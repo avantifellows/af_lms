@@ -90,12 +90,6 @@ describe("curriculum config admin guard", () => {
       permission: null,
       expected: { ok: false, status: 403, error: "Forbidden" },
     },
-    {
-      label: "read-only admin",
-      session: { user: { email: "readonly@avantifellows.org" } },
-      permission: { ...adminPermission, read_only: true },
-      expected: { ok: false, status: 403, error: "Forbidden" },
-    },
   ])("denies $label", async ({ session, permission, expected }) => {
     mockGetUserPermission.mockResolvedValue(permission);
 
@@ -109,6 +103,38 @@ describe("curriculum config admin guard", () => {
       requireCurriculumConfigAdmin({
         user: { email: "admin@avantifellows.org" },
       })
+    ).resolves.toEqual({
+      ok: true,
+      email: "admin@avantifellows.org",
+      permission: adminPermission,
+    });
+  });
+
+  // Read-only admins see every admin surface; only writes are blocked — the
+  // same reads-bare / writes-forWrite contract as the other admin guards.
+  it("allows a read-only admin to read, but denies with forWrite", async () => {
+    const readOnlyAdmin = { ...adminPermission, read_only: true };
+    mockGetUserPermission.mockResolvedValue(readOnlyAdmin);
+    const session = { user: { email: "readonly@avantifellows.org" } };
+
+    await expect(requireCurriculumConfigAdmin(session)).resolves.toEqual({
+      ok: true,
+      email: "readonly@avantifellows.org",
+      permission: readOnlyAdmin,
+    });
+    await expect(
+      requireCurriculumConfigAdmin(session, { forWrite: true })
+    ).resolves.toEqual({ ok: false, status: 403, error: "Forbidden" });
+  });
+
+  it("allows a full admin through forWrite", async () => {
+    mockGetUserPermission.mockResolvedValue(adminPermission);
+
+    await expect(
+      requireCurriculumConfigAdmin(
+        { user: { email: "admin@avantifellows.org" } },
+        { forWrite: true }
+      )
     ).resolves.toEqual({
       ok: true,
       email: "admin@avantifellows.org",

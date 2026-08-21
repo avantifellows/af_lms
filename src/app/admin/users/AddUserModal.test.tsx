@@ -468,7 +468,26 @@ describe("AddUserModal — role descriptions", () => {
     const roleSelect = screen.getAllByRole("combobox")[0];
     await user.selectOptions(roleSelect, "admin");
 
-    expect(screen.getByText(/Admins have full access to all features/)).toBeInTheDocument();
+    expect(screen.getByText(/Admins have access to all features/)).toBeInTheDocument();
+  });
+
+  it("offers the read-only checkbox for admins and sends read_only on submit", async () => {
+    const user = userEvent.setup();
+    mockFetch.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) });
+
+    // Admin Read Only = role admin + read_only. The checkbox used to be
+    // hidden for admins and forced to false in the payload; both are lifted.
+    renderModal({ user: { ...editUser, role: "admin", level: 3 } });
+
+    const readOnlyBox = screen.getByLabelText(/Read-only access/);
+    await user.click(readOnlyBox);
+    await user.click(screen.getByRole("button", { name: "Save Changes" }));
+
+    await waitFor(() => {
+      const callBody = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(callBody.role).toBe("admin");
+      expect(callBody.read_only).toBe(true);
+    });
   });
 
   it("shows program admin description when role is program_admin", async () => {

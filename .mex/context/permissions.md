@@ -39,7 +39,9 @@ Admin user create/update APIs reject unknown roles with 400 instead of silently 
 2. **School scope** (`AccessLevel`): `1` = specific `school_codes`, `2` = `regions`, `3` = all schools. (`isAdmin` is by **role**, not level.)
 3. **Program eligibility** (`program_ids`): COE=1, NODAL=2, NVS=64, plus non-JNV centre programs. Some features are gated to CoE/Nodal.
 
-A `read_only` flag downgrades any `edit` to `view`.
+A `read_only` flag downgrades any `edit` to `view` — **including for admins**: "Admin (Read
+Only)" is not a separate role, it is `role = admin` + `read_only = true` (#249). It sees every
+admin surface but every admin mutation route 403s it via the `forWrite` guard option below.
 
 ## Feature access — the matrix
 
@@ -69,6 +71,7 @@ Student Addition writes deliberately use a stricter gate than `ownsRecord`: admi
 ## The gate — what to call
 
 - **General routes:** `getServerSession(authOptions)` → `isAdmin(email)` (admin-only) or `canAccessSchool(email, code, region?)` / `canAccessStudent(session, studentId, { requireEdit })`.
+- **Admin-surface routes:** `requireAdmin` / `requireStaffAdmin` / `requireCentreAdmin` (`admin-guard.ts` family), `requireAdminApiAccess` (`api/admin/route-helpers.ts`), and `requireCurriculumConfigAdmin` (`curriculum-config.ts`) all take an optional `{ forWrite: true }`. **Every mutating admin handler (POST/PATCH/PUT/DELETE) must pass it** — it 403s read-only admins; reads stay bare. `isAdmin(email)` alone must not gate a write (it cannot see `read_only`).
 - **Academic Mentorship routes:** use `requireAcademicMentorshipAccess(session, "view"|"edit", { schoolCode? })` from `src/lib/academic-mentorship.ts`.
 - **Holistic Mentorship routes:** use `requireHolisticMentorshipAccess(session, action, options)` from `src/lib/holistic-mentorship.ts`; it authenticates before protected data access and applies action-specific Teacher/Admin rules.
 - **Holistic Mentorship list scope:** pass the resolved permission returned by the access helper into progress/options/year/CSV, coverage-School listing, and assignment-coverage domain reads. Those reads use `buildHolisticSchoolScopePredicate` from `src/lib/holistic-scope.ts`; Admin and Holistic Mentorship Admin remain program-wide, while explicit School, region, and Centre-seat-derived scopes produce parameterized, fail-closed SQL predicates. Current-year reconciliation triggered by a progress read consumes that same resolved permission before ending stale Mappings or erasing drafts, so scoped managers cannot cause writes outside their School scope. The coverage-School list comes from active Centres in the selected supported Program rather than Mapping history, so the dedicated Admin workspace can link to Assignment Coverage for Schools with zero active Mappings. Program Manager and Program Admin navigation and workspace entry both derive from the helper's non-empty supported-Program result; do not add a separate role-only UI gate.

@@ -65,14 +65,43 @@ const TEACHER_SEAT_ROLES = SEAT_ROLES.filter(
   (role) => !(PM_SEAT_ROLES as readonly SeatRole[]).includes(role)
 );
 
-// The roles offered when editing a seat: PM tiers for staff/PM rows, subject
-// roles for teachers. Keeps a PM from being re-tagged "Physics" and vice versa.
-function seatRoleOptionsFor(
-  kind: StaffRosterRow["kind"]
-): readonly SeatRole[] {
-  return kind === "teacher" || kind === "pending_teacher"
-    ? TEACHER_SEAT_ROLES
-    : PM_SEAT_ROLES;
+// Subject choices for the teacher Role/Subject editor — the subject seat roles
+// plus the "not confirmed yet" placeholder. APC is a role, not a subject.
+const TEACHER_SUBJECT_OPTIONS = TEACHER_SEAT_ROLES.filter(
+  (role) => role !== "apc"
+);
+
+// The subject seat role for a teacher whose seat doesn't name one (switching
+// an APC back to Teacher, seating a centre-less teacher): prefer the teacher
+// record's subject — the roster column — else the subject_tbd placeholder.
+function teacherSeatRoleFor(row: StaffRosterRow): SeatRole {
+  const fromRecord = row.subjectName?.toLowerCase();
+  return (TEACHER_SUBJECT_OPTIONS as readonly string[]).includes(
+    fromRecord ?? ""
+  )
+    ? (fromRecord as SeatRole)
+    : "subject_tbd";
+}
+
+// Whether a row is a teacher-band person (vs PM/staff). Teacher-band seats
+// carry the person's subject/APC role, so new seats inherit it rather than
+// offering a role picker — keeps a teacher from being seated as "PM" and vice
+// versa (a PM-tier seat would also promote them via syncAppRoleFromSeats).
+function isTeacherKind(kind: StaffRosterRow["kind"]): boolean {
+  return kind === "teacher" || kind === "pending_teacher";
+}
+
+// The Add form offers one flat role list — Teacher, APC, and the PM tiers —
+// matching what Edit shows (#249). The API still takes (kind, role): Teacher
+// and APC are teacher-record kinds, a PM tier picks kind "staff" + that seat.
+type AddRole = "teacher" | "apc" | (typeof PM_SEAT_ROLES)[number];
+const ADD_ROLE_OPTIONS: readonly { value: AddRole; label: string }[] = [
+  { value: "teacher", label: "Teacher" },
+  { value: "apc", label: SEAT_ROLE_LABELS.apc },
+  ...PM_SEAT_ROLES.map((role) => ({ value: role, label: SEAT_ROLE_LABELS[role] })),
+];
+function addKindFor(role: AddRole): "teacher" | "apc" | "staff" {
+  return role === "teacher" || role === "apc" ? role : "staff";
 }
 
 function rowKey(row: StaffRosterRow): string {
@@ -176,11 +205,8 @@ export default function StaffGrid({
   const [addError, setAddError] = useState("");
   const [addName, setAddName] = useState("");
   const [addEmail, setAddEmail] = useState("");
-  const [addKind, setAddKind] = useState<"teacher" | "apc" | "staff">(
-    "teacher"
-  );
+  const [addRole, setAddRole] = useState<AddRole>("teacher");
   const [addSubject, setAddSubject] = useState("");
-  const [addSeatRole, setAddSeatRole] = useState<SeatRole>("pm");
   const [addCentre, setAddCentre] = useState("");
   const [addCode, setAddCode] = useState("");
 
@@ -272,7 +298,9 @@ export default function StaffGrid({
     setExitDraft(new Date().toISOString().slice(0, 10));
     setExitArmed(false);
     setSeatCentreDraft("");
-    setSeatRoleDraft(row.kind === "teacher" ? "physics" : "pm");
+    // Teacher-band rows never read the draft (their new seats inherit the
+    // person's current role); "pm" is the default tier for staff rows.
+    setSeatRoleDraft("pm");
     setSubjectDraft("");
     setCreateCentreDraft("");
     setActionError("");
@@ -431,9 +459,8 @@ export default function StaffGrid({
   const openAddModal = () => {
     setAddName("");
     setAddEmail("");
-    setAddKind("teacher");
+    setAddRole("teacher");
     setAddSubject("");
-    setAddSeatRole("pm");
     setAddCentre("");
     setAddCode("");
     setAddError("");
@@ -450,6 +477,7 @@ export default function StaffGrid({
     setAddBusy(true);
     setAddError("");
     try {
+      const addKind = addKindFor(addRole);
       const response = await fetch(`/api/admin/staff`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -463,7 +491,7 @@ export default function StaffGrid({
             addKind === "staff" || !addSubject
               ? undefined
               : Number(addSubject),
-          role: addKind === "staff" ? addSeatRole : undefined,
+          role: addKind === "staff" ? addRole : undefined,
           af_id: addCode.trim() || undefined,
         }),
       });
@@ -487,7 +515,7 @@ export default function StaffGrid({
   const addValid =
     addEmail.trim().includes("@") &&
     !!addCentre &&
-    (addKind === "teacher" ? !!addSubject : true);
+    (addRole === "teacher" ? !!addSubject : true);
 
   const saveExit = (row: StaffRosterRow) => {
     const url =
@@ -506,13 +534,19 @@ export default function StaffGrid({
   };
 
   const addSeat = (row: StaffRosterRow) => {
+    // Teacher-band rows don't pick a role per seat — the new seat inherits the
+    // person's current role (their subject or APC), falling back on the record
+    // subject / subject_tbd for a not-yet-seated teacher.
+    const role = isTeacherKind(row.kind)
+      ? (row.seats[0]?.role ?? teacherSeatRoleFor(row))
+      : seatRoleDraft;
     return runAction(() =>
       fetch(`/api/admin/staff/positions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           centre_id: Number(seatCentreDraft),
-          role: seatRoleDraft,
+          role,
           user_id: row.userId,
         }),
       })
@@ -909,12 +943,79 @@ export default function StaffGrid({
                     aria-label="Edit role"
                     className="w-40"
                   >
-                    {seatRoleOptionsFor(modalRow.kind).map((role) => (
+                    {PM_SEAT_ROLES.map((role) => (
                       <option key={role} value={role}>
                         {SEAT_ROLE_LABELS[role]}
                       </option>
                     ))}
                   </Select>
+                  <p className="mt-1 text-xs text-text-muted">
+                    Applies to all of this person&apos;s centres.
+                  </p>
+                </div>
+              )}
+
+            {/* Teachers get the same Role + Subject shape as Add User (#249).
+                Role stays within the teacher band (Teacher/APC) — moving to a
+                PM tier is an org change done by exit + re-add, and it would
+                promote user_permission via syncAppRoleFromSeats. The subject
+                drives the person-level seat-role PATCH, which mirrors it onto
+                teacher.subject_id server-side, so the roster column follows. */}
+            {modalRow.userId !== null &&
+              modalRow.kind === "teacher" &&
+              modalRow.seats.length > 0 && (
+                <div className="mt-5">
+                  <div className="flex flex-col gap-3 sm:flex-row">
+                    <label className="flex-1">
+                      <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-text-muted">
+                        Role
+                      </span>
+                      <Select
+                        value={
+                          modalRow.seats[0].role === "apc" ? "apc" : "teacher"
+                        }
+                        onChange={(event) =>
+                          void changeRole(
+                            modalRow,
+                            event.target.value === "apc"
+                              ? "apc"
+                              : teacherSeatRoleFor(modalRow)
+                          )
+                        }
+                        disabled={actionBusy}
+                        aria-label="Edit role"
+                        className="w-full"
+                      >
+                        <option value="teacher">Teacher</option>
+                        <option value="apc">{SEAT_ROLE_LABELS.apc}</option>
+                      </Select>
+                    </label>
+                    {modalRow.seats[0].role !== "apc" && (
+                      <label className="flex-1">
+                        <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-text-muted">
+                          Subject
+                        </span>
+                        <Select
+                          value={modalRow.seats[0].role}
+                          onChange={(event) =>
+                            void changeRole(
+                              modalRow,
+                              event.target.value as SeatRole
+                            )
+                          }
+                          disabled={actionBusy}
+                          aria-label="Edit subject"
+                          className="w-full"
+                        >
+                          {TEACHER_SUBJECT_OPTIONS.map((role) => (
+                            <option key={role} value={role}>
+                              {SEAT_ROLE_LABELS[role]}
+                            </option>
+                          ))}
+                        </Select>
+                      </label>
+                    )}
+                  </div>
                   <p className="mt-1 text-xs text-text-muted">
                     Applies to all of this person&apos;s centres.
                   </p>
@@ -994,20 +1095,22 @@ export default function StaffGrid({
                         </option>
                       ))}
                     </Select>
-                    <Select
-                      value={seatRoleDraft}
-                      onChange={(event) =>
-                        setSeatRoleDraft(event.target.value as SeatRole)
-                      }
-                      aria-label="Assign role"
-                      className="sm:w-36"
-                    >
-                      {SEAT_ROLES.map((role) => (
-                        <option key={role} value={role}>
-                          {SEAT_ROLE_LABELS[role]}
-                        </option>
-                      ))}
-                    </Select>
+                    {!isTeacherKind(modalRow.kind) && (
+                      <Select
+                        value={seatRoleDraft}
+                        onChange={(event) =>
+                          setSeatRoleDraft(event.target.value as SeatRole)
+                        }
+                        aria-label="Assign role"
+                        className="sm:w-36"
+                      >
+                        {PM_SEAT_ROLES.map((role) => (
+                          <option key={role} value={role}>
+                            {SEAT_ROLE_LABELS[role]}
+                          </option>
+                        ))}
+                      </Select>
+                    )}
                     <Button
                       size="sm"
                       variant="secondary"
@@ -1146,55 +1249,40 @@ export default function StaffGrid({
             </label>
             <label>
               <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-text-muted">
-                Type
+                Role
               </span>
               <Select
-                value={addKind}
+                value={addRole}
                 onChange={(event) =>
-                  setAddKind(event.target.value as "teacher" | "apc" | "staff")
+                  setAddRole(event.target.value as AddRole)
                 }
-                aria-label="Type"
+                aria-label="Role"
+                className="w-full"
               >
-                <option value="teacher">Teacher</option>
-                <option value="apc">APC</option>
-                <option value="staff">PM / Staff</option>
+                {ADD_ROLE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
               </Select>
             </label>
-            {addKind !== "staff" ? (
+            {addKindFor(addRole) !== "staff" && (
               <label>
                 <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-text-muted">
-                  {addKind === "apc" ? "Subject (optional)" : "Subject"}
+                  {addRole === "apc" ? "Subject (optional)" : "Subject"}
                 </span>
                 <Select
                   value={addSubject}
                   onChange={(event) => setAddSubject(event.target.value)}
                   aria-label="Subject"
+                  className="w-full"
                 >
                   <option value="">
-                    {addKind === "apc" ? "No subject" : "Select Subject…"}
+                    {addRole === "apc" ? "No subject" : "Select Subject…"}
                   </option>
                   {subjects.map((subject) => (
                     <option key={subject.id} value={subject.id}>
                       {subject.name}
-                    </option>
-                  ))}
-                </Select>
-              </label>
-            ) : (
-              <label>
-                <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-text-muted">
-                  Role
-                </span>
-                <Select
-                  value={addSeatRole}
-                  onChange={(event) =>
-                    setAddSeatRole(event.target.value as SeatRole)
-                  }
-                  aria-label="Role"
-                >
-                  {PM_SEAT_ROLES.map((role) => (
-                    <option key={role} value={role}>
-                      {SEAT_ROLE_LABELS[role]}
                     </option>
                   ))}
                 </Select>
@@ -1208,6 +1296,7 @@ export default function StaffGrid({
                 value={addCentre}
                 onChange={(event) => setAddCentre(event.target.value)}
                 aria-label="Centre"
+                className="w-full"
               >
                 <option value="">Select Centre…</option>
                 {centres.map((centre) => (

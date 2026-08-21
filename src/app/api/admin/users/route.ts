@@ -94,7 +94,7 @@ export async function GET() {
 
 // POST /api/admin/users - Create new user
 export async function POST(request: NextRequest) {
-  const access = await requireAdminApiAccess();
+  const access = await requireAdminApiAccess({ forWrite: true });
   if (!access.ok) return access.response;
 
   try {

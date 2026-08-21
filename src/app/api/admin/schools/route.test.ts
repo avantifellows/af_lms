@@ -2,17 +2,18 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("next-auth", () => ({ getServerSession: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
-vi.mock("@/lib/permissions", () => ({ isAdmin: vi.fn() }));
+vi.mock("@/lib/permissions", () => ({ getUserPermission: vi.fn() }));
 vi.mock("@/lib/db", () => ({ query: vi.fn() }));
 
 import { getServerSession } from "next-auth";
-import { isAdmin } from "@/lib/permissions";
+import { getUserPermission, type UserPermission } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import { GET } from "./route";
 import { NO_SESSION, ADMIN_SESSION } from "../../__test-utils__/api-test-helpers";
 
 const mockSession = vi.mocked(getServerSession);
-const mockIsAdmin = vi.mocked(isAdmin);
+const mockGetUserPermission = vi.mocked(getUserPermission);
+const ADMIN_PERMISSION = { email: "admin@avantifellows.org", level: 3, role: "admin" } as UserPermission;
 const mockQuery = vi.mocked(query);
 
 beforeEach(() => {
@@ -29,7 +30,7 @@ describe("GET /api/admin/schools", () => {
 
   it("returns 403 when not admin", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
-    mockIsAdmin.mockResolvedValue(false);
+    mockGetUserPermission.mockResolvedValue(null);
     const req = new Request("http://localhost/api/admin/schools");
     const res = await GET(req as never);
     expect(res.status).toBe(403);
@@ -37,7 +38,7 @@ describe("GET /api/admin/schools", () => {
 
   it("returns all schools when all=true", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
-    mockIsAdmin.mockResolvedValue(true);
+    mockGetUserPermission.mockResolvedValue(ADMIN_PERMISSION);
     const schools = [{ id: 1, code: "70705", name: "JNV Test", region: "R1", program_ids: [1] }];
     mockQuery.mockResolvedValue(schools);
 
@@ -53,7 +54,7 @@ describe("GET /api/admin/schools", () => {
 
   it("searches schools by name, code, or UDISE when q is provided", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
-    mockIsAdmin.mockResolvedValue(true);
+    mockGetUserPermission.mockResolvedValue(ADMIN_PERMISSION);
     const schools = [
       {
         id: 1,
@@ -83,7 +84,7 @@ describe("GET /api/admin/schools", () => {
 
   it("searches all school categories for Centre linking when scope=centres", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
-    mockIsAdmin.mockResolvedValue(true);
+    mockGetUserPermission.mockResolvedValue(ADMIN_PERMISSION);
     const schools = [
       {
         id: 2,
@@ -109,7 +110,7 @@ describe("GET /api/admin/schools", () => {
 
   it("defaults to empty search when no q param", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
-    mockIsAdmin.mockResolvedValue(true);
+    mockGetUserPermission.mockResolvedValue(ADMIN_PERMISSION);
     mockQuery.mockResolvedValue([]);
 
     const req = new Request("http://localhost/api/admin/schools");

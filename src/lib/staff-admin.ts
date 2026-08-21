@@ -32,9 +32,10 @@ export type StaffAdminSession = AdminSession;
 export type StaffAdminResult = AdminGuardResult;
 
 export async function requireStaffAdmin(
-  session: StaffAdminSession
+  session: StaffAdminSession,
+  opts?: { forWrite?: boolean }
 ): Promise<StaffAdminResult> {
-  return requireAdmin(session);
+  return requireAdmin(session, opts);
 }
 
 // --- Schema readiness ---
