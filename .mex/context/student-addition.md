@@ -18,12 +18,29 @@ edges:
     condition: when adding LMS API routes for create or bulk upload
   - target: patterns/db-service-write.md
     condition: when proxying student writes to the DB Service
-last_updated: 2026-07-24
+last_updated: 2026-08-21
 ---
 
 # Student Addition
 
 Source context: GitHub issue https://github.com/avantifellows/af_lms/issues/197 is the current revised implementation PRD. Issue #155 describes the prior implementation and issue #144 remains reference context only.
+
+## Accepted Next Change: Phone Registration Mode (Not Yet Implemented)
+
+GitHub issue https://github.com/avantifellows/af_lms/issues/296 is the build-ready decision issue. Until HQ approves collecting PEN, Grade 10 Roll Number, and Annual Family Income during registration, the existing JNV NVS Add Student and Bulk Upload flow will use a hard-coded Phone Registration Mode in AF LMS and DB Service:
+
+- Phone mode accepts the existing fields except PEN, Grade 10 Roll Number, and Annual Family Income. G10 board remains required.
+- The exact HQ workbook `NVS_Lakshya_Data_Template_updated_19th_August_2026.xlsx` is the approved static asset (SHA-256 `657f236c35bda1d01375126394091a68ff7a4e3753c8036a030835762739c6e7`). Its dropdowns use Excel `x14:dataValidations`; copy and serve the bytes without regenerating the workbook through ExcelJS/openpyxl.
+- The workbook offers Grade 11 for the primary drive, but AF LMS and DB Service continue accepting both Grade 11 and Grade 12.
+- Parent phone is required, exactly 10 digits, begins with 6 through 9, and is stored as both `user.phone` and `student.student_id`. Portal keeps Student ID plus Date of Birth and already scopes verification by the selected auth group.
+- Identity and existing matching use `(student_id, auth_group)` with `EnableStudents`. In-file duplicate phones reject every affected row; another-School matches do not transfer.
+- The active mode is a code constant changed by coordinated AF LMS and DB Service PRs/deployments. No database mode configuration or School selector is added.
+- Existing phone-mode Students keep their phone Student ID after approval. Scoped Admins, Program Managers, and Program Admins can atomically correct phone plus Student ID with audit, and later fill a blank PEN or G10 Roll Number once. Annual Family Income remains optional.
+- Mode provenance is inferred from NVS membership, `EnableStudents` membership, and equality of Student ID and normalized phone; no mode column is added.
+- DB Service lookup checks provide duplicate safety, while the small concurrent-create race without a cross-table database constraint is accepted. `avantifellows/db-service#648` is not a blocker.
+- Non-LMS phone correction for this cohort is unsupported until the generic import lookup is fixed in `avantifellows/db-service#703`; that follow-up is separate and assigned to Aman.
+
+The planning branch is `grill/nvs-phone-registration-mode`; ADR 0006 records the permanent phone-identity trade-off. This section describes accepted future behavior and must not be mistaken for current production behavior until issue #296 is implemented and deployed.
 
 ## Settled Product Shape
 - v1 is JNV PMU / JNV NVS only. In current LMS code this is `PROGRAM_IDS.NVS` (`64`, label `JNV NVS`) from `src/lib/constants.ts`.
