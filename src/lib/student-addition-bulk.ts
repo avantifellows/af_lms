@@ -3,12 +3,18 @@ import ExcelJS from "exceljs";
 import JSZip from "jszip";
 
 import {
-  STUDENT_ADDITION_UPLOAD_COLUMNS,
+  getStudentAdditionUploadColumns,
+  getStudentAdditionRejectedRowMetadataColumns,
   validateStudentAdditionInput,
   type LmsStudentAdditionRow,
   type StudentAdditionInput,
   type StudentAdditionValidationResult,
 } from "./student-addition-fields";
+import {
+  ACTIVE_REGISTRATION_MODE,
+  PHONE_REGISTRATION_MODE,
+  type RegistrationMode,
+} from "./registration-mode";
 
 export interface StudentAdditionUploadRowResult {
   row_number: number;
@@ -47,14 +53,29 @@ interface ParseUploadInput {
   data: Buffer;
   today?: Date;
   academicYear?: string;
+  mode?: RegistrationMode;
 }
 
-const EXAMPLE_ROW_MARKERS = [
+// These marker values mirror the example rows in the checked-in Approved and
+// HQ Phone workbooks. Phone mode intentionally has no restricted-field
+// markers because those columns are not part of its schema.
+const APPROVED_EXAMPLE_ROW_MARKERS = [
   { column: "Student Name", field: "Student Name", value: "Example Student" },
   { column: "PEN Number", field: "PEN", value: "12345678910" },
   { column: "Grade 10 Roll no", field: "Grade 10 Roll No", value: "11111111" },
   { column: "Parents Phone Number", field: "Phone", value: "9999999999" },
 ] as const;
+
+const PHONE_EXAMPLE_ROW_MARKERS = [
+  { column: "Student Name", field: "Student Name", value: "Example Student" },
+  { column: "Parents Phone Number", field: "Phone", value: "9999999999" },
+] as const;
+
+function exampleRowMarkers(mode: RegistrationMode) {
+  return mode === PHONE_REGISTRATION_MODE
+    ? PHONE_EXAMPLE_ROW_MARKERS
+    : APPROVED_EXAMPLE_ROW_MARKERS;
+}
 
 function text(value: unknown): string {
   if (value instanceof Date) {
@@ -79,11 +100,56 @@ function text(value: unknown): string {
   return value == null ? "" : String(value).trim();
 }
 
-function missingColumns(headers: string[]) {
+function missingColumns(headers: string[], columns = getStudentAdditionUploadColumns()) {
   const headerSet = new Set(headers.map((header) => header.trim()));
-  return STUDENT_ADDITION_UPLOAD_COLUMNS
+  return columns
     .map((column) => column.label)
     .filter((label) => !headerSet.has(label));
+}
+
+function phoneModeSchemaError() {
+  return "This upload does not match the active Phone Registration Mode template. Download the current template and upload it again.";
+}
+
+function validateUploadSchema(headers: string[], mode: RegistrationMode) {
+  if (mode !== PHONE_REGISTRATION_MODE) {
+    if (headers.includes("APAAR ID") || !headers.includes("PEN Number")) {
+      return {
+        ok: false as const,
+        error: "This workbook uses the old APAAR template. Download the latest PEN-based template and upload it again.",
+      };
+    }
+    const missing = missingColumns(headers, getStudentAdditionUploadColumns(mode));
+    if (missing.length > 0) {
+      return {
+        ok: false as const,
+        error: `Missing required columns: ${missing.join(", ")}. Download the latest template and upload it again`,
+      };
+    }
+    return { ok: true as const };
+  }
+
+  const columns = getStudentAdditionUploadColumns(mode);
+  const rejectedRowMetadataColumns = new Set(
+    getStudentAdditionRejectedRowMetadataColumns(mode),
+  );
+  const expected = new Set(columns.map((column) => column.label));
+  const nonBlankHeaders = headers.filter(Boolean);
+  const missing = columns.filter((column) =>
+    !headers.includes(column.label),
+  );
+  const duplicateCanonicalHeaders = columns.some((column) =>
+    headers.filter((header) => header === column.label).length !== 1,
+  );
+  const unexpected = nonBlankHeaders.filter((header) =>
+    !expected.has(header) && !rejectedRowMetadataColumns.has(header),
+  );
+
+  if (missing.length > 0 || duplicateCanonicalHeaders || unexpected.length > 0) {
+    return { ok: false as const, error: phoneModeSchemaError() };
+  }
+
+  return { ok: true as const };
 }
 
 function validationToRejectedResult(
@@ -110,22 +176,13 @@ function parseRowsFromAoA(
   rows: unknown[][],
   today?: Date,
   academicYear?: string,
+  mode: RegistrationMode = ACTIVE_REGISTRATION_MODE,
 ): StudentAdditionUploadParseResult {
   const headers = (rows[0] ?? []).map(text);
-  if (headers.includes("APAAR ID") || !headers.includes("PEN Number")) {
-    return {
-      ok: false,
-      error: "This workbook uses the old APAAR template. Download the latest PEN-based template and upload it again.",
-    };
-  }
-  const missing = missingColumns(headers);
-  if (missing.length > 0) {
-    return {
-      ok: false,
-      error: `Missing required columns: ${missing.join(", ")}. Download the latest template and upload it again`,
-    };
-  }
+  const schema = validateUploadSchema(headers, mode);
+  if (!schema.ok) return schema;
 
+  const columns = getStudentAdditionUploadColumns(mode);
   const headerIndex = new Map(headers.map((header, index) => [header, index]));
   const originalRowNumberIndex = headerIndex.get("Original Row Number");
   const acceptedRows: LmsStudentAdditionRow[] = [];
@@ -133,7 +190,7 @@ function parseRowsFromAoA(
   const originalRows = new Map<number, Record<string, string>>();
   const dataRows = rows.slice(1).map((sourceRow, index) => ({ sourceRow, index }));
   const ignoredRows = dataRows.flatMap(({ sourceRow, index }) => {
-    const matchedFields = EXAMPLE_ROW_MARKERS
+    const matchedFields = exampleRowMarkers(mode)
       .filter((marker) =>
         text(sourceRow[headerIndex.get(marker.column) ?? -1]) === marker.value,
       )
@@ -150,7 +207,7 @@ function parseRowsFromAoA(
   const nonBlankRows = dataRows.filter(
     ({ sourceRow, index }) =>
       !ignoredIndexes.has(index) &&
-      STUDENT_ADDITION_UPLOAD_COLUMNS.some((column) =>
+      columns.some((column) =>
         text(sourceRow[headerIndex.get(column.label) ?? -1]),
       ),
   );
@@ -166,7 +223,7 @@ function parseRowsFromAoA(
     const original: Record<string, string> = {};
     const input: StudentAdditionInput = {};
 
-    for (const column of STUDENT_ADDITION_UPLOAD_COLUMNS) {
+    for (const column of columns) {
       const value = text(sourceRow[headerIndex.get(column.label) ?? -1]);
       original[column.label] = value;
       input[column.key] = column.key === "student_name" ? value.replace(/\./g, " ") : value;
@@ -183,6 +240,7 @@ function parseRowsFromAoA(
       rowNumber,
       academicYear,
       bulkUpload: true,
+      mode,
     });
     originalRows.set(rowNumber, original);
 
@@ -204,7 +262,12 @@ function parseRowsFromAoA(
   };
 }
 
-function parseCsv(data: Buffer, today?: Date, academicYear?: string) {
+function parseCsv(
+  data: Buffer,
+  today?: Date,
+  academicYear?: string,
+  mode: RegistrationMode = ACTIVE_REGISTRATION_MODE,
+) {
   let rows: unknown[][];
   try {
     rows = parse(data.toString("utf8"), {
@@ -215,7 +278,7 @@ function parseCsv(data: Buffer, today?: Date, academicYear?: string) {
   } catch {
     return { ok: false, error: "Upload a valid .xlsx file or rejected-row .csv file" } as const;
   }
-  return parseRowsFromAoA(rows, today, academicYear);
+  return parseRowsFromAoA(rows, today, academicYear, mode);
 }
 
 async function removeBlankXlsxFormatting(data: Buffer) {
@@ -240,7 +303,12 @@ async function removeBlankXlsxFormatting(data: Buffer) {
   });
 }
 
-async function parseXlsx(data: Buffer, today?: Date, academicYear?: string) {
+async function parseXlsx(
+  data: Buffer,
+  today?: Date,
+  academicYear?: string,
+  mode: RegistrationMode = ACTIVE_REGISTRATION_MODE,
+) {
   const workbook = new ExcelJS.Workbook();
   try {
     const compacted = await removeBlankXlsxFormatting(data);
@@ -265,7 +333,7 @@ async function parseXlsx(data: Buffer, today?: Date, academicYear?: string) {
     }
     rows.push(values);
   }
-  return parseRowsFromAoA(rows, today, academicYear);
+  return parseRowsFromAoA(rows, today, academicYear, mode);
 }
 
 export async function parseStudentAdditionUpload({
@@ -273,6 +341,7 @@ export async function parseStudentAdditionUpload({
   data,
   today,
   academicYear,
+  mode = ACTIVE_REGISTRATION_MODE,
 }: ParseUploadInput): Promise<StudentAdditionUploadParseResult> {
   if (filename.toLowerCase().endsWith(".xls")) {
     return {
@@ -282,11 +351,11 @@ export async function parseStudentAdditionUpload({
   }
 
   if (filename.toLowerCase().endsWith(".csv")) {
-    return parseCsv(data, today, academicYear);
+    return parseCsv(data, today, academicYear, mode);
   }
 
   if (filename.toLowerCase().endsWith(".xlsx")) {
-    return parseXlsx(data, today, academicYear);
+    return parseXlsx(data, today, academicYear, mode);
   }
 
   return {

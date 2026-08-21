@@ -10,6 +10,11 @@ import {
   formatStudentAdditionExistingMatch,
   type StudentAdditionCsvResult,
 } from "@/lib/student-addition-fields";
+import {
+  ACTIVE_REGISTRATION_MODE,
+  PHONE_REGISTRATION_MODE,
+  type RegistrationMode,
+} from "@/lib/registration-mode";
 
 interface BulkStudentUploadModalProps {
   open: boolean;
@@ -17,6 +22,7 @@ interface BulkStudentUploadModalProps {
   schoolCode: string;
   onClose: () => void;
   onUploaded: () => void;
+  registrationMode?: RegistrationMode;
 }
 
 interface UploadTotals {
@@ -49,7 +55,11 @@ const emptyTotals: UploadTotals = {
   rejected: 0,
 };
 
-function rowIssues(result: UploadResult, schoolCode: string): string {
+function rowIssues(
+  result: UploadResult,
+  schoolCode: string,
+  registrationMode: RegistrationMode,
+): string {
   const issues = [
     ...Object.values(result.field_errors ?? {}),
     ...(result.row_errors ?? []),
@@ -58,7 +68,9 @@ function rowIssues(result: UploadResult, schoolCode: string): string {
     (result.status === "duplicate_in_file"
       ? formatStudentAdditionDuplicateInFile(result.duplicate_identifiers)
       : "") ||
-    (result.existing_match ? formatStudentAdditionExistingMatch(result.existing_match, schoolCode) : "");
+    (result.existing_match
+      ? formatStudentAdditionExistingMatch(result.existing_match, schoolCode, registrationMode)
+      : "");
 }
 
 // fallow-ignore-next-line complexity
@@ -68,7 +80,9 @@ export default function BulkStudentUploadModal({
   schoolCode,
   onClose,
   onUploaded,
+  registrationMode = ACTIVE_REGISTRATION_MODE,
 }: BulkStudentUploadModalProps) {
+  const phoneMode = registrationMode === PHONE_REGISTRATION_MODE;
   const [file, setFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -78,8 +92,8 @@ export default function BulkStudentUploadModal({
 
   const rejectedCsvHref = useMemo(() => {
     if (!results.some((result) => result.status !== "created")) return null;
-    return `data:text/csv;charset=utf-8,${encodeURIComponent(buildRejectedRowsCsv(results, schoolCode))}`;
-  }, [results, schoolCode]);
+    return `data:text/csv;charset=utf-8,${encodeURIComponent(buildRejectedRowsCsv(results, schoolCode, registrationMode))}`;
+  }, [results, schoolCode, registrationMode]);
 
   const done = totals?.created ?? 0;
   const toGo = (totals?.total ?? 0) - done;
@@ -166,14 +180,18 @@ export default function BulkStudentUploadModal({
           <div className="flex flex-wrap items-center gap-3">
             <a
               href={`/api/school/${encodeURIComponent(schoolUdise)}/students`}
-              download="nvs-student-addition-template.xlsx"
+              download={phoneMode
+                ? "NVS_Lakshya_Data_Template_updated_19th_August_2026.xlsx"
+                : "nvs-student-addition-template.xlsx"}
               className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border border-border bg-bg-card px-4 py-1.5 text-xs font-medium text-text-primary shadow-sm hover:bg-hover-bg"
             >
               <Download className="h-4 w-4" aria-hidden="true" />
               Download template
             </a>
             <p className="text-sm text-text-secondary">
-              Each row supplies Grade 11 or 12. PEN or Grade 10 Roll no is required; CBSE roll numbers need exactly 8 digits.
+              {phoneMode
+                ? "Phone Registration Mode: upload the 11 approved fields. Parent phone is the Student ID and must be 10 digits starting with 6-9."
+                : "Each row supplies Grade 11 or 12. PEN or Grade 10 Roll no is required; CBSE roll numbers need exactly 8 digits."}
             </p>
           </div>
 
@@ -232,7 +250,7 @@ export default function BulkStudentUploadModal({
                           <td className="px-3 py-2">
                             {String(result.original?.["Student Name"] ?? result.generated_student_id ?? "")}
                           </td>
-                          <td className="px-3 py-2">{rowIssues(result, schoolCode)}</td>
+                          <td className="px-3 py-2">{rowIssues(result, schoolCode, registrationMode)}</td>
                         </tr>
                       ))}
                     </tbody>

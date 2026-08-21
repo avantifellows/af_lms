@@ -145,13 +145,55 @@ export function getStudentAdditionUploadColumns(
     : APPROVED_STUDENT_ADDITION_UPLOAD_COLUMNS;
 }
 
+const APPROVED_REJECTED_ROW_METADATA_COLUMNS = [
+  "Original Row Number",
+  "Row Status",
+  "Field Errors",
+  "Row Errors",
+  "Issue",
+  "Existing School Relationship",
+  "Matched Identifier",
+  "Existing Student ID",
+  "Existing PEN Number",
+  "Existing APAAR ID",
+  "Existing Student Name",
+  "Existing School Name",
+  "Existing School Code",
+  "Existing UDISE",
+  "Existing District",
+  "Existing State",
+  "Existing Grade",
+  "Existing Program",
+  "Existing Stream",
+] as const;
+
+const PHONE_REJECTED_ROW_METADATA_COLUMNS = APPROVED_REJECTED_ROW_METADATA_COLUMNS.filter(
+  (column) => column !== "Existing PEN Number" && column !== "Existing APAAR ID",
+);
+
+const PHONE_RESTRICTED_INPUT_KEYS = new Set([
+  "pen_number",
+  "g10_roll_no",
+  "annual_family_income",
+]);
+
+export function getStudentAdditionRejectedRowMetadataColumns(
+  mode: RegistrationMode = ACTIVE_REGISTRATION_MODE,
+): ReadonlyArray<string> {
+  return mode === PHONE_REGISTRATION_MODE
+    ? PHONE_REJECTED_ROW_METADATA_COLUMNS
+    : APPROVED_REJECTED_ROW_METADATA_COLUMNS;
+}
+
 // Backwards-compatible Approved-mode export. Later mode-specific UI/parser
 // slices should call getStudentAdditionUploadColumns(mode) explicitly.
 export const STUDENT_ADDITION_UPLOAD_COLUMNS = APPROVED_STUDENT_ADDITION_UPLOAD_COLUMNS;
 
-const UPLOAD_FIELD_LABELS = new Map(
-  STUDENT_ADDITION_UPLOAD_COLUMNS.map((column) => [column.key, column.label]),
-);
+function uploadFieldLabels(mode: RegistrationMode) {
+  return new Map(
+    getStudentAdditionUploadColumns(mode).map((column) => [column.key, column.label]),
+  );
+}
 
 export interface StudentAdditionCsvResult {
   row_number?: number;
@@ -179,14 +221,19 @@ function matchText(value: unknown): string {
 export function formatStudentAdditionExistingMatch(
   existing: ExistingMatch | null | undefined,
   schoolCode?: string,
+  mode: RegistrationMode = ACTIVE_REGISTRATION_MODE,
 ): string {
   const match = existing ?? {};
   const studentId = matchText(match.student_id) || "blank";
   const matchSchoolCode = matchText(match.school_code);
   const identities = [
     `Student ID: ${studentId}`,
-    matchText(match.pen_number) ? `PEN: ${matchText(match.pen_number)}` : "",
-    matchText(match.apaar_id) ? `APAAR: ${matchText(match.apaar_id)}` : "",
+    mode === PHONE_REGISTRATION_MODE || !matchText(match.pen_number)
+      ? ""
+      : `PEN: ${matchText(match.pen_number)}`,
+    mode === PHONE_REGISTRATION_MODE || !matchText(match.apaar_id)
+      ? ""
+      : `APAAR: ${matchText(match.apaar_id)}`,
   ].filter(Boolean).join(" | ");
 
   if (schoolCode && matchSchoolCode === schoolCode) {
@@ -221,37 +268,28 @@ export function formatStudentAdditionDuplicateInFile(
     : "Duplicate in uploaded file";
 }
 
-function formatFieldErrors(errors: Record<string, string> | undefined): string {
+function formatFieldErrors(
+  errors: Record<string, string> | undefined,
+  mode: RegistrationMode,
+): string {
+  const labels = uploadFieldLabels(mode);
   return Object.entries(errors ?? {})
-    .map(([key, message]) => `${UPLOAD_FIELD_LABELS.get(key as keyof StudentAdditionInput) ?? key}: ${message}`)
+    .filter(([key]) => mode !== PHONE_REGISTRATION_MODE || !PHONE_RESTRICTED_INPUT_KEYS.has(key))
+    .map(([key, message]) => `${labels.get(key as keyof StudentAdditionInput) ?? key}: ${message}`)
     .join("; ");
 }
 
 export function buildRejectedRowsCsv(
   results: StudentAdditionCsvResult[],
   schoolCode?: string,
+  mode: RegistrationMode = ACTIVE_REGISTRATION_MODE,
 ): string {
+  const columns = getStudentAdditionUploadColumns(mode);
+  const metadataColumns = getStudentAdditionRejectedRowMetadataColumns(mode);
   const headers = [
-    "Original Row Number",
-    "Row Status",
-    ...STUDENT_ADDITION_UPLOAD_COLUMNS.map((column) => column.label),
-    "Field Errors",
-    "Row Errors",
-    "Issue",
-    "Existing School Relationship",
-    "Matched Identifier",
-    "Existing Student ID",
-    "Existing PEN Number",
-    "Existing APAAR ID",
-    "Existing Student Name",
-    "Existing School Name",
-    "Existing School Code",
-    "Existing UDISE",
-    "Existing District",
-    "Existing State",
-    "Existing Grade",
-    "Existing Program",
-    "Existing Stream",
+    ...metadataColumns.slice(0, 2),
+    ...columns.map((column) => column.label),
+    ...metadataColumns.slice(2),
   ];
 
   const rows = results
@@ -260,30 +298,40 @@ export function buildRejectedRowsCsv(
     .map((result) => {
       const existing = result.existing_match ?? {};
       const existingSchoolCode = matchText(existing.school_code);
-      const schoolRelationship = result.status === "already_exists"
+      const showExistingMatchContext = result.existing_match && (
+        mode === PHONE_REGISTRATION_MODE || result.status === "already_exists"
+      );
+      const schoolRelationship = showExistingMatchContext
         ? !existingSchoolCode
           ? "Unknown"
           : existingSchoolCode === schoolCode
             ? "Same school"
             : "Different school"
         : "";
-      const issue = result.status === "already_exists"
-        ? formatStudentAdditionExistingMatch(existing, schoolCode)
+      const issue = showExistingMatchContext
+        ? formatStudentAdditionExistingMatch(existing, schoolCode, mode)
         : result.status === "duplicate_in_file"
-          ? formatStudentAdditionDuplicateInFile(result.duplicate_identifiers)
+          ? formatStudentAdditionDuplicateInFile(
+            mode === PHONE_REGISTRATION_MODE
+              ? result.duplicate_identifiers?.filter(
+                (identifier) => !/pen|grade\s*10\s*roll|annual\s*family\s*income/i.test(identifier),
+              )
+              : result.duplicate_identifiers,
+          )
           : "";
       return [
         result.row_number ?? "",
         result.status ?? "",
-        ...STUDENT_ADDITION_UPLOAD_COLUMNS.map((column) => result.original?.[column.label] ?? ""),
-        formatFieldErrors(result.field_errors),
+        ...columns.map((column) => result.original?.[column.label] ?? ""),
+        formatFieldErrors(result.field_errors, mode),
         (result.row_errors ?? []).join("; "),
         issue,
         schoolRelationship,
         existing.matched_identifier ?? "",
         existing.student_id ?? "",
-        existing.pen_number ?? "",
-        existing.apaar_id ?? "",
+        ...(mode === PHONE_REGISTRATION_MODE
+          ? []
+          : [existing.pen_number ?? "", existing.apaar_id ?? ""]),
         existing.student_name ?? "",
         existing.school_name ?? "",
         existing.school_code ?? "",
