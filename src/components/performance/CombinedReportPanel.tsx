@@ -243,7 +243,7 @@ export default function CombinedReportPanel({
                     href={job.download_url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="px-3 py-1.5 min-h-[36px] text-xs font-bold uppercase tracking-wide rounded-lg bg-accent text-text-on-accent hover:opacity-90"
+                    className="inline-flex items-center justify-center px-3 py-1.5 min-h-[36px] text-xs font-bold uppercase tracking-wide rounded-lg bg-accent text-text-on-accent hover:opacity-90"
                   >
                     Download
                   </a>
