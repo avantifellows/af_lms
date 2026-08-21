@@ -388,6 +388,7 @@ export default function EnrollmentTabContent({
         open={bulkOpen}
         schoolUdise={schoolUdise}
         schoolCode={schoolCode}
+        registrationMode={registrationMode}
         onClose={() => setBulkOpen(false)}
         onUploaded={() => router.refresh()}
       />

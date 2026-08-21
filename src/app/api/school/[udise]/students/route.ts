@@ -79,7 +79,24 @@ function safeFields(value: unknown, keys: string[]) {
   return Object.fromEntries(keys.filter((key) => key in record).map((key) => [key, record[key]]));
 }
 
-function safeUpstreamResults(value: unknown) {
+const PHONE_RESTRICTED_RESULT_KEYS = new Set([
+  "pen_number",
+  "g10_roll_no",
+  "annual_family_income",
+  "apaar_id",
+]);
+
+function safePhoneResultFields(value: unknown, mode: RegistrationMode) {
+  if (mode !== PHONE_REGISTRATION_MODE || !value || typeof value !== "object" || Array.isArray(value)) {
+    return value;
+  }
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([key]) => !PHONE_RESTRICTED_RESULT_KEYS.has(key)),
+  );
+}
+
+function safeUpstreamResults(value: unknown, mode: RegistrationMode = ACTIVE_REGISTRATION_MODE) {
   if (!Array.isArray(value)) return undefined;
   return value.map((result) => {
     const safe = safeFields(result, [
@@ -88,18 +105,22 @@ function safeUpstreamResults(value: unknown) {
     const record = result as Record<string, unknown>;
     const duplicateIdentifiers = Array.isArray(record.duplicate_identifiers)
       ? record.duplicate_identifiers.filter(
-        (identifier): identifier is string => typeof identifier === "string",
+        (identifier): identifier is string =>
+          typeof identifier === "string" &&
+          (mode !== PHONE_REGISTRATION_MODE || !/pen|grade\s*10\s*roll|annual\s*family\s*income/i.test(identifier)),
       )
       : undefined;
-    const normalized = safeFields(record.normalized, [
+    const normalized = safePhoneResultFields(safeFields(record.normalized, [
       "student_id", "pen_number", "student_name", "g10_roll_no",
-    ]);
-    const existingMatch = safeFields(record.existing_match, [
+    ]), mode);
+    const existingMatch = safePhoneResultFields(safeFields(record.existing_match, [
       "matched_identifier", "student_id", "pen_number", "apaar_id", "student_name",
       "school_name", "school_code", "udise_code", "district", "state", "grade", "program", "stream",
-    ]);
+    ]), mode);
+    const fieldErrors = safePhoneResultFields(safe.field_errors, mode);
     return {
       ...safe,
+      ...(fieldErrors ? { field_errors: fieldErrors } : {}),
       ...(duplicateIdentifiers ? { duplicate_identifiers: duplicateIdentifiers } : {}),
       ...(normalized ? { normalized } : {}),
       ...(existingMatch ? { existing_match: existingMatch } : {}),
@@ -246,7 +267,13 @@ async function proxyRowsToDbService({
     );
   }
 
-  return NextResponse.json(await response.json());
+  const body = await response.json() as Record<string, unknown>;
+  return NextResponse.json({
+    ...body,
+    ...(Array.isArray(body.results)
+      ? { results: safeUpstreamResults(body.results) }
+      : {}),
+  }, { status: response.status });
 }
 
 // fallow-ignore-next-line complexity
@@ -269,6 +296,7 @@ async function bulkUploadResponse(
     filename: uploadFilename(file),
     data: Buffer.from(await file.arrayBuffer()),
     academicYear: period.academic_year,
+    mode: ACTIVE_REGISTRATION_MODE,
   });
   if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
   if (parsed.totalRows === 0) {

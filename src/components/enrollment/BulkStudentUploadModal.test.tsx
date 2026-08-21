@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
+import { PHONE_REGISTRATION_MODE } from "@/lib/registration-mode";
 import BulkStudentUploadModal from "./BulkStudentUploadModal";
 
 const baseProps = {
@@ -267,5 +268,43 @@ describe("BulkStudentUploadModal", () => {
     rerender(<BulkStudentUploadModal {...baseProps} open />);
 
     expect(screen.getByLabelText("Student upload file")).toHaveProperty("files", expect.objectContaining({ length: 0 }));
+  });
+
+  it("uses the Phone Registration Mode retry columns and guidance", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          totals: { total: 1, created: 0, duplicate_in_file: 0, already_exists: 0, rejected: 1 },
+          results: [{
+            row_number: 2,
+            status: "rejected",
+            original: {
+              Grade: "12",
+              "Student Name": "Bad Student",
+              "Parents Phone Number": "5876543210",
+            },
+            field_errors: { phone: "Enter a valid phone number" },
+          }],
+        }),
+        { status: 400 },
+      ),
+    );
+
+    const user = userEvent.setup();
+    render(<BulkStudentUploadModal {...baseProps} registrationMode={PHONE_REGISTRATION_MODE} />);
+
+    expect(screen.getByText(/Phone Registration Mode/)).toBeInTheDocument();
+    await user.upload(
+      screen.getByLabelText("Student upload file"),
+      new File(["fake"], "students.csv", { type: "text/csv" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Upload students" }));
+
+    const download = await screen.findByRole("link", { name: "Download rejected rows CSV" });
+    const href = download.getAttribute("href") ?? "";
+    expect(href).toContain("Parents%20Phone%20Number");
+    expect(href).not.toContain("PEN%20Number");
+    expect(href).not.toContain("Grade%2010%20Roll%20no");
+    expect(href).not.toContain("Yearly%20%2F%20Annual%20Family%20Income");
   });
 });
