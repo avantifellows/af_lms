@@ -3,9 +3,13 @@ import { readFile } from "node:fs/promises";
 import ExcelJS from "exceljs";
 import JSZip from "jszip";
 
-import { parseStudentAdditionUpload } from "./student-addition-bulk";
-import { buildRejectedRowsCsv, CBSE_BOARD } from "./student-addition-fields";
-import { PHONE_REGISTRATION_MODE } from "./registration-mode";
+import { parseStudentAdditionUpload as parseStudentAdditionUploadForMode } from "./student-addition-bulk";
+import {
+  buildRejectedRowsCsv as buildRejectedRowsCsvForMode,
+  CBSE_BOARD,
+  type StudentAdditionCsvResult,
+} from "./student-addition-fields";
+import { APPROVED_REGISTRATION_MODE, PHONE_REGISTRATION_MODE } from "./registration-mode";
 
 function csvLine(values: unknown[]) {
   return values.map((value) => `"${String(value).replace(/"/g, '""')}"`).join(",");
@@ -75,6 +79,23 @@ const validPhoneRowValues: unknown[] = [
 
 const csvHeaders = csvLine(uploadHeaders);
 const validCsvRow = csvLine(validRowValues);
+
+async function parseStudentAdditionUpload(
+  options: Parameters<typeof parseStudentAdditionUploadForMode>[0],
+) {
+  return parseStudentAdditionUploadForMode({
+    ...options,
+    mode: options.mode ?? APPROVED_REGISTRATION_MODE,
+  });
+}
+
+function buildRejectedRowsCsv(
+  results: StudentAdditionCsvResult[],
+  schoolCode?: string,
+  mode: Parameters<typeof buildRejectedRowsCsvForMode>[2] = APPROVED_REGISTRATION_MODE,
+) {
+  return buildRejectedRowsCsvForMode(results, schoolCode, mode);
+}
 
 async function workbookBuffer(sheets: Record<string, unknown[][]>) {
   const workbook = new ExcelJS.Workbook();

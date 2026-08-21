@@ -3,7 +3,10 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { PROGRAM_IDS } from "@/lib/constants";
-import { PHONE_REGISTRATION_MODE } from "@/lib/registration-mode";
+import {
+  APPROVED_REGISTRATION_MODE,
+  PHONE_REGISTRATION_MODE,
+} from "@/lib/registration-mode";
 import EnrollmentTabContent from "./EnrollmentTabContent";
 import type { ProgramStats } from "@/lib/enrollment-stats";
 
@@ -67,6 +70,7 @@ const baseProps = {
   nvsStreams: [],
   schoolUdise: "12345678901",
   schoolCode: "JNV001",
+  registrationMode: APPROVED_REGISTRATION_MODE,
 };
 
 describe("EnrollmentTabContent", () => {

@@ -10,7 +10,7 @@ export type RegistrationMode =
  * AF LMS + DB Service deployment. It is deliberately not database-backed or
  * user-selectable.
  */
-export const ACTIVE_REGISTRATION_MODE: RegistrationMode = APPROVED_REGISTRATION_MODE;
+export const ACTIVE_REGISTRATION_MODE: RegistrationMode = PHONE_REGISTRATION_MODE;
 export const REGISTRATION_MODE_VERSION = "1" as const;
 
 export interface RegistrationModeContract {

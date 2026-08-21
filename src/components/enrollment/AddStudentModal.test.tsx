@@ -4,7 +4,10 @@ import userEvent from "@testing-library/user-event";
 
 import AddStudentModal from "./AddStudentModal";
 import { CBSE_BOARD } from "@/lib/student-addition-fields";
-import { PHONE_REGISTRATION_MODE } from "@/lib/registration-mode";
+import {
+  APPROVED_REGISTRATION_MODE,
+  PHONE_REGISTRATION_MODE,
+} from "@/lib/registration-mode";
 
 const baseProps = {
   open: true,
@@ -12,6 +15,7 @@ const baseProps = {
   schoolCode: "JNV001",
   onClose: vi.fn(),
   onCreated: vi.fn(),
+  registrationMode: APPROVED_REGISTRATION_MODE,
 };
 
 async function fillValidForm() {

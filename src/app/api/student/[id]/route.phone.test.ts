@@ -30,18 +30,6 @@ vi.mock("@/lib/student-addition-access", async () => {
 vi.mock("@/lib/lms-enrollment-date", () => ({
   deriveLmsEnrollmentPeriod: mockDeriveLmsEnrollmentPeriod,
 }));
-vi.mock("@/lib/registration-mode", async () => {
-  const actual = await vi.importActual<typeof import("@/lib/registration-mode")>(
-    "@/lib/registration-mode",
-  );
-  return {
-    ...actual,
-    ACTIVE_REGISTRATION_MODE: actual.PHONE_REGISTRATION_MODE,
-    getRegistrationModeHandshake: () =>
-      actual.getRegistrationModeHandshake(actual.PHONE_REGISTRATION_MODE),
-  };
-});
-
 import { getServerSession } from "next-auth";
 import { PATCH } from "./route";
 import {
@@ -119,6 +107,35 @@ describe("PATCH /api/student/[id] in Phone Registration Mode", () => {
     expect(response.status).toBe(200);
     expect(mockRequireStudentAdditionStudent).not.toHaveBeenCalled();
     expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a non-NVS Student Edit on its existing path while Phone mode is active", async () => {
+    mockRequireStudentEdit.mockResolvedValueOnce({
+      ...genericEditAccess,
+      programId: 1,
+    });
+    mockQuery.mockResolvedValueOnce([{
+      has_jnv_nvs_membership: false,
+      has_enable_students_membership: false,
+      student_id_matches_phone: false,
+    }]);
+
+    const response = await PATCH(
+      jsonRequest("http://localhost/api/student/100", {
+        method: "PATCH",
+        body: { program_id: 1, first_name: "Updated Student" },
+      }) as never,
+      params,
+    );
+
+    expect(response.status).toBe(200);
+    const payload = JSON.parse(mockFetch.mock.calls[0][1].body as string);
+    expect(payload).toMatchObject({
+      program_id: 1,
+      first_name: "Updated Student",
+      registration_mode: "phone",
+      registration_mode_version: "1",
+    });
   });
 
   it("uses the stricter NVS actor gate and sends the atomic correction contract", async () => {

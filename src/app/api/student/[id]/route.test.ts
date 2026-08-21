@@ -25,6 +25,17 @@ vi.mock("@/lib/student-addition-access", async () => {
 vi.mock("@/lib/lms-enrollment-date", () => ({
   deriveLmsEnrollmentPeriod: vi.fn(),
 }));
+vi.mock("@/lib/registration-mode", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/registration-mode")>(
+    "@/lib/registration-mode",
+  );
+  return {
+    ...actual,
+    ACTIVE_REGISTRATION_MODE: actual.APPROVED_REGISTRATION_MODE,
+    getRegistrationModeHandshake: () =>
+      actual.getRegistrationModeHandshake(actual.APPROVED_REGISTRATION_MODE),
+  };
+});
 
 import { getServerSession } from "next-auth";
 import { PATCH } from "./route";

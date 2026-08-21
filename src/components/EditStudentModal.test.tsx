@@ -2,6 +2,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import EditStudentModal from "./EditStudentModal";
 import { type Grade } from "./StudentTable";
+import { APPROVED_REGISTRATION_MODE } from "@/lib/registration-mode";
 
 const baseStudent = {
   group_user_id: "gu-1",
@@ -47,6 +48,7 @@ const defaultProps = {
   isPhoneRegistrationStudent: false,
   // The roster's selected program — what the Edit gate authorized against.
   programId: 64 as number | null,
+  registrationMode: APPROVED_REGISTRATION_MODE,
 };
 
 let mockFetch: ReturnType<typeof vi.fn>;

@@ -19,15 +19,6 @@ vi.mock("@/lib/db", () => ({ query: mockQuery }));
 vi.mock("@/lib/student-addition-access", () => ({
   requireStudentAdditionAccess: mockRequireStudentAdditionAccess,
 }));
-vi.mock("@/lib/registration-mode", async () => {
-  const actual = await vi.importActual<typeof import("@/lib/registration-mode")>("@/lib/registration-mode");
-  return {
-    ...actual,
-    ACTIVE_REGISTRATION_MODE: actual.PHONE_REGISTRATION_MODE,
-    getRegistrationModeHandshake: () => actual.getRegistrationModeHandshake(actual.PHONE_REGISTRATION_MODE),
-  };
-});
-
 import { GET, POST } from "./route";
 import { PROGRAM_IDS } from "@/lib/constants";
 import { jsonRequest, routeParams, ADMIN_SESSION } from "../../../__test-utils__/api-test-helpers";
