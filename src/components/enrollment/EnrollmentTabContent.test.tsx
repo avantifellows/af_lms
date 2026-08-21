@@ -3,6 +3,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { PROGRAM_IDS } from "@/lib/constants";
+import { PHONE_REGISTRATION_MODE } from "@/lib/registration-mode";
 import EnrollmentTabContent from "./EnrollmentTabContent";
 import type { ProgramStats } from "@/lib/enrollment-stats";
 
@@ -97,6 +98,21 @@ describe("EnrollmentTabContent", () => {
 
     expect(screen.getByText("Student successfully added")).toBeInTheDocument();
     expect(screen.getByText("Student can login using their PEN + DoB")).toBeInTheDocument();
+  });
+
+  it("explains Phone-mode Student ID and Portal login after creation", async () => {
+    createdResult.studentId = "6876543210";
+    createdResult.penNumber = null;
+    const user = userEvent.setup();
+    render(<EnrollmentTabContent {...baseProps} registrationMode={PHONE_REGISTRATION_MODE} />);
+
+    await user.click(screen.getByRole("button", { name: "Add Student" }));
+    await user.click(screen.getByRole("button", { name: "mock add modal" }));
+
+    expect(screen.getByText(/Parent phone number is the Student ID\./)).toBeInTheDocument();
+    expect(screen.getByText(
+      /Portal login remains Student ID \+ Date of Birth; enter the phone number as the Student ID\./,
+    )).toBeInTheDocument();
   });
 
   it("shows the Add Student entry only for the selected NVS program and refreshes after create", async () => {

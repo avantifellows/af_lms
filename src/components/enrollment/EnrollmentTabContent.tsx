@@ -22,6 +22,11 @@ import {
 } from "@/lib/enrollment-readiness";
 import type { Batch } from "@/components/EditStudentModal";
 import { PROGRAM_IDS } from "@/lib/constants";
+import {
+  ACTIVE_REGISTRATION_MODE,
+  PHONE_REGISTRATION_MODE,
+  type RegistrationMode,
+} from "@/lib/registration-mode";
 import { Button, Modal } from "@/components/ui";
 import AddStudentModal from "./AddStudentModal";
 import BulkStudentUploadModal from "./BulkStudentUploadModal";
@@ -45,6 +50,8 @@ interface Props {
   schoolUdise: string;
   /** School code/UDISE used to fetch grade 11/12 consent status. */
   schoolCode: string;
+  /** Code-controlled Registration Mode; defaults to the active mode. */
+  registrationMode?: RegistrationMode;
 }
 
 // fallow-ignore-next-line complexity
@@ -65,7 +72,9 @@ export default function EnrollmentTabContent({
   nvsStreams,
   schoolUdise,
   schoolCode,
+  registrationMode = ACTIVE_REGISTRATION_MODE,
 }: Props) {
+  const phoneMode = registrationMode === PHONE_REGISTRATION_MODE;
   const router = useRouter();
   const [selectedId, setSelectedId] = useState<number | null>(
     programs[0]?.id ?? null,
@@ -229,11 +238,13 @@ export default function EnrollmentTabContent({
         </div>
         <div className="px-5 py-4">
           <p className="text-sm text-text-secondary">
-            {createdStudentId && createdPenNumber
-              ? "Student can login using either Student ID or PEN + DoB"
-              : createdStudentId
-                ? "Student can login using their Student ID + DoB"
-                : "Student can login using their PEN + DoB"}
+            {phoneMode
+              ? "Parent phone number is the Student ID. Portal login remains Student ID + Date of Birth; enter the phone number as the Student ID."
+              : createdStudentId && createdPenNumber
+                ? "Student can login using either Student ID or PEN + DoB"
+                : createdStudentId
+                  ? "Student can login using their Student ID + DoB"
+                  : "Student can login using their PEN + DoB"}
           </p>
         </div>
         <div className="flex justify-end gap-3 border-t border-border px-5 py-4">
@@ -369,6 +380,7 @@ export default function EnrollmentTabContent({
         open={addOpen}
         schoolUdise={schoolUdise}
         schoolCode={schoolCode}
+        registrationMode={registrationMode}
         onClose={() => setAddOpen(false)}
         onCreated={handleStudentCreated}
       />
