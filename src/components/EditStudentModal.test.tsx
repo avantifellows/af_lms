@@ -135,6 +135,77 @@ describe("EditStudentModal", () => {
     ).toBeInTheDocument();
   });
 
+  it("shows Approved-mode backfill inputs and fills-once messaging for the phone cohort", () => {
+    renderModal({
+      isPhoneRegistrationStudent: true,
+      registrationMode: "approved",
+      student: {
+        ...baseStudent,
+        pen_number: null,
+        g10_roll_no: null,
+      },
+    });
+
+    expect(screen.getByText("Post-approval identifier backfill")).toBeInTheDocument();
+    expect(screen.getByText("PEN and Grade 10 Roll no can each be filled once; once saved, they are locked.")).toBeInTheDocument();
+    expect(getByName("pen_number")).toHaveValue("");
+    expect(getByName("g10_roll_no")).toHaveValue("");
+    expect(getByName("pen_number")).not.toBeDisabled();
+    expect(getByName("g10_roll_no")).not.toBeDisabled();
+    expect(getByName("annual_family_income")).toBeInTheDocument();
+  });
+
+  it("locks identifiers that were already backfilled", () => {
+    renderModal({
+      isPhoneRegistrationStudent: true,
+      registrationMode: "approved",
+    });
+
+    expect(getByName("pen_number")).toHaveValue("12345678901");
+    expect(getByName("g10_roll_no")).toHaveValue("ABC123");
+    expect(getByName("pen_number")).toBeDisabled();
+    expect(getByName("g10_roll_no")).toBeDisabled();
+  });
+
+  it("submits backfill identifiers without a Student ID change", async () => {
+    const user = userEvent.setup();
+    const { props } = renderModal({
+      isPhoneRegistrationStudent: true,
+      registrationMode: "approved",
+      student: {
+        ...baseStudent,
+        pen_number: null,
+        g10_roll_no: null,
+      },
+    });
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ status: "updated" }) });
+
+    await user.type(getByName("pen_number"), "01234567890");
+    await user.type(getByName("g10_roll_no"), "12345678");
+    await user.click(screen.getByText("Save Changes"));
+
+    await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
+    expect(JSON.parse(mockFetch.mock.calls[0][1].body)).toEqual({
+      pen_number: "01234567890",
+      g10_roll_no: "12345678",
+      program_id: 64,
+    });
+    expect(JSON.parse(mockFetch.mock.calls[0][1].body)).not.toHaveProperty("student_id");
+    expect(props.onSave).toHaveBeenCalledTimes(1);
+  });
+
+  it("hides all backfill inputs for the phone cohort while Phone mode is active", () => {
+    renderModal({
+      isPhoneRegistrationStudent: true,
+      registrationMode: "phone",
+    });
+
+    expect(screen.queryByText("Post-approval identifier backfill")).not.toBeInTheDocument();
+    expect(document.querySelector('[name="pen_number"]')).toBeNull();
+    expect(document.querySelector('[name="g10_roll_no"]')).toBeNull();
+    expect(document.querySelector('[name="annual_family_income"]')).toBeNull();
+  });
+
   it("does not show Phone Registration Mode guidance for other Students", () => {
     renderModal();
 

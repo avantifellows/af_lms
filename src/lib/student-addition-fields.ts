@@ -82,6 +82,8 @@ interface LmsStudentEditPayload {
   father_name?: string;
   annual_family_income?: string;
   g10_board?: string | null;
+  pen_number?: string;
+  g10_roll_no?: string;
   grade?: 11 | 12;
 }
 
@@ -498,11 +500,14 @@ function editError(field: string, message: string, otherField?: string) {
 // fallow-ignore-next-line complexity
 export function canonicalizeStudentEditPayload(
   input: Record<string, unknown>,
-  options: { mode?: RegistrationMode } = {},
+  options: { mode?: RegistrationMode; allowPhoneBackfill?: boolean } = {},
 ) {
   const mode = options.mode ?? ACTIVE_REGISTRATION_MODE;
+  const editableFields = options.allowPhoneBackfill
+    ? [...STUDENT_EDITABLE_FIELDS, "pen_number", "g10_roll_no"]
+    : STUDENT_EDITABLE_FIELDS;
   const fields = Object.fromEntries(
-    STUDENT_EDITABLE_FIELDS
+    editableFields
       .filter((field) => Object.prototype.hasOwnProperty.call(input, field))
       .map((field) => [field, input[field]]),
   ) as LmsStudentEditPayload;
@@ -515,6 +520,36 @@ export function canonicalizeStudentEditPayload(
   }
   if (fields.father_name !== undefined && typeof fields.father_name !== "string") {
     return editError("father_name", "Father Name must be text");
+  }
+  if (fields.pen_number !== undefined) {
+    if (typeof fields.pen_number !== "string") {
+      return editError("pen_number", "PEN must be text");
+    }
+    fields.pen_number = fields.pen_number.trim();
+    if (fields.pen_number && !/^\d{11}$/.test(fields.pen_number)) {
+      return editError("pen_number", "PEN must be exactly 11 digits");
+    }
+  }
+  if (fields.g10_roll_no !== undefined) {
+    if (typeof fields.g10_roll_no !== "string") {
+      return editError("g10_roll_no", "Grade 10 Roll no must be text");
+    }
+    const board = typeof fields.g10_board === "string" ? fields.g10_board : "";
+    if (fields.g10_roll_no.trim() && !board) {
+      return editError("g10_roll_no", "G10 board is required for Grade 10 Roll no");
+    }
+    fields.g10_roll_no = normalizeG10RollNo(fields.g10_roll_no, board);
+    if (fields.g10_roll_no) {
+      if (board === CBSE_BOARD && !/^[1-9]\d{7}$/.test(fields.g10_roll_no)) {
+        return editError(
+          "g10_roll_no",
+          "CBSE Grade 10 Roll no must be exactly 8 digits and cannot start with zero",
+        );
+      }
+      if (board !== CBSE_BOARD && !/^[A-Z0-9]{4,10}$/.test(fields.g10_roll_no)) {
+        return editError("g10_roll_no", "Grade 10 Roll no must be 4 to 10 characters");
+      }
+    }
   }
   if (fields.phone !== undefined && !isValidRegistrationPhone(fields.phone, mode)) {
     return editError(

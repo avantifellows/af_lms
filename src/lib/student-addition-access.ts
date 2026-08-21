@@ -91,12 +91,18 @@ export interface PhoneRegistrationStudentFacts {
   has_jnv_nvs_membership: boolean;
   has_enable_students_membership: boolean;
   student_id_matches_phone: boolean;
+  pen_number: string | null;
+  g10_roll_no: string | null;
+  g10_board: string | null;
 }
 
 interface PhoneRegistrationStudentFactRow {
   has_jnv_nvs_membership?: unknown;
   has_enable_students_membership?: unknown;
   student_id_matches_phone?: unknown;
+  pen_number?: unknown;
+  g10_roll_no?: unknown;
+  g10_board?: unknown;
 }
 
 function databaseBoolean(value: unknown): boolean {
@@ -141,7 +147,10 @@ export async function getPhoneRegistrationStudentFacts(
        regexp_replace(COALESCE(s.student_id, ''), '[^0-9]', '', 'g') =
          regexp_replace(COALESCE(u.phone, ''), '[^0-9]', '', 'g')
          AND regexp_replace(COALESCE(u.phone, ''), '[^0-9]', '', 'g') ~ '^[6-9][0-9]{9}$'
-         AS student_id_matches_phone
+         AS student_id_matches_phone,
+       s.pen_number,
+       s.g10_roll_no,
+       s.g10_board
      FROM student s
      JOIN "user" u ON u.id = s.user_id
      WHERE s.id = $1`,
@@ -152,6 +161,9 @@ export async function getPhoneRegistrationStudentFacts(
     has_jnv_nvs_membership: databaseBoolean(row?.has_jnv_nvs_membership),
     has_enable_students_membership: databaseBoolean(row?.has_enable_students_membership),
     student_id_matches_phone: databaseBoolean(row?.student_id_matches_phone),
+    pen_number: typeof row?.pen_number === "string" ? row.pen_number : null,
+    g10_roll_no: typeof row?.g10_roll_no === "string" ? row.g10_roll_no : null,
+    g10_board: typeof row?.g10_board === "string" ? row.g10_board : null,
   };
 }
 

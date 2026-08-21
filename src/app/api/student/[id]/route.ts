@@ -8,6 +8,7 @@ import {
   isPhoneRegistrationStudent,
   requireStudentAdditionStudentAccess,
   requireStudentEditAccess,
+  type PhoneRegistrationStudentFacts,
 } from "@/lib/student-addition-access";
 import { canonicalizeStudentEditPayload } from "@/lib/student-addition-fields";
 import {
@@ -24,6 +25,41 @@ const PHONE_MODE_RESTRICTED_EDIT_FIELDS = {
   g10_roll_no: "Grade 10 Roll no is not accepted in Phone Registration Mode",
   annual_family_income: "Annual Family Income is not accepted in Phone Registration Mode",
 } as const;
+
+const PHONE_COHORT_BACKFILL_FIELDS = [
+  "pen_number",
+  "g10_roll_no",
+  "annual_family_income",
+] as const;
+
+const PHONE_BACKFILL_REQUIRED_ERROR =
+  "PEN or Grade 10 Roll no is required for phone-cohort backfill";
+
+function hasOwnField(body: Record<string, unknown>, field: string) {
+  return Object.prototype.hasOwnProperty.call(body, field);
+}
+
+function hasValue(value: unknown): value is string {
+  return typeof value === "string" && value.trim() !== "";
+}
+
+function hasPhoneCohortBackfillInput(body: Record<string, unknown>) {
+  return PHONE_COHORT_BACKFILL_FIELDS.some((field) => hasOwnField(body, field));
+}
+
+function backfillLockError(
+  facts: PhoneRegistrationStudentFacts,
+  body: Record<string, unknown>,
+) {
+  const fieldErrors: Record<string, string> = {};
+  if (hasOwnField(body, "pen_number") && hasValue(facts.pen_number)) {
+    fieldErrors.pen_number = "PEN can only be filled once and is already set";
+  }
+  if (hasOwnField(body, "g10_roll_no") && hasValue(facts.g10_roll_no)) {
+    fieldErrors.g10_roll_no = "Grade 10 Roll no can only be filled once and is already set";
+  }
+  return fieldErrors;
+}
 
 function phoneModeRestrictedFieldErrors(body: Record<string, unknown>) {
   return Object.fromEntries(
@@ -195,11 +231,14 @@ export async function PATCH(
 
     const phoneRegistrationFacts = await getPhoneRegistrationStudentFacts(id);
     const isPhoneStudent = isPhoneRegistrationStudent(phoneRegistrationFacts);
-    const isPhoneCorrection =
-      isPhoneStudent && Object.prototype.hasOwnProperty.call(bodyObject, "phone");
+    const isPhoneCorrection = isPhoneStudent && hasOwnField(bodyObject, "phone");
+    const isApprovedPhoneBackfill =
+      ACTIVE_REGISTRATION_MODE === APPROVED_REGISTRATION_MODE &&
+      isPhoneStudent &&
+      hasPhoneCohortBackfillInput(bodyObject);
 
     let writeAccess = access;
-    if (isPhoneCorrection) {
+    if (isPhoneCorrection || isApprovedPhoneBackfill) {
       const correctionAccess = await requireStudentAdditionStudentAccess(session, id);
       if (!correctionAccess.ok) {
         return NextResponse.json(
@@ -224,18 +263,64 @@ export async function PATCH(
       }
     }
 
+    if (isApprovedPhoneBackfill) {
+      const lockErrors = backfillLockError(phoneRegistrationFacts, bodyObject);
+      if (Object.keys(lockErrors).length > 0) {
+        const firstError = Object.values(lockErrors)[0];
+        return NextResponse.json(
+          { ok: false, error: firstError, field_errors: lockErrors },
+          { status: 422 },
+        );
+      }
+
+      const hasExistingIdentifier =
+        hasValue(phoneRegistrationFacts.pen_number) ||
+        hasValue(phoneRegistrationFacts.g10_roll_no);
+      const hasSubmittedIdentifier =
+        hasValue(bodyObject.pen_number) || hasValue(bodyObject.g10_roll_no);
+      if (!hasExistingIdentifier && !hasSubmittedIdentifier) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: PHONE_BACKFILL_REQUIRED_ERROR,
+            field_errors: {
+              pen_number: PHONE_BACKFILL_REQUIRED_ERROR,
+              g10_roll_no: PHONE_BACKFILL_REQUIRED_ERROR,
+            },
+          },
+          { status: 422 },
+        );
+      }
+    }
+
     const dbService = getDbServiceConfig();
     if (!dbService) {
       return NextResponse.json({ error: "DB Service is not configured" }, { status: 500 });
     }
 
-    const canonical = canonicalizeStudentEditPayload(bodyObject, {
+    const canonicalInput = { ...bodyObject };
+    const shouldUseExistingBoard =
+      isApprovedPhoneBackfill &&
+      hasOwnField(bodyObject, "g10_roll_no") &&
+      !hasOwnField(bodyObject, "g10_board") &&
+      phoneRegistrationFacts.g10_board;
+    if (shouldUseExistingBoard) canonicalInput.g10_board = phoneRegistrationFacts.g10_board;
+
+    const canonical = canonicalizeStudentEditPayload(canonicalInput, {
       mode: isPhoneStudent ? PHONE_REGISTRATION_MODE : APPROVED_REGISTRATION_MODE,
+      allowPhoneBackfill: isApprovedPhoneBackfill,
     });
     if (!canonical.ok) {
       return NextResponse.json(canonical, { status: 422 });
     }
     const { fields } = canonical;
+    if (isApprovedPhoneBackfill && !hasOwnField(bodyObject, "g10_board")) {
+      delete fields.g10_board;
+    }
+    if (isApprovedPhoneBackfill) {
+      if (!hasValue(fields.pen_number)) delete fields.pen_number;
+      if (!hasValue(fields.g10_roll_no)) delete fields.g10_roll_no;
+    }
     if (Object.keys(fields).length === 0) {
       return NextResponse.json({ error: "No editable fields provided" }, { status: 400 });
     }
