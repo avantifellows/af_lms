@@ -158,6 +158,10 @@ export default function CombinedReportPanel({
   // A finished report is the one blocked state ops can act on: the data behind it
   // may have been fixed since, so offer a deliberate rebuild rather than a dead end.
   const alreadyGenerated = blockedReason === "already_generated";
+  // Keep the label on "Regenerate" while the rebuild is in flight — it flips to
+  // job_in_progress the moment the job is queued, and reverting the wording
+  // mid-run reads as the button having reset.
+  const hasFinishedReport = jobs.some((j) => j.status === "done");
 
   return (
     <div className="bg-bg-card-alt border border-border rounded-lg p-4 space-y-3">
@@ -178,7 +182,7 @@ export default function CombinedReportPanel({
         >
           {submitting
             ? "Starting…"
-            : alreadyGenerated
+            : hasFinishedReport
               ? "Regenerate"
               : "Generate combined report"}
         </button>
