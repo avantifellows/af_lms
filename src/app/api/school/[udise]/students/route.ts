@@ -9,6 +9,11 @@ import { query } from "@/lib/db";
 import { getDbServiceConfig } from "@/lib/db-service-config";
 import { deriveLmsEnrollmentPeriod } from "@/lib/lms-enrollment-date";
 import {
+  getRegistrationModeHandshake,
+  isRegistrationModeMismatchResponse,
+  REGISTRATION_MODE_MISMATCH_MESSAGE,
+} from "@/lib/registration-mode";
+import {
   parseStudentAdditionUpload,
   type StudentAdditionUploadRowResult,
 } from "@/lib/student-addition-bulk";
@@ -204,6 +209,7 @@ async function proxyRowsToDbService({
       actor: access.actor,
       school: { code: school.code, udise_code: school.udise_code },
       program_id: access.programId,
+      ...getRegistrationModeHandshake(),
       upload,
       ...period,
       rows,
@@ -211,9 +217,13 @@ async function proxyRowsToDbService({
   });
 
   if (!response.ok) {
-    const upstream = response.headers.get("content-type")?.includes("application/json")
-      ? await response.json().catch(() => null) as Record<string, unknown> | null
-      : null;
+    const upstream = await response.json().catch(() => null) as Record<string, unknown> | null;
+    if (isRegistrationModeMismatchResponse(upstream)) {
+      return NextResponse.json(
+        { error: REGISTRATION_MODE_MISMATCH_MESSAGE },
+        { status: 503 },
+      );
+    }
     return NextResponse.json(
       {
         error: "Student could not be created",
