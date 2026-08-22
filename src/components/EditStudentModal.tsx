@@ -315,9 +315,10 @@ export default function EditStudentModal({
       ...prev,
       [name]:
         name === "phone"
-          ? (isPhoneRegistrationStudent
-            ? digitsOnly(value).slice(0, 10)
-            : digitsOnly(value).replace(/^0+/, "").slice(0, 10))
+          // Keep the complete digit sequence so validation can reject
+          // leading-zero and overlength values instead of silently changing
+          // them into a different phone number.
+          ? digitsOnly(value)
           : name === "pen_number"
             ? digitsOnly(value).slice(0, 11)
             : name === "g10_roll_no"

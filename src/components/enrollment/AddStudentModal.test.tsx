@@ -117,6 +117,23 @@ describe("AddStudentModal", () => {
     expect(screen.getByRole("button", { name: "Add Student" })).toBeDisabled();
   });
 
+  it.each([
+    [PHONE_REGISTRATION_MODE, "09999999999"],
+    [PHONE_REGISTRATION_MODE, "99999999999"],
+    [APPROVED_REGISTRATION_MODE, "09999999999"],
+    [APPROVED_REGISTRATION_MODE, "99999999999"],
+  ] as const)("keeps invalid phone digits for %s validation", async (registrationMode, phone) => {
+    render(<AddStudentModal {...baseProps} registrationMode={registrationMode} />);
+    const user = userEvent.setup();
+    const input = screen.getByLabelText("Parents Phone Number");
+
+    await user.type(input, phone);
+
+    expect(input).toHaveValue(phone);
+    expect(screen.getByText("Enter a valid phone number")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add Student" })).toBeDisabled();
+  });
+
   it("shows the revised NVS identity, CWSN, board, gender, and stream controls", () => {
     render(<AddStudentModal {...baseProps} />);
 
@@ -235,7 +252,7 @@ describe("AddStudentModal", () => {
     expect(screen.getByRole("button", { name: "Add Student" })).toBeDisabled();
   });
 
-  it("filters restricted fields and caps fixed-length numeric inputs", async () => {
+  it("filters non-digits while preserving extra phone digits for validation", async () => {
     render(<AddStudentModal {...baseProps} />);
     const user = userEvent.setup();
 
@@ -254,7 +271,8 @@ describe("AddStudentModal", () => {
     expect(rollInput).toHaveValue("12345678");
 
     await user.type(screen.getByLabelText("Parents Phone Number"), "adasd12345678901");
-    expect(screen.getByLabelText("Parents Phone Number")).toHaveValue("1234567890");
+    expect(screen.getByLabelText("Parents Phone Number")).toHaveValue("12345678901");
+    expect(screen.getByText("Enter a valid phone number")).toBeInTheDocument();
 
     await user.type(screen.getByLabelText("Father Name"), "Ravi123 !");
     expect(screen.getByLabelText("Father Name")).toHaveValue("Ravi ");
