@@ -2,7 +2,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import EditStudentModal from "./EditStudentModal";
 import { type Grade } from "./StudentTable";
-import { APPROVED_REGISTRATION_MODE } from "@/lib/registration-mode";
+import { APPROVED_REGISTRATION_MODE, PHONE_REGISTRATION_MODE } from "@/lib/registration-mode";
 
 const baseStudent = {
   group_user_id: "gu-1",
@@ -234,6 +234,46 @@ describe("EditStudentModal", () => {
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
+  it.each([
+    [PHONE_REGISTRATION_MODE, true, "09999999999", "Parents Phone Number must be exactly 10 digits and start with 6-9"],
+    [PHONE_REGISTRATION_MODE, true, "99999999999", "Parents Phone Number must be exactly 10 digits and start with 6-9"],
+    [APPROVED_REGISTRATION_MODE, false, "09999999999", "Parents Phone Number must be exactly 10 digits and cannot start with zero"],
+    [APPROVED_REGISTRATION_MODE, false, "99999999999", "Parents Phone Number must be exactly 10 digits and cannot start with zero"],
+  ] as const)("keeps invalid phone digits for %s validation", async (registrationMode, isPhoneRegistrationStudent, phone, message) => {
+    const user = userEvent.setup();
+    renderModal({ registrationMode, isPhoneRegistrationStudent });
+
+    const input = getByName("phone");
+    await user.clear(input);
+    await user.type(input, phone);
+
+    expect(input).toHaveValue(phone);
+    await user.click(screen.getByText("Save Changes"));
+
+    expect(await screen.findByText(message)).toBeInTheDocument();
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("accepts a valid ten-digit phone unchanged in Phone Registration Mode", async () => {
+    const user = userEvent.setup();
+    renderModal({
+      registrationMode: PHONE_REGISTRATION_MODE,
+      isPhoneRegistrationStudent: true,
+    });
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ status: "updated" }) });
+
+    const input = getByName("phone");
+    await user.clear(input);
+    await user.type(input, "9999999999");
+    await user.click(screen.getByText("Save Changes"));
+
+    await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
+    expect(JSON.parse(mockFetch.mock.calls[0][1].body)).toMatchObject({
+      phone: "9999999999",
+      program_id: 64,
+    });
+  });
+
   it("keeps the local database date when serialization uses the prior UTC day", () => {
     renderModal({
       student: {
@@ -429,13 +469,13 @@ describe("EditStudentModal", () => {
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it("filters restricted edit fields while typing", async () => {
+  it("filters non-digits while preserving extra phone digits for validation", async () => {
     const user = userEvent.setup();
     renderModal();
 
     await user.clear(getByName("phone"));
     await user.type(getByName("phone"), "abc12345678901");
-    expect(getByName("phone")).toHaveValue("1234567890");
+    expect(getByName("phone")).toHaveValue("12345678901");
 
     await user.clear(getByName("father_name"));
     await user.type(getByName("father_name"), "Suresh123 !");

@@ -127,7 +127,10 @@ export default function AddStudentModal({
   const setField = (name: keyof StudentAdditionInput, value: string) => {
     setForm((prev) => {
       const next = { ...prev, [name]: value };
-      if (name === "phone") next.phone = digitsOnly(value).replace(/^0+/, "").slice(0, 10);
+      // Keep the complete digit sequence so validation can reject leading-zero
+      // and overlength phone numbers instead of turning them into another
+      // valid-looking number.
+      if (name === "phone") next.phone = digitsOnly(value);
       if (name === "pen_number") next.pen_number = digitsOnly(value).slice(0, 11);
       if (name === "father_name") next.father_name = lettersAndSpacesOnly(value);
       if (name === "g10_roll_no") {
@@ -474,7 +477,6 @@ export default function AddStudentModal({
                 "text",
                 "tel",
                 true,
-                phoneMode ? { maxLength: 10 } : {},
               )}
               {!phoneMode && selectField("annual_family_income", "Yearly / Annual Family Income", ANNUAL_FAMILY_INCOME_OPTIONS)}
             </div>
