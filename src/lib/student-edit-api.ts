@@ -14,7 +14,7 @@ import {
 } from "@/lib/student-addition-fields";
 import type { PhoneRegistrationStudentFacts } from "@/lib/student-addition-access";
 
-export const PHONE_MODE_RESTRICTED_EDIT_FIELDS = {
+const PHONE_MODE_RESTRICTED_EDIT_FIELDS = {
   pen_number: "PEN Number is not accepted in Phone Registration Mode",
   g10_roll_no: "Grade 10 Roll no is not accepted in Phone Registration Mode",
   annual_family_income: "Annual Family Income is not accepted in Phone Registration Mode",
@@ -86,6 +86,133 @@ function phoneModeRestrictedFieldErrors(body: Record<string, unknown>) {
   );
 }
 
+function restrictedPhoneModePreparationError(
+  body: Record<string, unknown>,
+  mode: RegistrationMode,
+  isPhoneStudent: boolean,
+): StudentEditPreparation | null {
+  if (mode !== PHONE_REGISTRATION_MODE || !isPhoneStudent) return null;
+
+  const fieldErrors = phoneModeRestrictedFieldErrors(body);
+  return Object.keys(fieldErrors).length === 0
+    ? null
+    : {
+      ok: false,
+      status: 422,
+      body: {
+        ok: false,
+        error: "Restricted fields are not accepted for Phone Registration Mode Students",
+        field_errors: fieldErrors,
+      },
+    };
+}
+
+function backfillRequiredIdentifierError(
+  facts: PhoneRegistrationStudentFacts,
+  body: Record<string, unknown>,
+): StudentEditPreparation | null {
+  const hasExistingIdentifier = hasValue(facts.pen_number) || hasValue(facts.g10_roll_no);
+  const hasSubmittedIdentifier = hasValue(body.pen_number) || hasValue(body.g10_roll_no);
+  if (hasExistingIdentifier || hasSubmittedIdentifier) return null;
+
+  return {
+    ok: false,
+    status: 422,
+    body: {
+      ok: false,
+      error: PHONE_BACKFILL_REQUIRED_ERROR,
+      field_errors: {
+        pen_number: PHONE_BACKFILL_REQUIRED_ERROR,
+        g10_roll_no: PHONE_BACKFILL_REQUIRED_ERROR,
+      },
+    },
+  };
+}
+
+function phoneBackfillPreparationError(
+  facts: PhoneRegistrationStudentFacts,
+  body: Record<string, unknown>,
+  allowPhoneBackfill: boolean,
+): StudentEditPreparation | null {
+  if (!allowPhoneBackfill) return null;
+
+  const lockErrors = backfillLockError(facts, body);
+  if (Object.keys(lockErrors).length > 0) {
+    return {
+      ok: false,
+      status: 422,
+      body: {
+        ok: false,
+        error: Object.values(lockErrors)[0],
+        field_errors: lockErrors,
+      },
+    };
+  }
+
+  return backfillRequiredIdentifierError(facts, body);
+}
+
+function prepareCanonicalStudentEditInput(
+  body: Record<string, unknown>,
+  facts: PhoneRegistrationStudentFacts,
+  allowPhoneBackfill: boolean,
+) {
+  const canonicalInput = { ...body };
+  const shouldUseExistingBoard =
+    allowPhoneBackfill &&
+    hasOwnField(body, "g10_roll_no") &&
+    !hasOwnField(body, "g10_board");
+  if (shouldUseExistingBoard) canonicalInput.g10_board = facts.g10_board ?? "Others";
+  return canonicalInput;
+}
+
+function canonicalizePreparedStudentEdit(
+  body: Record<string, unknown>,
+  facts: PhoneRegistrationStudentFacts,
+  isPhoneStudent: boolean,
+  allowPhoneBackfill: boolean,
+) {
+  return canonicalizeStudentEditPayload(
+    prepareCanonicalStudentEditInput(body, facts, allowPhoneBackfill),
+    {
+      mode: isPhoneStudent ? PHONE_REGISTRATION_MODE : APPROVED_REGISTRATION_MODE,
+      allowPhoneBackfill,
+    },
+  );
+}
+
+function cleanPreparedBackfillFields(
+  fields: Record<string, unknown>,
+  body: Record<string, unknown>,
+  allowPhoneBackfill: boolean,
+) {
+  if (!allowPhoneBackfill) return;
+
+  if (!hasOwnField(body, "g10_board")) delete fields.g10_board;
+  if (!hasValue(fields.pen_number)) delete fields.pen_number;
+  if (!hasValue(fields.g10_roll_no)) delete fields.g10_roll_no;
+}
+
+function finishPreparedStudentEdit(
+  canonical: ReturnType<typeof canonicalizeStudentEditPayload>,
+  body: Record<string, unknown>,
+  allowPhoneBackfill: boolean,
+): StudentEditPreparation {
+  if (!canonical.ok) return { ok: false, status: 422, body: canonical };
+
+  const fields = canonical.fields as Record<string, unknown>;
+  cleanPreparedBackfillFields(fields, body, allowPhoneBackfill);
+  if (Object.keys(fields).length === 0) {
+    return {
+      ok: false,
+      status: 400,
+      body: { error: "No editable fields provided" },
+    };
+  }
+
+  return { ok: true, fields };
+}
+
 export function prepareStudentEditFields({
   body,
   facts,
@@ -99,87 +226,14 @@ export function prepareStudentEditFields({
   allowPhoneBackfill: boolean;
   mode?: RegistrationMode;
 }): StudentEditPreparation {
-  if (mode === PHONE_REGISTRATION_MODE && isPhoneStudent) {
-    const restrictedFieldErrors = phoneModeRestrictedFieldErrors(body);
-    if (Object.keys(restrictedFieldErrors).length > 0) {
-      return {
-        ok: false,
-        status: 422,
-        body: {
-          ok: false,
-          error: "Restricted fields are not accepted for Phone Registration Mode Students",
-          field_errors: restrictedFieldErrors,
-        },
-      };
-    }
-  }
+  const restrictedError = restrictedPhoneModePreparationError(body, mode, isPhoneStudent);
+  if (restrictedError) return restrictedError;
 
-  if (allowPhoneBackfill) {
-    const lockErrors = backfillLockError(facts, body);
-    if (Object.keys(lockErrors).length > 0) {
-      return {
-        ok: false,
-        status: 422,
-        body: {
-          ok: false,
-          error: Object.values(lockErrors)[0],
-          field_errors: lockErrors,
-        },
-      };
-    }
+  const backfillError = phoneBackfillPreparationError(facts, body, allowPhoneBackfill);
+  if (backfillError) return backfillError;
 
-    const hasExistingIdentifier =
-      hasValue(facts.pen_number) || hasValue(facts.g10_roll_no);
-    const hasSubmittedIdentifier =
-      hasValue(body.pen_number) || hasValue(body.g10_roll_no);
-    if (!hasExistingIdentifier && !hasSubmittedIdentifier) {
-      return {
-        ok: false,
-        status: 422,
-        body: {
-          ok: false,
-          error: PHONE_BACKFILL_REQUIRED_ERROR,
-          field_errors: {
-            pen_number: PHONE_BACKFILL_REQUIRED_ERROR,
-            g10_roll_no: PHONE_BACKFILL_REQUIRED_ERROR,
-          },
-        },
-      };
-    }
-  }
-
-  const canonicalInput = { ...body };
-  const shouldUseExistingBoard =
-    allowPhoneBackfill &&
-    hasOwnField(body, "g10_roll_no") &&
-    !hasOwnField(body, "g10_board");
-  if (shouldUseExistingBoard) canonicalInput.g10_board = facts.g10_board ?? "Others";
-
-  const canonical = canonicalizeStudentEditPayload(canonicalInput, {
-    mode: isPhoneStudent ? PHONE_REGISTRATION_MODE : APPROVED_REGISTRATION_MODE,
-    allowPhoneBackfill,
-  });
-  if (!canonical.ok) {
-    return { ok: false, status: 422, body: canonical };
-  }
-
-  const fields = canonical.fields as Record<string, unknown>;
-  if (allowPhoneBackfill && !hasOwnField(body, "g10_board")) {
-    delete fields.g10_board;
-  }
-  if (allowPhoneBackfill) {
-    if (!hasValue(fields.pen_number)) delete fields.pen_number;
-    if (!hasValue(fields.g10_roll_no)) delete fields.g10_roll_no;
-  }
-  if (Object.keys(fields).length === 0) {
-    return {
-      ok: false,
-      status: 400,
-      body: { error: "No editable fields provided" },
-    };
-  }
-
-  return { ok: true, fields };
+  const canonical = canonicalizePreparedStudentEdit(body, facts, isPhoneStudent, allowPhoneBackfill);
+  return finishPreparedStudentEdit(canonical, body, allowPhoneBackfill);
 }
 
 function safeExistingPhoneMatch(value: unknown) {
@@ -215,37 +269,143 @@ function phoneDuplicateMessage(
   const isPhoneDuplicate = isPhoneDuplicateError(code, message, fields);
   if (!isPhoneDuplicate) return message;
 
-  const existingSchoolCode = typeof existingMatch?.school_code === "string"
-    ? existingMatch.school_code
-    : undefined;
-  const sameSchool =
-    (existingSchoolCode && schoolCode && existingSchoolCode === schoolCode) ||
-    /same.?school/.test(normalizedCode);
-  if (sameSchool) {
-    return "This phone number is already linked to a Student in this school.";
-  }
-
-  const otherSchool =
-    (existingSchoolCode && schoolCode && existingSchoolCode !== schoolCode) ||
-    /other.?school|different.?school|school.?conflict/.test(normalizedCode);
-  if (otherSchool) {
-    return "This phone number is already linked to a Student in another school and cannot be transferred.";
-  }
-
-  return message;
+  const scope = classifyPhoneDuplicateScope(normalizedCode, existingMatch, schoolCode);
+  return phoneDuplicateScopeMessage(scope) ?? message;
 }
 
-export async function dbServiceStudentEditError(
+type PhoneDuplicateScope = "same" | "other" | "unknown";
+
+function classifyPhoneDuplicateScope(
+  normalizedCode: string,
+  existingMatch: Record<string, unknown> | undefined,
+  schoolCode: string | undefined,
+): PhoneDuplicateScope {
+  if (isSameSchoolDuplicate(normalizedCode, existingMatch, schoolCode)) return "same";
+  if (isOtherSchoolDuplicate(normalizedCode, existingMatch, schoolCode)) return "other";
+  return "unknown";
+}
+
+function existingMatchSchoolCode(existingMatch: Record<string, unknown> | undefined) {
+  return typeof existingMatch?.school_code === "string"
+    ? existingMatch.school_code
+    : undefined;
+}
+
+function isSameSchoolDuplicate(
+  normalizedCode: string,
+  existingMatch: Record<string, unknown> | undefined,
+  schoolCode: string | undefined,
+) {
+  if (/same.?school/.test(normalizedCode)) return true;
+  const existingSchoolCode = existingMatchSchoolCode(existingMatch);
+  return Boolean(existingSchoolCode && schoolCode && existingSchoolCode === schoolCode);
+}
+
+function isOtherSchoolDuplicate(
+  normalizedCode: string,
+  existingMatch: Record<string, unknown> | undefined,
+  schoolCode: string | undefined,
+) {
+  if (/other.?school|different.?school|school.?conflict/.test(normalizedCode)) return true;
+  const existingSchoolCode = existingMatchSchoolCode(existingMatch);
+  return Boolean(existingSchoolCode && schoolCode && existingSchoolCode !== schoolCode);
+}
+
+function phoneDuplicateScopeMessage(scope: PhoneDuplicateScope) {
+  if (scope === "same") return "This phone number is already linked to a Student in this school.";
+  if (scope === "other") {
+    return "This phone number is already linked to a Student in another school and cannot be transferred.";
+  }
+  return undefined;
+}
+
+interface StructuredStudentEditError {
+  code?: string;
+  message: string;
+  fields: string[];
+  existingMatch?: unknown;
+}
+
+function parseResponseJson(text: string): unknown {
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+function objectValue(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function extractStudentEditError(parsed: unknown): StructuredStudentEditError {
+  const response = objectValue(parsed);
+  const error = objectValue(response?.error);
+  if (!error) {
+    return { message: "Failed to update student", fields: [] };
+  }
+  return {
+    code: typeof error.code === "string" ? error.code : undefined,
+    message: typeof error.message === "string" ? error.message : "Failed to update student",
+    fields: Array.isArray(error.fields) ? error.fields as string[] : [],
+    existingMatch: error.existing_match,
+  };
+}
+
+function extractExistingPhoneMatch(
+  parsed: unknown,
+  error: StructuredStudentEditError,
+) {
+  const response = objectValue(parsed);
+  const nestedMatch = error?.existingMatch;
+  return safeExistingPhoneMatch(nestedMatch ?? response?.existing_match);
+}
+
+function getStudentEditErrorDetails(parsed: unknown) {
+  const error = extractStudentEditError(parsed);
+  const existingMatch = extractExistingPhoneMatch(parsed, error);
+  return {
+    error,
+    existingMatch,
+    fields: error.fields,
+    message: error.message,
+  };
+}
+
+function buildStudentEditFieldErrors(
+  fields: string[],
+  message: string,
+  isPhoneDuplicate: boolean,
+) {
+  const fieldErrors = Object.fromEntries(fields.map((field) => [field, message]));
+  if (isPhoneDuplicate) fieldErrors.phone = message;
+  return fieldErrors;
+}
+
+function buildStudentEditErrorBody(
+  error: StructuredStudentEditError | null,
+  existingMatch: Record<string, unknown> | undefined,
+  fields: string[],
+  message: string,
+  isPhoneDuplicate: boolean,
+) {
+  return {
+    error: message,
+    code: error?.code,
+    field_errors: buildStudentEditFieldErrors(fields, message, isPhoneDuplicate),
+    ...(existingMatch ? { existing_match: existingMatch } : {}),
+  };
+}
+
+async function dbServiceStudentEditError(
   response: Response,
   schoolCode?: string,
 ): Promise<StudentEditProxyResult> {
   const text = await response.text();
-  let parsed: unknown = null;
-  try {
-    parsed = text ? JSON.parse(text) : null;
-  } catch {
-    parsed = null;
-  }
+  const parsed = parseResponseJson(text);
 
   if (isRegistrationModeMismatchResponse(parsed)) {
     return {
@@ -254,46 +414,20 @@ export async function dbServiceStudentEditError(
     };
   }
 
-  const error =
-    parsed &&
-    typeof parsed === "object" &&
-    "error" in parsed &&
-    parsed.error &&
-    typeof parsed.error === "object"
-      ? parsed.error as {
-        code?: string;
-        message?: string;
-        fields?: string[];
-        existing_match?: unknown;
-      }
-      : null;
-  const fields = Array.isArray(error?.fields) ? error.fields : [];
-  const existingMatch = safeExistingPhoneMatch(
-    error?.existing_match ??
-      (parsed && typeof parsed === "object" && !Array.isArray(parsed)
-        ? (parsed as Record<string, unknown>).existing_match
-        : undefined),
-  );
+  const details = getStudentEditErrorDetails(parsed);
+  const { error, existingMatch, fields, message: upstreamMessage } = details;
+  const isPhoneDuplicate = isPhoneDuplicateError(error.code, upstreamMessage, fields);
   const message = phoneDuplicateMessage(
-    error?.code,
-    error?.message || "Failed to update student",
+    error.code,
+    upstreamMessage,
     existingMatch,
     schoolCode,
     fields,
   );
-  const fieldErrors = Object.fromEntries(fields.map((field) => [field, message]));
-  if (isPhoneDuplicateError(error?.code, error?.message || "", fields)) {
-    fieldErrors.phone = message;
-  }
 
   return {
     status: response.status,
-    body: {
-      error: message,
-      code: error?.code,
-      field_errors: fieldErrors,
-      ...(existingMatch ? { existing_match: existingMatch } : {}),
-    },
+    body: buildStudentEditErrorBody(error, existingMatch, fields, message, isPhoneDuplicate),
   };
 }
 

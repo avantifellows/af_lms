@@ -12,7 +12,10 @@ import {
 import {
   parseStudentAdditionUpload,
 } from "@/lib/student-addition-bulk";
-import { requireStudentAdditionAccess } from "@/lib/student-addition-access";
+import {
+  requireStudentAdditionAccess,
+  type StudentAdditionSchool,
+} from "@/lib/student-addition-access";
 import {
   validateStudentAdditionInput,
 } from "@/lib/student-addition-fields";
@@ -25,7 +28,6 @@ import {
   STUDENT_ADDITION_TEMPLATE_FILENAMES,
   studentAdditionTemplatePath,
   studentAdditionValidationBody,
-  type StudentAdditionSchool,
 } from "@/lib/student-addition-api";
 
 function isUploadFile(value: FormDataEntryValue | null): value is File {

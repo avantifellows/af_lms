@@ -16,7 +16,211 @@ import {
   hasPhoneCorrectionInput,
   prepareStudentEditFields,
   proxyStudentEdit,
+  type StudentEditProxyAccess,
 } from "@/lib/student-edit-api";
+
+type ParsedStudentEditBody =
+  | { ok: true; body: Record<string, unknown> }
+  | { ok: false; response: NextResponse };
+
+async function parseStudentEditBody(request: NextRequest): Promise<ParsedStudentEditBody> {
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: "Request body must be an object" }, { status: 400 }),
+    };
+  }
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: "Request body must be an object" }, { status: 400 }),
+    };
+  }
+  return { ok: true, body: body as Record<string, unknown> };
+}
+
+function parseStudentEditProgramId(body: Record<string, unknown>) {
+  const rawProgramId = body.program_id;
+  if (typeof rawProgramId === "number") return rawProgramId;
+  if (typeof rawProgramId === "string" && rawProgramId.trim() !== "") {
+    return Number(rawProgramId);
+  }
+  return null;
+}
+
+type StrictPhoneAccessResult =
+  | { ok: true; access: StudentEditProxyAccess }
+  | { ok: false; status: 401 | 403; error: string };
+
+function isPhoneStudentCorrection(
+  facts: Awaited<ReturnType<typeof getPhoneRegistrationStudentFacts>>,
+  body: Record<string, unknown>,
+) {
+  if (!isPhoneRegistrationStudent(facts)) return false;
+  return hasPhoneCorrectionInput(body);
+}
+
+function shouldUseApprovedPhoneBackfill(
+  facts: Awaited<ReturnType<typeof getPhoneRegistrationStudentFacts>>,
+  body: Record<string, unknown>,
+) {
+  if (ACTIVE_REGISTRATION_MODE !== APPROVED_REGISTRATION_MODE) return false;
+  if (!isPhoneRegistrationStudent(facts)) return false;
+  return hasPhoneCohortBackfillInput(body);
+}
+
+async function resolveStrictPhoneWriteAccess({
+  session,
+  studentId,
+  genericAccess,
+  facts,
+  body,
+}: {
+  session: Parameters<typeof requireStudentEditAccess>[0];
+  studentId: string;
+  genericAccess: StudentEditProxyAccess;
+  facts: Awaited<ReturnType<typeof getPhoneRegistrationStudentFacts>>;
+  body: Record<string, unknown>;
+}): Promise<StrictPhoneAccessResult> {
+  const isPhoneCorrection = isPhoneStudentCorrection(facts, body);
+  const isApprovedPhoneBackfill = shouldUseApprovedPhoneBackfill(facts, body);
+  if (!isPhoneCorrection && !isApprovedPhoneBackfill) {
+    return { ok: true, access: genericAccess };
+  }
+
+  const strictAccess = await requireStudentAdditionStudentAccess(session, studentId);
+  if (!strictAccess.ok) return strictAccess;
+  return { ok: true, access: strictAccess };
+}
+
+type StudentEditStageResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; response: NextResponse };
+
+interface StudentEditAuthorisedRequest {
+  body: Record<string, unknown>;
+  access: StudentEditProxyAccess;
+}
+
+async function parseAndAuthoriseStudentEdit(
+  request: NextRequest,
+  id: string,
+  session: Parameters<typeof requireStudentEditAccess>[0],
+): Promise<StudentEditStageResult<StudentEditAuthorisedRequest>> {
+  const parsedBody = await parseStudentEditBody(request);
+  if (!parsedBody.ok) return { ok: false, response: parsedBody.response };
+
+  const body = parsedBody.body;
+  const access = await requireStudentEditAccess(session, id, parseStudentEditProgramId(body));
+  if (!access.ok) {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: access.error }, { status: access.status }),
+    };
+  }
+  return { ok: true, value: { body, access } };
+}
+
+interface StudentEditPhoneContext {
+  facts: Awaited<ReturnType<typeof getPhoneRegistrationStudentFacts>>;
+  writeAccess: StudentEditProxyAccess;
+}
+
+async function loadStudentEditPhoneContext({
+  session,
+  id,
+  body,
+  access,
+}: {
+  session: Parameters<typeof requireStudentEditAccess>[0];
+  id: string;
+  body: Record<string, unknown>;
+  access: StudentEditProxyAccess;
+}): Promise<StudentEditStageResult<StudentEditPhoneContext>> {
+  const facts = await getPhoneRegistrationStudentFacts(id);
+  const writeAccess = await resolveStrictPhoneWriteAccess({
+    session,
+    studentId: id,
+    genericAccess: access,
+    facts,
+    body,
+  });
+  if (!writeAccess.ok) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: writeAccess.error },
+        { status: writeAccess.status },
+      ),
+    };
+  }
+  return { ok: true, value: { facts, writeAccess: writeAccess.access } };
+}
+
+function shouldAllowPhoneBackfill(
+  facts: Awaited<ReturnType<typeof getPhoneRegistrationStudentFacts>>,
+  body: Record<string, unknown>,
+) {
+  if (ACTIVE_REGISTRATION_MODE !== APPROVED_REGISTRATION_MODE) return false;
+  if (!isPhoneRegistrationStudent(facts)) return false;
+  return hasPhoneCohortBackfillInput(body);
+}
+
+function prepareStudentEditRequest({
+  body,
+  facts,
+}: {
+  body: Record<string, unknown>;
+  facts: Awaited<ReturnType<typeof getPhoneRegistrationStudentFacts>>;
+}): StudentEditStageResult<{ fields: Record<string, unknown> }> {
+  const isPhoneStudent = isPhoneRegistrationStudent(facts);
+  const preparation = prepareStudentEditFields({
+    body,
+    facts,
+    isPhoneStudent,
+    allowPhoneBackfill: shouldAllowPhoneBackfill(facts, body),
+  });
+  if (!preparation.ok) {
+    return {
+      ok: false,
+      response: NextResponse.json(preparation.body, { status: preparation.status }),
+    };
+  }
+  return { ok: true, value: { fields: preparation.fields } };
+}
+
+async function handleStudentEditPatch(
+  request: NextRequest,
+  id: string,
+  session: Parameters<typeof requireStudentEditAccess>[0],
+) {
+  const authorised = await parseAndAuthoriseStudentEdit(request, id, session);
+  if (!authorised.ok) return authorised.response;
+
+  const phoneContext = await loadStudentEditPhoneContext({
+    session,
+    id,
+    body: authorised.value.body,
+    access: authorised.value.access,
+  });
+  if (!phoneContext.ok) return phoneContext.response;
+
+  const preparation = prepareStudentEditRequest({
+    body: authorised.value.body,
+    facts: phoneContext.value.facts,
+  });
+  if (!preparation.ok) return preparation.response;
+
+  const response = await proxyStudentEdit({
+    id,
+    access: phoneContext.value.writeAccess,
+    fields: preparation.value.fields,
+  });
+  return NextResponse.json(response.body, { status: response.status });
+}
 
 export async function PATCH(
   request: NextRequest,
@@ -38,72 +242,7 @@ export async function PATCH(
   }
 
   try {
-    // Authorization runs before anything else that could leak state (DB-service
-    // config, body-shape validation); the body must still be parsed first
-    // because the program being edited under comes from it.
-    let body: unknown;
-    try {
-      body = await request.json();
-    } catch {
-      return NextResponse.json({ error: "Request body must be an object" }, { status: 400 });
-    }
-    if (!body || typeof body !== "object" || Array.isArray(body)) {
-      return NextResponse.json({ error: "Request body must be an object" }, { status: 400 });
-    }
-    const bodyObject = body as Record<string, unknown>;
-
-    // The client sends the program the student is being edited under (the
-    // enrollment view's selected program). Access is authorized against that
-    // program; db-service also verifies the student is currently enrolled in it.
-    const rawProgramId = bodyObject.program_id;
-    const programId =
-      typeof rawProgramId === "number"
-        ? rawProgramId
-        : typeof rawProgramId === "string" && rawProgramId.trim() !== ""
-          ? Number(rawProgramId)
-          : null;
-
-    const access = await requireStudentEditAccess(session, id, programId);
-    if (!access.ok) {
-      return NextResponse.json({ error: access.error }, { status: access.status });
-    }
-
-    const phoneRegistrationFacts = await getPhoneRegistrationStudentFacts(id);
-    const isPhoneStudent = isPhoneRegistrationStudent(phoneRegistrationFacts);
-    const isPhoneCorrection = isPhoneStudent && hasPhoneCorrectionInput(bodyObject);
-    const isApprovedPhoneBackfill =
-      ACTIVE_REGISTRATION_MODE === APPROVED_REGISTRATION_MODE &&
-      isPhoneStudent &&
-      hasPhoneCohortBackfillInput(bodyObject);
-
-    let writeAccess = access;
-    if (isPhoneCorrection || isApprovedPhoneBackfill) {
-      const correctionAccess = await requireStudentAdditionStudentAccess(session, id);
-      if (!correctionAccess.ok) {
-        return NextResponse.json(
-          { error: correctionAccess.error },
-          { status: correctionAccess.status },
-        );
-      }
-      writeAccess = correctionAccess;
-    }
-
-    const preparation = prepareStudentEditFields({
-      body: bodyObject,
-      facts: phoneRegistrationFacts,
-      isPhoneStudent,
-      allowPhoneBackfill: isApprovedPhoneBackfill,
-    });
-    if (!preparation.ok) {
-      return NextResponse.json(preparation.body, { status: preparation.status });
-    }
-
-    const response = await proxyStudentEdit({
-      id,
-      access: writeAccess,
-      fields: preparation.fields,
-    });
-    return NextResponse.json(response.body, { status: response.status });
+    return await handleStudentEditPatch(request, id, session);
   } catch (error) {
     console.error("Error updating student:", error);
     return NextResponse.json(

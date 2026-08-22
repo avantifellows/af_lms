@@ -14,14 +14,8 @@ import {
   type LmsStudentAdditionRow,
   type StudentAdditionValidationResult,
 } from "@/lib/student-addition-fields";
+import type { StudentAdditionSchool } from "@/lib/student-addition-access";
 import type { StudentAdditionUploadRowResult } from "@/lib/student-addition-bulk";
-
-export interface StudentAdditionSchool {
-  code: string;
-  udise_code: string | null;
-  region: string | null;
-  af_school_category: string | null;
-}
 
 export interface StudentAdditionActor {
   user_id: number | null;
@@ -41,7 +35,7 @@ export type StudentAdditionResultStatus =
   | "already_exists"
   | "rejected";
 
-export interface StudentAdditionServiceResult {
+interface StudentAdditionServiceResult {
   row_number: number;
   status: StudentAdditionResultStatus;
   original?: Record<string, string>;
@@ -52,7 +46,7 @@ export interface StudentAdditionProxyResult {
   body: Record<string, unknown>;
 }
 
-export const EMPTY_STUDENT_ADDITION_TOTALS = {
+const EMPTY_STUDENT_ADDITION_TOTALS = {
   total: 0,
   created: 0,
   duplicate_in_file: 0,
@@ -107,7 +101,7 @@ function safePhoneResultFields(value: unknown, mode: RegistrationMode) {
   );
 }
 
-export function safeStudentAdditionServiceResults(
+function safeStudentAdditionServiceResults(
   value: unknown,
   mode: RegistrationMode = ACTIVE_REGISTRATION_MODE,
 ) {

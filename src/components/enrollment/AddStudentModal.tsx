@@ -16,8 +16,11 @@ import {
   STREAM_OPTIONS,
   STUDENT_DOB_MAX,
   STUDENT_DOB_MIN,
+  digitsOnly,
   formatStudentAdditionExistingMatch,
   getStudentAdditionUploadColumns,
+  lettersAndSpacesOnly,
+  rollCharactersOnly,
   validateStudentAdditionInput,
   type StudentAdditionInput,
 } from "@/lib/student-addition-fields";
@@ -56,18 +59,6 @@ const initialForm: Record<keyof StudentAdditionInput, string> = {
 };
 
 const labelClassName = "block text-sm font-medium text-text-secondary";
-
-function digitsOnly(value: string) {
-  return value.replace(/\D+/g, "");
-}
-
-function lettersAndSpacesOnly(value: string) {
-  return value.replace(/[^A-Za-z ]+/g, "");
-}
-
-function rollCharactersOnly(value: string) {
-  return value.replace(/[^A-Za-z0-9]+/g, "").toUpperCase();
-}
 
 function fieldsForRegistrationMode(
   form: Record<keyof StudentAdditionInput, string>,
