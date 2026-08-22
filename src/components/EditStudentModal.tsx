@@ -11,7 +11,10 @@ import {
   CBSE_BOARD,
   CATEGORY_OPTIONS,
   G10_BOARD_OPTIONS,
+  digitsOnly,
   isValidRegistrationPhone,
+  lettersAndSpacesOnly,
+  rollCharactersOnly,
   STUDENT_ADDITION_GENDER_OPTIONS,
   STUDENT_DOB_MAX,
   STUDENT_DOB_MIN,
@@ -129,18 +132,6 @@ const inputClassName =
 const labelClassName = "block text-sm font-medium text-text-secondary";
 const sectionHeadingClassName = "mb-4 text-sm font-semibold text-text-primary";
 const errorClassName = "mt-1 text-xs text-danger";
-
-function digitsOnly(value: string) {
-  return value.replace(/\D+/g, "");
-}
-
-function lettersAndSpacesOnly(value: string) {
-  return value.replace(/[^A-Za-z ]+/g, "");
-}
-
-function rollCharactersOnly(value: string) {
-  return value.replace(/[^A-Za-z0-9]+/g, "").toUpperCase();
-}
 
 // fallow-ignore-next-line complexity
 export default function EditStudentModal({

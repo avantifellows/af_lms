@@ -304,6 +304,104 @@ describe("PATCH /api/student/[id] in Phone Registration Mode", () => {
     });
   });
 
+  it("uses a top-level existing_match when DB Service does not nest it under error", async () => {
+    mockFetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          error: {
+            code: "phone_student_id_conflict",
+            message: "Phone Student ID is already in use",
+            fields: ["phone"],
+          },
+          existing_match: {
+            student_id: "6876543210",
+            school_code: "JNV001",
+            school_name: "Existing JNV",
+            secret_field: "must not be exposed",
+          },
+        }),
+        { status: 409 },
+      ),
+    );
+
+    const response = await PATCH(
+      jsonRequest("http://localhost/api/student/100", {
+        method: "PATCH",
+        body: { program_id: 64, phone: "6876543210" },
+      }) as never,
+      params,
+    );
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: "This phone number is already linked to a Student in this school.",
+      code: "phone_student_id_conflict",
+      field_errors: {
+        phone: "This phone number is already linked to a Student in this school.",
+      },
+      existing_match: {
+        student_id: "6876543210",
+        school_code: "JNV001",
+        school_name: "Existing JNV",
+      },
+    });
+  });
+
+  it("keeps the upstream message when duplicate scope is unknown", async () => {
+    mockFetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          error: {
+            code: "phone_student_id_conflict",
+            message: "Phone Student ID is already in use",
+            fields: ["phone"],
+          },
+          existing_match: {
+            student_id: "6876543210",
+          },
+        }),
+        { status: 409 },
+      ),
+    );
+
+    const response = await PATCH(
+      jsonRequest("http://localhost/api/student/100", {
+        method: "PATCH",
+        body: { program_id: 64, phone: "6876543210" },
+      }) as never,
+      params,
+    );
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: "Phone Student ID is already in use",
+      code: "phone_student_id_conflict",
+      field_errors: { phone: "Phone Student ID is already in use" },
+      existing_match: { student_id: "6876543210" },
+    });
+  });
+
+  it.each([
+    ["malformed JSON", "{not json"],
+    ["non-object JSON", JSON.stringify(["not", "an", "error"])],
+  ])("uses the safe fallback for %s from DB Service", async (_label, upstreamBody) => {
+    mockFetch.mockResolvedValueOnce(new Response(upstreamBody, { status: 502 }));
+
+    const response = await PATCH(
+      jsonRequest("http://localhost/api/student/100", {
+        method: "PATCH",
+        body: { program_id: 64, phone: "6876543210" },
+      }) as never,
+      params,
+    );
+
+    expect(response.status).toBe(502);
+    expect(await response.json()).toEqual({
+      error: "Failed to update student",
+      field_errors: {},
+    });
+  });
+
   it("allows the same phone Student ID in another auth group", async () => {
     mockFetch.mockResolvedValueOnce(
       new Response(JSON.stringify({ status: "updated" }), { status: 200 }),

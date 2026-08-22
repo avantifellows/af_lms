@@ -108,7 +108,7 @@ export type StudentAdditionUploadColumn = {
   key: keyof StudentAdditionInput;
 };
 
-export const APPROVED_STUDENT_ADDITION_UPLOAD_COLUMNS: ReadonlyArray<StudentAdditionUploadColumn> = [
+const APPROVED_STUDENT_ADDITION_UPLOAD_COLUMNS: ReadonlyArray<StudentAdditionUploadColumn> = [
   { label: "Grade", key: "grade" },
   { label: "Student Name", key: "student_name" },
   { label: "Date of Birth", key: "date_of_birth" },
@@ -125,7 +125,7 @@ export const APPROVED_STUDENT_ADDITION_UPLOAD_COLUMNS: ReadonlyArray<StudentAddi
   { label: "Yearly / Annual Family Income", key: "annual_family_income" },
 ] as const;
 
-export const PHONE_STUDENT_ADDITION_UPLOAD_COLUMNS: ReadonlyArray<StudentAdditionUploadColumn> = [
+const PHONE_STUDENT_ADDITION_UPLOAD_COLUMNS: ReadonlyArray<StudentAdditionUploadColumn> = [
   { label: "Grade", key: "grade" },
   { label: "Student Name", key: "student_name" },
   { label: "Date of Birth", key: "date_of_birth" },
@@ -187,14 +187,22 @@ export function getStudentAdditionRejectedRowMetadataColumns(
     : APPROVED_REJECTED_ROW_METADATA_COLUMNS;
 }
 
-// Backwards-compatible Approved-mode export. Later mode-specific UI/parser
-// slices should call getStudentAdditionUploadColumns(mode) explicitly.
-export const STUDENT_ADDITION_UPLOAD_COLUMNS = APPROVED_STUDENT_ADDITION_UPLOAD_COLUMNS;
-
 function uploadFieldLabels(mode: RegistrationMode) {
   return new Map(
     getStudentAdditionUploadColumns(mode).map((column) => [column.key, column.label]),
   );
+}
+
+export function digitsOnly(value: string) {
+  return value.replace(/\D+/g, "");
+}
+
+export function lettersAndSpacesOnly(value: string) {
+  return value.replace(/[^A-Za-z ]+/g, "");
+}
+
+export function rollCharactersOnly(value: string) {
+  return value.replace(/[^A-Za-z0-9]+/g, "").toUpperCase();
 }
 
 export interface StudentAdditionCsvResult {

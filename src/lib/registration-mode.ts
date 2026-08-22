@@ -11,7 +11,7 @@ export type RegistrationMode =
  * user-selectable.
  */
 export const ACTIVE_REGISTRATION_MODE: RegistrationMode = PHONE_REGISTRATION_MODE;
-export const REGISTRATION_MODE_VERSION = "1" as const;
+const REGISTRATION_MODE_VERSION = "1" as const;
 
 export interface RegistrationModeContract {
   mode: RegistrationMode;
@@ -44,7 +44,7 @@ export function getRegistrationModeHandshake(
  * mismatch. AF LMS treats it as a 503 and never merges upstream row results:
  * { error: { code: "registration_mode_mismatch", message: string } }
  */
-export const REGISTRATION_MODE_MISMATCH_CODE = "registration_mode_mismatch" as const;
+const REGISTRATION_MODE_MISMATCH_CODE = "registration_mode_mismatch" as const;
 export const REGISTRATION_MODE_MISMATCH_MESSAGE =
   "Student registration is temporarily unavailable while Registration Mode is being coordinated. Please try again shortly.";
 
