@@ -201,6 +201,61 @@ describe("AddStudentModal", () => {
     expect(baseProps.onCreated).not.toHaveBeenCalled();
   });
 
+  it("shows rejected existing-school context and redacts restricted Phone-mode identities", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          totals: { total: 1, created: 0, duplicate_in_file: 0, already_exists: 0, rejected: 1 },
+          results: [
+            {
+              status: "rejected",
+              row_errors: ["Student already belongs to another school"],
+              existing_match: {
+                student_id: "6876543210",
+                pen_number: "12345678901",
+                apaar_id: "123456789012",
+                student_name: "Asha Kumar",
+                school_name: "JNV Other",
+                school_code: "JNV999",
+                udise_code: "99999999999",
+                district: "Jaipur",
+                state: "Rajasthan",
+                grade: 11,
+                program: "JNV NVS",
+                stream: "engineering",
+              },
+            },
+          ],
+        }),
+        { status: 400 },
+      ),
+    );
+    render(<AddStudentModal {...baseProps} registrationMode={PHONE_REGISTRATION_MODE} />);
+    const user = userEvent.setup();
+
+    await user.selectOptions(screen.getByLabelText("Grade"), "11");
+    await user.type(screen.getByLabelText("Student Name"), "asha k kumar");
+    await user.type(screen.getByLabelText("Date of Birth"), "2010-01-02");
+    await user.selectOptions(screen.getByLabelText("Gender"), "Female");
+    await user.selectOptions(screen.getByLabelText("Category"), "Gen");
+    await user.selectOptions(screen.getByLabelText("CWSN"), "No");
+    await user.selectOptions(screen.getByLabelText("G10 board"), "Others");
+    await user.selectOptions(screen.getByLabelText("Board Stream"), "PCM");
+    await user.selectOptions(screen.getByLabelText("Primary Exam preparing for"), "Engineering");
+    await user.type(screen.getByLabelText("Father Name"), "ravi kumar");
+    await user.type(screen.getByLabelText("Parents Phone Number"), "6876543210");
+    await user.click(screen.getByRole("button", { name: "Add Student" }));
+
+    expect(
+      await screen.findByText(
+        /This identifier already belongs to Asha Kumar at JNV Other \(JNV999, UDISE 99999999999\), Jaipur, Rajasthan/,
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Student already belongs to another school")).not.toBeInTheDocument();
+    expect(screen.queryByText(/12345678901/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/123456789012/)).not.toBeInTheDocument();
+  });
+
   it("shows safe upstream field errors", async () => {
     const scrollTo = vi.fn();
     Object.defineProperty(HTMLElement.prototype, "scrollTo", {

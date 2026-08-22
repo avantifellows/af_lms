@@ -236,6 +236,56 @@ describe("BulkStudentUploadModal", () => {
     );
   });
 
+  it("shows rejected existing-school context and redacts restricted Phone-mode identities", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          totals: { total: 1, created: 0, duplicate_in_file: 0, already_exists: 0, rejected: 1 },
+          results: [
+            {
+              row_number: 2,
+              status: "rejected",
+              original: { Grade: "11", "Student Name": "Asha Kumar", "Parents Phone Number": "6876543210" },
+              row_errors: ["Student already belongs to another school"],
+              existing_match: {
+                student_id: "6876543210",
+                pen_number: "12345678901",
+                apaar_id: "123456789012",
+                student_name: "Asha Kumar",
+                school_name: "JNV Other",
+                school_code: "JNV999",
+                udise_code: "99999999999",
+                district: "Jaipur",
+                state: "Rajasthan",
+                grade: 11,
+                program: "JNV NVS",
+                stream: "engineering",
+              },
+            },
+          ],
+        }),
+        { status: 400 },
+      ),
+    );
+    const user = userEvent.setup();
+    render(<BulkStudentUploadModal {...baseProps} registrationMode={PHONE_REGISTRATION_MODE} />);
+
+    await user.upload(
+      screen.getByLabelText("Student upload file"),
+      new File(["fake"], "students.csv", { type: "text/csv" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Upload students" }));
+
+    expect(
+      await screen.findByText(
+        /This identifier already belongs to Asha Kumar at JNV Other \(JNV999, UDISE 99999999999\), Jaipur, Rajasthan/,
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Student already belongs to another school")).not.toBeInTheDocument();
+    expect(screen.queryByText(/12345678901/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/123456789012/)).not.toBeInTheDocument();
+  });
+
   it("does not repeat an upload when its response times out", async () => {
     vi.mocked(fetch).mockResolvedValue(new Response("Gateway timeout", { status: 504 }));
     const user = userEvent.setup();

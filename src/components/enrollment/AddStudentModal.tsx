@@ -367,12 +367,16 @@ export default function AddStudentModal({
       const body = await response.json();
       const result = body.results?.[0];
       if (result?.status === "already_exists") {
-        setError(formatStudentAdditionExistingMatch(result.existing_match, schoolCode));
+        setError(formatStudentAdditionExistingMatch(result.existing_match, schoolCode, registrationMode));
         return;
       }
       if (result?.status === "rejected") {
         const fieldErrors = result.field_errors ?? {};
         setServiceFieldErrors(fieldErrors);
+        if (result.existing_match) {
+          setError(formatStudentAdditionExistingMatch(result.existing_match, schoolCode, registrationMode));
+          return;
+        }
         setError([...(result.row_errors ?? []), ...Object.values(fieldErrors)][0] || "Student was rejected");
         return;
       }

@@ -60,6 +60,11 @@ function rowIssues(
   schoolCode: string,
   registrationMode: RegistrationMode,
 ): string {
+  const existingMatch = result.existing_match
+    ? formatStudentAdditionExistingMatch(result.existing_match, schoolCode, registrationMode)
+    : "";
+  if (result.status === "rejected" && existingMatch) return existingMatch;
+
   const issues = [
     ...Object.values(result.field_errors ?? {}),
     ...(result.row_errors ?? []),
@@ -68,9 +73,7 @@ function rowIssues(
     (result.status === "duplicate_in_file"
       ? formatStudentAdditionDuplicateInFile(result.duplicate_identifiers)
       : "") ||
-    (result.existing_match
-      ? formatStudentAdditionExistingMatch(result.existing_match, schoolCode, registrationMode)
-      : "");
+    existingMatch;
 }
 
 // fallow-ignore-next-line complexity
