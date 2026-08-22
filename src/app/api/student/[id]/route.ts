@@ -1,183 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { getDbServiceConfig } from "@/lib/db-service-config";
-import { deriveLmsEnrollmentPeriod } from "@/lib/lms-enrollment-date";
 import {
   getPhoneRegistrationStudentFacts,
   isPhoneRegistrationStudent,
   requireStudentAdditionStudentAccess,
   requireStudentEditAccess,
-  type PhoneRegistrationStudentFacts,
 } from "@/lib/student-addition-access";
-import { canonicalizeStudentEditPayload } from "@/lib/student-addition-fields";
 import {
   ACTIVE_REGISTRATION_MODE,
   APPROVED_REGISTRATION_MODE,
-  getRegistrationModeHandshake,
-  isRegistrationModeMismatchResponse,
-  PHONE_REGISTRATION_MODE,
-  REGISTRATION_MODE_MISMATCH_MESSAGE,
 } from "@/lib/registration-mode";
-
-const PHONE_MODE_RESTRICTED_EDIT_FIELDS = {
-  pen_number: "PEN Number is not accepted in Phone Registration Mode",
-  g10_roll_no: "Grade 10 Roll no is not accepted in Phone Registration Mode",
-  annual_family_income: "Annual Family Income is not accepted in Phone Registration Mode",
-} as const;
-
-const PHONE_COHORT_BACKFILL_FIELDS = [
-  "pen_number",
-  "g10_roll_no",
-  "annual_family_income",
-] as const;
-
-const PHONE_BACKFILL_REQUIRED_ERROR =
-  "PEN or Grade 10 Roll no is required for phone-cohort backfill";
-
-function hasOwnField(body: Record<string, unknown>, field: string) {
-  return Object.prototype.hasOwnProperty.call(body, field);
-}
-
-function hasValue(value: unknown): value is string {
-  return typeof value === "string" && value.trim() !== "";
-}
-
-function hasPhoneCohortBackfillInput(body: Record<string, unknown>) {
-  return PHONE_COHORT_BACKFILL_FIELDS.some((field) => hasOwnField(body, field));
-}
-
-function backfillLockError(
-  facts: PhoneRegistrationStudentFacts,
-  body: Record<string, unknown>,
-) {
-  const fieldErrors: Record<string, string> = {};
-  if (hasOwnField(body, "pen_number") && hasValue(facts.pen_number)) {
-    fieldErrors.pen_number = "PEN can only be filled once and is already set";
-  }
-  if (hasOwnField(body, "g10_roll_no") && hasValue(facts.g10_roll_no)) {
-    fieldErrors.g10_roll_no = "Grade 10 Roll no can only be filled once and is already set";
-  }
-  return fieldErrors;
-}
-
-function phoneModeRestrictedFieldErrors(body: Record<string, unknown>) {
-  return Object.fromEntries(
-    Object.entries(PHONE_MODE_RESTRICTED_EDIT_FIELDS)
-      .filter(([field]) => Object.prototype.hasOwnProperty.call(body, field)),
-  );
-}
-
-function safeExistingPhoneMatch(value: unknown) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-  const match = value as Record<string, unknown>;
-  const safe = Object.fromEntries(
-    ["student_id", "school_code", "school_name", "udise_code", "district", "state"]
-      .filter((key) => key in match)
-      .map((key) => [key, match[key]]),
-  );
-  return Object.keys(safe).length > 0 ? safe : undefined;
-}
-
-function phoneDuplicateMessage(
-  code: string | undefined,
-  message: string,
-  existingMatch: Record<string, unknown> | undefined,
-  schoolCode: string | undefined,
-  fields: string[],
-) {
-  const normalizedCode = (code ?? "").toLowerCase();
-  const isPhoneDuplicate = isPhoneDuplicateError(code, message, fields);
-  if (!isPhoneDuplicate) return message;
-
-  const existingSchoolCode = typeof existingMatch?.school_code === "string"
-    ? existingMatch.school_code
-    : undefined;
-  const sameSchool =
-    (existingSchoolCode && schoolCode && existingSchoolCode === schoolCode) ||
-    /same.?school/.test(normalizedCode);
-  if (sameSchool) {
-    return "This phone number is already linked to a Student in this school.";
-  }
-
-  const otherSchool =
-    (existingSchoolCode && schoolCode && existingSchoolCode !== schoolCode) ||
-    /other.?school|different.?school|school.?conflict/.test(normalizedCode);
-  if (otherSchool) {
-    return "This phone number is already linked to a Student in another school and cannot be transferred.";
-  }
-
-  return message;
-}
-
-function isPhoneDuplicateError(
-  code: string | undefined,
-  message: string,
-  fields: string[],
-) {
-  const searchable = `${code ?? ""} ${message}`.toLowerCase();
-  return (
-    fields.includes("phone") || /(phone|student.?id)/.test(searchable)
-  ) && /(already|duplicate|conflict|exists|unique|use)/.test(searchable);
-}
-
-// fallow-ignore-next-line complexity
-async function dbServiceError(response: Response, schoolCode?: string) {
-  const text = await response.text();
-  let parsed: unknown = null;
-  try {
-    parsed = text ? JSON.parse(text) : null;
-  } catch {
-    parsed = null;
-  }
-
-  if (isRegistrationModeMismatchResponse(parsed)) {
-    return NextResponse.json(
-      { error: REGISTRATION_MODE_MISMATCH_MESSAGE },
-      { status: 503 },
-    );
-  }
-
-  const error =
-    parsed &&
-    typeof parsed === "object" &&
-    "error" in parsed &&
-    parsed.error &&
-    typeof parsed.error === "object"
-      ? parsed.error as {
-        code?: string;
-        message?: string;
-        fields?: string[];
-        existing_match?: unknown;
-      }
-      : null;
-  const fields = Array.isArray(error?.fields) ? error.fields : [];
-  const existingMatch = safeExistingPhoneMatch(error?.existing_match ??
-    (parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>).existing_match
-      : undefined));
-  const message = phoneDuplicateMessage(
-    error?.code,
-    error?.message || "Failed to update student",
-    existingMatch,
-    schoolCode,
-    fields,
-  );
-  const fieldErrors = Object.fromEntries(fields.map((field) => [field, message]));
-  if (isPhoneDuplicateError(error?.code, error?.message || "", fields)) {
-    fieldErrors.phone = message;
-  }
-
-  return NextResponse.json(
-    {
-      error: message,
-      code: error?.code,
-      field_errors: fieldErrors,
-      ...(existingMatch ? { existing_match: existingMatch } : {}),
-    },
-    { status: response.status },
-  );
-}
+import {
+  hasPhoneCohortBackfillInput,
+  hasPhoneCorrectionInput,
+  prepareStudentEditFields,
+  proxyStudentEdit,
+} from "@/lib/student-edit-api";
 
 export async function PATCH(
   request: NextRequest,
@@ -231,7 +70,7 @@ export async function PATCH(
 
     const phoneRegistrationFacts = await getPhoneRegistrationStudentFacts(id);
     const isPhoneStudent = isPhoneRegistrationStudent(phoneRegistrationFacts);
-    const isPhoneCorrection = isPhoneStudent && hasOwnField(bodyObject, "phone");
+    const isPhoneCorrection = isPhoneStudent && hasPhoneCorrectionInput(bodyObject);
     const isApprovedPhoneBackfill =
       ACTIVE_REGISTRATION_MODE === APPROVED_REGISTRATION_MODE &&
       isPhoneStudent &&
@@ -249,103 +88,22 @@ export async function PATCH(
       writeAccess = correctionAccess;
     }
 
-    if (ACTIVE_REGISTRATION_MODE === PHONE_REGISTRATION_MODE && isPhoneStudent) {
-      const restrictedFieldErrors = phoneModeRestrictedFieldErrors(bodyObject);
-      if (Object.keys(restrictedFieldErrors).length > 0) {
-        return NextResponse.json(
-          {
-            ok: false,
-            error: "Restricted fields are not accepted for Phone Registration Mode Students",
-            field_errors: restrictedFieldErrors,
-          },
-          { status: 422 },
-        );
-      }
-    }
-
-    if (isApprovedPhoneBackfill) {
-      const lockErrors = backfillLockError(phoneRegistrationFacts, bodyObject);
-      if (Object.keys(lockErrors).length > 0) {
-        const firstError = Object.values(lockErrors)[0];
-        return NextResponse.json(
-          { ok: false, error: firstError, field_errors: lockErrors },
-          { status: 422 },
-        );
-      }
-
-      const hasExistingIdentifier =
-        hasValue(phoneRegistrationFacts.pen_number) ||
-        hasValue(phoneRegistrationFacts.g10_roll_no);
-      const hasSubmittedIdentifier =
-        hasValue(bodyObject.pen_number) || hasValue(bodyObject.g10_roll_no);
-      if (!hasExistingIdentifier && !hasSubmittedIdentifier) {
-        return NextResponse.json(
-          {
-            ok: false,
-            error: PHONE_BACKFILL_REQUIRED_ERROR,
-            field_errors: {
-              pen_number: PHONE_BACKFILL_REQUIRED_ERROR,
-              g10_roll_no: PHONE_BACKFILL_REQUIRED_ERROR,
-            },
-          },
-          { status: 422 },
-        );
-      }
-    }
-
-    const dbService = getDbServiceConfig();
-    if (!dbService) {
-      return NextResponse.json({ error: "DB Service is not configured" }, { status: 500 });
-    }
-
-    const canonicalInput = { ...bodyObject };
-    const shouldUseExistingBoard =
-      isApprovedPhoneBackfill &&
-      hasOwnField(bodyObject, "g10_roll_no") &&
-      !hasOwnField(bodyObject, "g10_board") &&
-      phoneRegistrationFacts.g10_board;
-    if (shouldUseExistingBoard) canonicalInput.g10_board = phoneRegistrationFacts.g10_board;
-
-    const canonical = canonicalizeStudentEditPayload(canonicalInput, {
-      mode: isPhoneStudent ? PHONE_REGISTRATION_MODE : APPROVED_REGISTRATION_MODE,
+    const preparation = prepareStudentEditFields({
+      body: bodyObject,
+      facts: phoneRegistrationFacts,
+      isPhoneStudent,
       allowPhoneBackfill: isApprovedPhoneBackfill,
     });
-    if (!canonical.ok) {
-      return NextResponse.json(canonical, { status: 422 });
-    }
-    const { fields } = canonical;
-    if (isApprovedPhoneBackfill && !hasOwnField(bodyObject, "g10_board")) {
-      delete fields.g10_board;
-    }
-    if (isApprovedPhoneBackfill) {
-      if (!hasValue(fields.pen_number)) delete fields.pen_number;
-      if (!hasValue(fields.g10_roll_no)) delete fields.g10_roll_no;
-    }
-    if (Object.keys(fields).length === 0) {
-      return NextResponse.json({ error: "No editable fields provided" }, { status: 400 });
+    if (!preparation.ok) {
+      return NextResponse.json(preparation.body, { status: preparation.status });
     }
 
-    const response = await fetch(
-      `${dbService.baseUrl}/lms/students/${id}/update-with-enrollments`,
-      {
-        method: "PATCH",
-        headers: dbService.headers,
-        body: JSON.stringify({
-          actor: writeAccess.actor,
-          school: writeAccess.school,
-          program_id: writeAccess.programId,
-          ...deriveLmsEnrollmentPeriod(),
-          ...getRegistrationModeHandshake(),
-          ...fields,
-        }),
-      },
-    );
-
-    if (!response.ok) {
-      return dbServiceError(response, writeAccess.school.code);
-    }
-
-    return NextResponse.json(await response.json());
+    const response = await proxyStudentEdit({
+      id,
+      access: writeAccess,
+      fields: preparation.fields,
+    });
+    return NextResponse.json(response.body, { status: response.status });
   } catch (error) {
     console.error("Error updating student:", error);
     return NextResponse.json(
