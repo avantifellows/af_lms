@@ -16,11 +16,20 @@ import {
   STREAM_OPTIONS,
   STUDENT_DOB_MAX,
   STUDENT_DOB_MIN,
+  digitsOnly,
   formatStudentAdditionExistingMatch,
+  getStudentAdditionUploadColumns,
+  lettersAndSpacesOnly,
+  rollCharactersOnly,
   validateStudentAdditionInput,
   type StudentAdditionInput,
 } from "@/lib/student-addition-fields";
 import { deriveLmsEnrollmentPeriod } from "@/lib/lms-enrollment-date";
+import {
+  ACTIVE_REGISTRATION_MODE,
+  PHONE_REGISTRATION_MODE,
+  type RegistrationMode,
+} from "@/lib/registration-mode";
 
 interface AddStudentModalProps {
   open: boolean;
@@ -28,6 +37,7 @@ interface AddStudentModalProps {
   schoolCode: string;
   onClose: () => void;
   onCreated: (studentId: string | null, penNumber: string | null) => void;
+  registrationMode?: RegistrationMode;
 }
 
 const initialForm: Record<keyof StudentAdditionInput, string> = {
@@ -50,16 +60,13 @@ const initialForm: Record<keyof StudentAdditionInput, string> = {
 
 const labelClassName = "block text-sm font-medium text-text-secondary";
 
-function digitsOnly(value: string) {
-  return value.replace(/\D+/g, "");
-}
-
-function lettersAndSpacesOnly(value: string) {
-  return value.replace(/[^A-Za-z ]+/g, "");
-}
-
-function rollCharactersOnly(value: string) {
-  return value.replace(/[^A-Za-z0-9]+/g, "").toUpperCase();
+function fieldsForRegistrationMode(
+  form: Record<keyof StudentAdditionInput, string>,
+  registrationMode: RegistrationMode,
+): StudentAdditionInput {
+  return Object.fromEntries(
+    getStudentAdditionUploadColumns(registrationMode).map(({ key }) => [key, form[key]]),
+  );
 }
 
 // fallow-ignore-next-line complexity
@@ -69,19 +76,28 @@ export default function AddStudentModal({
   schoolCode,
   onClose,
   onCreated,
+  registrationMode = ACTIVE_REGISTRATION_MODE,
 }: AddStudentModalProps) {
+  const phoneMode = registrationMode === PHONE_REGISTRATION_MODE;
   const [form, setForm] = useState(initialForm);
   const [touched, setTouched] = useState<Partial<Record<keyof StudentAdditionInput, boolean>>>({});
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [serviceFieldErrors, setServiceFieldErrors] = useState<Record<string, string>>({});
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const submittedFields = useMemo(
+    () => registrationMode === PHONE_REGISTRATION_MODE
+      ? fieldsForRegistrationMode(form, registrationMode)
+      : form,
+    [form, registrationMode],
+  );
 
   const validation = useMemo(
-    () => validateStudentAdditionInput(form, {
+    () => validateStudentAdditionInput(submittedFields, {
       academicYear: deriveLmsEnrollmentPeriod().academic_year,
+      mode: registrationMode,
     }),
-    [form],
+    [submittedFields, registrationMode],
   );
   const canSubmit = validation.ok && !submitting;
 
@@ -102,7 +118,10 @@ export default function AddStudentModal({
   const setField = (name: keyof StudentAdditionInput, value: string) => {
     setForm((prev) => {
       const next = { ...prev, [name]: value };
-      if (name === "phone") next.phone = digitsOnly(value).replace(/^0+/, "").slice(0, 10);
+      // Keep the complete digit sequence so validation can reject leading-zero
+      // and overlength phone numbers instead of turning them into another
+      // valid-looking number.
+      if (name === "phone") next.phone = digitsOnly(value);
       if (name === "pen_number") next.pen_number = digitsOnly(value).slice(0, 11);
       if (name === "father_name") next.father_name = lettersAndSpacesOnly(value);
       if (name === "g10_roll_no") {
@@ -132,8 +151,9 @@ export default function AddStudentModal({
   const fieldError = (name: keyof StudentAdditionInput) =>
     serviceFieldErrors[name] ?? (touched[name] ? validation.fieldErrors[name] : undefined);
 
-  const identityError =
-    touched.pen_number || touched.g10_roll_no ? validation.rowErrors[0] : undefined;
+  const identityError = !phoneMode && (touched.pen_number || touched.g10_roll_no)
+    ? validation.rowErrors[0]
+    : undefined;
 
   const errorClassName = "border-danger focus:border-danger focus:ring-danger/20";
   const renderLabel = (label: string, required = false) => (
@@ -305,6 +325,11 @@ export default function AddStudentModal({
   };
 
   const identityMessage = (() => {
+    if (phoneMode) {
+      return form.phone.trim()
+        ? `Parent phone number will be the Student ID: ${form.phone.trim()}`
+        : "Parent phone number will be the Student ID.";
+    }
     if (validation.generatedStudentId) {
       return `Student ID will be ${validation.generatedStudentId}`;
     }
@@ -328,17 +353,21 @@ export default function AddStudentModal({
       const response = await fetch(`/api/school/${encodeURIComponent(schoolUdise)}/students`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify(submittedFields),
       });
       const body = await response.json();
       const result = body.results?.[0];
       if (result?.status === "already_exists") {
-        setError(formatStudentAdditionExistingMatch(result.existing_match, schoolCode));
+        setError(formatStudentAdditionExistingMatch(result.existing_match, schoolCode, registrationMode));
         return;
       }
       if (result?.status === "rejected") {
         const fieldErrors = result.field_errors ?? {};
         setServiceFieldErrors(fieldErrors);
+        if (result.existing_match) {
+          setError(formatStudentAdditionExistingMatch(result.existing_match, schoolCode, registrationMode));
+          return;
+        }
         setError([...(result.row_errors ?? []), ...Object.values(fieldErrors)][0] || "Student was rejected");
         return;
       }
@@ -403,7 +432,7 @@ export default function AddStudentModal({
               {selectField("gender", "Gender", STUDENT_ADDITION_GENDER_OPTIONS, "Select...", true)}
               {selectField("category", "Category", CATEGORY_OPTIONS, "Select...", true)}
               {selectField("physically_handicapped", "CWSN", ["Yes", "No"], "Select...", true)}
-              {inputField("pen_number", "PEN", "text", "numeric", false, { maxLength: 11 }, true)}
+              {!phoneMode && inputField("pen_number", "PEN", "text", "numeric", false, { maxLength: 11 }, true)}
             </div>
           </FormSection>
 
@@ -412,7 +441,7 @@ export default function AddStudentModal({
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               {g10BoardField()}
               <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_minmax(220px,0.8fr)]">
-                {g10RollField()}
+                {!phoneMode && g10RollField()}
                 <div className="rounded-md border border-accent/30 bg-accent/10 px-3 py-2 text-sm font-medium text-text-primary">
                   {identityMessage}
                 </div>
@@ -437,14 +466,22 @@ export default function AddStudentModal({
             <h3 className="text-sm font-semibold text-text-primary">Family Details</h3>
             <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
               {inputField("father_name", "Father Name")}
-              {inputField("phone", "Parents Phone Number", "text", "tel", true)}
-              {selectField("annual_family_income", "Yearly / Annual Family Income", ANNUAL_FAMILY_INCOME_OPTIONS)}
+              {inputField(
+                "phone",
+                "Parents Phone Number",
+                "text",
+                "tel",
+                true,
+              )}
+              {!phoneMode && selectField("annual_family_income", "Yearly / Annual Family Income", ANNUAL_FAMILY_INCOME_OPTIONS)}
             </div>
           </FormSection>
 
           <p className="text-xs text-text-muted">
-            <span className="text-danger">*</span> Mandatory fields.{" "}
-            <span className="text-accent">#</span> Either PEN or Grade 10 Roll no is compulsory.
+            <span className="text-danger">*</span> Mandatory fields.
+            {!phoneMode && (
+              <>{" "}<span className="text-accent">#</span> Either PEN or Grade 10 Roll no is compulsory.</>
+            )}
           </p>
         </div>
 

@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build && mkdir -p .next/server/assets && cp src/assets/nvs-student-addition-template.xlsx .next/server/assets/",
+    "build": "next build && mkdir -p .next/server/assets && cp src/assets/nvs-student-addition-template.xlsx src/assets/NVS_Lakshya_Data_Template_updated_19th_August_2026.xlsx .next/server/assets/",
     "start": "next start",
     "lint": "eslint",
     "fallow": "fallow",

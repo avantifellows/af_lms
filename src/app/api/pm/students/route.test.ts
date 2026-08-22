@@ -161,7 +161,7 @@ describe("GET /api/pm/students", () => {
     const rosterCall = mockQuery.mock.calls[2];
     expect(rosterCall[0]).toContain("g.type = 'school' AND g.child_id = $1");
     expect(rosterCall[0]).toContain("er_grade.academic_year = $2");
-    expect(rosterCall[1]).toEqual([10, CURRENT_ACADEMIC_YEAR]);
+    expect(rosterCall[1]).toEqual([10, CURRENT_ACADEMIC_YEAR, 64]);
   });
 
   it("filters to the requested grade in JS with roster semantics", async () => {

@@ -17,6 +17,17 @@ vi.mock("@/lib/db", () => ({ query: mockQuery }));
 vi.mock("@/lib/student-addition-access", () => ({
   requireStudentAdditionAccess: mockRequireStudentAdditionAccess,
 }));
+vi.mock("@/lib/registration-mode", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/registration-mode")>(
+    "@/lib/registration-mode",
+  );
+  return {
+    ...actual,
+    ACTIVE_REGISTRATION_MODE: actual.APPROVED_REGISTRATION_MODE,
+    getRegistrationModeHandshake: () =>
+      actual.getRegistrationModeHandshake(actual.APPROVED_REGISTRATION_MODE),
+  };
+});
 
 import { GET, POST } from "./route";
 import { PROGRAM_IDS } from "@/lib/constants";
@@ -177,6 +188,8 @@ describe("POST /api/school/[udise]/students", () => {
       },
       school: { code: "JNV001", udise_code: "12345678901" },
       program_id: PROGRAM_IDS.NVS,
+      registration_mode: "approved",
+      registration_mode_version: "1",
       academic_year: "2026-2027",
       start_date: "2026-07-01",
       rows: [
@@ -304,6 +317,35 @@ describe("POST /api/school/[udise]/students", () => {
     expect(await response.json()).toEqual({
       error: "Student could not be created",
     });
+  });
+
+  it("fails closed when DB Service reports a registration mode mismatch", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: {
+            code: "registration_mode_mismatch",
+            message: "LMS and DB Service registration modes differ",
+          },
+          results: [{ row_number: 1, status: "created" }],
+        }),
+        { status: 409, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const response = await POST(
+      jsonRequest("http://localhost/api/school/12345678901/students", {
+        method: "POST",
+        body: validBody,
+      }) as never,
+      routeParams({ udise: "12345678901" }),
+    );
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: "Student registration is temporarily unavailable while Registration Mode is being coordinated. Please try again shortly.",
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 
   it("preserves safe structured DB Service field errors", async () => {
@@ -440,6 +482,8 @@ describe("POST /api/school/[udise]/students", () => {
 
     const payload = JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string);
     expect(payload.upload.filename).toBe("students.csv");
+    expect(payload.registration_mode).toBe("approved");
+    expect(payload.registration_mode_version).toBe("1");
     expect(payload.academic_year).toBe("2026-2027");
     expect(payload.rows).toEqual([
       expect.objectContaining({

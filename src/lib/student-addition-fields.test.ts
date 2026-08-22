@@ -4,11 +4,77 @@ import {
   CBSE_BOARD,
   canonicalizeStudentEditPayload,
   formatStudentAdditionExistingMatch,
+  getStudentAdditionUploadColumns,
   generateStudentId,
+  isValidRegistrationPhone,
   validateStudentAdditionInput,
 } from "./student-addition-fields";
+import {
+  ACTIVE_REGISTRATION_MODE,
+  APPROVED_REGISTRATION_MODE,
+  PHONE_REGISTRATION_MODE,
+  getRegistrationModeContract,
+} from "./registration-mode";
+
+describe("Registration Mode contract", () => {
+  it("selects Phone as active and resolves the exact mode-specific field lists", () => {
+    expect(ACTIVE_REGISTRATION_MODE).toBe(PHONE_REGISTRATION_MODE);
+    expect(getRegistrationModeContract(PHONE_REGISTRATION_MODE)).toEqual({
+      mode: "phone",
+      version: "1",
+    });
+    expect(getStudentAdditionUploadColumns(PHONE_REGISTRATION_MODE).map((column) => column.label)).toEqual([
+      "Grade",
+      "Student Name",
+      "Date of Birth",
+      "Gender",
+      "Category",
+      "CWSN",
+      "G10 board",
+      "Board Stream",
+      "Primary Exam preparing for",
+      "Father Name",
+      "Parents Phone Number",
+    ]);
+    expect(getStudentAdditionUploadColumns(APPROVED_REGISTRATION_MODE).map((column) => column.label)).toEqual([
+      "Grade",
+      "Student Name",
+      "Date of Birth",
+      "Gender",
+      "Category",
+      "CWSN",
+      "PEN Number",
+      "G10 board",
+      "Grade 10 Roll no",
+      "Board Stream",
+      "Primary Exam preparing for",
+      "Father Name",
+      "Parents Phone Number",
+      "Yearly / Annual Family Income",
+    ]);
+  });
+});
 
 describe("canonicalizeStudentEditPayload", () => {
+  it("uses the Phone-mode 6–9 predicate when explicitly requested", () => {
+    expect(isValidRegistrationPhone("6876543210", PHONE_REGISTRATION_MODE)).toBe(true);
+    expect(isValidRegistrationPhone("9876543210", PHONE_REGISTRATION_MODE)).toBe(true);
+    expect(isValidRegistrationPhone("5876543210", PHONE_REGISTRATION_MODE)).toBe(false);
+    expect(isValidRegistrationPhone("687654321", PHONE_REGISTRATION_MODE)).toBe(false);
+    expect(isValidRegistrationPhone("68765432101", PHONE_REGISTRATION_MODE)).toBe(false);
+    expect(isValidRegistrationPhone("5876543210", APPROVED_REGISTRATION_MODE)).toBe(true);
+    expect(canonicalizeStudentEditPayload(
+      { phone: "5876543210" },
+      { mode: PHONE_REGISTRATION_MODE },
+    )).toEqual({
+      ok: false,
+      error: "Parents Phone Number must be exactly 10 digits and start with 6-9",
+      field_errors: {
+        phone: "Parents Phone Number must be exactly 10 digits and start with 6-9",
+      },
+    });
+  });
+
   it("normalizes partial edit fields with the canonical student contract", () => {
     expect(canonicalizeStudentEditPayload({
       first_name: "  ravi  KUMAR ",
@@ -68,6 +134,64 @@ const validInput = {
 };
 
 describe("validateStudentAdditionInput", () => {
+  it("accepts the reduced Phone-mode fields and derives the phone Student ID", () => {
+    const result = validateStudentAdditionInput(
+      {
+        grade: "12",
+        student_name: " asha  k kumar ",
+        date_of_birth: "02/01/2010",
+        gender: "Female",
+        category: "Gen",
+        physically_handicapped: "No",
+        g10_board: "Others",
+        board_stream: "PCM",
+        stream: "Engineering",
+        father_name: " ravi  kumar ",
+        phone: " 6876543210 ",
+      },
+      {
+        mode: PHONE_REGISTRATION_MODE,
+        today: new Date("2026-07-01T00:00:00Z"),
+      },
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected valid Phone-mode input");
+    expect(result.row).toMatchObject({
+      grade: 12,
+      phone: "6876543210",
+      student_id: "6876543210",
+      g10_board: "Others",
+      father_name: "Ravi Kumar",
+    });
+    expect(result.row).not.toHaveProperty("pen_number");
+    expect(result.row).not.toHaveProperty("g10_roll_no");
+    expect(result.row).not.toHaveProperty("annual_family_income");
+    expect(result.generatedStudentId).toBe("6876543210");
+  });
+
+  it("rejects every restricted field key in Phone mode without echoing it", () => {
+    const result = validateStudentAdditionInput(
+      { ...validInput },
+      {
+        mode: PHONE_REGISTRATION_MODE,
+        today: new Date("2026-07-01T00:00:00Z"),
+      },
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected restricted Phone-mode fields to be rejected");
+    expect(result.fieldErrors).toMatchObject({
+      pen_number: "PEN Number is not accepted in Phone Registration Mode",
+      g10_roll_no: "Grade 10 Roll no is not accepted in Phone Registration Mode",
+      annual_family_income: "Annual Family Income is not accepted in Phone Registration Mode",
+    });
+    expect(result.row).not.toHaveProperty("pen_number");
+    expect(result.row).not.toHaveProperty("g10_roll_no");
+    expect(result.row).not.toHaveProperty("annual_family_income");
+    expect(result.generatedStudentId).toBe("9876543210");
+  });
+
   it("rejects periods in manually entered student names", () => {
     const result = validateStudentAdditionInput({ ...validInput, student_name: "Asha.Kumar" });
 
@@ -81,19 +205,22 @@ describe("validateStudentAdditionInput", () => {
       ...validInput,
       phone: "0876543210",
       g10_roll_no: "02345678",
-    });
+    }, { mode: APPROVED_REGISTRATION_MODE });
 
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error("expected invalid input");
     expect(result.fieldErrors.phone).toBe("Enter a valid phone number");
     expect(result.fieldErrors.g10_roll_no).toContain("cannot start with zero");
-    expect(canonicalizeStudentEditPayload({ phone: "0876543210" }).ok).toBe(false);
+    expect(canonicalizeStudentEditPayload(
+      { phone: "0876543210" },
+      { mode: APPROVED_REGISTRATION_MODE },
+    ).ok).toBe(false);
   });
 
   it("uses the approved bulk DOB format message", () => {
     const result = validateStudentAdditionInput(
       { ...validInput, date_of_birth: "not-a-date" },
-      { bulkUpload: true },
+      { bulkUpload: true, mode: APPROVED_REGISTRATION_MODE },
     );
 
     expect(result.ok).toBe(false);
@@ -104,10 +231,13 @@ describe("validateStudentAdditionInput", () => {
   });
 
   it("accepts Father Name as optional text", () => {
-    const result = validateStudentAdditionInput({
-      ...validInput,
-      father_name: "Ravi D'Souza-2",
-    });
+    const result = validateStudentAdditionInput(
+      {
+        ...validInput,
+        father_name: "Ravi D'Souza-2",
+      },
+      { mode: APPROVED_REGISTRATION_MODE },
+    );
 
     expect(result.ok).toBe(true);
   });
@@ -115,7 +245,7 @@ describe("validateStudentAdditionInput", () => {
   it("uses an 11-digit PEN as the canonical optional identifier", () => {
     const result = validateStudentAdditionInput(
       { ...validInput, apaar_id: undefined, pen_number: "12345678901" },
-      { today: new Date("2026-07-01T00:00:00Z") },
+      { today: new Date("2026-07-01T00:00:00Z"), mode: APPROVED_REGISTRATION_MODE },
     );
 
     expect(result.ok).toBe(true);
@@ -127,7 +257,7 @@ describe("validateStudentAdditionInput", () => {
   it("keeps an 11-digit PEN starting with zero", () => {
     const result = validateStudentAdditionInput(
       { ...validInput, pen_number: "01234567890" },
-      { today: new Date("2026-07-01T00:00:00Z") },
+      { today: new Date("2026-07-01T00:00:00Z"), mode: APPROVED_REGISTRATION_MODE },
     );
 
     expect(result.ok).toBe(true);
@@ -139,7 +269,7 @@ describe("validateStudentAdditionInput", () => {
     (pen_number) => {
       const result = validateStudentAdditionInput(
         { ...validInput, pen_number },
-        { today: new Date("2026-07-01T00:00:00Z") },
+        { today: new Date("2026-07-01T00:00:00Z"), mode: APPROVED_REGISTRATION_MODE },
       );
 
       expect(result.ok).toBe(false);
@@ -162,7 +292,7 @@ describe("validateStudentAdditionInput", () => {
         g10_roll_no: "00 ab-12 z",
         stream: "NDA",
       },
-      { today: new Date("2026-07-01T00:00:00Z") },
+      { today: new Date("2026-07-01T00:00:00Z"), mode: APPROVED_REGISTRATION_MODE },
     );
 
     expect(result.ok).toBe(true);
@@ -189,7 +319,7 @@ describe("validateStudentAdditionInput", () => {
   ])("accepts the supported DOB value %s", (date_of_birth, expected) => {
     const result = validateStudentAdditionInput(
       { ...validInput, date_of_birth },
-      { today: new Date("2026-07-01T00:00:00Z") },
+      { today: new Date("2026-07-01T00:00:00Z"), mode: APPROVED_REGISTRATION_MODE },
     );
 
     expect(result.row.date_of_birth).toBe(expected);
@@ -198,6 +328,7 @@ describe("validateStudentAdditionInput", () => {
   it("normalizes the canonical single-student fields and generates the Grade 11 Student ID", () => {
     const result = validateStudentAdditionInput(validInput, {
       today: new Date("2026-07-01T00:00:00Z"),
+      mode: APPROVED_REGISTRATION_MODE,
     });
 
     expect(result.ok).toBe(true);
@@ -224,7 +355,7 @@ describe("validateStudentAdditionInput", () => {
   it("allows PEN-only rows and leaves Student ID blank", () => {
     const result = validateStudentAdditionInput(
       { ...validInput, grade: "12", g10_roll_no: "" },
-      { today: new Date("2026-07-01T00:00:00Z") },
+      { today: new Date("2026-07-01T00:00:00Z"), mode: APPROVED_REGISTRATION_MODE },
     );
 
     expect(result.ok).toBe(true);
@@ -243,7 +374,7 @@ describe("validateStudentAdditionInput", () => {
         g10_roll_no: "ABC123",
         father_name: "Ravi123",
       },
-      { today: new Date("2026-07-01T00:00:00Z") },
+      { today: new Date("2026-07-01T00:00:00Z"), mode: APPROVED_REGISTRATION_MODE },
     );
 
     expect(result.ok).toBe(false);
@@ -265,7 +396,7 @@ describe("validateStudentAdditionInput", () => {
         g10_board: "Others",
         g10_roll_no: " 00 ab-12 z ",
       },
-      { today: new Date("2026-07-01T00:00:00Z") },
+      { today: new Date("2026-07-01T00:00:00Z"), mode: APPROVED_REGISTRATION_MODE },
     );
 
     expect(result.ok).toBe(true);
@@ -275,11 +406,14 @@ describe("validateStudentAdditionInput", () => {
   });
 
   it("rejects an Others roll that becomes too short after normalization", () => {
-    const result = validateStudentAdditionInput({
-      ...validInput,
-      g10_board: "Others",
-      g10_roll_no: "0000",
-    });
+    const result = validateStudentAdditionInput(
+      {
+        ...validInput,
+        g10_board: "Others",
+        g10_roll_no: "0000",
+      },
+      { mode: APPROVED_REGISTRATION_MODE },
+    );
 
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error("expected invalid input");
@@ -289,10 +423,13 @@ describe("validateStudentAdditionInput", () => {
   });
 
   it("rejects CBSE rolls that are not already exactly eight digits", () => {
-    const result = validateStudentAdditionInput({
-      ...validInput,
-      g10_roll_no: "1234-5678",
-    });
+    const result = validateStudentAdditionInput(
+      {
+        ...validInput,
+        g10_roll_no: "1234-5678",
+      },
+      { mode: APPROVED_REGISTRATION_MODE },
+    );
 
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error("expected invalid input");
@@ -316,7 +453,7 @@ describe("validateStudentAdditionInput", () => {
         g10_board: "Others",
         g10_roll_no: "ab12z",
       },
-      { academicYear: "2027-2028" },
+      { academicYear: "2027-2028", mode: APPROVED_REGISTRATION_MODE },
     );
 
     expect(result.ok).toBe(true);
@@ -335,6 +472,7 @@ describe("formatStudentAdditionExistingMatch", () => {
           school_code: "JNV001",
         },
         "JNV001",
+        APPROVED_REGISTRATION_MODE,
       ),
     ).toContain("Student ID: 2028AB12Z | PEN: 12345678901 | APAAR: 123456789012");
   });

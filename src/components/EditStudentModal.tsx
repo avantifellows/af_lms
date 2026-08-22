@@ -11,10 +11,20 @@ import {
   CBSE_BOARD,
   CATEGORY_OPTIONS,
   G10_BOARD_OPTIONS,
+  digitsOnly,
+  isValidRegistrationPhone,
+  lettersAndSpacesOnly,
+  rollCharactersOnly,
   STUDENT_ADDITION_GENDER_OPTIONS,
   STUDENT_DOB_MAX,
   STUDENT_DOB_MIN,
 } from "@/lib/student-addition-fields";
+import {
+  ACTIVE_REGISTRATION_MODE,
+  APPROVED_REGISTRATION_MODE,
+  PHONE_REGISTRATION_MODE,
+  type RegistrationMode,
+} from "@/lib/registration-mode";
 
 export interface Batch {
   id: number;
@@ -40,6 +50,10 @@ interface EditStudentModalProps {
    * from the program the user is acting under.
    */
   programId?: number | null;
+  /** Server-inferred Phone Registration Mode cohort membership. */
+  isPhoneRegistrationStudent?: boolean;
+  /** Code-controlled mode, injectable in tests while defaulting to the active mode. */
+  registrationMode?: RegistrationMode;
 }
 
 const STREAM_OPTIONS = [
@@ -107,6 +121,8 @@ function initialFormData(student: Student) {
     father_name: textValue(student.father_name),
     annual_family_income: textValue(student.annual_family_income),
     g10_board: student.g10_board === CBSE_BOARD ? CBSE_BOARD : "Others",
+    pen_number: textValue(student.pen_number),
+    g10_roll_no: textValue(student.g10_roll_no),
     grade: textValue(student.grade?.toString()),
   };
 }
@@ -117,14 +133,6 @@ const labelClassName = "block text-sm font-medium text-text-secondary";
 const sectionHeadingClassName = "mb-4 text-sm font-semibold text-text-primary";
 const errorClassName = "mt-1 text-xs text-danger";
 
-function digitsOnly(value: string) {
-  return value.replace(/\D+/g, "");
-}
-
-function lettersAndSpacesOnly(value: string) {
-  return value.replace(/[^A-Za-z ]+/g, "");
-}
-
 // fallow-ignore-next-line complexity
 export default function EditStudentModal({
   student,
@@ -133,8 +141,13 @@ export default function EditStudentModal({
   onSave,
   grades,
   programId = null,
+  isPhoneRegistrationStudent = false,
+  registrationMode = ACTIVE_REGISTRATION_MODE,
 }: EditStudentModalProps) {
   const initialData = initialFormData(student);
+  const phoneMode = registrationMode === PHONE_REGISTRATION_MODE;
+  const approvedPhoneBackfill =
+    isPhoneRegistrationStudent && registrationMode === APPROVED_REGISTRATION_MODE;
   const [formData, setFormData] = useState(initialData);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -181,8 +194,18 @@ export default function EditStudentModal({
       return;
     }
 
-    if ("phone" in changed && !/^[1-9]\d{9}$/.test(formData.phone)) {
-      setError("Parents Phone Number must be exactly 10 digits and cannot start with zero");
+    if (
+      "phone" in changed &&
+      !isValidRegistrationPhone(
+        formData.phone,
+        isPhoneRegistrationStudent ? "phone" : "approved",
+      )
+    ) {
+      setError(
+        isPhoneRegistrationStudent
+          ? "Parents Phone Number must be exactly 10 digits and start with 6-9"
+          : "Parents Phone Number must be exactly 10 digits and cannot start with zero",
+      );
       setLoading(false);
       return;
     }
@@ -194,6 +217,36 @@ export default function EditStudentModal({
       setFieldErrors({ date_of_birth: "Date of Birth must be between 2000 and 2015" });
       setLoading(false);
       return;
+    }
+
+    if (approvedPhoneBackfill) {
+      if ("pen_number" in changed && student.pen_number) {
+        setFieldErrors({ pen_number: "PEN can only be filled once and is already set" });
+        setLoading(false);
+        return;
+      }
+      if ("g10_roll_no" in changed && student.g10_roll_no) {
+        setFieldErrors({
+          g10_roll_no: "Grade 10 Roll no can only be filled once and is already set",
+        });
+        setLoading(false);
+        return;
+      }
+      const backfillSubmitted =
+        "pen_number" in changed ||
+        "g10_roll_no" in changed ||
+        "annual_family_income" in changed;
+      const hasIdentifier =
+        Boolean(student.pen_number?.trim() || student.g10_roll_no?.trim()) ||
+        Boolean(formData.pen_number.trim() || formData.g10_roll_no.trim());
+      if (backfillSubmitted && !hasIdentifier) {
+        setFieldErrors({
+          pen_number: "PEN or Grade 10 Roll no is required for phone-cohort backfill",
+          g10_roll_no: "PEN or Grade 10 Roll no is required for phone-cohort backfill",
+        });
+        setLoading(false);
+        return;
+      }
     }
 
     if ("grade" in changed && !["11", "12"].includes(formData.grade)) {
@@ -253,7 +306,16 @@ export default function EditStudentModal({
       ...prev,
       [name]:
         name === "phone"
-          ? digitsOnly(value).replace(/^0+/, "").slice(0, 10)
+          // Keep the complete digit sequence so validation can reject
+          // leading-zero and overlength values instead of silently changing
+          // them into a different phone number.
+          ? digitsOnly(value)
+          : name === "pen_number"
+            ? digitsOnly(value).slice(0, 11)
+            : name === "g10_roll_no"
+              ? (formData.g10_board === CBSE_BOARD
+                ? digitsOnly(value).replace(/^0+/, "").slice(0, 8)
+                : rollCharactersOnly(value).slice(0, 10))
           : name === "father_name"
             ? lettersAndSpacesOnly(value)
             : value,
@@ -283,6 +345,11 @@ export default function EditStudentModal({
         className={inputClassName}
       />
       {fieldErrors[name] && <p className={errorClassName}>{fieldErrors[name]}</p>}
+      {name === "phone" && isPhoneRegistrationStudent && (
+        <p className="mt-1 text-xs text-text-muted">
+          Changing this phone also changes the Student ID. Portal login switches to the new number immediately.
+        </p>
+      )}
     </div>
   );
 
@@ -436,7 +503,7 @@ export default function EditStudentModal({
                 </label>
                 {textField("phone", "Parents Phone Number", "tel")}
                 {textField("father_name", "Father Name")}
-                {selectField(
+                {(!phoneMode || !isPhoneRegistrationStudent) && selectField(
                   "annual_family_income",
                   "Yearly / Annual Family Income",
                   ANNUAL_FAMILY_INCOME_OPTIONS,
@@ -463,6 +530,49 @@ export default function EditStudentModal({
               </div>
             </FormSection>
 
+            {approvedPhoneBackfill && (
+              <FormSection>
+                <h3 className={sectionHeadingClassName}>Post-approval identifier backfill</h3>
+                <p className="mb-4 text-xs text-text-muted">
+                  PEN and Grade 10 Roll no can each be filled once; once saved, they are locked.
+                </p>
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <div>
+                    <label className={labelClassName}>PEN</label>
+                    <input
+                      type="text"
+                      name="pen_number"
+                      inputMode="numeric"
+                      maxLength={11}
+                      value={formData.pen_number}
+                      disabled={Boolean(student.pen_number)}
+                      onChange={handleChange}
+                      className={inputClassName}
+                    />
+                    {fieldErrors.pen_number && (
+                      <p className={errorClassName}>{fieldErrors.pen_number}</p>
+                    )}
+                  </div>
+                  <div>
+                    <label className={labelClassName}>Grade 10 Roll no</label>
+                    <input
+                      type="text"
+                      name="g10_roll_no"
+                      inputMode={formData.g10_board === CBSE_BOARD ? "numeric" : "text"}
+                      maxLength={formData.g10_board === CBSE_BOARD ? 8 : 10}
+                      value={formData.g10_roll_no}
+                      disabled={Boolean(student.g10_roll_no)}
+                      onChange={handleChange}
+                      className={inputClassName}
+                    />
+                    {fieldErrors.g10_roll_no && (
+                      <p className={errorClassName}>{fieldErrors.g10_roll_no}</p>
+                    )}
+                  </div>
+                </div>
+              </FormSection>
+            )}
+
             <FormSection>
               <h3 className={sectionHeadingClassName}>Locked Identity</h3>
               <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
@@ -470,18 +580,22 @@ export default function EditStudentModal({
                   <label className={labelClassName}>Student ID</label>
                   <input type="text" value={student.student_id || "—"} disabled className={inputClassName} />
                 </div>
-                <div>
-                  <label className={labelClassName}>PEN</label>
-                  <input type="text" value={student.pen_number || "—"} disabled className={inputClassName} />
-                </div>
+                {!approvedPhoneBackfill && (
+                  <div>
+                    <label className={labelClassName}>PEN</label>
+                    <input type="text" value={student.pen_number || "—"} disabled className={inputClassName} />
+                  </div>
+                )}
                 <div>
                   <label className={labelClassName}>APAAR ID</label>
                   <input type="text" value={student.apaar_id || "—"} disabled className={inputClassName} />
                 </div>
-                <div>
-                  <label className={labelClassName}>Grade 10 Roll no</label>
-                  <input type="text" value={student.g10_roll_no || "—"} disabled className={inputClassName} />
-                </div>
+                {!approvedPhoneBackfill && (
+                  <div>
+                    <label className={labelClassName}>Grade 10 Roll no</label>
+                    <input type="text" value={student.g10_roll_no || "—"} disabled className={inputClassName} />
+                  </div>
+                )}
                 <div>
                   <label className={labelClassName}>Program</label>
                   <input type="text" value={student.program_name || "—"} disabled className={inputClassName} />

@@ -1,9 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
+import { readFile } from "node:fs/promises";
 import ExcelJS from "exceljs";
 import JSZip from "jszip";
 
-import { parseStudentAdditionUpload } from "./student-addition-bulk";
-import { buildRejectedRowsCsv, CBSE_BOARD } from "./student-addition-fields";
+import { parseStudentAdditionUpload as parseStudentAdditionUploadForMode } from "./student-addition-bulk";
+import {
+  buildRejectedRowsCsv as buildRejectedRowsCsvForMode,
+  CBSE_BOARD,
+  type StudentAdditionCsvResult,
+} from "./student-addition-fields";
+import { APPROVED_REGISTRATION_MODE, PHONE_REGISTRATION_MODE } from "./registration-mode";
 
 function csvLine(values: unknown[]) {
   return values.map((value) => `"${String(value).replace(/"/g, '""')}"`).join(",");
@@ -26,6 +32,20 @@ const uploadHeaders = [
   "Yearly / Annual Family Income",
 ];
 
+const phoneUploadHeaders = [
+  "Grade",
+  "Student Name",
+  "Date of Birth",
+  "Gender",
+  "Category",
+  "CWSN",
+  "G10 board",
+  "Board Stream",
+  "Primary Exam preparing for",
+  "Father Name",
+  "Parents Phone Number",
+];
+
 const validRowValues: unknown[] = [
   "11",
   " asha  k. kumar ",
@@ -43,8 +63,39 @@ const validRowValues: unknown[] = [
   "Less than Rs. 1,00,000",
 ];
 
+const validPhoneRowValues: unknown[] = [
+  "12",
+  "asha kumar",
+  "02/01/2010",
+  "Female",
+  "Gen",
+  "No",
+  "Others",
+  "PCM",
+  "Engineering",
+  "ravi kumar",
+  "6876543210",
+];
+
 const csvHeaders = csvLine(uploadHeaders);
 const validCsvRow = csvLine(validRowValues);
+
+async function parseStudentAdditionUpload(
+  options: Parameters<typeof parseStudentAdditionUploadForMode>[0],
+) {
+  return parseStudentAdditionUploadForMode({
+    ...options,
+    mode: options.mode ?? APPROVED_REGISTRATION_MODE,
+  });
+}
+
+function buildRejectedRowsCsv(
+  results: StudentAdditionCsvResult[],
+  schoolCode?: string,
+  mode: Parameters<typeof buildRejectedRowsCsvForMode>[2] = APPROVED_REGISTRATION_MODE,
+) {
+  return buildRejectedRowsCsvForMode(results, schoolCode, mode);
+}
 
 async function workbookBuffer(sheets: Record<string, unknown[][]>) {
   const workbook = new ExcelJS.Workbook();
@@ -56,6 +107,20 @@ async function workbookBuffer(sheets: Record<string, unknown[][]>) {
 }
 
 describe("parseStudentAdditionUpload", () => {
+  it("rejects a full-mode workbook before processing it in Phone Registration Mode", async () => {
+    const result = await parseStudentAdditionUpload({
+      filename: "students.xlsx",
+      data: await workbookBuffer({ Template: [uploadHeaders, validRowValues] }),
+      mode: PHONE_REGISTRATION_MODE,
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error:
+        "This upload does not match the active Phone Registration Mode template. Download the current template and upload it again.",
+    });
+  });
+
   it("replaces periods in uploaded student names with spaces", async () => {
     const result = await parseStudentAdditionUpload({
       filename: "students.xlsx",
@@ -66,6 +131,80 @@ describe("parseStudentAdditionUpload", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error("expected valid upload");
     expect(result.rows[0].student_name).toBe("Asha K Kumar");
+  });
+
+  it("parses the exact 11-column Phone Registration Mode schema", async () => {
+    const result = await parseStudentAdditionUpload({
+      filename: "students.xlsx",
+      data: await workbookBuffer({ Template: [phoneUploadHeaders, validPhoneRowValues] }),
+      mode: PHONE_REGISTRATION_MODE,
+      today: new Date("2026-07-01T00:00:00Z"),
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected valid Phone-mode upload");
+    expect(result.rejectedResults).toEqual([]);
+    expect(result.rows).toEqual([
+      expect.objectContaining({
+        row_number: 2,
+        grade: 12,
+        student_name: "Asha Kumar",
+        phone: "6876543210",
+        student_id: "6876543210",
+      }),
+    ]);
+    expect(result.originalRows.get(2)).toEqual(
+      Object.fromEntries(phoneUploadHeaders.map((header, index) => [header, String(validPhoneRowValues[index])])),
+    );
+  });
+
+  it("rejects unknown Phone-mode columns instead of silently dropping them", async () => {
+    const result = await parseStudentAdditionUpload({
+      filename: "students.csv",
+      data: Buffer.from([
+        csvLine([...phoneUploadHeaders, "Unapproved extra column"]),
+        csvLine([...validPhoneRowValues, "restricted value"]),
+      ].join("\n")),
+      mode: PHONE_REGISTRATION_MODE,
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error:
+        "This upload does not match the active Phone Registration Mode template. Download the current template and upload it again.",
+    });
+  });
+
+  it("parses the checked-in HQ Phone workbook with x14 validations after compaction", async () => {
+    const xlsxPrototype = Object.getPrototypeOf(new ExcelJS.Workbook().xlsx) as {
+      load: (...args: unknown[]) => unknown;
+    };
+    const loadSpy = vi.spyOn(xlsxPrototype, "load");
+
+    try {
+      const result = await parseStudentAdditionUpload({
+        filename: "NVS_Lakshya_Data_Template_updated_19th_August_2026.xlsx",
+        data: await readFile("src/assets/NVS_Lakshya_Data_Template_updated_19th_August_2026.xlsx"),
+        mode: PHONE_REGISTRATION_MODE,
+        today: new Date("2026-08-21T00:00:00Z"),
+      });
+
+      expect(result).toEqual(expect.objectContaining({
+        ok: true,
+        totalRows: 0,
+        ignoredRows: [expect.objectContaining({
+          row_number: 2,
+          matched_fields: ["Student Name", "Phone"],
+        })],
+      }));
+      const loadedArchive = await JSZip.loadAsync(
+        Buffer.from(loadSpy.mock.calls[0][0] as Buffer),
+      );
+      const templateXml = await loadedArchive.file("xl/worksheets/sheet1.xml")!.async("string");
+      expect(templateXml).toContain('<x14:dataValidations count="7"');
+    } finally {
+      loadSpy.mockRestore();
+    }
   });
 
   it("removes blank formatted cells before loading xlsx", async () => {
@@ -482,6 +621,68 @@ describe("parseStudentAdditionUpload", () => {
     expect(csv).toContain("Duplicate in uploaded file: PEN Number, Grade 10 Roll no");
   });
 
+  it("keeps Approved-mode rejected existing-match presentation unchanged", () => {
+    const csv = buildRejectedRowsCsv([{
+      row_number: 2,
+      status: "rejected",
+      original: { "Student Name": "Conflict" },
+      existing_match: { student_id: "202812345678", school_code: "JNV001" },
+    }], "JNV001");
+
+    expect(csv).not.toContain("This student identifier is already part of this school");
+    expect(csv).not.toContain(",Same school,");
+  });
+
+  it("builds Phone-mode rejected rows with only the canonical phone columns", () => {
+    const csv = buildRejectedRowsCsv([
+      {
+        row_number: 2,
+        status: "rejected",
+        original: Object.fromEntries(phoneUploadHeaders.map((header) => [header, "value"])),
+        field_errors: {
+          phone: "Enter a valid phone number",
+          pen_number: "01234567890",
+          g10_roll_no: "12345678",
+          annual_family_income: "secret income",
+        },
+        existing_match: {
+          student_id: "9999999999",
+          school_code: "JNV001",
+          pen_number: "01234567890",
+          apaar_id: "legacy-id",
+        },
+      },
+    ], "JNV001", PHONE_REGISTRATION_MODE);
+
+    expect(csv.split("\n", 1)[0]).toBe([
+      "Original Row Number",
+      "Row Status",
+      ...phoneUploadHeaders,
+      "Field Errors",
+      "Row Errors",
+      "Issue",
+      "Existing School Relationship",
+      "Matched Identifier",
+      "Existing Student ID",
+      "Existing Student Name",
+      "Existing School Name",
+      "Existing School Code",
+      "Existing UDISE",
+      "Existing District",
+      "Existing State",
+      "Existing Grade",
+      "Existing Program",
+      "Existing Stream",
+    ].join(","));
+    expect(csv).not.toContain(",PEN Number,");
+    expect(csv).not.toContain(",Grade 10 Roll no,");
+    expect(csv).not.toContain(",Yearly / Annual Family Income,");
+    expect(csv).not.toContain("PEN");
+    expect(csv).not.toContain("01234567890");
+    expect(csv).not.toContain("legacy-id");
+    expect(csv).toContain("This student identifier is already part of this school.");
+  });
+
   it("round-trips a PEN-based rejected CSV with its original row number", async () => {
     const original = Object.fromEntries(uploadHeaders.map((header, index) => [header, validRowValues[index]]));
     const csv = buildRejectedRowsCsv([{
@@ -502,6 +703,34 @@ describe("parseStudentAdditionUpload", () => {
     expect(result.rows).toEqual([
       expect.objectContaining({ row_number: 47, pen_number: "12345678901" }),
     ]);
+  });
+
+  it("round-trips a Phone-mode rejected CSV with its original row number", async () => {
+    const original = Object.fromEntries(
+      phoneUploadHeaders.map((header, index) => [header, validPhoneRowValues[index]]),
+    );
+    const csv = buildRejectedRowsCsv([{
+      row_number: 47,
+      status: "rejected",
+      original,
+      row_errors: ["Temporary upstream rejection"],
+    }], "JNV001", PHONE_REGISTRATION_MODE);
+
+    const result = await parseStudentAdditionUpload({
+      filename: "student-addition-rejected-rows.csv",
+      data: Buffer.from(csv),
+      mode: PHONE_REGISTRATION_MODE,
+      today: new Date("2026-07-01T00:00:00Z"),
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected retryable Phone-mode csv");
+    expect(result.rows).toEqual([
+      expect.objectContaining({ row_number: 47, phone: "6876543210", student_id: "6876543210" }),
+    ]);
+    expect(result.originalRows.get(47)).toEqual(
+      Object.fromEntries(phoneUploadHeaders.map((header, index) => [header, String(validPhoneRowValues[index])])),
+    );
   });
 
   it("neutralizes formula-like values in rejected-row csv cells", () => {
