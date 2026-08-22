@@ -221,6 +221,38 @@ describe("PATCH /api/student/[id]", () => {
     expect(payload).not.toHaveProperty("student_id");
   });
 
+  it("uses Others to validate a backfilled roll when the persisted board is NULL", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockQuery.mockResolvedValueOnce([{
+      ...phoneCohortWithBlankIdentifiers,
+      g10_board: null,
+    }]);
+    mockFetch.mockResolvedValue(
+      new Response(JSON.stringify({ status: "updated" }), { status: 200 }),
+    );
+
+    const req = jsonRequest("http://localhost/api/student/100", {
+      method: "PATCH",
+      body: {
+        program_id: 64,
+        g10_roll_no: "RB-24",
+      },
+    });
+
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(200);
+    const payload = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(payload).toMatchObject({
+      program_id: 64,
+      registration_mode: "approved",
+      registration_mode_version: "1",
+      g10_roll_no: "RB24",
+    });
+    expect(payload).not.toHaveProperty("g10_board");
+    expect(payload).not.toHaveProperty("student_id");
+  });
+
   it("rejects an Approved-mode backfill with neither identifier", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
     mockQuery.mockResolvedValueOnce([phoneCohortWithBlankIdentifiers]);

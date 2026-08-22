@@ -152,9 +152,8 @@ export function prepareStudentEditFields({
   const shouldUseExistingBoard =
     allowPhoneBackfill &&
     hasOwnField(body, "g10_roll_no") &&
-    !hasOwnField(body, "g10_board") &&
-    facts.g10_board;
-  if (shouldUseExistingBoard) canonicalInput.g10_board = facts.g10_board;
+    !hasOwnField(body, "g10_board");
+  if (shouldUseExistingBoard) canonicalInput.g10_board = facts.g10_board ?? "Others";
 
   const canonical = canonicalizeStudentEditPayload(canonicalInput, {
     mode: isPhoneStudent ? PHONE_REGISTRATION_MODE : APPROVED_REGISTRATION_MODE,
