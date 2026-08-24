@@ -8,7 +8,6 @@ import { istWallClockWindowEnd, utcToISTDate } from "@/lib/quiz-session-time";
 import { resolveGradeId } from "@/lib/curriculum-options";
 import {
   CMS_SOURCE,
-  curriculumIdForCmsExamTrack,
   isCmsExamTrack,
   isCmsTestType,
   streamForCmsExamTrack,
@@ -212,7 +211,7 @@ export async function POST(request: NextRequest) {
   }
   const { group, authType } = resolved;
 
-  const curriculumId = curriculumIdForCmsExamTrack(body.examTrack);
+  // Kept for validation only — the id itself is no longer sent anywhere.
   const gradeId = await resolveGradeId(body.grade);
   if (!gradeId) {
     return NextResponse.json(
@@ -241,8 +240,6 @@ export async function POST(request: NextRequest) {
       headers: { "Content-Type": "application/json", accept: "application/json" },
       body: JSON.stringify({
         test_id: Number(body.cmsTestId),
-        curriculum_id: curriculumId,
-        grade_id: gradeId,
         quiz_type: "assessment",
         shuffle,
         show_scores: showScores,
@@ -358,9 +355,8 @@ export async function POST(request: NextRequest) {
       cms_source: CMS_SOURCE,
       cms_test_id: String(body.cmsTestId),
       cms_source_id: String(body.cmsTestId),
-      // Persist what the on-demand PDF proxy needs to re-fetch the test from the CMS.
-      cms_curriculum_id: String(curriculumId),
-      cms_grade_id: String(gradeId),
+      // No cms_curriculum_id/cms_grade_id: the PDF proxy and regenerate need only
+      // cms_test_id (nex-gen-cms#177). Older sessions keep theirs; nothing reads them.
       has_synced_to_bq: false,
       infinite_session: false,
       report_link: reportLink,

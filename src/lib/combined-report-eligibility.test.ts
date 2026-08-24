@@ -140,4 +140,30 @@ describe("evaluateGenerationEligibility", () => {
       evaluateGenerationEligibility(open, [{ status: "done" }]),
     ).toEqual({ allowed: false, reason: "session_not_ended" });
   });
+
+  it("allows a deliberate regenerate over a finished report", () => {
+    // The once-per-test rule stops accidental duplicates; it must not make a
+    // report built before an upstream data fix permanently unfixable.
+    const jobs = [{ status: "done" }];
+    expect(evaluateGenerationEligibility(ended, jobs).allowed).toBe(false);
+    expect(
+      evaluateGenerationEligibility(ended, jobs, { regenerate: true }).allowed,
+    ).toBe(true);
+  });
+
+  it("still refuses a regenerate while another job is in flight", () => {
+    // Two workers rendering the same session would race on the same S3 key.
+    const jobs = [{ status: "processing" }];
+    const v = evaluateGenerationEligibility(ended, jobs, { regenerate: true });
+    expect(v.allowed).toBe(false);
+    expect(v.reason).toBe("job_in_progress");
+  });
+
+  it("still refuses a regenerate while the session is open", () => {
+    const v = evaluateGenerationEligibility(open, [{ status: "done" }], {
+      regenerate: true,
+    });
+    expect(v.allowed).toBe(false);
+    expect(v.reason).toBe("session_not_ended");
+  });
 });

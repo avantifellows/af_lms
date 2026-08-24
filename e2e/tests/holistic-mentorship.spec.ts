@@ -239,7 +239,10 @@ test.describe("Holistic Mentorship release workflows", () => {
     await expect(progressTab).toBeFocused();
     await expect(progressTab).toHaveAttribute("aria-selected", "true");
 
-    const openStudent = holisticAdminPage.getByRole("link", { name: /^Open / }).first();
+    const openStudent = holisticAdminPage
+      .getByRole("table", { name: "Student progress results" })
+      .getByRole("link", { name: /^Open / })
+      .first();
     await openStudent.focus();
     await expect(openStudent).toBeFocused();
     await openStudent.press("Enter");
@@ -304,6 +307,76 @@ test.describe("Holistic Mentorship release workflows", () => {
       )).toBeVisible();
     }
     await expect(holisticTeacherPage.getByText("No response recorded", { exact: true })).toBeVisible();
+  });
+
+  test("Holistic Admin confirms reasons for assign, reassign, and remove controls", async ({
+    holisticAdminPage,
+  }) => {
+    const mutationBodies = new Map<string, Record<string, unknown>>();
+    await holisticAdminPage.route("**/api/holistic-mentorship/mappings", async (route) => {
+      const method = route.request().method();
+      if (!(["POST", "PATCH", "DELETE"] as const).includes(method as "POST" | "PATCH" | "DELETE")) {
+        return route.continue();
+      }
+      mutationBodies.set(method, route.request().postDataJSON() as Record<string, unknown>);
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ ok: true, changed: 1 }),
+      });
+    });
+    await holisticAdminPage.goto(`/school/${fixture.schoolCode}`);
+    await holisticAdminPage.getByRole("tab", { name: "Holistic Mentorship", exact: true }).click();
+
+    await holisticAdminPage.getByRole("button", { name: /^Assign / }).first().click();
+    const assignDialog = holisticAdminPage.getByRole("dialog", { name: /^Assign Mentor to / });
+    const assignSubmit = assignDialog.getByRole("button", { name: "Assign Mentor" });
+    await expect(assignSubmit).toBeDisabled();
+    await assignDialog.getByRole("combobox", { name: "Mentor" }).selectOption({ index: 1 });
+    await assignDialog.getByRole("textbox", { name: "Audit reason" }).fill("Student requested assignment");
+    await assignSubmit.click();
+    await expect.poll(() => mutationBodies.get("POST")).toMatchObject({
+      school_code: fixture.schoolCode,
+      program_id: 1,
+      academic_year: "2026-2027",
+      expected_mapping_id: null,
+      confirmed: true,
+      reason: "Student requested assignment",
+    });
+
+    await holisticAdminPage.getByRole("button", { name: /^Reassign Mentor for / }).first().click();
+    const reassignDialog = holisticAdminPage.getByRole("dialog", { name: /^Reassign Mentor for / });
+    const reassignSubmit = reassignDialog.getByRole("button", { name: "Reassign Mentor" });
+    await expect(reassignSubmit).toBeDisabled();
+    await reassignDialog.getByRole("combobox", { name: "Replacement Mentor" }).selectOption({ index: 1 });
+    await reassignDialog.getByRole("textbox", { name: "Reassignment reason" }).fill("Mentor handover");
+    await reassignSubmit.click();
+    await expect.poll(() => mutationBodies.get("PATCH")).toMatchObject({
+      school_code: fixture.schoolCode,
+      program_id: 1,
+      academic_year: "2026-2027",
+      confirmed: true,
+      reason: "Mentor handover",
+    });
+    expect(mutationBodies.get("PATCH")).toHaveProperty("student_id");
+    expect(mutationBodies.get("PATCH")).toHaveProperty("mentor_user_id");
+    expect(mutationBodies.get("PATCH")).toHaveProperty("expected_mapping_id");
+
+    await holisticAdminPage.getByRole("button", { name: /^Remove Mentor from / }).first().click();
+    const removeDialog = holisticAdminPage.getByRole("dialog", { name: /^Remove Mentor from / });
+    const removeSubmit = removeDialog.getByRole("button", { name: "Remove Mentor" });
+    await expect(removeSubmit).toBeDisabled();
+    await removeDialog.getByRole("textbox", { name: "Removal reason" }).fill("Mentor left programme");
+    await removeSubmit.click();
+    await expect.poll(() => mutationBodies.get("DELETE")).toMatchObject({
+      school_code: fixture.schoolCode,
+      program_id: 1,
+      academic_year: "2026-2027",
+      confirmed: true,
+      reason: "Mentor left programme",
+    });
+    expect(mutationBodies.get("DELETE")).toHaveProperty("student_id");
+    expect(mutationBodies.get("DELETE")).toHaveProperty("expected_mapping_id");
   });
 
   test("eligible Teacher assigns a Student, submits Notes, and edits the official Notes", async ({
@@ -434,7 +507,11 @@ test.describe("Holistic Mentorship release workflows", () => {
     expect(csvBody).toContain("Notes Author Name,Notes Author Email,Notes Last Edited At");
     expect(csvBody).not.toMatch(/Student Profile|Student Context|profile_journey_id|mapping_id/i);
 
-    await holisticAdminPage.getByRole("link", { name: /^Open / }).first().click();
+    await holisticAdminPage
+      .getByRole("table", { name: "Student progress results" })
+      .getByRole("link", { name: /^Open / })
+      .first()
+      .click();
     await expect(holisticAdminPage.getByText("Admin read-only view", { exact: true })).toBeVisible();
     await holisticAdminPage.goto("/admin/holistic-mentorship");
     await holisticAdminPage.getByRole("tab", { name: "Phase Setup" }).click();
@@ -467,28 +544,54 @@ test.describe("Holistic Mentorship release workflows", () => {
     holisticAdminPage.once("dialog", (dialog) => dialog.accept());
     await holisticAdminPage.getByRole("button", { name: "Request Profile regeneration" }).click();
     await expect(holisticAdminPage.getByText("Regeneration queued.", { exact: true })).toBeVisible();
+
+    const cleanupPool = getTestPool();
+    const assignedMapping = await cleanupPool.query<{ id: string }>(
+      `SELECT id FROM holistic_mentorship_mentor_mentee_mappings
+       WHERE student_id = $1 AND academic_year = '2026-2027' AND ended_at IS NULL`,
+      [fixture.unassignedStudentId],
+    );
+    await cleanupPool.end();
+    expect(assignedMapping.rows[0]?.id).toBeTruthy();
+    const restoreUnassigned = await holisticAdminPage.request.delete(
+      "/api/holistic-mentorship/mappings",
+      { data: {
+        academic_year: "2026-2027",
+        program_id: 1,
+        school_code: fixture.schoolCode,
+        student_id: fixture.unassignedStudentId,
+        expected_mapping_id: Number(assignedMapping.rows[0].id),
+        confirmed: true,
+        reason: "Restore unassigned release fixture",
+      } },
+    );
+    expect(restoreUnassigned.status()).toBe(200);
   });
 
-  test("global Admin and Holistic Admin have distinct role and deletion gates", async ({
+  test("every role is denied Holistic privacy deletion while Admin roles stay distinct", async ({
     adminPage,
     holisticAdminPage,
+    holisticTeacherPage,
+    pmPage,
+    programAdminPage,
+    passcodePage,
   }) => {
-    const adminDeletion = await apiStatus(adminPage,
-      `/api/holistic-mentorship/privacy-deletions/${fixture.draftStudentId}`, "POST", {});
-    expect(adminDeletion).toBe(422);
-    const scopedDeletion = await apiStatus(holisticAdminPage,
-      `/api/holistic-mentorship/privacy-deletions/${fixture.draftStudentId}`, "POST", {});
-    expect(scopedDeletion).toBe(403);
+    for (const page of [adminPage, holisticAdminPage, holisticTeacherPage,
+      pmPage, programAdminPage, passcodePage]) {
+      const deletion = await apiStatus(page,
+        `/api/holistic-mentorship/privacy-deletions/${fixture.draftStudentId}`, "POST", {});
+      expect(deletion).toBe(403);
+    }
     const adminRole = await apiStatus(adminPage, "/api/admin/users", "POST", {});
     expect(adminRole).not.toBe(403);
     const scopedRole = await apiStatus(holisticAdminPage, "/api/admin/users", "POST", {});
     expect(scopedRole).toBe(403);
   });
 
-  test("former Mentor loses stale-link access and excluded roles receive server-side 403 on desktop and mobile", async ({
+  test("former Mentor and passcode users stay denied while scoped roles enter read-only progress", async ({
     formerMentorPage,
-    pmPage,
-    programAdminPage,
+    holisticPmPage,
+    holisticProgramAdminPage,
     passcodePage,
   }) => {
     const stale = await formerMentorPage.request.get(
@@ -497,22 +600,79 @@ test.describe("Holistic Mentorship release workflows", () => {
     );
     expect(stale.status()).toBe(404);
 
-    for (const page of [pmPage, programAdminPage, passcodePage]) {
-      const desktopResponse = await page.request.get(
-        "/api/holistic-mentorship/progress?academic_year=2026-2027"
+    for (const [page, roleLabel] of [
+      [holisticPmPage, "Program Manager"],
+      [holisticProgramAdminPage, "Program Admin"],
+    ] as const) {
+      await page.goto("/dashboard");
+      const navigation = page.getByRole("link", { name: "Holistic Mentorship" });
+      await expect(navigation).toBeVisible();
+      await navigation.click();
+      await expect(page.getByRole("heading", { name: "Holistic Mentorship" })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Students & Progress" })).toBeVisible();
+      await expect(page.getByText("Read only", { exact: true })).toBeVisible();
+      await expect(page.getByRole("tab", { name: "Phase Setup" })).toHaveCount(0);
+      const detailLink = page
+        .getByRole("table", { name: "Student progress results" })
+        .getByRole("link", { name: /^Open / })
+        .first();
+      await expect(detailLink).toBeVisible();
+      await detailLink.click();
+      await expect(page.getByText(`${roleLabel} read-only view`, { exact: true })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Request Profile regeneration" })).toHaveCount(0);
+      await expect(page.getByRole("textbox")).toHaveCount(0);
+
+      const unassignedDetail = await page.request.get(
+        `/api/holistic-mentorship/students/${fixture.unassignedStudentId}/phases/` +
+        `${fixture.activeGrade11PhaseId}?school_code=${fixture.schoolCode}` +
+        "&program_id=1&academic_year=2026-2027",
       );
-      expect(desktopResponse.status()).toBe(403);
-      await page.setViewportSize({ width: 375, height: 800 });
-      const mobileResponse = await page.request.get(
-        "/api/holistic-mentorship/progress?academic_year=2026-2027"
+      expect(unassignedDetail.status()).toBe(200);
+      expect(await unassignedDetail.json()).toMatchObject({
+        readOnly: true,
+        selectedPhase: {
+          mappingId: null,
+          canEditNotes: false,
+          notesRevision: 0,
+        },
+      });
+      const regeneration = await page.request.post(
+        `/api/holistic-mentorship/profiles/${fixture.unassignedStudentId}?program_id=1`,
+        { data: { request_key: "d16e7d82-dc60-4b79-a064-9ed80badc119", force: true } },
       );
-      expect(mobileResponse.status()).toBe(403);
+      expect(regeneration.status()).toBe(403);
+
+      const progress = await page.request.get(
+        "/api/holistic-mentorship/progress?academic_year=2026-2027&program_id=1"
+      );
+      expect(progress.status()).toBe(200);
+      const mutation = await page.request.post("/api/holistic-mentorship/mappings", {
+        data: {
+          academic_year: "2026-2027",
+          program_id: 1,
+          school_code: fixture.schoolCode,
+          selections: [{ student_id: fixture.unassignedStudentId, expected_mapping_id: null }],
+        },
+      });
+      expect(mutation.status()).toBe(403);
+
       await page.goto("/admin/holistic-mentorship");
-      await expect(page.getByRole("heading", { name: "Holistic Mentorship" })).not.toBeVisible();
+
+      await page.setViewportSize({ width: 375, height: 800 });
+      await page.reload();
+      await expect(page.getByRole("heading", { name: "Students & Progress" })).toBeVisible();
+      await expectNoPageOverflow(page);
     }
 
-    await pmPage.goto("/admin/holistic-mentorship");
-    await expectNoPageOverflow(pmPage);
+    for (const viewport of [{ width: 1280, height: 800 }, { width: 375, height: 800 }]) {
+      await passcodePage.setViewportSize(viewport);
+      const response = await passcodePage.request.get(
+        "/api/holistic-mentorship/progress?academic_year=2026-2027&program_id=1"
+      );
+      expect(response.status()).toBe(403);
+      await passcodePage.goto("/admin/holistic-mentorship");
+      await expect(passcodePage.getByRole("heading", { name: "Holistic Mentorship" })).not.toBeVisible();
+    }
   });
 });
 

@@ -4,7 +4,7 @@ export function holisticStudentPhaseHref(params: {
   schoolCode: string;
   academicYear: string;
   programId: number;
-  source?: "school";
+  source?: "school" | "progress";
 }) {
   const query = new URLSearchParams({
     school_code: params.schoolCode,

@@ -20,7 +20,13 @@ import {
   type ProgramPermissionContext,
   type UserPermission,
 } from "@/lib/permissions";
-import { CURRENT_ACADEMIC_YEAR, PROGRAM_IDS } from "@/lib/constants";
+import {
+  CURRENT_ACADEMIC_YEAR,
+  HOLISTIC_MENTORSHIP_PROGRAM_IDS,
+  isHolisticMentorshipProgramId,
+  PROGRAM_ID_TO_LABEL,
+  PROGRAM_IDS,
+} from "@/lib/constants";
 import { getLmsSupportedProgramIds } from "@/lib/lms-programs";
 import { type Grade, type Student } from "@/components/StudentTable";
 import { getSchoolRoster } from "@/lib/school-students";
@@ -47,7 +53,11 @@ import {
   requireHolisticMentorshipAccess,
   type HolisticMentorshipSession,
 } from "@/lib/holistic-mentorship";
-import { listHolisticAssignmentRoster } from "@/lib/holistic-mappings";
+import {
+  getHolisticAssignmentCoverageSummary,
+  listHolisticAssignmentRoster,
+} from "@/lib/holistic-mappings";
+import { listEligibleHolisticMentors } from "@/lib/holistic-mentor-eligibility";
 import { type ReactNode } from "react";
 
 interface School {
@@ -136,6 +146,7 @@ function getDistinctNVSStreams(batches: Batch[]): string[] {
 
 interface PageProps {
   params: Promise<{ udise: string }>;
+  searchParams?: Promise<{ program_id?: string | string[] }>;
 }
 
 function menteeMeta(grade: number | null, studentId: string | null): string {
@@ -389,12 +400,6 @@ function getProgramAccessMessage(
   );
 }
 
-function redirectHolisticMentorshipAdmin(permission: UserPermission | null): void {
-  if (permission?.role === "holistic_mentorship_admin") {
-    redirect("/admin/holistic-mentorship");
-  }
-}
-
 function getSchoolNavigation(
   session: Session,
   permission: UserPermission | null
@@ -593,23 +598,38 @@ async function buildAcademicMentorshipContent({
 
 type SchoolTab = { id: string; label: string; content: ReactNode };
 
+function shouldChooseHolisticProgram(
+  programId: number | null | undefined,
+  programChoices?: number[],
+): boolean {
+  return programId === undefined && (programChoices?.length ?? 0) > 1;
+}
+
 async function buildHolisticMentorshipContent({
   session,
   permission,
   schoolCode,
+  programId,
+  programChoices,
   access,
 }: {
   session: HolisticMentorshipSession;
   permission: UserPermission | null;
   schoolCode: string;
+  programId?: number | null;
+  programChoices?: number[];
   access: FeatureAccessResult;
 }): Promise<ReactNode | null> {
-  if (!access.canView) return null;
-  const isTeacher = permission?.role === "teacher";
+  if (!access.canView || programId === null) return null;
+  if (shouldChooseHolisticProgram(programId, programChoices)) {
+    return <HolisticProgramChoice schoolCode={schoolCode} programIds={programChoices!} />;
+  }
+  const role = permission?.role;
+  const isTeacher = role === "teacher";
   const holisticAccess = await requireHolisticMentorshipAccess(
     session,
-    isTeacher ? "roster_view" : "program_read",
-    { schoolCode }
+    isTeacher ? "roster_view" : "assignment_coverage_read",
+    { schoolCode, programId }
   );
   if (!holisticAccess.ok) return null;
   if (isTeacher) {
@@ -622,14 +642,35 @@ async function buildHolisticMentorshipContent({
       />
     );
   }
-  return <AdminSchoolRoster
-    schoolCode={schoolCode}
-    programId={holisticAccess.school!.programId}
-    students={await listHolisticAssignmentRoster({
+  const [students, summary, mentors] = await Promise.all([
+    listHolisticAssignmentRoster({
+      permission: holisticAccess.permission,
       schoolId: holisticAccess.school!.id,
       programId: holisticAccess.school!.programId,
       academicYear: CURRENT_ACADEMIC_YEAR,
-    })}
+    }),
+    getHolisticAssignmentCoverageSummary({
+      permission: holisticAccess.permission,
+      schoolId: holisticAccess.school!.id,
+      programId: holisticAccess.school!.programId,
+      academicYear: CURRENT_ACADEMIC_YEAR,
+    }),
+    holisticAccess.canEdit
+      ? listEligibleHolisticMentors({
+          schoolId: holisticAccess.school!.id,
+          programId: holisticAccess.school!.programId,
+        })
+      : Promise.resolve([]),
+  ]);
+  return <AdminSchoolRoster
+    schoolCode={schoolCode}
+    programId={holisticAccess.school!.programId}
+    academicYear={CURRENT_ACADEMIC_YEAR}
+    role={role}
+    canEdit={holisticAccess.canEdit}
+    students={students}
+    summary={summary}
+    mentors={mentors}
   />;
 }
 
@@ -637,6 +678,8 @@ async function buildSchoolTabs({
   session,
   permission,
   school,
+  holisticProgramId,
+  holisticProgramChoices,
   enrollmentContent,
   academicMentorshipContent,
   curriculumAccess,
@@ -650,6 +693,8 @@ async function buildSchoolTabs({
   session: HolisticMentorshipSession;
   permission: UserPermission | null;
   school: School;
+  holisticProgramId?: number | null;
+  holisticProgramChoices?: number[];
   enrollmentContent: ReactNode;
   academicMentorshipContent: ReactNode;
   curriculumAccess: FeatureAccessResult;
@@ -664,34 +709,31 @@ async function buildSchoolTabs({
     session,
     permission,
     schoolCode: school.code,
+    programId: holisticProgramId,
+    programChoices: holisticProgramChoices,
     access: holisticMentorshipAccess,
   });
-  const tabs: SchoolTab[] = [
-    { id: "enrollment", label: "Enrollment", content: enrollmentContent },
-  ];
-  if (curriculumAccess.canView) {
-    tabs.push({
+  const candidates: Array<SchoolTab & { show: boolean }> = [
+    { id: "enrollment", label: "Enrollment", content: enrollmentContent, show: true },
+    {
       id: "curriculum",
       label: "Curriculum",
       content: <CurriculumTab schoolCode={school.code} schoolName={school.name} canEdit={curriculumAccess.canEdit} />,
-    });
-  }
-  if (performanceAccess.canView) {
-    tabs.push({
+      show: curriculumAccess.canView,
+    },
+    {
       id: "performance",
       label: "Performance",
       content: <PerformanceTab schoolUdise={school.udise_code || school.code} />,
-    });
-  }
-  if (quizSessionsAccess.canView) {
-    tabs.push({
+      show: performanceAccess.canView,
+    },
+    {
       id: "quiz_sessions",
       label: "Quiz Sessions",
       content: <QuizSessionsTab schoolId={school.id} canEdit={quizSessionsAccess.canEdit} />,
-    });
-  }
-  if (teacherFeedbackAccess.canView) {
-    tabs.push({
+      show: quizSessionsAccess.canView,
+    },
+    {
       id: "teacher_feedback",
       label: "Teacher Feedback",
       content: (
@@ -700,22 +742,30 @@ async function buildSchoolTabs({
           canEdit={teacherFeedbackAccess.canEdit}
         />
       ),
-    });
-  }
-  if (mentorshipAccess.canView) {
-    tabs.push({ id: "mentorship", label: "Academic Mentorship", content: academicMentorshipContent });
-  }
-  if (holisticContent) {
-    tabs.push({ id: "holistic_mentorship", label: "Holistic Mentorship", content: holisticContent });
-  }
-  if (visitsAccess.canView) {
-    tabs.push({
+      show: teacherFeedbackAccess.canView,
+    },
+    {
+      id: "mentorship",
+      label: "Academic Mentorship",
+      content: academicMentorshipContent,
+      show: mentorshipAccess.canView,
+    },
+    {
+      id: "holistic_mentorship",
+      label: "Holistic Mentorship",
+      content: holisticContent,
+      show: Boolean(holisticContent),
+    },
+    {
       id: "visits",
       label: "School Visits",
       content: <VisitsTab schoolCode={school.code} canEdit={visitsAccess.canEdit} />,
-    });
-  }
-  return tabs;
+      show: visitsAccess.canView,
+    },
+  ];
+  return candidates
+    .filter((tab) => tab.show)
+    .map(({ id, label, content }) => ({ id, label, content }));
 }
 
 function SchoolPageLayout({
@@ -739,7 +789,7 @@ function SchoolPageLayout({
         userEmail={userEmail}
       />
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-        <SchoolTabs tabs={tabs} defaultTab="enrollment" />
+        <SchoolTabs tabs={tabs} defaultTab={tabs[0]?.id} />
       </main>
     </div>
   );
@@ -768,9 +818,105 @@ function canDropoutStudent(
   return ["admin", "program_manager", "program_admin"].includes(permission?.role ?? "");
 }
 
-export default async function SchoolPage({ params }: PageProps) {
+function requestedHolisticProgramId(rawValue: string | string[] | undefined) {
+  if (rawValue === undefined) return undefined;
+  if (typeof rawValue !== "string") return null;
+  const programId = Number(rawValue);
+  return isHolisticMentorshipProgramId(programId) ? programId : null;
+}
+
+function resolveHolisticProgramId(
+  requestedProgramId: number | null | undefined,
+  programChoices: number[],
+): number | null | undefined {
+  return requestedProgramId === null
+    ? null
+    : requestedProgramId ?? (programChoices.length === 1 ? programChoices[0] : undefined);
+}
+
+function holisticProgramChoices(
+  school: School,
+  permission: UserPermission | null,
+): number[] {
+  const actorPrograms = permission?.role === "admin" ||
+    permission?.role === "holistic_mentorship_admin"
+    ? [...HOLISTIC_MENTORSHIP_PROGRAM_IDS]
+    : getProgramContextSync(permission).programIds.filter(isHolisticMentorshipProgramId);
+  const allowed = new Set(actorPrograms);
+  return (school.centre_program_ids ?? [])
+    .map(Number)
+    .filter((programId, index, values) =>
+      isHolisticMentorshipProgramId(programId) &&
+      allowed.has(programId) &&
+      values.indexOf(programId) === index,
+    );
+}
+
+function holisticProgramHref(schoolCode: string, programId: number): string {
+  return `/school/${schoolCode}?program_id=${programId}`;
+}
+
+function HolisticProgramChoice({ schoolCode, programIds }: {
+  schoolCode: string;
+  programIds: number[];
+}) {
+  return (
+    <Card elevation="sm" className="border-accent/30 p-6">
+      <h2 className="text-lg font-bold text-text-primary">Choose a Holistic Mentorship Program</h2>
+      <p className="mt-1 text-sm text-text-muted">
+        This School supports more than one Holistic Mentorship Program. Choose one to continue.
+      </p>
+      <div className="mt-4 flex flex-wrap gap-3">
+        {programIds.map((programId) => (
+          <Link
+            key={programId}
+            href={holisticProgramHref(schoolCode, programId)}
+            className="rounded-lg border border-accent px-4 py-2 text-sm font-bold text-accent hover:bg-accent/10"
+          >
+            {PROGRAM_ID_TO_LABEL[programId] ?? `Program ${programId}`}
+          </Link>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+function isAdminPermission(permission: UserPermission | null) {
+  return permission?.role === "admin";
+}
+
+async function holisticAdminSchoolLayout(params: {
+  session: Session;
+  permission: UserPermission;
+  school: School;
+  programId?: number | null;
+  programChoices?: number[];
+}) {
+  const holisticContent = await buildHolisticMentorshipContent({
+    session: params.session,
+    permission: params.permission,
+    schoolCode: params.school.code,
+    programId: params.programId,
+    programChoices: params.programChoices,
+    access: getFeatureAccess(params.permission, "holistic_mentorship"),
+  });
+  if (!holisticContent) redirect("/admin/holistic-mentorship");
+  return <SchoolPageLayout
+    school={params.school}
+    tabs={[{
+      id: "holistic_mentorship",
+      label: "Holistic Mentorship",
+      content: holisticContent,
+    }]}
+    backHref="/admin/holistic-mentorship"
+    userEmail={params.session.user?.email ?? undefined}
+  />;
+}
+
+export default async function SchoolPage({ params, searchParams }: PageProps) {
   const session = await getServerSession(authOptions);
   const { udise } = await params;
+  const requestedProgramId = requestedHolisticProgramId((await searchParams)?.program_id);
 
   if (!session) {
     redirect("/");
@@ -785,7 +931,17 @@ export default async function SchoolPage({ params }: PageProps) {
   const permission = await resolveSchoolPermission(session);
   const identityAccessMessage = getSchoolIdentityAccessMessage(session, permission, school);
   if (identityAccessMessage) return identityAccessMessage;
-  redirectHolisticMentorshipAdmin(permission);
+  const programChoices = holisticProgramChoices(school, permission);
+  const holisticProgramId = resolveHolisticProgramId(requestedProgramId, programChoices);
+  if (permission?.role === "holistic_mentorship_admin") {
+    return holisticAdminSchoolLayout({
+      session,
+      permission,
+      school,
+      programId: holisticProgramId,
+      programChoices,
+    });
+  }
 
   const programContext = getProgramContextSync(permission);
   const programAccessMessage = getProgramAccessMessage(session, programContext);
@@ -816,7 +972,7 @@ export default async function SchoolPage({ params }: PageProps) {
   ]);
 
   const nvsStreams = getDistinctNVSStreams(batches);
-  const isAdmin = permission?.role === "admin";
+  const isAdmin = isAdminPermission(permission);
   const navigation = getSchoolNavigation(session, permission);
   const enrollmentContent = (
     <EnrollmentSchoolTab
@@ -844,6 +1000,8 @@ export default async function SchoolPage({ params }: PageProps) {
     session,
     permission,
     school,
+    holisticProgramId,
+    holisticProgramChoices: programChoices,
     enrollmentContent,
     academicMentorshipContent,
     curriculumAccess: access.curriculum,
