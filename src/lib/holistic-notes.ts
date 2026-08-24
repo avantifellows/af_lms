@@ -152,7 +152,7 @@ async function loadExistingNotes(
 }
 
 function claimsErasedDraft(existing: ExistingNotes | null, mode: NotesInput["mode"]): boolean {
-  return !!existing && existing.state === "draft" && !existing.has_answers && mode === "draft";
+  return !!existing && existing.state === "draft" && existing.has_answers === false && mode === "draft";
 }
 
 function validateAuthor(existing: ExistingNotes | null, input: NotesInput): HolisticNotesResult | null {
@@ -232,7 +232,7 @@ function validateExisting(
   questionIds: Set<number>,
   input: NotesInput
 ): HolisticNotesResult | null {
-  const revision = existingRevision(existing);
+  const revision = claimsErasedDraft(existing, input.mode) ? 0 : existingRevision(existing);
   if (revision !== input.expectedRevision) {
     return notesConflict(revision);
   }
@@ -250,6 +250,9 @@ async function upsertNotes(
   input: NotesInput
 ): Promise<{ notesId: number; revision: number }> {
   if (existing) {
+    const expectedDatabaseRevision = claimsErasedDraft(existing, input.mode)
+      ? existing.revision
+      : input.expectedRevision;
     const updated = await client.query<{ revision: number }>(
         `UPDATE holistic_mentorship_post_session_notes
          SET revision = revision + 1,
@@ -259,7 +262,7 @@ async function upsertNotes(
                THEN COALESCE(first_submitted_at, now()) ELSE first_submitted_at END,
              last_edited_at = now(), updated_at = now()
          WHERE id = $1 AND revision = $2 RETURNING revision`,
-      [existing.id, input.expectedRevision, input.mode, input.actorUserId]
+      [existing.id, expectedDatabaseRevision, input.mode, input.actorUserId]
     );
     if (!updated.rows[0]) throw new Error("optimistic_notes_update_failed");
     return { notesId: Number(existing.id), revision: updated.rows[0].revision };

@@ -17,7 +17,10 @@ const {
   mockListAcademicMentorshipMappings,
   mockListAcademicMentorshipTeacherMentees,
   mockListHolisticAssignmentRoster,
+  mockGetHolisticAssignmentCoverageSummary,
+  mockListEligibleHolisticMentors,
   mockRequireHolisticMentorshipAccess,
+  mockGetLmsSupportedProgramIds,
 } = vi.hoisted(() => ({
   mockGetServerSession: vi.fn(),
   mockGetUserPermission: vi.fn(),
@@ -36,7 +39,10 @@ const {
   mockListAcademicMentorshipMappings: vi.fn(),
   mockListAcademicMentorshipTeacherMentees: vi.fn(),
   mockListHolisticAssignmentRoster: vi.fn(),
+  mockGetHolisticAssignmentCoverageSummary: vi.fn(),
+  mockListEligibleHolisticMentors: vi.fn(),
   mockRequireHolisticMentorshipAccess: vi.fn(),
+  mockGetLmsSupportedProgramIds: vi.fn(),
 }));
 
 vi.mock("next-auth", () => ({ getServerSession: mockGetServerSession }));
@@ -57,6 +63,12 @@ vi.mock("@/lib/permissions", async (importOriginal) => {
   };
 });
 vi.mock("@/lib/db", () => ({ query: mockQuery }));
+// Mocked (rather than driven through the sequential mockQuery chain) so the
+// centres read has one obvious seam per test. Defaulted below to the compiled-in
+// list, which is what an empty `centres` table resolves to anyway.
+vi.mock("@/lib/lms-programs", () => ({
+  getLmsSupportedProgramIds: mockGetLmsSupportedProgramIds,
+}));
 vi.mock("@/lib/school-student-list-data-issues", () => ({
   processStudents: mockProcessStudents,
 }));
@@ -71,6 +83,10 @@ vi.mock("@/lib/holistic-mentorship", () => ({
 }));
 vi.mock("@/lib/holistic-mappings", () => ({
   listHolisticAssignmentRoster: mockListHolisticAssignmentRoster,
+  getHolisticAssignmentCoverageSummary: mockGetHolisticAssignmentCoverageSummary,
+}));
+vi.mock("@/lib/holistic-mentor-eligibility", () => ({
+  listEligibleHolisticMentors: mockListEligibleHolisticMentors,
 }));
 vi.mock("next/link", () => ({
   __esModule: true,
@@ -216,6 +232,7 @@ vi.mock("@/components/EditStudentModal", () => ({
 }));
 
 import SchoolPage from "./page";
+import { PROGRAM_IDS, PROGRAM_IDS_ORDERED } from "@/lib/constants";
 
 // ---- helpers ----
 
@@ -328,8 +345,13 @@ async function resolveAsyncComponent(
 const renderResolved = async (jsx: React.ReactElement) =>
   render(await resolveAsyncComponent(jsx));
 
-const renderPage = async (udise = "24120100101") => {
-  const jsx = await SchoolPage({ params: Promise.resolve({ udise }) });
+const renderPage = async (udise = "24120100101", programId?: string) => {
+  const jsx = await SchoolPage({
+    params: Promise.resolve({ udise }),
+    searchParams: programId === undefined
+      ? undefined
+      : Promise.resolve({ program_id: programId }),
+  });
   return renderResolved(jsx);
 };
 
@@ -338,6 +360,7 @@ const renderPage = async (udise = "24120100101") => {
 describe("SchoolPage (server component)", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    mockGetLmsSupportedProgramIds.mockResolvedValue([...PROGRAM_IDS_ORDERED]);
     // Re-establish sentinel implementations after reset
     mockRedirect.mockImplementation((url: string) => {
       throw new Error(`REDIRECT:${url}`);
@@ -357,6 +380,17 @@ describe("SchoolPage (server component)", () => {
     mockListAcademicMentorshipMappings.mockResolvedValue([]);
     mockListAcademicMentorshipTeacherMentees.mockResolvedValue([]);
     mockListHolisticAssignmentRoster.mockResolvedValue([]);
+    mockGetHolisticAssignmentCoverageSummary.mockResolvedValue({
+      eligible: 0,
+      assigned: 0,
+      unassigned: 0,
+      activeMentors: 0,
+      coveragePercentage: 0,
+      completed: 0,
+      pending: 0,
+      noActivePhase: 0,
+    });
+    mockListEligibleHolisticMentors.mockResolvedValue([]);
     mockGetAcademicMentorshipActorUserId.mockResolvedValue(101);
     mockRequireHolisticMentorshipAccess.mockResolvedValue({
       ok: false,
@@ -1040,6 +1074,61 @@ describe("SchoolPage (server component)", () => {
     expect(screen.getByTestId("enrollment-stats-total")).toHaveTextContent("1");
   });
 
+  // GPUC Shimoga regression: 73 students with correct current enrollments in
+  // Karnataka CoE (97) rendered an EMPTY Enrollment tab, because activeStudents
+  // was filtered against the hand-maintained PROGRAM_IDS list, which lacked 97.
+  it("surfaces students of a centre program that is in the supported list", async () => {
+    const students = [
+      makeStudent({
+        group_user_id: "gu-1",
+        user_id: "u-1",
+        grade: 11,
+        program_id: PROGRAM_IDS.KARNATAKA_COE,
+        program_name: "Karnataka CoE",
+        status: "active",
+      }),
+    ];
+
+    setupAdminDefaults();
+    mockGetProgramContextSync.mockReturnValue({
+      hasAccess: true,
+      programIds: [PROGRAM_IDS.KARNATAKA_COE],
+      isNVSOnly: false,
+      hasCoEOrNodal: true,
+    });
+    mockProcessStudents.mockResolvedValue({ students, issues: [] });
+
+    await renderPage();
+
+    expect(screen.getByText("Karnataka CoE Students")).toBeInTheDocument();
+    expect(screen.getByTestId("enrollment-stats-total")).toHaveTextContent("1");
+  });
+
+  it("hides that same student when the program is NOT in the supported list — the pre-fix behaviour", async () => {
+    // Proves the supported list is genuinely what gates the roster, so this
+    // cannot silently regress to an unrelated cause.
+    const students = [
+      makeStudent({
+        group_user_id: "gu-1",
+        user_id: "u-1",
+        grade: 11,
+        program_id: PROGRAM_IDS.KARNATAKA_COE,
+        program_name: "Karnataka CoE",
+        status: "active",
+      }),
+    ];
+
+    setupAdminDefaults();
+    mockGetLmsSupportedProgramIds.mockResolvedValue(
+      PROGRAM_IDS_ORDERED.filter((id) => id !== PROGRAM_IDS.KARNATAKA_COE),
+    );
+    mockProcessStudents.mockResolvedValue({ students, issues: [] });
+
+    await renderPage();
+
+    expect(screen.queryByText("Karnataka CoE Students")).not.toBeInTheDocument();
+  });
+
   it("renders one program's stats at a time when multiple programs are present", async () => {
     const students = [
       makeStudent({
@@ -1514,8 +1603,8 @@ describe("SchoolPage (server component)", () => {
     await renderPage();
     expect(mockRequireHolisticMentorshipAccess).toHaveBeenCalledWith(
       expect.anything(),
-      "program_read",
-      { schoolCode: "70705" }
+      "assignment_coverage_read",
+      { schoolCode: "70705", programId: undefined }
     );
   });
 
@@ -1524,7 +1613,7 @@ describe("SchoolPage (server component)", () => {
     mockRequireHolisticMentorshipAccess.mockResolvedValue({
       ok: true,
       permission,
-      school: { id: 20, code: "SCH001" },
+      school: { id: 20, code: "SCH001", programId: 1 },
       actorUserId: 101,
       canEdit: false,
     });
@@ -1544,31 +1633,274 @@ describe("SchoolPage (server component)", () => {
     expect(screen.getByText("Asha Rao")).toBeInTheDocument();
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
     expect(mockListHolisticAssignmentRoster).toHaveBeenCalledWith({
+      permission,
       schoolId: 20,
+      programId: 1,
       academicYear: "2026-2027",
     });
   });
 
-  it("keeps the dedicated Admin out of non-Holistic School data", async () => {
+  it.each(["program_manager", "program_admin"] as const)(
+    "shows scoped read-only Assignment Coverage for an in-scope %s",
+    async (role) => {
+    setupAdminDefaults({ id: "20", code: "SCH001" });
+    const permission = makePermission({
+      email: `${role}@example.com`,
+      role,
+      level: 1,
+      school_codes: ["SCH001"],
+      program_ids: [1],
+    });
+    mockGetServerSession.mockResolvedValue(googleSession({ user: { email: `${role}@example.com` } }));
+    mockGetUserPermission.mockResolvedValue(permission);
+    mockRequireHolisticMentorshipAccess.mockResolvedValue({
+      ok: true,
+      permission,
+      school: { id: 20, code: "SCH001", programId: 1 },
+      programId: 1,
+      programIds: [1],
+      canEdit: false,
+    });
+    mockListHolisticAssignmentRoster.mockResolvedValue([{
+      studentId: 41,
+      name: "Asha Rao",
+      externalStudentId: "S41",
+      grade: 11,
+      activePhaseId: 73,
+      activeNotesState: null,
+      ownership: { mappingId: 8, mentorUserId: 9, mentorName: "Anita Mentor" },
+    }]);
+    mockGetHolisticAssignmentCoverageSummary.mockResolvedValue({
+      eligible: 1,
+      assigned: 1,
+      unassigned: 0,
+      activeMentors: 1,
+      coveragePercentage: 100,
+      completed: 0,
+      pending: 1,
+      noActivePhase: 0,
+    });
+
+    await renderPage();
+
+    expect(screen.getByText("School assignment coverage for 2026-2027")).toBeInTheDocument();
+    expect(screen.getByText("Asha Rao")).toBeInTheDocument();
+    expect(screen.getByText("100.0%")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Assign|Remove Mentor/ })).not.toBeInTheDocument();
+    expect(mockRequireHolisticMentorshipAccess).toHaveBeenCalledWith(
+      expect.objectContaining({ user: { email: `${role}@example.com` } }),
+      "assignment_coverage_read",
+      { schoolCode: "SCH001", programId: undefined },
+    );
+    expect(mockListHolisticAssignmentRoster).toHaveBeenCalledWith({
+      permission,
+      schoolId: 20,
+      programId: 1,
+      academicYear: "2026-2027",
+    });
+    expect(mockGetHolisticAssignmentCoverageSummary).toHaveBeenCalledWith({
+      permission,
+      schoolId: 20,
+      programId: 1,
+      academicYear: "2026-2027",
+    });
+  });
+
+  it("passes an explicit supported Program through for a multi-Program School", async () => {
+    setupAdminDefaults({ id: "20", code: "SCH001", centre_program_ids: [1, 78] });
+    const permission = makePermission({
+      email: "pm@example.com",
+      role: "program_manager",
+      level: 1,
+      school_codes: ["SCH001"],
+      program_ids: [1, 78],
+    });
+    mockGetServerSession.mockResolvedValue(googleSession({ user: { email: "pm@example.com" } }));
+    mockGetUserPermission.mockResolvedValue(permission);
+    mockRequireHolisticMentorshipAccess.mockResolvedValue({
+      ok: true,
+      permission,
+      school: { id: 20, code: "SCH001", programId: 78 },
+      programId: 78,
+      programIds: [78],
+      canEdit: false,
+    });
+
+    await renderPage("24120100101", "78");
+
+    expect(mockRequireHolisticMentorshipAccess).toHaveBeenCalledWith(
+      expect.anything(),
+      "assignment_coverage_read",
+      { schoolCode: "SCH001", programId: 78 },
+    );
+    expect(mockListHolisticAssignmentRoster).toHaveBeenCalledWith(
+      expect.objectContaining({ programId: 78, schoolId: 20 }),
+    );
+  });
+
+  it("offers an explicit choice when an Admin opens a dual-Program School without a selection", async () => {
+    setupAdminDefaults({ id: "20", code: "SCH001", centre_program_ids: [1, 78] });
+    const permission = makePermission({ role: "admin", program_ids: [1] });
+    mockGetUserPermission.mockResolvedValue(permission);
+
+    await renderPage();
+
+    expect(screen.getByTestId("tab-holistic_mentorship")).toHaveTextContent(
+      "Choose a Holistic Mentorship Program",
+    );
+    expect(screen.getByRole("link", { name: "JNV CoE" })).toHaveAttribute(
+      "href",
+      "/school/SCH001?program_id=1",
+    );
+    expect(screen.getByRole("link", { name: "EMRS CoE" })).toHaveAttribute(
+      "href",
+      "/school/SCH001?program_id=78",
+    );
+    expect(mockRequireHolisticMentorshipAccess).not.toHaveBeenCalled();
+  });
+
+  it("scopes the dual-Program choice to a Program Manager's permitted Program", async () => {
+    setupAdminDefaults({ id: "20", code: "SCH001", centre_program_ids: [1, 78] });
+    const permission = makePermission({
+      email: "pm@example.com",
+      role: "program_manager",
+      level: 1,
+      school_codes: ["SCH001"],
+      program_ids: [1],
+    });
+    mockGetServerSession.mockResolvedValue(
+      googleSession({ user: { email: "pm@example.com" } }),
+    );
+    mockGetUserPermission.mockResolvedValue(permission);
+    mockRequireHolisticMentorshipAccess.mockResolvedValue({
+      ok: true,
+      permission,
+      school: { id: 20, code: "SCH001", programId: 1 },
+      programId: 1,
+      programIds: [1],
+      canEdit: false,
+    });
+
+    await renderPage();
+
+    expect(screen.queryByRole("link", { name: "EMRS CoE" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Choose a Holistic Mentorship Program")).not.toBeInTheDocument();
+    expect(mockRequireHolisticMentorshipAccess).toHaveBeenCalledWith(
+      expect.objectContaining({ user: { email: "pm@example.com" } }),
+      "assignment_coverage_read",
+      { schoolCode: "SCH001", programId: 1 },
+    );
+  });
+
+  it("resolves a single supported Program before the School Holistic access gate", async () => {
+    setupAdminDefaults({ id: "20", code: "SCH001", centre_program_ids: [78] });
+    const permission = makePermission({ role: "teacher", program_ids: [78] });
+    mockGetUserPermission.mockResolvedValue(permission);
+    mockGetServerSession.mockResolvedValue(
+      googleSession({ user: { email: "teacher@avantifellows.org" } }),
+    );
+    mockGetProgramContextSync.mockReturnValue({
+      hasAccess: true,
+      programIds: [78],
+      isNVSOnly: false,
+      hasCoEOrNodal: true,
+    });
+    mockRequireHolisticMentorshipAccess.mockResolvedValue({
+      ok: true,
+      permission,
+      school: { id: 20, code: "SCH001", programId: 78 },
+      actorUserId: 101,
+      canEdit: false,
+    });
+
+    await renderPage();
+
+    expect(mockRequireHolisticMentorshipAccess).toHaveBeenCalledWith(
+      expect.anything(),
+      "roster_view",
+      { schoolCode: "SCH001", programId: 78 },
+    );
+  });
+
+  it("does not expose Holistic coverage for a forged unsupported Program URL", async () => {
+    setupAdminDefaults({ id: "20", code: "SCH001" });
+
+    await renderPage("24120100101", "999");
+
+    expect(mockRequireHolisticMentorshipAccess).not.toHaveBeenCalled();
+    expect(mockListHolisticAssignmentRoster).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("tab-holistic_mentorship")).not.toBeInTheDocument();
+  });
+
+  it("wires eligible Mentors into writable Admin coverage assignments", async () => {
+    const { permission } = setupAdminDefaults({ id: "20", code: "SCH001" });
+    mockRequireHolisticMentorshipAccess.mockResolvedValue({
+      ok: true,
+      permission,
+      school: { id: 20, code: "SCH001", programId: 78 },
+      actorUserId: 101,
+      canEdit: true,
+    });
+    mockListHolisticAssignmentRoster.mockResolvedValue([{
+      studentId: 42,
+      name: "Ravi Shah",
+      externalStudentId: "S42",
+      grade: 12,
+      activePhaseId: 74,
+      activeNotesState: null,
+      ownership: null,
+    }]);
+    mockListEligibleHolisticMentors.mockResolvedValue([
+      { userId: 27, name: "Nila Mentor", email: "nila@example.com" },
+    ]);
+
+    await renderPage();
+
+    expect(screen.getByRole("button", { name: "Assign Ravi Shah" })).toBeEnabled();
+    expect(mockListEligibleHolisticMentors).toHaveBeenCalledWith({
+      schoolId: 20,
+      programId: 78,
+    });
+  });
+
+  it("shows the dedicated Admin only Holistic School coverage without reading enrollment data", async () => {
+    const permission = makePermission({
+      email: "holistic@example.com",
+      level: 3,
+      role: "holistic_mentorship_admin",
+      program_ids: [1],
+    });
     mockGetServerSession.mockResolvedValue(
       googleSession({ user: { email: "holistic@example.com" } })
     );
     mockQuery.mockResolvedValueOnce([makeSchool()]);
-    mockGetUserPermission.mockResolvedValue(
-      makePermission({
-        email: "holistic@example.com",
-        level: 3,
-        role: "holistic_mentorship_admin",
-        program_ids: [1],
-      })
-    );
+    mockGetUserPermission.mockResolvedValue(permission);
+    mockGetFeatureAccess.mockReturnValue(featureAccess(true, true));
+    mockRequireHolisticMentorshipAccess.mockResolvedValue({
+      ok: true,
+      permission,
+      school: { id: 20, code: "70705", programId: 1 },
+      canEdit: true,
+    });
+    mockListHolisticAssignmentRoster.mockResolvedValue([{
+      studentId: 42,
+      name: "Ravi Shah",
+      externalStudentId: "S42",
+      grade: 12,
+      activePhaseId: 74,
+      activeNotesState: null,
+      ownership: null,
+    }]);
 
-    // The redirect lives in the shared RosterPage — so centre pages get it too
-    // — which means it fires when the wrapper's RosterPage resolves, not inside
-    // SchoolPage itself.
-    await expect(renderPage("70705")).rejects.toThrow(
-      "REDIRECT:/admin/holistic-mentorship"
+    await renderPage("70705");
+
+    expect(screen.getByTestId("school-tabs")).toHaveAttribute(
+      "data-default-tab",
+      "holistic_mentorship",
     );
+    expect(screen.getByTestId("tab-holistic_mentorship")).toBeInTheDocument();
+    expect(screen.queryByTestId("tab-enrollment")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Assign Ravi Shah" })).toBeEnabled();
     expect(mockProcessStudents).not.toHaveBeenCalled();
   });
 

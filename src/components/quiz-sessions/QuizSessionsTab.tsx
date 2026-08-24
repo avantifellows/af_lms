@@ -94,6 +94,7 @@ const EXAM_TRACK_OPTIONS: { value: ExamTrack; label: string }[] = [
   { value: "jee_main", label: "JEE Main" },
   { value: "jee_advanced", label: "JEE Advanced" },
   { value: "neet", label: "NEET" },
+  { value: "cet", label: "CET" },
 ];
 const CMS_SUBJECT_OPTIONS = ["Physics", "Chemistry", "Maths", "Biology"];
 
@@ -2827,14 +2828,11 @@ function CmsAwarePaperLinks({
   const cmsSource = getMetaString(meta, "cms_source");
   // Ids may be stored as numbers (older sessions) or strings — accept both.
   const cmsTestId = getMetaScalar(meta, "cms_test_id");
-  const curriculumId = getMetaScalar(meta, "cms_curriculum_id");
-  const gradeId = getMetaScalar(meta, "cms_grade_id");
 
-  if (cmsSource && cmsTestId && curriculumId && gradeId) {
-    const base =
-      `/api/cms/test-pdf?testId=${encodeURIComponent(cmsTestId)}` +
-      `&curriculumId=${encodeURIComponent(curriculumId)}` +
-      `&gradeId=${encodeURIComponent(gradeId)}`;
+  // Test id only: also gating on cms_curriculum_id/cms_grade_id would silently fall through
+  // to the legacy branch — no PDF links — for sessions created after we stopped storing them.
+  if (cmsSource && cmsTestId) {
+    const base = `/api/cms/test-pdf?testId=${encodeURIComponent(cmsTestId)}`;
     return (
       <PaperResourceLinks
         questionHref={`${base}&type=questions`}

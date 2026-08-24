@@ -40,7 +40,8 @@ export type Feature =
   | "performance"
   | "summary_stats"
   | "pm_dashboard"
-  | "quiz_sessions";
+  | "quiz_sessions"
+  | "teacher_feedback";
 
 // Feature access levels
 export type FeatureAccess = "none" | "view" | "edit";
@@ -50,17 +51,23 @@ const FEATURE_PERMISSIONS: Record<Feature, Record<UserRole, FeatureAccess>> = {
   students: { teacher: "edit", program_manager: "edit", program_admin: "edit", holistic_mentorship_admin: "none", admin: "edit" },
   visits: { teacher: "none", program_manager: "edit", program_admin: "edit", holistic_mentorship_admin: "none", admin: "edit" },
   curriculum: { teacher: "edit", program_manager: "view", program_admin: "edit", holistic_mentorship_admin: "none", admin: "edit" },
-  academic_mentorship: { teacher: "view", program_manager: "view", program_admin: "edit", holistic_mentorship_admin: "none", admin: "edit" },
-  holistic_mentorship: { teacher: "edit", program_manager: "none", program_admin: "none", holistic_mentorship_admin: "edit", admin: "edit" },
+  academic_mentorship: { teacher: "none", program_manager: "none", program_admin: "none", holistic_mentorship_admin: "none", admin: "none" },
+  holistic_mentorship: { teacher: "edit", program_manager: "view", program_admin: "view", holistic_mentorship_admin: "edit", admin: "edit" },
   performance: { teacher: "view", program_manager: "view", program_admin: "view", holistic_mentorship_admin: "none", admin: "view" },
   summary_stats: { teacher: "none", program_manager: "view", program_admin: "view", holistic_mentorship_admin: "none", admin: "view" },
   pm_dashboard: { teacher: "none", program_manager: "view", program_admin: "view", holistic_mentorship_admin: "none", admin: "view" },
   quiz_sessions: { teacher: "edit", program_manager: "view", program_admin: "view", holistic_mentorship_admin: "none", admin: "view" },
+  // PM-driven: a PM/admin sets up student feedback ABOUT teachers, so teachers
+  // must not have edit (or view) here. Mirrors `visits`, which main widened to
+  // program_admin: "edit" — feedback setup is the same class of PM fieldwork.
+  // `holistic_mentorship_admin` is scoped to its own feature only.
+  teacher_feedback: { teacher: "none", program_manager: "edit", program_admin: "edit", holistic_mentorship_admin: "none", admin: "edit" },
 };
 
 // Features gated to CoE/Nodal programs only (NVS-only users get "none")
 const NVS_GATED_FEATURES: Set<Feature> = new Set([
   "visits", "curriculum", "pm_dashboard", "summary_stats", "quiz_sessions",
+  "teacher_feedback",
 ]);
 
 export interface FeatureAccessResult {
@@ -533,25 +540,36 @@ export async function canAccessStudent(
   const email = session.user?.email;
   if (!email) return false;
   const permission = await getResolvedPermission(email);
-  if (!canAccessSchoolSync(permission, school.code, school.region || undefined)) {
-    // Level-2 region users may still match via the async fallback path that
-    // canAccessSchool does (querying school.region when not provided). We've
-    // already passed region in, so the sync check is sufficient here.
-    if (!permission || permission.level !== 2) return false;
-    const ok = await canAccessSchool(email, school.code, school.region || undefined);
-    if (!ok) return false;
-  }
-  if (options?.requireEdit) {
-    const { canEdit } = getFeatureAccess(permission, "students");
-    if (!canEdit) return false;
-    // Per-program ownership — mirrors the UI's per-row canEditStudent check.
-    // ownsRecord returns true for admins, true for null program_id
-    // (unassigned student), and true if the user's program_ids includes the
-    // student's program. Without this, a COE-only user could POST/DELETE
-    // documents for an NVS student in a mixed school.
-    if (!ownsRecord(permission, school.program_id)) return false;
-  }
+  if (!(await hasStudentSchoolAccess(email, permission, school))) return false;
+  if (options?.requireEdit && !canEditStudentRecords(permission, school)) return false;
   return true;
+}
+
+async function hasStudentSchoolAccess(
+  email: string,
+  permission: UserPermission | null,
+  school: StudentScope,
+): Promise<boolean> {
+  if (canAccessSchoolSync(permission, school.code, school.region || undefined)) return true;
+  // Level-2 region users may still match via the async fallback path that
+  // canAccessSchool does (querying school.region when not provided). We've
+  // already passed region in, so the sync check is sufficient here.
+  if (!permission || permission.level !== 2) return false;
+  return canAccessSchool(email, school.code, school.region || undefined);
+}
+
+function canEditStudentRecords(
+  permission: UserPermission | null,
+  school: StudentScope,
+): boolean {
+  const { canEdit } = getFeatureAccess(permission, "students");
+  if (!canEdit) return false;
+  // Per-program ownership — mirrors the UI's per-row canEditStudent check.
+  // ownsRecord returns true for admins, true for null program_id
+  // (unassigned student), and true if the user's program_ids includes the
+  // student's program. Without this, a COE-only user could POST/DELETE
+  // documents for an NVS student in a mixed school.
+  return ownsRecord(permission, school.program_id);
 }
 
 // Synchronous helper to get program context from a permission object

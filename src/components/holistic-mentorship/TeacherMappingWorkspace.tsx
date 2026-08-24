@@ -16,6 +16,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { Button } from "@/components/ui";
 import { CURRENT_ACADEMIC_YEAR, PROGRAM_IDS } from "@/lib/constants";
+import HolisticTutorialLink from "./HolisticTutorialLink";
 import StudentIdentity, { studentInitials } from "./StudentIdentity";
 
 interface Student {
@@ -165,16 +166,12 @@ function studentCount(count: number): string {
   return `${count} Student${count === 1 ? "" : "s"}`;
 }
 
-function assignmentConfirmation(choices: Student[], reassigned: Student[]): string {
-  if (reassigned.length === 0) return `Assign ${studentCount(choices.length)} to yourself?`;
-  const mentors = [...new Set(reassigned.map((student) => student.ownership!.mentorName))];
-  const verb = reassigned.length === 1 ? "is" : "are";
-  return `${studentCount(reassigned.length)} ${verb} currently assigned to ${mentors.join(", ")}. Assign all ${studentCount(choices.length)} to yourself?`;
+function assignmentConfirmation(choices: Student[]): string {
+  return `Assign ${studentCount(choices.length)} to yourself?`;
 }
 
-function assignmentSuccess(choices: Student[], reassigned: Student[]): string {
-  if (reassigned.length === 0) return `Assigned ${studentCount(choices.length)} to you.`;
-  return `Assigned ${studentCount(choices.length)} to you, including ${studentCount(reassigned.length)} reassigned from another Mentor.`;
+function assignmentSuccess(choices: Student[]): string {
+  return `Assigned ${studentCount(choices.length)} to you.`;
 }
 
 async function mappingChangeError(
@@ -293,29 +290,26 @@ export default function TeacherMappingWorkspace({
   };
 
   const assign = async () => {
-    const choices = visibleRoster.filter((student) => selected.includes(student.studentId));
-    const reassigned = choices.filter(
-      (student) => student.ownership && student.ownership.mentorUserId !== actorUserId
+    const choices = visibleRoster.filter(
+      (student) => !student.ownership && selected.includes(student.studentId)
     );
     if (choices.length === 0) return;
-    const takeover = reassigned.length > 0;
-    if (!window.confirm(assignmentConfirmation(choices, reassigned))) return;
+    if (!window.confirm(assignmentConfirmation(choices))) return;
     setBusy(true);
     const problem = await mappingChangeError("POST", {
       school_code: schoolCode,
       program_id: programId,
       academic_year: CURRENT_ACADEMIC_YEAR,
-      takeover_confirmed: takeover,
       selections: choices.map((student) => ({
         student_id: student.studentId,
-        expected_mapping_id: student.ownership?.mappingId ?? null,
+        expected_mapping_id: null,
       })),
     }, "Unable to update Mappings");
     const refreshed = await load();
     if (problem) {
       setMessage(problem);
     } else if (refreshed) {
-      setSuccess(assignmentSuccess(choices, reassigned));
+      setSuccess(assignmentSuccess(choices));
     }
     setBusy(false);
   };
@@ -352,9 +346,12 @@ export default function TeacherMappingWorkspace({
           </h2>
           <p className="text-sm text-text-muted">Assign Students to yourself to start mentorship</p>
         </div>
-        <span className="self-start rounded-full bg-info-bg px-3 py-1.5 font-mono text-xs font-bold text-info sm:self-auto">
-          {CURRENT_ACADEMIC_YEAR}
-        </span>
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          <HolisticTutorialLink schoolCode={schoolCode} />
+          <span className="rounded-full bg-info-bg px-3 py-1.5 font-mono text-xs font-bold text-info">
+            {CURRENT_ACADEMIC_YEAR}
+          </span>
+        </div>
       </div>
       {message && <p role="alert" className="text-sm text-danger">{message}</p>}
       {success && <p role="status" className="text-sm text-success">{success}</p>}
@@ -364,7 +361,9 @@ export default function TeacherMappingWorkspace({
         selected={selected} busy={busy} assignOpen={assignOpen} schoolCode={schoolCode}
         programId={programId}
         onOpenChange={setAssignOpen} onFilterChange={changeFilter} onToggle={toggle}
-        onSelectShown={() => setSelected(pagedRoster.map((student) => student.studentId))}
+        onSelectShown={() => setSelected(
+          pagedRoster.filter((student) => !student.ownership).map((student) => student.studentId)
+        )}
         onAssign={assign} onRemove={remove} />
     </section>
   );
@@ -471,7 +470,7 @@ function AssignmentRoster({ students, visibleCount, page, pageCount, allCount, f
         <span className="text-xs text-text-muted">
           You can view full mentorship data only after a Student is assigned to you.
         </span>
-        {canEdit && students.length > 0 && (
+        {canEdit && students.some((student) => !student.ownership) && (
           <Button type="button" variant="ghost" className="text-xs" onClick={onSelectShown}>
             Select all shown
           </Button>
@@ -592,11 +591,13 @@ function RosterTable({ students, allCount, canEdit, selected, page, visibleCount
         <tbody className="divide-y divide-border">
           {students.map((student) => <tr key={student.studentId} className="hover:bg-accent/5">
             {canEdit && <td className="px-3 py-2">
-              <label className="inline-flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded-md focus-within:ring-2 focus-within:ring-accent focus-within:ring-offset-2">
-                <input type="checkbox" aria-label={`Select ${student.name}`}
-                  checked={selected.includes(student.studentId)}
-                  className="h-5 w-5 accent-accent" onChange={() => onToggle(student.studentId)} />
-              </label>
+              {!student.ownership && (
+                <label className="inline-flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded-md focus-within:ring-2 focus-within:ring-accent focus-within:ring-offset-2">
+                  <input type="checkbox" aria-label={`Select ${student.name}`}
+                    checked={selected.includes(student.studentId)}
+                    className="h-5 w-5 accent-accent" onChange={() => onToggle(student.studentId)} />
+                </label>
+              )}
             </td>}
             <td className="px-3 py-2">
               <StudentIdentity student={student} />

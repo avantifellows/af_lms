@@ -95,7 +95,23 @@ export default function TestDeepDive({
       {data && !loading && (
         <>
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 md:gap-4">
-            <StatCard label="Students Appeared" value={data.summary.students_appeared} size="sm" color="brand-gold" />
+            {data.summary.students_submitted < data.summary.students_appeared ? (
+              // Scores below cover submitted attempts only, so show the
+              // denominator rather than an unqualified head count.
+              <StatCard
+                label="Submitted / Appeared"
+                value={`${data.summary.students_submitted} / ${data.summary.students_appeared}`}
+                size="sm"
+                color="brand-gold"
+              />
+            ) : (
+              <StatCard
+                label="Students Appeared"
+                value={data.summary.students_appeared}
+                size="sm"
+                color="brand-gold"
+              />
+            )}
             <StatCard label="Avg Score" value={`${data.summary.avg_marks}/${data.summary.total_marks} (${data.summary.avg_score}%)`} size="sm" color="brand-coral" />
             <StatCard label="Min Score" value={`${data.summary.min_marks}/${data.summary.total_marks} (${data.summary.min_score}%)`} size="sm" color="brand-amber" />
             <StatCard label="Max Score" value={`${data.summary.max_marks}/${data.summary.total_marks} (${data.summary.max_score}%)`} size="sm" color="brand-gold" />

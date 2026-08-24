@@ -8,26 +8,36 @@ const snsClient = new SNSClient({
   },
 });
 
-export async function publishMessage(message: Record<string, unknown>) {
+/**
+ * Publish to the sessionCreator topic. Never throws — a publish failure must not
+ * fail a create that already succeeded — but RETURNS whether it published, so a
+ * caller that records status can avoid claiming success when the Lambda was never
+ * triggered. Existing callers that ignore the result keep their old behaviour.
+ */
+export async function publishMessage(
+  message: Record<string, unknown>
+): Promise<boolean> {
   const topicArn = process.env.AF_TOPIC_ARN;
   const environment = process.env.APP_ENV ?? "production";
   const payload = JSON.stringify({ environment, ...message });
 
   if (!topicArn) {
     console.error("[SNS ERROR] Missing AF_TOPIC_ARN");
-    return;
+    return false;
   }
 
   if (environment === "testing") {
     console.info("[SNS DEBUG] publishing message:", payload);
-    return;
+    return true;
   }
 
   try {
     const command = new PublishCommand({ Message: payload, TopicArn: topicArn });
     const data = await snsClient.send(command);
     console.info("[SNS SUCCESS] publishing message:", data.MessageId);
+    return true;
   } catch (error) {
     console.error("[SNS ERROR] publishing message:", error);
+    return false;
   }
 }

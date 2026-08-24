@@ -228,8 +228,6 @@ describe("POST /api/quiz-sessions/[id]/regenerate", () => {
       expect((call?.[1] as RequestInit)?.method).toBe("PUT");
       expect(JSON.parse(String((call?.[1] as RequestInit)?.body))).toEqual({
         test_id: 504,
-        curriculum_id: 1,
-        grade_id: 7,
         quiz_type: "assessment",
         // Stored end_time is IST wall-clock; sent as a bare wall-clock so quiz-backend can
         // re-derive answer-visibility against the refreshed quiz duration.
@@ -288,13 +286,40 @@ describe("POST /api/quiz-sessions/[id]/regenerate", () => {
       expect(fetchCall("http://db-service.local/session/42")).toBeUndefined();
     });
 
-    it("returns 422 when the CMS identifiers are missing", async () => {
+    it("regenerates from cms_test_id alone, without curriculum/grade", async () => {
+      // Sessions created after we stopped persisting curriculum/grade carry only the id.
       const { POST } = await loadRouteModule();
       mocks.mockGetServerSession.mockResolvedValue(ADMIN_SESSION);
       mocks.mockQuery.mockResolvedValue([
         cmsSessionRow({
           meta_data: { cms_source: "nex-gen-cms", cms_test_id: "504" },
         }),
+      ]);
+      mocks.mockFetch.mockImplementation((input: unknown) => {
+        if (String(input).includes("/quiz/")) {
+          return Promise.resolve(jsonResponse({ id: "quiz-abc123", warnings: [] }));
+        }
+        return Promise.resolve(jsonResponse({ id: 42 }));
+      });
+
+      const res = await POST(
+        new Request("http://localhost") as never,
+        routeParams({ id: "42" })
+      );
+
+      expect(res.status).toBe(200);
+      const call = fetchCall("http://quiz-backend.local/quiz/quiz-abc123/from-cms");
+      expect(call).toBeDefined();
+      expect(
+        JSON.parse(String((call?.[1] as RequestInit)?.body)).test_id
+      ).toBe(504);
+    });
+
+    it("returns 422 when cms_test_id is missing", async () => {
+      const { POST } = await loadRouteModule();
+      mocks.mockGetServerSession.mockResolvedValue(ADMIN_SESSION);
+      mocks.mockQuery.mockResolvedValue([
+        cmsSessionRow({ meta_data: { cms_source: "nex-gen-cms" } }),
       ]);
 
       const res = await POST(

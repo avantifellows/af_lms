@@ -9,6 +9,8 @@ import {
   isCentreSeated,
 } from "@/lib/permissions";
 import { query } from "@/lib/db";
+import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
+import { requireHolisticMentorshipAccess } from "@/lib/holistic-mentorship";
 import Link from "next/link";
 import SchoolSearch from "@/components/SchoolSearch";
 import StudentSearch from "@/components/StudentSearch";
@@ -97,42 +99,65 @@ async function getSchools(
   const searchPattern = search ? `%${search}%` : null;
   const offset = (page - 1) * SCHOOLS_PER_PAGE;
 
-  // Stopgap: hide duplicate placeholder school rows. A stale bulk import left a
-  // second JNV row (null udise_code, 0 students) for ~190 schools, so they
-  // double-listed on the dashboard. Exclude a row only when its udise is null
-  // AND a same-named JNV row carries a real udise — that pins it as the dup.
-  // Single schools that legitimately lack a udise (a few Telangana/WB rows with
-  // real students) have no udise-bearing namesake and are kept. The data team
-  // will purge the placeholder rows; remove this filter once they have.
-  const excludeDupPlaceholders = `
-    AND NOT (
+  // Narrow to the visible set FIRST, in a MATERIALIZED CTE, then apply the
+  // dedup + search inside it.
+  //
+  // Previously both predicates sat in a flat WHERE over all ~10.8k school rows,
+  // so every dashboard load — search or not — evaluated the dup-placeholder
+  // correlated self-join against the whole table (~220 nested scans of 10.8k
+  // rows). Only ~880 schools are ever visible and 688 survive dedup, so the
+  // work was almost entirely wasted. MATERIALIZED is load-bearing: without it
+  // PG inlines the CTE and we are back to the flat plan.
+  //
+  // School visibility scope: the historical JNV set PLUS any school linked to an
+  // active centre. Centre-linked covers the non-JNV centre rollout (Punjab CoE
+  // meritorious / EMRS / Karnataka) without disturbing JNV. Centre-driven, not a
+  // category allowlist — new centre types light up by linking a centre.
+  //
+  // Dedup stopgap: a stale bulk import left a second JNV row (null udise_code,
+  // 0 students) for ~190 schools, so they double-listed. Exclude a row only when
+  // its udise is null AND a same-named JNV row carries a real udise — that pins
+  // it as the dup. Schools that legitimately lack a udise (a few Telangana/WB
+  // rows with real students) have no udise-bearing namesake and are kept. The
+  // data team will purge the placeholder rows; remove this filter once they have.
+  //
+  // The namesake lookup reads `visible` rather than `school`: it only ever
+  // matches JNV rows, and every JNV row is in `visible` by the first scope
+  // branch, so the result is identical (verified against prod — both forms
+  // return the same 688 ids, zero difference either way).
+  const visibleSchoolsCte = `
+    WITH visible AS MATERIALIZED (
+      SELECT s.id, s.code, s.name, s.district, s.state, s.region,
+             s.udise_code, s.af_school_category
+      FROM school s
+      WHERE s.af_school_category = 'JNV'
+         OR EXISTS (SELECT 1 FROM centres c WHERE c.school_id = s.id AND c.is_active)
+    )`;
+
+  // Aliased `visible` AS s so the shared schoolQueryPlan predicates (s.name,
+  // s.code, s.district) keep working unchanged.
+  const dedupFilter = `
+    WHERE NOT (
       s.udise_code IS NULL
       AND EXISTS (
-        SELECT 1 FROM school s2
-        WHERE s2.af_school_category = 'JNV'
-          AND s2.name = s.name
-          AND s2.udise_code IS NOT NULL
+        SELECT 1 FROM visible v2
+        WHERE v2.af_school_category = 'JNV'
+          AND v2.name = s.name
+          AND v2.udise_code IS NOT NULL
       )
     )`;
 
-  // School visibility scope: the historical JNV set PLUS any school linked to an
-  // active centre. Centre-linked covers the non-JNV centre rollout (Punjab CoE
-  // meritorious / EMRS) without disturbing JNV. Centre-driven, not a category
-  // allowlist — new centre types light up by linking a centre, no code change.
-  const schoolScope = `(
-    s.af_school_category = 'JNV'
-    OR EXISTS (SELECT 1 FROM centres c WHERE c.school_id = s.id AND c.is_active)
-  )`;
-
   const baseQuery = `
+    ${visibleSchoolsCte}
     SELECT s.id, s.code, s.name, s.district, s.state, s.region
-    FROM school s
-    WHERE ${schoolScope}${excludeDupPlaceholders}`;
+    FROM visible s
+    ${dedupFilter}`;
 
   const countBaseQuery = `
+    ${visibleSchoolsCte}
     SELECT COUNT(DISTINCT s.id) as total
-    FROM school s
-    WHERE ${schoolScope}${excludeDupPlaceholders}`;
+    FROM visible s
+    ${dedupFilter}`;
 
   if (codes.length === 0) return { schools: [], totalCount: 0 };
   const plan = schoolQueryPlan(codes, searchPattern, offset);
@@ -192,12 +217,16 @@ function canViewCurriculumSummary(permission: DashboardPermission, context: Dash
   return supportedRole && context.hasCoEOrNodal && getFeatureAccess(permission, "curriculum").canView;
 }
 
-function dashboardFeatures(permission: DashboardPermission, context: DashboardProgramContext): DashboardFeatures {
+function dashboardFeatures(
+  permission: DashboardPermission,
+  context: DashboardProgramContext,
+  canViewHolisticAdmin: boolean,
+): DashboardFeatures {
   return {
     hasPMAccess: getFeatureAccess(permission, "pm_dashboard").canView,
     canViewVisitSummary: canViewVisitSummary(permission),
     showCurriculumSummary: canViewCurriculumSummary(permission, context),
-    canViewHolisticAdmin: permission.role === "admin" && getFeatureAccess(permission, "holistic_mentorship").canView,
+    canViewHolisticAdmin,
   };
 }
 
@@ -370,7 +399,11 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     redirect("/admin/holistic-mentorship");
   }
 
-  const features = dashboardFeatures(permission, programContext);
+  const holisticAccess = await requireHolisticMentorshipAccess(
+    { user: { email } },
+    "program_read",
+  );
+  const features = dashboardFeatures(permission, programContext, holisticAccess.ok);
   const seated = isCentreSeated(permission);
   const view = resolveDashboardView(viewParam, seated);
   const schoolCodes = await getAccessibleSchoolCodes(email, permission);

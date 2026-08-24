@@ -19,12 +19,14 @@ import {
   isCentreSeated,
   hasMultipleSchools,
   PROGRAM_IDS,
-  PROGRAM_IDS_ORDERED,
 } from "@/lib/permissions";
 import {
   CURRENT_ACADEMIC_YEAR,
+  HOLISTIC_MENTORSHIP_PROGRAM_IDS,
   isHolisticMentorshipProgramId,
+  PROGRAM_ID_TO_LABEL,
 } from "@/lib/constants";
+import { getLmsSupportedProgramIds } from "@/lib/lms-programs";
 import { type Grade } from "@/components/StudentTable";
 import { getSchoolRoster, getCentreStudents } from "@/lib/school-students";
 import PageHeader from "@/components/PageHeader";
@@ -35,6 +37,7 @@ import PerformanceTab from "@/components/PerformanceTab";
 import VisitsTab from "@/components/VisitsTab";
 import { Batch } from "@/components/EditStudentModal";
 import QuizSessionsTab from "@/components/quiz-sessions/QuizSessionsTab";
+import TeacherFeedbackTab from "@/components/teacher-feedback/TeacherFeedbackTab";
 import {
   buildProgramStats,
   studentDroppedFromProgram,
@@ -49,7 +52,11 @@ import {
   requireHolisticMentorshipAccess,
   type HolisticMentorshipSession,
 } from "@/lib/holistic-mentorship";
-import { listHolisticAssignmentRoster } from "@/lib/holistic-mappings";
+import {
+  getHolisticAssignmentCoverageSummary,
+  listHolisticAssignmentRoster,
+} from "@/lib/holistic-mappings";
+import { listEligibleHolisticMentors } from "@/lib/holistic-mentor-eligibility";
 import type { FeatureAccessResult, UserPermission } from "@/lib/permissions";
 
 export interface RosterSchool {
@@ -282,10 +289,86 @@ function AcademicMentorshipSchoolTab({
 
 // The holistic-mentorship admin has no roster scope at all — their whole
 // surface is the admin console, so bounce them there off any roster page.
-function redirectHolisticMentorshipAdmin(permission: UserPermission | null): void {
-  if (permission?.role === "holistic_mentorship_admin") {
-    redirect("/admin/holistic-mentorship");
-  }
+/**
+ * Which Holistic Mentorship program a school page should show.
+ *
+ * A school can host more than one holistic program (JNV CoE + EMRS CoE), so the
+ * school page picks via `?program_id=`: absent + one choice auto-selects, absent
+ * + several renders {@link HolisticProgramChoice}, a non-holistic/garbage value
+ * resolves to null (tab hidden, not a 500).
+ *
+ * A CENTRE page never chooses — the centre's own program is the answer, and
+ * offering the school's other programs would leak exactly what centre scoping
+ * exists to prevent. Centre callers pass no param and get [] choices.
+ */
+function requestedHolisticProgramId(rawValue: string | string[] | undefined) {
+  if (rawValue === undefined) return undefined;
+  if (typeof rawValue !== "string") return null;
+  const programId = Number(rawValue);
+  return isHolisticMentorshipProgramId(programId) ? programId : null;
+}
+
+function resolveHolisticProgramId(
+  requestedProgramId: number | null | undefined,
+  programChoices: number[],
+): number | null | undefined {
+  return requestedProgramId === null
+    ? null
+    : requestedProgramId ?? (programChoices.length === 1 ? programChoices[0] : undefined);
+}
+
+function holisticProgramChoices(
+  school: RosterSchool,
+  permission: UserPermission | null,
+): number[] {
+  const actorPrograms = permission?.role === "admin" ||
+    permission?.role === "holistic_mentorship_admin"
+    ? [...HOLISTIC_MENTORSHIP_PROGRAM_IDS]
+    : getProgramContextSync(permission).programIds.filter(isHolisticMentorshipProgramId);
+  const allowed = new Set(actorPrograms);
+  return (school.centre_program_ids ?? [])
+    .map(Number)
+    .filter((programId, index, values) =>
+      isHolisticMentorshipProgramId(programId) &&
+      allowed.has(programId) &&
+      values.indexOf(programId) === index,
+    );
+}
+
+function shouldChooseHolisticProgram(
+  programId: number | null | undefined,
+  programChoices?: number[],
+): boolean {
+  return programId === undefined && (programChoices?.length ?? 0) > 1;
+}
+
+function holisticProgramHref(schoolCode: string, programId: number): string {
+  return `/school/${schoolCode}?program_id=${programId}`;
+}
+
+function HolisticProgramChoice({ schoolCode, programIds }: {
+  schoolCode: string;
+  programIds: number[];
+}) {
+  return (
+    <Card elevation="sm" className="border-accent/30 p-6">
+      <h2 className="text-lg font-bold text-text-primary">Choose a Holistic Mentorship Program</h2>
+      <p className="mt-1 text-sm text-text-muted">
+        This School supports more than one Holistic Mentorship Program. Choose one to continue.
+      </p>
+      <div className="mt-4 flex flex-wrap gap-3">
+        {programIds.map((programId) => (
+          <Link
+            key={programId}
+            href={holisticProgramHref(schoolCode, programId)}
+            className="rounded-lg border border-accent px-4 py-2 text-sm font-bold text-accent hover:bg-accent/10"
+          >
+            {PROGRAM_ID_TO_LABEL[programId] ?? `Program ${programId}`}
+          </Link>
+        ))}
+      </div>
+    </Card>
+  );
 }
 
 /**
@@ -309,6 +392,8 @@ async function buildHolisticMentorshipContent({
   access,
   isCentre,
   centreProgramId,
+  programId,
+  programChoices,
 }: {
   session: HolisticMentorshipSession;
   permission: UserPermission | null;
@@ -316,14 +401,20 @@ async function buildHolisticMentorshipContent({
   access: FeatureAccessResult;
   isCentre: boolean;
   centreProgramId?: number;
+  programId?: number | null;
+  programChoices?: number[];
 }): Promise<ReactNode | null> {
-  if (!access.canView) return null;
+  if (!access.canView || programId === null) return null;
   if (isCentre && !isHolisticMentorshipProgramId(Number(centreProgramId))) return null;
-  const isTeacher = permission?.role === "teacher";
+  if (shouldChooseHolisticProgram(programId, programChoices)) {
+    return <HolisticProgramChoice schoolCode={schoolCode} programIds={programChoices!} />;
+  }
+  const role = permission?.role;
+  const isTeacher = role === "teacher";
   const holisticAccess = await requireHolisticMentorshipAccess(
     session,
-    isTeacher ? "roster_view" : "program_read",
-    { schoolCode }
+    isTeacher ? "roster_view" : "assignment_coverage_read",
+    { schoolCode, programId }
   );
   if (!holisticAccess.ok) return null;
   if (isTeacher) {
@@ -336,15 +427,36 @@ async function buildHolisticMentorshipContent({
       />
     );
   }
+  const [students, summary, mentors] = await Promise.all([
+    listHolisticAssignmentRoster({
+      permission: holisticAccess.permission,
+      schoolId: holisticAccess.school!.id,
+      programId: holisticAccess.school!.programId,
+      academicYear: CURRENT_ACADEMIC_YEAR,
+    }),
+    getHolisticAssignmentCoverageSummary({
+      permission: holisticAccess.permission,
+      schoolId: holisticAccess.school!.id,
+      programId: holisticAccess.school!.programId,
+      academicYear: CURRENT_ACADEMIC_YEAR,
+    }),
+    holisticAccess.canEdit
+      ? listEligibleHolisticMentors({
+          schoolId: holisticAccess.school!.id,
+          programId: holisticAccess.school!.programId,
+        })
+      : Promise.resolve([]),
+  ]);
   return (
     <AdminSchoolRoster
       schoolCode={schoolCode}
       programId={holisticAccess.school!.programId}
-      students={await listHolisticAssignmentRoster({
-        schoolId: holisticAccess.school!.id,
-        programId: holisticAccess.school!.programId,
-        academicYear: CURRENT_ACADEMIC_YEAR,
-      })}
+      academicYear={CURRENT_ACADEMIC_YEAR}
+      role={role}
+      canEdit={holisticAccess.canEdit}
+      students={students}
+      summary={summary}
+      mentors={mentors}
     />
   );
 }
@@ -375,6 +487,44 @@ function AccessDenied({
 }
 
 /**
+ * The page chrome (header + tabs). Shared by the full roster page and the
+ * holistic-admin single-tab view, so both keep the same header and back link.
+ */
+function RosterShell({
+  title,
+  subtitle,
+  backHref,
+  userEmail,
+  actions,
+  tabs,
+}: {
+  title: string;
+  subtitle: string;
+  backHref?: string;
+  userEmail?: string;
+  actions?: ReactNode;
+  tabs: Array<{ id: string; label: string; content: ReactNode }>;
+}) {
+  return (
+    <div className="min-h-screen bg-bg">
+      <PageHeader
+        title={title}
+        subtitle={subtitle}
+        backHref={backHref}
+        userEmail={userEmail}
+        actions={actions}
+      />
+
+      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+        {/* defaultTab follows the first VISIBLE tab: the holistic-admin view has
+            no Enrollment tab, so a hardcoded "enrollment" would select nothing. */}
+        <SchoolTabs tabs={tabs} defaultTab={tabs[0]?.id} />
+      </main>
+    </div>
+  );
+}
+
+/**
  * Shared roster page for a school OR a centre. The two callers
  * (school/[udise] and centre/[id]) resolve their entity and hand us a
  * {@link RosterScope}; everything below — auth, permissions, tabs, header,
@@ -383,9 +533,14 @@ function AccessDenied({
 export default async function RosterPage({
   scope,
   session,
+  holisticProgramParam,
 }: {
   scope: RosterScope;
   session: Session;
+  // Raw `?program_id=` from the school page — which Holistic Mentorship program
+  // to show when a school hosts more than one. Centre callers omit it: the
+  // centre's own program is the answer (see holisticProgramChoices).
+  holisticProgramParam?: string | string[];
 }) {
   const school = scope.school;
   const isCentre = scope.kind === "centre";
@@ -410,6 +565,27 @@ export default async function RosterPage({
     ? await getResolvedPermission(session.user.email)
     : null;
 
+  // Which Holistic Mentorship program this page shows. A centre answers it
+  // itself — its own program, no choice offered, so a Nodal centre at a
+  // CoE+Nodal school can never reach the CoE holistic roster. A school may host
+  // several holistic programs and picks via ?program_id=.
+  //
+  // Deferred, not computed here: every access-denied path below must return
+  // before this runs (it reads the program context, which a denied user has no
+  // business resolving).
+  const resolveHolisticProgram = () => {
+    const choices = isCentre ? [] : holisticProgramChoices(school, permission);
+    return {
+      choices,
+      programId: isCentre
+        ? scope.centre.program_id ?? undefined
+        : resolveHolisticProgramId(
+            requestedHolisticProgramId(holisticProgramParam),
+            choices,
+          ),
+    };
+  };
+
   // For Google users, check school access (a centre inherits its school's access)
   if (!isPasscodeUser) {
     if (!permission) {
@@ -419,7 +595,39 @@ export default async function RosterPage({
       return <AccessDenied message="You don't have permission to view this page." />;
     }
 
-    redirectHolisticMentorshipAdmin(permission);
+    // The holistic-mentorship admin sees that school's holistic roster in place
+    // — and only that tab; they have no scope for anything else on the page.
+    // Their console links to /school/<code>?program_id=N, which is why school
+    // scope renders while centre scope still bounces to the console: a centre
+    // page is reached from the dashboard Centres tab, which this role never
+    // sees.
+    if (permission.role === "holistic_mentorship_admin") {
+      if (isCentre) redirect("/admin/holistic-mentorship");
+      const { programId, choices } = resolveHolisticProgram();
+      const holisticContent = await buildHolisticMentorshipContent({
+        session,
+        permission,
+        schoolCode: school.code,
+        access: getFeatureAccess(permission, "holistic_mentorship"),
+        isCentre,
+        programId,
+        programChoices: choices,
+      });
+      if (!holisticContent) redirect("/admin/holistic-mentorship");
+      return (
+        <RosterShell
+          title={school.name}
+          subtitle={`${school.district}, ${school.state} | Code: ${school.code}`}
+          backHref="/admin/holistic-mentorship"
+          userEmail={session.user?.email ?? undefined}
+          tabs={[{
+            id: "holistic_mentorship",
+            label: "Holistic Mentorship",
+            content: holisticContent,
+          }]}
+        />
+      );
+    }
 
     // Centre-seated staff are confined to their centre(s): the whole-school
     // roster page isn't theirs to open (their seat grants school access only so
@@ -485,6 +693,7 @@ export default async function RosterPage({
   const holisticMentorshipAccess = getFeatureAccess(permission, "holistic_mentorship", opts);
   const visitsAccess = getFeatureAccess(permission, "visits", opts);
   const quizSessionsAccess = getFeatureAccess(permission, "quiz_sessions", opts);
+  const teacherFeedbackAccess = getFeatureAccess(permission, "teacher_feedback", opts);
   // Student addition is an NVS school-page feature; a centre roster is scoped
   // to the centre's own program, so it never offers Add Student.
   const canAddStudent =
@@ -497,18 +706,25 @@ export default async function RosterPage({
 
   // Fetch enrollment data in parallel. THE fork: a centre pulls its own roster
   // from the centre_students view; a school pulls the full school roster.
-  const [{ students: dedupedStudents, issues: dataIssues }, grades, batches] =
-    await Promise.all([
-      isCentre ? getCentreStudents(scope.centre.id) : getSchoolRoster(school.id),
-      getGrades(),
-      getBatchesWithMetadata(),
-    ]);
+  const [
+    { students: dedupedStudents, issues: dataIssues },
+    grades,
+    batches,
+    supportedProgramIds,
+  ] = await Promise.all([
+    isCentre ? getCentreStudents(scope.centre.id) : getSchoolRoster(school.id),
+    getGrades(),
+    getBatchesWithMetadata(),
+    // centres-derived ∪ PROGRAM_IDS (D22c) — a newly onboarded centre program
+    // shows students without a code edit. Additive, so it can never hide one.
+    getLmsSupportedProgramIds(),
+  ]);
 
   // Separate active and dropout students (all students visible; editability is per-row)
   const activeStudents = dedupedStudents.filter(
     (s) =>
       s.status !== "dropout" &&
-      PROGRAM_IDS_ORDERED.some((programId) =>
+      supportedProgramIds.some((programId) =>
         studentHasCurrentProgram(s, programId),
       ),
   );
@@ -521,7 +737,7 @@ export default async function RosterPage({
 
   // Programs that have at least one student (active or dropped) in scope
   const programsWithStudents = new Set(
-    PROGRAM_IDS_ORDERED.filter((programId) =>
+    supportedProgramIds.filter((programId) =>
       dedupedStudents.some(
         (student) =>
           studentHasCurrentProgram(student, programId) ||
@@ -536,14 +752,14 @@ export default async function RosterPage({
   const isAdmin = permission?.role === "admin";
   const visibleProgramSet = new Set(
     (isPasscodeUser || isAdmin
-      ? PROGRAM_IDS_ORDERED
+      ? supportedProgramIds
       : programContext.programIds
     ).filter((id) => programsWithStudents.has(id)),
   );
 
   if (canAddStudent) visibleProgramSet.add(PROGRAM_IDS.NVS);
 
-  const visibleProgramIds = PROGRAM_IDS_ORDERED.filter((id) =>
+  const visibleProgramIds = supportedProgramIds.filter((id) =>
     visibleProgramSet.has(id),
   );
 
@@ -703,6 +919,19 @@ export default async function RosterPage({
     />
   );
 
+  // Teacher Feedback is inherently multi-centre: the tab fetches every active
+  // centre at the school and has the PM pick one. That's school-page data — on
+  // a centre page it would surface a sibling centre's feedback rounds, the same
+  // leak class as the four fixed in the 07-22 permissions review. Hidden on
+  // centre scope until the tab can take a centre (registered as debt).
+  const teacherFeedbackContent = (
+    <TeacherFeedbackTab
+      schoolCode={school.code}
+      canEdit={teacherFeedbackAccess.canEdit}
+    />
+  );
+
+  const holistic = resolveHolisticProgram();
   const holisticContent = await buildHolisticMentorshipContent({
     session,
     permission,
@@ -710,43 +939,54 @@ export default async function RosterPage({
     access: holisticMentorshipAccess,
     isCentre,
     centreProgramId,
+    programId: holistic.programId,
+    programChoices: holistic.choices,
   });
 
   // Tab visibility driven by feature permission matrix. Visits are school-linked
   // (a PM visits all of a school's centres in one trip), so the label stays
   // "School Visits" even on a centre page.
-  const tabs = [
-    { id: "enrollment", label: "Enrollment", content: enrollmentContent },
-    ...(curriculumAccess.canView ? [{ id: "curriculum", label: "Curriculum", content: curriculumContent }] : []),
-    ...(performanceAccess.canView ? [{ id: "performance", label: "Performance", content: performanceContent }] : []),
-    ...(quizSessionsAccess.canView ? [{ id: "quiz_sessions", label: "Quiz Sessions", content: quizSessionsContent }] : []),
-    ...(mentorshipAccess.canView ? [{ id: "mentorship", label: "Academic Mentorship", content: mentorshipContent }] : []),
-    ...(holisticContent ? [{ id: "holistic_mentorship", label: "Holistic Mentorship", content: holisticContent }] : []),
-    ...(visitsAccess.canView ? [{ id: "visits", label: "School Visits", content: visitsContent }] : []),
+  const candidates: Array<{ id: string; label: string; content: ReactNode; show: boolean }> = [
+    { id: "enrollment", label: "Enrollment", content: enrollmentContent, show: true },
+    { id: "curriculum", label: "Curriculum", content: curriculumContent, show: curriculumAccess.canView },
+    { id: "performance", label: "Performance", content: performanceContent, show: performanceAccess.canView },
+    { id: "quiz_sessions", label: "Quiz Sessions", content: quizSessionsContent, show: quizSessionsAccess.canView },
+    {
+      id: "teacher_feedback",
+      label: "Teacher Feedback",
+      content: teacherFeedbackContent,
+      show: !isCentre && teacherFeedbackAccess.canView,
+    },
+    { id: "mentorship", label: "Academic Mentorship", content: mentorshipContent, show: mentorshipAccess.canView },
+    {
+      id: "holistic_mentorship",
+      label: "Holistic Mentorship",
+      content: holisticContent,
+      show: Boolean(holisticContent),
+    },
+    { id: "visits", label: "School Visits", content: visitsContent, show: visitsAccess.canView },
   ];
+  const tabs = candidates
+    .filter((tab) => tab.show)
+    .map(({ id, label, content }) => ({ id, label, content }));
 
   return (
-    <div className="min-h-screen bg-bg">
-      <PageHeader
-        title={title}
-        subtitle={subtitle}
-        backHref={backHref}
-        userEmail={isPasscodeUser ? `School ${passcodeSchoolCode}` : session.user?.email || undefined}
-        actions={
-          visitsAccess.canEdit ? (
-            <Link
-              href={`/school/${school.code}/visit/new`}
-              className="inline-flex items-center rounded-lg px-3 py-2 text-sm font-bold text-text-on-accent bg-accent shadow-sm hover:bg-accent-hover active:bg-accent-hover/90 transition-colors"
-            >
-              Start Visit
-            </Link>
-          ) : undefined
-        }
-      />
-
-      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-        <SchoolTabs tabs={tabs} defaultTab="enrollment" />
-      </main>
-    </div>
+    <RosterShell
+      title={title}
+      subtitle={subtitle}
+      backHref={backHref}
+      userEmail={isPasscodeUser ? `School ${passcodeSchoolCode}` : session.user?.email || undefined}
+      tabs={tabs}
+      actions={
+        visitsAccess.canEdit ? (
+          <Link
+            href={`/school/${school.code}/visit/new`}
+            className="inline-flex items-center rounded-lg px-3 py-2 text-sm font-bold text-text-on-accent bg-accent shadow-sm hover:bg-accent-hover active:bg-accent-hover/90 transition-colors"
+          >
+            Start Visit
+          </Link>
+        ) : undefined
+      }
+    />
   );
 }

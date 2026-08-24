@@ -284,10 +284,12 @@ describe("CentrePage → RosterPage (centre scope)", () => {
       "data-school-code",
       "70705",
     );
+    // programId is the CENTRE's program, so the confinement is enforced by the
+    // access call itself rather than only by the tab-visibility gate above.
     expect(mockRequireHolisticMentorshipAccess).toHaveBeenCalledWith(
       expect.anything(),
       "roster_view",
-      { schoolCode: "70705" },
+      { schoolCode: "70705", programId: 1 },
     );
   });
 

@@ -9,6 +9,7 @@ import type {
   StudentQuestionRow,
 } from "@/types/quiz";
 import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
+import { AL_RANK } from "@/lib/academic-level";
 
 let bigQueryClient: BigQuery | null = null;
 
@@ -51,6 +52,11 @@ const FACT_TABLE = "`avantifellows.production_dbt_final.fact_student_test_result
 const DIM_STUDENT_TABLE = "`avantifellows.production_dbt_final.dim_student`";
 const FACT_QUESTION_LEVEL_TABLE =
   "`avantifellows.production_dbt_final.fact_student_test_results_question_level`";
+
+// An abandoned attempt still carries an academic_level, which would credit the
+// student with a level for a test they never submitted. NOT FALSE rather than
+// = TRUE: null means unknown (no test-level row upstream), not unsubmitted.
+const SUBMITTED_ONLY = "AND has_quiz_ended IS NOT FALSE";
 
 // Test formats that count as "major" (i.e. the Full Tests tab) — these also have
 // real Academic Level (AL) values populated on the section='overall' row.
@@ -251,18 +257,6 @@ export async function getBatchOverviewData(
   };
 }
 
-// Unified AL rank — M and B are stream-specific parallel scales.
-// M1 (engineering top) and B1 (medical top) share rank 3, M2/B2 share rank 2,
-// NQ rank 1, NE rank 0. Used for sorting + mode AL tie-break.
-export const AL_RANK: Record<string, number> = {
-  M1: 3,
-  B1: 3,
-  M2: 2,
-  B2: 2,
-  "Not Qualified": 1,
-  "Not Eligible for Academic Level": 0,
-};
-
 function alRank(al: string | null | undefined): number {
   if (!al) return -1;
   return AL_RANK[al] ?? -1;
@@ -315,6 +309,7 @@ export async function getCumulativeALData(
       AND academic_level IN (${alList})
       AND fk_student_id IS NOT NULL
       AND session_id IS NOT NULL
+      ${SUBMITTED_ONLY}
       ${programFilter}
       ${streamFilter}
       ${testGradeFilter}
@@ -480,6 +475,7 @@ export async function getTestQuestionLevelData(
       AND session_id = @sessionId
       AND academic_year = '${CURRENT_ACADEMIC_YEAR}'
       AND question_id IS NOT NULL
+      ${SUBMITTED_ONLY}
       ${programFilter}
       ${streamFilter}
     GROUP BY section, chapter_name, chapter_id, question_id

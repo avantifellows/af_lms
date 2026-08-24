@@ -37,9 +37,10 @@ async function getSchoolByCode(code: string): Promise<RosterSchool | null> {
 
 interface PageProps {
   params: Promise<{ udise: string }>;
+  searchParams?: Promise<{ program_id?: string | string[] }>;
 }
 
-export default async function SchoolPage({ params }: PageProps) {
+export default async function SchoolPage({ params, searchParams }: PageProps) {
   const session = await getServerSession(authOptions);
   const { udise } = await params;
 
@@ -52,5 +53,11 @@ export default async function SchoolPage({ params }: PageProps) {
     notFound();
   }
 
-  return <RosterPage scope={{ kind: "school", school }} session={session} />;
+  return (
+    <RosterPage
+      scope={{ kind: "school", school }}
+      session={session}
+      holisticProgramParam={(await searchParams)?.program_id}
+    />
+  );
 }

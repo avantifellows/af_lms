@@ -8,6 +8,8 @@ import type {
   StudentChapterScore,
   StudentQuestionRow,
 } from "@/types/quiz";
+import { getCategoryColor } from "@/lib/student-utils";
+import { alChipColor, alShortLabel } from "@/lib/academic-level";
 
 interface Props {
   students: StudentDeepDiveRow[];
@@ -32,6 +34,30 @@ const STATUS_CLASS: Record<StudentQuestionRow["status"], string> = {
   wrong: "text-danger",
   skipped: "text-text-muted",
 };
+
+// The on-track / off-track flag asked for in #28, read off the report doc's
+// qualification_status. etl-next already decides this (it drives the student's
+// recommendation message), so this surfaces that call rather than re-deriving
+// it from the AL code — the two would drift the moment cutoff logic changes.
+// Anything other than the two known values shows NA rather than guessing:
+// the fact model emits an empty status where no cutoff applies.
+function OnTrackCell({ status }: { status: string | null }) {
+  if (status === "Qualified") {
+    return (
+      <span className="inline-flex items-center px-2 py-0.5 text-xs font-bold uppercase tracking-wide rounded border bg-success-bg text-success border-success/30">
+        On track
+      </span>
+    );
+  }
+  if (status === "Not Qualified") {
+    return (
+      <span className="inline-flex items-center px-2 py-0.5 text-xs font-bold uppercase tracking-wide rounded border bg-warning-bg text-warning border-warning/30">
+        Off track
+      </span>
+    );
+  }
+  return <span className="text-text-muted">NA</span>;
+}
 
 // The questions for a single (student, chapter): match on chapter_id when the
 // v2 chapter row carries one, else fall back to a case-insensitive chapter_name
@@ -244,12 +270,27 @@ export default function StudentResultsTable({
   };
 
   const sorted = [...students].sort((a, b) => {
+    // Unsubmitted attempts always sit below submitted ones, whatever the sort:
+    // otherwise a 0% walkout interleaves with a genuine 0% and the ranked column
+    // reads out of order.
+    const aDone = a.has_quiz_ended !== false;
+    const bDone = b.has_quiz_ended !== false;
+    if (aDone !== bDone) return aDone ? -1 : 1;
+
     const mul = sortDir === "asc" ? 1 : -1;
     if (sortKey === "student_name") {
       return mul * a.student_name.localeCompare(b.student_name);
     }
     return mul * ((a[sortKey] ?? 0) - (b[sortKey] ?? 0));
   });
+
+  // Rank is over submitted attempts only, so a student who never submitted does
+  // not consume a position (and does not inflate the "of N" a teacher reads).
+  const rankByName = new Map<string, string>();
+  [...students]
+    .filter((s) => s.has_quiz_ended !== false)
+    .sort((a, b) => b.percentage - a.percentage)
+    .forEach((s, i) => rankByName.set(s.student_name, String(i + 1).padStart(2, "0")));
 
   const sortIcon = (key: SortKey) => {
     if (sortKey !== key) return "";
@@ -289,6 +330,9 @@ export default function StudentResultsTable({
                 Name{sortIcon("student_name")}
               </th>
               <th className={TH}>Gender</th>
+              <th className={TH}>Category</th>
+              <th className={TH}>AL</th>
+              <th className={TH}>On Track</th>
               <th className={SORTABLE_TH} onClick={() => handleSort("marks_scored")}>
                 Marks{sortIcon("marks_scored")}
               </th>
@@ -304,7 +348,7 @@ export default function StudentResultsTable({
             </tr>
           </thead>
           <tbody>
-            {sorted.map((s, idx) => {
+            {sorted.map((s) => {
               const isExpanded = expandedName === s.student_name;
               return (
                 <Fragment key={s.student_name}>
@@ -313,7 +357,7 @@ export default function StudentResultsTable({
                     onClick={() => toggleStudent(s.student_name)}
                   >
                     <td className="px-4 py-3 whitespace-nowrap text-sm font-bold text-accent">
-                      {String(idx + 1).padStart(2, "0")}
+                      {rankByName.get(s.student_name) ?? "—"}
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap text-sm font-semibold text-text-primary">
                       {s.student_name}
@@ -322,9 +366,38 @@ export default function StudentResultsTable({
                           {isExpanded ? "▼" : "▶"}
                         </span>
                       )}
+                      {s.has_quiz_ended === false && (
+                        <span
+                          className="ml-2 inline-flex items-center px-2 py-0.5 text-xs font-semibold rounded bg-danger text-white"
+                          title="This student never submitted the test, so their marks are only what was saved before they left."
+                        >
+                          Test Incomplete
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap text-sm text-text-secondary">
                       {s.gender || "-"}
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap text-sm">
+                      <span
+                        className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${getCategoryColor(s.category)}`}
+                      >
+                        {s.category || "—"}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap text-sm">
+                      {s.academic_level ? (
+                        <span
+                          className={`inline-flex items-center px-2 py-0.5 text-xs font-bold uppercase tracking-wide rounded border ${alChipColor(s.academic_level)}`}
+                        >
+                          {alShortLabel(s.academic_level)}
+                        </span>
+                      ) : (
+                        <span className="text-text-muted">NA</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap text-sm">
+                      <OnTrackCell status={s.qualification_status} />
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap text-sm font-mono text-text-primary">
                       {s.marks_scored}/{s.max_marks}
@@ -341,7 +414,7 @@ export default function StudentResultsTable({
                   </tr>
                   {isExpanded && s.subject_scores.length > 0 && (
                     <tr>
-                      <td colSpan={7} className="px-4 py-2 bg-bg">
+                      <td colSpan={10} className="px-4 py-2 bg-bg">
                         <div className="overflow-x-auto">
                           <table className="w-full">
                             <thead>
