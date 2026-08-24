@@ -11,7 +11,8 @@ import type {
   CurriculumConfigRow,
   CurriculumConfigWarning,
 } from "@/lib/curriculum-config";
-import type { ExamTrack } from "@/types/curriculum";
+import { getSubjectExamTrackCompatibilityError } from "@/lib/curriculum-subject-track";
+import { EXAM_TRACKS, formatExamTrack, type ExamTrack } from "@/lib/exam-tracks";
 
 interface CurriculumConfigTableProps {
   rows: CurriculumConfigRow[];
@@ -384,6 +385,7 @@ function RemovePanel({
   );
 }
 
+// fallow-ignore-next-line complexity
 function AddPanel({
   activeFilters,
   rows,
@@ -404,6 +406,7 @@ function AddPanel({
   const [chapterDropdownOpen, setChapterDropdownOpen] = useState(false);
   const [activeChapterIndex, setActiveChapterIndex] = useState(0);
   const [options, setOptions] = useState<CurriculumConfigChapterOption[]>([]);
+  const [chapterOptionsError, setChapterOptionsError] = useState("");
   const [selected, setSelected] = useState<CurriculumConfigChapterOption | null>(null);
   const [prescribedMinutes, setPrescribedMinutes] = useState(0);
   const [coverageSequence, setCoverageSequence] = useState(1);
@@ -426,16 +429,34 @@ function AddPanel({
     if (grade) params.set("grade", grade);
     if (subject) params.set("subject", subject);
     void fetch(`/api/curriculum/configs/chapter-options?${params.toString()}`)
-      .then((response) => response.json())
-      .then((json) => {
+      .then(async (response) => ({ response, json: await readJsonObject(response) }))
+      .then(({ response, json }) => {
         if (!cancelled) {
-          setOptions(json.options ?? []);
+          if (!response.ok) {
+            setOptions([]);
+            setChapterOptionsError(
+              jsonError(json, "Could not load chapter options.")
+            );
+            setActiveChapterIndex(0);
+            return;
+          }
+          const nextOptions = Array.isArray(json.options)
+            ? (json.options as CurriculumConfigChapterOption[])
+            : [];
+          setChapterOptionsError("");
+          setOptions(
+            nextOptions.filter(
+              (option) =>
+                !getSubjectExamTrackCompatibilityError(option.subjectName, examTrack)
+            )
+          );
           setActiveChapterIndex(0);
         }
       })
       .catch(() => {
         if (!cancelled) {
           setOptions([]);
+          setChapterOptionsError("Could not load chapter options.");
         }
       });
     return () => {
@@ -610,9 +631,11 @@ function AddPanel({
                   }}
                   className="min-h-[44px] rounded-md border border-border bg-bg-card px-3 py-2 text-sm font-normal text-text-primary"
                 >
-                  <option value="jee_main">JEE Main</option>
-                  <option value="jee_advanced">JEE Advanced</option>
-                  <option value="neet">NEET</option>
+                  {EXAM_TRACKS.map((track) => (
+                    <option key={track} value={track}>
+                      {formatExamTrack(track)}
+                    </option>
+                  ))}
                 </select>
               </label>
               <label className="flex flex-col gap-1 text-sm font-bold text-text-primary">
@@ -698,7 +721,7 @@ function AddPanel({
                   >
                     {options.length === 0 ? (
                       <div className="px-3 py-2 text-sm text-text-muted">
-                        No chapters match the add filters.
+                        {chapterOptionsError || "No chapters match the add filters."}
                       </div>
                     ) : (
                       options.map((option) => (
@@ -1175,14 +1198,4 @@ function rowMatchesFilters(
     return false;
   }
   return true;
-}
-
-function formatExamTrack(track: ExamTrack): string {
-  const labels: Record<ExamTrack, string> = {
-    jee_main: "JEE Main",
-    jee_advanced: "JEE Advanced",
-    neet: "NEET",
-    cet: "CET",
-  };
-  return labels[track];
 }

@@ -1,13 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown } from "lucide-react";
 
 import type {
   CurriculumSummaryProgramOption,
   CurriculumSummarySchoolOption,
   CurriculumSummarySubjectOption,
 } from "@/lib/curriculum-summary";
-import type { ExamTrack } from "@/types/curriculum";
+import { formatExamTrack, isExamTrack, type ExamTrack } from "@/lib/exam-tracks";
 
 interface SchoolFilterSelectProps {
   options: CurriculumSummarySchoolOption[];
@@ -50,12 +51,6 @@ interface StringFilterSelectProps {
   onSelectedValuesChange?: (selectedValues: string[]) => void;
 }
 
-interface DerivedFilterChipsProps {
-  label: string;
-  name: string;
-  values: string[];
-}
-
 interface SearchableFilterOption {
   value: string;
   label: string;
@@ -73,8 +68,6 @@ interface SearchableMultiSelectFilterProps {
   selectedValues: string[];
   onSelectedValuesChange?: (selectedValues: string[]) => void;
 }
-
-const MAX_VISIBLE_OPTIONS = 20;
 
 function matchesOption(option: SearchableFilterOption, query: string): boolean {
   const normalizedQuery = query.trim().toLowerCase();
@@ -272,38 +265,7 @@ export function StringFilterSelect({
   );
 }
 
-export function DerivedFilterChips({
-  label,
-  name,
-  values,
-}: DerivedFilterChipsProps) {
-  return (
-    <div className="flex flex-col gap-1 text-sm font-medium text-text-secondary">
-      <span>{label}</span>
-      <input type="hidden" name={name} value={values.join(",")} />
-      <div className="min-h-9 rounded-md border border-border bg-bg-muted px-3 py-2">
-        {values.length > 0 ? (
-          <div className="flex flex-wrap gap-2">
-            {values.map((value) => (
-              <span
-                key={value}
-                className="inline-flex max-w-full items-center rounded-md border border-border bg-hover-bg px-2 py-1 text-xs text-text-primary"
-              >
-                <span className="truncate">{value}</span>
-              </span>
-            ))}
-          </div>
-        ) : (
-          <span className="text-sm text-text-muted">No location data</span>
-        )}
-      </div>
-      <span className="text-xs font-normal text-text-muted">
-        Derived from selected schools
-      </span>
-    </div>
-  );
-}
-
+// fallow-ignore-next-line complexity
 function SearchableMultiSelectFilter({
   label,
   name,
@@ -317,24 +279,27 @@ function SearchableMultiSelectFilter({
   const [selected, setSelected] = useState(selectedValues);
   const [query, setQuery] = useState("");
   const [isOpen, setIsOpen] = useState(false);
-  const [activeIndex, setActiveIndex] = useState(0);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setSelected(selectedValues);
   }, [selectedValues]);
 
-  const optionByValue = useMemo(
-    () => new Map(options.map((option) => [option.value, option])),
-    [options]
-  );
+  useEffect(() => {
+    if (!isOpen) return;
+
+    function closeOnOutsideClick(event: MouseEvent) {
+      if (!containerRef.current?.contains(event.target as Node)) setIsOpen(false);
+    }
+
+    document.addEventListener("mousedown", closeOnOutsideClick);
+    return () => document.removeEventListener("mousedown", closeOnOutsideClick);
+  }, [isOpen]);
+
   const selectedSet = useMemo(() => new Set(selected), [selected]);
   const visibleOptions = useMemo(
-    () =>
-      options
-        .filter((option) => !selectedSet.has(option.value))
-        .filter((option) => matchesOption(option, query))
-        .slice(0, MAX_VISIBLE_OPTIONS),
-    [options, query, selectedSet]
+    () => options.filter((option) => matchesOption(option, query)),
+    [options, query]
   );
 
   function updateSelected(nextSelected: string[]) {
@@ -342,24 +307,17 @@ function SearchableMultiSelectFilter({
     onSelectedValuesChange?.(nextSelected);
   }
 
-  function addOption(value: string) {
-    if (!selected.includes(value)) {
-      updateSelected([...selected, value]);
-    }
-    setQuery("");
-    setActiveIndex(0);
-    setIsOpen(false);
-  }
-
-  function removeOption(value: string) {
-    updateSelected(selected.filter((selectedValue) => selectedValue !== value));
+  function toggleOption(value: string) {
+    updateSelected(
+      selectedSet.has(value)
+        ? selected.filter((selectedValue) => selectedValue !== value)
+        : [...selected, value]
+    );
   }
 
   function clearOptions() {
     updateSelected([]);
     setQuery("");
-    setActiveIndex(0);
-    setIsOpen(false);
   }
 
   function getOptionDisplayLabel(option: SearchableFilterOption): string {
@@ -367,134 +325,86 @@ function SearchableMultiSelectFilter({
   }
 
   return (
-    <div className="flex flex-col gap-1 text-sm font-medium text-text-secondary">
-      <label htmlFor={inputId}>{label}</label>
+    <div
+      ref={containerRef}
+      className="flex flex-col gap-1 text-sm font-medium text-text-secondary"
+    >
+      <span>{label}</span>
       <input type="hidden" name={name} value={selected.join(",")} />
       <div className="relative">
-        <input
-          id={inputId}
-          type="text"
-          role="combobox"
-          aria-autocomplete="list"
+        <button
+          type="button"
           aria-expanded={isOpen}
           aria-controls={`${inputId}-options`}
-          value={query}
-          onChange={(event) => {
-            setQuery(event.target.value);
-            setIsOpen(true);
-            setActiveIndex(0);
-          }}
-          onFocus={() => setIsOpen(true)}
-          onBlur={() => {
-            window.setTimeout(() => setIsOpen(false), 100);
-          }}
-          onKeyDown={(event) => {
-            if (event.key === "ArrowDown") {
-              event.preventDefault();
-              setIsOpen(true);
-              setActiveIndex((index) =>
-                visibleOptions.length === 0
-                  ? 0
-                  : Math.min(index + 1, visibleOptions.length - 1)
-              );
-            } else if (event.key === "ArrowUp") {
-              event.preventDefault();
-              setActiveIndex((index) => Math.max(index - 1, 0));
-            } else if (event.key === "Enter" && isOpen && visibleOptions[activeIndex]) {
-              event.preventDefault();
-              addOption(visibleOptions[activeIndex].value);
-            } else if (event.key === "Escape") {
-              setIsOpen(false);
-            } else if (event.key === "Backspace" && query === "" && selected.length > 0) {
-              removeOption(selected[selected.length - 1]);
-            }
-          }}
-          placeholder={placeholder}
-          className="w-full rounded-md border border-border bg-bg-card px-3 py-2 text-sm text-text-primary"
-        />
+          aria-label={`${label}: ${
+            selected.length === 0 ? "All" : `${selected.length} selected`
+          }`}
+          onClick={() => setIsOpen((open) => !open)}
+          className="flex w-full items-center justify-between rounded-md border border-border bg-bg-card px-3 py-2 text-sm text-text-primary"
+        >
+          <span>{selected.length === 0 ? "All" : `${selected.length} selected`}</span>
+          <ChevronDown aria-hidden="true" className="h-4 w-4" />
+        </button>
 
         {isOpen && (
           <div
             id={`${inputId}-options`}
-            role="listbox"
-            className="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-md border border-border bg-bg-card shadow-lg"
+            className="absolute z-20 mt-1 w-full rounded-md border border-border bg-bg-card p-2 shadow-lg"
           >
-            {visibleOptions.length === 0 ? (
-              <div className="px-3 py-2 text-sm text-text-muted">
-                {noMatchesText}
-              </div>
-            ) : (
-              visibleOptions.map((option, index) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  role="option"
-                  aria-label={getOptionDisplayLabel(option)}
-                  aria-selected={index === activeIndex}
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => addOption(option.value)}
-                  className={`w-full px-3 py-2 text-left text-sm ${
-                    index === activeIndex ? "bg-hover-bg text-text-primary" : "text-text-secondary"
-                  } hover:bg-hover-bg hover:text-text-primary`}
-                >
-                  <span className="font-medium">{option.label}</span>
-                  {option.meta && (
-                    <span className="ml-2 font-mono text-xs text-text-muted">
-                      {option.meta}
-                    </span>
-                  )}
-                </button>
-              ))
-            )}
+            <input
+              id={inputId}
+              type="search"
+              aria-label={`Search ${label}`}
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") setIsOpen(false);
+              }}
+              placeholder={placeholder}
+              className="w-full rounded-md border border-border bg-bg-card px-3 py-2 text-sm text-text-primary"
+            />
+            <div className="mt-2 max-h-48 overflow-y-auto">
+              {visibleOptions.length === 0 ? (
+                <div className="px-3 py-2 text-sm text-text-muted">
+                  {noMatchesText}
+                </div>
+              ) : (
+                visibleOptions.map((option) => (
+                  <label
+                    key={option.value}
+                    className="flex cursor-pointer items-center gap-2 px-2 py-2 text-sm text-text-secondary hover:bg-hover-bg hover:text-text-primary"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedSet.has(option.value)}
+                      onChange={() => toggleOption(option.value)}
+                      aria-label={getOptionDisplayLabel(option)}
+                      className="h-4 w-4 rounded border-border text-accent"
+                    />
+                    <span>{getOptionDisplayLabel(option)}</span>
+                  </label>
+                ))
+              )}
+            </div>
+            <div className="mt-2 flex items-center justify-between border-t border-border pt-2">
+              <button
+                type="button"
+                onClick={clearOptions}
+                className="text-xs font-bold text-accent"
+              >
+                Clear
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsOpen(false)}
+                className="text-xs font-bold text-accent"
+              >
+                Done
+              </button>
+            </div>
           </div>
         )}
       </div>
-
-      {selected.length > 0 && (
-        <div className="flex flex-wrap gap-2 pt-1">
-          {selected.map((value) => {
-            const option = optionByValue.get(value);
-            const chipLabel = option
-              ? getOptionDisplayLabel(option)
-              : `${value} (not in results)`;
-
-            return (
-              <span
-                key={value}
-                className="inline-flex max-w-full items-center gap-1 rounded-md border border-border bg-hover-bg px-2 py-1 text-xs text-text-primary"
-              >
-                <span className="truncate">{chipLabel}</span>
-                <button
-                  type="button"
-                  onClick={() => removeOption(value)}
-                  aria-label={`Remove ${chipLabel}`}
-                  className="font-bold text-accent hover:text-accent-hover"
-                >
-                  x
-                </button>
-              </span>
-            );
-          })}
-          <button
-            type="button"
-            onClick={clearOptions}
-            className="text-xs font-bold text-accent hover:text-accent-hover"
-          >
-            Clear
-          </button>
-        </div>
-      )}
     </div>
   );
-}
-
-function formatExamTrack(track: string): string {
-  if (track === "jee_main") return "JEE Main";
-  if (track === "jee_advanced") return "JEE Advanced";
-  if (track === "neet") return "NEET";
-  return track;
-}
-
-function isExamTrack(value: string): value is ExamTrack {
-  return value === "jee_main" || value === "jee_advanced" || value === "neet";
 }

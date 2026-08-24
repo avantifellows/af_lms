@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import { requireQuizSessionAccess } from "@/lib/quiz-session-access";
+import { requireQuizSessionRequestAccess } from "@/lib/quiz-session-access";
 import {
   parseQuizTemplateResource,
   type RawQuizTemplateResource,
@@ -13,13 +11,7 @@ const DB_SERVICE_TOKEN = process.env.DB_SERVICE_TOKEN;
 const RESOURCE_TYPE = "quiz_template";
 
 export async function GET(request: NextRequest) {
-  const session = await getServerSession(authOptions);
-
-  if (!session?.user?.email) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const access = await requireQuizSessionAccess(session.user.email, "view");
+  const access = await requireQuizSessionRequestAccess("view");
   if (!access.ok) {
     return access.response;
   }

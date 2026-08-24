@@ -12,6 +12,8 @@ import type {
   LmsCurriculumLog,
   SubjectName,
 } from "@/types/curriculum";
+import type { WritableCurriculumLogType } from "@/lib/curriculum-log-types";
+import { formatExamTrack } from "@/lib/exam-tracks";
 import ChapterAccordion from "./ChapterAccordion";
 import LogSessionModal from "./LogSessionModal";
 import ProgressSummary from "./ProgressSummary";
@@ -24,17 +26,10 @@ interface CurriculumTabProps {
   canEdit: boolean;
 }
 
+// Headings and the log-modal scope label render before a track is selected, so the null
+// case falls back to the generic "Curriculum" wording rather than an empty string.
 function examTrackLabel(track: ExamTrack | null): string {
-  switch (track) {
-    case "jee_main":
-      return "JEE Main";
-    case "jee_advanced":
-      return "JEE Advanced";
-    case "neet":
-      return "NEET";
-    default:
-      return "Curriculum";
-  }
+  return track ? formatExamTrack(track) : "Curriculum";
 }
 
 function selectFirstGradeSubject(
@@ -48,6 +43,19 @@ function selectFirstGradeSubject(
   ) ?? null;
 }
 
+async function requireSuccessfulResponse(
+  response: Response,
+  fallbackError: string
+): Promise<void> {
+  if (response.ok) return;
+  if (response.status === 403) {
+    throw new Error("Your permissions changed. Reload the page before trying again.");
+  }
+  const body = (await response.json().catch(() => null)) as { error?: string } | null;
+  throw new Error(body?.error ?? fallbackError);
+}
+
+// fallow-ignore-next-line complexity
 export default function CurriculumTab({
   schoolCode,
   schoolName,
@@ -64,6 +72,7 @@ export default function CurriculumTab({
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [progress, setProgress] = useState<Record<number, ChapterProgress>>({});
   const [subjectTotalTimeMinutes, setSubjectTotalTimeMinutes] = useState(0);
+  const [doubtSolvingTotalTimeMinutes, setDoubtSolvingTotalTimeMinutes] = useState(0);
   const [logs, setLogs] = useState<LmsCurriculumLog[]>([]);
   const [isOptionsLoading, setIsOptionsLoading] = useState(true);
   const [isDataLoading, setIsDataLoading] = useState(false);
@@ -82,6 +91,14 @@ export default function CurriculumTab({
       : "chapters"
   );
 
+  const applyOptions = useCallback((data: CurriculumOptionsResponse) => {
+    setOptions(data);
+    setSelectedProgramId(data.defaults.programId);
+    setSelectedExamTrack(data.defaults.examTrack);
+    setSelectedGrade(data.defaults.grade);
+    setSelectedSubject(data.defaults.subject);
+  }, []);
+
   const resetScopeInteractionState = useCallback(() => {
     setLogError(null);
     setCompletionError(null);
@@ -93,6 +110,7 @@ export default function CurriculumTab({
     setLogs([]);
     setProgress({});
     setSubjectTotalTimeMinutes(0);
+    setDoubtSolvingTotalTimeMinutes(0);
   }, []);
 
   useEffect(() => {
@@ -105,6 +123,7 @@ export default function CurriculumTab({
       setLogs([]);
       setProgress({});
       setSubjectTotalTimeMinutes(0);
+      setDoubtSolvingTotalTimeMinutes(0);
 
       try {
         const response = await fetch(
@@ -117,11 +136,7 @@ export default function CurriculumTab({
         const data = (await response.json()) as CurriculumOptionsResponse;
         if (isCancelled) return;
 
-        setOptions(data);
-        setSelectedProgramId(data.defaults.programId);
-        setSelectedExamTrack(data.defaults.examTrack);
-        setSelectedGrade(data.defaults.grade);
-        setSelectedSubject(data.defaults.subject);
+        applyOptions(data);
       } catch (err) {
         if (!isCancelled) {
           setError(err instanceof Error ? err.message : "An error occurred");
@@ -137,7 +152,7 @@ export default function CurriculumTab({
     return () => {
       isCancelled = true;
     };
-  }, [schoolCode]);
+  }, [applyOptions, schoolCode]);
 
   useEffect(() => {
     if (!selectedProgramId || !selectedExamTrack || !selectedGrade || !selectedSubject) {
@@ -145,6 +160,7 @@ export default function CurriculumTab({
       setLogs([]);
       setProgress({});
       setSubjectTotalTimeMinutes(0);
+      setDoubtSolvingTotalTimeMinutes(0);
       setIsDataLoading(false);
       return;
     }
@@ -155,6 +171,7 @@ export default function CurriculumTab({
     const subject = selectedSubject;
     let isCancelled = false;
 
+    // fallow-ignore-next-line complexity
     async function fetchCurriculumData() {
       setIsDataLoading(true);
       setError(null);
@@ -164,6 +181,7 @@ export default function CurriculumTab({
       setLogs([]);
       setProgress({});
       setSubjectTotalTimeMinutes(0);
+      setDoubtSolvingTotalTimeMinutes(0);
 
       const params = new URLSearchParams({
         school_code: schoolCode,
@@ -186,6 +204,7 @@ export default function CurriculumTab({
         const logsData = (await logsResponse.json()) as { logs: LmsCurriculumLog[] };
         const progressData = (await progressResponse.json()) as {
           subjectTotalTimeMinutes: number;
+          doubtSolvingTotalTimeMinutes: number;
           progress: Record<number, ChapterProgress>;
         };
         if (!isCancelled) {
@@ -193,6 +212,9 @@ export default function CurriculumTab({
           setLogs(logsData.logs);
           setProgress(progressData.progress);
           setSubjectTotalTimeMinutes(progressData.subjectTotalTimeMinutes);
+          setDoubtSolvingTotalTimeMinutes(
+            progressData.doubtSolvingTotalTimeMinutes ?? 0
+          );
         }
       } catch (err) {
         if (!isCancelled) {
@@ -238,23 +260,27 @@ export default function CurriculumTab({
     const logsData = (await logsResponse.json()) as { logs: LmsCurriculumLog[] };
     const progressData = (await progressResponse.json()) as {
       subjectTotalTimeMinutes: number;
+      doubtSolvingTotalTimeMinutes: number;
       progress: Record<number, ChapterProgress>;
     };
     setLogs(logsData.logs);
     setProgress(progressData.progress);
     setSubjectTotalTimeMinutes(progressData.subjectTotalTimeMinutes);
+    setDoubtSolvingTotalTimeMinutes(
+      progressData.doubtSolvingTotalTimeMinutes ?? 0
+    );
   }, [schoolCode, selectedProgramId, selectedExamTrack, selectedGrade, selectedSubject]);
 
-  const gradeOptions = useMemo(() => {
-    if (!options || !selectedExamTrack) return [];
-    return Array.from(
-      new Map(
-        options.gradeSubjects
-          .filter((option) => option.examTrack === selectedExamTrack)
-          .map((option) => [option.grade, option])
-      ).values()
-    );
-  }, [options, selectedExamTrack]);
+  const gradeOptions: GradeNumber[] = [11, 12];
+
+  const examTrackOptions = useMemo(
+    () =>
+      options?.centreExamTracks.filter((option) => option.grade === selectedGrade) ?? [],
+    [options, selectedGrade]
+  );
+  const selectedTrackOption = examTrackOptions.find(
+    (option) => option.examTrack === selectedExamTrack
+  );
 
   const subjectOptions = useMemo(() => {
     if (!options || !selectedExamTrack || !selectedGrade) return [];
@@ -282,27 +308,63 @@ export default function CurriculumTab({
   }, []);
 
   function handleExamTrackChange(track: ExamTrack) {
-    const first = selectFirstGradeSubject(options?.gradeSubjects ?? [], track);
+    const first = selectFirstGradeSubject(
+      options?.gradeSubjects ?? [],
+      track,
+      selectedGrade
+    );
     resetScopeInteractionState();
     setSelectedExamTrack(track);
-    setSelectedGrade(first?.grade ?? null);
     setSelectedSubject(first?.subject ?? null);
   }
 
+  // fallow-ignore-next-line complexity
   function handleGradeChange(grade: GradeNumber) {
+    const trackOption =
+      options?.centreExamTracks.find(
+        (option) =>
+          option.grade === grade && option.isMapped && option.hasCurriculumConfig
+      ) ??
+      options?.centreExamTracks.find(
+        (option) => option.grade === grade && option.isMapped
+      ) ??
+      options?.centreExamTracks.find((option) => option.grade === grade) ??
+      null;
     const first = selectFirstGradeSubject(
       options?.gradeSubjects ?? [],
-      selectedExamTrack,
+      trackOption?.examTrack ?? null,
       grade
     );
     resetScopeInteractionState();
     setSelectedGrade(grade);
+    setSelectedExamTrack(trackOption?.examTrack ?? null);
     setSelectedSubject(first?.subject ?? null);
   }
 
+  async function handleProgramChange(programId: number) {
+    resetScopeInteractionState();
+    setIsOptionsLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(
+        `/api/curriculum/options?school_code=${encodeURIComponent(schoolCode)}&program_id=${programId}`
+      );
+      if (!response.ok) throw new Error("Failed to fetch Curriculum options");
+      const data = (await response.json()) as CurriculumOptionsResponse;
+      applyOptions(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "An error occurred");
+    } finally {
+      setIsOptionsLoading(false);
+    }
+  }
+
+  // fallow-ignore-next-line complexity
   async function handleSaveLog(payload: {
+    logType: WritableCurriculumLogType;
     date: string;
-    durationMinutes: number;
+    durationMinutes: number | null;
+    chapterId: number | null;
     topicIds: number[];
     completeChapterIds: number[];
     uncompleteChapterIds: number[];
@@ -322,38 +384,55 @@ export default function CurriculumTab({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(
             isEditMode
-              ? {
-                  log_date: payload.date,
-                  duration_minutes: payload.durationMinutes,
-                  topic_ids: payload.topicIds,
-                }
-              : {
-                  school_code: schoolCode,
-                  program_id: selectedProgramId,
-                  exam_track: selectedExamTrack,
-                  grade: selectedGrade,
-                  subject: selectedSubject,
-                  ...(payload.topicIds.length > 0
-                    ? {
-                        log_date: payload.date,
-                        duration_minutes: payload.durationMinutes,
-                      }
-                    : {}),
-                  topic_ids: payload.topicIds,
-                  complete_chapter_ids: payload.completeChapterIds,
-                  uncomplete_chapter_ids: payload.uncompleteChapterIds,
-                }
+              ? payload.logType !== "regular"
+                ? {
+                    log_date: payload.date,
+                    chapter_id: payload.chapterId,
+                    ...(payload.logType === "doubt_solving"
+                      ? { duration_minutes: payload.durationMinutes }
+                      : {}),
+                  }
+                : {
+                    log_date: payload.date,
+                    duration_minutes: payload.durationMinutes,
+                    topic_ids: payload.topicIds,
+                  }
+              : payload.logType !== "regular"
+                ? {
+                    school_code: schoolCode,
+                    program_id: selectedProgramId,
+                    exam_track: selectedExamTrack,
+                    grade: selectedGrade,
+                    subject: selectedSubject,
+                    log_type: payload.logType,
+                    log_date: payload.date,
+                    chapter_id: payload.chapterId,
+                    ...(payload.logType === "doubt_solving"
+                      ? { duration_minutes: payload.durationMinutes }
+                      : {}),
+                  }
+                : {
+                    school_code: schoolCode,
+                    program_id: selectedProgramId,
+                    exam_track: selectedExamTrack,
+                    grade: selectedGrade,
+                    subject: selectedSubject,
+                    log_type: "regular",
+                    ...(payload.topicIds.length > 0
+                      ? {
+                          log_date: payload.date,
+                          duration_minutes: payload.durationMinutes,
+                        }
+                      : {}),
+                    topic_ids: payload.topicIds,
+                    complete_chapter_ids: payload.completeChapterIds,
+                    uncomplete_chapter_ids: payload.uncompleteChapterIds,
+                  }
           ),
         }
       );
 
-      if (!response.ok) {
-        if (response.status === 403) {
-          throw new Error("Your permissions changed. Reload the page before trying again.");
-        }
-        const body = (await response.json().catch(() => null)) as { error?: string } | null;
-        throw new Error(body?.error ?? "Failed to save LMS Curriculum Log");
-      }
+      await requireSuccessfulResponse(response, "Failed to save LMS Curriculum Log");
 
       setIsLogSessionModalOpen(false);
       setEditingLog(null);
@@ -392,13 +471,7 @@ export default function CurriculumTab({
         }),
       });
 
-      if (!response.ok) {
-        if (response.status === 403) {
-          throw new Error("Your permissions changed. Reload the page before trying again.");
-        }
-        const body = (await response.json().catch(() => null)) as { error?: string } | null;
-        throw new Error(body?.error ?? "Failed to update Chapter Completion");
-      }
+      await requireSuccessfulResponse(response, "Failed to update Chapter Completion");
 
       try {
         await refetchLogsAndProgress();
@@ -423,13 +496,7 @@ export default function CurriculumTab({
         method: "DELETE",
       });
 
-      if (!response.ok) {
-        if (response.status === 403) {
-          throw new Error("Your permissions changed. Reload the page before trying again.");
-        }
-        const body = (await response.json().catch(() => null)) as { error?: string } | null;
-        throw new Error(body?.error ?? "Failed to delete LMS Curriculum Log");
-      }
+      await requireSuccessfulResponse(response, "Failed to delete LMS Curriculum Log");
 
     } catch (err) {
       setLogError(
@@ -447,11 +514,17 @@ export default function CurriculumTab({
     }
   }
 
-  const hasEmptyConfig =
+  const hasNoMappedTracks =
     !isOptionsLoading &&
     options != null &&
     options.programs.length > 0 &&
-    options.examTracks.length === 0;
+    examTrackOptions.length === 0 &&
+    options.configurationError == null;
+  const isHistoricalTrack = selectedTrackOption?.isMapped === false;
+  const canMutateScope = canEdit && !isHistoricalTrack;
+  const hasUnavailableTrack =
+    selectedTrackOption?.hasCurriculumConfig === false &&
+    !selectedTrackOption.hasHistoricalLogs;
   const hasNoPrograms =
     !isOptionsLoading && options != null && options.programs.length === 0;
 
@@ -461,7 +534,9 @@ export default function CurriculumTab({
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-lg font-semibold text-gray-900">
-              {examTrackLabel(selectedExamTrack)} Curriculum Progress
+              {selectedExamTrack
+                ? `${examTrackLabel(selectedExamTrack)} Curriculum Progress`
+                : "Curriculum Progress"}
             </h2>
             <p className="text-sm text-gray-500">{schoolName}</p>
           </div>
@@ -487,8 +562,7 @@ export default function CurriculumTab({
                 id="curriculum-program"
                 value={selectedProgramId ?? ""}
                 onChange={(event) => {
-                  resetScopeInteractionState();
-                  setSelectedProgramId(Number(event.target.value));
+                  void handleProgramChange(Number(event.target.value));
                 }}
                 className="block w-36 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-accent focus:ring-1 focus:ring-accent/20"
               >
@@ -503,28 +577,6 @@ export default function CurriculumTab({
 
           <div>
             <label
-              htmlFor="exam-track"
-              className="block text-xs font-medium text-gray-700 mb-1"
-            >
-              Exam Track
-            </label>
-            <select
-              id="exam-track"
-              value={selectedExamTrack ?? ""}
-              disabled={!options || options.examTracks.length === 0}
-              onChange={(event) => handleExamTrackChange(event.target.value as ExamTrack)}
-              className="block w-40 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-accent focus:ring-1 focus:ring-accent/20 disabled:bg-gray-100 disabled:text-gray-500"
-            >
-              {options?.examTracks.map((track) => (
-                <option key={track} value={track}>
-                  {examTrackLabel(track)}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label
               htmlFor="grade"
               className="block text-xs font-medium text-gray-700 mb-1"
             >
@@ -533,15 +585,38 @@ export default function CurriculumTab({
             <select
               id="grade"
               value={selectedGrade ?? ""}
-              disabled={gradeOptions.length === 0}
+              disabled={!options || options.programs.length === 0}
               onChange={(event) =>
                 handleGradeChange(Number(event.target.value) as GradeNumber)
               }
               className="block w-24 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-accent focus:ring-1 focus:ring-accent/20 disabled:bg-gray-100 disabled:text-gray-500"
             >
-              {gradeOptions.map((option) => (
-                <option key={option.grade} value={option.grade}>
-                  {option.grade}
+              {gradeOptions.map((grade) => (
+                <option key={grade} value={grade}>
+                  {grade}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label
+              htmlFor="exam-track"
+              className="block text-xs font-medium text-gray-700 mb-1"
+            >
+              Exam Track
+            </label>
+            <select
+              id="exam-track"
+              value={selectedExamTrack ?? ""}
+              disabled={examTrackOptions.length === 0}
+              onChange={(event) => handleExamTrackChange(event.target.value as ExamTrack)}
+              className="block w-40 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-accent focus:ring-1 focus:ring-accent/20 disabled:bg-gray-100 disabled:text-gray-500"
+            >
+              {examTrackOptions.map((option) => (
+                <option key={option.examTrack} value={option.examTrack}>
+                  {examTrackLabel(option.examTrack)}
+                  {!option.isMapped ? " (history only)" : ""}
                 </option>
               ))}
             </select>
@@ -582,7 +657,12 @@ export default function CurriculumTab({
                 Log
               </span>
               <button
-                disabled={!selectedProgramId || isDataLoading || chapters.length === 0}
+                disabled={
+                  !canMutateScope ||
+                  !selectedProgramId ||
+                  isDataLoading ||
+                  chapters.length === 0
+                }
                 onClick={() => {
                   setLogError(null);
                   setEditingLog(null);
@@ -610,9 +690,17 @@ export default function CurriculumTab({
         <div className="bg-bg-card border border-border rounded-lg shadow-sm p-8 text-center text-gray-500">
           No curriculum-enabled Programs are available for this school.
         </div>
-      ) : hasEmptyConfig ? (
+      ) : options?.configurationError ? (
+        <div className="bg-red-50 text-red-700 p-4 rounded-lg">
+          {options.configurationError}
+        </div>
+      ) : hasNoMappedTracks ? (
         <div className="bg-bg-card border border-border rounded-lg shadow-sm p-8 text-center text-gray-500">
-          No Curriculum configuration is available for this school.
+          No Exam Tracks configured for this Centre and Grade
+        </div>
+      ) : hasUnavailableTrack ? (
+        <div className="bg-bg-card border border-border rounded-lg shadow-sm p-8 text-center text-gray-500">
+          Curriculum configuration is not available
         </div>
       ) : (
         <>
@@ -657,7 +745,7 @@ export default function CurriculumTab({
                   {completionError}
                 </div>
               )}
-              {canEdit &&
+              {canMutateScope &&
                 chapters.length > 0 &&
                 (() => {
                   const stats = calculateStats(chapters, progress);
@@ -676,13 +764,14 @@ export default function CurriculumTab({
                 chapters={chapters}
                 progress={progress}
                 subjectTotalTimeMinutes={subjectTotalTimeMinutes}
+                doubtSolvingTotalTimeMinutes={doubtSolvingTotalTimeMinutes}
               />
               <ChapterAccordion
                 chapters={chapters}
                 progress={progress}
                 expandedChapterIds={expandedChapterIds}
                 onToggleChapter={toggleChapter}
-                canEdit={canEdit}
+                canEdit={canMutateScope}
                 onToggleChapterCompletion={handleToggleChapterCompletion}
                 updatingChapterId={updatingCompletionChapterId}
               />
@@ -691,7 +780,7 @@ export default function CurriculumTab({
             <>
               <SessionHistory
                 logs={logs}
-                canEdit={canEdit}
+                canEdit={canMutateScope}
                 onEditLog={(log) => {
                   setLogError(null);
                   setEditingLog(log);

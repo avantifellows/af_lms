@@ -7,6 +7,7 @@ import type {
   CurriculumSummaryChapterRow,
   CurriculumSummaryRow,
 } from "@/lib/curriculum-summary";
+import { formatExamTrack } from "@/lib/exam-tracks";
 
 interface CurriculumSummaryTableRowsProps {
   rows: CurriculumSummaryRow[];
@@ -36,6 +37,10 @@ export default function CurriculumSummaryTableRows({
   return (
     <tbody className="divide-y divide-border bg-bg-card">
       {rows.map((row) => {
+        if (row.rowKind === "unavailable" || row.rowKind === "configuration_error") {
+          return <UnavailableSummaryRow key={row.rowKey} row={row} />;
+        }
+
         const chapterRows = chapterRowsByParentKey[row.rowKey] ?? [];
         const isExpanded = expandedRowKeys.has(row.rowKey);
         const expansionId = `curriculum-summary-chapters-${row.rowKey.replaceAll(
@@ -46,7 +51,7 @@ export default function CurriculumSummaryTableRows({
           row.schoolName
         } ${row.schoolCode} ${row.programName} Grade ${row.grade} ${
           row.subjectName
-        } ${formatExamTrack(row.examTrack)}`;
+        } ${formatExamTrack(row.examTrack!)}`;
 
         return (
           <Fragment key={row.rowKey}>
@@ -79,7 +84,7 @@ export default function CurriculumSummaryTableRows({
                 {row.subjectName}
               </td>
               <td className="whitespace-nowrap px-4 py-3 text-text-primary">
-                {formatExamTrack(row.examTrack)}
+                {formatExamTrack(row.examTrack!)}
               </td>
               <td className="whitespace-nowrap px-4 py-3 text-text-primary">
                 {formatCoverage(row.completedChapters, row.totalConfiguredChapters)}
@@ -108,7 +113,7 @@ export default function CurriculumSummaryTableRows({
                       rowContext={`${row.schoolName} ${row.schoolCode} / ${
                         row.programName
                       } / Grade ${row.grade} ${row.subjectName} / ${formatExamTrack(
-                        row.examTrack
+                        row.examTrack!
                       )}`}
                       chapterRows={chapterRows}
                     />
@@ -120,6 +125,28 @@ export default function CurriculumSummaryTableRows({
         );
       })}
     </tbody>
+  );
+}
+
+function UnavailableSummaryRow({ row }: { row: CurriculumSummaryRow }) {
+  return (
+    <tr className="bg-warning-bg">
+      <td className="whitespace-nowrap px-4 py-3 font-medium text-text-primary">
+        <span>{row.schoolName}</span>{" "}
+        <span className="text-text-muted">{row.schoolCode}</span>
+      </td>
+      <td className="whitespace-nowrap px-4 py-3 text-text-primary">{row.programName}</td>
+      <td className="whitespace-nowrap px-4 py-3 text-text-primary">{row.grade ?? "-"}</td>
+      <td className="whitespace-nowrap px-4 py-3 text-text-primary">-</td>
+      <td className="whitespace-nowrap px-4 py-3 text-text-primary">
+        {row.examTrack ? formatExamTrack(row.examTrack) : "-"}
+      </td>
+      <td className="whitespace-nowrap px-4 py-3 text-text-primary">-</td>
+      <td className="whitespace-nowrap px-4 py-3 text-text-primary">-</td>
+      <td className="whitespace-nowrap px-4 py-3 text-text-primary">-</td>
+      <td className="whitespace-nowrap px-4 py-3 text-text-primary">-</td>
+      <td className="min-w-72 px-4 py-3 text-warning-text">{row.explanation}</td>
+    </tr>
   );
 }
 
@@ -170,6 +197,12 @@ function ChapterExpansionTable({
                   Lecture vs prescribed
                 </th>
                 <th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-text-muted">
+                  Class Cancellation Count
+                </th>
+                <th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-text-muted">
+                  Doubt Solving Hours
+                </th>
+                <th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-text-muted">
                   Flagged
                 </th>
               </tr>
@@ -197,6 +230,12 @@ function ChapterExpansionTable({
                       actualMinutes={chapter.actualMinutes}
                       prescribedMinutes={chapter.prescribedMinutes}
                     />
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-2 text-text-primary">
+                    {chapter.classCancellationCount}
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-2 text-text-primary">
+                    {formatHours(chapter.doubtSolvingMinutes)}
                   </td>
                   <td className="whitespace-nowrap px-3 py-2 text-text-primary">
                     <FlagReasons flagged={chapter.flagged} reasons={chapter.flagReasons} />
@@ -395,13 +434,6 @@ function getFlagGroupType(reason: string): FlagGroupType {
     default:
       return "other";
   }
-}
-
-function formatExamTrack(track: string): string {
-  if (track === "jee_main") return "JEE Main";
-  if (track === "jee_advanced") return "JEE Advanced";
-  if (track === "neet") return "NEET";
-  return track;
 }
 
 function formatCoverage(count: number, total: number): string {

@@ -246,24 +246,26 @@ describe("POST /api/curriculum/configs", () => {
     expect(invalid.status).toBe(422);
     expect(mockQuery).not.toHaveBeenCalled();
 
-    mockQuery.mockResolvedValueOnce([
-      {
-        failure_reason: "duplicate",
-        config_id: null,
-        chapter_id: null,
-        chapter_code: null,
-        chapter_name: null,
-        grade: null,
-        subject_id: null,
-        subject_name: null,
-        exam_track: null,
-        is_in_syllabus: null,
-        prescribed_minutes: null,
-        coverage_sequence: null,
-        updated_by_email: null,
-        updated_at: null,
-      },
-    ]);
+    mockQuery
+      .mockResolvedValueOnce([{ subject_id: 4 }])
+      .mockResolvedValueOnce([
+        {
+          failure_reason: "duplicate",
+          config_id: null,
+          chapter_id: null,
+          chapter_code: null,
+          chapter_name: null,
+          grade: null,
+          subject_id: null,
+          subject_name: null,
+          exam_track: null,
+          is_in_syllabus: null,
+          prescribed_minutes: null,
+          coverage_sequence: null,
+          updated_by_email: null,
+          updated_at: null,
+        },
+      ]);
     const duplicate = await POST(
       new NextRequest("http://localhost/api/curriculum/configs", {
         method: "POST",
@@ -279,8 +281,61 @@ describe("POST /api/curriculum/configs", () => {
     expect(duplicate.status).toBe(409);
   });
 
+  it("rejects creating a Biology JEE Main Curriculum Config row", async () => {
+    mockQuery
+      .mockResolvedValueOnce([
+        {
+          failure_reason: null,
+          config_id: "50",
+          chapter_id: "7",
+          chapter_code: "BIO-01",
+          chapter_name: "Cell Structure",
+          grade: "11",
+          subject_id: "3",
+          subject_name: "Biology",
+          exam_track: "jee_main",
+          is_in_syllabus: true,
+          prescribed_minutes: "90",
+          coverage_sequence: "2",
+          updated_by_email: "admin@avantifellows.org",
+          updated_at: "2026-06-01T12:00:00.000Z",
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          expected_summary_rows: "12",
+          active_curriculum_logs: "0",
+          active_chapter_completions: "0",
+          duplicate_coverage_count: "0",
+        },
+      ]);
+
+    const res = await POST(
+      new NextRequest("http://localhost/api/curriculum/configs", {
+        method: "POST",
+        body: JSON.stringify({
+          chapter_id: 7,
+          exam_track: "jee_main",
+          is_in_syllabus: true,
+          prescribed_minutes: 90,
+          coverage_sequence: 2,
+        }),
+      })
+    );
+
+    expect(res.status).toBe(422);
+    await expect(res.json()).resolves.toMatchObject({
+      error: "Biology is not valid with JEE Main",
+    });
+    expect(mockQuery).not.toHaveBeenCalledWith(
+      expect.stringContaining("INSERT INTO lms_chapter_exam_configs"),
+      expect.anything()
+    );
+  });
+
   it("returns the created row, impact counts, and warnings for successful admin creates", async () => {
     mockQuery
+      .mockResolvedValueOnce([{ subject_id: 4 }])
       .mockResolvedValueOnce([
         {
           failure_reason: null,

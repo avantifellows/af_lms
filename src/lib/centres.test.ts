@@ -5,6 +5,7 @@ vi.mock("./db", () => ({ query: vi.fn() }));
 import { query } from "./db";
 import {
   createCentre,
+  checkCentreManagementSchema,
   createCentreOption,
   getCentreList,
   getCentreOptionSets,
@@ -27,20 +28,6 @@ describe("Centre option contracts", () => {
     mockQuery
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([
-        {
-          option_set_id: "1",
-          option_set_code: "stream",
-          option_set_label: "Centre Stream",
-          allow_multi: true,
-          option_set_sort_order: "4",
-          option_id: "12",
-          option_code: "jee",
-          option_label: "JEE",
-          option_sort_order: "1",
-          option_is_active: true,
-          option_inserted_at: "2026-01-01T00:00:00.000Z",
-          option_updated_at: "2026-01-02T00:00:00.000Z",
-        },
         {
           option_set_id: "2",
           option_set_code: "type",
@@ -78,25 +65,6 @@ describe("Centre option contracts", () => {
               isActive: false,
               insertedAt: "",
               updatedAt: "",
-            },
-          ],
-        },
-        {
-          id: 1,
-          code: "stream",
-          label: "Centre Stream",
-          allowMulti: true,
-          sortOrder: 4,
-          options: [
-            {
-              id: 12,
-              optionSetCode: "stream",
-              code: "jee",
-              label: "JEE",
-              sortOrder: 1,
-              isActive: true,
-              insertedAt: "2026-01-01T00:00:00.000Z",
-              updatedAt: "2026-01-02T00:00:00.000Z",
             },
           ],
         },
@@ -181,7 +149,7 @@ describe("Centre option contracts", () => {
       id: 31,
       body: {
         code: "changed",
-        option_set_code: "stream",
+        option_set_code: "type",
         label: "Changed",
         sort_order: 2,
         is_active: true,
@@ -281,7 +249,28 @@ describe("Centre option contracts", () => {
 
     expect(isActiveCentreOptionCode(optionSets, "type", "coe")).toBe(true);
     expect(isActiveCentreOptionCode(optionSets, "type", "old")).toBe(false);
-    expect(isActiveCentreOptionCode(optionSets, "stream", "coe")).toBe(false);
+  });
+});
+
+describe("Centre schema contract", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    resetCentreSchemaCheckForTests();
+  });
+
+  it("requires the Centre Exam Track mapping table", async () => {
+    mockQuery.mockResolvedValueOnce([]);
+
+    await expect(checkCentreManagementSchema()).resolves.toEqual({ ok: true });
+    const params = mockQuery.mock.calls[0][1] as unknown[];
+    expect(params).toEqual(
+      expect.arrayContaining([
+        "centre_exam_tracks",
+        "centre_id",
+        "grade_id",
+        "exam_track_code",
+      ])
+    );
   });
 });
 
@@ -308,11 +297,8 @@ describe("Centre grid contracts", () => {
           sub_category_code: null,
           sub_category_label: null,
           sub_category_is_active: null,
-          stream_codes: ["jee", "neet"],
-          stream_options: [
-            { code: "jee", label: "JEE", is_active: true },
-            { code: "neet", label: "NEET", is_active: false },
-          ],
+          grade_11_exam_track_codes: ["jee_main", "jee_advanced"],
+          grade_12_exam_track_codes: ["neet"],
           is_physical: true,
           is_active: true,
           program_id: "1",
@@ -346,7 +332,6 @@ describe("Centre grid contracts", () => {
         typeCode: null,
         categoryCode: null,
         subCategoryCode: null,
-        streamCode: null,
         isPhysical: "all",
       },
       rows: [
@@ -363,11 +348,8 @@ describe("Centre grid contracts", () => {
           subCategoryCode: null,
           subCategoryLabel: null,
           subCategoryOptionActive: null,
-          streamCodes: ["jee", "neet"],
-          streams: [
-            { code: "jee", label: "JEE", isActive: true },
-            { code: "neet", label: "NEET", isActive: false },
-          ],
+          grade11ExamTrackCodes: ["jee_main", "jee_advanced"],
+          grade12ExamTrackCodes: ["neet"],
           isPhysical: true,
           isActive: true,
           programId: 1,
@@ -461,20 +443,6 @@ describe("Centre grid contracts", () => {
           option_inserted_at: null,
           option_updated_at: null,
         },
-        {
-          option_set_id: "4",
-          option_set_code: "stream",
-          option_set_label: "Centre Stream",
-          allow_multi: true,
-          option_set_sort_order: "4",
-          option_id: "41",
-          option_code: "jee",
-          option_label: "JEE",
-          option_sort_order: "1",
-          option_is_active: true,
-          option_inserted_at: null,
-          option_updated_at: null,
-        },
       ])
       .mockResolvedValueOnce([{ id: "44" }])
       .mockResolvedValueOnce([
@@ -491,8 +459,8 @@ describe("Centre grid contracts", () => {
           sub_category_code: null,
           sub_category_label: null,
           sub_category_is_active: null,
-          stream_codes: ["jee"],
-          stream_options: [{ code: "jee", label: "JEE", is_active: true }],
+          grade_11_exam_track_codes: ["jee_main", "jee_advanced"],
+          grade_12_exam_track_codes: ["neet"],
           is_physical: false,
           is_active: true,
           inserted_at: "2026-01-07T00:00:00.000Z",
@@ -514,7 +482,8 @@ describe("Centre grid contracts", () => {
         type_code: "coe",
         category_code: null,
         sub_category_code: null,
-        stream_codes: ["jee"],
+        grade_11_exam_track_codes: ["jee_main", "jee_advanced"],
+        grade_12_exam_track_codes: ["neet"],
         is_physical: false,
         is_active: true,
       },
@@ -527,7 +496,8 @@ describe("Centre grid contracts", () => {
         name: "New Centre",
         schoolId: 44,
         typeCode: "coe",
-        streamCodes: ["jee"],
+        grade11ExamTrackCodes: ["jee_main", "jee_advanced"],
+        grade12ExamTrackCodes: ["neet"],
         isPhysical: false,
         isActive: true,
       },
@@ -538,11 +508,14 @@ describe("Centre grid contracts", () => {
       "coe",
       null,
       null,
-      ["jee"],
       false,
       true,
       null,
+      ["jee_main", "jee_advanced"],
+      ["neet"],
     ]);
+    expect(mockQuery.mock.calls.at(-1)?.[0]).toContain("DELETE FROM centre_exam_tracks");
+    expect(mockQuery.mock.calls.at(-1)?.[0]).toContain("ON CONFLICT");
   });
 
   it("updates Centres while allowing unchanged inactive options to remain", async () => {
@@ -559,8 +532,6 @@ describe("Centre grid contracts", () => {
       sub_category_code: null,
       sub_category_label: null,
       sub_category_is_active: null,
-      stream_codes: ["old_stream"],
-      stream_options: [{ code: "old_stream", label: "Old Stream", is_active: false }],
       is_physical: true,
       is_active: true,
       inserted_at: "2026-01-08T00:00:00.000Z",
@@ -591,20 +562,6 @@ describe("Centre grid contracts", () => {
           option_inserted_at: null,
           option_updated_at: null,
         },
-        {
-          option_set_id: "4",
-          option_set_code: "stream",
-          option_set_label: "Centre Stream",
-          allow_multi: true,
-          option_set_sort_order: "4",
-          option_id: "42",
-          option_code: "old_stream",
-          option_label: "Old Stream",
-          option_sort_order: "9",
-          option_is_active: false,
-          option_inserted_at: null,
-          option_updated_at: null,
-        },
       ])
       .mockResolvedValueOnce([{ ...existingCentreRow, name: "Legacy Centre Updated", is_active: false }]);
 
@@ -613,7 +570,6 @@ describe("Centre grid contracts", () => {
       body: {
         name: "Legacy Centre Updated",
         type_code: "legacy",
-        stream_codes: ["old_stream"],
         is_active: false,
       },
     });
@@ -625,8 +581,6 @@ describe("Centre grid contracts", () => {
         name: "Legacy Centre Updated",
         typeCode: "legacy",
         typeOptionActive: false,
-        streamCodes: ["old_stream"],
-        streams: [{ code: "old_stream", label: "Old Stream", isActive: false }],
         isActive: false,
       },
     });
@@ -637,11 +591,14 @@ describe("Centre grid contracts", () => {
       "legacy",
       null,
       null,
-      ["old_stream"],
       true,
       false,
       null,
+      [],
+      [],
     ]);
+    expect(mockQuery.mock.calls.at(-1)?.[0]).toContain("DELETE FROM centre_exam_tracks");
+    expect(mockQuery.mock.calls.at(-1)?.[0]).toContain("NOT EXISTS");
   });
 
   it("rejects non-string single-select option codes on Centre updates", async () => {
@@ -661,8 +618,6 @@ describe("Centre grid contracts", () => {
           sub_category_code: null,
           sub_category_label: null,
           sub_category_is_active: null,
-          stream_codes: [],
-          stream_options: [],
           is_physical: true,
           is_active: true,
           inserted_at: "2026-01-08T00:00:00.000Z",
@@ -731,20 +686,6 @@ describe("Centre grid contracts", () => {
           option_inserted_at: null,
           option_updated_at: null,
         },
-        {
-          option_set_id: "4",
-          option_set_code: "stream",
-          option_set_label: "Centre Stream",
-          allow_multi: true,
-          option_set_sort_order: "4",
-          option_id: "41",
-          option_code: "old_stream",
-          option_label: "Old Stream",
-          option_sort_order: "9",
-          option_is_active: false,
-          option_inserted_at: null,
-          option_updated_at: null,
-        },
       ]);
 
     const result = await createCentre({
@@ -754,7 +695,6 @@ describe("Centre grid contracts", () => {
         type_code: "cat_1_coe",
         category_code: null,
         sub_category_code: "missing",
-        stream_codes: ["old_stream"],
         is_physical: true,
         is_active: true,
       },
@@ -768,7 +708,6 @@ describe("Centre grid contracts", () => {
         type_code: "Centre type_code must be an active type option",
         sub_category_code:
           "Centre sub_category_code must be an active sub_category option",
-        stream_codes: "Centre Stream codes must be active stream options",
       },
     });
     expect(mockQuery).toHaveBeenCalledTimes(2);

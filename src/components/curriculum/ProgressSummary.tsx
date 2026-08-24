@@ -7,18 +7,20 @@ interface ProgressSummaryProps {
   chapters: Chapter[];
   progress: Record<number, ChapterProgress>;
   subjectTotalTimeMinutes: number;
+  doubtSolvingTotalTimeMinutes?: number;
 }
 
 export default function ProgressSummary({
   chapters,
   progress,
   subjectTotalTimeMinutes,
+  doubtSolvingTotalTimeMinutes = 0,
 }: ProgressSummaryProps) {
   const stats = calculateStats(chapters, progress);
 
   return (
     <div className="bg-bg-card border border-border rounded-lg shadow-sm p-4 mb-6">
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         {/* Chapters Completed */}
         <div className="text-center">
           <div className="text-2xl font-bold text-gray-900">
@@ -47,6 +49,13 @@ export default function ProgressSummary({
             {formatDuration(subjectTotalTimeMinutes)}
           </div>
           <div className="text-xs text-gray-500 mt-1">total time taught</div>
+        </div>
+
+        <div className="text-center border-l border-gray-100">
+          <div className="text-2xl font-bold text-gray-900">
+            {formatDuration(doubtSolvingTotalTimeMinutes)}
+          </div>
+          <div className="text-xs text-gray-500 mt-1">doubt solving time</div>
         </div>
       </div>
     </div>
