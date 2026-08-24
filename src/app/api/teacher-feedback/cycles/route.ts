@@ -108,7 +108,9 @@ async function resolveSessionLinks(
   return byPk;
 }
 
-// GET /api/teacher-feedback/cycles?school_code=XXXXX
+// GET /api/teacher-feedback/cycles?school_code=XXXXX[&centre_id=N]
+// centre_id restricts the rounds to that centre, for the centre page — without
+// it a centre page would list a sibling centre's feedback rounds.
 export async function GET(request: NextRequest) {
   const access = await authenticateTeacherFeedback("view");
   if (!access.ok) {
@@ -135,6 +137,15 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
+  const centreIdParam = request.nextUrl.searchParams.get("centre_id")?.trim();
+  const centreId = centreIdParam ? Number(centreIdParam) : null;
+  if (centreIdParam && !Number.isFinite(centreId)) {
+    return NextResponse.json(
+      { error: "centre_id must be a number" },
+      { status: 400 }
+    );
+  }
+
   const rows = await query<Row>(
     `
     SELECT tf.setup_run_id, tf.cycle_label, c.name AS centre_name,
@@ -149,9 +160,10 @@ export async function GET(request: NextRequest) {
     -- copy. LEFT JOIN: a round survives its centre being removed.
     LEFT JOIN centres c ON c.id = tf.centre_id
     WHERE tf.school_code = $1 AND tf.deleted_at IS NULL
+      AND ($2::bigint IS NULL OR tf.centre_id = $2::bigint)
     ORDER BY tf.inserted_at DESC, tf.teacher_order ASC
     `,
-    [schoolCode]
+    [schoolCode, centreId]
   );
 
   // Resolve batch_id -> readable name for all class batches across these cycles.

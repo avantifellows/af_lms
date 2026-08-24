@@ -919,15 +919,16 @@ export default async function RosterPage({
     />
   );
 
-  // Teacher Feedback is inherently multi-centre: the tab fetches every active
-  // centre at the school and has the PM pick one. That's school-page data — on
-  // a centre page it would surface a sibling centre's feedback rounds, the same
-  // leak class as the four fixed in the 07-22 permissions review. Hidden on
-  // centre scope until the tab can take a centre (registered as debt).
+  // Teacher Feedback is centre-keyed data (a round belongs to a centre, and
+  // teachers map to a centre, not the school), so a centre page passes its own
+  // id: the rounds list and the setup picker both narrow to it, and the picker
+  // collapses to the single centre. Without this a centre page would list a
+  // sibling centre's rounds — the leak class fixed in the 07-22 review.
   const teacherFeedbackContent = (
     <TeacherFeedbackTab
       schoolCode={school.code}
       canEdit={teacherFeedbackAccess.canEdit}
+      centreId={isCentre ? Number(scope.centre.id) : undefined}
     />
   );
 
@@ -955,7 +956,7 @@ export default async function RosterPage({
       id: "teacher_feedback",
       label: "Teacher Feedback",
       content: teacherFeedbackContent,
-      show: !isCentre && teacherFeedbackAccess.canView,
+      show: teacherFeedbackAccess.canView,
     },
     { id: "mentorship", label: "Academic Mentorship", content: mentorshipContent, show: mentorshipAccess.canView },
     {

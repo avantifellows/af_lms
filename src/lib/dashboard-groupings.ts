@@ -63,7 +63,11 @@ export async function getCentreWithSchool(
   const rows = await query<{
     id: string;
     name: string;
-    program_id: number | null;
+    // node-pg hands numeric columns back as strings, so this is "1", not 1 —
+    // coerced below. The declared CentreDetail.program_id: number is relied on
+    // by callers that pass it to `typeof value === "number"` guards
+    // (isHolisticMentorshipProgramId), where a string silently 404s.
+    program_id: number | string | null;
     program_name: string | null;
     school_id: string | null;
     school_name: string | null;
@@ -87,7 +91,7 @@ export async function getCentreWithSchool(
   return {
     id: row.id,
     name: row.name,
-    program_id: row.program_id,
+    program_id: row.program_id === null ? null : Number(row.program_id),
     program_name: row.program_name,
     school: row.school_id
       ? {
