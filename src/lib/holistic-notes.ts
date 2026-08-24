@@ -151,13 +151,14 @@ async function loadExistingNotes(
   return found.rows[0] ?? null;
 }
 
-function claimsErasedDraft(existing: ExistingNotes | null, mode: NotesInput["mode"]): boolean {
-  return !!existing && existing.state === "draft" && existing.has_answers === false && mode === "draft";
+function claimsErasedDraft(existing: ExistingNotes | null, input: NotesInput): boolean {
+  return !!existing && existing.state === "draft" && existing.has_answers === false &&
+    input.mode === "draft" && Number(existing.author_user_id) !== input.actorUserId;
 }
 
 function validateAuthor(existing: ExistingNotes | null, input: NotesInput): HolisticNotesResult | null {
   if (!existing || Number(existing.author_user_id) === input.actorUserId ||
-      claimsErasedDraft(existing, input.mode)) return null;
+      claimsErasedDraft(existing, input)) return null;
   return { ok: false, status: 403, error: "Forbidden" };
 }
 
@@ -232,7 +233,7 @@ function validateExisting(
   questionIds: Set<number>,
   input: NotesInput
 ): HolisticNotesResult | null {
-  const revision = claimsErasedDraft(existing, input.mode) ? 0 : existingRevision(existing);
+  const revision = claimsErasedDraft(existing, input) ? 0 : existingRevision(existing);
   if (revision !== input.expectedRevision) {
     return notesConflict(revision);
   }
@@ -250,7 +251,7 @@ async function upsertNotes(
   input: NotesInput
 ): Promise<{ notesId: number; revision: number }> {
   if (existing) {
-    const expectedDatabaseRevision = claimsErasedDraft(existing, input.mode)
+    const expectedDatabaseRevision = claimsErasedDraft(existing, input)
       ? existing.revision
       : input.expectedRevision;
     const updated = await client.query<{ revision: number }>(
