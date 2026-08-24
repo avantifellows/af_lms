@@ -479,7 +479,11 @@ describe("formatStudentAdditionExistingMatch", () => {
 
   it("does not claim a same-school match when school details are unavailable", () => {
     expect(
-      formatStudentAdditionExistingMatch({ student_id: "2028AB12Z" }, "JNV001"),
+      formatStudentAdditionExistingMatch(
+        { student_id: "2028AB12Z" },
+        "JNV001",
+        APPROVED_REGISTRATION_MODE,
+      ),
     ).toBe(
       "This student identifier already exists, but its school could not be identified. Student ID: 2028AB12Z. Please contact the admin.",
     );
@@ -490,7 +494,21 @@ describe("formatStudentAdditionExistingMatch", () => {
       formatStudentAdditionExistingMatch(
         { student_id: "2028AB12Z", school_code: "JNV001" },
         "JNV001",
+        APPROVED_REGISTRATION_MODE,
       ),
     ).toBe("This student identifier is already part of this school. Student ID: 2028AB12Z.");
+  });
+
+  it("uses the submitted phone when Phone-mode match context omits Student ID", () => {
+    expect(
+      formatStudentAdditionExistingMatch(
+        { school_code: "JNV001" },
+        "JNV001",
+        PHONE_REGISTRATION_MODE,
+        "6876543210",
+      ),
+    ).toBe(
+      "This student identifier is already part of this school. Student ID / Phone Number: 6876543210.",
+    );
   });
 });

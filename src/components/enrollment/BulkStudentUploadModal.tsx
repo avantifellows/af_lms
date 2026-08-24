@@ -39,6 +39,20 @@ type UploadResult = StudentAdditionCsvResult & {
   generated_student_id?: string | null;
 };
 
+function existingMatchIssue(
+  result: UploadResult,
+  schoolCode: string,
+  registrationMode: RegistrationMode,
+) {
+  if (!result.existing_match) return "";
+  return formatStudentAdditionExistingMatch(
+    result.existing_match,
+    schoolCode,
+    registrationMode,
+    result.original?.["Parents Phone Number"],
+  );
+}
+
 interface UploadResponse {
   error?: string;
   details?: string;
@@ -60,9 +74,7 @@ function rowIssues(
   schoolCode: string,
   registrationMode: RegistrationMode,
 ): string {
-  const existingMatch = result.existing_match
-    ? formatStudentAdditionExistingMatch(result.existing_match, schoolCode, registrationMode)
-    : "";
+  const existingMatch = existingMatchIssue(result, schoolCode, registrationMode);
   if (result.status === "rejected" && existingMatch) return existingMatch;
 
   const issues = [

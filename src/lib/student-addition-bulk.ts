@@ -71,10 +71,16 @@ const PHONE_EXAMPLE_ROW_MARKERS = [
   { column: "Parents Phone Number", field: "Phone", value: "9999999999" },
 ] as const;
 
+const PHONE_EXAMPLE_PHONE = "9999999999";
+const PHONE_EXAMPLE_PHONE_ERROR =
+  "Phone number matches the example row. Please replace it with the student's actual phone number";
+
 function exampleRowMarkers(mode: RegistrationMode) {
-  return mode === PHONE_REGISTRATION_MODE
-    ? PHONE_EXAMPLE_ROW_MARKERS
-    : APPROVED_EXAMPLE_ROW_MARKERS;
+  if (mode !== PHONE_REGISTRATION_MODE) return APPROVED_EXAMPLE_ROW_MARKERS;
+
+  // In Phone mode, only the named template row is ignored. A real student's
+  // row that reuses the example phone must remain visible as a rejected row.
+  return PHONE_EXAMPLE_ROW_MARKERS.filter((marker) => marker.column === "Student Name");
 }
 
 function text(value: unknown): string {
@@ -172,6 +178,30 @@ function validationToRejectedResult(
   };
 }
 
+function uploadRowRejectedResult(
+  validation: StudentAdditionValidationResult,
+  original: Record<string, string>,
+  mode: RegistrationMode,
+) {
+  if (
+    mode === PHONE_REGISTRATION_MODE &&
+    original["Parents Phone Number"] === PHONE_EXAMPLE_PHONE
+  ) {
+    return validationToRejectedResult({
+      ok: false,
+      row: validation.row,
+      generatedStudentId: validation.generatedStudentId,
+      fieldErrors: {
+        ...validation.fieldErrors,
+        phone: PHONE_EXAMPLE_PHONE_ERROR,
+      },
+      rowErrors: [...validation.rowErrors],
+    }, original);
+  }
+
+  return validation.ok ? null : validationToRejectedResult(validation, original);
+}
+
 function parseRowsFromAoA(
   rows: unknown[][],
   today?: Date,
@@ -244,12 +274,13 @@ function parseRowsFromAoA(
     });
     originalRows.set(rowNumber, original);
 
-    if (!validation.ok) {
-      rejectedResults.push(validationToRejectedResult(validation, original));
+    const rejectedResult = uploadRowRejectedResult(validation, original, mode);
+    if (rejectedResult) {
+      rejectedResults.push(rejectedResult);
       return;
     }
 
-    acceptedRows.push(validation.row);
+    acceptedRows.push(validation.row as LmsStudentAdditionRow);
   });
 
   return {

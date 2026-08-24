@@ -194,7 +194,7 @@ describe("parseStudentAdditionUpload", () => {
         totalRows: 0,
         ignoredRows: [expect.objectContaining({
           row_number: 2,
-          matched_fields: ["Student Name", "Phone"],
+          matched_fields: ["Student Name"],
         })],
       }));
       const loadedArchive = await JSZip.loadAsync(
@@ -346,6 +346,53 @@ describe("parseStudentAdditionUpload", () => {
     expect(result.rows[0]).toEqual(expect.objectContaining({ row_number: 3 }));
     expect(result.ignoredRows).toEqual([
       expect.objectContaining({ row_number: 2, matched_fields: ["PEN"] }),
+    ]);
+  });
+
+  it("rejects a real Phone-mode row that reuses the example phone", async () => {
+    const reusedExamplePhone = [...validPhoneRowValues];
+    reusedExamplePhone[1] = "Real Student";
+    reusedExamplePhone[10] = "9999999999";
+
+    const result = await parseStudentAdditionUpload({
+      filename: "students.xlsx",
+      data: await workbookBuffer({
+        Template: [
+          phoneUploadHeaders,
+          [
+            "11", "Example Student", "13/02/2011", "Female", "OBC", "Yes",
+            "CBSE", "PCMB", "Engineering", "Father ABC", "9999999999",
+          ],
+          reusedExamplePhone,
+          validPhoneRowValues,
+        ],
+      }),
+      mode: PHONE_REGISTRATION_MODE,
+      today: new Date("2026-08-24T00:00:00Z"),
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected valid Phone-mode upload");
+    expect(result.totalRows).toBe(2);
+    expect(result.ignoredRows).toEqual([
+      expect.objectContaining({ row_number: 2, matched_fields: ["Student Name"] }),
+    ]);
+    expect(result.rows).toEqual([
+      expect.objectContaining({ row_number: 4, phone: "6876543210" }),
+    ]);
+    expect(result.rejectedResults).toEqual([
+      expect.objectContaining({
+        row_number: 3,
+        status: "rejected",
+        field_errors: {
+          phone:
+            "Phone number matches the example row. Please replace it with the student's actual phone number",
+        },
+        original: expect.objectContaining({
+          "Student Name": "Real Student",
+          "Parents Phone Number": "9999999999",
+        }),
+      }),
     ]);
   });
 
@@ -681,6 +728,21 @@ describe("parseStudentAdditionUpload", () => {
     expect(csv).not.toContain("01234567890");
     expect(csv).not.toContain("legacy-id");
     expect(csv).toContain("This student identifier is already part of this school.");
+  });
+
+  it("uses the original phone in Phone-mode rejected CSV match messages", () => {
+    const csv = buildRejectedRowsCsv([{
+      row_number: 6,
+      status: "already_exists",
+      original: {
+        "Student Name": "Existing Student",
+        "Parents Phone Number": "6876543210",
+      },
+      existing_match: { school_code: "JNV001" },
+    }], "JNV001", PHONE_REGISTRATION_MODE);
+
+    expect(csv).toContain("Student ID / Phone Number: 6876543210");
+    expect(csv).not.toContain("Student ID / Phone Number: blank");
   });
 
   it("round-trips a PEN-based rejected CSV with its original row number", async () => {

@@ -232,12 +232,18 @@ export function formatStudentAdditionExistingMatch(
   existing: ExistingMatch | null | undefined,
   schoolCode?: string,
   mode: RegistrationMode = ACTIVE_REGISTRATION_MODE,
+  submittedPhone?: unknown,
 ): string {
   const match = existing ?? {};
-  const studentId = matchText(match.student_id) || "blank";
+  const studentId = matchText(match.student_id) ||
+    (mode === PHONE_REGISTRATION_MODE ? matchText(submittedPhone) : "") ||
+    "blank";
+  const studentIdLabel = mode === PHONE_REGISTRATION_MODE
+    ? "Student ID / Phone Number"
+    : "Student ID";
   const matchSchoolCode = matchText(match.school_code);
   const identities = [
-    `Student ID: ${studentId}`,
+    `${studentIdLabel}: ${studentId}`,
     mode === PHONE_REGISTRATION_MODE || !matchText(match.pen_number)
       ? ""
       : `PEN: ${matchText(match.pen_number)}`,
@@ -319,7 +325,12 @@ export function buildRejectedRowsCsv(
             : "Different school"
         : "";
       const issue = showExistingMatchContext
-        ? formatStudentAdditionExistingMatch(existing, schoolCode, mode)
+        ? formatStudentAdditionExistingMatch(
+          existing,
+          schoolCode,
+          mode,
+          result.original?.["Parents Phone Number"],
+        )
         : result.status === "duplicate_in_file"
           ? formatStudentAdditionDuplicateInFile(
             mode === PHONE_REGISTRATION_MODE

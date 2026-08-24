@@ -236,6 +236,42 @@ describe("BulkStudentUploadModal", () => {
     );
   });
 
+  it("shows the submitted phone when Phone-mode match context omits Student ID", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          totals: { total: 1, created: 0, duplicate_in_file: 0, already_exists: 1, rejected: 0 },
+          results: [{
+            row_number: 6,
+            status: "already_exists",
+            original: {
+              Grade: "12",
+              "Student Name": "Existing Student",
+              "Parents Phone Number": "6876543210",
+            },
+            existing_match: { school_code: "JNV001" },
+          }],
+        }),
+        { status: 200 },
+      ),
+    );
+
+    const user = userEvent.setup();
+    render(<BulkStudentUploadModal {...baseProps} registrationMode={PHONE_REGISTRATION_MODE} />);
+
+    await user.upload(
+      screen.getByLabelText("Student upload file"),
+      new File(["fake"], "students.xlsx", {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      }),
+    );
+    await user.click(screen.getByRole("button", { name: "Upload students" }));
+
+    expect(await screen.findByText(
+      "This student identifier is already part of this school. Student ID / Phone Number: 6876543210.",
+    )).toBeInTheDocument();
+  });
+
   it("shows rejected existing-school context and redacts restricted Phone-mode identities", async () => {
     vi.mocked(fetch).mockResolvedValue(
       new Response(
