@@ -57,8 +57,12 @@ vi.mock("next/link", () => ({
 // Mock child components as stubs
 vi.mock("@/components/SchoolSearch", () => ({
   __esModule: true,
-  default: ({ defaultValue }: { defaultValue?: string }) => (
-    <div data-testid="school-search" data-default-value={defaultValue || ""}>
+  default: ({ defaultValue, placeholder }: { defaultValue?: string; placeholder?: string }) => (
+    <div
+      data-testid="school-search"
+      data-default-value={defaultValue || ""}
+      data-placeholder={placeholder || ""}
+    >
       SchoolSearch
     </div>
   ),
@@ -490,11 +494,65 @@ describe("DashboardPage (server component)", () => {
     });
     render(jsx);
 
-    // Centres content, not the schools tab: no student search, no school search.
+    // Centres content, not the schools tab: the whole-school student search is
+    // the leak, and it is absent. The search box present here is the centre one.
     expect(screen.queryByTestId("student-search")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("school-search")).not.toBeInTheDocument();
+    expect(screen.getByTestId("school-search")).toHaveAttribute(
+      "data-placeholder",
+      "Search centres by name, school, or code..."
+    );
     // And no tab strip offering a scope they cannot open.
     expect(screen.queryByText("JNV NVS Schools")).not.toBeInTheDocument();
+  });
+
+  it("filters the centres tab by the search term", async () => {
+    mockGetServerSession.mockResolvedValue(teacherSession);
+    mockGetUserPermission.mockResolvedValue(seatedPermission);
+    mockGetProgramContextSync.mockReturnValue(defaultProgramContext);
+    mockGetFeatureAccess.mockReturnValue({ canView: false, canEdit: false });
+    mockGetAccessibleSchoolCodes.mockResolvedValue(["SC001", "SC002"]);
+    mockQuery
+      .mockResolvedValueOnce([]) // centre counts
+      .mockResolvedValueOnce([]) // schools
+      .mockResolvedValueOnce([{ total: "0" }]); // count
+
+    const jsx = await DashboardPage({
+      searchParams: Promise.resolve({ view: "centres", q: "shimoga" }),
+    });
+    render(jsx);
+
+    const [centresSql, centresParams] = mockQuery.mock.calls[0] as [string, unknown[]];
+    expect(centresSql).toContain("c.name ILIKE");
+    expect(centresSql).toContain("sch.name ILIKE");
+    expect(centresParams).toContain("%shimoga%");
+    expect(screen.getByTestId("school-search")).toBeInTheDocument();
+    expect(
+      screen.getByText('No physical centres match "shimoga"')
+    ).toBeInTheDocument();
+  });
+
+  // The header count is the user's scope, not a search result, and drives no
+  // pagination on this tab — so the centre term must not narrow it.
+  it("does not apply the centres search term to the header school count", async () => {
+    mockGetServerSession.mockResolvedValue(teacherSession);
+    mockGetUserPermission.mockResolvedValue(seatedPermission);
+    mockGetProgramContextSync.mockReturnValue(defaultProgramContext);
+    mockGetFeatureAccess.mockReturnValue({ canView: false, canEdit: false });
+    mockGetAccessibleSchoolCodes.mockResolvedValue(["SC001", "SC002"]);
+    mockQuery
+      .mockResolvedValueOnce([]) // centre counts
+      .mockResolvedValueOnce([]) // schools
+      .mockResolvedValueOnce([{ total: "7" }]); // count
+
+    const jsx = await DashboardPage({
+      searchParams: Promise.resolve({ view: "centres", q: "shimoga" }),
+    });
+    render(jsx);
+
+    const schoolCalls = mockQuery.mock.calls.slice(1);
+    for (const [, params] of schoolCalls as [string, unknown[]][]) {
+      expect(params).not.toContain("%shimoga%");
+    }
   });
 
   // --- Permission level subtitle ---

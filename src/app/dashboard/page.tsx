@@ -346,8 +346,13 @@ async function loadDashboardData({
     // Centre list + the header's school count, in parallel. No visits query and
     // no school grid on this tab.
     const [centres, { totalCount }] = await Promise.all([
-      getAccessibleCentresWithCounts(resolveCentreAccess(permission, schoolCodes)),
-      getSchools(schoolCodes, searchQuery, currentPage),
+      getAccessibleCentresWithCounts(
+        resolveCentreAccess(permission, schoolCodes),
+        searchQuery,
+      ),
+      // No searchQuery: on this tab the term filters CENTRES, while this count is
+      // the header's "your scope" figure and drives no pagination here.
+      getSchools(schoolCodes, undefined, currentPage),
     ]);
     return {
       schools: [],
@@ -547,7 +552,7 @@ function DashboardMain({ view, searchQuery, currentPage, totalPages, totalCount,
     <DashboardViewTabs view={view} seated={seated} />
     <PMStats enabled={hasPMAccess} totalCount={totalCount} recentVisitCount={recentVisits.length} />
     {view === "centres" ? (
-      <CentresSection centres={centres} hasPMAccess={hasPMAccess} />
+      <CentresSection centres={centres} hasPMAccess={hasPMAccess} searchQuery={searchQuery} />
     ) : (
       <>
         {/* Search is schools-tab only for now (centre search is a follow-up) */}
@@ -565,16 +570,28 @@ function DashboardMain({ view, searchQuery, currentPage, totalPages, totalCount,
   </main>;
 }
 
-function CentresSection({ centres, hasPMAccess }: { centres: Centre[]; hasPMAccess: boolean }) {
+function CentresSection({ centres, hasPMAccess, searchQuery }: {
+  centres: Centre[];
+  hasPMAccess: boolean;
+  searchQuery?: string;
+}) {
   return <div>
     {hasPMAccess && <div className="flex justify-between items-center mb-4 border-b-2 border-brand-gold pb-3">
       <h2 className="text-lg font-bold text-text-primary uppercase tracking-wide">Physical Centres</h2>
     </div>}
+    {/* Same ?q= mechanism as the schools tab — this is the default landing for
+        seated staff, and a PM with 35 seat centres needs to find one. */}
+    <div className="mb-6">
+      <SchoolSearch
+        defaultValue={searchQuery}
+        placeholder="Search centres by name, school, or code..."
+      />
+    </div>
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
       {centres.map((centre) => <DashboardCentreCard key={centre.id} centre={centre} hasPMAccess={hasPMAccess} />)}
     </div>
     {centres.length === 0 && <div className="text-center py-12 text-text-muted">
-      No physical centres found
+      {searchQuery ? `No physical centres match "${searchQuery}"` : "No physical centres found"}
     </div>}
   </div>;
 }

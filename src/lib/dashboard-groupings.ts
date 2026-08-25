@@ -184,6 +184,7 @@ export async function getBrowsableCentreIds(centreIds: number[]): Promise<number
 
 export async function getAccessibleCentresWithCounts(
   access: CentreAccess,
+  searchQuery?: string,
 ): Promise<Centre[]> {
   if (access.kind === "ids" && access.ids.length === 0) return [];
   if (access.kind === "schools" && access.codes.length === 0) return [];
@@ -196,6 +197,18 @@ export async function getAccessibleCentresWithCounts(
   } else if (access.kind === "schools") {
     scopeClause = "AND sch.code = ANY($2)";
     params.push(access.codes);
+  }
+
+  // Matches the school search's fields as closely as a centre allows: the
+  // centre's own name plus its school's name and code, so "shimoga" finds the
+  // centre whether the user thinks of it by centre or by school.
+  let searchClause = "";
+  const term = searchQuery?.trim();
+  if (term) {
+    params.push(`%${term}%`);
+    searchClause = `AND (c.name ILIKE $${params.length}
+       OR sch.name ILIKE $${params.length}
+       OR sch.code ILIKE $${params.length})`;
   }
 
   const rows = await query<CentreCountRow>(
@@ -214,7 +227,7 @@ export async function getAccessibleCentresWithCounts(
      LEFT JOIN school sch ON sch.id = c.school_id
      LEFT JOIN centre_students cs
        ON cs.centre_id = c.id AND cs.academic_year = $1
-     WHERE c.is_active ${scopeClause}
+     WHERE c.is_active ${scopeClause} ${searchClause}
      GROUP BY c.id, c.name, p.name, c.school_id, sch.code, sch.name, sch.region, cs.grade
      ORDER BY c.name, cs.grade`,
     params,
