@@ -2,11 +2,19 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("next-auth", () => ({ getServerSession: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
-vi.mock("@/lib/permissions", () => ({ getAccessibleSchoolCodes: vi.fn() }));
+vi.mock("@/lib/permissions", () => ({
+  getAccessibleSchoolCodes: vi.fn(),
+  getResolvedPermission: vi.fn(),
+  getCentreConfinement: vi.fn(),
+}));
 vi.mock("@/lib/db", () => ({ query: vi.fn() }));
 
 import { getServerSession } from "next-auth";
-import { getAccessibleSchoolCodes } from "@/lib/permissions";
+import {
+  getAccessibleSchoolCodes,
+  getCentreConfinement,
+  getResolvedPermission,
+} from "@/lib/permissions";
 import { query } from "@/lib/db";
 import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
 import { GET } from "./route";
@@ -14,10 +22,14 @@ import { NO_SESSION, ADMIN_SESSION } from "../../__test-utils__/api-test-helpers
 
 const mockSession = vi.mocked(getServerSession);
 const mockGetCodes = vi.mocked(getAccessibleSchoolCodes);
+const mockGetPermission = vi.mocked(getResolvedPermission);
+const mockConfinement = vi.mocked(getCentreConfinement);
 const mockQuery = vi.mocked(query);
 
 beforeEach(() => {
   vi.resetAllMocks();
+  mockGetPermission.mockResolvedValue(null);
+  mockConfinement.mockReturnValue({ confined: false, centreIds: [] });
 });
 
 describe("GET /api/students/search", () => {
@@ -82,13 +94,52 @@ describe("GET /api/students/search", () => {
     const res = await GET(req as never);
     expect(res.status).toBe(200);
     expect(mockQuery).toHaveBeenCalledWith(
-      expect.stringContaining("sch.code = ANY($1)"),
-      [["70705", "70706"], "%test%", CURRENT_ACADEMIC_YEAR],
+      expect.stringContaining("sch.code = ANY($3)"),
+      ["%test%", CURRENT_ACADEMIC_YEAR, ["70705", "70706"]],
     );
     const sql = mockQuery.mock.calls[0][0] as string;
-    expect(sql).toContain("er.academic_year = $3");
+    expect(sql).toContain("er.academic_year = $2");
     // Scoped branch carries the same JNV-OR-active-centre visibility scope, so a
     // user seated at a centre school can search its students within their codes.
     expect(sql).toContain("FROM centres c WHERE c.school_id = sch.id AND c.is_active");
+  });
+
+  // A centre seat grants parent-school access so school-linked actions (visits)
+  // work. Before this, that made every student at the school searchable by a
+  // confined user — name, student id, grade and phone included.
+  it("restricts a centre-confined user to their own centres' students", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockGetCodes.mockResolvedValue(["70705"] as never);
+    mockConfinement.mockReturnValue({ confined: true, centreIds: [8, 11] });
+    mockQuery.mockResolvedValue([]);
+
+    const req = new Request("http://localhost/api/students/search?q=test");
+    const res = await GET(req as never);
+    expect(res.status).toBe(200);
+
+    const [sql, params] = mockQuery.mock.calls[0] as [string, unknown[]];
+    // Scoped to seat centres via the membership view, so search results and the
+    // roster the user can actually open agree.
+    expect(sql).toContain("JOIN centre_students cs ON cs.user_id = u.id");
+    expect(sql).toContain("cs.centre_id = ANY($3::int[])");
+    expect(params).toEqual(["%test%", CURRENT_ACADEMIC_YEAR, [8, 11]]);
+    // The school-code predicate must NOT also be applied — it would be the wider
+    // scope, and leaving it in invites reading this as school-scoped.
+    expect(sql).not.toContain("sch.code = ANY");
+  });
+
+  // Confinement outranks all-school access: a seated admin is still seat-scoped.
+  it("restricts a confined user even when they have all-school access", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockGetCodes.mockResolvedValue("all" as never);
+    mockConfinement.mockReturnValue({ confined: true, centreIds: [8] });
+    mockQuery.mockResolvedValue([]);
+
+    const req = new Request("http://localhost/api/students/search?q=test");
+    await GET(req as never);
+
+    const [sql, params] = mockQuery.mock.calls[0] as [string, unknown[]];
+    expect(sql).toContain("cs.centre_id = ANY($3::int[])");
+    expect(params).toEqual(["%test%", CURRENT_ACADEMIC_YEAR, [8]]);
   });
 });

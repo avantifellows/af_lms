@@ -450,6 +450,30 @@ describe("DashboardPage (server component)", () => {
     expect(mockRedirect).not.toHaveBeenCalledWith("/centre/8");
   });
 
+  // The JNV NVS tab is the whole-school scope and carries the school-wide student
+  // search. A confined user has no NVS scope, so ?view=jnv-nvs must not be a way
+  // in — the search API refuses them too, but the URL shouldn't look like an
+  // option in the first place.
+  it("pins a centre-seated user to Centres even when the URL asks for JNV NVS", async () => {
+    mockGetServerSession.mockResolvedValue(teacherSession);
+    mockGetUserPermission.mockResolvedValue(seatedPermission);
+    mockGetProgramContextSync.mockReturnValue(defaultProgramContext);
+    mockGetFeatureAccess.mockReturnValue({ canView: false, canEdit: false });
+    mockGetAccessibleSchoolCodes.mockResolvedValue(["SC001", "SC002"]);
+    mockQuery.mockResolvedValue([]);
+
+    const jsx = await DashboardPage({
+      searchParams: Promise.resolve({ view: "jnv-nvs" }),
+    });
+    render(jsx);
+
+    // Centres content, not the schools tab: no student search, no school search.
+    expect(screen.queryByTestId("student-search")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("school-search")).not.toBeInTheDocument();
+    // And no tab strip offering a scope they cannot open.
+    expect(screen.queryByText("JNV NVS Schools")).not.toBeInTheDocument();
+  });
+
   // --- Permission level subtitle ---
 
   it("shows 'Admin access' for level 4", async () => {

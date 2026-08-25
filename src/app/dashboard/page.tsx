@@ -269,9 +269,13 @@ async function dashboardRequest(searchParams: PageProps["searchParams"]) {
 // whole-school roster. Default them to the Centres tab so the single-school
 // shortcut never bounces them to the school page — an explicit ?view= wins.
 function resolveDashboardView(viewParam: string | undefined, seated: boolean): DashboardView {
+  // A confined user has no NVS scope at all, so ?view=jnv-nvs is not an escape
+  // hatch for them — it is the whole-school tab, carrying the school-wide
+  // student search. Pin them to Centres whatever the URL says.
+  if (seated) return "centres";
   if (viewParam === "centres") return "centres";
   if (viewParam === "jnv-nvs") return "jnv-nvs";
-  return seated ? "centres" : "jnv-nvs";
+  return "jnv-nvs";
 }
 
 // Single-scope shortcuts, both taken only on the plain landing (no tab chosen,
@@ -432,6 +436,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         centres={data.centres}
         recentVisits={data.recentVisits}
         hasPMAccess={features.hasPMAccess}
+        seated={seated}
       />
     </div>
   );
@@ -503,9 +508,12 @@ const DASHBOARD_VIEWS = [
 ] as const;
 
 // Grouping tabs — disjoint scopes, so counts never double-count.
-function DashboardViewTabs({ view }: { view: DashboardView }) {
+function DashboardViewTabs({ view, seated }: { view: DashboardView; seated: boolean }) {
+  // One tab left for a confined user — render no tab strip rather than a lone
+  // tab that looks like a choice.
+  const views = seated ? [] : DASHBOARD_VIEWS;
   return <div className="mb-6 flex gap-6 border-b border-border">
-    {DASHBOARD_VIEWS.map((tab) => <Link
+    {views.map((tab) => <Link
       key={tab.key}
       href={`/dashboard?view=${tab.key}`}
       className={view === tab.key
@@ -517,7 +525,7 @@ function DashboardViewTabs({ view }: { view: DashboardView }) {
   </div>;
 }
 
-function DashboardMain({ view, searchQuery, currentPage, totalPages, totalCount, schools, centres, recentVisits, hasPMAccess }: {
+function DashboardMain({ view, searchQuery, currentPage, totalPages, totalCount, schools, centres, recentVisits, hasPMAccess, seated }: {
   view: DashboardView;
   searchQuery?: string;
   currentPage: number;
@@ -527,9 +535,10 @@ function DashboardMain({ view, searchQuery, currentPage, totalPages, totalCount,
   centres: Centre[];
   recentVisits: Visit[];
   hasPMAccess: boolean;
+  seated: boolean;
 }) {
   return <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-    <DashboardViewTabs view={view} />
+    <DashboardViewTabs view={view} seated={seated} />
     <PMStats enabled={hasPMAccess} totalCount={totalCount} recentVisitCount={recentVisits.length} />
     {view === "centres" ? (
       <CentresSection centres={centres} hasPMAccess={hasPMAccess} />

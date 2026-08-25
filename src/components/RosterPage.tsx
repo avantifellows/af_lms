@@ -16,7 +16,7 @@ import {
   getFeatureAccess,
   canAccessSchoolSync,
   canViewCentre,
-  isCentreSeated,
+  getCentreConfinement,
   hasMultipleSchools,
   PROGRAM_IDS,
 } from "@/lib/permissions";
@@ -653,11 +653,9 @@ export default async function RosterPage({
     // roster page isn't theirs to open (their seat grants school access only so
     // school-linked actions like visits work). Point them at their centre — the
     // single seat directly, otherwise the Centres tab to pick one.
-    if (!isCentre && isCentreSeated(permission)) {
-      const seatIds =
-        permission.scope?.centres instanceof Set
-          ? [...permission.scope.centres]
-          : [];
+    const confinement = getCentreConfinement(permission);
+    if (!isCentre && confinement.confined) {
+      const seatIds = confinement.centreIds;
       const centreLink =
         seatIds.length === 1
           ? { href: `/centre/${seatIds[0]}`, label: "Go to your centre" }

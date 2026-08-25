@@ -391,6 +391,21 @@ export function isCentreSeated(permission: UserPermission | null): boolean {
   return centres instanceof Set && centres.size > 0;
 }
 
+// The single home for "is this user confined to their centre(s)?" — one rule for
+// every surface that must not show a confined user whole-school data: the school
+// roster page gate, the dashboard's school-scoped tab, and the student search.
+// Keeping it here is the point. When the confinement rule changes (e.g. if it
+// narrows to teachers only, leaving PMs their school access) every surface moves
+// together instead of the UI hiding a tab whose API still answers.
+export function getCentreConfinement(permission: UserPermission | null): {
+  confined: boolean;
+  centreIds: number[];
+} {
+  if (!isCentreSeated(permission)) return { confined: false, centreIds: [] };
+  const centres = permission!.scope!.centres as Set<number>;
+  return { confined: true, centreIds: [...centres] };
+}
+
 // The single home for "may this user view this centre?": admins and users
 // seated at the centre pass; a seatless school/region manager falls back to
 // their school access. Both the dashboard's centre-list scoping
