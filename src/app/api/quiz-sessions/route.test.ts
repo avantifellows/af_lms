@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   mockGetUserPermission: vi.fn(),
   mockRequireQuizSessionAccess: vi.fn(),
   mockCanAccessQuizSessionSchool: vi.fn(),
+  mockResolveProgramIds: vi.fn(),
   mockCanAccessQuizSessionBatches: vi.fn(),
   mockResolveBatchGroups: vi.fn(),
   mockQuery: vi.fn(),
@@ -42,6 +43,7 @@ vi.mock("@/lib/quiz-session-access", () => ({
     return access.ok ? { ...access, email: session.user.email } : access;
   },
   canAccessQuizSessionSchool: mocks.mockCanAccessQuizSessionSchool,
+  resolveQuizSessionProgramIds: mocks.mockResolveProgramIds,
   canAccessQuizSessionBatches: mocks.mockCanAccessQuizSessionBatches,
   resolveBatchGroups: mocks.mockResolveBatchGroups,
 }));
@@ -75,6 +77,7 @@ beforeEach(() => {
   mocks.mockRequireQuizSessionAccess.mockReset();
   mocks.mockCanAccessQuizSessionSchool.mockReset();
   mocks.mockCanAccessQuizSessionBatches.mockReset();
+  mocks.mockResolveProgramIds.mockReset();
   mocks.mockQuery.mockReset();
   mocks.mockPublishMessage.mockReset();
   mocks.mockFetch.mockReset();
@@ -85,6 +88,7 @@ beforeEach(() => {
   });
   mocks.mockCanAccessQuizSessionSchool.mockResolvedValue(true);
   mocks.mockCanAccessQuizSessionBatches.mockResolvedValue(true);
+  mocks.mockResolveProgramIds.mockResolvedValue([1, 64]);
   // Default: the test class batch resolves to EnableStudents / ID,DOB.
   mocks.mockResolveBatchGroups.mockResolvedValue(
     new Map([["EnableStudents_11_Engg_A", { group: "EnableStudents", authType: "ID,DOB" }]])

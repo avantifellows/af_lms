@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import {
   canAccessQuizSessionSchool,
   requireQuizSessionAccess,
+  resolveQuizSessionProgramIds,
 } from "@/lib/quiz-session-access";
 import { query } from "@/lib/db";
 
@@ -58,7 +59,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const programIds = access.permission.program_ids ?? [];
+  const programIds = await resolveQuizSessionProgramIds(access.permission);
 
   if (programIds.length === 0) {
     return NextResponse.json({ batches: [] });

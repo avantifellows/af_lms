@@ -7,6 +7,7 @@ import {
   requireQuizSessionAccess,
   requireQuizSessionRequestAccess,
   resolveBatchGroups,
+  resolveQuizSessionProgramIds,
 } from "@/lib/quiz-session-access";
 import { query } from "@/lib/db";
 import {
@@ -159,7 +160,7 @@ export async function GET(request: NextRequest) {
   // Optional narrowing (centre pages pass their program). Intersected with the
   // viewer's own programs — it can only restrict, never widen, their access.
   const requestedProgramId = programIdParam ? Number(programIdParam) : null;
-  const allProgramIds = permission?.program_ids ?? [];
+  const allProgramIds = await resolveQuizSessionProgramIds(permission);
   const programIds =
     requestedProgramId !== null && !Number.isNaN(requestedProgramId)
       ? allProgramIds.filter((id) => id === requestedProgramId)
