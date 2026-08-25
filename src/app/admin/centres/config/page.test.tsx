@@ -70,11 +70,11 @@ describe("CentreOptionConfigPage (server component)", () => {
       ok: true,
       optionSets: [
         {
-          id: 4,
-          code: "stream",
-          label: "Centre Stream",
-          allowMulti: true,
-          sortOrder: 4,
+          id: 1,
+          code: "type",
+          label: "Centre Type",
+          allowMulti: false,
+          sortOrder: 1,
           options: [],
         },
       ],
@@ -88,6 +88,6 @@ describe("CentreOptionConfigPage (server component)", () => {
     expect(screen.getByText("Centres")).toHaveAttribute("href", "/admin/centres");
     const config = screen.getByTestId("centre-option-config");
     const props = JSON.parse(config.getAttribute("data-props")!);
-    expect(props.initialOptionSets[0].code).toBe("stream");
+    expect(props.initialOptionSets[0].code).toBe("type");
   });
 });

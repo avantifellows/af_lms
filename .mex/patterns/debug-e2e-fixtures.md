@@ -14,7 +14,7 @@ edges:
     condition: when failures are in PM school visit flows
   - target: context/data-access.md
     condition: when fixture rows need to match schema/read-path expectations
-last_updated: 2026-08-15
+last_updated: 2026-08-24
 ---
 
 # Debug E2E Fixtures

@@ -7,6 +7,9 @@ vi.mock("@/lib/db", () => ({
   query: vi.fn(),
   withTransaction: vi.fn(),
 }));
+vi.mock("@/lib/centre-resolver", () => ({
+  validateCentreExamTrackMapping: vi.fn(),
+}));
 vi.mock("@/lib/permissions", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/permissions")>();
   const getUserPermission = vi.fn();
@@ -32,6 +35,7 @@ import {
   routeParams,
 } from "../../../../__test-utils__/api-test-helpers";
 import { resetCurriculumSchemaCheckForTests } from "@/lib/curriculum-schema";
+import { validateCentreExamTrackMapping } from "@/lib/centre-resolver";
 import { PUT } from "./route";
 
 const mockSession = vi.mocked(getServerSession);
@@ -40,6 +44,7 @@ const mockWithTransaction = vi.mocked(withTransaction);
 const mockGetUserPermission = vi.mocked(getUserPermission);
 const mockGetFeatureAccess = vi.mocked(getFeatureAccess);
 const mockCanAccessSchoolSync = vi.mocked(canAccessSchoolSync);
+const mockValidateCentreExamTrackMapping = vi.mocked(validateCentreExamTrackMapping);
 
 function jsonReq(body: unknown) {
   return new NextRequest(
@@ -74,6 +79,7 @@ describe("PUT /api/curriculum/chapters/[chapterId]/completion", () => {
       canEdit: true,
     });
     mockCanAccessSchoolSync.mockReturnValue(true);
+    mockValidateCentreExamTrackMapping.mockResolvedValue({ ok: true });
   });
 
   it("marks one in-syllabus chapter complete without creating an LMS Curriculum Log", async () => {
@@ -128,6 +134,38 @@ describe("PUT /api/curriculum/chapters/[chapterId]/completion", () => {
       completedAt: "2026-02-15T10:00:00.000Z",
       completedByEmail: "teacher@avantifellows.org",
     });
+  });
+
+  it("rejects Chapter Completion when the Track is no longer mapped to the Centre", async () => {
+    mockValidateCentreExamTrackMapping.mockResolvedValue({
+      ok: false,
+      error: "No Exam Tracks configured for this Centre and Grade",
+    });
+    mockQuery
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ code: "70705", region: "North", program_ids: [1] }])
+      .mockResolvedValueOnce([{ id: 1, name: "JNV CoE" }])
+      .mockResolvedValueOnce([
+        { chapter_id: 44, is_in_syllabus: true, active_completed_at: null },
+      ]);
+
+    const res = await PUT(
+      jsonReq({
+        school_code: "70705",
+        program_id: 1,
+        exam_track: "jee_main",
+        grade: 11,
+        subject: "Physics",
+        completed: true,
+      }),
+      routeParams({ chapterId: "44" })
+    );
+
+    expect(res.status).toBe(422);
+    await expect(res.json()).resolves.toEqual({
+      error: "No Exam Tracks configured for this Centre and Grade",
+    });
+    expect(mockWithTransaction).not.toHaveBeenCalled();
   });
 
   it("allows unmarking an out-of-syllabus chapter with no active completion", async () => {

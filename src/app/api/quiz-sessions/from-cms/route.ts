@@ -1,19 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import {
   canAccessQuizSessionBatches,
-  requireQuizSessionAccess,
+  requireQuizSessionRequestAccess,
   resolveBatchGroups,
 } from "@/lib/quiz-session-access";
 import { istWallClockWindowEnd, utcToISTDate } from "@/lib/quiz-session-time";
+import { resolveGradeId } from "@/lib/curriculum-options";
 import {
-  EXAM_TRACKS,
-  resolveGradeId,
-  streamForExamTrack,
-} from "@/lib/curriculum-options";
-import { CMS_SOURCE, isCmsTestType } from "@/lib/cms-tests";
-import type { ExamTrack } from "@/types/curriculum";
+  CMS_SOURCE,
+  isCmsExamTrack,
+  isCmsTestType,
+  streamForCmsExamTrack,
+  type CmsExamTrack,
+} from "@/lib/cms-tests";
 
 // Create a quiz session from a new-CMS test. This is the SYNCHRONOUS replacement for the
 // legacy SNS -> etl-data-flow sessionCreator Lambda: af_lms builds the quiz in quiz-backend,
@@ -41,7 +40,7 @@ interface CreateFromCmsBody {
   name?: string;
   cmsTestId?: number;
   testType?: string;
-  examTrack?: ExamTrack;
+  examTrack?: CmsExamTrack;
   grade?: number;
   testName?: string;
   testCode?: string;
@@ -114,13 +113,9 @@ async function resolveGroupId(batchId: string): Promise<number | null> {
   return groups?.[0]?.id ?? null;
 }
 
+// fallow-ignore-next-line complexity code-duplication
 export async function POST(request: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.email) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const access = await requireQuizSessionAccess(session.user.email, "edit");
+  const access = await requireQuizSessionRequestAccess("edit");
   if (!access.ok) {
     return access.response;
   }
@@ -143,7 +138,7 @@ export async function POST(request: NextRequest) {
   if (!body.cmsTestId || Number.isNaN(Number(body.cmsTestId))) {
     return NextResponse.json({ error: "cmsTestId is required" }, { status: 400 });
   }
-  if (!body.examTrack || !EXAM_TRACKS.includes(body.examTrack)) {
+  if (!isCmsExamTrack(body.examTrack)) {
     return NextResponse.json({ error: "Valid examTrack is required" }, { status: 400 });
   }
   if (body.grade !== 11 && body.grade !== 12) {
@@ -171,7 +166,7 @@ export async function POST(request: NextRequest) {
   // the picker) must match the stream derived from the selected batch — e.g. a NEET test
   // cannot be attached to an engineering batch. Mirrors the legacy route's template.stream
   // vs body.stream check.
-  const expectedStream = streamForExamTrack(body.examTrack);
+  const expectedStream = streamForCmsExamTrack(body.examTrack);
   if (expectedStream && body.stream !== expectedStream) {
     return NextResponse.json(
       {
@@ -304,7 +299,7 @@ export async function POST(request: NextRequest) {
 
   // Student-facing shortened session/OMR links + the attendance report link (legacy
   // sessionCreator parity; each falls back to its full URL if the shortener is unavailable).
-  const createdBy = session.user.email;
+  const createdBy = access.email;
   // The three shortener calls are independent — run them concurrently so a create pays one
   // shortener round-trip's latency, not three.
   const [shortenedLink, shortenedOmrLink, reportLink] = await Promise.all([
@@ -376,7 +371,7 @@ export async function POST(request: NextRequest) {
       test_takers_count: 100,
       status: "success",
       date_created: utcToISTDate(new Date().toISOString()),
-      created_by: session.user.email,
+      created_by: access.email,
       created_from: "lms",
     },
   };

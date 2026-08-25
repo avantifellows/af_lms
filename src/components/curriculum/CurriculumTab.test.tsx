@@ -14,12 +14,14 @@ vi.mock("./ProgressSummary", () => ({
     chapters: Chapter[];
     progress: Record<number, ChapterProgress>;
     subjectTotalTimeMinutes: number;
+    doubtSolvingTotalTimeMinutes?: number;
   }) => (
     <div
       data-testid="progress-summary"
       data-chapters={JSON.stringify(props.chapters)}
       data-progress={JSON.stringify(props.progress)}
       data-subject-total-time-minutes={props.subjectTotalTimeMinutes}
+      data-doubt-solving-total-time-minutes={props.doubtSolvingTotalTimeMinutes}
     />
   ),
 }));
@@ -82,8 +84,10 @@ vi.mock("./LogSessionModal", () => ({
   default: (props: {
     chapters: Chapter[];
     onSave: (payload: {
+      logType: "regular" | "class_cancelled" | "doubt_solving";
       date: string;
-      durationMinutes: number;
+      durationMinutes: number | null;
+      chapterId: number | null;
       topicIds: number[];
       completeChapterIds: number[];
       uncompleteChapterIds: number[];
@@ -101,8 +105,10 @@ vi.mock("./LogSessionModal", () => ({
       <button
         onClick={() =>
           props.onSave({
+            logType: "regular",
             date: "2026-02-15",
             durationMinutes: 90,
+            chapterId: null,
             topicIds: [101],
             completeChapterIds: [],
             uncompleteChapterIds: [],
@@ -115,8 +121,10 @@ vi.mock("./LogSessionModal", () => ({
       <button
         onClick={() =>
           props.onSave({
+            logType: "regular",
             date: "2026-02-15",
             durationMinutes: 0,
+            chapterId: null,
             topicIds: [],
             completeChapterIds: [1],
             uncompleteChapterIds: [],
@@ -125,6 +133,22 @@ vi.mock("./LogSessionModal", () => ({
         disabled={props.isSaving}
       >
         Save Completion Only
+      </button>
+      <button
+        onClick={() =>
+          props.onSave({
+            logType: "doubt_solving",
+            date: "2026-02-15",
+            durationMinutes: 75,
+            chapterId: 1,
+            topicIds: [],
+            completeChapterIds: [],
+            uncompleteChapterIds: [],
+          })
+        }
+        disabled={props.isSaving}
+      >
+        Save Doubt Solving
       </button>
     </div>
   ),
@@ -136,10 +160,27 @@ const optionsResponse = {
     { id: 2, name: "JNV Nodal" },
   ],
   examTracks: ["jee_main", "neet"],
+  centreExamTracks: [
+    {
+      examTrack: "jee_main",
+      grade: 11,
+      hasCurriculumConfig: true,
+      isMapped: true,
+      hasHistoricalLogs: false,
+    },
+    {
+      examTrack: "neet",
+      grade: 12,
+      hasCurriculumConfig: true,
+      isMapped: true,
+      hasHistoricalLogs: false,
+    },
+  ],
   gradeSubjects: [
     { examTrack: "jee_main", grade: 11, gradeId: 3, subject: "Physics", subjectId: 4 },
     { examTrack: "neet", grade: 12, gradeId: 4, subject: "Biology", subjectId: 3 },
   ],
+  configurationError: null,
   defaults: {
     programId: 1,
     examTrack: "jee_main",
@@ -259,8 +300,22 @@ function setupFetch() {
     if (url === "/api/curriculum/logs/10" && init?.method === "DELETE") {
       return mockOkJson({ deleted: true });
     }
-    if (url === "/api/curriculum/options?school_code=70705") {
-      return mockOkJson(optionsResponse);
+    if (url.startsWith("/api/curriculum/options?school_code=70705")) {
+      // Mirrors the server: program_id is honoured only when it is one of the
+      // school's curriculum-enabled programs; anything else falls back to the
+      // default, which is how the route reports "not available for you".
+      const requested = Number(
+        new URLSearchParams(url.split("?")[1]).get("program_id")
+      );
+      const honoured = optionsResponse.programs.some((p) => p.id === requested);
+      return mockOkJson(
+        honoured
+          ? {
+              ...optionsResponse,
+              defaults: { ...optionsResponse.defaults, programId: requested },
+            }
+          : optionsResponse
+      );
     }
     if (url.includes("/api/curriculum/logs?") && url.includes("exam_track=neet")) {
       return mockOkJson(biologyLogsResponse);
@@ -364,7 +419,7 @@ describe("CurriculumTab", () => {
     renderTab();
 
     await screen.findByTestId("chapter-accordion");
-    await user.selectOptions(screen.getByLabelText("Exam Track"), "neet");
+    await user.selectOptions(screen.getByLabelText("Grade"), "12");
 
     await waitFor(() => {
       expect(screen.getByLabelText("Grade")).toHaveValue("12");
@@ -390,12 +445,159 @@ describe("CurriculumTab", () => {
     );
   });
 
+  it("changes Exam Track options with Grade and blocks logging when mapped content is unavailable", async () => {
+    const user = userEvent.setup();
+    mockFetch.mockResolvedValueOnce(
+      await mockOkJson({
+        ...optionsResponse,
+        examTracks: ["jee_main"],
+        centreExamTracks: [
+          {
+            examTrack: "jee_main",
+            grade: 11,
+            hasCurriculumConfig: true,
+            isMapped: true,
+            hasHistoricalLogs: false,
+          },
+          {
+            examTrack: "neet",
+            grade: 12,
+            hasCurriculumConfig: true,
+            isMapped: true,
+            hasHistoricalLogs: false,
+          },
+          {
+            examTrack: "math_foundation",
+            grade: 12,
+            hasCurriculumConfig: false,
+            isMapped: true,
+            hasHistoricalLogs: false,
+          },
+        ],
+      })
+    );
+    renderTab();
+
+    await screen.findByTestId("chapter-accordion");
+    await user.selectOptions(screen.getByLabelText("Grade"), "12");
+
+    expect(screen.getByLabelText("Exam Track").querySelectorAll("option")).toHaveLength(2);
+    await user.selectOptions(screen.getByLabelText("Exam Track"), "math_foundation");
+    expect(
+      await screen.findByText("Curriculum configuration is not available")
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "+ Log a class" })).toBeDisabled();
+  });
+
+  it("shows retained history for an unmapped Track without allowing changes", async () => {
+    const user = userEvent.setup();
+    const historicalOptions = {
+      ...optionsResponse,
+      examTracks: ["jee_main", "jee_advanced"],
+      centreExamTracks: [
+        optionsResponse.centreExamTracks[0],
+        {
+          examTrack: "jee_advanced",
+          grade: 11,
+          hasCurriculumConfig: true,
+          isMapped: false,
+          hasHistoricalLogs: true,
+        },
+      ],
+      gradeSubjects: [
+        ...optionsResponse.gradeSubjects,
+        {
+          examTrack: "jee_advanced",
+          grade: 11,
+          gradeId: 3,
+          subject: "Physics",
+          subjectId: 4,
+        },
+      ],
+    };
+    mockFetch.mockImplementation((url: string) => {
+      if (url === "/api/curriculum/options?school_code=70705") {
+        return mockOkJson(historicalOptions);
+      }
+      if (url.includes("/api/curriculum/logs?")) return mockOkJson(logsResponse);
+      if (url.includes("/api/curriculum/progress?")) return mockOkJson(progressResponse);
+      return mockOkJson({ chapters: physicsChapters });
+    });
+
+    renderTab({ canEdit: true });
+    await screen.findByTestId("chapter-accordion");
+    await user.selectOptions(screen.getByLabelText("Exam Track"), "jee_advanced");
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining("exam_track=jee_advanced")
+      );
+    });
+    expect(
+      screen.getByRole("option", { name: "JEE Advanced (history only)" })
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "+ Log a class" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Mark Chapter Row" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Logs" }));
+    expect(screen.getByTestId("session-history")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Edit log 10" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delete log 10" })).not.toBeInTheDocument();
+  });
+
+  it("reloads mapped Tracks when Program changes", async () => {
+    const user = userEvent.setup();
+    mockFetch.mockImplementation((url: string) => {
+      if (url === "/api/curriculum/options?school_code=70705") {
+        return mockOkJson(optionsResponse);
+      }
+      if (url === "/api/curriculum/options?school_code=70705&program_id=2") {
+        return mockOkJson({
+          ...optionsResponse,
+          examTracks: ["cet"],
+          centreExamTracks: [
+            {
+              examTrack: "cet",
+              grade: 11,
+              hasCurriculumConfig: false,
+              isMapped: true,
+              hasHistoricalLogs: false,
+            },
+          ],
+          gradeSubjects: [],
+          defaults: {
+            ...optionsResponse.defaults,
+            programId: 2,
+            examTrack: "cet",
+            subject: null,
+            subjectId: null,
+          },
+        });
+      }
+      if (url.includes("/api/curriculum/logs?")) return mockOkJson(logsResponse);
+      if (url.includes("/api/curriculum/progress?")) return mockOkJson(progressResponse);
+      return mockOkJson({ chapters: physicsChapters });
+    });
+    renderTab();
+
+    await screen.findByTestId("chapter-accordion");
+    await user.selectOptions(screen.getByLabelText("Program"), "2");
+
+    expect(
+      await screen.findByText("Curriculum configuration is not available")
+    ).toBeInTheDocument();
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/curriculum/options?school_code=70705&program_id=2"
+    );
+    expect(screen.getByLabelText("Exam Track")).toHaveValue("cet");
+  });
+
   it("opens Add Log with chapters from the active filter scope", async () => {
     const user = userEvent.setup();
     renderTab({ canEdit: true });
 
     await screen.findByTestId("chapter-accordion");
-    await user.selectOptions(screen.getByLabelText("Exam Track"), "neet");
+    await user.selectOptions(screen.getByLabelText("Grade"), "12");
     await waitFor(() =>
       expect(screen.getByTestId("chapter-accordion")).toHaveAttribute(
         "data-chapters",
@@ -449,6 +651,7 @@ describe("CurriculumTab", () => {
             exam_track: "jee_main",
             grade: 11,
             subject: "Physics",
+            log_type: "regular",
             log_date: "2026-02-15",
             duration_minutes: 90,
             topic_ids: [101],
@@ -464,6 +667,35 @@ describe("CurriculumTab", () => {
     expect(mockFetch).toHaveBeenCalledWith(
       "/api/curriculum/progress?school_code=70705&program_id=1&exam_track=jee_main&grade=11&subject=Physics"
     );
+  });
+
+  it("saves a Doubt Solving log with only its Chapter-backed fields", async () => {
+    const user = userEvent.setup();
+    renderTab({ canEdit: true });
+
+    await screen.findByTestId("chapter-accordion");
+    await user.click(screen.getByRole("button", { name: "+ Log a class" }));
+    await user.click(screen.getByText("Save Doubt Solving"));
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/curriculum/logs",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            school_code: "70705",
+            program_id: 1,
+            exam_track: "jee_main",
+            grade: 11,
+            subject: "Physics",
+            log_type: "doubt_solving",
+            log_date: "2026-02-15",
+            chapter_id: 1,
+            duration_minutes: 75,
+          }),
+        })
+      );
+    });
   });
 
   it("closes the Add Log modal and reports reload guidance when refresh fails after save", async () => {
@@ -522,6 +754,7 @@ describe("CurriculumTab", () => {
             exam_track: "jee_main",
             grade: 11,
             subject: "Physics",
+            log_type: "regular",
             topic_ids: [],
             complete_chapter_ids: [1],
             uncomplete_chapter_ids: [],
@@ -823,28 +1056,45 @@ describe("CurriculumTab", () => {
     expect(screen.getByTestId("log-session-modal")).toBeInTheDocument();
   });
 
-  it("stays locked to the centre's program even when it has no curriculum options", async () => {
-    // Program 99 isn't in the school's options — the locked page must not
-    // silently fall back to the default program's curriculum.
+  it("asks the server for the centre's program and keeps the selector hidden", async () => {
+    // Every option group (centreExamTracks, gradeSubjects, defaults) is derived
+    // server-side from the selected program, so the lock has to travel with the
+    // options request rather than being applied to the response afterwards.
     setupFetch();
 
-    renderTab({ programId: 99 });
+    renderTab({ programId: 2 });
 
     await screen.findByText(/Curriculum Progress/);
-    // Chapters are fetched for the locked program, never program 1 (default).
+    const optionsCalls = mockFetch.mock.calls
+      .map(([url]) => String(url))
+      .filter((url) => url.includes("/api/curriculum/options"));
+    expect(optionsCalls).toHaveLength(1);
+    expect(optionsCalls[0]).toContain("program_id=2");
+    expect(screen.queryByLabelText("Program")).not.toBeInTheDocument();
+
     await waitFor(() => {
       const chapterCalls = mockFetch.mock.calls
         .map(([url]) => String(url))
         .filter((url) => url.includes("/api/curriculum/chapters"));
       expect(chapterCalls.length).toBeGreaterThan(0);
-      expect(chapterCalls.every((url) => url.includes("program_id=99"))).toBe(true);
+      expect(chapterCalls.every((url) => url.includes("program_id=2"))).toBe(true);
     });
-    const allCalls = mockFetch.mock.calls.map(([url]) => String(url));
+  });
+
+  it("shows an unavailable state when the centre's program has no curriculum", async () => {
+    // Curriculum covers CoE/Nodal only, so a centre on any other program gets
+    // the school default back. Showing that would be another program's
+    // curriculum under this centre's heading.
+    setupFetch();
+
+    renderTab({ programId: 99 });
+
     expect(
-      allCalls.some(
-        (url) => url.includes("/api/curriculum/chapters") && url.includes("program_id=1&")
-      )
-    ).toBe(false);
+      await screen.findByText("Curriculum is not available for this Centre's Program.")
+    ).toBeInTheDocument();
+    const allCalls = mockFetch.mock.calls.map(([url]) => String(url));
+    expect(allCalls.some((url) => url.includes("/api/curriculum/options"))).toBe(true);
+    expect(allCalls.some((url) => url.includes("/api/curriculum/chapters"))).toBe(false);
   });
 
   it("shows an empty state when backend config is empty", async () => {
@@ -852,6 +1102,7 @@ describe("CurriculumTab", () => {
       await mockOkJson({
         ...optionsResponse,
         examTracks: [],
+        centreExamTracks: [],
         gradeSubjects: [],
         defaults: {
           programId: 1,
@@ -866,7 +1117,35 @@ describe("CurriculumTab", () => {
 
     renderTab();
 
-    expect(await screen.findByText("No Curriculum configuration is available for this school.")).toBeInTheDocument();
+    expect(await screen.findByText("No Exam Tracks configured for this Centre and Grade")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Curriculum Progress" })).toBeInTheDocument();
+    expect(screen.queryByText("Curriculum Curriculum Progress")).not.toBeInTheDocument();
     expect(mockFetch).not.toHaveBeenCalledWith(expect.stringContaining("/api/curriculum/chapters"));
+  });
+
+  it("shows the Centre configuration error and blocks logging", async () => {
+    mockFetch.mockResolvedValueOnce(
+      await mockOkJson({
+        ...optionsResponse,
+        examTracks: [],
+        centreExamTracks: [],
+        gradeSubjects: [],
+        configurationError:
+          "Curriculum Centre configuration error: multiple active physical Centres are configured for this School and Program",
+        defaults: {
+          ...optionsResponse.defaults,
+          examTrack: null,
+          subject: null,
+          subjectId: null,
+        },
+      })
+    );
+
+    renderTab();
+
+    expect(
+      await screen.findByText(/multiple active physical Centres are configured/)
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "+ Log a class" })).toBeDisabled();
   });
 });

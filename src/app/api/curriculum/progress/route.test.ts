@@ -69,7 +69,12 @@ describe("GET /api/curriculum/progress", () => {
         { code: "70705", region: "AHMEDABAD", program_ids: [1] },
       ])
       .mockResolvedValueOnce([{ id: 1, name: "JNV CoE" }])
-      .mockResolvedValueOnce([{ subject_total_time_minutes: "1" }])
+      .mockResolvedValueOnce([
+        {
+          subject_total_time_minutes: "1",
+          doubt_solving_total_time_minutes: "150",
+        },
+      ])
       .mockResolvedValueOnce([
         {
           chapter_id: 1,
@@ -109,6 +114,7 @@ describe("GET /api/curriculum/progress", () => {
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual({
       subjectTotalTimeMinutes: 1,
+      doubtSolvingTotalTimeMinutes: 150,
       progress: {
         "1": {
           chapterId: 1,
@@ -174,6 +180,7 @@ describe("GET /api/curriculum/progress", () => {
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual({
       subjectTotalTimeMinutes: 0,
+      doubtSolvingTotalTimeMinutes: 0,
       progress: {
         "3": {
           chapterId: 3,
@@ -191,6 +198,30 @@ describe("GET /api/curriculum/progress", () => {
       expect.stringContaining("JOIN topic_curriculum topic_scope"),
       ["70705", 1, 3, 4, "jee_main", 11, 1]
     );
+  });
+
+  it("aggregates Actual Hours and topic coverage from Regular Class logs only", async () => {
+    mockQuery
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { code: "70705", region: "AHMEDABAD", program_ids: [1] },
+      ])
+      .mockResolvedValueOnce([{ id: 1, name: "JNV CoE" }])
+      .mockResolvedValueOnce([{ subject_total_time_minutes: "0" }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+
+    await GET(
+      nextReq(
+        "/api/curriculum/progress?school_code=70705&program_id=1&exam_track=jee_main&grade=11&subject=Physics"
+      )
+    );
+
+    const totalSql = String(mockQuery.mock.calls[3][0]).replace(/\s+/g, " ");
+    expect(totalSql).toContain("log_type = 'regular'");
+    expect(totalSql).toContain("log_type = 'doubt_solving'");
+    const coverageSql = String(mockQuery.mock.calls[4][0]).replace(/\s+/g, " ");
+    expect(coverageSql).toContain("l.log_type = 'regular'");
   });
 
   it("returns 403 for passcode users", async () => {

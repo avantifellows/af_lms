@@ -5,6 +5,7 @@ import {
   canAccessQuizSessionBatches,
   canAccessQuizSessionSchool,
   requireQuizSessionAccess,
+  requireQuizSessionRequestAccess,
   resolveBatchGroups,
 } from "@/lib/quiz-session-access";
 import { query } from "@/lib/db";
@@ -253,14 +254,9 @@ async function listQuizSessions(
   return { sessions: items.map(normalizeSessionTimes), hasMore };
 }
 
+// fallow-ignore-next-line complexity
 export async function POST(request: NextRequest) {
-  const session = await getServerSession(authOptions);
-
-  if (!session?.user?.email) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const access = await requireQuizSessionAccess(session.user.email, "edit");
+  const access = await requireQuizSessionRequestAccess("edit");
   if (!access.ok) {
     return access.response;
   }
@@ -443,7 +439,7 @@ export async function POST(request: NextRequest) {
       test_takers_count: 100,
       status: "pending",
       date_created: utcToISTDate(new Date().toISOString()),
-      created_by: session.user.email,
+      created_by: access.email,
       created_from: "lms",
     },
   };

@@ -685,7 +685,7 @@ async function ensureTeacherCentre(pool: Pool, schoolCode: string): Promise<numb
      inserted AS (
        INSERT INTO centres (
          name, school_id, type_code, category_code, sub_category_code,
-         stream_codes, program_id, is_physical, is_active, inserted_at, updated_at
+         program_id, is_physical, is_active, inserted_at, updated_at
        )
        SELECT
          CONCAT(name, ' E2E Centre'),
@@ -693,7 +693,6 @@ async function ensureTeacherCentre(pool: Pool, schoolCode: string): Promise<numb
          'coe',
          'cat_1_coe',
          NULL,
-         ARRAY['jee']::TEXT[],
          COALESCE(program_ids[1], 1),
          true,
          true,
