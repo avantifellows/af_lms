@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ADMIN_SESSION, NO_SESSION, PASSCODE_SESSION, PM_SESSION } from "@/app/api/__test-utils__/api-test-helpers";
-import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
+import { CURRENT_ACADEMIC_YEAR, PROGRAM_ATTRIBUTION_ORDER } from "@/lib/constants";
 
 vi.mock("next-auth");
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
@@ -161,7 +161,7 @@ describe("GET /api/pm/students", () => {
     const rosterCall = mockQuery.mock.calls[2];
     expect(rosterCall[0]).toContain("g.type = 'school' AND g.child_id = $1");
     expect(rosterCall[0]).toContain("er_grade.academic_year = $2");
-    expect(rosterCall[1]).toEqual([10, CURRENT_ACADEMIC_YEAR]);
+    expect(rosterCall[1]).toEqual([10, CURRENT_ACADEMIC_YEAR, PROGRAM_ATTRIBUTION_ORDER]);
   });
 
   it("filters to the requested grade in JS with roster semantics", async () => {

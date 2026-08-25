@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
+import { CURRENT_ACADEMIC_YEAR, PROGRAM_ATTRIBUTION_ORDER } from "@/lib/constants";
 import type { Student } from "@/components/StudentTable";
 
 const mocks = vi.hoisted(() => ({
@@ -69,7 +69,7 @@ describe("getSchoolRoster", () => {
     expect(sql).toContain("AS can_undo_nvs_dropout");
     expect(sql).toContain("s.pen_number");
     expect(sql).toContain("er_batch.end_date DESC NULLS LAST");
-    expect(params).toEqual(["school-1", CURRENT_ACADEMIC_YEAR]);
+    expect(params).toEqual(["school-1", CURRENT_ACADEMIC_YEAR, PROGRAM_ATTRIBUTION_ORDER]);
   });
 
   it("returns deduplicated students plus data issues via processStudents", async () => {

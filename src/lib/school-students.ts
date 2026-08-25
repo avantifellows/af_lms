@@ -141,7 +141,7 @@ export async function getSchoolRoster(
       -- historical batch when no current batch remains.
       ORDER BY
         er_batch.is_current DESC,
-        CASE WHEN er_batch.is_current THEN array_position(ARRAY[${PROGRAM_ATTRIBUTION_ORDER.join(", ")}]::int[], b.program_id) END,
+        CASE WHEN er_batch.is_current THEN array_position($3::int[], b.program_id) END,
         (er_batch.academic_year = $2) DESC,
         er_batch.end_date DESC NULLS LAST,
         er_batch.updated_at DESC,
@@ -171,7 +171,7 @@ export async function getSchoolRoster(
     ) dp ON true
     WHERE g.type = 'school' AND g.child_id = $1
     ORDER BY gr.number, u.first_name, u.last_name`,
-    [schoolId, CURRENT_ACADEMIC_YEAR],
+    [schoolId, CURRENT_ACADEMIC_YEAR, PROGRAM_ATTRIBUTION_ORDER],
   );
   return processStudents(rows);
 }

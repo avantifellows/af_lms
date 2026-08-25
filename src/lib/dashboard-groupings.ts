@@ -290,13 +290,13 @@ export async function getNvsGradeCounts(
        JOIN "group" gb ON gub.group_id = gb.id AND gb.type = 'batch'
        JOIN batch b ON gb.child_id = b.id
        WHERE gub.user_id = gu.user_id
-       ORDER BY array_position(ARRAY[${PROGRAM_ATTRIBUTION_ORDER.join(", ")}]::int[], b.program_id::int)
+       ORDER BY array_position($4::int[], b.program_id::int)
        LIMIT 1
      ) att ON true
      WHERE s.id = ANY($1) AND att.program_id = $3
      GROUP BY s.id, gr.number
      ORDER BY gr.number`,
-    [schoolIds, CURRENT_ACADEMIC_YEAR, PROGRAM_IDS.NVS],
+    [schoolIds, CURRENT_ACADEMIC_YEAR, PROGRAM_IDS.NVS, PROGRAM_ATTRIBUTION_ORDER],
   );
 
   const byId = new Map<string, GradeCount[]>();
