@@ -753,6 +753,18 @@ export default async function RosterPage({
   // Extract distinct streams from NVS batches
   const nvsStreams = getDistinctNVSStreams(batches);
 
+  // On a centre page, scope the program-filtered tabs to the centre's single
+  // program (Performance filters by program name; Curriculum/Quiz by id).
+  const centreProgramId = isCentre ? scope.centre.program_id ?? undefined : undefined;
+  const centreProgramName = isCentre ? scope.centre.program_name ?? undefined : undefined;
+  // Distinguishes "school page" (no centre program by definition) from "centre
+  // page whose centre has no program" — both leave centreProgramId undefined,
+  // but only the second must refuse to fall back to the school's data.
+  const hasNoCentreProgram = isCentre && scope.centre.program_id == null;
+  const noCentreProgramContent = (
+    <NoCentreProgram centreName={isCentre ? scope.centre.name : school.name} />
+  );
+
   // Programs that have at least one student (active or dropped) in scope
   const programsWithStudents = new Set(
     supportedProgramIds.filter((programId) =>
@@ -777,8 +789,14 @@ export default async function RosterPage({
 
   if (canAddStudent) visibleProgramSet.add(PROGRAM_IDS.NVS);
 
-  const visibleProgramIds = supportedProgramIds.filter((id) =>
-    visibleProgramSet.has(id),
+  // A centre page shows only its own program's card. programsWithStudents counts
+  // a program when any student in scope merely *dropped* from it, and
+  // studentDroppedFromProgram reads the student's own audit history — so a CoE
+  // centre whose members carry an old "dropped from Nodal" audit would surface a
+  // Nodal card for students this page never lists.
+  const visibleProgramIds = supportedProgramIds.filter(
+    (id) =>
+      visibleProgramSet.has(id) && (!isCentre || id === centreProgramId),
   );
 
   const programStatsList: ProgramStats[] = visibleProgramIds.map((id) =>
@@ -867,17 +885,6 @@ export default async function RosterPage({
     </div>
   );
 
-  // On a centre page, scope the program-filtered tabs to the centre's single
-  // program (Performance filters by program name; Curriculum/Quiz by id).
-  const centreProgramId = isCentre ? scope.centre.program_id ?? undefined : undefined;
-  const centreProgramName = isCentre ? scope.centre.program_name ?? undefined : undefined;
-  // Distinguishes "school page" (no centre program by definition) from "centre
-  // page whose centre has no program" — both leave centreProgramId undefined,
-  // but only the second must refuse to fall back to the school's data.
-  const hasNoCentreProgram = isCentre && scope.centre.program_id == null;
-  const noCentreProgramContent = (
-    <NoCentreProgram centreName={isCentre ? scope.centre.name : school.name} />
-  );
 
   const performanceContent = (
     <PerformanceTab

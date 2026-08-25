@@ -124,7 +124,14 @@ vi.mock("@/components/SchoolTabs", () => ({
 }));
 vi.mock("@/components/enrollment/EnrollmentTabContent", () => ({
   __esModule: true,
-  default: () => <div data-testid="enrollment-tab-content">EnrollmentTabContent</div>,
+  default: ({ programs }: { programs?: { id: number }[] }) => (
+    <div
+      data-testid="enrollment-tab-content"
+      data-program-ids={(programs ?? []).map((p) => p.id).join(",")}
+    >
+      EnrollmentTabContent
+    </div>
+  ),
 }));
 vi.mock("@/components/curriculum/CurriculumTab", () => ({
   __esModule: true,
@@ -380,6 +387,43 @@ describe("CentrePage → RosterPage (centre scope)", () => {
     expect(screen.getByTestId("page-header")).toHaveAttribute(
       "data-back-href",
       "/dashboard?view=centres"
+    );
+  });
+
+  // programsWithStudents counts a program when any student in scope merely dropped
+  // from it, and that reads the student's own audit history. On JNV Adilabad CoE
+  // two members carried an old "dropped from Nodal" audit, so the centre page grew
+  // a JNV Nodal card for students it never lists.
+  it("does not show a sibling program's enrollment card on a centre page", async () => {
+    // Both programs in the viewer's own scope, so only the centre filter can
+    // remove the Nodal card — otherwise this would pass for the wrong reason.
+    setupCentre({}, { program_ids: [1, 2] });
+    mockGetProgramContextSync.mockReturnValue({
+      hasAccess: true,
+      programIds: [1, 2],
+      isNVSOnly: false,
+      hasCoEOrNodal: true,
+    });
+    mockGetCentreStudents.mockResolvedValue({
+      students: [
+        {
+          user_id: "1",
+          student_id: "S1",
+          program_id: 1,
+          student_program_ids: [1],
+          // old audit from a spell in the school's Nodal centre
+          dropout_program_ids: [2],
+          status: "active",
+        },
+      ] as never,
+      issues: [],
+    });
+
+    await renderCentre("8");
+
+    expect(screen.getByTestId("enrollment-tab-content")).toHaveAttribute(
+      "data-program-ids",
+      "1"
     );
   });
 
