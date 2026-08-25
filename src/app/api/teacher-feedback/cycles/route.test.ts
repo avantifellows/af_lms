@@ -1,7 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("@/lib/quiz-session-access", () => ({ canAccessQuizSessionSchool: vi.fn() }));
-vi.mock("@/lib/teacher-feedback-access", () => ({ authenticateTeacherFeedback: vi.fn() }));
+vi.mock("@/lib/teacher-feedback-access", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/teacher-feedback-access")>();
+  // requireCentreScope stays real: it is a pure permission check, and stubbing it
+  // would make these suites pass regardless of whether the routes enforce it.
+  return { ...actual, authenticateTeacherFeedback: vi.fn() };
+});
 vi.mock("@/lib/db", () => ({ query: vi.fn() }));
 
 import { NextRequest } from "next/server";
@@ -20,12 +25,21 @@ const denied = (status: number) => ({
   response: Response.json({ error: "x" }, { status }) as never,
 });
 
-function req(code?: string) {
-  const url = code
+function req(code?: string, centreId?: string) {
+  const base = code
     ? `http://localhost/api/teacher-feedback/cycles?school_code=${code}`
     : "http://localhost/api/teacher-feedback/cycles";
-  return new NextRequest(new URL(url));
+  return new NextRequest(new URL(centreId ? `${base}&centre_id=${centreId}` : base));
 }
+
+const confined = (centreIds: number[]) => ({
+  ok: true as const,
+  permission: {
+    email: "teacher@avantifellows.org",
+    level: 1,
+    scope: { centres: new Set(centreIds) },
+  } as never,
+});
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -46,6 +60,36 @@ describe("GET /api/teacher-feedback/cycles", () => {
   it("404 when school not found", async () => {
     mockQuery.mockResolvedValueOnce([] as never);
     expect((await GET(req("99999"))).status).toBe(404);
+  });
+
+  it("403 when a confined caller asks for a centre they hold no seat at", async () => {
+    mockAuth.mockResolvedValue(confined([11]));
+    mockQuery.mockResolvedValueOnce([{ id: 408 }] as never); // school
+
+    expect((await GET(req("34054", "38"))).status).toBe(403);
+  });
+
+  // centre_id is optional here, so leaving it off must not become the way round
+  // the check — the caller's own seats become the filter.
+  it("falls back to a confined caller's own centres when centre_id is omitted", async () => {
+    mockAuth.mockResolvedValue(confined([11, 38]));
+    mockQuery
+      .mockResolvedValueOnce([{ id: 408 }] as never) // school
+      .mockResolvedValueOnce([] as never); // cycles
+
+    expect((await GET(req("34054"))).status).toBe(200);
+    const [, params] = mockQuery.mock.calls[1] as [string, unknown[]];
+    expect(params).toEqual(["34054", null, [11, 38]]);
+  });
+
+  it("does not restrict a seatless manager to any centre", async () => {
+    mockQuery
+      .mockResolvedValueOnce([{ id: 408 }] as never) // school
+      .mockResolvedValueOnce([] as never); // cycles
+
+    expect((await GET(req("34054"))).status).toBe(200);
+    const [, params] = mockQuery.mock.calls[1] as [string, unknown[]];
+    expect(params).toEqual(["34054", null, null]);
   });
 
   it("groups rows into cycles by setup_run_id with per-teacher links", async () => {

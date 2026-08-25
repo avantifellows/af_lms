@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { query } from "@/lib/db";
+import { getCentreConfinement } from "@/lib/permissions";
 import { canAccessQuizSessionSchool } from "@/lib/quiz-session-access";
-import { authenticateTeacherFeedback } from "@/lib/teacher-feedback-access";
+import { authenticateTeacherFeedback, requireCentreScope } from "@/lib/teacher-feedback-access";
 
 interface Row {
   setup_run_id: string;
@@ -146,6 +147,18 @@ export async function GET(request: NextRequest) {
     );
   }
 
+  if (centreId !== null) {
+    const centreScopeCheck = requireCentreScope(access.permission, centreId);
+    if (!centreScopeCheck.ok) {
+      return centreScopeCheck.response;
+    }
+  }
+
+  // Same exposure by omission as the centres route: with no centre_id a confined
+  // caller would read every round at the school, sibling centres included.
+  const confinement = getCentreConfinement(access.permission);
+  const allowedCentreIds = confinement.confined ? confinement.centreIds : null;
+
   const rows = await query<Row>(
     `
     SELECT tf.setup_run_id, tf.cycle_label, c.name AS centre_name,
@@ -161,9 +174,10 @@ export async function GET(request: NextRequest) {
     LEFT JOIN centres c ON c.id = tf.centre_id
     WHERE tf.school_code = $1 AND tf.deleted_at IS NULL
       AND ($2::bigint IS NULL OR tf.centre_id = $2::bigint)
+      AND ($3::int[] IS NULL OR tf.centre_id = ANY($3::int[]))
     ORDER BY tf.inserted_at DESC, tf.teacher_order ASC
     `,
-    [schoolCode, centreId]
+    [schoolCode, centreId, allowedCentreIds]
   );
 
   // Resolve batch_id -> readable name for all class batches across these cycles.

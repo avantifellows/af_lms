@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { query } from "@/lib/db";
+import { getCentreConfinement } from "@/lib/permissions";
 import { canAccessQuizSessionSchool } from "@/lib/quiz-session-access";
-import { authenticateTeacherFeedback } from "@/lib/teacher-feedback-access";
+import { authenticateTeacherFeedback, requireCentreScope } from "@/lib/teacher-feedback-access";
 
 interface FeedbackCentre {
   id: number;
@@ -60,13 +61,27 @@ export async function GET(request: NextRequest) {
     );
   }
 
+  if (centreId !== null) {
+    const centreScopeCheck = requireCentreScope(access.permission, centreId);
+    if (!centreScopeCheck.ok) {
+      return centreScopeCheck.response;
+    }
+  }
+
+  // With no centre_id a confined caller would get every centre at the school,
+  // which is the same sibling-centre exposure by omission. Fall back to their
+  // seat centres rather than the school's.
+  const confinement = getCentreConfinement(access.permission);
+  const allowedCentreIds = confinement.confined ? confinement.centreIds : null;
+
   const rows = await query<CentreRow>(
     `SELECT id, name, type_code
      FROM centres
      WHERE school_id = $1 AND is_active = true
        AND ($2::bigint IS NULL OR id = $2::bigint)
+       AND ($3::int[] IS NULL OR id = ANY($3::int[]))
      ORDER BY name`,
-    [school.id, centreId]
+    [school.id, centreId, allowedCentreIds]
   );
 
   const centres: FeedbackCentre[] = rows.map((r) => ({

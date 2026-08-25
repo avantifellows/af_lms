@@ -1,7 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("@/lib/quiz-session-access", () => ({ canAccessQuizSessionSchool: vi.fn() }));
-vi.mock("@/lib/teacher-feedback-access", () => ({ authenticateTeacherFeedback: vi.fn() }));
+vi.mock("@/lib/teacher-feedback-access", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/teacher-feedback-access")>();
+  // requireCentreScope stays real: it is a pure permission check, and stubbing it
+  // would make these suites pass regardless of whether the routes enforce it.
+  return { ...actual, authenticateTeacherFeedback: vi.fn() };
+});
 vi.mock("@/lib/teacher-feedback-bq", () => ({ getTeacherFeedbackReport: vi.fn() }));
 vi.mock("@/lib/db", () => ({ query: vi.fn() }));
 
