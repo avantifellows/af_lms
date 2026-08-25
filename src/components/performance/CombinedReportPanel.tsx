@@ -55,11 +55,9 @@ function createdAtMs(job: Job): number {
   return isNaN(t) ? 0 : t;
 }
 
-// The rows worth showing: every regenerate produces a full replacement PDF, so
-// older finished runs are superseded — listing them invites downloading a stale
-// report. Show the newest run (whatever its state), plus the newest finished
-// report when the newest run isn't it, so the last good PDF stays downloadable
-// while a rebuild is queued/processing or after it fails.
+// Each regenerate fully replaces the PDF, so show only the newest run — plus
+// the newest finished one while a rebuild is in flight or failed, so the last
+// good download doesn't vanish.
 export function visibleJobs(jobs: Job[]): Job[] {
   const sorted = [...jobs].sort((a, b) => createdAtMs(b) - createdAtMs(a));
   const latest = sorted[0];
