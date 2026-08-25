@@ -786,9 +786,16 @@ export default async function RosterPage({
   );
 
   // Back link: to the dashboard when the user can see more than one school, or
-  // always for a centre (it's reached from the dashboard's Centres tab).
+  // always for a centre (it's reached from the dashboard's Centres tab). A bare
+  // /dashboard is a loop for a single-seat user — the landing shortcut sends them
+  // straight back here — so centre pages point at the Centres tab explicitly,
+  // which is where the card they came from lives anyway.
   const multipleSchools = !isPasscodeUser && hasMultipleSchools(permission);
-  const backHref = isCentre || multipleSchools ? "/dashboard" : undefined;
+  const backHref = isCentre
+    ? "/dashboard?view=centres"
+    : multipleSchools
+      ? "/dashboard"
+      : undefined;
 
   const title = isCentre ? scope.centre.name : school.name;
   const subtitle = isCentre

@@ -421,12 +421,35 @@ describe("DashboardPage (server component)", () => {
     mockGetProgramContextSync.mockReturnValue(defaultProgramContext);
     mockGetFeatureAccess.mockReturnValue({ canView: false, canEdit: false });
     mockGetAccessibleSchoolCodes.mockResolvedValue(["SC001"]);
+    mockQuery.mockResolvedValueOnce([{ id: "8" }]); // getBrowsableCentreIds
 
     await expect(
       DashboardPage({ searchParams: defaultSearchParams })
     ).rejects.toThrow("REDIRECT:/centre/8");
     expect(mockRedirect).toHaveBeenCalledWith("/centre/8");
     // A seated user is never bounced to the whole-school roster page.
+    expect(mockRedirect).not.toHaveBeenCalledWith("/school/SC001");
+  });
+
+  // Six teachers hold their only seat at a school-less centre (17, 29, 48).
+  // /centre/[id] notFound()s for those, so shortcutting there made /dashboard
+  // itself a 404 — they must land on the Centres tab instead.
+  it("does NOT shortcut a single-seat user whose centre has no page", async () => {
+    mockGetServerSession.mockResolvedValue(teacherSession);
+    mockGetUserPermission.mockResolvedValue(seatedPermission);
+    mockGetProgramContextSync.mockReturnValue(defaultProgramContext);
+    mockGetFeatureAccess.mockReturnValue({ canView: false, canEdit: false });
+    mockGetAccessibleSchoolCodes.mockResolvedValue(["SC001"]);
+    mockQuery
+      .mockResolvedValueOnce([]) // getBrowsableCentreIds: seat centre is school-less
+      .mockResolvedValueOnce([]) // centre counts
+      .mockResolvedValueOnce([]) // schools
+      .mockResolvedValueOnce([{ total: "0" }]); // count
+
+    const jsx = await DashboardPage({ searchParams: defaultSearchParams });
+    render(jsx);
+
+    expect(mockRedirect).not.toHaveBeenCalledWith("/centre/8");
     expect(mockRedirect).not.toHaveBeenCalledWith("/school/SC001");
   });
 

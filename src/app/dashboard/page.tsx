@@ -18,6 +18,7 @@ import SchoolCard, { School, GradeCount } from "@/components/SchoolCard";
 import CentreCard from "@/components/CentreCard";
 import {
   getAccessibleCentresWithCounts,
+  getBrowsableCentreIds,
   getNvsGradeCounts,
   resolveCentreAccess,
   type Centre,
@@ -282,7 +283,7 @@ function resolveDashboardView(viewParam: string | undefined, seated: boolean): D
 // no search): a single-seat user goes straight to their centre, and school
 // staff with exactly one school straight to it. Seated users are excluded from
 // the school shortcut — their home is the centre, resolved just above.
-function redirectSingleScope({
+async function redirectSingleScope({
   seated,
   permission,
   schoolCodes,
@@ -296,12 +297,17 @@ function redirectSingleScope({
   searchQuery?: string;
   viewParam?: string;
   view: DashboardView;
-}): void {
+}): Promise<void> {
   if (seated && !searchQuery && viewParam === undefined) {
     const centres = permission.scope?.centres;
     const seatIds = centres instanceof Set ? [...centres] : [];
-    if (seatIds.length === 1) {
-      redirect(`/centre/${seatIds[0]}`);
+    // Only shortcut to a centre whose page can render. A seat at a school-less
+    // centre is a real arrangement (six teachers hold one as their only seat),
+    // and redirecting there turned /dashboard itself into a 404 for them; they
+    // fall through to the Centres tab instead.
+    const browsable = await getBrowsableCentreIds(seatIds.map(Number));
+    if (browsable.length === 1) {
+      redirect(`/centre/${browsable[0]}`);
     }
   }
   if (
@@ -411,7 +417,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   const seated = isCentreSeated(permission);
   const view = resolveDashboardView(viewParam, seated);
   const schoolCodes = await getAccessibleSchoolCodes(email, permission);
-  redirectSingleScope({ seated, permission, schoolCodes, searchQuery, viewParam, view });
+  await redirectSingleScope({ seated, permission, schoolCodes, searchQuery, viewParam, view });
 
   const data = await loadDashboardData({
     email,

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
-import type { Centre } from "@/lib/dashboard-groupings";
+import { isBrowsableCentre, type Centre } from "@/lib/dashboard-groupings";
 
 interface CentreCardProps {
   centre: Centre;
@@ -13,11 +13,14 @@ interface CentreCardProps {
  * A single "Physical Centre" on the dashboard's Centres tab. Clicks through to
  * the centre roster page; mirrors SchoolCard (student count, grade breakdown,
  * optional actions like Start Visit).
+ *
+ * A school-less centre has no page to open, so its card renders unlinked rather
+ * than as a link to a 404.
  */
 export default function CentreCard({ centre, showRegion = false, actions }: CentreCardProps) {
   return (
     <Card className="p-6">
-      <Link href={`/centre/${centre.id}`} className="block">
+      <CentreCardBody centre={centre}>
         <div className="flex items-start justify-between gap-2">
           <h3 className="font-semibold text-text-primary">{centre.name}</h3>
           {centre.program_name && (
@@ -44,8 +47,19 @@ export default function CentreCard({ centre, showRegion = false, actions }: Cent
             ))}
           </div>
         )}
-      </Link>
+      </CentreCardBody>
       {actions && <div className="mt-4 flex gap-2">{actions}</div>}
     </Card>
+  );
+}
+
+function CentreCardBody({ centre, children }: { centre: Centre; children: React.ReactNode }) {
+  if (!isBrowsableCentre(centre)) {
+    return <div className="block">{children}</div>;
+  }
+  return (
+    <Link href={`/centre/${centre.id}`} className="block">
+      {children}
+    </Link>
   );
 }

@@ -157,6 +157,31 @@ export function resolveCentreAccess(
  * Centres with zero current-year students are still returned so freshly-
  * onboarded centres are visible.
  */
+/**
+ * A centre page only renders for a school-linked centre — /centre/[id] notFound()s
+ * without a parent school, because every school-keyed tab (Visits, Performance,
+ * Curriculum) needs one. City centres are grouped by batch and land with the
+ * batch-tag leg.
+ *
+ * Anything that routes a user to a centre must ask this first, or it sends them
+ * to a 404: for the six teachers whose only seat is at centre 17, 29 or 48, that
+ * made /dashboard itself a dead end.
+ */
+export function isBrowsableCentre(centre: { school_id: string | null }): boolean {
+  return centre.school_id !== null;
+}
+
+/** The subset of these centre ids whose page can actually render. */
+export async function getBrowsableCentreIds(centreIds: number[]): Promise<number[]> {
+  if (centreIds.length === 0) return [];
+  const rows = await query<{ id: string }>(
+    `SELECT id FROM centres
+     WHERE id = ANY($1::int[]) AND is_active AND school_id IS NOT NULL`,
+    [centreIds],
+  );
+  return rows.map((r) => Number(r.id));
+}
+
 export async function getAccessibleCentresWithCounts(
   access: CentreAccess,
 ): Promise<Centre[]> {

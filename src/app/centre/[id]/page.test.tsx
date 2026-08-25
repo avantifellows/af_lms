@@ -90,8 +90,21 @@ vi.mock("next/link", () => ({
 // for a centre scope, not how each tab renders.
 vi.mock("@/components/PageHeader", () => ({
   __esModule: true,
-  default: ({ title, subtitle }: { title: string; subtitle?: string }) => (
-    <div data-testid="page-header" data-title={title} data-subtitle={subtitle || ""}>
+  default: ({
+    title,
+    subtitle,
+    backHref,
+  }: {
+    title: string;
+    subtitle?: string;
+    backHref?: string;
+  }) => (
+    <div
+      data-testid="page-header"
+      data-title={title}
+      data-subtitle={subtitle || ""}
+      data-back-href={backHref || ""}
+    >
       PageHeader
     </div>
   ),
@@ -355,6 +368,19 @@ describe("CentrePage → RosterPage (centre scope)", () => {
     expect(screen.getByTestId("tab-content-visits")).toHaveTextContent("VisitsTab");
     // And the mentorship overview stays empty rather than showing the school's.
     expect(mockListAcademicMentorshipMappings).not.toHaveBeenCalled();
+  });
+
+  // /dashboard immediately shortcuts a single-seat user back to this page, so a
+  // bare /dashboard back link was a loop.
+  it("points the back link at the Centres tab, not the dashboard landing", async () => {
+    setupCentre();
+
+    await renderCentre("8");
+
+    expect(screen.getByTestId("page-header")).toHaveAttribute(
+      "data-back-href",
+      "/dashboard?view=centres"
+    );
   });
 
   it("keeps program-scoped tabs for a centre that has a program", async () => {
