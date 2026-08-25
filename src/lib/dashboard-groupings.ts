@@ -150,14 +150,6 @@ export function resolveCentreAccess(
 }
 
 /**
- * Active centres the user can access, each with its current-year student count
- * and grade breakdown from the centre_students view. Scope is decided by
- * {@link resolveCentreAccess}: admins see all, seated teachers see only their
- * seat centres, seatless managers see every centre at their accessible schools.
- * Centres with zero current-year students are still returned so freshly-
- * onboarded centres are visible.
- */
-/**
  * A centre page only renders for a school-linked centre — /centre/[id] notFound()s
  * without a parent school, because every school-keyed tab (Visits, Performance,
  * Curriculum) needs one. City centres are grouped by batch and land with the
@@ -182,6 +174,14 @@ export async function getBrowsableCentreIds(centreIds: number[]): Promise<number
   return rows.map((r) => Number(r.id));
 }
 
+/**
+ * Active centres the user can access, each with its current-year student count
+ * and grade breakdown from the centre_students view. Scope is decided by
+ * {@link resolveCentreAccess}: admins see all, seated teachers see only their
+ * seat centres, seatless managers see every centre at their accessible schools.
+ * Centres with zero current-year students are still returned so freshly-
+ * onboarded centres are visible.
+ */
 export async function getAccessibleCentresWithCounts(
   access: CentreAccess,
   searchQuery?: string,

@@ -520,11 +520,11 @@ const DASHBOARD_VIEWS = [
 
 // Grouping tabs — disjoint scopes, so counts never double-count.
 function DashboardViewTabs({ view, seated }: { view: DashboardView; seated: boolean }) {
-  // One tab left for a confined user — render no tab strip rather than a lone
-  // tab that looks like a choice.
-  const views = seated ? [] : DASHBOARD_VIEWS;
+  // One tab left for a confined user — render nothing rather than a lone tab that
+  // looks like a choice, or an empty strip that leaves a stray rule on the page.
+  if (seated) return null;
   return <div className="mb-6 flex gap-6 border-b border-border">
-    {views.map((tab) => <Link
+    {DASHBOARD_VIEWS.map((tab) => <Link
       key={tab.key}
       href={`/dashboard?view=${tab.key}`}
       className={view === tab.key
@@ -555,7 +555,8 @@ function DashboardMain({ view, searchQuery, currentPage, totalPages, totalCount,
       <CentresSection centres={centres} hasPMAccess={hasPMAccess} searchQuery={searchQuery} />
     ) : (
       <>
-        {/* Search is schools-tab only for now (centre search is a follow-up) */}
+        {/* Student search is schools-tab only: it spans the whole school, which
+            is exactly the scope a centre-confined user must not get. */}
         <DashboardSearch searchQuery={searchQuery} />
         <RecentVisits enabled={hasPMAccess} visits={recentVisits} />
         <SchoolsSection

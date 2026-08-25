@@ -885,7 +885,6 @@ export default async function RosterPage({
     </div>
   );
 
-
   const performanceContent = (
     <PerformanceTab
       schoolUdise={school.udise_code || school.code}
