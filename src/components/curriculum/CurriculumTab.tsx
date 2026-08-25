@@ -118,9 +118,9 @@ export default function CurriculumTab({
     setDoubtSolvingTotalTimeMinutes(0);
   }, []);
 
-  // Curriculum only covers CoE/Nodal, so a centre on any other program is outside
-  // the server's allowed scope and the program_id override is ignored — it answers
-  // with the school default instead. Never dress that up as this centre's
+  // The server honours program_id only for a program that has an active, physical,
+  // school-linked centre at this school and that the caller can see; otherwise it
+  // silently answers with the school default. Never dress that up as this centre's
   // curriculum: treat it as "nothing configured here".
   const isLockedProgramUnavailable =
     programId != null &&

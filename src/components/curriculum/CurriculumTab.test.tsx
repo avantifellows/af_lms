@@ -1082,9 +1082,8 @@ describe("CurriculumTab", () => {
   });
 
   it("shows an unavailable state when the centre's program has no curriculum", async () => {
-    // Curriculum covers CoE/Nodal only, so a centre on any other program gets
-    // the school default back. Showing that would be another program's
-    // curriculum under this centre's heading.
+    // A program the server won't honour gets the school default back. Showing
+    // that would be another program's curriculum under this centre's heading.
     setupFetch();
 
     renderTab({ programId: 99 });
