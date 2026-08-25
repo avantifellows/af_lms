@@ -461,6 +461,26 @@ async function buildHolisticMentorshipContent({
   );
 }
 
+// A centre row with no program_id (currently only 16 Nagaland Foundation) can
+// still be browsed, because it is active, physical and school-linked. Its
+// program-scoped tabs have nothing legitimate to show: with no program to filter
+// by they would fall back to the school's own data, which on a multi-centre
+// school is a sibling centre's curriculum, batches and performance under this
+// centre's name. Say so instead.
+function NoCentreProgram({ centreName }: { centreName: string }) {
+  return (
+    <Card elevation="sm" className="border-dashed p-8 text-center text-sm text-text-muted">
+      <div className="font-semibold text-text-primary">
+        No Program is assigned to this Centre.
+      </div>
+      <p className="mt-1">
+        {centreName} needs a Program before its Curriculum, Performance and Quiz
+        Sessions can be shown. Ask the team to set one on the Centre record.
+      </p>
+    </Card>
+  );
+}
+
 function AccessDenied({
   message,
   link,
@@ -846,6 +866,13 @@ export default async function RosterPage({
   // program (Performance filters by program name; Curriculum/Quiz by id).
   const centreProgramId = isCentre ? scope.centre.program_id ?? undefined : undefined;
   const centreProgramName = isCentre ? scope.centre.program_name ?? undefined : undefined;
+  // Distinguishes "school page" (no centre program by definition) from "centre
+  // page whose centre has no program" — both leave centreProgramId undefined,
+  // but only the second must refuse to fall back to the school's data.
+  const hasNoCentreProgram = isCentre && scope.centre.program_id == null;
+  const noCentreProgramContent = (
+    <NoCentreProgram centreName={isCentre ? scope.centre.name : school.name} />
+  );
 
   const performanceContent = (
     <PerformanceTab
@@ -880,7 +907,7 @@ export default async function RosterPage({
   // A program-less centre gets an empty overview rather than the school's.
   const mentorshipGroups =
     mentorshipAccess.canView && permission?.role !== "teacher"
-      ? isCentre && centreProgramId == null
+      ? hasNoCentreProgram
         ? []
         : await listAcademicMentorshipMappings({
             schoolId,
@@ -949,9 +976,24 @@ export default async function RosterPage({
   // "School Visits" even on a centre page.
   const candidates: Array<{ id: string; label: string; content: ReactNode; show: boolean }> = [
     { id: "enrollment", label: "Enrollment", content: enrollmentContent, show: true },
-    { id: "curriculum", label: "Curriculum", content: curriculumContent, show: curriculumAccess.canView },
-    { id: "performance", label: "Performance", content: performanceContent, show: performanceAccess.canView },
-    { id: "quiz_sessions", label: "Quiz Sessions", content: quizSessionsContent, show: quizSessionsAccess.canView },
+    {
+      id: "curriculum",
+      label: "Curriculum",
+      content: hasNoCentreProgram ? noCentreProgramContent : curriculumContent,
+      show: curriculumAccess.canView,
+    },
+    {
+      id: "performance",
+      label: "Performance",
+      content: hasNoCentreProgram ? noCentreProgramContent : performanceContent,
+      show: performanceAccess.canView,
+    },
+    {
+      id: "quiz_sessions",
+      label: "Quiz Sessions",
+      content: hasNoCentreProgram ? noCentreProgramContent : quizSessionsContent,
+      show: quizSessionsAccess.canView,
+    },
     {
       id: "teacher_feedback",
       label: "Teacher Feedback",

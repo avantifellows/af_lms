@@ -325,6 +325,52 @@ describe("CentrePage → RosterPage (centre scope)", () => {
     expect(screen.queryByTestId("tab-holistic_mentorship")).not.toBeInTheDocument();
   });
 
+  // Centre 16 "Nagaland Foundation" is active, physical and school-linked, so its
+  // page renders — but it has no program_id. Without a program to filter by, the
+  // program-scoped tabs fall back to the school's own data, which at Kohima means
+  // sibling centre 15 (JNV Kohima CoE, 82 students) showing under this name.
+  it("refuses program-scoped tabs for a centre with no program", async () => {
+    setupCentre(
+      { id: "16", name: "Nagaland Foundation", program_id: null, program_name: null },
+      {
+        scope: {
+          schools: new Set(["70705"]),
+          centres: new Set([16]),
+          programs: new Set([1]),
+        },
+      }
+    );
+
+    await renderCentre("16");
+
+    for (const tab of ["curriculum", "performance", "quiz_sessions"]) {
+      expect(screen.getByTestId(`tab-content-${tab}`)).toHaveTextContent(
+        "No Program is assigned to this Centre."
+      );
+    }
+    expect(screen.queryByTestId("curriculum-tab")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("performance-tab")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("quiz-sessions-tab")).not.toBeInTheDocument();
+    // The school-keyed tabs are unaffected — a visit covers the whole school.
+    expect(screen.getByTestId("tab-content-visits")).toHaveTextContent("VisitsTab");
+    // And the mentorship overview stays empty rather than showing the school's.
+    expect(mockListAcademicMentorshipMappings).not.toHaveBeenCalled();
+  });
+
+  it("keeps program-scoped tabs for a centre that has a program", async () => {
+    setupCentre();
+
+    await renderCentre("8");
+
+    expect(screen.getByTestId("curriculum-tab")).toHaveAttribute("data-program-id", "1");
+    expect(screen.getByTestId("quiz-sessions-tab")).toHaveAttribute("data-program-id", "1");
+    expect(screen.getByTestId("performance-tab")).toHaveAttribute(
+      "data-locked-program",
+      "JNV CoE"
+    );
+    expect(screen.queryByText("No Program is assigned to this Centre.")).not.toBeInTheDocument();
+  });
+
   it("labels the academic mentorship tab 'Academic Mentorship'", async () => {
     setupCentre();
 
