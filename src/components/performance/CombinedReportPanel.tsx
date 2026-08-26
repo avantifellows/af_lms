@@ -13,7 +13,7 @@ interface Props {
 
 type JobStatus = "queued" | "started" | "processing" | "done" | "errored";
 
-interface Job {
+export interface Job {
   job_id: string;
   status: JobStatus;
   student_count: number | null;
@@ -48,6 +48,23 @@ const STATUS_LABEL: Record<JobStatus, string> = {
 function formatTime(iso: string): string {
   const d = new Date(iso);
   return isNaN(d.getTime()) ? iso : d.toLocaleString();
+}
+
+function createdAtMs(job: Job): number {
+  const t = new Date(job.created_at).getTime();
+  return isNaN(t) ? 0 : t;
+}
+
+// Each regenerate fully replaces the PDF, so show only the newest run — plus
+// the newest finished one while a rebuild is in flight or failed, so the last
+// good download doesn't vanish.
+export function visibleJobs(jobs: Job[]): Job[] {
+  const sorted = [...jobs].sort((a, b) => createdAtMs(b) - createdAtMs(a));
+  const latest = sorted[0];
+  if (!latest) return [];
+  if (latest.status === "done") return [latest];
+  const latestDone = sorted.find((job) => job.status === "done");
+  return latestDone ? [latest, latestDone] : [latest];
 }
 
 export default function CombinedReportPanel({
@@ -213,7 +230,7 @@ export default function CombinedReportPanel({
         </p>
       ) : (
         <ul className="divide-y divide-border">
-          {jobs.map((job) => (
+          {visibleJobs(jobs).map((job) => (
             <li
               key={job.job_id}
               className="py-2 flex items-center justify-between gap-3 flex-wrap"
