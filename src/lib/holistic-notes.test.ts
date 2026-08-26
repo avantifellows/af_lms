@@ -229,6 +229,32 @@ describe("Holistic Post-Session Notes", () => {
     expect(update?.[1]).toEqual(["501", 4, "draft", 10]);
   });
 
+  it("lets the same Mentor continue an empty draft at its current revision", async () => {
+    const client = { query: vi.fn()
+      .mockResolvedValueOnce({ rows: [{ mapping_id: "300", mentor_user_id: "9", phase_revision: 5, phase_state: "open" }] })
+      .mockResolvedValueOnce({ rows: [{ id: "91" }] })
+      .mockResolvedValueOnce({ rows: [{ id: "501", author_user_id: "9", state: "draft", revision: 2, has_answers: false }] })
+      .mockResolvedValueOnce({ rows: [{ revision: 3 }] })
+      .mockResolvedValue({ rows: [] }) };
+    mockWithTransaction.mockImplementation(async (work) => work(client as never));
+
+    await expect(saveHolisticNotes({
+      programId: 1,
+      mode: "draft",
+      studentId: 41,
+      phaseId: 73,
+      schoolId: 4,
+      academicYear: "2026-2027",
+      actorUserId: 9,
+      expectedRevision: 2,
+      answers: [{ questionId: 91, answer: "A weekly plan" }],
+    })).resolves.toEqual({ ok: true, changed: true, revision: 3 });
+    const update = client.query.mock.calls.find(([sql]) =>
+      String(sql).includes("UPDATE holistic_mentorship_post_session_notes")
+    );
+    expect(update?.[1]).toEqual(["501", 2, "draft", 9]);
+  });
+
   it("corrects the author's submitted Notes without another Submit", async () => {
     const client = { query: vi.fn()
       .mockResolvedValueOnce({ rows: [{ mapping_id: "300", mentor_user_id: "9", phase_revision: 5, phase_state: "open" }] })
