@@ -46,6 +46,12 @@ const phoneUploadHeaders = [
   "Parents Phone Number",
 ];
 
+function variantHeaders(headers: readonly string[]) {
+  return headers.map((header, index) =>
+    index % 2 === 0 ? ` ${header.toLowerCase()} ` : ` ${header.toUpperCase()} `,
+  );
+}
+
 const validRowValues: unknown[] = [
   "11",
   " asha  k. kumar ",
@@ -158,11 +164,117 @@ describe("parseStudentAdditionUpload", () => {
     );
   });
 
+  it.each([
+    {
+      mode: APPROVED_REGISTRATION_MODE,
+      headers: uploadHeaders,
+      values: validRowValues,
+      expected: { student_name: "Asha K Kumar", pen_number: "12345678901", phone: "9876543210" },
+    },
+    {
+      mode: PHONE_REGISTRATION_MODE,
+      headers: phoneUploadHeaders,
+      values: validPhoneRowValues,
+      expected: { student_name: "Asha Kumar", phone: "6876543210", student_id: "6876543210" },
+    },
+  ])("matches trimmed, case-insensitive headers and maps row values in $mode", async ({ mode, headers, values, expected }) => {
+    const result = await parseStudentAdditionUpload({
+      filename: "students.csv",
+      data: Buffer.from(`${csvLine(variantHeaders(headers))}\n${csvLine(values)}`),
+      mode,
+      today: new Date("2026-07-01T00:00:00Z"),
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected normalized-header upload");
+    expect(result.rows).toEqual([expect.objectContaining({ row_number: 2, ...expected })]);
+    expect(result.originalRows.get(2)).toEqual(
+      Object.fromEntries(headers.map((header, index) => [header, String(values[index]).trim()])),
+    );
+  });
+
+  it.each([
+    { mode: APPROVED_REGISTRATION_MODE, headers: uploadHeaders, values: validRowValues },
+    { mode: PHONE_REGISTRATION_MODE, headers: phoneUploadHeaders, values: validPhoneRowValues },
+  ])("matches case-insensitive retry metadata headers in $mode", async ({ mode, headers, values }) => {
+    const original = Object.fromEntries(headers.map((header, index) => [header, values[index]]));
+    const rejectedCsv = buildRejectedRowsCsv([
+      { row_number: 47, status: "rejected", original, row_errors: ["Retry this row"] },
+    ], "JNV001", mode);
+    const [canonicalHeaders, row] = rejectedCsv.split("\n");
+    const normalizedMetadataHeaders = canonicalHeaders
+      .split(",")
+      .map((header, index) => index < 2 || index >= 2 + headers.length
+        ? ` ${header.toLowerCase()} `
+        : header)
+      .join(",");
+
+    const result = await parseStudentAdditionUpload({
+      filename: "student-addition-rejected-rows.csv",
+      data: Buffer.from(`${normalizedMetadataHeaders}\n${row}`),
+      mode,
+      today: new Date("2026-07-01T00:00:00Z"),
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected normalized retry metadata");
+    expect(result.rows).toEqual([expect.objectContaining({ row_number: 47 })]);
+  });
+
+  it("detects the legacy APAAR template regardless of header case or outer spaces", async () => {
+    const oldHeaders = [...uploadHeaders];
+    oldHeaders[5] = " physical handicapped / vikalang ";
+    oldHeaders[6] = "  apaar id  ";
+
+    const result = await parseStudentAdditionUpload({
+      filename: "students.csv",
+      data: Buffer.from(`${csvLine(oldHeaders)}\n${validCsvRow}`),
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: "This workbook uses the old APAAR template. Download the latest PEN-based template and upload it again.",
+    });
+  });
+
+  it.each([
+    {
+      mode: APPROVED_REGISTRATION_MODE,
+      headers: uploadHeaders,
+      values: validRowValues,
+      duplicateHeader: "  pen number  ",
+      duplicateValue: "12345678902",
+      error: "Duplicate columns: PEN Number. Download the latest template and upload it again",
+    },
+    {
+      mode: PHONE_REGISTRATION_MODE,
+      headers: phoneUploadHeaders,
+      values: validPhoneRowValues,
+      duplicateHeader: "  grade  ",
+      duplicateValue: "11",
+      error: "This upload does not match the active Phone Registration Mode template. Download the current template and upload it again.",
+    },
+  ])("rejects $mode headers that normalize to duplicate columns", async ({ mode, headers, values, duplicateHeader, duplicateValue, error }) => {
+    const result = await parseStudentAdditionUpload({
+      filename: "students.csv",
+      data: Buffer.from([
+        csvLine([...headers, duplicateHeader]),
+        csvLine([...values, duplicateValue]),
+      ].join("\n")),
+      mode,
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error,
+    });
+  });
+
   it("rejects unknown Phone-mode columns instead of silently dropping them", async () => {
     const result = await parseStudentAdditionUpload({
       filename: "students.csv",
       data: Buffer.from([
-        csvLine([...phoneUploadHeaders, "Unapproved extra column"]),
+        csvLine([...phoneUploadHeaders, "  unapproved extra column  "]),
         csvLine([...validPhoneRowValues, "restricted value"]),
       ].join("\n")),
       mode: PHONE_REGISTRATION_MODE,

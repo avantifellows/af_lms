@@ -106,11 +106,15 @@ function text(value: unknown): string {
   return value == null ? "" : String(value).trim();
 }
 
+function normalizeHeader(header: string): string {
+  return header.trim().toLowerCase();
+}
+
 function missingColumns(headers: string[], columns = getStudentAdditionUploadColumns()) {
-  const headerSet = new Set(headers.map((header) => header.trim()));
+  const headerSet = new Set(headers.map(normalizeHeader));
   return columns
     .map((column) => column.label)
-    .filter((label) => !headerSet.has(label));
+    .filter((label) => !headerSet.has(normalizeHeader(label)));
 }
 
 function phoneModeSchemaError() {
@@ -118,40 +122,51 @@ function phoneModeSchemaError() {
 }
 
 function validateUploadSchema(headers: string[], mode: RegistrationMode) {
+  const normalizedHeaders = headers.map(normalizeHeader);
+  const columns = getStudentAdditionUploadColumns(mode);
+  const duplicateCanonicalHeaders = columns.filter((column) =>
+    normalizedHeaders.filter((header) => header === normalizeHeader(column.label)).length !== 1,
+  );
+
   if (mode !== PHONE_REGISTRATION_MODE) {
-    if (headers.includes("APAAR ID") || !headers.includes("PEN Number")) {
+    if (
+      normalizedHeaders.includes(normalizeHeader("APAAR ID")) ||
+      !normalizedHeaders.includes(normalizeHeader("PEN Number"))
+    ) {
       return {
         ok: false as const,
         error: "This workbook uses the old APAAR template. Download the latest PEN-based template and upload it again.",
       };
     }
-    const missing = missingColumns(headers, getStudentAdditionUploadColumns(mode));
+    const missing = missingColumns(headers, columns);
     if (missing.length > 0) {
       return {
         ok: false as const,
         error: `Missing required columns: ${missing.join(", ")}. Download the latest template and upload it again`,
       };
     }
+    if (duplicateCanonicalHeaders.length > 0) {
+      return {
+        ok: false as const,
+        error: `Duplicate columns: ${duplicateCanonicalHeaders.map((column) => column.label).join(", ")}. Download the latest template and upload it again`,
+      };
+    }
     return { ok: true as const };
   }
 
-  const columns = getStudentAdditionUploadColumns(mode);
   const rejectedRowMetadataColumns = new Set(
-    getStudentAdditionRejectedRowMetadataColumns(mode),
+    getStudentAdditionRejectedRowMetadataColumns(mode).map(normalizeHeader),
   );
-  const expected = new Set(columns.map((column) => column.label));
-  const nonBlankHeaders = headers.filter(Boolean);
+  const expected = new Set(columns.map((column) => normalizeHeader(column.label)));
+  const nonBlankHeaders = normalizedHeaders.filter(Boolean);
   const missing = columns.filter((column) =>
-    !headers.includes(column.label),
-  );
-  const duplicateCanonicalHeaders = columns.some((column) =>
-    headers.filter((header) => header === column.label).length !== 1,
+    !normalizedHeaders.includes(normalizeHeader(column.label)),
   );
   const unexpected = nonBlankHeaders.filter((header) =>
     !expected.has(header) && !rejectedRowMetadataColumns.has(header),
   );
 
-  if (missing.length > 0 || duplicateCanonicalHeaders || unexpected.length > 0) {
+  if (missing.length > 0 || duplicateCanonicalHeaders.length > 0 || unexpected.length > 0) {
     return { ok: false as const, error: phoneModeSchemaError() };
   }
 
@@ -213,8 +228,8 @@ function parseRowsFromAoA(
   if (!schema.ok) return schema;
 
   const columns = getStudentAdditionUploadColumns(mode);
-  const headerIndex = new Map(headers.map((header, index) => [header, index]));
-  const originalRowNumberIndex = headerIndex.get("Original Row Number");
+  const headerIndex = new Map(headers.map((header, index) => [normalizeHeader(header), index]));
+  const originalRowNumberIndex = headerIndex.get(normalizeHeader("Original Row Number"));
   const acceptedRows: LmsStudentAdditionRow[] = [];
   const rejectedResults: StudentAdditionUploadRowResult[] = [];
   const originalRows = new Map<number, Record<string, string>>();
@@ -222,7 +237,7 @@ function parseRowsFromAoA(
   const ignoredRows = dataRows.flatMap(({ sourceRow, index }) => {
     const matchedFields = exampleRowMarkers(mode)
       .filter((marker) =>
-        text(sourceRow[headerIndex.get(marker.column) ?? -1]) === marker.value,
+        text(sourceRow[headerIndex.get(normalizeHeader(marker.column)) ?? -1]) === marker.value,
       )
       .map((marker) => marker.field);
     if (matchedFields.length === 0) return [];
@@ -238,7 +253,7 @@ function parseRowsFromAoA(
     ({ sourceRow, index }) =>
       !ignoredIndexes.has(index) &&
       columns.some((column) =>
-        text(sourceRow[headerIndex.get(column.label) ?? -1]),
+        text(sourceRow[headerIndex.get(normalizeHeader(column.label)) ?? -1]),
       ),
   );
 
@@ -254,7 +269,7 @@ function parseRowsFromAoA(
     const input: StudentAdditionInput = {};
 
     for (const column of columns) {
-      const value = text(sourceRow[headerIndex.get(column.label) ?? -1]);
+      const value = text(sourceRow[headerIndex.get(normalizeHeader(column.label)) ?? -1]);
       original[column.label] = value;
       input[column.key] = column.key === "student_name" ? value.replace(/\./g, " ") : value;
     }
