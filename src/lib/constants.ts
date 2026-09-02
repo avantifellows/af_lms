@@ -70,7 +70,7 @@ export function isHolisticMentorshipProgramId(
 // JNV and EMRS cohorts only. Keep this narrower than the live runtime
 // allowlist: the newly enabled Programs do not have an approved source
 // snapshot or baseline and must never inherit the EMRS assumptions.
-export const HOLISTIC_HISTORICAL_IMPORT_PROGRAM_IDS = [
+const HOLISTIC_HISTORICAL_IMPORT_PROGRAM_IDS = [
   PROGRAM_IDS.COE,
   PROGRAM_IDS.EMRS_COE,
 ] as const;
