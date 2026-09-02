@@ -136,6 +136,70 @@ describe("BulkStudentUploadModal", () => {
     expect(baseProps.onUploaded).not.toHaveBeenCalled();
   });
 
+  it("shows populated header mismatch groups and current-template guidance", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: "This upload does not match the active Phone Registration Mode template. Download the current template and upload it again.",
+          template_mismatch: {
+            missing: ["Gender"],
+            unexpected: ["Unapproved column"],
+            duplicate: ["Grade"],
+          },
+        }),
+        { status: 400 },
+      ),
+    );
+
+    const user = userEvent.setup();
+    render(<BulkStudentUploadModal {...baseProps} registrationMode={PHONE_REGISTRATION_MODE} />);
+
+    await user.upload(
+      screen.getByLabelText("Student upload file"),
+      new File(["fake"], "students.csv", { type: "text/csv" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Upload students" }));
+
+    expect(await screen.findByText("The uploaded headers do not match the current template.")).toBeInTheDocument();
+    expect(screen.getByText("Missing columns: Gender")).toBeInTheDocument();
+    expect(screen.getByText("Unrecognized columns: Unapproved column")).toBeInTheDocument();
+    expect(screen.getByText("Duplicate columns: Grade")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Download the current template" })).toHaveAttribute(
+      "download",
+      "NVS_Lakshya_Data_Template_updated_19th_August_2026.xlsx",
+    );
+  });
+
+  it("uses the structured legacy APAAR marker for its mismatch summary", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: "This workbook uses the old APAAR template. Download the latest PEN-based template and upload it again.",
+          template_mismatch: {
+            missing: ["CWSN", "PEN Number"],
+            unexpected: [],
+            duplicate: [],
+            legacy_apaar: true,
+          },
+        }),
+        { status: 400 },
+      ),
+    );
+
+    const user = userEvent.setup();
+    render(<BulkStudentUploadModal {...baseProps} />);
+
+    await user.upload(
+      screen.getByLabelText("Student upload file"),
+      new File(["fake"], "students.csv", { type: "text/csv" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Upload students" }));
+
+    expect(await screen.findByText("This workbook uses the old APAAR template.")).toBeInTheDocument();
+    expect(screen.queryByText("The uploaded headers do not match the current template.")).not.toBeInTheDocument();
+    expect(screen.getByText("Missing columns: CWSN, PEN Number")).toBeInTheDocument();
+  });
+
   it("counts every uncreated row as to go and includes skipped rows in the rejected CSV", async () => {
     vi.mocked(fetch).mockResolvedValue(
       new Response(

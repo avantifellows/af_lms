@@ -26,7 +26,7 @@ edges:
     condition: when working on teacher feedback setup, the feedback form, or its report
   - target: patterns/INDEX.md
     condition: when starting a task — check the pattern index for a matching pattern file
-last_updated: 2026-08-24
+last_updated: 2026-09-02
 ---
 
 # Session Bootstrap
@@ -55,7 +55,7 @@ Then read this file fully before doing anything else in this session.
 - NVS Phone Registration Mode is now the active AF LMS Registration Mode for JNV NVS Add Student, Bulk Upload, template download, and the scoped phone-cohort Edit path. The matching DB Service mode/version flip must deploy as the coordinated release; a mismatch fails closed. The rollout gate includes a manual Portal login smoke check with the phone as Student ID plus Date of Birth in `EnableStudents`. Staging feedback now keeps the named template example row ignored but shows any real row reusing its phone as a clear rejection; existing-match messages show the submitted Phone-mode identity even when DB Service omits Student ID from safe match context. Bulk column headers in both Phone and Approved modes match after trimming outer whitespace and ignoring case, while cell validation stays unchanged. The accepted concurrent-create race from ADR 0006 remains documented and is not fixed here.
 - Pull requests run a standalone Node 22 production-build check (`npm ci` then
   `npm run build`) in GitHub Actions; deploys continue through AWS Amplify.
-  The suite also has 3603 unit tests (Vitest/RTL) + 76 E2E (Playwright).
+  The suite also has 3608 unit tests (Vitest/RTL) + 76 E2E (Playwright).
 
 **Not yet built / in progress:**
 

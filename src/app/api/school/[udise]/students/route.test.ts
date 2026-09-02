@@ -494,6 +494,48 @@ describe("POST /api/school/[udise]/students", () => {
     ]);
   });
 
+  it("passes Approved-mode header mismatch details through the 400 response", async () => {
+    const headers = uploadHeaders.filter((header) => header !== "Gender");
+    const row = validUploadRow.filter((_value, index) => index !== 3);
+    const response = await POST(
+      multipartUploadRequest("students.csv", [csvLine(headers), csvLine(row)].join("\n")) as never,
+      routeParams({ udise: "12345678901" }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: "Missing required columns: Gender. Download the latest template and upload it again",
+      template_mismatch: {
+        missing: ["Gender"],
+        unexpected: [],
+        duplicate: [],
+      },
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("marks an Approved-mode APAAR template in the structured mismatch response", async () => {
+    const headers = [...uploadHeaders];
+    headers[5] = "Physical Handicapped / Vikalang";
+    headers[6] = "APAAR ID";
+    const response = await POST(
+      multipartUploadRequest("students.csv", [csvLine(headers), csvLine(validUploadRow)].join("\n")) as never,
+      routeParams({ udise: "12345678901" }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: "This workbook uses the old APAAR template. Download the latest PEN-based template and upload it again.",
+      template_mismatch: {
+        missing: ["CWSN", "PEN Number"],
+        unexpected: [],
+        duplicate: [],
+        legacy_apaar: true,
+      },
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("reports and removes example rows before proxying the upload", async () => {
     vi.mocked(fetch).mockResolvedValue(
       new Response(

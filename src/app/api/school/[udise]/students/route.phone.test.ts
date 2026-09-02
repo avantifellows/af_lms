@@ -192,6 +192,11 @@ describe("POST /api/school/[udise]/students in Phone Registration Mode", () => {
     expect(await response.json()).toEqual({
       error:
         "This upload does not match the active Phone Registration Mode template. Download the current template and upload it again.",
+      template_mismatch: {
+        missing: [],
+        unexpected: ["PEN Number", "Grade 10 Roll no", "Yearly / Annual Family Income"],
+        duplicate: [],
+      },
     });
     expect(fetch).not.toHaveBeenCalled();
   });

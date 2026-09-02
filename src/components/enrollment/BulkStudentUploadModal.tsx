@@ -55,7 +55,12 @@ function existingMatchIssue(
 
 interface UploadResponse {
   error?: string;
-  details?: string;
+  template_mismatch?: {
+    missing: string[];
+    unexpected: string[];
+    duplicate: string[];
+    legacy_apaar?: boolean;
+  };
   totals?: UploadTotals;
   results?: UploadResult[];
   ignored_rows?: Array<{ message: string }>;
@@ -101,6 +106,7 @@ export default function BulkStudentUploadModal({
   const [file, setFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [headerDetails, setHeaderDetails] = useState<UploadResponse["template_mismatch"] | null>(null);
   const [totals, setTotals] = useState<UploadTotals | null>(null);
   const [results, setResults] = useState<UploadResult[]>([]);
   const [ignoredRows, setIgnoredRows] = useState<string[]>([]);
@@ -118,6 +124,7 @@ export default function BulkStudentUploadModal({
       setFile(null);
       setSubmitting(false);
       setError(null);
+      setHeaderDetails(null);
       setTotals(null);
       setResults([]);
       setIgnoredRows([]);
@@ -131,6 +138,7 @@ export default function BulkStudentUploadModal({
 
     setSubmitting(true);
     setError(null);
+    setHeaderDetails(null);
     setTotals(null);
     setResults([]);
     setIgnoredRows([]);
@@ -151,8 +159,9 @@ export default function BulkStudentUploadModal({
         );
       }
       setIgnoredRows((json.ignored_rows ?? []).map((row) => row.message));
+      setHeaderDetails(json.template_mismatch ?? null);
       if (!response.ok && !json.results) {
-        throw new Error(json.details || json.error || "Upload failed");
+        throw new Error(json.error || "Upload failed");
       }
 
       setTotals(json.totals ?? emptyTotals);
@@ -165,6 +174,11 @@ export default function BulkStudentUploadModal({
       setSubmitting(false);
     }
   }
+
+  const templateHref = `/api/school/${encodeURIComponent(schoolUdise)}/students`;
+  const templateFilename = phoneMode
+    ? "NVS_Lakshya_Data_Template_updated_19th_August_2026.xlsx"
+    : "nvs-student-addition-template.xlsx";
 
   return (
     // fallow-ignore-next-line code-duplication
@@ -183,7 +197,31 @@ export default function BulkStudentUploadModal({
         <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
           {error && (
             <div className="rounded-lg border border-danger/30 bg-danger-bg p-3 text-sm text-danger">
-              {error}
+              <p>{headerDetails
+                ? headerDetails.legacy_apaar
+                  ? "This workbook uses the old APAAR template."
+                  : "The uploaded headers do not match the current template."
+                : error}</p>
+              {headerDetails && (
+                <div className="mt-2 space-y-1">
+                  {headerDetails.missing.length > 0 && (
+                    <p>Missing columns: {headerDetails.missing.join(", ")}</p>
+                  )}
+                  {headerDetails.unexpected.length > 0 && (
+                    <p>Unrecognized columns: {headerDetails.unexpected.join(", ")}</p>
+                  )}
+                  {headerDetails.duplicate.length > 0 && (
+                    <p>Duplicate columns: {headerDetails.duplicate.join(", ")}</p>
+                  )}
+                  <a
+                    href={templateHref}
+                    download={templateFilename}
+                    className="font-medium underline underline-offset-2"
+                  >
+                    Download the current template
+                  </a>
+                </div>
+              )}
             </div>
           )}
           {ignoredRows.length > 0 && (
@@ -194,10 +232,8 @@ export default function BulkStudentUploadModal({
 
           <div className="flex flex-wrap items-center gap-3">
             <a
-              href={`/api/school/${encodeURIComponent(schoolUdise)}/students`}
-              download={phoneMode
-                ? "NVS_Lakshya_Data_Template_updated_19th_August_2026.xlsx"
-                : "nvs-student-addition-template.xlsx"}
+              href={templateHref}
+              download={templateFilename}
               className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border border-border bg-bg-card px-4 py-1.5 text-xs font-medium text-text-primary shadow-sm hover:bg-hover-bg"
             >
               <Download className="h-4 w-4" aria-hidden="true" />

@@ -102,7 +102,12 @@ async function bulkUploadResponse(
     academicYear: period.academic_year,
     mode: ACTIVE_REGISTRATION_MODE,
   });
-  if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
+  if (!parsed.ok) {
+    return NextResponse.json({
+      error: parsed.error,
+      ...(parsed.templateMismatch ? { template_mismatch: parsed.templateMismatch } : {}),
+    }, { status: 400 });
+  }
   if (parsed.totalRows === 0) {
     if (parsed.ignoredRows.length > 0) {
       return NextResponse.json(

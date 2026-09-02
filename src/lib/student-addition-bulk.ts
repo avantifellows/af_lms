@@ -31,6 +31,13 @@ export interface StudentAdditionUploadRowResult {
   original: Record<string, string>;
 }
 
+export interface StudentAdditionUploadHeaderDetails {
+  missing: string[];
+  unexpected: string[];
+  duplicate: string[];
+  legacy_apaar?: boolean;
+}
+
 export interface StudentAdditionIgnoredExampleRow {
   row_number: number;
   matched_fields: string[];
@@ -46,7 +53,11 @@ export type StudentAdditionUploadParseResult =
       totalRows: number;
       originalRows: Map<number, Record<string, string>>;
     }
-  | { ok: false; error: string };
+  | {
+      ok: false;
+      error: string;
+      templateMismatch?: StudentAdditionUploadHeaderDetails;
+    };
 
 interface ParseUploadInput {
   filename: string;
@@ -110,64 +121,74 @@ function normalizeHeader(header: string): string {
   return header.trim().toLowerCase();
 }
 
-function missingColumns(headers: string[], columns = getStudentAdditionUploadColumns()) {
-  const headerSet = new Set(headers.map(normalizeHeader));
-  return columns
-    .map((column) => column.label)
-    .filter((label) => !headerSet.has(normalizeHeader(label)));
-}
-
 function phoneModeSchemaError() {
   return "This upload does not match the active Phone Registration Mode template. Download the current template and upload it again.";
 }
 
-function validateUploadSchema(headers: string[], mode: RegistrationMode) {
+function uploadHeaderDetails(
+  headers: string[],
+  mode: RegistrationMode,
+): StudentAdditionUploadHeaderDetails {
   const normalizedHeaders = headers.map(normalizeHeader);
   const columns = getStudentAdditionUploadColumns(mode);
-  const duplicateCanonicalHeaders = columns.filter((column) =>
-    normalizedHeaders.filter((header) => header === normalizeHeader(column.label)).length !== 1,
+  const expected = new Set(columns.map((column) => normalizeHeader(column.label)));
+  const rejectedRowMetadataColumns = new Set(
+    getStudentAdditionRejectedRowMetadataColumns(mode).map(normalizeHeader),
   );
 
+  return {
+    missing: columns
+      .filter((column) => !normalizedHeaders.includes(normalizeHeader(column.label)))
+      .map((column) => column.label),
+    unexpected: mode === PHONE_REGISTRATION_MODE
+      ? headers
+        .filter((header) => {
+          const normalizedHeader = normalizeHeader(header);
+          return normalizedHeader.length > 0 &&
+            !expected.has(normalizedHeader) &&
+            !rejectedRowMetadataColumns.has(normalizedHeader);
+        })
+        .map((header) => header.trim())
+      : [],
+    duplicate: columns
+      .filter((column) => normalizedHeaders.filter(
+        (header) => header === normalizeHeader(column.label),
+      ).length > 1)
+      .map((column) => column.label),
+  };
+}
+
+function validateUploadSchema(headers: string[], mode: RegistrationMode) {
+  const normalizedHeaders = headers.map(normalizeHeader);
+  const details = uploadHeaderDetails(headers, mode);
+
   if (mode !== PHONE_REGISTRATION_MODE) {
-    if (
-      normalizedHeaders.includes(normalizeHeader("APAAR ID")) ||
-      !normalizedHeaders.includes(normalizeHeader("PEN Number"))
-    ) {
+    if (normalizedHeaders.includes(normalizeHeader("APAAR ID"))) {
       return {
         ok: false as const,
         error: "This workbook uses the old APAAR template. Download the latest PEN-based template and upload it again.",
+        templateMismatch: { ...details, legacy_apaar: true },
       };
     }
-    const missing = missingColumns(headers, columns);
-    if (missing.length > 0) {
+    if (details.missing.length > 0) {
       return {
         ok: false as const,
-        error: `Missing required columns: ${missing.join(", ")}. Download the latest template and upload it again`,
+        error: `Missing required columns: ${details.missing.join(", ")}. Download the latest template and upload it again`,
+        templateMismatch: details,
       };
     }
-    if (duplicateCanonicalHeaders.length > 0) {
+    if (details.duplicate.length > 0) {
       return {
         ok: false as const,
-        error: `Duplicate columns: ${duplicateCanonicalHeaders.map((column) => column.label).join(", ")}. Download the latest template and upload it again`,
+        error: `Duplicate columns: ${details.duplicate.join(", ")}. Download the latest template and upload it again`,
+        templateMismatch: details,
       };
     }
     return { ok: true as const };
   }
 
-  const rejectedRowMetadataColumns = new Set(
-    getStudentAdditionRejectedRowMetadataColumns(mode).map(normalizeHeader),
-  );
-  const expected = new Set(columns.map((column) => normalizeHeader(column.label)));
-  const nonBlankHeaders = normalizedHeaders.filter(Boolean);
-  const missing = columns.filter((column) =>
-    !normalizedHeaders.includes(normalizeHeader(column.label)),
-  );
-  const unexpected = nonBlankHeaders.filter((header) =>
-    !expected.has(header) && !rejectedRowMetadataColumns.has(header),
-  );
-
-  if (missing.length > 0 || duplicateCanonicalHeaders.length > 0 || unexpected.length > 0) {
-    return { ok: false as const, error: phoneModeSchemaError() };
+  if (details.missing.length > 0 || details.duplicate.length > 0 || details.unexpected.length > 0) {
+    return { ok: false as const, error: phoneModeSchemaError(), templateMismatch: details };
   }
 
   return { ok: true as const };

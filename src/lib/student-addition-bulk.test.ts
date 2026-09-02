@@ -124,6 +124,11 @@ describe("parseStudentAdditionUpload", () => {
       ok: false,
       error:
         "This upload does not match the active Phone Registration Mode template. Download the current template and upload it again.",
+      templateMismatch: {
+        missing: [],
+        unexpected: ["PEN Number", "Grade 10 Roll no", "Yearly / Annual Family Income"],
+        duplicate: [],
+      },
     });
   });
 
@@ -234,6 +239,30 @@ describe("parseStudentAdditionUpload", () => {
     expect(result).toEqual({
       ok: false,
       error: "This workbook uses the old APAAR template. Download the latest PEN-based template and upload it again.",
+      templateMismatch: {
+        missing: ["CWSN", "PEN Number"],
+        unexpected: [],
+        duplicate: [],
+        legacy_apaar: true,
+      },
+    });
+  });
+
+  it("reports a missing PEN column instead of the legacy APAAR template when APAAR is absent", async () => {
+    const headers = uploadHeaders.filter((header) => header !== "PEN Number");
+    const result = await parseStudentAdditionUpload({
+      filename: "students.csv",
+      data: Buffer.from(`${csvLine(headers)}\n${csvLine(validRowValues.slice(0, 6).concat(validRowValues.slice(7)))}`),
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: "Missing required columns: PEN Number. Download the latest template and upload it again",
+      templateMismatch: {
+        missing: ["PEN Number"],
+        unexpected: [],
+        duplicate: [],
+      },
     });
   });
 
@@ -267,6 +296,11 @@ describe("parseStudentAdditionUpload", () => {
     expect(result).toEqual({
       ok: false,
       error,
+      templateMismatch: {
+        missing: [],
+        unexpected: [],
+        duplicate: [mode === APPROVED_REGISTRATION_MODE ? "PEN Number" : "Grade"],
+      },
     });
   });
 
@@ -284,6 +318,11 @@ describe("parseStudentAdditionUpload", () => {
       ok: false,
       error:
         "This upload does not match the active Phone Registration Mode template. Download the current template and upload it again.",
+      templateMismatch: {
+        missing: [],
+        unexpected: ["unapproved extra column"],
+        duplicate: [],
+      },
     });
   });
 
@@ -595,6 +634,12 @@ describe("parseStudentAdditionUpload", () => {
     expect(result).toEqual({
       ok: false,
       error: "This workbook uses the old APAAR template. Download the latest PEN-based template and upload it again.",
+      templateMismatch: {
+        missing: ["CWSN", "PEN Number"],
+        unexpected: [],
+        duplicate: [],
+        legacy_apaar: true,
+      },
     });
   });
 
@@ -624,6 +669,11 @@ describe("parseStudentAdditionUpload", () => {
       ok: false,
       error:
         "Missing required columns: Gender, Parents Phone Number. Download the latest template and upload it again",
+      templateMismatch: {
+        missing: ["Gender", "Parents Phone Number"],
+        unexpected: [],
+        duplicate: [],
+      },
     });
   });
 
