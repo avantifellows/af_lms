@@ -10,7 +10,7 @@ describe("Holistic Program parsing", () => {
     },
   );
 
-  it.each([1, 78, "1", "78"])(
+  it.each([1, 74, 78, 88, 99, "1", "74", "78", "88", "99"])(
     "accepts an explicit supported URL Program (%s)",
     (value) => {
       expect(holisticProgramId(value)).toBe(Number(value));
@@ -24,7 +24,7 @@ describe("Holistic Program parsing", () => {
     },
   );
 
-  it.each([1, 78])("accepts an explicit numeric JSON Program (%s)", (value) => {
+  it.each([1, 74, 78, 88, 99])("accepts an explicit numeric JSON Program (%s)", (value) => {
     expect(holisticJsonProgramId(value)).toBe(value);
   });
 });

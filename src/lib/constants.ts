@@ -50,7 +50,10 @@ export const PROGRAM_ID_TO_LABEL: Record<number, string> = {
 
 export const HOLISTIC_MENTORSHIP_PROGRAM_IDS = [
   PROGRAM_IDS.COE,
+  PROGRAM_IDS.PUNJAB_COE,
   PROGRAM_IDS.EMRS_COE,
+  PROGRAM_IDS.UTTARAKHAND_COE,
+  PROGRAM_IDS.MAHARASHTRA_COACHING_TESTPREP,
 ] as const;
 
 export type HolisticMentorshipProgramId =
@@ -61,6 +64,25 @@ export function isHolisticMentorshipProgramId(
 ): value is HolisticMentorshipProgramId {
   return typeof value === "number" &&
     HOLISTIC_MENTORSHIP_PROGRAM_IDS.some((programId) => programId === value);
+}
+
+// Historical Holistic Notes are a reviewed one-time import for the original
+// JNV and EMRS cohorts only. Keep this narrower than the live runtime
+// allowlist: the newly enabled Programs do not have an approved source
+// snapshot or baseline and must never inherit the EMRS assumptions.
+export const HOLISTIC_HISTORICAL_IMPORT_PROGRAM_IDS = [
+  PROGRAM_IDS.COE,
+  PROGRAM_IDS.EMRS_COE,
+] as const;
+
+export type HolisticHistoricalImportProgramId =
+  (typeof HOLISTIC_HISTORICAL_IMPORT_PROGRAM_IDS)[number];
+
+export function isHolisticHistoricalImportProgramId(
+  value: unknown,
+): value is HolisticHistoricalImportProgramId {
+  return typeof value === "number" &&
+    HOLISTIC_HISTORICAL_IMPORT_PROGRAM_IDS.some((programId) => programId === value);
 }
 
 export const ACADEMIC_MENTORSHIP_PROGRAM_ALLOWLIST = ["*"] as const;

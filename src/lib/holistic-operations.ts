@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { isHolisticMentorshipProgramId, PROGRAM_IDS } from "./constants";
+import { isHolisticHistoricalImportProgramId, PROGRAM_IDS } from "./constants";
 import { hasValidHistoricalSourceProvenance } from "./holistic-historical-provenance";
 
 export type HolisticOperationMode = "dry-run" | "apply";
@@ -107,7 +107,7 @@ function validateHistoricalImportParams(
   params: HistoricalImportParams,
   programId: number,
 ) {
-  if (!isHolisticMentorshipProgramId(programId)) {
+  if (!isHolisticHistoricalImportProgramId(programId)) {
     throw new Error("Historical import requires Program 1 or 78");
   }
   if (params.approvedBaseline &&

@@ -241,6 +241,42 @@ describe("Holistic Student Phase derivation", () => {
     });
   });
 
+  it.each([PROGRAM_IDS.PUNJAB_COE, PROGRAM_IDS.UTTARAKHAND_COE, PROGRAM_IDS.MAHARASHTRA_COACHING_TESTPREP])(
+    "does not read legacy Historical notes for newly enabled Program %s",
+    async (programId) => {
+      mockQuery
+        .mockResolvedValueOnce([{
+          student_id: 41, mapping_id: 301, name: "Asha", external_student_id: "S41",
+          grade: 12, entry_grade: 12,
+        }])
+        .mockResolvedValueOnce([{
+          id: 75, academic_year: "2026-2027", grade: 12, title: "Grade 12 start",
+          position: 5, revision: 1, state: "open", guidance_markdown: "Listen first.",
+        }])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{ academic_year: "2026-2027", started_at: "2026-07-01T00:00:00Z" }])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([]);
+
+      await getHolisticStudentPhase({
+        programId,
+        studentId: 41,
+        phaseId: 75,
+        schoolId: 4,
+        academicYear: "2026-2027",
+        actorUserId: 10,
+        role: "teacher",
+        canEdit: true,
+      });
+
+      expect(mockQuery).toHaveBeenCalledTimes(7);
+      expect(mockQuery.mock.calls.some(([sql]) =>
+        String(sql).includes("FROM holistic_mentorship_historical_notes notes")
+      )).toBe(false);
+    },
+  );
+
   it("uses the Active-configuration Profile only at the entry Grade's first Phase", () => {
     const input = {
       phases: [

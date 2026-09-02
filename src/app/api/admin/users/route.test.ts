@@ -156,7 +156,7 @@ describe("POST /api/admin/users", () => {
       "holistic_mentorship_admin",
       null,
       null,
-      [1, 78],
+      [1, 74, 78, 88, 99],
       false,
       null,
     ]);

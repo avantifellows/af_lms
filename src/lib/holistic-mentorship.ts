@@ -267,7 +267,11 @@ async function resolveScopedProgramIds(
      ORDER BY centre.program_id`,
     [candidates, ...schoolScope.params],
   );
-  return rows.map(({ program_id }) => Number(program_id));
+  const available = new Set(rows.map(({ program_id }) => Number(program_id)));
+  // Keep selector order independent of database row order. The shared
+  // allowlist is the product's stable display order for every Holistic
+  // workspace.
+  return HOLISTIC_MENTORSHIP_PROGRAM_IDS.filter((programId) => available.has(programId));
 }
 
 async function resolveSchool(

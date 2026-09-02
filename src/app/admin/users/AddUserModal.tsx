@@ -2,7 +2,11 @@
 
 import { useState, useEffect } from "react";
 import { Modal, Input, Select, Button } from "@/components/ui";
-import { HOLISTIC_MENTORSHIP_PROGRAM_IDS } from "@/lib/constants";
+import {
+  HOLISTIC_MENTORSHIP_PROGRAM_IDS,
+  PROGRAM_ID_TO_LABEL,
+  PROGRAM_IDS,
+} from "@/lib/constants";
 
 interface UserPermission {
   id: number;
@@ -16,12 +20,43 @@ interface UserPermission {
   full_name: string | null;
 }
 
-// Program definitions
+const PROGRAM_DESCRIPTIONS: Record<number, string> = {
+  [PROGRAM_IDS.COE]: "Center of Excellence program",
+  [PROGRAM_IDS.NODAL]: "Nodal schools program",
+  [PROGRAM_IDS.NVS]: "NVS schools (limited features)",
+  [PROGRAM_IDS.PUNJAB_COE]: "Punjab CoE schools",
+  [PROGRAM_IDS.EMRS_COE]: "EMRS CoE schools",
+  [PROGRAM_IDS.UTTARAKHAND_COE]: "Uttarakhand CoE schools",
+  [PROGRAM_IDS.MAHARASHTRA_COACHING_TESTPREP]: "Maharashtra coaching test-prep schools",
+};
+
+// Keep user-management choices in the supported LMS program order and source
+// names from the shared map so newly enabled Holistic programs do not get
+// stale labels. Other centre programs remain out of this role-assignment UI.
 const PROGRAMS = [
-  { id: 1, name: "JNV CoE", description: "Center of Excellence program" },
-  { id: 2, name: "JNV Nodal", description: "Nodal schools program" },
-  { id: 64, name: "JNV NVS", description: "NVS schools (limited features)" },
-];
+  PROGRAM_IDS.COE,
+  PROGRAM_IDS.NODAL,
+  PROGRAM_IDS.NVS,
+  PROGRAM_IDS.PUNJAB_COE,
+  PROGRAM_IDS.EMRS_COE,
+  PROGRAM_IDS.UTTARAKHAND_COE,
+  PROGRAM_IDS.MAHARASHTRA_COACHING_TESTPREP,
+].map((id) => ({
+  id,
+  name: PROGRAM_ID_TO_LABEL[id] ?? `Program ${id}`,
+  description: PROGRAM_DESCRIPTIONS[id] ?? "Program access",
+}));
+
+const HOLISTIC_PROGRAM_LABELS = HOLISTIC_MENTORSHIP_PROGRAM_IDS.map(
+  (id) => PROGRAM_ID_TO_LABEL[id] ?? `Program ${id}`,
+);
+
+function joinProgramLabels(labels: string[]) {
+  if (labels.length < 2) return labels[0] ?? "supported Holistic Mentorship";
+  return `${labels.slice(0, -1).join(", ")}, and ${labels.at(-1)}`;
+}
+
+const HOLISTIC_PROGRAM_LABELS_TEXT = joinProgramLabels(HOLISTIC_PROGRAM_LABELS);
 
 interface AddUserModalProps {
   user: UserPermission | null;
@@ -49,7 +84,7 @@ const ROLE_DESCRIPTIONS: Record<string, string> = {
   program_manager: "Program Managers can conduct school visits, view assigned schools, and monitor scoped Holistic Mentorship progress",
   program_admin: "Program Admins can oversee scoped schools, manage their own school visits, and monitor scoped Holistic Mentorship progress",
   teacher: "Teachers can view and manage students in their assigned schools",
-  holistic_mentorship_admin: "Holistic Mentorship Admins can manage JNV CoE and EMRS CoE mentorship",
+  holistic_mentorship_admin: `Holistic Mentorship Admins can manage ${HOLISTIC_PROGRAM_LABELS_TEXT} mentorship`,
   admin: "Admins have full access to all features, all schools, and all programs",
 };
 
@@ -303,7 +338,7 @@ function RoleField({ role, onChange }: { role: string; onChange: (role: string) 
       <option value="teacher">Teacher - Student management view</option>
       <option value="program_manager">Program Manager - School visits + student management</option>
       <option value="program_admin">Program Admin - Scoped oversight + own school visits</option>
-      <option value="holistic_mentorship_admin">Holistic Mentorship Admin - JNV CoE + EMRS CoE</option>
+      <option value="holistic_mentorship_admin">Holistic Mentorship Admin - All supported programs</option>
       <option value="admin">Admin - Full access + user management</option>
     </Select>
     <p className="mt-1 text-xs text-gray-500">{ROLE_DESCRIPTIONS[role]}</p>
@@ -339,7 +374,7 @@ function AccessFields({ role, ...props }: AccessFieldsProps) {
   if (role === "holistic_mentorship_admin") {
     return <>
       <div className="rounded-md bg-gray-50 p-3 text-sm text-gray-600">
-        Access includes all JNV CoE and EMRS CoE Schools and only Holistic Mentorship.
+        Access includes all {HOLISTIC_PROGRAM_LABELS_TEXT} Schools and only Holistic Mentorship.
       </div>
       <ReadOnlyField value={props.readOnly} onChange={props.onReadOnlyChange} label="Read-only access" />
     </>;

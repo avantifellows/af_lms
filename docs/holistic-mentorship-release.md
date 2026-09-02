@@ -29,7 +29,7 @@ an explicit local database:
 ```bash
 npm run holistic:setup-local -- \
   --confirm-synthetic-database \
-  --program-id=<1-or-78> \
+  --program-id=<supported-holistic-program-id> \
   --env-file=.env.local \
   --db-service-path=../db-service_holistic_mentorship
 ```
@@ -56,14 +56,17 @@ queries only the two approved BigQuery Form/Session pairs.
 ```bash
 npm run holistic:preflight -- \
   --confirm-production-read-only \
-  --program-id=<1-or-78> \
+  --program-id=<supported-holistic-program-id> \
   --env-file=.env.production \
   --academic-year=2026-2027 \
   --historical-source=/secure/path/historical-grouped.json
 ```
 
 `--historical-source` is required only for Program 1 preflight. The Historical
-Notes importer supports Program 1 and Program 78 as separate guarded runs.
+Notes importer supports only Program 1 and Program 78 as separate guarded runs;
+the live Holistic runtime additionally supports Programs 74 (Punjab CoE), 88
+(Uttarakhand CoE), and 99 (Maharashtra Coaching Test Prep). Do not pass a
+Historical source for those newly enabled Programs.
 
 Save the aggregate JSON report with the release record. It must reconcile
 dynamic Schools in the selected Program; eligible Grade 11/12 Students; Teacher seats;
@@ -136,12 +139,12 @@ apply with a canonical operator User ID and verify an immediate no-op rerun:
 ```bash
 npm run holistic:rollover -- \
   --from=2026-2027 --to=2027-2028 \
-  --program-id=<1-or-78> \
+  --program-id=<supported-holistic-program-id> \
   --actor-user-id=<operator-user-id> --env-file=.env.production
 
 npm run holistic:rollover -- \
   --from=2026-2027 --to=2027-2028 --apply \
-  --program-id=<1-or-78> \
+  --program-id=<supported-holistic-program-id> \
   --actor-user-id=<operator-user-id> --env-file=.env.production
 ```
 

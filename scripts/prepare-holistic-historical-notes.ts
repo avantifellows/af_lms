@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 
-import { isHolisticMentorshipProgramId, PROGRAM_IDS } from "../src/lib/constants";
+import { PROGRAM_IDS } from "../src/lib/constants";
 import {
   assertApprovedHistoricalSourceCounts,
   transformHistoricalHolisticSourceCsv,
@@ -9,6 +9,7 @@ import {
 import { writePrivateFileAtomically } from "../src/lib/private-file";
 import {
   getHolisticScriptArgument,
+  getHolisticHistoricalImportProgramId,
   runHolisticScript,
 } from "../src/lib/holistic-script";
 
@@ -17,12 +18,7 @@ async function main(): Promise<void> {
   const sourcePath = requireArgument(args, "--source-csv");
   const reviewedIdsPath = requireArgument(args, "--reviewed-student-ids");
   const outputPath = requireArgument(args, "--output");
-  const programId = Number(
-    getHolisticScriptArgument(args, "--program-id") ?? PROGRAM_IDS.COE
-  );
-  if (!isHolisticMentorshipProgramId(programId)) {
-    throw new Error("--program-id must be 1 or 78");
-  }
+  const programId = getHolisticHistoricalImportProgramId(args);
   const [csvText, reviewedIdsText] = await Promise.all([
     readFile(sourcePath, "utf8"),
     readFile(reviewedIdsPath, "utf8"),

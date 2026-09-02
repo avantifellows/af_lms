@@ -27,6 +27,19 @@ function csv(rows = sourceRows, sourceHeaders = headers): string {
 }
 
 describe("Historical Notes private-source preparation", () => {
+  it.each([74, 88, 99])(
+    "rejects newly enabled Program %s before applying approved source counts",
+    (programId) => {
+      expect(() => assertApprovedHistoricalSourceCounts({
+        sourceRows: 3_301,
+        sourceStudents: 159,
+        selectedStudents: 11,
+        substantive: 10,
+        empty: 1,
+      }, programId)).toThrow("Historical source preparation requires Program 1 or 78");
+    },
+  );
+
   it("groups the reviewed source deterministically with original matrix labels and provenance", () => {
     const result = transformHistoricalHolisticSourceCsv(csv(), ["S-1"]);
 

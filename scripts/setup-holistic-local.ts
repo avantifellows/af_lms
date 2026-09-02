@@ -3,9 +3,9 @@ import path from "node:path";
 import {
   configureHolisticScriptEnvironment,
   getHolisticScriptArgument,
+  getHolisticMentorshipProgramId,
   runHolisticScript,
 } from "../src/lib/holistic-script";
-import { isHolisticMentorshipProgramId, PROGRAM_IDS } from "../src/lib/constants";
 
 const LOCAL_DATABASE_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 
@@ -30,13 +30,7 @@ async function main(): Promise<void> {
 }
 
 function parseProgramId(args: string[]): number {
-  const programId = Number(
-    getHolisticScriptArgument(args, "--program-id") ?? PROGRAM_IDS.COE
-  );
-  if (!isHolisticMentorshipProgramId(programId)) {
-    throw new Error("--program-id must be 1 or 78");
-  }
-  return programId;
+  return getHolisticMentorshipProgramId(args);
 }
 
 function parseDbServicePath(args: string[]): string {

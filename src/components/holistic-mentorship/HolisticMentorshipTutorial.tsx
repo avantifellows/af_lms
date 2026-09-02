@@ -8,6 +8,11 @@ import {
 import Image from "next/image";
 import { useRef, useState, type ReactNode } from "react";
 
+import {
+  HOLISTIC_MENTORSHIP_PROGRAM_IDS,
+  PROGRAM_ID_TO_LABEL,
+} from "@/lib/constants";
+
 type Audience = "teacher" | "admin";
 type StepLayout = "notes" | "prepare" | "split";
 
@@ -37,6 +42,16 @@ type GuideStep = {
 };
 
 const IMAGE_ROOT = "/holistic-mentorship-guide";
+const HOLISTIC_PROGRAM_LABELS = HOLISTIC_MENTORSHIP_PROGRAM_IDS.map(
+  (id) => PROGRAM_ID_TO_LABEL[id] ?? `Program ${id}`,
+);
+
+function joinProgramLabels(labels: string[]) {
+  if (labels.length < 2) return labels[0] ?? "a supported Holistic Mentorship Program";
+  return `${labels.slice(0, -1).join(", ")}, or ${labels.at(-1)}`;
+}
+
+const HOLISTIC_PROGRAM_LABELS_TEXT = joinProgramLabels(HOLISTIC_PROGRAM_LABELS);
 
 const teacherSteps: GuideStep[] = [
   {
@@ -253,7 +268,7 @@ const adminSteps: GuideStep[] = [
       <>
         <ol>
           <li>
-            Select <strong>JNV CoE</strong> or <strong>EMRS CoE</strong>.
+            Select the Holistic Mentorship Program you want to manage: {HOLISTIC_PROGRAM_LABELS_TEXT}.
           </li>
           <li>Select the Academic Year you want to manage.</li>
           <li>

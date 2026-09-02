@@ -7,6 +7,7 @@ import {
 } from "../src/lib/holistic-release";
 import {
   configureHolisticScriptEnvironment,
+  getHolisticHistoricalImportProgramId,
   getHolisticMentorshipProgramId,
   getHolisticScriptArgument,
   runHolisticScript,
@@ -56,6 +57,12 @@ function parseOptions(args: string[]) {
   requireReadOnlyConfirmation(args);
   const programId = getHolisticMentorshipProgramId(args);
   const historicalSource = getHolisticScriptArgument(args, "--historical-source");
+  // A preflight may cover any live Holistic Program. If it is also supplied a
+  // Historical export, enforce the separate two-Program history contract
+  // before dotenv/file/database I/O begins.
+  if (historicalSource !== undefined) {
+    getHolisticHistoricalImportProgramId(args);
+  }
   requireProgramOneHistory(programId, historicalSource);
   return {
     historicalSource: historicalSource ?? null,

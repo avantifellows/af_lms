@@ -843,13 +843,15 @@ function holisticProgramChoices(
     ? [...HOLISTIC_MENTORSHIP_PROGRAM_IDS]
     : getProgramContextSync(permission).programIds.filter(isHolisticMentorshipProgramId);
   const allowed = new Set(actorPrograms);
-  return (school.centre_program_ids ?? [])
-    .map(Number)
-    .filter((programId, index, values) =>
-      isHolisticMentorshipProgramId(programId) &&
-      allowed.has(programId) &&
-      values.indexOf(programId) === index,
-    );
+  const schoolPrograms = new Set((school.centre_program_ids ?? []).map(Number));
+  // The centre query's row order is not a UI contract. Follow the shared
+  // allowlist order so a multi-Program School is presented consistently in
+  // the School page and Admin workspace.
+  return HOLISTIC_MENTORSHIP_PROGRAM_IDS.filter((programId) =>
+    isHolisticMentorshipProgramId(programId) &&
+    allowed.has(programId) &&
+    schoolPrograms.has(programId),
+  );
 }
 
 function holisticProgramHref(schoolCode: string, programId: number): string {
