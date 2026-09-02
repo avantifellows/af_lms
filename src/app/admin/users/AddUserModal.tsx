@@ -6,6 +6,7 @@ import {
   HOLISTIC_MENTORSHIP_PROGRAM_IDS,
   PROGRAM_ID_TO_LABEL,
   PROGRAM_IDS,
+  USER_MANAGEMENT_PROGRAM_IDS,
 } from "@/lib/constants";
 
 interface UserPermission {
@@ -33,15 +34,7 @@ const PROGRAM_DESCRIPTIONS: Record<number, string> = {
 // Keep user-management choices in the supported LMS program order and source
 // names from the shared map so newly enabled Holistic programs do not get
 // stale labels. Other centre programs remain out of this role-assignment UI.
-const PROGRAMS = [
-  PROGRAM_IDS.COE,
-  PROGRAM_IDS.NODAL,
-  PROGRAM_IDS.NVS,
-  PROGRAM_IDS.PUNJAB_COE,
-  PROGRAM_IDS.EMRS_COE,
-  PROGRAM_IDS.UTTARAKHAND_COE,
-  PROGRAM_IDS.MAHARASHTRA_COACHING_TESTPREP,
-].map((id) => ({
+const PROGRAMS = USER_MANAGEMENT_PROGRAM_IDS.map((id) => ({
   id,
   name: PROGRAM_ID_TO_LABEL[id] ?? `Program ${id}`,
   description: PROGRAM_DESCRIPTIONS[id] ?? "Program access",

@@ -1,6 +1,7 @@
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import AddUserModal from "./AddUserModal";
+import { PROGRAM_ID_TO_LABEL, USER_MANAGEMENT_PROGRAM_IDS } from "@/lib/constants";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -104,6 +105,18 @@ describe("AddUserModal — create mode", () => {
     expect(screen.getByText("EMRS CoE")).toBeInTheDocument();
     expect(screen.getByText("Uttarakhand CoE")).toBeInTheDocument();
     expect(screen.getByText("Maharashtra Coaching Test Prep")).toBeInTheDocument();
+  });
+
+  it("renders assignable programs in the shared constant's order", () => {
+    renderModal();
+
+    const renderedProgramLabels = screen.getAllByRole("checkbox")
+      .map((checkbox) => checkbox.closest("label")?.querySelector("span")?.textContent)
+      .filter((label): label is string => Boolean(label));
+
+    expect(renderedProgramLabels).toEqual(
+      USER_MANAGEMENT_PROGRAM_IDS.map((id) => PROGRAM_ID_TO_LABEL[id]),
+    );
   });
 
   it("shows no programs selected validation message initially", () => {

@@ -270,10 +270,12 @@ describe("Holistic release preflight", () => {
 
   it("seeds deterministic fixture coverage without exposing fixture content in its report", async () => {
     let actorId = 500;
+    let fixtureScopeQuery = "";
     let fixtureStudentsQuery = "";
     const query = async (sql: string) => {
       if (sql.includes("fixture_scope")) {
-        return { rows: [{ centre_id: 9, school_id: 10, school_code: "E2E-P1", grade_11_id: 11, grade_12_id: 12 }] };
+        fixtureScopeQuery = sql;
+        return { rows: [{ centre_id: 9, school_id: 10, school_code: "E2E-P74", grade_11_id: 11, grade_12_id: 12 }] };
       }
       if (sql.includes("fixture_students")) {
         fixtureStudentsQuery = sql;
@@ -298,20 +300,42 @@ describe("Holistic release preflight", () => {
       return { rows: [] };
     };
 
-    await expect(seedHolisticFixtures({ query } as never)).resolves.toEqual({
-      schoolCode: "E2E-P1",
-      programId: 1,
+    await expect(seedHolisticFixtures({ query } as never, PROGRAM_IDS.PUNJAB_COE)).resolves.toEqual({
+      schoolCode: "E2E-P74",
+      programId: PROGRAM_IDS.PUNJAB_COE,
       academicYear: "2026-2027",
       students: 6,
       mappings: 5,
       profiles: 2,
-      historicalNotes: 1,
+      historicalNotes: 0,
       draftNotes: 1,
       submittedNotes: 1,
       phases: 6,
     });
+    expect(fixtureScopeQuery).not.toContain("school.program_ids");
     expect(fixtureStudentsQuery).toContain(
       "WHERE batch_member.user_id = student.user_id AND batch.program_id = $3"
     );
+  });
+
+  it("rejects an active Centre whose selected Program roster lacks three Students in a Grade", async () => {
+    const query = async (sql: string) => {
+      if (sql.includes("fixture_scope")) {
+        return { rows: [{ centre_id: 9, school_id: 10, school_code: "E2E-P74", grade_11_id: 11, grade_12_id: 12 }] };
+      }
+      if (sql.includes("fixture_students")) {
+        return { rows: [
+          { student_id: 101, user_id: 1001, grade: 11, batch_group_id: 801 },
+          { student_id: 102, user_id: 1002, grade: 11, batch_group_id: 801 },
+          { student_id: 103, user_id: 1003, grade: 11, batch_group_id: 801 },
+          { student_id: 201, user_id: 2001, grade: 12, batch_group_id: 802 },
+          { student_id: 202, user_id: 2002, grade: 12, batch_group_id: 802 },
+        ] };
+      }
+      return { rows: [] };
+    };
+
+    await expect(seedHolisticFixtures({ query } as never, PROGRAM_IDS.PUNJAB_COE))
+      .rejects.toThrow("Holistic fixtures require three eligible Students in each Grade at one School");
   });
 });

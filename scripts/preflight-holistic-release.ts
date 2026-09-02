@@ -74,7 +74,7 @@ function parseOptions(args: string[]) {
 function requireReadOnlyConfirmation(args: string[]) {
   if (!args.includes("--confirm-production-read-only")) {
     throw new Error(
-      "--confirm-production-read-only, a supported --program-id, and Program 1's --historical-source are required"
+      "--confirm-production-read-only and a supported --program-id are required"
     );
   }
 }

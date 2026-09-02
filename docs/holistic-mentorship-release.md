@@ -6,19 +6,26 @@ approve content, sign off, launch, or announce the feature.
 
 ## Release Order
 
-1. In staging, deploy `db-service` issue `#615`, then `etl-next` issue `#113`,
-   then this AF LMS branch. Pause all other shared-preview deployments for the
-   sign-off window and complete staging reconciliation and smoke checks.
-2. Run and approve the read-only production preflight before changing
+This is a paired DB Service and AF LMS release. Follow this order; an older
+checklist that deploys a separate DB Service/ETL pair before LMS is superseded.
+
+1. In staging, deploy DB Service PR `#719` first. Verify its migrations,
+   health, readiness, and Holistic write contract.
+2. In staging, deploy AF LMS PR `#308` second. Pause other shared-preview
+   deployments for the sign-off window.
+3. After both staging deployments are healthy, manually create and open the
+   approved `2026-2027` Phase Plans for Programs `74` (Punjab CoE), `88`
+   (Uttarakhand CoE), and `99` (Maharashtra Coaching Test Prep) in AF LMS.
+4. Run the existing approved Profile-generation operator flow after those
+   Phase Plans are open. Do not add an ETL deployment to this release order.
+5. Complete staging reconciliation, smoke checks, and the sign-off checklist.
+6. Run and approve the read-only production preflight before changing
    production.
-3. Deploy `db-service` `#615`; verify migrations, health, readiness, and the
-   Holistic write contract.
-4. Deploy `etl-next` `#113` inactive and verify its environment and health.
-5. Activate the approved Prompt Configuration and reconcile Profile results.
-6. Dry-run, apply, reconcile, and no-op rerun the Historical Notes import.
-7. Deploy AF LMS, configure the current Phase Plan, and run the critical role
-   and workflow smoke checks.
-8. Engineering and Product must both record approval. Announce to Teachers only
+7. In production, deploy DB Service PR `#719` first and AF LMS PR `#308`
+   second. Verify health and readiness after each deployment.
+8. Manually create and open the approved `2026-2027` Phase Plans for Programs
+   `74`, `88`, and `99`, then run Profile generation.
+9. Engineering and Product must both record approval. Announce to Teachers only
    after production verification and both approvals.
 
 ## Local And Staging Data
@@ -49,24 +56,68 @@ production.
 
 ## Production Preflight
 
-Use production read credentials and the private, access-controlled grouped
-Historical export. The command opens a read-only PostgreSQL transaction and
-queries only the two approved BigQuery Form/Session pairs.
+Use production read credentials. The command opens a read-only PostgreSQL
+transaction and queries only the two approved BigQuery Form/Session pairs.
+Choose the command that matches the run: Programs `1` and `78` may use the
+private, access-controlled grouped Historical export; the newly enabled live
+Programs `74`, `88`, and `99` must not.
+
+### Historical Program 1
+
+Program 1 requires its reviewed Historical source:
 
 ```bash
 npm run holistic:preflight -- \
   --confirm-production-read-only \
-  --program-id=<supported-holistic-program-id> \
+  --program-id=1 \
   --env-file=.env.production \
   --academic-year=2026-2027 \
   --historical-source=/secure/path/historical-grouped.json
 ```
 
-`--historical-source` is required only for Program 1 preflight. The Historical
-Notes importer supports only Program 1 and Program 78 as separate guarded runs;
-the live Holistic runtime additionally supports Programs 74 (Punjab CoE), 88
-(Uttarakhand CoE), and 99 (Maharashtra Coaching Test Prep). Do not pass a
-Historical source for those newly enabled Programs.
+### Historical Program 78
+
+Include `--historical-source` when checking the approved EMRS Historical cohort:
+
+```bash
+npm run holistic:preflight -- \
+  --confirm-production-read-only \
+  --program-id=78 \
+  --env-file=.env.production \
+  --academic-year=2026-2027 \
+  --historical-source=/secure/path/emrs-historical-grouped.json
+```
+
+The Historical Notes importer supports only Programs `1` and `78` as separate
+guarded runs. A live-only Program 78 preflight may omit the source.
+
+### Live Programs 74, 88, and 99
+
+Run the live preflight once for each newly enabled Program. These commands
+intentionally omit `--historical-source`:
+
+```bash
+npm run holistic:preflight -- \
+  --confirm-production-read-only \
+  --program-id=74 \
+  --env-file=.env.production \
+  --academic-year=2026-2027
+
+npm run holistic:preflight -- \
+  --confirm-production-read-only \
+  --program-id=88 \
+  --env-file=.env.production \
+  --academic-year=2026-2027
+
+npm run holistic:preflight -- \
+  --confirm-production-read-only \
+  --program-id=99 \
+  --env-file=.env.production \
+  --academic-year=2026-2027
+```
+
+Do not pass a Historical source for Programs `74`, `88`, or `99`; they have no
+approved Historical snapshot or baseline.
 
 Save the aggregate JSON report with the release record. It must reconcile
 dynamic Schools in the selected Program; eligible Grade 11/12 Students; Teacher seats;

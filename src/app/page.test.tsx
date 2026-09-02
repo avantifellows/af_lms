@@ -202,6 +202,12 @@ describe("LoginPage", () => {
     expect(screen.getByText("Read-Only")).toBeInTheDocument();
   });
 
+  it("describes the Holistic Admin persona for all supported programs", () => {
+    render(<LoginPage />);
+    expect(screen.getByText("All supported programs, mentorship only")).toBeInTheDocument();
+    expect(screen.queryByText("JNV + EMRS, mentorship only")).not.toBeInTheDocument();
+  });
+
   it("calls signIn('dev-login') with persona on dev button click", async () => {
     mockSignIn.mockResolvedValue({ ok: true });
     const user = userEvent.setup();

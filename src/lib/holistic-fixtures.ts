@@ -80,7 +80,6 @@ export async function seedHolisticFixtures(
      FROM centres centre
      JOIN school ON school.id = centre.school_id
      WHERE centre.program_id = $1 AND centre.is_active IS TRUE
-       AND $1 = ANY(COALESCE(school.program_ids, '{}'))
        AND (SELECT COUNT(DISTINCT grade.number)
             FROM "group" school_group
             JOIN group_user school_member ON school_member.group_id = school_group.id
