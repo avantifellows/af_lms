@@ -48,6 +48,13 @@ export function alShortLabel(al: string): string {
   return AL_SHORT_LABEL[al] || al;
 }
 
+// Sort key for an AL that may be null/unknown: unlevelled or unrecognised
+// values rank below every known tier so they sort last.
+export function alRank(al: string | null | undefined): number {
+  if (!al) return -1;
+  return AL_RANK[al] ?? -1;
+}
+
 export function alChipColor(al: string): string {
   switch (al) {
     case "M1":

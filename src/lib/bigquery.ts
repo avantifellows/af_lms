@@ -9,7 +9,7 @@ import type {
   StudentQuestionRow,
 } from "@/types/quiz";
 import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
-import { AL_RANK } from "@/lib/academic-level";
+import { alRank } from "@/lib/academic-level";
 
 let bigQueryClient: BigQuery | null = null;
 
@@ -257,11 +257,6 @@ export async function getBatchOverviewData(
   };
 }
 
-function alRank(al: string | null | undefined): number {
-  if (!al) return -1;
-  return AL_RANK[al] ?? -1;
-}
-
 /**
  * Per-student AL + per-test AL progression across all major-test formats, in
  * chronological order.
@@ -296,9 +291,11 @@ export async function getCumulativeALData(
 
   // One row per (student, session) — gives us both the test list (for the
   // matrix columns) and per-test AL points. The student's own AL comes from
-  // dim_student via the join; the MERGE that writes it matches on
-  // pk_student_id, so every academic-year row of a student carries the same
-  // value and picking the current-year row is safe.
+  // dim_student via the join, keyed on student id alone: the dim row's
+  // denormalised school/grade can lag the fact rows, so filtering on them here
+  // would drop levelled students. A student can have more than one current-year
+  // dim row (the dbt MERGE also matches on enrollment_user_id / apaar_id), so
+  // pick deterministically with MAX rather than ANY_VALUE.
   const sql = `
     SELECT
       f.fk_student_id AS student_id,
@@ -314,11 +311,9 @@ export async function getCumulativeALData(
       ANY_VALUE(f.max_marks_possible) AS max_marks_possible
     FROM ${FACT_TABLE} f
     LEFT JOIN (
-      SELECT pk_student_id, ANY_VALUE(academic_level) AS academic_level
+      SELECT pk_student_id, MAX(academic_level) AS academic_level
       FROM ${DIM_STUDENT_TABLE}
-      WHERE student_school_udise_code = @udise
-        AND student_grade = @grade
-        AND academic_year = '${CURRENT_ACADEMIC_YEAR}'
+      WHERE academic_year = '${CURRENT_ACADEMIC_YEAR}'
         AND academic_level IS NOT NULL
       GROUP BY pk_student_id
     ) ds ON ds.pk_student_id = f.fk_student_id
@@ -392,7 +387,7 @@ export async function getCumulativeALData(
       student_id: r.student_id,
       student_name: r.student_name || r.student_id,
       student_stream: r.student_stream,
-      academic_level: r.student_academic_level ?? null,
+      academic_level: r.student_academic_level,
       progression: [] as ProgressionEntry[],
     };
     existing.progression.push({
@@ -403,8 +398,6 @@ export async function getCumulativeALData(
     });
     if (!existing.student_name && r.student_name) existing.student_name = r.student_name;
     if (!existing.student_stream && r.student_stream) existing.student_stream = r.student_stream;
-    if (!existing.academic_level && r.student_academic_level)
-      existing.academic_level = r.student_academic_level;
     studentMap.set(r.student_id, existing);
   }
 

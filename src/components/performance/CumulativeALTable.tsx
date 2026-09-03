@@ -11,7 +11,7 @@ import type {
 } from "@/types/quiz";
 import {
   AL_DISPLAY_ORDER,
-  AL_RANK,
+  alRank,
   alChipColor,
   alShortLabel as shortLabel,
 } from "@/lib/academic-level";
@@ -187,16 +187,16 @@ export default function CumulativeALTable({ schoolUdise, grade, program, stream,
         case "tests":
           return dir * (a.total_major_tests - b.total_major_tests);
         case "al": {
-          const ar = a.academic_level ? AL_RANK[a.academic_level] ?? -1 : -1;
-          const br = b.academic_level ? AL_RANK[b.academic_level] ?? -1 : -1;
+          const ar = alRank(a.academic_level);
+          const br = alRank(b.academic_level);
           if (ar !== br) return dir * (ar - br);
           return dir * (a.total_major_tests - b.total_major_tests);
         }
         case "latest_al": {
           const al = latestAL(a.progression);
           const bl = latestAL(b.progression);
-          const ar = al ? AL_RANK[al] ?? -1 : -1;
-          const br = bl ? AL_RANK[bl] ?? -1 : -1;
+          const ar = alRank(al);
+          const br = alRank(bl);
           if (ar !== br) return dir * (ar - br);
           return dir * (a.total_major_tests - b.total_major_tests);
         }
@@ -349,7 +349,6 @@ function StreamMatrix({
                 <th
                   className="text-left px-3 py-2 text-xs font-bold uppercase tracking-wide text-text-muted cursor-pointer select-none"
                   onClick={() => toggleSort("al")}
-                  title="Academic Level from the warehouse (dim_student) — mode of the student's last three major tests"
                 >
                   AL{sortIndicator("al")}
                 </th>
@@ -401,7 +400,7 @@ function StreamMatrix({
                           {shortLabel(row.academic_level)}
                         </span>
                       ) : (
-                        <span className="text-xs text-text-muted" title="Not levelled in the warehouse yet">—</span>
+                        <span className="text-xs text-text-muted">—</span>
                       )}
                     </td>
                     <td className="px-3 py-2">
