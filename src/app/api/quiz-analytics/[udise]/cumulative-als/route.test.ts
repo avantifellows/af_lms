@@ -87,8 +87,7 @@ describe("GET /api/quiz-analytics/[udise]/cumulative-als", () => {
           student_name: "Asha",
           stream: "PCM",
           total_major_tests: 2,
-          al_counts: { M1: 1, M2: 1 },
-          mode_al: "M1",
+          academic_level: "M1",
           progression: [
             { session_id: "t1", academic_level: "M2", marks_scored: 120, max_marks_possible: 300 },
             { session_id: "t2", academic_level: "M1", marks_scored: 210, max_marks_possible: 300 },

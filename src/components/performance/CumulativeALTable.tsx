@@ -11,7 +11,7 @@ import type {
 } from "@/types/quiz";
 import {
   AL_DISPLAY_ORDER,
-  AL_RANK,
+  alRank,
   alChipColor,
   alShortLabel as shortLabel,
 } from "@/lib/academic-level";
@@ -41,7 +41,7 @@ function streamGroupLabel(canonical: string | null): string {
   return STREAM_DISPLAY[canonical] || canonical.toUpperCase();
 }
 
-type SortKey = "name" | "tests" | "mode_al" | "latest_al";
+type SortKey = "name" | "tests" | "al" | "latest_al";
 type SortDir = "asc" | "desc";
 
 function formatDate(iso: string): string {
@@ -131,7 +131,7 @@ export default function CumulativeALTable({ schoolUdise, grade, program, stream,
   const [data, setData] = useState<CumulativeALData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [sortKey, setSortKey] = useState<SortKey>("mode_al");
+  const [sortKey, setSortKey] = useState<SortKey>("al");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
 
   useEffect(() => {
@@ -172,7 +172,7 @@ export default function CumulativeALTable({ schoolUdise, grade, program, stream,
     let totalTests = 0;
     for (const s of data.students) {
       totalTests += s.total_major_tests;
-      if (s.mode_al) counts[s.mode_al] = (counts[s.mode_al] || 0) + 1;
+      if (s.academic_level) counts[s.academic_level] = (counts[s.academic_level] || 0) + 1;
     }
     return { counts, totalStudents, totalTests };
   }, [data]);
@@ -186,17 +186,17 @@ export default function CumulativeALTable({ schoolUdise, grade, program, stream,
           return dir * a.student_name.localeCompare(b.student_name);
         case "tests":
           return dir * (a.total_major_tests - b.total_major_tests);
-        case "mode_al": {
-          const ar = a.mode_al ? AL_RANK[a.mode_al] ?? -1 : -1;
-          const br = b.mode_al ? AL_RANK[b.mode_al] ?? -1 : -1;
+        case "al": {
+          const ar = alRank(a.academic_level);
+          const br = alRank(b.academic_level);
           if (ar !== br) return dir * (ar - br);
           return dir * (a.total_major_tests - b.total_major_tests);
         }
         case "latest_al": {
           const al = latestAL(a.progression);
           const bl = latestAL(b.progression);
-          const ar = al ? AL_RANK[al] ?? -1 : -1;
-          const br = bl ? AL_RANK[bl] ?? -1 : -1;
+          const ar = alRank(al);
+          const br = alRank(bl);
           if (ar !== br) return dir * (ar - br);
           return dir * (a.total_major_tests - b.total_major_tests);
         }
@@ -255,7 +255,7 @@ export default function CumulativeALTable({ schoolUdise, grade, program, stream,
           <StatCard label="Students Tracked" value={summary.totalStudents} color="brand-gold" />
           <StatCard label="Major Tests Taken" value={summary.totalTests} color="brand-coral" />
           <StatCard
-            label="Mode AL Distribution"
+            label="AL Distribution"
             value={
               AL_DISPLAY_ORDER
                 .filter((al) => summary.counts[al])
@@ -348,9 +348,9 @@ function StreamMatrix({
                 </th>
                 <th
                   className="text-left px-3 py-2 text-xs font-bold uppercase tracking-wide text-text-muted cursor-pointer select-none"
-                  onClick={() => toggleSort("mode_al")}
+                  onClick={() => toggleSort("al")}
                 >
-                  Mode AL{sortIndicator("mode_al")}
+                  AL{sortIndicator("al")}
                 </th>
                 <th
                   className="text-left px-3 py-2 text-xs font-bold uppercase tracking-wide text-text-muted cursor-pointer select-none"
@@ -393,11 +393,11 @@ function StreamMatrix({
                       {row.total_major_tests}
                     </td>
                     <td className="px-3 py-2">
-                      {row.mode_al ? (
+                      {row.academic_level ? (
                         <span
-                          className={`inline-flex items-center px-2 py-0.5 text-xs font-bold uppercase tracking-wide rounded border ${alChipColor(row.mode_al)}`}
+                          className={`inline-flex items-center px-2 py-0.5 text-xs font-bold uppercase tracking-wide rounded border ${alChipColor(row.academic_level)}`}
                         >
-                          {shortLabel(row.mode_al)}
+                          {shortLabel(row.academic_level)}
                         </span>
                       ) : (
                         <span className="text-xs text-text-muted">—</span>
