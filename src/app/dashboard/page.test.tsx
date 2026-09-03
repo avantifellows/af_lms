@@ -555,6 +555,52 @@ describe("DashboardPage (server component)", () => {
     }
   });
 
+  // --- School visibility scope per tab ---
+
+  // Only JNV schools have NVS-attributed students. Centre-linked non-JNV schools
+  // (EMRS, RSMS, the Maharashtra coaching centres…) showed on this tab as
+  // permanent 0-student cards; their home is the Centres tab.
+  it("lists only JNV schools on the JNV NVS tab", async () => {
+    setupPM();
+
+    const jsx = await DashboardPage({
+      searchParams: Promise.resolve({ view: "jnv-nvs" }),
+    });
+    render(jsx);
+
+    const [listSql] = mockQuery.mock.calls[0] as [string];
+    const [countSql] = mockQuery.mock.calls[1] as [string];
+    for (const sql of [listSql, countSql]) {
+      expect(sql).toContain("s.af_school_category = 'JNV'");
+      expect(sql).not.toContain("FROM centres c WHERE c.school_id = s.id");
+    }
+  });
+
+  // The header's scope count on the Centres tab still counts centre-linked
+  // schools, so a Punjab CoE PM with no JNV school does not read "0 school(s)".
+  it("keeps centre-linked schools in the header count on the Centres tab", async () => {
+    mockGetServerSession.mockResolvedValue(teacherSession);
+    mockGetUserPermission.mockResolvedValue(teacherPermission);
+    mockGetProgramContextSync.mockReturnValue(defaultProgramContext);
+    mockGetFeatureAccess.mockReturnValue({ canView: false, canEdit: false });
+    mockGetAccessibleSchoolCodes.mockResolvedValue(["SC001", "SC002"]);
+    mockQuery
+      .mockResolvedValueOnce([]) // centre counts
+      .mockResolvedValueOnce([]) // schools
+      .mockResolvedValueOnce([{ total: "2" }]); // count
+
+    const jsx = await DashboardPage({
+      searchParams: Promise.resolve({ view: "centres" }),
+    });
+    render(jsx);
+
+    const schoolCalls = mockQuery.mock.calls.slice(1) as [string][];
+    expect(schoolCalls).toHaveLength(2);
+    for (const [sql] of schoolCalls) {
+      expect(sql).toContain("FROM centres c WHERE c.school_id = s.id AND c.is_active");
+    }
+  });
+
   // --- Permission level subtitle ---
 
   it("shows 'Admin access' for level 4", async () => {
