@@ -102,6 +102,7 @@ describe("AddUserModal — create mode", () => {
     expect(screen.getByText("JNV Nodal")).toBeInTheDocument();
     expect(screen.getByText("JNV NVS")).toBeInTheDocument();
     expect(screen.getByText("Punjab CoE")).toBeInTheDocument();
+    expect(screen.getByText("Punjab Nodal")).toBeInTheDocument();
     expect(screen.getByText("EMRS CoE")).toBeInTheDocument();
     expect(screen.getByText("Uttarakhand CoE")).toBeInTheDocument();
     expect(screen.getByText("Maharashtra Coaching Test Prep")).toBeInTheDocument();
@@ -513,12 +514,12 @@ describe("AddUserModal — role descriptions", () => {
 
     expect(
       screen.getByText(
-        "Holistic Mentorship Admins can manage JNV CoE, Punjab CoE, EMRS CoE, Uttarakhand CoE, and Maharashtra Coaching Test Prep mentorship",
+        "Holistic Mentorship Admins can manage JNV CoE, Punjab CoE, Punjab Nodal, EMRS CoE, Uttarakhand CoE, and Maharashtra Coaching Test Prep mentorship",
       )
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        /all JNV CoE, Punjab CoE, EMRS CoE, Uttarakhand CoE, and Maharashtra Coaching Test Prep Schools/,
+        /all JNV CoE, Punjab CoE, Punjab Nodal, EMRS CoE, Uttarakhand CoE, and Maharashtra Coaching Test Prep Schools/,
       ),
     ).toBeInTheDocument();
     expect(screen.queryByText("Assign Programs")).not.toBeInTheDocument();

@@ -14,8 +14,9 @@ checklist that deploys a separate DB Service/ETL pair before LMS is superseded.
 2. In staging, deploy AF LMS PR `#308` second. Pause other shared-preview
    deployments for the sign-off window.
 3. After both staging deployments are healthy, manually create and open the
-   approved `2026-2027` Phase Plans for Programs `74` (Punjab CoE), `88`
-   (Uttarakhand CoE), and `99` (Maharashtra Coaching Test Prep) in AF LMS.
+   approved `2026-2027` Phase Plans for Programs `74` (Punjab CoE), `94`
+   (Punjab Nodal), `88` (Uttarakhand CoE), and `99` (Maharashtra Coaching
+   Test Prep) in AF LMS.
 4. Run the existing approved Profile-generation operator flow after those
    Phase Plans are open. Do not add an ETL deployment to this release order.
 5. Complete staging reconciliation, smoke checks, and the sign-off checklist.
@@ -24,7 +25,7 @@ checklist that deploys a separate DB Service/ETL pair before LMS is superseded.
 7. In production, deploy DB Service PR `#719` first and AF LMS PR `#308`
    second. Verify health and readiness after each deployment.
 8. Manually create and open the approved `2026-2027` Phase Plans for Programs
-   `74`, `88`, and `99`, then run Profile generation.
+   `74`, `94`, `88`, and `99`, then run Profile generation.
 9. Engineering and Product must both record approval. Announce to Teachers only
    after production verification and both approvals.
 
@@ -60,7 +61,7 @@ Use production read credentials. The command opens a read-only PostgreSQL
 transaction and queries only the two approved BigQuery Form/Session pairs.
 Choose the command that matches the run: Programs `1` and `78` may use the
 private, access-controlled grouped Historical export; the newly enabled live
-Programs `74`, `88`, and `99` must not.
+Programs `74`, `94`, `88`, and `99` must not.
 
 ### Historical Program 1
 
@@ -91,7 +92,7 @@ npm run holistic:preflight -- \
 The Historical Notes importer supports only Programs `1` and `78` as separate
 guarded runs. A live-only Program 78 preflight may omit the source.
 
-### Live Programs 74, 88, and 99
+### Live Programs 74, 94, 88, and 99
 
 Run the live preflight once for each newly enabled Program. These commands
 intentionally omit `--historical-source`:
@@ -100,6 +101,12 @@ intentionally omit `--historical-source`:
 npm run holistic:preflight -- \
   --confirm-production-read-only \
   --program-id=74 \
+  --env-file=.env.production \
+  --academic-year=2026-2027
+
+npm run holistic:preflight -- \
+  --confirm-production-read-only \
+  --program-id=94 \
   --env-file=.env.production \
   --academic-year=2026-2027
 
@@ -116,7 +123,7 @@ npm run holistic:preflight -- \
   --academic-year=2026-2027
 ```
 
-Do not pass a Historical source for Programs `74`, `88`, or `99`; they have no
+Do not pass a Historical source for Programs `74`, `94`, `88`, or `99`; they have no
 approved Historical snapshot or baseline.
 
 Save the aggregate JSON report with the release record. It must reconcile

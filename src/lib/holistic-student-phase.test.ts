@@ -241,7 +241,12 @@ describe("Holistic Student Phase derivation", () => {
     });
   });
 
-  it.each([PROGRAM_IDS.PUNJAB_COE, PROGRAM_IDS.UTTARAKHAND_COE, PROGRAM_IDS.MAHARASHTRA_COACHING_TESTPREP])(
+  it.each([
+    PROGRAM_IDS.PUNJAB_COE,
+    PROGRAM_IDS.PUNJAB_NODAL,
+    PROGRAM_IDS.UTTARAKHAND_COE,
+    PROGRAM_IDS.MAHARASHTRA_COACHING_TESTPREP,
+  ])(
     "does not read legacy Historical notes for newly enabled Program %s",
     async (programId) => {
       mockQuery

@@ -37,6 +37,7 @@ describe("Holistic operator script helpers", () => {
   it("accepts all supported Holistic Mentorship Programs", () => {
     expect(getHolisticMentorshipProgramId([])).toBe(1);
     expect(getHolisticMentorshipProgramId(["--program-id=74"])).toBe(74);
+    expect(getHolisticMentorshipProgramId(["--program-id=94"])).toBe(94);
     expect(getHolisticMentorshipProgramId(["--program-id=78"])).toBe(78);
     expect(getHolisticMentorshipProgramId(["--program-id=88"])).toBe(88);
     expect(getHolisticMentorshipProgramId(["--program-id=99"])).toBe(99);
@@ -44,7 +45,7 @@ describe("Holistic operator script helpers", () => {
       .toThrow("supported Holistic Mentorship Program");
   });
 
-  it.each([74, 88, 99])(
+  it.each([74, 94, 88, 99])(
     "rejects newly enabled Program %s from Historical Notes operations",
     (programId) => {
       expect(() => getHolisticHistoricalImportProgramId([`--program-id=${programId}`]))

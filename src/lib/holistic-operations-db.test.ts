@@ -30,7 +30,7 @@ function operationsWithClientQuery(clientQuery: ReturnType<typeof vi.fn>) {
 }
 
 describe("Holistic operator database adapter", () => {
-  it.each([74, 88, 99])(
+  it.each([74, 94, 88, 99])(
     "rejects newly enabled Program %s before querying historical source rows",
     async (programId) => {
       const query = vi.fn();

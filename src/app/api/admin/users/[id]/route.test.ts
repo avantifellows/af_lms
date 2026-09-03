@@ -309,7 +309,7 @@ describe("PATCH /api/admin/users/[id]", () => {
       "holistic_mentorship_admin",
       null,
       null,
-      [1, 74, 78, 88, 99],
+      [1, 74, 94, 78, 88, 99],
       undefined,
       null,
       "5",

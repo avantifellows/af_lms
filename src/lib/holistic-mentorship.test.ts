@@ -360,7 +360,7 @@ describe("requireHolisticMentorshipAccess", () => {
     expect(String(schoolLookup?.[0])).toContain("centre.school_id = school.id");
     expect(String(schoolLookup?.[0])).toContain("centre.program_id = ANY($2::bigint[])");
     expect(String(schoolLookup?.[0])).not.toContain("school.program_ids");
-    expect(schoolLookup?.[1]).toEqual(["SCH001", [1, 74, 78, 88, 99], null]);
+    expect(schoolLookup?.[1]).toEqual(["SCH001", [1, 74, 94, 78, 88, 99], null]);
   });
 
   it("returns a safe 404 before checking Teacher eligibility", async () => {

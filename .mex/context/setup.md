@@ -56,7 +56,7 @@ Never commit real values — `.env.local` is gitignored; CI injects prod/preview
 - `npm run build` — production Next build.
 - `npm run fallow:health` — codebase health/hotspots; `fallow:dead-code`, `fallow:audit` for cleanup/PR risk.
 - Data scripts (one-off, via `ts-node`): `npm run centres:import`, `npm run pm:import`, `npm run db:setup-permissions`, etc. (see `scripts/`).
-- Holistic release setup: `npm run holistic:setup-local -- --confirm-synthetic-database --program-id=<1|74|78|88|99>` applies the sibling DB Service migrations and synthetic fixtures to a local-only database. Production preflight requires `--historical-source=<private-json>` for Program 1, uses it for a Program 78 Historical run when applicable, and omits it for live Programs 74, 88, and 99. Follow `docs/holistic-mentorship-release.md` for the separate commands, staging order, sign-off, monitoring, and rollback.
+- Holistic release setup: `npm run holistic:setup-local -- --confirm-synthetic-database --program-id=<1|74|94|78|88|99>` applies the sibling DB Service migrations and synthetic fixtures to a local-only database. Production preflight requires `--historical-source=<private-json>` for Program 1, uses it for a Program 78 Historical run when applicable, and omits it for live Programs 74, 94, 88, and 99. Follow `docs/holistic-mentorship-release.md` for the separate commands, staging order, sign-off, monitoring, and rollback.
 
 ## Common Issues
 - **Port 3000 in use:** `lsof -i :3000` then `kill -9 <PID>`.

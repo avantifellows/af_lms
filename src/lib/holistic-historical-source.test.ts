@@ -27,7 +27,7 @@ function csv(rows = sourceRows, sourceHeaders = headers): string {
 }
 
 describe("Historical Notes private-source preparation", () => {
-  it.each([74, 88, 99])(
+  it.each([74, 94, 88, 99])(
     "rejects newly enabled Program %s before applying approved source counts",
     (programId) => {
       expect(() => assertApprovedHistoricalSourceCounts({

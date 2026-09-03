@@ -26,6 +26,7 @@ const PROGRAM_DESCRIPTIONS: Record<number, string> = {
   [PROGRAM_IDS.NODAL]: "Nodal schools program",
   [PROGRAM_IDS.NVS]: "NVS schools (limited features)",
   [PROGRAM_IDS.PUNJAB_COE]: "Punjab CoE schools",
+  [PROGRAM_IDS.PUNJAB_NODAL]: "Punjab Nodal schools",
   [PROGRAM_IDS.EMRS_COE]: "EMRS CoE schools",
   [PROGRAM_IDS.UTTARAKHAND_COE]: "Uttarakhand CoE schools",
   [PROGRAM_IDS.MAHARASHTRA_COACHING_TESTPREP]: "Maharashtra coaching test-prep schools",

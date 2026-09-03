@@ -175,7 +175,7 @@ describe("Historical Holistic Notes import entrypoint", () => {
     expect(insert).toHaveBeenCalledOnce();
   });
 
-  it.each([74, 88, 99, 999])(
+  it.each([74, 94, 88, 99, 999])(
     "rejects unsupported Historical import Program %s before reading source data",
     async (programId) => {
     const read = vi.fn();
