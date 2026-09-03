@@ -120,9 +120,15 @@ describe("GET /api/students/search", () => {
     const [sql, params] = mockQuery.mock.calls[0] as [string, unknown[]];
     // Scoped to seat centres via the membership view, so search results and the
     // roster the user can actually open agree.
-    expect(sql).toContain("JOIN centre_students cs ON cs.user_id = u.id");
+    expect(sql).toContain("FROM centre_students cs");
     expect(sql).toContain("cs.centre_id = ANY($3::int[])");
+    expect(sql).toContain("JOIN scoped ON scoped.user_id = u.id");
     expect(params).toEqual(["%test%", CURRENT_ACADEMIC_YEAR, [8, 11]]);
+    // The scope is resolved first as a MATERIALIZED CTE — without it the planner
+    // drives from the ILIKEs over every user and a no-match term runs 40s on
+    // prod (past the 15s statement_timeout). The CTE must precede the SELECT.
+    expect(sql).toMatch(/^\s*WITH scoped AS MATERIALIZED \(/);
+    expect(sql.indexOf("WITH scoped")).toBeLessThan(sql.indexOf("SELECT DISTINCT"));
     // The school-code predicate must NOT also be applied — it would be the wider
     // scope, and leaving it in invites reading this as school-scoped.
     expect(sql).not.toContain("sch.code = ANY");
@@ -140,6 +146,7 @@ describe("GET /api/students/search", () => {
 
     const [sql, params] = mockQuery.mock.calls[0] as [string, unknown[]];
     expect(sql).toContain("cs.centre_id = ANY($3::int[])");
+    expect(sql).toContain("JOIN scoped ON scoped.user_id = u.id");
     expect(params).toEqual(["%test%", CURRENT_ACADEMIC_YEAR, [8]]);
   });
 });

@@ -67,6 +67,7 @@ export async function GET(request: NextRequest) {
   // own. Only these composed fragments are constant SQL — every value stays a
   // bound parameter.
   const params: unknown[] = [searchPattern, CURRENT_ACADEMIC_YEAR];
+  let scopeCte = "";
   let scopeJoin = "";
   const scopeConditions = [schoolScope];
 
@@ -74,17 +75,31 @@ export async function GET(request: NextRequest) {
     // centre_students is the membership source of truth this task added, and the
     // same one the centre roster page reads — so search results and the roster a
     // confined user can actually open cannot disagree.
+    //
+    // Resolved FIRST, in a MATERIALIZED CTE. Joined inline, the planner started
+    // from the five ILIKEs over every user (~570k) and probed the view's batch
+    // attribution per candidate; a term with a match let LIMIT 20 stop it early,
+    // a term with none ran to the end — 40s on prod for one centre, past the
+    // 15s statement_timeout, so the search 500'd. Pinning the seat centres'
+    // students (a few hundred rows) as the driving set makes the search a scan
+    // over them: 0.24s for one centre, 0.45s with every active centre in scope.
+    // MATERIALIZED is load-bearing — inlined, PG is back to the flat plan.
     params.push(confinement.centreIds);
-    scopeJoin = `JOIN centre_students cs ON cs.user_id = u.id
-        AND cs.academic_year = $2
-        AND cs.centre_id = ANY($${params.length}::int[])`;
+    scopeCte = `WITH scoped AS MATERIALIZED (
+        SELECT DISTINCT cs.user_id
+        FROM centre_students cs
+        WHERE cs.academic_year = $2
+          AND cs.centre_id = ANY($${params.length}::int[])
+      )`;
+    scopeJoin = "JOIN scoped ON scoped.user_id = u.id";
   } else if (schoolCodes !== "all") {
     params.push(schoolCodes);
     scopeConditions.push(`sch.code = ANY($${params.length})`);
   }
 
   const results = await query<StudentSearchResult>(
-    `SELECT DISTINCT
+    `${scopeCte}
+      SELECT DISTINCT
         u.id as user_id,
         u.first_name,
         u.last_name,
