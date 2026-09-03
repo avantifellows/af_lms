@@ -208,10 +208,10 @@ describe("UserList", () => {
 
     it("renders program badges for users with program_ids", () => {
       renderList();
-      // user 1 has [1,2] => CoE, Nodal; user 2 has [1] => CoE; user 4 has [64] => NVS
-      expect(screen.getAllByText("CoE").length).toBe(2);
-      expect(screen.getByText("Nodal")).toBeInTheDocument();
-      expect(screen.getByText("NVS")).toBeInTheDocument();
+      // user 1 has [1,2] => JNV CoE, JNV Nodal; user 2 has [1] => JNV CoE; user 4 has [64] => JNV NVS
+      expect(screen.getAllByText("JNV CoE").length).toBe(2);
+      expect(screen.getByText("JNV Nodal")).toBeInTheDocument();
+      expect(screen.getByText("JNV NVS")).toBeInTheDocument();
     });
 
     it("shows 'No programs' for users with null program_ids", () => {

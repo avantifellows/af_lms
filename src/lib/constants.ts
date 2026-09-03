@@ -48,9 +48,27 @@ export const PROGRAM_ID_TO_LABEL: Record<number, string> = {
   [PROGRAM_IDS.MAHARASHTRA_COACHING_FOUNDATION]: "Maharashtra Coaching Foundation",
 };
 
+// Programs that can be assigned through Admin user management. Keep this
+// narrower than PROGRAM_IDS so adding a centre program does not silently add it
+// to the permission form before its role-assignment support is reviewed.
+export const USER_MANAGEMENT_PROGRAM_IDS = [
+  PROGRAM_IDS.COE,
+  PROGRAM_IDS.NODAL,
+  PROGRAM_IDS.NVS,
+  PROGRAM_IDS.PUNJAB_COE,
+  PROGRAM_IDS.PUNJAB_NODAL,
+  PROGRAM_IDS.EMRS_COE,
+  PROGRAM_IDS.UTTARAKHAND_COE,
+  PROGRAM_IDS.MAHARASHTRA_COACHING_TESTPREP,
+] as const;
+
 export const HOLISTIC_MENTORSHIP_PROGRAM_IDS = [
   PROGRAM_IDS.COE,
+  PROGRAM_IDS.PUNJAB_COE,
+  PROGRAM_IDS.PUNJAB_NODAL,
   PROGRAM_IDS.EMRS_COE,
+  PROGRAM_IDS.UTTARAKHAND_COE,
+  PROGRAM_IDS.MAHARASHTRA_COACHING_TESTPREP,
 ] as const;
 
 export type HolisticMentorshipProgramId =
@@ -61,6 +79,25 @@ export function isHolisticMentorshipProgramId(
 ): value is HolisticMentorshipProgramId {
   return typeof value === "number" &&
     HOLISTIC_MENTORSHIP_PROGRAM_IDS.some((programId) => programId === value);
+}
+
+// Historical Holistic Notes are a reviewed one-time import for the original
+// JNV and EMRS cohorts only. Keep this narrower than the live runtime
+// allowlist: the newly enabled Programs do not have an approved source
+// snapshot or baseline and must never inherit the EMRS assumptions.
+const HOLISTIC_HISTORICAL_IMPORT_PROGRAM_IDS = [
+  PROGRAM_IDS.COE,
+  PROGRAM_IDS.EMRS_COE,
+] as const;
+
+export type HolisticHistoricalImportProgramId =
+  (typeof HOLISTIC_HISTORICAL_IMPORT_PROGRAM_IDS)[number];
+
+export function isHolisticHistoricalImportProgramId(
+  value: unknown,
+): value is HolisticHistoricalImportProgramId {
+  return typeof value === "number" &&
+    HOLISTIC_HISTORICAL_IMPORT_PROGRAM_IDS.some((programId) => programId === value);
 }
 
 export const ACADEMIC_MENTORSHIP_PROGRAM_ALLOWLIST = ["*"] as const;

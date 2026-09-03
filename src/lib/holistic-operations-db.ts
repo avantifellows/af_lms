@@ -6,6 +6,7 @@ import type {
   HolisticRolloverDb,
   ResolvedHistoricalStudent,
 } from "./holistic-operations";
+import { isHolisticHistoricalImportProgramId } from "./constants";
 import { PM_SEAT_ROLES } from "./staff-shared";
 
 type Database = Pick<typeof import("./db"), "query" | "withTransaction">;
@@ -25,6 +26,9 @@ function createHistoricalImportDb(database: Database): HistoricalImportDb {
   const { query, withTransaction } = database;
   return {
     async resolve(source, programId) {
+      if (!isHolisticHistoricalImportProgramId(programId)) {
+        throw new Error("Historical import requires Program 1 or 78");
+      }
       if (!source.length) return [];
       return query<{
         business_student_id: string;

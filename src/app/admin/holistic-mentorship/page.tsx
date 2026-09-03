@@ -11,7 +11,10 @@ import {
 import { requireHolisticMentorshipAccess } from "@/lib/holistic-mentorship";
 
 function availablePrograms(programIds?: number[]) {
-  return programIds?.length ? programIds : [...HOLISTIC_MENTORSHIP_PROGRAM_IDS];
+  const available = new Set(
+    programIds?.length ? programIds : HOLISTIC_MENTORSHIP_PROGRAM_IDS,
+  );
+  return HOLISTIC_MENTORSHIP_PROGRAM_IDS.filter((programId) => available.has(programId));
 }
 
 function selectedProgramId(
@@ -59,7 +62,7 @@ export default async function HolisticMentorshipAdminPage({
     <div className="min-h-screen overflow-x-clip bg-bg">
       <PageHeader
         title="Holistic Mentorship"
-        subtitle="Program-wide mentorship setup and progress."
+        subtitle="Program-wide mentorship setup and progress across supported programs."
         backHref={dashboardBackHref(access.permission.role)}
         userEmail={session?.user?.email ?? undefined}
         actions={

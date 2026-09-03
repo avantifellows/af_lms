@@ -13,7 +13,7 @@ const DEV_PERSONAS = [
   { key: "program_admin", label: "Program Admin", description: "Excluded from mentorship" },
   { key: "teacher", label: "Teacher", description: "Level 1, 1 school" },
   { key: "former_mentor", label: "Former Mentor", description: "No active mentees" },
-  { key: "holistic_admin", label: "Holistic Admin", description: "JNV + EMRS, mentorship only" },
+  { key: "holistic_admin", label: "Holistic Admin", description: "All supported programs, mentorship only" },
   { key: "read_only", label: "Read-Only", description: "Teacher view without edits" },
 ] as const;
 
