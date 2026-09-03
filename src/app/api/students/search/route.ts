@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { getAccessibleSchoolCodes } from "@/lib/permissions";
+import {
+  getAccessibleSchoolCodes,
+  getCentreConfinement,
+  getResolvedPermission,
+} from "@/lib/permissions";
 import { query } from "@/lib/db";
 import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
 
@@ -31,12 +35,21 @@ export async function GET(request: NextRequest) {
     return NextResponse.json([]);
   }
 
+  const permission = await getResolvedPermission(session.user.email);
+
   // Get accessible school codes for this user
-  const schoolCodes = await getAccessibleSchoolCodes(session.user.email);
+  const schoolCodes = await getAccessibleSchoolCodes(session.user.email, permission);
 
   if (schoolCodes.length === 0) {
     return NextResponse.json([]);
   }
+
+  // A centre-confined user's seat grants school access so school-linked actions
+  // (visits) work, which used to make every student at the parent school
+  // searchable — name, student id, grade and phone for students outside their
+  // centre. Confinement has to hold on the server: the caller passes no scope,
+  // so hiding the search UI would leave this endpoint answering in full.
+  const confinement = getCentreConfinement(permission);
 
   const searchPattern = `%${searchQuery}%`;
 
@@ -50,12 +63,28 @@ export async function GET(request: NextRequest) {
         OR EXISTS (SELECT 1 FROM centres c WHERE c.school_id = sch.id AND c.is_active)
       )`;
 
-  let results: StudentSearchResult[];
+  // $1 search pattern, $2 academic year; the scope predicate below appends its
+  // own. Only these composed fragments are constant SQL — every value stays a
+  // bound parameter.
+  const params: unknown[] = [searchPattern, CURRENT_ACADEMIC_YEAR];
+  let scopeJoin = "";
+  const scopeConditions = [schoolScope];
 
-  if (schoolCodes === "all") {
-    // User has access to all schools
-    results = await query<StudentSearchResult>(
-      `SELECT DISTINCT
+  if (confinement.confined) {
+    // centre_students is the membership source of truth this task added, and the
+    // same one the centre roster page reads — so search results and the roster a
+    // confined user can actually open cannot disagree.
+    params.push(confinement.centreIds);
+    scopeJoin = `JOIN centre_students cs ON cs.user_id = u.id
+        AND cs.academic_year = $2
+        AND cs.centre_id = ANY($${params.length}::int[])`;
+  } else if (schoolCodes !== "all") {
+    params.push(schoolCodes);
+    scopeConditions.push(`sch.code = ANY($${params.length})`);
+  }
+
+  const results = await query<StudentSearchResult>(
+    `SELECT DISTINCT
         u.id as user_id,
         u.first_name,
         u.last_name,
@@ -69,6 +98,7 @@ export async function GET(request: NextRequest) {
       JOIN group_user gu ON gu.user_id = u.id
       JOIN "group" g ON gu.group_id = g.id AND g.type = 'school'
       JOIN school sch ON g.child_id = sch.id
+      ${scopeJoin}
       -- Same current-cohort rule as the canonical school roster: only
       -- students enrolled for the current academic year. Passed-out cohorts
       -- keep is_current=true grade records forever, so the year filter is
@@ -79,7 +109,7 @@ export async function GET(request: NextRequest) {
         AND er.is_current = true
         AND er.academic_year = $2
       LEFT JOIN grade gr ON er.group_id = gr.id
-      WHERE ${schoolScope}
+      WHERE ${scopeConditions.join("\n        AND ")}
         AND (
           u.first_name ILIKE $1
           OR u.last_name ILIKE $1
@@ -89,46 +119,8 @@ export async function GET(request: NextRequest) {
         )
       ORDER BY u.first_name, u.last_name
       LIMIT 20`,
-      [searchPattern, CURRENT_ACADEMIC_YEAR]
-    );
-  } else {
-    // User has access to specific schools only
-    results = await query<StudentSearchResult>(
-      `SELECT DISTINCT
-        u.id as user_id,
-        u.first_name,
-        u.last_name,
-        u.phone,
-        s.student_id,
-        sch.name as school_name,
-        sch.code as school_code,
-        gr.number as grade
-      FROM "user" u
-      JOIN student s ON s.user_id = u.id
-      JOIN group_user gu ON gu.user_id = u.id
-      JOIN "group" g ON gu.group_id = g.id AND g.type = 'school'
-      JOIN school sch ON g.child_id = sch.id
-      -- See the all-schools query above: current-cohort rule shared with the
-      -- canonical school roster.
-      JOIN enrollment_record er ON er.user_id = u.id
-        AND er.group_type = 'grade'
-        AND er.is_current = true
-        AND er.academic_year = $3
-      LEFT JOIN grade gr ON er.group_id = gr.id
-      WHERE sch.code = ANY($1)
-        AND ${schoolScope}
-        AND (
-          u.first_name ILIKE $2
-          OR u.last_name ILIKE $2
-          OR s.student_id ILIKE $2
-          OR u.phone ILIKE $2
-          OR s.apaar_id ILIKE $2
-        )
-      ORDER BY u.first_name, u.last_name
-      LIMIT 20`,
-      [schoolCodes, searchPattern, CURRENT_ACADEMIC_YEAR]
-    );
-  }
+    params
+  );
 
   return NextResponse.json(results);
 }

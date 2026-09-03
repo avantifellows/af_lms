@@ -1,11 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("./db", () => ({ query: vi.fn() }));
+vi.mock("./lms-programs", () => ({ getLmsSupportedProgramIds: vi.fn() }));
 
 import { query } from "./db";
-import { resolveBatchGroups } from "./quiz-session-access";
+import { getLmsSupportedProgramIds } from "./lms-programs";
+import { resolveBatchGroups, resolveQuizSessionProgramIds } from "./quiz-session-access";
+import type { UserPermission } from "./permissions";
 
 const mockQuery = vi.mocked(query);
+const mockLmsPrograms = vi.mocked(getLmsSupportedProgramIds);
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -61,5 +65,57 @@ describe("resolveBatchGroups", () => {
     mockQuery.mockResolvedValueOnce([] as never); // no rows returned
     const none = await resolveBatchGroups(["UnknownBatch"]);
     expect(none.has("UnknownBatch")).toBe(false);
+  });
+});
+
+describe("resolveQuizSessionProgramIds", () => {
+  const permission = (over: Partial<UserPermission>): UserPermission =>
+    ({
+      id: 1,
+      email: "u@avantifellows.org",
+      full_name: "U",
+      level: 1,
+      role: "teacher",
+      school_codes: null,
+      regions: null,
+      program_ids: [],
+      read_only: false,
+      ...over,
+    }) as UserPermission;
+
+  // deepansh's case: seated at EMRS Bhopal CoE, seat grants program 78, but the
+  // permission row lists only [1]. Reading the row gave 0 batches and 0 sessions
+  // on a centre with 8 batches and 91 sessions.
+  it("includes a program the caller only holds through a centre seat", async () => {
+    const ids = await resolveQuizSessionProgramIds(
+      permission({
+        program_ids: [1],
+        scope: { schools: new Set(["X"]), centres: new Set([3]), programs: new Set([78]) },
+      })
+    );
+
+    expect(ids).toContain(78);
+    expect(mockLmsPrograms).not.toHaveBeenCalled();
+  });
+
+  // surya's case: an admin row of [1, 2, 64] made every non-JNV centre page look
+  // empty. An admin is not limited to their row.
+  it("gives an admin every LMS-supported program, not their row", async () => {
+    mockLmsPrograms.mockResolvedValue([1, 2, 64, 74, 78, 88]);
+
+    const ids = await resolveQuizSessionProgramIds(
+      permission({ role: "admin", program_ids: [1, 2, 64] })
+    );
+
+    expect(ids).toEqual([1, 2, 64, 74, 78, 88]);
+  });
+
+  it("falls back to the explicit programs for a seatless non-admin", async () => {
+    const ids = await resolveQuizSessionProgramIds(
+      permission({ program_ids: [1, 2] })
+    );
+
+    expect(ids).toEqual([1, 2]);
+    expect(mockLmsPrograms).not.toHaveBeenCalled();
   });
 });

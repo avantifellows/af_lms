@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { query } from "@/lib/db";
+import { getCentreConfinement } from "@/lib/permissions";
 import { canAccessQuizSessionSchool } from "@/lib/quiz-session-access";
-import { authenticateTeacherFeedback } from "@/lib/teacher-feedback-access";
+import { authenticateTeacherFeedback, requireCentreScope } from "@/lib/teacher-feedback-access";
 
 interface Row {
   setup_run_id: string;
@@ -108,7 +109,9 @@ async function resolveSessionLinks(
   return byPk;
 }
 
-// GET /api/teacher-feedback/cycles?school_code=XXXXX
+// GET /api/teacher-feedback/cycles?school_code=XXXXX[&centre_id=N]
+// centre_id restricts the rounds to that centre, for the centre page — without
+// it a centre page would list a sibling centre's feedback rounds.
 export async function GET(request: NextRequest) {
   const access = await authenticateTeacherFeedback("view");
   if (!access.ok) {
@@ -135,6 +138,27 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
+  const centreIdParam = request.nextUrl.searchParams.get("centre_id")?.trim();
+  const centreId = centreIdParam ? Number(centreIdParam) : null;
+  if (centreIdParam && !Number.isFinite(centreId)) {
+    return NextResponse.json(
+      { error: "centre_id must be a number" },
+      { status: 400 }
+    );
+  }
+
+  if (centreId !== null) {
+    const centreScopeCheck = requireCentreScope(access.permission, centreId);
+    if (!centreScopeCheck.ok) {
+      return centreScopeCheck.response;
+    }
+  }
+
+  // Same exposure by omission as the centres route: with no centre_id a confined
+  // caller would read every round at the school, sibling centres included.
+  const confinement = getCentreConfinement(access.permission);
+  const allowedCentreIds = confinement.confined ? confinement.centreIds : null;
+
   const rows = await query<Row>(
     `
     SELECT tf.setup_run_id, tf.cycle_label, c.name AS centre_name,
@@ -149,9 +173,11 @@ export async function GET(request: NextRequest) {
     -- copy. LEFT JOIN: a round survives its centre being removed.
     LEFT JOIN centres c ON c.id = tf.centre_id
     WHERE tf.school_code = $1 AND tf.deleted_at IS NULL
+      AND ($2::bigint IS NULL OR tf.centre_id = $2::bigint)
+      AND ($3::int[] IS NULL OR tf.centre_id = ANY($3::int[]))
     ORDER BY tf.inserted_at DESC, tf.teacher_order ASC
     `,
-    [schoolCode]
+    [schoolCode, centreId, allowedCentreIds]
   );
 
   // Resolve batch_id -> readable name for all class batches across these cycles.

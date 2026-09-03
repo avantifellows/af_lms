@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
+import { CURRENT_ACADEMIC_YEAR, PROGRAM_ATTRIBUTION_ORDER } from "@/lib/constants";
 
 // --- Hoisted mocks ---
 
@@ -148,7 +148,11 @@ describe("getTestDeepDiveFromDynamo (v2)", () => {
       const [sql, params] = mocks.mockQuery.mock.calls[0];
       expect(sql).toContain("g.type = 'school' AND g.child_id = $1");
       expect(sql).toContain("er_grade.academic_year = $2");
-      expect(params).toEqual(["school-abc", CURRENT_ACADEMIC_YEAR]);
+      expect(params).toEqual([
+        "school-abc",
+        CURRENT_ACADEMIC_YEAR,
+        PROGRAM_ATTRIBUTION_ORDER,
+      ]);
     });
 
     it("returns null + skips DynamoDB when Postgres returns no students", async () => {

@@ -1,7 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("@/lib/quiz-session-access", () => ({ canAccessQuizSessionSchool: vi.fn() }));
-vi.mock("@/lib/teacher-feedback-access", () => ({ authenticateTeacherFeedback: vi.fn() }));
+vi.mock("@/lib/teacher-feedback-access", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/teacher-feedback-access")>();
+  // requireCentreScope stays real: it is a pure permission check, and stubbing it
+  // would make these suites pass regardless of whether the routes enforce it.
+  return { ...actual, authenticateTeacherFeedback: vi.fn() };
+});
 vi.mock("@/lib/teacher-feedback-batches", () => ({
   getCentreScope: vi.fn(),
   getBatchesForCentre: vi.fn(),
@@ -77,6 +82,36 @@ describe("GET /api/teacher-feedback/batches", () => {
     mockSchool.mockResolvedValue(false);
     expect((await GET(req("38"))).status).toBe(403);
     expect(mockBatches).not.toHaveBeenCalled();
+  });
+
+  // The school check passes for a sibling centre at the same school, so without a
+  // centre check a confined caller could read centre B by asking for its id.
+  it("403 when a confined caller asks for a centre they hold no seat at", async () => {
+    mockAuth.mockResolvedValue({
+      ok: true,
+      permission: {
+        email: "teacher@avantifellows.org",
+        level: 1,
+        scope: { centres: new Set([11]) },
+      } as never,
+    });
+
+    expect((await GET(req("38"))).status).toBe(403);
+    expect(mockBatches).not.toHaveBeenCalled();
+  });
+
+  it("allows a confined caller their own seat centre", async () => {
+    mockAuth.mockResolvedValue({
+      ok: true,
+      permission: {
+        email: "teacher@avantifellows.org",
+        level: 1,
+        scope: { centres: new Set([38]) },
+      } as never,
+    });
+
+    expect((await GET(req("38"))).status).toBe(200);
+    expect(mockBatches).toHaveBeenCalled();
   });
 
   it("returns the centre's batches", async () => {

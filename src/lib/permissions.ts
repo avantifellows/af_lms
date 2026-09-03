@@ -383,6 +383,46 @@ export function canAccessCentreSync(
     : false;
 }
 
+// True when the user holds at least one centre seat — i.e. their centre access
+// is seat-scoped and they see ONLY their seat centres. Level-3 admins (scope
+// "all") are NOT "seated": they see everything, handled separately.
+export function isCentreSeated(permission: UserPermission | null): boolean {
+  const centres = permission?.scope?.centres;
+  return centres instanceof Set && centres.size > 0;
+}
+
+// The single home for "is this user confined to their centre(s)?" — one rule for
+// every surface that must not show a confined user whole-school data: the school
+// roster page gate, the dashboard's school-scoped tab, and the student search.
+// Keeping it here is the point. When the confinement rule changes (e.g. if it
+// narrows to teachers only, leaving PMs their school access) every surface moves
+// together instead of the UI hiding a tab whose API still answers.
+export function getCentreConfinement(permission: UserPermission | null): {
+  confined: boolean;
+  centreIds: number[];
+} {
+  if (!isCentreSeated(permission)) return { confined: false, centreIds: [] };
+  const centres = permission!.scope!.centres as Set<number>;
+  return { confined: true, centreIds: [...centres] };
+}
+
+// The single home for "may this user view this centre?": admins and users
+// seated at the centre pass; a seatless school/region manager falls back to
+// their school access. Both the dashboard's centre-list scoping
+// (resolveCentreAccess) and the centre page gate derive from this same rule.
+export function canViewCentre(
+  permission: UserPermission | null,
+  centre: { centreId: number; schoolCode: string; schoolRegion?: string }
+): boolean {
+  if (canAccessCentreSync(permission, centre.centreId)) return true;
+  // A seated user is confined to their seats; only a seatless manager reaches
+  // a centre purely via school access.
+  return (
+    !isCentreSeated(permission) &&
+    canAccessSchoolSync(permission, centre.schoolCode, centre.schoolRegion)
+  );
+}
+
 export async function canAccessSchool(
   email: string | null,
   schoolCode: string,

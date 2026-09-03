@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { query } from "@/lib/db";
 import { canAccessQuizSessionSchool } from "@/lib/quiz-session-access";
-import { authenticateTeacherFeedback } from "@/lib/teacher-feedback-access";
+import { authenticateTeacherFeedback, requireCentreScope } from "@/lib/teacher-feedback-access";
 
 interface FeedbackTeacher {
   /** Stable id for the teacher (employee_code / teacher_id when available). */
@@ -149,6 +149,13 @@ export async function GET(request: NextRequest) {
   }
   if (!(await canAccessQuizSessionSchool(access.permission, centre.school_id))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  // Teacher Feedback is centre-keyed, so the school check above is not enough:
+  // narrow a confined caller to their own seat centres.
+  const centreScopeCheck = requireCentreScope(access.permission, centreId);
+  if (!centreScopeCheck.ok) {
+    return centreScopeCheck.response;
   }
 
   // Prefer the centre-seat subject teachers; fall back to user_permission.

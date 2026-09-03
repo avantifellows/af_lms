@@ -6,6 +6,7 @@ import {
   getResolvedPermission,
   getProgramContextSync,
   getFeatureAccess,
+  isCentreSeated,
 } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
@@ -14,6 +15,14 @@ import Link from "next/link";
 import SchoolSearch from "@/components/SchoolSearch";
 import StudentSearch from "@/components/StudentSearch";
 import SchoolCard, { School, GradeCount } from "@/components/SchoolCard";
+import CentreCard from "@/components/CentreCard";
+import {
+  getAccessibleCentresWithCounts,
+  getBrowsableCentreIds,
+  getNvsGradeCounts,
+  resolveCentreAccess,
+  type Centre,
+} from "@/lib/dashboard-groupings";
 import Pagination from "@/components/Pagination";
 import { statusBadgeClass } from "@/lib/visit-actions";
 import { Card } from "@/components/ui";
@@ -160,65 +169,6 @@ async function getSchools(
   return { schools, totalCount: parseInt(countResult[0]?.total || "0", 10) };
 }
 
-// Get grade-wise student counts for the loaded school cards.
-// Scoped to the current academic year so the dashboard summary cards match
-// the school roster, which is also restricted to CURRENT_ACADEMIC_YEAR.
-//
-// Cohort rule (matches the school-page roster, which attributes each student a
-// program via their batch):
-//  - JNV schools: the school *is* the cohort — count every current-year member
-//    (historical behaviour, unchanged).
-//  - Non-JNV centre-linked schools sit inside a much larger host school (e.g.
-//    RSMS Bathinda has ~341 current-year members but only ~99 CoE+Nodal cohort),
-//    so count only students enrolled in a batch of one of the school's
-//    active-centre programs. Otherwise the card over-counts the whole host
-//    school (incl. unrelated programmes like the STP Test Series group).
-async function getSchoolGradeCounts(schoolIds: string[]): Promise<Map<string, GradeCount[]>> {
-  if (schoolIds.length === 0) return new Map();
-
-  const results = await query<{ school_id: string; grade: number; count: string }>(
-    `SELECT
-       s.id as school_id,
-       gr.number as grade,
-       COUNT(DISTINCT gu_school.user_id) as count
-     FROM school s
-     JOIN "group" g_school ON g_school.type = 'school' AND g_school.child_id = s.id
-     JOIN group_user gu_school ON gu_school.group_id = g_school.id
-     LEFT JOIN enrollment_record er ON er.user_id = gu_school.user_id
-       AND er.group_type = 'grade' AND er.is_current = true
-       AND er.academic_year = $2
-     LEFT JOIN grade gr ON er.group_id = gr.id
-     WHERE s.id = ANY($1) AND gr.number IS NOT NULL
-       AND (
-         s.af_school_category = 'JNV'
-         OR EXISTS (
-           SELECT 1
-           FROM group_user gu_batch
-           JOIN "group" g_batch ON gu_batch.group_id = g_batch.id AND g_batch.type = 'batch'
-           JOIN batch b ON g_batch.child_id = b.id
-           JOIN centres c ON c.school_id = s.id AND c.is_active
-             AND c.program_id = b.program_id
-           WHERE gu_batch.user_id = gu_school.user_id
-         )
-       )
-     GROUP BY s.id, gr.number
-     ORDER BY gr.number`,
-    [schoolIds, CURRENT_ACADEMIC_YEAR]
-  );
-
-  const gradeMap = new Map<string, GradeCount[]>();
-  results.forEach((row) => {
-    if (!gradeMap.has(row.school_id)) {
-      gradeMap.set(row.school_id, []);
-    }
-    gradeMap.get(row.school_id)!.push({
-      grade: row.grade,
-      count: parseInt(row.count, 10),
-    });
-  });
-  return gradeMap;
-}
-
 async function getRecentVisits(pmEmail: string, limit: number = 5): Promise<Visit[]> {
   return query<Visit>(
     `SELECT v.id, v.school_code, v.visit_date, v.status, v.inserted_at,
@@ -233,8 +183,12 @@ async function getRecentVisits(pmEmail: string, limit: number = 5): Promise<Visi
   );
 }
 
+// Dashboard groupings, rendered as tabs. A student belongs to exactly one
+// (partitioned by attributed program), so tab counts never double-count.
+type DashboardView = "jnv-nvs" | "centres";
+
 interface PageProps {
-  searchParams: Promise<{ q?: string; page?: string }>;
+  searchParams: Promise<{ q?: string; page?: string; view?: string }>;
 }
 
 type DashboardPermission = NonNullable<Awaited<ReturnType<typeof getResolvedPermission>>>;
@@ -248,6 +202,7 @@ type DashboardFeatures = {
 };
 type DashboardData = {
   schools: DashboardSchool[];
+  centres: Centre[];
   totalCount: number;
   totalPages: number;
   recentVisits: Visit[];
@@ -303,41 +258,127 @@ async function dashboardSession() {
 }
 
 async function dashboardRequest(searchParams: PageProps["searchParams"]) {
-  const { q: searchQuery, page: pageParam } = await searchParams;
-  return { searchQuery, currentPage: Math.max(1, parseInt(pageParam || "1", 10)) };
+  const { q: searchQuery, page: pageParam, view: viewParam } = await searchParams;
+  return {
+    searchQuery,
+    viewParam,
+    currentPage: Math.max(1, parseInt(pageParam || "1", 10)),
+  };
 }
 
+// Centre-seated staff are centre-scoped: their home is their centre, not the
+// whole-school roster. Default them to the Centres tab so the single-school
+// shortcut never bounces them to the school page — an explicit ?view= wins.
+function resolveDashboardView(viewParam: string | undefined, seated: boolean): DashboardView {
+  // A confined user has no NVS scope at all, so ?view=jnv-nvs is not an escape
+  // hatch for them — it is the whole-school tab, carrying the school-wide
+  // student search. Pin them to Centres whatever the URL says.
+  if (seated) return "centres";
+  if (viewParam === "centres") return "centres";
+  if (viewParam === "jnv-nvs") return "jnv-nvs";
+  return "jnv-nvs";
+}
+
+// Single-scope shortcuts, both taken only on the plain landing (no tab chosen,
+// no search): a single-seat user goes straight to their centre, and school
+// staff with exactly one school straight to it. Seated users are excluded from
+// the school shortcut — their home is the centre, resolved just above.
+async function redirectSingleScope({
+  seated,
+  permission,
+  schoolCodes,
+  searchQuery,
+  viewParam,
+  view,
+}: {
+  seated: boolean;
+  permission: DashboardPermission;
+  schoolCodes: Awaited<ReturnType<typeof getAccessibleSchoolCodes>>;
+  searchQuery?: string;
+  viewParam?: string;
+  view: DashboardView;
+}): Promise<void> {
+  if (seated && !searchQuery && viewParam === undefined) {
+    const centres = permission.scope?.centres;
+    const seatIds = centres instanceof Set ? [...centres] : [];
+    // Only shortcut to a centre whose page can render. A seat at a school-less
+    // centre is a real arrangement (six teachers hold one as their only seat),
+    // and redirecting there turned /dashboard itself into a 404 for them; they
+    // fall through to the Centres tab instead.
+    const browsable = await getBrowsableCentreIds(seatIds.map(Number));
+    if (browsable.length === 1) {
+      redirect(`/centre/${browsable[0]}`);
+    }
+  }
+  if (
+    !seated &&
+    schoolCodes !== "all" &&
+    schoolCodes.length === 1 &&
+    !searchQuery &&
+    view === "jnv-nvs"
+  ) {
+    redirect(`/school/${schoolCodes[0]}`);
+  }
+}
+
+// Fetch per tab so neither pays for the other's queries. getSchools runs on
+// both tabs — it drives the schools grid on jnv-nvs and the header's scope
+// count everywhere — but recent visits (jnv-nvs only) and the centre list
+// (centres only) are fetched only where they're rendered.
 async function loadDashboardData({
   email,
   permission,
+  schoolCodes,
   searchQuery,
   currentPage,
   hasPMAccess,
+  view,
 }: {
   email: string;
   permission: DashboardPermission;
+  schoolCodes: Awaited<ReturnType<typeof getAccessibleSchoolCodes>>;
   searchQuery?: string;
   currentPage: number;
   hasPMAccess: boolean;
+  view: DashboardView;
 }): Promise<DashboardData> {
-  const schoolCodes = await getAccessibleSchoolCodes(email, permission);
-  if (schoolCodes !== "all" && schoolCodes.length === 1 && !searchQuery) {
-    redirect(`/school/${schoolCodes[0]}`);
+  if (view === "centres") {
+    // Centre list + the header's school count, in parallel. No visits query and
+    // no school grid on this tab.
+    const [centres, { totalCount }] = await Promise.all([
+      getAccessibleCentresWithCounts(
+        resolveCentreAccess(permission, schoolCodes),
+        searchQuery,
+      ),
+      // No searchQuery: on this tab the term filters CENTRES, while this count is
+      // the header's "your scope" figure and drives no pagination here.
+      getSchools(schoolCodes, undefined, currentPage),
+    ]);
+    return {
+      schools: [],
+      centres,
+      totalCount,
+      totalPages: Math.ceil(totalCount / SCHOOLS_PER_PAGE),
+      recentVisits: [],
+    };
   }
-  const { schools, totalCount } = await getSchools(schoolCodes, searchQuery, currentPage);
-  const [gradeCounts, recentVisits] = await Promise.all([
-    getSchoolGradeCounts(schools.map((school) => school.id)),
+
+  const [{ schools, totalCount }, recentVisits] = await Promise.all([
+    getSchools(schoolCodes, searchQuery, currentPage),
     hasPMAccess ? getRecentVisits(email) : Promise.resolve([] as Visit[]),
   ]);
+  // NVS-attributed counts, not whole-school — keeps this tab disjoint from Centres.
+  const nvsCounts = await getNvsGradeCounts(schools.map((school) => school.id));
   return {
     schools: schools.map((school) => {
-      const counts = gradeCounts.get(school.id) || [];
+      const counts = nvsCounts.get(school.id) || [];
       return {
         ...school,
         grade_counts: counts,
         student_count: counts.reduce((sum, gradeCount) => sum + gradeCount.count, 0),
       };
     }),
+    centres: [],
     totalCount,
     totalPages: Math.ceil(totalCount / SCHOOLS_PER_PAGE),
     recentVisits,
@@ -345,7 +386,7 @@ async function loadDashboardData({
 }
 
 export default async function DashboardPage({ searchParams }: PageProps) {
-  const [email, { searchQuery, currentPage }] = await Promise.all([
+  const [email, { searchQuery, viewParam, currentPage }] = await Promise.all([
     dashboardSession(),
     dashboardRequest(searchParams),
   ]);
@@ -367,6 +408,8 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     />;
   }
 
+  // The holistic-mentorship admin has no school/centre scope at all — their
+  // whole surface is the admin console.
   if (permission.role === "holistic_mentorship_admin") {
     redirect("/admin/holistic-mentorship");
   }
@@ -376,25 +419,35 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     "program_read",
   );
   const features = dashboardFeatures(permission, programContext, holisticAccess.ok);
+  const seated = isCentreSeated(permission);
+  const view = resolveDashboardView(viewParam, seated);
+  const schoolCodes = await getAccessibleSchoolCodes(email, permission);
+  await redirectSingleScope({ seated, permission, schoolCodes, searchQuery, viewParam, view });
+
   const data = await loadDashboardData({
     email,
     permission,
+    schoolCodes,
     searchQuery,
     currentPage,
     hasPMAccess: features.hasPMAccess,
+    view,
   });
 
   return (
     <div className="min-h-screen bg-bg">
       <DashboardHeader email={email} permission={permission} totalCount={data.totalCount} features={features} />
       <DashboardMain
+        view={view}
         searchQuery={searchQuery}
         currentPage={currentPage}
         totalPages={data.totalPages}
         totalCount={data.totalCount}
         schools={data.schools}
+        centres={data.centres}
         recentVisits={data.recentVisits}
         hasPMAccess={features.hasPMAccess}
+        seated={seated}
       />
     </div>
   );
@@ -432,7 +485,7 @@ function DashboardNavigation({ features }: { features: DashboardFeatures }) {
   if (!features.hasPMAccess && !features.canViewVisitSummary && !features.showCurriculumSummary) return null;
   return <nav className="flex gap-3 sm:gap-4">
     <Link href="/dashboard" className="text-sm font-bold text-text-primary uppercase tracking-wide border-b-2 border-accent pb-1">
-      Schools
+      Home
     </Link>
     {features.canViewVisitSummary && <Link href="/school-visit-summary"
       className="text-sm font-medium text-text-muted uppercase tracking-wide hover:text-text-primary pb-1">
@@ -460,27 +513,97 @@ function DashboardAccountLinks({ email, isAdmin, canViewHolisticAdmin }: {
   </div>;
 }
 
-function DashboardMain({ searchQuery, currentPage, totalPages, totalCount, schools, recentVisits, hasPMAccess }: {
+const DASHBOARD_VIEWS = [
+  { key: "centres", label: "Physical Centres" },
+  { key: "jnv-nvs", label: "JNV NVS Schools" },
+] as const;
+
+// Grouping tabs — disjoint scopes, so counts never double-count.
+function DashboardViewTabs({ view, seated }: { view: DashboardView; seated: boolean }) {
+  // One tab left for a confined user — render nothing rather than a lone tab that
+  // looks like a choice, or an empty strip that leaves a stray rule on the page.
+  if (seated) return null;
+  return <div className="mb-6 flex gap-6 border-b border-border">
+    {DASHBOARD_VIEWS.map((tab) => <Link
+      key={tab.key}
+      href={`/dashboard?view=${tab.key}`}
+      className={view === tab.key
+        ? "text-sm font-bold text-text-primary uppercase tracking-wide border-b-2 border-accent pb-2 -mb-px"
+        : "text-sm font-medium text-text-muted uppercase tracking-wide hover:text-text-primary pb-2 -mb-px"}
+    >
+      {tab.label}
+    </Link>)}
+  </div>;
+}
+
+function DashboardMain({ view, searchQuery, currentPage, totalPages, totalCount, schools, centres, recentVisits, hasPMAccess, seated }: {
+  view: DashboardView;
   searchQuery?: string;
   currentPage: number;
   totalPages: number;
   totalCount: number;
   schools: DashboardSchool[];
+  centres: Centre[];
   recentVisits: Visit[];
   hasPMAccess: boolean;
+  seated: boolean;
 }) {
   return <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+    <DashboardViewTabs view={view} seated={seated} />
     <PMStats enabled={hasPMAccess} totalCount={totalCount} recentVisitCount={recentVisits.length} />
-    <DashboardSearch searchQuery={searchQuery} />
-    <RecentVisits enabled={hasPMAccess} visits={recentVisits} />
-    <SchoolsSection
-      schools={schools}
-      hasPMAccess={hasPMAccess}
-      searchQuery={searchQuery}
-      currentPage={currentPage}
-      totalPages={totalPages}
-    />
+    {view === "centres" ? (
+      <CentresSection centres={centres} hasPMAccess={hasPMAccess} searchQuery={searchQuery} />
+    ) : (
+      <>
+        {/* Student search is schools-tab only: it spans the whole school, which
+            is exactly the scope a centre-confined user must not get. */}
+        <DashboardSearch searchQuery={searchQuery} />
+        <RecentVisits enabled={hasPMAccess} visits={recentVisits} />
+        <SchoolsSection
+          schools={schools}
+          hasPMAccess={hasPMAccess}
+          searchQuery={searchQuery}
+          currentPage={currentPage}
+          totalPages={totalPages}
+        />
+      </>
+    )}
   </main>;
+}
+
+function CentresSection({ centres, hasPMAccess, searchQuery }: {
+  centres: Centre[];
+  hasPMAccess: boolean;
+  searchQuery?: string;
+}) {
+  return <div>
+    {hasPMAccess && <div className="flex justify-between items-center mb-4 border-b-2 border-brand-gold pb-3">
+      <h2 className="text-lg font-bold text-text-primary uppercase tracking-wide">Physical Centres</h2>
+    </div>}
+    {/* Same ?q= mechanism as the schools tab — this is the default landing for
+        seated staff, and a PM with 35 seat centres needs to find one. */}
+    <div className="mb-6">
+      <SchoolSearch
+        defaultValue={searchQuery}
+        placeholder="Search centres by name, school, or code..."
+      />
+    </div>
+    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      {centres.map((centre) => <DashboardCentreCard key={centre.id} centre={centre} hasPMAccess={hasPMAccess} />)}
+    </div>
+    {centres.length === 0 && <div className="text-center py-12 text-text-muted">
+      {searchQuery ? `No physical centres match "${searchQuery}"` : "No physical centres found"}
+    </div>}
+  </div>;
+}
+
+function DashboardCentreCard({ centre, hasPMAccess }: { centre: Centre; hasPMAccess: boolean }) {
+  // Visits are school-linked, so Start Visit needs the centre's parent school.
+  const actions = hasPMAccess && centre.school_code ? <Link href={`/school/${centre.school_code}/visit/new`}
+    className="inline-flex items-center rounded-lg px-3 py-2 text-sm font-bold text-text-on-accent bg-accent shadow-sm hover:bg-accent-hover active:bg-accent-hover/90 transition-colors">
+    Start Visit
+  </Link> : undefined;
+  return <CentreCard centre={centre} showRegion={hasPMAccess} actions={actions} />;
 }
 
 function PMStats({ enabled, totalCount, recentVisitCount }: {
@@ -559,7 +682,7 @@ function SchoolsSection({ schools, hasPMAccess, searchQuery, currentPage, totalP
 }) {
   return <div>
     {hasPMAccess && <div className="flex justify-between items-center mb-4 border-b-2 border-brand-gold pb-3">
-      <h2 className="text-lg font-bold text-text-primary uppercase tracking-wide">My Schools</h2>
+      <h2 className="text-lg font-bold text-text-primary uppercase tracking-wide">JNV NVS Schools</h2>
     </div>}
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
       {schools.map((school) => <DashboardSchoolCard key={school.id} school={school} hasPMAccess={hasPMAccess} />)}

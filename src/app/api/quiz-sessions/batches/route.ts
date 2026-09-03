@@ -4,15 +4,31 @@ import { authOptions } from "@/lib/auth";
 import {
   canAccessQuizSessionSchool,
   requireQuizSessionAccess,
+  resolveQuizSessionProgramIds,
 } from "@/lib/quiz-session-access";
 import { query } from "@/lib/db";
 
 interface BatchRow {
-  id: number;
+  // batch.id/parent_id/program_id are numeric columns, which node-pg hands back
+  // as strings ("1", not 1). They are coerced once before the response so the
+  // BatchOption contract clients code against is honestly numeric — the centre
+  // page filters batches with `b.program_id === programId`, and a string "1"
+  // never equals the number 1, which silently emptied the list.
+  id: number | string;
   name: string;
   batch_id: string;
-  parent_id: number | null;
-  program_id: number | null;
+  parent_id: number | string | null;
+  program_id: number | string | null;
+}
+
+function toBatchOption(row: BatchRow) {
+  return {
+    id: Number(row.id),
+    name: row.name,
+    batch_id: row.batch_id,
+    parent_id: row.parent_id === null ? null : Number(row.parent_id),
+    program_id: row.program_id === null ? null : Number(row.program_id),
+  };
 }
 
 export async function GET(request: NextRequest) {
@@ -43,7 +59,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const programIds = access.permission.program_ids ?? [];
+  const programIds = await resolveQuizSessionProgramIds(access.permission);
 
   if (programIds.length === 0) {
     return NextResponse.json({ batches: [] });
@@ -81,9 +97,13 @@ export async function GET(request: NextRequest) {
   }
 
   const parentIds = Array.from(
-    new Set(batches.map((b) => b.parent_id).filter((id): id is number => id !== null))
+    new Set(
+      batches
+        .map((b) => (b.parent_id === null ? null : Number(b.parent_id)))
+        .filter((id): id is number => id !== null)
+    )
   );
-  const knownIds = new Set(batches.map((b) => b.id));
+  const knownIds = new Set(batches.map((b) => Number(b.id)));
   const missingParentIds = parentIds.filter((id) => !knownIds.has(id));
 
   if (missingParentIds.length > 0) {
@@ -99,5 +119,5 @@ export async function GET(request: NextRequest) {
     batches = batches.concat(parentRows);
   }
 
-  return NextResponse.json({ batches });
+  return NextResponse.json({ batches: batches.map(toBatchOption) });
 }

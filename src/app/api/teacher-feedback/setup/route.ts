@@ -6,7 +6,7 @@ import {
   canAccessQuizSessionBatches,
   resolveBatchGroups,
 } from "@/lib/quiz-session-access";
-import { authenticateTeacherFeedback } from "@/lib/teacher-feedback-access";
+import { authenticateTeacherFeedback, requireCentreScope } from "@/lib/teacher-feedback-access";
 import {
   centreOwnsAllBatches,
   getCentreScope,
@@ -97,6 +97,13 @@ export async function POST(request: NextRequest) {
   }
   if (centreId === null) {
     return NextResponse.json({ error: "centreId is required" }, { status: 400 });
+  }
+
+  // Teacher Feedback is centre-keyed, so the school check above is not enough:
+  // narrow a confined caller to their own seat centres.
+  const centreScopeCheck = requireCentreScope(access.permission, centreId);
+  if (!centreScopeCheck.ok) {
+    return centreScopeCheck.response;
   }
   if (classBatchIds.length === 0) {
     return NextResponse.json(

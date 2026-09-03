@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   mockGetUserPermission: vi.fn(),
   mockRequireQuizSessionAccess: vi.fn(),
   mockCanAccessQuizSessionSchool: vi.fn(),
+  mockResolveProgramIds: vi.fn(),
   mockCanAccessQuizSessionBatches: vi.fn(),
   mockResolveBatchGroups: vi.fn(),
   mockQuery: vi.fn(),
@@ -42,6 +43,7 @@ vi.mock("@/lib/quiz-session-access", () => ({
     return access.ok ? { ...access, email: session.user.email } : access;
   },
   canAccessQuizSessionSchool: mocks.mockCanAccessQuizSessionSchool,
+  resolveQuizSessionProgramIds: mocks.mockResolveProgramIds,
   canAccessQuizSessionBatches: mocks.mockCanAccessQuizSessionBatches,
   resolveBatchGroups: mocks.mockResolveBatchGroups,
 }));
@@ -75,6 +77,7 @@ beforeEach(() => {
   mocks.mockRequireQuizSessionAccess.mockReset();
   mocks.mockCanAccessQuizSessionSchool.mockReset();
   mocks.mockCanAccessQuizSessionBatches.mockReset();
+  mocks.mockResolveProgramIds.mockReset();
   mocks.mockQuery.mockReset();
   mocks.mockPublishMessage.mockReset();
   mocks.mockFetch.mockReset();
@@ -85,6 +88,7 @@ beforeEach(() => {
   });
   mocks.mockCanAccessQuizSessionSchool.mockResolvedValue(true);
   mocks.mockCanAccessQuizSessionBatches.mockResolvedValue(true);
+  mocks.mockResolveProgramIds.mockResolvedValue([1, 64]);
   // Default: the test class batch resolves to EnableStudents / ID,DOB.
   mocks.mockResolveBatchGroups.mockResolvedValue(
     new Map([["EnableStudents_11_Engg_A", { group: "EnableStudents", authType: "ID,DOB" }]])
@@ -170,6 +174,38 @@ describe("GET /api/quiz-sessions", () => {
       ADMIN_SESSION.user.email,
       "view"
     );
+  });
+
+  it("narrows the batch scope to ?programId= when the viewer holds that program", async () => {
+    const { GET } = await loadRouteModule();
+    mocks.mockGetServerSession.mockResolvedValue(ADMIN_SESSION);
+    mocks.mockQuery.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+
+    await GET(
+      new NextRequest("http://localhost/api/quiz-sessions?schoolId=42&programId=1")
+    );
+
+    // Viewer holds [1, 64]; the centre page's programId=1 narrows to [1].
+    expect(mocks.mockQuery).toHaveBeenNthCalledWith(
+      1,
+      expect.stringContaining("FROM school_batch sb"),
+      [42, [1]]
+    );
+  });
+
+  it("returns no sessions for a ?programId= the viewer does not hold", async () => {
+    const { GET } = await loadRouteModule();
+    mocks.mockGetServerSession.mockResolvedValue(ADMIN_SESSION);
+
+    const res = await GET(
+      new NextRequest("http://localhost/api/quiz-sessions?schoolId=42&programId=2")
+    );
+
+    // Intersection of [1, 64] with 2 is empty — the param can only restrict,
+    // never widen, so no batch query runs and the list is empty.
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ sessions: [], hasMore: false });
+    expect(mocks.mockQuery).not.toHaveBeenCalled();
   });
 
   it("returns 403 when the user cannot view quiz sessions", async () => {

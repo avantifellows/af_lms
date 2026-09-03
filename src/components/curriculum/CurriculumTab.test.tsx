@@ -300,8 +300,22 @@ function setupFetch() {
     if (url === "/api/curriculum/logs/10" && init?.method === "DELETE") {
       return mockOkJson({ deleted: true });
     }
-    if (url === "/api/curriculum/options?school_code=70705") {
-      return mockOkJson(optionsResponse);
+    if (url.startsWith("/api/curriculum/options?school_code=70705")) {
+      // Mirrors the server: program_id is honoured only when it is one of the
+      // school's curriculum-enabled programs; anything else falls back to the
+      // default, which is how the route reports "not available for you".
+      const requested = Number(
+        new URLSearchParams(url.split("?")[1]).get("program_id")
+      );
+      const honoured = optionsResponse.programs.some((p) => p.id === requested);
+      return mockOkJson(
+        honoured
+          ? {
+              ...optionsResponse,
+              defaults: { ...optionsResponse.defaults, programId: requested },
+            }
+          : optionsResponse
+      );
     }
     if (url.includes("/api/curriculum/logs?") && url.includes("exam_track=neet")) {
       return mockOkJson(biologyLogsResponse);
@@ -322,12 +336,20 @@ function setupFetch() {
   });
 }
 
-function renderTab(props: Partial<{ schoolCode: string; schoolName: string; canEdit: boolean }> = {}) {
+function renderTab(
+  props: Partial<{
+    schoolCode: string;
+    schoolName: string;
+    canEdit: boolean;
+    programId: number;
+  }> = {}
+) {
   return render(
     <CurriculumTab
       schoolCode={props.schoolCode ?? "70705"}
       schoolName={props.schoolName ?? "Test School"}
       canEdit={props.canEdit ?? true}
+      programId={props.programId}
     />
   );
 }
@@ -1032,6 +1054,46 @@ describe("CurriculumTab", () => {
       await screen.findByText("Your permissions changed. Reload the page before trying again.")
     ).toBeInTheDocument();
     expect(screen.getByTestId("log-session-modal")).toBeInTheDocument();
+  });
+
+  it("asks the server for the centre's program and keeps the selector hidden", async () => {
+    // Every option group (centreExamTracks, gradeSubjects, defaults) is derived
+    // server-side from the selected program, so the lock has to travel with the
+    // options request rather than being applied to the response afterwards.
+    setupFetch();
+
+    renderTab({ programId: 2 });
+
+    await screen.findByText(/Curriculum Progress/);
+    const optionsCalls = mockFetch.mock.calls
+      .map(([url]) => String(url))
+      .filter((url) => url.includes("/api/curriculum/options"));
+    expect(optionsCalls).toHaveLength(1);
+    expect(optionsCalls[0]).toContain("program_id=2");
+    expect(screen.queryByLabelText("Program")).not.toBeInTheDocument();
+
+    await waitFor(() => {
+      const chapterCalls = mockFetch.mock.calls
+        .map(([url]) => String(url))
+        .filter((url) => url.includes("/api/curriculum/chapters"));
+      expect(chapterCalls.length).toBeGreaterThan(0);
+      expect(chapterCalls.every((url) => url.includes("program_id=2"))).toBe(true);
+    });
+  });
+
+  it("shows an unavailable state when the centre's program has no curriculum", async () => {
+    // A program the server won't honour gets the school default back. Showing
+    // that would be another program's curriculum under this centre's heading.
+    setupFetch();
+
+    renderTab({ programId: 99 });
+
+    expect(
+      await screen.findByText("Curriculum is not available for this Centre's Program.")
+    ).toBeInTheDocument();
+    const allCalls = mockFetch.mock.calls.map(([url]) => String(url));
+    expect(allCalls.some((url) => url.includes("/api/curriculum/options"))).toBe(true);
+    expect(allCalls.some((url) => url.includes("/api/curriculum/chapters"))).toBe(false);
   });
 
   it("shows an empty state when backend config is empty", async () => {

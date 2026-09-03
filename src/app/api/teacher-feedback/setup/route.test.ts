@@ -8,9 +8,12 @@ vi.mock("@/lib/teacher-feedback-batches", () => ({
   getCentreScope: vi.fn(),
   centreOwnsAllBatches: vi.fn(),
 }));
-vi.mock("@/lib/teacher-feedback-access", () => ({
-  authenticateTeacherFeedback: vi.fn(),
-}));
+vi.mock("@/lib/teacher-feedback-access", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/teacher-feedback-access")>();
+  // requireCentreScope stays real: it is a pure permission check, and stubbing it
+  // would make these suites pass regardless of whether the routes enforce it.
+  return { ...actual, authenticateTeacherFeedback: vi.fn() };
+});
 vi.mock("@/lib/teacher-feedback-session", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/teacher-feedback-session")>();
   return {
