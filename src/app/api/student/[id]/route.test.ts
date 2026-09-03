@@ -2,16 +2,47 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("next-auth", () => ({ getServerSession: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
-vi.mock("@/lib/student-addition-access", () => ({
-  requireStudentEditAccess: vi.fn(),
+const {
+  mockQuery,
+  mockRequireStudentEditAccessFn,
+  mockRequireStudentAdditionStudentAccessFn,
+} = vi.hoisted(() => ({
+  mockQuery: vi.fn(),
+  mockRequireStudentEditAccessFn: vi.fn(),
+  mockRequireStudentAdditionStudentAccessFn: vi.fn(),
 }));
+vi.mock("@/lib/db", () => ({ query: mockQuery }));
+vi.mock("@/lib/student-addition-access", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/student-addition-access")>(
+    "@/lib/student-addition-access",
+  );
+  return {
+    ...actual,
+    requireStudentEditAccess: mockRequireStudentEditAccessFn,
+    requireStudentAdditionStudentAccess: mockRequireStudentAdditionStudentAccessFn,
+  };
+});
 vi.mock("@/lib/lms-enrollment-date", () => ({
   deriveLmsEnrollmentPeriod: vi.fn(),
 }));
+vi.mock("@/lib/registration-mode", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/registration-mode")>(
+    "@/lib/registration-mode",
+  );
+  return {
+    ...actual,
+    ACTIVE_REGISTRATION_MODE: actual.APPROVED_REGISTRATION_MODE,
+    getRegistrationModeHandshake: () =>
+      actual.getRegistrationModeHandshake(actual.APPROVED_REGISTRATION_MODE),
+  };
+});
 
 import { getServerSession } from "next-auth";
 import { PATCH } from "./route";
-import { requireStudentEditAccess } from "@/lib/student-addition-access";
+import {
+  requireStudentAdditionStudentAccess,
+  requireStudentEditAccess,
+} from "@/lib/student-addition-access";
 import { deriveLmsEnrollmentPeriod } from "@/lib/lms-enrollment-date";
 import {
   jsonRequest,
@@ -22,6 +53,7 @@ import {
 
 const mockSession = vi.mocked(getServerSession);
 const mockRequireStudentEditAccess = vi.mocked(requireStudentEditAccess);
+const mockRequireStudentAdditionStudentAccess = vi.mocked(requireStudentAdditionStudentAccess);
 const mockDeriveLmsEnrollmentPeriod = vi.mocked(deriveLmsEnrollmentPeriod);
 const mockFetch = vi.fn();
 
@@ -30,7 +62,24 @@ beforeEach(() => {
   process.env.DB_SERVICE_URL = "https://db.example.test/api";
   process.env.DB_SERVICE_TOKEN = "test-token";
   vi.stubGlobal("fetch", mockFetch);
+  mockQuery.mockResolvedValue([{
+    has_jnv_nvs_membership: false,
+    has_enable_students_membership: false,
+    student_id_matches_phone: false,
+  }]);
   mockRequireStudentEditAccess.mockResolvedValue({
+    ok: true,
+    programId: 64,
+    permission: {} as never,
+    actor: {
+      user_id: 501,
+      email: "pm@example.org",
+      login_type: "google",
+      role: "program_manager",
+    },
+    school: { code: "JNV001", udise_code: "12345678901" },
+  });
+  mockRequireStudentAdditionStudentAccess.mockResolvedValue({
     ok: true,
     programId: 64,
     permission: {} as never,
@@ -49,6 +98,15 @@ beforeEach(() => {
 });
 
 const params = routeParams({ id: "100" });
+
+const phoneCohortWithBlankIdentifiers = {
+  has_jnv_nvs_membership: true,
+  has_enable_students_membership: true,
+  student_id_matches_phone: true,
+  pen_number: null,
+  g10_roll_no: null,
+  g10_board: "CBSE",
+};
 
 describe("PATCH /api/student/[id]", () => {
   it("returns 401 when not authenticated", async () => {
@@ -116,6 +174,8 @@ describe("PATCH /api/student/[id]", () => {
       program_id: 64,
       start_date: "2026-07-01",
       academic_year: "2026-2027",
+      registration_mode: "approved",
+      registration_mode_version: "1",
       first_name: "Ravi Kumar",
       last_name: "",
       father_name: "Suresh Kumar",
@@ -126,6 +186,280 @@ describe("PATCH /api/student/[id]", () => {
       stream: "nda",
       g10_board: "Others",
     });
+  });
+
+  it("canonicalizes case-insensitive choice labels in an Approved-mode edit payload", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockFetch.mockResolvedValue(
+      new Response(JSON.stringify({ status: "updated" }), { status: 200 }),
+    );
+
+    const req = jsonRequest("http://localhost/api/student/100", {
+      method: "PATCH",
+      body: {
+        program_id: 64,
+        gender: "fEmAlE",
+        category: "gEn-EwS",
+        physically_handicapped: false,
+        g10_board: "cBsE",
+        board_stream: "cOmMeRcE (wItHoUt MaTh)",
+        annual_family_income: "lEsS tHaN rS. 1,00,000",
+      },
+    });
+
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(200);
+    const payload = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(payload).toMatchObject({
+      gender: "Female",
+      category: "Gen-EWS",
+      physically_handicapped: false,
+      g10_board: "CBSE",
+      board_stream: "Commerce (Without Math)",
+      annual_family_income: "Less than Rs. 1,00,000",
+    });
+  });
+
+  it("proxies Approved-mode phone-cohort backfill fields without changing Student ID", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockQuery.mockResolvedValueOnce([phoneCohortWithBlankIdentifiers]);
+    mockFetch.mockResolvedValue(
+      new Response(JSON.stringify({ status: "updated" }), { status: 200 }),
+    );
+
+    const req = jsonRequest("http://localhost/api/student/100", {
+      method: "PATCH",
+      body: {
+        program_id: 64,
+        pen_number: "01234567890",
+        g10_roll_no: "12345678",
+        annual_family_income: "Less than Rs. 1,00,000",
+      },
+    });
+
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(200);
+    expect(mockRequireStudentAdditionStudentAccess).toHaveBeenCalledWith(ADMIN_SESSION, "100");
+    const payload = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(payload).toMatchObject({
+      program_id: 64,
+      registration_mode: "approved",
+      registration_mode_version: "1",
+      pen_number: "01234567890",
+      g10_roll_no: "12345678",
+      annual_family_income: "Less than Rs. 1,00,000",
+    });
+    expect(payload).not.toHaveProperty("student_id");
+  });
+
+  it("uses Others to validate a backfilled roll when the persisted board is NULL", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockQuery.mockResolvedValueOnce([{
+      ...phoneCohortWithBlankIdentifiers,
+      g10_board: null,
+    }]);
+    mockFetch.mockResolvedValue(
+      new Response(JSON.stringify({ status: "updated" }), { status: 200 }),
+    );
+
+    const req = jsonRequest("http://localhost/api/student/100", {
+      method: "PATCH",
+      body: {
+        program_id: 64,
+        g10_roll_no: "RB-24",
+      },
+    });
+
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(200);
+    const payload = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(payload).toMatchObject({
+      program_id: 64,
+      registration_mode: "approved",
+      registration_mode_version: "1",
+      g10_roll_no: "RB24",
+    });
+    expect(payload).not.toHaveProperty("g10_board");
+    expect(payload).not.toHaveProperty("student_id");
+  });
+
+  it("rejects an Approved-mode backfill with neither identifier", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockQuery.mockResolvedValueOnce([phoneCohortWithBlankIdentifiers]);
+
+    const req = jsonRequest("http://localhost/api/student/100", {
+      method: "PATCH",
+      body: {
+        program_id: 64,
+        annual_family_income: "Less than Rs. 1,00,000",
+      },
+    });
+
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(422);
+    expect(await res.json()).toEqual({
+      ok: false,
+      error: "PEN or Grade 10 Roll no is required for phone-cohort backfill",
+      field_errors: {
+        pen_number: "PEN or Grade 10 Roll no is required for phone-cohort backfill",
+        g10_roll_no: "PEN or Grade 10 Roll no is required for phone-cohort backfill",
+      },
+    });
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("refuses a second write to an already-filled backfill identifier", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockQuery.mockResolvedValueOnce([{
+      ...phoneCohortWithBlankIdentifiers,
+      pen_number: "01234567890",
+    }]);
+
+    const req = jsonRequest("http://localhost/api/student/100", {
+      method: "PATCH",
+      body: { program_id: 64, pen_number: "12345678901" },
+    });
+
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(422);
+    expect(await res.json()).toEqual({
+      ok: false,
+      error: "PEN can only be filled once and is already set",
+      field_errors: {
+        pen_number: "PEN can only be filled once and is already set",
+      },
+    });
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("refuses a second write to an already-filled Grade 10 Roll no", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockQuery.mockResolvedValueOnce([{
+      ...phoneCohortWithBlankIdentifiers,
+      g10_roll_no: "12345678",
+    }]);
+
+    const req = jsonRequest("http://localhost/api/student/100", {
+      method: "PATCH",
+      body: { program_id: 64, g10_roll_no: "87654321" },
+    });
+
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(422);
+    expect(await res.json()).toEqual({
+      ok: false,
+      error: "Grade 10 Roll no can only be filled once and is already set",
+      field_errors: {
+        g10_roll_no: "Grade 10 Roll no can only be filled once and is already set",
+      },
+    });
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("keeps Annual Family Income editable after a phone-cohort identifier is filled", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockQuery.mockResolvedValueOnce([{
+      ...phoneCohortWithBlankIdentifiers,
+      pen_number: "01234567890",
+    }]);
+    mockFetch.mockResolvedValue(
+      new Response(JSON.stringify({ status: "updated" }), { status: 200 }),
+    );
+
+    const req = jsonRequest("http://localhost/api/student/100", {
+      method: "PATCH",
+      body: {
+        program_id: 64,
+        annual_family_income: "Rs. 1,00,000-2,00,000",
+      },
+    });
+
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(200);
+    const payload = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(payload).toMatchObject({
+      annual_family_income: "Rs. 1,00,000-2,00,000",
+      registration_mode: "approved",
+      registration_mode_version: "1",
+    });
+    expect(payload).not.toHaveProperty("pen_number");
+    expect(payload).not.toHaveProperty("student_id");
+  });
+
+  it("surfaces DB Service identifier conflicts as backfill field errors", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockQuery.mockResolvedValueOnce([phoneCohortWithBlankIdentifiers]);
+    mockFetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          error: {
+            code: "pen_number_conflict",
+            message: "PEN already belongs to another Student",
+            fields: ["pen_number"],
+          },
+        }),
+        { status: 409 },
+      ),
+    );
+
+    const req = jsonRequest("http://localhost/api/student/100", {
+      method: "PATCH",
+      body: { program_id: 64, pen_number: "01234567890" },
+    });
+
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({
+      error: "PEN already belongs to another Student",
+      code: "pen_number_conflict",
+      field_errors: { pen_number: "PEN already belongs to another Student" },
+    });
+  });
+
+  it.each([
+    [{ pen_number: "123" }, "PEN must be exactly 11 digits"],
+    [{ g10_roll_no: "1234" }, "CBSE Grade 10 Roll no must be exactly 8 digits and cannot start with zero"],
+  ])("validates Approved-mode backfill values using existing format rules", async (field, message) => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockQuery.mockResolvedValueOnce([phoneCohortWithBlankIdentifiers]);
+    const req = jsonRequest("http://localhost/api/student/100", {
+      method: "PATCH",
+      body: { program_id: 64, ...field },
+    });
+
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toBe(message);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("uses the scoped phone-cohort gate for backfill and does not proxy when denied", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockQuery.mockResolvedValueOnce([phoneCohortWithBlankIdentifiers]);
+    mockRequireStudentAdditionStudentAccess.mockResolvedValue({
+      ok: false,
+      status: 403,
+      error: "Forbidden",
+    });
+
+    const req = jsonRequest("http://localhost/api/student/100", {
+      method: "PATCH",
+      body: { program_id: 64, pen_number: "01234567890" },
+    });
+
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(403);
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it("returns 403 and does not proxy when the edit gate denies", async () => {

@@ -1,5 +1,11 @@
 import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
 
+import {
+  ACTIVE_REGISTRATION_MODE,
+  PHONE_REGISTRATION_MODE,
+  type RegistrationMode,
+} from "./registration-mode";
+
 export const CBSE_BOARD = "CBSE";
 export const G10_BOARD_OPTIONS = [CBSE_BOARD, "Others"] as const;
 
@@ -30,11 +36,6 @@ export const ANNUAL_FAMILY_INCOME_OPTIONS = [
   "More than Rs. 8,00,000",
 ] as const;
 
-const BOARD_SET = new Set<string>(G10_BOARD_OPTIONS);
-const GENDER_SET = new Set<string>(STUDENT_ADDITION_GENDER_OPTIONS);
-const CATEGORY_SET = new Set<string>(CATEGORY_OPTIONS);
-const BOARD_STREAM_SET = new Set<string>(BOARD_STREAM_OPTIONS);
-const INCOME_SET = new Set<string>(ANNUAL_FAMILY_INCOME_OPTIONS);
 const STREAM_MAP: Record<string, LmsStudentStream> = {
   engineering: "engineering",
   medical: "medical",
@@ -76,6 +77,8 @@ interface LmsStudentEditPayload {
   father_name?: string;
   annual_family_income?: string;
   g10_board?: string | null;
+  pen_number?: string;
+  g10_roll_no?: string;
   grade?: 11 | 12;
 }
 
@@ -95,10 +98,12 @@ const STUDENT_EDITABLE_FIELDS: ReadonlyArray<keyof LmsStudentEditPayload> = [
   "grade",
 ];
 
-export const STUDENT_ADDITION_UPLOAD_COLUMNS: ReadonlyArray<{
+export type StudentAdditionUploadColumn = {
   label: string;
   key: keyof StudentAdditionInput;
-}> = [
+};
+
+const APPROVED_STUDENT_ADDITION_UPLOAD_COLUMNS: ReadonlyArray<StudentAdditionUploadColumn> = [
   { label: "Grade", key: "grade" },
   { label: "Student Name", key: "student_name" },
   { label: "Date of Birth", key: "date_of_birth" },
@@ -115,9 +120,85 @@ export const STUDENT_ADDITION_UPLOAD_COLUMNS: ReadonlyArray<{
   { label: "Yearly / Annual Family Income", key: "annual_family_income" },
 ] as const;
 
-const UPLOAD_FIELD_LABELS = new Map(
-  STUDENT_ADDITION_UPLOAD_COLUMNS.map((column) => [column.key, column.label]),
+const PHONE_STUDENT_ADDITION_UPLOAD_COLUMNS: ReadonlyArray<StudentAdditionUploadColumn> = [
+  { label: "Grade", key: "grade" },
+  { label: "Student Name", key: "student_name" },
+  { label: "Date of Birth", key: "date_of_birth" },
+  { label: "Gender", key: "gender" },
+  { label: "Category", key: "category" },
+  { label: "CWSN", key: "physically_handicapped" },
+  { label: "G10 board", key: "g10_board" },
+  { label: "Board Stream", key: "board_stream" },
+  { label: "Primary Exam preparing for", key: "stream" },
+  { label: "Father Name", key: "father_name" },
+  { label: "Parents Phone Number", key: "phone" },
+] as const;
+
+export function getStudentAdditionUploadColumns(
+  mode: RegistrationMode = ACTIVE_REGISTRATION_MODE,
+): ReadonlyArray<StudentAdditionUploadColumn> {
+  return mode === PHONE_REGISTRATION_MODE
+    ? PHONE_STUDENT_ADDITION_UPLOAD_COLUMNS
+    : APPROVED_STUDENT_ADDITION_UPLOAD_COLUMNS;
+}
+
+const APPROVED_REJECTED_ROW_METADATA_COLUMNS = [
+  "Original Row Number",
+  "Row Status",
+  "Field Errors",
+  "Row Errors",
+  "Issue",
+  "Existing School Relationship",
+  "Matched Identifier",
+  "Existing Student ID",
+  "Existing PEN Number",
+  "Existing APAAR ID",
+  "Existing Student Name",
+  "Existing School Name",
+  "Existing School Code",
+  "Existing UDISE",
+  "Existing District",
+  "Existing State",
+  "Existing Grade",
+  "Existing Program",
+  "Existing Stream",
+] as const;
+
+const PHONE_REJECTED_ROW_METADATA_COLUMNS = APPROVED_REJECTED_ROW_METADATA_COLUMNS.filter(
+  (column) => column !== "Existing PEN Number" && column !== "Existing APAAR ID",
 );
+
+const PHONE_RESTRICTED_INPUT_KEYS = new Set([
+  "pen_number",
+  "g10_roll_no",
+  "annual_family_income",
+]);
+
+export function getStudentAdditionRejectedRowMetadataColumns(
+  mode: RegistrationMode = ACTIVE_REGISTRATION_MODE,
+): ReadonlyArray<string> {
+  return mode === PHONE_REGISTRATION_MODE
+    ? PHONE_REJECTED_ROW_METADATA_COLUMNS
+    : APPROVED_REJECTED_ROW_METADATA_COLUMNS;
+}
+
+function uploadFieldLabels(mode: RegistrationMode) {
+  return new Map(
+    getStudentAdditionUploadColumns(mode).map((column) => [column.key, column.label]),
+  );
+}
+
+export function digitsOnly(value: string) {
+  return value.replace(/\D+/g, "");
+}
+
+export function lettersAndSpacesOnly(value: string) {
+  return value.replace(/[^A-Za-z ]+/g, "");
+}
+
+export function rollCharactersOnly(value: string) {
+  return value.replace(/[^A-Za-z0-9]+/g, "").toUpperCase();
+}
 
 export interface StudentAdditionCsvResult {
   row_number?: number;
@@ -145,14 +226,25 @@ function matchText(value: unknown): string {
 export function formatStudentAdditionExistingMatch(
   existing: ExistingMatch | null | undefined,
   schoolCode?: string,
+  mode: RegistrationMode = ACTIVE_REGISTRATION_MODE,
+  submittedPhone?: unknown,
 ): string {
   const match = existing ?? {};
-  const studentId = matchText(match.student_id) || "blank";
+  const studentId = matchText(match.student_id) ||
+    (mode === PHONE_REGISTRATION_MODE ? matchText(submittedPhone) : "") ||
+    "blank";
+  const studentIdLabel = mode === PHONE_REGISTRATION_MODE
+    ? "Student ID / Phone Number"
+    : "Student ID";
   const matchSchoolCode = matchText(match.school_code);
   const identities = [
-    `Student ID: ${studentId}`,
-    matchText(match.pen_number) ? `PEN: ${matchText(match.pen_number)}` : "",
-    matchText(match.apaar_id) ? `APAAR: ${matchText(match.apaar_id)}` : "",
+    `${studentIdLabel}: ${studentId}`,
+    mode === PHONE_REGISTRATION_MODE || !matchText(match.pen_number)
+      ? ""
+      : `PEN: ${matchText(match.pen_number)}`,
+    mode === PHONE_REGISTRATION_MODE || !matchText(match.apaar_id)
+      ? ""
+      : `APAAR: ${matchText(match.apaar_id)}`,
   ].filter(Boolean).join(" | ");
 
   if (schoolCode && matchSchoolCode === schoolCode) {
@@ -187,37 +279,28 @@ export function formatStudentAdditionDuplicateInFile(
     : "Duplicate in uploaded file";
 }
 
-function formatFieldErrors(errors: Record<string, string> | undefined): string {
+function formatFieldErrors(
+  errors: Record<string, string> | undefined,
+  mode: RegistrationMode,
+): string {
+  const labels = uploadFieldLabels(mode);
   return Object.entries(errors ?? {})
-    .map(([key, message]) => `${UPLOAD_FIELD_LABELS.get(key as keyof StudentAdditionInput) ?? key}: ${message}`)
+    .filter(([key]) => mode !== PHONE_REGISTRATION_MODE || !PHONE_RESTRICTED_INPUT_KEYS.has(key))
+    .map(([key, message]) => `${labels.get(key as keyof StudentAdditionInput) ?? key}: ${message}`)
     .join("; ");
 }
 
 export function buildRejectedRowsCsv(
   results: StudentAdditionCsvResult[],
   schoolCode?: string,
+  mode: RegistrationMode = ACTIVE_REGISTRATION_MODE,
 ): string {
+  const columns = getStudentAdditionUploadColumns(mode);
+  const metadataColumns = getStudentAdditionRejectedRowMetadataColumns(mode);
   const headers = [
-    "Original Row Number",
-    "Row Status",
-    ...STUDENT_ADDITION_UPLOAD_COLUMNS.map((column) => column.label),
-    "Field Errors",
-    "Row Errors",
-    "Issue",
-    "Existing School Relationship",
-    "Matched Identifier",
-    "Existing Student ID",
-    "Existing PEN Number",
-    "Existing APAAR ID",
-    "Existing Student Name",
-    "Existing School Name",
-    "Existing School Code",
-    "Existing UDISE",
-    "Existing District",
-    "Existing State",
-    "Existing Grade",
-    "Existing Program",
-    "Existing Stream",
+    ...metadataColumns.slice(0, 2),
+    ...columns.map((column) => column.label),
+    ...metadataColumns.slice(2),
   ];
 
   const rows = results
@@ -226,30 +309,45 @@ export function buildRejectedRowsCsv(
     .map((result) => {
       const existing = result.existing_match ?? {};
       const existingSchoolCode = matchText(existing.school_code);
-      const schoolRelationship = result.status === "already_exists"
+      const showExistingMatchContext = result.existing_match && (
+        mode === PHONE_REGISTRATION_MODE || result.status === "already_exists"
+      );
+      const schoolRelationship = showExistingMatchContext
         ? !existingSchoolCode
           ? "Unknown"
           : existingSchoolCode === schoolCode
             ? "Same school"
             : "Different school"
         : "";
-      const issue = result.status === "already_exists"
-        ? formatStudentAdditionExistingMatch(existing, schoolCode)
+      const issue = showExistingMatchContext
+        ? formatStudentAdditionExistingMatch(
+          existing,
+          schoolCode,
+          mode,
+          result.original?.["Parents Phone Number"],
+        )
         : result.status === "duplicate_in_file"
-          ? formatStudentAdditionDuplicateInFile(result.duplicate_identifiers)
+          ? formatStudentAdditionDuplicateInFile(
+            mode === PHONE_REGISTRATION_MODE
+              ? result.duplicate_identifiers?.filter(
+                (identifier) => !/pen|grade\s*10\s*roll|annual\s*family\s*income/i.test(identifier),
+              )
+              : result.duplicate_identifiers,
+          )
           : "";
       return [
         result.row_number ?? "",
         result.status ?? "",
-        ...STUDENT_ADDITION_UPLOAD_COLUMNS.map((column) => result.original?.[column.label] ?? ""),
-        formatFieldErrors(result.field_errors),
+        ...columns.map((column) => result.original?.[column.label] ?? ""),
+        formatFieldErrors(result.field_errors, mode),
         (result.row_errors ?? []).join("; "),
         issue,
         schoolRelationship,
         existing.matched_identifier ?? "",
         existing.student_id ?? "",
-        existing.pen_number ?? "",
-        existing.apaar_id ?? "",
+        ...(mode === PHONE_REGISTRATION_MODE
+          ? []
+          : [existing.pen_number ?? "", existing.apaar_id ?? ""]),
         existing.student_name ?? "",
         existing.school_name ?? "",
         existing.school_code ?? "",
@@ -273,14 +371,15 @@ export interface LmsStudentAdditionRow {
   gender: string;
   category: string;
   physically_handicapped: boolean;
-  pen_number: string;
+  pen_number?: string;
   g10_board: string | null;
-  g10_roll_no: string;
+  g10_roll_no?: string;
   board_stream: string;
   stream: LmsStudentStream;
   father_name: string;
   phone: string;
-  annual_family_income: string;
+  annual_family_income?: string;
+  student_id?: string;
 }
 
 export type StudentAdditionValidationResult =
@@ -301,6 +400,26 @@ export type StudentAdditionValidationResult =
 
 function stringValue(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function canonicalOptionValue(value: string, options: readonly string[]): string | null {
+  const normalized = value.toLowerCase();
+  return options.find((option) => option.toLowerCase() === normalized) ?? null;
+}
+
+function canonicalGenderValue(value: string): string | null {
+  return canonicalOptionValue(value, STUDENT_ADDITION_GENDER_OPTIONS) ??
+    (value.toLowerCase() === "others" ? "Other" : null);
+}
+
+export function isValidRegistrationPhone(
+  value: unknown,
+  mode: RegistrationMode = ACTIVE_REGISTRATION_MODE,
+): boolean {
+  const phone = typeof value === "string" ? value : "";
+  return mode === PHONE_REGISTRATION_MODE
+    ? /^[6-9]\d{9}$/.test(phone)
+    : /^[1-9]\d{9}$/.test(phone);
 }
 
 function normalizeName(value: unknown): string {
@@ -403,9 +522,16 @@ function editError(field: string, message: string, otherField?: string) {
 }
 
 // fallow-ignore-next-line complexity
-export function canonicalizeStudentEditPayload(input: Record<string, unknown>) {
+export function canonicalizeStudentEditPayload(
+  input: Record<string, unknown>,
+  options: { mode?: RegistrationMode; allowPhoneBackfill?: boolean } = {},
+) {
+  const mode = options.mode ?? ACTIVE_REGISTRATION_MODE;
+  const editableFields = options.allowPhoneBackfill
+    ? [...STUDENT_EDITABLE_FIELDS, "pen_number", "g10_roll_no"]
+    : STUDENT_EDITABLE_FIELDS;
   const fields = Object.fromEntries(
-    STUDENT_EDITABLE_FIELDS
+    editableFields
       .filter((field) => Object.prototype.hasOwnProperty.call(input, field))
       .map((field) => [field, input[field]]),
   ) as LmsStudentEditPayload;
@@ -419,11 +545,55 @@ export function canonicalizeStudentEditPayload(input: Record<string, unknown>) {
   if (fields.father_name !== undefined && typeof fields.father_name !== "string") {
     return editError("father_name", "Father Name must be text");
   }
-  if (fields.phone !== undefined && (typeof fields.phone !== "string" || !/^[1-9]\d{9}$/.test(fields.phone))) {
-    return editError("phone", "Parents Phone Number must be exactly 10 digits and cannot start with zero");
+  if (fields.pen_number !== undefined) {
+    if (typeof fields.pen_number !== "string") {
+      return editError("pen_number", "PEN must be text");
+    }
+    fields.pen_number = fields.pen_number.trim();
+    if (fields.pen_number && !/^\d{11}$/.test(fields.pen_number)) {
+      return editError("pen_number", "PEN must be exactly 11 digits");
+    }
   }
-  if (fields.gender !== undefined && (typeof fields.gender !== "string" || ![...GENDER_SET, "Others"].includes(fields.gender))) {
-    return editError("gender", "Gender must be Female, Male, or Other");
+  const canonicalG10Board = typeof fields.g10_board === "string"
+    ? canonicalOptionValue(fields.g10_board.trim(), G10_BOARD_OPTIONS)
+    : null;
+  if (canonicalG10Board) fields.g10_board = canonicalG10Board;
+  if (fields.g10_roll_no !== undefined) {
+    if (typeof fields.g10_roll_no !== "string") {
+      return editError("g10_roll_no", "Grade 10 Roll no must be text");
+    }
+    const board = typeof fields.g10_board === "string" ? fields.g10_board : "";
+    if (fields.g10_roll_no.trim() && !board) {
+      return editError("g10_roll_no", "G10 board is required for Grade 10 Roll no");
+    }
+    fields.g10_roll_no = normalizeG10RollNo(fields.g10_roll_no, board);
+    if (fields.g10_roll_no) {
+      if (board === CBSE_BOARD && !/^[1-9]\d{7}$/.test(fields.g10_roll_no)) {
+        return editError(
+          "g10_roll_no",
+          "CBSE Grade 10 Roll no must be exactly 8 digits and cannot start with zero",
+        );
+      }
+      if (board !== CBSE_BOARD && !/^[A-Z0-9]{4,10}$/.test(fields.g10_roll_no)) {
+        return editError("g10_roll_no", "Grade 10 Roll no must be 4 to 10 characters");
+      }
+    }
+  }
+  if (fields.phone !== undefined && !isValidRegistrationPhone(fields.phone, mode)) {
+    return editError(
+      "phone",
+      mode === PHONE_REGISTRATION_MODE
+        ? "Parents Phone Number must be exactly 10 digits and start with 6-9"
+        : "Parents Phone Number must be exactly 10 digits and cannot start with zero",
+    );
+  }
+  if (fields.gender !== undefined) {
+    if (typeof fields.gender !== "string") {
+      return editError("gender", "Gender must be Female, Male, or Other");
+    }
+    const gender = canonicalGenderValue(fields.gender.trim());
+    if (!gender) return editError("gender", "Gender must be Female, Male, or Other");
+    fields.gender = gender;
   }
   if (fields.date_of_birth !== undefined) {
     const date = parseDate(fields.date_of_birth);
@@ -433,8 +603,11 @@ export function canonicalizeStudentEditPayload(input: Record<string, unknown>) {
     }
     fields.date_of_birth = date;
   }
-  if (fields.category !== undefined && (typeof fields.category !== "string" || !CATEGORY_SET.has(fields.category))) {
-    return editError("category", "Category is not valid");
+  if (fields.category !== undefined) {
+    if (typeof fields.category !== "string") return editError("category", "Category is not valid");
+    const category = canonicalOptionValue(fields.category.trim(), CATEGORY_OPTIONS);
+    if (!category) return editError("category", "Category is not valid");
+    fields.category = category;
   }
   if (fields.physically_handicapped !== undefined && typeof fields.physically_handicapped !== "boolean") {
     return editError("physically_handicapped", "CWSN must be true or false");
@@ -445,13 +618,26 @@ export function canonicalizeStudentEditPayload(input: Record<string, unknown>) {
   if (fields.stream !== undefined && (typeof fields.stream !== "string" || !Object.values(STREAM_MAP).includes(fields.stream))) {
     return editError("stream", "Primary Exam preparing for is not valid");
   }
-  if (fields.board_stream !== undefined && (typeof fields.board_stream !== "string" || !BOARD_STREAM_SET.has(fields.board_stream))) {
-    return editError("board_stream", "Board Stream is not valid");
+  if (fields.board_stream !== undefined) {
+    if (typeof fields.board_stream !== "string") return editError("board_stream", "Board Stream is not valid");
+    const boardStream = canonicalOptionValue(fields.board_stream.trim(), BOARD_STREAM_OPTIONS);
+    if (!boardStream) return editError("board_stream", "Board Stream is not valid");
+    fields.board_stream = boardStream;
   }
-  if (fields.annual_family_income !== undefined && (typeof fields.annual_family_income !== "string" || (fields.annual_family_income && !INCOME_SET.has(fields.annual_family_income)))) {
-    return editError("annual_family_income", "Annual Family Income is not valid");
+  if (fields.annual_family_income !== undefined) {
+    if (typeof fields.annual_family_income !== "string") {
+      return editError("annual_family_income", "Annual Family Income is not valid");
+    }
+    const annualFamilyIncome = fields.annual_family_income.trim();
+    if (annualFamilyIncome) {
+      const canonicalIncome = canonicalOptionValue(annualFamilyIncome, ANNUAL_FAMILY_INCOME_OPTIONS);
+      if (!canonicalIncome) return editError("annual_family_income", "Annual Family Income is not valid");
+      fields.annual_family_income = canonicalIncome;
+    } else if (fields.annual_family_income !== "") {
+      return editError("annual_family_income", "Annual Family Income is not valid");
+    }
   }
-  if (fields.g10_board !== undefined && (typeof fields.g10_board !== "string" || !BOARD_SET.has(fields.g10_board))) {
+  if (fields.g10_board !== undefined && (typeof fields.g10_board !== "string" || !canonicalG10Board)) {
     return editError("g10_board", "G10 board must be CBSE or Others");
   }
   if (fields.grade !== undefined && fields.grade !== 11 && fields.grade !== 12) {
@@ -472,7 +658,6 @@ export function canonicalizeStudentEditPayload(input: Record<string, unknown>) {
       return editError("father_name", "Father Name must contain only letters");
     }
   }
-  if (fields.gender === "Others") fields.gender = "Other";
   if (fields.physically_handicapped && fields.category) {
     fields.category = fields.category === "Gen-EWS" ? "PWD-EWS" : `PWD-${fields.category}`;
   }
@@ -483,9 +668,17 @@ export function canonicalizeStudentEditPayload(input: Record<string, unknown>) {
 // fallow-ignore-next-line complexity
 export function validateStudentAdditionInput(
   input: StudentAdditionInput,
-  options: { today?: Date; rowNumber?: number; academicYear?: string; bulkUpload?: boolean } = {},
+  options: {
+    today?: Date;
+    rowNumber?: number;
+    academicYear?: string;
+    bulkUpload?: boolean;
+    mode?: RegistrationMode;
+  } = {},
 ): StudentAdditionValidationResult {
   const today = options.today ?? new Date();
+  const mode = options.mode ?? ACTIVE_REGISTRATION_MODE;
+  const phoneMode = mode === PHONE_REGISTRATION_MODE;
   const fieldErrors: Record<string, string> = {};
   const rowErrors: string[] = [];
 
@@ -513,42 +706,60 @@ export function validateStudentAdditionInput(
   }
 
   const genderInput = stringValue(input.gender);
-  const gender = genderInput === "Others" ? "Other" : genderInput;
-  if (!GENDER_SET.has(gender)) addError(fieldErrors, "gender", "Gender must be Female, Male, or Other");
+  const canonicalGender = canonicalGenderValue(genderInput);
+  const gender = canonicalGender ?? genderInput;
+  if (!canonicalGender) addError(fieldErrors, "gender", "Gender must be Female, Male, or Other");
 
   const categoryInput = stringValue(input.category);
-  if (!CATEGORY_SET.has(categoryInput)) addError(fieldErrors, "category", "Category is not valid");
+  const canonicalCategory = canonicalOptionValue(categoryInput, CATEGORY_OPTIONS);
+  if (!canonicalCategory) addError(fieldErrors, "category", "Category is not valid");
 
   const physically_handicapped = parsePhysicallyHandicapped(input.physically_handicapped);
   if (physically_handicapped === null) {
     addError(fieldErrors, "physically_handicapped", "CWSN must be Yes or No");
   }
+  const categoryValue = canonicalCategory ?? categoryInput;
   const category = physically_handicapped
-    ? categoryInput === "Gen-EWS" ? "PWD-EWS" : `PWD-${categoryInput}`
-    : categoryInput;
+    ? categoryValue === "Gen-EWS" ? "PWD-EWS" : `PWD-${categoryValue}`
+    : categoryValue;
 
-  const pen_number = stringValue(input.pen_number);
-  if (pen_number && !/^\d{11}$/.test(pen_number)) {
+  const restrictedFieldErrors: Record<string, string> = {
+    pen_number: "PEN Number is not accepted in Phone Registration Mode",
+    g10_roll_no: "Grade 10 Roll no is not accepted in Phone Registration Mode",
+    annual_family_income: "Annual Family Income is not accepted in Phone Registration Mode",
+  };
+  if (phoneMode) {
+    for (const key of Object.keys(restrictedFieldErrors) as Array<keyof typeof restrictedFieldErrors>) {
+      if (Object.prototype.hasOwnProperty.call(input, key)) {
+        addError(fieldErrors, key, restrictedFieldErrors[key]);
+      }
+    }
+  }
+
+  const pen_number = phoneMode ? "" : stringValue(input.pen_number);
+  if (!phoneMode && pen_number && !/^\d{11}$/.test(pen_number)) {
     addError(fieldErrors, "pen_number", "PEN must be exactly 11 digits");
   }
 
   const g10BoardInput = stringValue(input.g10_board);
-  if (!BOARD_SET.has(g10BoardInput)) addError(fieldErrors, "g10_board", "G10 board must be CBSE or Others");
-  const g10_board = g10BoardInput;
+  const canonicalG10Board = canonicalOptionValue(g10BoardInput, G10_BOARD_OPTIONS);
+  if (!canonicalG10Board) addError(fieldErrors, "g10_board", "G10 board must be CBSE or Others");
+  const g10_board = canonicalG10Board ?? g10BoardInput;
 
-  const g10RollInput = stringValue(input.g10_roll_no);
-  const g10_roll_no = normalizeG10RollNo(g10RollInput, g10BoardInput);
-  if (!pen_number && !g10_roll_no) rowErrors.push("PEN or Grade 10 Roll no is required");
-  if (g10RollInput) {
-    if (g10BoardInput === CBSE_BOARD && !/^[1-9]\d{7}$/.test(g10_roll_no)) {
+  const g10RollInput = phoneMode ? "" : stringValue(input.g10_roll_no);
+  const g10_roll_no = normalizeG10RollNo(g10RollInput, g10_board);
+  if (!phoneMode && !pen_number && !g10_roll_no) rowErrors.push("PEN or Grade 10 Roll no is required");
+  if (!phoneMode && g10RollInput) {
+    if (g10_board === CBSE_BOARD && !/^[1-9]\d{7}$/.test(g10_roll_no)) {
       addError(fieldErrors, "g10_roll_no", "CBSE Grade 10 Roll no must be exactly 8 digits and cannot start with zero");
-    } else if (g10BoardInput !== CBSE_BOARD && !/^[A-Z0-9]{4,10}$/.test(g10_roll_no)) {
+    } else if (g10_board !== CBSE_BOARD && !/^[A-Z0-9]{4,10}$/.test(g10_roll_no)) {
       addError(fieldErrors, "g10_roll_no", "Grade 10 Roll no must be 4 to 10 characters");
     }
   }
 
   const board_stream = stringValue(input.board_stream);
-  if (!BOARD_STREAM_SET.has(board_stream)) {
+  const canonicalBoardStream = canonicalOptionValue(board_stream, BOARD_STREAM_OPTIONS);
+  if (!canonicalBoardStream) {
     addError(fieldErrors, "board_stream", "Board Stream is not valid");
   }
 
@@ -557,18 +768,22 @@ export function validateStudentAdditionInput(
 
   const father_name = normalizeName(input.father_name);
   const phone = stringValue(input.phone);
-  if (!/^[1-9]\d{9}$/.test(phone)) {
+  if (!isValidRegistrationPhone(phone, mode)) {
     addError(fieldErrors, "phone", "Enter a valid phone number");
   }
 
-  const annual_family_income = stringValue(input.annual_family_income);
-  if (annual_family_income && !INCOME_SET.has(annual_family_income)) {
+  const annualFamilyIncomeInput = phoneMode ? "" : stringValue(input.annual_family_income);
+  const canonicalAnnualFamilyIncome = phoneMode
+    ? null
+    : canonicalOptionValue(annualFamilyIncomeInput, ANNUAL_FAMILY_INCOME_OPTIONS);
+  const annual_family_income = canonicalAnnualFamilyIncome ?? annualFamilyIncomeInput;
+  if (!phoneMode && annual_family_income && !canonicalAnnualFamilyIncome) {
     addError(fieldErrors, "annual_family_income", "Annual Family Income is not valid");
   }
 
-  const generatedStudentId = grade
-    ? generateStudentId(grade, g10_roll_no, options.academicYear)
-    : null;
+  const generatedStudentId = phoneMode
+    ? isValidRegistrationPhone(phone, mode) ? phone : null
+    : grade ? generateStudentId(grade, g10_roll_no, options.academicYear) : null;
   const row = {
     row_number: options.rowNumber ?? 1,
     ...(grade ? { grade } : {}),
@@ -577,14 +792,13 @@ export function validateStudentAdditionInput(
     gender,
     category,
     ...(physically_handicapped !== null ? { physically_handicapped } : {}),
-    pen_number,
     g10_board,
-    g10_roll_no,
-    board_stream,
+    board_stream: canonicalBoardStream ?? board_stream,
     ...(stream ? { stream } : {}),
     father_name,
     phone,
-    annual_family_income,
+    ...(phoneMode ? {} : { pen_number, g10_roll_no, annual_family_income }),
+    ...(phoneMode && generatedStudentId ? { student_id: generatedStudentId } : {}),
   };
 
   if (Object.keys(fieldErrors).length > 0 || rowErrors.length > 0) {

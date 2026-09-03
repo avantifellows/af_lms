@@ -10,6 +10,11 @@ import {
   formatStudentAdditionExistingMatch,
   type StudentAdditionCsvResult,
 } from "@/lib/student-addition-fields";
+import {
+  ACTIVE_REGISTRATION_MODE,
+  PHONE_REGISTRATION_MODE,
+  type RegistrationMode,
+} from "@/lib/registration-mode";
 
 interface BulkStudentUploadModalProps {
   open: boolean;
@@ -17,6 +22,7 @@ interface BulkStudentUploadModalProps {
   schoolCode: string;
   onClose: () => void;
   onUploaded: () => void;
+  registrationMode?: RegistrationMode;
 }
 
 interface UploadTotals {
@@ -33,9 +39,28 @@ type UploadResult = StudentAdditionCsvResult & {
   generated_student_id?: string | null;
 };
 
+function existingMatchIssue(
+  result: UploadResult,
+  schoolCode: string,
+  registrationMode: RegistrationMode,
+) {
+  if (!result.existing_match) return "";
+  return formatStudentAdditionExistingMatch(
+    result.existing_match,
+    schoolCode,
+    registrationMode,
+    result.original?.["Parents Phone Number"],
+  );
+}
+
 interface UploadResponse {
   error?: string;
-  details?: string;
+  template_mismatch?: {
+    missing: string[];
+    unexpected: string[];
+    duplicate: string[];
+    legacy_apaar?: boolean;
+  };
   totals?: UploadTotals;
   results?: UploadResult[];
   ignored_rows?: Array<{ message: string }>;
@@ -49,7 +74,14 @@ const emptyTotals: UploadTotals = {
   rejected: 0,
 };
 
-function rowIssues(result: UploadResult, schoolCode: string): string {
+function rowIssues(
+  result: UploadResult,
+  schoolCode: string,
+  registrationMode: RegistrationMode,
+): string {
+  const existingMatch = existingMatchIssue(result, schoolCode, registrationMode);
+  if (result.status === "rejected" && existingMatch) return existingMatch;
+
   const issues = [
     ...Object.values(result.field_errors ?? {}),
     ...(result.row_errors ?? []),
@@ -58,7 +90,7 @@ function rowIssues(result: UploadResult, schoolCode: string): string {
     (result.status === "duplicate_in_file"
       ? formatStudentAdditionDuplicateInFile(result.duplicate_identifiers)
       : "") ||
-    (result.existing_match ? formatStudentAdditionExistingMatch(result.existing_match, schoolCode) : "");
+    existingMatch;
 }
 
 // fallow-ignore-next-line complexity
@@ -68,18 +100,21 @@ export default function BulkStudentUploadModal({
   schoolCode,
   onClose,
   onUploaded,
+  registrationMode = ACTIVE_REGISTRATION_MODE,
 }: BulkStudentUploadModalProps) {
+  const phoneMode = registrationMode === PHONE_REGISTRATION_MODE;
   const [file, setFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [headerDetails, setHeaderDetails] = useState<UploadResponse["template_mismatch"] | null>(null);
   const [totals, setTotals] = useState<UploadTotals | null>(null);
   const [results, setResults] = useState<UploadResult[]>([]);
   const [ignoredRows, setIgnoredRows] = useState<string[]>([]);
 
   const rejectedCsvHref = useMemo(() => {
     if (!results.some((result) => result.status !== "created")) return null;
-    return `data:text/csv;charset=utf-8,${encodeURIComponent(buildRejectedRowsCsv(results, schoolCode))}`;
-  }, [results, schoolCode]);
+    return `data:text/csv;charset=utf-8,${encodeURIComponent(buildRejectedRowsCsv(results, schoolCode, registrationMode))}`;
+  }, [results, schoolCode, registrationMode]);
 
   const done = totals?.created ?? 0;
   const toGo = (totals?.total ?? 0) - done;
@@ -89,6 +124,7 @@ export default function BulkStudentUploadModal({
       setFile(null);
       setSubmitting(false);
       setError(null);
+      setHeaderDetails(null);
       setTotals(null);
       setResults([]);
       setIgnoredRows([]);
@@ -102,6 +138,7 @@ export default function BulkStudentUploadModal({
 
     setSubmitting(true);
     setError(null);
+    setHeaderDetails(null);
     setTotals(null);
     setResults([]);
     setIgnoredRows([]);
@@ -122,8 +159,9 @@ export default function BulkStudentUploadModal({
         );
       }
       setIgnoredRows((json.ignored_rows ?? []).map((row) => row.message));
+      setHeaderDetails(json.template_mismatch ?? null);
       if (!response.ok && !json.results) {
-        throw new Error(json.details || json.error || "Upload failed");
+        throw new Error(json.error || "Upload failed");
       }
 
       setTotals(json.totals ?? emptyTotals);
@@ -136,6 +174,11 @@ export default function BulkStudentUploadModal({
       setSubmitting(false);
     }
   }
+
+  const templateHref = `/api/school/${encodeURIComponent(schoolUdise)}/students`;
+  const templateFilename = phoneMode
+    ? "NVS_Lakshya_Data_Template_updated_19th_August_2026.xlsx"
+    : "nvs-student-addition-template.xlsx";
 
   return (
     // fallow-ignore-next-line code-duplication
@@ -154,7 +197,31 @@ export default function BulkStudentUploadModal({
         <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
           {error && (
             <div className="rounded-lg border border-danger/30 bg-danger-bg p-3 text-sm text-danger">
-              {error}
+              <p>{headerDetails
+                ? headerDetails.legacy_apaar
+                  ? "This workbook uses the old APAAR template."
+                  : "The uploaded headers do not match the current template."
+                : error}</p>
+              {headerDetails && (
+                <div className="mt-2 space-y-1">
+                  {headerDetails.missing.length > 0 && (
+                    <p>Missing columns: {headerDetails.missing.join(", ")}</p>
+                  )}
+                  {headerDetails.unexpected.length > 0 && (
+                    <p>Unrecognized columns: {headerDetails.unexpected.join(", ")}</p>
+                  )}
+                  {headerDetails.duplicate.length > 0 && (
+                    <p>Duplicate columns: {headerDetails.duplicate.join(", ")}</p>
+                  )}
+                  <a
+                    href={templateHref}
+                    download={templateFilename}
+                    className="font-medium underline underline-offset-2"
+                  >
+                    Download the current template
+                  </a>
+                </div>
+              )}
             </div>
           )}
           {ignoredRows.length > 0 && (
@@ -165,15 +232,17 @@ export default function BulkStudentUploadModal({
 
           <div className="flex flex-wrap items-center gap-3">
             <a
-              href={`/api/school/${encodeURIComponent(schoolUdise)}/students`}
-              download="nvs-student-addition-template.xlsx"
+              href={templateHref}
+              download={templateFilename}
               className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border border-border bg-bg-card px-4 py-1.5 text-xs font-medium text-text-primary shadow-sm hover:bg-hover-bg"
             >
               <Download className="h-4 w-4" aria-hidden="true" />
               Download template
             </a>
             <p className="text-sm text-text-secondary">
-              Each row supplies Grade 11 or 12. PEN or Grade 10 Roll no is required; CBSE roll numbers need exactly 8 digits.
+              {phoneMode
+                ? "Phone Registration Mode: upload the 11 approved fields. Parent phone is the Student ID and must be 10 digits starting with 6-9."
+                : "Each row supplies Grade 11 or 12. PEN or Grade 10 Roll no is required; CBSE roll numbers need exactly 8 digits."}
             </p>
           </div>
 
@@ -232,7 +301,7 @@ export default function BulkStudentUploadModal({
                           <td className="px-3 py-2">
                             {String(result.original?.["Student Name"] ?? result.generated_student_id ?? "")}
                           </td>
-                          <td className="px-3 py-2">{rowIssues(result, schoolCode)}</td>
+                          <td className="px-3 py-2">{rowIssues(result, schoolCode, registrationMode)}</td>
                         </tr>
                       ))}
                     </tbody>

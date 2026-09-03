@@ -87,6 +87,94 @@ interface StudentWriteScopeRow {
   centre_program_ids?: Array<number | string> | null;
 }
 
+export interface PhoneRegistrationStudentFacts {
+  has_jnv_nvs_membership: boolean;
+  has_enable_students_membership: boolean;
+  student_id_matches_phone: boolean;
+  pen_number: string | null;
+  g10_roll_no: string | null;
+  g10_board: string | null;
+}
+
+interface PhoneRegistrationStudentFactRow {
+  has_jnv_nvs_membership?: unknown;
+  has_enable_students_membership?: unknown;
+  student_id_matches_phone?: unknown;
+  pen_number?: unknown;
+  g10_roll_no?: unknown;
+  g10_board?: unknown;
+}
+
+function databaseBoolean(value: unknown): boolean {
+  return value === true || value === "t" || value === 1;
+}
+
+/**
+ * Phone Registration Mode has no stored mode column. Keep the inference at a
+ * server-side Postgres seam and require every part of the identity contract.
+ */
+export async function getPhoneRegistrationStudentFacts(
+  studentPkId: number | string,
+): Promise<PhoneRegistrationStudentFacts> {
+  const rows = await query<PhoneRegistrationStudentFactRow>(
+    `SELECT
+       EXISTS (
+         SELECT 1
+         FROM enrollment_record er_nvs
+         JOIN batch b_nvs ON b_nvs.id = er_nvs.group_id
+         JOIN enrollment_record er_school ON er_school.user_id = s.user_id
+           AND er_school.group_type = 'school'
+           AND er_school.is_current = true
+         JOIN school sch_nvs ON sch_nvs.id = er_school.group_id
+         WHERE er_nvs.user_id = s.user_id
+           AND er_nvs.group_type = 'batch'
+           AND er_nvs.is_current = true
+           AND b_nvs.program_id = $2
+           AND sch_nvs.af_school_category = 'JNV'
+       ) AS has_jnv_nvs_membership,
+       EXISTS (
+         SELECT 1
+         FROM enrollment_record er_auth
+         JOIN "group" auth_group_link
+           ON auth_group_link.type = 'auth_group'
+           AND auth_group_link.child_id = er_auth.group_id
+         JOIN auth_group ag ON ag.id = auth_group_link.child_id
+         WHERE er_auth.user_id = s.user_id
+           AND er_auth.group_type = 'auth_group'
+           AND er_auth.is_current = true
+           AND ag.name = $3
+       ) AS has_enable_students_membership,
+       regexp_replace(COALESCE(s.student_id, ''), '[^0-9]', '', 'g') =
+         regexp_replace(COALESCE(u.phone, ''), '[^0-9]', '', 'g')
+         AND regexp_replace(COALESCE(u.phone, ''), '[^0-9]', '', 'g') ~ '^[6-9][0-9]{9}$'
+         AS student_id_matches_phone,
+       s.pen_number,
+       s.g10_roll_no,
+       s.g10_board
+     FROM student s
+     JOIN "user" u ON u.id = s.user_id
+     WHERE s.id = $1`,
+    [studentPkId, PROGRAM_IDS.NVS, "EnableStudents"],
+  );
+  const row = rows[0];
+  return {
+    has_jnv_nvs_membership: databaseBoolean(row?.has_jnv_nvs_membership),
+    has_enable_students_membership: databaseBoolean(row?.has_enable_students_membership),
+    student_id_matches_phone: databaseBoolean(row?.student_id_matches_phone),
+    pen_number: typeof row?.pen_number === "string" ? row.pen_number : null,
+    g10_roll_no: typeof row?.g10_roll_no === "string" ? row.g10_roll_no : null,
+    g10_board: typeof row?.g10_board === "string" ? row.g10_board : null,
+  };
+}
+
+export function isPhoneRegistrationStudent(
+  facts: PhoneRegistrationStudentFacts,
+): boolean {
+  return facts.has_jnv_nvs_membership &&
+    facts.has_enable_students_membership &&
+    facts.student_id_matches_phone;
+}
+
 function deny(
   status: 401 | 403,
   error = "Forbidden",

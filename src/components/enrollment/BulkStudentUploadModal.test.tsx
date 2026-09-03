@@ -2,6 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
+import {
+  APPROVED_REGISTRATION_MODE,
+  PHONE_REGISTRATION_MODE,
+} from "@/lib/registration-mode";
 import BulkStudentUploadModal from "./BulkStudentUploadModal";
 
 const baseProps = {
@@ -10,6 +14,7 @@ const baseProps = {
   schoolCode: "JNV001",
   onClose: vi.fn(),
   onUploaded: vi.fn(),
+  registrationMode: APPROVED_REGISTRATION_MODE,
 };
 
 describe("BulkStudentUploadModal", () => {
@@ -131,6 +136,70 @@ describe("BulkStudentUploadModal", () => {
     expect(baseProps.onUploaded).not.toHaveBeenCalled();
   });
 
+  it("shows populated header mismatch groups and current-template guidance", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: "This upload does not match the active Phone Registration Mode template. Download the current template and upload it again.",
+          template_mismatch: {
+            missing: ["Gender"],
+            unexpected: ["Unapproved column"],
+            duplicate: ["Grade"],
+          },
+        }),
+        { status: 400 },
+      ),
+    );
+
+    const user = userEvent.setup();
+    render(<BulkStudentUploadModal {...baseProps} registrationMode={PHONE_REGISTRATION_MODE} />);
+
+    await user.upload(
+      screen.getByLabelText("Student upload file"),
+      new File(["fake"], "students.csv", { type: "text/csv" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Upload students" }));
+
+    expect(await screen.findByText("The uploaded headers do not match the current template.")).toBeInTheDocument();
+    expect(screen.getByText("Missing columns: Gender")).toBeInTheDocument();
+    expect(screen.getByText("Unrecognized columns: Unapproved column")).toBeInTheDocument();
+    expect(screen.getByText("Duplicate columns: Grade")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Download the current template" })).toHaveAttribute(
+      "download",
+      "NVS_Lakshya_Data_Template_updated_19th_August_2026.xlsx",
+    );
+  });
+
+  it("uses the structured legacy APAAR marker for its mismatch summary", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: "This workbook uses the old APAAR template. Download the latest PEN-based template and upload it again.",
+          template_mismatch: {
+            missing: ["CWSN", "PEN Number"],
+            unexpected: [],
+            duplicate: [],
+            legacy_apaar: true,
+          },
+        }),
+        { status: 400 },
+      ),
+    );
+
+    const user = userEvent.setup();
+    render(<BulkStudentUploadModal {...baseProps} />);
+
+    await user.upload(
+      screen.getByLabelText("Student upload file"),
+      new File(["fake"], "students.csv", { type: "text/csv" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Upload students" }));
+
+    expect(await screen.findByText("This workbook uses the old APAAR template.")).toBeInTheDocument();
+    expect(screen.queryByText("The uploaded headers do not match the current template.")).not.toBeInTheDocument();
+    expect(screen.getByText("Missing columns: CWSN, PEN Number")).toBeInTheDocument();
+  });
+
   it("counts every uncreated row as to go and includes skipped rows in the rejected CSV", async () => {
     vi.mocked(fetch).mockResolvedValue(
       new Response(
@@ -231,6 +300,92 @@ describe("BulkStudentUploadModal", () => {
     );
   });
 
+  it("shows the submitted phone when Phone-mode match context omits Student ID", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          totals: { total: 1, created: 0, duplicate_in_file: 0, already_exists: 1, rejected: 0 },
+          results: [{
+            row_number: 6,
+            status: "already_exists",
+            original: {
+              Grade: "12",
+              "Student Name": "Existing Student",
+              "Parents Phone Number": "6876543210",
+            },
+            existing_match: { school_code: "JNV001" },
+          }],
+        }),
+        { status: 200 },
+      ),
+    );
+
+    const user = userEvent.setup();
+    render(<BulkStudentUploadModal {...baseProps} registrationMode={PHONE_REGISTRATION_MODE} />);
+
+    await user.upload(
+      screen.getByLabelText("Student upload file"),
+      new File(["fake"], "students.xlsx", {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      }),
+    );
+    await user.click(screen.getByRole("button", { name: "Upload students" }));
+
+    expect(await screen.findByText(
+      "This student identifier is already part of this school. Student ID / Phone Number: 6876543210.",
+    )).toBeInTheDocument();
+  });
+
+  it("shows rejected existing-school context and redacts restricted Phone-mode identities", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          totals: { total: 1, created: 0, duplicate_in_file: 0, already_exists: 0, rejected: 1 },
+          results: [
+            {
+              row_number: 2,
+              status: "rejected",
+              original: { Grade: "11", "Student Name": "Asha Kumar", "Parents Phone Number": "6876543210" },
+              row_errors: ["Student already belongs to another school"],
+              existing_match: {
+                student_id: "6876543210",
+                pen_number: "12345678901",
+                apaar_id: "123456789012",
+                student_name: "Asha Kumar",
+                school_name: "JNV Other",
+                school_code: "JNV999",
+                udise_code: "99999999999",
+                district: "Jaipur",
+                state: "Rajasthan",
+                grade: 11,
+                program: "JNV NVS",
+                stream: "engineering",
+              },
+            },
+          ],
+        }),
+        { status: 400 },
+      ),
+    );
+    const user = userEvent.setup();
+    render(<BulkStudentUploadModal {...baseProps} registrationMode={PHONE_REGISTRATION_MODE} />);
+
+    await user.upload(
+      screen.getByLabelText("Student upload file"),
+      new File(["fake"], "students.csv", { type: "text/csv" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Upload students" }));
+
+    expect(
+      await screen.findByText(
+        /This identifier already belongs to Asha Kumar at JNV Other \(JNV999, UDISE 99999999999\), Jaipur, Rajasthan/,
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Student already belongs to another school")).not.toBeInTheDocument();
+    expect(screen.queryByText(/12345678901/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/123456789012/)).not.toBeInTheDocument();
+  });
+
   it("does not repeat an upload when its response times out", async () => {
     vi.mocked(fetch).mockResolvedValue(new Response("Gateway timeout", { status: 504 }));
     const user = userEvent.setup();
@@ -267,5 +422,43 @@ describe("BulkStudentUploadModal", () => {
     rerender(<BulkStudentUploadModal {...baseProps} open />);
 
     expect(screen.getByLabelText("Student upload file")).toHaveProperty("files", expect.objectContaining({ length: 0 }));
+  });
+
+  it("uses the Phone Registration Mode retry columns and guidance", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          totals: { total: 1, created: 0, duplicate_in_file: 0, already_exists: 0, rejected: 1 },
+          results: [{
+            row_number: 2,
+            status: "rejected",
+            original: {
+              Grade: "12",
+              "Student Name": "Bad Student",
+              "Parents Phone Number": "5876543210",
+            },
+            field_errors: { phone: "Enter a valid phone number" },
+          }],
+        }),
+        { status: 400 },
+      ),
+    );
+
+    const user = userEvent.setup();
+    render(<BulkStudentUploadModal {...baseProps} registrationMode={PHONE_REGISTRATION_MODE} />);
+
+    expect(screen.getByText(/Phone Registration Mode/)).toBeInTheDocument();
+    await user.upload(
+      screen.getByLabelText("Student upload file"),
+      new File(["fake"], "students.csv", { type: "text/csv" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Upload students" }));
+
+    const download = await screen.findByRole("link", { name: "Download rejected rows CSV" });
+    const href = download.getAttribute("href") ?? "";
+    expect(href).toContain("Parents%20Phone%20Number");
+    expect(href).not.toContain("PEN%20Number");
+    expect(href).not.toContain("Grade%2010%20Roll%20no");
+    expect(href).not.toContain("Yearly%20%2F%20Annual%20Family%20Income");
   });
 });

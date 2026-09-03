@@ -62,6 +62,7 @@ export interface Student {
   program_id: number | null;
   student_program_ids?: Array<number | string> | null;
   dropout_program_ids?: Array<number | string> | null;
+  is_phone_registration_student?: boolean;
   can_undo_nvs_dropout?: boolean;
   grade: number | null;
   grade_id: string | null;
@@ -781,6 +782,7 @@ export default function StudentTable({
           batches={batches}
           nvsStreams={nvsStreams}
           programId={effectiveProgramId}
+          isPhoneRegistrationStudent={editingStudent.is_phone_registration_student === true}
         />
       )}
 

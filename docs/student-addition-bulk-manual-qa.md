@@ -11,7 +11,7 @@ Use one real-like JNV NVS workbook from Ops with Grade 11 or Grade 12 selected o
 - Already-existing students return `already_exists` and do not overwrite existing data.
 - Missing APAAR ID and Grade 10 Roll no returns a rejected row.
 - Bad dates, including future Date of Birth, return field errors.
-- Bad reference values for Gender, Category, Board Stream, Primary Exam preparing for, G10 board, and Annual Family Income return field errors.
+- Choice cell values for Gender, Category, G10 board, and Board Stream—and, in Approved mode only, Annual Family Income—accept an exact configured label after outer whitespace is trimmed and case is ignored, then return the canonical label. CWSN and Primary Exam preparing for remain case-insensitive. Fuzzy matches, synonyms, and punctuation changes remain invalid; unknown values return field errors.
 - CBSE rows with a non-8-digit Grade 10 Roll no return field errors.
 - Non-CBSE alphanumeric Grade 10 Roll no with 4 to 10 characters is accepted and generates an alphanumeric Student ID.
 - Partial success shows created/already-present/rejected totals and a rejected-row CSV.
