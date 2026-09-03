@@ -188,6 +188,39 @@ describe("PATCH /api/student/[id]", () => {
     });
   });
 
+  it("canonicalizes case-insensitive choice labels in an Approved-mode edit payload", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockFetch.mockResolvedValue(
+      new Response(JSON.stringify({ status: "updated" }), { status: 200 }),
+    );
+
+    const req = jsonRequest("http://localhost/api/student/100", {
+      method: "PATCH",
+      body: {
+        program_id: 64,
+        gender: "fEmAlE",
+        category: "gEn-EwS",
+        physically_handicapped: false,
+        g10_board: "cBsE",
+        board_stream: "cOmMeRcE (wItHoUt MaTh)",
+        annual_family_income: "lEsS tHaN rS. 1,00,000",
+      },
+    });
+
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(200);
+    const payload = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(payload).toMatchObject({
+      gender: "Female",
+      category: "Gen-EWS",
+      physically_handicapped: false,
+      g10_board: "CBSE",
+      board_stream: "Commerce (Without Math)",
+      annual_family_income: "Less than Rs. 1,00,000",
+    });
+  });
+
   it("proxies Approved-mode phone-cohort backfill fields without changing Student ID", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
     mockQuery.mockResolvedValueOnce([phoneCohortWithBlankIdentifiers]);

@@ -244,6 +244,43 @@ describe("POST /api/school/[udise]/students", () => {
     });
   });
 
+  it("canonicalizes case-insensitive choice labels in an Approved-mode payload", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(JSON.stringify({ results: [{ status: "created" }] }), { status: 200 }),
+    );
+
+    const response = await POST(
+      jsonRequest("http://localhost/api/school/12345678901/students", {
+        method: "POST",
+        body: {
+          ...validBody,
+          gender: "fEmAlE",
+          category: "gEn-EwS",
+          physically_handicapped: "nO",
+          g10_board: "cBsE",
+          g10_roll_no: "12345678",
+          board_stream: "cOmMeRcE (wItHoUt MaTh)",
+          stream: "eNgInEeRiNg",
+          annual_family_income: "lEsS tHaN rS. 1,00,000",
+        },
+      }) as never,
+      routeParams({ udise: "12345678901" }),
+    );
+
+    expect(response.status).toBe(200);
+    const payload = JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string);
+    expect(payload.rows[0]).toMatchObject({
+      gender: "Female",
+      category: "Gen-EWS",
+      physically_handicapped: false,
+      g10_board: "CBSE",
+      g10_roll_no: "12345678",
+      board_stream: "Commerce (Without Math)",
+      stream: "engineering",
+      annual_family_income: "Less than Rs. 1,00,000",
+    });
+  });
+
   it("returns 401 before resolving schools when unauthenticated", async () => {
     mockGetServerSession.mockResolvedValue(NO_SESSION);
 

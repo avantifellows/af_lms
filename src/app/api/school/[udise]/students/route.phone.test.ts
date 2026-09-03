@@ -140,6 +140,42 @@ describe("POST /api/school/[udise]/students in Phone Registration Mode", () => {
     expect(payload.rows[0]).not.toHaveProperty("annual_family_income");
   });
 
+  it("canonicalizes case-insensitive choice labels in a Phone-mode payload", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(JSON.stringify({ results: [{ status: "created" }] }), { status: 200 }),
+    );
+
+    const response = await POST(
+      jsonRequest("http://localhost/api/school/12345678901/students", {
+        method: "POST",
+        body: {
+          ...phoneModeBody,
+          gender: "fEmAlE",
+          category: "gEn-EwS",
+          physically_handicapped: "nO",
+          g10_board: "oThErS",
+          board_stream: "pCmB",
+          stream: "eNgInEeRiNg",
+        },
+      }) as never,
+      routeParams({ udise: "12345678901" }),
+    );
+
+    expect(response.status).toBe(200);
+    const payload = JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string);
+    expect(payload.rows[0]).toMatchObject({
+      gender: "Female",
+      category: "Gen-EWS",
+      physically_handicapped: false,
+      g10_board: "Others",
+      board_stream: "PCMB",
+      stream: "engineering",
+      phone: "6876543210",
+      student_id: "6876543210",
+    });
+    expect(payload.rows[0]).not.toHaveProperty("annual_family_income");
+  });
+
   it("accepts the HQ 11-column workbook and forwards only Phone-mode fields", async () => {
     vi.useRealTimers();
     vi.mocked(fetch).mockResolvedValue(

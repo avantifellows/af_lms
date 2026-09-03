@@ -36,11 +36,6 @@ export const ANNUAL_FAMILY_INCOME_OPTIONS = [
   "More than Rs. 8,00,000",
 ] as const;
 
-const BOARD_SET = new Set<string>(G10_BOARD_OPTIONS);
-const GENDER_SET = new Set<string>(STUDENT_ADDITION_GENDER_OPTIONS);
-const CATEGORY_SET = new Set<string>(CATEGORY_OPTIONS);
-const BOARD_STREAM_SET = new Set<string>(BOARD_STREAM_OPTIONS);
-const INCOME_SET = new Set<string>(ANNUAL_FAMILY_INCOME_OPTIONS);
 const STREAM_MAP: Record<string, LmsStudentStream> = {
   engineering: "engineering",
   medical: "medical",
@@ -407,6 +402,16 @@ function stringValue(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function canonicalOptionValue(value: string, options: readonly string[]): string | null {
+  const normalized = value.toLowerCase();
+  return options.find((option) => option.toLowerCase() === normalized) ?? null;
+}
+
+function canonicalGenderValue(value: string): string | null {
+  return canonicalOptionValue(value, STUDENT_ADDITION_GENDER_OPTIONS) ??
+    (value.toLowerCase() === "others" ? "Other" : null);
+}
+
 export function isValidRegistrationPhone(
   value: unknown,
   mode: RegistrationMode = ACTIVE_REGISTRATION_MODE,
@@ -549,6 +554,10 @@ export function canonicalizeStudentEditPayload(
       return editError("pen_number", "PEN must be exactly 11 digits");
     }
   }
+  const canonicalG10Board = typeof fields.g10_board === "string"
+    ? canonicalOptionValue(fields.g10_board.trim(), G10_BOARD_OPTIONS)
+    : null;
+  if (canonicalG10Board) fields.g10_board = canonicalG10Board;
   if (fields.g10_roll_no !== undefined) {
     if (typeof fields.g10_roll_no !== "string") {
       return editError("g10_roll_no", "Grade 10 Roll no must be text");
@@ -578,8 +587,13 @@ export function canonicalizeStudentEditPayload(
         : "Parents Phone Number must be exactly 10 digits and cannot start with zero",
     );
   }
-  if (fields.gender !== undefined && (typeof fields.gender !== "string" || ![...GENDER_SET, "Others"].includes(fields.gender))) {
-    return editError("gender", "Gender must be Female, Male, or Other");
+  if (fields.gender !== undefined) {
+    if (typeof fields.gender !== "string") {
+      return editError("gender", "Gender must be Female, Male, or Other");
+    }
+    const gender = canonicalGenderValue(fields.gender.trim());
+    if (!gender) return editError("gender", "Gender must be Female, Male, or Other");
+    fields.gender = gender;
   }
   if (fields.date_of_birth !== undefined) {
     const date = parseDate(fields.date_of_birth);
@@ -589,8 +603,11 @@ export function canonicalizeStudentEditPayload(
     }
     fields.date_of_birth = date;
   }
-  if (fields.category !== undefined && (typeof fields.category !== "string" || !CATEGORY_SET.has(fields.category))) {
-    return editError("category", "Category is not valid");
+  if (fields.category !== undefined) {
+    if (typeof fields.category !== "string") return editError("category", "Category is not valid");
+    const category = canonicalOptionValue(fields.category.trim(), CATEGORY_OPTIONS);
+    if (!category) return editError("category", "Category is not valid");
+    fields.category = category;
   }
   if (fields.physically_handicapped !== undefined && typeof fields.physically_handicapped !== "boolean") {
     return editError("physically_handicapped", "CWSN must be true or false");
@@ -601,13 +618,26 @@ export function canonicalizeStudentEditPayload(
   if (fields.stream !== undefined && (typeof fields.stream !== "string" || !Object.values(STREAM_MAP).includes(fields.stream))) {
     return editError("stream", "Primary Exam preparing for is not valid");
   }
-  if (fields.board_stream !== undefined && (typeof fields.board_stream !== "string" || !BOARD_STREAM_SET.has(fields.board_stream))) {
-    return editError("board_stream", "Board Stream is not valid");
+  if (fields.board_stream !== undefined) {
+    if (typeof fields.board_stream !== "string") return editError("board_stream", "Board Stream is not valid");
+    const boardStream = canonicalOptionValue(fields.board_stream.trim(), BOARD_STREAM_OPTIONS);
+    if (!boardStream) return editError("board_stream", "Board Stream is not valid");
+    fields.board_stream = boardStream;
   }
-  if (fields.annual_family_income !== undefined && (typeof fields.annual_family_income !== "string" || (fields.annual_family_income && !INCOME_SET.has(fields.annual_family_income)))) {
-    return editError("annual_family_income", "Annual Family Income is not valid");
+  if (fields.annual_family_income !== undefined) {
+    if (typeof fields.annual_family_income !== "string") {
+      return editError("annual_family_income", "Annual Family Income is not valid");
+    }
+    const annualFamilyIncome = fields.annual_family_income.trim();
+    if (annualFamilyIncome) {
+      const canonicalIncome = canonicalOptionValue(annualFamilyIncome, ANNUAL_FAMILY_INCOME_OPTIONS);
+      if (!canonicalIncome) return editError("annual_family_income", "Annual Family Income is not valid");
+      fields.annual_family_income = canonicalIncome;
+    } else if (fields.annual_family_income !== "") {
+      return editError("annual_family_income", "Annual Family Income is not valid");
+    }
   }
-  if (fields.g10_board !== undefined && (typeof fields.g10_board !== "string" || !BOARD_SET.has(fields.g10_board))) {
+  if (fields.g10_board !== undefined && (typeof fields.g10_board !== "string" || !canonicalG10Board)) {
     return editError("g10_board", "G10 board must be CBSE or Others");
   }
   if (fields.grade !== undefined && fields.grade !== 11 && fields.grade !== 12) {
@@ -628,7 +658,6 @@ export function canonicalizeStudentEditPayload(
       return editError("father_name", "Father Name must contain only letters");
     }
   }
-  if (fields.gender === "Others") fields.gender = "Other";
   if (fields.physically_handicapped && fields.category) {
     fields.category = fields.category === "Gen-EWS" ? "PWD-EWS" : `PWD-${fields.category}`;
   }
@@ -677,19 +706,22 @@ export function validateStudentAdditionInput(
   }
 
   const genderInput = stringValue(input.gender);
-  const gender = genderInput === "Others" ? "Other" : genderInput;
-  if (!GENDER_SET.has(gender)) addError(fieldErrors, "gender", "Gender must be Female, Male, or Other");
+  const canonicalGender = canonicalGenderValue(genderInput);
+  const gender = canonicalGender ?? genderInput;
+  if (!canonicalGender) addError(fieldErrors, "gender", "Gender must be Female, Male, or Other");
 
   const categoryInput = stringValue(input.category);
-  if (!CATEGORY_SET.has(categoryInput)) addError(fieldErrors, "category", "Category is not valid");
+  const canonicalCategory = canonicalOptionValue(categoryInput, CATEGORY_OPTIONS);
+  if (!canonicalCategory) addError(fieldErrors, "category", "Category is not valid");
 
   const physically_handicapped = parsePhysicallyHandicapped(input.physically_handicapped);
   if (physically_handicapped === null) {
     addError(fieldErrors, "physically_handicapped", "CWSN must be Yes or No");
   }
+  const categoryValue = canonicalCategory ?? categoryInput;
   const category = physically_handicapped
-    ? categoryInput === "Gen-EWS" ? "PWD-EWS" : `PWD-${categoryInput}`
-    : categoryInput;
+    ? categoryValue === "Gen-EWS" ? "PWD-EWS" : `PWD-${categoryValue}`
+    : categoryValue;
 
   const restrictedFieldErrors: Record<string, string> = {
     pen_number: "PEN Number is not accepted in Phone Registration Mode",
@@ -710,22 +742,24 @@ export function validateStudentAdditionInput(
   }
 
   const g10BoardInput = stringValue(input.g10_board);
-  if (!BOARD_SET.has(g10BoardInput)) addError(fieldErrors, "g10_board", "G10 board must be CBSE or Others");
-  const g10_board = g10BoardInput;
+  const canonicalG10Board = canonicalOptionValue(g10BoardInput, G10_BOARD_OPTIONS);
+  if (!canonicalG10Board) addError(fieldErrors, "g10_board", "G10 board must be CBSE or Others");
+  const g10_board = canonicalG10Board ?? g10BoardInput;
 
   const g10RollInput = phoneMode ? "" : stringValue(input.g10_roll_no);
-  const g10_roll_no = normalizeG10RollNo(g10RollInput, g10BoardInput);
+  const g10_roll_no = normalizeG10RollNo(g10RollInput, g10_board);
   if (!phoneMode && !pen_number && !g10_roll_no) rowErrors.push("PEN or Grade 10 Roll no is required");
   if (!phoneMode && g10RollInput) {
-    if (g10BoardInput === CBSE_BOARD && !/^[1-9]\d{7}$/.test(g10_roll_no)) {
+    if (g10_board === CBSE_BOARD && !/^[1-9]\d{7}$/.test(g10_roll_no)) {
       addError(fieldErrors, "g10_roll_no", "CBSE Grade 10 Roll no must be exactly 8 digits and cannot start with zero");
-    } else if (g10BoardInput !== CBSE_BOARD && !/^[A-Z0-9]{4,10}$/.test(g10_roll_no)) {
+    } else if (g10_board !== CBSE_BOARD && !/^[A-Z0-9]{4,10}$/.test(g10_roll_no)) {
       addError(fieldErrors, "g10_roll_no", "Grade 10 Roll no must be 4 to 10 characters");
     }
   }
 
   const board_stream = stringValue(input.board_stream);
-  if (!BOARD_STREAM_SET.has(board_stream)) {
+  const canonicalBoardStream = canonicalOptionValue(board_stream, BOARD_STREAM_OPTIONS);
+  if (!canonicalBoardStream) {
     addError(fieldErrors, "board_stream", "Board Stream is not valid");
   }
 
@@ -738,8 +772,12 @@ export function validateStudentAdditionInput(
     addError(fieldErrors, "phone", "Enter a valid phone number");
   }
 
-  const annual_family_income = phoneMode ? "" : stringValue(input.annual_family_income);
-  if (!phoneMode && annual_family_income && !INCOME_SET.has(annual_family_income)) {
+  const annualFamilyIncomeInput = phoneMode ? "" : stringValue(input.annual_family_income);
+  const canonicalAnnualFamilyIncome = phoneMode
+    ? null
+    : canonicalOptionValue(annualFamilyIncomeInput, ANNUAL_FAMILY_INCOME_OPTIONS);
+  const annual_family_income = canonicalAnnualFamilyIncome ?? annualFamilyIncomeInput;
+  if (!phoneMode && annual_family_income && !canonicalAnnualFamilyIncome) {
     addError(fieldErrors, "annual_family_income", "Annual Family Income is not valid");
   }
 
@@ -755,7 +793,7 @@ export function validateStudentAdditionInput(
     category,
     ...(physically_handicapped !== null ? { physically_handicapped } : {}),
     g10_board,
-    board_stream,
+    board_stream: canonicalBoardStream ?? board_stream,
     ...(stream ? { stream } : {}),
     father_name,
     phone,

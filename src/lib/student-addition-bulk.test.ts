@@ -83,6 +83,23 @@ const validPhoneRowValues: unknown[] = [
   "6876543210",
 ];
 
+const caseVariantChoiceRowValues: unknown[] = [
+  "11",
+  "Asha Kumar",
+  "02/01/2010",
+  "fEmAlE",
+  "gEn-EwS",
+  "nO",
+  "12345678901",
+  "cBsE",
+  "12345678",
+  "cOmMeRcE (wItHoUt MaTh)",
+  "eNgInEeRiNg",
+  "Ravi Kumar",
+  "9876543210",
+  "lEsS tHaN rS. 1,00,000",
+];
+
 const csvHeaders = csvLine(uploadHeaders);
 const validCsvRow = csvLine(validRowValues);
 
@@ -168,6 +185,43 @@ describe("parseStudentAdditionUpload", () => {
       Object.fromEntries(phoneUploadHeaders.map((header, index) => [header, String(validPhoneRowValues[index])])),
     );
   });
+
+  it.each(["csv", "xlsx"]) (
+    "canonicalizes case-insensitive choice labels in %s uploads while preserving originalRows casing",
+    async (format) => {
+      const filename = `students.${format}`;
+      const data = format === "csv"
+        ? Buffer.from(`${csvLine(uploadHeaders)}\n${csvLine(caseVariantChoiceRowValues)}`)
+        : await workbookBuffer({ Template: [uploadHeaders, caseVariantChoiceRowValues] });
+
+      const result = await parseStudentAdditionUpload({
+        filename,
+        data,
+        today: new Date("2026-07-01T00:00:00Z"),
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) throw new Error("expected case-insensitive choice labels to be accepted");
+      expect(result.rows).toEqual([
+        expect.objectContaining({
+          row_number: 2,
+          gender: "Female",
+          category: "Gen-EWS",
+          physically_handicapped: false,
+          g10_board: "CBSE",
+          g10_roll_no: "12345678",
+          board_stream: "Commerce (Without Math)",
+          stream: "engineering",
+          annual_family_income: "Less than Rs. 1,00,000",
+        }),
+      ]);
+      expect(result.originalRows.get(2)).toEqual(
+        Object.fromEntries(
+          uploadHeaders.map((header, index) => [header, String(caseVariantChoiceRowValues[index])]),
+        ),
+      );
+    },
+  );
 
   it.each([
     {

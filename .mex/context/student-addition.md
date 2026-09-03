@@ -18,7 +18,7 @@ edges:
     condition: when adding LMS API routes for create or bulk upload
   - target: patterns/db-service-write.md
     condition: when proxying student writes to the DB Service
-last_updated: 2026-09-02
+last_updated: 2026-09-03
 ---
 
 # Student Addition
@@ -34,7 +34,7 @@ GitHub issue https://github.com/avantifellows/af_lms/issues/296 is the build-rea
 - The workbook offers Grade 11 for the primary drive, but AF LMS and DB Service continue accepting both Grade 11 and Grade 12.
 - Parent phone is required, exactly 10 digits, begins with 6 through 9, and is stored as both `user.phone` and `student.student_id`. Portal keeps Student ID plus Date of Birth and already scopes verification by the selected auth group.
 - Identity and existing matching use `(student_id, auth_group)` with `EnableStudents`. In-file duplicate phones reject every affected row; another-School matches do not transfer.
-- Bulk-upload column headers in both Phone and Approved modes are matched after trimming outer whitespace and ignoring case. Canonical output labels and all individual cell-value validation remain unchanged; missing, unknown Phone-mode, and duplicate canonical columns still fail schema validation.
+- Bulk-upload column headers in both Phone and Approved modes are matched after trimming outer whitespace and ignoring case. Choice cell values for Gender, Category, G10 board, Board Stream, and (in Approved mode only) Annual Family Income match exact configured labels after outer trimming and case-insensitive comparison, then are canonicalized to those labels. CWSN and Primary Exam preparing for were already case-insensitive. Fuzzy matches, synonyms, and punctuation changes are not accepted; other cell validation remains unchanged. Missing, unknown Phone-mode, and duplicate canonical columns still fail schema validation.
 - Bulk schema mismatches return structured `templateMismatch` / `template_mismatch` missing, unexpected, and duplicate header details through the LMS API; the upload modal shows only populated groups and links the current mode template. Approved mode still tolerates genuinely extra columns, and the structured `legacy_apaar` marker/message is reserved for files that actually include an APAAR ID header.
 - The active mode is a code constant changed by coordinated AF LMS and DB Service PRs/deployments. No database mode configuration or School selector is added.
 - Every Add/Bulk write carries `registration_mode` and `registration_mode_version`; the expected DB Service mismatch response is `{ error: { code: "registration_mode_mismatch", message: string } }`, which AF LMS surfaces as a fail-closed temporary-unavailability response without row results.
