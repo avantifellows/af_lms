@@ -92,10 +92,23 @@ function schoolQueryPlan(codes: string[] | "all", searchPattern: string | null, 
   };
 }
 
+// Which schools a dashboard query may see.
+//  - "jnv":           JNV schools only. The JNV NVS Schools tab is the scope of
+//                     NVS-attributed students, and only JNV schools have any;
+//                     the ten non-JNV centre-linked schools (EMRS, RSMS, GPUC,
+//                     RGNV, the Maharashtra coaching centres) rendered there as
+//                     permanent 0-student cards. They belong on the Centres tab,
+//                     where their centre card already lists them.
+//  - "centre-linked": JNV plus any school linked to an active centre — the
+//                     header's "your scope" count on the Centres tab, which
+//                     must keep counting a Punjab CoE PM's schools.
+type SchoolScope = "jnv" | "centre-linked";
+
 async function getSchools(
   codes: string[] | "all",
-  search?: string,
-  page: number = 1
+  search: string | undefined,
+  page: number,
+  schoolScope: SchoolScope,
 ): Promise<SchoolsResult> {
   const searchPattern = search ? `%${search}%` : null;
   const offset = (page - 1) * SCHOOLS_PER_PAGE;
@@ -110,10 +123,11 @@ async function getSchools(
   // work was almost entirely wasted. MATERIALIZED is load-bearing: without it
   // PG inlines the CTE and we are back to the flat plan.
   //
-  // School visibility scope: the historical JNV set PLUS any school linked to an
-  // active centre. Centre-linked covers the non-JNV centre rollout (Punjab CoE
-  // meritorious / EMRS / Karnataka) without disturbing JNV. Centre-driven, not a
-  // category allowlist — new centre types light up by linking a centre.
+  // School visibility scope: the historical JNV set, PLUS — for "centre-linked"
+  // — any school linked to an active centre. Centre-linked covers the non-JNV
+  // centre rollout (Punjab CoE meritorious / EMRS / Karnataka) without
+  // disturbing JNV. Centre-driven, not a category allowlist — new centre types
+  // light up by linking a centre. See SchoolScope for which tab wants which.
   //
   // Dedup stopgap: a stale bulk import left a second JNV row (null udise_code,
   // 0 students) for ~190 schools, so they double-listed. Exclude a row only when
@@ -126,13 +140,16 @@ async function getSchools(
   // matches JNV rows, and every JNV row is in `visible` by the first scope
   // branch, so the result is identical (verified against prod — both forms
   // return the same 688 ids, zero difference either way).
+  const centreLinkedClause = schoolScope === "centre-linked"
+    ? "OR EXISTS (SELECT 1 FROM centres c WHERE c.school_id = s.id AND c.is_active)"
+    : "";
   const visibleSchoolsCte = `
     WITH visible AS MATERIALIZED (
       SELECT s.id, s.code, s.name, s.district, s.state, s.region,
              s.udise_code, s.af_school_category
       FROM school s
       WHERE s.af_school_category = 'JNV'
-         OR EXISTS (SELECT 1 FROM centres c WHERE c.school_id = s.id AND c.is_active)
+         ${centreLinkedClause}
     )`;
 
   // Aliased `visible` AS s so the shared schoolQueryPlan predicates (s.name,
@@ -352,7 +369,7 @@ async function loadDashboardData({
       ),
       // No searchQuery: on this tab the term filters CENTRES, while this count is
       // the header's "your scope" figure and drives no pagination here.
-      getSchools(schoolCodes, undefined, currentPage),
+      getSchools(schoolCodes, undefined, currentPage, "centre-linked"),
     ]);
     return {
       schools: [],
@@ -364,7 +381,7 @@ async function loadDashboardData({
   }
 
   const [{ schools, totalCount }, recentVisits] = await Promise.all([
-    getSchools(schoolCodes, searchQuery, currentPage),
+    getSchools(schoolCodes, searchQuery, currentPage, "jnv"),
     hasPMAccess ? getRecentVisits(email) : Promise.resolve([] as Visit[]),
   ]);
   // NVS-attributed counts, not whole-school — keeps this tab disjoint from Centres.
