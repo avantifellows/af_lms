@@ -21,8 +21,7 @@ const SAMPLE = {
       student_name: "Asha",
       stream: "PCM",
       total_major_tests: 3,
-      al_counts: { M1: 2, M2: 1 },
-      mode_al: "M1",
+      academic_level: "M1",
       progression: [
         { session_id: "s1", academic_level: "M2" },
         { session_id: "s2", academic_level: "M1" },
@@ -34,8 +33,7 @@ const SAMPLE = {
       student_name: "Bilal",
       stream: "PCM",
       total_major_tests: 2,
-      al_counts: { M1: 1, M2: 1 },
-      mode_al: "M1",
+      academic_level: "M1",
       progression: [
         { session_id: "s1", academic_level: "M2" },
         { session_id: "s3", academic_level: "M1" },
@@ -58,8 +56,7 @@ const MIXED_STREAM_SAMPLE = {
       student_name: "Asha",
       stream: "PCM",
       total_major_tests: 2,
-      al_counts: { M1: 1, M2: 1 },
-      mode_al: "M1",
+      academic_level: "M1",
       progression: [
         { session_id: "s1", academic_level: "M2" },
         { session_id: "s2", academic_level: "M1" },
@@ -70,8 +67,7 @@ const MIXED_STREAM_SAMPLE = {
       student_name: "Chen",
       stream: "PCB",
       total_major_tests: 2,
-      al_counts: { B1: 1, B2: 1 },
-      mode_al: "B1",
+      academic_level: "B1",
       progression: [
         { session_id: "c1", academic_level: "B2" },
         { session_id: "c2", academic_level: "B1" },
@@ -101,20 +97,20 @@ describe("CumulativeALTable", () => {
     expect(screen.getByText("Test Two")).toBeInTheDocument();
     expect(screen.getByText("Test Three")).toBeInTheDocument();
 
-    // Mode AL / Latest AL header columns are present
+    // AL / Latest AL header columns are present
     const headers = screen.getAllByRole("columnheader");
-    expect(headers.some((h) => /^Mode AL/.test(h.textContent || ""))).toBe(true);
+    expect(headers.some((h) => /^AL/.test(h.textContent || ""))).toBe(true);
     expect(headers.some((h) => /^Latest AL/.test(h.textContent || ""))).toBe(true);
 
     // Stream group heading (PCM/JEE/Engineering)
     expect(screen.getByRole("heading", { name: /PCM/ })).toBeInTheDocument();
 
     // Asha's row should contain three AL chips for the three tests (M2, M1, M1)
-    // plus the Mode AL (M1) and Latest AL (M1) chips → 5 chips total in the row
+    // plus the AL (M1) and Latest AL (M1) chips → 5 chips total in the row
     const ashaRow = screen.getByText("Asha").closest("tr")!;
     const m1Chips = within(ashaRow).getAllByText("M1");
     const m2Chips = within(ashaRow).getAllByText("M2");
-    expect(m1Chips.length).toBe(4); // s2 cell + s3 cell + mode + latest
+    expect(m1Chips.length).toBe(4); // s2 cell + s3 cell + AL + latest
     expect(m2Chips.length).toBe(1); // s1 cell only
   });
 
@@ -202,7 +198,7 @@ describe("CumulativeALTable", () => {
     render(<CumulativeALTable schoolUdise="12345" grade={11} />);
     await screen.findByText("Asha");
 
-    // Default sort: mode_al desc (Asha and Bilal both M1) → tie broken by tests desc → Asha (3) > Bilal (2)
+    // Default sort: AL desc (Asha and Bilal both M1) → tie broken by tests desc → Asha (3) > Bilal (2)
     let rows = screen.getAllByRole("row");
     expect(rows[1]).toHaveTextContent("Asha");
     expect(rows[2]).toHaveTextContent("Bilal");

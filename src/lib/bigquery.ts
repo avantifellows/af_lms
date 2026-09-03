@@ -263,9 +263,17 @@ function alRank(al: string | null | undefined): number {
 }
 
 /**
- * Per-student AL summary + per-test AL progression across all major-test
- * formats, in chronological order. Mode AL is the AL value that appears most
- * often for the student (ties broken by tier: M1/B1 > M2/B2 > NQ > NE).
+ * Per-student AL + per-test AL progression across all major-test formats, in
+ * chronological order.
+ *
+ * The per-student AL is NOT recomputed here — it is read from
+ * dim_student.academic_level, which dbt fills from int_student_academic_level
+ * (mode of the last three major tests per stream, Advanced tests excluded,
+ * "Not Qualified" expressed as M3/B3). Reading the canonical column keeps this
+ * table in step with every other consumer of dim_student and means rule
+ * changes land here without an app change. It is NULL for students the dbt
+ * model has not levelled yet; we surface that as null rather than falling
+ * back to an app-side estimate that would silently disagree with the warehouse.
  */
 export async function getCumulativeALData(
   udise: string,
@@ -287,33 +295,46 @@ export async function getCumulativeALData(
   if (testGrade != null) params.testGrade = testGrade;
 
   // One row per (student, session) — gives us both the test list (for the
-  // matrix columns) and per-student AL points.
+  // matrix columns) and per-test AL points. The student's own AL comes from
+  // dim_student via the join; the MERGE that writes it matches on
+  // pk_student_id, so every academic-year row of a student carries the same
+  // value and picking the current-year row is safe.
   const sql = `
     SELECT
-      fk_student_id AS student_id,
-      ANY_VALUE(student_full_name) AS student_name,
-      ANY_VALUE(student_stream) AS student_stream,
-      session_id,
-      ANY_VALUE(test_name) AS test_name,
-      MIN(start_date) AS start_date,
-      ANY_VALUE(test_stream) AS test_stream,
-      ANY_VALUE(academic_level) AS academic_level,
-      ANY_VALUE(marks_scored) AS marks_scored,
-      ANY_VALUE(max_marks_possible) AS max_marks_possible
-    FROM ${FACT_TABLE}
-    WHERE student_school_udise_code = @udise
-      AND student_grade = @grade
-      AND academic_year = '${CURRENT_ACADEMIC_YEAR}'
-      AND LOWER(section) = 'overall'
-      AND test_format IN (${formatList})
-      AND academic_level IN (${alList})
-      AND fk_student_id IS NOT NULL
-      AND session_id IS NOT NULL
+      f.fk_student_id AS student_id,
+      ANY_VALUE(f.student_full_name) AS student_name,
+      ANY_VALUE(f.student_stream) AS student_stream,
+      ANY_VALUE(ds.academic_level) AS student_academic_level,
+      f.session_id,
+      ANY_VALUE(f.test_name) AS test_name,
+      MIN(f.start_date) AS start_date,
+      ANY_VALUE(f.test_stream) AS test_stream,
+      ANY_VALUE(f.academic_level) AS academic_level,
+      ANY_VALUE(f.marks_scored) AS marks_scored,
+      ANY_VALUE(f.max_marks_possible) AS max_marks_possible
+    FROM ${FACT_TABLE} f
+    LEFT JOIN (
+      SELECT pk_student_id, ANY_VALUE(academic_level) AS academic_level
+      FROM ${DIM_STUDENT_TABLE}
+      WHERE student_school_udise_code = @udise
+        AND student_grade = @grade
+        AND academic_year = '${CURRENT_ACADEMIC_YEAR}'
+        AND academic_level IS NOT NULL
+      GROUP BY pk_student_id
+    ) ds ON ds.pk_student_id = f.fk_student_id
+    WHERE f.student_school_udise_code = @udise
+      AND f.student_grade = @grade
+      AND f.academic_year = '${CURRENT_ACADEMIC_YEAR}'
+      AND LOWER(f.section) = 'overall'
+      AND f.test_format IN (${formatList})
+      AND f.academic_level IN (${alList})
+      AND f.fk_student_id IS NOT NULL
+      AND f.session_id IS NOT NULL
       ${SUBMITTED_ONLY}
       ${programFilter}
       ${streamFilter}
       ${testGradeFilter}
-    GROUP BY fk_student_id, session_id
+    GROUP BY f.fk_student_id, f.session_id
     ORDER BY start_date ASC
   `;
 
@@ -322,6 +343,7 @@ export async function getCumulativeALData(
     student_id: string;
     student_name: string | null;
     student_stream: string | null;
+    student_academic_level: string | null;
     session_id: string;
     test_name: string;
     start_date: string;
@@ -345,7 +367,7 @@ export async function getCumulativeALData(
       student_id: string;
       student_name: string;
       student_stream: string | null;
-      al_counts: Record<string, number>;
+      academic_level: string | null;
       progression: ProgressionEntry[];
     }
   >();
@@ -370,10 +392,9 @@ export async function getCumulativeALData(
       student_id: r.student_id,
       student_name: r.student_name || r.student_id,
       student_stream: r.student_stream,
-      al_counts: {} as Record<string, number>,
+      academic_level: r.student_academic_level ?? null,
       progression: [] as ProgressionEntry[],
     };
-    existing.al_counts[r.academic_level] = (existing.al_counts[r.academic_level] || 0) + 1;
     existing.progression.push({
       session_id: r.session_id,
       academic_level: r.academic_level,
@@ -382,6 +403,8 @@ export async function getCumulativeALData(
     });
     if (!existing.student_name && r.student_name) existing.student_name = r.student_name;
     if (!existing.student_stream && r.student_stream) existing.student_stream = r.student_stream;
+    if (!existing.academic_level && r.student_academic_level)
+      existing.academic_level = r.student_academic_level;
     studentMap.set(r.student_id, existing);
   }
 
@@ -392,19 +415,6 @@ export async function getCumulativeALData(
 
   const students: CumulativeALRow[] = [];
   for (const v of studentMap.values()) {
-    let modeAl: string | null = null;
-    let modeCount = 0;
-    let modeRank = -1;
-    let total = 0;
-    for (const [al, count] of Object.entries(v.al_counts)) {
-      total += count;
-      const rank = alRank(al);
-      if (count > modeCount || (count === modeCount && rank > modeRank)) {
-        modeAl = al;
-        modeCount = count;
-        modeRank = rank;
-      }
-    }
     // Sort each student's progression by the global chronological order.
     v.progression.sort(
       (a, b) =>
@@ -416,17 +426,17 @@ export async function getCumulativeALData(
       student_id: v.student_id,
       student_name: v.student_name,
       stream: canonical ? streamDisplayLabel(canonical) : null,
-      total_major_tests: total,
-      al_counts: v.al_counts,
-      mode_al: modeAl,
+      total_major_tests: v.progression.length,
+      academic_level: v.academic_level,
       progression: v.progression,
     });
   }
 
-  // Sort students by mode AL rank desc, then by total tests desc, then name.
+  // Sort students by AL rank desc (unlevelled students last), then by total
+  // tests desc, then name.
   students.sort((a, b) => {
-    const ar = alRank(a.mode_al);
-    const br = alRank(b.mode_al);
+    const ar = alRank(a.academic_level);
+    const br = alRank(b.academic_level);
     if (ar !== br) return br - ar;
     if (a.total_major_tests !== b.total_major_tests)
       return b.total_major_tests - a.total_major_tests;

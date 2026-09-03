@@ -57,9 +57,10 @@ export interface CumulativeALRow {
   student_name: string;
   stream: string | null;
   total_major_tests: number;
-  // Counts of each AL value across major tests for this student.
-  al_counts: Record<string, number>;
-  mode_al: string | null;
+  // The student's canonical AL from dim_student.academic_level (dbt-computed:
+  // mode of the last three major tests per stream; M3/B3 = not qualified).
+  // Null when the warehouse has not levelled the student yet.
+  academic_level: string | null;
   // Per-test AL points in chronological order. Useful when summarising trend
   // (most recent vs earliest) without consulting the test list.
   progression: ProgressionEntry[];
