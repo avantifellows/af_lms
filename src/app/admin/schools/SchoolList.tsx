@@ -154,6 +154,7 @@ export default function SchoolList({ initialSchools }: SchoolListProps) {
           <Select
             value={programFilter}
             onChange={(e) => setProgramFilter(e.target.value === "all" ? "all" : Number(e.target.value))}
+            className="max-w-xs"
           >
             <option value="all">All Programs</option>
             <option value="1">CoE only</option>
