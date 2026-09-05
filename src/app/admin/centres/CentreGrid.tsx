@@ -959,7 +959,7 @@ function FilterSelect<T extends CentreBooleanFilter | CentreSchoolLinkFilter>({
       <Select
         value={value}
         onChange={(event) => onChange(event.target.value as T)}
-        className="mt-1 w-full"
+        className="mt-1"
       >
         {options.map(([code, optionLabel]) => (
           <option key={code} value={code}>

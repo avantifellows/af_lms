@@ -133,7 +133,6 @@ export default function GroupStudentDiscussionForm({
           value={grade ?? ""}
           onChange={(e) => handleGradeChange(e.target.value)}
           disabled={disabled}
-          className="w-full"
           data-testid="group-student-grade-select"
         >
           <option value="" disabled>
