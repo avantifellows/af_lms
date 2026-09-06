@@ -125,9 +125,11 @@ async function priorPlanCanBeCopied(
 export default function PhasePlanSetup({
   academicYear = CURRENT_ACADEMIC_YEAR,
   programId = PROGRAM_IDS.COE,
+  canEdit = true,
 }: {
   academicYear?: string;
   programId?: number;
+  canEdit?: boolean;
 }) {
   const [plan, setPlan] = useState<Plan | null | undefined>();
   const [canCopyPriorPlan, setCanCopyPriorPlan] = useState(false);
@@ -146,8 +148,10 @@ export default function PhasePlanSetup({
     setMessage("");
     try {
       const loaded = await fetchPhasePlan(year, programId);
-      const nextPlan = loaded.plan;
-      const canCopy = await priorPlanCanBeCopied(nextPlan, year, programId);
+      const nextPlan = loaded.plan && !canEdit
+        ? { ...loaded.plan, editable: false }
+        : loaded.plan;
+      const canCopy = canEdit && await priorPlanCanBeCopied(nextPlan, year, programId);
       if (requestId !== loadId.current) return;
       setMessage(loaded.error);
       setCanCopyPriorPlan(canCopy);
@@ -160,7 +164,7 @@ export default function PhasePlanSetup({
       setCanCopyPriorPlan(false);
       setPlan(null);
     }
-  }, [academicYear, programId]);
+  }, [academicYear, canEdit, programId]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -263,7 +267,7 @@ export default function PhasePlanSetup({
       </div>
       {message && <p role="alert" className="rounded-md bg-danger-bg p-3 text-sm text-danger">{message}</p>}
       <PlanContent plan={plan ?? null} academicYear={academicYear} draft={draft} selectedPhase={selectedPhase}
-        definitionReadOnly={definitionReadOnly} busy={busy} canCopyPriorPlan={canCopyPriorPlan}
+        definitionReadOnly={definitionReadOnly} busy={busy} canCopyPriorPlan={canCopyPriorPlan} canEdit={canEdit}
         onCreate={create} onEdit={edit} onMove={move}
         onRemove={remove} onDraftChange={setDraft} onChangeState={changeState} onSave={save} onDiscard={discard} />
     </section>
@@ -278,6 +282,7 @@ type PlanContentProps = {
   definitionReadOnly: boolean;
   busy: boolean;
   canCopyPriorPlan: boolean;
+  canEdit: boolean;
   onCreate: (copy: boolean) => Promise<void>;
   onEdit: (phase: Phase) => void;
   onMove: (index: number, offset: -1 | 1) => Promise<void>;
@@ -291,19 +296,23 @@ type PlanContentProps = {
 function PlanContent(props: PlanContentProps) {
   if (!props.plan) {
     return <MissingPlan academicYear={props.academicYear} busy={props.busy}
-      canCopyPriorPlan={props.canCopyPriorPlan} onCreate={props.onCreate} />;
+      canCopyPriorPlan={props.canCopyPriorPlan} canEdit={props.canEdit} onCreate={props.onCreate} />;
   }
   return <ConfiguredPlan {...props} plan={props.plan} />;
 }
 
-function MissingPlan({ academicYear, busy, canCopyPriorPlan, onCreate }: {
+function MissingPlan({ academicYear, busy, canCopyPriorPlan, canEdit, onCreate }: {
   academicYear: string;
   busy: boolean;
   canCopyPriorPlan: boolean;
+  canEdit: boolean;
   onCreate: (copy: boolean) => Promise<void>;
 }) {
   if (academicYear !== CURRENT_ACADEMIC_YEAR) {
     return <p className="py-12 text-center text-sm text-text-muted">No prior-year Plan.</p>;
+  }
+  if (!canEdit) {
+    return <p className="py-12 text-center text-sm text-text-muted">No Phase Plan for this Academic Year.</p>;
   }
   return <div className="flex min-h-72 flex-col items-center justify-center gap-3 border border-dashed border-border p-6 text-center">
     <Milestone aria-hidden="true" className="h-8 w-8 text-text-muted" />

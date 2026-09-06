@@ -8,8 +8,8 @@ import type {
   CurriculumSummaryFilters,
 } from "@/lib/curriculum-summary";
 import type { ExamTrack } from "@/types/curriculum";
+import { EXAM_TRACKS } from "@/lib/exam-tracks";
 import SchoolFilterSelect, {
-  DerivedFilterChips,
   ExamTrackFilterSelect,
   GradeFilterSelect,
   ProgramFilterSelect,
@@ -36,124 +36,45 @@ export default function CurriculumSummaryFiltersForm({
     filters.examTracks
   );
   const [selectedRegions, setSelectedRegions] = useState(filters.regions);
-  const [selectedStates, setSelectedStates] = useState(filters.states);
-  const [selectedDistricts, setSelectedDistricts] = useState(filters.districts);
-  const derivedLocationFilters = useMemo(
-    () => deriveLocationFiltersFromSelectedSchools(selectedSchoolCodes, options),
-    [selectedSchoolCodes, options]
+  const schoolOptions = useMemo(
+    () => filterSchoolsByRegion(options.schools, selectedRegions),
+    [options.schools, selectedRegions]
   );
-  const manuallyFilteredSchools = useMemo(
-    () =>
-      filterSchoolsByLocation(options.schools, {
-        regions: selectedRegions,
-        states: selectedStates,
-        districts: selectedDistricts,
-      }),
-    [options.schools, selectedDistricts, selectedRegions, selectedStates]
-  );
-  const schoolOptions = derivedLocationFilters ? options.schools : manuallyFilteredSchools;
   const regionOptions = useMemo(
-    () =>
-      locationValuesForSchools(
-        filterSchoolsByLocation(options.schools, {
-          states: selectedStates,
-          districts: selectedDistricts,
-        }),
-        "region",
-        options.regions
-      ),
-    [options.regions, options.schools, selectedDistricts, selectedStates]
+    () => uniqueSorted(options.schools.map((school) => school.region)),
+    [options.schools]
   );
-  const stateOptions = useMemo(
-    () =>
-      locationValuesForSchools(
-        filterSchoolsByLocation(options.schools, {
-          regions: selectedRegions,
-          districts: selectedDistricts,
-        }),
-        "state",
-        options.states
-      ),
-    [options.schools, options.states, selectedDistricts, selectedRegions]
-  );
-  const districtOptions = useMemo(
-    () =>
-      locationValuesForSchools(
-        filterSchoolsByLocation(options.schools, {
-          regions: selectedRegions,
-          states: selectedStates,
-        }),
-        "district",
-        options.districts
-      ),
-    [options.districts, options.schools, selectedRegions, selectedStates]
+  const downstreamOptions = useMemo(
+    () => optionsForSchools(options, selectedSchoolCodes, selectedRegions),
+    [options, selectedSchoolCodes, selectedRegions]
   );
 
-  function handleSelectedSchoolCodesChange(nextSchoolCodes: string[]) {
-    setSelectedSchoolCodes(nextSchoolCodes);
-
-    if (nextSchoolCodes.length === 0) {
-      return;
-    }
-
-    setSelectedProgramIds((current) =>
-      current.length > 0 || !options.programs[0] ? current : [options.programs[0].id]
-    );
-    setSelectedGrades((current) =>
-      current.length > 0 || !options.grades[0] ? current : [options.grades[0]]
-    );
-    setSelectedSubjectIds((current) =>
-      current.length > 0 || !options.subjects[0] ? current : [options.subjects[0].id]
-    );
-    setSelectedExamTracks((current) =>
-      current.length > 0 || !options.examTracks[0] ? current : [options.examTracks[0]]
-    );
+  function handleSelectedSchoolsChange(schoolCodes: string[]) {
+    const nextOptions = optionsForSchools(options, schoolCodes, selectedRegions);
+    setSelectedSchoolCodes(schoolCodes);
+    pruneDownstreamSelections(nextOptions);
   }
 
-  function handleRegionsChange(nextRegions: string[]) {
-    setSelectedRegions(nextRegions);
-
-    const matchingSchools = filterSchoolsByLocation(options.schools, {
-      regions: nextRegions,
-    });
-    setSelectedStates((current) => pruneLocationValues(current, matchingSchools, "state"));
-    setSelectedDistricts((current) =>
-      pruneLocationValues(current, matchingSchools, "district")
+  function handleSelectedRegionsChange(regions: string[]) {
+    const schoolCodes = keepAvailable(
+      selectedSchoolCodes,
+      filterSchoolsByRegion(options.schools, regions).map(({ code }) => code)
     );
+    const nextOptions = optionsForSchools(options, schoolCodes, regions);
+    setSelectedRegions(regions);
+    setSelectedSchoolCodes(schoolCodes);
+    pruneDownstreamSelections(nextOptions);
   }
 
-  function handleStatesChange(nextStates: string[]) {
-    setSelectedStates(nextStates);
-
-    const matchingSchools = filterSchoolsByLocation(options.schools, {
-      states: nextStates,
-      districts: selectedDistricts,
-    });
-    const derivedRegions = uniqueSorted(matchingSchools.map((school) => school.region));
-    if (nextStates.length > 0 || selectedDistricts.length > 0) {
-      setSelectedRegions(derivedRegions);
-    }
-    setSelectedDistricts((current) =>
-      pruneLocationValues(
-        current,
-        filterSchoolsByLocation(options.schools, { states: nextStates }),
-        "district"
-      )
+  function pruneDownstreamSelections(nextOptions: CurriculumSummaryFilterOptions) {
+    setSelectedProgramIds((selected) =>
+      keepAvailable(selected, nextOptions.programs.map(({ id }) => id))
     );
-  }
-
-  function handleDistrictsChange(nextDistricts: string[]) {
-    setSelectedDistricts(nextDistricts);
-
-    if (nextDistricts.length === 0) {
-      return;
-    }
-
-    const matchingSchools = filterSchoolsByLocation(options.schools, {
-      districts: nextDistricts,
-    });
-    setSelectedStates(uniqueSorted(matchingSchools.map((school) => school.state)));
-    setSelectedRegions(uniqueSorted(matchingSchools.map((school) => school.region)));
+    setSelectedGrades((selected) => keepAvailable(selected, nextOptions.grades));
+    setSelectedSubjectIds((selected) =>
+      keepAvailable(selected, nextOptions.subjects.map(({ id }) => id))
+    );
+    setSelectedExamTracks((selected) => keepAvailable(selected, nextOptions.examTracks));
   }
 
   function handleClearFilters() {
@@ -163,8 +84,6 @@ export default function CurriculumSummaryFiltersForm({
     setSelectedSubjectIds([]);
     setSelectedExamTracks([]);
     setSelectedRegions([]);
-    setSelectedStates([]);
-    setSelectedDistricts([]);
     formRef.current?.reset();
     router.push("/curriculum-summary");
   }
@@ -181,81 +100,39 @@ export default function CurriculumSummaryFiltersForm({
           key={`schools:${filters.schools.join(",")}`}
           options={schoolOptions}
           selectedCodes={selectedSchoolCodes}
-          onSelectedCodesChange={handleSelectedSchoolCodesChange}
+          onSelectedCodesChange={handleSelectedSchoolsChange}
         />
         <ProgramFilterSelect
-          options={options.programs}
+          options={downstreamOptions.programs}
           selectedIds={selectedProgramIds}
           onSelectedIdsChange={setSelectedProgramIds}
         />
         <GradeFilterSelect
-          options={options.grades}
+          options={downstreamOptions.grades}
           selectedGrades={selectedGrades}
           onSelectedGradesChange={setSelectedGrades}
         />
         <SubjectFilterSelect
-          options={options.subjects}
+          options={downstreamOptions.subjects}
           selectedIds={selectedSubjectIds}
           onSelectedIdsChange={setSelectedSubjectIds}
         />
         <ExamTrackFilterSelect
-          options={options.examTracks}
+          options={downstreamOptions.examTracks}
           selectedTracks={selectedExamTracks}
           onSelectedTracksChange={setSelectedExamTracks}
         />
-        {derivedLocationFilters ? (
-          <>
-            <DerivedFilterChips
-              label="Regions"
-              name="regions"
-              values={derivedLocationFilters.regions}
-            />
-            <DerivedFilterChips
-              label="States"
-              name="states"
-              values={derivedLocationFilters.states}
-            />
-            <DerivedFilterChips
-              label="Districts"
-              name="districts"
-              values={derivedLocationFilters.districts}
-            />
-          </>
-        ) : (
-          <>
-            <StringFilterSelect
-              key={`regions:${filters.regions.join(",")}`}
-              label="Regions"
-              name="regions"
-              inputId="curriculum-summary-region-filter"
-              placeholder="Search region"
-              noMatchesText="No matching regions"
-              options={regionOptions}
-              selectedValues={selectedRegions}
-              onSelectedValuesChange={handleRegionsChange}
-            />
-            <StringFilterSelect
-              label="States"
-              name="states"
-              inputId="curriculum-summary-state-filter"
-              placeholder="Search state"
-              noMatchesText="No matching states"
-              options={stateOptions}
-              selectedValues={selectedStates}
-              onSelectedValuesChange={handleStatesChange}
-            />
-            <StringFilterSelect
-              label="Districts"
-              name="districts"
-              inputId="curriculum-summary-district-filter"
-              placeholder="Search district"
-              noMatchesText="No matching districts"
-              options={districtOptions}
-              selectedValues={selectedDistricts}
-              onSelectedValuesChange={handleDistrictsChange}
-            />
-          </>
-        )}
+        <StringFilterSelect
+          key={`regions:${filters.regions.join(",")}`}
+          label="Regions"
+          name="regions"
+          inputId="curriculum-summary-region-filter"
+          placeholder="Search region"
+          noMatchesText="No matching regions"
+          options={regionOptions.length > 0 ? regionOptions : options.regions}
+          selectedValues={selectedRegions}
+          onSelectedValuesChange={handleSelectedRegionsChange}
+        />
         <label className="flex flex-col gap-1 text-sm font-medium text-text-secondary">
           Date preset
           <select
@@ -303,67 +180,53 @@ export default function CurriculumSummaryFiltersForm({
   );
 }
 
-function filterSchoolsByLocation(
-  schools: CurriculumSummaryFilterOptions["schools"],
-  filters: Partial<Pick<CurriculumSummaryFilters, "regions" | "states" | "districts">>
-) {
-  const regions = new Set(filters.regions ?? []);
-  const states = new Set(filters.states ?? []);
-  const districts = new Set(filters.districts ?? []);
+function optionsForSchools(
+  options: CurriculumSummaryFilterOptions,
+  schoolCodes: string[],
+  regions: string[]
+): CurriculumSummaryFilterOptions {
+  if (!options.availability) return options;
 
-  return schools.filter((school) => {
-    if (regions.size > 0 && (!school.region || !regions.has(school.region))) {
-      return false;
-    }
-    if (states.size > 0 && (!school.state || !states.has(school.state))) {
-      return false;
-    }
-    if (
-      districts.size > 0 &&
-      (!school.district || !districts.has(school.district))
-    ) {
-      return false;
-    }
-    return true;
-  });
-}
-
-function locationValuesForSchools(
-  schools: CurriculumSummaryFilterOptions["schools"],
-  key: "region" | "state" | "district",
-  fallbackValues: string[]
-) {
-  const values = uniqueSorted(schools.map((school) => school[key]));
-  return values.length > 0 ? values : fallbackValues;
-}
-
-function pruneLocationValues(
-  values: string[],
-  schools: CurriculumSummaryFilterOptions["schools"],
-  key: "region" | "state" | "district"
-) {
-  const allowedValues = new Set(uniqueSorted(schools.map((school) => school[key])));
-  return values.filter((value) => allowedValues.has(value));
-}
-
-function deriveLocationFiltersFromSelectedSchools(
-  selectedSchoolCodes: string[],
-  options: CurriculumSummaryFilterOptions
-): Pick<CurriculumSummaryFilters, "regions" | "states" | "districts"> | null {
-  if (selectedSchoolCodes.length === 0) {
-    return null;
-  }
-
-  const selectedCodes = new Set(selectedSchoolCodes);
-  const selectedSchools = options.schools.filter((school) =>
-    selectedCodes.has(school.code)
+  const selectedSchools = new Set(schoolCodes);
+  const selectedRegions = new Set(regions);
+  const schoolRegions = new Map(options.schools.map((school) => [school.code, school.region]));
+  const rows = options.availability.filter(
+    (row) =>
+      (selectedSchools.size === 0 || selectedSchools.has(row.schoolCode)) &&
+      (selectedRegions.size === 0 || selectedRegions.has(schoolRegions.get(row.schoolCode) ?? ""))
   );
+  const programs = new Map(rows.map((row) => [row.programId, row.programName]));
+  const subjects = new Map(
+    rows.flatMap((row) =>
+      row.subjectId === null || row.subjectName === null
+        ? []
+        : [[row.subjectId, row.subjectName] as const]
+    )
+  );
+  const tracks = new Set(rows.map((row) => row.examTrack));
 
   return {
-    regions: uniqueSorted(selectedSchools.map((school) => school.region)),
-    states: uniqueSorted(selectedSchools.map((school) => school.state)),
-    districts: uniqueSorted(selectedSchools.map((school) => school.district)),
+    ...options,
+    programs: [...programs].map(([id, name]) => ({ id, name })).sort((a, b) => a.id - b.id),
+    grades: [...new Set(rows.map((row) => row.grade))].sort((a, b) => a - b),
+    subjects: [...subjects].map(([id, name]) => ({ id, name })).sort((a, b) => a.id - b.id),
+    examTracks: EXAM_TRACKS.filter((track) => tracks.has(track)),
   };
+}
+
+function keepAvailable<T>(selected: T[], available: T[]): T[] {
+  const availableSet = new Set(available);
+  return selected.filter((value) => availableSet.has(value));
+}
+
+function filterSchoolsByRegion(
+  schools: CurriculumSummaryFilterOptions["schools"],
+  regions: string[]
+) {
+  const selected = new Set(regions);
+  return selected.size === 0
+    ? schools
+    : schools.filter((school) => school.region && selected.has(school.region));
 }
 
 function uniqueSorted(values: Array<string | null>): string[] {

@@ -84,6 +84,10 @@ describe("AdminPage (server component)", () => {
     expect(screen.getByText("Batch Metadata")).toBeInTheDocument();
     expect(screen.getByText("School Programs")).toBeInTheDocument();
     expect(screen.getByText("Centre Management")).toBeInTheDocument();
+    expect(
+      screen.getByText("Manage Centres, School links, Exam Track mappings, and active status.")
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/School links, streams/)).not.toBeInTheDocument();
     expect(screen.getByText("Centre Option Configuration")).toBeInTheDocument();
     expect(screen.queryByText("Academic Mentorship")).not.toBeInTheDocument();
 

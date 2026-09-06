@@ -76,9 +76,14 @@ function formatDateTime(value: string | null): string {
 export default function TeacherFeedbackTab({
   schoolCode,
   canEdit,
+  centreId,
 }: {
   schoolCode: string;
   canEdit: boolean;
+  // Set on a centre page: restricts both the rounds list and the setup centre
+  // picker to this centre, so a centre page never shows a sibling centre's
+  // feedback. Undefined on a school page, where the PM picks a centre.
+  centreId?: number;
 }) {
   const [centres, setCentres] = useState<FeedbackCentre[]>([]);
   const [cycles, setCycles] = useState<Cycle[]>([]);
@@ -92,7 +97,8 @@ export default function TeacherFeedbackTab({
     setLoadingCentres(true);
     try {
       const res = await fetch(
-        `/api/teacher-feedback/centres?school_code=${encodeURIComponent(schoolCode)}`,
+        `/api/teacher-feedback/centres?school_code=${encodeURIComponent(schoolCode)}` +
+          (centreId === undefined ? "" : `&centre_id=${centreId}`),
         { cache: "no-store" }
       );
       const body = await res.json();
@@ -102,7 +108,7 @@ export default function TeacherFeedbackTab({
     } finally {
       setLoadingCentres(false);
     }
-  }, [schoolCode]);
+  }, [schoolCode, centreId]);
 
   const fetchCycles = useCallback(async ({ background = false } = {}) => {
     // background: a periodic refresh must not flash the loading state or raise a
@@ -112,7 +118,8 @@ export default function TeacherFeedbackTab({
       // no-store: links are filled asynchronously by the Lambda, so a cached
       // response would keep showing "Generating…" after they're ready.
       const res = await fetch(
-        `/api/teacher-feedback/cycles?school_code=${encodeURIComponent(schoolCode)}`,
+        `/api/teacher-feedback/cycles?school_code=${encodeURIComponent(schoolCode)}` +
+          (centreId === undefined ? "" : `&centre_id=${centreId}`),
         { cache: "no-store" }
       );
       const body = await res.json();
@@ -124,7 +131,7 @@ export default function TeacherFeedbackTab({
     } finally {
       if (!background) setLoadingCycles(false);
     }
-  }, [schoolCode]);
+  }, [schoolCode, centreId]);
 
   useEffect(() => {
     fetchCentres();

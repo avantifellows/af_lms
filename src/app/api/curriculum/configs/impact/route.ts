@@ -6,9 +6,7 @@ import {
   getCurriculumConfigImpact,
   requireCurriculumConfigAdmin,
 } from "@/lib/curriculum-config";
-import type { ExamTrack } from "@/types/curriculum";
-
-const EXAM_TRACKS: ExamTrack[] = ["jee_main", "jee_advanced", "neet"];
+import { isExamTrack } from "@/lib/exam-tracks";
 
 export async function GET(request: NextRequest) {
   const session = await getServerSession(authOptions);
@@ -43,7 +41,7 @@ export async function GET(request: NextRequest) {
       { status: 422 }
     );
   }
-  if (!EXAM_TRACKS.includes(examTrack as ExamTrack)) {
+  if (!isExamTrack(examTrack)) {
     return NextResponse.json(
       { error: "Invalid impact request", fields: { exam_track: "Invalid Exam Track" } },
       { status: 422 }
@@ -52,7 +50,7 @@ export async function GET(request: NextRequest) {
 
   const result = await getCurriculumConfigImpact({
     chapterId,
-    examTrack: examTrack as ExamTrack,
+    examTrack,
     configId: configId ?? undefined,
     coverageSequence: coverageSequence ?? undefined,
     prescribedMinutes: prescribedMinutes ?? undefined,

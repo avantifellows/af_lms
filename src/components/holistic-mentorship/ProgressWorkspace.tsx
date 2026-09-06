@@ -17,7 +17,11 @@ type Options = {
 type Payload = {
   rows: Row[];
   counts: { totalMapped: number; pending: number; completed: number; skipped: number; noActivePhase: number };
-  options: Options; academicYears: string[]; refreshedAt: string; pageSize: 50;
+  options: Options;
+  coverageSchools: Array<{ code: string; name: string }>;
+  academicYears: string[];
+  refreshedAt: string;
+  pageSize: 50;
 };
 type ProgressFilters = {
   school: string;
@@ -39,7 +43,7 @@ type StoredProgressView = {
 
 const EMPTY: Payload = {
   rows: [], counts: { totalMapped: 0, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 },
-  options: { schools: [], mentors: [], phases: [] }, academicYears: [CURRENT_ACADEMIC_YEAR],
+  options: { schools: [], mentors: [], phases: [] }, coverageSchools: [], academicYears: [CURRENT_ACADEMIC_YEAR],
   refreshedAt: "", pageSize: 50,
 };
 const INITIAL_FILTERS: ProgressFilters = {
@@ -188,10 +192,12 @@ export default function ProgressWorkspace({
   academicYear = CURRENT_ACADEMIC_YEAR,
   programId = PROGRAM_IDS.COE,
   onAcademicYears,
+  showStudentLinks = true,
 }: {
   academicYear?: string;
   programId?: number;
   onAcademicYears?: (years: string[]) => void;
+  showStudentLinks?: boolean;
 }) {
   const { filters, setFilters, page, setPage, scope } = useProgressView(
     academicYear,
@@ -264,6 +270,7 @@ export default function ProgressWorkspace({
     <div aria-busy={loading} className="w-full min-w-0 max-w-full space-y-5">
       <ProgressIntro academicYear={academicYear} exporting={exporting} exportError={exportError}
         onExport={exportProgress} />
+      <AssignmentCoverageSchools schools={data.coverageSchools ?? []} programId={programId} />
       <ProgressFilterPanel filters={filters} options={data.options} onChange={update} />
       <ProgressCounts counts={data.counts} />
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -293,11 +300,39 @@ export default function ProgressWorkspace({
         direction={filters.direction}
         onSort={changeSort}
         onClearFilters={clearFilters}
+        showStudentLinks={showStudentLinks}
       />
       <ProgressPagination page={page} totalPages={totalPages} rowCount={data.rows.length}
         totalMapped={data.counts.totalMapped} onPageChange={setPage} />
     </div>
   );
+}
+
+function AssignmentCoverageSchools({ schools, programId }: {
+  schools: Array<{ code: string; name: string }>;
+  programId: number;
+}) {
+  if (schools.length === 0) return null;
+  return <section aria-labelledby="assignment-coverage-heading" className="space-y-3 rounded-md border border-border bg-bg-card p-4">
+    <div>
+      <h3 id="assignment-coverage-heading" className="text-sm font-semibold text-text-primary">School Assignment Coverage</h3>
+      <p className="text-xs text-text-muted">Open a School to review coverage and manage current-year Mappings when permitted.</p>
+    </div>
+    <div className="flex flex-wrap gap-2">
+      {schools.map((school) => <Link
+        key={school.code}
+        aria-label={`Open Assignment Coverage for ${school.name}`}
+        className="inline-flex min-h-11 items-center rounded-lg border border-border bg-bg px-3 py-2 text-sm font-semibold text-text-primary hover:bg-hover-bg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
+        href={`/school/${school.code}?${new URLSearchParams({
+          tab: "holistic_mentorship",
+          program_id: String(programId),
+        })}`}
+      >
+        <span>{school.name}</span>
+        <span className="ml-2 font-mono text-xs text-text-muted">{school.code}</span>
+      </Link>)}
+    </div>
+  </section>;
 }
 
 function ProgressIntro({ academicYear, exporting, exportError, onExport }: {
@@ -411,6 +446,7 @@ function ProgressResults({
   direction,
   onSort,
   onClearFilters,
+  showStudentLinks,
 }: {
   rows: Row[];
   loading: boolean;
@@ -422,6 +458,7 @@ function ProgressResults({
   direction: string;
   onSort: (key: string) => void;
   onClearFilters: () => void;
+  showStudentLinks: boolean;
 }) {
   if (!loading && rows.length === 0) {
     return <ProgressEmptyState hasMappings={hasMappings} filtered={filtered} onClearFilters={onClearFilters} />;
@@ -450,6 +487,7 @@ function ProgressResults({
           loading={loading}
           academicYear={academicYear}
           programId={programId}
+          showStudentLinks={showStudentLinks}
         />
       </tbody>
     </table>
@@ -477,11 +515,12 @@ function ProgressEmptyState({ hasMappings, filtered, onClearFilters }: {
   </div>;
 }
 
-function ProgressRows({ rows, loading, academicYear, programId }: {
+function ProgressRows({ rows, loading, academicYear, programId, showStudentLinks }: {
   rows: Row[];
   loading: boolean;
   academicYear: string;
   programId: number;
+  showStudentLinks: boolean;
 }) {
   if (loading && rows.length === 0) {
     return <tr><td colSpan={8} className="px-3 py-12 text-center text-text-muted"><span role="status">Loading mapped Students...</span></td></tr>;
@@ -492,14 +531,16 @@ function ProgressRows({ rows, loading, academicYear, programId }: {
       row={row}
       academicYear={academicYear}
       programId={programId}
+      showStudentLinks={showStudentLinks}
     />
   ));
 }
 
-function ProgressRow({ row, academicYear, programId }: {
+function ProgressRow({ row, academicYear, programId, showStudentLinks }: {
   row: Row;
   academicYear: string;
   programId: number;
+  showStudentLinks: boolean;
 }) {
   return <tr className="hover:bg-hover-bg/50">
     <td className="px-3 py-3"><p className="font-semibold text-text-primary">{row.studentName}</p><p className="font-mono text-xs text-text-muted">{row.externalStudentId || "No external ID"}</p></td>
@@ -509,11 +550,11 @@ function ProgressRow({ row, academicYear, programId }: {
     <td className="px-3 py-3"><PhaseCell row={row} /></td>
     <td className="px-3 py-3"><ProgressBadge progress={row.progress} /></td>
     <td className="px-3 py-3 font-mono"><CompletionTime value={row.completedAt} /></td>
-    <td className="px-3 py-3"><ProgressActions
+    <td className="px-3 py-3">{showStudentLinks && <ProgressActions
       row={row}
       academicYear={academicYear}
       programId={programId}
-    /></td>
+    />}</td>
   </tr>;
 }
 
@@ -556,6 +597,7 @@ function ProgressActions({ row, academicYear, programId }: {
         school_code: row.schoolCode,
         academic_year: academicYear,
         program_id: String(programId),
+        source: "progress",
       })}`}>
       Open Student
     </Link> : <Button type="button" variant="secondary" className="text-xs" disabled title="Phase is locked">Open Student</Button>}

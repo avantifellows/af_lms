@@ -83,14 +83,14 @@ describe("GET /api/admin/centres/options", () => {
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([
         {
-          option_set_id: "4",
-          option_set_code: "stream",
-          option_set_label: "Centre Stream",
-          allow_multi: true,
-          option_set_sort_order: "4",
-          option_id: "41",
-          option_code: "jee",
-          option_label: "JEE",
+          option_set_id: "2",
+          option_set_code: "category",
+          option_set_label: "Centre Category",
+          allow_multi: false,
+          option_set_sort_order: "2",
+          option_id: "21",
+          option_code: "school",
+          option_label: "School",
           option_sort_order: "1",
           option_is_active: true,
           option_inserted_at: null,
@@ -104,17 +104,17 @@ describe("GET /api/admin/centres/options", () => {
     await expect(res.json()).resolves.toEqual({
       optionSets: [
         {
-          id: 4,
-          code: "stream",
-          label: "Centre Stream",
-          allowMulti: true,
-          sortOrder: 4,
+          id: 2,
+          code: "category",
+          label: "Centre Category",
+          allowMulti: false,
+          sortOrder: 2,
           options: [
             {
-              id: 41,
-              optionSetCode: "stream",
-              code: "jee",
-              label: "JEE",
+              id: 21,
+              optionSetCode: "category",
+              code: "school",
+              label: "School",
               sortOrder: 1,
               isActive: true,
               insertedAt: "",

@@ -216,6 +216,21 @@ describe("GET /api/curriculum/chapters", () => {
     );
   });
 
+  it("returns a validation error when the Exam Track has no curriculum content", async () => {
+    mockQuery.mockResolvedValueOnce([]);
+
+    const res = await GET(
+      nextReq(
+        "/api/curriculum/chapters?school_code=70705&program_id=1&exam_track=cet&grade=11&subject=Physics"
+      )
+    );
+
+    expect(res.status).toBe(422);
+    await expect(res.json()).resolves.toEqual({
+      error: "Curriculum configuration is not available for CET",
+    });
+  });
+
   it("returns 403 for passcode users", async () => {
     mockSession.mockResolvedValue(PASSCODE_SESSION);
 

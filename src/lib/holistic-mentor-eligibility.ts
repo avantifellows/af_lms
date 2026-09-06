@@ -6,6 +6,51 @@ type EligibilityLookup =
   | { email: string; userId?: never; schoolId: number; programId: number; client?: PoolClient }
   | { userId: number; email?: never; schoolId: number; programId: number; client: PoolClient };
 
+export interface EligibleHolisticMentor {
+  userId: number;
+  name: string;
+  email: string | null;
+}
+
+export async function listEligibleHolisticMentors(params: {
+  schoolId: number;
+  programId: number;
+}): Promise<EligibleHolisticMentor[]> {
+  const rows = await query<{
+    user_id: number | string;
+    name: string | null;
+    email: string | null;
+  }>(
+    `SELECT DISTINCT u.id AS user_id,
+            NULLIF(TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')), '') AS name,
+            u.email
+     FROM teacher t
+     JOIN "user" u ON u.id = t.user_id
+     JOIN user_permission up
+       ON up.revoked_at IS NULL
+      AND up.role = 'teacher'
+      AND (up.user_id = u.id OR LOWER(up.email) = LOWER(u.email))
+     JOIN centre_positions cp
+       ON cp.user_id = u.id
+      AND cp.deleted_at IS NULL
+      AND NOT (cp.role = ANY($3::text[]))
+     JOIN centres c
+       ON c.id = cp.centre_id
+      AND c.is_active IS TRUE
+     WHERE c.school_id = $1
+       AND c.program_id = $2
+       AND t.is_af_teacher = true
+       AND t.exit_date IS NULL
+     ORDER BY name NULLS LAST, u.email NULLS LAST`,
+    [params.schoolId, params.programId, [...PM_SEAT_ROLES]],
+  );
+  return rows.map((row) => ({
+    userId: Number(row.user_id),
+    name: row.name || row.email || "Unknown Mentor",
+    email: row.email,
+  }));
+}
+
 export async function findEligibleHolisticMentorUserId(
   lookup: EligibilityLookup
 ): Promise<number | null> {

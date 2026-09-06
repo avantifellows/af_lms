@@ -77,15 +77,15 @@ test.describe("Curriculum read path", () => {
     await expect(adminPage.getByLabel("Exam Track").locator("option")).toHaveText([
       "JEE Main",
       "JEE Advanced",
-      "NEET",
     ]);
     await expect(adminPage.getByText("1. Fixture Alpha Physics")).toBeVisible();
     await expect(adminPage.getByText("2. Fixture Beta Physics")).toBeVisible();
     await expect(adminPage.getByText(/Prescribed: 1h 30m/)).toBeVisible();
 
-    await adminPage.getByLabel("Exam Track").selectOption("neet");
+    await adminPage.getByLabel("Grade").selectOption("12");
 
     await expect(adminPage.getByLabel("Grade")).toHaveValue("12");
+    await expect(adminPage.getByLabel("Exam Track")).toHaveValue("neet");
     await expect(adminPage.getByLabel("Subject")).toHaveValue("Biology");
     await expect(
       adminPage.getByRole("heading", { name: "NEET Curriculum Progress" })
@@ -153,6 +153,12 @@ test.describe("Curriculum read path", () => {
     ).toBeVisible();
     await adminPage.getByLabel("Program").selectOption("2");
 
+    await adminPage.getByRole("button", { name: "Logs" }).click();
+    const initialLogCount = await adminPage
+      .locator("[data-curriculum-log-row]")
+      .count();
+    await adminPage.getByRole("button", { name: "Chapters" }).click();
+
     await adminPage.getByRole("button", { name: "+ Log a class" }).click();
     await expect(adminPage.getByText("Log a class", { exact: true })).toBeVisible();
     const betaCompletionRow = adminPage
@@ -163,7 +169,9 @@ test.describe("Curriculum read path", () => {
 
     await expect(adminPage.getByText("Log a class", { exact: true })).toBeHidden();
     await adminPage.getByRole("button", { name: "Logs" }).click();
-    await expect(adminPage.getByText("No classes logged yet.")).toBeVisible();
+    await expect(adminPage.locator("[data-curriculum-log-row]")).toHaveCount(
+      initialLogCount
+    );
 
     await adminPage.getByRole("button", { name: "+ Log a class" }).click();
     const betaRow = adminPage
@@ -176,9 +184,12 @@ test.describe("Curriculum read path", () => {
 
     await expect(adminPage.getByText("Log a class", { exact: true })).toBeHidden();
     await adminPage.getByRole("button", { name: "Logs" }).click();
-    await expect(adminPage.getByText("Beta Forces")).toBeVisible();
+    const betaLog = adminPage
+      .locator("[data-curriculum-log-row]")
+      .filter({ hasText: "Beta Forces" });
+    await expect(betaLog).toBeVisible();
 
-    await adminPage.getByRole("button", { name: "Edit log" }).click();
+    await betaLog.getByRole("button", { name: "Edit log" }).click();
     await expect(adminPage.getByText("Edit class log", { exact: true })).toBeVisible();
     await expect(adminPage.getByRole("checkbox", { name: "Complete" })).toBeHidden();
 
@@ -205,6 +216,141 @@ test.describe("Curriculum read path", () => {
     await expect(alphaEditRow.getByText(/Time: 1h/)).toBeVisible();
   });
 
+  test("admin can log a cancelled class without moving Curriculum Progress", async ({
+    adminPage,
+  }) => {
+    await adminPage.goto("/school/75000000075?tab=curriculum");
+    await expect(
+      adminPage.getByRole("heading", { name: "JEE Main Curriculum Progress" })
+    ).toBeVisible();
+    await adminPage.getByLabel("Program").selectOption("2");
+
+    const totalTime = adminPage.getByText("total time taught").locator("..");
+    const timeBefore = await totalTime.textContent();
+
+    await adminPage.getByRole("button", { name: "+ Log a class" }).click();
+    await adminPage.getByLabel("Log type").selectOption("class_cancelled");
+    await expect(adminPage.getByText("Which class was cancelled?")).toBeVisible();
+    await adminPage
+      .getByRole("radio", { name: "Fixture Alpha Physics" })
+      .check();
+    await adminPage.getByRole("button", { name: "Save class log" }).click();
+
+    await expect(adminPage.getByText("Log a class", { exact: true })).toBeHidden();
+    await adminPage.getByRole("button", { name: "Logs" }).click();
+    const cancelledLog = adminPage
+      .locator("[data-curriculum-log-row]")
+      .filter({ hasText: "Class Cancelled" });
+    await expect(cancelledLog).toContainText("Fixture Alpha Physics");
+    await expect(cancelledLog).not.toContainText("Duration:");
+
+    // A second cancellation for the same Chapter and date is rejected.
+    await adminPage.getByRole("button", { name: "+ Log a class" }).click();
+    await adminPage.getByLabel("Log type").selectOption("class_cancelled");
+    await adminPage
+      .getByRole("radio", { name: "Fixture Alpha Physics" })
+      .check();
+    await adminPage.getByRole("button", { name: "Save class log" }).click();
+    await expect(
+      adminPage.getByText("A Class Cancelled log already exists for this Chapter and date")
+    ).toBeVisible();
+    await adminPage.getByRole("button", { name: "Cancel" }).click();
+
+    await adminPage.getByRole("button", { name: "Chapters" }).click();
+    await expect(totalTime).toHaveText(String(timeBefore));
+
+    await adminPage.goto(
+      "/curriculum-summary?schools=LMS75&programs=2&grades=11&subjects=4&exam_tracks=jee_main"
+    );
+    await adminPage.getByRole("button", { name: /Show chapters for.*JNV Nodal.*JEE Main/ }).click();
+    const alphaSummaryRow = adminPage
+      .getByRole("table")
+      .last()
+      .getByRole("row")
+      .filter({ hasText: "Fixture Alpha Physics" });
+    await expect(alphaSummaryRow.locator("td").nth(6)).toHaveText("1");
+  });
+
+  test("admin can create, edit, and delete a Doubt Solving log without moving Curriculum Progress", async ({
+    adminPage,
+  }) => {
+    await adminPage.goto("/school/75000000075?tab=curriculum");
+    await expect(
+      adminPage.getByRole("heading", { name: "JEE Main Curriculum Progress" })
+    ).toBeVisible();
+    await adminPage.getByLabel("Program").selectOption("2");
+
+    const totalTime = adminPage.getByText("total time taught").locator("..");
+    const timeBefore = await totalTime.textContent();
+
+    await adminPage.getByRole("button", { name: "+ Log a class" }).click();
+    await adminPage.getByLabel("Log type").selectOption("doubt_solving");
+    await expect(
+      adminPage.getByText("Which Chapter did you cover doubts for?")
+    ).toBeVisible();
+    await adminPage
+      .getByRole("radio", { name: "Fixture Alpha Physics" })
+      .check();
+    const [hours, minutes] = await adminPage.getByRole("spinbutton").all();
+    await hours.fill("1");
+    await minutes.fill("15");
+    await adminPage.getByRole("button", { name: "Save class log" }).click();
+
+    await adminPage.getByRole("button", { name: "Logs" }).click();
+    const doubtLog = adminPage
+      .locator("[data-curriculum-log-row]")
+      .filter({ hasText: "Doubt Solving" });
+    await expect(doubtLog).toContainText("Fixture Alpha Physics");
+    await expect(doubtLog).toContainText("Duration: 1h 15m");
+    await expect(doubtLog).not.toContainText("Topics covered");
+
+    await doubtLog.getByRole("button", { name: "Edit log" }).click();
+    await expect(adminPage.getByLabel("Log type")).toBeDisabled();
+    const editMinutes = adminPage.getByRole("spinbutton").nth(1);
+    await editMinutes.fill("30");
+    await adminPage.getByRole("button", { name: "Save changes" }).click();
+    await expect(doubtLog).toContainText("Duration: 1h 30m");
+
+    await adminPage.getByRole("button", { name: "Chapters" }).click();
+    await expect(totalTime).toHaveText(String(timeBefore));
+    const doubtSolvingMetric = adminPage
+      .getByText("doubt solving time")
+      .locator("..");
+    await expect(doubtSolvingMetric).toContainText("1h 30m");
+
+    await adminPage.goto(
+      "/curriculum-summary?schools=LMS75&programs=2&grades=11&subjects=4&exam_tracks=jee_main"
+    );
+    await adminPage.getByRole("button", { name: /Show chapters for.*JNV Nodal.*JEE Main/ }).click();
+    let alphaSummaryRow = adminPage
+      .getByRole("table")
+      .last()
+      .getByRole("row")
+      .filter({ hasText: "Fixture Alpha Physics" });
+    await expect(alphaSummaryRow.locator("td").nth(7)).toHaveText("1h 30m");
+
+    await adminPage.goto("/school/75000000075?tab=curriculum");
+    await adminPage.getByLabel("Program").selectOption("2");
+    await adminPage.getByRole("button", { name: "Logs" }).click();
+    const persistedDoubtLog = adminPage
+      .locator("[data-curriculum-log-row]")
+      .filter({ hasText: "Doubt Solving" });
+    adminPage.once("dialog", (dialog) => dialog.accept());
+    await persistedDoubtLog.getByRole("button", { name: "Delete log" }).click();
+    await expect(persistedDoubtLog).toBeHidden();
+
+    await adminPage.goto(
+      "/curriculum-summary?schools=LMS75&programs=2&grades=11&subjects=4&exam_tracks=jee_main"
+    );
+    await adminPage.getByRole("button", { name: /Show chapters for.*JNV Nodal.*JEE Main/ }).click();
+    alphaSummaryRow = adminPage
+      .getByRole("table")
+      .last()
+      .getByRole("row")
+      .filter({ hasText: "Fixture Alpha Physics" });
+    await expect(alphaSummaryRow.locator("td").nth(7)).toHaveText("0h");
+  });
+
   test("admin can delete a log and it stays excluded after reload", async ({
     adminPage,
   }) => {
@@ -224,11 +370,10 @@ test.describe("Curriculum read path", () => {
 
     await expect(adminPage.getByText("Log a class", { exact: true })).toBeHidden();
     await adminPage.getByRole("button", { name: "Logs" }).click();
-    await expect(adminPage.getByText("Beta Forces")).toBeVisible();
-
     const betaLog = adminPage
       .locator("[data-curriculum-log-row]")
       .filter({ hasText: "Beta Forces" });
+    await expect(betaLog).toBeVisible();
     adminPage.once("dialog", (dialog) => dialog.accept());
     await betaLog.getByRole("button", { name: "Delete log" }).click();
     await expect(adminPage.getByText("Beta Forces")).toBeHidden();

@@ -5,6 +5,7 @@ import type { UserPermission } from "./permissions";
 
 interface SubjectTotalRow {
   subject_total_time_minutes: string | number | null;
+  doubt_solving_total_time_minutes: string | number | null;
 }
 
 interface ProgressRow {
@@ -25,6 +26,7 @@ type CurriculumProgressResult =
   | {
       ok: true;
       subjectTotalTimeMinutes: number;
+      doubtSolvingTotalTimeMinutes: number;
       progress: Record<number, ChapterProgress>;
     }
   | { ok: false; status: 400 | 403 | 404 | 422; error: string };
@@ -44,6 +46,7 @@ function toTimestampString(value: string | Date): string {
   return value instanceof Date ? value.toISOString() : value;
 }
 
+// fallow-ignore-next-line complexity
 export async function getCurriculumProgress(params: {
   schoolCode: string;
   programId: number;
@@ -56,7 +59,13 @@ export async function getCurriculumProgress(params: {
   if (!scope.ok) return scope;
 
   const totalRows = await query<SubjectTotalRow>(
-    `SELECT COALESCE(SUM(duration_minutes), 0) AS subject_total_time_minutes
+    // Only Regular Class logs are teaching time; cancellations and doubt solving
+    // never move Actual Hours.
+    `SELECT
+       COALESCE(SUM(duration_minutes) FILTER (WHERE log_type = 'regular'), 0)
+         AS subject_total_time_minutes,
+       COALESCE(SUM(duration_minutes) FILTER (WHERE log_type = 'doubt_solving'), 0)
+         AS doubt_solving_total_time_minutes
      FROM lms_curriculum_logs
      WHERE school_code = $1
        AND program_id = $2
@@ -91,6 +100,7 @@ export async function getCurriculumProgress(params: {
          AND l.grade_id = $3
          AND l.subject_id = $4
          AND l.exam_track = $5
+         AND l.log_type = 'regular'
          AND l.deleted_at IS NULL
      )
      SELECT
@@ -227,6 +237,9 @@ export async function getCurriculumProgress(params: {
   return {
     ok: true,
     subjectTotalTimeMinutes: Number(totalRows[0]?.subject_total_time_minutes ?? 0),
+    doubtSolvingTotalTimeMinutes: Number(
+      totalRows[0]?.doubt_solving_total_time_minutes ?? 0
+    ),
     progress,
   };
 }

@@ -38,7 +38,6 @@ describe("Centre CSV import", () => {
       sourceId: "1",
       name: "JNV Barwani",
       typeCode: "coe",
-      streamCodes: ["jee"],
       isPhysical: true,
       isActive: true,
     });
@@ -164,7 +163,7 @@ describe("Centre CSV import", () => {
       /\bINSERT\s+INTO\s+centres\b/i.test(call.sql)
     );
     expect(insertCall?.sql).toContain(
-      "name, school_id, type_code, category_code, sub_category_code, stream_codes, is_physical, is_active"
+      "name, school_id, type_code, category_code, sub_category_code, is_physical, is_active"
     );
     expect(insertCall?.sql).not.toContain("region");
     expect(insertCall?.sql).not.toContain("district");
@@ -174,7 +173,6 @@ describe("Centre CSV import", () => {
       "coe",
       "cat_1_coe",
       "regional_coe",
-      ["jee", "neet"],
       true,
       true,
       "Bench Teachers",
@@ -182,7 +180,6 @@ describe("Centre CSV import", () => {
       null,
       null,
       null,
-      [],
       false,
       true,
     ]);
@@ -221,7 +218,7 @@ describe("Centre CSV import", () => {
   it("reports invalid option codes before apply", async () => {
     const { sourcePath, mappingPath } = await writeImportFiles(
       `id,name,cost_centre_type,count_as_physical_2627,school_name,program,coe_type_2526,category_2627,vg_notes,is_active
-1,JNV Invalid,CoE,1,JNV Invalid,SAT,Regional CoE,Cat 1 CoE,,1
+1,JNV Invalid,SAT,1,JNV Invalid,JEE,Regional CoE,Cat 1 CoE,,1
 `,
       `source_id,centre_name,status,school_id
 1,JNV Invalid,unlinked,
@@ -235,7 +232,7 @@ describe("Centre CSV import", () => {
       {
         sourceId: "1",
         name: "JNV Invalid",
-        field: "stream",
+        field: "type",
         code: "sat",
       },
     ]);
@@ -299,7 +296,7 @@ describe("Centre CSV import", () => {
 
   it("fails clearly when db-service Centre tables are missing", async () => {
     const db = new FakeImportDb([
-      [{ table_name: "centres", column_name: "stream_codes" }],
+      [{ table_name: "centres", column_name: "program_id" }],
     ]);
 
     const result = await runCentreCsvImport({ mode: "apply", db });
@@ -309,7 +306,7 @@ describe("Centre CSV import", () => {
       mode: "apply",
       error:
         "Centre import tables are unavailable. Run the db-service Centre management schema migration before importing Centres.",
-      details: ["centres.stream_codes"],
+      details: ["centres.program_id"],
     });
     expect(db.calls).toHaveLength(1);
   });

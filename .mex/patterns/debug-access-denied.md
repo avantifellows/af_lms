@@ -33,6 +33,7 @@ likelihood, are below — check them top-down.
 3. **Bare vs resolved permission.** The #1 real bug: a school/centre decision used `getUserPermission` instead of `getResolvedPermission`, so centre **seats** were absent and a seated user got denied (or an empty list). Switch to `getResolvedPermission`.
 4. **Scope level.** Level 1 = `school_codes`, level 2 = `regions` (region resolved via a `school` lookup when not passed), level 3 = all. Confirm the `user_permission` row's level/codes/regions match expectation.
 5. **Feature matrix + gating.** `getFeatureAccess`: is the role's matrix cell `none`? Is it an `NVS_GATED_FEATURES` feature and the user lacks CoE/Nodal (`hasCoEOrNodal=false`)? Is `read_only` downgrading `edit`→`view` on a write path?
+   - In Holistic Mentorship, `program_read` is only a workspace/list gate. Student resources must bind the exact Student and School scope, while Phase Setup reads use the Admin-only configuration-read action.
 6. **Write paths.** A write returning 403 may be missing — or correctly enforcing — `requireEdit` + `ownsRecord` (per-program ownership in mixed schools).
    - **Type mismatch trap:** pg returns `bigint` columns as strings. If a program/id comparison feeds `includes()`/`===`, confirm the SQL casts (`::int`) or the check coerces (`Number()`). Jul 2026: this 403'd every non-admin document upload in prod (`[1].includes("1")`).
 7. **`revoked_at`.** A revoked user resolves to no permission everywhere — check `revoked_at IS NULL`.

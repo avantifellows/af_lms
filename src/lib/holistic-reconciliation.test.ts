@@ -44,6 +44,29 @@ describe("Holistic Mapping reconciliation", () => {
     expect(values).toEqual([1, "2026-2027", 4, null, [41, 42]]);
   });
 
+  it("limits reconciliation side effects to the actor's resolved School scope", async () => {
+    mockClientQuery.mockResolvedValue({ rows: [{ ended_count: "1" }] });
+
+    await reconcileHolisticMappings({
+      programId: 1,
+      academicYear: "2026-2027",
+      permission: {
+        email: "pm@example.com",
+        level: 1,
+        role: "program_manager",
+        school_codes: ["SCH001"],
+        program_ids: [1],
+      },
+    });
+
+    const [sql, values] = mockClientQuery.mock.calls[0];
+    expect(sql).toContain("JOIN school mapping_school ON mapping_school.id = mapping.school_id");
+    expect(sql).toContain("mapping_school.code = ANY($6::text[])");
+    expect(sql.indexOf("mapping_school.code = ANY($6::text[])"))
+      .toBeLessThan(sql.indexOf("UPDATE holistic_mentorship_mentor_mentee_mappings"));
+    expect(values).toEqual([1, "2026-2027", null, null, null, ["SCH001"]]);
+  });
+
   it("does not reconcile an older Academic Year", async () => {
     await expect(reconcileHolisticMappings({
       programId: 1,

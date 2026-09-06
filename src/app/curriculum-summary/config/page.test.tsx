@@ -164,6 +164,10 @@ describe("CurriculumConfigPage", () => {
       screen.getByRole("heading", { level: 1, name: "Curriculum Config" })
     ).toBeInTheDocument();
     expect(screen.getByLabelText("Exam Track")).toHaveValue("jee_main");
+    expect(screen.getByRole("option", { name: "CET" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("option", { name: "Math Foundation" })
+    ).toBeInTheDocument();
     expect(screen.getByLabelText("Grade")).toHaveValue("");
     expect(screen.getByLabelText("Subject")).toHaveValue("");
     expect(screen.getByLabelText("Syllabus status")).toHaveValue("in_syllabus");

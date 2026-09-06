@@ -42,7 +42,6 @@ CREATE TABLE IF NOT EXISTS public.centres (
   type_code character varying(255),
   category_code character varying(255),
   sub_category_code character varying(255),
-  stream_codes text[] DEFAULT '{}'::text[] NOT NULL,
   is_physical boolean DEFAULT false NOT NULL,
   is_active boolean DEFAULT true NOT NULL,
   program_id bigint REFERENCES public.program(id),
@@ -61,9 +60,6 @@ CREATE INDEX IF NOT EXISTS centres_category_code_index
 
 CREATE INDEX IF NOT EXISTS centres_sub_category_code_index
   ON public.centres (sub_category_code);
-
-CREATE INDEX IF NOT EXISTS centres_stream_codes_index
-  ON public.centres USING gin (stream_codes);
 
 CREATE INDEX IF NOT EXISTS centres_program_id_index
   ON public.centres (program_id);

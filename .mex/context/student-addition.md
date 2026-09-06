@@ -18,7 +18,7 @@ edges:
     condition: when adding LMS API routes for create or bulk upload
   - target: patterns/db-service-write.md
     condition: when proxying student writes to the DB Service
-last_updated: 2026-07-24
+last_updated: 2026-09-03
 ---
 
 # Student Addition
@@ -109,7 +109,6 @@ Enrollment date handling is decided: LMS supplies DB Service `start_date` and `a
 - LMS-audited DB Service dropout closes only the selected program batch and its group membership. It preserves other program batches, grade, school, and global status; when no current batch remains it applies the existing global dropout flow. Generic non-LMS `/api/dropout` callers retain the existing global behavior.
 - New LMS-audited NVS dropouts can be undone only in the same school and only when the exact prior NVS batch still exists, is open, and no other NVS batch is current. Undo restores that exact batch and membership; if NVS was the final active program, it also restores the exact school/grade records ended by global dropout and clears the generated dropout status. Legacy dropouts without the new audit metadata cannot be undone, and every undo writes a separate audit record.
 - When the selected Program has no dropout rows, the enrollment tab falls back to Active and removes the stale `students=dropout` query parameter. Undoing the final visible dropout does the same immediately.
-- Remaining LMS write proxy not safe enough for school rollout: `src/app/api/student/route.ts` only checks `session` before proxying.
 - `csv-parse`, `exceljs`, and `jszip` are installed in af_lms for upload parsing and blank-formatting compaction. Do not add runtime template generation or reintroduce the direct `xlsx` dependency. Rejected-row retry is CSV and includes every row that was not created.
 
 ## DB Service Context

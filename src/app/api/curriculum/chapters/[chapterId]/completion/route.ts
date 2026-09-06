@@ -1,69 +1,29 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import { checkCurriculumSchema } from "@/lib/curriculum-schema";
+import {
+  parsePositiveInteger,
+  requireCurriculumEditBody,
+} from "@/lib/curriculum-api";
 import { withTransaction } from "@/lib/db";
 import {
   markChapterComplete,
   unmarkChapterComplete,
   validateChapterCompletionDeltas,
 } from "@/lib/curriculum-chapter-completion";
-import { getFeatureAccess, getResolvedPermission } from "@/lib/permissions";
-
-type CurriculumSession = {
-  user?: { email?: string | null } | null;
-  isPasscodeUser?: boolean;
-} | null;
-
-async function requireCurriculumEditAccess(session: CurriculumSession) {
-  if (!session?.user?.email) {
-    return {
-      ok: false as const,
-      response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
-    };
-  }
-  if (session.isPasscodeUser) {
-    return {
-      ok: false as const,
-      response: NextResponse.json({ error: "Forbidden" }, { status: 403 }),
-    };
-  }
-
-  const permission = await getResolvedPermission(session.user.email);
-  const access = getFeatureAccess(permission, "curriculum");
-  if (!permission || !access.canEdit) {
-    return {
-      ok: false as const,
-      response: NextResponse.json({ error: "Forbidden" }, { status: 403 }),
-    };
-  }
-
-  return { ok: true as const, permission, email: session.user.email };
-}
+import { validateCentreExamTrackMapping } from "@/lib/centre-resolver";
 
 export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ chapterId: string }> }
 ) {
   const { chapterId: rawChapterId } = await params;
-  const chapterId = Number.parseInt(rawChapterId, 10);
-  if (!Number.isInteger(chapterId) || chapterId <= 0) {
+  const chapterId = parsePositiveInteger(rawChapterId);
+  if (chapterId === null) {
     return NextResponse.json({ error: "Invalid chapter id" }, { status: 400 });
   }
 
-  const session = await getServerSession(authOptions);
-  const access = await requireCurriculumEditAccess(session);
+  const access = await requireCurriculumEditBody(request);
   if (!access.ok) return access.response;
-
-  const schema = await checkCurriculumSchema();
-  if (!schema.ok) {
-    return NextResponse.json(schema, { status: schema.status });
-  }
-
-  const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
-  if (!body) {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
+  const { body } = access;
 
   const schoolCode = typeof body.school_code === "string" ? body.school_code.trim() : "";
   const programId = Number(body.program_id);
@@ -104,6 +64,16 @@ export async function PUT(
       { error: validation.error },
       { status: validation.status }
     );
+  }
+
+  const mapping = await validateCentreExamTrackMapping({
+    schoolCode,
+    programId,
+    grade: validation.grade,
+    examTrack: validation.examTrack,
+  });
+  if (!mapping.ok) {
+    return NextResponse.json({ error: mapping.error }, { status: 422 });
   }
 
   const result = await withTransaction((client) =>

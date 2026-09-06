@@ -4,6 +4,10 @@ import path from "path";
 import { parse } from "csv-parse/sync";
 
 import { query } from "./db";
+import {
+  CENTRE_COMMON_SCHEMA_COLUMNS,
+  findMissingSchemaColumns,
+} from "./schema-columns";
 import type { CentreOptionSetCode } from "./centres";
 
 export type CentreImportMode = "dry-run" | "apply";
@@ -19,7 +23,6 @@ export interface CentreImportSourceRow {
   typeCode: string | null;
   categoryCode: string | null;
   subCategoryCode: string | null;
-  streamCodes: string[];
   isPhysical: boolean;
   isActive: boolean;
   sourceNotes: string;
@@ -91,11 +94,6 @@ interface OptionCodeRow {
   option_is_active: boolean | string | null;
 }
 
-interface MissingColumnRow {
-  table_name: string;
-  column_name: string;
-}
-
 interface CountRow {
   count: string | number;
 }
@@ -136,17 +134,7 @@ const DEFAULT_MAPPING_PATH = path.join(
 );
 
 const REQUIRED_COLUMNS: Array<{ table: string; column: string }> = [
-  { table: "centres", column: "id" },
-  { table: "centres", column: "name" },
-  { table: "centres", column: "school_id" },
-  { table: "centres", column: "type_code" },
-  { table: "centres", column: "category_code" },
-  { table: "centres", column: "sub_category_code" },
-  { table: "centres", column: "stream_codes" },
-  { table: "centres", column: "is_physical" },
-  { table: "centres", column: "is_active" },
-  { table: "centres", column: "inserted_at" },
-  { table: "centres", column: "updated_at" },
+  ...CENTRE_COMMON_SCHEMA_COLUMNS,
   { table: "centre_option_sets", column: "id" },
   { table: "centre_option_sets", column: "code" },
   { table: "centre_options", column: "option_set_id" },
@@ -312,31 +300,8 @@ export async function loadCentreSchoolMapping(
 async function checkImportSchema(
   db: CentreImportDb
 ): Promise<{ ok: true } | { ok: false; details: string[] }> {
-  const values = REQUIRED_COLUMNS.map(
-    (_column, index) => `($${index * 2 + 1}, $${index * 2 + 2})`
-  ).join(", ");
-  const params = REQUIRED_COLUMNS.flatMap(({ table, column }) => [
-    table,
-    column,
-  ]);
-  const rows = await db.query<MissingColumnRow>(
-    `WITH required(table_name, column_name) AS (VALUES ${values})
-     SELECT required.table_name, required.column_name
-     FROM required
-     LEFT JOIN information_schema.columns cols
-       ON cols.table_schema = 'public'
-      AND cols.table_name = required.table_name
-      AND cols.column_name = required.column_name
-     WHERE cols.column_name IS NULL
-     ORDER BY required.table_name, required.column_name`,
-    params
-  );
-
-  if (rows.length === 0) return { ok: true };
-  return {
-    ok: false,
-    details: rows.map((row) => `${row.table_name}.${row.column_name}`),
-  };
+  const details = await findMissingSchemaColumns(db, REQUIRED_COLUMNS);
+  return details.length === 0 ? { ok: true } : { ok: false, details };
 }
 
 async function loadActiveOptionCodes(db: CentreImportDb) {
@@ -349,7 +314,7 @@ async function loadActiveOptionCodes(db: CentreImportDb) {
        ON options.option_set_id = option_sets.id
      WHERE option_sets.code = ANY($1::text[])
        AND options.is_active = true`,
-    [["type", "category", "sub_category", "stream"]]
+    [["type", "category", "sub_category"]]
   );
   const codes = new Map<CentreOptionSetCode, Set<string>>();
 
@@ -357,7 +322,6 @@ async function loadActiveOptionCodes(db: CentreImportDb) {
     "type",
     "category",
     "sub_category",
-    "stream",
   ] as CentreOptionSetCode[]) {
     codes.set(setCode, new Set());
   }
@@ -430,23 +394,22 @@ async function insertCentreRows(
       row.typeCode,
       row.categoryCode,
       row.subCategoryCode,
-      row.streamCodes,
       row.isPhysical,
       row.isActive,
     ];
   });
   const values = sourceRows
     .map((_, index) => {
-      const offset = index * 8;
+      const offset = index * 7;
       return `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${
         offset + 4
-      }, $${offset + 5}, $${offset + 6}, $${offset + 7}, $${offset + 8})`;
+      }, $${offset + 5}, $${offset + 6}, $${offset + 7})`;
     })
     .join(", ");
 
   await db.query(
     `INSERT INTO centres
-       (name, school_id, type_code, category_code, sub_category_code, stream_codes, is_physical, is_active)
+       (name, school_id, type_code, category_code, sub_category_code, is_physical, is_active)
      VALUES ${values}`,
     params
   );
@@ -627,17 +590,6 @@ function validateOptionCodes(
       activeOptionCodes,
       issues
     );
-
-    for (const streamCode of row.streamCodes) {
-      if (!activeOptionCodes.get("stream")?.has(streamCode)) {
-        issues.push({
-          sourceId: row.sourceId,
-          name: row.name,
-          field: "stream",
-          code: streamCode,
-        });
-      }
-    }
   }
 
   return issues;
@@ -731,21 +683,10 @@ function mapSourceRow(row: RawCentreCsvRow): CentreImportSourceRow {
     typeCode: codeFromLabel(row.cost_centre_type, TYPE_CODES),
     categoryCode: codeFromLabel(row.category_2627, CATEGORY_CODES),
     subCategoryCode: codeFromLabel(row.coe_type_2526, SUB_CATEGORY_CODES),
-    streamCodes: streamCodesFromProgram(row.program),
     isPhysical: booleanFromSource(row.count_as_physical_2627),
     isActive: booleanFromSource(row.is_active),
     sourceNotes: String(row.vg_notes ?? ""),
   };
-}
-
-function streamCodesFromProgram(value: string | undefined): string[] {
-  const normalized = String(value ?? "").trim();
-  if (!normalized) return [];
-  if (normalized === "JEE") return ["jee"];
-  if (normalized === "NEET") return ["neet"];
-  if (normalized === "JEE + NEET") return ["jee", "neet"];
-  if (normalized === "Math") return ["math_foundation"];
-  return [normalized.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "")];
 }
 
 function codeFromLabel(
@@ -796,7 +737,7 @@ function numberFromDb(value: string | number): number {
 }
 
 function isCentreOptionSetCode(value: string): value is CentreOptionSetCode {
-  return ["type", "category", "sub_category", "stream"].includes(value);
+  return ["type", "category", "sub_category"].includes(value);
 }
 
 function isMappingStatus(value: string): value is CentreMappingStatus {

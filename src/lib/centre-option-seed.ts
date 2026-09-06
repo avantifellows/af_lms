@@ -1,4 +1,5 @@
 import { query } from "./db";
+import { findMissingSchemaColumns } from "./schema-columns";
 import type { CentreOptionSetCode } from "./centres";
 
 export type CentreOptionSeedMode = "dry-run" | "apply";
@@ -74,11 +75,6 @@ interface ExistingOptionSetRow {
   option_is_active: boolean | string | null;
 }
 
-interface MissingColumnRow {
-  table_name: string;
-  column_name: string;
-}
-
 interface ExistingSeedOption {
   optionSetCode: CentreOptionSetCode;
   code: string;
@@ -110,7 +106,6 @@ export const CENTRE_OPTION_SEED_SETS: SeedOptionSet[] = [
     allowMulti: false,
     sortOrder: 3,
   },
-  { code: "stream", label: "Centre Stream", allowMulti: true, sortOrder: 4 },
 ];
 
 export const CENTRE_OPTION_SEED_OPTIONS: SeedOption[] = [
@@ -189,27 +184,6 @@ export const CENTRE_OPTION_SEED_OPTIONS: SeedOption[] = [
     code: "nodal",
     label: "Nodal",
     sortOrder: 5,
-    isActive: true,
-  },
-  {
-    optionSetCode: "stream",
-    code: "jee",
-    label: "JEE",
-    sortOrder: 1,
-    isActive: true,
-  },
-  {
-    optionSetCode: "stream",
-    code: "neet",
-    label: "NEET",
-    sortOrder: 2,
-    isActive: true,
-  },
-  {
-    optionSetCode: "stream",
-    code: "math_foundation",
-    label: "Math Foundation",
-    sortOrder: 3,
     isActive: true,
   },
 ];
@@ -337,31 +311,8 @@ export async function runCentreOptionSeed(params: {
 async function checkSeedSchema(
   db: CentreOptionSeedDb
 ): Promise<{ ok: true } | { ok: false; details: string[] }> {
-  const values = REQUIRED_COLUMNS.map(
-    (_column, index) => `($${index * 2 + 1}, $${index * 2 + 2})`
-  ).join(", ");
-  const params = REQUIRED_COLUMNS.flatMap(({ table, column }) => [
-    table,
-    column,
-  ]);
-  const rows = await db.query<MissingColumnRow>(
-    `WITH required(table_name, column_name) AS (VALUES ${values})
-     SELECT required.table_name, required.column_name
-     FROM required
-     LEFT JOIN information_schema.columns cols
-       ON cols.table_schema = 'public'
-      AND cols.table_name = required.table_name
-      AND cols.column_name = required.column_name
-     WHERE cols.column_name IS NULL
-     ORDER BY required.table_name, required.column_name`,
-    params
-  );
-
-  if (rows.length === 0) return { ok: true };
-  return {
-    ok: false,
-    details: rows.map((row) => `${row.table_name}.${row.column_name}`),
-  };
+  const details = await findMissingSchemaColumns(db, REQUIRED_COLUMNS);
+  return details.length === 0 ? { ok: true } : { ok: false, details };
 }
 
 async function loadExistingSeedState(db: CentreOptionSeedDb) {

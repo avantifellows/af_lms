@@ -95,7 +95,7 @@ describe("PATCH /api/admin/centres/options/[id]", () => {
         method: "PATCH",
         body: {
           code: "changed",
-          option_set_code: "stream",
+          option_set_code: "type",
           label: "Changed",
           sort_order: 2,
           is_active: true,

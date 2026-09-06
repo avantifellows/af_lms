@@ -42,22 +42,34 @@ describe("Holistic Profile regeneration", () => {
     process.env.HOLISTIC_PROFILE_ETL_TOKEN = "machine-token";
   });
 
-  it("parameterizes the current-year active-Mapping rule for Profile reads", async () => {
-    mockQuery.mockResolvedValue([]);
+  it("returns Profile and polling reads without a second reconciliation", async () => {
+    mockQuery
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{
+        request_key: requestKey,
+        state: "running",
+        inserted_at: "2026-07-17T00:00:00.000Z",
+        error_code: null,
+      }]);
 
-    await getHolisticProfileAdmin(41, "2026-2027", 1);
+    await expect(getHolisticProfileAdmin(41, "2026-2027", 1)).resolves.toMatchObject({
+      regeneration: { requestKey, state: "running" },
+    });
 
     expect(mockQuery).toHaveBeenCalledTimes(2);
     expect(mockQuery.mock.calls[0][1]).toEqual([41, 1, "2026-2027", "2026-2027"]);
     expect(mockQuery.mock.calls[1][1]).toEqual([41, 1, "2026-2027", "2026-2027"]);
-    expect(mockQuery.mock.calls[1][0]).toContain("configuration.state = 'active'");
+    for (const [sql] of mockQuery.mock.calls) {
+      expect(String(sql)).toContain("configuration.state = 'active'");
+      expect(String(sql)).toContain("roster_student.academic_year = $3");
+      expect(String(sql)).toContain("roster_student.program_id = $2");
+      expect(String(sql)).toContain("HAVING COUNT(DISTINCT roster_student.grade) = 1");
+      expect(String(sql)).not.toContain("mapping.ended_at IS NULL");
+      expect(String(sql)).toContain("OR ($3 <> $4 AND EXISTS");
+      expect(String(sql)).toContain("mapping.academic_year = $3");
+    }
     expect(mockQuery.mock.calls[1][0]).toContain("configuration.id = request.prompt_configuration_id");
-    expect(mockQuery.mock.calls[0][0]).toContain("FROM student live_student");
-    expect(mockReconcile).toHaveBeenCalledWith({
-      academicYear: "2026-2027",
-      programId: 1,
-      studentIds: [41],
-    });
+    expect(mockReconcile).not.toHaveBeenCalled();
   });
 
   it("records actor, Student, Active configuration and force before sending only the request reference", async () => {

@@ -15,7 +15,7 @@ edges:
     condition: when the mismatch depends on user role, school scope, program ids, or centre seats
   - target: patterns/debug-access-denied.md
     condition: when the symptom is an empty view, 403, or wrong school/program scope
-last_updated: 2026-07-06
+last_updated: 2026-08-07
 ---
 
 # Debug Curriculum Progress
@@ -42,10 +42,16 @@ must include both explicit `program_ids` and seat-derived `scope.programs`.
    instead of raw `permission.program_ids`.
 6. Check both school-tab APIs and `/curriculum-summary`; both need effective
    programs, not raw `program_ids`.
-7. For a specific school page, default the Program picker to that school's
+7. Resolve exactly one Centre for the selected School + Program with
+   `is_active = true` and `is_physical = true`; zero or multiple matches are a
+   configuration error, not a reason to guess or combine Centres.
+8. Check `centre_exam_tracks` for the selected Centre + Grade. No rows blocks
+   logging, and a mapped Track without an in-syllabus Chapter config stays visible
+   but unavailable.
+9. For a specific school page, default the Program picker to that school's
    assigned centre program when available; otherwise mixed CoE/Nodal users can
    land on the wrong empty Program.
-8. If a screenshot shows a modal date, verify an actual saved log exists for that
+10. If a screenshot shows a modal date, verify an actual saved log exists for that
    `log_date` or `inserted_at`; the modal date can just be today's default.
 
 ## Gotchas
@@ -54,6 +60,8 @@ must include both explicit `program_ids` and seat-derived `scope.programs`.
   school seat. Do not assume CoE-first default is the right school default.
 - A topic marked "covered" in the log modal comes from loaded progress; it is not
   proof that the current modal was saved.
+- Never fall back to the global Chapter Exam Config Track list when Centre
+  resolution or Centre Exam Track mappings are missing.
 - Chapter completion is separate from topic coverage. `0/11 chapters completed`
   can be correct even when topics are covered.
 - Use `BEGIN READ ONLY` when checking prod manually. Do not run writes in prod.

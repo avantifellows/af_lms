@@ -79,7 +79,6 @@ describe("CentresPage (server component)", () => {
         typeCode: null,
         categoryCode: null,
         subCategoryCode: null,
-        streamCode: null,
         isPhysical: "all",
       },
       rows: [
@@ -96,8 +95,6 @@ describe("CentresPage (server component)", () => {
           subCategoryCode: null,
           subCategoryLabel: null,
           subCategoryOptionActive: null,
-          streamCodes: ["jee"],
-          streams: [{ code: "jee", label: "JEE", isActive: true }],
           isPhysical: true,
           isActive: true,
           insertedAt: "2026-01-01T00:00:00.000Z",

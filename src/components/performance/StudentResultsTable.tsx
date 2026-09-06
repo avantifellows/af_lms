@@ -270,12 +270,27 @@ export default function StudentResultsTable({
   };
 
   const sorted = [...students].sort((a, b) => {
+    // Unsubmitted attempts always sit below submitted ones, whatever the sort:
+    // otherwise a 0% walkout interleaves with a genuine 0% and the ranked column
+    // reads out of order.
+    const aDone = a.has_quiz_ended !== false;
+    const bDone = b.has_quiz_ended !== false;
+    if (aDone !== bDone) return aDone ? -1 : 1;
+
     const mul = sortDir === "asc" ? 1 : -1;
     if (sortKey === "student_name") {
       return mul * a.student_name.localeCompare(b.student_name);
     }
     return mul * ((a[sortKey] ?? 0) - (b[sortKey] ?? 0));
   });
+
+  // Rank is over submitted attempts only, so a student who never submitted does
+  // not consume a position (and does not inflate the "of N" a teacher reads).
+  const rankByName = new Map<string, string>();
+  [...students]
+    .filter((s) => s.has_quiz_ended !== false)
+    .sort((a, b) => b.percentage - a.percentage)
+    .forEach((s, i) => rankByName.set(s.student_name, String(i + 1).padStart(2, "0")));
 
   const sortIcon = (key: SortKey) => {
     if (sortKey !== key) return "";
@@ -333,7 +348,7 @@ export default function StudentResultsTable({
             </tr>
           </thead>
           <tbody>
-            {sorted.map((s, idx) => {
+            {sorted.map((s) => {
               const isExpanded = expandedName === s.student_name;
               return (
                 <Fragment key={s.student_name}>
@@ -342,13 +357,21 @@ export default function StudentResultsTable({
                     onClick={() => toggleStudent(s.student_name)}
                   >
                     <td className="px-4 py-3 whitespace-nowrap text-sm font-bold text-accent">
-                      {String(idx + 1).padStart(2, "0")}
+                      {rankByName.get(s.student_name) ?? "—"}
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap text-sm font-semibold text-text-primary">
                       {s.student_name}
                       {s.subject_scores.length > 0 && (
                         <span className="ml-1 text-xs text-text-muted">
                           {isExpanded ? "▼" : "▶"}
+                        </span>
+                      )}
+                      {s.has_quiz_ended === false && (
+                        <span
+                          className="ml-2 inline-flex items-center px-2 py-0.5 text-xs font-semibold rounded bg-danger text-white"
+                          title="This student never submitted the test, so their marks are only what was saved before they left."
+                        >
+                          Test Incomplete
                         </span>
                       )}
                     </td>

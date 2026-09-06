@@ -1,50 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import { checkCurriculumSchema } from "@/lib/curriculum-schema";
+import { requireCurriculumRequestAccess } from "@/lib/curriculum-api";
 import { getCurriculumOptions } from "@/lib/curriculum-options";
-import { getFeatureAccess, getResolvedPermission } from "@/lib/permissions";
-
-type CurriculumSession = {
-  user?: { email?: string | null } | null;
-  isPasscodeUser?: boolean;
-} | null;
-
-async function requireCurriculumViewAccess(session: CurriculumSession) {
-  if (!session?.user?.email) {
-    return {
-      ok: false as const,
-      response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
-    };
-  }
-  if (session.isPasscodeUser) {
-    return {
-      ok: false as const,
-      response: NextResponse.json({ error: "Forbidden" }, { status: 403 }),
-    };
-  }
-
-  const permission = await getResolvedPermission(session.user.email);
-  const access = getFeatureAccess(permission, "curriculum");
-  if (!permission || !access.canView) {
-    return {
-      ok: false as const,
-      response: NextResponse.json({ error: "Forbidden" }, { status: 403 }),
-    };
-  }
-
-  return { ok: true as const, permission };
-}
 
 export async function GET(request: NextRequest) {
-  const session = await getServerSession(authOptions);
-  const access = await requireCurriculumViewAccess(session);
+  const access = await requireCurriculumRequestAccess("view");
   if (!access.ok) return access.response;
-
-  const schema = await checkCurriculumSchema();
-  if (!schema.ok) {
-    return NextResponse.json(schema, { status: schema.status });
-  }
 
   const schoolCode = request.nextUrl.searchParams.get("school_code")?.trim() || "";
   if (!schoolCode) {
@@ -67,7 +27,9 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({
     programs: result.programs,
     examTracks: result.examTracks,
+    centreExamTracks: result.centreExamTracks,
     gradeSubjects: result.gradeSubjects,
+    configurationError: result.configurationError,
     defaults: result.defaults,
   });
 }

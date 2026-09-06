@@ -97,6 +97,29 @@ describe("curriculum-chapter-completion", () => {
     });
   });
 
+  it.each(["44", ["invalid"], [0], [1.5]])(
+    "rejects malformed Chapter Completion IDs: %j",
+    async (completeChapterIds) => {
+      const result = await validateChapterCompletionDeltas({
+        schoolCode: "70705",
+        programId: 1,
+        examTrack: "jee_main",
+        grade: 11,
+        subject: "Physics",
+        completeChapterIds,
+        uncompleteChapterIds: [],
+        permission,
+      });
+
+      expect(result).toEqual({
+        ok: false,
+        status: 422,
+        error: "Chapter Completion changes must use arrays of positive integer Chapter IDs",
+      });
+      expect(mockQuery).not.toHaveBeenCalled();
+    }
+  );
+
   it("marks Chapter Completion with conflict-safe insert and re-read", async () => {
     const clientQuery = vi.fn()
       .mockResolvedValueOnce({ rows: [] })

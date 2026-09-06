@@ -270,6 +270,82 @@ describe("CurriculumConfigTable", () => {
     );
   });
 
+  it("does not offer Biology chapters for JEE Main in the Add flow", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse({
+          options: [
+            {
+              chapterId: 8,
+              chapterCode: "PHY-02",
+              chapterName: "Laws",
+              grade: 11,
+              subjectId: 4,
+              subjectName: "Physics",
+              topicCount: 2,
+              hasTopics: true,
+              topicWarning: "",
+              existingConfigId: null,
+              configExists: false,
+              existingIsInSyllabus: null,
+            },
+            {
+              chapterId: 9,
+              chapterCode: "BIO-01",
+              chapterName: "Cell Structure",
+              grade: 11,
+              subjectId: 3,
+              subjectName: "Biology",
+              topicCount: 2,
+              hasTopics: true,
+              topicWarning: "",
+              existingConfigId: null,
+              configExists: false,
+              existingIsInSyllabus: null,
+            },
+          ],
+        })
+      )
+    );
+
+    render(<CurriculumConfigTable rows={[inSyllabusRow]} activeFilters={baseFilters} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Add" }));
+    await userEvent.click(screen.getByLabelText("Chapter search"));
+    await screen.findByRole("option", { name: /PHY-02/ });
+
+    expect(screen.queryByRole("option", { name: /BIO-01/ })).not.toBeInTheDocument();
+  });
+
+  it("shows the API error when chapter options are unavailable", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse(
+          { error: "Curriculum configuration is not available for CET" },
+          { status: 422 }
+        )
+      )
+    );
+
+    render(
+      <CurriculumConfigTable
+        rows={[]}
+        activeFilters={{ ...baseFilters, examTrack: "cet" }}
+      />
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Add" }));
+    await userEvent.click(screen.getByLabelText("Chapter search"));
+
+    expect(
+      await screen.findByText("Curriculum configuration is not available for CET")
+    ).toBeInTheDocument();
+    expect(screen.queryByText("No chapters match the add filters.")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create" })).toBeDisabled();
+  });
+
   it("shows an error and re-enables create when POST returns non-JSON", async () => {
     const fetchMock = vi.fn((input, init) => {
       const url = String(input);

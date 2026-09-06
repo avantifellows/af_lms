@@ -48,9 +48,25 @@ describe("ProgressSummary", () => {
 
   it("renders total time from formatDuration", () => {
     render(<ProgressSummary chapters={chapters} progress={progress} subjectTotalTimeMinutes={75} />);
-    expect(screen.getByText("1h 30m")).toBeInTheDocument();
+    expect(screen.getAllByText("1h 30m")).toHaveLength(2);
     expect(screen.getByText("total time taught")).toBeInTheDocument();
     expect(mockFormatDuration).toHaveBeenCalledWith(75);
+  });
+
+  it("renders Doubt Solving Hours separately from teaching time", () => {
+    mockFormatDuration.mockImplementation((minutes) => `${minutes}m`);
+    render(
+      <ProgressSummary
+        chapters={chapters}
+        progress={progress}
+        subjectTotalTimeMinutes={75}
+        doubtSolvingTotalTimeMinutes={150}
+      />
+    );
+
+    expect(screen.getByText("150m")).toBeInTheDocument();
+    expect(screen.getByText("doubt solving time")).toBeInTheDocument();
+    expect(mockFormatDuration).toHaveBeenCalledWith(150);
   });
 
   it("passes chapters and progress to calculateStats", () => {
@@ -69,7 +85,7 @@ describe("ProgressSummary", () => {
     mockFormatDuration.mockReturnValue("0m");
 
     render(<ProgressSummary chapters={[]} progress={{}} subjectTotalTimeMinutes={0} />);
-    expect(screen.getByText("0m")).toBeInTheDocument();
+    expect(screen.getAllByText("0m")).toHaveLength(2);
     expect(screen.getByText("chapters completed")).toBeInTheDocument();
     expect(screen.getByText("topics covered")).toBeInTheDocument();
     expect(screen.getByText("total time taught")).toBeInTheDocument();

@@ -301,8 +301,8 @@ describe("getFeatureAccess", () => {
       ["teacher", "edit"],
       ["holistic_mentorship_admin", "edit"],
       ["admin", "edit"],
-      ["program_manager", "none"],
-      ["program_admin", "none"],
+      ["program_manager", "view"],
+      ["program_admin", "view"],
     ] as const)("gives %s %s access to holistic mentorship", (role, access) => {
       const permission = makePermission({ role, program_ids: [PROGRAM_IDS.COE] });
       expect(getFeatureAccess(permission, "holistic_mentorship").access).toBe(access);

@@ -13,7 +13,7 @@ interface Props {
 
 type JobStatus = "queued" | "started" | "processing" | "done" | "errored";
 
-interface Job {
+export interface Job {
   job_id: string;
   status: JobStatus;
   student_count: number | null;
@@ -48,6 +48,23 @@ const STATUS_LABEL: Record<JobStatus, string> = {
 function formatTime(iso: string): string {
   const d = new Date(iso);
   return isNaN(d.getTime()) ? iso : d.toLocaleString();
+}
+
+function createdAtMs(job: Job): number {
+  const t = new Date(job.created_at).getTime();
+  return isNaN(t) ? 0 : t;
+}
+
+// Each regenerate fully replaces the PDF, so show only the newest run — plus
+// the newest finished one while a rebuild is in flight or failed, so the last
+// good download doesn't vanish.
+export function visibleJobs(jobs: Job[]): Job[] {
+  const sorted = [...jobs].sort((a, b) => createdAtMs(b) - createdAtMs(a));
+  const latest = sorted[0];
+  if (!latest) return [];
+  if (latest.status === "done") return [latest];
+  const latestDone = sorted.find((job) => job.status === "done");
+  return latestDone ? [latest, latestDone] : [latest];
 }
 
 export default function CombinedReportPanel({
@@ -116,7 +133,7 @@ export default function CombinedReportPanel({
     };
   }, [jobs, refresh]);
 
-  const generate = async () => {
+  const generate = async (regenerate = false) => {
     setSubmitting(true);
     setError(null);
     try {
@@ -129,6 +146,7 @@ export default function CombinedReportPanel({
           grade,
           program,
           stream,
+          ...(regenerate ? { regenerate: true } : {}),
         }),
       });
       if (!res.ok) {
@@ -154,6 +172,14 @@ export default function CombinedReportPanel({
     }
   };
 
+  // A finished report is the one blocked state ops can act on: the data behind it
+  // may have been fixed since, so offer a deliberate rebuild rather than a dead end.
+  const alreadyGenerated = blockedReason === "already_generated";
+  // Keep the label on "Regenerate" while the rebuild is in flight — it flips to
+  // job_in_progress the moment the job is queued, and reverting the wording
+  // mid-run reads as the button having reset.
+  const hasFinishedReport = jobs.some((j) => j.status === "done");
+
   return (
     <div className="bg-bg-card-alt border border-border rounded-lg p-4 space-y-3">
       <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -166,18 +192,22 @@ export default function CombinedReportPanel({
           </p>
         </div>
         <button
-          onClick={generate}
-          disabled={submitting || loading || !canGenerate}
-          title={blockedMessage ?? undefined}
+          onClick={() => generate(alreadyGenerated)}
+          disabled={submitting || loading || (!canGenerate && !alreadyGenerated)}
+          title={alreadyGenerated ? undefined : blockedMessage ?? undefined}
           className="px-4 py-2 min-h-[44px] text-xs md:text-sm font-bold uppercase tracking-wide rounded-lg bg-accent text-text-on-accent shadow-sm transition-colors hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          {submitting ? "Starting…" : "Generate combined report"}
+          {submitting
+            ? "Starting…"
+            : hasFinishedReport
+              ? "Regenerate"
+              : "Generate combined report"}
         </button>
       </div>
 
       {/* Not an error — the ordinary state of a test that is still open, or one
           whose report has already been produced. */}
-      {!loading && blockedMessage && (
+      {!loading && blockedMessage && !alreadyGenerated && (
         <div className="p-2 bg-bg-card border border-border text-text-muted rounded text-xs">
           {blockedMessage}
           {blockedReason === "session_not_ended" && sessionEndTime && (
@@ -200,7 +230,7 @@ export default function CombinedReportPanel({
         </p>
       ) : (
         <ul className="divide-y divide-border">
-          {jobs.map((job) => (
+          {visibleJobs(jobs).map((job) => (
             <li
               key={job.job_id}
               className="py-2 flex items-center justify-between gap-3 flex-wrap"
@@ -230,7 +260,7 @@ export default function CombinedReportPanel({
                     href={job.download_url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="px-3 py-1.5 min-h-[36px] text-xs font-bold uppercase tracking-wide rounded-lg bg-accent text-text-on-accent hover:opacity-90"
+                    className="inline-flex items-center justify-center px-3 py-1.5 min-h-[36px] text-xs font-bold uppercase tracking-wide rounded-lg bg-accent text-text-on-accent hover:opacity-90"
                   >
                     Download
                   </a>

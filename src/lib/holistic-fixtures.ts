@@ -176,12 +176,18 @@ export async function seedHolisticFixtures(
          SELECT id FROM created UNION ALL SELECT id FROM existing LIMIT 1
        ), permission AS (
          INSERT INTO user_permission
-           (email, level, role, program_ids, school_codes, full_name, read_only, user_id, revoked_at)
-         SELECT $1, $4, $3, $5::int[], ARRAY[$6::text], CONCAT('Synthetic ', $2), $7, actor.id, NULL
+           (email, level, role, program_ids, school_codes, regions, full_name, read_only, user_id, revoked_at)
+         SELECT $1, $4, $3, $5::int[], ARRAY[$6::text],
+           CASE WHEN $3 IN ('program_manager', 'program_admin')
+             THEN ARRAY[(SELECT region FROM school WHERE code = $6)]
+             ELSE NULL
+           END,
+           CONCAT('Synthetic ', $2), $7, actor.id, NULL
          FROM actor
          ON CONFLICT (email) DO UPDATE SET level = EXCLUDED.level, role = EXCLUDED.role,
            program_ids = EXCLUDED.program_ids, school_codes = EXCLUDED.school_codes,
-           read_only = EXCLUDED.read_only, user_id = EXCLUDED.user_id, revoked_at = NULL
+           regions = EXCLUDED.regions, read_only = EXCLUDED.read_only,
+           user_id = EXCLUDED.user_id, revoked_at = NULL
        )
        SELECT id FROM actor`,
       [

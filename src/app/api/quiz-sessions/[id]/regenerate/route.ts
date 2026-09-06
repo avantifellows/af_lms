@@ -169,14 +169,13 @@ async function regenerateFromCms(
 
   const quizId = currentSession.platform_id;
   const cmsTestId = metaString(metaData, "cms_test_id");
-  const curriculumId = metaString(metaData, "cms_curriculum_id");
-  const gradeId = metaString(metaData, "cms_grade_id");
 
-  if (!quizId || !cmsTestId || !curriculumId || !gradeId) {
+  // Test id only: requiring curriculum/grade would 422 every session created after we
+  // stopped persisting them (nex-gen-cms#177).
+  if (!quizId || !cmsTestId) {
     console.error(
       `Session ${sessionId} is CMS-sourced but missing regenerate identifiers ` +
-        `(platform_id=${quizId}, cms_test_id=${cmsTestId}, ` +
-        `cms_curriculum_id=${curriculumId}, cms_grade_id=${gradeId})`
+        `(platform_id=${quizId}, cms_test_id=${cmsTestId})`
     );
     return NextResponse.json(
       { error: "Session is missing the CMS identifiers needed to regenerate" },
@@ -196,8 +195,6 @@ async function regenerateFromCms(
       headers: { "Content-Type": "application/json", accept: "application/json" },
       body: JSON.stringify({
         test_id: Number(cmsTestId),
-        curriculum_id: Number(curriculumId),
-        grade_id: Number(gradeId),
         quiz_type: "assessment",
         ...(sessionEndTime ? { session_end_time: sessionEndTime } : {}),
       }),

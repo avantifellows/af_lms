@@ -1,6 +1,9 @@
 import { query, withTransaction } from "./db";
+import { CURRENT_ACADEMIC_YEAR } from "./constants";
 import { findEligibleHolisticMentorUserId } from "./holistic-mentor-eligibility";
 import { reconcileHolisticMappings } from "./holistic-reconciliation";
+import { buildHolisticSchoolScopePredicate } from "./holistic-scope";
+import type { UserPermission } from "./permissions";
 import type { PoolClient } from "pg";
 
 interface RosterRow {
@@ -27,6 +30,28 @@ export interface HolisticAssignmentRosterStudent {
     mentorUserId: number;
     mentorName: string;
   } | null;
+}
+
+export interface HolisticAssignmentCoverageSummary {
+  eligible: number;
+  assigned: number;
+  unassigned: number;
+  activeMentors: number;
+  coveragePercentage: number;
+  completed: number;
+  pending: number;
+  noActivePhase: number;
+}
+
+interface CoverageSummaryRow {
+  eligible_count: number | string;
+  assigned_count: number | string;
+  unassigned_count: number | string;
+  active_mentor_count: number | string;
+  coverage_percentage: number | string;
+  completed_count: number | string;
+  pending_count: number | string;
+  no_active_phase_count: number | string;
 }
 
 interface ActiveMappingRow {
@@ -85,8 +110,9 @@ export async function lockHolisticMentorMappingMutation(
 export async function eraseDraftHolisticNotes(
   client: PoolClient,
   studentIds: number[],
-  actorUserId: number,
-  reason: string
+  actorUserId: number | null,
+  reason: string,
+  actorEmail?: string,
 ): Promise<void> {
   if (studentIds.length === 0) return;
   await client.query(
@@ -107,10 +133,61 @@ export async function eraseDraftHolisticNotes(
        WHERE answers.notes_id = updated_notes.id
      )
      INSERT INTO holistic_mentorship_post_session_note_audits
-       (notes_id, actor_user_id, action, occurred_at, reason, inserted_at, updated_at)
-     SELECT id, $2, 'draft_erased_on_mapping_end', now(), $3, now(), now()
+       (notes_id, actor_user_id, actor_email, action, occurred_at, reason, inserted_at, updated_at)
+     SELECT id, $2, $3, 'draft_erased_on_mapping_end', now(), $4, now(), now()
      FROM updated_notes`,
-    [studentIds, actorUserId, reason]
+    [studentIds, actorUserId, actorEmail ?? null, reason]
+  );
+}
+
+async function eraseDraftHolisticNotesForMapping(
+  client: PoolClient,
+  params: {
+    studentIds: number[];
+    mentorUserId: number;
+    programId: number;
+    academicYear: string;
+    actorUserId: number | null;
+    actorEmail: string;
+    reason: string;
+  },
+): Promise<void> {
+  await client.query(
+    `WITH draft_notes AS MATERIALIZED (
+       SELECT notes.id
+       FROM holistic_mentorship_post_session_notes notes
+       JOIN holistic_mentorship_phases phase ON phase.id = notes.phase_id
+       JOIN holistic_mentorship_phase_plans plan ON plan.id = phase.phase_plan_id
+       WHERE notes.student_id = ANY($1::bigint[])
+         AND notes.author_user_id = $2
+         AND plan.program_id = $3
+         AND plan.academic_year = $4
+         AND notes.state = 'draft'
+       FOR UPDATE OF notes
+     ), updated_notes AS (
+       UPDATE holistic_mentorship_post_session_notes notes
+       SET revision = revision + 1, last_edited_at = now(), updated_at = now()
+       FROM draft_notes
+       WHERE notes.id = draft_notes.id
+       RETURNING notes.id
+     ), erased_answers AS (
+       DELETE FROM holistic_mentorship_post_session_answers answers
+       USING updated_notes
+       WHERE answers.notes_id = updated_notes.id
+     )
+     INSERT INTO holistic_mentorship_post_session_note_audits
+       (notes_id, actor_user_id, actor_email, action, occurred_at, reason, inserted_at, updated_at)
+     SELECT id, $5, $6, 'draft_erased_on_mapping_end', now(), $7, now(), now()
+     FROM updated_notes`,
+    [
+      params.studentIds,
+      params.mentorUserId,
+      params.programId,
+      params.academicYear,
+      params.actorUserId,
+      params.actorEmail,
+      params.reason,
+    ],
   );
 }
 
@@ -216,14 +293,12 @@ function assertAssignmentsCurrent(
   selections: Array<{ studentId: number; expectedMappingId: number | null }>,
   activeByStudent: Map<number, ActiveMappingRow>,
   actorUserId: number,
-  takeoverConfirmed: boolean
 ) {
   for (const selection of selections) {
     assertAssignmentCurrent(
       selection,
       activeByStudent.get(selection.studentId),
       actorUserId,
-      takeoverConfirmed
     );
   }
 }
@@ -232,7 +307,6 @@ function assertAssignmentCurrent(
   selection: { studentId: number; expectedMappingId: number | null },
   current: ActiveMappingRow | undefined,
   actorUserId: number,
-  takeoverConfirmed: boolean
 ) {
   const currentId = current ? Number(current.id) : 0;
   const expectedId = selection.expectedMappingId ?? 0;
@@ -243,30 +317,7 @@ function assertAssignmentCurrent(
   if (Number(current.mentor_user_id) === actorUserId) {
     throw new MappingMutationError(409, "Student is already assigned to you");
   }
-  if (!takeoverConfirmed) {
-    throw new MappingMutationError(409, "Confirm takeover using the refreshed roster");
-  }
-}
-
-async function endMappingsForTakeover(
-  client: PoolClient,
-  active: ActiveMappingRow[],
-  actorUserId: number
-) {
-  if (active.length === 0) return;
-  await client.query(
-    `UPDATE holistic_mentorship_mentor_mentee_mappings
-     SET ended_at = now(), ended_by_user_id = $1, end_source = $2,
-         end_reason = $3, updated_at = now()
-     WHERE id = ANY($4::bigint[])`,
-    [actorUserId, "af_lms_teacher", "teacher_takeover", active.map((row) => Number(row.id))]
-  );
-  await eraseDraftHolisticNotes(
-    client,
-    active.map((row) => Number(row.student_id)),
-    actorUserId,
-    "teacher_takeover"
-  );
+  throw new MappingMutationError(409, "Student is already assigned to another Mentor");
 }
 
 async function insertMappings(
@@ -274,26 +325,189 @@ async function insertMappings(
   params: {
     studentIds: number[];
     actorUserId: number;
+    auditActorUserId?: number;
+    actorEmail: string;
     schoolId: number;
     programId: number;
     academicYear: string;
-    activeByStudent: Map<number, ActiveMappingRow>;
   }
 ) {
   for (const studentId of params.studentIds) {
-    const source = params.activeByStudent.has(studentId)
-      ? "af_lms_teacher_takeover"
-      : "af_lms_teacher_claim";
     await client.query(
       `INSERT INTO holistic_mentorship_mentor_mentee_mappings
          (student_id, mentor_user_id, school_id, program_id, academic_year,
-          started_at, assigned_by_user_id, assignment_source, inserted_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, now(), $6, $7, now(), now())
+          started_at, assigned_by_user_id, assigned_by_email, assignment_source,
+          inserted_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, now(), $6, $7, $8, now(), now())
        RETURNING id`,
       [studentId, params.actorUserId, params.schoolId, params.programId,
-        params.academicYear, params.actorUserId, source]
+        params.academicYear, params.auditActorUserId ?? null, params.actorEmail,
+        "af_lms_teacher_claim"]
     );
   }
+}
+
+type AdminMappingWriteParams = {
+  actorEmail: string;
+  auditActorUserId?: number;
+  schoolId: number;
+  programId: number;
+  academicYear: string;
+  studentId: number;
+  expectedMappingId: number | null;
+  reason: string;
+};
+
+async function lockEligibleAdminMentor(
+  client: PoolClient,
+  params: AdminMappingWriteParams & { mentorUserId: number },
+) {
+  await lockHolisticMentorMappingMutation(client, params.mentorUserId);
+  await lockEligibleStudents(client, {
+    schoolId: params.schoolId,
+    programId: params.programId,
+    academicYear: params.academicYear,
+    studentIds: [params.studentId],
+  });
+  const eligibleMentorUserId = await findEligibleHolisticMentorUserId({
+    client,
+    userId: params.mentorUserId,
+    schoolId: params.schoolId,
+    programId: params.programId,
+  });
+  if (eligibleMentorUserId === null) {
+    throw new MappingMutationError(422, "Mentor is not eligible for this School and Program");
+  }
+}
+
+async function insertAdminMapping(
+  client: PoolClient,
+  params: AdminMappingWriteParams & { mentorUserId: number },
+  source: "af_lms_admin_assign" | "af_lms_admin_reassign",
+) {
+  await client.query(
+    `INSERT INTO holistic_mentorship_mentor_mentee_mappings
+       (student_id, mentor_user_id, school_id, program_id, academic_year,
+        started_at, assigned_by_user_id, assigned_by_email, assignment_source,
+        assignment_audit_reason, inserted_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, now(), $6, $7, $8, $9, now(), now())
+     RETURNING id`,
+    [
+      params.studentId,
+      params.mentorUserId,
+      params.schoolId,
+      params.programId,
+      params.academicYear,
+      params.auditActorUserId ?? null,
+      params.actorEmail.trim().toLowerCase(),
+      source,
+      params.reason.trim(),
+    ],
+  );
+}
+
+async function lockExpectedAdminMapping(
+  client: PoolClient,
+  params: AdminMappingWriteParams & { expectedMappingId: number },
+) {
+  const active = await lockActiveMappings(
+    client,
+    [params.studentId],
+    params.academicYear,
+    params.schoolId,
+    params.programId,
+  );
+  const current = active.byStudent.get(params.studentId);
+  if (Number(current?.id ?? 0) !== params.expectedMappingId) {
+    throw new MappingMutationError(409, "Mapping ownership changed; review the refreshed roster");
+  }
+  return current!;
+}
+
+async function endAdminMapping(
+  client: PoolClient,
+  params: AdminMappingWriteParams & { expectedMappingId: number },
+  currentMentorUserId: number,
+  source: "af_lms_admin_reassign" | "af_lms_admin_remove",
+  endReason: "admin_reassignment" | "admin_removal",
+) {
+  const actorEmail = params.actorEmail.trim().toLowerCase();
+  const reason = params.reason.trim();
+  await client.query(
+    `UPDATE holistic_mentorship_mentor_mentee_mappings
+     SET ended_at = now(), ended_by_user_id = $1, ended_by_email = $2,
+         end_source = $3, end_reason = $4, end_audit_reason = $5, updated_at = now()
+     WHERE id = $6`,
+    [params.auditActorUserId ?? null, actorEmail, source,
+      endReason, reason, params.expectedMappingId],
+  );
+  await eraseDraftHolisticNotesForMapping(client, {
+    studentIds: [params.studentId],
+    mentorUserId: currentMentorUserId,
+    programId: params.programId,
+    academicYear: params.academicYear,
+    actorUserId: params.auditActorUserId ?? null,
+    actorEmail,
+    reason,
+  });
+}
+
+async function assignAdminMappingInTransaction(
+  client: PoolClient,
+  params: Parameters<typeof assignHolisticMenteeAsAdmin>[0],
+): Promise<HolisticMappingMutationResult> {
+  await lockEligibleAdminMentor(client, params);
+  const active = await lockActiveMappings(
+    client,
+    [params.studentId],
+    params.academicYear,
+    params.schoolId,
+    params.programId,
+  );
+  if (active.byStudent.has(params.studentId)) {
+    throw new MappingMutationError(409, "Student is already assigned");
+  }
+  await insertAdminMapping(client, params, "af_lms_admin_assign");
+  return { ok: true, changed: 1 };
+}
+
+export async function assignHolisticMenteeAsAdmin(params: {
+  actorEmail: string;
+  auditActorUserId?: number;
+  schoolId: number;
+  programId: number;
+  academicYear: string;
+  studentId: number;
+  mentorUserId: number;
+  expectedMappingId: null;
+  confirmed: boolean;
+  reason: string;
+}): Promise<HolisticMappingMutationResult> {
+  if (!params.confirmed) {
+    return { ok: false, status: 422, error: "Assignment confirmation is required" };
+  }
+  if (!params.reason.trim()) {
+    return { ok: false, status: 422, error: "Assignment reason is required" };
+  }
+  if (params.academicYear !== CURRENT_ACADEMIC_YEAR) {
+    return {
+      ok: false,
+      status: 422,
+      error: "Admin Mapping assignments are limited to the current Academic Year",
+    };
+  }
+  await reconcileHolisticMappings({
+    academicYear: params.academicYear,
+    studentIds: [params.studentId],
+    programId: params.programId,
+  });
+  return runMappingMutation({
+    studentIds: [params.studentId],
+    academicYear: params.academicYear,
+    schoolId: params.schoolId,
+    programId: params.programId,
+    handlesUniqueViolation: true,
+  }, () => withTransaction((client) => assignAdminMappingInTransaction(client, params)));
 }
 
 async function assignInTransaction(
@@ -325,10 +539,8 @@ async function assignInTransaction(
     params.selections,
     active.byStudent,
     params.actorUserId,
-    params.takeoverConfirmed
   );
-  await endMappingsForTakeover(client, active.rows, params.actorUserId);
-  await insertMappings(client, { ...params, studentIds, activeByStudent: active.byStudent });
+  await insertMappings(client, { ...params, studentIds });
   return { ok: true, changed: studentIds.length };
 }
 
@@ -356,13 +568,42 @@ async function mutationConflict(
   };
 }
 
+async function runMappingMutation(
+  params: {
+    studentIds: number[];
+    academicYear: string;
+    schoolId: number;
+    programId: number;
+    handlesUniqueViolation?: boolean;
+  },
+  mutation: () => Promise<HolisticMappingMutationResult>,
+) {
+  try {
+    return await mutation();
+  } catch (error) {
+    const knownConflict = error instanceof MappingMutationError;
+    const uniqueConflict = params.handlesUniqueViolation && isUniqueViolation(error);
+    if (knownConflict || uniqueConflict) {
+      return mutationConflict(
+        error as MappingMutationError | { code?: unknown },
+        params.studentIds,
+        params.academicYear,
+        params.schoolId,
+        params.programId,
+      );
+    }
+    throw error;
+  }
+}
+
 export async function assignHolisticMentees(params: {
   actorUserId: number;
+  auditActorUserId?: number;
+  actorEmail: string;
   schoolId: number;
   programId: number;
   academicYear: string;
   selections: Array<{ studentId: number; expectedMappingId: number | null }>;
-  takeoverConfirmed: boolean;
 }): Promise<HolisticMappingMutationResult> {
   const studentIds = params.selections.map(({ studentId }) => studentId).sort((a, b) => a - b);
   await reconcileHolisticMappings({
@@ -370,19 +611,128 @@ export async function assignHolisticMentees(params: {
     studentIds,
     programId: params.programId,
   });
-  try {
-    return await withTransaction((client) => assignInTransaction(client, params, studentIds));
-  } catch (error) {
-    if (error instanceof MappingMutationError || isUniqueViolation(error)) {
-      return mutationConflict(
-        error as MappingMutationError | { code?: unknown },
-        studentIds,
-        params.academicYear,
-        params.schoolId,
-        params.programId,
-      );
+  return runMappingMutation({
+    studentIds,
+    academicYear: params.academicYear,
+    schoolId: params.schoolId,
+    programId: params.programId,
+    handlesUniqueViolation: true,
+  }, () => withTransaction((client) => assignInTransaction(client, params, studentIds)));
+}
+
+async function reassignAdminMappingInTransaction(
+  client: PoolClient,
+  params: Parameters<typeof reassignHolisticMenteeAsAdmin>[0],
+): Promise<HolisticMappingMutationResult> {
+  await lockEligibleAdminMentor(client, params);
+  const current = await lockExpectedAdminMapping(client, params);
+  if (Number(current.mentor_user_id) === params.mentorUserId) {
+    throw new MappingMutationError(422, "Replacement Mentor must differ from the current Mentor");
+  }
+  await endAdminMapping(
+    client,
+    params,
+    Number(current.mentor_user_id),
+    "af_lms_admin_reassign",
+    "admin_reassignment",
+  );
+  await insertAdminMapping(client, params, "af_lms_admin_reassign");
+  return { ok: true, changed: 1 };
+}
+
+export async function reassignHolisticMenteeAsAdmin(params: {
+  actorEmail: string;
+  auditActorUserId?: number;
+  schoolId: number;
+  programId: number;
+  academicYear: string;
+  studentId: number;
+  mentorUserId: number;
+  expectedMappingId: number;
+  confirmed: boolean;
+  reason: string;
+}): Promise<HolisticMappingMutationResult> {
+  if (!params.confirmed) {
+    return { ok: false, status: 422, error: "Reassignment confirmation is required" };
+  }
+  if (!params.reason.trim()) {
+    return { ok: false, status: 422, error: "Reassignment reason is required" };
+  }
+  if (params.academicYear !== CURRENT_ACADEMIC_YEAR) {
+    return {
+      ok: false,
+      status: 422,
+      error: "Admin Mapping reassignments are limited to the current Academic Year",
+    };
+  }
+  return runMappingMutation({
+    studentIds: [params.studentId],
+    academicYear: params.academicYear,
+    schoolId: params.schoolId,
+    programId: params.programId,
+    handlesUniqueViolation: true,
+  }, () => withTransaction((client) => reassignAdminMappingInTransaction(client, params)));
+}
+
+async function removeAdminMappingInTransaction(
+  client: PoolClient,
+  params: Parameters<typeof removeHolisticMenteeAsAdmin>[0],
+): Promise<HolisticMappingMutationResult> {
+  const current = await lockExpectedAdminMapping(client, params);
+  await endAdminMapping(
+    client,
+    params,
+    Number(current.mentor_user_id),
+    "af_lms_admin_remove",
+    "admin_removal",
+  );
+  return { ok: true, changed: 1 };
+}
+
+export async function removeHolisticMenteeAsAdmin(params: {
+  actorEmail: string;
+  auditActorUserId?: number;
+  schoolId: number;
+  programId: number;
+  academicYear: string;
+  studentId: number;
+  expectedMappingId: number;
+  confirmed: boolean;
+  reason: string;
+}): Promise<HolisticMappingMutationResult> {
+  if (!params.confirmed) {
+    return { ok: false, status: 422, error: "Removal confirmation is required" };
+  }
+  if (!params.reason.trim()) {
+    return { ok: false, status: 422, error: "Removal reason is required" };
+  }
+  if (params.academicYear !== CURRENT_ACADEMIC_YEAR) {
+    return {
+      ok: false,
+      status: 422,
+      error: "Admin Mapping removals are limited to the current Academic Year",
+    };
+  }
+  return runMappingMutation({
+    studentIds: [params.studentId],
+    academicYear: params.academicYear,
+    schoolId: params.schoolId,
+    programId: params.programId,
+  }, () => withTransaction((client) => removeAdminMappingInTransaction(client, params)));
+}
+
+function assertTeacherMappingsCurrent(
+  mappings: Array<{ studentId: number; expectedMappingId: number }>,
+  activeByStudent: Map<number, ActiveMappingRow>,
+  actorUserId: number,
+) {
+  for (const expected of mappings) {
+    const current = activeByStudent.get(expected.studentId);
+    const mappingChanged = Number(current?.id ?? 0) !== expected.expectedMappingId;
+    const ownerChanged = Number(current?.mentor_user_id ?? 0) !== actorUserId;
+    if (mappingChanged || ownerChanged) {
+      throw new MappingMutationError(409, "Mapping ownership changed; review the refreshed roster");
     }
-    throw error;
   }
 }
 
@@ -405,27 +755,32 @@ async function removeInTransaction(
     params.schoolId,
     params.programId,
   );
-  for (const expected of params.mappings) {
-    const current = active.byStudent.get(expected.studentId);
-    if (Number(current?.id ?? 0) !== expected.expectedMappingId ||
-        Number(current?.mentor_user_id ?? 0) !== params.actorUserId) {
-      throw new MappingMutationError(409, "Mapping ownership changed; review the refreshed roster");
-    }
-  }
+  assertTeacherMappingsCurrent(params.mappings, active.byStudent, params.actorUserId);
   const mappingIds = params.mappings.map(({ expectedMappingId }) => expectedMappingId);
   await client.query(
     `UPDATE holistic_mentorship_mentor_mentee_mappings
-     SET ended_at = now(), ended_by_user_id = $1, end_source = $2,
-         end_reason = $3, updated_at = now()
-     WHERE id = ANY($4::bigint[])`,
-    [params.actorUserId, "af_lms_teacher", "teacher_removal", mappingIds]
+     SET ended_at = now(), ended_by_user_id = $1, ended_by_email = $2,
+         end_source = $3, end_reason = $4, updated_at = now()
+     WHERE id = ANY($5::bigint[])`,
+    [params.auditActorUserId ?? null, params.actorEmail, "af_lms_teacher",
+      "teacher_removal", mappingIds]
   );
-  await eraseDraftHolisticNotes(client, studentIds, params.actorUserId, "teacher_removal");
+  await eraseDraftHolisticNotesForMapping(client, {
+    studentIds,
+    mentorUserId: params.actorUserId,
+    programId: params.programId,
+    academicYear: params.academicYear,
+    actorUserId: params.auditActorUserId ?? null,
+    actorEmail: params.actorEmail,
+    reason: "teacher_removal",
+  });
   return { ok: true, changed: mappingIds.length };
 }
 
 export async function removeHolisticMentees(params: {
   actorUserId: number;
+  auditActorUserId?: number;
+  actorEmail: string;
   schoolId: number;
   programId: number;
   academicYear: string;
@@ -441,23 +796,17 @@ export async function removeHolisticMentees(params: {
     studentIds,
     programId: params.programId,
   });
-  try {
-    return await withTransaction((client) => removeInTransaction(client, params, studentIds));
-  } catch (error) {
-    if (error instanceof MappingMutationError) {
-      return mutationConflict(
-        error,
-        studentIds,
-        params.academicYear,
-        params.schoolId,
-        params.programId,
-      );
-    }
-    throw error;
-  }
+  return runMappingMutation({
+    studentIds,
+    academicYear: params.academicYear,
+    schoolId: params.schoolId,
+    programId: params.programId,
+  }, () => withTransaction((client) => removeInTransaction(client, params, studentIds)));
 }
 
 export async function listHolisticAssignmentRoster(params: {
+  permission: UserPermission;
+  actorUserId?: number;
   schoolId: number;
   programId: number;
   academicYear: string;
@@ -469,6 +818,18 @@ export async function listHolisticAssignmentRoster(params: {
     schoolId: params.schoolId,
     programId: params.programId,
   });
+  const schoolScope = buildHolisticSchoolScopePredicate(params.permission, {
+    startIndex: 8,
+    schoolCodeColumn: "scope_school.code",
+    schoolRegionColumn: "scope_school.region",
+  });
+  const schoolScopeSql = schoolScope.clause
+    ? `AND EXISTS (
+         SELECT 1
+         FROM school scope_school
+         WHERE scope_school.id = $1 AND ${schoolScope.clause}
+       )`
+    : "";
   const rows = await query<RosterRow>(
     `WITH ${ELIGIBLE_ROSTER_CTE_SQL}
      SELECT st.id AS student_id,
@@ -476,7 +837,12 @@ export async function listHolisticAssignmentRoster(params: {
             st.student_id AS external_student_id,
             roster_student.grade,
             active_phase.id AS active_phase_id,
-            active_notes.state AS active_notes_state,
+            CASE WHEN active_notes.state = 'submitted' THEN 'submitted'
+                 WHEN $6::boolean
+                  AND active_notes.state = 'draft'
+                  AND active_notes.author_user_id = $7
+                  AND mapping.mentor_user_id = $7 THEN 'draft'
+            END AS active_notes_state,
             mapping.id AS mapping_id,
             mapping.mentor_user_id,
             NULLIF(TRIM(COALESCE(mentor.first_name, '') || ' ' || COALESCE(mentor.last_name, '')), '') AS mentor_name
@@ -504,6 +870,7 @@ export async function listHolisticAssignmentRoster(params: {
       AND mapping.ended_at IS NULL
      LEFT JOIN "user" mentor ON mentor.id = mapping.mentor_user_id
      WHERE st.status IS DISTINCT FROM 'dropout'
+       ${schoolScopeSql}
        AND ($4 = '%%' OR st.student_id ILIKE $4 OR
             TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')) ILIKE $4)
        AND ($5::int IS NULL OR roster_student.grade = $5)
@@ -514,6 +881,9 @@ export async function listHolisticAssignmentRoster(params: {
       params.programId,
       `%${(params.search ?? "").trim()}%`,
       params.grade ?? null,
+      params.permission.role === "teacher" && params.actorUserId !== undefined,
+      params.actorUserId ?? null,
+      ...schoolScope.params,
     ]
   );
 
@@ -533,4 +903,96 @@ export async function listHolisticAssignmentRoster(params: {
             mentorName: row.mentor_name || "Unknown Mentor",
           },
   }));
+}
+
+export async function getHolisticAssignmentCoverageSummary(params: {
+  permission: UserPermission;
+  schoolId: number;
+  programId: number;
+  academicYear: string;
+}): Promise<HolisticAssignmentCoverageSummary> {
+  await reconcileHolisticMappings({
+    academicYear: params.academicYear,
+    schoolId: params.schoolId,
+    programId: params.programId,
+  });
+  const schoolScope = buildHolisticSchoolScopePredicate(params.permission, {
+    startIndex: 4,
+    schoolCodeColumn: "scope_school.code",
+    schoolRegionColumn: "scope_school.region",
+  });
+  const schoolScopeSql = schoolScope.clause
+    ? `AND EXISTS (
+         SELECT 1
+         FROM school scope_school
+         WHERE scope_school.id = $1 AND ${schoolScope.clause}
+       )`
+    : "";
+  const rows = await query<CoverageSummaryRow>(
+    `WITH ${ELIGIBLE_ROSTER_CTE_SQL},
+     coverage_roster AS MATERIALIZED (
+       SELECT st.id AS student_id,
+              mapping.mentor_user_id,
+              active_phase.id AS active_phase_id,
+              EXISTS (
+                SELECT 1
+                FROM holistic_mentorship_post_session_notes notes
+                WHERE notes.student_id = st.id
+                  AND notes.phase_id = active_phase.id
+                  AND notes.state = 'submitted'
+              ) AS has_submitted_notes
+       FROM eligible_roster roster_student
+       JOIN student st ON st.user_id = roster_student.user_id
+       LEFT JOIN LATERAL (
+         SELECT phase.id
+         FROM holistic_mentorship_phase_plans plan
+         JOIN holistic_mentorship_phases phase
+           ON phase.phase_plan_id = plan.id AND phase.state = 'open'
+         JOIN grade phase_grade
+           ON phase_grade.id = phase.grade_id AND phase_grade.number = roster_student.grade
+         WHERE plan.program_id = $3 AND plan.academic_year = $2
+         ORDER BY phase.position DESC
+         LIMIT 1
+       ) active_phase ON true
+       LEFT JOIN holistic_mentorship_mentor_mentee_mappings mapping
+         ON mapping.student_id = st.id
+        AND mapping.academic_year = $2
+        AND mapping.school_id = $1
+        AND mapping.program_id = $3
+        AND mapping.ended_at IS NULL
+       WHERE st.status IS DISTINCT FROM 'dropout'
+         ${schoolScopeSql}
+     ), counts AS (
+       SELECT COUNT(*)::int AS eligible_count,
+              COUNT(*) FILTER (WHERE mentor_user_id IS NOT NULL)::int AS assigned_count,
+              COUNT(*) FILTER (WHERE mentor_user_id IS NULL)::int AS unassigned_count,
+              COUNT(DISTINCT mentor_user_id)::int AS active_mentor_count,
+              COUNT(*) FILTER (
+                WHERE active_phase_id IS NOT NULL AND has_submitted_notes
+              )::int AS completed_count,
+              COUNT(*) FILTER (
+                WHERE active_phase_id IS NOT NULL AND NOT has_submitted_notes
+              )::int AS pending_count,
+              COUNT(*) FILTER (WHERE active_phase_id IS NULL)::int AS no_active_phase_count
+       FROM coverage_roster
+     )
+     SELECT eligible_count, assigned_count, unassigned_count, active_mentor_count,
+            CASE WHEN eligible_count = 0 THEN 0
+                 ELSE ROUND(assigned_count * 100.0 / eligible_count, 1)
+            END AS coverage_percentage,
+            completed_count, pending_count, no_active_phase_count
+     FROM counts`,
+    [params.schoolId, params.academicYear, params.programId, ...schoolScope.params],
+  );
+  const row = rows[0];
+  return {
+    eligible: Number(row?.eligible_count ?? 0),
+    assigned: Number(row?.assigned_count ?? 0),
+    unassigned: Number(row?.unassigned_count ?? 0),
+    activeMentors: Number(row?.active_mentor_count ?? 0),
+    coveragePercentage: Number(row?.coverage_percentage ?? 0),
+    completed: Number(row?.completed_count ?? 0),
+    pending: Number(row?.pending_count ?? 0),
+    noActivePhase: Number(row?.no_active_phase_count ?? 0),
+  };
 }

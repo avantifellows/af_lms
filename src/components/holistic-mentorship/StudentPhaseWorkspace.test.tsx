@@ -137,11 +137,31 @@ describe("StudentPhaseWorkspace", () => {
 
   it("preserves the School source while an Admin changes Phase", () => {
     render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027"
-      source="school" backHref="/school/SCH001?tab=holistic_mentorship" detail={adminDetail()} />);
+      source="school" backHref="/school/SCH001?tab=holistic_mentorship&program_id=1"
+      detail={adminDetail()} />);
 
+    expect(screen.getByRole("link", { name: "Back to Assignment Coverage" })).toHaveAttribute(
+      "href",
+      "/school/SCH001?tab=holistic_mentorship&program_id=1",
+    );
     expect(screen.getByRole("tab", { name: /Phase 5/ })).toHaveAttribute(
       "href",
       "/holistic-mentorship/students/41/phases/70?school_code=SCH001&academic_year=2026-2027&program_id=1&source=school"
+    );
+  });
+
+  it("preserves the Progress source while a read-only viewer changes Phase", () => {
+    render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027"
+      source="progress" backHref="/admin/holistic-mentorship?program_id=1"
+      detail={adminDetail()} />);
+
+    expect(screen.getByRole("link", { name: "Back to Students and Progress" })).toHaveAttribute(
+      "href",
+      "/admin/holistic-mentorship?program_id=1",
+    );
+    expect(screen.getByRole("tab", { name: /Phase 5/ })).toHaveAttribute(
+      "href",
+      "/holistic-mentorship/students/41/phases/70?school_code=SCH001&academic_year=2026-2027&program_id=1&source=progress"
     );
   });
 
@@ -170,21 +190,15 @@ describe("StudentPhaseWorkspace", () => {
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
   });
 
-  it("hides Mentor draft answers from Admins while the Phase is Pending", () => {
-    render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={adminDetail({
-      notes: {
-        state: "draft",
-        revision: 2,
-        authorName: "Divya Menon",
-        firstSubmittedAt: null,
-        lastEditedAt: "2026-07-14T09:48:00Z",
-      },
-    })} />);
+  it("shows Admins the same Pending state whether or not a Mentor draft exists", () => {
+    render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={adminDetail()} />);
 
-    expect(screen.getByText("Mentor draft is not visible")).toBeInTheDocument();
-    expect(screen.getByText("This Phase is Pending. Admins can read Notes only after the Mentor submits them."))
+    expect(screen.getByText("Pending")).toBeInTheDocument();
+    expect(screen.getByText("Submitted Notes will appear here after the Mentor completes this Phase."))
       .toBeInTheDocument();
+    expect(screen.queryByText(/Mentor draft/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Draft saved/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Divya Menon")).not.toBeInTheDocument();
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
   });
 
@@ -206,6 +220,29 @@ describe("StudentPhaseWorkspace", () => {
     const post = fetchMock.mock.calls.find(([, init]) => init?.method === "POST")!;
     expect(post[0]).toBe("/api/holistic-mentorship/profiles/41?program_id=1");
     expect(JSON.parse(String(post[1].body))).toMatchObject({ force: true });
+  });
+
+  it("shows Profile context read-only without regeneration for a Program Manager", () => {
+    render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027"
+      viewerRole="program_manager" canRegenerateProfile={false} detail={adminDetail({
+        context: {
+          label: "Student Profile",
+          items: [{ label: "Journey", content: "Patient problem solver" }],
+          regeneration: {
+            requestKey: "request-1",
+            state: "failed",
+            errorCode: "no_questionnaire_submission",
+          },
+        },
+      })} />);
+
+    expect(screen.getByText("Patient problem solver")).toBeInTheDocument();
+    expect(screen.getByText("Listen first.")).toBeInTheDocument();
+    expect(screen.getByText("Program Manager read-only view")).toBeInTheDocument();
+    expect(screen.queryByText("Admin read-only view")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Request Profile regeneration" }))
+      .not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
   });
 
   it("polls a queued Profile request and explains a missing questionnaire", async () => {
@@ -233,7 +270,7 @@ describe("StudentPhaseWorkspace", () => {
     await act(async () => vi.advanceTimersByTimeAsync(2_000));
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/holistic-mentorship/profiles/41?academic_year=2026-2027&program_id=1",
+      "/api/holistic-mentorship/profiles/41?academic_year=2026-2027&program_id=1&school_code=SCH001",
       { cache: "no-store" }
     );
     expect(screen.getByText("failed")).toBeInTheDocument();
@@ -262,6 +299,25 @@ describe("StudentPhaseWorkspace", () => {
       "This Student has not submitted the profile questionnaire."
     );
     expect(screen.queryByRole("button", { name: "Request Profile regeneration" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the erased-content notice visible for a previously erased Student", () => {
+    render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={adminDetail({
+      context: {
+        label: null,
+        items: [],
+        missing: "Profile unavailable",
+        regeneration: {
+          requestKey: "request-erased",
+          state: "failed",
+          errorCode: "privacy_erased",
+        },
+      },
+    })} />);
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "A Profile cannot be generated because this Student's Holistic Mentorship data was deleted."
+    );
   });
 
   it("autosaves a partial answer only after a short pause", async () => {

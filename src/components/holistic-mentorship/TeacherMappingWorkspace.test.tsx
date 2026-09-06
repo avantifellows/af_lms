@@ -5,7 +5,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import TeacherMappingWorkspace from "./TeacherMappingWorkspace";
 
 describe("TeacherMappingWorkspace", () => {
-  beforeEach(() => sessionStorage.clear());
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    sessionStorage.clear();
+  });
 
   it("claims the selected current roster facts and refreshes immediately", async () => {
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
@@ -50,7 +53,6 @@ describe("TeacherMappingWorkspace", () => {
       school_code: "SCH001",
       academic_year: "2026-2027",
       program_id: 1,
-      takeover_confirmed: false,
       selections: [{ student_id: 41, expected_mapping_id: null }],
     });
     expect(confirm).toHaveBeenCalledWith("Assign 1 Student to yourself?");
@@ -183,7 +185,7 @@ describe("TeacherMappingWorkspace", () => {
     expect(screen.queryByText("Draft Mentee")).not.toBeInTheDocument();
   });
 
-  it("names the current Mentor and count before a takeover", async () => {
+  it("shows another Mentor's assignment without offering takeover", async () => {
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       ok: true,
@@ -200,15 +202,13 @@ describe("TeacherMappingWorkspace", () => {
         }],
       }),
     }));
-    const user = userEvent.setup();
-
     render(<TeacherMappingWorkspace schoolCode="SCH001" />);
-    await user.click(await screen.findByRole("checkbox", { name: "Select Another Mentee" }));
-    await user.click(screen.getByRole("button", { name: "Assign to me (1)" }));
-
-    expect(confirm).toHaveBeenCalledWith(
-      "1 Student is currently assigned to Nila Sen. Assign all 1 Student to yourself?"
-    );
+    expect(await screen.findByText("Another Mentee")).toBeInTheDocument();
+    expect(screen.getByText("Nila Sen")).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: "Select Another Mentee" }))
+      .not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Select all shown" })).not.toBeInTheDocument();
+    expect(confirm).not.toHaveBeenCalled();
   });
 
   it("opens a Mentee at the stable Active Phase identity", async () => {

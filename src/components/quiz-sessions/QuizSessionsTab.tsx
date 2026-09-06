@@ -9,11 +9,13 @@ import {
 import { addHours, toDateTimeLocalValue } from "@/lib/quiz-session-time";
 import { parseBatchStream } from "@/lib/batch-code";
 import {
+  CMS_EXAM_TRACKS,
   CMS_SOURCE,
   CMS_TEST_TYPE_OPTIONS,
+  type CmsExamTrack,
   type CmsTestType,
 } from "@/lib/cms-tests";
-import type { ExamTrack } from "@/types/curriculum";
+import { formatExamTrack } from "@/lib/exam-tracks";
 
 interface BatchOption {
   id: number;
@@ -90,11 +92,6 @@ const GradeOptions = [11, 12];
 // New-CMS chapter-test picker (source toggle inside session creation). Test subtypes +
 // their labels are shared with the server routes via CMS_TEST_TYPE_OPTIONS (@/lib/cms-tests).
 type TestSource = "legacy" | "cms";
-const EXAM_TRACK_OPTIONS: { value: ExamTrack; label: string }[] = [
-  { value: "jee_main", label: "JEE Main" },
-  { value: "jee_advanced", label: "JEE Advanced" },
-  { value: "neet", label: "NEET" },
-];
 const CMS_SUBJECT_OPTIONS = ["Physics", "Chemistry", "Maths", "Biology"];
 
 interface CmsChapterOption {
@@ -314,9 +311,13 @@ function areSessionsEqual(previous: QuizSession[], next: QuizSession[]): boolean
 export default function QuizSessionsTab({
   schoolId,
   canEdit = false,
+  programId,
 }: {
   schoolId: string;
   canEdit?: boolean;
+  // When set (centre pages), restricts every batch surface (selector, session
+  // creation) to this program's batches.
+  programId?: number;
 }) {
   const [batches, setBatches] = useState<BatchOption[]>([]);
   const [sessions, setSessions] = useState<QuizSession[]>([]);
@@ -373,14 +374,20 @@ export default function QuizSessionsTab({
         throw new Error("Failed to fetch batches");
       }
       const data = await response.json();
-      setBatches(data.batches || []);
+      const fetched: BatchOption[] = data.batches || [];
+      // Centre pages see only their program's batches; school pages see all.
+      setBatches(
+        programId != null
+          ? fetched.filter((b) => b.program_id === programId)
+          : fetched,
+      );
     } catch (err) {
       console.error(err);
       setLoadError("Failed to fetch class batches.");
     } finally {
       setLoadingBatches(false);
     }
-  }, [schoolId]);
+  }, [schoolId, programId]);
 
   const fetchSessions = useCallback(
     async (
@@ -401,6 +408,11 @@ export default function QuizSessionsTab({
         });
         if (classBatchId) {
           params.set("classBatchId", classBatchId);
+        }
+        // Centre pages: keep the "All batches" list scoped to the centre's
+        // program (the server intersects this with the viewer's own programs).
+        if (programId != null) {
+          params.set("programId", String(programId));
         }
 
         const response = await fetch(`/api/quiz-sessions?${params.toString()}`);
@@ -430,7 +442,7 @@ export default function QuizSessionsTab({
         }
       }
     },
-    [schoolId]
+    [schoolId, programId]
   );
 
   useEffect(() => {
@@ -935,6 +947,7 @@ export default function QuizSessionsTab({
   );
 }
 
+// fallow-ignore-next-line complexity
 function QuizSessionCreateModal({
   batches,
   onClose,
@@ -984,7 +997,7 @@ function QuizSessionCreateModal({
   // major_test skips subject/chapter and lists straight off exam track + grade.
   const [testSource, setTestSource] = useState<TestSource>("legacy");
   const [cmsTestType, setCmsTestType] = useState<CmsTestType>("chapter_test");
-  const [cmsExamTrack, setCmsExamTrack] = useState<ExamTrack | "">("");
+  const [cmsExamTrack, setCmsExamTrack] = useState<CmsExamTrack | "">("");
   const [cmsGrade, setCmsGrade] = useState("");
   const [cmsSubject, setCmsSubject] = useState("");
   const [cmsChapters, setCmsChapters] = useState<CmsChapterOption[]>([]);
@@ -1691,15 +1704,15 @@ function QuizSessionCreateModal({
                           <select
                             value={cmsExamTrack}
                             onChange={(event) => {
-                              setCmsExamTrack(event.target.value as ExamTrack | "");
+                              setCmsExamTrack(event.target.value as CmsExamTrack | "");
                               setCmsChapterId(null);
                             }}
                             className="min-h-[44px] w-full rounded-lg border-2 border-border bg-bg-input px-3 py-2.5 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
                           >
                             <option value="">Select exam track</option>
-                            {EXAM_TRACK_OPTIONS.map((option) => (
-                              <option key={option.value} value={option.value}>
-                                {option.label}
+                            {CMS_EXAM_TRACKS.map((track) => (
+                              <option key={track} value={track}>
+                                {formatExamTrack(track)}
                               </option>
                             ))}
                           </select>
@@ -2812,14 +2825,11 @@ function CmsAwarePaperLinks({
   const cmsSource = getMetaString(meta, "cms_source");
   // Ids may be stored as numbers (older sessions) or strings — accept both.
   const cmsTestId = getMetaScalar(meta, "cms_test_id");
-  const curriculumId = getMetaScalar(meta, "cms_curriculum_id");
-  const gradeId = getMetaScalar(meta, "cms_grade_id");
 
-  if (cmsSource && cmsTestId && curriculumId && gradeId) {
-    const base =
-      `/api/cms/test-pdf?testId=${encodeURIComponent(cmsTestId)}` +
-      `&curriculumId=${encodeURIComponent(curriculumId)}` +
-      `&gradeId=${encodeURIComponent(gradeId)}`;
+  // Test id only: also gating on cms_curriculum_id/cms_grade_id would silently fall through
+  // to the legacy branch — no PDF links — for sessions created after we stopped storing them.
+  if (cmsSource && cmsTestId) {
+    const base = `/api/cms/test-pdf?testId=${encodeURIComponent(cmsTestId)}`;
     return (
       <PaperResourceLinks
         questionHref={`${base}&type=questions`}

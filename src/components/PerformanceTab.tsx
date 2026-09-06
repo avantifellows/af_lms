@@ -10,6 +10,9 @@ import CombinedReportPanel from "./performance/CombinedReportPanel";
 
 interface Props {
   schoolUdise: string;
+  // When set (centre pages), locks the program filter to this program name and
+  // hides the program selector — the tab shows only this program's performance.
+  lockedProgram?: string;
 }
 
 export type TestCategory = "chapter" | "full";
@@ -30,7 +33,7 @@ function streamLabel(canonical: string): string {
   return STREAM_LABELS[canonical] || canonical.charAt(0).toUpperCase() + canonical.slice(1);
 }
 
-export default function PerformanceTab({ schoolUdise }: Props) {
+export default function PerformanceTab({ schoolUdise, lockedProgram }: Props) {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -45,7 +48,9 @@ export default function PerformanceTab({ schoolUdise }: Props) {
   const urlCategory = (searchParams.get("category") as TestCategory | null) || null;
 
   const [programs, setPrograms] = useState<string[] | null>(null);
-  const [selectedProgram, setSelectedProgram] = useState<string | null>(urlProgram);
+  // lockedProgram (centre pages) must win over the URL param — otherwise a
+  // centre-confined viewer could open ?program=X and read another program's data.
+  const [selectedProgram, setSelectedProgram] = useState<string | null>(lockedProgram ?? urlProgram ?? null);
   const [grades, setGrades] = useState<number[] | null>(null);
   const [selectedGrade, setSelectedGrade] = useState<number | null>(
     urlGrade ? parseInt(urlGrade, 10) : null
@@ -294,7 +299,7 @@ export default function PerformanceTab({ schoolUdise }: Props) {
     updateUrl({ view });
   };
 
-  const showProgramTabs = programs.length > 1;
+  const showProgramTabs = !lockedProgram && programs.length > 1;
 
   return (
     <div className="space-y-6">

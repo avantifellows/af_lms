@@ -7,6 +7,7 @@ import {
   holisticProgramId,
   positiveIntegerString,
   readJsonObject,
+  validSchoolCode,
 } from "../../route-helpers";
 
 type RouteContext = { params: Promise<{ studentId: string }> };
@@ -20,10 +21,16 @@ export async function GET(request: Request, context: RouteContext) {
   const params = new URL(request.url).searchParams;
   const academicYear = params.get("academic_year") ?? "";
   const programId = holisticProgramId(params.get("program_id"));
-  if (!studentId || !programId || !validateAcademicYear(academicYear)) {
+  const schoolCode = params.get("school_code");
+  if (!studentId || !programId || !validSchoolCode(schoolCode) || !validateAcademicYear(academicYear)) {
     return NextResponse.json({ error: "Invalid Student or Academic Year" }, { status: 422 });
   }
-  const access = await holisticRouteAccess("program_read", { programId });
+  const access = await holisticRouteAccess("mapped_student_read", {
+    schoolCode,
+    studentId,
+    academicYear,
+    programId,
+  });
   if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status });
   return NextResponse.json(
     await getHolisticProfileAdmin(studentId, academicYear, programId),

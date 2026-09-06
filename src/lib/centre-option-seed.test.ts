@@ -26,13 +26,12 @@ describe("Centre option seed script", () => {
 
     expect(result.ok).toBe(true);
     expect(result.mode).toBe("dry-run");
-    expect(result.counts.optionSets.created).toBe(4);
+    expect(result.counts.optionSets.created).toBe(3);
     expect(result.counts.options.created).toBeGreaterThan(0);
     expect(result.changes.optionSets.created.map((change) => change.code)).toEqual([
       "type",
       "category",
       "sub_category",
-      "stream",
     ]);
     expect(
       db.calls.some((call) => /\b(insert|update|delete)\b/i.test(call.sql))
@@ -74,7 +73,7 @@ describe("Centre option seed script", () => {
 
     expect(result.ok).toBe(true);
     expect(result.mode).toBe("apply");
-    expect(result.counts.optionSets.created).toBe(3);
+    expect(result.counts.optionSets.created).toBe(2);
     expect(result.counts.optionSets.unchanged).toBe(1);
     expect(result.counts.options.created).toBeGreaterThan(0);
     expect(result.counts.options.updated).toBe(1);
@@ -147,7 +146,7 @@ describe("Centre option seed script", () => {
     expect(result.counts.optionSets).toEqual({
       created: 0,
       updated: 0,
-      unchanged: 4,
+      unchanged: 3,
       skipped: 0,
     });
     expect(result.counts.options).toEqual({

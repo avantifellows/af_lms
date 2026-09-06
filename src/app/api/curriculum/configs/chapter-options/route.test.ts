@@ -160,4 +160,21 @@ describe("GET /api/curriculum/configs/chapter-options", () => {
       },
     });
   });
+
+  it("returns a validation error when the Exam Track has no curriculum content", async () => {
+    const res = await GET(
+      nextReq(
+        "/api/curriculum/configs/chapter-options?exam_track=math_foundation"
+      )
+    );
+
+    expect(res.status).toBe(422);
+    await expect(res.json()).resolves.toEqual({
+      ok: false,
+      status: 422,
+      error: "Curriculum configuration is not available for Math Foundation",
+      fields: { exam_track: "Curriculum configuration is not available" },
+    });
+    expect(mockQuery).not.toHaveBeenCalled();
+  });
 });

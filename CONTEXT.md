@@ -26,9 +26,9 @@ _Avoid_: Cohort, section
 An Avanti Fellows delivery model within a school, such as CoE, Nodal, or NVS.
 _Avoid_: Course, stream
 
-**Centre Stream**:
-One or more academic delivery streams attached to a Centre, such as JEE, NEET, or Math Foundation.
-_Avoid_: Program, Exam Track, comma-separated stream
+**Centre Exam Track**:
+An Exam Track assigned to one Centre for one Grade. A Centre and Grade can have one or more Centre Exam Tracks.
+_Avoid_: Centre Stream, Program, generic JEE
 
 **UDISE Code**:
 A unique government-issued identifier for a school.
@@ -41,8 +41,16 @@ _Avoid_: PIN, access code
 ### Curriculum
 
 **LMS Curriculum Log**:
-A soft-deletable dated record of curriculum teaching for a school, program, grade, subject, and exam track, with duration and covered topics.
+A soft-deletable dated record of curriculum activity for a school, program, grade, subject, and exam track. A regular teaching entry has duration and covered topics; cancellation and doubt-solving entries have narrower data and do not change Curriculum Progress.
 _Avoid_: Teaching Session, Session, Class Log
+
+**Class Cancellation Log**:
+An LMS Curriculum Log that records that a class for one Chapter was cancelled on a date within the selected curriculum scope.
+_Avoid_: Cancelled teaching, zero-hour class
+
+**Doubt Solving Log**:
+An LMS Curriculum Log that records doubt-solving duration for one chapter on a date within the selected curriculum scope.
+_Avoid_: Revision class, curriculum teaching log
 
 **Chapter Completion**:
 The current state that a chapter is complete for a school, program, and exam track.
@@ -57,7 +65,7 @@ A top-level read-only dashboard for reviewing curriculum progress across schools
 _Avoid_: Curriculum tab, curriculum report, curriculum overview
 
 **Exam Track**:
-The exam-specific curriculum lens selected by a user, such as JEE Main, JEE Advanced, or NEET.
+The exam-specific curriculum lens used by a Centre, such as JEE Main, JEE Advanced, NEET, CET, or Math Foundation.
 _Avoid_: Stream, orientation
 
 **LMS Chapter Exam Config**:
@@ -213,15 +221,28 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - **Centre** links to **School** through `school.id`; school code and UDISE code are display/search identifiers, not the Centre relationship key
 - A **Centre** name is not globally unique; the same School can have separate billing/funder centres for different operational setups
 - In v1, **Centre** rows do not have a uniqueness constraint beyond their primary key
-- In v1, **Centre** schema stores `name`, nullable `school_id`, nullable `type_code`, nullable `category_code`, nullable `sub_category_code`, non-null `stream_codes`, `is_physical`, `is_active`, and normal timestamps
+- In v1, **Centre** schema stores `name`, nullable `school_id`, nullable `type_code`, nullable `category_code`, nullable `sub_category_code`, `is_physical`, `is_active`, and normal timestamps; Grade-specific Exam Tracks live in `centre_exam_tracks`
 - In v1, **Centre** classification fields are current-state fields on the Centre itself, not separate academic-year history records
 - In v1, **Centre** rows use normal inserted/updated timestamps without a dedicated audit actor or changelog model
 - In v1, **Centre** type, category, and sub-category can be null so incomplete source rows can be imported and cleaned later
-- A **Centre** can have multiple **Centre Streams**
-- In v1, a **Centre** can have no Centre Streams assigned; empty streams are valid for special rows such as bench teacher buckets
+- Issue #252 replaces the legacy centre-level **Centre Stream** classification with grade-specific **Centre Exam Tracks**
+- A **Centre** can have multiple **Centre Exam Tracks** for one Grade
+- A **Centre** and Grade can have no **Centre Exam Tracks** assigned
+- In issue #252, **Centre Exam Tracks** are current Centre-and-Grade mappings and are not scoped by Academic Year; revisit this assumption only when mappings need to change between years
+- Curriculum resolves one active physical **Centre** from the selected School and Program, then loads **Centre Exam Tracks** for that Centre and Grade
+- Curriculum fails closed when School and Program resolve to zero or multiple active physical **Centres**
+- When a Centre and Grade have no **Centre Exam Tracks**, Curriculum shows the missing configuration and blocks new LMS Curriculum Logs without falling back to other Exam Tracks
+- **Centre Exam Tracks** are the only source of Exam Track availability in Curriculum; Curriculum does not keep a separate approved-track list
+- A mapped **Centre Exam Track** without LMS Chapter Exam Config is visible in Curriculum but unavailable for logging until configuration exists
+- Removing a **Centre Exam Track** blocks new logs and removes that track from the current **Curriculum Summary**, while existing logs remain stored for audit
+- Initial **Centre Exam Track** mappings are entered by Admins from the reviewed mapping Sheet through Centre Management; there is no live Sheet sync or one-off importer
+- Admins do not infer mappings from legacy centre-wide stream values; the legacy Centre Stream field is removed during cutover
+- Issue #252 is activated only after Admins enter the reviewed Grade 11/12 mappings during a planned configuration window and verify them in Centre Management
 - In v1, **Centre** configurable fields store stable option codes on the Centre row; display labels and ordering come from centre option configuration
 - In v1, **Centre** administration includes both a spreadsheet-like Centre grid and a Centre option configuration surface for editing option labels, option active state, and ordering
-- In v1, **Centre** administration can create and edit Centre name, linked School, type, category, sub-category, streams, physical status, and active status
+- Issue #252 replaces the Centre grid's Centre Stream column with Grade 11 Exam Tracks and Grade 12 Exam Tracks multi-select columns using the five fixed Exam Track choices
+- Centre Admins assign the five fixed **Exam Track** choices but cannot create additional Track types; adding a Track requires coordinated Curriculum and CMS support
+- In v1, **Centre** administration can create and edit Centre name, linked School, type, category, sub-category, Grade 11/12 Exam Tracks, physical status, and active status
 - In v1, **Centre** administration displays linked School metadata such as school name, code, UDISE, region, state, and district as read-only values derived from School
 - In v1, unlinked **Centres** do not store centre-level location fields; location columns remain blank until the Centre is linked to a School or a later feature adds centre-level location
 - In v1, Centre option code validity is enforced by AF LMS APIs and import scripts rather than foreign keys from Centre rows to option rows
@@ -232,7 +253,7 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - In v1, **Centres** are deactivated with `is_active = false`; the admin UI does not hard-delete Centre rows
 - In v1, Centre options are deactivated with `is_active = false`; the admin UI does not hard-delete option rows because Centre rows may still reference their codes
 - In v1, inactive Centre options remain displayable on existing Centre rows but are not offered for new selections
-- In v1, Centre option sets are fixed to type, category, sub-category, and stream; admins configure options inside those sets rather than creating new sets
+- In v1, Centre option sets are fixed to type, category, and sub-category; Exam Tracks use the shared fixed vocabulary instead of configurable Centre options
 - In v1, admins cannot create or delete Centre option sets; option set editing, if exposed, is limited to display label and ordering
 - In v1, Centre option configuration is stored in `centre_option_sets` and `centre_options`; option sets define fixed fields, while options define stable codes, labels, ordering, and active state
 - Centre schema changes are introduced through db-service migrations, while AF LMS owns the data scripts for seeding Centre options and importing the initial Centre CSV data
@@ -243,16 +264,42 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - The initial Centre import requires a checked-in mapping file with one row per source Centre and explicit school-link status; unresolved or ambiguous mappings block apply mode
 - Yearly planning fields such as `plan_status_2627` are out of scope for Centre v1
 - Centre v1 should be delivered in slices: db-service schema, AF LMS option seed script, AF LMS Centre import script, admin Centre APIs, Centre grid UI, and Centre option config UI
-- A **School** has many **LMS Curriculum Logs**, each scoped to exactly one **Program** and **Exam Track**
-- An **LMS Curriculum Log** has many covered topics
+- A **School** has many **LMS Curriculum Logs**, each scoped to exactly one **Program**, Grade, Subject, and **Exam Track**
+- A regular teaching **LMS Curriculum Log** has duration and one or more covered topics
+- A **Class Cancellation Log** has a date and one Chapter but no topics or duration; it appears in log history but contributes no teaching time or curriculum progress
+- At most one active **Class Cancellation Log** exists for each School, Program, Grade, Subject, Exam Track, Chapter, and date
+- A **Doubt Solving Log** has a date, chapter, and duration but no covered topics; it appears in log history but contributes no Actual Hours, topic coverage, or curriculum progress
+- **Class Cancellation Logs** and **Doubt Solving Logs** use the same edit and soft-delete lifecycle as regular teaching LMS Curriculum Logs
+- The Curriculum Add Log flow selects Regular Class, Class Cancelled, or Doubt Solving in one modal and shows only the fields required by that type
+- An existing **LMS Curriculum Log** cannot change its log type; correcting the type requires soft-deleting the entry and creating another
+- A **Doubt Solving Log** can select one in-syllabus Chapter from LMS Chapter Exam Config for its Exam Track, Grade, and Subject, but cannot use free text or an out-of-syllabus Chapter
+- Curriculum shows all three LMS Curriculum Log types in one chronological history with a clear type label and only the details relevant to that type; issue #252 adds no history type filter
+- Regular Class, **Class Cancellation Log**, and **Doubt Solving Log** dates can be today or in the past, but not in the future
+- All three LMS Curriculum Log types reuse the existing Curriculum permission: Teacher, Program Admin, and Admin can edit, while Program Manager can view
 - **Chapter Completion** is stored independently from **LMS Curriculum Logs**
 - **Curriculum Progress** combines covered topics and teaching time from **LMS Curriculum Logs** with stored **Chapter Completion**
 - **Curriculum Summary** aggregates **Curriculum Progress** across multiple **Schools** for PM/admin monitoring
 - Each **Curriculum Summary** top-level row represents one School-Program-Grade-Subject-Exam Track combination
+- **Curriculum Summary** shows a mapped **Centre Exam Track** without LMS Chapter Exam Config as unavailable rather than hiding the operational track or creating empty chapter rows
+- An unavailable **Centre Exam Track** appears as one non-expandable top-level row with School, Program, Grade, and Exam Track; Subject and metrics are blank and the row explains that Curriculum configuration is unavailable
+- When School and Program resolve to zero or multiple active physical Centres, **Curriculum Summary** shows a configuration-error row for that combination while continuing to load valid combinations
+- Selecting Schools in **Curriculum Summary** limits the available values in the other multi-select filters but does not select values automatically
+- Issue #252 keeps the Region filter in **Curriculum Summary** and removes the State and District filters
+- **Curriculum Summary** multi-select filters keep selections inside their open checkbox lists rather than showing removable selection chips; users clear one filter by unchecking values or clear all filters with Clear filters
+- A **Curriculum Summary** multi-select updates its form selection immediately and stays open while users check or uncheck values; clicking outside or Done keeps the selections and closes the list, while Clear unchecks that filter and leaves the list open
+- Apply filters is the only action that reloads **Curriculum Summary** with the selected filter values
+- A closed **Curriculum Summary** multi-select shows All when empty and a selected-value count when one or more values are checked
+- An empty Program, Grade, Subject, or Exam Track filter in **Curriculum Summary** means all available values for the selected Schools
+- With multiple Schools selected, **Curriculum Summary** filter options use the union of values available to any selected School, while result rows still include only valid School combinations
+- Changing selected Schools automatically removes selected filter values that are no longer valid for any selected School
+- Issue #252 does not add Chapter Test Completion Status or connect **Curriculum Summary** to Quiz Sessions or BigQuery; that work is deferred to a separate change
+- **Curriculum Summary** shows Class Cancellation Count and Doubt Solving Hours only on expanded Chapter rows, not on the parent School-Program-Grade-Subject-Exam Track row
+- Class Cancellation Count includes active Class Cancellation Logs, while Doubt Solving Hours sum active Doubt Solving Log duration without changing Actual Hours or Curriculum Progress
 - **Curriculum Summary** uses **Chapter Completion** as its source for chapter completion state
 - **Curriculum Summary** is the entry point to **Curriculum Config Management** for eligible **Admins**
 - In v1, **Curriculum Config Management** is exposed at `/curriculum-summary/config` with the page title `Curriculum Config`
 - A chapter has one **LMS Chapter Exam Config** per configured exam track
+- Curriculum rejects Biology for JEE Main or JEE Advanced and Maths for NEET even if an invalid LMS Chapter Exam Config exists; Curriculum Config Management prevents creating those invalid pairs
 - **LMS Chapter Exam Config** is global per chapter and exam track, not scoped to a school or program
 - **Curriculum Config Management** changes global **LMS Chapter Exam Config** values and is restricted to **Admins**
 - In v1, **Curriculum Config Management** edits the live **LMS Chapter Exam Config** rows directly rather than using draft or versioned configs
@@ -301,10 +348,10 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - V1 external AI processing is limited to **Holistic Student Profile Questionnaire** answers; Post-Session Notes, Phase Guidance, Mentor-Mentee Mappings, School data, and other LMS records are not sent to OpenRouter
 - V1 Holistic Mentorship storage keeps the generated Student Profile summary and its provenance but does not duplicate the raw questionnaire answers held by the existing Quiz and BigQuery source path
 - Student Profile summaries and Post-Session Notes remain as historical records after a Student exits a School or Program or an academic year ends; former actors lose access through normal scope rules, while authorized Admin access remains
-- Only a global Admin with a canonical LMS User ID may process an AF-approved Holistic data deletion request; Student Profile summaries, Post-Session answers, and imported Historical answers are erased while their content-free relational history remains, and raw Quiz/BigQuery deletion is coordinated with those source systems
-- An approved Holistic deletion creates one immutable Student tombstone even when no stored content exists; it blocks later Profile generation or regeneration, Post-Session answer writes, and Historical answer imports so retries or in-flight work cannot restore erased content
+- No LMS role may permanently erase a Student's Holistic Mentorship content; the former LMS privacy-erasure endpoint and action are disabled, and any source-system privacy request is coordinated outside LMS
+- Existing Holistic deletion tombstones remain immutable and continue to block Profile generation or regeneration, Post-Session answer writes, and Historical answer imports so retries or in-flight work cannot restore content that was already erased
 - V1 does not create a per-read audit trail for Student Profile summaries or Post-Session Notes; it records actor and time for important Holistic mutations without copying sensitive content into audit records
-- A generated Student Profile summary is never edited directly; v1 has no Mentor flagging flow, a Mentorship Admin or global Admin may request regeneration, and incorrect source answers must be corrected through the source-data process first
+- A generated Student Profile summary is never edited directly; v1 has no Mentor flagging flow, a **Holistic Mentorship Admin** or **Admin** may request regeneration only for a missing or failed Profile, and incorrect source answers must be corrected through the source-data process first
 - A Student has one logical **Holistic Student Profile** for their Holistic journey, tied to the configured Profile Form and AF Session projection; v1 does not retain the exact per-user Quiz attempt ID. The Profile is available as context at the Student's first real Phase subject to the context-resolution rules, and a Grade 11 entrant keeps that Profile when moving to Grade 12 while the Grade 12 Profile Form is used only for a Student first entering Holistic Mentorship in Grade 12
 - A Student's Profile context remains attached to the earliest ordered Phase assigned to their Holistic entry Grade; joining or first Mapping later in that Grade does not move the Profile to the current Active Phase, and the Mentor may open the earlier Skipped Phase to read it
 - A later Grade 12 Profile Form response never creates or replaces a second logical Profile for a Student who already has a Grade 11 Profile
@@ -328,7 +375,7 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - V1 has no flagged-Profile state in the Mentor experience; an existing successful Profile remains visible until a successful Admin-requested regeneration replaces it, and generated text remains non-editable. Regeneration status and safe failure reasons appear with the Profile in the first-Phase Student Context for both Mentors and Admins; only Admins can request regeneration, and pending requests refresh automatically
 - The Holistic Mentorship allowlist contains canonical Main DB Program IDs `1` (`JNV CoE`) and `78` (`EMRS CoE`) and covers every School in those Programs; it does not hard-code School IDs or counts
 - Each Program has one **Holistic Phase Plan** per academic year; when creating a new Plan, an Admin can start blank or, when a prior-year Plan exists, copy its Grade, title, order, Guidance, and Questions into new Phase records that are all Locked with none Active, while student work and Phase state are never copied and the prior Plan's definition and state stay read-only
-- The Admin Academic Year selector always includes the current year and includes an earlier year only when that Program has a Phase Plan or Mentor-Mentee Mapping data for it
+- The **Holistic Mentorship Admin** and **Admin** Academic Year selector always includes the current year and includes an earlier year only when that Program has a Phase Plan or Mentor-Mentee Mapping data for it; Program Manager and Program Admin year options apply the same rule inside their resolved School and Program scope
 - Each **Holistic Phase** keeps a stable internal identity and required short title; LMS derives its displayed `Phase N` number from its position in the Plan's full ordered sequence
 - Opening a **Holistic Phase** makes it available for the selected Program, academic year, and Grade; every already Open Phase stays Open and usable
 - A Program, academic year, and Grade has no Active Phase before any Phase is Open; afterward, Active is derived as the latest ordered Open Phase, with no separate Make Active control
@@ -347,8 +394,8 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - An applicable Locked Phase shows a disabled Phase number and title but exposes no Guidance, Questions, or Notes form until an Admin opens it
 - A Mentee who was already mapped when a Phase became available starts Pending for that Phase; activating a later Phase neither blocks nor skips an earlier Pending Phase
 - Because LMS has no trustworthy historical Holistic eligibility-start date, a Mentee's first Mapping in an academic year is the v1 starting point: applicable Phases ordered before the current Active Phase start Skipped, while the Active and later applicable Phases start Pending when available; if no Phase is Active, nothing is initially Skipped
-- A Skipped Phase remains available for later work; the first non-empty Notes draft changes it to Pending, and Notes submission changes Pending or Skipped to Completed
-- Pending, Skipped, and Completed are system-derived with no manual status control; a saved Notes draft remains Pending and shows a Draft saved indicator, and only Notes submission creates Completed status
+- A Skipped Phase remains available for later work; for its authoring current Mentor the first non-empty Notes draft changes it to Pending, and Notes submission changes Pending or Skipped to Completed. Non-author progress surfaces treat the draft as absent, so an otherwise Skipped Phase stays Skipped.
+- Pending, Skipped, and Completed are system-derived with no manual status control; only the authoring current Mentor sees a saved Notes draft as Pending with the Draft saved indicator, non-authors derive status without that draft, and only Notes submission creates Completed status
 - Grade 12 launch Mentees with no LMS Grade 11 Holistic history see disabled Phase 1-4 placeholder tabs with no persisted Phase record, progress status, Guidance, Questions, or Notes; their real Grade 12 Phases begin at Phase 5
 - In later academic years, a Grade 12 Mentee sees their real prior-year Grade 11 Phase history instead of placeholders, alongside current Grade 12 Phases
 - A current Mentor may start and complete a prior-year Pending or Skipped Phase for their Mentee; the historical Phase definition and Program state remain frozen, and submitted-Notes editing continues to follow author-only rules
@@ -367,11 +414,12 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - An eligible Teacher retains their normal access outside Holistic Mentorship; inside Holistic Mentorship they can see the School's mapping roster but can read full Holistic data only for their assigned Holistic Mentees
 - A Student is eligible to be a **Holistic Mentee** when they are a non-dropout current Grade 11 or 12 Student, roster-attributed to the same supported Program and School as the eligible Teacher; Student Profile completion, historical-note availability, and Phase state do not affect Mapping eligibility
 - Holistic Mentor eligibility is not Grade-scoped, and v1 places no maximum on a Mentor's active Mentee count
-- An eligible Teacher can bulk-assign unmapped Students to themselves, reassign another Mentor's Mentees to themselves, and remove their own Mentee assignments from the **Holistic Mentorship Tab**
-- V1 has no Mapping CSV import or Admin assignment path, and historical source Mentor details do not create live **Holistic Mentor-Mentee Mappings**
+- An eligible Teacher can bulk-assign only unmapped Students to themselves and can remove their own Mentee assignments from the **Holistic Mentorship Tab**; a Teacher cannot take over a Student who has an active Mapping to another Holistic Mentor
+- A **Holistic Mentorship Admin** or **Admin** can assign an eligible Student, reassign an active Mapping to another eligible Holistic Mentor, or remove an active Mapping in the current academic year; earlier academic years remain read-only, V1 has no Mapping CSV import, and historical source Mentor details do not create live **Holistic Mentor-Mentee Mappings**
 - A Holistic Mentee has at most one active **Holistic Mentor-Mentee Mapping** per academic year
-- Reassignment and removal require confirmation but no approval, notification, or entered reason; a stale concurrent action fails and reloads current state, and a bulk mutation changes every selected Student or none
-- **Holistic Mentor-Mentee Mappings** retain their School, Program, academic year, Mentor, Student, start/end times, action actor or system source, and end reason as history; v1 has no separate Mapping-history view or export
+- Teacher self-unassignment requires confirmation but no approval, notification, or entered reason; each **Holistic Mentorship Admin** or **Admin** assignment, reassignment, or removal requires confirmation and a non-empty free-text audit reason of at most 500 characters
+- Manual Mapping changes are transactional and concurrency-safe; a stale action fails and reloads current state, and a bulk Teacher claim changes every selected Student or none
+- **Holistic Mentor-Mentee Mappings** retain their School, Program, academic year, Mentor, Student, start/end times, immutable actor identity snapshot, optional canonical User reference, action or system source, and audit reason as history; v1 has no separate Mapping-history view or export
 - At academic-year rollover, an active **Holistic Mentor-Mentee Mapping** creates a new-year Mapping only when both Mentor and Mentee remain eligible at the same School; the prior-year Mapping remains as history
 - Losing Mentor eligibility automatically ends affected active Mappings, makes those Students unassigned, and removes the former Mentor's access without blocking the staff change
 - Live eligibility is the access boundary for Holistic Profile, Context, Notes, and Mapping actions; an active Mapping row alone never grants access
@@ -382,7 +430,7 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - A Holistic Mentee's currently assigned **Holistic Mentor** may read prior submitted Post-Session Notes for that Mentee but may edit only Notes they authored; a former Mentor loses access after reassignment, Admins remain read-only, and no reopen workflow is required
 - V1 has one **Post-Session Notes** answer set per Mentee and Phase; multiple offline conversations update the same set rather than creating separate session records
 - Draft **Post-Session Notes** allow partial answers and autosave with visible state, but opening or viewing a blank form does not persist data or freeze the Phase
-- An unfinished Notes draft is readable only by its author while they remain the current Mentor; Admins see Pending status but not draft content
+- An unfinished Notes draft and the fact that it has been saved are visible only to its author while they remain the current Mentor; Program Managers, Program Admins, Holistic Mentorship Admins, and Admins derive progress as though the draft does not exist (normally Pending, while an otherwise Skipped Phase remains Skipped) until Notes are submitted
 - If a Mapping ends before Notes submission, LMS warns when applicable, discards the draft content, records a content-free actor/time/reason audit event, and gives the replacement Mentor a blank form
 - Submitting **Post-Session Notes** requires every configured answer and confirmation, records submitter/time, marks the Mentee's Phase Completed, and exposes the answers to authorized Admins and future assigned Mentors
 - Submitted **Post-Session Notes** are read-only by default; their author while currently assigned may explicitly Edit notes and Save changes with confirmation, without autosave, reopen, resubmit, or changing Completed status
@@ -398,15 +446,16 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - **Post-Session Notes** store system-generated first-draft, first-submitted, and last-edited timestamps but no manually entered conversation date
 - V1 stores only the latest official Notes content plus content-free mutation audit events; it has no old-answer snapshots, content-revision browser, or per-read audit
 - Notes writes use first-successful-write concurrency; a stale tab preserves local text but must reload, and stale Submit cannot complete or overwrite newer content
-- Program Managers, Program Admins, and passcode users have no Holistic Mentorship access in v1
+- Program Managers and Program Admins have scoped read-only Holistic Mentorship access for supported Programs inside their resolved School scope; passcode users have no Holistic Mentorship access
 - **Holistic Mentorship Admin** is a dedicated LMS role, not an additive capability combined with another LMS role or a Centre designation
 - An **Admin** automatically receives the same Holistic Mentorship feature access without becoming a **Holistic Mentorship Admin**
 - In v1, the **Holistic Mentorship Admin** role grants access only to Holistic Mentorship; access to other LMS features is deferred
 - A **Holistic Mentorship Admin** can view the School and staff context needed for Holistic Mentorship across all launch Schools, but can edit only Holistic Mentorship records
-- A **Holistic Mentorship Admin** can view mapped Holistic Mentees and their current Mapping status across the launch Program; eligible Students without an active Mapping do not appear in the Admin **Students & Progress** view
-- On a School's **Holistic Mentorship Tab**, a global **Admin** sees read-only assignment coverage for all eligible Students, including unassigned Students, Mentor assignment, and current progress; Student drill-down returns to that School tab
-- A **Holistic Mentorship Admin** can read every Holistic Mentee's Student Context and Post-Session Notes across the launch Program
-- **Holistic Mentorship Admins** and **Admins** can view Mapping status but cannot assign, reassign, or remove Holistic Mentees in v1
+- Program Managers and Program Admins can view mapped Holistic Mentees, filtered progress, filtered CSV exports, Student Profiles, active Phase Guidance, and submitted Post-Session Notes only inside their resolved School, Program, and Academic Year scope; they cannot see draft Notes or make Holistic Mentorship changes
+- A **Holistic Mentorship Admin** or **Admin** can view mapped Holistic Mentees and their current Mapping status across all supported Programs; eligible Students without an active Mapping do not appear in the **Students & Progress** view
+- School-level assignment coverage shows eligible, assigned, and unassigned Students, Mentors with active Mappings, assignment coverage percentage, and completed, pending, and no-active-Phase counts inside the actor's permitted scope
+- Program Managers, Program Admins, Holistic Mentorship Admins, and Admins can open an eligible Student's read-only Holistic Mentorship details inside their detailed Student scope, including from assignment coverage when the Student is unassigned; Teachers can open details only for their own Mentees
+- A **Holistic Mentorship Admin** or **Admin** can read every in-scope Holistic Mentee's Student Context and submitted Post-Session Notes, manage current-year Mentor-Mentee Mappings with confirmation and an audit reason, configure Phases, and request missing or failed Profile regeneration; they cannot see draft Notes or author or edit Post-Session Notes
 - Holistic Mentorship Teacher and Admin workspaces include an in-context **View tutorial** link that opens the matching role guide in a new tab; the guide stays inside LMS and uses the same Teacher School-scope or Admin Program-scope access check as the workspace
 - Academic Mentorship is temporarily disabled for every role through the shared feature-permission matrix; its access and workflow behavior below remains implemented but dormant until the original role permissions are restored
 - The db-service table for **Academic Mentor-Mentee Mappings** is `academic_mentorship_mentor_mentee_mappings`
@@ -524,7 +573,7 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - "school code" vs "UDISE code": `school.code` is an internal short identifier; `school.udise_code` is the government-issued UDISE. Both identify a school but in different contexts. API routes use UDISE in URLs, passcodes derive from school code.
 - "center/centre" in the imported CRUD export means **Centre**, not **School**.
 - Centre `name` alone is not an identity; `JNV Adilabad` appears as separate CoE and Nodal centres in the source export.
-- The source `program` column maps to **Centre Stream**, not **Program** or **Exam Track**; it should be stored as an array, not a comma-separated string.
+- The imported source `program` column populated the legacy centre-level stream field; issue #252 supersedes it with grade-specific **Centre Exam Tracks** entered from the reviewed mapping Sheet.
 - Centre option labels are configurable option data; Centre rows should store stable codes rather than labels.
 - "admin" vs "program_admin": These are distinct roles. An `admin` may manage any scoped Visit; a `program_admin` may manage only their own in-progress Visits and otherwise has scoped read access. Feature permissions vary: for #155 Student Addition, `program_admin` is intentionally allowed to write student data. The naming is confusing — always use the full term.
 - "deleted" for actions vs visits: Actions already support soft delete (`deleted_at` on `lms_pm_school_visit_actions`). Issue #35 extends this to visits (`lms_pm_school_visits`).

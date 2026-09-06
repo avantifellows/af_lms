@@ -23,6 +23,17 @@ describe("Holistic Student Phase API", () => {
     mockSession.mockResolvedValue({ user: { email: "mentor@example.com" } });
   });
 
+  it.each(["", "null", undefined])("rejects missing Student Phase Program context (%s)", async (programId) => {
+    const query = programId === undefined ? "" : `&program_id=${programId}`;
+    const response = await GET(
+      new Request(`http://localhost/api/holistic-mentorship/students/41/phases/73?school_code=SCH001&academic_year=2026-2027${query}`) as never,
+      context,
+    );
+
+    expect(response.status).toBe(422);
+    expect(mockAccess).not.toHaveBeenCalled();
+  });
+
   it("re-authorizes the current Mentor Mapping before reading a stable Phase", async () => {
     mockAccess.mockResolvedValue({
       ok: true,
@@ -34,7 +45,7 @@ describe("Holistic Student Phase API", () => {
     mockDetail.mockResolvedValue({ student: { id: 41 }, selectedPhase: { phaseId: 73 } });
 
     const response = await GET(
-      new Request("http://localhost/api/holistic-mentorship/students/41/phases/73?school_code=SCH001&academic_year=2026-2027") as never,
+      new Request("http://localhost/api/holistic-mentorship/students/41/phases/73?school_code=SCH001&academic_year=2026-2027&program_id=1") as never,
       context
     );
 
@@ -75,7 +86,7 @@ describe("Holistic Student Phase API", () => {
     });
 
     const response = await GET(
-      new Request("http://localhost/api/holistic-mentorship/students/41/phases/73?school_code=SCH001&academic_year=2025-2026") as never,
+      new Request("http://localhost/api/holistic-mentorship/students/41/phases/73?school_code=SCH001&academic_year=2025-2026&program_id=1") as never,
       context
     );
 
@@ -104,11 +115,81 @@ describe("Holistic Student Phase API", () => {
     });
   });
 
+  it.each(["program_manager", "program_admin"] as const)(
+    "returns an in-scope unassigned Student detail read-only for a %s",
+    async (role) => {
+      mockSession.mockResolvedValue({ user: { email: `${role}@example.com` } });
+      mockAccess.mockResolvedValue({
+        ok: true,
+        permission: { role },
+        canEdit: false,
+        school: { id: 4 },
+      });
+      mockDetail.mockResolvedValue({
+        student: { id: 41, name: "Asha Rao" },
+        phases: [{ phaseId: 73, progress: "pending", draftSaved: false }],
+        selectedPhase: {
+          phaseId: 73,
+          mappingId: null,
+          notesRevision: 0,
+          canEditNotes: false,
+          guidanceMarkdown: "Listen first.",
+          context: {
+            label: "Student Profile",
+            items: [{ label: "Strengths", content: "Patient problem solver" }],
+          },
+          notes: null,
+        },
+        readOnly: true,
+      });
+
+      const response = await GET(
+        new Request("http://localhost/api/holistic-mentorship/students/41/phases/73?school_code=SCH001&academic_year=2026-2027&program_id=1") as never,
+        context,
+      );
+
+      expect(response.status).toBe(200);
+      expect(mockAccess).toHaveBeenCalledWith(
+        { user: { email: `${role}@example.com` } },
+        "mapped_student_read",
+        { schoolCode: "SCH001", studentId: 41, programId: 1, academicYear: "2026-2027" },
+      );
+      expect(mockDetail).toHaveBeenCalledWith(expect.objectContaining({
+        studentId: 41,
+        schoolId: 4,
+        role,
+        canEdit: false,
+      }));
+      await expect(response.json()).resolves.toEqual(expect.objectContaining({
+        readOnly: true,
+        selectedPhase: expect.objectContaining({
+          mappingId: null,
+          canEditNotes: false,
+          notesRevision: 0,
+          notes: null,
+        }),
+      }));
+    },
+  );
+
+  it("denies an out-of-scope Program Manager before reading direct Student detail", async () => {
+    mockSession.mockResolvedValue({ user: { email: "manager@example.com" } });
+    mockAccess.mockResolvedValue({ ok: false, status: 403, error: "Forbidden" });
+
+    const response = await GET(
+      new Request("http://localhost/api/holistic-mentorship/students/41/phases/73?school_code=SCH999&academic_year=2026-2027&program_id=1") as never,
+      context,
+    );
+
+    expect(response.status).toBe(403);
+    expect(mockDetail).not.toHaveBeenCalled();
+  });
+
   it("does not read protected Phase data after a stale bookmark loses access", async () => {
     mockAccess.mockResolvedValue({ ok: false, status: 404, error: "Not found" });
 
     const response = await GET(
-      new Request("http://localhost/api/holistic-mentorship/students/41/phases/73?school_code=SCH001&academic_year=2026-2027") as never,
+      new Request("http://localhost/api/holistic-mentorship/students/41/phases/73?school_code=SCH001&academic_year=2026-2027&program_id=1") as never,
       context
     );
 
@@ -128,7 +209,7 @@ describe("Holistic Student Phase API", () => {
     });
 
     const response = await GET(
-      new Request("http://localhost/api/holistic-mentorship/students/41/phases/73?school_code=SCH001&academic_year=2026-2027") as never,
+      new Request("http://localhost/api/holistic-mentorship/students/41/phases/73?school_code=SCH001&academic_year=2026-2027&program_id=1") as never,
       context
     );
 
@@ -150,7 +231,7 @@ describe("Holistic Student Phase API", () => {
       answer: `Answer ${index + 1}`,
     }));
     const response = await PATCH(new Request(
-      "http://localhost/api/holistic-mentorship/students/41/phases/73?school_code=SCH001&academic_year=2026-2027",
+      "http://localhost/api/holistic-mentorship/students/41/phases/73?school_code=SCH001&academic_year=2026-2027&program_id=1",
       {
         method: "PATCH",
         body: JSON.stringify({
@@ -187,7 +268,7 @@ describe("Holistic Student Phase API", () => {
     mockSession.mockResolvedValue(null);
 
     const response = await PATCH(new Request(
-      "http://localhost/api/holistic-mentorship/students/41/phases/73?school_code=SCH001&academic_year=2026-2027",
+      "http://localhost/api/holistic-mentorship/students/41/phases/73?school_code=SCH001&academic_year=2026-2027&program_id=1",
       { method: "PATCH", body: "invalid" }
     ) as never, context);
 
@@ -200,7 +281,7 @@ describe("Holistic Student Phase API", () => {
     mockAccess.mockResolvedValue({ ok: false, status, error: status === 403 ? "Forbidden" : "Not found" });
 
     const response = await PATCH(new Request(
-      "http://localhost/api/holistic-mentorship/students/41/phases/73?school_code=SCH001&academic_year=2026-2027",
+      "http://localhost/api/holistic-mentorship/students/41/phases/73?school_code=SCH001&academic_year=2026-2027&program_id=1",
       { method: "PATCH", body: JSON.stringify({ action: "draft", expected_revision: 0, answers: [] }) }
     ) as never, context);
 
@@ -218,7 +299,7 @@ describe("Holistic Student Phase API", () => {
     });
 
     const response = await PATCH(new Request(
-      "http://localhost/api/holistic-mentorship/students/41/phases/73?school_code=SCH001&academic_year=2026-2027",
+      "http://localhost/api/holistic-mentorship/students/41/phases/73?school_code=SCH001&academic_year=2026-2027&program_id=1",
       { method: "PATCH", body: JSON.stringify({ action: "draft", expected_revision: 2, answers: [] }) }
     ) as never, context);
 
@@ -232,7 +313,7 @@ describe("Holistic Student Phase API", () => {
   it("rejects Submit without all current revision tokens and confirmation", async () => {
     mockAccess.mockResolvedValue({ ok: true, actorUserId: 9, school: { id: 4 } });
     const response = await PATCH(new Request(
-      "http://localhost/api/holistic-mentorship/students/41/phases/73?school_code=SCH001&academic_year=2026-2027",
+      "http://localhost/api/holistic-mentorship/students/41/phases/73?school_code=SCH001&academic_year=2026-2027&program_id=1",
       { method: "PATCH", body: JSON.stringify({ action: "submit", expected_revision: 2, answers: [] }) }
     ) as never, context);
 
