@@ -1,6 +1,7 @@
 import { parse } from "csv-parse/sync";
 import ExcelJS from "exceljs";
 import JSZip from "jszip";
+import { readableStudentWorkbook, UnsupportedWorkbookEncryptionError } from "./student-addition-workbook";
 
 import {
   getStudentAdditionUploadColumns,
@@ -423,9 +424,12 @@ async function parseXlsx(
 ) {
   const workbook = new ExcelJS.Workbook();
   try {
-    const compacted = await removeBlankXlsxFormatting(data);
+    const compacted = await removeBlankXlsxFormatting(await readableStudentWorkbook(data));
     await workbook.xlsx.load(compacted as unknown as Parameters<typeof workbook.xlsx.load>[0]);
-  } catch {
+  } catch (error) {
+    if (error instanceof UnsupportedWorkbookEncryptionError) {
+      return { ok: false, error: error.message } as const;
+    }
     return { ok: false, error: "Upload a valid .xlsx file or rejected-row .csv file" } as const;
   }
   const sheet = workbook.getWorksheet("Template");

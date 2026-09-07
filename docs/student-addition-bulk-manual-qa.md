@@ -43,3 +43,5 @@ means a student row/enrollment created by the existing DB Service contract.
 - Rejected-row CSV contains original fields, original row number, status, field errors, row errors, and existing-match details when present.
 
 - Phone duplicate regression: check a sheet with two repeated phones plus one unique row; expect 1 ready / 2 rejected and zero DB calls. Add forwards only the unique row. Repeat with one matching row having another field error, an all-duplicate sheet, and a corrected rejected-CSV retry. The named example row must not cause a duplicate conflict.
+
+- Automatic Excel encryption: Check a workbook encrypted with Excel’s built-in default password (Standard and Agile); normal preview and validation must work with zero writes. A workbook with a user-supplied password must show the unsupported-password error and make no DB Service call. Ordinary XLSX, corrupt XLSX, and rejected CSV behavior must stay unchanged.

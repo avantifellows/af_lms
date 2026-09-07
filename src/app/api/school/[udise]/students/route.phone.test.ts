@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
 import ExcelJS from "exceljs";
 import JSZip from "jszip";
+import officeCrypto from "officecrypto-tool";
 
 const {
   mockGetServerSession,
@@ -230,6 +231,30 @@ describe("POST /api/school/[udise]/students in Phone Registration Mode", () => {
     expect(JSON.stringify(body)).not.toContain("g10_roll_no");
     expect(JSON.stringify(body)).not.toContain("annual_family_income");
     expect(JSON.stringify(body)).not.toContain("apaar_id");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("checks an automatically encrypted workbook and rejects a user password without DB calls", async () => {
+    vi.useRealTimers();
+    const workbook = await workbookBuffer([
+      phoneUploadHeaders,
+      ["12", "Asha Kumar", "02/01/2010", "Female", "Gen", "No", "Others", "PCM", "Engineering", "Ravi Kumar", "6876543210"],
+    ]);
+    for (const password of ["VelvetSweatshop", "synthetic-user-password"]) {
+      const data = await officeCrypto.encrypt(workbook, { password, type: "standard" });
+      const response = await POST(
+        multipartUploadRequest("students.xlsx", data, "validate") as never,
+        routeParams({ udise: "12345678901" }),
+      );
+      const body = await response.json();
+      if (password === "VelvetSweatshop") {
+        expect(response.status).toBe(200);
+        expect(body.summary).toEqual({ total: 1, ready: 1, rejected: 0 });
+      } else {
+        expect(response.status).toBe(400);
+        expect(body.error).toContain("Password-protected uploads are not supported");
+      }
+    }
     expect(fetch).not.toHaveBeenCalled();
   });
 
