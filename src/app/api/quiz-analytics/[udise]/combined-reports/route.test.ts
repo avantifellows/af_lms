@@ -99,16 +99,16 @@ describe("GET combined-reports", () => {
     mockWindow.mockResolvedValue(ENDED);
 
     const res = await GET(
-      jsonRequest(`${URL_BASE}?session_id=${SESSION}`),
+      new Request(`${URL_BASE}?session_id=${SESSION}`),
       routeParams({ udise: "27361106702" }),
     );
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.can_generate).toBe(false);
-    expect(body.blocked_reason).toBe("read_only");
-    expect(body.blocked_message).toMatch(/read-only/i);
-    // Listing still works — read-only means view, not none.
-    expect(body.jobs).toEqual([]);
+    // Listing still works (read-only means view, not none); only the verdict changes.
+    await expect(res.json()).resolves.toMatchObject({
+      jobs: [],
+      can_generate: false,
+      blocked_reason: "read_only",
+      blocked_message: expect.stringMatching(/read-only/i),
+    });
   });
 
   it("reports can_generate false with a reason while the session is open", async () => {

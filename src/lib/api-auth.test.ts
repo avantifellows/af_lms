@@ -207,55 +207,38 @@ describe("authorizeSchoolAccess", () => {
   // change anything there. A read-only admin passes canAccessSchool, so routes
   // that trigger work must opt in with requireEdit.
 
-  it("reports readOnly on success so views can mirror the write verdict", async () => {
+  /** An email user who passes the school check, with the given permission row. */
+  function grantSchoolAccess(perm: UserPermission) {
     mockSession.mockResolvedValue(ADMIN_SESSION);
     mockQuery.mockResolvedValue([SCHOOL_ROW]);
     mockCanAccessSchool.mockResolvedValue(true);
-    mockResolvedPermission.mockResolvedValue(permission({ read_only: true }));
+    mockResolvedPermission.mockResolvedValue(perm);
+  }
 
-    const result = await authorizeSchoolAccess("70705");
-    expect(result.authorized).toBe(true);
-    if (result.authorized) expect(result.readOnly).toBe(true);
-  });
+  it.each([
+    { read_only: true, requireEdit: undefined, authorized: true, readOnly: true },
+    { read_only: false, requireEdit: true, authorized: true, readOnly: false },
+    { read_only: true, requireEdit: true, authorized: false, readOnly: undefined },
+  ])(
+    "read_only=$read_only requireEdit=$requireEdit → authorized=$authorized",
+    async ({ read_only, requireEdit, authorized, readOnly }) => {
+      grantSchoolAccess(permission({ read_only }));
 
-  it("reports readOnly=false for a full-access user", async () => {
-    mockSession.mockResolvedValue(ADMIN_SESSION);
-    mockQuery.mockResolvedValue([SCHOOL_ROW]);
-    mockCanAccessSchool.mockResolvedValue(true);
-    mockResolvedPermission.mockResolvedValue(permission());
-
-    const result = await authorizeSchoolAccess("70705", { requireEdit: true });
-    expect(result.authorized).toBe(true);
-    if (result.authorized) expect(result.readOnly).toBe(false);
-  });
-
-  it("403s a read-only user when requireEdit is set", async () => {
-    mockSession.mockResolvedValue(ADMIN_SESSION);
-    mockQuery.mockResolvedValue([SCHOOL_ROW]);
-    mockCanAccessSchool.mockResolvedValue(true);
-    mockResolvedPermission.mockResolvedValue(permission({ read_only: true }));
-
-    const result = await authorizeSchoolAccess("70705", { requireEdit: true });
-    expect(result.authorized).toBe(false);
-    if (!result.authorized) {
-      expect(result.response.status).toBe(403);
-      await expect(result.response.json()).resolves.toEqual({
-        error: "Read-only access cannot perform this action",
-      });
+      const result = await authorizeSchoolAccess(
+        "70705",
+        requireEdit === undefined ? undefined : { requireEdit }
+      );
+      expect(result.authorized).toBe(authorized);
+      if (result.authorized) {
+        expect(result.readOnly).toBe(readOnly);
+      } else {
+        expect(result.response.status).toBe(403);
+        await expect(result.response.json()).resolves.toEqual({
+          error: "Read-only access cannot perform this action",
+        });
+      }
     }
-  });
-
-  it("still lets a read-only user through without requireEdit (reads)", async () => {
-    mockSession.mockResolvedValue(PM_SESSION);
-    mockQuery.mockResolvedValue([SCHOOL_ROW]);
-    mockCanAccessSchool.mockResolvedValue(true);
-    mockResolvedPermission.mockResolvedValue(
-      permission({ email: "pm@avantifellows.org", role: "program_manager", read_only: true })
-    );
-
-    const result = await authorizeSchoolAccess("70705");
-    expect(result.authorized).toBe(true);
-  });
+  );
 
   it("requireEdit does not affect passcode users (they cannot be read-only)", async () => {
     mockSession.mockResolvedValue(PASSCODE_SESSION as never);
