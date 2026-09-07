@@ -10,7 +10,7 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
     return (
       <select
         ref={ref}
-        className={`min-h-[44px] ${baseInputClasses} ${className}`}
+        className={`w-full min-h-[44px] ${baseInputClasses} ${className}`}
         {...props}
       />
     );

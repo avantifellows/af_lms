@@ -55,7 +55,7 @@ function AdminSelectors({ selectedProgramId, availableProgramIds, academicYear, 
   return <div className="grid gap-3 rounded-md border border-border bg-bg-card p-4 sm:grid-cols-[minmax(0,1fr)_12rem]">
     <label className="block min-w-0 text-[11px] font-extrabold uppercase tracking-wide text-text-muted">
       Program
-      <Select aria-label="Program" className="mt-1 w-full font-normal normal-case tracking-normal"
+      <Select aria-label="Program" className="mt-1 font-normal normal-case tracking-normal"
         value={selectedProgramId} onChange={(event) => onProgramChange(Number(event.target.value))}>
         {availableProgramIds.map((id) => <option key={id} value={id}>
           {id} - {PROGRAM_ID_TO_LABEL[id]}
@@ -64,7 +64,7 @@ function AdminSelectors({ selectedProgramId, availableProgramIds, academicYear, 
     </label>
     <label className="block min-w-0 text-[11px] font-extrabold uppercase tracking-wide text-text-muted">
       Academic Year
-      <Select aria-label="Academic Year" className="mt-1 w-full font-mono font-normal normal-case tracking-normal"
+      <Select aria-label="Academic Year" className="mt-1 font-mono font-normal normal-case tracking-normal"
         value={academicYear} onChange={(event) => onAcademicYearChange(event.target.value)}>
         {academicYears.map((year) => <option key={year}>{year}</option>)}
       </Select>

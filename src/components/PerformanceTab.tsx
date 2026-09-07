@@ -348,7 +348,7 @@ export default function PerformanceTab({ schoolUdise, lockedProgram }: Props) {
               <label className="text-xs font-bold uppercase tracking-wide text-text-muted">
                 Test Grade
               </label>
-              <Select value={selectedTestGrade ?? ""} onChange={handleTestGradeChange}>
+              <Select value={selectedTestGrade ?? ""} onChange={handleTestGradeChange} className="max-w-xs">
                 <option value="">All test grades</option>
                 {availableTestGrades.map((g) => (
                   <option key={g} value={g}>

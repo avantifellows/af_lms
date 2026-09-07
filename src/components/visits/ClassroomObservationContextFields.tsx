@@ -195,7 +195,6 @@ function CurriculumField({
       <Select
         value={selectedCurriculumId !== null ? String(selectedCurriculumId) : ""}
         onChange={onChange}
-        className="w-full"
         data-testid="curriculum-select"
       >
         <option value="" disabled>
@@ -251,7 +250,6 @@ function ChapterField({
       <Select
         value={selectedChapterId !== null ? String(selectedChapterId) : ""}
         onChange={onChange}
-        className="w-full"
         data-testid="chapter-select"
         disabled={chapters.length === 0}
       >
@@ -303,7 +301,6 @@ function TopicField({
         <Select
           value={selectedTopicId !== null ? String(selectedTopicId) : ""}
           onChange={onChange}
-          className="w-full"
           data-testid="topic-select"
           disabled={topics.length === 0}
         >
