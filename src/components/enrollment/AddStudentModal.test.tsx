@@ -4,6 +4,10 @@ import userEvent from "@testing-library/user-event";
 
 import AddStudentModal from "./AddStudentModal";
 import { CBSE_BOARD } from "@/lib/student-addition-fields";
+import {
+  APPROVED_REGISTRATION_MODE,
+  PHONE_REGISTRATION_MODE,
+} from "@/lib/registration-mode";
 
 const baseProps = {
   open: true,
@@ -11,6 +15,7 @@ const baseProps = {
   schoolCode: "JNV001",
   onClose: vi.fn(),
   onCreated: vi.fn(),
+  registrationMode: APPROVED_REGISTRATION_MODE,
 };
 
 async function fillValidForm() {
@@ -39,6 +44,94 @@ describe("AddStudentModal", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     vi.stubGlobal("fetch", vi.fn());
+  });
+
+  it("shows exactly the Phone-mode fields and phone-as-Student-ID guidance", () => {
+    render(<AddStudentModal {...baseProps} registrationMode={PHONE_REGISTRATION_MODE} />);
+
+    expect(screen.getByLabelText("Grade")).toBeInTheDocument();
+    expect(screen.getByLabelText("Student Name")).toBeInTheDocument();
+    expect(screen.getByLabelText("Date of Birth")).toBeInTheDocument();
+    expect(screen.getByLabelText("Gender")).toBeInTheDocument();
+    expect(screen.getByLabelText("Category")).toBeInTheDocument();
+    expect(screen.getByLabelText("CWSN")).toBeInTheDocument();
+    expect(screen.getByLabelText("G10 board")).toBeInTheDocument();
+    expect(screen.getByLabelText("Board Stream")).toBeInTheDocument();
+    expect(screen.getByLabelText("Primary Exam preparing for")).toBeInTheDocument();
+    expect(screen.getByLabelText("Father Name")).toBeInTheDocument();
+    expect(screen.getByLabelText("Parents Phone Number")).toBeInTheDocument();
+    expect(screen.queryByLabelText("PEN")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Grade 10 Roll no")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Yearly / Annual Family Income")).not.toBeInTheDocument();
+    expect(screen.getByText("Parent phone number will be the Student ID.")).toBeInTheDocument();
+  });
+
+  it("submits a Grade 12 Phone-mode row with only canonical fields and phone identity", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          totals: { total: 1, created: 1, duplicate_in_file: 0, already_exists: 0, rejected: 0 },
+          results: [{ status: "created", generated_student_id: "6876543210" }],
+        }),
+        { status: 200 },
+      ),
+    );
+    render(<AddStudentModal {...baseProps} registrationMode={PHONE_REGISTRATION_MODE} />);
+    const user = userEvent.setup();
+
+    await user.selectOptions(screen.getByLabelText("Grade"), "12");
+    await user.type(screen.getByLabelText("Student Name"), "asha k kumar");
+    await user.type(screen.getByLabelText("Date of Birth"), "2010-01-02");
+    await user.selectOptions(screen.getByLabelText("Gender"), "Female");
+    await user.selectOptions(screen.getByLabelText("Category"), "Gen");
+    await user.selectOptions(screen.getByLabelText("CWSN"), "No");
+    await user.selectOptions(screen.getByLabelText("G10 board"), "Others");
+    await user.selectOptions(screen.getByLabelText("Board Stream"), "PCM");
+    await user.selectOptions(screen.getByLabelText("Primary Exam preparing for"), "Engineering");
+    await user.type(screen.getByLabelText("Father Name"), "ravi kumar");
+    await user.type(screen.getByLabelText("Parents Phone Number"), "6876543210");
+
+    expect(screen.getByText("Parent phone number will be the Student ID: 6876543210")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add Student" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "Add Student" }));
+
+    await waitFor(() => expect(fetch).toHaveBeenCalled());
+    const body = JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string);
+    expect(body).toMatchObject({
+      grade: "12",
+      phone: "6876543210",
+    });
+    expect(body).not.toHaveProperty("pen_number");
+    expect(body).not.toHaveProperty("g10_roll_no");
+    expect(body).not.toHaveProperty("annual_family_income");
+  });
+
+  it("uses the shared Phone-mode rule for the first digit and exact length", async () => {
+    render(<AddStudentModal {...baseProps} registrationMode={PHONE_REGISTRATION_MODE} />);
+    const user = userEvent.setup();
+
+    await user.type(screen.getByLabelText("Parents Phone Number"), "5876543210");
+    await user.tab();
+
+    expect(screen.getByText("Enter a valid phone number")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add Student" })).toBeDisabled();
+  });
+
+  it.each([
+    [PHONE_REGISTRATION_MODE, "09999999999"],
+    [PHONE_REGISTRATION_MODE, "99999999999"],
+    [APPROVED_REGISTRATION_MODE, "09999999999"],
+    [APPROVED_REGISTRATION_MODE, "99999999999"],
+  ] as const)("keeps invalid phone digits for %s validation", async (registrationMode, phone) => {
+    render(<AddStudentModal {...baseProps} registrationMode={registrationMode} />);
+    const user = userEvent.setup();
+    const input = screen.getByLabelText("Parents Phone Number");
+
+    await user.type(input, phone);
+
+    expect(input).toHaveValue(phone);
+    expect(screen.getByText("Enter a valid phone number")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add Student" })).toBeDisabled();
   });
 
   it("shows the revised NVS identity, CWSN, board, gender, and stream controls", () => {
@@ -108,6 +201,61 @@ describe("AddStudentModal", () => {
     expect(baseProps.onCreated).not.toHaveBeenCalled();
   });
 
+  it("shows rejected existing-school context and redacts restricted Phone-mode identities", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          totals: { total: 1, created: 0, duplicate_in_file: 0, already_exists: 0, rejected: 1 },
+          results: [
+            {
+              status: "rejected",
+              row_errors: ["Student already belongs to another school"],
+              existing_match: {
+                student_id: "6876543210",
+                pen_number: "12345678901",
+                apaar_id: "123456789012",
+                student_name: "Asha Kumar",
+                school_name: "JNV Other",
+                school_code: "JNV999",
+                udise_code: "99999999999",
+                district: "Jaipur",
+                state: "Rajasthan",
+                grade: 11,
+                program: "JNV NVS",
+                stream: "engineering",
+              },
+            },
+          ],
+        }),
+        { status: 400 },
+      ),
+    );
+    render(<AddStudentModal {...baseProps} registrationMode={PHONE_REGISTRATION_MODE} />);
+    const user = userEvent.setup();
+
+    await user.selectOptions(screen.getByLabelText("Grade"), "11");
+    await user.type(screen.getByLabelText("Student Name"), "asha k kumar");
+    await user.type(screen.getByLabelText("Date of Birth"), "2010-01-02");
+    await user.selectOptions(screen.getByLabelText("Gender"), "Female");
+    await user.selectOptions(screen.getByLabelText("Category"), "Gen");
+    await user.selectOptions(screen.getByLabelText("CWSN"), "No");
+    await user.selectOptions(screen.getByLabelText("G10 board"), "Others");
+    await user.selectOptions(screen.getByLabelText("Board Stream"), "PCM");
+    await user.selectOptions(screen.getByLabelText("Primary Exam preparing for"), "Engineering");
+    await user.type(screen.getByLabelText("Father Name"), "ravi kumar");
+    await user.type(screen.getByLabelText("Parents Phone Number"), "6876543210");
+    await user.click(screen.getByRole("button", { name: "Add Student" }));
+
+    expect(
+      await screen.findByText(
+        /This identifier already belongs to Asha Kumar at JNV Other \(JNV999, UDISE 99999999999\), Jaipur, Rajasthan/,
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Student already belongs to another school")).not.toBeInTheDocument();
+    expect(screen.queryByText(/12345678901/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/123456789012/)).not.toBeInTheDocument();
+  });
+
   it("shows safe upstream field errors", async () => {
     const scrollTo = vi.fn();
     Object.defineProperty(HTMLElement.prototype, "scrollTo", {
@@ -159,7 +307,7 @@ describe("AddStudentModal", () => {
     expect(screen.getByRole("button", { name: "Add Student" })).toBeDisabled();
   });
 
-  it("filters restricted fields and caps fixed-length numeric inputs", async () => {
+  it("filters non-digits while preserving extra phone digits for validation", async () => {
     render(<AddStudentModal {...baseProps} />);
     const user = userEvent.setup();
 
@@ -178,7 +326,8 @@ describe("AddStudentModal", () => {
     expect(rollInput).toHaveValue("12345678");
 
     await user.type(screen.getByLabelText("Parents Phone Number"), "adasd12345678901");
-    expect(screen.getByLabelText("Parents Phone Number")).toHaveValue("1234567890");
+    expect(screen.getByLabelText("Parents Phone Number")).toHaveValue("12345678901");
+    expect(screen.getByText("Enter a valid phone number")).toBeInTheDocument();
 
     await user.type(screen.getByLabelText("Father Name"), "Ravi123 !");
     expect(screen.getByLabelText("Father Name")).toHaveValue("Ravi ");

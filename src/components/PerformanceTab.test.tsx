@@ -146,6 +146,29 @@ describe("PerformanceTab", () => {
     });
   });
 
+  it("lockedProgram wins over a ?program= URL override (centre confinement)", async () => {
+    // A centre page locks the tab to the centre's program; a hand-edited URL
+    // param must not widen the view to another program's data.
+    mockSearchParams = new URLSearchParams("program=JNV%20NVS");
+    const mockFetch = mockGradesResponse([11], ["JNV CoE", "JNV NVS"]);
+    vi.stubGlobal("fetch", mockFetch);
+
+    render(<PerformanceTab schoolUdise="99887766" lockedProgram="JNV CoE" />);
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/quiz-analytics/99887766/grades?program=JNV%20CoE",
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
+      );
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("batch-overview")).toBeInTheDocument();
+    });
+    expect(screen.getByText(/program=JNV CoE/)).toBeInTheDocument();
+    // No program tabs when locked — the override has no UI path either.
+    expect(screen.queryByRole("button", { name: "JNV NVS" })).not.toBeInTheDocument();
+  });
+
   it("auto-selects grade and renders BatchOverview when single program and single grade", async () => {
     vi.stubGlobal("fetch", mockGradesResponse([11], ["JNV CoE"]));
 

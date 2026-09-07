@@ -15,7 +15,11 @@ import { dbIstTimestampToUtcIso } from "@/lib/quiz-session-time";
 export type GenerationBlockedReason =
   | "session_not_ended"
   | "job_in_progress"
-  | "already_generated";
+  | "already_generated"
+  // Not a property of the test but of the caller: read-only users can see
+  // reports but never trigger generation. Lives in the same vocabulary so the
+  // panel renders one consistent "why the button is off" message.
+  | "read_only";
 
 export interface SessionWindow {
   /** Session end as a true instant, or null when we can't determine one. */
@@ -125,4 +129,6 @@ export const BLOCKED_MESSAGE: Record<GenerationBlockedReason, string> = {
   job_in_progress: "A combined report for this test is already being generated.",
   already_generated:
     "A combined report already exists for this test. Use Regenerate to build a fresh copy.",
+  read_only:
+    "Your access is read-only. You can view and download existing reports but not generate new ones.",
 };

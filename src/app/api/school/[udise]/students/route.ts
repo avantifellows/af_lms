@@ -1,95 +1,36 @@
 import { readFile } from "fs/promises";
-import path from "path";
 
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 
 import { authOptions } from "@/lib/auth";
 import { query } from "@/lib/db";
-import { getDbServiceConfig } from "@/lib/db-service-config";
 import { deriveLmsEnrollmentPeriod } from "@/lib/lms-enrollment-date";
 import {
-  parseStudentAdditionUpload,
-  type StudentAdditionUploadRowResult,
-} from "@/lib/student-addition-bulk";
-import { requireStudentAdditionAccess } from "@/lib/student-addition-access";
+  ACTIVE_REGISTRATION_MODE,
+  PHONE_REGISTRATION_MODE,
+} from "@/lib/registration-mode";
 import {
+  parseStudentAdditionUpload,
+} from "@/lib/student-addition-bulk";
+import {
+  requireStudentAdditionAccess,
+  type StudentAdditionSchool,
+} from "@/lib/student-addition-access";
+import {
+  getStudentAdditionUploadColumns,
   validateStudentAdditionInput,
-  type LmsStudentAdditionRow,
-  type StudentAdditionValidationResult,
 } from "@/lib/student-addition-fields";
 
-interface RouteSchool {
-  id: string;
-  code: string;
-  udise_code: string | null;
-  region: string | null;
-  af_school_category: string | null;
-}
-
-interface StudentAdditionAccess {
-  programId: number;
-  actor: {
-    user_id: number | null;
-    email: string;
-    login_type: "google";
-    role: string;
-  };
-}
-
-type DbServiceResult = {
-  row_number: number;
-  status: "created" | "duplicate_in_file" | "already_exists" | "rejected";
-  original?: Record<string, string>;
-};
-
-const EMPTY_TOTALS = {
-  total: 0,
-  created: 0,
-  duplicate_in_file: 0,
-  already_exists: 0,
-  rejected: 0,
-};
-const MAX_STUDENT_ADDITION_UPLOAD_BYTES = 5 * 1024 * 1024;
-const STUDENT_ADDITION_TEMPLATE = path.join(
-  process.cwd(),
-  process.env.NODE_ENV === "production" ? ".next/server/assets" : "src/assets",
-  "nvs-student-addition-template.xlsx",
-);
-
-function safeFields(value: unknown, keys: string[]) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-  const record = value as Record<string, unknown>;
-  return Object.fromEntries(keys.filter((key) => key in record).map((key) => [key, record[key]]));
-}
-
-function safeUpstreamResults(value: unknown) {
-  if (!Array.isArray(value)) return undefined;
-  return value.map((result) => {
-    const safe = safeFields(result, [
-      "row_number", "status", "generated_student_id", "field_errors", "row_errors",
-    ]) ?? {};
-    const record = result as Record<string, unknown>;
-    const duplicateIdentifiers = Array.isArray(record.duplicate_identifiers)
-      ? record.duplicate_identifiers.filter(
-        (identifier): identifier is string => typeof identifier === "string",
-      )
-      : undefined;
-    const normalized = safeFields(record.normalized, [
-      "student_id", "pen_number", "student_name", "g10_roll_no",
-    ]);
-    const existingMatch = safeFields(record.existing_match, [
-      "matched_identifier", "student_id", "pen_number", "apaar_id", "student_name",
-      "school_name", "school_code", "udise_code", "district", "state", "grade", "program", "stream",
-    ]);
-    return {
-      ...safe,
-      ...(duplicateIdentifiers ? { duplicate_identifiers: duplicateIdentifiers } : {}),
-      ...(normalized ? { normalized } : {}),
-      ...(existingMatch ? { existing_match: existingMatch } : {}),
-    };
-  });
-}
+import {
+  countStudentAdditionTotals,
+  MAX_STUDENT_ADDITION_UPLOAD_BYTES,
+  mergeStudentAdditionResults,
+  proxyStudentAdditionRows,
+  STUDENT_ADDITION_TEMPLATE_FILENAMES,
+  studentAdditionTemplatePath,
+  studentAdditionValidationBody,
+} from "@/lib/student-addition-api";
 
 function isUploadFile(value: FormDataEntryValue | null): value is File {
   return typeof value === "object" &&
@@ -103,29 +44,61 @@ function uploadFilename(file: File): string {
   return file.type.includes("csv") ? "upload.csv" : "upload.xlsx";
 }
 
-function validationResponse(result: StudentAdditionValidationResult) {
-  return NextResponse.json(
-    {
-      error: "Validation failed",
-      totals: { total: 1, created: 0, duplicate_in_file: 0, already_exists: 0, rejected: 1 },
-      results: [
-        {
-          row_number: 1,
-          status: "rejected",
-          generated_student_id: result.generatedStudentId,
-          normalized: {
-            student_name: result.row.student_name ?? "",
-            g10_roll_no: result.row.g10_roll_no ?? "",
-            student_id: result.generatedStudentId,
-          },
-          field_errors: result.fieldErrors,
-          row_errors: result.rowErrors,
-          existing_match: null,
-        },
-      ],
-    },
-    { status: 400 },
+type BulkUploadAction = "validate" | "upload";
+
+function parseBulkUploadAction(value: FormDataEntryValue | null): BulkUploadAction | null {
+  return value === "validate" || value === "upload" ? value : null;
+}
+
+const PHONE_RESTRICTED_PREVIEW_KEYS = new Set([
+  "pen_number",
+  "g10_roll_no",
+  "annual_family_income",
+  "apaar_id",
+]);
+
+function safePreviewOriginal(original: Record<string, string>) {
+  const allowedColumns = new Set(
+    getStudentAdditionUploadColumns(ACTIVE_REGISTRATION_MODE).map((column) => column.label),
   );
+  return Object.fromEntries(
+    Object.entries(original).filter(([key]) => allowedColumns.has(key)),
+  );
+}
+
+function safePreviewFieldErrors(errors: Record<string, string>) {
+  if (ACTIVE_REGISTRATION_MODE !== PHONE_REGISTRATION_MODE) return errors;
+  return Object.fromEntries(
+    Object.entries(errors).filter(([key]) => !PHONE_RESTRICTED_PREVIEW_KEYS.has(key)),
+  );
+}
+
+function checkedBulkUploadResponse(
+  parsed: Extract<Awaited<ReturnType<typeof parseStudentAdditionUpload>>, { ok: true }>,
+) {
+  const readyRows = parsed.rows.map((row) => ({
+    row_number: row.row_number,
+    status: "ready" as const,
+    original: safePreviewOriginal(parsed.originalRows.get(row.row_number) ?? {}),
+  }));
+  const rejectedRows = parsed.rejectedResults.map((result) => ({
+    row_number: result.row_number,
+    status: "rejected" as const,
+    original: safePreviewOriginal(result.original),
+    field_errors: safePreviewFieldErrors(result.field_errors),
+    row_errors: result.row_errors,
+  }));
+
+  return NextResponse.json({
+    stage: "checked" as const,
+    summary: {
+      total: parsed.totalRows,
+      ready: parsed.rows.length,
+      rejected: parsed.rejectedResults.length,
+    },
+    rows: [...readyRows, ...rejectedRows].sort((a, b) => a.row_number - b.row_number),
+    ignored_rows: parsed.ignoredRows,
+  });
 }
 
 async function resolveSchoolAndAccess(
@@ -136,7 +109,7 @@ async function resolveSchoolAndAccess(
     return { response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   }
 
-  const schools = await query<RouteSchool>(
+  const schools = await query<StudentAdditionSchool>(
     `SELECT
        sch.id,
        sch.code,
@@ -167,74 +140,46 @@ async function resolveRouteContext(params: Promise<{ udise: string }>) {
   return resolveSchoolAndAccess(session, udise);
 }
 
-function countTotals(results: Array<{ status: DbServiceResult["status"] }>) {
-  return results.reduce(
-    (totals, result) => ({
-      ...totals,
-      total: totals.total + 1,
-      [result.status]: totals[result.status] + 1,
-    }),
-    { ...EMPTY_TOTALS },
+function emptyUploadResponse(ignoredRows: Array<{ message: string }>) {
+  if (ignoredRows.length > 0) {
+    return NextResponse.json(
+      {
+        error: `No students to upload. ${ignoredRows.map((row) => row.message).join(" ")} Add at least one student and upload again.`,
+        ignored_rows: ignoredRows,
+      },
+      { status: 400 },
+    );
+  }
+  return NextResponse.json({ error: "Upload has no student rows" }, { status: 400 });
+}
+
+function rejectedUploadResponse(
+  parsed: Extract<Awaited<ReturnType<typeof parseStudentAdditionUpload>>, { ok: true }>,
+) {
+  return NextResponse.json(
+    {
+      totals: countStudentAdditionTotals(parsed.rejectedResults),
+      results: parsed.rejectedResults,
+      ...(parsed.ignoredRows.length > 0 ? { ignored_rows: parsed.ignoredRows } : {}),
+    },
+    { status: 400 },
   );
 }
 
-// fallow-ignore-next-line complexity
-async function proxyRowsToDbService({
-  access,
-  school,
-  rows,
-  upload,
-  period,
-}: {
-  access: StudentAdditionAccess;
-  school: RouteSchool;
-  rows: LmsStudentAdditionRow[];
-  upload: { id: string; filename: string };
-  period: ReturnType<typeof deriveLmsEnrollmentPeriod>;
-}) {
-  const dbService = getDbServiceConfig();
-  if (!dbService) {
-    return NextResponse.json({ error: "DB Service is not configured" }, { status: 500 });
-  }
-
-  const response = await fetch(`${dbService.baseUrl}/lms/students/bulk-create-with-enrollments`, {
-    method: "POST",
-    headers: dbService.headers,
-    body: JSON.stringify({
-      actor: access.actor,
-      school: { code: school.code, udise_code: school.udise_code },
-      program_id: access.programId,
-      upload,
-      ...period,
-      rows,
-    }),
-  });
-
-  if (!response.ok) {
-    const upstream = response.headers.get("content-type")?.includes("application/json")
-      ? await response.json().catch(() => null) as Record<string, unknown> | null
-      : null;
+async function bulkUploadResponse(
+  request: NextRequest,
+  access: Awaited<ReturnType<typeof requireStudentAdditionAccess>> & { ok: true },
+  school: StudentAdditionSchool,
+) {
+  const form = await request.formData();
+  const action = parseBulkUploadAction(form.get("action"));
+  if (!action) {
     return NextResponse.json(
-      {
-        error: "Student could not be created",
-        ...(upstream?.field_errors ? { field_errors: upstream.field_errors } : {}),
-        ...(upstream?.row_errors ? { row_errors: upstream.row_errors } : {}),
-        ...(upstream?.results ? { results: safeUpstreamResults(upstream.results) } : {}),
-      },
-      { status: response.status },
+      { error: "Bulk upload action must be 'validate' or 'upload'" },
+      { status: 400 },
     );
   }
 
-  return NextResponse.json(await response.json());
-}
-
-// fallow-ignore-next-line complexity
-async function bulkUploadResponse(
-  request: NextRequest,
-  access: StudentAdditionAccess,
-  school: RouteSchool,
-) {
-  const form = await request.formData();
   const file = form.get("file");
   if (!isUploadFile(file)) {
     return NextResponse.json({ error: "Upload a .xlsx or rejected-row .csv file" }, { status: 400 });
@@ -248,33 +193,25 @@ async function bulkUploadResponse(
     filename: uploadFilename(file),
     data: Buffer.from(await file.arrayBuffer()),
     academicYear: period.academic_year,
+    mode: ACTIVE_REGISTRATION_MODE,
   });
-  if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
-  if (parsed.totalRows === 0) {
-    if (parsed.ignoredRows.length > 0) {
-      return NextResponse.json(
-        {
-          error: `No students to upload. ${parsed.ignoredRows.map((row) => row.message).join(" ")} Add at least one student and upload again.`,
-          ignored_rows: parsed.ignoredRows,
-        },
-        { status: 400 },
-      );
-    }
-    return NextResponse.json({ error: "Upload has no student rows" }, { status: 400 });
+  if (!parsed.ok) {
+    return NextResponse.json({
+      error: parsed.error,
+      ...(parsed.templateMismatch ? { template_mismatch: parsed.templateMismatch } : {}),
+    }, { status: 400 });
   }
+  if (parsed.totalRows === 0) {
+    return emptyUploadResponse(parsed.ignoredRows);
+  }
+
+  if (action === "validate") return checkedBulkUploadResponse(parsed);
 
   if (parsed.rows.length === 0) {
-    return NextResponse.json(
-      {
-        totals: countTotals(parsed.rejectedResults),
-        results: parsed.rejectedResults,
-        ...(parsed.ignoredRows.length > 0 ? { ignored_rows: parsed.ignoredRows } : {}),
-      },
-      { status: 400 },
-    );
+    return rejectedUploadResponse(parsed);
   }
 
-  const response = await proxyRowsToDbService({
+  const response = await proxyStudentAdditionRows({
     access,
     school,
     rows: parsed.rows,
@@ -284,25 +221,15 @@ async function bulkUploadResponse(
     },
     period,
   });
-  const status = response.status;
-  const body = await response.json();
-  if (!Array.isArray(body.results)) {
-    return NextResponse.json(body, { status });
-  }
-  const dbResults = (body.results ?? []).map((result: DbServiceResult) => ({
-    ...result,
-    original: parsed.originalRows.get(result.row_number) ?? {},
-  }));
-  const results = [...dbResults, ...parsed.rejectedResults].sort(
-    (a, b) => (a.row_number ?? 0) - (b.row_number ?? 0),
-  ) as Array<DbServiceResult | StudentAdditionUploadRowResult>;
-
-  return NextResponse.json({
-    ...body,
-    totals: countTotals(results),
-    results,
-    ...(parsed.ignoredRows.length > 0 ? { ignored_rows: parsed.ignoredRows } : {}),
-  }, { status });
+  return NextResponse.json(
+    mergeStudentAdditionResults({
+      body: response.body,
+      parsedRejectedResults: parsed.rejectedResults,
+      originalRows: parsed.originalRows,
+      ignoredRows: parsed.ignoredRows,
+    }),
+    { status: response.status },
+  );
 }
 
 export async function POST(
@@ -324,8 +251,10 @@ export async function POST(
     rowNumber: 1,
     academicYear: period.academic_year,
   });
-  if (!validation.ok) return validationResponse(validation);
-  return proxyRowsToDbService({
+  if (!validation.ok) {
+    return NextResponse.json(studentAdditionValidationBody(validation), { status: 400 });
+  }
+  const response = await proxyStudentAdditionRows({
     access,
     school,
     rows: [validation.row],
@@ -335,6 +264,7 @@ export async function POST(
     },
     period,
   });
+  return NextResponse.json(response.body, { status: response.status });
 }
 
 export async function GET(
@@ -344,11 +274,12 @@ export async function GET(
   const resolved = await resolveRouteContext(params);
   if (resolved.response) return resolved.response;
 
-  const workbook = await readFile(STUDENT_ADDITION_TEMPLATE);
+  const filename = STUDENT_ADDITION_TEMPLATE_FILENAMES[ACTIVE_REGISTRATION_MODE];
+  const workbook = await readFile(studentAdditionTemplatePath());
   return new NextResponse(new Uint8Array(workbook), {
     headers: {
       "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      "Content-Disposition": 'attachment; filename="nvs-student-addition-template.xlsx"',
+      "Content-Disposition": `attachment; filename="${filename}"`,
     },
   });
 }

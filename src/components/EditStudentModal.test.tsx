@@ -2,6 +2,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import EditStudentModal from "./EditStudentModal";
 import { type Grade } from "./StudentTable";
+import { APPROVED_REGISTRATION_MODE, PHONE_REGISTRATION_MODE } from "@/lib/registration-mode";
 
 const baseStudent = {
   group_user_id: "gu-1",
@@ -44,8 +45,10 @@ const defaultProps = {
   onClose: vi.fn(),
   onSave: vi.fn(),
   grades,
+  isPhoneRegistrationStudent: false,
   // The roster's selected program — what the Edit gate authorized against.
   programId: 64 as number | null,
+  registrationMode: APPROVED_REGISTRATION_MODE,
 };
 
 let mockFetch: ReturnType<typeof vi.fn>;
@@ -122,6 +125,153 @@ describe("EditStudentModal", () => {
     fireEvent.change(getByName("stream"), { target: { value: "medical" } });
     expect(screen.queryByText(/New Batch/)).not.toBeInTheDocument();
     expect(document.querySelector('[name="batch_group_id"]')).toBeNull();
+  });
+
+  it("explains that a Phone Registration Mode correction changes Portal login", () => {
+    renderModal({ isPhoneRegistrationStudent: true });
+
+    expect(
+      screen.getByText(
+        "Changing this phone also changes the Student ID. Portal login switches to the new number immediately.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("shows Approved-mode backfill inputs and fills-once messaging for the phone cohort", () => {
+    renderModal({
+      isPhoneRegistrationStudent: true,
+      registrationMode: "approved",
+      student: {
+        ...baseStudent,
+        pen_number: null,
+        g10_roll_no: null,
+      },
+    });
+
+    expect(screen.getByText("Post-approval identifier backfill")).toBeInTheDocument();
+    expect(screen.getByText("PEN and Grade 10 Roll no can each be filled once; once saved, they are locked.")).toBeInTheDocument();
+    expect(getByName("pen_number")).toHaveValue("");
+    expect(getByName("g10_roll_no")).toHaveValue("");
+    expect(getByName("pen_number")).not.toBeDisabled();
+    expect(getByName("g10_roll_no")).not.toBeDisabled();
+    expect(getByName("annual_family_income")).toBeInTheDocument();
+  });
+
+  it("locks identifiers that were already backfilled", () => {
+    renderModal({
+      isPhoneRegistrationStudent: true,
+      registrationMode: "approved",
+    });
+
+    expect(getByName("pen_number")).toHaveValue("12345678901");
+    expect(getByName("g10_roll_no")).toHaveValue("ABC123");
+    expect(getByName("pen_number")).toBeDisabled();
+    expect(getByName("g10_roll_no")).toBeDisabled();
+  });
+
+  it("submits backfill identifiers without a Student ID change", async () => {
+    const user = userEvent.setup();
+    const { props } = renderModal({
+      isPhoneRegistrationStudent: true,
+      registrationMode: "approved",
+      student: {
+        ...baseStudent,
+        pen_number: null,
+        g10_roll_no: null,
+      },
+    });
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ status: "updated" }) });
+
+    await user.type(getByName("pen_number"), "01234567890");
+    await user.type(getByName("g10_roll_no"), "12345678");
+    await user.click(screen.getByText("Save Changes"));
+
+    await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
+    expect(JSON.parse(mockFetch.mock.calls[0][1].body)).toEqual({
+      pen_number: "01234567890",
+      g10_roll_no: "12345678",
+      program_id: 64,
+    });
+    expect(JSON.parse(mockFetch.mock.calls[0][1].body)).not.toHaveProperty("student_id");
+    expect(props.onSave).toHaveBeenCalledTimes(1);
+  });
+
+  it("hides all backfill inputs for the phone cohort while Phone mode is active", () => {
+    renderModal({
+      isPhoneRegistrationStudent: true,
+      registrationMode: "phone",
+    });
+
+    expect(screen.queryByText("Post-approval identifier backfill")).not.toBeInTheDocument();
+    expect(document.querySelector('[name="pen_number"]')).toBeNull();
+    expect(document.querySelector('[name="g10_roll_no"]')).toBeNull();
+    expect(document.querySelector('[name="annual_family_income"]')).toBeNull();
+  });
+
+  it("does not show Phone Registration Mode guidance for other Students", () => {
+    renderModal();
+
+    expect(
+      screen.queryByText(
+        "Changing this phone also changes the Student ID. Portal login switches to the new number immediately.",
+      ),
+    ).not.toBeInTheDocument();
+  });
+
+  it("uses the Phone Registration Mode 6-9 phone rule in the Edit UI", async () => {
+    const user = userEvent.setup();
+    renderModal({ isPhoneRegistrationStudent: true });
+
+    await user.clear(getByName("phone"));
+    await user.type(getByName("phone"), "5876543210");
+    await user.click(screen.getByText("Save Changes"));
+
+    expect(
+      await screen.findByText(
+        "Parents Phone Number must be exactly 10 digits and start with 6-9",
+      ),
+    ).toBeInTheDocument();
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [PHONE_REGISTRATION_MODE, true, "09999999999", "Parents Phone Number must be exactly 10 digits and start with 6-9"],
+    [PHONE_REGISTRATION_MODE, true, "99999999999", "Parents Phone Number must be exactly 10 digits and start with 6-9"],
+    [APPROVED_REGISTRATION_MODE, false, "09999999999", "Parents Phone Number must be exactly 10 digits and cannot start with zero"],
+    [APPROVED_REGISTRATION_MODE, false, "99999999999", "Parents Phone Number must be exactly 10 digits and cannot start with zero"],
+  ] as const)("keeps invalid phone digits for %s validation", async (registrationMode, isPhoneRegistrationStudent, phone, message) => {
+    const user = userEvent.setup();
+    renderModal({ registrationMode, isPhoneRegistrationStudent });
+
+    const input = getByName("phone");
+    await user.clear(input);
+    await user.type(input, phone);
+
+    expect(input).toHaveValue(phone);
+    await user.click(screen.getByText("Save Changes"));
+
+    expect(await screen.findByText(message)).toBeInTheDocument();
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("accepts a valid ten-digit phone unchanged in Phone Registration Mode", async () => {
+    const user = userEvent.setup();
+    renderModal({
+      registrationMode: PHONE_REGISTRATION_MODE,
+      isPhoneRegistrationStudent: true,
+    });
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ status: "updated" }) });
+
+    const input = getByName("phone");
+    await user.clear(input);
+    await user.type(input, "9999999999");
+    await user.click(screen.getByText("Save Changes"));
+
+    await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
+    expect(JSON.parse(mockFetch.mock.calls[0][1].body)).toMatchObject({
+      phone: "9999999999",
+      program_id: 64,
+    });
   });
 
   it("keeps the local database date when serialization uses the prior UTC day", () => {
@@ -319,13 +469,13 @@ describe("EditStudentModal", () => {
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it("filters restricted edit fields while typing", async () => {
+  it("filters non-digits while preserving extra phone digits for validation", async () => {
     const user = userEvent.setup();
     renderModal();
 
     await user.clear(getByName("phone"));
     await user.type(getByName("phone"), "abc12345678901");
-    expect(getByName("phone")).toHaveValue("1234567890");
+    expect(getByName("phone")).toHaveValue("12345678901");
 
     await user.clear(getByName("father_name"));
     await user.type(getByName("father_name"), "Suresh123 !");

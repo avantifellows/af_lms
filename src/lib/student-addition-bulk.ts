@@ -1,14 +1,22 @@
 import { parse } from "csv-parse/sync";
 import ExcelJS from "exceljs";
 import JSZip from "jszip";
+import { readableStudentWorkbook, UnsupportedWorkbookEncryptionError } from "./student-addition-workbook";
 
 import {
-  STUDENT_ADDITION_UPLOAD_COLUMNS,
+  getStudentAdditionUploadColumns,
+  getStudentAdditionRejectedRowMetadataColumns,
+  isValidRegistrationPhone,
   validateStudentAdditionInput,
   type LmsStudentAdditionRow,
   type StudentAdditionInput,
   type StudentAdditionValidationResult,
 } from "./student-addition-fields";
+import {
+  ACTIVE_REGISTRATION_MODE,
+  PHONE_REGISTRATION_MODE,
+  type RegistrationMode,
+} from "./registration-mode";
 
 export interface StudentAdditionUploadRowResult {
   row_number: number;
@@ -23,6 +31,13 @@ export interface StudentAdditionUploadRowResult {
   row_errors: string[];
   existing_match: null;
   original: Record<string, string>;
+}
+
+export interface StudentAdditionUploadHeaderDetails {
+  missing: string[];
+  unexpected: string[];
+  duplicate: string[];
+  legacy_apaar?: boolean;
 }
 
 export interface StudentAdditionIgnoredExampleRow {
@@ -40,21 +55,46 @@ export type StudentAdditionUploadParseResult =
       totalRows: number;
       originalRows: Map<number, Record<string, string>>;
     }
-  | { ok: false; error: string };
+  | {
+      ok: false;
+      error: string;
+      templateMismatch?: StudentAdditionUploadHeaderDetails;
+    };
 
 interface ParseUploadInput {
   filename: string;
   data: Buffer;
   today?: Date;
   academicYear?: string;
+  mode?: RegistrationMode;
 }
 
-const EXAMPLE_ROW_MARKERS = [
+// These marker values mirror the example rows in the checked-in Approved and
+// HQ Phone workbooks. Phone mode intentionally has no restricted-field
+// markers because those columns are not part of its schema.
+const APPROVED_EXAMPLE_ROW_MARKERS = [
   { column: "Student Name", field: "Student Name", value: "Example Student" },
   { column: "PEN Number", field: "PEN", value: "12345678910" },
   { column: "Grade 10 Roll no", field: "Grade 10 Roll No", value: "11111111" },
   { column: "Parents Phone Number", field: "Phone", value: "9999999999" },
 ] as const;
+
+const PHONE_EXAMPLE_ROW_MARKERS = [
+  { column: "Student Name", field: "Student Name", value: "Example Student" },
+  { column: "Parents Phone Number", field: "Phone", value: "9999999999" },
+] as const;
+
+const PHONE_EXAMPLE_PHONE = "9999999999";
+const PHONE_EXAMPLE_PHONE_ERROR =
+  "Phone number matches the example row. Please replace it with the student's actual phone number";
+
+function exampleRowMarkers(mode: RegistrationMode) {
+  if (mode !== PHONE_REGISTRATION_MODE) return APPROVED_EXAMPLE_ROW_MARKERS;
+
+  // In Phone mode, only the named template row is ignored. A real student's
+  // row that reuses the example phone must remain visible as a rejected row.
+  return PHONE_EXAMPLE_ROW_MARKERS.filter((marker) => marker.column === "Student Name");
+}
 
 function text(value: unknown): string {
   if (value instanceof Date) {
@@ -79,11 +119,81 @@ function text(value: unknown): string {
   return value == null ? "" : String(value).trim();
 }
 
-function missingColumns(headers: string[]) {
-  const headerSet = new Set(headers.map((header) => header.trim()));
-  return STUDENT_ADDITION_UPLOAD_COLUMNS
-    .map((column) => column.label)
-    .filter((label) => !headerSet.has(label));
+function normalizeHeader(header: string): string {
+  return header.trim().toLowerCase();
+}
+
+function phoneModeSchemaError() {
+  return "This upload does not match the active Phone Registration Mode template. Download the current template and upload it again.";
+}
+
+function uploadHeaderDetails(
+  headers: string[],
+  mode: RegistrationMode,
+): StudentAdditionUploadHeaderDetails {
+  const normalizedHeaders = headers.map(normalizeHeader);
+  const columns = getStudentAdditionUploadColumns(mode);
+  const expected = new Set(columns.map((column) => normalizeHeader(column.label)));
+  const rejectedRowMetadataColumns = new Set(
+    getStudentAdditionRejectedRowMetadataColumns(mode).map(normalizeHeader),
+  );
+
+  return {
+    missing: columns
+      .filter((column) => !normalizedHeaders.includes(normalizeHeader(column.label)))
+      .map((column) => column.label),
+    unexpected: mode === PHONE_REGISTRATION_MODE
+      ? headers
+        .filter((header) => {
+          const normalizedHeader = normalizeHeader(header);
+          return normalizedHeader.length > 0 &&
+            !expected.has(normalizedHeader) &&
+            !rejectedRowMetadataColumns.has(normalizedHeader);
+        })
+        .map((header) => header.trim())
+      : [],
+    duplicate: columns
+      .filter((column) => normalizedHeaders.filter(
+        (header) => header === normalizeHeader(column.label),
+      ).length > 1)
+      .map((column) => column.label),
+  };
+}
+
+function validateUploadSchema(headers: string[], mode: RegistrationMode) {
+  const normalizedHeaders = headers.map(normalizeHeader);
+  const details = uploadHeaderDetails(headers, mode);
+
+  if (mode !== PHONE_REGISTRATION_MODE) {
+    if (normalizedHeaders.includes(normalizeHeader("APAAR ID"))) {
+      return {
+        ok: false as const,
+        error: "This workbook uses the old APAAR template. Download the latest PEN-based template and upload it again.",
+        templateMismatch: { ...details, legacy_apaar: true },
+      };
+    }
+    if (details.missing.length > 0) {
+      return {
+        ok: false as const,
+        error: `Missing required columns: ${details.missing.join(", ")}. Download the latest template and upload it again`,
+        templateMismatch: details,
+      };
+    }
+    if (details.duplicate.length > 0) {
+      return {
+        ok: false as const,
+        error: `Duplicate columns: ${details.duplicate.join(", ")}. Download the latest template and upload it again`,
+        templateMismatch: details,
+      };
+    }
+    return { ok: true as const };
+  }
+
+  if (details.missing.length > 0 || details.duplicate.length > 0 || details.unexpected.length > 0) {
+    return { ok: false as const, error: phoneModeSchemaError(), templateMismatch: details };
+  }
+
+  return { ok: true as const };
 }
 
 function validationToRejectedResult(
@@ -106,36 +216,90 @@ function validationToRejectedResult(
   };
 }
 
+function uploadRowRejectedResult(
+  validation: StudentAdditionValidationResult,
+  original: Record<string, string>,
+  mode: RegistrationMode,
+) {
+  if (
+    mode === PHONE_REGISTRATION_MODE &&
+    original["Parents Phone Number"] === PHONE_EXAMPLE_PHONE
+  ) {
+    return validationToRejectedResult({
+      ok: false,
+      row: validation.row,
+      generatedStudentId: validation.generatedStudentId,
+      fieldErrors: {
+        ...validation.fieldErrors,
+        phone: PHONE_EXAMPLE_PHONE_ERROR,
+      },
+      rowErrors: [...validation.rowErrors],
+    }, original);
+  }
+
+  return validation.ok ? null : validationToRejectedResult(validation, original);
+}
+
+function rejectDuplicatePhones(
+  rows: LmsStudentAdditionRow[],
+  rejectedResults: StudentAdditionUploadRowResult[],
+  originalRows: Map<number, Record<string, string>>,
+) {
+  const counts = new Map<string, number>();
+  const phones = [
+    ...rows.map((row) => row.phone),
+    ...rejectedResults.map((row) => row.original["Parents Phone Number"]),
+  ];
+  for (const phone of phones) {
+    if (isValidRegistrationPhone(phone, PHONE_REGISTRATION_MODE)) {
+      counts.set(phone, (counts.get(phone) ?? 0) + 1);
+    }
+  }
+  const isDuplicate = (phone: string) => (counts.get(phone) ?? 0) > 1;
+  const message = "Parents Phone Number is repeated in this file. Correct all rows using this phone before adding students.";
+
+  // Keep other validation errors, including when one of the matching rows
+  // already needs correction for an unrelated field.
+  for (const rejected of rejectedResults) {
+    if (isDuplicate(rejected.original["Parents Phone Number"])) {
+      rejected.row_errors.push(message);
+    }
+  }
+
+  return rows.filter((row) => {
+    if (!isDuplicate(row.phone)) return true;
+    rejectedResults.push(validationToRejectedResult({
+      ok: false,
+      row,
+      generatedStudentId: row.phone,
+      fieldErrors: {},
+      rowErrors: [message],
+    }, originalRows.get(row.row_number) ?? {}));
+    return false;
+  });
+}
+
 function parseRowsFromAoA(
   rows: unknown[][],
   today?: Date,
   academicYear?: string,
+  mode: RegistrationMode = ACTIVE_REGISTRATION_MODE,
 ): StudentAdditionUploadParseResult {
   const headers = (rows[0] ?? []).map(text);
-  if (headers.includes("APAAR ID") || !headers.includes("PEN Number")) {
-    return {
-      ok: false,
-      error: "This workbook uses the old APAAR template. Download the latest PEN-based template and upload it again.",
-    };
-  }
-  const missing = missingColumns(headers);
-  if (missing.length > 0) {
-    return {
-      ok: false,
-      error: `Missing required columns: ${missing.join(", ")}. Download the latest template and upload it again`,
-    };
-  }
+  const schema = validateUploadSchema(headers, mode);
+  if (!schema.ok) return schema;
 
-  const headerIndex = new Map(headers.map((header, index) => [header, index]));
-  const originalRowNumberIndex = headerIndex.get("Original Row Number");
+  const columns = getStudentAdditionUploadColumns(mode);
+  const headerIndex = new Map(headers.map((header, index) => [normalizeHeader(header), index]));
+  const originalRowNumberIndex = headerIndex.get(normalizeHeader("Original Row Number"));
   const acceptedRows: LmsStudentAdditionRow[] = [];
   const rejectedResults: StudentAdditionUploadRowResult[] = [];
   const originalRows = new Map<number, Record<string, string>>();
   const dataRows = rows.slice(1).map((sourceRow, index) => ({ sourceRow, index }));
   const ignoredRows = dataRows.flatMap(({ sourceRow, index }) => {
-    const matchedFields = EXAMPLE_ROW_MARKERS
+    const matchedFields = exampleRowMarkers(mode)
       .filter((marker) =>
-        text(sourceRow[headerIndex.get(marker.column) ?? -1]) === marker.value,
+        text(sourceRow[headerIndex.get(normalizeHeader(marker.column)) ?? -1]) === marker.value,
       )
       .map((marker) => marker.field);
     if (matchedFields.length === 0) return [];
@@ -150,8 +314,8 @@ function parseRowsFromAoA(
   const nonBlankRows = dataRows.filter(
     ({ sourceRow, index }) =>
       !ignoredIndexes.has(index) &&
-      STUDENT_ADDITION_UPLOAD_COLUMNS.some((column) =>
-        text(sourceRow[headerIndex.get(column.label) ?? -1]),
+      columns.some((column) =>
+        text(sourceRow[headerIndex.get(normalizeHeader(column.label)) ?? -1]),
       ),
   );
 
@@ -166,8 +330,8 @@ function parseRowsFromAoA(
     const original: Record<string, string> = {};
     const input: StudentAdditionInput = {};
 
-    for (const column of STUDENT_ADDITION_UPLOAD_COLUMNS) {
-      const value = text(sourceRow[headerIndex.get(column.label) ?? -1]);
+    for (const column of columns) {
+      const value = text(sourceRow[headerIndex.get(normalizeHeader(column.label)) ?? -1]);
       original[column.label] = value;
       input[column.key] = column.key === "student_name" ? value.replace(/\./g, " ") : value;
     }
@@ -183,28 +347,40 @@ function parseRowsFromAoA(
       rowNumber,
       academicYear,
       bulkUpload: true,
+      mode,
     });
     originalRows.set(rowNumber, original);
 
-    if (!validation.ok) {
-      rejectedResults.push(validationToRejectedResult(validation, original));
+    const rejectedResult = uploadRowRejectedResult(validation, original, mode);
+    if (rejectedResult) {
+      rejectedResults.push(rejectedResult);
       return;
     }
 
-    acceptedRows.push(validation.row);
+    acceptedRows.push(validation.row as LmsStudentAdditionRow);
   });
+
+  const readyRows = mode === PHONE_REGISTRATION_MODE
+    ? rejectDuplicatePhones(acceptedRows, rejectedResults, originalRows)
+    : acceptedRows;
+  rejectedResults.sort((a, b) => a.row_number - b.row_number);
 
   return {
     ok: true,
-    rows: acceptedRows,
+    rows: readyRows,
     rejectedResults,
     ignoredRows,
-    totalRows: acceptedRows.length + rejectedResults.length,
+    totalRows: readyRows.length + rejectedResults.length,
     originalRows,
   };
 }
 
-function parseCsv(data: Buffer, today?: Date, academicYear?: string) {
+function parseCsv(
+  data: Buffer,
+  today?: Date,
+  academicYear?: string,
+  mode: RegistrationMode = ACTIVE_REGISTRATION_MODE,
+) {
   let rows: unknown[][];
   try {
     rows = parse(data.toString("utf8"), {
@@ -215,7 +391,7 @@ function parseCsv(data: Buffer, today?: Date, academicYear?: string) {
   } catch {
     return { ok: false, error: "Upload a valid .xlsx file or rejected-row .csv file" } as const;
   }
-  return parseRowsFromAoA(rows, today, academicYear);
+  return parseRowsFromAoA(rows, today, academicYear, mode);
 }
 
 async function removeBlankXlsxFormatting(data: Buffer) {
@@ -240,12 +416,20 @@ async function removeBlankXlsxFormatting(data: Buffer) {
   });
 }
 
-async function parseXlsx(data: Buffer, today?: Date, academicYear?: string) {
+async function parseXlsx(
+  data: Buffer,
+  today?: Date,
+  academicYear?: string,
+  mode: RegistrationMode = ACTIVE_REGISTRATION_MODE,
+) {
   const workbook = new ExcelJS.Workbook();
   try {
-    const compacted = await removeBlankXlsxFormatting(data);
+    const compacted = await removeBlankXlsxFormatting(await readableStudentWorkbook(data));
     await workbook.xlsx.load(compacted as unknown as Parameters<typeof workbook.xlsx.load>[0]);
-  } catch {
+  } catch (error) {
+    if (error instanceof UnsupportedWorkbookEncryptionError) {
+      return { ok: false, error: error.message } as const;
+    }
     return { ok: false, error: "Upload a valid .xlsx file or rejected-row .csv file" } as const;
   }
   const sheet = workbook.getWorksheet("Template");
@@ -265,7 +449,7 @@ async function parseXlsx(data: Buffer, today?: Date, academicYear?: string) {
     }
     rows.push(values);
   }
-  return parseRowsFromAoA(rows, today, academicYear);
+  return parseRowsFromAoA(rows, today, academicYear, mode);
 }
 
 export async function parseStudentAdditionUpload({
@@ -273,6 +457,7 @@ export async function parseStudentAdditionUpload({
   data,
   today,
   academicYear,
+  mode = ACTIVE_REGISTRATION_MODE,
 }: ParseUploadInput): Promise<StudentAdditionUploadParseResult> {
   if (filename.toLowerCase().endsWith(".xls")) {
     return {
@@ -282,11 +467,11 @@ export async function parseStudentAdditionUpload({
   }
 
   if (filename.toLowerCase().endsWith(".csv")) {
-    return parseCsv(data, today, academicYear);
+    return parseCsv(data, today, academicYear, mode);
   }
 
   if (filename.toLowerCase().endsWith(".xlsx")) {
-    return parseXlsx(data, today, academicYear);
+    return parseXlsx(data, today, academicYear, mode);
   }
 
   return {

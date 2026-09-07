@@ -108,4 +108,47 @@ describe("GET NVS student export", () => {
     expect(active.getRow(2).getCell(5).value).toBe("Gen-EWS");
     expect(active.getRow(2).getCell(6).value).toBe("Yes");
   });
+
+  it("exports Phone Registration Mode identity and leaves uncollected fields blank", async () => {
+    vi.mocked(getSchoolRoster).mockResolvedValue({
+      issues: [],
+      students: [
+        student({
+          first_name: "Phone Cohort",
+          phone: "6876543210",
+          student_id: "6876543210",
+          pen_number: null,
+          g10_roll_no: null,
+          annual_family_income: null,
+          apaar_id: null,
+        }),
+        student({
+          group_user_id: "4",
+          student_pk_id: "103",
+          first_name: "Approved Cohort",
+        }),
+      ] as never,
+    });
+
+    const response = await GET(
+      new NextRequest("http://localhost/api/school/123/students/export"),
+      { params: Promise.resolve({ udise: "123" }) },
+    );
+
+    expect(response.status).toBe(200);
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(Buffer.from(await response.arrayBuffer()));
+    const active = workbook.getWorksheet("Active")!;
+    const phoneRow = active.getRow(2);
+    const approvedRow = active.getRow(3);
+
+    expect(phoneRow.getCell(7).value ?? "").toBe("");
+    expect(phoneRow.getCell(9).value ?? "").toBe("");
+    expect(phoneRow.getCell(14).value ?? "").toBe("");
+    expect(phoneRow.getCell(13).value).toBe("6876543210");
+    expect(phoneRow.getCell(16).value).toBe("6876543210");
+    expect(approvedRow.getCell(7).value).toBe("12345678901");
+    expect(approvedRow.getCell(9).value).toBe("12345678");
+    expect(approvedRow.getCell(14).value).toBe("Less than Rs. 1,00,000");
+  });
 });

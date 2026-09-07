@@ -5,9 +5,11 @@ import { query } from "@/lib/db";
 import {
   canAccessSchoolSync,
   getFeatureAccess,
+  getProgramContextSync,
   getResolvedPermission,
   type UserPermission,
 } from "@/lib/permissions";
+import { getLmsSupportedProgramIds } from "@/lib/lms-programs";
 
 type QuizSessionAccessMode = "view" | "edit";
 
@@ -134,4 +136,30 @@ export async function canAccessQuizSessionBatches(
   return rows.some((school) =>
     canAccessSchoolSync(permission, school.code, school.region || undefined)
   );
+}
+
+/**
+ * The programs a caller's Quiz Sessions data should be drawn from.
+ *
+ * Both endpoints used to read `permission.program_ids` straight off the row,
+ * which broke two ways:
+ *
+ * - A user whose program access comes from a centre SEAT has that program in
+ *   their resolved scope but not in the row. A teacher seated at EMRS Bhopal CoE
+ *   (seat program 78, row [1]) saw 0 batches and 0 sessions on a centre with 8
+ *   batches and 91 sessions. `getProgramContextSync` is the existing union of
+ *   explicit ids and seat-derived ones.
+ * - An admin is not limited to their row either. An admin row of [1, 2, 64] made
+ *   every non-JNV centre page (EMRS, Punjab, …) look empty. `getProgramContextSync`
+ *   would keep that row, so admins resolve to the full LMS-supported set instead
+ *   — mirroring resolveCurriculumProgramScope, which already treats an admin as
+ *   every curriculum program rather than their row.
+ */
+export async function resolveQuizSessionProgramIds(
+  permission: UserPermission
+): Promise<number[]> {
+  if (permission.role === "admin") {
+    return getLmsSupportedProgramIds();
+  }
+  return getProgramContextSync(permission).programIds;
 }

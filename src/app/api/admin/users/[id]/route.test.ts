@@ -22,7 +22,7 @@ vi.mock("next-auth", () => ({ getServerSession: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("@/lib/permissions", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/permissions")>()),
-  isAdmin: vi.fn(),
+  getUserPermission: vi.fn(),
 }));
 vi.mock("@/lib/db", () => ({
   query: mockQuery,
@@ -30,7 +30,7 @@ vi.mock("@/lib/db", () => ({
 }));
 
 import { getServerSession } from "next-auth";
-import { isAdmin } from "@/lib/permissions";
+import { getUserPermission, type UserPermission } from "@/lib/permissions";
 import { DELETE, PATCH } from "./route";
 import {
   jsonRequest,
@@ -40,7 +40,8 @@ import {
 } from "../../../__test-utils__/api-test-helpers";
 
 const mockSession = vi.mocked(getServerSession);
-const mockIsAdmin = vi.mocked(isAdmin);
+const mockGetUserPermission = vi.mocked(getUserPermission);
+const ADMIN_PERMISSION = { email: "admin@avantifellows.org", level: 3, role: "admin" } as UserPermission;
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -68,7 +69,7 @@ describe("DELETE /api/admin/users/[id]", () => {
 
   it("returns 403 when not admin", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
-    mockIsAdmin.mockResolvedValue(false);
+    mockGetUserPermission.mockResolvedValue(null);
     const req = jsonRequest("http://localhost/api/admin/users/5", { method: "DELETE" });
     const res = await DELETE(req as never, params);
     expect(res.status).toBe(403);
@@ -77,7 +78,7 @@ describe("DELETE /api/admin/users/[id]", () => {
 
   it("prevents deleting yourself", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
-    mockIsAdmin.mockResolvedValue(true);
+    mockGetUserPermission.mockResolvedValue(ADMIN_PERMISSION);
     mockQuery.mockResolvedValue([{ email: "admin@avantifellows.org" }]);
 
     const req = jsonRequest("http://localhost/api/admin/users/5", { method: "DELETE" });
@@ -89,7 +90,7 @@ describe("DELETE /api/admin/users/[id]", () => {
 
   it("blocks deleting a user with Academic Mentor-Mentee Mapping history", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
-    mockIsAdmin.mockResolvedValue(true);
+    mockGetUserPermission.mockResolvedValue(ADMIN_PERMISSION);
     mockQuery
       .mockResolvedValueOnce([{ email: "mentor@test.com", user_id: 70 }])
       .mockResolvedValueOnce([
@@ -115,7 +116,7 @@ describe("DELETE /api/admin/users/[id]", () => {
 
   it("revokes LMS access and ends Holistic Mappings without blocking on history", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
-    mockIsAdmin.mockResolvedValue(true);
+    mockGetUserPermission.mockResolvedValue(ADMIN_PERMISSION);
     mockQuery
       .mockResolvedValueOnce([{ email: "mentor@test.com", user_id: 70 }])
       .mockResolvedValueOnce([])
@@ -146,7 +147,7 @@ describe("DELETE /api/admin/users/[id]", () => {
 
   it("resolves legacy null permission user_id by email before mapping-history checks", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
-    mockIsAdmin.mockResolvedValue(true);
+    mockGetUserPermission.mockResolvedValue(ADMIN_PERMISSION);
     mockQuery
       .mockResolvedValueOnce([{ email: "mentor@test.com", user_id: 70 }])
       .mockResolvedValueOnce([{ school_code: "54019", academic_year: "2026-2027" }]);
@@ -165,7 +166,7 @@ describe("DELETE /api/admin/users/[id]", () => {
 
   it("deletes another user and vacates their centre seats", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
-    mockIsAdmin.mockResolvedValue(true);
+    mockGetUserPermission.mockResolvedValue(ADMIN_PERMISSION);
     mockQuery
       .mockResolvedValueOnce([{ email: "other@test.com", user_id: 70 }]) // lookup
       .mockResolvedValueOnce([]) // mapping history blocker
@@ -191,7 +192,7 @@ describe("DELETE /api/admin/users/[id]", () => {
 
   it("succeeds when user to delete does not exist", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
-    mockIsAdmin.mockResolvedValue(true);
+    mockGetUserPermission.mockResolvedValue(ADMIN_PERMISSION);
     mockQuery
       .mockResolvedValueOnce([]) // lookup returns empty
       .mockResolvedValueOnce([]); // delete (no-op)
@@ -217,7 +218,7 @@ describe("PATCH /api/admin/users/[id]", () => {
 
   it("returns 403 when not admin", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
-    mockIsAdmin.mockResolvedValue(false);
+    mockGetUserPermission.mockResolvedValue(null);
     const req = jsonRequest("http://localhost/api/admin/users/5", {
       method: "PATCH",
       body: { level: 2 },
@@ -228,7 +229,7 @@ describe("PATCH /api/admin/users/[id]", () => {
 
   it("returns 400 for invalid level", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
-    mockIsAdmin.mockResolvedValue(true);
+    mockGetUserPermission.mockResolvedValue(ADMIN_PERMISSION);
     const req = jsonRequest("http://localhost/api/admin/users/5", {
       method: "PATCH",
       body: { level: 5 },
@@ -239,7 +240,7 @@ describe("PATCH /api/admin/users/[id]", () => {
 
   it("returns 400 for empty program_ids array", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
-    mockIsAdmin.mockResolvedValue(true);
+    mockGetUserPermission.mockResolvedValue(ADMIN_PERMISSION);
     const req = jsonRequest("http://localhost/api/admin/users/5", {
       method: "PATCH",
       body: { program_ids: [] },
@@ -252,7 +253,7 @@ describe("PATCH /api/admin/users/[id]", () => {
 
   it("updates user successfully", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
-    mockIsAdmin.mockResolvedValue(true);
+    mockGetUserPermission.mockResolvedValue(ADMIN_PERMISSION);
     mockQuery.mockResolvedValue([]);
     const req = jsonRequest("http://localhost/api/admin/users/5", {
       method: "PATCH",
@@ -266,7 +267,7 @@ describe("PATCH /api/admin/users/[id]", () => {
 
   it("ends Holistic Mappings in the same transaction when a Teacher role changes", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
-    mockIsAdmin.mockResolvedValue(true);
+    mockGetUserPermission.mockResolvedValue(ADMIN_PERMISSION);
     mockQuery.mockResolvedValueOnce([{ one: 1, user_id: 70 }]);
     const req = jsonRequest("http://localhost/api/admin/users/5", {
       method: "PATCH",
@@ -289,7 +290,7 @@ describe("PATCH /api/admin/users/[id]", () => {
 
   it("changes an unseated user to Program 1-wide Holistic Mentorship Admin", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
-    mockIsAdmin.mockResolvedValue(true);
+    mockGetUserPermission.mockResolvedValue(ADMIN_PERMISSION);
     mockQuery
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([]);
@@ -318,7 +319,7 @@ describe("PATCH /api/admin/users/[id]", () => {
 
   it("rejects (409) editing school_codes for a user with a centre seat", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
-    mockIsAdmin.mockResolvedValue(true);
+    mockGetUserPermission.mockResolvedValue(ADMIN_PERMISSION);
     mockQuery.mockResolvedValueOnce([{ one: 1 }]); // seated check → seated
     const req = jsonRequest("http://localhost/api/admin/users/5", {
       method: "PATCH",
@@ -334,7 +335,7 @@ describe("PATCH /api/admin/users/[id]", () => {
 
   it("forces school_codes/regions to NULL when a seated user's other fields are edited", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
-    mockIsAdmin.mockResolvedValue(true);
+    mockGetUserPermission.mockResolvedValue(ADMIN_PERMISSION);
     mockQuery
       .mockResolvedValueOnce([{ one: 1 }]) // seated check → seated
       .mockResolvedValueOnce([]); // UPDATE
@@ -351,7 +352,7 @@ describe("PATCH /api/admin/users/[id]", () => {
 
   it("still allows editing school_codes for a user with NO centre seat", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
-    mockIsAdmin.mockResolvedValue(true);
+    mockGetUserPermission.mockResolvedValue(ADMIN_PERMISSION);
     mockQuery
       .mockResolvedValueOnce([]) // seated check → not seated
       .mockResolvedValueOnce([]); // UPDATE
@@ -367,7 +368,7 @@ describe("PATCH /api/admin/users/[id]", () => {
 
   it("rejects invalid role values", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
-    mockIsAdmin.mockResolvedValue(true);
+    mockGetUserPermission.mockResolvedValue(ADMIN_PERMISSION);
     const req = jsonRequest("http://localhost/api/admin/users/5", {
       method: "PATCH",
       body: { role: "invalid_role" },
@@ -380,7 +381,7 @@ describe("PATCH /api/admin/users/[id]", () => {
 
   it("returns 500 on query error", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
-    mockIsAdmin.mockResolvedValue(true);
+    mockGetUserPermission.mockResolvedValue(ADMIN_PERMISSION);
     mockQuery.mockRejectedValue(new Error("DB error"));
     const req = jsonRequest("http://localhost/api/admin/users/5", {
       method: "PATCH",

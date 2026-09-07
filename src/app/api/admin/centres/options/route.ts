@@ -27,7 +27,7 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   const session = await getServerSession(authOptions);
-  const access = await requireCentreAdmin(session);
+  const access = await requireCentreAdmin(session, { forWrite: true });
 
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status });

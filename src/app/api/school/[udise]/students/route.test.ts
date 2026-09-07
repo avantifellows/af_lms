@@ -17,6 +17,17 @@ vi.mock("@/lib/db", () => ({ query: mockQuery }));
 vi.mock("@/lib/student-addition-access", () => ({
   requireStudentAdditionAccess: mockRequireStudentAdditionAccess,
 }));
+vi.mock("@/lib/registration-mode", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/registration-mode")>(
+    "@/lib/registration-mode",
+  );
+  return {
+    ...actual,
+    ACTIVE_REGISTRATION_MODE: actual.APPROVED_REGISTRATION_MODE,
+    getRegistrationModeHandshake: () =>
+      actual.getRegistrationModeHandshake(actual.APPROVED_REGISTRATION_MODE),
+  };
+});
 
 import { GET, POST } from "./route";
 import { PROGRAM_IDS } from "@/lib/constants";
@@ -101,6 +112,7 @@ function multipartUploadRequest(
   contents: string,
   grade: string | null = "11",
   size = Buffer.from(contents).byteLength,
+  action: string | null = "upload",
 ) {
   const bytes = Buffer.from(contents);
   const file = {
@@ -113,7 +125,9 @@ function multipartUploadRequest(
   return {
     headers: new Headers({ "content-type": "multipart/form-data; boundary=test" }),
     formData: async () => ({
-      get: (key: string) => (key === "grade" ? grade : key === "file" ? file : null),
+      get: (key: string) => (
+        key === "action" ? action : key === "grade" ? grade : key === "file" ? file : null
+      ),
     }),
   };
 }
@@ -139,6 +153,28 @@ describe("POST /api/school/[udise]/students", () => {
         role: "admin",
       },
     });
+  });
+
+  it.each([
+    ["missing", null],
+    ["unknown", "preview"],
+  ])("rejects a %s multipart action before parsing or proxying", async (_label, action) => {
+    const response = await POST(
+      multipartUploadRequest(
+        "students.csv",
+        csvLine(uploadHeaders),
+        "11",
+        undefined,
+        action,
+      ) as never,
+      routeParams({ udise: "12345678901" }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: "Bulk upload action must be 'validate' or 'upload'",
+    });
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it("derives ownership fields server-side and proxies one normalized row to DB Service", async () => {
@@ -177,6 +213,8 @@ describe("POST /api/school/[udise]/students", () => {
       },
       school: { code: "JNV001", udise_code: "12345678901" },
       program_id: PROGRAM_IDS.NVS,
+      registration_mode: "approved",
+      registration_mode_version: "1",
       academic_year: "2026-2027",
       start_date: "2026-07-01",
       rows: [
@@ -228,6 +266,43 @@ describe("POST /api/school/[udise]/students", () => {
       g10_board: "Others",
       g10_roll_no: "AB12",
       stream: "nda",
+    });
+  });
+
+  it("canonicalizes case-insensitive choice labels in an Approved-mode payload", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(JSON.stringify({ results: [{ status: "created" }] }), { status: 200 }),
+    );
+
+    const response = await POST(
+      jsonRequest("http://localhost/api/school/12345678901/students", {
+        method: "POST",
+        body: {
+          ...validBody,
+          gender: "fEmAlE",
+          category: "gEn-EwS",
+          physically_handicapped: "nO",
+          g10_board: "cBsE",
+          g10_roll_no: "12345678",
+          board_stream: "cOmMeRcE (wItHoUt MaTh)",
+          stream: "eNgInEeRiNg",
+          annual_family_income: "lEsS tHaN rS. 1,00,000",
+        },
+      }) as never,
+      routeParams({ udise: "12345678901" }),
+    );
+
+    expect(response.status).toBe(200);
+    const payload = JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string);
+    expect(payload.rows[0]).toMatchObject({
+      gender: "Female",
+      category: "Gen-EWS",
+      physically_handicapped: false,
+      g10_board: "CBSE",
+      g10_roll_no: "12345678",
+      board_stream: "Commerce (Without Math)",
+      stream: "engineering",
+      annual_family_income: "Less than Rs. 1,00,000",
     });
   });
 
@@ -304,6 +379,35 @@ describe("POST /api/school/[udise]/students", () => {
     expect(await response.json()).toEqual({
       error: "Student could not be created",
     });
+  });
+
+  it("fails closed when DB Service reports a registration mode mismatch", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: {
+            code: "registration_mode_mismatch",
+            message: "LMS and DB Service registration modes differ",
+          },
+          results: [{ row_number: 1, status: "created" }],
+        }),
+        { status: 409, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const response = await POST(
+      jsonRequest("http://localhost/api/school/12345678901/students", {
+        method: "POST",
+        body: validBody,
+      }) as never,
+      routeParams({ udise: "12345678901" }),
+    );
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: "Student registration is temporarily unavailable while Registration Mode is being coordinated. Please try again shortly.",
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 
   it("preserves safe structured DB Service field errors", async () => {
@@ -440,6 +544,8 @@ describe("POST /api/school/[udise]/students", () => {
 
     const payload = JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string);
     expect(payload.upload.filename).toBe("students.csv");
+    expect(payload.registration_mode).toBe("approved");
+    expect(payload.registration_mode_version).toBe("1");
     expect(payload.academic_year).toBe("2026-2027");
     expect(payload.rows).toEqual([
       expect.objectContaining({
@@ -448,6 +554,132 @@ describe("POST /api/school/[udise]/students", () => {
         stream: "engineering",
       }),
     ]);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns a local checked preview without proxying accepted rows", async () => {
+    const csv = [
+      csvLine(uploadHeaders),
+      csvLine(validUploadRow),
+      csvLine([...validUploadRow.slice(0, 10), "Not A Stream", ...validUploadRow.slice(11)]),
+    ].join("\n");
+
+    const response = await POST(
+      multipartUploadRequest("students.csv", csv, "11", undefined, "validate") as never,
+      routeParams({ udise: "12345678901" }),
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toMatchObject({
+      stage: "checked",
+      summary: { total: 2, ready: 1, rejected: 1 },
+      ignored_rows: [],
+    });
+    expect(body.rows).toEqual([
+      {
+        row_number: 2,
+        status: "ready",
+        original: expect.objectContaining({ "Student Name": "asha  k. kumar" }),
+      },
+      {
+        row_number: 3,
+        status: "rejected",
+        original: expect.objectContaining({ "Primary Exam preparing for": "Not A Stream" }),
+        field_errors: { stream: "Primary Exam preparing for is not valid" },
+        row_errors: [],
+      },
+    ]);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("returns a successful checked preview when every real row is locally rejected", async () => {
+    const invalidRow = [...validUploadRow];
+    invalidRow[6] = "";
+    invalidRow[8] = "";
+    invalidRow[10] = "Not A Stream";
+    const csv = [csvLine(uploadHeaders), csvLine(invalidRow)].join("\n");
+
+    const response = await POST(
+      multipartUploadRequest("students.csv", csv, "11", undefined, "validate") as never,
+      routeParams({ udise: "12345678901" }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      stage: "checked",
+      summary: { total: 1, ready: 0, rejected: 1 },
+      rows: [expect.objectContaining({ row_number: 2, status: "rejected" })],
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("checks first and proxies exactly once when the same file is uploaded", async () => {
+    const csv = [csvLine(uploadHeaders), csvLine(validUploadRow)].join("\n");
+    const checked = await POST(
+      multipartUploadRequest("students.csv", csv, "11", undefined, "validate") as never,
+      routeParams({ udise: "12345678901" }),
+    );
+
+    expect(checked.status).toBe(200);
+    expect(fetch).not.toHaveBeenCalled();
+
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(JSON.stringify({
+        totals: { total: 1, created: 1, duplicate_in_file: 0, already_exists: 0, rejected: 0 },
+        results: [{ row_number: 2, status: "created" }],
+      }), { status: 200 }),
+    );
+
+    const uploaded = await POST(
+      multipartUploadRequest("students.csv", csv, "11", undefined, "upload") as never,
+      routeParams({ udise: "12345678901" }),
+    );
+
+    expect(uploaded.status).toBe(200);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("passes Approved-mode header mismatch details through the 400 response", async () => {
+    const headers = uploadHeaders.filter((header) => header !== "Gender");
+    const row = validUploadRow.filter((_value, index) => index !== 3);
+    const response = await POST(
+      multipartUploadRequest("students.csv", [csvLine(headers), csvLine(row)].join("\n")) as never,
+      routeParams({ udise: "12345678901" }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: "Missing required columns: Gender. Download the latest template and upload it again",
+      template_mismatch: {
+        missing: ["Gender"],
+        unexpected: [],
+        duplicate: [],
+      },
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("marks an Approved-mode APAAR template in the structured mismatch response", async () => {
+    const headers = [...uploadHeaders];
+    headers[5] = "Physical Handicapped / Vikalang";
+    headers[6] = "APAAR ID";
+    const response = await POST(
+      multipartUploadRequest("students.csv", [csvLine(headers), csvLine(validUploadRow)].join("\n")) as never,
+      routeParams({ udise: "12345678901" }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: "This workbook uses the old APAAR template. Download the latest PEN-based template and upload it again.",
+      template_mismatch: {
+        missing: ["CWSN", "PEN Number"],
+        unexpected: [],
+        duplicate: [],
+        legacy_apaar: true,
+      },
+    });
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it("reports and removes example rows before proxying the upload", async () => {
