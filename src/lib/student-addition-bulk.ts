@@ -5,6 +5,7 @@ import JSZip from "jszip";
 import {
   getStudentAdditionUploadColumns,
   getStudentAdditionRejectedRowMetadataColumns,
+  isValidRegistrationPhone,
   validateStudentAdditionInput,
   type LmsStudentAdditionRow,
   type StudentAdditionInput,
@@ -238,6 +239,45 @@ function uploadRowRejectedResult(
   return validation.ok ? null : validationToRejectedResult(validation, original);
 }
 
+function rejectDuplicatePhones(
+  rows: LmsStudentAdditionRow[],
+  rejectedResults: StudentAdditionUploadRowResult[],
+  originalRows: Map<number, Record<string, string>>,
+) {
+  const counts = new Map<string, number>();
+  const phones = [
+    ...rows.map((row) => row.phone),
+    ...rejectedResults.map((row) => row.original["Parents Phone Number"]),
+  ];
+  for (const phone of phones) {
+    if (isValidRegistrationPhone(phone, PHONE_REGISTRATION_MODE)) {
+      counts.set(phone, (counts.get(phone) ?? 0) + 1);
+    }
+  }
+  const isDuplicate = (phone: string) => (counts.get(phone) ?? 0) > 1;
+  const message = "Parents Phone Number is repeated in this file. Correct all rows using this phone before adding students.";
+
+  // Keep other validation errors, including when one of the matching rows
+  // already needs correction for an unrelated field.
+  for (const rejected of rejectedResults) {
+    if (isDuplicate(rejected.original["Parents Phone Number"])) {
+      rejected.row_errors.push(message);
+    }
+  }
+
+  return rows.filter((row) => {
+    if (!isDuplicate(row.phone)) return true;
+    rejectedResults.push(validationToRejectedResult({
+      ok: false,
+      row,
+      generatedStudentId: row.phone,
+      fieldErrors: {},
+      rowErrors: [message],
+    }, originalRows.get(row.row_number) ?? {}));
+    return false;
+  });
+}
+
 function parseRowsFromAoA(
   rows: unknown[][],
   today?: Date,
@@ -319,12 +359,17 @@ function parseRowsFromAoA(
     acceptedRows.push(validation.row as LmsStudentAdditionRow);
   });
 
+  const readyRows = mode === PHONE_REGISTRATION_MODE
+    ? rejectDuplicatePhones(acceptedRows, rejectedResults, originalRows)
+    : acceptedRows;
+  rejectedResults.sort((a, b) => a.row_number - b.row_number);
+
   return {
     ok: true,
-    rows: acceptedRows,
+    rows: readyRows,
     rejectedResults,
     ignoredRows,
-    totalRows: acceptedRows.length + rejectedResults.length,
+    totalRows: readyRows.length + rejectedResults.length,
     originalRows,
   };
 }

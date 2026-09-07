@@ -7,7 +7,7 @@ Use one real-like JNV NVS workbook from Ops with Grade 11 or Grade 12 selected o
 ## Workbook Cases
 
 - Valid rows create students and refresh the active roster.
-- Duplicate rows in the same file return `duplicate_in_file` and do not create a second student.
+- In Phone mode, repeated phones appear as rejected rows during Check file, with every matching row excluded from the ready count. Add rechecks and never sends these rows to DB Service. In Approved mode, DB Service retains its `duplicate_in_file` checks.
 - Already-existing students return `already_exists` and do not overwrite existing data.
 - Missing APAAR ID and Grade 10 Roll no returns a rejected row.
 - Bad dates, including future Date of Birth, return field errors.
@@ -41,3 +41,5 @@ means a student row/enrollment created by the existing DB Service contract.
 - The template downloads from the same modal and has the PRD columns.
 - The Student ID guidance is visible before upload and in results.
 - Rejected-row CSV contains original fields, original row number, status, field errors, row errors, and existing-match details when present.
+
+- Phone duplicate regression: check a sheet with two repeated phones plus one unique row; expect 1 ready / 2 rejected and zero DB calls. Add forwards only the unique row. Repeat with one matching row having another field error, an all-duplicate sheet, and a corrected rejected-CSV retry. The named example row must not cause a duplicate conflict.

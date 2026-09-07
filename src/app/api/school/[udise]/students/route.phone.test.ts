@@ -233,6 +233,56 @@ describe("POST /api/school/[udise]/students in Phone Registration Mode", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it("shows duplicate phones during Check and forwards only unique rows during Add", async () => {
+    vi.useRealTimers();
+    const row = ["12", "Asha Kumar", "02/01/2010", "Female", "Gen", "No", "Others", "PCM", "Engineering", "Ravi Kumar", "6876543210"];
+    const data = await workbookBuffer([
+      phoneUploadHeaders, row, row, [...row.slice(0, 10), "7876543210"],
+    ]);
+    const check = await POST(
+      multipartUploadRequest("students.xlsx", data, "validate") as never,
+      routeParams({ udise: "12345678901" }),
+    );
+    expect(await check.json()).toMatchObject({
+      stage: "checked",
+      summary: { total: 3, ready: 1, rejected: 2 },
+      rows: [
+        { row_number: 2, status: "rejected", row_errors: [expect.stringContaining("repeated")] },
+        { row_number: 3, status: "rejected", row_errors: [expect.stringContaining("repeated")] },
+        { row_number: 4, status: "ready" },
+      ],
+    });
+    expect(fetch).not.toHaveBeenCalled();
+
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({
+      totals: { total: 1, created: 1, duplicate_in_file: 0, already_exists: 0, rejected: 0 },
+      results: [{ row_number: 4, status: "created" }],
+    }), { status: 200 }));
+    const added = await POST(
+      multipartUploadRequest("students.xlsx", data, "upload") as never,
+      routeParams({ udise: "12345678901" }),
+    );
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string).rows).toEqual([
+      expect.objectContaining({ row_number: 4, phone: "7876543210" }),
+    ]);
+    expect(await added.json()).toMatchObject({ totals: { total: 3, created: 1, rejected: 2 } });
+  });
+
+  it.each(["validate", "upload"])("never calls DB Service for an all-duplicate file with action %s", async (action) => {
+    vi.useRealTimers();
+    const row = ["12", "Asha Kumar", "02/01/2010", "Female", "Gen", "No", "Others", "PCM", "Engineering", "Ravi Kumar", "6876543210"];
+    const response = await POST(
+      multipartUploadRequest("duplicates.xlsx", await workbookBuffer([phoneUploadHeaders, row, row]), action) as never,
+      routeParams({ udise: "12345678901" }),
+    );
+    const body = await response.json();
+    const rows = action === "validate" ? body.rows : body.results;
+    expect(rows).toHaveLength(2);
+    expect(rows.every((result: { status: string }) => result.status === "rejected")).toBe(true);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("rejects a full-mode workbook before any Phone-mode row is forwarded", async () => {
     vi.useRealTimers();
     const response = await POST(
@@ -308,8 +358,6 @@ describe("POST /api/school/[udise]/students in Phone Registration Mode", () => {
     vi.mocked(fetch).mockResolvedValue(
       new Response(JSON.stringify({
         results: [
-          { row_number: 2, status: "duplicate_in_file", duplicate_identifiers: ["Phone"] },
-          { row_number: 3, status: "duplicate_in_file", duplicate_identifiers: ["Phone"] },
           {
             row_number: 4,
             status: "already_exists",
@@ -349,13 +397,13 @@ describe("POST /api/school/[udise]/students in Phone Registration Mode", () => {
     expect(body.totals).toEqual({
       total: 5,
       created: 1,
-      duplicate_in_file: 2,
+      duplicate_in_file: 0,
       already_exists: 1,
-      rejected: 1,
+      rejected: 3,
     });
     expect(body.results.map((result: { status: string }) => result.status)).toEqual([
-      "duplicate_in_file",
-      "duplicate_in_file",
+      "rejected",
+      "rejected",
       "already_exists",
       "rejected",
       "created",
@@ -368,7 +416,7 @@ describe("POST /api/school/[udise]/students in Phone Registration Mode", () => {
       existing_match: { school_code: "JNV999", udise_code: "99999999999" },
     });
     const payload = JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string);
-    expect(payload.rows).toHaveLength(5);
+    expect(payload.rows.map((row: { row_number: number }) => row.row_number)).toEqual([4, 5, 6]);
   });
 
   it("also accepts Grade 11 in Phone mode", async () => {

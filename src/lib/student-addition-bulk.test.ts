@@ -130,6 +130,59 @@ async function workbookBuffer(sheets: Record<string, unknown[][]>) {
 }
 
 describe("parseStudentAdditionUpload", () => {
+  it("rejects every repeated phone before upload and supports corrected rejected CSV retry", async () => {
+    const duplicate = [...validPhoneRowValues];
+    duplicate[10] = " 6876543210 ";
+    const unique = [...validPhoneRowValues];
+    unique[10] = "7876543210";
+    const result = await parseStudentAdditionUpload({
+      filename: "students.xlsx",
+      data: await workbookBuffer({ Template: [phoneUploadHeaders, validPhoneRowValues, duplicate, unique] }),
+      mode: PHONE_REGISTRATION_MODE,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected parsed workbook");
+    expect(result.totalRows).toBe(3);
+    expect(result.rows.map((row) => row.row_number)).toEqual([4]);
+    expect(result.rejectedResults.map((row) => row.row_number)).toEqual([2, 3]);
+    for (const row of result.rejectedResults) {
+      expect(row.row_errors).toEqual([expect.stringContaining("Parents Phone Number is repeated")]);
+    }
+    result.rejectedResults[1].original["Parents Phone Number"] = "8876543210";
+    const retry = await parseStudentAdditionUpload({
+      filename: "corrected.csv",
+      data: Buffer.from(buildRejectedRowsCsv(result.rejectedResults, "JNV001", PHONE_REGISTRATION_MODE)),
+      mode: PHONE_REGISTRATION_MODE,
+    });
+    expect(retry.ok).toBe(true);
+    if (!retry.ok) throw new Error("expected parsed retry");
+    expect(retry.rows.map((row) => row.row_number)).toEqual([2, 3]);
+    expect(retry.rejectedResults).toEqual([]);
+  });
+
+  it("flags a repeated phone even when one matching row has another error, ignoring the named example", async () => {
+    const invalid = [...validPhoneRowValues];
+    invalid[3] = "Invalid";
+    const example = [...validPhoneRowValues];
+    example[1] = "Example Student";
+    example[10] = "7876543210";
+    const unique = [...validPhoneRowValues];
+    unique[10] = "7876543210";
+    const result = await parseStudentAdditionUpload({
+      filename: "students.csv",
+      data: Buffer.from([phoneUploadHeaders, example, validPhoneRowValues, invalid, unique].map(csvLine).join("\n")),
+      mode: PHONE_REGISTRATION_MODE,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected parsed upload");
+    expect(result.totalRows).toBe(3);
+    expect(result.rows.map((row) => row.row_number)).toEqual([5]);
+    expect(result.ignoredRows.map((row) => row.row_number)).toEqual([2]);
+    expect(result.rejectedResults.map((row) => row.row_number)).toEqual([3, 4]);
+    expect(result.rejectedResults[1].field_errors.gender).toBeDefined();
+    expect(result.rejectedResults.every((row) => row.row_errors.some((error) => error.includes("repeated")))).toBe(true);
+  });
+
   it("rejects a full-mode workbook before processing it in Phone Registration Mode", async () => {
     const result = await parseStudentAdditionUpload({
       filename: "students.xlsx",
