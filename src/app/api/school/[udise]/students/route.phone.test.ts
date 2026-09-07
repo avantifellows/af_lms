@@ -65,7 +65,7 @@ async function workbookBuffer(rows: unknown[][]) {
   return Buffer.from(await workbook.xlsx.writeBuffer());
 }
 
-function multipartUploadRequest(filename: string, data: Buffer) {
+function multipartUploadRequest(filename: string, data: Buffer, action: string | null = "upload") {
   const file = {
     name: filename,
     type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -75,7 +75,7 @@ function multipartUploadRequest(filename: string, data: Buffer) {
   return {
     headers: new Headers({ "content-type": "multipart/form-data; boundary=test" }),
     formData: async () => ({
-      get: (key: string) => key === "file" ? file : null,
+      get: (key: string) => key === "action" ? action : key === "file" ? file : null,
     }),
   };
 }
@@ -207,6 +207,30 @@ describe("POST /api/school/[udise]/students in Phone Registration Mode", () => {
     expect(payload.rows[0]).not.toHaveProperty("pen_number");
     expect(payload.rows[0]).not.toHaveProperty("g10_roll_no");
     expect(payload.rows[0]).not.toHaveProperty("annual_family_income");
+  });
+
+  it("returns a Phone-mode preview without restricted fields or a DB Service call", async () => {
+    vi.useRealTimers();
+    const response = await POST(
+      multipartUploadRequest("students.xlsx", await workbookBuffer([
+        phoneUploadHeaders,
+        ["12", "Asha Kumar", "02/01/2010", "Female", "Gen", "No", "Others", "PCM", "Engineering", "Ravi Kumar", "6876543210"],
+      ]), "validate") as never,
+      routeParams({ udise: "12345678901" }),
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toMatchObject({
+      stage: "checked",
+      summary: { total: 1, ready: 1, rejected: 0 },
+      rows: [{ status: "ready", original: { "Parents Phone Number": "6876543210" } }],
+    });
+    expect(JSON.stringify(body)).not.toContain("pen_number");
+    expect(JSON.stringify(body)).not.toContain("g10_roll_no");
+    expect(JSON.stringify(body)).not.toContain("annual_family_income");
+    expect(JSON.stringify(body)).not.toContain("apaar_id");
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it("rejects a full-mode workbook before any Phone-mode row is forwarded", async () => {

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import {
@@ -17,149 +17,339 @@ const baseProps = {
   registrationMode: APPROVED_REGISTRATION_MODE,
 };
 
+function response(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+function checkedResponse({
+  readyCount = 1,
+  needsCorrectionCount = 0,
+  rejectedRows = [],
+  ignoredRows = [],
+}: {
+  readyCount?: number;
+  needsCorrectionCount?: number;
+  rejectedRows?: unknown[];
+  ignoredRows?: Array<{ message: string }>;
+} = {}) {
+  const readyRows = Array.from({ length: readyCount }, (_, index) => ({
+    row_number: index + 2,
+    status: "ready",
+    original: { "Student Name": `Ready ${index + 1}`, Grade: "11" },
+  }));
+  return response({
+    stage: "checked",
+    summary: {
+      total: readyCount + needsCorrectionCount,
+      ready: readyCount,
+      rejected: needsCorrectionCount,
+    },
+    rows: [...readyRows, ...rejectedRows],
+    ignored_rows: ignoredRows,
+  });
+}
+
+function finalResponse({
+  total = 1,
+  created = 1,
+  duplicateInFile = 0,
+  alreadyExists = 0,
+  rejected = 0,
+  results = [],
+}: {
+  total?: number;
+  created?: number;
+  duplicateInFile?: number;
+  alreadyExists?: number;
+  rejected?: number;
+  results?: unknown[];
+} = {}) {
+  return response({
+    action: "upload",
+    totals: {
+      total,
+      created,
+      duplicate_in_file: duplicateInFile,
+      already_exists: alreadyExists,
+      rejected,
+    },
+    results,
+  });
+}
+
+function file(name = "students.xlsx") {
+  return new File(["spreadsheet bytes"], name, {
+    type: name.endsWith(".csv") ? "text/csv" : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+}
+
+async function selectFile(user: ReturnType<typeof userEvent.setup>, name = "students.xlsx") {
+  const selected = file(name);
+  await user.upload(screen.getByLabelText("Student upload file"), selected);
+  return selected;
+}
+
+async function checkFile(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole("button", { name: "Check file" }));
+}
+
 describe("BulkStudentUploadModal", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     vi.stubGlobal("fetch", vi.fn());
   });
 
-  it("downloads the template, uploads xlsx/csv files, and exposes rejected rows as csv", async () => {
-    vi.mocked(fetch).mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          totals: { total: 2, created: 1, duplicate_in_file: 0, already_exists: 0, rejected: 1 },
-          ignored_rows: [
-            {
-              row_number: 7,
-              matched_fields: ["Student Name", "PEN"],
-              message: "Row 7 was ignored as the example row. Matched: Student Name, PEN.",
-            },
-          ],
-          results: [
-            {
-              row_number: 2,
-              status: "created",
-              generated_student_id: "202712345678",
-              original: { "Student Name": "Created Student", Grade: "12" },
-            },
-            {
-              row_number: 3,
-              status: "rejected",
-              original: { "Student Name": "Bad Student", Grade: "11" },
-              field_errors: { stream: "Primary Exam preparing for is not valid" },
-              row_errors: ["PEN or Grade 10 Roll no is required"],
-              existing_match: null,
-            },
-          ],
-        }),
-        { status: 200 },
-      ),
-    );
+  it("keeps selection inert, checks without writing, then adds exactly once", async () => {
+    const rejected = {
+      row_number: 3,
+      status: "rejected",
+      original: { "Student Name": "Bad Student", Grade: "11" },
+      field_errors: { stream: "Primary Exam preparing for is not valid" },
+      row_errors: ["PEN or Grade 10 Roll no is required"],
+    };
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(checkedResponse({
+        readyCount: 1,
+        needsCorrectionCount: 1,
+        rejectedRows: [rejected],
+        ignoredRows: [{ message: "Row 7 was ignored as the example row. Matched: PEN." }],
+      }))
+      .mockResolvedValueOnce(finalResponse({
+        total: 2,
+        created: 1,
+        rejected: 1,
+        results: [
+          {
+            row_number: 2,
+            status: "created",
+            generated_student_id: "202712345678",
+            original: { "Student Name": "Created Student", Grade: "12" },
+          },
+          rejected,
+        ],
+      }));
 
     const user = userEvent.setup();
     render(<BulkStudentUploadModal {...baseProps} />);
+    const selected = await selectFile(user);
 
-    expect(screen.getByRole("link", { name: "Download template" })).toHaveAttribute(
-      "href",
-      "/api/school/12345678901/students",
-    );
-    expect(screen.getByText(/Each row supplies Grade 11 or 12/)).toHaveTextContent(
-      "PEN or Grade 10 Roll no is required",
-    );
+    expect(fetch).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: /Add/ })).not.toBeInTheDocument();
 
-    expect(screen.queryByLabelText("Upload grade")).not.toBeInTheDocument();
-    await user.upload(
-      screen.getByLabelText("Student upload file"),
-      new File(["fake"], "students.xlsx", {
-        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      }),
-    );
-    await user.click(screen.getByRole("button", { name: "Upload students" }));
+    await checkFile(user);
+    await screen.findByText("Nothing has been added yet.");
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(baseProps.onUploaded).not.toHaveBeenCalled();
+    expect(screen.getByText("1 row ready for final checks")).toBeInTheDocument();
+    expect(screen.getByText("1 row needs correction")).toBeInTheDocument();
+    expect(screen.getByText("Row 7 was ignored as the example row. Matched: PEN.")).toBeInTheDocument();
+    expect(screen.getByText("Needs correction")).toBeInTheDocument();
+    const checkForm = vi.mocked(fetch).mock.calls[0][1]?.body as FormData;
+    expect(Array.from(checkForm.keys())).toEqual(["file", "action"]);
+    expect(checkForm.get("action")).toBe("validate");
+    expect((checkForm.get("file") as File).name).toBe(selected.name);
 
-    await waitFor(() => expect(baseProps.onUploaded).toHaveBeenCalled());
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/school/12345678901/students",
-      expect.objectContaining({ method: "POST", body: expect.any(FormData) }),
-    );
-    const form = vi.mocked(fetch).mock.calls[0][1]?.body as FormData;
-    expect(Array.from(form.keys())).toEqual(["file"]);
-    expect(screen.getByText("1 done, 1 to go")).toBeInTheDocument();
-    expect(
-      screen.getByText("Row 7 was ignored as the example row. Matched: Student Name, PEN."),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("columnheader", { name: "Grade" })).toBeInTheDocument();
-    expect(screen.getByText("12")).toBeInTheDocument();
-    expect(screen.getByText("11")).toBeInTheDocument();
-    expect(screen.getByText("Bad Student")).toBeInTheDocument();
-    expect(screen.getByText(
-      "Primary Exam preparing for is not valid; PEN or Grade 10 Roll no is required",
-    )).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Download rejected rows CSV" })).toHaveAttribute(
-      "href",
-      expect.stringContaining("data:text/csv"),
-    );
+    await user.click(screen.getByRole("button", { name: "Add 1 student" }));
+    await screen.findByRole("heading", { name: "Upload complete" });
+    expect(fetch).toHaveBeenCalledTimes(2);
+    const addForm = vi.mocked(fetch).mock.calls[1][1]?.body as FormData;
+    expect(addForm.get("action")).toBe("upload");
+    expect((addForm.get("file") as File).name).toBe(selected.name);
+    expect(screen.getByText("Added 1")).toBeInTheDocument();
+    expect(screen.getByText("Already present 0")).toBeInTheDocument();
+    expect(screen.getByText("Rejected 1")).toBeInTheDocument();
+    expect(baseProps.onUploaded).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: /Add/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Done" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Upload another file" })).toBeInTheDocument();
   });
 
-  it("shows a clear error when the upload contains only example rows", async () => {
-    vi.mocked(fetch).mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          error:
-            "No students to upload. Row 2 was ignored as the example row. Matched: PEN. Add at least one student and upload again.",
-          ignored_rows: [
-            {
-              row_number: 2,
-              matched_fields: ["PEN"],
-              message: "Row 2 was ignored as the example row. Matched: PEN.",
-            },
-          ],
-        }),
-        { status: 400 },
-      ),
-    );
-
+  it("cancels safely after checking and clears the checked state", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(checkedResponse({ readyCount: 2 }));
     const user = userEvent.setup();
     render(<BulkStudentUploadModal {...baseProps} />);
 
-    await user.upload(
-      screen.getByLabelText("Student upload file"),
-      new File(["fake"], "students.csv", { type: "text/csv" }),
-    );
-    await user.click(screen.getByRole("button", { name: "Upload students" }));
+    await selectFile(user);
+    await checkFile(user);
+    await screen.findByText("2 rows ready for final checks");
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
 
-    expect(
-      await screen.findByText(/No students to upload.*Add at least one student/),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText("Row 2 was ignored as the example row. Matched: PEN."),
-    ).toBeInTheDocument();
+    expect(baseProps.onClose).toHaveBeenCalledTimes(1);
+    expect(baseProps.onUploaded).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("Nothing has been added yet.")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Check file" })).toBeDisabled();
+  });
+
+  it("sends only one check request for synchronous duplicate submits", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(checkedResponse({ readyCount: 1 }));
+    const user = userEvent.setup();
+    render(<BulkStudentUploadModal {...baseProps} />);
+
+    await selectFile(user);
+    const form = screen.getByRole("button", { name: "Check file" }).closest("form");
+    expect(form).not.toBeNull();
+    fireEvent.submit(form!);
+    fireEvent.submit(form!);
+
+    await screen.findByText("1 row ready for final checks");
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders complete check and final responses with duplicate row labels", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(response({
+        stage: "checked",
+        summary: { total: 2, ready: 2, rejected: 0 },
+        rows: [
+          { row_number: 2, status: "ready", original: { "Student Name": "First" } },
+          { row_number: 2, status: "ready", original: { "Student Name": "Second" } },
+        ],
+      }))
+      .mockResolvedValueOnce(finalResponse({
+        total: 2,
+        created: 2,
+        results: [
+          { row_number: 2, status: "created", original: { "Student Name": "First" } },
+          { row_number: 2, status: "created", original: { "Student Name": "Second" } },
+        ],
+      }));
+    const user = userEvent.setup();
+    render(<BulkStudentUploadModal {...baseProps} />);
+
+    await selectFile(user);
+    await checkFile(user);
+    await screen.findByText("2 rows ready for final checks");
+    await user.click(screen.getByRole("button", { name: "Add 2 students" }));
+
+    await screen.findByRole("heading", { name: "Upload complete" });
+    expect(screen.getByText("Added 2")).toBeInTheDocument();
+    expect(screen.getAllByText("2")).toHaveLength(2);
+    expect(baseProps.onUploaded).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not let a stale check response repopulate after cancel", async () => {
+    let resolveCheck!: (value: Response) => void;
+    vi.mocked(fetch).mockReturnValueOnce(new Promise<Response>((resolve) => {
+      resolveCheck = resolve;
+    }));
+    const user = userEvent.setup();
+    render(<BulkStudentUploadModal {...baseProps} />);
+
+    await selectFile(user);
+    await checkFile(user);
+    expect(screen.getByRole("button", { name: "Checking…" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    resolveCheck(checkedResponse({ readyCount: 1 }));
+
+    await waitFor(() => expect(screen.queryByText("Nothing has been added yet.")).not.toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "Check file" })).toBeDisabled();
+  });
+
+  it("shows all-invalid checked rows without offering Add", async () => {
+    const rejectedRows = [
+      {
+        row_number: 2,
+        status: "rejected",
+        original: { "Student Name": "Bad One", Grade: "10" },
+        field_errors: { grade: "Grade must be 11 or 12" },
+      },
+      {
+        row_number: 3,
+        status: "rejected",
+        original: { "Student Name": "Bad Two", Grade: "11" },
+        row_errors: ["PEN or Grade 10 Roll no is required"],
+      },
+    ];
+    vi.mocked(fetch).mockResolvedValueOnce(checkedResponse({
+      readyCount: 0,
+      needsCorrectionCount: 2,
+      rejectedRows,
+    }));
+    const user = userEvent.setup();
+    render(<BulkStudentUploadModal {...baseProps} />);
+
+    await selectFile(user, "all-invalid.csv");
+    await checkFile(user);
+    await screen.findByText("0 rows ready for final checks");
+    expect(screen.getByText("2 rows need correction")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Add/ })).not.toBeInTheDocument();
+    const download = screen.getByRole("link", { name: "Download rejected rows CSV" });
+    const href = download.getAttribute("href") ?? "";
+    expect(href).toContain("Bad%20One");
+    expect(href).toContain("Bad%20Two");
+    expect(fetch).toHaveBeenCalledTimes(1);
     expect(baseProps.onUploaded).not.toHaveBeenCalled();
   });
 
-  it("shows populated header mismatch groups and current-template guidance", async () => {
-    vi.mocked(fetch).mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          error: "This upload does not match the active Phone Registration Mode template. Download the current template and upload it again.",
-          template_mismatch: {
-            missing: ["Gender"],
-            unexpected: ["Unapproved column"],
-            duplicate: ["Grade"],
-          },
-        }),
-        { status: 400 },
-      ),
-    );
+  it("keeps ready rows out of the checked rejected CSV and resets for the same file", async () => {
+    const good = {
+      row_number: 2,
+      status: "rejected",
+      original: { "Student Name": "Good Student", Grade: "11" },
+    };
+    const bad = {
+      row_number: 3,
+      status: "rejected",
+      original: { "Student Name": "Bad Student", Grade: "10" },
+      field_errors: { grade: "Grade must be 11 or 12" },
+    };
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(checkedResponse({ readyCount: 1, needsCorrectionCount: 1, rejectedRows: [bad] }))
+      .mockResolvedValueOnce(finalResponse({
+        total: 2,
+        created: 1,
+        rejected: 1,
+        results: [
+          { row_number: 2, status: "created", original: good.original },
+          bad,
+        ],
+      }))
+      .mockResolvedValueOnce(checkedResponse({ readyCount: 1 }));
+    const user = userEvent.setup();
+    render(<BulkStudentUploadModal {...baseProps} />);
 
+    const selected = await selectFile(user);
+    await checkFile(user);
+    await screen.findByText("1 row needs correction");
+    const previewCsv = screen.getByRole("link", { name: "Download rejected rows CSV" });
+    const previewHref = previewCsv.getAttribute("href") ?? "";
+    expect(previewHref).toContain("Bad%20Student");
+    expect(previewHref).not.toContain("Good%20Student");
+
+    await user.click(screen.getByRole("button", { name: "Add 1 student" }));
+    await screen.findByRole("heading", { name: "Upload complete" });
+    await user.click(screen.getByRole("button", { name: "Upload another file" }));
+    expect(screen.getByLabelText("Student upload file")).toHaveProperty("files", expect.objectContaining({ length: 0 }));
+    expect(screen.queryByRole("heading", { name: "Upload complete" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Nothing has been added yet.")).not.toBeInTheDocument();
+
+    await user.upload(screen.getByLabelText("Student upload file"), selected);
+    await checkFile(user);
+    await screen.findByText("1 row ready for final checks");
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(baseProps.onUploaded).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves exact template mismatch details and clears them after a new file", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(response({
+        error: "This upload does not match the active Phone Registration Mode template.",
+        template_mismatch: {
+          missing: ["Gender"],
+          unexpected: ["Unapproved column"],
+          duplicate: ["Grade"],
+        },
+      }, 400))
+      .mockResolvedValueOnce(checkedResponse({ readyCount: 1 }));
     const user = userEvent.setup();
     render(<BulkStudentUploadModal {...baseProps} registrationMode={PHONE_REGISTRATION_MODE} />);
 
-    await user.upload(
-      screen.getByLabelText("Student upload file"),
-      new File(["fake"], "students.csv", { type: "text/csv" }),
-    );
-    await user.click(screen.getByRole("button", { name: "Upload students" }));
-
+    await selectFile(user, "wrong.csv");
+    await checkFile(user);
     expect(await screen.findByText("The uploaded headers do not match the current template.")).toBeInTheDocument();
     expect(screen.getByText("Missing columns: Gender")).toBeInTheDocument();
     expect(screen.getByText("Unrecognized columns: Unapproved column")).toBeInTheDocument();
@@ -168,297 +358,217 @@ describe("BulkStudentUploadModal", () => {
       "download",
       "NVS_Lakshya_Data_Template_updated_19th_August_2026.xlsx",
     );
+    expect(screen.queryByRole("button", { name: /Add/ })).not.toBeInTheDocument();
+
+    await selectFile(user, "correct.csv");
+    expect(screen.queryByText("Missing columns: Gender")).not.toBeInTheDocument();
+    await checkFile(user);
+    await screen.findByText("1 row ready for final checks");
   });
 
-  it("uses the structured legacy APAAR marker for its mismatch summary", async () => {
-    vi.mocked(fetch).mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          error: "This workbook uses the old APAAR template. Download the latest PEN-based template and upload it again.",
-          template_mismatch: {
-            missing: ["CWSN", "PEN Number"],
-            unexpected: [],
-            duplicate: [],
-            legacy_apaar: true,
-          },
-        }),
-        { status: 400 },
-      ),
-    );
-
+  it("resets the selected file and checked state when upload context changes", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(checkedResponse({ readyCount: 1 }))
+      .mockResolvedValueOnce(checkedResponse({ readyCount: 2 }));
     const user = userEvent.setup();
-    render(<BulkStudentUploadModal {...baseProps} />);
+    const { rerender } = render(<BulkStudentUploadModal {...baseProps} />);
 
-    await user.upload(
-      screen.getByLabelText("Student upload file"),
-      new File(["fake"], "students.csv", { type: "text/csv" }),
-    );
-    await user.click(screen.getByRole("button", { name: "Upload students" }));
+    await selectFile(user);
+    await checkFile(user);
+    await screen.findByText("1 row ready for final checks");
 
-    expect(await screen.findByText("This workbook uses the old APAAR template.")).toBeInTheDocument();
-    expect(screen.queryByText("The uploaded headers do not match the current template.")).not.toBeInTheDocument();
-    expect(screen.getByText("Missing columns: CWSN, PEN Number")).toBeInTheDocument();
-  });
-
-  it("counts every uncreated row as to go and includes skipped rows in the rejected CSV", async () => {
-    vi.mocked(fetch).mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          totals: { total: 2, created: 0, duplicate_in_file: 1, already_exists: 1, rejected: 0 },
-          results: [
-            {
-              row_number: 2,
-              status: "already_exists",
-              original: { "Student Name": "Existing" },
-              existing_match: {
-                student_id: "202812345678",
-                student_name: "Existing Student",
-                school_name: "JNV Other",
-                school_code: "JNV999",
-                udise_code: "99999999999",
-                district: "Jaipur",
-                state: "Rajasthan",
-                grade: 11,
-                program: "JNV NVS",
-                stream: "engineering",
-              },
-            },
-            {
-              row_number: 3,
-              status: "duplicate_in_file",
-              duplicate_identifiers: ["PEN Number", "Grade 10 Roll no"],
-              original: { "Student Name": "Duplicate" },
-            },
-          ],
-        }),
-        { status: 200 },
-      ),
-    );
-
-    const user = userEvent.setup();
-    render(<BulkStudentUploadModal {...baseProps} />);
-
-    await user.upload(
-      screen.getByLabelText("Student upload file"),
-      new File(["fake"], "students.xlsx", {
-        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      }),
-    );
-    await user.click(screen.getByRole("button", { name: "Upload students" }));
-
-    await waitFor(() => expect(screen.getByText("0 done, 2 to go")).toBeInTheDocument());
-    expect(screen.getByText(/This identifier already belongs to Existing Student/)).toBeInTheDocument();
-    expect(screen.getByText(/JNV999, UDISE 99999999999/)).toBeInTheDocument();
-    expect(
-      screen.getByText("Duplicate in uploaded file: PEN Number, Grade 10 Roll no"),
-    ).toBeInTheDocument();
-    const download = screen.getByRole("link", { name: "Download rejected rows CSV" });
-    expect(download).toHaveAttribute("href", expect.stringContaining("Existing"));
-    expect(download).toHaveAttribute("href", expect.stringContaining("Duplicate"));
-    expect(download).toHaveAttribute("href", expect.stringContaining("Different%20school"));
-  });
-
-  it("uses school code for same-school duplicate messages", async () => {
-    vi.mocked(fetch).mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          totals: { total: 1, created: 0, duplicate_in_file: 0, already_exists: 1, rejected: 0 },
-          results: [
-            {
-              row_number: 2,
-              status: "already_exists",
-              original: { "Student Name": "Existing" },
-              existing_match: {
-                student_id: "202812345678",
-                student_name: "Existing Student",
-                school_code: "JNV001",
-              },
-            },
-          ],
-        }),
-        { status: 200 },
-      ),
-    );
-
-    const user = userEvent.setup();
-    render(<BulkStudentUploadModal {...baseProps} />);
-
-    await user.upload(
-      screen.getByLabelText("Student upload file"),
-      new File(["fake"], "students.xlsx", {
-        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      }),
-    );
-    await user.click(screen.getByRole("button", { name: "Upload students" }));
-
+    rerender(<BulkStudentUploadModal {...baseProps} schoolUdise="98765432109" />);
     await waitFor(() => {
-      expect(screen.getByText(/already part of this school/)).toBeInTheDocument();
+      expect(screen.getByLabelText("Student upload file")).toHaveProperty("files", expect.objectContaining({ length: 0 }));
+      expect(screen.queryByText("1 row ready for final checks")).not.toBeInTheDocument();
     });
-    expect(screen.getByRole("link", { name: "Download rejected rows CSV" })).toHaveAttribute(
-      "href",
-      expect.stringContaining("Same%20school"),
-    );
+    expect(screen.getByRole("button", { name: "Check file" })).toBeDisabled();
+
+    await selectFile(user);
+    await checkFile(user);
+    await screen.findByText("2 rows ready for final checks");
+
+    rerender(<BulkStudentUploadModal {...baseProps} schoolUdise="98765432109" registrationMode={PHONE_REGISTRATION_MODE} />);
+    await waitFor(() => {
+      expect(screen.getByLabelText("Student upload file")).toHaveProperty("files", expect.objectContaining({ length: 0 }));
+      expect(screen.queryByText("2 rows ready for final checks")).not.toBeInTheDocument();
+    });
+    expect(screen.getByRole("button", { name: "Check file" })).toBeDisabled();
   });
 
-  it("shows the submitted phone when Phone-mode match context omits Student ID", async () => {
-    vi.mocked(fetch).mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          totals: { total: 1, created: 0, duplicate_in_file: 0, already_exists: 1, rejected: 0 },
-          results: [{
-            row_number: 6,
-            status: "already_exists",
-            original: {
-              Grade: "12",
-              "Student Name": "Existing Student",
-              "Parents Phone Number": "6876543210",
-            },
-            existing_match: { school_code: "JNV001" },
-          }],
-        }),
-        { status: 200 },
-      ),
-    );
+  it("rejects a check response that does not match the checked contract", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(response({
+      stage: "checked",
+      summary: { total: 1, ready: 1, rejected: 0 },
+    }));
+    const user = userEvent.setup();
+    render(<BulkStudentUploadModal {...baseProps} />);
 
+    await selectFile(user);
+    await checkFile(user);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("We could not check this file");
+    expect(screen.queryByText(/ready for final checks/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Add/ })).not.toBeInTheDocument();
+  });
+
+  it("shows final existing and duplicate outcomes as completed rejected results", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(checkedResponse({ readyCount: 2 }))
+      .mockResolvedValueOnce(finalResponse({
+        total: 2,
+        created: 0,
+        duplicateInFile: 1,
+        alreadyExists: 1,
+        results: [
+          {
+            row_number: 2,
+            status: "already_exists",
+            original: { "Student Name": "Existing" },
+            existing_match: {
+              student_id: "202812345678",
+              student_name: "Existing Student",
+              school_name: "JNV Other",
+              school_code: "JNV999",
+              udise_code: "99999999999",
+            },
+          },
+          {
+            row_number: 3,
+            status: "duplicate_in_file",
+            original: { "Student Name": "Duplicate" },
+            duplicate_identifiers: ["PEN Number", "Grade 10 Roll no"],
+          },
+        ],
+      }));
+    const user = userEvent.setup();
+    render(<BulkStudentUploadModal {...baseProps} />);
+
+    await selectFile(user);
+    await checkFile(user);
+    await screen.findByText("2 rows ready for final checks");
+    await user.click(screen.getByRole("button", { name: "Add 2 students" }));
+    await screen.findByRole("heading", { name: "Upload complete" });
+
+    expect(screen.getByText("Added 0")).toBeInTheDocument();
+    expect(screen.getByText("Already present 1")).toBeInTheDocument();
+    expect(screen.getByText("Rejected 1")).toBeInTheDocument();
+    expect(screen.getByText("Already present")).toBeInTheDocument();
+    expect(screen.getAllByText("Rejected").length).toBeGreaterThan(0);
+    expect(screen.getByText(/This identifier already belongs to Existing Student/)).toBeInTheDocument();
+    expect(screen.getByText("Duplicate in uploaded file: PEN Number, Grade 10 Roll no")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Add/ })).not.toBeInTheDocument();
+    expect(baseProps.onUploaded).not.toHaveBeenCalled();
+    expect(screen.getByRole("link", { name: "Download rejected rows CSV" })).toBeInTheDocument();
+  });
+
+  it("redacts restricted Phone-mode fields in final rows and CSV", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(checkedResponse({ readyCount: 1 }))
+      .mockResolvedValueOnce(finalResponse({
+        total: 1,
+        created: 0,
+        alreadyExists: 1,
+        results: [{
+          row_number: 6,
+          status: "already_exists",
+          original: {
+            Grade: "12",
+            "Student Name": "Existing Student",
+            "Parents Phone Number": "6876543210",
+          },
+          existing_match: {
+            school_code: "JNV001",
+            pen_number: "12345678901",
+            apaar_id: "123456789012",
+          },
+        }],
+      }));
     const user = userEvent.setup();
     render(<BulkStudentUploadModal {...baseProps} registrationMode={PHONE_REGISTRATION_MODE} />);
 
-    await user.upload(
-      screen.getByLabelText("Student upload file"),
-      new File(["fake"], "students.xlsx", {
-        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      }),
-    );
-    await user.click(screen.getByRole("button", { name: "Upload students" }));
+    await selectFile(user, "students.csv");
+    await checkFile(user);
+    await screen.findByText("1 row ready for final checks");
+    await user.click(screen.getByRole("button", { name: "Add 1 student" }));
+    await screen.findByRole("heading", { name: "Upload complete" });
 
-    expect(await screen.findByText(
+    expect(screen.getByText(
       "This student identifier is already part of this school. Student ID / Phone Number: 6876543210.",
     )).toBeInTheDocument();
-  });
-
-  it("shows rejected existing-school context and redacts restricted Phone-mode identities", async () => {
-    vi.mocked(fetch).mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          totals: { total: 1, created: 0, duplicate_in_file: 0, already_exists: 0, rejected: 1 },
-          results: [
-            {
-              row_number: 2,
-              status: "rejected",
-              original: { Grade: "11", "Student Name": "Asha Kumar", "Parents Phone Number": "6876543210" },
-              row_errors: ["Student already belongs to another school"],
-              existing_match: {
-                student_id: "6876543210",
-                pen_number: "12345678901",
-                apaar_id: "123456789012",
-                student_name: "Asha Kumar",
-                school_name: "JNV Other",
-                school_code: "JNV999",
-                udise_code: "99999999999",
-                district: "Jaipur",
-                state: "Rajasthan",
-                grade: 11,
-                program: "JNV NVS",
-                stream: "engineering",
-              },
-            },
-          ],
-        }),
-        { status: 400 },
-      ),
-    );
-    const user = userEvent.setup();
-    render(<BulkStudentUploadModal {...baseProps} registrationMode={PHONE_REGISTRATION_MODE} />);
-
-    await user.upload(
-      screen.getByLabelText("Student upload file"),
-      new File(["fake"], "students.csv", { type: "text/csv" }),
-    );
-    await user.click(screen.getByRole("button", { name: "Upload students" }));
-
-    expect(
-      await screen.findByText(
-        /This identifier already belongs to Asha Kumar at JNV Other \(JNV999, UDISE 99999999999\), Jaipur, Rajasthan/,
-      ),
-    ).toBeInTheDocument();
-    expect(screen.queryByText("Student already belongs to another school")).not.toBeInTheDocument();
     expect(screen.queryByText(/12345678901/)).not.toBeInTheDocument();
     expect(screen.queryByText(/123456789012/)).not.toBeInTheDocument();
-  });
-
-  it("does not repeat an upload when its response times out", async () => {
-    vi.mocked(fetch).mockResolvedValue(new Response("Gateway timeout", { status: 504 }));
-    const user = userEvent.setup();
-    render(<BulkStudentUploadModal {...baseProps} />);
-
-    await user.upload(
-      screen.getByLabelText("Student upload file"),
-      new File(["fake"], "students.xlsx", {
-        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      }),
-    );
-    await user.click(screen.getByRole("button", { name: "Upload students" }));
-
-    expect(await screen.findByText(
-      "Upload timed out before the final result was returned. Some rows may still be processing. The student list has been refreshed. Wait a minute, then re-upload the same file to check the result.",
-    )).toBeInTheDocument();
-    expect(fetch).toHaveBeenCalledTimes(1);
-    expect(baseProps.onUploaded).toHaveBeenCalled();
-    expect(screen.queryByText(/JSON/)).not.toBeInTheDocument();
-  });
-
-  it("resets upload state when reopened", async () => {
-    const { rerender } = render(<BulkStudentUploadModal {...baseProps} />);
-    const user = userEvent.setup();
-
-    await user.upload(
-      screen.getByLabelText("Student upload file"),
-      new File(["fake"], "students.csv", { type: "text/csv" }),
-    );
-
-    expect(screen.getByLabelText("Student upload file")).toHaveProperty("files", expect.objectContaining({ length: 1 }));
-
-    rerender(<BulkStudentUploadModal {...baseProps} open={false} />);
-    rerender(<BulkStudentUploadModal {...baseProps} open />);
-
-    expect(screen.getByLabelText("Student upload file")).toHaveProperty("files", expect.objectContaining({ length: 0 }));
-  });
-
-  it("uses the Phone Registration Mode retry columns and guidance", async () => {
-    vi.mocked(fetch).mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          totals: { total: 1, created: 0, duplicate_in_file: 0, already_exists: 0, rejected: 1 },
-          results: [{
-            row_number: 2,
-            status: "rejected",
-            original: {
-              Grade: "12",
-              "Student Name": "Bad Student",
-              "Parents Phone Number": "5876543210",
-            },
-            field_errors: { phone: "Enter a valid phone number" },
-          }],
-        }),
-        { status: 400 },
-      ),
-    );
-
-    const user = userEvent.setup();
-    render(<BulkStudentUploadModal {...baseProps} registrationMode={PHONE_REGISTRATION_MODE} />);
-
-    expect(screen.getByText(/Phone Registration Mode/)).toBeInTheDocument();
-    await user.upload(
-      screen.getByLabelText("Student upload file"),
-      new File(["fake"], "students.csv", { type: "text/csv" }),
-    );
-    await user.click(screen.getByRole("button", { name: "Upload students" }));
-
-    const download = await screen.findByRole("link", { name: "Download rejected rows CSV" });
-    const href = download.getAttribute("href") ?? "";
+    const href = screen.getByRole("link", { name: "Download rejected rows CSV" }).getAttribute("href") ?? "";
     expect(href).toContain("Parents%20Phone%20Number");
     expect(href).not.toContain("PEN%20Number");
     expect(href).not.toContain("Grade%2010%20Roll%20no");
     expect(href).not.toContain("Yearly%20%2F%20Annual%20Family%20Income");
+    expect(href).not.toContain("12345678901");
+    expect(href).not.toContain("123456789012");
+  });
+
+  it("does not offer an Add retry when the final response is unknown", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(checkedResponse({ readyCount: 1 }))
+      .mockResolvedValueOnce(new Response("Gateway timeout", { status: 504 }));
+    const user = userEvent.setup();
+    render(<BulkStudentUploadModal {...baseProps} />);
+
+    await selectFile(user);
+    await checkFile(user);
+    await screen.findByText("1 row ready for final checks");
+    await user.click(screen.getByRole("button", { name: "Add 1 student" }));
+
+    expect(await screen.findByText(/final result was not returned/)).toBeInTheDocument();
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("button", { name: /Add/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Done" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Upload another file" })).toBeInTheDocument();
+    expect(baseProps.onUploaded).toHaveBeenCalledTimes(1);
+  });
+
+  it("treats final totals without a complete results array as unknown", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(checkedResponse({ readyCount: 1 }))
+      .mockResolvedValueOnce(response({
+        error: "Student could not be created",
+        totals: { total: 1, created: 1, duplicate_in_file: 0, already_exists: 0, rejected: 0 },
+      }, 500));
+    const user = userEvent.setup();
+    render(<BulkStudentUploadModal {...baseProps} />);
+
+    await selectFile(user);
+    await checkFile(user);
+    await screen.findByText("1 row ready for final checks");
+    await user.click(screen.getByRole("button", { name: "Add 1 student" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Student could not be created");
+    expect(screen.getByRole("alert")).toHaveTextContent(/final result was not returned/);
+    expect(baseProps.onUploaded).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: /Add/ })).not.toBeInTheDocument();
+  });
+
+  it("exposes accessible dialog and busy labels during checking and adding", async () => {
+    let resolveCheck!: (value: Response) => void;
+    let resolveAdd!: (value: Response) => void;
+    vi.mocked(fetch)
+      .mockReturnValueOnce(new Promise<Response>((resolve) => { resolveCheck = resolve; }))
+      .mockReturnValueOnce(new Promise<Response>((resolve) => { resolveAdd = resolve; }));
+    const user = userEvent.setup();
+    render(<BulkStudentUploadModal {...baseProps} />);
+    expect(screen.getByRole("dialog", { name: "Bulk Upload Students" })).toHaveAttribute("aria-modal", "true");
+
+    await selectFile(user);
+    await checkFile(user);
+    expect(screen.getByRole("button", { name: "Checking…" })).toBeDisabled();
+    expect(screen.getByText(/Checking file/)).toHaveAttribute("role", "status");
+    resolveCheck(checkedResponse({ readyCount: 1 }));
+    await screen.findByText("1 row ready for final checks");
+
+    await user.click(screen.getByRole("button", { name: "Add 1 student" }));
+    expect(screen.getByRole("button", { name: "Adding…" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
+    resolveAdd(finalResponse({ results: [{ row_number: 2, status: "created" }] }));
+    await screen.findByRole("heading", { name: "Upload complete" });
   });
 });

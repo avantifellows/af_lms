@@ -8,6 +8,7 @@ import { query } from "@/lib/db";
 import { deriveLmsEnrollmentPeriod } from "@/lib/lms-enrollment-date";
 import {
   ACTIVE_REGISTRATION_MODE,
+  PHONE_REGISTRATION_MODE,
 } from "@/lib/registration-mode";
 import {
   parseStudentAdditionUpload,
@@ -17,6 +18,7 @@ import {
   type StudentAdditionSchool,
 } from "@/lib/student-addition-access";
 import {
+  getStudentAdditionUploadColumns,
   validateStudentAdditionInput,
 } from "@/lib/student-addition-fields";
 
@@ -40,6 +42,63 @@ function isUploadFile(value: FormDataEntryValue | null): value is File {
 function uploadFilename(file: File): string {
   if (file.name && file.name !== "blob") return file.name;
   return file.type.includes("csv") ? "upload.csv" : "upload.xlsx";
+}
+
+type BulkUploadAction = "validate" | "upload";
+
+function parseBulkUploadAction(value: FormDataEntryValue | null): BulkUploadAction | null {
+  return value === "validate" || value === "upload" ? value : null;
+}
+
+const PHONE_RESTRICTED_PREVIEW_KEYS = new Set([
+  "pen_number",
+  "g10_roll_no",
+  "annual_family_income",
+  "apaar_id",
+]);
+
+function safePreviewOriginal(original: Record<string, string>) {
+  const allowedColumns = new Set(
+    getStudentAdditionUploadColumns(ACTIVE_REGISTRATION_MODE).map((column) => column.label),
+  );
+  return Object.fromEntries(
+    Object.entries(original).filter(([key]) => allowedColumns.has(key)),
+  );
+}
+
+function safePreviewFieldErrors(errors: Record<string, string>) {
+  if (ACTIVE_REGISTRATION_MODE !== PHONE_REGISTRATION_MODE) return errors;
+  return Object.fromEntries(
+    Object.entries(errors).filter(([key]) => !PHONE_RESTRICTED_PREVIEW_KEYS.has(key)),
+  );
+}
+
+function checkedBulkUploadResponse(
+  parsed: Extract<Awaited<ReturnType<typeof parseStudentAdditionUpload>>, { ok: true }>,
+) {
+  const readyRows = parsed.rows.map((row) => ({
+    row_number: row.row_number,
+    status: "ready" as const,
+    original: safePreviewOriginal(parsed.originalRows.get(row.row_number) ?? {}),
+  }));
+  const rejectedRows = parsed.rejectedResults.map((result) => ({
+    row_number: result.row_number,
+    status: "rejected" as const,
+    original: safePreviewOriginal(result.original),
+    field_errors: safePreviewFieldErrors(result.field_errors),
+    row_errors: result.row_errors,
+  }));
+
+  return NextResponse.json({
+    stage: "checked" as const,
+    summary: {
+      total: parsed.totalRows,
+      ready: parsed.rows.length,
+      rejected: parsed.rejectedResults.length,
+    },
+    rows: [...readyRows, ...rejectedRows].sort((a, b) => a.row_number - b.row_number),
+    ignored_rows: parsed.ignoredRows,
+  });
 }
 
 async function resolveSchoolAndAccess(
@@ -81,12 +140,46 @@ async function resolveRouteContext(params: Promise<{ udise: string }>) {
   return resolveSchoolAndAccess(session, udise);
 }
 
+function emptyUploadResponse(ignoredRows: Array<{ message: string }>) {
+  if (ignoredRows.length > 0) {
+    return NextResponse.json(
+      {
+        error: `No students to upload. ${ignoredRows.map((row) => row.message).join(" ")} Add at least one student and upload again.`,
+        ignored_rows: ignoredRows,
+      },
+      { status: 400 },
+    );
+  }
+  return NextResponse.json({ error: "Upload has no student rows" }, { status: 400 });
+}
+
+function rejectedUploadResponse(
+  parsed: Extract<Awaited<ReturnType<typeof parseStudentAdditionUpload>>, { ok: true }>,
+) {
+  return NextResponse.json(
+    {
+      totals: countStudentAdditionTotals(parsed.rejectedResults),
+      results: parsed.rejectedResults,
+      ...(parsed.ignoredRows.length > 0 ? { ignored_rows: parsed.ignoredRows } : {}),
+    },
+    { status: 400 },
+  );
+}
+
 async function bulkUploadResponse(
   request: NextRequest,
   access: Awaited<ReturnType<typeof requireStudentAdditionAccess>> & { ok: true },
   school: StudentAdditionSchool,
 ) {
   const form = await request.formData();
+  const action = parseBulkUploadAction(form.get("action"));
+  if (!action) {
+    return NextResponse.json(
+      { error: "Bulk upload action must be 'validate' or 'upload'" },
+      { status: 400 },
+    );
+  }
+
   const file = form.get("file");
   if (!isUploadFile(file)) {
     return NextResponse.json({ error: "Upload a .xlsx or rejected-row .csv file" }, { status: 400 });
@@ -109,27 +202,13 @@ async function bulkUploadResponse(
     }, { status: 400 });
   }
   if (parsed.totalRows === 0) {
-    if (parsed.ignoredRows.length > 0) {
-      return NextResponse.json(
-        {
-          error: `No students to upload. ${parsed.ignoredRows.map((row) => row.message).join(" ")} Add at least one student and upload again.`,
-          ignored_rows: parsed.ignoredRows,
-        },
-        { status: 400 },
-      );
-    }
-    return NextResponse.json({ error: "Upload has no student rows" }, { status: 400 });
+    return emptyUploadResponse(parsed.ignoredRows);
   }
 
+  if (action === "validate") return checkedBulkUploadResponse(parsed);
+
   if (parsed.rows.length === 0) {
-    return NextResponse.json(
-      {
-        totals: countStudentAdditionTotals(parsed.rejectedResults),
-        results: parsed.rejectedResults,
-        ...(parsed.ignoredRows.length > 0 ? { ignored_rows: parsed.ignoredRows } : {}),
-      },
-      { status: 400 },
-    );
+    return rejectedUploadResponse(parsed);
   }
 
   const response = await proxyStudentAdditionRows({

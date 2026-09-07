@@ -112,6 +112,7 @@ function multipartUploadRequest(
   contents: string,
   grade: string | null = "11",
   size = Buffer.from(contents).byteLength,
+  action: string | null = "upload",
 ) {
   const bytes = Buffer.from(contents);
   const file = {
@@ -124,7 +125,9 @@ function multipartUploadRequest(
   return {
     headers: new Headers({ "content-type": "multipart/form-data; boundary=test" }),
     formData: async () => ({
-      get: (key: string) => (key === "grade" ? grade : key === "file" ? file : null),
+      get: (key: string) => (
+        key === "action" ? action : key === "grade" ? grade : key === "file" ? file : null
+      ),
     }),
   };
 }
@@ -150,6 +153,28 @@ describe("POST /api/school/[udise]/students", () => {
         role: "admin",
       },
     });
+  });
+
+  it.each([
+    ["missing", null],
+    ["unknown", "preview"],
+  ])("rejects a %s multipart action before parsing or proxying", async (_label, action) => {
+    const response = await POST(
+      multipartUploadRequest(
+        "students.csv",
+        csvLine(uploadHeaders),
+        "11",
+        undefined,
+        action,
+      ) as never,
+      routeParams({ udise: "12345678901" }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: "Bulk upload action must be 'validate' or 'upload'",
+    });
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it("derives ownership fields server-side and proxies one normalized row to DB Service", async () => {
@@ -529,6 +554,90 @@ describe("POST /api/school/[udise]/students", () => {
         stream: "engineering",
       }),
     ]);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns a local checked preview without proxying accepted rows", async () => {
+    const csv = [
+      csvLine(uploadHeaders),
+      csvLine(validUploadRow),
+      csvLine([...validUploadRow.slice(0, 10), "Not A Stream", ...validUploadRow.slice(11)]),
+    ].join("\n");
+
+    const response = await POST(
+      multipartUploadRequest("students.csv", csv, "11", undefined, "validate") as never,
+      routeParams({ udise: "12345678901" }),
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toMatchObject({
+      stage: "checked",
+      summary: { total: 2, ready: 1, rejected: 1 },
+      ignored_rows: [],
+    });
+    expect(body.rows).toEqual([
+      {
+        row_number: 2,
+        status: "ready",
+        original: expect.objectContaining({ "Student Name": "asha  k. kumar" }),
+      },
+      {
+        row_number: 3,
+        status: "rejected",
+        original: expect.objectContaining({ "Primary Exam preparing for": "Not A Stream" }),
+        field_errors: { stream: "Primary Exam preparing for is not valid" },
+        row_errors: [],
+      },
+    ]);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("returns a successful checked preview when every real row is locally rejected", async () => {
+    const invalidRow = [...validUploadRow];
+    invalidRow[6] = "";
+    invalidRow[8] = "";
+    invalidRow[10] = "Not A Stream";
+    const csv = [csvLine(uploadHeaders), csvLine(invalidRow)].join("\n");
+
+    const response = await POST(
+      multipartUploadRequest("students.csv", csv, "11", undefined, "validate") as never,
+      routeParams({ udise: "12345678901" }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      stage: "checked",
+      summary: { total: 1, ready: 0, rejected: 1 },
+      rows: [expect.objectContaining({ row_number: 2, status: "rejected" })],
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("checks first and proxies exactly once when the same file is uploaded", async () => {
+    const csv = [csvLine(uploadHeaders), csvLine(validUploadRow)].join("\n");
+    const checked = await POST(
+      multipartUploadRequest("students.csv", csv, "11", undefined, "validate") as never,
+      routeParams({ udise: "12345678901" }),
+    );
+
+    expect(checked.status).toBe(200);
+    expect(fetch).not.toHaveBeenCalled();
+
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(JSON.stringify({
+        totals: { total: 1, created: 1, duplicate_in_file: 0, already_exists: 0, rejected: 0 },
+        results: [{ row_number: 2, status: "created" }],
+      }), { status: 200 }),
+    );
+
+    const uploaded = await POST(
+      multipartUploadRequest("students.csv", csv, "11", undefined, "upload") as never,
+      routeParams({ udise: "12345678901" }),
+    );
+
+    expect(uploaded.status).toBe(200);
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 
   it("passes Approved-mode header mismatch details through the 400 response", async () => {
