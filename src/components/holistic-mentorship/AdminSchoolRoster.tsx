@@ -178,14 +178,14 @@ function RosterFilters({ search, grade, assignment, onSearchChange, onGradeChang
     </label>
     <label className="block text-[11px] font-extrabold uppercase tracking-wide text-text-muted">
       Grade
-      <Select aria-label="Filter by Grade" className="mt-1 w-full" value={grade}
+      <Select aria-label="Filter by Grade" className="mt-1" value={grade}
         onChange={(event) => onGradeChange(event.target.value)}>
         <option value="">All Grades</option><option value="11">Grade 11</option><option value="12">Grade 12</option>
       </Select>
     </label>
     <label className="block text-[11px] font-extrabold uppercase tracking-wide text-text-muted">
       Assignment
-      <Select aria-label="Filter by Assignment" className="mt-1 w-full" value={assignment}
+      <Select aria-label="Filter by Assignment" className="mt-1" value={assignment}
         onChange={(event) => onAssignmentChange(event.target.value as AssignmentFilter)}>
         <option value="all">All Students</option><option value="assigned">Assigned</option><option value="unassigned">Unassigned</option>
       </Select>
@@ -226,7 +226,7 @@ function MentorSelectField({ label, mentors, value, excludedUserId, onChange }: 
     : mentors.filter((mentor) => mentor.userId !== excludedUserId);
   return <label className="block text-sm font-bold text-text-primary">
     {label}
-    <Select aria-label={label} className="mt-1 w-full" value={value}
+    <Select aria-label={label} className="mt-1" value={value}
       onChange={(event) => onChange(event.target.value)}>
       <option value="">Select an eligible Mentor</option>
       {options.map((mentor) => <option key={mentor.userId} value={mentor.userId}>
