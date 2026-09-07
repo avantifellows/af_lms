@@ -3,10 +3,11 @@ import { render, screen } from "@testing-library/react";
 
 // ---- mocks (hoisted) ----
 
-const { mockGetServerSession, mockIsAdmin, mockRedirect, mockQuery } =
+const { mockGetServerSession, mockIsAdmin, mockGetUserPermission, mockRedirect, mockQuery } =
   vi.hoisted(() => ({
     mockGetServerSession: vi.fn(),
     mockIsAdmin: vi.fn(),
+    mockGetUserPermission: vi.fn(),
     mockRedirect: vi.fn((url: string) => {
       throw new Error(`REDIRECT:${url}`);
     }),
@@ -16,7 +17,7 @@ const { mockGetServerSession, mockIsAdmin, mockRedirect, mockQuery } =
 vi.mock("next-auth", () => ({ getServerSession: mockGetServerSession }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("next/navigation", () => ({ redirect: mockRedirect }));
-vi.mock("@/lib/permissions", () => ({ isAdmin: mockIsAdmin }));
+vi.mock("@/lib/permissions", () => ({ isAdmin: mockIsAdmin, getUserPermission: mockGetUserPermission }));
 vi.mock("@/lib/db", () => ({ query: mockQuery }));
 vi.mock("next/link", () => ({
   __esModule: true,
@@ -123,5 +124,19 @@ describe("SchoolsPage (server component)", () => {
     const schoolList = screen.getByTestId("school-list");
     const props = JSON.parse(schoolList.getAttribute("data-props")!);
     expect(props.initialSchools).toEqual([]);
+  });
+});
+
+describe("SchoolsPage read-only admin (D116)", () => {
+  it("passes viewerReadOnly to SchoolList when the admin's permission is read_only", async () => {
+    mockGetServerSession.mockResolvedValue(adminSession);
+    mockIsAdmin.mockResolvedValue(true);
+    mockGetUserPermission.mockResolvedValue({ role: "admin", read_only: true });
+    mockQuery.mockResolvedValue(mockSchools);
+
+    render(await SchoolsPage());
+
+    const props = JSON.parse(screen.getByTestId("school-list").getAttribute("data-props")!);
+    expect(props.viewerReadOnly).toBe(true);
   });
 });

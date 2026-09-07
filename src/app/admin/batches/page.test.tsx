@@ -3,10 +3,11 @@ import { render, screen } from "@testing-library/react";
 
 // ---- mocks (hoisted) ----
 
-const { mockGetServerSession, mockIsAdmin, mockRedirect, mockFetch } =
+const { mockGetServerSession, mockIsAdmin, mockGetUserPermission, mockRedirect, mockFetch } =
   vi.hoisted(() => ({
     mockGetServerSession: vi.fn(),
     mockIsAdmin: vi.fn(),
+    mockGetUserPermission: vi.fn(),
     mockRedirect: vi.fn((url: string) => {
       throw new Error(`REDIRECT:${url}`);
     }),
@@ -16,7 +17,7 @@ const { mockGetServerSession, mockIsAdmin, mockRedirect, mockFetch } =
 vi.mock("next-auth", () => ({ getServerSession: mockGetServerSession }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("next/navigation", () => ({ redirect: mockRedirect }));
-vi.mock("@/lib/permissions", () => ({ isAdmin: mockIsAdmin }));
+vi.mock("@/lib/permissions", () => ({ isAdmin: mockIsAdmin, getUserPermission: mockGetUserPermission }));
 vi.mock("next/link", () => ({
   __esModule: true,
   default: ({
@@ -150,5 +151,31 @@ describe("BatchManagementPage (server component)", () => {
     const batchList = screen.getByTestId("batch-list");
     const props = JSON.parse(batchList.getAttribute("data-props")!);
     expect(props.initialBatches).toEqual([]);
+  });
+});
+
+describe("BatchManagementPage read-only admin (D116)", () => {
+  it("passes viewerReadOnly to BatchList when the admin's permission is read_only", async () => {
+    mockGetServerSession.mockResolvedValue(adminSession);
+    mockIsAdmin.mockResolvedValue(true);
+    mockGetUserPermission.mockResolvedValue({ role: "admin", read_only: true });
+    mockFetch.mockResolvedValue({ ok: false });
+
+    render(await BatchManagementPage());
+
+    const props = JSON.parse(screen.getByTestId("batch-list").getAttribute("data-props")!);
+    expect(props.viewerReadOnly).toBe(true);
+  });
+
+  it("passes viewerReadOnly=false for a read/write admin", async () => {
+    mockGetServerSession.mockResolvedValue(adminSession);
+    mockIsAdmin.mockResolvedValue(true);
+    mockGetUserPermission.mockResolvedValue({ role: "admin", read_only: false });
+    mockFetch.mockResolvedValue({ ok: false });
+
+    render(await BatchManagementPage());
+
+    const props = JSON.parse(screen.getByTestId("batch-list").getAttribute("data-props")!);
+    expect(props.viewerReadOnly).toBe(false);
   });
 });

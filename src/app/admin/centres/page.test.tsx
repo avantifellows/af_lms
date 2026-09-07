@@ -4,12 +4,14 @@ import { render, screen } from "@testing-library/react";
 const {
   mockGetServerSession,
   mockIsAdmin,
+  mockGetUserPermission,
   mockRedirect,
   mockGetCentreList,
   mockGetCentreOptionSets,
 } = vi.hoisted(() => ({
   mockGetServerSession: vi.fn(),
   mockIsAdmin: vi.fn(),
+  mockGetUserPermission: vi.fn(),
   mockRedirect: vi.fn((url: string) => {
     throw new Error(`REDIRECT:${url}`);
   }),
@@ -20,7 +22,7 @@ const {
 vi.mock("next-auth", () => ({ getServerSession: mockGetServerSession }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("next/navigation", () => ({ redirect: mockRedirect }));
-vi.mock("@/lib/permissions", () => ({ isAdmin: mockIsAdmin }));
+vi.mock("@/lib/permissions", () => ({ isAdmin: mockIsAdmin, getUserPermission: mockGetUserPermission }));
 vi.mock("@/lib/centres", () => ({
   getCentreList: mockGetCentreList,
   getCentreOptionSets: mockGetCentreOptionSets,

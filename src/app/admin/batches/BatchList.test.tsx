@@ -481,3 +481,11 @@ describe("BatchList — save edit", () => {
     expect(screen.getByText("unknown_stream")).toBeInTheDocument();
   });
 });
+
+describe("BatchList read-only viewer (D116)", () => {
+  it("replaces every Edit button with a Read-only marker", () => {
+    render(<BatchList {...defaultProps} viewerReadOnly />);
+    expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
+    expect(screen.getAllByText("Read-only").length).toBeGreaterThan(0);
+  });
+});
