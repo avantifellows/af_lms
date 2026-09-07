@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { canAccessSchool } from "@/lib/permissions";
+import { canAccessSchool, getResolvedPermission } from "@/lib/permissions";
 import { query } from "@/lib/db";
 
 interface SchoolInfo {
@@ -12,10 +12,27 @@ interface SchoolInfo {
 }
 
 type AuthResult =
-  | { authorized: true; school: SchoolInfo }
+  | {
+      authorized: true;
+      school: SchoolInfo;
+      /**
+       * True when the caller's `user_permission.read_only` flag is set. School
+       * access says nothing about *changing* things — a read-only admin still
+       * passes `canAccessSchool` — so routes that trigger work (report
+       * generation, retries) pass `requireEdit`, and views consult this to
+       * render the same verdict.
+       */
+      readOnly: boolean;
+    }
   | { authorized: false; response: NextResponse };
 
-export async function authorizeSchoolAccess(udise: string): Promise<AuthResult> {
+// `requireEdit`: additionally refuse read-only callers with 403. Passcode
+// users have no user_permission row and so cannot be read-only; the flag only
+// bites for email users.
+export async function authorizeSchoolAccess(
+  udise: string,
+  options?: { requireEdit?: boolean },
+): Promise<AuthResult> {
   const session = await getServerSession(authOptions);
   if (!session) {
     return {
@@ -43,19 +60,33 @@ export async function authorizeSchoolAccess(udise: string): Promise<AuthResult> 
         response: NextResponse.json({ error: "Access denied" }, { status: 403 }),
       };
     }
-  } else {
-    const hasAccess = await canAccessSchool(
-      session.user?.email || null,
-      school.code,
-      school.region || undefined
-    );
-    if (!hasAccess) {
-      return {
-        authorized: false,
-        response: NextResponse.json({ error: "Access denied" }, { status: 403 }),
-      };
-    }
+    return { authorized: true, school, readOnly: false };
   }
 
-  return { authorized: true, school };
+  const email = session.user?.email || null;
+  const hasAccess = await canAccessSchool(
+    email,
+    school.code,
+    school.region || undefined
+  );
+  if (!hasAccess) {
+    return {
+      authorized: false,
+      response: NextResponse.json({ error: "Access denied" }, { status: 403 }),
+    };
+  }
+
+  const permission = email ? await getResolvedPermission(email) : null;
+  const readOnly = permission?.read_only === true;
+  if (options?.requireEdit && readOnly) {
+    return {
+      authorized: false,
+      response: NextResponse.json(
+        { error: "Read-only access cannot perform this action" },
+        { status: 403 },
+      ),
+    };
+  }
+
+  return { authorized: true, school, readOnly };
 }

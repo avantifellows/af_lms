@@ -175,6 +175,10 @@ export default function CombinedReportPanel({
   // A finished report is the one blocked state ops can act on: the data behind it
   // may have been fixed since, so offer a deliberate rebuild rather than a dead end.
   const alreadyGenerated = blockedReason === "already_generated";
+  // Read-only callers: the API 403s generate and retry alike, so hide Retry
+  // rather than offer a click that fails. (The main button is already disabled
+  // via can_generate=false with the read_only message.)
+  const readOnly = blockedReason === "read_only";
   // Keep the label on "Regenerate" while the rebuild is in flight — it flips to
   // job_in_progress the moment the job is queued, and reverting the wording
   // mid-run reads as the button having reset.
@@ -265,7 +269,7 @@ export default function CombinedReportPanel({
                     Download
                   </a>
                 )}
-                {job.status === "errored" && (
+                {job.status === "errored" && !readOnly && (
                   <button
                     onClick={() => retry(job.job_id)}
                     className="px-3 py-1.5 min-h-[36px] text-xs font-bold uppercase tracking-wide rounded-lg bg-bg-card-alt text-text-primary border border-border hover:border-accent/50"

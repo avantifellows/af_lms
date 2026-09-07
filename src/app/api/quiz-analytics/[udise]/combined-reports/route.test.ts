@@ -75,7 +75,7 @@ function job(status: CombinedReportJob["status"]): CombinedReportJob {
 
 beforeEach(() => {
   vi.resetAllMocks();
-  mockAuth.mockResolvedValue({ authorized: true, school: SCHOOL });
+  mockAuth.mockResolvedValue({ authorized: true, school: SCHOOL, readOnly: false });
   // Roster shapes are incidental to the gate; cast to keep the fixture small.
   mockRoster.mockResolvedValue({
     students: [{ user_id: 1, student_id: "S1", apaar_id: null }],
@@ -93,6 +93,24 @@ function postBody() {
 }
 
 describe("GET combined-reports", () => {
+  it("reports can_generate false with read_only for a read-only caller, even when the test is eligible", async () => {
+    mockAuth.mockResolvedValue({ authorized: true, school: SCHOOL, readOnly: true });
+    mockList.mockResolvedValue([]);
+    mockWindow.mockResolvedValue(ENDED);
+
+    const res = await GET(
+      jsonRequest(`${URL_BASE}?session_id=${SESSION}`),
+      routeParams({ udise: "27361106702" }),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.can_generate).toBe(false);
+    expect(body.blocked_reason).toBe("read_only");
+    expect(body.blocked_message).toMatch(/read-only/i);
+    // Listing still works — read-only means view, not none.
+    expect(body.jobs).toEqual([]);
+  });
+
   it("reports can_generate false with a reason while the session is open", async () => {
     mockList.mockResolvedValue([]);
     mockWindow.mockResolvedValue(OPEN);
@@ -186,6 +204,15 @@ describe("POST combined-reports gating", () => {
     const res = await POST(postBody(), routeParams({ udise: "27361106702" }));
     expect(res.status).toBe(202);
     expect(mockSubmit).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks auth for edit rights — read-only callers must 403 before any work", async () => {
+    mockWindow.mockResolvedValue(ENDED);
+    mockList.mockResolvedValue([]);
+    mockSubmit.mockResolvedValue({ job_id: "j1", status: "queued" });
+
+    await POST(postBody(), routeParams({ udise: "27361106702" }));
+    expect(mockAuth).toHaveBeenCalledWith("27361106702", { requireEdit: true });
   });
 
   it("keeps auth ahead of the gate", async () => {
