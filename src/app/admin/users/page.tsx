@@ -1,7 +1,7 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { redirect } from "next/navigation";
-import { isAdmin } from "@/lib/permissions";
+import { getUserPermission } from "@/lib/permissions";
 import { CENTRE_ASSIGNMENTS_SUBQUERY } from "@/lib/centres";
 import { query } from "@/lib/db";
 import Link from "next/link";
@@ -70,8 +70,8 @@ export default async function UsersPage() {
     redirect("/");
   }
 
-  const admin = await isAdmin(session.user.email);
-  if (!admin) {
+  const permission = await getUserPermission(session.user.email);
+  if (permission?.role !== "admin") {
     redirect("/dashboard");
   }
 
@@ -114,6 +114,7 @@ export default async function UsersPage() {
           regions={regions.map(r => r.region)}
           schoolCodeToName={schoolCodeToName}
           currentUserEmail={session.user.email}
+          viewerReadOnly={!!permission.read_only}
         />
       </main>
     </div>

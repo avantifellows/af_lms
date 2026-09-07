@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import { isAdmin, PROGRAM_IDS_ORDERED } from "@/lib/permissions";
+import { PROGRAM_IDS_ORDERED } from "@/lib/permissions";
 import { query } from "@/lib/db";
+import { requireAdminApiAccess } from "../../route-helpers";
 
 interface RouteParams {
   params: Promise<{ code: string }>;
@@ -10,16 +9,11 @@ interface RouteParams {
 
 // PATCH /api/admin/schools/[code] - Update school program_ids
 export async function PATCH(request: NextRequest, { params }: RouteParams) {
-  const session = await getServerSession(authOptions);
   const { code } = await params;
 
-  if (!session?.user?.email) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const admin = await isAdmin(session.user.email);
-  if (!admin) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  const access = await requireAdminApiAccess({ forWrite: true });
+  if (!access.ok) {
+    return access.response;
   }
 
   try {

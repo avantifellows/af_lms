@@ -13,7 +13,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const session = await getServerSession(authOptions);
-  const access = await requireStaffAdmin(session);
+  const access = await requireStaffAdmin(session, { forWrite: true });
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status });
   }

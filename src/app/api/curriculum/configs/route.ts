@@ -45,7 +45,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const session = await getServerSession(authOptions);
-  const access = await requireCurriculumConfigAdmin(session);
+  const access = await requireCurriculumConfigAdmin(session, { forWrite: true });
 
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status });

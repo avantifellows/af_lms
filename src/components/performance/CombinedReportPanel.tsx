@@ -175,6 +175,10 @@ export default function CombinedReportPanel({
   // A finished report is the one blocked state ops can act on: the data behind it
   // may have been fixed since, so offer a deliberate rebuild rather than a dead end.
   const alreadyGenerated = blockedReason === "already_generated";
+  // Read-only callers: the API 403s generate and retry alike, so hide Retry
+  // rather than offer a click that fails. (The main button is already disabled
+  // via can_generate=false with the read_only message.)
+  const readOnly = blockedReason === "read_only";
   // Keep the label on "Regenerate" while the rebuild is in flight — it flips to
   // job_in_progress the moment the job is queued, and reverting the wording
   // mid-run reads as the button having reset.
@@ -235,48 +239,68 @@ export default function CombinedReportPanel({
               key={job.job_id}
               className="py-2 flex items-center justify-between gap-3 flex-wrap"
             >
-              <div className="flex items-center gap-2 flex-wrap">
-                <span
-                  className={`px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide rounded border ${STATUS_STYLE[job.status]}`}
-                >
-                  {STATUS_LABEL[job.status]}
-                </span>
-                <span className="text-xs text-text-muted">
-                  {formatTime(job.created_at)}
-                </span>
-                {job.status === "done" && job.matched_count != null && (
-                  <span className="text-xs text-text-muted">
-                    {job.matched_count} of {job.student_count} students
-                    {job.missing_count ? ` · ${job.missing_count} missing` : ""}
-                  </span>
-                )}
-                {job.status === "errored" && job.error && (
-                  <span className="text-xs text-danger">{job.error}</span>
-                )}
-              </div>
-              <div className="flex items-center gap-2">
-                {job.status === "done" && job.download_url && (
-                  <a
-                    href={job.download_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center justify-center px-3 py-1.5 min-h-[36px] text-xs font-bold uppercase tracking-wide rounded-lg bg-accent text-text-on-accent hover:opacity-90"
-                  >
-                    Download
-                  </a>
-                )}
-                {job.status === "errored" && (
-                  <button
-                    onClick={() => retry(job.job_id)}
-                    className="px-3 py-1.5 min-h-[36px] text-xs font-bold uppercase tracking-wide rounded-lg bg-bg-card-alt text-text-primary border border-border hover:border-accent/50"
-                  >
-                    Retry
-                  </button>
-                )}
-              </div>
+              <JobSummary job={job} />
+              <JobActions job={job} canRetry={!readOnly} onRetry={retry} />
             </li>
           ))}
         </ul>
+      )}
+    </div>
+  );
+}
+
+function JobSummary({ job }: { job: Job }) {
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      <span
+        className={`px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide rounded border ${STATUS_STYLE[job.status]}`}
+      >
+        {STATUS_LABEL[job.status]}
+      </span>
+      <span className="text-xs text-text-muted">{formatTime(job.created_at)}</span>
+      {job.status === "done" && job.matched_count != null && (
+        <span className="text-xs text-text-muted">
+          {job.matched_count} of {job.student_count} students
+          {job.missing_count ? ` · ${job.missing_count} missing` : ""}
+        </span>
+      )}
+      {job.status === "errored" && job.error && (
+        <span className="text-xs text-danger">{job.error}</span>
+      )}
+    </div>
+  );
+}
+
+// `canRetry` is false for read-only callers: the retry route 403s them, so the
+// button is withheld rather than offered as a click that fails.
+function JobActions({
+  job,
+  canRetry,
+  onRetry,
+}: {
+  job: Job;
+  canRetry: boolean;
+  onRetry: (jobId: string) => void;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      {job.status === "done" && job.download_url && (
+        <a
+          href={job.download_url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center justify-center px-3 py-1.5 min-h-[36px] text-xs font-bold uppercase tracking-wide rounded-lg bg-accent text-text-on-accent hover:opacity-90"
+        >
+          Download
+        </a>
+      )}
+      {job.status === "errored" && canRetry && (
+        <button
+          onClick={() => onRetry(job.job_id)}
+          className="px-3 py-1.5 min-h-[36px] text-xs font-bold uppercase tracking-wide rounded-lg bg-bg-card-alt text-text-primary border border-border hover:border-accent/50"
+        >
+          Retry
+        </button>
       )}
     </div>
   );

@@ -50,7 +50,7 @@ const ROLE_DESCRIPTIONS: Record<string, string> = {
   program_admin: "Program Admins can oversee scoped schools, manage their own school visits, and monitor scoped Holistic Mentorship progress",
   teacher: "Teachers can view and manage students in their assigned schools",
   holistic_mentorship_admin: "Holistic Mentorship Admins can manage JNV CoE and EMRS CoE mentorship",
-  admin: "Admins have full access to all features, all schools, and all programs",
+  admin: "Admins have access to all features, all schools, and all programs — full edit unless marked read-only",
 };
 
 type UserFormValues = {
@@ -116,7 +116,7 @@ function buildUserBody(values: UserFormValues, user: UserPermission | null) {
   const body: Record<string, unknown> = {
     level: hasGlobalSchoolAccess(values.role) ? 3 : values.level,
     role: values.role,
-    read_only: values.role === "admin" ? false : values.readOnly,
+    read_only: values.readOnly,
     program_ids: programIdsFor(values.role, values.selectedPrograms),
     full_name: values.fullName.trim() || null,
   };
@@ -332,9 +332,12 @@ type AccessFieldsProps = {
 
 function AccessFields({ role, ...props }: AccessFieldsProps) {
   if (role === "admin") {
-    return <div className="rounded-md bg-gray-50 p-3 text-sm text-gray-600">
-      Admins automatically get access to all schools, all programs, and full edit permissions.
-    </div>;
+    return <>
+      <div className="rounded-md bg-gray-50 p-3 text-sm text-gray-600">
+        Admins automatically get access to all schools, all programs, and every admin surface.
+      </div>
+      <ReadOnlyField value={props.readOnly} onChange={props.onReadOnlyChange} label="Read-only access (can view everything, cannot change anything)" />
+    </>;
   }
   if (role === "holistic_mentorship_admin") {
     return <>
