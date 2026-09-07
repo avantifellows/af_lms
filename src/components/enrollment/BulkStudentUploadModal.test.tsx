@@ -93,7 +93,7 @@ async function selectFile(user: ReturnType<typeof userEvent.setup>, name = "stud
 }
 
 async function checkFile(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole("button", { name: "Check file" }));
+  await user.click(screen.getByRole("button", { name: "Check spreadsheet" }));
 }
 
 describe("BulkStudentUploadModal", () => {
@@ -137,14 +137,17 @@ describe("BulkStudentUploadModal", () => {
     const selected = await selectFile(user);
 
     expect(fetch).not.toHaveBeenCalled();
-    expect(screen.queryByRole("button", { name: /Add/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Check & add students" })).not.toBeInTheDocument();
 
     await checkFile(user);
     await screen.findByText("Nothing has been added yet.");
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(baseProps.onUploaded).not.toHaveBeenCalled();
-    expect(screen.getByText("1 row ready for final checks")).toBeInTheDocument();
-    expect(screen.getByText("1 row needs correction")).toBeInTheDocument();
+    expect(screen.getByText("1 row passed spreadsheet checks")).toBeInTheDocument();
+    expect(screen.getByText("2 rows checked")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Spreadsheet check complete" })).toBeInTheDocument();
+    expect(screen.getByText(/Only the 1 row that passed will continue/)).toBeInTheDocument();
+    expect(screen.getByText("1 row needs correction — these will not be added")).toBeInTheDocument();
     expect(screen.getByText("Row 7 was ignored as the example row. Matched: PEN.")).toBeInTheDocument();
     expect(screen.getByText("Needs correction")).toBeInTheDocument();
     const checkForm = vi.mocked(fetch).mock.calls[0][1]?.body as FormData;
@@ -152,7 +155,7 @@ describe("BulkStudentUploadModal", () => {
     expect(checkForm.get("action")).toBe("validate");
     expect((checkForm.get("file") as File).name).toBe(selected.name);
 
-    await user.click(screen.getByRole("button", { name: "Add 1 student" }));
+    await user.click(screen.getByRole("button", { name: "Check & add students" }));
     await screen.findByRole("heading", { name: "Upload complete" });
     expect(fetch).toHaveBeenCalledTimes(2);
     const addForm = vi.mocked(fetch).mock.calls[1][1]?.body as FormData;
@@ -162,7 +165,7 @@ describe("BulkStudentUploadModal", () => {
     expect(screen.getByText("Already present 0")).toBeInTheDocument();
     expect(screen.getByText("Rejected 1")).toBeInTheDocument();
     expect(baseProps.onUploaded).toHaveBeenCalledTimes(1);
-    expect(screen.queryByRole("button", { name: /Add/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Check & add students" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Done" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Upload another file" })).toBeInTheDocument();
   });
@@ -174,14 +177,14 @@ describe("BulkStudentUploadModal", () => {
 
     await selectFile(user);
     await checkFile(user);
-    await screen.findByText("2 rows ready for final checks");
+    await screen.findByText("2 rows passed spreadsheet checks");
     await user.click(screen.getByRole("button", { name: "Cancel" }));
 
     expect(baseProps.onClose).toHaveBeenCalledTimes(1);
     expect(baseProps.onUploaded).not.toHaveBeenCalled();
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(screen.queryByText("Nothing has been added yet.")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Check file" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Check spreadsheet" })).toBeDisabled();
   });
 
   it("sends only one check request for synchronous duplicate submits", async () => {
@@ -190,12 +193,12 @@ describe("BulkStudentUploadModal", () => {
     render(<BulkStudentUploadModal {...baseProps} />);
 
     await selectFile(user);
-    const form = screen.getByRole("button", { name: "Check file" }).closest("form");
+    const form = screen.getByRole("button", { name: "Check spreadsheet" }).closest("form");
     expect(form).not.toBeNull();
     fireEvent.submit(form!);
     fireEvent.submit(form!);
 
-    await screen.findByText("1 row ready for final checks");
+    await screen.findByText("1 row passed spreadsheet checks");
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 
@@ -222,8 +225,8 @@ describe("BulkStudentUploadModal", () => {
 
     await selectFile(user);
     await checkFile(user);
-    await screen.findByText("2 rows ready for final checks");
-    await user.click(screen.getByRole("button", { name: "Add 2 students" }));
+    await screen.findByText("2 rows passed spreadsheet checks");
+    await user.click(screen.getByRole("button", { name: "Check & add students" }));
 
     await screen.findByRole("heading", { name: "Upload complete" });
     expect(screen.getByText("Added 2")).toBeInTheDocument();
@@ -246,7 +249,7 @@ describe("BulkStudentUploadModal", () => {
     resolveCheck(checkedResponse({ readyCount: 1 }));
 
     await waitFor(() => expect(screen.queryByText("Nothing has been added yet.")).not.toBeInTheDocument());
-    expect(screen.getByRole("button", { name: "Check file" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Check spreadsheet" })).toBeDisabled();
   });
 
   it("shows all-invalid checked rows without offering Add", async () => {
@@ -274,10 +277,10 @@ describe("BulkStudentUploadModal", () => {
 
     await selectFile(user, "all-invalid.csv");
     await checkFile(user);
-    await screen.findByText("0 rows ready for final checks");
-    expect(screen.getByText("2 rows need correction")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Add/ })).not.toBeInTheDocument();
-    const download = screen.getByRole("link", { name: "Download rejected rows CSV" });
+    await screen.findByText("0 rows passed spreadsheet checks");
+    expect(screen.getByText("2 rows need correction — these will not be added")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Check & add students" })).not.toBeInTheDocument();
+    const download = screen.getByRole("link", { name: "Download rows needing correction" });
     const href = download.getAttribute("href") ?? "";
     expect(href).toContain("Bad%20One");
     expect(href).toContain("Bad%20Two");
@@ -314,13 +317,13 @@ describe("BulkStudentUploadModal", () => {
 
     const selected = await selectFile(user);
     await checkFile(user);
-    await screen.findByText("1 row needs correction");
-    const previewCsv = screen.getByRole("link", { name: "Download rejected rows CSV" });
+    await screen.findByText("1 row needs correction — these will not be added");
+    const previewCsv = screen.getByRole("link", { name: "Download rows needing correction" });
     const previewHref = previewCsv.getAttribute("href") ?? "";
     expect(previewHref).toContain("Bad%20Student");
     expect(previewHref).not.toContain("Good%20Student");
 
-    await user.click(screen.getByRole("button", { name: "Add 1 student" }));
+    await user.click(screen.getByRole("button", { name: "Check & add students" }));
     await screen.findByRole("heading", { name: "Upload complete" });
     await user.click(screen.getByRole("button", { name: "Upload another file" }));
     expect(screen.getByLabelText("Student upload file")).toHaveProperty("files", expect.objectContaining({ length: 0 }));
@@ -329,7 +332,7 @@ describe("BulkStudentUploadModal", () => {
 
     await user.upload(screen.getByLabelText("Student upload file"), selected);
     await checkFile(user);
-    await screen.findByText("1 row ready for final checks");
+    await screen.findByText("1 row passed spreadsheet checks");
     expect(fetch).toHaveBeenCalledTimes(3);
     expect(baseProps.onUploaded).toHaveBeenCalledTimes(1);
   });
@@ -358,12 +361,12 @@ describe("BulkStudentUploadModal", () => {
       "download",
       "NVS_Lakshya_Data_Template_updated_19th_August_2026.xlsx",
     );
-    expect(screen.queryByRole("button", { name: /Add/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Check & add students" })).not.toBeInTheDocument();
 
     await selectFile(user, "correct.csv");
     expect(screen.queryByText("Missing columns: Gender")).not.toBeInTheDocument();
     await checkFile(user);
-    await screen.findByText("1 row ready for final checks");
+    await screen.findByText("1 row passed spreadsheet checks");
   });
 
   it("resets the selected file and checked state when upload context changes", async () => {
@@ -375,25 +378,25 @@ describe("BulkStudentUploadModal", () => {
 
     await selectFile(user);
     await checkFile(user);
-    await screen.findByText("1 row ready for final checks");
+    await screen.findByText("1 row passed spreadsheet checks");
 
     rerender(<BulkStudentUploadModal {...baseProps} schoolUdise="98765432109" />);
     await waitFor(() => {
       expect(screen.getByLabelText("Student upload file")).toHaveProperty("files", expect.objectContaining({ length: 0 }));
-      expect(screen.queryByText("1 row ready for final checks")).not.toBeInTheDocument();
+      expect(screen.queryByText("1 row passed spreadsheet checks")).not.toBeInTheDocument();
     });
-    expect(screen.getByRole("button", { name: "Check file" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Check spreadsheet" })).toBeDisabled();
 
     await selectFile(user);
     await checkFile(user);
-    await screen.findByText("2 rows ready for final checks");
+    await screen.findByText("2 rows passed spreadsheet checks");
 
     rerender(<BulkStudentUploadModal {...baseProps} schoolUdise="98765432109" registrationMode={PHONE_REGISTRATION_MODE} />);
     await waitFor(() => {
       expect(screen.getByLabelText("Student upload file")).toHaveProperty("files", expect.objectContaining({ length: 0 }));
-      expect(screen.queryByText("2 rows ready for final checks")).not.toBeInTheDocument();
+      expect(screen.queryByText("2 rows passed spreadsheet checks")).not.toBeInTheDocument();
     });
-    expect(screen.getByRole("button", { name: "Check file" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Check spreadsheet" })).toBeDisabled();
   });
 
   it("rejects a check response that does not match the checked contract", async () => {
@@ -408,8 +411,8 @@ describe("BulkStudentUploadModal", () => {
     await checkFile(user);
 
     expect(await screen.findByRole("alert")).toHaveTextContent("We could not check this file");
-    expect(screen.queryByText(/ready for final checks/)).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Add/ })).not.toBeInTheDocument();
+    expect(screen.queryByText(/passed spreadsheet checks/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Check & add students" })).not.toBeInTheDocument();
   });
 
   it("shows final existing and duplicate outcomes as completed rejected results", async () => {
@@ -446,8 +449,8 @@ describe("BulkStudentUploadModal", () => {
 
     await selectFile(user);
     await checkFile(user);
-    await screen.findByText("2 rows ready for final checks");
-    await user.click(screen.getByRole("button", { name: "Add 2 students" }));
+    await screen.findByText("2 rows passed spreadsheet checks");
+    await user.click(screen.getByRole("button", { name: "Check & add students" }));
     await screen.findByRole("heading", { name: "Upload complete" });
 
     expect(screen.getByText("Added 0")).toBeInTheDocument();
@@ -457,7 +460,7 @@ describe("BulkStudentUploadModal", () => {
     expect(screen.getAllByText("Rejected").length).toBeGreaterThan(0);
     expect(screen.getByText(/This identifier already belongs to Existing Student/)).toBeInTheDocument();
     expect(screen.getByText("Duplicate in uploaded file: PEN Number, Grade 10 Roll no")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Add/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Check & add students" })).not.toBeInTheDocument();
     expect(baseProps.onUploaded).not.toHaveBeenCalled();
     expect(screen.getByRole("link", { name: "Download rejected rows CSV" })).toBeInTheDocument();
   });
@@ -489,8 +492,8 @@ describe("BulkStudentUploadModal", () => {
 
     await selectFile(user, "students.csv");
     await checkFile(user);
-    await screen.findByText("1 row ready for final checks");
-    await user.click(screen.getByRole("button", { name: "Add 1 student" }));
+    await screen.findByText("1 row passed spreadsheet checks");
+    await user.click(screen.getByRole("button", { name: "Check & add students" }));
     await screen.findByRole("heading", { name: "Upload complete" });
 
     expect(screen.getByText(
@@ -516,12 +519,12 @@ describe("BulkStudentUploadModal", () => {
 
     await selectFile(user);
     await checkFile(user);
-    await screen.findByText("1 row ready for final checks");
-    await user.click(screen.getByRole("button", { name: "Add 1 student" }));
+    await screen.findByText("1 row passed spreadsheet checks");
+    await user.click(screen.getByRole("button", { name: "Check & add students" }));
 
     expect(await screen.findByText(/final result was not returned/)).toBeInTheDocument();
     expect(fetch).toHaveBeenCalledTimes(2);
-    expect(screen.queryByRole("button", { name: /Add/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Check & add students" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Done" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Upload another file" })).toBeInTheDocument();
     expect(baseProps.onUploaded).toHaveBeenCalledTimes(1);
@@ -539,13 +542,13 @@ describe("BulkStudentUploadModal", () => {
 
     await selectFile(user);
     await checkFile(user);
-    await screen.findByText("1 row ready for final checks");
-    await user.click(screen.getByRole("button", { name: "Add 1 student" }));
+    await screen.findByText("1 row passed spreadsheet checks");
+    await user.click(screen.getByRole("button", { name: "Check & add students" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Student could not be created");
     expect(screen.getByRole("alert")).toHaveTextContent(/final result was not returned/);
     expect(baseProps.onUploaded).toHaveBeenCalledTimes(1);
-    expect(screen.queryByRole("button", { name: /Add/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Check & add students" })).not.toBeInTheDocument();
   });
 
   it("exposes accessible dialog and busy labels during checking and adding", async () => {
@@ -561,12 +564,12 @@ describe("BulkStudentUploadModal", () => {
     await selectFile(user);
     await checkFile(user);
     expect(screen.getByRole("button", { name: "Checking…" })).toBeDisabled();
-    expect(screen.getByText(/Checking file/)).toHaveAttribute("role", "status");
+    expect(screen.getByText(/Checking spreadsheet/)).toHaveAttribute("role", "status");
     resolveCheck(checkedResponse({ readyCount: 1 }));
-    await screen.findByText("1 row ready for final checks");
+    await screen.findByText("1 row passed spreadsheet checks");
 
-    await user.click(screen.getByRole("button", { name: "Add 1 student" }));
-    expect(screen.getByRole("button", { name: "Adding…" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Check & add students" }));
+    expect(screen.getByRole("button", { name: "Checking & adding…" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
     resolveAdd(finalResponse({ results: [{ row_number: 2, status: "created" }] }));
     await screen.findByRole("heading", { name: "Upload complete" });

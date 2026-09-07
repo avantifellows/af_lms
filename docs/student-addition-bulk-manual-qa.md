@@ -7,7 +7,7 @@ Use one real-like JNV NVS workbook from Ops with Grade 11 or Grade 12 selected o
 ## Workbook Cases
 
 - Valid rows create students and refresh the active roster.
-- In Phone mode, repeated phones appear as rejected rows during Check file, with every matching row excluded from the ready count. Add rechecks and never sends these rows to DB Service. In Approved mode, DB Service retains its `duplicate_in_file` checks.
+- In Phone mode, repeated phones appear as rejected rows during Check spreadsheet, with every matching row excluded from the ready count. Add rechecks and never sends these rows to DB Service. In Approved mode, DB Service retains its `duplicate_in_file` checks.
 - Already-existing students return `already_exists` and do not overwrite existing data.
 - Missing APAAR ID and Grade 10 Roll no returns a rejected row.
 - Bad dates, including future Date of Birth, return field errors.
@@ -24,15 +24,15 @@ requests to the LMS route separately from the DB Service request; a database wri
 means a student row/enrollment created by the existing DB Service contract.
 
 - Selecting a valid or invalid file only updates the modal: 0 LMS requests, 0 DB Service requests, and 0 writes.
-- `Check file` sends exactly 1 read-only LMS validation request, returns the ready/rejected summary, and makes 0 DB Service requests and 0 writes. It must not show a final created result.
-- For an invalid-only file, the check shows ready = 0; `Add students` stays unavailable and the flow makes 0 DB Service requests and 0 writes.
-- For a mixed file, `Add students` sends exactly 1 LMS upload request. The route re-runs authoritative checks and makes exactly 1 DB Service request containing only ready rows; rejected rows cause no writes. The final result includes both authoritative statuses and local rejects.
-- A header/template mismatch stops at the LMS check: 1 LMS request, 0 DB Service requests, and 0 writes; `Add students` remains unavailable until a corrected file is checked.
+- `Check spreadsheet` sends exactly 1 read-only LMS validation request, returns the ready/rejected summary, and makes 0 DB Service requests and 0 writes. It must not show a final created result.
+- For an invalid-only file, the check shows ready = 0; `Check & add students` stays unavailable and the flow makes 0 DB Service requests and 0 writes.
+- For a mixed file, `Check & add students` sends exactly 1 LMS upload request. The route re-runs authoritative checks and makes exactly 1 DB Service request containing only ready rows; rejected rows cause no writes. The final result includes both authoritative statuses and local rejects.
+- A header/template mismatch stops at the LMS check: 1 LMS request, 0 DB Service requests, and 0 writes; `Check & add students` remains unavailable until a corrected file is checked.
 - Cancel/close before checking or before adding makes no additional request and no write. While adding, Close and Cancel are disabled; attempting either must not start a second request, and the existing add remains at most 1 LMS request and 1 DB Service request.
-- Double-click `Check file` or `Add students`: the action is disabled while the request is in flight; expect exactly 1 LMS validation request for Check file, or exactly 1 LMS upload request and at most 1 DB Service request for Add students, with no duplicate writes.
-- Force an unreadable response or timeout during `Add students`: expect exactly 1 LMS upload request, no automatic retry, a refreshed roster, and an explicit unknown final outcome. DB Service may have been called and may have written rows, so do not report success or assume zero writes; reconcile by an explicit same-file re-upload after reset.
+- Double-click `Check spreadsheet` or `Check & add students`: the action is disabled while the request is in flight; expect exactly 1 LMS validation request for Check spreadsheet, or exactly 1 LMS upload request and at most 1 DB Service request for Check & add students, with no duplicate writes.
+- Force an unreadable response or timeout during `Check & add students`: expect exactly 1 LMS upload request, no automatic retry, a refreshed roster, and an explicit unknown final outcome. DB Service may have been called and may have written rows, so do not report success or assume zero writes; reconcile by an explicit same-file re-upload after reset.
 - Use `Reset`/`Upload another` after a check, result, mismatch, or error: expect 0 requests for the reset itself, cleared file/summary/results/errors, and successful selection of the same file again. A fresh check then makes 1 LMS request; a fresh add follows the counts above.
-- Repeat the checklist with Phone and Approved templates. Phone checks/results contain only active Phone-mode fields and never call DB Service during `Check file`; Approved includes its PEN, Grade 10 Roll no, and Annual Family Income fields, but the request/write counts are otherwise the same. No step changes the DB Service contract or database schema; Add students writes through the existing contract.
+- Repeat the checklist with Phone and Approved templates. Phone checks/results contain only active Phone-mode fields and never call DB Service during `Check spreadsheet`; Approved includes its PEN, Grade 10 Roll no, and Annual Family Income fields, but the request/write counts are otherwise the same. No step changes the DB Service contract or database schema; Check & add students writes through the existing contract.
 
 ## Checks
 
@@ -45,3 +45,5 @@ means a student row/enrollment created by the existing DB Service contract.
 - Phone duplicate regression: check a sheet with two repeated phones plus one unique row; expect 1 ready / 2 rejected and zero DB calls. Add forwards only the unique row. Repeat with one matching row having another field error, an all-duplicate sheet, and a corrected rejected-CSV retry. The named example row must not cause a duplicate conflict.
 
 - Automatic Excel encryption: Check a workbook encrypted with Excel’s built-in default password (Standard and Agile); normal preview and validation must work with zero writes. A workbook with a user-supplied password must show the unsupported-password error and make no DB Service call. Ordinary XLSX, corrupt XLSX, and rejected CSV behavior must stay unchanged.
+
+- Preview counts and wording: 59 total / 50 passed / 9 correction must remain distinct from 50 total / 41 passed / 9 correction. Verify both numbered steps, the correction-only preview download label, and the Check & add students button on desktop and mobile. Zero passed rows show correction guidance with no add action. Final result totals retain Added / Already present / Rejected.

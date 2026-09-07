@@ -263,13 +263,13 @@ function templateMismatch(value: unknown): TemplateMismatch | null {
 function unknownResponseMessage(action: "validate" | "upload"): string {
   return action === "validate"
     ? "We could not check this file. Please try again or choose a different file."
-    : "The final result was not returned. Some rows may still be processing. Do not try Add again; wait a minute and check the student list before starting a new upload.";
+    : "The final result was not returned. Some rows may still be processing. Do not try Check & add students again; wait a minute and check the student list before starting a new upload.";
 }
 
 function requestErrorMessage(action: "validate" | "upload"): string {
   return action === "validate"
     ? "We could not check this file. Please try again or choose a different file."
-    : "The final result could not be confirmed. Some rows may still be processing. Do not try Add again; check the student list before starting a new upload.";
+    : "The final result could not be confirmed. Some rows may still be processing. Do not try Check & add students again; check the student list before starting a new upload.";
 }
 
 function finalUnknownOutcomeMessage(serverError: unknown): string {
@@ -621,6 +621,12 @@ export default function BulkStudentUploadModal({
           </div>
 
           <div>
+            <h3 className="mb-1 text-base font-semibold text-text-primary">
+              Step 1: Check spreadsheet
+            </h3>
+            <p className="mb-3 text-sm text-text-secondary">
+              Check the file’s columns, required values{phoneMode ? ", and repeated phone numbers" : ""}. No students will be added.
+            </p>
             <label htmlFor="bulk-file" className="block text-sm font-medium text-text-secondary">
               Student upload file
             </label>
@@ -634,7 +640,7 @@ export default function BulkStudentUploadModal({
               onChange={handleFileChange}
             />
             <p id="bulk-file-help" className="mt-1 text-xs text-text-muted">
-              Choosing a file does not add students. Check the file before any students are added.
+              Choosing a file does not add students.
             </p>
             {file && (
               <p className="mt-1 break-words text-xs text-text-muted">
@@ -645,7 +651,7 @@ export default function BulkStudentUploadModal({
 
           {phase === "checking" && (
             <p role="status" aria-live="polite" className="text-sm text-text-secondary">
-              Checking file… Nothing has been added yet.
+              Checking spreadsheet… Nothing has been added yet.
             </p>
           )}
 
@@ -658,7 +664,7 @@ export default function BulkStudentUploadModal({
               <div className="flex flex-wrap items-baseline justify-between gap-3">
                 <div>
                   <h3 id="bulk-upload-check-results" className="text-base font-semibold text-text-primary">
-                    File checked
+                    Spreadsheet check complete
                   </h3>
                   <p className="mt-1 text-sm font-medium text-text-primary">
                     Nothing has been added yet.
@@ -670,13 +676,16 @@ export default function BulkStudentUploadModal({
                     download="student-addition-rejected-rows.csv"
                     className="text-sm font-medium text-accent hover:text-accent-hover"
                   >
-                    Download rejected rows CSV
+                    Download rows needing correction
                   </a>
                 )}
               </div>
+              <p className="text-base font-semibold text-text-primary">
+                {countLabel(preview.readyCount + preview.needsCorrectionCount, "row")} checked
+              </p>
               <div className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
-                <span>{countLabel(preview.readyCount, "row")} ready for final checks</span>
-                <span>{countLabel(preview.needsCorrectionCount, "row")} need{preview.needsCorrectionCount === 1 ? "s" : ""} correction</span>
+                <span>{countLabel(preview.readyCount, "row")} passed spreadsheet checks</span>
+                <span>{countLabel(preview.needsCorrectionCount, "row")} need{preview.needsCorrectionCount === 1 ? "s" : ""} correction{preview.needsCorrectionCount > 0 ? " — these will not be added" : ""}</span>
               </div>
               {preview.rejectedRows.length > 0 && (
                 <ResultTable
@@ -689,9 +698,28 @@ export default function BulkStudentUploadModal({
             </section>
           )}
 
+          {phase === "checked" && preview && (
+            <section aria-labelledby="bulk-upload-next-step" className="space-y-2">
+              {preview.readyCount > 0 ? (
+                <>
+                  <h3 id="bulk-upload-next-step" className="text-base font-semibold text-text-primary">
+                    Step 2: Check existing records and add students
+                  </h3>
+                  <p className="text-sm text-text-secondary">
+                    Only the {countLabel(preview.readyCount, "row")} that passed will continue. We’ll check for existing students and other registration issues, then add eligible new students. Already registered students will be skipped.
+                  </p>
+                </>
+              ) : (
+                <p id="bulk-upload-next-step" className="text-sm text-text-secondary">
+                  No rows can continue yet. Correct the errors and choose the updated file to check it again.
+                </p>
+              )}
+            </section>
+          )}
+
           {phase === "adding" && (
             <p role="status" aria-live="polite" className="text-sm text-text-secondary">
-              Adding students… Please wait for the final result.
+              Checking existing records and adding eligible students… Please wait for the final result.
             </p>
           )}
 
@@ -755,13 +783,13 @@ export default function BulkStudentUploadModal({
               {(phase === "select" || phase === "check-error") && (
                 <Button type="submit" disabled={!file || busy}>
                   <Upload className="h-4 w-4" aria-hidden="true" />
-                  Check file
+                  Check spreadsheet
                 </Button>
               )}
               {phase === "checked" && preview && preview.readyCount > 0 && (
                 <Button type="submit" disabled={busy || finalAttemptedRef.current}>
                   <Upload className="h-4 w-4" aria-hidden="true" />
-                  Add {preview.readyCount} student{preview.readyCount === 1 ? "" : "s"}
+                  Check &amp; add students
                 </Button>
               )}
               {phase === "checking" && (
@@ -773,7 +801,7 @@ export default function BulkStudentUploadModal({
               {phase === "adding" && (
                 <Button type="submit" disabled>
                   <Upload className="h-4 w-4" aria-hidden="true" />
-                  Adding…
+                  Checking &amp; adding…
                 </Button>
               )}
             </>
