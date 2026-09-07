@@ -88,6 +88,30 @@ describe("requireStaffAdmin", () => {
       await requireStaffAdmin({ user: { email: "admin@avantifellows.org" } })
     ).toMatchObject({ ok: true, email: "admin@avantifellows.org" });
   });
+
+  it("rejects a read-only admin on forWrite but admits them on reads", async () => {
+    mockGetUserPermission.mockResolvedValueOnce({ role: "admin", read_only: true });
+    expect(
+      await requireStaffAdmin(
+        { user: { email: "ro@avantifellows.org" } },
+        { forWrite: true }
+      )
+    ).toMatchObject({ ok: false, status: 403 });
+    mockGetUserPermission.mockResolvedValueOnce({ role: "admin", read_only: true });
+    expect(
+      await requireStaffAdmin({ user: { email: "ro@avantifellows.org" } })
+    ).toMatchObject({ ok: true, email: "ro@avantifellows.org" });
+  });
+
+  it("still admits a read-write admin on forWrite", async () => {
+    mockGetUserPermission.mockResolvedValueOnce({ role: "admin", read_only: false });
+    expect(
+      await requireStaffAdmin(
+        { user: { email: "admin@avantifellows.org" } },
+        { forWrite: true }
+      )
+    ).toMatchObject({ ok: true, email: "admin@avantifellows.org" });
+  });
 });
 
 describe("normalizeEmployeeCode / isSeatRole", () => {

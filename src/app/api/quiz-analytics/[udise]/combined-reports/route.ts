@@ -37,7 +37,11 @@ export async function GET(
     // The panel renders its button from this, so it needs the same verdict the
     // POST route will apply — otherwise the button invites a click that 409s.
     const window = await getSessionWindow(sessionId);
-    const eligibility = evaluateGenerationEligibility(window, jobs);
+    // A read-only caller is blocked before the test-state gate: POST will 403
+    // them regardless of the session, so that is the verdict the button shows.
+    const eligibility = auth.readOnly
+      ? { allowed: false, reason: "read_only" as const }
+      : evaluateGenerationEligibility(window, jobs);
     return NextResponse.json({
       jobs,
       session_end_time: window.endTimeUtcIso,
@@ -69,7 +73,9 @@ export async function POST(
   { params }: { params: Promise<{ udise: string }> },
 ) {
   const { udise } = await params;
-  const auth = await authorizeSchoolAccess(udise);
+  // Generating a report is work, not a read: read-only callers get 403 here
+  // even though they can list and download existing reports via GET.
+  const auth = await authorizeSchoolAccess(udise, { requireEdit: true });
   if (!auth.authorized) return auth.response;
 
   let body: {

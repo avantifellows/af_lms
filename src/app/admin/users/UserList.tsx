@@ -33,6 +33,12 @@ interface UserListProps {
    */
   schoolCodeToName: Record<string, string>;
   currentUserEmail: string;
+  /**
+   * True when the viewer is a read-only admin. Hides every mutation control
+   * (Add/Edit/Delete) — the admin APIs reject their writes with 403 anyway,
+   * this just keeps the UI honest about it.
+   */
+  viewerReadOnly: boolean;
 }
 
 const LEVEL_LABELS: Record<number, string> = {
@@ -69,7 +75,7 @@ const PROGRAM_LABELS: Record<number, string> = {
   64: "NVS",
 };
 
-export default function UserList({ initialUsers, regions, schoolCodeToName, currentUserEmail }: UserListProps) {
+export default function UserList({ initialUsers, regions, schoolCodeToName, currentUserEmail, viewerReadOnly }: UserListProps) {
   const labelForSchool = (code: string) => {
     const name = schoolCodeToName[code];
     return name ? `${name} (${code})` : code;
@@ -123,14 +129,18 @@ export default function UserList({ initialUsers, regions, schoolCodeToName, curr
     <>
       <div className="mb-6 flex justify-between items-center">
         <div className="text-sm text-gray-500">
-          Manage user access levels and permissions
+          {viewerReadOnly
+            ? "Read-only view of user access levels and permissions"
+            : "Manage user access levels and permissions"}
         </div>
-        <Button
-          onClick={() => setShowAddModal(true)}
-          size="sm"
-        >
-          Add User
-        </Button>
+        {!viewerReadOnly && (
+          <Button
+            onClick={() => setShowAddModal(true)}
+            size="sm"
+          >
+            Add User
+          </Button>
+        )}
       </div>
 
       <div className="overflow-x-auto bg-white shadow ring-1 ring-black ring-opacity-5 sm:rounded-lg">
@@ -236,6 +246,10 @@ export default function UserList({ initialUsers, regions, schoolCodeToName, curr
                   </div>
                 </td>
                 <td className="px-3 py-4 text-sm">
+                  {viewerReadOnly ? (
+                    <span className="text-xs text-gray-400">Read-only</span>
+                  ) : (
+                  <>
                   <div className="flex items-center whitespace-nowrap">
                     {(user.centres?.length ?? 0) > 0 ? (
                       // Seated users' scope is derived from their centre, so it
@@ -272,6 +286,8 @@ export default function UserList({ initialUsers, regions, schoolCodeToName, curr
                     <p className="mt-1 text-xs text-gray-400">
                       Edit in Staff Management only
                     </p>
+                  )}
+                  </>
                   )}
                 </td>
               </tr>

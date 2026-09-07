@@ -6,7 +6,8 @@ import { EXAM_TRACKS, formatExamTrack, isExamTrack } from "./exam-tracks";
 import { getSubjectExamTrackCompatibilityError } from "./curriculum-subject-track";
 import { curriculumIdForExamTrack } from "./curriculum-options";
 import { query } from "./db";
-import { PHYSICAL_CENTRE_PROGRAM_IDS, getUserPermission, type UserPermission } from "./permissions";
+import { requireAdmin } from "./admin-guard";
+import { PHYSICAL_CENTRE_PROGRAM_IDS, type UserPermission } from "./permissions";
 import { SUBJECT_IDS, type ExamTrack, type SubjectName } from "@/types/curriculum";
 
 export type CurriculumConfigSession = {
@@ -331,24 +332,14 @@ function curriculumContentError(
   return { ok: false, status: 422, error, fields: { exam_track: error } };
 }
 
+// Same policy as every other admin surface (passcode users blocked, only
+// role "admin", read-only admins 403 on `forWrite: true` writes) — delegate to
+// the shared guard so the surfaces can't drift.
 export async function requireCurriculumConfigAdmin(
-  session: CurriculumConfigSession
+  session: CurriculumConfigSession,
+  opts?: { forWrite?: boolean }
 ): Promise<CurriculumConfigAdminResult> {
-  const email = session?.user?.email;
-  if (!email) {
-    return { ok: false, status: 401, error: "Unauthorized" };
-  }
-
-  if (session.isPasscodeUser) {
-    return { ok: false, status: 403, error: "Forbidden" };
-  }
-
-  const permission = await getUserPermission(email);
-  if (permission?.role !== "admin" || permission.read_only) {
-    return { ok: false, status: 403, error: "Forbidden" };
-  }
-
-  return { ok: true, email, permission };
+  return requireAdmin(session, opts);
 }
 
 export function normalizeCurriculumConfigListParams(

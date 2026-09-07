@@ -87,6 +87,7 @@ function renderList(
     regions?: string[];
     schoolCodeToName?: Record<string, string>;
     currentUserEmail?: string;
+    viewerReadOnly?: boolean;
   } = {}
 ) {
   return render(
@@ -95,6 +96,7 @@ function renderList(
       regions={overrides.regions ?? regions}
       schoolCodeToName={overrides.schoolCodeToName ?? schoolCodeToName}
       currentUserEmail={overrides.currentUserEmail ?? currentUserEmail}
+      viewerReadOnly={overrides.viewerReadOnly ?? false}
     />
   );
 }
@@ -596,6 +598,22 @@ describe("UserList", () => {
       // No user rows
       const rows = screen.getAllByRole("row");
       expect(rows.length).toBe(1); // only header row
+    });
+  });
+
+  // =========================================================================
+  // Read-only viewer (Admin Read Only)
+  // =========================================================================
+
+  describe("read-only viewer", () => {
+    it("hides Add/Edit/Delete for a read-only admin", () => {
+      renderList({ viewerReadOnly: true });
+      expect(screen.queryByRole("button", { name: "Add User" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
+      expect(
+        screen.getByText("Read-only view of user access levels and permissions")
+      ).toBeInTheDocument();
     });
   });
 });

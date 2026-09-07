@@ -3,10 +3,10 @@ import { render, screen } from "@testing-library/react";
 
 // ---- mocks (hoisted) ----
 
-const { mockGetServerSession, mockIsAdmin, mockRedirect, mockQuery } =
+const { mockGetServerSession, mockGetUserPermission, mockRedirect, mockQuery } =
   vi.hoisted(() => ({
     mockGetServerSession: vi.fn(),
-    mockIsAdmin: vi.fn(),
+    mockGetUserPermission: vi.fn(),
     mockRedirect: vi.fn((url: string) => {
       throw new Error(`REDIRECT:${url}`);
     }),
@@ -16,7 +16,7 @@ const { mockGetServerSession, mockIsAdmin, mockRedirect, mockQuery } =
 vi.mock("next-auth", () => ({ getServerSession: mockGetServerSession }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("next/navigation", () => ({ redirect: mockRedirect }));
-vi.mock("@/lib/permissions", () => ({ isAdmin: mockIsAdmin }));
+vi.mock("@/lib/permissions", () => ({ getUserPermission: mockGetUserPermission }));
 vi.mock("@/lib/db", () => ({ query: mockQuery }));
 vi.mock("next/link", () => ({
   __esModule: true,
@@ -88,7 +88,7 @@ describe("UsersPage (server component)", () => {
 
     await expect(UsersPage()).rejects.toThrow("REDIRECT:/");
     expect(mockRedirect).toHaveBeenCalledWith("/");
-    expect(mockIsAdmin).not.toHaveBeenCalled();
+    expect(mockGetUserPermission).not.toHaveBeenCalled();
   });
 
   it("redirects to / when session has no email", async () => {
@@ -100,16 +100,16 @@ describe("UsersPage (server component)", () => {
 
   it("redirects to /dashboard when user is not admin", async () => {
     mockGetServerSession.mockResolvedValue(adminSession);
-    mockIsAdmin.mockResolvedValue(false);
+    mockGetUserPermission.mockResolvedValue({ email: "admin@avantifellows.org", level: 3, role: "teacher" });
 
     await expect(UsersPage()).rejects.toThrow("REDIRECT:/dashboard");
     expect(mockRedirect).toHaveBeenCalledWith("/dashboard");
-    expect(mockIsAdmin).toHaveBeenCalledWith("admin@avantifellows.org");
+    expect(mockGetUserPermission).toHaveBeenCalledWith("admin@avantifellows.org");
   });
 
   it("fetches users, regions, and school names and renders UserList for admin", async () => {
     mockGetServerSession.mockResolvedValue(adminSession);
-    mockIsAdmin.mockResolvedValue(true);
+    mockGetUserPermission.mockResolvedValue({ email: "admin@avantifellows.org", level: 3, role: "admin", read_only: false });
     // query is called three times: users, regions, schools
     mockQuery
       .mockResolvedValueOnce(mockUsers)
@@ -140,6 +140,7 @@ describe("UsersPage (server component)", () => {
       "14042": "JNV Mumbai",
     });
     expect(props.currentUserEmail).toBe("admin@avantifellows.org");
+    expect(props.viewerReadOnly).toBe(false);
 
     // Verify all three queries were called
     expect(mockQuery).toHaveBeenCalledTimes(3);
@@ -159,7 +160,7 @@ describe("UsersPage (server component)", () => {
 
   it("renders with empty users, regions, and schools", async () => {
     mockGetServerSession.mockResolvedValue(adminSession);
-    mockIsAdmin.mockResolvedValue(true);
+    mockGetUserPermission.mockResolvedValue({ email: "admin@avantifellows.org", level: 3, role: "admin", read_only: false });
     mockQuery
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
@@ -176,5 +177,6 @@ describe("UsersPage (server component)", () => {
     expect(props.regions).toEqual([]);
     expect(props.schoolCodeToName).toEqual({});
     expect(props.currentUserEmail).toBe("admin@avantifellows.org");
+    expect(props.viewerReadOnly).toBe(false);
   });
 });
