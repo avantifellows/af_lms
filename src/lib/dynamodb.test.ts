@@ -151,6 +151,7 @@ describe("getTestDeepDiveFromDynamo (v2)", () => {
       expect(params).toEqual([
         "school-abc",
         CURRENT_ACADEMIC_YEAR,
+        64,
         PROGRAM_ATTRIBUTION_ORDER,
       ]);
     });

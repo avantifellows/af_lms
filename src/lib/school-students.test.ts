@@ -69,7 +69,9 @@ describe("getSchoolRoster", () => {
     expect(sql).toContain("AS can_undo_nvs_dropout");
     expect(sql).toContain("s.pen_number");
     expect(sql).toContain("er_batch.end_date DESC NULLS LAST");
-    expect(params).toEqual(["school-1", CURRENT_ACADEMIC_YEAR, PROGRAM_ATTRIBUTION_ORDER]);
+    expect(sql).toContain("b_phone_nvs.program_id = $3");
+    expect(sql).toContain("array_position($4::int[], b.program_id)");
+    expect(params).toEqual(["school-1", CURRENT_ACADEMIC_YEAR, 64, PROGRAM_ATTRIBUTION_ORDER]);
   });
 
   it("returns deduplicated students plus data issues via processStudents", async () => {
@@ -102,7 +104,8 @@ describe("getCentreStudents", () => {
     expect(sql).toContain("cs.academic_year = $2");
     // Hydration joins the current-year grade enrollment (for grade_id).
     expect(sql).toContain("JOIN enrollment_record er_grade");
-    expect(params).toEqual(["centre-8", CURRENT_ACADEMIC_YEAR]);
+    expect(sql).toContain("b_phone_nvs.program_id = $3");
+    expect(params).toEqual(["centre-8", CURRENT_ACADEMIC_YEAR, 64]);
   });
 
   it("hydrates via the shared column list, identical to the school roster", async () => {
