@@ -12,7 +12,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const session = await getServerSession(authOptions);
-  const access = await requireCurriculumConfigAdmin(session);
+  const access = await requireCurriculumConfigAdmin(session, { forWrite: true });
 
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status });

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { query } from "@/lib/db";
 import { canAccessQuizSessionSchool } from "@/lib/quiz-session-access";
-import { authenticateTeacherFeedback } from "@/lib/teacher-feedback-access";
+import { authenticateTeacherFeedback, requireCentreScope } from "@/lib/teacher-feedback-access";
 import { getBatchesForCentre, getCentreScope } from "@/lib/teacher-feedback-batches";
 
 // GET /api/teacher-feedback/batches?centre_id=NN
@@ -30,11 +30,16 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Centre not found" }, { status: 404 });
   }
 
-  // Authorize on the centre's school, matching the other Teacher Feedback
-  // routes. (Confining a seated PM to their own seat centres is a broader
-  // change than this tab — tracked as follow-up, see the PR description.)
+  // Authorize on the centre's school, matching the other Teacher Feedback routes.
   if (!(await canAccessQuizSessionSchool(access.permission, scope.schoolId))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  // Teacher Feedback is centre-keyed, so the school check above is not enough:
+  // narrow a confined caller to their own seat centres.
+  const centreScopeCheck = requireCentreScope(access.permission, scope.centreId);
+  if (!centreScopeCheck.ok) {
+    return centreScopeCheck.response;
   }
 
   const batches = await getBatchesForCentre(scope);

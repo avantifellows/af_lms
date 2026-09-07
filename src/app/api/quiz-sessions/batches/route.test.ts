@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   mockGetUserPermission: vi.fn(),
   mockRequireQuizSessionAccess: vi.fn(),
   mockCanAccessQuizSessionSchool: vi.fn(),
+  mockResolveProgramIds: vi.fn(),
   mockQuery: vi.fn(),
 }));
 
@@ -25,6 +26,7 @@ vi.mock("@/lib/permissions", () => ({
 vi.mock("@/lib/quiz-session-access", () => ({
   requireQuizSessionAccess: mocks.mockRequireQuizSessionAccess,
   canAccessQuizSessionSchool: mocks.mockCanAccessQuizSessionSchool,
+  resolveQuizSessionProgramIds: mocks.mockResolveProgramIds,
 }));
 vi.mock("@/lib/db", () => ({
   query: mocks.mockQuery,
@@ -37,12 +39,16 @@ beforeEach(() => {
   mocks.mockGetUserPermission.mockReset();
   mocks.mockRequireQuizSessionAccess.mockReset();
   mocks.mockCanAccessQuizSessionSchool.mockReset();
+  mocks.mockResolveProgramIds.mockReset();
   mocks.mockQuery.mockReset();
   mocks.mockRequireQuizSessionAccess.mockResolvedValue({
     ok: true,
     permission: { program_ids: [1] },
   });
   mocks.mockCanAccessQuizSessionSchool.mockResolvedValue(true);
+  // The route must take its programs from the resolver, not the permission row —
+  // that is the whole point of the fix, so the default here differs from the row.
+  mocks.mockResolveProgramIds.mockResolvedValue([1]);
 });
 
 describe("GET /api/quiz-sessions/batches", () => {

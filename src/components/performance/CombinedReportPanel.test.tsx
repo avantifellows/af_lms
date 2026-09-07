@@ -1,5 +1,6 @@
-import { describe, it, expect } from "vitest";
-import { visibleJobs, type Job } from "./CombinedReportPanel";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { render, screen, waitFor } from "@testing-library/react";
+import CombinedReportPanel, { visibleJobs, type Job } from "./CombinedReportPanel";
 
 function makeJob(overrides: Partial<Job> = {}): Job {
   return {
@@ -73,5 +74,65 @@ describe("visibleJobs", () => {
 
   it("returns nothing for no jobs", () => {
     expect(visibleJobs([])).toEqual([]);
+  });
+});
+
+// The panel takes its verdict from GET; a read-only caller gets
+// can_generate=false / read_only, and the API 403s generate and retry. The UI
+// must not offer either click.
+describe("CombinedReportPanel for a read-only caller", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function stubListResponse(body: Record<string, unknown>) {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => body,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  const props = {
+    schoolUdise: "27361106702",
+    sessionId: "EnableStudents_abc",
+    testName: "Test 1",
+    grade: 12,
+  };
+
+  it("disables Generate with the read-only message and hides Retry on failed jobs", async () => {
+    stubListResponse({
+      jobs: [
+        makeJob({ job_id: "failed", status: "errored", error: "boom", download_url: null }),
+      ],
+      session_end_time: "2026-06-23T18:03:00.000Z",
+      can_generate: false,
+      blocked_reason: "read_only",
+      blocked_message: "Your access is read-only.",
+    });
+
+    render(<CombinedReportPanel {...props} />);
+
+    const generate = await screen.findByRole("button", { name: /generate combined report/i });
+    await waitFor(() => expect(generate).toBeDisabled());
+    expect(screen.getByText("Your access is read-only.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
+  });
+
+  it("still offers Retry to a full-access caller", async () => {
+    stubListResponse({
+      jobs: [
+        makeJob({ job_id: "failed", status: "errored", error: "boom", download_url: null }),
+      ],
+      session_end_time: "2026-06-23T18:03:00.000Z",
+      can_generate: true,
+      blocked_reason: null,
+      blocked_message: null,
+    });
+
+    render(<CombinedReportPanel {...props} />);
+
+    expect(await screen.findByRole("button", { name: /retry/i })).toBeInTheDocument();
   });
 });

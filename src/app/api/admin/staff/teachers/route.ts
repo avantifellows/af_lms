@@ -11,7 +11,7 @@ import {
 // Complete a pending_teacher into a real teacher record + centre seat.
 export async function POST(request: NextRequest) {
   const session = await getServerSession(authOptions);
-  const access = await requireStaffAdmin(session);
+  const access = await requireStaffAdmin(session, { forWrite: true });
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status });
   }

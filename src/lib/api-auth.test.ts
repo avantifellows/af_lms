@@ -2,11 +2,15 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("next-auth", () => ({ getServerSession: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
-vi.mock("@/lib/permissions", () => ({ canAccessSchool: vi.fn() }));
+vi.mock("@/lib/permissions", () => ({
+  canAccessSchool: vi.fn(),
+  getResolvedPermission: vi.fn(),
+}));
 vi.mock("@/lib/db", () => ({ query: vi.fn() }));
 
 import { getServerSession } from "next-auth";
-import { canAccessSchool } from "@/lib/permissions";
+import { canAccessSchool, getResolvedPermission } from "@/lib/permissions";
+import type { UserPermission } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import { authorizeSchoolAccess } from "./api-auth";
 import {
@@ -19,6 +23,20 @@ import {
 const mockSession = vi.mocked(getServerSession);
 const mockQuery = vi.mocked(query);
 const mockCanAccessSchool = vi.mocked(canAccessSchool);
+const mockResolvedPermission = vi.mocked(getResolvedPermission);
+
+function permission(overrides: Partial<UserPermission> = {}): UserPermission {
+  return {
+    email: "admin@avantifellows.org",
+    level: 3,
+    role: "admin",
+    school_codes: null,
+    regions: null,
+    program_ids: null,
+    read_only: false,
+    ...overrides,
+  } as UserPermission;
+}
 
 const SCHOOL_ROW = {
   id: "101",
@@ -182,5 +200,53 @@ describe("authorizeSchoolAccess", () => {
       "80808",
       undefined
     );
+  });
+
+  // --- read_only ---
+  // School access says who may *see* a school; read_only says whether they may
+  // change anything there. A read-only admin passes canAccessSchool, so routes
+  // that trigger work must opt in with requireEdit.
+
+  /** An email user who passes the school check, with the given permission row. */
+  function grantSchoolAccess(perm: UserPermission) {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockQuery.mockResolvedValue([SCHOOL_ROW]);
+    mockCanAccessSchool.mockResolvedValue(true);
+    mockResolvedPermission.mockResolvedValue(perm);
+  }
+
+  it.each([
+    { read_only: true, requireEdit: undefined, authorized: true, readOnly: true },
+    { read_only: false, requireEdit: true, authorized: true, readOnly: false },
+    { read_only: true, requireEdit: true, authorized: false, readOnly: undefined },
+  ])(
+    "read_only=$read_only requireEdit=$requireEdit → authorized=$authorized",
+    async ({ read_only, requireEdit, authorized, readOnly }) => {
+      grantSchoolAccess(permission({ read_only }));
+
+      const result = await authorizeSchoolAccess(
+        "70705",
+        requireEdit === undefined ? undefined : { requireEdit }
+      );
+      expect(result.authorized).toBe(authorized);
+      if (result.authorized) {
+        expect(result.readOnly).toBe(readOnly);
+      } else {
+        expect(result.response.status).toBe(403);
+        await expect(result.response.json()).resolves.toEqual({
+          error: "Read-only access cannot perform this action",
+        });
+      }
+    }
+  );
+
+  it("requireEdit does not affect passcode users (they cannot be read-only)", async () => {
+    mockSession.mockResolvedValue(PASSCODE_SESSION as never);
+    mockQuery.mockResolvedValue([SCHOOL_ROW]);
+
+    const result = await authorizeSchoolAccess("70705", { requireEdit: true });
+    expect(result.authorized).toBe(true);
+    if (result.authorized) expect(result.readOnly).toBe(false);
+    expect(mockResolvedPermission).not.toHaveBeenCalled();
   });
 });

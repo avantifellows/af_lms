@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 
 import { authOptions } from "@/lib/auth";
 import {
+  getCentreConfinement,
   getFeatureAccess,
   getResolvedPermission,
   type UserPermission,
@@ -70,4 +71,25 @@ export async function authenticateTeacherFeedback(
     };
   }
   return requireTeacherFeedbackAccess(email, mode);
+}
+
+/**
+ * Teacher Feedback data is centre-keyed — a round belongs to a centre and
+ * teachers map to a centre, not the school — but every route authorized only the
+ * parent SCHOOL. A centre-confined caller could therefore reach a sibling centre
+ * at the same school by changing `centre_id` in the request. Call this after the
+ * school check on every route that accepts a centre id.
+ *
+ * Only confined callers are narrowed: a seatless manager's access is school-level
+ * by design and the school check above already covers them.
+ */
+export function requireCentreScope(
+  permission: UserPermission,
+  centreId: number
+): TeacherFeedbackAccessResult {
+  const confinement = getCentreConfinement(permission);
+  if (confinement.confined && !confinement.centreIds.includes(centreId)) {
+    return forbidden();
+  }
+  return { ok: true, permission };
 }

@@ -24,6 +24,10 @@ interface CurriculumTabProps {
   schoolCode: string;
   schoolName: string;
   canEdit: boolean;
+  // When set (centre pages), locks curriculum to this program and hides the
+  // program selector. Falls back to the school default if the program isn't
+  // available for this school.
+  programId?: number;
 }
 
 // Headings and the log-modal scope label render before a track is selected, so the null
@@ -60,6 +64,7 @@ export default function CurriculumTab({
   schoolCode,
   schoolName,
   canEdit,
+  programId,
 }: CurriculumTabProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -113,6 +118,15 @@ export default function CurriculumTab({
     setDoubtSolvingTotalTimeMinutes(0);
   }, []);
 
+  // The server honours program_id only for a program that has an active, physical,
+  // school-linked centre at this school and that the caller can see; otherwise it
+  // silently answers with the school default. Never dress that up as this centre's
+  // curriculum: treat it as "nothing configured here".
+  const isLockedProgramUnavailable =
+    programId != null &&
+    options != null &&
+    options.defaults?.programId !== programId;
+
   useEffect(() => {
     let isCancelled = false;
 
@@ -126,8 +140,13 @@ export default function CurriculumTab({
       setDoubtSolvingTotalTimeMinutes(0);
 
       try {
+        // Centre pages ask for their own program up front — every option group
+        // (centreExamTracks, gradeSubjects, defaults) is derived server-side from
+        // the selected program, so overriding it client-side afterwards would pair
+        // this centre's program with the school default's curriculum options.
         const response = await fetch(
-          `/api/curriculum/options?school_code=${encodeURIComponent(schoolCode)}`
+          `/api/curriculum/options?school_code=${encodeURIComponent(schoolCode)}` +
+            (programId != null ? `&program_id=${programId}` : "")
         );
         if (!response.ok) {
           throw new Error("Failed to fetch Curriculum options");
@@ -152,10 +171,16 @@ export default function CurriculumTab({
     return () => {
       isCancelled = true;
     };
-  }, [applyOptions, schoolCode]);
+  }, [applyOptions, schoolCode, programId]);
 
   useEffect(() => {
-    if (!selectedProgramId || !selectedExamTrack || !selectedGrade || !selectedSubject) {
+    if (
+      isLockedProgramUnavailable ||
+      !selectedProgramId ||
+      !selectedExamTrack ||
+      !selectedGrade ||
+      !selectedSubject
+    ) {
       setChapters([]);
       setLogs([]);
       setProgress({});
@@ -231,7 +256,14 @@ export default function CurriculumTab({
     return () => {
       isCancelled = true;
     };
-  }, [schoolCode, selectedProgramId, selectedExamTrack, selectedGrade, selectedSubject]);
+  }, [
+    isLockedProgramUnavailable,
+    schoolCode,
+    selectedProgramId,
+    selectedExamTrack,
+    selectedGrade,
+    selectedSubject,
+  ]);
 
   const refetchLogsAndProgress = useCallback(async () => {
     if (!selectedProgramId || !selectedExamTrack || !selectedGrade || !selectedSubject) {
@@ -275,8 +307,11 @@ export default function CurriculumTab({
 
   const examTrackOptions = useMemo(
     () =>
-      options?.centreExamTracks.filter((option) => option.grade === selectedGrade) ?? [],
-    [options, selectedGrade]
+      isLockedProgramUnavailable
+        ? []
+        : options?.centreExamTracks.filter((option) => option.grade === selectedGrade) ??
+          [],
+    [isLockedProgramUnavailable, options, selectedGrade]
   );
   const selectedTrackOption = examTrackOptions.find(
     (option) => option.examTrack === selectedExamTrack
@@ -526,7 +561,9 @@ export default function CurriculumTab({
     selectedTrackOption?.hasCurriculumConfig === false &&
     !selectedTrackOption.hasHistoricalLogs;
   const hasNoPrograms =
-    !isOptionsLoading && options != null && options.programs.length === 0;
+    !isOptionsLoading &&
+    options != null &&
+    (options.programs.length === 0 || isLockedProgramUnavailable);
 
   return (
     <div>
@@ -550,7 +587,7 @@ export default function CurriculumTab({
 
       <div className="mb-6">
         <div className="flex flex-wrap gap-4 items-start">
-          {options && options.programs.length > 1 && (
+          {!programId && options && options.programs.length > 1 && (
             <div>
               <label
                 htmlFor="curriculum-program"
@@ -688,7 +725,9 @@ export default function CurriculumTab({
         <div className="bg-red-50 text-red-700 p-4 rounded-lg">{error}</div>
       ) : hasNoPrograms ? (
         <div className="bg-bg-card border border-border rounded-lg shadow-sm p-8 text-center text-gray-500">
-          No curriculum-enabled Programs are available for this school.
+          {isLockedProgramUnavailable
+            ? "Curriculum is not available for this Centre's Program."
+            : "No curriculum-enabled Programs are available for this school."}
         </div>
       ) : options?.configurationError ? (
         <div className="bg-red-50 text-red-700 p-4 rounded-lg">

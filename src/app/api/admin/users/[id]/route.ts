@@ -85,7 +85,7 @@ async function updatePermission(
 
 // DELETE /api/admin/users/[id] - Delete user
 export async function DELETE(request: NextRequest, { params }: RouteParams) {
-  const access = await requireAdminApiAccess();
+  const access = await requireAdminApiAccess({ forWrite: true });
   const { id } = await params;
   if (!access.ok) return access.response;
 
@@ -149,7 +149,7 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
 
 // PATCH /api/admin/users/[id] - Update user
 export async function PATCH(request: NextRequest, { params }: RouteParams) {
-  const access = await requireAdminApiAccess();
+  const access = await requireAdminApiAccess({ forWrite: true });
   const { id } = await params;
   if (!access.ok) return access.response;
 

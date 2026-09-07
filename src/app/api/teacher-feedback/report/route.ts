@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { query } from "@/lib/db";
 import { canAccessQuizSessionSchool } from "@/lib/quiz-session-access";
-import { authenticateTeacherFeedback } from "@/lib/teacher-feedback-access";
+import { authenticateTeacherFeedback, requireCentreScope } from "@/lib/teacher-feedback-access";
 import { getTeacherFeedbackReport } from "@/lib/teacher-feedback-bq";
 
 // GET /api/teacher-feedback/report?quiz_id=XXXX
@@ -27,9 +27,10 @@ export async function GET(request: NextRequest) {
     school_code: string;
     teacher_name: string;
     school_id: number | null;
+    centre_id: number | string | null;
   }>(
     `
-    SELECT tf.school_code, tf.teacher_name, sch.id AS school_id
+    SELECT tf.school_code, tf.teacher_name, sch.id AS school_id, tf.centre_id
     FROM session s
     JOIN lms_teacher_feedback tf ON tf.session_pk = s.id AND tf.deleted_at IS NULL
     LEFT JOIN school sch ON sch.code = tf.school_code
@@ -44,6 +45,16 @@ export async function GET(request: NextRequest) {
   }
   if (row.school_id == null || !(await canAccessQuizSessionSchool(access.permission, row.school_id))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  // The report is the actual feedback content, so the centre check matters most
+  // here: the school check above would otherwise hand a confined caller a
+  // sibling centre's report given only its quiz id.
+  if (row.centre_id != null) {
+    const centreScopeCheck = requireCentreScope(access.permission, Number(row.centre_id));
+    if (!centreScopeCheck.ok) {
+      return centreScopeCheck.response;
+    }
   }
 
   try {

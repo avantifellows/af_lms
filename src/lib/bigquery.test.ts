@@ -201,19 +201,22 @@ describe("getAvailableGrades / getAvailablePrograms", () => {
 });
 
 describe("getCumulativeALData", () => {
-  it("aggregates AL counts + per-test progression per student, sorts students by mode AL rank", async () => {
-    // Asha (PCM): M1 on s1, M2 on s2, M1 on s3 → al_counts {M1:2, M2:1}, mode M1
-    // Bilal (PCM): M2 on s1, M1 on s2 → al_counts {M1:1, M2:1}, mode M1 (tie broken by rank — M1 > M2)
-    // Chen (PCB): B2 on c1, B1 on c2, B1 on c3 → mode B1
+  it("takes each student's AL from dim_student and builds the per-test progression, sorting by AL rank", async () => {
+    // The per-student AL is whatever dim_student says (student_academic_level),
+    // NOT the mode of the per-test values — Bilal's tests are M2, M1 but the
+    // warehouse levels him M3 (last-three-tests rule upstream), and that wins.
+    // Asha (PCM): tests M1, M2, M1 → dim_student M1
+    // Bilal (PCM): tests M2, M1 → dim_student M3
+    // Chen (PCB): tests B2, B1, B1 → dim_student B1
     const rows = [
-      { student_id: "asha", student_name: "Asha", student_stream: "PCM", session_id: "s1", test_name: "T1", start_date: "2025-01-10", test_stream: "pcm", academic_level: "M1" },
-      { student_id: "asha", student_name: "Asha", student_stream: "PCM", session_id: "s2", test_name: "T2", start_date: "2025-02-10", test_stream: "pcm", academic_level: "M2" },
-      { student_id: "asha", student_name: "Asha", student_stream: "PCM", session_id: "s3", test_name: "T3", start_date: "2025-03-10", test_stream: "pcm", academic_level: "M1" },
-      { student_id: "bilal", student_name: "Bilal", student_stream: "PCM", session_id: "s1", test_name: "T1", start_date: "2025-01-10", test_stream: "pcm", academic_level: "M2" },
-      { student_id: "bilal", student_name: "Bilal", student_stream: "PCM", session_id: "s2", test_name: "T2", start_date: "2025-02-10", test_stream: "pcm", academic_level: "M1" },
-      { student_id: "chen", student_name: "Chen", student_stream: "PCB", session_id: "c1", test_name: "C1", start_date: "2025-01-10", test_stream: "pcb", academic_level: "B2" },
-      { student_id: "chen", student_name: "Chen", student_stream: "PCB", session_id: "c2", test_name: "C2", start_date: "2025-02-10", test_stream: "pcb", academic_level: "B1" },
-      { student_id: "chen", student_name: "Chen", student_stream: "PCB", session_id: "c3", test_name: "C3", start_date: "2025-03-10", test_stream: "pcb", academic_level: "B1" },
+      { student_id: "asha", student_name: "Asha", student_stream: "PCM", student_academic_level: "M1", session_id: "s1", test_name: "T1", start_date: "2025-01-10", test_stream: "pcm", academic_level: "M1" },
+      { student_id: "asha", student_name: "Asha", student_stream: "PCM", student_academic_level: "M1", session_id: "s2", test_name: "T2", start_date: "2025-02-10", test_stream: "pcm", academic_level: "M2" },
+      { student_id: "asha", student_name: "Asha", student_stream: "PCM", student_academic_level: "M1", session_id: "s3", test_name: "T3", start_date: "2025-03-10", test_stream: "pcm", academic_level: "M1" },
+      { student_id: "bilal", student_name: "Bilal", student_stream: "PCM", student_academic_level: "M3", session_id: "s1", test_name: "T1", start_date: "2025-01-10", test_stream: "pcm", academic_level: "M2" },
+      { student_id: "bilal", student_name: "Bilal", student_stream: "PCM", student_academic_level: "M3", session_id: "s2", test_name: "T2", start_date: "2025-02-10", test_stream: "pcm", academic_level: "M1" },
+      { student_id: "chen", student_name: "Chen", student_stream: "PCB", student_academic_level: "B1", session_id: "c1", test_name: "C1", start_date: "2025-01-10", test_stream: "pcb", academic_level: "B2" },
+      { student_id: "chen", student_name: "Chen", student_stream: "PCB", student_academic_level: "B1", session_id: "c2", test_name: "C2", start_date: "2025-02-10", test_stream: "pcb", academic_level: "B1" },
+      { student_id: "chen", student_name: "Chen", student_stream: "PCB", student_academic_level: "B1", session_id: "c3", test_name: "C3", start_date: "2025-03-10", test_stream: "pcb", academic_level: "B1" },
     ];
     mocks.mockQueryFn.mockResolvedValueOnce([rows]);
 
@@ -231,21 +234,52 @@ describe("getCumulativeALData", () => {
     const byId: Record<string, (typeof result.students)[number]> = {};
     for (const r of result.students) byId[r.student_id] = r;
 
-    expect(byId.asha.al_counts).toEqual({ M1: 2, M2: 1 });
     expect(byId.asha.total_major_tests).toBe(3);
-    expect(byId.asha.mode_al).toBe("M1");
+    expect(byId.asha.academic_level).toBe("M1");
     expect(byId.asha.stream).toBe("PCM");
     expect(byId.asha.progression.map((p) => p.academic_level)).toEqual(["M1", "M2", "M1"]);
 
-    expect(byId.bilal.mode_al).toBe("M1"); // tie broken by rank (M1 > M2)
+    // Warehouse value wins over any app-side mode of the per-test ALs.
+    expect(byId.bilal.academic_level).toBe("M3");
     expect(byId.bilal.progression.map((p) => p.academic_level)).toEqual(["M2", "M1"]);
 
-    expect(byId.chen.mode_al).toBe("B1");
+    expect(byId.chen.academic_level).toBe("B1");
     expect(byId.chen.progression.map((p) => p.academic_level)).toEqual(["B2", "B1", "B1"]);
 
-    // Mode AL rank ordering: B1, M1 are tier 3 (tie) → tie broken by total tests desc
-    // asha (3 tests) and chen (3 tests) before bilal (2 tests)
-    expect(result.students[result.students.length - 1].student_id).toBe("bilal");
+    // Rank ordering: M1/B1 (tier 3) → tie broken by total tests desc → then M3 (tier 1)
+    expect(result.students.map((s) => s.student_id)).toEqual(["asha", "chen", "bilal"]);
+    expect(result.students[0]).not.toHaveProperty("al_counts");
+    expect(result.students[0]).not.toHaveProperty("mode_al");
+  });
+
+  it("keeps students the warehouse has not levelled yet, with a null AL, sorted last", async () => {
+    // Dev has three M1 tests but no dim_student AL (post-hook not run / new
+    // student). We must not invent an AL for him from the per-test values.
+    const rows = [
+      { student_id: "dev", student_name: "Dev", student_stream: "PCM", student_academic_level: null, session_id: "s1", test_name: "T1", start_date: "2025-01-10", test_stream: "pcm", academic_level: "M1" },
+      { student_id: "dev", student_name: "Dev", student_stream: "PCM", student_academic_level: null, session_id: "s2", test_name: "T2", start_date: "2025-02-10", test_stream: "pcm", academic_level: "M1" },
+      { student_id: "esha", student_name: "Esha", student_stream: "PCM", student_academic_level: "Not Eligible for Academic Level", session_id: "s1", test_name: "T1", start_date: "2025-01-10", test_stream: "pcm", academic_level: "Not Eligible for Academic Level" },
+    ];
+    mocks.mockQueryFn.mockResolvedValueOnce([rows]);
+
+    const { getCumulativeALData } = await import("./bigquery");
+    const result = await getCumulativeALData("11223344", 11);
+
+    expect(result.students.map((s) => s.student_id)).toEqual(["esha", "dev"]);
+    expect(result.students[1].academic_level).toBeNull();
+    expect(result.students[1].total_major_tests).toBe(2);
+  });
+
+  it("joins dim_student for the per-student AL instead of recomputing it", async () => {
+    mocks.mockQueryFn.mockResolvedValueOnce([[]]);
+
+    const { getCumulativeALData } = await import("./bigquery");
+    await getCumulativeALData("11223344", 11);
+
+    const sql = mocks.mockQueryFn.mock.calls[0][0].query;
+    expect(sql).toContain("production_dbt_final.dim_student");
+    expect(sql).toContain("ds.academic_level) AS student_academic_level");
+    expect(sql).toContain("ds.pk_student_id = f.fk_student_id");
   });
 
   it("excludes unsubmitted attempts from the AL matrix", async () => {
@@ -293,7 +327,7 @@ describe("getCumulativeALData", () => {
     expect(call.query).toContain("mock_test");
     expect(call.query).toContain("part_test");
     expect(call.query).toContain("full_syllabus_test");
-    expect(call.query).toContain("LOWER(section) = 'overall'");
+    expect(call.query).toContain("LOWER(f.section) = 'overall'");
     expect(call.query).toContain("LOWER(student_stream) = @stream");
     expect(call.query).toContain("session_id IS NOT NULL");
     expect(call.params).toMatchObject({ stream: "pcm", program: "JNV", grade: 11 });
