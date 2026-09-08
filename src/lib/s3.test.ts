@@ -12,6 +12,8 @@ import {
   uploadDocumentPages,
   deleteDocumentObjects,
   presignDocumentPage,
+  buildTransientKey,
+  uploadTransientObject,
   S3UploadError,
   __resetS3ClientForTesting,
 } from "./s3";
@@ -231,5 +233,56 @@ describe("presignDocumentPage", () => {
     });
 
     expect(url).toContain("response-content-type=application");
+  });
+
+  it("passes ResponseContentDisposition into the signed URL when provided", async () => {
+    const url = await presignDocumentPage({
+      s3Key: "test-prefix/tmp/cms-test-pdf/u.pdf",
+      ttlSeconds: 300,
+      responseContentDisposition: 'attachment; filename="paper.pdf"',
+    });
+
+    expect(url).toContain("response-content-disposition=attachment");
+    expect(url).toContain("paper.pdf");
+  });
+});
+
+describe("transient objects", () => {
+  it("buildTransientKey nests under <prefix>/tmp/ so the lifecycle rule can expire it", () => {
+    expect(
+      buildTransientKey({ kind: "cms-test-pdf", id: "abc-123", extension: "pdf" }),
+    ).toBe("test-prefix/tmp/cms-test-pdf/abc-123.pdf");
+  });
+
+  it("uploadTransientObject PUTs the bytes with the given content type", async () => {
+    s3Mock.on(PutObjectCommand).resolves({});
+    const body = Buffer.from("%PDF");
+
+    await uploadTransientObject({
+      s3Key: "test-prefix/tmp/cms-test-pdf/abc.pdf",
+      body,
+      contentType: "application/pdf",
+    });
+
+    const calls = s3Mock.commandCalls(PutObjectCommand);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].args[0].input).toMatchObject({
+      Bucket: "test-bucket",
+      Key: "test-prefix/tmp/cms-test-pdf/abc.pdf",
+      ContentType: "application/pdf",
+    });
+    expect(calls[0].args[0].input.Body).toBe(body);
+  });
+
+  it("uploadTransientObject propagates S3 errors so the route can fail instead of redirecting", async () => {
+    s3Mock.on(PutObjectCommand).rejects(new Error("AccessDenied"));
+
+    await expect(
+      uploadTransientObject({
+        s3Key: "test-prefix/tmp/cms-test-pdf/abc.pdf",
+        body: Buffer.from("x"),
+        contentType: "application/pdf",
+      }),
+    ).rejects.toThrow("AccessDenied");
   });
 });

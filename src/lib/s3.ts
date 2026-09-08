@@ -136,10 +136,14 @@ export async function uploadDocumentPages(opts: {
 
 // Sign a short-lived GET URL for a single S3 key. Used by the viewer route
 // to hand the browser a direct link without proxying bytes through Lambda.
+// `responseContentDisposition` is how a cross-origin link forces a save: the
+// `download` attribute on <a> is ignored for cross-origin hrefs, so the
+// attachment disposition has to come from S3 itself.
 export async function presignDocumentPage(opts: {
   s3Key: string;
   ttlSeconds: number;
   responseContentType?: string;
+  responseContentDisposition?: string;
 }): Promise<string> {
   return getSignedUrl(
     client(),
@@ -149,8 +153,43 @@ export async function presignDocumentPage(opts: {
       ...(opts.responseContentType
         ? { ResponseContentType: opts.responseContentType }
         : {}),
+      ...(opts.responseContentDisposition
+        ? { ResponseContentDisposition: opts.responseContentDisposition }
+        : {}),
     }),
     { expiresIn: opts.ttlSeconds },
+  );
+}
+
+// --- Transient objects -------------------------------------------------------
+//
+// Bounce storage for bytes we must not proxy through Amplify's Lambda: SSR
+// responses cap at ~5.7MB and API routes can't stream, so anything bigger
+// (CMS-generated test PDFs, for one) 504s if we return it directly. Instead the
+// route stages the bytes here, presigns a GET and 302s the browser to it.
+//
+// Everything under <prefix>/tmp/ is expired by a bucket lifecycle rule after a
+// day. Nothing here is a record; never reference a transient key from the DB.
+export function buildTransientKey(opts: {
+  kind: string;
+  id: string;
+  extension: string;
+}): string {
+  return `${prefix()}/tmp/${opts.kind}/${opts.id}.${opts.extension}`;
+}
+
+export async function uploadTransientObject(opts: {
+  s3Key: string;
+  body: Buffer;
+  contentType: string;
+}): Promise<void> {
+  await client().send(
+    new PutObjectCommand({
+      Bucket: bucket(),
+      Key: opts.s3Key,
+      Body: opts.body,
+      ContentType: opts.contentType,
+    }),
   );
 }
 
