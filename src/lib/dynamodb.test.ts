@@ -309,6 +309,7 @@ describe("getTestDeepDiveFromDynamo (v2)", () => {
       // runs; throw there too so the overall result is null.
       mocks.mockSend
         .mockRejectedValueOnce(new Error("DynamoDB timeout"))
+        .mockRejectedValueOnce(new Error("DynamoDB timeout"))
         .mockRejectedValueOnce(new Error("DynamoDB timeout"));
 
       const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -321,11 +322,12 @@ describe("getTestDeepDiveFromDynamo (v2)", () => {
       expect(result).toBeNull();
     });
 
-    it("returns null when both GSI and fallback come back empty", async () => {
+    it("returns null when the GSI and both partition scans come back empty", async () => {
       mocks.mockQuery.mockResolvedValueOnce([makeStudent()]);
       mocks.mockSend
         .mockResolvedValueOnce({ Items: [] }) // gsi
-        .mockResolvedValueOnce({ Items: [] }); // fallback
+        .mockResolvedValueOnce({ Items: [] }) // filtered partition scan
+        .mockResolvedValueOnce({ Items: [] }); // unfiltered partition scan
 
       const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
       const { getTestDeepDiveFromDynamo } = await importModule();
@@ -333,6 +335,107 @@ describe("getTestDeepDiveFromDynamo (v2)", () => {
       consoleWarn.mockRestore();
 
       expect(result).toBeNull();
+    });
+
+    // Regression: a school rename leaves the v2 docs stamped with the OLD name
+    // (they are never re-stamped), so both school-scoped reads return nothing
+    // and every historical test 404s. The unfiltered partition scan recovers
+    // them; the identifier intersection still scopes to this school's roster.
+    it("recovers docs via an unfiltered partition scan when the school name has drifted", async () => {
+      const { QueryCommand } = await import("@aws-sdk/lib-dynamodb");
+      const qcMock = QueryCommand as unknown as { mock: { calls: unknown[][] } };
+      const callsBefore = qcMock.mock.calls.length;
+
+      mocks.mockQuery.mockResolvedValueOnce([makeStudent()]);
+      mocks.mockSend
+        .mockResolvedValueOnce({ Items: [] }) // gsi: nothing under the new name
+        .mockResolvedValueOnce({ Items: [] }) // filtered scan: filter excludes them
+        .mockResolvedValueOnce({ Items: [makeV2Doc({ school: "JNV Ramanagara" })] });
+
+      const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const { getTestDeepDiveFromDynamo } = await importModule();
+      const result = await getTestDeepDiveFromDynamo(
+        "school-1",
+        "JNV Bangalore South",
+        10,
+        "sess-1"
+      );
+      consoleWarn.mockRestore();
+
+      expect(result).not.toBeNull();
+      expect(result?.students).toHaveLength(1);
+      expect(mocks.mockSend).toHaveBeenCalledTimes(3);
+
+      const thisRunCalls = qcMock.mock.calls.slice(callsBefore);
+      const lastCall = thisRunCalls[thisRunCalls.length - 1][0] as {
+        IndexName?: string;
+        FilterExpression?: string;
+        KeyConditionExpression: string;
+        ExpressionAttributeValues: Record<string, unknown>;
+      };
+      expect(lastCall.IndexName).toBeUndefined();
+      expect(lastCall.KeyConditionExpression).toBe("session_id = :sid");
+      // The point of the tier: no school predicate at all.
+      expect(lastCall.FilterExpression).toBeUndefined();
+      expect(lastCall.ExpressionAttributeValues).toEqual({ ":sid": "sess-1" });
+    });
+
+    it("warns with both names when it recovers docs by ignoring the school name", async () => {
+      mocks.mockQuery.mockResolvedValueOnce([makeStudent()]);
+      mocks.mockSend
+        .mockResolvedValueOnce({ Items: [] })
+        .mockResolvedValueOnce({ Items: [] })
+        .mockResolvedValueOnce({ Items: [makeV2Doc({ school: "JNV Ramanagara" })] });
+
+      const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const { getTestDeepDiveFromDynamo } = await importModule();
+      await getTestDeepDiveFromDynamo("school-1", "JNV Bangalore South", 10, "sess-1");
+
+      const recoveryWarning = consoleWarn.mock.calls
+        .map((c) => String(c[0]))
+        .find((m) => m.includes("ignoring the school name"));
+      consoleWarn.mockRestore();
+
+      expect(recoveryWarning).toBeDefined();
+      // Both sides of the mismatch must be in the log, or the next person has
+      // to re-derive the rename from scratch.
+      expect(recoveryWarning).toContain("JNV Bangalore South");
+      expect(recoveryWarning).toContain("JNV Ramanagara");
+    });
+
+    // An unfiltered scan must not leak another school's students into this
+    // school's deep dive — the roster intersection is what keeps it correct.
+    it("does not leak other schools' docs when the unfiltered scan runs", async () => {
+      mocks.mockQuery.mockResolvedValueOnce([makeStudent()]);
+      mocks.mockSend
+        .mockResolvedValueOnce({ Items: [] })
+        .mockResolvedValueOnce({ Items: [] })
+        .mockResolvedValueOnce({
+          Items: [
+            makeV2Doc({ school: "JNV Ramanagara" }),
+            makeV2Doc({
+              school: "JNV Some Other School",
+              user_id: "other-u",
+              student_id: "other-stu",
+              apaar_id: "other-apaar",
+            }),
+          ],
+        });
+
+      const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const { getTestDeepDiveFromDynamo } = await importModule();
+      const result = await getTestDeepDiveFromDynamo(
+        "school-1",
+        "JNV Bangalore South",
+        10,
+        "sess-1"
+      );
+      consoleWarn.mockRestore();
+
+      // Only the roster student survives the identifier intersection.
+      expect(result?.students).toHaveLength(1);
+      expect(result?.students[0].student_name).toBe("Alice Smith");
+      expect(result?.students[0].enrollment_user_id).toBe("enrollment-u1");
     });
   });
 

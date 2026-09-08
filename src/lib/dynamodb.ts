@@ -138,6 +138,9 @@ interface V2ReportHeader {
 interface V2ReportDoc {
   session_id: string;
   user_id: string;
+  // Partition key of the school_session_index GSI, stamped from BigQuery at
+  // write time and never re-stamped — so it can lag a school rename.
+  school?: string;
   student_id?: string;
   apaar_id?: string;
   report_header?: V2ReportHeader;
@@ -341,6 +344,37 @@ export async function getTestDeepDiveFromDynamo(
       `[deep-dive] gsi returned 0 docs for school="${schoolName}" session=${sessionId} — falling back to filtered partition scan`
     );
     allDocs = await getAllReportsForSession(sessionId, schoolName);
+  }
+  // Last resort: drop the school filter entirely. Both tiers above match the
+  // doc's `school` attribute by EXACT string equality against the Postgres
+  // name, so any drift between the two makes every test for that school 404
+  // with "No results available for this test yet" — no error, no log, just an
+  // empty page for every historical test at once.
+  //
+  // A school RENAME is the way this happens in practice: report docs are
+  // stamped with the school name at write time and never re-stamped, so
+  // renaming a school in Postgres orphans every doc written before it. This is
+  // not hypothetical — school 532 (udise 29320810110) was renamed
+  // "JNV Ramanagara" -> "JNV Bangalore South" on 2026-09-04 and every test up
+  // to that date went blank, while tests written after it kept working.
+  //
+  // Scoping by school is only an optimisation here: the identifier
+  // intersection below already restricts docs to this school's roster, so
+  // reading the unfiltered partition is no less correct — it just costs a
+  // second partition read. We only pay it on a path that is otherwise a
+  // guaranteed 404, which makes it a strict improvement.
+  if (allDocs.length === 0) {
+    allDocs = await getAllReportsForSession(sessionId);
+    if (allDocs.length > 0) {
+      const docSchools = [
+        ...new Set(allDocs.map((d) => d.school).filter(Boolean)),
+      ];
+      console.warn(
+        `[deep-dive] recovered ${allDocs.length} doc(s) for session=${sessionId} only after ignoring the school name: ` +
+          `Postgres says "${schoolName}" but the docs carry ${JSON.stringify(docSchools)}. ` +
+          `This is the school-rename failure mode — re-run the etl-next v2 report flow for this school so the docs are re-stamped.`
+      );
+    }
   }
   if (allDocs.length === 0) return null;
 
