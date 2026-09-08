@@ -1,7 +1,7 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { redirect } from "next/navigation";
-import { isAdmin } from "@/lib/permissions";
+import { getUserPermission, isAdmin } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import Link from "next/link";
 import SchoolList from "./SchoolList";
@@ -31,6 +31,14 @@ export default async function SchoolsPage() {
   }
 
   const admin = await isAdmin(session.user.email);
+
+  // Read-only admins may look but not touch: the API already 403s their
+
+  // writes (forWrite guards); this hides the controls too (D116).
+
+  const permission = await getUserPermission(session.user.email);
+
+  const viewerReadOnly = !!permission?.read_only;
   if (!admin) {
     redirect("/dashboard");
   }
@@ -65,7 +73,7 @@ export default async function SchoolsPage() {
       </header>
 
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-        <SchoolList initialSchools={schools} />
+        <SchoolList initialSchools={schools} viewerReadOnly={viewerReadOnly} />
       </main>
     </div>
   );

@@ -21,6 +21,8 @@ interface StaffGridProps {
   initialRows: StaffRosterRow[];
   initialSummary: StaffRosterSummary;
   initialFilters: StaffRosterFilters;
+  /** Admin (Read Only) viewer: hide Add/Edit controls (the API 403s the writes anyway). */
+  viewerReadOnly?: boolean;
 }
 
 interface CentreOptionItem {
@@ -171,6 +173,7 @@ export default function StaffGrid({
   initialRows,
   initialSummary,
   initialFilters,
+  viewerReadOnly = false,
 }: StaffGridProps) {
   const [rows, setRows] = useState(initialRows);
   const [summary, setSummary] = useState(initialSummary);
@@ -602,12 +605,15 @@ export default function StaffGrid({
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-3">
         <p className="text-sm text-text-muted">
-          Add centre staff (teachers &amp; PMs) and seat them here — no separate
-          permissions step.
+          {viewerReadOnly
+            ? "Read-only view of centre staff and their seats."
+            : "Add centre staff (teachers & PMs) and seat them here — no separate permissions step."}
         </p>
-        <Button onClick={openAddModal} aria-label="Add user" className="shrink-0">
-          <Plus className="mr-1 h-4 w-4" /> Add User
-        </Button>
+        {!viewerReadOnly && (
+          <Button onClick={openAddModal} aria-label="Add user" className="shrink-0">
+            <Plus className="mr-1 h-4 w-4" /> Add User
+          </Button>
+        )}
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
@@ -804,14 +810,18 @@ export default function StaffGrid({
                   </div>
                   {/* Every row is editable — pending_teacher opens the
                       create-teacher flow; others open the edit/seat modal. */}
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => openModal(row)}
-                    aria-label={`Edit ${row.name || row.email}`}
-                  >
-                    <Edit2 className="mr-1 h-4 w-4" /> Edit
-                  </Button>
+                  {viewerReadOnly ? (
+                    <span className="text-xs text-gray-400">Read-only</span>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => openModal(row)}
+                      aria-label={`Edit ${row.name || row.email}`}
+                    >
+                      <Edit2 className="mr-1 h-4 w-4" /> Edit
+                    </Button>
+                  )}
                 </div>
               </Card>
             ))}

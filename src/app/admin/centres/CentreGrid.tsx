@@ -47,6 +47,8 @@ interface CentreGridProps {
     totalPages: number;
   };
   optionSets: CentreOptionSet[];
+  /** Admin (Read Only) viewer: hide New/Edit controls (the API 403s the writes anyway). */
+  viewerReadOnly?: boolean;
 }
 
 type EditMode = "create" | "edit";
@@ -95,6 +97,7 @@ export default function CentreGrid({
   initialFilters,
   initialPagination,
   optionSets,
+  viewerReadOnly = false,
 }: CentreGridProps) {
   const [rows, setRows] = useState(initialRows);
   const [summary, setSummary] = useState(initialSummary);
@@ -423,10 +426,12 @@ export default function CentreGrid({
             Manage Centre records and their School links.
           </p>
         </div>
-        <Button size="sm" onClick={openCreate}>
-          <Plus className="h-4 w-4" aria-hidden="true" />
-          New Centre
-        </Button>
+        {!viewerReadOnly && (
+          <Button size="sm" onClick={openCreate}>
+            <Plus className="h-4 w-4" aria-hidden="true" />
+            New Centre
+          </Button>
+        )}
       </div>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -606,7 +611,7 @@ export default function CentreGrid({
                 row={row}
                 expanded={expandedIds.has(row.id)}
                 onToggle={() => toggleExpanded(row.id)}
-                onEdit={() => openEdit(row)}
+                onEdit={viewerReadOnly ? undefined : () => openEdit(row)}
               />
             ))}
           </ul>
@@ -1132,7 +1137,8 @@ function CentreCard({
   row: CentreListRow;
   expanded: boolean;
   onToggle: () => void;
-  onEdit: () => void;
+  /** Absent for read-only viewers: the card renders without an Edit control. */
+  onEdit?: () => void;
 }) {
   return (
     <li>
@@ -1216,12 +1222,14 @@ function CentreCard({
             </div>
           </div>
 
-          <div className="mt-3 flex items-center gap-2">
-            <Button variant="ghost" size="sm" onClick={onEdit}>
-              <Edit2 className="h-4 w-4" aria-hidden="true" />
-              Edit
-            </Button>
-          </div>
+          {onEdit && (
+            <div className="mt-3 flex items-center gap-2">
+              <Button variant="ghost" size="sm" onClick={onEdit}>
+                <Edit2 className="h-4 w-4" aria-hidden="true" />
+                Edit
+              </Button>
+            </div>
+          )}
         </div>
 
         {expanded && (

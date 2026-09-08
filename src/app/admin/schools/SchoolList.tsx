@@ -13,6 +13,8 @@ interface School {
 
 interface SchoolListProps {
   initialSchools: School[];
+  /** Admin (Read Only) viewer: hide the Edit control (the API 403s the write anyway). */
+  viewerReadOnly?: boolean;
 }
 
 const PROGRAM_LABELS: Record<number, string> = {
@@ -33,7 +35,7 @@ const PROGRAMS = [
   { id: 64, name: "NVS", description: "NVS program" },
 ];
 
-export default function SchoolList({ initialSchools }: SchoolListProps) {
+export default function SchoolList({ initialSchools, viewerReadOnly = false }: SchoolListProps) {
   const [schools, setSchools] = useState(initialSchools);
   const [editingSchool, setEditingSchool] = useState<School | null>(null);
   const [selectedPrograms, setSelectedPrograms] = useState<number[]>([]);
@@ -217,13 +219,17 @@ export default function SchoolList({ initialSchools }: SchoolListProps) {
                   )}
                 </td>
                 <td className="whitespace-nowrap px-3 py-4 text-sm">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => openEditModal(school)}
-                  >
-                    Edit
-                  </Button>
+                  {viewerReadOnly ? (
+                    <span className="text-xs text-gray-400">Read-only</span>
+                  ) : (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => openEditModal(school)}
+                    >
+                      Edit
+                    </Button>
+                  )}
                 </td>
               </tr>
             ))}
