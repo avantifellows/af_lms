@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { ADDITIONAL_PROFILE_SOURCES } from "./holistic-additional-profile-sources";
 import { PROGRAM_IDS } from "./constants";
 import {
   buildHolisticProfileSourceEvidence,
@@ -389,5 +390,50 @@ describe("Holistic release preflight", () => {
 
     await expect(seedHolisticFixtures({ query } as never, PROGRAM_IDS.PUNJAB_COE))
       .rejects.toThrow("Holistic fixtures require three eligible Students in each Grade at one School");
+  });
+});
+
+describe("additional questionnaire preflight", () => {
+  const rows = ADDITIONAL_PROFILE_SOURCES.flatMap(source => source.questions.map(q => ({
+    user_id: "123", test_id: source.formId, session_id: source.sessionId,
+    question_id: q.questionId, question_position_index: q.position,
+    question_set_title: q.rawTitle,
+  })));
+
+  it("requires explicit inclusion and parameterizes both sources", () => {
+    expect(buildHolisticProfileSourceEvidence(rows).sourceUserIds).toEqual([]);
+    const query = buildHolisticProfileSourceQuery("avantifellows", "assessments", true);
+    expect(query.query).toContain("@emrsForm");
+    expect(query.params.emrsForm).toBe(ADDITIONAL_PROFILE_SOURCES[0].formId);
+    expect(query.params.maharashtraSession).toBe(ADDITIONAL_PROFILE_SOURCES[1].sessionId);
+  });
+
+  it("maps all real question IDs to five sections and excludes test identities", () => {
+    const evidence = buildHolisticProfileSourceEvidence([...rows, ...rows.map(row => ({...row, user_id: "test_admin"}))], [], true);
+    expect(evidence.sourceUserIds).toEqual(["123"]);
+    expect(evidence.excludedTestSourceCount).toBe(2);
+    for (const form of evidence.forms.slice(2)) {
+      expect(form.sourceSchemaValid).toBe(true);
+      expect(form.questions).toHaveLength(34);
+      expect(new Set(form.questions.map(q => q.questionSetTitle)).size).toBe(5);
+      expect(form.questions.map(q => q.questionId)).toEqual(ADDITIONAL_PROFILE_SOURCES.find(s => s.formId === form.formId)!.questions.map(q => q.questionId));
+    }
+  });
+
+  it.each([
+    { question_id: "unknown" },
+    { question_position_index: 99 },
+    { question_set_title: "Unexpected heading" },
+  ])("rejects raw schema drift before normalizing: %j", async change => {
+    const evidence = buildHolisticProfileSourceEvidence([{...rows[0], ...change}, ...rows.slice(1)], [], true);
+    expect(evidence.forms[2].sourceSchemaValid).toBe(false);
+    const result = await runHolisticReleasePreflight({db: async () => [], academicYear: "2026-2027", programId: 78, profileSource: evidence});
+    expect(result.blockers).toContain(`Additional Profile Form ${ADDITIONAL_PROFILE_SOURCES[0].formId} structure is invalid`);
+  });
+
+  it("blocks a missing questionnaire when inclusion is requested", async () => {
+    const evidence = buildHolisticProfileSourceEvidence(rows.filter(row => row.test_id !== ADDITIONAL_PROFILE_SOURCES[1].formId), [], true);
+    const result = await runHolisticReleasePreflight({db: async () => [], academicYear: "2026-2027", programId: 99, profileSource: evidence});
+    expect(result.blockers).toContain(`Additional Profile Form ${ADDITIONAL_PROFILE_SOURCES[1].formId} structure is invalid`);
   });
 });

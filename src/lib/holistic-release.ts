@@ -1,3 +1,4 @@
+import { ADDITIONAL_PROFILE_SOURCES } from "./holistic-additional-profile-sources";
 import { HOLISTIC_MENTORSHIP_PROGRAM_IDS } from "./constants";
 import { PM_SEAT_ROLES } from "./staff-shared";
 
@@ -24,12 +25,14 @@ type Query = <T extends Record<string, unknown> = Record<string, unknown>>(
 export interface HolisticProfileSourceEvidence {
   forms: Array<{
     grade: 11 | 12;
+    sourceSchemaValid?: boolean;
     formId: string;
     sessionId: string;
     questions: Array<{ questionId: string; position: number; questionSetTitle: string }>;
   }>;
   sourceUserIds: string[];
   historicalBusinessStudentIds?: string[];
+  excludedTestSourceCount?: number;
 }
 
 interface BigQueryProfileRow {
@@ -73,7 +76,7 @@ interface PreflightParams {
   profileSource: HolisticProfileSourceEvidence;
 }
 
-export function buildHolisticProfileSourceQuery(project: string, dataset: string) {
+export function buildHolisticProfileSourceQuery(project: string, dataset: string, includeAdditionalForms = false) {
   if (!BIGQUERY_PROJECT_PATTERN.test(project) || !BIGQUERY_DATASET_PATTERN.test(dataset)) {
     throw new Error("Invalid BigQuery project or dataset");
   }
@@ -82,27 +85,30 @@ export function buildHolisticProfileSourceQuery(project: string, dataset: string
             FROM \`${project}.${dataset}.all_responses_form_level\`
             WHERE test_type = 'form'
               AND ((test_id = @grade11Form AND session_id = @grade11Session)
-                OR (test_id = @grade12Form AND session_id = @grade12Session))
+                OR (test_id = @grade12Form AND session_id = @grade12Session)
+                ${includeAdditionalForms ? 'OR (test_id = @emrsForm AND session_id = @emrsSession) OR (test_id = @maharashtraForm AND session_id = @maharashtraSession)' : ''})
             ORDER BY user_id, test_id, question_position_index, question_id`,
     params: {
       grade11Form: APPROVED_PROFILE_FORMS[11].formId,
       grade11Session: APPROVED_PROFILE_FORMS[11].sessionId,
       grade12Form: APPROVED_PROFILE_FORMS[12].formId,
       grade12Session: APPROVED_PROFILE_FORMS[12].sessionId,
+      ...(includeAdditionalForms ? { emrsForm: ADDITIONAL_PROFILE_SOURCES[0].formId, emrsSession: ADDITIONAL_PROFILE_SOURCES[0].sessionId, maharashtraForm: ADDITIONAL_PROFILE_SOURCES[1].formId, maharashtraSession: ADDITIONAL_PROFILE_SOURCES[1].sessionId } : {}),
     },
   };
 }
 
 export function buildHolisticProfileSourceEvidence(
   rows: BigQueryProfileRow[],
-  historicalBusinessStudentIds: string[] = []
+  historicalBusinessStudentIds: string[] = [],
+  includeAdditionalForms = false
 ): HolisticProfileSourceEvidence {
   const approvedRows = rows.filter((row) =>
     Object.values(APPROVED_PROFILE_FORMS).some(
       ({ formId, sessionId }) => row.test_id === formId && row.session_id === sessionId
     )
   );
-  const forms = ([11, 12] as const).map((grade) => {
+  const forms: ProfileForm[] = ([11, 12] as const).map((grade) => {
     const approved = APPROVED_PROFILE_FORMS[grade];
     const questions = new Map<string, HolisticProfileSourceEvidence["forms"][number]["questions"][number]>();
     for (const row of approvedRows.filter(({ test_id }) => test_id === approved.formId)) {
@@ -119,7 +125,22 @@ export function buildHolisticProfileSourceEvidence(
       questions: [...questions.values()].sort((a, b) => a.position - b.position || a.questionId.localeCompare(b.questionId)),
     };
   });
+  let excludedTestSourceCount = 0;
+  if (includeAdditionalForms) {
+    for (const source of ADDITIONAL_PROFILE_SOURCES) {
+      const sourceRows = rows.filter(row => row.test_id === source.formId && row.session_id === source.sessionId);
+      const validRows = sourceRows.filter(row => /^[1-9][0-9]*$/.test(String(row.user_id)));
+      excludedTestSourceCount += new Set(sourceRows.filter(row => !/^[1-9][0-9]*$/.test(String(row.user_id))).map(row => String(row.user_id))).size;
+      const sourceSchemaValid = sourceRows.every(row => source.questions.some(q => q.questionId === row.question_id && q.position === Number(row.question_position_index) && q.rawTitle === row.question_set_title));
+      forms.push({
+        grade: source.grade, formId: source.formId, sessionId: source.sessionId, sourceSchemaValid,
+        questions: source.questions.filter(q => sourceRows.some(row => row.question_id === q.questionId)).map(q => ({questionId: q.questionId, position: q.position, questionSetTitle: q.questionSetTitle})),
+      });
+      approvedRows.push(...validRows);
+    }
+  }
   return {
+    ...(includeAdditionalForms ? { excludedTestSourceCount } : {}),
     sourceUserIds: [...new Set(approvedRows.map(({ user_id }) => String(user_id)))].sort(),
     historicalBusinessStudentIds,
     forms,
@@ -136,7 +157,7 @@ export async function runHolisticReleasePreflight(params: PreflightParams) {
   return {
     ok: blockers.length === 0,
     blockers,
-    warnings: getProfileWarnings(incompleteProfiles),
+    warnings: [...getProfileWarnings(incompleteProfiles), ...(params.profileSource.excludedTestSourceCount ? [`Excluded ${params.profileSource.excludedTestSourceCount} non-student additional-form source identities`] : [])],
     counts: getPreflightCounts(evidence, incompleteProfiles),
   };
 }
@@ -256,12 +277,19 @@ async function loadPreflightEvidence(params: PreflightParams): Promise<Preflight
 }
 
 function getProfileFormBlockers(forms: ProfileForm[]): string[] {
-  return APPROVED_PROFILE_GRADES.flatMap((grade) => {
-    const form = forms.find((candidate) => candidate.grade === grade);
+  const originalBlockers = APPROVED_PROFILE_GRADES.flatMap((grade) => {
+    const form = forms.find((candidate) => candidate.formId === APPROVED_PROFILE_FORMS[grade].formId);
     return isApprovedProfileForm(form, grade)
       ? []
       : [`Approved Grade ${grade} Profile Form structure is invalid`];
   });
+  const additionalBlockers = forms.filter(form => ADDITIONAL_PROFILE_SOURCES.some(source => source.formId === form.formId)).flatMap(form => {
+    const source = ADDITIONAL_PROFILE_SOURCES.find(source => source.formId === form.formId)!;
+    return form.sourceSchemaValid === true && form.grade === 11 && form.sessionId === source.sessionId && hasApprovedQuestions(form.questions)
+      && form.questions.every(q => source.questions.some(expected => expected.questionId === q.questionId && expected.position === q.position && expected.questionSetTitle === q.questionSetTitle))
+      ? [] : [`Additional Profile Form ${form.formId} structure is invalid`];
+  });
+  return [...originalBlockers, ...additionalBlockers];
 }
 
 function isApprovedProfileForm(form: ProfileForm | undefined, grade: 11 | 12): boolean {
