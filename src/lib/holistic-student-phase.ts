@@ -1,6 +1,6 @@
 import {
   CURRENT_ACADEMIC_YEAR,
-  isHolisticMentorshipProgramId,
+  isHolisticHistoricalImportProgramId,
 } from "./constants";
 import { query } from "./db";
 
@@ -480,7 +480,11 @@ async function loadPhaseRelations(
        ORDER BY summary.position`,
       [params.studentId]
     ),
-    isHolisticMentorshipProgramId(params.programId) ? query<HistoricalRow>(
+    // Historical Notes are not program-scoped in their legacy table. Only
+    // Programs with an approved historical import may read them; otherwise a
+    // newly enabled Program could accidentally inherit a Program 78 record
+    // for a Student shared across program rosters.
+    isHolisticHistoricalImportProgramId(params.programId) ? query<HistoricalRow>(
       `SELECT answer.question, answer.answer, answer.position
        FROM holistic_mentorship_historical_notes notes
        JOIN holistic_mentorship_historical_note_answers answer ON answer.historical_note_id = notes.id

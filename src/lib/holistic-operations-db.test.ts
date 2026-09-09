@@ -30,6 +30,21 @@ function operationsWithClientQuery(clientQuery: ReturnType<typeof vi.fn>) {
 }
 
 describe("Holistic operator database adapter", () => {
+  it.each([74, 94, 88, 99])(
+    "rejects newly enabled Program %s before querying historical source rows",
+    async (programId) => {
+      const query = vi.fn();
+      const operations = createHolisticOperationsDb({
+        query: query as never,
+        withTransaction: vi.fn() as never,
+      });
+
+      await expect(operations.historicalImport.resolve(source, programId))
+        .rejects.toThrow("Historical import requires Program 1 or 78");
+      expect(query).not.toHaveBeenCalled();
+    },
+  );
+
   it("resolves the selected Program from active Centres and safely scopes legacy Mentors", async () => {
     const query = vi.fn().mockResolvedValueOnce([{
       business_student_id: "AF-100",

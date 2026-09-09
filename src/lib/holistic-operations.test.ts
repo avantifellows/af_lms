@@ -175,10 +175,12 @@ describe("Historical Holistic Notes import entrypoint", () => {
     expect(insert).toHaveBeenCalledOnce();
   });
 
-  it("rejects unsupported Historical import Programs before reading source data", async () => {
+  it.each([74, 94, 88, 99, 999])(
+    "rejects unsupported Historical import Program %s before reading source data",
+    async (programId) => {
     const read = vi.fn();
     await expect(runHistoricalHolisticNotesImport({
-      programId: 999,
+      programId,
       source: { read },
       db: {
         resolve: vi.fn(),
@@ -187,7 +189,8 @@ describe("Historical Holistic Notes import entrypoint", () => {
       },
     })).rejects.toThrow("Historical import requires Program 1 or 78");
     expect(read).not.toHaveBeenCalled();
-  });
+    },
+  );
 
   it("rejects empty Program 78 approved counts before reading source data", async () => {
     const read = vi.fn();

@@ -1739,7 +1739,7 @@ describe("SchoolPage (server component)", () => {
   });
 
   it("offers an explicit choice when an Admin opens a dual-Program School without a selection", async () => {
-    setupAdminDefaults({ id: "20", code: "SCH001", centre_program_ids: [1, 78] });
+    setupAdminDefaults({ id: "20", code: "SCH001", centre_program_ids: [78, 1] });
     const permission = makePermission({ role: "admin", program_ids: [1] });
     mockGetUserPermission.mockResolvedValue(permission);
 
@@ -1756,6 +1756,14 @@ describe("SchoolPage (server component)", () => {
       "href",
       "/school/SCH001?program_id=78",
     );
+    expect(
+      within(screen.getByTestId("tab-holistic_mentorship"))
+        .getAllByRole("link")
+        .map((link) => link.getAttribute("href")),
+    ).toEqual([
+      "/school/SCH001?program_id=1",
+      "/school/SCH001?program_id=78",
+    ]);
     expect(mockRequireHolisticMentorshipAccess).not.toHaveBeenCalled();
   });
 

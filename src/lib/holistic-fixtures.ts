@@ -80,15 +80,22 @@ export async function seedHolisticFixtures(
      FROM centres centre
      JOIN school ON school.id = centre.school_id
      WHERE centre.program_id = $1 AND centre.is_active IS TRUE
-       AND $1 = ANY(COALESCE(school.program_ids, '{}'))
-       AND (SELECT COUNT(DISTINCT grade.number)
-            FROM "group" school_group
-            JOIN group_user school_member ON school_member.group_id = school_group.id
-            JOIN enrollment_record grade_enrollment ON grade_enrollment.user_id = school_member.user_id
-              AND grade_enrollment.group_type = 'grade' AND grade_enrollment.academic_year = $2
-              AND grade_enrollment.is_current IS TRUE
-            JOIN grade ON grade.id = grade_enrollment.group_id AND grade.number IN (11, 12)
-            WHERE school_group.type = 'school' AND school_group.child_id = centre.school_id) = 2
+       AND EXISTS (
+         SELECT 1
+         FROM centre_students roster_student
+         WHERE roster_student.centre_id = centre.id
+           AND roster_student.program_id = $1
+           AND roster_student.academic_year = $2
+           AND roster_student.grade = 11
+       )
+       AND EXISTS (
+         SELECT 1
+         FROM centre_students roster_student
+         WHERE roster_student.centre_id = centre.id
+           AND roster_student.program_id = $1
+           AND roster_student.academic_year = $2
+           AND roster_student.grade = 12
+       )
      ORDER BY centre.school_id
      `,
     [programId, HOLISTIC_FIXTURE_MANIFEST.academicYear]
@@ -98,27 +105,28 @@ export async function seedHolisticFixtures(
   for (const candidateScope of scopeResult.rows) {
     const studentResult = await client.query<FixtureStudent>(
       `/* fixture_students */
-     WITH candidates AS (
-       SELECT DISTINCT student.id AS student_id, student.user_id, grade.number AS grade,
-              roster_program.batch_group_id
-       FROM centres centre
-       JOIN "group" school_group ON school_group.type = 'school' AND school_group.child_id = centre.school_id
-       JOIN group_user school_member ON school_member.group_id = school_group.id
-       JOIN student ON student.user_id = school_member.user_id
-       JOIN enrollment_record grade_enrollment ON grade_enrollment.user_id = student.user_id
-         AND grade_enrollment.group_type = 'grade' AND grade_enrollment.academic_year = $2
-         AND grade_enrollment.is_current IS TRUE
-       JOIN grade ON grade.id = grade_enrollment.group_id AND grade.number IN (11, 12)
+     WITH canonical_roster AS (
+       SELECT DISTINCT student.id AS student_id, roster_student.user_id, roster_student.grade
+       FROM centre_students roster_student
+       JOIN student ON student.user_id = roster_student.user_id
+       WHERE roster_student.centre_id = $1
+         AND roster_student.program_id = $3
+         AND roster_student.academic_year = $2
+         AND roster_student.grade IN (11, 12)
+         AND student.status IS DISTINCT FROM 'dropout'
+     ), candidates AS (
+       SELECT canonical_roster.student_id, canonical_roster.user_id, canonical_roster.grade,
+              selected_batch.batch_group_id
+       FROM canonical_roster
        JOIN LATERAL (
-         SELECT batch.program_id, batch_group.id AS batch_group_id
+         SELECT batch.id AS batch_group_id
          FROM group_user batch_member
          JOIN "group" batch_group ON batch_group.id = batch_member.group_id AND batch_group.type = 'batch'
          JOIN batch ON batch.id = batch_group.child_id
-         WHERE batch_member.user_id = student.user_id AND batch.program_id = $3
+         WHERE batch_member.user_id = canonical_roster.user_id AND batch.program_id = $3
          ORDER BY batch.id
          LIMIT 1
-       ) roster_program ON TRUE
-       WHERE centre.id = $1 AND student.status IS DISTINCT FROM 'dropout'
+       ) selected_batch ON TRUE
      ), ranked AS (
        SELECT candidates.*,
               ROW_NUMBER() OVER (PARTITION BY grade ORDER BY student_id) AS position

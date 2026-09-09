@@ -3,6 +3,7 @@
 import { useState } from "react";
 import AddUserModal from "./AddUserModal";
 import { Button } from "@/components/ui";
+import { PROGRAM_ID_TO_LABEL } from "@/lib/constants";
 
 interface CentreAssignment {
   centreName: string;
@@ -69,11 +70,7 @@ const ROLE_COLORS: Record<string, string> = {
   teacher: "bg-gray-100 text-gray-800",
 };
 
-const PROGRAM_LABELS: Record<number, string> = {
-  1: "CoE",
-  2: "Nodal",
-  64: "NVS",
-};
+const PROGRAM_LABELS = PROGRAM_ID_TO_LABEL;
 
 export default function UserList({ initialUsers, regions, schoolCodeToName, currentUserEmail, viewerReadOnly }: UserListProps) {
   const labelForSchool = (code: string) => {

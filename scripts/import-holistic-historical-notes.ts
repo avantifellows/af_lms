@@ -7,7 +7,7 @@ import { PROGRAM_IDS } from "../src/lib/constants";
 import {
   configureHolisticScriptEnvironment,
   getHistoricalImportBaseline,
-  getHolisticMentorshipProgramId,
+  getHolisticHistoricalImportProgramId,
   getHolisticOperationMode,
   getHolisticScriptArgument,
   isHistoricalHolisticNotesSource,
@@ -49,7 +49,9 @@ function parseOptions(args: string[]) {
   );
   const actorUserId = Number(getHolisticScriptArgument(args, "--actor-user-id"));
   const sourceSnapshot = getHolisticScriptArgument(args, "--source-snapshot");
-  const programId = getHolisticMentorshipProgramId(args);
+  // Validate the historical-only Program contract before parsing optional
+  // counts or touching the environment/source files.
+  const programId = getHolisticHistoricalImportProgramId(args);
   const approvedBaseline = getHistoricalImportBaseline(args);
   if (mode === "apply") {
     validateApplyOptions(actorUserId, sourceSnapshot, programId, approvedBaseline);

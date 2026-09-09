@@ -43,6 +43,11 @@ function nextWorkspaceIndex(key: string, index: number, count: number) {
   return null;
 }
 
+function orderedProgramIds(programIds: number[]) {
+  const available = new Set(programIds);
+  return HOLISTIC_MENTORSHIP_PROGRAM_IDS.filter((programId) => available.has(programId));
+}
+
 function AdminSelectors({ selectedProgramId, availableProgramIds, academicYear, academicYears,
   onProgramChange, onAcademicYearChange }: {
   selectedProgramId: number;
@@ -129,6 +134,7 @@ function AdminWorkspace({
   canEdit = true,
   canViewPhaseSetup = canEdit,
 }: Omit<HolisticMentorshipWorkspaceProps, "mode" | "schoolCode" | "programId">) {
+  const orderedAvailableProgramIds = orderedProgramIds(availableProgramIds);
   const workspaces = canViewPhaseSetup ? WORKSPACES.admin : WORKSPACES.admin.slice(0, 1);
   const [activeId, setActiveId] = useState<string>(workspaces[0].id);
   const active = workspaces.find((workspace) => workspace.id === activeId) ?? workspaces[0];
@@ -169,7 +175,7 @@ function AdminWorkspace({
       <div className="flex justify-end">
         <HolisticTutorialLink />
       </div>
-      <AdminSelectors selectedProgramId={selectedProgramId} availableProgramIds={availableProgramIds}
+      <AdminSelectors selectedProgramId={selectedProgramId} availableProgramIds={orderedAvailableProgramIds}
         academicYear={academicYear} academicYears={academicYears}
         onProgramChange={handleProgramChange} onAcademicYearChange={setAcademicYear} />
       <WorkspaceTabs workspaces={workspaces} active={active} tabSetId={tabSetId}

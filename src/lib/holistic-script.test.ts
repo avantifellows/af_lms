@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   getHistoricalImportBaseline,
+  getHolisticHistoricalImportProgramId,
   getHolisticMentorshipProgramId,
   getHolisticOperationMode,
   getHolisticScriptArgument,
@@ -33,11 +34,28 @@ describe("Holistic operator script helpers", () => {
       .toThrow("source required");
   });
 
-  it("accepts only supported Holistic Mentorship Programs", () => {
+  it("accepts all supported Holistic Mentorship Programs", () => {
     expect(getHolisticMentorshipProgramId([])).toBe(1);
+    expect(getHolisticMentorshipProgramId(["--program-id=74"])).toBe(74);
+    expect(getHolisticMentorshipProgramId(["--program-id=94"])).toBe(94);
     expect(getHolisticMentorshipProgramId(["--program-id=78"])).toBe(78);
+    expect(getHolisticMentorshipProgramId(["--program-id=88"])).toBe(88);
+    expect(getHolisticMentorshipProgramId(["--program-id=99"])).toBe(99);
     expect(() => getHolisticMentorshipProgramId(["--program-id=64"]))
-      .toThrow("--program-id must be 1 or 78");
+      .toThrow("supported Holistic Mentorship Program");
+  });
+
+  it.each([74, 94, 88, 99])(
+    "rejects newly enabled Program %s from Historical Notes operations",
+    (programId) => {
+      expect(() => getHolisticHistoricalImportProgramId([`--program-id=${programId}`]))
+        .toThrow("--program-id must be 1 or 78");
+    },
+  );
+
+  it("keeps Historical Notes parsing limited to Programs 1 and 78", () => {
+    expect(getHolisticHistoricalImportProgramId([])).toBe(1);
+    expect(getHolisticHistoricalImportProgramId(["--program-id=78"])).toBe(78);
   });
 
   it("defaults to dry-run and rejects conflicting execution modes", () => {

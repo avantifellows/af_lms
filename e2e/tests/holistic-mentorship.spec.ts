@@ -452,7 +452,13 @@ test.describe("Holistic Mentorship release workflows", () => {
     const program = holisticAdminPage.getByLabel("Program");
     await expect(program).toBeEnabled();
     await expect(program).toHaveValue("1");
-    await expect(program.locator("option")).toHaveText(["1 - JNV CoE", "78 - EMRS CoE"]);
+    await expect(program.locator("option")).toHaveText([
+      "1 - JNV CoE",
+      "74 - Punjab CoE",
+      "78 - EMRS CoE",
+      "88 - Uttarakhand CoE",
+      "99 - Maharashtra Coaching Test Prep",
+    ]);
 
     const emrsProgress = holisticAdminPage.waitForResponse((response) =>
       response.url().includes("/api/holistic-mentorship/progress") &&

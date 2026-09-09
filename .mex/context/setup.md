@@ -15,7 +15,7 @@ edges:
     condition: when configuring which backend env vars point at
   - target: context/architecture.md
     condition: when understanding how components connect during setup
-last_updated: 2026-07-27
+last_updated: 2026-09-02
 ---
 
 # Setup
@@ -56,7 +56,7 @@ Never commit real values — `.env.local` is gitignored; CI injects prod/preview
 - `npm run build` — production Next build.
 - `npm run fallow:health` — codebase health/hotspots; `fallow:dead-code`, `fallow:audit` for cleanup/PR risk.
 - Data scripts (one-off, via `ts-node`): `npm run centres:import`, `npm run pm:import`, `npm run db:setup-permissions`, etc. (see `scripts/`).
-- Holistic release setup: `npm run holistic:setup-local -- --confirm-synthetic-database --program-id=<1-or-78>` applies the sibling DB Service migrations and synthetic fixtures to a local-only database. `npm run holistic:preflight -- --confirm-production-read-only --program-id=<1-or-78> --historical-source=<private-json>` performs the read-only production reconciliation; the Historical source is required only for Program 1. Follow `docs/holistic-mentorship-release.md` for staging, sign-off, monitoring, and rollback.
+- Holistic release setup: `npm run holistic:setup-local -- --confirm-synthetic-database --program-id=<1|74|94|78|88|99>` applies the sibling DB Service migrations and synthetic fixtures to a local-only database. Production preflight requires `--historical-source=<private-json>` for Program 1, uses it for a Program 78 Historical run when applicable, and omits it for live Programs 74, 94, 88, and 99. Follow `docs/holistic-mentorship-release.md` for the separate commands, staging order, sign-off, monitoring, and rollback.
 
 ## Common Issues
 - **Port 3000 in use:** `lsof -i :3000` then `kill -9 <PID>`.

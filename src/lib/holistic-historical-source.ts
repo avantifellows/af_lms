@@ -1,6 +1,6 @@
 import { parse } from "csv-parse/sync";
 
-import { isHolisticMentorshipProgramId, PROGRAM_IDS } from "./constants";
+import { isHolisticHistoricalImportProgramId, PROGRAM_IDS } from "./constants";
 import {
   HISTORICAL_SOURCE_TIMEZONE,
   hasValidHistoricalSourceProvenance,
@@ -36,7 +36,7 @@ export function assertApprovedHistoricalSourceCounts(
   counts: HistoricalSourcePreparationResult["counts"],
   programId: number = PROGRAM_IDS.COE
 ): void {
-  if (!isHolisticMentorshipProgramId(programId)) {
+  if (!isHolisticHistoricalImportProgramId(programId)) {
     throw new Error("Historical source preparation requires Program 1 or 78");
   }
   const selectedStudents = programId === PROGRAM_IDS.COE ? 53 : 11;
