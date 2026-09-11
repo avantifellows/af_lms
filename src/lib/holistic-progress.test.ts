@@ -207,8 +207,9 @@ describe("Holistic progress", () => {
     expect(sql).toContain("COALESCE(current_roster.grade, historical_grade.grade) AS grade");
     expect(sql).toContain("HAVING COUNT(DISTINCT roster_student.grade) = 1");
     expect(sql).toContain("WHERE $2 <> $11");
-    expect(sql.indexOf("FROM centre_students roster_student"))
-      .toBeLessThan(sql.indexOf("FROM enrollment_record grade_enrollment"));
+    const currentRosterIndex = sql.indexOf("FROM current_roster_snapshot roster_student");
+    expect(currentRosterIndex).toBeGreaterThanOrEqual(0);
+    expect(currentRosterIndex).toBeLessThan(sql.indexOf("FROM enrollment_record grade_enrollment"));
     expect(mockReconcile).toHaveBeenCalledWith({
       academicYear: "2026-2027",
       programId: 1,

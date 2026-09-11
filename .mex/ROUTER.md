@@ -26,7 +26,7 @@ edges:
     condition: when working on teacher feedback setup, the feedback form, or its report
   - target: patterns/INDEX.md
     condition: when starting a task — check the pattern index for a matching pattern file
-last_updated: 2026-09-07
+last_updated: 2026-09-11
 ---
 
 # Session Bootstrap
@@ -38,6 +38,8 @@ Then read this file fully before doing anything else in this session.
 ## Current Project State
 
 **Working:**
+
+- Holistic Admin progress resolves the selected current-year Program roster once per query, avoiding the per-Mapping view expansion that timed out after the DB Service #727 roster change. Eligibility, Grade ambiguity, School scope, history, counts, pagination, and CSV semantics are preserved. The API returns safe JSON on failures, and the workspace handles empty/non-JSON failures with a retry message. See `context/data-access.md` and `patterns/debug-holistic-progress.md`; deployment verification is recorded in the fix PR.
 
 - LMS PR #304 incorporates the current main-branch centre roster and read-only Admin changes. Shared school/centre roster phone-cohort checks retain their own SQL binding, separate from school program attribution order.
 
@@ -71,6 +73,8 @@ Then read this file fully before doing anything else in this session.
 - Curriculum Log resolves exactly one active physical Centre for the selected School + Program and derives Grade-specific Exam Track choices from that Centre's mappings. Missing/ambiguous Centres, unmapped Grades, and mapped Tracks without in-syllabus config fail closed with distinct UI states; Program and Grade changes refresh/prune Track choices, and create plus standalone Chapter Completion validation reject stale or forged unmapped Tracks. A Track removed from Centre Management remains selectable as history-only while active logs exist, with create/edit/delete and Chapter Completion controls disabled. E2E fixture Centres/mappings live in `20260807020000_seed_curriculum_centre_exam_tracks.sql`.
 - Curriculum Summary rows now follow the same current Centre Exam Track mappings instead of globally configured Tracks. Mapped Tracks with content keep normal metrics and Chapter expansion, mapped Tracks without content render one non-expandable unavailable row, and missing/ambiguous physical Centres render per-School + Program configuration-error rows without blocking valid combinations. Biology/JEE and both Maths/Mathematics + NEET labels are excluded. Downstream filter options are the mapped union for the selected Schools, every matching checkbox option remains scrollable, and changing Schools or Regions prunes only incompatible selections without applying the form.
 - Expanded Curriculum Summary Chapter rows show active Class Cancellation Count and Doubt Solving Hours for the selected scope and date range; parent, unavailable, and configuration-error rows remain unchanged, and Regular Class metrics keep their existing calculation.
+
+- Holistic progress roster cleanup keeps Program/year/Grade filters in its per-query snapshot and removes duplicate consumer checks; eligibility and historical behavior are unchanged. See `context/data-access.md`.
 
 **Known issues:**
 

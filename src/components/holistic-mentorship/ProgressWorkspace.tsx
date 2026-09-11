@@ -86,6 +86,14 @@ function storedView(scope: string) {
   return { filters: restoredFilters(stored, scope), page: restoredPage(stored, scope) };
 }
 
+async function readProgressResponse(response: Response): Promise<Payload> {
+  const body = await response.json().catch(() => null);
+  if (!response.ok || !body) {
+    throw new Error(body?.error || "Unable to load progress. Please try again.");
+  }
+  return body;
+}
+
 function useProgressData(params: URLSearchParams, ready: boolean) {
   const [refresh, setRefresh] = useState(0);
   const [data, setData] = useState(EMPTY);
@@ -96,12 +104,10 @@ function useProgressData(params: URLSearchParams, ready: boolean) {
     setLoading(true);
     try {
       const response = await fetch(`/api/holistic-mentorship/progress?${params}`, { signal });
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.error || "Unable to load progress");
-      setData(body);
+      setData(await readProgressResponse(response));
       setError("");
     } catch (problem) {
-      if ((problem as Error).name !== "AbortError") setError((problem as Error).message);
+      if (!signal?.aborted && (problem as Error).name !== "AbortError") setError((problem as Error).message);
     } finally {
       if (!signal?.aborted) setLoading(false);
     }
