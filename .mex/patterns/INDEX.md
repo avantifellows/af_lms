@@ -1,6 +1,6 @@
 ---
 name: pattern-index
-last_updated: 2026-09-07
+last_updated: 2026-09-11
 ---
 
 # Pattern Index
@@ -36,4 +36,5 @@ Lookup table for all pattern files in this directory. Check here before starting
 | [debug-bulk-workbook.md](debug-bulk-workbook.md) | Diagnosing XLSX/CSV upload parsing, encryption, or row-validation failures |
 | [debug-curriculum-progress.md](debug-curriculum-progress.md) | Diagnosing teacher LMS curriculum updates not appearing in manager LMS |
 | [debug-e2e-fixtures.md](debug-e2e-fixtures.md) | Diagnosing Playwright failures caused by stale local fixtures or app flow drift |
+| [debug-holistic-progress.md](debug-holistic-progress.md) | Diagnosing empty 500 responses, JSON parse errors, or slow Holistic Admin progress |
 | [merge-roster-changes.md](merge-roster-changes.md) | Merging overlapping school/centre roster queries and SQL bindings |

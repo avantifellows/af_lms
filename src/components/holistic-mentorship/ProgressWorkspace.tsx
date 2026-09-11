@@ -96,12 +96,14 @@ function useProgressData(params: URLSearchParams, ready: boolean) {
     setLoading(true);
     try {
       const response = await fetch(`/api/holistic-mentorship/progress?${params}`, { signal });
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.error || "Unable to load progress");
+      const body = await response.json().catch(() => null);
+      if (!response.ok || !body) {
+        throw new Error(body?.error || "Unable to load progress. Please try again.");
+      }
       setData(body);
       setError("");
     } catch (problem) {
-      if ((problem as Error).name !== "AbortError") setError((problem as Error).message);
+      if (!signal?.aborted && (problem as Error).name !== "AbortError") setError((problem as Error).message);
     } finally {
       if (!signal?.aborted) setLoading(false);
     }

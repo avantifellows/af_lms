@@ -119,6 +119,13 @@ export async function listHolisticProgress(
        WHERE mapping.program_id = $1 AND mapping.academic_year = $2
          ${schoolScopeSql}
          AND ($4::text IS NULL OR mapping_school.code = $4)
+     ), current_roster_snapshot AS MATERIALIZED (
+       -- The Centre membership view is expensive when expanded per Mapping.
+       -- Resolve this Program/year once for both eligibility and Grade lookup.
+       SELECT centre_id, user_id, academic_year, program_id, grade
+       FROM centre_students
+       WHERE program_id = $1 AND academic_year = $2
+         AND grade IN (11, 12) AND $2 = $11
      ), mapping_history AS (
        SELECT mapping.*,
               MIN(mapping.started_at) OVER (PARTITION BY mapping.student_id) AS first_started_at
@@ -133,7 +140,7 @@ export async function listHolisticProgress(
          AND EXISTS (
            SELECT 1
            FROM student live_student
-           JOIN centre_students roster_student
+           JOIN current_roster_snapshot roster_student
              ON roster_student.user_id = live_student.user_id
            JOIN centres roster_centre
              ON roster_centre.id = roster_student.centre_id
@@ -166,7 +173,7 @@ export async function listHolisticProgress(
        JOIN "user" mentor ON mentor.id = mapped.mentor_user_id
        LEFT JOIN LATERAL (
          SELECT MIN(roster_student.grade) AS grade
-         FROM centre_students roster_student
+         FROM current_roster_snapshot roster_student
          JOIN centres roster_centre
            ON roster_centre.id = roster_student.centre_id
           AND roster_centre.school_id = mapped.school_id

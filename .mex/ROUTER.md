@@ -26,7 +26,7 @@ edges:
     condition: when working on teacher feedback setup, the feedback form, or its report
   - target: patterns/INDEX.md
     condition: when starting a task — check the pattern index for a matching pattern file
-last_updated: 2026-09-07
+last_updated: 2026-09-11
 ---
 
 # Session Bootstrap
@@ -38,6 +38,8 @@ Then read this file fully before doing anything else in this session.
 ## Current Project State
 
 **Working:**
+
+- Holistic Admin progress resolves the selected current-year Program roster once per query, avoiding the per-Mapping view expansion that timed out after the DB Service #727 roster change. Eligibility, Grade ambiguity, School scope, history, counts, pagination, and CSV semantics are preserved. The API returns safe JSON on failures, and the workspace handles empty/non-JSON failures with a retry message. See `context/data-access.md` and `patterns/debug-holistic-progress.md`; deployment verification is recorded in the fix PR.
 
 - LMS PR #304 incorporates the current main-branch centre roster and read-only Admin changes. Shared school/centre roster phone-cohort checks retain their own SQL binding, separate from school program attribution order.
 

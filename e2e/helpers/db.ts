@@ -106,10 +106,10 @@ async function seedHolisticE2eRoster(
 
   await client.query(
     `INSERT INTO centres (
-       name, school_id, stream_codes, program_id, is_physical, is_active,
+       name, school_id, program_id, is_physical, is_active,
        inserted_at, updated_at
      )
-     SELECT $1, $2, ARRAY['jee']::TEXT[], 1, true, true,
+     SELECT $1, $2, 1, true, true,
             (NOW() AT TIME ZONE 'UTC'), (NOW() AT TIME ZONE 'UTC')
      WHERE NOT EXISTS (
        SELECT 1 FROM centres WHERE school_id = $2 AND program_id = 1 AND is_active IS TRUE
