@@ -49,10 +49,10 @@ test("progress counts, filters, pagination and CSV work with the production Cent
 test("progress shows a useful empty-500 error and Refresh restores the real results", async ({ holisticAdminPage }) => {
   await holisticAdminPage.route(`**${endpoint}?**`, (route) => route.fulfill({ status: 500, body: "" }));
   await holisticAdminPage.goto("/admin/holistic-mentorship");
-  await expect(holisticAdminPage.getByRole("alert")).toHaveText("Unable to load progress. Please try again.");
+  await expect(holisticAdminPage.getByRole("alert").filter({ hasText: "Unable to load progress" })).toHaveText("Unable to load progress. Please try again.");
   await holisticAdminPage.unroute(`**${endpoint}?**`);
   await holisticAdminPage.getByRole("button", { name: "Refresh", exact: true }).click();
-  await expect(holisticAdminPage.getByRole("alert")).toHaveCount(0);
+  await expect(holisticAdminPage.getByRole("alert").filter({ hasText: "Unable to load progress" })).toHaveCount(0);
   await expect(holisticAdminPage.getByRole("table", { name: "Student progress results" }).locator("tbody tr").first()).toBeVisible();
   await expect(holisticAdminPage.getByText(/Last refreshed/)).toBeVisible();
 });
