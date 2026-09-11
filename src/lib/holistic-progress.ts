@@ -122,7 +122,7 @@ export async function listHolisticProgress(
      ), current_roster_snapshot AS MATERIALIZED (
        -- The Centre membership view is expensive when expanded per Mapping.
        -- Resolve this Program/year once for both eligibility and Grade lookup.
-       SELECT centre_id, user_id, academic_year, program_id, grade
+       SELECT centre_id, user_id, grade
        FROM centre_students
        WHERE program_id = $1 AND academic_year = $2
          AND grade IN (11, 12) AND $2 = $11
@@ -149,9 +149,6 @@ export async function listHolisticProgress(
             AND roster_centre.is_active IS TRUE
            WHERE live_student.id = mapping.student_id
              AND live_student.status IS DISTINCT FROM 'dropout'
-             AND roster_student.academic_year = mapping.academic_year
-             AND roster_student.program_id = mapping.program_id
-             AND roster_student.grade IN (11, 12)
          )
        ))
        ORDER BY mapping.student_id, mapping.started_at DESC, mapping.id DESC
@@ -179,11 +176,7 @@ export async function listHolisticProgress(
           AND roster_centre.school_id = mapped.school_id
           AND roster_centre.program_id = $1
           AND roster_centre.is_active IS TRUE
-         WHERE $2 = $11
-           AND roster_student.user_id = student_user.id
-           AND roster_student.academic_year = $2
-           AND roster_student.program_id = $1
-           AND roster_student.grade IN (11, 12)
+         WHERE roster_student.user_id = student_user.id
          HAVING COUNT(DISTINCT roster_student.grade) = 1
        ) current_roster ON true
        LEFT JOIN LATERAL (

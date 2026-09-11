@@ -74,6 +74,8 @@ Then read this file fully before doing anything else in this session.
 - Curriculum Summary rows now follow the same current Centre Exam Track mappings instead of globally configured Tracks. Mapped Tracks with content keep normal metrics and Chapter expansion, mapped Tracks without content render one non-expandable unavailable row, and missing/ambiguous physical Centres render per-School + Program configuration-error rows without blocking valid combinations. Biology/JEE and both Maths/Mathematics + NEET labels are excluded. Downstream filter options are the mapped union for the selected Schools, every matching checkbox option remains scrollable, and changing Schools or Regions prunes only incompatible selections without applying the form.
 - Expanded Curriculum Summary Chapter rows show active Class Cancellation Count and Doubt Solving Hours for the selected scope and date range; parent, unavailable, and configuration-error rows remain unchanged, and Regular Class metrics keep their existing calculation.
 
+- Holistic progress roster cleanup keeps Program/year/Grade filters in its per-query snapshot and removes duplicate consumer checks; eligibility and historical behavior are unchanged. See `context/data-access.md`.
+
 **Known issues:**
 
 - Two write paths exist — sending a student/batch/quiz-session write to Postgres instead of the DB Service is a real bug (see `context/data-access.md`).
