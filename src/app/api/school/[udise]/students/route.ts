@@ -87,6 +87,9 @@ function checkedBulkUploadResponse(
     original: safePreviewOriginal(result.original),
     field_errors: safePreviewFieldErrors(result.field_errors),
     row_errors: result.row_errors,
+    ...(result.unsupported_choice_fields?.length
+      ? { unsupported_choice_fields: result.unsupported_choice_fields }
+      : {}),
   }));
 
   return NextResponse.json({

@@ -28,6 +28,7 @@ export interface StudentAdditionUploadRowResult {
     student_id: string | null;
   };
   field_errors: Record<string, string>;
+  unsupported_choice_fields?: string[];
   row_errors: string[];
   existing_match: null;
   original: Record<string, string>;
@@ -210,6 +211,9 @@ function validationToRejectedResult(
       student_id: validation.generatedStudentId,
     },
     field_errors: validation.fieldErrors,
+    ...(!validation.ok && validation.unsupportedChoiceFields?.length
+      ? { unsupported_choice_fields: validation.unsupportedChoiceFields }
+      : {}),
     row_errors: validation.rowErrors,
     existing_match: null,
     original,
@@ -233,6 +237,7 @@ function uploadRowRejectedResult(
         ...validation.fieldErrors,
         phone: PHONE_EXAMPLE_PHONE_ERROR,
       },
+      ...(!validation.ok ? { unsupportedChoiceFields: validation.unsupportedChoiceFields } : {}),
       rowErrors: [...validation.rowErrors],
     }, original);
   }

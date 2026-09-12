@@ -1,7 +1,7 @@
 ---
 name: debug-bulk-workbook
 description: Diagnose uploaded spreadsheets without importing students or exposing their data.
-last_updated: 2026-09-07
+last_updated: 2026-09-12
 ---
 
 # Debug Bulk Workbooks
@@ -13,8 +13,12 @@ last_updated: 2026-09-07
 4. Pass the original bytes through `parseStudentAdditionUpload` locally. Report counts and row numbers, not names, phones, or other student data. Never commit supplied workbooks as fixtures.
 5. Distinguish a read failure from template errors, ignored examples, and row errors. In Phone mode the shared parser rejects every repeated valid phone before either Check or Add.
 
+6. For dropdown rejects, compare the submitted value against the configured options in `student-addition-fields.ts`; workbook dropdown edits do not expand LMS choices. Preserve aliases and case/outer-space normalization. Keep unsupported-choice metadata separate from message text so required blanks and unrelated errors cannot trigger template guidance.
+
 ## Verify
 - Use synthetic encrypted workbooks for committed tests; test the supplied workbook locally only.
 - Check must make zero DB Service calls. Add must repeat validation and forward only ready rows.
 - Exercise ordinary XLSX/CSV, automatic Standard/Agile encryption, custom passwords, and malformed input.
+- Check unsupported choices and required blanks in both modes, preview/final error parity, and correction CSV round-trips (including quotes, commas, and newlines). Confirm the guidance appears once above the preview table only for unsupported choices; inspect long/unbroken messages on desktop and mobile.
+- Compare decoded CSV error cells with the displayed message content (UI sections use a bold label and separate allowed-values line): labels must not repeat, and separate errors must use line breaks without period-semicolon separators. Include Annual Family Income, whose validation label differs from its column header.
 - Run the build to verify Node dependency bundling and update the context when behavior changes.
