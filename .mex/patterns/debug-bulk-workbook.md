@@ -20,5 +20,5 @@ last_updated: 2026-09-12
 - Check must make zero DB Service calls. Add must repeat validation and forward only ready rows.
 - Exercise ordinary XLSX/CSV, automatic Standard/Agile encryption, custom passwords, and malformed input.
 - Check unsupported choices and required blanks in both modes, preview/final error parity, and correction CSV round-trips (including quotes, commas, and newlines). Confirm the guidance appears once above the preview table only for unsupported choices; inspect long/unbroken messages on desktop and mobile.
-- Compare decoded CSV error cells with the displayed messages: labels must not repeat, and separate errors must use line breaks without period-semicolon separators. Include Annual Family Income, whose validation label differs from its column header.
+- Compare decoded CSV error cells with the displayed message content (UI sections use a bold label and separate allowed-values line): labels must not repeat, and separate errors must use line breaks without period-semicolon separators. Include Annual Family Income, whose validation label differs from its column header.
 - Run the build to verify Node dependency bundling and update the context when behavior changes.

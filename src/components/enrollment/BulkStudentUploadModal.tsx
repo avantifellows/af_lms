@@ -220,19 +220,19 @@ function rowIssues(
   result: StudentAdditionCsvResult,
   schoolCode: string,
   registrationMode: RegistrationMode,
-): string {
+): string[] {
   const existingMatch = existingMatchIssue(result, schoolCode, registrationMode);
-  if (result.status === "rejected" && existingMatch) return existingMatch;
+  if (result.status === "rejected" && existingMatch) return [existingMatch];
 
   const issues = [
     ...Object.values(result.field_errors ?? {}),
     ...(result.row_errors ?? []),
   ];
-  return issues.join("\n") ||
-    (result.status === "duplicate_in_file"
-      ? formatStudentAdditionDuplicateInFile(result.duplicate_identifiers)
-      : "") ||
-    existingMatch;
+  if (issues.length > 0) return issues;
+  const fallback = result.status === "duplicate_in_file"
+    ? formatStudentAdditionDuplicateInFile(result.duplicate_identifiers)
+    : existingMatch;
+  return fallback ? [fallback] : [];
 }
 
 function statusLabel(status: UploadResult["status"]): string {
@@ -836,7 +836,7 @@ function ResultTable({
   registrationMode: RegistrationMode;
 }) {
   return (
-    <div className="max-h-64 overflow-auto rounded-md border border-border bg-bg-card">
+    <div className="max-h-96 overflow-auto rounded-md border border-border bg-bg-card">
       <table className="w-[calc(100vw+13rem)] table-fixed text-left text-sm sm:w-full sm:min-w-[40rem]">
         <caption className="sr-only">
           {preview ? "Rows needing correction" : "Bulk upload final results"}
@@ -866,8 +866,23 @@ function ResultTable({
               <td className="px-3 py-2">
                 {String(result.original?.["Student Name"] ?? (result as UploadResult).generated_student_id ?? "")}
               </td>
-              <td className="whitespace-pre-wrap px-3 py-2">
-                {rowIssues(result, schoolCode, registrationMode)}
+              <td className="px-3 py-2">
+                <ul className="divide-y divide-border">
+                  {rowIssues(result, schoolCode, registrationMode).map((message, issueIndex) => {
+                    const choice = /^([^:\n]+): ([\s\S]* isn’t supported\.) (Allowed values: [\s\S]*)$/.exec(message);
+                    return (
+                      <li key={issueIndex} className="whitespace-pre-wrap py-3 first:pt-0 last:pb-0">
+                        {choice ? (
+                          <>
+                            <p className="font-semibold">{choice[1]}</p>
+                            <p className="mt-1 leading-relaxed">{choice[2]}</p>
+                            <p className="mt-1 text-xs leading-relaxed text-text-muted">{choice[3]}</p>
+                          </>
+                        ) : <p className="leading-relaxed">{message}</p>}
+                      </li>
+                    );
+                  })}
+                </ul>
               </td>
             </tr>
           ))}

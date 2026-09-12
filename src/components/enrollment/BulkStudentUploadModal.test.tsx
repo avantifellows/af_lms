@@ -187,18 +187,20 @@ describe("BulkStudentUploadModal", () => {
     const guidance = await screen.findByText(note);
     expect(screen.getAllByText(note)).toHaveLength(1);
     expect(guidance.nextElementSibling).toContainElement(screen.getByRole("table", { name: "Rows needing correction" }));
-    expect(screen.getAllByText(message)).toHaveLength(2);
+    expect(screen.getAllByText("Board Stream", { selector: "p" })).toHaveLength(2);
+    expect(screen.getAllByText("“Commerce (without Maths)” isn’t supported.")).toHaveLength(2);
     const previewCsv = decodeURIComponent(screen.getByRole("link", { name: "Download rows needing correction" }).getAttribute("href")!);
     expect(previewCsv).toContain(message);
     expect(previewCsv).not.toContain(note);
     await user.click(screen.getByRole("button", { name: "Check & add students" }));
     await screen.findByRole("heading", { name: "Upload complete" });
-    expect(screen.getAllByText(message)).toHaveLength(2);
+    expect(screen.getAllByText("Board Stream", { selector: "p" })).toHaveLength(2);
+    expect(screen.getAllByText("“Commerce (without Maths)” isn’t supported.")).toHaveLength(2);
     expect(decodeURIComponent(screen.getByRole("link", { name: "Download rejected rows CSV" }).getAttribute("href")!)).toBe(previewCsv);
     expect(screen.queryByText(note)).not.toBeInTheDocument();
   });
 
-  it("separates field and row errors with line breaks in preview and final results", async () => {
+  it("separates field and row errors into readable sections in preview and final results", async () => {
     const fieldMessage = "Gender: “F” isn’t supported. Allowed values: Female, Male, Other.";
     const rowMessage = "Correct this row before uploading.";
     const rejectedRow = {
@@ -212,11 +214,13 @@ describe("BulkStudentUploadModal", () => {
     render(<BulkStudentUploadModal {...baseProps} />);
     await selectFile(user);
     await checkFile(user);
-    const expected = `${fieldMessage}\n${rowMessage}`;
-    expect(await screen.findByText((_, element) => element?.tagName === "TD" && element.textContent === expected)).toHaveClass("whitespace-pre-wrap");
+    expect(await screen.findByText("Gender", { selector: "p" })).toHaveClass("font-semibold");
+    expect(screen.getByText("Allowed values: Female, Male, Other.")).toHaveClass("text-text-muted");
+    expect(screen.getByText(rowMessage).closest("li")).toHaveClass("whitespace-pre-wrap");
     await user.click(screen.getByRole("button", { name: "Check & add students" }));
     await screen.findByRole("heading", { name: "Upload complete" });
-    expect(screen.getByText((_, element) => element?.tagName === "TD" && element.textContent === expected)).toHaveClass("whitespace-pre-wrap");
+    expect(screen.getByText("Gender", { selector: "p" })).toHaveClass("font-semibold");
+    expect(screen.getByText(rowMessage).closest("li")).toHaveClass("whitespace-pre-wrap");
   });
 
   it.each([
