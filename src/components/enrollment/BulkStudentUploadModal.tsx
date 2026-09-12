@@ -228,7 +228,7 @@ function rowIssues(
     ...Object.values(result.field_errors ?? {}),
     ...(result.row_errors ?? []),
   ];
-  return issues.join("; ") ||
+  return issues.join("\n") ||
     (result.status === "duplicate_in_file"
       ? formatStudentAdditionDuplicateInFile(result.duplicate_identifiers)
       : "") ||

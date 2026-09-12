@@ -198,6 +198,27 @@ describe("BulkStudentUploadModal", () => {
     expect(screen.queryByText(note)).not.toBeInTheDocument();
   });
 
+  it("separates field and row errors with line breaks in preview and final results", async () => {
+    const fieldMessage = "Gender: “F” isn’t supported. Allowed values: Female, Male, Other.";
+    const rowMessage = "Correct this row before uploading.";
+    const rejectedRow = {
+      row_number: 3, status: "rejected", field_errors: { gender: fieldMessage },
+      row_errors: [rowMessage],
+    };
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(checkedResponse({ readyCount: 1, needsCorrectionCount: 1, rejectedRows: [rejectedRow] }))
+      .mockResolvedValueOnce(finalResponse({ total: 2, created: 1, rejected: 1, results: [{ row_number: 2, status: "created" }, rejectedRow] }));
+    const user = userEvent.setup();
+    render(<BulkStudentUploadModal {...baseProps} />);
+    await selectFile(user);
+    await checkFile(user);
+    const expected = `${fieldMessage}\n${rowMessage}`;
+    expect(await screen.findByText((_, element) => element?.tagName === "TD" && element.textContent === expected)).toHaveClass("whitespace-pre-wrap");
+    await user.click(screen.getByRole("button", { name: "Check & add students" }));
+    await screen.findByRole("heading", { name: "Upload complete" });
+    expect(screen.getByText((_, element) => element?.tagName === "TD" && element.textContent === expected)).toHaveClass("whitespace-pre-wrap");
+  });
+
   it.each([
     { field_errors: { board_stream: "Board Stream is required" } },
     { row_errors: ["Parents Phone Number is repeated in this file."] },

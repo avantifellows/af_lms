@@ -173,7 +173,7 @@ describe("parseStudentAdditionUpload", () => {
         const correction = buildRejectedRowsCsv(result.rejectedResults, "JNV001", mode);
         const decoded = parse(correction, { columns: true });
         expect(decoded[0][header]).toBe(submitted);
-        expect(decoded[0]["Field Errors"]).toContain(message);
+        expect(decoded[0]["Field Errors"]).toBe(message);
         const retry = await parseStudentAdditionUpload({ filename: "retry.csv", data: Buffer.from(correction), mode });
         if (!retry.ok) throw new Error(retry.error);
         expect(retry.rejectedResults[0].field_errors).toEqual({ [key]: message });

@@ -39,7 +39,7 @@ Then read this file fully before doing anything else in this session.
 
 **Working:**
 
-- Student upload validation (#322) now names unsupported submitted dropdown values and configured choices, distinguishes required blanks, and carries the same errors through spreadsheet checks, final local rejects, and correction CSVs. A single template guidance note appears above the preview error table only for unsupported choices. Allowed values, aliases, Phone-mode restrictions, and the no-write Check step are unchanged. See `context/student-addition.md`.
+- Student upload validation (#322) now names unsupported submitted dropdown values and configured choices, distinguishes required blanks, and carries the same errors through spreadsheet checks, final local rejects, and correction CSVs. A single template guidance note appears above the preview error table only for unsupported choices. Preview/final errors and correction CSVs separate messages with line breaks; CSVs preserve already-labeled choice messages without repeating the field name. Allowed values, aliases, Phone-mode restrictions, and the no-write Check step are unchanged. See `context/student-addition.md`.
 
 - Holistic Admin progress resolves the selected current-year Program roster once per query, avoiding the per-Mapping view expansion that timed out after the DB Service #727 roster change. Eligibility, Grade ambiguity, School scope, history, counts, pagination, and CSV semantics are preserved. The API returns safe JSON on failures, and the workspace handles empty/non-JSON failures with a retry message. See `context/data-access.md` and `patterns/debug-holistic-progress.md`; deployment verification is recorded in the fix PR.
 

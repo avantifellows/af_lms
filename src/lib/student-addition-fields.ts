@@ -287,8 +287,14 @@ function formatFieldErrors(
   const labels = uploadFieldLabels(mode);
   return Object.entries(errors ?? {})
     .filter(([key]) => mode !== PHONE_REGISTRATION_MODE || !PHONE_RESTRICTED_INPUT_KEYS.has(key))
-    .map(([key, message]) => `${labels.get(key as keyof StudentAdditionInput) ?? key}: ${message}`)
-    .join("; ");
+    .map(([key, message]) => {
+      const label = labels.get(key as keyof StudentAdditionInput) ?? key;
+      const messageLabel = key === "annual_family_income" ? "Annual Family Income" : label;
+      return message.startsWith(`${label}:`) || message.startsWith(`${messageLabel}:`)
+        ? message
+        : `${label}: ${message}`;
+    })
+    .join("\n");
 }
 
 export function buildRejectedRowsCsv(
@@ -341,7 +347,7 @@ export function buildRejectedRowsCsv(
         result.status ?? "",
         ...columns.map((column) => result.original?.[column.label] ?? ""),
         formatFieldErrors(result.field_errors, mode),
-        (result.row_errors ?? []).join("; "),
+        (result.row_errors ?? []).join("\n"),
         issue,
         schoolRelationship,
         existing.matched_identifier ?? "",

@@ -198,3 +198,9 @@ Expected AY26-27 derived values from current DB data:
 - Grade 11 CLAT -> stream `clat` -> `EnableStudents_TP_2028_clat_A001`
 
 Assume the team will correct the old batch-id spelling typo before implementation. `No stream` is out of v1.
+
+## PR #323 presentation QA follow-up (2026-09-12)
+
+Manual Brave QA found repeated field labels in correction CSVs and awkward period-semicolon separators between errors. Correction exports now retain already-labeled messages (including the shorter Annual Family Income label), while unlabeled service messages still receive their column label. Preview/final issue cells and CSV error columns use line breaks between messages. Actual local Brave recheck confirmed the downloaded multi-error CSV matches the issue cell exactly and Check makes no DB Service calls. All data used was synthetic; backend writes remain stubbed locally.
+
+Verification after the presentation fixes: 3,820 unit tests passed (3 skipped); lint passed with the same 15 existing warnings; production build passed. Regression coverage asserts exact decoded CSV messages for every choice field in both modes, including multiline submitted values, and line separation in preview/final UI cells.
