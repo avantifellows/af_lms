@@ -205,6 +205,7 @@ export interface StudentAdditionCsvResult {
   status?: string;
   original?: Record<string, unknown>;
   field_errors?: Record<string, string>;
+  unsupported_choice_fields?: string[];
   row_errors?: string[];
   duplicate_identifiers?: string[];
   existing_match?: Record<string, unknown> | null;
@@ -395,6 +396,7 @@ export type StudentAdditionValidationResult =
       row: Partial<LmsStudentAdditionRow>;
       generatedStudentId: string | null;
       fieldErrors: Record<string, string>;
+      unsupportedChoiceFields?: string[];
       rowErrors: string[];
     };
 
@@ -681,9 +683,23 @@ export function validateStudentAdditionInput(
   const phoneMode = mode === PHONE_REGISTRATION_MODE;
   const fieldErrors: Record<string, string> = {};
   const rowErrors: string[] = [];
+  const unsupportedChoiceFields: string[] = [];
+
+  function choiceError(
+    key: keyof StudentAdditionInput,
+    label: string,
+    choices: readonly string[],
+    fallback: string,
+  ) {
+    if (!options.bulkUpload) return addError(fieldErrors, key, fallback);
+    const submitted = stringValue(input[key]);
+    if (!submitted) return addError(fieldErrors, key, `${label} is required`);
+    unsupportedChoiceFields.push(key);
+    addError(fieldErrors, key, `${label}: “${submitted}” isn’t supported. Allowed values: ${choices.join(", ")}.`);
+  }
 
   const grade = parseGrade(input.grade);
-  if (!grade) addError(fieldErrors, "grade", "Grade must be 11 or 12");
+  if (!grade) addError(fieldErrors, "grade", options.bulkUpload && !stringValue(input.grade) ? "Grade is required" : "Grade must be 11 or 12");
 
   const rawStudentName = stringValue(input.student_name);
   const student_name = normalizeName(input.student_name);
@@ -697,9 +713,11 @@ export function validateStudentAdditionInput(
     addError(
       fieldErrors,
       "date_of_birth",
-      options.bulkUpload
-        ? "Date of Birth must be DD/MM/YYYY, DD-MM-YYYY, DD.MM.YYYY"
-        : "Date of Birth must be DD/MM/YYYY or YYYY-MM-DD",
+      options.bulkUpload && !stringValue(input.date_of_birth)
+        ? "Date of Birth is required"
+        : options.bulkUpload
+          ? "Date of Birth must be DD/MM/YYYY, DD-MM-YYYY, DD.MM.YYYY"
+          : "Date of Birth must be DD/MM/YYYY or YYYY-MM-DD",
     );
   } else if (date_of_birth < STUDENT_DOB_MIN || date_of_birth > STUDENT_DOB_MAX || date_of_birth > isoToday(today)) {
     addError(fieldErrors, "date_of_birth", "Date of Birth must be between 2000 and 2015");
@@ -708,15 +726,15 @@ export function validateStudentAdditionInput(
   const genderInput = stringValue(input.gender);
   const canonicalGender = canonicalGenderValue(genderInput);
   const gender = canonicalGender ?? genderInput;
-  if (!canonicalGender) addError(fieldErrors, "gender", "Gender must be Female, Male, or Other");
+  if (!canonicalGender) choiceError("gender", "Gender", STUDENT_ADDITION_GENDER_OPTIONS, "Gender must be Female, Male, or Other");
 
   const categoryInput = stringValue(input.category);
   const canonicalCategory = canonicalOptionValue(categoryInput, CATEGORY_OPTIONS);
-  if (!canonicalCategory) addError(fieldErrors, "category", "Category is not valid");
+  if (!canonicalCategory) choiceError("category", "Category", CATEGORY_OPTIONS, "Category is not valid");
 
   const physically_handicapped = parsePhysicallyHandicapped(input.physically_handicapped);
   if (physically_handicapped === null) {
-    addError(fieldErrors, "physically_handicapped", "CWSN must be Yes or No");
+    choiceError("physically_handicapped", "CWSN", ["Yes", "No"], "CWSN must be Yes or No");
   }
   const categoryValue = canonicalCategory ?? categoryInput;
   const category = physically_handicapped
@@ -743,7 +761,7 @@ export function validateStudentAdditionInput(
 
   const g10BoardInput = stringValue(input.g10_board);
   const canonicalG10Board = canonicalOptionValue(g10BoardInput, G10_BOARD_OPTIONS);
-  if (!canonicalG10Board) addError(fieldErrors, "g10_board", "G10 board must be CBSE or Others");
+  if (!canonicalG10Board) choiceError("g10_board", "G10 board", G10_BOARD_OPTIONS, "G10 board must be CBSE or Others");
   const g10_board = canonicalG10Board ?? g10BoardInput;
 
   const g10RollInput = phoneMode ? "" : stringValue(input.g10_roll_no);
@@ -760,16 +778,16 @@ export function validateStudentAdditionInput(
   const board_stream = stringValue(input.board_stream);
   const canonicalBoardStream = canonicalOptionValue(board_stream, BOARD_STREAM_OPTIONS);
   if (!canonicalBoardStream) {
-    addError(fieldErrors, "board_stream", "Board Stream is not valid");
+    choiceError("board_stream", "Board Stream", BOARD_STREAM_OPTIONS, "Board Stream is not valid");
   }
 
   const stream = parseStream(input.stream);
-  if (!stream) addError(fieldErrors, "stream", "Primary Exam preparing for is not valid");
+  if (!stream) choiceError("stream", "Primary Exam preparing for", STREAM_OPTIONS, "Primary Exam preparing for is not valid");
 
   const father_name = normalizeName(input.father_name);
   const phone = stringValue(input.phone);
   if (!isValidRegistrationPhone(phone, mode)) {
-    addError(fieldErrors, "phone", "Enter a valid phone number");
+    addError(fieldErrors, "phone", options.bulkUpload && !phone ? "Parents Phone Number is required" : "Enter a valid phone number");
   }
 
   const annualFamilyIncomeInput = phoneMode ? "" : stringValue(input.annual_family_income);
@@ -778,7 +796,7 @@ export function validateStudentAdditionInput(
     : canonicalOptionValue(annualFamilyIncomeInput, ANNUAL_FAMILY_INCOME_OPTIONS);
   const annual_family_income = canonicalAnnualFamilyIncome ?? annualFamilyIncomeInput;
   if (!phoneMode && annual_family_income && !canonicalAnnualFamilyIncome) {
-    addError(fieldErrors, "annual_family_income", "Annual Family Income is not valid");
+    choiceError("annual_family_income", "Annual Family Income", ANNUAL_FAMILY_INCOME_OPTIONS, "Annual Family Income is not valid");
   }
 
   const generatedStudentId = phoneMode
@@ -802,7 +820,10 @@ export function validateStudentAdditionInput(
   };
 
   if (Object.keys(fieldErrors).length > 0 || rowErrors.length > 0) {
-    return { ok: false, row, generatedStudentId, fieldErrors, rowErrors };
+    return {
+      ok: false, row, generatedStudentId, fieldErrors, rowErrors,
+      ...(unsupportedChoiceFields.length > 0 ? { unsupportedChoiceFields } : {}),
+    };
   }
 
   return {

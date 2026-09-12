@@ -184,7 +184,14 @@ function parseCheckedRows(value: unknown): UploadCheckRow[] | null {
       (result.status === "ready" || result.status === "rejected");
   });
   if (rows.length !== value.length) return null;
-  return rows;
+  return rows.map((row) => ({
+    ...row,
+    unsupported_choice_fields: Array.isArray(row.unsupported_choice_fields)
+      ? row.unsupported_choice_fields.filter((field) =>
+        typeof field === "string" && typeof row.field_errors?.[field] === "string",
+      )
+      : [],
+  }));
 }
 
 function previewFromResponse(json: UploadResponse): UploadPreview | null {
@@ -687,6 +694,11 @@ export default function BulkStudentUploadModal({
                 <span>{countLabel(preview.readyCount, "row")} passed spreadsheet checks</span>
                 <span>{countLabel(preview.needsCorrectionCount, "row")} need{preview.needsCorrectionCount === 1 ? "s" : ""} correction{preview.needsCorrectionCount > 0 ? " — these will not be added" : ""}</span>
               </div>
+              {preview.rejectedRows.some((row) => (row.unsupported_choice_fields?.length ?? 0) > 0) && (
+                <p className="text-sm text-text-secondary">
+                  Use the choices from a freshly downloaded LMS template. Editing the spreadsheet’s dropdown list does not change the values LMS accepts.
+                </p>
+              )}
               {preview.rejectedRows.length > 0 && (
                 <ResultTable
                   results={preview.rejectedRows}
@@ -825,10 +837,17 @@ function ResultTable({
 }) {
   return (
     <div className="max-h-64 overflow-auto rounded-md border border-border bg-bg-card">
-      <table className="min-w-full text-left text-sm">
+      <table className="w-[calc(100vw+13rem)] table-fixed text-left text-sm sm:w-full sm:min-w-[40rem]">
         <caption className="sr-only">
           {preview ? "Rows needing correction" : "Bulk upload final results"}
         </caption>
+        <colgroup>
+          <col className="w-12" />
+          <col className="w-16" />
+          <col className="w-28" />
+          <col className="w-28" />
+          <col />
+        </colgroup>
         <thead className="bg-bg-card-alt text-text-muted">
           <tr>
             <th scope="col" className="px-3 py-2 font-medium">Row</th>
@@ -840,14 +859,14 @@ function ResultTable({
         </thead>
         <tbody>
           {results.map((result, index) => (
-            <tr key={`${result.row_number}-${result.status}-${index}`} className="border-t border-border">
+            <tr key={`${result.row_number}-${result.status}-${index}`} className="border-t border-border align-top [overflow-wrap:anywhere]">
               <td className="px-3 py-2">{result.row_number}</td>
               <td className="px-3 py-2">{String(result.original?.Grade ?? "")}</td>
               <td className="px-3 py-2">{preview ? "Needs correction" : statusLabel(result.status as UploadResult["status"])}</td>
               <td className="px-3 py-2">
                 {String(result.original?.["Student Name"] ?? (result as UploadResult).generated_student_id ?? "")}
               </td>
-              <td className="max-w-[28rem] break-words px-3 py-2">
+              <td className="whitespace-pre-wrap px-3 py-2">
                 {rowIssues(result, schoolCode, registrationMode)}
               </td>
             </tr>

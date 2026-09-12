@@ -170,6 +170,49 @@ describe("BulkStudentUploadModal", () => {
     expect(screen.getByRole("button", { name: "Upload another file" })).toBeInTheDocument();
   });
 
+  it("shows the template note once above multiple choice errors and carries messages through final results and CSV", async () => {
+    const message = "Board Stream: “Commerce (without Maths)” isn’t supported. Allowed values: PCM, PCB, PCMB, Commerce (Math), Commerce (Without Math), Arts/Humanities.";
+    const note = "Use the choices from a freshly downloaded LMS template. Editing the spreadsheet’s dropdown list does not change the values LMS accepts.";
+    const rejectedRows = [3, 4].map((row_number) => ({
+      row_number, status: "rejected", field_errors: { board_stream: message },
+      unsupported_choice_fields: ["board_stream"], original: { "Board Stream": "Commerce (without Maths)" },
+    }));
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(checkedResponse({ readyCount: 1, needsCorrectionCount: 2, rejectedRows }))
+      .mockResolvedValueOnce(finalResponse({ total: 3, created: 1, rejected: 2, results: [{ row_number: 2, status: "created" }, ...rejectedRows] }));
+    const user = userEvent.setup();
+    render(<BulkStudentUploadModal {...baseProps} />);
+    await selectFile(user);
+    await checkFile(user);
+    const guidance = await screen.findByText(note);
+    expect(screen.getAllByText(note)).toHaveLength(1);
+    expect(guidance.nextElementSibling).toContainElement(screen.getByRole("table", { name: "Rows needing correction" }));
+    expect(screen.getAllByText(message)).toHaveLength(2);
+    const previewCsv = decodeURIComponent(screen.getByRole("link", { name: "Download rows needing correction" }).getAttribute("href")!);
+    expect(previewCsv).toContain(message);
+    expect(previewCsv).not.toContain(note);
+    await user.click(screen.getByRole("button", { name: "Check & add students" }));
+    await screen.findByRole("heading", { name: "Upload complete" });
+    expect(screen.getAllByText(message)).toHaveLength(2);
+    expect(decodeURIComponent(screen.getByRole("link", { name: "Download rejected rows CSV" }).getAttribute("href")!)).toBe(previewCsv);
+    expect(screen.queryByText(note)).not.toBeInTheDocument();
+  });
+
+  it.each([
+    { field_errors: { board_stream: "Board Stream is required" } },
+    { row_errors: ["Parents Phone Number is repeated in this file."] },
+    { field_errors: { phone: "Enter a valid phone number" }, unsupported_choice_fields: "phone" },
+    { field_errors: {}, unsupported_choice_fields: [null, 1, "board_stream"] },
+  ])("hides template guidance for unrelated errors and malformed metadata: %j", async (errors) => {
+    vi.mocked(fetch).mockResolvedValueOnce(checkedResponse({ readyCount: 0, needsCorrectionCount: 1, rejectedRows: [{ row_number: 2, status: "rejected", ...errors }] }));
+    const user = userEvent.setup();
+    render(<BulkStudentUploadModal {...baseProps} />);
+    await selectFile(user);
+    await checkFile(user);
+    await screen.findByRole("table", { name: "Rows needing correction" });
+    expect(screen.queryByText(/Use the choices from a freshly downloaded LMS template/)).not.toBeInTheDocument();
+  });
+
   it("cancels safely after checking and clears the checked state", async () => {
     vi.mocked(fetch).mockResolvedValueOnce(checkedResponse({ readyCount: 2 }));
     const user = userEvent.setup();

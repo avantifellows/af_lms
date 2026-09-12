@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { readFile } from "node:fs/promises";
 import ExcelJS from "exceljs";
+import { parse } from "csv-parse/sync";
 import JSZip from "jszip";
 
 import { parseStudentAdditionUpload as parseStudentAdditionUploadForMode } from "./student-addition-bulk";
@@ -130,6 +131,74 @@ async function workbookBuffer(sheets: Record<string, unknown[][]>) {
 }
 
 describe("parseStudentAdditionUpload", () => {
+  const choices = [
+    ["Gender", "gender", "Female, Male, Other"],
+    ["Category", "category", "Gen, Gen-EWS, OBC, SC, ST"],
+    ["CWSN", "physically_handicapped", "Yes, No"],
+    ["G10 board", "g10_board", "CBSE, Others"],
+    ["Board Stream", "board_stream", "PCM, PCB, PCMB, Commerce (Math), Commerce (Without Math), Arts/Humanities"],
+    ["Primary Exam preparing for", "stream", "Engineering, Medical, CA, CLAT, NDA"],
+    ["Yearly / Annual Family Income", "annual_family_income", "Less than Rs. 1,00,000, Rs. 1,00,000-2,00,000, Rs. 2,00,000-3,00,000, Rs. 3,00,000-4,00,000, Rs. 4,00,000-5,00,000, Rs. 5,00,000-6,00,000, Rs. 6,00,000-7,00,000, Rs. 7,00,000-8,00,000, More than Rs. 8,00,000"],
+  ];
+
+  describe.each([
+    { mode: APPROVED_REGISTRATION_MODE, headers: uploadHeaders, valid: validRowValues },
+    { mode: PHONE_REGISTRATION_MODE, headers: phoneUploadHeaders, valid: validPhoneRowValues },
+  ])("dropdown errors in $mode mode", ({ mode, headers, valid }) => {
+    function rowWith(header: string, value: string) {
+      const row = [...valid];
+      row[headers.indexOf(header)] = value;
+      return row;
+    }
+
+    async function parseRow(row: unknown[], extension = "csv") {
+      return parseStudentAdditionUpload({
+        filename: `synthetic.${extension}`, mode,
+        data: extension === "xlsx"
+          ? await workbookBuffer({ Template: [headers, row] })
+          : Buffer.from([csvLine(headers), csvLine(row)].join("\n")),
+      });
+    }
+
+    describe.each(["csv", "xlsx"])("%s", (extension) => {
+      it.each(choices.filter(([header]) => headers.includes(header)))("explains unsupported %s and preserves correction messages", async (header, key, allowed) => {
+        const submitted = key === "board_stream" ? "Commerce (without Maths)" : 'Unsupported, "choice"\nsecond line';
+        const label = key === "annual_family_income" ? "Annual Family Income" : header;
+        const message = `${label}: “${submitted}” isn’t supported. Allowed values: ${allowed}.`;
+        const result = await parseRow(rowWith(header, ` ${submitted} `), extension);
+        if (!result.ok) throw new Error(result.error);
+        expect(result.rows).toEqual([]);
+        expect(result.rejectedResults[0].field_errors).toEqual({ [key]: message });
+        expect(result.rejectedResults[0].unsupported_choice_fields).toEqual([key]);
+        const correction = buildRejectedRowsCsv(result.rejectedResults, "JNV001", mode);
+        const decoded = parse(correction, { columns: true });
+        expect(decoded[0][header]).toBe(submitted);
+        expect(decoded[0]["Field Errors"]).toContain(message);
+        const retry = await parseStudentAdditionUpload({ filename: "retry.csv", data: Buffer.from(correction), mode });
+        if (!retry.ok) throw new Error(retry.error);
+        expect(retry.rejectedResults[0].field_errors).toEqual({ [key]: message });
+      });
+    });
+
+    it.each(["Grade", "Student Name", "Date of Birth", "Parents Phone Number", ...choices.slice(0, 6).map(([header]) => header)])("distinguishes blank required %s", async (header) => {
+      const result = await parseRow(rowWith(header, "   "));
+      if (!result.ok) throw new Error(result.error);
+      expect(Object.values(result.rejectedResults[0].field_errors)).toEqual([`${header} is required`]);
+      expect(result.rejectedResults[0].unsupported_choice_fields).toBeUndefined();
+    });
+
+    it("preserves optional blanks and existing Gender/CWSN aliases", async () => {
+      const row = rowWith("Father Name", "");
+      if (mode === APPROVED_REGISTRATION_MODE) row[headers.indexOf("Yearly / Annual Family Income")] = "";
+      row[headers.indexOf("Gender")] = " oThErS ";
+      row[headers.indexOf("CWSN")] = " yEs ";
+      const result = await parseRow(row);
+      if (!result.ok) throw new Error(result.error);
+      expect(result.rejectedResults).toEqual([]);
+      expect(result.rows[0]).toMatchObject({ gender: "Other", physically_handicapped: true });
+    });
+  });
+
   it("rejects every repeated phone before upload and supports corrected rejected CSV retry", async () => {
     const duplicate = [...validPhoneRowValues];
     duplicate[10] = " 6876543210 ";
@@ -1095,7 +1164,7 @@ describe("parseStudentAdditionUpload", () => {
     if (!result.ok) throw new Error("expected parsed upload");
     expect(result.rows).toEqual([]);
     expect(result.rejectedResults.map((row) => row.field_errors)).toEqual([
-      { stream: "Primary Exam preparing for is not valid" },
+      { stream: "Primary Exam preparing for: “Not A Stream” isn’t supported. Allowed values: Engineering, Medical, CA, CLAT, NDA." },
       { grade: "Grade must be 11 or 12" },
       { date_of_birth: "Date of Birth must be between 2000 and 2015" },
     ]);
