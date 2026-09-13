@@ -216,7 +216,9 @@ export interface StudentQuestionRow {
   chapter_name: string;
   question_id: string;
   position_index: number | null;
-  status: "correct" | "wrong" | "skipped";
+  // "partial" = answered and credited under partial marking (JEE Advanced) —
+  // neither fully correct nor wrong.
+  status: "correct" | "partial" | "wrong" | "skipped";
 }
 
 export interface StudentQuestionLevelData {
