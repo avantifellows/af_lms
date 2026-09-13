@@ -446,21 +446,23 @@ describe("getTestQuestionLevelData", () => {
 });
 
 describe("getStudentQuestionLevelData", () => {
-  it("maps is_answered/is_correct to correct/wrong/skipped status", async () => {
+  it("maps is_answered/is_correct/is_partially_correct to correct/partial/wrong/skipped status", async () => {
     const rows = [
       // answered + correct -> correct
-      { enrollment_user_id: 368592, subject: "Physics", chapter_name: "Kinematics", chapter_id: "c-kin", question_id: "q1", position_index: 0, is_answered: 1, is_correct: 1 },
+      { enrollment_user_id: 368592, subject: "Physics", chapter_name: "Kinematics", chapter_id: "c-kin", question_id: "q1", position_index: 0, is_answered: 1, is_correct: 1, is_partially_correct: 0 },
       // answered + incorrect -> wrong
-      { enrollment_user_id: 368592, subject: "Physics", chapter_name: "Kinematics", chapter_id: "c-kin", question_id: "q2", position_index: 1, is_answered: 1, is_correct: 0 },
+      { enrollment_user_id: 368592, subject: "Physics", chapter_name: "Kinematics", chapter_id: "c-kin", question_id: "q2", position_index: 1, is_answered: 1, is_correct: 0, is_partially_correct: 0 },
       // not answered -> skipped (is_correct irrelevant)
-      { enrollment_user_id: 368592, subject: "Physics", chapter_name: "Optics", chapter_id: "c-opt", question_id: "q3", position_index: 2, is_answered: 0, is_correct: 0 },
+      { enrollment_user_id: 368592, subject: "Physics", chapter_name: "Optics", chapter_id: "c-opt", question_id: "q3", position_index: 2, is_answered: 0, is_correct: 0, is_partially_correct: 0 },
+      // answered, not fully correct, but credited under partial marking -> partial (NOT wrong)
+      { enrollment_user_id: 368592, subject: "Physics", chapter_name: "Optics", chapter_id: "c-opt", question_id: "q4", position_index: 3, is_answered: 1, is_correct: 0, is_partially_correct: 1 },
     ];
     mocks.mockQueryFn.mockResolvedValueOnce([rows]);
 
     const { getStudentQuestionLevelData } = await import("./bigquery");
     const result = await getStudentQuestionLevelData("11223344", 12, "sess-1");
 
-    expect(result).toHaveLength(3);
+    expect(result).toHaveLength(4);
     expect(result[0]).toMatchObject({
       enrollment_user_id: "368592", // stringified for client-side matching
       chapter_id: "c-kin",
@@ -470,6 +472,7 @@ describe("getStudentQuestionLevelData", () => {
     });
     expect(result[1].status).toBe("wrong");
     expect(result[2].status).toBe("skipped");
+    expect(result[3].status).toBe("partial");
   });
 
   it("groups by enrollment_user_id and binds filter params", async () => {
