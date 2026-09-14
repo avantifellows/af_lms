@@ -560,7 +560,8 @@ export async function getStudentQuestionLevelData(
       question_id,
       ANY_VALUE(question_position_index) AS position_index,
       MAX(CAST(is_answered AS INT64)) AS is_answered,
-      MAX(is_correct) AS is_correct
+      MAX(is_correct) AS is_correct,
+      MAX(CAST(is_partially_correct AS INT64)) AS is_partially_correct
     FROM ${FACT_QUESTION_LEVEL_TABLE}
     WHERE student_school_udise_code = @udise
       AND student_grade = @grade
@@ -583,6 +584,7 @@ export async function getStudentQuestionLevelData(
     position_index: number | string | null;
     is_answered: number | string | null;
     is_correct: number | string | null;
+    is_partially_correct: number | string | null;
   }
 
   const toInt = (v: number | string | null | undefined): number => {
@@ -595,11 +597,16 @@ export async function getStudentQuestionLevelData(
   return (rows as RawRow[]).map((r) => {
     const answered = toInt(r.is_answered) > 0;
     const correct = toInt(r.is_correct) === 1;
+    // Partial marking (JEE Advanced multi-correct): answered, not fully correct,
+    // but credited — its own bucket, not "wrong", matching the report's counts.
+    const partial = toInt(r.is_partially_correct) === 1;
     const status: StudentQuestionRow["status"] = !answered
       ? "skipped"
       : correct
         ? "correct"
-        : "wrong";
+        : partial
+          ? "partial"
+          : "wrong";
     return {
       enrollment_user_id: String(r.enrollment_user_id ?? ""),
       chapter_id: r.chapter_id || null,
