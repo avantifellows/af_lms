@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, type ReactNode } from "react";
 import StatCard from "../StatCard";
 import SubjectAnalysisSection from "./SubjectAnalysisSection";
 import ChapterAnalysisSection from "./ChapterAnalysisSection";
@@ -11,22 +11,23 @@ interface Props {
   schoolUdise: string;
   grade: number;
   sessionId: string;
-  testName: string;
   program?: string;
   stream?: string;
-  onBack: () => void;
   onDataLoaded?: (testName: string) => void;
+  /** Rendered between the stat cards and the subject analysis — the combined
+   *  reports panel lives there so the headline numbers stay first. The title
+   *  and the way back are the parent's (PerformanceTab), above this component. */
+  afterStats?: ReactNode;
 }
 
 export default function TestDeepDive({
   schoolUdise,
   grade,
   sessionId,
-  testName,
   program,
   stream,
-  onBack,
   onDataLoaded,
+  afterStats,
 }: Props) {
   const [data, setData] = useState<TestDeepDiveData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -67,18 +68,6 @@ export default function TestDeepDive({
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-3">
-        <button
-          onClick={onBack}
-          className="text-sm font-bold uppercase tracking-wide text-accent hover:text-accent-hover transition-colors rounded-lg px-3 min-h-[44px] hover:bg-hover-bg"
-        >
-          &larr; Back to Overview
-        </button>
-        <h2 className="text-lg font-bold uppercase tracking-tight text-text-primary">
-          {testName || data?.summary.test_name || "Loading..."}
-        </h2>
-      </div>
-
       {loading && (
         <div className="flex justify-center items-center h-[30vh]">
           <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-accent" />
@@ -118,7 +107,16 @@ export default function TestDeepDive({
             <StatCard label="Avg Accuracy" value={`${data.summary.avg_accuracy}%`} size="sm" color="brand-gold" />
             <StatCard label="Avg Attempt Rate" value={`${data.summary.avg_attempt_rate}%`} size="sm" color="brand-coral" />
           </div>
+        </>
+      )}
 
+      {/* Outside the data branch on purpose: the combined reports are their own
+          job with their own status, and must stay reachable while this summary
+          is loading or has failed. */}
+      {afterStats}
+
+      {data && !loading && (
+        <>
           <SubjectAnalysisSection subjects={data.subjects} />
           <ChapterAnalysisSection
             chapters={data.chapters}
