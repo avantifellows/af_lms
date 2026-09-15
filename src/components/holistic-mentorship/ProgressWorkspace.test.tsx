@@ -40,6 +40,28 @@ describe("ProgressWorkspace", () => {
     vi.restoreAllMocks();
   });
 
+  it.each([
+    [500, ""],
+    [502, "<html>Bad gateway</html>"],
+    [200, ""],
+  ])("shows a useful error and recovers after an invalid response (%s)", async (status, body) => {
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(body, { status }));
+    render(<ProgressWorkspace />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Unable to load progress. Please try again.");
+    expect(screen.queryByText("Student One")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    expect(await screen.findByText("Student One")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("shows the API's controlled timeout message", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({
+      error: "Progress took too long to load. Please try again.",
+    }), { status: 503 }));
+    render(<ProgressWorkspace />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Progress took too long to load. Please try again.");
+  });
+
   it("reports dynamic years and shows required row details, counts, and drill-down", async () => {
     const onAcademicYears = vi.fn();
     render(<ProgressWorkspace onAcademicYears={onAcademicYears} />);

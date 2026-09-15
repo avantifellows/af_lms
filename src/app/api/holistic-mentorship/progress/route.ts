@@ -104,7 +104,7 @@ function filtersFrom(request: Request): { filters: HolisticProgressFilters; csv:
   };
 }
 
-export async function GET(request: Request) {
+async function progressResponse(request: Request) {
   const parsedRequest = filtersFrom(request);
   if (!parsedRequest) return NextResponse.json({ error: "Invalid progress filters" }, { status: 422 });
   const { filters, csv } = parsedRequest;
@@ -141,4 +141,21 @@ export async function GET(request: Request) {
     pageSize: 50,
     refreshedAt: new Date().toISOString(),
   });
+}
+
+export async function GET(request: Request) {
+  try {
+    return await progressResponse(request);
+  } catch (error) {
+    const code = error && typeof error === "object" && "code" in error
+      ? String(error.code)
+      : undefined;
+    console.error("Failed to load holistic progress", { code });
+    const timedOut = code === "57014";
+    return NextResponse.json({
+      error: timedOut
+        ? "Progress took too long to load. Please try again."
+        : "Unable to load progress. Please try again.",
+    }, { status: timedOut ? 503 : 500 });
+  }
 }

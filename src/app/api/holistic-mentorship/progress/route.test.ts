@@ -51,6 +51,38 @@ describe("Holistic progress API", () => {
     mockAcademicYears.mockResolvedValue(["2026-2027", "2025-2026"]);
   });
 
+  it.each([undefined, "csv"])("returns a safe JSON response on a progress timeout (%s)", async (format) => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockList.mockRejectedValueOnce(Object.assign(new Error("private database details"), { code: "57014" }));
+    try {
+      const response = await GET(new Request(
+        `http://localhost/api/holistic-mentorship/progress?academic_year=2026-2027&program_id=1${format ? "&format=csv" : ""}`,
+      ));
+      expect(response.status).toBe(503);
+      expect(response.headers.get("content-type")).toContain("application/json");
+      expect(await response.json()).toEqual({ error: "Progress took too long to load. Please try again." });
+      expect(log).toHaveBeenCalledWith("Failed to load holistic progress", { code: "57014" });
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it.each(["access", "options", "coverage", "years"])("handles failures from %s without leaking database details", async (stage) => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const mocks = { access: mockAccess, options: mockOptions, coverage: mockCoverageSchools, years: mockAcademicYears };
+    mocks[stage as keyof typeof mocks].mockRejectedValueOnce(new Error("private database details"));
+    try {
+      const response = await GET(new Request(
+        "http://localhost/api/holistic-mentorship/progress?academic_year=2026-2027&program_id=1",
+      ));
+      expect(response.status).toBe(500);
+      expect(await response.json()).toEqual({ error: "Unable to load progress. Please try again." });
+      if (stage === "access") expect(mockList).not.toHaveBeenCalled();
+    } finally {
+      log.mockRestore();
+    }
+  });
+
   it.each(["", "null", undefined])("rejects missing Progress Program context (%s)", async (programId) => {
     const query = programId === undefined ? "" : `&program_id=${programId}`;
     const response = await GET(new Request(
