@@ -26,7 +26,7 @@ edges:
     condition: when working on teacher feedback setup, the feedback form, or its report
   - target: patterns/INDEX.md
     condition: when starting a task — check the pattern index for a matching pattern file
-last_updated: 2026-09-09
+last_updated: 2026-09-15
 ---
 
 # Session Bootstrap
@@ -112,6 +112,10 @@ For every task, follow this loop:
    - **Orient:** If this task can recur and no pattern exists, create one in `patterns/` using `patterns/README.md`, then add it to `patterns/INDEX.md`. If a pattern exists but you learned a gotcha, update it.
    - **Write:** Bump `last_updated` in every scaffold file you changed. If the why matters, run `mex log --type decision "<what changed and why>"` or `mex log "<note>"`.
 
-## Additional Profile source preflight
+## Profile source preflight
 
-`npm run holistic:preflight -- --include-additional-forms` adds EMRS and Maharashtra Grade 11 questionnaire evidence to the existing English sources. Keep the usual mode/program options. Exact raw Question IDs, positions and headings are checked before mapping to five canonical sections; nonnumeric test identities are counted separately. This is a read-only check and does not enable ETL generation. DB source migration, ETL deployment and reviewed single-Student pilots precede scheduled activation.
+The existing release preflight includes all four approved Form/Session pairs.
+Optional section aliases merge EMRS bilingual headings before the shared five-theme
+checks; Maharashtra requires no mapping. There is no separate question-ID registry
+or new-form flag. Exact schema fingerprint enforcement remains in ETL. This change
+is being tested locally and on staging; production is excluded.

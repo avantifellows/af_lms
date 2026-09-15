@@ -1,18 +1,39 @@
-import { ADDITIONAL_PROFILE_SOURCES } from "./holistic-additional-profile-sources";
 import { HOLISTIC_MENTORSHIP_PROGRAM_IDS } from "./constants";
 import { PM_SEAT_ROLES } from "./staff-shared";
 
-const APPROVED_PROFILE_FORMS = {
-  11: {
-    formId: "6a44a83d1184e717b920c499",
-    sessionId: "EnableStudents_6a44a83d1184e717b920c499",
+const APPROVED_PROFILE_FORMS: Array<{formId: string; sessionId: string; grade: 11 | 12; sectionAliases: Record<string, string>}> = [
+  {
+    "formId": "6a44a83d1184e717b920c499",
+    "sessionId": "EnableStudents_6a44a83d1184e717b920c499",
+    "grade": 11,
+    "sectionAliases": {}
   },
-  12: {
-    formId: "6a4deca8e030ebe34669fb0f",
-    sessionId: "EnableStudents_6a4deca8e030ebe34669fb0f",
+  {
+    "formId": "6a4deca8e030ebe34669fb0f",
+    "sessionId": "EnableStudents_6a4deca8e030ebe34669fb0f",
+    "grade": 12,
+    "sectionAliases": {}
   },
-} as const;
-const APPROVED_PROFILE_GRADES = [11, 12] as const;
+  {
+    "formId": "6a76d43e24402e7cb501f34f",
+    "sessionId": "EMRSStudents_6a76d43e24402e7cb501f34f",
+    "grade": 11,
+    "sectionAliases": {
+      "Student & Family Background\nछात्र और पारिवारिक पृष्ठभूमि": "Student & Family Background",
+      "Student & Family Background\n छात्र और पारिवारिक पृष्ठभूमि": "Student & Family Background",
+      "Academic Performance and Perception\n पढ़ाई में प्रदर्शन और सोच": "Academic Performance and Perception",
+      "Career aspiration, readiness, exposure and skill\n करियर के सपने, तैयारी, जानकारी और कौशल": "Career aspiration, readiness, exposure and skill",
+      "Support System & Guidance Access\n सहायता और मार्गदर्शन": "Support System & Guidance Access",
+      "Barriers and Challenges\n मुश्किलें और चुनौतियां": "Barriers and Challenges"
+    }
+  },
+  {
+    "formId": "6a8843143834e2f94dd88f5d",
+    "sessionId": "MaharashtraStudents_6a8843143834e2f94dd88f5d",
+    "grade": 11,
+    "sectionAliases": {}
+  }
+];
 const APPROVED_PROFILE_THEME_COUNTS = [3, 6, 7, 8, 10];
 const BIGQUERY_PROJECT_PATTERN = /^[A-Za-z0-9_-]+$/;
 const BIGQUERY_DATASET_PATTERN = /^[A-Za-z0-9_]+$/;
@@ -25,14 +46,12 @@ type Query = <T extends Record<string, unknown> = Record<string, unknown>>(
 export interface HolisticProfileSourceEvidence {
   forms: Array<{
     grade: 11 | 12;
-    sourceSchemaValid?: boolean;
     formId: string;
     sessionId: string;
     questions: Array<{ questionId: string; position: number; questionSetTitle: string }>;
   }>;
   sourceUserIds: string[];
   historicalBusinessStudentIds?: string[];
-  excludedTestSourceCount?: number;
 }
 
 interface BigQueryProfileRow {
@@ -76,7 +95,7 @@ interface PreflightParams {
   profileSource: HolisticProfileSourceEvidence;
 }
 
-export function buildHolisticProfileSourceQuery(project: string, dataset: string, includeAdditionalForms = false) {
+export function buildHolisticProfileSourceQuery(project: string, dataset: string) {
   if (!BIGQUERY_PROJECT_PATTERN.test(project) || !BIGQUERY_DATASET_PATTERN.test(dataset)) {
     throw new Error("Invalid BigQuery project or dataset");
   }
@@ -84,63 +103,40 @@ export function buildHolisticProfileSourceQuery(project: string, dataset: string
     query: `SELECT user_id, test_id, session_id, question_id, question_position_index, question_set_title
             FROM \`${project}.${dataset}.all_responses_form_level\`
             WHERE test_type = 'form'
-              AND ((test_id = @grade11Form AND session_id = @grade11Session)
-                OR (test_id = @grade12Form AND session_id = @grade12Session)
-                ${includeAdditionalForms ? 'OR (test_id = @emrsForm AND session_id = @emrsSession) OR (test_id = @maharashtraForm AND session_id = @maharashtraSession)' : ''})
+              AND (${APPROVED_PROFILE_FORMS.map((_, index) => `(test_id = @form${index} AND session_id = @session${index})`).join(" OR ")})
             ORDER BY user_id, test_id, question_position_index, question_id`,
-    params: {
-      grade11Form: APPROVED_PROFILE_FORMS[11].formId,
-      grade11Session: APPROVED_PROFILE_FORMS[11].sessionId,
-      grade12Form: APPROVED_PROFILE_FORMS[12].formId,
-      grade12Session: APPROVED_PROFILE_FORMS[12].sessionId,
-      ...(includeAdditionalForms ? { emrsForm: ADDITIONAL_PROFILE_SOURCES[0].formId, emrsSession: ADDITIONAL_PROFILE_SOURCES[0].sessionId, maharashtraForm: ADDITIONAL_PROFILE_SOURCES[1].formId, maharashtraSession: ADDITIONAL_PROFILE_SOURCES[1].sessionId } : {}),
-    },
+    params: Object.fromEntries(APPROVED_PROFILE_FORMS.flatMap((source, index) => [
+      [`form${index}`, source.formId], [`session${index}`, source.sessionId],
+    ])),
   };
 }
 
 export function buildHolisticProfileSourceEvidence(
   rows: BigQueryProfileRow[],
-  historicalBusinessStudentIds: string[] = [],
-  includeAdditionalForms = false
+  historicalBusinessStudentIds: string[] = []
 ): HolisticProfileSourceEvidence {
   const approvedRows = rows.filter((row) =>
-    Object.values(APPROVED_PROFILE_FORMS).some(
+    APPROVED_PROFILE_FORMS.some(
       ({ formId, sessionId }) => row.test_id === formId && row.session_id === sessionId
     )
   );
-  const forms: ProfileForm[] = ([11, 12] as const).map((grade) => {
-    const approved = APPROVED_PROFILE_FORMS[grade];
+  const forms = APPROVED_PROFILE_FORMS.map((approved) => {
     const questions = new Map<string, HolisticProfileSourceEvidence["forms"][number]["questions"][number]>();
     for (const row of approvedRows.filter(({ test_id }) => test_id === approved.formId)) {
       questions.set(row.question_id, {
         questionId: row.question_id,
         position: Number(row.question_position_index),
-        questionSetTitle: row.question_set_title,
+        questionSetTitle: approved.sectionAliases[row.question_set_title] ?? row.question_set_title,
       });
     }
     return {
-      grade,
+      grade: approved.grade,
       formId: approved.formId,
       sessionId: approved.sessionId,
       questions: [...questions.values()].sort((a, b) => a.position - b.position || a.questionId.localeCompare(b.questionId)),
     };
   });
-  let excludedTestSourceCount = 0;
-  if (includeAdditionalForms) {
-    for (const source of ADDITIONAL_PROFILE_SOURCES) {
-      const sourceRows = rows.filter(row => row.test_id === source.formId && row.session_id === source.sessionId);
-      const validRows = sourceRows.filter(row => /^[1-9][0-9]*$/.test(String(row.user_id)));
-      excludedTestSourceCount += new Set(sourceRows.filter(row => !/^[1-9][0-9]*$/.test(String(row.user_id))).map(row => String(row.user_id))).size;
-      const sourceSchemaValid = sourceRows.every(row => source.questions.some(q => q.questionId === row.question_id && q.position === Number(row.question_position_index) && q.rawTitle === row.question_set_title));
-      forms.push({
-        grade: source.grade, formId: source.formId, sessionId: source.sessionId, sourceSchemaValid,
-        questions: source.questions.filter(q => sourceRows.some(row => row.question_id === q.questionId)).map(q => ({questionId: q.questionId, position: q.position, questionSetTitle: q.questionSetTitle})),
-      });
-      approvedRows.push(...validRows);
-    }
-  }
   return {
-    ...(includeAdditionalForms ? { excludedTestSourceCount } : {}),
     sourceUserIds: [...new Set(approvedRows.map(({ user_id }) => String(user_id)))].sort(),
     historicalBusinessStudentIds,
     forms,
@@ -157,7 +153,7 @@ export async function runHolisticReleasePreflight(params: PreflightParams) {
   return {
     ok: blockers.length === 0,
     blockers,
-    warnings: [...getProfileWarnings(incompleteProfiles), ...(params.profileSource.excludedTestSourceCount ? [`Excluded ${params.profileSource.excludedTestSourceCount} non-student additional-form source identities`] : [])],
+    warnings: getProfileWarnings(incompleteProfiles),
     counts: getPreflightCounts(evidence, incompleteProfiles),
   };
 }
@@ -277,27 +273,13 @@ async function loadPreflightEvidence(params: PreflightParams): Promise<Preflight
 }
 
 function getProfileFormBlockers(forms: ProfileForm[]): string[] {
-  const originalBlockers = APPROVED_PROFILE_GRADES.flatMap((grade) => {
-    const form = forms.find((candidate) => candidate.formId === APPROVED_PROFILE_FORMS[grade].formId);
-    return isApprovedProfileForm(form, grade)
+  return APPROVED_PROFILE_FORMS.flatMap((approved) => {
+    const form = forms.find(candidate => candidate.formId === approved.formId);
+    return form && form.grade === approved.grade && form.sessionId === approved.sessionId
+      && hasApprovedQuestions(form.questions)
       ? []
-      : [`Approved Grade ${grade} Profile Form structure is invalid`];
+      : [`Approved Grade ${approved.grade} Profile Form ${approved.formId} structure is invalid`];
   });
-  const additionalBlockers = forms.filter(form => ADDITIONAL_PROFILE_SOURCES.some(source => source.formId === form.formId)).flatMap(form => {
-    const source = ADDITIONAL_PROFILE_SOURCES.find(source => source.formId === form.formId)!;
-    return form.sourceSchemaValid === true && form.grade === 11 && form.sessionId === source.sessionId && hasApprovedQuestions(form.questions)
-      && form.questions.every(q => source.questions.some(expected => expected.questionId === q.questionId && expected.position === q.position && expected.questionSetTitle === q.questionSetTitle))
-      ? [] : [`Additional Profile Form ${form.formId} structure is invalid`];
-  });
-  return [...originalBlockers, ...additionalBlockers];
-}
-
-function isApprovedProfileForm(form: ProfileForm | undefined, grade: 11 | 12): boolean {
-  if (!form) return false;
-  const approved = APPROVED_PROFILE_FORMS[grade];
-  return form.formId === approved.formId &&
-    form.sessionId === approved.sessionId &&
-    hasApprovedQuestions(form.questions);
 }
 
 function hasApprovedQuestions(questions: ProfileQuestion[]): boolean {

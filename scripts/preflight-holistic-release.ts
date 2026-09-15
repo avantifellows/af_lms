@@ -27,14 +27,12 @@ async function main(): Promise<void> {
   ]);
   const sourceQuery = buildHolisticProfileSourceQuery(
     process.env.HOLISTIC_PROFILE_BQ_PROJECT ?? "avantifellows",
-    process.env.HOLISTIC_PROFILE_BQ_DATASET ?? "assessments",
-    args.includes("--include-additional-forms")
+    process.env.HOLISTIC_PROFILE_BQ_DATASET ?? "assessments"
   );
   const [sourceRows] = await getBigQueryClient().query(sourceQuery);
   const profileSource = buildHolisticProfileSourceEvidence(
     sourceRows as Parameters<typeof buildHolisticProfileSourceEvidence>[0],
-    historicalBusinessStudentIds,
-    args.includes("--include-additional-forms")
+    historicalBusinessStudentIds
   );
 
   try {
