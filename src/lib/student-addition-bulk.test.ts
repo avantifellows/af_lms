@@ -180,11 +180,15 @@ describe("parseStudentAdditionUpload", () => {
       });
     });
 
-    it.each(["Grade", "Student Name", "Date of Birth", "Parents Phone Number", ...choices.slice(0, 6).map(([header]) => header)])("distinguishes blank required %s", async (header) => {
+    it.each(["Grade", "Student Name", "Date of Birth", "Parents Phone Number", ...choices.slice(0, 6).map(([header]) => header)])("distinguishes blank required %s and preserves CSV parity", async (header) => {
       const result = await parseRow(rowWith(header, "   "));
       if (!result.ok) throw new Error(result.error);
+      const message = Object.values(result.rejectedResults[0].field_errors)[0];
       expect(Object.values(result.rejectedResults[0].field_errors)).toEqual([`${header} is required`]);
       expect(result.rejectedResults[0].unsupported_choice_fields).toBeUndefined();
+      const correction = buildRejectedRowsCsv(result.rejectedResults, "JNV001", mode);
+      const [decoded] = parse(correction, { columns: true });
+      expect(decoded["Field Errors"]).toBe(message);
     });
 
     it("preserves optional blanks and existing Gender/CWSN aliases", async () => {
@@ -197,6 +201,19 @@ describe("parseStudentAdditionUpload", () => {
       expect(result.rejectedResults).toEqual([]);
       expect(result.rows[0]).toMatchObject({ gender: "Other", physically_handicapped: true });
     });
+  });
+
+  it("preserves the validation label for an Annual Family Income required error", () => {
+    const message = "Annual Family Income is required";
+    const csv = buildRejectedRowsCsv([{
+      row_number: 2,
+      status: "rejected",
+      original: { "Yearly / Annual Family Income": "" },
+      field_errors: { annual_family_income: message },
+    }], "JNV001", APPROVED_REGISTRATION_MODE);
+
+    const [decoded] = parse(csv, { columns: true });
+    expect(decoded["Field Errors"]).toBe(message);
   });
 
   it("rejects every repeated phone before upload and supports corrected rejected CSV retry", async () => {

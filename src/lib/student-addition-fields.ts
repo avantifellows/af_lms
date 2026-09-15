@@ -290,7 +290,9 @@ function formatFieldErrors(
     .map(([key, message]) => {
       const label = labels.get(key as keyof StudentAdditionInput) ?? key;
       const messageLabel = key === "annual_family_income" ? "Annual Family Income" : label;
-      return message.startsWith(`${label}:`) || message.startsWith(`${messageLabel}:`)
+      return message.startsWith(`${label}:`) ||
+        message.startsWith(`${messageLabel}:`) ||
+        message.startsWith(`${messageLabel} is required`)
         ? message
         : `${label}: ${message}`;
     })
