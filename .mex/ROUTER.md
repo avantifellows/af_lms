@@ -39,7 +39,7 @@ Then read this file fully before doing anything else in this session.
 
 **Working:**
 
-- September 16 issue #327: the School page Visit History tab shows "Visited by <name>" for each Visit. `GET /api/pm/visits` now returns `pm_name` resolved from `user_permission.full_name` through a scalar subquery (no row duplication), with the email shown when no name exists. See `context/visits.md`.
+- September 16 issue #327: the School page Visit History tab shows "Visited by <name>" for each Visit. `GET /api/pm/visits` now returns `pm_name` resolved from `user_permission.full_name` through a scalar subquery (no row duplication), with the email shown when no name exists. PR #329; local headless-Chromium QA passed on real-shaped local data, including the email fallback and a case-variant duplicate permission row. See `context/visits.md` and `patterns/local-browser-qa.md`.
 
 - Student upload validation (#322) now names unsupported submitted dropdown values and configured choices, distinguishes required blanks, and carries the same errors through spreadsheet checks, final local rejects, and correction CSVs. A single template guidance note appears above the preview error table only for unsupported choices. Preview/final errors use spaced sections with bold field names and muted allowed values; correction CSVs separate messages with line breaks; CSVs preserve already-labeled choice messages without repeating the field name. Allowed values, aliases, Phone-mode restrictions, and the no-write Check step are unchanged. See `context/student-addition.md`.
 
