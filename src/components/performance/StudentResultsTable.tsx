@@ -26,11 +26,13 @@ type QStatus = "idle" | "loading" | "loaded" | "error";
 
 const STATUS_LABEL: Record<StudentQuestionRow["status"], string> = {
   correct: "Correct",
+  partial: "Partially correct",
   wrong: "Wrong",
   skipped: "Skipped",
 };
 const STATUS_CLASS: Record<StudentQuestionRow["status"], string> = {
   correct: "text-accent",
+  partial: "text-warning",
   wrong: "text-danger",
   skipped: "text-text-muted",
 };

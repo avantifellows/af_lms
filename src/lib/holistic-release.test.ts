@@ -18,10 +18,14 @@ describe("Holistic release preflight", () => {
 
     expect(sourceQuery.query).toContain("`avantifellows.assessments.all_responses_form_level`");
     expect(sourceQuery.params).toEqual({
-      grade11Form: "6a44a83d1184e717b920c499",
-      grade11Session: "EnableStudents_6a44a83d1184e717b920c499",
-      grade12Form: "6a4deca8e030ebe34669fb0f",
-      grade12Session: "EnableStudents_6a4deca8e030ebe34669fb0f",
+      form0: "6a44a83d1184e717b920c499",
+      session0: "EnableStudents_6a44a83d1184e717b920c499",
+      form1: "6a4deca8e030ebe34669fb0f",
+      session1: "EnableStudents_6a4deca8e030ebe34669fb0f",
+      form2: "6a76d43e24402e7cb501f34f",
+      session2: "EMRSStudents_6a76d43e24402e7cb501f34f",
+      form3: "6a8843143834e2f94dd88f5d",
+      session3: "MaharashtraStudents_6a8843143834e2f94dd88f5d",
     });
     expect(() => buildHolisticProfileSourceQuery("bad.project", "assessments"))
       .toThrow("Invalid BigQuery project or dataset");
@@ -103,7 +107,9 @@ describe("Holistic release preflight", () => {
 
     expect(result.ok).toBe(false);
     expect(result.blockers).toEqual([
-      "Approved Grade 12 Profile Form structure is invalid",
+      "Approved Grade 12 Profile Form 6a4deca8e030ebe34669fb0f structure is invalid",
+      "Approved Grade 11 Profile Form 6a76d43e24402e7cb501f34f structure is invalid",
+      "Approved Grade 11 Profile Form 6a8843143834e2f94dd88f5d structure is invalid",
       "1 BigQuery User identity is missing from LMS",
       "1 BigQuery User identity is ambiguous in LMS",
     ]);
@@ -264,6 +270,8 @@ describe("Holistic release preflight", () => {
           sessionId: "EnableStudents_6a4deca8e030ebe34669fb0f",
           questions: [{ questionId: "g12-q1", position: 1, questionSetTitle: "Background" }],
         },
+        { grade: 11, formId: "6a76d43e24402e7cb501f34f", sessionId: "EMRSStudents_6a76d43e24402e7cb501f34f", questions: [] },
+        { grade: 11, formId: "6a8843143834e2f94dd88f5d", sessionId: "MaharashtraStudents_6a8843143834e2f94dd88f5d", questions: [] },
       ],
     });
   });
@@ -389,5 +397,18 @@ describe("Holistic release preflight", () => {
 
     await expect(seedHolisticFixtures({ query } as never, PROGRAM_IDS.PUNJAB_COE))
       .rejects.toThrow("Holistic fixtures require three eligible Students in each Grade at one School");
+  });
+});
+
+
+describe("catalog-based questionnaire sections", () => {
+  it("groups both EMRS background headings without changing source identities", () => {
+    const forms = buildHolisticProfileSourceEvidence([
+      { user_id: "123", test_id: "6a76d43e24402e7cb501f34f", session_id: "EMRSStudents_6a76d43e24402e7cb501f34f", question_id: "q1", question_position_index: 0, question_set_title: "Student & Family Background\nछात्र और पारिवारिक पृष्ठभूमि" },
+      { user_id: "123", test_id: "6a76d43e24402e7cb501f34f", session_id: "EMRSStudents_6a76d43e24402e7cb501f34f", question_id: "q2", question_position_index: 1, question_set_title: "Student & Family Background\n छात्र और पारिवारिक पृष्ठभूमि" },
+    ]).forms;
+    expect(forms[2].questions.map(q => q.questionSetTitle)).toEqual(["Student & Family Background", "Student & Family Background"]);
+    expect(forms[2].questions.map(q => q.questionId)).toEqual(["q1", "q2"]);
+    expect(forms[2].formId).toBe("6a76d43e24402e7cb501f34f");
   });
 });

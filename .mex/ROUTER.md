@@ -26,7 +26,7 @@ edges:
     condition: when working on teacher feedback setup, the feedback form, or its report
   - target: patterns/INDEX.md
     condition: when starting a task — check the pattern index for a matching pattern file
-last_updated: 2026-09-12
+last_updated: 2026-09-16
 ---
 
 # Session Bootstrap
@@ -117,3 +117,11 @@ For every task, follow this loop:
    - **Record:** If project state changed, update the "Current Project State" section above. If documented facts changed, update the relevant `context/` file surgically.
    - **Orient:** If this task can recur and no pattern exists, create one in `patterns/` using `patterns/README.md`, then add it to `patterns/INDEX.md`. If a pattern exists but you learned a gotcha, update it.
    - **Write:** Bump `last_updated` in every scaffold file you changed. If the why matters, run `mex log --type decision "<what changed and why>"` or `mex log "<note>"`.
+
+## Profile source preflight
+
+The existing release preflight includes all four approved Form/Session pairs.
+Optional section aliases merge EMRS bilingual headings before the shared five-theme
+checks; Maharashtra requires no mapping. There is no separate question-ID registry
+or new-form flag. Exact schema fingerprint enforcement remains in ETL. This change
+is being tested locally and on staging; production is excluded.
