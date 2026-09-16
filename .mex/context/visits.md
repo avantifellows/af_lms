@@ -74,8 +74,9 @@ Most types follow the **binary-question checklist** shape (`RadioPair` yes/no + 
 Visits store only `pm_email`. Wherever a visitor's name is shown (the School page Visit History tab via
 `GET /api/pm/visits`, and the Visit Summary page), it is resolved from `user_permission.full_name` by
 case-insensitive email match, falling back to the email when no name exists. The list API uses a
-**scalar subquery** (preferring the non-revoked row) rather than a `LEFT JOIN user_permission`, because an
-email can have several permission rows and a join would duplicate visits. Visit History renders it as
+**scalar subquery** (preferring the non-revoked row) rather than a `LEFT JOIN user_permission`.
+`user_permission.email` is unique only case-sensitively (`user_permission_email_index`), so a case variant of
+the same address can exist as a second row and a case-insensitive join would duplicate visits. Visit History renders it as
 "Visited by <name>" with the email as the hover title.
 
 ## Route map

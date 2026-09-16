@@ -131,7 +131,7 @@ describe("GET /api/pm/visits", () => {
     expect(queryText).not.toContain("v.ended_at");
     expect(queryText).not.toContain("v.data");
     // Visitor name comes from a scalar subquery so one visit never becomes
-    // several rows when an email has multiple user_permission rows.
+    // several rows when case variants of an email exist in user_permission.
     expect(queryText).toContain("AS pm_name");
     expect(queryText).toContain("FROM user_permission up");
     expect(queryText).toContain("LOWER(up.email) = LOWER(v.pm_email)");

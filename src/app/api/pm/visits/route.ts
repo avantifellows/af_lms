@@ -72,9 +72,10 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // pm_name resolves the visitor's display name from user_permission. A scalar
-  // subquery (not a JOIN) keeps one row per visit even when an email has several
-  // permission rows; the active (non-revoked) row's name is preferred.
+  // pm_name resolves the visitor's display name from user_permission. The match
+  // is case-insensitive, and user_permission.email is only unique case-sensitively,
+  // so a scalar subquery (not a JOIN) keeps one row per visit if case variants of
+  // an email exist; the active (non-revoked) row's name is preferred.
   let queryText = `
     SELECT v.id, v.school_code, s.name as school_name, v.pm_email,
            (SELECT up.full_name
