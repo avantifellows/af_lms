@@ -1,17 +1,39 @@
 import { HOLISTIC_MENTORSHIP_PROGRAM_IDS } from "./constants";
 import { PM_SEAT_ROLES } from "./staff-shared";
 
-const APPROVED_PROFILE_FORMS = {
-  11: {
-    formId: "6a44a83d1184e717b920c499",
-    sessionId: "EnableStudents_6a44a83d1184e717b920c499",
+const APPROVED_PROFILE_FORMS: Array<{formId: string; sessionId: string; grade: 11 | 12; sectionAliases: Record<string, string>}> = [
+  {
+    "formId": "6a44a83d1184e717b920c499",
+    "sessionId": "EnableStudents_6a44a83d1184e717b920c499",
+    "grade": 11,
+    "sectionAliases": {}
   },
-  12: {
-    formId: "6a4deca8e030ebe34669fb0f",
-    sessionId: "EnableStudents_6a4deca8e030ebe34669fb0f",
+  {
+    "formId": "6a4deca8e030ebe34669fb0f",
+    "sessionId": "EnableStudents_6a4deca8e030ebe34669fb0f",
+    "grade": 12,
+    "sectionAliases": {}
   },
-} as const;
-const APPROVED_PROFILE_GRADES = [11, 12] as const;
+  {
+    "formId": "6a76d43e24402e7cb501f34f",
+    "sessionId": "EMRSStudents_6a76d43e24402e7cb501f34f",
+    "grade": 11,
+    "sectionAliases": {
+      "Student & Family Background\nछात्र और पारिवारिक पृष्ठभूमि": "Student & Family Background",
+      "Student & Family Background\n छात्र और पारिवारिक पृष्ठभूमि": "Student & Family Background",
+      "Academic Performance and Perception\n पढ़ाई में प्रदर्शन और सोच": "Academic Performance and Perception",
+      "Career aspiration, readiness, exposure and skill\n करियर के सपने, तैयारी, जानकारी और कौशल": "Career aspiration, readiness, exposure and skill",
+      "Support System & Guidance Access\n सहायता और मार्गदर्शन": "Support System & Guidance Access",
+      "Barriers and Challenges\n मुश्किलें और चुनौतियां": "Barriers and Challenges"
+    }
+  },
+  {
+    "formId": "6a8843143834e2f94dd88f5d",
+    "sessionId": "MaharashtraStudents_6a8843143834e2f94dd88f5d",
+    "grade": 11,
+    "sectionAliases": {}
+  }
+];
 const APPROVED_PROFILE_THEME_COUNTS = [3, 6, 7, 8, 10];
 const BIGQUERY_PROJECT_PATTERN = /^[A-Za-z0-9_-]+$/;
 const BIGQUERY_DATASET_PATTERN = /^[A-Za-z0-9_]+$/;
@@ -81,15 +103,11 @@ export function buildHolisticProfileSourceQuery(project: string, dataset: string
     query: `SELECT user_id, test_id, session_id, question_id, question_position_index, question_set_title
             FROM \`${project}.${dataset}.all_responses_form_level\`
             WHERE test_type = 'form'
-              AND ((test_id = @grade11Form AND session_id = @grade11Session)
-                OR (test_id = @grade12Form AND session_id = @grade12Session))
+              AND (${APPROVED_PROFILE_FORMS.map((_, index) => `(test_id = @form${index} AND session_id = @session${index})`).join(" OR ")})
             ORDER BY user_id, test_id, question_position_index, question_id`,
-    params: {
-      grade11Form: APPROVED_PROFILE_FORMS[11].formId,
-      grade11Session: APPROVED_PROFILE_FORMS[11].sessionId,
-      grade12Form: APPROVED_PROFILE_FORMS[12].formId,
-      grade12Session: APPROVED_PROFILE_FORMS[12].sessionId,
-    },
+    params: Object.fromEntries(APPROVED_PROFILE_FORMS.flatMap((source, index) => [
+      [`form${index}`, source.formId], [`session${index}`, source.sessionId],
+    ])),
   };
 }
 
@@ -98,22 +116,21 @@ export function buildHolisticProfileSourceEvidence(
   historicalBusinessStudentIds: string[] = []
 ): HolisticProfileSourceEvidence {
   const approvedRows = rows.filter((row) =>
-    Object.values(APPROVED_PROFILE_FORMS).some(
+    APPROVED_PROFILE_FORMS.some(
       ({ formId, sessionId }) => row.test_id === formId && row.session_id === sessionId
     )
   );
-  const forms = ([11, 12] as const).map((grade) => {
-    const approved = APPROVED_PROFILE_FORMS[grade];
+  const forms = APPROVED_PROFILE_FORMS.map((approved) => {
     const questions = new Map<string, HolisticProfileSourceEvidence["forms"][number]["questions"][number]>();
     for (const row of approvedRows.filter(({ test_id }) => test_id === approved.formId)) {
       questions.set(row.question_id, {
         questionId: row.question_id,
         position: Number(row.question_position_index),
-        questionSetTitle: row.question_set_title,
+        questionSetTitle: approved.sectionAliases[row.question_set_title] ?? row.question_set_title,
       });
     }
     return {
-      grade,
+      grade: approved.grade,
       formId: approved.formId,
       sessionId: approved.sessionId,
       questions: [...questions.values()].sort((a, b) => a.position - b.position || a.questionId.localeCompare(b.questionId)),
@@ -256,20 +273,13 @@ async function loadPreflightEvidence(params: PreflightParams): Promise<Preflight
 }
 
 function getProfileFormBlockers(forms: ProfileForm[]): string[] {
-  return APPROVED_PROFILE_GRADES.flatMap((grade) => {
-    const form = forms.find((candidate) => candidate.grade === grade);
-    return isApprovedProfileForm(form, grade)
+  return APPROVED_PROFILE_FORMS.flatMap((approved) => {
+    const form = forms.find(candidate => candidate.formId === approved.formId);
+    return form && form.grade === approved.grade && form.sessionId === approved.sessionId
+      && hasApprovedQuestions(form.questions)
       ? []
-      : [`Approved Grade ${grade} Profile Form structure is invalid`];
+      : [`Approved Grade ${approved.grade} Profile Form ${approved.formId} structure is invalid`];
   });
-}
-
-function isApprovedProfileForm(form: ProfileForm | undefined, grade: 11 | 12): boolean {
-  if (!form) return false;
-  const approved = APPROVED_PROFILE_FORMS[grade];
-  return form.formId === approved.formId &&
-    form.sessionId === approved.sessionId &&
-    hasApprovedQuestions(form.questions);
 }
 
 function hasApprovedQuestions(questions: ProfileQuestion[]): boolean {
