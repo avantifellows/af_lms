@@ -86,6 +86,7 @@ Then read this file fully before doing anything else in this session.
 - Regenerating a CMS quiz does **not** re-score already-submitted attempts (scoring happens only at attempt time); they keep their scores against the old answer key. The UI confirms this before proceeding. Related: no `DELETE /quiz` means a partial create leaves an orphan quiz, and regenerate's writes are un-transactioned — see `context/cms-quiz-sessions.md`.
 - The Graphify knowledge graph is generated locally and not committed; rebuild it with `/graphify --update` after significant changes.
 - Deploy is CI-only via `.github/workflows/deploy-amplify.yml` (main → prod, PRs → shared staging URL). There is no local deploy script.
+- Pushing a second commit to a PR while its previous preview build is still running makes `deploy-preview` fail with Amplify `LimitExceededException` ("already have pending or running jobs"). It is not a code failure; wait for the earlier Amplify job, then `gh run rerun <run-id> --failed`.
 
 ## Routing Table
 
