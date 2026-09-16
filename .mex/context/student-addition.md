@@ -18,7 +18,7 @@ edges:
     condition: when adding LMS API routes for create or bulk upload
   - target: patterns/db-service-write.md
     condition: when proxying student writes to the DB Service
-last_updated: 2026-09-07
+last_updated: 2026-09-12
 ---
 
 # Student Addition
@@ -37,6 +37,8 @@ GitHub issue https://github.com/avantifellows/af_lms/issues/296 is the build-rea
 - Parent phone is required, exactly 10 digits, begins with 6 through 9, and is stored as both `user.phone` and `student.student_id`. Portal keeps Student ID plus Date of Birth and already scopes verification by the selected auth group.
 - Identity and existing matching use `(student_id, auth_group)` with `EnableStudents`. In-file duplicate phones reject every affected row; another-School matches do not transfer.
 - Bulk-upload column headers in both Phone and Approved modes are matched after trimming outer whitespace and ignoring case. Choice cell values for Gender, Category, G10 board, Board Stream, and (in Approved mode only) Annual Family Income match exact configured labels after outer trimming and case-insensitive comparison, then are canonicalized to those labels. CWSN and Primary Exam preparing for were already case-insensitive. Fuzzy matches, synonyms, and punctuation changes are not accepted; other cell validation remains unchanged. Missing, unknown Phone-mode, and duplicate canonical columns still fail schema validation.
+- Bulk-upload unsupported dropdown errors name the submitted value and configured choices for Gender, Category, CWSN, G10 board, Board Stream, Primary Exam preparing for, and enabled Annual Family Income. Required blanks get `[Field] is required`; Father Name and Approved-mode income remain optional. This message change is bulk-only; Add/Edit behavior and all accepted choices, aliases, case/outer-space normalization, and Phone-mode restricted fields are unchanged.
+- Locally rejected rows carry optional `unsupported_choice_fields` metadata through Check and final results. The preview validates that metadata against the row's field errors and shows the fresh-template guidance once immediately above the error table only when an unsupported choice exists. Missing fields, duplicate phones, and other errors do not trigger it. Correction CSVs retain the complete field messages and original submitted values; the guidance is not repeated per row or exported. Result columns have bounded widths with wrapping, including unbroken submitted text, and contained horizontal scrolling on mobile.
 - Bulk schema mismatches return structured `templateMismatch` / `template_mismatch` missing, unexpected, and duplicate header details through the LMS API; the upload modal shows only populated groups and links the current mode template. Approved mode still tolerates genuinely extra columns, and the structured `legacy_apaar` marker/message is reserved for files that actually include an APAAR ID header.
 - The active mode is a code constant changed by coordinated AF LMS and DB Service PRs/deployments. No database mode configuration or School selector is added.
 - Every Add/Bulk write carries `registration_mode` and `registration_mode_version`; the expected DB Service mismatch response is `{ error: { code: "registration_mode_mismatch", message: string } }`, which AF LMS surfaces as a fail-closed temporary-unavailability response without row results.
@@ -196,3 +198,11 @@ Expected AY26-27 derived values from current DB data:
 - Grade 11 CLAT -> stream `clat` -> `EnableStudents_TP_2028_clat_A001`
 
 Assume the team will correct the old batch-id spelling typo before implementation. `No stream` is out of v1.
+
+## PR #323 presentation QA follow-up (2026-09-12)
+
+Manual Brave QA found repeated field labels in correction CSVs and awkward period-semicolon separators between errors. Correction exports now retain already-labeled messages (including the shorter Annual Family Income label), while unlabeled service messages still receive their column label. Preview/final issue cells and CSV error columns use line breaks between messages. Actual local Brave recheck confirmed the downloaded multi-error CSV matches the issue cell exactly and Check makes no DB Service calls. All data used was synthetic; backend writes remain stubbed locally.
+
+Verification after the presentation fixes: 3,820 unit tests passed (3 skipped); lint passed with the same 15 existing warnings; production build passed. Regression coverage asserts exact decoded CSV messages for every choice field in both modes, including multiline submitted values, and line separation in preview/final UI cells.
+
+A further presentation pass replaces the dense preview/final issue text with separate list items and subtle dividers. Unsupported choices show a bold field name, the rejected value, and smaller muted allowed values below. Other error messages remain intact in their own sections. The scrollable results area is taller (24rem). Local Brave desktop/390px checks preserved all seven synthetic errors; the 3,820-test suite, lint (existing warnings only), and build passed again. CSV formatting is unchanged.

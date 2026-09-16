@@ -537,7 +537,8 @@ describe("POST /api/school/[udise]/students", () => {
       expect.objectContaining({
         row_number: 3,
         status: "rejected",
-        field_errors: { stream: "Primary Exam preparing for is not valid" },
+        field_errors: { stream: "Primary Exam preparing for: “Not A Stream” isn’t supported. Allowed values: Engineering, Medical, CA, CLAT, NDA." },
+        unsupported_choice_fields: ["stream"],
         original: expect.objectContaining({ "Primary Exam preparing for": "Not A Stream" }),
       }),
     ]);
@@ -586,7 +587,8 @@ describe("POST /api/school/[udise]/students", () => {
         row_number: 3,
         status: "rejected",
         original: expect.objectContaining({ "Primary Exam preparing for": "Not A Stream" }),
-        field_errors: { stream: "Primary Exam preparing for is not valid" },
+        field_errors: { stream: "Primary Exam preparing for: “Not A Stream” isn’t supported. Allowed values: Engineering, Medical, CA, CLAT, NDA." },
+        unsupported_choice_fields: ["stream"],
         row_errors: [],
       },
     ]);
