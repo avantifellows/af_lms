@@ -89,11 +89,20 @@ interface VisitHistoryProps {
     id: number;
     visit_date: string;
     status: string;
+    pm_email?: string | null;
+    pm_name?: string | null;
     inserted_at?: string | null;
     completed_at?: string | null;
   }[];
   schoolCode: string;
   canEdit?: boolean;
+}
+
+function visitorLabel(visit: VisitHistoryProps["visits"][number]): string | null {
+  const name = visit.pm_name?.trim();
+  if (name) return name;
+  const email = visit.pm_email?.trim();
+  return email || null;
 }
 
 export function VisitHistorySection({ visits, schoolCode, canEdit = false }: VisitHistoryProps) {
@@ -150,6 +159,17 @@ export function VisitHistorySection({ visits, schoolCode, canEdit = false }: Vis
                     : "In Progress"}
                 </span>
               </div>
+              {visitorLabel(visit) && (
+                <div className="text-sm text-text-secondary mt-1">
+                  Visited by{" "}
+                  <span
+                    className="font-medium text-text-primary"
+                    title={visit.pm_name?.trim() && visit.pm_email ? visit.pm_email : undefined}
+                  >
+                    {visitorLabel(visit)}
+                  </span>
+                </div>
+              )}
               <div className="text-xs text-text-muted font-mono mt-1 flex flex-wrap gap-x-3">
                 {visit.inserted_at && (
                   <span>

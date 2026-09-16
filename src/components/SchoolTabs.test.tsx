@@ -159,6 +159,62 @@ describe("VisitHistorySection", () => {
     expect(screen.getByText("In Progress")).toBeInTheDocument();
   });
 
+  it("shows the visitor's name when the API supplies one", () => {
+    const visits = [
+      {
+        id: 7,
+        visit_date: "2026-03-01",
+        status: "completed",
+        pm_email: "priya@avantifellows.org",
+        pm_name: "Priya Sharma",
+        inserted_at: "2026-03-01T09:00:00Z",
+        completed_at: "2026-03-01T11:00:00Z",
+      },
+    ];
+    render(<VisitHistorySection visits={visits} schoolCode="ABC123" />);
+
+    expect(screen.getByText("Visited by")).toBeInTheDocument();
+    const name = screen.getByText("Priya Sharma");
+    expect(name).toBeInTheDocument();
+    expect(name).toHaveAttribute("title", "priya@avantifellows.org");
+    expect(screen.queryByText("priya@avantifellows.org")).not.toBeInTheDocument();
+  });
+
+  it("falls back to the visitor's email when no name is known", () => {
+    const visits = [
+      {
+        id: 8,
+        visit_date: "2026-03-02",
+        status: "in_progress",
+        pm_email: "newpm@avantifellows.org",
+        pm_name: null,
+        inserted_at: "2026-03-02T09:00:00Z",
+        completed_at: null,
+      },
+    ];
+    render(<VisitHistorySection visits={visits} schoolCode="ABC123" />);
+
+    expect(screen.getByText("Visited by")).toBeInTheDocument();
+    const email = screen.getByText("newpm@avantifellows.org");
+    expect(email).toBeInTheDocument();
+    expect(email).not.toHaveAttribute("title");
+  });
+
+  it("omits the visitor line when neither name nor email is present", () => {
+    const visits = [
+      {
+        id: 9,
+        visit_date: "2026-03-03",
+        status: "completed",
+        inserted_at: "2026-03-03T09:00:00Z",
+        completed_at: "2026-03-03T11:00:00Z",
+      },
+    ];
+    render(<VisitHistorySection visits={visits} schoolCode="ABC123" />);
+
+    expect(screen.queryByText("Visited by")).not.toBeInTheDocument();
+  });
+
   it("does not render an 'Ended' status badge", () => {
     const visits = [
       {

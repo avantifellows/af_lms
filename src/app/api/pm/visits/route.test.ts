@@ -108,6 +108,7 @@ describe("GET /api/pm/visits", () => {
       school_code: "70705",
       school_name: "JNV Bhavnagar",
       pm_email: "pm@avantifellows.org",
+      pm_name: "Priya Sharma",
       visit_date: "2026-02-15",
       status: "completed",
       completed_at: "2026-02-15T12:00:00.000Z",
@@ -121,6 +122,7 @@ describe("GET /api/pm/visits", () => {
     const json = await res.json();
     expect(json.visits).toEqual(visits);
     expect(json.visits[0].completed_at).toBe("2026-02-15T12:00:00.000Z");
+    expect(json.visits[0].pm_name).toBe("Priya Sharma");
     expect(json.visits[0].ended_at).toBeUndefined();
     expect(json.visits[0].data).toBeUndefined();
 
@@ -128,6 +130,13 @@ describe("GET /api/pm/visits", () => {
     expect(queryText).toContain("v.completed_at");
     expect(queryText).not.toContain("v.ended_at");
     expect(queryText).not.toContain("v.data");
+    // Visitor name comes from a scalar subquery so one visit never becomes
+    // several rows when an email has multiple user_permission rows.
+    expect(queryText).toContain("AS pm_name");
+    expect(queryText).toContain("FROM user_permission up");
+    expect(queryText).toContain("LOWER(up.email) = LOWER(v.pm_email)");
+    expect(queryText).toContain("ORDER BY (up.revoked_at IS NULL) DESC");
+    expect(queryText).not.toContain("JOIN user_permission");
     expect(queryText).toContain("WHERE v.deleted_at IS NULL AND LOWER(v.pm_email) = LOWER($1)");
     expect(queryText).toContain("LOWER(v.pm_email) = LOWER($1)");
     expect(queryText).not.toContain("v.school_code = ANY(");
