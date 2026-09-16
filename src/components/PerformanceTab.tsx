@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { SegmentedControl } from "@/components/ui/SegmentedControl";
+import PerformanceFilterBar from "./performance/PerformanceFilterBar";
 import BatchOverview from "./performance/BatchOverview";
 import TestDeepDive from "./performance/TestDeepDive";
 import CumulativeALTable from "./performance/CumulativeALTable";
@@ -17,21 +18,6 @@ interface Props {
 
 export type TestCategory = "chapter" | "full";
 export type FullTestView = "per_test" | "cumulative";
-
-const STREAM_LABELS: Record<string, string> = {
-  pcm: "PCM",
-  pcb: "PCB",
-  pcmb: "PCMB",
-  engineering: "Engineering",
-  medical: "Medical",
-  foundation: "Foundation",
-  clat: "CLAT",
-  ca: "CA",
-};
-
-function streamLabel(canonical: string): string {
-  return STREAM_LABELS[canonical] || canonical.charAt(0).toUpperCase() + canonical.slice(1);
-}
 
 export default function PerformanceTab({ schoolUdise, lockedProgram }: Props) {
   const router = useRouter();
@@ -302,8 +288,7 @@ export default function PerformanceTab({ schoolUdise, lockedProgram }: Props) {
 
   // Every filter is the same shape — a label and one joined button group —
   // because teachers missed the <select>s that used to sit between pill rows
-  // (#326). "All" options use a sentinel so the control always has a value.
-  const ALL = "__all__";
+  // (#326). Grade is built here because the deep dive shows it beside the title.
   const gradeControl = grades.length > 0 && (
     <SegmentedControl
       label="Grade"
@@ -409,77 +394,23 @@ export default function PerformanceTab({ schoolUdise, lockedProgram }: Props) {
         </div>
       )}
 
-      {/* Filter bar — one row of uniform button groups */}
-      {grades.length > 0 && (
-        <div className="rounded-xl border border-border bg-bg-card-alt/50 p-3 md:p-4 flex flex-wrap items-center gap-x-6 gap-y-3">
-          {gradeControl}
-
-          {/* Test Grade — the grade the test targets, which can differ from the
-              students' grade (e.g. a grade-12 batch sitting an 11th-grade test).
-              Options come from the loaded test set. */}
-          {selectedGrade != null && availableTestGrades.length > 0 && (
-            <SegmentedControl
-              label="Test grade"
-              options={[
-                { value: 0, label: "All test grades" },
-                ...availableTestGrades.map((g) => ({ value: g, label: String(g) })),
-              ]}
-              value={selectedTestGrade ?? 0}
-              onChange={handleTestGradeChange}
-            />
-          )}
-
-          {selectedGrade != null && (
-            <SegmentedControl<TestCategory>
-              label="Test type"
-              options={[
-                { value: "chapter", label: "Chapter tests" },
-                { value: "full", label: "Full tests" },
-              ]}
-              value={testCategory}
-              onChange={handleCategoryChange}
-            />
-          )}
-
-          {selectedGrade != null && availableStreams.length > 0 && (
-            <SegmentedControl
-              label="Stream"
-              options={[
-                { value: ALL, label: "All" },
-                ...availableStreams.map((st) => ({ value: st, label: streamLabel(st) })),
-              ]}
-              value={selectedStream ?? ALL}
-              onChange={(v) => handleStreamChange(v === ALL ? null : v)}
-            />
-          )}
-
-          {/* Subject — Chapter Tests only */}
-          {selectedGrade != null && testCategory === "chapter" && availableSubjects.length > 0 && (
-            <SegmentedControl
-              label="Subject"
-              options={[
-                { value: ALL, label: "All" },
-                ...availableSubjects.map((sub) => ({ value: sub, label: sub })),
-              ]}
-              value={selectedSubject ?? ALL}
-              onChange={(v) => handleSubjectChange(v === ALL ? null : v)}
-            />
-          )}
-
-          {/* Per Test / Cumulative — Full Tests only */}
-          {selectedGrade != null && testCategory === "full" && (
-            <SegmentedControl<FullTestView>
-              label="View"
-              options={[
-                { value: "per_test", label: "Per test" },
-                { value: "cumulative", label: "Cumulative" },
-              ]}
-              value={fullTestView}
-              onChange={handleFullViewChange}
-            />
-          )}
-        </div>
-      )}
+      <PerformanceFilterBar
+        gradeControl={gradeControl}
+        selectedGrade={selectedGrade}
+        testCategory={testCategory}
+        fullTestView={fullTestView}
+        selectedTestGrade={selectedTestGrade}
+        selectedStream={selectedStream}
+        selectedSubject={selectedSubject}
+        availableTestGrades={availableTestGrades}
+        availableStreams={availableStreams}
+        availableSubjects={availableSubjects}
+        onTestGradeChange={handleTestGradeChange}
+        onCategoryChange={handleCategoryChange}
+        onStreamChange={handleStreamChange}
+        onSubjectChange={handleSubjectChange}
+        onFullViewChange={handleFullViewChange}
+      />
 
       {content}
     </div>

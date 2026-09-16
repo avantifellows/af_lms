@@ -1,6 +1,6 @@
 "use client";
 
-export interface SegmentedOption<T extends string | number> {
+interface SegmentedOption<T extends string | number> {
   value: T;
   label: string;
 }
