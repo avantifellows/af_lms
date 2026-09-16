@@ -442,18 +442,15 @@ export default function PerformanceTab({ schoolUdise, lockedProgram }: Props) {
           )}
 
           {selectedGrade != null && availableStreams.length > 0 && (
-            <>
-              <span className="hidden lg:block h-8 w-px bg-border" aria-hidden="true" />
-              <SegmentedControl
-                label="Stream"
-                options={[
-                  { value: ALL, label: "All" },
-                  ...availableStreams.map((st) => ({ value: st, label: streamLabel(st) })),
-                ]}
-                value={selectedStream ?? ALL}
-                onChange={(v) => handleStreamChange(v === ALL ? null : v)}
-              />
-            </>
+            <SegmentedControl
+              label="Stream"
+              options={[
+                { value: ALL, label: "All" },
+                ...availableStreams.map((st) => ({ value: st, label: streamLabel(st) })),
+              ]}
+              value={selectedStream ?? ALL}
+              onChange={(v) => handleStreamChange(v === ALL ? null : v)}
+            />
           )}
 
           {/* Subject — Chapter Tests only */}
