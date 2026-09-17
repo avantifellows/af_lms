@@ -67,6 +67,14 @@ export const MAJOR_TEST_FORMATS = [
   "full_syllabus_test",
 ];
 
+// Advanced papers are excluded from Academic Level by the warehouse — see
+// isAdvancedTest in src/lib/academic-level.ts for the why. Spelled exactly as
+// etl-next's int_student_academic_level spells it so the matrix columns are the
+// same tests that decide dim_student.academic_level; a matrix that showed an
+// Advanced column would contradict the AL in its own summary column.
+const NOT_ADVANCED = (alias: string) =>
+  `AND LOWER(${alias}.test_name) NOT LIKE '%advance%'`;
+
 // AL values that represent meaningful achievement levels. Filters out the
 // per-subject placeholder ("only for overall") that appears on non-overall rows.
 const REAL_AL_VALUES = ["B1", "B2", "M1", "M2", "Not Qualified", "Not Eligible for Academic Level"];
@@ -269,6 +277,10 @@ export async function getBatchOverviewData(
  * changes land here without an app change. It is NULL for students the dbt
  * model has not levelled yet; we surface that as null rather than falling
  * back to an app-side estimate that would silently disagree with the warehouse.
+ *
+ * The per-test progression columns apply that same Advanced-test exclusion, so
+ * every test in the matrix is one that actually counted towards the AL shown
+ * beside it, and total_major_tests counts those tests only.
  */
 export async function getCumulativeALData(
   udise: string,
@@ -323,6 +335,7 @@ export async function getCumulativeALData(
       AND LOWER(f.section) = 'overall'
       AND f.test_format IN (${formatList})
       AND f.academic_level IN (${alList})
+      ${NOT_ADVANCED("f")}
       AND f.fk_student_id IS NOT NULL
       AND f.session_id IS NOT NULL
       ${SUBMITTED_ONLY}

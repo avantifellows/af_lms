@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { fireEvent } from "@testing-library/react";
 import PerformanceTab from "./PerformanceTab";
 
@@ -189,7 +189,10 @@ describe("PerformanceTab", () => {
     await waitFor(() => {
       expect(screen.getByText("Select a grade to view performance data.")).toBeInTheDocument();
     });
-    expect(screen.getByText("Select grade...")).toBeInTheDocument();
+    // One button per grade, none selected yet.
+    for (const g of ["9", "10", "11"]) {
+      expect(screen.getByRole("button", { name: g, pressed: false })).toBeInTheDocument();
+    }
   });
 
   it("auto-selects Grade 12 when present in available grades", async () => {
@@ -277,7 +280,7 @@ describe("PerformanceTab", () => {
     });
   });
 
-  it("renders the Test Grade dropdown from reported options and forwards selection", async () => {
+  it("renders the Test Grade buttons from reported options and forwards selection", async () => {
     vi.stubGlobal("fetch", mockGradesResponse([12], ["JNV CoE"]));
     lastBatchOverviewProps = null;
 
@@ -287,15 +290,79 @@ describe("PerformanceTab", () => {
       expect(screen.getByTestId("batch-overview")).toBeInTheDocument();
     });
 
-    // The dropdown appears once BatchOverview reports its test grades.
-    const allOption = await screen.findByRole("option", { name: "All test grades" });
-    const testGradeSelect = allOption.closest("select") as HTMLSelectElement;
-    expect(testGradeSelect).not.toBeNull();
+    // The group appears once BatchOverview reports its test grades, with
+    // "All test grades" selected by default.
+    const allBtn = await screen.findByRole("button", { name: "All test grades" });
+    expect(allBtn).toHaveAttribute("aria-pressed", "true");
 
-    fireEvent.change(testGradeSelect, { target: { value: "11" } });
+    const testGradeGroup = screen.getByRole("group", { name: "Test grade" });
+    fireEvent.click(within(testGradeGroup).getByRole("button", { name: "11" }));
     await waitFor(() => {
       expect(lastBatchOverviewProps?.testGrade).toBe(11);
     });
+    expect(within(testGradeGroup).getByRole("button", { name: "11" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("'All test grades' clears the URL param rather than writing testGrade=0", async () => {
+    mockSearchParams = new URLSearchParams("testGrade=11");
+    vi.stubGlobal("fetch", mockGradesResponse([12], ["JNV CoE"]));
+    lastBatchOverviewProps = null;
+
+    render(<PerformanceTab schoolUdise="12345" />);
+    await waitFor(() => expect(lastBatchOverviewProps?.testGrade).toBe(11));
+
+    fireEvent.click(await screen.findByRole("button", { name: "All test grades" }));
+    await waitFor(() => expect(lastBatchOverviewProps?.testGrade).toBeUndefined());
+    const last = mockReplace.mock.calls.at(-1)?.[0] as string;
+    expect(last).not.toMatch(/testGrade=/);
+  });
+
+  it("re-clicking the selected grade is a no-op (does not reset filters)", async () => {
+    vi.stubGlobal("fetch", mockGradesResponse([11, 12], ["JNV CoE"]));
+    lastBatchOverviewProps = null;
+
+    render(<PerformanceTab schoolUdise="12345" />);
+    await waitFor(() => expect(lastBatchOverviewProps?.grade).toBe(12));
+    fireEvent.click(await screen.findByRole("button", { name: "PCM" }));
+    await waitFor(() => expect(lastBatchOverviewProps?.stream).toBe("pcm"));
+
+    const gradeGroup = screen.getByRole("group", { name: "Grade" });
+    fireEvent.click(within(gradeGroup).getByRole("button", { name: "12" }));
+    // Still filtered by stream — nothing was reset.
+    expect(lastBatchOverviewProps?.stream).toBe("pcm");
+  });
+
+  it("keeps the 'Select a program' gate on a deep dive reached by URL", async () => {
+    mockSearchParams = new URLSearchParams("grade=12&session=sess-1");
+    vi.stubGlobal("fetch", mockGradesResponse([12], ["JNV CoE", "JNV Nodal"]));
+
+    render(<PerformanceTab schoolUdise="12345" />);
+
+    expect(await screen.findByText("Select a program to view performance data.")).toBeInTheDocument();
+    expect(screen.queryByTestId("test-deep-dive")).not.toBeInTheDocument();
+  });
+
+  it("puts 'Back to overview' first on a deep dive and returns to the overview on click", async () => {
+    mockSearchParams = new URLSearchParams("session=sess-1");
+    vi.stubGlobal("fetch", mockGradesResponse([11], ["JNV CoE"]));
+
+    render(<PerformanceTab schoolUdise="12345" />);
+
+    const back = await screen.findByRole("button", { name: /back to overview/i });
+    expect(screen.getByTestId("test-deep-dive")).toBeInTheDocument();
+    // No filter bar on the deep dive — only the grade control beside the title.
+    expect(screen.queryByRole("group", { name: "Test type" })).not.toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Grade" })).toBeInTheDocument();
+    // The back link precedes everything else in the document.
+    expect(back.compareDocumentPosition(screen.getByTestId("test-deep-dive")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    fireEvent.click(back);
+    await waitFor(() => {
+      expect(screen.getByTestId("batch-overview")).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("test-deep-dive")).not.toBeInTheDocument();
+    const calls = mockReplace.mock.calls.map((c) => c[0] as string);
+    expect(calls.some((url) => !url.includes("session="))).toBe(true);
   });
 
   it("renders subject filter pills only on chapter tab", async () => {
@@ -310,7 +377,7 @@ describe("PerformanceTab", () => {
     expect(screen.queryByRole("button", { name: "Physics" })).not.toBeInTheDocument();
 
     // Switch to Chapter Tests — subject pills should appear
-    fireEvent.click(screen.getByRole("button", { name: "Chapter Tests" }));
+    fireEvent.click(screen.getByRole("button", { name: "Chapter tests" }));
     expect(await screen.findByRole("button", { name: "Physics" })).toBeInTheDocument();
   });
 
@@ -323,7 +390,7 @@ describe("PerformanceTab", () => {
     // Subject pills only render on chapter — their presence proves we landed on Chapter Tests
     expect(await screen.findByRole("button", { name: "Physics" })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Full Tests" }));
+    fireEvent.click(screen.getByRole("button", { name: "Full tests" }));
     await waitFor(() => {
       // Switching to full (the default) should drop the category param
       const calls = mockReplace.mock.calls.map((c) => c[0] as string);
@@ -344,13 +411,13 @@ describe("PerformanceTab", () => {
     expect(await screen.findByRole("button", { name: "Cumulative" })).toBeInTheDocument();
 
     // Switching to Chapter Tests hides the sub-tab.
-    fireEvent.click(screen.getByRole("button", { name: "Chapter Tests" }));
+    fireEvent.click(screen.getByRole("button", { name: "Chapter tests" }));
     await waitFor(() => {
       expect(screen.queryByRole("button", { name: "Cumulative" })).not.toBeInTheDocument();
     });
 
     // Switching back to Full Tests brings it back, and Cumulative swaps the view.
-    fireEvent.click(screen.getByRole("button", { name: "Full Tests" }));
+    fireEvent.click(screen.getByRole("button", { name: "Full tests" }));
     fireEvent.click(await screen.findByRole("button", { name: "Cumulative" }));
     await waitFor(() => {
       expect(screen.getByTestId("cumulative-al-table")).toBeInTheDocument();

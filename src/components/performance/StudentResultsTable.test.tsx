@@ -190,6 +190,54 @@ describe("StudentResultsTable", () => {
     expect(screen.getByText("NA")).toBeInTheDocument();
   });
 
+  // Advanced papers still carry an AL on the fact row, but the warehouse
+  // excludes them from dim_student.academic_level — showing one here would
+  // contradict the student's real level (#326 review).
+  it("drops the AL column entirely for an Advanced test", () => {
+    render(
+      <StudentResultsTable {...props} testName="Advanced MoT 2 (Paper-1)-PB" />
+    );
+    expect(screen.queryByText("AL")).not.toBeInTheDocument();
+    expect(screen.queryByText("NQ")).not.toBeInTheDocument();
+    // The rest of the row is untouched.
+    expect(screen.getByText("Asha Rao")).toBeInTheDocument();
+    expect(screen.getByText("40/100")).toBeInTheDocument();
+  });
+
+  // qualification_status is derived from the AL codes by the same fact model —
+  // on Advanced rows it restates them 1:1 — so leaving it visible would
+  // republish the hidden verdict under another name.
+  it("drops On Track too for an Advanced test, since it restates the AL", () => {
+    render(
+      <StudentResultsTable {...props} testName="Advanced MoT 2 (Paper-1)-PB" />
+    );
+    expect(screen.queryByText("On Track")).not.toBeInTheDocument();
+    expect(screen.queryByText("Off track")).not.toBeInTheDocument();
+    expect(screen.queryByText("On track")).not.toBeInTheDocument();
+  });
+
+  it("matches Advanced on the name however it is cased or embedded", () => {
+    for (const name of [
+      "JEE ADVANCED MOCK 5 - PAPER 1",
+      "CT06-NLM-ADVANCED-N",
+      "11C3 - Periodic Table - JEE Advanced",
+    ]) {
+      const { unmount } = render(
+        <StudentResultsTable {...props} testName={name} />
+      );
+      expect(screen.queryByText("AL")).not.toBeInTheDocument();
+      unmount();
+    }
+  });
+
+  it("keeps the AL and On Track columns for a non-Advanced test", () => {
+    render(<StudentResultsTable {...props} testName="Major Test 4" />);
+    expect(screen.getByText("AL")).toBeInTheDocument();
+    expect(screen.getByText("NQ")).toBeInTheDocument();
+    expect(screen.getByText("On Track")).toBeInTheDocument();
+    expect(screen.getByText("Off track")).toBeInTheDocument();
+  });
+
   it("flags on-track / off-track from qualification_status (#28 item 2)", () => {
     render(
       <StudentResultsTable

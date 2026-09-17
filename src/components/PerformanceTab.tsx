@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Select } from "@/components/ui/Select";
+import { SegmentedControl } from "@/components/ui/SegmentedControl";
+import PerformanceFilterBar from "./performance/PerformanceFilterBar";
 import BatchOverview from "./performance/BatchOverview";
 import TestDeepDive from "./performance/TestDeepDive";
 import CumulativeALTable from "./performance/CumulativeALTable";
@@ -17,21 +18,6 @@ interface Props {
 
 export type TestCategory = "chapter" | "full";
 export type FullTestView = "per_test" | "cumulative";
-
-const STREAM_LABELS: Record<string, string> = {
-  pcm: "PCM",
-  pcb: "PCB",
-  pcmb: "PCMB",
-  engineering: "Engineering",
-  medical: "Medical",
-  foundation: "Foundation",
-  clat: "CLAT",
-  ca: "CA",
-};
-
-function streamLabel(canonical: string): string {
-  return STREAM_LABELS[canonical] || canonical.charAt(0).toUpperCase() + canonical.slice(1);
-}
 
 export default function PerformanceTab({ schoolUdise, lockedProgram }: Props) {
   const router = useRouter();
@@ -238,9 +224,7 @@ export default function PerformanceTab({ schoolUdise, lockedProgram }: Props) {
     updateUrl({ program, grade: null, session: null, stream: null, subject: null, testGrade: null });
   };
 
-  const handleGradeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const val = e.target.value;
-    const grade = val ? parseInt(val, 10) : null;
+  const handleGradeChange = (grade: number) => {
     setSelectedGrade(grade);
     setDeepDiveSession(null);
     setSelectedStream(null);
@@ -250,9 +234,10 @@ export default function PerformanceTab({ schoolUdise, lockedProgram }: Props) {
     updateUrl({ grade, session: null, stream: null, subject: null, testGrade: null });
   };
 
-  const handleTestGradeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const val = e.target.value;
-    const testGrade = val ? parseInt(val, 10) : null;
+  // 0 is the "All test grades" sentinel — a segmented control needs a concrete
+  // value for the all-option, and no test targets grade 0.
+  const handleTestGradeChange = (value: number) => {
+    const testGrade = value === 0 ? null : value;
     setSelectedTestGrade(testGrade);
     updateUrl({ testGrade });
   };
@@ -301,6 +286,93 @@ export default function PerformanceTab({ schoolUdise, lockedProgram }: Props) {
 
   const showProgramTabs = !lockedProgram && programs.length > 1;
 
+  // Every filter is the same shape — a label and one joined button group —
+  // because teachers missed the <select>s that used to sit between pill rows
+  // (#326). Grade is built here because the deep dive shows it beside the title.
+  const gradeControl = grades.length > 0 && (
+    <SegmentedControl
+      label="Grade"
+      options={grades.map((g) => ({ value: g, label: String(g) }))}
+      value={selectedGrade}
+      onChange={handleGradeChange}
+    />
+  );
+
+  // A multi-program school with no program chosen must not show any data —
+  // including a deep dive reached by URL — since the queries would span programs.
+  const needsProgram = showProgramTabs && !selectedProgram;
+
+  const content = needsProgram ? (
+    <div className="p-8 text-center bg-bg-card-alt border border-border rounded-lg shadow-sm">
+      <p className="text-sm text-text-muted">Select a program to view performance data.</p>
+    </div>
+  ) : selectedGrade == null ? (
+    <div className="p-8 text-center bg-bg-card-alt border border-border rounded-lg shadow-sm">
+      <p className="text-sm text-text-muted">Select a grade to view performance data.</p>
+    </div>
+  ) : testCategory === "full" && fullTestView === "cumulative" ? (
+    <CumulativeALTable
+      schoolUdise={schoolUdise}
+      grade={selectedGrade}
+      program={selectedProgram || undefined}
+      stream={selectedStream || undefined}
+      testGrade={selectedTestGrade ?? undefined}
+    />
+  ) : (
+    <BatchOverview
+      schoolUdise={schoolUdise}
+      grade={selectedGrade}
+      testCategory={testCategory}
+      program={selectedProgram || undefined}
+      stream={selectedStream || undefined}
+      subject={selectedSubject || undefined}
+      testGrade={selectedTestGrade ?? undefined}
+      onTestClick={handleTestClick}
+      onFilterOptions={handleFilterOptions}
+    />
+  );
+
+  // Deep dive: the way back is the first thing on the page, then the test
+  // title with the grade control beside it. The filter bar is not shown — a
+  // test session is grade-specific, so changing grade returns to the overview.
+  if (deepDiveSession && selectedGrade != null && !needsProgram) {
+    return (
+      <div className="space-y-5">
+        <button
+          onClick={handleBack}
+          className="inline-flex items-center gap-1.5 -ml-1 px-1 min-h-[44px] text-sm font-bold text-accent hover:text-accent-hover transition-colors rounded-lg"
+        >
+          <span aria-hidden="true" className="text-lg leading-none">&lsaquo;</span>
+          Back to overview
+        </button>
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <h2 className="text-2xl md:text-3xl font-bold tracking-tight text-text-primary">
+            {deepDiveSession.testName || "Loading..."}
+          </h2>
+          {gradeControl}
+        </div>
+        <TestDeepDive
+          schoolUdise={schoolUdise}
+          grade={selectedGrade}
+          sessionId={deepDiveSession.sessionId}
+          program={selectedProgram || undefined}
+          stream={selectedStream || undefined}
+          onDataLoaded={handleDeepDiveData}
+          afterStats={
+            <CombinedReportPanel
+              schoolUdise={schoolUdise}
+              sessionId={deepDiveSession.sessionId}
+              testName={deepDiveSession.testName}
+              grade={selectedGrade}
+              program={selectedProgram || undefined}
+              stream={selectedStream || undefined}
+            />
+          }
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {/* Program tabs */}
@@ -322,194 +394,25 @@ export default function PerformanceTab({ schoolUdise, lockedProgram }: Props) {
         </div>
       )}
 
-      {/* Grade + Test Grade selectors */}
-      {grades.length > 0 && (
-        <div className="flex items-center gap-4 flex-wrap">
-          <label className="text-xs font-bold uppercase tracking-wide text-text-muted">
-            Grade
-          </label>
-          <Select
-            value={selectedGrade ?? ""}
-            onChange={handleGradeChange}
-          >
-            {grades.length > 1 && <option value="">Select grade...</option>}
-            {grades.map((g) => (
-              <option key={g} value={g}>
-                Grade {g}
-              </option>
-            ))}
-          </Select>
+      <PerformanceFilterBar
+        gradeControl={gradeControl}
+        selectedGrade={selectedGrade}
+        testCategory={testCategory}
+        fullTestView={fullTestView}
+        selectedTestGrade={selectedTestGrade}
+        selectedStream={selectedStream}
+        selectedSubject={selectedSubject}
+        availableTestGrades={availableTestGrades}
+        availableStreams={availableStreams}
+        availableSubjects={availableSubjects}
+        onTestGradeChange={handleTestGradeChange}
+        onCategoryChange={handleCategoryChange}
+        onStreamChange={handleStreamChange}
+        onSubjectChange={handleSubjectChange}
+        onFullViewChange={handleFullViewChange}
+      />
 
-          {/* Test Grade filter — the grade the test targets, which can differ
-              from the students' grade (e.g. a grade-12 batch sitting an
-              11th-grade test). Options come from the loaded test set. */}
-          {selectedGrade != null && !deepDiveSession && availableTestGrades.length > 0 && (
-            <>
-              <label className="text-xs font-bold uppercase tracking-wide text-text-muted">
-                Test Grade
-              </label>
-              <Select value={selectedTestGrade ?? ""} onChange={handleTestGradeChange} className="max-w-xs">
-                <option value="">All test grades</option>
-                {availableTestGrades.map((g) => (
-                  <option key={g} value={g}>
-                    Grade {g}
-                  </option>
-                ))}
-              </Select>
-            </>
-          )}
-        </div>
-      )}
-
-      {/* Chapter / Full Tests toggle */}
-      {selectedGrade != null && !deepDiveSession && (
-        <div className="flex gap-1">
-          {(["chapter", "full"] as const).map((cat) => (
-            <button
-              key={cat}
-              onClick={() => handleCategoryChange(cat)}
-              className={`px-3 md:px-4 py-1.5 md:py-2 min-h-[44px] text-xs md:text-sm font-bold uppercase tracking-wide rounded-lg transition-colors ${
-                testCategory === cat
-                  ? "bg-accent text-text-on-accent shadow-sm"
-                  : "bg-bg-card-alt text-text-muted border border-border hover:border-accent/50 hover:text-text-primary"
-              }`}
-            >
-              {cat === "chapter" ? "Chapter Tests" : "Full Tests"}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* Per Test / Cumulative sub-tab — Full Tests only */}
-      {selectedGrade != null && !deepDiveSession && testCategory === "full" && (
-        <div className="flex gap-1">
-          {(["per_test", "cumulative"] as const).map((view) => (
-            <button
-              key={view}
-              onClick={() => handleFullViewChange(view)}
-              className={`px-3 py-1.5 min-h-[36px] text-xs font-bold uppercase tracking-wide rounded-lg transition-colors ${
-                fullTestView === view
-                  ? "bg-accent/15 text-accent border border-accent/40"
-                  : "bg-bg-card-alt text-text-muted border border-border hover:border-accent/40 hover:text-text-primary"
-              }`}
-            >
-              {view === "per_test" ? "Per Test" : "Cumulative"}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* Stream filter */}
-      {selectedGrade != null && !deepDiveSession && availableStreams.length > 0 && (
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-xs font-bold uppercase tracking-wide text-text-muted mr-1">Stream</span>
-          <button
-            onClick={() => handleStreamChange(null)}
-            className={`px-3 py-1.5 min-h-[36px] text-xs font-bold uppercase tracking-wide rounded-lg transition-colors ${
-              !selectedStream
-                ? "bg-accent text-text-on-accent shadow-sm"
-                : "bg-bg-card-alt text-text-muted border border-border hover:border-accent/50 hover:text-text-primary"
-            }`}
-          >
-            All
-          </button>
-          {availableStreams.map((s) => (
-            <button
-              key={s}
-              onClick={() => handleStreamChange(s)}
-              className={`px-3 py-1.5 min-h-[36px] text-xs font-bold uppercase tracking-wide rounded-lg transition-colors ${
-                selectedStream === s
-                  ? "bg-accent text-text-on-accent shadow-sm"
-                  : "bg-bg-card-alt text-text-muted border border-border hover:border-accent/50 hover:text-text-primary"
-              }`}
-            >
-              {streamLabel(s)}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* Subject filter — Chapter Tests only */}
-      {selectedGrade != null && !deepDiveSession && testCategory === "chapter" && availableSubjects.length > 0 && (
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-xs font-bold uppercase tracking-wide text-text-muted mr-1">Subject</span>
-          <button
-            onClick={() => handleSubjectChange(null)}
-            className={`px-3 py-1.5 min-h-[36px] text-xs font-bold uppercase tracking-wide rounded-lg transition-colors ${
-              !selectedSubject
-                ? "bg-accent text-text-on-accent shadow-sm"
-                : "bg-bg-card-alt text-text-muted border border-border hover:border-accent/50 hover:text-text-primary"
-            }`}
-          >
-            All
-          </button>
-          {availableSubjects.map((s) => (
-            <button
-              key={s}
-              onClick={() => handleSubjectChange(s)}
-              className={`px-3 py-1.5 min-h-[36px] text-xs font-bold uppercase tracking-wide rounded-lg transition-colors ${
-                selectedSubject === s
-                  ? "bg-accent text-text-on-accent shadow-sm"
-                  : "bg-bg-card-alt text-text-muted border border-border hover:border-accent/50 hover:text-text-primary"
-              }`}
-            >
-              {s}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* Content */}
-      {showProgramTabs && !selectedProgram ? (
-        <div className="p-8 text-center bg-bg-card-alt border border-border rounded-lg shadow-sm">
-          <p className="text-sm text-text-muted">Select a program to view performance data.</p>
-        </div>
-      ) : selectedGrade == null ? (
-        <div className="p-8 text-center bg-bg-card-alt border border-border rounded-lg shadow-sm">
-          <p className="text-sm text-text-muted">Select a grade to view performance data.</p>
-        </div>
-      ) : deepDiveSession ? (
-        <div className="space-y-6">
-          <CombinedReportPanel
-            schoolUdise={schoolUdise}
-            sessionId={deepDiveSession.sessionId}
-            testName={deepDiveSession.testName}
-            grade={selectedGrade}
-            program={selectedProgram || undefined}
-            stream={selectedStream || undefined}
-          />
-          <TestDeepDive
-            schoolUdise={schoolUdise}
-            grade={selectedGrade}
-            sessionId={deepDiveSession.sessionId}
-            testName={deepDiveSession.testName}
-            program={selectedProgram || undefined}
-            stream={selectedStream || undefined}
-            onBack={handleBack}
-            onDataLoaded={handleDeepDiveData}
-          />
-        </div>
-      ) : testCategory === "full" && fullTestView === "cumulative" ? (
-        <CumulativeALTable
-          schoolUdise={schoolUdise}
-          grade={selectedGrade}
-          program={selectedProgram || undefined}
-          stream={selectedStream || undefined}
-          testGrade={selectedTestGrade ?? undefined}
-        />
-      ) : (
-        <BatchOverview
-          schoolUdise={schoolUdise}
-          grade={selectedGrade}
-          testCategory={testCategory}
-          program={selectedProgram || undefined}
-          stream={selectedStream || undefined}
-          subject={selectedSubject || undefined}
-          testGrade={selectedTestGrade ?? undefined}
-          onTestClick={handleTestClick}
-          onFilterOptions={handleFilterOptions}
-        />
-      )}
+      {content}
     </div>
   );
 }

@@ -9,7 +9,7 @@ import type {
   StudentQuestionRow,
 } from "@/types/quiz";
 import { getCategoryColor } from "@/lib/student-utils";
-import { alChipColor, alShortLabel } from "@/lib/academic-level";
+import { alChipColor, alShortLabel, isAdvancedTest } from "@/lib/academic-level";
 
 interface Props {
   students: StudentDeepDiveRow[];
@@ -18,6 +18,11 @@ interface Props {
   sessionId: string;
   program?: string;
   stream?: string;
+  /** This test's name. Only used to decide whether an AL applies at all —
+   *  Advanced papers are excluded from Academic Level upstream, so the AL and
+   *  On Track columns are dropped rather than showing a level dim_student
+   *  never counted. */
+  testName?: string | null;
 }
 
 type SortKey = "percentage" | "accuracy" | "attempt_rate" | "student_name" | "marks_scored";
@@ -215,7 +220,18 @@ export default function StudentResultsTable({
   sessionId,
   program,
   stream,
+  testName,
 }: Props) {
+  // Advanced papers carry an AL on the fact row but are excluded from the
+  // canonical Academic Level upstream, so we don't show one here either.
+  //
+  // This gates On Track as well as AL, because the two are one judgement, not
+  // two: qualification_status is derived from the AL codes by the same fact
+  // model, and on Advanced rows it is a 1:1 restatement of them ("Not
+  // Qualified" -> "Not Qualified", M1/M2 -> "Qualified"). Hiding the chip while
+  // printing "Off track" beside it would republish the very verdict the
+  // warehouse refuses to count, under another name.
+  const showALColumns = !isAdvancedTest(testName);
   const [sortKey, setSortKey] = useState<SortKey>("percentage");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [expandedName, setExpandedName] = useState<string | null>(null);
@@ -333,8 +349,12 @@ export default function StudentResultsTable({
               </th>
               <th className={TH}>Gender</th>
               <th className={TH}>Category</th>
-              <th className={TH}>AL</th>
-              <th className={TH}>On Track</th>
+              {showALColumns && (
+                <>
+                  <th className={TH}>AL</th>
+                  <th className={TH}>On Track</th>
+                </>
+              )}
               <th className={SORTABLE_TH} onClick={() => handleSort("marks_scored")}>
                 Marks{sortIcon("marks_scored")}
               </th>
@@ -387,20 +407,24 @@ export default function StudentResultsTable({
                         {s.category || "—"}
                       </span>
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-sm">
-                      {s.academic_level ? (
-                        <span
-                          className={`inline-flex items-center px-2 py-0.5 text-xs font-bold uppercase tracking-wide rounded border ${alChipColor(s.academic_level)}`}
-                        >
-                          {alShortLabel(s.academic_level)}
-                        </span>
-                      ) : (
-                        <span className="text-text-muted">NA</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-sm">
-                      <OnTrackCell status={s.qualification_status} />
-                    </td>
+                    {showALColumns && (
+                      <>
+                        <td className="px-4 py-3 whitespace-nowrap text-sm">
+                          {s.academic_level ? (
+                            <span
+                              className={`inline-flex items-center px-2 py-0.5 text-xs font-bold uppercase tracking-wide rounded border ${alChipColor(s.academic_level)}`}
+                            >
+                              {alShortLabel(s.academic_level)}
+                            </span>
+                          ) : (
+                            <span className="text-text-muted">NA</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap text-sm">
+                          <OnTrackCell status={s.qualification_status} />
+                        </td>
+                      </>
+                    )}
                     <td className="px-4 py-3 whitespace-nowrap text-sm font-mono text-text-primary">
                       {s.marks_scored}/{s.max_marks}
                     </td>
@@ -416,7 +440,7 @@ export default function StudentResultsTable({
                   </tr>
                   {isExpanded && s.subject_scores.length > 0 && (
                     <tr>
-                      <td colSpan={10} className="px-4 py-2 bg-bg">
+                      <td colSpan={showALColumns ? 10 : 8} className="px-4 py-2 bg-bg">
                         <div className="overflow-x-auto">
                           <table className="w-full">
                             <thead>
