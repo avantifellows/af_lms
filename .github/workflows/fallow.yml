@@ -23,10 +23,28 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # CRAP is complexity weighted by how *untested* a function is, so without
+      # real coverage Fallow falls back to a static estimate — and that estimate
+      # is pessimistic enough to fail a fully-tested function (PerformanceTab
+      # scored 404.1 estimated, 24.0 measured). Costs a test run in this job,
+      # but a gate that mis-scores covered code is a gate people learn to ignore.
+      - name: Run unit tests with coverage
+        run: npm run test:unit:coverage
+
       - name: Run Fallow audit
         uses: fallow-rs/fallow@v2
         with:
           command: audit
+          coverage: unit-coverage/coverage-final.json
           # Post ONE sticky summary comment (updates in place on re-runs) instead
           # of dozens of inline review comments. `annotations` still surfaces
           # findings on the Files Changed view without adding PR comments.

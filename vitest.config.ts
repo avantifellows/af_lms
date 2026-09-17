@@ -35,7 +35,11 @@ export default defineConfig({
         "src/app/api/auth/**",
       ],
       reportsDirectory: "./unit-coverage",
-      reporter: ["text", "json-summary", "html"],
+      // "json" emits coverage-final.json — the per-function Istanbul data the
+      // Fallow audit needs for real CRAP scores. Without it Fallow falls back
+      // to a static estimate that assumes a function is largely untested, which
+      // is how a 100%-covered component scored CRAP 404 in CI.
+      reporter: ["text", "json-summary", "json", "html"],
     },
   },
 });
