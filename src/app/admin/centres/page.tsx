@@ -3,7 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { authOptions } from "@/lib/auth";
-import { isAdmin } from "@/lib/permissions";
+import { getUserPermission, isAdmin } from "@/lib/permissions";
 import { getCentreList, getCentreOptionSets } from "@/lib/centres";
 import CentreGrid from "./CentreGrid";
 
@@ -21,6 +21,14 @@ export default async function CentresPage({ searchParams }: CentresPageProps = {
   }
 
   const admin = await isAdmin(session.user.email);
+
+  // Read-only admins may look but not touch: the API already 403s their
+
+  // writes (forWrite guards); this hides the controls too (D116).
+
+  const permission = await getUserPermission(session.user.email);
+
+  const viewerReadOnly = !!permission?.read_only;
   if (!admin) {
     redirect("/dashboard");
   }
@@ -74,6 +82,7 @@ export default async function CentresPage({ searchParams }: CentresPageProps = {
             initialFilters={centresResult.filters}
             initialPagination={centresResult.pagination}
             optionSets={optionSetsResult.optionSets}
+            viewerReadOnly={viewerReadOnly}
           />
         ) : (
           <div className="rounded-md border border-danger/30 bg-danger-bg p-4 text-sm text-danger">

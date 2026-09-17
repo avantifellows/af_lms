@@ -578,3 +578,22 @@ describe("CentreGrid", () => {
     expect(screen.getByRole("heading", { name: "New Centre" })).toBeInTheDocument();
   });
 });
+
+describe("CentreGrid read-only viewer (D116)", () => {
+  it("hides New Centre and the per-card Edit controls", () => {
+    render(
+      <CentreGrid
+        initialRows={rows}
+        initialSummary={summary}
+        initialFilters={filters}
+        initialPagination={{ page: 1, limit: 25, totalRows: rows.length, totalPages: 1 }}
+        optionSets={optionSets}
+        viewerReadOnly
+      />
+    );
+    expect(screen.queryByRole("button", { name: "New Centre" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
+    // The list itself still renders for read-only admins.
+    expect(screen.getByText(rows[0].name)).toBeInTheDocument();
+  });
+});

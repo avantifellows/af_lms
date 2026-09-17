@@ -25,6 +25,8 @@ interface BatchListProps {
   initialBatches: Batch[];
   programs: Program[];
   initialProgramId: number;
+  /** Admin (Read Only) viewer: hide the Edit control (the API 403s the write anyway). */
+  viewerReadOnly?: boolean;
 }
 
 const STREAM_OPTIONS = [
@@ -52,6 +54,7 @@ export default function BatchList({
   initialBatches,
   programs,
   initialProgramId,
+  viewerReadOnly = false,
 }: BatchListProps) {
   const [batches, setBatches] = useState(initialBatches);
   const [selectedProgramId, setSelectedProgramId] = useState(initialProgramId);
@@ -295,6 +298,8 @@ export default function BatchList({
                             Cancel
                           </Button>
                         </div>
+                      ) : viewerReadOnly ? (
+                        <span className="text-xs text-gray-400">Read-only</span>
                       ) : (
                         <Button
                           variant="ghost"

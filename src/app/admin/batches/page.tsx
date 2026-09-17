@@ -1,7 +1,7 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { redirect } from "next/navigation";
-import { isAdmin } from "@/lib/permissions";
+import { getUserPermission, isAdmin } from "@/lib/permissions";
 import Link from "next/link";
 import BatchList from "./BatchList";
 
@@ -58,6 +58,14 @@ export default async function BatchManagementPage() {
   }
 
   const admin = await isAdmin(session.user.email);
+
+  // Read-only admins may look but not touch: the API already 403s their
+
+  // writes (forWrite guards); this hides the controls too (D116).
+
+  const permission = await getUserPermission(session.user.email);
+
+  const viewerReadOnly = !!permission?.read_only;
   if (!admin) {
     redirect("/dashboard");
   }
@@ -99,6 +107,7 @@ export default async function BatchManagementPage() {
           initialBatches={batches}
           programs={programs}
           initialProgramId={DEFAULT_PROGRAM_ID}
+          viewerReadOnly={viewerReadOnly}
         />
       </main>
     </div>

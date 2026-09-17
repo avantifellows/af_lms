@@ -544,3 +544,12 @@ describe("SchoolList", () => {
     });
   });
 });
+
+describe("SchoolList read-only viewer (D116)", () => {
+  it("replaces every Edit button with a Read-only marker", () => {
+    render(<SchoolList initialSchools={sampleSchools} viewerReadOnly />);
+    expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
+    expect(screen.getAllByText("Read-only").length).toBe(sampleSchools.length);
+    expect(screen.getByText("Delhi Public School")).toBeInTheDocument();
+  });
+});
