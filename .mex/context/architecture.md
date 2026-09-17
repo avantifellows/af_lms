@@ -18,7 +18,7 @@ edges:
     condition: when a route or page needs to gate access
   - target: context/visits.md
     condition: when working on PM school visits or visit action types
-last_updated: 2026-08-07
+last_updated: 2026-09-17
 ---
 
 # Architecture
@@ -39,6 +39,21 @@ handler (`src/app/api/**/route.ts`).
 
 Every API route gates first: `getServerSession(authOptions)` → a permission check
 (`src/lib/permissions.ts`, or `src/lib/visits-policy.ts` for visits) → then data access.
+
+## Holistic Admin navigation state
+
+The Holistic Admin Program selector is represented by the validated `program_id`
+query parameter. The client derives its selection from `useSearchParams` and uses
+native `history.replaceState(null, "", url)` when the user changes Program. This
+preserves unrelated query parameters and the hash, updates Next App Router state,
+and keeps the current history entry so native Back and reload restore the Program.
+
+Assignment Coverage School links add the fixed `source=progress` marker. The School
+route recognizes only that exact scalar value, and `RosterPage` produces a
+program-bearing return link only after the existing School and Holistic access
+checks resolve authorized content. The marker supplies navigation context and never
+grants access. Ordinary School links and all Centre return paths keep their existing
+dashboard behavior; there is no general return-URL or storage framework.
 
 ## Key Components
 - **`src/lib/db.ts`** — the `query<T>()` helper over a singleton `pg.Pool` (god node, ~137 edges). Reads and direct writes both go through it. `withTransaction()` for multi-statement writes.

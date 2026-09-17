@@ -120,6 +120,56 @@ describe("HolisticMentorshipAdminPage", () => {
     expect(screen.getByText("Read only")).toBeInTheDocument();
   });
 
+  it("restores Punjab Nodal from a valid Program query", async () => {
+    mockGetServerSession.mockResolvedValue({ user: { email: "admin@example.com" } });
+    mockRequireAccess.mockResolvedValue({
+      ok: true,
+      canEdit: true,
+      programId: 1,
+      programIds: [1, 94],
+      permission: { role: "admin" },
+    });
+
+    render(await HolisticMentorshipAdminPage({
+      searchParams: Promise.resolve({ program_id: "94" }),
+    }));
+
+    expect(mockWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({
+        initialProgramId: 94,
+        availableProgramIds: [1, 94],
+      }),
+      undefined,
+    );
+  });
+
+  it.each([
+    ["unsupported", "999"],
+    ["unavailable", "78"],
+    ["array", ["94"]],
+  ])("falls back from an %s Program query", async (_label, programId) => {
+    mockGetServerSession.mockResolvedValue({ user: { email: "pm@example.com" } });
+    mockRequireAccess.mockResolvedValue({
+      ok: true,
+      canEdit: false,
+      programId: 94,
+      programIds: [94],
+      permission: { role: "program_manager" },
+    });
+
+    render(await HolisticMentorshipAdminPage({
+      searchParams: Promise.resolve({ program_id: programId }),
+    }));
+
+    expect(mockWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({
+        initialProgramId: 94,
+        availableProgramIds: [94],
+      }),
+      undefined,
+    );
+  });
+
   it("does not link the dedicated Admin back to its redirecting dashboard", async () => {
     mockGetServerSession.mockResolvedValue({ user: { email: "holistic@example.com" } });
     mockRequireAccess.mockResolvedValue({

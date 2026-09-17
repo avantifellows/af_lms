@@ -556,6 +556,7 @@ export default async function RosterPage({
   scope,
   session,
   holisticProgramParam,
+  fromHolisticProgress = false,
 }: {
   scope: RosterScope;
   session: Session;
@@ -563,6 +564,10 @@ export default async function RosterPage({
   // to show when a school hosts more than one. Centre callers omit it: the
   // centre's own program is the answer (see holisticProgramChoices).
   holisticProgramParam?: string | string[];
+  // Set only by the School route for the fixed `source=progress` marker. The
+  // marker chooses a return destination; Holistic authorization still decides
+  // whether the tab and its Program context exist.
+  fromHolisticProgress?: boolean;
 }) {
   const school = scope.school;
   const isCentre = scope.kind === "centre";
@@ -640,7 +645,9 @@ export default async function RosterPage({
         <RosterShell
           title={school.name}
           subtitle={`${school.district}, ${school.state} | Code: ${school.code}`}
-          backHref="/admin/holistic-mentorship"
+          backHref={programId === undefined
+            ? "/admin/holistic-mentorship"
+            : `/admin/holistic-mentorship?program_id=${programId}`}
           userEmail={session.user?.email ?? undefined}
           tabs={[{
             id: "holistic_mentorship",
@@ -811,7 +818,7 @@ export default async function RosterPage({
   // straight back here — so centre pages point at the Centres tab explicitly,
   // which is where the card they came from lives anyway.
   const multipleSchools = !isPasscodeUser && hasMultipleSchools(permission);
-  const backHref = isCentre
+  const defaultBackHref = isCentre
     ? "/dashboard?view=centres"
     : multipleSchools
       ? "/dashboard"
@@ -983,6 +990,9 @@ export default async function RosterPage({
     programId: holistic.programId,
     programChoices: holistic.choices,
   });
+  const backHref = !isCentre && fromHolisticProgress && holisticContent && holistic.programId !== undefined
+    ? `/admin/holistic-mentorship?program_id=${holistic.programId}`
+    : defaultBackHref;
 
   // Tab visibility driven by feature permission matrix. Visits are school-linked
   // (a PM visits all of a school's centres in one trip), so the label stays

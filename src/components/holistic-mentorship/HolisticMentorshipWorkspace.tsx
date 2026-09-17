@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useId, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 
 import { Select } from "@/components/ui";
 import {
@@ -135,13 +136,19 @@ function AdminWorkspace({
   canViewPhaseSetup = canEdit,
 }: Omit<HolisticMentorshipWorkspaceProps, "mode" | "schoolCode" | "programId">) {
   const orderedAvailableProgramIds = orderedProgramIds(availableProgramIds);
+  const searchParams = useSearchParams();
+  const requestedProgramId = Number(searchParams.get("program_id"));
+  const selectedProgramId = orderedAvailableProgramIds.some(
+    (programId) => programId === requestedProgramId,
+  )
+    ? requestedProgramId
+    : initialProgramId;
   const workspaces = canViewPhaseSetup ? WORKSPACES.admin : WORKSPACES.admin.slice(0, 1);
   const [activeId, setActiveId] = useState<string>(workspaces[0].id);
   const active = workspaces.find((workspace) => workspace.id === activeId) ?? workspaces[0];
   const tabSetId = useId();
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const [academicYear, setAcademicYear] = useState(CURRENT_ACADEMIC_YEAR);
-  const [selectedProgramId, setSelectedProgramId] = useState(initialProgramId);
   const [academicYears, setAcademicYears] = useState<string[]>([CURRENT_ACADEMIC_YEAR]);
   const updateAcademicYears = useCallback((years: string[]) => {
     if (years.length === 0) return;
@@ -165,7 +172,9 @@ function AdminWorkspace({
     tabRefs.current[nextIndex]?.focus();
   };
   const handleProgramChange = (nextProgramId: number) => {
-    setSelectedProgramId(nextProgramId);
+    const url = new URL(window.location.href);
+    url.searchParams.set("program_id", String(nextProgramId));
+    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
     setAcademicYear(CURRENT_ACADEMIC_YEAR);
     setAcademicYears([CURRENT_ACADEMIC_YEAR]);
   };

@@ -345,12 +345,16 @@ async function resolveAsyncComponent(
 const renderResolved = async (jsx: React.ReactElement) =>
   render(await resolveAsyncComponent(jsx));
 
-const renderPage = async (udise = "24120100101", programId?: string) => {
+const renderPage = async (
+  udise = "24120100101",
+  programId?: string,
+  source?: string | string[],
+) => {
   const jsx = await SchoolPage({
     params: Promise.resolve({ udise }),
-    searchParams: programId === undefined
+    searchParams: programId === undefined && source === undefined
       ? undefined
-      : Promise.resolve({ program_id: programId }),
+      : Promise.resolve({ program_id: programId, source }),
   });
   return renderResolved(jsx);
 };
@@ -701,6 +705,87 @@ describe("SchoolPage (server component)", () => {
     const header = screen.getByTestId("page-header");
     expect(header).toHaveAttribute("data-back-href", "/dashboard");
   });
+
+  it("returns an authorized Assignment Coverage School to its selected Program", async () => {
+    const { permission } = setupAdminDefaults({
+      id: "20",
+      code: "SCH001",
+      centre_program_ids: [94],
+    });
+    mockRequireHolisticMentorshipAccess.mockResolvedValue({
+      ok: true,
+      permission,
+      school: { id: 20, code: "SCH001", programId: 94 },
+      programId: 94,
+      programIds: [94],
+      canEdit: true,
+    });
+
+    await renderPage("SCH001", "94", "progress");
+
+    expect(screen.getByTestId("page-header")).toHaveAttribute(
+      "data-back-href",
+      "/admin/holistic-mentorship?program_id=94",
+    );
+  });
+
+  it.each(["program_manager", "program_admin"] as const)(
+    "returns a scoped %s to the selected read-only Program workspace",
+    async (role) => {
+      setupAdminDefaults({ id: "20", code: "SCH001", centre_program_ids: [94] });
+      const permission = makePermission({
+        email: `${role}@example.com`,
+        role,
+        level: 1,
+        school_codes: ["SCH001", "SCH002"],
+        program_ids: [94],
+      });
+      mockGetServerSession.mockResolvedValue(
+        googleSession({ user: { email: `${role}@example.com` } }),
+      );
+      mockGetUserPermission.mockResolvedValue(permission);
+      mockGetProgramContextSync.mockReturnValue({
+        hasAccess: true,
+        programIds: [94],
+        isNVSOnly: false,
+        hasCoEOrNodal: true,
+      });
+      mockRequireHolisticMentorshipAccess.mockResolvedValue({
+        ok: true,
+        permission,
+        school: { id: 20, code: "SCH001", programId: 94 },
+        programId: 94,
+        programIds: [94],
+        canEdit: false,
+      });
+
+      await renderPage("SCH001", "94", "progress");
+
+      expect(screen.getByTestId("page-header")).toHaveAttribute(
+        "data-back-href",
+        "/admin/holistic-mentorship?program_id=94",
+      );
+      expect(mockRequireHolisticMentorshipAccess).toHaveBeenCalledWith(
+        expect.anything(),
+        "assignment_coverage_read",
+        { schoolCode: "SCH001", programId: 94 },
+      );
+    },
+  );
+
+  it.each(["other", ["progress"]])(
+    "ignores an unrecognized progress source marker (%s)",
+    async (source) => {
+      setupAdminDefaults({ id: "20", code: "SCH001", centre_program_ids: [94] });
+
+      await renderPage("SCH001", "94", source);
+
+      expect(screen.getByTestId("page-header")).toHaveAttribute(
+        "data-back-href",
+        "/dashboard",
+      );
+    },
+  );
 
   it("renders no backHref for level 1 user with single school code", async () => {
     setupAdminDefaults();
@@ -1833,11 +1918,15 @@ describe("SchoolPage (server component)", () => {
   it("does not expose Holistic coverage for a forged unsupported Program URL", async () => {
     setupAdminDefaults({ id: "20", code: "SCH001" });
 
-    await renderPage("24120100101", "999");
+    await renderPage("24120100101", "999", "progress");
 
     expect(mockRequireHolisticMentorshipAccess).not.toHaveBeenCalled();
     expect(mockListHolisticAssignmentRoster).not.toHaveBeenCalled();
     expect(screen.queryByTestId("tab-holistic_mentorship")).not.toBeInTheDocument();
+    expect(screen.getByTestId("page-header")).toHaveAttribute(
+      "data-back-href",
+      "/dashboard",
+    );
   });
 
   it("wires eligible Mentors into writable Admin coverage assignments", async () => {
@@ -1876,18 +1965,18 @@ describe("SchoolPage (server component)", () => {
       email: "holistic@example.com",
       level: 3,
       role: "holistic_mentorship_admin",
-      program_ids: [1],
+      program_ids: [94],
     });
     mockGetServerSession.mockResolvedValue(
       googleSession({ user: { email: "holistic@example.com" } })
     );
-    mockQuery.mockResolvedValueOnce([makeSchool()]);
+    mockQuery.mockResolvedValueOnce([makeSchool({ centre_program_ids: [94] })]);
     mockGetUserPermission.mockResolvedValue(permission);
     mockGetFeatureAccess.mockReturnValue(featureAccess(true, true));
     mockRequireHolisticMentorshipAccess.mockResolvedValue({
       ok: true,
       permission,
-      school: { id: 20, code: "70705", programId: 1 },
+      school: { id: 20, code: "70705", programId: 94 },
       canEdit: true,
     });
     mockListHolisticAssignmentRoster.mockResolvedValue([{
@@ -1900,7 +1989,7 @@ describe("SchoolPage (server component)", () => {
       ownership: null,
     }]);
 
-    await renderPage("70705");
+    await renderPage("70705", "94", "progress");
 
     expect(screen.getByTestId("school-tabs")).toHaveAttribute(
       "data-default-tab",
@@ -1909,6 +1998,10 @@ describe("SchoolPage (server component)", () => {
     expect(screen.getByTestId("tab-holistic_mentorship")).toBeInTheDocument();
     expect(screen.queryByTestId("tab-enrollment")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Assign Ravi Shah" })).toBeEnabled();
+    expect(screen.getByTestId("page-header")).toHaveAttribute(
+      "data-back-href",
+      "/admin/holistic-mentorship?program_id=94",
+    );
     expect(mockProcessStudents).not.toHaveBeenCalled();
   });
 
