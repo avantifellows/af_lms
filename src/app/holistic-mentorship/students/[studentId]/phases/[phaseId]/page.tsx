@@ -5,7 +5,7 @@ import PageHeader from "@/components/PageHeader";
 import StudentPhaseWorkspace from "@/components/holistic-mentorship/StudentPhaseWorkspace";
 import { authOptions } from "@/lib/auth";
 import { isHolisticMentorshipProgramId, PROGRAM_IDS } from "@/lib/constants";
-import { holisticStudentPhaseHref } from "@/lib/holistic-links";
+import { holisticStudentPhaseHref, type HolisticStudentPhaseSource } from "@/lib/holistic-links";
 import { validateAcademicYear } from "@/lib/holistic-phase-plans";
 import {
   getHolisticStudentPhase,
@@ -25,8 +25,6 @@ type StudentPhasePageProps = {
     source?: string;
   }>;
 };
-
-type StudentPhaseSource = "school" | "progress";
 
 function positiveInteger(value: string) {
   const parsed = Number(value);
@@ -49,8 +47,8 @@ async function studentPhaseRequest({ params, searchParams }: StudentPhasePagePro
   const schoolCode = queryParams.school_code ?? "";
   const academicYear = queryParams.academic_year ?? "";
   const programId = Number(queryParams.program_id ?? PROGRAM_IDS.COE);
-  const source = queryParams.source === "school" || queryParams.source === "progress"
-    ? queryParams.source as StudentPhaseSource
+  const source = queryParams.source === "school" || queryParams.source === "school-progress" || queryParams.source === "progress"
+    ? queryParams.source as HolisticStudentPhaseSource
     : undefined;
   const valid = [
     Boolean(schoolCode),
@@ -80,11 +78,12 @@ function studentPhaseBackHref(
   role: string,
   schoolCode: string,
   programId: number,
-  source?: StudentPhaseSource,
+  source?: HolisticStudentPhaseSource,
 ) {
   if (source === "progress") return `/admin/holistic-mentorship?program_id=${programId}`;
-  if (source === "school") {
-    return `/school/${schoolCode}?tab=holistic_mentorship&program_id=${programId}`;
+  if (source === "school" || source === "school-progress") {
+    const origin = source === "school-progress" ? "&source=progress" : "";
+    return `/school/${schoolCode}?tab=holistic_mentorship&program_id=${programId}${origin}`;
   }
   const admin = role === "admin" || role === "holistic_mentorship_admin";
   return admin
@@ -117,7 +116,7 @@ function redirectFromLockedPhase(detail: HolisticStudentPhaseDetail, request: {
   schoolCode: string;
   academicYear: string;
   programId: number;
-  source?: StudentPhaseSource;
+  source?: HolisticStudentPhaseSource;
 }, role: string) {
   if (!("locked" in detail.selectedPhase) || !detail.selectedPhase.locked) return;
   const source = request.source;

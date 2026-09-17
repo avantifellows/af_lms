@@ -36,13 +36,13 @@ function progress(student: Student): Progress {
   return "pending";
 }
 
-function studentHref(student: Student, schoolCode: string, programId: number) {
+function studentHref(student: Student, schoolCode: string, programId: number, fromHolisticProgress: boolean) {
   if (!student.activePhaseId) return null;
   const params = new URLSearchParams({
     school_code: schoolCode,
     academic_year: CURRENT_ACADEMIC_YEAR,
     program_id: String(programId),
-    source: "school",
+    source: fromHolisticProgress ? "school-progress" : "school",
   });
   return `/holistic-mentorship/students/${student.studentId}/phases/${student.activePhaseId}?${params}`;
 }
@@ -88,6 +88,7 @@ function Summary({ summary }: { summary: HolisticAssignmentCoverageSummary }) {
 }
 
 type CoverageTableProps = {
+  fromHolisticProgress?: boolean;
   students: Student[];
   schoolCode: string;
   programId: number;
@@ -98,7 +99,7 @@ type CoverageTableProps = {
   onRemove: (student: Student) => void;
 };
 
-function CoverageTable({ students, schoolCode, programId, canManage, controlsDisabled,
+function CoverageTable({ fromHolisticProgress = false, students, schoolCode, programId, canManage, controlsDisabled,
   onAssign, onReassign, onRemove }: CoverageTableProps) {
   return <div className="overflow-hidden rounded-lg border border-border bg-bg-card shadow-sm">
     <div role="region" aria-label="School mentorship coverage" tabIndex={0}
@@ -110,7 +111,7 @@ function CoverageTable({ students, schoolCode, programId, canManage, controlsDis
             <th className="w-36 px-4 py-3"><span className="sr-only">Actions</span></th></tr>
         </thead>
         <tbody className="divide-y divide-border">{students.map((student) => {
-          const href = studentHref(student, schoolCode, programId);
+          const href = studentHref(student, schoolCode, programId, fromHolisticProgress);
           const state = progress(student);
           return <tr key={student.studentId} className="hover:bg-hover-bg">
             <td className="px-4 py-3"><StudentIdentity student={student} /></td>
@@ -503,10 +504,10 @@ function canManageMappings(role: string | undefined, academicYear: string) {
   return adminRole && academicYear === CURRENT_ACADEMIC_YEAR;
 }
 
-function CoverageResults({ students, schoolCode, programId, canManage, controlsDisabled,
+function CoverageResults({ fromHolisticProgress, students, schoolCode, programId, canManage, controlsDisabled,
   onAssign, onReassign, onRemove }: CoverageTableProps) {
   if (students.length === 0) return <NoMatchingStudents />;
-  return <CoverageTable students={students} schoolCode={schoolCode} programId={programId}
+  return <CoverageTable fromHolisticProgress={fromHolisticProgress} students={students} schoolCode={schoolCode} programId={programId}
     canManage={canManage} controlsDisabled={controlsDisabled} onAssign={onAssign}
     onReassign={onReassign} onRemove={onRemove} />;
 }
@@ -534,6 +535,7 @@ function MappingDialogs({ dialogs, mentors }: {
 }
 
 export default function AdminSchoolRoster({
+  fromHolisticProgress = false,
   students,
   schoolCode,
   programId = PROGRAM_IDS.COE,
@@ -551,6 +553,7 @@ export default function AdminSchoolRoster({
   canEdit?: boolean;
   mentors?: EligibleMentor[];
   summary?: HolisticAssignmentCoverageSummary;
+  fromHolisticProgress?: boolean;
 }) {
   const [search, setSearch] = useState("");
   const [grade, setGrade] = useState("");
@@ -571,7 +574,7 @@ export default function AdminSchoolRoster({
     <Summary summary={displayedSummary} />
     <RosterFilters search={search} grade={grade} assignment={assignment}
       onSearchChange={setSearch} onGradeChange={setGrade} onAssignmentChange={setAssignment} />
-    <CoverageResults students={shown} schoolCode={schoolCode} programId={programId}
+    <CoverageResults fromHolisticProgress={fromHolisticProgress} students={shown} schoolCode={schoolCode} programId={programId}
       canManage={canManage} controlsDisabled={!canEdit || dialogs.submitting || dialogs.rosterStale}
       onAssign={dialogs.setAssigning} onReassign={dialogs.setReassigning}
       onRemove={dialogs.setRemoving} />

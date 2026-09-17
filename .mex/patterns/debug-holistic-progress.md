@@ -18,6 +18,7 @@ last_updated: 2026-09-17
 
 ## Verify
 
+- For navigation fixes, test the entire nested journey: program progress → School → Student → another Phase → School → program progress. Checking only the first School Back misses return URLs rebuilt by the Student route. Verify ordinary School entry separately; fixed origin context must survive phase links and locked-phase redirects without changing access checks.
 - Production probes are read-only, with credentials kept in memory and no Student/Notes rows printed.
 - Identify the failing query separately from the reconciliation candidate check.
 - Clearly label proposed-query timing versus shipped behavior; matching row counts alone do not establish full result parity.

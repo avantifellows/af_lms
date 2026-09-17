@@ -455,6 +455,7 @@ test.describe("Holistic Mentorship release workflows", () => {
     await expect(program.locator("option")).toHaveText([
       "1 - JNV CoE",
       "74 - Punjab CoE",
+      "94 - Punjab Nodal",
       "78 - EMRS CoE",
       "88 - Uttarakhand CoE",
       "99 - Maharashtra Coaching Test Prep",
@@ -466,6 +467,45 @@ test.describe("Holistic Mentorship release workflows", () => {
     );
     await program.selectOption("78");
     await expect((await emrsProgress).status()).toBe(200);
+    await expect(program).toHaveValue("78");
+    await expect(holisticAdminPage).toHaveURL(
+      "/admin/holistic-mentorship?program_id=78",
+    );
+
+    const emrsSchool = holisticAdminPage
+      .getByRole("link", { name: /^Open Assignment Coverage for / })
+      .first();
+    await expect(emrsSchool).toBeVisible();
+    await emrsSchool.click();
+    await expect(holisticAdminPage).toHaveURL(
+      /\/school\/[^?]+\?tab=holistic_mentorship&program_id=78&source=progress$/,
+    );
+
+    await holisticAdminPage.goBack();
+    await expect(holisticAdminPage).toHaveURL(
+      "/admin/holistic-mentorship?program_id=78",
+    );
+    await expect(program).toHaveValue("78");
+    await holisticAdminPage.reload();
+    await expect(program).toHaveValue("78");
+
+    await holisticAdminPage
+      .getByRole("link", { name: /^Open Assignment Coverage for / })
+      .first()
+      .click();
+    await holisticAdminPage.getByRole("region", { name: "School mentorship coverage" })
+      .getByRole("link", { name: /^Open / }).first().click();
+    await expect(holisticAdminPage).toHaveURL(/source=school-progress$/);
+    await holisticAdminPage.getByRole("link", { name: "Back to Assignment Coverage" }).click();
+    await expect(holisticAdminPage).toHaveURL(
+      /\/school\/[^?]+\?tab=holistic_mentorship&program_id=78&source=progress$/,
+    );
+    await holisticAdminPage
+      .locator('header a[href="/admin/holistic-mentorship?program_id=78"]')
+      .click();
+    await expect(holisticAdminPage).toHaveURL(
+      "/admin/holistic-mentorship?program_id=78",
+    );
     await expect(program).toHaveValue("78");
 
     const jnvProgress = holisticAdminPage.waitForResponse((response) =>

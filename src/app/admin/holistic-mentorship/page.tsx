@@ -18,10 +18,13 @@ function availablePrograms(programIds?: number[]) {
 }
 
 function selectedProgramId(
-  requestedValue: string | undefined,
+  requestedValue: string | string[] | undefined,
   programIds: number[],
   fallbackProgramId?: number,
 ) {
+  if (typeof requestedValue !== "string") {
+    return fallbackProgramId ?? programIds[0];
+  }
   const requestedProgramId = Number(requestedValue);
   if (isHolisticMentorshipProgramId(requestedProgramId) && programIds.includes(requestedProgramId)) {
     return requestedProgramId;
@@ -44,7 +47,7 @@ function accessBadge(canEdit: boolean) {
 export default async function HolisticMentorshipAdminPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ program_id?: string }>;
+  searchParams?: Promise<{ program_id?: string | string[] }>;
 } = {}) {
   const session = await getServerSession(authOptions);
   const access = await requireHolisticMentorshipAccess(session, "program_read");
