@@ -46,6 +46,7 @@ Then read this file fully before doing anything else in this session.
 - Holistic Admin progress resolves the selected current-year Program roster once per query, avoiding the per-Mapping view expansion that timed out after the DB Service #727 roster change. Eligibility, Grade ambiguity, School scope, history, counts, pagination, and CSV semantics are preserved. The API returns safe JSON on failures, and the workspace handles empty/non-JSON failures with a retry message. See `context/data-access.md` and `patterns/debug-holistic-progress.md`; deployment verification is recorded in the fix PR.
 
 - LMS PR #304 incorporates the current main-branch centre roster and read-only Admin changes. Shared school/centre roster phone-cohort checks retain their own SQL binding, separate from school program attribution order.
+- Canonical school and centre rosters materialize the filtered program-dropout audit set once before their per-Student lateral lookup. Same-snapshot read-only verification preserved the complete 360-row school and 123-row centre results while reducing the measured queries from 5.76s to 0.53s and 2.02s to 0.20s, respectively; positive SQL fixtures cover dropout/current-program/null/undo semantics. See `context/student-addition.md`, `patterns/debug-holistic-progress.md`, and the stacked performance PR.
 
 - Dual auth (Google OAuth + school passcode) with dev-login personas in non-prod.
 - Student enrollment CRUD (reads direct from Postgres; writes proxied to the DB Service) + school dashboard, search, grade filtering, document uploads (S3).
