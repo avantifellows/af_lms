@@ -82,23 +82,81 @@ describe("Holistic Student Phase derivation", () => {
     });
   });
 
-  it("shows launch Grade 12 placeholders before real Phase 5", () => {
+  it.each([2, 5])("returns only configured Grade 12 Phase %s without placeholders", (phaseNumber) => {
     expect(buildHolisticApplicablePhases({
       currentGrade: 12,
       entryGrade: 12,
       hasPriorYearMapping: false,
       currentPhases: [
         { id: 21, number: 1, grade: 11 as const, title: "Grade 11 start" },
-        { id: 25, number: 5, grade: 12 as const, title: "Grade 12 start" },
+        { id: 25, number: phaseNumber, grade: 12 as const, title: "Grade 12 start" },
       ],
       priorGrade11Phases: [],
     })).toEqual([
-      { phaseId: null, number: 1, title: "Phase 1", placeholder: true },
-      { phaseId: null, number: 2, title: "Phase 2", placeholder: true },
-      { phaseId: null, number: 3, title: "Phase 3", placeholder: true },
-      { phaseId: null, number: 4, title: "Phase 4", placeholder: true },
-      { id: 25, number: 5, grade: 12, title: "Grade 12 start" },
+      { id: 25, number: phaseNumber, grade: 12, title: "Grade 12 start" },
     ]);
+  });
+
+  it.each([
+    {
+      label: "with an entry profile",
+      entryGrade: 12,
+      profileRows: [{ title: "Strengths", summary: "Patient problem solver", position: 1 }],
+      context: {
+        label: "Student Profile",
+        items: [{ label: "Strengths", content: "Patient problem solver" }],
+      },
+    },
+    {
+      label: "without an entry profile",
+      entryGrade: null,
+      profileRows: [],
+      context: { label: null, items: [], missing: "Profile unavailable" },
+    },
+  ])("keeps the configured Grade 12 phase ID and number $label", async ({ entryGrade, profileRows, context }) => {
+    mockQuery
+      .mockResolvedValueOnce([{
+        student_id: 41, mapping_id: 301, name: "Asha", external_student_id: "S41",
+        grade: 12, entry_grade: entryGrade,
+      }])
+      .mockResolvedValueOnce([
+        {
+          id: 5, academic_year: "2026-2027", grade: 11, title: "Grade 11 start",
+          position: 1, revision: 1, state: "open", guidance_markdown: "Listen first.",
+        },
+        {
+          id: 6, academic_year: "2026-2027", grade: 12, title: "Grade 12 start",
+          position: 2, revision: 1, state: "open", guidance_markdown: "Listen first.",
+        },
+      ])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ academic_year: "2026-2027", started_at: "2026-07-01T00:00:00Z" }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce(profileRows);
+
+    const result = await getHolisticStudentPhase({
+      programId: PROGRAM_IDS.MAHARASHTRA_COACHING_TESTPREP,
+      studentId: 41,
+      phaseId: 6,
+      schoolId: 4,
+      academicYear: "2026-2027",
+      actorUserId: 10,
+      role: "teacher",
+      canEdit: true,
+    });
+
+    expect(result).toMatchObject({
+      phases: [{
+        phaseId: 6,
+        number: 2,
+        title: "Grade 12 start",
+        grade: 12,
+        academicYear: "2026-2027",
+      }],
+      selectedPhase: { phaseId: 6, number: 2, context },
+    });
+    expect(result?.phases.every((phase) => phase.phaseId !== null)).toBe(true);
   });
 
   it("shows real prior-year Grade 11 history for a continuing Grade 12 Mentee", () => {
