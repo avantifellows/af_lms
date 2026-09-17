@@ -26,7 +26,7 @@ edges:
     condition: when working on teacher feedback setup, the feedback form, or its report
   - target: patterns/INDEX.md
     condition: when starting a task — check the pattern index for a matching pattern file
-last_updated: 2026-09-11
+last_updated: 2026-09-16
 ---
 
 # Session Bootstrap
@@ -38,6 +38,8 @@ Then read this file fully before doing anything else in this session.
 ## Current Project State
 
 **Working:**
+
+- Student upload validation (#322) now names unsupported submitted dropdown values and configured choices, distinguishes required blanks, and carries the same errors through spreadsheet checks, final local rejects, and correction CSVs. A single template guidance note appears above the preview error table only for unsupported choices. Preview/final errors use spaced sections with bold field names and muted allowed values; correction CSVs separate messages with line breaks; CSVs preserve already-labeled choice messages without repeating the field name. Allowed values, aliases, Phone-mode restrictions, and the no-write Check step are unchanged. See `context/student-addition.md`.
 
 - Holistic Admin progress resolves the selected current-year Program roster once per query, avoiding the per-Mapping view expansion that timed out after the DB Service #727 roster change. Eligibility, Grade ambiguity, School scope, history, counts, pagination, and CSV semantics are preserved. The API returns safe JSON on failures, and the workspace handles empty/non-JSON failures with a retry message. See `context/data-access.md` and `patterns/debug-holistic-progress.md`; deployment verification is recorded in the fix PR.
 
@@ -115,3 +117,11 @@ For every task, follow this loop:
    - **Record:** If project state changed, update the "Current Project State" section above. If documented facts changed, update the relevant `context/` file surgically.
    - **Orient:** If this task can recur and no pattern exists, create one in `patterns/` using `patterns/README.md`, then add it to `patterns/INDEX.md`. If a pattern exists but you learned a gotcha, update it.
    - **Write:** Bump `last_updated` in every scaffold file you changed. If the why matters, run `mex log --type decision "<what changed and why>"` or `mex log "<note>"`.
+
+## Profile source preflight
+
+The existing release preflight includes all four approved Form/Session pairs.
+Optional section aliases merge EMRS bilingual headings before the shared five-theme
+checks; Maharashtra requires no mapping. There is no separate question-ID registry
+or new-form flag. Exact schema fingerprint enforcement remains in ETL. This change
+is being tested locally and on staging; production is excluded.

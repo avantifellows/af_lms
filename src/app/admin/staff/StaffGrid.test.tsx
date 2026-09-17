@@ -744,3 +744,20 @@ describe("StaffGrid", () => {
     });
   });
 });
+
+describe("StaffGrid read-only viewer (D116)", () => {
+  it("hides Add User and every row Edit control, showing a Read-only marker instead", () => {
+    render(
+      <StaffGrid
+        initialRows={ROWS}
+        initialSummary={SUMMARY}
+        initialFilters={FILTERS}
+        viewerReadOnly
+      />
+    );
+    expect(screen.queryByLabelText("Add user")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/^Edit /)).not.toBeInTheDocument();
+    expect(screen.getAllByText("Read-only").length).toBe(ROWS.length);
+    expect(screen.getByText("Read-only view of centre staff and their seats.")).toBeInTheDocument();
+  });
+});

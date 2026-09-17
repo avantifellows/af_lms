@@ -13,6 +13,8 @@ interface School {
 
 interface SchoolListProps {
   initialSchools: School[];
+  /** Admin (Read Only) viewer: hide the Edit control (the API 403s the write anyway). */
+  viewerReadOnly?: boolean;
 }
 
 const PROGRAM_LABELS: Record<number, string> = {
@@ -33,7 +35,7 @@ const PROGRAMS = [
   { id: 64, name: "NVS", description: "NVS program" },
 ];
 
-export default function SchoolList({ initialSchools }: SchoolListProps) {
+export default function SchoolList({ initialSchools, viewerReadOnly = false }: SchoolListProps) {
   const [schools, setSchools] = useState(initialSchools);
   const [editingSchool, setEditingSchool] = useState<School | null>(null);
   const [selectedPrograms, setSelectedPrograms] = useState<number[]>([]);
@@ -154,6 +156,7 @@ export default function SchoolList({ initialSchools }: SchoolListProps) {
           <Select
             value={programFilter}
             onChange={(e) => setProgramFilter(e.target.value === "all" ? "all" : Number(e.target.value))}
+            className="max-w-xs"
           >
             <option value="all">All Programs</option>
             <option value="1">CoE only</option>
@@ -217,13 +220,17 @@ export default function SchoolList({ initialSchools }: SchoolListProps) {
                   )}
                 </td>
                 <td className="whitespace-nowrap px-3 py-4 text-sm">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => openEditModal(school)}
-                  >
-                    Edit
-                  </Button>
+                  {viewerReadOnly ? (
+                    <span className="text-xs text-gray-400">Read-only</span>
+                  ) : (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => openEditModal(school)}
+                    >
+                      Edit
+                    </Button>
+                  )}
                 </td>
               </tr>
             ))}
