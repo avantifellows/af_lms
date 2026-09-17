@@ -7,6 +7,8 @@ interface Visit {
   id: number;
   visit_date: string;
   status: string;
+  pm_email?: string | null;
+  pm_name?: string | null;
   inserted_at: string;
   completed_at: string | null;
 }

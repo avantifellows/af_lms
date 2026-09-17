@@ -39,6 +39,8 @@ Then read this file fully before doing anything else in this session.
 
 **Working:**
 
+- September 16 issue #327: the School page Visit History tab shows "Visited by <name>" for each Visit. `GET /api/pm/visits` now returns `pm_name` resolved from `user_permission.full_name` through a scalar subquery (no row duplication), with the email shown when no name exists. PR #329; local headless-Chromium QA passed on real-shaped local data, including the email fallback and a case-variant duplicate permission row. See `context/visits.md` and `patterns/local-browser-qa.md`.
+
 - Student upload validation (#322) now names unsupported submitted dropdown values and configured choices, distinguishes required blanks, and carries the same errors through spreadsheet checks, final local rejects, and correction CSVs. A single template guidance note appears above the preview error table only for unsupported choices. Preview/final errors use spaced sections with bold field names and muted allowed values; correction CSVs separate messages with line breaks; CSVs preserve already-labeled choice messages without repeating the field name. Allowed values, aliases, Phone-mode restrictions, and the no-write Check step are unchanged. See `context/student-addition.md`.
 
 - Holistic Admin progress resolves the selected current-year Program roster once per query, avoiding the per-Mapping view expansion that timed out after the DB Service #727 roster change. Eligibility, Grade ambiguity, School scope, history, counts, pagination, and CSV semantics are preserved. The API returns safe JSON on failures, and the workspace handles empty/non-JSON failures with a retry message. See `context/data-access.md` and `patterns/debug-holistic-progress.md`; deployment verification is recorded in the fix PR.
@@ -84,6 +86,7 @@ Then read this file fully before doing anything else in this session.
 - Regenerating a CMS quiz does **not** re-score already-submitted attempts (scoring happens only at attempt time); they keep their scores against the old answer key. The UI confirms this before proceeding. Related: no `DELETE /quiz` means a partial create leaves an orphan quiz, and regenerate's writes are un-transactioned — see `context/cms-quiz-sessions.md`.
 - The Graphify knowledge graph is generated locally and not committed; rebuild it with `/graphify --update` after significant changes.
 - Deploy is CI-only via `.github/workflows/deploy-amplify.yml` (main → prod, PRs → shared staging URL). There is no local deploy script.
+- Pushing a second commit to a PR while its previous preview build is still running makes `deploy-preview` fail with Amplify `LimitExceededException` ("already have pending or running jobs"). It is not a code failure; wait for the earlier Amplify job, then `gh run rerun <run-id> --failed`.
 
 ## Routing Table
 

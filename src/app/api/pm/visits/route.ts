@@ -72,8 +72,19 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  // pm_name resolves the visitor's display name from user_permission. The match
+  // is case-insensitive, and user_permission.email is only unique case-sensitively,
+  // so a scalar subquery (not a JOIN) keeps one row per visit if case variants of
+  // an email exist; the active (non-revoked) row's name is preferred.
   let queryText = `
-    SELECT v.id, v.school_code, s.name as school_name, v.pm_email, v.visit_date, v.status,
+    SELECT v.id, v.school_code, s.name as school_name, v.pm_email,
+           (SELECT up.full_name
+              FROM user_permission up
+             WHERE LOWER(up.email) = LOWER(v.pm_email)
+               AND up.full_name IS NOT NULL
+             ORDER BY (up.revoked_at IS NULL) DESC
+             LIMIT 1) AS pm_name,
+           v.visit_date, v.status,
            v.completed_at, v.inserted_at, v.updated_at
     FROM lms_pm_school_visits v
     LEFT JOIN school s ON s.code = v.school_code

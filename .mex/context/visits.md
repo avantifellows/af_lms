@@ -18,7 +18,7 @@ edges:
     condition: when adding a new visit action type
   - target: context/data-access.md
     condition: when writing visit rows (direct Postgres, not the DB Service)
-last_updated: 2026-07-15
+last_updated: 2026-09-16
 ---
 
 # PM School Visits
@@ -70,8 +70,17 @@ Most types follow the **binary-question checklist** shape (`RadioPair` yes/no + 
 
 **Naming exception:** validator names mirror the type key, *except* `individual_af_teacher_interaction`, whose validators are `validateIndividualTeacherSave`/`validateIndividualTeacherComplete` (no "AF").
 
+## Visitor display name
+Visits store only `pm_email`. Wherever a visitor's name is shown (the School page Visit History tab via
+`GET /api/pm/visits`, and the Visit Summary page), it is resolved from `user_permission.full_name` by
+case-insensitive email match, falling back to the email when no name exists. The list API uses a
+**scalar subquery** (preferring the non-revoked row) rather than a `LEFT JOIN user_permission`.
+`user_permission.email` is unique only case-sensitively (`user_permission_email_index`), so a case variant of
+the same address can exist as a second row and a case-insensitive join would duplicate visits. Visit History renders it as
+"Visited by <name>" with the email as the hover title.
+
 ## Route map
-`src/app/api/pm/visits/route.ts` (list/create) · `.../[id]/route.ts` (get/delete) ·
+`src/app/api/pm/visits/route.ts` (list/create; returns `pm_name` alongside `pm_email`) · `.../[id]/route.ts` (get/delete) ·
 `.../[id]/complete/route.ts` · `.../[id]/actions/route.ts` (add) ·
 `.../[id]/actions/[actionId]/route.ts` (get/patch) · `.../start` · `.../end`.
 Pages: `src/app/visits/[id]/...` and `src/app/school/[udise]/visit/...`; read-only summary under `src/app/school-visit-summary/[id]`.
