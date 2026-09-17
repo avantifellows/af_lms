@@ -17,13 +17,13 @@ vi.mock("@/lib/holistic-student-phase", () => ({ getHolisticStudentPhase: mockDe
 vi.mock("@/components/holistic-mentorship/StudentPhaseWorkspace", () => ({
   default: ({ detail, source, backHref, canRegenerateProfile }: {
     detail: { student: { name: string } };
-    source?: "school" | "progress";
+    source?: "school" | "school-progress" | "progress";
     backHref?: string;
     canRegenerateProfile?: boolean;
   }) => (
     <div data-testid="student-phase-workspace"
       data-can-regenerate-profile={String(canRegenerateProfile)}>
-      {backHref && <a href={backHref}>{source === "school"
+      {backHref && <a href={backHref}>{(source === "school" || source === "school-progress")
         ? "Back to Assignment Coverage"
         : "Back to Students and Progress"}</a>}
       <h1>{detail.student.name}</h1>
@@ -169,7 +169,7 @@ describe("StudentPhasePage", () => {
     )).toBeInTheDocument();
   });
 
-  it("returns a global Admin opened from School coverage to that School tab", async () => {
+  it.each(["school", "school-progress"])("returns a global Admin from %s to the correct School context", async (source) => {
     mockSession.mockResolvedValue({ user: { email: "admin@example.com" } });
     mockAccess.mockResolvedValue({
       ok: true,
@@ -189,7 +189,7 @@ describe("StudentPhasePage", () => {
         school_code: "SCH001",
         academic_year: "2026-2027",
         program_id: "78",
-        source: "school",
+        source,
       }),
     };
 
@@ -197,7 +197,7 @@ describe("StudentPhasePage", () => {
 
     expect(screen.getByRole("link", { name: "Back to Assignment Coverage" })).toHaveAttribute(
       "href",
-      "/school/SCH001?tab=holistic_mentorship&program_id=78",
+      `/school/SCH001?tab=holistic_mentorship&program_id=78${source === "school-progress" ? "&source=progress" : ""}`,
     );
   });
 
@@ -301,7 +301,7 @@ describe("StudentPhasePage", () => {
     );
   });
 
-  it("preserves School origin when a Holistic Mentorship Admin is redirected from a Locked Phase", async () => {
+  it.each(["school", "school-progress"])("preserves %s origin when redirected from a Locked Phase", async (source) => {
     mockSession.mockResolvedValue({ user: { email: "holistic@example.com" } });
     mockAccess.mockResolvedValue({
       ok: true,
@@ -324,12 +324,12 @@ describe("StudentPhasePage", () => {
         school_code: "SCH001",
         academic_year: "2026-2027",
         program_id: "78",
-        source: "school",
+        source,
       }),
     };
 
     await expect(StudentPhasePage(schoolProps)).rejects.toThrow(
-      "REDIRECT:/holistic-mentorship/students/41/phases/74?school_code=SCH001&academic_year=2026-2027&program_id=78&source=school"
+      `REDIRECT:/holistic-mentorship/students/41/phases/74?school_code=SCH001&academic_year=2026-2027&program_id=78&source=${source}`
     );
   });
 

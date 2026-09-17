@@ -93,10 +93,12 @@ vi.mock("next/link", () => ({
   default: ({
     href,
     children,
+    "aria-label": ariaLabel,
   }: {
     href: string;
     children: React.ReactNode;
-  }) => <a href={href}>{children}</a>,
+    "aria-label"?: string;
+  }) => <a href={href} aria-label={ariaLabel}>{children}</a>,
 }));
 
 // Mock child components as stubs
@@ -721,7 +723,15 @@ describe("SchoolPage (server component)", () => {
       canEdit: true,
     });
 
+    mockListHolisticAssignmentRoster.mockResolvedValue([{
+      studentId: 42, name: "Ravi Shah", externalStudentId: "S42", grade: 12,
+      activePhaseId: 74, activeNotesState: null, ownership: null,
+    }]);
     await renderPage("SCH001", "94", "progress");
+    expect(screen.getByRole("link", { name: "Open Ravi Shah" })).toHaveAttribute(
+      "href",
+      "/holistic-mentorship/students/42/phases/74?school_code=SCH001&academic_year=2026-2027&program_id=94&source=school-progress",
+    );
 
     expect(screen.getByTestId("page-header")).toHaveAttribute(
       "data-back-href",

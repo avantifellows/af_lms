@@ -493,6 +493,13 @@ test.describe("Holistic Mentorship release workflows", () => {
       .getByRole("link", { name: /^Open Assignment Coverage for / })
       .first()
       .click();
+    await holisticAdminPage.getByRole("region", { name: "School mentorship coverage" })
+      .getByRole("link", { name: /^Open / }).first().click();
+    await expect(holisticAdminPage).toHaveURL(/source=school-progress$/);
+    await holisticAdminPage.getByRole("link", { name: "Back to Assignment Coverage" }).click();
+    await expect(holisticAdminPage).toHaveURL(
+      /\/school\/[^?]+\?tab=holistic_mentorship&program_id=78&source=progress$/,
+    );
     await holisticAdminPage
       .locator('header a[href="/admin/holistic-mentorship?program_id=78"]')
       .click();

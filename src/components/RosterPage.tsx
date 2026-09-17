@@ -396,6 +396,7 @@ async function buildHolisticMentorshipContent({
   centreProgramId,
   programId,
   programChoices,
+  fromHolisticProgress = false,
 }: {
   session: HolisticMentorshipSession;
   permission: UserPermission | null;
@@ -405,6 +406,7 @@ async function buildHolisticMentorshipContent({
   centreProgramId?: number;
   programId?: number | null;
   programChoices?: number[];
+  fromHolisticProgress?: boolean;
 }): Promise<ReactNode | null> {
   if (!access.canView || programId === null) return null;
   if (isCentre && !isHolisticMentorshipProgramId(Number(centreProgramId))) return null;
@@ -451,6 +453,7 @@ async function buildHolisticMentorshipContent({
   ]);
   return (
     <AdminSchoolRoster
+      fromHolisticProgress={!isCentre && fromHolisticProgress}
       schoolCode={schoolCode}
       programId={holisticAccess.school!.programId}
       academicYear={CURRENT_ACADEMIC_YEAR}
@@ -639,6 +642,7 @@ export default async function RosterPage({
         isCentre,
         programId,
         programChoices: choices,
+        fromHolisticProgress,
       });
       if (!holisticContent) redirect("/admin/holistic-mentorship");
       return (
@@ -989,6 +993,7 @@ export default async function RosterPage({
     centreProgramId,
     programId: holistic.programId,
     programChoices: holistic.choices,
+    fromHolisticProgress,
   });
   const backHref = !isCentre && fromHolisticProgress && holisticContent && holistic.programId !== undefined
     ? `/admin/holistic-mentorship?program_id=${holistic.programId}`

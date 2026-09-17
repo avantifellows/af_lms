@@ -119,6 +119,15 @@ describe("AdminSchoolRoster", () => {
     vi.clearAllMocks();
   });
 
+  it("keeps the progress origin when opening a student from a School", () => {
+    render(<AdminSchoolRoster schoolCode="SCH001" programId={94} students={students}
+      fromHolisticProgress canEdit={false} />);
+    expect(screen.getByRole("link", { name: "Open Asha Rao" })).toHaveAttribute(
+      "href",
+      "/holistic-mentorship/students/41/phases/73?school_code=SCH001&academic_year=2026-2027&program_id=94&source=school-progress",
+    );
+  });
+
   it("shows read-only School coverage and links assigned and unassigned Students to detail", () => {
     render(<AdminSchoolRoster students={students} schoolCode="SCH001" />);
 

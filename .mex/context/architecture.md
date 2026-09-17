@@ -57,6 +57,11 @@ checks resolve authorized content. The marker supplies navigation context and ne
 grants access. Ordinary School links and all Centre return paths keep their existing
 dashboard behavior; there is no general return-URL or storage framework.
 
+Student drill-downs from a progress-origin School use the fixed `school-progress`
+source. Phase links and locked-phase redirects preserve it, and the Student Back
+link restores `source=progress` on the School URL. Ordinary School drill-downs
+retain `source=school`, so their original dashboard return does not change.
+
 ## Key Components
 - **`src/lib/db.ts`** — the `query<T>()` helper over a singleton `pg.Pool` (god node, ~137 edges). Reads and direct writes both go through it. `withTransaction()` for multi-statement writes.
 - **`src/lib/permissions.ts`** — the access-control core: `getUserPermission`/`getResolvedPermission`, `getFeatureAccess` (feature×role matrix), `canAccessSchool*`, `isAdmin`. See `context/permissions.md`.
