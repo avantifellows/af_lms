@@ -47,6 +47,8 @@ query parameter. The client derives its selection from `useSearchParams` and use
 native `history.replaceState(null, "", url)` when the user changes Program. This
 preserves unrelated query parameters and the hash, updates Next App Router state,
 and keeps the current history entry so native Back and reload restore the Program.
+Repeated, invalid or unavailable Program query values use the server-validated
+fallback rather than selecting the first repeated query value on the client.
 
 Assignment Coverage School links add the fixed `source=progress` marker. The School
 route recognizes only that exact scalar value, and `RosterPage` produces a

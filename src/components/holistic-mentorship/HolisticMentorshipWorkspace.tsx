@@ -137,7 +137,8 @@ function AdminWorkspace({
 }: Omit<HolisticMentorshipWorkspaceProps, "mode" | "schoolCode" | "programId">) {
   const orderedAvailableProgramIds = orderedProgramIds(availableProgramIds);
   const searchParams = useSearchParams();
-  const requestedProgramId = Number(searchParams.get("program_id"));
+  const programParams = searchParams.getAll("program_id");
+  const requestedProgramId = programParams.length === 1 ? Number(programParams[0]) : NaN;
   const selectedProgramId = orderedAvailableProgramIds.some(
     (programId) => programId === requestedProgramId,
   )

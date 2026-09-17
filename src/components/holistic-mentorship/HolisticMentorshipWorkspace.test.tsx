@@ -229,6 +229,37 @@ describe("HolisticMentorshipWorkspace", () => {
     ));
   });
 
+  it.each([
+    { query: "program_id=94&program_id=1", available: [1, 94], initial: 1 },
+    { query: "program_id=94&program_id=94", available: [1, 94], initial: 1 },
+    { query: "program_id=999", available: [1, 94], initial: 1 },
+    { query: "program_id=invalid", available: [1, 94], initial: 1 },
+    { query: "program_id=94", available: [78], initial: 78 },
+  ])("uses the permitted fallback for $query with available $available", async ({ query, available, initial }) => {
+    window.history.replaceState(null, "", `/admin/holistic-mentorship?${query}`);
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        rows: [],
+        counts: { totalMapped: 0, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 },
+        options: { schools: [], mentors: [], phases: [] },
+        pageSize: 50,
+        academicYears: ["2026-2027"],
+        refreshedAt: "2026-09-17T10:00:00.000Z",
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<HolisticMentorshipWorkspace
+      mode="admin" initialProgramId={initial} availableProgramIds={available}
+    />);
+
+    expect(screen.getByLabelText("Program")).toHaveValue(String(initial));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining(`program_id=${initial}`), expect.anything(),
+    ));
+  });
+
   it("renders scoped Program Manager and Program Admin workspaces with read-only Student detail links", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       ok: true,
