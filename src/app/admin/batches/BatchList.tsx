@@ -147,7 +147,7 @@ export default function BatchList({
           value={selectedProgramId}
           onChange={(e) => handleProgramChange(Number(e.target.value))}
           disabled={loading}
-          className="max-w-md w-full"
+          className="max-w-md"
         >
           {programs.map((program) => (
             <option key={program.id} value={program.id}>

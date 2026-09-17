@@ -209,7 +209,6 @@ export default function ClassroomObservationForm({
               <Select
                 value={selectedTeacherId !== null ? String(selectedTeacherId) : ""}
                 onChange={handleTeacherChange}
-                className="w-full"
                 data-testid="teacher-select"
               >
                 <option value="" disabled>
@@ -238,7 +237,6 @@ export default function ClassroomObservationForm({
             <Select
               value={selectedGrade ?? ""}
               onChange={handleGradeChange}
-              className="w-full"
               data-testid="grade-select"
             >
               <option value="" disabled>

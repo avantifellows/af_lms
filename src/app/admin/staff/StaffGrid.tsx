@@ -893,7 +893,6 @@ export default function StaffGrid({
                       value={subjectDraft}
                       onChange={(event) => setSubjectDraft(event.target.value)}
                       aria-label="Subject"
-                      className="w-full"
                     >
                       <option value="">Select Subject…</option>
                       {subjects.map((subject) => (
@@ -913,7 +912,6 @@ export default function StaffGrid({
                         setCreateCentreDraft(event.target.value)
                       }
                       aria-label="Centre"
-                      className="w-full"
                     >
                       <option value="">Select Centre…</option>
                       {centres.map((centre) => (
