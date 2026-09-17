@@ -295,6 +295,18 @@ describe("getCumulativeALData", () => {
     expect(sql).not.toContain("has_quiz_ended = TRUE");
   });
 
+  it("excludes Advanced tests from the AL matrix, as int_student_academic_level does", async () => {
+    mocks.mockQueryFn.mockResolvedValueOnce([[]]);
+
+    const { getCumulativeALData } = await import("./bigquery");
+    await getCumulativeALData("11223344", 11);
+
+    const sql = mocks.mockQueryFn.mock.calls[0][0].query;
+    // Character for character the dbt model's rule: a matrix column for a test
+    // that never counted towards the AL would contradict the AL next to it.
+    expect(sql).toContain("LOWER(f.test_name) NOT LIKE '%advance%'");
+  });
+
   it("normalizes BigQuery DATE objects ({value: '...'}) on start_date", async () => {
     const rows = [
       {

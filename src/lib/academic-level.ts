@@ -12,6 +12,27 @@
 // int_student_academic_level) writes it stream-specifically as M3 / B3. Same
 // tier, same colour.
 
+// Advanced tests do not count towards Academic Level.
+//
+// The rule is the warehouse's, not ours: etl-next's int_student_academic_level
+// takes the mode of the last three major tests per stream under
+// `LOWER(test_name) NOT LIKE '%advance%'`, so an AL earned on an Advanced paper
+// never reaches dim_student.academic_level. The fact table still carries one on
+// the row (every one of this year's 208 Advanced sessions has an AL, 54% of them
+// "Not Qualified" — Advanced is graded on a harder curve), so anything that
+// renders a per-test AL has to apply the same exclusion or it shows students a
+// level the warehouse refuses to count.
+//
+// Deliberately a substring match on the test name, exactly as the dbt model
+// spells it — the names in the wild vary ("Advanced MoT 2 (Paper-1)-DL",
+// "JEE ADVANCED MOCK 5 - PAPER 1", "CT06-NLM-ADVANCED-N") and there is no
+// format or flag upstream that marks them. Matching dbt character for character
+// is the point: a cleverer rule here would drift from the one that decides the
+// canonical AL.
+export function isAdvancedTest(testName: string | null | undefined): boolean {
+  return !!testName && testName.toLowerCase().includes("advance");
+}
+
 // Best (top tier) first. Used for legends and distribution charts.
 export const AL_DISPLAY_ORDER = [
   "M1",

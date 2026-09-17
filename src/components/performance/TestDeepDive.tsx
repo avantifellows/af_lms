@@ -133,6 +133,7 @@ export default function TestDeepDive({
             sessionId={sessionId}
             program={program}
             stream={stream}
+            testName={data.summary.test_name}
           />
         </>
       )}
