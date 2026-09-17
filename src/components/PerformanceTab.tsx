@@ -1,13 +1,13 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
 import { SegmentedControl } from "@/components/ui/SegmentedControl";
 import PerformanceFilterBar from "./performance/PerformanceFilterBar";
-import BatchOverview from "./performance/BatchOverview";
-import TestDeepDive from "./performance/TestDeepDive";
-import CumulativeALTable from "./performance/CumulativeALTable";
-import CombinedReportPanel from "./performance/CombinedReportPanel";
+import PerformanceContent from "./performance/PerformanceContent";
+import TestDeepDiveView from "./performance/TestDeepDiveView";
+import ProgramTabs from "./performance/ProgramTabs";
+import { performanceLoadState } from "./performance/PerformanceStates";
+import { usePerformanceFilters } from "./performance/usePerformanceFilters";
+import type { TestCategory, FullTestView } from "@/lib/performance-url-params";
 
 interface Props {
   schoolUdise: string;
@@ -16,273 +16,24 @@ interface Props {
   lockedProgram?: string;
 }
 
-export type TestCategory = "chapter" | "full";
-export type FullTestView = "per_test" | "cumulative";
+export type { TestCategory, FullTestView };
 
 export default function PerformanceTab({ schoolUdise, lockedProgram }: Props) {
-  const router = useRouter();
-  const searchParams = useSearchParams();
+  // Held as one object rather than destructured: the tab reads two dozen of
+  // these, and re-listing them here was literally a copy of the hook's return
+  // shape — enough for the duplication check to flag the two as clones.
+  const f = usePerformanceFilters({ schoolUdise, lockedProgram });
 
-  // Read initial state from URL
-  const urlProgram = searchParams.get("program") || null;
-  const urlGrade = searchParams.get("grade");
-  const urlSession = searchParams.get("session");
-  const urlStream = searchParams.get("stream") || null;
-  const urlSubject = searchParams.get("subject") || null;
-  const urlTestGrade = searchParams.get("testGrade");
-  const urlView = (searchParams.get("view") as FullTestView | null) || null;
-  const urlCategory = (searchParams.get("category") as TestCategory | null) || null;
-
-  const [programs, setPrograms] = useState<string[] | null>(null);
-  // lockedProgram (centre pages) must win over the URL param — otherwise a
-  // centre-confined viewer could open ?program=X and read another program's data.
-  const [selectedProgram, setSelectedProgram] = useState<string | null>(lockedProgram ?? urlProgram ?? null);
-  const [grades, setGrades] = useState<number[] | null>(null);
-  const [selectedGrade, setSelectedGrade] = useState<number | null>(
-    urlGrade ? parseInt(urlGrade, 10) : null
-  );
-  const [deepDiveSession, setDeepDiveSession] = useState<{
-    sessionId: string;
-    testName: string;
-  } | null>(
-    urlSession ? { sessionId: urlSession, testName: "" } : null
-  );
-  const [testCategory, setTestCategory] = useState<TestCategory>(
-    urlCategory === "chapter" ? "chapter" : "full"
-  );
-  const [selectedStream, setSelectedStream] = useState<string | null>(urlStream);
-  const [selectedSubject, setSelectedSubject] = useState<string | null>(urlSubject);
-  const [selectedTestGrade, setSelectedTestGrade] = useState<number | null>(
-    urlTestGrade ? parseInt(urlTestGrade, 10) : null
-  );
-  const [fullTestView, setFullTestView] = useState<FullTestView>(urlView === "cumulative" ? "cumulative" : "per_test");
-  const [availableStreams, setAvailableStreams] = useState<string[]>([]);
-  const [availableSubjects, setAvailableSubjects] = useState<string[]>([]);
-  const [availableTestGrades, setAvailableTestGrades] = useState<number[]>([]);
-  const [error, setError] = useState<string | null>(null);
-
-  // Update URL when state changes
-  const updateUrl = useCallback(
-    (opts: {
-      program?: string | null;
-      grade?: number | null;
-      session?: string | null;
-      stream?: string | null;
-      subject?: string | null;
-      testGrade?: number | null;
-      view?: FullTestView | null;
-      category?: TestCategory | null;
-    }) => {
-      const params = new URLSearchParams(searchParams.toString());
-      if (opts.program !== undefined) {
-        if (opts.program) params.set("program", opts.program);
-        else params.delete("program");
-      }
-      if (opts.grade !== undefined) {
-        if (opts.grade != null) params.set("grade", String(opts.grade));
-        else params.delete("grade");
-      }
-      if (opts.session !== undefined) {
-        if (opts.session) params.set("session", opts.session);
-        else params.delete("session");
-      }
-      if (opts.stream !== undefined) {
-        if (opts.stream) params.set("stream", opts.stream);
-        else params.delete("stream");
-      }
-      if (opts.subject !== undefined) {
-        if (opts.subject) params.set("subject", opts.subject);
-        else params.delete("subject");
-      }
-      if (opts.testGrade !== undefined) {
-        if (opts.testGrade != null) params.set("testGrade", String(opts.testGrade));
-        else params.delete("testGrade");
-      }
-      if (opts.view !== undefined) {
-        if (opts.view && opts.view !== "per_test") params.set("view", opts.view);
-        else params.delete("view");
-      }
-      if (opts.category !== undefined) {
-        // Default category is "full" — only encode in URL when it diverges
-        if (opts.category && opts.category !== "full") params.set("category", opts.category);
-        else params.delete("category");
-      }
-      router.replace(`?${params.toString()}`, { scroll: false });
-    },
-    [router, searchParams]
-  );
-
-  // Fetch programs + grades
-  useEffect(() => {
-    const controller = new AbortController();
-    const programParam = selectedProgram
-      ? `?program=${encodeURIComponent(selectedProgram)}`
-      : "";
-    fetch(`/api/quiz-analytics/${schoolUdise}/grades${programParam}`, {
-      signal: controller.signal,
-    })
-      .then((res) => {
-        if (!res.ok) throw new Error("Failed to fetch grades");
-        return res.json();
-      })
-      .then((data: { grades: number[]; programs: string[] }) => {
-        setPrograms(data.programs);
-        setGrades(data.grades);
-
-        // Auto-select single program
-        if (!selectedProgram && data.programs.length === 1) {
-          setSelectedProgram(data.programs[0]);
-        }
-
-        // Reconcile the selected grade with the grades available for the
-        // current program scope. A grade chosen against the all-programs list
-        // (or a prior program) can fall out of the available set once the
-        // program narrows — e.g. a PM scoped to JNV CoE at a school where CoE
-        // only has grade 11, while the default "prefer 12" came from another
-        // program the PM can't see. Treat a now-invalid selection like no
-        // selection, then auto-pick: prefer 12, else the only grade.
-        const gradeValid =
-          selectedGrade != null && data.grades.includes(selectedGrade);
-        if (!gradeValid) {
-          const preferred = data.grades.includes(12)
-            ? 12
-            : data.grades.length === 1
-              ? data.grades[0]
-              : null;
-          if (preferred != null) {
-            setSelectedGrade(preferred);
-            updateUrl({ grade: preferred });
-          } else if (selectedGrade != null) {
-            // Stale selection with no auto-pickable replacement (multiple
-            // grades, none is 12) — clear it so the user re-picks.
-            setSelectedGrade(null);
-            updateUrl({ grade: null });
-          }
-        }
-      })
-      .catch((err) => {
-        if (err.name !== "AbortError") {
-          console.error("Failed to fetch grades:", err);
-          setError("Failed to load quiz data");
-        }
-      });
-
-    return () => controller.abort();
-  }, [schoolUdise, selectedProgram]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // When deep dive loads, fill in test name from URL if missing
-  const handleDeepDiveData = useCallback((testName: string) => {
-    setDeepDiveSession((prev) =>
-      prev && !prev.testName ? { ...prev, testName } : prev
-    );
-  }, []);
-
-  // Receive available filter values from BatchOverview as it loads data.
-  const handleFilterOptions = useCallback(
-    (opts: { streams: string[]; subjects: string[]; testGrades: number[] }) => {
-      setAvailableStreams(opts.streams ?? []);
-      setAvailableSubjects(opts.subjects ?? []);
-      setAvailableTestGrades(opts.testGrades ?? []);
-    },
-    []
-  );
-
-  if (error) {
-    return (
-      <div className="p-4 bg-danger-bg border border-danger text-danger rounded-lg">
-        {error}
-      </div>
-    );
-  }
-
-  if (programs === null || grades === null) {
-    return (
-      <div className="flex justify-center items-center h-[30vh]">
-        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-accent" />
-        <span className="ml-3 text-sm text-text-secondary">Loading quiz data...</span>
-      </div>
-    );
-  }
-
-  if (programs.length === 0 && grades.length === 0) {
-    return (
-      <div className="p-8 text-center bg-bg-card-alt border border-border rounded-lg shadow-sm">
-        <p className="text-sm text-text-muted">No quiz data available for this school yet.</p>
-      </div>
-    );
-  }
-
-  const handleProgramChange = (program: string) => {
-    setSelectedProgram(program);
-    setSelectedGrade(null);
-    setDeepDiveSession(null);
-    setSelectedStream(null);
-    setSelectedSubject(null);
-    setSelectedTestGrade(null);
-    setAvailableTestGrades([]);
-    setGrades(null); // trigger re-fetch
-    updateUrl({ program, grade: null, session: null, stream: null, subject: null, testGrade: null });
-  };
-
-  const handleGradeChange = (grade: number) => {
-    setSelectedGrade(grade);
-    setDeepDiveSession(null);
-    setSelectedStream(null);
-    setSelectedSubject(null);
-    setSelectedTestGrade(null);
-    setAvailableTestGrades([]);
-    updateUrl({ grade, session: null, stream: null, subject: null, testGrade: null });
-  };
-
-  // 0 is the "All test grades" sentinel — a segmented control needs a concrete
-  // value for the all-option, and no test targets grade 0.
-  const handleTestGradeChange = (value: number) => {
-    const testGrade = value === 0 ? null : value;
-    setSelectedTestGrade(testGrade);
-    updateUrl({ testGrade });
-  };
-
-  const handleTestClick = (sessionId: string, testName: string) => {
-    setDeepDiveSession({ sessionId, testName });
-    updateUrl({ session: sessionId });
-  };
-
-  const handleBack = () => {
-    setDeepDiveSession(null);
-    updateUrl({ session: null });
-  };
-
-  const handleCategoryChange = (cat: TestCategory) => {
-    setTestCategory(cat);
-    // Subject filter is chapter-only; clear when leaving chapter tab
-    const subjectReset = cat !== "chapter" && selectedSubject;
-    if (subjectReset) setSelectedSubject(null);
-    // Chapter and full tests can target different grades, so a test-grade
-    // selection from one category may not exist in the other. Clear it on
-    // switch so the view never silently renders empty.
-    const testGradeReset = selectedTestGrade != null;
-    if (testGradeReset) setSelectedTestGrade(null);
-    updateUrl({
-      category: cat,
-      subject: subjectReset ? null : undefined,
-      testGrade: testGradeReset ? null : undefined,
-    });
-  };
-
-  const handleStreamChange = (stream: string | null) => {
-    setSelectedStream(stream);
-    updateUrl({ stream });
-  };
-
-  const handleSubjectChange = (subject: string | null) => {
-    setSelectedSubject(subject);
-    updateUrl({ subject });
-  };
-
-  const handleFullViewChange = (view: FullTestView) => {
-    setFullTestView(view);
-    updateUrl({ view });
-  };
+  // Failed / still loading / loaded-but-empty are genuine early exits; the
+  // three of them live together in performanceLoadState, which hands back the
+  // loaded lists on the ready path so the narrowing survives the extraction.
+  const loadState = performanceLoadState({
+    error: f.error,
+    programs: f.programs,
+    grades: f.grades,
+  });
+  if (loadState.status === "pending") return loadState.element;
+  const { programs, grades } = loadState;
 
   const showProgramTabs = !lockedProgram && programs.length > 1;
 
@@ -293,126 +44,70 @@ export default function PerformanceTab({ schoolUdise, lockedProgram }: Props) {
     <SegmentedControl
       label="Grade"
       options={grades.map((g) => ({ value: g, label: String(g) }))}
-      value={selectedGrade}
-      onChange={handleGradeChange}
+      value={f.selectedGrade}
+      onChange={f.handleGradeChange}
     />
   );
 
   // A multi-program school with no program chosen must not show any data —
   // including a deep dive reached by URL — since the queries would span programs.
-  const needsProgram = showProgramTabs && !selectedProgram;
+  const needsProgram = showProgramTabs && !f.selectedProgram;
 
-  const content = needsProgram ? (
-    <div className="p-8 text-center bg-bg-card-alt border border-border rounded-lg shadow-sm">
-      <p className="text-sm text-text-muted">Select a program to view performance data.</p>
-    </div>
-  ) : selectedGrade == null ? (
-    <div className="p-8 text-center bg-bg-card-alt border border-border rounded-lg shadow-sm">
-      <p className="text-sm text-text-muted">Select a grade to view performance data.</p>
-    </div>
-  ) : testCategory === "full" && fullTestView === "cumulative" ? (
-    <CumulativeALTable
-      schoolUdise={schoolUdise}
-      grade={selectedGrade}
-      program={selectedProgram || undefined}
-      stream={selectedStream || undefined}
-      testGrade={selectedTestGrade ?? undefined}
-    />
-  ) : (
-    <BatchOverview
-      schoolUdise={schoolUdise}
-      grade={selectedGrade}
-      testCategory={testCategory}
-      program={selectedProgram || undefined}
-      stream={selectedStream || undefined}
-      subject={selectedSubject || undefined}
-      testGrade={selectedTestGrade ?? undefined}
-      onTestClick={handleTestClick}
-      onFilterOptions={handleFilterOptions}
-    />
-  );
-
-  // Deep dive: the way back is the first thing on the page, then the test
-  // title with the grade control beside it. The filter bar is not shown — a
-  // test session is grade-specific, so changing grade returns to the overview.
-  if (deepDiveSession && selectedGrade != null && !needsProgram) {
+  // Deep dive: one test, full width, no filter bar. A session is grade-specific,
+  // so changing grade returns to the overview rather than re-filtering here.
+  if (f.deepDiveSession && f.selectedGrade != null && !needsProgram) {
     return (
-      <div className="space-y-5">
-        <button
-          onClick={handleBack}
-          className="inline-flex items-center gap-1.5 -ml-1 px-1 min-h-[44px] text-sm font-bold text-accent hover:text-accent-hover transition-colors rounded-lg"
-        >
-          <span aria-hidden="true" className="text-lg leading-none">&lsaquo;</span>
-          Back to overview
-        </button>
-        <div className="flex items-start justify-between gap-4 flex-wrap">
-          <h2 className="text-2xl md:text-3xl font-bold tracking-tight text-text-primary">
-            {deepDiveSession.testName || "Loading..."}
-          </h2>
-          {gradeControl}
-        </div>
-        <TestDeepDive
-          schoolUdise={schoolUdise}
-          grade={selectedGrade}
-          sessionId={deepDiveSession.sessionId}
-          program={selectedProgram || undefined}
-          stream={selectedStream || undefined}
-          onDataLoaded={handleDeepDiveData}
-          afterStats={
-            <CombinedReportPanel
-              schoolUdise={schoolUdise}
-              sessionId={deepDiveSession.sessionId}
-              testName={deepDiveSession.testName}
-              grade={selectedGrade}
-              program={selectedProgram || undefined}
-              stream={selectedStream || undefined}
-            />
-          }
-        />
-      </div>
+      <TestDeepDiveView
+        schoolUdise={schoolUdise}
+        grade={f.selectedGrade}
+        sessionId={f.deepDiveSession.sessionId}
+        testName={f.deepDiveSession.testName}
+        scope={f.scope}
+        gradeControl={gradeControl}
+        onBack={f.handleBack}
+        onDataLoaded={f.handleDeepDiveData}
+      />
     );
   }
 
   return (
     <div className="space-y-6">
-      {/* Program tabs */}
       {showProgramTabs && (
-        <div className="flex gap-1 flex-wrap">
-          {programs.map((prog) => (
-            <button
-              key={prog}
-              onClick={() => handleProgramChange(prog)}
-              className={`px-3 md:px-4 py-1.5 md:py-2 min-h-[44px] text-xs md:text-sm font-bold uppercase tracking-wide rounded-lg transition-colors ${
-                selectedProgram === prog
-                  ? "bg-accent text-text-on-accent shadow-sm"
-                  : "bg-bg-card-alt text-text-muted border border-border hover:border-accent/50 hover:text-text-primary"
-              }`}
-            >
-              {prog}
-            </button>
-          ))}
-        </div>
+        <ProgramTabs
+          programs={programs}
+          selected={f.selectedProgram}
+          onChange={f.handleProgramChange}
+        />
       )}
 
       <PerformanceFilterBar
         gradeControl={gradeControl}
-        selectedGrade={selectedGrade}
-        testCategory={testCategory}
-        fullTestView={fullTestView}
-        selectedTestGrade={selectedTestGrade}
-        selectedStream={selectedStream}
-        selectedSubject={selectedSubject}
-        availableTestGrades={availableTestGrades}
-        availableStreams={availableStreams}
-        availableSubjects={availableSubjects}
-        onTestGradeChange={handleTestGradeChange}
-        onCategoryChange={handleCategoryChange}
-        onStreamChange={handleStreamChange}
-        onSubjectChange={handleSubjectChange}
-        onFullViewChange={handleFullViewChange}
+        selectedGrade={f.selectedGrade}
+        testCategory={f.testCategory}
+        fullTestView={f.fullTestView}
+        selectedTestGrade={f.selectedTestGrade}
+        selectedStream={f.selectedStream}
+        selectedSubject={f.selectedSubject}
+        availableTestGrades={f.availableTestGrades}
+        availableStreams={f.availableStreams}
+        availableSubjects={f.availableSubjects}
+        onTestGradeChange={f.handleTestGradeChange}
+        onCategoryChange={f.handleCategoryChange}
+        onStreamChange={f.handleStreamChange}
+        onSubjectChange={f.handleSubjectChange}
+        onFullViewChange={f.handleFullViewChange}
       />
 
-      {content}
+      <PerformanceContent
+        schoolUdise={schoolUdise}
+        grade={f.selectedGrade}
+        needsProgram={needsProgram}
+        testCategory={f.testCategory}
+        fullTestView={f.fullTestView}
+        scope={f.scope}
+        onTestClick={f.handleTestClick}
+        onFilterOptions={f.handleFilterOptions}
+      />
     </div>
   );
 }
