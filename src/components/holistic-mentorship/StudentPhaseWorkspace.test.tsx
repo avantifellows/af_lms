@@ -606,23 +606,22 @@ describe("StudentPhaseWorkspace", () => {
     expect(await screen.findByText("Submitted Notes updated.")).toBeInTheDocument();
   });
 
-  it("shows eight ordered stage tabs and keeps locked tabs disabled", () => {
+  it("shows configured phase tabs and keeps real locked tabs disabled", () => {
     const base = teacherDetail();
     const selected = base.selectedPhase as OpenPhase;
     const detail: HolisticStudentPhaseDetail = {
       ...base,
       student: { ...base.student, grade: 12 },
       phases: [
-        ...[1, 2, 3, 4].map((number) => ({ phaseId: null, number, title: `Phase ${number}`, placeholder: true as const })),
-        { phaseId: 75, number: 5, title: "Start Grade 12", locked: false, active: true, progress: "completed", draftSaved: false, grade: 12, academicYear: "2026-2027" },
-        { phaseId: 76, number: 6, title: "Study choices", locked: false, active: false, progress: "pending", draftSaved: false, grade: 12, academicYear: "2026-2027" },
-        { phaseId: 77, number: 7, title: "Staying on track", locked: false, active: false, progress: "skipped", draftSaved: false, grade: 12, academicYear: "2026-2027" },
-        { phaseId: 78, number: 8, title: "Next steps", locked: true },
+        { phaseId: 75, number: 2, title: "Start Grade 12", locked: false, active: true, progress: "completed", draftSaved: false, grade: 12, academicYear: "2026-2027" },
+        { phaseId: 76, number: 3, title: "Study choices", locked: false, active: false, progress: "pending", draftSaved: false, grade: 12, academicYear: "2026-2027" },
+        { phaseId: 77, number: 4, title: "Staying on track", locked: false, active: false, progress: "skipped", draftSaved: false, grade: 12, academicYear: "2026-2027" },
+        { phaseId: 78, number: 5, title: "Next steps", locked: true },
       ],
       selectedPhase: {
         ...selected,
         phaseId: 75,
-        number: 5,
+        number: 2,
         title: "Start Grade 12",
         grade: 12,
         progress: "completed",
@@ -632,15 +631,21 @@ describe("StudentPhaseWorkspace", () => {
     render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={detail} />);
 
     const tabs = screen.getAllByRole("tab");
-    expect(tabs).toHaveLength(8);
+    expect(tabs).toHaveLength(4);
     expect(tabs.map((tab) => tab.textContent)).toEqual([
-      "Phase 1Locked", "Phase 2Locked", "Phase 3Locked", "Phase 4Locked",
-      "Phase 5Completed", "Phase 6Open", "Phase 7Skipped", "Phase 8Locked",
+      "Phase 2Completed", "Phase 3Open", "Phase 4Skipped", "Phase 5Locked",
     ]);
-    expect(screen.getByRole("tab", { name: "Phase 5 - Start Grade 12 - Completed" }))
+    const selectedTab = screen.getByRole("tab", { name: "Phase 2 - Start Grade 12 - Completed" });
+    expect(selectedTab)
       .toHaveAttribute("aria-selected", "true");
-    expect(tabs[0]).toBeDisabled();
-    expect(tabs[7]).toBeDisabled();
+    expect(selectedTab).toHaveAttribute(
+      "href",
+      "/holistic-mentorship/students/41/phases/75?school_code=SCH001&academic_year=2026-2027&program_id=1",
+    );
+    expect(tabs[0]).not.toBeDisabled();
+    expect(tabs[1]).not.toBeDisabled();
+    expect(tabs[2]).not.toBeDisabled();
+    expect(tabs[3]).toBeDisabled();
     expect(screen.getByRole("banner")).toHaveTextContent("Asha Rao");
     expect(screen.getByRole("banner")).not.toHaveTextContent("Grade 12");
   });

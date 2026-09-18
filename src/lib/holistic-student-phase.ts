@@ -41,18 +41,7 @@ export function buildHolisticApplicablePhases<T extends ApplicablePhase>(input: 
   if (input.entryGrade === 11 && input.hasPriorYearMapping) {
     return [...input.priorGrade11Phases, ...currentGrade12];
   }
-  return [
-    ...[1, 2, 3, 4].map((number) => ({
-      phaseId: null,
-      number,
-      title: `Phase ${number}`,
-      placeholder: true as const,
-    })),
-    ...currentGrade12.map((phase, index) => ({
-      ...phase,
-      number: Math.max(phase.number, index + 5),
-    })),
-  ];
+  return currentGrade12;
 }
 
 export type HolisticStudentContext = {
