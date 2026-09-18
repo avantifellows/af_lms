@@ -18,12 +18,14 @@ edges:
     condition: when adding LMS API routes for create or bulk upload
   - target: patterns/db-service-write.md
     condition: when proxying student writes to the DB Service
-last_updated: 2026-09-12
+last_updated: 2026-09-17
 ---
 
 # Student Addition
 
 The September 7 main-branch merge preserves Phone Registration checks in the shared school/centre roster projection. Both queries bind NVS as `$3`; the school query binds program attribution order separately as `$4`. This avoids treating the program-order array as an NVS program ID.
+
+School and centre roster reads materialize the `student_program_dropout` audit subset once per query before evaluating each Student's `dropout_program_ids`. The lateral aggregate still uses distinct non-null Program IDs, excludes Programs in the current batch-membership array, and retains the existing JSON cast and SQL null behavior. The independent NVS undo-eligibility predicate continues reading the full audit table, including explicit undo records. School and centre membership, Grade fallback, attribution, projections, ordering, and parameter arrays are unchanged.
 
 Source context: GitHub issue https://github.com/avantifellows/af_lms/issues/197 is the current revised implementation PRD. Issue #155 describes the prior implementation and issue #144 remains reference context only.
 

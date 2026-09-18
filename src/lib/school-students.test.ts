@@ -16,6 +16,26 @@ import {
   filterActiveRosterStudents,
 } from "./school-students";
 
+function expectMaterializedDropoutAuditLookup(sql: string) {
+  expect(sql).toMatch(
+    /WITH program_dropout_audits AS MATERIALIZED \(\s*SELECT action, program_id, affected_identifiers\s*FROM lms_student_write_audits\s*WHERE action = 'student_program_dropout'\s*\)/,
+  );
+  expect(sql).toMatch(
+    /AS dropout_program_ids\s*FROM program_dropout_audits audit\s*WHERE audit\.action = 'student_program_dropout'\s*AND \(audit\.affected_identifiers ->> 'student_pk_id'\)::bigint = s\.id\s*AND NOT \(audit\.program_id = ANY\(sp\.student_program_ids\)\)/,
+  );
+  expect(sql).not.toMatch(
+    /AS dropout_program_ids\s*FROM lms_student_write_audits audit/,
+  );
+
+  // Undo eligibility intentionally continues to use the complete audit table.
+  expect(sql).toMatch(
+    /FROM lms_student_write_audits dropout\s*WHERE dropout\.action = 'student_program_dropout'/,
+  );
+  expect(sql).toMatch(
+    /FROM lms_student_write_audits undo\s*WHERE undo\.action = 'student_program_dropout_undo'\s*AND \(undo\.affected_identifiers ->> 'dropout_audit_id'\)::bigint = dropout\.id/,
+  );
+}
+
 function makeStudent(overrides: Partial<Student> = {}): Student {
   const user_id = overrides.user_id ?? "u-1";
   return {
@@ -71,6 +91,7 @@ describe("getSchoolRoster", () => {
     expect(sql).toContain("er_batch.end_date DESC NULLS LAST");
     expect(sql).toContain("b_phone_nvs.program_id = $3");
     expect(sql).toContain("array_position($4::int[], b.program_id)");
+    expectMaterializedDropoutAuditLookup(sql);
     expect(params).toEqual(["school-1", CURRENT_ACADEMIC_YEAR, 64, PROGRAM_ATTRIBUTION_ORDER]);
   });
 
@@ -105,6 +126,7 @@ describe("getCentreStudents", () => {
     // Hydration joins the current-year grade enrollment (for grade_id).
     expect(sql).toContain("JOIN enrollment_record er_grade");
     expect(sql).toContain("b_phone_nvs.program_id = $3");
+    expectMaterializedDropoutAuditLookup(sql);
     expect(params).toEqual(["centre-8", CURRENT_ACADEMIC_YEAR, 64]);
   });
 

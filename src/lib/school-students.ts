@@ -131,7 +131,12 @@ export async function getSchoolRoster(
   schoolId: string | number,
 ): Promise<SchoolRoster> {
   const rows = await query<Student>(
-    `SELECT ${STUDENT_COLUMNS}
+    `WITH program_dropout_audits AS MATERIALIZED (
+      SELECT action, program_id, affected_identifiers
+      FROM lms_student_write_audits
+      WHERE action = 'student_program_dropout'
+    )
+    SELECT ${STUDENT_COLUMNS}
     FROM group_user gu
     JOIN "group" g ON gu.group_id = g.id
     JOIN "user" u ON gu.user_id = u.id
@@ -196,7 +201,7 @@ export async function getSchoolRoster(
         ARRAY_AGG(DISTINCT audit.program_id) FILTER (WHERE audit.program_id IS NOT NULL),
         ARRAY[]::int[]
       ) AS dropout_program_ids
-      FROM lms_student_write_audits audit
+      FROM program_dropout_audits audit
       WHERE audit.action = 'student_program_dropout'
         AND (audit.affected_identifiers ->> 'student_pk_id')::bigint = s.id
         AND NOT (audit.program_id = ANY(sp.student_program_ids))
@@ -229,7 +234,12 @@ export async function getCentreStudents(
   centreId: string | number,
 ): Promise<SchoolRoster> {
   const rows = await query<Student>(
-    `SELECT ${STUDENT_COLUMNS}
+    `WITH program_dropout_audits AS MATERIALIZED (
+      SELECT action, program_id, affected_identifiers
+      FROM lms_student_write_audits
+      WHERE action = 'student_program_dropout'
+    )
+    SELECT ${STUDENT_COLUMNS}
     FROM centre_students cs
     JOIN centres c ON c.id = cs.centre_id
     JOIN "group" g ON g.type = 'school' AND g.child_id = c.school_id
@@ -266,7 +276,7 @@ export async function getCentreStudents(
         ARRAY_AGG(DISTINCT audit.program_id) FILTER (WHERE audit.program_id IS NOT NULL),
         ARRAY[]::int[]
       ) AS dropout_program_ids
-      FROM lms_student_write_audits audit
+      FROM program_dropout_audits audit
       WHERE audit.action = 'student_program_dropout'
         AND (audit.affected_identifiers ->> 'student_pk_id')::bigint = s.id
         AND NOT (audit.program_id = ANY(sp.student_program_ids))

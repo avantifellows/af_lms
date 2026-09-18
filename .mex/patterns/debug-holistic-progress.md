@@ -1,7 +1,7 @@
 ---
 name: debug-holistic-progress
 description: Trace empty HTTP 500 responses and database timeouts in Holistic Admin progress.
-last_updated: 2026-09-11
+last_updated: 2026-09-17
 ---
 
 # Debug Holistic Admin progress
@@ -14,6 +14,7 @@ last_updated: 2026-09-11
 4. Capture SQL with database calls replaced locally, then execute only SELECT/EXPLAIN through the existing DB helper inside an explicitly READ ONLY transaction. To inspect reconciliation, isolate its candidate SELECT and remove `FOR UPDATE` and all mutation CTEs. Keep the production timeout; never EXPLAIN ANALYZE a mutation.
 5. Inspect the live `centre_students` definition and query plan. Correlated eligibility EXISTS can repeatedly expand roster membership for every Mapping after view changes. Compare a query-local materialized Program/year roster in both eligibility and Grade lookup; preserve authorization and historical behavior. Never replace the production view for diagnosis.
 6. Check client error handling separately: parsing an empty 500 body as JSON masks the server error, while reset counters may falsely look like zero Students.
+7. A slow School link can come from the canonical roster rather than Holistic progress. School and centre roster queries now materialize only `student_program_dropout` audits once, then retain the existing per-Student lateral aggregate over that reduced set. Verify the base-table CTE scan has one loop; repeated in-memory CTE scans are expected. Keep `can_undo_nvs_dropout` on the complete audit table because it also needs undo records and changed-value metadata.
 
 ## Verify
 
@@ -21,4 +22,5 @@ last_updated: 2026-09-11
 - Identify the failing query separately from the reconciliation candidate check.
 - Clearly label proposed-query timing versus shipped behavior; matching row counts alone do not establish full result parity.
 - For a fix, test permissions, current/historical year semantics, conflicting Grades, filters, pagination/counts/CSV, and empty/non-JSON server failures, plus representative query performance.
+- For roster performance changes, compare complete same-snapshot row digests for school and centre queries and run positive SQL fixtures for duplicate/nonempty dropout Programs, current membership, null/missing identifiers, casts, and undo behavior. Keep the read-only transaction, 15-second timeout, and no-row-output guardrails.
 - Record findings in ROUTER.md and data-access context; bump changed scaffold dates and run mex log.
