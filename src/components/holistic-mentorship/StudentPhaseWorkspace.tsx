@@ -10,7 +10,7 @@ import { type ReactNode, useCallback, useEffect, useEffectEvent, useId, useRef, 
 
 import type { HolisticProfileRegeneration, HolisticStudentPhaseDetail } from "@/lib/holistic-student-phase";
 import { PROGRAM_IDS } from "@/lib/constants";
-import { holisticStudentPhaseHref } from "@/lib/holistic-links";
+import { holisticStudentPhaseHref, type HolisticStudentPhaseSource } from "@/lib/holistic-links";
 import { Button } from "@/components/ui/Button";
 import { Badge, type BadgeVariant } from "@/components/ui/Badge";
 import { Card } from "@/components/ui/Card";
@@ -856,7 +856,7 @@ export default function StudentPhaseWorkspace({
   schoolCode: string;
   academicYear: string;
   programId?: number;
-  source?: "school" | "progress";
+  source?: HolisticStudentPhaseSource;
   backHref?: string;
   canRegenerateProfile?: boolean;
   viewerRole?: string;
@@ -900,7 +900,7 @@ function AdminReadOnlyWorkspace({ detail, schoolCode, academicYear, programId, s
   schoolCode: string;
   academicYear: string;
   programId: number;
-  source?: "school" | "progress";
+  source?: HolisticStudentPhaseSource;
   backHref?: string;
   canRegenerateProfile: boolean;
   viewerRole: string;
@@ -953,12 +953,12 @@ function readOnlyViewerLabel(role: string) {
 
 function AdminStudentHeader({ student, source, backHref, viewerRole }: {
   student: HolisticStudentPhaseDetail["student"];
-  source?: "school" | "progress";
+  source?: HolisticStudentPhaseSource;
   backHref?: string;
   viewerRole: string;
 }) {
   return <header className="flex items-center gap-4">
-    {backHref && <Link href={backHref} aria-label={source === "school"
+    {backHref && <Link href={backHref} aria-label={source === "school" || source === "school-progress"
       ? "Back to Assignment Coverage"
       : "Back to Students and Progress"}
       className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-border bg-bg-card text-text-primary shadow-sm hover:bg-hover-bg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50">
@@ -997,7 +997,7 @@ function PhaseNavigation({ studentId, phases, selectedPhaseId, schoolCode, acade
   schoolCode: string;
   academicYear: string;
   programId: number;
-  source?: "school" | "progress";
+  source?: HolisticStudentPhaseSource;
   readOnly?: boolean;
 }) {
   const onKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
@@ -1038,7 +1038,7 @@ type PhaseTabProps = {
   schoolCode: string;
   academicYear: string;
   programId: number;
-  source?: "school" | "progress";
+  source?: HolisticStudentPhaseSource;
   admin: boolean;
 };
 

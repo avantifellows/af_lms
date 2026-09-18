@@ -332,6 +332,7 @@ function AssignmentCoverageSchools({ schools, programId }: {
         href={`/school/${school.code}?${new URLSearchParams({
           tab: "holistic_mentorship",
           program_id: String(programId),
+          source: "progress",
         })}`}
       >
         <span>{school.name}</span>

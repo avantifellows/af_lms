@@ -109,6 +109,20 @@ describe("SchoolTabs", () => {
     expect(mockReplace).toHaveBeenCalledWith("?tab=visits");
   });
 
+  it("preserves the Holistic return marker when switching tabs", async () => {
+    mockReplace.mockClear();
+    mockSearchParams = new URLSearchParams("program_id=94&source=progress");
+    const user = userEvent.setup();
+    render(<SchoolTabs tabs={tabs} />);
+
+    await user.click(screen.getByText("Info"));
+
+    expect(mockReplace).toHaveBeenCalledWith(
+      "?program_id=94&source=progress&tab=info",
+    );
+    mockSearchParams = new URLSearchParams();
+  });
+
   it("applies active styling to the selected tab button", () => {
     render(<SchoolTabs tabs={tabs} defaultTab="visits" />);
     const visitsBtn = screen.getByText("Visits");

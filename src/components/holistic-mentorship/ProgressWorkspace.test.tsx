@@ -90,9 +90,9 @@ describe("ProgressWorkspace", () => {
     render(<ProgressWorkspace programId={78} />);
 
     expect(await screen.findByRole("link", { name: "Open Assignment Coverage for School One" }))
-      .toHaveAttribute("href", "/school/SCH001?tab=holistic_mentorship&program_id=78");
+      .toHaveAttribute("href", "/school/SCH001?tab=holistic_mentorship&program_id=78&source=progress");
     expect(screen.getByRole("link", { name: "Open Assignment Coverage for School Without Mappings" }))
-      .toHaveAttribute("href", "/school/SCH002?tab=holistic_mentorship&program_id=78");
+      .toHaveAttribute("href", "/school/SCH002?tab=holistic_mentorship&program_id=78&source=progress");
   });
 
   it("loads on filter change and manual Refresh without polling", async () => {

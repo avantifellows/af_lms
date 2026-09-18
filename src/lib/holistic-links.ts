@@ -1,10 +1,12 @@
+export type HolisticStudentPhaseSource = "school" | "school-progress" | "progress";
+
 export function holisticStudentPhaseHref(params: {
   studentId: number;
   phaseId: number;
   schoolCode: string;
   academicYear: string;
   programId: number;
-  source?: "school" | "progress";
+  source?: HolisticStudentPhaseSource;
 }) {
   const query = new URLSearchParams({
     school_code: params.schoolCode,
