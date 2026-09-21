@@ -22,7 +22,7 @@ edges:
     condition: when a user is wrongly denied or wrongly granted access
   - target: patterns/add-api-route.md
     condition: when adding a route that needs gating
-last_updated: 2026-08-17
+last_updated: 2026-09-22
 ---
 
 # Permissions
@@ -93,5 +93,6 @@ Student Addition writes deliberately use a stricter gate than `ownsRecord`: admi
 - **Passcode users** must be handled explicitly (`session.isPasscodeUser`) — they're blocked from visits and all non-`students` features; the gate checks `session.schoolCode` against the target school.
 - **`revoked_at`** is the single "exited" switch — a revoked user resolves to no permission everywhere.
 - **Postgres `bigint` columns arrive as JS strings** (no `setTypeParser` in `db.ts`). Any numeric comparison against them must cast in SQL (`::int`) or coerce (`Number()`). This bit for real in Jul 2026: `getStudentSchool` started resolving `batch.program_id` (bigint) after the #162 batch-join fix, `ownsRecord` did `[1].includes("1")` → false, and every non-admin got 403 on document upload/delete in prod for 3 days. `ownsRecord` now coerces and the query casts; keep both when touching this path.
+- **School *visibility* is a separate predicate from school *access*, and it is duplicated per route.** A school is visible when `af_school_category = 'JNV'` **OR** it has an active centre (`centres c ON c.school_id = s.id AND c.is_active`). Any route resolving a school by `udise_code`/`code` must carry both halves — a JNV-only filter compiles, passes tests written against JNV fixtures, and then silently 404s the non-JNV centre schools (Punjab CoE, EMRS) whose page opens fine, so the failure surfaces as a blank widget rather than an error. This bit `consent-status` in Sep 2026: its `% Docs` pill read `—` for those schools from the day the feature shipped. Copy the predicate from `getSchoolByCode` in `src/app/school/[udise]/page.tsx`.
 - **`PROGRAM_IDS` is hand-maintained** in `constants.ts` (transitional debt) — add a program id here when a non-JNV centre is onboarded.
 - Import `PROGRAM_IDS` from `@/lib/constants`, not `@/lib/permissions`, in client components — `permissions.ts` pulls in the server-only DB pool.

@@ -80,6 +80,21 @@ describe("GET /api/schools/[code]/consent-status", () => {
     expect(res.status).toBe(404);
   });
 
+  // Regression guard: this route used to filter on af_school_category = 'JNV'
+  // alone, so the 10 non-JNV centre schools (Punjab CoE, EMRS) 404'd here even
+  // though their school page opens — "% Docs" showed "—" forever. The lookup
+  // must stay in step with getSchoolByCode in src/app/school/[udise]/page.tsx.
+  it("resolves active-centre schools, not just JNV ones", async () => {
+    mockSession.mockResolvedValueOnce(ADMIN_SESSION);
+    mockQuery.mockResolvedValueOnce([] as never);
+    await GET(req(), params);
+
+    const sql = mockQuery.mock.calls[0][0] as string;
+    expect(sql).toContain("af_school_category = 'JNV'");
+    expect(sql).toMatch(/EXISTS\s*\(\s*SELECT 1 FROM centres/);
+    expect(sql).toContain("c.is_active");
+  });
+
   it("403 when a passcode user targets another school", async () => {
     mockSession.mockResolvedValueOnce({
       ...PASSCODE_SESSION,

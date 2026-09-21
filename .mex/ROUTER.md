@@ -26,7 +26,7 @@ edges:
     condition: when working on teacher feedback setup, the feedback form, or its report
   - target: patterns/INDEX.md
     condition: when starting a task — check the pattern index for a matching pattern file
-last_updated: 2026-09-17
+last_updated: 2026-09-22
 ---
 
 # Session Bootstrap
@@ -87,6 +87,8 @@ Then read this file fully before doing anything else in this session.
 
 **Known issues:**
 
+- The admission-readiness percentages are **defined entirely by two lists** in `src/lib/enrollment-readiness.ts` (`INFO_REQUIRED_FIELDS`, `CONSENT_REQUIRED_DOC_TYPES`), and both are all-or-nothing per slot. Treat editing them as a product decision, and sanity-check the resulting number against real fill rates first — the original 12-field info list made the metric read 0.1% for months before PMs reported it.
+- `% Docs` counts only `parent_undertaking` + `wise_research_consent`, though PMs upload 7 document types. Uploading the other 5 (income/caste certificate, photo, media consent, student undertaking) moves the metric by zero, which reads in the field as a broken number. Awaiting a product call on whether all 7 should count.
 - Two write paths exist — sending a student/batch/quiz-session write to Postgres instead of the DB Service is a real bug (see `context/data-access.md`).
 - Regenerating a CMS quiz does **not** re-score already-submitted attempts (scoring happens only at attempt time); they keep their scores against the old answer key. The UI confirms this before proceeding. Related: no `DELETE /quiz` means a partial create leaves an orphan quiz, and regenerate's writes are un-transactioned — see `context/cms-quiz-sessions.md`.
 - The Graphify knowledge graph is generated locally and not committed; rebuild it with `/graphify --update` after significant changes.

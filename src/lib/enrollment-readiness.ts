@@ -26,22 +26,33 @@ export const CONSENT_REQUIRED_DOC_TYPES = [
 
 export type ConsentDocType = (typeof CONSENT_REQUIRED_DOC_TYPES)[number];
 
-// Fields that count toward "info available". There is no product-defined
-// required-field rule yet, so this is a sensible default — adjust the list to
-// change the metric. Keyed against the Student shape so renames stay in sync.
+// Fields that count toward "info available" — the ones admissions actually
+// collects, so the metric moves as PMs fill profiles in.
+//
+// This list was previously all 12 profile fields, which made the metric read
+// ~0% everywhere and hid real progress. Measured fill rates across the grade
+// 11/12 roster (~1.67L students) showed why:
+//
+//   first_name 100% · gender 100% · category 100% · district 98% · dob 83%
+//   phone 82% · state 59% · last_name 56% · father_name 50%
+//   mother_name 12% · pincode 5% · address 0.5%
+//
+// Because the check is all-or-nothing, address alone capped the metric at
+// 0.5%. The fields below are the ones with real coverage, minus:
+//   • last_name — ~44% of these students have no surname, so requiring it
+//     penalises records that are in fact correct.
+//   • district — 98% filled, but it is inherited from the school rather than
+//     collected per student, so it would inflate the number without
+//     reflecting any admissions work.
+//
+// Keyed against the Student shape so renames stay in sync. Editing this list
+// is the supported way to change what "info complete" means.
 export const INFO_REQUIRED_FIELDS = [
   "first_name",
-  "last_name",
   "phone",
   "gender",
   "date_of_birth",
   "category",
-  "father_name",
-  "mother_name",
-  "address",
-  "state",
-  "district",
-  "pincode",
 ] as const satisfies readonly (keyof Student)[];
 
 /** True when every INFO_REQUIRED_FIELDS value on the student is non-empty. */

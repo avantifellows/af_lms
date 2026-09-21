@@ -40,6 +40,26 @@ describe("config integrity", () => {
       "wise_research_consent",
     ]);
   });
+
+  it("counts info only on the fields admissions actually collects", () => {
+    expect([...INFO_REQUIRED_FIELDS]).toEqual([
+      "first_name",
+      "phone",
+      "gender",
+      "date_of_birth",
+      "category",
+    ]);
+  });
+
+  // Regression guard: these were once required, which pinned % info near 0
+  // because they are rarely (or never) collected. Re-adding one should be a
+  // deliberate product decision, not an accident.
+  it.each(["address", "pincode", "mother_name", "last_name"] as const)(
+    "does not require %s",
+    (field) => {
+      expect([...INFO_REQUIRED_FIELDS]).not.toContain(field);
+    },
+  );
 });
 
 describe("isAdmissionGrade", () => {
@@ -65,7 +85,7 @@ describe("isInfoComplete", () => {
   });
 
   it("false when a required field is blank/whitespace", () => {
-    expect(isInfoComplete(completeStudent({ address: "   " }))).toBe(false);
+    expect(isInfoComplete(completeStudent({ category: "   " }))).toBe(false);
   });
 
   it("ignores fields outside the required set", () => {
@@ -73,6 +93,22 @@ describe("isInfoComplete", () => {
     expect(isInfoComplete(completeStudent({ monthly_family_income: "" }))).toBe(
       true,
     );
+  });
+
+  // The case that made the metric read 1% in the field: a student whose
+  // profile is filled in as far as admissions ever collects it, but with the
+  // never-collected address/pincode blank, now counts as complete.
+  it("complete when only never-collected fields are blank", () => {
+    expect(
+      isInfoComplete(
+        completeStudent({
+          address: null,
+          pincode: null,
+          mother_name: null,
+          last_name: null,
+        }),
+      ),
+    ).toBe(true);
   });
 });
 
