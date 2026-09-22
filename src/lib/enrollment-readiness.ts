@@ -26,22 +26,18 @@ export const CONSENT_REQUIRED_DOC_TYPES = [
 
 export type ConsentDocType = (typeof CONSENT_REQUIRED_DOC_TYPES)[number];
 
-// Fields that count toward "info available". There is no product-defined
-// required-field rule yet, so this is a sensible default — adjust the list to
-// change the metric. Keyed against the Student shape so renames stay in sync.
+// Fields that count toward "info available" — the core details admissions
+// collects per student. See https://github.com/avantifellows/af_lms/pull/338
+// for why this list was chosen.
+//
+// Keyed against the Student shape so renames stay in sync. Editing this list
+// is the supported way to change what "info complete" means.
 export const INFO_REQUIRED_FIELDS = [
   "first_name",
-  "last_name",
   "phone",
   "gender",
   "date_of_birth",
   "category",
-  "father_name",
-  "mother_name",
-  "address",
-  "state",
-  "district",
-  "pincode",
 ] as const satisfies readonly (keyof Student)[];
 
 /** True when every INFO_REQUIRED_FIELDS value on the student is non-empty. */

@@ -57,16 +57,23 @@ export async function GET(
     grades = [grade];
   }
 
-  // Resolve the school by UDISE or code (same lookup as the school page).
+  // Resolve the school by UDISE or code. This must mirror `getSchoolByCode` in
+  // the school page: visible schools are the historical JNV set PLUS any school
+  // linked to an active centre (the non-JNV rollout — Punjab CoE, EMRS). A
+  // JNV-only filter here meant those schools opened fine but this route 404'd,
+  // leaving "% Docs" stuck on "—" for them.
   const schoolRows = await query<{
     id: string;
     code: string;
     region: string | null;
   }>(
     `SELECT id, code, region
-     FROM school
-     WHERE af_school_category = 'JNV'
-       AND (udise_code = $1 OR code = $1)`,
+     FROM school s
+     WHERE (
+         s.af_school_category = 'JNV'
+         OR EXISTS (SELECT 1 FROM centres c WHERE c.school_id = s.id AND c.is_active)
+       )
+       AND (s.udise_code = $1 OR s.code = $1)`,
     [code],
   );
   const school = schoolRows[0];
