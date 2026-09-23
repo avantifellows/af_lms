@@ -90,6 +90,8 @@ Then read this file fully before doing anything else in this session.
 
 **Known issues:**
 
+- DB Service #736 retains the explicitly deferred future-date dropout/undo defect: undo before the recorded dropout date can create overlapping status periods and end a period before it starts. A resolved review thread does not establish a fix. See `context/student-addition.md` for the finding and deferral evidence.
+
 - Two write paths exist — sending a student/batch/quiz-session write to Postgres instead of the DB Service is a real bug (see `context/data-access.md`).
 - Regenerating a CMS quiz does **not** re-score already-submitted attempts (scoring happens only at attempt time); they keep their scores against the old answer key. The UI confirms this before proceeding. Related: no `DELETE /quiz` means a partial create leaves an orphan quiz, and regenerate's writes are un-transactioned — see `context/cms-quiz-sessions.md`.
 - The Graphify knowledge graph is generated locally and not committed; rebuild it with `/graphify --update` after significant changes.

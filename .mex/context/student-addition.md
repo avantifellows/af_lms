@@ -278,6 +278,17 @@ cycles and program isolation. Review fixes use the captured UTC operation time a
 reject duplicate status titles. These changes are still in an open PR, not current
 production guarantees.
 
+Known unresolved limitation: DB Service #736 accepts a future dropout `start_date`.
+Undoing before that date can end the dropout period before its own start and
+create overlapping status periods. The owner acknowledged this issue and explicitly
+deferred its fix; resolving the review discussion did not mean the defect was fixed.
+The earlier lifecycle QA does not establish correctness for this sequence. Retain
+it in future merge/deployment decisions; a follow-up could reject future dropout
+dates or reject undo before the recorded dropout date. This documentation change
+does not implement either fix or alter the decision to defer it.
+See the [original finding](https://github.com/avantifellows/db-service/pull/736#discussion_r4024481795)
+and [recorded deferral](https://github.com/avantifellows/db-service/pull/736#discussion_r4024620027).
+
 September 17 local rehearsal of #737 covered the 37,255 LMS-created Students in
 academic year 2026–2027, with five separate evidence-validated groups:
 
