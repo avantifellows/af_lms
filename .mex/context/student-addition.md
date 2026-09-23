@@ -18,7 +18,7 @@ edges:
     condition: when adding LMS API routes for create or bulk upload
   - target: patterns/db-service-write.md
     condition: when proxying student writes to the DB Service
-last_updated: 2026-09-17
+last_updated: 2026-09-23
 ---
 
 # Student Addition
@@ -29,9 +29,9 @@ School and centre roster reads materialize the `student_program_dropout` audit s
 
 Source context: GitHub issue https://github.com/avantifellows/af_lms/issues/197 is the current revised implementation PRD. Issue #155 describes the prior implementation and issue #144 remains reference context only.
 
-## Current Behavior: Phone Registration Mode (AF LMS Active; Coordinated Release)
+## Current Behavior: Phone Registration Mode (Production Deployed 2026-09-07)
 
-GitHub issue https://github.com/avantifellows/af_lms/issues/296 is the build-ready decision issue. AF LMS slices #297–#303 have implemented the foundation plus the Add Student and Bulk Upload paths, mode-aware template download, scoped existing-Student phone correction, the Approved-mode phone-cohort backfill contract, and activation/regression coverage: a typed code registry with Phone and Approved modes, mode-resolved canonical fields, shared mode-aware validation, an explicit mode/version handshake on NVS DB Service writes, mode-aware Add/Bulk UI and API behavior, the exact HQ Phone workbook, strict Phone bulk schema detection, example-row removal before limits and writes, x14-safe workbook compaction, directly retryable 11-column Phone rejected CSVs, duplicate/conflict result presentation, server-side three-fact phone-cohort inference with current PEN/G10 state, strict NVS correction/backfill authorization, atomic correction/backfill payload and error handling, fill-once identifier locks, and Edit guidance. AF LMS now selects Phone mode; the matching DB Service constant must be flipped and deployed in the coordinated release. The Approved Add/Bulk/Edit behavior and workbooks remain covered by explicit Approved-mode regression injection for the future post-approval flip. The existing JNV NVS Add Student and Bulk Upload flow uses Phone Registration Mode when the coordinated release is deployed:
+GitHub issue https://github.com/avantifellows/af_lms/issues/296 is the build-ready decision issue. AF LMS slices #297–#303 have implemented the foundation plus the Add Student and Bulk Upload paths, mode-aware template download, scoped existing-Student phone correction, the Approved-mode phone-cohort backfill contract, and activation/regression coverage: a typed code registry with Phone and Approved modes, mode-resolved canonical fields, shared mode-aware validation, an explicit mode/version handshake on NVS DB Service writes, mode-aware Add/Bulk UI and API behavior, the exact HQ Phone workbook, strict Phone bulk schema detection, example-row removal before limits and writes, x14-safe workbook compaction, directly retryable 11-column Phone rejected CSVs, duplicate/conflict result presentation, server-side three-fact phone-cohort inference with current PEN/G10 state, strict NVS correction/backfill authorization, atomic correction/backfill payload and error handling, fill-once identifier locks, and Edit guidance. AF LMS and DB Service now both select Phone mode; their coordinated production deployment completed on September 7. The Approved Add/Bulk/Edit behavior and workbooks remain covered by explicit Approved-mode regression injection for the future post-approval flip. The existing JNV NVS Add Student and Bulk Upload flow uses Phone Registration Mode:
 
 - Phone mode accepts the existing fields except PEN, Grade 10 Roll Number, and Annual Family Income. G10 board remains required.
 - The exact HQ workbook `NVS_Lakshya_Data_Template_updated_19th_August_2026.xlsx` is the approved static asset (SHA-256 `657f236c35bda1d01375126394091a68ff7a4e3753c8036a030835762739c6e7`). Its dropdowns use Excel `x14:dataValidations`; copy and serve the bytes without regenerating the workbook through ExcelJS/openpyxl.
@@ -49,7 +49,7 @@ GitHub issue https://github.com/avantifellows/af_lms/issues/296 is the build-rea
 - DB Service lookup checks provide duplicate safety, while the small concurrent-create race without a cross-table database constraint is accepted. `avantifellows/db-service#648` is not a blocker.
 - Non-LMS phone correction for this cohort is unsupported until the generic import lookup is fixed in `avantifellows/db-service#703`; that follow-up is separate and assigned to Aman.
 
-The planning branch is `grill/nvs-phone-registration-mode`; ADR 0006 records the permanent phone-identity trade-off. AF LMS now has Phone Registration Mode active in code. Production rollout requires the matching DB Service mode/version deployment, a paused-registration mismatch check, and the manual Portal login smoke gate documented in `docs/nvs-phone-registration-release.md`. The accepted concurrent-create race without a cross-table database constraint remains documented, not fixed.
+The planning branch is `grill/nvs-phone-registration-mode`; ADR 0006 records the permanent phone-identity trade-off. AF LMS now has Phone Registration Mode active in code. The coordinated production deployment and no-write mode-mismatch probe completed on September 7. The separate EnableStudents manual Portal login smoke gate in `docs/nvs-phone-registration-release.md` remains to be recorded; the non-EnableStudents regression below does not substitute for it. The accepted concurrent-create race without a cross-table database constraint remains documented, not fixed.
 
 ## Settled Product Shape
 - v1 is JNV PMU / JNV NVS only. In current LMS code this is `PROGRAM_IDS.NVS` (`64`, label `JNV NVS`) from `src/lib/constants.ts`.
@@ -138,6 +138,32 @@ Enrollment date handling is decided: LMS supplies DB Service `start_date` and `a
 - `csv-parse`, `exceljs`, and `jszip` are installed in af_lms for upload parsing and blank-formatting compaction. Do not add runtime template generation or reintroduce the direct `xlsx` dependency. Rejected-row retry is CSV and includes every row that was not created.
 
 ## DB Service Context
+
+### Measuring bulk-upload adoption
+
+Source inspection on September 8 confirmed that `lms_student_write_audits`
+records successful creations with action `student_bulk_create`, School
+code/UDISE, upload ID/filename, actor, and timestamp. Both forms share this
+action: file uploads use the LMS-generated `student-bulk-` upload ID prefix;
+one-by-one adds use `single-student-` and filename `one-by-one`.
+Count distinct `school_code` for file-upload creation audits in the chosen date
+range to measure Schools with at least one Student successfully bulk-added.
+Check-only requests and uploads creating zero Students leave no creation audit,
+so these records cannot measure all attempted uploads.
+
+Authorized production inspection at 2026-09-08 22:38 IST verified session and
+transaction read-only settings, used the existing `query()` helper with one
+connection and a 10-second statement timeout, and rolled back before closing.
+All retained file-upload creation audits covered 337 Schools, 19,937 Students,
+and 365 successful uploads. From September 7 00:00 IST, the counts were 333
+Schools, 19,897 Students, and 358 successful uploads. These are dated snapshots,
+not a live metric. Grouped School codes were unique and all matched School rows.
+For future operator reads, configure `PGOPTIONS` with
+`default_transaction_read_only=on` before importing `src/lib/db.ts`, set
+`DATABASE_POOL_MAX=1`, verify read-only settings, use parameterized SELECTs,
+and close the pool. Format UTC audit timestamps to IST in SQL to avoid the
+local Node timezone interpretation of PostgreSQL timestamp-without-time-zone.
+
 Repo: `/Users/deepanshmathur/Documents/AF/db-service`.
 
 Existing endpoint: `POST /api/student/create-with-enrollments` in `lib/dbservice_web/controllers/student_controller.ex`.
@@ -208,3 +234,80 @@ Manual Brave QA found repeated field labels in correction CSVs and awkward perio
 Verification after the presentation fixes: 3,820 unit tests passed (3 skipped); lint passed with the same 15 existing warnings; production build passed. Regression coverage asserts exact decoded CSV messages for every choice field in both modes, including multiline submitted values, and line separation in preview/final UI cells.
 
 A further presentation pass replaces the dense preview/final issue text with separate list items and subtle dividers. Unsupported choices show a bold field name, the rejected value, and smaller muted allowed values below. Other error messages remain intact in their own sections. The scrollable results area is taller (24rem). Local Brave desktop/390px checks preserved all seven synthetic errors; the 3,820-test suite, lint (existing warnings only), and build passed again. CSV formatting is unchanged.
+
+## September release and QA record
+
+On 2026-09-07, the user authorized both merges and DB Service main → release
+promotion. LMS #304 merged as `a34364c940de218c95c2560a3d7e16bf46c454a2`;
+Amplify production job 147 completed BUILD, DEPLOY, and VERIFY successfully.
+DB Service #713 merged to main as `306909d802fccde51890d7c1e9ea7d64dab5440a`,
+then release-promotion PR #723 merged as `4462d37950b1bdee16ac23ca9b57a850a58df08d`.
+The EC2 production workflow 34119216236 succeeded; its logs confirm the checkout
+advanced from `9abb3a3` to `4462d37`. At that deployment, production used the push-to-release EC2 workflow; the
+separate production ECS workflow was manual-only.
+Both `https://lms.avantifellows.org` and DB Service `/api/health` returned HTTP 200.
+Authenticated probes against non-existent Student 0 confirmed missing mode
+returns 409 `registration_mode_mismatch`, while phone/version 1 passes the mode
+check and returns 404 `not_found`, without modifying any production Student.
+
+The September 7 staging regression for LMS #304 / DB Service #713 exercised
+non-EnableStudents name edits through the real LMS API and Centre Edit controls,
+plus Portal login with unchanged Student ID/DOB. Synthetic records were restored;
+expected update timestamps and audit history remained. This did not complete the
+separate EnableStudents phone-login gate.
+
+LMS #323 merged on September 16 as `dc0923aa68b036ba41e0a83fa755807a33e1d9b7`.
+Local validation included 3,822 passing unit tests (3 skipped), lint with no errors,
+and staging QA. Duplicate CSV labels and period-semicolon separators found during
+QA were fixed before merge; main's validation behavior above is authoritative.
+Production rollout completion for #323 was not verified in these retained notes.
+
+## DB Service status history and repair handoff
+
+GitHub status rechecked September 23: combined #731 is closed as superseded by
+#735 (timestamp fix, merged September 17), #736 (status history, open), and #737
+(guarded historical repair utilities, open). These are DB Service PR numbers.
+Their implementation and utility READMEs belong in that repository; this section
+records the LMS integration and historical QA. Merge does not establish deployment
+or authorize historical repair.
+
+The #736 change creates current status enrollment history on LMS Add/Bulk and a
+new period on full-dropout undo; program-only dropout/undo preserves status history.
+Local and staging lifecycle checks covered Add/Bulk, cancellation, repeated full
+cycles and program isolation. Review fixes use the captured UTC operation time and
+reject duplicate status titles. These changes are still in an open PR, not current
+production guarantees.
+
+September 17 local rehearsal of #737 covered the 37,255 LMS-created Students in
+academic year 2026–2027, with five separate evidence-validated groups:
+
+- 36,817 enrolled Students missing status history: insert their original enrolled period.
+- 152 confirmed accidental dropout/undo cases: retain continuous enrollment by
+  correcting the existing erroneous status row with an explicit before/after audit.
+- 284 single-dropout cases: add only the missing ended pre-dropout enrolled period.
+- One repeated dropout/undo/dropout case: reconstruct the two missing ended periods
+  while preserving both dropout rows; reject a second dropout row predating undo.
+- One individually approved missing-audit exception: pin its exact source records
+  and document the DB-evidence fallback; this is not a general audit bypass.
+
+School-ID differences were separated from status repair, not silently repaired or
+used as a blanket exclusion. Combined local verification found one matching current
+status for every cohort Student (36,969 enrolled / 286 dropout). All groups had zero
+remaining targets and reruns were idempotent. Subsequent timestamp apply/replay covered
+1,605 proposals while preserving the 152 actual correction times and all non-target
+columns. Final utility checks passed 71 tests; the service suite had one known,
+unchanged fetch-data fixture assertion failure (827/828 passed). No production
+historical repair was performed by this work.
+
+The September 17 attendance investigation traced 96 Grade 11 Students across
+Paschim Champaran and Kalaburagi 2 to ended dropout history overriding their enrolled
+Student status in reporting. All 96 belonged to the 152 accidental cases and became
+enrolled in the combined local rehearsal. Timestamp repair alone cannot fix this;
+production status repair and downstream Airbyte/models/attendance/cache refresh were
+still outstanding in that investigation. No dashboard filter change was proposed.
+
+Evidence is kept privately in the sibling `release-records/` directory, especially
+`lms-status-combined-20260917/QA.md`, `nvs-attendance-root-cause-20260917/report.md`
+and `lms-pr323-manual-qa-20260912/`. Read the DB Service utility README and
+[local rehearsal runbook](../patterns/local-enrollment-repair.md) before repeating
+any repair. Local testing does not authorize production apply.

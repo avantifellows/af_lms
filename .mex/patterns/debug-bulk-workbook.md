@@ -1,7 +1,7 @@
 ---
 name: debug-bulk-workbook
 description: Diagnose uploaded spreadsheets without importing students or exposing their data.
-last_updated: 2026-09-12
+last_updated: 2026-09-23
 ---
 
 # Debug Bulk Workbooks
@@ -22,3 +22,15 @@ last_updated: 2026-09-12
 - Check unsupported choices and required blanks in both modes, preview/final error parity, and correction CSV round-trips (including quotes, commas, and newlines). Confirm the guidance appears once above the preview table only for unsupported choices; inspect long/unbroken messages on desktop and mobile.
 - Compare decoded CSV error cells with the displayed message content (UI sections use a bold label and separate allowed-values line): labels must not repeat, and separate errors must use line breaks without period-semicolon separators. Include Annual Family Income, whose validation label differs from its column header.
 - Run the build to verify Node dependency bundling and update the context when behavior changes.
+
+## Workbook labels and browser QA
+
+Compare a rejected value and the workbook's embedded dropdown with the current
+shipped template. The September 11 workbook used `Commerce (without Maths)`;
+the shipped label was `Commerce (Without Math)`. Case-insensitive comparison
+cannot normalize `Maths` to `Math`. Use the current template rather than widening
+validation based on a stale workbook.
+
+Exercise corrected-CSV reupload as well as download. For headful Brave screenshots,
+bring the QA tab to the front and restore its window: a minimized/background window
+can show stale rendered scroll position despite current DOM geometry.

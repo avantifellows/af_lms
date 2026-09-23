@@ -21,7 +21,7 @@ edges:
     condition: when adding a write that must proxy to the DB Service
   - target: patterns/add-api-route.md
     condition: when adding a route that reads or writes
-last_updated: 2026-09-17
+last_updated: 2026-09-23
 ---
 
 # Data Access
@@ -78,7 +78,6 @@ if (!res.ok) { const text = await res.text(); /* surface upstream error */ }
 - A missing-schema error (42P01/42703) means the connected DB lacks a DB-Service migration — fix it there, not by adding columns here.
 - Don't add a second `pg.Pool` — reuse the `query()` singleton.
 
-
 ## Holistic progress query performance
 
 The September 11, 2026 production Admin progress request for Program 1 / 2026–2027 hit PostgreSQL `57014` after the configured 15-second timeout (CloudWatch at 09:32:52 UTC). The live `centre_students` EXISTS membership view from DB Service #727 expanded repeatedly within the per-Mapping eligibility check. The empty HTTP 500 then surfaced as a client JSON parsing error; reset counters did not indicate zero mapped Students.
@@ -87,7 +86,39 @@ The September 11, 2026 production Admin progress request for Program 1 / 2026–
 
 The progress route catches failures after preserving its auth/permission gates, returning a safe JSON 503 for statement cancellation/timeouts and 500 for other failures; logs contain only an error code. The client handles empty/non-JSON bodies and permits Refresh to recover, without surfacing errors from aborted requests. Local E2E fixtures mirror the current DB Service view so they exercise the same roster rules. Read-only production timing of the final SQL was approximately 1.1 seconds for 50 rows / 1,670 mapped Students; the previous query timed out. See the fix PR for final local and staging verification.
 
-
 ## Holistic Grade 12 phase labels
 
 Student detail now returns only real current Grade 12 phases when no continuing Grade 11 history applies; it no longer invents four placeholder tabs or forces numbering to start at 5. Existing plan-wide numbering is retained (the reported Maharashtra plan displays Grade 12 as Phase 2). Continuing prior-year history, phase IDs, context precedence, permissions and database access are unchanged. Missing generated profiles do not change numbering and do not establish source-form completion. No schema/data repair is involved.
+
+## September investigation and verification record
+
+These are dated findings, not fresh production measurements:
+
+- DB Service #727 changed Centre membership to existence of a matching Centre
+  Program batch. September 10 read-only validation added three expected Punjab
+  memberships and removed none, with no observed dual-Centre students. This does
+  not prohibit future multi-Program membership: consumer scoping and global active
+  Mentorship Mapping uniqueness still need care. The earlier synthetic review
+  concerns were not observed production blockers.
+- LMS #321 merged September 11 as `b8c22901dad18f79a0f6ecba6de3c27230c0fb32`.
+  Exact production Amplify job 151 passed; the reported Admin request returned
+  200 in 1.585 seconds with 1,670 mapped Students. Filter, pagination, CSV,
+  historical-year, auth and error-recovery checks passed without changing the
+  recorded Mapping/Notes/audit aggregate counts. This was a smoke test, not a load test.
+- LMS #332 staging job 537 verified real Maharashtra Grade 12 Phase 2 and Grade 11
+  Phase 1, including missing/available profiles, for Admin and Teacher. No configured
+  locked phase was available for the staging check; local tests covered it.
+- LMS #334 addressed the hidden full Enrollment roster loaded by ordinary Admins
+  even on a Holistic School tab. Same-snapshot full-row comparisons preserved
+  360 School / 123 Centre results while query time improved from 5.68s to 0.45s
+  and 2.05s to 0.24s respectively. Staging job 539 measured the incident School
+  click at a 755ms median across three fresh browser contexts. One separate direct
+  navigation readiness outlier remained unexplained; do not call every fresh
+  browser context a cold server measurement.
+
+#332/#334 merged September 18. Broader request-amplification follow-up is LMS
+issue #333; a measured DB Service audit-index migration plus LMS query change is
+tracked separately in #336. No audit index was applied during these investigations.
+Production deployment of the September 18 stack was not established by these notes.
+Evidence: sibling `release-records/holistic-phase-label-20260917/` and
+`release-records/punjab-nodal-list-investigation-20260917/`.
