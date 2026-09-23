@@ -22,7 +22,7 @@ edges:
     condition: when a user is wrongly denied or wrongly granted access
   - target: patterns/add-api-route.md
     condition: when adding a route that needs gating
-last_updated: 2026-08-17
+last_updated: 2026-09-23
 ---
 
 # Permissions
@@ -95,3 +95,13 @@ Student Addition writes deliberately use a stricter gate than `ownsRecord`: admi
 - **Postgres `bigint` columns arrive as JS strings** (no `setTypeParser` in `db.ts`). Any numeric comparison against them must cast in SQL (`::int`) or coerce (`Number()`). This bit for real in Jul 2026: `getStudentSchool` started resolving `batch.program_id` (bigint) after the #162 batch-join fix, `ownsRecord` did `[1].includes("1")` → false, and every non-admin got 403 on document upload/delete in prod for 3 days. `ownsRecord` now coerces and the query casts; keep both when touching this path.
 - **`PROGRAM_IDS` is hand-maintained** in `constants.ts` (transitional debt) — add a program id here when a non-JNV centre is onboarded.
 - Import `PROGRAM_IDS` from `@/lib/constants`, not `@/lib/permissions`, in client components — `permissions.ts` pulls in the server-only DB pool.
+
+## Operator removal verification (2026-09-08)
+
+The user authorized removal of the four PM permissions created that day for
+JNV Bangalore Urban (School code `49060`, permission IDs 322–325). All four
+authenticated production `DELETE /api/admin/users/[id]` requests returned 200
+and `success: true`. Read-only production verification found no remaining
+permissions for the four exact target emails. Use this Admin API for removal
+so permission guards and staff/mentorship cleanup run; do not replace it with
+a raw database delete. Shared canonical User records are preserved by this flow.

@@ -18,7 +18,7 @@ edges:
     condition: when a route or page needs to gate access
   - target: context/visits.md
     condition: when working on PM school visits or visit action types
-last_updated: 2026-09-17
+last_updated: 2026-09-23
 ---
 
 # Architecture
@@ -87,3 +87,15 @@ retain `source=school`, so their original dashboard return does not change.
 - No state library (Redux/Zustand) — React local state + Server Components only.
 - No REST/GraphQL client framework — `fetch` directly to the DB Service.
 - The DB Service itself lives in a **separate repo** (`/Users/deepanshmathur/Documents/AF/db-service`); migrations and write business logic are there, not here.
+
+## Navigation release verification
+
+LMS #332, #334 and #335 merged into main on September 18 in stack order.
+For #335 final head `2b2d3392`, staging job 541 verified the complete nested
+School/Student/Phase return journey for global and dedicated Holistic Admins on
+EMRS Bhopal, plus reload and ordinary School entry. Punjab Nodal had no staging
+phases, so its exact nested RSMS drill-down was covered by regression tests rather
+than a live browser claim. Final checks included 3,884 unit tests (3 skipped),
+lint/build and a completed Codex review without findings. Merge verification alone
+does not establish production deployment. Evidence: sibling
+`release-records/holistic-back-navigation-20260917/`.
