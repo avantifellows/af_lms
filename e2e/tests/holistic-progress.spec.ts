@@ -578,3 +578,42 @@ test("Coverage and Progress cards fit every Holistic viewport without page overf
     expect(horizontalPageScroll, `${viewport.width}x${viewport.height}`).toBeLessThanOrEqual(1);
   }
 });
+
+test("header Back from an Unassigned Student returns to Students & Progress with Unassigned still selected", async ({
+  holisticAdminPage: page,
+  holisticTeacherPage,
+}) => {
+  test.setTimeout(60_000);
+  const schoolCode = await fixtureSchoolCode();
+  const known = await knownUnassignedGrade11Student(holisticTeacherPage, schoolCode);
+  const unassignedBody = await progress(page, `${unassignedFilters}&school_code=${schoolCode}`);
+  const knownRow = unassignedBody.rows.find((row: UnassignedRow) => row.studentId === known.studentId);
+  expect(knownRow, "the known Unassigned Student is on the first Unassigned page").toBeDefined();
+  const studentName: string = knownRow.studentName;
+
+  await page.goto("/admin/holistic-mentorship?program_id=1");
+  const coverage = page.getByRole("region", { name: "Coverage" });
+  for (const label of ["Eligible Students", "Assigned", "Unassigned"]) {
+    await expect(coverage.getByText(label, { exact: true })).toBeVisible();
+  }
+  const table = page.getByRole("table", { name: "Student progress results" });
+  await expect(table.locator("tbody tr").first()).toBeVisible();
+
+  const progressFilter = page.getByLabel("Filter by Progress");
+  await progressFilter.selectOption("unassigned");
+  await expect(table.locator("tbody tr").first().getByText("Unassigned", { exact: true })).toBeVisible();
+  await page.getByLabel("Search Students").fill(studentName);
+  const knownStudentRow = table.getByRole("row").filter({ hasText: studentName });
+  await expect(knownStudentRow.first()).toBeVisible();
+
+  await knownStudentRow.first().getByRole("link", { name: `Open ${studentName}` }).click();
+  await expect(page).toHaveURL(new RegExp(
+    `/holistic-mentorship/students/${known.studentId}/phases/${known.activePhaseId}\\?.*source=progress`,
+  ));
+
+  await page.getByRole("link", { name: "Back to Students and Progress" }).click();
+  await expect(page).toHaveURL(/\/admin\/holistic-mentorship\?program_id=1$/);
+  await expect(page.getByLabel("Filter by Progress")).toHaveValue("unassigned");
+  await expect(table.getByRole("row").filter({ hasText: studentName }).first()
+    .getByText("Unassigned", { exact: true })).toBeVisible();
+});

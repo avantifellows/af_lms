@@ -65,6 +65,13 @@ const INITIAL_FILTERS: ProgressFilters = {
 const VIEW_STATE_KEY = "holistic-progress-view";
 const SCROLL_KEY = "holistic-progress-scroll";
 
+// Unassigned is only valid for the current year without a Mentor filter (the API returns 422 otherwise).
+function withValidProgress(filters: ProgressFilters, academicYear: string) {
+  if (filters.progress !== "unassigned") return filters;
+  if (!filters.mentor && academicYear === CURRENT_ACADEMIC_YEAR) return filters;
+  return { ...filters, progress: "" };
+}
+
 function readStoredView(): StoredProgressView | null {
   try {
     return JSON.parse(sessionStorage.getItem(VIEW_STATE_KEY) ?? "null");
@@ -87,9 +94,12 @@ function restoredPage(stored: StoredProgressView | null, scope: string) {
   return stored.page! > 0 ? stored.page! : 1;
 }
 
-function storedView(scope: string) {
+function storedView(scope: string, academicYear: string) {
   const stored = readStoredView();
-  return { filters: restoredFilters(stored, scope), page: restoredPage(stored, scope) };
+  const filters = restoredFilters(stored, scope);
+  const validFilters = withValidProgress(filters, academicYear);
+  const page = validFilters === filters ? restoredPage(stored, scope) : 1;
+  return { filters: validFilters, page };
 }
 
 async function readProgressResponse(response: Response): Promise<Payload> {
@@ -166,7 +176,7 @@ function useProgressView(academicYear: string, programId: number) {
   const [seenScope, setSeenScope] = useState(scope);
   if (seenScope !== scope) {
     setSeenScope(scope);
-    setFilters((current) => ({ ...current, school: "", mentor: "", phase: "" }));
+    setFilters((current) => withValidProgress({ ...current, school: "", mentor: "", phase: "" }, academicYear));
     setPage(1);
   }
   return { filters, setFilters, page, setPage, scope };
@@ -216,7 +226,7 @@ export default function ProgressWorkspace({
     programId,
   );
   const [ready, setReady] = useState(false);
-  const initialScope = useRef(scope);
+  const initialView = useRef({ scope, academicYear });
   const savedScroll = useRef(0);
   const scrollRestored = useRef(false);
   const params = useMemo(
@@ -237,7 +247,7 @@ export default function ProgressWorkspace({
 
 
   useEffect(() => {
-    const stored = storedView(initialScope.current);
+    const stored = storedView(initialView.current.scope, initialView.current.academicYear);
     savedScroll.current = Number(sessionStorage.getItem(SCROLL_KEY)) || 0;
     queueMicrotask(() => {
       setFilters(stored.filters);
@@ -261,7 +271,7 @@ export default function ProgressWorkspace({
   }, [loading, ready]);
 
   const update = (name: ProgressFilterName): FilterChangeHandler => (event) => {
-    setFilters((current) => ({ ...current, [name]: event.target.value }));
+    setFilters((current) => withValidProgress({ ...current, [name]: event.target.value }, academicYear));
     setPage(1);
   };
   const clearFilters = () => {

@@ -62,4 +62,10 @@ last_updated: 2026-09-24
 - `progress=unassigned` with a past year (JSON or CSV) or with `mentor_user_id` returns 422 `Invalid progress filters`.
 - Unassigned CSV: header without Question/Answer columns; Progress `unassigned`; Mentor, Phase, Phase Title, Availability, Completed At and Notes cells blank; no assigned Mentee from that School. All Assigned CSV: data-row count equals `counts.total`, and no row says `unassigned`. Quoted answer cells can contain line breaks, so parse the CSV rather than splitting lines.
 - PM/PA: in-scope School totals and rows equal the Admin's; program-wide rows stay inside their `coverageSchools`; an out-of-scope `school_code` returns 403.
-- UI: Unassigned is absent for past years and disabled while a Mentor is selected. Rows show "—" for Mentor, Phase and Completed on, plus an "Unassigned" badge. "Open Student" links to the active Phase with `source=progress`, or is a disabled "No active Phase" button. Picking a Mentor while Unassigned is selected can still show the 422 until the view-state slice lands.
+- UI: Unassigned is absent for past years and disabled while a Mentor is selected. Rows show "—" for Mentor, Phase and Completed on, plus an "Unassigned" badge. "Open Student" links to the active Phase with `source=progress`, or is a disabled "No active Phase" button.
+
+## Unassigned view state and Back journey QA checks (#345)
+
+- Pick a Mentor, or switch to a past Academic Year, while Unassigned is selected: Progress shows All Assigned, the page is 1, and no list or CSV request pairs `progress=unassigned` with `mentor_user_id` or a past `academic_year`. The 422 should never appear in normal use.
+- The stored `holistic-progress-view` sessionStorage entry is normalized before the first request: Unassigned with a Mentor or a past year becomes All Assigned on page 1. A current-year Unassigned view with no Mentor is restored as Unassigned, and it stays Unassigned across a Program change.
+- Browser journey (`holistic-progress.spec.ts`): choose Unassigned, search the known Unassigned Grade 11 Student, click "Open <name>" (active Phase, `source=progress`), then the read-only header link "Back to Students and Progress". The Progress filter is still Unassigned and the Student's row is listed. This asserts header Back, not native browser Back.
