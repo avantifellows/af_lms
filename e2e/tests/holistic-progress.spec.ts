@@ -8,7 +8,7 @@ test("progress counts, filters, pagination and CSV work with the production Cent
   expect(response.status()).toBe(200);
   const baseline = await response.json();
   expect(baseline.rows.length).toBeGreaterThan(0);
-  expect(baseline.counts.totalMapped).toBe(
+  expect(baseline.counts.total).toBe(
     baseline.counts.pending + baseline.counts.completed + baseline.counts.skipped + baseline.counts.noActivePhase,
   );
   const first = baseline.rows[0];
@@ -22,7 +22,7 @@ test("progress counts, filters, pagination and CSV work with the production Cent
     const filtered = await filteredResponse.json();
     expect(filtered.rows.length).toBeGreaterThan(0);
     expect(filtered.rows.every((row: Record<string, unknown>) => row[key] === value)).toBe(true);
-    expect(filtered.counts.totalMapped).toBeLessThanOrEqual(baseline.counts.totalMapped);
+    expect(filtered.counts.total).toBeLessThanOrEqual(baseline.counts.total);
   }
   const pageTwoResponse = await holisticAdminPage.request.get(`${endpoint}?${filters.replace("page=1", "page=2")}`);
   expect(pageTwoResponse.status()).toBe(200);

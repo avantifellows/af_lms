@@ -16,7 +16,7 @@ type Options = {
 };
 type Payload = {
   rows: Row[];
-  counts: { totalMapped: number; pending: number; completed: number; skipped: number; noActivePhase: number };
+  counts: { total: number; pending: number; completed: number; skipped: number; noActivePhase: number };
   options: Options;
   coverageSchools: Array<{ code: string; name: string }>;
   academicYears: string[];
@@ -42,7 +42,7 @@ type StoredProgressView = {
 };
 
 const EMPTY: Payload = {
-  rows: [], counts: { totalMapped: 0, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 },
+  rows: [], counts: { total: 0, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 },
   options: { schools: [], mentors: [], phases: [] }, coverageSchools: [], academicYears: [CURRENT_ACADEMIC_YEAR],
   refreshedAt: "", pageSize: 50,
 };
@@ -271,7 +271,7 @@ export default function ProgressWorkspace({
     setPage(1);
   };
   const filtered = progressIsFiltered(filters);
-  const totalPages = Math.max(1, Math.ceil(data.counts.totalMapped / 50));
+  const totalPages = Math.max(1, Math.ceil(data.counts.total / 50));
   return (
     <div aria-busy={loading} className="w-full min-w-0 max-w-full space-y-5">
       <ProgressIntro academicYear={academicYear} exporting={exporting} exportError={exportError}
@@ -309,7 +309,7 @@ export default function ProgressWorkspace({
         showStudentLinks={showStudentLinks}
       />
       <ProgressPagination page={page} totalPages={totalPages} rowCount={data.rows.length}
-        totalMapped={data.counts.totalMapped} onPageChange={setPage} />
+        total={data.counts.total} onPageChange={setPage} />
     </div>
   );
 }
@@ -352,7 +352,7 @@ function ProgressIntro({ academicYear, exporting, exportError, onExport }: {
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div>
         <h2 className="text-lg font-semibold text-text-primary">Students &amp; Progress</h2>
-        <p className="text-sm text-text-muted">Mapped Mentees only. Mapping and Notes are read-only for Admins.</p>
+        <p className="text-sm text-text-muted">Shows assigned Mentees. Mapping and Notes are read-only for Admins.</p>
       </div>
       <Button type="button" onClick={() => void onExport()} disabled={exporting}>
         <Download aria-hidden="true" className="h-4 w-4" /> {exporting ? "Exporting..." : "Export CSV"}
@@ -375,7 +375,7 @@ function refreshedLabel(refreshedAt: string) {
 
 function ProgressCounts({ counts }: { counts: Payload["counts"] }) {
   const items: Array<[string, number, string]> = [
-    ["Total mapped Mentees", counts.totalMapped, ""],
+    ["Assigned", counts.total, ""],
     ["Pending", counts.pending, "border-t-[3px] border-t-warning-border"],
     ["Completed", counts.completed, "border-t-[3px] border-t-success"],
     ["Skipped", counts.skipped, "border-t-[3px] border-t-info"],
@@ -428,7 +428,7 @@ function ProgressFilterPanel({ filters, options, onChange }: {
     <label className={FILTER_LABEL}>
       Progress
       <select aria-label="Filter by Progress" className={FILTER_CONTROL} value={filters.progress} onChange={onChange("progress")}>
-        <option value="">All Progress</option><option value="pending">Pending</option><option value="completed">Completed</option>
+        <option value="">All Assigned</option><option value="pending">Pending</option><option value="completed">Completed</option>
         <option value="skipped">Skipped</option><option value="no_active_phase">No active phase</option>
       </select>
     </label>
@@ -511,12 +511,12 @@ function ProgressEmptyState({ hasMappings, filtered, onClearFilters }: {
   return <div className="flex min-h-64 flex-col items-center justify-center gap-3 border-y border-border p-8 text-center">
     <Icon aria-hidden="true" className="h-8 w-8 text-text-muted" />
     <p className="text-base font-semibold text-text-primary">
-      {noMappings ? "No mapped Students exist for this Academic Year." : "No mapped Students match these filters."}
+      {noMappings ? "No assigned Students exist for this Academic Year." : "No assigned Students match these filters."}
     </p>
     <p className="text-sm text-text-muted">
       {noMappings
         ? "Students appear here after Teachers assign them from their School workspace."
-        : "Change or clear a filter to see more mapped Mentees."}
+        : "Change or clear a filter to see more assigned Mentees."}
     </p>
     {!noMappings && <Button type="button" variant="secondary" onClick={onClearFilters}>Clear filters</Button>}
   </div>;
@@ -530,7 +530,7 @@ function ProgressRows({ rows, loading, academicYear, programId, showStudentLinks
   showStudentLinks: boolean;
 }) {
   if (loading && rows.length === 0) {
-    return <tr><td colSpan={8} className="px-3 py-12 text-center text-text-muted"><span role="status">Loading mapped Students...</span></td></tr>;
+    return <tr><td colSpan={8} className="px-3 py-12 text-center text-text-muted"><span role="status">Loading assigned Students...</span></td></tr>;
   }
   return rows.map((row) => (
     <ProgressRow
@@ -611,18 +611,18 @@ function ProgressActions({ row, academicYear, programId }: {
   </div>;
 }
 
-function ProgressPagination({ page, totalPages, rowCount, totalMapped, onPageChange }: {
+function ProgressPagination({ page, totalPages, rowCount, total, onPageChange }: {
   page: number;
   totalPages: number;
   rowCount: number;
-  totalMapped: number;
+  total: number;
   onPageChange: React.Dispatch<React.SetStateAction<number>>;
 }) {
   const start = rowCount > 0 ? (page - 1) * 50 + 1 : 0;
   const end = rowCount > 0 ? start + rowCount - 1 : 0;
   return <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
     <span className="text-text-muted">
-      Showing <span className="font-mono">{start}-{end}</span> of <span className="font-mono">{totalMapped}</span> mapped Mentees
+      Showing <span className="font-mono">{start}-{end}</span> of <span className="font-mono">{total}</span> assigned Mentees
     </span>
     <div className="flex items-center gap-2">
       <Button className="min-w-11" variant="icon" aria-label="Previous page" disabled={page <= 1}

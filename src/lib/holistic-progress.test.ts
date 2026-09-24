@@ -134,7 +134,7 @@ describe("Holistic progress", () => {
     expect(result.rows.map(({ studentId, schoolCode }) => ({ studentId, schoolCode }))).toEqual([
       { studentId: 41, schoolCode: "SCH001" },
     ]);
-    expect(result.counts.totalMapped).toBe(1);
+    expect(result.counts.total).toBe(1);
     const csv = formatHolisticProgressCsv("2025-2026", 1, result.rows);
     expect(csv).toContain("School, One");
     expect(csv).toContain("AF-41");
@@ -224,7 +224,7 @@ describe("Holistic progress", () => {
     expect(sql).toContain("school_name ASC NULLS LAST, grade ASC NULLS LAST, student_name ASC NULLS LAST");
     expect(sql).toContain("AND notes.state = 'submitted'");
     expect(result.counts).toEqual({
-      totalMapped: 73,
+      total: 73,
       pending: 30,
       completed: 20,
       skipped: 18,
@@ -426,6 +426,6 @@ describe("Holistic progress", () => {
     }, adminPermission);
 
     expect(result.rows).toEqual([]);
-    expect(result.counts.totalMapped).toBe(51);
+    expect(result.counts.total).toBe(51);
   });
 });

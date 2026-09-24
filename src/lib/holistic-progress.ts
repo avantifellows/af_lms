@@ -93,7 +93,7 @@ export async function listHolisticProgress(
   options: { all?: boolean } = {}
 ): Promise<{
   rows: HolisticProgressRow[];
-  counts: { totalMapped: number; pending: number; completed: number; skipped: number; noActivePhase: number };
+  counts: { total: number; pending: number; completed: number; skipped: number; noActivePhase: number };
 }> {
   await reconcileHolisticMappings({
     academicYear: filters.academicYear,
@@ -305,7 +305,7 @@ export async function listHolisticProgress(
       answers: parsedAnswers(row.answers),
     })),
     counts: {
-      totalMapped: Number(first?.total_mapped ?? 0),
+      total: Number(first?.total_mapped ?? 0),
       pending: Number(first?.pending_count ?? 0),
       completed: Number(first?.completed_count ?? 0),
       skipped: Number(first?.skipped_count ?? 0),

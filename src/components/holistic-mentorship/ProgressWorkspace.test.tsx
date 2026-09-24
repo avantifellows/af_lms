@@ -12,7 +12,7 @@ const payload = {
     completedAt: "2026-07-01T10:30:00.000Z", notesAuthor: "Mentor One",
     notesAuthorEmail: "mentor@example.com", notesLastEditedAt: "2026-07-01", answers: [],
   }],
-  counts: { totalMapped: 73, pending: 30, completed: 20, skipped: 18, noActivePhase: 5 },
+  counts: { total: 73, pending: 30, completed: 20, skipped: 18, noActivePhase: 5 },
   options: {
     schools: [{ code: "SCH001", name: "School One" }],
     mentors: [{ userId: 9, name: "Mentor One" }],
@@ -86,6 +86,27 @@ describe("ProgressWorkspace", () => {
     );
   });
 
+  it("says Assigned instead of mapped in cards, the Progress filter, and pagination", async () => {
+    render(<ProgressWorkspace />);
+    await screen.findByText("Student One");
+
+    expect(screen.getByText("Assigned").nextElementSibling).toHaveTextContent("73");
+    expect(screen.getByText("Shows assigned Mentees. Mapping and Notes are read-only for Admins."))
+      .toBeInTheDocument();
+    const progress = screen.getByLabelText("Filter by Progress");
+    expect(progress).toHaveValue("");
+    expect(Array.from(progress.querySelectorAll("option")).map((option) => [option.value, option.textContent])).toEqual([
+      ["", "All Assigned"], ["pending", "Pending"], ["completed", "Completed"],
+      ["skipped", "Skipped"], ["no_active_phase", "No active phase"],
+    ]);
+    expect(screen.getByText(/Showing/)).toHaveTextContent("Showing 1-1 of 73 assigned Mentees");
+    const labels = [...screen.getAllByText((_, element) => element?.tagName === "P"
+      && element.className.includes("uppercase")), ...progress.querySelectorAll("option")];
+    expect(labels.map((element) => element.textContent).filter((text) => /mapped/i.test(text ?? ""))).toEqual([]);
+    expect(labels.map((element) => element.textContent).filter((text) => /%/.test(text ?? ""))).toEqual([]);
+    expect(screen.queryByText(/mapped/i)).not.toBeInTheDocument();
+  });
+
   it("links every permitted School to Assignment Coverage, including a School without Mappings", async () => {
     render(<ProgressWorkspace programId={78} />);
 
@@ -132,13 +153,13 @@ describe("ProgressWorkspace", () => {
 
     view.rerender(<ProgressWorkspace programId={78} />);
 
-    expect(await screen.findByText("Loading mapped Students...")).toBeInTheDocument();
+    expect(await screen.findByText("Loading assigned Students...")).toBeInTheDocument();
     expect(screen.queryByText("Student One")).not.toBeInTheDocument();
     finishEmrs(new Response(JSON.stringify({ ...payload, rows: [] })));
   });
 
   it("distinguishes an Academic Year with no Mappings from filters with no matches", async () => {
-    const emptyCounts = { totalMapped: 0, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 };
+    const emptyCounts = { total: 0, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 };
     vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({
       ...payload,
       rows: [],
@@ -147,7 +168,7 @@ describe("ProgressWorkspace", () => {
     }))));
     const first = render(<ProgressWorkspace />);
 
-    expect(await screen.findByText("No mapped Students exist for this Academic Year.")).toBeInTheDocument();
+    expect(await screen.findByText("No assigned Students exist for this Academic Year.")).toBeInTheDocument();
     first.unmount();
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
       ...payload,
@@ -156,7 +177,7 @@ describe("ProgressWorkspace", () => {
     }))));
     render(<ProgressWorkspace />);
 
-    expect(await screen.findByText("No mapped Students match these filters.")).toBeInTheDocument();
+    expect(await screen.findByText("No assigned Students match these filters.")).toBeInTheDocument();
   });
 
   it("restores filters, sorting, page, and scroll after drill-down navigation", async () => {

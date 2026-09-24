@@ -42,7 +42,7 @@ describe("Holistic progress API", () => {
     vi.resetAllMocks();
     mockSession.mockResolvedValue({ user: { email: "admin@example.com" } });
     mockAccess.mockResolvedValue({ ok: true, email: "admin@example.com", canEdit: true, permission } as never);
-    mockList.mockResolvedValue({ rows: [], counts: { totalMapped: 0, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 } });
+    mockList.mockResolvedValue({ rows: [], counts: { total: 0, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 } });
     mockOptions.mockResolvedValue({ schools: [], mentors: [], phases: [] });
     mockCoverageSchools.mockResolvedValue([
       { code: "SCH001", name: "School One" },

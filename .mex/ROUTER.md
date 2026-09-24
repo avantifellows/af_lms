@@ -26,7 +26,7 @@ edges:
     condition: when working on teacher feedback setup, the feedback form, or its report
   - target: patterns/INDEX.md
     condition: when starting a task — check the pattern index for a matching pattern file
-last_updated: 2026-09-23
+last_updated: 2026-09-24
 ---
 
 # Session Bootstrap
@@ -39,6 +39,7 @@ Then read this file fully before doing anything else in this session.
 
 **Working:**
 
+- Issue #340 slice #342 (prefactor, `feat/issue-340-holistic-students-progress-show-eligible-assigned`): `GET /api/holistic-mentorship/progress` now returns `counts.total` instead of `counts.totalMapped`. The value is unchanged: rows matching the list filters, and it drives pagination. Students & Progress copy says "Assigned" instead of "mapped": the Assigned card shows `counts.total`, the default Progress option is "All Assigned" (value `""`), and the subtitle, loading, empty-state and pagination text say assigned Mentees/Students. CSV, filters, sorting, SQL and permissions are unchanged. Coverage cards and the Unassigned option come in later #340 slices. Local e2e needs a sibling `../db-service_holistic_mentorship` checkout; `holistic-mentorship.spec.ts` currently fails in `beforeAll` on the local fixture DB (no unassigned Grade 11 Student is found), with or without this slice.
 - September 23 scaffold reconciliation: recovered useful September 7–18 local notes onto current main, preserving already-merged behavior and condensing superseded investigation stages. Context now records #304 rollout, #321 production smoke, #323 QA, and #332/#334/#335 staging/merge outcomes. New runbooks cover shared staging, local enrollment repair and cleanup of old-branch scaffold edits. Original local files are backed up privately under sibling `release-records/mex-cleanup-20260923-125614/`.
 - September 23 DB Service release: after #736 (`2df0e522`) and #737 (`2bea0794`) merged into main, main was merged cleanly into `release` as `1f70b41a`. The EC2 production deploy workflow succeeded for that SHA, its log shows the server fast-forwarded from `3f82649b` to `1f70b41a`, and live health/readiness returned 200. No historical data repair was run. See `context/student-addition.md` for cohort decisions and the unresolved attendance handoff.
 - September 23 fresh production-to-local repair retest: 37,892 LMS-created 2026–27 Students split 37,394 / 243 / 253 / 1 / 1. The owner confirmed the 91 newly found dropout/undo events were mistakes. A fresh local QA clone passed all five status repairs and 1,647 timestamp fixes in that order, with replay and full-table checks. All cohort current-status gaps are resolved locally. Production was read only. See `context/student-addition.md` and the private `release-records/repair-retest-confirmed-20260923/QA.md`.
