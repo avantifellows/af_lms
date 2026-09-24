@@ -57,6 +57,7 @@ const databaseRow = {
 describe("Holistic progress", () => {
   beforeEach(() => {
     mockQuery.mockReset();
+    mockQuery.mockResolvedValue([]);
     mockReconcile.mockReset();
     mockReconcile.mockResolvedValue(0);
   });
@@ -97,6 +98,83 @@ describe("Holistic progress", () => {
       schoolCode: undefined,
       permission: scopedPermission,
     });
+  });
+
+  it("applies the actor's School scope to current-year coverage", async () => {
+    mockQuery
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ eligible: "12", assigned: "9", unassigned: "3" }]);
+    const scopedPermission: UserPermission = {
+      email: "pm@example.com",
+      level: 1,
+      role: "program_manager",
+      school_codes: ["SCH001", "SCH002"],
+      program_ids: [1],
+    };
+
+    const result = await listHolisticProgress({
+      programId: 1,
+      academicYear: "2026-2027",
+      phaseId: 70,
+      schoolCode: "SCH001",
+      grade: 11,
+      mentorUserId: null,
+      progress: "completed",
+      search: "Asha",
+      sort: "progress",
+      direction: "desc",
+      page: 2,
+    }, scopedPermission);
+
+    expect(mockQuery).toHaveBeenCalledTimes(2);
+    const [sql, params] = mockQuery.mock.calls[1];
+    expect(String(sql)).toContain("mapping_school.code = ANY($7::text[])");
+    expect(params).toEqual([1, "2026-2027", "2026-2027", "SCH001", 11, "%Asha%", ["SCH001", "SCH002"]]);
+    expect(result.coverage).toEqual({ eligible: 12, assigned: 9, unassigned: 3 });
+  });
+
+  it("fails coverage closed for an empty resolved School scope", async () => {
+    await listHolisticProgress({
+      programId: 1,
+      academicYear: "2026-2027",
+      phaseId: null,
+      schoolCode: null,
+      grade: null,
+      mentorUserId: null,
+      progress: null,
+      search: "",
+      sort: DEFAULT_HOLISTIC_PROGRESS_SORT,
+      direction: "asc",
+      page: 1,
+    }, { email: "pa@example.com", level: 2, role: "program_admin", program_ids: [1] });
+
+    const [sql, params] = mockQuery.mock.calls[1];
+    expect(String(sql)).toContain("AND 1 = 0");
+    expect(params).toEqual([1, "2026-2027", "2026-2027", null, null, "%%"]);
+  });
+
+  it.each([
+    ["a past Academic Year", { academicYear: "2025-2026" }, {}],
+    ["a Mentor filter", { mentorUserId: 9 }, {}],
+    ["the CSV export", {}, { all: true }],
+  ])("does not read coverage for %s", async (_, overrides, options) => {
+    const result = await listHolisticProgress({
+      programId: 1,
+      academicYear: "2026-2027",
+      phaseId: null,
+      schoolCode: null,
+      grade: null,
+      mentorUserId: null,
+      progress: null,
+      search: "",
+      sort: DEFAULT_HOLISTIC_PROGRESS_SORT,
+      direction: "asc",
+      page: 1,
+      ...overrides,
+    }, adminPermission, options);
+
+    expect(mockQuery).toHaveBeenCalledTimes(1);
+    expect(result.coverage).toBeNull();
   });
 
   it("keeps an in-scope Mapping in rows, counts, and CSV after an out-of-scope School transfer", async () => {

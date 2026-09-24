@@ -1,5 +1,7 @@
 export type HolisticProgress = "pending" | "completed" | "skipped" | "no_active_phase";
 
+export type HolisticProgressCoverage = { eligible: number; assigned: number; unassigned: number };
+
 export type HolisticProgressRow = {
   studentId: number;
   studentName: string;

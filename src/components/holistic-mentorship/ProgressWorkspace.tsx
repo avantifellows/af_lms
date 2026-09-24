@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Badge, Button } from "@/components/ui";
 import { CURRENT_ACADEMIC_YEAR, PROGRAM_IDS } from "@/lib/constants";
-import type { HolisticProgressRow } from "@/types/holistic-progress";
+import type { HolisticProgressCoverage, HolisticProgressRow } from "@/types/holistic-progress";
 
 type Row = HolisticProgressRow;
 type Options = {
@@ -17,6 +17,7 @@ type Options = {
 type Payload = {
   rows: Row[];
   counts: { total: number; pending: number; completed: number; skipped: number; noActivePhase: number };
+  coverage: HolisticProgressCoverage | null;
   options: Options;
   coverageSchools: Array<{ code: string; name: string }>;
   academicYears: string[];
@@ -42,7 +43,7 @@ type StoredProgressView = {
 };
 
 const EMPTY: Payload = {
-  rows: [], counts: { total: 0, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 },
+  rows: [], counts: { total: 0, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 }, coverage: null,
   options: { schools: [], mentors: [], phases: [] }, coverageSchools: [], academicYears: [CURRENT_ACADEMIC_YEAR],
   refreshedAt: "", pageSize: 50,
 };
@@ -278,7 +279,8 @@ export default function ProgressWorkspace({
         onExport={exportProgress} />
       <AssignmentCoverageSchools schools={data.coverageSchools ?? []} programId={programId} />
       <ProgressFilterPanel filters={filters} options={data.options} onChange={update} />
-      <ProgressCounts counts={data.counts} />
+      <ProgressCounts counts={data.counts} coverage={filters.mentor ? null : data.coverage ?? null}
+        currentYear={academicYear === CURRENT_ACADEMIC_YEAR} />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2 text-xs text-text-muted">
           <Clock aria-hidden="true" className="h-4 w-4" />
@@ -362,7 +364,9 @@ function ProgressIntro({ academicYear, exporting, exportError, onExport }: {
       className="flex items-start gap-3 rounded-md bg-info-bg p-3 text-sm text-text-secondary">
       <History aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-text-muted" />
       <p><strong className="text-text-primary">Viewing {academicYear}.</strong> This view shows Students
-        who had a Mapping during that Academic Year. Earlier academic years are read-only.</p>
+        who had a Mapping during that Academic Year. Earlier academic years are read-only. Eligible and
+        Unassigned counts aren&apos;t available for earlier years because LMS keeps no trustworthy record of
+        historical eligibility.</p>
     </div>}
     {exportError && <p role="alert" className="text-sm text-danger">{exportError}</p>}
   </>;
@@ -373,20 +377,45 @@ function refreshedLabel(refreshedAt: string) {
   return <>Last refreshed <span className="font-mono">{new Date(refreshedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}</span></>;
 }
 
-function ProgressCounts({ counts }: { counts: Payload["counts"] }) {
-  const items: Array<[string, number, string]> = [
-    ["Assigned", counts.total, ""],
+type CountCard = [label: string, value: number | string, accent: string];
+
+const SM_COUNT_COLUMNS: Record<number, string> = { 3: "sm:grid-cols-3", 4: "sm:grid-cols-4", 5: "sm:grid-cols-5" };
+
+function ProgressCounts({ counts, coverage, currentYear }: {
+  counts: Payload["counts"];
+  coverage: HolisticProgressCoverage | null;
+  currentYear: boolean;
+}) {
+  const progress: CountCard[] = [
     ["Pending", counts.pending, "border-t-[3px] border-t-warning-border"],
     ["Completed", counts.completed, "border-t-[3px] border-t-success"],
     ["Skipped", counts.skipped, "border-t-[3px] border-t-info"],
   ];
-  if (counts.noActivePhase > 0) items.push(["No active phase", counts.noActivePhase, ""]);
-  return <div className={`grid grid-cols-2 gap-px overflow-hidden rounded-md border border-border bg-border ${items.length === 5 ? "sm:grid-cols-5" : "sm:grid-cols-4"}`}>
-    {items.map(([label, value, accent]) => <div key={label} className={`bg-bg-card px-4 py-3 last:col-span-2 sm:last:col-span-1 ${accent}`}>
-      <p className="text-[10px] font-extrabold uppercase tracking-wide text-text-muted">{label}</p>
-      <p className="mt-1 font-mono text-2xl font-extrabold text-text-primary">{value}</p>
-    </div>)}
+  if (counts.noActivePhase > 0) progress.push(["No active phase", counts.noActivePhase, ""]);
+  if (!currentYear) return <CountGroup label="Progress" cards={[["Assigned", counts.total, ""], ...progress]} />;
+  const coverageCards: CountCard[] = [
+    ["Eligible Students", coverage?.eligible ?? "—", ""],
+    ["Assigned", coverage?.assigned ?? "—", ""],
+    ["Unassigned", coverage?.unassigned ?? "—", ""],
+  ];
+  return <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,3fr)_minmax(0,4fr)]">
+    <CountGroup label="Coverage" cards={coverageCards} />
+    <CountGroup label="Progress" cards={progress} />
   </div>;
+}
+
+function CountGroup({ label, cards }: { label: string; cards: CountCard[] }) {
+  const id = `holistic-progress-${label.toLowerCase()}-counts`;
+  const oddLast = cards.length % 2 === 1 ? "last:col-span-2 sm:last:col-span-1" : "";
+  return <section aria-labelledby={id} className="min-w-0 space-y-2">
+    <h3 id={id} className="text-xs font-semibold text-text-secondary">{label}</h3>
+    <ul className={`grid grid-cols-2 gap-px overflow-hidden rounded-md border border-border bg-border ${SM_COUNT_COLUMNS[cards.length]}`}>
+      {cards.map(([cardLabel, value, accent]) => <li key={cardLabel} className={`bg-bg-card px-4 py-3 ${oddLast} ${accent}`}>
+        <p className="text-[10px] font-extrabold uppercase tracking-wide text-text-muted">{cardLabel}</p>
+        <p className="mt-1 font-mono text-2xl font-extrabold text-text-primary">{value}</p>
+      </li>)}
+    </ul>
+  </section>;
 }
 
 const FILTER_LABEL = "block min-w-0 text-[11px] font-extrabold uppercase tracking-wide text-text-muted";

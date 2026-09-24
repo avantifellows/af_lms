@@ -21,7 +21,7 @@ edges:
     condition: when adding a write that must proxy to the DB Service
   - target: patterns/add-api-route.md
     condition: when adding a route that reads or writes
-last_updated: 2026-09-23
+last_updated: 2026-09-24
 ---
 
 # Data Access
@@ -85,6 +85,23 @@ The September 11, 2026 production Admin progress request for Program 1 / 2026–
 `listHolisticProgress` now materializes the selected current-year Program roster once and reuses it in both eligibility and Grade lookup. Keep both references on the same snapshot. Program, Academic Year, current-year, and Grade 11/12 constraints live in the snapshot; its consumers retain Student/School matching and the single-Grade check without repeating those filters. The snapshot carries only Centre ID, User ID, and Grade. The existing School predicate still scopes Mapping history before first-start/latest-Mapping selection; the single-Grade HAVING check and historical enrollment fallback remain intact. Do not replace the shared membership view or increase the database timeout to fix this consumer.
 
 The progress route catches failures after preserving its auth/permission gates, returning a safe JSON 503 for statement cancellation/timeouts and 500 for other failures; logs contain only an error code. The client handles empty/non-JSON bodies and permits Refresh to recover, without surfacing errors from aborted requests. Local E2E fixtures mirror the current DB Service view so they exercise the same roster rules. Read-only production timing of the final SQL was approximately 1.1 seconds for 50 rows / 1,670 mapped Students; the previous query timed out. See the fix PR for final local and staging verification.
+
+## Holistic Students & Progress coverage query (#343)
+
+`listHolisticProgress` returns `coverage: { eligible, assigned, unassigned }` only for the current Academic Year with no Mentor filter and not for the CSV (`all`) read; otherwise `null`. It runs after reconciliation, in parallel with the list query. Shape:
+
+- `holisticMenteeSchoolsCte` — in-scope Schools with at least one active current-year Mapping in the Program. The current-year School dropdown in `getHolisticProgressOptions` uses the same fragment, so selectable Schools and coverage cannot drift. The School scope predicate is applied here (`mapping_school` alias). The past-year dropdown still uses latest-Mapping history.
+- `CURRENT_ELIGIBLE_ROSTER_CTES` — a query-local `MATERIALIZED` Program/year `centre_students` snapshot (Grades 11/12), joined to the Program's active Centres and grouped by (School, Student User) with exactly one Grade, then restricted to mentee Schools, non-dropout Students, `school_code`, Grade and Student search. The Unassigned-list slice reuses this building block.
+- A pair is Assigned when an active current-year Mapping exists for that Student at that School and Program, exactly like School Assignment Coverage.
+
+The Mapping module's `ELIGIBLE_ROSTER_CTE_SQL` is untouched; parity is enforced by `holistic-progress.spec.ts` against the Teacher roster API. Read-only `EXPLAIN (ANALYZE, BUFFERS)` of the captured coverage SELECT inside `BEGIN READ ONLY` with `statement_timeout = 15s`, no filters, Admin scope (September 24, 2026):
+
+| Database | Program 1 | Program 78 |
+| --- | --- | --- |
+| Local production-derived snapshot `dbservice_status_repair_snapshot_20260923` (1,808 / 191 active Mappings) | 231 ms | 14 ms |
+| Local dev `dbservice_dev` (108 / 0 active Mappings) | 581 ms | 4 ms |
+
+The current-year School options query measured 2.4 ms (Program 1) and 0.8 ms (Program 78) on the snapshot. The snapshot is a local clone, not live production; never invoke `listHolisticProgress` against production, because its reconciliation mutates.
 
 ## Holistic Grade 12 phase labels
 

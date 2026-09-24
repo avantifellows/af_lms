@@ -3,9 +3,17 @@ import { query } from "./db";
 import { reconcileHolisticMappings } from "./holistic-reconciliation";
 import { buildHolisticSchoolScopePredicate } from "./holistic-scope";
 import type { UserPermission } from "./permissions";
-import type { HolisticProgress, HolisticProgressRow } from "@/types/holistic-progress";
+import type {
+  HolisticProgress,
+  HolisticProgressCoverage,
+  HolisticProgressRow,
+} from "@/types/holistic-progress";
 
-export type { HolisticProgress, HolisticProgressRow } from "@/types/holistic-progress";
+export type {
+  HolisticProgress,
+  HolisticProgressCoverage,
+  HolisticProgressRow,
+} from "@/types/holistic-progress";
 export type HolisticProgressSort = "student_name" | "school" | "grade" | "mentor" | "phase" | "progress";
 export type HolisticProgressDirection = "asc" | "desc";
 export const DEFAULT_HOLISTIC_PROGRESS_SORT: HolisticProgressSort = "school";
@@ -87,6 +95,104 @@ function parsedAnswers(value: unknown): HolisticProgressRow["answers"] {
   });
 }
 
+// In-scope Schools with at least one active current-year Mapping in the Program.
+// The current-year School dropdown and coverage share this set so they cannot drift.
+// The scope clause must use the `mapping_school` alias.
+function holisticMenteeSchoolsCte(
+  placeholders: { programId: string; academicYear: string; currentYear: string },
+  schoolScopeSql: string,
+) {
+  return `holistic_mentee_schools AS (
+       SELECT DISTINCT mapping_school.id AS school_id
+       FROM holistic_mentorship_mentor_mentee_mappings mapping
+       JOIN school mapping_school ON mapping_school.id = mapping.school_id
+       WHERE mapping.program_id = ${placeholders.programId}
+         AND mapping.academic_year = ${placeholders.academicYear}
+         AND ${placeholders.academicYear} = ${placeholders.currentYear}
+         AND mapping.ended_at IS NULL
+         ${schoolScopeSql}
+     )`;
+}
+
+// Program-wide current-year eligible roster: one row per (School, Student) pair,
+// using the same eligibility rules as School Assignment Coverage. Requires the
+// `holistic_mentee_schools` CTE. Placeholders: $1 Program, $2 Academic Year,
+// $3 current Academic Year, $4 School code, $5 Grade, $6 search pattern.
+const CURRENT_ELIGIBLE_ROSTER_CTES = `current_roster_snapshot AS MATERIALIZED (
+       -- Resolve the Centre membership view once for this Program/year.
+       SELECT centre_id, user_id, grade
+       FROM centre_students
+       WHERE program_id = $1 AND academic_year = $2
+         AND grade IN (11, 12) AND $2 = $3
+     ), current_school_roster AS (
+       SELECT roster_centre.school_id, roster_student.user_id, MIN(roster_student.grade) AS grade
+       FROM current_roster_snapshot roster_student
+       JOIN centres roster_centre
+         ON roster_centre.id = roster_student.centre_id
+        AND roster_centre.program_id = $1
+        AND roster_centre.is_active IS TRUE
+       GROUP BY roster_centre.school_id, roster_student.user_id
+       HAVING COUNT(DISTINCT roster_student.grade) = 1
+     ), current_eligible_roster AS (
+       SELECT roster.school_id, st.id AS student_id, roster.grade
+       FROM current_school_roster roster
+       JOIN holistic_mentee_schools mentee_school ON mentee_school.school_id = roster.school_id
+       JOIN school roster_school ON roster_school.id = roster.school_id
+       JOIN student st ON st.user_id = roster.user_id
+       JOIN "user" student_user ON student_user.id = roster.user_id
+       WHERE st.status IS DISTINCT FROM 'dropout'
+         AND ($4::text IS NULL OR roster_school.code = $4)
+         AND ($5::int IS NULL OR roster.grade = $5)
+         AND ($6 = '%%' OR st.student_id ILIKE $6 OR
+              TRIM(COALESCE(student_user.first_name, '') || ' ' || COALESCE(student_user.last_name, '')) ILIKE $6)
+     )`;
+
+async function getHolisticProgressCoverage(
+  filters: HolisticProgressFilters,
+  permission: UserPermission,
+): Promise<HolisticProgressCoverage> {
+  const schoolScope = buildHolisticSchoolScopePredicate(permission, {
+    startIndex: 7,
+    schoolCodeColumn: "mapping_school.code",
+    schoolRegionColumn: "mapping_school.region",
+  });
+  const schoolScopeSql = schoolScope.clause ? `AND ${schoolScope.clause}` : "";
+  const rows = await query<{ eligible: number | string; assigned: number | string; unassigned: number | string }>(
+    `WITH ${holisticMenteeSchoolsCte({ programId: "$1", academicYear: "$2", currentYear: "$3" }, schoolScopeSql)},
+     ${CURRENT_ELIGIBLE_ROSTER_CTES}, coverage AS (
+       SELECT EXISTS (
+                SELECT 1
+                FROM holistic_mentorship_mentor_mentee_mappings mapping
+                WHERE mapping.student_id = eligible.student_id
+                  AND mapping.school_id = eligible.school_id
+                  AND mapping.program_id = $1
+                  AND mapping.academic_year = $2
+                  AND mapping.ended_at IS NULL
+              ) AS assigned
+       FROM current_eligible_roster eligible
+     )
+     SELECT COUNT(*) AS eligible,
+            COUNT(*) FILTER (WHERE assigned) AS assigned,
+            COUNT(*) FILTER (WHERE NOT assigned) AS unassigned
+     FROM coverage`,
+    [
+      filters.programId,
+      filters.academicYear,
+      CURRENT_ACADEMIC_YEAR,
+      filters.schoolCode,
+      filters.grade,
+      `%${filters.search}%`,
+      ...schoolScope.params,
+    ],
+  );
+  const first = rows[0];
+  return {
+    eligible: Number(first?.eligible ?? 0),
+    assigned: Number(first?.assigned ?? 0),
+    unassigned: Number(first?.unassigned ?? 0),
+  };
+}
+
 export async function listHolisticProgress(
   filters: HolisticProgressFilters,
   permission: UserPermission,
@@ -94,6 +200,7 @@ export async function listHolisticProgress(
 ): Promise<{
   rows: HolisticProgressRow[];
   counts: { total: number; pending: number; completed: number; skipped: number; noActivePhase: number };
+  coverage: HolisticProgressCoverage | null;
 }> {
   await reconcileHolisticMappings({
     academicYear: filters.academicYear,
@@ -101,6 +208,9 @@ export async function listHolisticProgress(
     programId: filters.programId,
     permission,
   });
+  // Coverage runs after reconciliation so Mappings it ended count as Unassigned.
+  const includeCoverage = filters.academicYear === CURRENT_ACADEMIC_YEAR &&
+    filters.mentorUserId === null && !options.all;
   const direction = filters.direction === "desc" ? "DESC" : "ASC";
   const order = progressOrder(filters.sort, direction);
   const limit = options.all ? null : 50;
@@ -111,7 +221,7 @@ export async function listHolisticProgress(
     schoolRegionColumn: "mapping_school.region",
   });
   const schoolScopeSql = schoolScope.clause ? `AND ${schoolScope.clause}` : "";
-  const rows = await query<ProgressDatabaseRow>(
+  const [rows, coverage] = await Promise.all([query<ProgressDatabaseRow>(
     `WITH scoped_mappings AS (
        SELECT mapping.*
        FROM holistic_mentorship_mentor_mentee_mappings mapping
@@ -281,7 +391,7 @@ export async function listHolisticProgress(
       CURRENT_ACADEMIC_YEAR,
       ...schoolScope.params,
     ]
-  );
+  ), includeCoverage ? getHolisticProgressCoverage(filters, permission) : null]);
   const first = rows[0];
   return {
     rows: rows.filter((row) => row.student_id !== null).map((row) => ({
@@ -311,6 +421,7 @@ export async function listHolisticProgress(
       skipped: Number(first?.skipped_count ?? 0),
       noActivePhase: Number(first?.no_active_phase_count ?? 0),
     },
+    coverage,
   };
 }
 
@@ -337,13 +448,20 @@ export async function getHolisticProgressOptions(
          WHERE ($2 <> $3 OR mapping.ended_at IS NULL)
          ORDER BY mapping.student_id, mapping.started_at DESC, mapping.id DESC
        )`;
-  const [schools, mentors, phases] = await Promise.all([
-    query<{ code: string; name: string }>(
-      `${latestMappings}
+  const schoolsSql = academicYear === CURRENT_ACADEMIC_YEAR
+    ? `WITH ${holisticMenteeSchoolsCte({ programId: "$1", academicYear: "$2", currentYear: "$3" }, schoolScopeSql)}
+       SELECT school.code, school.name
+       FROM holistic_mentee_schools mentee_school
+       JOIN school ON school.id = mentee_school.school_id
+       ORDER BY school.name, school.code`
+    : `${latestMappings}
        SELECT DISTINCT school.code, school.name
        FROM latest_mapping mapping
        JOIN school ON school.id = mapping.school_id
-       ORDER BY school.name, school.code`,
+       ORDER BY school.name, school.code`;
+  const [schools, mentors, phases] = await Promise.all([
+    query<{ code: string; name: string }>(
+      schoolsSql,
       [programId, academicYear, CURRENT_ACADEMIC_YEAR, ...schoolScope.params]
     ),
     query<{ user_id: number | string; name: string | null; email: string }>(

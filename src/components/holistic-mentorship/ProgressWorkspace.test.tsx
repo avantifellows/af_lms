@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -13,6 +13,7 @@ const payload = {
     notesAuthorEmail: "mentor@example.com", notesLastEditedAt: "2026-07-01", answers: [],
   }],
   counts: { total: 73, pending: 30, completed: 20, skipped: 18, noActivePhase: 5 },
+  coverage: { eligible: 90, assigned: 73, unassigned: 17 },
   options: {
     schools: [{ code: "SCH001", name: "School One" }],
     mentors: [{ userId: 9, name: "Mentor One" }],
@@ -26,6 +27,11 @@ const payload = {
   pageSize: 50,
   refreshedAt: "2026-07-17T10:00:00.000Z",
 };
+
+function cardValues(group: string) {
+  return within(screen.getByRole("region", { name: group })).getAllByRole("listitem")
+    .map((card) => [card.firstElementChild?.textContent, card.lastElementChild?.textContent]);
+}
 
 describe("ProgressWorkspace", () => {
   beforeEach(() => {
@@ -101,10 +107,61 @@ describe("ProgressWorkspace", () => {
     ]);
     expect(screen.getByText(/Showing/)).toHaveTextContent("Showing 1-1 of 73 assigned Mentees");
     const labels = [...screen.getAllByText((_, element) => element?.tagName === "P"
-      && element.className.includes("uppercase")), ...progress.querySelectorAll("option")];
+      && element.className.includes("uppercase")), ...screen.getAllByRole("heading"),
+      ...progress.querySelectorAll("option")];
     expect(labels.map((element) => element.textContent).filter((text) => /mapped/i.test(text ?? ""))).toEqual([]);
     expect(labels.map((element) => element.textContent).filter((text) => /%/.test(text ?? ""))).toEqual([]);
     expect(screen.queryByText(/mapped/i)).not.toBeInTheDocument();
+  });
+
+  it("shows current-year Coverage and Progress card groups", async () => {
+    render(<ProgressWorkspace />);
+    await screen.findByText("Student One");
+
+    expect(cardValues("Coverage")).toEqual([
+      ["Eligible Students", "90"], ["Assigned", "73"], ["Unassigned", "17"],
+    ]);
+    expect(cardValues("Progress")).toEqual([
+      ["Pending", "30"], ["Completed", "20"], ["Skipped", "18"], ["No active phase", "5"],
+    ]);
+  });
+
+  it("shows a dash in every Coverage card while a Mentor is selected", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify(payload)))));
+    render(<ProgressWorkspace />);
+    await screen.findByText("Student One");
+
+    fireEvent.change(screen.getByLabelText("Filter by Mentor"), { target: { value: "9" } });
+
+    expect(cardValues("Coverage")).toEqual([
+      ["Eligible Students", "—"], ["Assigned", "—"], ["Unassigned", "—"],
+    ]);
+    await screen.findByText("Student One");
+    expect(cardValues("Coverage")).toEqual([
+      ["Eligible Students", "—"], ["Assigned", "—"], ["Unassigned", "—"],
+    ]);
+  });
+
+  it("shows only an Assigned total before progress counts for a past Academic Year", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      ...payload,
+      counts: { total: 41, pending: 11, completed: 25, skipped: 5, noActivePhase: 0 },
+      coverage: null,
+    }))));
+    render(<ProgressWorkspace academicYear="2025-2026" />);
+    await screen.findByText("Student One");
+
+    expect(screen.queryByRole("region", { name: "Coverage" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Eligible Students")).not.toBeInTheDocument();
+    expect(screen.queryByText("Unassigned")).not.toBeInTheDocument();
+    expect(cardValues("Progress")).toEqual([
+      ["Assigned", "41"], ["Pending", "11"], ["Completed", "25"], ["Skipped", "5"],
+    ]);
+    expect(screen.getByText(/Viewing 2025-2026/).parentElement).toHaveTextContent(
+      "Viewing 2025-2026. This view shows Students who had a Mapping during that Academic Year. " +
+      "Earlier academic years are read-only. Eligible and Unassigned counts aren't available for " +
+      "earlier years because LMS keeps no trustworthy record of historical eligibility.",
+    );
   });
 
   it("links every permitted School to Assignment Coverage, including a School without Mappings", async () => {

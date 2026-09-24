@@ -1,7 +1,7 @@
 ---
 name: debug-holistic-progress
 description: Trace empty HTTP 500 responses and database timeouts in Holistic Admin progress.
-last_updated: 2026-09-23
+last_updated: 2026-09-24
 ---
 
 # Debug Holistic Admin progress
@@ -44,3 +44,12 @@ last_updated: 2026-09-23
   Student-to-School return, native Back visits the Student; the School header is
   the explicit return to Program progress. If staging lacks incident-Program phases,
   disclose that limit and test the shared nested route with configured data.
+
+## Coverage invariants and QA checks (#343)
+
+- Current year, no filters: `coverage.eligible === coverage.assigned + coverage.unassigned` and `coverage.assigned === counts.total === pending + completed + skipped + noActivePhase`.
+- For one School, coverage must equal the Teacher roster (`GET /api/holistic-mentorship/mappings`, Teacher session — Admin roles get 403 there): student count, owned count, unowned count. The same holds with `grade` or `search` on both sides.
+- `phase_id`, `progress`, `page`, `sort` and `direction` never change coverage. `mentor_user_id` and past years give `coverage: null`; the UI then shows "—" (Mentor) or hides the Coverage group (past year).
+- Summing per-School coverage over `options.schools` equals program coverage. A School whose active Mappings all end leaves `options.schools` and coverage but stays in `coverageSchools`.
+- To seed exclusions locally, mutate only the **Unassigned** fixture Student (dropout, or an extra current Grade 12 `enrollment_record` for conflicting Grades) so reconciliation cannot end fixture Mappings. End Mappings directly in SQL and restore the exact rows; do not deactivate the fixture Centre, because reconciliation would end every fixture Mapping and erase draft answers.
+- For batch enrollments, `enrollment_record.group_id` holds `batch.id`, not `"group".id` (the same convention the view uses for Grades). `holistic-mentorship.spec.ts` `beforeAll` joins it through `"group"`, so on the local dump its unassigned-Student lookup returns nothing. With that join corrected, the spec next fails because the fixture Teacher gets "Access Denied" on the School page. Both failures predate #340.
