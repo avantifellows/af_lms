@@ -131,7 +131,7 @@ describe("ProgressWorkspace", () => {
       ["", "All Assigned"], ["pending", "Pending"], ["completed", "Completed"],
       ["skipped", "Skipped"], ["no_active_phase", "No active phase"], ["unassigned", "Unassigned"],
     ]);
-    expect(screen.getByText(/Showing/)).toHaveTextContent("Showing 1-1 of 73 assigned Mentees");
+    expect(screen.getByText(/Showing/)).toHaveTextContent("Showing 1–1 of 73 assigned Mentees");
     const labels = [...screen.getAllByText((_, element) => element?.tagName === "P"
       && element.className.includes("uppercase")), ...screen.getAllByRole("heading"),
       ...progress.querySelectorAll("option")];
@@ -261,7 +261,7 @@ describe("ProgressWorkspace", () => {
     await showUnassigned();
     await screen.findAllByRole("row", { name: /Asha Rao/ });
 
-    expect(screen.getByText(/Showing/)).toHaveTextContent("Showing 1-2 of 212 Unassigned Students");
+    expect(screen.getByText(/Showing/)).toHaveTextContent("Showing 1–2 of 212 Unassigned Students");
     expect(cardValues("Progress")).toEqual([["Pending", "0"], ["Completed", "0"], ["Skipped", "0"]]);
     expect(cardValues("Coverage")).toEqual([
       ["Eligible Students", "90"], ["Assigned", "73"], ["Unassigned", "17"],
@@ -282,6 +282,30 @@ describe("ProgressWorkspace", () => {
       ...unassignedPayload, rows: [], counts: { total: 0, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 },
     })));
     expect(await screen.findByText("No Unassigned Students match these filters.")).toBeInTheDocument();
+  });
+
+  it("keeps Unassigned selected when Clear filters is used from the Unassigned empty state", async () => {
+    const fetchMock = vi.fn().mockImplementation((input: string) => Promise.resolve(new Response(JSON.stringify(
+      input.includes("progress=unassigned")
+        ? { ...unassignedPayload, rows: [], counts: { total: 0, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 } }
+        : payload,
+    ))));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ProgressWorkspace />);
+    await screen.findByText("Student One");
+    fireEvent.change(screen.getByLabelText("Filter by Grade"), { target: { value: "11" } });
+    fireEvent.change(screen.getByLabelText("Filter by Progress"), { target: { value: "unassigned" } });
+    const empty = (await screen.findByText("No Unassigned Students match these filters.")).parentElement!;
+
+    fireEvent.click(within(empty).getByRole("button", { name: "Clear filters" }));
+
+    expect(screen.getByLabelText("Filter by Progress")).toHaveValue("unassigned");
+    expect(screen.getByLabelText("Filter by Grade")).toHaveValue("");
+    await waitFor(() => {
+      const url = String(fetchMock.mock.calls.at(-1)?.[0]);
+      expect(url).toContain("progress=unassigned");
+      expect(url).not.toContain("grade=");
+    });
   });
 
   it("exports the Unassigned list with the current filters and no page", async () => {

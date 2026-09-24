@@ -274,10 +274,11 @@ export default function ProgressWorkspace({
     setFilters((current) => withValidProgress({ ...current, [name]: event.target.value }, academicYear));
     setPage(1);
   };
-  const clearFilters = () => {
-    setFilters((current) => ({ ...INITIAL_FILTERS, sort: current.sort, direction: current.direction }));
+  const resetFilters = (progress: string) => {
+    setFilters((current) => ({ ...INITIAL_FILTERS, progress, sort: current.sort, direction: current.direction }));
     setPage(1);
   };
+  const clearFilters = () => resetFilters("");
   const changeSort = (key: string) => {
     setFilters((current) => ({
       ...current,
@@ -324,7 +325,7 @@ export default function ProgressWorkspace({
         sort={filters.sort}
         direction={filters.direction}
         onSort={changeSort}
-        onClearFilters={clearFilters}
+        onClearFilters={unassigned ? () => resetFilters("unassigned") : clearFilters}
         showStudentLinks={showStudentLinks}
         unassigned={unassigned}
       />
@@ -731,7 +732,7 @@ function ProgressPagination({ page, totalPages, rowCount, total, unassigned, onP
   const end = rowCount > 0 ? start + rowCount - 1 : 0;
   return <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
     <span className="text-text-muted">
-      Showing <span className="font-mono">{start}-{end}</span> of <span className="font-mono">{total}</span> {unassigned ? "Unassigned Students" : "assigned Mentees"}
+      Showing <span className="font-mono">{start}–{end}</span> of <span className="font-mono">{total}</span> {unassigned ? "Unassigned Students" : "assigned Mentees"}
     </span>
     <div className="flex items-center gap-2">
       <Button className="min-w-11" variant="icon" aria-label="Previous page" disabled={page <= 1}
