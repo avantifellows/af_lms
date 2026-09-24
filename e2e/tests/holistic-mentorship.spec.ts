@@ -5,6 +5,7 @@ import { getTestPool } from "../helpers/db";
 
 type Fixture = {
   schoolCode: string;
+  centreId: number;
   draftStudentId: number;
   unassignedStudentId: number;
   unassignedStudentExternalId: string;
@@ -33,6 +34,7 @@ test.describe("Holistic Mentorship release workflows", () => {
     try {
       const result = await pool.query<{
         school_code: string;
+        centre_id: string;
         draft_student_id: string;
         unassigned_student_id: string;
         former_student_id: string;
@@ -43,7 +45,7 @@ test.describe("Holistic Mentorship release workflows", () => {
         grade_11_phase_id: string;
         grade_12_phase_id: string;
       }>(
-        `SELECT school.code AS school_code,
+        `SELECT school.code AS school_code, centre.id AS centre_id,
                 (SELECT notes.student_id FROM holistic_mentorship_post_session_notes notes
                  WHERE notes.state = 'draft' LIMIT 1) AS draft_student_id,
                 (SELECT student.id FROM "group" school_group
@@ -55,8 +57,7 @@ test.describe("Holistic Mentorship release workflows", () => {
                  JOIN grade ON grade.id = grade_enrollment.group_id AND grade.number = 11
                  JOIN LATERAL (
                    SELECT batch.program_id FROM enrollment_record batch_enrollment
-                   JOIN "group" batch_group ON batch_group.id = batch_enrollment.group_id AND batch_group.type = 'batch'
-                   JOIN batch ON batch.id = batch_group.child_id
+                   JOIN batch ON batch.id = batch_enrollment.group_id
                    WHERE batch_enrollment.user_id = student.user_id
                      AND batch_enrollment.group_type = 'batch' AND batch_enrollment.is_current IS TRUE
                    ORDER BY array_position(ARRAY[1, 2, 64]::int[], batch.program_id), batch_enrollment.id LIMIT 1
@@ -112,6 +113,7 @@ test.describe("Holistic Mentorship release workflows", () => {
       );
       fixture = {
         schoolCode: row.school_code,
+        centreId: Number(row.centre_id),
         draftStudentId: Number(row.draft_student_id),
         unassignedStudentId: Number(row.unassigned_student_id),
         unassignedStudentExternalId: unassignedStudent.rows[0].student_id,
@@ -642,7 +644,7 @@ test.describe("Holistic Mentorship release workflows", () => {
   }) => {
     const stale = await formerMentorPage.request.get(
       `/api/holistic-mentorship/students/${fixture.formerStudentId}/phases/${fixture.activeGrade12PhaseId}` +
-      `?school_code=${fixture.schoolCode}&academic_year=2026-2027`
+      `?school_code=${fixture.schoolCode}&program_id=1&academic_year=2026-2027`
     );
     expect(stale.status()).toBe(404);
 
@@ -727,7 +729,8 @@ function assignmentSummary(page: Page) {
 }
 
 async function openTeacherWorkspace(page: Page) {
-  await page.goto(`/school/${fixture.schoolCode}`);
+  // Centre-seated Teachers are confined to their Centre page, which hosts the Holistic tab.
+  await page.goto(`/centre/${fixture.centreId}`);
   const tab = page.getByRole("tab", { name: "Holistic Mentorship", exact: true });
   await expect(tab).toBeVisible();
   await tab.click();
