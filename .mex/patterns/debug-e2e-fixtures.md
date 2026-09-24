@@ -39,6 +39,8 @@ expectations, or fixture rows missing a relationship the app now requires.
 - Centre-seated Teachers are confined off `/school/<code>` (Access Denied); open their Holistic workspace at `/centre/<id>`.
 - `seedHolisticFixtures()` upserts the shared fixture actors' permissions, so do not call it a second time for another Program. The EMRS (Program 78) Admin journey uses the separate `LMS78` scope seeded by `seedHolisticE2eEmrsScope()` in `e2e/helpers/db.ts`.
 - Holistic Student/Phase APIs return 422 without `program_id`; an access-denial assertion (404) must still send a valid Program.
+- The dashboard's default tab heading is "JNV NVS Schools"; "My Schools" is only the stat label.
+- The Curriculum tab shows a Program selector only when the School has more than one Program from active physical Centres; single-Centre fixture Schools (e.g. `LMS75EMPTY`) have none.
 - Curriculum topics need `topic_curriculum` rows in the fixture migration, not just `chapter` and `topic` rows.
 - Responsive visit lists can render hidden duplicate links; target visible links or rows.
 - Program-admin `/visits` redirects to `/school-visit-summary`; go directly to visit detail when asserting read-only access.
