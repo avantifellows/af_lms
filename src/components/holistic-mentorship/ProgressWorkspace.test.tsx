@@ -28,6 +28,30 @@ const payload = {
   refreshedAt: "2026-07-17T10:00:00.000Z",
 };
 
+const unassignedPayload = {
+  ...payload,
+  rows: [
+    {
+      progress: "unassigned", studentId: 52, studentName: "Asha Rao", externalStudentId: "AF-52", grade: 11,
+      schoolName: "School One", schoolCode: "SCH001", activePhaseId: 70,
+    },
+    {
+      progress: "unassigned", studentId: 52, studentName: "Asha Rao", externalStudentId: "AF-52", grade: 12,
+      schoolName: "School Two", schoolCode: "SCH002", activePhaseId: null,
+    },
+  ],
+  counts: { total: 212, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 },
+};
+
+async function showUnassigned(body: unknown = unassignedPayload) {
+  vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => Promise.resolve(new Response(JSON.stringify(
+    input.includes("progress=unassigned") ? body : payload,
+  )))));
+  render(<ProgressWorkspace />);
+  await screen.findByText("Student One");
+  fireEvent.change(screen.getByLabelText("Filter by Progress"), { target: { value: "unassigned" } });
+}
+
 function cardValues(group: string) {
   return within(screen.getByRole("region", { name: group })).getAllByRole("listitem")
     .map((card) => [card.firstElementChild?.textContent, card.lastElementChild?.textContent]);
@@ -97,13 +121,15 @@ describe("ProgressWorkspace", () => {
     await screen.findByText("Student One");
 
     expect(screen.getByText("Assigned").nextElementSibling).toHaveTextContent("73");
-    expect(screen.getByText("Shows assigned Mentees. Mapping and Notes are read-only for Admins."))
-      .toBeInTheDocument();
+    expect(screen.getByText(
+      "Shows assigned Mentees by default. Choose Unassigned in the Progress filter to list eligible Students " +
+      "without a Mentor (current year only). Mapping and Notes are read-only for Admins.",
+    )).toBeInTheDocument();
     const progress = screen.getByLabelText("Filter by Progress");
     expect(progress).toHaveValue("");
     expect(Array.from(progress.querySelectorAll("option")).map((option) => [option.value, option.textContent])).toEqual([
       ["", "All Assigned"], ["pending", "Pending"], ["completed", "Completed"],
-      ["skipped", "Skipped"], ["no_active_phase", "No active phase"],
+      ["skipped", "Skipped"], ["no_active_phase", "No active phase"], ["unassigned", "Unassigned"],
     ]);
     expect(screen.getByText(/Showing/)).toHaveTextContent("Showing 1-1 of 73 assigned Mentees");
     const labels = [...screen.getAllByText((_, element) => element?.tagName === "P"
@@ -112,6 +138,115 @@ describe("ProgressWorkspace", () => {
     expect(labels.map((element) => element.textContent).filter((text) => /mapped/i.test(text ?? ""))).toEqual([]);
     expect(labels.map((element) => element.textContent).filter((text) => /%/.test(text ?? ""))).toEqual([]);
     expect(screen.queryByText(/mapped/i)).not.toBeInTheDocument();
+  });
+
+  it("offers Unassigned only for the current year and disables it while a Mentor is selected", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify(payload)))));
+    const view = render(<ProgressWorkspace />);
+    await screen.findByText("Student One");
+    const unassigned = () => screen.getByRole("option", { name: "Unassigned" }) as HTMLOptionElement;
+
+    expect(unassigned().disabled).toBe(false);
+    fireEvent.change(screen.getByLabelText("Filter by Mentor"), { target: { value: "9" } });
+    expect(unassigned().disabled).toBe(true);
+
+    view.rerender(<ProgressWorkspace academicYear="2025-2026" />);
+    await screen.findByText("Student One");
+    expect(Array.from(screen.getByLabelText("Filter by Progress").querySelectorAll("option"))
+      .map((option) => option.value)).toEqual(["", "pending", "completed", "skipped", "no_active_phase"]);
+  });
+
+  it("requests the Unassigned list when Unassigned is chosen", async () => {
+    render(<ProgressWorkspace />);
+    await screen.findByText("Student One");
+
+    fireEvent.change(screen.getByLabelText("Filter by Progress"), { target: { value: "unassigned" } });
+
+    await waitFor(() => expect(fetch).toHaveBeenLastCalledWith(
+      "/api/holistic-mentorship/progress?academic_year=2026-2027&program_id=1&page=1&sort=school&direction=asc&progress=unassigned",
+      expect.anything(),
+    ));
+  });
+
+  it("shows Unassigned rows read-only with dashes, a badge, and an active-Phase link", async () => {
+    const log = vi.spyOn(console, "error");
+    await showUnassigned();
+    const rows = await screen.findAllByRole("row", { name: /Asha Rao/ });
+
+    expect(rows).toHaveLength(2);
+    const [first, second] = rows.map((row) => within(row).getAllByRole("cell").map((cell) => cell.textContent));
+    expect(first).toEqual(["Asha RaoAF-52", "School OneSCH001", "11", "—", "—", "Unassigned", "—", "Open Student"]);
+    expect(second).toEqual(["Asha RaoAF-52", "School TwoSCH002", "12", "—", "—", "Unassigned", "—", "Open Student"]);
+    expect(within(rows[0]).getByRole("link", { name: "Open Asha Rao" })).toHaveAttribute(
+      "href", "/holistic-mentorship/students/52/phases/70?school_code=SCH001&academic_year=2026-2027&program_id=1&source=progress",
+    );
+    expect(within(rows[0]).queryAllByRole("button")).toEqual([]);
+    expect(log.mock.calls.flat().join(" ")).not.toMatch(/same key/);
+  });
+
+  it("disables Open Student when the Unassigned Student's Grade has no active Phase", async () => {
+    await showUnassigned();
+    const [, noActivePhase] = await screen.findAllByRole("row", { name: /Asha Rao/ });
+
+    expect(within(noActivePhase).queryByRole("link")).not.toBeInTheDocument();
+    const button = within(noActivePhase).getByRole("button", { name: "Open Student" });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("title", "No active Phase");
+  });
+
+  it("shows Unassigned pagination, zero Progress cards, and unchanged Coverage cards", async () => {
+    await showUnassigned();
+    await screen.findAllByRole("row", { name: /Asha Rao/ });
+
+    expect(screen.getByText(/Showing/)).toHaveTextContent("Showing 1-2 of 212 Unassigned Students");
+    expect(cardValues("Progress")).toEqual([["Pending", "0"], ["Completed", "0"], ["Skipped", "0"]]);
+    expect(cardValues("Coverage")).toEqual([
+      ["Eligible Students", "90"], ["Assigned", "73"], ["Unassigned", "17"],
+    ]);
+  });
+
+  it("shows Unassigned loading and empty-state text", async () => {
+    let finish!: (response: Response) => void;
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => input.includes("progress=unassigned")
+      ? new Promise<Response>((resolve) => { finish = resolve; })
+      : Promise.resolve(new Response(JSON.stringify(payload)))));
+    render(<ProgressWorkspace />);
+    await screen.findByText("Student One");
+    fireEvent.change(screen.getByLabelText("Filter by Progress"), { target: { value: "unassigned" } });
+
+    expect(await screen.findByText("Loading Unassigned Students...")).toBeInTheDocument();
+    finish(new Response(JSON.stringify({
+      ...unassignedPayload, rows: [], counts: { total: 0, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 },
+    })));
+    expect(await screen.findByText("No Unassigned Students match these filters.")).toBeInTheDocument();
+  });
+
+  it("exports the Unassigned list with the current filters and no page", async () => {
+    const fetchMock = vi.fn().mockImplementation((input: string) => Promise.resolve(
+      input.includes("format=csv")
+        ? new Response("Academic Year,Student", { status: 200, headers: { "content-type": "text/csv" } })
+        : new Response(JSON.stringify(input.includes("progress=unassigned") ? unassignedPayload : payload)),
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+    const NativeURL = URL;
+    vi.stubGlobal("URL", Object.assign(class extends NativeURL {}, {
+      createObjectURL: vi.fn(() => "blob:progress"), revokeObjectURL: vi.fn(),
+    }));
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    render(<ProgressWorkspace />);
+    await screen.findByText("Student One");
+    fireEvent.change(screen.getByLabelText("Filter by Progress"), { target: { value: "unassigned" } });
+    await screen.findAllByRole("row", { name: /Asha Rao/ });
+
+    fireEvent.click(screen.getByRole("button", { name: "Export CSV" }));
+
+    await waitFor(() => expect(click).toHaveBeenCalled());
+    const exportCall = fetchMock.mock.calls.find(([url]) => url.includes("format=csv"));
+    const query = new URL(String(exportCall![0]), "http://localhost").searchParams;
+    expect(Object.fromEntries(query)).toEqual({
+      academic_year: "2026-2027", program_id: "1", sort: "school", direction: "asc",
+      progress: "unassigned", format: "csv",
+    });
   });
 
   it("shows current-year Coverage and Progress card groups", async () => {

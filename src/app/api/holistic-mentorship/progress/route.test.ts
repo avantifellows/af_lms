@@ -107,6 +107,32 @@ describe("Holistic progress API", () => {
     expect(mockList).not.toHaveBeenCalled();
   });
 
+  it("passes the Unassigned progress filter through to the progress read", async () => {
+    const response = await GET(new Request(
+      "http://localhost/api/holistic-mentorship/progress?academic_year=2026-2027&program_id=1&progress=unassigned",
+    ) as never);
+
+    expect(response.status).toBe(200);
+    expect(mockList).toHaveBeenCalledWith(
+      expect.objectContaining({ progress: "unassigned", academicYear: "2026-2027", mentorUserId: null }),
+      permission,
+    );
+  });
+
+  it.each([
+    ["a past Academic Year", "academic_year=2025-2026&program_id=1&progress=unassigned"],
+    ["a past Academic Year CSV", "academic_year=2025-2026&program_id=1&progress=unassigned&format=csv"],
+    ["a Mentor filter", "academic_year=2026-2027&program_id=1&progress=unassigned&mentor_user_id=9"],
+    ["a Mentor filter CSV", "academic_year=2026-2027&program_id=1&progress=unassigned&mentor_user_id=9&format=csv"],
+  ])("rejects Unassigned with %s before authorization or any read", async (_, filters) => {
+    const response = await GET(new Request(`http://localhost/api/holistic-mentorship/progress?${filters}`) as never);
+
+    expect(response.status).toBe(422);
+    expect(await response.json()).toEqual({ error: "Invalid progress filters" });
+    expect(mockAccess).not.toHaveBeenCalled();
+    expect(mockList).not.toHaveBeenCalled();
+  });
+
   it("rejects an unknown response format", async () => {
     const response = await GET(new Request("http://localhost/api/holistic-mentorship/progress?academic_year=2026-2027&format=xlsx") as never);
     expect(response.status).toBe(422);
