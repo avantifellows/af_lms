@@ -618,6 +618,13 @@ describe("QuizSessionsTab", () => {
         name: "Part Test 11 - Round 1",
         meta_data: { ...makeSessions()[0].meta_data, resource_id: 501 },
       },
+      {
+        ...makeSessions()[0],
+        id: 8,
+        name: "Part Test 11 - Disabled",
+        is_active: false,
+        meta_data: { ...makeSessions()[0].meta_data, resource_id: 501 },
+      },
       ...makeSessions(),
     ];
     const user = userEvent.setup();
@@ -630,20 +637,38 @@ describe("QuizSessionsTab", () => {
     await user.selectOptions(screen.getByLabelText("Test Format"), "part_test");
     await user.click(await screen.findByText("Part Test 11"));
 
+    const dialog = screen.getByRole("heading", { name: "Create Quiz Session" }).closest("div.fixed") as HTMLElement;
     expect(
-      await screen.findByText("This test already has a session for the selected batches")
+      await within(dialog).findByText("This test already has a session for the selected batches")
     ).toBeInTheDocument();
-    expect(screen.queryByText("3. When And How")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Create Session" })).toBeDisabled();
+    expect(within(dialog).queryByText("Part Test 11 - Disabled")).not.toBeInTheDocument();
+    expect(within(dialog).queryByText("3. When And How")).not.toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Create Session" })).toBeDisabled();
 
-    await user.click(screen.getByRole("button", { name: "Create a new session anyway" }));
-    expect(screen.getByText("3. When And How")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Create Session" })).toBeEnabled();
+    await user.click(within(dialog).getByRole("button", { name: "Create a new session anyway" }));
+    expect(within(dialog).getByText("3. When And How")).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Create Session" })).toBeEnabled();
 
-    await user.click(screen.getByRole("button", { name: "Extend this session" }));
-    expect(screen.getByRole("heading", { name: "Edit Quiz Session" })).toBeInTheDocument();
-    expect(screen.getByDisplayValue("Part Test 11 - Round 1")).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Create Quiz Session" })).not.toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Extend" }));
+    const endInput = within(dialog).getByLabelText("New end time");
+    await user.clear(endInput);
+    await user.type(endInput, "2099-01-01T18:00");
+    await user.click(within(dialog).getByRole("button", { name: "Save end time" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("heading", { name: "Create Quiz Session" })).not.toBeInTheDocument();
+    });
+    const patchCall = mockFetch.mock.calls.find(
+      ([input, init]) => String(input) === "/api/quiz-sessions/7" && init?.method === "PATCH"
+    );
+    expect(Object.keys(JSON.parse(String(patchCall?.[1]?.body)))).toEqual(["endTime"]);
+    expect(await screen.findByText(/Session extended/)).toBeInTheDocument();
+    await waitFor(() => {
+      expect(getFetchCalls(mockFetch, "/api/quiz-sessions?").some(([input]) =>
+        String(input).includes("classBatchId=EnableStudents_11_Engg_A")
+      )).toBe(true);
+    });
+    expect(document.querySelector('[data-session-row="7"]')).toHaveClass("bg-success-bg");
   });
 
   it("ignores earlier sessions of the paper that ran for other batches", async () => {

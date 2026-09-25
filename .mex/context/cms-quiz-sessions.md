@@ -142,6 +142,8 @@ redirects to a short-lived presigned S3 copy. Build hrefs with `cmsTestPdfHrefs`
 Sessions are batch-level, so the nudge is too. Selecting a paper in the create form looks up
 earlier sessions of it in the school (`GET /api/quiz-sessions?cmsTestId=` for CMS, `?resourceId=`
 for legacy templates) and keeps only those sharing a selected class batch. If any remain,
-"When And How" and Create fold behind "Create a new session anyway", and each match offers
-**Extend this session**, which opens the normal edit modal. The lookup fails open, so creation is
+"When And How" and Create fold behind "Create a new session anyway". Disabled sessions are not
+listed. **Extend** edits only the end time inline (`PATCH` with `endTime` alone; start, the
+occurrence and the quiz doc follow the normal edit path), then closes the form and highlights the
+session in that batch's list. The lookup fails open, so creation is
 never blocked by it.

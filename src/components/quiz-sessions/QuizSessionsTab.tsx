@@ -524,6 +524,29 @@ export default function QuizSessionsTab({
     await fetchSessions(0, selectedClassBatch || undefined);
   };
 
+  // After an inline extend from the create form: show that batch's list and flash the row.
+  const [highlightedSessionId, setHighlightedSessionId] = useState<number | null>(null);
+  const handleExtended = (session: QuizSession, batchId: string) => {
+    setIsCreateOpen(false);
+    setFeedbackToast({ variant: "success", message: "Session extended. Changes will reflect shortly." });
+    setHighlightedSessionId(session.id);
+    if (selectedClassBatch === batchId && page === 0) {
+      void fetchSessions(0, batchId);
+    } else {
+      setSelectedClassBatch(batchId);
+      setPage(0);
+    }
+  };
+
+  useEffect(() => {
+    if (highlightedSessionId === null) return;
+    document
+      .querySelector(`[data-session-row="${highlightedSessionId}"]`)
+      ?.scrollIntoView?.({ block: "center", behavior: "smooth" });
+    const timeoutId = window.setTimeout(() => setHighlightedSessionId(null), 4000);
+    return () => window.clearTimeout(timeoutId);
+  }, [highlightedSessionId, sessions]);
+
   const handleUpdated = async (message?: string) => {
     setEditingSession(null);
     setSelectedSession(null);
@@ -726,10 +749,11 @@ export default function QuizSessionsTab({
                 return (
                   <tr
                     key={session.id}
+                    data-session-row={session.id}
                     onClick={() => setSelectedSession(session)}
-                    className={`cursor-pointer hover:bg-hover-bg ${
+                    className={`cursor-pointer transition-colors hover:bg-hover-bg ${
                       lifecycle === "ended" ? "opacity-80" : ""
-                    }`}
+                    } ${highlightedSessionId === session.id ? "bg-success-bg" : ""}`}
                   >
                     <td className="px-4 py-4 text-sm">
                       <div className="font-semibold text-text-primary">{session.name}</div>
@@ -827,10 +851,7 @@ export default function QuizSessionsTab({
           batchNameMap={batchNameMap}
           onClose={() => setIsCreateOpen(false)}
           onCreated={handleCreated}
-          onExtend={(session) => {
-            setIsCreateOpen(false);
-            setEditingSession(session);
-          }}
+          onExtended={handleExtended}
         />
       )}
 
@@ -962,7 +983,7 @@ function QuizSessionCreateModal({
   batchNameMap,
   onClose,
   onCreated,
-  onExtend,
+  onExtended,
 }: {
   batches: BatchOption[];
   schoolId: string;
@@ -970,7 +991,7 @@ function QuizSessionCreateModal({
   batchNameMap: Map<string, string>;
   onClose: () => void;
   onCreated: (message?: string) => void;
-  onExtend: (session: QuizSession) => void;
+  onExtended: (session: QuizSession, batchId: string) => void;
 }) {
   const [name, setName] = useState("");
   const [nameEdited, setNameEdited] = useState(false);
@@ -1323,10 +1344,12 @@ function QuizSessionCreateModal({
     };
   }, [paperQuery, programId, schoolId]);
 
-  const batchSessions = existingSessions.filter((session) =>
-    getMetaString(session.meta_data, "batch_id")
-      ?.split(",")
-      .some((id) => classBatchIds.includes(id))
+  const batchSessions = existingSessions.filter(
+    (session) =>
+      session.is_active !== false &&
+      getMetaString(session.meta_data, "batch_id")
+        ?.split(",")
+        .some((id) => classBatchIds.includes(id))
   );
   const duplicateGate = batchSessions.length > 0 && !createAnyway;
 
@@ -1947,8 +1970,9 @@ function QuizSessionCreateModal({
                 <ExistingSessionsNotice
                   sessions={batchSessions}
                   batchNameMap={batchNameMap}
+                  selectedBatchIds={classBatchIds}
                   createAnyway={createAnyway}
-                  onExtend={onExtend}
+                  onExtended={onExtended}
                   onToggleCreateAnyway={() => setCreateAnyway((previous) => !previous)}
                 />
               ) : null}
@@ -2162,14 +2186,16 @@ function QuizSessionCreateModal({
 function ExistingSessionsNotice({
   sessions,
   batchNameMap,
+  selectedBatchIds,
   createAnyway,
-  onExtend,
+  onExtended,
   onToggleCreateAnyway,
 }: {
   sessions: QuizSession[];
   batchNameMap: Map<string, string>;
+  selectedBatchIds: string[];
   createAnyway: boolean;
-  onExtend: (session: QuizSession) => void;
+  onExtended: (session: QuizSession, batchId: string) => void;
   onToggleCreateAnyway: () => void;
 }) {
   return (
@@ -2184,52 +2210,155 @@ function ExistingSessionsNotice({
       </p>
 
       <div className="mt-3 space-y-2">
-        {sessions.map((session) => {
-          const batchIds = getMetaString(session.meta_data, "batch_id")?.split(",").filter(Boolean) ?? [];
-          const lifecycle = getSessionLifecycleState(session);
-          const processing = isSessionProcessing(session);
-          return (
-            <div
-              key={session.id}
-              className="flex flex-col gap-2 rounded-lg border border-border bg-bg-card px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
-            >
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm font-semibold text-text-primary">{session.name}</span>
-                  <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${getLifecycleClasses(lifecycle)}`}>
-                    {getLifecycleLabel(lifecycle)}
-                  </span>
-                  {session.is_active === false && (
-                    <span className="text-xs text-text-muted">Disabled</span>
-                  )}
-                </div>
-                <div className="mt-0.5 text-xs text-text-secondary">
-                  {formatDateTime(session.start_time)} → {formatDateTime(session.end_time)} ·{" "}
-                  {getCompactBatchLabel(batchIds.map((id) => batchNameMap.get(id) || id))}
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => onExtend(session)}
-                disabled={processing}
-                className="min-h-[36px] shrink-0 rounded-lg bg-accent px-3 py-1.5 text-xs font-bold uppercase tracking-wide text-text-on-accent hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {processing ? "Processing..." : "Extend this session"}
-              </button>
-            </div>
-          );
-        })}
+        {sessions.map((session) => (
+          <ExistingSessionRow
+            key={session.id}
+            session={session}
+            batchNameMap={batchNameMap}
+            selectedBatchIds={selectedBatchIds}
+            onExtended={onExtended}
+          />
+        ))}
       </div>
 
       <button
         type="button"
         onClick={onToggleCreateAnyway}
         aria-expanded={createAnyway}
-        className="mt-3 inline-flex items-center gap-1 text-sm font-medium text-text-secondary hover:text-accent"
+        className="mt-3 inline-flex items-center gap-1.5 whitespace-nowrap text-sm font-medium text-text-secondary hover:text-accent"
       >
         {createAnyway ? "Hide new session options" : "Create a new session anyway"}
-        <ChevronDownIcon className={createAnyway ? "rotate-180" : ""} />
+        <ChevronDownIcon className={`h-4 w-4 transition-transform ${createAnyway ? "rotate-180" : ""}`} />
       </button>
+    </div>
+  );
+}
+
+function ExistingSessionRow({
+  session,
+  batchNameMap,
+  selectedBatchIds,
+  onExtended,
+}: {
+  session: QuizSession;
+  batchNameMap: Map<string, string>;
+  selectedBatchIds: string[];
+  onExtended: (session: QuizSession, batchId: string) => void;
+}) {
+  const batchIds = getMetaString(session.meta_data, "batch_id")?.split(",").filter(Boolean) ?? [];
+  const lifecycle = getSessionLifecycleState(session);
+  const processing = isSessionProcessing(session);
+  const [extending, setExtending] = useState(false);
+  const [endTime, setEndTime] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const startExtend = () => {
+    // Ended sessions reopen for the default window from now; others keep their current end.
+    const currentEnd = session.end_time ? new Date(session.end_time) : null;
+    const suggested =
+      lifecycle === "ended" || !currentEnd
+        ? addHours(new Date(), DEFAULT_DURATION_HOURS)
+        : currentEnd;
+    setEndTime(toDateTimeLocalValue(suggested));
+    setError(null);
+    setExtending(true);
+  };
+
+  const saveExtend = async () => {
+    const end = new Date(endTime);
+    if (Number.isNaN(end.getTime()) || end.getTime() <= Date.now()) {
+      setError("New end time must be in the future.");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/quiz-sessions/${session.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ endTime: end.toISOString() }),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        throw new Error(data?.error || "Failed to extend session");
+      }
+      onExtended(session, batchIds.find((id) => selectedBatchIds.includes(id)) ?? batchIds[0] ?? "");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to extend session.");
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="rounded-lg border border-border bg-bg-card px-3 py-3">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-semibold text-text-primary">{session.name}</span>
+            <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${getLifecycleClasses(lifecycle)}`}>
+              {getLifecycleLabel(lifecycle)}
+            </span>
+          </div>
+          <div className="mt-1 text-sm font-medium text-text-primary">
+            {formatDateTime(session.start_time)} → {formatDateTime(session.end_time)}
+          </div>
+          <div className="mt-0.5 text-xs text-text-secondary">
+            {getCompactBatchLabel(batchIds.map((id) => batchNameMap.get(id) || id))}
+          </div>
+        </div>
+        {!extending && (
+          <button
+            type="button"
+            onClick={startExtend}
+            disabled={processing}
+            className="min-h-[36px] shrink-0 rounded-lg bg-accent px-3 py-1.5 text-xs font-bold uppercase tracking-wide text-text-on-accent hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {processing ? "Processing..." : "Extend"}
+          </button>
+        )}
+      </div>
+
+      {extending && (
+        <div className="mt-3 border-t border-border pt-3">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+            <label className="flex-1">
+              <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-text-muted">
+                New end time
+              </span>
+              <input
+                type="datetime-local"
+                value={endTime}
+                onChange={(event) => setEndTime(event.target.value)}
+                className="min-h-[40px] w-full rounded-lg border-2 border-border bg-bg-input px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
+              />
+            </label>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setExtending(false)}
+                disabled={saving}
+                className="min-h-[40px] rounded-lg border-2 border-border px-3 py-1.5 text-xs font-bold uppercase tracking-wide text-text-primary hover:border-accent hover:text-accent"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={saveExtend}
+                disabled={saving}
+                className="min-h-[40px] rounded-lg bg-accent px-4 py-1.5 text-xs font-bold uppercase tracking-wide text-text-on-accent hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {saving ? "Saving..." : "Save end time"}
+              </button>
+            </div>
+          </div>
+          {error ? (
+            <div role="alert" className="mt-2 text-sm text-red-700">
+              {error}
+            </div>
+          ) : null}
+        </div>
+      )}
     </div>
   );
 }
