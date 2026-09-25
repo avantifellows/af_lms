@@ -133,26 +133,6 @@ describe("Holistic progress", () => {
     expect(result.coverage).toEqual({ eligible: 12, assigned: 9, unassigned: 3 });
   });
 
-  it("fails coverage closed for an empty resolved School scope", async () => {
-    await listHolisticProgress({
-      programId: 1,
-      academicYear: "2026-2027",
-      phaseId: null,
-      schoolCode: null,
-      grade: null,
-      mentorUserId: null,
-      progress: null,
-      search: "",
-      sort: DEFAULT_HOLISTIC_PROGRESS_SORT,
-      direction: "asc",
-      page: 1,
-    }, { email: "pa@example.com", level: 2, role: "program_admin", program_ids: [1] });
-
-    const [sql, params] = mockQuery.mock.calls[1];
-    expect(String(sql)).toContain("AND 1 = 0");
-    expect(params).toEqual([1, "2026-2027", "2026-2027", null, null, "%%"]);
-  });
-
   it.each([
     ["a past Academic Year", { academicYear: "2025-2026" }, {}],
     ["a Mentor filter", { mentorUserId: 9 }, {}],
@@ -257,7 +237,7 @@ describe("Holistic progress", () => {
       expect(mockQuery.mock.calls[0][1]).toEqual([1, "2026-2027", "2026-2027", null, null, "%%", null, null, 0]);
     });
 
-    it("fails closed for an empty resolved School scope", async () => {
+    it("fails the list and coverage closed for an empty resolved School scope", async () => {
       await listHolisticProgress(unassignedFilters, {
         email: "pa@example.com", level: 2, role: "program_admin", program_ids: [1],
       });
@@ -265,6 +245,9 @@ describe("Holistic progress", () => {
       const [sql, params] = mockQuery.mock.calls[0];
       expect(String(sql)).toContain("AND 1 = 0");
       expect(params).toEqual([1, "2026-2027", "2026-2027", null, null, "%%", null, 50, 0]);
+      const [coverageSql, coverageParams] = mockQuery.mock.calls[1];
+      expect(String(coverageSql)).toContain("AND 1 = 0");
+      expect(coverageParams).toEqual([1, "2026-2027", "2026-2027", null, null, "%%"]);
     });
 
     it.each(["pending", "completed", "skipped", "no_active_phase"] as const)(

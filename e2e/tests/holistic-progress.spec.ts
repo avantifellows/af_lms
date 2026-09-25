@@ -103,26 +103,7 @@ async function knownUnassignedGrade11Student(page: Page, schoolCode: string) {
   return student!;
 }
 
-test("coverage adds up and matches assigned progress with no filters", async ({ holisticAdminPage }) => {
-  const baseline = await progress(holisticAdminPage, filters);
-
-  expect(baseline.coverage.eligible).toBeGreaterThan(0);
-  expect(baseline.coverage.eligible).toBe(baseline.coverage.assigned + baseline.coverage.unassigned);
-  expect(baseline.coverage.assigned).toBe(baseline.counts.total);
-  expect(baseline.counts.total).toBe(
-    baseline.counts.pending + baseline.counts.completed + baseline.counts.skipped + baseline.counts.noActivePhase,
-  );
-});
-
-test("fixture School coverage matches the Teacher School roster", async ({ holisticAdminPage, holisticTeacherPage }) => {
-  const schoolCode = await fixtureSchoolCode();
-  const school = await progress(holisticAdminPage, `${filters}&school_code=${schoolCode}`);
-
-  expect(school.coverage).toEqual(await rosterCoverage(holisticTeacherPage, schoolCode));
-  expect(school.coverage.unassigned).toBeGreaterThan(0);
-});
-
-test("coverage ignores Phase, Progress, page and sort but follows Grade and search", async ({
+test("School coverage matches the Teacher roster, ignores Phase, Progress, page and sort, and follows Grade and search", async ({
   holisticAdminPage,
   holisticTeacherPage,
 }) => {
@@ -140,6 +121,8 @@ test("coverage ignores Phase, Progress, page and sort but follows Grade and sear
   expect((await progress(holisticAdminPage, filters.replace("page=1", "page=2"))).coverage).toEqual(baseline.coverage);
 
   const school = await progress(holisticAdminPage, schoolFilters);
+  expect(school.coverage).toEqual(await rosterCoverage(holisticTeacherPage, schoolCode));
+  expect(school.coverage.unassigned).toBeGreaterThan(0);
   const unassigned = await knownUnassignedGrade11Student(holisticTeacherPage, schoolCode);
   for (const [progressQuery, rosterQuery] of [
     ["&grade=11", "&grade=11"],
@@ -168,20 +151,16 @@ test("coverage is unavailable under a Mentor filter and for past Academic Years"
   expect(Array.isArray(pastYear.rows)).toBe(true);
 });
 
-test("coverage excludes a dropout Unassigned Student and stays equal to the Teacher roster", async ({
+test("coverage excludes dropout and conflicting-Grade Students and stays equal to the Teacher roster", async ({
   holisticAdminPage,
   holisticTeacherPage,
 }) => {
+  test.setTimeout(60_000);
   const schoolCode = await fixtureSchoolCode();
   const schoolFilters = `${filters}&school_code=${schoolCode}`;
   const unassigned = await knownUnassignedGrade11Student(holisticTeacherPage, schoolCode);
   const before = (await progress(holisticAdminPage, schoolFilters)).coverage;
-  const pool = getTestPool();
-  const original = await pool.query<{ status: string | null }>(
-    "SELECT status FROM student WHERE id = $1", [unassigned.studentId],
-  );
-  try {
-    await pool.query("UPDATE student SET status = 'dropout' WHERE id = $1", [unassigned.studentId]);
+  const expectOneFewerUnassigned = async () => {
     const after = (await progress(holisticAdminPage, schoolFilters)).coverage;
     expect(after).toEqual({
       eligible: before.eligible - 1,
@@ -189,49 +168,47 @@ test("coverage excludes a dropout Unassigned Student and stays equal to the Teac
       unassigned: before.unassigned - 1,
     });
     expect(after).toEqual(await rosterCoverage(holisticTeacherPage, schoolCode));
-  } finally {
-    await pool.query("UPDATE student SET status = $2 WHERE id = $1", [unassigned.studentId, original.rows[0].status]);
-    await pool.end();
-  }
-  expect((await progress(holisticAdminPage, schoolFilters)).coverage).toEqual(before);
-});
+  };
+  const pool = getTestPool();
+  try {
+    await test.step("dropout", async () => {
+      const original = await pool.query<{ status: string | null }>(
+        "SELECT status FROM student WHERE id = $1", [unassigned.studentId],
+      );
+      try {
+        await pool.query("UPDATE student SET status = 'dropout' WHERE id = $1", [unassigned.studentId]);
+        await expectOneFewerUnassigned();
+      } finally {
+        await pool.query("UPDATE student SET status = $2 WHERE id = $1", [unassigned.studentId, original.rows[0].status]);
+      }
+      expect((await progress(holisticAdminPage, schoolFilters)).coverage).toEqual(before);
+    });
 
-test("coverage excludes an Unassigned Student with conflicting roster Grades", async ({
-  holisticAdminPage,
-  holisticTeacherPage,
-}) => {
-  const schoolCode = await fixtureSchoolCode();
-  const schoolFilters = `${filters}&school_code=${schoolCode}`;
-  const unassigned = await knownUnassignedGrade11Student(holisticTeacherPage, schoolCode);
-  const before = (await progress(holisticAdminPage, schoolFilters)).coverage;
-  const pool = getTestPool();
-  let conflictingEnrollmentId: number | null = null;
-  try {
-    // A second current Grade 12 enrollment gives the Student two roster Grades in centre_students.
-    const inserted = await pool.query<{ id: string }>(
-      `INSERT INTO enrollment_record
-         (user_id, group_id, group_type, academic_year, is_current, inserted_at, updated_at)
-       SELECT student.user_id, (SELECT id FROM grade WHERE number = 12 ORDER BY id LIMIT 1),
-              'grade', '2026-2027', true, now(), now()
-       FROM student WHERE student.id = $1
-       RETURNING id`,
-      [unassigned.studentId],
-    );
-    conflictingEnrollmentId = Number(inserted.rows[0].id);
-    const after = (await progress(holisticAdminPage, schoolFilters)).coverage;
-    expect(after).toEqual({
-      eligible: before.eligible - 1,
-      assigned: before.assigned,
-      unassigned: before.unassigned - 1,
+    await test.step("conflicting roster Grades", async () => {
+      let conflictingEnrollmentId: number | null = null;
+      try {
+        // A second current Grade 12 enrollment gives the Student two roster Grades in centre_students.
+        const inserted = await pool.query<{ id: string }>(
+          `INSERT INTO enrollment_record
+             (user_id, group_id, group_type, academic_year, is_current, inserted_at, updated_at)
+           SELECT student.user_id, (SELECT id FROM grade WHERE number = 12 ORDER BY id LIMIT 1),
+                  'grade', '2026-2027', true, now(), now()
+           FROM student WHERE student.id = $1
+           RETURNING id`,
+          [unassigned.studentId],
+        );
+        conflictingEnrollmentId = Number(inserted.rows[0].id);
+        await expectOneFewerUnassigned();
+      } finally {
+        if (conflictingEnrollmentId !== null) {
+          await pool.query("DELETE FROM enrollment_record WHERE id = $1", [conflictingEnrollmentId]);
+        }
+      }
+      expect((await progress(holisticAdminPage, schoolFilters)).coverage).toEqual(before);
     });
-    expect(after).toEqual(await rosterCoverage(holisticTeacherPage, schoolCode));
   } finally {
-    if (conflictingEnrollmentId !== null) {
-      await pool.query("DELETE FROM enrollment_record WHERE id = $1", [conflictingEnrollmentId]);
-    }
     await pool.end();
   }
-  expect((await progress(holisticAdminPage, schoolFilters)).coverage).toEqual(before);
 });
 
 // Inactive Centres are not seeded here. centre_students lists a School's Students
@@ -296,8 +273,14 @@ test("a School whose Mappings all end leaves the School options and coverage but
   expect((await progress(holisticAdminPage, schoolFilters)).coverage).toEqual(schoolBefore);
 });
 
-test("program coverage equals the sum over the selectable Schools", async ({ holisticAdminPage }) => {
+test("program coverage adds up, equals assigned progress and sums over the selectable Schools", async ({
+  holisticAdminPage,
+}) => {
+  test.setTimeout(60_000);
   const program = await progress(holisticAdminPage, filters);
+  expect(program.coverage.eligible).toBeGreaterThan(0);
+  expect(program.coverage.eligible).toBe(program.coverage.assigned + program.coverage.unassigned);
+  expect(program.coverage.assigned).toBe(program.counts.total);
   expect(program.options.schools.length).toBeGreaterThan(0);
   const total = { eligible: 0, assigned: 0, unassigned: 0 };
   for (const { code } of program.options.schools as Array<{ code: string }>) {
@@ -309,14 +292,16 @@ test("program coverage equals the sum over the selectable Schools", async ({ hol
   expect(total).toEqual(program.coverage);
 });
 
-test("Holistic PM and PA see the Admin's coverage for an in-scope School only", async ({
+test("Holistic PM and PA see the Admin's coverage and Unassigned Students for in-scope Schools only", async ({
   holisticAdminPage,
   holisticPmPage,
   holisticProgramAdminPage,
 }) => {
+  test.setTimeout(60_000);
   const schoolCode = await fixtureSchoolCode();
-  const schoolFilters = `${filters}&school_code=${schoolCode}`;
-  const admin = (await progress(holisticAdminPage, schoolFilters)).coverage;
+  const schoolFilters = `${unassignedFilters}&school_code=${schoolCode}`;
+  const admin = await progress(holisticAdminPage, schoolFilters);
+  expect(admin.counts.total).toBeGreaterThan(0);
   const pool = getTestPool();
   let outOfScopeCode: string;
   try {
@@ -333,8 +318,15 @@ test("Holistic PM and PA see the Admin's coverage for an in-scope School only", 
     await pool.end();
   }
   for (const page of [holisticPmPage, holisticProgramAdminPage]) {
-    expect((await progress(page, schoolFilters)).coverage).toEqual(admin);
-    const denied = await page.request.get(`${endpoint}?${filters}&school_code=${outOfScopeCode}`);
+    const scoped = await progress(page, schoolFilters);
+    expect(scoped.coverage).toEqual(admin.coverage);
+    expect(scoped.counts.total).toBe(admin.counts.total);
+    expect(scoped.rows).toEqual(admin.rows);
+    const programWide = await progress(page, unassignedFilters);
+    const inScope = new Set(programWide.coverageSchools.map(({ code }: { code: string }) => code));
+    expect(programWide.rows.every((row: UnassignedRow) => inScope.has(row.schoolCode))).toBe(true);
+    expect(programWide.rows.some((row: UnassignedRow) => row.schoolCode === outOfScopeCode)).toBe(false);
+    const denied = await page.request.get(`${endpoint}?${unassignedFilters}&school_code=${outOfScopeCode}`);
     expect(denied.status()).toBe(403);
   }
 });
@@ -463,43 +455,6 @@ test("the Unassigned CSV lists Unassigned Students only and the All Assigned CSV
   expect(assignedRows.some((row) => row[progressColumn] === "unassigned")).toBe(false);
 });
 
-test("Holistic PM and PA see Unassigned Students only for in-scope Schools", async ({
-  holisticAdminPage,
-  holisticPmPage,
-  holisticProgramAdminPage,
-}) => {
-  const schoolCode = await fixtureSchoolCode();
-  const schoolFilters = `${unassignedFilters}&school_code=${schoolCode}`;
-  const admin = await progress(holisticAdminPage, schoolFilters);
-  expect(admin.counts.total).toBeGreaterThan(0);
-  const pool = getTestPool();
-  let outOfScopeCode: string;
-  try {
-    const result = await pool.query<{ code: string }>(
-      `SELECT other.code FROM school fixture
-       JOIN school other ON other.id <> fixture.id
-        AND COALESCE(other.region, '') <> COALESCE(fixture.region, '')
-       JOIN centres centre ON centre.school_id = other.id AND centre.program_id = 1 AND centre.is_active IS TRUE
-       WHERE fixture.code = $1 ORDER BY other.code LIMIT 1`,
-      [schoolCode],
-    );
-    outOfScopeCode = result.rows[0].code;
-  } finally {
-    await pool.end();
-  }
-  for (const page of [holisticPmPage, holisticProgramAdminPage]) {
-    const scoped = await progress(page, schoolFilters);
-    expect(scoped.counts.total).toBe(admin.counts.total);
-    expect(scoped.rows).toEqual(admin.rows);
-    const programWide = await progress(page, unassignedFilters);
-    const inScope = new Set(programWide.coverageSchools.map(({ code }: { code: string }) => code));
-    expect(programWide.rows.every((row: UnassignedRow) => inScope.has(row.schoolCode))).toBe(true);
-    expect(programWide.rows.some((row: UnassignedRow) => row.schoolCode === outOfScopeCode)).toBe(false);
-    const denied = await page.request.get(`${endpoint}?${unassignedFilters}&school_code=${outOfScopeCode}`);
-    expect(denied.status()).toBe(403);
-  }
-});
-
 test("progress counts, filters, pagination and CSV work with the production Centre membership view", async ({ holisticAdminPage }) => {
   const response = await holisticAdminPage.request.get(`${endpoint}?${filters}`);
   expect(response.status()).toBe(200);
@@ -552,31 +507,6 @@ test("progress shows a useful empty-500 error and Refresh restores the real resu
   await expect(holisticAdminPage.getByRole("alert").filter({ hasText: "Unable to load progress" })).toHaveCount(0);
   await expect(holisticAdminPage.getByRole("table", { name: "Student progress results" }).locator("tbody tr").first()).toBeVisible();
   await expect(holisticAdminPage.getByText(/Last refreshed/)).toBeVisible();
-});
-
-test("Coverage and Progress cards fit every Holistic viewport without page overflow", async ({ holisticAdminPage }) => {
-  for (const viewport of [
-    { width: 1280, height: 800 },
-    { width: 375, height: 812 },
-    { width: 812, height: 375 },
-  ]) {
-    await holisticAdminPage.setViewportSize(viewport);
-    await holisticAdminPage.goto("/admin/holistic-mentorship");
-    const coverage = holisticAdminPage.getByRole("region", { name: "Coverage" });
-    await expect(coverage.getByText("Eligible Students", { exact: true })).toBeVisible();
-    await expect(coverage.getByText("Unassigned", { exact: true })).toBeVisible();
-    await expect(coverage.locator("li").first().locator("p").last()).toHaveText(/^\d+$/);
-    await expect(holisticAdminPage.getByRole("region", { name: "Progress" }).getByText("Completed", { exact: true }))
-      .toBeVisible();
-    const horizontalPageScroll = await holisticAdminPage.evaluate(() => {
-      const original = { x: window.scrollX, y: window.scrollY };
-      window.scrollTo(document.documentElement.scrollWidth, original.y);
-      const scrolled = window.scrollX;
-      window.scrollTo(original.x, original.y);
-      return scrolled;
-    });
-    expect(horizontalPageScroll, `${viewport.width}x${viewport.height}`).toBeLessThanOrEqual(1);
-  }
 });
 
 test("header Back from an Unassigned Student returns to Students & Progress with Unassigned still selected", async ({

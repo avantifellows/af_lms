@@ -1,7 +1,7 @@
 ---
 name: debug-holistic-progress
 description: Trace empty HTTP 500 responses and database timeouts in Holistic Admin progress.
-last_updated: 2026-09-24
+last_updated: 2026-09-25
 ---
 
 # Debug Holistic Admin progress
@@ -45,28 +45,15 @@ last_updated: 2026-09-24
   the explicit return to Program progress. If staging lacks incident-Program phases,
   disclose that limit and test the shared nested route with configured data.
 
-## Coverage invariants and QA checks (#343)
+## Coverage and Unassigned list (#340)
 
-- Current year, no filters: `coverage.eligible === coverage.assigned + coverage.unassigned` and `coverage.assigned === counts.total === pending + completed + skipped + noActivePhase`.
-- For one School, coverage must equal the Teacher roster (`GET /api/holistic-mentorship/mappings`, Teacher session — Admin roles get 403 there): student count, owned count, unowned count. The same holds with `grade` or `search` on both sides.
-- `phase_id`, `progress`, `page`, `sort` and `direction` never change coverage. `mentor_user_id` and past years give `coverage: null`; the UI then shows "—" (Mentor) or hides the Coverage group (past year).
-- Summing per-School coverage over `options.schools` equals program coverage. A School whose active Mappings all end leaves `options.schools` and coverage but stays in `coverageSchools`.
-- To seed exclusions locally, mutate only the **Unassigned** fixture Student (dropout, or an extra current Grade 12 `enrollment_record` for conflicting Grades) so reconciliation cannot end fixture Mappings. End Mappings directly in SQL and restore the exact rows; do not deactivate the fixture Centre, because reconciliation would end every fixture Mapping and erase draft answers.
-- For batch enrollments, `enrollment_record.group_id` holds `batch.id`, not `"group".id` (the same convention the view uses for Grades). `holistic-mentorship.spec.ts` once joined it through `"group"` and opened the centre-seated Teacher's workspace on the School page; both were fixed on September 24 (`9d2cd18d`) and the spec passes 7/7. See `patterns/debug-e2e-fixtures.md`.
+The invariants (coverage adds up and matches the Teacher roster, which filters it follows, the Unassigned list = roster unowned IDs, 422 rules, CSV shape, PM/PA scope, view-state resets and the header-Back journey) are asserted in `e2e/tests/holistic-progress.spec.ts`, `ProgressWorkspace.test.tsx` and `holistic-progress.test.ts`. Read those for the expected behaviour. Things that aren't obvious:
 
-## Unassigned list and CSV invariants and QA checks (#344)
-
-- `progress=unassigned`, current year: every row has `progress === "unassigned"`; without `phase_id`, `counts.total === coverage.unassigned`, and pending/completed/skipped/noActivePhase are 0. Pages hold `min(50, total)` rows and never repeat a (School, Student) pair.
-- For one School, the Student IDs across all Unassigned pages equal the Teacher roster's `ownership === null` IDs. The same holds with `grade` or `search` on both sides. The known fixture Student's `activePhaseId` equals its roster `activePhaseId`.
-- A Grade 12 `phase_id` removes Grade 11 Students; an unknown `phase_id` gives an empty list. Coverage stays unchanged in both cases.
-- `progress=unassigned` with a past year (JSON or CSV) or with `mentor_user_id` returns 422 `Invalid progress filters`.
-- Unassigned CSV: header without Question/Answer columns; Progress `unassigned`; Mentor, Phase, Phase Title, Availability, Completed At and Notes cells blank; no assigned Mentee from that School. All Assigned CSV: data-row count equals `counts.total`, and no row says `unassigned`. Quoted answer cells can contain line breaks, so parse the CSV rather than splitting lines.
-- PM/PA: in-scope School totals and rows equal the Admin's; program-wide rows stay inside their `coverageSchools`; an out-of-scope `school_code` returns 403.
-- UI: Unassigned is absent for past years and disabled while a Mentor is selected. Rows show "—" for Mentor, Phase and Completed on, plus an "Unassigned" badge. "Open Student" links to the active Phase with `source=progress`, or is a disabled "No active Phase" button. Pagination reads "Showing 1–50 of N Unassigned Students" (en dash, as for assigned Mentees).
-- "Clear filters" in the Unassigned empty state clears School, Grade, Phase and search but keeps Progress = Unassigned, as its copy promises. The toolbar "Clear filters" still resets everything to All Assigned.
-
-## Unassigned view state and Back journey QA checks (#345)
-
-- Pick a Mentor, or switch to a past Academic Year, while Unassigned is selected: Progress shows All Assigned, the page is 1, and no list or CSV request pairs `progress=unassigned` with `mentor_user_id` or a past `academic_year`. The 422 should never appear in normal use.
-- The stored `holistic-progress-view` sessionStorage entry is normalized before the first request: Unassigned with a Mentor or a past year becomes All Assigned on page 1. A current-year Unassigned view with no Mentor is restored as Unassigned, and it stays Unassigned across a Program change.
-- Browser journey (`holistic-progress.spec.ts`): choose Unassigned, search the known Unassigned Grade 11 Student, click "Open <name>" (active Phase, `source=progress`), then the read-only header link "Back to Students and Progress". The Progress filter is still Unassigned and the Student's row is listed. This asserts header Back, not native browser Back.
+- The Teacher roster (`GET /api/holistic-mentorship/mappings`) needs a Teacher session. Admin roles get 403 there, so parity checks use two sessions.
+- To seed exclusions locally, mutate only the **Unassigned** fixture Student (dropout, or an extra current Grade 12 `enrollment_record` for conflicting Grades) so reconciliation cannot end fixture Mappings. End Mappings directly in SQL and restore the exact rows. Do not deactivate the fixture Centre: reconciliation would end every fixture Mapping and erase draft answers.
+- A School whose active Mappings all end leaves `options.schools` and coverage but stays in `coverageSchools`.
+- `counts.total === coverage.unassigned` under Unassigned only without `phase_id`; a Phase narrows the list, not coverage.
+- Quoted CSV answer cells can contain line breaks. Parse the CSV instead of splitting lines.
+- "Clear filters" in the Unassigned empty state keeps Progress = Unassigned; the toolbar "Clear filters" resets to All Assigned.
+- The browser journey asserts the header link "Back to Students and Progress", not native browser Back.
+- Batch `enrollment_record.group_id` holds `batch.id`; see `patterns/debug-e2e-fixtures.md`.

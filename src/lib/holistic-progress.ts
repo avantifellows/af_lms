@@ -12,14 +12,7 @@ import type {
   HolisticUnassignedProgressRow,
 } from "@/types/holistic-progress";
 
-export type {
-  HolisticAssignedProgressRow,
-  HolisticProgress,
-  HolisticProgressCoverage,
-  HolisticProgressFilter,
-  HolisticProgressRow,
-  HolisticUnassignedProgressRow,
-} from "@/types/holistic-progress";
+export type { HolisticProgress, HolisticProgressFilter, HolisticProgressRow } from "@/types/holistic-progress";
 export type HolisticProgressSort = "student_name" | "school" | "grade" | "mentor" | "phase" | "progress";
 export type HolisticProgressDirection = "asc" | "desc";
 export const DEFAULT_HOLISTIC_PROGRESS_SORT: HolisticProgressSort = "school";
@@ -103,18 +96,16 @@ function parsedAnswers(value: unknown): HolisticAssignedProgressRow["answers"] {
 
 // In-scope Schools with at least one active current-year Mapping in the Program.
 // The current-year School dropdown and coverage share this set so they cannot drift.
+// Placeholders: $1 Program, $2 Academic Year, $3 current Academic Year.
 // The scope clause must use the `mapping_school` alias.
-function holisticMenteeSchoolsCte(
-  placeholders: { programId: string; academicYear: string; currentYear: string },
-  schoolScopeSql: string,
-) {
+function holisticMenteeSchoolsCte(schoolScopeSql: string) {
   return `holistic_mentee_schools AS (
        SELECT DISTINCT mapping_school.id AS school_id
        FROM holistic_mentorship_mentor_mentee_mappings mapping
        JOIN school mapping_school ON mapping_school.id = mapping.school_id
-       WHERE mapping.program_id = ${placeholders.programId}
-         AND mapping.academic_year = ${placeholders.academicYear}
-         AND ${placeholders.academicYear} = ${placeholders.currentYear}
+       WHERE mapping.program_id = $1
+         AND mapping.academic_year = $2
+         AND $2 = $3
          AND mapping.ended_at IS NULL
          ${schoolScopeSql}
      )`;
@@ -164,7 +155,7 @@ async function getHolisticProgressCoverage(
   });
   const schoolScopeSql = schoolScope.clause ? `AND ${schoolScope.clause}` : "";
   const rows = await query<{ eligible: number | string; assigned: number | string; unassigned: number | string }>(
-    `WITH ${holisticMenteeSchoolsCte({ programId: "$1", academicYear: "$2", currentYear: "$3" }, schoolScopeSql)},
+    `WITH ${holisticMenteeSchoolsCte(schoolScopeSql)},
      ${CURRENT_ELIGIBLE_ROSTER_CTES}, coverage AS (
        SELECT EXISTS (
                 SELECT 1
@@ -263,7 +254,7 @@ async function listUnassignedStudents(
   });
   const schoolScopeSql = schoolScope.clause ? `AND ${schoolScope.clause}` : "";
   const rows = await query<UnassignedDatabaseRow>(
-    `WITH ${holisticMenteeSchoolsCte({ programId: "$1", academicYear: "$2", currentYear: "$3" }, schoolScopeSql)},
+    `WITH ${holisticMenteeSchoolsCte(schoolScopeSql)},
      ${CURRENT_ELIGIBLE_ROSTER_CTES}, unassigned AS (
        -- Mentor, Phase and Progress are empty, so those sorts fall back to the tie-breakers.
        SELECT eligible.student_id, eligible.grade, school.name AS school_name, school.code AS school_code,
@@ -584,7 +575,7 @@ export async function getHolisticProgressOptions(
          ORDER BY mapping.student_id, mapping.started_at DESC, mapping.id DESC
        )`;
   const schoolsSql = academicYear === CURRENT_ACADEMIC_YEAR
-    ? `WITH ${holisticMenteeSchoolsCte({ programId: "$1", academicYear: "$2", currentYear: "$3" }, schoolScopeSql)}
+    ? `WITH ${holisticMenteeSchoolsCte(schoolScopeSql)}
        SELECT school.code, school.name
        FROM holistic_mentee_schools mentee_school
        JOIN school ON school.id = mentee_school.school_id
