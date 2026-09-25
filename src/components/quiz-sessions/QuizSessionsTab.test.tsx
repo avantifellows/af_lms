@@ -734,6 +734,25 @@ describe("QuizSessionsTab", () => {
     expect(screen.queryByText(/already has/)).not.toBeInTheDocument();
   });
 
+  it("filters the list to live sessions with the Live only toggle", async () => {
+    const user = userEvent.setup();
+
+    render(<QuizSessionsTab schoolId="school-1" canEdit />);
+    expect(await screen.findByText("Existing Quiz")).toBeInTheDocument();
+
+    const toggle = screen.getByRole("button", { name: "Live only" });
+    await user.click(toggle);
+
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+    await waitFor(() => {
+      expect(
+        getFetchCalls(mockFetch, "/api/quiz-sessions?").some(([input]) =>
+          String(input).includes("status=live")
+        )
+      ).toBe(true);
+    });
+  });
+
   it("does not expose the removed sync endpoint from the UI", async () => {
     render(<QuizSessionsTab schoolId="school-1" canEdit />);
 

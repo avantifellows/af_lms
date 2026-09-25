@@ -322,6 +322,7 @@ export default function QuizSessionsTab({
   const [batches, setBatches] = useState<BatchOption[]>([]);
   const [sessions, setSessions] = useState<QuizSession[]>([]);
   const [selectedClassBatch, setSelectedClassBatch] = useState("");
+  const [liveOnly, setLiveOnly] = useState(false);
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(false);
   const [loadingBatches, setLoadingBatches] = useState(false);
@@ -409,6 +410,9 @@ export default function QuizSessionsTab({
         if (classBatchId) {
           params.set("classBatchId", classBatchId);
         }
+        if (liveOnly) {
+          params.set("status", "live");
+        }
         // Centre pages: keep the "All batches" list scoped to the centre's
         // program (the server intersects this with the viewer's own programs).
         if (programId != null) {
@@ -442,7 +446,7 @@ export default function QuizSessionsTab({
         }
       }
     },
-    [schoolId, programId]
+    [schoolId, programId, liveOnly]
   );
 
   useEffect(() => {
@@ -688,6 +692,22 @@ export default function QuizSessionsTab({
               </option>
             ))}
           </select>
+          <button
+            type="button"
+            aria-pressed={liveOnly}
+            onClick={() => {
+              setLiveOnly((previous) => !previous);
+              setPage(0);
+            }}
+            className={`inline-flex min-h-[44px] shrink-0 items-center gap-2 rounded-lg border-2 px-4 py-2 text-sm font-semibold ${
+              liveOnly
+                ? "border-border-accent bg-success-bg text-accent"
+                : "border-border bg-bg-card text-text-secondary hover:border-accent hover:text-accent"
+            }`}
+          >
+            <span className={`h-2 w-2 rounded-full ${liveOnly ? "bg-accent" : "bg-text-muted"}`} />
+            Live only
+          </button>
         </div>
         <div className="text-xs leading-5 text-text-secondary">
           Results sync automatically every {AUTO_SYNC_INTERVAL_MINUTES} minutes. Manual sync is not needed.
@@ -729,7 +749,7 @@ export default function QuizSessionsTab({
             ) : sessions.length === 0 ? (
               <tr>
                 <td colSpan={6} className="px-4 py-10 text-center text-sm text-text-secondary">
-                  No quiz sessions found.
+                  {liveOnly ? "No live quiz sessions." : "No quiz sessions found."}
                 </td>
               </tr>
             ) : (

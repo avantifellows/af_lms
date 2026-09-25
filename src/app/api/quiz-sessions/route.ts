@@ -140,6 +140,7 @@ export async function GET(request: NextRequest) {
     cmsTestId: searchParams.get("cmsTestId")?.trim() || null,
     resourceId: searchParams.get("resourceId")?.trim() || null,
   };
+  const liveOnly = searchParams.get("status") === "live";
   const page = Number(searchParams.get("page") || "0");
   const perPage = Number(searchParams.get("per_page") || "50");
 
@@ -193,7 +194,8 @@ export async function GET(request: NextRequest) {
     filteredClassIds,
     page,
     perPage,
-    paper
+    paper,
+    liveOnly
   );
   return NextResponse.json({ sessions, hasMore });
 }
@@ -224,7 +226,8 @@ async function listQuizSessions(
   filteredClassIds: string[],
   page: number,
   perPage: number,
-  paper: { cmsTestId: string | null; resourceId: string | null }
+  paper: { cmsTestId: string | null; resourceId: string | null },
+  liveOnly: boolean
 ): Promise<{ sessions: ReturnType<typeof normalizeSessionTimes>[]; hasMore: boolean }> {
   const limit = perPage + 1;
   const offset = page * perPage;
@@ -253,11 +256,16 @@ async function listQuizSessions(
       AND COALESCE(s.meta_data->>'cms_test_id', '') NOT LIKE 'teacher-feedback:%'
       AND ($5::text IS NULL OR (s.meta_data ? 'cms_source' AND s.meta_data->>'cms_test_id' = $5))
       AND ($6::text IS NULL OR s.meta_data->>'resource_id' = $6)
+      -- Times are IST wall-clock, so compare against IST now.
+      AND (NOT $7::boolean OR (
+        s.start_time <= (now() AT TIME ZONE 'Asia/Kolkata')
+        AND s.end_time > (now() AT TIME ZONE 'Asia/Kolkata')
+      ))
     -- Latest window end first, so an extended session rises to the top.
     ORDER BY s.end_time DESC NULLS LAST, s.id DESC
     LIMIT $3 OFFSET $4
     `,
-    [groups, filteredClassIds, limit, offset, paper.cmsTestId, paper.resourceId]
+    [groups, filteredClassIds, limit, offset, paper.cmsTestId, paper.resourceId, liveOnly]
   );
 
   const hasMore = rows.length > perPage;
