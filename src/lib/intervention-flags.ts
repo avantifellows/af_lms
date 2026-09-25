@@ -129,6 +129,9 @@ export function validateNote(raw: unknown, { required }: { required: boolean }):
   return { ok: true, note };
 }
 
+// Timestamp columns are `timestamp without time zone` holding UTC. node-pg would
+// read them as the Node process's local time, so every read converts them to
+// timestamptz with `AT TIME ZONE 'UTC'`.
 const UPDATE_COLUMNS = `
   upd.id::int AS id,
   upd.author_email,
@@ -136,7 +139,7 @@ const UPDATE_COLUMNS = `
   upd.body,
   upd.status_from,
   upd.status_to,
-  upd.inserted_at`;
+  upd.inserted_at AT TIME ZONE 'UTC' AS inserted_at`;
 
 // Name lookup by email: permission-only admins have no "user" row, but every
 // author has a user_permission row. A scalar subquery avoids row duplication
@@ -152,7 +155,9 @@ const AUTHOR_NAME_JOIN = `
 export async function listSchoolFlags(schoolId: string): Promise<InterventionFlag[]> {
   const flags = await query<Omit<InterventionFlag, "updates">>(
     `SELECT f.id::int AS id, f.student_id::text AS student_pk_id, f.status,
-            f.raised_by_email, f.inserted_at, f.resolved_at
+            f.raised_by_email,
+            f.inserted_at AT TIME ZONE 'UTC' AS inserted_at,
+            f.resolved_at AT TIME ZONE 'UTC' AS resolved_at
      FROM lms_student_intervention_flags f
      WHERE f.school_id = $1
      ORDER BY f.inserted_at DESC`,
@@ -191,9 +196,9 @@ export async function listOpenFlags(
             sch.udise_code AS school_udise,
             sch.name AS school_name,
             f.raised_by_email,
-            f.inserted_at,
+            f.inserted_at AT TIME ZONE 'UTC' AS inserted_at,
             latest.body AS latest_note,
-            latest.inserted_at AS latest_at
+            latest.inserted_at AT TIME ZONE 'UTC' AS latest_at
      FROM lms_student_intervention_flags f
      JOIN school sch ON sch.id = f.school_id
      JOIN student s ON s.id = f.student_id

@@ -138,7 +138,7 @@ export default function InterventionFlagModal({
             rows={4}
             maxLength={INTERVENTION_FLAG_NOTE_MAX_LENGTH}
             disabled={submitting}
-            className={baseInputClasses}
+            className={`${baseInputClasses} w-full`}
           />
         </label>
         {error && (
