@@ -12,7 +12,7 @@ import type {
   HolisticUnassignedProgressRow,
 } from "@/types/holistic-progress";
 
-export type { HolisticProgress, HolisticProgressFilter, HolisticProgressRow } from "@/types/holistic-progress";
+export type { HolisticProgressFilter, HolisticProgressRow } from "@/types/holistic-progress";
 export type HolisticProgressSort = "student_name" | "school" | "grade" | "mentor" | "phase" | "progress";
 export type HolisticProgressDirection = "asc" | "desc";
 export const DEFAULT_HOLISTIC_PROGRESS_SORT: HolisticProgressSort = "school";

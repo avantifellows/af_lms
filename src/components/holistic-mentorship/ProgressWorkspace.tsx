@@ -289,16 +289,16 @@ export default function ProgressWorkspace({
   };
   const filtered = progressIsFiltered(filters);
   const unassigned = filters.progress === "unassigned";
+  const currentYear = academicYear === CURRENT_ACADEMIC_YEAR;
   const totalPages = Math.max(1, Math.ceil(data.counts.total / 50));
   return (
     <div aria-busy={loading} className="w-full min-w-0 max-w-full space-y-5">
       <ProgressIntro academicYear={academicYear} exporting={exporting} exportError={exportError}
         onExport={exportProgress} />
       <AssignmentCoverageSchools schools={data.coverageSchools ?? []} programId={programId} />
-      <ProgressFilterPanel filters={filters} options={data.options} onChange={update}
-        currentYear={academicYear === CURRENT_ACADEMIC_YEAR} />
-      <ProgressCounts counts={data.counts} coverage={filters.mentor ? null : data.coverage ?? null}
-        currentYear={academicYear === CURRENT_ACADEMIC_YEAR} />
+      <ProgressFilterPanel filters={filters} options={data.options} onChange={update} currentYear={currentYear} />
+      <ProgressCounts counts={data.counts} coverage={data.coverage} mentorSelected={filters.mentor !== ""}
+        currentYear={currentYear} />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2 text-xs text-text-muted">
           <Clock aria-hidden="true" className="h-4 w-4" />
@@ -325,7 +325,7 @@ export default function ProgressWorkspace({
         sort={filters.sort}
         direction={filters.direction}
         onSort={changeSort}
-        onClearFilters={unassigned ? () => resetFilters("unassigned") : clearFilters}
+        onClearFilters={resetFilters}
         showStudentLinks={showStudentLinks}
         unassigned={unassigned}
       />
@@ -402,11 +402,14 @@ type CountCard = [label: string, value: number | string, accent: string];
 
 const SM_COUNT_COLUMNS: Record<number, string> = { 3: "sm:grid-cols-3", 4: "sm:grid-cols-4", 5: "sm:grid-cols-5" };
 
-function ProgressCounts({ counts, coverage, currentYear }: {
+function ProgressCounts({ counts, coverage, mentorSelected, currentYear }: {
   counts: Payload["counts"];
   coverage: HolisticProgressCoverage | null;
+  mentorSelected: boolean;
   currentYear: boolean;
 }) {
+  // Blank at once on a Mentor change instead of showing the previous coverage while loading.
+  const shown = mentorSelected ? null : coverage;
   const progress: CountCard[] = [
     ["Pending", counts.pending, "border-t-[3px] border-t-warning-border"],
     ["Completed", counts.completed, "border-t-[3px] border-t-success"],
@@ -415,9 +418,9 @@ function ProgressCounts({ counts, coverage, currentYear }: {
   if (counts.noActivePhase > 0) progress.push(["No active phase", counts.noActivePhase, ""]);
   if (!currentYear) return <CountGroup label="Progress" cards={[["Assigned", counts.total, ""], ...progress]} />;
   const coverageCards: CountCard[] = [
-    ["Eligible Students", coverage?.eligible ?? "—", ""],
-    ["Assigned", coverage?.assigned ?? "—", ""],
-    ["Unassigned", coverage?.unassigned ?? "—", ""],
+    ["Eligible Students", shown?.eligible ?? "—", ""],
+    ["Assigned", shown?.assigned ?? "—", ""],
+    ["Unassigned", shown?.unassigned ?? "—", ""],
   ];
   return <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,3fr)_minmax(0,4fr)]">
     <CountGroup label="Coverage" cards={coverageCards} />
@@ -517,7 +520,7 @@ function ProgressResults({
   sort: string;
   direction: string;
   onSort: (key: string) => void;
-  onClearFilters: () => void;
+  onClearFilters: (progress: string) => void;
   showStudentLinks: boolean;
   unassigned: boolean;
 }) {
@@ -561,7 +564,7 @@ function ProgressEmptyState({ hasMappings, filtered, unassigned, onClearFilters 
   hasMappings: boolean;
   filtered: boolean;
   unassigned: boolean;
-  onClearFilters: () => void;
+  onClearFilters: (progress: string) => void;
 }) {
   const noMappings = !hasMappings && !filtered;
   const Icon = noMappings ? Users : SearchX;
@@ -570,7 +573,7 @@ function ProgressEmptyState({ hasMappings, filtered, unassigned, onClearFilters 
       <SearchX aria-hidden="true" className="h-8 w-8 text-text-muted" />
       <p className="text-base font-semibold text-text-primary">No Unassigned Students match these filters.</p>
       <p className="text-sm text-text-muted">Change or clear a filter to see more Unassigned Students.</p>
-      <Button type="button" variant="secondary" onClick={onClearFilters}>Clear filters</Button>
+      <Button type="button" variant="secondary" onClick={() => onClearFilters("unassigned")}>Clear filters</Button>
     </div>;
   }
   return <div className="flex min-h-64 flex-col items-center justify-center gap-3 border-y border-border p-8 text-center">
@@ -583,7 +586,7 @@ function ProgressEmptyState({ hasMappings, filtered, unassigned, onClearFilters 
         ? "Students appear here after Teachers assign them from their School workspace."
         : "Change or clear a filter to see more assigned Mentees."}
     </p>
-    {!noMappings && <Button type="button" variant="secondary" onClick={onClearFilters}>Clear filters</Button>}
+    {!noMappings && <Button type="button" variant="secondary" onClick={() => onClearFilters("")}>Clear filters</Button>}
   </div>;
 }
 
