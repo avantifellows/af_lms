@@ -136,3 +136,11 @@ CMS tests have no stored PDF URLs. Both the create-form test picker and session 
 `/api/cms/test-pdf?testId=…&type=questions|answers`, which fetches the CMS service PDF and
 redirects to a short-lived presigned S3 copy. Build hrefs with `cmsTestPdfHrefs` in
 `QuizSessionsTab.tsx`. The CMS caches rendered PDFs (nex-gen-cms#202), so repeat opens skip headless Chrome.
+
+## Duplicate-session nudge
+
+Selecting a paper in the create form looks up earlier sessions of it in the school
+(`GET /api/quiz-sessions?cmsTestId=` for CMS, `?resourceId=` for legacy templates). If any exist,
+"When And How" and Create fold behind "Create a new session anyway", and each match offers
+**Extend this session**, which opens the normal edit modal. The lookup fails open, so creation is
+never blocked by it.

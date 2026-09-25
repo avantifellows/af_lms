@@ -135,6 +135,11 @@ export async function GET(request: NextRequest) {
   const schoolIdParam = searchParams.get("schoolId");
   const classBatchId = searchParams.get("classBatchId");
   const programIdParam = searchParams.get("programId");
+  // Optional paper filter: the create form uses it to find earlier sessions of the same test.
+  const paper = {
+    cmsTestId: searchParams.get("cmsTestId")?.trim() || null,
+    resourceId: searchParams.get("resourceId")?.trim() || null,
+  };
   const page = Number(searchParams.get("page") || "0");
   const perPage = Number(searchParams.get("per_page") || "50");
 
@@ -187,7 +192,8 @@ export async function GET(request: NextRequest) {
   const { sessions, hasMore } = await listQuizSessions(
     filteredClassIds,
     page,
-    perPage
+    perPage,
+    paper
   );
   return NextResponse.json({ sessions, hasMore });
 }
@@ -217,7 +223,8 @@ function normalizeSessionTimes(s: SessionRow) {
 async function listQuizSessions(
   filteredClassIds: string[],
   page: number,
-  perPage: number
+  perPage: number,
+  paper: { cmsTestId: string | null; resourceId: string | null }
 ): Promise<{ sessions: ReturnType<typeof normalizeSessionTimes>[]; hasMore: boolean }> {
   const limit = perPage + 1;
   const offset = page * perPage;
@@ -244,10 +251,12 @@ async function listQuizSessions(
       AND string_to_array(s.meta_data->>'batch_id', ',') && $2::text[]
       -- Teacher Feedback forms are managed in their own tab, not here.
       AND COALESCE(s.meta_data->>'cms_test_id', '') NOT LIKE 'teacher-feedback:%'
+      AND ($5::text IS NULL OR (s.meta_data ? 'cms_source' AND s.meta_data->>'cms_test_id' = $5))
+      AND ($6::text IS NULL OR s.meta_data->>'resource_id' = $6)
     ORDER BY s.id DESC
     LIMIT $3 OFFSET $4
     `,
-    [groups, filteredClassIds, limit, offset]
+    [groups, filteredClassIds, limit, offset, paper.cmsTestId, paper.resourceId]
   );
 
   const hasMore = rows.length > perPage;

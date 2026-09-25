@@ -179,13 +179,21 @@ describe("QuizSessionsTab", () => {
       if (url.startsWith("/api/quiz-sessions?")) {
         const parsed = new URL(url, "http://localhost");
         const classBatchId = parsed.searchParams.get("classBatchId");
-        const filtered = classBatchId
-          ? sessions.filter((session) =>
+        const cmsTestId = parsed.searchParams.get("cmsTestId");
+        const resourceId = parsed.searchParams.get("resourceId");
+        const filtered = sessions
+          .filter(
+            (session) =>
+              !classBatchId ||
               String(session.meta_data?.batch_id || "")
                 .split(",")
                 .includes(classBatchId)
-            )
-          : sessions;
+          )
+          .filter(
+            (session) =>
+              (!cmsTestId || String(session.meta_data?.cms_test_id) === cmsTestId) &&
+              (!resourceId || String(session.meta_data?.resource_id) === resourceId)
+          );
         return jsonResponse({ sessions: filtered, hasMore: false });
       }
 
@@ -600,6 +608,62 @@ describe("QuizSessionsTab", () => {
       "aria-pressed",
       "false"
     );
+  });
+
+  it("nudges towards extending an earlier session of the same paper", async () => {
+    sessions = [
+      {
+        ...makeSessions()[0],
+        id: 7,
+        name: "Part Test 11 - Round 1",
+        meta_data: { ...makeSessions()[0].meta_data, resource_id: 501 },
+      },
+      ...makeSessions(),
+    ];
+    const user = userEvent.setup();
+
+    render(<QuizSessionsTab schoolId="school-1" canEdit />);
+
+    await user.click(await screen.findByRole("button", { name: "Create Quiz Session" }));
+    await user.click(screen.getByLabelText("Class 11 Engg A"));
+    await user.selectOptions(screen.getByLabelText("Grade"), "11");
+    await user.selectOptions(screen.getByLabelText("Test Format"), "part_test");
+    await user.click(await screen.findByText("Part Test 11"));
+
+    expect(await screen.findByText("This test already has a session in this school")).toBeInTheDocument();
+    expect(screen.getByText(/includes your selected batches/)).toBeInTheDocument();
+    expect(screen.queryByText("3. When And How")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create Session" })).toBeDisabled();
+
+    await user.click(screen.getByRole("button", { name: "Create a new session anyway" }));
+    expect(screen.getByText("3. When And How")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create Session" })).toBeEnabled();
+
+    await user.click(screen.getByRole("button", { name: "Extend this session" }));
+    expect(screen.getByRole("heading", { name: "Edit Quiz Session" })).toBeInTheDocument();
+    expect(screen.getByDisplayValue("Part Test 11 - Round 1")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Create Quiz Session" })).not.toBeInTheDocument();
+  });
+
+  it("shows no nudge when the paper has no earlier session", async () => {
+    const user = userEvent.setup();
+
+    render(<QuizSessionsTab schoolId="school-1" canEdit />);
+
+    await user.click(await screen.findByRole("button", { name: "Create Quiz Session" }));
+    await user.click(screen.getByLabelText("Class 11 Engg A"));
+    await user.selectOptions(screen.getByLabelText("Grade"), "11");
+    await user.selectOptions(screen.getByLabelText("Test Format"), "part_test");
+    await user.click(await screen.findByText("Part Test 11"));
+
+    await waitFor(() => {
+      expect(getFetchCalls(mockFetch, "/api/quiz-sessions?schoolId=school-1&per_page=20")).toHaveLength(1);
+    });
+    expect(String(getFetchCalls(mockFetch, "/api/quiz-sessions?schoolId=school-1&per_page=20")[0][0])).toContain(
+      "resourceId=501"
+    );
+    expect(await screen.findByText("3. When And How")).toBeInTheDocument();
+    expect(screen.queryByText(/already has/)).not.toBeInTheDocument();
   });
 
   it("does not expose the removed sync endpoint from the UI", async () => {

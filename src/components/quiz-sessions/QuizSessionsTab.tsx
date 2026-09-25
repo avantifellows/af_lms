@@ -822,8 +822,15 @@ export default function QuizSessionsTab({
       {isCreateOpen && (
         <QuizSessionCreateModal
           batches={batches}
+          schoolId={schoolId}
+          programId={programId}
+          batchNameMap={batchNameMap}
           onClose={() => setIsCreateOpen(false)}
           onCreated={handleCreated}
+          onExtend={(session) => {
+            setIsCreateOpen(false);
+            setEditingSession(session);
+          }}
         />
       )}
 
@@ -950,12 +957,20 @@ export default function QuizSessionsTab({
 // fallow-ignore-next-line complexity
 function QuizSessionCreateModal({
   batches,
+  schoolId,
+  programId,
+  batchNameMap,
   onClose,
   onCreated,
+  onExtend,
 }: {
   batches: BatchOption[];
+  schoolId: string;
+  programId?: number;
+  batchNameMap: Map<string, string>;
   onClose: () => void;
   onCreated: (message?: string) => void;
+  onExtend: (session: QuizSession) => void;
 }) {
   const [name, setName] = useState("");
   const [nameEdited, setNameEdited] = useState(false);
@@ -1269,6 +1284,46 @@ function QuizSessionCreateModal({
     }
     return selectedTemplate?.name ?? null;
   }, [cmsTests, selectedCmsTestId, selectedTemplate, testSource]);
+
+  // Earlier sessions of the selected paper in this school — we nudge towards extending one
+  // rather than creating a duplicate session for the same test.
+  const paperQuery =
+    testSource === "cms"
+      ? selectedCmsTestId !== null
+        ? `cmsTestId=${selectedCmsTestId}`
+        : null
+      : selectedTemplateId !== null
+        ? `resourceId=${selectedTemplateId}`
+        : null;
+  const [existingSessions, setExistingSessions] = useState<QuizSession[]>([]);
+  const [checkingExisting, setCheckingExisting] = useState(false);
+  const [createAnyway, setCreateAnyway] = useState(false);
+
+  useEffect(() => {
+    setCreateAnyway(false);
+    setExistingSessions([]);
+    if (!paperQuery) return;
+
+    let cancelled = false;
+    const params = new URLSearchParams({ schoolId, per_page: "20" });
+    if (programId != null) params.set("programId", String(programId));
+    setCheckingExisting(true);
+    // Fail open: if the lookup fails, creation simply proceeds without the nudge.
+    fetch(`/api/quiz-sessions?${params.toString()}&${paperQuery}`)
+      .then((response) => (response.ok ? response.json() : { sessions: [] }))
+      .then((data) => {
+        if (!cancelled) setExistingSessions(data.sessions ?? []);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) setCheckingExisting(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [paperQuery, programId, schoolId]);
+
+  const duplicateGate = existingSessions.length > 0 && !createAnyway;
 
   useEffect(() => {
     if (!selectedTestName) {
@@ -1878,6 +1933,23 @@ function QuizSessionCreateModal({
                 </div>
               </SectionCard>
 
+              {checkingExisting ? (
+                <div className="flex items-center gap-2 rounded-lg border border-border bg-bg-card-alt px-4 py-3 text-sm text-text-secondary">
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-accent border-t-transparent" />
+                  Checking for earlier sessions of this test...
+                </div>
+              ) : existingSessions.length > 0 ? (
+                <ExistingSessionsNotice
+                  sessions={existingSessions}
+                  batchNameMap={batchNameMap}
+                  selectedBatchIds={classBatchIds}
+                  createAnyway={createAnyway}
+                  onExtend={onExtend}
+                  onToggleCreateAnyway={() => setCreateAnyway((previous) => !previous)}
+                />
+              ) : null}
+
+              {!duplicateGate && (
               <SectionCard title="3. When And How">
                 <div className="space-y-4">
                   <div className="grid gap-3 md:grid-cols-2">
@@ -2043,6 +2115,7 @@ function QuizSessionCreateModal({
                   </div>
                 </div>
               </SectionCard>
+              )}
             </div>
           </div>
 
@@ -2068,7 +2141,7 @@ function QuizSessionCreateModal({
                 </button>
                 <button
                   onClick={handleSubmit}
-                  disabled={saving}
+                  disabled={saving || checkingExisting || duplicateGate}
                   className="min-h-[44px] rounded-lg bg-accent px-5 py-2.5 text-sm font-bold uppercase tracking-wide text-text-on-accent shadow-sm hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {saving ? "Creating..." : "Create Session"}
@@ -2078,6 +2151,85 @@ function QuizSessionCreateModal({
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function ExistingSessionsNotice({
+  sessions,
+  batchNameMap,
+  selectedBatchIds,
+  createAnyway,
+  onExtend,
+  onToggleCreateAnyway,
+}: {
+  sessions: QuizSession[];
+  batchNameMap: Map<string, string>;
+  selectedBatchIds: string[];
+  createAnyway: boolean;
+  onExtend: (session: QuizSession) => void;
+  onToggleCreateAnyway: () => void;
+}) {
+  return (
+    <div className="rounded-lg border border-warning-border/40 bg-warning-bg p-4">
+      <div className="text-sm font-bold text-warning-text">
+        This test already has {sessions.length === 1 ? "a session" : `${sessions.length} sessions`} in
+        this school
+      </div>
+      <p className="mt-1 text-sm text-text-secondary">
+        Please extend an existing session instead of creating a new one, so students and results
+        stay in one place.
+      </p>
+
+      <div className="mt-3 space-y-2">
+        {sessions.map((session) => {
+          const batchIds = getMetaString(session.meta_data, "batch_id")?.split(",").filter(Boolean) ?? [];
+          const coversSelected = batchIds.some((id) => selectedBatchIds.includes(id));
+          const lifecycle = getSessionLifecycleState(session);
+          const processing = isSessionProcessing(session);
+          return (
+            <div
+              key={session.id}
+              className="flex flex-col gap-2 rounded-lg border border-border bg-bg-card px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
+            >
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-semibold text-text-primary">{session.name}</span>
+                  <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${getLifecycleClasses(lifecycle)}`}>
+                    {getLifecycleLabel(lifecycle)}
+                  </span>
+                  {session.is_active === false && (
+                    <span className="text-xs text-text-muted">Disabled</span>
+                  )}
+                </div>
+                <div className="mt-0.5 text-xs text-text-secondary">
+                  {formatDateTime(session.start_time)} → {formatDateTime(session.end_time)} ·{" "}
+                  {getCompactBatchLabel(batchIds.map((id) => batchNameMap.get(id) || id))}
+                  {coversSelected ? " · includes your selected batches" : ""}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => onExtend(session)}
+                disabled={processing}
+                className="min-h-[36px] shrink-0 rounded-lg bg-accent px-3 py-1.5 text-xs font-bold uppercase tracking-wide text-text-on-accent hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {processing ? "Processing..." : "Extend this session"}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+
+      <button
+        type="button"
+        onClick={onToggleCreateAnyway}
+        aria-expanded={createAnyway}
+        className="mt-3 inline-flex items-center gap-1 text-sm font-medium text-text-secondary hover:text-accent"
+      >
+        {createAnyway ? "Hide new session options" : "Create a new session anyway"}
+        <ChevronDownIcon className={createAnyway ? "rotate-180" : ""} />
+      </button>
     </div>
   );
 }

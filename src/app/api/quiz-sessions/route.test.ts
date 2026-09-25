@@ -167,13 +167,40 @@ describe("GET /api/quiz-sessions", () => {
     expect(mocks.mockQuery).toHaveBeenNthCalledWith(
       2,
       expect.stringContaining("FROM session s"),
-      // groups (derived from the class batch prefix), then class batch ids, limit, offset
-      [["EnableStudents"], ["EnableStudents_11_Engg_A"], 11, 0]
+      // groups (derived from the class batch prefix), class batch ids, limit, offset, paper filters
+      [["EnableStudents"], ["EnableStudents_11_Engg_A"], 11, 0, null, null]
     );
     expect(mocks.mockRequireQuizSessionAccess).toHaveBeenCalledWith(
       ADMIN_SESSION.user.email,
       "view"
     );
+  });
+
+  it("filters to one paper with ?cmsTestId= or ?resourceId=", async () => {
+    const { GET } = await loadRouteModule();
+    mocks.mockGetServerSession.mockResolvedValue(ADMIN_SESSION);
+    const classBatch = {
+      id: 11,
+      name: "Class 11 Engg A",
+      batch_id: "EnableStudents_11_Engg_A",
+      parent_id: 5,
+      program_id: 1,
+    };
+    mocks.mockQuery
+      .mockResolvedValueOnce([classBatch])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([classBatch])
+      .mockResolvedValueOnce([]);
+
+    await GET(new NextRequest("http://localhost/api/quiz-sessions?schoolId=42&cmsTestId=4379"));
+    await GET(new NextRequest("http://localhost/api/quiz-sessions?schoolId=42&resourceId=501"));
+
+    const sessionQueries = mocks.mockQuery.mock.calls.filter(([sql]) =>
+      String(sql).includes("FROM session s")
+    );
+    expect(sessionQueries[0][0]).toContain("s.meta_data ? 'cms_source'");
+    expect(sessionQueries[0][1].slice(-2)).toEqual(["4379", null]);
+    expect(sessionQueries[1][1].slice(-2)).toEqual([null, "501"]);
   });
 
   it("narrows the batch scope to ?programId= when the viewer holds that program", async () => {
