@@ -630,8 +630,9 @@ describe("QuizSessionsTab", () => {
     await user.selectOptions(screen.getByLabelText("Test Format"), "part_test");
     await user.click(await screen.findByText("Part Test 11"));
 
-    expect(await screen.findByText("This test already has a session in this school")).toBeInTheDocument();
-    expect(screen.getByText(/includes your selected batches/)).toBeInTheDocument();
+    expect(
+      await screen.findByText("This test already has a session for the selected batches")
+    ).toBeInTheDocument();
     expect(screen.queryByText("3. When And How")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Create Session" })).toBeDisabled();
 
@@ -643,6 +644,41 @@ describe("QuizSessionsTab", () => {
     expect(screen.getByRole("heading", { name: "Edit Quiz Session" })).toBeInTheDocument();
     expect(screen.getByDisplayValue("Part Test 11 - Round 1")).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Create Quiz Session" })).not.toBeInTheDocument();
+  });
+
+  it("ignores earlier sessions of the paper that ran for other batches", async () => {
+    sessions = [
+      {
+        ...makeSessions()[0],
+        id: 7,
+        name: "Part Test 11 - Batch B",
+        meta_data: {
+          ...makeSessions()[0].meta_data,
+          batch_id: "EnableStudents_11_Engg_B",
+          resource_id: 501,
+        },
+      },
+      ...makeSessions(),
+    ];
+    const user = userEvent.setup();
+
+    render(<QuizSessionsTab schoolId="school-1" canEdit />);
+
+    await user.click(await screen.findByRole("button", { name: "Create Quiz Session" }));
+    await user.click(screen.getByLabelText("Class 11 Engg A"));
+    await user.selectOptions(screen.getByLabelText("Grade"), "11");
+    await user.selectOptions(screen.getByLabelText("Test Format"), "part_test");
+    await user.click(await screen.findByText("Part Test 11"));
+
+    expect(await screen.findByText("3. When And How")).toBeInTheDocument();
+    expect(screen.queryByText(/already has/)).not.toBeInTheDocument();
+
+    // Adding the batch that already ran it brings the nudge up.
+    await user.click(screen.getByLabelText("Class 11 Engg B"));
+    expect(
+      await screen.findByText("This test already has a session for the selected batches")
+    ).toBeInTheDocument();
+    expect(screen.queryByText("3. When And How")).not.toBeInTheDocument();
   });
 
   it("shows no nudge when the paper has no earlier session", async () => {
@@ -657,9 +693,9 @@ describe("QuizSessionsTab", () => {
     await user.click(await screen.findByText("Part Test 11"));
 
     await waitFor(() => {
-      expect(getFetchCalls(mockFetch, "/api/quiz-sessions?schoolId=school-1&per_page=20")).toHaveLength(1);
+      expect(getFetchCalls(mockFetch, "/api/quiz-sessions?schoolId=school-1&per_page=50")).toHaveLength(1);
     });
-    expect(String(getFetchCalls(mockFetch, "/api/quiz-sessions?schoolId=school-1&per_page=20")[0][0])).toContain(
+    expect(String(getFetchCalls(mockFetch, "/api/quiz-sessions?schoolId=school-1&per_page=50")[0][0])).toContain(
       "resourceId=501"
     );
     expect(await screen.findByText("3. When And How")).toBeInTheDocument();

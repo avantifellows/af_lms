@@ -1285,8 +1285,8 @@ function QuizSessionCreateModal({
     return selectedTemplate?.name ?? null;
   }, [cmsTests, selectedCmsTestId, selectedTemplate, testSource]);
 
-  // Earlier sessions of the selected paper in this school — we nudge towards extending one
-  // rather than creating a duplicate session for the same test.
+  // Earlier sessions of the selected paper for the selected batches — we nudge towards
+  // extending one rather than creating a duplicate session of the same test for a batch.
   const paperQuery =
     testSource === "cms"
       ? selectedCmsTestId !== null
@@ -1305,7 +1305,7 @@ function QuizSessionCreateModal({
     if (!paperQuery) return;
 
     let cancelled = false;
-    const params = new URLSearchParams({ schoolId, per_page: "20" });
+    const params = new URLSearchParams({ schoolId, per_page: "50" });
     if (programId != null) params.set("programId", String(programId));
     setCheckingExisting(true);
     // Fail open: if the lookup fails, creation simply proceeds without the nudge.
@@ -1323,7 +1323,12 @@ function QuizSessionCreateModal({
     };
   }, [paperQuery, programId, schoolId]);
 
-  const duplicateGate = existingSessions.length > 0 && !createAnyway;
+  const batchSessions = existingSessions.filter((session) =>
+    getMetaString(session.meta_data, "batch_id")
+      ?.split(",")
+      .some((id) => classBatchIds.includes(id))
+  );
+  const duplicateGate = batchSessions.length > 0 && !createAnyway;
 
   useEffect(() => {
     if (!selectedTestName) {
@@ -1938,11 +1943,10 @@ function QuizSessionCreateModal({
                   <span className="h-4 w-4 animate-spin rounded-full border-2 border-accent border-t-transparent" />
                   Checking for earlier sessions of this test...
                 </div>
-              ) : existingSessions.length > 0 ? (
+              ) : batchSessions.length > 0 ? (
                 <ExistingSessionsNotice
-                  sessions={existingSessions}
+                  sessions={batchSessions}
                   batchNameMap={batchNameMap}
-                  selectedBatchIds={classBatchIds}
                   createAnyway={createAnyway}
                   onExtend={onExtend}
                   onToggleCreateAnyway={() => setCreateAnyway((previous) => !previous)}
@@ -2158,14 +2162,12 @@ function QuizSessionCreateModal({
 function ExistingSessionsNotice({
   sessions,
   batchNameMap,
-  selectedBatchIds,
   createAnyway,
   onExtend,
   onToggleCreateAnyway,
 }: {
   sessions: QuizSession[];
   batchNameMap: Map<string, string>;
-  selectedBatchIds: string[];
   createAnyway: boolean;
   onExtend: (session: QuizSession) => void;
   onToggleCreateAnyway: () => void;
@@ -2173,8 +2175,8 @@ function ExistingSessionsNotice({
   return (
     <div className="rounded-lg border border-warning-border/40 bg-warning-bg p-4">
       <div className="text-sm font-bold text-warning-text">
-        This test already has {sessions.length === 1 ? "a session" : `${sessions.length} sessions`} in
-        this school
+        This test already has {sessions.length === 1 ? "a session" : `${sessions.length} sessions`} for
+        the selected batches
       </div>
       <p className="mt-1 text-sm text-text-secondary">
         Please extend an existing session instead of creating a new one, so students and results
@@ -2184,7 +2186,6 @@ function ExistingSessionsNotice({
       <div className="mt-3 space-y-2">
         {sessions.map((session) => {
           const batchIds = getMetaString(session.meta_data, "batch_id")?.split(",").filter(Boolean) ?? [];
-          const coversSelected = batchIds.some((id) => selectedBatchIds.includes(id));
           const lifecycle = getSessionLifecycleState(session);
           const processing = isSessionProcessing(session);
           return (
@@ -2205,7 +2206,6 @@ function ExistingSessionsNotice({
                 <div className="mt-0.5 text-xs text-text-secondary">
                   {formatDateTime(session.start_time)} → {formatDateTime(session.end_time)} ·{" "}
                   {getCompactBatchLabel(batchIds.map((id) => batchNameMap.get(id) || id))}
-                  {coversSelected ? " · includes your selected batches" : ""}
                 </div>
               </div>
               <button
