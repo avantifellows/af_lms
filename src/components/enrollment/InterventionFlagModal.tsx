@@ -12,8 +12,11 @@ import {
 interface Props {
   open: boolean;
   onClose: () => void;
-  /** Called after any successful write so the parent refetches flags. */
-  onChanged: () => void;
+  /**
+   * Refetches flags after a write (or a conflict). Awaited: the dialog stays in
+   * its saving state until the refreshed flag is showing.
+   */
+  onChanged: () => Promise<void> | void;
   schoolCode: string;
   studentPkId: string;
   studentName: string;
@@ -71,6 +74,7 @@ export default function InterventionFlagModal({
   const [note, setNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState<string | null>(null);
 
   const openFlag = flags.find((flag) => flag.status === "open") ?? null;
   const pastFlags = flags.filter((flag) => flag.status !== "open");
@@ -80,12 +84,18 @@ export default function InterventionFlagModal({
   const close = () => {
     setNote("");
     setError(null);
+    setSaved(null);
     onClose();
   };
 
-  const submit = async (url: string, payload: Record<string, unknown>) => {
+  const submit = async (
+    url: string,
+    payload: Record<string, unknown>,
+    savedMessage: string,
+  ) => {
     setSubmitting(true);
     setError(null);
+    setSaved(null);
     try {
       const res = await fetch(url, {
         method: "POST",
@@ -94,11 +104,21 @@ export default function InterventionFlagModal({
       });
       if (!res.ok) {
         const data = (await res.json().catch(() => null)) as { error?: string } | null;
-        setError(data?.error ?? "Something went wrong. Please try again.");
+        if (res.status === 409 && !openFlag) {
+          // Someone else flagged this student while this form was open. Load
+          // their flag and keep the typed text so it can be added as a note.
+          await onChanged();
+          setError(
+            "Someone else has already flagged this student. Their flag is shown above; you can add your text to it as a note.",
+          );
+        } else {
+          setError(data?.error ?? "Something went wrong. Please try again.");
+        }
         return;
       }
+      await onChanged();
       setNote("");
-      onChanged();
+      setSaved(savedMessage);
     } catch {
       setError("Could not reach the server. Please try again.");
     } finally {
@@ -106,11 +126,13 @@ export default function InterventionFlagModal({
     }
   };
 
-  const raise = () => submit(base, { studentPkId: Number(studentPkId), note: trimmed });
+  const raise = () =>
+    submit(base, { studentPkId: Number(studentPkId), note: trimmed }, "Flag saved.");
   const addNote = () =>
-    openFlag && submit(`${base}/${openFlag.id}/updates`, { note: trimmed });
+    openFlag && submit(`${base}/${openFlag.id}/updates`, { note: trimmed }, "Note added.");
   const resolve = () =>
-    openFlag && submit(`${base}/${openFlag.id}/updates`, { note: trimmed, resolve: true });
+    openFlag &&
+    submit(`${base}/${openFlag.id}/updates`, { note: trimmed, resolve: true }, "Flag resolved.");
 
   return (
     <Modal open={open} onClose={close} className="p-0">
@@ -146,6 +168,11 @@ export default function InterventionFlagModal({
             {error}
           </p>
         )}
+        {saved && !error && (
+          <p role="status" className="text-sm text-green-700">
+            {saved}
+          </p>
+        )}
 
         {pastFlags.length > 0 && (
           <details className="text-sm">
@@ -171,12 +198,12 @@ export default function InterventionFlagModal({
               Mark resolved
             </Button>
             <Button type="button" onClick={addNote} disabled={submitting || !trimmed}>
-              Add note
+              {submitting ? "Saving…" : "Add note"}
             </Button>
           </>
         ) : (
           <Button type="button" onClick={raise} disabled={submitting || !trimmed}>
-            Flag for intervention
+            {submitting ? "Saving…" : "Flag for intervention"}
           </Button>
         )}
       </div>

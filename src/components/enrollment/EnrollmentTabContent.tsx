@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Download, Plus, Upload } from "lucide-react";
 import StudentTable, {
@@ -32,6 +32,22 @@ import type { InterventionFlag } from "@/lib/intervention-flag-types";
 import AddStudentModal from "./AddStudentModal";
 import InterventionFlagModal from "./InterventionFlagModal";
 import BulkStudentUploadModal from "./BulkStudentUploadModal";
+
+async function fetchJson<T>(url: string): Promise<T> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`${url} ${res.status}`);
+  return (await res.json()) as T;
+}
+
+function groupFlagsByStudent(flags: InterventionFlag[]) {
+  const byStudent = new Map<string, InterventionFlag[]>();
+  for (const flag of flags) {
+    const list = byStudent.get(flag.student_pk_id) ?? [];
+    list.push(flag);
+    byStudent.set(flag.student_pk_id, list);
+  }
+  return byStudent;
+}
 
 interface Props {
   programs: ProgramStats[];
@@ -112,12 +128,10 @@ export default function EnrollmentTabContent({
   // cascading renders.
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/schools/${encodeURIComponent(schoolCode)}/consent-status`)
-      .then((res) => {
-        if (!res.ok) throw new Error(`consent-status ${res.status}`);
-        return res.json();
-      })
-      .then((data: { consent: ConsentByStudentId }) => {
+    fetchJson<{ consent: ConsentByStudentId }>(
+      `/api/schools/${encodeURIComponent(schoolCode)}/consent-status`,
+    )
+      .then((data) => {
         if (cancelled) return;
         setConsent(data.consent ?? {});
         setConsentError(false);
@@ -137,34 +151,34 @@ export default function EnrollmentTabContent({
   const [flagsByStudent, setFlagsByStudent] = useState<
     Map<string, InterventionFlag[]>
   >(new Map());
-  const [flagsReloadKey, setFlagsReloadKey] = useState(0);
   const [flaggedOnly, setFlaggedOnly] = useState(false);
   const [flagStudent, setFlagStudent] = useState<Student | null>(null);
+  const flagsUrl = `/api/schools/${encodeURIComponent(schoolCode)}/intervention-flags`;
 
   useEffect(() => {
     if (!canUseInterventionFlags) return;
     let cancelled = false;
-    fetch(`/api/schools/${encodeURIComponent(schoolCode)}/intervention-flags`)
-      .then((res) => {
-        if (!res.ok) throw new Error(`intervention-flags ${res.status}`);
-        return res.json();
-      })
-      .then((data: { flags: InterventionFlag[] }) => {
-        if (cancelled) return;
-        const next = new Map<string, InterventionFlag[]>();
-        for (const flag of data.flags ?? []) {
-          const list = next.get(flag.student_pk_id) ?? [];
-          list.push(flag);
-          next.set(flag.student_pk_id, list);
-        }
-        setFlagsByStudent(next);
+    fetchJson<{ flags: InterventionFlag[] }>(flagsUrl)
+      .then((data) => {
+        if (!cancelled) setFlagsByStudent(groupFlagsByStudent(data.flags ?? []));
       })
       // A failed fetch leaves the roster usable, just without flag markers.
       .catch(() => {});
     return () => {
       cancelled = true;
     };
-  }, [canUseInterventionFlags, schoolCode, flagsReloadKey]);
+  }, [canUseInterventionFlags, flagsUrl]);
+
+  // Called by the flag dialog after a write (or a 409) and awaited, so the
+  // dialog only leaves its saving state once it shows the refreshed flag.
+  const reloadFlags = useCallback(async () => {
+    try {
+      const data = await fetchJson<{ flags: InterventionFlag[] }>(flagsUrl);
+      setFlagsByStudent(groupFlagsByStudent(data.flags ?? []));
+    } catch {
+      // Keep the current flags; the next page load refetches.
+    }
+  }, [flagsUrl]);
 
   const openFlagStudentIds = useMemo(() => {
     const ids = new Set<string>();
@@ -221,9 +235,9 @@ export default function EnrollmentTabContent({
     return programs.map((p) => buildProgramStats(scopedActive, p.id));
   }, [programs, activeStudents, selectedGrade, selectedStream]);
 
-  // Active students of the selected program after the grade filter — drives
-  // the "Showing X of Y" hint next to the dropdown.
-  const activeFilteredCount = useMemo(
+  // Active students of the selected program after the grade and stream
+  // filters. Drives the flag count and the "Showing X of Y" hint.
+  const gradeStreamActive = useMemo(
     () =>
       filteredActive.filter(
         (student) =>
@@ -231,9 +245,14 @@ export default function EnrollmentTabContent({
             student.grade === Number(selectedGrade)) &&
           (selectedStream === "all" ||
             student.stream?.toLowerCase() === selectedStream.toLowerCase()),
-      ).length,
+      ),
     [filteredActive, selectedGrade, selectedStream],
   );
+  const flaggedCount = gradeStreamActive.filter(
+    (s) => s.student_pk_id && openFlagStudentIds.has(s.student_pk_id),
+  ).length;
+  const flagFilterOn = canUseInterventionFlags && flaggedOnly;
+  const activeFilteredCount = flagFilterOn ? flaggedCount : gradeStreamActive.length;
 
   const showAddStudent = canAddStudent && selectedProgramId === PROGRAM_IDS.NVS;
 
@@ -352,16 +371,10 @@ export default function EnrollmentTabContent({
               onChange={(event) => setFlaggedOnly(event.target.checked)}
               className="h-4 w-4 rounded border-gray-300 text-accent focus:ring-accent/20"
             />
-            Needs intervention only (
-            {
-              filteredActive.filter(
-                (s) => s.student_pk_id && openFlagStudentIds.has(s.student_pk_id),
-              ).length
-            }
-            )
+            Needs intervention only ({flaggedCount})
           </label>
         )}
-        {(selectedGrade !== "all" || selectedStream !== "all") && (
+        {(selectedGrade !== "all" || selectedStream !== "all" || flagFilterOn) && (
           <span className="text-sm text-gray-500">
             Showing {activeFilteredCount} of {filteredActive.length} students
           </span>
@@ -439,14 +452,14 @@ export default function EnrollmentTabContent({
         onDataChanged={() => setConsentReloadKey((k) => k + 1)}
         openFlagStudentIds={canUseInterventionFlags ? openFlagStudentIds : undefined}
         onOpenInterventionFlag={canUseInterventionFlags ? setFlagStudent : undefined}
-        flaggedOnly={canUseInterventionFlags && flaggedOnly}
+        flaggedOnly={flagFilterOn}
       />
 
       {flagStudent?.student_pk_id && (
         <InterventionFlagModal
           open
           onClose={() => setFlagStudent(null)}
-          onChanged={() => setFlagsReloadKey((k) => k + 1)}
+          onChanged={reloadFlags}
           schoolCode={schoolCode}
           studentPkId={flagStudent.student_pk_id}
           studentName={

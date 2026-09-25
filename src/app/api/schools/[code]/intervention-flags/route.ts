@@ -16,6 +16,12 @@ function jsonError(status: number, message: string) {
   return NextResponse.json({ error: message }, { status });
 }
 
+async function authorize(params: Promise<{ code: string }>) {
+  const session = await getServerSession(authOptions);
+  const { code } = await params;
+  return authorizeInterventionFlags(session, code);
+}
+
 // GET /api/schools/[code]/intervention-flags
 // Every intervention flag raised at the school (open and resolved) with its
 // update history: `{ flags: InterventionFlag[] }`.
@@ -23,9 +29,7 @@ export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ code: string }> },
 ) {
-  const session = await getServerSession(authOptions);
-  const { code } = await params;
-  const auth = await authorizeInterventionFlags(session, code);
+  const auth = await authorize(params);
   if (!auth.ok) return auth.response;
 
   const flags = await listSchoolFlags(auth.school.id);
@@ -38,9 +42,7 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ code: string }> },
 ) {
-  const session = await getServerSession(authOptions);
-  const { code } = await params;
-  const auth = await authorizeInterventionFlags(session, code);
+  const auth = await authorize(params);
   if (!auth.ok) return auth.response;
 
   const body = (await request.json().catch(() => null)) as {

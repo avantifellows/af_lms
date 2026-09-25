@@ -291,11 +291,19 @@ function StudentCard({
             )}
           </div>
         )}
-        {canUndoDropout && isDropout && (
-          <div className="mt-3 flex justify-end">
-            <Button variant="ghost" size="sm" onClick={onUndoDropout}>
-              Undo Dropout
-            </Button>
+        {isDropout && (canUndoDropout || onOpenFlag) && (
+          <div className="mt-3 flex justify-end gap-2">
+            {/* Flags stay reachable after dropout so they can be resolved. */}
+            {onOpenFlag && (
+              <Button variant="ghost" size="sm" onClick={onOpenFlag}>
+                {hasOpenFlag ? "View flag" : "Flag"}
+              </Button>
+            )}
+            {canUndoDropout && (
+              <Button variant="ghost" size="sm" onClick={onUndoDropout}>
+                Undo Dropout
+              </Button>
+            )}
           </div>
         )}
       </div>

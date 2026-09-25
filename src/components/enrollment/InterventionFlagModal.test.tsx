@@ -106,6 +106,35 @@ describe("InterventionFlagModal", () => {
     expect(onChanged).not.toHaveBeenCalled();
   });
 
+  it("waits for the refetch, then confirms the save", async () => {
+    let finishReload: () => void = () => {};
+    const onChanged = vi.fn(() => new Promise<void>((resolve) => (finishReload = resolve)));
+    renderModal([], onChanged);
+
+    await userEvent.type(screen.getByRole("textbox"), "Needs counselling");
+    await userEvent.click(screen.getByRole("button", { name: "Flag for intervention" }));
+
+    expect(await screen.findByRole("button", { name: "Saving…" })).toBeDisabled();
+    finishReload();
+    expect(await screen.findByRole("status")).toHaveTextContent("Flag saved.");
+  });
+
+  it("on a conflict, loads the other flag and keeps the typed text", async () => {
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({ error: "This student already has an open flag" }),
+    });
+    const { onChanged } = renderModal([]);
+
+    await userEvent.type(screen.getByRole("textbox"), "My note");
+    await userEvent.click(screen.getByRole("button", { name: "Flag for intervention" }));
+
+    expect(onChanged).toHaveBeenCalled();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Someone else has already flagged");
+    expect(screen.getByRole("textbox")).toHaveValue("My note");
+  });
+
   it("keeps resolved flags under Past flags", () => {
     renderModal([{ ...OPEN_FLAG, id: 3, status: "resolved", resolved_at: "2026-09-26T05:00:00Z" }]);
     expect(screen.getByText("Past flags (1)")).toBeInTheDocument();

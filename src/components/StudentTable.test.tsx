@@ -1560,4 +1560,22 @@ describe("StudentTable - intervention flags", () => {
     expect(screen.getByText("Flagged Sharma")).toBeInTheDocument();
     expect(screen.queryByText("Other Sharma")).not.toBeInTheDocument();
   });
+
+  it("keeps the flag reachable for dropout students", async () => {
+    const onOpen = vi.fn();
+    const dropout = makeStudent({ group_user_id: "g3", student_pk_id: "3", first_name: "Left", status: "dropout" });
+    render(
+      <StudentTable
+        students={[]}
+        dropoutStudents={[dropout]}
+        grades={defaultGrades}
+        openFlagStudentIds={new Set(["3"])}
+        onOpenInterventionFlag={onOpen}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: /Dropout/ }));
+    await userEvent.click(screen.getByRole("button", { name: "View flag" }));
+    expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ student_pk_id: "3" }));
+  });
 });

@@ -26,14 +26,6 @@ import {
 // below (the cross-school list is admin-only, behind `requireAdmin`), so a later narrowing (e.g. for
 // mental-health notes) is a change in one place.
 
-export {
-  INTERVENTION_FLAG_NOTE_MAX_LENGTH,
-  type InterventionFlag,
-  type InterventionFlagStatus,
-  type InterventionFlagUpdate,
-  type OpenInterventionFlagSummary,
-} from "./intervention-flag-types";
-
 export interface InterventionFlagActor {
   email: string;
   userId: number | null;
@@ -307,13 +299,15 @@ export async function addFlagUpdate(
   if (params.resolve) {
     await client.query(
       `UPDATE lms_student_intervention_flags
-       SET status = 'resolved', resolved_at = now(), updated_at = now()
+       SET status = 'resolved',
+           resolved_at = (NOW() AT TIME ZONE 'UTC'),
+           updated_at = (NOW() AT TIME ZONE 'UTC')
        WHERE id = $1`,
       [params.flagId],
     );
   } else {
     await client.query(
-      `UPDATE lms_student_intervention_flags SET updated_at = now() WHERE id = $1`,
+      `UPDATE lms_student_intervention_flags SET updated_at = (NOW() AT TIME ZONE 'UTC') WHERE id = $1`,
       [params.flagId],
     );
   }
