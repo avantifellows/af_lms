@@ -28,7 +28,9 @@ import {
   type RegistrationMode,
 } from "@/lib/registration-mode";
 import { Button, Modal } from "@/components/ui";
+import type { InterventionFlag } from "@/lib/intervention-flag-types";
 import AddStudentModal from "./AddStudentModal";
+import InterventionFlagModal from "./InterventionFlagModal";
 import BulkStudentUploadModal from "./BulkStudentUploadModal";
 
 interface Props {
@@ -52,6 +54,8 @@ interface Props {
   schoolCode: string;
   /** Code-controlled Registration Mode; defaults to the active mode. */
   registrationMode?: RegistrationMode;
+  /** Viewer may see and raise intervention flags (see lib/intervention-flags). */
+  canUseInterventionFlags?: boolean;
 }
 
 // fallow-ignore-next-line complexity
@@ -73,6 +77,7 @@ export default function EnrollmentTabContent({
   schoolUdise,
   schoolCode,
   registrationMode = ACTIVE_REGISTRATION_MODE,
+  canUseInterventionFlags = false,
 }: Props) {
   const phoneMode = registrationMode === PHONE_REGISTRATION_MODE;
   const router = useRouter();
@@ -127,6 +132,47 @@ export default function EnrollmentTabContent({
       cancelled = true;
     };
   }, [schoolCode, consentReloadKey]);
+
+  // Intervention flags for the school, keyed by student_pk_id (newest first).
+  const [flagsByStudent, setFlagsByStudent] = useState<
+    Map<string, InterventionFlag[]>
+  >(new Map());
+  const [flagsReloadKey, setFlagsReloadKey] = useState(0);
+  const [flaggedOnly, setFlaggedOnly] = useState(false);
+  const [flagStudent, setFlagStudent] = useState<Student | null>(null);
+
+  useEffect(() => {
+    if (!canUseInterventionFlags) return;
+    let cancelled = false;
+    fetch(`/api/schools/${encodeURIComponent(schoolCode)}/intervention-flags`)
+      .then((res) => {
+        if (!res.ok) throw new Error(`intervention-flags ${res.status}`);
+        return res.json();
+      })
+      .then((data: { flags: InterventionFlag[] }) => {
+        if (cancelled) return;
+        const next = new Map<string, InterventionFlag[]>();
+        for (const flag of data.flags ?? []) {
+          const list = next.get(flag.student_pk_id) ?? [];
+          list.push(flag);
+          next.set(flag.student_pk_id, list);
+        }
+        setFlagsByStudent(next);
+      })
+      // A failed fetch leaves the roster usable, just without flag markers.
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [canUseInterventionFlags, schoolCode, flagsReloadKey]);
+
+  const openFlagStudentIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const [id, flags] of flagsByStudent) {
+      if (flags.some((flag) => flag.status === "open")) ids.add(id);
+    }
+    return ids;
+  }, [flagsByStudent]);
 
   const filteredActive = useMemo(() => {
     if (selectedProgramId == null) return [];
@@ -298,6 +344,23 @@ export default function EnrollmentTabContent({
             </option>
           ))}
         </select>
+        {canUseInterventionFlags && (
+          <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+            <input
+              type="checkbox"
+              checked={flaggedOnly}
+              onChange={(event) => setFlaggedOnly(event.target.checked)}
+              className="h-4 w-4 rounded border-gray-300 text-accent focus:ring-accent/20"
+            />
+            Needs intervention only (
+            {
+              filteredActive.filter(
+                (s) => s.student_pk_id && openFlagStudentIds.has(s.student_pk_id),
+              ).length
+            }
+            )
+          </label>
+        )}
         {(selectedGrade !== "all" || selectedStream !== "all") && (
           <span className="text-sm text-gray-500">
             Showing {activeFilteredCount} of {filteredActive.length} students
@@ -374,7 +437,26 @@ export default function EnrollmentTabContent({
         selectedStream={selectedStream}
         hideGradeFilterUI
         onDataChanged={() => setConsentReloadKey((k) => k + 1)}
+        openFlagStudentIds={canUseInterventionFlags ? openFlagStudentIds : undefined}
+        onOpenInterventionFlag={canUseInterventionFlags ? setFlagStudent : undefined}
+        flaggedOnly={canUseInterventionFlags && flaggedOnly}
       />
+
+      {flagStudent?.student_pk_id && (
+        <InterventionFlagModal
+          open
+          onClose={() => setFlagStudent(null)}
+          onChanged={() => setFlagsReloadKey((k) => k + 1)}
+          schoolCode={schoolCode}
+          studentPkId={flagStudent.student_pk_id}
+          studentName={
+            [flagStudent.first_name, flagStudent.last_name]
+              .filter(Boolean)
+              .join(" ") || "Student"
+          }
+          flags={flagsByStudent.get(flagStudent.student_pk_id) ?? []}
+        />
+      )}
 
       <AddStudentModal
         open={addOpen}

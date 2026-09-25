@@ -20,6 +20,7 @@ import {
   hasMultipleSchools,
   PROGRAM_IDS,
 } from "@/lib/permissions";
+import { canUseInterventionFlags } from "@/lib/intervention-flags";
 import {
   CURRENT_ACADEMIC_YEAR,
   HOLISTIC_MENTORSHIP_PROGRAM_IDS,
@@ -894,6 +895,7 @@ export default async function RosterPage({
         nvsStreams={nvsStreams}
         schoolUdise={school.udise_code || school.code}
         schoolCode={school.code}
+        canUseInterventionFlags={canUseInterventionFlags(permission, opts)}
       />
     </div>
   );

@@ -1517,3 +1517,47 @@ describe("StudentTable - Dropout modal error edge cases", () => {
     });
   });
 });
+
+describe("StudentTable - intervention flags", () => {
+  const students = [
+    makeStudent({ group_user_id: "g1", student_pk_id: "1", first_name: "Flagged" }),
+    makeStudent({ group_user_id: "g2", student_pk_id: "2", first_name: "Other" }),
+  ];
+
+  it("marks flagged students and opens the flag dialog from the card", async () => {
+    const onOpen = vi.fn();
+    render(
+      <StudentTable
+        students={students}
+        grades={defaultGrades}
+        canEditStudent={false}
+        canDropoutStudent={false}
+        openFlagStudentIds={new Set(["1"])}
+        onOpenInterventionFlag={onOpen}
+      />,
+    );
+
+    expect(screen.getAllByText("Needs intervention")).toHaveLength(1);
+    await userEvent.click(screen.getByRole("button", { name: "View flag" }));
+    expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ student_pk_id: "1" }));
+    expect(screen.getByRole("button", { name: "Flag" })).toBeInTheDocument();
+  });
+
+  it("shows no flag controls when the viewer cannot use flags", () => {
+    render(<StudentTable students={students} grades={defaultGrades} canEditStudent={false} canDropoutStudent={false} />);
+    expect(screen.queryByRole("button", { name: /flag/i })).not.toBeInTheDocument();
+  });
+
+  it("narrows to flagged students when flaggedOnly is set", () => {
+    render(
+      <StudentTable
+        students={students}
+        grades={defaultGrades}
+        openFlagStudentIds={new Set(["1"])}
+        flaggedOnly
+      />,
+    );
+    expect(screen.getByText("Flagged Sharma")).toBeInTheDocument();
+    expect(screen.queryByText("Other Sharma")).not.toBeInTheDocument();
+  });
+});
