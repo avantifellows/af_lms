@@ -241,6 +241,12 @@ describe("QuizSessionsTab", () => {
         return jsonResponse({ id: sessionId });
       }
 
+      if (url.startsWith("/api/cms/tests")) {
+        return jsonResponse({
+          tests: [{ id: 42, name: "NEET Major 1", code: "NM-1", marks: 720, duration: 200 }],
+        });
+      }
+
       throw new Error(`Unhandled fetch: ${url}`);
     });
 
@@ -565,6 +571,35 @@ describe("QuizSessionsTab", () => {
       screen.getByRole("button", { name: "Save Changes" })
     );
     expect(screen.getByRole("heading", { name: "Edit Quiz Session" })).toBeInTheDocument();
+  });
+
+  it("shows question and answer PDFs for new-CMS tests before creating", async () => {
+    const user = userEvent.setup();
+
+    render(<QuizSessionsTab schoolId="school-1" canEdit />);
+
+    await user.click(await screen.findByRole("button", { name: "Create Quiz Session" }));
+    await user.click(screen.getByRole("button", { name: "New CMS Test" }));
+    await user.selectOptions(screen.getByDisplayValue("Chapter Test"), "major_test");
+    await user.selectOptions(screen.getByDisplayValue("Select exam track"), "neet");
+    await user.selectOptions(screen.getByDisplayValue("Select grade"), "12");
+
+    expect(await screen.findByText("NEET Major 1")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Question PDF" })).toHaveAttribute(
+      "href",
+      "/api/cms/test-pdf?testId=42&type=questions"
+    );
+    expect(screen.getByRole("link", { name: "Answer PDF" })).toHaveAttribute(
+      "href",
+      "/api/cms/test-pdf?testId=42&type=answers"
+    );
+
+    // Opening a PDF must not toggle the test selection.
+    await user.click(screen.getByRole("link", { name: "Answer PDF" }));
+    expect(screen.getByText("NEET Major 1").closest("[role=button]")).toHaveAttribute(
+      "aria-pressed",
+      "false"
+    );
   });
 
   it("does not expose the removed sync endpoint from the UI", async () => {

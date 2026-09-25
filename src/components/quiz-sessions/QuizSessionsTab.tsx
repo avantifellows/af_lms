@@ -1864,6 +1864,9 @@ function QuizSessionCreateModal({
                                     {test.marks !== null ? `${test.marks} marks` : ""}
                                     {test.duration ? ` · ${test.duration} min` : ""}
                                   </div>
+                                  <div className="mt-2">
+                                    <PaperResourceLinks {...cmsTestPdfHrefs(test.id)} inline />
+                                  </div>
                                 </div>
                               </div>
                             );
@@ -2814,6 +2817,16 @@ function PaperDownloadChip({
   );
 }
 
+function cmsTestPdfHrefs(testId: string | number) {
+  const base = `/api/cms/test-pdf?testId=${encodeURIComponent(testId)}`;
+  return {
+    questionHref: `${base}&type=questions`,
+    solutionHref: `${base}&type=answers`,
+    questionDownloadHref: `${base}&type=questions&download=1`,
+    solutionDownloadHref: `${base}&type=answers&download=1`,
+  };
+}
+
 // Chooses PDF links for the session-details Paper card: for new-CMS sessions the PDFs are
 // generated on demand (proxy route), rebuilt from the CMS ids stored at create time; for
 // legacy sessions they're the stored question_pdf/solution_pdf URLs.
@@ -2829,15 +2842,7 @@ function CmsAwarePaperLinks({
   // Test id only: also gating on cms_curriculum_id/cms_grade_id would silently fall through
   // to the legacy branch — no PDF links — for sessions created after we stopped storing them.
   if (cmsSource && cmsTestId) {
-    const base = `/api/cms/test-pdf?testId=${encodeURIComponent(cmsTestId)}`;
-    return (
-      <PaperResourceLinks
-        questionHref={`${base}&type=questions`}
-        solutionHref={`${base}&type=answers`}
-        questionDownloadHref={`${base}&type=questions&download=1`}
-        solutionDownloadHref={`${base}&type=answers&download=1`}
-      />
-    );
+    return <PaperResourceLinks {...cmsTestPdfHrefs(cmsTestId)} />;
   }
 
   return (
@@ -2873,7 +2878,11 @@ function PaperResourceLinks({
   }
 
   const content = (
-    <div className="flex flex-wrap items-center gap-2" onClick={(event) => event.stopPropagation()}>
+    <div
+      className="flex flex-wrap items-center gap-2"
+      onClick={(event) => event.stopPropagation()}
+      onKeyDown={(event) => event.stopPropagation()}
+    >
       <PaperLinkChip href={questionHref} label="Question PDF" />
       <PaperDownloadChip href={questionDownloadHref} label="Download Question PDF" />
       <PaperLinkChip href={solutionHref} label="Answer PDF" />

@@ -21,7 +21,7 @@ edges:
     condition: when tracing the request flow across af_lms / quiz-backend / db-service
   - target: patterns/db-service-write.md
     condition: when adding a session or occurrence write
-last_updated: 2026-07-28
+last_updated: 2026-09-25
 ---
 
 # CMS-sourced quiz sessions
@@ -129,3 +129,10 @@ falls back to defaults. `QUIZ_BACKEND_URL` must be set (Amplify staging + prod).
   a mid-loop infra failure leaves refreshed questions with a stale embedded grading subset.
 - **Non-atomic edit** — session row / occurrence / quiz doc are three stores. Every write is an
   idempotent `$set`/PATCH, so a retry converges.
+
+## Question / answer PDFs
+
+CMS tests have no stored PDF URLs. Both the create-form test picker and session details link to
+`/api/cms/test-pdf?testId=…&type=questions|answers`, which fetches the CMS service PDF and
+redirects to a short-lived presigned S3 copy. Build hrefs with `cmsTestPdfHrefs` in
+`QuizSessionsTab.tsx`. The CMS caches rendered PDFs (nex-gen-cms#202), so repeat opens skip headless Chrome.
