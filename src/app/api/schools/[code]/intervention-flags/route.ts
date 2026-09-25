@@ -7,6 +7,7 @@ import {
   InterventionFlagError,
   authorizeInterventionFlags,
   listSchoolFlags,
+  type InterventionFlagAction,
   raiseFlag,
   validateNote,
 } from "@/lib/intervention-flags";
@@ -16,10 +17,13 @@ function jsonError(status: number, message: string) {
   return NextResponse.json({ error: message }, { status });
 }
 
-async function authorize(params: Promise<{ code: string }>) {
+async function authorize(
+  params: Promise<{ code: string }>,
+  action: InterventionFlagAction,
+) {
   const session = await getServerSession(authOptions);
   const { code } = await params;
-  return authorizeInterventionFlags(session, code);
+  return authorizeInterventionFlags(session, code, action);
 }
 
 // GET /api/schools/[code]/intervention-flags
@@ -29,7 +33,7 @@ export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ code: string }> },
 ) {
-  const auth = await authorize(params);
+  const auth = await authorize(params, "view");
   if (!auth.ok) return auth.response;
 
   const flags = await listSchoolFlags(auth.school.id);
@@ -42,7 +46,7 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ code: string }> },
 ) {
-  const auth = await authorize(params);
+  const auth = await authorize(params, "edit");
   if (!auth.ok) return auth.response;
 
   const body = (await request.json().catch(() => null)) as {

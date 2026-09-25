@@ -1578,4 +1578,20 @@ describe("StudentTable - intervention flags", () => {
     await userEvent.click(screen.getByRole("button", { name: "View flag" }));
     expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ student_pk_id: "3" }));
   });
+
+  it("gives read-only viewers View flag only, never Flag", () => {
+    render(
+      <StudentTable
+        students={students}
+        grades={defaultGrades}
+        canEditStudent={false}
+        canDropoutStudent={false}
+        openFlagStudentIds={new Set(["1"])}
+        onOpenInterventionFlag={vi.fn()}
+        canRaiseInterventionFlag={false}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "View flag" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Flag" })).not.toBeInTheDocument();
+  });
 });

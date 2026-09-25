@@ -50,6 +50,7 @@ describe("POST /api/schools/[code]/intervention-flags/[flagId]/updates", () => {
 
     expect(res.status).toBe(201);
     expect(await res.json()).toEqual({ status: "resolved" });
+    expect(authorizeInterventionFlags).toHaveBeenCalledWith(undefined, "70705", "edit");
     expect(mockAddFlagUpdate).toHaveBeenCalledWith(expect.anything(), {
       flagId: 9, schoolId: "7", actor: ACTOR, note: "", resolve: true,
     });

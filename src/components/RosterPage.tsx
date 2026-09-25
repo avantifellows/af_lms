@@ -20,7 +20,7 @@ import {
   hasMultipleSchools,
   PROGRAM_IDS,
 } from "@/lib/permissions";
-import { canUseInterventionFlags } from "@/lib/intervention-flags";
+import { interventionFlagAccess } from "@/lib/intervention-flags";
 import {
   CURRENT_ACADEMIC_YEAR,
   HOLISTIC_MENTORSHIP_PROGRAM_IDS,
@@ -726,6 +726,7 @@ export default async function RosterPage({
   const visitsAccess = getFeatureAccess(permission, "visits", opts);
   const quizSessionsAccess = getFeatureAccess(permission, "quiz_sessions", opts);
   const teacherFeedbackAccess = getFeatureAccess(permission, "teacher_feedback", opts);
+  const flagAccess = interventionFlagAccess(permission, opts);
   // Student addition is an NVS school-page feature; a centre roster is scoped
   // to the centre's own program, so it never offers Add Student.
   const canAddStudent =
@@ -895,7 +896,8 @@ export default async function RosterPage({
         nvsStreams={nvsStreams}
         schoolUdise={school.udise_code || school.code}
         schoolCode={school.code}
-        canUseInterventionFlags={canUseInterventionFlags(permission, opts)}
+        canUseInterventionFlags={flagAccess.canView}
+        canEditInterventionFlags={flagAccess.canEdit}
       />
     </div>
   );

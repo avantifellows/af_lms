@@ -13,7 +13,7 @@ import {
   InterventionFlagError,
   addFlagUpdate,
   authorizeInterventionFlags,
-  canUseInterventionFlags,
+  interventionFlagAccess,
   listSchoolFlags,
   raiseFlag,
   validateNote,
@@ -53,7 +53,7 @@ beforeEach(() => vi.resetAllMocks());
 
 describe("authorizeInterventionFlags", () => {
   it("rejects a missing session", async () => {
-    const result = await authorizeInterventionFlags(null, "70705");
+    const result = await authorizeInterventionFlags(null, "70705", "view");
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.response.status).toBe(401);
   });
@@ -62,6 +62,7 @@ describe("authorizeInterventionFlags", () => {
     const result = await authorizeInterventionFlags(
       { user: { email: "passcode_70705@avantifellows.org" }, isPasscodeUser: true },
       "70705",
+      "view",
     );
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.response.status).toBe(403);
@@ -70,7 +71,7 @@ describe("authorizeInterventionFlags", () => {
 
   it("rejects users without a permission row", async () => {
     mockGetResolvedPermission.mockResolvedValue(null);
-    const result = await authorizeInterventionFlags(SESSION, "70705");
+    const result = await authorizeInterventionFlags(SESSION, "70705", "view");
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.response.status).toBe(403);
   });
@@ -78,7 +79,7 @@ describe("authorizeInterventionFlags", () => {
   it("returns 404 for an unknown school", async () => {
     mockGetResolvedPermission.mockResolvedValue(TEACHER);
     mockQuery.mockResolvedValueOnce([]);
-    const result = await authorizeInterventionFlags(SESSION, "99999");
+    const result = await authorizeInterventionFlags(SESSION, "99999", "view");
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.response.status).toBe(404);
   });
@@ -86,15 +87,25 @@ describe("authorizeInterventionFlags", () => {
   it("rejects a school outside the user's scope", async () => {
     mockGetResolvedPermission.mockResolvedValue(TEACHER);
     mockQuery.mockResolvedValueOnce([{ ...SCHOOL, code: "11111" }]);
-    const result = await authorizeInterventionFlags(SESSION, "11111");
+    const result = await authorizeInterventionFlags(SESSION, "11111", "view");
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.response.status).toBe(403);
   });
 
-  it("allows anyone who can see the school's students, including read-only users", async () => {
+  it("lets read-only users view but not change flags", async () => {
     mockGetResolvedPermission.mockResolvedValue({ ...TEACHER, read_only: true });
     mockQuery.mockResolvedValueOnce([SCHOOL]);
-    const result = await authorizeInterventionFlags(SESSION, "09123");
+    expect((await authorizeInterventionFlags(SESSION, "09123", "view")).ok).toBe(true);
+
+    const edit = await authorizeInterventionFlags(SESSION, "09123", "edit");
+    expect(edit.ok).toBe(false);
+    if (!edit.ok) expect(edit.response.status).toBe(403);
+  });
+
+  it("allows anyone who can edit the school's students to change flags", async () => {
+    mockGetResolvedPermission.mockResolvedValue(TEACHER);
+    mockQuery.mockResolvedValueOnce([SCHOOL]);
+    const result = await authorizeInterventionFlags(SESSION, "09123", "edit");
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.school).toEqual(SCHOOL);
@@ -103,12 +114,13 @@ describe("authorizeInterventionFlags", () => {
   });
 });
 
-describe("canUseInterventionFlags", () => {
-  it("follows students view access and excludes passcode logins", () => {
-    expect(canUseInterventionFlags(TEACHER)).toBe(true);
-    expect(canUseInterventionFlags(null)).toBe(false);
-    expect(canUseInterventionFlags(TEACHER, { isPasscodeUser: true })).toBe(false);
-    expect(canUseInterventionFlags({ ...TEACHER, role: "holistic_mentorship_admin" })).toBe(false);
+describe("interventionFlagAccess", () => {
+  it("follows students access and excludes passcode logins", () => {
+    expect(interventionFlagAccess(TEACHER)).toEqual({ canView: true, canEdit: true });
+    expect(interventionFlagAccess({ ...TEACHER, read_only: true })).toEqual({ canView: true, canEdit: false });
+    expect(interventionFlagAccess(null)).toEqual({ canView: false, canEdit: false });
+    expect(interventionFlagAccess(TEACHER, { isPasscodeUser: true })).toEqual({ canView: false, canEdit: false });
+    expect(interventionFlagAccess({ ...TEACHER, role: "holistic_mentorship_admin" }).canView).toBe(false);
   });
 });
 

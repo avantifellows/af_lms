@@ -23,7 +23,7 @@ export async function POST(
 ) {
   const session = await getServerSession(authOptions);
   const { code, flagId: flagIdParam } = await params;
-  const auth = await authorizeInterventionFlags(session, code);
+  const auth = await authorizeInterventionFlags(session, code, "edit");
   if (!auth.ok) return auth.response;
 
   const flagId = Number(flagIdParam);

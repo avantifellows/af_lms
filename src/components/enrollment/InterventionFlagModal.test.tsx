@@ -27,7 +27,7 @@ const OPEN_FLAG: InterventionFlag = {
 
 const fetchMock = vi.fn();
 
-function renderModal(flags: InterventionFlag[], onChanged = vi.fn()) {
+function renderModal(flags: InterventionFlag[], onChanged = vi.fn(), canEdit = true) {
   render(
     <InterventionFlagModal
       open
@@ -37,6 +37,7 @@ function renderModal(flags: InterventionFlag[], onChanged = vi.fn()) {
       studentPkId="5"
       studentName="Ravi Kumar"
       flags={flags}
+      canEdit={canEdit}
     />,
   );
   return { onChanged };
@@ -133,6 +134,15 @@ describe("InterventionFlagModal", () => {
     expect(onChanged).toHaveBeenCalled();
     expect(await screen.findByRole("alert")).toHaveTextContent("Someone else has already flagged");
     expect(screen.getByRole("textbox")).toHaveValue("My note");
+  });
+
+  it("shows read-only viewers the history without any way to change it", () => {
+    renderModal([OPEN_FLAG], vi.fn(), false);
+    expect(screen.getByText("Lost a parent last week")).toBeInTheDocument();
+    expect(screen.getByText(/read-only access/)).toBeInTheDocument();
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Mark resolved" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add note" })).not.toBeInTheDocument();
   });
 
   it("keeps resolved flags under Past flags", () => {

@@ -70,8 +70,10 @@ interface Props {
   schoolCode: string;
   /** Code-controlled Registration Mode; defaults to the active mode. */
   registrationMode?: RegistrationMode;
-  /** Viewer may see and raise intervention flags (see lib/intervention-flags). */
+  /** Viewer may see intervention flags (see lib/intervention-flags). */
   canUseInterventionFlags?: boolean;
+  /** Viewer may also raise, add notes to and resolve them (not read-only). */
+  canEditInterventionFlags?: boolean;
 }
 
 // fallow-ignore-next-line complexity
@@ -94,6 +96,7 @@ export default function EnrollmentTabContent({
   schoolCode,
   registrationMode = ACTIVE_REGISTRATION_MODE,
   canUseInterventionFlags = false,
+  canEditInterventionFlags = false,
 }: Props) {
   const phoneMode = registrationMode === PHONE_REGISTRATION_MODE;
   const router = useRouter();
@@ -452,6 +455,7 @@ export default function EnrollmentTabContent({
         onDataChanged={() => setConsentReloadKey((k) => k + 1)}
         openFlagStudentIds={canUseInterventionFlags ? openFlagStudentIds : undefined}
         onOpenInterventionFlag={canUseInterventionFlags ? setFlagStudent : undefined}
+        canRaiseInterventionFlag={canEditInterventionFlags}
         flaggedOnly={flagFilterOn}
       />
 
@@ -460,6 +464,7 @@ export default function EnrollmentTabContent({
           open
           onClose={() => setFlagStudent(null)}
           onChanged={reloadFlags}
+          canEdit={canEditInterventionFlags}
           schoolCode={schoolCode}
           studentPkId={flagStudent.student_pk_id}
           studentName={

@@ -107,6 +107,8 @@ interface StudentTableProps {
   // those with an open flag.
   openFlagStudentIds?: Set<string>;
   onOpenInterventionFlag?: (student: Student) => void;
+  /** False for read-only viewers: they get "View flag" only, never "Flag". */
+  canRaiseInterventionFlag?: boolean;
   flaggedOnly?: boolean;
 }
 
@@ -568,6 +570,7 @@ export default function StudentTable({
   onDataChanged,
   openFlagStudentIds,
   onOpenInterventionFlag,
+  canRaiseInterventionFlag = true,
   flaggedOnly = false,
 }: StudentTableProps) {
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
@@ -800,7 +803,9 @@ export default function StudentTable({
               isDropoutView={activeTab === "dropout"}
               hasOpenFlag={hasOpenFlag(student)}
               onOpenFlag={
-                onOpenInterventionFlag && student.student_pk_id
+                onOpenInterventionFlag &&
+                student.student_pk_id &&
+                (canRaiseInterventionFlag || hasOpenFlag(student))
                   ? () => onOpenInterventionFlag(student)
                   : undefined
               }

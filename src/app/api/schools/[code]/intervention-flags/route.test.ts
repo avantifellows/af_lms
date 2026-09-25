@@ -63,6 +63,7 @@ describe("GET /api/schools/[code]/intervention-flags", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ flags: [] });
     expect(listSchoolFlags).toHaveBeenCalledWith("7");
+    expect(mockAuthorize).toHaveBeenCalledWith(undefined, "70705", "view");
   });
 });
 
@@ -88,6 +89,7 @@ describe("POST /api/schools/[code]/intervention-flags", () => {
 
     expect(res.status).toBe(201);
     expect(await res.json()).toEqual({ flag: { id: 9 } });
+    expect(mockAuthorize).toHaveBeenCalledWith(undefined, "70705", "edit");
     expect(mockRaiseFlag).toHaveBeenCalledWith(expect.anything(), {
       studentPkId: 5, schoolId: "7", programId: 1, actor: ACTOR, note: "Lost a parent",
     });

@@ -51,19 +51,25 @@ function deny(status: number, error: string): { ok: false; response: NextRespons
   return { ok: false, response: NextResponse.json({ error }, { status }) };
 }
 
-// Rule: anyone who can see a Student (school access + `students` view) can
-// flag them, add notes and resolve. Passcode logins are excluded: a passcode is
+// Rule: anyone who can see a Student (school access + `students` view) can see
+// their flags; raising, adding notes and resolving also need `students` edit,
+// so read-only accounts only view. Passcode logins are excluded: a passcode is
 // shared by a whole school, so it cannot attribute a note to a person.
+export type InterventionFlagAction = "view" | "edit";
+
 async function resolveActor(
   session: SessionLike | null,
+  action: InterventionFlagAction,
 ): Promise<AuthResult<{ actor: InterventionFlagActor }>> {
   if (!session) return deny(401, "Unauthorized");
   const email = session.user?.email;
   if (session.isPasscodeUser || !email) return deny(403, "Forbidden");
 
   const permission = await getResolvedPermission(email);
-  if (!permission || !getFeatureAccess(permission, "students").canView) {
-    return deny(403, "Forbidden");
+  const access = interventionFlagAccess(permission);
+  if (!permission || !access.canView) return deny(403, "Forbidden");
+  if (action === "edit" && !access.canEdit) {
+    return deny(403, "Read-only access cannot change intervention flags");
   }
 
   return {
@@ -80,8 +86,9 @@ async function resolveActor(
 export async function authorizeInterventionFlags(
   session: SessionLike | null,
   schoolKey: string,
+  action: InterventionFlagAction,
 ): Promise<AuthResult<{ actor: InterventionFlagActor; school: InterventionFlagSchool }>> {
-  const actorResult = await resolveActor(session);
+  const actorResult = await resolveActor(session, action);
   if (!actorResult.ok) return actorResult;
 
   const schools = await query<InterventionFlagSchool>(
@@ -97,13 +104,14 @@ export async function authorizeInterventionFlags(
   return { ok: true, actor: actorResult.actor, school };
 }
 
-/** Pure check used by server components to decide whether to render flag UI. */
-export function canUseInterventionFlags(
+/** Who may see and change flags; also decides which flag UI to render. */
+export function interventionFlagAccess(
   permission: UserPermission | null,
   opts?: { isPasscodeUser?: boolean },
-): boolean {
-  if (opts?.isPasscodeUser) return false;
-  return getFeatureAccess(permission, "students").canView;
+): { canView: boolean; canEdit: boolean } {
+  if (opts?.isPasscodeUser) return { canView: false, canEdit: false };
+  const { canView, canEdit } = getFeatureAccess(permission, "students");
+  return { canView, canEdit };
 }
 
 export type NoteValidation = { ok: true; note: string } | { ok: false; error: string };
