@@ -15,7 +15,7 @@ edges:
     condition: when configuring which backend env vars point at
   - target: context/architecture.md
     condition: when understanding how components connect during setup
-last_updated: 2026-09-02
+last_updated: 2026-09-25
 ---
 
 # Setup
@@ -55,6 +55,7 @@ Never commit real values — `.env.local` is gitignored; CI injects prod/preview
 - `npm run lint` — ESLint (`eslint-config-next`).
 - `npm run build` — production Next build.
 - `npm run fallow:health` — codebase health/hotspots; `fallow:dead-code`, `fallow:audit` for cleanup/PR risk.
+  - The CI Fallow job installs the newest fallow that satisfies `package.json` (for example 2.104.0), and that version can score differently from the locally installed one: it counts React hook density toward cognitive complexity, with a threshold of 15. To reproduce the CI gate, run `npm run test:unit:coverage`, then `npx -y fallow@<CI version> audit --base origin/main --coverage unit-coverage/coverage-final.json`. The CI log line "Installed fallow …" gives the version. Restore the tracked `coverage/coverage-summary.json` afterwards.
 - Data scripts (one-off, via `ts-node`): `npm run centres:import`, `npm run pm:import`, `npm run db:setup-permissions`, etc. (see `scripts/`).
 - Holistic release setup: `npm run holistic:setup-local -- --confirm-synthetic-database --program-id=<1|74|94|78|88|99>` applies the sibling DB Service migrations and synthetic fixtures to a local-only database. Production preflight requires `--historical-source=<private-json>` for Program 1, uses it for a Program 78 Historical run when applicable, and omits it for live Programs 74, 94, 88, and 99. Follow `docs/holistic-mentorship-release.md` for the separate commands, staging order, sign-off, monitoring, and rollback.
 

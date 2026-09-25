@@ -42,7 +42,11 @@ describe("Holistic progress API", () => {
     vi.resetAllMocks();
     mockSession.mockResolvedValue({ user: { email: "admin@example.com" } });
     mockAccess.mockResolvedValue({ ok: true, email: "admin@example.com", canEdit: true, permission } as never);
-    mockList.mockResolvedValue({ rows: [], counts: { totalMapped: 0, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 } });
+    mockList.mockResolvedValue({
+      rows: [],
+      counts: { total: 0, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 },
+      coverage: null,
+    });
     mockOptions.mockResolvedValue({ schools: [], mentors: [], phases: [] });
     mockCoverageSchools.mockResolvedValue([
       { code: "SCH001", name: "School One" },
@@ -103,6 +107,32 @@ describe("Holistic progress API", () => {
     expect(mockList).not.toHaveBeenCalled();
   });
 
+  it("passes the Unassigned progress filter through to the progress read", async () => {
+    const response = await GET(new Request(
+      "http://localhost/api/holistic-mentorship/progress?academic_year=2026-2027&program_id=1&progress=unassigned",
+    ) as never);
+
+    expect(response.status).toBe(200);
+    expect(mockList).toHaveBeenCalledWith(
+      expect.objectContaining({ progress: "unassigned", academicYear: "2026-2027", mentorUserId: null }),
+      permission,
+    );
+  });
+
+  it.each([
+    ["a past Academic Year", "academic_year=2025-2026&program_id=1&progress=unassigned"],
+    ["a past Academic Year CSV", "academic_year=2025-2026&program_id=1&progress=unassigned&format=csv"],
+    ["a Mentor filter", "academic_year=2026-2027&program_id=1&progress=unassigned&mentor_user_id=9"],
+    ["a Mentor filter CSV", "academic_year=2026-2027&program_id=1&progress=unassigned&mentor_user_id=9&format=csv"],
+  ])("rejects Unassigned with %s before authorization or any read", async (_, filters) => {
+    const response = await GET(new Request(`http://localhost/api/holistic-mentorship/progress?${filters}`) as never);
+
+    expect(response.status).toBe(422);
+    expect(await response.json()).toEqual({ error: "Invalid progress filters" });
+    expect(mockAccess).not.toHaveBeenCalled();
+    expect(mockList).not.toHaveBeenCalled();
+  });
+
   it("rejects an unknown response format", async () => {
     const response = await GET(new Request("http://localhost/api/holistic-mentorship/progress?academic_year=2026-2027&format=xlsx") as never);
     expect(response.status).toBe(422);
@@ -131,6 +161,22 @@ describe("Holistic progress API", () => {
     expect(mockOptions).toHaveBeenCalledWith("2026-2027", 1, permission);
     expect(mockCoverageSchools).toHaveBeenCalledWith(1, permission);
     expect(mockAcademicYears).toHaveBeenCalledWith(1, permission);
+  });
+
+  it("returns current-year coverage with the JSON results", async () => {
+    mockList.mockResolvedValue({
+      rows: [],
+      counts: { total: 9, pending: 4, completed: 3, skipped: 2, noActivePhase: 0 },
+      coverage: { eligible: 12, assigned: 9, unassigned: 3 },
+    });
+
+    const response = await GET(new Request("http://localhost/api/holistic-mentorship/progress?academic_year=2026-2027&program_id=1") as never);
+
+    expect(await response.json()).toMatchObject({
+      counts: { total: 9, pending: 4, completed: 3, skipped: 2, noActivePhase: 0 },
+      coverage: { eligible: 12, assigned: 9, unassigned: 3 },
+      pageSize: 50,
+    });
   });
 
   it("carries EMRS Program 78 into access and progress queries", async () => {

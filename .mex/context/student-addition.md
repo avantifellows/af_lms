@@ -265,18 +265,33 @@ Production rollout completion for #323 was not verified in these retained notes.
 ## DB Service status history and repair handoff
 
 GitHub status rechecked September 23: combined #731 is closed as superseded by
-#735 (timestamp fix, merged September 17), #736 (status history, open), and #737
-(guarded historical repair utilities, open). These are DB Service PR numbers.
+#735 (timestamp fix, merged September 17), #736 (status history, merged September 23
+as `2df0e522`), and #737 (guarded historical repair utilities, merged September 23
+as `2bea0794`). Both September 23 merges were explicitly requested, had successful
+head CI and no conflicts, and used merge commits in stack order. After #736 merged,
+#737 automatically retargeted to main and was checked again before merging.
+These are DB Service PR numbers.
 Their implementation and utility READMEs belong in that repository; this section
 records the LMS integration and historical QA. Merge does not establish deployment
 or authorize historical repair.
+
+The initial read-only deployment check on September 23 found the last production
+deploy at `release` SHA `3f82649b`, before #736/#737 merged. On the user's
+instruction, main was merged into release as `1f70b41a` with no conflicts. The
+release diff consisted of #736/#737's status history and repair utilities;
+formatting, 71 repair integration tests, and 126 related service tests passed.
+[The EC2 production deploy](https://github.com/avantifellows/db-service/actions/runs/35871098883)
+completed successfully at that SHA. Its SSH log shows a fast-forward from
+`3f82649b` to `1f70b41a`; the live health and database-readiness endpoints
+both returned 200 afterward. This deployed code only; no historical data repair
+or downstream reporting refresh was run.
 
 The #736 change creates current status enrollment history on LMS Add/Bulk and a
 new period on full-dropout undo; program-only dropout/undo preserves status history.
 Local and staging lifecycle checks covered Add/Bulk, cancellation, repeated full
 cycles and program isolation. Review fixes use the captured UTC operation time and
-reject duplicate status titles. These changes are still in an open PR, not current
-production guarantees.
+reject duplicate status titles. These changes are merged into main; production
+deployment was not verified during the merge task, and no historical repair ran.
 
 Known unresolved limitation: DB Service #736 accepts a future dropout `start_date`.
 Undoing before that date can end the dropout period before its own start and
@@ -316,6 +331,31 @@ Student status in reporting. All 96 belonged to the 152 accidental cases and bec
 enrolled in the combined local rehearsal. Timestamp repair alone cannot fix this;
 production status repair and downstream Airbyte/models/attendance/cache refresh were
 still outstanding in that investigation. No dashboard filter change was proposed.
+
+September 23 fresh read-only production dump and separate local QA clone recounted
+37,892 LMS-created 2026–27 Students, split into 37,394 with no status history,
+243 dropout/undo cases, 253 single-dropout cases, and the same two singleton
+cases. The 91 added undo cases were not covered by the earlier decision that the
+152 dropouts were accidental: 33 were previously single dropouts undone on
+September 22; 58 had dropout and undo on September 20. Each has one current
+School: 58 at JNV Mainpuri (Lucknow region), 33 at JNV Warangal (Hyderabad
+region). School attribution uses current School enrollment. The first local
+rehearsal held those 91 out and found 1,705 proposed timestamp fixes. The user
+then confirmed all 91 dropouts were mistakes. On a fresh clone, all 243
+accidental cases were corrected to continuous enrollment alongside 37,394
+missing-status backfills, 253 pre-dropout periods and both singleton repairs.
+Every status group has zero remaining targets and all 37,892 cohort Students
+have one matching current status. Full-table comparisons and replay checks passed.
+
+After the complete status cleanup, the fresh timestamp report had 1,647
+proposed cohort targets, 243 corrected status rows to preserve and 342 already
+equal/later. All 1,647 applied and replayed locally; the final cohort report
+has no proposed or unresolved targets. The initial 1,705 count was provisional
+and is superseded by 1,647. One global timestamp coverage issue and 20
+unresolved targets are outside this cohort. The 71 utility integration tests
+passed. No production repair, deployment confirmation, warehouse sync, or
+dashboard refresh occurred. Private QA evidence:
+`../release-records/repair-retest-confirmed-20260923/QA.md`.
 
 Evidence is kept privately in the sibling `release-records/` directory, especially
 `lms-status-combined-20260917/QA.md`, `nvs-attendance-root-cause-20260917/report.md`

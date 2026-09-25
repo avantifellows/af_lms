@@ -45,7 +45,7 @@ describe("HolisticMentorshipWorkspace", () => {
     vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => Promise.resolve({
       ok: true,
       json: async () => url.includes("/progress?") ? {
-        rows: [], counts: { totalMapped: 0, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 },
+        rows: [], counts: { total: 0, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 },
         options: { schools: [], mentors: [], phases: [] }, pageSize: 50,
         academicYears: ["2026-2027"],
         refreshedAt: "2026-07-17T10:00:00.000Z",
@@ -84,7 +84,7 @@ describe("HolisticMentorshipWorkspace", () => {
     vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => Promise.resolve({
       ok: true,
       json: async () => url.includes("/progress?") ? {
-        rows: [], counts: { totalMapped: 0, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 },
+        rows: [], counts: { total: 0, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 },
         options: { schools: [], mentors: [], phases: [] }, pageSize: 50,
         academicYears: ["2026-2027"],
         refreshedAt: "2026-07-17T10:00:00.000Z",
@@ -98,7 +98,7 @@ describe("HolisticMentorshipWorkspace", () => {
       "/holistic-mentorship/tutorial",
     );
     expect(screen.getByRole("tab", { name: "Students & Progress" })).toBeInTheDocument();
-    expect(await screen.findByText("No mapped Students exist for this Academic Year.")).toBeInTheDocument();
+    expect(await screen.findByText("No assigned Students exist for this Academic Year.")).toBeInTheDocument();
     expect(screen.getAllByRole("option", { name: "2026-2027" })).toHaveLength(1);
     expect(screen.queryByRole("option", { name: "2025-2026" })).not.toBeInTheDocument();
 
@@ -113,7 +113,7 @@ describe("HolisticMentorshipWorkspace", () => {
     vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => Promise.resolve({
       ok: true,
       json: async () => url.includes("/progress?") ? {
-        rows: [], counts: { totalMapped: 0, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 },
+        rows: [], counts: { total: 0, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 },
         options: { schools: [], mentors: [], phases: [] }, pageSize: 50,
         academicYears: ["2026-2027"],
         refreshedAt: "2026-07-17T10:00:00.000Z",
@@ -138,7 +138,7 @@ describe("HolisticMentorshipWorkspace", () => {
       ok: true,
       json: async () => ({
         rows: [],
-        counts: { totalMapped: 0, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 },
+        counts: { total: 0, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 },
         options: { schools: [], mentors: [], phases: [] },
         pageSize: 50,
         academicYears: ["2026-2027"],
@@ -173,7 +173,7 @@ describe("HolisticMentorshipWorkspace", () => {
       ok: true,
       json: async () => ({
         rows: [],
-        counts: { totalMapped: 0, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 },
+        counts: { total: 0, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 },
         options: { schools: [], mentors: [], phases: [] },
         pageSize: 50,
         academicYears: ["2026-2027"],
@@ -200,7 +200,7 @@ describe("HolisticMentorshipWorkspace", () => {
       ok: true,
       json: async () => ({
         rows: [],
-        counts: { totalMapped: 0, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 },
+        counts: { total: 0, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 },
         options: { schools: [], mentors: [], phases: [] },
         pageSize: 50,
         academicYears: ["2026-2027"],
@@ -241,7 +241,7 @@ describe("HolisticMentorshipWorkspace", () => {
       ok: true,
       json: async () => ({
         rows: [],
-        counts: { totalMapped: 0, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 },
+        counts: { total: 0, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 },
         options: { schools: [], mentors: [], phases: [] },
         pageSize: 50,
         academicYears: ["2026-2027"],
@@ -272,7 +272,7 @@ describe("HolisticMentorshipWorkspace", () => {
           completedAt: null, notesAuthor: null, notesAuthorEmail: null,
           notesLastEditedAt: null, answers: [],
         }],
-        counts: { totalMapped: 1, pending: 1, completed: 0, skipped: 0, noActivePhase: 0 },
+        counts: { total: 1, pending: 1, completed: 0, skipped: 0, noActivePhase: 0 },
         options: { schools: [{ code: "SCH001", name: "School One" }], mentors: [], phases: [] },
         pageSize: 50,
         academicYears: ["2026-2027"],
