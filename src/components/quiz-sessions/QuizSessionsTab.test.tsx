@@ -642,14 +642,21 @@ describe("QuizSessionsTab", () => {
       await within(dialog).findByText("This test already has a session for the selected batches")
     ).toBeInTheDocument();
     expect(within(dialog).queryByText("Part Test 11 - Disabled")).not.toBeInTheDocument();
+    // Choosing: no new-session form and no primary action until they pick a path.
     expect(within(dialog).queryByText("3. When And How")).not.toBeInTheDocument();
-    expect(within(dialog).getByRole("button", { name: "Create Session" })).toBeDisabled();
+    expect(within(dialog).queryByRole("button", { name: "Create Session" })).not.toBeInTheDocument();
 
+    // Create anyway: the notice shrinks to a reminder and the normal form returns.
     await user.click(within(dialog).getByRole("button", { name: "Create a new session anyway" }));
+    expect(within(dialog).getByText(/You are creating a new session/)).toBeInTheDocument();
     expect(within(dialog).getByText("3. When And How")).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: "Create Session" })).toBeEnabled();
+    await user.click(within(dialog).getByRole("button", { name: "Extend an existing one instead" }));
 
+    // Extending: only the end time, and the footer's one primary action saves it.
     await user.click(within(dialog).getByRole("button", { name: "Extend" }));
+    expect(within(dialog).queryByText("3. When And How")).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: "Create Session" })).not.toBeInTheDocument();
     const endInput = within(dialog).getByLabelText("New end time");
     await user.clear(endInput);
     await user.type(endInput, "2099-01-01T18:00");
