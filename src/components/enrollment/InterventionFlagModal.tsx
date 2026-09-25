@@ -72,17 +72,63 @@ function UpdateList({ updates }: { updates: InterventionFlagUpdate[] }) {
   );
 }
 
+const CONFLICT_MESSAGE =
+  "Someone else has already flagged this student. Their flag is shown above; you can add your text to it as a note.";
+
+type PostResult = { ok: true } | { ok: false; status: number; error: string };
+
+async function postJson(
+  url: string,
+  payload: Record<string, unknown>,
+): Promise<PostResult> {
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (res.ok) return { ok: true };
+    const data = (await res.json().catch(() => null)) as {
+      error?: string;
+    } | null;
+    return {
+      ok: false,
+      status: res.status,
+      error: data?.error ?? "Something went wrong. Please try again.",
+    };
+  } catch {
+    return {
+      ok: false,
+      status: 0,
+      error: "Could not reach the server. Please try again.",
+    };
+  }
+}
+
 function NoteField({
-  label,
+  canEdit,
+  hasOpenFlag,
   value,
   onChange,
   disabled,
 }: {
-  label: string;
+  canEdit: boolean;
+  hasOpenFlag: boolean;
   value: string;
   onChange: (value: string) => void;
   disabled: boolean;
 }) {
+  if (!canEdit) {
+    return (
+      <p className="text-sm text-text-muted">
+        You have read-only access, so you can view flags but not add to or
+        resolve them.
+      </p>
+    );
+  }
+  const label = hasOpenFlag
+    ? "Add a note"
+    : "What is going on, and what support might help?";
   return (
     <label className="block">
       <span className="mb-1 block text-sm font-medium text-text-primary">
@@ -97,6 +143,22 @@ function NoteField({
         className={`${baseInputClasses} w-full`}
       />
     </label>
+  );
+}
+
+function PastFlags({ flags }: { flags: InterventionFlag[] }) {
+  if (flags.length === 0) return null;
+  return (
+    <details className="text-sm">
+      <summary className="cursor-pointer text-text-secondary">
+        Past flags ({flags.length})
+      </summary>
+      <div className="mt-3 space-y-4">
+        {flags.map((flag) => (
+          <UpdateList key={flag.id} updates={flag.updates} />
+        ))}
+      </div>
+    </details>
   );
 }
 
@@ -201,36 +263,20 @@ export default function InterventionFlagModal({
     setSubmitting(true);
     setError(null);
     setSaved(null);
-    try {
-      const res = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) {
-        const data = (await res.json().catch(() => null)) as {
-          error?: string;
-        } | null;
-        if (res.status === 409 && !openFlag) {
-          // Someone else flagged this student while this form was open. Load
-          // their flag and keep the typed text so it can be added as a note.
-          await onChanged();
-          setError(
-            "Someone else has already flagged this student. Their flag is shown above; you can add your text to it as a note.",
-          );
-        } else {
-          setError(data?.error ?? "Something went wrong. Please try again.");
-        }
-        return;
-      }
+    const result = await postJson(url, payload);
+    if (result.ok) {
       await onChanged();
       setNote("");
       setSaved(savedMessage);
-    } catch {
-      setError("Could not reach the server. Please try again.");
-    } finally {
-      setSubmitting(false);
+    } else if (result.status === 409 && !openFlag) {
+      // Someone else flagged this student while this form was open. Load
+      // their flag and keep the typed text so it can be added as a note.
+      await onChanged();
+      setError(CONFLICT_MESSAGE);
+    } else {
+      setError(result.error);
     }
+    setSubmitting(false);
   };
 
   const raise = () =>
@@ -268,37 +314,16 @@ export default function InterventionFlagModal({
       <div className="max-h-[60vh] space-y-4 overflow-y-auto px-5 py-4">
         {openFlag && <UpdateList updates={openFlag.updates} />}
 
-        {canEdit ? (
-          <NoteField
-            label={
-              openFlag
-                ? "Add a note"
-                : "What is going on, and what support might help?"
-            }
-            value={note}
-            onChange={setNote}
-            disabled={submitting}
-          />
-        ) : (
-          <p className="text-sm text-text-muted">
-            You have read-only access, so you can view flags but not add to or
-            resolve them.
-          </p>
-        )}
+        <NoteField
+          canEdit={canEdit}
+          hasOpenFlag={openFlag != null}
+          value={note}
+          onChange={setNote}
+          disabled={submitting}
+        />
         <StatusMessage error={error} saved={saved} />
 
-        {pastFlags.length > 0 && (
-          <details className="text-sm">
-            <summary className="cursor-pointer text-text-secondary">
-              Past flags ({pastFlags.length})
-            </summary>
-            <div className="mt-3 space-y-4">
-              {pastFlags.map((flag) => (
-                <UpdateList key={flag.id} updates={flag.updates} />
-              ))}
-            </div>
-          </details>
-        )}
+        <PastFlags flags={pastFlags} />
       </div>
 
       <div className="flex flex-wrap justify-end gap-3 border-t border-border px-5 py-4">
