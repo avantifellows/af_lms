@@ -226,7 +226,6 @@ describe("EnrollmentTabContent", () => {
     render(
       <EnrollmentTabContent
         {...baseProps}
-        canUseInterventionFlags
         activeStudents={[student("1", "medical"), student("2", "medical"), student("3", "engineering")]}
       />,
     );

@@ -70,10 +70,6 @@ interface Props {
   schoolCode: string;
   /** Code-controlled Registration Mode; defaults to the active mode. */
   registrationMode?: RegistrationMode;
-  /** Viewer may see intervention flags (see lib/intervention-flags). */
-  canUseInterventionFlags?: boolean;
-  /** Viewer may also raise, add notes to and resolve them (not read-only). */
-  canEditInterventionFlags?: boolean;
 }
 
 // fallow-ignore-next-line complexity
@@ -95,10 +91,13 @@ export default function EnrollmentTabContent({
   schoolUdise,
   schoolCode,
   registrationMode = ACTIVE_REGISTRATION_MODE,
-  canUseInterventionFlags = false,
-  canEditInterventionFlags = false,
 }: Props) {
   const phoneMode = registrationMode === PHONE_REGISTRATION_MODE;
+  // Intervention flags mirror students access (lib/intervention-flags): anyone
+  // on this tab can see students, so they see flags; changing them needs
+  // students edit. Passcode logins get neither. The API enforces the same rule.
+  const canUseInterventionFlags = !isPasscodeUser;
+  const canEditInterventionFlags = canUseInterventionFlags && canEdit;
   const router = useRouter();
   const [selectedId, setSelectedId] = useState<number | null>(
     programs[0]?.id ?? null,
