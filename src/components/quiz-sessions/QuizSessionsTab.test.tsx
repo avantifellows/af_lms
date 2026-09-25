@@ -734,6 +734,36 @@ describe("QuizSessionsTab", () => {
     expect(screen.queryByText(/already has/)).not.toBeInTheDocument();
   });
 
+  it("does not badge a disabled session inside its window as Live", async () => {
+    const now = Date.now();
+    sessions = [
+      {
+        ...makeSessions()[0],
+        id: 30,
+        name: "Disabled Live Window",
+        is_active: false,
+        start_time: new Date(now - 3600_000).toISOString(),
+        end_time: new Date(now + 3600_000).toISOString(),
+      },
+      {
+        ...makeSessions()[0],
+        id: 31,
+        name: "Enabled Live Window",
+        start_time: new Date(now - 3600_000).toISOString(),
+        end_time: new Date(now + 3600_000).toISOString(),
+      },
+    ];
+
+    render(<QuizSessionsTab schoolId="school-1" canEdit />);
+    expect(await screen.findByText("Disabled Live Window")).toBeInTheDocument();
+
+    const disabledRow = document.querySelector('[data-session-row="30"]') as HTMLElement;
+    const enabledRow = document.querySelector('[data-session-row="31"]') as HTMLElement;
+    expect(within(disabledRow).queryByText("Live")).not.toBeInTheDocument();
+    expect(within(disabledRow).getByText("Disabled")).toBeInTheDocument();
+    expect(within(enabledRow).getByText("Live")).toBeInTheDocument();
+  });
+
   it("filters the list to live sessions with the Live only toggle", async () => {
     const user = userEvent.setup();
 

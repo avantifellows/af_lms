@@ -2874,7 +2874,9 @@ function SessionWindowSummary({
   session: QuizSession;
   lifecycle: SessionLifecycleState;
 }) {
-  const showLifecycleBadge = lifecycle === "live" || lifecycle === "ended";
+  // A disabled session can't be taken, so it never reads as Live (Status says Disabled).
+  const showLifecycleBadge =
+    (lifecycle === "live" && session.is_active !== false) || lifecycle === "ended";
 
   return (
     <div className="space-y-2">
