@@ -145,5 +145,6 @@ for legacy templates) and keeps only those sharing a selected class batch. If an
 "When And How" and Create fold behind "Create a new session anyway". Disabled sessions are not
 listed. **Extend** edits only the end time inline (`PATCH` with `endTime` alone; start, the
 occurrence and the quiz doc follow the normal edit path), then closes the form and highlights the
-session in that batch's list. The lookup fails open, so creation is
+session in that batch's list. The session list sorts by `end_time DESC` (not `updated_at`, which
+result sync bumps long after a session ends), so an extended session rises to the top. The lookup fails open, so creation is
 never blocked by it.

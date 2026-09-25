@@ -199,6 +199,7 @@ describe("GET /api/quiz-sessions", () => {
       String(sql).includes("FROM session s")
     );
     expect(sessionQueries[0][0]).toContain("s.meta_data ? 'cms_source'");
+    expect(sessionQueries[0][0]).toContain("ORDER BY s.end_time DESC NULLS LAST, s.id DESC");
     expect(sessionQueries[0][1].slice(-2)).toEqual(["4379", null]);
     expect(sessionQueries[1][1].slice(-2)).toEqual([null, "501"]);
   });

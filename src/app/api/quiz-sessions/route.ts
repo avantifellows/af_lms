@@ -253,7 +253,8 @@ async function listQuizSessions(
       AND COALESCE(s.meta_data->>'cms_test_id', '') NOT LIKE 'teacher-feedback:%'
       AND ($5::text IS NULL OR (s.meta_data ? 'cms_source' AND s.meta_data->>'cms_test_id' = $5))
       AND ($6::text IS NULL OR s.meta_data->>'resource_id' = $6)
-    ORDER BY s.id DESC
+    -- Latest window end first, so an extended session rises to the top.
+    ORDER BY s.end_time DESC NULLS LAST, s.id DESC
     LIMIT $3 OFFSET $4
     `,
     [groups, filteredClassIds, limit, offset, paper.cmsTestId, paper.resourceId]
