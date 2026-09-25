@@ -189,6 +189,7 @@ describe("GET /api/quiz-sessions", () => {
 
     const [sql, params] = mocks.mockQuery.mock.calls[1];
     expect(sql).toContain("now() AT TIME ZONE 'Asia/Kolkata'");
+    expect(sql).toContain("COALESCE(s.is_active, true)");
     expect(params.at(-1)).toBe(true);
   });
 

@@ -256,9 +256,10 @@ async function listQuizSessions(
       AND COALESCE(s.meta_data->>'cms_test_id', '') NOT LIKE 'teacher-feedback:%'
       AND ($5::text IS NULL OR (s.meta_data ? 'cms_source' AND s.meta_data->>'cms_test_id' = $5))
       AND ($6::text IS NULL OR s.meta_data->>'resource_id' = $6)
-      -- Times are IST wall-clock, so compare against IST now.
+      -- Live = enabled and inside its window. Times are IST wall-clock, so compare against IST now.
       AND (NOT $7::boolean OR (
-        s.start_time <= (now() AT TIME ZONE 'Asia/Kolkata')
+        COALESCE(s.is_active, true)
+        AND s.start_time <= (now() AT TIME ZONE 'Asia/Kolkata')
         AND s.end_time > (now() AT TIME ZONE 'Asia/Kolkata')
       ))
     -- Latest window end first, so an extended session rises to the top.

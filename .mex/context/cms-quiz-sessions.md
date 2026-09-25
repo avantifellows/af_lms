@@ -146,6 +146,6 @@ for legacy templates) and keeps only those sharing a selected class batch. If an
 listed. **Extend** edits only the end time inline (`PATCH` with `endTime` alone; start, the
 occurrence and the quiz doc follow the normal edit path), then closes the form and highlights the
 session in that batch's list. The session list sorts by `end_time DESC` (not `updated_at`, which
-result sync bumps long after a session ends), so an extended session rises to the top. The **Live only** toggle (`?status=live`) compares
+result sync bumps long after a session ends), so an extended session rises to the top. The **Live only** toggle (`?status=live`) keeps enabled sessions and compares
 against `now() AT TIME ZONE 'Asia/Kolkata'` because session times are IST wall-clock. The lookup fails open, so creation is
 never blocked by it.
