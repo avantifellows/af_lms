@@ -80,6 +80,15 @@ export default async function AdminPage() {
             </Card>
           </Link>
 
+          <Link href="/admin/intervention-flags">
+            <Card className="block p-6">
+              <h3 className="text-lg font-bold text-text-primary uppercase tracking-wide">Intervention Flags</h3>
+              <p className="mt-2 text-sm text-text-muted">
+                Students flagged by staff for welfare support, across all schools.
+              </p>
+            </Card>
+          </Link>
+
           <Link href="/admin/centres/config">
             <Card className="block p-6">
               <h3 className="text-lg font-bold text-text-primary uppercase tracking-wide">Centre Option Configuration</h3>

@@ -21,7 +21,7 @@ edges:
     condition: when adding a write that must proxy to the DB Service
   - target: patterns/add-api-route.md
     condition: when adding a route that reads or writes
-last_updated: 2026-09-23
+last_updated: 2026-09-25
 ---
 
 # Data Access
@@ -31,7 +31,7 @@ Five backends. Picking the wrong one for a write is a real bug — read this bef
 ## 1. PostgreSQL — `query()` (the default)
 `import { query } from "@/lib/db"` → `query<RowType>(sql, params)`. Returns `rows`.
 - **All reads** (lists, dashboards, detail pages, scope resolution).
-- **Direct writes** for LMS-owned tables only: PM visits (`lms_pm_school_visits`, `lms_pm_school_visit_actions`), curriculum, permissions/centre tables, Academic Mentor-Mentee Mappings, and Holistic Mentorship product records.
+- **Direct writes** for LMS-owned tables only: PM visits (`lms_pm_school_visits`, `lms_pm_school_visit_actions`), curriculum, permissions/centre tables, Academic Mentor-Mentee Mappings, Holistic Mentorship product records, and intervention flags (`lms_student_intervention_flags` + append-only `lms_student_intervention_flag_updates`; a DB trigger allows only clearing `body`).
 - Holistic Profile regeneration first records an attributable request atomically in Postgres, then calls the configured ETL collection endpoint at `/{request_key}/enqueue` with the matching `APP_ENV` in the body. No Student data is sent. Ambiguous network outcomes remain queued for retry; confirmed rejection is recorded as failed without replacing the previous Profile.
 - Multi-statement writes: `withTransaction(async (client) => { ... })` (no nesting — it throws).
 - Pool is a singleton (10 conns, 15s `statement_timeout`, 5s connect timeout). **Always `$1` placeholders.** This module is server-only — never import it (transitively) into a client component.

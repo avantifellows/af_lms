@@ -8,6 +8,7 @@ import {
   PHONE_REGISTRATION_MODE,
 } from "@/lib/registration-mode";
 import EnrollmentTabContent from "./EnrollmentTabContent";
+import type { Student } from "@/components/StudentTable";
 import type { ProgramStats } from "@/lib/enrollment-stats";
 
 const { mockRefresh, createdResult } = vi.hoisted(() => ({
@@ -193,4 +194,48 @@ describe("EnrollmentTabContent", () => {
     expect(screen.getByTestId("student-table")).toHaveAttribute("data-stream", "engineering");
     expect(screen.getByText("Showing 1 of 2 students")).toBeInTheDocument();
   });
+
+  it("counts flagged students within the grade and stream filters", async () => {
+    const student = (id: string, stream: string) =>
+      ({
+        group_user_id: `gu-${id}`,
+        student_pk_id: id,
+        grade: 11,
+        stream,
+        program_id: PROGRAM_IDS.NVS,
+        student_program_ids: [PROGRAM_IDS.NVS],
+      }) as unknown as Student;
+    const flag = (studentPkId: string) => ({
+      id: Number(studentPkId),
+      student_pk_id: studentPkId,
+      status: "open",
+      raised_by_email: "t@x",
+      inserted_at: "2026-09-25T05:00:00Z",
+      resolved_at: null,
+      updates: [],
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => ({
+        ok: true,
+        json: async () =>
+          url.includes("intervention-flags") ? { flags: [flag("1"), flag("3")] } : { consent: {} },
+      })),
+    );
+    const user = userEvent.setup();
+    render(
+      <EnrollmentTabContent
+        {...baseProps}
+        activeStudents={[student("1", "medical"), student("2", "medical"), student("3", "engineering")]}
+      />,
+    );
+
+    expect(await screen.findByLabelText("Needs intervention only (2)")).toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText("Filter by Stream:"), "medical");
+    expect(screen.getByLabelText("Needs intervention only (1)")).toBeInTheDocument();
+    await user.click(screen.getByLabelText("Needs intervention only (1)"));
+    expect(screen.getByText("Showing 1 of 3 students")).toBeInTheDocument();
+    vi.unstubAllGlobals();
+  });
 });
+

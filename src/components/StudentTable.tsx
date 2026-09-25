@@ -102,6 +102,14 @@ interface StudentTableProps {
   // the parent can refetch data it owns — e.g. the consent map behind the
   // admission summary.
   onDataChanged?: () => void;
+  // Intervention flags (parent-owned). `onOpenInterventionFlag` is passed only
+  // when the viewer may use flags; `flaggedOnly` narrows active students to
+  // those with an open flag.
+  openFlagStudentIds?: Set<string>;
+  onOpenInterventionFlag?: (student: Student) => void;
+  /** False for read-only viewers: they get "View flag" only, never "Flag". */
+  canRaiseInterventionFlag?: boolean;
+  flaggedOnly?: boolean;
 }
 
 function studentBelongsToProgram(student: Student, programId: number) {
@@ -148,6 +156,10 @@ interface StudentCardProps {
   onDropout: () => void;
   onUndoDropout: () => void;
   isDropoutView?: boolean;
+  /** Student has an open intervention flag (shows the marker). */
+  hasOpenFlag?: boolean;
+  /** Present when the viewer may use intervention flags; opens the flag dialog. */
+  onOpenFlag?: () => void;
   /**
    * Bumped by the parent when something outside this card may have changed
    * the student's documents (e.g. an upload via EditStudentModal). Forwarded
@@ -194,6 +206,8 @@ function StudentCard({
   onDropout,
   onUndoDropout,
   isDropoutView = false,
+  hasOpenFlag = false,
+  onOpenFlag,
   documentsRefreshNonce,
 }: StudentCardProps) {
   const [expanded, setExpanded] = useState(false);
@@ -216,6 +230,7 @@ function StudentCard({
               <Badge variant="info">Grade {student.grade}</Badge>
             )}
             {isDropout && <Badge variant="danger">Dropout</Badge>}
+            {hasOpenFlag && <Badge variant="warning">Needs intervention</Badge>}
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <Button
@@ -259,8 +274,13 @@ function StudentCard({
         </div>
 
         {/* Action buttons */}
-        {(canEditStudent || canDropout) && !isDropout && (
+        {(canEditStudent || canDropout || onOpenFlag) && !isDropout && (
           <div className="mt-3 flex items-center justify-end gap-2">
+            {onOpenFlag && (
+              <Button variant="ghost" size="sm" onClick={onOpenFlag}>
+                {hasOpenFlag ? "View flag" : "Flag"}
+              </Button>
+            )}
             {canEditStudent && (
               <Button variant="ghost" size="sm" onClick={onEdit}>
                 Edit
@@ -273,11 +293,19 @@ function StudentCard({
             )}
           </div>
         )}
-        {canUndoDropout && isDropout && (
-          <div className="mt-3 flex justify-end">
-            <Button variant="ghost" size="sm" onClick={onUndoDropout}>
-              Undo Dropout
-            </Button>
+        {isDropout && (canUndoDropout || onOpenFlag) && (
+          <div className="mt-3 flex justify-end gap-2">
+            {/* Flags stay reachable after dropout so they can be resolved. */}
+            {onOpenFlag && (
+              <Button variant="ghost" size="sm" onClick={onOpenFlag}>
+                {hasOpenFlag ? "View flag" : "Flag"}
+              </Button>
+            )}
+            {canUndoDropout && (
+              <Button variant="ghost" size="sm" onClick={onUndoDropout}>
+                Undo Dropout
+              </Button>
+            )}
           </div>
         )}
       </div>
@@ -540,6 +568,10 @@ export default function StudentTable({
   selectedStream = "all",
   hideGradeFilterUI = false,
   onDataChanged,
+  openFlagStudentIds,
+  onOpenInterventionFlag,
+  canRaiseInterventionFlag = true,
+  flaggedOnly = false,
 }: StudentTableProps) {
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [dropoutStudent, setDropoutStudent] = useState<Student | null>(null);
@@ -626,11 +658,15 @@ export default function StudentTable({
   ].sort((a, b) => a - b);
 
   // Filter students by selected grade
+  const hasOpenFlag = (student: Student) =>
+    student.student_pk_id != null &&
+    Boolean(openFlagStudentIds?.has(student.student_pk_id));
   const filteredStudents = currentStudents.filter(
     (student) =>
       (selectedGrade === "all" || student.grade === parseInt(selectedGrade)) &&
       (selectedStream === "all" ||
-        student.stream?.toLowerCase() === selectedStream.toLowerCase()),
+        student.stream?.toLowerCase() === selectedStream.toLowerCase()) &&
+      (!flaggedOnly || activeTab !== "active" || hasOpenFlag(student)),
   );
 
   // Reset grade filter when switching tabs if the selected grade doesn't exist in new tab
@@ -765,6 +801,14 @@ export default function StudentTable({
               onDropout={() => setDropoutStudent(student)}
               onUndoDropout={() => setUndoStudent(student)}
               isDropoutView={activeTab === "dropout"}
+              hasOpenFlag={hasOpenFlag(student)}
+              onOpenFlag={
+                onOpenInterventionFlag &&
+                student.student_pk_id &&
+                (canRaiseInterventionFlag || hasOpenFlag(student))
+                  ? () => onOpenInterventionFlag(student)
+                  : undefined
+              }
               documentsRefreshNonce={documentsRefresh}
             />
           ))
