@@ -21,7 +21,7 @@ edges:
     condition: when adding a write that must proxy to the DB Service
   - target: patterns/add-api-route.md
     condition: when adding a route that reads or writes
-last_updated: 2026-09-25
+last_updated: 2026-09-28
 ---
 
 # Data Access
@@ -61,6 +61,15 @@ if (!res.ok) { const text = await res.text(); /* surface upstream error */ }
 `src/lib/s3.ts` (`@aws-sdk/client-s3` + presigner). Student document uploads/reads via presigned URLs; bucket shared with prod (`S3_DOCS_*`). Document **metadata** writes still proxy through the DB Service.
 
 (SNS — `src/lib/sns.ts` — publishes session-creation messages, not a data store.)
+
+## Usage events — `lms_usage_events`
+
+Product-usage log written directly by af_lms through `recordUsageEvent` (`src/lib/usage-events.ts`):
+`sign_in` (next-auth `events.signIn`), `combined_report_requested` (combined-reports POST) and
+`tab_viewed` (`SchoolTabs` pings `/api/usage/tab-view`; a unique index keeps one row per person,
+tab, school/centre and IST day). Writes never throw. db-service owns the migration; the warehouse
+copy is `fact_lms_usage_events` (etl-next dbt). Add an event by extending the table's
+`event_constraint` first.
 
 ## Decision table
 | Operation | Backend |

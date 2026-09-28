@@ -3,6 +3,7 @@ import type { Provider } from "next-auth/providers/index";
 import GoogleProvider from "next-auth/providers/google";
 import CredentialsProvider from "next-auth/providers/credentials";
 import { getSchoolByPasscode } from "./permissions";
+import { recordUsageEvent } from "./usage-events";
 
 // Dev login personas — each maps to a local fixture email in user_permission.
 // Only used when NODE_ENV !== "production".
@@ -83,6 +84,19 @@ export const authOptions: NextAuthOptions = {
         session.isPasscodeUser = true;
       }
       return session;
+    },
+  },
+  events: {
+    async signIn({ user, account }) {
+      if (!user.email) return;
+      const schoolCode = "schoolCode" in user ? (user.schoolCode as string) : null;
+      await recordUsageEvent({
+        event: "sign_in",
+        email: user.email,
+        role: schoolCode ? "passcode" : null,
+        schoolCode,
+        detail: account?.provider ?? null,
+      });
     },
   },
   pages: {

@@ -16,6 +16,7 @@ import {
   evaluateGenerationEligibility,
   BLOCKED_MESSAGE,
 } from "@/lib/combined-report-eligibility";
+import { recordUsageEvent } from "@/lib/usage-events";
 
 // GET /api/quiz-analytics/[udise]/combined-reports?session_id=...
 // List the combined-report jobs for this school + test (the Performance-tab view).
@@ -149,6 +150,16 @@ export async function POST(
       students,
       requestedBy: session?.user?.email ?? null,
     });
+    if (session?.user?.email) {
+      await recordUsageEvent({
+        event: "combined_report_requested",
+        email: session.user.email,
+        role: session.isPasscodeUser ? "passcode" : null,
+        schoolCode: auth.school.code,
+        detail: body.session_id,
+        meta: { test_name: body.test_name ?? null, student_count: students.length },
+      });
+    }
     return NextResponse.json(result, { status: 202 });
   } catch (error) {
     if (error instanceof ReportingServiceError) {

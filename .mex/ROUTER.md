@@ -26,7 +26,7 @@ edges:
     condition: when working on teacher feedback setup, the feedback form, or its report
   - target: patterns/INDEX.md
     condition: when starting a task — check the pattern index for a matching pattern file
-last_updated: 2026-09-25
+last_updated: 2026-09-28
 ---
 
 # Session Bootstrap
@@ -56,6 +56,7 @@ Then read this file fully before doing anything else in this session.
 - Canonical school and centre rosters materialize the filtered program-dropout audit set once before their per-Student lateral lookup. Same-snapshot read-only verification preserved the complete 360-row school and 123-row centre results while reducing the measured queries from 5.76s to 0.53s and 2.02s to 0.20s, respectively; positive SQL fixtures cover dropout/current-program/null/undo semantics. See `context/student-addition.md`, `patterns/debug-holistic-progress.md`, and stacked performance [PR #334](https://github.com/avantifellows/af_lms/pull/334).
 
 - Dual auth (Google OAuth + school passcode) with dev-login personas in non-prod.
+- Product-usage tracking in `lms_usage_events`: sign-ins, combined-report requests and daily school/centre tab views. See `context/data-access.md`.
 - Student enrollment CRUD (reads direct from Postgres; writes proxied to the DB Service) + school dashboard, search, grade filtering, document uploads (S3).
 - Permission system: feature×role matrix, 3-level school scope, program/NVS gating, `read_only` downgrade, additive centre-seat scope.
 - PM school visits: GPS-tracked lifecycle + 7 visit action types (registry pattern), scoped by `visits-policy`; PM completion requires six Action Types, while Admin and Program Admin completion permits zero Actions; Program Admins manage their own in-progress Visits while retaining scoped read access; teacher pickers use the Staff Management Visit Teacher roster.

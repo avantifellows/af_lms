@@ -20,6 +20,7 @@ vi.mock("@/lib/school-students", () => ({
   filterActiveRosterStudents: vi.fn(),
 }));
 vi.mock("next-auth", () => ({ getServerSession: vi.fn() }));
+vi.mock("@/lib/usage-events", () => ({ recordUsageEvent: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 
 import { authorizeSchoolAccess } from "@/lib/api-auth";
@@ -33,6 +34,8 @@ import {
   getSchoolRoster,
   filterActiveRosterStudents,
 } from "@/lib/school-students";
+import { getServerSession } from "next-auth";
+import { recordUsageEvent } from "@/lib/usage-events";
 import { GET, POST } from "./route";
 import {
   jsonRequest,
@@ -194,6 +197,23 @@ describe("POST combined-reports gating", () => {
     const res = await POST(postBody(), routeParams({ udise: "27361106702" }));
     expect(res.status).toBe(202);
     expect(mockSubmit).toHaveBeenCalledTimes(1);
+  });
+
+  it("logs who requested the report", async () => {
+    vi.mocked(getServerSession).mockResolvedValue({
+      user: { email: "teacher@avantifellows.org" },
+    } as never);
+    mockWindow.mockResolvedValue(ENDED);
+    mockList.mockResolvedValue([]);
+    mockSubmit.mockResolvedValue({ job_id: "j1", status: "queued" });
+
+    await POST(postBody(), routeParams({ udise: "27361106702" }));
+    expect(vi.mocked(recordUsageEvent)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "combined_report_requested",
+        email: "teacher@avantifellows.org",
+      })
+    );
   });
 
   it("still submits when previous jobs all errored", async () => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { type KeyboardEvent, useId, useState } from "react";
+import { type KeyboardEvent, useEffect, useId, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { statusBadgeClass } from "@/lib/visit-actions";
@@ -15,9 +15,11 @@ interface Tab {
 interface Props {
   tabs: Tab[];
   defaultTab?: string;
+  // When set, each tab's first view on this page load is logged as usage.
+  usage?: { schoolCode: string; centreId?: number };
 }
 
-export default function SchoolTabs({ tabs, defaultTab }: Props) {
+export default function SchoolTabs({ tabs, defaultTab, usage }: Props) {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -27,6 +29,18 @@ export default function SchoolTabs({ tabs, defaultTab }: Props) {
   const initial = urlTab && tabs.some((t) => t.id === urlTab) ? urlTab : fallback;
   const [activeTab, setActiveTabState] = useState(initial);
   const tabGroupId = useId();
+
+  const loggedTabs = useRef(new Set<string>());
+  useEffect(() => {
+    if (!usage || !activeTab || loggedTabs.current.has(activeTab)) return;
+    loggedTabs.current.add(activeTab);
+    fetch("/api/usage/tab-view", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tab: activeTab, ...usage }),
+      keepalive: true,
+    }).catch(() => undefined);
+  }, [activeTab, usage]);
 
   const setActiveTab = (id: string) => {
     setActiveTabState(id);
