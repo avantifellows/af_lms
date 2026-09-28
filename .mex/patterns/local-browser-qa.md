@@ -15,7 +15,7 @@ edges:
     condition: when the QA must happen on shared staging instead of locally
   - target: patterns/debug-e2e-fixtures.md
     condition: when the local dump lacks the rows the flow needs
-last_updated: 2026-09-16
+last_updated: 2026-09-27
 ---
 
 # Local Browser QA of a PR Branch
@@ -43,6 +43,13 @@ defined in `src/lib/auth.ts` and their emails exist in the local `user_permissio
 9. Pick QA schools from the DB first (`psql` with the `.env.local` values) so every branch of the
    new UI has real rows; add synthetic rows only when no real case exists, and delete them by id afterwards.
 10. Stop the server: `pkill -f 'next dev --port 33NN'`.
+
+## Video walkthrough of a PR
+- Use the `feature-demo-video` skill (`~/.agents/skills/feature-demo-video`, demo-kit + `finish-video.sh`), not a hand-rolled Playwright spec.
+- Throwaway env: run `resetDatabase()` from `e2e/helpers/db.ts` with `npx -y tsx --env-file=.env.test` (see `debug-e2e-fixtures.md` for the `mix` PATH). Then start `next dev --port 3001` with the env from `playwright.config.ts`, and mint the `next-auth.session-token` cookie with `next-auth/jwt` `encode`, as `e2e/fixtures/auth.ts` does.
+- Blur Student and Mentor name cells with a `context.addInitScript` style. Use `captionStyle: 'bottom'` at 1440×810, and check each caption's numbers against the progress API before recording.
+- For real data, clone the newest local production snapshot with `CREATE DATABASE <demo> TEMPLATE <snapshot>`. Holistic reads can reconcile, and that writes. Add a fake `user_permission` admin to the clone only. Run on a spare port with `.env.local` values, with `DB_SERVICE_URL` pointed at a dead port and `GOOGLE_SERVICE_ACCOUNT_JSON`/`VERCEL_OIDC_TOKEN` blank. Blur at 11px or more; 6px left names partly readable at 1440 wide.
+- The e2e fixture has only the current Academic Year. Copying Phase plans into an earlier year makes it selectable, but it shows 0 rows: copied Mappings still don't appear.
 
 ## Gotchas
 - Two dev servers on the same port fight silently; check `lsof -iTCP:33NN -sTCP:LISTEN` first.
