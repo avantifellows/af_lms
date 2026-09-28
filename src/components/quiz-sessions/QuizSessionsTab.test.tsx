@@ -266,6 +266,16 @@ describe("QuizSessionsTab", () => {
     vi.restoreAllMocks();
   });
 
+  function overrideFetch(
+    handler: (url: string, init?: RequestInit) => Promise<Response> | undefined
+  ) {
+    const base = mockFetch.getMockImplementation()!;
+    mockFetch.mockImplementation(
+      (input: RequestInfo | URL, init?: RequestInit) =>
+        handler(String(input), init) ?? base(input, init)
+    );
+  }
+
   it("filters sessions by class batch", async () => {
     const user = userEvent.setup();
 
@@ -781,6 +791,288 @@ describe("QuizSessionsTab", () => {
         )
       ).toBe(true);
     });
+  });
+
+  it("walks the new-CMS chapter-test path, validating each step before creating", async () => {
+    let cmsPayload: Record<string, unknown> | null = null;
+    overrideFetch((url, init) => {
+      if (url.startsWith("/api/cms/chapters?")) {
+        return jsonResponse({ chapters: [{ id: 9, code: "PHY-9", name: "Kinematics" }] });
+      }
+      if (url === "/api/quiz-sessions/from-cms" && init?.method === "POST") {
+        cmsPayload = JSON.parse(String(init.body));
+        return jsonResponse({ id: 100, warnings: ["Matrix match approximated"] });
+      }
+      return undefined;
+    });
+    const user = userEvent.setup();
+
+    render(<QuizSessionsTab schoolId="school-1" canEdit />);
+
+    await user.click(await screen.findByRole("button", { name: "Create Quiz Session" }));
+    await user.click(screen.getByLabelText("Class 11 Engg A"));
+    await user.click(screen.getByRole("button", { name: "New CMS Test" }));
+
+    const submit = () => user.click(screen.getByRole("button", { name: "Create Session" }));
+    await submit();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Exam track is required.");
+
+    await user.selectOptions(screen.getByDisplayValue("Select exam track"), "neet");
+    await submit();
+    expect(screen.getByRole("alert")).toHaveTextContent("Grade is required.");
+
+    await user.selectOptions(screen.getByDisplayValue("Select grade"), "12");
+    await submit();
+    expect(screen.getByRole("alert")).toHaveTextContent("Chapter is required.");
+
+    await user.selectOptions(screen.getByDisplayValue("Select subject"), "Physics");
+    expect(await screen.findByRole("option", { name: "Kinematics" })).toBeInTheDocument();
+    await user.selectOptions(screen.getByDisplayValue("Select chapter"), "9");
+    await submit();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Please select a CMS test.");
+
+    await user.click(await screen.findByText("NEET Major 1"));
+    await submit();
+
+    await waitFor(() => {
+      expect(cmsPayload).toMatchObject({
+        cmsTestId: 42,
+        testType: "chapter_test",
+        examTrack: "neet",
+        grade: 12,
+        classBatchIds: ["EnableStudents_11_Engg_A"],
+      });
+    });
+    expect(
+      await screen.findByText("Session created with warnings: Matrix match approximated")
+    ).toBeInTheDocument();
+    const chaptersUrl = String(getFetchCalls(mockFetch, "/api/cms/chapters?")[0][0]);
+    expect(new URL(chaptersUrl, "http://localhost").searchParams.get("subject")).toBe("Physics");
+  });
+
+  it("shows the chapter lookup error when CMS chapters fail to load", async () => {
+    overrideFetch((url) =>
+      url.startsWith("/api/cms/chapters?") ? jsonResponse({ error: "down" }, 500) : undefined
+    );
+    const user = userEvent.setup();
+
+    render(<QuizSessionsTab schoolId="school-1" canEdit />);
+
+    await user.click(await screen.findByRole("button", { name: "Create Quiz Session" }));
+    await user.click(screen.getByRole("button", { name: "New CMS Test" }));
+    await user.selectOptions(screen.getByDisplayValue("Select exam track"), "neet");
+    await user.selectOptions(screen.getByDisplayValue("Select grade"), "12");
+    await user.selectOptions(screen.getByDisplayValue("Select subject"), "Physics");
+
+    expect(await screen.findByText("Failed to fetch chapters")).toBeInTheDocument();
+  });
+
+  it("validates a scheduled window and shows the server's create error", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    overrideFetch((url, init) =>
+      url === "/api/quiz-sessions" && init?.method === "POST"
+        ? jsonResponse({ error: "Window overlaps another session" }, 409)
+        : undefined
+    );
+    const user = userEvent.setup();
+
+    render(<QuizSessionsTab schoolId="school-1" canEdit />);
+
+    await user.click(await screen.findByRole("button", { name: "Create Quiz Session" }));
+    await user.click(screen.getByLabelText("Class 11 Engg A"));
+    await user.selectOptions(screen.getByLabelText("Grade"), "11");
+    await user.selectOptions(screen.getByLabelText("Test Format"), "part_test");
+    await user.click(await screen.findByText("Part Test 11"));
+    await user.click(await screen.findByRole("button", { name: /Schedule/ }));
+
+    const [startInput, endInput] = Array.from(
+      document.querySelectorAll<HTMLInputElement>('input[type="datetime-local"]')
+    );
+    await user.clear(startInput);
+    await user.type(startInput, "2099-01-01T18:00");
+    await user.clear(endInput);
+    await user.type(endInput, "2099-01-01T10:00");
+    await user.click(screen.getByRole("button", { name: "Create Session" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "End time must be after start time."
+    );
+
+    await user.clear(endInput);
+    await user.type(endInput, "2099-01-01T22:00");
+    await user.click(screen.getByRole("button", { name: "Create Session" }));
+    expect(await screen.findByText("Window overlaps another session")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Create Quiz Session" })).toBeInTheDocument();
+  });
+
+  describe("row actions menu", () => {
+    function makeLiveSession() {
+      const now = Date.now();
+      return {
+        ...makeSessions()[0],
+        id: 40,
+        name: "Live Quiz",
+        start_time: new Date(now - 3600_000).toISOString(),
+        end_time: new Date(now + 3600_000).toISOString(),
+      };
+    }
+
+    async function openMenu(user: ReturnType<typeof userEvent.setup>, sessionId: number) {
+      const row = (await waitFor(() => {
+        const found = document.querySelector(`[data-session-row="${sessionId}"]`);
+        expect(found).not.toBeNull();
+        return found;
+      })) as HTMLElement;
+      await user.click(within(row).getByRole("button", { name: "Open actions" }));
+    }
+
+    function patchBodies(sessionId: number) {
+      return mockFetch.mock.calls
+        .filter(
+          ([input, init]) =>
+            String(input) === `/api/quiz-sessions/${sessionId}` && init?.method === "PATCH"
+        )
+        .map(([, init]) => JSON.parse(String(init?.body)));
+    }
+
+    it("disables and re-enables a session", async () => {
+      sessions = [...makeSessions(), { ...makeSessions()[0], id: 4, name: "Off Quiz", is_active: false }];
+      const user = userEvent.setup();
+
+      render(<QuizSessionsTab schoolId="school-1" canEdit />);
+
+      await openMenu(user, 1);
+      await user.click(screen.getByRole("button", { name: "Disable Session" }));
+      expect(await screen.findByText("Session disabled.")).toBeInTheDocument();
+      expect(patchBodies(1)).toEqual([{ isActive: false }]);
+
+      await openMenu(user, 4);
+      await user.click(screen.getByRole("button", { name: "Enable Session" }));
+      expect(await screen.findByText("Session enabled.")).toBeInTheDocument();
+      expect(patchBodies(4)).toEqual([{ isActive: true }]);
+    });
+
+    it("shows the server error when toggling a session fails", async () => {
+      vi.spyOn(console, "error").mockImplementation(() => undefined);
+      overrideFetch((url, init) =>
+        url === "/api/quiz-sessions/1" && init?.method === "PATCH"
+          ? jsonResponse({ error: "Toggle refused" }, 500)
+          : undefined
+      );
+      const user = userEvent.setup();
+
+      render(<QuizSessionsTab schoolId="school-1" canEdit />);
+
+      await openMenu(user, 1);
+      await user.click(screen.getByRole("button", { name: "Disable Session" }));
+      expect(await screen.findByText("Toggle refused")).toBeInTheDocument();
+    });
+
+    it("offers End Now only for live sessions and ends them", async () => {
+      sessions = [makeLiveSession(), ...makeSessions()];
+      const user = userEvent.setup();
+
+      render(<QuizSessionsTab schoolId="school-1" canEdit />);
+
+      await openMenu(user, 1);
+      expect(screen.queryByRole("button", { name: /End Now/ })).not.toBeInTheDocument();
+      await openMenu(user, 1); // toggles the menu closed again
+
+      await openMenu(user, 40);
+      await user.click(screen.getByRole("button", { name: /End Now/ }));
+      expect(await screen.findByText("Session ended now.")).toBeInTheDocument();
+      expect(patchBodies(40)).toEqual([{ action: "end_now" }]);
+    });
+
+    it("warns without logging when the session is no longer live", async () => {
+      const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      sessions = [makeLiveSession(), ...makeSessions()];
+      overrideFetch((url, init) =>
+        url === "/api/quiz-sessions/40" && init?.method === "PATCH"
+          ? jsonResponse({ error: "Only live sessions can be ended now" }, 409)
+          : undefined
+      );
+      const user = userEvent.setup();
+
+      render(<QuizSessionsTab schoolId="school-1" canEdit />);
+
+      await openMenu(user, 40);
+      await user.click(screen.getByRole("button", { name: /End Now/ }));
+      expect(await screen.findByText("Only live sessions can be ended now")).toBeInTheDocument();
+      expect(consoleError).not.toHaveBeenCalled();
+    });
+
+    it("regenerates a session and surfaces the server message", async () => {
+      overrideFetch((url, init) =>
+        url === "/api/quiz-sessions/1/regenerate" && init?.method === "POST"
+          ? jsonResponse({ message: "Regeneration queued." })
+          : undefined
+      );
+      const user = userEvent.setup();
+
+      render(<QuizSessionsTab schoolId="school-1" canEdit />);
+
+      await openMenu(user, 1);
+      await user.click(screen.getByRole("button", { name: "Regenerate" }));
+      expect(await screen.findByText("Regeneration queued.")).toBeInTheDocument();
+    });
+
+    it("surfaces the server's reason when regeneration is refused", async () => {
+      vi.spyOn(console, "error").mockImplementation(() => undefined);
+      overrideFetch((url, init) =>
+        url === "/api/quiz-sessions/1/regenerate" && init?.method === "POST"
+          ? jsonResponse({ error: "Test structure no longer matches" }, 409)
+          : undefined
+      );
+      const user = userEvent.setup();
+
+      render(<QuizSessionsTab schoolId="school-1" canEdit />);
+
+      await openMenu(user, 1);
+      await user.click(screen.getByRole("button", { name: "Regenerate" }));
+      expect(await screen.findByText("Test structure no longer matches")).toBeInTheDocument();
+    });
+
+    it("asks before regenerating a CMS session and stops when declined", async () => {
+      sessions = [
+        { ...makeSessions()[0], meta_data: { ...makeSessions()[0].meta_data, cms_source: "nex-gen-cms" } },
+      ];
+      const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+      const user = userEvent.setup();
+
+      render(<QuizSessionsTab schoolId="school-1" canEdit />);
+
+      await openMenu(user, 1);
+      await user.click(screen.getByRole("button", { name: "Regenerate" }));
+      expect(confirm).toHaveBeenCalledTimes(1);
+      expect(getFetchCalls(mockFetch, "/api/quiz-sessions/1/regenerate")).toHaveLength(0);
+    });
+  });
+
+  it("pages through sessions with Next and Previous", async () => {
+    const base = mockFetch.getMockImplementation()!;
+    mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith("/api/quiz-sessions?")) {
+        const pageIndex = new URL(url, "http://localhost").searchParams.get("page");
+        return jsonResponse({ sessions: pageIndex === "0" ? makeSessions() : [], hasMore: pageIndex === "0" });
+      }
+      return base(input, init);
+    });
+    const user = userEvent.setup();
+
+    render(<QuizSessionsTab schoolId="school-1" canEdit />);
+
+    expect(await screen.findByText("Existing Quiz")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Previous" })).toBeDisabled();
+
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    expect(await screen.findByText("No quiz sessions found.")).toBeInTheDocument();
+    expect(screen.getByText("Page 2")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Next" })).toBeDisabled();
+
+    await user.click(screen.getByRole("button", { name: "Previous" }));
+    expect(await screen.findByText("Existing Quiz")).toBeInTheDocument();
+    expect(screen.getByText("Page 1")).toBeInTheDocument();
   });
 
   it("does not expose the removed sync endpoint from the UI", async () => {
