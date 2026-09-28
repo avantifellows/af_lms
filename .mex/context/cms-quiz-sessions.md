@@ -21,7 +21,7 @@ edges:
     condition: when tracing the request flow across af_lms / quiz-backend / db-service
   - target: patterns/db-service-write.md
     condition: when adding a session or occurrence write
-last_updated: 2026-07-28
+last_updated: 2026-09-25
 ---
 
 # CMS-sourced quiz sessions
@@ -129,3 +129,23 @@ falls back to defaults. `QUIZ_BACKEND_URL` must be set (Amplify staging + prod).
   a mid-loop infra failure leaves refreshed questions with a stale embedded grading subset.
 - **Non-atomic edit** — session row / occurrence / quiz doc are three stores. Every write is an
   idempotent `$set`/PATCH, so a retry converges.
+
+## Question / answer PDFs
+
+CMS tests have no stored PDF URLs. Both the create-form test picker and session details link to
+`/api/cms/test-pdf?testId=…&type=questions|answers`, which fetches the CMS service PDF and
+redirects to a short-lived presigned S3 copy. Build hrefs with `cmsTestPdfHrefs` in
+`QuizSessionsTab.tsx`. The CMS caches rendered PDFs (nex-gen-cms#202), so repeat opens skip headless Chrome.
+
+## Duplicate-session nudge
+
+Sessions are batch-level, so the nudge is too. Selecting a paper in the create form looks up
+earlier sessions of it in the school (`GET /api/quiz-sessions?cmsTestId=` for CMS, `?resourceId=`
+for legacy templates) and keeps only those sharing a selected class batch. If any remain,
+"When And How" and Create fold behind "Create a new session anyway". Disabled sessions are not
+listed. **Extend** edits only the end time inline (`PATCH` with `endTime` alone; start, the
+occurrence and the quiz doc follow the normal edit path), then closes the form and highlights the
+session in that batch's list. The session list sorts by `end_time DESC` (not `updated_at`, which
+result sync bumps long after a session ends), so an extended session rises to the top. The **Live only** toggle (`?status=live`) keeps enabled sessions and compares
+against `now() AT TIME ZONE 'Asia/Kolkata'` because session times are IST wall-clock. The lookup fails open, so creation is
+never blocked by it.

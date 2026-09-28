@@ -1726,7 +1726,10 @@ describe("SchoolPage (server component)", () => {
 
     expect(screen.getByText("School assignment coverage for 2026-2027")).toBeInTheDocument();
     expect(screen.getByText("Asha Rao")).toBeInTheDocument();
-    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    // No assignment checkboxes; the Enrollment tab's flag filter is unrelated.
+    expect(
+      screen.queryByRole("checkbox", { name: /^(?!Needs intervention only)/ }),
+    ).not.toBeInTheDocument();
     expect(mockListHolisticAssignmentRoster).toHaveBeenCalledWith({
       permission,
       schoolId: 20,
