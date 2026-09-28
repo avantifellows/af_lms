@@ -68,7 +68,7 @@ Product-usage log written directly by af_lms through `recordUsageEvent` (`src/li
 `sign_in` (next-auth `events.signIn`), `combined_report_requested` (combined-reports POST) and
 `tab_viewed` (`SchoolTabs` pings `/api/usage/tab-view`; a unique index keeps one row per person,
 tab, school/centre and IST day). Writes never throw. db-service owns the migration; the warehouse
-copy is `fact_lms_usage_events` (etl-next dbt). Add an event by extending the table's
+copy is `analytics.fact_lms_user_events` (etl-next dbt, outside production_dbt_*). Add an event by extending the table's
 `event_constraint` first.
 
 ## Decision table
