@@ -1,5 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
 import { authOptions, DEV_LOGIN_PERSONAS } from "./auth";
+import { recordUsageEvent } from "./usage-events";
+
+vi.mock("./usage-events", () => ({ recordUsageEvent: vi.fn() }));
 
 // Extract providers by id
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -171,5 +174,26 @@ describe("Dev login provider", () => {
   it("returns null for undefined credentials", async () => {
     const result = await devAuthorize(undefined);
     expect(result).toBeNull();
+  });
+});
+
+describe("signIn event", () => {
+  const signIn = authOptions.events!.signIn!;
+
+  it("logs Google sign-ins with the provider", async () => {
+    await signIn({ user: { id: "1", email: "pm@avantifellows.org" }, account: { provider: "google" } } as never);
+    expect(vi.mocked(recordUsageEvent)).toHaveBeenCalledWith(
+      expect.objectContaining({ event: "sign_in", email: "pm@avantifellows.org", detail: "google", role: null })
+    );
+  });
+
+  it("logs passcode sign-ins against their school", async () => {
+    await signIn({
+      user: { id: "passcode-59525", email: "passcode-59525@school.local", schoolCode: "59525" },
+      account: { provider: "passcode" },
+    } as never);
+    expect(vi.mocked(recordUsageEvent)).toHaveBeenCalledWith(
+      expect.objectContaining({ role: "passcode", schoolCode: "59525", detail: "passcode" })
+    );
   });
 });

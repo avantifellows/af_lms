@@ -31,6 +31,29 @@ describe("SchoolTabs", () => {
     { id: "info", label: "Info", content: <div>Info Content</div> },
   ];
 
+  it("logs each tab's first view once when usage is set", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    render(<SchoolTabs tabs={tabs} usage={{ schoolCode: "59525" }} />);
+    await user.click(screen.getByRole("tab", { name: "Visits" }));
+    await user.click(screen.getByRole("tab", { name: "Students" }));
+
+    const tabsLogged = fetchMock.mock.calls.map(([, init]) => JSON.parse(init.body).tab);
+    expect(tabsLogged).toEqual(["students", "visits"]);
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/usage/tab-view");
+    vi.unstubAllGlobals();
+  });
+
+  it("does not log without usage", () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    render(<SchoolTabs tabs={tabs} />);
+    expect(fetchMock).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
   it("renders all tab labels", () => {
     render(<SchoolTabs tabs={tabs} />);
     expect(screen.getByText("Students")).toBeInTheDocument();

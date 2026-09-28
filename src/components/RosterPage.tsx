@@ -522,6 +522,7 @@ function RosterShell({
   userEmail,
   actions,
   tabs,
+  usage,
 }: {
   title: string;
   subtitle: string;
@@ -529,6 +530,7 @@ function RosterShell({
   userEmail?: string;
   actions?: ReactNode;
   tabs: Array<{ id: string; label: string; content: ReactNode }>;
+  usage?: { schoolCode: string; centreId?: number };
 }) {
   return (
     <div className="min-h-screen bg-bg">
@@ -543,7 +545,7 @@ function RosterShell({
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
         {/* defaultTab follows the first VISIBLE tab: the holistic-admin view has
             no Enrollment tab, so a hardcoded "enrollment" would select nothing. */}
-        <SchoolTabs tabs={tabs} defaultTab={tabs[0]?.id} />
+        <SchoolTabs tabs={tabs} defaultTab={tabs[0]?.id} usage={usage} />
       </main>
     </div>
   );
@@ -1048,6 +1050,7 @@ export default async function RosterPage({
       backHref={backHref}
       userEmail={isPasscodeUser ? `School ${passcodeSchoolCode}` : session.user?.email || undefined}
       tabs={tabs}
+      usage={{ schoolCode: school.code, centreId: isCentre ? Number(scope.centre.id) : undefined }}
       actions={
         visitsAccess.canEdit ? (
           <Link
