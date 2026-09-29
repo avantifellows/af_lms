@@ -167,10 +167,23 @@ function buildUserBody(values: UserFormValues, user: UserPermission | null) {
   return body;
 }
 
+const PMU_GOVT_EXTRA_SCHOOLS_ERROR = "A PMU Govt School User must have exactly one School — remove the others";
+const PMU_GOVT_NO_SCHOOL_ERROR = "A PMU Govt School User must have exactly one School — pick one";
+
+// Never trim a PMU Govt School User's Schools for the Admin: Save is blocked until exactly one remains.
+function pmuGovtSchoolError(values: Pick<UserFormValues, "role" | "selectedSchools">) {
+  if (values.role !== PMU_GOVT_ROLE) return null;
+  if (values.selectedSchools.length > 1) return PMU_GOVT_EXTRA_SCHOOLS_ERROR;
+  if (values.selectedSchools.length === 0) return PMU_GOVT_NO_SCHOOL_ERROR;
+  return null;
+}
+
 async function saveUser(values: UserFormValues, user: UserPermission | null) {
   if (!hasGlobalSchoolAccess(values.role) && !isPmuRole(values.role) && values.selectedPrograms.length === 0) {
     throw new Error("At least one program must be selected");
   }
+  const schoolError = pmuGovtSchoolError(values);
+  if (schoolError) throw new Error(schoolError);
   const response = await fetch(user ? `/api/admin/users/${user.id}` : "/api/admin/users", {
     method: user ? "PATCH" : "POST",
     headers: { "Content-Type": "application/json" },
@@ -250,11 +263,6 @@ export default function AddUserModal({ user, regions, schoolCodeToName, onClose,
     setSelectedRegions((current) => toggledSelection(current, region));
   };
 
-  const changeRole = (nextRole: string) => {
-    setRole(nextRole);
-    if (nextRole === PMU_GOVT_ROLE) setSelectedSchools((current) => current.slice(0, 1));
-  };
-
   const addSchool = (code: string) => {
     if (role === PMU_GOVT_ROLE) {
       setSelectedSchools([code]);
@@ -281,7 +289,7 @@ export default function AddUserModal({ user, regions, schoolCodeToName, onClose,
           onEmailChange={setEmail}
           onFullNameChange={setFullName}
         />
-        <RoleField role={role} onChange={changeRole} />
+        <RoleField role={role} onChange={setRole} />
         <AccessFields
           role={role}
           level={level}
@@ -427,6 +435,9 @@ function PmuGovtAccessFields(props: Omit<AccessFieldsProps, "role">) {
       onAdd={props.onAddSchool}
       onRemove={props.onRemoveSchool}
     />
+    {props.selectedSchools.length > 1 && <p className="mt-2 text-xs text-red-600">
+      {PMU_GOVT_EXTRA_SCHOOLS_ERROR}.
+    </p>}
   </>;
 }
 

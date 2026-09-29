@@ -957,24 +957,91 @@ describe("AddUserModal — PMU roles", () => {
     });
   });
 
-  it("keeps a single School when a multi-school user becomes a PMU Govt School User", async () => {
+  const multiSchoolPm = { ...editUser, level: 1, school_codes: ["SC001", "SC002"], regions: null };
+  const extraSchoolsError = "A PMU Govt School User must have exactly one School — remove the others";
+
+  it("keeps every School and blocks Save when a multi-School user becomes a PMU Govt School User", async () => {
     const user = userEvent.setup();
     mockFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve({}) });
-    renderModal({ user: { ...editUser, level: 1, school_codes: ["SC001", "SC002"], regions: null } });
+    const { props } = renderModal({ user: multiSchoolPm });
 
     await user.selectOptions(screen.getAllByRole("combobox")[0], "pmu_govt_school_user");
-    expect(screen.getAllByRole("button", { name: /^Remove / })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: /^Remove / })).toHaveLength(2);
+    expect(screen.getByText(`${extraSchoolsError}.`)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Save Changes" }));
+
+    expect(await screen.findByText(extraSchoolsError)).toBeInTheDocument();
+    expect(submittedBody()).toBeUndefined();
+    expect(props.onSave).not.toHaveBeenCalled();
+  });
+
+  it("saves one School and [64] once the Admin removes the other Schools", async () => {
+    const user = userEvent.setup();
+    mockFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve({}) });
+    const { props } = renderModal({ user: multiSchoolPm });
+
+    await user.selectOptions(screen.getAllByRole("combobox")[0], "pmu_govt_school_user");
+    await user.click(screen.getByRole("button", { name: "Remove JNV Alpha (SC001)" }));
+    expect(screen.queryByText(`${extraSchoolsError}.`)).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Save Changes" }));
 
     await waitFor(() => expect(submittedBody()).toBeDefined());
+    expect(mockFetch.mock.calls.find(([url]) => url === "/api/admin/users/42")?.[1].method).toBe("PATCH");
     expect(submittedBody()).toMatchObject({
       level: 1,
       role: "pmu_govt_school_user",
       program_ids: [64],
-      school_codes: ["SC001"],
+      school_codes: ["SC002"],
       regions: null,
     });
+    expect(props.onSave).toHaveBeenCalled();
+  });
+
+  it("restores the original School list when the role is switched back", async () => {
+    const user = userEvent.setup();
+    mockFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve({}) });
+    renderModal({ user: multiSchoolPm });
+    const roleSelect = screen.getAllByRole("combobox")[0];
+
+    await user.selectOptions(roleSelect, "pmu_govt_school_user");
+    await user.selectOptions(roleSelect, "program_manager");
+    expect(screen.getAllByRole("button", { name: /^Remove / })).toHaveLength(2);
+    expect(screen.queryByText(`${extraSchoolsError}.`)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Save Changes" }));
+
+    await waitFor(() => expect(submittedBody()).toBeDefined());
+    expect(submittedBody()).toMatchObject({ role: "program_manager", school_codes: ["SC001", "SC002"] });
+  });
+
+  it("blocks Save for a PMU Govt School User with no School", async () => {
+    const user = userEvent.setup();
+    renderModal();
+    await user.type(document.querySelector('input[type="email"]') as HTMLInputElement, "principal@example.com");
+    await user.selectOptions(screen.getAllByRole("combobox")[0], "pmu_govt_school_user");
+
+    await user.click(screen.getByRole("button", { name: "Add User" }));
+
+    expect(
+      await screen.findByText("A PMU Govt School User must have exactly one School — pick one")
+    ).toBeInTheDocument();
+    expect(submittedBody()).toBeUndefined();
+  });
+
+  it("still shows the server's 400 error for a PMU Govt School User", async () => {
+    const user = userEvent.setup();
+    mockFetch.mockResolvedValue({
+      ok: false,
+      json: () => Promise.resolve({ error: "PMU Govt School User needs exactly one JNV School" }),
+    });
+    renderModal({ user: { ...multiSchoolPm, school_codes: ["SC001"] } });
+
+    await user.selectOptions(screen.getAllByRole("combobox")[0], "pmu_govt_school_user");
+    await user.click(screen.getByRole("button", { name: "Save Changes" }));
+
+    expect(await screen.findByText("PMU Govt School User needs exactly one JNV School")).toBeInTheDocument();
   });
 
   it("searches only the JNV School list for PMU roles", async () => {
