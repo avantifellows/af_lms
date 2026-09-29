@@ -5,22 +5,33 @@ import {
   ADMIN_SESSION,
   NO_SESSION,
   PASSCODE_SESSION,
+  PMU_GOVT_SESSION,
+  PMU_MANAGER_SESSION,
 } from "@/app/api/__test-utils__/api-test-helpers";
 
 vi.mock("next-auth");
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("@/lib/db");
 vi.mock("@/lib/db-service-documents");
-vi.mock("@/lib/permissions", () => ({
-  getUserPermission: vi.fn(),
-  canAccessSchoolSync: vi.fn(() => true),
-  getFeatureAccess: vi.fn(() => ({ access: "edit", canView: true, canEdit: true })),
-}));
+vi.mock("@/lib/permissions", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/permissions")>();
+  return {
+    getResolvedPermission: vi.fn(),
+    canAccessSchoolSync: vi.fn(() => true),
+    getFeatureAccess: vi.fn(() => ({ access: "edit", canView: true, canEdit: true })),
+    // The real shared fragment, so the assertions see the SQL PMU consent runs.
+    hasCurrentNvsBatchSql: actual.hasCurrentNvsBatchSql,
+  };
+});
 
 import { getServerSession } from "next-auth";
 import { query } from "@/lib/db";
 import { listDocuments } from "@/lib/db-service-documents";
-import { canAccessSchoolSync, getFeatureAccess } from "@/lib/permissions";
+import {
+  canAccessSchoolSync,
+  getFeatureAccess,
+  getResolvedPermission,
+} from "@/lib/permissions";
 
 import { GET } from "./route";
 
@@ -29,6 +40,27 @@ const mockQuery = vi.mocked(query);
 const mockListDocs = vi.mocked(listDocuments);
 const mockCanAccess = vi.mocked(canAccessSchoolSync);
 const mockFeature = vi.mocked(getFeatureAccess);
+const mockGetPermission = vi.mocked(getResolvedPermission);
+
+const PMU_MANAGER_PERMISSION = {
+  email: PMU_MANAGER_SESSION.user.email,
+  level: 3,
+  role: "pmu_manager",
+  regions: null,
+  school_codes: null,
+  program_ids: [64],
+  read_only: false,
+};
+
+const PMU_GOVT_PERMISSION = {
+  email: PMU_GOVT_SESSION.user.email,
+  level: 2,
+  role: "pmu_govt_school_user",
+  regions: ["north"],
+  school_codes: null,
+  program_ids: [64],
+  read_only: false,
+};
 
 function req(grade?: string): NextRequest {
   const url = new URL("http://localhost/api/schools/SCH1/consent-status");
@@ -153,5 +185,71 @@ describe("GET /api/schools/[code]/consent-status", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.consent["1"]).toEqual([]);
+  });
+
+  it("resolves permission (with seat scope) for the school decision", async () => {
+    mockSession.mockResolvedValueOnce(PMU_GOVT_SESSION);
+    mockGetPermission.mockResolvedValueOnce(PMU_GOVT_PERMISSION as never);
+    mockQuery
+      .mockResolvedValueOnce(SCHOOL_ROW as never)
+      .mockResolvedValueOnce([] as never);
+
+    const res = await GET(req(), params);
+    expect(res.status).toBe(200);
+    expect(mockGetPermission).toHaveBeenCalledWith(PMU_GOVT_SESSION.user.email);
+    expect(mockCanAccess).toHaveBeenCalledWith(PMU_GOVT_PERMISSION, "SCH1", "north");
+  });
+
+  it("403 when a region-scoped PMU user targets a School outside their region", async () => {
+    mockSession.mockResolvedValueOnce(PMU_GOVT_SESSION);
+    mockGetPermission.mockResolvedValueOnce(PMU_GOVT_PERMISSION as never);
+    mockQuery.mockResolvedValueOnce(SCHOOL_ROW as never);
+    mockCanAccess.mockReturnValue(false);
+
+    const res = await GET(req(), params);
+    expect(res.status).toBe(403);
+    expect(mockQuery).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["level-3 PMU Manager", PMU_MANAGER_SESSION, PMU_MANAGER_PERMISSION],
+    ["region-scoped PMU Govt School User", PMU_GOVT_SESSION, PMU_GOVT_PERMISSION],
+  ])("counts only Students with a current NVS batch for a %s", async (_label, session, permission) => {
+    mockSession.mockResolvedValueOnce(session);
+    mockGetPermission.mockResolvedValueOnce(permission as never);
+    mockQuery
+      .mockResolvedValueOnce(SCHOOL_ROW as never)
+      .mockResolvedValueOnce([{ student_pk_id: "5" }] as never);
+    mockListDocs.mockResolvedValueOnce([doc("parent_undertaking")] as never);
+
+    const res = await GET(req(), params);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ consent: { "5": ["parent_undertaking"] } });
+
+    const [sql, sqlParams] = mockQuery.mock.calls[1] as [string, unknown[]];
+    expect(sql).toMatch(/AND EXISTS \(\s*SELECT 1\s*FROM enrollment_record er_nvs/);
+    expect(sql).toContain("er_nvs.user_id = u.id");
+    expect(sql).toContain("er_nvs.is_current = true");
+    expect(sql).toContain("b_nvs.program_id = 64");
+    expect(sqlParams).toEqual(["10", expect.any(String), [11, 12]]);
+  });
+
+  it("does not add the NVS predicate for non-PMU roles", async () => {
+    mockSession.mockResolvedValueOnce(ADMIN_SESSION);
+    mockGetPermission.mockResolvedValueOnce({
+      email: ADMIN_SESSION.user.email,
+      level: 3,
+      role: "admin",
+      regions: null,
+      school_codes: null,
+      program_ids: [1, 2, 64],
+      read_only: false,
+    } as never);
+    mockQuery
+      .mockResolvedValueOnce(SCHOOL_ROW as never)
+      .mockResolvedValueOnce([] as never);
+
+    await GET(req(), params);
+    expect(mockQuery.mock.calls[1][0]).not.toContain("er_nvs");
   });
 });
