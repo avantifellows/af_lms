@@ -195,6 +195,80 @@ describe("EnrollmentTabContent", () => {
     expect(screen.getByText("Showing 1 of 2 students")).toBeInTheDocument();
   });
 
+  it("offers a No stream option and groups streams ignoring case and whitespace", async () => {
+    const user = userEvent.setup();
+    render(
+      <EnrollmentTabContent
+        {...baseProps}
+        activeStudents={[
+          { grade: 11, stream: "Engineering", student_program_ids: [64] },
+          { grade: 11, stream: " engineering ", student_program_ids: [64] },
+          { grade: 12, stream: "ENGINEERING", student_program_ids: [64] },
+          { grade: 12, stream: "medical", student_program_ids: [64] },
+          { grade: 11, stream: null, student_program_ids: [64] },
+          { grade: 11, stream: "", student_program_ids: [64] },
+          { grade: 12, stream: "   ", student_program_ids: [64] },
+        ] as never}
+      />,
+    );
+
+    const streamFilter = screen.getByLabelText("Filter by Stream:");
+    expect(
+      [...streamFilter.querySelectorAll("option")].map((option) => [option.value, option.textContent]),
+    ).toEqual([
+      ["all", "All Streams (7)"],
+      ["engineering", "Engineering (3)"],
+      ["medical", "medical (1)"],
+      ["__none__", "No stream (3)"],
+    ]);
+    expect(screen.getByTestId("enrollment-stats-total")).toHaveTextContent("7");
+
+    await user.selectOptions(streamFilter, "__none__");
+    expect(screen.getByTestId("student-table")).toHaveAttribute("data-stream", "__none__");
+    expect(screen.getByText("Showing 3 of 7 students")).toBeInTheDocument();
+    expect(screen.getByTestId("enrollment-stats-total")).toHaveTextContent("3");
+
+    await user.selectOptions(streamFilter, "engineering");
+    expect(screen.getByText("Showing 3 of 7 students")).toBeInTheDocument();
+    expect(screen.getByTestId("enrollment-stats-total")).toHaveTextContent("3");
+
+    await user.selectOptions(screen.getByLabelText("Filter by Grade:"), "11");
+    expect(screen.getByText("Showing 2 of 7 students")).toBeInTheDocument();
+    expect(screen.getByTestId("enrollment-stats-total")).toHaveTextContent("2");
+  });
+
+  it("hides the No stream option when every student has a stream", () => {
+    render(
+      <EnrollmentTabContent
+        {...baseProps}
+        activeStudents={[{ grade: 11, stream: "medical", student_program_ids: [64] }] as never}
+      />,
+    );
+
+    expect(screen.queryByRole("option", { name: /No stream/ })).not.toBeInTheDocument();
+  });
+
+  it("carries the No stream sentinel into the Download List URL", async () => {
+    const assign = vi.fn();
+    vi.stubGlobal("location", { ...window.location, assign });
+    const user = userEvent.setup();
+    render(
+      <EnrollmentTabContent
+        {...baseProps}
+        activeStudents={[
+          { grade: 11, stream: " ", student_program_ids: [64] },
+          { grade: 11, stream: "medical", student_program_ids: [64] },
+        ] as never}
+      />,
+    );
+
+    await user.selectOptions(screen.getByLabelText("Filter by Stream:"), "__none__");
+    await user.click(screen.getByRole("button", { name: "Download List" }));
+
+    expect(assign).toHaveBeenCalledWith("/api/school/12345678901/students/export?stream=__none__");
+    vi.unstubAllGlobals();
+  });
+
   it("counts flagged students within the grade and stream filters", async () => {
     const student = (id: string, stream: string) =>
       ({

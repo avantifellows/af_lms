@@ -253,6 +253,32 @@ describe("StudentTable - grade filter", () => {
   });
 });
 
+describe("StudentTable - stream filter", () => {
+  const students = [
+    makeStudent({ group_user_id: "g1", first_name: "Proper", stream: "Engineering" }),
+    makeStudent({ group_user_id: "g2", first_name: "Padded", stream: " engineering " }),
+    makeStudent({ group_user_id: "g3", first_name: "Shouty", stream: "ENGINEERING" }),
+    makeStudent({ group_user_id: "g4", first_name: "Medic", stream: "medical" }),
+    makeStudent({ group_user_id: "g5", first_name: "Nullish", stream: null }),
+    makeStudent({ group_user_id: "g6", first_name: "Empty", stream: "" }),
+    makeStudent({ group_user_id: "g7", first_name: "Blank", stream: "   " }),
+  ];
+  const shown = () =>
+    ["Proper", "Padded", "Shouty", "Medic", "Nullish", "Empty", "Blank"].filter((name) =>
+      screen.queryByText(`${name} Sharma`),
+    );
+
+  it("lists exactly the students with no stream when No stream is selected", () => {
+    render(<StudentTable students={students} grades={defaultGrades} selectedStream="__none__" />);
+    expect(shown()).toEqual(["Nullish", "Empty", "Blank"]);
+  });
+
+  it("matches a stream ignoring case and surrounding whitespace", () => {
+    render(<StudentTable students={students} grades={defaultGrades} selectedStream="engineering" />);
+    expect(shown()).toEqual(["Proper", "Padded", "Shouty"]);
+  });
+});
+
 // ─── 3. Tabs shown when dropout students exist ──────────────────────────────
 
 describe("StudentTable - tabs", () => {

@@ -7,6 +7,7 @@ import { PROGRAM_IDS } from "@/lib/constants";
 import { query } from "@/lib/db";
 import { studentDroppedFromProgram, studentHasCurrentProgram } from "@/lib/enrollment-stats";
 import { getSchoolRoster } from "@/lib/school-students";
+import { formatExamPreparingFor, matchesStreamFilter } from "@/lib/stream-rules";
 import { requireStudentAdditionAccess } from "@/lib/student-addition-access";
 import type { Student } from "@/components/StudentTable";
 
@@ -44,11 +45,6 @@ function categoryAndCwsn(student: Student) {
   return { category, cwsn: pwd ? "Yes" : "No" };
 }
 
-function displayStream(value: string | null) {
-  const normalized = value?.trim().toLowerCase() ?? "";
-  return ({ engineering: "Engineering", medical: "Medical", ca: "CA", clat: "CLAT", nda: "NDA" } as Record<string, string>)[normalized] ?? value ?? "";
-}
-
 function valueOrBlank<T>(value: T | null | undefined): T | "" {
   return value ?? "";
 }
@@ -77,7 +73,7 @@ function rowValues(student: Student) {
     displayBoard(student.g10_board),
     valueOrBlank(student.g10_roll_no),
     valueOrBlank(student.board_stream),
-    displayStream(student.stream),
+    formatExamPreparingFor(student.stream),
     valueOrBlank(student.father_name),
     valueOrBlank(student.phone),
     valueOrBlank(student.annual_family_income),
@@ -124,14 +120,14 @@ export async function GET(
   if (grade != null && grade !== 11 && grade !== 12) {
     return NextResponse.json({ error: "Grade must be 11 or 12" }, { status: 400 });
   }
-  const stream = request.nextUrl.searchParams.get("stream")?.trim().toLowerCase() || null;
+  const stream = request.nextUrl.searchParams.get("stream")?.trim() || "all";
 
   const { students } = await getSchoolRoster(school.id);
   const active = students.filter((student) =>
     student.status !== "dropout" &&
     studentHasCurrentProgram(student, PROGRAM_IDS.NVS) &&
     (grade == null || student.grade === grade) &&
-    (stream == null || student.stream?.trim().toLowerCase() === stream),
+    matchesStreamFilter(student.stream, stream),
   );
   const dropout = students.filter((student) =>
     studentDroppedFromProgram(student, PROGRAM_IDS.NVS),

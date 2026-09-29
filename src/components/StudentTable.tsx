@@ -13,6 +13,7 @@ import {
 } from "@/components/ui";
 import { DocumentsList } from "@/components/documents/DocumentsList";
 import { PROGRAM_IDS, PROGRAM_ID_TO_LABEL } from "@/lib/constants";
+import { matchesStreamFilter } from "@/lib/stream-rules";
 import { getCategoryColor } from "@/lib/student-utils";
 
 export interface Student {
@@ -664,8 +665,7 @@ export default function StudentTable({
   const filteredStudents = currentStudents.filter(
     (student) =>
       (selectedGrade === "all" || student.grade === parseInt(selectedGrade)) &&
-      (selectedStream === "all" ||
-        student.stream?.toLowerCase() === selectedStream.toLowerCase()) &&
+      matchesStreamFilter(student.stream, selectedStream) &&
       (!flaggedOnly || activeTab !== "active" || hasOpenFlag(student)),
   );
 

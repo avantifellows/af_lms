@@ -109,6 +109,72 @@ describe("GET NVS student export", () => {
     expect(active.getRow(2).getCell(6).value).toBe("Yes");
   });
 
+  async function exportActive(search: string) {
+    const response = await GET(
+      new NextRequest(`http://localhost/api/school/123/students/export${search}`),
+      { params: Promise.resolve({ udise: "123" }) },
+    );
+    expect(response.status).toBe(200);
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(Buffer.from(await response.arrayBuffer()));
+    const active = workbook.getWorksheet("Active")!;
+    return Array.from({ length: active.rowCount - 1 }, (_, index) => {
+      const row = active.getRow(index + 2);
+      return [row.getCell(2).value, row.getCell(11).value ?? ""];
+    });
+  }
+
+  const streamRoster = () => ({
+    issues: [],
+    students: [
+      student({ group_user_id: "1", first_name: "Padded", stream: " engineering " }),
+      student({ group_user_id: "2", first_name: "Medic", stream: "medical" }),
+      student({ group_user_id: "3", first_name: "Nullish", stream: null }),
+      student({ group_user_id: "4", first_name: "Empty", stream: "" }),
+      student({ group_user_id: "5", first_name: "Blank", stream: "   " }),
+      student({ group_user_id: "6", first_name: "Law", stream: "clat" }),
+      student({ group_user_id: "7", first_name: "Other", stream: "Humanities" }),
+      student({
+        group_user_id: "8",
+        first_name: "Dropped",
+        stream: null,
+        status: "dropout",
+        student_program_ids: [],
+        dropout_program_ids: [64],
+      }),
+    ] as never,
+  });
+
+  it("exports exactly the active students with a blank stream for stream=__none__", async () => {
+    vi.mocked(getSchoolRoster).mockResolvedValue(streamRoster());
+
+    expect(await exportActive("?stream=__none__")).toEqual([
+      ["Nullish Kumar", ""],
+      ["Empty Kumar", ""],
+      ["Blank Kumar", "   "],
+    ]);
+  });
+
+  it("matches the stream filter ignoring case and surrounding whitespace", async () => {
+    vi.mocked(getSchoolRoster).mockResolvedValue(streamRoster());
+
+    expect(await exportActive("?stream=Engineering")).toEqual([["Padded Kumar", "Engineering"]]);
+  });
+
+  it("formats the Primary Exam preparing for column", async () => {
+    vi.mocked(getSchoolRoster).mockResolvedValue(streamRoster());
+
+    expect(await exportActive("")).toEqual([
+      ["Padded Kumar", "Engineering"],
+      ["Medic Kumar", "Medical"],
+      ["Nullish Kumar", ""],
+      ["Empty Kumar", ""],
+      ["Blank Kumar", "   "],
+      ["Law Kumar", "CLAT"],
+      ["Other Kumar", "Humanities"],
+    ]);
+  });
+
   it("exports Phone Registration Mode identity and leaves uncollected fields blank", async () => {
     vi.mocked(getSchoolRoster).mockResolvedValue({
       issues: [],

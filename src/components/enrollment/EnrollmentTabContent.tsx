@@ -16,6 +16,11 @@ import {
   studentHasCurrentProgram,
 } from "@/lib/enrollment-stats";
 import {
+  matchesStreamFilter,
+  NO_STREAM,
+  streamFilterOptions,
+} from "@/lib/stream-rules";
+import {
   buildAdmissionSummary,
   isAdmissionGrade,
   type ConsentByStudentId,
@@ -216,14 +221,10 @@ export default function EnrollmentTabContent({
       .sort((a, b) => a.grade - b.grade);
   }, [filteredActive]);
 
-  const streamOptions = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const student of filteredActive) {
-      const stream = student.stream?.trim();
-      if (stream) counts.set(stream, (counts.get(stream) ?? 0) + 1);
-    }
-    return [...counts.entries()].sort(([a], [b]) => a.localeCompare(b));
-  }, [filteredActive]);
+  const streamOptions = useMemo(
+    () => streamFilterOptions(filteredActive),
+    [filteredActive],
+  );
 
   // Recompute the program pills scoped to the selected grade so every number
   // (total, gender, category) corresponds to the applied program + grade.
@@ -231,8 +232,7 @@ export default function EnrollmentTabContent({
     const scopedActive = activeStudents.filter(
       (student) =>
         (selectedGrade === "all" || student.grade === Number(selectedGrade)) &&
-        (selectedStream === "all" ||
-          student.stream?.toLowerCase() === selectedStream.toLowerCase()),
+        matchesStreamFilter(student.stream, selectedStream),
     );
     return programs.map((p) => buildProgramStats(scopedActive, p.id));
   }, [programs, activeStudents, selectedGrade, selectedStream]);
@@ -245,8 +245,7 @@ export default function EnrollmentTabContent({
         (student) =>
           (selectedGrade === "all" ||
             student.grade === Number(selectedGrade)) &&
-          (selectedStream === "all" ||
-            student.stream?.toLowerCase() === selectedStream.toLowerCase()),
+          matchesStreamFilter(student.stream, selectedStream),
       ),
     [filteredActive, selectedGrade, selectedStream],
   );
@@ -359,11 +358,16 @@ export default function EnrollmentTabContent({
           className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/20"
         >
           <option value="all">All Streams ({filteredActive.length})</option>
-          {streamOptions.map(([stream, count]) => (
-            <option key={stream} value={stream}>
-              {stream} ({count})
+          {streamOptions.options.map(({ value, label, count }) => (
+            <option key={value} value={value}>
+              {label} ({count})
             </option>
           ))}
+          {streamOptions.noStreamCount > 0 && (
+            <option value={NO_STREAM}>
+              No stream ({streamOptions.noStreamCount})
+            </option>
+          )}
         </select>
         {canUseInterventionFlags && (
           <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
