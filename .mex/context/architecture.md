@@ -18,7 +18,7 @@ edges:
     condition: when a route or page needs to gate access
   - target: context/visits.md
     condition: when working on PM school visits or visit action types
-last_updated: 2026-09-23
+last_updated: 2026-09-29
 ---
 
 # Architecture
@@ -26,6 +26,8 @@ last_updated: 2026-09-23
 ## System Overview
 Next.js 16 App Router monolith. A request hits `src/proxy.ts` (middleware) first — it
 redirects unauthenticated users to `/` and logged-in users away from the login page.
+Retired passcode JWTs (`src/lib/retired-session.ts`) count as no token, and their
+session cookies are cleared.
 The request then lands on a Server Component page (`src/app/**/page.tsx`) or a route
 handler (`src/app/api/**/route.ts`).
 
@@ -66,7 +68,7 @@ retain `source=school`, so their original dashboard return does not change.
 - **`src/lib/db.ts`** — the `query<T>()` helper over a singleton `pg.Pool` (god node, ~137 edges). Reads and direct writes both go through it. `withTransaction()` for multi-statement writes.
 - **`src/lib/permissions.ts`** — the access-control core: `getUserPermission`/`getResolvedPermission`, `getFeatureAccess` (feature×role matrix), `canAccessSchool*`, `isAdmin`. See `context/permissions.md`.
 - **`src/lib/visits-policy.ts`** — visit-specific gate (`requireVisitsAccess`, `enforceVisit*`, `buildVisitScopePredicate`, `apiError`). See `context/visits.md`.
-- **`src/lib/auth.ts`** — NextAuth v4 config: Google OAuth + passcode CredentialsProvider (+ dev-login personas in non-prod).
+- **`src/lib/auth.ts`** — NextAuth v4 config: Google OAuth (+ dev-login personas in non-prod). The `jwt` callback throws on a retired passcode token, signing it out.
 - **`src/lib/centres.ts`** — admin-only Centre Management reads and direct writes, including current Grade 11/12 Centre Exam Track mappings. The API accepts only the shared fixed Exam Track codes; mapping unassignment is a hard delete. Legacy Centre Stream storage and configurable options are removed. Admins enter the reviewed initial mappings manually through Centre Management; there is no one-off importer or live Sheet sync.
 - **`src/lib/centre-resolver.ts`** — shared fail-closed School + Program resolver for exactly one active physical Centre. Curriculum options use that Centre's Grade-specific Exam Track mappings, annotate Tracks with curriculum-content availability, and reject new logs or standalone Chapter Completion writes outside the current mapping; scopes with retained logs remain available as read-only history. Curriculum Summary expresses the same cardinality rule in its bulk query: current mappings produce normal or unavailable rows, zero/multiple Centres produce per-combination configuration-error rows, and filter options use the complete mapped union for the selected Schools.
 - **Visit action-type registry** — 7 action types, each a `src/lib/<type>.ts` config/validator + a `src/components/visits/<Type>Form.tsx`, dispatched by `ActionDetailForm.tsx`. Registered in `ACTION_TYPES` (`src/lib/visit-actions.ts`).
@@ -79,7 +81,7 @@ retain `source=school`, so their original dashboard return does not change.
 - **DynamoDB** (`@aws-sdk/lib-dynamodb`) — read-only source for the performance dashboard deep-dive (`src/lib/dynamodb.ts`).
 - **S3** (`@aws-sdk/client-s3`) — student document uploads (`src/lib/s3.ts`), presigned URLs. Bucket shared with prod.
 - **SNS** (`@aws-sdk/client-sns`) — `src/lib/sns.ts` publishes session-creation messages.
-- **Google OAuth** — staff login via NextAuth; passcode auth for school users without Google.
+- **Google OAuth** — the only login, via NextAuth, open to any Google account; access comes only from a `user_permission` row. Passcode login was removed (ADR 0007).
 
 ## What Does NOT Exist Here
 - No ORM — raw parameterised SQL via `pg` only. No Prisma/Drizzle/Knex.
