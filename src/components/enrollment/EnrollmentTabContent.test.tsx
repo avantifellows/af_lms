@@ -196,7 +196,7 @@ describe("EnrollmentTabContent", () => {
     );
 
     await user.selectOptions(screen.getByLabelText("Filter by Grade:"), "11");
-    await user.selectOptions(screen.getByLabelText("Filter by Stream:"), "engineering");
+    await user.selectOptions(screen.getByLabelText("Filter by Exam Preparing For:"), "engineering");
 
     expect(screen.getByTestId("student-table")).toHaveAttribute("data-grade", "11");
     expect(screen.getByTestId("student-table")).toHaveAttribute("data-stream", "engineering");
@@ -220,13 +220,13 @@ describe("EnrollmentTabContent", () => {
       />,
     );
 
-    const streamFilter = screen.getByLabelText("Filter by Stream:");
+    const streamFilter = screen.getByLabelText("Filter by Exam Preparing For:");
     expect(
       [...streamFilter.querySelectorAll("option")].map((option) => [option.value, option.textContent]),
     ).toEqual([
       ["all", "All Streams (7)"],
       ["engineering", "Engineering (3)"],
-      ["medical", "medical (1)"],
+      ["medical", "Medical (1)"],
       ["__none__", "No stream (3)"],
     ]);
     expect(screen.getByTestId("enrollment-stats-total")).toHaveTextContent("7");
@@ -243,6 +243,53 @@ describe("EnrollmentTabContent", () => {
     await user.selectOptions(screen.getByLabelText("Filter by Grade:"), "11");
     expect(screen.getByText("Showing 2 of 7 students")).toBeInTheDocument();
     expect(screen.getByTestId("enrollment-stats-total")).toHaveTextContent("2");
+  });
+
+  it("labels the NVS stream filter Exam Preparing For with formatted options", () => {
+    render(
+      <EnrollmentTabContent
+        {...baseProps}
+        activeStudents={[
+          { grade: 11, stream: "engineering", student_program_ids: [64] },
+          { grade: 11, stream: " clat ", student_program_ids: [64] },
+          { grade: 12, stream: "nda", student_program_ids: [64] },
+          { grade: 12, stream: "Engineering", student_program_ids: [64] },
+          { grade: 12, stream: null, student_program_ids: [64] },
+        ] as never}
+      />,
+    );
+
+    expect(screen.queryByLabelText("Filter by Stream:")).not.toBeInTheDocument();
+    const filter = screen.getByLabelText("Filter by Exam Preparing For:");
+    expect([...filter.querySelectorAll("option")].map((option) => option.textContent)).toEqual([
+      "All Streams (5)",
+      "CLAT (1)",
+      "Engineering (2)",
+      "NDA (1)",
+      "No stream (1)",
+    ]);
+  });
+
+  it("keeps the Stream label and raw option labels for other programs", () => {
+    render(
+      <EnrollmentTabContent
+        {...baseProps}
+        programs={[program(PROGRAM_IDS.COE, "JNV CoE")]}
+        userProgramIds={[PROGRAM_IDS.COE]}
+        activeStudents={[
+          { grade: 11, stream: " clat ", program_id: PROGRAM_IDS.COE, student_program_ids: [PROGRAM_IDS.COE] },
+          { grade: 11, stream: "nda", program_id: PROGRAM_IDS.COE, student_program_ids: [PROGRAM_IDS.COE] },
+        ] as never}
+      />,
+    );
+
+    expect(screen.queryByLabelText("Filter by Exam Preparing For:")).not.toBeInTheDocument();
+    const filter = screen.getByLabelText("Filter by Stream:");
+    expect([...filter.querySelectorAll("option")].map((option) => option.textContent)).toEqual([
+      "All Streams (2)",
+      "clat (1)",
+      "nda (1)",
+    ]);
   });
 
   it("hides the No stream option when every student has a stream", () => {
@@ -270,7 +317,7 @@ describe("EnrollmentTabContent", () => {
       />,
     );
 
-    await user.selectOptions(screen.getByLabelText("Filter by Stream:"), "__none__");
+    await user.selectOptions(screen.getByLabelText("Filter by Exam Preparing For:"), "__none__");
     await user.click(screen.getByRole("button", { name: "Download List" }));
 
     expect(assign).toHaveBeenCalledWith("/api/school/12345678901/students/export?stream=__none__");

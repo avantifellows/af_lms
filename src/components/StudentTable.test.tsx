@@ -399,6 +399,72 @@ describe("StudentTable - tab switching", () => {
   });
 });
 
+describe("StudentTable - NVS Exam Preparing For", () => {
+  it("shows Exam Preparing For instead of Program and Stream on an NVS card", async () => {
+    const user = userEvent.setup();
+    const student = makeStudent({ stream: "engineering", program_name: "JNV NVS" });
+    render(
+      <StudentTable
+        students={[student]}
+        grades={defaultGrades}
+        selectedProgramId={PROGRAM_IDS.NVS}
+      />,
+    );
+
+    expect(screen.getByText("Exam Preparing For")).toBeInTheDocument();
+    expect(screen.getByText("Engineering")).toBeInTheDocument();
+    expect(screen.queryByText("Program")).not.toBeInTheDocument();
+    expect(screen.queryByText("JNV NVS")).not.toBeInTheDocument();
+
+    await user.click(screen.getByLabelText("Expand"));
+    expect(screen.queryByText("Stream")).not.toBeInTheDocument();
+    expect(screen.queryByText("engineering")).not.toBeInTheDocument();
+  });
+
+  it("shows an em-dash for a blank stream on an NVS card", () => {
+    const student = makeStudent({
+      student_id: "S1",
+      pen_number: "P1",
+      apaar_id: "A1",
+      phone: "9999999999",
+      gender: "Female",
+      category: "Gen",
+      date_of_birth: "2011-03-20",
+      stream: "  ",
+    });
+    render(
+      <StudentTable
+        students={[student]}
+        grades={defaultGrades}
+        selectedProgramId={PROGRAM_IDS.NVS}
+      />,
+    );
+
+    const label = screen.getByText("Exam Preparing For");
+    expect(label.nextElementSibling).toHaveTextContent(/^—$/);
+  });
+
+  it("keeps the Program key field and expanded Stream on a non-NVS card", async () => {
+    const user = userEvent.setup();
+    const student = makeStudent({ stream: "engineering", program_name: "CoE" });
+    render(
+      <StudentTable
+        students={[student]}
+        grades={defaultGrades}
+        selectedProgramId={PROGRAM_IDS.COE}
+      />,
+    );
+
+    expect(screen.getByText("Program")).toBeInTheDocument();
+    expect(screen.getByText("CoE")).toBeInTheDocument();
+    expect(screen.queryByText("Exam Preparing For")).not.toBeInTheDocument();
+
+    await user.click(screen.getByLabelText("Expand"));
+    expect(screen.getByText("Stream")).toBeInTheDocument();
+    expect(screen.getByText("engineering")).toBeInTheDocument();
+  });
+});
+
 // ─── 5. Expand / collapse card details ──────────────────────────────────────
 
 describe("StudentTable - expand/collapse", () => {
@@ -409,6 +475,7 @@ describe("StudentTable - expand/collapse", () => {
       category: "OBC",
       stream: "commerce",
       program_name: "Nodal",
+      program_id: PROGRAM_IDS.COE,
       email: "test@example.com",
     });
     render(<StudentTable students={[student]} grades={defaultGrades} />);
@@ -430,6 +497,7 @@ describe("StudentTable - expand/collapse", () => {
       category: "SC",
       stream: "arts",
       program_name: "CoE",
+      program_id: PROGRAM_IDS.COE,
       email: "expanded@test.com",
     });
     render(<StudentTable students={[student]} grades={defaultGrades} />);

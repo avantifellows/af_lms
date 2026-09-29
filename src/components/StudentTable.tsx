@@ -13,7 +13,7 @@ import {
 } from "@/components/ui";
 import { DocumentsList } from "@/components/documents/DocumentsList";
 import { PROGRAM_IDS, PROGRAM_ID_TO_LABEL } from "@/lib/constants";
-import { matchesStreamFilter } from "@/lib/stream-rules";
+import { formatExamPreparingFor, matchesStreamFilter } from "@/lib/stream-rules";
 import { getCategoryColor } from "@/lib/student-utils";
 
 export interface Student {
@@ -167,6 +167,8 @@ interface StudentCardProps {
    * to the inline DocumentsList so it refetches.
    */
   documentsRefreshNonce?: number;
+  /** JNV NVS card: shows "Exam Preparing For" in place of Program and Stream. */
+  isNvs?: boolean;
 }
 
 // Coerce a `string | null` PK into a safe positive integer; rejects NaN +
@@ -210,6 +212,7 @@ function StudentCard({
   hasOpenFlag = false,
   onOpenFlag,
   documentsRefreshNonce,
+  isNvs = false,
 }: StudentCardProps) {
   const [expanded, setExpanded] = useState(false);
   const isDropout = isDropoutView || student.status === "dropout";
@@ -270,7 +273,15 @@ function StudentCard({
               {student.category || "—"}
             </span>
           </KeyField>
-          <KeyField label="Program">{student.program_name || "—"}</KeyField>
+          {isNvs ? (
+            <KeyField label="Exam Preparing For">
+              {student.stream?.trim()
+                ? formatExamPreparingFor(student.stream)
+                : "—"}
+            </KeyField>
+          ) : (
+            <KeyField label="Program">{student.program_name || "—"}</KeyField>
+          )}
           <KeyField label="DOB">{formatDate(student.date_of_birth)}</KeyField>
         </div>
 
@@ -317,11 +328,13 @@ function StudentCard({
           {/* Phone / Gender / Category / Program now live in the always-visible
               card summary above, so the expanded view covers the rest. */}
           <DetailGroup title="Personal">
-            <DetailField
-              label="Stream"
-              value={student.stream}
-              className="capitalize"
-            />
+            {!isNvs && (
+              <DetailField
+                label="Stream"
+                value={student.stream}
+                className="capitalize"
+              />
+            )}
             <DetailField
               label="Email"
               value={student.email}
@@ -787,6 +800,7 @@ export default function StudentTable({
             <StudentCard
               key={student.group_user_id}
               student={student}
+              isNvs={effectiveProgramId === PROGRAM_IDS.NVS}
               canEditStudent={
                 activeTab === "active" &&
                 canEditStudentInSelectedProgram(student)

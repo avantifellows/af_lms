@@ -16,6 +16,7 @@ import {
   studentHasCurrentProgram,
 } from "@/lib/enrollment-stats";
 import {
+  formatExamPreparingFor,
   matchesStreamFilter,
   NO_STREAM,
   streamFilterOptions,
@@ -224,10 +225,16 @@ export default function EnrollmentTabContent({
       .sort((a, b) => a.grade - b.grade);
   }, [filteredActive]);
 
-  const streamOptions = useMemo(
-    () => streamFilterOptions(filteredActive),
-    [filteredActive],
-  );
+  // NVS speaks "Exam Preparing For": the same stream filter, formatted labels.
+  const isNvsSelected = selectedProgramId === PROGRAM_IDS.NVS;
+  const streamOptions = useMemo(() => {
+    const built = streamFilterOptions(filteredActive);
+    if (!isNvsSelected) return built;
+    const options = built.options
+      .map((option) => ({ ...option, label: formatExamPreparingFor(option.value) }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+    return { ...built, options };
+  }, [filteredActive, isNvsSelected]);
 
   // Recompute the program pills scoped to the selected grade so every number
   // (total, gender, category) corresponds to the applied program + grade.
@@ -352,7 +359,7 @@ export default function EnrollmentTabContent({
           htmlFor="streamFilter"
           className="text-sm font-medium text-gray-700"
         >
-          Filter by Stream:
+          {isNvsSelected ? "Filter by Exam Preparing For:" : "Filter by Stream:"}
         </label>
         <select
           id="streamFilter"
