@@ -42,10 +42,6 @@ _Avoid_: Centre Stream, Program, generic JEE
 A unique government-issued identifier for a school.
 _Avoid_: School ID, school code (internally `school.code` is a separate field)
 
-**Passcode**:
-An 8-digit code granting single-school access without Google OAuth. Format: `{schoolCode}XXX`.
-_Avoid_: PIN, access code
-
 ### Curriculum
 
 **LMS Curriculum Log**:
@@ -131,6 +127,14 @@ _Avoid_: Superuser, root
 **Program Admin**:
 Has scoped read access to visits and can start and manage their own Visits. Their own Visits have no required Action Types; Visits started by other users remain read-only.
 _Avoid_: Viewer, observer
+
+**PMU Manager**:
+A member of Avanti's internal PMU team who works with JNV NVS Students across one or more Schools. Determined by `role = "pmu_manager"`.
+_Avoid_: NVS PM, Program Manager (for NVS)
+
+**PMU Govt School User**:
+An external stakeholder of exactly one JNV NVS School, such as its principal, who signs in with their own Google account. Determined by `role = "pmu_govt_school_user"`.
+_Avoid_: Government School (as a role), school login, Passcode user
 
 **Permission Level**:
 Numeric access scope: Level 3 = all schools, Level 2 = region, Level 1 = specific school codes.
@@ -468,7 +472,7 @@ _Avoid_: Unmapped Student, Mapping not done, unassigned Mentee
 - **Post-Session Notes** store system-generated first-draft, first-submitted, and last-edited timestamps but no manually entered conversation date
 - V1 stores only the latest official Notes content plus content-free mutation audit events; it has no old-answer snapshots, content-revision browser, or per-read audit
 - Notes writes use first-successful-write concurrency; a stale tab preserves local text but must reload, and stale Submit cannot complete or overwrite newer content
-- Program Managers and Program Admins have scoped read-only Holistic Mentorship access for supported Programs inside their resolved School scope; passcode users have no Holistic Mentorship access
+- Program Managers and Program Admins have scoped read-only Holistic Mentorship access for supported Programs inside their resolved School scope
 - **Holistic Mentorship Admin** is a dedicated LMS role, not an additive capability combined with another LMS role or a Centre designation
 - An **Admin** automatically receives the same Holistic Mentorship feature access without becoming a **Holistic Mentorship Admin**
 - In v1, the **Holistic Mentorship Admin** role grants access only to Holistic Mentorship; access to other LMS features is deferred
@@ -518,7 +522,6 @@ _Avoid_: Unmapped Student, Mapping not done, unassigned Mentee
 - Admins and Program Admins see a Manage mappings link from the School page **Academic Mentorship Tab** to `/admin/academic-mentorship`; read-only Program Admins land there in view-only mode
 - The Manage mappings link preselects the current School and current academic year on `/admin/academic-mentorship` via query params
 - The School page **Academic Mentorship Tab** shows the current academic year only, with no academic year picker
-- Passcode users do not see the School page **Academic Mentorship Tab**; Academic Mentorship is for Google-login staff governed by Staff Management permissions
 - Program Managers do not get an admin page link for Academic Mentorship; they use only the School page **Academic Mentorship Tab** read-only view
 - Academic Mentorship APIs live under `/api/academic-mentorship/*`, with route handlers checking role, School scope, Program allowlist, and requested action
 - Academic Mentorship route handlers use a shared server-side access helper for role, School scope, Program allowlist, `read_only`, and requested action checks
@@ -599,7 +602,7 @@ _Avoid_: Unmapped Student, Mapping not done, unassigned Mentee
 
 ## Flagged ambiguities
 
-- "school code" vs "UDISE code": `school.code` is an internal short identifier; `school.udise_code` is the government-issued UDISE. Both identify a school but in different contexts. API routes use UDISE in URLs, passcodes derive from school code.
+- "school code" vs "UDISE code": `school.code` is an internal short identifier; `school.udise_code` is the government-issued UDISE. Both identify a school but in different contexts. API routes use UDISE in URLs.
 - "center/centre" in the imported CRUD export means **Centre**, not **School**.
 - Centre `name` alone is not an identity; `JNV Adilabad` appears as separate CoE and Nodal centres in the source export.
 - The imported source `program` column populated the legacy centre-level stream field; issue #252 supersedes it with grade-specific **Centre Exam Tracks** entered from the reviewed mapping Sheet.
