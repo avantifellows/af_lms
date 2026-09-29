@@ -246,7 +246,7 @@ _Avoid_: Unmapped Student, Mapping not done, unassigned Mentee
 - Portal authentication resolves a **Phone Registration Mode** Student inside the selected auth group before checking Student ID and Date of Birth
 - A **Phone Registration Mode** Student is identified from JNV NVS membership, `EnableStudents` membership, and equality between Student ID and normalized parent phone; the Student does not store a separate Registration Mode value
 - Two Students cannot share one phone-based Student ID inside `EnableStudents`; the second Student must use another parent or guardian phone
-- A scoped Admin, Program Manager, or Program Admin can correct the parent phone for a **Phone Registration Mode** Student; the contact phone and Student ID change together and the old and new values are audited
+- A scoped Admin, Program Manager, Program Admin, PMU Manager, or PMU Govt School User can correct the parent phone for a **Phone Registration Mode** Student; the contact phone and Student ID change together and the old and new values are audited
 - Until the generic DB Service student-update import is made auth-group-aware, phone correction for a **Phone Registration Mode** Student is supported only through LMS
 - Adding PEN, Grade 10 Roll Number, and Annual Family Income after HQ approval does not replace a **Phone Registration Mode** Student's phone-based Student ID
 - After HQ approval, a blank PEN or Grade 10 Roll Number can be filled once for an eligible NVS Student and then locks again; at least one of the two identifiers is required, while Annual Family Income remains optional and editable

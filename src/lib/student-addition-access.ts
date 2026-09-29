@@ -14,6 +14,8 @@ const ALLOWED_STUDENT_ADDITION_ROLES: ReadonlySet<UserRole> = new Set([
   "admin",
   "program_manager",
   "program_admin",
+  "pmu_manager",
+  "pmu_govt_school_user",
 ]);
 
 export interface StudentAdditionSchool {
@@ -300,11 +302,11 @@ export async function requireStudentProgramDropoutAccess(
   programId: number,
 ): Promise<StudentProgramDropoutAccessResult> {
   // Centre-program dropout follows the general students=edit gate (teachers
-  // included), NOT the stricter admin/PM/PA student-addition actor. Teachers
+  // included), NOT the stricter admin/PM/PA/PMU student-addition actor. Teachers
   // may drop a student from a centre program they manage — per-program
   // ownership is still enforced below via actorHasProgramAccess. NVS dropout is
   // unaffected: it routes through requireStudentAdditionStudentAccess, which
-  // keeps the admin/PM/PA-only requireStudentWriteActor.
+  // keeps the admin/PM/PA/PMU-only requireStudentWriteActor.
   const actor = await requireStudentEditActor(session);
   if (!actor.ok) return actor;
 

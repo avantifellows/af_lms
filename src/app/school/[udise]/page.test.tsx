@@ -978,6 +978,53 @@ describe("SchoolPage (server component)", () => {
     expect(props.canDropoutStudent).toBe(true);
   });
 
+  describe.each(["pmu_manager", "pmu_govt_school_user"] as const)(
+    "%s NVS dropout",
+    (role) => {
+      // Real matrix and program pinning, so read_only and the NVS-only
+      // context behave as in production.
+      async function setupPmu(readOnly: boolean) {
+        setupAdminDefaults();
+        const actual = await vi.importActual<typeof import("@/lib/permissions")>(
+          "@/lib/permissions",
+        );
+        mockGetUserPermission.mockResolvedValue(
+          makePermission({
+            role,
+            level: 1,
+            school_codes: ["70705"],
+            program_ids: [64],
+            read_only: readOnly,
+          }),
+        );
+        mockGetFeatureAccess.mockImplementation(actual.getFeatureAccess);
+        mockGetProgramContextSync.mockImplementation(actual.getProgramContextSync);
+      }
+
+      it("passes canDropoutStudent = true at an in-scope JNV School", async () => {
+        await setupPmu(false);
+
+        await renderPage();
+
+        const props = JSON.parse(
+          screen.getByTestId("student-table").dataset.props || "{}",
+        );
+        expect(props.canDropoutStudent).toBe(true);
+      });
+
+      it("passes canDropoutStudent = false when read_only is set", async () => {
+        await setupPmu(true);
+
+        await renderPage();
+
+        const props = JSON.parse(
+          screen.getByTestId("student-table").dataset.props || "{}",
+        );
+        expect(props.canDropoutStudent).toBe(false);
+      });
+    },
+  );
+
   it("passes correct defaultTab to SchoolTabs", async () => {
     setupAdminDefaults();
 

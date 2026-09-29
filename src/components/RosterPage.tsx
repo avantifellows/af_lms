@@ -869,9 +869,13 @@ export default async function RosterPage({
         canDropoutStudent={
           studentsAccess.canEdit &&
           !isPasscodeUser &&
-          ["admin", "program_manager", "program_admin"].includes(
-            permission?.role ?? "",
-          )
+          [
+            "admin",
+            "program_manager",
+            "program_admin",
+            "pmu_manager",
+            "pmu_govt_school_user",
+          ].includes(permission?.role ?? "")
         }
         dropoutProgramIds={[
           ...new Set([
