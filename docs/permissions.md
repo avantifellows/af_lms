@@ -82,12 +82,6 @@ Certain features are restricted to users who have CoE or Nodal program access. U
 - pm_dashboard
 - summary_stats
 
-### Passcode Users
-
-Passcode authentication grants single-school access. Passcode users get:
-- `students` → edit
-- Everything else → none
-
 ### The Matrix Lives in Code, Not the Database
 
 The matrix defines **what each role means** — it's application logic, not per-user data. Changes are reviewed in PRs and type-checked by TypeScript. Adding a new feature is one line in the matrix.
@@ -100,7 +94,6 @@ The function `ownsRecord(permission, programId)` checks whether a user can edit 
 
 Rules:
 - **Admins** own all records
-- **Passcode users** own all records at their school
 - **Unassigned records** (null `program_id`) are editable by anyone with feature-level edit access
 - **Everyone else** can only edit records whose `program_id` is in their `program_ids`
 

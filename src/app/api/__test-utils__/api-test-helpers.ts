@@ -46,13 +46,6 @@ export const PMU_GOVT_SESSION = {
   expires: "2099-01-01",
 };
 
-export const PASSCODE_SESSION = {
-  user: { email: "passcode_70705@avantifellows.org", name: "Passcode User" },
-  isPasscodeUser: true,
-  schoolCode: "70705",
-  expires: "2099-01-01",
-};
-
 export const NO_SESSION = null;
 
 /**

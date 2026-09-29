@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
-  getSchoolByPasscode,
   getFeatureAccess,
   ownsRecord,
   getProgramContextSync,
@@ -45,20 +44,6 @@ function makePermission(overrides: Partial<UserPermission> = {}): UserPermission
 
 beforeEach(() => {
   mockQuery.mockReset();
-});
-
-describe("getSchoolByPasscode", () => {
-  it("returns school code for a valid passcode", () => {
-    expect(getSchoolByPasscode("70705123")).toBe("70705");
-  });
-
-  it("returns null for an invalid passcode", () => {
-    expect(getSchoolByPasscode("00000000")).toBeNull();
-  });
-
-  it("returns null for empty string", () => {
-    expect(getSchoolByPasscode("")).toBeNull();
-  });
 });
 
 describe("getProgramContextSync", () => {
@@ -186,26 +171,6 @@ describe("getProgramContextSync", () => {
 });
 
 describe("getFeatureAccess", () => {
-  describe("passcode users", () => {
-    it("gives edit access to students", () => {
-      const result = getFeatureAccess(null, "students", { isPasscodeUser: true });
-      expect(result.access).toBe("edit");
-      expect(result.canView).toBe(true);
-      expect(result.canEdit).toBe(true);
-    });
-
-    it("gives no access to visits", () => {
-      const result = getFeatureAccess(null, "visits", { isPasscodeUser: true });
-      expect(result.access).toBe("none");
-      expect(result.canView).toBe(false);
-    });
-
-    it("gives no access to curriculum", () => {
-      const result = getFeatureAccess(null, "curriculum", { isPasscodeUser: true });
-      expect(result.access).toBe("none");
-    });
-  });
-
   describe("null permission", () => {
     it("returns none for any feature", () => {
       expect(getFeatureAccess(null, "students").access).toBe("none");
@@ -435,11 +400,7 @@ describe("getFeatureAccess", () => {
 });
 
 describe("ownsRecord", () => {
-  it("passcode users own all records", () => {
-    expect(ownsRecord(null, 64, { isPasscodeUser: true })).toBe(true);
-  });
-
-  it("returns false for null permission (non-passcode)", () => {
+  it("returns false for null permission", () => {
     expect(ownsRecord(null, 64)).toBe(false);
   });
 
@@ -1030,24 +991,6 @@ describe("canAccessStudent", () => {
     expect(result).toBe(false);
   });
 
-  it("passcode user can access student in their school", async () => {
-    mockQuery.mockResolvedValueOnce([{ code: "70705", region: null, program_id: null }]);
-    const result = await canAccessStudent(
-      { isPasscodeUser: true, schoolCode: "70705" },
-      42,
-    );
-    expect(result).toBe(true);
-  });
-
-  it("passcode user cannot access student in a different school", async () => {
-    mockQuery.mockResolvedValueOnce([{ code: "99999", region: null, program_id: null }]);
-    const result = await canAccessStudent(
-      { isPasscodeUser: true, schoolCode: "70705" },
-      42,
-    );
-    expect(result).toBe(false);
-  });
-
   it("Google user with level-3 admin gets access", async () => {
     // student-school lookup
     mockQuery.mockResolvedValueOnce([{ code: "12345", region: "West", program_id: 1 }]);
@@ -1139,16 +1082,6 @@ describe("canAccessStudent", () => {
       ]);
       const result = await canAccessStudent(
         { user: { email: "admin@af.org" } },
-        42,
-        { requireEdit: true },
-      );
-      expect(result).toBe(true);
-    });
-
-    it("passcode user bypasses program check (school match is sufficient)", async () => {
-      mockQuery.mockResolvedValueOnce([{ code: "70705", region: null, program_id: 64 }]);
-      const result = await canAccessStudent(
-        { isPasscodeUser: true, schoolCode: "70705" },
         42,
         { requireEdit: true },
       );

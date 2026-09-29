@@ -82,28 +82,15 @@ export interface FeatureAccessResult {
   canEdit: boolean;
 }
 
-interface FeatureAccessOptions {
-  isPasscodeUser?: boolean;
-}
-
 /**
  * Get the feature access level for a user.
- * Handles passcode users, NVS-only gating, and read_only downgrade.
+ * Handles NVS-only gating and read_only downgrade.
  */
 export function getFeatureAccess(
   permission: UserPermission | null,
   feature: Feature,
-  opts?: FeatureAccessOptions,
 ): FeatureAccessResult {
   const none: FeatureAccessResult = { access: "none", canView: false, canEdit: false };
-
-  // Passcode users: students → edit, everything else → none
-  if (opts?.isPasscodeUser) {
-    if (feature === "students") {
-      return { access: "edit", canView: true, canEdit: true };
-    }
-    return none;
-  }
 
   if (!permission) return none;
 
@@ -137,10 +124,7 @@ export function getFeatureAccess(
 export function ownsRecord(
   permission: UserPermission | null,
   programId: number | string | null,
-  opts?: { isPasscodeUser?: boolean },
 ): boolean {
-  // Passcode users own all records at their school
-  if (opts?.isPasscodeUser) return true;
   if (!permission) return false;
   // PMU roles own only JNV NVS records — not unassigned ones, and never by
   // their row's program_ids.
@@ -197,19 +181,6 @@ export interface ProgramPermissionContext {
   isNVSOnly: boolean;
   hasCoEOrNodal: boolean;
 }
-
-interface SchoolPasscode {
-  schoolCode: string;
-  passcode: string; // 8 digits
-}
-
-// School passcodes - 8 digit codes for schools without Google
-// Format: schoolCode -> passcode
-const SCHOOL_PASSCODES: SchoolPasscode[] = [
-  { schoolCode: "70705", passcode: "70705123" }, // JNV Bhavnagar
-  { schoolCode: "14042", passcode: "14042456" },
-  // Add more schools as needed
-];
 
 export async function getUserPermission(
   email: string
@@ -360,11 +331,6 @@ export async function getResolvedPermission(
   const permission = await getUserPermission(email);
   if (!permission) return null;
   return { ...permission, scope: await resolveScope(permission) };
-}
-
-export function getSchoolByPasscode(passcode: string): string | null {
-  const entry = SCHOOL_PASSCODES.find((s) => s.passcode === passcode);
-  return entry?.schoolCode || null;
 }
 
 export function canAccessSchoolSync(
@@ -577,9 +543,8 @@ async function studentHasCurrentNvsBatch(studentPkId: number | string): Promise<
   return rows[0]?.has_current_nvs_batch === true;
 }
 
-// Permission gate for routes scoped to a single student. Honors both Google
-// users (via canAccessSchool against their user_permission row) and passcode
-// users (via session.schoolCode match).
+// Permission gate for routes scoped to a single student, checked via
+// canAccessSchool against the user's user_permission row.
 //
 // Pass `requireEdit: true` for write paths (upload, delete) — this additionally
 // requires the user's role + read_only flag to grant `canEdit` on the
@@ -588,8 +553,6 @@ async function studentHasCurrentNvsBatch(studentPkId: number | string): Promise<
 export async function canAccessStudent(
   session: {
     user?: { email?: string | null } | null;
-    isPasscodeUser?: boolean;
-    schoolCode?: string;
   } | null,
   studentPkId: number | string,
   options?: { requireEdit?: boolean },
@@ -597,12 +560,6 @@ export async function canAccessStudent(
   if (!session) return false;
   const school = await getStudentSchool(studentPkId);
   if (!school) return false;
-
-  if (session.isPasscodeUser) {
-    // Passcode users have edit access on `students` per getFeatureAccess; the
-    // only check that matters is school match.
-    return session.schoolCode === school.code;
-  }
 
   const email = session.user?.email;
   if (!email) return false;

@@ -18,7 +18,7 @@ Admin interface for managing JNV (Jawahar Navodaya Vidyalaya) student enrollment
 ## Tech Stack
 
 - **Framework**: Next.js 16 (App Router)
-- **Auth**: NextAuth.js v4 (Google OAuth)
+- **Auth**: NextAuth.js v4 (Google OAuth only)
 - **Database**: PostgreSQL (direct connection for reads)
 - **Styling**: Tailwind CSS v4
 - **External API**: DB Service for student updates
@@ -27,7 +27,7 @@ Admin interface for managing JNV (Jawahar Navodaya Vidyalaya) student enrollment
 
 - macOS, Linux, or Windows with WSL
 - Access to the PostgreSQL database credentials
-- Google OAuth credentials (for admin auth)
+- Google OAuth credentials (for sign-in)
 - DB Service API access (for write operations)
 
 ---
