@@ -905,6 +905,15 @@ describe("DashboardPage (server component)", () => {
     expect(screen.queryByText("Start Visit")).not.toBeInTheDocument();
   });
 
+  it("keeps the JNV NVS Schools heading hidden from non-PM users", async () => {
+    setupTeacher([makeSchool()], 1);
+
+    const jsx = await DashboardPage({ searchParams: defaultSearchParams });
+    render(jsx);
+
+    expect(screen.queryByRole("heading", { name: "JNV NVS Schools" })).not.toBeInTheDocument();
+  });
+
   it("shows showRegion=true for PM users", async () => {
     const school = makeSchool();
     setupPM([school], 1);
@@ -1367,6 +1376,16 @@ describe("DashboardPage (server component)", () => {
       expect(screen.getByTestId("student-search")).toBeInTheDocument();
       expect(screen.queryByText("Physical Centres")).not.toBeInTheDocument();
       expect(document.querySelector('a[href="/dashboard?view=centres"]')).toBeNull();
+    });
+
+    it("labels the PMU Manager's view with the JNV NVS Schools heading and no tab strip", async () => {
+      await setupPmuManager();
+
+      const jsx = await DashboardPage({ searchParams: defaultSearchParams });
+      render(jsx);
+
+      expect(screen.getByRole("heading", { name: "JNV NVS Schools" })).toBeInTheDocument();
+      expect(document.querySelector('a[href="/dashboard?view=jnv-nvs"]')).toBeNull();
     });
 
     it("ignores ?view=centres for a PMU Manager", async () => {

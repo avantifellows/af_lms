@@ -485,6 +485,8 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         recentVisits={data.recentVisits}
         hasPMAccess={features.hasPMAccess}
         showViewTabs={!seated && !isPmuRole(permission.role)}
+        // A PMU Manager has no tab strip, so the heading names their one view.
+        showSchoolsHeading={features.hasPMAccess || isPmuRole(permission.role)}
       />
     </div>
   );
@@ -574,7 +576,7 @@ function DashboardViewTabs({ view, show }: { view: DashboardView; show: boolean 
   </div>;
 }
 
-function DashboardMain({ view, searchQuery, currentPage, totalPages, totalCount, schools, centres, recentVisits, hasPMAccess, showViewTabs }: {
+function DashboardMain({ view, searchQuery, currentPage, totalPages, totalCount, schools, centres, recentVisits, hasPMAccess, showViewTabs, showSchoolsHeading }: {
   view: DashboardView;
   searchQuery?: string;
   currentPage: number;
@@ -585,6 +587,7 @@ function DashboardMain({ view, searchQuery, currentPage, totalPages, totalCount,
   recentVisits: Visit[];
   hasPMAccess: boolean;
   showViewTabs: boolean;
+  showSchoolsHeading: boolean;
 }) {
   return <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
     <DashboardViewTabs view={view} show={showViewTabs} />
@@ -600,6 +603,7 @@ function DashboardMain({ view, searchQuery, currentPage, totalPages, totalCount,
         <SchoolsSection
           schools={schools}
           hasPMAccess={hasPMAccess}
+          showHeading={showSchoolsHeading}
           searchQuery={searchQuery}
           currentPage={currentPage}
           totalPages={totalPages}
@@ -711,15 +715,16 @@ function VisitRow({ visit }: { visit: Visit }) {
   </tr>;
 }
 
-function SchoolsSection({ schools, hasPMAccess, searchQuery, currentPage, totalPages }: {
+function SchoolsSection({ schools, hasPMAccess, showHeading, searchQuery, currentPage, totalPages }: {
   schools: DashboardSchool[];
   hasPMAccess: boolean;
+  showHeading: boolean;
   searchQuery?: string;
   currentPage: number;
   totalPages: number;
 }) {
   return <div>
-    {hasPMAccess && <div className="flex justify-between items-center mb-4 border-b-2 border-brand-gold pb-3">
+    {showHeading && <div className="flex justify-between items-center mb-4 border-b-2 border-brand-gold pb-3">
       <h2 className="text-lg font-bold text-text-primary uppercase tracking-wide">JNV NVS Schools</h2>
     </div>}
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
