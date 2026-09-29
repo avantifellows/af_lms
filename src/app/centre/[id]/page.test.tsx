@@ -451,6 +451,26 @@ describe("CentrePage → RosterPage (centre scope)", () => {
     );
   });
 
+  it.each(["pmu_manager", "pmu_govt_school_user"] as const)(
+    "gives %s Access Denied on a Physical Centre page",
+    async (role) => {
+      setupCentre({ program_id: 64, program_name: "JNV NVS" }, {
+        email: "pmu@avantifellows.org",
+        role,
+        program_ids: [64],
+        scope: undefined,
+      });
+
+      await renderCentre();
+
+      expect(screen.getByText("Access Denied")).toBeInTheDocument();
+      expect(
+        screen.getByText("You don't have permission to view this centre."),
+      ).toBeInTheDocument();
+      expect(mockGetCentreStudents).not.toHaveBeenCalled();
+    },
+  );
+
   it("sends the holistic-mentorship admin to their console instead of the centre", async () => {
     setupCentre({}, {
       email: "holistic@example.com",

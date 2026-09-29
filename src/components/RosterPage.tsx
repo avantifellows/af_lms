@@ -24,6 +24,8 @@ import {
   CURRENT_ACADEMIC_YEAR,
   HOLISTIC_MENTORSHIP_PROGRAM_IDS,
   isHolisticMentorshipProgramId,
+  isPmuRole,
+  PMU_PROGRAM_ID,
   PROGRAM_ID_TO_LABEL,
 } from "@/lib/constants";
 import { getLmsSupportedProgramIds } from "@/lib/lms-programs";
@@ -624,6 +626,12 @@ export default async function RosterPage({
     if (!canAccessSchoolSync(permission, school.code, school.region || undefined)) {
       return <AccessDenied message="You don't have permission to view this page." />;
     }
+    // PMU roles are pinned to JNV NVS (ADR 0007): level 3 "all" must not open
+    // a centre-program (non-JNV) School. Centre pages are refused by
+    // canViewCentre below.
+    if (!isCentre && isPmuRole(permission.role) && school.af_school_category !== "JNV") {
+      return <AccessDenied message="You don't have permission to view this page." />;
+    }
 
     // The holistic-mentorship admin sees that school's holistic roster in place
     // — and only that tab; they have no scope for anything else on the page.
@@ -770,6 +778,7 @@ export default async function RosterPage({
   // program (Performance filters by program name; Curriculum/Quiz by id).
   const centreProgramId = isCentre ? scope.centre.program_id ?? undefined : undefined;
   const centreProgramName = isCentre ? scope.centre.program_name ?? undefined : undefined;
+  const isPmu = isPmuRole(permission?.role);
   // Distinguishes "school page" (no centre program by definition) from "centre
   // page whose centre has no program" — both leave centreProgramId undefined,
   // but only the second must refuse to fall back to the school's data.
@@ -822,9 +831,10 @@ export default async function RosterPage({
   // straight back here — so centre pages point at the Centres tab explicitly,
   // which is where the card they came from lives anyway.
   const multipleSchools = !isPasscodeUser && hasMultipleSchools(permission);
+  // A PMU Govt School User has exactly one School, so never a back link.
   const defaultBackHref = isCentre
     ? "/dashboard?view=centres"
-    : multipleSchools
+    : multipleSchools && permission?.role !== "pmu_govt_school_user"
       ? "/dashboard"
       : undefined;
 
@@ -905,7 +915,8 @@ export default async function RosterPage({
   const performanceContent = (
     <PerformanceTab
       schoolUdise={school.udise_code || school.code}
-      lockedProgram={centreProgramName}
+      // PMU roles see only JNV NVS — the same lock a centre page uses.
+      lockedProgram={isPmu ? PROGRAM_ID_TO_LABEL[PMU_PROGRAM_ID] : centreProgramName}
     />
   );
 

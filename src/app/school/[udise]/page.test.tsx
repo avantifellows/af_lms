@@ -198,8 +198,18 @@ vi.mock("@/components/curriculum/CurriculumTab", () => ({
 
 vi.mock("@/components/PerformanceTab", () => ({
   __esModule: true,
-  default: ({ schoolUdise }: { schoolUdise: string }) => (
-    <div data-testid="performance-tab" data-school-udise={schoolUdise}>
+  default: ({
+    schoolUdise,
+    lockedProgram,
+  }: {
+    schoolUdise: string;
+    lockedProgram?: string;
+  }) => (
+    <div
+      data-testid="performance-tab"
+      data-school-udise={schoolUdise}
+      data-locked-program={lockedProgram ?? ""}
+    >
       PerformanceTab
     </div>
   ),
@@ -1024,6 +1034,161 @@ describe("SchoolPage (server component)", () => {
       });
     },
   );
+
+  describe.each(["pmu_manager", "pmu_govt_school_user"] as const)(
+    "%s school page",
+    (role) => {
+      // Real matrix, program pinning and school scope, so the page behaves as
+      // it would for a production PMU row.
+      async function setupPmuPage(
+        schoolOverrides = {},
+        permissionOverrides = {},
+      ) {
+        setupAdminDefaults(schoolOverrides);
+        const actual = await vi.importActual<typeof import("@/lib/permissions")>(
+          "@/lib/permissions",
+        );
+        mockGetUserPermission.mockResolvedValue(
+          makePermission({
+            role,
+            level: 1,
+            school_codes: ["70705"],
+            program_ids: [64],
+            ...permissionOverrides,
+          }),
+        );
+        mockGetFeatureAccess.mockImplementation(actual.getFeatureAccess);
+        mockGetProgramContextSync.mockImplementation(actual.getProgramContextSync);
+      }
+
+      it("shows only the JNV NVS card and NVS Students at a mixed School", async () => {
+        await setupPmuPage({ centre_program_ids: [1, 64] });
+        mockProcessStudents.mockResolvedValue({
+          students: [
+            makeStudent({
+              group_user_id: "gu-nvs",
+              user_id: "u-nvs",
+              first_name: "Nisha",
+              program_id: 64,
+              program_name: "JNV NVS",
+            }),
+            makeStudent({
+              group_user_id: "gu-coe",
+              user_id: "u-coe",
+              first_name: "Chetan",
+              program_id: 1,
+              program_name: "JNV CoE",
+            }),
+          ],
+          issues: [],
+        });
+
+        await renderPage();
+
+        expect(screen.getByText("JNV NVS Students")).toBeInTheDocument();
+        expect(screen.queryByText("JNV CoE Students")).not.toBeInTheDocument();
+        expect(
+          screen.queryByRole("button", { name: "JNV CoE" }),
+        ).not.toBeInTheDocument();
+        const props = JSON.parse(
+          screen.getByTestId("student-table").dataset.props || "{}",
+        );
+        expect(
+          props.students.map((s: { first_name: string }) => s.first_name),
+        ).toEqual(["Nisha"]);
+      });
+
+      it("locks the Performance tab to JNV NVS", async () => {
+        await setupPmuPage();
+
+        await renderPage();
+
+        expect(screen.getByTestId("performance-tab")).toHaveAttribute(
+          "data-locked-program",
+          "JNV NVS",
+        );
+      });
+
+      it("hides the tabs the matrix gives PMU roles no access to", async () => {
+        await setupPmuPage();
+
+        await renderPage();
+
+        expect(screen.getByTestId("tab-enrollment")).toBeInTheDocument();
+        expect(screen.getByTestId("tab-performance")).toBeInTheDocument();
+        for (const id of [
+          "visits",
+          "curriculum",
+          "quiz_sessions",
+          "teacher_feedback",
+          "mentorship",
+          "holistic_mentorship",
+        ]) {
+          expect(screen.queryByTestId(`tab-${id}`)).not.toBeInTheDocument();
+        }
+      });
+
+      it("returns Access Denied at a non-JNV School, even at level 3", async () => {
+        await setupPmuPage(
+          { af_school_category: "Punjab CoE", centre_program_ids: [94] },
+          { level: 3, school_codes: null },
+        );
+
+        await renderPage();
+
+        expect(screen.getByText("Access Denied")).toBeInTheDocument();
+        expect(screen.queryByTestId("school-tabs")).not.toBeInTheDocument();
+      });
+    },
+  );
+
+  it("gives a PMU Govt School User no back link, even with a multi-School row", async () => {
+    setupAdminDefaults();
+    const actual = await vi.importActual<typeof import("@/lib/permissions")>(
+      "@/lib/permissions",
+    );
+    mockGetUserPermission.mockResolvedValue(
+      makePermission({
+        role: "pmu_govt_school_user",
+        level: 1,
+        school_codes: ["70705", "70706"],
+        program_ids: [64],
+      }),
+    );
+    mockGetFeatureAccess.mockImplementation(actual.getFeatureAccess);
+    mockGetProgramContextSync.mockImplementation(actual.getProgramContextSync);
+
+    await renderPage();
+
+    expect(screen.getByTestId("page-header")).toHaveAttribute(
+      "data-back-href",
+      "",
+    );
+  });
+
+  it("keeps the dashboard back link for a PMU Manager with several Schools", async () => {
+    setupAdminDefaults();
+    const actual = await vi.importActual<typeof import("@/lib/permissions")>(
+      "@/lib/permissions",
+    );
+    mockGetUserPermission.mockResolvedValue(
+      makePermission({
+        role: "pmu_manager",
+        level: 1,
+        school_codes: ["70705", "70706"],
+        program_ids: [64],
+      }),
+    );
+    mockGetFeatureAccess.mockImplementation(actual.getFeatureAccess);
+    mockGetProgramContextSync.mockImplementation(actual.getProgramContextSync);
+
+    await renderPage();
+
+    expect(screen.getByTestId("page-header")).toHaveAttribute(
+      "data-back-href",
+      "/dashboard",
+    );
+  });
 
   it("passes correct defaultTab to SchoolTabs", async () => {
     setupAdminDefaults();
