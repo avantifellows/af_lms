@@ -10,6 +10,7 @@ import type {
 } from "@/types/quiz";
 import { getCategoryColor } from "@/lib/student-utils";
 import { alChipColor, alShortLabel, isAdvancedTest } from "@/lib/academic-level";
+import { isNvsProgram } from "@/lib/constants";
 
 interface Props {
   students: StudentDeepDiveRow[];
@@ -231,7 +232,9 @@ export default function StudentResultsTable({
   // Qualified" -> "Not Qualified", M1/M2 -> "Qualified"). Hiding the chip while
   // printing "Off track" beside it would republish the very verdict the
   // warehouse refuses to count, under another name.
-  const showALColumns = !isAdvancedTest(testName);
+  //
+  // JNV NVS does not use Academic Level or On Track, so both are hidden there too.
+  const showALColumns = !isAdvancedTest(testName) && !isNvsProgram(program);
   const [sortKey, setSortKey] = useState<SortKey>("percentage");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [expandedName, setExpandedName] = useState<string | null>(null);
@@ -315,6 +318,35 @@ export default function StudentResultsTable({
     return sortDir === "asc" ? " ↑" : " ↓";
   };
 
+  // The expanded row spans exactly the rendered columns, so adding or gating a
+  // column never needs a hand-kept colSpan.
+  const headerCells = [
+    <th key="rank" className={TH}>Rank</th>,
+    <th key="name" className={SORTABLE_TH} onClick={() => handleSort("student_name")}>
+      Name{sortIcon("student_name")}
+    </th>,
+    <th key="gender" className={TH}>Gender</th>,
+    <th key="category" className={TH}>Category</th>,
+    ...(showALColumns
+      ? [
+          <th key="al" className={TH}>AL</th>,
+          <th key="on-track" className={TH}>On Track</th>,
+        ]
+      : []),
+    <th key="marks" className={SORTABLE_TH} onClick={() => handleSort("marks_scored")}>
+      Marks{sortIcon("marks_scored")}
+    </th>,
+    <th key="percentage" className={SORTABLE_TH} onClick={() => handleSort("percentage")}>
+      Percentage{sortIcon("percentage")}
+    </th>,
+    <th key="accuracy" className={SORTABLE_TH} onClick={() => handleSort("accuracy")}>
+      Accuracy{sortIcon("accuracy")}
+    </th>,
+    <th key="attempt-rate" className={SORTABLE_TH} onClick={() => handleSort("attempt_rate")}>
+      Attempt Rate{sortIcon("attempt_rate")}
+    </th>,
+  ];
+
   const toggleStudent = (name: string) => {
     const next = expandedName === name ? null : name;
     setExpandedName(next);
@@ -342,32 +374,7 @@ export default function StudentResultsTable({
       <div className="overflow-x-auto">
         <table className="w-full">
           <thead>
-            <tr className="border-b-2 border-border-accent">
-              <th className={TH}>Rank</th>
-              <th className={SORTABLE_TH} onClick={() => handleSort("student_name")}>
-                Name{sortIcon("student_name")}
-              </th>
-              <th className={TH}>Gender</th>
-              <th className={TH}>Category</th>
-              {showALColumns && (
-                <>
-                  <th className={TH}>AL</th>
-                  <th className={TH}>On Track</th>
-                </>
-              )}
-              <th className={SORTABLE_TH} onClick={() => handleSort("marks_scored")}>
-                Marks{sortIcon("marks_scored")}
-              </th>
-              <th className={SORTABLE_TH} onClick={() => handleSort("percentage")}>
-                Percentage{sortIcon("percentage")}
-              </th>
-              <th className={SORTABLE_TH} onClick={() => handleSort("accuracy")}>
-                Accuracy{sortIcon("accuracy")}
-              </th>
-              <th className={SORTABLE_TH} onClick={() => handleSort("attempt_rate")}>
-                Attempt Rate{sortIcon("attempt_rate")}
-              </th>
-            </tr>
+            <tr className="border-b-2 border-border-accent">{headerCells}</tr>
           </thead>
           <tbody>
             {sorted.map((s) => {
@@ -440,7 +447,7 @@ export default function StudentResultsTable({
                   </tr>
                   {isExpanded && s.subject_scores.length > 0 && (
                     <tr>
-                      <td colSpan={showALColumns ? 10 : 8} className="px-4 py-2 bg-bg">
+                      <td colSpan={headerCells.length} className="px-4 py-2 bg-bg">
                         <div className="overflow-x-auto">
                           <table className="w-full">
                             <thead>

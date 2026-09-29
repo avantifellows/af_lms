@@ -238,6 +238,33 @@ describe("StudentResultsTable", () => {
     expect(screen.getByText("Off track")).toBeInTheDocument();
   });
 
+  it("drops the AL and On Track columns for JNV NVS", () => {
+    render(<StudentResultsTable {...props} program="JNV NVS" testName="Major Test 4" />);
+    expect(screen.queryByText("AL")).not.toBeInTheDocument();
+    expect(screen.queryByText("NQ")).not.toBeInTheDocument();
+    expect(screen.queryByText("On Track")).not.toBeInTheDocument();
+    expect(screen.queryByText("Off track")).not.toBeInTheDocument();
+    // The rest of the row is untouched.
+    expect(screen.getByText("Asha Rao")).toBeInTheDocument();
+    expect(screen.getByText("40/100")).toBeInTheDocument();
+  });
+
+  // The expanded row must span the whole table in every column variant, so the
+  // subject breakdown never leaves a ragged gap under the trailing columns.
+  it.each([
+    ["JNV NVS", { program: "JNV NVS", testName: "Major Test 4" }, 8],
+    ["non-NVS", { program: "CoE", testName: "Major Test 4" }, 10],
+    ["Advanced", { program: "CoE", testName: "Advanced MoT 2 (Paper-1)-PB" }, 8],
+  ])("spans every header column in the expanded row (%s)", (_label, extra, columns) => {
+    const { container } = render(<StudentResultsTable {...props} {...extra} />);
+    const headerCells = container.querySelectorAll(":scope table > thead > tr > th");
+    expect(headerCells).toHaveLength(columns);
+
+    fireEvent.click(screen.getByText("Asha Rao"));
+    const expandedCell = container.querySelector(":scope table > tbody > tr > td[colspan]");
+    expect(expandedCell).toHaveAttribute("colspan", String(columns));
+  });
+
   it("flags on-track / off-track from qualification_status (#28 item 2)", () => {
     render(
       <StudentResultsTable
