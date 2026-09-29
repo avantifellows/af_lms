@@ -38,6 +38,7 @@ Then read this file fully before doing anything else in this session.
 ## Current Project State
 
 **Working:**
+- Issue #361 slice #363: PMU Manager (`pmu_manager`) and PMU Govt School User (`pmu_govt_school_user`) exist in the permission layer, pinned to JNV NVS (ADR 0007): matrix `students` edit + `performance` view only, program context always `[64]`/NVS-only, no centre seats or centre access, `ownsRecord` only for 64, and `canAccessStudent` requires a current NVS batch (`hasCurrentNvsBatchSql`). Admin user management, school page, dashboard and other PMU surfaces are later slices. See `context/permissions.md`.
 - Issue #351 slice #352: the NVS Performance batch overview lists only System-wide Mandated Tests (`test_purpose = 'system_wide_mandated'`), across all formats and test grades, with NVS-specific empty-state copy. Other programs are unchanged. See `context/data-access.md` §3.
 - Issue #351 slice #353: for JNV NVS, the test deep dive's Student Results table drops the AL and On Track columns (the same gate as Advanced tests). The expanded row's `colSpan` now comes from the rendered header cells rather than a hard-coded 10 or 8. See `context/data-access.md` §3.
 - Issue #351 slice #354: in every program, the Enrollment Stream filter has a "No stream (N)" option (`__none__`) and matches streams ignoring case and surrounding whitespace. This covers program-card counts, "Showing X of Y", StudentTable, and Download List. The shared rule lives in `src/lib/stream-rules.ts`. See `context/student-addition.md`.

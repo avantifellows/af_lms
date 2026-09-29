@@ -35,7 +35,7 @@ Auth config: `src/lib/auth.ts`.
 Admin user create/update APIs reject unknown roles with 400 instead of silently defaulting them.
 
 ## The model — three independent axes
-1. **Role** (`UserRole`): `teacher` | `program_manager` | `program_admin` | `holistic_mentorship_admin` | `admin`.
+1. **Role** (`UserRole`): `teacher` | `program_manager` | `program_admin` | `holistic_mentorship_admin` | `admin` | `pmu_manager` | `pmu_govt_school_user`. The two PMU roles are pinned to JNV NVS (see below).
 2. **School scope** (`AccessLevel`): `1` = specific `school_codes`, `2` = `regions`, `3` = all schools. (`isAdmin` is by **role**, not level.)
 3. **Program eligibility** (`program_ids`): COE=1, NODAL=2, NVS=64, plus non-JNV centre programs. Some features are gated to CoE/Nodal.
 
@@ -61,6 +61,17 @@ admin surface but every admin mutation route 403s it via the `forWrite` guard op
 Per-row ownership uses `ownsRecord(permission, programId)` — admins own all, null program_id (unassigned) is editable by anyone with feature edit, otherwise the record's `program_id` must be in the user's programs.
 
 Student Addition writes deliberately use a stricter gate than `ownsRecord`: admin, program admin, and program manager roles must all have the target Program in their resolved Program context. Global admins still resolve all Programs; an admin explicitly scoped only to CoE cannot edit or drop an NVS student.
+
+## PMU roles — pinned to JNV NVS (ADR 0007, #363)
+
+`PMU_ROLES`, `isPmuRole(role)` and `PMU_PROGRAM_ID` (= 64) live in client-safe `src/lib/constants.ts`; `USER_ROLES` spreads `PMU_ROLES`.
+
+- **Matrix columns:** `pmu_manager` and `pmu_govt_school_user` get `students: "edit"` and `performance: "view"`; every other feature is `none` at every level. `read_only` makes `students` view.
+- **Program context:** `getProgramContextSync` returns `{ hasAccess: true, programIds: [64], isNVSOnly: true, hasCoEOrNodal: false }` first — before admin, `scope.programs === "all"`, seat or `program_ids` logic.
+- **Scope:** `resolveScope` never reads `centre_positions` for PMU roles. Level 3 → `schools: "all"` with empty `centres`/`programs`; levels 1/2 keep explicit codes / lazy regions only. So `isCentreSeated`, `getCentreConfinement` and `canAccessCentreSync` are false, and `canViewCentre` denies outright with no School fallback.
+- **Ownership:** `ownsRecord` is true only for program 64 (null/unassigned is false).
+- **Student narrowing:** `canAccessStudent` (view and `requireEdit`) additionally requires a current JNV NVS batch — any current batch with `program_id = 64`, not `getStudentSchool`'s `LIMIT 1` program. Student document list/upload/delete inherit this. List queries should reuse `hasCurrentNvsBatchSql(userIdColumn)` from `permissions.ts`.
+- Visits, Curriculum, Quiz Sessions, Teacher Feedback, Summary, Holistic/Academic Mentorship, Centres, Staff Management and `/admin` are already unreachable because their guards read the matrix and program context.
 
 ## Scope resolution — `getResolvedPermission` vs `getUserPermission`
 

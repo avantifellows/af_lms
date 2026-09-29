@@ -36,6 +36,16 @@ export const TEACHER_SESSION = {
   expires: "2099-01-01",
 };
 
+export const PMU_MANAGER_SESSION = {
+  user: { email: "pmu.manager@avantifellows.org", name: "PMU Manager" },
+  expires: "2099-01-01",
+};
+
+export const PMU_GOVT_SESSION = {
+  user: { email: "principal@jnv.example.org", name: "PMU Govt School User" },
+  expires: "2099-01-01",
+};
+
 export const PASSCODE_SESSION = {
   user: { email: "passcode_70705@avantifellows.org", name: "Passcode User" },
   isPasscodeUser: true,

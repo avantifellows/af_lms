@@ -28,7 +28,7 @@ Separating scope, capabilities, and ownership keeps each concern simple. A singl
 | Column | Type | Purpose |
 |--------|------|---------|
 | `email` | varchar(255) | User identifier |
-| `role` | varchar(50) | `teacher`, `program_manager`, `program_admin`, or `admin` |
+| `role` | varchar(50) | `teacher`, `program_manager`, `program_admin`, `holistic_mentorship_admin`, `admin`, `pmu_manager`, or `pmu_govt_school_user` |
 | `level` | integer | 1=specific schools, 2=region, 3=all schools |
 | `school_codes` | text[] | Specific school codes (level 1) |
 | `regions` | text[] | Region names (level 2) |
@@ -128,6 +128,20 @@ The school page query fetches `program_id` per student via a LATERAL join.
 | `program_admin` | Yes | Scoped admin for a specific program (e.g., CoE lead) |
 | `program_manager` | Yes | PMs who do school visits, view curriculum |
 | `teacher` | Yes | School-level users who edit curriculum/mentorship |
+| `pmu_manager` | No (pinned to JNV NVS) | Avanti's internal PMU team, working with JNV NVS Students across Schools |
+| `pmu_govt_school_user` | No (pinned to JNV NVS) | External stakeholder of one JNV NVS School (e.g. its principal), Google sign-in |
+
+### PMU roles (JNV NVS pinned, ADR 0007)
+
+`pmu_manager` and `pmu_govt_school_user` are pinned to JNV NVS at every level.
+`PMU_ROLES`, `isPmuRole(role)` and `PMU_PROGRAM_ID` (= `PROGRAM_IDS.NVS`) live in the
+client-safe `src/lib/constants.ts`.
+
+- **Matrix:** explicit columns — `students: "edit"`, `performance: "view"`, every other feature `"none"` at every level. `read_only` downgrades `students` to view.
+- **Program context:** `getProgramContextSync` returns `{ hasAccess: true, programIds: [64], isNVSOnly: true, hasCoEOrNodal: false }` before any admin, seat or `program_ids` logic. CoE/Nodal ids, level 3 and seats never widen it.
+- **Scope:** `resolveScope` skips the centre-seat lookup. Level 3 → `{ schools: "all", centres: ∅, programs: ∅ }`; levels 1/2 keep explicit codes and lazy regions only. `isCentreSeated`, `getCentreConfinement` and `canAccessCentreSync` are false, and `canViewCentre` denies outright (no School fallback).
+- **Ownership:** `ownsRecord` is true only for program 64; a null (unassigned) program is false.
+- **Students:** `canAccessStudent` (view and `requireEdit`, so Student documents too) also requires any current JNV NVS batch enrollment — not the single `LIMIT 1` program from `getStudentSchool`. The shared SQL fragment is `hasCurrentNvsBatchSql(userIdColumn)` in `src/lib/permissions.ts`.
 
 ---
 

@@ -1,6 +1,9 @@
 import { query } from "./db";
 import {
   PHYSICAL_CENTRE_PROGRAM_IDS,
+  PMU_PROGRAM_ID,
+  PMU_ROLES,
+  isPmuRole,
   PROGRAM_IDS,
   PROGRAM_IDS_ORDERED,
   PROGRAM_ID_TO_LABEL,
@@ -23,6 +26,7 @@ const USER_ROLES = [
   "program_admin",
   "holistic_mentorship_admin",
   "admin",
+  ...PMU_ROLES,
 ] as const;
 export type UserRole = (typeof USER_ROLES)[number];
 
@@ -47,21 +51,23 @@ export type Feature =
 export type FeatureAccess = "none" | "view" | "edit";
 
 // Feature permission matrix: feature → role → access level
+// PMU roles (ADR 0007) get students + performance only; every other feature
+// is "none" at every level, whatever their program context says.
 const FEATURE_PERMISSIONS: Record<Feature, Record<UserRole, FeatureAccess>> = {
-  students: { teacher: "edit", program_manager: "edit", program_admin: "edit", holistic_mentorship_admin: "none", admin: "edit" },
-  visits: { teacher: "none", program_manager: "edit", program_admin: "edit", holistic_mentorship_admin: "none", admin: "edit" },
-  curriculum: { teacher: "edit", program_manager: "view", program_admin: "edit", holistic_mentorship_admin: "none", admin: "edit" },
-  academic_mentorship: { teacher: "none", program_manager: "none", program_admin: "none", holistic_mentorship_admin: "none", admin: "none" },
-  holistic_mentorship: { teacher: "edit", program_manager: "view", program_admin: "view", holistic_mentorship_admin: "edit", admin: "edit" },
-  performance: { teacher: "view", program_manager: "view", program_admin: "view", holistic_mentorship_admin: "none", admin: "view" },
-  summary_stats: { teacher: "none", program_manager: "view", program_admin: "view", holistic_mentorship_admin: "none", admin: "view" },
-  pm_dashboard: { teacher: "none", program_manager: "view", program_admin: "view", holistic_mentorship_admin: "none", admin: "view" },
-  quiz_sessions: { teacher: "edit", program_manager: "view", program_admin: "view", holistic_mentorship_admin: "none", admin: "view" },
+  students: { teacher: "edit", program_manager: "edit", program_admin: "edit", holistic_mentorship_admin: "none", admin: "edit", pmu_manager: "edit", pmu_govt_school_user: "edit" },
+  visits: { teacher: "none", program_manager: "edit", program_admin: "edit", holistic_mentorship_admin: "none", admin: "edit", pmu_manager: "none", pmu_govt_school_user: "none" },
+  curriculum: { teacher: "edit", program_manager: "view", program_admin: "edit", holistic_mentorship_admin: "none", admin: "edit", pmu_manager: "none", pmu_govt_school_user: "none" },
+  academic_mentorship: { teacher: "none", program_manager: "none", program_admin: "none", holistic_mentorship_admin: "none", admin: "none", pmu_manager: "none", pmu_govt_school_user: "none" },
+  holistic_mentorship: { teacher: "edit", program_manager: "view", program_admin: "view", holistic_mentorship_admin: "edit", admin: "edit", pmu_manager: "none", pmu_govt_school_user: "none" },
+  performance: { teacher: "view", program_manager: "view", program_admin: "view", holistic_mentorship_admin: "none", admin: "view", pmu_manager: "view", pmu_govt_school_user: "view" },
+  summary_stats: { teacher: "none", program_manager: "view", program_admin: "view", holistic_mentorship_admin: "none", admin: "view", pmu_manager: "none", pmu_govt_school_user: "none" },
+  pm_dashboard: { teacher: "none", program_manager: "view", program_admin: "view", holistic_mentorship_admin: "none", admin: "view", pmu_manager: "none", pmu_govt_school_user: "none" },
+  quiz_sessions: { teacher: "edit", program_manager: "view", program_admin: "view", holistic_mentorship_admin: "none", admin: "view", pmu_manager: "none", pmu_govt_school_user: "none" },
   // PM-driven: a PM/admin sets up student feedback ABOUT teachers, so teachers
   // must not have edit (or view) here. Mirrors `visits`, which main widened to
   // program_admin: "edit" — feedback setup is the same class of PM fieldwork.
   // `holistic_mentorship_admin` is scoped to its own feature only.
-  teacher_feedback: { teacher: "none", program_manager: "edit", program_admin: "edit", holistic_mentorship_admin: "none", admin: "edit" },
+  teacher_feedback: { teacher: "none", program_manager: "edit", program_admin: "edit", holistic_mentorship_admin: "none", admin: "edit", pmu_manager: "none", pmu_govt_school_user: "none" },
 };
 
 // Features gated to CoE/Nodal programs only (NVS-only users get "none")
@@ -136,6 +142,11 @@ export function ownsRecord(
   // Passcode users own all records at their school
   if (opts?.isPasscodeUser) return true;
   if (!permission) return false;
+  // PMU roles own only JNV NVS records — not unassigned ones, and never by
+  // their row's program_ids.
+  if (isPmuRole(permission.role)) {
+    return programId !== null && Number(programId) === PMU_PROGRAM_ID;
+  }
   // Admins own everything
   if (permission.role === "admin") return true;
   // Unassigned records are editable by anyone with feature-level edit
@@ -293,6 +304,18 @@ function isMissingSchemaError(err: unknown): boolean {
 // derived from school_codes (seat schools ⊆ school_codes); strict per-user
 // exclusivity (B2) makes seats the sole source for seated staff.
 export async function resolveScope(p: UserPermission): Promise<ResolvedScope> {
+  // PMU roles never hold centre seats (ADR 0007): skip the seat lookup so a
+  // stale centre_positions row grants no School, centre or program. Level 3
+  // reaches every School but no centre.
+  if (isPmuRole(p.role)) {
+    const explicitSchools = new Set<string>(p.level === 1 ? p.school_codes ?? [] : []);
+    return {
+      schools: p.level === 3 ? "all" : explicitSchools,
+      centres: new Set<number>(),
+      programs: new Set<number>(),
+    };
+  }
+
   if (p.level === 3) return { schools: "all", centres: "all", programs: "all" };
 
   // school_codes is the level-1 scope mechanism; level-2's explicit scope is
@@ -414,6 +437,8 @@ export function canViewCentre(
   permission: UserPermission | null,
   centre: { centreId: number; schoolCode: string; schoolRegion?: string }
 ): boolean {
+  // PMU roles have no centre access at all — no fallback to School access.
+  if (permission && isPmuRole(permission.role)) return false;
   if (canAccessCentreSync(permission, centre.centreId)) return true;
   // A seated user is confined to their seats; only a seatless manager reaches
   // a centre purely via school access.
@@ -525,6 +550,33 @@ export async function getStudentSchool(
   return rows[0] ?? null;
 }
 
+// SQL fragment: "this Student's user has a current JNV NVS batch enrollment".
+// Any current batch counts — not just the single LIMIT-1 program that
+// getStudentSchool reports. Parameterised by the SQL expression holding the
+// Student's user id (e.g. "s.user_id") so list queries can reuse it to narrow
+// PMU roles. The program id is the trusted PMU_PROGRAM_ID constant, never input.
+export function hasCurrentNvsBatchSql(userIdColumn: string): string {
+  return `EXISTS (
+    SELECT 1
+    FROM enrollment_record er_nvs
+    JOIN batch b_nvs ON b_nvs.id = er_nvs.group_id
+    WHERE er_nvs.user_id = ${userIdColumn}
+      AND er_nvs.group_type = 'batch'
+      AND er_nvs.is_current = true
+      AND b_nvs.program_id = ${PMU_PROGRAM_ID}
+  )`;
+}
+
+async function studentHasCurrentNvsBatch(studentPkId: number | string): Promise<boolean> {
+  const rows = await query<{ has_current_nvs_batch: boolean }>(
+    `SELECT ${hasCurrentNvsBatchSql("s.user_id")} AS has_current_nvs_batch
+     FROM student s
+     WHERE s.id = $1`,
+    [studentPkId],
+  );
+  return rows[0]?.has_current_nvs_batch === true;
+}
+
 // Permission gate for routes scoped to a single student. Honors both Google
 // users (via canAccessSchool against their user_permission row) and passcode
 // users (via session.schoolCode match).
@@ -556,6 +608,13 @@ export async function canAccessStudent(
   if (!email) return false;
   const permission = await getResolvedPermission(email);
   if (!(await hasStudentSchoolAccess(email, permission, school))) return false;
+  if (permission && isPmuRole(permission.role)) {
+    // PMU roles reach a Student (view and edit) only through a current JNV
+    // NVS batch — including in mixed Schools that also run other Programs.
+    // That batch is also their ownership, so edit needs only the feature gate.
+    if (!(await studentHasCurrentNvsBatch(studentPkId))) return false;
+    return !options?.requireEdit || getFeatureAccess(permission, "students").canEdit;
+  }
   if (options?.requireEdit && !canEditStudentRecords(permission, school)) return false;
   return true;
 }
@@ -596,6 +655,17 @@ export function getProgramContextSync(
       hasAccess: false,
       programIds: [],
       isNVSOnly: false,
+      hasCoEOrNodal: false,
+    };
+  }
+
+  // PMU roles are pinned to JNV NVS (ADR 0007) before any admin, seat or
+  // program_ids logic: CoE/Nodal ids, level 3 or a stale seat never widen it.
+  if (isPmuRole(permission.role)) {
+    return {
+      hasAccess: true,
+      programIds: [PMU_PROGRAM_ID],
+      isNVSOnly: true,
       hasCoEOrNodal: false,
     };
   }
