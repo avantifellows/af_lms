@@ -577,23 +577,8 @@ export default async function RosterPage({
   const school = scope.school;
   const isCentre = scope.kind === "centre";
 
-  // Check permissions
-  const isPasscodeUser = session.isPasscodeUser;
-  const passcodeSchoolCode = session.schoolCode;
-
-  // For passcode users, only allow access to their (parent) school. Point them
-  // back to login, not the dashboard (a passcode user has no dashboard).
-  if (isPasscodeUser && passcodeSchoolCode !== school.code) {
-    return (
-      <AccessDenied
-        message="Your passcode only grants access to a different school."
-        link={{ href: "/", label: "Return to login" }}
-      />
-    );
-  }
-
   // Single DB call for permission — reuse everywhere
-  const permission = !isPasscodeUser && session.user?.email
+  const permission = session.user?.email
     ? await getResolvedPermission(session.user.email)
     : null;
 
@@ -618,96 +603,94 @@ export default async function RosterPage({
     };
   };
 
-  // For Google users, check school access (a centre inherits its school's access)
-  if (!isPasscodeUser) {
-    if (!permission) {
-      return <AccessDenied message="You don't have permission to view this page." />;
-    }
-    if (!canAccessSchoolSync(permission, school.code, school.region || undefined)) {
-      return <AccessDenied message="You don't have permission to view this page." />;
-    }
-    // PMU roles are pinned to JNV NVS (ADR 0007): level 3 "all" must not open
-    // a centre-program (non-JNV) School. Centre pages are refused by
-    // canViewCentre below.
-    if (!isCentre && isPmuRole(permission.role) && school.af_school_category !== "JNV") {
-      return <AccessDenied message="You don't have permission to view this page." />;
-    }
+  // Check school access (a centre inherits its school's access)
+  if (!permission) {
+    return <AccessDenied message="You don't have permission to view this page." />;
+  }
+  if (!canAccessSchoolSync(permission, school.code, school.region || undefined)) {
+    return <AccessDenied message="You don't have permission to view this page." />;
+  }
+  // PMU roles are pinned to JNV NVS (ADR 0007): level 3 "all" must not open
+  // a centre-program (non-JNV) School. Centre pages are refused by
+  // canViewCentre below.
+  if (!isCentre && isPmuRole(permission.role) && school.af_school_category !== "JNV") {
+    return <AccessDenied message="You don't have permission to view this page." />;
+  }
 
-    // The holistic-mentorship admin sees that school's holistic roster in place
-    // — and only that tab; they have no scope for anything else on the page.
-    // Their console links to /school/<code>?program_id=N, which is why school
-    // scope renders while centre scope still bounces to the console: a centre
-    // page is reached from the dashboard Centres tab, which this role never
-    // sees.
-    if (permission.role === "holistic_mentorship_admin") {
-      if (isCentre) redirect("/admin/holistic-mentorship");
-      const { programId, choices } = resolveHolisticProgram();
-      const holisticContent = await buildHolisticMentorshipContent({
-        session,
-        permission,
-        schoolCode: school.code,
-        access: getFeatureAccess(permission, "holistic_mentorship"),
-        isCentre,
-        programId,
-        programChoices: choices,
-        fromHolisticProgress,
-      });
-      if (!holisticContent) redirect("/admin/holistic-mentorship");
-      return (
-        <RosterShell
-          title={school.name}
-          subtitle={`${school.district}, ${school.state} | Code: ${school.code}`}
-          backHref={programId === undefined
-            ? "/admin/holistic-mentorship"
-            : `/admin/holistic-mentorship?program_id=${programId}`}
-          userEmail={session.user?.email ?? undefined}
-          tabs={[{
-            id: "holistic_mentorship",
-            label: "Holistic Mentorship",
-            content: holisticContent,
-          }]}
-        />
-      );
-    }
+  // The holistic-mentorship admin sees that school's holistic roster in place
+  // — and only that tab; they have no scope for anything else on the page.
+  // Their console links to /school/<code>?program_id=N, which is why school
+  // scope renders while centre scope still bounces to the console: a centre
+  // page is reached from the dashboard Centres tab, which this role never
+  // sees.
+  if (permission.role === "holistic_mentorship_admin") {
+    if (isCentre) redirect("/admin/holistic-mentorship");
+    const { programId, choices } = resolveHolisticProgram();
+    const holisticContent = await buildHolisticMentorshipContent({
+      session,
+      permission,
+      schoolCode: school.code,
+      access: getFeatureAccess(permission, "holistic_mentorship"),
+      isCentre,
+      programId,
+      programChoices: choices,
+      fromHolisticProgress,
+    });
+    if (!holisticContent) redirect("/admin/holistic-mentorship");
+    return (
+      <RosterShell
+        title={school.name}
+        subtitle={`${school.district}, ${school.state} | Code: ${school.code}`}
+        backHref={programId === undefined
+          ? "/admin/holistic-mentorship"
+          : `/admin/holistic-mentorship?program_id=${programId}`}
+        userEmail={session.user?.email ?? undefined}
+        tabs={[{
+          id: "holistic_mentorship",
+          label: "Holistic Mentorship",
+          content: holisticContent,
+        }]}
+      />
+    );
+  }
 
-    // Centre-seated staff are confined to their centre(s): the whole-school
-    // roster page isn't theirs to open (their seat grants school access only so
-    // school-linked actions like visits work). Point them at their centre — the
-    // single seat directly, otherwise the Centres tab to pick one.
-    const confinement = getCentreConfinement(permission);
-    if (!isCentre && confinement.confined) {
-      const seatIds = confinement.centreIds;
-      const centreLink =
-        seatIds.length === 1
-          ? { href: `/centre/${seatIds[0]}`, label: "Go to your centre" }
-          : { href: "/dashboard?view=centres", label: "Go to your centres" };
-      return (
-        <AccessDenied
-          message="This school page isn't available for your access. View your assigned centre instead."
-          link={centreLink}
-        />
-      );
-    }
+  // Centre-seated staff are confined to their centre(s): the whole-school
+  // roster page isn't theirs to open (their seat grants school access only so
+  // school-linked actions like visits work). Point them at their centre — the
+  // single seat directly, otherwise the Centres tab to pick one.
+  const confinement = getCentreConfinement(permission);
+  if (!isCentre && confinement.confined) {
+    const seatIds = confinement.centreIds;
+    const centreLink =
+      seatIds.length === 1
+        ? { href: `/centre/${seatIds[0]}`, label: "Go to your centre" }
+        : { href: "/dashboard?view=centres", label: "Go to your centres" };
+    return (
+      <AccessDenied
+        message="This school page isn't available for your access. View your assigned centre instead."
+        link={centreLink}
+      />
+    );
+  }
 
-    // Centre pages are seat-scoped: a user with centre seats may only open the
-    // centres they hold a seat at (not every centre at the school). Rule lives
-    // in permissions.canViewCentre; a seatless manager falls back to school access.
-    if (
-      isCentre &&
-      !canViewCentre(permission, {
-        centreId: Number(scope.centre.id),
-        schoolCode: school.code,
-        schoolRegion: school.region || undefined,
-      })
-    ) {
-      return <AccessDenied message="You don't have permission to view this centre." />;
-    }
+  // Centre pages are seat-scoped: a user with centre seats may only open the
+  // centres they hold a seat at (not every centre at the school). Rule lives
+  // in permissions.canViewCentre; a seatless manager falls back to school access.
+  if (
+    isCentre &&
+    !canViewCentre(permission, {
+      centreId: Number(scope.centre.id),
+      schoolCode: school.code,
+      schoolRegion: school.region || undefined,
+    })
+  ) {
+    return <AccessDenied message="You don't have permission to view this centre." />;
   }
 
   // Derive everything from the single permission object — no extra DB calls
   const programContext = getProgramContextSync(permission);
 
-  if (!isPasscodeUser && !programContext.hasAccess) {
+  if (!programContext.hasAccess) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <Card elevation="xl" className="p-8 max-w-md text-center">
@@ -724,15 +707,14 @@ export default async function RosterPage({
   }
 
   // Derive feature access from the permission matrix
-  const opts = { isPasscodeUser };
-  const studentsAccess = getFeatureAccess(permission, "students", opts);
-  const curriculumAccess = getFeatureAccess(permission, "curriculum", opts);
-  const performanceAccess = getFeatureAccess(permission, "performance", opts);
-  const mentorshipAccess = getFeatureAccess(permission, "academic_mentorship", opts);
-  const holisticMentorshipAccess = getFeatureAccess(permission, "holistic_mentorship", opts);
-  const visitsAccess = getFeatureAccess(permission, "visits", opts);
-  const quizSessionsAccess = getFeatureAccess(permission, "quiz_sessions", opts);
-  const teacherFeedbackAccess = getFeatureAccess(permission, "teacher_feedback", opts);
+  const studentsAccess = getFeatureAccess(permission, "students");
+  const curriculumAccess = getFeatureAccess(permission, "curriculum");
+  const performanceAccess = getFeatureAccess(permission, "performance");
+  const mentorshipAccess = getFeatureAccess(permission, "academic_mentorship");
+  const holisticMentorshipAccess = getFeatureAccess(permission, "holistic_mentorship");
+  const visitsAccess = getFeatureAccess(permission, "visits");
+  const quizSessionsAccess = getFeatureAccess(permission, "quiz_sessions");
+  const teacherFeedbackAccess = getFeatureAccess(permission, "teacher_feedback");
   // Student addition is an NVS school-page feature; a centre roster is scoped
   // to the centre's own program, so it never offers Add Student.
   const canAddStudent =
@@ -798,12 +780,12 @@ export default async function RosterPage({
     ),
   );
 
-  // Programs shown as enrollment cards. Admins + passcode users see every
-  // program present; everyone else sees the intersection of their effective
+  // Programs shown as enrollment cards. Admins see every program present;
+  // everyone else sees the intersection of their effective
   // programs with what's here.
   const isAdmin = permission?.role === "admin";
   const visibleProgramSet = new Set(
-    (isPasscodeUser || isAdmin
+    (isAdmin
       ? supportedProgramIds
       : programContext.programIds
     ).filter((id) => programsWithStudents.has(id)),
@@ -830,7 +812,7 @@ export default async function RosterPage({
   // /dashboard is a loop for a single-seat user — the landing shortcut sends them
   // straight back here — so centre pages point at the Centres tab explicitly,
   // which is where the card they came from lives anyway.
-  const multipleSchools = !isPasscodeUser && hasMultipleSchools(permission);
+  const multipleSchools = hasMultipleSchools(permission);
   // A PMU Govt School User has exactly one School, so never a back link.
   const defaultBackHref = isCentre
     ? "/dashboard?view=centres"
@@ -878,7 +860,6 @@ export default async function RosterPage({
         canEditStudent={studentsAccess.canEdit}
         canDropoutStudent={
           studentsAccess.canEdit &&
-          !isPasscodeUser &&
           [
             "admin",
             "program_manager",
@@ -900,8 +881,7 @@ export default async function RosterPage({
           ]),
         ]}
         canAddStudent={canAddStudent}
-        userProgramIds={isPasscodeUser ? null : programContext.programIds}
-        isPasscodeUser={isPasscodeUser ?? false}
+        userProgramIds={programContext.programIds}
         isAdmin={isAdmin}
         grades={grades}
         batches={batches}
@@ -1061,7 +1041,7 @@ export default async function RosterPage({
       title={title}
       subtitle={subtitle}
       backHref={backHref}
-      userEmail={isPasscodeUser ? `School ${passcodeSchoolCode}` : session.user?.email || undefined}
+      userEmail={session.user?.email || undefined}
       tabs={tabs}
       actions={
         visitsAccess.canEdit ? (

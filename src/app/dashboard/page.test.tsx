@@ -146,12 +146,6 @@ const teacherSession = {
   user: { email: "teacher@avantifellows.org" },
 };
 
-const passcodeSession = {
-  user: { email: "passcode@school.org" },
-  isPasscodeUser: true,
-  schoolCode: "70705",
-};
-
 const adminPermission = {
   email: "admin@avantifellows.org",
   level: 4,
@@ -328,15 +322,6 @@ describe("DashboardPage (server component)", () => {
       DashboardPage({ searchParams: defaultSearchParams })
     ).rejects.toThrow("REDIRECT:/");
     expect(mockRedirect).toHaveBeenCalledWith("/");
-  });
-
-  it("redirects passcode user to their school page", async () => {
-    mockGetServerSession.mockResolvedValue(passcodeSession);
-
-    await expect(
-      DashboardPage({ searchParams: defaultSearchParams })
-    ).rejects.toThrow("REDIRECT:/school/70705");
-    expect(mockRedirect).toHaveBeenCalledWith("/school/70705");
   });
 
   // --- No permission ---

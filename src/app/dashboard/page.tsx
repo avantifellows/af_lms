@@ -270,7 +270,6 @@ function NoDashboardAccess({ email, message }: { email: string; message: string 
 async function dashboardSession() {
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) redirect("/");
-  if (session.isPasscodeUser && session.schoolCode) redirect(`/school/${session.schoolCode}`);
   return session.user.email;
 }
 

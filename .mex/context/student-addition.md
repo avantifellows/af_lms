@@ -110,7 +110,7 @@ Enrollment date handling is decided: LMS supplies DB Service `start_date` and `a
 
 ## LMS Code Context
 - School page gate and enrollment tab live in `src/app/school/[udise]/page.tsx`.
-- The page already resolves school by UDISE/code and checks passcode user scope or `canAccessSchoolSync`.
+- The page already resolves school by UDISE/code and checks `canAccessSchoolSync`.
 - `students` feature access currently grants edit to all roles, passcode users get students edit, and `read_only` downgrades edit to view in `getFeatureAccess`.
 - Existing `NVS_GATED_FEATURES` does not include `students`, so Student Addition needs its own explicit `PROGRAM_IDS.NVS` allowlist check.
 - `canAccessStudent(session, id, { requireEdit: true })` is the right pattern for generic existing-student writes. Student Addition existing-student writes use `requireStudentAdditionStudentAccess(session, studentPkId)`, which starts from the opaque Student PK, gates before route-level row lookup, requires `school.af_school_category = 'JNV'`, and checks school scope, `students` edit, actor NVS access, and current NVS Batch enrollment without querying or requiring a Centre.

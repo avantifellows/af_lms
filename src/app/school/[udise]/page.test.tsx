@@ -297,15 +297,7 @@ const makePermission = (overrides = {}) => ({
 
 const googleSession = (overrides = {}) => ({
   user: { email: "user@avantifellows.org" },
-  isPasscodeUser: false,
-  schoolCode: undefined,
   ...overrides,
-});
-
-const passcodeSession = (schoolCode: string) => ({
-  user: {},
-  isPasscodeUser: true,
-  schoolCode,
 });
 
 const featureAccess = (canView: boolean, canEdit: boolean) => ({
@@ -435,82 +427,6 @@ describe("SchoolPage (server component)", () => {
       SchoolPage({ params: Promise.resolve({ udise: "99999999999" }) }),
     ).rejects.toThrow("NOT_FOUND");
     expect(mockNotFound).toHaveBeenCalled();
-  });
-
-  // --- Passcode user access ---
-
-  it("renders access denied for passcode user accessing wrong school", async () => {
-    mockGetServerSession.mockResolvedValue(passcodeSession("12345"));
-    mockQuery.mockResolvedValueOnce([makeSchool({ code: "70705" })]);
-
-    const jsx = await SchoolPage({
-      params: Promise.resolve({ udise: "24120100101" }),
-    });
-    await renderResolved(jsx);
-
-    expect(screen.getByText("Access Denied")).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "Your passcode only grants access to a different school.",
-      ),
-    ).toBeInTheDocument();
-    expect(screen.getByText("Return to login")).toBeInTheDocument();
-    expect(screen.getByText("Return to login").closest("a")).toHaveAttribute(
-      "href",
-      "/",
-    );
-  });
-
-  it("renders page for passcode user accessing own school", async () => {
-    const school = makeSchool({ code: "70705" });
-    mockGetServerSession.mockResolvedValue(passcodeSession("70705"));
-    mockQuery
-      .mockResolvedValueOnce([school]) // getSchoolByCode
-      .mockResolvedValueOnce([]) // getStudents
-      .mockResolvedValueOnce([]) // getGrades
-      .mockResolvedValueOnce([]); // getBatchesWithMetadata
-    mockGetProgramContextSync.mockReturnValue({
-      hasAccess: true,
-      programIds: [],
-      isNVSOnly: false,
-      hasCoEOrNodal: false,
-    });
-    // Passcode user: students = edit, rest = none
-    mockGetFeatureAccess.mockImplementation(
-      (
-        _perm: unknown,
-        feature: string,
-        opts?: { isPasscodeUser?: boolean },
-      ) => {
-        if (opts?.isPasscodeUser && feature === "students") {
-          return featureAccess(true, true);
-        }
-        return featureAccess(false, false);
-      },
-    );
-    mockProcessStudents.mockResolvedValue({ students: [], issues: [] });
-
-    const jsx = await SchoolPage({
-      params: Promise.resolve({ udise: "24120100101" }),
-    });
-    await renderResolved(jsx);
-
-    // PageHeader should show school name and passcode email
-    const header = screen.getByTestId("page-header");
-    expect(header).toHaveAttribute("data-title", "JNV Bhavnagar");
-    expect(header).toHaveAttribute("data-user-email", "School 70705");
-    // No back href for passcode user (single school)
-    expect(header).toHaveAttribute("data-back-href", "");
-    // Only enrollment tab should be visible (passcode user gets none for other features)
-    expect(screen.getByTestId("tab-enrollment")).toBeInTheDocument();
-    expect(screen.queryByTestId("tab-curriculum")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("tab-mentorship")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("tab-visits")).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("link", { name: "Curriculum Summary" }),
-    ).not.toBeInTheDocument();
-    expect(mockListAcademicMentorshipMappings).not.toHaveBeenCalled();
-    expect(mockListAcademicMentorshipTeacherMentees).not.toHaveBeenCalled();
   });
 
   // --- Google user permission checks ---
@@ -1542,7 +1458,6 @@ describe("SchoolPage (server component)", () => {
     expect(props.dropoutStudents[0].status).toBe("dropout");
     expect(props.canEdit).toBe(true);
     expect(props.isAdmin).toBe(true);
-    expect(props.isPasscodeUser).toBe(false);
   });
 
   it("passes effective program-context ids as userProgramIds to StudentTable", async () => {
@@ -1584,32 +1499,6 @@ describe("SchoolPage (server component)", () => {
     const table = screen.getByTestId("student-table");
     const props = JSON.parse(table.getAttribute("data-props") || "{}");
     expect(props.userProgramIds).toEqual([2]);
-  });
-
-  it("passes null userProgramIds for passcode user", async () => {
-    const school = makeSchool({ code: "70705" });
-    mockGetServerSession.mockResolvedValue(passcodeSession("70705"));
-    mockQuery
-      .mockResolvedValueOnce([school])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([]);
-    mockGetProgramContextSync.mockReturnValue({
-      hasAccess: true,
-      programIds: [],
-      isNVSOnly: false,
-      hasCoEOrNodal: false,
-    });
-    mockGetFeatureAccess.mockReturnValue(featureAccess(true, true));
-    mockProcessStudents.mockResolvedValue({ students: [], issues: [] });
-
-    await renderPage();
-
-    const table = screen.getByTestId("student-table");
-    const props = JSON.parse(table.getAttribute("data-props") || "{}");
-    expect(props.userProgramIds).toBeNull();
-    expect(props.isPasscodeUser).toBe(true);
-    expect(props.isAdmin).toBe(false);
   });
 
   // --- Data issues banner ---
@@ -2408,36 +2297,6 @@ describe("SchoolPage (server component)", () => {
     await renderResolved(jsx);
 
     expect(screen.getByText("Access Denied")).toBeInTheDocument();
-  });
-
-  // --- Passcode user skips program context check ---
-
-  it("does not show no-program-access for passcode user even with hasAccess=false", async () => {
-    const school = makeSchool({ code: "70705" });
-    mockGetServerSession.mockResolvedValue(passcodeSession("70705"));
-    mockQuery
-      .mockResolvedValueOnce([school])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([]);
-    mockGetProgramContextSync.mockReturnValue({
-      hasAccess: false,
-      programIds: [],
-      isNVSOnly: false,
-      hasCoEOrNodal: false,
-    });
-    mockGetFeatureAccess.mockReturnValue(featureAccess(true, true));
-    mockProcessStudents.mockResolvedValue({ students: [], issues: [] });
-
-    const jsx = await SchoolPage({
-      params: Promise.resolve({ udise: "24120100101" }),
-    });
-    await renderResolved(jsx);
-
-    // Passcode user should NOT see the "No Program Access" message
-    // because the check is gated by `!isPasscodeUser`
-    expect(screen.queryByText("No Program Access")).not.toBeInTheDocument();
-    expect(screen.getByTestId("page-header")).toBeInTheDocument();
   });
 
   // --- Empty students ---

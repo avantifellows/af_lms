@@ -248,8 +248,6 @@ function setupCentre(centreOverrides = {}, permissionOverrides = {}) {
   const permission = makePermission(permissionOverrides);
   mockGetServerSession.mockResolvedValue({
     user: { email: permission.email },
-    isPasscodeUser: false,
-    schoolCode: undefined,
   });
   mockGetCentreWithSchool.mockResolvedValue(centre);
   mockGetUserPermission.mockResolvedValue(permission);

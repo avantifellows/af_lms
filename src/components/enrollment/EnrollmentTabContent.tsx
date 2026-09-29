@@ -66,7 +66,6 @@ interface Props {
   dropoutProgramIds?: number[];
   canAddStudent: boolean;
   userProgramIds: number[] | null;
-  isPasscodeUser: boolean;
   isAdmin: boolean;
   grades: Grade[];
   batches: Batch[];
@@ -90,7 +89,6 @@ export default function EnrollmentTabContent({
   dropoutProgramIds,
   canAddStudent,
   userProgramIds,
-  isPasscodeUser,
   isAdmin,
   grades,
   batches,
@@ -120,10 +118,9 @@ export default function EnrollmentTabContent({
 
   // Intervention flags mirror students access (lib/intervention-flags): anyone
   // on this tab can see students, so they see flags; changing them needs
-  // students edit. Passcode logins get neither. The API enforces the same rule.
+  // students edit. The API enforces the same rule.
   // The JNV NVS card hides flags entirely (UI only; the API is unchanged).
-  const canUseInterventionFlags =
-    !isPasscodeUser && selectedProgramId !== PROGRAM_IDS.NVS;
+  const canUseInterventionFlags = selectedProgramId !== PROGRAM_IDS.NVS;
   const canEditInterventionFlags = canUseInterventionFlags && canEdit;
 
   // Consent status for the school's grade 11/12 students, keyed by
@@ -476,7 +473,6 @@ export default function EnrollmentTabContent({
         selectedProgramId={selectedProgramId}
         dropoutProgramIds={dropoutProgramIds}
         userProgramIds={userProgramIds}
-        isPasscodeUser={isPasscodeUser}
         isAdmin={isAdmin}
         grades={grades}
         batches={batches}

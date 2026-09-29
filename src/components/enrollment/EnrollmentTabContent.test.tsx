@@ -74,7 +74,6 @@ const baseProps = {
   canEditStudent: true,
   canAddStudent: true,
   userProgramIds: [PROGRAM_IDS.NVS],
-  isPasscodeUser: false,
   isAdmin: false,
   grades: [],
   batches: [],
@@ -461,29 +460,6 @@ describe("EnrollmentTabContent", () => {
     expect(await screen.findByLabelText("Needs intervention only (0)")).toBeInTheDocument();
     expect(flagsCalls()).toHaveLength(1);
     expect(screen.getByTestId("student-table")).toHaveAttribute("data-flags-shown", "true");
-    vi.unstubAllGlobals();
-  });
-
-  it("keeps Intervention Flags hidden for passcode users in non-NVS programs", async () => {
-    const fetchMock = vi.fn<(url: string) => Promise<{ ok: boolean; json: () => Promise<unknown> }>>(
-      async () => ({ ok: true, json: async () => ({ consent: {} }) }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-    render(
-      <EnrollmentTabContent
-        {...baseProps}
-        isPasscodeUser
-        programs={[program(PROGRAM_IDS.COE, "JNV CoE")]}
-        userProgramIds={[PROGRAM_IDS.COE]}
-      />,
-    );
-
-    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    expect(
-      fetchMock.mock.calls.filter(([url]) => url.includes("intervention-flags")),
-    ).toHaveLength(0);
-    expect(screen.queryByLabelText(/Needs intervention only/)).not.toBeInTheDocument();
-    expect(screen.getByTestId("student-table")).toHaveAttribute("data-flags-shown", "false");
     vi.unstubAllGlobals();
   });
 });
