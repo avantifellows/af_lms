@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -12,7 +12,8 @@ const payload = {
     completedAt: "2026-07-01T10:30:00.000Z", notesAuthor: "Mentor One",
     notesAuthorEmail: "mentor@example.com", notesLastEditedAt: "2026-07-01", answers: [],
   }],
-  counts: { totalMapped: 73, pending: 30, completed: 20, skipped: 18, noActivePhase: 5 },
+  counts: { total: 73, pending: 30, completed: 20, skipped: 18, noActivePhase: 5 },
+  coverage: { eligible: 90, assigned: 73, unassigned: 17 },
   options: {
     schools: [{ code: "SCH001", name: "School One" }],
     mentors: [{ userId: 9, name: "Mentor One" }],
@@ -26,6 +27,35 @@ const payload = {
   pageSize: 50,
   refreshedAt: "2026-07-17T10:00:00.000Z",
 };
+
+const unassignedPayload = {
+  ...payload,
+  rows: [
+    {
+      progress: "unassigned", studentId: 52, studentName: "Asha Rao", externalStudentId: "AF-52", grade: 11,
+      schoolName: "School One", schoolCode: "SCH001", activePhaseId: 70,
+    },
+    {
+      progress: "unassigned", studentId: 52, studentName: "Asha Rao", externalStudentId: "AF-52", grade: 12,
+      schoolName: "School Two", schoolCode: "SCH002", activePhaseId: null,
+    },
+  ],
+  counts: { total: 212, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 },
+};
+
+async function showUnassigned(body: unknown = unassignedPayload) {
+  vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => Promise.resolve(new Response(JSON.stringify(
+    input.includes("progress=unassigned") ? body : payload,
+  )))));
+  render(<ProgressWorkspace />);
+  await screen.findByText("Student One");
+  fireEvent.change(screen.getByLabelText("Filter by Progress"), { target: { value: "unassigned" } });
+}
+
+function cardValues(group: string) {
+  return within(screen.getByRole("region", { name: group })).getAllByRole("listitem")
+    .map((card) => [card.firstElementChild?.textContent, card.lastElementChild?.textContent]);
+}
 
 describe("ProgressWorkspace", () => {
   beforeEach(() => {
@@ -86,6 +116,276 @@ describe("ProgressWorkspace", () => {
     );
   });
 
+  it("says Assigned instead of mapped in cards, the Progress filter, and pagination", async () => {
+    render(<ProgressWorkspace />);
+    await screen.findByText("Student One");
+
+    expect(screen.getByText("Assigned").nextElementSibling).toHaveTextContent("73");
+    expect(screen.getByText(
+      "Shows assigned Mentees by default. Choose Unassigned in the Progress filter to list eligible Students " +
+      "without a Mentor (current year only). Mapping and Notes are read-only for Admins.",
+    )).toBeInTheDocument();
+    const progress = screen.getByLabelText("Filter by Progress");
+    expect(progress).toHaveValue("");
+    expect(Array.from(progress.querySelectorAll("option")).map((option) => [option.value, option.textContent])).toEqual([
+      ["", "All Assigned"], ["pending", "Pending"], ["completed", "Completed"],
+      ["skipped", "Skipped"], ["no_active_phase", "No active phase"], ["unassigned", "Unassigned"],
+    ]);
+    expect(screen.getByText(/Showing/)).toHaveTextContent("Showing 1–1 of 73 assigned Mentees");
+    const labels = [...screen.getAllByText((_, element) => element?.tagName === "P"
+      && element.className.includes("uppercase")), ...screen.getAllByRole("heading"),
+      ...progress.querySelectorAll("option")];
+    expect(labels.map((element) => element.textContent).filter((text) => /mapped/i.test(text ?? ""))).toEqual([]);
+    expect(labels.map((element) => element.textContent).filter((text) => /%/.test(text ?? ""))).toEqual([]);
+    expect(screen.queryByText(/mapped/i)).not.toBeInTheDocument();
+  });
+
+  it("offers Unassigned only for the current year and disables it while a Mentor is selected", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify(payload)))));
+    const view = render(<ProgressWorkspace />);
+    await screen.findByText("Student One");
+    const unassigned = () => screen.getByRole("option", { name: "Unassigned" }) as HTMLOptionElement;
+
+    expect(unassigned().disabled).toBe(false);
+    fireEvent.change(screen.getByLabelText("Filter by Mentor"), { target: { value: "9" } });
+    expect(unassigned().disabled).toBe(true);
+
+    view.rerender(<ProgressWorkspace academicYear="2025-2026" />);
+    await screen.findByText("Student One");
+    expect(Array.from(screen.getByLabelText("Filter by Progress").querySelectorAll("option"))
+      .map((option) => option.value)).toEqual(["", "pending", "completed", "skipped", "no_active_phase"]);
+  });
+
+  it("requests the Unassigned list when Unassigned is chosen", async () => {
+    render(<ProgressWorkspace />);
+    await screen.findByText("Student One");
+
+    fireEvent.change(screen.getByLabelText("Filter by Progress"), { target: { value: "unassigned" } });
+
+    await waitFor(() => expect(fetch).toHaveBeenLastCalledWith(
+      "/api/holistic-mentorship/progress?academic_year=2026-2027&program_id=1&page=1&sort=school&direction=asc&progress=unassigned",
+      expect.anything(),
+    ));
+  });
+
+  it("switches Progress to All Assigned and page 1 when a Mentor is chosen on Unassigned", async () => {
+    await showUnassigned();
+    await screen.findAllByRole("row", { name: /Asha Rao/ });
+    fireEvent.click(screen.getByRole("button", { name: "Next page" }));
+    await waitFor(() => expect(fetch).toHaveBeenLastCalledWith(
+      expect.stringContaining("page=2"), expect.anything(),
+    ));
+
+    fireEvent.change(screen.getByLabelText("Filter by Mentor"), { target: { value: "9" } });
+
+    expect(screen.getByLabelText("Filter by Progress")).toHaveValue("");
+    await waitFor(() => expect(fetch).toHaveBeenLastCalledWith(
+      "/api/holistic-mentorship/progress?academic_year=2026-2027&program_id=1&page=1&sort=school&direction=asc&mentor_user_id=9",
+      expect.anything(),
+    ));
+    const requests = vi.mocked(fetch).mock.calls.map(([url]) => String(url));
+    expect(requests.filter((url) => url.includes("progress=unassigned") && url.includes("mentor_user_id")))
+      .toEqual([]);
+  });
+
+  it("switches Progress to All Assigned and page 1 when a past Academic Year is chosen on Unassigned", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => Promise.resolve(new Response(JSON.stringify(
+      input.includes("progress=unassigned") ? unassignedPayload : payload,
+    )))));
+    const view = render(<ProgressWorkspace />);
+    await screen.findByText("Student One");
+    fireEvent.change(screen.getByLabelText("Filter by Progress"), { target: { value: "unassigned" } });
+    await screen.findAllByRole("row", { name: /Asha Rao/ });
+    fireEvent.click(screen.getByRole("button", { name: "Next page" }));
+    await waitFor(() => expect(fetch).toHaveBeenLastCalledWith(
+      expect.stringContaining("page=2"), expect.anything(),
+    ));
+
+    view.rerender(<ProgressWorkspace academicYear="2025-2026" />);
+
+    await waitFor(() => expect(fetch).toHaveBeenLastCalledWith(
+      "/api/holistic-mentorship/progress?academic_year=2025-2026&program_id=1&page=1&sort=school&direction=asc",
+      expect.anything(),
+    ));
+    expect(screen.getByLabelText("Filter by Progress")).toHaveValue("");
+    const requests = vi.mocked(fetch).mock.calls.map(([url]) => String(url));
+    expect(requests.filter((url) => url.includes("progress=unassigned") && url.includes("academic_year=2025-2026")))
+      .toEqual([]);
+  });
+
+  it("keeps a current-year Unassigned selection when the Program changes", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => Promise.resolve(new Response(JSON.stringify(
+      input.includes("progress=unassigned") ? unassignedPayload : payload,
+    )))));
+    const view = render(<ProgressWorkspace />);
+    await screen.findByText("Student One");
+    fireEvent.change(screen.getByLabelText("Filter by Progress"), { target: { value: "unassigned" } });
+    await screen.findAllByRole("row", { name: /Asha Rao/ });
+
+    view.rerender(<ProgressWorkspace programId={78} />);
+
+    await waitFor(() => expect(fetch).toHaveBeenLastCalledWith(
+      "/api/holistic-mentorship/progress?academic_year=2026-2027&program_id=78&page=1&sort=school&direction=asc&progress=unassigned",
+      expect.anything(),
+    ));
+    expect(screen.getByLabelText("Filter by Progress")).toHaveValue("unassigned");
+  });
+
+  it("shows Unassigned rows read-only with dashes, a badge, and an active-Phase link", async () => {
+    const log = vi.spyOn(console, "error");
+    await showUnassigned();
+    const rows = await screen.findAllByRole("row", { name: /Asha Rao/ });
+
+    expect(rows).toHaveLength(2);
+    const [first, second] = rows.map((row) => within(row).getAllByRole("cell").map((cell) => cell.textContent));
+    expect(first).toEqual(["Asha RaoAF-52", "School OneSCH001", "11", "—", "—", "Unassigned", "—", "Open Student"]);
+    expect(second).toEqual(["Asha RaoAF-52", "School TwoSCH002", "12", "—", "—", "Unassigned", "—", "Open Student"]);
+    expect(within(rows[0]).getByRole("link", { name: "Open Asha Rao" })).toHaveAttribute(
+      "href", "/holistic-mentorship/students/52/phases/70?school_code=SCH001&academic_year=2026-2027&program_id=1&source=progress",
+    );
+    expect(within(rows[0]).queryAllByRole("button")).toEqual([]);
+    expect(log.mock.calls.flat().join(" ")).not.toMatch(/same key/);
+  });
+
+  it("disables Open Student when the Unassigned Student's Grade has no active Phase", async () => {
+    await showUnassigned();
+    const [, noActivePhase] = await screen.findAllByRole("row", { name: /Asha Rao/ });
+
+    expect(within(noActivePhase).queryByRole("link")).not.toBeInTheDocument();
+    const button = within(noActivePhase).getByRole("button", { name: "Open Student" });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("title", "No active Phase");
+  });
+
+  it("shows Unassigned pagination, zero Progress cards, and unchanged Coverage cards", async () => {
+    await showUnassigned();
+    await screen.findAllByRole("row", { name: /Asha Rao/ });
+
+    expect(screen.getByText(/Showing/)).toHaveTextContent("Showing 1–2 of 212 Unassigned Students");
+    expect(cardValues("Progress")).toEqual([["Pending", "0"], ["Completed", "0"], ["Skipped", "0"]]);
+    expect(cardValues("Coverage")).toEqual([
+      ["Eligible Students", "90"], ["Assigned", "73"], ["Unassigned", "17"],
+    ]);
+  });
+
+  it("shows Unassigned loading and empty-state text", async () => {
+    let finish!: (response: Response) => void;
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => input.includes("progress=unassigned")
+      ? new Promise<Response>((resolve) => { finish = resolve; })
+      : Promise.resolve(new Response(JSON.stringify(payload)))));
+    render(<ProgressWorkspace />);
+    await screen.findByText("Student One");
+    fireEvent.change(screen.getByLabelText("Filter by Progress"), { target: { value: "unassigned" } });
+
+    expect(await screen.findByText("Loading Unassigned Students...")).toBeInTheDocument();
+    finish(new Response(JSON.stringify({
+      ...unassignedPayload, rows: [], counts: { total: 0, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 },
+    })));
+    expect(await screen.findByText("No Unassigned Students match these filters.")).toBeInTheDocument();
+  });
+
+  it("keeps Unassigned selected when Clear filters is used from the Unassigned empty state", async () => {
+    const fetchMock = vi.fn().mockImplementation((input: string) => Promise.resolve(new Response(JSON.stringify(
+      input.includes("progress=unassigned")
+        ? { ...unassignedPayload, rows: [], counts: { total: 0, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 } }
+        : payload,
+    ))));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ProgressWorkspace />);
+    await screen.findByText("Student One");
+    fireEvent.change(screen.getByLabelText("Filter by Grade"), { target: { value: "11" } });
+    fireEvent.change(screen.getByLabelText("Filter by Progress"), { target: { value: "unassigned" } });
+    const empty = (await screen.findByText("No Unassigned Students match these filters.")).parentElement!;
+
+    fireEvent.click(within(empty).getByRole("button", { name: "Clear filters" }));
+
+    expect(screen.getByLabelText("Filter by Progress")).toHaveValue("unassigned");
+    expect(screen.getByLabelText("Filter by Grade")).toHaveValue("");
+    await waitFor(() => {
+      const url = String(fetchMock.mock.calls.at(-1)?.[0]);
+      expect(url).toContain("progress=unassigned");
+      expect(url).not.toContain("grade=");
+    });
+  });
+
+  it("exports the Unassigned list with the current filters and no page", async () => {
+    const fetchMock = vi.fn().mockImplementation((input: string) => Promise.resolve(
+      input.includes("format=csv")
+        ? new Response("Academic Year,Student", { status: 200, headers: { "content-type": "text/csv" } })
+        : new Response(JSON.stringify(input.includes("progress=unassigned") ? unassignedPayload : payload)),
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+    const NativeURL = URL;
+    vi.stubGlobal("URL", Object.assign(class extends NativeURL {}, {
+      createObjectURL: vi.fn(() => "blob:progress"), revokeObjectURL: vi.fn(),
+    }));
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    render(<ProgressWorkspace />);
+    await screen.findByText("Student One");
+    fireEvent.change(screen.getByLabelText("Filter by Progress"), { target: { value: "unassigned" } });
+    await screen.findAllByRole("row", { name: /Asha Rao/ });
+
+    fireEvent.click(screen.getByRole("button", { name: "Export CSV" }));
+
+    await waitFor(() => expect(click).toHaveBeenCalled());
+    const exportCall = fetchMock.mock.calls.find(([url]) => url.includes("format=csv"));
+    const query = new URL(String(exportCall![0]), "http://localhost").searchParams;
+    expect(Object.fromEntries(query)).toEqual({
+      academic_year: "2026-2027", program_id: "1", sort: "school", direction: "asc",
+      progress: "unassigned", format: "csv",
+    });
+  });
+
+  it("shows current-year Coverage and Progress card groups", async () => {
+    render(<ProgressWorkspace />);
+    await screen.findByText("Student One");
+
+    expect(cardValues("Coverage")).toEqual([
+      ["Eligible Students", "90"], ["Assigned", "73"], ["Unassigned", "17"],
+    ]);
+    expect(cardValues("Progress")).toEqual([
+      ["Pending", "30"], ["Completed", "20"], ["Skipped", "18"], ["No active phase", "5"],
+    ]);
+  });
+
+  it("shows a dash in every Coverage card while a Mentor is selected", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify(payload)))));
+    render(<ProgressWorkspace />);
+    await screen.findByText("Student One");
+
+    fireEvent.change(screen.getByLabelText("Filter by Mentor"), { target: { value: "9" } });
+
+    expect(cardValues("Coverage")).toEqual([
+      ["Eligible Students", "—"], ["Assigned", "—"], ["Unassigned", "—"],
+    ]);
+    await screen.findByText("Student One");
+    expect(cardValues("Coverage")).toEqual([
+      ["Eligible Students", "—"], ["Assigned", "—"], ["Unassigned", "—"],
+    ]);
+  });
+
+  it("shows only an Assigned total before progress counts for a past Academic Year", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      ...payload,
+      counts: { total: 41, pending: 11, completed: 25, skipped: 5, noActivePhase: 0 },
+      coverage: null,
+    }))));
+    render(<ProgressWorkspace academicYear="2025-2026" />);
+    await screen.findByText("Student One");
+
+    expect(screen.queryByRole("region", { name: "Coverage" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Eligible Students")).not.toBeInTheDocument();
+    expect(screen.queryByText("Unassigned")).not.toBeInTheDocument();
+    expect(cardValues("Progress")).toEqual([
+      ["Assigned", "41"], ["Pending", "11"], ["Completed", "25"], ["Skipped", "5"],
+    ]);
+    expect(screen.getByText(/Viewing 2025-2026/).parentElement).toHaveTextContent(
+      "Viewing 2025-2026. This view shows Students who had a Mapping during that Academic Year. " +
+      "Earlier academic years are read-only. Eligible and Unassigned counts aren't available for " +
+      "earlier years because LMS keeps no trustworthy record of historical eligibility.",
+    );
+  });
+
   it("links every permitted School to Assignment Coverage, including a School without Mappings", async () => {
     render(<ProgressWorkspace programId={78} />);
 
@@ -132,13 +432,13 @@ describe("ProgressWorkspace", () => {
 
     view.rerender(<ProgressWorkspace programId={78} />);
 
-    expect(await screen.findByText("Loading mapped Students...")).toBeInTheDocument();
+    expect(await screen.findByText("Loading assigned Students...")).toBeInTheDocument();
     expect(screen.queryByText("Student One")).not.toBeInTheDocument();
     finishEmrs(new Response(JSON.stringify({ ...payload, rows: [] })));
   });
 
   it("distinguishes an Academic Year with no Mappings from filters with no matches", async () => {
-    const emptyCounts = { totalMapped: 0, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 };
+    const emptyCounts = { total: 0, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 };
     vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({
       ...payload,
       rows: [],
@@ -147,7 +447,7 @@ describe("ProgressWorkspace", () => {
     }))));
     const first = render(<ProgressWorkspace />);
 
-    expect(await screen.findByText("No mapped Students exist for this Academic Year.")).toBeInTheDocument();
+    expect(await screen.findByText("No assigned Students exist for this Academic Year.")).toBeInTheDocument();
     first.unmount();
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
       ...payload,
@@ -156,7 +456,7 @@ describe("ProgressWorkspace", () => {
     }))));
     render(<ProgressWorkspace />);
 
-    expect(await screen.findByText("No mapped Students match these filters.")).toBeInTheDocument();
+    expect(await screen.findByText("No assigned Students match these filters.")).toBeInTheDocument();
   });
 
   it("restores filters, sorting, page, and scroll after drill-down navigation", async () => {
@@ -182,6 +482,85 @@ describe("ProgressWorkspace", () => {
     expect(screen.getByLabelText("Filter by School")).toHaveValue("SCH001");
     expect(screen.getByLabelText("Page 2 of 2")).toBeInTheDocument();
     await waitFor(() => expect(scrollTo).toHaveBeenCalledWith({ top: 420 }));
+  });
+
+  it.each([
+    ["a past Academic Year", "2025-2026", "1:2025-2026", ""],
+    ["a Mentor", "2026-2027", "1:2026-2027", "9"],
+  ])("restores a stored Unassigned view with %s as All Assigned on page 1", async (_, academicYear, scope, mentor) => {
+    sessionStorage.setItem("holistic-progress-view", JSON.stringify({
+      scope,
+      filters: {
+        school: "", grade: "11", mentor, phase: "", progress: "unassigned", search: "", sort: "school", direction: "asc",
+      },
+      page: 3,
+    }));
+
+    render(<ProgressWorkspace academicYear={academicYear} />);
+
+    await screen.findByText("Student One");
+    const query = new URL(String(vi.mocked(fetch).mock.calls[0][0]), "http://localhost").searchParams;
+    expect(Object.fromEntries(query)).toEqual({
+      academic_year: academicYear, program_id: "1", page: "1", sort: "school", direction: "asc", grade: "11",
+      ...(mentor ? { mentor_user_id: mentor } : {}),
+    });
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
+    expect(screen.getByLabelText("Filter by Progress")).toHaveValue("");
+  });
+
+  it("restores a stored current-year Unassigned view without a Mentor as Unassigned", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => Promise.resolve(new Response(JSON.stringify(
+      input.includes("progress=unassigned") ? unassignedPayload : payload,
+    )))));
+    sessionStorage.setItem("holistic-progress-view", JSON.stringify({
+      scope: "1:2026-2027",
+      filters: {
+        school: "SCH001", grade: "", mentor: "", phase: "", progress: "unassigned", search: "", sort: "school", direction: "asc",
+      },
+      page: 2,
+    }));
+
+    render(<ProgressWorkspace />);
+
+    expect(await screen.findAllByRole("row", { name: /Asha Rao/ })).not.toHaveLength(0);
+    expect(vi.mocked(fetch).mock.calls).toEqual([[
+      "/api/holistic-mentorship/progress?academic_year=2026-2027&program_id=1&page=2&sort=school&direction=asc&school_code=SCH001&progress=unassigned",
+      expect.anything(),
+    ]]);
+    expect(screen.getByLabelText("Filter by Progress")).toHaveValue("unassigned");
+  });
+
+  it("exports valid params after a stored Unassigned view with a Mentor is normalized", async () => {
+    const fetchMock = vi.fn().mockImplementation((input: string) => Promise.resolve(
+      input.includes("format=csv")
+        ? new Response("Academic Year,Student", { status: 200, headers: { "content-type": "text/csv" } })
+        : new Response(JSON.stringify(payload)),
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+    const NativeURL = URL;
+    vi.stubGlobal("URL", Object.assign(class extends NativeURL {}, {
+      createObjectURL: vi.fn(() => "blob:progress"), revokeObjectURL: vi.fn(),
+    }));
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    sessionStorage.setItem("holistic-progress-view", JSON.stringify({
+      scope: "1:2026-2027",
+      filters: {
+        school: "", grade: "", mentor: "9", phase: "", progress: "unassigned", search: "", sort: "school", direction: "asc",
+      },
+      page: 1,
+    }));
+    render(<ProgressWorkspace />);
+    await screen.findByText("Student One");
+
+    fireEvent.click(screen.getByRole("button", { name: "Export CSV" }));
+
+    await waitFor(() => expect(click).toHaveBeenCalled());
+    const exportCall = fetchMock.mock.calls.find(([url]) => url.includes("format=csv"));
+    const query = new URL(String(exportCall![0]), "http://localhost").searchParams;
+    expect(Object.fromEntries(query)).toEqual({
+      academic_year: "2026-2027", program_id: "1", sort: "school", direction: "asc",
+      mentor_user_id: "9", format: "csv",
+    });
   });
 
   it("does not restore School, Mentor, or Phase filters from another Program", async () => {

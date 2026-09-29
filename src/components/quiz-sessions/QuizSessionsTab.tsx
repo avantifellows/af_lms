@@ -2224,46 +2224,25 @@ function QuizSessionCreateModal({
             </div>
           </div>
 
-          <div className="border-t border-border px-5 py-4">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="min-h-[20px] flex-1">
-                {error ? (
-                  <div
-                    role="alert"
-                    className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
-                  >
-                    {error}
-                  </div>
-                ) : null}
-              </div>
-              <div className="flex justify-end gap-3">
-                <button
-                  type="button"
-                  onClick={onClose}
-                  className="min-h-[44px] rounded-lg border-2 border-border px-4 py-2 text-sm font-bold uppercase tracking-wide text-text-primary hover:border-accent hover:text-accent"
-                >
-                  Cancel
-                </button>
-                {extendingSession ? (
-                  <button
-                    onClick={saveExtend}
-                    disabled={extendSaving}
-                    className="min-h-[44px] rounded-lg bg-accent px-5 py-2.5 text-sm font-bold uppercase tracking-wide text-text-on-accent shadow-sm hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {extendSaving ? "Saving..." : "Save end time"}
-                  </button>
-                ) : duplicateGate ? null : (
-                  <button
-                    onClick={handleSubmit}
-                    disabled={saving || checkingExisting}
-                    className="min-h-[44px] rounded-lg bg-accent px-5 py-2.5 text-sm font-bold uppercase tracking-wide text-text-on-accent shadow-sm hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {saving ? "Creating..." : "Create Session"}
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
+          <ModalFooter error={error} onClose={onClose}>
+            {extendingSession ? (
+              <button
+                onClick={saveExtend}
+                disabled={extendSaving}
+                className="min-h-[44px] rounded-lg bg-accent px-5 py-2.5 text-sm font-bold uppercase tracking-wide text-text-on-accent shadow-sm hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {extendSaving ? "Saving..." : "Save end time"}
+              </button>
+            ) : duplicateGate ? null : (
+              <button
+                onClick={handleSubmit}
+                disabled={saving || checkingExisting}
+                className="min-h-[44px] rounded-lg bg-accent px-5 py-2.5 text-sm font-bold uppercase tracking-wide text-text-on-accent shadow-sm hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {saving ? "Creating..." : "Create Session"}
+              </button>
+            )}
+          </ModalFooter>
         </div>
       </div>
     </div>
@@ -2398,6 +2377,43 @@ function ExistingSessionsNotice({
           </>
         )}
       </button>
+    </div>
+  );
+}
+
+function ModalFooter({
+  error,
+  onClose,
+  children,
+}: {
+  error: string | null;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <div className="border-t border-border px-5 py-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-h-[20px] flex-1">
+          {error ? (
+            <div
+              role="alert"
+              className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
+            >
+              {error}
+            </div>
+          ) : null}
+        </div>
+        <div className="flex justify-end gap-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="min-h-[44px] rounded-lg border-2 border-border px-4 py-2 text-sm font-bold uppercase tracking-wide text-text-primary hover:border-accent hover:text-accent"
+          >
+            Cancel
+          </button>
+          {children}
+        </div>
+      </div>
     </div>
   );
 }
@@ -2664,36 +2680,15 @@ function QuizSessionEditModal({
             </div>
           </div>
 
-          <div className="border-t border-border px-5 py-4">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="min-h-[20px] flex-1">
-                {error ? (
-                  <div
-                    role="alert"
-                    className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
-                  >
-                    {error}
-                  </div>
-                ) : null}
-              </div>
-              <div className="flex justify-end gap-3">
-                <button
-                  type="button"
-                  onClick={onClose}
-                  className="min-h-[44px] rounded-lg border-2 border-border px-4 py-2 text-sm font-bold uppercase tracking-wide text-text-primary hover:border-accent hover:text-accent"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleSubmit}
-                  disabled={saving}
-                  className="min-h-[44px] rounded-lg bg-accent px-5 py-2.5 text-sm font-bold uppercase tracking-wide text-text-on-accent shadow-sm hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {saving ? "Saving..." : "Save Changes"}
-                </button>
-              </div>
-            </div>
-          </div>
+          <ModalFooter error={error} onClose={onClose}>
+            <button
+              onClick={handleSubmit}
+              disabled={saving}
+              className="min-h-[44px] rounded-lg bg-accent px-5 py-2.5 text-sm font-bold uppercase tracking-wide text-text-on-accent shadow-sm hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {saving ? "Saving..." : "Save Changes"}
+            </button>
+          </ModalFooter>
         </div>
       </div>
     </div>

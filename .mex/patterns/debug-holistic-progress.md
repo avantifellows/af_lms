@@ -1,7 +1,7 @@
 ---
 name: debug-holistic-progress
 description: Trace empty HTTP 500 responses and database timeouts in Holistic Admin progress.
-last_updated: 2026-09-23
+last_updated: 2026-09-25
 ---
 
 # Debug Holistic Admin progress
@@ -44,3 +44,16 @@ last_updated: 2026-09-23
   Student-to-School return, native Back visits the Student; the School header is
   the explicit return to Program progress. If staging lacks incident-Program phases,
   disclose that limit and test the shared nested route with configured data.
+
+## Coverage and Unassigned list (#340)
+
+The invariants (coverage adds up and matches the Teacher roster, which filters it follows, the Unassigned list = roster unowned IDs, 422 rules, CSV shape, PM/PA scope, view-state resets and the header-Back journey) are asserted in `e2e/tests/holistic-progress.spec.ts`, `ProgressWorkspace.test.tsx` and `holistic-progress.test.ts`. Read those for the expected behaviour. Things that aren't obvious:
+
+- The Teacher roster (`GET /api/holistic-mentorship/mappings`) needs a Teacher session. Admin roles get 403 there, so parity checks use two sessions.
+- To seed exclusions locally, mutate only the **Unassigned** fixture Student (dropout, or an extra current Grade 12 `enrollment_record` for conflicting Grades) so reconciliation cannot end fixture Mappings. End Mappings directly in SQL and restore the exact rows. Do not deactivate the fixture Centre: reconciliation would end every fixture Mapping and erase draft answers.
+- A School whose active Mappings all end leaves `options.schools` and coverage but stays in `coverageSchools`.
+- `counts.total === coverage.unassigned` under Unassigned only without `phase_id`; a Phase narrows the list, not coverage.
+- Quoted CSV answer cells can contain line breaks. Parse the CSV instead of splitting lines.
+- "Clear filters" in the Unassigned empty state keeps Progress = Unassigned; the toolbar "Clear filters" resets to All Assigned.
+- The browser journey asserts the header link "Back to Students and Progress", not native browser Back.
+- Batch `enrollment_record.group_id` holds `batch.id`; see `patterns/debug-e2e-fixtures.md`.

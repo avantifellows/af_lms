@@ -18,6 +18,10 @@ Service utility README for its actual safeguards. Each chart box is separate.
 2. Keep the restored database unchanged. Clone it for apply tests.
 3. Recount the cohort locally before proposing changes. Separate box count from
    eligible count; a School mismatch alone is not a status-repair exclusion.
+   Compare IDs with any previously approved accidental-dropout set. New
+   dropout/undo candidates need their own business classification before they
+   are corrected into continuous enrollment, even when the utility accepts
+   their audit evidence. Preserve the reported count of unclassified cases.
 4. Derive year/start date from original audited Batch and Grade enrollment rows.
    LMS creation audits themselves do not contain these fields. Normal audited
    Batch replacement does not reset the original status start date.
@@ -65,3 +69,7 @@ Invalid/duplicated/mismatched correction snapshots produce unresolved_status_cor
 Run all stages on the same local clone, verify one matching current status per
 Student, then prove timestamp apply preserves new/corrected status rows and all
 non-timestamp fields. Never reuse old manifests across these stages.
+If some new undo cases await classification, record their current-status gap
+separately and count timestamp targets associated with them. A later status
+decision requires new manifests and an ordered retest. Report coverage issues
+outside the reviewed cohort separately.

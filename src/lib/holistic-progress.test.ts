@@ -57,6 +57,7 @@ const databaseRow = {
 describe("Holistic progress", () => {
   beforeEach(() => {
     mockQuery.mockReset();
+    mockQuery.mockResolvedValue([]);
     mockReconcile.mockReset();
     mockReconcile.mockResolvedValue(0);
   });
@@ -99,6 +100,168 @@ describe("Holistic progress", () => {
     });
   });
 
+  it("applies the actor's School scope to current-year coverage", async () => {
+    mockQuery
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ eligible: "12", assigned: "9", unassigned: "3" }]);
+    const scopedPermission: UserPermission = {
+      email: "pm@example.com",
+      level: 1,
+      role: "program_manager",
+      school_codes: ["SCH001", "SCH002"],
+      program_ids: [1],
+    };
+
+    const result = await listHolisticProgress({
+      programId: 1,
+      academicYear: "2026-2027",
+      phaseId: 70,
+      schoolCode: "SCH001",
+      grade: 11,
+      mentorUserId: null,
+      progress: "completed",
+      search: "Asha",
+      sort: "progress",
+      direction: "desc",
+      page: 2,
+    }, scopedPermission);
+
+    expect(mockQuery).toHaveBeenCalledTimes(2);
+    const [sql, params] = mockQuery.mock.calls[1];
+    expect(String(sql)).toContain("mapping_school.code = ANY($7::text[])");
+    expect(params).toEqual([1, "2026-2027", "2026-2027", "SCH001", 11, "%Asha%", ["SCH001", "SCH002"]]);
+    expect(result.coverage).toEqual({ eligible: 12, assigned: 9, unassigned: 3 });
+  });
+
+  it.each([
+    ["a past Academic Year", { academicYear: "2025-2026" }, {}],
+    ["a Mentor filter", { mentorUserId: 9 }, {}],
+    ["the CSV export", {}, { all: true }],
+  ])("does not read coverage for %s", async (_, overrides, options) => {
+    const result = await listHolisticProgress({
+      programId: 1,
+      academicYear: "2026-2027",
+      phaseId: null,
+      schoolCode: null,
+      grade: null,
+      mentorUserId: null,
+      progress: null,
+      search: "",
+      sort: DEFAULT_HOLISTIC_PROGRESS_SORT,
+      direction: "asc",
+      page: 1,
+      ...overrides,
+    }, adminPermission, options);
+
+    expect(mockQuery).toHaveBeenCalledTimes(1);
+    expect(result.coverage).toBeNull();
+  });
+
+  describe("Unassigned list", () => {
+    const unassignedFilters = {
+      programId: 1,
+      academicYear: "2026-2027",
+      phaseId: null,
+      schoolCode: null,
+      grade: null,
+      mentorUserId: null,
+      progress: "unassigned" as const,
+      search: "",
+      sort: DEFAULT_HOLISTIC_PROGRESS_SORT,
+      direction: "asc" as const,
+      page: 1,
+    };
+    const pmPermission: UserPermission = {
+      email: "pm@example.com",
+      level: 1,
+      role: "program_manager",
+      school_codes: ["SCH001", "SCH002"],
+      program_ids: [1],
+    };
+
+    it("returns Unassigned rows with the Unassigned total and zero progress counts after reconciliation", async () => {
+      mockQuery
+        .mockResolvedValueOnce([{
+          student_id: "52", student_name: null, external_student_id: "AF-52", grade: 11,
+          school_name: "School One", school_code: "SCH001", active_phase_id: "70", total_unassigned: "212",
+        }, {
+          student_id: "53", student_name: "Ravi Kumar", external_student_id: null, grade: "12",
+          school_name: "School One", school_code: "SCH001", active_phase_id: null, total_unassigned: "212",
+        }] as never)
+        .mockResolvedValueOnce([{ eligible: "300", assigned: "88", unassigned: "212" }]);
+
+      const result = await listHolisticProgress(unassignedFilters, adminPermission);
+
+      expect(mockReconcile).toHaveBeenCalledWith({
+        academicYear: "2026-2027", programId: 1, schoolCode: undefined, permission: adminPermission,
+      });
+      expect(result).toEqual({
+        rows: [
+          {
+            progress: "unassigned", studentId: 52, studentName: "AF-52", externalStudentId: "AF-52",
+            grade: 11, schoolName: "School One", schoolCode: "SCH001", activePhaseId: 70,
+          },
+          {
+            progress: "unassigned", studentId: 53, studentName: "Ravi Kumar", externalStudentId: null,
+            grade: 12, schoolName: "School One", schoolCode: "SCH001", activePhaseId: null,
+          },
+        ],
+        counts: { total: 212, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 },
+        coverage: { eligible: 300, assigned: 88, unassigned: 212 },
+      });
+    });
+
+    it("keeps the Unassigned total when the requested page has no rows", async () => {
+      mockQuery.mockResolvedValueOnce([{ student_id: null, total_unassigned: "51" }] as never);
+
+      const result = await listHolisticProgress({ ...unassignedFilters, page: 3 }, adminPermission);
+
+      expect(result.rows).toEqual([]);
+      expect(result.counts).toEqual({ total: 51, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 });
+    });
+
+    it("binds the PM's School codes and pages at 50 rows", async () => {
+      await listHolisticProgress({
+        ...unassignedFilters, phaseId: 71, schoolCode: "SCH001", grade: 11, search: "Asha", page: 2,
+      }, pmPermission);
+
+      const [sql, params] = mockQuery.mock.calls[0];
+      expect(String(sql)).toContain("mapping_school.code = ANY($10::text[])");
+      expect(params).toEqual([1, "2026-2027", "2026-2027", "SCH001", 11, "%Asha%", 71, 50, 50, ["SCH001", "SCH002"]]);
+    });
+
+    it("returns every row for the CSV export", async () => {
+      await listHolisticProgress(unassignedFilters, adminPermission, { all: true });
+
+      expect(mockQuery).toHaveBeenCalledTimes(1);
+      expect(mockQuery.mock.calls[0][1]).toEqual([1, "2026-2027", "2026-2027", null, null, "%%", null, null, 0]);
+    });
+
+    it("fails the list and coverage closed for an empty resolved School scope", async () => {
+      await listHolisticProgress(unassignedFilters, {
+        email: "pa@example.com", level: 2, role: "program_admin", program_ids: [1],
+      });
+
+      const [sql, params] = mockQuery.mock.calls[0];
+      expect(String(sql)).toContain("AND 1 = 0");
+      expect(params).toEqual([1, "2026-2027", "2026-2027", null, null, "%%", null, 50, 0]);
+      const [coverageSql, coverageParams] = mockQuery.mock.calls[1];
+      expect(String(coverageSql)).toContain("AND 1 = 0");
+      expect(coverageParams).toEqual([1, "2026-2027", "2026-2027", null, null, "%%"]);
+    });
+
+    it.each(["pending", "completed", "skipped", "no_active_phase"] as const)(
+      "keeps the assigned-Mentee query for progress %s",
+      async (progress) => {
+        await listHolisticProgress({ ...unassignedFilters, progress }, adminPermission);
+
+        expect(mockQuery.mock.calls[0][1]).toEqual([
+          1, "2026-2027", null, null, null, null, progress, "%%", 50, 0, "2026-2027",
+        ]);
+      },
+    );
+  });
+
   it("keeps an in-scope Mapping in rows, counts, and CSV after an out-of-scope School transfer", async () => {
     mockQuery.mockResolvedValueOnce([{ ...databaseRow, total_mapped: "1" }]);
     const scopedPermission: UserPermission = {
@@ -134,7 +297,7 @@ describe("Holistic progress", () => {
     expect(result.rows.map(({ studentId, schoolCode }) => ({ studentId, schoolCode }))).toEqual([
       { studentId: 41, schoolCode: "SCH001" },
     ]);
-    expect(result.counts.totalMapped).toBe(1);
+    expect(result.counts.total).toBe(1);
     const csv = formatHolisticProgressCsv("2025-2026", 1, result.rows);
     expect(csv).toContain("School, One");
     expect(csv).toContain("AF-41");
@@ -224,7 +387,7 @@ describe("Holistic progress", () => {
     expect(sql).toContain("school_name ASC NULLS LAST, grade ASC NULLS LAST, student_name ASC NULLS LAST");
     expect(sql).toContain("AND notes.state = 'submitted'");
     expect(result.counts).toEqual({
-      totalMapped: 73,
+      total: 73,
       pending: 30,
       completed: 20,
       skipped: 18,
@@ -306,6 +469,62 @@ describe("Holistic progress", () => {
     expect(csv).toContain("Anything else?,Keep going");
     expect(csv).not.toContain("studentId");
     expect(csv).not.toContain("Student Profile");
+  });
+
+  describe("Unassigned CSV rows", () => {
+    const unassignedRow: HolisticProgressRow = {
+      progress: "unassigned",
+      studentId: 52,
+      studentName: "Asha Rao",
+      externalStudentId: "AF-52",
+      grade: 11,
+      schoolName: "School One",
+      schoolCode: "SCH001",
+      activePhaseId: 70,
+    };
+
+    it("fills Student and School cells, sets Progress to unassigned, and leaves every other cell blank", () => {
+      expect(formatHolisticProgressCsv("2026-2027", 1, [unassignedRow]).split("\r\n")).toEqual([
+        "Academic Year,Program ID,Program Name,School,UDISE Code,Student Name,Student External ID," +
+          "Grade,Mentor Name,Mentor Email,Phase,Phase Title,Availability,Progress,Completed At," +
+          "Notes Author Name,Notes Author Email,Notes Last Edited At",
+        "2026-2027,1,JNV CoE,School One,SCH001,Asha Rao,AF-52,11,,,,,,unassigned,,,,",
+      ]);
+    });
+
+    it("stops Question/Answer columns at the highest answer position in a mixed export", () => {
+      const assignedRow: HolisticProgressRow = {
+        studentId: 41, studentName: "Student One", externalStudentId: "AF-41", grade: 11,
+        schoolName: "School One", schoolCode: "SCH001", mentorName: "Mentor One", mentorEmail: "mentor@example.com",
+        phaseId: 70, phaseNumber: 2, phaseTitle: "Check-in", phaseState: "active", progress: "completed",
+        completedAt: "2026-07-01T10:00:00.000Z", notesAuthor: "Mentor One", notesAuthorEmail: "mentor@example.com",
+        notesLastEditedAt: "2026-07-01T11:00:00.000Z",
+        answers: [
+          { position: 1, question: "Goal?", answer: "On track" },
+          { position: 2, question: "Next?", answer: "Practice" },
+        ],
+      };
+
+      const [header, assigned, unassigned] = formatHolisticProgressCsv("2026-2027", 1, [assignedRow, unassignedRow])
+        .split("\r\n");
+
+      expect(header).toContain("Completed At,Question 1,Answer 1,Question 2,Answer 2,Notes Author Name");
+      expect(header).not.toContain("Question 3");
+      expect(assigned).toBe(
+        "2026-2027,1,JNV CoE,School One,SCH001,Student One,AF-41,11,Mentor One,mentor@example.com," +
+        "Phase 2,Check-in,active,completed,2026-07-01T10:00:00.000Z,Goal?,On track,Next?,Practice," +
+        "Mentor One,mentor@example.com,2026-07-01T11:00:00.000Z",
+      );
+      expect(unassigned).toBe("2026-2027,1,JNV CoE,School One,SCH001,Asha Rao,AF-52,11,,,,,,unassigned,,,,,,,,");
+    });
+
+    it("neutralizes a formula-leading Unassigned Student name", () => {
+      const csv = formatHolisticProgressCsv("2026-2027", 1, [{ ...unassignedRow, studentName: "=HYPERLINK(\"x\")" }]);
+
+      expect(csv.split("\r\n")[1]).toBe(
+        "2026-2027,1,JNV CoE,School One,SCH001,\"'=HYPERLINK(\"\"x\"\")\",AF-52,11,,,,,,unassigned,,,,",
+      );
+    });
   });
 
   it("uses only each Student's latest yearly Mapping for School and Mentor options", async () => {
@@ -426,6 +645,6 @@ describe("Holistic progress", () => {
     }, adminPermission);
 
     expect(result.rows).toEqual([]);
-    expect(result.counts.totalMapped).toBe(51);
+    expect(result.counts.total).toBe(51);
   });
 });

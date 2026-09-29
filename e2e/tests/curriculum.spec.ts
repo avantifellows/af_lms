@@ -101,7 +101,9 @@ test.describe("Curriculum read path", () => {
     await expect(
       adminPage.getByRole("heading", { name: "JEE Main Curriculum Progress" })
     ).toBeVisible();
-    await expect(adminPage.getByLabel("Program")).toHaveValue("1");
+    // The School's only active physical Centre is CoE, so Program 1 is resolved
+    // from Centres (not school.program_ids = {64}) and no Program selector shows.
+    await expect(adminPage.getByLabel("Program")).toHaveCount(0);
     await expect(adminPage.getByText("Fixture Alpha Physics")).toBeVisible();
   });
 

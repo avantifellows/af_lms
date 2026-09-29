@@ -220,6 +220,10 @@ _Avoid_: Academic Mentee, learner, advisee
 An academic-year assignment connecting one eligible Holistic Mentor to one eligible Holistic Mentee at one launch School and Program, with prior assignments retained as history.
 _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen assignment
 
+**Unassigned Student**:
+A current-year Student who is eligible to be a Holistic Mentee but has no active Holistic Mentor-Mentee Mapping.
+_Avoid_: Unmapped Student, Mapping not done, unassigned Mentee
+
 ## Relationships
 
 - A **School** has many **Students** (via `group` → `group_user`)
@@ -432,7 +436,7 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - An eligible Teacher retains their normal access outside Holistic Mentorship; inside Holistic Mentorship they can see the School's mapping roster but can read full Holistic data only for their assigned Holistic Mentees
 - A Student is eligible to be a **Holistic Mentee** when they are a non-dropout current Grade 11 or 12 Student, roster-attributed to the same supported Program and School as the eligible Teacher; Student Profile completion, historical-note availability, and Phase state do not affect Mapping eligibility
 - Holistic Mentor eligibility is not Grade-scoped, and v1 places no maximum on a Mentor's active Mentee count
-- An eligible Teacher can bulk-assign only unmapped Students to themselves and can remove their own Mentee assignments from the **Holistic Mentorship Tab**; a Teacher cannot take over a Student who has an active Mapping to another Holistic Mentor
+- An eligible Teacher can bulk-assign only Unassigned Students to themselves and can remove their own Mentee assignments from the **Holistic Mentorship Tab**; a Teacher cannot take over a Student who has an active Mapping to another Holistic Mentor
 - A **Holistic Mentorship Admin** or **Admin** can assign an eligible Student, reassign an active Mapping to another eligible Holistic Mentor, or remove an active Mapping in the current academic year; earlier academic years remain read-only, V1 has no Mapping CSV import, and historical source Mentor details do not create live **Holistic Mentor-Mentee Mappings**
 - A Holistic Mentee has at most one active **Holistic Mentor-Mentee Mapping** per academic year
 - Teacher self-unassignment requires confirmation but no approval, notification, or entered reason; each **Holistic Mentorship Admin** or **Admin** assignment, reassignment, or removal requires confirmation and a non-empty free-text audit reason of at most 500 characters
@@ -470,7 +474,14 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - In v1, the **Holistic Mentorship Admin** role grants access only to Holistic Mentorship; access to other LMS features is deferred
 - A **Holistic Mentorship Admin** can view the School and staff context needed for Holistic Mentorship across all launch Schools, but can edit only Holistic Mentorship records
 - Program Managers and Program Admins can view mapped Holistic Mentees, filtered progress, filtered CSV exports, Student Profiles, active Phase Guidance, and submitted Post-Session Notes only inside their resolved School, Program, and Academic Year scope; they cannot see draft Notes or make Holistic Mentorship changes
-- A **Holistic Mentorship Admin** or **Admin** can view mapped Holistic Mentees and their current Mapping status across all supported Programs; eligible Students without an active Mapping do not appear in the **Students & Progress** view
+- A **Holistic Mentorship Admin** or **Admin** can view mapped Holistic Mentees and their current Mapping status across all supported Programs
+- For the current academic year, **Students & Progress** counts Eligible, Assigned, and **Unassigned Students** alongside Mentee progress; its Student list shows Holistic Mentees by default and lists **Unassigned Students** only when the viewer selects Unassigned
+- In **Students & Progress**, Eligible, Assigned, and **Unassigned Student** counts describe coverage for the selected School, Grade, and Student search, and do not change with the Phase, Mentor, or Progress filters; Pending, Completed, and Skipped counts continue to follow every filter
+- When a single Holistic Mentor is selected in **Students & Progress**, coverage counts are not shown and **Unassigned Students** cannot be selected, because an **Unassigned Student** has no Mentor
+- **Students & Progress** shows no Eligible or **Unassigned Student** counts for earlier academic years, because LMS has no trustworthy historical eligibility; earlier years show only Students who had a Mapping that year
+- Every role that can open **Students & Progress** sees **Unassigned Students** only inside the School scope it already has
+- The **Students & Progress** School filter offers only Schools with at least one Holistic Mentee
+- **Students & Progress** counts and lists **Unassigned Students** only from Schools with at least one Holistic Mentee; a School with no Holistic Mentees contributes nothing to the Eligible or Unassigned totals and is reviewed through its School assignment coverage instead
 - School-level assignment coverage shows eligible, assigned, and unassigned Students, Mentors with active Mappings, assignment coverage percentage, and completed, pending, and no-active-Phase counts inside the actor's permitted scope
 - Program Managers, Program Admins, Holistic Mentorship Admins, and Admins can open an eligible Student's read-only Holistic Mentorship details inside their detailed Student scope, including from assignment coverage when the Student is unassigned; Teachers can open details only for their own Mentees
 - A **Holistic Mentorship Admin** or **Admin** can read every in-scope Holistic Mentee's Student Context and submitted Post-Session Notes, manage current-year Mentor-Mentee Mappings with confirmation and an audit reason, configure Phases, and request missing or failed Profile regeneration; they cannot see draft Notes or author or edit Post-Session Notes

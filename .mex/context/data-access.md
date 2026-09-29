@@ -86,6 +86,22 @@ The September 11, 2026 production Admin progress request for Program 1 / 2026–
 
 The progress route catches failures after preserving its auth/permission gates, returning a safe JSON 503 for statement cancellation/timeouts and 500 for other failures; logs contain only an error code. The client handles empty/non-JSON bodies and permits Refresh to recover, without surfacing errors from aborted requests. Local E2E fixtures mirror the current DB Service view so they exercise the same roster rules. Read-only production timing of the final SQL was approximately 1.1 seconds for 50 rows / 1,670 mapped Students; the previous query timed out. See the fix PR for final local and staging verification.
 
+## Holistic Students & Progress coverage query (#343)
+
+`listHolisticProgress` returns `coverage: { eligible, assigned, unassigned }` only for the current Academic Year with no Mentor filter and not for the CSV (`all`) read; otherwise `null`. It runs after reconciliation, in parallel with the list query. Shape:
+
+- `holisticMenteeSchoolsCte` — in-scope Schools with at least one active current-year Mapping in the Program. The current-year School dropdown in `getHolisticProgressOptions` uses the same fragment, so selectable Schools and coverage cannot drift. The School scope predicate is applied here (`mapping_school` alias). The past-year dropdown still uses latest-Mapping history.
+- `CURRENT_ELIGIBLE_ROSTER_CTES` — a query-local `MATERIALIZED` Program/year `centre_students` snapshot (Grades 11/12), joined to the Program's active Centres and grouped by (School, Student User) with exactly one Grade, then restricted to mentee Schools, non-dropout Students, `school_code`, Grade and Student search. The Unassigned-list slice reuses this building block.
+- A pair is Assigned when an active current-year Mapping exists for that Student at that School and Program, exactly like School Assignment Coverage.
+
+The Mapping module's `ELIGIBLE_ROSTER_CTE_SQL` is untouched; parity is enforced by `holistic-progress.spec.ts` against the Teacher roster API. `EXPLAIN (ANALYZE, BUFFERS)` inside `BEGIN READ ONLY` on a local production-derived snapshot (September 24, 2026; 1,808 / 191 active Mappings): coverage 231 ms (Program 1) and 14 ms (Program 78). The current-year School options query measured 2.4 ms (Program 1) and 0.8 ms (Program 78) on the snapshot. The snapshot is a local clone, not live production; never invoke `listHolisticProgress` against production, because its reconciliation mutates.
+
+## Holistic Unassigned Student list (#344)
+
+`listHolisticProgress` dispatches on `filters.progress`. Every value except `unassigned` runs the assigned-Mentee query (SQL text unchanged). `unassigned` runs `listUnassignedStudents`: `holisticMenteeSchoolsCte` + `CURRENT_ELIGIBLE_ROSTER_CTES` (reused, not copied), keeping pairs with no active current-year Mapping for that Student at that School and Program. Each row carries its Grade's `activePhaseId`: the highest-position `open` Phase for that Grade in the Program/year Plan (same rule as the School roster). With `phase_id`, rows are limited to that Phase's Grade within this Program/year Plan, so an unknown or foreign Phase gives an empty list. Sorts reuse `progressOrder`; the CTE exposes `NULL` Mentor, Phase and Progress columns, so those sorts fall back to the tie-breakers. Rows are paged at 50; CSV (`all`) returns every row. Under Unassigned, `counts.total` is the list total and the four progress counts are 0. Reconciliation still runs first, and coverage still ignores `progress`. The route rejects `progress=unassigned` with a past year or `mentor_user_id` (422, before authorization).
+
+On the same local snapshot (September 24, 2026), the Unassigned SELECT took 22–37 ms warm (279 ms cold) for a 50-row Program 1 page, 24 ms for all rows, and 20 ms for Program 78. It is a local clone, not live production.
+
 ## Holistic Grade 12 phase labels
 
 Student detail now returns only real current Grade 12 phases when no continuing Grade 11 history applies; it no longer invents four placeholder tabs or forces numbering to start at 5. Existing plan-wide numbering is retained (the reported Maharashtra plan displays Grade 12 as Phase 2). Continuing prior-year history, phase IDs, context precedence, permissions and database access are unchanged. Missing generated profiles do not change numbering and do not establish source-form completion. No schema/data repair is involved.

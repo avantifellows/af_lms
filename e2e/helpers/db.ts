@@ -92,15 +92,95 @@ async function applyE2eMigrations(pool: Pool): Promise<void> {
   }
 }
 
-async function seedHolisticE2eRoster(
+type HolisticE2eRoster = {
+  schoolCode: string;
+  programId: number;
+  centreName: string;
+  batchId: string;
+  batchName: string;
+  students: ReadonlyArray<{ suffix: string; firstName: string; lastName: string; grade: 11 | 12 }>;
+};
+
+const JNV_HOLISTIC_E2E_ROSTER: HolisticE2eRoster = {
+  schoolCode: "LMS75",
+  programId: 1,
+  centreName: "LMS75 Holistic E2E Centre",
+  batchId: "E2E-HOLISTIC-COE",
+  batchName: "Holistic E2E CoE Batch",
+  students: [
+    { suffix: "11-A", firstName: "Holistic", lastName: "Eleven A", grade: 11 },
+    { suffix: "11-B", firstName: "Holistic", lastName: "Eleven B", grade: 11 },
+    { suffix: "11-C", firstName: "Holistic", lastName: "Eleven C", grade: 11 },
+    { suffix: "12-A", firstName: "Holistic", lastName: "Twelve A", grade: 12 },
+    { suffix: "12-B", firstName: "Holistic", lastName: "Twelve B", grade: 12 },
+    { suffix: "12-C", firstName: "Holistic", lastName: "Twelve C", grade: 12 },
+  ],
+};
+
+// The shared Holistic fixtures cover JNV CoE only. The Admin Program-switch
+// journey also needs an EMRS CoE School whose Assignment Coverage has an
+// openable Student, which the local dump does not provide.
+const EMRS_HOLISTIC_E2E_ROSTER: HolisticE2eRoster = {
+  schoolCode: "LMS78",
+  programId: 78,
+  centreName: "LMS78 Holistic E2E EMRS Centre",
+  batchId: "E2E-HOLISTIC-EMRS",
+  batchName: "Holistic E2E EMRS Batch",
+  students: [
+    { suffix: "78-11-A", firstName: "Holistic EMRS", lastName: "Eleven A", grade: 11 },
+  ],
+};
+
+async function seedHolisticE2eEmrsScope(
   client: Pick<PoolClient, "query">
+): Promise<void> {
+  await client.query(
+    `INSERT INTO school
+       (id, code, name, inserted_at, updated_at, udise_code, af_school_category, region, state, district, program_ids)
+     VALUES
+       (900078, 'LMS78', 'LMS EMRS Fixture School', NOW(), NOW(), '75000000078', 'EMRS',
+        'LMS_FIXTURE', 'Gujarat', 'Ahmedabad', ARRAY[78]::integer[])
+     ON CONFLICT (id) DO NOTHING`
+  );
+  await seedHolisticE2eRoster(client, EMRS_HOLISTIC_E2E_ROSTER);
+
+  const planResult = await client.query<{ id: number }>(
+    `WITH created AS (
+       INSERT INTO holistic_mentorship_phase_plans (program_id, academic_year, inserted_at, updated_at)
+       VALUES ($1, $2, NOW(), NOW()) ON CONFLICT (program_id, academic_year) DO NOTHING RETURNING id
+     )
+     SELECT id FROM created UNION ALL
+     SELECT id FROM holistic_mentorship_phase_plans WHERE program_id = $1 AND academic_year = $2 LIMIT 1`,
+    [EMRS_HOLISTIC_E2E_ROSTER.programId, CURRENT_ACADEMIC_YEAR]
+  );
+  await client.query(
+    `INSERT INTO holistic_mentorship_phases
+       (phase_plan_id, grade_id, title, position, state, guidance_markdown, revision, inserted_at, updated_at)
+     SELECT $1, grade.id, 'Synthetic EMRS Grade 11 Active', 1, 'open', 'Synthetic guidance only.', 1, NOW(), NOW()
+     FROM grade WHERE grade.number = 11 ORDER BY grade.id LIMIT 1
+     ON CONFLICT (phase_plan_id, position) DO NOTHING`,
+    [Number(planResult.rows[0].id)]
+  );
+  await client.query(
+    `INSERT INTO holistic_mentorship_phase_questions (phase_id, text, position, inserted_at, updated_at)
+     SELECT phase.id, 'Synthetic: What support will help next?', 1, NOW(), NOW()
+     FROM holistic_mentorship_phases phase
+     WHERE phase.phase_plan_id = $1 AND phase.position = 1
+     ON CONFLICT (phase_id, position) DO NOTHING`,
+    [Number(planResult.rows[0].id)]
+  );
+}
+
+async function seedHolisticE2eRoster(
+  client: Pick<PoolClient, "query">,
+  roster: HolisticE2eRoster = JNV_HOLISTIC_E2E_ROSTER
 ): Promise<void> {
   const schoolResult = await client.query<{ id: number }>(
     `SELECT id FROM school WHERE code = $1 LIMIT 1`,
-    ["LMS75"]
+    [roster.schoolCode]
   );
   if (schoolResult.rows.length === 0) {
-    throw new Error("Holistic E2E fixture School LMS75 is missing");
+    throw new Error(`Holistic E2E fixture School ${roster.schoolCode} is missing`);
   }
   const schoolId = Number(schoolResult.rows[0].id);
 
@@ -109,12 +189,12 @@ async function seedHolisticE2eRoster(
        name, school_id, program_id, is_physical, is_active,
        inserted_at, updated_at
      )
-     SELECT $1, $2, 1, true, true,
+     SELECT $1, $2, $3, true, true,
             (NOW() AT TIME ZONE 'UTC'), (NOW() AT TIME ZONE 'UTC')
      WHERE NOT EXISTS (
-       SELECT 1 FROM centres WHERE school_id = $2 AND program_id = 1 AND is_active IS TRUE
+       SELECT 1 FROM centres WHERE school_id = $2 AND program_id = $3 AND is_active IS TRUE
      )`,
-    ["LMS75 Holistic E2E Centre", schoolId]
+    [roster.centreName, schoolId, roster.programId]
   );
 
   const schoolGroupResult = await client.query<{ id: number }>(
@@ -136,7 +216,7 @@ async function seedHolisticE2eRoster(
        SELECT id FROM batch WHERE batch_id = $1 LIMIT 1
      ), inserted_batch AS (
        INSERT INTO batch (name, batch_id, program_id, inserted_at, updated_at)
-       SELECT $2, $1, 1, (NOW() AT TIME ZONE 'UTC'), (NOW() AT TIME ZONE 'UTC')
+       SELECT $2, $1, $3, (NOW() AT TIME ZONE 'UTC'), (NOW() AT TIME ZONE 'UTC')
        WHERE NOT EXISTS (SELECT 1 FROM existing_batch)
        RETURNING id
      ), fixture_batch AS (
@@ -155,7 +235,7 @@ async function seedHolisticE2eRoster(
        RETURNING id
      )
      SELECT id FROM inserted_group UNION ALL SELECT id FROM existing_group LIMIT 1`,
-    ["E2E-HOLISTIC-COE", "Holistic E2E CoE Batch"]
+    [roster.batchId, roster.batchName, roster.programId]
   );
   const batchGroupId = Number(batchGroupResult.rows[0].id);
 
@@ -165,16 +245,7 @@ async function seedHolisticE2eRoster(
      WHERE student_id LIKE 'E2E-HM-%'`
   );
 
-  const students = [
-    { suffix: "11-A", firstName: "Holistic", lastName: "Eleven A", grade: 11 },
-    { suffix: "11-B", firstName: "Holistic", lastName: "Eleven B", grade: 11 },
-    { suffix: "11-C", firstName: "Holistic", lastName: "Eleven C", grade: 11 },
-    { suffix: "12-A", firstName: "Holistic", lastName: "Twelve A", grade: 12 },
-    { suffix: "12-B", firstName: "Holistic", lastName: "Twelve B", grade: 12 },
-    { suffix: "12-C", firstName: "Holistic", lastName: "Twelve C", grade: 12 },
-  ] as const;
-
-  for (const studentFixture of students) {
+  for (const studentFixture of roster.students) {
     const email = `e2e-hm-student-${studentFixture.suffix.toLowerCase()}@test.local`;
     const studentId = `E2E-HM-${studentFixture.suffix}`;
     const userResult = await client.query<{ id: number }>(
@@ -286,6 +357,7 @@ export async function resetDatabase(): Promise<void> {
       await client.query("BEGIN");
       await seedHolisticE2eRoster(client);
       await seedHolisticFixtures(client);
+      await seedHolisticE2eEmrsScope(client);
       await client.query("COMMIT");
     } catch (error) {
       await client.query("ROLLBACK");
