@@ -707,3 +707,38 @@ export async function getStudentTimeSpentData(
   }
   return result;
 }
+
+/**
+ * Whether a test session's results at a school belong to `program` and to no
+ * other program.
+ *
+ * The Performance tab lists tests from this same fact table, filtered by
+ * `student_program`, so this is the definition of "this test belongs to that
+ * program" the UI already uses. A session with any row of another program at
+ * the school counts as not belonging: its combined-report jobs were built from
+ * a roster that may include that other program's Students. A session with no
+ * rows at all (unknown to the warehouse) also counts as not belonging, so the
+ * check fails closed. Null `student_program` rows are ignored.
+ */
+export async function isSessionOnlyForProgram(
+  udise: string,
+  sessionId: string,
+  program: string
+): Promise<boolean> {
+  const client = getBigQueryClient();
+  const sql = `
+    SELECT
+      COUNTIF(student_program = @program) AS in_program,
+      COUNTIF(student_program != @program) AS other_program
+    FROM ${FACT_TABLE}
+    WHERE student_school_udise_code = @udise
+      AND session_id = @sessionId
+  `;
+  const [rows] = await client.query({
+    query: sql,
+    params: { udise, sessionId, program },
+  });
+  const row = (rows as { in_program: number | string; other_program: number | string }[])[0];
+  if (!row) return false;
+  return Number(row.in_program) > 0 && Number(row.other_program) === 0;
+}

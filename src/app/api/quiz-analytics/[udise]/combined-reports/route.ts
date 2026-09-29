@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { authorizeSchoolAccess } from "@/lib/api-auth";
 import { resolvePerformanceProgram } from "@/lib/performance-program";
+import { refuseOutsidePmuSession } from "@/lib/performance-session-pin";
 import {
   getSchoolRoster,
   filterActiveRosterStudents,
@@ -41,6 +42,9 @@ export async function GET(
   }
 
   try {
+    // A PMU caller may only list a JNV NVS test's jobs (and their links).
+    const outside = await refuseOutsidePmuSession(auth.permission, udise, sessionId);
+    if (outside) return outside;
     const jobs = await listCombinedReportJobs(sessionId, auth.school.code);
     // The panel renders its button from this, so it needs the same verdict the
     // POST route will apply — otherwise the button invites a click that 409s.
@@ -109,6 +113,13 @@ export async function POST(
   }
 
   try {
+    // A PMU caller may only generate a report for a JNV NVS test.
+    const outside = await refuseOutsidePmuSession(
+      auth.permission,
+      udise,
+      body.session_id,
+    );
+    if (outside) return outside;
     // Gate before doing any work: the session must have closed, and this test
     // must not already have an in-flight report. An existing finished report
     // only blocks unless the caller explicitly asked to regenerate.

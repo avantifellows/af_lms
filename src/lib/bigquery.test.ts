@@ -651,3 +651,45 @@ describe("canonicalStream / streamDisplayLabel", () => {
     expect(streamDisplayLabel("unknown")).toBe("Unknown");
   });
 });
+
+describe("isSessionOnlyForProgram", () => {
+  async function check(rows: unknown[]) {
+    mocks.mockQueryFn.mockResolvedValueOnce([rows]);
+    const { isSessionOnlyForProgram } = await import("./bigquery");
+    return isSessionOnlyForProgram("11223344", "sess-1", "JNV NVS");
+  }
+
+  it("is true when every program-tagged row is the given program", async () => {
+    await expect(check([{ in_program: 30, other_program: 0 }])).resolves.toBe(true);
+    expect(mocks.mockQueryFn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        params: { udise: "11223344", sessionId: "sess-1", program: "JNV NVS" },
+      })
+    );
+  });
+
+  it("is false when the session has rows of another program at the school", async () => {
+    await expect(check([{ in_program: 30, other_program: 2 }])).resolves.toBe(false);
+  });
+
+  it("is false for a session of another program only", async () => {
+    await expect(check([{ in_program: 0, other_program: 40 }])).resolves.toBe(false);
+  });
+
+  it("is false (fails closed) when the warehouse has no rows for it", async () => {
+    await expect(check([{ in_program: 0, other_program: 0 }])).resolves.toBe(false);
+    await expect(check([])).resolves.toBe(false);
+  });
+
+  it("handles numeric strings from BigQuery", async () => {
+    await expect(check([{ in_program: "5", other_program: "0" }])).resolves.toBe(true);
+  });
+
+  it("propagates BQ errors to the caller", async () => {
+    mocks.mockQueryFn.mockRejectedValueOnce(new Error("BQ error"));
+    const { isSessionOnlyForProgram } = await import("./bigquery");
+    await expect(
+      isSessionOnlyForProgram("11223344", "sess-1", "JNV NVS")
+    ).rejects.toThrow("BQ error");
+  });
+});
