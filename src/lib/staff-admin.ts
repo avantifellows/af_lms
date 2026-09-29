@@ -732,13 +732,20 @@ async function clearExplicitSchoolScope(
 //   their regions, which seat assignment would wipe with no way to reconstitute.
 //   Reject seating such a user up front rather than silently collapsing their
 //   access to a single school.
+// A live row counts when it is linked by user_id OR by the User's email
+// (case-insensitive), the same match the roster uses: Admin-created rows carry
+// only an email, so a PMU row linked that way must still block the seat. The
+// region-level rule keeps its user_id-only match (email_only rows are skipped).
 // Returns a failure to surface, or null if allowed.
 async function rejectIneligibleSeatUser(
-  userId: number
+  userId: number,
+  email: string | null
 ): Promise<StaffValidationFailure | null> {
-  const rows = await query<{ level: number; role: string }>(
-    `SELECT level, role FROM user_permission WHERE user_id = $1 AND revoked_at IS NULL`,
-    [userId]
+  const rows = await query<{ level: number; role: string; email_only?: boolean }>(
+    `SELECT level, role, (user_id IS DISTINCT FROM $1) AS email_only
+     FROM user_permission
+     WHERE (user_id = $1 OR LOWER(email) = LOWER($2)) AND revoked_at IS NULL`,
+    [userId, email]
   );
   if (rows.some((r) => isPmuRole(r.role))) {
     return {
@@ -747,7 +754,7 @@ async function rejectIneligibleSeatUser(
       error: "PMU users can't hold centre seats — their access is pinned to JNV NVS.",
     };
   }
-  if (rows.some((r) => r.level === 2)) {
+  if (rows.some((r) => !r.email_only && r.level === 2)) {
     return {
       ok: false,
       status: 422,
@@ -771,14 +778,14 @@ async function validateSeatOccupant(
   role: SeatRole,
   excludePositionId?: number
 ): Promise<StaffValidationFailure | null> {
-  const users = await query<{ id: number }>(
-    `SELECT id FROM "user" WHERE id = $1`,
+  const users = await query<{ id: number; email: string | null }>(
+    `SELECT id, email FROM "user" WHERE id = $1`,
     [userId]
   );
   if (users.length === 0) {
     return { ok: false, status: 404, error: "User not found" };
   }
-  const ineligible = await rejectIneligibleSeatUser(userId);
+  const ineligible = await rejectIneligibleSeatUser(userId, users[0].email ?? null);
   if (ineligible) return ineligible;
   const duplicate = await query<{ id: number }>(
     `SELECT id FROM centre_positions

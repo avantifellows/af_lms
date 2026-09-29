@@ -506,4 +506,36 @@ describe("PATCH /api/admin/users/[id] — PMU roles", () => {
     expect((await res.json()).error).toMatch(/centre assignments/i);
     expect(updateParams()).toBeUndefined();
   });
+
+  it("returns 409 when the target is seated through an email-only permission link", async () => {
+    // The permission row has no user_id, so the user_id seat join finds nothing;
+    // the seat is found by the stored email instead.
+    mockQuery.mockImplementation(async (sql: string, args?: unknown[]) => {
+      if (sql.includes("JOIN user_permission up ON up.user_id = cp.user_id")) return [];
+      if (sql.includes("centre_positions")) {
+        return String(args?.[0]).toLowerCase() === "seated.pm@example.org"
+          ? [{ one: 1 }]
+          : [];
+      }
+      if (/SELECT[\s\S]*FROM user_permission[\s\S]*WHERE id = \$1/.test(sql)) {
+        return [{ ...MULTI_SCHOOL_PM, email: "Seated.PM@Example.org" }];
+      }
+      return [];
+    });
+    const res = await patch({ role: "pmu_manager", level: 3 });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toMatch(/centre assignments/i);
+    const emailSeatCheck = mockQuery.mock.calls.find(([sql]) =>
+      String(sql).includes("LOWER(u.email) = LOWER($1)")
+    );
+    expect(emailSeatCheck?.[1]).toEqual(["Seated.PM@Example.org"]);
+    expect(updateParams()).toBeUndefined();
+  });
+
+  it("still allows a PMU change when neither link finds a seat", async () => {
+    mockDb({ stored: { ...MULTI_SCHOOL_PM, email: "free.pm@example.org" } });
+    const res = await patch({ role: "pmu_manager", level: 3 });
+    expect(res.status).toBe(200);
+    expect(updateParams()).toEqual([3, "pmu_manager", null, null, [64], undefined, null, "5"]);
+  });
 });

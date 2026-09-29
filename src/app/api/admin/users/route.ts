@@ -4,7 +4,7 @@ import { query } from "@/lib/db";
 import { isUserRole, type UserRole } from "@/lib/permissions";
 import { HOLISTIC_MENTORSHIP_PROGRAM_IDS, isPmuRole } from "@/lib/constants";
 import { requireAdminApiAccess } from "../route-helpers";
-import { PMU_SEATED_ERROR, resolvePmuRow, type PmuRow } from "./pmu-rows";
+import { isSeatedEmail, PMU_SEATED_ERROR, resolvePmuRow, type PmuRow } from "./pmu-rows";
 
 // Disable Next.js caching for this route
 export const dynamic = "force-dynamic";
@@ -70,24 +70,6 @@ function userWriteParams(value: UserWrite, pmuRow: PmuRow | null) {
     value.read_only || false,
     value.full_name || null,
   ];
-}
-
-// POST upserts by email, so an existing seated person counts as the target.
-async function isSeatedEmail(email: string) {
-  const seats = await query<{ one: number }>(
-    `SELECT 1 AS one
-     FROM centre_positions cp
-     WHERE cp.deleted_at IS NULL
-       AND cp.user_id IN (
-         SELECT u.id FROM "user" u WHERE LOWER(u.email) = LOWER($1)
-         UNION
-         SELECT up.user_id FROM user_permission up
-         WHERE LOWER(up.email) = LOWER($1) AND up.user_id IS NOT NULL
-       )
-     LIMIT 1`,
-    [email]
-  );
-  return seats.length > 0;
 }
 
 // GET /api/admin/users - List all users

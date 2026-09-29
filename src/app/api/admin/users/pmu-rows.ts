@@ -22,6 +22,27 @@ export type PmuRow = {
 export const PMU_SEATED_ERROR =
   "This user is assigned to a centre. Remove their centre assignments in Staff Management before giving them a PMU role.";
 
+// Whether the person behind `email` holds an active centre seat. The seat's
+// User is matched by email (case-insensitive) or through any user_permission
+// row with that email, so a permission linked only by email still counts.
+// POST checks the posted email (it upserts); PATCH checks the stored row's.
+export async function isSeatedEmail(email: string) {
+  const seats = await query<{ one: number }>(
+    `SELECT 1 AS one
+     FROM centre_positions cp
+     WHERE cp.deleted_at IS NULL
+       AND cp.user_id IN (
+         SELECT u.id FROM "user" u WHERE LOWER(u.email) = LOWER($1)
+         UNION
+         SELECT up.user_id FROM user_permission up
+         WHERE LOWER(up.email) = LOWER($1) AND up.user_id IS NOT NULL
+       )
+     LIMIT 1`,
+    [email]
+  );
+  return seats.length > 0;
+}
+
 const GOVT_SHAPE_ERROR =
   "A PMU Govt School User must have School access with exactly one JNV School";
 const NON_JNV_ERROR = "PMU roles can only be assigned JNV Schools";

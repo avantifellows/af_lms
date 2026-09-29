@@ -789,6 +789,103 @@ describe("positions", () => {
     }
   );
 
+  describe("seat guard matches permission rows by user_id or email", () => {
+    type PermissionRow = {
+      user_id: number | null;
+      email: string;
+      level: number;
+      role: string;
+    };
+
+    // Fakes the guard's WHERE (user_id = $1 OR LOWER(email) = LOWER($2)) over
+    // `rows` and records the SQL so the predicate itself can be asserted.
+    function mockSeatGuard(rows: PermissionRow[]) {
+      const seen: { sql: string; args: unknown[] } = { sql: "", args: [] };
+      mockQuery.mockImplementationOnce((async (sql: string, args: unknown[]) => {
+        seen.sql = sql;
+        seen.args = args;
+        const [userId, email] = args as [number, string];
+        return rows
+          .filter(
+            (r) =>
+              r.user_id === userId || r.email.toLowerCase() === email.toLowerCase()
+          )
+          .map((r) => ({ level: r.level, role: r.role, email_only: r.user_id !== userId }));
+      }) as never);
+      return seen;
+    }
+
+    function seatUser70(rows: PermissionRow[]) {
+      mockSchemaReady();
+      mockQuery.mockResolvedValueOnce([{ id: 8 }]); // centre
+      mockQuery.mockResolvedValueOnce([{ id: 70, email: "Pmu.Lead@Example.org" }]); // user
+      const seen = mockSeatGuard(rows);
+      mockQuery.mockResolvedValueOnce([]); // duplicate check (none)
+      return seen;
+    }
+
+    it.each(["pmu_manager", "pmu_govt_school_user"])(
+      "createPosition refuses a %s row linked only by email (different case)",
+      async (pmuRole) => {
+        const seen = seatUser70([
+          { user_id: null, email: "pmu.lead@example.org", level: 3, role: pmuRole },
+        ]);
+        const result = await createPosition({
+          body: { centre_id: 8, role: "pm", user_id: 70 },
+        });
+        expect(result).toMatchObject({ ok: false, status: 409 });
+        expect(seen.sql).toContain("user_id = $1 OR LOWER(email) = LOWER($2)");
+        expect(seen.args).toEqual([70, "Pmu.Lead@Example.org"]);
+        expect(mockWithTransaction).not.toHaveBeenCalled();
+        expect(mockClientQuery).not.toHaveBeenCalled();
+      }
+    );
+
+    it("createPosition still refuses a PMU row linked by user_id", async () => {
+      seatUser70([
+        { user_id: 70, email: "someone.else@example.org", level: 1, role: "pmu_manager" },
+      ]);
+      const result = await createPosition({
+        body: { centre_id: 8, role: "pm", user_id: 70 },
+      });
+      expect(result).toMatchObject({ ok: false, status: 409 });
+      expect(mockClientQuery).not.toHaveBeenCalled();
+    });
+
+    it("updatePosition refuses a PMU row linked only by email", async () => {
+      mockSchemaReady();
+      mockQuery.mockResolvedValueOnce([
+        { id: 44, centre_id: 8, role: "pm", user_id: null },
+      ]); // vacant position
+      mockQuery.mockResolvedValueOnce([{ id: 70, email: "Pmu.Lead@Example.org" }]); // user
+      mockSeatGuard([
+        { user_id: null, email: "PMU.LEAD@example.org", level: 3, role: "pmu_manager" },
+      ]);
+      mockQuery.mockResolvedValueOnce([]); // duplicate check (none)
+      const result = await updatePosition({ id: 44, body: { user_id: 70 } });
+      expect(result).toMatchObject({ ok: false, status: 409 });
+      expect(mockClientQuery).not.toHaveBeenCalled();
+    });
+
+    it("createPosition still seats a non-PMU user linked only by email", async () => {
+      seatUser70([
+        { user_id: null, email: "pmu.lead@example.org", level: 1, role: "program_manager" },
+      ]);
+      expect(
+        await createPosition({ body: { centre_id: 8, role: "pm", user_id: 70 } })
+      ).toEqual({ ok: true });
+    });
+
+    it("keeps the region-level rule on user_id links only", async () => {
+      seatUser70([
+        { user_id: null, email: "pmu.lead@example.org", level: 2, role: "program_manager" },
+      ]);
+      expect(
+        await createPosition({ body: { centre_id: 8, role: "pm", user_id: 70 } })
+      ).toEqual({ ok: true });
+    });
+  });
+
   it("updatePosition still seats a Program Manager", async () => {
     mockSchemaReady();
     mockQuery.mockResolvedValueOnce([

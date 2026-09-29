@@ -8,7 +8,7 @@ import {
 import { isUserRole } from "@/lib/permissions";
 import { HOLISTIC_MENTORSHIP_PROGRAM_IDS, isPmuRole } from "@/lib/constants";
 import { requireAdminApiAccess } from "../../route-helpers";
-import { PMU_SEATED_ERROR, resolvePmuRow } from "../pmu-rows";
+import { isSeatedEmail, PMU_SEATED_ERROR, resolvePmuRow } from "../pmu-rows";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -56,12 +56,13 @@ function assignedPrograms(programIds: number[] | undefined, isHolisticAdmin: boo
 
 async function storedPermission(id: string) {
   const rows = await query<{
+    email: string | null;
     level: number;
     role: string;
     school_codes: string[] | null;
     regions: string[] | null;
   }>(
-    `SELECT level, role, school_codes, regions
+    `SELECT email, level, role, school_codes, regions
      FROM user_permission
      WHERE id = $1`,
     [id]
@@ -212,7 +213,9 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     const stored = userRole === undefined || isPmuRole(userRole) ? await storedPermission(id) : null;
     const effectiveRole = userRole ?? stored?.role;
     if (isPmuRole(effectiveRole)) {
-      if (isSeated) {
+      // The seat check above joins on user_id only; a row Admin created carries
+      // just an email, so also look the seat up by the stored email.
+      if (isSeated || (stored?.email && (await isSeatedEmail(stored.email)))) {
         return NextResponse.json({ error: PMU_SEATED_ERROR }, { status: 409 });
       }
       const resolved = await resolvePmuRow({
