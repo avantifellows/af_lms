@@ -731,7 +731,7 @@ export default async function RosterPage({
   // Fetch enrollment data in parallel. THE fork: a centre pulls its own roster
   // from the centre_students view; a school pulls the full school roster.
   const [
-    { students: dedupedStudents, issues: dataIssues },
+    { students: rosterStudents, issues: rosterIssues },
     grades,
     batches,
     supportedProgramIds,
@@ -744,16 +744,38 @@ export default async function RosterPage({
     getLmsSupportedProgramIds(),
   ]);
 
-  // Separate active and dropout students (all students visible; editability is per-row)
+  // PMU roles are pinned to JNV NVS (ADR 0007): narrow the roster on the
+  // server, before any props are built, so a mixed School's CoE, Nodal and
+  // unassigned Students never reach the browser (the client only filters by
+  // the selected card). An NVS Student has a current NVS batch or an NVS
+  // dropout that hasn't been undone — the same sets the NVS export lists — so
+  // NVS dropouts stay undoable. Data issues follow their Student.
+  const isPmu = isPmuRole(permission.role);
+  const isNvsStudent = (s: (typeof rosterStudents)[number]) =>
+    studentHasCurrentProgram(s, PMU_PROGRAM_ID) ||
+    studentDroppedFromProgram(s, PMU_PROGRAM_ID);
+  const dedupedStudents = isPmu ? rosterStudents.filter(isNvsStudent) : rosterStudents;
+  const nvsGroupUserIds = new Set(dedupedStudents.map((s) => String(s.group_user_id)));
+  const dataIssues = isPmu
+    ? rosterIssues.filter((issue) => nvsGroupUserIds.has(String(issue.groupUserId)))
+    : rosterIssues;
+
+  // Separate active and dropout students (all students visible; editability is per-row).
+  // A PMU user's lists hold only what the NVS card shows: active = a current
+  // NVS batch, dropout = dropped from NVS.
   const activeStudents = dedupedStudents.filter(
     (s) =>
       s.status !== "dropout" &&
-      supportedProgramIds.some((programId) =>
-        studentHasCurrentProgram(s, programId),
-      ),
+      (isPmu
+        ? studentHasCurrentProgram(s, PMU_PROGRAM_ID)
+        : supportedProgramIds.some((programId) =>
+            studentHasCurrentProgram(s, programId),
+          )),
   );
-  const dropoutStudents = dedupedStudents.filter(
-    (s) => s.status === "dropout" || (s.dropout_program_ids?.length ?? 0) > 0,
+  const dropoutStudents = dedupedStudents.filter((s) =>
+    isPmu
+      ? studentDroppedFromProgram(s, PMU_PROGRAM_ID)
+      : s.status === "dropout" || (s.dropout_program_ids?.length ?? 0) > 0,
   );
 
   // Extract distinct streams from NVS batches
@@ -763,7 +785,6 @@ export default async function RosterPage({
   // program (Performance filters by program name; Curriculum/Quiz by id).
   const centreProgramId = isCentre ? scope.centre.program_id ?? undefined : undefined;
   const centreProgramName = isCentre ? scope.centre.program_name ?? undefined : undefined;
-  const isPmu = isPmuRole(permission?.role);
   // Distinguishes "school page" (no centre program by definition) from "centre
   // page whose centre has no program" — both leave centreProgramId undefined,
   // but only the second must refuse to fall back to the school's data.
