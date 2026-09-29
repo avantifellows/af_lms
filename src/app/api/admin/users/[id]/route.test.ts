@@ -32,6 +32,7 @@ vi.mock("@/lib/db", () => ({
 import { getServerSession } from "next-auth";
 import { getUserPermission, type UserPermission } from "@/lib/permissions";
 import { DELETE, PATCH } from "./route";
+import { PMU_SEATED_ERROR } from "../pmu-rows";
 import {
   jsonRequest,
   routeParams,
@@ -320,7 +321,9 @@ describe("PATCH /api/admin/users/[id]", () => {
   it("rejects (409) editing school_codes for a user with a centre seat", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
     mockGetUserPermission.mockResolvedValue(ADMIN_PERMISSION);
-    mockQuery.mockResolvedValueOnce([{ one: 1 }]); // seated check → seated
+    mockQuery
+      .mockResolvedValueOnce([{ one: 1 }]) // seated check → seated
+      .mockResolvedValueOnce([{ level: 1, role: "program_manager", school_codes: null, regions: null }]); // stored row
     const req = jsonRequest("http://localhost/api/admin/users/5", {
       method: "PATCH",
       body: { school_codes: ["54019"] },
@@ -328,8 +331,26 @@ describe("PATCH /api/admin/users/[id]", () => {
     const res = await PATCH(req as never, params);
     expect(res.status).toBe(409);
     const json = await res.json();
-    expect(json.error).toContain("centre");
-    // guard returns before the UPDATE — only the seated check ran
+    expect(json.error).toContain("Change their centre assignment instead");
+    // guard returns before the UPDATE — only the seated check and the stored
+    // row read (to learn the effective role) ran
+    expect(mockQuery).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects (409) a non-PMU role change with school_codes for a seated user with the seated-scope message", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockGetUserPermission.mockResolvedValue(ADMIN_PERMISSION);
+    mockQuery.mockResolvedValueOnce([{ one: 1, user_id: 70 }]); // seated check → seated
+    const req = jsonRequest("http://localhost/api/admin/users/5", {
+      method: "PATCH",
+      body: { role: "program_manager", level: 1, school_codes: ["54019"], program_ids: [1] },
+    });
+    const res = await PATCH(req as never, params);
+    expect(res.status).toBe(409);
+    const json = await res.json();
+    expect(json.error).toContain("Change their centre assignment instead");
+    expect(json.error).not.toBe(PMU_SEATED_ERROR);
+    // a named non-PMU role needs no stored-row read
     expect(mockQuery).toHaveBeenCalledTimes(1);
   });
 
@@ -504,6 +525,17 @@ describe("PATCH /api/admin/users/[id] — PMU roles", () => {
     const res = await patch({ role: "pmu_manager", level: 3 });
     expect(res.status).toBe(409);
     expect((await res.json()).error).toMatch(/centre assignments/i);
+    expect(updateParams()).toBeUndefined();
+  });
+
+  it.each([
+    ["pmu_manager", { role: "pmu_manager", level: 1, school_codes: ["JNV001"] }],
+    ["pmu_govt_school_user", { role: "pmu_govt_school_user", level: 1, school_codes: ["JNV001"] }],
+  ])("returns PMU_SEATED_ERROR (not the seated-scope message) when a seated user is given %s with school_codes", async (_role, body) => {
+    mockDb({ seats: [{ one: 1, user_id: 70 }] });
+    const res = await patch(body);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: PMU_SEATED_ERROR });
     expect(updateParams()).toBeUndefined();
   });
 

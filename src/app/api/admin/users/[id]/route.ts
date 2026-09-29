@@ -195,6 +195,22 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       [id]
     );
     const isSeated = seated.length > 0;
+
+    // A PMU row is validated as the stored row with the body merged over it, so
+    // a role-only change can't leave a multi-school Govt School User behind.
+    const stored = userRole === undefined || isPmuRole(userRole) ? await storedPermission(id) : null;
+    const effectiveRole = userRole ?? stored?.role;
+    const isPmu = isPmuRole(effectiveRole);
+
+    // The PMU seat rule runs before the seated-scope rule below, so a seated
+    // user given a PMU role always gets PMU_SEATED_ERROR, even when the body
+    // also carries school_codes/regions. The seat check above joins on user_id
+    // only; a row Admin created carries just an email, so also look the seat
+    // up by the stored email.
+    if (isPmu && (isSeated || (stored?.email && (await isSeatedEmail(stored.email))))) {
+      return NextResponse.json({ error: PMU_SEATED_ERROR }, { status: 409 });
+    }
+
     const wantsScopeEdit =
       (Array.isArray(school_codes) && school_codes.length > 0) ||
       (Array.isArray(regions) && regions.length > 0);
@@ -208,16 +224,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       );
     }
 
-    // A PMU row is validated as the stored row with the body merged over it, so
-    // a role-only change can't leave a multi-school Govt School User behind.
-    const stored = userRole === undefined || isPmuRole(userRole) ? await storedPermission(id) : null;
-    const effectiveRole = userRole ?? stored?.role;
-    if (isPmuRole(effectiveRole)) {
-      // The seat check above joins on user_id only; a row Admin created carries
-      // just an email, so also look the seat up by the stored email.
-      if (isSeated || (stored?.email && (await isSeatedEmail(stored.email)))) {
-        return NextResponse.json({ error: PMU_SEATED_ERROR }, { status: 409 });
-      }
+    if (isPmu) {
       const resolved = await resolvePmuRow({
         role: effectiveRole,
         level: body.level ?? stored?.level,
