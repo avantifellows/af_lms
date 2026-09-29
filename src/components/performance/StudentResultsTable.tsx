@@ -26,7 +26,13 @@ interface Props {
   testName?: string | null;
 }
 
-type SortKey = "percentage" | "accuracy" | "attempt_rate" | "student_name" | "marks_scored";
+type SortKey =
+  | "percentage"
+  | "accuracy"
+  | "attempt_rate"
+  | "student_name"
+  | "marks_scored"
+  | "time_spent_seconds";
 type SortDir = "asc" | "desc";
 type QStatus = "idle" | "loading" | "loaded" | "error";
 
@@ -42,6 +48,22 @@ const STATUS_CLASS: Record<StudentQuestionRow["status"], string> = {
   wrong: "text-danger",
   skipped: "text-text-muted",
 };
+
+// Whole minutes, or an em-dash when the time is unknown (never a fake 0).
+function formatMinutes(seconds: number | null | undefined): string {
+  return seconds == null ? "—" : String(Math.round(seconds / 60));
+}
+
+// Unknown times sort after every known time in both directions, so missing
+// data never reads as the fastest (or slowest) attempt.
+function compareNullsLast(
+  a: number | null | undefined,
+  b: number | null | undefined,
+  mul: number
+): number {
+  if (a == null || b == null) return (a == null ? 1 : 0) - (b == null ? 1 : 0);
+  return mul * (a - b);
+}
 
 // The on-track / off-track flag asked for in #28, read off the report doc's
 // qualification_status. etl-next already decides this (it drives the student's
@@ -89,10 +111,12 @@ function ChapterRow({
   ch,
   studentQuestions,
   qStatus,
+  showTimeColumn,
 }: {
   ch: StudentChapterScore;
   studentQuestions: StudentQuestionRow[] | undefined;
   qStatus: QStatus;
+  showTimeColumn: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   // Drill-down to questions is only meaningful once the fetch has data.
@@ -140,6 +164,8 @@ function ChapterRow({
         <td className="px-3 py-1 text-[11px] font-mono text-text-secondary">
           {Math.round(ch.attempt_rate * 10) / 10}%
         </td>
+        {/* No chapter-level time; the blank cell keeps the columns aligned. */}
+        {showTimeColumn && <td className="px-3 py-1" />}
       </tr>
       {expanded &&
         questions.map((q) => (
@@ -149,7 +175,7 @@ function ChapterRow({
             </td>
             <td
               className={`px-3 py-1 text-[11px] font-semibold ${STATUS_CLASS[q.status]}`}
-              colSpan={4}
+              colSpan={showTimeColumn ? 5 : 4}
             >
               {STATUS_LABEL[q.status]}
             </td>
@@ -163,10 +189,12 @@ function SubjectWithChapters({
   ss,
   studentQuestions,
   qStatus,
+  showTimeColumn,
 }: {
   ss: StudentSubjectScore;
   studentQuestions: StudentQuestionRow[] | undefined;
   qStatus: QStatus;
+  showTimeColumn: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   const hasChapters = ss.chapters && ss.chapters.length > 0;
@@ -197,6 +225,11 @@ function SubjectWithChapters({
         <td className="px-3 py-1.5 text-xs font-mono text-text-primary">
           {Math.round(ss.attempt_rate * 10) / 10}%
         </td>
+        {showTimeColumn && (
+          <td className="px-3 py-1.5 text-xs font-mono text-text-primary">
+            {formatMinutes(ss.time_spent_seconds)}
+          </td>
+        )}
       </tr>
       {expanded &&
         ss.chapters!.map((ch) => (
@@ -205,6 +238,7 @@ function SubjectWithChapters({
             ch={ch}
             studentQuestions={studentQuestions}
             qStatus={qStatus}
+            showTimeColumn={showTimeColumn}
           />
         ))}
     </>
@@ -234,7 +268,10 @@ export default function StudentResultsTable({
   // warehouse refuses to count, under another name.
   //
   // JNV NVS does not use Academic Level or On Track, so both are hidden there too.
-  const showALColumns = !isAdvancedTest(testName) && !isNvsProgram(program);
+  const isNvs = isNvsProgram(program);
+  const showALColumns = !isAdvancedTest(testName) && !isNvs;
+  // NVS time spent comes from BigQuery via the deep-dive route.
+  const showTimeColumn = isNvs;
   const [sortKey, setSortKey] = useState<SortKey>("percentage");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [expandedName, setExpandedName] = useState<string | null>(null);
@@ -302,6 +339,9 @@ export default function StudentResultsTable({
     if (sortKey === "student_name") {
       return mul * a.student_name.localeCompare(b.student_name);
     }
+    if (sortKey === "time_spent_seconds") {
+      return compareNullsLast(a.time_spent_seconds, b.time_spent_seconds, mul);
+    }
     return mul * ((a[sortKey] ?? 0) - (b[sortKey] ?? 0));
   });
 
@@ -345,6 +385,17 @@ export default function StudentResultsTable({
     <th key="attempt-rate" className={SORTABLE_TH} onClick={() => handleSort("attempt_rate")}>
       Attempt Rate{sortIcon("attempt_rate")}
     </th>,
+    ...(showTimeColumn
+      ? [
+          <th
+            key="time-spent"
+            className={SORTABLE_TH}
+            onClick={() => handleSort("time_spent_seconds")}
+          >
+            Time Spent (min){sortIcon("time_spent_seconds")}
+          </th>,
+        ]
+      : []),
   ];
 
   const toggleStudent = (name: string) => {
@@ -444,6 +495,11 @@ export default function StudentResultsTable({
                     <td className="px-4 py-3 whitespace-nowrap text-sm font-mono text-text-primary">
                       {Math.round(s.attempt_rate * 10) / 10}%
                     </td>
+                    {showTimeColumn && (
+                      <td className="px-4 py-3 whitespace-nowrap text-sm font-mono text-text-primary">
+                        {formatMinutes(s.time_spent_seconds)}
+                      </td>
+                    )}
                   </tr>
                   {isExpanded && s.subject_scores.length > 0 && (
                     <tr>
@@ -467,6 +523,11 @@ export default function StudentResultsTable({
                                 <th className="px-3 py-1 text-left text-xs font-bold uppercase tracking-wider text-accent">
                                   Attempt Rate
                                 </th>
+                                {showTimeColumn && (
+                                  <th className="px-3 py-1 text-left text-xs font-bold uppercase tracking-wider text-accent">
+                                    Time Spent (min)
+                                  </th>
+                                )}
                               </tr>
                             </thead>
                             <tbody>
@@ -480,6 +541,7 @@ export default function StudentResultsTable({
                                       : undefined
                                   }
                                   qStatus={qStatus}
+                                  showTimeColumn={showTimeColumn}
                                 />
                               ))}
                             </tbody>
