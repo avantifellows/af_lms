@@ -9,6 +9,7 @@ import {
   type TestCategory,
   type FullTestView,
 } from "@/lib/performance-url-params";
+import { isNvsProgram } from "@/lib/constants";
 import type { PerformanceScope } from "./PerformanceContent";
 
 /** reconcileGrade's "leave the selection as it is" answer, distinct from null,
@@ -403,6 +404,8 @@ export function usePerformanceFilters({
     error,
     // Current selection
     selectedProgram: sel.selectedProgram,
+    // NVS schools get a narrower Performance tab (mandated tests only).
+    isNvs: isNvsProgram(sel.selectedProgram),
     selectedGrade: sel.selectedGrade,
     selectedStream: sel.selectedStream,
     selectedSubject: sel.selectedSubject,

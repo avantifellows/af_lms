@@ -105,6 +105,7 @@ export default function PerformanceTab({ schoolUdise, lockedProgram }: Props) {
         testCategory={f.testCategory}
         fullTestView={f.fullTestView}
         scope={f.scope}
+        isNvs={f.isNvs}
         onTestClick={f.handleTestClick}
         onFilterOptions={f.handleFilterOptions}
       />

@@ -12,6 +12,69 @@ function isChapterTest(format: string | null): boolean {
   return format != null && CHAPTER_FORMATS.includes(format.toLowerCase());
 }
 
+/**
+ * The tests the overview lists. NVS lists every returned test — the server has
+ * already narrowed them to System-wide Mandated Tests, which cut across the
+ * chapter/full split and test grades. Everyone else gets the category split
+ * plus the subject (chapter only) and test-grade filters.
+ */
+function listedTests(
+  tests: TestTrendPoint[],
+  {
+    isNvs,
+    testCategory,
+    subject,
+    testGrade,
+  }: { isNvs?: boolean; testCategory: TestCategory; subject?: string; testGrade?: number }
+): TestTrendPoint[] {
+  if (isNvs) return tests;
+  return tests.filter((t) => {
+    const isChapter = isChapterTest(t.test_format);
+    if (testCategory === "chapter" ? !isChapter : isChapter) return false;
+    if (testCategory === "chapter" && subject) {
+      if (!(t.subjects || []).includes(subject)) return false;
+    }
+    if (testGrade != null && t.test_grade !== testGrade) return false;
+    return true;
+  });
+}
+
+/** Copy for an overview with nothing to list — either no tests came back at
+ *  all, or the filters left none. NVS reads the same either way. */
+function emptyStateCopy({
+  isNvs,
+  hasData,
+  testCategory,
+  subject,
+  stream,
+  testGrade,
+}: {
+  isNvs?: boolean;
+  hasData: boolean;
+  testCategory: TestCategory;
+  subject?: string;
+  stream?: string;
+  testGrade?: number;
+}): string {
+  if (isNvs) return "No system-wide mandated tests yet for this grade/stream";
+  if (!hasData) return "No quiz data available for this grade yet.";
+  return [
+    `No ${testCategory === "chapter" ? "chapter" : "full"} tests`,
+    subject ? ` for ${subject}` : "",
+    stream ? ` for the selected stream` : "",
+    testGrade != null ? ` targeting grade ${testGrade}` : "",
+    " available for this grade yet.",
+  ].join("");
+}
+
+function EmptyOverview({ children }: { children: string }) {
+  return (
+    <div className="p-8 text-center bg-bg-card-alt border border-border rounded-lg shadow-sm">
+      <p className="text-sm text-text-muted">{children}</p>
+    </div>
+  );
+}
+
 interface Props {
   schoolUdise: string;
   grade: number;
@@ -20,6 +83,8 @@ interface Props {
   stream?: string;
   subject?: string;
   testGrade?: number;
+  /** JNV NVS: list every (mandated) test, with no format split or filters. */
+  isNvs?: boolean;
   onTestClick: (sessionId: string, testName: string) => void;
   onFilterOptions?: (opts: {
     streams: string[];
@@ -86,6 +151,7 @@ export default function BatchOverview({
   stream,
   subject,
   testGrade,
+  isNvs,
   onTestClick,
   onFilterOptions,
 }: Props) {
@@ -163,39 +229,18 @@ export default function BatchOverview({
     );
   }
 
-  if (!data || data.tests.length === 0) {
+  const allTests = data?.tests ?? [];
+  const tests = listedTests(allTests, { isNvs, testCategory, subject, testGrade });
+
+  if (!data || tests.length === 0) {
     return (
-      <div className="p-8 text-center bg-bg-card-alt border border-border rounded-lg shadow-sm">
-        <p className="text-sm text-text-muted">No quiz data available for this grade yet.</p>
-      </div>
+      <EmptyOverview>
+        {emptyStateCopy({ isNvs, hasData: allTests.length > 0, testCategory, subject, stream, testGrade })}
+      </EmptyOverview>
     );
   }
 
   const { totalEnrolled, enrolledByStream } = data;
-
-  const tests = data.tests.filter((t) => {
-    const isChapter = isChapterTest(t.test_format);
-    if (testCategory === "chapter" ? !isChapter : isChapter) return false;
-    if (testCategory === "chapter" && subject) {
-      if (!(t.subjects || []).includes(subject)) return false;
-    }
-    if (testGrade != null && t.test_grade !== testGrade) return false;
-    return true;
-  });
-
-  if (tests.length === 0) {
-    return (
-      <div className="p-8 text-center bg-bg-card-alt border border-border rounded-lg shadow-sm">
-        <p className="text-sm text-text-muted">
-          No {testCategory === "chapter" ? "chapter" : "full"} tests
-          {subject ? ` for ${subject}` : ""}
-          {stream ? ` for the selected stream` : ""}
-          {testGrade != null ? ` targeting grade ${testGrade}` : ""}
-          {" "}available for this grade yet.
-        </p>
-      </div>
-    );
-  }
 
   const avgAttendance = Math.round(
     tests.reduce((s, t) => s + (t.test_stream ? t.stream_student_count : t.student_count), 0) / tests.length

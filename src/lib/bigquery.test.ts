@@ -150,6 +150,33 @@ describe("getBatchOverviewData", () => {
     expect(calls[0][0].query).toContain("LOWER(student_stream) = @stream");
   });
 
+  it("lists only system-wide mandated tests for JNV NVS, leaving enrollment and params alone", async () => {
+    mocks.mockQueryFn.mockResolvedValueOnce([[]]).mockResolvedValueOnce([[]]);
+
+    const { getBatchOverviewData } = await import("./bigquery");
+    await getBatchOverviewData("11223344", 12, "JNV NVS");
+
+    const [testListCall, enrolledCall] = mocks.mockQueryFn.mock.calls;
+    expect(testListCall[0].query).toContain("AND test_purpose = 'system_wide_mandated'");
+    expect(enrolledCall[0].query).not.toContain("test_purpose");
+    expect(testListCall[0].params).toEqual({ udise: "11223344", grade: 12, program: "JNV NVS" });
+    expect(enrolledCall[0].params).toEqual({ udise: "11223344", grade: 12, program: "JNV NVS" });
+  });
+
+  it.each([
+    ["JNV CoE", "JNV CoE"],
+    ["no program", undefined],
+  ])("adds no test_purpose predicate for %s", async (_label, program) => {
+    mocks.mockQueryFn.mockResolvedValueOnce([[]]).mockResolvedValueOnce([[]]);
+
+    const { getBatchOverviewData } = await import("./bigquery");
+    await getBatchOverviewData("11223344", 12, program);
+
+    for (const [call] of mocks.mockQueryFn.mock.calls) {
+      expect(call.query).not.toContain("test_purpose");
+    }
+  });
+
   it("propagates BQ errors to the caller", async () => {
     mocks.mockQueryFn.mockRejectedValueOnce(new Error("BQ error"));
 

@@ -8,7 +8,7 @@ import type {
   TestQuestionLevelRow,
   StudentQuestionRow,
 } from "@/types/quiz";
-import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
+import { CURRENT_ACADEMIC_YEAR, isNvsProgram } from "@/lib/constants";
 import { alRank } from "@/lib/academic-level";
 
 let bigQueryClient: BigQuery | null = null;
@@ -173,6 +173,11 @@ export async function getBatchOverviewData(
   const client = getBigQueryClient();
   const programFilter = program ? `AND student_program = @program` : "";
   const streamFilter = stream ? `AND LOWER(student_stream) = @stream` : "";
+  // NVS schools only track System-wide Mandated Tests on this overview. A static
+  // literal, so it needs no param; enrollment counts are unaffected.
+  const purposeFilter = isNvsProgram(program)
+    ? `AND test_purpose = 'system_wide_mandated'`
+    : "";
   const params: Record<string, string | number> = { udise, grade };
   if (program) params.program = program;
   if (stream) params.stream = stream;
@@ -195,6 +200,7 @@ export async function getBatchOverviewData(
       AND session_id IS NOT NULL
       ${programFilter}
       ${streamFilter}
+      ${purposeFilter}
     GROUP BY session_id, test_name
     ORDER BY start_date ASC
   `;

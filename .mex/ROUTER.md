@@ -26,7 +26,7 @@ edges:
     condition: when working on teacher feedback setup, the feedback form, or its report
   - target: patterns/INDEX.md
     condition: when starting a task — check the pattern index for a matching pattern file
-last_updated: 2026-09-25
+last_updated: 2026-09-29
 ---
 
 # Session Bootstrap
@@ -38,6 +38,7 @@ Then read this file fully before doing anything else in this session.
 ## Current Project State
 
 **Working:**
+- Issue #351 slice #352: the NVS Performance batch overview lists only System-wide Mandated Tests (`test_purpose = 'system_wide_mandated'`), across all formats and test grades, with NVS-specific empty-state copy. Other programs are unchanged. See `context/data-access.md` §3.
 
 - Issue #340 complete (slices #342–#345, PR #346): Students & Progress says "Assigned" (`counts.total` replaces `counts.totalMapped`). It shows current-year Coverage cards (Eligible / Assigned / Unassigned; `coverage` is `null` under a Mentor filter or for a past year). Progress = Unassigned lists, opens (read-only) and exports eligible Students without a Mentor. The API returns 422 for `progress=unassigned` with a past year or `mentor_user_id`, and the client resets such view states to All Assigned. `holistic-mentorship.spec.ts` passes again (see `patterns/debug-e2e-fixtures.md`). Local e2e needs a sibling `../db-service_holistic_mentorship` (symlink to `../db-service`). See `context/data-access.md` and `patterns/debug-holistic-progress.md`.
 - September 23 scaffold reconciliation: recovered useful September 7–18 local notes onto current main, preserving already-merged behavior and condensing superseded investigation stages. Context now records #304 rollout, #321 production smoke, #323 QA, and #332/#334/#335 staging/merge outcomes. New runbooks cover shared staging, local enrollment repair and cleanup of old-branch scaffold edits. Original local files are backed up privately under sibling `release-records/mex-cleanup-20260923-125614/`.

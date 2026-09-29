@@ -21,7 +21,7 @@ edges:
     condition: when adding a write that must proxy to the DB Service
   - target: patterns/add-api-route.md
     condition: when adding a route that reads or writes
-last_updated: 2026-09-25
+last_updated: 2026-09-29
 ---
 
 # Data Access
@@ -53,6 +53,7 @@ if (!res.ok) { const text = await res.text(); /* surface upstream error */ }
 
 ## 3. BigQuery — quiz analytics reads (read-only)
 `src/lib/bigquery.ts`, lazy singleton `getBigQueryClient()`. Credentials via `GOOGLE_SERVICE_ACCOUNT_JSON` (string) or `GOOGLE_APPLICATION_CREDENTIALS` (file). Used by `/api/quiz-analytics/*`. Read-only; uses `CURRENT_ACADEMIC_YEAR` from constants.
+- **NVS batch overview:** when the program is JNV NVS (`isNvsProgram()` in `src/lib/constants.ts` — the one client-safe place that compares the label), `getBatchOverviewData`'s test-list query adds the static literal `AND test_purpose = 'system_wide_mandated'`. Enrollment counts, params, and the response shape don't change. On the client, `usePerformanceFilters` exposes `isNvs`; `BatchOverview` then lists every returned test (no Chapter/Full split, no subject/test-grade filters) and uses the empty state "No system-wide mandated tests yet for this grade/stream". A single-program school's program is auto-selected in the same batched update that loads grades, so the first overview render is already scoped (#352).
 
 ## 4. DynamoDB — performance dashboard reads (read-only)
 `src/lib/dynamodb.ts`, lazy singleton via `@aws-sdk/lib-dynamodb` `DynamoDBDocumentClient`. Holds test deep-dive reports keyed by school student identifiers (cross-referenced against Postgres rosters). Read-only.

@@ -18,6 +18,7 @@ interface BatchOverviewProps {
   stream?: string;
   subject?: string;
   testGrade?: number;
+  isNvs?: boolean;
   onFilterOptions?: (opts: {
     streams: string[];
     subjects: string[];
@@ -26,9 +27,11 @@ interface BatchOverviewProps {
 }
 
 let lastBatchOverviewProps: BatchOverviewProps | null = null;
+let batchOverviewRenders: BatchOverviewProps[] = [];
 vi.mock("./performance/BatchOverview", () => ({
   default: (props: BatchOverviewProps) => {
     lastBatchOverviewProps = props;
+    batchOverviewRenders.push(props);
     // simulate the real component reporting available filter options
     if (props.onFilterOptions) {
       Promise.resolve().then(() =>
@@ -80,6 +83,7 @@ describe("PerformanceTab", () => {
     vi.restoreAllMocks();
     mockReplace.mockReset();
     mockSearchParams = new URLSearchParams();
+    batchOverviewRenders = [];
   });
 
   it("shows loading spinner initially", () => {
@@ -178,6 +182,19 @@ describe("PerformanceTab", () => {
       expect(screen.getByTestId("batch-overview")).toBeInTheDocument();
     });
     expect(screen.getByText(/grade=11/)).toBeInTheDocument();
+    expect(batchOverviewRenders.some((p) => p.isNvs)).toBe(false);
+  });
+
+  it("scopes a single-program NVS school's overview to NVS from its very first render", async () => {
+    vi.stubGlobal("fetch", mockGradesResponse([12], ["JNV NVS"]));
+
+    render(<PerformanceTab schoolUdise="12345" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("batch-overview")).toBeInTheDocument();
+    });
+    expect(batchOverviewRenders[0]).toMatchObject({ program: "JNV NVS", isNvs: true });
+    expect(batchOverviewRenders.every((p) => p.program === "JNV NVS" && p.isNvs)).toBe(true);
   });
 
   it("shows grade selector when multiple grades exist (and no Grade 12)", async () => {
