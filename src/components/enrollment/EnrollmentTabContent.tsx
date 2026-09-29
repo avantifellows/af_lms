@@ -18,6 +18,7 @@ import {
 import {
   formatExamPreparingFor,
   matchesStreamFilter,
+  matchesStudentSearch,
   NO_STREAM,
   streamFilterOptions,
 } from "@/lib/stream-rules";
@@ -105,6 +106,7 @@ export default function EnrollmentTabContent({
   );
   const [selectedGrade, setSelectedGrade] = useState<string>("all");
   const [selectedStream, setSelectedStream] = useState<string>("all");
+  const [searchQuery, setSearchQuery] = useState("");
   const [addOpen, setAddOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [createdStudentId, setCreatedStudentId] = useState<string | null>(null);
@@ -227,6 +229,9 @@ export default function EnrollmentTabContent({
 
   // NVS speaks "Exam Preparing For": the same stream filter, formatted labels.
   const isNvsSelected = selectedProgramId === PROGRAM_IDS.NVS;
+  // Roster search is NVS-only; it narrows the table and "Showing X of Y" but
+  // not the program-card counts or Download List.
+  const rosterSearch = isNvsSelected ? searchQuery : "";
   const streamOptions = useMemo(() => {
     const built = streamFilterOptions(filteredActive);
     if (!isNvsSelected) return built;
@@ -247,17 +252,18 @@ export default function EnrollmentTabContent({
     return programs.map((p) => buildProgramStats(scopedActive, p.id));
   }, [programs, activeStudents, selectedGrade, selectedStream]);
 
-  // Active students of the selected program after the grade and stream
-  // filters. Drives the flag count and the "Showing X of Y" hint.
+  // Active students of the selected program after the grade, stream, and
+  // roster search filters. Drives the flag count and the "Showing X of Y" hint.
   const gradeStreamActive = useMemo(
     () =>
       filteredActive.filter(
         (student) =>
           (selectedGrade === "all" ||
             student.grade === Number(selectedGrade)) &&
-          matchesStreamFilter(student.stream, selectedStream),
+          matchesStreamFilter(student.stream, selectedStream) &&
+          matchesStudentSearch(student, rosterSearch),
       ),
-    [filteredActive, selectedGrade, selectedStream],
+    [filteredActive, selectedGrade, selectedStream, rosterSearch],
   );
   const flaggedCount = gradeStreamActive.filter(
     (s) => s.student_pk_id && openFlagStudentIds.has(s.student_pk_id),
@@ -379,6 +385,16 @@ export default function EnrollmentTabContent({
             </option>
           )}
         </select>
+        {isNvsSelected && (
+          <input
+            type="search"
+            aria-label="Search students"
+            placeholder="Search name, Student ID, PEN, APAAR ID, phone"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/20 sm:w-80"
+          />
+        )}
         {canUseInterventionFlags && (
           <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
             <input
@@ -390,7 +406,10 @@ export default function EnrollmentTabContent({
             Needs intervention only ({flaggedCount})
           </label>
         )}
-        {(selectedGrade !== "all" || selectedStream !== "all" || flagFilterOn) && (
+        {(selectedGrade !== "all" ||
+          selectedStream !== "all" ||
+          rosterSearch.trim() !== "" ||
+          flagFilterOn) && (
           <span className="text-sm text-gray-500">
             Showing {activeFilteredCount} of {filteredActive.length} students
           </span>
@@ -440,6 +459,7 @@ export default function EnrollmentTabContent({
             setSelectedId(id);
             setSelectedGrade("all");
             setSelectedStream("all");
+            setSearchQuery("");
           }}
           admission={admissionSummary}
           consentLoading={consentLoading}
@@ -464,6 +484,7 @@ export default function EnrollmentTabContent({
         selectedGrade={selectedGrade}
         onGradeChange={setSelectedGrade}
         selectedStream={selectedStream}
+        searchQuery={rosterSearch}
         hideGradeFilterUI
         onDataChanged={() => setConsentReloadKey((k) => k + 1)}
         openFlagStudentIds={canUseInterventionFlags ? openFlagStudentIds : undefined}

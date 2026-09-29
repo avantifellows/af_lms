@@ -27,6 +27,7 @@ vi.mock("@/components/StudentTable", () => ({
     canEditStudent?: boolean;
     selectedGrade?: string;
     selectedStream?: string;
+    searchQuery?: string;
     openFlagStudentIds?: Set<string>;
     onOpenInterventionFlag?: unknown;
   }) => (
@@ -37,6 +38,7 @@ vi.mock("@/components/StudentTable", () => ({
       data-can-edit-student={String(props.canEditStudent)}
       data-grade={props.selectedGrade}
       data-stream={props.selectedStream}
+      data-search={props.searchQuery ?? ""}
     />
   ),
 }));
@@ -321,6 +323,53 @@ describe("EnrollmentTabContent", () => {
     await user.click(screen.getByRole("button", { name: "Download List" }));
 
     expect(assign).toHaveBeenCalledWith("/api/school/12345678901/students/export?stream=__none__");
+    vi.unstubAllGlobals();
+  });
+
+  it("shows the roster search only for NVS and passes the query to the table", async () => {
+    const user = userEvent.setup();
+    render(
+      <EnrollmentTabContent
+        {...baseProps}
+        programs={[program(PROGRAM_IDS.NVS, "JNV NVS"), program(PROGRAM_IDS.COE, "JNV CoE")]}
+      />,
+    );
+
+    await user.type(screen.getByRole("searchbox", { name: "Search students" }), "riya");
+    expect(screen.getByTestId("student-table")).toHaveAttribute("data-search", "riya");
+
+    await user.click(screen.getByRole("button", { name: "JNV CoE" }));
+    expect(screen.queryByRole("searchbox", { name: "Search students" })).not.toBeInTheDocument();
+    expect(screen.getByTestId("student-table")).toHaveAttribute("data-search", "");
+
+    await user.click(screen.getByRole("button", { name: "JNV NVS" }));
+    expect(screen.getByRole("searchbox", { name: "Search students" })).toHaveValue("");
+    expect(screen.getByTestId("student-table")).toHaveAttribute("data-search", "");
+  });
+
+  it("counts the roster search in Showing X of Y but not in card counts or Download List", async () => {
+    const assign = vi.fn();
+    vi.stubGlobal("location", { ...window.location, assign });
+    const user = userEvent.setup();
+    render(
+      <EnrollmentTabContent
+        {...baseProps}
+        activeStudents={[
+          { first_name: "Riya", last_name: "Verma", student_id: "2028001", grade: 11, stream: "engineering", student_program_ids: [64] },
+          { first_name: "Kabir", last_name: "Rao", student_id: "2028002", grade: 11, stream: "engineering", student_program_ids: [64] },
+          { first_name: "Meera", last_name: "Iyer", student_id: "2028003", grade: 12, stream: null, student_program_ids: [64] },
+        ] as never}
+      />,
+    );
+
+    await user.selectOptions(screen.getByLabelText("Filter by Grade:"), "11");
+    await user.type(screen.getByRole("searchbox", { name: "Search students" }), " RIYA ");
+
+    expect(screen.getByText("Showing 1 of 3 students")).toBeInTheDocument();
+    expect(screen.getByTestId("enrollment-stats-total")).toHaveTextContent("2");
+
+    await user.click(screen.getByRole("button", { name: "Download List" }));
+    expect(assign).toHaveBeenCalledWith("/api/school/12345678901/students/export?grade=11");
     vi.unstubAllGlobals();
   });
 

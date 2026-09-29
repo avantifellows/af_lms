@@ -13,7 +13,11 @@ import {
 } from "@/components/ui";
 import { DocumentsList } from "@/components/documents/DocumentsList";
 import { PROGRAM_IDS, PROGRAM_ID_TO_LABEL } from "@/lib/constants";
-import { formatExamPreparingFor, matchesStreamFilter } from "@/lib/stream-rules";
+import {
+  formatExamPreparingFor,
+  matchesStreamFilter,
+  matchesStudentSearch,
+} from "@/lib/stream-rules";
 import { getCategoryColor } from "@/lib/student-utils";
 
 export interface Student {
@@ -98,6 +102,8 @@ interface StudentTableProps {
   selectedGrade?: string;
   onGradeChange?: (grade: string) => void;
   selectedStream?: string;
+  /** Parent-owned roster search; narrows both the Active and Dropout lists. */
+  searchQuery?: string;
   hideGradeFilterUI?: boolean;
   // Called after a save/upload (in addition to the internal router.refresh) so
   // the parent can refetch data it owns — e.g. the consent map behind the
@@ -580,6 +586,7 @@ export default function StudentTable({
   selectedGrade: controlledGrade,
   onGradeChange,
   selectedStream = "all",
+  searchQuery = "",
   hideGradeFilterUI = false,
   onDataChanged,
   openFlagStudentIds,
@@ -679,6 +686,7 @@ export default function StudentTable({
     (student) =>
       (selectedGrade === "all" || student.grade === parseInt(selectedGrade)) &&
       matchesStreamFilter(student.stream, selectedStream) &&
+      matchesStudentSearch(student, searchQuery) &&
       (!flaggedOnly || activeTab !== "active" || hasOpenFlag(student)),
   );
 

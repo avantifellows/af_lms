@@ -279,6 +279,69 @@ describe("StudentTable - stream filter", () => {
   });
 });
 
+describe("StudentTable - roster search", () => {
+  const students = [
+    makeStudent({ group_user_id: "g1", first_name: "Riya", last_name: "Verma", student_id: "2028001", pen_number: "11111111111", apaar_id: "APA-ONE", phone: "9000000001", grade: 11, stream: "engineering" }),
+    makeStudent({ group_user_id: "g2", first_name: "Kabir", last_name: "Rao", student_id: "2028002", pen_number: "22222222222", apaar_id: "APA-TWO", phone: "9000000002", grade: 12, stream: "medical" }),
+    makeStudent({ group_user_id: "g3", first_name: "Meera", last_name: "Iyer", student_id: "2028003", pen_number: null, apaar_id: null, phone: null, grade: 11, stream: null }),
+  ];
+  const shown = () =>
+    ["Riya Verma", "Kabir Rao", "Meera Iyer"].filter((name) => screen.queryByText(name));
+  const search = (searchQuery: string) =>
+    render(<StudentTable students={students} grades={defaultGrades} searchQuery={searchQuery} />);
+
+  it("finds a student by a full first-last name substring, ignoring case and whitespace", () => {
+    search("  ya VER ");
+    expect(shown()).toEqual(["Riya Verma"]);
+  });
+
+  it.each([
+    ["Student ID", "2028002"],
+    ["PEN", "22222222"],
+    ["APAAR ID", "apa-two"],
+    ["phone", " 9000000002 "],
+  ])("finds a student by %s", (_field: string, query: string) => {
+    search(query);
+    expect(shown()).toEqual(["Kabir Rao"]);
+  });
+
+  it("shows everyone for a blank query", () => {
+    search("   ");
+    expect(shown()).toEqual(["Riya Verma", "Kabir Rao", "Meera Iyer"]);
+  });
+
+  it("narrows the Dropout list too", async () => {
+    const user = userEvent.setup();
+    render(
+      <StudentTable
+        students={[students[0]]}
+        dropoutStudents={[
+          makeStudent({ group_user_id: "d1", first_name: "Kabir", last_name: "Rao", student_id: "2028002", status: "dropout" }),
+          makeStudent({ group_user_id: "d2", first_name: "Meera", last_name: "Iyer", student_id: "2028003", status: "dropout" }),
+        ]}
+        grades={defaultGrades}
+        searchQuery="kabir"
+      />,
+    );
+
+    await user.click(screen.getByText("Dropout (2)"));
+    expect(shown()).toEqual(["Kabir Rao"]);
+  });
+
+  it("combines with the grade and stream filters, including No stream", () => {
+    const { unmount } = render(
+      <StudentTable students={students} grades={defaultGrades} searchQuery="2028" selectedGrade="11" selectedStream="engineering" />,
+    );
+    expect(shown()).toEqual(["Riya Verma"]);
+    unmount();
+
+    render(
+      <StudentTable students={students} grades={defaultGrades} searchQuery="2028" selectedGrade="11" selectedStream="__none__" />,
+    );
+    expect(shown()).toEqual(["Meera Iyer"]);
+  });
+});
+
 // ─── 3. Tabs shown when dropout students exist ──────────────────────────────
 
 describe("StudentTable - tabs", () => {

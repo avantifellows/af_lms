@@ -53,3 +53,31 @@ export function formatExamPreparingFor(value: string | null) {
   const normalized = value?.trim().toLowerCase() ?? "";
   return ({ engineering: "Engineering", medical: "Medical", ca: "CA", clat: "CLAT", nda: "NDA" } as Record<string, string>)[normalized] ?? value ?? "";
 }
+
+export interface SearchableStudent {
+  first_name?: string | null;
+  last_name?: string | null;
+  student_id?: string | null;
+  pen_number?: string | null;
+  apaar_id?: string | null;
+  phone?: string | null;
+}
+
+/**
+ * NVS roster search: trimmed, case-insensitive substring over "first last",
+ * Student ID, PEN, APAAR ID, and phone. An empty query matches everyone.
+ */
+export function matchesStudentSearch(
+  student: SearchableStudent,
+  query: string,
+): boolean {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return true;
+  return [
+    `${student.first_name ?? ""} ${student.last_name ?? ""}`,
+    student.student_id,
+    student.pen_number,
+    student.apaar_id,
+    student.phone,
+  ].some((field) => field?.toLowerCase().includes(needle));
+}
