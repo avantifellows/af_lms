@@ -142,6 +142,11 @@ client-safe `src/lib/constants.ts`.
 - **Scope:** `resolveScope` skips the centre-seat lookup. Level 3 → `{ schools: "all", centres: ∅, programs: ∅ }`; levels 1/2 keep explicit codes and lazy regions only. `isCentreSeated`, `getCentreConfinement` and `canAccessCentreSync` are false, and `canViewCentre` denies outright (no School fallback).
 - **Ownership:** `ownsRecord` is true only for program 64; a null (unassigned) program is false.
 - **Students:** `canAccessStudent` (view and `requireEdit`, so Student documents too) also requires any current JNV NVS batch enrollment — not the single `LIMIT 1` program from `getStudentSchool`. The shared SQL fragment is `hasCurrentNvsBatchSql(userIdColumn)` in `src/lib/permissions.ts`.
+- **Admin user management:** Admin Users `POST`/`PATCH` validate the effective row (for `PATCH`, the stored row with the body merged over it) and always store `program_ids = [64]`:
+  - `pmu_govt_school_user` — level 1, exactly one JNV School code, no regions.
+  - `pmu_manager` — level 1: at least one code, all JNV Schools; level 2: at least one region, each with a JNV School; level 3: null codes and regions.
+  - Any other shape returns 400 `{ error }`. A target with an active centre seat returns 409 — remove their centre assignments in Staff Management first.
+  - The Admin modal replaces the Programs checkboxes with a read-only "JNV NVS" note; Govt School Users get a single-School picker and no level selector.
 
 ---
 

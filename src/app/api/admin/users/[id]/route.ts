@@ -6,8 +6,9 @@ import {
   endIneligibleHolisticMappings,
 } from "@/lib/staff-admin";
 import { isUserRole } from "@/lib/permissions";
-import { HOLISTIC_MENTORSHIP_PROGRAM_IDS } from "@/lib/constants";
+import { HOLISTIC_MENTORSHIP_PROGRAM_IDS, isPmuRole } from "@/lib/constants";
 import { requireAdminApiAccess } from "../../route-helpers";
+import { PMU_SEATED_ERROR, resolvePmuRow } from "../pmu-rows";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -51,6 +52,21 @@ function explicitScope(value: string[] | undefined, clear: boolean) {
 
 function assignedPrograms(programIds: number[] | undefined, isHolisticAdmin: boolean) {
   return isHolisticAdmin ? [...HOLISTIC_MENTORSHIP_PROGRAM_IDS] : programIds || null;
+}
+
+async function storedPermission(id: string) {
+  const rows = await query<{
+    level: number;
+    role: string;
+    school_codes: string[] | null;
+    regions: string[] | null;
+  }>(
+    `SELECT level, role, school_codes, regions
+     FROM user_permission
+     WHERE id = $1`,
+    [id]
+  );
+  return rows[0] ?? null;
 }
 
 async function updatePermission(
@@ -161,7 +177,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     }
     const userRole = role;
     const isHolisticAdmin = userRole === "holistic_mentorship_admin";
-    const validationError = validatePatch(body, isHolisticAdmin);
+    const validationError = validatePatch(body, isHolisticAdmin || isPmuRole(userRole));
     if (validationError) return validationError;
 
     // Centre seats are the source of truth for a seated user's school scope
@@ -189,6 +205,36 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
         },
         { status: 409 }
       );
+    }
+
+    // A PMU row is validated as the stored row with the body merged over it, so
+    // a role-only change can't leave a multi-school Govt School User behind.
+    const stored = userRole === undefined || isPmuRole(userRole) ? await storedPermission(id) : null;
+    const effectiveRole = userRole ?? stored?.role;
+    if (isPmuRole(effectiveRole)) {
+      if (isSeated) {
+        return NextResponse.json({ error: PMU_SEATED_ERROR }, { status: 409 });
+      }
+      const resolved = await resolvePmuRow({
+        role: effectiveRole,
+        level: body.level ?? stored?.level,
+        school_codes: school_codes !== undefined ? school_codes : stored?.school_codes,
+        regions: regions !== undefined ? regions : stored?.regions,
+      });
+      if (!resolved.ok) {
+        return NextResponse.json({ error: resolved.error }, { status: 400 });
+      }
+      const { row } = resolved;
+      await withTransaction((client) =>
+        updatePermission(
+          client,
+          [row.level, userRole, row.school_codes, row.regions, row.program_ids,
+            body.read_only, body.full_name ?? null, id],
+          userRole,
+          Number(seated[0]?.user_id)
+        )
+      );
+      return NextResponse.json({ success: true });
     }
 
     const clearExplicitScope = isHolisticAdmin || isSeated;

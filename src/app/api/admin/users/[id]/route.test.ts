@@ -338,6 +338,7 @@ describe("PATCH /api/admin/users/[id]", () => {
     mockGetUserPermission.mockResolvedValue(ADMIN_PERMISSION);
     mockQuery
       .mockResolvedValueOnce([{ one: 1 }]) // seated check → seated
+      .mockResolvedValueOnce([{ level: 1, role: "program_manager", school_codes: null, regions: null }]) // stored row
       .mockResolvedValueOnce([]); // UPDATE
     const req = jsonRequest("http://localhost/api/admin/users/5", {
       method: "PATCH",
@@ -345,7 +346,7 @@ describe("PATCH /api/admin/users/[id]", () => {
     });
     const res = await PATCH(req as never, params);
     expect(res.status).toBe(200);
-    const updateArgs = mockQuery.mock.calls[1][1] as unknown[];
+    const updateArgs = mockQuery.mock.calls[2][1] as unknown[];
     expect(updateArgs[2]).toBeNull(); // school_codes
     expect(updateArgs[3]).toBeNull(); // regions
   });
@@ -355,6 +356,7 @@ describe("PATCH /api/admin/users/[id]", () => {
     mockGetUserPermission.mockResolvedValue(ADMIN_PERMISSION);
     mockQuery
       .mockResolvedValueOnce([]) // seated check → not seated
+      .mockResolvedValueOnce([{ level: 1, role: "teacher", school_codes: null, regions: null }]) // stored row
       .mockResolvedValueOnce([]); // UPDATE
     const req = jsonRequest("http://localhost/api/admin/users/5", {
       method: "PATCH",
@@ -362,7 +364,7 @@ describe("PATCH /api/admin/users/[id]", () => {
     });
     const res = await PATCH(req as never, params);
     expect(res.status).toBe(200);
-    const updateArgs = mockQuery.mock.calls[1][1] as unknown[];
+    const updateArgs = mockQuery.mock.calls[2][1] as unknown[];
     expect(updateArgs[2]).toEqual(["54019"]); // school_codes applied
   });
 
@@ -389,5 +391,119 @@ describe("PATCH /api/admin/users/[id]", () => {
     });
     const res = await PATCH(req as never, params);
     expect(res.status).toBe(500);
+  });
+});
+
+describe("PATCH /api/admin/users/[id] — PMU roles", () => {
+  const params = routeParams({ id: "5" });
+  const JNV_SCHOOLS = [
+    { code: "JNV001", region: "North" },
+    { code: "JNV002", region: "North" },
+  ];
+  const MULTI_SCHOOL_PM = {
+    level: 1,
+    role: "program_manager",
+    school_codes: ["JNV001", "JNV002"],
+    regions: null,
+    program_ids: [1, 64],
+  };
+
+  // Routes each SQL statement to a fake: the seat check answers from `seats`,
+  // the stored-row read from `stored`, and JNV lookups from JNV_SCHOOLS.
+  function mockDb({ seats = [] as unknown[], stored = MULTI_SCHOOL_PM as unknown } = {}) {
+    mockQuery.mockImplementation(async (sql: string, args?: unknown[]) => {
+      if (sql.includes("centre_positions")) return seats;
+      if (sql.includes("af_school_category = 'JNV'")) {
+        const wanted = (args?.[0] ?? []) as string[];
+        return sql.includes("region")
+          ? JNV_SCHOOLS.filter((s) => wanted.includes(s.region)).map((s) => ({ region: s.region }))
+          : JNV_SCHOOLS.filter((s) => wanted.includes(s.code)).map((s) => ({ code: s.code }));
+      }
+      if (/SELECT[\s\S]*FROM user_permission[\s\S]*WHERE id = \$1/.test(sql)) {
+        return stored ? [stored] : [];
+      }
+      return [];
+    });
+  }
+
+  function updateParams() {
+    const call = mockQuery.mock.calls.find(([sql]) =>
+      String(sql).includes("UPDATE user_permission")
+    );
+    return call?.[1];
+  }
+
+  async function patch(body: Record<string, unknown>) {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockGetUserPermission.mockResolvedValue(ADMIN_PERMISSION);
+    const req = jsonRequest("http://localhost/api/admin/users/5", { method: "PATCH", body });
+    return PATCH(req as never, params);
+  }
+
+  it.each([
+    ["a Govt School User at level 2", { role: "pmu_govt_school_user", level: 2, regions: ["North"] }],
+    ["a Govt School User at level 3", { role: "pmu_govt_school_user", level: 3 }],
+    ["a Govt School User with no codes", { role: "pmu_govt_school_user", level: 1, school_codes: [] }],
+    ["a Govt School User with two codes", { role: "pmu_govt_school_user", level: 1, school_codes: ["JNV001", "JNV002"] }],
+    ["a Govt School User with a non-JNV code", { role: "pmu_govt_school_user", level: 1, school_codes: ["OTHER1"] }],
+    ["a Manager at level 1 with a non-JNV code", { role: "pmu_manager", level: 1, school_codes: ["OTHER1"] }],
+    ["a Manager at level 1 with no codes", { role: "pmu_manager", level: 1, school_codes: [] }],
+    ["a Manager at level 2 with no region", { role: "pmu_manager", level: 2, regions: [] }],
+    ["a Manager at level 2 with a region without a JNV School", { role: "pmu_manager", level: 2, regions: ["Nowhere"] }],
+    ["a role-only change to Govt School User on a multi-school row", { role: "pmu_govt_school_user" }],
+  ])("returns 400 for %s", async (_label, body) => {
+    mockDb();
+    const res = await patch(body);
+    expect(res.status).toBe(400);
+    expect(typeof (await res.json()).error).toBe("string");
+    expect(updateParams()).toBeUndefined();
+  });
+
+  it("returns 400 when a stored Govt School User row is edited to level 3", async () => {
+    mockDb({
+      stored: { level: 1, role: "pmu_govt_school_user", school_codes: ["JNV001"], regions: null, program_ids: [64] },
+    });
+    const res = await patch({ level: 3 });
+    expect(res.status).toBe(400);
+    expect(updateParams()).toBeUndefined();
+  });
+
+  it("stores [64] and the single School for a role-only change on a one-school row", async () => {
+    mockDb({ stored: { ...MULTI_SCHOOL_PM, school_codes: ["JNV002"] } });
+    const res = await patch({ role: "pmu_govt_school_user", program_ids: [1] });
+    expect(res.status).toBe(200);
+    expect(updateParams()).toEqual([
+      1, "pmu_govt_school_user", ["JNV002"], null, [64], undefined, null, "5",
+    ]);
+  });
+
+  it("ignores body program_ids and stores null scope for a level-3 Manager", async () => {
+    mockDb();
+    const res = await patch({
+      role: "pmu_manager",
+      level: 3,
+      school_codes: ["JNV001"],
+      regions: ["North"],
+      program_ids: [1, 2],
+      read_only: true,
+      full_name: "PMU Lead",
+    });
+    expect(res.status).toBe(200);
+    expect(updateParams()).toEqual([3, "pmu_manager", null, null, [64], true, "PMU Lead", "5"]);
+  });
+
+  it("stores regions for a level-2 Manager", async () => {
+    mockDb();
+    const res = await patch({ role: "pmu_manager", level: 2, regions: ["North"], school_codes: [] });
+    expect(res.status).toBe(200);
+    expect(updateParams()).toEqual([2, "pmu_manager", null, ["North"], [64], undefined, null, "5"]);
+  });
+
+  it("returns 409 when the target holds a centre seat", async () => {
+    mockDb({ seats: [{ one: 1, user_id: 70 }] });
+    const res = await patch({ role: "pmu_manager", level: 3 });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toMatch(/centre assignments/i);
+    expect(updateParams()).toBeUndefined();
   });
 });

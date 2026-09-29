@@ -59,6 +59,8 @@ const ROLE_LABELS: Record<string, string> = {
   program_admin: "Program Admin",
   program_manager: "Program Manager",
   holistic_mentorship_admin: "Holistic Mentorship Admin",
+  pmu_manager: "PMU Manager",
+  pmu_govt_school_user: "PMU Govt School User",
   teacher: "Teacher",
 };
 
@@ -67,6 +69,8 @@ const ROLE_COLORS: Record<string, string> = {
   program_admin: "bg-cyan-100 text-cyan-800",
   program_manager: "bg-indigo-100 text-indigo-800",
   holistic_mentorship_admin: "bg-emerald-100 text-emerald-800",
+  pmu_manager: "bg-amber-100 text-amber-800",
+  pmu_govt_school_user: "bg-orange-100 text-orange-800",
   teacher: "bg-gray-100 text-gray-800",
 };
 

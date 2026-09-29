@@ -1,0 +1,89 @@
+import { query } from "@/lib/db";
+import { PMU_PROGRAM_ID, type PmuRole } from "@/lib/constants";
+
+// Admin-side shape rules for the two PMU roles (ADR 0007). They keep a stored
+// row pinned to JNV NVS: program is always [64], a Govt School User holds
+// exactly one JNV School, and a Manager's explicit scope only names JNV Schools.
+
+export type PmuRowInput = {
+  role: PmuRole;
+  level?: number;
+  school_codes?: string[] | null;
+  regions?: string[] | null;
+};
+
+export type PmuRow = {
+  level: number;
+  school_codes: string[] | null;
+  regions: string[] | null;
+  program_ids: number[];
+};
+
+export const PMU_SEATED_ERROR =
+  "This user is assigned to a centre. Remove their centre assignments in Staff Management before giving them a PMU role.";
+
+const GOVT_SHAPE_ERROR =
+  "A PMU Govt School User must have School access with exactly one JNV School";
+const NON_JNV_ERROR = "PMU roles can only be assigned JNV Schools";
+
+function nonEmpty(value: string[] | null | undefined): value is string[] {
+  return Array.isArray(value) && value.length > 0;
+}
+
+async function allJnvSchools(codes: string[]) {
+  const rows = await query<{ code: string }>(
+    `SELECT code FROM school
+     WHERE af_school_category = 'JNV' AND code = ANY($1::text[])`,
+    [codes]
+  );
+  const jnv = new Set(rows.map((row) => row.code));
+  return codes.every((code) => jnv.has(code));
+}
+
+async function allRegionsHaveJnvSchools(regions: string[]) {
+  const rows = await query<{ region: string }>(
+    `SELECT DISTINCT region FROM school
+     WHERE af_school_category = 'JNV' AND region = ANY($1::text[])`,
+    [regions]
+  );
+  const found = new Set(rows.map((row) => row.region));
+  return regions.every((region) => found.has(region));
+}
+
+function pinned(level: number, schoolCodes: string[] | null, regions: string[] | null) {
+  return { level, school_codes: schoolCodes, regions, program_ids: [PMU_PROGRAM_ID] };
+}
+
+/** Validates the effective PMU row; returns the row to store or a 400 message. */
+export async function resolvePmuRow(
+  input: PmuRowInput
+): Promise<{ ok: true; row: PmuRow } | { ok: false; error: string }> {
+  const { role, level, school_codes, regions } = input;
+
+  if (role === "pmu_govt_school_user") {
+    if (level !== 1 || nonEmpty(regions) || school_codes?.length !== 1) {
+      return { ok: false, error: GOVT_SHAPE_ERROR };
+    }
+    if (!(await allJnvSchools(school_codes))) return { ok: false, error: NON_JNV_ERROR };
+    return { ok: true, row: pinned(1, school_codes, null) };
+  }
+
+  if (level === 1) {
+    if (!nonEmpty(school_codes)) {
+      return { ok: false, error: "A PMU Manager with School access needs at least one JNV School" };
+    }
+    if (!(await allJnvSchools(school_codes))) return { ok: false, error: NON_JNV_ERROR };
+    return { ok: true, row: pinned(1, school_codes, null) };
+  }
+  if (level === 2) {
+    if (!nonEmpty(regions) || !(await allRegionsHaveJnvSchools(regions))) {
+      return {
+        ok: false,
+        error: "A PMU Manager with Region access needs at least one region, each with a JNV School",
+      };
+    }
+    return { ok: true, row: pinned(2, null, regions) };
+  }
+  if (level === 3) return { ok: true, row: pinned(3, null, null) };
+  return { ok: false, error: "Level must be between 1 and 3" };
+}

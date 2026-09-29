@@ -206,3 +206,117 @@ describe("POST /api/admin/users", () => {
     expect(res.status).toBe(500);
   });
 });
+
+describe("POST /api/admin/users — PMU roles", () => {
+  const JNV_SCHOOLS = [
+    { code: "JNV001", region: "North" },
+    { code: "JNV002", region: "North" },
+  ];
+
+  // Routes each SQL statement to a fake: JNV School lookups answer from
+  // JNV_SCHOOLS, the seat check from `seats`, and the upsert returns an id.
+  function mockDb({ seats = [] as unknown[] } = {}) {
+    mockQuery.mockImplementation(async (sql: string, params?: unknown[]) => {
+      if (sql.includes("centre_positions")) return seats;
+      if (sql.includes("af_school_category = 'JNV'")) {
+        const wanted = (params?.[0] ?? []) as string[];
+        return sql.includes("region")
+          ? JNV_SCHOOLS.filter((s) => wanted.includes(s.region)).map((s) => ({ region: s.region }))
+          : JNV_SCHOOLS.filter((s) => wanted.includes(s.code)).map((s) => ({ code: s.code }));
+      }
+      if (sql.includes("INSERT INTO user_permission")) return [{ id: 21 }];
+      return [];
+    });
+  }
+
+  function insertParams() {
+    const call = mockQuery.mock.calls.find(([sql]) =>
+      String(sql).includes("INSERT INTO user_permission")
+    );
+    return call?.[1];
+  }
+
+  async function post(body: Record<string, unknown>) {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockGetUserPermission.mockResolvedValue(ADMIN_PERMISSION);
+    const req = jsonRequest("http://localhost/api/admin/users", {
+      method: "POST",
+      body: { email: "pmu@example.com", ...body },
+    });
+    return POST(req as never);
+  }
+
+  it.each([
+    ["a Govt School User at level 2", { role: "pmu_govt_school_user", level: 2, regions: ["North"] }],
+    ["a Govt School User at level 3", { role: "pmu_govt_school_user", level: 3 }],
+    ["a Govt School User with no codes", { role: "pmu_govt_school_user", level: 1, school_codes: [] }],
+    ["a Govt School User with two codes", { role: "pmu_govt_school_user", level: 1, school_codes: ["JNV001", "JNV002"] }],
+    ["a Govt School User with a non-JNV code", { role: "pmu_govt_school_user", level: 1, school_codes: ["OTHER1"] }],
+    ["a Manager at level 1 with a non-JNV code", { role: "pmu_manager", level: 1, school_codes: ["JNV001", "OTHER1"] }],
+    ["a Manager at level 1 with no codes", { role: "pmu_manager", level: 1, school_codes: [] }],
+    ["a Manager at level 2 with no region", { role: "pmu_manager", level: 2, regions: [] }],
+    ["a Manager at level 2 with a region without a JNV School", { role: "pmu_manager", level: 2, regions: ["North", "Nowhere"] }],
+  ])("returns 400 for %s", async (_label, body) => {
+    mockDb();
+    const res = await post({ program_ids: [64], ...body });
+    expect(res.status).toBe(400);
+    expect(typeof (await res.json()).error).toBe("string");
+    expect(insertParams()).toBeUndefined();
+  });
+
+  it("stores a Govt School User pinned to [64] with its one School, ignoring body program_ids", async () => {
+    mockDb();
+    const res = await post({
+      role: "pmu_govt_school_user",
+      level: 1,
+      school_codes: ["JNV001"],
+      program_ids: [1, 2],
+      read_only: true,
+      full_name: "Principal",
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ id: 21, success: true });
+    expect(insertParams()).toEqual([
+      "pmu@example.com",
+      1,
+      "pmu_govt_school_user",
+      ["JNV001"],
+      null,
+      [64],
+      true,
+      "Principal",
+    ]);
+  });
+
+  it("stores a Manager without program_ids in the body", async () => {
+    mockDb();
+    const res = await post({ role: "pmu_manager", level: 2, regions: ["North"], school_codes: ["JNV001"] });
+    expect(res.status).toBe(200);
+    expect(insertParams()).toEqual([
+      "pmu@example.com", 2, "pmu_manager", null, ["North"], [64], false, null,
+    ]);
+  });
+
+  it("stores null codes and regions for a level-3 Manager", async () => {
+    mockDb();
+    const res = await post({
+      role: "pmu_manager",
+      level: 3,
+      school_codes: ["JNV001"],
+      regions: ["North"],
+      program_ids: [1],
+    });
+    expect(res.status).toBe(200);
+    expect(insertParams()).toEqual([
+      "pmu@example.com", 3, "pmu_manager", null, null, [64], false, null,
+    ]);
+  });
+
+  it("returns 409 when the target already holds a centre seat", async () => {
+    mockDb({ seats: [{ one: 1 }] });
+    const res = await post({ role: "pmu_manager", level: 3 });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toMatch(/centre assignments/i);
+    expect(insertParams()).toBeUndefined();
+  });
+});

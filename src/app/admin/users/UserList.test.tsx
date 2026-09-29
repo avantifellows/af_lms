@@ -200,6 +200,18 @@ describe("UserList", () => {
       expect(screen.getByText("Holistic Mentorship Admin")).toBeInTheDocument();
     });
 
+    it.each([
+      ["pmu_manager", "PMU Manager", "bg-amber-100 text-amber-800"],
+      ["pmu_govt_school_user", "PMU Govt School User", "bg-orange-100 text-orange-800"],
+    ])("renders the %s role label and colour", (role, label, colour) => {
+      renderList({
+        initialUsers: [
+          { ...users[2], id: 101, email: "pmu@example.com", role, program_ids: [64] },
+        ],
+      });
+      expect(screen.getByText(label)).toHaveClass(...colour.split(" "));
+    });
+
     it("renders level badges", () => {
       renderList();
       // Level labels from LEVEL_LABELS
