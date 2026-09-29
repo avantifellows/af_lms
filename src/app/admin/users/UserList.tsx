@@ -3,7 +3,7 @@
 import { useState } from "react";
 import AddUserModal from "./AddUserModal";
 import { Button } from "@/components/ui";
-import { PROGRAM_ID_TO_LABEL } from "@/lib/constants";
+import { isPmuRole, PROGRAM_ID_TO_LABEL } from "@/lib/constants";
 
 interface CentreAssignment {
   centreName: string;
@@ -47,6 +47,12 @@ const LEVEL_LABELS: Record<number, string> = {
   2: "Region",
   1: "School",
 };
+
+// PMU roles only ever reach JNV Schools, so their level-3 badge says so.
+function levelLabel(user: Pick<UserPermission, "level" | "role">) {
+  if (user.level === 3 && isPmuRole(user.role)) return "All JNV Schools";
+  return LEVEL_LABELS[user.level];
+}
 
 const LEVEL_COLORS: Record<number, string> = {
   3: "bg-hover-bg text-accent-hover",
@@ -190,7 +196,7 @@ export default function UserList({ initialUsers, regions, schoolCodeToName, curr
                 </td>
                 <td className="whitespace-nowrap px-3 py-4 text-sm">
                   <span className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${LEVEL_COLORS[user.level]}`}>
-                    {LEVEL_LABELS[user.level]}
+                    {levelLabel(user)}
                   </span>
                   <span className={`ml-2 inline-flex rounded-full px-2 py-1 text-xs font-semibold ${
                     user.read_only

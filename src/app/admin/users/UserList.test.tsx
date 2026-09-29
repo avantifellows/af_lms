@@ -220,6 +220,28 @@ describe("UserList", () => {
       expect(screen.getByText("School")).toBeInTheDocument(); // level 1
     });
 
+    it.each(["pmu_manager", "pmu_govt_school_user"])(
+      "labels a level-3 %s's Level badge 'All JNV Schools'",
+      (role) => {
+        renderList({
+          initialUsers: [
+            { ...users[0], id: 102, email: "pmu@example.com", role, level: 3, program_ids: [64] },
+          ],
+        });
+        expect(screen.getByText("All JNV Schools")).toBeInTheDocument();
+        expect(screen.queryByText("All Schools")).not.toBeInTheDocument();
+        expect(screen.getByText("All JNV schools")).toBeInTheDocument(); // Access column
+      },
+    );
+
+    it("keeps the 'All Schools' Level badge for a level-3 Program Manager", () => {
+      renderList({
+        initialUsers: [{ ...users[0], id: 103, role: "program_manager", level: 3 }],
+      });
+      expect(screen.getByText("All Schools")).toBeInTheDocument();
+      expect(screen.queryByText("All JNV Schools")).not.toBeInTheDocument();
+    });
+
     it("renders program badges for users with program_ids", () => {
       renderList();
       // user 1 has [1,2] => JNV CoE, JNV Nodal; user 2 has [1] => JNV CoE; user 4 has [64] => JNV NVS
