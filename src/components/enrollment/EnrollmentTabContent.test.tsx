@@ -325,6 +325,28 @@ describe("EnrollmentTabContent", () => {
     vi.unstubAllGlobals();
   });
 
+  it("offers only Download List when it may download but not add (read-only PMU)", async () => {
+    const assign = vi.fn();
+    vi.stubGlobal("location", { ...window.location, assign });
+    const user = userEvent.setup();
+    render(
+      <EnrollmentTabContent {...baseProps} canEdit={false} canEditStudent={false} canAddStudent={false} canDownloadList />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Add Student" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Bulk Upload" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Download List" }));
+
+    expect(assign).toHaveBeenCalledWith("/api/school/12345678901/students/export");
+    vi.unstubAllGlobals();
+  });
+
+  it("hides Download List when it may neither add nor download", () => {
+    render(<EnrollmentTabContent {...baseProps} canAddStudent={false} />);
+
+    expect(screen.queryByRole("button", { name: "Download List" })).not.toBeInTheDocument();
+  });
+
   it("shows the roster search only for NVS and passes the query to the table", async () => {
     const user = userEvent.setup();
     render(

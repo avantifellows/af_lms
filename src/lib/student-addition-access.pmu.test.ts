@@ -12,6 +12,7 @@ import {
   requireStudentAdditionStudentAccess,
   requireStudentDropoutUndoAccess,
   requireStudentEditAccess,
+  requireStudentExportAccess,
   requireStudentProgramDropoutAccess,
 } from "./student-addition-access";
 
@@ -91,6 +92,69 @@ describe.each(PMU_ROLES)("%s student addition (Add Student, Bulk Upload, Downloa
     expect(await requireStudentAdditionAccess(session, outOfScopeJnv)).toEqual(forbidden);
   });
 });
+
+describe.each(PMU_ROLES)("%s Download List (NVS Student export)", (role) => {
+  beforeEach(() => {
+    permissionRow = pmuRow(role);
+  });
+
+  it("accepts an in-scope JNV School", async () => {
+    expect(await requireStudentExportAccess(session, inScopeJnv)).toMatchObject({ ok: true, programId: 64 });
+  });
+
+  it("still accepts a read_only PMU user: the export is a view action", async () => {
+    permissionRow = pmuRow(role, { read_only: true });
+    expect(await requireStudentExportAccess(session, inScopeJnv)).toMatchObject({
+      ok: true,
+      programId: 64,
+      actor: { role },
+    });
+  });
+
+  it("refuses a read_only PMU user at a non-JNV School", async () => {
+    permissionRow = pmuRow(role, { read_only: true });
+    expect(await requireStudentExportAccess(session, nonJnvInScope)).toEqual(forbidden);
+  });
+
+  it("refuses a read_only PMU user at a JNV School outside the PMU scope", async () => {
+    permissionRow = pmuRow(role, { read_only: true });
+    expect(await requireStudentExportAccess(session, outOfScopeJnv)).toEqual(forbidden);
+  });
+});
+
+describe.each(["admin", "program_manager", "program_admin"] as const)(
+  "%s Download List keeps the edit gate (existing roles unchanged)",
+  (role) => {
+    function existingRoleRow(readOnly: boolean) {
+      return {
+        email,
+        level: 3,
+        role,
+        school_codes: null,
+        regions: null,
+        program_ids: [PROGRAM_IDS.COE, PROGRAM_IDS.NVS],
+        read_only: readOnly,
+        user_id: 778,
+      };
+    }
+
+    beforeEach(() => {
+      mockQuery.mockImplementation(async (sql: string) =>
+        sql.includes("FROM user_permission") ? [permissionRow] : [],
+      );
+    });
+
+    it("accepts an editable account", async () => {
+      permissionRow = existingRoleRow(false);
+      expect(await requireStudentExportAccess(session, inScopeJnv)).toMatchObject({ ok: true });
+    });
+
+    it("refuses a read_only account", async () => {
+      permissionRow = existingRoleRow(true);
+      expect(await requireStudentExportAccess(session, inScopeJnv)).toEqual(forbidden);
+    });
+  },
+);
 
 describe.each(PMU_ROLES)("%s NVS Student writes (NVS dropout, phone correction)", (role) => {
   beforeEach(() => {

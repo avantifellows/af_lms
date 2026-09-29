@@ -47,7 +47,10 @@ import {
   type ProgramStats,
 } from "@/lib/enrollment-stats";
 import EnrollmentTabContent from "@/components/enrollment/EnrollmentTabContent";
-import { getStudentAdditionAccessFromPermission } from "@/lib/student-addition-access";
+import {
+  getStudentAdditionAccessFromPermission,
+  getStudentExportAccessFromPermission,
+} from "@/lib/student-addition-access";
 import HolisticMentorshipWorkspace from "@/components/holistic-mentorship/HolisticMentorshipWorkspace";
 import AdminSchoolRoster from "@/components/holistic-mentorship/AdminSchoolRoster";
 import {
@@ -717,13 +720,13 @@ export default async function RosterPage({
   const teacherFeedbackAccess = getFeatureAccess(permission, "teacher_feedback");
   // Student addition is an NVS school-page feature; a centre roster is scoped
   // to the centre's own program, so it never offers Add Student.
+  const rosterSchool = { ...school, af_school_category: school.af_school_category ?? null };
   const canAddStudent =
-    !isCentre &&
-    getStudentAdditionAccessFromPermission(
-      session,
-      { ...school, af_school_category: school.af_school_category ?? null },
-      permission,
-    ).ok;
+    !isCentre && getStudentAdditionAccessFromPermission(session, rosterSchool, permission).ok;
+  // Download List is a view action: same as canAddStudent for existing roles,
+  // but a read_only PMU user keeps it (NVS-only export).
+  const canDownloadList =
+    !isCentre && getStudentExportAccessFromPermission(session, rosterSchool, permission).ok;
 
   // Fetch enrollment data in parallel. THE fork: a centre pulls its own roster
   // from the centre_students view; a school pulls the full school roster.
@@ -881,6 +884,7 @@ export default async function RosterPage({
           ]),
         ]}
         canAddStudent={canAddStudent}
+        canDownloadList={canDownloadList}
         userProgramIds={programContext.programIds}
         isAdmin={isAdmin}
         grades={grades}

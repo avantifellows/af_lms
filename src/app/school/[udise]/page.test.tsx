@@ -1014,6 +1014,20 @@ describe("SchoolPage (server component)", () => {
         ).toEqual(["Nisha"]);
       });
 
+      it("keeps Download List but hides Add Student and Bulk Upload when read_only", async () => {
+        await setupPmuPage({}, { read_only: true });
+        mockProcessStudents.mockResolvedValue({
+          students: [makeStudent({ student_program_ids: [64] })],
+          issues: [],
+        });
+
+        await renderPage();
+
+        expect(screen.getByRole("button", { name: "Download List" })).toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: "Add Student" })).not.toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: "Bulk Upload" })).not.toBeInTheDocument();
+      });
+
       it("locks the Performance tab to JNV NVS", async () => {
         await setupPmuPage();
 
@@ -2213,6 +2227,30 @@ describe("SchoolPage (server component)", () => {
     expect(screen.getByText("Meena Student")).toBeInTheDocument();
     expect(screen.queryByText("Manage mappings")).not.toBeInTheDocument();
   });
+
+  it.each(["admin", "program_manager", "program_admin"] as const)(
+    "gives a read-only %s no Download List (unchanged by the PMU rule)",
+    async (role) => {
+      setupAdminDefaults();
+      const actual = await vi.importActual<typeof import("@/lib/permissions")>(
+        "@/lib/permissions",
+      );
+      mockGetUserPermission.mockResolvedValue(
+        makePermission({ role, read_only: true }),
+      );
+      mockGetFeatureAccess.mockImplementation(actual.getFeatureAccess);
+      mockGetProgramContextSync.mockImplementation(actual.getProgramContextSync);
+      mockProcessStudents.mockResolvedValue({
+        students: [makeStudent({ student_program_ids: [64] })],
+        issues: [],
+      });
+
+      await renderPage();
+
+      expect(screen.getByText("JNV NVS Students")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Download List" })).not.toBeInTheDocument();
+    },
+  );
 
   it("keeps the Manage mappings link visible for read-only Program Admins", async () => {
     setupAdminDefaults({ id: 20, code: "SCH001" });

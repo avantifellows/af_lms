@@ -65,6 +65,8 @@ interface Props {
   canDropoutStudent?: boolean;
   dropoutProgramIds?: number[];
   canAddStudent: boolean;
+  /** NVS Download List; defaults to canAddStudent (PMU roles keep it when read_only). */
+  canDownloadList?: boolean;
   userProgramIds: number[] | null;
   isAdmin: boolean;
   grades: Grade[];
@@ -88,6 +90,7 @@ export default function EnrollmentTabContent({
   canDropoutStudent = false,
   dropoutProgramIds,
   canAddStudent,
+  canDownloadList = canAddStudent,
   userProgramIds,
   isAdmin,
   grades,
@@ -269,6 +272,7 @@ export default function EnrollmentTabContent({
   const activeFilteredCount = flagFilterOn ? flaggedCount : gradeStreamActive.length;
 
   const showAddStudent = canAddStudent && selectedProgramId === PROGRAM_IDS.NVS;
+  const showDownloadList = canDownloadList && selectedProgramId === PROGRAM_IDS.NVS;
 
   const closeCreatedModal = () => {
     setCreatedOpen(false);
@@ -412,39 +416,42 @@ export default function EnrollmentTabContent({
           </span>
         )}
         {showAddStudent && (
-          <>
-            <Button
-              type="button"
-              size="sm"
-              variant="secondary"
-              onClick={() => setBulkOpen(true)}
-              className="ml-auto"
-            >
-              <Upload className="h-4 w-4" aria-hidden="true" />
-              Bulk Upload
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="secondary"
-              onClick={() => {
-                const params = new URLSearchParams();
-                if (selectedGrade !== "all") params.set("grade", selectedGrade);
-                if (selectedStream !== "all")
-                  params.set("stream", selectedStream);
-                window.location.assign(
-                  `/api/school/${encodeURIComponent(schoolUdise)}/students/export${params.size ? `?${params}` : ""}`,
-                );
-              }}
-            >
-              <Download className="h-4 w-4" aria-hidden="true" />
-              Download List
-            </Button>
-            <Button type="button" size="sm" onClick={() => setAddOpen(true)}>
-              <Plus className="h-4 w-4" aria-hidden="true" />
-              Add Student
-            </Button>
-          </>
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            onClick={() => setBulkOpen(true)}
+            className="ml-auto"
+          >
+            <Upload className="h-4 w-4" aria-hidden="true" />
+            Bulk Upload
+          </Button>
+        )}
+        {showDownloadList && (
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            className={showAddStudent ? undefined : "ml-auto"}
+            onClick={() => {
+              const params = new URLSearchParams();
+              if (selectedGrade !== "all") params.set("grade", selectedGrade);
+              if (selectedStream !== "all")
+                params.set("stream", selectedStream);
+              window.location.assign(
+                `/api/school/${encodeURIComponent(schoolUdise)}/students/export${params.size ? `?${params}` : ""}`,
+              );
+            }}
+          >
+            <Download className="h-4 w-4" aria-hidden="true" />
+            Download List
+          </Button>
+        )}
+        {showAddStudent && (
+          <Button type="button" size="sm" onClick={() => setAddOpen(true)}>
+            <Plus className="h-4 w-4" aria-hidden="true" />
+            Add Student
+          </Button>
         )}
       </div>
 

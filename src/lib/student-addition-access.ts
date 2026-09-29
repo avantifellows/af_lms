@@ -1,4 +1,4 @@
-import { PROGRAM_IDS } from "@/lib/constants";
+import { isPmuRole, PROGRAM_IDS } from "@/lib/constants";
 import { query } from "@/lib/db";
 import {
   canAccessSchool,
@@ -326,10 +326,11 @@ export async function requireStudentProgramDropoutAccess(
   };
 }
 
-export function getStudentAdditionAccessFromPermission(
+function getNvsRosterAccessFromPermission(
   session: StudentWriteSession | null,
   school: StudentAdditionSchool,
   permission: UserPermission | null,
+  studentsAccess: "edit" | "view",
 ): StudentAdditionAccessResult {
   if (!session) return deny(401, "Unauthorized");
 
@@ -339,7 +340,8 @@ export function getStudentAdditionAccessFromPermission(
   if (!ALLOWED_STUDENT_ADDITION_ROLES.has(permission.role)) return deny(403);
   if (!canAccessSchoolSync(permission, school.code, school.region ?? undefined))
     return deny(403);
-  if (!getFeatureAccess(permission, "students").canEdit) return deny(403);
+  const access = getFeatureAccess(permission, "students");
+  if (!(studentsAccess === "edit" ? access.canEdit : access.canView)) return deny(403);
   if (!getProgramContextSync(permission).programIds.includes(PROGRAM_IDS.NVS))
     return deny(403);
 
@@ -351,6 +353,29 @@ export function getStudentAdditionAccessFromPermission(
   };
 }
 
+export function getStudentAdditionAccessFromPermission(
+  session: StudentWriteSession | null,
+  school: StudentAdditionSchool,
+  permission: UserPermission | null,
+): StudentAdditionAccessResult {
+  return getNvsRosterAccessFromPermission(session, school, permission, "edit");
+}
+
+/**
+ * Download List (the NVS Student export) gate. Existing roles keep the
+ * student-addition gate (students=edit), so their read_only accounts get no
+ * Download List. PMU roles are pinned to JNV NVS and the export lists only NVS
+ * Students, so a read_only PMU user keeps it with students=view.
+ */
+export function getStudentExportAccessFromPermission(
+  session: StudentWriteSession | null,
+  school: StudentAdditionSchool,
+  permission: UserPermission | null,
+): StudentAdditionAccessResult {
+  const required = isPmuRole(permission?.role) ? "view" : "edit";
+  return getNvsRosterAccessFromPermission(session, school, permission, required);
+}
+
 export async function requireStudentAdditionAccess(
   session: StudentWriteSession | null,
   school: StudentAdditionSchool,
@@ -360,6 +385,17 @@ export async function requireStudentAdditionAccess(
 
   const permission = await getResolvedPermission(sessionEmail.email);
   return getStudentAdditionAccessFromPermission(session, school, permission);
+}
+
+export async function requireStudentExportAccess(
+  session: StudentWriteSession | null,
+  school: StudentAdditionSchool,
+): Promise<StudentAdditionAccessResult> {
+  const sessionEmail = requireGoogleSessionEmail(session);
+  if (!sessionEmail.ok) return sessionEmail;
+
+  const permission = await getResolvedPermission(sessionEmail.email);
+  return getStudentExportAccessFromPermission(session, school, permission);
 }
 
 async function getStudentEditScope(
