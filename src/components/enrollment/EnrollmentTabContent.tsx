@@ -98,11 +98,6 @@ export default function EnrollmentTabContent({
   registrationMode = ACTIVE_REGISTRATION_MODE,
 }: Props) {
   const phoneMode = registrationMode === PHONE_REGISTRATION_MODE;
-  // Intervention flags mirror students access (lib/intervention-flags): anyone
-  // on this tab can see students, so they see flags; changing them needs
-  // students edit. Passcode logins get neither. The API enforces the same rule.
-  const canUseInterventionFlags = !isPasscodeUser;
-  const canEditInterventionFlags = canUseInterventionFlags && canEdit;
   const router = useRouter();
   const [selectedId, setSelectedId] = useState<number | null>(
     programs[0]?.id ?? null,
@@ -119,6 +114,14 @@ export default function EnrollmentTabContent({
   )
     ? selectedId
     : (programs[0]?.id ?? null);
+
+  // Intervention flags mirror students access (lib/intervention-flags): anyone
+  // on this tab can see students, so they see flags; changing them needs
+  // students edit. Passcode logins get neither. The API enforces the same rule.
+  // The JNV NVS card hides flags entirely (UI only; the API is unchanged).
+  const canUseInterventionFlags =
+    !isPasscodeUser && selectedProgramId !== PROGRAM_IDS.NVS;
+  const canEditInterventionFlags = canUseInterventionFlags && canEdit;
 
   // Consent status for the school's grade 11/12 students, keyed by
   // student_pk_id. Fetched client-side so the (default) enrollment tab isn't

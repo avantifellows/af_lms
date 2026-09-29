@@ -1572,6 +1572,7 @@ describe("StudentTable - intervention flags", () => {
   it("shows no flag controls when the viewer cannot use flags", () => {
     render(<StudentTable students={students} grades={defaultGrades} canEditStudent={false} canDropoutStudent={false} />);
     expect(screen.queryByRole("button", { name: /flag/i })).not.toBeInTheDocument();
+    expect(screen.queryByText("Needs intervention")).not.toBeInTheDocument();
   });
 
   it("narrows to flagged students when flaggedOnly is set", () => {

@@ -22,9 +22,17 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/components/StudentTable", () => ({
   __esModule: true,
-  default: (props: { canEdit?: boolean; canEditStudent?: boolean; selectedGrade?: string; selectedStream?: string }) => (
+  default: (props: {
+    canEdit?: boolean;
+    canEditStudent?: boolean;
+    selectedGrade?: string;
+    selectedStream?: string;
+    openFlagStudentIds?: Set<string>;
+    onOpenInterventionFlag?: unknown;
+  }) => (
     <div
       data-testid="student-table"
+      data-flags-shown={String(Boolean(props.openFlagStudentIds || props.onOpenInterventionFlag))}
       data-can-edit={String(props.canEdit)}
       data-can-edit-student={String(props.canEditStudent)}
       data-grade={props.selectedGrade}
@@ -276,8 +284,8 @@ describe("EnrollmentTabContent", () => {
         student_pk_id: id,
         grade: 11,
         stream,
-        program_id: PROGRAM_IDS.NVS,
-        student_program_ids: [PROGRAM_IDS.NVS],
+        program_id: PROGRAM_IDS.COE,
+        student_program_ids: [PROGRAM_IDS.COE],
       }) as unknown as Student;
     const flag = (studentPkId: string) => ({
       id: Number(studentPkId),
@@ -300,6 +308,8 @@ describe("EnrollmentTabContent", () => {
     render(
       <EnrollmentTabContent
         {...baseProps}
+        programs={[program(PROGRAM_IDS.COE, "JNV CoE")]}
+        userProgramIds={[PROGRAM_IDS.COE]}
         activeStudents={[student("1", "medical"), student("2", "medical"), student("3", "engineering")]}
       />,
     );
@@ -311,5 +321,73 @@ describe("EnrollmentTabContent", () => {
     expect(screen.getByText("Showing 1 of 3 students")).toBeInTheDocument();
     vi.unstubAllGlobals();
   });
-});
 
+  it("hides Intervention Flags and skips the flags fetch while the NVS card is selected", async () => {
+    const fetchMock = vi.fn(async (url: string) => ({
+      ok: true,
+      json: async () =>
+        url.includes("intervention-flags")
+          ? {
+              flags: [
+                {
+                  id: 1,
+                  student_pk_id: "1",
+                  status: "open",
+                  raised_by_email: "t@x",
+                  inserted_at: "2026-09-25T05:00:00Z",
+                  resolved_at: null,
+                  updates: [],
+                },
+              ],
+            }
+          : { consent: {} },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const flagsCalls = () =>
+      fetchMock.mock.calls.filter(([url]) => url.includes("intervention-flags"));
+    const user = userEvent.setup();
+    render(
+      <EnrollmentTabContent
+        {...baseProps}
+        programs={[program(PROGRAM_IDS.NVS, "JNV NVS"), program(PROGRAM_IDS.COE, "JNV CoE")]}
+        userProgramIds={[PROGRAM_IDS.NVS, PROGRAM_IDS.COE]}
+      />,
+    );
+
+    // Let the consent fetch settle so any flags fetch would have fired too.
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(flagsCalls()).toHaveLength(0);
+    expect(screen.queryByLabelText(/Needs intervention only/)).not.toBeInTheDocument();
+    expect(screen.getByTestId("student-table")).toHaveAttribute("data-flags-shown", "false");
+
+    await user.click(screen.getByRole("button", { name: "JNV CoE" }));
+
+    expect(await screen.findByLabelText("Needs intervention only (0)")).toBeInTheDocument();
+    expect(flagsCalls()).toHaveLength(1);
+    expect(screen.getByTestId("student-table")).toHaveAttribute("data-flags-shown", "true");
+    vi.unstubAllGlobals();
+  });
+
+  it("keeps Intervention Flags hidden for passcode users in non-NVS programs", async () => {
+    const fetchMock = vi.fn<(url: string) => Promise<{ ok: boolean; json: () => Promise<unknown> }>>(
+      async () => ({ ok: true, json: async () => ({ consent: {} }) }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <EnrollmentTabContent
+        {...baseProps}
+        isPasscodeUser
+        programs={[program(PROGRAM_IDS.COE, "JNV CoE")]}
+        userProgramIds={[PROGRAM_IDS.COE]}
+      />,
+    );
+
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(
+      fetchMock.mock.calls.filter(([url]) => url.includes("intervention-flags")),
+    ).toHaveLength(0);
+    expect(screen.queryByLabelText(/Needs intervention only/)).not.toBeInTheDocument();
+    expect(screen.getByTestId("student-table")).toHaveAttribute("data-flags-shown", "false");
+    vi.unstubAllGlobals();
+  });
+});
