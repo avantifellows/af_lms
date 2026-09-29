@@ -9,7 +9,7 @@ import {
   isCentreSeated,
 } from "@/lib/permissions";
 import { query } from "@/lib/db";
-import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
+import { CURRENT_ACADEMIC_YEAR, isPmuRole } from "@/lib/constants";
 import { requireHolisticMentorshipAccess } from "@/lib/holistic-mentorship";
 import Link from "next/link";
 import SchoolSearch from "@/components/SchoolSearch";
@@ -286,7 +286,13 @@ async function dashboardRequest(searchParams: PageProps["searchParams"]) {
 // Centre-seated staff are centre-scoped: their home is their centre, not the
 // whole-school roster. Default them to the Centres tab so the single-school
 // shortcut never bounces them to the school page — an explicit ?view= wins.
-function resolveDashboardView(viewParam: string | undefined, seated: boolean): DashboardView {
+function resolveDashboardView(
+  viewParam: string | undefined,
+  seated: boolean,
+  permission: DashboardPermission,
+): DashboardView {
+  // PMU Managers are JNV NVS only (ADR 0007): no Physical Centres tab to pick.
+  if (permission.role === "pmu_manager") return "jnv-nvs";
   // A confined user has no NVS scope at all, so ?view=jnv-nvs is not an escape
   // hatch for them — it is the whole-school tab, carrying the school-wide
   // student search. Pin them to Centres whatever the URL says.
@@ -416,6 +422,21 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     />;
   }
 
+  // A PMU Govt School User's only surface is their one School — send them
+  // there before any view, search or holistic logic, whatever the URL says.
+  // A stored scope that isn't exactly one code gets the no-access panel rather
+  // than a redirect loop.
+  if (permission.role === "pmu_govt_school_user") {
+    const codes = permission.school_codes ?? [];
+    if (codes.length !== 1) {
+      return <NoDashboardAccess
+        email={email}
+        message={`Your account (${email}) does not have access to any schools. Please contact an administrator.`}
+      />;
+    }
+    redirect(`/school/${codes[0]}`);
+  }
+
   // Derive everything from the single permission object — no extra DB calls
   const programContext = getProgramContextSync(permission);
   if (!programContext.hasAccess) {
@@ -437,7 +458,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   );
   const features = dashboardFeatures(permission, programContext, holisticAccess.ok);
   const seated = isCentreSeated(permission);
-  const view = resolveDashboardView(viewParam, seated);
+  const view = resolveDashboardView(viewParam, seated, permission);
   const schoolCodes = await getAccessibleSchoolCodes(email, permission);
   await redirectSingleScope({ seated, permission, schoolCodes, searchQuery, viewParam, view });
 
@@ -464,7 +485,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         centres={data.centres}
         recentVisits={data.recentVisits}
         hasPMAccess={features.hasPMAccess}
-        seated={seated}
+        showViewTabs={!seated && !isPmuRole(permission.role)}
       />
     </div>
   );
@@ -536,10 +557,11 @@ const DASHBOARD_VIEWS = [
 ] as const;
 
 // Grouping tabs — disjoint scopes, so counts never double-count.
-function DashboardViewTabs({ view, seated }: { view: DashboardView; seated: boolean }) {
-  // One tab left for a confined user — render nothing rather than a lone tab that
-  // looks like a choice, or an empty strip that leaves a stray rule on the page.
-  if (seated) return null;
+function DashboardViewTabs({ view, show }: { view: DashboardView; show: boolean }) {
+  // One tab left for a confined user or a PMU Manager — render nothing rather
+  // than a lone tab that looks like a choice, or an empty strip that leaves a
+  // stray rule on the page.
+  if (!show) return null;
   return <div className="mb-6 flex gap-6 border-b border-border">
     {DASHBOARD_VIEWS.map((tab) => <Link
       key={tab.key}
@@ -553,7 +575,7 @@ function DashboardViewTabs({ view, seated }: { view: DashboardView; seated: bool
   </div>;
 }
 
-function DashboardMain({ view, searchQuery, currentPage, totalPages, totalCount, schools, centres, recentVisits, hasPMAccess, seated }: {
+function DashboardMain({ view, searchQuery, currentPage, totalPages, totalCount, schools, centres, recentVisits, hasPMAccess, showViewTabs }: {
   view: DashboardView;
   searchQuery?: string;
   currentPage: number;
@@ -563,10 +585,10 @@ function DashboardMain({ view, searchQuery, currentPage, totalPages, totalCount,
   centres: Centre[];
   recentVisits: Visit[];
   hasPMAccess: boolean;
-  seated: boolean;
+  showViewTabs: boolean;
 }) {
   return <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-    <DashboardViewTabs view={view} seated={seated} />
+    <DashboardViewTabs view={view} show={showViewTabs} />
     <PMStats enabled={hasPMAccess} totalCount={totalCount} recentVisitCount={recentVisits.length} />
     {view === "centres" ? (
       <CentresSection centres={centres} hasPMAccess={hasPMAccess} searchQuery={searchQuery} />
