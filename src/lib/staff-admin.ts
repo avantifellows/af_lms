@@ -19,6 +19,7 @@ import {
   eraseDraftHolisticNotes,
   lockHolisticMentorMappingMutation,
 } from "./holistic-mappings";
+import { isPmuRole } from "./constants";
 import {
   type AdminGuardResult,
   type AdminSession,
@@ -724,17 +725,28 @@ async function clearExplicitSchoolScope(
   );
 }
 
-// Strict region/seat exclusivity (#1): a region-level (level-2) user's scope is
-// their regions, which seat assignment would wipe with no way to reconstitute.
-// Reject seating such a user up front rather than silently collapsing their
-// access to a single school. Returns a failure to surface, or null if allowed.
-async function rejectIfRegionLevelUser(
+// Reject a user whose live permission row can't hold a centre seat:
+// - PMU roles (ADR 0007) are pinned to JNV NVS; a seat would rewrite their role,
+//   program_ids and school scope, so Staff Management refuses them outright.
+// - Strict region/seat exclusivity (#1): a region-level (level-2) user's scope is
+//   their regions, which seat assignment would wipe with no way to reconstitute.
+//   Reject seating such a user up front rather than silently collapsing their
+//   access to a single school.
+// Returns a failure to surface, or null if allowed.
+async function rejectIneligibleSeatUser(
   userId: number
 ): Promise<StaffValidationFailure | null> {
-  const rows = await query<{ level: number }>(
-    `SELECT level FROM user_permission WHERE user_id = $1 AND revoked_at IS NULL`,
+  const rows = await query<{ level: number; role: string }>(
+    `SELECT level, role FROM user_permission WHERE user_id = $1 AND revoked_at IS NULL`,
     [userId]
   );
+  if (rows.some((r) => isPmuRole(r.role))) {
+    return {
+      ok: false,
+      status: 409,
+      error: "PMU users can't hold centre seats — their access is pinned to JNV NVS.",
+    };
+  }
   if (rows.some((r) => r.level === 2)) {
     return {
       ok: false,
@@ -747,8 +759,8 @@ async function rejectIfRegionLevelUser(
   return null;
 }
 
-// Validate a user about to be seated: the user must exist, must not be
-// region-level (see rejectIfRegionLevelUser), and must not already hold this
+// Validate a user about to be seated: the user must exist, must not be a PMU
+// or region-level user (see rejectIneligibleSeatUser), and must not already hold this
 // exact centre+role seat. Shared by createPosition (no seat yet) and
 // updatePosition (pass the edited row's id as `excludePositionId` so filling a
 // seat doesn't collide with itself). Returns a failure to surface, or null when
@@ -766,8 +778,8 @@ async function validateSeatOccupant(
   if (users.length === 0) {
     return { ok: false, status: 404, error: "User not found" };
   }
-  const regionBlock = await rejectIfRegionLevelUser(userId);
-  if (regionBlock) return regionBlock;
+  const ineligible = await rejectIneligibleSeatUser(userId);
+  if (ineligible) return ineligible;
   const duplicate = await query<{ id: number }>(
     `SELECT id FROM centre_positions
      WHERE centre_id = $1 AND role = $2 AND user_id = $3 AND deleted_at IS NULL
@@ -1005,7 +1017,7 @@ export async function createTeacher(params: {
   const permission = permissions[0];
 
   // Region-level (level 2) users are scoped by region, not by centre seat —
-  // mirror rejectIfRegionLevelUser, but read level off the permission row since
+  // mirror rejectIneligibleSeatUser, but read level off the permission row since
   // a pending teacher's user_id may not be linked yet.
   if (permission.level === 2) {
     return {
@@ -1712,7 +1724,8 @@ async function syncAppRoleFromSeats(
 // stale for multi-program PMs.
 //
 // Only touches the live (revoked_at IS NULL) row, and skips manually elevated
-// Admin and Holistic Mentorship Admin roles whose Program scope is not seat-derived.
+// Admin and Holistic Mentorship Admin roles whose Program scope is not seat-derived,
+// plus the PMU roles, which are pinned to JNV NVS (ADR 0007).
 async function syncProgramIdsFromSeats(
   client: PoolClient,
   userId: number
@@ -1731,7 +1744,7 @@ async function syncProgramIdsFromSeats(
      SET program_ids = $2, updated_at = now()
      WHERE user_id = $1
        AND revoked_at IS NULL
-       AND role NOT IN ('admin', 'holistic_mentorship_admin')
+       AND role NOT IN ('admin', 'holistic_mentorship_admin', 'pmu_manager', 'pmu_govt_school_user')
        AND COALESCE(program_ids, '{}') <> $2`,
     [userId, programIds]
   );

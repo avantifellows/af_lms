@@ -266,6 +266,19 @@ describe("getStaffRoster", () => {
     });
   });
 
+  it("lists only teacher and program_manager rows as pending, so PMU users never appear", async () => {
+    mockSchemaReady();
+    mockQuery.mockResolvedValueOnce([]);
+    mockQuery.mockResolvedValueOnce([]);
+    mockQuery.mockResolvedValueOnce([]);
+
+    await getStaffRoster({ searchParams: { kind: "pending_pm" } });
+
+    const [sql] = mockQuery.mock.calls[1];
+    expect(sql).toContain("WHERE up.role IN ('teacher', 'program_manager')");
+    expect(sql).not.toContain("pmu_");
+  });
+
   it("applies search/kind/code filters in the WHERE clause", async () => {
     mockSchemaReady();
     mockQuery.mockResolvedValueOnce([]);
@@ -744,6 +757,61 @@ describe("positions", () => {
     expect(mockClientQuery).not.toHaveBeenCalled();
   });
 
+  it.each(["pmu_manager", "pmu_govt_school_user"])(
+    "createPosition refuses to seat a %s user (409, no seat written)",
+    async (pmuRole) => {
+      mockSchemaReady();
+      mockQuery.mockResolvedValueOnce([{ id: 8 }]); // centre
+      mockQuery.mockResolvedValueOnce([{ id: 70 }]); // user
+      mockQuery.mockResolvedValueOnce([{ level: 3, role: pmuRole }]); // live permission row
+      mockQuery.mockResolvedValueOnce([]); // duplicate check (none)
+      const result = await createPosition({
+        body: { centre_id: 8, role: "physics", user_id: 70 },
+      });
+      expect(result).toMatchObject({
+        ok: false,
+        status: 409,
+        error: "PMU users can't hold centre seats — their access is pinned to JNV NVS.",
+      });
+      expect(mockWithTransaction).not.toHaveBeenCalled();
+      expect(mockClientQuery).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(["pmu_manager", "pmu_govt_school_user"])(
+    "updatePosition refuses to fill a seat with a %s user (409, no seat written)",
+    async (pmuRole) => {
+      mockSchemaReady();
+      mockQuery.mockResolvedValueOnce([
+        { id: 44, centre_id: 8, role: "pm", user_id: null },
+      ]); // vacant position
+      mockQuery.mockResolvedValueOnce([{ id: 70 }]); // user
+      mockQuery.mockResolvedValueOnce([{ level: 3, role: pmuRole }]); // live permission row
+      mockQuery.mockResolvedValueOnce([]); // duplicate check (none)
+      const result = await updatePosition({ id: 44, body: { user_id: 70 } });
+      expect(result).toMatchObject({ ok: false, status: 409 });
+      expect(mockWithTransaction).not.toHaveBeenCalled();
+      expect(mockClientQuery).not.toHaveBeenCalled();
+    }
+  );
+
+  it("updatePosition still seats a Program Manager", async () => {
+    mockSchemaReady();
+    mockQuery.mockResolvedValueOnce([
+      { id: 44, centre_id: 8, role: "pm", user_id: null },
+    ]); // vacant position
+    mockQuery.mockResolvedValueOnce([{ id: 70 }]); // user
+    mockQuery.mockResolvedValueOnce([{ level: 3, role: "program_manager" }]);
+    mockQuery.mockResolvedValueOnce([]); // duplicate check (none)
+    expect(await updatePosition({ id: 44, body: { user_id: 70 } })).toEqual({
+      ok: true,
+    });
+    const updateCall = mockClientQuery.mock.calls.find(([sql]) =>
+      String(sql).includes("UPDATE centre_positions SET user_id = $1")
+    )!;
+    expect(updateCall[1]).toEqual([70, 44]);
+  });
+
   it("updatePosition vacates a seat without clearing scope", async () => {
     mockSchemaReady();
     // Occupant 70 has another active seat, so vacating this one isn't a strand.
@@ -910,6 +978,18 @@ describe("positions", () => {
     );
   });
 
+  it("app-role sync only moves between teacher and program_manager, so a PMU row keeps its role", async () => {
+    // A PMU user can still be a seat's prior occupant (a legacy seat being
+    // removed); the role re-derive must not touch their pinned role.
+    mockSchemaReady();
+    mockQuery.mockResolvedValueOnce([{ id: 44, user_id: 70 }]); // position
+    mockQuery.mockResolvedValueOnce([{ id: 99 }]); // isLastActiveSeat → not last
+    expect(await deletePosition({ id: 44 })).toEqual({ ok: true });
+    const sql = String(appRoleUpdate()![0]);
+    expect(sql).toContain("role IN ('teacher', 'program_manager')");
+    expect(sql).not.toContain("pmu_");
+  });
+
   it("createPosition keeps role at teacher for a subject seat (no PM seat)", async () => {
     mockSchemaReady();
     mockQuery.mockResolvedValueOnce([{ id: 8 }]); // centre
@@ -1004,9 +1084,20 @@ describe("positions", () => {
     expect(upd[1]).toEqual([70, [1, 2]]); // sorted union
     // Seat sync never shrinks either manually elevated admin role's Program scope.
     expect(String(upd[0])).toContain(
-      "role NOT IN ('admin', 'holistic_mentorship_admin')"
+      "role NOT IN ('admin', 'holistic_mentorship_admin'"
     );
     expect(String(upd[0])).toContain("revoked_at IS NULL");
+  });
+
+  it("program_ids sync skips PMU rows so their NVS pinning survives", async () => {
+    mockSchemaReady();
+    mockQuery.mockResolvedValueOnce([{ id: 44, user_id: 70 }]); // position
+    mockQuery.mockResolvedValueOnce([{ id: 99 }]); // isLastActiveSeat → not last
+    routeClient([1]); // a remaining (legacy) seat in program 1
+    expect(await deletePosition({ id: 44 })).toEqual({ ok: true });
+    expect(String(progUpdate()![0])).toContain(
+      "role NOT IN ('admin', 'holistic_mentorship_admin', 'pmu_manager', 'pmu_govt_school_user')"
+    );
   });
 
   it("deletePosition recomputes program_ids from the remaining seats", async () => {
