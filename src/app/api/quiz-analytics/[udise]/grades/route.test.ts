@@ -27,7 +27,13 @@ import { getAvailableGrades, getAvailablePrograms } from "@/lib/bigquery";
 import { getServerSession } from "next-auth";
 import { getUserPermission } from "@/lib/permissions";
 import { GET } from "./route";
-import { routeParams } from "../../../__test-utils__/api-test-helpers";
+import {
+  PMU_GOVT_PERMISSION,
+  PMU_GOVT_SESSION,
+  PMU_MANAGER_PERMISSION,
+  PMU_MANAGER_SESSION,
+  routeParams,
+} from "../../../__test-utils__/api-test-helpers";
 
 const mockAuth = vi.mocked(authorizeSchoolAccess);
 const mockGetGrades = vi.mocked(getAvailableGrades);
@@ -219,5 +225,60 @@ describe("GET /api/quiz-analytics/[udise]/grades", () => {
     );
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual({ grades: [], programs: [] });
+  });
+});
+
+// PMU roles are pinned to JNV NVS (ADR 0007). The program list comes from the
+// pinned program context, so stray CoE/Nodal ids on the row never widen it.
+describe.each([
+  ["PMU Manager", PMU_MANAGER_SESSION, PMU_MANAGER_PERMISSION],
+  ["PMU Govt School User", PMU_GOVT_SESSION, PMU_GOVT_PERMISSION],
+])("GET grades as %s", (_label, session, basePermission) => {
+  const permission = { ...basePermission, program_ids: [1, 2, 64] };
+
+  beforeEach(() => {
+    mockSession.mockResolvedValue(session as never);
+    mockPermission.mockResolvedValue(permission);
+    mockAuth.mockResolvedValue({ authorized: true, school: SCHOOL, readOnly: false, permission });
+    mockGetGrades.mockResolvedValue([11, 12]);
+    mockGetPrograms.mockResolvedValue(["JNV CoE", "JNV Nodal", "JNV NVS"]);
+  });
+
+  it("serves JNV NVS grades and only the JNV NVS program when no program is given", async () => {
+    const res = await GET(
+      new Request("http://localhost/api/quiz-analytics/1234/grades"),
+      routeParams({ udise: "1234" })
+    );
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ grades: [11, 12], programs: ["JNV NVS"] });
+    expect(mockGetGrades).toHaveBeenCalledWith("1234", "JNV NVS");
+  });
+
+  it("serves program=JNV NVS", async () => {
+    const res = await GET(
+      new Request("http://localhost/api/quiz-analytics/1234/grades?program=JNV%20NVS"),
+      routeParams({ udise: "1234" })
+    );
+    expect(res.status).toBe(200);
+    expect(mockGetGrades).toHaveBeenCalledWith("1234", "JNV NVS");
+  });
+
+  it.each(["JNV CoE", "JNV Nodal", "Punjab CoE"])("403s program=%s", async (program) => {
+    const res = await GET(
+      new Request(`http://localhost/api/quiz-analytics/1234/grades?program=${encodeURIComponent(program)}`),
+      routeParams({ udise: "1234" })
+    );
+    expect(res.status).toBe(403);
+    expect(mockGetGrades).not.toHaveBeenCalled();
+    expect(mockGetPrograms).not.toHaveBeenCalled();
+  });
+
+  it("returns no programs when the School has no JNV NVS results", async () => {
+    mockGetPrograms.mockResolvedValue(["JNV CoE"]);
+    const res = await GET(
+      new Request("http://localhost/api/quiz-analytics/1234/grades"),
+      routeParams({ udise: "1234" })
+    );
+    await expect(res.json()).resolves.toMatchObject({ programs: [] });
   });
 });

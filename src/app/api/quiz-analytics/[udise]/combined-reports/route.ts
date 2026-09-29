@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { authorizeSchoolAccess } from "@/lib/api-auth";
+import { resolvePerformanceProgram } from "@/lib/performance-program";
 import {
   getSchoolRoster,
   filterActiveRosterStudents,
@@ -27,7 +28,14 @@ export async function GET(
   const auth = await authorizeSchoolAccess(udise);
   if (!auth.authorized) return auth.response;
 
-  const sessionId = new URL(request.url).searchParams.get("session_id");
+  const url = new URL(request.url);
+  const pinned = resolvePerformanceProgram(
+    auth.permission,
+    url.searchParams.get("program") || undefined,
+  );
+  if (!pinned.ok) return pinned.response;
+
+  const sessionId = url.searchParams.get("session_id");
   if (!sessionId) {
     return NextResponse.json({ error: "session_id is required" }, { status: 400 });
   }
@@ -91,6 +99,11 @@ export async function POST(
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
+  const pinned = resolvePerformanceProgram(
+    auth.permission,
+    body.program || undefined,
+  );
+  if (!pinned.ok) return pinned.response;
   if (!body.session_id) {
     return NextResponse.json({ error: "session_id is required" }, { status: 400 });
   }
@@ -122,7 +135,7 @@ export async function POST(
     // combined report matches what the teacher sees for this test.
     const students = filterActiveRosterStudents(roster, {
       grade: body.grade,
-      program: body.program,
+      program: pinned.program,
       stream: body.stream,
     }).map((s) => ({
       user_id: s.user_id != null ? String(s.user_id) : null,

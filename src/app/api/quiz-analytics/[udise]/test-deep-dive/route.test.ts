@@ -16,7 +16,11 @@ import { authorizeSchoolAccess } from "@/lib/api-auth";
 import { getTestDeepDiveFromDynamo } from "@/lib/dynamodb";
 import { getStudentTimeSpentData } from "@/lib/bigquery";
 import { GET } from "./route";
-import { routeParams } from "../../../__test-utils__/api-test-helpers";
+import {
+  PMU_GOVT_PERMISSION,
+  PMU_MANAGER_PERMISSION,
+  routeParams,
+} from "../../../__test-utils__/api-test-helpers";
 
 const mockAuth = vi.mocked(authorizeSchoolAccess);
 const mockGetDeepDive = vi.mocked(getTestDeepDiveFromDynamo);
@@ -343,5 +347,44 @@ describe("GET /api/quiz-analytics/[udise]/test-deep-dive", () => {
       expect(json.students[0]).not.toHaveProperty("time_spent_seconds");
       expect(json.students[0].subject_scores[0]).not.toHaveProperty("time_spent_seconds");
     });
+  });
+});
+
+// PMU roles are pinned to JNV NVS (ADR 0007): a missing program becomes
+// "JNV NVS", any other program is refused before any data is read.
+describe.each([
+  ["PMU Manager", PMU_MANAGER_PERMISSION],
+  ["PMU Govt School User", PMU_GOVT_PERMISSION],
+])("GET test-deep-dive as %s", (_label, permission) => {
+  function pmuRequest(program?: string) {
+    const url = new URL("http://localhost/api/quiz-analytics/1234/test-deep-dive");
+    url.searchParams.set("grade", "11");
+    url.searchParams.set("sessionId", "s1");
+    if (program !== undefined) url.searchParams.set("program", program);
+    return new Request(url.toString());
+  }
+
+  beforeEach(() => {
+    mockAuth.mockResolvedValue({ authorized: true, school: SCHOOL, readOnly: false, permission });
+    mockGetDeepDive.mockResolvedValue({ students: [] } as unknown as TestDeepDiveData);
+    mockGetTimeSpent.mockResolvedValue(new Map());
+  });
+
+  it("serves JNV NVS data when no program is given", async () => {
+    const res = await GET(pmuRequest(), routeParams({ udise: "1234" }));
+    expect(res.status).toBe(200);
+    expect(mockGetDeepDive).toHaveBeenCalledWith("42", "Test School", 11, "s1", "JNV NVS", undefined);
+  });
+
+  it("serves program=JNV NVS", async () => {
+    const res = await GET(pmuRequest("JNV NVS"), routeParams({ udise: "1234" }));
+    expect(res.status).toBe(200);
+    expect(mockGetDeepDive).toHaveBeenCalledWith("42", "Test School", 11, "s1", "JNV NVS", undefined);
+  });
+
+  it.each(["JNV CoE", "JNV Nodal", "Punjab CoE"])("403s program=%s", async (program) => {
+    const res = await GET(pmuRequest(program), routeParams({ udise: "1234" }));
+    expect(res.status).toBe(403);
+    expect(mockGetDeepDive).not.toHaveBeenCalled();
   });
 });

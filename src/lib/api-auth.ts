@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { canAccessSchool, getResolvedPermission } from "@/lib/permissions";
+import type { UserPermission } from "@/lib/permissions";
 import { query } from "@/lib/db";
 
 interface SchoolInfo {
@@ -23,6 +24,12 @@ type AuthResult =
        * render the same verdict.
        */
       readOnly: boolean;
+      /**
+       * The caller's resolved permission row (null for passcode users), so
+       * routes can apply role rules — e.g. the PMU Performance pin — without
+       * resolving it again.
+       */
+      permission?: UserPermission | null;
     }
   | { authorized: false; response: NextResponse };
 
@@ -60,7 +67,7 @@ export async function authorizeSchoolAccess(
         response: NextResponse.json({ error: "Access denied" }, { status: 403 }),
       };
     }
-    return { authorized: true, school, readOnly: false };
+    return { authorized: true, school, readOnly: false, permission: null };
   }
 
   const email = session.user?.email || null;
@@ -88,5 +95,5 @@ export async function authorizeSchoolAccess(
     };
   }
 
-  return { authorized: true, school, readOnly };
+  return { authorized: true, school, readOnly, permission };
 }

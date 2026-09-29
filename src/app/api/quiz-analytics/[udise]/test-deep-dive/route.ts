@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { authorizeSchoolAccess } from "@/lib/api-auth";
+import { resolvePerformanceProgram } from "@/lib/performance-program";
 import { getTestDeepDiveFromDynamo } from "@/lib/dynamodb";
 import { getStudentTimeSpentData, type StudentTimeSpent } from "@/lib/bigquery";
 import { isNvsProgram } from "@/lib/constants";
@@ -51,6 +52,12 @@ export async function GET(
   if (!auth.authorized) return auth.response;
 
   const url = new URL(request.url);
+  const pinned = resolvePerformanceProgram(
+    auth.permission,
+    url.searchParams.get("program") || undefined
+  );
+  if (!pinned.ok) return pinned.response;
+  const program = pinned.program;
   const gradeParam = url.searchParams.get("grade");
   const sessionId = url.searchParams.get("sessionId");
 
@@ -66,7 +73,6 @@ export async function GET(
   }
 
   try {
-    const program = url.searchParams.get("program") || undefined;
     const stream = url.searchParams.get("stream")?.toLowerCase() || undefined;
     const nvs = isNvsProgram(program);
     const [data, times] = await Promise.all([

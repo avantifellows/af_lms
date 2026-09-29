@@ -35,6 +35,8 @@ import {
 } from "@/lib/school-students";
 import { GET, POST } from "./route";
 import {
+  PMU_GOVT_PERMISSION,
+  PMU_MANAGER_PERMISSION,
   jsonRequest,
   routeParams,
 } from "../../../__test-utils__/api-test-helpers";
@@ -225,5 +227,76 @@ describe("POST combined-reports gating", () => {
     const res = await POST(postBody(), routeParams({ udise: "27361106702" }));
     expect(res.status).toBe(403);
     expect(mockWindow).not.toHaveBeenCalled();
+  });
+});
+
+// PMU roles are pinned to JNV NVS (ADR 0007): the report cohort defaults to
+// "JNV NVS" and any other program is refused before any work.
+describe.each([
+  ["PMU Manager", PMU_MANAGER_PERMISSION],
+  ["PMU Govt School User", PMU_GOVT_PERMISSION],
+])("combined-reports as %s", (_label, permission) => {
+  beforeEach(() => {
+    mockAuth.mockResolvedValue({ authorized: true, school: SCHOOL, readOnly: false, permission });
+    mockWindow.mockResolvedValue(ENDED);
+    mockList.mockResolvedValue([]);
+    mockSubmit.mockResolvedValue({ job_id: "j1", status: "queued" });
+  });
+
+  function pmuPost(program?: string) {
+    return jsonRequest(URL_BASE, {
+      method: "POST",
+      body: { session_id: SESSION, grade: 12, ...(program ? { program } : {}) },
+    });
+  }
+
+  it("POST builds the JNV NVS cohort when no program is given", async () => {
+    const res = await POST(pmuPost(), routeParams({ udise: "27361106702" }));
+    expect(res.status).toBe(202);
+    expect(mockFilter).toHaveBeenCalledWith(expect.anything(), {
+      grade: 12,
+      program: "JNV NVS",
+      stream: undefined,
+    });
+  });
+
+  it("POST accepts program=JNV NVS", async () => {
+    const res = await POST(pmuPost("JNV NVS"), routeParams({ udise: "27361106702" }));
+    expect(res.status).toBe(202);
+    expect(mockFilter).toHaveBeenCalledWith(expect.anything(), {
+      grade: 12,
+      program: "JNV NVS",
+      stream: undefined,
+    });
+  });
+
+  it("POST still asks auth for edit rights", async () => {
+    await POST(pmuPost(), routeParams({ udise: "27361106702" }));
+    expect(mockAuth).toHaveBeenCalledWith("27361106702", { requireEdit: true });
+  });
+
+  it.each(["JNV CoE", "JNV Nodal", "Punjab CoE"])("POST 403s program=%s", async (program) => {
+    const res = await POST(pmuPost(program), routeParams({ udise: "27361106702" }));
+    expect(res.status).toBe(403);
+    expect(mockWindow).not.toHaveBeenCalled();
+    expect(mockSubmit).not.toHaveBeenCalled();
+  });
+
+  it("GET lists jobs when no program is given", async () => {
+    const res = await GET(
+      new Request(`${URL_BASE}?session_id=${SESSION}`),
+      routeParams({ udise: "27361106702" })
+    );
+    expect(res.status).toBe(200);
+    expect(mockList).toHaveBeenCalledWith(SESSION, SCHOOL.code);
+  });
+
+  it.each(["JNV CoE", "JNV Nodal"])("GET 403s program=%s", async (program) => {
+    const res = await GET(
+      new Request(`${URL_BASE}?session_id=${SESSION}&program=${encodeURIComponent(program)}`),
+      routeParams({ udise: "27361106702" })
+    );
+    expect(res.status).toBe(403);
+    expect(mockList).not.toHaveBeenCalled();
   });
 });

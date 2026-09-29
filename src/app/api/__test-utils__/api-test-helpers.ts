@@ -54,3 +54,27 @@ export const PASSCODE_SESSION = {
 };
 
 export const NO_SESSION = null;
+
+/**
+ * Resolved permission rows for the PMU sessions above, as
+ * `authorizeSchoolAccess` returns them. Both roles are pinned to JNV NVS.
+ */
+export const PMU_MANAGER_PERMISSION = {
+  email: "pmu.manager@avantifellows.org",
+  level: 3 as const,
+  role: "pmu_manager" as const,
+  school_codes: null,
+  regions: null,
+  program_ids: [64],
+  read_only: false,
+};
+
+export const PMU_GOVT_PERMISSION = {
+  email: "principal@jnv.example.org",
+  level: 1 as const,
+  role: "pmu_govt_school_user" as const,
+  school_codes: ["70705"],
+  regions: null,
+  program_ids: [64],
+  read_only: false,
+};

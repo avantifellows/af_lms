@@ -249,4 +249,28 @@ describe("authorizeSchoolAccess", () => {
     if (result.authorized) expect(result.readOnly).toBe(false);
     expect(mockResolvedPermission).not.toHaveBeenCalled();
   });
+
+  // Performance routes pin PMU roles to JNV NVS from the caller's role, so the
+  // result carries the permission row authorizeSchoolAccess already resolved.
+  it("returns the resolved permission for an email user", async () => {
+    const pmu = permission({
+      email: "pmu.manager@avantifellows.org",
+      role: "pmu_manager",
+      program_ids: [64],
+    });
+    grantSchoolAccess(pmu);
+
+    const result = await authorizeSchoolAccess("70705");
+    expect(result.authorized).toBe(true);
+    if (result.authorized) expect(result.permission).toEqual(pmu);
+  });
+
+  it("returns a null permission for passcode users", async () => {
+    mockSession.mockResolvedValue(PASSCODE_SESSION as never);
+    mockQuery.mockResolvedValue([SCHOOL_ROW]);
+
+    const result = await authorizeSchoolAccess("70705");
+    expect(result.authorized).toBe(true);
+    if (result.authorized) expect(result.permission).toBeNull();
+  });
 });
