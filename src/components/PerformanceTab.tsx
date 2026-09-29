@@ -96,6 +96,7 @@ export default function PerformanceTab({ schoolUdise, lockedProgram }: Props) {
         onStreamChange={f.handleStreamChange}
         onSubjectChange={f.handleSubjectChange}
         onFullViewChange={f.handleFullViewChange}
+        isNvs={f.isNvs}
       />
 
       <PerformanceContent
