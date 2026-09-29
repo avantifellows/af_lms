@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { authOptions, DEV_LOGIN_PERSONAS } from "./auth";
 
 // Extract providers by id
@@ -140,6 +140,24 @@ describe("Dev login provider", () => {
     });
   });
 
+  it("returns user for valid pmu_manager persona", async () => {
+    const result = await devAuthorize({ persona: "pmu_manager" });
+    expect(result).toEqual({
+      id: "dev-pmu_manager",
+      email: "e2e-pmu-manager@test.local",
+      name: "Dev PMU Manager",
+    });
+  });
+
+  it("returns user for valid pmu_govt_school_user persona", async () => {
+    const result = await devAuthorize({ persona: "pmu_govt_school_user" });
+    expect(result).toEqual({
+      id: "dev-pmu_govt_school_user",
+      email: "e2e-pmu-govt-school-user@test.local",
+      name: "Dev PMU Govt School User",
+    });
+  });
+
   it("returns null for unknown persona", async () => {
     const result = await devAuthorize({ persona: "superadmin" });
     expect(result).toBeNull();
@@ -153,5 +171,19 @@ describe("Dev login provider", () => {
   it("returns null for undefined credentials", async () => {
     const result = await devAuthorize(undefined);
     expect(result).toBeNull();
+  });
+});
+
+describe("Dev login provider in production", () => {
+  it("is not registered, so no persona (including PMU personas) can sign in", async () => {
+    vi.resetModules();
+    vi.stubEnv("NODE_ENV", "production");
+    try {
+      const { authOptions: prodAuthOptions } = await import("./auth");
+      const ids = prodAuthOptions.providers.map((p: any) => p.options?.id ?? p.id);
+      expect(ids).not.toContain("dev-login");
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });

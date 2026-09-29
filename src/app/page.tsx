@@ -15,6 +15,8 @@ const DEV_PERSONAS = [
   { key: "former_mentor", label: "Former Mentor", description: "No active mentees" },
   { key: "holistic_admin", label: "Holistic Admin", description: "All supported programs, mentorship only" },
   { key: "read_only", label: "Read-Only", description: "Teacher view without edits" },
+  { key: "pmu_manager", label: "PMU Manager", description: "Level 1, JNV NVS only" },
+  { key: "pmu_govt_school_user", label: "PMU Govt School User", description: "Level 1, 1 JNV School" },
 ] as const;
 
 export default function LoginPage() {

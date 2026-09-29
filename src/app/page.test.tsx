@@ -58,6 +58,19 @@ describe("LoginPage", () => {
     expect(screen.getByText("Former Mentor")).toBeInTheDocument();
     expect(screen.getByText("Holistic Admin")).toBeInTheDocument();
     expect(screen.getByText("Read-Only")).toBeInTheDocument();
+    expect(screen.getByText("PMU Manager")).toBeInTheDocument();
+    expect(screen.getByText("PMU Govt School User")).toBeInTheDocument();
+  });
+
+  it("signs in as a PMU Govt School User persona via dev-login", async () => {
+    mockSignIn.mockResolvedValue({ ok: true });
+    const user = userEvent.setup();
+    render(<LoginPage />);
+    await user.click(screen.getByText("PMU Govt School User"));
+    expect(mockSignIn).toHaveBeenCalledWith("dev-login", {
+      persona: "pmu_govt_school_user",
+      redirect: false,
+    });
   });
 
   it("describes the Holistic Admin persona for all supported programs", () => {

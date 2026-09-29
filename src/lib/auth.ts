@@ -14,6 +14,11 @@ export const DEV_LOGIN_PERSONAS = {
   former_mentor: { email: "e2e-former-holistic-mentor@test.local", name: "Dev Former Mentor" },
   holistic_admin: { email: "e2e-holistic-admin@test.local", name: "Dev Holistic Admin" },
   read_only: { email: "e2e-holistic-read-only@test.local", name: "Dev Read-Only" },
+  pmu_manager: { email: "e2e-pmu-manager@test.local", name: "Dev PMU Manager" },
+  pmu_govt_school_user: {
+    email: "e2e-pmu-govt-school-user@test.local",
+    name: "Dev PMU Govt School User",
+  },
 } as const;
 
 type DevPersonaKey = keyof typeof DEV_LOGIN_PERSONAS;
