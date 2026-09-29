@@ -1,4 +1,4 @@
-import { isPmuRole, PROGRAM_IDS } from "@/lib/constants";
+import { isPmuRole, PMU_ROLES, PROGRAM_IDS } from "@/lib/constants";
 import { query } from "@/lib/db";
 import {
   canAccessSchool,
@@ -10,12 +10,11 @@ import {
   type UserRole,
 } from "@/lib/permissions";
 
-const ALLOWED_STUDENT_ADDITION_ROLES: ReadonlySet<UserRole> = new Set([
+export const ALLOWED_STUDENT_ADDITION_ROLES: ReadonlySet<UserRole> = new Set<UserRole>([
   "admin",
   "program_manager",
   "program_admin",
-  "pmu_manager",
-  "pmu_govt_school_user",
+  ...PMU_ROLES,
 ]);
 
 export interface StudentAdditionSchool {

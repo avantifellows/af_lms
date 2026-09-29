@@ -25,6 +25,7 @@ import {
   HOLISTIC_MENTORSHIP_PROGRAM_IDS,
   isHolisticMentorshipProgramId,
   isPmuRole,
+  PMU_GOVT_SCHOOL_USER_ROLE,
   PMU_PROGRAM_ID,
   PROGRAM_ID_TO_LABEL,
 } from "@/lib/constants";
@@ -48,6 +49,7 @@ import {
 } from "@/lib/enrollment-stats";
 import EnrollmentTabContent from "@/components/enrollment/EnrollmentTabContent";
 import {
+  ALLOWED_STUDENT_ADDITION_ROLES,
   getStudentAdditionAccessFromPermission,
   getStudentExportAccessFromPermission,
 } from "@/lib/student-addition-access";
@@ -840,7 +842,7 @@ export default async function RosterPage({
   // A PMU Govt School User has exactly one School, so never a back link.
   const defaultBackHref = isCentre
     ? "/dashboard?view=centres"
-    : multipleSchools && permission?.role !== "pmu_govt_school_user"
+    : multipleSchools && permission?.role !== PMU_GOVT_SCHOOL_USER_ROLE
       ? "/dashboard"
       : undefined;
 
@@ -884,13 +886,8 @@ export default async function RosterPage({
         canEditStudent={studentsAccess.canEdit}
         canDropoutStudent={
           studentsAccess.canEdit &&
-          [
-            "admin",
-            "program_manager",
-            "program_admin",
-            "pmu_manager",
-            "pmu_govt_school_user",
-          ].includes(permission?.role ?? "")
+          !!permission &&
+          ALLOWED_STUDENT_ADDITION_ROLES.has(permission.role)
         }
         dropoutProgramIds={[
           ...new Set([

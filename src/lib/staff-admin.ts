@@ -19,7 +19,7 @@ import {
   eraseDraftHolisticNotes,
   lockHolisticMentorMappingMutation,
 } from "./holistic-mappings";
-import { isPmuRole } from "./constants";
+import { isPmuRole, PMU_ROLES } from "./constants";
 import {
   type AdminGuardResult,
   type AdminSession,
@@ -1733,6 +1733,8 @@ async function syncAppRoleFromSeats(
 // Only touches the live (revoked_at IS NULL) row, and skips manually elevated
 // Admin and Holistic Mentorship Admin roles whose Program scope is not seat-derived,
 // plus the PMU roles, which are pinned to JNV NVS (ADR 0007).
+const PROGRAM_SYNC_SKIPPED_ROLES = ["admin", "holistic_mentorship_admin", ...PMU_ROLES];
+
 async function syncProgramIdsFromSeats(
   client: PoolClient,
   userId: number
@@ -1751,9 +1753,9 @@ async function syncProgramIdsFromSeats(
      SET program_ids = $2, updated_at = now()
      WHERE user_id = $1
        AND revoked_at IS NULL
-       AND role NOT IN ('admin', 'holistic_mentorship_admin', 'pmu_manager', 'pmu_govt_school_user')
+       AND role <> ALL($3::text[])
        AND COALESCE(program_ids, '{}') <> $2`,
-    [userId, programIds]
+    [userId, programIds, PROGRAM_SYNC_SKIPPED_ROLES]
   );
 }
 

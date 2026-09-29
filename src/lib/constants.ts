@@ -25,7 +25,9 @@ export const PROGRAM_IDS = {
 // components can branch on them without pulling in the server-only DB pool.
 // Both roles are pinned to JNV NVS at every level: the permission layer reads
 // PMU_PROGRAM_ID instead of the row's program_ids, centre seats or level.
-export const PMU_ROLES = ["pmu_manager", "pmu_govt_school_user"] as const;
+export const PMU_MANAGER_ROLE = "pmu_manager";
+export const PMU_GOVT_SCHOOL_USER_ROLE = "pmu_govt_school_user";
+export const PMU_ROLES = [PMU_MANAGER_ROLE, PMU_GOVT_SCHOOL_USER_ROLE] as const;
 export type PmuRole = (typeof PMU_ROLES)[number];
 
 export function isPmuRole(role: unknown): role is PmuRole {

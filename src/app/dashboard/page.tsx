@@ -9,7 +9,12 @@ import {
   isCentreSeated,
 } from "@/lib/permissions";
 import { query } from "@/lib/db";
-import { CURRENT_ACADEMIC_YEAR, isPmuRole } from "@/lib/constants";
+import {
+  CURRENT_ACADEMIC_YEAR,
+  isPmuRole,
+  PMU_GOVT_SCHOOL_USER_ROLE,
+  PMU_MANAGER_ROLE,
+} from "@/lib/constants";
 import { requireHolisticMentorshipAccess } from "@/lib/holistic-mentorship";
 import Link from "next/link";
 import SchoolSearch from "@/components/SchoolSearch";
@@ -291,7 +296,7 @@ function resolveDashboardView(
   permission: DashboardPermission,
 ): DashboardView {
   // PMU Managers are JNV NVS only (ADR 0007): no Physical Centres tab to pick.
-  if (permission.role === "pmu_manager") return "jnv-nvs";
+  if (permission.role === PMU_MANAGER_ROLE) return "jnv-nvs";
   // A confined user has no NVS scope at all, so ?view=jnv-nvs is not an escape
   // hatch for them — it is the whole-school tab, carrying the school-wide
   // student search. Pin them to Centres whatever the URL says.
@@ -425,7 +430,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   // there before any view, search or holistic logic, whatever the URL says.
   // A stored scope that isn't exactly one code gets the no-access panel rather
   // than a redirect loop.
-  if (permission.role === "pmu_govt_school_user") {
+  if (permission.role === PMU_GOVT_SCHOOL_USER_ROLE) {
     const codes = permission.school_codes ?? [];
     if (codes.length !== 1) {
       return <NoDashboardAccess

@@ -1172,11 +1172,10 @@ describe("positions", () => {
       await createPosition({ body: { centre_id: 8, role: "pm", user_id: 70 } })
     ).toEqual({ ok: true });
     const upd = progUpdate()!;
-    expect(upd[1]).toEqual([70, [1, 2]]); // sorted union
+    expect(upd[1].slice(0, 2)).toEqual([70, [1, 2]]); // sorted union
     // Seat sync never shrinks either manually elevated admin role's Program scope.
-    expect(String(upd[0])).toContain(
-      "role NOT IN ('admin', 'holistic_mentorship_admin'"
-    );
+    expect(String(upd[0])).toContain("role <> ALL($3::text[])");
+    expect(upd[1][2]).toEqual(expect.arrayContaining(["admin", "holistic_mentorship_admin"]));
     expect(String(upd[0])).toContain("revoked_at IS NULL");
   });
 
@@ -1186,9 +1185,14 @@ describe("positions", () => {
     mockQuery.mockResolvedValueOnce([{ id: 99 }]); // isLastActiveSeat → not last
     routeClient([1]); // a remaining (legacy) seat in program 1
     expect(await deletePosition({ id: 44 })).toEqual({ ok: true });
-    expect(String(progUpdate()![0])).toContain(
-      "role NOT IN ('admin', 'holistic_mentorship_admin', 'pmu_manager', 'pmu_govt_school_user')"
-    );
+    const upd = progUpdate()!;
+    expect(String(upd[0])).toContain("role <> ALL($3::text[])");
+    expect(upd[1][2]).toEqual([
+      "admin",
+      "holistic_mentorship_admin",
+      "pmu_manager",
+      "pmu_govt_school_user",
+    ]);
   });
 
   it("deletePosition recomputes program_ids from the remaining seats", async () => {
@@ -1197,7 +1201,7 @@ describe("positions", () => {
     mockQuery.mockResolvedValueOnce([{ id: 99 }]); // isLastActiveSeat → not last
     routeClient([1]); // after removal only a program-1 seat remains
     expect(await deletePosition({ id: 44 })).toEqual({ ok: true });
-    expect(progUpdate()![1]).toEqual([70, [1]]);
+    expect(progUpdate()![1].slice(0, 2)).toEqual([70, [1]]);
   });
 
   it("does not touch program_ids when the person has no active seat", async () => {

@@ -5,6 +5,8 @@ import { Modal, Input, Select, Button } from "@/components/ui";
 import {
   HOLISTIC_MENTORSHIP_PROGRAM_IDS,
   isPmuRole,
+  PMU_GOVT_SCHOOL_USER_ROLE,
+  PMU_MANAGER_ROLE,
   PMU_PROGRAM_ID,
   PROGRAM_ID_TO_LABEL,
   PROGRAM_IDS,
@@ -86,8 +88,6 @@ const ROLE_DESCRIPTIONS: Record<string, string> = {
   pmu_govt_school_user: "PMU Govt School Users can view and manage JNV NVS students and view performance in their one JNV School",
 };
 
-const PMU_GOVT_ROLE = "pmu_govt_school_user";
-
 type UserFormValues = {
   email: string;
   fullName: string;
@@ -134,7 +134,7 @@ function toggledSelection<T>(selection: T[], value: T) {
 
 // A PMU Govt School User is always School-level; the level picker is hidden.
 function effectiveLevel(role: string, level: number) {
-  return role === PMU_GOVT_ROLE ? 1 : level;
+  return role === PMU_GOVT_SCHOOL_USER_ROLE ? 1 : level;
 }
 
 function programIdsFor(role: string, selectedPrograms: number[]) {
@@ -148,7 +148,7 @@ function programIdsFor(role: string, selectedPrograms: number[]) {
 
 function schoolScopeFor(values: UserFormValues) {
   if (hasGlobalSchoolAccess(values.role)) return { school_codes: null, regions: null };
-  if (values.role === PMU_GOVT_ROLE) return { school_codes: values.selectedSchools, regions: null };
+  if (values.role === PMU_GOVT_SCHOOL_USER_ROLE) return { school_codes: values.selectedSchools, regions: null };
   if (values.level === 2) return { school_codes: null, regions: values.selectedRegions };
   if (values.level === 1) return { school_codes: values.selectedSchools, regions: null };
   return { school_codes: null, regions: null };
@@ -172,7 +172,7 @@ const PMU_GOVT_NO_SCHOOL_ERROR = "A PMU Govt School User must have exactly one S
 
 // Never trim a PMU Govt School User's Schools for the Admin: Save is blocked until exactly one remains.
 function pmuGovtSchoolError(values: Pick<UserFormValues, "role" | "selectedSchools">) {
-  if (values.role !== PMU_GOVT_ROLE) return null;
+  if (values.role !== PMU_GOVT_SCHOOL_USER_ROLE) return null;
   if (values.selectedSchools.length > 1) return PMU_GOVT_EXTRA_SCHOOLS_ERROR;
   if (values.selectedSchools.length === 0) return PMU_GOVT_NO_SCHOOL_ERROR;
   return null;
@@ -264,7 +264,7 @@ export default function AddUserModal({ user, regions, schoolCodeToName, onClose,
   };
 
   const addSchool = (code: string) => {
-    if (role === PMU_GOVT_ROLE) {
+    if (role === PMU_GOVT_SCHOOL_USER_ROLE) {
       setSelectedSchools([code]);
     } else if (!selectedSchools.includes(code)) {
       setSelectedSchools([...selectedSchools, code]);
@@ -362,8 +362,8 @@ function RoleField({ role, onChange }: { role: string; onChange: (role: string) 
       <option value="program_manager">Program Manager - School visits + student management</option>
       <option value="program_admin">Program Admin - Scoped oversight + own school visits</option>
       <option value="holistic_mentorship_admin">Holistic Mentorship Admin - All supported programs</option>
-      <option value="pmu_manager">PMU Manager - JNV NVS students + performance</option>
-      <option value="pmu_govt_school_user">PMU Govt School User - One JNV NVS School</option>
+      <option value={PMU_MANAGER_ROLE}>PMU Manager - JNV NVS students + performance</option>
+      <option value={PMU_GOVT_SCHOOL_USER_ROLE}>PMU Govt School User - One JNV NVS School</option>
       <option value="admin">Admin - Full access + user management</option>
     </Select>
     <p className="mt-1 text-xs text-gray-500">{ROLE_DESCRIPTIONS[role]}</p>
@@ -407,7 +407,7 @@ function AccessFields({ role, ...props }: AccessFieldsProps) {
       <ReadOnlyField value={props.readOnly} onChange={props.onReadOnlyChange} label="Read-only access" />
     </>;
   }
-  if (role === PMU_GOVT_ROLE) return <PmuGovtAccessFields {...props} />;
+  if (role === PMU_GOVT_SCHOOL_USER_ROLE) return <PmuGovtAccessFields {...props} />;
   if (isPmuRole(role)) return <StandardAccessFields {...props} pmu />;
   return <StandardAccessFields {...props} />;
 }

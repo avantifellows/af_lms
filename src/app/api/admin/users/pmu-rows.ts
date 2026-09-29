@@ -1,5 +1,5 @@
 import { query } from "@/lib/db";
-import { PMU_PROGRAM_ID, type PmuRole } from "@/lib/constants";
+import { PMU_GOVT_SCHOOL_USER_ROLE, PMU_PROGRAM_ID, type PmuRole } from "@/lib/constants";
 
 // Admin-side shape rules for the two PMU roles (ADR 0007). They keep a stored
 // row pinned to JNV NVS: program is always [64], a Govt School User holds
@@ -81,7 +81,7 @@ export async function resolvePmuRow(
 ): Promise<{ ok: true; row: PmuRow } | { ok: false; error: string }> {
   const { role, level, school_codes, regions } = input;
 
-  if (role === "pmu_govt_school_user") {
+  if (role === PMU_GOVT_SCHOOL_USER_ROLE) {
     if (level !== 1 || nonEmpty(regions) || school_codes?.length !== 1) {
       return { ok: false, error: GOVT_SHAPE_ERROR };
     }
