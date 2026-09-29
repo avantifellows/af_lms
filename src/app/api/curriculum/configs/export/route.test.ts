@@ -28,7 +28,6 @@ vi.mock("@/lib/curriculum-schema", () => ({
 import { GET } from "./route";
 import {
   ADMIN_SESSION,
-  PASSCODE_SESSION,
   PM_SESSION,
 } from "../../../__test-utils__/api-test-helpers";
 
@@ -108,9 +107,6 @@ describe("GET /api/curriculum/configs/export", () => {
   it("returns 401, 403, and 503 before exporting", async () => {
     mockGetServerSession.mockResolvedValueOnce(null);
     expect((await GET(nextReq("/api/curriculum/configs/export"))).status).toBe(401);
-
-    mockGetServerSession.mockResolvedValueOnce(PASSCODE_SESSION);
-    expect((await GET(nextReq("/api/curriculum/configs/export"))).status).toBe(403);
 
     mockGetServerSession.mockResolvedValueOnce(PM_SESSION);
     mockGetUserPermission.mockResolvedValueOnce({

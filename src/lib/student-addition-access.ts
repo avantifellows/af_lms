@@ -28,7 +28,6 @@ export interface StudentAdditionSchool {
 
 interface StudentWriteSession {
   user?: { email?: string | null } | null;
-  isPasscodeUser?: boolean;
 }
 
 export type StudentAdditionAccessResult =
@@ -186,7 +185,6 @@ function deny(
 
 function requireGoogleSessionEmail(session: StudentWriteSession | null) {
   if (!session) return deny(401, "Unauthorized");
-  if (session.isPasscodeUser) return deny(403);
 
   const email = session.user?.email;
   return email ? { ok: true as const, email } : deny(403);
@@ -234,8 +232,7 @@ async function requireStudentWriteActor(session: StudentWriteSession | null) {
 // Actor gate for editing an existing student's profile. Unlike the
 // student-addition actor, this follows the permission matrix directly: any role
 // with students=edit (teacher / program_manager / program_admin / admin, minus
-// read_only) may edit. Passcode users are excluded (requireGoogleSessionEmail
-// denies them). Program ownership is checked separately, per student.
+// read_only) may edit. Program ownership is checked separately, per student.
 async function requireStudentEditActor(session: StudentWriteSession | null) {
   const sessionEmail = requireGoogleSessionEmail(session);
   if (!sessionEmail.ok) return sessionEmail;
@@ -335,7 +332,6 @@ export function getStudentAdditionAccessFromPermission(
   permission: UserPermission | null,
 ): StudentAdditionAccessResult {
   if (!session) return deny(401, "Unauthorized");
-  if (session.isPasscodeUser) return deny(403);
 
   const email = session.user?.email;
   if (!email || !permission) return deny(403);

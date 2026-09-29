@@ -58,17 +58,6 @@ describe("authorizeInterventionFlags", () => {
     if (!result.ok) expect(result.response.status).toBe(401);
   });
 
-  it("rejects passcode logins before any lookup", async () => {
-    const result = await authorizeInterventionFlags(
-      { user: { email: "passcode_70705@avantifellows.org" }, isPasscodeUser: true },
-      "70705",
-      "view",
-    );
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.response.status).toBe(403);
-    expect(mockGetResolvedPermission).not.toHaveBeenCalled();
-  });
-
   it("rejects users without a permission row", async () => {
     mockGetResolvedPermission.mockResolvedValue(null);
     const result = await authorizeInterventionFlags(SESSION, "70705", "view");
@@ -115,11 +104,10 @@ describe("authorizeInterventionFlags", () => {
 });
 
 describe("interventionFlagAccess", () => {
-  it("follows students access and excludes passcode logins", () => {
+  it("follows students access", () => {
     expect(interventionFlagAccess(TEACHER)).toEqual({ canView: true, canEdit: true });
     expect(interventionFlagAccess({ ...TEACHER, read_only: true })).toEqual({ canView: true, canEdit: false });
     expect(interventionFlagAccess(null)).toEqual({ canView: false, canEdit: false });
-    expect(interventionFlagAccess(TEACHER, { isPasscodeUser: true })).toEqual({ canView: false, canEdit: false });
     expect(interventionFlagAccess({ ...TEACHER, role: "holistic_mentorship_admin" }).canView).toBe(false);
   });
 });

@@ -58,15 +58,6 @@ describe("curriculum config admin guard", () => {
       expected: { ok: false, status: 401, error: "Unauthorized" },
     },
     {
-      label: "passcode user",
-      session: {
-        user: { email: "passcode-70705@school.local" },
-        isPasscodeUser: true,
-      },
-      permission: null,
-      expected: { ok: false, status: 403, error: "Forbidden" },
-    },
-    {
       label: "PM",
       session: { user: { email: "pm@avantifellows.org" } },
       permission: { ...adminPermission, role: "program_manager" },

@@ -47,7 +47,6 @@ describe("POST /api/holistic-mentorship/privacy-deletions/:studentId", () => {
     ["Teacher", { user: { email: "teacher@af.org" } }],
     ["Program Manager", { user: { email: "pm@af.org" } }],
     ["Program Admin", { user: { email: "program-admin@af.org" } }],
-    ["passcode user", { user: { email: "passcode@school.org" }, isPasscodeUser: true }],
   ])("rejects %s before validating or deleting content", async (_label, session) => {
     mockSession.mockResolvedValue(session);
     mockAccess.mockResolvedValue({ ok: false, status: 403, error: "Forbidden" });

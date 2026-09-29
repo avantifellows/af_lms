@@ -75,26 +75,18 @@ export async function GET(
     return jsonError(404, "School not found");
   }
 
-  // Access control mirrors the school page: passcode users are pinned to their
-  // own school; Google users need school access + students view permission.
-  const isPasscodeUser = session.isPasscodeUser ?? false;
-  let isPmu = false;
-  if (isPasscodeUser) {
-    if (session.schoolCode !== school.code) {
-      return jsonError(403, "Forbidden");
-    }
-  } else {
-    const permission = session.user?.email
-      ? await getResolvedPermission(session.user.email)
-      : null;
-    if (!canAccessSchoolSync(permission, school.code, school.region ?? undefined)) {
-      return jsonError(403, "Forbidden");
-    }
-    if (!getFeatureAccess(permission, "students").canView) {
-      return jsonError(403, "Forbidden");
-    }
-    isPmu = isPmuRole(permission?.role);
+  // Access control mirrors the school page: school access + students view
+  // permission.
+  const permission = session.user?.email
+    ? await getResolvedPermission(session.user.email)
+    : null;
+  if (!canAccessSchoolSync(permission, school.code, school.region ?? undefined)) {
+    return jsonError(403, "Forbidden");
   }
+  if (!getFeatureAccess(permission, "students").canView) {
+    return jsonError(403, "Forbidden");
+  }
+  const isPmu = isPmuRole(permission?.role);
 
   // Students in the target grade(s) currently enrolled at the school
   // (excludes dropouts). PMU roles are pinned to JNV NVS, so for them only

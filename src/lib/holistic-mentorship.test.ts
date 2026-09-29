@@ -57,16 +57,6 @@ describe("requireHolisticMentorshipAccess", () => {
     expect(mockQuery).not.toHaveBeenCalled();
   });
 
-  it("rejects passcode access before data access", async () => {
-    await expect(
-      requireHolisticMentorshipAccess(
-        { user: { email: "passcode@school.local" }, isPasscodeUser: true },
-        "program_read"
-      )
-    ).resolves.toMatchObject({ ok: false, status: 403 });
-    expect(mockQuery).not.toHaveBeenCalled();
-  });
-
   it.each([
     ["admin", true],
     ["holistic_mentorship_admin", true],
@@ -323,15 +313,6 @@ describe("requireHolisticMentorshipAccess", () => {
       if (!allowed) expect(result).toMatchObject({ status: 403 });
     },
   );
-
-  it("denies passcode users the Admin Mapping mutation action before data access", async () => {
-    await expect(requireHolisticMentorshipAccess(
-      { user: { email: "passcode@school.local" }, isPasscodeUser: true },
-      "admin_mapping_mutation",
-      { programId: 1 },
-    )).resolves.toMatchObject({ ok: false, status: 403 });
-    expect(mockQuery).not.toHaveBeenCalled();
-  });
 
   it("allows an active Teacher seat at a Program 1 School", async () => {
     mockTeacherScope();

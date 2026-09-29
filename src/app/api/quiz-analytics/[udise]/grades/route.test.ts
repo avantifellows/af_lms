@@ -47,7 +47,6 @@ beforeEach(() => {
   // Default: admin session → no program filtering applied
   mockSession.mockResolvedValue({
     user: { email: "admin@avantifellows.org" },
-    isPasscodeUser: false,
   } as never);
   mockPermission.mockResolvedValue({
     email: "admin@avantifellows.org",
@@ -142,7 +141,6 @@ describe("GET /api/quiz-analytics/[udise]/grades", () => {
     mockGetPrograms.mockResolvedValue(["JNV CoE", "JNV Nodal", "JNV NVS"]);
     mockSession.mockResolvedValue({
       user: { email: "teacher@example.com" },
-      isPasscodeUser: false,
     } as never);
     mockPermission.mockResolvedValue({
       email: "teacher@example.com",
@@ -171,7 +169,6 @@ describe("GET /api/quiz-analytics/[udise]/grades", () => {
     mockGetPrograms.mockResolvedValue(["JNV CoE", "JNV NVS"]);
     mockSession.mockResolvedValue({
       user: { email: "admin@example.com" },
-      isPasscodeUser: false,
     } as never);
     mockPermission.mockResolvedValue({
       email: "admin@example.com",
@@ -191,27 +188,6 @@ describe("GET /api/quiz-analytics/[udise]/grades", () => {
       grades: [11, 12],
       programs: ["JNV CoE", "JNV NVS"],
     });
-  });
-
-  it("passcode users see every program (no permission lookup)", async () => {
-    mockAuth.mockResolvedValue({ authorized: true, school: SCHOOL });
-    mockGetGrades.mockResolvedValue([12]);
-    mockGetPrograms.mockResolvedValue(["JNV CoE", "JNV NVS"]);
-    mockSession.mockResolvedValue({
-      user: { email: null },
-      isPasscodeUser: true,
-      schoolCode: "70705",
-    } as never);
-
-    const res = await GET(
-      new Request("http://localhost/api/quiz-analytics/1234/grades"),
-      routeParams({ udise: "1234" })
-    );
-    await expect(res.json()).resolves.toEqual({
-      grades: [12],
-      programs: ["JNV CoE", "JNV NVS"],
-    });
-    expect(mockPermission).not.toHaveBeenCalled();
   });
 
   it("returns empty grades array when none exist", async () => {

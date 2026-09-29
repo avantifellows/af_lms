@@ -17,7 +17,7 @@ edges:
     condition: when the denied resource is a visit
   - target: patterns/add-api-route.md
     condition: when the bug is in a route's gate ordering
-last_updated: 2026-07-23
+last_updated: 2026-09-29
 ---
 
 # Debug Access Denied (401/403/empty)
@@ -29,7 +29,7 @@ likelihood, are below — check them top-down.
 
 ## Steps
 1. **Authenticated at all?** 401 → no `session`. Confirm `getServerSession(authOptions)` returns a user; check NextAuth env (`NEXTAUTH_URL`/`NEXTAUTH_SECRET`) and that the route gated correctly.
-2. **Passcode user?** `session.isPasscodeUser` is blocked from visits and every non-`students` feature. Expected 403 — not a bug. The gate compares `session.schoolCode` to the target school.
+2. **Old passcode session?** Passcode login is gone (ADR 0007); a retired passcode JWT is treated as signed out, so the user must sign in with Google.
 3. **Bare vs resolved permission.** The #1 real bug: a school/centre decision used `getUserPermission` instead of `getResolvedPermission`, so centre **seats** were absent and a seated user got denied (or an empty list). Switch to `getResolvedPermission`.
 4. **Scope level.** Level 1 = `school_codes`, level 2 = `regions` (region resolved via a `school` lookup when not passed), level 3 = all. Confirm the `user_permission` row's level/codes/regions match expectation.
 5. **Feature matrix + gating.** `getFeatureAccess`: is the role's matrix cell `none`? Is it an `NVS_GATED_FEATURES` feature and the user lacks CoE/Nodal (`hasCoEOrNodal=false`)? Is `read_only` downgrading `edit`→`view` on a write path?

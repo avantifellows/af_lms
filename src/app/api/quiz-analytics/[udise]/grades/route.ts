@@ -42,7 +42,7 @@ export async function GET(
     ]);
 
     // Restrict program tabs to the ones the user is assigned to.
-    // Passcode users and admins see every program available for the school.
+    // Admins see every program available for the school.
     // PMU roles use the pinned program context (JNV NVS only), never the
     // row's raw program_ids.
     const session = await getServerSession(authOptions);
@@ -50,7 +50,7 @@ export async function GET(
     if (auth.permission && isPmuRole(auth.permission.role)) {
       const allowedLabels = labelsFor(getProgramContextSync(auth.permission).programIds);
       programs = allPrograms.filter((p) => allowedLabels.has(p));
-    } else if (session && !session.isPasscodeUser && session.user?.email) {
+    } else if (session?.user?.email) {
       const permission = await getUserPermission(session.user.email);
       if (permission && permission.role !== "admin") {
         const allowedLabels = labelsFor(permission.program_ids || []);

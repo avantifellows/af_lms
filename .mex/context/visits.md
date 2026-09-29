@@ -18,7 +18,7 @@ edges:
     condition: when adding a new visit action type
   - target: context/data-access.md
     condition: when writing visit rows (direct Postgres, not the DB Service)
-last_updated: 2026-09-16
+last_updated: 2026-09-29
 ---
 
 # PM School Visits
@@ -40,7 +40,7 @@ stored completion state without changing its GPS or timestamp.
 
 ## Access layer — `src/lib/visits-policy.ts` (NOT raw permissions)
 Visit routes do **not** call `canAccessSchool` directly. They use:
-- `requireVisitsAccess(session, "view"|"edit")` → `{ ok, actor }` or `{ ok:false, response }`. Blocks passcode users, resolves the permission, checks the `visits` feature.
+- `requireVisitsAccess(session, "view"|"edit")` → `{ ok, actor }` or `{ ok:false, response }`. Resolves the permission, checks the `visits` feature.
 - `enforceVisitReadAccess` / `enforceVisitWriteAccess(actor, target)` — per-visit ownership: a **program_manager** sees/edits only their own visits (`pm_email` match); **admin** has scoped read/write; **program_admin** has scoped read access and edits only their own in-progress visits.
 - `enforceVisitWriteLock(status)` — returns 409 if the visit is `completed` (completed visits are read-only; only `admin` may edit completed action *data*, via `canEditCompletedActionData`).
 - `buildVisitScopePredicate(actor, opts)` — SQL `WHERE` fragment to scope list queries (handles level 1/2/3 + seat schools).
@@ -50,7 +50,7 @@ Visit pages that gate entry before calling an API must also use `getResolvedPerm
 `getUserPermission` omits Centre-seat-derived schools and programs. In particular, the new-Visit
 page uses the resolved permission for its Visits feature check before rendering the form.
 
-Role semantics: **PM owner** = read/write own; **admin** = scoped read/write; **program_admin** = scoped read plus write on owned in-progress Visits; **passcode** = blocked. `read_only` downgrades every role to view-only, and Visit/Action pages combine feature-level `canEdit` with the ownership policy before rendering mutation controls.
+Role semantics: **PM owner** = read/write own; **admin** = scoped read/write; **program_admin** = scoped read plus write on owned in-progress Visits. `read_only` downgrades every role to view-only, and Visit/Action pages combine feature-level `canEdit` with the ownership policy before rendering mutation controls.
 
 ## GPS — `src/lib/geo-validation.ts`
 `validateGpsReading(body, "start"|"end")` reads `${prefix}_lat/_lng/_accuracy`. Rejects (422) accuracy > 500m or out-of-range lat/lng; warns (still accepts) between 100–500m. **Never log lat/lng.** Routes that need GPS: create visit, action start, action end, complete visit.

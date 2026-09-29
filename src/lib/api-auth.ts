@@ -25,7 +25,7 @@ type AuthResult =
        */
       readOnly: boolean;
       /**
-       * The caller's resolved permission row (null for passcode users), so
+       * The caller's resolved permission row, so
        * routes can apply role rules — e.g. the PMU Performance pin — without
        * resolving it again.
        */
@@ -33,9 +33,7 @@ type AuthResult =
     }
   | { authorized: false; response: NextResponse };
 
-// `requireEdit`: additionally refuse read-only callers with 403. Passcode
-// users have no user_permission row and so cannot be read-only; the flag only
-// bites for email users.
+// `requireEdit`: additionally refuse read-only callers with 403.
 export async function authorizeSchoolAccess(
   udise: string,
   options?: { requireEdit?: boolean },
@@ -58,16 +56,6 @@ export async function authorizeSchoolAccess(
       authorized: false,
       response: NextResponse.json({ error: "School not found" }, { status: 404 }),
     };
-  }
-
-  if (session.isPasscodeUser) {
-    if (session.schoolCode !== school.code) {
-      return {
-        authorized: false,
-        response: NextResponse.json({ error: "Access denied" }, { status: 403 }),
-      };
-    }
-    return { authorized: true, school, readOnly: false, permission: null };
   }
 
   const email = session.user?.email || null;

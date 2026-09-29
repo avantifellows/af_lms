@@ -4,7 +4,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ADMIN_SESSION,
   NO_SESSION,
-  PASSCODE_SESSION,
   PMU_GOVT_SESSION,
   PMU_MANAGER_SESSION,
 } from "@/app/api/__test-utils__/api-test-helpers";
@@ -110,16 +109,6 @@ describe("GET /api/schools/[code]/consent-status", () => {
     mockQuery.mockResolvedValueOnce([] as never); // school lookup
     const res = await GET(req(), params);
     expect(res.status).toBe(404);
-  });
-
-  it("403 when a passcode user targets another school", async () => {
-    mockSession.mockResolvedValueOnce({
-      ...PASSCODE_SESSION,
-      schoolCode: "OTHER",
-    });
-    mockQuery.mockResolvedValueOnce(SCHOOL_ROW as never);
-    const res = await GET(req(), params);
-    expect(res.status).toBe(403);
   });
 
   it("403 when a Google user lacks school access", async () => {

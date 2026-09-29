@@ -42,7 +42,6 @@ export interface InterventionFlagSchool {
 
 interface SessionLike {
   user?: { email?: string | null } | null;
-  isPasscodeUser?: boolean;
 }
 
 type AuthResult<T> = ({ ok: true } & T) | { ok: false; response: NextResponse };
@@ -53,8 +52,7 @@ function deny(status: number, error: string): { ok: false; response: NextRespons
 
 // Rule: anyone who can see a Student (school access + `students` view) can see
 // their flags; raising, adding notes and resolving also need `students` edit,
-// so read-only accounts only view. Passcode logins are excluded: a passcode is
-// shared by a whole school, so it cannot attribute a note to a person.
+// so read-only accounts only view.
 export type InterventionFlagAction = "view" | "edit";
 
 async function resolveActor(
@@ -63,7 +61,7 @@ async function resolveActor(
 ): Promise<AuthResult<{ actor: InterventionFlagActor }>> {
   if (!session) return deny(401, "Unauthorized");
   const email = session.user?.email;
-  if (session.isPasscodeUser || !email) return deny(403, "Forbidden");
+  if (!email) return deny(403, "Forbidden");
 
   const permission = await getResolvedPermission(email);
   const access = interventionFlagAccess(permission);
@@ -107,9 +105,7 @@ export async function authorizeInterventionFlags(
 /** Who may see and change flags; also decides which flag UI to render. */
 export function interventionFlagAccess(
   permission: UserPermission | null,
-  opts?: { isPasscodeUser?: boolean },
 ): { canView: boolean; canEdit: boolean } {
-  if (opts?.isPasscodeUser) return { canView: false, canEdit: false };
   const { canView, canEdit } = getFeatureAccess(permission, "students");
   return { canView, canEdit };
 }

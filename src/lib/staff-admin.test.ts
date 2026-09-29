@@ -68,14 +68,8 @@ afterEach(() => {
 });
 
 describe("requireStaffAdmin", () => {
-  it("rejects missing sessions, passcode users, and non-admins", async () => {
+  it("rejects missing sessions and non-admins", async () => {
     expect(await requireStaffAdmin(null)).toMatchObject({ ok: false, status: 401 });
-    expect(
-      await requireStaffAdmin({
-        user: { email: "x@avantifellows.org" },
-        isPasscodeUser: true,
-      })
-    ).toMatchObject({ ok: false, status: 403 });
     mockGetUserPermission.mockResolvedValueOnce({ role: "program_manager" });
     expect(
       await requireStaffAdmin({ user: { email: "pm@avantifellows.org" } })
