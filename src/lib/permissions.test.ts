@@ -1325,30 +1325,38 @@ describe("PMU roles (JNV NVS pinned)", () => {
       students: "view",
     };
 
-    for (const role of ["pmu_manager", "pmu_govt_school_user"] as const) {
-      for (const level of [1, 2, 3] as const) {
-        for (const readOnly of [false, true]) {
-          const expected = readOnly ? EXPECTED_READ_ONLY : EXPECTED;
-          for (const [feature, access] of Object.entries(expected)) {
-            it(`${role} level ${level}${readOnly ? " read_only" : ""}: ${feature} → ${access}`, () => {
-              // CoE/Nodal program_ids must not unlock anything for PMU roles.
-              const permission = makePermission({
-                role,
-                level,
-                read_only: readOnly,
-                program_ids: [PROGRAM_IDS.COE, PROGRAM_IDS.NODAL, PROGRAM_IDS.NVS],
-                school_codes: level === 1 ? ["70705"] : null,
-                regions: level === 2 ? ["West"] : null,
-              });
-              expect(getFeatureAccess(permission, feature as Feature)).toEqual({
-                access,
-                canView: access !== "none",
-                canEdit: access === "edit",
-              });
-            });
-          }
-        }
-      }
+    // Every role × level × read_only × feature combination, flattened.
+    const cases = (["pmu_manager", "pmu_govt_school_user"] as const).flatMap((role) =>
+      ([1, 2, 3] as const).flatMap((level) =>
+        [false, true].flatMap((readOnly) =>
+          Object.entries(readOnly ? EXPECTED_READ_ONLY : EXPECTED).map(([feature, access]) => ({
+            role,
+            level,
+            readOnly,
+            feature: feature as Feature,
+            access,
+          }))
+        )
+      )
+    );
+
+    for (const { role, level, readOnly, feature, access } of cases) {
+      it(`${role} level ${level}${readOnly ? " read_only" : ""}: ${feature} → ${access}`, () => {
+        // CoE/Nodal program_ids must not unlock anything for PMU roles.
+        const permission = makePermission({
+          role,
+          level,
+          read_only: readOnly,
+          program_ids: [PROGRAM_IDS.COE, PROGRAM_IDS.NODAL, PROGRAM_IDS.NVS],
+          school_codes: level === 1 ? ["70705"] : null,
+          regions: level === 2 ? ["West"] : null,
+        });
+        expect(getFeatureAccess(permission, feature)).toEqual({
+          access,
+          canView: access !== "none",
+          canEdit: access === "edit",
+        });
+      });
     }
   });
 });

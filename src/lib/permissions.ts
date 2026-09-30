@@ -6,12 +6,11 @@ import {
   isPmuRole,
   PROGRAM_IDS,
   PROGRAM_IDS_ORDERED,
-  PROGRAM_ID_TO_LABEL,
 } from "./constants";
 
 // Re-exported from constants so existing `@/lib/permissions` imports keep
 // working while the definitions live in a client-safe module.
-export { PHYSICAL_CENTRE_PROGRAM_IDS, PROGRAM_IDS, PROGRAM_IDS_ORDERED, PROGRAM_ID_TO_LABEL };
+export { PHYSICAL_CENTRE_PROGRAM_IDS, PROGRAM_IDS, PROGRAM_IDS_ORDERED };
 
 // Permission levels (school scope only)
 export type AccessLevel = 1 | 2 | 3;
@@ -268,6 +267,53 @@ function isMissingSchemaError(err: unknown): boolean {
   return code === "42P01" || code === "42703";
 }
 
+// school_codes is the level-1 scope mechanism; level-2's explicit scope is
+// regions (kept lazy in canAccessSchoolSync's switch), so only seed school_codes
+// for level 1 — seeding it for level 2 would over-grant the additive check and
+// diverge from the level switch.
+function explicitLevelOneSchools(p: UserPermission): Set<string> {
+  return new Set<string>(p.level === 1 ? p.school_codes ?? [] : []);
+}
+
+// PMU roles never hold centre seats (ADR 0007): skip the seat lookup so a
+// stale centre_positions row grants no School, centre or program. Level 3
+// reaches every School but no centre.
+function resolvePmuScope(p: UserPermission): ResolvedScope {
+  return {
+    schools: p.level === 3 ? "all" : explicitLevelOneSchools(p),
+    centres: new Set<number>(),
+    programs: new Set<number>(),
+  };
+}
+
+// Adds the user's centre seats, and the schools and programs those centres
+// belong to, into the given sets (mutated in place, in that order).
+async function addSeatScope(
+  userId: number,
+  schools: Set<string>,
+  centres: Set<number>,
+  programs: Set<number>
+): Promise<void> {
+  try {
+    const centreIds = await centresForUser(userId);
+    centreIds.forEach((id) => centres.add(id));
+    for (const code of await schoolCodesForCentres(centreIds)) {
+      schools.add(code);
+    }
+    for (const programId of await programsForCentres(centreIds)) {
+      programs.add(programId);
+    }
+  } catch (err) {
+    // The centre tables/columns may not exist yet on an environment that
+    // hasn't run the seat migration — degrade to explicit-only scope in that
+    // one case. Any other error (a transient DB failure) must propagate:
+    // swallowing it would silently hand a *seated* staff member an empty
+    // scope (their explicit school_codes were cleared by strict exclusivity),
+    // i.e. lock them out of their own data while showing no error.
+    if (!isMissingSchemaError(err)) throw err;
+  }
+}
+
 // Resolve a permission's effective scope: explicit school_codes ∪ centre-seat-
 // derived schools. Regions stay handled lazily by canAccessSchoolSync's level-2
 // branch (no eager region→school expansion here, so level-2 semantics are
@@ -275,50 +321,17 @@ function isMissingSchemaError(err: unknown): boolean {
 // derived from school_codes (seat schools ⊆ school_codes); strict per-user
 // exclusivity (B2) makes seats the sole source for seated staff.
 export async function resolveScope(p: UserPermission): Promise<ResolvedScope> {
-  // PMU roles never hold centre seats (ADR 0007): skip the seat lookup so a
-  // stale centre_positions row grants no School, centre or program. Level 3
-  // reaches every School but no centre.
-  if (isPmuRole(p.role)) {
-    const explicitSchools = new Set<string>(p.level === 1 ? p.school_codes ?? [] : []);
-    return {
-      schools: p.level === 3 ? "all" : explicitSchools,
-      centres: new Set<number>(),
-      programs: new Set<number>(),
-    };
-  }
+  if (isPmuRole(p.role)) return resolvePmuScope(p);
 
   if (p.level === 3) return { schools: "all", centres: "all", programs: "all" };
 
-  // school_codes is the level-1 scope mechanism; level-2's explicit scope is
-  // regions (kept lazy in canAccessSchoolSync's switch), so only seed school_codes
-  // for level 1 — seeding it for level 2 would over-grant the additive check and
-  // diverge from the level switch.
-  const schools = new Set<string>(p.level === 1 ? p.school_codes ?? [] : []);
+  const schools = explicitLevelOneSchools(p);
   const centres = new Set<number>();
   // Seat-derived programs only — explicit program_ids are unioned in by
   // getProgramContextSync, which is where program access is actually decided.
   const programs = new Set<number>();
 
-  if (p.user_id != null) {
-    try {
-      const centreIds = await centresForUser(p.user_id);
-      centreIds.forEach((id) => centres.add(id));
-      for (const code of await schoolCodesForCentres(centreIds)) {
-        schools.add(code);
-      }
-      for (const programId of await programsForCentres(centreIds)) {
-        programs.add(programId);
-      }
-    } catch (err) {
-      // The centre tables/columns may not exist yet on an environment that
-      // hasn't run the seat migration — degrade to explicit-only scope in that
-      // one case. Any other error (a transient DB failure) must propagate:
-      // swallowing it would silently hand a *seated* staff member an empty
-      // scope (their explicit school_codes were cleared by strict exclusivity),
-      // i.e. lock them out of their own data while showing no error.
-      if (!isMissingSchemaError(err)) throw err;
-    }
-  }
+  if (p.user_id != null) await addSeatScope(p.user_id, schools, centres, programs);
 
   return { schools, centres, programs };
 }
