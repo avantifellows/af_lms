@@ -56,6 +56,55 @@ function groupFlagsByStudent(flags: InterventionFlag[]) {
   return byStudent;
 }
 
+interface EnrollmentActionsProps {
+  showAddStudent: boolean;
+  showDownloadList: boolean;
+  onBulkUpload: () => void;
+  onDownloadList: () => void;
+  onAddStudent: () => void;
+}
+
+/**
+ * The roster action buttons, always as one group in one order (Bulk Upload,
+ * Download List, Add Student) so filters, search text and the count line
+ * can't reflow them.
+ */
+function EnrollmentActions({
+  showAddStudent,
+  showDownloadList,
+  onBulkUpload,
+  onDownloadList,
+  onAddStudent,
+}: EnrollmentActionsProps) {
+  if (!showAddStudent && !showDownloadList) return null;
+  return (
+    <div
+      role="group"
+      aria-label="Student actions"
+      className="ml-auto flex flex-wrap items-center gap-3 sm:gap-4"
+    >
+      {showAddStudent && (
+        <Button type="button" size="sm" variant="secondary" onClick={onBulkUpload}>
+          <Upload className="h-4 w-4" aria-hidden="true" />
+          Bulk Upload
+        </Button>
+      )}
+      {showDownloadList && (
+        <Button type="button" size="sm" variant="secondary" onClick={onDownloadList}>
+          <Download className="h-4 w-4" aria-hidden="true" />
+          Download List
+        </Button>
+      )}
+      {showAddStudent && (
+        <Button type="button" size="sm" onClick={onAddStudent}>
+          <Plus className="h-4 w-4" aria-hidden="true" />
+          Add Student
+        </Button>
+      )}
+    </div>
+  );
+}
+
 interface Props {
   programs: ProgramStats[];
   activeStudents: Student[];
@@ -273,6 +322,20 @@ export default function EnrollmentTabContent({
 
   const showAddStudent = canAddStudent && selectedProgramId === PROGRAM_IDS.NVS;
   const showDownloadList = canDownloadList && selectedProgramId === PROGRAM_IDS.NVS;
+  const showFilteredCount =
+    selectedGrade !== "all" ||
+    selectedStream !== "all" ||
+    rosterSearch.trim() !== "" ||
+    flagFilterOn;
+
+  const downloadList = () => {
+    const params = new URLSearchParams();
+    if (selectedGrade !== "all") params.set("grade", selectedGrade);
+    if (selectedStream !== "all") params.set("stream", selectedStream);
+    window.location.assign(
+      `/api/school/${encodeURIComponent(schoolUdise)}/students/export${params.size ? `?${params}` : ""}`,
+    );
+  };
 
   const closeCreatedModal = () => {
     setCreatedOpen(false);
@@ -340,120 +403,95 @@ export default function EnrollmentTabContent({
           </Button>
         </div>
       </Modal>
-      {/* Grade filter — placed above the summary so it's clear the pills react
-          to it. */}
-      <div className="mb-4 flex flex-wrap items-center gap-3 sm:gap-4">
-        <label
-          htmlFor="gradeFilter"
-          className="text-sm font-medium text-gray-700"
-        >
-          Filter by Grade:
-        </label>
-        <select
-          id="gradeFilter"
-          value={selectedGrade}
-          onChange={(e) => setSelectedGrade(e.target.value)}
-          className="rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 bg-white focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/20"
-        >
-          <option value="all">All Grades ({filteredActive.length})</option>
-          {gradeOptions.map(({ grade, count }) => (
-            <option key={grade} value={grade}>
-              Grade {grade} ({count})
-            </option>
-          ))}
-        </select>
-        <label
-          htmlFor="streamFilter"
-          className="text-sm font-medium text-gray-700"
-        >
-          {isNvsSelected ? "Filter by Exam Preparing For:" : "Filter by Stream:"}
-        </label>
-        <select
-          id="streamFilter"
-          value={selectedStream}
-          onChange={(event) => setSelectedStream(event.target.value)}
-          className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/20"
-        >
-          <option value="all">All Streams ({filteredActive.length})</option>
-          {streamOptions.options.map(({ value, label, count }) => (
-            <option key={value} value={value}>
-              {label} ({count})
-            </option>
-          ))}
-          {streamOptions.noStreamCount > 0 && (
-            <option value={NO_STREAM}>
-              No stream ({streamOptions.noStreamCount})
-            </option>
-          )}
-        </select>
-        {isNvsSelected && (
-          <input
-            type="search"
-            aria-label="Search students"
-            placeholder="Search name, Student ID, PEN, APAAR ID, phone"
-            value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
-            className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/20 sm:w-80"
-          />
-        )}
-        {canUseInterventionFlags && (
-          <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
-            <input
-              type="checkbox"
-              checked={flaggedOnly}
-              onChange={(event) => setFlaggedOnly(event.target.checked)}
-              className="h-4 w-4 rounded border-gray-300 text-accent focus:ring-accent/20"
-            />
-            Needs intervention only ({flaggedCount})
+      {/* Filters, then the actions group pushed right (wrapping to its own
+          line when both don't fit) — placed above the summary so it's clear the
+          pills react to them. The count has its own reserved line below, so
+          neither filters nor search text can reflow the actions. */}
+      <div className="flex flex-wrap items-center gap-3 sm:gap-4">
+        <div className="flex min-w-0 flex-wrap items-center gap-3 sm:gap-4">
+          <label
+            htmlFor="gradeFilter"
+            className="text-sm font-medium text-gray-700"
+          >
+            Filter by Grade:
           </label>
-        )}
-        {(selectedGrade !== "all" ||
-          selectedStream !== "all" ||
-          rosterSearch.trim() !== "" ||
-          flagFilterOn) && (
-          <span className="text-sm text-gray-500">
-            Showing {activeFilteredCount} of {filteredActive.length} students
-          </span>
-        )}
-        {showAddStudent && (
-          <Button
-            type="button"
-            size="sm"
-            variant="secondary"
-            onClick={() => setBulkOpen(true)}
-            className="ml-auto"
+          <select
+            id="gradeFilter"
+            value={selectedGrade}
+            onChange={(e) => setSelectedGrade(e.target.value)}
+            className="rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 bg-white focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/20"
           >
-            <Upload className="h-4 w-4" aria-hidden="true" />
-            Bulk Upload
-          </Button>
-        )}
-        {showDownloadList && (
-          <Button
-            type="button"
-            size="sm"
-            variant="secondary"
-            className={showAddStudent ? undefined : "ml-auto"}
-            onClick={() => {
-              const params = new URLSearchParams();
-              if (selectedGrade !== "all") params.set("grade", selectedGrade);
-              if (selectedStream !== "all")
-                params.set("stream", selectedStream);
-              window.location.assign(
-                `/api/school/${encodeURIComponent(schoolUdise)}/students/export${params.size ? `?${params}` : ""}`,
-              );
-            }}
+            <option value="all">All Grades ({filteredActive.length})</option>
+            {gradeOptions.map(({ grade, count }) => (
+              <option key={grade} value={grade}>
+                Grade {grade} ({count})
+              </option>
+            ))}
+          </select>
+          <label
+            htmlFor="streamFilter"
+            className="text-sm font-medium text-gray-700"
           >
-            <Download className="h-4 w-4" aria-hidden="true" />
-            Download List
-          </Button>
-        )}
-        {showAddStudent && (
-          <Button type="button" size="sm" onClick={() => setAddOpen(true)}>
-            <Plus className="h-4 w-4" aria-hidden="true" />
-            Add Student
-          </Button>
-        )}
+            {isNvsSelected ? "Filter by Exam Preparing For:" : "Filter by Stream:"}
+          </label>
+          <select
+            id="streamFilter"
+            value={selectedStream}
+            onChange={(event) => setSelectedStream(event.target.value)}
+            className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/20"
+          >
+            <option value="all">All Streams ({filteredActive.length})</option>
+            {streamOptions.options.map(({ value, label, count }) => (
+              <option key={value} value={value}>
+                {label} ({count})
+              </option>
+            ))}
+            {streamOptions.noStreamCount > 0 && (
+              <option value={NO_STREAM}>
+                No stream ({streamOptions.noStreamCount})
+              </option>
+            )}
+          </select>
+          {isNvsSelected && (
+            <input
+              type="search"
+              aria-label="Search students"
+              placeholder="Search name, Student ID, PEN, APAAR ID, phone"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/20 sm:w-80"
+            />
+          )}
+          {canUseInterventionFlags && (
+            <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+              <input
+                type="checkbox"
+                checked={flaggedOnly}
+                onChange={(event) => setFlaggedOnly(event.target.checked)}
+                className="h-4 w-4 rounded border-gray-300 text-accent focus:ring-accent/20"
+              />
+              Needs intervention only ({flaggedCount})
+            </label>
+          )}
+        </div>
+        <EnrollmentActions
+          showAddStudent={showAddStudent}
+          showDownloadList={showDownloadList}
+          onBulkUpload={() => setBulkOpen(true)}
+          onDownloadList={downloadList}
+          onAddStudent={() => setAddOpen(true)}
+        />
       </div>
+      {/* Always rendered at one line's height so the cards and table below
+          don't shift when a filter or search starts or clears. */}
+      <p
+        data-testid="enrollment-filtered-count"
+        aria-live="polite"
+        className="mb-4 mt-2 min-h-5 text-sm text-gray-500"
+      >
+        {showFilteredCount &&
+          `Showing ${activeFilteredCount} of ${filteredActive.length} students`}
+      </p>
 
       {selectedProgramId != null && (
         <EnrollmentStatsCards

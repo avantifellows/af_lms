@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { PROGRAM_IDS } from "@/lib/constants";
@@ -345,6 +345,80 @@ describe("EnrollmentTabContent", () => {
     render(<EnrollmentTabContent {...baseProps} canAddStudent={false} />);
 
     expect(screen.queryByRole("button", { name: "Download List" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the action buttons in one group, in one order, while searching", async () => {
+    const user = userEvent.setup();
+    render(
+      <EnrollmentTabContent
+        {...baseProps}
+        activeStudents={[
+          { first_name: "Riya", grade: 11, stream: "engineering", student_program_ids: [64] },
+          { first_name: "Kabir", grade: 11, stream: "engineering", student_program_ids: [64] },
+        ] as never}
+      />,
+    );
+    const actionNames = () =>
+      within(screen.getByRole("group", { name: "Student actions" }))
+        .getAllByRole("button")
+        .map((button) => button.textContent);
+    const group = screen.getByRole("group", { name: "Student actions" });
+    const row = group.parentElement;
+    const countLine = screen.getByTestId("enrollment-filtered-count");
+    expect(actionNames()).toEqual(["Bulk Upload", "Download List", "Add Student"]);
+    expect(countLine).toBeEmptyDOMElement();
+    expect(row).not.toContainElement(countLine);
+
+    await user.type(screen.getByRole("searchbox", { name: "Search students" }), "riya");
+
+    expect(screen.getByRole("group", { name: "Student actions" })).toBe(group);
+    expect(group.parentElement).toBe(row);
+    expect(actionNames()).toEqual(["Bulk Upload", "Download List", "Add Student"]);
+    expect(screen.getByTestId("enrollment-filtered-count")).toBe(countLine);
+    expect(countLine).toHaveTextContent("Showing 1 of 2 students");
+    expect(row).not.toContainElement(countLine);
+
+    await user.clear(screen.getByRole("searchbox", { name: "Search students" }));
+    expect(countLine).toBeEmptyDOMElement();
+    expect(screen.queryByText(/Showing \d+ of \d+ students/)).not.toBeInTheDocument();
+  });
+
+  it("groups only Download List for a read-only PMU and no actions group without any", () => {
+    const { rerender } = render(
+      <EnrollmentTabContent {...baseProps} canEdit={false} canEditStudent={false} canAddStudent={false} canDownloadList />,
+    );
+    expect(
+      within(screen.getByRole("group", { name: "Student actions" }))
+        .getAllByRole("button")
+        .map((button) => button.textContent),
+    ).toEqual(["Download List"]);
+
+    rerender(<EnrollmentTabContent {...baseProps} canAddStudent={false} />);
+    expect(screen.queryByRole("group", { name: "Student actions" })).not.toBeInTheDocument();
+  });
+
+  it("shows the Showing X of Y line only while a filter is active", async () => {
+    const user = userEvent.setup();
+    render(
+      <EnrollmentTabContent
+        {...baseProps}
+        activeStudents={[
+          { grade: 11, stream: "engineering", student_program_ids: [64] },
+          { grade: 12, stream: "medical", student_program_ids: [64] },
+        ] as never}
+      />,
+    );
+    const countLine = screen.getByTestId("enrollment-filtered-count");
+    expect(countLine).toBeEmptyDOMElement();
+
+    await user.selectOptions(screen.getByLabelText("Filter by Grade:"), "12");
+    expect(countLine).toHaveTextContent("Showing 1 of 2 students");
+
+    await user.selectOptions(screen.getByLabelText("Filter by Grade:"), "all");
+    expect(countLine).toBeEmptyDOMElement();
+
+    await user.selectOptions(screen.getByLabelText("Filter by Exam Preparing For:"), "medical");
+    expect(countLine).toHaveTextContent("Showing 1 of 2 students");
   });
 
   it("shows the roster search only for NVS and passes the query to the table", async () => {
