@@ -354,6 +354,20 @@ describe("PATCH /api/admin/users/[id]", () => {
     expect(mockQuery).toHaveBeenCalledTimes(1);
   });
 
+  it("rejects (409) a regions-only scope edit for a seated user", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockGetUserPermission.mockResolvedValue(ADMIN_PERMISSION);
+    mockQuery.mockResolvedValueOnce([{ one: 1, user_id: 70 }]); // seated check → seated
+    const req = jsonRequest("http://localhost/api/admin/users/5", {
+      method: "PATCH",
+      body: { role: "program_manager", level: 2, regions: ["North"], program_ids: [1] },
+    });
+    const res = await PATCH(req as never, params);
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toContain("Change their centre assignment instead");
+    expect(mockWithTransaction).not.toHaveBeenCalled();
+  });
+
   it("forces school_codes/regions to NULL when a seated user's other fields are edited", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
     mockGetUserPermission.mockResolvedValue(ADMIN_PERMISSION);

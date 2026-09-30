@@ -75,26 +75,28 @@ function pinned(level: number, schoolCodes: string[] | null, regions: string[] |
   return { level, school_codes: schoolCodes, regions, program_ids: [PMU_PROGRAM_ID] };
 }
 
-/** Validates the effective PMU row; returns the row to store or a 400 message. */
-export async function resolvePmuRow(
-  input: PmuRowInput
-): Promise<{ ok: true; row: PmuRow } | { ok: false; error: string }> {
-  const { role, level, school_codes, regions } = input;
+type PmuRowResult = { ok: true; row: PmuRow } | { ok: false; error: string };
 
-  if (role === PMU_GOVT_SCHOOL_USER_ROLE) {
-    if (level !== 1 || nonEmpty(regions) || school_codes?.length !== 1) {
-      return { ok: false, error: GOVT_SHAPE_ERROR };
-    }
-    if (!(await allJnvSchools(school_codes))) return { ok: false, error: NON_JNV_ERROR };
-    return { ok: true, row: pinned(1, school_codes, null) };
+async function jnvSchoolRow(schoolCodes: string[]): Promise<PmuRowResult> {
+  if (!(await allJnvSchools(schoolCodes))) return { ok: false, error: NON_JNV_ERROR };
+  return { ok: true, row: pinned(1, schoolCodes, null) };
+}
+
+async function resolveGovtSchoolUserRow(input: PmuRowInput): Promise<PmuRowResult> {
+  const { level, school_codes, regions } = input;
+  if (level !== 1 || nonEmpty(regions) || school_codes?.length !== 1) {
+    return { ok: false, error: GOVT_SHAPE_ERROR };
   }
+  return jnvSchoolRow(school_codes);
+}
 
+async function resolveManagerRow(input: PmuRowInput): Promise<PmuRowResult> {
+  const { level, school_codes, regions } = input;
   if (level === 1) {
     if (!nonEmpty(school_codes)) {
       return { ok: false, error: "A PMU Manager with School access needs at least one JNV School" };
     }
-    if (!(await allJnvSchools(school_codes))) return { ok: false, error: NON_JNV_ERROR };
-    return { ok: true, row: pinned(1, school_codes, null) };
+    return jnvSchoolRow(school_codes);
   }
   if (level === 2) {
     if (!nonEmpty(regions) || !(await allRegionsHaveJnvSchools(regions))) {
@@ -107,4 +109,10 @@ export async function resolvePmuRow(
   }
   if (level === 3) return { ok: true, row: pinned(3, null, null) };
   return { ok: false, error: "Level must be between 1 and 3" };
+}
+
+/** Validates the effective PMU row; returns the row to store or a 400 message. */
+export async function resolvePmuRow(input: PmuRowInput): Promise<PmuRowResult> {
+  if (input.role === PMU_GOVT_SCHOOL_USER_ROLE) return resolveGovtSchoolUserRow(input);
+  return resolveManagerRow(input);
 }
