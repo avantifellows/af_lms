@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const { mockPush, mockRefresh } = vi.hoisted(() => ({
@@ -73,6 +73,19 @@ const teacherDetail = (notes: OpenPhase["notes"] = null): HolisticStudentPhaseDe
   },
   readOnly: false,
 });
+
+const completedTeacherDetail = (followUp: OpenPhase["followUpNotes"] = []): HolisticStudentPhaseDetail => {
+  const detail = teacherDetail({
+    state: "submitted",
+    revision: 2,
+    authorName: "Anita Sharma",
+    firstSubmittedAt: "2026-07-03T00:00:00Z",
+    lastEditedAt: "2026-07-03T00:00:00Z",
+    answers: [{ questionId: 91, question: "What helped?", answer: "A plan" }],
+  });
+  Object.assign(detail.selectedPhase, { progress: "completed", followUpNotes: followUp });
+  return detail;
+};
 
 const followUpNotes: OpenPhase["followUpNotes"] = [
   {
@@ -910,6 +923,8 @@ describe("StudentPhaseWorkspace", () => {
   });
 
   describe("Follow-up Notes", () => {
+    afterEach(() => vi.restoreAllMocks());
+
     function followUpSection() {
       return screen.getByRole("region", { name: "Follow-up Notes" });
     }
@@ -965,6 +980,224 @@ describe("StudentPhaseWorkspace", () => {
         element?.textContent === "Yes, mostly.\nMissed Sunday revision." && element.tagName === "BLOCKQUOTE"
       );
       expect(answer).toHaveClass("whitespace-pre-wrap");
+    });
+
+    it.each([
+      ["pending", { progress: "pending", draftSaved: false }],
+      ["in progress", { progress: "pending", draftSaved: true }],
+      ["skipped", { progress: "skipped", draftSaved: false }],
+    ] as const)(
+      "disables Add notes with a hint while the Phase is %s",
+      (_state, progress) => {
+        const detail = teacherDetail();
+        Object.assign(detail.selectedPhase, progress);
+
+        render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={detail} />);
+
+        const button = within(followUpSection()).getByRole("button", { name: "Add notes" });
+        expect(button).toBeDisabled();
+        expect(button).toHaveAccessibleDescription("Submit Post-Session Notes first");
+      }
+    );
+
+    it("enables Add notes once the Phase is completed", () => {
+      render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={completedTeacherDetail()} />);
+
+      const button = within(followUpSection()).getByRole("button", { name: "Add notes" });
+      expect(button).toBeEnabled();
+      expect(followUpSection()).not.toHaveTextContent("Submit Post-Session Notes first");
+    });
+
+    it("enables Add notes after Post-Session Notes are submitted in-page", async () => {
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(new Response(JSON.stringify({ revision: 1 }), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ revision: 2 }), { status: 200 }))
+        .mockResolvedValueOnce(new Response("{}", { status: 500 }));
+      vi.stubGlobal("fetch", fetchMock);
+      vi.spyOn(window, "confirm").mockReturnValue(true);
+      render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={teacherDetail()} />);
+      expect(within(followUpSection()).getByRole("button", { name: "Add notes" })).toBeDisabled();
+
+      fireEvent.change(screen.getByRole("textbox", { name: "What helped?" }), { target: { value: "A plan" } });
+      fireEvent.click(screen.getByRole("button", { name: "Submit Notes" }));
+
+      await screen.findByText("Notes submitted. Phase completed.");
+      expect(within(followUpSection()).getByRole("button", { name: "Add notes" })).toBeEnabled();
+    });
+
+    function openAddNotes() {
+      fireEvent.click(within(followUpSection()).getByRole("button", { name: "Add notes" }));
+      return screen.getByRole("dialog", { name: "Add follow-up notes" });
+    }
+
+    it("opens a modal with the three Follow-up questions and the immutability notice", () => {
+      render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={completedTeacherDetail()} />);
+
+      const dialog = openAddNotes();
+
+      expect(dialog).toHaveAttribute("aria-modal", "true");
+      expect(within(dialog).getAllByRole("textbox").map((box) => (box as HTMLTextAreaElement).labels?.[0]?.textContent))
+        .toEqual([
+          "What challenges did the student talk about?",
+          "What solutions did you suggest?",
+          "Was the student able to follow the action plan shared previously?",
+        ]);
+      expect(dialog).toHaveTextContent("Follow-up notes can't be edited after saving.");
+      expect(within(dialog).getByRole("button", { name: "Cancel" })).toBeEnabled();
+      expect(within(dialog).getByRole("button", { name: "Save" })).toBeDisabled();
+    });
+
+    it("saves a Follow-up Note and prepends it showing only the answered questions", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+        followUpNote: {
+          id: 503,
+          submittedAt: "2026-08-03T04:30:00Z",
+          authorName: "Anita Sharma",
+          answers: [{ key: "solutions", answer: "Daily check-in" }],
+        },
+      }), { status: 201 }));
+      vi.stubGlobal("fetch", fetchMock);
+      render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" programId={2}
+        detail={completedTeacherDetail(followUpNotes)} />);
+
+      const dialog = openAddNotes();
+      fireEvent.change(within(dialog).getByRole("textbox", { name: "What challenges did the student talk about?" }),
+        { target: { value: "   " } });
+      expect(within(dialog).getByRole("button", { name: "Save" })).toBeDisabled();
+      fireEvent.change(within(dialog).getByRole("textbox", { name: "What solutions did you suggest?" }),
+        { target: { value: "Daily check-in" } });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const [url, init] = fetchMock.mock.calls[0];
+      expect(url).toBe(
+        "/api/holistic-mentorship/students/41/phases/73/follow-up-notes?school_code=SCH001&academic_year=2026-2027&program_id=2"
+      );
+      expect(init.method).toBe("POST");
+      expect(JSON.parse(init.body)).toEqual({
+        answers: { challenges: "   ", solutions: "Daily check-in", action_plan: "" },
+      });
+      const cards = followUpSection().querySelectorAll("article");
+      expect(cards).toHaveLength(3);
+      expect(cards[0]).toHaveTextContent("Anita Sharma");
+      expect(cards[0]).toHaveTextContent("Daily check-in");
+      expect(Array.from(cards[0].querySelectorAll("h4")).map((heading) => heading.textContent))
+        .toEqual(["What solutions did you suggest?"]);
+      expect(cards[1]).toHaveTextContent("Nila Sen");
+
+      expect(openAddNotes()).not.toHaveTextContent("Daily check-in");
+      expect(within(screen.getByRole("dialog")).getByRole("textbox", { name: "What solutions did you suggest?" }))
+        .toHaveValue("");
+    });
+
+    it("keeps the typed text and shows the server error when a save fails", async () => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+        JSON.stringify({ error: "Mentor Mapping changed" }), { status: 409 }
+      )));
+      render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={completedTeacherDetail()} />);
+
+      const dialog = openAddNotes();
+      const textbox = within(dialog).getByRole("textbox", { name: "What challenges did the student talk about?" });
+      fireEvent.change(textbox, { target: { value: "Exam stress" } });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+
+      expect(await within(dialog).findByRole("alert")).toHaveTextContent("Mentor Mapping changed");
+      expect(textbox).toHaveValue("Exam stress");
+      expect(followUpSection()).toHaveTextContent("No follow-up notes yet");
+    });
+
+    it("rejects an answer over 10,000 characters without sending a request", () => {
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+      render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={completedTeacherDetail()} />);
+
+      const dialog = openAddNotes();
+      fireEvent.change(within(dialog).getByRole("textbox", { name: "What solutions did you suggest?" }),
+        { target: { value: "a".repeat(10_001) } });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+
+      expect(within(dialog).getByRole("alert"))
+        .toHaveTextContent("Follow-up answers must be 10,000 characters or fewer");
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["Cancel", (dialog: HTMLElement) => fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }))],
+      ["Escape", () => fireEvent.keyDown(document, { key: "Escape" })],
+      ["the backdrop", (dialog: HTMLElement) => fireEvent.click(dialog.querySelector("[aria-hidden='true']")!)],
+    ])("confirms before discarding typed text via %s", (_trigger, close) => {
+      const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
+      render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={completedTeacherDetail()} />);
+
+      let dialog = openAddNotes();
+      const textbox = within(dialog).getByRole("textbox", { name: "What challenges did the student talk about?" });
+      fireEvent.change(textbox, { target: { value: "Exam stress" } });
+
+      close(dialog);
+      expect(confirm).toHaveBeenCalledWith("Discard this follow-up note?");
+      expect(textbox).toHaveValue("Exam stress");
+
+      close(dialog);
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      dialog = openAddNotes();
+      expect(within(dialog).getByRole("textbox", { name: "What challenges did the student talk about?" }))
+        .toHaveValue("");
+    });
+
+    it("closes an empty modal without confirming", () => {
+      const confirm = vi.spyOn(window, "confirm");
+      render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={completedTeacherDetail()} />);
+
+      fireEvent.click(within(openAddNotes()).getByRole("button", { name: "Cancel" }));
+
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(confirm).not.toHaveBeenCalled();
+    });
+
+    it("disables Save and ignores closing while the save is in flight", async () => {
+      let finishSave!: (response: Response) => void;
+      const saveResponse = new Promise<Response>((resolve) => { finishSave = resolve; });
+      const fetchMock = vi.fn().mockReturnValue(saveResponse);
+      vi.stubGlobal("fetch", fetchMock);
+      const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+      render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={completedTeacherDetail()} />);
+
+      const dialog = openAddNotes();
+      fireEvent.change(within(dialog).getByRole("textbox", { name: "What challenges did the student talk about?" }),
+        { target: { value: "Exam stress" } });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+
+      await waitFor(() => expect(within(dialog).getByRole("button", { name: "Save" })).toBeDisabled());
+      fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+      fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+      fireEvent.keyDown(document, { key: "Escape" });
+      fireEvent.click(dialog.querySelector("[aria-hidden='true']")!);
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+      expect(confirm).not.toHaveBeenCalled();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        finishSave(new Response(JSON.stringify({
+          followUpNote: {
+            id: 504,
+            submittedAt: "2026-08-04T04:30:00Z",
+            authorName: "Anita Sharma",
+            answers: [{ key: "challenges", answer: "Exam stress" }],
+          },
+        }), { status: 201 }));
+        await saveResponse;
+      });
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      expect(followUpSection()).toHaveTextContent("Exam stress");
+    });
+
+    it("offers no Add notes button to read-only viewers", () => {
+      render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027"
+        detail={adminDetail({ progress: "completed", followUpNotes })} />);
+
+      expect(within(followUpSection()).queryByRole("button", { name: "Add notes" })).not.toBeInTheDocument();
+      expect(followUpSection().querySelectorAll("article")).toHaveLength(2);
     });
   });
 });
