@@ -141,7 +141,7 @@ Evidence: sibling `release-records/holistic-phase-label-20260917/` and
 
 ## Holistic Mentor write scope (#378)
 
-Mentor-owned Holistic writes (Post-Session Notes today; Follow-up Notes next) share one
+Mentor-owned Holistic writes (Post-Session Notes and Follow-up Notes) share one
 guard in `src/lib/holistic-mentor-write-scope.ts`. `loadHolisticMentorWriteScope(client, { studentId, phaseId, schoolId, programId, academicYear })`
 runs inside the caller's transaction and takes `FOR UPDATE OF mapping, phase`. It requires
 an active Mapping, a non-dropout Student, a single current Grade 11/12 roster Grade, no
@@ -168,3 +168,18 @@ open selected Phase, ordered `submitted_at DESC, id DESC`. The author label is t
 user first and last name, or `author_email` when that name is blank. The list is empty when
 the Student has a privacy tombstone: content is suppressed on read. Locked Phase summaries,
 Student Context, progress, and the CSV never read this table.
+
+Write path (#380): `POST /api/holistic-mentorship/students/{studentId}/phases/{phaseId}/follow-up-notes`
+(same `school_code` / `academic_year` / `program_id` context as the Student Phase route, parsed
+by the shared `student-phase-target.ts`) authorizes `follow_up_note_add`. It then normalises
+`{ answers }` with `normalizeHolisticFollowUpAnswers`, which rejects unknown keys, non-strings,
+and answers over 10,000 characters, trims, maps blanks to `null`, and rejects all-blank notes.
+It then calls `addHolisticFollowUpNote` in `src/lib/holistic-follow-up-notes.ts`. Per ADR 0005,
+LMS inserts the row directly rather than through the DB Service, inside one `withTransaction`:
+Mentor write scope (the shared helper, 404/422), then Post-Session Notes state `FOR SHARE`
+(anything but `submitted` is 422 `Submit Post-Session Notes first`), then the insert with
+`author_email` = trimmed lowercase session email and `RETURNING` shaped by `toHolisticFollowUpNote`.
+Lock order is Mapping → Phase → the trigger's advisory lock. There is no audit row, no Phase
+freeze, and no Student-row lock. A trigger `23514` (tombstone race) maps to 409
+`Student changed; reload before saving`, and any other database error is rethrown. Success is
+201 `{ followUpNote }`.
