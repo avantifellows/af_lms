@@ -26,7 +26,7 @@ edges:
     condition: when working on teacher feedback setup, the feedback form, or its report
   - target: patterns/INDEX.md
     condition: when starting a task — check the pattern index for a matching pattern file
-last_updated: 2026-09-25
+last_updated: 2026-09-30
 ---
 
 # Session Bootstrap
@@ -79,6 +79,7 @@ Then read this file fully before doing anything else in this session.
 
 **Not yet built / in progress:**
 
+- Issue #377 Holistic Follow-up Notes is in progress on `feat/issue-377-holistic-mentorship-add-follow-up-notes`. Slice #378 extracted the shared Mentor write-scope guard. Slice #379 added the read path: the Student Phase detail and `GET` return `selectedPhase.followUpNotes` for an open Phase, and the Mentor and read-only workspaces show a "Follow-up Notes" section (newest first, or "No follow-up notes yet"). Nobody can add notes yet; the write path and the "Add notes" button come in later slices. The table comes from db-service. See `context/data-access.md`.
 - The coordinated DB Service deployment completed September 7; the separate EnableStudents manual Portal smoke gate remains unrecorded in the retained evidence; the AF LMS activation and regression coverage are shipped in slice #303. Post-approval backfill remains a later coordinated approval release. See `context/student-addition.md`, `docs/nvs-phone-registration-release.md`, and ADR 0006.
 - Centre rollout is mid-migration: `PROGRAM_IDS` is still hand-maintained in `src/lib/constants.ts` (target is reading `program` from the DB); non-JNV centre programs are being onboarded.
 - Student Addition #197/#228/#231 follow-up is in progress. One-by-one, mixed-grade bulk, existing-Student Edit, audited NVS Dropout undo, combined Grade/Stream filtering, and NVS roster export use Centre-free NVS authorization. Program-specific Dropout keeps existing Centre-based programs working. Add/bulk serve the approved static workbook; example rows are removed before limits, validation, totals, rejected-row output, and writes; PEN accepts exact 11-digit text including a leading zero; empty dropout views return to Active. The final bulk error contract names duplicate identifiers on screen and in rejected CSVs, rejects every row sharing an in-file identifier, and aligns LMS and DB Service conflict messages. Blank formatting records are removed from uploaded worksheet XML before ExcelJS parsing, while the 200-nonblank-row limit remains unchanged. Bulk upload now has a two-step Check spreadsheet/Check & add students flow: preview validation stays LMS-only, Check & add students re-runs authoritative checks and sends the file once to the existing DB Service contract only when ready rows remain; double clicks and automatic retries are suppressed, and an unknown final response refreshes the roster without claiming a result. DB Service processes independent rows concurrently after duplicate pre-scan to stay within the gateway timeout. The matching DB Service work deployed with LMS #304 through DB Service #713 and release-promotion #723 on September 7.

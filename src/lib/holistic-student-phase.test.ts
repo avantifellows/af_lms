@@ -12,7 +12,10 @@ import {
 } from "./holistic-student-phase";
 
 describe("Holistic Student Phase derivation", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockQuery.mockReset().mockResolvedValue([]);
+  });
 
   it("skips only Phases before the Active Phase at the first Mapping", () => {
     const phases = [
@@ -333,7 +336,7 @@ describe("Holistic Student Phase derivation", () => {
         canEdit: true,
       });
 
-      expect(mockQuery).toHaveBeenCalledTimes(7);
+      expect(mockQuery).toHaveBeenCalledTimes(9);
       expect(mockQuery.mock.calls.some(([sql]) =>
         String(sql).includes("FROM holistic_mentorship_historical_notes notes")
       )).toBe(false);
@@ -777,5 +780,168 @@ describe("Holistic Student Phase derivation", () => {
       String(sql).includes("FROM holistic_mentorship_post_session_notes notes")
     );
     expect(notesCall?.[1]).toEqual([41, [73], true, 10]);
+  });
+
+  describe("Follow-up Notes on the selected Phase", () => {
+    const studentRow = {
+      student_id: 41, mapping_id: 301, name: "Asha", external_student_id: "S41",
+      grade: 11, entry_grade: 11,
+    };
+    const phaseRows = [
+      { id: 72, academic_year: "2026-2027", grade: 11, title: "Getting started", position: 1, revision: 1, state: "open", guidance_markdown: "Listen first." },
+      { id: 73, academic_year: "2026-2027", grade: 11, title: "Building confidence", position: 2, revision: 1, state: "open", guidance_markdown: "Reflect together." },
+    ];
+    const submittedPhase72Notes = [{
+      notes_id: 101, phase_id: 72, author_user_id: 9, author_name: "Divya Rao",
+      state: "submitted", revision: 1, first_submitted_at: "2026-07-05T00:00:00Z",
+      last_edited_at: "2026-07-06T00:00:00Z", question_id: 91,
+      question: "What helped?", question_position: 1, answer: "A weekly plan",
+    }];
+
+    function routeQueries(rows: {
+      phases?: typeof phaseRows;
+      followUp?: unknown[];
+      tombstone?: boolean;
+    }) {
+      // First matching SQL fragment wins; the Student read is the fallback.
+      const routes: Array<[string, unknown[]]> = [
+        ["FROM holistic_mentorship_follow_up_notes", rows.followUp ?? []],
+        ["FROM holistic_mentorship_privacy_deletions", [{ erased: rows.tombstone ?? false }]],
+        ["FROM holistic_mentorship_phase_questions", []],
+        ["FROM holistic_mentorship_phase_state_transitions",
+          [{ phase_id: 72, to_state: "open", occurred_at: "2026-06-01T00:00:00Z" }]],
+        ["GROUP BY academic_year", [{ academic_year: "2026-2027", started_at: "2026-07-01T00:00:00Z" }]],
+        ["FROM holistic_mentorship_post_session_notes notes", submittedPhase72Notes],
+        ["FROM holistic_mentorship_prompt_configurations", []],
+        ["FROM holistic_mentorship_phases phase", rows.phases ?? phaseRows],
+      ];
+      mockQuery.mockImplementation(async (sql: string) =>
+        routes.find(([fragment]) => sql.includes(fragment))?.[1] ?? [studentRow]
+      );
+    }
+
+    const mentorParams = {
+      programId: PROGRAM_IDS.MAHARASHTRA_COACHING_TESTPREP,
+      studentId: 41,
+      phaseId: 73,
+      schoolId: 4,
+      academicYear: "2026-2027",
+      actorUserId: 10,
+      role: "teacher",
+      canEdit: true,
+    };
+
+    it("lists the selected Phase's Follow-up Notes newest first with only answered questions in order", async () => {
+      routeQueries({
+        followUp: [
+          {
+            id: 502, submitted_at: "2026-08-02T09:30:00Z", author_first_name: " Nila ",
+            author_last_name: "Sen ", author_email: "nila@example.com",
+            challenges_answer: null, solutions_answer: "Try a timetable",
+            action_plan_answer: "Yes\nmostly",
+          },
+          {
+            id: 501, submitted_at: "2026-08-01T10:00:00Z", author_first_name: "Nila",
+            author_last_name: "Sen", author_email: "nila@example.com",
+            challenges_answer: "Exam stress", solutions_answer: null, action_plan_answer: null,
+          },
+        ],
+      });
+
+      const result = await getHolisticStudentPhase(mentorParams);
+
+      expect(result?.selectedPhase).toMatchObject({
+        followUpNotes: [
+          {
+            id: 502,
+            submittedAt: "2026-08-02T09:30:00Z",
+            authorName: "Nila Sen",
+            answers: [
+              { key: "solutions", answer: "Try a timetable" },
+              { key: "action_plan", answer: "Yes\nmostly" },
+            ],
+          },
+          {
+            id: 501,
+            submittedAt: "2026-08-01T10:00:00Z",
+            authorName: "Nila Sen",
+            answers: [{ key: "challenges", answer: "Exam stress" }],
+          },
+        ],
+      });
+      const followUpCall = mockQuery.mock.calls.find(([sql]) =>
+        String(sql).includes("FROM holistic_mentorship_follow_up_notes")
+      );
+      expect(String(followUpCall?.[0])).toContain("ORDER BY note.submitted_at DESC, note.id DESC");
+      expect(followUpCall?.[1]).toEqual([41, 73]);
+    });
+
+    it("labels a Follow-up Note by the author email snapshot when the author has a blank name", async () => {
+      routeQueries({
+        followUp: [{
+          id: 503, submitted_at: "2026-08-03T08:00:00Z", author_first_name: "  ",
+          author_last_name: null, author_email: "former.mentor@example.com",
+          challenges_answer: "Missed classes", solutions_answer: null, action_plan_answer: null,
+        }],
+      });
+
+      const result = await getHolisticStudentPhase({ ...mentorParams, role: "admin", actorUserId: undefined });
+
+      expect(result?.selectedPhase).toMatchObject({
+        followUpNotes: [{ id: 503, authorName: "former.mentor@example.com" }],
+      });
+    });
+
+    it("suppresses Follow-up Notes for a Student with a privacy tombstone", async () => {
+      routeQueries({
+        tombstone: true,
+        followUp: [{
+          id: 504, submitted_at: "2026-08-04T08:00:00Z", author_first_name: "Nila",
+          author_last_name: "Sen", author_email: "nila@example.com",
+          challenges_answer: "Private detail", solutions_answer: null, action_plan_answer: null,
+        }],
+      });
+
+      const result = await getHolisticStudentPhase(mentorParams);
+
+      expect(result?.selectedPhase).toMatchObject({ followUpNotes: [] });
+    });
+
+    it("does not include Follow-up Notes in a locked Phase summary", async () => {
+      routeQueries({
+        phases: [phaseRows[0], { ...phaseRows[1], state: "locked" }],
+        followUp: [{
+          id: 505, submitted_at: "2026-08-05T08:00:00Z", author_first_name: "Nila",
+          author_last_name: "Sen", author_email: "nila@example.com",
+          challenges_answer: "Hidden", solutions_answer: null, action_plan_answer: null,
+        }],
+      });
+
+      const result = await getHolisticStudentPhase(mentorParams);
+
+      expect(result?.selectedPhase).toEqual({
+        phaseId: 73, number: 2, title: "Building confidence", locked: true,
+      });
+    });
+
+    it("keeps Student Context identical when an earlier Phase has Follow-up Notes", async () => {
+      routeQueries({
+        followUp: [{
+          id: 506, submitted_at: "2026-08-06T08:00:00Z", author_first_name: "Nila",
+          author_last_name: "Sen", author_email: "nila@example.com",
+          challenges_answer: "Newer follow-up detail", solutions_answer: null, action_plan_answer: null,
+        }],
+      });
+
+      const result = await getHolisticStudentPhase(mentorParams);
+
+      expect(result?.selectedPhase).toMatchObject({
+        context: {
+          label: "From Phase 1 - Getting started",
+          items: [{ label: "What helped?", content: "A weekly plan" }],
+          lastUpdatedAt: "2026-07-06T00:00:00Z",
+        },
+      });
+    });
   });
 });

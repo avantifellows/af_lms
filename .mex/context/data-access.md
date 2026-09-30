@@ -149,3 +149,22 @@ privacy tombstone, and an applicable Phase: current-year, or a prior-year Grade 
 for a Grade 12 Mentee with prior-year Mapping history. It derives the prior Academic Year
 itself. `checkHolisticMentorWriteScope(scope, actorUserId)` returns 404 `Not found` for
 missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do not copy the query into new writers; call the helper so guard semantics and lock order stay identical.
+
+## Holistic Follow-up Notes (#377)
+
+`holistic_mentorship_follow_up_notes` is created by the db-service migration
+`20260930120000_create_holistic_mentorship_follow_up_notes` (db-service branch
+`feat/issue-377-holistic-follow-up-notes`), but LMS reads and writes it directly. Rows are
+immutable: a trigger rejects every `UPDATE` and `DELETE`, and an insert trigger requires
+submitted Post-Session Notes for the Student and Phase and no privacy tombstone. FKs to
+`student`, `holistic_mentorship_phases`, and `user` are restrictive (`on_delete: :nothing`).
+Each row has three nullable answers (`challenges_answer`, `solutions_answer`,
+`action_plan_answer`, at least one non-null), plus `author_email` as a snapshot and a
+`submitted_at` system timestamp. The question keys and text live in the client-safe
+`src/lib/holistic-follow-up-questions.ts`.
+
+Read path (#379): `getHolisticStudentPhase` loads `selectedPhase.followUpNotes` only for an
+open selected Phase, ordered `submitted_at DESC, id DESC`. The author label is the trimmed
+user first and last name, or `author_email` when that name is blank. The list is empty when
+the Student has a privacy tombstone: content is suppressed on read. Locked Phase summaries,
+Student Context, progress, and the CSV never read this table.

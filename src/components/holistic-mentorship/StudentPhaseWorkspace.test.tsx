@@ -53,6 +53,7 @@ const adminDetail = (overrides: Partial<OpenPhase> = {}): HolisticStudentPhaseDe
     },
     questions: [{ questionId: 91, text: "Which decision is the student working through?", position: 1 }],
     notes: null,
+    followUpNotes: [],
     ...overrides,
   },
   readOnly: true,
@@ -68,9 +69,28 @@ const teacherDetail = (notes: OpenPhase["notes"] = null): HolisticStudentPhaseDe
     context: { label: null, items: [] as [], missing: "No previous session notes available" as const },
     questions: [{ questionId: 91, text: "What helped?", position: 1 }],
     notes,
+    followUpNotes: [],
   },
   readOnly: false,
 });
+
+const followUpNotes: OpenPhase["followUpNotes"] = [
+  {
+    id: 502,
+    submittedAt: "2026-08-02T09:30:00Z",
+    authorName: "Nila Sen",
+    answers: [
+      { key: "solutions", answer: "Try a timetable" },
+      { key: "action_plan", answer: "Yes, mostly.\nMissed Sunday revision." },
+    ],
+  },
+  {
+    id: 501,
+    submittedAt: "2026-08-01T10:00:00Z",
+    authorName: "former.mentor@example.com",
+    answers: [{ key: "challenges", answer: "Exam stress" }],
+  },
+];
 
 describe("StudentPhaseWorkspace", () => {
   afterEach(() => {
@@ -95,6 +115,7 @@ describe("StudentPhaseWorkspace", () => {
         context: { label: "From Phase 4 - Building confidence", items: [{ label: "What helped?", content: "A weekly plan" }], lastUpdatedAt: "2026-05-03T00:00:00Z" },
         questions: [{ questionId: 91, text: "What will you try next?", position: 1 }],
         notes: null,
+        followUpNotes: [],
       },
       readOnly: true,
     }} />);
@@ -886,5 +907,64 @@ describe("StudentPhaseWorkspace", () => {
 
     expect(screen.getByText("Could not save Notes")).toBeInTheDocument();
     expect(textbox).toHaveValue("Keep this answer");
+  });
+
+  describe("Follow-up Notes", () => {
+    function followUpSection() {
+      return screen.getByRole("region", { name: "Follow-up Notes" });
+    }
+
+    it("lists Follow-up Notes below Post-Session Notes in the Mentor workspace", () => {
+      const detail = teacherDetail();
+      (detail.selectedPhase as OpenPhase).followUpNotes = followUpNotes;
+
+      render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={detail} />);
+
+      const section = followUpSection();
+      const cards = section.querySelectorAll("article");
+      expect(cards).toHaveLength(2);
+      expect(cards[0]).toHaveTextContent("Nila Sen");
+      expect(cards[0]).toHaveTextContent("2 Aug 2026, 3:00 pm");
+      expect(cards[1]).toHaveTextContent("former.mentor@example.com");
+      const notesHeading = screen.getByRole("heading", { name: "Post-Session Notes" });
+      expect(notesHeading.compareDocumentPosition(section) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it("lists Follow-up Notes below the read-only Post-Session Notes panel", () => {
+      render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027"
+        detail={adminDetail({ followUpNotes })} />);
+
+      const section = followUpSection();
+      expect(section.querySelectorAll("article")).toHaveLength(2);
+      expect(section).toHaveTextContent("Exam stress");
+      const notesHeading = screen.getByRole("heading", { name: "Post-Session Notes" });
+      expect(notesHeading.compareDocumentPosition(section) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it.each([
+      ["Mentor", teacherDetail()],
+      ["read-only", adminDetail()],
+    ])("shows the empty state in the %s workspace", (_viewer, detail) => {
+      render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={detail} />);
+
+      expect(followUpSection()).toHaveTextContent("No follow-up notes yet");
+    });
+
+    it("shows only answered questions in fixed order with multi-line answers preserved", () => {
+      render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027"
+        detail={adminDetail({ followUpNotes: [followUpNotes[0]] })} />);
+
+      const card = followUpSection().querySelector("article")!;
+      const questions = Array.from(card.querySelectorAll("h4")).map((heading) => heading.textContent);
+      expect(questions).toEqual([
+        "What solutions did you suggest?",
+        "Was the student able to follow the action plan shared previously?",
+      ]);
+      expect(card).not.toHaveTextContent("What challenges did the student talk about?");
+      const answer = screen.getByText((_, element) =>
+        element?.textContent === "Yes, mostly.\nMissed Sunday revision." && element.tagName === "BLOCKQUOTE"
+      );
+      expect(answer).toHaveClass("whitespace-pre-wrap");
+    });
   });
 });

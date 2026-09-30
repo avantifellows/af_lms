@@ -10,6 +10,7 @@ import { type ReactNode, useCallback, useEffect, useEffectEvent, useId, useRef, 
 
 import type { HolisticProfileRegeneration, HolisticStudentPhaseDetail } from "@/lib/holistic-student-phase";
 import { PROGRAM_IDS } from "@/lib/constants";
+import { HOLISTIC_FOLLOW_UP_QUESTIONS } from "@/lib/holistic-follow-up-questions";
 import { holisticStudentPhaseHref, type HolisticStudentPhaseSource } from "@/lib/holistic-links";
 import { Button } from "@/components/ui/Button";
 import { Badge, type BadgeVariant } from "@/components/ui/Badge";
@@ -1155,6 +1156,7 @@ function SelectedPhaseContent({ phase, selectedPhase, studentId, readOnly, schoo
       phase={phase} studentId={studentId} readOnly={readOnly}
       schoolCode={schoolCode} academicYear={academicYear} programId={programId}
       onSubmitted={() => onSubmitted(phase.phaseId)} />
+    <FollowUpNotesSection notes={phase.followUpNotes} />
   </section>;
 }
 
@@ -1215,6 +1217,7 @@ function AdminSelectedPhase({ phase, selectedPhase, studentId, schoolCode, acade
       </Card>
     </div>
     <AdminNotesPanel phase={phase} />
+    <FollowUpNotesSection notes={phase.followUpNotes} />
   </section>;
 }
 
@@ -1473,6 +1476,42 @@ function AdminNotesPanel({ phase }: { phase: OpenSelectedPhase }) {
           Submitted Notes will appear here after the Mentor completes this Phase.
         </AdminInfoAlert>}
   </Card>;
+}
+
+const FOLLOW_UP_QUESTION_TEXT = new Map<string, string>(
+  HOLISTIC_FOLLOW_UP_QUESTIONS.map(({ key, text }) => [key, text])
+);
+
+function FollowUpNotesSection({ notes }: { notes: OpenSelectedPhase["followUpNotes"] }) {
+  const headingId = useId();
+  return <Card elevation="sm" className="p-4 sm:p-5">
+    <section aria-labelledby={headingId}>
+      <div className="flex items-center justify-between gap-2 border-b border-border pb-3">
+        <h3 id={headingId} className="text-base font-semibold text-text-primary">Follow-up Notes</h3>
+      </div>
+      {notes.length
+        ? <div className="mt-4 space-y-4">
+            {notes.map((note) => <FollowUpNoteCard key={note.id} note={note} />)}
+          </div>
+        : <p className="mt-4 text-sm text-text-muted">No follow-up notes yet</p>}
+    </section>
+  </Card>;
+}
+
+function FollowUpNoteCard({ note }: { note: OpenSelectedPhase["followUpNotes"][number] }) {
+  return <article className="rounded-md border border-border p-3">
+    <p className="text-sm text-text-muted">
+      {note.authorName} · <span className="font-mono">{formatDateTime(note.submittedAt)}</span>
+    </p>
+    <div className="mt-3 space-y-3">
+      {note.answers.map((answer) => <div key={answer.key}>
+        <h4 className="text-sm font-semibold text-success">{FOLLOW_UP_QUESTION_TEXT.get(answer.key)}</h4>
+        <blockquote className="mt-2 whitespace-pre-wrap border-l-2 border-info bg-bg-card-alt p-3 text-sm text-text-primary">
+          {answer.answer}
+        </blockquote>
+      </div>)}
+    </div>
+  </article>;
 }
 
 function AdminSubmittedNotes({ notes, questions }: {
