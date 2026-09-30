@@ -160,9 +160,39 @@ interface BatchOverviewRaw {
 }
 
 /**
+ * Folds the per-stream enrolment rows into the overview's enrolment fields.
+ *
+ * The rows cover every stream at the school + grade, so `streams` (the filter
+ * bar's options) never shrinks to the one being viewed. The totals keep the
+ * selected-stream semantics: with a stream, only rows whose LOWER(stream)
+ * equals it count — exactly what `LOWER(student_stream) = @stream` used to do
+ * in SQL, cased duplicates ("Medical" + "medical") included.
+ */
+function summariseEnrolment(
+  rows: { stream: string; total: number }[],
+  stream?: string
+): Pick<BatchOverviewRaw, "totalEnrolled" | "enrolledByStream" | "streams"> {
+  const enrolledByStream: Record<string, number> = {};
+  const streamsSet = new Set<string>();
+  let totalEnrolled = 0;
+  for (const row of rows) {
+    const c = canonicalStream(row.stream);
+    if (c) streamsSet.add(c);
+    if (stream && row.stream.toLowerCase() !== stream) continue;
+    enrolledByStream[row.stream] = row.total;
+    totalEnrolled += row.total;
+  }
+  return {
+    totalEnrolled: totalEnrolled || null,
+    enrolledByStream,
+    streams: [...streamsSet].sort(),
+  };
+}
+
+/**
  * Fetch test list + enrollment count for the Batch Overview.
  * If `stream` is provided (canonical lowercase), tests + enrollment are filtered
- * to that student stream.
+ * to that student stream; the stream options are not (see summariseEnrolment).
  */
 export async function getBatchOverviewData(
   udise: string,
@@ -214,13 +244,16 @@ export async function getBatchOverviewData(
       AND student_grade = @grade
       AND academic_year = '${CURRENT_ACADEMIC_YEAR}'
       ${programFilter}
-      ${streamFilter}
     GROUP BY student_stream
   `;
+  // No stream param: this query lists every stream so the filter keeps all its
+  // options; the selected stream is applied to the totals in JS instead.
+  const enrolledParams = { ...params };
+  delete enrolledParams.stream;
 
   const [testRows, enrolledRows] = await Promise.all([
     client.query({ query: testListQuery, params }),
-    client.query({ query: enrolledQuery, params }),
+    client.query({ query: enrolledQuery, params: enrolledParams }),
   ]);
 
   interface RawTestRow {
@@ -253,22 +286,7 @@ export async function getBatchOverviewData(
   });
 
   const streamRows = enrolledRows[0] as { stream: string; total: number }[];
-  const enrolledByStream: Record<string, number> = {};
-  const streamsSet = new Set<string>();
-  let totalEnrolled = 0;
-  for (const row of streamRows) {
-    enrolledByStream[row.stream] = row.total;
-    totalEnrolled += row.total;
-    const c = canonicalStream(row.stream);
-    if (c) streamsSet.add(c);
-  }
-
-  return {
-    tests,
-    totalEnrolled: totalEnrolled || null,
-    enrolledByStream,
-    streams: [...streamsSet].sort(),
-  };
+  return { tests, ...summariseEnrolment(streamRows, stream) };
 }
 
 /**

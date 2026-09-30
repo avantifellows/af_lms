@@ -297,6 +297,23 @@ describe("PerformanceTab", () => {
     });
   });
 
+  it("keeps every stream option after one is picked, so another can be chosen directly", async () => {
+    vi.stubGlobal("fetch", mockGradesResponse([11], ["JNV CoE"]));
+    lastBatchOverviewProps = null;
+
+    render(<PerformanceTab schoolUdise="12345" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "PCM" }));
+    await waitFor(() => expect(lastBatchOverviewProps?.stream).toBe("pcm"));
+
+    const streamGroup = screen.getByRole("group", { name: "Stream" });
+    expect(within(streamGroup).getByRole("button", { name: "PCM" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(within(streamGroup).getByRole("button", { name: "PCB" }));
+    await waitFor(() => expect(lastBatchOverviewProps?.stream).toBe("pcb"));
+    expect(within(streamGroup).getByRole("button", { name: "All" })).toBeInTheDocument();
+    expect(within(streamGroup).getByRole("button", { name: "PCM" })).toBeInTheDocument();
+  });
+
   it("renders the Test Grade buttons from reported options and forwards selection", async () => {
     vi.stubGlobal("fetch", mockGradesResponse([12], ["JNV CoE"]));
     lastBatchOverviewProps = null;

@@ -138,16 +138,78 @@ describe("getBatchOverviewData", () => {
     expect(result.streams).toEqual(["engg", "med"]);
   });
 
-  it("forwards stream filter to both queries (lowercased)", async () => {
+  it("filters the test list by stream but leaves the enrolment query unfiltered", async () => {
     mocks.mockQueryFn.mockResolvedValueOnce([[]]).mockResolvedValueOnce([[]]);
 
     const { getBatchOverviewData } = await import("./bigquery");
     await getBatchOverviewData("11223344", 10, undefined, "pcm");
 
-    const calls = mocks.mockQueryFn.mock.calls;
-    expect(calls[0][0].params).toMatchObject({ udise: "11223344", grade: 10, stream: "pcm" });
-    expect(calls[1][0].params).toMatchObject({ stream: "pcm" });
-    expect(calls[0][0].query).toContain("LOWER(student_stream) = @stream");
+    const [testListCall, enrolledCall] = mocks.mockQueryFn.mock.calls;
+    expect(testListCall[0].params).toMatchObject({ udise: "11223344", grade: 10, stream: "pcm" });
+    expect(testListCall[0].query).toContain("LOWER(student_stream) = @stream");
+    // The enrolment rows feed the Stream filter's options, so they must cover
+    // every stream — the selected one is applied to the totals in JS.
+    expect(enrolledCall[0].query).not.toContain("@stream");
+    expect(enrolledCall[0].params).toEqual({ udise: "11223344", grade: 10 });
+  });
+
+  describe("with a stream selected", () => {
+    const enrolledRows = [
+      { stream: "CA", total: 8 },
+      { stream: "CLAT", total: 6 },
+      { stream: "Engineering", total: 40 },
+      { stream: "Medical", total: 30 },
+      { stream: "medical", total: 2 },
+      { stream: "", total: 3 },
+    ];
+
+    it("still lists every stream at the school + grade as an option", async () => {
+      mocks.mockQueryFn.mockResolvedValueOnce([[]]).mockResolvedValueOnce([enrolledRows]);
+
+      const { getBatchOverviewData } = await import("./bigquery");
+      const result = await getBatchOverviewData("11223344", 12, "JNV NVS", "medical");
+
+      expect(result.streams).toEqual(["ca", "clat", "engineering", "medical"]);
+    });
+
+    it("keeps totalEnrolled and enrolledByStream to the selected stream, cased duplicates included", async () => {
+      mocks.mockQueryFn.mockResolvedValueOnce([[]]).mockResolvedValueOnce([enrolledRows]);
+
+      const { getBatchOverviewData } = await import("./bigquery");
+      const result = await getBatchOverviewData("11223344", 12, "JNV NVS", "medical");
+
+      expect(result.totalEnrolled).toBe(32);
+      expect(result.enrolledByStream).toEqual({ Medical: 30, medical: 2 });
+    });
+
+    it("returns null totalEnrolled when the selected stream has no enrolment", async () => {
+      mocks.mockQueryFn.mockResolvedValueOnce([[]]).mockResolvedValueOnce([enrolledRows]);
+
+      const { getBatchOverviewData } = await import("./bigquery");
+      const result = await getBatchOverviewData("11223344", 12, "JNV NVS", "pcb");
+
+      expect(result.totalEnrolled).toBeNull();
+      expect(result.enrolledByStream).toEqual({});
+      expect(result.streams).toEqual(["ca", "clat", "engineering", "medical"]);
+    });
+
+    it("counts every stream, blanks included, when no stream is selected", async () => {
+      mocks.mockQueryFn.mockResolvedValueOnce([[]]).mockResolvedValueOnce([enrolledRows]);
+
+      const { getBatchOverviewData } = await import("./bigquery");
+      const result = await getBatchOverviewData("11223344", 12, "JNV NVS");
+
+      expect(result.totalEnrolled).toBe(89);
+      expect(result.enrolledByStream).toEqual({
+        CA: 8,
+        CLAT: 6,
+        Engineering: 40,
+        Medical: 30,
+        medical: 2,
+        "": 3,
+      });
+      expect(result.streams).toEqual(["ca", "clat", "engineering", "medical"]);
+    });
   });
 
   it("lists only system-wide mandated tests for JNV NVS, leaving enrollment and params alone", async () => {
