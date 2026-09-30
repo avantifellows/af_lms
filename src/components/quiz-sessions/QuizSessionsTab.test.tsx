@@ -301,6 +301,31 @@ describe("QuizSessionsTab", () => {
     );
   });
 
+  it("links Session Manager sessions' PDFs by cms_source_id, not the stored CMS URL", async () => {
+    sessions = [
+      {
+        ...makeSessions()[0],
+        id: 40,
+        name: "Chemical kinetics rt",
+        meta_data: {
+          ...makeSessions()[0].meta_data,
+          cms_source: "nex-gen-cms",
+          cms_test_id: "https://new-cms.avantifellows.org/test?id=2472&curriculum_id=2",
+          cms_source_id: "2472",
+        },
+      },
+    ];
+    const user = userEvent.setup();
+
+    render(<QuizSessionsTab schoolId="school-1" />);
+    await user.click(await screen.findByText("Chemical kinetics rt"));
+
+    expect(screen.getByRole("link", { name: "Question PDF" })).toHaveAttribute(
+      "href",
+      "/api/cms/test-pdf?testId=2472&type=questions"
+    );
+  });
+
   it("keeps view-only users away from create and edit actions", async () => {
     const user = userEvent.setup();
 

@@ -315,6 +315,32 @@ describe("POST /api/quiz-sessions/[id]/regenerate", () => {
       ).toBe(504);
     });
 
+    it("regenerates Session Manager sessions from cms_source_id", async () => {
+      const { POST } = await loadRouteModule();
+      mocks.mockGetServerSession.mockResolvedValue(ADMIN_SESSION);
+      mocks.mockQuery.mockResolvedValue([
+        cmsSessionRow({
+          meta_data: {
+            cms_source: "nex-gen-cms",
+            cms_test_id: "https://new-cms.avantifellows.org/test?id=2472&curriculum_id=2",
+            cms_source_id: "2472",
+          },
+        }),
+      ]);
+      mocks.mockFetch.mockImplementation((input: unknown) => {
+        if (String(input).includes("/quiz/")) {
+          return Promise.resolve(jsonResponse({ id: "quiz-abc123", warnings: [] }));
+        }
+        return Promise.resolve(jsonResponse({ id: 42 }));
+      });
+
+      const res = await POST(new Request("http://localhost") as never, routeParams({ id: "42" }));
+
+      expect(res.status).toBe(200);
+      const call = fetchCall("http://quiz-backend.local/quiz/quiz-abc123/from-cms");
+      expect(JSON.parse(String((call?.[1] as RequestInit)?.body)).test_id).toBe(2472);
+    });
+
     it("returns 422 when cms_test_id is missing", async () => {
       const { POST } = await loadRouteModule();
       mocks.mockGetServerSession.mockResolvedValue(ADMIN_SESSION);

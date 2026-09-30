@@ -12,6 +12,7 @@ import {
   CMS_EXAM_TRACKS,
   CMS_SOURCE,
   CMS_TEST_TYPE_OPTIONS,
+  getCmsTestId,
   type CmsExamTrack,
   type CmsTestType,
 } from "@/lib/cms-tests";
@@ -211,16 +212,6 @@ function getMetaString(
 ): string | undefined {
   const value = meta?.[key];
   return typeof value === "string" ? value : undefined;
-}
-
-function getMetaScalar(
-  meta: Record<string, unknown> | null | undefined,
-  key: string
-): string | undefined {
-  const value = meta?.[key];
-  if (typeof value === "string") return value;
-  if (typeof value === "number" && Number.isFinite(value)) return String(value);
-  return undefined;
 }
 
 function getMetaBoolean(
@@ -3153,8 +3144,7 @@ function CmsAwarePaperLinks({
   meta: Record<string, unknown> | null | undefined;
 }) {
   const cmsSource = getMetaString(meta, "cms_source");
-  // Ids may be stored as numbers (older sessions) or strings — accept both.
-  const cmsTestId = getMetaScalar(meta, "cms_test_id");
+  const cmsTestId = getCmsTestId(meta);
 
   // Test id only: also gating on cms_curriculum_id/cms_grade_id would silently fall through
   // to the legacy branch — no PDF links — for sessions created after we stopped storing them.

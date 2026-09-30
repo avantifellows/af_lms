@@ -7,7 +7,7 @@ import {
 } from "@/lib/quiz-session-access";
 import { query } from "@/lib/db";
 import { publishMessage } from "@/lib/sns";
-import { CMS_SOURCE } from "@/lib/cms-tests";
+import { CMS_SOURCE, getCmsTestId } from "@/lib/cms-tests";
 import {
   dbIstTimestampToUtcIso,
   istWallClockWindowEnd,
@@ -168,7 +168,7 @@ async function regenerateFromCms(
   }
 
   const quizId = currentSession.platform_id;
-  const cmsTestId = metaString(metaData, "cms_test_id");
+  const cmsTestId = getCmsTestId(metaData);
 
   // Test id only: requiring curriculum/grade would 422 every session created after we
   // stopped persisting them (nex-gen-cms#177).
