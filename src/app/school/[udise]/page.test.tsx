@@ -119,11 +119,13 @@ vi.mock("@/components/PageHeader", () => ({
     subtitle,
     backHref,
     userEmail,
+    actions,
   }: {
     title: string;
     subtitle?: string;
     backHref?: string;
     userEmail?: string;
+    actions?: React.ReactNode;
   }) => (
     <div
       data-testid="page-header"
@@ -133,6 +135,7 @@ vi.mock("@/components/PageHeader", () => ({
       data-user-email={userEmail || ""}
     >
       PageHeader
+      <div data-testid="page-header-actions">{actions}</div>
     </div>
   ),
 }));
@@ -245,7 +248,12 @@ vi.mock("@/components/EditStudentModal", () => ({
 
 import SchoolPage from "./page";
 import EnrollmentTabContent from "@/components/enrollment/EnrollmentTabContent";
-import { PROGRAM_IDS, PROGRAM_IDS_ORDERED, PROGRAM_ATTRIBUTION_ORDER } from "@/lib/constants";
+import {
+  PMU_FEEDBACK_FORM_URL,
+  PROGRAM_IDS,
+  PROGRAM_IDS_ORDERED,
+  PROGRAM_ATTRIBUTION_ORDER,
+} from "@/lib/constants";
 
 // ---- helpers ----
 
@@ -1059,6 +1067,21 @@ describe("SchoolPage (server component)", () => {
         }
       });
 
+      it("shows the Feedback / Grievance link, opening the Google Form in a new tab", async () => {
+        await setupPmuPage();
+
+        await renderPage();
+
+        const actions = within(screen.getByTestId("page-header-actions"));
+        const link = actions.getByRole("link", { name: /Feedback \/ Grievance/ });
+        expect(link).toHaveAttribute("href", PMU_FEEDBACK_FORM_URL);
+        expect(link).toHaveAttribute("href", "https://forms.gle/Xisa7AjkDp6fMhew6");
+        expect(link).toHaveAttribute("target", "_blank");
+        expect(link).toHaveAttribute("rel", "noopener noreferrer");
+        expect(link).toHaveAccessibleName("Feedback / Grievance (opens in a new tab)");
+        expect(actions.queryByText("Start Visit")).not.toBeInTheDocument();
+      });
+
       it("returns Access Denied at a non-JNV School, even at level 3", async () => {
         await setupPmuPage(
           { af_school_category: "Punjab CoE", centre_program_ids: [94] },
@@ -1203,6 +1226,54 @@ describe("SchoolPage (server component)", () => {
           expect(screen.getByText(name)).toBeInTheDocument();
         }
       });
+    });
+  });
+
+  // Header actions with the real matrix: Start Visit follows visits edit, and
+  // the Feedback / Grievance link is PMU-only.
+  describe.each([
+    { role: "teacher", startVisit: false },
+    { role: "program_manager", startVisit: true },
+    { role: "program_admin", startVisit: true },
+    { role: "admin", startVisit: true },
+  ] as const)("$role header actions", ({ role, startVisit }) => {
+    async function setupRole() {
+      setupAdminDefaults();
+      const actual = await vi.importActual<typeof import("@/lib/permissions")>(
+        "@/lib/permissions",
+      );
+      mockGetUserPermission.mockResolvedValue(
+        makePermission({ role, level: 3, school_codes: null, program_ids: [1, 64] }),
+      );
+      mockGetFeatureAccess.mockImplementation(actual.getFeatureAccess);
+    }
+
+    it("has no Feedback / Grievance link", async () => {
+      await setupRole();
+
+      await renderPage();
+
+      const actions = within(screen.getByTestId("page-header-actions"));
+      expect(
+        actions.queryByRole("link", { name: /Feedback \/ Grievance/ }),
+      ).not.toBeInTheDocument();
+      expect(screen.queryByText("Feedback / Grievance")).not.toBeInTheDocument();
+    });
+
+    it(`${startVisit ? "shows" : "hides"} Start Visit`, async () => {
+      await setupRole();
+
+      await renderPage();
+
+      const actions = within(screen.getByTestId("page-header-actions"));
+      if (startVisit) {
+        expect(actions.getByRole("link", { name: "Start Visit" })).toHaveAttribute(
+          "href",
+          "/school/70705/visit/new",
+        );
+      } else {
+        expect(actions.queryByText("Start Visit")).not.toBeInTheDocument();
+      }
     });
   });
 

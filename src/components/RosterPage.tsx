@@ -1,3 +1,4 @@
+import { ExternalLink } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import type { Session } from "next-auth";
@@ -25,6 +26,7 @@ import {
   HOLISTIC_MENTORSHIP_PROGRAM_IDS,
   isHolisticMentorshipProgramId,
   isPmuRole,
+  PMU_FEEDBACK_FORM_URL,
   PMU_GOVT_SCHOOL_USER_ROLE,
   PMU_PROGRAM_ID,
   PROGRAM_ID_TO_LABEL,
@@ -558,6 +560,52 @@ function RosterShell({
         <SchoolTabs tabs={tabs} defaultTab={tabs[0]?.id} />
       </main>
     </div>
+  );
+}
+
+/**
+ * The School page's Feedback / Grievance link: the program team's Google Form,
+ * opened in a new tab. PMU roles only (see rosterHeaderActions).
+ */
+function PmuFeedbackLink() {
+  return (
+    <a
+      href={PMU_FEEDBACK_FORM_URL}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label="Feedback / Grievance (opens in a new tab)"
+      className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg border border-border bg-bg-card px-3 py-2 text-sm font-bold text-text-primary shadow-sm hover:bg-hover-bg active:bg-bg-card-alt transition-colors"
+    >
+      Feedback / Grievance
+      <ExternalLink className="h-4 w-4" aria-hidden="true" />
+    </a>
+  );
+}
+
+/**
+ * Header actions: Start Visit for roles with visits edit, and the Feedback /
+ * Grievance link for PMU roles. PMU roles have no visits access, so in
+ * practice a user gets one or the other; other roles' output is unchanged.
+ */
+function rosterHeaderActions(
+  permission: UserPermission,
+  canStartVisit: boolean,
+  schoolCode: string,
+): ReactNode {
+  const startVisit = canStartVisit ? (
+    <Link
+      href={`/school/${schoolCode}/visit/new`}
+      className="inline-flex items-center rounded-lg px-3 py-2 text-sm font-bold text-text-on-accent bg-accent shadow-sm hover:bg-accent-hover active:bg-accent-hover/90 transition-colors"
+    >
+      Start Visit
+    </Link>
+  ) : undefined;
+  if (!isPmuRole(permission.role)) return startVisit;
+  return (
+    <>
+      {startVisit}
+      <PmuFeedbackLink />
+    </>
   );
 }
 
@@ -1300,16 +1348,7 @@ export default async function RosterPage({
       backHref={backHref}
       userEmail={session.user?.email || undefined}
       tabs={tabs}
-      actions={
-        access.visits.canEdit ? (
-          <Link
-            href={`/school/${school.code}/visit/new`}
-            className="inline-flex items-center rounded-lg px-3 py-2 text-sm font-bold text-text-on-accent bg-accent shadow-sm hover:bg-accent-hover active:bg-accent-hover/90 transition-colors"
-          >
-            Start Visit
-          </Link>
-        ) : undefined
-      }
+      actions={rosterHeaderActions(permission, access.visits.canEdit, school.code)}
     />
   );
 }

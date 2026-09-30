@@ -36,6 +36,10 @@ export function isPmuRole(role: unknown): role is PmuRole {
 
 export const PMU_PROGRAM_ID = PROGRAM_IDS.NVS;
 
+// Google Form the program team uses to collect School issues, feedback and
+// requests. The School page header links to it for PMU roles only.
+export const PMU_FEEDBACK_FORM_URL = "https://forms.gle/Xisa7AjkDp6fMhew6";
+
 // Canonical display order for program IDs (JNV first, then non-JNV centres).
 export const PROGRAM_IDS_ORDERED: number[] = Object.values(PROGRAM_IDS);
 
