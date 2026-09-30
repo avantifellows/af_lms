@@ -6,15 +6,21 @@ vi.mock("./permissions", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./permissions")>();
   return { ...actual, getResolvedPermission: vi.fn() };
 });
+vi.mock("./school-students", () => ({ getSchoolRoster: vi.fn() }));
 
 import { query } from "./db";
 import { getResolvedPermission, type UserPermission } from "./permissions";
+import { getSchoolRoster } from "./school-students";
+import type { Student } from "@/components/StudentTable";
 import {
   InterventionFlagError,
   addFlagUpdate,
   authorizeInterventionFlags,
+  flagStudentScopeForPmu,
   interventionFlagAccess,
   listSchoolFlags,
+  mayRaiseFlagForPmu,
+  mayUpdateFlagForPmu,
   raiseFlag,
   validateNote,
   type InterventionFlagActor,
@@ -32,9 +38,29 @@ const TEACHER: UserPermission = {
   read_only: false,
   user_id: 42,
 };
-const SCHOOL = { id: "7", code: "70705", udise_code: "09123", name: "JNV Test", region: "North" };
+const PMU_MANAGER: UserPermission = {
+  email: "pmu@avantifellows.org",
+  level: 3,
+  role: "pmu_manager",
+  program_ids: [64],
+  read_only: false,
+  user_id: 77,
+};
+const SCHOOL = {
+  id: "7", code: "70705", udise_code: "09123", name: "JNV Test", region: "North", af_school_category: "JNV",
+};
+const NON_JNV_SCHOOL = { ...SCHOOL, code: "80808", udise_code: "08888", name: "Govt School", af_school_category: "Govt" };
 const SESSION = { user: { email: TEACHER.email } };
+const PMU_SESSION = { user: { email: PMU_MANAGER.email } };
 const ACTOR: InterventionFlagActor = { email: "Teacher@AvantiFellows.org", userId: 42, permission: TEACHER };
+const PMU_ACTOR: InterventionFlagActor = { email: PMU_MANAGER.email, userId: 77, permission: PMU_MANAGER };
+
+function rosterStudent(pk: string | null, overrides: Partial<Student>): Student {
+  return {
+    student_pk_id: pk, program_id: null, student_program_ids: [], dropout_program_ids: [], status: null,
+    ...overrides,
+  } as Student;
+}
 
 function fakeClient(results: Array<{ rows: unknown[] } | Error>) {
   const calls: Array<{ sql: string; params: unknown[] }> = [];
@@ -91,6 +117,27 @@ describe("authorizeInterventionFlags", () => {
     if (!edit.ok) expect(edit.response.status).toBe(403);
   });
 
+  it("refuses a PMU role at a non-JNV School, even at level 3", async () => {
+    mockGetResolvedPermission.mockResolvedValue(PMU_MANAGER);
+    mockQuery.mockResolvedValueOnce([NON_JNV_SCHOOL]);
+    const result = await authorizeInterventionFlags(PMU_SESSION, "08888", "view");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.response.status).toBe(403);
+    expect(mockQuery.mock.calls[0][0]).toContain("af_school_category");
+  });
+
+  it("lets a PMU role into a JNV School in scope", async () => {
+    mockGetResolvedPermission.mockResolvedValue(PMU_MANAGER);
+    mockQuery.mockResolvedValueOnce([SCHOOL]);
+    expect((await authorizeInterventionFlags(PMU_SESSION, "09123", "edit")).ok).toBe(true);
+  });
+
+  it("keeps non-JNV Schools open to other roles", async () => {
+    mockGetResolvedPermission.mockResolvedValue({ ...TEACHER, school_codes: ["80808"] });
+    mockQuery.mockResolvedValueOnce([NON_JNV_SCHOOL]);
+    expect((await authorizeInterventionFlags(SESSION, "08888", "edit")).ok).toBe(true);
+  });
+
   it("allows anyone who can edit the school's students to change flags", async () => {
     mockGetResolvedPermission.mockResolvedValue(TEACHER);
     mockQuery.mockResolvedValueOnce([SCHOOL]);
@@ -141,10 +188,86 @@ describe("listSchoolFlags", () => {
     expect(flags.map((f) => f.updates.map((u) => u.id))).toEqual([[11], [10, 12]]);
   });
 
+  it("lists every flag when no Student scope is given", async () => {
+    mockQuery.mockResolvedValueOnce([]);
+    await listSchoolFlags("7");
+    expect(mockQuery).toHaveBeenCalledWith(expect.stringContaining("$2::bigint[] IS NULL"), ["7", null]);
+  });
+
+  it("narrows to the given Students and skips the query for an empty scope", async () => {
+    mockQuery.mockResolvedValueOnce([]);
+    await listSchoolFlags("7", ["5", "6"]);
+    expect(mockQuery).toHaveBeenCalledWith(expect.any(String), ["7", ["5", "6"]]);
+
+    mockQuery.mockClear();
+    expect(await listSchoolFlags("7", [])).toEqual([]);
+    expect(mockQuery).not.toHaveBeenCalled();
+  });
+
   it("skips the update query when the school has no flags", async () => {
     mockQuery.mockResolvedValueOnce([]);
     expect(await listSchoolFlags("7")).toEqual([]);
     expect(mockQuery).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("flagStudentScopeForPmu", () => {
+  it("does not narrow other roles", async () => {
+    expect(await flagStudentScopeForPmu(ACTOR, "7")).toBeNull();
+    expect(getSchoolRoster).not.toHaveBeenCalled();
+  });
+
+  it("keeps only the mixed School's NVS roster for a PMU role", async () => {
+    vi.mocked(getSchoolRoster).mockResolvedValue({
+      issues: [],
+      students: [
+        rosterStudent("1", { student_program_ids: [64], program_id: 64 }), // current NVS
+        rosterStudent("2", { student_program_ids: [1, 64], program_id: 1 }), // CoE + NVS
+        rosterStudent("3", { dropout_program_ids: [64], status: "dropout", program_id: 64 }), // NVS dropout
+        rosterStudent("4", { student_program_ids: [1], program_id: 1 }), // CoE only
+        rosterStudent("5", { student_program_ids: [2], dropout_program_ids: [1] }), // Nodal, CoE dropout
+        rosterStudent("6", {}), // unassigned
+        rosterStudent(null, { student_program_ids: [64] }), // no student row
+      ],
+    });
+
+    expect(await flagStudentScopeForPmu(PMU_ACTOR, "7")).toEqual(["1", "2", "3"]);
+    expect(getSchoolRoster).toHaveBeenCalledWith("7");
+  });
+});
+
+describe("mayRaiseFlagForPmu", () => {
+  it("never checks other roles", async () => {
+    expect(await mayRaiseFlagForPmu(ACTOR, 5)).toBe(true);
+    expect(mockQuery).not.toHaveBeenCalled();
+  });
+
+  it("requires a current NVS batch for a PMU role", async () => {
+    mockQuery.mockResolvedValueOnce([{ has_current_nvs_batch: false }]);
+    expect(await mayRaiseFlagForPmu(PMU_ACTOR, 5)).toBe(false);
+    expect(mockQuery).toHaveBeenLastCalledWith(expect.stringContaining("b_nvs.program_id = 64"), [5]);
+
+    mockQuery.mockResolvedValueOnce([{ has_current_nvs_batch: true }]);
+    expect(await mayRaiseFlagForPmu(PMU_ACTOR, 5)).toBe(true);
+  });
+});
+
+describe("mayUpdateFlagForPmu", () => {
+  it("never checks other roles", async () => {
+    expect(await mayUpdateFlagForPmu(ACTOR, 9, "7")).toBe(true);
+    expect(mockQuery).not.toHaveBeenCalled();
+  });
+
+  it("requires the flag's Student to have a current NVS batch for a PMU role", async () => {
+    mockQuery.mockResolvedValueOnce([{ has_current_nvs_batch: false }]);
+    expect(await mayUpdateFlagForPmu(PMU_ACTOR, 9, "7")).toBe(false);
+    expect(mockQuery).toHaveBeenLastCalledWith(expect.stringContaining("b_nvs.program_id = 64"), [9, "7"]);
+
+    mockQuery.mockResolvedValueOnce([]);
+    expect(await mayUpdateFlagForPmu(PMU_ACTOR, 9, "7")).toBe(false);
+
+    mockQuery.mockResolvedValueOnce([{ has_current_nvs_batch: true }]);
+    expect(await mayUpdateFlagForPmu(PMU_ACTOR, 9, "7")).toBe(true);
   });
 });
 

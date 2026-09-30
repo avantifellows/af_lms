@@ -546,7 +546,7 @@ export function hasCurrentNvsBatchSql(userIdColumn: string): string {
   )`;
 }
 
-async function studentHasCurrentNvsBatch(studentPkId: number | string): Promise<boolean> {
+export async function studentHasCurrentNvsBatch(studentPkId: number | string): Promise<boolean> {
   const rows = await query<{ has_current_nvs_batch: boolean }>(
     `SELECT ${hasCurrentNvsBatchSql("s.user_id")} AS has_current_nvs_batch
      FROM student s

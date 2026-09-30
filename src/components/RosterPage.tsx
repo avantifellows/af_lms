@@ -49,6 +49,7 @@ import {
   buildProgramStats,
   studentDroppedFromProgram,
   studentHasCurrentProgram,
+  studentInProgram,
   type ProgramStats,
 } from "@/lib/enrollment-stats";
 import EnrollmentTabContent from "@/components/enrollment/EnrollmentTabContent";
@@ -758,10 +759,7 @@ async function fetchRosterData(scope: RosterScope) {
 }
 
 function isNvsStudent(s: RosterStudent): boolean {
-  return (
-    studentHasCurrentProgram(s, PMU_PROGRAM_ID) ||
-    studentDroppedFromProgram(s, PMU_PROGRAM_ID)
-  );
+  return studentInProgram(s, PMU_PROGRAM_ID);
 }
 
 /**
