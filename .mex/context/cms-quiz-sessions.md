@@ -21,7 +21,7 @@ edges:
     condition: when tracing the request flow across af_lms / quiz-backend / db-service
   - target: patterns/db-service-write.md
     condition: when adding a session or occurrence write
-last_updated: 2026-09-25
+last_updated: 2026-09-30
 ---
 
 # CMS-sourced quiz sessions
@@ -131,6 +131,10 @@ falls back to defaults. `QUIZ_BACKEND_URL` must be set (Amplify staging + prod).
   idempotent `$set`/PATCH, so a retry converges.
 
 ## Question / answer PDFs
+
+Read the CMS test id with `getCmsTestId` (`src/lib/cms-tests.ts`), never `cms_test_id` raw:
+Session Manager and sheet-script sessions store the CMS page URL there and the id in
+`cms_source_id`. PDF links, regenerate and the duplicate check all depend on it.
 
 CMS tests have no stored PDF URLs. Both the create-form test picker and session details link to
 `/api/cms/test-pdf?testId=…&type=questions|answers`, which fetches the CMS service PDF and
