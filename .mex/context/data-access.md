@@ -21,7 +21,7 @@ edges:
     condition: when adding a write that must proxy to the DB Service
   - target: patterns/add-api-route.md
     condition: when adding a route that reads or writes
-last_updated: 2026-09-25
+last_updated: 2026-09-30
 ---
 
 # Data Access
@@ -138,3 +138,14 @@ tracked separately in #336. No audit index was applied during these investigatio
 Production deployment of the September 18 stack was not established by these notes.
 Evidence: sibling `release-records/holistic-phase-label-20260917/` and
 `release-records/punjab-nodal-list-investigation-20260917/`.
+
+## Holistic Mentor write scope (#378)
+
+Mentor-owned Holistic writes (Post-Session Notes today; Follow-up Notes next) share one
+guard in `src/lib/holistic-mentor-write-scope.ts`. `loadHolisticMentorWriteScope(client, { studentId, phaseId, schoolId, programId, academicYear })`
+runs inside the caller's transaction and takes `FOR UPDATE OF mapping, phase`. It requires
+an active Mapping, a non-dropout Student, a single current Grade 11/12 roster Grade, no
+privacy tombstone, and an applicable Phase: current-year, or a prior-year Grade 11 Phase
+for a Grade 12 Mentee with prior-year Mapping history. It derives the prior Academic Year
+itself. `checkHolisticMentorWriteScope(scope, actorUserId)` returns 404 `Not found` for
+missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do not copy the query into new writers; call the helper so guard semantics and lock order stay identical.
