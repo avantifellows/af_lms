@@ -31,7 +31,11 @@ import {
 } from "@/lib/constants";
 import { getLmsSupportedProgramIds } from "@/lib/lms-programs";
 import { type Grade } from "@/components/StudentTable";
-import { getSchoolRoster, getCentreStudents } from "@/lib/school-students";
+import {
+  getSchoolRoster,
+  getCentreStudents,
+  type SchoolRoster,
+} from "@/lib/school-students";
 import PageHeader from "@/components/PageHeader";
 import SchoolTabs from "@/components/SchoolTabs";
 import { Badge, Card } from "@/components/ui";
@@ -556,6 +560,557 @@ function RosterShell({
   );
 }
 
+function NoProgramAccess() {
+  return (
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <Card elevation="xl" className="p-8 max-w-md text-center">
+        <h1 className="text-xl font-bold text-red-600 mb-2">No Program Access</h1>
+        <p className="text-gray-600 mb-4">
+          You are not assigned to any programs. Please contact an administrator.
+        </p>
+        <Link href="/dashboard" className="text-accent hover:text-accent-hover">
+          Return to dashboard
+        </Link>
+      </Card>
+    </div>
+  );
+}
+
+const NO_PAGE_PERMISSION = "You don't have permission to view this page.";
+
+type RosterStudent = SchoolRoster["students"][number];
+type RosterDataIssue = SchoolRoster["issues"][number];
+
+/**
+ * Which Holistic Mentorship program this page shows. A centre answers it
+ * itself — its own program, no choice offered, so a Nodal centre at a
+ * CoE+Nodal school can never reach the CoE holistic roster. A school may host
+ * several holistic programs and picks via ?program_id=.
+ *
+ * Call it only after every access-denied check: it reads the program context,
+ * which a denied user has no business resolving.
+ */
+function resolveHolisticProgram(
+  scope: RosterScope,
+  permission: UserPermission,
+  holisticProgramParam: string | string[] | undefined,
+) {
+  if (scope.kind === "centre") {
+    return { choices: [], programId: scope.centre.program_id ?? undefined };
+  }
+  const choices = holisticProgramChoices(scope.school, permission);
+  return {
+    choices,
+    programId: resolveHolisticProgramId(
+      requestedHolisticProgramId(holisticProgramParam),
+      choices,
+    ),
+  };
+}
+
+// School access checks (a centre inherits its school's access).
+function schoolAccessDenial(permission: UserPermission, scope: RosterScope): ReactNode | null {
+  const { school } = scope;
+  if (!canAccessSchoolSync(permission, school.code, school.region || undefined)) {
+    return <AccessDenied message={NO_PAGE_PERMISSION} />;
+  }
+  // PMU roles are pinned to JNV NVS (ADR 0007): level 3 "all" must not open
+  // a centre-program (non-JNV) School. Centre pages are refused by
+  // canViewCentre in centreScopeDenial.
+  if (scope.kind === "school" && isPmuRole(permission.role) && school.af_school_category !== "JNV") {
+    return <AccessDenied message={NO_PAGE_PERMISSION} />;
+  }
+  return null;
+}
+
+function centreConfinementLink(seatIds: number[] | string[]) {
+  return seatIds.length === 1
+    ? { href: `/centre/${seatIds[0]}`, label: "Go to your centre" }
+    : { href: "/dashboard?view=centres", label: "Go to your centres" };
+}
+
+function centreScopeDenial(permission: UserPermission, scope: RosterScope): ReactNode | null {
+  const confinement = getCentreConfinement(permission);
+  // Centre-seated staff are confined to their centre(s): the whole-school
+  // roster page isn't theirs to open (their seat grants school access only so
+  // school-linked actions like visits work). Point them at their centre — the
+  // single seat directly, otherwise the Centres tab to pick one.
+  if (scope.kind === "school") {
+    if (!confinement.confined) return null;
+    return (
+      <AccessDenied
+        message="This school page isn't available for your access. View your assigned centre instead."
+        link={centreConfinementLink(confinement.centreIds)}
+      />
+    );
+  }
+  // Centre pages are seat-scoped: a user with centre seats may only open the
+  // centres they hold a seat at (not every centre at the school). Rule lives
+  // in permissions.canViewCentre; a seatless manager falls back to school access.
+  const canView = canViewCentre(permission, {
+    centreId: Number(scope.centre.id),
+    schoolCode: scope.school.code,
+    schoolRegion: scope.school.region || undefined,
+  });
+  return canView ? null : <AccessDenied message="You don't have permission to view this centre." />;
+}
+
+/**
+ * The holistic-mentorship admin sees that school's holistic roster in place
+ * — and only that tab; they have no scope for anything else on the page.
+ * Their console links to /school/<code>?program_id=N, which is why school
+ * scope renders while centre scope still bounces to the console: a centre
+ * page is reached from the dashboard Centres tab, which this role never
+ * sees.
+ */
+async function renderHolisticAdminRoster({
+  scope,
+  session,
+  permission,
+  holisticProgramParam,
+  fromHolisticProgress,
+}: {
+  scope: RosterScope;
+  session: Session;
+  permission: UserPermission;
+  holisticProgramParam?: string | string[];
+  fromHolisticProgress: boolean;
+}) {
+  const { school } = scope;
+  const isCentre = scope.kind === "centre";
+  if (isCentre) redirect("/admin/holistic-mentorship");
+  const { programId, choices } = resolveHolisticProgram(scope, permission, holisticProgramParam);
+  const holisticContent = await buildHolisticMentorshipContent({
+    session,
+    permission,
+    schoolCode: school.code,
+    access: getFeatureAccess(permission, "holistic_mentorship"),
+    isCentre,
+    programId,
+    programChoices: choices,
+    fromHolisticProgress,
+  });
+  if (!holisticContent) redirect("/admin/holistic-mentorship");
+  return (
+    <RosterShell
+      title={school.name}
+      subtitle={`${school.district}, ${school.state} | Code: ${school.code}`}
+      backHref={programId === undefined
+        ? "/admin/holistic-mentorship"
+        : `/admin/holistic-mentorship?program_id=${programId}`}
+      userEmail={session.user?.email ?? undefined}
+      tabs={[{
+        id: "holistic_mentorship",
+        label: "Holistic Mentorship",
+        content: holisticContent,
+      }]}
+    />
+  );
+}
+
+// Derive feature access from the permission matrix
+function rosterFeatureAccess(permission: UserPermission) {
+  return {
+    students: getFeatureAccess(permission, "students"),
+    curriculum: getFeatureAccess(permission, "curriculum"),
+    performance: getFeatureAccess(permission, "performance"),
+    mentorship: getFeatureAccess(permission, "academic_mentorship"),
+    holisticMentorship: getFeatureAccess(permission, "holistic_mentorship"),
+    visits: getFeatureAccess(permission, "visits"),
+    quizSessions: getFeatureAccess(permission, "quiz_sessions"),
+    teacherFeedback: getFeatureAccess(permission, "teacher_feedback"),
+  };
+}
+
+function studentActionAccess(
+  session: Session,
+  scope: RosterScope,
+  permission: UserPermission,
+  canEditStudents: boolean,
+) {
+  const isCentre = scope.kind === "centre";
+  // Student addition is an NVS school-page feature; a centre roster is scoped
+  // to the centre's own program, so it never offers Add Student.
+  const rosterSchool = { ...scope.school, af_school_category: scope.school.af_school_category ?? null };
+  return {
+    canAddStudent:
+      !isCentre && getStudentAdditionAccessFromPermission(session, rosterSchool, permission).ok,
+    // Download List is a view action: same as canAddStudent for existing roles,
+    // but a read_only PMU user keeps it (NVS-only export).
+    canDownloadList:
+      !isCentre && getStudentExportAccessFromPermission(session, rosterSchool, permission).ok,
+    canDropoutStudent: canEditStudents && ALLOWED_STUDENT_ADDITION_ROLES.has(permission.role),
+  };
+}
+
+// Fetch enrollment data in parallel. THE fork: a centre pulls its own roster
+// from the centre_students view; a school pulls the full school roster.
+async function fetchRosterData(scope: RosterScope) {
+  const [roster, grades, batches, supportedProgramIds] = await Promise.all([
+    scope.kind === "centre" ? getCentreStudents(scope.centre.id) : getSchoolRoster(scope.school.id),
+    getGrades(),
+    getBatchesWithMetadata(),
+    // centres-derived ∪ PROGRAM_IDS (D22c) — a newly onboarded centre program
+    // shows students without a code edit. Additive, so it can never hide one.
+    getLmsSupportedProgramIds(),
+  ]);
+  return { roster, grades, batches, supportedProgramIds };
+}
+
+function isNvsStudent(s: RosterStudent): boolean {
+  return (
+    studentHasCurrentProgram(s, PMU_PROGRAM_ID) ||
+    studentDroppedFromProgram(s, PMU_PROGRAM_ID)
+  );
+}
+
+/**
+ * PMU roles are pinned to JNV NVS (ADR 0007): narrow the roster on the
+ * server, before any props are built, so a mixed School's CoE, Nodal and
+ * unassigned Students never reach the browser (the client only filters by
+ * the selected card). An NVS Student has a current NVS batch or an NVS
+ * dropout that hasn't been undone — the same sets the NVS export lists — so
+ * NVS dropouts stay undoable. Data issues follow their Student.
+ */
+function scopeRosterToRole(
+  students: RosterStudent[],
+  issues: RosterDataIssue[],
+  isPmu: boolean,
+): { students: RosterStudent[]; dataIssues: RosterDataIssue[] } {
+  if (!isPmu) return { students, dataIssues: issues };
+  const nvsStudents = students.filter(isNvsStudent);
+  const nvsGroupUserIds = new Set(nvsStudents.map((s) => String(s.group_user_id)));
+  return {
+    students: nvsStudents,
+    dataIssues: issues.filter((issue) => nvsGroupUserIds.has(String(issue.groupUserId))),
+  };
+}
+
+// Separate active and dropout students (all students visible; editability is per-row).
+// A PMU user's lists hold only what the NVS card shows: active = a current
+// NVS batch, dropout = dropped from NVS.
+function isActiveStudent(s: RosterStudent, isPmu: boolean, supportedProgramIds: number[]): boolean {
+  if (s.status === "dropout") return false;
+  return isPmu
+    ? studentHasCurrentProgram(s, PMU_PROGRAM_ID)
+    : supportedProgramIds.some((programId) => studentHasCurrentProgram(s, programId));
+}
+
+function isDropoutStudent(s: RosterStudent, isPmu: boolean): boolean {
+  if (isPmu) return studentDroppedFromProgram(s, PMU_PROGRAM_ID);
+  return s.status === "dropout" || (s.dropout_program_ids?.length ?? 0) > 0;
+}
+
+function splitActiveAndDropout(
+  students: RosterStudent[],
+  isPmu: boolean,
+  supportedProgramIds: number[],
+) {
+  return {
+    activeStudents: students.filter((s) => isActiveStudent(s, isPmu, supportedProgramIds)),
+    dropoutStudents: students.filter((s) => isDropoutStudent(s, isPmu)),
+  };
+}
+
+/**
+ * On a centre page, scope the program-filtered tabs to the centre's single
+ * program (Performance filters by program name; Curriculum/Quiz by id).
+ * `hasNoProgram` distinguishes "school page" (no centre program by definition)
+ * from "centre page whose centre has no program" — both leave `programId`
+ * undefined, but only the second must refuse to fall back to the school's data.
+ */
+function centreProgramScope(scope: RosterScope) {
+  if (scope.kind === "school") {
+    return { centreId: undefined, programId: undefined, programName: undefined, hasNoProgram: false };
+  }
+  return {
+    centreId: Number(scope.centre.id),
+    programId: scope.centre.program_id ?? undefined,
+    programName: scope.centre.program_name ?? undefined,
+    hasNoProgram: scope.centre.program_id == null,
+  };
+}
+
+function visibleEnrollmentProgramIds({
+  students,
+  supportedProgramIds,
+  permission,
+  userProgramIds,
+  canAddStudent,
+  isCentre,
+  centreProgramId,
+}: {
+  students: RosterStudent[];
+  supportedProgramIds: number[];
+  permission: UserPermission;
+  userProgramIds: number[];
+  canAddStudent: boolean;
+  isCentre: boolean;
+  centreProgramId: number | undefined;
+}): number[] {
+  // Programs that have at least one student (active or dropped) in scope
+  const programsWithStudents = new Set(
+    supportedProgramIds.filter((programId) =>
+      students.some(
+        (student) =>
+          studentHasCurrentProgram(student, programId) ||
+          studentDroppedFromProgram(student, programId),
+      ),
+    ),
+  );
+
+  // Programs shown as enrollment cards. Admins see every program present;
+  // everyone else sees the intersection of their effective
+  // programs with what's here.
+  const visibleProgramSet = new Set(
+    (permission.role === "admin" ? supportedProgramIds : userProgramIds).filter((id) =>
+      programsWithStudents.has(id),
+    ),
+  );
+
+  if (canAddStudent) visibleProgramSet.add(PROGRAM_IDS.NVS);
+
+  // A centre page shows only its own program's card. programsWithStudents counts
+  // a program when any student in scope merely *dropped* from it, and
+  // studentDroppedFromProgram reads the student's own audit history — so a CoE
+  // centre whose members carry an old "dropped from Nodal" audit would surface a
+  // Nodal card for students this page never lists.
+  return supportedProgramIds.filter(
+    (id) => visibleProgramSet.has(id) && (!isCentre || id === centreProgramId),
+  );
+}
+
+// Dropout is offered for centre programs: on a centre page just the centre's
+// own; on a school page every active centre at the school.
+function centreDropoutProgramIds(scope: RosterScope): number[] {
+  if (scope.kind === "centre") {
+    return scope.centre.program_id != null ? [Number(scope.centre.program_id)] : [];
+  }
+  return (scope.school.centre_program_ids ?? []).map(Number);
+}
+
+function dropoutProgramIds(scope: RosterScope, canAddStudent: boolean): number[] {
+  return [
+    ...new Set([
+      ...centreDropoutProgramIds(scope),
+      ...(canAddStudent ? [PROGRAM_IDS.NVS] : []),
+    ]),
+  ];
+}
+
+function udiseSuffix(school: RosterSchool): string {
+  return school.udise_code ? ` | UDISE: ${school.udise_code}` : "";
+}
+
+function rosterHeading(scope: RosterScope): { title: string; subtitle: string } {
+  const { school } = scope;
+  if (scope.kind === "centre") {
+    const programPrefix = scope.centre.program_name ? `${scope.centre.program_name} | ` : "";
+    return {
+      title: scope.centre.name,
+      subtitle: `${programPrefix}${school.name}${udiseSuffix(school)}`,
+    };
+  }
+  return {
+    title: school.name,
+    subtitle: `${school.district}, ${school.state} | Code: ${school.code}${udiseSuffix(school)}`,
+  };
+}
+
+/**
+ * Back link: to the dashboard when the user can see more than one school, or
+ * always for a centre (it's reached from the dashboard's Centres tab). A bare
+ * /dashboard is a loop for a single-seat user — the landing shortcut sends them
+ * straight back here — so centre pages point at the Centres tab explicitly,
+ * which is where the card they came from lives anyway.
+ */
+function defaultRosterBackHref(isCentre: boolean, permission: UserPermission): string | undefined {
+  if (isCentre) return "/dashboard?view=centres";
+  // A PMU Govt School User has exactly one School, so never a back link.
+  return hasMultipleSchools(permission) && permission.role !== PMU_GOVT_SCHOOL_USER_ROLE
+    ? "/dashboard"
+    : undefined;
+}
+
+// A School page opened from the Holistic Progress console returns there.
+function holisticProgressBackHref({
+  isCentre,
+  fromHolisticProgress,
+  holisticContent,
+  holisticProgramId,
+}: {
+  isCentre: boolean;
+  fromHolisticProgress: boolean;
+  holisticContent: ReactNode | null;
+  holisticProgramId: number | null | undefined;
+}): string | undefined {
+  return !isCentre && fromHolisticProgress && holisticContent && holisticProgramId !== undefined
+    ? `/admin/holistic-mentorship?program_id=${holisticProgramId}`
+    : undefined;
+}
+
+function DataIssuesBanner({ issues }: { issues: RosterDataIssue[] }) {
+  if (issues.length === 0) return null;
+  return (
+    <div className="mb-4">
+      <details className="bg-amber-50 border border-amber-200 rounded-lg">
+        <summary className="px-4 py-3 cursor-pointer text-sm font-medium text-amber-800 hover:bg-amber-100 rounded-lg transition-colors">
+          {issues.length} data {issues.length === 1 ? "issue" : "issues"} found
+        </summary>
+        <div className="px-4 pb-3 space-y-2">
+          {issues.map((issue) => (
+            <div key={issue.groupUserId} className="flex items-start gap-2 text-sm text-amber-700">
+              <span className="shrink-0 mt-0.5 w-4 h-4 text-amber-500">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                </svg>
+              </span>
+              <span><strong>{issue.studentName}</strong>: {issue.details}</span>
+            </div>
+          ))}
+        </div>
+      </details>
+    </div>
+  );
+}
+
+function academicMentorshipManageHref(
+  permission: UserPermission,
+  schoolCode: string,
+): string | undefined {
+  const isManager = permission.role === "admin" || permission.role === "program_admin";
+  return isManager
+    ? `/admin/academic-mentorship?${new URLSearchParams({
+        school_code: schoolCode,
+        academic_year: CURRENT_ACADEMIC_YEAR,
+      }).toString()}`
+    : undefined;
+}
+
+async function listTeacherMentees(permission: UserPermission, schoolId: number) {
+  const mentorUserId = await getAcademicMentorshipActorUserId(permission.email, permission);
+  return mentorUserId !== null
+    ? await listAcademicMentorshipTeacherMentees({
+        schoolId,
+        academicYear: CURRENT_ACADEMIC_YEAR,
+        mentorUserId,
+      })
+    : null;
+}
+
+// Centre pages scope the manager overview to the centre's program — the
+// school-wide mapping list (all programs, all centres) is school-page data.
+// A program-less centre gets an empty overview rather than the school's.
+async function listManagerMentorshipGroups(
+  schoolId: number,
+  centre: { programId: number | undefined; hasNoProgram: boolean },
+) {
+  return centre.hasNoProgram
+    ? []
+    : await listAcademicMentorshipMappings({
+        schoolId,
+        academicYear: CURRENT_ACADEMIC_YEAR,
+        includeHistory: false,
+        programId: centre.programId ?? null,
+      });
+}
+
+async function buildAcademicMentorshipContent({
+  permission,
+  school,
+  canView,
+  centre,
+}: {
+  permission: UserPermission;
+  school: RosterSchool;
+  canView: boolean;
+  centre: { programId: number | undefined; hasNoProgram: boolean };
+}): Promise<ReactNode> {
+  const schoolId = Number(school.id);
+  const isTeacher = permission.role === "teacher";
+  const teacherMentees =
+    canView && isTeacher ? await listTeacherMentees(permission, schoolId) : null;
+  const mentorshipGroups =
+    canView && !isTeacher ? await listManagerMentorshipGroups(schoolId, centre) : null;
+  return (
+    <AcademicMentorshipSchoolTab
+      mode={isTeacher ? "teacher" : "overview"}
+      mentees={teacherMentees ?? undefined}
+      groups={mentorshipGroups ?? undefined}
+      manageHref={academicMentorshipManageHref(permission, school.code)}
+    />
+  );
+}
+
+/**
+ * Tab visibility driven by feature permission matrix. Visits are school-linked
+ * (a PM visits all of a school's centres in one trip), so the label stays
+ * "School Visits" even on a centre page. Program-scoped tabs on a program-less
+ * centre show {@link NoCentreProgram} instead of the school's data.
+ */
+function visibleRosterTabs({
+  access,
+  hasNoCentreProgram,
+  noCentreProgramContent,
+  content,
+}: {
+  access: ReturnType<typeof rosterFeatureAccess>;
+  hasNoCentreProgram: boolean;
+  noCentreProgramContent: ReactNode;
+  content: Record<
+    | "enrollment"
+    | "curriculum"
+    | "performance"
+    | "quizSessions"
+    | "teacherFeedback"
+    | "mentorship"
+    | "holisticMentorship"
+    | "visits",
+    ReactNode
+  >;
+}): Array<{ id: string; label: string; content: ReactNode }> {
+  const programScoped = (tabContent: ReactNode) =>
+    hasNoCentreProgram ? noCentreProgramContent : tabContent;
+  const candidates: Array<{ id: string; label: string; content: ReactNode; show: boolean }> = [
+    { id: "enrollment", label: "Enrollment", content: content.enrollment, show: true },
+    {
+      id: "curriculum",
+      label: "Curriculum",
+      content: programScoped(content.curriculum),
+      show: access.curriculum.canView,
+    },
+    {
+      id: "performance",
+      label: "Performance",
+      content: programScoped(content.performance),
+      show: access.performance.canView,
+    },
+    {
+      id: "quiz_sessions",
+      label: "Quiz Sessions",
+      content: programScoped(content.quizSessions),
+      show: access.quizSessions.canView,
+    },
+    {
+      id: "teacher_feedback",
+      label: "Teacher Feedback",
+      content: content.teacherFeedback,
+      show: access.teacherFeedback.canView,
+    },
+    { id: "mentorship", label: "Academic Mentorship", content: content.mentorship, show: access.mentorship.canView },
+    {
+      id: "holistic_mentorship",
+      label: "Holistic Mentorship",
+      content: content.holisticMentorship,
+      show: Boolean(content.holisticMentorship),
+    },
+    { id: "visits", label: "School Visits", content: content.visits, show: access.visits.canView },
+  ];
+  return candidates
+    .filter((tab) => tab.show)
+    .map(({ id, label, content: tabContent }) => ({ id, label, content: tabContent }));
+}
+
 /**
  * Shared roster page for a school OR a centre. The two callers
  * (school/[udise] and centre/[id]) resolve their entity and hand us a
@@ -587,476 +1142,158 @@ export default async function RosterPage({
     ? await getResolvedPermission(session.user.email)
     : null;
 
-  // Which Holistic Mentorship program this page shows. A centre answers it
-  // itself — its own program, no choice offered, so a Nodal centre at a
-  // CoE+Nodal school can never reach the CoE holistic roster. A school may host
-  // several holistic programs and picks via ?program_id=.
-  //
-  // Deferred, not computed here: every access-denied path below must return
-  // before this runs (it reads the program context, which a denied user has no
-  // business resolving).
-  const resolveHolisticProgram = () => {
-    const choices = isCentre ? [] : holisticProgramChoices(school, permission);
-    return {
-      choices,
-      programId: isCentre
-        ? scope.centre.program_id ?? undefined
-        : resolveHolisticProgramId(
-            requestedHolisticProgramId(holisticProgramParam),
-            choices,
-          ),
-    };
-  };
-
-  // Check school access (a centre inherits its school's access)
   if (!permission) {
-    return <AccessDenied message="You don't have permission to view this page." />;
+    return <AccessDenied message={NO_PAGE_PERMISSION} />;
   }
-  if (!canAccessSchoolSync(permission, school.code, school.region || undefined)) {
-    return <AccessDenied message="You don't have permission to view this page." />;
-  }
-  // PMU roles are pinned to JNV NVS (ADR 0007): level 3 "all" must not open
-  // a centre-program (non-JNV) School. Centre pages are refused by
-  // canViewCentre below.
-  if (!isCentre && isPmuRole(permission.role) && school.af_school_category !== "JNV") {
-    return <AccessDenied message="You don't have permission to view this page." />;
-  }
+  const schoolDenial = schoolAccessDenial(permission, scope);
+  if (schoolDenial) return schoolDenial;
 
-  // The holistic-mentorship admin sees that school's holistic roster in place
-  // — and only that tab; they have no scope for anything else on the page.
-  // Their console links to /school/<code>?program_id=N, which is why school
-  // scope renders while centre scope still bounces to the console: a centre
-  // page is reached from the dashboard Centres tab, which this role never
-  // sees.
   if (permission.role === "holistic_mentorship_admin") {
-    if (isCentre) redirect("/admin/holistic-mentorship");
-    const { programId, choices } = resolveHolisticProgram();
-    const holisticContent = await buildHolisticMentorshipContent({
+    return renderHolisticAdminRoster({
+      scope,
       session,
       permission,
-      schoolCode: school.code,
-      access: getFeatureAccess(permission, "holistic_mentorship"),
-      isCentre,
-      programId,
-      programChoices: choices,
+      holisticProgramParam,
       fromHolisticProgress,
     });
-    if (!holisticContent) redirect("/admin/holistic-mentorship");
-    return (
-      <RosterShell
-        title={school.name}
-        subtitle={`${school.district}, ${school.state} | Code: ${school.code}`}
-        backHref={programId === undefined
-          ? "/admin/holistic-mentorship"
-          : `/admin/holistic-mentorship?program_id=${programId}`}
-        userEmail={session.user?.email ?? undefined}
-        tabs={[{
-          id: "holistic_mentorship",
-          label: "Holistic Mentorship",
-          content: holisticContent,
-        }]}
-      />
-    );
   }
 
-  // Centre-seated staff are confined to their centre(s): the whole-school
-  // roster page isn't theirs to open (their seat grants school access only so
-  // school-linked actions like visits work). Point them at their centre — the
-  // single seat directly, otherwise the Centres tab to pick one.
-  const confinement = getCentreConfinement(permission);
-  if (!isCentre && confinement.confined) {
-    const seatIds = confinement.centreIds;
-    const centreLink =
-      seatIds.length === 1
-        ? { href: `/centre/${seatIds[0]}`, label: "Go to your centre" }
-        : { href: "/dashboard?view=centres", label: "Go to your centres" };
-    return (
-      <AccessDenied
-        message="This school page isn't available for your access. View your assigned centre instead."
-        link={centreLink}
-      />
-    );
-  }
-
-  // Centre pages are seat-scoped: a user with centre seats may only open the
-  // centres they hold a seat at (not every centre at the school). Rule lives
-  // in permissions.canViewCentre; a seatless manager falls back to school access.
-  if (
-    isCentre &&
-    !canViewCentre(permission, {
-      centreId: Number(scope.centre.id),
-      schoolCode: school.code,
-      schoolRegion: school.region || undefined,
-    })
-  ) {
-    return <AccessDenied message="You don't have permission to view this centre." />;
-  }
+  const scopeDenial = centreScopeDenial(permission, scope);
+  if (scopeDenial) return scopeDenial;
 
   // Derive everything from the single permission object — no extra DB calls
   const programContext = getProgramContextSync(permission);
+  if (!programContext.hasAccess) return <NoProgramAccess />;
 
-  if (!programContext.hasAccess) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <Card elevation="xl" className="p-8 max-w-md text-center">
-          <h1 className="text-xl font-bold text-red-600 mb-2">No Program Access</h1>
-          <p className="text-gray-600 mb-4">
-            You are not assigned to any programs. Please contact an administrator.
-          </p>
-          <Link href="/dashboard" className="text-accent hover:text-accent-hover">
-            Return to dashboard
-          </Link>
-        </Card>
-      </div>
-    );
-  }
+  const access = rosterFeatureAccess(permission);
+  const { canAddStudent, canDownloadList, canDropoutStudent } = studentActionAccess(
+    session,
+    scope,
+    permission,
+    access.students.canEdit,
+  );
 
-  // Derive feature access from the permission matrix
-  const studentsAccess = getFeatureAccess(permission, "students");
-  const curriculumAccess = getFeatureAccess(permission, "curriculum");
-  const performanceAccess = getFeatureAccess(permission, "performance");
-  const mentorshipAccess = getFeatureAccess(permission, "academic_mentorship");
-  const holisticMentorshipAccess = getFeatureAccess(permission, "holistic_mentorship");
-  const visitsAccess = getFeatureAccess(permission, "visits");
-  const quizSessionsAccess = getFeatureAccess(permission, "quiz_sessions");
-  const teacherFeedbackAccess = getFeatureAccess(permission, "teacher_feedback");
-  // Student addition is an NVS school-page feature; a centre roster is scoped
-  // to the centre's own program, so it never offers Add Student.
-  const rosterSchool = { ...school, af_school_category: school.af_school_category ?? null };
-  const canAddStudent =
-    !isCentre && getStudentAdditionAccessFromPermission(session, rosterSchool, permission).ok;
-  // Download List is a view action: same as canAddStudent for existing roles,
-  // but a read_only PMU user keeps it (NVS-only export).
-  const canDownloadList =
-    !isCentre && getStudentExportAccessFromPermission(session, rosterSchool, permission).ok;
-
-  // Fetch enrollment data in parallel. THE fork: a centre pulls its own roster
-  // from the centre_students view; a school pulls the full school roster.
-  const [
-    { students: rosterStudents, issues: rosterIssues },
-    grades,
-    batches,
-    supportedProgramIds,
-  ] = await Promise.all([
-    isCentre ? getCentreStudents(scope.centre.id) : getSchoolRoster(school.id),
-    getGrades(),
-    getBatchesWithMetadata(),
-    // centres-derived ∪ PROGRAM_IDS (D22c) — a newly onboarded centre program
-    // shows students without a code edit. Additive, so it can never hide one.
-    getLmsSupportedProgramIds(),
-  ]);
-
-  // PMU roles are pinned to JNV NVS (ADR 0007): narrow the roster on the
-  // server, before any props are built, so a mixed School's CoE, Nodal and
-  // unassigned Students never reach the browser (the client only filters by
-  // the selected card). An NVS Student has a current NVS batch or an NVS
-  // dropout that hasn't been undone — the same sets the NVS export lists — so
-  // NVS dropouts stay undoable. Data issues follow their Student.
+  const { roster, grades, batches, supportedProgramIds } = await fetchRosterData(scope);
   const isPmu = isPmuRole(permission.role);
-  const isNvsStudent = (s: (typeof rosterStudents)[number]) =>
-    studentHasCurrentProgram(s, PMU_PROGRAM_ID) ||
-    studentDroppedFromProgram(s, PMU_PROGRAM_ID);
-  const dedupedStudents = isPmu ? rosterStudents.filter(isNvsStudent) : rosterStudents;
-  const nvsGroupUserIds = new Set(dedupedStudents.map((s) => String(s.group_user_id)));
-  const dataIssues = isPmu
-    ? rosterIssues.filter((issue) => nvsGroupUserIds.has(String(issue.groupUserId)))
-    : rosterIssues;
-
-  // Separate active and dropout students (all students visible; editability is per-row).
-  // A PMU user's lists hold only what the NVS card shows: active = a current
-  // NVS batch, dropout = dropped from NVS.
-  const activeStudents = dedupedStudents.filter(
-    (s) =>
-      s.status !== "dropout" &&
-      (isPmu
-        ? studentHasCurrentProgram(s, PMU_PROGRAM_ID)
-        : supportedProgramIds.some((programId) =>
-            studentHasCurrentProgram(s, programId),
-          )),
-  );
-  const dropoutStudents = dedupedStudents.filter((s) =>
-    isPmu
-      ? studentDroppedFromProgram(s, PMU_PROGRAM_ID)
-      : s.status === "dropout" || (s.dropout_program_ids?.length ?? 0) > 0,
+  const { students, dataIssues } = scopeRosterToRole(roster.students, roster.issues, isPmu);
+  const { activeStudents, dropoutStudents } = splitActiveAndDropout(
+    students,
+    isPmu,
+    supportedProgramIds,
   );
 
-  // Extract distinct streams from NVS batches
-  const nvsStreams = getDistinctNVSStreams(batches);
+  const centre = centreProgramScope(scope);
+  const { title, subtitle } = rosterHeading(scope);
+  const programStatsList: ProgramStats[] = visibleEnrollmentProgramIds({
+    students,
+    supportedProgramIds,
+    permission,
+    userProgramIds: programContext.programIds,
+    canAddStudent,
+    isCentre,
+    centreProgramId: centre.programId,
+  }).map((id) => buildProgramStats(activeStudents, id));
+  const defaultBackHref = defaultRosterBackHref(isCentre, permission);
+  const schoolUdise = school.udise_code || school.code;
 
-  // On a centre page, scope the program-filtered tabs to the centre's single
-  // program (Performance filters by program name; Curriculum/Quiz by id).
-  const centreProgramId = isCentre ? scope.centre.program_id ?? undefined : undefined;
-  const centreProgramName = isCentre ? scope.centre.program_name ?? undefined : undefined;
-  // Distinguishes "school page" (no centre program by definition) from "centre
-  // page whose centre has no program" — both leave centreProgramId undefined,
-  // but only the second must refuse to fall back to the school's data.
-  const hasNoCentreProgram = isCentre && scope.centre.program_id == null;
-  const noCentreProgramContent = (
-    <NoCentreProgram centreName={isCentre ? scope.centre.name : school.name} />
-  );
-
-  // Programs that have at least one student (active or dropped) in scope
-  const programsWithStudents = new Set(
-    supportedProgramIds.filter((programId) =>
-      dedupedStudents.some(
-        (student) =>
-          studentHasCurrentProgram(student, programId) ||
-          studentDroppedFromProgram(student, programId),
-      ),
-    ),
-  );
-
-  // Programs shown as enrollment cards. Admins see every program present;
-  // everyone else sees the intersection of their effective
-  // programs with what's here.
-  const isAdmin = permission?.role === "admin";
-  const visibleProgramSet = new Set(
-    (isAdmin
-      ? supportedProgramIds
-      : programContext.programIds
-    ).filter((id) => programsWithStudents.has(id)),
-  );
-
-  if (canAddStudent) visibleProgramSet.add(PROGRAM_IDS.NVS);
-
-  // A centre page shows only its own program's card. programsWithStudents counts
-  // a program when any student in scope merely *dropped* from it, and
-  // studentDroppedFromProgram reads the student's own audit history — so a CoE
-  // centre whose members carry an old "dropped from Nodal" audit would surface a
-  // Nodal card for students this page never lists.
-  const visibleProgramIds = supportedProgramIds.filter(
-    (id) =>
-      visibleProgramSet.has(id) && (!isCentre || id === centreProgramId),
-  );
-
-  const programStatsList: ProgramStats[] = visibleProgramIds.map((id) =>
-    buildProgramStats(activeStudents, id)
-  );
-
-  // Back link: to the dashboard when the user can see more than one school, or
-  // always for a centre (it's reached from the dashboard's Centres tab). A bare
-  // /dashboard is a loop for a single-seat user — the landing shortcut sends them
-  // straight back here — so centre pages point at the Centres tab explicitly,
-  // which is where the card they came from lives anyway.
-  const multipleSchools = hasMultipleSchools(permission);
-  // A PMU Govt School User has exactly one School, so never a back link.
-  const defaultBackHref = isCentre
-    ? "/dashboard?view=centres"
-    : multipleSchools && permission?.role !== PMU_GOVT_SCHOOL_USER_ROLE
-      ? "/dashboard"
-      : undefined;
-
-  const title = isCentre ? scope.centre.name : school.name;
-  const subtitle = isCentre
-    ? `${scope.centre.program_name ? `${scope.centre.program_name} | ` : ""}${school.name}${school.udise_code ? ` | UDISE: ${school.udise_code}` : ""}`
-    : `${school.district}, ${school.state} | Code: ${school.code}${school.udise_code ? ` | UDISE: ${school.udise_code}` : ""}`;
-
-  // Build tabs
   const enrollmentContent = (
     <div>
-      {/* Data Issues Banner */}
-      {dataIssues.length > 0 && (
-        <div className="mb-4">
-          <details className="bg-amber-50 border border-amber-200 rounded-lg">
-            <summary className="px-4 py-3 cursor-pointer text-sm font-medium text-amber-800 hover:bg-amber-100 rounded-lg transition-colors">
-              {dataIssues.length} data {dataIssues.length === 1 ? "issue" : "issues"} found
-            </summary>
-            <div className="px-4 pb-3 space-y-2">
-              {dataIssues.map((issue) => (
-                <div key={issue.groupUserId} className="flex items-start gap-2 text-sm text-amber-700">
-                  <span className="shrink-0 mt-0.5 w-4 h-4 text-amber-500">
-                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
-                    </svg>
-                  </span>
-                  <span><strong>{issue.studentName}</strong>: {issue.details}</span>
-                </div>
-              ))}
-            </div>
-          </details>
-        </div>
-      )}
+      <DataIssuesBanner issues={dataIssues} />
 
       {/* Per-program enrollment stats + student table (both filtered by selected program) */}
       <EnrollmentTabContent
         programs={programStatsList}
         activeStudents={activeStudents}
         dropoutStudents={dropoutStudents}
-        canEdit={studentsAccess.canEdit}
-        canEditStudent={studentsAccess.canEdit}
-        canDropoutStudent={
-          studentsAccess.canEdit &&
-          !!permission &&
-          ALLOWED_STUDENT_ADDITION_ROLES.has(permission.role)
-        }
-        dropoutProgramIds={[
-          ...new Set([
-            // Dropout is offered for centre programs: on a centre page just the
-            // centre's own; on a school page every active centre at the school.
-            ...(isCentre
-              ? scope.centre.program_id != null
-                ? [Number(scope.centre.program_id)]
-                : []
-              : (school.centre_program_ids ?? []).map(Number)),
-            ...(canAddStudent ? [PROGRAM_IDS.NVS] : []),
-          ]),
-        ]}
+        canEdit={access.students.canEdit}
+        canEditStudent={access.students.canEdit}
+        canDropoutStudent={canDropoutStudent}
+        dropoutProgramIds={dropoutProgramIds(scope, canAddStudent)}
         canAddStudent={canAddStudent}
         canDownloadList={canDownloadList}
         userProgramIds={programContext.programIds}
-        isAdmin={isAdmin}
+        isAdmin={permission.role === "admin"}
         grades={grades}
         batches={batches}
-        nvsStreams={nvsStreams}
-        schoolUdise={school.udise_code || school.code}
+        nvsStreams={getDistinctNVSStreams(batches)}
+        schoolUdise={schoolUdise}
         schoolCode={school.code}
       />
     </div>
   );
 
-  const performanceContent = (
-    <PerformanceTab
-      schoolUdise={school.udise_code || school.code}
-      // PMU roles see only JNV NVS — the same lock a centre page uses.
-      lockedProgram={isPmu ? PROGRAM_ID_TO_LABEL[PMU_PROGRAM_ID] : centreProgramName}
-    />
-  );
+  const mentorshipContent = await buildAcademicMentorshipContent({
+    permission,
+    school,
+    canView: access.mentorship.canView,
+    centre,
+  });
 
-  const schoolId = Number(school.id);
-  const isAcademicMentorshipManager =
-    permission?.role === "admin" || permission?.role === "program_admin";
-  const mentorshipManageHref = isAcademicMentorshipManager
-    ? `/admin/academic-mentorship?${new URLSearchParams({
-        school_code: school.code,
-        academic_year: CURRENT_ACADEMIC_YEAR,
-      }).toString()}`
-    : undefined;
-  const teacherMentorUserId =
-    mentorshipAccess.canView && permission?.role === "teacher"
-      ? await getAcademicMentorshipActorUserId(permission.email, permission)
-      : null;
-  const teacherMentees =
-    teacherMentorUserId !== null
-      ? await listAcademicMentorshipTeacherMentees({
-          schoolId,
-          academicYear: CURRENT_ACADEMIC_YEAR,
-          mentorUserId: teacherMentorUserId,
-        })
-      : null;
-  // Centre pages scope the manager overview to the centre's program — the
-  // school-wide mapping list (all programs, all centres) is school-page data.
-  // A program-less centre gets an empty overview rather than the school's.
-  const mentorshipGroups =
-    mentorshipAccess.canView && permission?.role !== "teacher"
-      ? hasNoCentreProgram
-        ? []
-        : await listAcademicMentorshipMappings({
-            schoolId,
-            academicYear: CURRENT_ACADEMIC_YEAR,
-            includeHistory: false,
-            programId: centreProgramId ?? null,
-          })
-      : null;
-  const mentorshipContent = (
-    <AcademicMentorshipSchoolTab
-      mode={permission?.role === "teacher" ? "teacher" : "overview"}
-      mentees={teacherMentees ?? undefined}
-      groups={mentorshipGroups ?? undefined}
-      manageHref={mentorshipManageHref}
-    />
-  );
-
-  const visitsContent = (
-    <VisitsTab schoolCode={school.code} canEdit={visitsAccess.canEdit} />
-  );
-
-  const quizSessionsContent = (
-    <QuizSessionsTab
-      schoolId={school.id}
-      canEdit={quizSessionsAccess.canEdit}
-      programId={centreProgramId}
-    />
-  );
-
-  const curriculumContent = (
-    <CurriculumTab
-      schoolCode={school.code}
-      schoolName={school.name}
-      canEdit={curriculumAccess.canEdit}
-      programId={centreProgramId}
-    />
-  );
-
-  // Teacher Feedback is centre-keyed data (a round belongs to a centre, and
-  // teachers map to a centre, not the school), so a centre page passes its own
-  // id: the rounds list and the setup picker both narrow to it, and the picker
-  // collapses to the single centre. Without this a centre page would list a
-  // sibling centre's rounds — the leak class fixed in the 07-22 review.
-  const teacherFeedbackContent = (
-    <TeacherFeedbackTab
-      schoolCode={school.code}
-      canEdit={teacherFeedbackAccess.canEdit}
-      centreId={isCentre ? Number(scope.centre.id) : undefined}
-    />
-  );
-
-  const holistic = resolveHolisticProgram();
+  const holistic = resolveHolisticProgram(scope, permission, holisticProgramParam);
   const holisticContent = await buildHolisticMentorshipContent({
     session,
     permission,
     schoolCode: school.code,
-    access: holisticMentorshipAccess,
+    access: access.holisticMentorship,
     isCentre,
-    centreProgramId,
+    centreProgramId: centre.programId,
     programId: holistic.programId,
     programChoices: holistic.choices,
     fromHolisticProgress,
   });
-  const backHref = !isCentre && fromHolisticProgress && holisticContent && holistic.programId !== undefined
-    ? `/admin/holistic-mentorship?program_id=${holistic.programId}`
-    : defaultBackHref;
+  const backHref =
+    holisticProgressBackHref({
+      isCentre,
+      fromHolisticProgress,
+      holisticContent,
+      holisticProgramId: holistic.programId,
+    }) ?? defaultBackHref;
 
-  // Tab visibility driven by feature permission matrix. Visits are school-linked
-  // (a PM visits all of a school's centres in one trip), so the label stays
-  // "School Visits" even on a centre page.
-  const candidates: Array<{ id: string; label: string; content: ReactNode; show: boolean }> = [
-    { id: "enrollment", label: "Enrollment", content: enrollmentContent, show: true },
-    {
-      id: "curriculum",
-      label: "Curriculum",
-      content: hasNoCentreProgram ? noCentreProgramContent : curriculumContent,
-      show: curriculumAccess.canView,
+  const tabs = visibleRosterTabs({
+    access,
+    hasNoCentreProgram: centre.hasNoProgram,
+    noCentreProgramContent: <NoCentreProgram centreName={title} />,
+    content: {
+      enrollment: enrollmentContent,
+      curriculum: (
+        <CurriculumTab
+          schoolCode={school.code}
+          schoolName={school.name}
+          canEdit={access.curriculum.canEdit}
+          programId={centre.programId}
+        />
+      ),
+      performance: (
+        <PerformanceTab
+          schoolUdise={schoolUdise}
+          // PMU roles see only JNV NVS — the same lock a centre page uses.
+          lockedProgram={isPmu ? PROGRAM_ID_TO_LABEL[PMU_PROGRAM_ID] : centre.programName}
+        />
+      ),
+      quizSessions: (
+        <QuizSessionsTab
+          schoolId={school.id}
+          canEdit={access.quizSessions.canEdit}
+          programId={centre.programId}
+        />
+      ),
+      // Teacher Feedback is centre-keyed data (a round belongs to a centre, and
+      // teachers map to a centre, not the school), so a centre page passes its own
+      // id: the rounds list and the setup picker both narrow to it, and the picker
+      // collapses to the single centre. Without this a centre page would list a
+      // sibling centre's rounds — the leak class fixed in the 07-22 review.
+      teacherFeedback: (
+        <TeacherFeedbackTab
+          schoolCode={school.code}
+          canEdit={access.teacherFeedback.canEdit}
+          centreId={centre.centreId}
+        />
+      ),
+      mentorship: mentorshipContent,
+      holisticMentorship: holisticContent,
+      visits: <VisitsTab schoolCode={school.code} canEdit={access.visits.canEdit} />,
     },
-    {
-      id: "performance",
-      label: "Performance",
-      content: hasNoCentreProgram ? noCentreProgramContent : performanceContent,
-      show: performanceAccess.canView,
-    },
-    {
-      id: "quiz_sessions",
-      label: "Quiz Sessions",
-      content: hasNoCentreProgram ? noCentreProgramContent : quizSessionsContent,
-      show: quizSessionsAccess.canView,
-    },
-    {
-      id: "teacher_feedback",
-      label: "Teacher Feedback",
-      content: teacherFeedbackContent,
-      show: teacherFeedbackAccess.canView,
-    },
-    { id: "mentorship", label: "Academic Mentorship", content: mentorshipContent, show: mentorshipAccess.canView },
-    {
-      id: "holistic_mentorship",
-      label: "Holistic Mentorship",
-      content: holisticContent,
-      show: Boolean(holisticContent),
-    },
-    { id: "visits", label: "School Visits", content: visitsContent, show: visitsAccess.canView },
-  ];
-  const tabs = candidates
-    .filter((tab) => tab.show)
-    .map(({ id, label, content }) => ({ id, label, content }));
+  });
 
   return (
     <RosterShell
@@ -1066,7 +1303,7 @@ export default async function RosterPage({
       userEmail={session.user?.email || undefined}
       tabs={tabs}
       actions={
-        visitsAccess.canEdit ? (
+        access.visits.canEdit ? (
           <Link
             href={`/school/${school.code}/visit/new`}
             className="inline-flex items-center rounded-lg px-3 py-2 text-sm font-bold text-text-on-accent bg-accent shadow-sm hover:bg-accent-hover active:bg-accent-hover/90 transition-colors"
