@@ -22,14 +22,3 @@ test.describe("Dashboard — PM", () => {
     await expect(pmPage.getByRole("link", { name: "Curriculum Summary" })).toBeVisible();
   });
 });
-
-test.describe("Dashboard — Passcode user", () => {
-  test("passcode user is redirected to their school page", async ({
-    passcodePage,
-  }) => {
-    await passcodePage.goto("/dashboard");
-
-    // Passcode users should be redirected to /school/{schoolCode}
-    await passcodePage.waitForURL(/\/school\//);
-  });
-});

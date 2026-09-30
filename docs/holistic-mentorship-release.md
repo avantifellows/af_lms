@@ -233,7 +233,7 @@ record this checklist:
   content is erased once, the immutable content-free tombstone remains, and
   regeneration cannot restore content. Verify the Holistic Admin cannot use
   either global-only gate.
-- Excluded program manager, program admin, and passcode actors: verify direct API
+- Excluded program manager and program admin actors: verify direct API
   requests return server-side `403` on desktop and mobile, with no hidden or
   overlapping controls.
 

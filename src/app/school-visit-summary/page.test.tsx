@@ -203,19 +203,6 @@ describe("SchoolVisitSummaryPage", () => {
       expect(mockQuery).not.toHaveBeenCalled();
     });
 
-    it("redirects passcode users to their school page or dashboard", async () => {
-      mockGetServerSession.mockResolvedValue({ user: {}, isPasscodeUser: true, schoolCode: "70705" });
-
-      await expect(SchoolVisitSummaryPage({ searchParams: Promise.resolve({}) })).rejects.toThrow("REDIRECT:/school/70705");
-      expect(mockRedirect).toHaveBeenCalledWith("/school/70705");
-
-      vi.clearAllMocks();
-      mockGetServerSession.mockResolvedValue({ user: {}, isPasscodeUser: true });
-
-      await expect(SchoolVisitSummaryPage({ searchParams: Promise.resolve({}) })).rejects.toThrow("REDIRECT:/dashboard");
-      expect(mockRedirect).toHaveBeenCalledWith("/dashboard");
-    });
-
     it("redirects PM users to /visits and teachers to /dashboard", async () => {
       setupAuth(programManagerPermission, { user: { email: "pm@avantifellows.org" } });
 

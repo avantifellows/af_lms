@@ -6,7 +6,9 @@ import { withTransaction } from "@/lib/db";
 import {
   InterventionFlagError,
   authorizeInterventionFlags,
+  flagStudentScopeForPmu,
   listSchoolFlags,
+  mayRaiseFlagForPmu,
   type InterventionFlagAction,
   raiseFlag,
   validateNote,
@@ -28,7 +30,8 @@ async function authorize(
 
 // GET /api/schools/[code]/intervention-flags
 // Every intervention flag raised at the school (open and resolved) with its
-// update history: `{ flags: InterventionFlag[] }`.
+// update history: `{ flags: InterventionFlag[] }`. PMU roles get only flags on
+// the School's NVS Students.
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ code: string }> },
@@ -36,7 +39,8 @@ export async function GET(
   const auth = await authorize(params, "view");
   if (!auth.ok) return auth.response;
 
-  const flags = await listSchoolFlags(auth.school.id);
+  const studentPkIds = await flagStudentScopeForPmu(auth.actor, auth.school.id);
+  const flags = await listSchoolFlags(auth.school.id, studentPkIds);
   return NextResponse.json({ flags });
 }
 
@@ -60,9 +64,14 @@ export async function POST(
   const note = validateNote(body?.note, { required: true });
   if (!note.ok) return jsonError(400, note.error);
 
-  // The Student must be on this school's roster, not just any Student id.
+  // The Student must be on this school's roster, not just any Student id —
+  // and, for PMU roles, have a current NVS batch (same 404: no existence leak).
   const studentSchool = await getStudentSchool(studentPkId);
-  if (!studentSchool || studentSchool.code !== auth.school.code) {
+  if (
+    !studentSchool ||
+    studentSchool.code !== auth.school.code ||
+    !(await mayRaiseFlagForPmu(auth.actor, studentPkId))
+  ) {
     return jsonError(404, "Student not found at this school");
   }
 

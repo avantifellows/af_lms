@@ -21,7 +21,7 @@ import { getUserPermission, getFeatureAccess } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import { validateGpsReading } from "@/lib/geo-validation";
 import { GET, POST } from "./route";
-import { ADMIN_SESSION, NO_SESSION, PASSCODE_SESSION, PM_SESSION } from "../../__test-utils__/api-test-helpers";
+import { ADMIN_SESSION, NO_SESSION, PM_SESSION } from "../../__test-utils__/api-test-helpers";
 
 const mockSession = vi.mocked(getServerSession);
 const mockGetPermission = vi.mocked(getUserPermission);
@@ -87,16 +87,6 @@ describe("GET /api/pm/visits", () => {
 
     const res = await GET(nextReq("/api/pm/visits"));
     expect(res.status).toBe(403);
-  });
-
-  it("returns 403 for passcode users", async () => {
-    mockSession.mockResolvedValue(PASSCODE_SESSION as never);
-
-    const res = await GET(nextReq("/api/pm/visits"));
-    expect(res.status).toBe(403);
-    await expect(res.json()).resolves.toEqual({
-      error: "Passcode users cannot access visit routes",
-    });
   });
 
   it("returns own visits for PM and only selected columns", async () => {
@@ -313,15 +303,6 @@ describe("POST /api/pm/visits", () => {
 
     expect(res.status).toBe(403);
     expect(mockQuery).not.toHaveBeenCalled();
-  });
-
-  it("returns 403 for passcode users", async () => {
-    mockSession.mockResolvedValue(PASSCODE_SESSION as never);
-    const res = await POST(nextReq("/api/pm/visits", {
-      method: "POST",
-      body: JSON.stringify(visitBody),
-    }));
-    expect(res.status).toBe(403);
   });
 
   it("returns 400 when school_code is missing", async () => {

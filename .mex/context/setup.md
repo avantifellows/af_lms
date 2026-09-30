@@ -15,7 +15,7 @@ edges:
     condition: when configuring which backend env vars point at
   - target: context/architecture.md
     condition: when understanding how components connect during setup
-last_updated: 2026-09-28
+last_updated: 2026-09-29
 ---
 
 # Setup
@@ -31,7 +31,7 @@ last_updated: 2026-09-28
 2. `npm install`
 3. `cp .env.example .env.local` and fill in values (see below; ask team lead for secrets)
 4. `npm run dev` → http://localhost:3000
-5. In dev, log in via the **Dev Login** personas (admin / program_manager / teacher / read_only) — no Google needed (`src/lib/auth.ts`, only when `NODE_ENV !== "production"`).
+5. In dev, log in via the **Dev Login** personas (admin / program_manager / program_admin / teacher / former_mentor / holistic_admin / read_only / pmu_manager / pmu_govt_school_user) — no Google needed (`src/lib/auth.ts`, only when `NODE_ENV !== "production"`). The two PMU personas are seeded by the local fixture setup at a JNV School (level 1, `program_ids = [64]`, no regions).
 
 ## Environment Variables
 Required (app won't function without them):

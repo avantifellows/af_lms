@@ -5,9 +5,10 @@ import {
   getAccessibleSchoolCodes,
   getCentreConfinement,
   getResolvedPermission,
+  hasCurrentNvsBatchSql,
 } from "@/lib/permissions";
 import { query } from "@/lib/db";
-import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
+import { CURRENT_ACADEMIC_YEAR, isPmuRole } from "@/lib/constants";
 
 interface StudentSearchResult {
   user_id: string;
@@ -95,6 +96,12 @@ export async function GET(request: NextRequest) {
   } else if (schoolCodes !== "all") {
     params.push(schoolCodes);
     scopeConditions.push(`sch.code = ANY($${params.length})`);
+  }
+
+  // PMU roles are pinned to JNV NVS: School scope alone would surface the other
+  // Programs' Students (and unassigned ones) at a mixed School.
+  if (isPmuRole(permission?.role)) {
+    scopeConditions.push(hasCurrentNvsBatchSql("u.id"));
   }
 
   const results = await query<StudentSearchResult>(

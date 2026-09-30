@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { authorizeSchoolAccess } from "@/lib/api-auth";
+import { resolvePerformanceProgram } from "@/lib/performance-program";
 import { getBatchOverviewData } from "@/lib/bigquery";
 import type { BatchSummary, BatchOverviewData } from "@/types/quiz";
 
@@ -12,6 +13,12 @@ export async function GET(
   if (!auth.authorized) return auth.response;
 
   const url = new URL(request.url);
+  const pinned = resolvePerformanceProgram(
+    auth.permission,
+    url.searchParams.get("program") || undefined
+  );
+  if (!pinned.ok) return pinned.response;
+  const program = pinned.program;
   const gradeParam = url.searchParams.get("grade");
   if (!gradeParam) {
     return NextResponse.json({ error: "grade is required" }, { status: 400 });
@@ -22,7 +29,6 @@ export async function GET(
   }
 
   try {
-    const program = url.searchParams.get("program") || undefined;
     const stream = url.searchParams.get("stream")?.toLowerCase() || undefined;
     const raw = await getBatchOverviewData(udise, grade, program, stream);
 

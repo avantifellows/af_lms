@@ -63,7 +63,6 @@ vi.mock("@/components/visits/DeleteVisitButton", () => ({
 import VisitDetailPage from "./page";
 
 const pmSession = { user: { email: "pm@avantifellows.org" } };
-const passcodeSession = { user: {}, isPasscodeUser: true, schoolCode: "70705" };
 const pmPermission = {
   level: 1,
   role: "program_manager",
@@ -168,15 +167,6 @@ describe("VisitDetailPage", () => {
     mockGetFeatureAccess.mockReturnValue({ canView: false, canEdit: false });
 
     await expect(VisitDetailPage(pageProps())).rejects.toThrow("REDIRECT:/dashboard");
-    expect(mockQuery).not.toHaveBeenCalled();
-  });
-
-  it("redirects passcode users to their school page", async () => {
-    mockGetServerSession.mockResolvedValue(passcodeSession);
-
-    await expect(VisitDetailPage(pageProps())).rejects.toThrow("REDIRECT:/school/70705");
-    expect(mockRedirect).toHaveBeenCalledWith("/school/70705");
-    expect(mockGetUserPermission).not.toHaveBeenCalled();
     expect(mockQuery).not.toHaveBeenCalled();
   });
 

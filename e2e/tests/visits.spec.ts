@@ -1980,18 +1980,4 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
     await expect(stats).toContainText("Entries: 2");
     await expect(stats).toContainText("Students: 3");
   });
-
-  test("passcode-user-is-redirected-from-individual-student-action-detail", async ({
-    passcodePage,
-  }) => {
-    const { visitId } = await seedTestVisit(pool, schoolCode);
-    const { actionId } = await seedVisitAction(pool, visitId, {
-      actionType: "individual_student_discussion",
-      status: "in_progress",
-      data: { entries: [] },
-    });
-
-    await passcodePage.goto(`/visits/${visitId}/actions/${actionId}`);
-    await passcodePage.waitForURL("/school/70705");
-  });
 });

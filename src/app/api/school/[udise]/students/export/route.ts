@@ -8,7 +8,7 @@ import { query } from "@/lib/db";
 import { studentDroppedFromProgram, studentHasCurrentProgram } from "@/lib/enrollment-stats";
 import { getSchoolRoster } from "@/lib/school-students";
 import { formatExamPreparingFor, matchesStreamFilter } from "@/lib/stream-rules";
-import { requireStudentAdditionAccess } from "@/lib/student-addition-access";
+import { requireStudentExportAccess } from "@/lib/student-addition-access";
 import type { Student } from "@/components/StudentTable";
 
 interface SchoolRow {
@@ -112,7 +112,7 @@ export async function GET(
   );
   if (!school) return NextResponse.json({ error: "School not found" }, { status: 404 });
 
-  const access = await requireStudentAdditionAccess(session, school);
+  const access = await requireStudentExportAccess(session, school);
   if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status });
 
   const gradeParam = request.nextUrl.searchParams.get("grade");

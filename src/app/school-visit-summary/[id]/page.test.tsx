@@ -275,10 +275,6 @@ describe("SchoolVisitSummaryDetailPage", () => {
     await expect(SchoolVisitSummaryDetailPage(pageProps())).rejects.toThrow("REDIRECT:/");
 
     vi.clearAllMocks();
-    mockGetServerSession.mockResolvedValue({ user: {}, isPasscodeUser: true, schoolCode: "70705" });
-    await expect(SchoolVisitSummaryDetailPage(pageProps())).rejects.toThrow("REDIRECT:/school/70705");
-
-    vi.clearAllMocks();
     setupAuth(pmPermission, { user: { email: "pm@avantifellows.org" } });
     await expect(SchoolVisitSummaryDetailPage(pageProps())).rejects.toThrow("REDIRECT:/visits");
 

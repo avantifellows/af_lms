@@ -21,7 +21,6 @@ import { getFeatureAccess, getUserPermission } from "@/lib/permissions";
 import {
   ADMIN_SESSION,
   NO_SESSION,
-  PASSCODE_SESSION,
   PM_SESSION,
   routeParams,
 } from "../../../../__test-utils__/api-test-helpers";
@@ -102,18 +101,6 @@ describe("GET /api/pm/visits/[id]/actions", () => {
 
     expect(res.status).toBe(401);
     await expect(res.json()).resolves.toEqual({ error: "Unauthorized" });
-  });
-
-  it("returns 403 for passcode users", async () => {
-    mockSession.mockResolvedValue(PASSCODE_SESSION as never);
-
-    const req = new Request("http://localhost/api/pm/visits/10/actions");
-    const res = await GET(req as never, params);
-
-    expect(res.status).toBe(403);
-    await expect(res.json()).resolves.toEqual({
-      error: "Passcode users cannot access visit routes",
-    });
   });
 
   it("returns 404 when parent visit does not exist or is soft-deleted", async () => {
@@ -245,22 +232,6 @@ describe("POST /api/pm/visits/[id]/actions", () => {
 
     expect(res.status).toBe(201);
     await expect(res.json()).resolves.toEqual({ action: ACTION_ROWS[0] });
-  });
-
-  it("returns 403 for passcode users", async () => {
-    mockSession.mockResolvedValue(PASSCODE_SESSION as never);
-
-    const req = new Request("http://localhost/api/pm/visits/10/actions", {
-      method: "POST",
-      body: JSON.stringify({ action_type: "principal_interaction" }),
-      headers: { "Content-Type": "application/json" },
-    });
-    const res = await POST(req as never, params);
-
-    expect(res.status).toBe(403);
-    await expect(res.json()).resolves.toEqual({
-      error: "Passcode users cannot access visit routes",
-    });
   });
 
   it("returns 404 when parent visit does not exist or is soft-deleted", async () => {

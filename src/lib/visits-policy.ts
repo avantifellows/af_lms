@@ -117,13 +117,6 @@ export async function requireVisitsAccess(
     return { ok: false, response: apiError(401, "Unauthorized") };
   }
 
-  if (session.isPasscodeUser) {
-    return {
-      ok: false,
-      response: apiError(403, "Passcode users cannot access visit routes"),
-    };
-  }
-
   const permission = await getResolvedPermission(email);
   if (!permission) {
     return { ok: false, response: apiError(403, "Forbidden") };

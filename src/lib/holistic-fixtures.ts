@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import type { PoolClient } from "pg";
 
-import { HOLISTIC_MENTORSHIP_PROGRAM_IDS, PROGRAM_IDS } from "./constants";
+import { HOLISTIC_MENTORSHIP_PROGRAM_IDS, isPmuRole, PMU_PROGRAM_ID, PROGRAM_IDS } from "./constants";
 
 export const HOLISTIC_FIXTURE_MANIFEST = {
   academicYear: "2026-2027",
@@ -15,7 +15,8 @@ export const HOLISTIC_FIXTURE_MANIFEST = {
     "program_manager",
     "program_admin",
     "read_only",
-    "passcode",
+    "pmu_manager",
+    "pmu_govt_school_user",
   ],
   states: ["locked", "open", "active", "skipped", "pending", "completed"],
   content: ["mapping", "profile", "historical_notes", "draft_notes", "submitted_notes"],
@@ -171,7 +172,13 @@ export async function seedHolisticFixtures(
     );
   }
 
-  const actor = async (email: string, role: string, level: number, readOnly = false) => {
+  const actor = async (
+    email: string,
+    role: string,
+    level: number,
+    readOnly = false,
+    schoolCode = scope.school_code
+  ) => {
     const result = await client.query<{ id: number | string }>(
       `/* fixture_actor */
        WITH existing AS (
@@ -205,8 +212,10 @@ export async function seedHolisticFixtures(
         level,
         role === "holistic_mentorship_admin"
           ? [...HOLISTIC_MENTORSHIP_PROGRAM_IDS]
-          : [programId],
-        scope.school_code,
+          : isPmuRole(role)
+            ? [PMU_PROGRAM_ID]
+            : [programId],
+        schoolCode,
         readOnly,
       ]
     );
@@ -221,6 +230,21 @@ export async function seedHolisticFixtures(
   await actor("e2e-holistic-global-admin@test.local", "admin", 3);
   await actor("e2e-holistic-pm@test.local", "program_manager", 2);
   await actor("e2e-holistic-program-admin@test.local", "program_admin", 2);
+
+  // PMU Dev Login personas are pinned to JNV NVS, so they sit at a JNV School
+  // (the fixture School when it is one) rather than the selected Program's.
+  const jnvSchoolResult = await client.query<{ code: string }>(
+    `/* fixture_jnv_school */
+     SELECT code FROM school WHERE af_school_category = 'JNV'
+     ORDER BY (code = $1) DESC, id LIMIT 1`,
+    [scope.school_code]
+  );
+  const jnvSchoolCode = jnvSchoolResult.rows[0]?.code;
+  if (!jnvSchoolCode) {
+    throw new Error("Holistic fixtures require a JNV School for the PMU Dev Login personas");
+  }
+  await actor("e2e-pmu-manager@test.local", "pmu_manager", 1, false, jnvSchoolCode);
+  await actor("e2e-pmu-govt-school-user@test.local", "pmu_govt_school_user", 1, false, jnvSchoolCode);
 
   for (const [userId, suffix] of [
     [mentorUserId, "ACTIVE"],

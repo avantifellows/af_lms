@@ -1,6 +1,7 @@
 import { query } from "@/lib/db";
 import {
   CURRENT_ACADEMIC_YEAR,
+  isPmuRole,
   PROGRAM_IDS,
   PROGRAM_ATTRIBUTION_ORDER,
 } from "@/lib/constants";
@@ -141,6 +142,8 @@ export function resolveCentreAccess(
   permission: UserPermission | null,
   schoolCodes: string[] | "all",
 ): CentreAccess {
+  // PMU roles have no centre access (ADR 0007) — no fallback to School access.
+  if (isPmuRole(permission?.role)) return { kind: "ids", ids: [] };
   const centres = permission?.scope?.centres;
   if (centres === "all") return { kind: "all" };
   // isCentreSeated guarantees a non-empty Set here.

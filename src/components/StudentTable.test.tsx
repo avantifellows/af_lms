@@ -667,17 +667,6 @@ describe("StudentTable - Edit button visibility", () => {
     );
     expect(screen.getByText("Edit")).toBeInTheDocument();
   });
-
-  it("hides Edit button for passcode users", () => {
-    render(
-      <StudentTable
-        students={[makeStudent()]}
-        grades={defaultGrades}
-        isPasscodeUser={true}
-      />,
-    );
-    expect(screen.queryByText("Edit")).not.toBeInTheDocument();
-  });
 });
 
 // ─── 7. Edit button hidden when canEdit is false ────────────────────────────
@@ -846,19 +835,6 @@ describe("StudentTable - Dropout button", () => {
 // ─── 9. canEditStudent logic ────────────────────────────────────────────────
 
 describe("StudentTable - canEditStudent logic", () => {
-  it("passcode user cannot edit through the Student Addition gate", () => {
-    const student = makeStudent({ program_id: PROGRAM_IDS.NVS });
-    render(
-      <StudentTable
-        students={[student]}
-        grades={defaultGrades}
-        isPasscodeUser={true}
-        userProgramIds={[PROGRAM_IDS.NVS]}
-      />,
-    );
-    expect(screen.queryByText("Edit")).not.toBeInTheDocument();
-  });
-
   it("admin can edit an NVS student even without explicit NVS scope", () => {
     const student = makeStudent({ program_id: PROGRAM_IDS.NVS });
     render(
@@ -910,7 +886,6 @@ describe("StudentTable - canEditStudent logic", () => {
         grades={defaultGrades}
         canEdit={true}
         isAdmin={false}
-        isPasscodeUser={false}
         userProgramIds={[PROGRAM_IDS.NVS]}
       />,
     );
@@ -925,7 +900,6 @@ describe("StudentTable - canEditStudent logic", () => {
         grades={defaultGrades}
         canEdit={true}
         isAdmin={false}
-        isPasscodeUser={false}
         userProgramIds={[PROGRAM_IDS.NVS]}
       />,
     );
@@ -945,7 +919,6 @@ describe("StudentTable - canEditStudent logic", () => {
         grades={defaultGrades}
         canEdit={true}
         isAdmin={false}
-        isPasscodeUser={false}
         selectedProgramId={PROGRAM_IDS.NVS}
         userProgramIds={[PROGRAM_IDS.NVS]}
       />,
@@ -965,7 +938,6 @@ describe("StudentTable - canEditStudent logic", () => {
         grades={defaultGrades}
         canEdit={true}
         isAdmin={false}
-        isPasscodeUser={false}
         selectedProgramId={PROGRAM_IDS.COE}
         userProgramIds={[PROGRAM_IDS.NVS]}
       />,
@@ -981,7 +953,6 @@ describe("StudentTable - canEditStudent logic", () => {
         grades={defaultGrades}
         canEdit={true}
         isAdmin={false}
-        isPasscodeUser={false}
         userProgramIds={[PROGRAM_IDS.COE, PROGRAM_IDS.NODAL]}
       />,
     );
@@ -996,7 +967,6 @@ describe("StudentTable - canEditStudent logic", () => {
         grades={defaultGrades}
         canEdit={true}
         isAdmin={false}
-        isPasscodeUser={false}
         userProgramIds={[]}
       />,
     );
@@ -1011,7 +981,6 @@ describe("StudentTable - canEditStudent logic", () => {
         grades={defaultGrades}
         canEdit={true}
         isAdmin={false}
-        isPasscodeUser={false}
         userProgramIds={null}
       />,
     );
@@ -1035,7 +1004,6 @@ describe("StudentTable - canEditStudent logic", () => {
         grades={defaultGrades}
         canEdit={true}
         isAdmin={false}
-        isPasscodeUser={false}
         userProgramIds={[PROGRAM_IDS.NVS]}
       />,
     );

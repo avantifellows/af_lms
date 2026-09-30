@@ -30,7 +30,6 @@ vi.mock("@/lib/curriculum-schema", () => ({
 import { PATCH } from "./route";
 import {
   ADMIN_SESSION,
-  PASSCODE_SESSION,
   PM_SESSION,
   jsonRequest,
   routeParams,
@@ -64,16 +63,6 @@ describe("PATCH /api/curriculum/configs/[id]", () => {
         )
       ).status
     ).toBe(401);
-
-    mockGetServerSession.mockResolvedValueOnce(PASSCODE_SESSION);
-    expect(
-      (
-        await PATCH(
-          jsonRequest("http://localhost/api/curriculum/configs/42", { method: "PATCH" }) as NextRequest,
-          routeParams({ id: "42" })
-        )
-      ).status
-    ).toBe(403);
 
     mockGetServerSession.mockResolvedValueOnce(PM_SESSION);
     mockGetUserPermission.mockResolvedValueOnce({

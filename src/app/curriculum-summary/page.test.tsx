@@ -152,19 +152,6 @@ describe("CurriculumSummaryPage", () => {
     expect(mockRedirect).toHaveBeenCalledWith("/");
   });
 
-  it("redirects passcode users to their school page", async () => {
-    mockGetServerSession.mockResolvedValue({
-      user: {},
-      isPasscodeUser: true,
-      schoolCode: "70705",
-    });
-
-    await expect(
-      CurriculumSummaryPage({ searchParams: defaultSearchParams })
-    ).rejects.toThrow("REDIRECT:/school/70705");
-    expect(mockRedirect).toHaveBeenCalledWith("/school/70705");
-  });
-
   it("redirects Google users without permissions to /dashboard", async () => {
     mockGetServerSession.mockResolvedValue(pmSession);
     mockGetUserPermission.mockResolvedValue(null);

@@ -10,8 +10,6 @@ interface TokenPayload {
   name: string;
   email: string;
   sub: string;
-  schoolCode?: string;
-  isPasscodeUser?: boolean;
   [key: string]: unknown;
 }
 
@@ -79,7 +77,6 @@ export const test = base.extend<{
   holisticProgramAdminPage: Page;
   holisticTeacherPage: Page;
   formerMentorPage: Page;
-  passcodePage: Page;
 }>({
   // Auto-fixture: collects V8 JS coverage for default page (Chromium only)
   autoTestFixture: [
@@ -177,21 +174,6 @@ export const test = base.extend<{
       name: "Synthetic Former Mentor",
       email: "e2e-former-holistic-mentor@test.local",
       sub: "e2e-former-holistic-mentor-sub",
-    });
-    await startCoverage(page, testInfo);
-    await use(page);
-    await stopCoverage(page, testInfo);
-    await context.close();
-  },
-  passcodePage: async ({ browser }, use, testInfo) => {
-    const context = await browser.newContext();
-    const page = await context.newPage();
-    await authenticatedPage(page, {
-      name: "School 70705",
-      email: "passcode-70705@school.local",
-      sub: "passcode-70705",
-      schoolCode: "70705",
-      isPasscodeUser: true,
     });
     await startCoverage(page, testInfo);
     await use(page);

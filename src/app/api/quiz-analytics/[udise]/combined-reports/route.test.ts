@@ -19,6 +19,7 @@ vi.mock("@/lib/school-students", () => ({
   getSchoolRoster: vi.fn(),
   filterActiveRosterStudents: vi.fn(),
 }));
+vi.mock("@/lib/bigquery", () => ({ isSessionOnlyForProgram: vi.fn() }));
 vi.mock("next-auth", () => ({ getServerSession: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 
@@ -29,12 +30,15 @@ import {
 } from "@/lib/reporting-service";
 import type { CombinedReportJob } from "@/lib/reporting-service";
 import { getSessionWindow } from "@/lib/combined-report-eligibility";
+import { isSessionOnlyForProgram } from "@/lib/bigquery";
 import {
   getSchoolRoster,
   filterActiveRosterStudents,
 } from "@/lib/school-students";
 import { GET, POST } from "./route";
 import {
+  PMU_GOVT_PERMISSION,
+  PMU_MANAGER_PERMISSION,
   jsonRequest,
   routeParams,
 } from "../../../__test-utils__/api-test-helpers";
@@ -45,6 +49,7 @@ const mockSubmit = vi.mocked(submitCombinedReport);
 const mockWindow = vi.mocked(getSessionWindow);
 const mockRoster = vi.mocked(getSchoolRoster);
 const mockFilter = vi.mocked(filterActiveRosterStudents);
+const mockSessionPin = vi.mocked(isSessionOnlyForProgram);
 
 const SCHOOL = { id: "1", code: "34054", name: "JNV Palghar", region: "West" };
 const URL_BASE =
@@ -225,5 +230,165 @@ describe("POST combined-reports gating", () => {
     const res = await POST(postBody(), routeParams({ udise: "27361106702" }));
     expect(res.status).toBe(403);
     expect(mockWindow).not.toHaveBeenCalled();
+  });
+});
+
+// PMU roles are pinned to JNV NVS (ADR 0007): the report cohort defaults to
+// "JNV NVS" and any other program is refused before any work.
+describe.each([
+  ["PMU Manager", PMU_MANAGER_PERMISSION],
+  ["PMU Govt School User", PMU_GOVT_PERMISSION],
+])("combined-reports as %s", (_label, permission) => {
+  beforeEach(() => {
+    mockAuth.mockResolvedValue({ authorized: true, school: SCHOOL, readOnly: false, permission });
+    mockWindow.mockResolvedValue(ENDED);
+    mockList.mockResolvedValue([]);
+    mockSubmit.mockResolvedValue({ job_id: "j1", status: "queued" });
+    mockSessionPin.mockResolvedValue(true);
+  });
+
+  function pmuPost(program?: string) {
+    return jsonRequest(URL_BASE, {
+      method: "POST",
+      body: { session_id: SESSION, grade: 12, ...(program ? { program } : {}) },
+    });
+  }
+
+  it("POST builds the JNV NVS cohort when no program is given", async () => {
+    const res = await POST(pmuPost(), routeParams({ udise: "27361106702" }));
+    expect(res.status).toBe(202);
+    expect(mockFilter).toHaveBeenCalledWith(expect.anything(), {
+      grade: 12,
+      program: "JNV NVS",
+      stream: undefined,
+    });
+  });
+
+  it("POST accepts program=JNV NVS", async () => {
+    const res = await POST(pmuPost("JNV NVS"), routeParams({ udise: "27361106702" }));
+    expect(res.status).toBe(202);
+    expect(mockFilter).toHaveBeenCalledWith(expect.anything(), {
+      grade: 12,
+      program: "JNV NVS",
+      stream: undefined,
+    });
+  });
+
+  it("POST still asks auth for edit rights", async () => {
+    await POST(pmuPost(), routeParams({ udise: "27361106702" }));
+    expect(mockAuth).toHaveBeenCalledWith("27361106702", { requireEdit: true });
+  });
+
+  it.each(["JNV CoE", "JNV Nodal", "Punjab CoE"])("POST 403s program=%s", async (program) => {
+    const res = await POST(pmuPost(program), routeParams({ udise: "27361106702" }));
+    expect(res.status).toBe(403);
+    expect(mockWindow).not.toHaveBeenCalled();
+    expect(mockSubmit).not.toHaveBeenCalled();
+  });
+
+  it("GET lists jobs when no program is given", async () => {
+    const res = await GET(
+      new Request(`${URL_BASE}?session_id=${SESSION}`),
+      routeParams({ udise: "27361106702" })
+    );
+    expect(res.status).toBe(200);
+    expect(mockList).toHaveBeenCalledWith(SESSION, SCHOOL.code);
+  });
+
+  it.each(["JNV CoE", "JNV Nodal"])("GET 403s program=%s", async (program) => {
+    const res = await GET(
+      new Request(`${URL_BASE}?session_id=${SESSION}&program=${encodeURIComponent(program)}`),
+      routeParams({ udise: "27361106702" })
+    );
+    expect(res.status).toBe(403);
+    expect(mockList).not.toHaveBeenCalled();
+  });
+
+  it("GET checks the session is a JNV NVS test at this School", async () => {
+    await GET(
+      new Request(`${URL_BASE}?session_id=${SESSION}`),
+      routeParams({ udise: "27361106702" })
+    );
+    expect(mockSessionPin).toHaveBeenCalledWith("27361106702", SESSION, "JNV NVS");
+  });
+
+  it("GET 403s a session that is not a JNV NVS test", async () => {
+    mockSessionPin.mockResolvedValue(false);
+    const res = await GET(
+      new Request(`${URL_BASE}?session_id=CoE_session`),
+      routeParams({ udise: "27361106702" })
+    );
+    expect(res.status).toBe(403);
+    expect(mockSessionPin).toHaveBeenCalledWith("27361106702", "CoE_session", "JNV NVS");
+    expect(mockList).not.toHaveBeenCalled();
+    expect(mockWindow).not.toHaveBeenCalled();
+  });
+
+  it("POST 403s a session that is not a JNV NVS test", async () => {
+    mockSessionPin.mockResolvedValue(false);
+    const res = await POST(pmuPost(), routeParams({ udise: "27361106702" }));
+    expect(res.status).toBe(403);
+    expect(mockList).not.toHaveBeenCalled();
+    expect(mockSubmit).not.toHaveBeenCalled();
+  });
+
+  it("GET 502s (fails closed) when the session lookup fails", async () => {
+    mockSessionPin.mockRejectedValue(new Error("bq down"));
+    const res = await GET(
+      new Request(`${URL_BASE}?session_id=${SESSION}`),
+      routeParams({ udise: "27361106702" })
+    );
+    expect(res.status).toBe(502);
+    expect(mockList).not.toHaveBeenCalled();
+  });
+});
+
+// Other roles never hit the session pin, whatever program the session is.
+describe("combined-reports session pin for other roles", () => {
+  const PM_PERMISSION = {
+    email: "pm@avantifellows.org",
+    level: 3 as const,
+    role: "program_manager" as const,
+    school_codes: null,
+    regions: null,
+    program_ids: [1],
+    read_only: false,
+  };
+
+  beforeEach(() => {
+    mockAuth.mockResolvedValue({
+      authorized: true,
+      school: SCHOOL,
+      readOnly: false,
+      permission: PM_PERMISSION,
+    });
+    mockWindow.mockResolvedValue(ENDED);
+    mockList.mockResolvedValue([]);
+    mockSubmit.mockResolvedValue({ job_id: "j1", status: "queued" });
+    // Would refuse a PMU caller; must not matter here.
+    mockSessionPin.mockResolvedValue(false);
+  });
+
+  it("GET lists a non-NVS session's jobs without a session lookup", async () => {
+    const res = await GET(
+      new Request(`${URL_BASE}?session_id=CoE_session`),
+      routeParams({ udise: "27361106702" })
+    );
+    expect(res.status).toBe(200);
+    expect(mockList).toHaveBeenCalledWith("CoE_session", SCHOOL.code);
+    expect(mockSessionPin).not.toHaveBeenCalled();
+  });
+
+  it("POST submits for a non-NVS session without a session lookup", async () => {
+    const res = await POST(
+      jsonRequest(URL_BASE, {
+        method: "POST",
+        body: { session_id: "CoE_session", grade: 12, program: "JNV CoE" },
+      }),
+      routeParams({ udise: "27361106702" })
+    );
+    expect(res.status).toBe(202);
+    expect(mockSubmit).toHaveBeenCalledTimes(1);
+    expect(mockSessionPin).not.toHaveBeenCalled();
   });
 });

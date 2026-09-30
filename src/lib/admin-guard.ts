@@ -2,7 +2,7 @@
  * Shared admin-surface helpers used by both the Centre management
  * (`centres.ts`) and Staff management (`staff-admin.ts`) domains.
  *
- * Both surfaces enforce the same admin policy (passcode users blocked, only
+ * Both surfaces enforce the same admin policy (only
  * `user_permission.role === "admin"` allowed) and the same cached
  * schema-readiness degrade (503 until the migration lands). Keeping that policy
  * and the (easy-to-get-wrong) cache-reset-on-failure dance in one place stops
@@ -12,14 +12,13 @@ import { getUserPermission, type UserPermission } from "./permissions";
 
 export type AdminSession = {
   user?: { email?: string | null } | null;
-  isPasscodeUser?: boolean;
 } | null;
 
 export type AdminGuardResult =
   | { ok: true; email: string; permission: UserPermission }
   | { ok: false; status: 401 | 403; error: "Unauthorized" | "Forbidden" };
 
-// Passcode users and any non-`admin` Google role are rejected; only
+// Any non-`admin` Google role is rejected; only
 // `user_permission.role === "admin"` passes. Pass `forWrite: true` on mutating
 // routes — a read-only admin (role "admin" + read_only) may see every admin
 // surface but must not change anything, and route guards are the enforcement
@@ -31,9 +30,6 @@ export async function requireAdmin(
   const email = session?.user?.email;
   if (!email) {
     return { ok: false, status: 401, error: "Unauthorized" };
-  }
-  if (session.isPasscodeUser) {
-    return { ok: false, status: 403, error: "Forbidden" };
   }
   const permission = await getUserPermission(email);
   if (permission?.role !== "admin") {
