@@ -34,3 +34,27 @@ export async function refuseOutsidePmuSession(
     { status },
   );
 }
+
+// For routes that read a caller-named session's scores (deep dive, question
+// level): the same 403 refusal, but a failed warehouse lookup answers 502
+// (fails closed) here instead of reaching the route's own catch, whose 500
+// means "the data read failed". Other roles still get null with no lookup.
+export async function refusePmuSessionOr502(
+  permission: { role: string } | null | undefined,
+  udise: string,
+  sessionId: string,
+): Promise<NextResponse | null> {
+  try {
+    return await refuseOutsidePmuSession(permission, udise, sessionId);
+  } catch (error) {
+    // Message only — never the session's rows.
+    console.error(
+      "PMU session pin lookup failed:",
+      error instanceof Error ? error.message : "unknown error",
+    );
+    return NextResponse.json(
+      { error: "Failed to check the test's program" },
+      { status: 502 },
+    );
+  }
+}

@@ -10,21 +10,24 @@ vi.mock("@/lib/dynamodb", () => ({
 }));
 vi.mock("@/lib/bigquery", () => ({
   getStudentTimeSpentData: vi.fn(),
+  isSessionOnlyForProgram: vi.fn(),
 }));
 
 import { authorizeSchoolAccess } from "@/lib/api-auth";
 import { getTestDeepDiveFromDynamo } from "@/lib/dynamodb";
-import { getStudentTimeSpentData } from "@/lib/bigquery";
+import { getStudentTimeSpentData, isSessionOnlyForProgram } from "@/lib/bigquery";
 import { GET } from "./route";
 import {
   PMU_GOVT_PERMISSION,
   PMU_MANAGER_PERMISSION,
   routeParams,
 } from "../../../__test-utils__/api-test-helpers";
+import { describePmuSessionPin } from "../../../__test-utils__/pmu-session-pin-cases";
 
 const mockAuth = vi.mocked(authorizeSchoolAccess);
 const mockGetDeepDive = vi.mocked(getTestDeepDiveFromDynamo);
 const mockGetTimeSpent = vi.mocked(getStudentTimeSpentData);
+const mockSessionPin = vi.mocked(isSessionOnlyForProgram);
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -368,6 +371,7 @@ describe.each([
     mockAuth.mockResolvedValue({ authorized: true, school: SCHOOL, readOnly: false, permission });
     mockGetDeepDive.mockResolvedValue({ students: [] } as unknown as TestDeepDiveData);
     mockGetTimeSpent.mockResolvedValue(new Map());
+    mockSessionPin.mockResolvedValue(true);
   });
 
   it("serves JNV NVS data when no program is given", async () => {
@@ -387,4 +391,17 @@ describe.each([
     expect(res.status).toBe(403);
     expect(mockGetDeepDive).not.toHaveBeenCalled();
   });
+});
+
+describePmuSessionPin({
+  route: "test-deep-dive",
+  GET,
+  auth: mockAuth,
+  school: SCHOOL,
+  arrangeData: () => {
+    mockGetDeepDive.mockResolvedValue({ students: [] } as unknown as TestDeepDiveData);
+    mockGetTimeSpent.mockResolvedValue(new Map());
+  },
+  sessionPin: mockSessionPin,
+  dataReads: [mockGetDeepDive, mockGetTimeSpent],
 });

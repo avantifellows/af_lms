@@ -6,19 +6,22 @@ vi.mock("@/lib/api-auth", () => ({
 }));
 vi.mock("@/lib/bigquery", () => ({
   getStudentQuestionLevelData: vi.fn(),
+  isSessionOnlyForProgram: vi.fn(),
 }));
 
 import { authorizeSchoolAccess } from "@/lib/api-auth";
-import { getStudentQuestionLevelData } from "@/lib/bigquery";
+import { getStudentQuestionLevelData, isSessionOnlyForProgram } from "@/lib/bigquery";
 import { GET } from "./route";
 import {
   PMU_GOVT_PERMISSION,
   PMU_MANAGER_PERMISSION,
   routeParams,
 } from "../../../__test-utils__/api-test-helpers";
+import { describePmuSessionPin } from "../../../__test-utils__/pmu-session-pin-cases";
 
 const mockAuth = vi.mocked(authorizeSchoolAccess);
 const mockGet = vi.mocked(getStudentQuestionLevelData);
+const mockSessionPin = vi.mocked(isSessionOnlyForProgram);
 
 const SCHOOL = { id: "1", code: "70705", name: "Test School", region: "North" };
 
@@ -125,6 +128,7 @@ describe.each([
   beforeEach(() => {
     mockAuth.mockResolvedValue({ authorized: true, school: SCHOOL, readOnly: false, permission });
     mockGet.mockResolvedValue([]);
+    mockSessionPin.mockResolvedValue(true);
   });
 
   it("serves JNV NVS data when no program is given", async () => {
@@ -144,4 +148,16 @@ describe.each([
     expect(res.status).toBe(403);
     expect(mockGet).not.toHaveBeenCalled();
   });
+});
+
+describePmuSessionPin({
+  route: "student-questions",
+  GET,
+  auth: mockAuth,
+  school: SCHOOL,
+  arrangeData: () => {
+    mockGet.mockResolvedValue([]);
+  },
+  sessionPin: mockSessionPin,
+  dataReads: [mockGet],
 });

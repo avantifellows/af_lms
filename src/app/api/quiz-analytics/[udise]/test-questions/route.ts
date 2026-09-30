@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { authorizeSchoolAccess } from "@/lib/api-auth";
-import { resolvePerformanceProgram } from "@/lib/performance-program";
+import { authorizeSessionRead } from "@/lib/performance-session-request";
 import { getTestQuestionLevelData } from "@/lib/bigquery";
 
 export async function GET(
@@ -8,32 +7,11 @@ export async function GET(
   { params }: { params: Promise<{ udise: string }> }
 ) {
   const { udise } = await params;
-  const auth = await authorizeSchoolAccess(udise);
-  if (!auth.authorized) return auth.response;
-
-  const url = new URL(request.url);
-  const pinned = resolvePerformanceProgram(
-    auth.permission,
-    url.searchParams.get("program") || undefined
-  );
-  if (!pinned.ok) return pinned.response;
-  const program = pinned.program;
-  const gradeParam = url.searchParams.get("grade");
-  const sessionId = url.searchParams.get("sessionId");
-
-  if (!gradeParam || !sessionId) {
-    return NextResponse.json(
-      { error: "grade and sessionId are required" },
-      { status: 400 }
-    );
-  }
-  const grade = Number(gradeParam);
-  if (!Number.isInteger(grade)) {
-    return NextResponse.json({ error: "grade must be an integer" }, { status: 400 });
-  }
+  const read = await authorizeSessionRead(request, udise);
+  if (!read.ok) return read.response;
+  const { program, grade, sessionId, stream } = read;
 
   try {
-    const stream = url.searchParams.get("stream")?.toLowerCase() || undefined;
     const questions = await getTestQuestionLevelData(
       udise,
       grade,
