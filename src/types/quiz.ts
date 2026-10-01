@@ -145,6 +145,9 @@ export interface StudentSubjectScore {
   accuracy: number;
   attempt_rate: number;
   chapters?: StudentChapterScore[];
+  // JNV NVS only, from BigQuery total_time_spent for this subject section.
+  // Null when unknown; absent for other programs.
+  time_spent_seconds?: number | null;
 }
 
 export interface StudentDeepDiveRow {
@@ -176,6 +179,9 @@ export interface StudentDeepDiveRow {
   // Null for docs written before etl-next started carrying the flag, and where
   // the student has no test-level row upstream — unknown, so no badge.
   has_quiz_ended: boolean | null;
+  // JNV NVS only, from BigQuery total_time_spent on the overall row. Null when
+  // unknown; absent for other programs.
+  time_spent_seconds?: number | null;
 }
 
 export interface TestDeepDiveData {

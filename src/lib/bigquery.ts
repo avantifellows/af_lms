@@ -8,7 +8,7 @@ import type {
   TestQuestionLevelRow,
   StudentQuestionRow,
 } from "@/types/quiz";
-import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
+import { CURRENT_ACADEMIC_YEAR, isNvsProgram } from "@/lib/constants";
 import { alRank } from "@/lib/academic-level";
 
 let bigQueryClient: BigQuery | null = null;
@@ -173,6 +173,11 @@ export async function getBatchOverviewData(
   const client = getBigQueryClient();
   const programFilter = program ? `AND student_program = @program` : "";
   const streamFilter = stream ? `AND LOWER(student_stream) = @stream` : "";
+  // NVS schools only track System-wide Mandated Tests on this overview. A static
+  // literal, so it needs no param; enrollment counts are unaffected.
+  const purposeFilter = isNvsProgram(program)
+    ? `AND test_purpose = 'system_wide_mandated'`
+    : "";
   const params: Record<string, string | number> = { udise, grade };
   if (program) params.program = program;
   if (stream) params.stream = stream;
@@ -195,6 +200,7 @@ export async function getBatchOverviewData(
       AND session_id IS NOT NULL
       ${programFilter}
       ${streamFilter}
+      ${purposeFilter}
     GROUP BY session_id, test_name
     ORDER BY start_date ASC
   `;
@@ -630,4 +636,74 @@ export async function getStudentQuestionLevelData(
       status,
     };
   });
+}
+
+export interface StudentTimeSpent {
+  overall: number | null;
+  bySection: Map<string, number | null>;
+}
+
+/**
+ * Per-student, per-section time spent (seconds) on a single test, for the
+ * JNV NVS deep dive's Time Spent column. The overall fact table carries
+ * total_time_spent on the `overall` row and on each subject `section` row.
+ * Filters mirror getStudentQuestionLevelData so the two reads cover the same
+ * students; MAX collapses duplicate fact rows deterministically. Keyed by the
+ * stringified enrollment_user_id, sections by lower-cased name.
+ */
+export async function getStudentTimeSpentData(
+  udise: string,
+  grade: number,
+  sessionId: string,
+  program?: string,
+  stream?: string
+): Promise<Map<string, StudentTimeSpent>> {
+  const client = getBigQueryClient();
+  const programFilter = program ? `AND student_program = @program` : "";
+  const streamFilter = stream ? `AND LOWER(student_stream) = @stream` : "";
+
+  const params: Record<string, string | number> = { udise, grade, sessionId };
+  if (program) params.program = program;
+  if (stream) params.stream = stream;
+
+  const sql = `
+    SELECT
+      enrollment_user_id,
+      LOWER(section) AS section,
+      MAX(total_time_spent) AS total_time_spent
+    FROM ${FACT_TABLE}
+    WHERE student_school_udise_code = @udise
+      AND student_grade = @grade
+      AND session_id = @sessionId
+      AND academic_year = '${CURRENT_ACADEMIC_YEAR}'
+      AND enrollment_user_id IS NOT NULL
+      ${programFilter}
+      ${streamFilter}
+    GROUP BY enrollment_user_id, LOWER(section)
+  `;
+
+  interface RawRow {
+    enrollment_user_id: number | string;
+    section: string | null;
+    total_time_spent: number | string | null;
+  }
+
+  const toSecondsOrNull = (v: number | string | null | undefined): number | null => {
+    if (v == null) return null;
+    const n = typeof v === "number" ? v : Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  const [rows] = await client.query({ query: sql, params });
+  const result = new Map<string, StudentTimeSpent>();
+  for (const r of rows as RawRow[]) {
+    const id = String(r.enrollment_user_id);
+    const entry = result.get(id) || { overall: null, bySection: new Map() };
+    const section = (r.section || "").toLowerCase();
+    const seconds = toSecondsOrNull(r.total_time_spent);
+    if (section === "overall") entry.overall = seconds;
+    else if (section) entry.bySection.set(section, seconds);
+    result.set(id, entry);
+  }
+  return result;
 }
