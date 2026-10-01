@@ -1062,6 +1062,7 @@ function QuizSessionCreateModal({
   const [cmsError, setCmsError] = useState<string | null>(null);
   const [selectedCmsTestId, setSelectedCmsTestId] = useState<number | null>(null);
   const [cmsLangCode, setCmsLangCode] = useState("");
+  const [cmsTestSearch, setCmsTestSearch] = useState("");
 
   const parentIdSet = useMemo(() => {
     const set = new Set<number>();
@@ -1311,6 +1312,16 @@ function QuizSessionCreateModal({
       cancelled = true;
     };
   }, [cmsTestsReady, testSource, cmsTestType, cmsExamTrack, cmsGrade, cmsChapterId]);
+
+  // Search narrows the CMS test list by name/code; the selected test always stays visible.
+  const cmsTestQuery = cmsTestSearch.trim().toLowerCase();
+  const visibleCmsTests = cmsTestQuery
+    ? cmsTests.filter(
+        (test) =>
+          test.id === selectedCmsTestId ||
+          `${test.name} ${test.code}`.toLowerCase().includes(cmsTestQuery)
+      )
+    : cmsTests;
 
   // Regional languages of the selected CMS test; a choice only counts while that test offers it.
   const selectedCmsLanguages =
@@ -1977,8 +1988,22 @@ function QuizSessionCreateModal({
                             : "No major tests found for this exam track and grade."}
                         </div>
                       ) : (
+                        <div className="space-y-2">
+                        <input
+                          type="search"
+                          aria-label="Search tests"
+                          placeholder="Search by name or code (e.g. AIAT-03, PN-MT)"
+                          value={cmsTestSearch}
+                          onChange={(event) => setCmsTestSearch(event.target.value)}
+                          className="min-h-[40px] w-full rounded-lg border-2 border-border bg-bg-input px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
+                        />
+                        {visibleCmsTests.length === 0 ? (
+                          <div className="rounded-lg border border-border bg-bg-card-alt px-3 py-3 text-sm text-text-secondary">
+                            No tests match &ldquo;{cmsTestSearch}&rdquo;.
+                          </div>
+                        ) : (
                         <div className="max-h-72 overflow-y-auto rounded-lg border border-border">
-                          {cmsTests.map((test) => {
+                          {visibleCmsTests.map((test) => {
                             const isSelected = test.id === selectedCmsTestId;
                             return (
                               <div
@@ -2034,6 +2059,8 @@ function QuizSessionCreateModal({
                             );
                           })}
                         </div>
+                        )}
+                        </div>
                       )}
 
                       {selectedCmsLanguages.length > 0 && (
@@ -2042,7 +2069,7 @@ function QuizSessionCreateModal({
                             htmlFor="cms-quiz-language"
                             className="mb-2 block text-xs font-bold uppercase tracking-wide text-text-muted"
                           >
-                            Quiz language
+                            Language
                           </label>
                           <select
                             id="cms-quiz-language"

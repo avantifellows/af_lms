@@ -314,6 +314,31 @@ describe("QuizSessionsTab", () => {
     );
   });
 
+  it("narrows CMS tests by search but keeps the selected test visible", async () => {
+    const user = userEvent.setup();
+
+    render(<QuizSessionsTab schoolId="school-1" canEdit />);
+
+    await user.click(await screen.findByRole("button", { name: "Create Quiz Session" }));
+    await user.click(screen.getByRole("button", { name: "New CMS Test" }));
+    await user.selectOptions(screen.getByDisplayValue("Chapter Test"), "major_test");
+    await user.selectOptions(screen.getByDisplayValue("Select exam track"), "neet");
+    await user.selectOptions(screen.getByDisplayValue("Select grade"), "12");
+    expect(await screen.findByText("NEET Major 1")).toBeInTheDocument();
+
+    const search = screen.getByRole("searchbox", { name: "Search tests" });
+    await user.type(search, "zzz");
+    expect(screen.queryByText("NEET Major 1")).not.toBeInTheDocument();
+    expect(screen.getByText(/No tests match/)).toBeInTheDocument();
+
+    await user.clear(search);
+    await user.type(search, "nm-1");
+    await user.click(screen.getByText("NEET Major 1"));
+    await user.clear(search);
+    await user.type(search, "zzz");
+    expect(screen.getByText("NEET Major 1")).toBeInTheDocument();
+  });
+
   it("offers a quiz language for a CMS test with a translation", async () => {
     const user = userEvent.setup();
 
@@ -326,7 +351,7 @@ describe("QuizSessionsTab", () => {
     await user.selectOptions(screen.getByDisplayValue("Select grade"), "12");
     await user.click(await screen.findByText("NEET Major 1"));
 
-    const select = screen.getByLabelText("Quiz language");
+    const select = screen.getByLabelText("Language");
     expect([...(select as HTMLSelectElement).options].map((o) => o.text)).toEqual([
       "English",
       "English + Hindi",
@@ -336,7 +361,7 @@ describe("QuizSessionsTab", () => {
 
     // Deselecting the test drops the choice with it.
     await user.click(screen.getByText("NEET Major 1"));
-    expect(screen.queryByLabelText("Quiz language")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Language")).not.toBeInTheDocument();
   });
 
   it("shows the quiz language in CMS session details", async () => {
@@ -706,7 +731,7 @@ describe("QuizSessionsTab", () => {
       "/api/cms/test-pdf?testId=42&lang=hi&type=questions"
     );
 
-    expect(screen.queryByLabelText("Quiz language")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Language")).not.toBeInTheDocument();
 
     // Opening a PDF must not toggle the test selection.
     await user.click(screen.getByRole("link", { name: "Answer PDF" }));
