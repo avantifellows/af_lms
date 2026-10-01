@@ -249,9 +249,22 @@ describe("QuizSessionsTab", () => {
         return jsonResponse({ id: sessionId });
       }
 
+      if (url.startsWith("/api/cms/test-languages")) {
+        return jsonResponse({ languages: [{ code: "hi", name: "Hindi" }] });
+      }
+
       if (url.startsWith("/api/cms/tests")) {
         return jsonResponse({
-          tests: [{ id: 42, name: "NEET Major 1", code: "NM-1", marks: 720, duration: 200 }],
+          tests: [
+            {
+              id: 42,
+              name: "NEET Major 1",
+              code: "NM-1",
+              marks: 720,
+              duration: 200,
+              languages: [{ code: "hi", name: "Hindi" }],
+            },
+          ],
         });
       }
 
@@ -324,6 +337,9 @@ describe("QuizSessionsTab", () => {
       "href",
       "/api/cms/test-pdf?testId=2472&type=questions"
     );
+    expect(
+      await screen.findByRole("link", { name: "Answer PDF (English + Hindi)" })
+    ).toHaveAttribute("href", "/api/cms/test-pdf?testId=2472&lang=hi&type=answers");
   });
 
   it("keeps view-only users away from create and edit actions", async () => {
@@ -635,6 +651,12 @@ describe("QuizSessionsTab", () => {
     expect(screen.getByRole("link", { name: "Answer PDF" })).toHaveAttribute(
       "href",
       "/api/cms/test-pdf?testId=42&type=answers"
+    );
+
+    expect(screen.getByText("English + Hindi")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Question PDF (English + Hindi)" })).toHaveAttribute(
+      "href",
+      "/api/cms/test-pdf?testId=42&lang=hi&type=questions"
     );
 
     // Opening a PDF must not toggle the test selection.
