@@ -21,7 +21,7 @@ edges:
     condition: when tracing the request flow across af_lms / quiz-backend / db-service
   - target: patterns/db-service-write.md
     condition: when adding a session or occurrence write
-last_updated: 2026-09-30
+last_updated: 2026-10-01
 ---
 
 # CMS-sourced quiz sessions
@@ -135,6 +135,12 @@ falls back to defaults. `QUIZ_BACKEND_URL` must be set (Amplify staging + prod).
 Read the CMS test id with `getCmsTestId` (`src/lib/cms-tests.ts`), never `cms_test_id` raw:
 Session Manager and sheet-script sessions store the CMS page URL there and the id in
 `cms_source_id`. PDF links, regenerate and the duplicate check all depend on it.
+
+Regional-language PDFs: `getCmsTestLanguages` (`src/lib/cms-test-languages.ts`) lists the
+non-English languages on a test's problems (`problem_lang` → `language`); the picker gets them
+from `/api/cms/tests`, session details from `/api/cms/test-languages`. `/api/cms/test-pdf?lang=hi`
+forwards `lang_code` to the CMS, which prints English with that language underneath. The
+CMS "(Bilingual)" tests are duplicates of the originals (same problems); they aren't needed.
 
 CMS tests have no stored PDF URLs. Both the create-form test picker and session details link to
 `/api/cms/test-pdf?testId=…&type=questions|answers`, which fetches the CMS service PDF and
