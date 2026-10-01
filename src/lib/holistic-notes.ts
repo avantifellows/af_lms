@@ -1,5 +1,10 @@
 import { query, withTransaction } from "./db";
 import type { PoolClient } from "pg";
+import {
+  checkHolisticMentorWriteScope,
+  loadHolisticMentorWriteScope,
+  type HolisticMentorWriteScope,
+} from "./holistic-mentor-write-scope";
 
 type NotesInput = {
   mode: "draft" | "submit" | "edit";
@@ -20,13 +25,6 @@ export type HolisticNotesResult =
   | { ok: true; changed: boolean; revision: number }
   | { ok: false; status: 403 | 404 | 409 | 422; error: string; currentRevision?: number };
 
-type NotesScope = {
-  mapping_id: number | string;
-  mentor_user_id: number | string;
-  phase_revision: number;
-  phase_state: "locked" | "open";
-};
-
 type ExistingNotes = {
   id: number | string;
   author_user_id: number | string;
@@ -42,71 +40,6 @@ function notesConflict(revision: number): HolisticNotesResult {
     error: "Notes changed; reload the latest version",
     currentRevision: revision,
   };
-}
-
-async function loadScope(
-  client: PoolClient,
-  input: NotesInput,
-  priorAcademicYear: string
-): Promise<NotesScope | null> {
-  const scope = await client.query<NotesScope>(
-      `SELECT mapping.id AS mapping_id, mapping.mentor_user_id,
-              phase.revision AS phase_revision, phase.state AS phase_state
-       FROM holistic_mentorship_mentor_mentee_mappings mapping
-       JOIN student st ON st.id = mapping.student_id AND st.status IS DISTINCT FROM 'dropout'
-       JOIN "user" student_user ON student_user.id = st.user_id
-       JOIN LATERAL (
-         SELECT MIN(roster_student.grade) AS grade
-         FROM centre_students roster_student
-         JOIN centres roster_centre
-           ON roster_centre.id = roster_student.centre_id
-          AND roster_centre.school_id = mapping.school_id
-          AND roster_centre.program_id = mapping.program_id
-          AND roster_centre.is_active IS TRUE
-         WHERE roster_student.user_id = student_user.id
-           AND roster_student.academic_year = mapping.academic_year
-           AND roster_student.program_id = mapping.program_id
-           AND roster_student.grade IN (11, 12)
-         HAVING COUNT(DISTINCT roster_student.grade) = 1
-       ) current_roster ON true
-       JOIN holistic_mentorship_phases phase ON phase.id = $1
-       JOIN holistic_mentorship_phase_plans plan ON plan.id = phase.phase_plan_id
-       JOIN grade phase_grade ON phase_grade.id = phase.grade_id
-       LEFT JOIN holistic_mentorship_profile_journeys journey ON journey.student_id = st.id
-       LEFT JOIN LATERAL (
-         SELECT true AS has_prior_mapping
-         FROM holistic_mentorship_mentor_mentee_mappings prior_mapping
-         WHERE prior_mapping.student_id = mapping.student_id
-           AND prior_mapping.program_id = $4 AND prior_mapping.academic_year = $6
-         LIMIT 1
-       ) prior_history ON true
-       WHERE mapping.student_id = $2 AND mapping.school_id = $3
-         AND mapping.program_id = $4 AND mapping.academic_year = $5
-         AND mapping.ended_at IS NULL AND plan.program_id = $4
-         AND NOT EXISTS (
-           SELECT 1 FROM holistic_mentorship_privacy_deletions deletion
-           WHERE deletion.student_id = mapping.student_id
-         )
-         AND (
-           (plan.academic_year = $5 AND phase_grade.number = current_roster.grade)
-           OR (plan.academic_year = $6 AND current_roster.grade = 12
-             AND phase_grade.number = 11 AND prior_history.has_prior_mapping IS TRUE
-             AND COALESCE(journey.entry_grade, 11) = 11)
-         )
-       FOR UPDATE OF mapping, phase`,
-      [input.phaseId, input.studentId, input.schoolId, input.programId,
-        input.academicYear, priorAcademicYear]
-  );
-  return scope.rows[0] ?? null;
-}
-
-function validateScope(scope: NotesScope | null, input: NotesInput): HolisticNotesResult | null {
-  if (!scope || Number(scope.mentor_user_id) !== input.actorUserId) {
-    return { ok: false, status: 404, error: "Not found" };
-  }
-  return scope.phase_state === "open"
-    ? null
-    : { ok: false, status: 422, error: "Phase is not Open" };
 }
 
 async function loadQuestionIds(client: PoolClient, phaseId: number): Promise<Set<number>> {
@@ -163,7 +96,7 @@ function validateAuthor(existing: ExistingNotes | null, input: NotesInput): Holi
 }
 
 function validateFinalTokens(
-  scope: NotesScope,
+  scope: HolisticMentorWriteScope,
   existing: ExistingNotes | null,
   input: NotesInput
 ): HolisticNotesResult | null {
@@ -209,7 +142,7 @@ function hasEveryAnswer(questionIds: Set<number>, input: NotesInput): boolean {
 }
 
 function validateFinalWrite(
-  scope: NotesScope,
+  scope: HolisticMentorWriteScope,
   existing: ExistingNotes | null,
   questionIds: Set<number>,
   input: NotesInput
@@ -228,7 +161,7 @@ function existingRevision(existing: ExistingNotes | null): number {
 }
 
 function validateExisting(
-  scope: NotesScope,
+  scope: HolisticMentorWriteScope,
   existing: ExistingNotes | null,
   questionIds: Set<number>,
   input: NotesInput
@@ -319,11 +252,10 @@ async function recordNotesAudit(client: PoolClient, notesId: number, input: Note
 
 async function saveNotesTransaction(
   client: PoolClient,
-  input: NotesInput,
-  priorAcademicYear: string
+  input: NotesInput
 ): Promise<HolisticNotesResult> {
-  const scope = await loadScope(client, input, priorAcademicYear);
-  const scopeError = validateScope(scope, input);
+  const scope = await loadHolisticMentorWriteScope(client, input);
+  const scopeError = checkHolisticMentorWriteScope(scope, input.actorUserId);
   if (scopeError) return scopeError;
   const questionIds = await loadQuestionIds(client, input.phaseId);
   const answerError = validateAnswers(questionIds, input);
@@ -346,10 +278,8 @@ async function saveNotesTransaction(
 }
 
 export async function saveHolisticNotes(input: NotesInput): Promise<HolisticNotesResult> {
-  const academicYearStart = Number(input.academicYear.slice(0, 4));
-  const priorAcademicYear = `${academicYearStart - 1}-${academicYearStart}`;
   try {
-    return await withTransaction((client) => saveNotesTransaction(client, input, priorAcademicYear));
+    return await withTransaction((client) => saveNotesTransaction(client, input));
   } catch (error) {
     if ((error as { code?: unknown } | null)?.code !== "23505") throw error;
     const current = await query<{ revision: number }>(

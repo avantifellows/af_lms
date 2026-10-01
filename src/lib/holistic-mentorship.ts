@@ -24,6 +24,7 @@ export type HolisticMentorshipAction =
   | "notes_draft"
   | "notes_submit"
   | "notes_edit"
+  | "follow_up_note_add"
   | "program_read"
   | "phase_configuration_read"
   | "phase_configure"
@@ -83,12 +84,14 @@ const TEACHER_ACTIONS = new Set<HolisticMentorshipAction>([
   "notes_draft",
   "notes_submit",
   "notes_edit",
+  "follow_up_note_add",
 ]);
 const MAPPING_REQUIRED_ACTIONS = new Set<HolisticMentorshipAction>([
   "mapped_student_read",
   "notes_draft",
   "notes_submit",
   "notes_edit",
+  "follow_up_note_add",
 ]);
 const READ_ONLY_ACTIONS = new Set<HolisticMentorshipAction>([
   "program_read",

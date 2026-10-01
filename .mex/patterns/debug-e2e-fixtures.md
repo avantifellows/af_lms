@@ -14,7 +14,7 @@ edges:
     condition: when failures are in PM school visit flows
   - target: context/data-access.md
     condition: when fixture rows need to match schema/read-path expectations
-last_updated: 2026-09-27
+last_updated: 2026-09-30
 ---
 
 # Debug E2E Fixtures
@@ -36,6 +36,7 @@ expectations, or fixture rows missing a relationship the app now requires.
 - Holistic fixture selection needs one School with an active supported-Program Centre, Batch membership, current-year Grade enrollment, and at least three eligible Students in each configured Grade. Seed that prerequisite roster before calling the shared Holistic fixture helper when the local dump does not provide it.
 - `resetDatabase()` applies DB Service Holistic migrations from a sibling `../db-service_holistic_mentorship` checkout. If it is missing, symlink it to `../db-service` for the run (`ln -s db-service db-service_holistic_mentorship` from the parent folder) and remove the symlink afterwards.
 - That step shells out to `mix`. The asdf shim fails there: no version is pinned for `db-service`, and its per-version `MIX_HOME` has no Hex. Put the real binaries first: `PATH="$HOME/.asdf/installs/elixir/1.18.4-otp-27/bin:$HOME/.asdf/installs/erlang/27.0/bin:$PATH" MIX_HOME=$HOME/.mix npx playwright test`.
+- `relation "lms_student_intervention_flags" does not exist` in the webServer log (surfacing as browser 500s in the Holistic responsive/health test) means the local `e2e/fixtures/db-dump.sql` predates that table; nothing in the e2e migrations creates it. Refresh the dump rather than loosening the health assertions. Run e2e from a worktree by symlinking the gitignored `.env.test` and the dump from the main checkout (and remove the symlinks after).
 - A batch `enrollment_record.group_id` holds `batch.id`, not the batch `group.id`; join `batch ON batch.id = enrollment_record.group_id` (as `permissions.ts` does). Batch *membership* (`group_user`) is the one that goes through `"group".child_id`.
 - Centre-seated Teachers are confined off `/school/<code>` (Access Denied); open their Holistic workspace at `/centre/<id>`.
 - `seedHolisticFixtures()` upserts the shared fixture actors' permissions, so do not call it a second time for another Program. The EMRS (Program 78) Admin journey uses the separate `LMS78` scope seeded by `seedHolisticE2eEmrsScope()` in `e2e/helpers/db.ts`.

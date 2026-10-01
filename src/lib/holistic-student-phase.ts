@@ -3,6 +3,10 @@ import {
   isHolisticHistoricalImportProgramId,
 } from "./constants";
 import { query } from "./db";
+import {
+  HOLISTIC_FOLLOW_UP_QUESTIONS,
+  type HolisticFollowUpNote,
+} from "./holistic-follow-up-questions";
 
 export type HolisticPhaseProgress = "pending" | "skipped" | "completed";
 
@@ -96,6 +100,7 @@ export type HolisticStudentPhaseDetail = {
       lastEditedAt: string;
       answers?: Array<{ questionId: number; question: string; answer: string }>;
     };
+    followUpNotes: HolisticFollowUpNote[];
   });
   readOnly: boolean;
 };
@@ -233,6 +238,57 @@ type NotesRow = {
   answer: string | null;
 };
 
+export type HolisticFollowUpNoteRow = {
+  id: number | string;
+  submitted_at: string;
+  author_first_name: string | null;
+  author_last_name: string | null;
+  author_email: string;
+  challenges_answer: string | null;
+  solutions_answer: string | null;
+  action_plan_answer: string | null;
+};
+
+export function toHolisticFollowUpNote(row: HolisticFollowUpNoteRow): HolisticFollowUpNote {
+  const name = [row.author_first_name, row.author_last_name]
+    .map((part) => part?.trim() ?? "")
+    .filter(Boolean)
+    .join(" ");
+  return {
+    id: Number(row.id),
+    submittedAt: row.submitted_at,
+    authorName: name || row.author_email,
+    answers: HOLISTIC_FOLLOW_UP_QUESTIONS.flatMap(({ key }) => {
+      const answer = row[`${key}_answer`];
+      return answer === null ? [] : [{ key, answer }];
+    }),
+  };
+}
+
+// Follow-up Notes are content: a privacy tombstone suppresses them on read.
+async function loadFollowUpNotes(studentId: number, phaseId: number) {
+  const [rows, [tombstone]] = await Promise.all([
+    query<HolisticFollowUpNoteRow>(
+      `SELECT note.id, note.submitted_at, author.first_name AS author_first_name,
+              author.last_name AS author_last_name, note.author_email,
+              note.challenges_answer, note.solutions_answer, note.action_plan_answer
+       FROM holistic_mentorship_follow_up_notes note
+       LEFT JOIN "user" author ON author.id = note.author_user_id
+       WHERE note.student_id = $1 AND note.phase_id = $2
+       ORDER BY note.submitted_at DESC, note.id DESC`,
+      [studentId, phaseId]
+    ),
+    query<{ erased: boolean }>(
+      `SELECT EXISTS (
+         SELECT 1 FROM holistic_mentorship_privacy_deletions deletion
+         WHERE deletion.student_id = $1
+       ) AS erased`,
+      [studentId]
+    ),
+  ]);
+  return tombstone?.erased ? [] : rows.map(toHolisticFollowUpNote);
+}
+
 type ProfileRow = {
   title: string | null;
   summary: string | null;
@@ -288,6 +344,7 @@ type OpenSelectedPhaseParams = {
   currentGrade: 11 | 12;
   entryGrade: 11 | 12;
   hasPriorYearMapping: boolean;
+  followUpNotes: HolisticFollowUpNote[];
   actorUserId?: number;
   role: string;
   canEdit: boolean;
@@ -727,6 +784,7 @@ function openSelectedPhase(params: OpenSelectedPhaseParams) {
     context: selectedPhaseContext(params),
     questions: params.questionsByPhase.get(params.selected.id) ?? [],
     notes: visibleNotes(notes, canReadDraft, erasedDraft),
+    followUpNotes: params.followUpNotes,
   };
 }
 
@@ -810,6 +868,7 @@ export async function getHolisticStudentPhase(params: {
       currentGrade,
       entryGrade,
       hasPriorYearMapping,
+      followUpNotes: await loadFollowUpNotes(params.studentId, selected.id),
       actorUserId: params.actorUserId,
       role: params.role,
       canEdit: params.canEdit,

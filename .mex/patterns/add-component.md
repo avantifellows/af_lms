@@ -14,7 +14,7 @@ edges:
     condition: for the testing stack (Vitest + RTL) specifics
   - target: context/permissions.md
     condition: when the component imports shared constants (use @/lib/constants, not @/lib/permissions)
-last_updated: 2026-06-25
+last_updated: 2026-09-30
 ---
 
 # Add a React Component
@@ -39,6 +39,7 @@ inputs (`RadioPair`, `RemarkField`, `FormLabel`). Test stack: Vitest + `@testing
 - **Constructor/`new`-able mocks** need `vi.fn(function(){ return {...} })`, not arrow functions.
 - **Variables used inside a `vi.mock()` factory** must be wrapped in `vi.hoisted()` (the factory is hoisted above `const`s).
 - **Fake timers + async rendering**: call `vi.useFakeTimers()` AFTER `await ServerComponent(props)` + `render(jsx)`; use `fireEvent` not `userEvent`, wrap advances in `act(async () => await vi.advanceTimersByTimeAsync(n))`; don't pair `waitFor` with fake timers.
+- **Immutable-append modal** (e.g. Holistic Follow-up Notes in `StudentPhaseWorkspace.tsx`): reuse `ui/Modal` with `role="dialog"`, `aria-modal`, `aria-labelledby`, and route Cancel, Escape, and backdrop through one `requestClose` that is a no-op while saving and calls `window.confirm` only when a field has text. Validate with the same client-safe normaliser the route uses, keep the typed text on failure, and prepend the 201 body locally (dedupe by id against server props so a `router.refresh()` can't duplicate it). Tests: stub `fetch` with a held promise to observe the in-flight state; restore `window.confirm` spies between tests.
 - **GPS state machines** (visit forms): mock `@/lib/geolocation` (`getAccurateLocation`/`getAccuracyStatus`); hold the fetch promise open to observe intermediate states (see `src/components/visits/AGENTS.md`).
 
 ## Verify
