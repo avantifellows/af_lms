@@ -1537,7 +1537,7 @@ function QuizSessionCreateModal({
           showScores,
           shuffle,
           gurukulFormatType: getGurukulFormatForShuffle(gurukulFormatType, shuffle),
-          ...(selectedCmsLangCode ? { langCode: selectedCmsLangCode } : {}),
+          langCode: selectedCmsLangCode,
           startTime: computedStart.toISOString(),
           endTime: computedEnd.toISOString(),
         };
