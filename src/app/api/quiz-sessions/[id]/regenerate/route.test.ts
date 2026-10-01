@@ -341,6 +341,30 @@ describe("POST /api/quiz-sessions/[id]/regenerate", () => {
       expect(JSON.parse(String((call?.[1] as RequestInit)?.body)).test_id).toBe(2472);
     });
 
+    it("re-sends the session's quiz language, and none for English sessions", async () => {
+      const { POST } = await loadRouteModule();
+      mocks.mockGetServerSession.mockResolvedValue(ADMIN_SESSION);
+      mocks.mockFetch.mockImplementation((input: unknown) => {
+        if (String(input).includes("/quiz/")) {
+          return Promise.resolve(jsonResponse({ id: "quiz-abc123", warnings: [] }));
+        }
+        return Promise.resolve(jsonResponse({ id: 42 }));
+      });
+
+      for (const [meta, expected] of [
+        [{ cms_source: "nex-gen-cms", cms_test_id: "504", lang_code: "hi" }, "hi"],
+        [{ cms_source: "nex-gen-cms", cms_test_id: "504" }, undefined],
+      ] as const) {
+        mocks.mockFetch.mockClear();
+        mocks.mockQuery.mockResolvedValue([cmsSessionRow({ meta_data: meta })]);
+
+        await POST(new Request("http://localhost") as never, routeParams({ id: "42" }));
+
+        const call = fetchCall("http://quiz-backend.local/quiz/quiz-abc123/from-cms");
+        expect(JSON.parse(String((call?.[1] as RequestInit)?.body)).lang_code).toBe(expected);
+      }
+    });
+
     it("returns 422 when cms_test_id is missing", async () => {
       const { POST } = await loadRouteModule();
       mocks.mockGetServerSession.mockResolvedValue(ADMIN_SESSION);

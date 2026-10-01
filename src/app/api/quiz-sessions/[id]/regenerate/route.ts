@@ -187,6 +187,7 @@ async function regenerateFromCms(
   // duration (a corrected test may change time_limit). Omitted if unparseable — quiz-backend
   // then preserves the existing value rather than dropping the gate.
   const sessionEndTime = storedEndTimeToIstWallClock(currentSession.end_time);
+  const langCode = metaString(metaData, "lang_code");
 
   let response: Response;
   try {
@@ -197,6 +198,8 @@ async function regenerateFromCms(
         test_id: Number(cmsTestId),
         quiz_type: "assessment",
         ...(sessionEndTime ? { session_end_time: sessionEndTime } : {}),
+        // Keep the session's quiz language; omitted, quiz-backend keeps the quiz's own.
+        ...(langCode ? { lang_code: langCode } : {}),
       }),
     });
   } catch (err) {

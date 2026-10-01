@@ -12,6 +12,7 @@ import {
   CMS_EXAM_TRACKS,
   CMS_SOURCE,
   CMS_TEST_TYPE_OPTIONS,
+  cmsQuizLanguageLabel,
   getCmsTestId,
   type CmsExamTrack,
   type CmsTestType,
@@ -1060,6 +1061,8 @@ function QuizSessionCreateModal({
   const [loadingCmsTests, setLoadingCmsTests] = useState(false);
   const [cmsError, setCmsError] = useState<string | null>(null);
   const [selectedCmsTestId, setSelectedCmsTestId] = useState<number | null>(null);
+  const [cmsLangCode, setCmsLangCode] = useState("");
+  const [cmsTestSearch, setCmsTestSearch] = useState("");
 
   const parentIdSet = useMemo(() => {
     const set = new Set<number>();
@@ -1310,6 +1313,25 @@ function QuizSessionCreateModal({
     };
   }, [cmsTestsReady, testSource, cmsTestType, cmsExamTrack, cmsGrade, cmsChapterId]);
 
+  // Search narrows the CMS test list by name/code; the selected test always stays visible.
+  const cmsTestQuery = cmsTestSearch.trim().toLowerCase();
+  const visibleCmsTests = cmsTestQuery
+    ? cmsTests.filter(
+        (test) =>
+          test.id === selectedCmsTestId ||
+          `${test.name} ${test.code}`.toLowerCase().includes(cmsTestQuery)
+      )
+    : cmsTests;
+
+  // Regional languages of the selected CMS test; a choice only counts while that test offers it.
+  const selectedCmsLanguages =
+    testSource === "cms"
+      ? cmsTests.find((test) => test.id === selectedCmsTestId)?.languages ?? []
+      : [];
+  const selectedCmsLangCode = selectedCmsLanguages.some((language) => language.code === cmsLangCode)
+    ? cmsLangCode
+    : "";
+
   // Prefill Session Name from whichever test is selected. Both sources are handled: the
   // legacy path selects a template, the CMS path selects a chapter/major test — they live in
   // separate state, so keying this off `selectedTemplate` alone left the field blank for
@@ -1526,6 +1548,7 @@ function QuizSessionCreateModal({
           showScores,
           shuffle,
           gurukulFormatType: getGurukulFormatForShuffle(gurukulFormatType, shuffle),
+          langCode: selectedCmsLangCode,
           startTime: computedStart.toISOString(),
           endTime: computedEnd.toISOString(),
         };
@@ -1965,8 +1988,22 @@ function QuizSessionCreateModal({
                             : "No major tests found for this exam track and grade."}
                         </div>
                       ) : (
+                        <div className="space-y-2">
+                        <input
+                          type="search"
+                          aria-label="Search tests"
+                          placeholder="Search by name or code (e.g. AIAT-03, PN-MT)"
+                          value={cmsTestSearch}
+                          onChange={(event) => setCmsTestSearch(event.target.value)}
+                          className="min-h-[40px] w-full rounded-lg border-2 border-border bg-bg-input px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
+                        />
+                        {visibleCmsTests.length === 0 ? (
+                          <div className="rounded-lg border border-border bg-bg-card-alt px-3 py-3 text-sm text-text-secondary">
+                            No tests match &ldquo;{cmsTestSearch}&rdquo;.
+                          </div>
+                        ) : (
                         <div className="max-h-72 overflow-y-auto rounded-lg border border-border">
-                          {cmsTests.map((test) => {
+                          {visibleCmsTests.map((test) => {
                             const isSelected = test.id === selectedCmsTestId;
                             return (
                               <div
@@ -2021,6 +2058,35 @@ function QuizSessionCreateModal({
                               </div>
                             );
                           })}
+                        </div>
+                        )}
+                        </div>
+                      )}
+
+                      {selectedCmsLanguages.length > 0 && (
+                        <div>
+                          <label
+                            htmlFor="cms-quiz-language"
+                            className="mb-2 block text-xs font-bold uppercase tracking-wide text-text-muted"
+                          >
+                            Language
+                          </label>
+                          <select
+                            id="cms-quiz-language"
+                            value={selectedCmsLangCode}
+                            onChange={(event) => setCmsLangCode(event.target.value)}
+                            className="min-h-[44px] w-full rounded-lg border-2 border-border bg-bg-input px-3 py-2.5 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 md:w-72"
+                          >
+                            <option value="">English</option>
+                            {selectedCmsLanguages.map((language) => (
+                              <option key={language.code} value={language.code}>
+                                English + {language.name}
+                              </option>
+                            ))}
+                          </select>
+                          <p className="mt-1 text-xs text-text-secondary">
+                            Questions without a translation stay in English.
+                          </p>
                         </div>
                       )}
                     </div>
@@ -2815,6 +2881,12 @@ function QuizSessionDetailsModal({
                   label="Gurukul Format"
                   value={getMetaString(session.meta_data, "gurukul_format_type") || "-"}
                 />
+                {getMetaString(session.meta_data, "cms_source") ? (
+                  <InfoRow
+                    label="Quiz Language"
+                    value={cmsQuizLanguageLabel(getMetaString(session.meta_data, "lang_code"))}
+                  />
+                ) : null}
               </div>
             </SectionCard>
 
