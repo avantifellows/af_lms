@@ -314,6 +314,53 @@ describe("QuizSessionsTab", () => {
     );
   });
 
+  it("offers a quiz language for a CMS test with a translation", async () => {
+    const user = userEvent.setup();
+
+    render(<QuizSessionsTab schoolId="school-1" canEdit />);
+
+    await user.click(await screen.findByRole("button", { name: "Create Quiz Session" }));
+    await user.click(screen.getByRole("button", { name: "New CMS Test" }));
+    await user.selectOptions(screen.getByDisplayValue("Chapter Test"), "major_test");
+    await user.selectOptions(screen.getByDisplayValue("Select exam track"), "neet");
+    await user.selectOptions(screen.getByDisplayValue("Select grade"), "12");
+    await user.click(await screen.findByText("NEET Major 1"));
+
+    const select = screen.getByLabelText("Quiz language");
+    expect([...(select as HTMLSelectElement).options].map((o) => o.text)).toEqual([
+      "English",
+      "English + Hindi",
+    ]);
+    await user.selectOptions(select, "hi");
+    expect(select).toHaveValue("hi");
+
+    // Deselecting the test drops the choice with it.
+    await user.click(screen.getByText("NEET Major 1"));
+    expect(screen.queryByLabelText("Quiz language")).not.toBeInTheDocument();
+  });
+
+  it("shows the quiz language in CMS session details", async () => {
+    sessions = [
+      {
+        ...makeSessions()[0],
+        id: 41,
+        name: "Bilingual Major",
+        meta_data: {
+          ...makeSessions()[0].meta_data,
+          cms_source: "nex-gen-cms",
+          cms_test_id: "9535",
+          lang_code: "hi",
+        },
+      },
+    ];
+    const user = userEvent.setup();
+
+    render(<QuizSessionsTab schoolId="school-1" />);
+    await user.click(await screen.findByText("Bilingual Major"));
+
+    expect(screen.getByText("Quiz Language").parentElement).toHaveTextContent("English + Hindi");
+  });
+
   it("links Session Manager sessions' PDFs by cms_source_id, not the stored CMS URL", async () => {
     sessions = [
       {
@@ -658,6 +705,8 @@ describe("QuizSessionsTab", () => {
       "href",
       "/api/cms/test-pdf?testId=42&lang=hi&type=questions"
     );
+
+    expect(screen.queryByLabelText("Quiz language")).not.toBeInTheDocument();
 
     // Opening a PDF must not toggle the test selection.
     await user.click(screen.getByRole("link", { name: "Answer PDF" }));

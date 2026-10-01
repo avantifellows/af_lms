@@ -88,3 +88,10 @@ export function getCmsTestId(meta: Record<string, unknown> | null | undefined): 
   }
   return null;
 }
+
+// Display label for a CMS quiz's language (session meta_data.lang_code). Unknown codes show as-is.
+const REGIONAL_LANGUAGE_NAMES: Record<string, string> = { hi: "Hindi", gu: "Gujarati", ta: "Tamil" };
+export function cmsQuizLanguageLabel(langCode: string | null | undefined): string {
+  if (!langCode) return "English";
+  return `English + ${REGIONAL_LANGUAGE_NAMES[langCode] ?? langCode}`;
+}
