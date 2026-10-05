@@ -380,10 +380,16 @@ describe("QuizSessionsTab", () => {
     ];
     const user = userEvent.setup();
 
-    render(<QuizSessionsTab schoolId="school-1" />);
+    render(<QuizSessionsTab schoolId="school-1" canEdit />);
     await user.click(await screen.findByText("Bilingual Major"));
 
-    expect(screen.getByText("Quiz Language").parentElement).toHaveTextContent("English + Hindi");
+    expect(screen.getByText("Language").parentElement).toHaveTextContent("English + Hindi");
+
+    // Shown read-only on edit: the language is built into the quiz at create.
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+    expect(screen.getByRole("heading", { name: "Edit Quiz Session" })).toBeInTheDocument();
+    expect(screen.getByText("Language").parentElement).toHaveTextContent("English + Hindi");
+    expect(screen.queryByRole("combobox", { name: "Language" })).not.toBeInTheDocument();
   });
 
   it("links Session Manager sessions' PDFs by cms_source_id, not the stored CMS URL", async () => {

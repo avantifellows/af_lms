@@ -2630,6 +2630,12 @@ function QuizSessionEditModal({
                     value={String(session.id)}
                     mono
                   />
+                  {getMetaString(session.meta_data, "cms_source") ? (
+                    <InfoRow
+                      label="Language"
+                      value={cmsQuizLanguageLabel(getMetaString(session.meta_data, "lang_code"))}
+                    />
+                  ) : null}
                 </div>
               </SectionCard>
 
@@ -2883,7 +2889,7 @@ function QuizSessionDetailsModal({
                 />
                 {getMetaString(session.meta_data, "cms_source") ? (
                   <InfoRow
-                    label="Quiz Language"
+                    label="Language"
                     value={cmsQuizLanguageLabel(getMetaString(session.meta_data, "lang_code"))}
                   />
                 ) : null}
