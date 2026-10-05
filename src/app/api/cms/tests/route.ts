@@ -8,6 +8,7 @@ import {
 } from "@/lib/cms-tests";
 import { requireCmsServiceAccess } from "@/lib/cms-service";
 import { query } from "@/lib/db";
+import { getCmsTestLanguages, type CmsTestLanguage } from "@/lib/cms-test-languages";
 
 // New CMS (nex-gen-cms) service API. af_lms consumes the list route to let the session
 // creator pick tests authored in the new CMS. The CMS list route is subtype-agnostic
@@ -30,6 +31,7 @@ export interface CmsTestOption {
   chapterId: number | null;
   marks: number | null;
   duration: string | null;
+  languages: CmsTestLanguage[];
 }
 
 function resourceName(test: RawCmsTest): string {
@@ -141,22 +143,24 @@ export async function GET(request: NextRequest) {
     chapterIds = new Set(siblings.length > 0 ? siblings : [selectedChapterId]);
   }
 
-  const tests: CmsTestOption[] = rawTests
+  const filtered = rawTests
     .filter((test) => (test.subtype ?? testType) === testType)
     .filter(
       (test) =>
         chapterIds === null ||
         (test.type_params?.chapter_id !== undefined &&
           chapterIds.has(test.type_params.chapter_id))
-    )
-    .map((test) => ({
-      id: test.id,
-      code: test.code,
-      name: resourceName(test),
-      chapterId: test.type_params?.chapter_id ?? null,
-      marks: test.type_params?.marks ?? null,
-      duration: test.type_params?.duration ?? null,
-    }));
+    );
+  const languages = await getCmsTestLanguages(filtered.map((test) => test.id));
+  const tests: CmsTestOption[] = filtered.map((test) => ({
+    id: test.id,
+    code: test.code,
+    name: resourceName(test),
+    chapterId: test.type_params?.chapter_id ?? null,
+    marks: test.type_params?.marks ?? null,
+    duration: test.type_params?.duration ?? null,
+    languages: languages.get(test.id) ?? [],
+  }));
 
   return NextResponse.json({ tests });
 }
