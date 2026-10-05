@@ -142,6 +142,13 @@ from `/api/cms/tests`, session details from `/api/cms/test-languages`. `/api/cms
 forwards `lang_code` to the CMS, which prints English with that language underneath. The
 CMS "(Bilingual)" tests are duplicates of the originals (same problems); they aren't needed.
 
+Quiz language: the create form offers "English + <language>" when the selected CMS test has
+one; af_lms sends `lang_code` to `POST /quiz/from-cms` and stores `meta_data.lang_code`;
+regenerate re-sends it. quiz-backend (#187) shows the language under the English and grades on
+the English answer key. **quiz-backend must deploy first**: older builds ignore `lang_code`,
+which would leave a "Hindi" session with an English quiz. The sessionCreator Lambda (Session
+Manager / sheet / scripts) reads the same `meta_data.lang_code`.
+
 CMS tests have no stored PDF URLs. Both the create-form test picker and session details link to
 `/api/cms/test-pdf?testId=…&type=questions|answers`, which fetches the CMS service PDF and
 redirects to a short-lived presigned S3 copy. Build hrefs with `cmsTestPdfHrefs` in

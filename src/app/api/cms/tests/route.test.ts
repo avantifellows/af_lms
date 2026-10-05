@@ -85,6 +85,18 @@ describe("GET /api/cms/tests", () => {
     });
   });
 
+  it("lists the newest tests first", async () => {
+    const older = { ...RAW_TESTS[0], id: 4379, code: "JN-MT-1-26" };
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(JSON.stringify([older, RAW_TESTS[0]]), { status: 200 })
+    );
+
+    const res = await GET(req("exam_track=jee_main&grade=12&test_type=major_test"));
+
+    const { tests } = await res.json();
+    expect(tests.map((test: { id: number }) => test.id)).toEqual([9535, 4379]);
+  });
+
   it("400s on an invalid scope", async () => {
     expect((await GET(req("grade=12"))).status).toBe(400);
   });

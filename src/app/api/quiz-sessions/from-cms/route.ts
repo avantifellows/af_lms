@@ -51,6 +51,8 @@ interface CreateFromCmsBody {
   showScores?: boolean;
   shuffle?: boolean;
   gurukulFormatType?: string;
+  // Regional language shown under the English in the quiz (e.g. "hi"); omitted = English.
+  langCode?: string;
   startTime?: string;
   endTime?: string;
 }
@@ -147,6 +149,11 @@ export async function POST(request: NextRequest) {
   if (!isCmsTestType(body.testType)) {
     return NextResponse.json({ error: "Valid testType is required" }, { status: 400 });
   }
+  const langCode = body.langCode?.trim().toLowerCase() || "";
+  if (langCode && !/^[a-z]{2}$/.test(langCode)) {
+    return NextResponse.json({ error: "Invalid langCode" }, { status: 400 });
+  }
+  const quizLangCode = langCode === "en" ? "" : langCode;
   if (!body.parentBatchId) {
     return NextResponse.json({ error: "parentBatchId is required" }, { status: 400 });
   }
@@ -248,6 +255,7 @@ export async function POST(request: NextRequest) {
         // answer-visibility moment (metadata.session_end_time). Without it the frontend has
         // no gate, so review_immediate=false would still show answers immediately.
         session_end_time: istWallClockWindowEnd(body.endTime),
+        ...(quizLangCode ? { lang_code: quizLangCode } : {}),
       }),
     });
     if (!quizRes.ok) {
@@ -355,6 +363,7 @@ export async function POST(request: NextRequest) {
       cms_source: CMS_SOURCE,
       cms_test_id: String(body.cmsTestId),
       cms_source_id: String(body.cmsTestId),
+      ...(quizLangCode ? { lang_code: quizLangCode } : {}),
       // No cms_curriculum_id/cms_grade_id: the PDF proxy and regenerate need only
       // cms_test_id (nex-gen-cms#177). Older sessions keep theirs; nothing reads them.
       has_synced_to_bq: false,

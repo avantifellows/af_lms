@@ -151,6 +151,8 @@ export async function GET(request: NextRequest) {
         (test.type_params?.chapter_id !== undefined &&
           chapterIds.has(test.type_params.chapter_id))
     );
+  // Newest first: CMS ids are assigned at creation.
+  filtered.sort((a, b) => b.id - a.id);
   const languages = await getCmsTestLanguages(filtered.map((test) => test.id));
   const tests: CmsTestOption[] = filtered.map((test) => ({
     id: test.id,
