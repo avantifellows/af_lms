@@ -21,7 +21,7 @@ edges:
     condition: when adding a write that must proxy to the DB Service
   - target: patterns/add-api-route.md
     condition: when adding a route that reads or writes
-last_updated: 2026-09-25
+last_updated: 2026-09-29
 ---
 
 # Data Access
@@ -53,6 +53,10 @@ if (!res.ok) { const text = await res.text(); /* surface upstream error */ }
 
 ## 3. BigQuery — quiz analytics reads (read-only)
 `src/lib/bigquery.ts`, lazy singleton `getBigQueryClient()`. Credentials via `GOOGLE_SERVICE_ACCOUNT_JSON` (string) or `GOOGLE_APPLICATION_CREDENTIALS` (file). Used by `/api/quiz-analytics/*`. Read-only; uses `CURRENT_ACADEMIC_YEAR` from constants.
+- **NVS batch overview:** when the program is JNV NVS (`isNvsProgram()` in `src/lib/constants.ts` — the one client-safe place that compares the label), `getBatchOverviewData`'s test-list query adds the static literal `AND test_purpose = 'system_wide_mandated'`. Enrollment counts, params, and the response shape don't change. On the client, `usePerformanceFilters` exposes `isNvs`; `BatchOverview` then lists every returned test (no Chapter/Full split, no subject/test-grade filters) and uses the empty state "No system-wide mandated tests yet for this grade/stream". A single-program school's program is auto-selected in the same batched update that loads grades, so the first overview render is already scoped (#352).
+- **NVS Student Results:** `StudentResultsTable` hides the AL and On Track columns when `isNvsProgram(program)` is true, exactly as it does for Advanced tests (`showALColumns`). Its header cells are built as one list, and the expanded row's `colSpan` is `headerCells.length`. So to add a column, add it to that list (#353).
+- **NVS Performance filters:** for JNV NVS, `effectiveSelection()` in `src/components/performance/usePerformanceFilters.ts` forces the effective `testCategory="full"`, `fullTestView="per_test"`, and no subject/testGrade, so the overview never gets a subject or test grade and the Cumulative AL table never renders. `PerformanceFilterBar` gets `isNvs` and renders only Grade and Stream. The raw selection and URL are left as they are: `?view=cumulative&category=chapter&subject=…&testGrade=…` is ignored on NVS, not rewritten.
+- **NVS Time Spent (#357):** `getStudentTimeSpentData()` reads `MAX(total_time_spent)` (INT64 seconds) from `fact_student_test_results_overall`, grouped by `enrollment_user_id` + `LOWER(section)`. Its filters are the same as `getStudentQuestionLevelData` (udise, student grade, session, current year, optional program/stream, `enrollment_user_id IS NOT NULL`). It returns `Map<id, { overall, bySection }>`. The `test-deep-dive` route calls it only when `isNvsProgram(program)`, in parallel with the DynamoDB read, and merges `time_spent_seconds` onto each student (overall) and each subject score (`subject.toLowerCase()`). Unmatched students get null. If the lookup fails, the route logs only the error message and returns the deep dive with null times; DynamoDB failures still return 500/404. `StudentResultsTable` shows a sortable "Time Spent (min)" column after Attempt Rate (`Math.round(s/60)` or "—", nulls last in both directions), a subject-row time cell, and a blank chapter cell. Non-NVS payloads have no time fields.
 
 ## 4. DynamoDB — performance dashboard reads (read-only)
 `src/lib/dynamodb.ts`, lazy singleton via `@aws-sdk/lib-dynamodb` `DynamoDBDocumentClient`. Holds test deep-dive reports keyed by school student identifiers (cross-referenced against Postgres rosters). Read-only.

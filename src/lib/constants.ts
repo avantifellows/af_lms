@@ -60,6 +60,12 @@ export const PROGRAM_ID_TO_LABEL: Record<number, string> = {
   [PROGRAM_IDS.MAHARASHTRA_COACHING_FOUNDATION]: "Maharashtra Coaching Foundation",
 };
 
+// True when a BigQuery `student_program` label is JNV NVS. The one place the
+// label is compared, so NVS-specific Performance rules don't each respell it.
+export function isNvsProgram(program: string | null | undefined): boolean {
+  return program === PROGRAM_ID_TO_LABEL[PROGRAM_IDS.NVS];
+}
+
 // Programs that can be assigned through Admin user management. Keep this
 // narrower than PROGRAM_IDS so adding a centre program does not silently add it
 // to the permission form before its role-assignment support is reviewed.

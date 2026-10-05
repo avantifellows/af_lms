@@ -8,14 +8,19 @@ vi.mock("@/lib/api-auth", () => ({
 vi.mock("@/lib/dynamodb", () => ({
   getTestDeepDiveFromDynamo: vi.fn(),
 }));
+vi.mock("@/lib/bigquery", () => ({
+  getStudentTimeSpentData: vi.fn(),
+}));
 
 import { authorizeSchoolAccess } from "@/lib/api-auth";
 import { getTestDeepDiveFromDynamo } from "@/lib/dynamodb";
+import { getStudentTimeSpentData } from "@/lib/bigquery";
 import { GET } from "./route";
 import { routeParams } from "../../../__test-utils__/api-test-helpers";
 
 const mockAuth = vi.mocked(authorizeSchoolAccess);
 const mockGetDeepDive = vi.mocked(getTestDeepDiveFromDynamo);
+const mockGetTimeSpent = vi.mocked(getStudentTimeSpentData);
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -23,10 +28,17 @@ beforeEach(() => {
 
 const SCHOOL = { id: "42", code: "70705", name: "Test School", region: "North" };
 
-function makeRequest(params?: { grade?: string; sessionId?: string }) {
+function makeRequest(params?: {
+  grade?: string;
+  sessionId?: string;
+  program?: string;
+  stream?: string;
+}) {
   const url = new URL("http://localhost/api/quiz-analytics/1234/test-deep-dive");
   if (params?.grade !== undefined) url.searchParams.set("grade", params.grade);
   if (params?.sessionId !== undefined) url.searchParams.set("sessionId", params.sessionId);
+  if (params?.program !== undefined) url.searchParams.set("program", params.program);
+  if (params?.stream !== undefined) url.searchParams.set("stream", params.stream);
   return new Request(url.toString());
 }
 
@@ -185,5 +197,171 @@ describe("GET /api/quiz-analytics/[udise]/test-deep-dive", () => {
     );
     expect(res.status).toBe(500);
     await expect(res.json()).resolves.toEqual({ error: "Failed to fetch test deep dive data" });
+  });
+
+  describe("JNV NVS time spent", () => {
+    function nvsDeepDive(): TestDeepDiveData {
+      const subject = (name: string) => ({
+        subject: name,
+        percentage: 50,
+        marks_scored: 10,
+        max_marks: 20,
+        accuracy: 0.5,
+        attempt_rate: 0.8,
+      });
+      const student = (name: string, id: string | null) => ({
+        student_name: name,
+        enrollment_user_id: id,
+        gender: "F",
+        category: "GEN",
+        academic_level: null,
+        qualification_status: null,
+        marks_scored: 20,
+        max_marks: 40,
+        percentage: 50,
+        accuracy: 0.5,
+        attempt_rate: 0.8,
+        has_quiz_ended: true,
+        subject_scores: [subject("Physics"), subject("Chemistry")],
+      });
+      return {
+        summary: {
+          test_name: "NVS Mandated Test 1",
+          start_date: "2026-08-01",
+          students_appeared: 3,
+          students_submitted: 3,
+          avg_score: 50,
+          min_score: 50,
+          max_score: 50,
+          avg_marks: 20,
+          min_marks: 20,
+          max_marks: 20,
+          total_marks: 40,
+          avg_accuracy: 0.5,
+          avg_attempt_rate: 0.8,
+        },
+        subjects: [],
+        chapters: [],
+        students: [
+          student("Asha", "368592"),
+          student("Unmatched", "999999"),
+          student("No Id", null),
+        ],
+      };
+    }
+
+    it("merges overall and per-subject time onto matching students, null otherwise", async () => {
+      mockAuth.mockResolvedValue({ authorized: true, school: SCHOOL });
+      mockGetDeepDive.mockResolvedValue(nvsDeepDive());
+      mockGetTimeSpent.mockResolvedValue(
+        new Map([
+          [
+            "368592",
+            { overall: 1530, bySection: new Map([["physics", 600], ["chemistry", null]]) },
+          ],
+        ])
+      );
+
+      const res = await GET(
+        makeRequest({ grade: "11", sessionId: "s1", program: "JNV NVS", stream: "Engineering" }),
+        routeParams({ udise: "1234" })
+      );
+      expect(res.status).toBe(200);
+      const json = await res.json();
+
+      expect(mockGetTimeSpent).toHaveBeenCalledWith("1234", 11, "s1", "JNV NVS", "engineering");
+      const [asha, unmatched, noId] = json.students;
+      expect(asha.time_spent_seconds).toBe(1530);
+      expect(asha.subject_scores[0].time_spent_seconds).toBe(600);
+      expect(asha.subject_scores[1].time_spent_seconds).toBeNull();
+      for (const s of [unmatched, noId]) {
+        expect(s.time_spent_seconds).toBeNull();
+        expect(s.subject_scores[0].time_spent_seconds).toBeNull();
+        expect(s.subject_scores[1].time_spent_seconds).toBeNull();
+      }
+    });
+
+    it("returns the scores with null times when the BigQuery lookup hangs", async () => {
+      vi.useFakeTimers();
+      mockAuth.mockResolvedValue({ authorized: true, school: SCHOOL });
+      mockGetDeepDive.mockResolvedValue(nvsDeepDive());
+      mockGetTimeSpent.mockReturnValue(new Promise(() => {}));
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      const pending = GET(
+        makeRequest({ grade: "11", sessionId: "s1", program: "JNV NVS" }),
+        routeParams({ udise: "1234" })
+      );
+      await vi.advanceTimersByTimeAsync(5000);
+      const res = await pending;
+
+      expect(res.status).toBe(200);
+      expect((await res.json()).students[0].time_spent_seconds).toBeNull();
+      errorSpy.mockRestore();
+      vi.useRealTimers();
+    });
+
+    it("still returns 200 with null times when the BigQuery lookup rejects", async () => {
+      mockAuth.mockResolvedValue({ authorized: true, school: SCHOOL });
+      mockGetDeepDive.mockResolvedValue(nvsDeepDive());
+      mockGetTimeSpent.mockRejectedValue(new Error("BQ down"));
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      const res = await GET(
+        makeRequest({ grade: "11", sessionId: "s1", program: "JNV NVS" }),
+        routeParams({ udise: "1234" })
+      );
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.students[0].time_spent_seconds).toBeNull();
+      expect(json.students[0].subject_scores[0].time_spent_seconds).toBeNull();
+
+      // Logged without any student identifier or name.
+      const logged = JSON.stringify(errorSpy.mock.calls);
+      expect(logged).not.toContain("368592");
+      expect(logged).not.toContain("Asha");
+      errorSpy.mockRestore();
+    });
+
+    it("still returns 500 when DynamoDB fails", async () => {
+      mockAuth.mockResolvedValue({ authorized: true, school: SCHOOL });
+      mockGetDeepDive.mockRejectedValue(new Error("DynamoDB timeout"));
+      mockGetTimeSpent.mockResolvedValue(new Map());
+      vi.spyOn(console, "error").mockImplementation(() => {});
+
+      const res = await GET(
+        makeRequest({ grade: "11", sessionId: "s1", program: "JNV NVS" }),
+        routeParams({ udise: "1234" })
+      );
+      expect(res.status).toBe(500);
+      await expect(res.json()).resolves.toEqual({ error: "Failed to fetch test deep dive data" });
+    });
+
+    it("still returns 404 when DynamoDB has no results", async () => {
+      mockAuth.mockResolvedValue({ authorized: true, school: SCHOOL });
+      mockGetDeepDive.mockResolvedValue(null);
+      mockGetTimeSpent.mockResolvedValue(new Map());
+
+      const res = await GET(
+        makeRequest({ grade: "11", sessionId: "s1", program: "JNV NVS" }),
+        routeParams({ udise: "1234" })
+      );
+      expect(res.status).toBe(404);
+    });
+
+    it("never calls the time lookup for a non-NVS program and adds no time values", async () => {
+      mockAuth.mockResolvedValue({ authorized: true, school: SCHOOL });
+      mockGetDeepDive.mockResolvedValue(nvsDeepDive());
+
+      const res = await GET(
+        makeRequest({ grade: "11", sessionId: "s1", program: "JNV CoE" }),
+        routeParams({ udise: "1234" })
+      );
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(mockGetTimeSpent).not.toHaveBeenCalled();
+      expect(json.students[0]).not.toHaveProperty("time_spent_seconds");
+      expect(json.students[0].subject_scores[0]).not.toHaveProperty("time_spent_seconds");
+    });
   });
 });

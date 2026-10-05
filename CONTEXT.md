@@ -34,6 +34,10 @@ _Avoid_: Template type, upload mode, School-selected mode
 The temporary Registration Mode in which JNV NVS registration does not collect PEN, Grade 10 Roll Number, or Annual Family Income and uses the 10-digit parent phone number, starting from 6 through 9, as the Student ID.
 _Avoid_: Phone-only login, temporary Student ID
 
+**Exam Preparing For**:
+The competitive exam a JNV NVS Student is preparing for, such as Engineering, Medical, CA, CLAT, or NDA. It belongs to the Student, not to a Centre, and is distinct from an Exam Track.
+_Avoid_: Stream (for NVS), target exam, Exam Track
+
 **Centre Exam Track**:
 An Exam Track assigned to one Centre for one Grade. A Centre and Grade can have one or more Centre Exam Tracks.
 _Avoid_: Centre Stream, Program, generic JEE
@@ -83,6 +87,12 @@ _Avoid_: Timemap, chapter requirement
 **Curriculum Config Management**:
 An admin-only workflow for changing LMS Chapter Exam Config values that affect all schools using the configured chapter and exam track.
 _Avoid_: Curriculum logging, school curriculum setup
+
+### Assessments
+
+**System-wide Mandated Test**:
+A test whose test purpose is `system_wide_mandated`, distinct from a System-wide Optional Test (`system_wide_optional`). It is the only kind of test the JNV NVS Performance view reports.
+_Avoid_: Mandatory test, official test
 
 ### Visits & Actions
 

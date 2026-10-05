@@ -150,6 +150,33 @@ describe("getBatchOverviewData", () => {
     expect(calls[0][0].query).toContain("LOWER(student_stream) = @stream");
   });
 
+  it("lists only system-wide mandated tests for JNV NVS, leaving enrollment and params alone", async () => {
+    mocks.mockQueryFn.mockResolvedValueOnce([[]]).mockResolvedValueOnce([[]]);
+
+    const { getBatchOverviewData } = await import("./bigquery");
+    await getBatchOverviewData("11223344", 12, "JNV NVS");
+
+    const [testListCall, enrolledCall] = mocks.mockQueryFn.mock.calls;
+    expect(testListCall[0].query).toContain("AND test_purpose = 'system_wide_mandated'");
+    expect(enrolledCall[0].query).not.toContain("test_purpose");
+    expect(testListCall[0].params).toEqual({ udise: "11223344", grade: 12, program: "JNV NVS" });
+    expect(enrolledCall[0].params).toEqual({ udise: "11223344", grade: 12, program: "JNV NVS" });
+  });
+
+  it.each([
+    ["JNV CoE", "JNV CoE"],
+    ["no program", undefined],
+  ])("adds no test_purpose predicate for %s", async (_label, program) => {
+    mocks.mockQueryFn.mockResolvedValueOnce([[]]).mockResolvedValueOnce([[]]);
+
+    const { getBatchOverviewData } = await import("./bigquery");
+    await getBatchOverviewData("11223344", 12, program);
+
+    for (const [call] of mocks.mockQueryFn.mock.calls) {
+      expect(call.query).not.toContain("test_purpose");
+    }
+  });
+
   it("propagates BQ errors to the caller", async () => {
     mocks.mockQueryFn.mockRejectedValueOnce(new Error("BQ error"));
 
@@ -515,6 +542,93 @@ describe("getStudentQuestionLevelData", () => {
     await expect(
       getStudentQuestionLevelData("11223344", 12, "sess-1")
     ).rejects.toThrow("BQ down");
+  });
+});
+
+describe("getStudentTimeSpentData", () => {
+  it("reads MAX(total_time_spent) per student and lower-cased section, with the question-level filters", async () => {
+    mocks.mockQueryFn.mockResolvedValueOnce([[]]);
+
+    const { getStudentTimeSpentData } = await import("./bigquery");
+    await getStudentTimeSpentData("11223344", 12, "sess-1", "JNV NVS", "engineering");
+
+    const call = mocks.mockQueryFn.mock.calls[0][0];
+    expect(call.query).toContain("fact_student_test_results_overall");
+    expect(call.query).toContain("MAX(total_time_spent)");
+    expect(call.query).toContain("GROUP BY enrollment_user_id, LOWER(section)");
+    expect(call.query).toContain("enrollment_user_id IS NOT NULL");
+    expect(call.query).toContain("student_school_udise_code = @udise");
+    expect(call.query).toContain("student_grade = @grade");
+    expect(call.query).toContain("session_id = @sessionId");
+    expect(call.query).toContain("academic_year = '2026-2027'");
+    expect(call.query).toContain("student_program = @program");
+    expect(call.query).toContain("LOWER(student_stream) = @stream");
+    expect(call.params).toEqual({
+      udise: "11223344",
+      grade: 12,
+      sessionId: "sess-1",
+      program: "JNV NVS",
+      stream: "engineering",
+    });
+  });
+
+  it("omits the program and stream filters when they are not given", async () => {
+    mocks.mockQueryFn.mockResolvedValueOnce([[]]);
+
+    const { getStudentTimeSpentData } = await import("./bigquery");
+    await getStudentTimeSpentData("11223344", 12, "sess-1");
+
+    const call = mocks.mockQueryFn.mock.calls[0][0];
+    expect(call.query).not.toContain("@program");
+    expect(call.query).not.toContain("@stream");
+    expect(call.params).toEqual({ udise: "11223344", grade: 12, sessionId: "sess-1" });
+  });
+
+  it("folds rows into overall + per-section time keyed by stringified enrollment_user_id", async () => {
+    const rows = [
+      { enrollment_user_id: 368592, section: "overall", total_time_spent: 1530 },
+      { enrollment_user_id: 368592, section: "physics", total_time_spent: 600 },
+      { enrollment_user_id: 368592, section: "chemistry", total_time_spent: null },
+      { enrollment_user_id: 400001, section: "maths", total_time_spent: "420" },
+    ];
+    mocks.mockQueryFn.mockResolvedValueOnce([rows]);
+
+    const { getStudentTimeSpentData } = await import("./bigquery");
+    const result = await getStudentTimeSpentData("11223344", 12, "sess-1");
+
+    expect([...result.keys()]).toEqual(["368592", "400001"]);
+    const asha = result.get("368592")!;
+    expect(asha.overall).toBe(1530);
+    expect(asha.bySection.get("physics")).toBe(600);
+    expect(asha.bySection.has("chemistry")).toBe(true);
+    expect(asha.bySection.get("chemistry")).toBeNull();
+    expect(asha.bySection.has("overall")).toBe(false);
+
+    // No overall row -> overall stays null.
+    const other = result.get("400001")!;
+    expect(other.overall).toBeNull();
+    expect(other.bySection.get("maths")).toBe(420);
+  });
+
+  it("treats section keys case-insensitively", async () => {
+    const rows = [
+      { enrollment_user_id: "368592", section: "Overall", total_time_spent: 900 },
+      { enrollment_user_id: "368592", section: "Physics", total_time_spent: 300 },
+    ];
+    mocks.mockQueryFn.mockResolvedValueOnce([rows]);
+
+    const { getStudentTimeSpentData } = await import("./bigquery");
+    const result = await getStudentTimeSpentData("11223344", 12, "sess-1");
+
+    expect(result.get("368592")!.overall).toBe(900);
+    expect(result.get("368592")!.bySection.get("physics")).toBe(300);
+  });
+
+  it("propagates BQ errors to the caller", async () => {
+    mocks.mockQueryFn.mockRejectedValueOnce(new Error("BQ down"));
+
+    const { getStudentTimeSpentData } = await import("./bigquery");
+    await expect(getStudentTimeSpentData("11223344", 12, "sess-1")).rejects.toThrow("BQ down");
   });
 });
 

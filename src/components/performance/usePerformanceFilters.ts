@@ -9,6 +9,7 @@ import {
   type TestCategory,
   type FullTestView,
 } from "@/lib/performance-url-params";
+import { isNvsProgram } from "@/lib/constants";
 import type { PerformanceScope } from "./PerformanceContent";
 
 /** reconcileGrade's "leave the selection as it is" answer, distinct from null,
@@ -38,6 +39,29 @@ export function reconcileGrade(
   // Nothing auto-pickable (several grades, none is 12): clear a stale choice so
   // the user re-picks, but don't churn the URL when there was none.
   return current != null ? null : KEEP_GRADE;
+}
+
+/** The selections the NVS tab overrides. */
+interface OverridableSelection {
+  testCategory: TestCategory;
+  fullTestView: FullTestView;
+  subject: string | null;
+  testGrade: number | null;
+}
+
+/**
+ * The selections the tab actually renders with. JNV NVS offers only per-test
+ * full tests with no Subject or Test grade filter, so an old shared link's
+ * view/category/subject/testGrade is ignored there. Only the effective values
+ * change — the raw state and URL are left alone, so switching to another
+ * program tab gets that program's own selections back without URL churn.
+ */
+export function effectiveSelection(
+  isNvs: boolean,
+  raw: OverridableSelection
+): OverridableSelection {
+  if (!isNvs) return raw;
+  return { testCategory: "full", fullTestView: "per_test", subject: null, testGrade: null };
 }
 
 /** The state the handlers drive. Grouped so the factory below takes one
@@ -386,14 +410,23 @@ export function usePerformanceFilters({
     updateUrl,
   });
 
+  // NVS schools get a narrower Performance tab (mandated tests only).
+  const isNvs = isNvsProgram(sel.selectedProgram);
+  const effective = effectiveSelection(isNvs, {
+    testCategory: sel.testCategory,
+    fullTestView: sel.fullTestView,
+    subject: sel.selectedSubject,
+    testGrade: sel.selectedTestGrade,
+  });
+
   // The filter scope every data component receives. Narrowed from null to
   // undefined once here rather than at each of the ten-odd prop sites, where
   // the repetition was both noise and a place for one of them to disagree.
   const scope: PerformanceScope = {
     program: sel.selectedProgram || undefined,
     stream: sel.selectedStream || undefined,
-    subject: sel.selectedSubject || undefined,
-    testGrade: sel.selectedTestGrade ?? undefined,
+    subject: effective.subject || undefined,
+    testGrade: effective.testGrade ?? undefined,
   };
 
   return {
@@ -403,12 +436,13 @@ export function usePerformanceFilters({
     error,
     // Current selection
     selectedProgram: sel.selectedProgram,
+    isNvs,
     selectedGrade: sel.selectedGrade,
     selectedStream: sel.selectedStream,
-    selectedSubject: sel.selectedSubject,
-    selectedTestGrade: sel.selectedTestGrade,
-    testCategory: sel.testCategory,
-    fullTestView: sel.fullTestView,
+    selectedSubject: effective.subject,
+    selectedTestGrade: effective.testGrade,
+    testCategory: effective.testCategory,
+    fullTestView: effective.fullTestView,
     deepDiveSession: sel.deepDiveSession,
     scope,
     // Options offered by the loaded test set

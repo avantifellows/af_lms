@@ -253,6 +253,95 @@ describe("StudentTable - grade filter", () => {
   });
 });
 
+describe("StudentTable - stream filter", () => {
+  const students = [
+    makeStudent({ group_user_id: "g1", first_name: "Proper", stream: "Engineering" }),
+    makeStudent({ group_user_id: "g2", first_name: "Padded", stream: " engineering " }),
+    makeStudent({ group_user_id: "g3", first_name: "Shouty", stream: "ENGINEERING" }),
+    makeStudent({ group_user_id: "g4", first_name: "Medic", stream: "medical" }),
+    makeStudent({ group_user_id: "g5", first_name: "Nullish", stream: null }),
+    makeStudent({ group_user_id: "g6", first_name: "Empty", stream: "" }),
+    makeStudent({ group_user_id: "g7", first_name: "Blank", stream: "   " }),
+  ];
+  const shown = () =>
+    ["Proper", "Padded", "Shouty", "Medic", "Nullish", "Empty", "Blank"].filter((name) =>
+      screen.queryByText(`${name} Sharma`),
+    );
+
+  it("lists exactly the students with no stream when No stream is selected", () => {
+    render(<StudentTable students={students} grades={defaultGrades} selectedStream="__none__" />);
+    expect(shown()).toEqual(["Nullish", "Empty", "Blank"]);
+  });
+
+  it("matches a stream ignoring case and surrounding whitespace", () => {
+    render(<StudentTable students={students} grades={defaultGrades} selectedStream="engineering" />);
+    expect(shown()).toEqual(["Proper", "Padded", "Shouty"]);
+  });
+});
+
+describe("StudentTable - roster search", () => {
+  const students = [
+    makeStudent({ group_user_id: "g1", first_name: "Riya", last_name: "Verma", student_id: "2028001", pen_number: "11111111111", apaar_id: "APA-ONE", phone: "9000000001", grade: 11, stream: "engineering" }),
+    makeStudent({ group_user_id: "g2", first_name: "Kabir", last_name: "Rao", student_id: "2028002", pen_number: "22222222222", apaar_id: "APA-TWO", phone: "9000000002", grade: 12, stream: "medical" }),
+    makeStudent({ group_user_id: "g3", first_name: "Meera", last_name: "Iyer", student_id: "2028003", pen_number: null, apaar_id: null, phone: null, grade: 11, stream: null }),
+  ];
+  const shown = () =>
+    ["Riya Verma", "Kabir Rao", "Meera Iyer"].filter((name) => screen.queryByText(name));
+  const search = (searchQuery: string) =>
+    render(<StudentTable students={students} grades={defaultGrades} searchQuery={searchQuery} />);
+
+  it("finds a student by a full first-last name substring, ignoring case and whitespace", () => {
+    search("  ya VER ");
+    expect(shown()).toEqual(["Riya Verma"]);
+  });
+
+  it.each([
+    ["Student ID", "2028002"],
+    ["PEN", "22222222"],
+    ["APAAR ID", "apa-two"],
+    ["phone", " 9000000002 "],
+  ])("finds a student by %s", (_field: string, query: string) => {
+    search(query);
+    expect(shown()).toEqual(["Kabir Rao"]);
+  });
+
+  it("shows everyone for a blank query", () => {
+    search("   ");
+    expect(shown()).toEqual(["Riya Verma", "Kabir Rao", "Meera Iyer"]);
+  });
+
+  it("narrows the Dropout list too", async () => {
+    const user = userEvent.setup();
+    render(
+      <StudentTable
+        students={[students[0]]}
+        dropoutStudents={[
+          makeStudent({ group_user_id: "d1", first_name: "Kabir", last_name: "Rao", student_id: "2028002", status: "dropout" }),
+          makeStudent({ group_user_id: "d2", first_name: "Meera", last_name: "Iyer", student_id: "2028003", status: "dropout" }),
+        ]}
+        grades={defaultGrades}
+        searchQuery="kabir"
+      />,
+    );
+
+    await user.click(screen.getByText("Dropout (2)"));
+    expect(shown()).toEqual(["Kabir Rao"]);
+  });
+
+  it("combines with the grade and stream filters, including No stream", () => {
+    const { unmount } = render(
+      <StudentTable students={students} grades={defaultGrades} searchQuery="2028" selectedGrade="11" selectedStream="engineering" />,
+    );
+    expect(shown()).toEqual(["Riya Verma"]);
+    unmount();
+
+    render(
+      <StudentTable students={students} grades={defaultGrades} searchQuery="2028" selectedGrade="11" selectedStream="__none__" />,
+    );
+    expect(shown()).toEqual(["Meera Iyer"]);
+  });
+});
+
 // ─── 3. Tabs shown when dropout students exist ──────────────────────────────
 
 describe("StudentTable - tabs", () => {
@@ -373,6 +462,72 @@ describe("StudentTable - tab switching", () => {
   });
 });
 
+describe("StudentTable - NVS Exam Preparing For", () => {
+  it("shows Exam Preparing For instead of Program and Stream on an NVS card", async () => {
+    const user = userEvent.setup();
+    const student = makeStudent({ stream: "engineering", program_name: "JNV NVS" });
+    render(
+      <StudentTable
+        students={[student]}
+        grades={defaultGrades}
+        selectedProgramId={PROGRAM_IDS.NVS}
+      />,
+    );
+
+    expect(screen.getByText("Exam Preparing For")).toBeInTheDocument();
+    expect(screen.getByText("Engineering")).toBeInTheDocument();
+    expect(screen.queryByText("Program")).not.toBeInTheDocument();
+    expect(screen.queryByText("JNV NVS")).not.toBeInTheDocument();
+
+    await user.click(screen.getByLabelText("Expand"));
+    expect(screen.queryByText("Stream")).not.toBeInTheDocument();
+    expect(screen.queryByText("engineering")).not.toBeInTheDocument();
+  });
+
+  it("shows an em-dash for a blank stream on an NVS card", () => {
+    const student = makeStudent({
+      student_id: "S1",
+      pen_number: "P1",
+      apaar_id: "A1",
+      phone: "9999999999",
+      gender: "Female",
+      category: "Gen",
+      date_of_birth: "2011-03-20",
+      stream: "  ",
+    });
+    render(
+      <StudentTable
+        students={[student]}
+        grades={defaultGrades}
+        selectedProgramId={PROGRAM_IDS.NVS}
+      />,
+    );
+
+    const label = screen.getByText("Exam Preparing For");
+    expect(label.nextElementSibling).toHaveTextContent(/^—$/);
+  });
+
+  it("keeps the Program key field and expanded Stream on a non-NVS card", async () => {
+    const user = userEvent.setup();
+    const student = makeStudent({ stream: "engineering", program_name: "CoE" });
+    render(
+      <StudentTable
+        students={[student]}
+        grades={defaultGrades}
+        selectedProgramId={PROGRAM_IDS.COE}
+      />,
+    );
+
+    expect(screen.getByText("Program")).toBeInTheDocument();
+    expect(screen.getByText("CoE")).toBeInTheDocument();
+    expect(screen.queryByText("Exam Preparing For")).not.toBeInTheDocument();
+
+    await user.click(screen.getByLabelText("Expand"));
+    expect(screen.getByText("Stream")).toBeInTheDocument();
+    expect(screen.getByText("engineering")).toBeInTheDocument();
+  });
+});
+
 // ─── 5. Expand / collapse card details ──────────────────────────────────────
 
 describe("StudentTable - expand/collapse", () => {
@@ -383,6 +538,7 @@ describe("StudentTable - expand/collapse", () => {
       category: "OBC",
       stream: "commerce",
       program_name: "Nodal",
+      program_id: PROGRAM_IDS.COE,
       email: "test@example.com",
     });
     render(<StudentTable students={[student]} grades={defaultGrades} />);
@@ -404,6 +560,7 @@ describe("StudentTable - expand/collapse", () => {
       category: "SC",
       stream: "arts",
       program_name: "CoE",
+      program_id: PROGRAM_IDS.COE,
       email: "expanded@test.com",
     });
     render(<StudentTable students={[student]} grades={defaultGrades} />);
@@ -1546,6 +1703,7 @@ describe("StudentTable - intervention flags", () => {
   it("shows no flag controls when the viewer cannot use flags", () => {
     render(<StudentTable students={students} grades={defaultGrades} canEditStudent={false} canDropoutStudent={false} />);
     expect(screen.queryByRole("button", { name: /flag/i })).not.toBeInTheDocument();
+    expect(screen.queryByText("Needs intervention")).not.toBeInTheDocument();
   });
 
   it("narrows to flagged students when flaggedOnly is set", () => {

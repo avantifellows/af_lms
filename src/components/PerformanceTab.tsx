@@ -96,6 +96,7 @@ export default function PerformanceTab({ schoolUdise, lockedProgram }: Props) {
         onStreamChange={f.handleStreamChange}
         onSubjectChange={f.handleSubjectChange}
         onFullViewChange={f.handleFullViewChange}
+        isNvs={f.isNvs}
       />
 
       <PerformanceContent
@@ -105,6 +106,7 @@ export default function PerformanceTab({ schoolUdise, lockedProgram }: Props) {
         testCategory={f.testCategory}
         fullTestView={f.fullTestView}
         scope={f.scope}
+        isNvs={f.isNvs}
         onTestClick={f.handleTestClick}
         onFilterOptions={f.handleFilterOptions}
       />
