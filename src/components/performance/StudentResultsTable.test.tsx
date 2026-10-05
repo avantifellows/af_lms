@@ -370,7 +370,11 @@ describe("StudentResultsTable", () => {
         <StudentResultsTable
           {...props}
           program="JNV NVS"
-          students={[nvsStudent("Asha Rao", 1530), nvsStudent("No Time", null, { percentage: 10 })]}
+          students={[
+            nvsStudent("Asha Rao", 1530),
+            nvsStudent("No Time", null, { percentage: 10 }),
+            nvsStudent("Quick", 20, { percentage: 5 }),
+          ]}
         />
       );
       const headers = headerTexts(container);
@@ -381,6 +385,7 @@ describe("StudentResultsTable", () => {
         [...(screen.getByText(name).closest("tr") as HTMLElement).querySelectorAll("td")];
       expect(cells("Asha Rao").at(-1)!.textContent).toBe("26");
       expect(cells("No Time").at(-1)!.textContent).toBe("—");
+      expect(cells("Quick").at(-1)!.textContent).toBe("<1");
     });
 
     it("shows subject times and a blank time cell on chapter rows", () => {

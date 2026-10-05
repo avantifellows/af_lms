@@ -228,7 +228,7 @@ describe("EnrollmentTabContent", () => {
       ["all", "All Streams (7)"],
       ["engineering", "Engineering (3)"],
       ["medical", "Medical (1)"],
-      ["__none__", "No stream (3)"],
+      ["__none__", "Not set (3)"],
     ]);
     expect(screen.getByTestId("enrollment-stats-total")).toHaveTextContent("7");
 
@@ -267,7 +267,7 @@ describe("EnrollmentTabContent", () => {
       "CLAT (1)",
       "Engineering (2)",
       "NDA (1)",
-      "No stream (1)",
+      "Not set (1)",
     ]);
   });
 

@@ -73,6 +73,11 @@ export function matchesStudentSearch(
 ): boolean {
   const needle = query.trim().toLowerCase();
   if (!needle) return true;
+  // Phones also match on digits alone, so "98765 43210" or "+91 9876543210" work.
+  const digits = needle.replace(/\D/g, "").slice(-10);
+  if (digits.length >= 4 && student.phone?.replace(/\D/g, "").includes(digits)) {
+    return true;
+  }
   return [
     `${student.first_name ?? ""} ${student.last_name ?? ""}`,
     student.student_id,

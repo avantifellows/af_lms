@@ -288,6 +288,26 @@ describe("GET /api/quiz-analytics/[udise]/test-deep-dive", () => {
       }
     });
 
+    it("returns the scores with null times when the BigQuery lookup hangs", async () => {
+      vi.useFakeTimers();
+      mockAuth.mockResolvedValue({ authorized: true, school: SCHOOL });
+      mockGetDeepDive.mockResolvedValue(nvsDeepDive());
+      mockGetTimeSpent.mockReturnValue(new Promise(() => {}));
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      const pending = GET(
+        makeRequest({ grade: "11", sessionId: "s1", program: "JNV NVS" }),
+        routeParams({ udise: "1234" })
+      );
+      await vi.advanceTimersByTimeAsync(5000);
+      const res = await pending;
+
+      expect(res.status).toBe(200);
+      expect((await res.json()).students[0].time_spent_seconds).toBeNull();
+      errorSpy.mockRestore();
+      vi.useRealTimers();
+    });
+
     it("still returns 200 with null times when the BigQuery lookup rejects", async () => {
       mockAuth.mockResolvedValue({ authorized: true, school: SCHOOL });
       mockGetDeepDive.mockResolvedValue(nvsDeepDive());

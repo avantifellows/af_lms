@@ -49,9 +49,11 @@ const STATUS_CLASS: Record<StudentQuestionRow["status"], string> = {
   skipped: "text-text-muted",
 };
 
-// Whole minutes, or an em-dash when the time is unknown (never a fake 0).
+// Whole minutes ("<1" under half a minute), or an em-dash when unknown (never a fake 0).
 function formatMinutes(seconds: number | null | undefined): string {
-  return seconds == null ? "—" : String(Math.round(seconds / 60));
+  if (seconds == null) return "—";
+  if (seconds > 0 && seconds < 30) return "<1";
+  return String(Math.round(seconds / 60));
 }
 
 // Unknown times sort after every known time in both directions, so missing
