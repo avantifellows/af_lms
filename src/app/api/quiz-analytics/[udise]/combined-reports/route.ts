@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { authorizeSchoolAccess } from "@/lib/api-auth";
+import { resolvePerformanceProgram } from "@/lib/performance-program";
+import { refuseOutsidePmuSession } from "@/lib/performance-session-pin";
 import {
   getSchoolRoster,
   filterActiveRosterStudents,
@@ -27,12 +29,22 @@ export async function GET(
   const auth = await authorizeSchoolAccess(udise);
   if (!auth.authorized) return auth.response;
 
-  const sessionId = new URL(request.url).searchParams.get("session_id");
+  const url = new URL(request.url);
+  const pinned = resolvePerformanceProgram(
+    auth.permission,
+    url.searchParams.get("program") || undefined,
+  );
+  if (!pinned.ok) return pinned.response;
+
+  const sessionId = url.searchParams.get("session_id");
   if (!sessionId) {
     return NextResponse.json({ error: "session_id is required" }, { status: 400 });
   }
 
   try {
+    // A PMU caller may only list a JNV NVS test's jobs (and their links).
+    const outside = await refuseOutsidePmuSession(auth.permission, udise, sessionId);
+    if (outside) return outside;
     const jobs = await listCombinedReportJobs(sessionId, auth.school.code);
     // The panel renders its button from this, so it needs the same verdict the
     // POST route will apply — otherwise the button invites a click that 409s.
@@ -91,11 +103,23 @@ export async function POST(
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
+  const pinned = resolvePerformanceProgram(
+    auth.permission,
+    body.program || undefined,
+  );
+  if (!pinned.ok) return pinned.response;
   if (!body.session_id) {
     return NextResponse.json({ error: "session_id is required" }, { status: 400 });
   }
 
   try {
+    // A PMU caller may only generate a report for a JNV NVS test.
+    const outside = await refuseOutsidePmuSession(
+      auth.permission,
+      udise,
+      body.session_id,
+    );
+    if (outside) return outside;
     // Gate before doing any work: the session must have closed, and this test
     // must not already have an in-flight report. An existing finished report
     // only blocks unless the caller explicitly asked to regenerate.
@@ -122,7 +146,7 @@ export async function POST(
     // combined report matches what the teacher sees for this test.
     const students = filterActiveRosterStudents(roster, {
       grade: body.grade,
-      program: body.program,
+      program: pinned.program,
       stream: body.stream,
     }).map((s) => ({
       user_id: s.user_id != null ? String(s.user_id) : null,

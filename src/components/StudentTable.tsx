@@ -89,8 +89,7 @@ interface StudentTableProps {
   canDropoutStudent?: boolean;
   selectedProgramId?: number | null;
   dropoutProgramIds?: number[] | null;
-  userProgramIds?: number[] | null; // null = owns all (admin/passcode)
-  isPasscodeUser?: boolean;
+  userProgramIds?: number[] | null; // null = owns all (admin)
   isAdmin?: boolean;
   grades: Grade[];
   batches?: Batch[];
@@ -579,7 +578,6 @@ export default function StudentTable({
   dropoutProgramIds = null,
   userProgramIds = null,
   isAdmin = false,
-  isPasscodeUser = false,
   grades,
   batches = [],
   nvsStreams = [],
@@ -631,7 +629,7 @@ export default function StudentTable({
   // incorrectly) limited to NVS students only.
   const canEditStudentInSelectedProgram = (student: Student): boolean => {
     if (!canEditStudentEntry || effectiveProgramId == null) return false;
-    if (isPasscodeUser || !student.student_pk_id) return false;
+    if (!student.student_pk_id) return false;
     if (!studentBelongsToProgram(student, effectiveProgramId)) return false;
     return userCanManageProgram(isAdmin, userProgramIds, effectiveProgramId);
   };
@@ -650,7 +648,7 @@ export default function StudentTable({
     if (!allowed) return false;
     if (dropoutProgramIds && !dropoutProgramIds.includes(effectiveProgramId))
       return false;
-    if (isPasscodeUser || !student.student_pk_id) return false;
+    if (!student.student_pk_id) return false;
     if (!studentBelongsToProgram(student, effectiveProgramId)) return false;
     return userCanManageProgram(isAdmin, userProgramIds, effectiveProgramId);
   };
@@ -659,7 +657,6 @@ export default function StudentTable({
     Boolean(
       canDropoutStudent &&
       effectiveProgramId === PROGRAM_IDS.NVS &&
-      !isPasscodeUser &&
       student.student_pk_id &&
       student.can_undo_nvs_dropout &&
       (isAdmin || userProgramIds?.includes(PROGRAM_IDS.NVS)) &&

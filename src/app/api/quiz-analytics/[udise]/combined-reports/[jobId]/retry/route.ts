@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { authorizeSchoolAccess } from "@/lib/api-auth";
+import { refuseOutsidePmuSession } from "@/lib/performance-session-pin";
 import {
   getCombinedReportJob,
   retryCombinedReportJob,
@@ -23,6 +24,14 @@ export async function POST(
     if (existing.school_code !== auth.school.code) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
+    // A PMU caller may only retry jobs for JNV NVS tests.
+    const outside = await refuseOutsidePmuSession(
+      auth.permission,
+      udise,
+      existing.session_id,
+      404,
+    );
+    if (outside) return outside;
     const job = await retryCombinedReportJob(jobId);
     return NextResponse.json(job);
   } catch (error) {

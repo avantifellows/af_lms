@@ -18,7 +18,6 @@ type QueryRows = <T>(text: string, params?: unknown[]) => Promise<T[]>;
 
 export type AcademicMentorshipSession = {
   user?: { email?: string | null } | null;
-  isPasscodeUser?: boolean;
 } | null;
 
 export interface AcademicMentorshipSchool {
@@ -238,9 +237,6 @@ export async function requireAcademicMentorshipAccess(
   const email = session?.user?.email;
   if (!email) {
     return { ok: false, status: 401, error: "Unauthorized" };
-  }
-  if (session.isPasscodeUser) {
-    return { ok: false, status: 403, error: "Forbidden" };
   }
 
   const permission = await getResolvedPermission(email);

@@ -218,7 +218,8 @@ describe("Holistic release preflight", () => {
         "program_manager",
         "program_admin",
         "read_only",
-        "passcode",
+        "pmu_manager",
+        "pmu_govt_school_user",
       ],
       states: ["locked", "open", "active", "skipped", "pending", "completed"],
       content: ["mapping", "profile", "historical_notes", "draft_notes", "submitted_notes"],
@@ -296,6 +297,7 @@ describe("Holistic release preflight", () => {
           { student_id: 203, user_id: 2003, grade: 12, batch_group_id: 802 },
         ] };
       }
+      if (sql.includes("fixture_jnv_school")) return { rows: [{ code: "JNV-70705" }] };
       if (sql.includes("fixture_actor")) return { rows: [{ id: actorId++ }] };
       if (sql.includes("fixture_plan")) return { rows: [{ id: 30 }] };
       if (sql.includes("fixture_phases")) {
@@ -329,6 +331,66 @@ describe("Holistic release preflight", () => {
     expect(fixtureStudentsQuery).toContain("SELECT batch.id AS batch_group_id");
   });
 
+  it("seeds both PMU Dev Login actors at a JNV School, pinned to JNV NVS with level 1 and no regions", async () => {
+    const actorCalls: { sql: string; params: unknown[] }[] = [];
+    let jnvSchoolQuery = "";
+    const query = async (sql: string, params: unknown[] = []) => {
+      if (sql.includes("fixture_scope")) {
+        return { rows: [{ centre_id: 9, school_id: 10, school_code: "E2E-P74", grade_11_id: 11, grade_12_id: 12 }] };
+      }
+      if (sql.includes("fixture_students")) {
+        return { rows: [
+          { student_id: 101, user_id: 1001, grade: 11, batch_group_id: 801 },
+          { student_id: 102, user_id: 1002, grade: 11, batch_group_id: 801 },
+          { student_id: 103, user_id: 1003, grade: 11, batch_group_id: 801 },
+          { student_id: 201, user_id: 2001, grade: 12, batch_group_id: 802 },
+          { student_id: 202, user_id: 2002, grade: 12, batch_group_id: 802 },
+          { student_id: 203, user_id: 2003, grade: 12, batch_group_id: 802 },
+        ] };
+      }
+      if (sql.includes("fixture_jnv_school")) {
+        jnvSchoolQuery = sql;
+        return { rows: [{ code: "JNV-70705" }] };
+      }
+      if (sql.includes("fixture_actor")) {
+        actorCalls.push({ sql, params });
+        return { rows: [{ id: 500 + actorCalls.length }] };
+      }
+      if (sql.includes("fixture_plan")) return { rows: [{ id: 30 }] };
+      if (sql.includes("fixture_phases")) {
+        return { rows: Array.from({ length: 6 }, (_, index) => ({ id: 40 + index, position: index + 1 })) };
+      }
+      if (sql.includes("fixture_questions")) {
+        return { rows: Array.from({ length: 6 }, (_, index) => ({ id: 60 + index, phase_id: 40 + index })) };
+      }
+      if (sql.includes("fixture_configuration")) return { rows: [{ id: 70 }] };
+      return { rows: [] };
+    };
+
+    await seedHolisticFixtures({ query } as never, PROGRAM_IDS.PUNJAB_COE);
+
+    expect(jnvSchoolQuery).toContain("af_school_category = 'JNV'");
+    const pmuCalls = actorCalls.filter(({ params }) => String(params[2]).startsWith("pmu_"));
+    expect(pmuCalls.map(({ params }) => ({
+      email: params[0],
+      role: params[2],
+      level: params[3],
+      programIds: params[4],
+      schoolCode: params[5],
+    }))).toEqual([
+      { email: "e2e-pmu-manager@test.local", role: "pmu_manager", level: 1, programIds: [64], schoolCode: "JNV-70705" },
+      {
+        email: "e2e-pmu-govt-school-user@test.local",
+        role: "pmu_govt_school_user",
+        level: 1,
+        programIds: [64],
+        schoolCode: "JNV-70705",
+      },
+    ]);
+    // Regions are only derived for program_manager / program_admin rows.
+    expect(pmuCalls[0].sql).toContain("WHEN $3 IN ('program_manager', 'program_admin')");
+  });
+
   it("uses the canonical Centre roster before resolving a selected Program batch", async () => {
     let fixtureStudentsQuery = "";
     const query = async (sql: string) => {
@@ -350,6 +412,7 @@ describe("Holistic release preflight", () => {
           { student_id: 203, user_id: 2003, grade: 12, batch_group_id: 802 },
         ] };
       }
+      if (sql.includes("fixture_jnv_school")) return { rows: [{ code: "JNV-70705" }] };
       if (sql.includes("fixture_actor")) return { rows: [{ id: 500 }] };
       if (sql.includes("fixture_plan")) return { rows: [{ id: 30 }] };
       if (sql.includes("fixture_phases")) {

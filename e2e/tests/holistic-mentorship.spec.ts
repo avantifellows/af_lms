@@ -622,10 +622,9 @@ test.describe("Holistic Mentorship release workflows", () => {
     holisticTeacherPage,
     pmPage,
     programAdminPage,
-    passcodePage,
   }) => {
     for (const page of [adminPage, holisticAdminPage, holisticTeacherPage,
-      pmPage, programAdminPage, passcodePage]) {
+      pmPage, programAdminPage]) {
       const deletion = await apiStatus(page,
         `/api/holistic-mentorship/privacy-deletions/${fixture.draftStudentId}`, "POST", {});
       expect(deletion).toBe(403);
@@ -636,11 +635,10 @@ test.describe("Holistic Mentorship release workflows", () => {
     expect(scopedRole).toBe(403);
   });
 
-  test("former Mentor and passcode users stay denied while scoped roles enter read-only progress", async ({
+  test("former Mentor stays denied while scoped roles enter read-only progress", async ({
     formerMentorPage,
     holisticPmPage,
     holisticProgramAdminPage,
-    passcodePage,
   }) => {
     const stale = await formerMentorPage.request.get(
       `/api/holistic-mentorship/students/${fixture.formerStudentId}/phases/${fixture.activeGrade12PhaseId}` +
@@ -710,16 +708,6 @@ test.describe("Holistic Mentorship release workflows", () => {
       await page.reload();
       await expect(page.getByRole("heading", { name: "Students & Progress" })).toBeVisible();
       await expectNoPageOverflow(page);
-    }
-
-    for (const viewport of [{ width: 1280, height: 800 }, { width: 375, height: 800 }]) {
-      await passcodePage.setViewportSize(viewport);
-      const response = await passcodePage.request.get(
-        "/api/holistic-mentorship/progress?academic_year=2026-2027&program_id=1"
-      );
-      expect(response.status()).toBe(403);
-      await passcodePage.goto("/admin/holistic-mentorship");
-      await expect(passcodePage.getByRole("heading", { name: "Holistic Mentorship" })).not.toBeVisible();
     }
   });
 });

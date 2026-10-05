@@ -1,7 +1,9 @@
 import type { PoolClient } from "pg";
 import { NextResponse } from "next/server";
 
+import { PMU_PROGRAM_ID, isPmuRole } from "./constants";
 import { query } from "./db";
+import { studentInProgram } from "./enrollment-stats";
 import {
   INTERVENTION_FLAG_NOTE_MAX_LENGTH,
   type InterventionFlag,
@@ -13,8 +15,11 @@ import {
   canAccessSchoolSync,
   getFeatureAccess,
   getResolvedPermission,
+  hasCurrentNvsBatchSql,
+  studentHasCurrentNvsBatch,
   type UserPermission,
 } from "./permissions";
+import { getSchoolRoster } from "./school-students";
 
 // Intervention flags: a Teacher (or PM/Admin) flags a Student who needs special,
 // non-academic intervention — medical, mental health, grief, extra attention —
@@ -25,6 +30,10 @@ import {
 // Every school-scoped read and write goes through `authorizeInterventionFlags`
 // below (the cross-school list is admin-only, behind `requireAdmin`), so a later narrowing (e.g. for
 // mental-health notes) is a change in one place.
+//
+// PMU roles are pinned to JNV NVS (ADR 0007): only JNV Schools, only flags on
+// the School's NVS roster, and only raise/update on a Student with a current
+// NVS batch (the `canAccessStudent` rule). See the `*ForPmu` helpers below.
 
 export interface InterventionFlagActor {
   email: string;
@@ -38,11 +47,11 @@ export interface InterventionFlagSchool {
   udise_code: string | null;
   name: string;
   region: string | null;
+  af_school_category: string | null;
 }
 
 interface SessionLike {
   user?: { email?: string | null } | null;
-  isPasscodeUser?: boolean;
 }
 
 type AuthResult<T> = ({ ok: true } & T) | { ok: false; response: NextResponse };
@@ -53,8 +62,7 @@ function deny(status: number, error: string): { ok: false; response: NextRespons
 
 // Rule: anyone who can see a Student (school access + `students` view) can see
 // their flags; raising, adding notes and resolving also need `students` edit,
-// so read-only accounts only view. Passcode logins are excluded: a passcode is
-// shared by a whole school, so it cannot attribute a note to a person.
+// so read-only accounts only view.
 export type InterventionFlagAction = "view" | "edit";
 
 async function resolveActor(
@@ -63,7 +71,7 @@ async function resolveActor(
 ): Promise<AuthResult<{ actor: InterventionFlagActor }>> {
   if (!session) return deny(401, "Unauthorized");
   const email = session.user?.email;
-  if (session.isPasscodeUser || !email) return deny(403, "Forbidden");
+  if (!email) return deny(403, "Forbidden");
 
   const permission = await getResolvedPermission(email);
   const access = interventionFlagAccess(permission);
@@ -92,24 +100,73 @@ export async function authorizeInterventionFlags(
   if (!actorResult.ok) return actorResult;
 
   const schools = await query<InterventionFlagSchool>(
-    `SELECT id, code, udise_code, name, region FROM school WHERE udise_code = $1 OR code = $1`,
+    `SELECT id, code, udise_code, name, region, af_school_category
+     FROM school WHERE udise_code = $1 OR code = $1`,
     [schoolKey],
   );
   const school = schools[0];
   if (!school) return deny(404, "School not found");
 
-  if (!canAccessSchoolSync(actorResult.actor.permission, school.code, school.region ?? undefined)) {
+  const { permission } = actorResult.actor;
+  if (!canAccessSchoolSync(permission, school.code, school.region ?? undefined)) {
+    return deny(403, "Forbidden");
+  }
+  // PMU roles never reach a non-JNV School, even at level 3.
+  if (isPmuRole(permission.role) && school.af_school_category !== "JNV") {
     return deny(403, "Forbidden");
   }
   return { ok: true, actor: actorResult.actor, school };
 }
 
+/**
+ * The Student ids whose flags a PMU actor may list at `schoolId`: the School's
+ * NVS roster (a current NVS batch, or an NVS dropout not undone), the same set
+ * `RosterPage` shows a PMU role. `null` for every other role (no narrowing).
+ */
+export async function flagStudentScopeForPmu(
+  actor: InterventionFlagActor,
+  schoolId: string,
+): Promise<string[] | null> {
+  if (!isPmuRole(actor.permission.role)) return null;
+  const { students } = await getSchoolRoster(schoolId);
+  return students
+    .filter((s) => s.student_pk_id != null && studentInProgram(s, PMU_PROGRAM_ID))
+    .map((s) => String(s.student_pk_id));
+}
+
+/** PMU roles raise flags only on a Student with a current NVS batch; others always may. */
+export async function mayRaiseFlagForPmu(
+  actor: InterventionFlagActor,
+  studentPkId: number,
+): Promise<boolean> {
+  if (!isPmuRole(actor.permission.role)) return true;
+  return studentHasCurrentNvsBatch(studentPkId);
+}
+
+/**
+ * PMU roles update/resolve a flag only when its Student has a current NVS
+ * batch; a flag that isn't at `schoolId` is refused too. Others always may.
+ */
+export async function mayUpdateFlagForPmu(
+  actor: InterventionFlagActor,
+  flagId: number,
+  schoolId: string,
+): Promise<boolean> {
+  if (!isPmuRole(actor.permission.role)) return true;
+  const rows = await query<{ has_current_nvs_batch: boolean }>(
+    `SELECT ${hasCurrentNvsBatchSql("s.user_id")} AS has_current_nvs_batch
+     FROM lms_student_intervention_flags f
+     JOIN student s ON s.id = f.student_id
+     WHERE f.id = $1 AND f.school_id = $2`,
+    [flagId, schoolId],
+  );
+  return rows[0]?.has_current_nvs_batch === true;
+}
+
 /** Who may see and change flags; also decides which flag UI to render. */
 export function interventionFlagAccess(
   permission: UserPermission | null,
-  opts?: { isPasscodeUser?: boolean },
 ): { canView: boolean; canEdit: boolean } {
-  if (opts?.isPasscodeUser) return { canView: false, canEdit: false };
   const { canView, canEdit } = getFeatureAccess(permission, "students");
   return { canView, canEdit };
 }
@@ -151,8 +208,16 @@ const AUTHOR_NAME_JOIN = `
     ORDER BY id LIMIT 1
   ) up ON true`;
 
-/** Every flag (open and resolved) raised at a school, with its update history. */
-export async function listSchoolFlags(schoolId: string): Promise<InterventionFlag[]> {
+/**
+ * Every flag (open and resolved) raised at a school, with its update history.
+ * `studentPkIds` (from `flagStudentScopeForPmu`) narrows it to those Students;
+ * `null` lists every flag.
+ */
+export async function listSchoolFlags(
+  schoolId: string,
+  studentPkIds: string[] | null = null,
+): Promise<InterventionFlag[]> {
+  if (studentPkIds && studentPkIds.length === 0) return [];
   const flags = await query<Omit<InterventionFlag, "updates">>(
     `SELECT f.id::int AS id, f.student_id::text AS student_pk_id, f.status,
             f.raised_by_email,
@@ -160,8 +225,9 @@ export async function listSchoolFlags(schoolId: string): Promise<InterventionFla
             f.resolved_at AT TIME ZONE 'UTC' AS resolved_at
      FROM lms_student_intervention_flags f
      WHERE f.school_id = $1
+       AND ($2::bigint[] IS NULL OR f.student_id = ANY($2::bigint[]))
      ORDER BY f.inserted_at DESC`,
-    [schoolId],
+    [schoolId, studentPkIds],
   );
   if (flags.length === 0) return [];
 

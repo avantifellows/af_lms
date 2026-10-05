@@ -17,7 +17,6 @@ import { GET, POST } from "./route";
 import {
   ADMIN_SESSION,
   jsonRequest,
-  PASSCODE_SESSION,
   PM_SESSION,
 } from "../../__test-utils__/api-test-helpers";
 import { resetCentreSchemaCheckForTests } from "@/lib/centres";
@@ -41,12 +40,9 @@ describe("GET /api/admin/centres", () => {
     mockQuery.mockResolvedValue([]);
   });
 
-  it("returns 401 for unauthenticated users and 403 for passcode/non-admin users", async () => {
+  it("returns 401 for unauthenticated users and 403 for non-admin users", async () => {
     mockGetServerSession.mockResolvedValueOnce(null);
     expect((await GET(jsonRequest("http://localhost/api/admin/centres") as never)).status).toBe(401);
-
-    mockGetServerSession.mockResolvedValueOnce(PASSCODE_SESSION);
-    expect((await GET(jsonRequest("http://localhost/api/admin/centres") as never)).status).toBe(403);
 
     mockGetServerSession.mockResolvedValueOnce(PM_SESSION);
     mockGetUserPermission.mockResolvedValueOnce({

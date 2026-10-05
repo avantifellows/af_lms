@@ -24,7 +24,7 @@ import {
   getUserPermission,
 } from "@/lib/permissions";
 import { GET } from "./route";
-import { PASSCODE_SESSION, TEACHER_SESSION } from "../../__test-utils__/api-test-helpers";
+import { TEACHER_SESSION } from "../../__test-utils__/api-test-helpers";
 import { resetCurriculumSchemaCheckForTests } from "@/lib/curriculum-schema";
 
 const mockSession = vi.mocked(getServerSession);
@@ -229,17 +229,5 @@ describe("GET /api/curriculum/chapters", () => {
     await expect(res.json()).resolves.toEqual({
       error: "Curriculum configuration is not available for CET",
     });
-  });
-
-  it("returns 403 for passcode users", async () => {
-    mockSession.mockResolvedValue(PASSCODE_SESSION);
-
-    const res = await GET(
-      nextReq(
-        "/api/curriculum/chapters?school_code=70705&program_id=1&exam_track=neet&grade=12&subject=Biology"
-      )
-    );
-
-    expect(res.status).toBe(403);
   });
 });

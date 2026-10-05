@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { PROGRAM_IDS } from "@/lib/constants";
@@ -74,7 +74,6 @@ const baseProps = {
   canEditStudent: true,
   canAddStudent: true,
   userProgramIds: [PROGRAM_IDS.NVS],
-  isPasscodeUser: false,
   isAdmin: false,
   grades: [],
   batches: [],
@@ -326,6 +325,102 @@ describe("EnrollmentTabContent", () => {
     vi.unstubAllGlobals();
   });
 
+  it("offers only Download List when it may download but not add (read-only PMU)", async () => {
+    const assign = vi.fn();
+    vi.stubGlobal("location", { ...window.location, assign });
+    const user = userEvent.setup();
+    render(
+      <EnrollmentTabContent {...baseProps} canEdit={false} canEditStudent={false} canAddStudent={false} canDownloadList />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Add Student" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Bulk Upload" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Download List" }));
+
+    expect(assign).toHaveBeenCalledWith("/api/school/12345678901/students/export");
+    vi.unstubAllGlobals();
+  });
+
+  it("hides Download List when it may neither add nor download", () => {
+    render(<EnrollmentTabContent {...baseProps} canAddStudent={false} />);
+
+    expect(screen.queryByRole("button", { name: "Download List" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the action buttons in one group, in one order, while searching", async () => {
+    const user = userEvent.setup();
+    render(
+      <EnrollmentTabContent
+        {...baseProps}
+        activeStudents={[
+          { first_name: "Riya", grade: 11, stream: "engineering", student_program_ids: [64] },
+          { first_name: "Kabir", grade: 11, stream: "engineering", student_program_ids: [64] },
+        ] as never}
+      />,
+    );
+    const actionNames = () =>
+      within(screen.getByRole("group", { name: "Student actions" }))
+        .getAllByRole("button")
+        .map((button) => button.textContent);
+    const group = screen.getByRole("group", { name: "Student actions" });
+    const row = group.parentElement;
+    const countLine = screen.getByTestId("enrollment-filtered-count");
+    expect(actionNames()).toEqual(["Bulk Upload", "Download List", "Add Student"]);
+    expect(countLine).toBeEmptyDOMElement();
+    expect(row).not.toContainElement(countLine);
+
+    await user.type(screen.getByRole("searchbox", { name: "Search students" }), "riya");
+
+    expect(screen.getByRole("group", { name: "Student actions" })).toBe(group);
+    expect(group.parentElement).toBe(row);
+    expect(actionNames()).toEqual(["Bulk Upload", "Download List", "Add Student"]);
+    expect(screen.getByTestId("enrollment-filtered-count")).toBe(countLine);
+    expect(countLine).toHaveTextContent("Showing 1 of 2 students");
+    expect(row).not.toContainElement(countLine);
+
+    await user.clear(screen.getByRole("searchbox", { name: "Search students" }));
+    expect(countLine).toBeEmptyDOMElement();
+    expect(screen.queryByText(/Showing \d+ of \d+ students/)).not.toBeInTheDocument();
+  });
+
+  it("groups only Download List for a read-only PMU and no actions group without any", () => {
+    const { rerender } = render(
+      <EnrollmentTabContent {...baseProps} canEdit={false} canEditStudent={false} canAddStudent={false} canDownloadList />,
+    );
+    expect(
+      within(screen.getByRole("group", { name: "Student actions" }))
+        .getAllByRole("button")
+        .map((button) => button.textContent),
+    ).toEqual(["Download List"]);
+
+    rerender(<EnrollmentTabContent {...baseProps} canAddStudent={false} />);
+    expect(screen.queryByRole("group", { name: "Student actions" })).not.toBeInTheDocument();
+  });
+
+  it("shows the Showing X of Y line only while a filter is active", async () => {
+    const user = userEvent.setup();
+    render(
+      <EnrollmentTabContent
+        {...baseProps}
+        activeStudents={[
+          { grade: 11, stream: "engineering", student_program_ids: [64] },
+          { grade: 12, stream: "medical", student_program_ids: [64] },
+        ] as never}
+      />,
+    );
+    const countLine = screen.getByTestId("enrollment-filtered-count");
+    expect(countLine).toBeEmptyDOMElement();
+
+    await user.selectOptions(screen.getByLabelText("Filter by Grade:"), "12");
+    expect(countLine).toHaveTextContent("Showing 1 of 2 students");
+
+    await user.selectOptions(screen.getByLabelText("Filter by Grade:"), "all");
+    expect(countLine).toBeEmptyDOMElement();
+
+    await user.selectOptions(screen.getByLabelText("Filter by Exam Preparing For:"), "medical");
+    expect(countLine).toHaveTextContent("Showing 1 of 2 students");
+  });
+
   it("shows the roster search only for NVS and passes the query to the table", async () => {
     const user = userEvent.setup();
     render(
@@ -461,29 +556,6 @@ describe("EnrollmentTabContent", () => {
     expect(await screen.findByLabelText("Needs intervention only (0)")).toBeInTheDocument();
     expect(flagsCalls()).toHaveLength(1);
     expect(screen.getByTestId("student-table")).toHaveAttribute("data-flags-shown", "true");
-    vi.unstubAllGlobals();
-  });
-
-  it("keeps Intervention Flags hidden for passcode users in non-NVS programs", async () => {
-    const fetchMock = vi.fn<(url: string) => Promise<{ ok: boolean; json: () => Promise<unknown> }>>(
-      async () => ({ ok: true, json: async () => ({ consent: {} }) }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-    render(
-      <EnrollmentTabContent
-        {...baseProps}
-        isPasscodeUser
-        programs={[program(PROGRAM_IDS.COE, "JNV CoE")]}
-        userProgramIds={[PROGRAM_IDS.COE]}
-      />,
-    );
-
-    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    expect(
-      fetchMock.mock.calls.filter(([url]) => url.includes("intervention-flags")),
-    ).toHaveLength(0);
-    expect(screen.queryByLabelText(/Needs intervention only/)).not.toBeInTheDocument();
-    expect(screen.getByTestId("student-table")).toHaveAttribute("data-flags-shown", "false");
     vi.unstubAllGlobals();
   });
 });

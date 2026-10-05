@@ -1,4 +1,4 @@
-import { PROGRAM_IDS } from "@/lib/constants";
+import { isPmuRole, PMU_ROLES, PROGRAM_IDS } from "@/lib/constants";
 import { query } from "@/lib/db";
 import {
   canAccessSchool,
@@ -10,10 +10,11 @@ import {
   type UserRole,
 } from "@/lib/permissions";
 
-const ALLOWED_STUDENT_ADDITION_ROLES: ReadonlySet<UserRole> = new Set([
+export const ALLOWED_STUDENT_ADDITION_ROLES: ReadonlySet<UserRole> = new Set<UserRole>([
   "admin",
   "program_manager",
   "program_admin",
+  ...PMU_ROLES,
 ]);
 
 export interface StudentAdditionSchool {
@@ -26,7 +27,6 @@ export interface StudentAdditionSchool {
 
 interface StudentWriteSession {
   user?: { email?: string | null } | null;
-  isPasscodeUser?: boolean;
 }
 
 export type StudentAdditionAccessResult =
@@ -184,7 +184,6 @@ function deny(
 
 function requireGoogleSessionEmail(session: StudentWriteSession | null) {
   if (!session) return deny(401, "Unauthorized");
-  if (session.isPasscodeUser) return deny(403);
 
   const email = session.user?.email;
   return email ? { ok: true as const, email } : deny(403);
@@ -232,8 +231,7 @@ async function requireStudentWriteActor(session: StudentWriteSession | null) {
 // Actor gate for editing an existing student's profile. Unlike the
 // student-addition actor, this follows the permission matrix directly: any role
 // with students=edit (teacher / program_manager / program_admin / admin, minus
-// read_only) may edit. Passcode users are excluded (requireGoogleSessionEmail
-// denies them). Program ownership is checked separately, per student.
+// read_only) may edit. Program ownership is checked separately, per student.
 async function requireStudentEditActor(session: StudentWriteSession | null) {
   const sessionEmail = requireGoogleSessionEmail(session);
   if (!sessionEmail.ok) return sessionEmail;
@@ -300,11 +298,11 @@ export async function requireStudentProgramDropoutAccess(
   programId: number,
 ): Promise<StudentProgramDropoutAccessResult> {
   // Centre-program dropout follows the general students=edit gate (teachers
-  // included), NOT the stricter admin/PM/PA student-addition actor. Teachers
+  // included), NOT the stricter admin/PM/PA/PMU student-addition actor. Teachers
   // may drop a student from a centre program they manage — per-program
   // ownership is still enforced below via actorHasProgramAccess. NVS dropout is
   // unaffected: it routes through requireStudentAdditionStudentAccess, which
-  // keeps the admin/PM/PA-only requireStudentWriteActor.
+  // keeps the admin/PM/PA/PMU-only requireStudentWriteActor.
   const actor = await requireStudentEditActor(session);
   if (!actor.ok) return actor;
 
@@ -327,13 +325,13 @@ export async function requireStudentProgramDropoutAccess(
   };
 }
 
-export function getStudentAdditionAccessFromPermission(
+function getNvsRosterAccessFromPermission(
   session: StudentWriteSession | null,
   school: StudentAdditionSchool,
   permission: UserPermission | null,
+  studentsAccess: "edit" | "view",
 ): StudentAdditionAccessResult {
   if (!session) return deny(401, "Unauthorized");
-  if (session.isPasscodeUser) return deny(403);
 
   const email = session.user?.email;
   if (!email || !permission) return deny(403);
@@ -341,7 +339,8 @@ export function getStudentAdditionAccessFromPermission(
   if (!ALLOWED_STUDENT_ADDITION_ROLES.has(permission.role)) return deny(403);
   if (!canAccessSchoolSync(permission, school.code, school.region ?? undefined))
     return deny(403);
-  if (!getFeatureAccess(permission, "students").canEdit) return deny(403);
+  const access = getFeatureAccess(permission, "students");
+  if (!(studentsAccess === "edit" ? access.canEdit : access.canView)) return deny(403);
   if (!getProgramContextSync(permission).programIds.includes(PROGRAM_IDS.NVS))
     return deny(403);
 
@@ -353,6 +352,29 @@ export function getStudentAdditionAccessFromPermission(
   };
 }
 
+export function getStudentAdditionAccessFromPermission(
+  session: StudentWriteSession | null,
+  school: StudentAdditionSchool,
+  permission: UserPermission | null,
+): StudentAdditionAccessResult {
+  return getNvsRosterAccessFromPermission(session, school, permission, "edit");
+}
+
+/**
+ * Download List (the NVS Student export) gate. Existing roles keep the
+ * student-addition gate (students=edit), so their read_only accounts get no
+ * Download List. PMU roles are pinned to JNV NVS and the export lists only NVS
+ * Students, so a read_only PMU user keeps it with students=view.
+ */
+export function getStudentExportAccessFromPermission(
+  session: StudentWriteSession | null,
+  school: StudentAdditionSchool,
+  permission: UserPermission | null,
+): StudentAdditionAccessResult {
+  const required = isPmuRole(permission?.role) ? "view" : "edit";
+  return getNvsRosterAccessFromPermission(session, school, permission, required);
+}
+
 export async function requireStudentAdditionAccess(
   session: StudentWriteSession | null,
   school: StudentAdditionSchool,
@@ -362,6 +384,17 @@ export async function requireStudentAdditionAccess(
 
   const permission = await getResolvedPermission(sessionEmail.email);
   return getStudentAdditionAccessFromPermission(session, school, permission);
+}
+
+export async function requireStudentExportAccess(
+  session: StudentWriteSession | null,
+  school: StudentAdditionSchool,
+): Promise<StudentAdditionAccessResult> {
+  const sessionEmail = requireGoogleSessionEmail(session);
+  if (!sessionEmail.ok) return sessionEmail;
+
+  const permission = await getResolvedPermission(sessionEmail.email);
+  return getStudentExportAccessFromPermission(session, school, permission);
 }
 
 async function getStudentEditScope(

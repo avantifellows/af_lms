@@ -6,12 +6,12 @@ vi.mock("next-auth", () => ({ getServerSession: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("@/lib/db", () => ({ query: vi.fn() }));
 vi.mock("@/lib/school-students", () => ({ getSchoolRoster: vi.fn() }));
-vi.mock("@/lib/student-addition-access", () => ({ requireStudentAdditionAccess: vi.fn() }));
+vi.mock("@/lib/student-addition-access", () => ({ requireStudentExportAccess: vi.fn() }));
 
 import { getServerSession } from "next-auth";
 import { query } from "@/lib/db";
 import { getSchoolRoster } from "@/lib/school-students";
-import { requireStudentAdditionAccess } from "@/lib/student-addition-access";
+import { requireStudentExportAccess } from "@/lib/student-addition-access";
 import { GET } from "./route";
 
 const student = (overrides: Record<string, unknown> = {}) => ({
@@ -57,7 +57,7 @@ describe("GET NVS student export", () => {
       region: "R1",
       af_school_category: "JNV",
     }]);
-    vi.mocked(requireStudentAdditionAccess).mockResolvedValue({
+    vi.mocked(requireStudentExportAccess).mockResolvedValue({
       ok: true,
       programId: 64,
       permission: {} as never,

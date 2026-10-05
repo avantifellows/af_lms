@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   buildProgramStats,
   studentDroppedFromProgram,
+  studentInProgram,
 } from "./enrollment-stats";
 import { PROGRAM_IDS } from "./permissions";
 
@@ -141,5 +142,22 @@ describe("buildProgramStats", () => {
 
     expect(studentDroppedFromProgram(student, PROGRAM_IDS.COE)).toBe(true);
     expect(studentDroppedFromProgram(student, PROGRAM_IDS.NVS)).toBe(false);
+  });
+});
+
+describe("studentInProgram", () => {
+  it("is a current batch in the Program or a dropout from it", () => {
+    const nvs = PROGRAM_IDS.NVS;
+    expect(studentInProgram({ program_id: 1, student_program_ids: [1, nvs] }, nvs)).toBe(true);
+    expect(
+      studentInProgram({ program_id: nvs, student_program_ids: [], dropout_program_ids: [nvs] }, nvs),
+    ).toBe(true);
+    expect(
+      studentInProgram({ program_id: nvs, student_program_ids: [], status: "dropout" }, nvs),
+    ).toBe(true);
+    expect(
+      studentInProgram({ program_id: 1, student_program_ids: [1], dropout_program_ids: [2] }, nvs),
+    ).toBe(false);
+    expect(studentInProgram({ program_id: null, student_program_ids: [] }, nvs)).toBe(false);
   });
 });

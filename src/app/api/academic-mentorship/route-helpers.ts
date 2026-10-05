@@ -17,7 +17,6 @@ export type ApiResult<T> =
 
 type ApiSession = NonNullable<Awaited<ReturnType<typeof getServerSession>>> & {
   user: { email: string };
-  isPasscodeUser?: boolean;
 };
 export type AcademicMentorshipRouteSession = ApiSession;
 type AccessResult = Awaited<ReturnType<typeof requireAcademicMentorshipAccess>>;

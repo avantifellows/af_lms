@@ -7,6 +7,7 @@ import {
   InterventionFlagError,
   addFlagUpdate,
   authorizeInterventionFlags,
+  mayUpdateFlagForPmu,
   validateNote,
 } from "@/lib/intervention-flags";
 
@@ -41,6 +42,12 @@ export async function POST(
   const resolve = body?.resolve === true;
   const note = validateNote(body?.note, { required: !resolve });
   if (!note.ok) return jsonError(400, note.error);
+
+  // PMU roles may only touch flags on NVS Students; anything else looks like
+  // a flag that isn't here.
+  if (!(await mayUpdateFlagForPmu(auth.actor, flagId, auth.school.id))) {
+    return jsonError(404, "Flag not found");
+  }
 
   try {
     const result = await withTransaction((client) =>

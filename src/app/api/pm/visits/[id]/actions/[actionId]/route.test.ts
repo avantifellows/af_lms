@@ -31,7 +31,6 @@ import { getFeatureAccess, getUserPermission } from "@/lib/permissions";
 import {
   ADMIN_SESSION,
   NO_SESSION,
-  PASSCODE_SESSION,
   PM_SESSION,
   routeParams,
 } from "../../../../../__test-utils__/api-test-helpers";
@@ -193,18 +192,6 @@ describe("GET /api/pm/visits/[id]/actions/[actionId]", () => {
     await expect(res.json()).resolves.toEqual({ error: "Unauthorized" });
   });
 
-  it("returns 403 for passcode users", async () => {
-    mockSession.mockResolvedValue(PASSCODE_SESSION as never);
-
-    const req = new Request("http://localhost/api/pm/visits/10/actions/101");
-    const res = await GET(req as never, params);
-
-    expect(res.status).toBe(403);
-    await expect(res.json()).resolves.toEqual({
-      error: "Passcode users cannot access visit routes",
-    });
-  });
-
   it("returns 404 when parent visit does not exist or is soft-deleted", async () => {
     setupPmView();
     mockQuery.mockResolvedValueOnce([]);
@@ -329,22 +316,6 @@ describe("PATCH /api/pm/visits/[id]/actions/[actionId]", () => {
     const [visitQueryText, visitParams] = mockQuery.mock.calls[0] as [string, unknown[]];
     expect(visitQueryText).toContain("v.deleted_at IS NULL");
     expect(visitParams).toEqual(["10"]);
-  });
-
-  it("returns 403 for passcode users", async () => {
-    mockSession.mockResolvedValue(PASSCODE_SESSION as never);
-
-    const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
-      method: "PATCH",
-      body: JSON.stringify({ data: { notes: "updated" } }),
-      headers: { "Content-Type": "application/json" },
-    });
-    const res = await PATCH(req as never, params);
-
-    expect(res.status).toBe(403);
-    await expect(res.json()).resolves.toEqual({
-      error: "Passcode users cannot access visit routes",
-    });
   });
 
   it("allows a program admin to save an action on their own visit", async () => {
@@ -1502,20 +1473,6 @@ describe("DELETE /api/pm/visits/[id]/actions/[actionId]", () => {
     const [visitQueryText, visitParams] = mockQuery.mock.calls[0] as [string, unknown[]];
     expect(visitQueryText).toContain("v.deleted_at IS NULL");
     expect(visitParams).toEqual(["10"]);
-  });
-
-  it("returns 403 for passcode users", async () => {
-    mockSession.mockResolvedValue(PASSCODE_SESSION as never);
-
-    const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
-      method: "DELETE",
-    });
-    const res = await DELETE(req as never, params);
-
-    expect(res.status).toBe(403);
-    await expect(res.json()).resolves.toEqual({
-      error: "Passcode users cannot access visit routes",
-    });
   });
 
   it("allows a program admin to delete an action on their own visit", async () => {
