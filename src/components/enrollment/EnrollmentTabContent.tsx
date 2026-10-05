@@ -381,7 +381,7 @@ export default function EnrollmentTabContent({
           ))}
           {streamOptions.noStreamCount > 0 && (
             <option value={NO_STREAM}>
-              No stream ({streamOptions.noStreamCount})
+              {isNvsSelected ? "Not set" : "No stream"} ({streamOptions.noStreamCount})
             </option>
           )}
         </select>

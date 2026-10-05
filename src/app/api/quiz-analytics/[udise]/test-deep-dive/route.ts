@@ -7,11 +7,20 @@ import type { TestDeepDiveData } from "@/types/quiz";
 
 // JNV NVS only: time spent comes from BigQuery, not the DynamoDB report doc.
 // A failed lookup must not block the scores, so it degrades to "no times".
+// Time spent is optional detail; a slow BigQuery must not hold back the scores.
+const TIME_SPENT_TIMEOUT_MS = 5000;
+
 async function lookupTimeSpent(
   ...args: Parameters<typeof getStudentTimeSpentData>
 ): Promise<Map<string, StudentTimeSpent>> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    return await getStudentTimeSpentData(...args);
+    return await Promise.race([
+      getStudentTimeSpentData(...args),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("timed out")), TIME_SPENT_TIMEOUT_MS);
+      }),
+    ]);
   } catch (error) {
     // Message only — never the student rows or ids.
     console.error(
@@ -19,6 +28,8 @@ async function lookupTimeSpent(
       error instanceof Error ? error.message : "unknown error"
     );
     return new Map();
+  } finally {
+    clearTimeout(timer);
   }
 }
 
