@@ -578,6 +578,18 @@ describe("PATCH /api/admin/users/[id] — PMU roles", () => {
     expect(updateParams()).toBeUndefined();
   });
 
+  it("requires program_ids when moving a user off a PMU role", async () => {
+    const pmu = { level: 3, role: "pmu_manager", school_codes: null, regions: null, program_ids: [64] };
+    mockDb({ stored: pmu });
+    const res = await patch({ role: "teacher", level: 1, school_codes: ["JNV001"] });
+    expect(res.status).toBe(400);
+    expect(updateParams()).toBeUndefined();
+
+    mockDb({ stored: pmu });
+    const ok = await patch({ role: "teacher", level: 1, school_codes: ["JNV001"], program_ids: [1] });
+    expect(ok.status).toBe(200);
+  });
+
   it("still allows a PMU change when neither link finds a seat", async () => {
     mockDb({ stored: { ...MULTI_SCHOOL_PM, email: "free.pm@example.org" } });
     const res = await patch({ role: "pmu_manager", level: 3 });

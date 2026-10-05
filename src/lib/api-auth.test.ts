@@ -42,6 +42,7 @@ const SCHOOL_ROW = {
   code: "70705",
   name: "JNV Bhavnagar",
   region: "West",
+  af_school_category: "JNV",
 };
 
 beforeEach(() => {
@@ -105,6 +106,20 @@ describe("authorizeSchoolAccess", () => {
       "70705",
       "West"
     );
+  });
+
+  it("refuses a PMU role at a non-JNV school even with school access", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockCanAccessSchool.mockResolvedValue(true);
+    mockResolvedPermission.mockResolvedValue(permission({ role: "pmu_manager", program_ids: [64] }));
+
+    mockQuery.mockResolvedValue([{ ...SCHOOL_ROW, af_school_category: "CoE" }]);
+    const denied = await authorizeSchoolAccess("70705");
+    expect(denied.authorized).toBe(false);
+    if (!denied.authorized) expect(denied.response.status).toBe(403);
+
+    mockQuery.mockResolvedValue([{ ...SCHOOL_ROW, af_school_category: "JNV" }]);
+    expect((await authorizeSchoolAccess("70705")).authorized).toBe(true);
   });
 
   it("returns 403 for email user without access", async () => {

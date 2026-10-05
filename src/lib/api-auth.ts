@@ -4,12 +4,14 @@ import { authOptions } from "@/lib/auth";
 import { canAccessSchool, getResolvedPermission } from "@/lib/permissions";
 import type { UserPermission } from "@/lib/permissions";
 import { query } from "@/lib/db";
+import { isPmuRole } from "@/lib/constants";
 
 interface SchoolInfo {
   id: string;
   code: string;
   name: string;
   region: string | null;
+  af_school_category?: string | null;
 }
 
 type AuthResult =
@@ -47,7 +49,7 @@ export async function authorizeSchoolAccess(
   }
 
   const schools = await query<SchoolInfo>(
-    `SELECT id, code, name, region FROM school WHERE udise_code = $1 OR code = $1`,
+    `SELECT id, code, name, region, af_school_category FROM school WHERE udise_code = $1 OR code = $1`,
     [udise]
   );
   const school = schools[0];
@@ -72,6 +74,13 @@ export async function authorizeSchoolAccess(
   }
 
   const permission = email ? await getResolvedPermission(email) : null;
+  // PMU roles are NVS-only, so non-JNV schools are out of scope (as on the School page).
+  if (isPmuRole(permission?.role) && school.af_school_category !== "JNV") {
+    return {
+      authorized: false,
+      response: NextResponse.json({ error: "Access denied" }, { status: 403 }),
+    };
+  }
   const readOnly = permission?.read_only === true;
   if (options?.requireEdit && readOnly) {
     return {

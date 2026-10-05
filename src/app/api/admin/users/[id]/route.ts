@@ -173,6 +173,18 @@ async function applyPatch(id: string, body: UserPatchBody) {
   }
 
   if (isPmu) return updatePmuUser(id, body, effectiveRole, stored, seat);
+
+  // Moving off a PMU role must say which programs the user gets; otherwise the
+  // stored [64] would silently carry over.
+  if (body.program_ids === undefined && body.role !== "holistic_mentorship_admin") {
+    const current = stored ?? (await storedPermission(id));
+    if (current && isPmuRole(current.role)) {
+      return NextResponse.json(
+        { error: "program_ids is required when moving a user off a PMU role" },
+        { status: 400 }
+      );
+    }
+  }
   return updateStandardUser(id, body, seat);
 }
 
