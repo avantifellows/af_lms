@@ -95,8 +95,9 @@ export default function DeleteVisitButton({ visitId, mode, redirectTo }: DeleteV
         open={isOpen}
         onClose={isDeleting ? undefined : () => setIsOpen(false)}
         className="max-w-md"
+        aria-labelledby="delete-visit-title"
       >
-        <div role="dialog" aria-modal="true" aria-labelledby="delete-visit-title">
+        <div>
           <div className="border-b-4 border-danger/30 px-5 py-4">
             <h3 id="delete-visit-title" className="text-base font-bold uppercase tracking-tight text-text-primary">
               Delete Visit

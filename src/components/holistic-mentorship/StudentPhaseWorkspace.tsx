@@ -11,7 +11,8 @@ import { type ReactNode, useCallback, useEffect, useEffectEvent, useId, useRef, 
 import type { HolisticProfileRegeneration, HolisticStudentPhaseDetail } from "@/lib/holistic-student-phase";
 import { PROGRAM_IDS } from "@/lib/constants";
 import {
-  HOLISTIC_FOLLOW_UP_QUESTIONS, normalizeHolisticFollowUpAnswers, type HolisticFollowUpQuestionKey,
+  HOLISTIC_FOLLOW_UP_ANSWER_MAX_LENGTH, HOLISTIC_FOLLOW_UP_QUESTIONS, normalizeHolisticFollowUpAnswers,
+  type HolisticFollowUpQuestionKey,
 } from "@/lib/holistic-follow-up-questions";
 import { holisticStudentPhaseHref, type HolisticStudentPhaseSource } from "@/lib/holistic-links";
 import { Button } from "@/components/ui/Button";
@@ -1493,6 +1494,9 @@ const EMPTY_FOLLOW_UP_DRAFT = Object.fromEntries(
   HOLISTIC_FOLLOW_UP_QUESTIONS.map(({ key }) => [key, ""])
 ) as FollowUpDraft;
 
+const FOLLOW_UP_ANSWER_TOO_LONG =
+  `Keep this answer to ${HOLISTIC_FOLLOW_UP_ANSWER_MAX_LENGTH.toLocaleString("en-US")} characters or fewer`;
+
 function MentorFollowUpNotes({ phase, apiUrl }: { phase: OpenSelectedPhase; apiUrl: string }) {
   const hintId = useId();
   const [open, setOpen] = useState(false);
@@ -1523,7 +1527,10 @@ function AddFollowUpNoteModal({ open, apiUrl, onClose, onSaved }: {
   const [draft, setDraft] = useState<FollowUpDraft>(EMPTY_FOLLOW_UP_DRAFT);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const firstAnswerRef = useRef<HTMLTextAreaElement>(null);
   const hasAnswer = Object.values(draft).some((answer) => answer.trim());
+  const isTooLong = (answer: string) => answer.length > HOLISTIC_FOLLOW_UP_ANSWER_MAX_LENGTH;
+  const hasTooLongAnswer = Object.values(draft).some(isTooLong);
 
   function close() {
     setDraft(EMPTY_FOLLOW_UP_DRAFT);
@@ -1564,21 +1571,33 @@ function AddFollowUpNoteModal({ open, apiUrl, onClose, onSaved }: {
   }
 
   return <Modal open={open} onClose={requestClose} role="dialog" aria-modal="true" aria-labelledby={headingId}
-    className="max-w-2xl p-5">
+    initialFocusRef={firstAnswerRef} className="max-w-2xl p-5">
     <h2 id={headingId} className="text-lg font-semibold text-text-primary">Add follow-up notes</h2>
     <p className="mt-1 text-sm text-text-muted">Follow-up notes can&apos;t be edited after saving.</p>
     <div className="mt-4 space-y-4">
-      {HOLISTIC_FOLLOW_UP_QUESTIONS.map(({ key, text }) => <div key={key}>
-        <label htmlFor={`${fieldId}-${key}`} className="text-sm font-semibold text-text-primary">{text}</label>
-        <textarea id={`${fieldId}-${key}`} rows={3} value={draft[key]}
-          onChange={(event) => setDraft((current) => ({ ...current, [key]: event.target.value }))}
-          className="mt-1 w-full rounded-md border border-border bg-bg-card p-2 text-sm text-text-primary" />
-      </div>)}
+      {HOLISTIC_FOLLOW_UP_QUESTIONS.map(({ key, text }, index) => {
+        const tooLong = isTooLong(draft[key]);
+        return <div key={key}>
+          <label htmlFor={`${fieldId}-${key}`} className="text-sm font-semibold text-text-primary">{text}</label>
+          {/* readOnly, not disabled, so text stays selectable while a save is in flight. */}
+          <textarea id={`${fieldId}-${key}`} ref={index === 0 ? firstAnswerRef : undefined} rows={3}
+            value={draft[key]} readOnly={saving} aria-invalid={tooLong || undefined}
+            aria-describedby={tooLong ? `${fieldId}-${key}-error` : undefined}
+            onChange={(event) => setDraft((current) => ({ ...current, [key]: event.target.value }))}
+            className={`mt-1 w-full rounded-md border bg-bg-card p-2 text-sm text-text-primary ${
+              tooLong ? "border-danger" : "border-border"}`} />
+          {tooLong && <p id={`${fieldId}-${key}-error`} className="mt-1 text-sm text-danger">
+            {FOLLOW_UP_ANSWER_TOO_LONG}
+          </p>}
+        </div>;
+      })}
     </div>
     {error && <p role="alert" className="mt-4 text-sm text-danger">{error}</p>}
     <div className="mt-5 flex justify-end gap-2">
       <Button type="button" variant="secondary" onClick={requestClose}>Cancel</Button>
-      <Button type="button" disabled={!hasAnswer || saving} onClick={() => void save()}>Save</Button>
+      <Button type="button" disabled={!hasAnswer || hasTooLongAnswer || saving} onClick={() => void save()}>
+        Save
+      </Button>
     </div>
   </Modal>;
 }

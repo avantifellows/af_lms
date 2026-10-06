@@ -975,12 +975,9 @@ export default function ActionPointList({
         onClose={deletingActionId !== null ? undefined : () => setConfirmDeleteActionId(null)}
         zIndex="z-40"
         className="max-w-md"
+        aria-labelledby="delete-confirm-title"
       >
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="delete-confirm-title"
-        >
+        <div>
           <div className="border-b-4 border-danger/30 px-5 py-4">
             <h3 id="delete-confirm-title" className="text-base font-bold uppercase tracking-tight text-text-primary">
               Delete Action Point

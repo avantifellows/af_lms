@@ -1104,22 +1104,62 @@ describe("StudentPhaseWorkspace", () => {
 
       expect(await within(dialog).findByRole("alert")).toHaveTextContent("Mentor Mapping changed");
       expect(textbox).toHaveValue("Exam stress");
+      expect(textbox).not.toHaveAttribute("readonly");
       expect(followUpSection()).toHaveTextContent("No follow-up notes yet");
     });
 
-    it("rejects an answer over 10,000 characters without sending a request", () => {
+    it("flags an answer over 10,000 characters inline and disables Save without sending a request", () => {
       const fetchMock = vi.fn();
       vi.stubGlobal("fetch", fetchMock);
       render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={completedTeacherDetail()} />);
 
       const dialog = openAddNotes();
-      fireEvent.change(within(dialog).getByRole("textbox", { name: "What solutions did you suggest?" }),
-        { target: { value: "a".repeat(10_001) } });
-      fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+      fireEvent.change(within(dialog).getByRole("textbox", { name: "What challenges did the student talk about?" }),
+        { target: { value: "Exam stress" } });
+      const solutions = within(dialog).getByRole("textbox", { name: "What solutions did you suggest?" });
+      fireEvent.change(solutions, { target: { value: "a".repeat(10_001) } });
 
-      expect(within(dialog).getByRole("alert"))
-        .toHaveTextContent("Follow-up answers must be 10,000 characters or fewer");
+      expect(solutions).toHaveAttribute("aria-invalid", "true");
+      expect(solutions).toHaveAccessibleDescription("Keep this answer to 10,000 characters or fewer");
+      expect(within(dialog).getAllByText("Keep this answer to 10,000 characters or fewer")).toHaveLength(1);
+      expect(within(dialog).getByRole("textbox", { name: "What challenges did the student talk about?" }))
+        .not.toHaveAttribute("aria-invalid");
+      const save = within(dialog).getByRole("button", { name: "Save" });
+      expect(save).toBeDisabled();
+      fireEvent.click(save);
       expect(fetchMock).not.toHaveBeenCalled();
+
+      fireEvent.change(solutions, { target: { value: "a".repeat(10_000) } });
+      expect(solutions).not.toHaveAttribute("aria-invalid");
+      expect(dialog).not.toHaveTextContent("Keep this answer to 10,000 characters or fewer");
+      expect(save).toBeEnabled();
+    });
+
+    it("keeps Save disabled while an over-limit answer is the only answer", () => {
+      render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={completedTeacherDetail()} />);
+
+      const dialog = openAddNotes();
+      const actionPlan = within(dialog).getByRole("textbox", {
+        name: "Was the student able to follow the action plan shared previously?",
+      });
+      fireEvent.change(actionPlan, { target: { value: " ".repeat(10_001) } });
+
+      expect(actionPlan).toHaveAccessibleDescription("Keep this answer to 10,000 characters or fewer");
+      expect(within(dialog).getByRole("button", { name: "Save" })).toBeDisabled();
+    });
+
+    it("focuses the first answer on open and returns focus to Add notes on close", () => {
+      render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={completedTeacherDetail()} />);
+      const addNotes = within(followUpSection()).getByRole("button", { name: "Add notes" });
+      addNotes.focus();
+
+      const dialog = openAddNotes();
+      expect(within(dialog).getByRole("textbox", { name: "What challenges did the student talk about?" }))
+        .toHaveFocus();
+
+      fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(addNotes).toHaveFocus();
     });
 
     it.each([
@@ -1155,7 +1195,7 @@ describe("StudentPhaseWorkspace", () => {
       expect(confirm).not.toHaveBeenCalled();
     });
 
-    it("disables Save and ignores closing while the save is in flight", async () => {
+    it("disables Save, makes answers read-only, and ignores closing while the save is in flight", async () => {
       let finishSave!: (response: Response) => void;
       const saveResponse = new Promise<Response>((resolve) => { finishSave = resolve; });
       const fetchMock = vi.fn().mockReturnValue(saveResponse);
@@ -1169,6 +1209,12 @@ describe("StudentPhaseWorkspace", () => {
       fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
 
       await waitFor(() => expect(within(dialog).getByRole("button", { name: "Save" })).toBeDisabled());
+      for (const textbox of within(dialog).getAllByRole("textbox")) {
+        expect(textbox).toHaveAttribute("readonly");
+        expect(textbox).toBeEnabled();
+      }
+      expect(within(dialog).getByRole("textbox", { name: "What challenges did the student talk about?" }))
+        .toHaveValue("Exam stress");
       fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
       fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
       fireEvent.keyDown(document, { key: "Escape" });

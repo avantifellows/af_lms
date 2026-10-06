@@ -1,7 +1,28 @@
 import { describe, it, expect, vi } from "vitest";
+import { useRef, useState } from "react";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Modal } from "./Modal";
+
+function ModalHarness({ withInitialFocus = false, empty = false }: { withInitialFocus?: boolean; empty?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const notesRef = useRef<HTMLTextAreaElement>(null);
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)}>Open</button>
+      <button type="button">Behind</button>
+      <Modal open={open} onClose={() => setOpen(false)} aria-label="Test dialog"
+        initialFocusRef={withInitialFocus ? notesRef : undefined}>
+        {!empty && <>
+          <button type="button">First</button>
+          <textarea aria-label="Notes" ref={notesRef} />
+          <button type="button" disabled>Disabled</button>
+          <button type="button" onClick={() => setOpen(false)}>Last</button>
+        </>}
+      </Modal>
+    </>
+  );
+}
 
 describe("Modal", () => {
   it("renders nothing when closed", () => {
@@ -42,5 +63,82 @@ describe("Modal", () => {
     render(<Modal open={true} zIndex="z-40">Content</Modal>);
     const container = document.querySelector(".fixed.inset-0");
     expect(container).toHaveClass("z-40");
+  });
+
+  it("exposes the dialog role and modal state, letting callers add their own aria props", () => {
+    render(<Modal open={true} aria-labelledby="title"><h2 id="title">Edit</h2></Modal>);
+    const dialog = screen.getByRole("dialog", { name: "Edit" });
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+  });
+
+  describe("focus management", () => {
+    it("moves focus to the first focusable element on open", async () => {
+      const user = userEvent.setup();
+      render(<ModalHarness />);
+      await user.click(screen.getByRole("button", { name: "Open" }));
+      expect(screen.getByRole("button", { name: "First" })).toHaveFocus();
+    });
+
+    it("focuses the caller's initialFocusRef element when given", async () => {
+      const user = userEvent.setup();
+      render(<ModalHarness withInitialFocus />);
+      await user.click(screen.getByRole("button", { name: "Open" }));
+      expect(screen.getByRole("textbox", { name: "Notes" })).toHaveFocus();
+    });
+
+    it("focuses the dialog itself when it has nothing focusable", async () => {
+      const user = userEvent.setup();
+      render(<ModalHarness empty />);
+      await user.click(screen.getByRole("button", { name: "Open" }));
+      const dialog = screen.getByRole("dialog", { name: "Test dialog" });
+      expect(dialog).toHaveFocus();
+      await user.tab();
+      expect(dialog).toHaveFocus();
+    });
+
+    it("wraps Tab from the last focusable element back to the first", async () => {
+      const user = userEvent.setup();
+      render(<ModalHarness />);
+      await user.click(screen.getByRole("button", { name: "Open" }));
+      await user.tab();
+      expect(screen.getByRole("textbox", { name: "Notes" })).toHaveFocus();
+      await user.tab();
+      expect(screen.getByRole("button", { name: "Last" })).toHaveFocus();
+      await user.tab();
+      expect(screen.getByRole("button", { name: "First" })).toHaveFocus();
+    });
+
+    it("wraps Shift+Tab from the first focusable element to the last", async () => {
+      const user = userEvent.setup();
+      render(<ModalHarness />);
+      await user.click(screen.getByRole("button", { name: "Open" }));
+      expect(screen.getByRole("button", { name: "First" })).toHaveFocus();
+      await user.tab({ shift: true });
+      expect(screen.getByRole("button", { name: "Last" })).toHaveFocus();
+    });
+
+    it("pulls focus back into the dialog when it has escaped to the page", async () => {
+      const user = userEvent.setup();
+      render(<ModalHarness />);
+      await user.click(screen.getByRole("button", { name: "Open" }));
+      screen.getByRole("button", { name: "Behind", hidden: true }).focus();
+      await user.tab();
+      expect(screen.getByRole("button", { name: "First" })).toHaveFocus();
+    });
+
+    it.each([
+      ["Escape", async (user: ReturnType<typeof userEvent.setup>) => user.keyboard("{Escape}")],
+      ["a button inside the dialog", async (user: ReturnType<typeof userEvent.setup>) =>
+        user.click(screen.getByRole("button", { name: "Last" }))],
+    ])("restores focus to the opener after closing via %s", async (_how, close) => {
+      const user = userEvent.setup();
+      render(<ModalHarness />);
+      const opener = screen.getByRole("button", { name: "Open" });
+      await user.click(opener);
+      expect(opener).not.toHaveFocus();
+      await close(user);
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(opener).toHaveFocus();
+    });
   });
 });

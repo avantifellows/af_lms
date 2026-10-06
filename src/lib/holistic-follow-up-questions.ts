@@ -18,7 +18,7 @@ export type HolisticFollowUpNote = {
 
 export type HolisticFollowUpAnswers = Record<HolisticFollowUpQuestionKey, string | null>;
 
-const HOLISTIC_FOLLOW_UP_ANSWER_MAX_LENGTH = 10_000;
+export const HOLISTIC_FOLLOW_UP_ANSWER_MAX_LENGTH = 10_000;
 
 export type HolisticFollowUpAnswersResult =
   | { ok: true; answers: HolisticFollowUpAnswers }
