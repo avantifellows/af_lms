@@ -5,9 +5,8 @@ import { getAccessibleSchoolCodes, getResolvedPermission } from "@/lib/permissio
 import { runAsMcpCaller } from "@/lib/session";
 import { LMS_VIEWS, invokeView, matchView } from "@/lib/mcp/views";
 
-// The MCP caller, resolved by the route before the server is built. Spike:
-// this comes from the NextAuth session cookie. Once the OAuth server lands it
-// comes from the bearer token instead; tools only ever see this shape.
+// The MCP caller, resolved by the route (OAuth bearer token) before the server
+// is built; tools only ever see this shape.
 export interface McpCaller {
   email: string;
 }
@@ -34,15 +33,13 @@ const text = (t: string, isError = false): ToolResult => ({
   ...(isError ? { isError } : {}),
 });
 
-const NOT_SIGNED_IN = text("Not signed in to the LMS.", true);
-
 // One structured line per tool call. Never log arguments' values beyond the
 // path: they can carry student identifiers.
-function logCall(caller: McpCaller | null, tool: string, startedAt: number, extra: object) {
+function logCall(caller: McpCaller, tool: string, startedAt: number, extra: object) {
   console.log(
     JSON.stringify({
       event: "lms_mcp_call",
-      email: caller?.email ?? null,
+      email: caller.email,
       tool,
       ms: Date.now() - startedAt,
       ...extra,
@@ -52,7 +49,7 @@ function logCall(caller: McpCaller | null, tool: string, startedAt: number, extr
 
 // Built fresh per request: the transport is stateless, so nothing may live on
 // the server between calls (Amplify gives no instance affinity anyway).
-export function buildLmsMcpServer(caller: McpCaller | null, baseUrl: string): McpServer {
+export function buildLmsMcpServer(caller: McpCaller, baseUrl: string): McpServer {
   const server = new McpServer(
     { name: "avanti-lms", version: "0.1.0" },
     { instructions: INSTRUCTIONS },
@@ -67,7 +64,6 @@ export function buildLmsMcpServer(caller: McpCaller | null, baseUrl: string): Mc
       annotations: { readOnlyHint: true },
     },
     async () => {
-      if (!caller) return NOT_SIGNED_IN;
       const permission = await getResolvedPermission(caller.email);
       const scope = permission?.scope;
       const summary = permission
@@ -94,7 +90,6 @@ export function buildLmsMcpServer(caller: McpCaller | null, baseUrl: string): Mc
       annotations: { readOnlyHint: true },
     },
     async ({ search }) => {
-      if (!caller) return NOT_SIGNED_IN;
       const startedAt = Date.now();
       const codes = await getAccessibleSchoolCodes(caller.email);
       const like = search ? `%${search.trim()}%` : null;
@@ -152,7 +147,6 @@ export function buildLmsMcpServer(caller: McpCaller | null, baseUrl: string): Mc
       annotations: { readOnlyHint: true },
     },
     async ({ path, query: params }) => {
-      if (!caller) return NOT_SIGNED_IN;
       const startedAt = Date.now();
       const match = matchView(path);
       if (!match) {

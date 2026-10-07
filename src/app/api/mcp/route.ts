@@ -1,25 +1,55 @@
 import { getServerSession } from "next-auth";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { authOptions } from "@/lib/auth";
-import { buildLmsMcpServer, type McpCaller } from "@/lib/mcp/server";
+import { buildLmsMcpServer } from "@/lib/mcp/server";
+import {
+  CORS_HEADERS,
+  bearerEmail,
+  protectedResourceMetadataUrl,
+  publicOrigin,
+} from "@/lib/mcp/oauth";
 
 // Remote MCP endpoint (Streamable HTTP, stateless, JSON responses — no SSE
-// stream to hold open on Amplify). Spike: identity is the NextAuth session
-// cookie; passcode users are out of scope (no email). The OAuth bearer check
-// must replace this before this ships: MCP clients can't hold an LMS cookie.
-async function handle(request: Request): Promise<Response> {
-  const session = await getServerSession(authOptions);
-  const email = session && !session.isPasscodeUser ? session.user?.email : null;
-  const caller: McpCaller | null = email ? { email } : null;
+// stream to hold open on Amplify). The caller is the email in an OAuth bearer
+// token issued by /api/mcp/oauth; tools re-resolve their LMS permission on
+// every call, so access changes apply immediately.
+async function callerEmail(request: Request, origin: string): Promise<string | null> {
+  const email = bearerEmail(request, origin);
+  if (email) return email;
+  // Local development only: accept the NextAuth cookie, so the server can be
+  // tried without running the OAuth flow. Passcode users have no email.
+  if (process.env.NODE_ENV !== "production") {
+    const session = await getServerSession(authOptions);
+    if (session && !session.isPasscodeUser && session.user?.email) return session.user.email;
+  }
+  return null;
+}
 
-  const server = buildLmsMcpServer(caller, new URL(request.url).origin);
+export async function POST(request: Request): Promise<Response> {
+  const origin = publicOrigin(request);
+  const email = await callerEmail(request, origin);
+  if (!email) {
+    // Tells the client where to discover the authorization server (RFC 9728).
+    return new Response(JSON.stringify({ error: "invalid_token", error_description: "Sign in required" }), {
+      status: 401,
+      headers: {
+        "Content-Type": "application/json",
+        "WWW-Authenticate": `Bearer resource_metadata="${protectedResourceMetadataUrl(origin)}"`,
+        ...CORS_HEADERS,
+      },
+    });
+  }
+
+  const server = buildLmsMcpServer({ email }, origin);
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
     enableJsonResponse: true,
   });
   await server.connect(transport);
   try {
-    return await transport.handleRequest(request);
+    const response = await transport.handleRequest(request);
+    for (const [k, v] of Object.entries(CORS_HEADERS)) response.headers.set(k, v);
+    return response;
   } finally {
     await server.close();
   }
@@ -29,7 +59,11 @@ async function handle(request: Request): Promise<Response> {
 // 405 tells clients so; answering GET with an empty stream makes them reconnect
 // in a loop.
 function methodNotAllowed(): Response {
-  return new Response(null, { status: 405, headers: { Allow: "POST" } });
+  return new Response(null, { status: 405, headers: { Allow: "POST", ...CORS_HEADERS } });
 }
 
-export { handle as POST, methodNotAllowed as GET, methodNotAllowed as DELETE };
+export function OPTIONS(): Response {
+  return new Response(null, { status: 204, headers: CORS_HEADERS });
+}
+
+export { methodNotAllowed as GET, methodNotAllowed as DELETE };

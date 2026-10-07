@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("next-auth", () => ({ getServerSession: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
@@ -23,6 +23,7 @@ import { query } from "@/lib/db";
 import { getCurriculumOptions } from "@/lib/curriculum-options";
 import { getAccessibleSchoolCodes, getResolvedPermission } from "@/lib/permissions";
 import { GET, POST } from "./route";
+import { issueTokens } from "@/lib/mcp/oauth";
 import { PM_SESSION } from "../__test-utils__/api-test-helpers";
 
 const mockSession = vi.mocked(getServerSession);
@@ -60,14 +61,18 @@ async function callTool(name: string, args: object = {}) {
 }
 
 describe("/api/mcp", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv("NEXTAUTH_SECRET", "test-secret");
+  });
+  afterEach(() => vi.unstubAllEnvs());
 
   it("GET is 405: stateless, no event stream", async () => {
     expect((await GET()).status).toBe(405);
   });
 
   it("lists the tools", async () => {
-    mockSession.mockResolvedValue(null);
+    mockSession.mockResolvedValue(PM_SESSION);
     const body = await (await POST(rpc("tools/list"))).json();
     expect(body.result.tools.map((t: { name: string }) => t.name)).toEqual([
       "whoami",
@@ -77,21 +82,38 @@ describe("/api/mcp", () => {
     ]);
   });
 
-  describe("without a signed-in caller", () => {
-    it.each([
-      ["whoami", {}],
-      ["list_my_schools", {}],
-      ["get_view", { path: "/api/curriculum/options" }],
-    ])("%s refuses", async (tool, args) => {
+  describe("authentication", () => {
+    it("is 401 with resource metadata when there is no caller", async () => {
       mockSession.mockResolvedValue(null);
-      const result = await callTool(tool, args);
-      expect(result.content[0].text).toBe("Not signed in to the LMS.");
+      const res = await POST(rpc("tools/list"));
+      expect(res.status).toBe(401);
+      expect(res.headers.get("www-authenticate")).toBe(
+        'Bearer resource_metadata="http://localhost/.well-known/oauth-protected-resource"',
+      );
       expect(mockPermission).not.toHaveBeenCalled();
     });
 
-    it("passcode users are not callers", async () => {
+    it("passcode sessions are not callers", async () => {
       mockSession.mockResolvedValue({ ...PM_SESSION, isPasscodeUser: true });
-      expect((await callTool("whoami")).content[0].text).toBe("Not signed in to the LMS.");
+      expect((await POST(rpc("tools/list"))).status).toBe(401);
+    });
+
+    it("accepts an OAuth bearer token without any cookie session", async () => {
+      mockSession.mockResolvedValue(null);
+      mockPermission.mockResolvedValue(PM_PERMISSION);
+      const { access_token } = issueTokens(PM_SESSION.user.email, "client", "http://localhost");
+      const req = rpc("tools/call", { name: "whoami", arguments: {} });
+      req.headers.set("authorization", `Bearer ${access_token}`);
+      const res = await POST(req);
+      expect(res.status).toBe(200);
+      expect(mockPermission).toHaveBeenCalledWith(PM_SESSION.user.email);
+    });
+
+    it("rejects a forged bearer token", async () => {
+      mockSession.mockResolvedValue(null);
+      const req = rpc("tools/list");
+      req.headers.set("authorization", "Bearer eyJlbWFpbCI6ImFkbWluIn0.AAAA");
+      expect((await POST(req)).status).toBe(401);
     });
   });
 
