@@ -72,7 +72,7 @@ describe("redirect URIs", () => {
     ["not a url", false],
   ])("%s allowed=%s", (uri, allowed) => expect(isAllowedRedirectUri(uri)).toBe(allowed));
 
-  const client = { redirect_uris: ["https://claude.ai/api/mcp/auth_callback", "http://localhost:33418/callback"] };
+  const client = { iss: ORIGIN, redirect_uris: ["https://claude.ai/api/mcp/auth_callback", "http://localhost:33418/callback"] };
 
   it("matches registered URIs exactly", () => {
     expect(redirectUriRegistered(client, "https://claude.ai/api/mcp/auth_callback")).toBe(true);

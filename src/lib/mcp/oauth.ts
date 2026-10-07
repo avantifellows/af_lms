@@ -105,7 +105,10 @@ export function protectedResourceMetadata(origin: string) {
 
 // --- Clients --------------------------------------------------------------
 
+// `iss` is the issuing origin. Staging and production share NEXTAUTH_SECRET,
+// so without it a client or code from one would be accepted by the other.
 export interface ClientPayload {
+  iss: string;
   redirect_uris: string[];
   client_name?: string;
 }
@@ -157,6 +160,7 @@ export interface AuthorizationRequest {
 }
 
 export interface CodePayload {
+  iss: string;
   email: string;
   cid: string;
   redirect_uri: string;

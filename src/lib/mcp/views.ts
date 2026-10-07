@@ -31,6 +31,10 @@ export interface LmsView {
   description: string;
   query: Record<string, string>; // query parameter → meaning ("required" when needed)
   handler: Handler;
+  // The route checks school access but not the caller's programs (the LMS UI
+  // narrows by program instead). get_view requires `program` and only allows
+  // one the caller's own grades view lists — see `programGuard`.
+  programScoped?: boolean;
 }
 
 const CURRICULUM_SCOPE = {
@@ -42,7 +46,7 @@ const CURRICULUM_SCOPE = {
 };
 
 const QUIZ_FILTERS = {
-  program: "optional — program name, from the grades view",
+  program: "required — one of the programs the grades view returns",
   stream: "optional — e.g. engineering / medical",
 };
 
@@ -78,18 +82,21 @@ export const LMS_VIEWS: LmsView[] = [
     description: "Test-by-test summary for a grade at a school: attendance, average scores, the list of tests (with sessionId).",
     query: { grade: "required — integer", ...QUIZ_FILTERS },
     handler: handler(quizBatchOverview.GET),
+    programScoped: true,
   },
   {
     path: "/api/quiz-analytics/[udise]/cumulative-als",
     description: "Each student's academic level across major tests for a grade at a school, with the progression.",
     query: { grade: "required — integer", ...QUIZ_FILTERS },
     handler: handler(quizCumulativeAls.GET),
+    programScoped: true,
   },
   {
     path: "/api/quiz-analytics/[udise]/test-deep-dive",
     description: "One test at a school: per-student marks and per-subject/chapter breakdown.",
     query: { grade: "required — integer", sessionId: "required — from batch-overview", ...QUIZ_FILTERS },
     handler: handler(quizTestDeepDive.GET),
+    programScoped: true,
   },
 ];
 
@@ -111,6 +118,32 @@ export function matchView(path: string): { view: LmsView; params: Record<string,
       return seg === parts[i];
     });
     if (ok) return { view, params };
+  }
+  return null;
+}
+
+const GRADES_VIEW = "/api/quiz-analytics/[udise]/grades";
+
+// For programScoped views: the requested program must be one the LMS's own
+// grades route offers this caller at this school (it filters by the caller's
+// program_ids). Returns an error message, or null when the call may proceed.
+// Must run inside `runAsMcpCaller`.
+export async function programGuard(
+  match: { view: LmsView; params: Record<string, string> },
+  query: Record<string, string | number>,
+  baseUrl: string,
+): Promise<string | null> {
+  if (!match.view.programScoped) return null;
+  const grades = LMS_VIEWS.find((v) => v.path === GRADES_VIEW)!;
+  const path = GRADES_VIEW.replace("[udise]", encodeURIComponent(match.params.udise));
+  const response = await invokeView({ view: grades, params: match.params }, path, {}, baseUrl);
+  if (!response.ok) return `HTTP ${response.status}: ${await response.text()}`;
+  const { programs } = (await response.json()) as { programs: string[] };
+  const program = query.program === undefined ? "" : String(query.program);
+  if (!programs.includes(program)) {
+    return programs.length
+      ? `\`program\` is required and must be one of: ${programs.join(", ")}.`
+      : "No test-result programs at this school are available to you.";
   }
   return null;
 }

@@ -2,6 +2,7 @@ import {
   CORS_HEADERS,
   isAllowedRedirectUri,
   oauthError,
+  publicOrigin,
   sign,
   type ClientPayload,
 } from "@/lib/mcp/oauth";
@@ -30,7 +31,11 @@ export async function POST(request: Request) {
 
   const name =
     typeof body.client_name === "string" ? body.client_name.trim().slice(0, 100) : undefined;
-  const client: ClientPayload = { redirect_uris: uris as string[], ...(name ? { client_name: name } : {}) };
+  const client: ClientPayload = {
+    iss: publicOrigin(request),
+    redirect_uris: uris as string[],
+    ...(name ? { client_name: name } : {}),
+  };
 
   return Response.json(
     {

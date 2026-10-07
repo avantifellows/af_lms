@@ -210,6 +210,32 @@ describe("token", () => {
     expect((await revoked.json()).error).toBe("invalid_grant");
   });
 
+  it("refuses a client registered on another environment (shared NEXTAUTH_SECRET)", async () => {
+    vi.stubEnv("NEXTAUTH_URL", "https://staging.example.org");
+    const stagingClient = await registerClient();
+    vi.stubEnv("NEXTAUTH_URL", ORIGIN);
+    mockSession.mockResolvedValue(signedIn());
+    expect((await authorize(new Request(authorizeUrl(stagingClient)))).status).toBe(400);
+    const res = await exchange({ grant_type: "refresh_token", refresh_token: "x", client_id: stagingClient });
+    expect(res.status).toBe(401);
+  });
+
+  it("refuses a code issued on another environment", async () => {
+    vi.stubEnv("NEXTAUTH_URL", "https://staging.example.org");
+    const clientId = await registerClient();
+    const code = await codeFor(clientId);
+    // Same secret, same client blob, but presented to production.
+    vi.stubEnv("NEXTAUTH_URL", ORIGIN);
+    const forged = await exchange({
+      grant_type: "authorization_code",
+      code,
+      client_id: clientId,
+      redirect_uri: REDIRECT,
+      code_verifier: VERIFIER,
+    });
+    expect(forged.status).toBe(401);
+  });
+
   it("rejects an unknown client", async () => {
     const res = await exchange({ grant_type: "refresh_token", refresh_token: "x", client_id: "forged" });
     expect(res.status).toBe(401);

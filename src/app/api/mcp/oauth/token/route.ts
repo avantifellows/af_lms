@@ -8,6 +8,7 @@ import {
   pkceS256Matches,
   publicOrigin,
   verify,
+  type ClientPayload,
   type CodePayload,
   type TokenPayload,
 } from "@/lib/mcp/oauth";
@@ -28,7 +29,8 @@ export async function POST(request: Request) {
   const origin = publicOrigin(request);
   const params = await readParams(request);
   const clientId = params.get("client_id");
-  if (!clientId || !verify("client", clientId)) {
+  const client = verify<ClientPayload>("client", clientId);
+  if (!clientId || !client || client.iss !== origin) {
     return oauthError("invalid_client", "Unknown client_id", 401);
   }
   const cid = clientFingerprint(clientId);
@@ -36,7 +38,7 @@ export async function POST(request: Request) {
 
   if (grantType === "authorization_code") {
     const code = verify<CodePayload>("code", params.get("code"));
-    if (!code || code.cid !== cid) {
+    if (!code || code.cid !== cid || code.iss !== origin) {
       return oauthError("invalid_grant", "Authorization code is invalid or expired");
     }
     if (params.get("redirect_uri") !== code.redirect_uri) {

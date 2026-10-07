@@ -32,7 +32,7 @@ export async function GET(request: Request) {
   const client = verify<ClientPayload>("client", clientId);
   // Until the client and redirect are known good, errors are shown here and
   // never sent to the redirect_uri (no open redirect).
-  if (!client) return page("Unknown application", "<p>This connector link is not valid. Remove the connector and add it again.</p>", 400);
+  if (!client || client.iss !== origin) return page("Unknown application", "<p>This connector link is not valid. Remove the connector and add it again.</p>", 400);
   if (!redirectUriRegistered(client, redirectUri)) {
     return page("Invalid redirect", "<p>The application's redirect address is not the one it registered.</p>", 400);
   }
@@ -101,6 +101,7 @@ export async function POST(request: Request) {
   const code = sign<CodePayload>(
     "code",
     {
+      iss: publicOrigin(request),
       email: consent.email,
       cid: clientFingerprint(consent.client_id),
       redirect_uri: consent.redirect_uri,

@@ -3,8 +3,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 vi.mock("next-auth", () => ({ getServerSession: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("@/lib/db", () => ({ query: vi.fn() }));
-vi.mock("@/lib/bigquery", () => ({}));
-vi.mock("@/lib/dynamodb", () => ({}));
+vi.mock("@/lib/bigquery", () => ({
+  getAvailableGrades: vi.fn().mockResolvedValue([11, 12]),
+  getAvailablePrograms: vi.fn().mockResolvedValue(["JNV CoE", "JNV NVS"]),
+}));
+vi.mock("@/lib/dynamodb", () => ({ getTestDeepDiveFromDynamo: vi.fn() }));
 vi.mock("@/lib/curriculum-schema", () => ({
   checkCurriculumSchema: vi.fn().mockResolvedValue({ ok: true }),
 }));
@@ -16,12 +19,19 @@ vi.mock("@/lib/permissions", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/permissions")>()),
   getResolvedPermission: vi.fn(),
   getAccessibleSchoolCodes: vi.fn(),
+  getUserPermission: vi.fn(),
+  canAccessSchool: vi.fn().mockResolvedValue(true),
 }));
 
 import { getServerSession } from "next-auth";
 import { query } from "@/lib/db";
 import { getCurriculumOptions } from "@/lib/curriculum-options";
-import { getAccessibleSchoolCodes, getResolvedPermission } from "@/lib/permissions";
+import { getTestDeepDiveFromDynamo } from "@/lib/dynamodb";
+import {
+  getAccessibleSchoolCodes,
+  getResolvedPermission,
+  getUserPermission,
+} from "@/lib/permissions";
 import { GET, POST } from "./route";
 import { issueTokens } from "@/lib/mcp/oauth";
 import { PM_SESSION } from "../__test-utils__/api-test-helpers";
@@ -175,6 +185,42 @@ describe("/api/mcp", () => {
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toMatch(/^HTTP 403/);
       expect(mockOptions).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("program-scoped quiz views", () => {
+    const deepDive = (program?: string) =>
+      callTool("get_view", {
+        path: "/api/quiz-analytics/U1/test-deep-dive",
+        query: { grade: 11, sessionId: "s1", ...(program ? { program } : {}) },
+      });
+
+    beforeEach(() => {
+      mockSession.mockResolvedValue(PM_SESSION);
+      mockPermission.mockResolvedValue(PM_PERMISSION);
+      // A CoE-only (program 1) non-admin at a school offering CoE and NVS.
+      vi.mocked(getUserPermission).mockResolvedValue({ ...(PM_PERMISSION as object), program_ids: [1] } as never);
+      mockQuery.mockResolvedValue([{ id: "1", code: "S1", name: "JNV One", region: "R" }]);
+    });
+
+    it("requires a program, listing only the caller's", async () => {
+      const result = await deepDive();
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toMatch(/must be one of: JNV CoE\.$/);
+      expect(getTestDeepDiveFromDynamo).not.toHaveBeenCalled();
+    });
+
+    it("refuses a program the caller doesn't hold", async () => {
+      const result = await deepDive("JNV NVS");
+      expect(result.isError).toBe(true);
+      expect(getTestDeepDiveFromDynamo).not.toHaveBeenCalled();
+    });
+
+    it("runs the view for an allowed program", async () => {
+      vi.mocked(getTestDeepDiveFromDynamo).mockResolvedValue({ summary: {} } as never);
+      const result = await deepDive("JNV CoE");
+      expect(result.isError).toBeUndefined();
+      expect(getTestDeepDiveFromDynamo).toHaveBeenCalledWith("1", "JNV One", 11, "s1", "JNV CoE", undefined);
     });
   });
 });
