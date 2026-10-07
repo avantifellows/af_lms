@@ -10,10 +10,15 @@ import { type ReactNode, useCallback, useEffect, useEffectEvent, useId, useRef, 
 
 import type { HolisticProfileRegeneration, HolisticStudentPhaseDetail } from "@/lib/holistic-student-phase";
 import { PROGRAM_IDS } from "@/lib/constants";
+import {
+  HOLISTIC_FOLLOW_UP_ANSWER_MAX_LENGTH, HOLISTIC_FOLLOW_UP_QUESTIONS,
+  type HolisticFollowUpQuestionKey,
+} from "@/lib/holistic-follow-up-questions";
 import { holisticStudentPhaseHref, type HolisticStudentPhaseSource } from "@/lib/holistic-links";
 import { Button } from "@/components/ui/Button";
 import { Badge, type BadgeVariant } from "@/components/ui/Badge";
 import { Card } from "@/components/ui/Card";
+import { Modal } from "@/components/ui/Modal";
 import GuidancePreview from "./GuidancePreview";
 
 type NotesEditorProps = {
@@ -1155,6 +1160,9 @@ function SelectedPhaseContent({ phase, selectedPhase, studentId, readOnly, schoo
       phase={phase} studentId={studentId} readOnly={readOnly}
       schoolCode={schoolCode} academicYear={academicYear} programId={programId}
       onSubmitted={() => onSubmitted(phase.phaseId)} />
+    <MentorFollowUpNotes key={`${phase.phaseId}-${phase.mappingId}`} phase={phase} apiUrl={`/api/holistic-mentorship/students/${studentId}/phases/${phase.phaseId}/follow-up-notes?${new URLSearchParams(
+      { school_code: schoolCode, academic_year: academicYear, program_id: String(programId) }
+    )}`} />
   </section>;
 }
 
@@ -1215,6 +1223,7 @@ function AdminSelectedPhase({ phase, selectedPhase, studentId, schoolCode, acade
       </Card>
     </div>
     <AdminNotesPanel phase={phase} />
+    <FollowUpNotesSection notes={phase.followUpNotes} />
   </section>;
 }
 
@@ -1473,6 +1482,155 @@ function AdminNotesPanel({ phase }: { phase: OpenSelectedPhase }) {
           Submitted Notes will appear here after the Mentor completes this Phase.
         </AdminInfoAlert>}
   </Card>;
+}
+
+const FOLLOW_UP_QUESTION_TEXT = new Map<string, string>(
+  HOLISTIC_FOLLOW_UP_QUESTIONS.map(({ key, text }) => [key, text])
+);
+
+type FollowUpDraft = Record<HolisticFollowUpQuestionKey, string>;
+
+const EMPTY_FOLLOW_UP_DRAFT = Object.fromEntries(
+  HOLISTIC_FOLLOW_UP_QUESTIONS.map(({ key }) => [key, ""])
+) as FollowUpDraft;
+
+const FOLLOW_UP_ANSWER_TOO_LONG =
+  `Keep this answer to ${HOLISTIC_FOLLOW_UP_ANSWER_MAX_LENGTH.toLocaleString("en-US")} characters or fewer`;
+
+const FOLLOW_UP_MAYBE_SAVED =
+  "This note may have saved. Check the Follow-up Notes list before trying again.";
+
+function MentorFollowUpNotes({ phase, apiUrl }: { phase: OpenSelectedPhase; apiUrl: string }) {
+  const hintId = useId();
+  const [open, setOpen] = useState(false);
+  const canAdd = phase.progress === "completed";
+  return <>
+    <FollowUpNotesSection notes={phase.followUpNotes} action={<div className="flex items-center gap-2">
+      {!canAdd && <span id={hintId} className="text-xs text-text-muted">Submit Post-Session Notes first</span>}
+      <Button type="button" variant="secondary" size="sm" disabled={!canAdd}
+        aria-describedby={canAdd ? undefined : hintId} onClick={() => setOpen(true)}>Add notes</Button>
+    </div>} />
+    <AddFollowUpNoteModal open={open} apiUrl={apiUrl} onClose={() => setOpen(false)} />
+  </>;
+}
+
+function AddFollowUpNoteModal({ open, apiUrl, onClose }: {
+  open: boolean;
+  apiUrl: string;
+  onClose: () => void;
+}) {
+  const router = useRouter();
+  const headingId = useId();
+  const fieldId = useId();
+  const [draft, setDraft] = useState<FollowUpDraft>(EMPTY_FOLLOW_UP_DRAFT);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const hasAnswer = Object.values(draft).some((answer) => answer.trim());
+  const isTooLong = (answer: string) => answer.length > HOLISTIC_FOLLOW_UP_ANSWER_MAX_LENGTH;
+  const hasTooLongAnswer = Object.values(draft).some(isTooLong);
+
+  function close() {
+    setDraft(EMPTY_FOLLOW_UP_DRAFT);
+    setError("");
+    onClose();
+  }
+
+  function requestClose() {
+    if (saving) return;
+    if (Object.values(draft).some(Boolean) && !window.confirm("Discard this follow-up note?")) return;
+    close();
+  }
+
+  async function save() {
+    setError("");
+    setSaving(true);
+    const response = await fetch(apiUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ answers: draft }),
+    }).catch(() => null);
+    const result = await response?.json().catch(() => ({})) as { error?: string } | undefined;
+    setSaving(false);
+    // No response (or a 5xx) means the note may have committed; show the
+    // refreshed list instead of inviting a blind retry that would duplicate it.
+    if (!response || response.status >= 500) {
+      setError(FOLLOW_UP_MAYBE_SAVED);
+      router.refresh();
+      return;
+    }
+    if (!response.ok) {
+      setError(result?.error || "Could not save follow-up notes");
+      return;
+    }
+    close();
+    router.refresh();
+  }
+
+  return <Modal open={open} onClose={requestClose} aria-labelledby={headingId} className="max-w-2xl p-5">
+    <h2 id={headingId} className="text-lg font-semibold text-text-primary">Add follow-up notes</h2>
+    <p className="mt-1 text-sm text-text-muted">Follow-up notes can&apos;t be edited after saving.</p>
+    <div className="mt-4 space-y-4">
+      {HOLISTIC_FOLLOW_UP_QUESTIONS.map(({ key, text }) => {
+        const tooLong = isTooLong(draft[key]);
+        return <div key={key}>
+          <label htmlFor={`${fieldId}-${key}`} className="text-sm font-semibold text-text-primary">{text}</label>
+          {/* readOnly, not disabled, so text stays selectable while a save is in flight. */}
+          <textarea id={`${fieldId}-${key}`} rows={3}
+            value={draft[key]} readOnly={saving} aria-invalid={tooLong || undefined}
+            aria-describedby={tooLong ? `${fieldId}-${key}-error` : undefined}
+            onChange={(event) => setDraft((current) => ({ ...current, [key]: event.target.value }))}
+            className={`mt-1 w-full rounded-md border bg-bg-card p-2 text-sm text-text-primary ${
+              tooLong ? "border-danger" : "border-border"}`} />
+          {tooLong && <p id={`${fieldId}-${key}-error`} className="mt-1 text-sm text-danger">
+            {FOLLOW_UP_ANSWER_TOO_LONG}
+          </p>}
+        </div>;
+      })}
+    </div>
+    {error && <p role="alert" className="mt-4 text-sm text-danger">{error}</p>}
+    <div className="mt-5 flex justify-end gap-2">
+      <Button type="button" variant="secondary" onClick={requestClose}>Cancel</Button>
+      <Button type="button" disabled={!hasAnswer || hasTooLongAnswer || saving} onClick={() => void save()}>
+        Save
+      </Button>
+    </div>
+  </Modal>;
+}
+
+function FollowUpNotesSection({ notes, action }: {
+  notes: OpenSelectedPhase["followUpNotes"];
+  action?: ReactNode;
+}) {
+  const headingId = useId();
+  return <Card elevation="sm" className="p-4 sm:p-5">
+    <section aria-labelledby={headingId}>
+      <div className="flex items-center justify-between gap-2 border-b border-border pb-3">
+        <h3 id={headingId} className="text-base font-semibold text-text-primary">Follow-up Notes</h3>
+        {action}
+      </div>
+      {notes.length
+        ? <div className="mt-4 space-y-4">
+            {notes.map((note) => <FollowUpNoteCard key={note.id} note={note} />)}
+          </div>
+        : <p className="mt-4 text-sm text-text-muted">No follow-up notes yet</p>}
+    </section>
+  </Card>;
+}
+
+function FollowUpNoteCard({ note }: { note: OpenSelectedPhase["followUpNotes"][number] }) {
+  return <article className="rounded-md border border-border p-3">
+    <p className="text-sm text-text-muted">
+      {note.authorName} · <span className="font-mono">{formatDateTime(note.submittedAt)}</span>
+    </p>
+    <div className="mt-3 space-y-3">
+      {note.answers.map((answer) => <div key={answer.key}>
+        <h4 className="text-sm font-semibold text-success">{FOLLOW_UP_QUESTION_TEXT.get(answer.key)}</h4>
+        <blockquote className="mt-2 whitespace-pre-wrap border-l-2 border-info bg-bg-card-alt p-3 text-sm text-text-primary">
+          {answer.answer}
+        </blockquote>
+      </div>)}
+    </div>
+  </article>;
 }
 
 function AdminSubmittedNotes({ notes, questions }: {

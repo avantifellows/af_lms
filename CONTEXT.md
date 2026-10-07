@@ -216,7 +216,11 @@ _Avoid_: Quiz Question, questionnaire item, rating field
 
 **Post-Session Notes**:
 The single draft-to-submitted answer set authored for one Holistic Mentee and Holistic Phase after the offline mentoring conversation.
-_Avoid_: Session log, multiple interaction entries, Academic Mentorship feedback
+_Avoid_: Session log, multiple interaction entries, Follow-up Note, Academic Mentorship feedback
+
+**Follow-up Note**:
+An immutable, timestamped answer set recording one extra offline conversation with a Holistic Mentee in a Holistic Phase whose Post-Session Notes are already submitted. A Mentee and Phase may have many.
+_Avoid_: Additional Notes, Check-in Notes, extra Post-Session Notes, session log
 
 **Historical Holistic Notes**:
 Prior-year questionnaire answers migrated from the returning-school Sheet for safely matched current Grade 12 Students. They are legacy Student Context, not canonical Post-Session Notes or evidence of a completed Holistic Phase.
@@ -464,7 +468,12 @@ _Avoid_: Unmapped Student, Mapping not done, unassigned Mentee
 - Hard-deleting a User is blocked when Holistic Mapping or authored-Notes history exists
 - Only a Holistic Mentee's currently assigned **Holistic Mentor** can draft and submit that Mentee's Post-Session Notes
 - A Holistic Mentee's currently assigned **Holistic Mentor** may read prior submitted Post-Session Notes for that Mentee but may edit only Notes they authored; a former Mentor loses access after reassignment, Admins remain read-only, and no reopen workflow is required
-- V1 has one **Post-Session Notes** answer set per Mentee and Phase; multiple offline conversations update the same set rather than creating separate session records
+- Each Mentee and Phase has one **Post-Session Notes** answer set for the Phase's main conversation; an extra offline conversation after submission is recorded as a separate **Follow-up Note** rather than by editing Post-Session Notes
+- A Mentee's currently assigned **Holistic Mentor** may add **Follow-up Notes** to any applicable Phase, including a prior-year Phase, only after that Phase's Post-Session Notes are submitted, regardless of who authored them; the same Mapping, dropout, and privacy guards as Notes writes apply, and Admins, Holistic Mentorship Admins, Program Managers, and Program Admins are read-only
+- **Follow-up Notes** answer three fixed free-text questions shared by every Program, Grade, and Phase: what challenges the Student talked about, what solutions the Mentor suggested, and whether the Student was able to follow the previously shared action plan; each is optional, but at least one must be answered
+- A **Follow-up Note** has no draft and cannot be edited or deleted after it is saved; a correction is recorded as another Follow-up Note
+- A **Follow-up Note** records its author and system save time but no manually entered conversation date; a Mentee and Phase have no limit on Follow-up Notes
+- **Follow-up Notes** are readable by the same audience as submitted Post-Session Notes, appear only on their own Phase, do not feed Student Context, do not change Phase progress, and remain as history when a Mapping ends
 - Draft **Post-Session Notes** allow partial answers and autosave with visible state, but opening or viewing a blank form does not persist data or freeze the Phase
 - An unfinished Notes draft and the fact that it has been saved are visible only to its author while they remain the current Mentor; Program Managers, Program Admins, Holistic Mentorship Admins, and Admins derive progress as though the draft does not exist (normally Pending, while an otherwise Skipped Phase remains Skipped) until Notes are submitted
 - If a Mapping ends before Notes submission, LMS warns when applicable, discards the draft content, records a content-free actor/time/reason audit event, and gives the replacement Mentor a blank form

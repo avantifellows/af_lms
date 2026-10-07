@@ -37,74 +37,69 @@ export default function ActionTypePickerModal({
       onClose={submitting ? undefined : onClose}
       zIndex="z-40"
       className="max-h-[90vh] flex flex-col"
+      aria-labelledby="action-type-picker-title"
     >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="action-type-picker-title"
-      >
-        <div className="border-b-4 border-border-accent px-5 py-4 shrink-0">
-          <h3 id="action-type-picker-title" className="text-base font-bold uppercase tracking-tight text-text-primary">
-            Add Action Point
-          </h3>
-          <p className="mt-1 text-sm text-text-muted">Pick one action type to add.</p>
-        </div>
+      <div className="border-b-4 border-border-accent px-5 py-4 shrink-0">
+        <h3 id="action-type-picker-title" className="text-base font-bold uppercase tracking-tight text-text-primary">
+          Add Action Point
+        </h3>
+        <p className="mt-1 text-sm text-text-muted">Pick one action type to add.</p>
+      </div>
 
-        <div className="space-y-2 px-5 py-4 overflow-y-auto">
-          {ACTION_TYPE_VALUES.map((actionType) => (
-              <label
-                key={actionType}
-                className={`flex items-center gap-4 border-2 px-4 py-3 transition-colors ${
-                  selectedType === actionType
-                    ? "cursor-pointer border-accent bg-success-bg"
-                    : "cursor-pointer border-border hover:bg-hover-bg hover:border-accent/50"
-                }`}
-              >
-                <input
-                  type="radio"
-                  name="action-type"
-                  value={actionType}
-                  aria-label={getActionTypeLabel(actionType)}
-                  checked={selectedType === actionType}
-                  onChange={() => {
-                    setSelectedType(actionType);
-                  }}
-                  className="h-5 w-5 accent-accent"
-                />
-                <span className="flex min-w-0 flex-1 items-center justify-between gap-3 text-base font-medium text-text-primary">
-                  <span>{getActionTypeLabel(actionType)}</span>
-                  {isOptionalActionType(actionType) && (
-                    <span className="shrink-0 rounded-full border border-border-accent bg-bg-card-alt px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-text-muted">
-                      Optional
-                    </span>
-                  )}
-                </span>
-              </label>
-            ))}
-        </div>
+      <div className="space-y-2 px-5 py-4 overflow-y-auto">
+        {ACTION_TYPE_VALUES.map((actionType) => (
+            <label
+              key={actionType}
+              className={`flex items-center gap-4 border-2 px-4 py-3 transition-colors ${
+                selectedType === actionType
+                  ? "cursor-pointer border-accent bg-success-bg"
+                  : "cursor-pointer border-border hover:bg-hover-bg hover:border-accent/50"
+              }`}
+            >
+              <input
+                type="radio"
+                name="action-type"
+                value={actionType}
+                aria-label={getActionTypeLabel(actionType)}
+                checked={selectedType === actionType}
+                onChange={() => {
+                  setSelectedType(actionType);
+                }}
+                className="h-5 w-5 accent-accent"
+              />
+              <span className="flex min-w-0 flex-1 items-center justify-between gap-3 text-base font-medium text-text-primary">
+                <span>{getActionTypeLabel(actionType)}</span>
+                {isOptionalActionType(actionType) && (
+                  <span className="shrink-0 rounded-full border border-border-accent bg-bg-card-alt px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-text-muted">
+                    Optional
+                  </span>
+                )}
+              </span>
+            </label>
+          ))}
+      </div>
 
-        <div className="flex items-center justify-end gap-2 border-t border-border px-5 py-4 shrink-0">
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={submitting}
-            className="inline-flex items-center border border-border bg-bg-card px-3 py-2 text-sm font-medium text-text-secondary hover:bg-hover-bg disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              if (selectedType !== "") {
-                onSubmit(selectedType);
-              }
-            }}
-            disabled={!canSubmit}
-            className="inline-flex items-center rounded-lg bg-accent px-3 py-2 text-sm font-bold uppercase text-white hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {submitting ? (submittingLabel ?? "Adding...") : "Add"}
-          </button>
-        </div>
+      <div className="flex items-center justify-end gap-2 border-t border-border px-5 py-4 shrink-0">
+        <button
+          type="button"
+          onClick={onClose}
+          disabled={submitting}
+          className="inline-flex items-center border border-border bg-bg-card px-3 py-2 text-sm font-medium text-text-secondary hover:bg-hover-bg disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            if (selectedType !== "") {
+              onSubmit(selectedType);
+            }
+          }}
+          disabled={!canSubmit}
+          className="inline-flex items-center rounded-lg bg-accent px-3 py-2 text-sm font-bold uppercase text-white hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {submitting ? (submittingLabel ?? "Adding...") : "Add"}
+        </button>
       </div>
     </Modal>
   );

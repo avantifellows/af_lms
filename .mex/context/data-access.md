@@ -21,7 +21,7 @@ edges:
     condition: when adding a write that must proxy to the DB Service
   - target: patterns/add-api-route.md
     condition: when adding a route that reads or writes
-last_updated: 2026-09-30
+last_updated: 2026-10-07
 ---
 
 # Data Access
@@ -143,3 +143,40 @@ tracked separately in #336. No audit index was applied during these investigatio
 Production deployment of the September 18 stack was not established by these notes.
 Evidence: sibling `release-records/holistic-phase-label-20260917/` and
 `release-records/punjab-nodal-list-investigation-20260917/`.
+
+## Holistic Mentor write scope (#378)
+
+Mentor-owned Holistic writes (Post-Session Notes and Follow-up Notes) share one
+guard in `src/lib/holistic-mentor-write-scope.ts`. `loadHolisticMentorWriteScope(client, { studentId, phaseId, schoolId, programId, academicYear })`
+runs inside the caller's transaction and takes `FOR UPDATE OF mapping, phase`. It requires
+an active Mapping, a non-dropout Student, a single current Grade 11/12 roster Grade, no
+privacy tombstone, and an applicable Phase: current-year, or a prior-year Grade 11 Phase
+for a Grade 12 Mentee with prior-year Mapping history. It derives the prior Academic Year
+itself. `checkHolisticMentorWriteScope(scope, actorUserId)` returns 404 `Not found` for
+missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do not copy the query into new writers; call the helper so guard semantics and lock order stay identical.
+
+## Holistic Follow-up Notes (#377)
+
+- **Table ownership:** `holistic_mentorship_follow_up_notes` is created by the db-service
+  migration `20260930120000_create_holistic_mentorship_follow_up_notes`, but LMS reads and
+  inserts rows directly (ADR 0005).
+- **Immutable:** triggers reject every `UPDATE` and `DELETE`; a correction is another row. The
+  insert trigger takes the per-Student privacy advisory lock, rejects a tombstoned Student, and
+  requires submitted Post-Session Notes for the Student and Phase.
+- **Write path:** `POST .../phases/{phaseId}/follow-up-notes` authorizes `follow_up_note_add`,
+  normalises answers with `normalizeHolisticFollowUpAnswers`, then `addHolisticFollowUpNote`
+  runs one transaction: the per-Student privacy advisory lock first (same order as privacy
+  deletion), then the shared Mentor write-scope loader's `FOR UPDATE` on Mapping/Phase
+  (404/422), then a submitted Post-Session Notes check (422), then `INSERT ... RETURNING id`.
+  The trigger re-takes the same advisory lock. Success is 201 `{ id }`; the UI refreshes server
+  data.
+- **Read audience:** the same as submitted Post-Session Notes. `getHolisticStudentPhase` loads
+  `selectedPhase.followUpNotes` for the open selected Phase only, newest first. Locked Phase
+  summaries, Student Context, progress, and the CSV never read this table.
+- **Privacy:** a tombstone hides Follow-up Notes on read (same-query `NOT EXISTS`) and blocks
+  new inserts. Erasure cannot remove Follow-up Note text because rows are immutable; it is hidden
+  by the tombstone, not erased. LMS privacy erasure is currently disabled; re-enabling it needs a
+  migration for this table.
+- **Code:** `src/lib/holistic-follow-up-notes.ts` (write), `src/lib/holistic-student-phase.ts`
+  (read), `src/lib/holistic-follow-up-questions.ts` (client-safe question keys, text, and
+  normaliser), `src/lib/holistic-mentor-write-scope.ts` (shared scope guard).
