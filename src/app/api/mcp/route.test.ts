@@ -15,6 +15,15 @@ vi.mock("@/lib/curriculum-options", () => ({
   getCurriculumOptions: vi.fn(),
   getCurriculumChapters: vi.fn(),
 }));
+vi.mock("@/lib/holistic-mentorship", () => ({ requireHolisticMentorshipAccess: vi.fn() }));
+vi.mock("@/lib/holistic-progress", () => ({
+  DEFAULT_HOLISTIC_PROGRESS_SORT: "school",
+  listHolisticProgress: vi.fn(),
+  getHolisticProgressOptions: vi.fn().mockResolvedValue({ schools: [], mentors: [], phases: [] }),
+  getHolisticCoverageSchools: vi.fn().mockResolvedValue([]),
+  getHolisticProgressAcademicYears: vi.fn().mockResolvedValue(["2026-2027"]),
+  formatHolisticProgressCsv: vi.fn(),
+}));
 vi.mock("@/lib/permissions", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/permissions")>()),
   getResolvedPermission: vi.fn(),
@@ -27,6 +36,8 @@ import { getServerSession } from "next-auth";
 import { query } from "@/lib/db";
 import { getCurriculumOptions } from "@/lib/curriculum-options";
 import { getTestDeepDiveFromDynamo } from "@/lib/dynamodb";
+import { requireHolisticMentorshipAccess } from "@/lib/holistic-mentorship";
+import { listHolisticProgress, formatHolisticProgressCsv } from "@/lib/holistic-progress";
 import {
   getAccessibleSchoolCodes,
   getResolvedPermission,
@@ -217,6 +228,59 @@ describe("/api/mcp", () => {
       const result = await deepDive("JNV CoE");
       expect(result.isError).toBeUndefined();
       expect(getTestDeepDiveFromDynamo).toHaveBeenCalledWith("1", "JNV One", 11, "s1", "JNV CoE", undefined);
+    });
+  });
+
+  describe("holistic mentorship progress", () => {
+    const ROW = {
+      studentId: 1,
+      studentName: "A Student",
+      progress: "completed",
+      answers: [{ position: 1, question: "How is the student doing?", answer: "Confidential note text" }],
+    };
+    const progress = (query: Record<string, string | number>) =>
+      callTool("get_view", { path: "/api/holistic-mentorship/progress", query });
+
+    beforeEach(() => {
+      mockSession.mockResolvedValueOnce(PM_SESSION).mockResolvedValue(null);
+      vi.mocked(requireHolisticMentorshipAccess).mockResolvedValue({ ok: true, permission: PM_PERMISSION } as never);
+      vi.mocked(listHolisticProgress).mockResolvedValue({
+        rows: [ROW],
+        counts: { total: 1, pending: 0, completed: 1, skipped: 0, noActivePhase: 0 },
+        coverage: null,
+      } as never);
+    });
+
+    it("runs the access check as the caller and strips note text by default", async () => {
+      const result = await progress({ program_id: 1, academic_year: "2026-2027" });
+      expect(result.isError).toBeUndefined();
+      expect(vi.mocked(requireHolisticMentorshipAccess).mock.calls[0][0]?.user?.email).toBe(PM_SESSION.user.email);
+      const body = JSON.parse(result.content[0].text);
+      expect(body.counts.completed).toBe(1);
+      expect(body.rows[0]).not.toHaveProperty("answers");
+      expect(body.rows[0].answersSubmitted).toBe(1);
+      expect(result.content[0].text).not.toContain("Confidential note text");
+    });
+
+    it("returns note text only when include_notes=true, without forwarding the flag", async () => {
+      const result = await progress({ program_id: 1, academic_year: "2026-2027", include_notes: "true" });
+      expect(JSON.parse(result.content[0].text).rows[0].answers[0].answer).toBe("Confidential note text");
+    });
+
+    it("refuses parameters the view doesn't declare (e.g. the CSV export)", async () => {
+      const result = await progress({ program_id: 1, academic_year: "2026-2027", format: "csv" });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toMatch(/Unsupported parameter\(s\).*format/);
+      expect(formatHolisticProgressCsv).not.toHaveBeenCalled();
+      expect(listHolisticProgress).not.toHaveBeenCalled();
+    });
+
+    it("refuses include_notes on views without notes", async () => {
+      const result = await callTool("get_view", {
+        path: "/api/curriculum/options",
+        query: { school_code: "S1", include_notes: "true" },
+      });
+      expect(result.isError).toBe(true);
     });
   });
 });

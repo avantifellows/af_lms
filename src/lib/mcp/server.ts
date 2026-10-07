@@ -3,7 +3,7 @@ import { z } from "zod";
 import { query } from "@/lib/db";
 import { getAccessibleSchoolCodes, getResolvedPermission } from "@/lib/permissions";
 import { runAsMcpCaller } from "@/lib/session";
-import { LMS_VIEWS, invokeView, matchView, programGuard } from "@/lib/mcp/views";
+import { LMS_VIEWS, NOTES_PARAM, invokeView, matchView, programGuard } from "@/lib/mcp/views";
 
 // The MCP caller, resolved by the route (OAuth bearer token) before the server
 // is built; tools only ever see this shape.
@@ -24,7 +24,9 @@ How to answer:
 - Quiz analytics: /grades first (it lists the programs you may query; the other quiz views require one of them as the program parameter), then /batch-overview for the tests (each with a session_id), then /test-deep-dive or /cumulative-als.
 - Prefer aggregates (completion %, averages, counts) over per-student rows. Say which school, grade and program a figure covers.
 
-Student data: names and scores are visible to this user in the LMS, but don't copy per-student rows into documents, slides or messages unless the user explicitly asks for individual students.`;
+Student data: names and scores are visible to this user in the LMS, but don't copy per-student rows into documents, slides or messages unless the user explicitly asks for individual students.
+
+Mentorship notes: Holistic Mentorship progress omits the mentors' note text by default. Pass include_notes=true only when the user explicitly asks to read what was written in notes, never to count or summarise sessions. Treat note content as confidential: quote only what the user asked for, and never copy it into documents or messages unless asked.`;
 
 type ToolResult ={ content: { type: "text"; text: string }[]; isError?: boolean };
 
@@ -153,17 +155,39 @@ export function buildLmsMcpServer(caller: McpCaller, baseUrl: string): McpServer
         logCall(caller, "get_view", startedAt, { path, status: 404 });
         return text(`Unknown view: ${path}. Call list_views for the available paths.`, true);
       }
+      const undeclared = Object.keys(params ?? {}).filter((k) => !(k in match.view.query));
+      if (undeclared.length) {
+        logCall(caller, "get_view", startedAt, { path: match.view.path, status: 400 });
+        return text(
+          `Unsupported parameter(s) for ${match.view.path}: ${undeclared.join(", ")}. Allowed: ${Object.keys(match.view.query).join(", ") || "none"}.`,
+          true,
+        );
+      }
+      const { [NOTES_PARAM]: notesFlag, ...forwarded } = params ?? {};
+      const includeNotes = String(notesFlag) === "true";
       const result = await runAsMcpCaller(caller.email, async () => {
-        const refusal = await programGuard(match, params ?? {}, baseUrl);
-        return refusal ?? invokeView(match, path, params ?? {}, baseUrl);
+        const refusal = await programGuard(match, forwarded, baseUrl);
+        return refusal ?? invokeView(match, path, forwarded, baseUrl);
       });
       if (typeof result === "string") {
         logCall(caller, "get_view", startedAt, { path: match.view.path, status: 403 });
         return text(result, true);
       }
       const response = result;
-      logCall(caller, "get_view", startedAt, { path: match.view.path, status: response.status });
+      logCall(caller, "get_view", startedAt, {
+        path: match.view.path,
+        status: response.status,
+        ...(includeNotes ? { notes: true } : {}),
+      });
       let body = await response.text();
+      if (response.ok && match.view.redact) {
+        try {
+          body = JSON.stringify(match.view.redact(JSON.parse(body), { includeNotes }));
+        } catch {
+          // A view with a redaction rule must not leak an unparsed body.
+          return text("The LMS returned an unexpected response for this view.", true);
+        }
+      }
       if (body.length > MAX_VIEW_CHARS) {
         body = `${body.slice(0, MAX_VIEW_CHARS)}\n…[truncated: ${body.length} chars; narrow the query]`;
       }

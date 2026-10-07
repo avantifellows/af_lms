@@ -6,6 +6,7 @@ import * as quizGrades from "@/app/api/quiz-analytics/[udise]/grades/route";
 import * as quizBatchOverview from "@/app/api/quiz-analytics/[udise]/batch-overview/route";
 import * as quizCumulativeAls from "@/app/api/quiz-analytics/[udise]/cumulative-als/route";
 import * as quizTestDeepDive from "@/app/api/quiz-analytics/[udise]/test-deep-dive/route";
+import * as holisticProgress from "@/app/api/holistic-mentorship/progress/route";
 
 // LMS read endpoints Claude may call through `get_view`. An explicit
 // allow-list: a route only belongs here once it (and every gate it calls)
@@ -35,6 +36,10 @@ export interface LmsView {
   // narrows by program instead). get_view requires `program` and only allows
   // one the caller's own grades view lists — see `programGuard`.
   programScoped?: boolean;
+  // Rewrites a successful JSON body before Claude sees it, to drop fields the
+  // LMS shows on screen that shouldn't reach Claude by default (e.g. mentorship
+  // notes). `includeNotes` is the caller's explicit opt-in (see NOTES_PARAM).
+  redact?: (body: unknown, opts: { includeNotes: boolean }) => unknown;
 }
 
 const CURRICULUM_SCOPE = {
@@ -98,7 +103,47 @@ export const LMS_VIEWS: LmsView[] = [
     handler: handler(quizTestDeepDive.GET),
     programScoped: true,
   },
+  {
+    path: "/api/holistic-mentorship/progress",
+    description:
+      "Holistic Mentorship progress for one program and academic year: counts (total / completed / pending / skipped / noActivePhase mentees, where completed = post-session notes submitted for the phase), coverage (eligible / assigned / unassigned students), filter options (schools, mentors, phases), and one page of 50 mentee rows (student, school, grade, mentor, phase, progress). Filter by phase_id for a given session/phase; by school_code for one school. Note text is omitted unless include_notes=true.",
+    query: {
+      program_id: "required — 1 JNV CoE, 74 Punjab CoE, 94 Punjab Nodal, 78 EMRS CoE, 88 Uttarakhand CoE, 99 Maharashtra Coaching Test Prep",
+      academic_year: "required — e.g. 2026-2027 (current)",
+      phase_id: "optional — from options.phases",
+      school_code: "optional",
+      grade: "optional — 11 or 12",
+      progress: "optional — pending | completed | skipped | no_active_phase | unassigned",
+      mentor_user_id: "optional — from options.mentors",
+      search: "optional — student name",
+      page: "optional — 50 rows per page",
+      include_notes:
+        "optional — 'true' returns the mentors' submitted note answers. Set it ONLY when the user explicitly asks to read note content; counts and progress never need it.",
+    },
+    handler: handler(holisticProgress.GET),
+    redact: redactHolisticProgress,
+  },
 ];
+
+// Handled by get_view itself, never forwarded to the LMS route.
+export const NOTES_PARAM = "include_notes";
+
+// Mentor-authored session notes are sensitive: by default keep only how many
+// answers exist. The LMS route has already applied its own visibility rules
+// (draft privacy, program/school scope), so opting in shows only what the
+// user could read in the LMS.
+function redactHolisticProgress(body: unknown, { includeNotes }: { includeNotes: boolean }): unknown {
+  if (includeNotes) return body;
+  if (!body || typeof body !== "object" || !("rows" in body) || !Array.isArray(body.rows)) return body;
+  return {
+    ...body,
+    rows: body.rows.map((row: Record<string, unknown>) => {
+      if (!("answers" in row)) return row;
+      const { answers, ...rest } = row;
+      return { ...rest, answersSubmitted: Array.isArray(answers) ? answers.length : 0 };
+    }),
+  };
+}
 
 // Match a concrete path ("/api/quiz-analytics/123/grades") to its view and
 // pull out the path parameters.
