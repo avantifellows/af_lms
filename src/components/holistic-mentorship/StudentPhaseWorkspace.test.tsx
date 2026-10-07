@@ -1095,6 +1095,24 @@ describe("StudentPhaseWorkspace", () => {
       expect(mockRefresh).not.toHaveBeenCalled();
     });
 
+    it.each([
+      ["the request gets no response", () => vi.fn().mockRejectedValue(new TypeError("Failed to fetch"))],
+      ["the server answers 502", () => vi.fn().mockResolvedValue(new Response("Bad gateway", { status: 502 }))],
+    ])("refreshes the list and warns before a retry when %s", async (_label, fetchMock) => {
+      vi.stubGlobal("fetch", fetchMock());
+      render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={completedTeacherDetail()} />);
+
+      const dialog = openAddNotes();
+      const textbox = within(dialog).getByRole("textbox", { name: "What challenges did the student talk about?" });
+      fireEvent.change(textbox, { target: { value: "Exam stress" } });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+
+      expect(await within(dialog).findByRole("alert"))
+        .toHaveTextContent("This note may have saved. Check the Follow-up Notes list before trying again.");
+      expect(mockRefresh).toHaveBeenCalledTimes(1);
+      expect(textbox).toHaveValue("Exam stress");
+    });
+
     it("flags an answer over 10,000 characters inline and disables Save without sending a request", () => {
       const fetchMock = vi.fn();
       vi.stubGlobal("fetch", fetchMock);

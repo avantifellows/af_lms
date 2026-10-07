@@ -1497,6 +1497,9 @@ const EMPTY_FOLLOW_UP_DRAFT = Object.fromEntries(
 const FOLLOW_UP_ANSWER_TOO_LONG =
   `Keep this answer to ${HOLISTIC_FOLLOW_UP_ANSWER_MAX_LENGTH.toLocaleString("en-US")} characters or fewer`;
 
+const FOLLOW_UP_MAYBE_SAVED =
+  "This note may have saved. Check the Follow-up Notes list before trying again.";
+
 function MentorFollowUpNotes({ phase, apiUrl }: { phase: OpenSelectedPhase; apiUrl: string }) {
   const hintId = useId();
   const [open, setOpen] = useState(false);
@@ -1548,7 +1551,14 @@ function AddFollowUpNoteModal({ open, apiUrl, onClose }: {
     }).catch(() => null);
     const result = await response?.json().catch(() => ({})) as { error?: string } | undefined;
     setSaving(false);
-    if (!response?.ok) {
+    // No response (or a 5xx) means the note may have committed; show the
+    // refreshed list instead of inviting a blind retry that would duplicate it.
+    if (!response || response.status >= 500) {
+      setError(FOLLOW_UP_MAYBE_SAVED);
+      router.refresh();
+      return;
+    }
+    if (!response.ok) {
       setError(result?.error || "Could not save follow-up notes");
       return;
     }
