@@ -18,7 +18,7 @@ edges:
     condition: when a route or page needs to gate access
   - target: context/visits.md
     condition: when working on PM school visits or visit action types
-last_updated: 2026-09-29
+last_updated: 2026-10-07
 ---
 
 # Architecture
@@ -64,7 +64,49 @@ source. Phase links and locked-phase redirects preserve it, and the Student Back
 link restores `source=progress` on the School URL. Ordinary School drill-downs
 retain `source=school`, so their original dashboard return does not change.
 
+## Planned navigation work — issue #383
+
+The October 7 PRD retains the existing dashboard/roster/Performance boundaries.
+It plans a Physical Centres default from resolved `hasCoEOrNodal`, preserving
+seated/PMU/Holistic routing, explicit JNV return and pagination links, and an exact
+trimmed/case-folded owned non-deleted Visit count independent of Recent Visits;
+the capped Recent Visits query uses that same owner predicate.
+Performance will push deliberate choices, rehydrate every selection from URL
+history, compose rapid pending choices, and reject stale grade, option, loading,
+error, and report-name responses. Outer
+tabs still replace but must follow historical `tab`; report return consumes only
+a proven internal step, otherwise replacing away `session` safely. Dashboard
+cards lose Start Visit; authorized header/School Visits actions remain.
+
+This is a plan, not shipped behavior. Centre Switcher is separate (#388). No schema,
+new API, permission change, or persistent history store is planned. Existing
+rendered-page/component tests plus native browser journeys are the chosen seams;
+the owned Visit-count predicate needs a real local database fixture. Original and
+final issue bodies live under `.ralph/workspaces/383/`; configured council rounds
+were zero. No ADR conflicts were identified.
+
+AFK implementation slices are published and natively linked under #383:
+#389 exact Visit totals; #390 dashboard defaults/returns/pagination; #391 card
+action removal; #392 reversible Performance filters; #393 report history and
+outer-tab restoration. Only #393 is blocked by #392, both in its body and as a
+native GitHub dependency. The three dashboard slices own distinct edit regions
+in the same page; broad page/test rewrites would create avoidable conflicts.
+The existing Performance controller and serializer make a separate prefactor
+unnecessary. Final issue bodies, write boundaries and verification are in
+`.ralph/workspaces/383/slices.md`. This publication implements no app behavior.
+
+AFK implementation slices are published and natively linked under #383:
+#389 exact Visit totals; #390 dashboard defaults/returns/pagination; #391 card
+action removal; #392 reversible Performance filters; #393 report history and
+outer-tab restoration. Only #393 is blocked by #392, both in its body and as a
+native GitHub dependency. The three dashboard slices own distinct edit regions
+in the same page; broad page/test rewrites would create avoidable conflicts.
+The existing Performance controller and serializer make a separate prefactor
+unnecessary. Final issue bodies, write boundaries and verification are in
+`.ralph/workspaces/383/slices.md`. This publication implements no app behavior.
+
 ## Key Components
+
 - **`src/lib/db.ts`** — the `query<T>()` helper over a singleton `pg.Pool` (god node, ~137 edges). Reads and direct writes both go through it. `withTransaction()` for multi-statement writes.
 - **`src/lib/permissions.ts`** — the access-control core: `getUserPermission`/`getResolvedPermission`, `getFeatureAccess` (feature×role matrix), `canAccessSchool*`, `isAdmin`. See `context/permissions.md`.
 - **`src/lib/visits-policy.ts`** — visit-specific gate (`requireVisitsAccess`, `enforceVisit*`, `buildVisitScopePredicate`, `apiError`). See `context/visits.md`.

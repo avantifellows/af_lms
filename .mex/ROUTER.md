@@ -26,7 +26,7 @@ edges:
     condition: when working on teacher feedback setup, the feedback form, or its report
   - target: patterns/INDEX.md
     condition: when starting a task — check the pattern index for a matching pattern file
-last_updated: 2026-09-30
+last_updated: 2026-10-07
 ---
 
 # Session Bootstrap
@@ -102,6 +102,8 @@ Then read this file fully before doing anything else in this session.
 - Intervention flags (September 25, from Vandana's Discord ask): any Google-login user who can see a Student sees their flags, and anyone who can edit Students (not `read_only`) can flag them for non-academic welfare intervention (medical, mental health, grief, extra attention) with a note, add follow-up notes, and resolve. Flags show as a "Needs intervention" badge with a filter in the Enrollment tab; admins get an all-schools list of open flags at `/admin/intervention-flags`. Tables come from the db-service migration `20260925120000_create_lms_student_intervention_flags`, which must deploy before this code. See `context/permissions.md`.
 
 **Not yet built / in progress:**
+
+- Issue #383 PRD refreshed October 7: physical-Program dashboard defaults, exact owned Visit totals, shared School/Centre Performance Back/Forward, explicit return/pagination views, and dashboard-card Start Visit removal. Centre Switcher remains #388. Planning only; implementation is not claimed. AFK slices #389–#393 are published and natively linked: Visit totals, dashboard routing/returns, card actions, Performance filters, and reports/tabs. Only #393 is blocked by #392. Ralph configured zero council rounds. See `context/architecture.md`, `patterns/create-ralph-slices.md`, and `.ralph/workspaces/383/slices.md`.
 
 - The coordinated DB Service deployment completed September 7; the separate EnableStudents manual Portal smoke gate remains unrecorded in the retained evidence; the AF LMS activation and regression coverage are shipped in slice #303. Post-approval backfill remains a later coordinated approval release. See `context/student-addition.md`, `docs/nvs-phone-registration-release.md`, and ADR 0006.
 - Centre rollout is mid-migration: `PROGRAM_IDS` is still hand-maintained in `src/lib/constants.ts` (target is reading `program` from the DB); non-JNV centre programs are being onboarded.
