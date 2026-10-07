@@ -155,15 +155,19 @@ export default function BatchOverview({
   onTestClick,
   onFilterOptions,
 }: Props) {
-  const [data, setData] = useState<BatchOverviewData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  // Each answer is tagged with the request it belongs to. Once the filters move
+  // on, a late success or failure for the old request is never shown, and the
+  // new request starts loading with no stale data or error.
+  const requestKey = [schoolUdise, grade, program ?? "", stream ?? ""].join("|");
+  const [result, setResult] = useState<{
+    key: string;
+    data?: BatchOverviewData;
+    error?: string;
+  } | null>(null);
 
   useEffect(() => {
+    let current = true;
     const controller = new AbortController();
-    setLoading(true);
-    setError(null);
-    setData(null);
 
     const programParam = program ? `&program=${encodeURIComponent(program)}` : "";
     const streamParam = stream ? `&stream=${encodeURIComponent(stream)}` : "";
@@ -177,14 +181,23 @@ export default function BatchOverview({
         if (!res.ok) throw new Error("Failed to fetch batch overview");
         return res.json();
       })
-      .then((d: BatchOverviewData) => setData(d))
-      .catch((err) => {
-        if (err.name !== "AbortError") setError(err.message);
+      .then((d: BatchOverviewData) => {
+        if (current) setResult({ key: requestKey, data: d });
       })
-      .finally(() => setLoading(false));
+      .catch((err) => {
+        if (current && err.name !== "AbortError") setResult({ key: requestKey, error: err.message });
+      });
 
-    return () => controller.abort();
-  }, [schoolUdise, grade, program, stream]);
+    return () => {
+      current = false;
+      controller.abort();
+    };
+  }, [requestKey]); // eslint-disable-line react-hooks/exhaustive-deps -- requestKey encodes every input
+
+  const settled = result?.key === requestKey ? result : null;
+  const loading = settled === null;
+  const error = settled?.error ?? null;
+  const data = settled?.data ?? null;
 
   // Compute available subjects from the loaded test set, scoped to the current
   // test category (chapter vs full). Streams come straight from the API.

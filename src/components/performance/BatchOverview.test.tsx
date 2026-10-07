@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, act } from "@testing-library/react";
 import BatchOverview from "./BatchOverview";
 import type { BatchOverviewData, TestTrendPoint } from "@/types/quiz";
 
@@ -120,5 +120,98 @@ describe("BatchOverview", () => {
     expect(
       await screen.findByText("No quiz data available for this grade yet.")
     ).toBeInTheDocument();
+  });
+
+  // The overview's request is bound to its School/Grade/Program/Stream: once
+  // the tab moves on (a filter click or Back/Forward), the old request's late
+  // answer must not land in the new view.
+  describe("obsolete responses", () => {
+    function controlledOverviewFetch() {
+      const pending = new Map<string, { resolve: (v: unknown) => void }>();
+      vi.stubGlobal(
+        "fetch",
+        vi.fn((url: string) => new Promise((resolve) => pending.set(url, { resolve })))
+      );
+      const settle = async (url: string, response: unknown) => {
+        const p = pending.get(url);
+        if (!p) throw new Error(`no pending request for ${url}`);
+        await act(async () => p.resolve(response));
+      };
+      return {
+        respond: (url: string, data: Omit<BatchOverviewData, "summary">) =>
+          settle(url, {
+            ok: true,
+            json: () => Promise.resolve({ summary: { tests_conducted: 0, avg_participation: 0 }, ...data }),
+          }),
+        fail: (url: string) => settle(url, { ok: false, status: 500 }),
+      };
+    }
+
+    const PCM_URL = "/api/quiz-analytics/12345/batch-overview?grade=12&program=JNV%20CoE&stream=pcm";
+    const PCB_URL = "/api/quiz-analytics/12345/batch-overview?grade=12&program=JNV%20CoE&stream=pcb";
+    const PCM_TEST = test({ session_id: "p1", test_name: "PCM Full Test", test_format: "full_test", student_count: 10 });
+    const PCB_TEST = test({ session_id: "b1", test_name: "PCB Full Test", test_format: "full_test", student_count: 20 });
+
+    function overview(stream: string, onFilterOptions = vi.fn()) {
+      return (
+        <BatchOverview
+          schoolUdise="12345" grade={12} testCategory="full" program="JNV CoE" stream={stream}
+          onTestClick={noop} onFilterOptions={onFilterOptions}
+        />
+      );
+    }
+
+    it("ignores a late success, and its finalisation, for a stream history has left", async () => {
+      const f = controlledOverviewFetch();
+      const onFilterOptions = vi.fn();
+      const { rerender } = render(overview("pcm", onFilterOptions));
+      rerender(overview("pcb", onFilterOptions));
+
+      await f.respond(PCM_URL, { tests: [PCM_TEST], totalEnrolled: 10, enrolledByStream: {}, streams: ["pcm", "pcb"] });
+      expect(screen.queryByText("PCM Full Test")).not.toBeInTheDocument();
+      expect(screen.getByText("Loading batch overview...")).toBeInTheDocument();
+      expect(onFilterOptions).not.toHaveBeenCalledWith(expect.objectContaining({ streams: ["pcm", "pcb"] }));
+
+      await f.respond(PCB_URL, { tests: [PCB_TEST], totalEnrolled: 20, enrolledByStream: {}, streams: ["pcm", "pcb"] });
+      expect(screen.getByText("PCB Full Test")).toBeInTheDocument();
+      expect(onFilterOptions).toHaveBeenLastCalledWith({ streams: ["pcm", "pcb"], subjects: [], testGrades: [] });
+    });
+
+    it("ignores a late failure for a stream history has left", async () => {
+      const f = controlledOverviewFetch();
+      const { rerender } = render(overview("pcm"));
+      rerender(overview("pcb"));
+
+      await f.fail(PCM_URL);
+      expect(screen.queryByText("Failed to fetch batch overview")).not.toBeInTheDocument();
+      expect(screen.getByText("Loading batch overview...")).toBeInTheDocument();
+    });
+
+    it("a new request clears the old error, and recovers", async () => {
+      const f = controlledOverviewFetch();
+      const { rerender } = render(overview("pcm"));
+      await f.fail(PCM_URL);
+      expect(screen.getByText("Failed to fetch batch overview")).toBeInTheDocument();
+
+      rerender(overview("pcb"));
+      expect(screen.queryByText("Failed to fetch batch overview")).not.toBeInTheDocument();
+      await f.respond(PCB_URL, { tests: [PCB_TEST], totalEnrolled: 20, enrolledByStream: {}, streams: [] });
+      expect(screen.getByText("PCB Full Test")).toBeInTheDocument();
+    });
+
+    it("a current empty result clears the option groups published before it", async () => {
+      const f = controlledOverviewFetch();
+      const onFilterOptions = vi.fn();
+      const { rerender } = render(overview("pcm", onFilterOptions));
+      await f.respond(PCM_URL, {
+        tests: [test({ session_id: "p1", test_format: "full_test", test_grade: 12, subjects: ["Physics"] })],
+        totalEnrolled: 10, enrolledByStream: {}, streams: ["pcm", "pcb"],
+      });
+      expect(onFilterOptions).toHaveBeenLastCalledWith({ streams: ["pcm", "pcb"], subjects: ["Physics"], testGrades: [12] });
+
+      rerender(overview("pcb", onFilterOptions));
+      await f.respond(PCB_URL, { tests: [], totalEnrolled: 0, enrolledByStream: {}, streams: [] });
+      expect(onFilterOptions).toHaveBeenLastCalledWith({ streams: [], subjects: [], testGrades: [] });
+    });
   });
 });
