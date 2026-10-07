@@ -55,9 +55,12 @@ export default function PerformanceTab({ schoolUdise, lockedProgram }: Props) {
 
   // Deep dive: one test, full width, no filter bar. A session is grade-specific,
   // so changing grade returns to the overview rather than re-filtering here.
+  // Keyed by session: another report is a fresh view, never one frame of the
+  // previous report's data under the new one's heading.
   if (f.deepDiveSession && f.selectedGrade != null && !needsProgram) {
     return (
       <TestDeepDiveView
+        key={f.deepDiveSession.sessionId}
         schoolUdise={schoolUdise}
         grade={f.selectedGrade}
         sessionId={f.deepDiveSession.sessionId}

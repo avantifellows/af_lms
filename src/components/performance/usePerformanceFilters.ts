@@ -82,6 +82,48 @@ interface UrlIntent {
   intended: string;
   inFlight: string | null;
   queued: { query: string; mode: NavigateMode }[];
+  trail: Trail;
+}
+
+/**
+ * The history entries this mount has walked through, in order, with `at`
+ * marking the current one. `pushed` says the tab itself pushed that entry on
+ * top of the one before it; an entry the tab arrived at any other way, or
+ * whose URL was replaced since, proves nothing about what precedes it.
+ *
+ * Transient by design: a reload, a direct link or a remount starts a fresh
+ * trail of one unproven entry.
+ */
+interface Trail {
+  entries: { query: string; pushed: boolean }[];
+  at: number;
+}
+
+function freshTrail(query: string): Trail {
+  return { entries: [{ query, pushed: false }], at: 0 };
+}
+
+/** The trail after the tab hands a navigation to the router. */
+function record(trail: Trail, query: string, mode: NavigateMode): Trail {
+  if (mode === "push") {
+    const entries = [...trail.entries.slice(0, trail.at + 1), { query, pushed: true }];
+    return { entries, at: trail.at + 1 };
+  }
+  const entries = trail.entries.map((e, i) => (i === trail.at ? { query, pushed: false } : e));
+  return { entries, at: trail.at };
+}
+
+/**
+ * The trail after a URL the tab didn't ask for. Landing on exactly one
+ * neighbour's URL is Back or Forward to it. Anything else — an ambiguous
+ * step, a jump, a link, an outside replace — leaves nothing proven.
+ */
+function follow(trail: Trail, query: string): Trail {
+  const before = trail.entries[trail.at - 1]?.query === query;
+  const after = trail.entries[trail.at + 1]?.query === query;
+  if (before && !after) return { ...trail, at: trail.at - 1 };
+  if (after && !before) return { ...trail, at: trail.at + 1 };
+  return freshTrail(query);
 }
 
 /**
@@ -93,7 +135,27 @@ interface UrlIntent {
 function rehydrate(intent: UrlIntent, urlQuery: string): UrlIntent {
   if (intent.seen === urlQuery) return intent;
   if (intent.inFlight === urlQuery) return { ...intent, seen: urlQuery, inFlight: null };
-  return { seen: urlQuery, intended: urlQuery, inFlight: null, queued: [] };
+  return {
+    seen: urlQuery,
+    intended: urlQuery,
+    inFlight: null,
+    queued: [],
+    trail: follow(intent.trail, urlQuery),
+  };
+}
+
+/**
+ * Whether the current entry is an open report the tab pushed directly on top
+ * of its own overview — the only case in which browser Back is a safe way to
+ * close it. Nothing may be outstanding, or "current" isn't settled.
+ */
+function reportFollowsItsOverview(intent: UrlIntent): boolean {
+  if (intent.inFlight !== null || intent.queued.length > 0) return false;
+  const { entries, at } = intent.trail;
+  const current = entries[at];
+  if (!current?.pushed || current.query !== intent.seen) return false;
+  if (!new URLSearchParams(current.query).has("session")) return false;
+  return entries[at - 1]?.query === applyPerformanceParams(current.query, { session: null });
 }
 
 /**
@@ -112,6 +174,7 @@ function usePerformanceUrl() {
     intended: urlQuery,
     inFlight: null,
     queued: [],
+    trail: freshTrail(urlQuery),
   }));
   // Derived during render (React's "adjust state on prop change" pattern) so a
   // Back/Forward never renders one frame of the previous entry's filters.
@@ -130,7 +193,12 @@ function usePerformanceUrl() {
     const current = latest.current;
     if (current.inFlight !== null || current.queued.length === 0) return;
     const [next, ...rest] = current.queued;
-    const updated = { ...current, inFlight: next.query, queued: rest };
+    const updated = {
+      ...current,
+      inFlight: next.query,
+      queued: rest,
+      trail: record(current.trail, next.query, next.mode),
+    };
     latest.current = updated;
     setStored(updated);
     router[next.mode](`?${next.query}`, { scroll: false });
@@ -154,7 +222,19 @@ function usePerformanceUrl() {
     [dispatch]
   );
 
-  return { query: intent.intended, latest, navigate };
+  /**
+   * Leave the open report. Browser Back when the tab can prove the entry
+   * behind this one is the report's own overview, so the report's step is
+   * consumed rather than doubled. Otherwise (a direct link, a reload, a
+   * remount, a replaced entry) drop only the report from this entry, which
+   * keeps every filter and never leaves the app.
+   */
+  const closeReport = useCallback(() => {
+    if (reportFollowsItsOverview(latest.current)) router.back();
+    else navigate({ session: null }, "replace");
+  }, [router, navigate]);
+
+  return { query: intent.intended, latest, navigate, closeReport };
 }
 
 /** The raw selections a query describes. */
@@ -359,6 +439,7 @@ interface HandlerContext {
   selectedStream: string | null;
   effective: OverridableSelection;
   navigate: (patch: PerformanceUrlPatch, mode: NavigateMode) => void;
+  closeReport: () => void;
   nameReport: (v: { session: string; name: string }) => void;
 }
 
@@ -375,6 +456,7 @@ function createPerformanceHandlers({
   selectedStream,
   effective,
   navigate,
+  closeReport,
   nameReport,
 }: HandlerContext) {
   const push = (patch: PerformanceUrlPatch) => navigate(patch, "push");
@@ -398,14 +480,14 @@ function createPerformanceHandlers({
     push({ testGrade });
   };
 
-  // Opening and closing a report keep their replace policy here; the report's
-  // own history behaviour is a separate change.
+  // Opening a report is a step of its own, so Back closes it and Forward
+  // reopens it with the overview's filters intact.
   const handleTestClick = (sessionId: string, testName: string) => {
     nameReport({ session: sessionId, name: testName });
-    navigate({ session: sessionId }, "replace");
+    push({ session: sessionId });
   };
 
-  const handleBack = () => navigate({ session: null }, "replace");
+  const handleBack = closeReport;
 
   const handleCategoryChange = (cat: TestCategory) => {
     if (cat === effective.testCategory) return;
@@ -459,7 +541,7 @@ export function usePerformanceFilters({
   schoolUdise: string;
   lockedProgram?: string;
 }) {
-  const { query, latest, navigate } = usePerformanceUrl();
+  const { query, latest, navigate, closeReport } = usePerformanceUrl();
   const raw = readQuery(query);
 
   const { program, programs, grades, error } = useProgramsAndGrades(
@@ -500,6 +582,7 @@ export function usePerformanceFilters({
     selectedStream: raw.stream,
     effective,
     navigate,
+    closeReport,
     nameReport: setNamed,
   });
 

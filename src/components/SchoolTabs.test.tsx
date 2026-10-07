@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import SchoolTabs, { VisitHistorySection } from "./SchoolTabs";
@@ -6,8 +7,8 @@ const mockReplace = vi.fn();
 let mockSearchParams = new URLSearchParams();
 vi.mock("next/navigation", () => ({
   useRouter: () => ({
-    replace: (url: string) => {
-      mockReplace(url);
+    replace: (url: string, options?: { scroll?: boolean }) => {
+      mockReplace(url, options);
       // Reflect the URL change so consumers re-read the new active tab on re-render.
       const qs = url.startsWith("?") ? url.slice(1) : url.split("?")[1] || "";
       mockSearchParams = new URLSearchParams(qs);
@@ -25,6 +26,8 @@ vi.mock("next/link", () => ({
 }));
 
 describe("SchoolTabs", () => {
+  beforeEach(() => mockReplace.mockClear());
+
   const tabs = [
     { id: "students", label: "Students", content: <div>Students Content</div> },
     { id: "visits", label: "Visits", content: <div>Visits Content</div> },
@@ -106,7 +109,7 @@ describe("SchoolTabs", () => {
     const user = userEvent.setup();
     render(<SchoolTabs tabs={tabs} />);
     await user.click(screen.getByText("Visits"));
-    expect(mockReplace).toHaveBeenCalledWith("?tab=visits");
+    expect(mockReplace).toHaveBeenCalledWith("?tab=visits", { scroll: false });
   });
 
   it("preserves the Holistic return marker when switching tabs", async () => {
@@ -119,8 +122,96 @@ describe("SchoolTabs", () => {
 
     expect(mockReplace).toHaveBeenCalledWith(
       "?program_id=94&source=progress&tab=info",
+      { scroll: false },
     );
     mockSearchParams = new URLSearchParams();
+  });
+
+  describe("history navigation", () => {
+    // Counts mounts, so a test can tell a section was mounted afresh.
+    let performanceMounts = 0;
+    function PerformanceProbe() {
+      const [n] = useState(() => ++performanceMounts);
+      return <div>Performance Content #{n}</div>;
+    }
+    const withPerformance = [
+      ...tabs,
+      { id: "performance", label: "Performance", content: <PerformanceProbe /> },
+    ];
+
+    afterEach(() => {
+      mockSearchParams = new URLSearchParams();
+      performanceMounts = 0;
+    });
+
+    function urlBecomes(rerender: (ui: React.ReactElement) => void, query: string) {
+      mockSearchParams = new URLSearchParams(query);
+      rerender(<SchoolTabs tabs={withPerformance} />);
+    }
+
+    it("shows the tab a Back/Forward URL names, remounting Performance when it returns", () => {
+      mockSearchParams = new URLSearchParams("tab=performance&grade=12&session=sess-a");
+      const { rerender } = render(<SchoolTabs tabs={withPerformance} />);
+      expect(screen.getByText("Performance Content #1")).toBeInTheDocument();
+
+      urlBecomes(rerender, "tab=visits&grade=12&session=sess-a");
+      expect(screen.getByText("Visits Content")).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Visits" })).toHaveAttribute("aria-selected", "true");
+
+      urlBecomes(rerender, "tab=performance&grade=12&session=sess-a");
+      expect(screen.getByText("Performance Content #2")).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Performance" })).toHaveAttribute("aria-selected", "true");
+      expect(mockReplace).not.toHaveBeenCalled();
+    });
+
+    it("falls back to the first tab when history lands on an absent or unknown tab", () => {
+      mockSearchParams = new URLSearchParams("tab=info");
+      const { rerender } = render(<SchoolTabs tabs={withPerformance} />);
+      expect(screen.getByText("Info Content")).toBeInTheDocument();
+
+      urlBecomes(rerender, "grade=12");
+      expect(screen.getByText("Students Content")).toBeInTheDocument();
+
+      urlBecomes(rerender, "tab=info");
+      urlBecomes(rerender, "tab=ghost");
+      expect(screen.getByText("Students Content")).toBeInTheDocument();
+      expect(mockReplace).not.toHaveBeenCalled();
+    });
+
+    it("a past click doesn't outlive the URL: history back to that click's starting tab shows it", async () => {
+      const user = userEvent.setup();
+      const { rerender } = render(<SchoolTabs tabs={withPerformance} />);
+
+      await user.click(screen.getByRole("tab", { name: "Performance" }));
+      // The click's replace lands and the tab re-renders with it.
+      urlBecomes(rerender, "tab=performance");
+      expect(screen.getByText("Performance Content #1")).toBeInTheDocument();
+
+      // Back to an entry without ?tab=, the URL the click started from.
+      urlBecomes(rerender, "grade=12");
+      expect(screen.getByText("Students Content")).toBeInTheDocument();
+    });
+
+    it("an unknown defaultTab falls back to the first tab", () => {
+      render(<SchoolTabs tabs={withPerformance} defaultTab="ghost" />);
+      expect(screen.getByText("Students Content")).toBeInTheDocument();
+    });
+
+    it("a tab click replaces, without scrolling, keeping Performance filters, session and Holistic params", async () => {
+      mockSearchParams = new URLSearchParams(
+        "program_id=94&source=progress&tab=performance&grade=12&stream=pcm&category=chapter&session=sess-a"
+      );
+      const user = userEvent.setup();
+      render(<SchoolTabs tabs={withPerformance} />);
+
+      await user.click(screen.getByRole("tab", { name: "Info" }));
+      expect(mockReplace).toHaveBeenCalledTimes(1);
+      expect(mockReplace).toHaveBeenCalledWith(
+        "?program_id=94&source=progress&tab=info&grade=12&stream=pcm&category=chapter&session=sess-a",
+        { scroll: false },
+      );
+      expect(screen.getByText("Info Content")).toBeInTheDocument();
+    });
   });
 
   it("applies active styling to the selected tab button", () => {

@@ -6,6 +6,7 @@ import PerformanceTab from "./PerformanceTab";
 
 const mockReplace = vi.fn();
 const mockPush = vi.fn();
+const mockBack = vi.fn();
 let mockSearchParams = new URLSearchParams();
 // A stand-in for the App Router: by default a push or replace lands, and the
 // tab re-renders with the new query. A test that needs a navigation to stay
@@ -24,7 +25,7 @@ vi.mock("next/navigation", async () => {
     return () => mockUrlListeners.delete(l);
   };
   return {
-    useRouter: vi.fn(() => ({ replace: mockReplace, push: mockPush })),
+    useRouter: vi.fn(() => ({ replace: mockReplace, push: mockPush, back: mockBack })),
     useSearchParams: vi.fn(() => {
       useSyncExternalStore(subscribe, () => mockUrlVersion);
       return mockSearchParams;
@@ -46,6 +47,7 @@ interface BatchOverviewProps {
     subjects: string[];
     testGrades: number[];
   }) => void;
+  onTestClick?: (sessionId: string, testName: string) => void;
 }
 
 let lastBatchOverviewProps: BatchOverviewProps | null = null;
@@ -67,14 +69,34 @@ vi.mock("./performance/BatchOverview", () => ({
     return (
       <div data-testid="batch-overview">
         BatchOverview: udise={props.schoolUdise}, grade={props.grade}, category={props.testCategory}, program={props.program ?? "none"}, stream={props.stream ?? "none"}, subject={props.subject ?? "none"}, testGrade={props.testGrade ?? "none"}
+        <button onClick={() => props.onTestClick?.("sess-a", "Test A")}>Open Test A</button>
+        <button onClick={() => props.onTestClick?.("sess-b", "Test B")}>Open Test B</button>
       </div>
     );
   },
 }));
 
-vi.mock("./performance/TestDeepDive", () => ({
-  default: () => <div data-testid="test-deep-dive">TestDeepDive</div>,
-}));
+// Each deep dive's onDataLoaded, by the session it was rendered for — so a
+// test can deliver a report's name late, after the report has changed.
+let deepDiveLoaders = new Map<string, (testName: string) => void>();
+vi.mock("./performance/TestDeepDive", async () => {
+  const { useState } = await import("react");
+  return {
+    default: function TestDeepDive(props: { sessionId: string; onDataLoaded?: (testName: string) => void }) {
+      // Local state stands in for the real deep dive's loaded data: it shows
+      // which report this instance was first mounted for.
+      const [mountedFor] = useState(props.sessionId);
+      if (props.onDataLoaded && !deepDiveLoaders.has(props.sessionId)) {
+        deepDiveLoaders.set(props.sessionId, props.onDataLoaded);
+      }
+      return (
+        <div data-testid="test-deep-dive" data-mounted-for={mountedFor}>
+          TestDeepDive
+        </div>
+      );
+    },
+  };
+});
 
 interface CumulativeALProps {
   schoolUdise: string;
@@ -110,8 +132,10 @@ describe("PerformanceTab", () => {
     vi.restoreAllMocks();
     mockReplace.mockReset();
     mockPush.mockReset();
+    mockBack.mockReset();
     mockSearchParams = new URLSearchParams();
     batchOverviewRenders = [];
+    deepDiveLoaders = new Map();
   });
 
   it("shows loading spinner initially", () => {
@@ -913,6 +937,210 @@ describe("PerformanceTab", () => {
       // The grade-12 overview's publication arrives late, with no streams.
       act(() => staleOptions({ streams: [], subjects: [], testGrades: [] }));
       expect(screen.getByRole("group", { name: "Stream" })).toBeInTheDocument();
+    });
+  });
+
+  describe("Report history", () => {
+    // A stand-in for the browser's session history: push and replace write
+    // entries, Back/Forward move between them, and every landing re-renders the
+    // mounted tab with that entry's query.
+    function browserHistory(initial: string) {
+      const entries = [initial];
+      let at = 0;
+      const strip = (url: string) => url.replace(/^\?/, "");
+      mockSearchParams = new URLSearchParams(initial);
+      mockPush.mockImplementation((url: string) => {
+        entries.splice(at + 1);
+        entries.push(strip(url));
+        at++;
+        landUrl(url);
+      });
+      mockReplace.mockImplementation((url: string) => {
+        entries[at] = strip(url);
+        landUrl(url);
+      });
+      const go = (delta: number) => {
+        at += delta;
+        landUrl(entries[at]);
+      };
+      mockBack.mockImplementation(() => go(-1));
+      return {
+        entries,
+        get current() {
+          return entries[at];
+        },
+        back: () => act(() => go(-1)),
+        forward: () => act(() => go(1)),
+      };
+    }
+
+    const heading = () => screen.getByRole("heading", { level: 2 });
+
+    it("opening a report pushes one step; Back returns to the filtered overview and Forward restores it", async () => {
+      const history = browserHistory("tab=performance&grade=12&stream=pcm&category=chapter&from=holistic");
+      vi.stubGlobal("fetch", mockGradesResponse([11, 12], ["JNV CoE"]));
+      render(<PerformanceTab schoolUdise="12345" />);
+
+      fireEvent.click(await screen.findByRole("button", { name: "Open Test A" }));
+      expect(mockPush).toHaveBeenCalledTimes(1);
+      expect(mockPush).toHaveBeenCalledWith(
+        "?tab=performance&grade=12&stream=pcm&category=chapter&from=holistic&session=sess-a",
+        { scroll: false }
+      );
+      expect(mockReplace).not.toHaveBeenCalled();
+      expect(await screen.findByTestId("test-deep-dive")).toBeInTheDocument();
+      expect(heading()).toHaveTextContent("Test A");
+
+      history.back();
+      expect(history.current).toBe("tab=performance&grade=12&stream=pcm&category=chapter&from=holistic");
+      expect(await screen.findByTestId("batch-overview")).toBeInTheDocument();
+      expect(batchOverviewRenders.at(-1)).toMatchObject({ grade: 12, stream: "pcm", testCategory: "chapter" });
+
+      history.forward();
+      expect(await screen.findByTestId("test-deep-dive")).toBeInTheDocument();
+      expect(heading()).toHaveTextContent("Test A");
+      expect(history.entries).toHaveLength(2);
+    });
+
+    it("Back to overview consumes the report step it proves followed its overview", async () => {
+      const history = browserHistory("tab=performance&grade=12&stream=pcm");
+      vi.stubGlobal("fetch", mockGradesResponse([11, 12], ["JNV CoE"]));
+      render(<PerformanceTab schoolUdise="12345" />);
+
+      fireEvent.click(await screen.findByRole("button", { name: "Open Test A" }));
+      fireEvent.click(await screen.findByRole("button", { name: /back to overview/i }));
+
+      expect(mockBack).toHaveBeenCalledTimes(1);
+      expect(mockReplace).not.toHaveBeenCalled();
+      expect(history.current).toBe("tab=performance&grade=12&stream=pcm");
+      expect(history.entries).toEqual([
+        "tab=performance&grade=12&stream=pcm",
+        "tab=performance&grade=12&stream=pcm&session=sess-a",
+      ]);
+      expect(await screen.findByTestId("batch-overview")).toBeInTheDocument();
+    });
+
+    it("tracks the report entry through a Grade change and Back, then consumes it", async () => {
+      const history = browserHistory("tab=performance&grade=12");
+      vi.stubGlobal("fetch", mockGradesResponse([11, 12], ["JNV CoE"]));
+      render(<PerformanceTab schoolUdise="12345" />);
+
+      fireEvent.click(await screen.findByRole("button", { name: "Open Test A" }));
+      await screen.findByTestId("test-deep-dive");
+      const gradeGroup = screen.getByRole("group", { name: "Grade" });
+      fireEvent.click(within(gradeGroup).getByRole("button", { name: "11" }));
+      expect(history.current).toBe("tab=performance&grade=11");
+
+      history.back();
+      expect(history.current).toBe("tab=performance&grade=12&session=sess-a");
+      fireEvent.click(await screen.findByRole("button", { name: /back to overview/i }));
+
+      expect(mockBack).toHaveBeenCalledTimes(1);
+      expect(mockReplace).not.toHaveBeenCalled();
+      expect(history.current).toBe("tab=performance&grade=12");
+      expect(history.entries).toEqual([
+        "tab=performance&grade=12",
+        "tab=performance&grade=12&session=sess-a",
+        "tab=performance&grade=11",
+      ]);
+    });
+
+    it("tracks the report entry through Back then Forward, then consumes it", async () => {
+      const history = browserHistory("tab=performance&grade=12");
+      vi.stubGlobal("fetch", mockGradesResponse([11, 12], ["JNV CoE"]));
+      render(<PerformanceTab schoolUdise="12345" />);
+
+      fireEvent.click(await screen.findByRole("button", { name: "Open Test A" }));
+      history.back();
+      await screen.findByTestId("batch-overview");
+      history.forward();
+      fireEvent.click(await screen.findByRole("button", { name: /back to overview/i }));
+
+      expect(mockBack).toHaveBeenCalledTimes(1);
+      expect(mockReplace).not.toHaveBeenCalled();
+      expect(history.current).toBe("tab=performance&grade=12");
+      expect(history.entries).toHaveLength(2);
+    });
+
+    it("a direct-linked report clears only its session, by replace, without leaving", async () => {
+      const history = browserHistory(
+        "tab=performance&grade=12&stream=pcm&category=chapter&subject=Physics&program_id=94&source=progress&session=sess-a"
+      );
+      vi.stubGlobal("fetch", mockGradesResponse([11, 12], ["JNV CoE"]));
+      render(<PerformanceTab schoolUdise="12345" />);
+
+      fireEvent.click(await screen.findByRole("button", { name: /back to overview/i }));
+
+      expect(mockBack).not.toHaveBeenCalled();
+      expect(mockPush).not.toHaveBeenCalled();
+      expect(mockReplace).toHaveBeenCalledTimes(1);
+      expect(mockReplace).toHaveBeenCalledWith(
+        "?tab=performance&grade=12&stream=pcm&category=chapter&subject=Physics&program_id=94&source=progress",
+        { scroll: false }
+      );
+      expect(history.entries).toEqual([
+        "tab=performance&grade=12&stream=pcm&category=chapter&subject=Physics&program_id=94&source=progress",
+      ]);
+      expect(await screen.findByTestId("batch-overview")).toBeInTheDocument();
+    });
+
+    it("a remounted report has unknown provenance and clears only its session", async () => {
+      const history = browserHistory("tab=performance&grade=12");
+      vi.stubGlobal("fetch", mockGradesResponse([11, 12], ["JNV CoE"]));
+      const { unmount } = render(<PerformanceTab schoolUdise="12345" />);
+
+      fireEvent.click(await screen.findByRole("button", { name: "Open Test A" }));
+      await screen.findByTestId("test-deep-dive");
+      // Another School section is shown, then Performance comes back.
+      unmount();
+      render(<PerformanceTab schoolUdise="12345" />);
+
+      fireEvent.click(await screen.findByRole("button", { name: /back to overview/i }));
+      expect(mockBack).not.toHaveBeenCalled();
+      expect(mockReplace).toHaveBeenLastCalledWith("?tab=performance&grade=12", { scroll: false });
+      expect(history.entries).toEqual(["tab=performance&grade=12", "tab=performance&grade=12"]);
+    });
+
+    it("an outside navigation of the report entry invalidates its provenance", async () => {
+      const history = browserHistory("tab=performance&grade=12");
+      vi.stubGlobal("fetch", mockGradesResponse([11, 12], ["JNV CoE"]));
+      render(<PerformanceTab schoolUdise="12345" />);
+
+      fireEvent.click(await screen.findByRole("button", { name: "Open Test A" }));
+      await screen.findByTestId("test-deep-dive");
+      // Something else rewrites this entry's URL in place.
+      act(() => landUrl("tab=performance&grade=12&session=sess-a&source=progress"));
+
+      fireEvent.click(await screen.findByRole("button", { name: /back to overview/i }));
+      expect(mockBack).not.toHaveBeenCalled();
+      expect(mockReplace).toHaveBeenLastCalledWith("?tab=performance&grade=12&source=progress", { scroll: false });
+      expect(history.entries).toHaveLength(2);
+    });
+
+    it("a report reached by history starts nameless, and a late name for another report can't label it", async () => {
+      const history = browserHistory("tab=performance&grade=12&session=sess-a");
+      vi.stubGlobal("fetch", mockGradesResponse([11, 12], ["JNV CoE"]));
+      const ui = <PerformanceTab schoolUdise="12345" />;
+      render(ui);
+
+      await screen.findByTestId("test-deep-dive");
+      expect(heading()).toHaveTextContent("Loading...");
+      const lateA = deepDiveLoaders.get("sess-a")!;
+
+      // History moves to report B before A's data arrives.
+      act(() => landUrl("tab=performance&grade=12&session=sess-b"));
+      expect(heading()).toHaveTextContent("Loading...");
+      expect(screen.getByTestId("test-deep-dive")).toHaveAttribute("data-mounted-for", "sess-b");
+
+      act(() => lateA("Test A"));
+      expect(heading()).toHaveTextContent("Loading...");
+
+      act(() => deepDiveLoaders.get("sess-b")!("Test B"));
+      expect(heading()).toHaveTextContent("Test B");
+      // Naming a report is not navigation.
+      expect(mockPush).not.toHaveBeenCalled();
+      expect(mockReplace).not.toHaveBeenCalled();
+      expect(history.entries).toHaveLength(1);
     });
   });
 });

@@ -21,15 +21,22 @@ export default function SchoolTabs({ tabs, defaultTab }: Props) {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const fallback = defaultTab || tabs[0]?.id || "";
+  const visible = (id: string | null | undefined) => (id && tabs.some((t) => t.id === id) ? id : null);
+  const fallback = visible(defaultTab) ?? tabs[0]?.id ?? "";
   const urlTab = searchParams.get("tab");
-  // Seed the initial tab from ?tab= if it points to a visible tab; otherwise fall back.
-  const initial = urlTab && tabs.some((t) => t.id === urlTab) ? urlTab : fallback;
-  const [activeTab, setActiveTabState] = useState(initial);
+  // The URL decides the tab: a ?tab= naming a visible tab, otherwise the
+  // fallback. A click shows its tab at once, ahead of its replace landing; any
+  // later change to ?tab= (Back/Forward) wins over that click.
+  const fromUrl = visible(urlTab) ?? fallback;
+  const [clicked, setClicked] = useState<{ tab: string; urlTab: string | null } | null>(null);
+  // Once ?tab= moves on, the click is spent — even if history later returns
+  // to the ?tab= it was made from.
+  if (clicked && clicked.urlTab !== urlTab) setClicked(null);
+  const activeTab = clicked && clicked.urlTab === urlTab ? clicked.tab : fromUrl;
   const tabGroupId = useId();
 
   const setActiveTab = (id: string) => {
-    setActiveTabState(id);
+    setClicked({ tab: id, urlTab });
     const params = new URLSearchParams(searchParams.toString());
     if (id === fallback) params.delete("tab");
     else params.set("tab", id);
