@@ -26,7 +26,7 @@ edges:
     condition: when working on teacher feedback setup, the feedback form, or its report
   - target: patterns/INDEX.md
     condition: when starting a task — check the pattern index for a matching pattern file
-last_updated: 2026-10-07
+last_updated: 2026-10-08
 ---
 
 # Session Bootstrap
@@ -55,6 +55,7 @@ Then read this file fully before doing anything else in this session.
 - PR #376 Codex P1: intervention flags are pinned to JNV NVS for PMU roles. Non-JNV Schools get 403. The list holds only NVS-roster Students' flags. Raise and update need a current NVS batch, else the route's usual 404. Other roles are unchanged. See `context/permissions.md`.
 - PR #376 program-team ask: the School page header shows PMU roles (only) a "Feedback / Grievance" link that opens the program team's Google Form (`PMU_FEEDBACK_FORM_URL`) in a new tab. Start Visit for other roles is unchanged. See `context/permissions.md`.
 - Issue #383 slice #389: dashboard Total Visits is an exact `COUNT(*)` of the actor's owned non-deleted Visits (trim + case-fold owner match, both statuses), shown on both Physical Centres and JNV NVS Schools and unaffected by search/pagination. The JNV-only five-row Recent Visits shares the same owner predicate. A failed count read errors instead of showing 0; no Visit read without `pm_dashboard`. See `context/visits.md`.
+- Issue #383 slice #390: a plain `/dashboard` lands on Physical Centres when the resolved Program context has `hasCoEOrNodal`, else JNV NVS Schools. Hard pins (PMU, seated, Holistic Mentorship Admin, no access) still win, then an explicit valid `?view=`. A missing or invalid `view` uses that fallback (also with `q`/`page`); any supplied `view` suppresses the seated single-Centre shortcut. The one-School shortcut needs the resolved JNV view. Multi-School School Back links, JNV pagination and Centre Back links all name their view (`/dashboard?view=jnv-nvs` / `?view=centres`). See `context/architecture.md`.
 - Issue #351 slice #352: the NVS Performance batch overview lists only System-wide Mandated Tests (`test_purpose = 'system_wide_mandated'`), across all formats and test grades, with NVS-specific empty-state copy. Other programs are unchanged. See `context/data-access.md` §3.
 - Issue #351 slice #353: for JNV NVS, the test deep dive's Student Results table drops the AL and On Track columns (the same gate as Advanced tests). The expanded row's `colSpan` now comes from the rendered header cells rather than a hard-coded 10 or 8. See `context/data-access.md` §3.
 - Issue #351 slice #354: in every program, the Enrollment Stream filter has a "No stream (N)" option (`__none__`) and matches streams ignoring case and surrounding whitespace. This covers program-card counts, "Showing X of Y", StudentTable, and Download List. The shared rule lives in `src/lib/stream-rules.ts`. See `context/student-addition.md`.

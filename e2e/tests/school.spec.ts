@@ -2,7 +2,7 @@ import { test, expect } from "../fixtures/auth";
 
 test.describe("School page — Admin", () => {
   test("admin can view a school page", async ({ adminPage }) => {
-    await adminPage.goto("/dashboard");
+    await adminPage.goto("/dashboard?view=jnv-nvs");
 
     // Click the first school card heading link
     const firstSchool = adminPage.getByRole("heading", { level: 3 }).first();

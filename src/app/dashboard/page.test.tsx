@@ -227,6 +227,15 @@ const defaultProgramContext = {
   hasCoEOrNodal: true,
 };
 
+// Teacher fixtures hold only JNV NVS (64), so their context has no physical
+// Program and their plain landing is JNV NVS Schools.
+const nvsOnlyProgramContext = {
+  hasAccess: true,
+  programIds: [64],
+  isNVSOnly: true,
+  hasCoEOrNodal: false,
+};
+
 const noProgramContext = {
   hasAccess: false,
   programIds: [],
@@ -283,7 +292,7 @@ function setupTeacher(
 ) {
   mockGetServerSession.mockResolvedValue(teacherSession);
   mockGetUserPermission.mockResolvedValue(teacherPermission);
-  mockGetProgramContextSync.mockReturnValue(defaultProgramContext);
+  mockGetProgramContextSync.mockReturnValue(nvsOnlyProgramContext);
   mockGetFeatureAccess.mockReturnValue({ canView: false, canEdit: false });
   mockGetAccessibleSchoolCodes.mockResolvedValue(codes);
 
@@ -297,6 +306,9 @@ function setupTeacher(
 }
 
 const defaultSearchParams = Promise.resolve({});
+// Admin/PM fixtures hold physical Programs and land on Centres, so their JNV
+// NVS Schools tests choose the view explicitly.
+const jnvSearchParams = Promise.resolve({ view: "jnv-nvs" });
 
 // ---- tests ----
 
@@ -366,7 +378,7 @@ describe("DashboardPage (server component)", () => {
   it("redirects single-school user to their school page (no search)", async () => {
     mockGetServerSession.mockResolvedValue(teacherSession);
     mockGetUserPermission.mockResolvedValue(singleSchoolPermission);
-    mockGetProgramContextSync.mockReturnValue(defaultProgramContext);
+    mockGetProgramContextSync.mockReturnValue(nvsOnlyProgramContext);
     mockGetFeatureAccess.mockReturnValue({ canView: false, canEdit: false });
     mockGetAccessibleSchoolCodes.mockResolvedValue(["SC001"]);
 
@@ -379,7 +391,7 @@ describe("DashboardPage (server component)", () => {
   it("does NOT redirect single-school user when search is active", async () => {
     mockGetServerSession.mockResolvedValue(teacherSession);
     mockGetUserPermission.mockResolvedValue(singleSchoolPermission);
-    mockGetProgramContextSync.mockReturnValue(defaultProgramContext);
+    mockGetProgramContextSync.mockReturnValue(nvsOnlyProgramContext);
     mockGetFeatureAccess.mockReturnValue({ canView: false, canEdit: false });
     mockGetAccessibleSchoolCodes.mockResolvedValue(["SC001", "SC002"]);
     mockQuery
@@ -805,7 +817,7 @@ describe("DashboardPage (server component)", () => {
     ];
     setupPM([], 5, visits);
 
-    const jsx = await DashboardPage({ searchParams: defaultSearchParams });
+    const jsx = await DashboardPage({ searchParams: jnvSearchParams });
     render(jsx);
 
     expect(screen.getByText("Total Visits")).toBeInTheDocument();
@@ -856,7 +868,7 @@ describe("DashboardPage (server component)", () => {
     const school = makeSchool();
     setupAdmin([school], 1);
 
-    const jsx = await DashboardPage({ searchParams: defaultSearchParams });
+    const jsx = await DashboardPage({ searchParams: jnvSearchParams });
     render(jsx);
 
     const card = screen.getByTestId("school-card-SC001");
@@ -878,7 +890,7 @@ describe("DashboardPage (server component)", () => {
       program_ids: [78],
     });
 
-    const jsx = await DashboardPage({ searchParams: defaultSearchParams });
+    const jsx = await DashboardPage({ searchParams: jnvSearchParams });
     render(jsx);
 
     expect(screen.getByTestId("school-card-SC001")).toHaveAttribute(
@@ -891,7 +903,7 @@ describe("DashboardPage (server component)", () => {
     const school = makeSchool();
     setupPM([school], 1);
 
-    const jsx = await DashboardPage({ searchParams: defaultSearchParams });
+    const jsx = await DashboardPage({ searchParams: jnvSearchParams });
     render(jsx);
 
     const startVisitLink = screen.getByText("Start Visit");
@@ -924,7 +936,7 @@ describe("DashboardPage (server component)", () => {
     const school = makeSchool();
     setupPM([school], 1);
 
-    const jsx = await DashboardPage({ searchParams: defaultSearchParams });
+    const jsx = await DashboardPage({ searchParams: jnvSearchParams });
     render(jsx);
 
     const card = screen.getByTestId("school-card-SC001");
@@ -961,7 +973,7 @@ describe("DashboardPage (server component)", () => {
         { school_id: "s1", grade: 10, count: "15" },
       ]); // grade counts
 
-    const jsx = await DashboardPage({ searchParams: defaultSearchParams });
+    const jsx = await DashboardPage({ searchParams: jnvSearchParams });
     render(jsx);
 
     expect(screen.getByTestId("school-card-SC001")).toBeInTheDocument();
@@ -990,7 +1002,7 @@ describe("DashboardPage (server component)", () => {
     ];
     setupPM([], 0, visits);
 
-    const jsx = await DashboardPage({ searchParams: defaultSearchParams });
+    const jsx = await DashboardPage({ searchParams: jnvSearchParams });
     render(jsx);
 
     expect(screen.getByText("Recent Visits")).toBeInTheDocument();
@@ -1017,7 +1029,7 @@ describe("DashboardPage (server component)", () => {
   it("filters deleted visits from recent visits query", async () => {
     setupPM([], 0, []);
 
-    await DashboardPage({ searchParams: defaultSearchParams });
+    await DashboardPage({ searchParams: jnvSearchParams });
 
     const [recentVisitsSql, recentVisitsParams] = mockQuery.mock.calls[2] as [string, unknown[]];
     expect(recentVisitsSql).toContain("FROM lms_pm_school_visits v");
@@ -1213,7 +1225,7 @@ describe("DashboardPage (server component)", () => {
     setupAdmin(schools, 45);
 
     const jsx = await DashboardPage({
-      searchParams: Promise.resolve({ page: "2", q: "test" }),
+      searchParams: Promise.resolve({ view: "jnv-nvs", page: "2", q: "test" }),
     });
     render(jsx);
 
@@ -1223,20 +1235,20 @@ describe("DashboardPage (server component)", () => {
     expect(pagination).toHaveAttribute("data-base-path", "/dashboard");
     expect(pagination).toHaveAttribute(
       "data-search-params",
-      JSON.stringify({ q: "test" })
+      JSON.stringify({ q: "test", view: "jnv-nvs" })
     );
   });
 
-  it("passes empty searchParams to Pagination when no search", async () => {
+  it("passes only the JNV view to Pagination when no search", async () => {
     setupAdmin([], 0);
 
-    const jsx = await DashboardPage({ searchParams: defaultSearchParams });
+    const jsx = await DashboardPage({ searchParams: jnvSearchParams });
     render(jsx);
 
     const pagination = screen.getByTestId("pagination");
     expect(pagination).toHaveAttribute(
       "data-search-params",
-      JSON.stringify({})
+      JSON.stringify({ view: "jnv-nvs" })
     );
   });
 
@@ -1244,7 +1256,7 @@ describe("DashboardPage (server component)", () => {
     setupAdmin([], 0);
 
     const jsx = await DashboardPage({
-      searchParams: Promise.resolve({ page: "-5" }),
+      searchParams: Promise.resolve({ view: "jnv-nvs", page: "-5" }),
     });
     render(jsx);
 
@@ -1257,7 +1269,7 @@ describe("DashboardPage (server component)", () => {
   it("renders 'My Schools' section heading for PM users", async () => {
     setupPM([], 0);
 
-    const jsx = await DashboardPage({ searchParams: defaultSearchParams });
+    const jsx = await DashboardPage({ searchParams: jnvSearchParams });
     render(jsx);
 
     // "My Schools" appears as both stats card label and section heading
@@ -1272,7 +1284,7 @@ describe("DashboardPage (server component)", () => {
     const school2 = makeSchool({ id: "s2", code: "SC002", name: "School B" });
     setupAdmin([school1, school2], 2);
 
-    const jsx = await DashboardPage({ searchParams: defaultSearchParams });
+    const jsx = await DashboardPage({ searchParams: jnvSearchParams });
     render(jsx);
 
     expect(screen.getByTestId("school-card-SC001")).toBeInTheDocument();
@@ -1306,7 +1318,7 @@ describe("DashboardPage (server component)", () => {
     setupAdmin([], 0);
 
     await DashboardPage({
-      searchParams: Promise.resolve({ q: "bhav" }),
+      searchParams: Promise.resolve({ view: "jnv-nvs", q: "bhav" }),
     });
 
     // First query should include ILIKE and search pattern
@@ -1362,7 +1374,7 @@ describe("DashboardPage (server component)", () => {
       .mockResolvedValueOnce([{ total: "1" }]) // count query
       .mockResolvedValueOnce([]); // getNvsGradeCounts
 
-    await DashboardPage({ searchParams: defaultSearchParams });
+    await DashboardPage({ searchParams: jnvSearchParams });
 
     // Third query call is getNvsGradeCounts (no PM queries for teacher). The
     // JNV-NVS tab counts only students whose single attributed program is NVS,
@@ -1419,7 +1431,7 @@ describe("DashboardPage (server component)", () => {
     mockGetFeatureAccess.mockReturnValue({ canView: false, canEdit: false });
     mockGetAccessibleSchoolCodes.mockResolvedValue([]);
 
-    const jsx = await DashboardPage({ searchParams: defaultSearchParams });
+    const jsx = await DashboardPage({ searchParams: jnvSearchParams });
     render(jsx);
 
     // Empty codes => getSchools returns { schools: [], totalCount: 0 } immediately
@@ -1570,6 +1582,210 @@ describe("DashboardPage (server component)", () => {
       expect(
         mockQuery.mock.calls.some(([sql]) => String(sql).includes("lms_pm_school_visits"))
       ).toBe(false);
+    });
+  });
+  // Landing view (#390): hard-pinned roles first, then an explicit valid view,
+  // then the Program-context fallback — Physical Centres when the resolved
+  // context has physical-centre Programs, JNV NVS Schools otherwise.
+  describe("Landing view", () => {
+    const physicalContext = { hasAccess: true, programIds: [1, 2], isNVSOnly: false, hasCoEOrNodal: true };
+    const mixedContext = { hasAccess: true, programIds: [1, 2, 64], isNVSOnly: false, hasCoEOrNodal: true };
+    const nvsOnlyContext = { hasAccess: true, programIds: [64], isNVSOnly: true, hasCoEOrNodal: false };
+
+    // Answer by SQL shape so either view's query mix resolves.
+    function routeQueries({
+      schools = [] as unknown[],
+      schoolTotal = "0",
+      centres = [] as unknown[],
+      browsableCentreIds = [] as string[],
+    } = {}) {
+      mockQuery.mockImplementation(async (sql: string) => {
+        if (sql.includes("school_id IS NOT NULL")) return browsableCentreIds.map((id) => ({ id }));
+        if (sql.includes("FROM centres c\n") || sql.includes("LEFT JOIN centre_students")) return centres;
+        if (sql.includes("COUNT(DISTINCT s.id)")) return [{ total: schoolTotal }];
+        if (sql.includes("COUNT(*) AS total")) return [{ total: "0" }];
+        if (sql.includes("FROM visible s")) return schools;
+        return [];
+      });
+    }
+
+    function setupActor({
+      session = pmSession,
+      permission = pmPermission as Record<string, unknown>,
+      context = physicalContext,
+      codes = "all" as string[] | "all",
+      pmAccess = true,
+    } = {}) {
+      mockGetServerSession.mockResolvedValue(session);
+      mockGetUserPermission.mockResolvedValue(permission);
+      mockGetProgramContextSync.mockReturnValue(context);
+      mockGetFeatureAccess.mockReturnValue({ canView: pmAccess, canEdit: pmAccess });
+      mockGetAccessibleSchoolCodes.mockResolvedValue(codes);
+    }
+
+    async function renderDashboard(params: Record<string, string>) {
+      render(await DashboardPage({ searchParams: Promise.resolve(params) }));
+    }
+
+    function expectCentresView() {
+      expect(screen.getByTestId("school-search")).toHaveAttribute(
+        "data-placeholder",
+        "Search centres by name, school, or code...",
+      );
+      expect(screen.queryByTestId("student-search")).not.toBeInTheDocument();
+    }
+
+    function expectJnvView() {
+      expect(screen.getByTestId("student-search")).toBeInTheDocument();
+      expect(screen.queryByText(/physical centres found/i)).not.toBeInTheDocument();
+    }
+
+    const centreRow = (id: string, name: string, schoolId: string | null, schoolCode: string | null) => ({
+      id, name, program_name: "CoE", school_id: schoolId, school_code: schoolCode,
+      school_name: schoolCode ? `School ${schoolCode}` : null, region: "West", grade: null, count: "0",
+    });
+
+    it.each([
+      ["a physical-only PM", pmPermission, physicalContext, {}],
+      ["a mixed-Program Admin", adminPermission, mixedContext, {}],
+      ["a physical-only PM with an invalid view", pmPermission, physicalContext, { view: "bogus" }],
+      ["a physical-only PM searching without a view", pmPermission, physicalContext, { q: "abc" }],
+      ["a physical-only PM paging without a view", pmPermission, physicalContext, { page: "2" }],
+      ["an NVS-only Program Admin asking for Centres", nvsOnlyProgramAdminPermission, nvsOnlyContext, { view: "centres" }],
+    ] as const)("lands %s on Physical Centres", async (_label, permission, context, params) => {
+      setupActor({ permission, context });
+      routeQueries();
+
+      await renderDashboard(params);
+
+      expectCentresView();
+      expect(screen.getByText("Physical Centres", { selector: "a" })).toHaveAttribute("href", "/dashboard?view=centres");
+    });
+
+    it.each([
+      ["an NVS-only Program Admin", nvsOnlyProgramAdminPermission, nvsOnlyContext, {}],
+      ["an NVS-only Program Admin with an invalid view", nvsOnlyProgramAdminPermission, nvsOnlyContext, { view: "bogus" }],
+      ["an NVS-only Program Admin searching without a view", nvsOnlyProgramAdminPermission, nvsOnlyContext, { q: "abc" }],
+      ["a physical-only PM choosing JNV NVS Schools", pmPermission, physicalContext, { view: "jnv-nvs" }],
+      ["a mixed-Program Admin choosing JNV NVS Schools", adminPermission, mixedContext, { view: "jnv-nvs" }],
+    ] as const)("lands %s on JNV NVS Schools", async (_label, permission, context, params) => {
+      setupActor({ permission, context });
+      routeQueries({ schools: [makeSchool()], schoolTotal: "1" });
+
+      await renderDashboard(params);
+
+      expectJnvView();
+      expect(screen.getByTestId("school-card-SC001")).toHaveAttribute("data-href", "/school/SC001");
+    });
+
+    it("shows a seatless physical-Program user with one School their Physical Centres instead of redirecting", async () => {
+      setupActor({ session: teacherSession, permission: { ...singleSchoolPermission, program_ids: [1] }, codes: ["SC001"], pmAccess: false });
+      routeQueries({ centres: [centreRow("8", "Bhavnagar CoE", "s1", "SC001")] });
+
+      await renderDashboard({});
+
+      expect(mockRedirect).not.toHaveBeenCalled();
+      expectCentresView();
+      expect(screen.getByText("Bhavnagar CoE").closest("a")).toHaveAttribute("href", "/centre/8");
+    });
+
+    it("still sends a physical-Program user with one School to it when JNV NVS Schools is chosen", async () => {
+      setupActor({ session: teacherSession, permission: { ...singleSchoolPermission, program_ids: [1] }, codes: ["SC001"], pmAccess: false });
+      routeQueries();
+
+      await expect(renderDashboard({ view: "jnv-nvs" })).rejects.toThrow("REDIRECT:/school/SC001");
+    });
+
+    it("still sends an NVS-only user with one School straight to it", async () => {
+      setupActor({ session: teacherSession, permission: singleSchoolPermission, context: nvsOnlyContext, codes: ["SC001"], pmAccess: false });
+      routeQueries();
+
+      await expect(renderDashboard({})).rejects.toThrow("REDIRECT:/school/SC001");
+    });
+
+    it("does not send a one-School user to the School while searching JNV NVS Schools", async () => {
+      setupActor({ session: teacherSession, permission: singleSchoolPermission, context: nvsOnlyContext, codes: ["SC001"], pmAccess: false });
+      routeQueries();
+
+      await renderDashboard({ view: "jnv-nvs", q: "x" });
+
+      expect(mockRedirect).not.toHaveBeenCalled();
+      expectJnvView();
+    });
+
+    describe("seated users", () => {
+      const seated = (centres: number[]) => ({
+        ...singleSchoolPermission,
+        program_ids: [1],
+        scope: { schools: new Set(["SC001"]), centres: new Set(centres), programs: new Set([1]) },
+      });
+
+      it("redirects on a plain landing when exactly one seat Centre is browsable", async () => {
+        setupActor({ session: teacherSession, permission: seated([8, 17]), codes: ["SC001"], pmAccess: false });
+        routeQueries({ browsableCentreIds: ["8"] });
+
+        await expect(renderDashboard({})).rejects.toThrow("REDIRECT:/centre/8");
+      });
+
+      it("lists both Centres when two seat Centres are browsable", async () => {
+        setupActor({ session: teacherSession, permission: seated([8, 9]), codes: ["SC001"], pmAccess: false });
+        routeQueries({
+          browsableCentreIds: ["8", "9"],
+          centres: [centreRow("8", "Centre Eight", "s1", "SC001"), centreRow("9", "Centre Nine", "s1", "SC001")],
+        });
+
+        await renderDashboard({});
+
+        expect(mockRedirect).not.toHaveBeenCalled();
+        expectCentresView();
+        expect(screen.getByText("Centre Eight").closest("a")).toHaveAttribute("href", "/centre/8");
+        expect(screen.getByText("Centre Nine").closest("a")).toHaveAttribute("href", "/centre/9");
+      });
+
+      it("lists Centres when the only seat Centre is School-less", async () => {
+        setupActor({ session: teacherSession, permission: seated([17]), codes: ["SC001"], pmAccess: false });
+        routeQueries({ browsableCentreIds: [], centres: [centreRow("17", "City Centre", null, null)] });
+
+        await renderDashboard({});
+
+        expect(mockRedirect).not.toHaveBeenCalled();
+        expectCentresView();
+        expect(screen.getByText("City Centre")).toBeInTheDocument();
+      });
+
+      it.each([
+        ["an invalid view", { view: "bogus" }],
+        ["an explicit Centres view", { view: "centres" }],
+        ["an explicit JNV view", { view: "jnv-nvs" }],
+      ])("does not take the single-Centre shortcut with %s, and stays on Centres", async (_label, params) => {
+        setupActor({ session: teacherSession, permission: seated([8]), codes: ["SC001"], pmAccess: false });
+        routeQueries({ browsableCentreIds: ["8"], centres: [centreRow("8", "Centre Eight", "s1", "SC001")] });
+
+        await renderDashboard(params);
+
+        expect(mockRedirect).not.toHaveBeenCalled();
+        expectCentresView();
+        expect(screen.getByText("Centre Eight").closest("a")).toHaveAttribute("href", "/centre/8");
+      });
+    });
+
+    describe("JNV pagination", () => {
+      it.each([
+        ["without search", { view: "jnv-nvs", page: "2" }, { view: "jnv-nvs" }],
+        ["with search", { view: "jnv-nvs", page: "2", q: "bhav" }, { q: "bhav", view: "jnv-nvs" }],
+        ["for an NVS-only user without a view", {}, { view: "jnv-nvs" }],
+      ] as const)("keeps pages on JNV NVS Schools %s", async (_label, params, expected) => {
+        const nvsOnly = Object.keys(params).length === 0;
+        setupActor(nvsOnly
+          ? { permission: nvsOnlyProgramAdminPermission, context: nvsOnlyContext }
+          : {});
+        routeQueries({ schools: [makeSchool()], schoolTotal: "45" });
+
+        await renderDashboard(params);
+
+        const searchParams = JSON.parse(screen.getByTestId("pagination").getAttribute("data-search-params")!);
+        expect(searchParams).toEqual(expected);
+      });
     });
   });
 });

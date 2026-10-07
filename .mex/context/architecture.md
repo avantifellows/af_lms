@@ -18,7 +18,7 @@ edges:
     condition: when a route or page needs to gate access
   - target: context/visits.md
     condition: when working on PM school visits or visit action types
-last_updated: 2026-10-07
+last_updated: 2026-10-08
 ---
 
 # Architecture
@@ -67,8 +67,10 @@ retain `source=school`, so their original dashboard return does not change.
 ## Planned navigation work — issue #383
 
 The October 7 PRD retains the existing dashboard/roster/Performance boundaries.
-It plans a Physical Centres default from resolved `hasCoEOrNodal`, preserving
-seated/PMU/Holistic routing, explicit JNV return and pagination links, and an exact
+Shipped in #390: `resolveDashboardView` in `src/app/dashboard/page.tsx` defaults
+to Physical Centres from resolved `hasCoEOrNodal` (JNV NVS otherwise) after
+seated/PMU/Holistic routing and an explicit valid `?view=`; `defaultRosterBackHref`
+in `RosterPage` and JNV pagination name `?view=jnv-nvs`. It also plans an exact
 trimmed/case-folded owned non-deleted Visit count independent of Recent Visits;
 the capped Recent Visits query uses that same owner predicate (shipped in #389,
 see `context/visits.md`).

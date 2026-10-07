@@ -309,13 +309,15 @@ async function dashboardRequest(searchParams: PageProps["searchParams"]) {
   };
 }
 
-// Centre-seated staff are centre-scoped: their home is their centre, not the
-// whole-school roster. Default them to the Centres tab so the single-school
-// shortcut never bounces them to the school page — an explicit ?view= wins.
+// Hard-pinned roles/scopes first, then an explicit valid ?view=, then the
+// Program-context fallback: Physical Centres for anyone whose resolved Programs
+// include a physical-centre Program, JNV NVS Schools otherwise. A missing and an
+// invalid ?view= fall back alike (they differ only for the seated shortcut).
 function resolveDashboardView(
   viewParam: string | undefined,
   seated: boolean,
   permission: DashboardPermission,
+  programContext: DashboardProgramContext,
 ): DashboardView {
   // PMU Managers are JNV NVS only (ADR 0007): no Physical Centres tab to pick.
   if (permission.role === PMU_MANAGER_ROLE) return "jnv-nvs";
@@ -325,13 +327,14 @@ function resolveDashboardView(
   if (seated) return "centres";
   if (viewParam === "centres") return "centres";
   if (viewParam === "jnv-nvs") return "jnv-nvs";
-  return "jnv-nvs";
+  return programContext.hasCoEOrNodal ? "centres" : "jnv-nvs";
 }
 
-// Single-scope shortcuts, both taken only on the plain landing (no tab chosen,
-// no search): a single-seat user goes straight to their centre, and school
-// staff with exactly one school straight to it. Seated users are excluded from
-// the school shortcut — their home is the centre, resolved just above.
+// Single-scope shortcuts, both taken only without a search: a single-seat user
+// goes straight to their centre on the plain landing (any supplied ?view=, even
+// an invalid one, suppresses it), and non-seated staff with exactly one school
+// go straight to it when the resolved view is JNV NVS Schools. Seated users are
+// excluded from the school shortcut — their home is the centre.
 async function redirectSingleScope({
   seated,
   permission,
@@ -488,7 +491,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   );
   const features = dashboardFeatures(permission, programContext, holisticAccess.ok);
   const seated = isCentreSeated(permission);
-  const view = resolveDashboardView(viewParam, seated, permission);
+  const view = resolveDashboardView(viewParam, seated, permission, programContext);
   const schoolCodes = await getAccessibleSchoolCodes(email, permission);
   await redirectSingleScope({ seated, permission, schoolCodes, searchQuery, viewParam, view });
 
@@ -766,8 +769,10 @@ function SchoolsSection({ schools, hasPMAccess, showHeading, searchQuery, curren
     {schools.length === 0 && <div className="text-center py-12 text-text-muted">
       {searchQuery ? `No schools found matching "${searchQuery}"` : "No schools found"}
     </div>}
+    {/* Name the view explicitly: a bare /dashboard?page=2 would fall back to
+        Physical Centres for a physical-Program user. */}
     <Pagination currentPage={currentPage} totalPages={totalPages} basePath="/dashboard"
-      searchParams={searchQuery ? { q: searchQuery } : {}} />
+      searchParams={searchQuery ? { q: searchQuery, view: "jnv-nvs" } : { view: "jnv-nvs" }} />
   </div>;
 }
 
