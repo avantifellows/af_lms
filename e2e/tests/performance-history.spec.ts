@@ -61,15 +61,21 @@ function deepDive(sessionId: string | null) {
   };
 }
 
-async function stubAnalytics(page: Page, programsFor: (program: string | null) => string[]) {
+async function stubAnalytics(
+  page: Page,
+  programsFor: (program: string | null) => string[],
+  { gradesDelayMs = 0, overviewDelayMs = 0 }: { gradesDelayMs?: number; overviewDelayMs?: number } = {}
+) {
   await page.route("**/api/quiz-analytics/**", async (route) => {
     const url = new URL(route.request().url());
     if (url.pathname.endsWith("/grades")) {
       const program = url.searchParams.get("program");
+      if (gradesDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, gradesDelayMs));
       await route.fulfill({ json: { grades: [11, 12], programs: programsFor(program) } });
       return;
     }
     if (url.pathname.endsWith("/batch-overview")) {
+      if (overviewDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, overviewDelayMs));
       await route.fulfill({ json: OVERVIEW });
       return;
     }
@@ -93,6 +99,11 @@ async function expectQuery(page: Page, expected: string) {
   await expect.poll(() => query(page).toString()).toBe(expected);
 }
 
+async function expectScroll(page: Page, expected: number) {
+  expect(expected).toBeGreaterThan(0);
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(expected);
+}
+
 function reportTitle(page: Page, name: string) {
   return page.getByRole("heading", { level: 2, name, exact: true });
 }
@@ -108,54 +119,89 @@ function button(page: Page, group: string, name: string) {
 test.describe("Performance filter history", () => {
   test("Centre: Grade, category and stream choices step back and forward one at a time", async ({ adminPage: page }) => {
     // Whatever Program the Centre locks to is the only one offered.
-    await stubAnalytics(page, (program) => [program ?? "JNV CoE"]);
+    await stubAnalytics(page, (program) => [program ?? "JNV CoE"], {
+      // Reproduce QA's fast-grades race while leaving overview reloads pending
+      // long enough to assert the page does not collapse and clamp scroll.
+      gradesDelayMs: 10,
+      overviewDelayMs: 1_000,
+    });
+    await page.setViewportSize({ width: 1280, height: 450 });
 
     await page.goto("/dashboard?view=centres");
     await page.locator('a[href^="/centre/"]').first().click();
     await page.waitForURL(/\/centre\/\d+$/);
-    const centrePath = new URL(page.url()).pathname;
 
-    await page.goto(`${centrePath}?tab=performance`);
-    // Grade 12 is picked automatically, by replace.
+    await expect(page.getByRole("tab", { name: "Enrollment" })).toHaveAttribute("aria-selected", "true");
+    await page.getByRole("tab", { name: "Performance" }).click();
+    // Grade 12 is picked automatically, by replace. The outer tab must survive
+    // even when that request resolves almost immediately.
     await expectQuery(page, "tab=performance&grade=12");
     await expect(button(page, "Grade", "12")).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByText("E2E Full Test", { exact: true })).toBeVisible();
+    await page.reload();
+    await expectQuery(page, "tab=performance&grade=12");
+    await expect(page.getByRole("tab", { name: "Performance" })).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByText("E2E Full Test", { exact: true })).toBeVisible();
 
+    await page.evaluate(() => window.scrollTo(0, 120));
     const scrollBefore = await page.evaluate(() => window.scrollY);
+    expect(scrollBefore).toBeGreaterThan(0);
 
     await button(page, "Grade", "11").click();
     await expectQuery(page, "tab=performance&grade=11");
+    await expect(page.getByText("Loading batch overview...")).toBeVisible();
+    await expectScroll(page, scrollBefore);
+    await expect(page.getByText("E2E Full Test", { exact: true })).toBeVisible();
+    await expectScroll(page, scrollBefore);
     await button(page, "Test type", "Chapter tests").click();
     await expectQuery(page, "tab=performance&grade=11&category=chapter");
     await button(page, "Stream", "PCM").click();
     await expectQuery(page, "tab=performance&grade=11&category=chapter&stream=pcm");
+    await expect(page.getByText("Loading batch overview...")).toBeVisible();
+    await expectScroll(page, scrollBefore);
+    await expect(page.getByText("E2E Chapter Test", { exact: true })).toBeVisible();
     await expect(button(page, "Stream", "PCM")).toHaveAttribute("aria-pressed", "true");
-    expect(await page.evaluate(() => window.scrollY)).toBe(scrollBefore);
+    await expectScroll(page, scrollBefore);
 
     await page.goBack();
     await expectQuery(page, "tab=performance&grade=11&category=chapter");
+    await expect(page.getByText("Loading batch overview...")).toBeVisible();
+    await expectScroll(page, scrollBefore);
+    await expect(page.getByText("E2E Chapter Test", { exact: true })).toBeVisible();
     await expect(button(page, "Stream", "All")).toHaveAttribute("aria-pressed", "true");
     await expect(button(page, "Test type", "Chapter tests")).toHaveAttribute("aria-pressed", "true");
+    await expectScroll(page, scrollBefore);
 
     await page.goBack();
     await expectQuery(page, "tab=performance&grade=11");
     await expect(button(page, "Test type", "Full tests")).toHaveAttribute("aria-pressed", "true");
+    await expectScroll(page, scrollBefore);
 
     await page.goBack();
     await expectQuery(page, "tab=performance&grade=12");
+    await expect(page.getByText("Loading batch overview...")).toBeVisible();
+    await expectScroll(page, scrollBefore);
+    await expect(page.getByText("E2E Full Test", { exact: true })).toBeVisible();
     await expect(button(page, "Grade", "12")).toHaveAttribute("aria-pressed", "true");
+    await expectScroll(page, scrollBefore);
 
     await page.goForward();
     await expectQuery(page, "tab=performance&grade=11");
+    await expect(page.getByText("E2E Full Test", { exact: true })).toBeVisible();
     await expect(button(page, "Grade", "11")).toHaveAttribute("aria-pressed", "true");
+    await expectScroll(page, scrollBefore);
     await page.goForward();
     await expectQuery(page, "tab=performance&grade=11&category=chapter");
     await expect(button(page, "Test type", "Chapter tests")).toHaveAttribute("aria-pressed", "true");
+    await expectScroll(page, scrollBefore);
 
-    // Back past the landing entry leaves Performance: no automatic stops.
+    // Back past the landing entry leaves Performance: no automatic stops. The
+    // outer tab click replaced the Centre's default-tab entry, so the next
+    // older entry is the dashboard that opened the Centre.
     await page.goBack();
     await page.goBack();
     await page.goBack();
-    await page.waitForURL((url) => url.pathname === centrePath && url.search === "");
+    await page.waitForURL((url) => url.pathname === "/dashboard" && url.search === "?view=centres");
   });
 
   test("multi-Program School: Program and filter choices are each one history entry", async ({ adminPage: page }) => {
@@ -197,6 +243,7 @@ test.describe("Performance filter history", () => {
 
   test("Centre: a report is a step of its own, and Back to overview consumes it", async ({ adminPage: page }) => {
     await stubAnalytics(page, (program) => [program ?? "JNV CoE"]);
+    await page.setViewportSize({ width: 1280, height: 450 });
 
     await page.goto("/dashboard?view=centres");
     await page.locator('a[href^="/centre/"]').first().click();
@@ -205,37 +252,46 @@ test.describe("Performance filter history", () => {
 
     await page.goto(`${centrePath}?tab=performance`);
     await expectQuery(page, "tab=performance&grade=12");
-    const scrollBefore = await page.evaluate(() => window.scrollY);
 
     await button(page, "Grade", "11").click();
     await expectQuery(page, "tab=performance&grade=11");
     await button(page, "Test type", "Chapter tests").click();
     await expectQuery(page, "tab=performance&grade=11&category=chapter");
-    await page.getByText("E2E Chapter Test", { exact: true }).click();
+    const chapterTest = page.getByText("E2E Chapter Test", { exact: true });
+    await expect(chapterTest).toBeVisible();
+    await page.evaluate(() => window.scrollTo(0, 120));
+    const scrollBefore = await page.evaluate(() => window.scrollY);
+    expect(scrollBefore).toBeGreaterThan(0);
+
+    await chapterTest.click();
     await expectQuery(page, "tab=performance&grade=11&category=chapter&session=e2e-chapter");
     await expect(reportTitle(page, "E2E Chapter Test")).toBeVisible();
-    expect(await page.evaluate(() => window.scrollY)).toBe(scrollBefore);
+    await expectScroll(page, scrollBefore);
 
     // Back closes the report onto its filtered overview, then undoes the category.
     await page.goBack();
     await expectQuery(page, "tab=performance&grade=11&category=chapter");
     await expect(button(page, "Test type", "Chapter tests")).toHaveAttribute("aria-pressed", "true");
     await expect(backToOverview(page)).toHaveCount(0);
+    await expectScroll(page, scrollBefore);
     await page.goBack();
     await expectQuery(page, "tab=performance&grade=11");
     await expect(button(page, "Test type", "Full tests")).toHaveAttribute("aria-pressed", "true");
 
     await page.goForward();
     await expectQuery(page, "tab=performance&grade=11&category=chapter");
+    await expectScroll(page, scrollBefore);
     await page.goForward();
     await expectQuery(page, "tab=performance&grade=11&category=chapter&session=e2e-chapter");
     await expect(reportTitle(page, "E2E Chapter Test")).toBeVisible();
+    await expectScroll(page, scrollBefore);
 
     // The report's provenance survived Back/Forward: the in-page Back consumes
     // the report step, so one more Back undoes the category — no duplicate overview.
     await backToOverview(page).click();
     await expectQuery(page, "tab=performance&grade=11&category=chapter");
     await expect(button(page, "Test type", "Chapter tests")).toHaveAttribute("aria-pressed", "true");
+    await expectScroll(page, scrollBefore);
     await page.goBack();
     await expectQuery(page, "tab=performance&grade=11");
     expect(new URL(page.url()).pathname).toBe(centrePath);

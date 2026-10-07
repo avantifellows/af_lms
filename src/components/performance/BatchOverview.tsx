@@ -5,6 +5,7 @@ import { Card } from "@/components/ui/Card";
 import StatCard from "../StatCard";
 import type { BatchOverviewData, TestTrendPoint } from "@/types/quiz";
 import type { TestCategory } from "../PerformanceTab";
+import { RetainedHeightFrame } from "./PerformanceStates";
 
 const CHAPTER_FORMATS = ["chapter_test", "combined_chapter_test", "homework"];
 
@@ -225,60 +226,62 @@ export default function BatchOverview({
     onFilterOptions?.(filterOptions);
   }, [filterOptions, onFilterOptions]);
 
+  let content: React.ReactNode;
   if (loading) {
-    return (
+    content = (
       <div className="flex justify-center items-center h-[30vh]">
         <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-accent" />
         <span className="ml-3 text-sm text-text-secondary">Loading batch overview...</span>
       </div>
     );
-  }
-
-  if (error) {
-    return (
+  } else if (error) {
+    content = (
       <div className="p-4 bg-danger-bg border border-danger text-danger rounded-lg">
         {error}
       </div>
     );
-  }
-
-  const allTests = data?.tests ?? [];
-  const tests = listedTests(allTests, { isNvs, testCategory, subject, testGrade });
-
-  if (!data || tests.length === 0) {
-    return (
+  } else {
+    const allTests = data?.tests ?? [];
+    const tests = listedTests(allTests, { isNvs, testCategory, subject, testGrade });
+    if (!data || tests.length === 0) {
+      content = (
       <EmptyOverview>
         {emptyStateCopy({ isNvs, hasData: allTests.length > 0, testCategory, subject, stream, testGrade })}
       </EmptyOverview>
-    );
+      );
+    } else {
+      const { totalEnrolled, enrolledByStream } = data;
+      const avgAttendance = Math.round(
+        tests.reduce((s, t) => s + (t.test_stream ? t.stream_student_count : t.student_count), 0) / tests.length
+      );
+      content = (
+        <div className="space-y-6">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
+            <StatCard label="Tests Conducted" value={tests.length} color="brand-coral" />
+            <StatCard label="Avg Attendance" value={avgAttendance} color="brand-amber" />
+            {totalEnrolled != null && (
+              <StatCard label="Total Enrolled" value={totalEnrolled} color="brand-gold" />
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 md:gap-4">
+            {[...tests].reverse().map((t) => (
+              <TestCard
+                key={t.session_id}
+                test={t}
+                enrolledByStream={enrolledByStream}
+                onClick={() => onTestClick(t.session_id, t.test_name)}
+              />
+            ))}
+          </div>
+        </div>
+      );
+    }
   }
 
-  const { totalEnrolled, enrolledByStream } = data;
-
-  const avgAttendance = Math.round(
-    tests.reduce((s, t) => s + (t.test_stream ? t.stream_student_count : t.student_count), 0) / tests.length
-  );
-
   return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
-        <StatCard label="Tests Conducted" value={tests.length} color="brand-coral" />
-        <StatCard label="Avg Attendance" value={avgAttendance} color="brand-amber" />
-        {totalEnrolled != null && (
-          <StatCard label="Total Enrolled" value={totalEnrolled} color="brand-gold" />
-        )}
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 md:gap-4">
-        {[...tests].reverse().map((t) => (
-          <TestCard
-            key={t.session_id}
-            test={t}
-            enrolledByStream={enrolledByStream}
-            onClick={() => onTestClick(t.session_id, t.test_name)}
-          />
-        ))}
-      </div>
-    </div>
+    <RetainedHeightFrame loading={loading} testId="batch-overview-frame">
+      {content}
+    </RetainedHeightFrame>
   );
 }

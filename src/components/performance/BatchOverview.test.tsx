@@ -177,6 +177,41 @@ describe("BatchOverview", () => {
       expect(onFilterOptions).toHaveBeenLastCalledWith({ streams: ["pcm", "pcb"], subjects: [], testGrades: [] });
     });
 
+    it("retains the tallest settled overview through loading and a shorter result", async () => {
+      const tall = {
+        width: 800,
+        height: 640,
+        top: 0,
+        right: 800,
+        bottom: 640,
+        left: 0,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      };
+      const short = { ...tall, height: 240, bottom: 240 };
+      const rect = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect")
+        .mockReturnValueOnce(tall)
+        .mockReturnValue(short);
+      const f = controlledOverviewFetch();
+      const { rerender } = render(overview("pcm"));
+      await f.respond(PCM_URL, {
+        tests: [PCM_TEST], totalEnrolled: 10, enrolledByStream: {}, streams: ["pcm", "pcb"],
+      });
+
+      rerender(overview("pcb"));
+
+      expect(screen.getByTestId("batch-overview-frame")).toHaveStyle({ minHeight: "640px" });
+      expect(screen.getByText("Loading batch overview...")).toBeInTheDocument();
+
+      await f.respond(PCB_URL, {
+        tests: [PCB_TEST], totalEnrolled: 20, enrolledByStream: {}, streams: ["pcm", "pcb"],
+      });
+      expect(screen.getByText("PCB Full Test")).toBeInTheDocument();
+      expect(screen.getByTestId("batch-overview-frame")).toHaveStyle({ minHeight: "640px" });
+      rect.mockRestore();
+    });
+
     it("ignores a late failure for a stream history has left", async () => {
       const f = controlledOverviewFetch();
       const { rerender } = render(overview("pcm"));

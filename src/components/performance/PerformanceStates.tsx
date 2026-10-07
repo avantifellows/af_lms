@@ -1,6 +1,48 @@
 "use client";
 
-import type { ReactElement } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
+import type { ReactElement, ReactNode } from "react";
+
+/**
+ * Keeps this mounted view at least as tall as its tallest settled content.
+ * Router `scroll: false` cannot preserve a non-zero scroll position when the
+ * document briefly becomes shorter than the viewport. Keeping the maximum
+ * height also covers a shorter response settling after the loading frame.
+ */
+export function RetainedHeightFrame({
+  loading,
+  children,
+  className,
+  testId,
+}: {
+  loading: boolean;
+  children: ReactNode;
+  className?: string;
+  testId?: string;
+}) {
+  const frameRef = useRef<HTMLDivElement>(null);
+  const [maxSettledHeight, setMaxSettledHeight] = useState(0);
+
+  useLayoutEffect(() => {
+    if (!loading && frameRef.current) {
+      const height = frameRef.current.getBoundingClientRect().height;
+      setMaxSettledHeight((current) => Math.max(current, height));
+    }
+  }, [children, loading]);
+
+  const minHeight = maxSettledHeight > 0 ? `${maxSettledHeight}px` : undefined;
+  return (
+    <div
+      ref={frameRef}
+      style={{ minHeight }}
+      className={className}
+      data-testid={testId}
+      aria-busy={loading}
+    >
+      {children}
+    </div>
+  );
+}
 
 /** The tab's flat "nothing to show yet" panel, used for both the prompts
  *  (pick a program, pick a grade) and the no-data message. */

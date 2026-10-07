@@ -3,17 +3,8 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import SchoolTabs, { VisitHistorySection } from "./SchoolTabs";
 
-const mockReplace = vi.fn();
 let mockSearchParams = new URLSearchParams();
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({
-    replace: (url: string, options?: { scroll?: boolean }) => {
-      mockReplace(url, options);
-      // Reflect the URL change so consumers re-read the new active tab on re-render.
-      const qs = url.startsWith("?") ? url.slice(1) : url.split("?")[1] || "";
-      mockSearchParams = new URLSearchParams(qs);
-    },
-  }),
   useSearchParams: () => mockSearchParams,
 }));
 
@@ -26,7 +17,10 @@ vi.mock("next/link", () => ({
 }));
 
 describe("SchoolTabs", () => {
-  beforeEach(() => mockReplace.mockClear());
+  beforeEach(() => {
+    mockSearchParams = new URLSearchParams();
+    window.history.replaceState(null, "", "/school/123");
+  });
 
   const tabs = [
     { id: "students", label: "Students", content: <div>Students Content</div> },
@@ -104,25 +98,44 @@ describe("SchoolTabs", () => {
     mockSearchParams = new URLSearchParams();
   });
 
-  it("calls router.replace with ?tab= when switching tabs", async () => {
-    mockReplace.mockClear();
+  it("replaces the current URL with ?tab= when switching tabs", async () => {
     const user = userEvent.setup();
     render(<SchoolTabs tabs={tabs} />);
     await user.click(screen.getByText("Visits"));
-    expect(mockReplace).toHaveBeenCalledWith("?tab=visits", { scroll: false });
+    expect(window.location.pathname + window.location.search).toBe("/school/123?tab=visits");
+  });
+
+  it("writes the selected tab to the live URL before mounting its content", async () => {
+    window.history.replaceState(null, "", "/school/123?source=progress");
+    mockSearchParams = new URLSearchParams("source=progress");
+    const user = userEvent.setup();
+    function UrlProbe() {
+      return <div>Mounted at {window.location.search}</div>;
+    }
+    const tabsWithUrlProbe = [
+      ...tabs,
+      {
+        id: "performance",
+        label: "Performance",
+        content: <UrlProbe />,
+      },
+    ];
+
+    render(<SchoolTabs tabs={tabsWithUrlProbe} />);
+    await user.click(screen.getByRole("tab", { name: "Performance" }));
+
+    expect(screen.getByText("Mounted at ?source=progress&tab=performance")).toBeInTheDocument();
   });
 
   it("preserves the Holistic return marker when switching tabs", async () => {
-    mockReplace.mockClear();
     mockSearchParams = new URLSearchParams("program_id=94&source=progress");
     const user = userEvent.setup();
     render(<SchoolTabs tabs={tabs} />);
 
     await user.click(screen.getByText("Info"));
 
-    expect(mockReplace).toHaveBeenCalledWith(
-      "?program_id=94&source=progress&tab=info",
-      { scroll: false },
+    expect(window.location.pathname + window.location.search).toBe(
+      "/school/123?program_id=94&source=progress&tab=info"
     );
     mockSearchParams = new URLSearchParams();
   });
@@ -161,7 +174,6 @@ describe("SchoolTabs", () => {
       urlBecomes(rerender, "tab=performance&grade=12&session=sess-a");
       expect(screen.getByText("Performance Content #2")).toBeInTheDocument();
       expect(screen.getByRole("tab", { name: "Performance" })).toHaveAttribute("aria-selected", "true");
-      expect(mockReplace).not.toHaveBeenCalled();
     });
 
     it("falls back to the first tab when history lands on an absent or unknown tab", () => {
@@ -175,7 +187,6 @@ describe("SchoolTabs", () => {
       urlBecomes(rerender, "tab=info");
       urlBecomes(rerender, "tab=ghost");
       expect(screen.getByText("Students Content")).toBeInTheDocument();
-      expect(mockReplace).not.toHaveBeenCalled();
     });
 
     it("a past click doesn't outlive the URL: history back to that click's starting tab shows it", async () => {
@@ -205,10 +216,8 @@ describe("SchoolTabs", () => {
       render(<SchoolTabs tabs={withPerformance} />);
 
       await user.click(screen.getByRole("tab", { name: "Info" }));
-      expect(mockReplace).toHaveBeenCalledTimes(1);
-      expect(mockReplace).toHaveBeenCalledWith(
-        "?program_id=94&source=progress&tab=info&grade=12&stream=pcm&category=chapter&session=sess-a",
-        { scroll: false },
+      expect(window.location.pathname + window.location.search).toBe(
+        "/school/123?program_id=94&source=progress&tab=info&grade=12&stream=pcm&category=chapter&session=sess-a"
       );
       expect(screen.getByText("Info Content")).toBeInTheDocument();
     });

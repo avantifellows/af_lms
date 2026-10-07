@@ -1,7 +1,7 @@
 "use client";
 
 import { type KeyboardEvent, useId, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { statusBadgeClass } from "@/lib/visit-actions";
 import { Card } from "@/components/ui";
@@ -18,7 +18,6 @@ interface Props {
 }
 
 export default function SchoolTabs({ tabs, defaultTab }: Props) {
-  const router = useRouter();
   const searchParams = useSearchParams();
 
   const visible = (id: string | null | undefined) => (id && tabs.some((t) => t.id === id) ? id : null);
@@ -41,7 +40,13 @@ export default function SchoolTabs({ tabs, defaultTab }: Props) {
     if (id === fallback) params.delete("tab");
     else params.set("tab", id);
     const qs = params.toString();
-    router.replace(qs ? `?${qs}` : "?", { scroll: false });
+    const href = `${window.location.pathname}${qs ? `?${qs}` : ""}${window.location.hash}`;
+    // Write the new tab synchronously before its content mounts. Performance
+    // can finish its first grades request before an App Router replace lands;
+    // without this, its automatic Grade replace can be built from the old URL
+    // and erase `tab=performance`. Next's patched history API updates
+    // useSearchParams and preserves replace (rather than push) semantics.
+    window.history.replaceState(null, "", href);
   };
 
   const activeContent = tabs.find((t) => t.id === activeTab)?.content;
