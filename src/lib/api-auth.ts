@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { getSession } from "@/lib/session";
 import { canAccessSchool, getResolvedPermission } from "@/lib/permissions";
 import type { UserPermission } from "@/lib/permissions";
 import { query } from "@/lib/db";
@@ -40,7 +39,7 @@ export async function authorizeSchoolAccess(
   udise: string,
   options?: { requireEdit?: boolean },
 ): Promise<AuthResult> {
-  const session = await getServerSession(authOptions);
+  const session = await getSession();
   if (!session) {
     return {
       authorized: false,

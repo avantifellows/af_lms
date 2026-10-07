@@ -41,6 +41,7 @@
     "@aws-sdk/lib-dynamodb": "^3.1025.0",
     "@aws-sdk/s3-request-presigner": "^3.1056.0",
     "@google-cloud/bigquery": "^8.1.1",
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "@types/pg": "^8.15.6",
     "cfb": "1.2.2",
     "csv-parse": "^6.2.1",
@@ -55,7 +56,8 @@
     "react-dom": "19.2.0",
     "react-markdown": "^10.1.0",
     "recharts": "^3.6.0",
-    "sonner": "^2.0.7"
+    "sonner": "^2.0.7",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",
