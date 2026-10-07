@@ -48,8 +48,8 @@ export async function GET(request: Request) {
   if (resource && resource !== mcpResource(origin)) return fail("invalid_target", "Unknown resource");
 
   const session = await getServerSession(authOptions);
-  const email = session && !session.isPasscodeUser ? session.user?.email : null;
-  if (!email) return signInPage(request.url, origin, Boolean(session?.isPasscodeUser));
+  const email = session?.user?.email;
+  if (!email) return signInPage(request.url, origin);
 
   if (!(await getResolvedPermission(email))) {
     return page(
@@ -86,7 +86,7 @@ export async function POST(request: Request) {
   // The approval must come from the same signed-in user the page was shown to.
   // The session cookie is SameSite=Lax, so a cross-site POST arrives without it.
   const session = await getServerSession(authOptions);
-  if (session?.isPasscodeUser || session?.user?.email !== consent.email) {
+  if (session?.user?.email !== consent.email) {
     return page("Not signed in", "<p>Your LMS sign-in changed. Start the connection again from Claude.</p>", 403);
   }
 
@@ -120,11 +120,11 @@ function redirectTo(uri: string, params: Record<string, string | undefined>): Re
 
 // NextAuth's Google sign-in is a POST carrying its CSRF token; fetch the token,
 // then submit, returning to this exact authorize URL afterwards.
-function signInPage(returnTo: string, origin: string, isPasscodeUser: boolean): Response {
+function signInPage(returnTo: string, origin: string): Response {
   const callbackUrl = new URL(new URL(returnTo).pathname + new URL(returnTo).search, origin).toString();
   return page(
     "Sign in to the Avanti LMS",
-    `<p>${isPasscodeUser ? "School passcode sign-in can't be used for Claude. " : ""}Sign in with the Google account you use for the LMS to connect it to Claude.</p>
+    `<p>Sign in with the Google account you use for the LMS to connect it to Claude.</p>
 <form id="signin" method="post" action="/api/auth/signin/google">
   <input type="hidden" name="csrfToken" id="csrf">
   <input type="hidden" name="callbackUrl" value="${esc(callbackUrl)}">

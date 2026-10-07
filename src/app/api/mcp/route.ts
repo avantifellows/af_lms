@@ -17,10 +17,10 @@ async function callerEmail(request: Request, origin: string): Promise<string | n
   const email = bearerEmail(request, origin);
   if (email) return email;
   // Local development only: accept the NextAuth cookie, so the server can be
-  // tried without running the OAuth flow. Passcode users have no email.
+  // tried without running the OAuth flow.
   if (process.env.NODE_ENV !== "production") {
     const session = await getServerSession(authOptions);
-    if (session && !session.isPasscodeUser && session.user?.email) return session.user.email;
+    if (session?.user?.email) return session.user.email;
   }
   return null;
 }

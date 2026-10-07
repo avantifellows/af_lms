@@ -24,7 +24,6 @@ describe("getSession", () => {
       return getSession();
     });
     expect(session?.user?.email).toBe("caller@avantifellows.org");
-    expect(session?.isPasscodeUser).toBeUndefined();
     expect(mockSession).not.toHaveBeenCalled();
   });
 });

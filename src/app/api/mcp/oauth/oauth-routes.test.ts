@@ -109,11 +109,6 @@ describe("authorize", () => {
     expect(html).toContain("/api/mcp/oauth/authorize?");
   });
 
-  it("treats a passcode session as signed out", async () => {
-    mockSession.mockResolvedValue({ ...signedIn(), isPasscodeUser: true });
-    const clientId = await registerClient();
-    expect(await (await authorize(new Request(authorizeUrl(clientId)))).text()).toContain("passcode");
-  });
 
   it("refuses an account with no LMS permission", async () => {
     mockSession.mockResolvedValue(signedIn("outsider@gmail.com"));

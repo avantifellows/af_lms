@@ -17,7 +17,6 @@ export async function getSession(): Promise<Session | null> {
 }
 
 // Run `fn` with route handlers seeing `email` as the signed-in Google user.
-// Passcode identity is never synthesised here; MCP callers are email users.
 export function runAsMcpCaller<T>(email: string, fn: () => Promise<T>): Promise<T> {
   const session: Session = {
     user: { email },

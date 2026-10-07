@@ -103,10 +103,6 @@ describe("/api/mcp", () => {
       expect(mockPermission).not.toHaveBeenCalled();
     });
 
-    it("passcode sessions are not callers", async () => {
-      mockSession.mockResolvedValue({ ...PM_SESSION, isPasscodeUser: true });
-      expect((await POST(rpc("tools/list"))).status).toBe(401);
-    });
 
     it("accepts an OAuth bearer token without any cookie session", async () => {
       mockSession.mockResolvedValue(null);
