@@ -4,10 +4,9 @@ import { useLayoutEffect, useRef, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
 
 /**
- * Keeps this mounted view at least as tall as its tallest settled content.
- * Router `scroll: false` cannot preserve a non-zero scroll position when the
- * document briefly becomes shorter than the viewport. Keeping the maximum
- * height also covers a shorter response settling after the loading frame.
+ * Keeps the previous settled height while content reloads. Once new content
+ * settles, it releases that height down to the natural content height or the
+ * smaller floor needed to keep the current scroll position valid.
  */
 export function RetainedHeightFrame({
   loading,
@@ -21,25 +20,53 @@ export function RetainedHeightFrame({
   testId?: string;
 }) {
   const frameRef = useRef<HTMLDivElement>(null);
-  const [maxSettledHeight, setMaxSettledHeight] = useState(0);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [retainedHeight, setRetainedHeight] = useState(0);
 
   useLayoutEffect(() => {
-    if (!loading && frameRef.current) {
-      const height = frameRef.current.getBoundingClientRect().height;
-      setMaxSettledHeight((current) => Math.max(current, height));
-    }
-  }, [children, loading]);
+    if (loading || !frameRef.current || !contentRef.current) return;
 
-  const minHeight = maxSettledHeight > 0 ? `${maxSettledHeight}px` : undefined;
+    const frame = frameRef.current;
+    const content = contentRef.current;
+    const heights = () => {
+      const naturalHeight = Math.ceil(content.getBoundingClientRect().height);
+      const frameTop = frame.getBoundingClientRect().top + window.scrollY;
+      const viewportBottom = window.scrollY + window.innerHeight;
+      const scrollFloor = window.scrollY > 0 ? Math.max(0, Math.ceil(viewportBottom - frameTop)) : 0;
+      return { naturalHeight, requiredHeight: Math.max(naturalHeight, scrollFloor) };
+    };
+    const measure = () => {
+      const { naturalHeight, requiredHeight } = heights();
+      setRetainedHeight((current) => (
+        current === 0 ? requiredHeight : Math.max(naturalHeight, Math.min(current, requiredHeight))
+      ));
+    };
+    const releaseOnScrollUp = () => {
+      const { requiredHeight } = heights();
+      setRetainedHeight((current) => Math.min(current, requiredHeight));
+    };
+
+    measure();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    observer?.observe(content);
+    window.addEventListener("scroll", releaseOnScrollUp, { passive: true });
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("scroll", releaseOnScrollUp);
+    };
+  }, [loading]);
+
+  const minHeight = retainedHeight > 0 ? `${retainedHeight}px` : undefined;
   return (
     <div
       ref={frameRef}
       style={{ minHeight }}
-      className={className}
       data-testid={testId}
       aria-busy={loading}
     >
-      {children}
+      <div ref={contentRef} className={className} data-testid={testId ? `${testId}-content` : undefined}>
+        {children}
+      </div>
     </div>
   );
 }
