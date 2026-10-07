@@ -191,18 +191,39 @@ async function getSchools(
   return { schools, totalCount: parseInt(countResult[0]?.total || "0", 10) };
 }
 
+// Visit ownership is matched on the trimmed, case-folded email (same rule as
+// visits-policy). Recent Visits and Total Visits share this predicate so the
+// newest rows can never disagree with the total. $1 is the normalized email.
+const OWNED_VISIT_PREDICATE = `LOWER(TRIM(v.pm_email)) = $1 AND v.deleted_at IS NULL`;
+
+function normalizeOwnerEmail(email: string) {
+  return email.trim().toLowerCase();
+}
+
 async function getRecentVisits(pmEmail: string, limit: number = 5): Promise<Visit[]> {
   return query<Visit>(
     `SELECT v.id, v.school_code, v.visit_date, v.status, v.inserted_at,
             s.name as school_name
      FROM lms_pm_school_visits v
      LEFT JOIN school s ON s.code = v.school_code
-     WHERE v.pm_email = $1
-       AND v.deleted_at IS NULL
+     WHERE ${OWNED_VISIT_PREDICATE}
      ORDER BY v.visit_date DESC, v.inserted_at DESC
      LIMIT $2`,
-    [pmEmail, limit]
+    [normalizeOwnerEmail(pmEmail), limit]
   );
+}
+
+// Exact count of every owned Visit (any status), independent of dashboard
+// search, pagination and the Recent Visits cap. A failed read throws rather
+// than rendering a false zero.
+async function getOwnedVisitTotal(pmEmail: string): Promise<number> {
+  const rows = await query<{ total: string }>(
+    `SELECT COUNT(*) AS total
+     FROM lms_pm_school_visits v
+     WHERE ${OWNED_VISIT_PREDICATE}`,
+    [normalizeOwnerEmail(pmEmail)]
+  );
+  return parseInt(rows[0].total, 10);
 }
 
 // Dashboard groupings, rendered as tabs. A student belongs to exactly one
@@ -228,6 +249,7 @@ type DashboardData = {
   totalCount: number;
   totalPages: number;
   recentVisits: Visit[];
+  visitTotal: number;
 };
 
 function canViewVisitSummary(permission: DashboardPermission) {
@@ -372,7 +394,7 @@ async function loadDashboardData({
   if (view === "centres") {
     // Centre list + the header's school count, in parallel. No visits query and
     // no school grid on this tab.
-    const [centres, { totalCount }] = await Promise.all([
+    const [centres, { totalCount }, visitTotal] = await Promise.all([
       getAccessibleCentresWithCounts(
         resolveCentreAccess(permission, schoolCodes),
         searchQuery,
@@ -380,6 +402,7 @@ async function loadDashboardData({
       // No searchQuery: on this tab the term filters CENTRES, while this count is
       // the header's "your scope" figure and drives no pagination here.
       getSchools(schoolCodes, undefined, currentPage, "centre-linked"),
+      hasPMAccess ? getOwnedVisitTotal(email) : Promise.resolve(0),
     ]);
     return {
       schools: [],
@@ -387,12 +410,14 @@ async function loadDashboardData({
       totalCount,
       totalPages: Math.ceil(totalCount / SCHOOLS_PER_PAGE),
       recentVisits: [],
+      visitTotal,
     };
   }
 
-  const [{ schools, totalCount }, recentVisits] = await Promise.all([
+  const [{ schools, totalCount }, recentVisits, visitTotal] = await Promise.all([
     getSchools(schoolCodes, searchQuery, currentPage, "jnv"),
     hasPMAccess ? getRecentVisits(email) : Promise.resolve([] as Visit[]),
+    hasPMAccess ? getOwnedVisitTotal(email) : Promise.resolve(0),
   ]);
   // NVS-attributed counts, not whole-school — keeps this tab disjoint from Centres.
   const nvsCounts = await getNvsGradeCounts(schools.map((school) => school.id));
@@ -409,6 +434,7 @@ async function loadDashboardData({
     totalCount,
     totalPages: Math.ceil(totalCount / SCHOOLS_PER_PAGE),
     recentVisits,
+    visitTotal,
   };
 }
 
@@ -488,6 +514,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         schools={data.schools}
         centres={data.centres}
         recentVisits={data.recentVisits}
+        visitTotal={data.visitTotal}
         hasPMAccess={features.hasPMAccess}
         showViewTabs={!seated && !isPmuRole(permission.role)}
         // A PMU Manager has no tab strip, so the heading names their one view.
@@ -581,7 +608,7 @@ function DashboardViewTabs({ view, show }: { view: DashboardView; show: boolean 
   </div>;
 }
 
-function DashboardMain({ view, searchQuery, currentPage, totalPages, totalCount, schools, centres, recentVisits, hasPMAccess, showViewTabs, showSchoolsHeading }: {
+function DashboardMain({ view, searchQuery, currentPage, totalPages, totalCount, schools, centres, recentVisits, visitTotal, hasPMAccess, showViewTabs, showSchoolsHeading }: {
   view: DashboardView;
   searchQuery?: string;
   currentPage: number;
@@ -590,13 +617,14 @@ function DashboardMain({ view, searchQuery, currentPage, totalPages, totalCount,
   schools: DashboardSchool[];
   centres: Centre[];
   recentVisits: Visit[];
+  visitTotal: number;
   hasPMAccess: boolean;
   showViewTabs: boolean;
   showSchoolsHeading: boolean;
 }) {
   return <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
     <DashboardViewTabs view={view} show={showViewTabs} />
-    <PMStats enabled={hasPMAccess} totalCount={totalCount} recentVisitCount={recentVisits.length} />
+    <PMStats enabled={hasPMAccess} totalCount={totalCount} visitTotal={visitTotal} />
     {view === "centres" ? (
       <CentresSection centres={centres} hasPMAccess={hasPMAccess} searchQuery={searchQuery} />
     ) : (
@@ -653,10 +681,10 @@ function DashboardCentreCard({ centre, hasPMAccess }: { centre: Centre; hasPMAcc
   return <CentreCard centre={centre} showRegion={hasPMAccess} actions={actions} />;
 }
 
-function PMStats({ enabled, totalCount, recentVisitCount }: {
+function PMStats({ enabled, totalCount, visitTotal }: {
   enabled: boolean;
   totalCount: number;
-  recentVisitCount: number;
+  visitTotal: number;
 }) {
   if (!enabled) return null;
   return <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 mb-8">
@@ -666,7 +694,7 @@ function PMStats({ enabled, totalCount, recentVisitCount }: {
     </Card>
     <Card className="p-6 border-l-4 border-l-brand-amber">
       <div className="text-xs font-bold text-brand-amber uppercase tracking-wide">Total Visits</div>
-      <div className="mt-1 text-3xl font-bold text-text-primary font-mono">{recentVisitCount}</div>
+      <div className="mt-1 text-3xl font-bold text-text-primary font-mono">{visitTotal}</div>
     </Card>
   </div>;
 }

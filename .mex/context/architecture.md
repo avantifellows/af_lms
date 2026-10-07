@@ -70,7 +70,8 @@ The October 7 PRD retains the existing dashboard/roster/Performance boundaries.
 It plans a Physical Centres default from resolved `hasCoEOrNodal`, preserving
 seated/PMU/Holistic routing, explicit JNV return and pagination links, and an exact
 trimmed/case-folded owned non-deleted Visit count independent of Recent Visits;
-the capped Recent Visits query uses that same owner predicate.
+the capped Recent Visits query uses that same owner predicate (shipped in #389,
+see `context/visits.md`).
 Performance will push deliberate choices, rehydrate every selection from URL
 history, compose rapid pending choices, and reject stale grade, option, loading,
 error, and report-name responses. Outer
