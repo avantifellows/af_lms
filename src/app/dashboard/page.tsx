@@ -392,8 +392,8 @@ async function loadDashboardData({
   view: DashboardView;
 }): Promise<DashboardData> {
   if (view === "centres") {
-    // Centre list + the header's school count, in parallel. No visits query and
-    // no school grid on this tab.
+    // Centre list + the header's school count + the Visit total, in parallel.
+    // No Recent Visits and no school grid on this tab.
     const [centres, { totalCount }, visitTotal] = await Promise.all([
       getAccessibleCentresWithCounts(
         resolveCentreAccess(permission, schoolCodes),
