@@ -11,7 +11,6 @@ vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("@/lib/holistic-mentorship", () => ({ requireHolisticMentorshipAccess: mockAccess }));
 vi.mock("@/lib/holistic-follow-up-notes", () => ({ addHolisticFollowUpNote: mockAdd }));
 
-import * as routeModule from "./route";
 import { POST } from "./route";
 
 const context = { params: Promise.resolve({ studentId: "41", phaseId: "73" }) };
@@ -42,35 +41,14 @@ describe("Holistic Follow-up Notes API", () => {
   });
 
   it("saves the current Mentor's Follow-up Note", async () => {
-    mockAdd.mockResolvedValue({
-      ok: true,
-      followUpNote: {
-        id: 601,
-        submittedAt: "2026-08-03T10:00:00Z",
-        authorName: "Nila Sen",
-        answers: [
-          { key: "challenges", answer: "Exam stress" },
-          { key: "action_plan", answer: "Yes, mostly" },
-        ],
-      },
-    });
+    mockAdd.mockResolvedValue({ ok: true, id: 601 });
 
     const response = await post({
       answers: { challenges: "  Exam stress ", solutions: "   ", action_plan: "Yes, mostly" },
     });
 
     expect(response.status).toBe(201);
-    await expect(response.json()).resolves.toEqual({
-      followUpNote: {
-        id: 601,
-        submittedAt: "2026-08-03T10:00:00Z",
-        authorName: "Nila Sen",
-        answers: [
-          { key: "challenges", answer: "Exam stress" },
-          { key: "action_plan", answer: "Yes, mostly" },
-        ],
-      },
-    });
+    await expect(response.json()).resolves.toEqual({ id: 601 });
     expect(mockAccess).toHaveBeenCalledWith(
       { user: { email: "Nila.Sen@example.com" } },
       "follow_up_note_add",
@@ -122,8 +100,7 @@ describe("Holistic Follow-up Notes API", () => {
   });
 
   it.each([
-    ["an Admin or Program Manager", 403, "Forbidden"],
-    ["a read-only Teacher", 403, "Forbidden"],
+    ["a read-only role", 403, "Forbidden"],
     ["a former Mentor", 404, "Not found"],
   ])("passes access denial for %s through without saving", async (_label, status, error) => {
     mockAccess.mockResolvedValue({ ok: false, status, error });
@@ -151,7 +128,7 @@ describe("Holistic Follow-up Notes API", () => {
   });
 
   it("accepts an answer of exactly 10,000 characters", async () => {
-    mockAdd.mockResolvedValue({ ok: true, followUpNote: { id: 603 } });
+    mockAdd.mockResolvedValue({ ok: true, id: 603 });
 
     const response = await post({ answers: { solutions: "a".repeat(10_000) } });
 
@@ -164,7 +141,6 @@ describe("Holistic Follow-up Notes API", () => {
   it.each([
     [422, "Submit Post-Session Notes first"],
     [404, "Not found"],
-    [409, "Student changed; reload before saving"],
   ])("returns the save result status %s", async (status, error) => {
     mockAdd.mockResolvedValue({ ok: false, status, error });
 
@@ -172,11 +148,5 @@ describe("Holistic Follow-up Notes API", () => {
 
     expect(response.status).toBe(status);
     await expect(response.json()).resolves.toEqual({ error });
-  });
-
-  it("exports no handler that edits or deletes a Follow-up Note", () => {
-    expect(routeModule).not.toHaveProperty("PATCH");
-    expect(routeModule).not.toHaveProperty("PUT");
-    expect(routeModule).not.toHaveProperty("DELETE");
   });
 });

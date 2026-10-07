@@ -1,21 +1,19 @@
 import { describe, it, expect, vi } from "vitest";
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Modal } from "./Modal";
 
-function ModalHarness({ withInitialFocus = false, empty = false }: { withInitialFocus?: boolean; empty?: boolean }) {
+function ModalHarness({ empty = false }: { empty?: boolean }) {
   const [open, setOpen] = useState(false);
-  const notesRef = useRef<HTMLTextAreaElement>(null);
   return (
     <>
       <button type="button" onClick={() => setOpen(true)}>Open</button>
       <button type="button">Behind</button>
-      <Modal open={open} onClose={() => setOpen(false)} aria-label="Test dialog"
-        initialFocusRef={withInitialFocus ? notesRef : undefined}>
+      <Modal open={open} onClose={() => setOpen(false)} aria-label="Test dialog">
         {!empty && <>
           <button type="button">First</button>
-          <textarea aria-label="Notes" ref={notesRef} />
+          <textarea aria-label="Notes" />
           <button type="button" disabled>Disabled</button>
           <button type="button" onClick={() => setOpen(false)}>Last</button>
         </>}
@@ -77,13 +75,6 @@ describe("Modal", () => {
       render(<ModalHarness />);
       await user.click(screen.getByRole("button", { name: "Open" }));
       expect(screen.getByRole("button", { name: "First" })).toHaveFocus();
-    });
-
-    it("focuses the caller's initialFocusRef element when given", async () => {
-      const user = userEvent.setup();
-      render(<ModalHarness withInitialFocus />);
-      await user.click(screen.getByRole("button", { name: "Open" }));
-      expect(screen.getByRole("textbox", { name: "Notes" })).toHaveFocus();
     });
 
     it("focuses the dialog itself when it has nothing focusable", async () => {

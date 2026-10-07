@@ -238,7 +238,7 @@ type NotesRow = {
   answer: string | null;
 };
 
-export type HolisticFollowUpNoteRow = {
+type HolisticFollowUpNoteRow = {
   id: number | string;
   submitted_at: string;
   author_first_name: string | null;
@@ -249,7 +249,7 @@ export type HolisticFollowUpNoteRow = {
   action_plan_answer: string | null;
 };
 
-export function toHolisticFollowUpNote(row: HolisticFollowUpNoteRow): HolisticFollowUpNote {
+function toHolisticFollowUpNote(row: HolisticFollowUpNoteRow): HolisticFollowUpNote {
   const name = [row.author_first_name, row.author_last_name]
     .map((part) => part?.trim() ?? "")
     .filter(Boolean)

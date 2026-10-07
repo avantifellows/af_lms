@@ -20,18 +20,6 @@ describe("Holistic Mentor write scope", () => {
     await expect(loadHolisticMentorWriteScope(client as never, scopeInput)).resolves.toBeNull();
   });
 
-  it("returns the locked Mapping and Phase row when present", async () => {
-    const row = { mapping_id: "300", mentor_user_id: "9", phase_revision: 5, phase_state: "open" };
-    const client = { query: vi.fn().mockResolvedValueOnce({ rows: [row] }) };
-
-    await expect(loadHolisticMentorWriteScope(client as never, scopeInput)).resolves.toEqual({
-      mapping_id: "300",
-      mentor_user_id: "9",
-      phase_revision: 5,
-      phase_state: "open",
-    });
-  });
-
   it("hides missing scope and non-Mentor actors as Not found", () => {
     expect(checkHolisticMentorWriteScope(null, 9)).toEqual({ ok: false, status: 404, error: "Not found" });
     expect(checkHolisticMentorWriteScope(

@@ -42,6 +42,6 @@ export async function POST(
     answers: normalized.answers,
   });
   return result.ok
-    ? NextResponse.json({ followUpNote: result.followUpNote }, { status: 201 })
+    ? NextResponse.json({ id: result.id }, { status: 201 })
     : NextResponse.json({ error: result.error }, { status: result.status });
 }

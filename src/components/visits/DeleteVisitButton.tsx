@@ -97,37 +97,35 @@ export default function DeleteVisitButton({ visitId, mode, redirectTo }: DeleteV
         className="max-w-md"
         aria-labelledby="delete-visit-title"
       >
-        <div>
-          <div className="border-b-4 border-danger/30 px-5 py-4">
-            <h3 id="delete-visit-title" className="text-base font-bold uppercase tracking-tight text-text-primary">
-              Delete Visit
-            </h3>
-          </div>
-          <div className="px-5 py-4">
-            <p className="text-sm text-text-secondary">
-              This visit and all its action points will be removed. This cannot be undone.
-            </p>
-          </div>
-          <div className="flex items-center justify-end gap-2 border-t border-border px-5 py-4">
-            <button
-              type="button"
-              onClick={() => setIsOpen(false)}
-              disabled={isDeleting}
-              className="inline-flex items-center border border-border bg-bg-card px-3 py-2 text-sm font-medium text-text-secondary hover:bg-hover-bg disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                void handleDelete();
-              }}
-              disabled={isDeleting}
-              className="inline-flex items-center bg-danger px-3 py-2 text-sm font-bold uppercase text-white hover:bg-danger/80 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {isDeleting ? "Deleting..." : "Delete"}
-            </button>
-          </div>
+        <div className="border-b-4 border-danger/30 px-5 py-4">
+          <h3 id="delete-visit-title" className="text-base font-bold uppercase tracking-tight text-text-primary">
+            Delete Visit
+          </h3>
+        </div>
+        <div className="px-5 py-4">
+          <p className="text-sm text-text-secondary">
+            This visit and all its action points will be removed. This cannot be undone.
+          </p>
+        </div>
+        <div className="flex items-center justify-end gap-2 border-t border-border px-5 py-4">
+          <button
+            type="button"
+            onClick={() => setIsOpen(false)}
+            disabled={isDeleting}
+            className="inline-flex items-center border border-border bg-bg-card px-3 py-2 text-sm font-medium text-text-secondary hover:bg-hover-bg disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              void handleDelete();
+            }}
+            disabled={isDeleting}
+            className="inline-flex items-center bg-danger px-3 py-2 text-sm font-bold uppercase text-white hover:bg-danger/80 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {isDeleting ? "Deleting..." : "Delete"}
+          </button>
         </div>
       </Modal>
     </>

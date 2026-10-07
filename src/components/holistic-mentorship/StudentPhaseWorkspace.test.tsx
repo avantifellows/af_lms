@@ -1047,15 +1047,8 @@ describe("StudentPhaseWorkspace", () => {
       expect(within(dialog).getByRole("button", { name: "Save" })).toBeDisabled();
     });
 
-    it("saves a Follow-up Note and prepends it showing only the answered questions", async () => {
-      const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
-        followUpNote: {
-          id: 503,
-          submittedAt: "2026-08-03T04:30:00Z",
-          authorName: "Anita Sharma",
-          answers: [{ key: "solutions", answer: "Daily check-in" }],
-        },
-      }), { status: 201 }));
+    it("saves a Follow-up Note, closes the modal, and refreshes the server data", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 503 }), { status: 201 }));
       vi.stubGlobal("fetch", fetchMock);
       render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" programId={2}
         detail={completedTeacherDetail(followUpNotes)} />);
@@ -1078,13 +1071,7 @@ describe("StudentPhaseWorkspace", () => {
       expect(JSON.parse(init.body)).toEqual({
         answers: { challenges: "   ", solutions: "Daily check-in", action_plan: "" },
       });
-      const cards = followUpSection().querySelectorAll("article");
-      expect(cards).toHaveLength(3);
-      expect(cards[0]).toHaveTextContent("Anita Sharma");
-      expect(cards[0]).toHaveTextContent("Daily check-in");
-      expect(Array.from(cards[0].querySelectorAll("h4")).map((heading) => heading.textContent))
-        .toEqual(["What solutions did you suggest?"]);
-      expect(cards[1]).toHaveTextContent("Nila Sen");
+      expect(mockRefresh).toHaveBeenCalledTimes(1);
 
       expect(openAddNotes()).not.toHaveTextContent("Daily check-in");
       expect(within(screen.getByRole("dialog")).getByRole("textbox", { name: "What solutions did you suggest?" }))
@@ -1105,7 +1092,7 @@ describe("StudentPhaseWorkspace", () => {
       expect(await within(dialog).findByRole("alert")).toHaveTextContent("Mentor Mapping changed");
       expect(textbox).toHaveValue("Exam stress");
       expect(textbox).not.toHaveAttribute("readonly");
-      expect(followUpSection()).toHaveTextContent("No follow-up notes yet");
+      expect(mockRefresh).not.toHaveBeenCalled();
     });
 
     it("flags an answer over 10,000 characters inline and disables Save without sending a request", () => {
@@ -1133,19 +1120,28 @@ describe("StudentPhaseWorkspace", () => {
       expect(solutions).not.toHaveAttribute("aria-invalid");
       expect(dialog).not.toHaveTextContent("Keep this answer to 10,000 characters or fewer");
       expect(save).toBeEnabled();
+
+      fireEvent.change(within(dialog).getByRole("textbox", { name: "What challenges did the student talk about?" }),
+        { target: { value: "" } });
+      fireEvent.change(solutions, { target: { value: " ".repeat(10_001) } });
+      expect(solutions).toHaveAccessibleDescription("Keep this answer to 10,000 characters or fewer");
+      expect(save).toBeDisabled();
     });
 
-    it("keeps Save disabled while an over-limit answer is the only answer", () => {
-      render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={completedTeacherDetail()} />);
+    it("resets the Follow-up section when the selected Phase changes", () => {
+      const { rerender } = render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027"
+        detail={completedTeacherDetail()} />);
+      fireEvent.change(within(openAddNotes()).getByRole("textbox", { name: "What challenges did the student talk about?" }),
+        { target: { value: "Exam stress" } });
 
-      const dialog = openAddNotes();
-      const actionPlan = within(dialog).getByRole("textbox", {
-        name: "Was the student able to follow the action plan shared previously?",
-      });
-      fireEvent.change(actionPlan, { target: { value: " ".repeat(10_001) } });
+      const nextPhase = completedTeacherDetail();
+      Object.assign(nextPhase.phases[0], { phaseId: 74 });
+      Object.assign(nextPhase.selectedPhase, { phaseId: 74, mappingId: 301 });
+      rerender(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={nextPhase} />);
 
-      expect(actionPlan).toHaveAccessibleDescription("Keep this answer to 10,000 characters or fewer");
-      expect(within(dialog).getByRole("button", { name: "Save" })).toBeDisabled();
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(within(openAddNotes()).getByRole("textbox", { name: "What challenges did the student talk about?" }))
+        .toHaveValue("");
     });
 
     it("focuses the first answer on open and returns focus to Add notes on close", () => {
@@ -1224,18 +1220,11 @@ describe("StudentPhaseWorkspace", () => {
       expect(fetchMock).toHaveBeenCalledTimes(1);
 
       await act(async () => {
-        finishSave(new Response(JSON.stringify({
-          followUpNote: {
-            id: 504,
-            submittedAt: "2026-08-04T04:30:00Z",
-            authorName: "Anita Sharma",
-            answers: [{ key: "challenges", answer: "Exam stress" }],
-          },
-        }), { status: 201 }));
+        finishSave(new Response(JSON.stringify({ id: 504 }), { status: 201 }));
         await saveResponse;
       });
       await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-      expect(followUpSection()).toHaveTextContent("Exam stress");
+      expect(mockRefresh).toHaveBeenCalledTimes(1);
     });
 
     it("offers no Add notes button to read-only viewers", () => {

@@ -11,7 +11,7 @@ import { type ReactNode, useCallback, useEffect, useEffectEvent, useId, useRef, 
 import type { HolisticProfileRegeneration, HolisticStudentPhaseDetail } from "@/lib/holistic-student-phase";
 import { PROGRAM_IDS } from "@/lib/constants";
 import {
-  HOLISTIC_FOLLOW_UP_ANSWER_MAX_LENGTH, HOLISTIC_FOLLOW_UP_QUESTIONS, normalizeHolisticFollowUpAnswers,
+  HOLISTIC_FOLLOW_UP_ANSWER_MAX_LENGTH, HOLISTIC_FOLLOW_UP_QUESTIONS,
   type HolisticFollowUpQuestionKey,
 } from "@/lib/holistic-follow-up-questions";
 import { holisticStudentPhaseHref, type HolisticStudentPhaseSource } from "@/lib/holistic-links";
@@ -1160,7 +1160,7 @@ function SelectedPhaseContent({ phase, selectedPhase, studentId, readOnly, schoo
       phase={phase} studentId={studentId} readOnly={readOnly}
       schoolCode={schoolCode} academicYear={academicYear} programId={programId}
       onSubmitted={() => onSubmitted(phase.phaseId)} />
-    <MentorFollowUpNotes phase={phase} apiUrl={`/api/holistic-mentorship/students/${studentId}/phases/${phase.phaseId}/follow-up-notes?${new URLSearchParams(
+    <MentorFollowUpNotes key={`${phase.phaseId}-${phase.mappingId}`} phase={phase} apiUrl={`/api/holistic-mentorship/students/${studentId}/phases/${phase.phaseId}/follow-up-notes?${new URLSearchParams(
       { school_code: schoolCode, academic_year: academicYear, program_id: String(programId) }
     )}`} />
   </section>;
@@ -1500,34 +1500,28 @@ const FOLLOW_UP_ANSWER_TOO_LONG =
 function MentorFollowUpNotes({ phase, apiUrl }: { phase: OpenSelectedPhase; apiUrl: string }) {
   const hintId = useId();
   const [open, setOpen] = useState(false);
-  const [addedNotes, setAddedNotes] = useState<OpenSelectedPhase["followUpNotes"]>([]);
   const canAdd = phase.progress === "completed";
-  // A server refresh may already include notes added in-page; keep each note once.
-  const serverIds = new Set(phase.followUpNotes.map(({ id }) => id));
-  const notes = [...addedNotes.filter(({ id }) => !serverIds.has(id)), ...phase.followUpNotes];
   return <>
-    <FollowUpNotesSection notes={notes} action={<div className="flex items-center gap-2">
+    <FollowUpNotesSection notes={phase.followUpNotes} action={<div className="flex items-center gap-2">
       {!canAdd && <span id={hintId} className="text-xs text-text-muted">Submit Post-Session Notes first</span>}
       <Button type="button" variant="secondary" size="sm" disabled={!canAdd}
         aria-describedby={canAdd ? undefined : hintId} onClick={() => setOpen(true)}>Add notes</Button>
     </div>} />
-    <AddFollowUpNoteModal open={open} apiUrl={apiUrl} onClose={() => setOpen(false)}
-      onSaved={(note) => setAddedNotes((current) => [note, ...current])} />
+    <AddFollowUpNoteModal open={open} apiUrl={apiUrl} onClose={() => setOpen(false)} />
   </>;
 }
 
-function AddFollowUpNoteModal({ open, apiUrl, onClose, onSaved }: {
+function AddFollowUpNoteModal({ open, apiUrl, onClose }: {
   open: boolean;
   apiUrl: string;
   onClose: () => void;
-  onSaved: (note: OpenSelectedPhase["followUpNotes"][number]) => void;
 }) {
+  const router = useRouter();
   const headingId = useId();
   const fieldId = useId();
   const [draft, setDraft] = useState<FollowUpDraft>(EMPTY_FOLLOW_UP_DRAFT);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
-  const firstAnswerRef = useRef<HTMLTextAreaElement>(null);
   const hasAnswer = Object.values(draft).some((answer) => answer.trim());
   const isTooLong = (answer: string) => answer.length > HOLISTIC_FOLLOW_UP_ANSWER_MAX_LENGTH;
   const hasTooLongAnswer = Object.values(draft).some(isTooLong);
@@ -1545,11 +1539,6 @@ function AddFollowUpNoteModal({ open, apiUrl, onClose, onSaved }: {
   }
 
   async function save() {
-    const normalized = normalizeHolisticFollowUpAnswers(draft);
-    if (!normalized.ok) {
-      setError(normalized.error);
-      return;
-    }
     setError("");
     setSaving(true);
     const response = await fetch(apiUrl, {
@@ -1557,30 +1546,26 @@ function AddFollowUpNoteModal({ open, apiUrl, onClose, onSaved }: {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ answers: draft }),
     }).catch(() => null);
-    const result = await response?.json().catch(() => ({})) as {
-      followUpNote?: OpenSelectedPhase["followUpNotes"][number];
-      error?: string;
-    } | undefined;
+    const result = await response?.json().catch(() => ({})) as { error?: string } | undefined;
     setSaving(false);
-    if (!response?.ok || !result?.followUpNote) {
+    if (!response?.ok) {
       setError(result?.error || "Could not save follow-up notes");
       return;
     }
-    onSaved(result.followUpNote);
     close();
+    router.refresh();
   }
 
-  return <Modal open={open} onClose={requestClose} role="dialog" aria-modal="true" aria-labelledby={headingId}
-    initialFocusRef={firstAnswerRef} className="max-w-2xl p-5">
+  return <Modal open={open} onClose={requestClose} aria-labelledby={headingId} className="max-w-2xl p-5">
     <h2 id={headingId} className="text-lg font-semibold text-text-primary">Add follow-up notes</h2>
     <p className="mt-1 text-sm text-text-muted">Follow-up notes can&apos;t be edited after saving.</p>
     <div className="mt-4 space-y-4">
-      {HOLISTIC_FOLLOW_UP_QUESTIONS.map(({ key, text }, index) => {
+      {HOLISTIC_FOLLOW_UP_QUESTIONS.map(({ key, text }) => {
         const tooLong = isTooLong(draft[key]);
         return <div key={key}>
           <label htmlFor={`${fieldId}-${key}`} className="text-sm font-semibold text-text-primary">{text}</label>
           {/* readOnly, not disabled, so text stays selectable while a save is in flight. */}
-          <textarea id={`${fieldId}-${key}`} ref={index === 0 ? firstAnswerRef : undefined} rows={3}
+          <textarea id={`${fieldId}-${key}`} rows={3}
             value={draft[key]} readOnly={saving} aria-invalid={tooLong || undefined}
             aria-describedby={tooLong ? `${fieldId}-${key}-error` : undefined}
             onChange={(event) => setDraft((current) => ({ ...current, [key]: event.target.value }))}

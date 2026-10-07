@@ -1,14 +1,12 @@
 "use client";
 
-import { HTMLAttributes, RefObject, forwardRef, useCallback, useEffect, useRef } from "react";
+import { HTMLAttributes, forwardRef, useCallback, useEffect, useRef } from "react";
 
 interface ModalProps extends HTMLAttributes<HTMLDivElement> {
   open: boolean;
   onClose?: () => void;
   /** z-index class — default z-50 for primary modals, use z-40 for secondary */
   zIndex?: "z-40" | "z-50";
-  /** Element to focus on open; defaults to the first focusable element in the dialog. */
-  initialFocusRef?: RefObject<HTMLElement | null>;
 }
 
 const FOCUSABLE_SELECTOR = [
@@ -33,7 +31,7 @@ function focusableElements(container: HTMLElement): HTMLElement[] {
 const openModalStack: object[] = [];
 
 export const Modal = forwardRef<HTMLDivElement, ModalProps>(
-  ({ open, onClose, zIndex = "z-50", initialFocusRef, className = "", children, ...props }, ref) => {
+  ({ open, onClose, zIndex = "z-50", className = "", children, ...props }, ref) => {
     const dialogRef = useRef<HTMLDivElement | null>(null);
     const setDialogRef = useCallback(
       (node: HTMLDivElement | null) => {
@@ -63,7 +61,7 @@ export const Modal = forwardRef<HTMLDivElement, ModalProps>(
       const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
 
       if (!dialog.contains(document.activeElement)) {
-        (initialFocusRef?.current ?? focusableElements(dialog)[0] ?? dialog).focus();
+        (focusableElements(dialog)[0] ?? dialog).focus();
       }
 
       const trapTab = (e: KeyboardEvent) => {
@@ -96,7 +94,7 @@ export const Modal = forwardRef<HTMLDivElement, ModalProps>(
         const focusLeftWithDialog = !active || active === document.body || dialog.contains(active);
         if (focusLeftWithDialog && previouslyFocused?.isConnected) previouslyFocused.focus();
       };
-    }, [open, initialFocusRef]);
+    }, [open]);
 
     if (!open) return null;
 

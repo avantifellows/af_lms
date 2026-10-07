@@ -977,41 +977,39 @@ export default function ActionPointList({
         className="max-w-md"
         aria-labelledby="delete-confirm-title"
       >
-        <div>
-          <div className="border-b-4 border-danger/30 px-5 py-4">
-            <h3 id="delete-confirm-title" className="text-base font-bold uppercase tracking-tight text-text-primary">
-              Delete Action Point
-            </h3>
-          </div>
-          <div className="px-5 py-4">
-            <p className="text-sm text-text-secondary">
-              This action point and all its data will be permanently removed. This cannot be undone.
-            </p>
-          </div>
-          <div className="flex items-center justify-end gap-2 border-t border-border px-5 py-4">
-            <button
-              type="button"
-              onClick={() => {
-                setConfirmDeleteActionId(null);
-              }}
-              disabled={deletingActionId !== null}
-              className="inline-flex items-center border border-border bg-bg-card px-3 py-2 text-sm font-medium text-text-secondary hover:bg-hover-bg disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                if (confirmDeleteActionId !== null) {
-                  void handleDeleteAction(confirmDeleteActionId);
-                }
-              }}
-              disabled={deletingActionId !== null}
-              className="inline-flex items-center bg-danger px-3 py-2 text-sm font-bold uppercase text-white hover:bg-danger/80 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {deletingActionId === confirmDeleteActionId ? "Deleting..." : "Delete"}
-            </button>
-          </div>
+        <div className="border-b-4 border-danger/30 px-5 py-4">
+          <h3 id="delete-confirm-title" className="text-base font-bold uppercase tracking-tight text-text-primary">
+            Delete Action Point
+          </h3>
+        </div>
+        <div className="px-5 py-4">
+          <p className="text-sm text-text-secondary">
+            This action point and all its data will be permanently removed. This cannot be undone.
+          </p>
+        </div>
+        <div className="flex items-center justify-end gap-2 border-t border-border px-5 py-4">
+          <button
+            type="button"
+            onClick={() => {
+              setConfirmDeleteActionId(null);
+            }}
+            disabled={deletingActionId !== null}
+            className="inline-flex items-center border border-border bg-bg-card px-3 py-2 text-sm font-medium text-text-secondary hover:bg-hover-bg disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (confirmDeleteActionId !== null) {
+                void handleDeleteAction(confirmDeleteActionId);
+              }
+            }}
+            disabled={deletingActionId !== null}
+            className="inline-flex items-center bg-danger px-3 py-2 text-sm font-bold uppercase text-white hover:bg-danger/80 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {deletingActionId === confirmDeleteActionId ? "Deleting..." : "Delete"}
+          </button>
         </div>
       </Modal>
     </div>

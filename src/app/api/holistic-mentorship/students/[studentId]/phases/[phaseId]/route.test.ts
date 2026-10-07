@@ -42,7 +42,13 @@ describe("Holistic Student Phase API", () => {
       canEdit: false,
       school: { id: 4 },
     });
-    mockDetail.mockResolvedValue({ student: { id: 41 }, selectedPhase: { phaseId: 73 } });
+    const followUpNotes = [{
+      id: 502,
+      submittedAt: "2026-08-02T09:30:00Z",
+      authorName: "Nila Sen",
+      answers: [{ key: "solutions", answer: "Try a timetable" }],
+    }];
+    mockDetail.mockResolvedValue({ student: { id: 41 }, selectedPhase: { phaseId: 73, followUpNotes } });
 
     const response = await GET(
       new Request("http://localhost/api/holistic-mentorship/students/41/phases/73?school_code=SCH001&academic_year=2026-2027&program_id=1") as never,
@@ -50,6 +56,7 @@ describe("Holistic Student Phase API", () => {
     );
 
     expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ selectedPhase: { followUpNotes } });
     expect(mockAccess).toHaveBeenCalledWith(
       { user: { email: "mentor@example.com" } },
       "mapped_student_read",
@@ -64,43 +71,6 @@ describe("Holistic Student Phase API", () => {
       actorUserId: 9,
       role: "teacher",
       canEdit: false,
-    });
-  });
-
-  it("passes the selected Phase's Follow-up Notes through unchanged", async () => {
-    mockAccess.mockResolvedValue({
-      ok: true,
-      actorUserId: 9,
-      permission: { role: "teacher" },
-      canEdit: true,
-      school: { id: 4 },
-    });
-    const followUpNotes = [{
-      id: 502,
-      submittedAt: "2026-08-02T09:30:00Z",
-      authorName: "Nila Sen",
-      answers: [{ key: "solutions", answer: "Try a timetable" }],
-    }];
-    mockDetail.mockResolvedValue({
-      student: { id: 41 },
-      selectedPhase: { phaseId: 73, locked: false, followUpNotes },
-    });
-
-    const response = await GET(
-      new Request("http://localhost/api/holistic-mentorship/students/41/phases/73?school_code=SCH001&academic_year=2026-2027&program_id=1") as never,
-      context
-    );
-
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({
-      selectedPhase: {
-        followUpNotes: [{
-          id: 502,
-          submittedAt: "2026-08-02T09:30:00Z",
-          authorName: "Nila Sen",
-          answers: [{ key: "solutions", answer: "Try a timetable" }],
-        }],
-      },
     });
   });
 
