@@ -336,7 +336,7 @@ describe("Holistic Student Phase derivation", () => {
         canEdit: true,
       });
 
-      expect(mockQuery).toHaveBeenCalledTimes(9);
+      expect(mockQuery).toHaveBeenCalledTimes(8);
       expect(mockQuery.mock.calls.some(([sql]) =>
         String(sql).includes("FROM holistic_mentorship_historical_notes notes")
       )).toBe(false);
@@ -801,12 +801,10 @@ describe("Holistic Student Phase derivation", () => {
     function routeQueries(rows: {
       phases?: typeof phaseRows;
       followUp?: unknown[];
-      tombstone?: boolean;
     }) {
       // First matching SQL fragment wins; the Student read is the fallback.
       const routes: Array<[string, unknown[]]> = [
         ["FROM holistic_mentorship_follow_up_notes", rows.followUp ?? []],
-        ["FROM holistic_mentorship_privacy_deletions", [{ erased: rows.tombstone ?? false }]],
         ["FROM holistic_mentorship_phase_questions", []],
         ["FROM holistic_mentorship_phase_state_transitions",
           [{ phase_id: 72, to_state: "open", occurred_at: "2026-06-01T00:00:00Z" }]],
@@ -892,19 +890,22 @@ describe("Holistic Student Phase derivation", () => {
       });
     });
 
-    it("suppresses Follow-up Notes for a Student with a privacy tombstone", async () => {
-      routeQueries({
-        tombstone: true,
-        followUp: [{
-          id: 504, submitted_at: "2026-08-04T08:00:00Z", author_first_name: "Nila",
-          author_last_name: "Sen", author_email: "nila@example.com",
-          challenges_answer: "Private detail", solutions_answer: null, action_plan_answer: null,
-        }],
-      });
+    it("suppresses tombstoned Follow-up Notes inside the notes query itself", async () => {
+      routeQueries({});
 
-      const result = await getHolisticStudentPhase(mentorParams);
+      await getHolisticStudentPhase(mentorParams);
 
-      expect(result?.selectedPhase).toMatchObject({ followUpNotes: [] });
+      const followUpCall = mockQuery.mock.calls.find(([sql]) =>
+        String(sql).includes("FROM holistic_mentorship_follow_up_notes")
+      );
+      // One snapshot: a deletion can't land between a tombstone read and the notes read.
+      expect(String(followUpCall?.[0])).toMatch(
+        /AND NOT EXISTS \(\s*SELECT 1 FROM holistic_mentorship_privacy_deletions deletion\s*WHERE deletion.student_id = note.student_id\s*\)/
+      );
+      expect(mockQuery.mock.calls.some(([sql]) =>
+        String(sql).includes("FROM holistic_mentorship_privacy_deletions") &&
+        !String(sql).includes("FROM holistic_mentorship_follow_up_notes")
+      )).toBe(false);
     });
 
     it("does not include Follow-up Notes in a locked Phase summary", async () => {

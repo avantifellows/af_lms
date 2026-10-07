@@ -21,12 +21,23 @@ const input = {
 
 function transactionClient(...results: Array<{ rows: unknown[] }>) {
   const client = { query: vi.fn() };
+  client.query.mockResolvedValueOnce({ rows: [] }); // per-Student privacy lock
   for (const result of results) client.query.mockResolvedValueOnce(result);
   mockWithTransaction.mockImplementation(async (work) => work(client as never));
   return client;
 }
 
 describe("addHolisticFollowUpNote", () => {
+  const insertedRow = {
+    id: "602",
+    submitted_at: "2026-08-04T10:00:00Z",
+    author_first_name: null,
+    author_last_name: null,
+    author_email: "nila.sen@example.com",
+    challenges_answer: "Exam stress",
+    solutions_answer: null,
+    action_plan_answer: "Yes, mostly",
+  };
   beforeEach(() => vi.clearAllMocks());
 
   it("saves the current Mentor's Follow-up Note on submitted Post-Session Notes", async () => {
@@ -63,6 +74,16 @@ describe("addHolisticFollowUpNote", () => {
     );
   });
 
+  it("takes the per-Student privacy lock before any row lock", async () => {
+    const client = transactionClient({ rows: [openScope] }, { rows: [{ state: "submitted" }] }, { rows: [insertedRow] });
+
+    await addHolisticFollowUpNote(input);
+
+    expect(client.query.mock.calls[0]).toEqual(["SELECT pg_advisory_xact_lock($1, 0)", [41]]);
+    expect(String(client.query.mock.calls[1][0])).toContain("FOR UPDATE");
+    expect(String(client.query.mock.calls[2][0])).toContain("FOR SHARE");
+  });
+
   it("reports a Student changed by a privacy tombstone race as a conflict", async () => {
     const client = transactionClient({ rows: [openScope] }, { rows: [{ state: "submitted" }] });
     client.query.mockRejectedValueOnce(Object.assign(new Error("blocked"), { code: "23514" }));
@@ -82,16 +103,6 @@ describe("addHolisticFollowUpNote", () => {
     await expect(addHolisticFollowUpNote(input)).rejects.toBe(failure);
   });
 
-  const insertedRow = {
-    id: "602",
-    submitted_at: "2026-08-04T10:00:00Z",
-    author_first_name: null,
-    author_last_name: null,
-    author_email: "nila.sen@example.com",
-    challenges_answer: "Exam stress",
-    solutions_answer: null,
-    action_plan_answer: "Yes, mostly",
-  };
 
   it("does not insert when the Mentor write scope is missing", async () => {
     const client = transactionClient({ rows: [] });
@@ -99,7 +110,7 @@ describe("addHolisticFollowUpNote", () => {
     await expect(addHolisticFollowUpNote(input)).resolves.toEqual({
       ok: false, status: 404, error: "Not found",
     });
-    expect(client.query).toHaveBeenCalledTimes(1);
+    expect(client.query).toHaveBeenCalledTimes(2);
   });
 
   it("does not insert for an actor who is not the Mapping's Mentor", async () => {
@@ -108,7 +119,7 @@ describe("addHolisticFollowUpNote", () => {
     await expect(addHolisticFollowUpNote(input)).resolves.toEqual({
       ok: false, status: 404, error: "Not found",
     });
-    expect(client.query).toHaveBeenCalledTimes(1);
+    expect(client.query).toHaveBeenCalledTimes(2);
   });
 
   it("does not insert on a Phase that is not Open", async () => {
@@ -117,7 +128,7 @@ describe("addHolisticFollowUpNote", () => {
     await expect(addHolisticFollowUpNote(input)).resolves.toEqual({
       ok: false, status: 422, error: "Phase is not Open",
     });
-    expect(client.query).toHaveBeenCalledTimes(1);
+    expect(client.query).toHaveBeenCalledTimes(2);
   });
 
   it.each([
@@ -129,7 +140,7 @@ describe("addHolisticFollowUpNote", () => {
     await expect(addHolisticFollowUpNote(input)).resolves.toEqual({
       ok: false, status: 422, error: "Submit Post-Session Notes first",
     });
-    expect(client.query).toHaveBeenCalledTimes(2);
+    expect(client.query).toHaveBeenCalledTimes(3);
   });
 
   it("lets a reassigned Mentor follow up on another author's submitted Notes", async () => {
@@ -156,6 +167,6 @@ describe("addHolisticFollowUpNote", () => {
       ok: true,
       followUpNote: { id: 602 },
     });
-    expect(client.query.mock.calls[0][1]).toEqual([70, 41, 4, 1, "2026-2027", "2025-2026"]);
+    expect(client.query.mock.calls[1][1]).toEqual([70, 41, 4, 1, "2026-2027", "2025-2026"]);
   });
 });

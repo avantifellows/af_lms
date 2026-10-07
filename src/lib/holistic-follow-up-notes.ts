@@ -56,6 +56,9 @@ async function addFollowUpNoteTransaction(
   client: PoolClient,
   input: FollowUpNoteInput
 ): Promise<HolisticFollowUpNoteResult> {
+  // Take the per-Student privacy lock before any row lock, in the same order as
+  // privacy deletion, so the insert trigger's lock can't deadlock against it.
+  await client.query("SELECT pg_advisory_xact_lock($1, 0)", [input.studentId]);
   const scope = await loadHolisticMentorWriteScope(client, input);
   const scopeError = checkHolisticMentorWriteScope(scope, input.actorUserId);
   if (scopeError) return scopeError;

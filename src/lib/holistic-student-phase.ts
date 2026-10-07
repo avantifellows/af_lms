@@ -265,28 +265,24 @@ export function toHolisticFollowUpNote(row: HolisticFollowUpNoteRow): HolisticFo
   };
 }
 
-// Follow-up Notes are content: a privacy tombstone suppresses them on read.
+// Follow-up Notes are content: a privacy tombstone suppresses them on read. The
+// tombstone check sits in the same query so both come from one snapshot.
 async function loadFollowUpNotes(studentId: number, phaseId: number) {
-  const [rows, [tombstone]] = await Promise.all([
-    query<HolisticFollowUpNoteRow>(
-      `SELECT note.id, note.submitted_at, author.first_name AS author_first_name,
-              author.last_name AS author_last_name, note.author_email,
-              note.challenges_answer, note.solutions_answer, note.action_plan_answer
-       FROM holistic_mentorship_follow_up_notes note
-       LEFT JOIN "user" author ON author.id = note.author_user_id
-       WHERE note.student_id = $1 AND note.phase_id = $2
-       ORDER BY note.submitted_at DESC, note.id DESC`,
-      [studentId, phaseId]
-    ),
-    query<{ erased: boolean }>(
-      `SELECT EXISTS (
+  const rows = await query<HolisticFollowUpNoteRow>(
+    `SELECT note.id, note.submitted_at, author.first_name AS author_first_name,
+            author.last_name AS author_last_name, note.author_email,
+            note.challenges_answer, note.solutions_answer, note.action_plan_answer
+     FROM holistic_mentorship_follow_up_notes note
+     LEFT JOIN "user" author ON author.id = note.author_user_id
+     WHERE note.student_id = $1 AND note.phase_id = $2
+       AND NOT EXISTS (
          SELECT 1 FROM holistic_mentorship_privacy_deletions deletion
-         WHERE deletion.student_id = $1
-       ) AS erased`,
-      [studentId]
-    ),
-  ]);
-  return tombstone?.erased ? [] : rows.map(toHolisticFollowUpNote);
+         WHERE deletion.student_id = note.student_id
+       )
+     ORDER BY note.submitted_at DESC, note.id DESC`,
+    [studentId, phaseId]
+  );
+  return rows.map(toHolisticFollowUpNote);
 }
 
 type ProfileRow = {
