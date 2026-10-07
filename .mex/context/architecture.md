@@ -78,8 +78,10 @@ Performance will push deliberate choices, rehydrate every selection from URL
 history, compose rapid pending choices, and reject stale grade, option, loading,
 error, and report-name responses. Outer
 tabs still replace but must follow historical `tab`; report return consumes only
-a proven internal step, otherwise replacing away `session` safely. Dashboard
-cards lose Start Visit; authorized header/School Visits actions remain.
+a proven internal step, otherwise replacing away `session` safely.
+Shipped in #391: dashboard School and Centre cards pass no `actions` (no Start
+Visit shortcut for any role or view); Visits start from the School/Centre page
+header or the School Visits tab, which keep their existing gates.
 
 This is a plan, not shipped behavior. Centre Switcher is separate (#388). No schema,
 new API, permission change, or persistent history store is planned. Existing

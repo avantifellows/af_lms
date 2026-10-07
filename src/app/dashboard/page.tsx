@@ -675,13 +675,9 @@ function CentresSection({ centres, hasPMAccess, searchQuery }: {
   </div>;
 }
 
+// Cards only open their Centre; Visits start from the destination page (#391).
 function DashboardCentreCard({ centre, hasPMAccess }: { centre: Centre; hasPMAccess: boolean }) {
-  // Visits are school-linked, so Start Visit needs the centre's parent school.
-  const actions = hasPMAccess && centre.school_code ? <Link href={`/school/${centre.school_code}/visit/new`}
-    className="inline-flex items-center rounded-lg px-3 py-2 text-sm font-bold text-text-on-accent bg-accent shadow-sm hover:bg-accent-hover active:bg-accent-hover/90 transition-colors">
-    Start Visit
-  </Link> : undefined;
-  return <CentreCard centre={centre} showRegion={hasPMAccess} actions={actions} />;
+  return <CentreCard centre={centre} showRegion={hasPMAccess} />;
 }
 
 function PMStats({ enabled, totalCount, visitTotal }: {
@@ -776,11 +772,8 @@ function SchoolsSection({ schools, hasPMAccess, showHeading, searchQuery, curren
   </div>;
 }
 
+// Cards only open their School; Visits start from the destination page (#391).
 function DashboardSchoolCard({ school, hasPMAccess }: { school: DashboardSchool; hasPMAccess: boolean }) {
-  const actions = hasPMAccess ? <Link href={`/school/${school.code}/visit/new`}
-    className="inline-flex items-center rounded-lg px-3 py-2 text-sm font-bold text-text-on-accent bg-accent shadow-sm hover:bg-accent-hover active:bg-accent-hover/90 transition-colors">
-    Start Visit
-  </Link> : undefined;
   return <SchoolCard school={school} href={`/school/${school.code}`} showStudentCount showGradeBreakdown
-    showRegion={hasPMAccess} actions={actions} />;
+    showRegion={hasPMAccess} />;
 }

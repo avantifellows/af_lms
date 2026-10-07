@@ -899,20 +899,6 @@ describe("DashboardPage (server component)", () => {
     );
   });
 
-  it("shows Start Visit action for PM users", async () => {
-    const school = makeSchool();
-    setupPM([school], 1);
-
-    const jsx = await DashboardPage({ searchParams: jnvSearchParams });
-    render(jsx);
-
-    const startVisitLink = screen.getByText("Start Visit");
-    expect(startVisitLink.closest("a")).toHaveAttribute(
-      "href",
-      "/school/SC001/visit/new"
-    );
-  });
-
   it("does not show Start Visit for non-PM users", async () => {
     const school = makeSchool();
     setupTeacher([school], 1);
@@ -1785,6 +1771,42 @@ describe("DashboardPage (server component)", () => {
 
         const searchParams = JSON.parse(screen.getByTestId("pagination").getAttribute("data-search-params")!);
         expect(searchParams).toEqual(expected);
+      });
+    });
+
+    // #391: cards open their School or Centre; Visits start from the destination.
+    describe("card actions", () => {
+      it.each([
+        ["a PM", pmPermission],
+        ["an Admin", adminPermission],
+      ] as const)("gives %s School cards on JNV NVS Schools without a Start Visit shortcut", async (_label, permission) => {
+        setupActor({ permission, context: mixedContext });
+        routeQueries({ schools: [makeSchool()], schoolTotal: "1" });
+
+        await renderDashboard({ view: "jnv-nvs" });
+
+        expect(screen.getByTestId("school-card-SC001")).toHaveAttribute("data-href", "/school/SC001");
+        expect(screen.queryByTestId("school-card-actions")).not.toBeInTheDocument();
+        expect(screen.queryByText("Start Visit")).not.toBeInTheDocument();
+        expect(document.querySelector('a[href$="/visit/new"]')).toBeNull();
+      });
+
+      it.each([
+        ["a PM", pmPermission],
+        ["an Admin", adminPermission],
+      ] as const)("gives %s Centre cards on Physical Centres without a Start Visit shortcut", async (_label, permission) => {
+        setupActor({ permission, context: mixedContext });
+        routeQueries({
+          browsableCentreIds: ["8"],
+          centres: [centreRow("8", "Centre Eight", "s1", "SC001"), centreRow("17", "City Centre", null, null)],
+        });
+
+        await renderDashboard({ view: "centres" });
+
+        expect(screen.getByText("Centre Eight").closest("a")).toHaveAttribute("href", "/centre/8");
+        expect(screen.getByText("City Centre").closest("a")).toBeNull();
+        expect(screen.queryByText("Start Visit")).not.toBeInTheDocument();
+        expect(document.querySelector('a[href$="/visit/new"]')).toBeNull();
       });
     });
   });
