@@ -108,6 +108,18 @@ describe("Modal", () => {
       expect(screen.getByRole("button", { name: "Last" })).toHaveFocus();
     });
 
+    it("keeps a <details> summary reachable inside the focus trap", async () => {
+      const user = userEvent.setup();
+      render(<Modal open={true} aria-label="Flags">
+        <details><summary>Past flags</summary>Old flag</details>
+        <button type="button">Close</button>
+      </Modal>);
+      expect(screen.getByText("Past flags")).toHaveFocus();
+      screen.getByRole("button", { name: "Close" }).focus();
+      await user.tab();
+      expect(screen.getByText("Past flags")).toHaveFocus();
+    });
+
     it("pulls focus back into the dialog when it has escaped to the page", async () => {
       const user = userEvent.setup();
       render(<ModalHarness />);

@@ -17,6 +17,7 @@ const FOCUSABLE_SELECTOR = [
   "select:not([disabled])",
   "textarea:not([disabled])",
   "iframe",
+  "summary",
   "[contenteditable='true']",
   "[tabindex]:not([tabindex='-1'])",
 ].join(",");
