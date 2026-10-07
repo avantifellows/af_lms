@@ -76,3 +76,22 @@ export function parseCmsCurriculumScope(searchParams: URLSearchParams) {
 
   return { ok: true as const, examTrack, grade };
 }
+
+// The numeric CMS test id of a session. LMS-created sessions store it in cms_test_id;
+// Session Manager and sheet-script sessions store the CMS page URL there and the id in
+// cms_source_id.
+export function getCmsTestId(meta: Record<string, unknown> | null | undefined): string | null {
+  for (const key of ["cms_test_id", "cms_source_id"]) {
+    const value = meta?.[key];
+    const id = typeof value === "number" ? String(value) : typeof value === "string" ? value.trim() : "";
+    if (/^\d+$/.test(id)) return id;
+  }
+  return null;
+}
+
+// Display label for a CMS quiz's language (session meta_data.lang_code). Unknown codes show as-is.
+const REGIONAL_LANGUAGE_NAMES: Record<string, string> = { hi: "Hindi", gu: "Gujarati", ta: "Tamil" };
+export function cmsQuizLanguageLabel(langCode: string | null | undefined): string {
+  if (!langCode) return "English";
+  return `English + ${REGIONAL_LANGUAGE_NAMES[langCode] ?? langCode}`;
+}

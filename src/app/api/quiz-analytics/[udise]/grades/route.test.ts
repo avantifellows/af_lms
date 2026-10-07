@@ -8,53 +8,42 @@ vi.mock("@/lib/bigquery", () => ({
   getAvailableGrades: vi.fn(),
   getAvailablePrograms: vi.fn(),
 }));
-vi.mock("next-auth", () => ({
-  getServerSession: vi.fn(),
-}));
-vi.mock("@/lib/auth", () => ({ authOptions: {} }));
-vi.mock("@/lib/permissions", async () => {
-  const actual = await vi.importActual<typeof import("@/lib/permissions")>(
-    "@/lib/permissions"
-  );
-  return {
-    ...actual,
-    getUserPermission: vi.fn(),
-  };
-});
 
 import { authorizeSchoolAccess } from "@/lib/api-auth";
 import { getAvailableGrades, getAvailablePrograms } from "@/lib/bigquery";
-import { getServerSession } from "next-auth";
-import { getUserPermission } from "@/lib/permissions";
+import type { UserPermission } from "@/lib/permissions";
 import { GET } from "./route";
-import { routeParams } from "../../../__test-utils__/api-test-helpers";
+import {
+  PMU_GOVT_PERMISSION,
+  PMU_MANAGER_PERMISSION,
+  routeParams,
+} from "../../../__test-utils__/api-test-helpers";
 
 const mockAuth = vi.mocked(authorizeSchoolAccess);
 const mockGetGrades = vi.mocked(getAvailableGrades);
 const mockGetPrograms = vi.mocked(getAvailablePrograms);
-const mockSession = vi.mocked(getServerSession);
-const mockPermission = vi.mocked(getUserPermission);
-
 beforeEach(() => {
   vi.resetAllMocks();
   mockGetPrograms.mockResolvedValue([]);
-  // Default: admin session → no program filtering applied
-  mockSession.mockResolvedValue({
-    user: { email: "admin@avantifellows.org" },
-    isPasscodeUser: false,
-  } as never);
-  mockPermission.mockResolvedValue({
-    email: "admin@avantifellows.org",
-    level: 3,
-    role: "admin",
-    school_codes: null,
-    regions: null,
-    program_ids: [1, 2, 64],
-    read_only: false,
-  });
 });
 
 const SCHOOL = { id: "1", code: "70705", name: "Test School", region: "North" };
+
+// The route reads the caller's permission from authorizeSchoolAccess only.
+// Default: admin → no program filtering applied.
+const ADMIN_PERMISSION: UserPermission = {
+  email: "admin@avantifellows.org",
+  level: 3,
+  role: "admin",
+  school_codes: null,
+  regions: null,
+  program_ids: [1, 2, 64],
+  read_only: false,
+};
+
+function authorizedAs(permission: UserPermission | null = ADMIN_PERMISSION) {
+  mockAuth.mockResolvedValue({ authorized: true, school: SCHOOL, readOnly: false, permission });
+}
 
 describe("GET /api/quiz-analytics/[udise]/grades", () => {
   it("returns 401 when not authenticated", async () => {
@@ -100,7 +89,7 @@ describe("GET /api/quiz-analytics/[udise]/grades", () => {
   });
 
   it("returns grades and programs on success", async () => {
-    mockAuth.mockResolvedValue({ authorized: true, school: SCHOOL });
+    authorizedAs();
     mockGetGrades.mockResolvedValue([9, 10, 11]);
     mockGetPrograms.mockResolvedValue(["JNV CoE", "JNV Nodal"]);
 
@@ -118,7 +107,7 @@ describe("GET /api/quiz-analytics/[udise]/grades", () => {
   });
 
   it("passes program param to getAvailableGrades", async () => {
-    mockAuth.mockResolvedValue({ authorized: true, school: SCHOOL });
+    authorizedAs();
     mockGetGrades.mockResolvedValue([10]);
     mockGetPrograms.mockResolvedValue(["JNV CoE"]);
 
@@ -131,14 +120,7 @@ describe("GET /api/quiz-analytics/[udise]/grades", () => {
   });
 
   it("filters programs to those assigned to the user", async () => {
-    mockAuth.mockResolvedValue({ authorized: true, school: SCHOOL });
-    mockGetGrades.mockResolvedValue([11, 12]);
-    mockGetPrograms.mockResolvedValue(["JNV CoE", "JNV Nodal", "JNV NVS"]);
-    mockSession.mockResolvedValue({
-      user: { email: "teacher@example.com" },
-      isPasscodeUser: false,
-    } as never);
-    mockPermission.mockResolvedValue({
+    authorizedAs({
       email: "teacher@example.com",
       level: 1,
       role: "teacher",
@@ -147,6 +129,8 @@ describe("GET /api/quiz-analytics/[udise]/grades", () => {
       program_ids: [1], // CoE only
       read_only: false,
     });
+    mockGetGrades.mockResolvedValue([11, 12]);
+    mockGetPrograms.mockResolvedValue(["JNV CoE", "JNV Nodal", "JNV NVS"]);
 
     const res = await GET(
       new Request("http://localhost/api/quiz-analytics/1234/grades"),
@@ -160,14 +144,7 @@ describe("GET /api/quiz-analytics/[udise]/grades", () => {
   });
 
   it("admins see every program regardless of program_ids", async () => {
-    mockAuth.mockResolvedValue({ authorized: true, school: SCHOOL });
-    mockGetGrades.mockResolvedValue([11, 12]);
-    mockGetPrograms.mockResolvedValue(["JNV CoE", "JNV NVS"]);
-    mockSession.mockResolvedValue({
-      user: { email: "admin@example.com" },
-      isPasscodeUser: false,
-    } as never);
-    mockPermission.mockResolvedValue({
+    authorizedAs({
       email: "admin@example.com",
       level: 3,
       role: "admin",
@@ -176,6 +153,8 @@ describe("GET /api/quiz-analytics/[udise]/grades", () => {
       program_ids: [1],
       read_only: false,
     });
+    mockGetGrades.mockResolvedValue([11, 12]);
+    mockGetPrograms.mockResolvedValue(["JNV CoE", "JNV NVS"]);
 
     const res = await GET(
       new Request("http://localhost/api/quiz-analytics/1234/grades"),
@@ -187,29 +166,65 @@ describe("GET /api/quiz-analytics/[udise]/grades", () => {
     });
   });
 
-  it("passcode users see every program (no permission lookup)", async () => {
-    mockAuth.mockResolvedValue({ authorized: true, school: SCHOOL });
-    mockGetGrades.mockResolvedValue([12]);
+  it("keeps the row's program_ids for a non-PMU role (seat programs do not widen it)", async () => {
+    authorizedAs({
+      email: "pm@example.com",
+      level: 1,
+      role: "program_manager",
+      school_codes: [],
+      regions: null,
+      program_ids: [64],
+      read_only: false,
+      scope: {
+        schools: new Set(["70705"]),
+        centres: new Set([7]),
+        programs: new Set([1]),
+      },
+    });
+    mockGetGrades.mockResolvedValue([11]);
     mockGetPrograms.mockResolvedValue(["JNV CoE", "JNV NVS"]);
-    mockSession.mockResolvedValue({
-      user: { email: null },
-      isPasscodeUser: true,
-      schoolCode: "70705",
-    } as never);
 
     const res = await GET(
       new Request("http://localhost/api/quiz-analytics/1234/grades"),
       routeParams({ udise: "1234" })
     );
-    await expect(res.json()).resolves.toEqual({
-      grades: [12],
-      programs: ["JNV CoE", "JNV NVS"],
+    await expect(res.json()).resolves.toEqual({ grades: [11], programs: ["JNV NVS"] });
+  });
+
+  it("gives a non-admin with no program_ids no programs", async () => {
+    authorizedAs({
+      email: "teacher@example.com",
+      level: 1,
+      role: "teacher",
+      school_codes: ["70705"],
+      regions: null,
+      program_ids: null,
+      read_only: false,
     });
-    expect(mockPermission).not.toHaveBeenCalled();
+    mockGetGrades.mockResolvedValue([11]);
+    mockGetPrograms.mockResolvedValue(["JNV CoE", "JNV NVS"]);
+
+    const res = await GET(
+      new Request("http://localhost/api/quiz-analytics/1234/grades"),
+      routeParams({ udise: "1234" })
+    );
+    await expect(res.json()).resolves.toEqual({ grades: [11], programs: [] });
+  });
+
+  it("does not filter programs when there is no permission row", async () => {
+    authorizedAs(null);
+    mockGetGrades.mockResolvedValue([11]);
+    mockGetPrograms.mockResolvedValue(["JNV CoE", "JNV NVS"]);
+
+    const res = await GET(
+      new Request("http://localhost/api/quiz-analytics/1234/grades"),
+      routeParams({ udise: "1234" })
+    );
+    await expect(res.json()).resolves.toEqual({ grades: [11], programs: ["JNV CoE", "JNV NVS"] });
   });
 
   it("returns empty grades array when none exist", async () => {
-    mockAuth.mockResolvedValue({ authorized: true, school: SCHOOL });
+    authorizedAs();
     mockGetGrades.mockResolvedValue([]);
     mockGetPrograms.mockResolvedValue([]);
 
@@ -219,5 +234,58 @@ describe("GET /api/quiz-analytics/[udise]/grades", () => {
     );
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual({ grades: [], programs: [] });
+  });
+});
+
+// PMU roles are pinned to JNV NVS (ADR 0007). The program list comes from the
+// pinned program context, so stray CoE/Nodal ids on the row never widen it.
+describe.each([
+  ["PMU Manager", PMU_MANAGER_PERMISSION],
+  ["PMU Govt School User", PMU_GOVT_PERMISSION],
+])("GET grades as %s", (_label, basePermission) => {
+  const permission = { ...basePermission, program_ids: [1, 2, 64] };
+
+  beforeEach(() => {
+    authorizedAs(permission);
+    mockGetGrades.mockResolvedValue([11, 12]);
+    mockGetPrograms.mockResolvedValue(["JNV CoE", "JNV Nodal", "JNV NVS"]);
+  });
+
+  it("serves JNV NVS grades and only the JNV NVS program when no program is given", async () => {
+    const res = await GET(
+      new Request("http://localhost/api/quiz-analytics/1234/grades"),
+      routeParams({ udise: "1234" })
+    );
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ grades: [11, 12], programs: ["JNV NVS"] });
+    expect(mockGetGrades).toHaveBeenCalledWith("1234", "JNV NVS");
+  });
+
+  it("serves program=JNV NVS", async () => {
+    const res = await GET(
+      new Request("http://localhost/api/quiz-analytics/1234/grades?program=JNV%20NVS"),
+      routeParams({ udise: "1234" })
+    );
+    expect(res.status).toBe(200);
+    expect(mockGetGrades).toHaveBeenCalledWith("1234", "JNV NVS");
+  });
+
+  it.each(["JNV CoE", "JNV Nodal", "Punjab CoE"])("403s program=%s", async (program) => {
+    const res = await GET(
+      new Request(`http://localhost/api/quiz-analytics/1234/grades?program=${encodeURIComponent(program)}`),
+      routeParams({ udise: "1234" })
+    );
+    expect(res.status).toBe(403);
+    expect(mockGetGrades).not.toHaveBeenCalled();
+    expect(mockGetPrograms).not.toHaveBeenCalled();
+  });
+
+  it("returns no programs when the School has no JNV NVS results", async () => {
+    mockGetPrograms.mockResolvedValue(["JNV CoE"]);
+    const res = await GET(
+      new Request("http://localhost/api/quiz-analytics/1234/grades"),
+      routeParams({ udise: "1234" })
+    );
+    await expect(res.json()).resolves.toMatchObject({ programs: [] });
   });
 });

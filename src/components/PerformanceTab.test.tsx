@@ -18,6 +18,7 @@ interface BatchOverviewProps {
   stream?: string;
   subject?: string;
   testGrade?: number;
+  isNvs?: boolean;
   onFilterOptions?: (opts: {
     streams: string[];
     subjects: string[];
@@ -26,9 +27,11 @@ interface BatchOverviewProps {
 }
 
 let lastBatchOverviewProps: BatchOverviewProps | null = null;
+let batchOverviewRenders: BatchOverviewProps[] = [];
 vi.mock("./performance/BatchOverview", () => ({
   default: (props: BatchOverviewProps) => {
     lastBatchOverviewProps = props;
+    batchOverviewRenders.push(props);
     // simulate the real component reporting available filter options
     if (props.onFilterOptions) {
       Promise.resolve().then(() =>
@@ -80,6 +83,7 @@ describe("PerformanceTab", () => {
     vi.restoreAllMocks();
     mockReplace.mockReset();
     mockSearchParams = new URLSearchParams();
+    batchOverviewRenders = [];
   });
 
   it("shows loading spinner initially", () => {
@@ -178,6 +182,19 @@ describe("PerformanceTab", () => {
       expect(screen.getByTestId("batch-overview")).toBeInTheDocument();
     });
     expect(screen.getByText(/grade=11/)).toBeInTheDocument();
+    expect(batchOverviewRenders.some((p) => p.isNvs)).toBe(false);
+  });
+
+  it("scopes a single-program NVS school's overview to NVS from its very first render", async () => {
+    vi.stubGlobal("fetch", mockGradesResponse([12], ["JNV NVS"]));
+
+    render(<PerformanceTab schoolUdise="12345" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("batch-overview")).toBeInTheDocument();
+    });
+    expect(batchOverviewRenders[0]).toMatchObject({ program: "JNV NVS", isNvs: true });
+    expect(batchOverviewRenders.every((p) => p.program === "JNV NVS" && p.isNvs)).toBe(true);
   });
 
   it("shows grade selector when multiple grades exist (and no Grade 12)", async () => {
@@ -278,6 +295,23 @@ describe("PerformanceTab", () => {
     await waitFor(() => {
       expect(lastBatchOverviewProps?.stream).toBe("pcm");
     });
+  });
+
+  it("keeps every stream option after one is picked, so another can be chosen directly", async () => {
+    vi.stubGlobal("fetch", mockGradesResponse([11], ["JNV CoE"]));
+    lastBatchOverviewProps = null;
+
+    render(<PerformanceTab schoolUdise="12345" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "PCM" }));
+    await waitFor(() => expect(lastBatchOverviewProps?.stream).toBe("pcm"));
+
+    const streamGroup = screen.getByRole("group", { name: "Stream" });
+    expect(within(streamGroup).getByRole("button", { name: "PCM" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(within(streamGroup).getByRole("button", { name: "PCB" }));
+    await waitFor(() => expect(lastBatchOverviewProps?.stream).toBe("pcb"));
+    expect(within(streamGroup).getByRole("button", { name: "All" })).toBeInTheDocument();
+    expect(within(streamGroup).getByRole("button", { name: "PCM" })).toBeInTheDocument();
   });
 
   it("renders the Test Grade buttons from reported options and forwards selection", async () => {
@@ -422,6 +456,66 @@ describe("PerformanceTab", () => {
     await waitFor(() => {
       expect(screen.getByTestId("cumulative-al-table")).toBeInTheDocument();
       expect(screen.queryByTestId("batch-overview")).not.toBeInTheDocument();
+    });
+  });
+  describe("JNV NVS", () => {
+    it("gives a multi-program school's other tab back every filter and its URL view", async () => {
+      mockSearchParams = new URLSearchParams("program=JNV%20NVS&grade=12&view=cumulative");
+      vi.stubGlobal("fetch", mockGradesResponse([12], ["JNV CoE", "JNV NVS"]));
+
+      render(<PerformanceTab schoolUdise="12345" />);
+
+      // NVS: per-test overview, narrow bar, despite ?view=cumulative.
+      expect(await screen.findByTestId("batch-overview")).toBeInTheDocument();
+      await screen.findByRole("group", { name: "Stream" });
+      expect(screen.queryByRole("group", { name: "View" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("group", { name: "Test type" })).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "JNV CoE" }));
+
+      // CoE honours the raw cumulative view and shows the full bar.
+      expect(await screen.findByTestId("cumulative-al-table")).toBeInTheDocument();
+      expect(screen.getByRole("group", { name: "View" })).toBeInTheDocument();
+      expect(screen.getByRole("group", { name: "Test type" })).toBeInTheDocument();
+    });
+
+    it("ignores view, category, subject and testGrade from an old link, without rewriting it", async () => {
+      mockSearchParams = new URLSearchParams(
+        "grade=12&view=cumulative&category=chapter&subject=Physics&testGrade=11"
+      );
+      vi.stubGlobal("fetch", mockGradesResponse([12], ["JNV NVS"]));
+
+      render(<PerformanceTab schoolUdise="12345" />);
+
+      expect(await screen.findByTestId("batch-overview")).toBeInTheDocument();
+      expect(screen.queryByTestId("cumulative-al-table")).not.toBeInTheDocument();
+      const props = batchOverviewRenders.at(-1);
+      expect(props).toMatchObject({ testCategory: "full", isNvs: true });
+      expect(props?.subject).toBeUndefined();
+      expect(props?.testGrade).toBeUndefined();
+      // Let the reported filter options settle before checking the URL.
+      await screen.findByRole("group", { name: "Stream" });
+      // Any URL write that did happen must still carry the ignored params.
+      for (const [url] of mockReplace.mock.calls as [string][]) {
+        expect(url).toContain("view=cumulative");
+        expect(url).toContain("category=chapter");
+        expect(url).toContain("subject=Physics");
+        expect(url).toContain("testGrade=11");
+      }
+    });
+
+    it("shows only the Grade and Stream filters", async () => {
+      vi.stubGlobal("fetch", mockGradesResponse([11, 12], ["JNV NVS"]));
+
+      render(<PerformanceTab schoolUdise="12345" />);
+
+      // Stream appears once the overview reports its options; by then the
+      // other groups would have too, if they were going to.
+      expect(await screen.findByRole("group", { name: "Stream" })).toBeInTheDocument();
+      expect(screen.getByRole("group", { name: "Grade" })).toBeInTheDocument();
+      for (const name of ["Test grade", "Test type", "Subject", "View"]) {
+        expect(screen.queryByRole("group", { name })).not.toBeInTheDocument();
+      }
     });
   });
 });

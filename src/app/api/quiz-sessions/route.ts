@@ -269,7 +269,7 @@ async function listQuizSessions(
       AND string_to_array(s.meta_data->>'batch_id', ',') && $2::text[]
       -- Teacher Feedback forms are managed in their own tab, not here.
       AND COALESCE(s.meta_data->>'cms_test_id', '') NOT LIKE 'teacher-feedback:%'
-      AND ($5::text IS NULL OR (s.meta_data ? 'cms_source' AND s.meta_data->>'cms_test_id' = $5))
+      AND ($5::text IS NULL OR (s.meta_data ? 'cms_source' AND $5 IN (s.meta_data->>'cms_test_id', s.meta_data->>'cms_source_id')))
       AND ($6::text IS NULL OR s.meta_data->>'resource_id' = $6)
       -- Live = enabled and inside its window. Times are IST wall-clock, so compare against IST now.
       AND (NOT $7::boolean OR (

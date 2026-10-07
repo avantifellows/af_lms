@@ -30,7 +30,6 @@ vi.mock("@/lib/curriculum-schema", () => ({
 import { POST } from "./route";
 import {
   ADMIN_SESSION,
-  PASSCODE_SESSION,
   PM_SESSION,
   jsonRequest,
   routeParams,
@@ -67,19 +66,6 @@ describe("POST /api/curriculum/configs/[id]/remove-from-syllabus", () => {
         )
       ).status
     ).toBe(401);
-
-    mockGetServerSession.mockResolvedValueOnce(PASSCODE_SESSION);
-    expect(
-      (
-        await POST(
-          jsonRequest(
-            "http://localhost/api/curriculum/configs/42/remove-from-syllabus",
-            { method: "POST" }
-          ) as NextRequest,
-          routeParams({ id: "42" })
-        )
-      ).status
-    ).toBe(403);
 
     mockGetServerSession.mockResolvedValueOnce(PM_SESSION);
     mockGetUserPermission.mockResolvedValueOnce({

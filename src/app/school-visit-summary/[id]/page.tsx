@@ -509,13 +509,6 @@ export default async function SchoolVisitSummaryDetailPage({ params }: PageProps
     redirect("/");
   }
 
-  if (session.isPasscodeUser) {
-    if (session.schoolCode) {
-      redirect(`/school/${session.schoolCode}`);
-    }
-    redirect("/dashboard");
-  }
-
   if (!session.user?.email) {
     redirect("/");
   }

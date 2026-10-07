@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { CENTRE_ASSIGNMENTS_SUBQUERY } from "@/lib/centres";
 import { query } from "@/lib/db";
 import { isUserRole, type UserRole } from "@/lib/permissions";
-import { HOLISTIC_MENTORSHIP_PROGRAM_IDS } from "@/lib/constants";
+import { HOLISTIC_MENTORSHIP_PROGRAM_IDS, isPmuRole } from "@/lib/constants";
 import { requireAdminApiAccess } from "../route-helpers";
+import { isSeatedEmail, PMU_SEATED_ERROR, resolvePmuRow, type PmuRow } from "./pmu-rows";
 
 // Disable Next.js caching for this route
 export const dynamic = "force-dynamic";
@@ -28,17 +29,25 @@ function validateUserWrite(value: UserWrite): string | null {
   if (!value.level) return "Email and level are required";
   if (![1, 2, 3].includes(value.level)) return "Level must be between 1 and 3";
   if (value.role !== undefined && !isUserRole(value.role)) return "Invalid role";
-  if (userRole(value) === "holistic_mentorship_admin") return null;
+  const role = userRole(value);
+  if (role === "holistic_mentorship_admin" || isPmuRole(role)) return null;
   if (!Array.isArray(value.program_ids) || value.program_ids.length === 0) {
     return "At least one program must be assigned";
   }
   return null;
 }
 
-function userWriteParams(value: UserWrite) {
+function userWriteParams(value: UserWrite, pmuRow: PmuRow | null) {
   const role = userRole(value);
   const holisticAdmin = role === "holistic_mentorship_admin";
-  const scope = holisticAdmin
+  const scope = pmuRow
+    ? {
+        level: pmuRow.level,
+        schoolCodes: pmuRow.school_codes,
+        regions: pmuRow.regions,
+        programIds: pmuRow.program_ids,
+      }
+    : holisticAdmin
     ? {
         level: 3,
         schoolCodes: null,
@@ -104,6 +113,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: validationError }, { status: 400 });
     }
 
+    let pmuRow: PmuRow | null = null;
+    const role = userRole(body);
+    if (isPmuRole(role)) {
+      const resolved = await resolvePmuRow({ ...body, role });
+      if (!resolved.ok) {
+        return NextResponse.json({ error: resolved.error }, { status: 400 });
+      }
+      if (await isSeatedEmail(body.email)) {
+        return NextResponse.json({ error: PMU_SEATED_ERROR }, { status: 409 });
+      }
+      pmuRow = resolved.row;
+    }
+
     const result = await query<{ id: number }>(
       `INSERT INTO user_permission (email, level, role, school_codes, regions, program_ids, read_only, full_name)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -117,7 +139,7 @@ export async function POST(request: NextRequest) {
          full_name = EXCLUDED.full_name,
          updated_at = NOW()
        RETURNING id`,
-      userWriteParams(body)
+      userWriteParams(body, pmuRow)
     );
 
     return NextResponse.json({ id: result[0].id, success: true });

@@ -119,11 +119,13 @@ vi.mock("@/components/PageHeader", () => ({
     subtitle,
     backHref,
     userEmail,
+    actions,
   }: {
     title: string;
     subtitle?: string;
     backHref?: string;
     userEmail?: string;
+    actions?: React.ReactNode;
   }) => (
     <div
       data-testid="page-header"
@@ -133,6 +135,7 @@ vi.mock("@/components/PageHeader", () => ({
       data-user-email={userEmail || ""}
     >
       PageHeader
+      <div data-testid="page-header-actions">{actions}</div>
     </div>
   ),
 }));
@@ -198,8 +201,18 @@ vi.mock("@/components/curriculum/CurriculumTab", () => ({
 
 vi.mock("@/components/PerformanceTab", () => ({
   __esModule: true,
-  default: ({ schoolUdise }: { schoolUdise: string }) => (
-    <div data-testid="performance-tab" data-school-udise={schoolUdise}>
+  default: ({
+    schoolUdise,
+    lockedProgram,
+  }: {
+    schoolUdise: string;
+    lockedProgram?: string;
+  }) => (
+    <div
+      data-testid="performance-tab"
+      data-school-udise={schoolUdise}
+      data-locked-program={lockedProgram ?? ""}
+    >
       PerformanceTab
     </div>
   ),
@@ -234,7 +247,13 @@ vi.mock("@/components/EditStudentModal", () => ({
 }));
 
 import SchoolPage from "./page";
-import { PROGRAM_IDS, PROGRAM_IDS_ORDERED, PROGRAM_ATTRIBUTION_ORDER } from "@/lib/constants";
+import EnrollmentTabContent from "@/components/enrollment/EnrollmentTabContent";
+import {
+  PMU_FEEDBACK_FORM_URL,
+  PROGRAM_IDS,
+  PROGRAM_IDS_ORDERED,
+  PROGRAM_ATTRIBUTION_ORDER,
+} from "@/lib/constants";
 
 // ---- helpers ----
 
@@ -287,15 +306,7 @@ const makePermission = (overrides = {}) => ({
 
 const googleSession = (overrides = {}) => ({
   user: { email: "user@avantifellows.org" },
-  isPasscodeUser: false,
-  schoolCode: undefined,
   ...overrides,
-});
-
-const passcodeSession = (schoolCode: string) => ({
-  user: {},
-  isPasscodeUser: true,
-  schoolCode,
 });
 
 const featureAccess = (canView: boolean, canEdit: boolean) => ({
@@ -425,82 +436,6 @@ describe("SchoolPage (server component)", () => {
       SchoolPage({ params: Promise.resolve({ udise: "99999999999" }) }),
     ).rejects.toThrow("NOT_FOUND");
     expect(mockNotFound).toHaveBeenCalled();
-  });
-
-  // --- Passcode user access ---
-
-  it("renders access denied for passcode user accessing wrong school", async () => {
-    mockGetServerSession.mockResolvedValue(passcodeSession("12345"));
-    mockQuery.mockResolvedValueOnce([makeSchool({ code: "70705" })]);
-
-    const jsx = await SchoolPage({
-      params: Promise.resolve({ udise: "24120100101" }),
-    });
-    await renderResolved(jsx);
-
-    expect(screen.getByText("Access Denied")).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "Your passcode only grants access to a different school.",
-      ),
-    ).toBeInTheDocument();
-    expect(screen.getByText("Return to login")).toBeInTheDocument();
-    expect(screen.getByText("Return to login").closest("a")).toHaveAttribute(
-      "href",
-      "/",
-    );
-  });
-
-  it("renders page for passcode user accessing own school", async () => {
-    const school = makeSchool({ code: "70705" });
-    mockGetServerSession.mockResolvedValue(passcodeSession("70705"));
-    mockQuery
-      .mockResolvedValueOnce([school]) // getSchoolByCode
-      .mockResolvedValueOnce([]) // getStudents
-      .mockResolvedValueOnce([]) // getGrades
-      .mockResolvedValueOnce([]); // getBatchesWithMetadata
-    mockGetProgramContextSync.mockReturnValue({
-      hasAccess: true,
-      programIds: [],
-      isNVSOnly: false,
-      hasCoEOrNodal: false,
-    });
-    // Passcode user: students = edit, rest = none
-    mockGetFeatureAccess.mockImplementation(
-      (
-        _perm: unknown,
-        feature: string,
-        opts?: { isPasscodeUser?: boolean },
-      ) => {
-        if (opts?.isPasscodeUser && feature === "students") {
-          return featureAccess(true, true);
-        }
-        return featureAccess(false, false);
-      },
-    );
-    mockProcessStudents.mockResolvedValue({ students: [], issues: [] });
-
-    const jsx = await SchoolPage({
-      params: Promise.resolve({ udise: "24120100101" }),
-    });
-    await renderResolved(jsx);
-
-    // PageHeader should show school name and passcode email
-    const header = screen.getByTestId("page-header");
-    expect(header).toHaveAttribute("data-title", "JNV Bhavnagar");
-    expect(header).toHaveAttribute("data-user-email", "School 70705");
-    // No back href for passcode user (single school)
-    expect(header).toHaveAttribute("data-back-href", "");
-    // Only enrollment tab should be visible (passcode user gets none for other features)
-    expect(screen.getByTestId("tab-enrollment")).toBeInTheDocument();
-    expect(screen.queryByTestId("tab-curriculum")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("tab-mentorship")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("tab-visits")).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("link", { name: "Curriculum Summary" }),
-    ).not.toBeInTheDocument();
-    expect(mockListAcademicMentorshipMappings).not.toHaveBeenCalled();
-    expect(mockListAcademicMentorshipTeacherMentees).not.toHaveBeenCalled();
   });
 
   // --- Google user permission checks ---
@@ -978,6 +913,418 @@ describe("SchoolPage (server component)", () => {
     expect(props.canDropoutStudent).toBe(true);
   });
 
+  describe.each(["pmu_manager", "pmu_govt_school_user"] as const)(
+    "%s NVS dropout",
+    (role) => {
+      // Real matrix and program pinning, so read_only and the NVS-only
+      // context behave as in production.
+      async function setupPmu(readOnly: boolean) {
+        setupAdminDefaults();
+        const actual = await vi.importActual<typeof import("@/lib/permissions")>(
+          "@/lib/permissions",
+        );
+        mockGetUserPermission.mockResolvedValue(
+          makePermission({
+            role,
+            level: 1,
+            school_codes: ["70705"],
+            program_ids: [64],
+            read_only: readOnly,
+          }),
+        );
+        mockGetFeatureAccess.mockImplementation(actual.getFeatureAccess);
+        mockGetProgramContextSync.mockImplementation(actual.getProgramContextSync);
+      }
+
+      it("passes canDropoutStudent = true at an in-scope JNV School", async () => {
+        await setupPmu(false);
+
+        await renderPage();
+
+        const props = JSON.parse(
+          screen.getByTestId("student-table").dataset.props || "{}",
+        );
+        expect(props.canDropoutStudent).toBe(true);
+      });
+
+      it("passes canDropoutStudent = false when read_only is set", async () => {
+        await setupPmu(true);
+
+        await renderPage();
+
+        const props = JSON.parse(
+          screen.getByTestId("student-table").dataset.props || "{}",
+        );
+        expect(props.canDropoutStudent).toBe(false);
+      });
+    },
+  );
+
+  describe.each(["pmu_manager", "pmu_govt_school_user"] as const)(
+    "%s school page",
+    (role) => {
+      // Real matrix, program pinning and school scope, so the page behaves as
+      // it would for a production PMU row.
+      async function setupPmuPage(
+        schoolOverrides = {},
+        permissionOverrides = {},
+      ) {
+        setupAdminDefaults(schoolOverrides);
+        const actual = await vi.importActual<typeof import("@/lib/permissions")>(
+          "@/lib/permissions",
+        );
+        mockGetUserPermission.mockResolvedValue(
+          makePermission({
+            role,
+            level: 1,
+            school_codes: ["70705"],
+            program_ids: [64],
+            ...permissionOverrides,
+          }),
+        );
+        mockGetFeatureAccess.mockImplementation(actual.getFeatureAccess);
+        mockGetProgramContextSync.mockImplementation(actual.getProgramContextSync);
+      }
+
+      it("shows only the JNV NVS card and NVS Students at a mixed School", async () => {
+        await setupPmuPage({ centre_program_ids: [1, 64] });
+        mockProcessStudents.mockResolvedValue({
+          students: [
+            makeStudent({
+              group_user_id: "gu-nvs",
+              user_id: "u-nvs",
+              first_name: "Nisha",
+              program_id: 64,
+              program_name: "JNV NVS",
+            }),
+            makeStudent({
+              group_user_id: "gu-coe",
+              user_id: "u-coe",
+              first_name: "Chetan",
+              program_id: 1,
+              program_name: "JNV CoE",
+            }),
+          ],
+          issues: [],
+        });
+
+        await renderPage();
+
+        expect(screen.getByText("JNV NVS Students")).toBeInTheDocument();
+        expect(screen.queryByText("JNV CoE Students")).not.toBeInTheDocument();
+        expect(
+          screen.queryByRole("button", { name: "JNV CoE" }),
+        ).not.toBeInTheDocument();
+        const props = JSON.parse(
+          screen.getByTestId("student-table").dataset.props || "{}",
+        );
+        expect(
+          props.students.map((s: { first_name: string }) => s.first_name),
+        ).toEqual(["Nisha"]);
+      });
+
+      it("keeps Download List but hides Add Student and Bulk Upload when read_only", async () => {
+        await setupPmuPage({}, { read_only: true });
+        mockProcessStudents.mockResolvedValue({
+          students: [makeStudent({ student_program_ids: [64] })],
+          issues: [],
+        });
+
+        await renderPage();
+
+        expect(screen.getByRole("button", { name: "Download List" })).toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: "Add Student" })).not.toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: "Bulk Upload" })).not.toBeInTheDocument();
+      });
+
+      it("locks the Performance tab to JNV NVS", async () => {
+        await setupPmuPage();
+
+        await renderPage();
+
+        expect(screen.getByTestId("performance-tab")).toHaveAttribute(
+          "data-locked-program",
+          "JNV NVS",
+        );
+      });
+
+      it("hides the tabs the matrix gives PMU roles no access to", async () => {
+        await setupPmuPage();
+
+        await renderPage();
+
+        expect(screen.getByTestId("tab-enrollment")).toBeInTheDocument();
+        expect(screen.getByTestId("tab-performance")).toBeInTheDocument();
+        for (const id of [
+          "visits",
+          "curriculum",
+          "quiz_sessions",
+          "teacher_feedback",
+          "mentorship",
+          "holistic_mentorship",
+        ]) {
+          expect(screen.queryByTestId(`tab-${id}`)).not.toBeInTheDocument();
+        }
+      });
+
+      it("shows the Feedback / Grievance link, opening the Google Form in a new tab", async () => {
+        await setupPmuPage();
+
+        await renderPage();
+
+        const actions = within(screen.getByTestId("page-header-actions"));
+        const link = actions.getByRole("link", { name: /Feedback \/ Grievance/ });
+        expect(link).toHaveAttribute("href", PMU_FEEDBACK_FORM_URL);
+        expect(link).toHaveAttribute("href", "https://forms.gle/Xisa7AjkDp6fMhew6");
+        expect(link).toHaveAttribute("target", "_blank");
+        expect(link).toHaveAttribute("rel", "noopener noreferrer");
+        expect(link).toHaveAccessibleName("Feedback / Grievance (opens in a new tab)");
+        expect(actions.queryByText("Start Visit")).not.toBeInTheDocument();
+      });
+
+      it("returns Access Denied at a non-JNV School, even at level 3", async () => {
+        await setupPmuPage(
+          { af_school_category: "Punjab CoE", centre_program_ids: [94] },
+          { level: 3, school_codes: null },
+        );
+
+        await renderPage();
+
+        expect(screen.getByText("Access Denied")).toBeInTheDocument();
+        expect(screen.queryByTestId("school-tabs")).not.toBeInTheDocument();
+      });
+    },
+  );
+
+  // PR #376 review #1: the client only filters by the selected card, so the
+  // server must hand a PMU user nothing but NVS Students (and their issues).
+  describe("mixed School roster sent to the client", () => {
+    const mixedRoster = () => ({
+      students: [
+        makeStudent({ group_user_id: "gu-nvs", user_id: "u-nvs", first_name: "Nisha", last_name: "Nvs", program_id: 64, program_name: "JNV NVS", student_program_ids: [64] }),
+        makeStudent({ group_user_id: "gu-dual", user_id: "u-dual", first_name: "Maya", last_name: "Dual", program_id: 1, program_name: "JNV CoE", student_program_ids: [1, 64] }),
+        makeStudent({ group_user_id: "gu-coe", user_id: "u-coe", first_name: "Chetan", last_name: "Coe", program_id: 1, program_name: "JNV CoE", student_program_ids: [1] }),
+        makeStudent({ group_user_id: "gu-nodal", user_id: "u-nodal", first_name: "Neel", last_name: "Nodal", program_id: 2, program_name: "JNV Nodal", student_program_ids: [2] }),
+        makeStudent({ group_user_id: "gu-none", user_id: "u-none", first_name: "Uma", last_name: "Unassigned", program_id: null, program_name: null, student_program_ids: [] }),
+        makeStudent({ group_user_id: "gu-nvs-drop", user_id: "u-nvs-drop", first_name: "Deepa", last_name: "Nvsdrop", status: "dropout", program_id: 64, program_name: "JNV NVS", student_program_ids: [], dropout_program_ids: [64] }),
+        makeStudent({ group_user_id: "gu-coe-drop", user_id: "u-coe-drop", first_name: "Kiran", last_name: "Coedrop", status: "dropout", program_id: 1, program_name: "JNV CoE", student_program_ids: [], dropout_program_ids: [1] }),
+      ],
+      issues: [
+        { type: "duplicate_grade", studentName: "Nisha Nvs", groupUserId: "gu-nvs", details: "Nisha issue" },
+        { type: "multiple_schools", studentName: "Deepa Nvsdrop", groupUserId: "gu-nvs-drop", details: "Deepa issue" },
+        { type: "duplicate_grade", studentName: "Chetan Coe", groupUserId: "gu-coe", details: "Chetan issue" },
+        { type: "multiple_schools", studentName: "Uma Unassigned", groupUserId: "gu-none", details: "Uma issue" },
+        { type: "duplicate_grade", studentName: "Kiran Coedrop", groupUserId: "gu-coe-drop", details: "Kiran issue" },
+      ],
+    });
+
+    // Resolve the server component and read the props it hands the
+    // "use client" EnrollmentTabContent — that is the RSC payload.
+    async function resolveEnrollment() {
+      const jsx = await SchoolPage({ params: Promise.resolve({ udise: "24120100101" }) });
+      const resolved = await resolveAsyncComponent(jsx);
+      const tabs = (resolved.props as { tabs: Array<{ id: string; content: React.ReactElement }> }).tabs;
+      const enrollment = tabs.find((tab) => tab.id === "enrollment")!.content;
+      const find = (node: unknown): React.ReactElement | null => {
+        if (Array.isArray(node)) {
+          for (const child of node) {
+            const hit = find(child);
+            if (hit) return hit;
+          }
+          return null;
+        }
+        if (!node || typeof node !== "object" || !("props" in node)) return null;
+        const element = node as React.ReactElement<{ children?: unknown }>;
+        if (element.type === EnrollmentTabContent) return element;
+        return find(element.props.children);
+      };
+      const tabContent = find(enrollment) as React.ReactElement<{
+        activeStudents: Array<{ first_name: string }>;
+        dropoutStudents: Array<{ first_name: string }>;
+        programs: Array<{ id: number }>;
+      }>;
+      expect(tabContent).not.toBeNull();
+      return { resolved, props: tabContent.props };
+    }
+    const names = (students: Array<{ first_name: string }>) =>
+      students.map((student) => student.first_name).sort();
+
+    describe.each(["pmu_manager", "pmu_govt_school_user"] as const)("%s", (role) => {
+      async function setupPmuMixed() {
+        setupAdminDefaults({ centre_program_ids: [1, 2, 64] });
+        const actual = await vi.importActual<typeof import("@/lib/permissions")>(
+          "@/lib/permissions",
+        );
+        mockGetUserPermission.mockResolvedValue(
+          makePermission({ role, level: 1, school_codes: ["70705"], program_ids: [64] }),
+        );
+        mockGetFeatureAccess.mockImplementation(actual.getFeatureAccess);
+        mockGetProgramContextSync.mockImplementation(actual.getProgramContextSync);
+        mockProcessStudents.mockResolvedValue(mixedRoster());
+      }
+
+      it("passes only NVS Students (active + NVS dropouts) to EnrollmentTabContent", async () => {
+        await setupPmuMixed();
+
+        const { props } = await resolveEnrollment();
+
+        expect(names(props.activeStudents)).toEqual(["Maya", "Nisha"]);
+        expect(names(props.dropoutStudents)).toEqual(["Deepa"]);
+        expect(props.programs.map((program) => program.id)).toEqual([64]);
+      });
+
+      it("lists only NVS Students' data issues in the banner", async () => {
+        await setupPmuMixed();
+
+        const { resolved } = await resolveEnrollment();
+        render(resolved);
+
+        expect(screen.getByText(/2 data issues found/)).toBeInTheDocument();
+        expect(screen.getByText("Nisha Nvs")).toBeInTheDocument();
+        expect(screen.getByText("Deepa Nvsdrop")).toBeInTheDocument();
+        for (const hidden of ["Chetan Coe", "Uma Unassigned", "Kiran Coedrop"]) {
+          expect(screen.queryByText(hidden)).not.toBeInTheDocument();
+        }
+      });
+    });
+
+    describe.each([
+      ["admin", [1, 2, 64]],
+      ["program_admin", [1, 2, 64]],
+    ] as const)("%s", (role, programIds) => {
+      function setupMixed() {
+        setupAdminDefaults({ centre_program_ids: [1, 2, 64] });
+        mockGetUserPermission.mockResolvedValue(
+          makePermission({ role, program_ids: [...programIds] }),
+        );
+        mockGetProgramContextSync.mockReturnValue({
+          hasAccess: true,
+          programIds: [...programIds],
+          isNVSOnly: false,
+          hasCoEOrNodal: true,
+        });
+        mockProcessStudents.mockResolvedValue(mixedRoster());
+      }
+
+      it("still passes every program's Students to EnrollmentTabContent", async () => {
+        setupMixed();
+
+        const { props } = await resolveEnrollment();
+
+        expect(names(props.activeStudents)).toEqual(["Chetan", "Maya", "Neel", "Nisha"]);
+        expect(names(props.dropoutStudents)).toEqual(["Deepa", "Kiran"]);
+      });
+
+      it("still lists every data issue in the banner", async () => {
+        setupMixed();
+
+        const { resolved } = await resolveEnrollment();
+        render(resolved);
+
+        expect(screen.getByText(/5 data issues found/)).toBeInTheDocument();
+        for (const name of ["Nisha Nvs", "Deepa Nvsdrop", "Chetan Coe", "Uma Unassigned", "Kiran Coedrop"]) {
+          expect(screen.getByText(name)).toBeInTheDocument();
+        }
+      });
+    });
+  });
+
+  // Header actions with the real matrix: Start Visit follows visits edit, and
+  // the Feedback / Grievance link is PMU-only.
+  describe.each([
+    { role: "teacher", startVisit: false },
+    { role: "program_manager", startVisit: true },
+    { role: "program_admin", startVisit: true },
+    { role: "admin", startVisit: true },
+  ] as const)("$role header actions", ({ role, startVisit }) => {
+    async function setupRole() {
+      setupAdminDefaults();
+      const actual = await vi.importActual<typeof import("@/lib/permissions")>(
+        "@/lib/permissions",
+      );
+      mockGetUserPermission.mockResolvedValue(
+        makePermission({ role, level: 3, school_codes: null, program_ids: [1, 64] }),
+      );
+      mockGetFeatureAccess.mockImplementation(actual.getFeatureAccess);
+    }
+
+    it("has no Feedback / Grievance link", async () => {
+      await setupRole();
+
+      await renderPage();
+
+      const actions = within(screen.getByTestId("page-header-actions"));
+      expect(
+        actions.queryByRole("link", { name: /Feedback \/ Grievance/ }),
+      ).not.toBeInTheDocument();
+      expect(screen.queryByText("Feedback / Grievance")).not.toBeInTheDocument();
+    });
+
+    it(`${startVisit ? "shows" : "hides"} Start Visit`, async () => {
+      await setupRole();
+
+      await renderPage();
+
+      const actions = within(screen.getByTestId("page-header-actions"));
+      if (startVisit) {
+        expect(actions.getByRole("link", { name: "Start Visit" })).toHaveAttribute(
+          "href",
+          "/school/70705/visit/new",
+        );
+      } else {
+        expect(actions.queryByText("Start Visit")).not.toBeInTheDocument();
+      }
+    });
+  });
+
+  it("gives a PMU Govt School User no back link, even with a multi-School row", async () => {
+    setupAdminDefaults();
+    const actual = await vi.importActual<typeof import("@/lib/permissions")>(
+      "@/lib/permissions",
+    );
+    mockGetUserPermission.mockResolvedValue(
+      makePermission({
+        role: "pmu_govt_school_user",
+        level: 1,
+        school_codes: ["70705", "70706"],
+        program_ids: [64],
+      }),
+    );
+    mockGetFeatureAccess.mockImplementation(actual.getFeatureAccess);
+    mockGetProgramContextSync.mockImplementation(actual.getProgramContextSync);
+
+    await renderPage();
+
+    expect(screen.getByTestId("page-header")).toHaveAttribute(
+      "data-back-href",
+      "",
+    );
+  });
+
+  it("keeps the dashboard back link for a PMU Manager with several Schools", async () => {
+    setupAdminDefaults();
+    const actual = await vi.importActual<typeof import("@/lib/permissions")>(
+      "@/lib/permissions",
+    );
+    mockGetUserPermission.mockResolvedValue(
+      makePermission({
+        role: "pmu_manager",
+        level: 1,
+        school_codes: ["70705", "70706"],
+        program_ids: [64],
+      }),
+    );
+    mockGetFeatureAccess.mockImplementation(actual.getFeatureAccess);
+    mockGetProgramContextSync.mockImplementation(actual.getProgramContextSync);
+
+    await renderPage();
+
+    expect(screen.getByTestId("page-header")).toHaveAttribute(
+      "data-back-href",
+      "/dashboard",
+    );
+  });
+
   it("passes correct defaultTab to SchoolTabs", async () => {
     setupAdminDefaults();
 
@@ -1330,7 +1677,6 @@ describe("SchoolPage (server component)", () => {
     expect(props.dropoutStudents[0].status).toBe("dropout");
     expect(props.canEdit).toBe(true);
     expect(props.isAdmin).toBe(true);
-    expect(props.isPasscodeUser).toBe(false);
   });
 
   it("passes effective program-context ids as userProgramIds to StudentTable", async () => {
@@ -1372,32 +1718,6 @@ describe("SchoolPage (server component)", () => {
     const table = screen.getByTestId("student-table");
     const props = JSON.parse(table.getAttribute("data-props") || "{}");
     expect(props.userProgramIds).toEqual([2]);
-  });
-
-  it("passes null userProgramIds for passcode user", async () => {
-    const school = makeSchool({ code: "70705" });
-    mockGetServerSession.mockResolvedValue(passcodeSession("70705"));
-    mockQuery
-      .mockResolvedValueOnce([school])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([]);
-    mockGetProgramContextSync.mockReturnValue({
-      hasAccess: true,
-      programIds: [],
-      isNVSOnly: false,
-      hasCoEOrNodal: false,
-    });
-    mockGetFeatureAccess.mockReturnValue(featureAccess(true, true));
-    mockProcessStudents.mockResolvedValue({ students: [], issues: [] });
-
-    await renderPage();
-
-    const table = screen.getByTestId("student-table");
-    const props = JSON.parse(table.getAttribute("data-props") || "{}");
-    expect(props.userProgramIds).toBeNull();
-    expect(props.isPasscodeUser).toBe(true);
-    expect(props.isAdmin).toBe(false);
   });
 
   // --- Data issues banner ---
@@ -2113,6 +2433,30 @@ describe("SchoolPage (server component)", () => {
     expect(screen.queryByText("Manage mappings")).not.toBeInTheDocument();
   });
 
+  it.each(["admin", "program_manager", "program_admin"] as const)(
+    "gives a read-only %s no Download List (unchanged by the PMU rule)",
+    async (role) => {
+      setupAdminDefaults();
+      const actual = await vi.importActual<typeof import("@/lib/permissions")>(
+        "@/lib/permissions",
+      );
+      mockGetUserPermission.mockResolvedValue(
+        makePermission({ role, read_only: true }),
+      );
+      mockGetFeatureAccess.mockImplementation(actual.getFeatureAccess);
+      mockGetProgramContextSync.mockImplementation(actual.getProgramContextSync);
+      mockProcessStudents.mockResolvedValue({
+        students: [makeStudent({ student_program_ids: [64] })],
+        issues: [],
+      });
+
+      await renderPage();
+
+      expect(screen.getByText("JNV NVS Students")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Download List" })).not.toBeInTheDocument();
+    },
+  );
+
   it("keeps the Manage mappings link visible for read-only Program Admins", async () => {
     setupAdminDefaults({ id: 20, code: "SCH001" });
     mockGetUserPermission.mockResolvedValue(
@@ -2196,36 +2540,6 @@ describe("SchoolPage (server component)", () => {
     await renderResolved(jsx);
 
     expect(screen.getByText("Access Denied")).toBeInTheDocument();
-  });
-
-  // --- Passcode user skips program context check ---
-
-  it("does not show no-program-access for passcode user even with hasAccess=false", async () => {
-    const school = makeSchool({ code: "70705" });
-    mockGetServerSession.mockResolvedValue(passcodeSession("70705"));
-    mockQuery
-      .mockResolvedValueOnce([school])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([]);
-    mockGetProgramContextSync.mockReturnValue({
-      hasAccess: false,
-      programIds: [],
-      isNVSOnly: false,
-      hasCoEOrNodal: false,
-    });
-    mockGetFeatureAccess.mockReturnValue(featureAccess(true, true));
-    mockProcessStudents.mockResolvedValue({ students: [], issues: [] });
-
-    const jsx = await SchoolPage({
-      params: Promise.resolve({ udise: "24120100101" }),
-    });
-    await renderResolved(jsx);
-
-    // Passcode user should NOT see the "No Program Access" message
-    // because the check is gated by `!isPasscodeUser`
-    expect(screen.queryByText("No Program Access")).not.toBeInTheDocument();
-    expect(screen.getByTestId("page-header")).toBeInTheDocument();
   });
 
   // --- Empty students ---

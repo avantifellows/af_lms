@@ -6,9 +6,10 @@ import { query } from "@/lib/db";
 import {
   canAccessSchoolSync,
   getFeatureAccess,
-  getUserPermission,
+  getResolvedPermission,
+  hasCurrentNvsBatchSql,
 } from "@/lib/permissions";
-import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
+import { CURRENT_ACADEMIC_YEAR, isPmuRole } from "@/lib/constants";
 import { listDocuments } from "@/lib/db-service-documents";
 import {
   ADMISSION_GRADES,
@@ -74,27 +75,23 @@ export async function GET(
     return jsonError(404, "School not found");
   }
 
-  // Access control mirrors the school page: passcode users are pinned to their
-  // own school; Google users need school access + students view permission.
-  const isPasscodeUser = session.isPasscodeUser ?? false;
-  if (isPasscodeUser) {
-    if (session.schoolCode !== school.code) {
-      return jsonError(403, "Forbidden");
-    }
-  } else {
-    const permission = session.user?.email
-      ? await getUserPermission(session.user.email)
-      : null;
-    if (!canAccessSchoolSync(permission, school.code, school.region ?? undefined)) {
-      return jsonError(403, "Forbidden");
-    }
-    if (!getFeatureAccess(permission, "students").canView) {
-      return jsonError(403, "Forbidden");
-    }
+  // Access control mirrors the school page: school access + students view
+  // permission.
+  const permission = session.user?.email
+    ? await getResolvedPermission(session.user.email)
+    : null;
+  if (!canAccessSchoolSync(permission, school.code, school.region ?? undefined)) {
+    return jsonError(403, "Forbidden");
   }
+  if (!getFeatureAccess(permission, "students").canView) {
+    return jsonError(403, "Forbidden");
+  }
+  const isPmu = isPmuRole(permission?.role);
 
   // Students in the target grade(s) currently enrolled at the school
-  // (excludes dropouts).
+  // (excludes dropouts). PMU roles are pinned to JNV NVS, so for them only
+  // Students with a current NVS batch count.
+  const nvsOnly = isPmu ? `\n       AND ${hasCurrentNvsBatchSql("u.id")}` : "";
   const students = await query<{ student_pk_id: string }>(
     `SELECT s.id AS student_pk_id
      FROM group_user gu
@@ -108,7 +105,7 @@ export async function GET(
      JOIN grade gr ON er.group_id = gr.id
      WHERE g.child_id = $1
        AND gr.number = ANY($3::int[])
-       AND (s.status IS NULL OR s.status != 'dropout')`,
+       AND (s.status IS NULL OR s.status != 'dropout')${nvsOnly}`,
     [school.id, CURRENT_ACADEMIC_YEAR, grades],
   );
 

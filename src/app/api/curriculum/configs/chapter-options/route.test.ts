@@ -30,7 +30,6 @@ vi.mock("@/lib/curriculum-schema", () => ({
 import { GET } from "./route";
 import {
   ADMIN_SESSION,
-  PASSCODE_SESSION,
   PM_SESSION,
 } from "../../../__test-utils__/api-test-helpers";
 
@@ -65,15 +64,6 @@ describe("GET /api/curriculum/configs/chapter-options", () => {
         )
       ).status
     ).toBe(401);
-
-    mockGetServerSession.mockResolvedValueOnce(PASSCODE_SESSION);
-    expect(
-      (
-        await GET(
-          nextReq("/api/curriculum/configs/chapter-options?exam_track=jee_main")
-        )
-      ).status
-    ).toBe(403);
 
     mockGetServerSession.mockResolvedValueOnce(PM_SESSION);
     mockGetUserPermission.mockResolvedValueOnce({

@@ -51,15 +51,6 @@ const defaultSearchParams = Promise.resolve({});
 const pmSession = {
   user: { email: "pm@avantifellows.org" },
 };
-const passcodeSession = {
-  user: {},
-  isPasscodeUser: true,
-  schoolCode: "70705",
-};
-const passcodeSessionWithoutSchool = {
-  user: {},
-  isPasscodeUser: true,
-};
 const teacherSession = {
   user: { email: "teacher@avantifellows.org" },
 };
@@ -157,24 +148,6 @@ describe("VisitsListPage (server component)", () => {
 
     await expect(VisitsListPage({ searchParams: defaultSearchParams })).rejects.toThrow("REDIRECT:/");
     expect(mockRedirect).toHaveBeenCalledWith("/");
-  });
-
-  it("redirects passcode users to their school page", async () => {
-    mockGetServerSession.mockResolvedValue(passcodeSession);
-
-    await expect(VisitsListPage({ searchParams: defaultSearchParams })).rejects.toThrow("REDIRECT:/school/70705");
-    expect(mockRedirect).toHaveBeenCalledWith("/school/70705");
-    expect(mockGetUserPermission).not.toHaveBeenCalled();
-    expect(mockQuery).not.toHaveBeenCalled();
-  });
-
-  it("redirects passcode users without a school code to the dashboard", async () => {
-    mockGetServerSession.mockResolvedValue(passcodeSessionWithoutSchool);
-
-    await expect(VisitsListPage({ searchParams: defaultSearchParams })).rejects.toThrow("REDIRECT:/dashboard");
-    expect(mockRedirect).toHaveBeenCalledWith("/dashboard");
-    expect(mockGetUserPermission).not.toHaveBeenCalled();
-    expect(mockQuery).not.toHaveBeenCalled();
   });
 
   it("redirects to /dashboard when permission is missing", async () => {

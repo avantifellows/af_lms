@@ -21,6 +21,25 @@ export const PROGRAM_IDS = {
   MAHARASHTRA_COACHING_FOUNDATION: 100, // Mumbai/Pune Foundation Coaching
 } as const;
 
+// JNV NVS PMU roles (ADR 0007). Kept here, not in permissions.ts, so client
+// components can branch on them without pulling in the server-only DB pool.
+// Both roles are pinned to JNV NVS at every level: the permission layer reads
+// PMU_PROGRAM_ID instead of the row's program_ids, centre seats or level.
+export const PMU_MANAGER_ROLE = "pmu_manager";
+export const PMU_GOVT_SCHOOL_USER_ROLE = "pmu_govt_school_user";
+export const PMU_ROLES = [PMU_MANAGER_ROLE, PMU_GOVT_SCHOOL_USER_ROLE] as const;
+export type PmuRole = (typeof PMU_ROLES)[number];
+
+export function isPmuRole(role: unknown): role is PmuRole {
+  return typeof role === "string" && PMU_ROLES.includes(role as PmuRole);
+}
+
+export const PMU_PROGRAM_ID = PROGRAM_IDS.NVS;
+
+// Google Form the program team uses to collect School issues, feedback and
+// requests. The School page header links to it for PMU roles only.
+export const PMU_FEEDBACK_FORM_URL = "https://forms.gle/Xisa7AjkDp6fMhew6";
+
 // Canonical display order for program IDs (JNV first, then non-JNV centres).
 export const PROGRAM_IDS_ORDERED: number[] = Object.values(PROGRAM_IDS);
 
@@ -59,6 +78,12 @@ export const PROGRAM_ID_TO_LABEL: Record<number, string> = {
   [PROGRAM_IDS.MAHARASHTRA_COACHING_TESTPREP]: "Maharashtra Coaching Test Prep",
   [PROGRAM_IDS.MAHARASHTRA_COACHING_FOUNDATION]: "Maharashtra Coaching Foundation",
 };
+
+// True when a BigQuery `student_program` label is JNV NVS. The one place the
+// label is compared, so NVS-specific Performance rules don't each respell it.
+export function isNvsProgram(program: string | null | undefined): boolean {
+  return program === PROGRAM_ID_TO_LABEL[PROGRAM_IDS.NVS];
+}
 
 // Programs that can be assigned through Admin user management. Keep this
 // narrower than PROGRAM_IDS so adding a centre program does not silently add it

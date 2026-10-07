@@ -16,14 +16,18 @@ vi.mock("@/lib/reporting-service", () => ({
     }
   },
 }));
+vi.mock("@/lib/bigquery", () => ({ isSessionOnlyForProgram: vi.fn() }));
 
 import { authorizeSchoolAccess } from "@/lib/api-auth";
 import {
   getCombinedReportJob,
   retryCombinedReportJob,
 } from "@/lib/reporting-service";
+import { isSessionOnlyForProgram } from "@/lib/bigquery";
 import { POST } from "./route";
 import {
+  PMU_GOVT_PERMISSION,
+  PMU_MANAGER_PERMISSION,
   jsonRequest,
   routeParams,
 } from "../../../../../__test-utils__/api-test-helpers";
@@ -31,6 +35,7 @@ import {
 const mockAuth = vi.mocked(authorizeSchoolAccess);
 const mockGet = vi.mocked(getCombinedReportJob);
 const mockRetry = vi.mocked(retryCombinedReportJob);
+const mockSessionPin = vi.mocked(isSessionOnlyForProgram);
 
 const SCHOOL = { id: "1", code: "34054", name: "JNV Palghar", region: "West" };
 const URL =
@@ -75,5 +80,63 @@ describe("POST combined-reports/[jobId]/retry", () => {
     const res = await POST(jsonRequest(URL, { method: "POST" }), PARAMS);
     expect(res.status).toBe(404);
     expect(mockRetry).not.toHaveBeenCalled();
+  });
+});
+
+// PMU roles are pinned to JNV NVS (ADR 0007): a job for any other test at the
+// School is out of scope, so it 404s like another School's job.
+describe.each([
+  ["PMU Manager", PMU_MANAGER_PERMISSION],
+  ["PMU Govt School User", PMU_GOVT_PERMISSION],
+])("POST combined-reports/[jobId]/retry as %s", (_label, permission) => {
+  beforeEach(() => {
+    mockAuth.mockResolvedValue({ authorized: true, school: SCHOOL, readOnly: false, permission });
+    mockRetry.mockResolvedValue({ job_id: "job-1", status: "queued" } as never);
+  });
+
+  it("retries a job for a JNV NVS test", async () => {
+    mockGet.mockResolvedValue({ school_code: SCHOOL.code, session_id: "nvs-session" } as never);
+    mockSessionPin.mockResolvedValue(true);
+
+    const res = await POST(jsonRequest(URL, { method: "POST" }), PARAMS);
+    expect(res.status).toBe(200);
+    expect(mockSessionPin).toHaveBeenCalledWith("27361106702", "nvs-session", "JNV NVS");
+    expect(mockRetry).toHaveBeenCalledWith("job-1");
+  });
+
+  it("404s and does not retry a job for a non-NVS test", async () => {
+    mockGet.mockResolvedValue({ school_code: SCHOOL.code, session_id: "coe-session" } as never);
+    mockSessionPin.mockResolvedValue(false);
+
+    const res = await POST(jsonRequest(URL, { method: "POST" }), PARAMS);
+    expect(res.status).toBe(404);
+    expect(mockRetry).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST combined-reports/[jobId]/retry as another role", () => {
+  it("retries a non-NVS job without a session lookup", async () => {
+    mockAuth.mockResolvedValue({
+      authorized: true,
+      school: SCHOOL,
+      readOnly: false,
+      permission: {
+        email: "pm@avantifellows.org",
+        level: 3,
+        role: "program_manager",
+        school_codes: null,
+        regions: null,
+        program_ids: [1],
+        read_only: false,
+      },
+    });
+    mockGet.mockResolvedValue({ school_code: SCHOOL.code, session_id: "coe-session" } as never);
+    mockSessionPin.mockResolvedValue(false);
+    mockRetry.mockResolvedValue({ job_id: "job-1", status: "queued" } as never);
+
+    const res = await POST(jsonRequest(URL, { method: "POST" }), PARAMS);
+    expect(res.status).toBe(200);
+    expect(mockSessionPin).not.toHaveBeenCalled();
+    expect(mockRetry).toHaveBeenCalledWith("job-1");
   });
 });

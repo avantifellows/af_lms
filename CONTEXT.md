@@ -34,6 +34,10 @@ _Avoid_: Template type, upload mode, School-selected mode
 The temporary Registration Mode in which JNV NVS registration does not collect PEN, Grade 10 Roll Number, or Annual Family Income and uses the 10-digit parent phone number, starting from 6 through 9, as the Student ID.
 _Avoid_: Phone-only login, temporary Student ID
 
+**Exam Preparing For**:
+The competitive exam a JNV NVS Student is preparing for, such as Engineering, Medical, CA, CLAT, or NDA. It belongs to the Student, not to a Centre, and is distinct from an Exam Track.
+_Avoid_: Stream (for NVS), target exam, Exam Track
+
 **Centre Exam Track**:
 An Exam Track assigned to one Centre for one Grade. A Centre and Grade can have one or more Centre Exam Tracks.
 _Avoid_: Centre Stream, Program, generic JEE
@@ -41,10 +45,6 @@ _Avoid_: Centre Stream, Program, generic JEE
 **UDISE Code**:
 A unique government-issued identifier for a school.
 _Avoid_: School ID, school code (internally `school.code` is a separate field)
-
-**Passcode**:
-An 8-digit code granting single-school access without Google OAuth. Format: `{schoolCode}XXX`.
-_Avoid_: PIN, access code
 
 ### Curriculum
 
@@ -83,6 +83,12 @@ _Avoid_: Timemap, chapter requirement
 **Curriculum Config Management**:
 An admin-only workflow for changing LMS Chapter Exam Config values that affect all schools using the configured chapter and exam track.
 _Avoid_: Curriculum logging, school curriculum setup
+
+### Assessments
+
+**System-wide Mandated Test**:
+A test whose test purpose is `system_wide_mandated`, distinct from a System-wide Optional Test (`system_wide_optional`). It is the only kind of test the JNV NVS Performance view reports.
+_Avoid_: Mandatory test, official test
 
 ### Visits & Actions
 
@@ -131,6 +137,14 @@ _Avoid_: Superuser, root
 **Program Admin**:
 Has scoped read access to visits and can start and manage their own Visits. Their own Visits have no required Action Types; Visits started by other users remain read-only.
 _Avoid_: Viewer, observer
+
+**PMU Manager**:
+A member of Avanti's internal PMU team who works with JNV NVS Students across one or more Schools. Determined by `role = "pmu_manager"`.
+_Avoid_: NVS PM, Program Manager (for NVS)
+
+**PMU Govt School User**:
+An external stakeholder of exactly one JNV NVS School, such as its principal, who signs in with their own Google account. Determined by `role = "pmu_govt_school_user"`.
+_Avoid_: Government School (as a role), school login, Passcode user
 
 **Permission Level**:
 Numeric access scope: Level 3 = all schools, Level 2 = region, Level 1 = specific school codes.
@@ -236,7 +250,7 @@ _Avoid_: Unmapped Student, Mapping not done, unassigned Mentee
 - Portal authentication resolves a **Phone Registration Mode** Student inside the selected auth group before checking Student ID and Date of Birth
 - A **Phone Registration Mode** Student is identified from JNV NVS membership, `EnableStudents` membership, and equality between Student ID and normalized parent phone; the Student does not store a separate Registration Mode value
 - Two Students cannot share one phone-based Student ID inside `EnableStudents`; the second Student must use another parent or guardian phone
-- A scoped Admin, Program Manager, or Program Admin can correct the parent phone for a **Phone Registration Mode** Student; the contact phone and Student ID change together and the old and new values are audited
+- A scoped Admin, Program Manager, Program Admin, PMU Manager, or PMU Govt School User can correct the parent phone for a **Phone Registration Mode** Student; the contact phone and Student ID change together and the old and new values are audited
 - Until the generic DB Service student-update import is made auth-group-aware, phone correction for a **Phone Registration Mode** Student is supported only through LMS
 - Adding PEN, Grade 10 Roll Number, and Annual Family Income after HQ approval does not replace a **Phone Registration Mode** Student's phone-based Student ID
 - After HQ approval, a blank PEN or Grade 10 Roll Number can be filled once for an eligible NVS Student and then locks again; at least one of the two identifiers is required, while Annual Family Income remains optional and editable
@@ -477,7 +491,7 @@ _Avoid_: Unmapped Student, Mapping not done, unassigned Mentee
 - **Post-Session Notes** store system-generated first-draft, first-submitted, and last-edited timestamps but no manually entered conversation date
 - V1 stores only the latest official Notes content plus content-free mutation audit events; it has no old-answer snapshots, content-revision browser, or per-read audit
 - Notes writes use first-successful-write concurrency; a stale tab preserves local text but must reload, and stale Submit cannot complete or overwrite newer content
-- Program Managers and Program Admins have scoped read-only Holistic Mentorship access for supported Programs inside their resolved School scope; passcode users have no Holistic Mentorship access
+- Program Managers and Program Admins have scoped read-only Holistic Mentorship access for supported Programs inside their resolved School scope
 - **Holistic Mentorship Admin** is a dedicated LMS role, not an additive capability combined with another LMS role or a Centre designation
 - An **Admin** automatically receives the same Holistic Mentorship feature access without becoming a **Holistic Mentorship Admin**
 - In v1, the **Holistic Mentorship Admin** role grants access only to Holistic Mentorship; access to other LMS features is deferred
@@ -527,7 +541,6 @@ _Avoid_: Unmapped Student, Mapping not done, unassigned Mentee
 - Admins and Program Admins see a Manage mappings link from the School page **Academic Mentorship Tab** to `/admin/academic-mentorship`; read-only Program Admins land there in view-only mode
 - The Manage mappings link preselects the current School and current academic year on `/admin/academic-mentorship` via query params
 - The School page **Academic Mentorship Tab** shows the current academic year only, with no academic year picker
-- Passcode users do not see the School page **Academic Mentorship Tab**; Academic Mentorship is for Google-login staff governed by Staff Management permissions
 - Program Managers do not get an admin page link for Academic Mentorship; they use only the School page **Academic Mentorship Tab** read-only view
 - Academic Mentorship APIs live under `/api/academic-mentorship/*`, with route handlers checking role, School scope, Program allowlist, and requested action
 - Academic Mentorship route handlers use a shared server-side access helper for role, School scope, Program allowlist, `read_only`, and requested action checks
@@ -608,7 +621,7 @@ _Avoid_: Unmapped Student, Mapping not done, unassigned Mentee
 
 ## Flagged ambiguities
 
-- "school code" vs "UDISE code": `school.code` is an internal short identifier; `school.udise_code` is the government-issued UDISE. Both identify a school but in different contexts. API routes use UDISE in URLs, passcodes derive from school code.
+- "school code" vs "UDISE code": `school.code` is an internal short identifier; `school.udise_code` is the government-issued UDISE. Both identify a school but in different contexts. API routes use UDISE in URLs.
 - "center/centre" in the imported CRUD export means **Centre**, not **School**.
 - Centre `name` alone is not an identity; `JNV Adilabad` appears as separate CoE and Nodal centres in the source export.
 - The imported source `program` column populated the legacy centre-level stream field; issue #252 supersedes it with grade-specific **Centre Exam Tracks** entered from the reviewed mapping Sheet.

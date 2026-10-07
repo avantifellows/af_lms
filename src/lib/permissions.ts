@@ -1,14 +1,16 @@
 import { query } from "./db";
 import {
   PHYSICAL_CENTRE_PROGRAM_IDS,
+  PMU_PROGRAM_ID,
+  PMU_ROLES,
+  isPmuRole,
   PROGRAM_IDS,
   PROGRAM_IDS_ORDERED,
-  PROGRAM_ID_TO_LABEL,
 } from "./constants";
 
 // Re-exported from constants so existing `@/lib/permissions` imports keep
 // working while the definitions live in a client-safe module.
-export { PHYSICAL_CENTRE_PROGRAM_IDS, PROGRAM_IDS, PROGRAM_IDS_ORDERED, PROGRAM_ID_TO_LABEL };
+export { PHYSICAL_CENTRE_PROGRAM_IDS, PROGRAM_IDS, PROGRAM_IDS_ORDERED };
 
 // Permission levels (school scope only)
 export type AccessLevel = 1 | 2 | 3;
@@ -23,6 +25,7 @@ const USER_ROLES = [
   "program_admin",
   "holistic_mentorship_admin",
   "admin",
+  ...PMU_ROLES,
 ] as const;
 export type UserRole = (typeof USER_ROLES)[number];
 
@@ -47,21 +50,23 @@ export type Feature =
 export type FeatureAccess = "none" | "view" | "edit";
 
 // Feature permission matrix: feature → role → access level
+// PMU roles (ADR 0007) get students + performance only; every other feature
+// is "none" at every level, whatever their program context says.
 const FEATURE_PERMISSIONS: Record<Feature, Record<UserRole, FeatureAccess>> = {
-  students: { teacher: "edit", program_manager: "edit", program_admin: "edit", holistic_mentorship_admin: "none", admin: "edit" },
-  visits: { teacher: "none", program_manager: "edit", program_admin: "edit", holistic_mentorship_admin: "none", admin: "edit" },
-  curriculum: { teacher: "edit", program_manager: "view", program_admin: "edit", holistic_mentorship_admin: "none", admin: "edit" },
-  academic_mentorship: { teacher: "none", program_manager: "none", program_admin: "none", holistic_mentorship_admin: "none", admin: "none" },
-  holistic_mentorship: { teacher: "edit", program_manager: "view", program_admin: "view", holistic_mentorship_admin: "edit", admin: "edit" },
-  performance: { teacher: "view", program_manager: "view", program_admin: "view", holistic_mentorship_admin: "none", admin: "view" },
-  summary_stats: { teacher: "none", program_manager: "view", program_admin: "view", holistic_mentorship_admin: "none", admin: "view" },
-  pm_dashboard: { teacher: "none", program_manager: "view", program_admin: "view", holistic_mentorship_admin: "none", admin: "view" },
-  quiz_sessions: { teacher: "edit", program_manager: "view", program_admin: "view", holistic_mentorship_admin: "none", admin: "view" },
+  students: { teacher: "edit", program_manager: "edit", program_admin: "edit", holistic_mentorship_admin: "none", admin: "edit", pmu_manager: "edit", pmu_govt_school_user: "edit" },
+  visits: { teacher: "none", program_manager: "edit", program_admin: "edit", holistic_mentorship_admin: "none", admin: "edit", pmu_manager: "none", pmu_govt_school_user: "none" },
+  curriculum: { teacher: "edit", program_manager: "view", program_admin: "edit", holistic_mentorship_admin: "none", admin: "edit", pmu_manager: "none", pmu_govt_school_user: "none" },
+  academic_mentorship: { teacher: "none", program_manager: "none", program_admin: "none", holistic_mentorship_admin: "none", admin: "none", pmu_manager: "none", pmu_govt_school_user: "none" },
+  holistic_mentorship: { teacher: "edit", program_manager: "view", program_admin: "view", holistic_mentorship_admin: "edit", admin: "edit", pmu_manager: "none", pmu_govt_school_user: "none" },
+  performance: { teacher: "view", program_manager: "view", program_admin: "view", holistic_mentorship_admin: "none", admin: "view", pmu_manager: "view", pmu_govt_school_user: "view" },
+  summary_stats: { teacher: "none", program_manager: "view", program_admin: "view", holistic_mentorship_admin: "none", admin: "view", pmu_manager: "none", pmu_govt_school_user: "none" },
+  pm_dashboard: { teacher: "none", program_manager: "view", program_admin: "view", holistic_mentorship_admin: "none", admin: "view", pmu_manager: "none", pmu_govt_school_user: "none" },
+  quiz_sessions: { teacher: "edit", program_manager: "view", program_admin: "view", holistic_mentorship_admin: "none", admin: "view", pmu_manager: "none", pmu_govt_school_user: "none" },
   // PM-driven: a PM/admin sets up student feedback ABOUT teachers, so teachers
   // must not have edit (or view) here. Mirrors `visits`, which main widened to
   // program_admin: "edit" — feedback setup is the same class of PM fieldwork.
   // `holistic_mentorship_admin` is scoped to its own feature only.
-  teacher_feedback: { teacher: "none", program_manager: "edit", program_admin: "edit", holistic_mentorship_admin: "none", admin: "edit" },
+  teacher_feedback: { teacher: "none", program_manager: "edit", program_admin: "edit", holistic_mentorship_admin: "none", admin: "edit", pmu_manager: "none", pmu_govt_school_user: "none" },
 };
 
 // Features gated to CoE/Nodal programs only (NVS-only users get "none")
@@ -76,28 +81,15 @@ export interface FeatureAccessResult {
   canEdit: boolean;
 }
 
-interface FeatureAccessOptions {
-  isPasscodeUser?: boolean;
-}
-
 /**
  * Get the feature access level for a user.
- * Handles passcode users, NVS-only gating, and read_only downgrade.
+ * Handles NVS-only gating and read_only downgrade.
  */
 export function getFeatureAccess(
   permission: UserPermission | null,
   feature: Feature,
-  opts?: FeatureAccessOptions,
 ): FeatureAccessResult {
   const none: FeatureAccessResult = { access: "none", canView: false, canEdit: false };
-
-  // Passcode users: students → edit, everything else → none
-  if (opts?.isPasscodeUser) {
-    if (feature === "students") {
-      return { access: "edit", canView: true, canEdit: true };
-    }
-    return none;
-  }
 
   if (!permission) return none;
 
@@ -131,11 +123,13 @@ export function getFeatureAccess(
 export function ownsRecord(
   permission: UserPermission | null,
   programId: number | string | null,
-  opts?: { isPasscodeUser?: boolean },
 ): boolean {
-  // Passcode users own all records at their school
-  if (opts?.isPasscodeUser) return true;
   if (!permission) return false;
+  // PMU roles own only JNV NVS records — not unassigned ones, and never by
+  // their row's program_ids.
+  if (isPmuRole(permission.role)) {
+    return programId !== null && Number(programId) === PMU_PROGRAM_ID;
+  }
   // Admins own everything
   if (permission.role === "admin") return true;
   // Unassigned records are editable by anyone with feature-level edit
@@ -186,19 +180,6 @@ export interface ProgramPermissionContext {
   isNVSOnly: boolean;
   hasCoEOrNodal: boolean;
 }
-
-interface SchoolPasscode {
-  schoolCode: string;
-  passcode: string; // 8 digits
-}
-
-// School passcodes - 8 digit codes for schools without Google
-// Format: schoolCode -> passcode
-const SCHOOL_PASSCODES: SchoolPasscode[] = [
-  { schoolCode: "70705", passcode: "70705123" }, // JNV Bhavnagar
-  { schoolCode: "14042", passcode: "14042456" },
-  // Add more schools as needed
-];
 
 export async function getUserPermission(
   email: string
@@ -286,6 +267,53 @@ function isMissingSchemaError(err: unknown): boolean {
   return code === "42P01" || code === "42703";
 }
 
+// school_codes is the level-1 scope mechanism; level-2's explicit scope is
+// regions (kept lazy in canAccessSchoolSync's switch), so only seed school_codes
+// for level 1 — seeding it for level 2 would over-grant the additive check and
+// diverge from the level switch.
+function explicitLevelOneSchools(p: UserPermission): Set<string> {
+  return new Set<string>(p.level === 1 ? p.school_codes ?? [] : []);
+}
+
+// PMU roles never hold centre seats (ADR 0007): skip the seat lookup so a
+// stale centre_positions row grants no School, centre or program. Level 3
+// reaches every School but no centre.
+function resolvePmuScope(p: UserPermission): ResolvedScope {
+  return {
+    schools: p.level === 3 ? "all" : explicitLevelOneSchools(p),
+    centres: new Set<number>(),
+    programs: new Set<number>(),
+  };
+}
+
+// Adds the user's centre seats, and the schools and programs those centres
+// belong to, into the given sets (mutated in place, in that order).
+async function addSeatScope(
+  userId: number,
+  schools: Set<string>,
+  centres: Set<number>,
+  programs: Set<number>
+): Promise<void> {
+  try {
+    const centreIds = await centresForUser(userId);
+    centreIds.forEach((id) => centres.add(id));
+    for (const code of await schoolCodesForCentres(centreIds)) {
+      schools.add(code);
+    }
+    for (const programId of await programsForCentres(centreIds)) {
+      programs.add(programId);
+    }
+  } catch (err) {
+    // The centre tables/columns may not exist yet on an environment that
+    // hasn't run the seat migration — degrade to explicit-only scope in that
+    // one case. Any other error (a transient DB failure) must propagate:
+    // swallowing it would silently hand a *seated* staff member an empty
+    // scope (their explicit school_codes were cleared by strict exclusivity),
+    // i.e. lock them out of their own data while showing no error.
+    if (!isMissingSchemaError(err)) throw err;
+  }
+}
+
 // Resolve a permission's effective scope: explicit school_codes ∪ centre-seat-
 // derived schools. Regions stay handled lazily by canAccessSchoolSync's level-2
 // branch (no eager region→school expansion here, so level-2 semantics are
@@ -293,38 +321,17 @@ function isMissingSchemaError(err: unknown): boolean {
 // derived from school_codes (seat schools ⊆ school_codes); strict per-user
 // exclusivity (B2) makes seats the sole source for seated staff.
 export async function resolveScope(p: UserPermission): Promise<ResolvedScope> {
+  if (isPmuRole(p.role)) return resolvePmuScope(p);
+
   if (p.level === 3) return { schools: "all", centres: "all", programs: "all" };
 
-  // school_codes is the level-1 scope mechanism; level-2's explicit scope is
-  // regions (kept lazy in canAccessSchoolSync's switch), so only seed school_codes
-  // for level 1 — seeding it for level 2 would over-grant the additive check and
-  // diverge from the level switch.
-  const schools = new Set<string>(p.level === 1 ? p.school_codes ?? [] : []);
+  const schools = explicitLevelOneSchools(p);
   const centres = new Set<number>();
   // Seat-derived programs only — explicit program_ids are unioned in by
   // getProgramContextSync, which is where program access is actually decided.
   const programs = new Set<number>();
 
-  if (p.user_id != null) {
-    try {
-      const centreIds = await centresForUser(p.user_id);
-      centreIds.forEach((id) => centres.add(id));
-      for (const code of await schoolCodesForCentres(centreIds)) {
-        schools.add(code);
-      }
-      for (const programId of await programsForCentres(centreIds)) {
-        programs.add(programId);
-      }
-    } catch (err) {
-      // The centre tables/columns may not exist yet on an environment that
-      // hasn't run the seat migration — degrade to explicit-only scope in that
-      // one case. Any other error (a transient DB failure) must propagate:
-      // swallowing it would silently hand a *seated* staff member an empty
-      // scope (their explicit school_codes were cleared by strict exclusivity),
-      // i.e. lock them out of their own data while showing no error.
-      if (!isMissingSchemaError(err)) throw err;
-    }
-  }
+  if (p.user_id != null) await addSeatScope(p.user_id, schools, centres, programs);
 
   return { schools, centres, programs };
 }
@@ -337,11 +344,6 @@ export async function getResolvedPermission(
   const permission = await getUserPermission(email);
   if (!permission) return null;
   return { ...permission, scope: await resolveScope(permission) };
-}
-
-export function getSchoolByPasscode(passcode: string): string | null {
-  const entry = SCHOOL_PASSCODES.find((s) => s.passcode === passcode);
-  return entry?.schoolCode || null;
 }
 
 export function canAccessSchoolSync(
@@ -414,6 +416,8 @@ export function canViewCentre(
   permission: UserPermission | null,
   centre: { centreId: number; schoolCode: string; schoolRegion?: string }
 ): boolean {
+  // PMU roles have no centre access at all — no fallback to School access.
+  if (permission && isPmuRole(permission.role)) return false;
   if (canAccessCentreSync(permission, centre.centreId)) return true;
   // A seated user is confined to their seats; only a seatless manager reaches
   // a centre purely via school access.
@@ -525,9 +529,35 @@ export async function getStudentSchool(
   return rows[0] ?? null;
 }
 
-// Permission gate for routes scoped to a single student. Honors both Google
-// users (via canAccessSchool against their user_permission row) and passcode
-// users (via session.schoolCode match).
+// SQL fragment: "this Student's user has a current JNV NVS batch enrollment".
+// Any current batch counts — not just the single LIMIT-1 program that
+// getStudentSchool reports. Parameterised by the SQL expression holding the
+// Student's user id (e.g. "s.user_id") so list queries can reuse it to narrow
+// PMU roles. The program id is the trusted PMU_PROGRAM_ID constant, never input.
+export function hasCurrentNvsBatchSql(userIdColumn: string): string {
+  return `EXISTS (
+    SELECT 1
+    FROM enrollment_record er_nvs
+    JOIN batch b_nvs ON b_nvs.id = er_nvs.group_id
+    WHERE er_nvs.user_id = ${userIdColumn}
+      AND er_nvs.group_type = 'batch'
+      AND er_nvs.is_current = true
+      AND b_nvs.program_id = ${PMU_PROGRAM_ID}
+  )`;
+}
+
+export async function studentHasCurrentNvsBatch(studentPkId: number | string): Promise<boolean> {
+  const rows = await query<{ has_current_nvs_batch: boolean }>(
+    `SELECT ${hasCurrentNvsBatchSql("s.user_id")} AS has_current_nvs_batch
+     FROM student s
+     WHERE s.id = $1`,
+    [studentPkId],
+  );
+  return rows[0]?.has_current_nvs_batch === true;
+}
+
+// Permission gate for routes scoped to a single student, checked via
+// canAccessSchool against the user's user_permission row.
 //
 // Pass `requireEdit: true` for write paths (upload, delete) — this additionally
 // requires the user's role + read_only flag to grant `canEdit` on the
@@ -536,8 +566,6 @@ export async function getStudentSchool(
 export async function canAccessStudent(
   session: {
     user?: { email?: string | null } | null;
-    isPasscodeUser?: boolean;
-    schoolCode?: string;
   } | null,
   studentPkId: number | string,
   options?: { requireEdit?: boolean },
@@ -546,16 +574,17 @@ export async function canAccessStudent(
   const school = await getStudentSchool(studentPkId);
   if (!school) return false;
 
-  if (session.isPasscodeUser) {
-    // Passcode users have edit access on `students` per getFeatureAccess; the
-    // only check that matters is school match.
-    return session.schoolCode === school.code;
-  }
-
   const email = session.user?.email;
   if (!email) return false;
   const permission = await getResolvedPermission(email);
   if (!(await hasStudentSchoolAccess(email, permission, school))) return false;
+  if (permission && isPmuRole(permission.role)) {
+    // PMU roles reach a Student (view and edit) only through a current JNV
+    // NVS batch — including in mixed Schools that also run other Programs.
+    // That batch is also their ownership, so edit needs only the feature gate.
+    if (!(await studentHasCurrentNvsBatch(studentPkId))) return false;
+    return !options?.requireEdit || getFeatureAccess(permission, "students").canEdit;
+  }
   if (options?.requireEdit && !canEditStudentRecords(permission, school)) return false;
   return true;
 }
@@ -596,6 +625,17 @@ export function getProgramContextSync(
       hasAccess: false,
       programIds: [],
       isNVSOnly: false,
+      hasCoEOrNodal: false,
+    };
+  }
+
+  // PMU roles are pinned to JNV NVS (ADR 0007) before any admin, seat or
+  // program_ids logic: CoE/Nodal ids, level 3 or a stale seat never widen it.
+  if (isPmuRole(permission.role)) {
+    return {
+      hasAccess: true,
+      programIds: [PMU_PROGRAM_ID],
+      isNVSOnly: true,
       hasCoEOrNodal: false,
     };
   }

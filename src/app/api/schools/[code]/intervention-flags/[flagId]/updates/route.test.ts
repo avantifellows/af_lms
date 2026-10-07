@@ -6,7 +6,12 @@ vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("@/lib/db", () => ({ withTransaction: vi.fn() }));
 vi.mock("@/lib/intervention-flags", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/intervention-flags")>();
-  return { ...actual, authorizeInterventionFlags: vi.fn(), addFlagUpdate: vi.fn() };
+  return {
+    ...actual,
+    authorizeInterventionFlags: vi.fn(),
+    addFlagUpdate: vi.fn(),
+    mayUpdateFlagForPmu: vi.fn(),
+  };
 });
 
 import { withTransaction } from "@/lib/db";
@@ -14,12 +19,15 @@ import {
   InterventionFlagError,
   addFlagUpdate,
   authorizeInterventionFlags,
+  mayUpdateFlagForPmu,
 } from "@/lib/intervention-flags";
 import { routeParams } from "@/app/api/__test-utils__/api-test-helpers";
 import { POST } from "./route";
 
 const mockAddFlagUpdate = vi.mocked(addFlagUpdate);
-const SCHOOL = { id: "7", code: "70705", udise_code: null, name: "JNV Test", region: null };
+const SCHOOL = {
+  id: "7", code: "70705", udise_code: null, name: "JNV Test", region: null, af_school_category: "JNV",
+};
 const ACTOR = { email: "teacher@avantifellows.org", userId: 42, permission: {} as never };
 
 function post(flagId: string, body: unknown) {
@@ -33,6 +41,8 @@ beforeEach(() => {
   vi.resetAllMocks();
   vi.mocked(withTransaction).mockImplementation((fn) => fn({} as never));
   vi.mocked(authorizeInterventionFlags).mockResolvedValue({ ok: true, actor: ACTOR, school: SCHOOL });
+  // Non-PMU default: every flag at the School may be updated.
+  vi.mocked(mayUpdateFlagForPmu).mockResolvedValue(true);
 });
 
 describe("POST /api/schools/[code]/intervention-flags/[flagId]/updates", () => {
@@ -54,6 +64,15 @@ describe("POST /api/schools/[code]/intervention-flags/[flagId]/updates", () => {
     expect(mockAddFlagUpdate).toHaveBeenCalledWith(expect.anything(), {
       flagId: 9, schoolId: "7", actor: ACTOR, note: "", resolve: true,
     });
+  });
+
+  it("refuses a flag outside a PMU role's NVS pin as not found", async () => {
+    vi.mocked(mayUpdateFlagForPmu).mockResolvedValue(false);
+    const res = await post("9", { note: "follow-up", resolve: true });
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "Flag not found" });
+    expect(mayUpdateFlagForPmu).toHaveBeenCalledWith(ACTOR, 9, "7");
+    expect(mockAddFlagUpdate).not.toHaveBeenCalled();
   });
 
   it("maps domain errors to their status", async () => {

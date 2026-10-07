@@ -238,6 +238,34 @@ describe("StudentResultsTable", () => {
     expect(screen.getByText("Off track")).toBeInTheDocument();
   });
 
+  it("drops the AL and On Track columns for JNV NVS", () => {
+    render(<StudentResultsTable {...props} program="JNV NVS" testName="Major Test 4" />);
+    expect(screen.queryByText("AL")).not.toBeInTheDocument();
+    expect(screen.queryByText("NQ")).not.toBeInTheDocument();
+    expect(screen.queryByText("On Track")).not.toBeInTheDocument();
+    expect(screen.queryByText("Off track")).not.toBeInTheDocument();
+    // The rest of the row is untouched.
+    expect(screen.getByText("Asha Rao")).toBeInTheDocument();
+    expect(screen.getByText("40/100")).toBeInTheDocument();
+  });
+
+  // The expanded row must span the whole table in every column variant, so the
+  // subject breakdown never leaves a ragged gap under the trailing columns.
+  it.each([
+    // NVS: no AL / On Track, plus Time Spent.
+    ["JNV NVS", { program: "JNV NVS", testName: "Major Test 4" }, 9],
+    ["non-NVS", { program: "CoE", testName: "Major Test 4" }, 10],
+    ["Advanced", { program: "CoE", testName: "Advanced MoT 2 (Paper-1)-PB" }, 8],
+  ])("spans every header column in the expanded row (%s)", (_label, extra, columns) => {
+    const { container } = render(<StudentResultsTable {...props} {...extra} />);
+    const headerCells = container.querySelectorAll(":scope table > thead > tr > th");
+    expect(headerCells).toHaveLength(columns);
+
+    fireEvent.click(screen.getByText("Asha Rao"));
+    const expandedCell = container.querySelector(":scope table > tbody > tr > td[colspan]");
+    expect(expandedCell).toHaveAttribute("colspan", String(columns));
+  });
+
   it("flags on-track / off-track from qualification_status (#28 item 2)", () => {
     render(
       <StudentResultsTable
@@ -314,5 +342,140 @@ describe("StudentResultsTable", () => {
     render(<StudentResultsTable {...props} />);
     fireEvent.click(screen.getByText("Asha Rao"));
     await screen.findByText(/BQ outage/);
+  });
+
+  describe("JNV NVS Time Spent column", () => {
+    const nvsStudent = (
+      name: string,
+      seconds: number | null | undefined,
+      extra: Partial<StudentDeepDiveRow> = {}
+    ): StudentDeepDiveRow => ({
+      ...STUDENTS[0],
+      student_name: name,
+      time_spent_seconds: seconds,
+      ...extra,
+    });
+    const headerTexts = (container: HTMLElement) =>
+      [...container.querySelectorAll(":scope table > thead > tr > th")].map(
+        (th) => th.textContent
+      );
+    const bodyOrder = () =>
+      screen
+        .getAllByRole("row")
+        .slice(1)
+        .map((r) => r.querySelector("td:nth-child(2)")?.textContent || "");
+
+    it("shows Time Spent (min) right after Attempt Rate, with minutes or an em-dash", () => {
+      const { container } = render(
+        <StudentResultsTable
+          {...props}
+          program="JNV NVS"
+          students={[
+            nvsStudent("Asha Rao", 1530),
+            nvsStudent("No Time", null, { percentage: 10 }),
+            nvsStudent("Quick", 20, { percentage: 5 }),
+          ]}
+        />
+      );
+      const headers = headerTexts(container);
+      expect(headers[headers.length - 2]).toBe("Attempt Rate");
+      expect(headers[headers.length - 1]).toBe("Time Spent (min)");
+
+      const cells = (name: string) =>
+        [...(screen.getByText(name).closest("tr") as HTMLElement).querySelectorAll("td")];
+      expect(cells("Asha Rao").at(-1)!.textContent).toBe("26");
+      expect(cells("No Time").at(-1)!.textContent).toBe("—");
+      expect(cells("Quick").at(-1)!.textContent).toBe("<1");
+    });
+
+    it("shows subject times and a blank time cell on chapter rows", () => {
+      render(
+        <StudentResultsTable
+          {...props}
+          program="JNV NVS"
+          students={[
+            nvsStudent("Asha Rao", 1530, {
+              subject_scores: [
+                { ...STUDENTS[0].subject_scores[0], time_spent_seconds: 610 },
+              ],
+            }),
+          ]}
+        />
+      );
+      fireEvent.click(screen.getByText("Asha Rao"));
+      const subjectHeaders = [
+        ...(screen.getByText("Subject").closest("tr") as HTMLElement).querySelectorAll("th"),
+      ].map((th) => th.textContent);
+      expect(subjectHeaders.at(-1)).toBe("Time Spent (min)");
+
+      const subjectCells = [
+        ...(screen.getByText("Physics").closest("tr") as HTMLElement).querySelectorAll("td"),
+      ];
+      expect(subjectCells).toHaveLength(6);
+      expect(subjectCells.at(-1)!.textContent).toBe("10");
+
+      fireEvent.click(screen.getByText("Physics"));
+      const chapterCells = [
+        ...(screen.getByText("Kinematics").closest("tr") as HTMLElement).querySelectorAll("td"),
+      ];
+      expect(chapterCells).toHaveLength(6);
+      expect(chapterCells.at(-1)!.textContent).toBe("");
+    });
+
+    it("widens question rows by one column so they stay aligned", async () => {
+      render(
+        <StudentResultsTable {...props} program="JNV NVS" students={[nvsStudent("Asha Rao", 1530)]} />
+      );
+      fireEvent.click(screen.getByText("Asha Rao"));
+      fireEvent.click(screen.getByText("Physics"));
+      fireEvent.click(await screen.findByText("Kinematics"));
+      const q1Row = (await screen.findByText("Q1")).closest("tr") as HTMLElement;
+      expect(q1Row.querySelector("td[colspan]")).toHaveAttribute("colspan", "5");
+    });
+
+    it("sorts by time with nulls last in both directions, keeping unsubmitted below", () => {
+      render(
+        <StudentResultsTable
+          {...props}
+          program="JNV NVS"
+          students={[
+            nvsStudent("Slow", 3000),
+            nvsStudent("Unknown", null),
+            nvsStudent("Fast", 600),
+            nvsStudent("Walked Out", 60, { has_quiz_ended: false }),
+            nvsStudent("Middle", 1500),
+          ]}
+        />
+      );
+      const header = screen.getByText("Time Spent (min)");
+
+      fireEvent.click(header); // desc first
+      expect(bodyOrder().map((t) => t.replace(/Test Incomplete|[▶▼]/g, "").trim())).toEqual([
+        "Slow",
+        "Middle",
+        "Fast",
+        "Unknown",
+        "Walked Out",
+      ]);
+
+      fireEvent.click(header); // asc
+      expect(bodyOrder().map((t) => t.replace(/Test Incomplete|[▶▼]/g, "").trim())).toEqual([
+        "Fast",
+        "Middle",
+        "Slow",
+        "Unknown",
+        "Walked Out",
+      ]);
+    });
+
+    it("has no time column outside NVS", () => {
+      render(
+        <StudentResultsTable {...props} program="JNV CoE" students={[nvsStudent("Asha Rao", 1530)]} />
+      );
+      expect(screen.queryByText("Time Spent (min)")).not.toBeInTheDocument();
+      expect(screen.queryByText("26")).not.toBeInTheDocument();
+      fireEvent.click(screen.getByText("Asha Rao"));
+      expect(screen.queryByText("Time Spent (min)")).not.toBeInTheDocument();
+    });
   });
 });

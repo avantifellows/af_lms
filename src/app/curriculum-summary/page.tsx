@@ -55,10 +55,6 @@ export default async function CurriculumSummaryPage({ searchParams }: PageProps)
   const resolvedSearchParams = await searchParams;
   const session = await getServerSession(authOptions);
 
-  if (session?.isPasscodeUser) {
-    redirect(session.schoolCode ? `/school/${session.schoolCode}` : "/dashboard");
-  }
-
   if (!session?.user?.email) {
     redirect("/");
   }

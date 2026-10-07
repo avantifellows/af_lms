@@ -249,9 +249,22 @@ describe("QuizSessionsTab", () => {
         return jsonResponse({ id: sessionId });
       }
 
+      if (url.startsWith("/api/cms/test-languages")) {
+        return jsonResponse({ languages: [{ code: "hi", name: "Hindi" }] });
+      }
+
       if (url.startsWith("/api/cms/tests")) {
         return jsonResponse({
-          tests: [{ id: 42, name: "NEET Major 1", code: "NM-1", marks: 720, duration: 200 }],
+          tests: [
+            {
+              id: 42,
+              name: "NEET Major 1",
+              code: "NM-1",
+              marks: 720,
+              duration: 200,
+              languages: [{ code: "hi", name: "Hindi" }],
+            },
+          ],
         });
       }
 
@@ -299,6 +312,112 @@ describe("QuizSessionsTab", () => {
     expect(mockFetch).toHaveBeenCalledWith(
       expect.stringContaining("classBatchId=EnableStudents_11_Engg_B")
     );
+  });
+
+  it("narrows CMS tests by search but keeps the selected test visible", async () => {
+    const user = userEvent.setup();
+
+    render(<QuizSessionsTab schoolId="school-1" canEdit />);
+
+    await user.click(await screen.findByRole("button", { name: "Create Quiz Session" }));
+    await user.click(screen.getByRole("button", { name: "New CMS Test" }));
+    await user.selectOptions(screen.getByDisplayValue("Chapter Test"), "major_test");
+    await user.selectOptions(screen.getByDisplayValue("Select exam track"), "neet");
+    await user.selectOptions(screen.getByDisplayValue("Select grade"), "12");
+    expect(await screen.findByText("NEET Major 1")).toBeInTheDocument();
+
+    const search = screen.getByRole("searchbox", { name: "Search tests" });
+    await user.type(search, "zzz");
+    expect(screen.queryByText("NEET Major 1")).not.toBeInTheDocument();
+    expect(screen.getByText(/No tests match/)).toBeInTheDocument();
+
+    await user.clear(search);
+    await user.type(search, "nm-1");
+    await user.click(screen.getByText("NEET Major 1"));
+    await user.clear(search);
+    await user.type(search, "zzz");
+    expect(screen.getByText("NEET Major 1")).toBeInTheDocument();
+  });
+
+  it("offers a quiz language for a CMS test with a translation", async () => {
+    const user = userEvent.setup();
+
+    render(<QuizSessionsTab schoolId="school-1" canEdit />);
+
+    await user.click(await screen.findByRole("button", { name: "Create Quiz Session" }));
+    await user.click(screen.getByRole("button", { name: "New CMS Test" }));
+    await user.selectOptions(screen.getByDisplayValue("Chapter Test"), "major_test");
+    await user.selectOptions(screen.getByDisplayValue("Select exam track"), "neet");
+    await user.selectOptions(screen.getByDisplayValue("Select grade"), "12");
+    await user.click(await screen.findByText("NEET Major 1"));
+
+    const select = screen.getByLabelText("Language");
+    expect([...(select as HTMLSelectElement).options].map((o) => o.text)).toEqual([
+      "English",
+      "English + Hindi",
+    ]);
+    await user.selectOptions(select, "hi");
+    expect(select).toHaveValue("hi");
+
+    // Deselecting the test drops the choice with it.
+    await user.click(screen.getByText("NEET Major 1"));
+    expect(screen.queryByLabelText("Language")).not.toBeInTheDocument();
+  });
+
+  it("shows the quiz language in CMS session details", async () => {
+    sessions = [
+      {
+        ...makeSessions()[0],
+        id: 41,
+        name: "Bilingual Major",
+        meta_data: {
+          ...makeSessions()[0].meta_data,
+          cms_source: "nex-gen-cms",
+          cms_test_id: "9535",
+          lang_code: "hi",
+        },
+      },
+    ];
+    const user = userEvent.setup();
+
+    render(<QuizSessionsTab schoolId="school-1" canEdit />);
+    await user.click(await screen.findByText("Bilingual Major"));
+
+    expect(screen.getByText("Language").parentElement).toHaveTextContent("English + Hindi");
+
+    // Shown read-only on edit: the language is built into the quiz at create.
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+    expect(screen.getByRole("heading", { name: "Edit Quiz Session" })).toBeInTheDocument();
+    expect(screen.getByText("Language").parentElement).toHaveTextContent("English + Hindi");
+    expect(screen.queryByRole("combobox", { name: "Language" })).not.toBeInTheDocument();
+  });
+
+  it("links Session Manager sessions' PDFs by cms_source_id, not the stored CMS URL", async () => {
+    sessions = [
+      {
+        ...makeSessions()[0],
+        id: 40,
+        name: "Chemical kinetics rt",
+        meta_data: {
+          ...makeSessions()[0].meta_data,
+          cms_source: "nex-gen-cms",
+          cms_test_id: "https://new-cms.avantifellows.org/test?id=2472&curriculum_id=2",
+          cms_source_id: "2472",
+        },
+      },
+    ];
+    const user = userEvent.setup();
+
+    render(<QuizSessionsTab schoolId="school-1" />);
+    await user.click(await screen.findByText("Chemical kinetics rt"));
+
+    expect(screen.getByRole("link", { name: "Question PDF" })).toHaveAttribute(
+      "href",
+      "/api/cms/test-pdf?testId=2472&type=questions"
+    );
+    expect(
+      await screen.findByRole("link", { name: "Answer PDF (English + Hindi)" })
+    ).toHaveAttribute("href", "/api/cms/test-pdf?testId=2472&lang=hi&type=answers");
   });
 
   it("keeps view-only users away from create and edit actions", async () => {
@@ -611,6 +730,14 @@ describe("QuizSessionsTab", () => {
       "href",
       "/api/cms/test-pdf?testId=42&type=answers"
     );
+
+    expect(screen.getByText("English + Hindi")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Question PDF (English + Hindi)" })).toHaveAttribute(
+      "href",
+      "/api/cms/test-pdf?testId=42&lang=hi&type=questions"
+    );
+
+    expect(screen.queryByLabelText("Language")).not.toBeInTheDocument();
 
     // Opening a PDF must not toggle the test selection.
     await user.click(screen.getByRole("link", { name: "Answer PDF" }));

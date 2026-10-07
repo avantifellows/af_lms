@@ -146,12 +146,6 @@ const teacherSession = {
   user: { email: "teacher@avantifellows.org" },
 };
 
-const passcodeSession = {
-  user: { email: "passcode@school.org" },
-  isPasscodeUser: true,
-  schoolCode: "70705",
-};
-
 const adminPermission = {
   email: "admin@avantifellows.org",
   level: 4,
@@ -328,15 +322,6 @@ describe("DashboardPage (server component)", () => {
       DashboardPage({ searchParams: defaultSearchParams })
     ).rejects.toThrow("REDIRECT:/");
     expect(mockRedirect).toHaveBeenCalledWith("/");
-  });
-
-  it("redirects passcode user to their school page", async () => {
-    mockGetServerSession.mockResolvedValue(passcodeSession);
-
-    await expect(
-      DashboardPage({ searchParams: defaultSearchParams })
-    ).rejects.toThrow("REDIRECT:/school/70705");
-    expect(mockRedirect).toHaveBeenCalledWith("/school/70705");
   });
 
   // --- No permission ---
@@ -920,6 +905,15 @@ describe("DashboardPage (server component)", () => {
     expect(screen.queryByText("Start Visit")).not.toBeInTheDocument();
   });
 
+  it("keeps the JNV NVS Schools heading hidden from non-PM users", async () => {
+    setupTeacher([makeSchool()], 1);
+
+    const jsx = await DashboardPage({ searchParams: defaultSearchParams });
+    render(jsx);
+
+    expect(screen.queryByRole("heading", { name: "JNV NVS Schools" })).not.toBeInTheDocument();
+  });
+
   it("shows showRegion=true for PM users", async () => {
     const school = makeSchool();
     setupPM([school], 1);
@@ -1286,5 +1280,150 @@ describe("DashboardPage (server component)", () => {
     expect(screen.getByText("No schools found")).toBeInTheDocument();
     // No DB query should be made for schools (codes.length === 0 returns early)
     expect(mockQuery).not.toHaveBeenCalled();
+  });
+
+  // --- PMU roles (JNV NVS only) ---
+
+  describe("PMU roles", () => {
+    const pmuManagerSession = { user: { email: "pmu-manager@avantifellows.org" } };
+    const pmuGovtSession = { user: { email: "pmu-govt@avantifellows.org" } };
+    const pmuManagerPermission = {
+      email: "pmu-manager@avantifellows.org",
+      level: 2,
+      role: "pmu_manager",
+      school_codes: null,
+      regions: ["North"],
+      program_ids: [64],
+    };
+    const pmuGovtPermission = {
+      email: "pmu-govt@avantifellows.org",
+      level: 1,
+      role: "pmu_govt_school_user",
+      school_codes: ["70705"],
+      regions: null,
+      program_ids: [64],
+    };
+
+    // PMU visibility comes from the real permission matrix, not a stub.
+    async function withRealMatrix() {
+      const actual = await vi.importActual<typeof import("@/lib/permissions")>("@/lib/permissions");
+      mockGetFeatureAccess.mockImplementation(actual.getFeatureAccess);
+      mockGetProgramContextSync.mockImplementation(actual.getProgramContextSync);
+    }
+
+    async function setupPmuManager(codes: string[] | "all" = ["70705", "70706"]) {
+      await withRealMatrix();
+      mockGetServerSession.mockResolvedValue(pmuManagerSession);
+      mockGetUserPermission.mockResolvedValue(pmuManagerPermission);
+      mockGetAccessibleSchoolCodes.mockResolvedValue(codes);
+      mockQuery
+        .mockResolvedValueOnce([
+          makeSchool({ id: "s1", code: "70705", name: "JNV Alpha" }),
+          makeSchool({ id: "s2", code: "70706", name: "JNV Beta" }),
+        ]) // schools
+        .mockResolvedValueOnce([{ total: "2" }]) // count
+        .mockResolvedValue([]); // NVS grade counts
+    }
+
+    it("redirects a PMU Govt School User to their School", async () => {
+      await withRealMatrix();
+      mockGetServerSession.mockResolvedValue(pmuGovtSession);
+      mockGetUserPermission.mockResolvedValue(pmuGovtPermission);
+
+      await expect(
+        DashboardPage({ searchParams: defaultSearchParams })
+      ).rejects.toThrow("REDIRECT:/school/70705");
+    });
+
+    it("redirects a PMU Govt School User to their School even with a view and a search", async () => {
+      await withRealMatrix();
+      mockGetServerSession.mockResolvedValue(pmuGovtSession);
+      mockGetUserPermission.mockResolvedValue(pmuGovtPermission);
+
+      await expect(
+        DashboardPage({ searchParams: Promise.resolve({ view: "centres", q: "x" }) })
+      ).rejects.toThrow("REDIRECT:/school/70705");
+      expect(mockRedirect).toHaveBeenCalledTimes(1);
+    });
+
+    for (const [label, codes] of [
+      ["no School code", []],
+      ["two School codes", ["70705", "70706"]],
+    ] as const) {
+      it(`shows a PMU Govt School User with ${label} the no-access panel instead of redirecting`, async () => {
+        await withRealMatrix();
+        mockGetServerSession.mockResolvedValue(pmuGovtSession);
+        mockGetUserPermission.mockResolvedValue({ ...pmuGovtPermission, school_codes: [...codes] });
+        mockGetAccessibleSchoolCodes.mockResolvedValue([...codes]);
+        mockQuery.mockResolvedValue([]);
+
+        const jsx = await DashboardPage({ searchParams: defaultSearchParams });
+        render(jsx);
+
+        expect(mockRedirect).not.toHaveBeenCalled();
+        expect(screen.getByText(/does not have access/)).toBeInTheDocument();
+        expect(screen.queryByTestId("student-search")).not.toBeInTheDocument();
+      });
+    }
+
+    it("shows a PMU Manager the JNV NVS Schools view with no Physical Centres tab", async () => {
+      await setupPmuManager();
+
+      const jsx = await DashboardPage({ searchParams: defaultSearchParams });
+      render(jsx);
+
+      expect(screen.getByTestId("school-card-70705")).toBeInTheDocument();
+      expect(screen.getByTestId("student-search")).toBeInTheDocument();
+      expect(screen.queryByText("Physical Centres")).not.toBeInTheDocument();
+      expect(document.querySelector('a[href="/dashboard?view=centres"]')).toBeNull();
+    });
+
+    it("labels the PMU Manager's view with the JNV NVS Schools heading and no tab strip", async () => {
+      await setupPmuManager();
+
+      const jsx = await DashboardPage({ searchParams: defaultSearchParams });
+      render(jsx);
+
+      expect(screen.getByRole("heading", { name: "JNV NVS Schools" })).toBeInTheDocument();
+      expect(document.querySelector('a[href="/dashboard?view=jnv-nvs"]')).toBeNull();
+    });
+
+    it("ignores ?view=centres for a PMU Manager", async () => {
+      await setupPmuManager();
+
+      const jsx = await DashboardPage({ searchParams: Promise.resolve({ view: "centres" }) });
+      render(jsx);
+
+      expect(screen.getByTestId("school-card-70706")).toBeInTheDocument();
+      expect(screen.getByTestId("student-search")).toBeInTheDocument();
+      expect(screen.queryByText("Physical Centres")).not.toBeInTheDocument();
+      expect(screen.queryByText(/physical centres found/)).not.toBeInTheDocument();
+    });
+
+    it("redirects a PMU Manager with exactly one School to that School", async () => {
+      await setupPmuManager(["70705"]);
+
+      await expect(
+        DashboardPage({ searchParams: defaultSearchParams })
+      ).rejects.toThrow("REDIRECT:/school/70705");
+    });
+
+    it("hides recent visits, the PM nav, Visit Summary and Curriculum Summary from a PMU Manager", async () => {
+      await setupPmuManager();
+
+      const jsx = await DashboardPage({ searchParams: defaultSearchParams });
+      render(jsx);
+
+      expect(screen.queryByText("Recent Visits")).not.toBeInTheDocument();
+      expect(screen.queryByText("Total Visits")).not.toBeInTheDocument();
+      expect(screen.queryByText("Home")).not.toBeInTheDocument();
+      expect(screen.queryByText("Visit Summary")).not.toBeInTheDocument();
+      expect(screen.queryByText("Curriculum Summary")).not.toBeInTheDocument();
+      expect(screen.queryByText("Start Visit")).not.toBeInTheDocument();
+      // No recent-visits query is issued either.
+      expect(
+        mockQuery.mock.calls.some(([sql]) => String(sql).includes("lms_pm_school_visits"))
+      ).toBe(false);
+    });
   });
 });

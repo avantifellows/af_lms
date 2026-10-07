@@ -846,3 +846,211 @@ describe("AddUserModal — read-only toggle", () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// PMU roles (pinned to JNV NVS)
+// ---------------------------------------------------------------------------
+
+describe("AddUserModal — PMU roles", () => {
+  function mockSchoolSearch() {
+    mockFetch.mockImplementation(async (url: string) => {
+      if (url.startsWith("/api/admin/schools")) {
+        return {
+          ok: true,
+          json: () => Promise.resolve([
+            { code: "SC001", name: "Search Alpha", region: "North" },
+            { code: "SC002", name: "Search Beta", region: "North" },
+          ]),
+        };
+      }
+      return { ok: true, json: () => Promise.resolve({}) };
+    });
+  }
+
+  function submittedBody() {
+    const call = mockFetch.mock.calls.find(([url]) => String(url).startsWith("/api/admin/users"));
+    return call ? JSON.parse(call[1].body) : undefined;
+  }
+
+  async function pickSchool(user: ReturnType<typeof userEvent.setup>, query: string, name: string) {
+    const input = screen.getByPlaceholderText("Search schools by name or code...");
+    await user.clear(input);
+    await user.type(input, query);
+    await user.click(await screen.findByText(name));
+  }
+
+  it("offers both PMU roles with their descriptions and a fixed JNV NVS program note", async () => {
+    const user = userEvent.setup();
+    renderModal();
+    const roleSelect = screen.getAllByRole("combobox")[0];
+
+    await user.selectOptions(roleSelect, "pmu_manager");
+    expect(
+      screen.getByText("PMU Managers can view and manage JNV NVS students and view performance in their assigned JNV Schools")
+    ).toBeInTheDocument();
+    expect(screen.getByText("JNV NVS")).toBeInTheDocument();
+    expect(screen.getByText(/PMU roles are pinned to the JNV NVS program/)).toBeInTheDocument();
+    expect(screen.queryByText("Assign Programs")).not.toBeInTheDocument();
+
+    await user.selectOptions(roleSelect, "pmu_govt_school_user");
+    expect(
+      screen.getByText("PMU Govt School Users can view and manage JNV NVS students and view performance in their one JNV School")
+    ).toBeInTheDocument();
+    expect(screen.getByText(/PMU roles are pinned to the JNV NVS program/)).toBeInTheDocument();
+    expect(screen.queryByText("Assign Programs")).not.toBeInTheDocument();
+  });
+
+  it("gives a PMU Manager the level picker with 'All JNV Schools' and submits [64]", async () => {
+    const user = userEvent.setup();
+    mockSchoolSearch();
+    renderModal();
+    await user.type(document.querySelector('input[type="email"]') as HTMLInputElement, "pmu@example.com");
+    await user.selectOptions(screen.getAllByRole("combobox")[0], "pmu_manager");
+
+    const levelSelect = screen.getAllByRole("combobox")[1];
+    expect(screen.getByRole("option", { name: /All JNV Schools/ })).toBeInTheDocument();
+    await user.selectOptions(levelSelect, "3");
+    expect(screen.getByRole("checkbox", { name: /read-only/i })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Add User" }));
+
+    await waitFor(() => expect(submittedBody()).toBeDefined());
+    expect(submittedBody()).toEqual({
+      level: 3,
+      role: "pmu_manager",
+      read_only: false,
+      program_ids: [64],
+      full_name: null,
+      email: "pmu@example.com",
+      school_codes: null,
+      regions: null,
+    });
+  });
+
+  it("gives a PMU Govt School User no level selector and one School that a new pick replaces", async () => {
+    const user = userEvent.setup();
+    mockSchoolSearch();
+    renderModal();
+    await user.type(document.querySelector('input[type="email"]') as HTMLInputElement, "principal@example.com");
+    await user.selectOptions(screen.getAllByRole("combobox")[0], "pmu_govt_school_user");
+
+    expect(screen.getAllByRole("combobox")).toHaveLength(1);
+    expect(screen.getByRole("checkbox", { name: /read-only/i })).toBeInTheDocument();
+
+    await pickSchool(user, "Search", "Search Alpha");
+    await pickSchool(user, "Search", "Search Beta");
+    expect(screen.queryByText("JNV Alpha (SC001)")).not.toBeInTheDocument();
+    expect(screen.getByText("JNV Beta (SC002)")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Add User" }));
+
+    await waitFor(() => expect(submittedBody()).toBeDefined());
+    expect(submittedBody()).toEqual({
+      level: 1,
+      role: "pmu_govt_school_user",
+      read_only: false,
+      program_ids: [64],
+      full_name: null,
+      email: "principal@example.com",
+      school_codes: ["SC002"],
+      regions: null,
+    });
+  });
+
+  const multiSchoolPm = { ...editUser, level: 1, school_codes: ["SC001", "SC002"], regions: null };
+  const extraSchoolsError = "A PMU Govt School User must have exactly one School — remove the others";
+
+  it("keeps every School and blocks Save when a multi-School user becomes a PMU Govt School User", async () => {
+    const user = userEvent.setup();
+    mockFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve({}) });
+    const { props } = renderModal({ user: multiSchoolPm });
+
+    await user.selectOptions(screen.getAllByRole("combobox")[0], "pmu_govt_school_user");
+    expect(screen.getAllByRole("button", { name: /^Remove / })).toHaveLength(2);
+    expect(screen.getByText(`${extraSchoolsError}.`)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Save Changes" }));
+
+    expect(await screen.findByText(extraSchoolsError)).toBeInTheDocument();
+    expect(submittedBody()).toBeUndefined();
+    expect(props.onSave).not.toHaveBeenCalled();
+  });
+
+  it("saves one School and [64] once the Admin removes the other Schools", async () => {
+    const user = userEvent.setup();
+    mockFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve({}) });
+    const { props } = renderModal({ user: multiSchoolPm });
+
+    await user.selectOptions(screen.getAllByRole("combobox")[0], "pmu_govt_school_user");
+    await user.click(screen.getByRole("button", { name: "Remove JNV Alpha (SC001)" }));
+    expect(screen.queryByText(`${extraSchoolsError}.`)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Save Changes" }));
+
+    await waitFor(() => expect(submittedBody()).toBeDefined());
+    expect(mockFetch.mock.calls.find(([url]) => url === "/api/admin/users/42")?.[1].method).toBe("PATCH");
+    expect(submittedBody()).toMatchObject({
+      level: 1,
+      role: "pmu_govt_school_user",
+      program_ids: [64],
+      school_codes: ["SC002"],
+      regions: null,
+    });
+    expect(props.onSave).toHaveBeenCalled();
+  });
+
+  it("restores the original School list when the role is switched back", async () => {
+    const user = userEvent.setup();
+    mockFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve({}) });
+    renderModal({ user: multiSchoolPm });
+    const roleSelect = screen.getAllByRole("combobox")[0];
+
+    await user.selectOptions(roleSelect, "pmu_govt_school_user");
+    await user.selectOptions(roleSelect, "program_manager");
+    expect(screen.getAllByRole("button", { name: /^Remove / })).toHaveLength(2);
+    expect(screen.queryByText(`${extraSchoolsError}.`)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Save Changes" }));
+
+    await waitFor(() => expect(submittedBody()).toBeDefined());
+    expect(submittedBody()).toMatchObject({ role: "program_manager", school_codes: ["SC001", "SC002"] });
+  });
+
+  it("blocks Save for a PMU Govt School User with no School", async () => {
+    const user = userEvent.setup();
+    renderModal();
+    await user.type(document.querySelector('input[type="email"]') as HTMLInputElement, "principal@example.com");
+    await user.selectOptions(screen.getAllByRole("combobox")[0], "pmu_govt_school_user");
+
+    await user.click(screen.getByRole("button", { name: "Add User" }));
+
+    expect(
+      await screen.findByText("A PMU Govt School User must have exactly one School — pick one")
+    ).toBeInTheDocument();
+    expect(submittedBody()).toBeUndefined();
+  });
+
+  it("still shows the server's 400 error for a PMU Govt School User", async () => {
+    const user = userEvent.setup();
+    mockFetch.mockResolvedValue({
+      ok: false,
+      json: () => Promise.resolve({ error: "PMU Govt School User needs exactly one JNV School" }),
+    });
+    renderModal({ user: { ...multiSchoolPm, school_codes: ["SC001"] } });
+
+    await user.selectOptions(screen.getAllByRole("combobox")[0], "pmu_govt_school_user");
+    await user.click(screen.getByRole("button", { name: "Save Changes" }));
+
+    expect(await screen.findByText("PMU Govt School User needs exactly one JNV School")).toBeInTheDocument();
+  });
+
+  it("searches only the JNV School list for PMU roles", async () => {
+    const user = userEvent.setup();
+    mockSchoolSearch();
+    renderModal();
+    await user.selectOptions(screen.getAllByRole("combobox")[0], "pmu_govt_school_user");
+    await user.type(screen.getByPlaceholderText("Search schools by name or code..."), "Se");
+
+    await waitFor(() => expect(mockFetch).toHaveBeenCalledWith("/api/admin/schools?q=Se"));
+  });
+});

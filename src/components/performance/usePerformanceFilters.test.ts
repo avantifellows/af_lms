@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { reconcileGrade, KEEP_GRADE } from "./usePerformanceFilters";
+import { reconcileGrade, KEEP_GRADE, effectiveSelection } from "./usePerformanceFilters";
 
 // The rule that decides which grade the Performance tab lands on when the
 // available grades change under it — extracted from the fetch effect so it can
@@ -41,5 +41,34 @@ describe("reconcileGrade", () => {
   it("clears a selection when the school has no grades at all", () => {
     expect(reconcileGrade([], 12)).toBeNull();
     expect(reconcileGrade([], null)).toBe(KEEP_GRADE);
+  });
+});
+
+// JNV NVS renders only per-test full tests with no Subject or Test grade
+// filter, whatever an old shared link asked for.
+describe("effectiveSelection", () => {
+  const fromOldLink = {
+    testCategory: "chapter" as const,
+    fullTestView: "cumulative" as const,
+    subject: "Physics",
+    testGrade: 11,
+  };
+
+  it("forces NVS onto per-test full tests with no subject or test grade", () => {
+    expect(effectiveSelection(true, fromOldLink)).toEqual({
+      testCategory: "full",
+      fullTestView: "per_test",
+      subject: null,
+      testGrade: null,
+    });
+  });
+
+  it("leaves every other program's selection as it is", () => {
+    expect(effectiveSelection(false, fromOldLink)).toEqual({
+      testCategory: "chapter",
+      fullTestView: "cumulative",
+      subject: "Physics",
+      testGrade: 11,
+    });
   });
 });

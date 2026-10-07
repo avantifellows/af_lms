@@ -16,7 +16,6 @@ import { authorizeSchoolAccess } from "./api-auth";
 import {
   ADMIN_SESSION,
   NO_SESSION,
-  PASSCODE_SESSION,
   PM_SESSION,
 } from "@/app/api/__test-utils__/api-test-helpers";
 
@@ -43,6 +42,7 @@ const SCHOOL_ROW = {
   code: "70705",
   name: "JNV Bhavnagar",
   region: "West",
+  af_school_category: "JNV",
 };
 
 beforeEach(() => {
@@ -89,35 +89,6 @@ describe("authorizeSchoolAccess", () => {
     expect(params).toEqual(["70705"]);
   });
 
-  // --- Passcode user tests ---
-
-  it("authorizes passcode user with matching schoolCode", async () => {
-    mockSession.mockResolvedValue(PASSCODE_SESSION as never);
-    mockQuery.mockResolvedValue([SCHOOL_ROW]);
-
-    const result = await authorizeSchoolAccess("70705");
-    expect(result.authorized).toBe(true);
-    if (result.authorized) {
-      expect(result.school).toEqual(SCHOOL_ROW);
-    }
-    // canAccessSchool should NOT be called for passcode users
-    expect(mockCanAccessSchool).not.toHaveBeenCalled();
-  });
-
-  it("returns 403 for passcode user with wrong schoolCode", async () => {
-    mockSession.mockResolvedValue(PASSCODE_SESSION as never);
-    mockQuery.mockResolvedValue([{ ...SCHOOL_ROW, code: "99999" }]);
-
-    const result = await authorizeSchoolAccess("1234567890");
-    expect(result.authorized).toBe(false);
-    if (!result.authorized) {
-      expect(result.response.status).toBe(403);
-      await expect(result.response.json()).resolves.toEqual({
-        error: "Access denied",
-      });
-    }
-  });
-
   // --- Email user tests ---
 
   it("authorizes email user with access", async () => {
@@ -135,6 +106,20 @@ describe("authorizeSchoolAccess", () => {
       "70705",
       "West"
     );
+  });
+
+  it("refuses a PMU role at a non-JNV school even with school access", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockCanAccessSchool.mockResolvedValue(true);
+    mockResolvedPermission.mockResolvedValue(permission({ role: "pmu_manager", program_ids: [64] }));
+
+    mockQuery.mockResolvedValue([{ ...SCHOOL_ROW, af_school_category: "CoE" }]);
+    const denied = await authorizeSchoolAccess("70705");
+    expect(denied.authorized).toBe(false);
+    if (!denied.authorized) expect(denied.response.status).toBe(403);
+
+    mockQuery.mockResolvedValue([{ ...SCHOOL_ROW, af_school_category: "JNV" }]);
+    expect((await authorizeSchoolAccess("70705")).authorized).toBe(true);
   });
 
   it("returns 403 for email user without access", async () => {
@@ -240,13 +225,18 @@ describe("authorizeSchoolAccess", () => {
     }
   );
 
-  it("requireEdit does not affect passcode users (they cannot be read-only)", async () => {
-    mockSession.mockResolvedValue(PASSCODE_SESSION as never);
-    mockQuery.mockResolvedValue([SCHOOL_ROW]);
+  // Performance routes pin PMU roles to JNV NVS from the caller's role, so the
+  // result carries the permission row authorizeSchoolAccess already resolved.
+  it("returns the resolved permission for an email user", async () => {
+    const pmu = permission({
+      email: "pmu.manager@avantifellows.org",
+      role: "pmu_manager",
+      program_ids: [64],
+    });
+    grantSchoolAccess(pmu);
 
-    const result = await authorizeSchoolAccess("70705", { requireEdit: true });
+    const result = await authorizeSchoolAccess("70705");
     expect(result.authorized).toBe(true);
-    if (result.authorized) expect(result.readOnly).toBe(false);
-    expect(mockResolvedPermission).not.toHaveBeenCalled();
+    if (result.authorized) expect(result.permission).toEqual(pmu);
   });
 });

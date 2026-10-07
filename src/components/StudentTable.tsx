@@ -13,6 +13,11 @@ import {
 } from "@/components/ui";
 import { DocumentsList } from "@/components/documents/DocumentsList";
 import { PROGRAM_IDS, PROGRAM_ID_TO_LABEL } from "@/lib/constants";
+import {
+  formatExamPreparingFor,
+  matchesStreamFilter,
+  matchesStudentSearch,
+} from "@/lib/stream-rules";
 import { getCategoryColor } from "@/lib/student-utils";
 
 export interface Student {
@@ -84,8 +89,7 @@ interface StudentTableProps {
   canDropoutStudent?: boolean;
   selectedProgramId?: number | null;
   dropoutProgramIds?: number[] | null;
-  userProgramIds?: number[] | null; // null = owns all (admin/passcode)
-  isPasscodeUser?: boolean;
+  userProgramIds?: number[] | null; // null = owns all (admin)
   isAdmin?: boolean;
   grades: Grade[];
   batches?: Batch[];
@@ -97,6 +101,8 @@ interface StudentTableProps {
   selectedGrade?: string;
   onGradeChange?: (grade: string) => void;
   selectedStream?: string;
+  /** Parent-owned roster search; narrows both the Active and Dropout lists. */
+  searchQuery?: string;
   hideGradeFilterUI?: boolean;
   // Called after a save/upload (in addition to the internal router.refresh) so
   // the parent can refetch data it owns — e.g. the consent map behind the
@@ -166,6 +172,8 @@ interface StudentCardProps {
    * to the inline DocumentsList so it refetches.
    */
   documentsRefreshNonce?: number;
+  /** JNV NVS card: shows "Exam Preparing For" in place of Program and Stream. */
+  isNvs?: boolean;
 }
 
 // Coerce a `string | null` PK into a safe positive integer; rejects NaN +
@@ -209,6 +217,7 @@ function StudentCard({
   hasOpenFlag = false,
   onOpenFlag,
   documentsRefreshNonce,
+  isNvs = false,
 }: StudentCardProps) {
   const [expanded, setExpanded] = useState(false);
   const isDropout = isDropoutView || student.status === "dropout";
@@ -269,7 +278,15 @@ function StudentCard({
               {student.category || "—"}
             </span>
           </KeyField>
-          <KeyField label="Program">{student.program_name || "—"}</KeyField>
+          {isNvs ? (
+            <KeyField label="Exam Preparing For">
+              {student.stream?.trim()
+                ? formatExamPreparingFor(student.stream)
+                : "—"}
+            </KeyField>
+          ) : (
+            <KeyField label="Program">{student.program_name || "—"}</KeyField>
+          )}
           <KeyField label="DOB">{formatDate(student.date_of_birth)}</KeyField>
         </div>
 
@@ -316,11 +333,13 @@ function StudentCard({
           {/* Phone / Gender / Category / Program now live in the always-visible
               card summary above, so the expanded view covers the rest. */}
           <DetailGroup title="Personal">
-            <DetailField
-              label="Stream"
-              value={student.stream}
-              className="capitalize"
-            />
+            {!isNvs && (
+              <DetailField
+                label="Stream"
+                value={student.stream}
+                className="capitalize"
+              />
+            )}
             <DetailField
               label="Email"
               value={student.email}
@@ -559,13 +578,13 @@ export default function StudentTable({
   dropoutProgramIds = null,
   userProgramIds = null,
   isAdmin = false,
-  isPasscodeUser = false,
   grades,
   batches = [],
   nvsStreams = [],
   selectedGrade: controlledGrade,
   onGradeChange,
   selectedStream = "all",
+  searchQuery = "",
   hideGradeFilterUI = false,
   onDataChanged,
   openFlagStudentIds,
@@ -610,7 +629,7 @@ export default function StudentTable({
   // incorrectly) limited to NVS students only.
   const canEditStudentInSelectedProgram = (student: Student): boolean => {
     if (!canEditStudentEntry || effectiveProgramId == null) return false;
-    if (isPasscodeUser || !student.student_pk_id) return false;
+    if (!student.student_pk_id) return false;
     if (!studentBelongsToProgram(student, effectiveProgramId)) return false;
     return userCanManageProgram(isAdmin, userProgramIds, effectiveProgramId);
   };
@@ -629,7 +648,7 @@ export default function StudentTable({
     if (!allowed) return false;
     if (dropoutProgramIds && !dropoutProgramIds.includes(effectiveProgramId))
       return false;
-    if (isPasscodeUser || !student.student_pk_id) return false;
+    if (!student.student_pk_id) return false;
     if (!studentBelongsToProgram(student, effectiveProgramId)) return false;
     return userCanManageProgram(isAdmin, userProgramIds, effectiveProgramId);
   };
@@ -638,7 +657,6 @@ export default function StudentTable({
     Boolean(
       canDropoutStudent &&
       effectiveProgramId === PROGRAM_IDS.NVS &&
-      !isPasscodeUser &&
       student.student_pk_id &&
       student.can_undo_nvs_dropout &&
       (isAdmin || userProgramIds?.includes(PROGRAM_IDS.NVS)) &&
@@ -664,8 +682,8 @@ export default function StudentTable({
   const filteredStudents = currentStudents.filter(
     (student) =>
       (selectedGrade === "all" || student.grade === parseInt(selectedGrade)) &&
-      (selectedStream === "all" ||
-        student.stream?.toLowerCase() === selectedStream.toLowerCase()) &&
+      matchesStreamFilter(student.stream, selectedStream) &&
+      matchesStudentSearch(student, searchQuery) &&
       (!flaggedOnly || activeTab !== "active" || hasOpenFlag(student)),
   );
 
@@ -787,6 +805,7 @@ export default function StudentTable({
             <StudentCard
               key={student.group_user_id}
               student={student}
+              isNvs={effectiveProgramId === PROGRAM_IDS.NVS}
               canEditStudent={
                 activeTab === "active" &&
                 canEditStudentInSelectedProgram(student)

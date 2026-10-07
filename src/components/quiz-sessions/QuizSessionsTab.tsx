@@ -12,6 +12,8 @@ import {
   CMS_EXAM_TRACKS,
   CMS_SOURCE,
   CMS_TEST_TYPE_OPTIONS,
+  cmsQuizLanguageLabel,
+  getCmsTestId,
   type CmsExamTrack,
   type CmsTestType,
 } from "@/lib/cms-tests";
@@ -100,6 +102,11 @@ interface CmsChapterOption {
   name: string;
 }
 
+interface CmsTestLanguage {
+  code: string;
+  name: string;
+}
+
 interface CmsTestOption {
   id: number;
   code: string;
@@ -107,6 +114,7 @@ interface CmsTestOption {
   chapterId: number | null;
   marks: number | null;
   duration: string | null;
+  languages?: CmsTestLanguage[];
 }
 
 function getDefaultSessionName(baseName: string): string {
@@ -211,16 +219,6 @@ function getMetaString(
 ): string | undefined {
   const value = meta?.[key];
   return typeof value === "string" ? value : undefined;
-}
-
-function getMetaScalar(
-  meta: Record<string, unknown> | null | undefined,
-  key: string
-): string | undefined {
-  const value = meta?.[key];
-  if (typeof value === "string") return value;
-  if (typeof value === "number" && Number.isFinite(value)) return String(value);
-  return undefined;
 }
 
 function getMetaBoolean(
@@ -1063,6 +1061,8 @@ function QuizSessionCreateModal({
   const [loadingCmsTests, setLoadingCmsTests] = useState(false);
   const [cmsError, setCmsError] = useState<string | null>(null);
   const [selectedCmsTestId, setSelectedCmsTestId] = useState<number | null>(null);
+  const [cmsLangCode, setCmsLangCode] = useState("");
+  const [cmsTestSearch, setCmsTestSearch] = useState("");
 
   const parentIdSet = useMemo(() => {
     const set = new Set<number>();
@@ -1313,6 +1313,25 @@ function QuizSessionCreateModal({
     };
   }, [cmsTestsReady, testSource, cmsTestType, cmsExamTrack, cmsGrade, cmsChapterId]);
 
+  // Search narrows the CMS test list by name/code; the selected test always stays visible.
+  const cmsTestQuery = cmsTestSearch.trim().toLowerCase();
+  const visibleCmsTests = cmsTestQuery
+    ? cmsTests.filter(
+        (test) =>
+          test.id === selectedCmsTestId ||
+          `${test.name} ${test.code}`.toLowerCase().includes(cmsTestQuery)
+      )
+    : cmsTests;
+
+  // Regional languages of the selected CMS test; a choice only counts while that test offers it.
+  const selectedCmsLanguages =
+    testSource === "cms"
+      ? cmsTests.find((test) => test.id === selectedCmsTestId)?.languages ?? []
+      : [];
+  const selectedCmsLangCode = selectedCmsLanguages.some((language) => language.code === cmsLangCode)
+    ? cmsLangCode
+    : "";
+
   // Prefill Session Name from whichever test is selected. Both sources are handled: the
   // legacy path selects a template, the CMS path selects a chapter/major test — they live in
   // separate state, so keying this off `selectedTemplate` alone left the field blank for
@@ -1529,6 +1548,7 @@ function QuizSessionCreateModal({
           showScores,
           shuffle,
           gurukulFormatType: getGurukulFormatForShuffle(gurukulFormatType, shuffle),
+          langCode: selectedCmsLangCode,
           startTime: computedStart.toISOString(),
           endTime: computedEnd.toISOString(),
         };
@@ -1968,8 +1988,22 @@ function QuizSessionCreateModal({
                             : "No major tests found for this exam track and grade."}
                         </div>
                       ) : (
+                        <div className="space-y-2">
+                        <input
+                          type="search"
+                          aria-label="Search tests"
+                          placeholder="Search by name or code (e.g. AIAT-03, PN-MT)"
+                          value={cmsTestSearch}
+                          onChange={(event) => setCmsTestSearch(event.target.value)}
+                          className="min-h-[40px] w-full rounded-lg border-2 border-border bg-bg-input px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
+                        />
+                        {visibleCmsTests.length === 0 ? (
+                          <div className="rounded-lg border border-border bg-bg-card-alt px-3 py-3 text-sm text-text-secondary">
+                            No tests match &ldquo;{cmsTestSearch}&rdquo;.
+                          </div>
+                        ) : (
                         <div className="max-h-72 overflow-y-auto rounded-lg border border-border">
-                          {cmsTests.map((test) => {
+                          {visibleCmsTests.map((test) => {
                             const isSelected = test.id === selectedCmsTestId;
                             return (
                               <div
@@ -2018,12 +2052,41 @@ function QuizSessionCreateModal({
                                     {test.duration ? ` · ${test.duration} min` : ""}
                                   </div>
                                   <div className="mt-2">
-                                    <PaperResourceLinks {...cmsTestPdfHrefs(test.id)} inline />
+                                    <CmsPaperLinks testId={test.id} languages={test.languages ?? []} inline />
                                   </div>
                                 </div>
                               </div>
                             );
                           })}
+                        </div>
+                        )}
+                        </div>
+                      )}
+
+                      {selectedCmsLanguages.length > 0 && (
+                        <div>
+                          <label
+                            htmlFor="cms-quiz-language"
+                            className="mb-2 block text-xs font-bold uppercase tracking-wide text-text-muted"
+                          >
+                            Language
+                          </label>
+                          <select
+                            id="cms-quiz-language"
+                            value={selectedCmsLangCode}
+                            onChange={(event) => setCmsLangCode(event.target.value)}
+                            className="min-h-[44px] w-full rounded-lg border-2 border-border bg-bg-input px-3 py-2.5 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 md:w-72"
+                          >
+                            <option value="">English</option>
+                            {selectedCmsLanguages.map((language) => (
+                              <option key={language.code} value={language.code}>
+                                English + {language.name}
+                              </option>
+                            ))}
+                          </select>
+                          <p className="mt-1 text-xs text-text-secondary">
+                            Questions without a translation stay in English.
+                          </p>
                         </div>
                       )}
                     </div>
@@ -2567,6 +2630,12 @@ function QuizSessionEditModal({
                     value={String(session.id)}
                     mono
                   />
+                  {getMetaString(session.meta_data, "cms_source") ? (
+                    <InfoRow
+                      label="Language"
+                      value={cmsQuizLanguageLabel(getMetaString(session.meta_data, "lang_code"))}
+                    />
+                  ) : null}
                 </div>
               </SectionCard>
 
@@ -2818,6 +2887,12 @@ function QuizSessionDetailsModal({
                   label="Gurukul Format"
                   value={getMetaString(session.meta_data, "gurukul_format_type") || "-"}
                 />
+                {getMetaString(session.meta_data, "cms_source") ? (
+                  <InfoRow
+                    label="Language"
+                    value={cmsQuizLanguageLabel(getMetaString(session.meta_data, "lang_code"))}
+                  />
+                ) : null}
               </div>
             </SectionCard>
 
@@ -3087,9 +3162,11 @@ function LinkIconButton({
 function PaperLinkChip({
   href,
   label,
+  text = label,
 }: {
   href?: string;
   label: string;
+  text?: string;
 }) {
   const value = href?.trim();
   if (!value) return null;
@@ -3103,7 +3180,7 @@ function PaperLinkChip({
       aria-label={label}
       className="inline-flex items-center gap-1.5 rounded-full border border-border bg-bg-card px-2.5 py-1 text-xs font-medium text-text-primary hover:border-accent hover:text-accent"
     >
-      <span>{label}</span>
+      <span>{text}</span>
       <ExternalLinkIcon />
     </a>
   );
@@ -3134,8 +3211,10 @@ function PaperDownloadChip({
   );
 }
 
-function cmsTestPdfHrefs(testId: string | number) {
-  const base = `/api/cms/test-pdf?testId=${encodeURIComponent(testId)}`;
+function cmsTestPdfHrefs(testId: string | number, lang?: string) {
+  const base =
+    `/api/cms/test-pdf?testId=${encodeURIComponent(testId)}` +
+    (lang ? `&lang=${encodeURIComponent(lang)}` : "");
   return {
     questionHref: `${base}&type=questions`,
     solutionHref: `${base}&type=answers`,
@@ -3153,13 +3232,27 @@ function CmsAwarePaperLinks({
   meta: Record<string, unknown> | null | undefined;
 }) {
   const cmsSource = getMetaString(meta, "cms_source");
-  // Ids may be stored as numbers (older sessions) or strings — accept both.
-  const cmsTestId = getMetaScalar(meta, "cms_test_id");
+  const cmsTestId = getCmsTestId(meta);
+  const [languages, setLanguages] = useState<CmsTestLanguage[]>([]);
+
+  useEffect(() => {
+    if (!cmsSource || !cmsTestId) return;
+    let cancelled = false;
+    fetch(`/api/cms/test-languages?testId=${encodeURIComponent(cmsTestId)}`)
+      .then((response) => (response.ok ? response.json() : { languages: [] }))
+      .then((data) => {
+        if (!cancelled) setLanguages(data.languages ?? []);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [cmsSource, cmsTestId]);
 
   // Test id only: also gating on cms_curriculum_id/cms_grade_id would silently fall through
   // to the legacy branch — no PDF links — for sessions created after we stopped storing them.
   if (cmsSource && cmsTestId) {
-    return <PaperResourceLinks {...cmsTestPdfHrefs(cmsTestId)} />;
+    return <CmsPaperLinks testId={cmsTestId} languages={languages} />;
   }
 
   return (
@@ -3170,17 +3263,62 @@ function CmsAwarePaperLinks({
   );
 }
 
+// English PDFs, plus one row per regional language the test has (English with that language
+// underneath, as the CMS prints it).
+function CmsPaperLinks({
+  testId,
+  languages,
+  inline = false,
+}: {
+  testId: string | number;
+  languages: CmsTestLanguage[];
+  inline?: boolean;
+}) {
+  if (languages.length === 0) {
+    return <PaperResourceLinks {...cmsTestPdfHrefs(testId)} inline={inline} />;
+  }
+
+  const rows = [
+    { label: "English", lang: undefined as string | undefined },
+    ...languages.map((language) => ({ label: `English + ${language.name}`, lang: language.code })),
+  ];
+  const content = (
+    <div className="space-y-1.5">
+      {rows.map((row) => (
+        <div key={row.label} className="flex flex-wrap items-center gap-2">
+          <span className="w-32 shrink-0 text-xs text-text-secondary">{row.label}</span>
+          <PaperResourceLinks
+            {...cmsTestPdfHrefs(testId, row.lang)}
+            labelSuffix={row.lang ? ` (${row.label})` : ""}
+            inline
+          />
+        </div>
+      ))}
+    </div>
+  );
+
+  if (inline) return content;
+  return (
+    <div>
+      <div className="text-xs font-bold uppercase tracking-wide text-text-muted">Test Paper Files</div>
+      <div className="mt-2">{content}</div>
+    </div>
+  );
+}
+
 function PaperResourceLinks({
   questionHref,
   solutionHref,
   questionDownloadHref,
   solutionDownloadHref,
+  labelSuffix = "",
   inline = false,
 }: {
   questionHref?: string;
   solutionHref?: string;
   questionDownloadHref?: string;
   solutionDownloadHref?: string;
+  labelSuffix?: string;
   inline?: boolean;
 }) {
   if (!questionHref?.trim() && !solutionHref?.trim()) {
@@ -3200,10 +3338,10 @@ function PaperResourceLinks({
       onClick={(event) => event.stopPropagation()}
       onKeyDown={(event) => event.stopPropagation()}
     >
-      <PaperLinkChip href={questionHref} label="Question PDF" />
-      <PaperDownloadChip href={questionDownloadHref} label="Download Question PDF" />
-      <PaperLinkChip href={solutionHref} label="Answer PDF" />
-      <PaperDownloadChip href={solutionDownloadHref} label="Download Answer PDF" />
+      <PaperLinkChip href={questionHref} label={`Question PDF${labelSuffix}`} text="Question PDF" />
+      <PaperDownloadChip href={questionDownloadHref} label={`Download Question PDF${labelSuffix}`} />
+      <PaperLinkChip href={solutionHref} label={`Answer PDF${labelSuffix}`} text="Answer PDF" />
+      <PaperDownloadChip href={solutionDownloadHref} label={`Download Answer PDF${labelSuffix}`} />
     </div>
   );
 

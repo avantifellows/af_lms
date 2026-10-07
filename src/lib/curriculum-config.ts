@@ -12,7 +12,6 @@ import { SUBJECT_IDS, type ExamTrack, type SubjectName } from "@/types/curriculu
 
 export type CurriculumConfigSession = {
   user?: { email?: string | null } | null;
-  isPasscodeUser?: boolean;
 } | null;
 
 export type CurriculumConfigAdminResult =
@@ -332,9 +331,9 @@ function curriculumContentError(
   return { ok: false, status: 422, error, fields: { exam_track: error } };
 }
 
-// Same policy as every other admin surface (passcode users blocked, only
-// role "admin", read-only admins 403 on `forWrite: true` writes) — delegate to
-// the shared guard so the surfaces can't drift.
+// Same policy as every other admin surface (only role "admin", read-only
+// admins 403 on `forWrite: true` writes) — delegate to the shared guard so the
+// surfaces can't drift.
 export async function requireCurriculumConfigAdmin(
   session: CurriculumConfigSession,
   opts?: { forWrite?: boolean }

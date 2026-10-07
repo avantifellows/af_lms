@@ -10,7 +10,9 @@ vi.mock("@/lib/intervention-flags", async (importOriginal) => {
   return {
     ...actual,
     authorizeInterventionFlags: vi.fn(),
+    flagStudentScopeForPmu: vi.fn(),
     listSchoolFlags: vi.fn(),
+    mayRaiseFlagForPmu: vi.fn(),
     raiseFlag: vi.fn(),
   };
 });
@@ -19,7 +21,9 @@ import { withTransaction } from "@/lib/db";
 import {
   InterventionFlagError,
   authorizeInterventionFlags,
+  flagStudentScopeForPmu,
   listSchoolFlags,
+  mayRaiseFlagForPmu,
   raiseFlag,
 } from "@/lib/intervention-flags";
 import { getStudentSchool } from "@/lib/permissions";
@@ -30,7 +34,9 @@ const mockAuthorize = vi.mocked(authorizeInterventionFlags);
 const mockRaiseFlag = vi.mocked(raiseFlag);
 const mockGetStudentSchool = vi.mocked(getStudentSchool);
 
-const SCHOOL = { id: "7", code: "70705", udise_code: "09123", name: "JNV Test", region: null };
+const SCHOOL = {
+  id: "7", code: "70705", udise_code: "09123", name: "JNV Test", region: null, af_school_category: "JNV",
+};
 const ACTOR = { email: "teacher@avantifellows.org", userId: 42, permission: {} as never };
 
 function post(body: unknown) {
@@ -44,6 +50,9 @@ beforeEach(() => {
   vi.resetAllMocks();
   vi.mocked(withTransaction).mockImplementation((fn) => fn({} as never));
   mockAuthorize.mockResolvedValue({ ok: true, actor: ACTOR, school: SCHOOL });
+  // Non-PMU defaults: no Student scope, any Student at the School may be flagged.
+  vi.mocked(flagStudentScopeForPmu).mockResolvedValue(null);
+  vi.mocked(mayRaiseFlagForPmu).mockResolvedValue(true);
 });
 
 describe("GET /api/schools/[code]/intervention-flags", () => {
@@ -62,8 +71,17 @@ describe("GET /api/schools/[code]/intervention-flags", () => {
     const res = await GET(new NextRequest("http://localhost"), routeParams({ code: "70705" }));
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ flags: [] });
-    expect(listSchoolFlags).toHaveBeenCalledWith("7");
+    expect(listSchoolFlags).toHaveBeenCalledWith("7", null);
+    expect(flagStudentScopeForPmu).toHaveBeenCalledWith(ACTOR, "7");
     expect(mockAuthorize).toHaveBeenCalledWith(undefined, "70705", "view");
+  });
+
+  it("lists only the NVS Students' flags for a PMU role", async () => {
+    vi.mocked(flagStudentScopeForPmu).mockResolvedValue(["5"]);
+    vi.mocked(listSchoolFlags).mockResolvedValue([]);
+    const res = await GET(new NextRequest("http://localhost"), routeParams({ code: "70705" }));
+    expect(res.status).toBe(200);
+    expect(listSchoolFlags).toHaveBeenCalledWith("7", ["5"]);
   });
 });
 
@@ -78,6 +96,16 @@ describe("POST /api/schools/[code]/intervention-flags", () => {
     mockGetStudentSchool.mockResolvedValue({ code: "11111", region: null, program_id: 1 });
     const res = await POST(post({ studentPkId: 5, note: "x" }), routeParams({ code: "70705" }));
     expect(res.status).toBe(404);
+    expect(mockRaiseFlag).not.toHaveBeenCalled();
+  });
+
+  it("refuses a Student outside a PMU role's NVS pin with the same 404", async () => {
+    mockGetStudentSchool.mockResolvedValue({ code: "70705", region: null, program_id: 1 });
+    vi.mocked(mayRaiseFlagForPmu).mockResolvedValue(false);
+    const res = await POST(post({ studentPkId: 5, note: "x" }), routeParams({ code: "70705" }));
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "Student not found at this school" });
+    expect(mayRaiseFlagForPmu).toHaveBeenCalledWith(ACTOR, 5);
     expect(mockRaiseFlag).not.toHaveBeenCalled();
   });
 

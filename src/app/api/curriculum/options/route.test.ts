@@ -26,7 +26,6 @@ import {
 import { GET } from "./route";
 import {
   ADMIN_SESSION,
-  PASSCODE_SESSION,
   TEACHER_SESSION,
 } from "../../__test-utils__/api-test-helpers";
 import { resetCurriculumSchemaCheckForTests } from "@/lib/curriculum-schema";
@@ -434,15 +433,6 @@ describe("GET /api/curriculum/options", () => {
         subjectId: null,
       },
     });
-  });
-
-  it("returns 403 for passcode users", async () => {
-    mockSession.mockResolvedValue(PASSCODE_SESSION);
-
-    const res = await GET(nextReq("/api/curriculum/options?school_code=70705"));
-
-    expect(res.status).toBe(403);
-    expect(mockQuery).not.toHaveBeenCalled();
   });
 
   it("returns controlled 503 when the LMS curriculum schema is missing", async () => {

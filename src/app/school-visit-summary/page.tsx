@@ -908,13 +908,6 @@ export default async function SchoolVisitSummaryPage({ searchParams }: PageProps
     redirect("/");
   }
 
-  if (session.isPasscodeUser) {
-    if (session.schoolCode) {
-      redirect(`/school/${session.schoolCode}`);
-    }
-    redirect("/dashboard");
-  }
-
   if (!session.user?.email) {
     redirect("/");
   }

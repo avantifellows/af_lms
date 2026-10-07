@@ -11,7 +11,11 @@ vi.mock("@/lib/bigquery", () => ({
 import { authorizeSchoolAccess } from "@/lib/api-auth";
 import { getBatchOverviewData } from "@/lib/bigquery";
 import { GET } from "./route";
-import { routeParams } from "../../../__test-utils__/api-test-helpers";
+import {
+  PMU_GOVT_PERMISSION,
+  PMU_MANAGER_PERMISSION,
+  routeParams,
+} from "../../../__test-utils__/api-test-helpers";
 
 const mockAuth = vi.mocked(authorizeSchoolAccess);
 const mockGetBatchOverview = vi.mocked(getBatchOverviewData);
@@ -141,5 +145,35 @@ describe("GET /api/quiz-analytics/[udise]/batch-overview", () => {
     const res = await GET(makeRequest("10"), routeParams({ udise: "1234" }));
     expect(res.status).toBe(500);
     await expect(res.json()).resolves.toEqual({ error: "Failed to fetch batch overview" });
+  });
+});
+
+// PMU roles are pinned to JNV NVS (ADR 0007): a missing program becomes
+// "JNV NVS", any other program is refused before BigQuery is queried.
+describe.each([
+  ["PMU Manager", PMU_MANAGER_PERMISSION],
+  ["PMU Govt School User", PMU_GOVT_PERMISSION],
+])("GET batch-overview as %s", (_label, permission) => {
+  beforeEach(() => {
+    mockAuth.mockResolvedValue({ authorized: true, school: SCHOOL, readOnly: false, permission });
+    mockGetBatchOverview.mockResolvedValue({ tests: [], totalEnrolled: 0, enrolledByStream: {}, streams: [] });
+  });
+
+  it("serves JNV NVS data when no program is given", async () => {
+    const res = await GET(makeRequest("11"), routeParams({ udise: "1234" }));
+    expect(res.status).toBe(200);
+    expect(mockGetBatchOverview).toHaveBeenCalledWith("1234", 11, "JNV NVS", undefined);
+  });
+
+  it("serves program=JNV NVS", async () => {
+    const res = await GET(makeRequest("11", { program: "JNV NVS" }), routeParams({ udise: "1234" }));
+    expect(res.status).toBe(200);
+    expect(mockGetBatchOverview).toHaveBeenCalledWith("1234", 11, "JNV NVS", undefined);
+  });
+
+  it.each(["JNV CoE", "JNV Nodal", "Punjab CoE"])("403s program=%s", async (program) => {
+    const res = await GET(makeRequest("11", { program }), routeParams({ udise: "1234" }));
+    expect(res.status).toBe(403);
+    expect(mockGetBatchOverview).not.toHaveBeenCalled();
   });
 });

@@ -1,12 +1,16 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { authorizeSchoolAccess } from "@/lib/api-auth";
 import { getAvailableGrades, getAvailablePrograms } from "@/lib/bigquery";
-import {
-  PROGRAM_ID_TO_LABEL,
-  getUserPermission,
-} from "@/lib/permissions";
+import { resolvePerformanceProgram } from "@/lib/performance-program";
+import { PROGRAM_ID_TO_LABEL, isPmuRole } from "@/lib/constants";
+
+function labelsFor(programIds: number[]): Set<string> {
+  return new Set(
+    programIds
+      .map((id) => PROGRAM_ID_TO_LABEL[id])
+      .filter((label): label is string => Boolean(label))
+  );
+}
 
 export async function GET(
   request: Request,
@@ -17,7 +21,12 @@ export async function GET(
   if (!auth.authorized) return auth.response;
 
   const url = new URL(request.url);
-  const program = url.searchParams.get("program") || undefined;
+  const pinned = resolvePerformanceProgram(
+    auth.permission,
+    url.searchParams.get("program") || undefined
+  );
+  if (!pinned.ok) return pinned.response;
+  const program = pinned.program;
 
   try {
     const [grades, allPrograms] = await Promise.all([
@@ -26,19 +35,16 @@ export async function GET(
     ]);
 
     // Restrict program tabs to the ones the user is assigned to.
-    // Passcode users and admins see every program available for the school.
-    const session = await getServerSession(authOptions);
+    // Admins see every program available for the school.
+    // PMU roles see only their pinned program (JNV NVS), never the row's raw
+    // program_ids.
+    const permission = auth.permission;
     let programs = allPrograms;
-    if (session && !session.isPasscodeUser && session.user?.email) {
-      const permission = await getUserPermission(session.user.email);
-      if (permission && permission.role !== "admin") {
-        const allowedLabels = new Set(
-          (permission.program_ids || [])
-            .map((id) => PROGRAM_ID_TO_LABEL[id])
-            .filter((label): label is string => Boolean(label))
-        );
-        programs = allPrograms.filter((p) => allowedLabels.has(p));
-      }
+    if (permission && isPmuRole(permission.role)) {
+      programs = allPrograms.filter((p) => p === program);
+    } else if (permission && permission.role !== "admin") {
+      const allowedLabels = labelsFor(permission.program_ids || []);
+      programs = allPrograms.filter((p) => allowedLabels.has(p));
     }
 
     return NextResponse.json({ grades, programs });

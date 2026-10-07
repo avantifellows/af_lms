@@ -8,7 +8,7 @@ import type {
   TestQuestionLevelRow,
   StudentQuestionRow,
 } from "@/types/quiz";
-import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
+import { CURRENT_ACADEMIC_YEAR, isNvsProgram } from "@/lib/constants";
 import { alRank } from "@/lib/academic-level";
 
 let bigQueryClient: BigQuery | null = null;
@@ -160,9 +160,39 @@ interface BatchOverviewRaw {
 }
 
 /**
+ * Folds the per-stream enrolment rows into the overview's enrolment fields.
+ *
+ * The rows cover every stream at the school + grade, so `streams` (the filter
+ * bar's options) never shrinks to the one being viewed. The totals keep the
+ * selected-stream semantics: with a stream, only rows whose LOWER(stream)
+ * equals it count — exactly what `LOWER(student_stream) = @stream` used to do
+ * in SQL, cased duplicates ("Medical" + "medical") included.
+ */
+function summariseEnrolment(
+  rows: { stream: string; total: number }[],
+  stream?: string
+): Pick<BatchOverviewRaw, "totalEnrolled" | "enrolledByStream" | "streams"> {
+  const enrolledByStream: Record<string, number> = {};
+  const streamsSet = new Set<string>();
+  let totalEnrolled = 0;
+  for (const row of rows) {
+    const c = canonicalStream(row.stream);
+    if (c) streamsSet.add(c);
+    if (stream && row.stream.toLowerCase() !== stream) continue;
+    enrolledByStream[row.stream] = row.total;
+    totalEnrolled += row.total;
+  }
+  return {
+    totalEnrolled: totalEnrolled || null,
+    enrolledByStream,
+    streams: [...streamsSet].sort(),
+  };
+}
+
+/**
  * Fetch test list + enrollment count for the Batch Overview.
  * If `stream` is provided (canonical lowercase), tests + enrollment are filtered
- * to that student stream.
+ * to that student stream; the stream options are not (see summariseEnrolment).
  */
 export async function getBatchOverviewData(
   udise: string,
@@ -173,6 +203,11 @@ export async function getBatchOverviewData(
   const client = getBigQueryClient();
   const programFilter = program ? `AND student_program = @program` : "";
   const streamFilter = stream ? `AND LOWER(student_stream) = @stream` : "";
+  // NVS schools only track System-wide Mandated Tests on this overview. A static
+  // literal, so it needs no param; enrollment counts are unaffected.
+  const purposeFilter = isNvsProgram(program)
+    ? `AND test_purpose = 'system_wide_mandated'`
+    : "";
   const params: Record<string, string | number> = { udise, grade };
   if (program) params.program = program;
   if (stream) params.stream = stream;
@@ -195,6 +230,7 @@ export async function getBatchOverviewData(
       AND session_id IS NOT NULL
       ${programFilter}
       ${streamFilter}
+      ${purposeFilter}
     GROUP BY session_id, test_name
     ORDER BY start_date ASC
   `;
@@ -208,13 +244,16 @@ export async function getBatchOverviewData(
       AND student_grade = @grade
       AND academic_year = '${CURRENT_ACADEMIC_YEAR}'
       ${programFilter}
-      ${streamFilter}
     GROUP BY student_stream
   `;
+  // No stream param: this query lists every stream so the filter keeps all its
+  // options; the selected stream is applied to the totals in JS instead.
+  const enrolledParams = { ...params };
+  delete enrolledParams.stream;
 
   const [testRows, enrolledRows] = await Promise.all([
     client.query({ query: testListQuery, params }),
-    client.query({ query: enrolledQuery, params }),
+    client.query({ query: enrolledQuery, params: enrolledParams }),
   ]);
 
   interface RawTestRow {
@@ -247,22 +286,7 @@ export async function getBatchOverviewData(
   });
 
   const streamRows = enrolledRows[0] as { stream: string; total: number }[];
-  const enrolledByStream: Record<string, number> = {};
-  const streamsSet = new Set<string>();
-  let totalEnrolled = 0;
-  for (const row of streamRows) {
-    enrolledByStream[row.stream] = row.total;
-    totalEnrolled += row.total;
-    const c = canonicalStream(row.stream);
-    if (c) streamsSet.add(c);
-  }
-
-  return {
-    tests,
-    totalEnrolled: totalEnrolled || null,
-    enrolledByStream,
-    streams: [...streamsSet].sort(),
-  };
+  return { tests, ...summariseEnrolment(streamRows, stream) };
 }
 
 /**
@@ -630,4 +654,109 @@ export async function getStudentQuestionLevelData(
       status,
     };
   });
+}
+
+export interface StudentTimeSpent {
+  overall: number | null;
+  bySection: Map<string, number | null>;
+}
+
+/**
+ * Per-student, per-section time spent (seconds) on a single test, for the
+ * JNV NVS deep dive's Time Spent column. The overall fact table carries
+ * total_time_spent on the `overall` row and on each subject `section` row.
+ * Filters mirror getStudentQuestionLevelData so the two reads cover the same
+ * students; MAX collapses duplicate fact rows deterministically. Keyed by the
+ * stringified enrollment_user_id, sections by lower-cased name.
+ */
+export async function getStudentTimeSpentData(
+  udise: string,
+  grade: number,
+  sessionId: string,
+  program?: string,
+  stream?: string
+): Promise<Map<string, StudentTimeSpent>> {
+  const client = getBigQueryClient();
+  const programFilter = program ? `AND student_program = @program` : "";
+  const streamFilter = stream ? `AND LOWER(student_stream) = @stream` : "";
+
+  const params: Record<string, string | number> = { udise, grade, sessionId };
+  if (program) params.program = program;
+  if (stream) params.stream = stream;
+
+  const sql = `
+    SELECT
+      enrollment_user_id,
+      LOWER(section) AS section,
+      MAX(total_time_spent) AS total_time_spent
+    FROM ${FACT_TABLE}
+    WHERE student_school_udise_code = @udise
+      AND student_grade = @grade
+      AND session_id = @sessionId
+      AND academic_year = '${CURRENT_ACADEMIC_YEAR}'
+      AND enrollment_user_id IS NOT NULL
+      ${programFilter}
+      ${streamFilter}
+    GROUP BY enrollment_user_id, LOWER(section)
+  `;
+
+  interface RawRow {
+    enrollment_user_id: number | string;
+    section: string | null;
+    total_time_spent: number | string | null;
+  }
+
+  const toSecondsOrNull = (v: number | string | null | undefined): number | null => {
+    if (v == null) return null;
+    const n = typeof v === "number" ? v : Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  const [rows] = await client.query({ query: sql, params });
+  const result = new Map<string, StudentTimeSpent>();
+  for (const r of rows as RawRow[]) {
+    const id = String(r.enrollment_user_id);
+    const entry = result.get(id) || { overall: null, bySection: new Map() };
+    const section = (r.section || "").toLowerCase();
+    const seconds = toSecondsOrNull(r.total_time_spent);
+    if (section === "overall") entry.overall = seconds;
+    else if (section) entry.bySection.set(section, seconds);
+    result.set(id, entry);
+  }
+  return result;
+}
+
+/**
+ * Whether a test session's results at a school belong to `program` and to no
+ * other program.
+ *
+ * The Performance tab lists tests from this same fact table, filtered by
+ * `student_program`, so this is the definition of "this test belongs to that
+ * program" the UI already uses. A session with any row of another program at
+ * the school counts as not belonging: its combined-report jobs were built from
+ * a roster that may include that other program's Students. A session with no
+ * rows at all (unknown to the warehouse) also counts as not belonging, so the
+ * check fails closed. Null `student_program` rows are ignored.
+ */
+export async function isSessionOnlyForProgram(
+  udise: string,
+  sessionId: string,
+  program: string
+): Promise<boolean> {
+  const client = getBigQueryClient();
+  const sql = `
+    SELECT
+      COUNTIF(student_program = @program) AS in_program,
+      COUNTIF(student_program != @program) AS other_program
+    FROM ${FACT_TABLE}
+    WHERE student_school_udise_code = @udise
+      AND session_id = @sessionId
+  `;
+  const [rows] = await client.query({
+    query: sql,
+    params: { udise, sessionId, program },
+  });
+  const row = (rows as { in_program: number | string; other_program: number | string }[])[0];
+  if (!row) return false;
+  return Number(row.in_program) > 0 && Number(row.other_program) === 0;
 }

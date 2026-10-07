@@ -6,6 +6,7 @@ import {
   isCmsExamTrack,
   parseCmsCurriculumScope,
   streamForCmsExamTrack,
+  getCmsTestId,
 } from "./cms-tests";
 
 describe("CMS_EXAM_TRACKS", () => {
@@ -56,5 +57,26 @@ describe("parseCmsCurriculumScope", () => {
     expect(
       parseCmsCurriculumScope(new URLSearchParams("exam_track=jee_main&grade=10"))
     ).toEqual({ ok: false, error: "grade must be 11 or 12" });
+  });
+});
+
+describe("getCmsTestId", () => {
+  it("reads the numeric id LMS sessions store in cms_test_id", () => {
+    expect(getCmsTestId({ cms_test_id: "2472" })).toBe("2472");
+    expect(getCmsTestId({ cms_test_id: 2472 })).toBe("2472");
+  });
+
+  it("falls back to cms_source_id when cms_test_id is the CMS page URL", () => {
+    expect(
+      getCmsTestId({
+        cms_test_id: "https://new-cms.avantifellows.org/test?id=2472&curriculum_id=2",
+        cms_source_id: "2472",
+      })
+    ).toBe("2472");
+  });
+
+  it("returns null without a numeric id", () => {
+    expect(getCmsTestId({ cms_test_id: "https://new-cms.avantifellows.org/test?id=1" })).toBeNull();
+    expect(getCmsTestId(null)).toBeNull();
   });
 });
