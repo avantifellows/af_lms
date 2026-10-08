@@ -544,7 +544,7 @@ function ExtendRound({
 
   return (
     <div className="flex flex-wrap items-center gap-2 border-t border-border px-4 py-2 text-xs">
-      <span className="font-medium text-text-secondary">Extend all teachers until</span>
+      <span className="font-medium text-text-secondary">Extend deadline to</span>
       <input
         type="datetime-local"
         value={endTime}
