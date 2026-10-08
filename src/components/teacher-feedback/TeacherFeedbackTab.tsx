@@ -5,6 +5,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import Toast from "@/components/Toast";
@@ -64,10 +65,30 @@ const DEFAULT_DURATION_HOURS = 24;
  */
 const CYCLE_REFRESH_MS = 40000;
 
+/** Round times come back from Postgres in UTC without an offset. */
+function parseDbTime(value: string | null): Date | null {
+  if (!value) return null;
+  const d = new Date(value.includes("T") || value.includes("Z") ? value : value.replace(" ", "T") + "Z");
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/** "2026-09" in IST — rounds are monthly, and a month boundary is an IST one. */
+function istMonth(d: Date): string {
+  return d.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit" });
+}
+
+interface TeacherResponses {
+  teacherOrder: number;
+  responded: number;
+  total: number;
+  outsideBatches: number;
+  notResponded: { name: string; studentId: string | null; batchId: string }[];
+}
+
 function formatDateTime(value: string | null): string {
   if (!value) return "-";
-  const d = new Date(value.includes("T") || value.includes("Z") ? value : value.replace(" ", "T") + "Z");
-  if (Number.isNaN(d.getTime())) return value;
+  const d = parseDbTime(value);
+  if (!d) return value;
   return d.toLocaleString("en-IN", {
     year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
   });
@@ -91,6 +112,8 @@ export default function TeacherFeedbackTab({
   const [loadingCycles, setLoadingCycles] = useState(true);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [analysisQuiz, setAnalysisQuiz] = useState<{ quizId: string; teacherName: string } | null>(null);
+  // A round the setup nudge sent the PM to: opened and scrolled into view.
+  const [focusRunId, setFocusRunId] = useState<string | null>(null);
   const [toast, setToast] = useState<{ variant: "error" | "success" | "info"; message: string } | null>(null);
 
   const fetchCentres = useCallback(async () => {
@@ -192,10 +215,17 @@ export default function TeacherFeedbackTab({
         <div className="space-y-3">
           {cycles.map((c) => (
             <CycleCard
-              key={c.setupRunId}
+              // Remount on focus so the card opens even if it was rendered closed.
+              key={c.setupRunId === focusRunId ? `${c.setupRunId}-focus` : c.setupRunId}
               cycle={c}
+              canEdit={canEdit}
+              focused={c.setupRunId === focusRunId}
               onAnalyze={(quizId, teacherName) => setAnalysisQuiz({ quizId, teacherName })}
               onCopy={(msg) => setToast({ variant: "success", message: msg })}
+              onExtended={(message, variant) => {
+                setToast({ variant, message });
+                fetchCycles({ background: true });
+              }}
             />
           ))}
         </div>
@@ -205,8 +235,13 @@ export default function TeacherFeedbackTab({
         <SetupModal
           schoolCode={schoolCode}
           centres={centres}
+          cycles={cycles}
           loading={loadingCentres}
           onClose={() => setIsCreateOpen(false)}
+          onExtendInstead={(setupRunId) => {
+            setIsCreateOpen(false);
+            setFocusRunId(setupRunId);
+          }}
           onDone={(result) => {
             setIsCreateOpen(false);
             setToast({
@@ -279,21 +314,65 @@ function CopyLink({ label, href, onCopy }: { label: string; href: string; onCopy
 
 function CycleCard({
   cycle,
+  canEdit,
+  focused,
   onAnalyze,
   onCopy,
+  onExtended,
 }: {
   cycle: Cycle;
+  canEdit: boolean;
+  focused: boolean;
   onAnalyze: (quizId: string, teacherName: string) => void;
   onCopy: (msg: string) => void;
+  onExtended: (message: string, variant: "success" | "info") => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(focused);
+  const cardRef = useRef<HTMLDivElement>(null);
+  // Scroll once when the setup nudge sends the PM here; the card remounts on focus.
+  useEffect(() => {
+    if (focused) cardRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [focused]);
   // Capture "now" once at mount (lazy initializer) to keep render pure.
   const [nowMs] = useState(() => new Date().getTime());
-  const end = cycle.endTime ? new Date(cycle.endTime.replace(" ", "T") + "Z").getTime() : null;
+  const end = parseDbTime(cycle.endTime)?.getTime() ?? null;
   const live = end !== null && end > nowMs;
+  const [responses, setResponses] = useState<Map<number, TeacherResponses> | null>(null);
+  const [responsesError, setResponsesError] = useState(false);
+  const [pendingOpen, setPendingOpen] = useState<number | null>(null);
+
+  // Who has responded is fetched only when the round is opened (it hits BigQuery).
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/teacher-feedback/cycles/${encodeURIComponent(cycle.setupRunId)}/responses`,
+          { cache: "no-store" }
+        );
+        const body = await res.json();
+        if (!res.ok) throw new Error();
+        if (!cancelled) {
+          setResponses(new Map((body.teachers as TeacherResponses[]).map((t) => [t.teacherOrder, t])));
+          setResponsesError(false);
+        }
+      } catch {
+        if (!cancelled) setResponsesError(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, cycle.setupRunId]);
 
   return (
-    <div className="overflow-hidden rounded-lg border border-border bg-bg-card shadow-sm">
+    <div
+      ref={cardRef}
+      className={`overflow-hidden rounded-lg border bg-bg-card shadow-sm ${
+        focused ? "border-accent ring-2 ring-accent/30" : "border-border"
+      }`}
+    >
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -331,20 +410,50 @@ function CycleCard({
             <div>
               Window: {formatDateTime(cycle.startTime)} → {formatDateTime(cycle.endTime)}
             </div>
+            {responsesError && <div className="text-danger">Couldn’t load who has responded.</div>}
           </div>
+          {canEdit && (
+            <ExtendRound
+              setupRunId={cycle.setupRunId}
+              currentEndMs={end}
+              nowMs={nowMs}
+              onExtended={onExtended}
+            />
+          )}
           <ul className="divide-y divide-border">
-            {cycle.teachers.map((t) => (
-              <li
-                key={`${t.teacherOrder}-${t.teacherName}`}
-                className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
-              >
-                <div className="flex items-center gap-2">
+            {cycle.teachers.map((t) => {
+              const r = t.quizId ? responses?.get(t.teacherOrder) : undefined;
+              const showPending = pendingOpen === t.teacherOrder && r && r.notResponded.length > 0;
+              return (
+              <li key={`${t.teacherOrder}-${t.teacherName}`} className="px-4 py-3">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex flex-wrap items-center gap-2">
                   <span
                     className={`inline-block h-2 w-2 shrink-0 rounded-full ${
                       t.status === "created" ? "bg-success" : "bg-danger"
                     }`}
                   />
                   <span className="text-sm font-medium text-text-primary">{t.teacherName}</span>
+                  {r && (
+                    <button
+                      type="button"
+                      disabled={r.notResponded.length === 0}
+                      onClick={() => setPendingOpen(showPending ? null : t.teacherOrder)}
+                      className="rounded-full bg-bg-card-alt px-2.5 py-0.5 text-xs font-medium text-text-secondary hover:bg-hover-bg disabled:cursor-default disabled:hover:bg-bg-card-alt"
+                      title={r.notResponded.length > 0 ? "Show who hasn’t responded" : undefined}
+                    >
+                      {r.responded}/{r.total} responded
+                      {r.notResponded.length > 0 && ` · ${r.notResponded.length} pending ${showPending ? "▾" : "▸"}`}
+                    </button>
+                  )}
+                  {r && r.outsideBatches > 0 && (
+                    <span
+                      className="text-xs text-warning-text"
+                      title="Answered, but not in this round's batches today (left, moved batch, or given this link by mistake). Analysis includes them."
+                    >
+                      +{r.outsideBatches} outside these batches
+                    </span>
+                  )}
                 </div>
                 <div className="flex flex-wrap items-center gap-4">
                   {t.status === "failed" ? (
@@ -379,11 +488,98 @@ function CycleCard({
                     Analysis
                   </button>
                 </div>
+              </div>
+              {showPending && (
+                <ul className="mt-2 grid gap-x-6 gap-y-1 rounded-md bg-bg-card-alt px-3 py-2 text-xs text-text-primary sm:grid-cols-2">
+                  {r.notResponded.map((s) => (
+                    <li key={`${s.studentId}-${s.name}`}>
+                      {s.name || "Unnamed"}
+                      <span className="text-text-muted">
+                        {" "}· {s.studentId ?? "no ID"}
+                        {cycle.batchClassIds.length > 1 ? ` · ${s.batchId}` : ""}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
               </li>
-            ))}
+              );
+            })}
           </ul>
         </div>
       )}
+    </div>
+  );
+}
+
+function ExtendRound({
+  setupRunId,
+  currentEndMs,
+  nowMs,
+  onExtended,
+}: {
+  setupRunId: string;
+  currentEndMs: number | null;
+  nowMs: number;
+  onExtended: (message: string, variant: "success" | "info") => void;
+}) {
+  // Default: a day past whichever is later, the current end or now.
+  const [endTime, setEndTime] = useState(() =>
+    toDateTimeLocalValue(addHours(new Date(Math.max(currentEndMs ?? nowMs, nowMs)), DEFAULT_DURATION_HOURS))
+  );
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const extend = async () => {
+    const end = new Date(endTime);
+    if (Number.isNaN(end.getTime()) || end.getTime() <= Math.max(Date.now(), currentEndMs ?? 0)) {
+      setError("Pick a time after the current end.");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/teacher-feedback/cycles/${encodeURIComponent(setupRunId)}/extend`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ endTime: end.toISOString() }),
+      });
+      const body = await res.json();
+      if (res.status === 502) {
+        // Partly extended: refresh so the card shows the teachers that did move.
+        onExtended(body.error || "Some teachers could not be extended", "info");
+        return;
+      }
+      if (!res.ok) {
+        setError(body.error || "Failed to extend");
+        return;
+      }
+      onExtended(`Extended to ${formatDateTime(body.endTime)}`, "success");
+    } catch {
+      setError("Extend request failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 border-t border-border px-4 py-2 text-xs">
+      <span className="font-medium text-text-secondary">Extend deadline to</span>
+      <input
+        type="datetime-local"
+        value={endTime}
+        onChange={(e) => setEndTime(e.target.value)}
+        className="rounded-md border border-border bg-bg-input px-2 py-1 text-xs text-text-primary"
+      />
+      <button
+        type="button"
+        onClick={extend}
+        disabled={saving}
+        className="rounded-md bg-accent px-3 py-1 text-xs font-bold uppercase tracking-wide text-text-on-accent hover:bg-accent-hover disabled:opacity-50"
+      >
+        {saving ? "Extending…" : "Extend"}
+      </button>
+      {error && <span className="text-danger">{error}</span>}
     </div>
   );
 }
@@ -548,15 +744,19 @@ type TimingMode = "start_now" | "schedule";
 function SetupModal({
   schoolCode,
   centres,
+  cycles,
   loading,
   onClose,
   onDone,
+  onExtendInstead,
 }: {
   schoolCode: string;
   centres: FeedbackCentre[];
+  cycles: Cycle[];
   loading: boolean;
   onClose: () => void;
   onDone: (result: SetupResponse) => void;
+  onExtendInstead: (setupRunId: string) => void;
 }) {
   // Centre is picked first: it scopes BOTH the teachers and the batches. A
   // school can host a CoE and a Nodal centre, each with its own cohorts, so
@@ -576,6 +776,28 @@ function SetupModal({
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The month the new round would run in: now, or the scheduled start.
+  const [nowMonth] = useState(() => istMonth(new Date()));
+  const scheduledStart = new Date(startTime);
+  const roundMonth =
+    timingMode === "schedule" && !Number.isNaN(scheduledStart.getTime())
+      ? istMonth(scheduledStart)
+      : nowMonth;
+
+  // Feedback is monthly per batch: a round this month that already covers any
+  // picked batch is probably the one to extend, not a reason for a second form.
+  const roundsThisMonth = useMemo(
+    () =>
+      cycles.filter((c) => {
+        const start = parseDbTime(c.startTime);
+        return (
+          start !== null &&
+          istMonth(start) === roundMonth &&
+          c.batchClassIds.some((id) => classBatchIds.includes(id))
+        );
+      }),
+    [cycles, classBatchIds, roundMonth]
+  );
 
   // Auto-select when there's exactly one centre. Centres load asynchronously, so
   // this must be an effect (a one-time state initializer would see []).
@@ -791,6 +1013,25 @@ function SetupModal({
                 )}
               </div>
             </SectionCard>
+
+            {roundsThisMonth.map((c) => (
+              <div
+                key={c.setupRunId}
+                className="flex flex-col gap-2 rounded-lg border border-warning-border bg-warning-bg px-4 py-3 text-sm text-warning-text sm:flex-row sm:items-center sm:justify-between"
+              >
+                <span>
+                  <strong>{c.batchClassNames.join(", ") || "These batches"}</strong> already had feedback
+                  {roundMonth === nowMonth ? " this month" : " that month"} ({c.cycleLabel}, {formatDateTime(c.startTime)}). Extend it instead?
+                </span>
+                <button
+                  type="button"
+                  onClick={() => onExtendInstead(c.setupRunId)}
+                  className="shrink-0 rounded-md border border-warning-border bg-bg-card px-3 py-1 text-xs font-bold uppercase tracking-wide text-text-primary hover:bg-hover-bg"
+                >
+                  Go to that round
+                </button>
+              </div>
+            ))}
 
             <SectionCard title="3. Select Teachers">
               <div className="max-h-64 overflow-y-auto rounded-lg border border-border">
