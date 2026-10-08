@@ -16,7 +16,7 @@ edges:
     condition: when the question is about quiz sessions generally, not feedback
   - target: context/permissions.md
     condition: when gating a feedback route
-last_updated: 2026-08-04
+last_updated: 2026-10-08
 ---
 
 # Teacher Feedback
@@ -82,6 +82,23 @@ dangerous edit — reordering is safe.
 
 Transitional. Once the form lives in the CMS with real question ids this becomes
 an id join and both copies of the form go away.
+
+## Extend a round, and who has responded
+
+- **Extend applies to the whole round** (`POST /api/teacher-feedback/cycles/:setupRunId/extend`).
+  Each teacher needs three writes: the db-service `session` and its single
+  `session_occurrence` (both IST), then `lms_teacher_feedback.end_time` (UTC). The
+  portal gates on the *occurrence*, so patching only the session does nothing.
+  Per-teacher failures are named in the error; the rest still extend.
+- **Responses** (`GET .../responses`): roster = current, non-dropout
+  `enrollment_record`s in the round's class batches *today*, not at the time of
+  the round. BigQuery responders (`user_id` = `user.id`) are matched against it, so
+  a responder who has since left the batch drops out of the count. Returns
+  names of non-responders only; never which student said what.
+- **Monthly nudge at setup is per batch**: a round whose start falls in the
+  current IST month and shares any picked batch triggers "extend it instead?".
+  Two rounds in one month for *different* batches (Kurnool's 2027 and 2028
+  cohorts) are normal.
 
 ## Gotchas
 

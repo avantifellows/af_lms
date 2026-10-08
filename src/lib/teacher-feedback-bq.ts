@@ -201,3 +201,23 @@ export async function getTeacherFeedbackReport(
     comments,
   };
 }
+
+/** user_ids (LMS user.id) who answered each feedback quiz, keyed by quiz id. */
+export async function getRespondersByQuiz(quizIds: string[]): Promise<Map<string, Set<string>>> {
+  const byQuiz = new Map<string, Set<string>>();
+  if (quizIds.length === 0) return byQuiz;
+  const [rows] = await getBigQueryClient().query({
+    query: `
+      SELECT test_id, ARRAY_AGG(DISTINCT user_id) AS user_ids
+      FROM ${FORM_LEVEL_TABLE}
+      WHERE test_id IN UNNEST(@quizIds) AND is_answered = TRUE
+      GROUP BY test_id
+    `,
+    params: { quizIds },
+    location: BQ_LOCATION,
+  });
+  for (const r of rows as Array<{ test_id: string; user_ids: string[] }>) {
+    byQuiz.set(r.test_id, new Set((r.user_ids ?? []).map(String)));
+  }
+  return byQuiz;
+}
