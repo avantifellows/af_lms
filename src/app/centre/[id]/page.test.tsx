@@ -797,6 +797,248 @@ describe("CentrePage → Centre switcher", () => {
       expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
     });
 
+    function visibleOptionLabels() {
+      return within(screen.getByRole("listbox", { name: "Centres" }))
+        .queryAllByRole("option")
+        .map((option) => option.textContent);
+    }
+
+    function searchInput() {
+      return screen.getByRole("combobox", { name: "Search Centres" });
+    }
+
+    describe("search", () => {
+      it.each([
+        ["Centre name", "foundation", [
+          "Nagaland Foundation" + "No Program · JNV Kohima (13001)",
+          "Nagaland Foundation" + "No Program · JNV Kohima (13001)",
+        ]],
+        ["Program name", "  NODAL ", [
+          "JNV Adilabad" + "JNV Nodal · JNV Adilabad (36001)",
+        ]],
+        ["School name", "Annex", [
+          "JNV Adilabad" + "JNV CoE · Adilabad Annex (36002)",
+        ]],
+        ["School code", " 36001", [
+          "JNV Adilabad" + "JNV CoE · JNV Adilabad (36001)",
+          "JNV Adilabad" + "JNV Nodal · JNV Adilabad (36001)",
+        ]],
+      ])("filters by %s, ignoring case and surrounding spaces", async (_field, query, expected) => {
+        const user = await openSwitcher();
+
+        await user.type(searchInput(), query);
+
+        expect(visibleOptionLabels()).toEqual(expected);
+      });
+
+      it("keeps the current Centre first when it matches", async () => {
+        const user = await openSwitcher();
+
+        await user.type(searchInput(), "coe");
+
+        expect(visibleOptionLabels()).toEqual([
+          "JNV Bhavnagar CoE" + "Current" + "JNV CoE · JNV Bhavnagar (70705)",
+          "JNV Adilabad" + "JNV CoE · Adilabad Annex (36002)",
+          "JNV Adilabad" + "JNV CoE · JNV Adilabad (36001)",
+        ]);
+      });
+
+      it("says nothing matches, and Clear search restores the list and refocuses the input", async () => {
+        const user = await openSwitcher();
+
+        await user.type(searchInput(), "zzz");
+
+        expect(visibleOptionLabels()).toEqual([]);
+        expect(screen.getByText("No accessible Centres match your search")).toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "Clear search" }));
+
+        expect(searchInput()).toHaveValue("");
+        expect(searchInput()).toHaveFocus();
+        expect(visibleOptionLabels()).toHaveLength(6);
+        expect(screen.queryByText("No accessible Centres match your search")).not.toBeInTheDocument();
+      });
+    });
+
+    describe("keyboard", () => {
+      async function renderClosed() {
+        setupCentre();
+        stubSwitcherRows([NAGALAND, ADILABAD_NODAL, NAGALAND_9, BHAVNAGAR_COE, ADILABAD_COE, ADILABAD_ANNEX]);
+        await renderCentre("8");
+        return userEvent.setup();
+      }
+
+      // The ids of the options in the order shown, for aria-activedescendant.
+      function optionIdAt(index: number) {
+        return within(screen.getByRole("listbox", { name: "Centres" })).getAllByRole("option")[index].id;
+      }
+
+      it.each([["{Enter}"], [" "], ["{ArrowDown}"]])(
+        "opens with %s on the trigger and focuses the named search input",
+        async (key) => {
+          const user = await renderClosed();
+          switcherTrigger()!.focus();
+
+          await user.keyboard(key);
+
+          expect(switcherTrigger()).toHaveAttribute("aria-expanded", "true");
+          expect(searchInput()).toHaveFocus();
+          expect(searchInput()).toHaveAttribute("aria-expanded", "true");
+          expect(searchInput()).toHaveAttribute(
+            "aria-controls",
+            screen.getByRole("listbox", { name: "Centres" }).id,
+          );
+          const heading = screen.getByRole("heading", { level: 1 });
+          expect(heading).toHaveAccessibleName("JNV Bhavnagar CoE");
+          expect(heading.contains(searchInput())).toBe(false);
+        },
+      );
+
+      // Shown order: Bhavnagar (Current), Adilabad Annex, Adilabad CoE,
+      // Adilabad Nodal, Nagaland 9, Nagaland 16.
+      function activeOptionText() {
+        const id = searchInput().getAttribute("aria-activedescendant");
+        return id ? document.getElementById(id)?.textContent : null;
+      }
+
+      it("moves the active option with the arrows, skipping the current Centre", async () => {
+        const user = await renderClosed();
+        switcherTrigger()!.focus();
+        await user.keyboard("{ArrowDown}");
+
+        expect(searchInput()).not.toHaveAttribute("aria-activedescendant");
+
+        await user.keyboard("{ArrowDown}");
+        expect(activeOptionText()).toBe("JNV Adilabad" + "JNV CoE · Adilabad Annex (36002)");
+        expect(searchInput()).toHaveAttribute("aria-activedescendant", optionIdAt(1));
+
+        await user.keyboard("{ArrowDown}{ArrowDown}");
+        expect(activeOptionText()).toBe("JNV Adilabad" + "JNV Nodal · JNV Adilabad (36001)");
+
+        await user.keyboard("{ArrowUp}{ArrowUp}{ArrowUp}");
+        expect(activeOptionText()).toBe("JNV Adilabad" + "JNV CoE · Adilabad Annex (36002)");
+      });
+
+      it("jumps to the last and first selectable options with End and Home", async () => {
+        const user = await renderClosed();
+        switcherTrigger()!.focus();
+        await user.keyboard("{ArrowDown}");
+
+        await user.keyboard("{End}");
+        expect(searchInput()).toHaveAttribute("aria-activedescendant", optionIdAt(5));
+
+        await user.keyboard("{Home}");
+        expect(activeOptionText()).toBe("JNV Adilabad" + "JNV CoE · Adilabad Annex (36002)");
+      });
+
+      it("goes to the active Centre's page on Enter, like a click", async () => {
+        const user = await renderClosed();
+        switcherTrigger()!.focus();
+        await user.keyboard("{ArrowDown}{End}{Enter}");
+
+        expect(mockRouterPush).toHaveBeenCalledTimes(1);
+        expect(mockRouterPush).toHaveBeenCalledWith("/centre/16");
+        expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+      });
+
+      it("does nothing on Enter when only the current Centre matches", async () => {
+        const user = await renderClosed();
+        switcherTrigger()!.focus();
+        await user.keyboard("{ArrowDown}");
+        await user.type(searchInput(), "bhavnagar");
+
+        await user.keyboard("{ArrowDown}{Enter}");
+
+        expect(mockRouterPush).not.toHaveBeenCalled();
+        expect(screen.getByRole("listbox", { name: "Centres" })).toBeInTheDocument();
+      });
+
+      it("clears the active option when the search filters it away", async () => {
+        const user = await renderClosed();
+        switcherTrigger()!.focus();
+        await user.keyboard("{ArrowDown}{ArrowDown}");
+        expect(activeOptionText()).toBe("JNV Adilabad" + "JNV CoE · Adilabad Annex (36002)");
+
+        await user.keyboard("kohima");
+
+        expect(searchInput()).not.toHaveAttribute("aria-activedescendant");
+        await user.keyboard("{ArrowDown}");
+        expect(activeOptionText()).toBe("Nagaland Foundation" + "No Program · JNV Kohima (13001)");
+      });
+    });
+
+    describe("dismissal", () => {
+      it("closes on Escape and returns focus to the trigger", async () => {
+        const user = await openSwitcher();
+
+        await user.keyboard("{Escape}");
+
+        expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+        expect(switcherTrigger()).toHaveAttribute("aria-expanded", "false");
+        expect(switcherTrigger()).toHaveFocus();
+      });
+
+      it("closes when the trigger is clicked again, with focus on the trigger", async () => {
+        const user = await openSwitcher();
+        expect(searchInput()).toHaveFocus();
+
+        await user.click(switcherTrigger()!);
+
+        expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+        expect(switcherTrigger()).toHaveFocus();
+      });
+
+      it("closes on Tab and leaves focus on the next control", async () => {
+        const user = await openSwitcher();
+
+        await user.tab();
+
+        expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+        expect(screen.getByRole("link", { name: "Start Visit" })).toHaveFocus();
+      });
+
+      it("closes on Shift+Tab and leaves focus on the previous control", async () => {
+        const user = await openSwitcher();
+
+        await user.tab({ shift: true });
+
+        expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+        expect(switcherTrigger()).toHaveFocus();
+      });
+
+      it("closes on a click on another control without taking its focus", async () => {
+        const user = await openSwitcher();
+        const elsewhere = document.createElement("button");
+        elsewhere.textContent = "Elsewhere";
+        document.body.appendChild(elsewhere);
+
+        await user.click(elsewhere);
+
+        expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+        expect(elsewhere).toHaveFocus();
+        elsewhere.remove();
+      });
+
+      it("closes on a click on non-focusable page content", async () => {
+        const user = await openSwitcher();
+
+        await user.click(screen.getByTestId("school-tabs"));
+
+        expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+      });
+
+      it("reopens with an empty search", async () => {
+        const user = await openSwitcher();
+        await user.type(searchInput(), "kohima");
+        await user.keyboard("{Escape}");
+
+        await user.click(switcherTrigger()!);
+
+        expect(searchInput()).toHaveValue("");
+        expect(visibleOptionLabels()).toHaveLength(6);
+      });
+    });
+
     it("does nothing when the current Centre is clicked", async () => {
       const user = await openSwitcher();
 

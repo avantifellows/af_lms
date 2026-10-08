@@ -123,9 +123,29 @@ Tests: `src/app/centre/[id]/page.test.tsx` keeps the real header and query expor
 `removeCentreSwitcherFixture` (`e2e/helpers/db.ts`) and `signInAs`
 (`e2e/fixtures/auth.ts`) — the shared fixture contract for #398–#400.
 
-**Still planned (#398–#400):** search, keyboard/combobox, focus, mobile layout,
-effective outer-tab carry, pending guard, Back/Forward journeys, and
-type/category → Centre ID disambiguation. The grilled plan follows.
+**Search, keyboard, and mobile (#398):** the popup opens with a `combobox` input
+("Search Centres", `aria-controls` → the "Centres" listbox) that takes focus however
+the popup opens (click, Enter, Space, ArrowDown on the trigger) and starts empty.
+`matchesCentreSearch` in `src/lib/centre-switcher.ts` filters on the separate
+`search` fields only (trimmed, case-insensitive substring; empty matches all), so
+the current Centre stays first when it matches. No match shows "No accessible
+Centres match your search" plus "Clear search" (empties and refocuses the input).
+ArrowUp/Down/Home/End move `aria-activedescendant` over non-current options only;
+the active option is derived from the filtered list, so filtering it away clears
+it at once. Enter calls the same `select` handler as a click (nothing without an
+active option). Escape and a trigger click close and focus the trigger; the input's
+blur closes on Tab/Shift+Tab or a click on another control without moving focus,
+and a click on non-focusable content returns focus to the trigger. Mouse-downs
+inside the popup and on the trigger are prevented so focus stays in the input.
+Below `sm` the popup is positioned against `PageHeader`'s `<header>` (now
+`relative`) and spans its width; from `sm` up it anchors under the title. The
+list caps at `60vh`/`max-h-80` and scrolls; the input and options are ≥ 44px.
+Tests: the page seam's `popup › search/keyboard/dismissal` blocks and the 390px
+Playwright journey (search by School code → select → Delta loads).
+
+**Still planned (#399–#400):** effective outer-tab carry, pending guard,
+Back/Forward journeys, and type/category → Centre ID disambiguation. The grilled
+plan follows.
 
 
 Issue #388 will add a searchable switcher to the Centre page title when the

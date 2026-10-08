@@ -87,4 +87,40 @@ test.describe("Centre switcher", () => {
     await expect(page.getByText("JNV Nodal | JNV Surguja", { exact: false })).toBeVisible();
     expect(await page.evaluate(() => window.history.length)).toBe(historyBefore + 1);
   });
+
+  test("on a phone, the switcher spans the header, scrolls, and switches by School code", async ({ browser }) => {
+    const page = await pageAs(browser, CENTRE_SWITCHER_USERS.schoolScoped);
+    await page.setViewportSize({ width: 390, height: 740 });
+    await page.goto(`/centre/${fixture.centres.alpha}`);
+
+    await switcher(page).click();
+    const search = page.getByRole("combobox", { name: "Search Centres" });
+    await expect(search).toBeFocused();
+
+    const header = (await page.locator("header").boundingBox())!;
+    const popup = (await page.getByRole("listbox", { name: "Centres" }).locator("..").boundingBox())!;
+    expect(popup.x).toBeGreaterThanOrEqual(header.x);
+    expect(popup.x + popup.width).toBeLessThanOrEqual(header.x + header.width);
+    expect(popup.width).toBeGreaterThanOrEqual(header.width - 16);
+
+    const listbox = page.getByRole("listbox", { name: "Centres" });
+    await expect(listbox).toHaveCSS("overflow-y", "auto");
+    expect(await listbox.evaluate((el) => getComputedStyle(el).maxHeight)).not.toBe("none");
+
+    await search.fill("19006");
+    const options = listbox.getByRole("option");
+    await expect(options).toHaveText([
+      "Switcher E2E CharlieNo Program · JNV Durg (19006)",
+      "Switcher E2E DeltaJNV CoE · JNV Durg (19006)",
+    ]);
+    for (const option of await options.all()) {
+      expect((await option.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    }
+
+    await options.filter({ hasText: "Switcher E2E Delta" }).click();
+
+    await page.waitForURL(new RegExp(`/centre/${fixture.centres.delta}$`));
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Switcher E2E Delta");
+    await page.context().close();
+  });
 });

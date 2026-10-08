@@ -75,3 +75,17 @@ export function buildCentreSwitcherOptions(
 export function shouldShowSwitcher(options: CentreSwitcherOption[]): boolean {
   return options.some((option) => !option.isCurrent);
 }
+
+/**
+ * Whether an option matches the switcher search: a trimmed, case-insensitive
+ * substring of the Centre, Program, School name, or School code. An empty
+ * query matches everything.
+ */
+export function matchesCentreSearch(option: CentreSwitcherOption, query: string): boolean {
+  const needle = query.trim().toLocaleLowerCase();
+  if (!needle) return true;
+  const { centreName, programName, schoolName, schoolCode } = option.search;
+  return [centreName, programName, schoolName, schoolCode].some(
+    (field) => field != null && field.toLocaleLowerCase().includes(needle),
+  );
+}
