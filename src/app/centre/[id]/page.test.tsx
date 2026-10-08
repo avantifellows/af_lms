@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 // ---- mocks (hoisted) ----
@@ -22,6 +22,7 @@ const {
   mockListAcademicMentorshipTeacherMentees,
   mockListHolisticAssignmentRoster,
   mockRequireHolisticMentorshipAccess,
+  searchParamsState,
 } = vi.hoisted(() => ({
   mockGetServerSession: vi.fn(),
   mockGetUserPermission: vi.fn(),
@@ -44,6 +45,9 @@ const {
   mockListAcademicMentorshipTeacherMentees: vi.fn(),
   mockListHolisticAssignmentRoster: vi.fn(),
   mockRequireHolisticMentorshipAccess: vi.fn(),
+  // The page's query string as useSearchParams reports it (not a vi.fn, so
+  // resetAllMocks leaves it alone; each switcher test sets it).
+  searchParamsState: { current: new URLSearchParams() },
 }));
 
 vi.mock("next-auth", () => ({ getServerSession: mockGetServerSession }));
@@ -52,6 +56,7 @@ vi.mock("next/navigation", () => ({
   redirect: mockRedirect,
   notFound: mockNotFound,
   useRouter: () => ({ refresh: mockRouterRefresh, push: mockRouterPush }),
+  useSearchParams: () => searchParamsState.current,
 }));
 vi.mock("@/lib/permissions", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/permissions")>();
@@ -539,6 +544,7 @@ describe("CentrePage → Centre switcher", () => {
     mockListHolisticAssignmentRoster.mockResolvedValue([]);
     mockGetAcademicMentorshipActorUserId.mockResolvedValue(101);
     mockRequireHolisticMentorshipAccess.mockResolvedValue({ ok: false, status: 403, error: "Forbidden" });
+    searchParamsState.current = new URLSearchParams();
   });
 
   it("turns the Centre title into a switcher button when another Centre is browsable", async () => {
@@ -1046,5 +1052,104 @@ describe("CentrePage → Centre switcher", () => {
 
       expect(mockRouterPush).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe("CentrePage → Centre switcher → where a switch lands", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    mockRedirect.mockImplementation((url: string) => {
+      throw new Error(`REDIRECT:${url}`);
+    });
+    mockNotFound.mockImplementation(() => {
+      throw new Error("NOT_FOUND");
+    });
+    mockListAcademicMentorshipMappings.mockResolvedValue([]);
+    mockListAcademicMentorshipTeacherMentees.mockResolvedValue([]);
+    mockListHolisticAssignmentRoster.mockResolvedValue([]);
+    mockGetAcademicMentorshipActorUserId.mockResolvedValue(101);
+    // Holistic Mentorship is hidden unless a test grants it.
+    mockRequireHolisticMentorshipAccess.mockResolvedValue({ ok: false, status: 403, error: "Forbidden" });
+    searchParamsState.current = new URLSearchParams();
+  });
+
+  // Centre 8's page at the given query string; option 1 is JNV Adilabad (30).
+  async function switchFrom(search: string) {
+    searchParamsState.current = new URLSearchParams(search);
+    setupCentre();
+    stubSwitcherRows([BHAVNAGAR_COE, ADILABAD_COE]);
+    await renderCentre("8");
+    const user = userEvent.setup();
+    await user.click(switcherTrigger()!);
+    await user.click(within(screen.getByRole("listbox")).getAllByRole("option")[1]);
+  }
+
+  it("keeps the Performance tab and drops Grade, stream, report and hash", async () => {
+    await switchFrom("?tab=performance&grade=12&stream=pcm&session=x#h");
+
+    expect(mockRouterPush).toHaveBeenCalledTimes(1);
+    expect(mockRouterPush).toHaveBeenCalledWith("/centre/30?tab=performance");
+  });
+
+  it.each(["", "?tab=enrollment"])("lands on the bare Centre page from Enrollment (%s)", async (search) => {
+    await switchFrom(search);
+
+    expect(mockRouterPush).toHaveBeenCalledTimes(1);
+    expect(mockRouterPush).toHaveBeenCalledWith("/centre/30");
+  });
+
+  // Holistic Mentorship is hidden here, so both URLs display Enrollment.
+  it.each(["?tab=nonsense&grade=11", "?tab=holistic_mentorship"])(
+    "does not carry a tab the source isn't showing (%s)",
+    async (search) => {
+      await switchFrom(search);
+
+      expect(mockRouterPush).toHaveBeenCalledTimes(1);
+      expect(mockRouterPush).toHaveBeenCalledWith("/centre/30");
+    },
+  );
+
+  it.each([
+    ["curriculum", "/centre/30?tab=curriculum"],
+    ["quiz_sessions", "/centre/30?tab=quiz_sessions"],
+    ["teacher_feedback", "/centre/30?tab=teacher_feedback"],
+    ["mentorship", "/centre/30?tab=mentorship"],
+    ["visits", "/centre/30?tab=visits"],
+  ])("carries the %s tab", async (tab, expected) => {
+    await switchFrom(`?tab=${tab}`);
+
+    expect(mockRouterPush).toHaveBeenCalledWith(expected);
+  });
+
+  it("carries the Holistic Mentorship tab when the source shows it", async () => {
+    mockRequireHolisticMentorshipAccess.mockResolvedValue({
+      ok: true,
+      email: "teacher@avantifellows.org",
+      permission: makePermission(),
+      canEdit: true,
+      school: { id: 20, code: "70705", name: "JNV Bhavnagar", region: "West" },
+    });
+
+    await switchFrom("?tab=holistic_mentorship");
+
+    expect(mockRouterPush).toHaveBeenCalledWith("/centre/30?tab=holistic_mentorship");
+  });
+
+  // router.push returns void, so nothing to await: the guard must engage
+  // before push, while the closing popup's options are still clickable.
+  it("navigates once when two Centres are chosen in the same turn", async () => {
+    setupCentre();
+    stubSwitcherRows([BHAVNAGAR_COE, ADILABAD_COE, ADILABAD_NODAL]);
+    await renderCentre("8");
+    await userEvent.setup().click(switcherTrigger()!);
+    const options = within(screen.getByRole("listbox")).getAllByRole("option");
+
+    act(() => {
+      options[1].click();
+      options[2].click();
+    });
+
+    expect(mockRouterPush).toHaveBeenCalledTimes(1);
+    expect(mockRouterPush).toHaveBeenCalledWith("/centre/30");
   });
 });

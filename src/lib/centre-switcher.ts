@@ -4,6 +4,8 @@
  * logic: ordering, context labels, and the current-Centre merge.
  */
 
+import { DEFAULT_ROSTER_TAB, ROSTER_TAB_IDS } from "@/lib/roster-tabs";
+
 /** One browsable Centre the viewer may open, as the list query returns it. */
 export interface CentreSwitcherEntry {
   id: string;
@@ -88,4 +90,16 @@ export function matchesCentreSearch(option: CentreSwitcherOption, query: string)
   return [centreName, programName, schoolName, schoolCode].some(
     (field) => field != null && field.toLocaleLowerCase().includes(needle),
   );
+}
+
+/**
+ * Where switching to another Centre lands: its page on the outer tab the user
+ * is looking at. Only the tab carries over (and not at all for the default
+ * Enrollment tab) — Grade, stream, report, every other parameter and the hash
+ * belong to the source Centre. Pass the effective visible tab, never a raw
+ * `?tab=` value that may be hidden.
+ */
+export function centreSwitchHref(targetId: string, effectiveTab: string): string {
+  const carry = effectiveTab !== DEFAULT_ROSTER_TAB && (ROSTER_TAB_IDS as readonly string[]).includes(effectiveTab);
+  return carry ? `/centre/${targetId}?tab=${effectiveTab}` : `/centre/${targetId}`;
 }

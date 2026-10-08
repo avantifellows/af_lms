@@ -143,8 +143,33 @@ list caps at `60vh`/`max-h-80` and scrolls; the input and options are ≥ 44px.
 Tests: the page seam's `popup › search/keyboard/dismissal` blocks and the 390px
 Playwright journey (search by School code → select → Delta loads).
 
-**Still planned (#399–#400):** effective outer-tab carry, pending guard,
-Back/Forward journeys, and type/category → Centre ID disambiguation. The grilled
+**Tab carry, history, and pending (#399):** `src/lib/roster-tabs.ts` (client-safe)
+owns `ROSTER_TAB_IDS` (the eight outer tab ids in display order; `RosterPage`'s
+`visibleRosterTabs` is typed by it), `DEFAULT_ROSTER_TAB` (`enrollment`), and
+`resolveVisibleTab(rawTab, visibleTabIds, defaultTab)` — raw tab if visible, else
+the default if visible, else the first visible tab. `SchoolTabs` and the switcher
+both use it, so they agree on which tab a URL shows. `RosterPage` passes the
+switcher the source page's visible tab ids and `tabs[0]` as default. `select`
+reads `?tab=` from `useSearchParams()` at selection time (tab clicks write it with
+`history.replaceState`, never a server prop), resolves it, and pushes
+`centreSwitchHref(id, tab)` from `src/lib/centre-switcher.ts`: `/centre/<id>` plus
+`?tab=<tab>` only for a non-default roster tab — Grade, stream, report session,
+every other parameter, and the hash are dropped, and a hidden/unknown raw tab
+resolves to Enrollment, so it is never carried. The push runs inside
+`useTransition`; a `navigatingRef` set synchronously before `push` (which returns
+`void`) ignores further choices until `isPending` falls back to false. The
+`role="status"` sibling of the `h1` shows "Switching Centre…" meanwhile; default
+scroll-to-top is kept. The destination re-runs `getCentreWithSchool` and
+`canViewCentre` (stale scope → Access Denied), `SchoolTabs` maps a hidden tab to
+Enrollment, a Program-less target keeps program-scoped tabs with
+`NoCentreProgram`, and Performance adds its own default Grade by `replace` — one
+history entry per switch, and Back restores the source's untouched query/report.
+Tests: the page seam's `where a switch lands` block (literal pushed URLs, a
+same-turn double click inside one `act`) and `e2e/tests/centre-switcher-history.spec.ts`
+(an init-script recorder of `pushState`/`replaceState` proves the first write is the
+lone push; held RSC request for the pending case; scope revoked via the test pool).
+
+**Still planned (#400):** type/category → Centre ID disambiguation. The grilled
 plan follows.
 
 

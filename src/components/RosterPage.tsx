@@ -48,6 +48,7 @@ import {
   type CentreSwitcherOption,
 } from "@/lib/centre-switcher";
 import SchoolTabs from "@/components/SchoolTabs";
+import type { RosterTabId } from "@/lib/roster-tabs";
 import { Badge, Card } from "@/components/ui";
 import CurriculumTab from "@/components/curriculum/CurriculumTab";
 import PerformanceTab from "@/components/PerformanceTab";
@@ -1154,10 +1155,11 @@ function visibleRosterTabs({
     | "visits",
     ReactNode
   >;
-}): Array<{ id: string; label: string; content: ReactNode }> {
+}): Array<{ id: RosterTabId; label: string; content: ReactNode }> {
   const programScoped = (tabContent: ReactNode) =>
     hasNoCentreProgram ? noCentreProgramContent : tabContent;
-  const candidates: Array<{ id: string; label: string; content: ReactNode; show: boolean }> = [
+  // Listed in ROSTER_TAB_IDS order; the switcher carries these same ids.
+  const candidates: Array<{ id: RosterTabId; label: string; content: ReactNode; show: boolean }> = [
     { id: "enrollment", label: "Enrollment", content: content.enrollment, show: true },
     {
       id: "curriculum",
@@ -1387,7 +1389,15 @@ export default async function RosterPage({
   return (
     <RosterShell
       title={title}
-      titleBlock={switcherOptions ? <CentreSwitcher options={switcherOptions} /> : undefined}
+      titleBlock={
+        switcherOptions ? (
+          <CentreSwitcher
+            options={switcherOptions}
+            tabIds={tabs.map((tab) => tab.id)}
+            defaultTab={tabs[0]?.id}
+          />
+        ) : undefined
+      }
       subtitle={subtitle}
       backHref={backHref}
       userEmail={session.user?.email || undefined}

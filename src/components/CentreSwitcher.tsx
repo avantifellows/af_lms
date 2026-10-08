@@ -1,26 +1,48 @@
 "use client";
 
-import { ChevronDown } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { useEffect, useId, useRef, useState } from "react";
+import { ChevronDown, Loader2 } from "lucide-react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useId, useRef, useState, useTransition } from "react";
 import { PAGE_TITLE_CLASS } from "@/components/PageHeader";
 import { Badge } from "@/components/ui";
-import { matchesCentreSearch, type CentreSwitcherOption } from "@/lib/centre-switcher";
+import {
+  centreSwitchHref,
+  matchesCentreSearch,
+  type CentreSwitcherOption,
+} from "@/lib/centre-switcher";
+import { resolveVisibleTab } from "@/lib/roster-tabs";
 
 /**
  * The Centre page title as a switcher. The h1 holds only the trigger, so the
  * heading's accessible name stays exactly the Centre name; the popup is the
  * heading's sibling, never inside it. Option logic (order, labels) lives in
  * `@/lib/centre-switcher`; this component only renders and navigates.
+ *
+ * `tabIds`/`defaultTab` are the source page's visible outer tabs, so a switch
+ * carries the tab the user actually sees, never a hidden raw `?tab=`.
  */
-export default function CentreSwitcher({ options }: { options: CentreSwitcherOption[] }) {
+export default function CentreSwitcher({
+  options,
+  tabIds,
+  defaultTab,
+}: {
+  options: CentreSwitcherOption[];
+  tabIds: readonly string[];
+  defaultTab?: string;
+}) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [activeId, setActiveId] = useState<string | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popupRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  // router.push returns nothing to await, so a ref (set before push, in the
+  // same turn) stops a second choice racing the first; isPending mirrors it
+  // for the indicator and releases it once the navigation settles.
+  const navigatingRef = useRef(false);
+  const [isPending, startTransition] = useTransition();
   const descriptionId = useId();
   const listboxId = useId();
   const current = options.find((option) => option.isCurrent) ?? options[0];
@@ -35,6 +57,10 @@ export default function CentreSwitcher({ options }: { options: CentreSwitcherOpt
   useEffect(() => {
     if (open) inputRef.current?.focus();
   }, [open]);
+
+  useEffect(() => {
+    if (!isPending) navigatingRef.current = false;
+  }, [isPending]);
 
   function openPopup() {
     setQuery("");
@@ -83,9 +109,13 @@ export default function CentreSwitcher({ options }: { options: CentreSwitcherOpt
 
   // The one place a choice becomes navigation.
   function select(option: CentreSwitcherOption) {
-    if (option.isCurrent) return;
+    if (option.isCurrent || navigatingRef.current) return;
+    navigatingRef.current = true;
     setOpen(false);
-    router.push(`/centre/${option.id}`);
+    // Outer-tab clicks rewrite ?tab= with history.replaceState, which Next
+    // surfaces through useSearchParams, so read it now rather than from props.
+    const tab = resolveVisibleTab(searchParams.get("tab"), tabIds, defaultTab);
+    startTransition(() => router.push(centreSwitchHref(option.id, tab)));
   }
 
   return (
@@ -117,6 +147,15 @@ export default function CentreSwitcher({ options }: { options: CentreSwitcherOpt
       </h1>
       <span id={descriptionId} className="sr-only">
         Switch Centre
+      </span>
+      {/* Outside the h1 so the heading's name stays the Centre name. */}
+      <span role="status" className="flex items-center gap-1 text-sm text-text-muted">
+        {isPending && (
+          <>
+            <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />
+            Switching Centre…
+          </>
+        )}
       </span>
       {open && (
         <div
