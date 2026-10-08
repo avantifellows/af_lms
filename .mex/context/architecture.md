@@ -118,12 +118,21 @@ disambiguate otherwise identical labels. The current Centre is first and inert.
 A single browsable Centre keeps the existing plain title. A list-read failure
 also falls back to the plain title without failing the current Centre page.
 
-Choosing a Centre pushes history and carries only the current outer `tab`. It
-drops every Centre-specific query value and hash. Back therefore restores the
-previous Centre's untouched URL, including any earlier Performance report or
-filters. A Program-less target keeps the tab and uses the existing no-Program
-state; a tab that is genuinely unavailable at the destination falls back to
-Enrollment. No School-page switcher, dashboard redesign, new API, permission,
+Choosing a Centre pushes history and carries only the outer tab that is actually
+visible at the source; a stale or hidden raw `tab` cannot reappear on a later
+switch. It drops every Centre-specific query value and hash. Back therefore
+restores the previous Centre's untouched URL, including any earlier Performance
+report or filters. Destination-owned defaults may reconcile by `replace` without
+adding a history entry. A Program-less target keeps the tab and uses the existing
+no-Program state; a tab genuinely unavailable at the destination falls back to
+Enrollment.
+
+The reviewed implementation contract keeps the popup outside the heading subtree,
+uses dismissal-specific focus behavior, guards navigation synchronously before
+App Router's void-returning `push`, and adapts the Centre-page tests to retain the
+real header and switcher query. Browser fixtures prove inactive, School-less,
+unseated, and out-of-scope Centres are excluded rather than merely omitting them
+from mocked rows. No School-page switcher, dashboard redesign, new API, permission,
 persistence, schema, or School-less Centre page is part of #388.
 
 The implementation will be a separate stack on PR #394, then retarget to `main`
