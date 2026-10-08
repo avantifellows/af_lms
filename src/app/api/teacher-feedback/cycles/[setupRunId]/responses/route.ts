@@ -23,6 +23,7 @@ export async function GET(
     const quizIds = round.rows.map((r) => r.quiz_id).filter((id): id is string => !!id);
     const responders = await getRespondersByQuiz(quizIds);
 
+    const rosterIds = new Set(roster.map((s) => s.user_id));
     const teachers = round.rows.map((row) => {
       const answered = (row.quiz_id && responders.get(row.quiz_id)) || new Set<string>();
       const pending = roster.filter((s) => !answered.has(s.user_id));
@@ -31,6 +32,10 @@ export async function GET(
         teacherOrder: row.teacher_order,
         responded: roster.length - pending.length,
         total: roster.length,
+        // Answered but not in the round's batches today: dropouts, students who
+        // moved batch, or a class handed a link meant for another batch. Analysis
+        // still counts them, so say so rather than let the numbers disagree.
+        outsideBatches: [...answered].filter((id) => !rosterIds.has(id)).length,
         notResponded: pending.map(({ name, student_id, batch_id }) => ({
           name,
           studentId: student_id,

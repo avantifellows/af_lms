@@ -29,23 +29,24 @@ beforeEach(() => {
     { user_id: "1", student_id: "S1", name: "Anil", batch_id: "B27" },
     { user_id: "2", student_id: "S2", name: "Bina", batch_id: "B27" },
   ]);
-  vi.mocked(getRespondersByQuiz).mockResolvedValue(new Map([["q1", new Set(["1", "2"])], ["q2", new Set(["2"])]]));
+  vi.mocked(getRespondersByQuiz).mockResolvedValue(new Map([["q1", new Set(["1", "2", "99"])], ["q2", new Set(["2"])]]));
 });
 
 describe("GET /api/teacher-feedback/cycles/:setupRunId/responses", () => {
-  it("counts responders per teacher and lists who is pending", async () => {
+  it("counts responders per teacher, lists who is pending, and flags outsiders", async () => {
     const res = await get();
 
     expect(getRoundRoster).toHaveBeenCalledWith(["B27"]);
     expect(getRespondersByQuiz).toHaveBeenCalledWith(["q1", "q2"]);
     expect(await res.json()).toEqual({
       teachers: [
-        { teacherName: "Asha", teacherOrder: 1, responded: 2, total: 2, notResponded: [] },
+        { teacherName: "Asha", teacherOrder: 1, responded: 2, total: 2, outsideBatches: 1, notResponded: [] },
         {
           teacherName: "Ravi",
           teacherOrder: 2,
           responded: 1,
           total: 2,
+          outsideBatches: 0,
           notResponded: [{ name: "Anil", studentId: "S1", batchId: "B27" }],
         },
       ],

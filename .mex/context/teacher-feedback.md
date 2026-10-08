@@ -95,6 +95,16 @@ an id join and both copies of the form go away.
   the round. BigQuery responders (`user_id` = `user.id`) are matched against it, so
   a responder who has since left the batch drops out of the count. Returns
   names of non-responders only; never which student said what.
+- **Responders outside the roster are counted separately** (`outsideBatches`), as
+  Analysis still scores them. Across 114 rounds (Oct 2026) it was 55 of 3,731:
+  mostly dropouts and batch moves, plus one Punjab round (7 Sep, `4eaf7760`) where
+  a 40-student N002 class was handed the C001 links in one sitting.
+- **The portal link does not check batch.** portal-backend
+  `verify_student_comprehensive` only checks the student is in the session's auth
+  *group* (e.g. all of PunjabStudents), plus DOB when `auth_type` has it. Gurukul's
+  home list does filter by batch. So a shared link works for any student in the
+  programme; the batch scoping is only as good as who the link is given to.
+- **"Admin test" submits as `test_admin`**; both BigQuery queries exclude it.
 - **Monthly nudge at setup is per batch**: a round whose start falls in the
   current IST month and shares any picked batch triggers "extend it instead?".
   Two rounds in one month for *different* batches (Kurnool's 2027 and 2028

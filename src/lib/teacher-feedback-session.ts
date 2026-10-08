@@ -231,15 +231,8 @@ export async function extendFeedbackSession(
   const base = dbBaseUrl();
   const endIst = utcToISTDate(endTimeUtc);
 
-  const sessionResp = await fetch(`${base}/session/${sessionPk}`, {
-    method: "PATCH",
-    headers: authHeaders(),
-    body: JSON.stringify({ end_time: endIst }),
-  });
-  if (!sessionResp.ok) {
-    throw new Error(`session ${sessionPk}: PATCH failed (${sessionResp.status})`);
-  }
-
+  // Find the occurrence before writing anything, so a missing one can't leave
+  // the session extended but the portal (which gates on the occurrence) not.
   if (!sessionId) {
     throw new Error(`session ${sessionPk}: no session_id yet, so its schedule can't be found`);
   }
@@ -251,6 +244,15 @@ export async function extendFeedbackSession(
   const occurrence = Array.isArray(occurrences) ? occurrences[0] : undefined;
   if (!occurrence?.id) {
     throw new Error(`session ${sessionPk}: no schedule (occurrence) found`);
+  }
+
+  const sessionResp = await fetch(`${base}/session/${sessionPk}`, {
+    method: "PATCH",
+    headers: authHeaders(),
+    body: JSON.stringify({ end_time: endIst }),
+  });
+  if (!sessionResp.ok) {
+    throw new Error(`session ${sessionPk}: PATCH failed (${sessionResp.status})`);
   }
   const occPatch = await fetch(`${base}/session-occurrence/${occurrence.id}`, {
     method: "PATCH",

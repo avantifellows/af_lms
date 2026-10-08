@@ -8,6 +8,7 @@ import { requireCentreScope } from "./teacher-feedback-access";
 export interface RoundRow {
   teacher_name: string;
   teacher_order: number;
+  status: string;
   /** bigints come back from pg as strings — coerce before use. */
   session_pk: number | string | null;
   session_id: string | null;
@@ -30,7 +31,7 @@ export async function loadAuthorizedRound(
 ): Promise<{ ok: true; rows: RoundRow[] } | { ok: false; response: NextResponse }> {
   const rows = await query<RoundRow>(
     `
-    SELECT tf.teacher_name, tf.teacher_order, tf.session_pk,
+    SELECT tf.teacher_name, tf.teacher_order, tf.status, tf.session_pk,
            s.session_id, s.platform_id AS quiz_id,
            tf.school_code, sch.id AS school_id, tf.centre_id, tf.batch_class_ids,
            tf.start_time::text AS start_time, tf.end_time::text AS end_time

@@ -25,6 +25,8 @@ import {
 const BQ_PROJECT = process.env.BIGQUERY_PROJECT?.trim() || "avantifellows";
 const FORM_LEVEL_TABLE = `\`${BQ_PROJECT}.assessments.all_responses_form_level\``;
 const BQ_LOCATION = "asia-south1";
+// The "Admin test" link submits as this user; a PM trying the form isn't a student.
+const ADMIN_TEST_USER = "test_admin";
 
 interface RawRow {
   user_id: string;
@@ -151,6 +153,7 @@ export async function getTeacherFeedbackReport(
     FROM ${FORM_LEVEL_TABLE}
     WHERE test_id = @quizId
       AND is_answered = TRUE
+      AND user_id != '${ADMIN_TEST_USER}'
   `;
   const [rows] = await client.query({
     query: sql,
@@ -211,6 +214,7 @@ export async function getRespondersByQuiz(quizIds: string[]): Promise<Map<string
       SELECT test_id, ARRAY_AGG(DISTINCT user_id) AS user_ids
       FROM ${FORM_LEVEL_TABLE}
       WHERE test_id IN UNNEST(@quizIds) AND is_answered = TRUE
+        AND user_id != '${ADMIN_TEST_USER}'
       GROUP BY test_id
     `,
     params: { quizIds },

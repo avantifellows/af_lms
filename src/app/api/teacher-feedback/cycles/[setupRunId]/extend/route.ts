@@ -28,21 +28,24 @@ export async function POST(
 
   const body = (await request.json().catch(() => null)) as { endTime?: unknown } | null;
   const end = typeof body?.endTime === "string" ? new Date(body.endTime) : null;
-  const start = parseUtc(round.rows[0].start_time);
+  const currentEnd = parseUtc(round.rows[0].end_time);
   if (!end || Number.isNaN(end.getTime()) || end.getTime() <= Date.now()) {
     return NextResponse.json({ error: "New end time must be in the future" }, { status: 400 });
   }
-  if (start && end <= start) {
-    return NextResponse.json({ error: "New end time must be after the start" }, { status: 400 });
+  // Extend only: shortening a live round would cut students off mid-window.
+  if (currentEnd && end <= currentEnd) {
+    return NextResponse.json({ error: "New end time must be after the current end" }, { status: 400 });
   }
   const endUtc = end.toISOString();
 
+  // Teachers whose setup or quiz build failed have no live form to extend.
+  const extendable = round.rows.filter((r) => r.status !== "failed" && r.session_pk != null && r.session_id);
+  if (extendable.length === 0) {
+    return NextResponse.json({ error: "No teacher in this round has a working form" }, { status: 400 });
+  }
+
   const failed: string[] = [];
-  for (const row of round.rows) {
-    if (row.session_pk == null) {
-      failed.push(row.teacher_name);
-      continue;
-    }
+  for (const row of extendable) {
     try {
       await extendFeedbackSession(Number(row.session_pk), row.session_id, endUtc);
       await query(

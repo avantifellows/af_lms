@@ -5,6 +5,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import Toast from "@/components/Toast";
@@ -80,6 +81,7 @@ interface TeacherResponses {
   teacherOrder: number;
   responded: number;
   total: number;
+  outsideBatches: number;
   notResponded: { name: string; studentId: string | null; batchId: string }[];
 }
 
@@ -220,8 +222,8 @@ export default function TeacherFeedbackTab({
               focused={c.setupRunId === focusRunId}
               onAnalyze={(quizId, teacherName) => setAnalysisQuiz({ quizId, teacherName })}
               onCopy={(msg) => setToast({ variant: "success", message: msg })}
-              onExtended={(message) => {
-                setToast({ variant: "success", message });
+              onExtended={(message, variant) => {
+                setToast({ variant, message });
                 fetchCycles({ background: true });
               }}
             />
@@ -323,9 +325,14 @@ function CycleCard({
   focused: boolean;
   onAnalyze: (quizId: string, teacherName: string) => void;
   onCopy: (msg: string) => void;
-  onExtended: (message: string) => void;
+  onExtended: (message: string, variant: "success" | "info") => void;
 }) {
   const [open, setOpen] = useState(focused);
+  const cardRef = useRef<HTMLDivElement>(null);
+  // Scroll once when the setup nudge sends the PM here; the card remounts on focus.
+  useEffect(() => {
+    if (focused) cardRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [focused]);
   // Capture "now" once at mount (lazy initializer) to keep render pure.
   const [nowMs] = useState(() => new Date().getTime());
   const end = parseDbTime(cycle.endTime)?.getTime() ?? null;
@@ -361,7 +368,7 @@ function CycleCard({
 
   return (
     <div
-      ref={focused ? (el) => el?.scrollIntoView({ behavior: "smooth", block: "center" }) : undefined}
+      ref={cardRef}
       className={`overflow-hidden rounded-lg border bg-bg-card shadow-sm ${
         focused ? "border-accent ring-2 ring-accent/30" : "border-border"
       }`}
@@ -439,6 +446,14 @@ function CycleCard({
                       {r.notResponded.length > 0 && ` · ${r.notResponded.length} pending ${showPending ? "▾" : "▸"}`}
                     </button>
                   )}
+                  {r && r.outsideBatches > 0 && (
+                    <span
+                      className="text-xs text-warning-text"
+                      title="Answered, but not in this round's batches today (left, moved batch, or given this link by mistake). Analysis includes them."
+                    >
+                      +{r.outsideBatches} outside these batches
+                    </span>
+                  )}
                 </div>
                 <div className="flex flex-wrap items-center gap-4">
                   {t.status === "failed" ? (
@@ -506,7 +521,7 @@ function ExtendRound({
   setupRunId: string;
   currentEndMs: number | null;
   nowMs: number;
-  onExtended: (message: string) => void;
+  onExtended: (message: string, variant: "success" | "info") => void;
 }) {
   // Default: a day past whichever is later, the current end or now.
   const [endTime, setEndTime] = useState(() =>
@@ -517,8 +532,8 @@ function ExtendRound({
 
   const extend = async () => {
     const end = new Date(endTime);
-    if (Number.isNaN(end.getTime()) || end.getTime() <= Date.now()) {
-      setError("Pick a time in the future.");
+    if (Number.isNaN(end.getTime()) || end.getTime() <= Math.max(Date.now(), currentEndMs ?? 0)) {
+      setError("Pick a time after the current end.");
       return;
     }
     setSaving(true);
@@ -530,11 +545,16 @@ function ExtendRound({
         body: JSON.stringify({ endTime: end.toISOString() }),
       });
       const body = await res.json();
+      if (res.status === 502) {
+        // Partly extended: refresh so the card shows the teachers that did move.
+        onExtended(body.error || "Some teachers could not be extended", "info");
+        return;
+      }
       if (!res.ok) {
         setError(body.error || "Failed to extend");
         return;
       }
-      onExtended(`Extended to ${formatDateTime(body.endTime)}`);
+      onExtended(`Extended to ${formatDateTime(body.endTime)}`, "success");
     } catch {
       setError("Extend request failed");
     } finally {
@@ -756,7 +776,13 @@ function SetupModal({
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [thisMonth] = useState(() => istMonth(new Date()));
+  // The month the new round would run in: now, or the scheduled start.
+  const [nowMonth] = useState(() => istMonth(new Date()));
+  const scheduledStart = new Date(startTime);
+  const roundMonth =
+    timingMode === "schedule" && !Number.isNaN(scheduledStart.getTime())
+      ? istMonth(scheduledStart)
+      : nowMonth;
 
   // Feedback is monthly per batch: a round this month that already covers any
   // picked batch is probably the one to extend, not a reason for a second form.
@@ -766,11 +792,11 @@ function SetupModal({
         const start = parseDbTime(c.startTime);
         return (
           start !== null &&
-          istMonth(start) === thisMonth &&
+          istMonth(start) === roundMonth &&
           c.batchClassIds.some((id) => classBatchIds.includes(id))
         );
       }),
-    [cycles, classBatchIds, thisMonth]
+    [cycles, classBatchIds, roundMonth]
   );
 
   // Auto-select when there's exactly one centre. Centres load asynchronously, so
@@ -995,7 +1021,7 @@ function SetupModal({
               >
                 <span>
                   <strong>{c.batchClassNames.join(", ") || "These batches"}</strong> already had feedback
-                  this month ({c.cycleLabel}, {formatDateTime(c.startTime)}). Extend it instead?
+                  {roundMonth === nowMonth ? " this month" : " that month"} ({c.cycleLabel}, {formatDateTime(c.startTime)}). Extend it instead?
                 </span>
                 <button
                   type="button"

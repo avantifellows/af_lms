@@ -13,8 +13,8 @@ import { query } from "@/lib/db";
 import { POST } from "./route";
 
 const ROWS = [
-  { teacher_name: "Asha", session_pk: "11", session_id: "s-11", start_time: "2026-09-16 04:30:00" },
-  { teacher_name: "Ravi", session_pk: "12", session_id: "s-12", start_time: "2026-09-16 04:30:00" },
+  { teacher_name: "Asha", status: "created", session_pk: "11", session_id: "s-11", end_time: "2026-09-17 04:30:00" },
+  { teacher_name: "Ravi", status: "created", session_pk: "12", session_id: "s-12", end_time: "2026-09-17 04:30:00" },
 ];
 
 function post(body: unknown) {
@@ -72,5 +72,33 @@ describe("POST /api/teacher-feedback/cycles/:setupRunId/extend", () => {
     expect(res.status).toBe(502);
     expect((await res.json()).error).toContain("Ravi");
     expect(query).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses to shorten a round that ends later than the new time", async () => {
+    const later = new Date(Date.now() + 10 * 86400_000).toISOString().replace("T", " ").slice(0, 19);
+    vi.mocked(loadAuthorizedRound).mockResolvedValue({
+      ok: true,
+      rows: ROWS.map((r) => ({ ...r, end_time: later })),
+    } as never);
+    const res = await post({ endTime: future() });
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/after the current end/);
+    expect(extendFeedbackSession).not.toHaveBeenCalled();
+  });
+
+  it("skips teachers whose setup or build failed instead of failing the round", async () => {
+    vi.mocked(loadAuthorizedRound).mockResolvedValue({
+      ok: true,
+      rows: [
+        ...ROWS,
+        { ...ROWS[0], teacher_name: "Failed", status: "failed", session_pk: null, session_id: null },
+        { ...ROWS[0], teacher_name: "NoBuild", session_pk: "13", session_id: "" },
+      ],
+    } as never);
+    const res = await post({ endTime: future() });
+
+    expect(res.status).toBe(200);
+    expect(extendFeedbackSession).toHaveBeenCalledTimes(2);
   });
 });
