@@ -84,7 +84,16 @@ function useCentreOptions(centreId: number | null) {
     return batches.find((b) => b.id === parentId)?.batch_id ?? "";
   };
 
-  return { teachers, classBatches, batchNotice, loading, parentBatchIdFor };
+  const batchNote = pickerNote(
+    centreId,
+    loading,
+    "batches",
+    classBatches.length === 0,
+    batchNotice ?? "No class batches available for this centre."
+  );
+  const teacherNote = pickerNote(centreId, loading, "teachers", teachers.length === 0, "No teachers found for this centre.");
+
+  return { teachers, classBatches, batchNote, teacherNote, parentBatchIdFor };
 }
 
 function CheckRow({ checked, onChange, children }: { checked: boolean; onChange: () => void; children: ReactNode }) {
@@ -337,6 +346,28 @@ async function postSetup(body: Record<string, unknown>): Promise<{ result: Setup
   }
 }
 
+/** Validates the window, posts the setup, and tracks saving and errors. */
+function useSetupSubmit(
+  ready: boolean,
+  onDone: (result: SetupResponse) => void,
+  request: () => { window: ReturnType<typeof resolveWindow>; body: Record<string, unknown> }
+) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const submit = async () => {
+    if (!ready || saving) return;
+    const { window, body } = request();
+    if (typeof window === "string") return setError(window);
+    setSaving(true);
+    setError(null);
+    const outcome = await postSetup({ ...body, startTime: window.start.toISOString(), endTime: window.end.toISOString() });
+    setSaving(false);
+    if ("error" in outcome) setError(outcome.error);
+    else onDone(outcome.result);
+  };
+  return { submit, saving, error };
+}
+
 export default function SetupModal({
   schoolCode,
   centres,
@@ -369,9 +400,6 @@ export default function SetupModal({
   const [endTime, setEndTime] = useState(() =>
     toDateTimeLocalValue(addHours(new Date(), DEFAULT_DURATION_HOURS))
   );
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
   const setCentreId = (id: number | null) => {
     setPickedCentreId(id);
     setClassBatchIds([]);
@@ -380,45 +408,17 @@ export default function SetupModal({
 
   const { roundByBatch, sameMonth } = useRoundsThatMonth(cycles, timingMode, startTime);
 
-  const canSubmit = centreId !== null && classBatchIds.length > 0 && selectedTeachers.length > 0 && !saving;
-
-  const submit = async () => {
-    if (!canSubmit) return;
-    const window = resolveWindow(timingMode, startTime, endTime);
-    if (typeof window === "string") {
-      setError(window);
-      return;
-    }
-    setSaving(true);
-    setError(null);
-    const outcome = await postSetup({
+  const ready = centreId !== null && classBatchIds.length > 0 && selectedTeachers.length > 0;
+  const { submit, saving, error } = useSetupSubmit(ready, onDone, () => ({
+    window: resolveWindow(timingMode, startTime, endTime),
+    body: {
       schoolCode,
       centreId,
       parentBatchId: options.parentBatchIdFor(classBatchIds),
       classBatchIds,
-      startTime: window.start.toISOString(),
-      endTime: window.end.toISOString(),
       teachers: selectedTeachers.map((t, i) => ({ id: t.id, name: t.name, order: i + 1 })),
-    });
-    setSaving(false);
-    if ("error" in outcome) setError(outcome.error);
-    else onDone(outcome.result);
-  };
-
-  const batchNote = pickerNote(
-    centreId,
-    options.loading,
-    "batches",
-    options.classBatches.length === 0,
-    options.batchNotice ?? "No class batches available for this centre."
-  );
-  const teacherNote = pickerNote(
-    centreId,
-    options.loading,
-    "teachers",
-    options.teachers.length === 0,
-    "No teachers found for this centre."
-  );
+    },
+  }));
 
   return (
     <Modal open onClose={onClose} className="flex max-h-[92vh] max-w-4xl flex-col border border-border">
@@ -437,7 +437,7 @@ export default function SetupModal({
 
           <SectionCard title="2. Select Class Batches">
             <BatchPicker
-              note={batchNote}
+              note={options.batchNote}
               batches={options.classBatches}
               selected={classBatchIds}
               onToggle={(id) => setClassBatchIds((prev) => toggle(prev, id))}
@@ -449,7 +449,7 @@ export default function SetupModal({
 
           <SectionCard title="3. Select Teachers">
             <TeacherPicker
-              note={teacherNote}
+              note={options.teacherNote}
               teachers={options.teachers}
               selected={selectedTeachers}
               onToggle={(t) => setSelectedTeachers((prev) => toggle(prev, t, teacherKey))}
@@ -473,7 +473,7 @@ export default function SetupModal({
         </div>
       </div>
 
-      <ModalFooter onClose={onClose} onSubmit={submit} canSubmit={canSubmit} saving={saving} />
+      <ModalFooter onClose={onClose} onSubmit={submit} canSubmit={ready && !saving} saving={saving} />
     </Modal>
   );
 }
