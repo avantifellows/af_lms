@@ -122,7 +122,8 @@ an id join and both copies of the form go away.
 - **History** = the teacher's rounds at the same school *and centre*, matched by
   `teacher_id`, falling back to name only when either side has no id. Rounds with
   zero responses (abandoned duplicate set-ups) are dropped. "▲ vs <month>"
-  compares with the same batches' previous round.
+  compares with the same batches' previous round. A round's trend stops at that round
+  (an August analysis never shows September).
 - **Gender split** (`user.gender`, lower-cased; only male/female) is shown only
   when both groups have ≥ 5 responses, so a split can't single anyone out.
 - **"Nothing"-style comments** ("nothing", "no comments", "nothing sir") are
