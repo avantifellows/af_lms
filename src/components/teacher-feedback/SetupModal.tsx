@@ -139,29 +139,29 @@ function pickerNote(centreId: number | null, loading: boolean, what: string, emp
   return empty ? emptyText : null;
 }
 
-function ExtendNudge({ rounds, sameMonth, onExtendInstead }: {
-  rounds: Cycle[];
+/** Under a batch that already had a round in the month being set up. */
+function ExistingRoundNote({ round, sameMonth, onExtendInstead }: {
+  round: Cycle;
   sameMonth: boolean;
   onExtendInstead: (setupRunId: string) => void;
 }) {
-  return rounds.map((c) => (
-    <div
-      key={c.setupRunId}
-      className="flex flex-col gap-2 rounded-lg border border-warning-border bg-warning-bg px-4 py-3 text-sm text-warning-text sm:flex-row sm:items-center sm:justify-between"
-    >
+  return (
+    <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-warning-text">
       <span>
-        <strong>{c.batchClassNames.join(", ") || "These batches"}</strong> already had feedback
-        {sameMonth ? " this month" : " that month"} ({c.cycleLabel}, {formatDateTime(c.startTime)}). Extend it instead?
+        Already had feedback {sameMonth ? "this month" : "that month"} ({formatDateTime(round.startTime)}).
       </span>
       <button
         type="button"
-        onClick={() => onExtendInstead(c.setupRunId)}
-        className="shrink-0 rounded-md border border-warning-border bg-bg-card px-3 py-1 text-xs font-bold uppercase tracking-wide text-text-primary hover:bg-hover-bg"
+        onClick={(e) => {
+          e.preventDefault(); // inside the batch's <label>: don't toggle the checkbox
+          onExtendInstead(round.setupRunId);
+        }}
+        className="rounded-md border border-warning-border bg-bg-card px-2.5 py-0.5 text-xs font-bold uppercase tracking-wide text-text-primary hover:bg-hover-bg"
       >
-        Go to that round
+        Extend that round instead
       </button>
-    </div>
-  ));
+    </span>
+  );
 }
 
 function TimingPicker({
@@ -276,16 +276,18 @@ export default function SetupModal({
   const roundMonth =
     timingMode === "schedule" && !Number.isNaN(scheduledStart.getTime()) ? istMonth(scheduledStart) : nowMonth;
 
-  // Feedback is monthly per batch: a round that month that already covers any
-  // picked batch is probably the one to extend, not a reason for a second form.
-  const roundsThatMonth = useMemo(
-    () =>
-      cycles.filter((c) => {
-        const start = parseDbTime(c.startTime);
-        return start !== null && istMonth(start) === roundMonth && c.batchClassIds.some((id) => classBatchIds.includes(id));
-      }),
-    [cycles, classBatchIds, roundMonth]
-  );
+  // Feedback is monthly per batch: a batch that already had a round that month
+  // most likely needs that round extended, not a second form. Shown on the batch
+  // itself, before it's picked. (Latest round wins: cycles come newest first.)
+  const roundByBatch = useMemo(() => {
+    const byBatch = new Map<string, Cycle>();
+    for (const c of cycles) {
+      const start = parseDbTime(c.startTime);
+      if (start === null || istMonth(start) !== roundMonth) continue;
+      for (const id of c.batchClassIds) if (!byBatch.has(id)) byBatch.set(id, c);
+    }
+    return byBatch;
+  }, [cycles, roundMonth]);
 
   const canSubmit = centreId !== null && classBatchIds.length > 0 && selectedTeachers.length > 0 && !saving;
 
@@ -363,14 +365,21 @@ export default function SetupModal({
                     checked={classBatchIds.includes(b.batch_id)}
                     onChange={() => setClassBatchIds((prev) => toggle(prev, b.batch_id))}
                   >
-                    <span className="font-medium text-text-primary">{b.name}</span>
+                    <span>
+                      <span className="block font-medium text-text-primary">{b.name}</span>
+                      {roundByBatch.has(b.batch_id) && (
+                        <ExistingRoundNote
+                          round={roundByBatch.get(b.batch_id)!}
+                          sameMonth={roundMonth === nowMonth}
+                          onExtendInstead={onExtendInstead}
+                        />
+                      )}
+                    </span>
                   </CheckRow>
                 ))
               )}
             </div>
           </SectionCard>
-
-          <ExtendNudge rounds={roundsThatMonth} sameMonth={roundMonth === nowMonth} onExtendInstead={onExtendInstead} />
 
           <SectionCard title="3. Select Teachers">
             <div className={PICKER_BOX}>

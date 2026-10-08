@@ -92,10 +92,17 @@ const MIN_GROUP_SIZE = 5;
 // "Nothing", "nothing sir", "No comments." — a real answer (no complaints), but
 // listing each one buries the comments that say something. Counted instead.
 const NOTHING_WORDS = new Set(["no", "na", "n/a", "none", "nil", "nothing", "nope", "nothing much"]);
-const NOTHING_FILLER = /\b(sir|mam|madam|maam|ma'am|as such|to improve|to say|comments?|everything is (fine|good|perfect)|all good|all is good|as per me|so far)\b/g;
+const NOTHING_FILLER = /\b(sir|mam|madam|maam|ma'am|as such|to improve|to say|comments?|as per me|so far)\b/g;
+// "All good" is praise under "liked", but means "nothing" under "improve".
+const ALL_GOOD = /\b(everything is (fine|good|perfect)|all good|all is good)\b/g;
 
-function isNothing(text: string): boolean {
-  const t = text.toLowerCase().replace(/[^a-z/' ]/g, " ").replace(NOTHING_FILLER, " ").replace(/\s+/g, " ").trim();
+function isNothing(text: string, role: SubjectiveComment["role"]): boolean {
+  // Only judge English: stripping a Hindi or Telugu comment to [a-z] would
+  // leave "" and wrongly count it as "nothing".
+  if (/[^\x00-\x7F‘’“”]/.test(text)) return false;
+  let t = text.toLowerCase().replace(/[^a-z/' ]/g, " ").replace(NOTHING_FILLER, " ");
+  if (role === "improve") t = t.replace(ALL_GOOD, " ");
+  t = t.replace(/\s+/g, " ").trim();
   return t === "" || NOTHING_WORDS.has(t);
 }
 
@@ -139,7 +146,7 @@ function foldScored(acc: Accumulator, r: RawRow, question: FeedbackScoredQuestio
 
 function foldComment(acc: Accumulator, r: RawRow, role: "liked" | "improve"): void {
   const text = (r.user_response_labels ?? "").trim();
-  if (text && isNothing(text)) acc.nothingCounts[role] += 1;
+  if (text && isNothing(text, role)) acc.nothingCounts[role] += 1;
   else if (isMeaningful(text)) acc.comments.push({ role, text });
 }
 
@@ -234,9 +241,11 @@ function warnUnrecognized(quizId: string, acc: Accumulator): void {
   );
 }
 
-/** Answered rows for each quiz, keyed by quiz id. */
-async function fetchRows(quizIds: string[]): Promise<Map<string, RawRow[]>> {
-  const byQuiz = new Map<string, RawRow[]>(quizIds.map((id) => [id, []]));
+export type FeedbackRows = Map<string, RawRow[]>;
+
+/** Answered rows for each quiz, keyed by quiz id: one scan serves every use below. */
+export async function fetchFeedbackRows(quizIds: string[]): Promise<FeedbackRows> {
+  const byQuiz: FeedbackRows = new Map(quizIds.map((id) => [id, []]));
   if (quizIds.length === 0) return byQuiz;
   // Per quiz id, so an older form generation under the same cms_test_id can't
   // bleed in.
@@ -255,15 +264,22 @@ async function fetchRows(quizIds: string[]): Promise<Map<string, RawRow[]>> {
   return byQuiz;
 }
 
+/** Headline numbers for one quiz's rows. */
+export function summarizeRows(rows: RawRow[]): ScoreSummary {
+  return summarize(accumulate(rows));
+}
+
 /**
- * Build the per-teacher report for one feedback quiz. `genderOf` (LMS user id →
- * gender) adds a split by gender; groups under MIN_GROUP_SIZE are left out.
+ * Build the per-teacher report from one quiz's rows. `genderOf` (LMS user id →
+ * gender) adds a split by gender — only when BOTH groups reach MIN_GROUP_SIZE.
+ * Returning one group alone would let the other be derived from the overall
+ * score (overall × n − group × m), so a lone girl's answers would be exposed.
  */
-export async function getTeacherFeedbackReport(
+export async function buildTeacherFeedbackReport(
   quizId: string,
+  rows: RawRow[],
   genderOf?: (userIds: string[]) => Promise<Map<string, Gender>>
 ): Promise<TeacherFeedbackReport> {
-  const rows = (await fetchRows([quizId])).get(quizId) ?? [];
   const acc = accumulate(rows);
   warnUnrecognized(quizId, acc);
 
@@ -274,13 +290,14 @@ export async function getTeacherFeedbackReport(
   const order = OPEN_QUESTIONS.map((q) => q.role);
   acc.comments.sort((a, b) => order.indexOf(a.role) - order.indexOf(b.role));
 
-  const byGender: Partial<Record<Gender, ScoreSummary>> = {};
+  let byGender: Partial<Record<Gender, ScoreSummary>> = {};
   if (genderOf && acc.users.size > 0) {
     const genders = await genderOf([...acc.users]);
-    for (const g of ["female", "male"] as const) {
-      const groupRows = rows.filter((r) => genders.get(r.user_id) === g);
-      const summary = summarize(accumulate(groupRows));
-      if (summary.responseCount >= MIN_GROUP_SIZE) byGender[g] = summary;
+    const split = (g: Gender) => summarizeRows(rows.filter((r) => genders.get(r.user_id) === g));
+    const female = split("female");
+    const male = split("male");
+    if (female.responseCount >= MIN_GROUP_SIZE && male.responseCount >= MIN_GROUP_SIZE) {
+      byGender = { female, male };
     }
   }
 
@@ -297,31 +314,21 @@ export async function getTeacherFeedbackReport(
   };
 }
 
-/** Headline scores for many quizzes in one query (trends, teacher cards). */
-export async function getTeacherFeedbackSummaries(
-  quizIds: string[]
-): Promise<Map<string, ScoreSummary>> {
-  const rows = await fetchRows(quizIds);
-  return new Map([...rows].map(([id, r]) => [id, summarize(accumulate(r))]));
+/** The report for one quiz, fetched on its own. */
+export async function getTeacherFeedbackReport(
+  quizId: string,
+  genderOf?: (userIds: string[]) => Promise<Map<string, Gender>>
+): Promise<TeacherFeedbackReport> {
+  const rows = (await fetchFeedbackRows([quizId])).get(quizId) ?? [];
+  return buildTeacherFeedbackReport(quizId, rows, genderOf);
 }
 
-/** user_ids (LMS user.id) who answered each feedback quiz, keyed by quiz id. */
-export async function getRespondersByQuiz(quizIds: string[]): Promise<Map<string, Set<string>>> {
-  const byQuiz = new Map<string, Set<string>>();
-  if (quizIds.length === 0) return byQuiz;
-  const [rows] = await getBigQueryClient().query({
-    query: `
-      SELECT test_id, ARRAY_AGG(DISTINCT user_id) AS user_ids
-      FROM ${FORM_LEVEL_TABLE}
-      WHERE test_id IN UNNEST(@quizIds) AND is_answered = TRUE
-        AND user_id != '${ADMIN_TEST_USER}'
-      GROUP BY test_id
-    `,
-    params: { quizIds },
-    location: BQ_LOCATION,
-  });
-  for (const r of rows as Array<{ test_id: string; user_ids: string[] }>) {
-    byQuiz.set(r.test_id, new Set((r.user_ids ?? []).map(String)));
-  }
-  return byQuiz;
+/** Who answered each quiz (LMS user ids) and its headline scores, from one scan. */
+export async function getRoundResults(
+  quizIds: string[]
+): Promise<Map<string, { responders: Set<string>; summary: ScoreSummary }>> {
+  const rows = await fetchFeedbackRows(quizIds);
+  return new Map(
+    [...rows].map(([id, r]) => [id, { responders: new Set(r.map((x) => String(x.user_id))), summary: summarizeRows(r) }])
+  );
 }

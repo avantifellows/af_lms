@@ -3,8 +3,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { canAccessQuizSessionSchool } from "@/lib/quiz-session-access";
 import { authenticateTeacherFeedback, requireCentreScope } from "@/lib/teacher-feedback-access";
-import { getTeacherFeedbackReport } from "@/lib/teacher-feedback-bq";
-import { getGenders, getRoundContext, getTeacherHistory } from "@/lib/teacher-feedback-history";
+import { buildTeacherFeedbackReport, fetchFeedbackRows } from "@/lib/teacher-feedback-bq";
+import { getGenders, getRoundContext, getTeacherRounds, scoreRounds } from "@/lib/teacher-feedback-history";
 
 // GET /api/teacher-feedback/report?quiz_id=XXXX
 export async function GET(request: NextRequest) {
@@ -60,16 +60,19 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const [report, round, history] = await Promise.all([
-      getTeacherFeedbackReport(quizId, getGenders),
+    const [round, rounds] = await Promise.all([
       getRoundContext(quizId),
-      getTeacherHistory({
+      getTeacherRounds({
         schoolCode: row.school_code,
         centreId: row.centre_id == null ? null : Number(row.centre_id),
         teacherId: row.teacher_id,
         teacherName: row.teacher_name,
       }),
     ]);
+    // One BigQuery scan for this quiz and the teacher's other rounds.
+    const rows = await fetchFeedbackRows([...new Set([quizId, ...rounds.map((r) => r.quizId)])]);
+    const report = await buildTeacherFeedbackReport(quizId, rows.get(quizId) ?? [], getGenders);
+    const history = scoreRounds(rounds, rows);
 
     return NextResponse.json({ teacherName: row.teacher_name, round, history, ...report });
   } catch (error) {

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Modal } from "@/components/ui";
-import { formatDateTime, formatPct } from "./format";
+import { formatDateTime, formatPct, istMonth, parseDbTime } from "./format";
 import { SectionCard } from "./shared";
 
 interface QuestionScore {
@@ -56,21 +56,36 @@ type View = "all" | "gender";
 
 const batchKey = (names: string[]) => names.join(", ");
 
-/**
- * The teacher's rounds up to and including this one. A round's analysis reads as
- * of that round, so a later month never shows up in an earlier round's trend.
- */
-export function historyUpTo(history: HistoryEntry[], quizId: string): HistoryEntry[] {
-  const index = history.findIndex((h) => h.quizId === quizId);
-  return index < 0 ? [] : history.slice(0, index + 1);
+/** "2026-09", from the round's start (IST) or, failing that, its "Sep 2026" label. */
+function monthKey(h: { startTime: string | null; cycleLabel: string }): string {
+  const start = parseDbTime(h.startTime);
+  if (start) return istMonth(start);
+  const fromLabel = new Date(`1 ${h.cycleLabel}`);
+  return Number.isNaN(fromLabel.getTime()) ? h.cycleLabel : istMonth(fromLabel);
 }
 
-/** The same batches' most recent earlier round, for "vs last time". */
+const sharesBatch = (a: HistoryEntry, b: HistoryEntry) => a.batchNames.some((n) => b.batchNames.includes(n));
+
+/**
+ * This round's batches over time: earlier rounds that share a batch with it, up
+ * to and including its month. Other batches the teacher teaches belong to a
+ * teacher-level view, and a later month never shows in an earlier round. PMs
+ * regroup batches between months (all four, then pairs), so "shares a batch"
+ * rather than "same batches".
+ */
+export function batchHistory(history: HistoryEntry[], quizId: string): HistoryEntry[] {
+  const current = history.find((h) => h.quizId === quizId);
+  if (!current) return [];
+  const month = monthKey(current);
+  return history.filter((h) => monthKey(h) <= month && sharesBatch(h, current));
+}
+
+/** The latest earlier round sharing a batch with this one, for "vs last time". */
 export function previousRound(history: HistoryEntry[], quizId: string): HistoryEntry | null {
   const index = history.findIndex((h) => h.quizId === quizId);
   if (index <= 0) return null;
-  const key = batchKey(history[index].batchNames);
-  return history.slice(0, index).reverse().find((h) => batchKey(h.batchNames) === key) ?? null;
+  const current = history[index];
+  return history.slice(0, index).reverse().find((h) => sharesBatch(h, current)) ?? null;
 }
 
 function useReport(quizId: string) {
@@ -275,7 +290,7 @@ function MonthTrend({ history, currentQuizId }: { history: HistoryEntry[]; curre
   }
 
   return (
-    <SectionCard title="Up to this round" subtitle="This teacher's overall score per round, by batch">
+    <SectionCard title="Over time" subtitle="This teacher's overall score for these batches, up to this round">
       <div className="overflow-x-auto">
         <table className="w-full text-base">
           <thead>
@@ -334,7 +349,7 @@ function Comments({ title, items, nothingCount }: { title: string; items: string
 
 function Report({ data, quizId }: { data: ReportData; quizId: string }) {
   const previous = previousRound(data.history, quizId);
-  const history = historyUpTo(data.history, quizId);
+  const history = batchHistory(data.history, quizId);
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">

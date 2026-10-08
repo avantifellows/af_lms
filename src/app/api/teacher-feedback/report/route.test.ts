@@ -7,25 +7,29 @@ vi.mock("@/lib/teacher-feedback-access", async (importOriginal) => {
   // would make these suites pass regardless of whether the routes enforce it.
   return { ...actual, authenticateTeacherFeedback: vi.fn() };
 });
-vi.mock("@/lib/teacher-feedback-bq", () => ({ getTeacherFeedbackReport: vi.fn() }));
+vi.mock("@/lib/teacher-feedback-bq", () => ({
+  buildTeacherFeedbackReport: vi.fn(),
+  fetchFeedbackRows: vi.fn(),
+}));
 vi.mock("@/lib/db", () => ({ query: vi.fn() }));
 vi.mock("@/lib/teacher-feedback-history", () => ({
   getGenders: vi.fn(),
   getRoundContext: vi.fn(),
-  getTeacherHistory: vi.fn(),
+  getTeacherRounds: vi.fn(),
+  scoreRounds: vi.fn(),
 }));
 
 import { NextRequest } from "next/server";
 import { canAccessQuizSessionSchool } from "@/lib/quiz-session-access";
 import { authenticateTeacherFeedback } from "@/lib/teacher-feedback-access";
-import { getTeacherFeedbackReport } from "@/lib/teacher-feedback-bq";
+import { buildTeacherFeedbackReport, fetchFeedbackRows } from "@/lib/teacher-feedback-bq";
 import { query } from "@/lib/db";
-import { getGenders, getRoundContext, getTeacherHistory } from "@/lib/teacher-feedback-history";
+import { getGenders, getRoundContext, getTeacherRounds, scoreRounds } from "@/lib/teacher-feedback-history";
 import { GET } from "./route";
 
 const mockAuth = vi.mocked(authenticateTeacherFeedback);
 const mockSchool = vi.mocked(canAccessQuizSessionSchool);
-const mockReport = vi.mocked(getTeacherFeedbackReport);
+const mockReport = vi.mocked(buildTeacherFeedbackReport);
 const mockQuery = vi.mocked(query);
 
 const PERMISSION = { email: "pm@avantifellows.org", level: 3 } as never;
@@ -98,7 +102,10 @@ describe("GET /api/teacher-feedback/report", () => {
     ]);
     mockReport.mockResolvedValue(baseReport());
     vi.mocked(getRoundContext).mockResolvedValue({ cycleLabel: "Sep 2026", batchNames: ["2027 Engg"] } as never);
-    vi.mocked(getTeacherHistory).mockResolvedValue([{ cycleLabel: "Aug 2026", percentage: 60 }] as never);
+    vi.mocked(getTeacherRounds).mockResolvedValue([{ quizId: "q0" }, { quizId: "q1" }] as never);
+    const rows = new Map([["q1", ["row"]]]);
+    vi.mocked(fetchFeedbackRows).mockResolvedValue(rows as never);
+    vi.mocked(scoreRounds).mockReturnValue([{ cycleLabel: "Aug 2026", percentage: 60 }] as never);
 
     const res = await GET(req("q1"));
     expect(res.status).toBe(200);
@@ -108,8 +115,12 @@ describe("GET /api/teacher-feedback/report", () => {
     expect(body.percentage).toBe(42.86);
     expect(body.round).toEqual({ cycleLabel: "Sep 2026", batchNames: ["2027 Engg"] });
     expect(body.history).toEqual([{ cycleLabel: "Aug 2026", percentage: 60 }]);
-    expect(mockReport).toHaveBeenCalledWith("q1", getGenders);
-    expect(getTeacherHistory).toHaveBeenCalledWith({
+    // One BigQuery scan covers the report and the teacher's other rounds.
+    expect(fetchFeedbackRows).toHaveBeenCalledTimes(1);
+    expect(fetchFeedbackRows).toHaveBeenCalledWith(["q1", "q0"]);
+    expect(mockReport).toHaveBeenCalledWith("q1", ["row"], getGenders);
+    expect(scoreRounds).toHaveBeenCalledWith([{ quizId: "q0" }, { quizId: "q1" }], rows);
+    expect(getTeacherRounds).toHaveBeenCalledWith({
       schoolCode: "34054",
       centreId: null,
       teacherId: "42",
@@ -121,7 +132,21 @@ describe("GET /api/teacher-feedback/report", () => {
     mockQuery.mockResolvedValueOnce([
       { school_code: "34054", teacher_name: "Manjit Kumar", school_id: 5 },
     ]);
-    mockReport.mockRejectedValue(new Error("BQ down"));
+    vi.mocked(getTeacherRounds).mockResolvedValue([]);
+    vi.mocked(fetchFeedbackRows).mockRejectedValue(new Error("BQ down"));
     expect((await GET(req("q1"))).status).toBe(500);
+  });
+
+  it("403 when the caller is confined to a different centre", async () => {
+    mockAuth.mockResolvedValue({
+      ok: true,
+      permission: { email: "pm@avantifellows.org", level: 1, scope: { centres: new Set([99]) } } as never,
+    });
+    mockQuery.mockResolvedValueOnce([
+      { school_code: "34054", teacher_name: "Manjit Kumar", teacher_id: "42", school_id: 5, centre_id: "7" },
+    ]);
+
+    expect((await GET(req("q1"))).status).toBe(403);
+    expect(fetchFeedbackRows).not.toHaveBeenCalled();
   });
 });

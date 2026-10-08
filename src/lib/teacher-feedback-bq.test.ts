@@ -5,7 +5,7 @@ vi.mock("@/lib/bigquery", () => ({
   getBigQueryClient: () => ({ query: mockQuery }),
 }));
 
-import { getTeacherFeedbackReport, getTeacherFeedbackSummaries } from "./teacher-feedback-bq";
+import { getRoundResults, getTeacherFeedbackReport } from "./teacher-feedback-bq";
 import {
   FEEDBACK_QUESTIONS,
   OPEN_QUESTIONS,
@@ -232,34 +232,45 @@ describe("question-level detail and splits", () => {
     expect(param.percentage).toBeCloseTo((param.score / param.maxScore) * 100);
   });
 
-  it("splits by gender, leaving out a group too small to stay anonymous", async () => {
-    const girls = ["f1", "f2", "f3", "f4", "f5"];
+  const genderOf = vi.fn(async (ids: string[]) =>
+    new Map(ids.map((id) => [id, id.startsWith("f") ? ("female" as const) : ("male" as const)]))
+  );
+  const users = (prefix: string, n: number) => Array.from({ length: n }, (_, i) => `${prefix}${i}`);
+
+  it("splits by gender when both groups have at least 5 responses", async () => {
     mockQuery.mockResolvedValueOnce([[
-      ...girls.flatMap((u) => fullResponseRows(u, 0)),
-      ...fullResponseRows("m1", 2),
+      ...users("f", 5).flatMap((u) => fullResponseRows(u, 0)),
+      ...users("m", 6).flatMap((u) => fullResponseRows(u, 2)),
     ]]);
-    const genderOf = vi.fn(async (ids: string[]) =>
-      new Map(ids.map((id) => [id, id.startsWith("f") ? ("female" as const) : ("male" as const)]))
-    );
     const r = await getTeacherFeedbackReport("quiz_x", genderOf);
 
     expect(r.byGender.female).toMatchObject({ responseCount: 5, percentage: 100 });
-    expect(r.byGender.male).toBeUndefined();
-    expect(genderOf).toHaveBeenCalledWith(expect.arrayContaining([...girls, "m1"]));
+    expect(r.byGender.male).toMatchObject({ responseCount: 6, percentage: 0 });
   });
 
-  it("summarises several quizzes from one query, excluding the admin test user", async () => {
+  it("sends no split at all when either group is small", async () => {
+    // Sending the boys alone would let 1 girl's answers be derived from the overall.
+    mockQuery.mockResolvedValueOnce([[
+      ...users("m", 9).flatMap((u) => fullResponseRows(u, 0)),
+      ...fullResponseRows("f0", 2),
+    ]]);
+    const r = await getTeacherFeedbackReport("quiz_x", genderOf);
+
+    expect(r.byGender).toEqual({});
+  });
+
+  it("gives responders and scores for several quizzes from one query, excluding the admin test user", async () => {
     mockQuery.mockResolvedValueOnce([[
       ...fullResponseRows("u1", 0),
       ...fullResponseRows("u2", 2).map((row) => ({ ...row, test_id: "quiz_y" })),
     ]]);
-    const byQuiz = await getTeacherFeedbackSummaries(["quiz_x", "quiz_y", "quiz_z"]);
+    const byQuiz = await getRoundResults(["quiz_x", "quiz_y", "quiz_z"]);
 
     expect(mockQuery).toHaveBeenCalledTimes(1);
     expect(mockQuery.mock.calls[0][0].query).toContain("test_admin");
-    expect(byQuiz.get("quiz_x")).toMatchObject({ responseCount: 1, percentage: 100 });
-    expect(byQuiz.get("quiz_y")).toMatchObject({ responseCount: 1, percentage: 0 });
-    expect(byQuiz.get("quiz_z")).toMatchObject({ responseCount: 0 });
+    expect(byQuiz.get("quiz_x")).toMatchObject({ responders: new Set(["u1"]), summary: { responseCount: 1, percentage: 100 } });
+    expect(byQuiz.get("quiz_y")?.summary).toMatchObject({ responseCount: 1, percentage: 0 });
+    expect(byQuiz.get("quiz_z")?.summary.responseCount).toBe(0);
   });
 
   it("counts \"nothing\"-style answers instead of listing each one", async () => {
@@ -274,5 +285,17 @@ describe("question-level detail and splits", () => {
 
     expect(r.nothingCounts.improve).toBe(4);
     expect(r.comments).toEqual([{ role: "improve", text: "Do some more PYQs" }]);
+  });
+
+  it("keeps regional-language comments, and 'all good' under liked", async () => {
+    mockQuery.mockResolvedValueOnce([[
+      openRow("u1", "liked", "Everything is good"),
+      openRow("u2", "improve", "All good sir"),
+      openRow("u3", "improve", "कक्षा समय पर शुरू करें"),
+    ]]);
+    const r = await getTeacherFeedbackReport("quiz_x");
+
+    expect(r.nothingCounts).toEqual({ liked: 0, improve: 1 });
+    expect(r.comments.map((c) => c.text)).toEqual(["Everything is good", "कक्षा समय पर शुरू करें"]);
   });
 });

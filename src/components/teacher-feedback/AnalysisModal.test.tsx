@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import AnalysisModal, { historyUpTo, previousRound, type ReportData } from "./AnalysisModal";
+import AnalysisModal, { batchHistory, previousRound, type ReportData } from "./AnalysisModal";
 
 const summary = (percentage: number, responseCount = 10) => ({
   responseCount,
@@ -112,13 +112,13 @@ describe("AnalysisModal", () => {
     expect(await screen.findByRole("button", { name: "Girls vs boys" })).toBeDisabled();
   });
 
-  it("tables the teacher's rounds by batch and month", async () => {
+  it("tables this round's batch over the months, without the teacher's other batches", async () => {
     show();
     const table = await screen.findByRole("table");
 
-    expect(within(table).getByText("Aug 2026")).toBeInTheDocument();
-    expect(within(table).getByText("2028 Engineering").closest("tr")).toHaveTextContent("94%");
-    expect(within(table).getAllByText("–")).toHaveLength(1); // no Sep round for 2028
+    expect(within(table).getByText("2027 Engineering").closest("tr")).toHaveTextContent(/93%.*96%/);
+    expect(within(table).queryByText("2028 Engineering")).not.toBeInTheDocument();
+    expect(within(table).queryByText("–")).not.toBeInTheDocument();
   });
 
   it("lists comments, counting the 'nothing' answers instead", async () => {
@@ -154,11 +154,25 @@ describe("previousRound", () => {
   });
 });
 
-describe("historyUpTo", () => {
-  it("stops at this round, so an August analysis never shows September", () => {
-    const h = report().history;
-    expect(historyUpTo(h, "a28").map((x) => x.quizId)).toEqual(["a27", "a28"]);
-    expect(historyUpTo(h, "q1")).toHaveLength(3);
-    expect(historyUpTo(h, "missing")).toEqual([]);
+describe("batchHistory", () => {
+  it("shows only rounds sharing a batch, up to this round's month", () => {
+    const h = [
+      history("a27", "Aug 2026", "2027 Engineering", 92),
+      history("a28", "Aug 2026", "2028 Engineering", 93),
+      history("s28", "Sep 2026", "2028 Engineering", 96),
+      history("s27", "Sep 2026", "2027 Engineering", 95),
+      history("o27", "Oct 2026", "2027 Engineering", 97),
+    ];
+    // The 2028 Sep round: no 2027 row, and no October.
+    expect(batchHistory(h, "s28").map((x) => x.quizId)).toEqual(["a28", "s28"]);
+    expect(batchHistory(h, "a27").map((x) => x.quizId)).toEqual(["a27"]);
+    expect(batchHistory(h, "missing")).toEqual([]);
+  });
+
+  it("keeps comparing when batches are regrouped between months", () => {
+    const all = { ...history("aug", "Aug 2026", "A", 90), batchNames: ["A", "B"] };
+    const pair = history("sep", "Sep 2026", "A", 94);
+    expect(batchHistory([all, pair], "sep").map((x) => x.quizId)).toEqual(["aug", "sep"]);
+    expect(previousRound([all, pair], "sep")?.quizId).toBe("aug");
   });
 });

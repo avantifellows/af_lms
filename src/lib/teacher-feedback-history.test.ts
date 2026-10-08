@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("./db", () => ({ query: vi.fn() }));
-vi.mock("./teacher-feedback-bq", () => ({ getTeacherFeedbackSummaries: vi.fn() }));
+vi.mock("./teacher-feedback-bq", () => ({
+  summarizeRows: (rows: unknown[]) => ({ responseCount: rows.length, percentage: rows.length ? 90 : 0, parameters: [] }),
+}));
 
 import { query } from "./db";
-import { getTeacherFeedbackSummaries } from "./teacher-feedback-bq";
-import { getGenders, getRoundContext, getTeacherHistory } from "./teacher-feedback-history";
+import { getGenders, getRoundContext, getTeacherRounds, scoreRounds } from "./teacher-feedback-history";
 
 const mockQuery = vi.mocked(query);
 
@@ -20,8 +21,6 @@ function round(quizId: string, cycleLabel: string, batches: string[]) {
     quiz_id: quizId,
   };
 }
-
-const score = (responseCount: number, percentage: number) => ({ responseCount, percentage, parameters: [] });
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -49,33 +48,44 @@ describe("getRoundContext", () => {
   });
 });
 
-describe("getTeacherHistory", () => {
+describe("getTeacherRounds", () => {
   const params = { schoolCode: "59324", centreId: 7, teacherId: "T1", teacherName: "Indrani Khan" };
 
-  it("scores every round of the teacher, dropping rounds nobody answered", async () => {
+  it("lists the teacher's rounds at the centre with sorted batch names", async () => {
     mockQuery
-      .mockResolvedValueOnce([round("a", "Aug 2026", ["B27"]), round("b", "Aug 2026", ["B27"]), round("c", "Sep 2026", ["B27"])])
-      .mockResolvedValueOnce([{ batch_id: "B27", name: "2027 Engineering" }]);
-    vi.mocked(getTeacherFeedbackSummaries).mockResolvedValue(
-      new Map([["a", score(40, 92.8)], ["b", score(0, 0)], ["c", score(36, 95.5)]])
-    );
+      .mockResolvedValueOnce([round("a", "Aug 2026", ["B28", "B27"])])
+      .mockResolvedValueOnce([
+        { batch_id: "B27", name: "2027 Engineering" },
+        { batch_id: "B28", name: "2028 Engineering" },
+      ]);
 
-    const history = await getTeacherHistory(params);
-
-    expect(history.map((h) => [h.quizId, h.cycleLabel, h.percentage, h.batchNames])).toEqual([
-      ["a", "Aug 2026", 92.8, ["2027 Engineering"]],
-      ["c", "Sep 2026", 95.5, ["2027 Engineering"]],
+    expect(await getTeacherRounds(params)).toEqual([
+      {
+        quizId: "a",
+        setupRunId: "run-a",
+        cycleLabel: "Aug 2026",
+        startTime: "2026-09-17 11:32:28",
+        batchNames: ["2027 Engineering", "2028 Engineering"],
+      },
     ]);
-    expect(getTeacherFeedbackSummaries).toHaveBeenCalledWith(["a", "b", "c"]);
     // Matched by teacher id, falling back to name; scoped to the same centre.
     expect(mockQuery.mock.calls[0][1]).toEqual(["59324", 7, "T1", "Indrani Khan"]);
     expect(mockQuery.mock.calls[0][0]).toContain("tf.teacher_id = $3");
   });
+});
 
-  it("returns nothing, without asking BigQuery, when the teacher has no rounds", async () => {
-    mockQuery.mockResolvedValueOnce([]);
-    expect(await getTeacherHistory(params)).toEqual([]);
-    expect(getTeacherFeedbackSummaries).not.toHaveBeenCalled();
+describe("scoreRounds", () => {
+  it("scores each round from fetched rows and drops rounds nobody answered", () => {
+    const rounds = ["a", "b", "c"].map((quizId) => ({
+      quizId,
+      setupRunId: `run-${quizId}`,
+      cycleLabel: "Aug 2026",
+      startTime: null,
+      batchNames: ["2027 Engineering"],
+    }));
+    const rows = new Map([["a", [{}, {}]], ["b", []]]) as never;
+
+    expect(scoreRounds(rounds, rows).map((h) => [h.quizId, h.responseCount])).toEqual([["a", 2]]);
   });
 });
 

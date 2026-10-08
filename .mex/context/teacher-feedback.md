@@ -121,13 +121,26 @@ an id join and both copies of the form go away.
   BigQuery query for many quizzes).
 - **History** = the teacher's rounds at the same school *and centre*, matched by
   `teacher_id`, falling back to name only when either side has no id. Rounds with
-  zero responses (abandoned duplicate set-ups) are dropped. "▲ vs <month>"
-  compares with the same batches' previous round. A round's trend stops at that round
-  (an August analysis never shows September).
-- **Gender split** (`user.gender`, lower-cased; only male/female) is shown only
-  when both groups have ≥ 5 responses, so a split can't single anyone out.
+  zero responses (abandoned duplicate set-ups) are dropped.
+- **A round's trend is that round's batches only**: earlier rounds that *share a
+  batch* with it, up to its month. "Shares", not "same", because PMs regroup
+  batches between months (24701: all four, then pairs). The teacher's other
+  batches belong to a teacher-level view (planned: a "Rounds | Teachers" toggle in
+  this tab, PM-facing). "▲ vs <month>" uses the same rule.
+- **One BigQuery scan per screen**: the report route fetches the teacher's rounds
+  from Postgres first, then scans once for this quiz plus history; opening a
+  round scans once for responders and scores (`getRoundResults`). The table is
+  clustered on session_id, not test_id (~107 MB per scan).
+- **Gender split** (`user.gender`, lower-cased; only male/female) is sent only
+  when *both* groups have ≥ 5 responses — enforced server-side. Sending one group
+  alone would let the other be derived from the overall score.
 - **"Nothing"-style comments** ("nothing", "no comments", "nothing sir") are
-  counted, not listed; they used to bury the real suggestions.
+  counted, not listed; they used to bury the real suggestions. Only English text
+  is judged (regional-language comments are always kept), and "all good" counts
+  as nothing only under "improve" — under "liked" it's praise.
+- **Setup flags a batch** that already had a round in the month being set up,
+  on the batch row itself, with "Extend that round instead". Still pickable: a
+  second round in a month is sometimes deliberate.
 - Ended rounds say "didn't respond", live ones "pending".
 
 ## Gotchas

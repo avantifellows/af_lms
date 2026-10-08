@@ -1,5 +1,5 @@
 import { query } from "./db";
-import { getTeacherFeedbackSummaries, type Gender, type ScoreSummary } from "./teacher-feedback-bq";
+import { summarizeRows, type FeedbackRows, type Gender, type ScoreSummary } from "./teacher-feedback-bq";
 
 export interface RoundContext {
   setupRunId: string;
@@ -10,13 +10,15 @@ export interface RoundContext {
   endTime: string | null;
 }
 
-export interface HistoryEntry extends ScoreSummary {
+export interface TeacherRound {
   quizId: string;
   setupRunId: string;
   cycleLabel: string;
   startTime: string | null;
   batchNames: string[];
 }
+
+export type HistoryEntry = TeacherRound & ScoreSummary;
 
 interface FeedbackRow {
   setup_run_id: string;
@@ -59,23 +61,22 @@ export async function getRoundContext(quizId: string): Promise<RoundContext | nu
     setupRunId: row.setup_run_id,
     cycleLabel: row.cycle_label,
     centreName: row.centre_name,
-    batchNames: row.batch_class_ids.map((id) => names.get(id) ?? id),
+    batchNames: row.batch_class_ids.map((id) => names.get(id) ?? id).sort(),
     startTime: row.start_time,
     endTime: row.end_time,
   };
 }
 
 /**
- * Every round this teacher was rated in at the same centre, oldest first, with
- * headline scores. Matched by teacher_id; rows saved without one match by name.
- * Rounds nobody answered (abandoned or duplicate set-ups) are left out.
+ * Every round this teacher was rated in at the same centre, oldest first.
+ * Matched by teacher_id; rows saved without one match by name.
  */
-export async function getTeacherHistory(params: {
+export async function getTeacherRounds(params: {
   schoolCode: string;
   centreId: number | null;
   teacherId: string | null;
   teacherName: string;
-}): Promise<HistoryEntry[]> {
+}): Promise<TeacherRound[]> {
   const rows = await query<FeedbackRow>(
     `SELECT ${ROUND_COLUMNS}
      FROM lms_teacher_feedback tf
@@ -90,22 +91,25 @@ export async function getTeacherHistory(params: {
      ORDER BY tf.start_time`,
     [params.schoolCode, params.centreId, params.teacherId, params.teacherName]
   );
-  if (rows.length === 0) return [];
-  const [scores, names] = await Promise.all([
-    getTeacherFeedbackSummaries(rows.map((r) => r.quiz_id)),
-    batchNames([...new Set(rows.flatMap((r) => r.batch_class_ids))]),
-  ]);
-  return rows.flatMap((r) => {
-    const score = scores.get(r.quiz_id);
-    if (!score || score.responseCount === 0) return [];
-    return [{
-      ...score,
-      quizId: r.quiz_id,
-      setupRunId: r.setup_run_id,
-      cycleLabel: r.cycle_label,
-      startTime: r.start_time,
-      batchNames: r.batch_class_ids.map((id) => names.get(id) ?? id),
-    }];
+  const names = await batchNames([...new Set(rows.flatMap((r) => r.batch_class_ids))]);
+  return rows.map((r) => ({
+    quizId: r.quiz_id,
+    setupRunId: r.setup_run_id,
+    cycleLabel: r.cycle_label,
+    startTime: r.start_time,
+    // Sorted, so the same batches always read (and compare) the same way.
+    batchNames: r.batch_class_ids.map((id) => names.get(id) ?? id).sort(),
+  }));
+}
+
+/**
+ * Score each round from already-fetched rows. Rounds nobody answered
+ * (abandoned or duplicate set-ups) are left out.
+ */
+export function scoreRounds(rounds: TeacherRound[], rows: FeedbackRows): HistoryEntry[] {
+  return rounds.flatMap((round) => {
+    const summary = summarizeRows(rows.get(round.quizId) ?? []);
+    return summary.responseCount > 0 ? [{ ...round, ...summary }] : [];
   });
 }
 

@@ -54,7 +54,7 @@ function renderModal(props: Partial<Parameters<typeof SetupModal>[0]> = {}) {
 }
 
 async function pickBatchAndTeacher() {
-  fireEvent.click(await screen.findByRole("checkbox", { name: "2027 Engineering" }));
+  fireEvent.click(await screen.findByRole("checkbox", { name: /2027 Engineering/ }));
   fireEvent.click(await screen.findByRole("checkbox", { name: /Indrani Khan/ }));
 }
 
@@ -79,7 +79,7 @@ describe("SetupModal", () => {
   it("auto-selects the only centre and lists its class batches and teachers", async () => {
     renderModal();
 
-    expect(await screen.findByRole("checkbox", { name: "2027 Engineering" })).toBeInTheDocument();
+    expect(await screen.findByRole("checkbox", { name: /2027 Engineering/ })).toBeInTheDocument();
     // The quiz (parent) batch is not a class batch.
     expect(screen.queryByRole("checkbox", { name: "Grade 12 quiz batch" })).not.toBeInTheDocument();
     expect(await screen.findByText("Chemistry")).toBeInTheDocument();
@@ -149,9 +149,9 @@ describe("SetupModal", () => {
     renderModal();
     const create = screen.getByRole("button", { name: "Create Feedback Forms" });
     expect(create).toBeDisabled();
-    fireEvent.click(await screen.findByRole("checkbox", { name: "2027 Engineering" }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: /2027 Engineering/ }));
     expect(create).toBeDisabled();
-    fireEvent.click(screen.getByRole("checkbox", { name: "2027 Engineering" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /2027 Engineering/ }));
   });
 
   it("rejects a schedule that ends before it starts", async () => {
@@ -179,26 +179,26 @@ describe("SetupModal", () => {
     expect(await screen.findByText("Setup request failed")).toBeInTheDocument();
   });
 
-  it("nudges to extend when a picked batch already had a round this month", async () => {
-    const { onExtendInstead } = renderModal({
-      cycles: [cycle(), cycle({ setupRunId: "other", batchClassIds: ["B28"], batchClassNames: ["2028 Engineering"] })],
-    });
-    fireEvent.click(await screen.findByRole("checkbox", { name: "2027 Engineering" }));
+  it("flags a batch that already had a round this month, before it's picked", async () => {
+    const { onExtendInstead } = renderModal({ cycles: [cycle()] });
+    const batch = await screen.findByRole("checkbox", { name: /2027 Engineering/ });
 
-    expect(screen.getByText(/already had feedback/)).toHaveTextContent("this month");
-    expect(screen.getAllByRole("button", { name: "Go to that round" })).toHaveLength(1);
-    fireEvent.click(screen.getByRole("button", { name: "Go to that round" }));
+    expect(screen.getByText(/Already had feedback this month/)).toBeInTheDocument();
+    // Only the batch that had a round is flagged.
+    expect(screen.getAllByRole("button", { name: "Extend that round instead" })).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Extend that round instead" }));
     expect(onExtendInstead).toHaveBeenCalledWith("run-1");
+    expect(batch).not.toBeChecked(); // the button sits inside the label
   });
 
-  it("checks the scheduled month, not today's, for the nudge", async () => {
+  it("checks the scheduled month, not today's", async () => {
     renderModal({ cycles: [cycle()] });
-    fireEvent.click(await screen.findByRole("checkbox", { name: "2027 Engineering" }));
+    await screen.findByText(/Already had feedback this month/);
     fireEvent.click(screen.getByRole("button", { name: /Schedule/ }));
     const [start] = document.querySelectorAll<HTMLInputElement>('input[type="datetime-local"]');
     fireEvent.change(start, { target: { value: "2031-01-15T10:00" } });
 
-    expect(screen.queryByText(/already had feedback/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Already had feedback/)).not.toBeInTheDocument();
   });
 
   it("closes from the header and the Cancel button", () => {
