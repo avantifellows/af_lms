@@ -26,7 +26,7 @@ beforeEach(() => {
         teacher_order: 1,
         quiz_id: "q1",
         batch_class_ids: ["B27"],
-        summary: { concerns: [{ serious: true }, { serious: false }] },
+        summary: { improve: [{ serious: true }, { serious: false }] },
       },
       { teacher_name: "Ravi", teacher_order: 2, quiz_id: "q2", batch_class_ids: ["B27"] },
     ],

@@ -147,36 +147,40 @@ describe("AnalysisModal", () => {
   });
 });
 
-describe("summary", () => {
-  it("shows highlights and flagged concerns", async () => {
-    show(
-      report({
-        summary: {
-          highlights: ["Explains concepts clearly"],
-          concerns: [
-            { text: "Starts class late", serious: false, recurring: true },
-            { text: "Some students feel ignored", serious: true, recurring: false },
-          ],
-          response_count: 36,
-        },
-        summaryGeneratedAt: "2026-09-19 03:00:00",
-      })
-    );
+describe("comment summary", () => {
+  const summarised = () =>
+    report({
+      summary: {
+        liked: [{ text: "Explains concepts clearly", students: 19 }],
+        improve: [
+          { text: "Start class on time", students: 5, serious: false, recurring: true },
+          { text: "Equal attention for all", students: 6, serious: true, recurring: false },
+        ],
+      },
+    });
+
+  it("shows themes in place of the raw comments, which are a click away", async () => {
+    show(summarised());
 
     expect(await screen.findByText("Explains concepts clearly")).toBeInTheDocument();
-    expect(screen.getByText("Starts class late").parentElement).toHaveTextContent("Also last time");
-    expect(screen.getByText("Some students feel ignored").previousElementSibling).toHaveTextContent("⚑");
-    expect(screen.getByText(/AI summary of 36 responses/)).toBeInTheDocument();
+    expect(screen.getByText(/· 19 students/)).toBeInTheDocument();
+    expect(screen.getByText("Start class on time").parentElement).toHaveTextContent("Also last time");
+    expect(screen.getByText("Equal attention for all").previousElementSibling).toHaveTextContent("⚑");
+    expect(screen.queryByText("Explains well")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByRole("button", { name: /Show all 1 comments/ })[0]);
+    expect(screen.getByText("Explains well")).toBeInTheDocument();
   });
 
-  it("explains when there is no summary yet", async () => {
+  it("shows raw comments with a note until the round is summarised", async () => {
     show(report({ roundClosed: false }));
-    expect(await screen.findByText(/A summary will appear after this round closes/)).toBeInTheDocument();
+    expect(await screen.findByText(/will be summarised after this round closes/)).toBeInTheDocument();
+    expect(screen.getByText("Explains well")).toBeInTheDocument();
   });
 
   it("says closed rounds are summarised daily", async () => {
     show();
-    expect(await screen.findByText(/prepared daily after a round closes/)).toBeInTheDocument();
+    expect(await screen.findByText(/summarised daily after a round closes/)).toBeInTheDocument();
   });
 });
 

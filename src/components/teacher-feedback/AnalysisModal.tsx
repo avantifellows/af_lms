@@ -54,11 +54,17 @@ export interface ReportData {
   roundClosed: boolean;
 }
 
-/** Written daily by the etl-next summaries flow once a round has closed. */
+interface Theme {
+  text: string;
+  students: number;
+  serious?: boolean;
+  recurring?: boolean;
+}
+
+/** The comments grouped into themes; written daily by etl-next once a round has closed. */
 interface FeedbackSummary {
-  highlights: string[];
-  concerns: { text: string; serious: boolean; recurring: boolean }[];
-  response_count?: number;
+  liked: Theme[];
+  improve: Theme[];
 }
 
 type View = "all" | "gender";
@@ -337,79 +343,99 @@ function MonthTrend({ history, currentQuizId }: { history: HistoryEntry[]; curre
   );
 }
 
-function Comments({ title, items, nothingCount }: { title: string; items: string[]; nothingCount: number }) {
+function ThemeList({ themes }: { themes: Theme[] }) {
+  if (themes.length === 0) return <p className="text-base text-text-muted">No common themes.</p>;
+  return (
+    <ul className="space-y-2 text-base text-text-primary">
+      {themes.map((t) => (
+        <li key={t.text} className="flex gap-2">
+          <span className={t.serious ? "text-danger" : "text-text-muted"}>{t.serious ? "⚑" : "•"}</span>
+          <span>
+            {t.text}
+            {t.students > 0 && (
+              <span className="text-text-muted">
+                {" "}· {t.students} student{t.students === 1 ? "" : "s"}
+              </span>
+            )}
+            {t.recurring && (
+              <span className="ml-2 rounded-full bg-warning-bg px-2 py-0.5 text-xs font-medium text-warning-text">
+                Also last time
+              </span>
+            )}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/**
+ * One open question: its themes once summarised, with the raw comments a click
+ * away; before that, the raw comments.
+ */
+function Comments({ title, items, nothingCount, themes }: {
+  title: string;
+  items: string[];
+  nothingCount: number;
+  themes: Theme[] | null;
+}) {
+  const [showAll, setShowAll] = useState(false);
+  const raw = (
+    <ul className="list-disc space-y-2 pl-5 text-base text-text-primary">
+      {items.map((text, i) => (
+        <li key={i}>{text}</li>
+      ))}
+    </ul>
+  );
   return (
     <SectionCard title={title}>
-      {nothingCount > 0 && (
-        <p className="mb-3 text-sm text-text-secondary">
-          {nothingCount} student{nothingCount === 1 ? "" : "s"} wrote “nothing” or similar.
-        </p>
+      {themes && <ThemeList themes={themes} />}
+      {themes && items.length > 0 && (
+        <button
+          type="button"
+          onClick={() => setShowAll((v) => !v)}
+          className="mt-3 text-sm font-medium text-accent hover:underline"
+        >
+          {showAll ? "Hide comments" : `Show all ${items.length} comments`}
+        </button>
       )}
-      {items.length === 0 ? (
-        <p className="text-base text-text-muted">No comments.</p>
-      ) : (
-        <ul className="list-disc space-y-2 pl-5 text-base text-text-primary">
-          {items.map((text, i) => (
-            <li key={i}>{text}</li>
-          ))}
-        </ul>
+      {(!themes || showAll) && (
+        <div className={themes ? "mt-3 border-t border-border pt-3" : ""}>
+          {nothingCount > 0 && (
+            <p className="mb-3 text-sm text-text-secondary">
+              {nothingCount} student{nothingCount === 1 ? "" : "s"} wrote “nothing” or similar.
+            </p>
+          )}
+          {items.length === 0 ? <p className="text-base text-text-muted">No comments.</p> : raw}
+        </div>
       )}
     </SectionCard>
   );
 }
 
-function SummarySection({ data }: { data: ReportData }) {
+function CommentsSection({ data }: { data: ReportData }) {
   const { summary } = data;
-  if (!summary) {
-    return (
-      <SectionCard title="Summary">
-        <p className="text-base text-text-secondary">
-          {data.roundClosed
-            ? "The summary is prepared daily after a round closes. Check back tomorrow."
-            : "A summary will appear after this round closes. Until then, see the scores and comments below."}
-        </p>
-      </SectionCard>
-    );
-  }
-  const generated = data.summaryGeneratedAt ? ` · ${formatDateTime(data.summaryGeneratedAt)}` : "";
+  const note = data.roundClosed
+    ? "The comments are summarised daily after a round closes."
+    : "The comments will be summarised after this round closes.";
   return (
-    <SectionCard title="Summary" subtitle={`AI summary of ${summary.response_count ?? data.responseCount} responses${generated}`}>
+    <div className="space-y-2">
+      {!summary && <p className="text-sm text-text-secondary">{note}</p>}
       <div className="grid gap-5 md:grid-cols-2">
-        <div>
-          <div className="mb-2 text-sm font-bold uppercase tracking-wide text-text-secondary">Highlights</div>
-          <ul className="space-y-2 text-base text-text-primary">
-            {summary.highlights.map((h) => (
-              <li key={h} className="flex gap-2">
-                <span className="text-success">✓</span>
-                {h}
-              </li>
-            ))}
-          </ul>
-        </div>
-        <div>
-          <div className="mb-2 text-sm font-bold uppercase tracking-wide text-text-secondary">Concerns</div>
-          {summary.concerns.length === 0 ? (
-            <p className="text-base text-text-muted">None raised.</p>
-          ) : (
-            <ul className="space-y-2 text-base text-text-primary">
-              {summary.concerns.map((c) => (
-                <li key={c.text} className="flex gap-2">
-                  <span className={c.serious ? "text-danger" : "text-warning-text"}>{c.serious ? "⚑" : "•"}</span>
-                  <span>
-                    {c.text}
-                    {c.recurring && (
-                      <span className="ml-2 rounded-full bg-warning-bg px-2 py-0.5 text-xs font-medium text-warning-text">
-                        Also last time
-                      </span>
-                    )}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+        <Comments
+          title="What students liked"
+          items={data.comments.filter((c) => c.role === "liked").map((c) => c.text)}
+          nothingCount={data.nothingCounts.liked}
+          themes={summary?.liked ?? null}
+        />
+        <Comments
+          title="What could improve"
+          items={data.comments.filter((c) => c.role === "improve").map((c) => c.text)}
+          nothingCount={data.nothingCounts.improve}
+          themes={summary?.improve ?? null}
+        />
       </div>
-    </SectionCard>
+    </div>
   );
 }
 
@@ -425,21 +451,9 @@ function Report({ data, quizId }: { data: ReportData; quizId: string }) {
         </div>
         {previous && <Delta now={data.percentage} before={previous.percentage} label={previous.cycleLabel} />}
       </div>
-      <SummarySection data={data} />
       <ParameterSection data={data} />
       {history.length > 1 && <MonthTrend history={history} currentQuizId={quizId} />}
-      <div className="grid gap-5 md:grid-cols-2">
-        <Comments
-          title="What students liked"
-          items={data.comments.filter((c) => c.role === "liked").map((c) => c.text)}
-          nothingCount={data.nothingCounts.liked}
-        />
-        <Comments
-          title="What could improve"
-          items={data.comments.filter((c) => c.role === "improve").map((c) => c.text)}
-          nothingCount={data.nothingCounts.improve}
-        />
-      </div>
+      <CommentsSection data={data} />
     </div>
   );
 }

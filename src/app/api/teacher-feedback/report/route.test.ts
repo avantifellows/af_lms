@@ -104,7 +104,7 @@ describe("GET /api/teacher-feedback/report", () => {
         teacher_id: "42",
         school_id: 5,
         centre_id: null,
-        summary: { highlights: ["Clear"], concerns: [] },
+        summary: { liked: [{ text: "Clear", students: 9 }], improve: [] },
         summary_generated_at: "2026-09-19 03:00:00",
         closed: true,
       },
@@ -124,7 +124,7 @@ describe("GET /api/teacher-feedback/report", () => {
     expect(body.percentage).toBe(42.86);
     expect(body.round).toEqual({ cycleLabel: "Sep 2026", batchNames: ["2027 Engg"] });
     expect(body.history).toEqual([{ cycleLabel: "Aug 2026", percentage: 60 }]);
-    expect(body.summary).toEqual({ highlights: ["Clear"], concerns: [] });
+    expect(body.summary).toEqual({ liked: [{ text: "Clear", students: 9 }], improve: [] });
     expect(body.summaryGeneratedAt).toBe("2026-09-19 03:00:00");
     expect(body.roundClosed).toBe(true);
     // One BigQuery scan covers the report and the teacher's other rounds.

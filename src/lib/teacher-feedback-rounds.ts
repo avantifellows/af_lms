@@ -20,7 +20,7 @@ export interface RoundRow {
   start_time: string | null;
   end_time: string | null;
   /** LLM summary (etl-next), null until the round has closed and been summarised. */
-  summary: { concerns?: { serious?: boolean }[] } | null;
+  summary: { improve?: { serious?: boolean }[] } | null;
 }
 
 /**

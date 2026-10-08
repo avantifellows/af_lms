@@ -37,7 +37,7 @@ export async function GET(
         // moved batch, or a class handed a link meant for another batch. Analysis
         // still counts them, so say so rather than let the numbers disagree.
         outsideBatches: [...answered].filter((id) => !rosterIds.has(id)).length,
-        seriousConcerns: (row.summary?.concerns ?? []).filter((c) => c.serious === true).length,
+        seriousConcerns: (row.summary?.improve ?? []).filter((t) => t.serious === true).length,
         responseCount: result?.summary.responseCount ?? 0,
         percentage: result?.summary.percentage ?? 0,
         notResponded: pending.map(({ name, student_id, batch_id }) => ({
