@@ -101,6 +101,34 @@ permission, or persistent history store. The Ralph PRD/slice artifacts and write
 boundaries remain under `.ralph/workspaces/383/`; configured council rounds were
 zero, and no ADR conflict was identified.
 
+## Issue #388 Centre-page switcher — grilled plan
+
+Issue #388 will add a searchable switcher to the Centre page title when the
+viewer has at least two browsable accessible Centres. It reuses the Physical
+Centres access semantics: active Centre seats confine the list to those Centres;
+a seatless scoped user falls back to accessible Schools; admins may see all;
+PMU roles see none. Only active School-linked Centres are switch targets, because
+School-less Centre pages do not exist. The destination page remains the final
+authorization gate.
+
+The page server-loads one lightweight authorized list without student counts;
+the client searches Centre, Program, School name, and School code. Results show
+Program and School context, with type/category and finally Centre ID used only to
+disambiguate otherwise identical labels. The current Centre is first and inert.
+A single browsable Centre keeps the existing plain title. A list-read failure
+also falls back to the plain title without failing the current Centre page.
+
+Choosing a Centre pushes history and carries only the current outer `tab`. It
+drops every Centre-specific query value and hash. Back therefore restores the
+previous Centre's untouched URL, including any earlier Performance report or
+filters. A Program-less target keeps the tab and uses the existing no-Program
+state; a tab that is genuinely unavailable at the destination falls back to
+Enrollment. No School-page switcher, dashboard redesign, new API, permission,
+persistence, schema, or School-less Centre page is part of #388.
+
+The implementation will be a separate stack on PR #394, then retarget to `main`
+after #394 merges. These are reversible navigation decisions, so no ADR is needed.
+
 ## Key Components
 
 - **`src/lib/db.ts`** — the `query<T>()` helper over a singleton `pg.Pool` (god node, ~137 edges). Reads and direct writes both go through it. `withTransaction()` for multi-statement writes.
