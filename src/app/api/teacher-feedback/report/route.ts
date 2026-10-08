@@ -4,6 +4,7 @@ import { query } from "@/lib/db";
 import { canAccessQuizSessionSchool } from "@/lib/quiz-session-access";
 import { authenticateTeacherFeedback, requireCentreScope } from "@/lib/teacher-feedback-access";
 import { getTeacherFeedbackReport } from "@/lib/teacher-feedback-bq";
+import { getGenders, getRoundContext, getTeacherHistory } from "@/lib/teacher-feedback-history";
 
 // GET /api/teacher-feedback/report?quiz_id=XXXX
 export async function GET(request: NextRequest) {
@@ -26,11 +27,12 @@ export async function GET(request: NextRequest) {
   const rows = await query<{
     school_code: string;
     teacher_name: string;
+    teacher_id: string | null;
     school_id: number | null;
     centre_id: number | string | null;
   }>(
     `
-    SELECT tf.school_code, tf.teacher_name, sch.id AS school_id, tf.centre_id
+    SELECT tf.school_code, tf.teacher_name, tf.teacher_id, sch.id AS school_id, tf.centre_id
     FROM session s
     JOIN lms_teacher_feedback tf ON tf.session_pk = s.id AND tf.deleted_at IS NULL
     LEFT JOIN school sch ON sch.code = tf.school_code
@@ -58,9 +60,18 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const report = await getTeacherFeedbackReport(quizId);
+    const [report, round, history] = await Promise.all([
+      getTeacherFeedbackReport(quizId, getGenders),
+      getRoundContext(quizId),
+      getTeacherHistory({
+        schoolCode: row.school_code,
+        centreId: row.centre_id == null ? null : Number(row.centre_id),
+        teacherId: row.teacher_id,
+        teacherName: row.teacher_name,
+      }),
+    ]);
 
-    return NextResponse.json({ teacherName: row.teacher_name, ...report });
+    return NextResponse.json({ teacherName: row.teacher_name, round, history, ...report });
   } catch (error) {
     console.error("Teacher feedback report error:", error);
     return NextResponse.json(

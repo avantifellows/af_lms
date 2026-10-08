@@ -9,12 +9,18 @@ vi.mock("@/lib/teacher-feedback-access", async (importOriginal) => {
 });
 vi.mock("@/lib/teacher-feedback-bq", () => ({ getTeacherFeedbackReport: vi.fn() }));
 vi.mock("@/lib/db", () => ({ query: vi.fn() }));
+vi.mock("@/lib/teacher-feedback-history", () => ({
+  getGenders: vi.fn(),
+  getRoundContext: vi.fn(),
+  getTeacherHistory: vi.fn(),
+}));
 
 import { NextRequest } from "next/server";
 import { canAccessQuizSessionSchool } from "@/lib/quiz-session-access";
 import { authenticateTeacherFeedback } from "@/lib/teacher-feedback-access";
 import { getTeacherFeedbackReport } from "@/lib/teacher-feedback-bq";
 import { query } from "@/lib/db";
+import { getGenders, getRoundContext, getTeacherHistory } from "@/lib/teacher-feedback-history";
 import { GET } from "./route";
 
 const mockAuth = vi.mocked(authenticateTeacherFeedback);
@@ -42,8 +48,12 @@ function baseReport() {
     totalScore: 12,
     maxTotalScore: 28,
     percentage: 42.86,
-    parameters: [{ parameter: "Planning", score: 3, maxScore: 4, answeredBy: 2 }],
+    parameters: [
+      { parameter: "Planning", score: 3, maxScore: 4, percentage: 75, answeredBy: 2, questions: [] },
+    ],
     comments: [{ role: "liked" as const, text: "friendly" }],
+    nothingCounts: { liked: 0, improve: 0 },
+    byGender: {},
   };
 }
 
@@ -82,13 +92,13 @@ describe("GET /api/teacher-feedback/report", () => {
     expect((await GET(req("q1"))).status).toBe(403);
   });
 
-  it("returns the report for the resolved teacher", async () => {
-    // One query only: the session/teacher lookup. The report itself needs no
-    // further SQL — there is no per-batch breakdown to resolve names for.
+  it("returns the report with its round and the teacher's history", async () => {
     mockQuery.mockResolvedValueOnce([
-      { school_code: "34054", teacher_name: "Manjit Kumar", school_id: 5 },
+      { school_code: "34054", teacher_name: "Manjit Kumar", teacher_id: "42", school_id: 5, centre_id: null },
     ]);
     mockReport.mockResolvedValue(baseReport());
+    vi.mocked(getRoundContext).mockResolvedValue({ cycleLabel: "Sep 2026", batchNames: ["2027 Engg"] } as never);
+    vi.mocked(getTeacherHistory).mockResolvedValue([{ cycleLabel: "Aug 2026", percentage: 60 }] as never);
 
     const res = await GET(req("q1"));
     expect(res.status).toBe(200);
@@ -96,7 +106,15 @@ describe("GET /api/teacher-feedback/report", () => {
     expect(body.teacherName).toBe("Manjit Kumar");
     expect(body.parameters[0].answeredBy).toBe(2);
     expect(body.percentage).toBe(42.86);
-    expect(mockQuery).toHaveBeenCalledTimes(1);
+    expect(body.round).toEqual({ cycleLabel: "Sep 2026", batchNames: ["2027 Engg"] });
+    expect(body.history).toEqual([{ cycleLabel: "Aug 2026", percentage: 60 }]);
+    expect(mockReport).toHaveBeenCalledWith("q1", getGenders);
+    expect(getTeacherHistory).toHaveBeenCalledWith({
+      schoolCode: "34054",
+      centreId: null,
+      teacherId: "42",
+      teacherName: "Manjit Kumar",
+    });
   });
 
   it("500 when the report computation throws", async () => {

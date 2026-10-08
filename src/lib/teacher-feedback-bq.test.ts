@@ -5,7 +5,7 @@ vi.mock("@/lib/bigquery", () => ({
   getBigQueryClient: () => ({ query: mockQuery }),
 }));
 
-import { getTeacherFeedbackReport } from "./teacher-feedback-bq";
+import { getTeacherFeedbackReport, getTeacherFeedbackSummaries } from "./teacher-feedback-bq";
 import {
   FEEDBACK_QUESTIONS,
   OPEN_QUESTIONS,
@@ -21,6 +21,7 @@ function scoredRow(
 ) {
   const option = question.options[optionIndex];
   return {
+    test_id: "quiz_x",
     user_id: userId,
     question_text: question.text,
     user_response: String(optionIndex),
@@ -35,6 +36,7 @@ function openRow(
 ) {
   const question = OPEN_QUESTIONS.find((q) => q.role === role)!;
   return {
+    test_id: "quiz_x",
     user_id: userId,
     question_text: question.text,
     user_response: text,
@@ -62,8 +64,9 @@ describe("getTeacherFeedbackReport", () => {
     expect(r.totalScore).toBe(28);
     expect(r.maxTotalScore).toBe(28);
     expect(r.percentage).toBe(100);
-    // "Great teacher" is meaningful; "no" is filtered out
+    // "Great teacher" is meaningful; "no" is counted, not listed
     expect(r.comments).toEqual([{ role: "liked", text: "Great teacher" }]);
+    expect(r.nothingCounts).toEqual({ liked: 0, improve: 1 });
   });
 
   it("averages across students (worst option = score 0 -> 0%)", async () => {
@@ -144,6 +147,7 @@ describe("getTeacherFeedbackReport", () => {
     const q = SCORED_QUESTIONS[0];
     const rows = [
       {
+        test_id: "quiz_x",
         user_id: "u1",
         question_text: q.text,
         user_response: "0",
@@ -163,6 +167,7 @@ describe("getTeacherFeedbackReport", () => {
     const rows = [
       ...fullResponseRows("u1", 0),
       {
+        test_id: "quiz_x",
         user_id: "u1",
         question_text: "Does the teacher bring snacks?",
         user_response: "0",
@@ -183,6 +188,7 @@ describe("getTeacherFeedbackReport", () => {
     const mangled = q.text.replace(/[’']/g, "'").replace(/ /g, "  ");
     const rows = [
       {
+        test_id: "quiz_x",
         user_id: "u1",
         question_text: `  ${mangled} `,
         user_response: "0",
@@ -210,5 +216,63 @@ describe("getTeacherFeedbackReport", () => {
         labels.length
       );
     }
+  });
+});
+
+describe("question-level detail and splits", () => {
+  it("gives each parameter a % and each question its % and option counts", async () => {
+    const [q] = SCORED_QUESTIONS;
+    mockQuery.mockResolvedValueOnce([[scoredRow("u1", q, 0), scoredRow("u2", q, 1), scoredRow("u3", q, 1)]]);
+    const r = await getTeacherFeedbackReport("quiz_x");
+
+    const param = r.parameters.find((p) => p.parameter === q.parameter)!;
+    const question = param.questions.find((x) => x.text === q.text)!;
+    expect(question).toMatchObject({ questionTag: q.questionTag, answeredBy: 3, optionCounts: [1, 2, 0] });
+    expect(question.percentage).toBeCloseTo((4 / 3 / 2) * 100);
+    expect(param.percentage).toBeCloseTo((param.score / param.maxScore) * 100);
+  });
+
+  it("splits by gender, leaving out a group too small to stay anonymous", async () => {
+    const girls = ["f1", "f2", "f3", "f4", "f5"];
+    mockQuery.mockResolvedValueOnce([[
+      ...girls.flatMap((u) => fullResponseRows(u, 0)),
+      ...fullResponseRows("m1", 2),
+    ]]);
+    const genderOf = vi.fn(async (ids: string[]) =>
+      new Map(ids.map((id) => [id, id.startsWith("f") ? ("female" as const) : ("male" as const)]))
+    );
+    const r = await getTeacherFeedbackReport("quiz_x", genderOf);
+
+    expect(r.byGender.female).toMatchObject({ responseCount: 5, percentage: 100 });
+    expect(r.byGender.male).toBeUndefined();
+    expect(genderOf).toHaveBeenCalledWith(expect.arrayContaining([...girls, "m1"]));
+  });
+
+  it("summarises several quizzes from one query, excluding the admin test user", async () => {
+    mockQuery.mockResolvedValueOnce([[
+      ...fullResponseRows("u1", 0),
+      ...fullResponseRows("u2", 2).map((row) => ({ ...row, test_id: "quiz_y" })),
+    ]]);
+    const byQuiz = await getTeacherFeedbackSummaries(["quiz_x", "quiz_y", "quiz_z"]);
+
+    expect(mockQuery).toHaveBeenCalledTimes(1);
+    expect(mockQuery.mock.calls[0][0].query).toContain("test_admin");
+    expect(byQuiz.get("quiz_x")).toMatchObject({ responseCount: 1, percentage: 100 });
+    expect(byQuiz.get("quiz_y")).toMatchObject({ responseCount: 1, percentage: 0 });
+    expect(byQuiz.get("quiz_z")).toMatchObject({ responseCount: 0 });
+  });
+
+  it("counts \"nothing\"-style answers instead of listing each one", async () => {
+    mockQuery.mockResolvedValueOnce([[
+      openRow("u1", "improve", "Nothing"),
+      openRow("u2", "improve", "nothing sir."),
+      openRow("u3", "improve", "No comments"),
+      openRow("u4", "improve", "Nothing to improve"),
+      openRow("u5", "improve", "Do some more PYQs"),
+    ]]);
+    const r = await getTeacherFeedbackReport("quiz_x");
+
+    expect(r.nothingCounts.improve).toBe(4);
+    expect(r.comments).toEqual([{ role: "improve", text: "Do some more PYQs" }]);
   });
 });

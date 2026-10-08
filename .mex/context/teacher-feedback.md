@@ -16,7 +16,7 @@ edges:
     condition: when the question is about quiz sessions generally, not feedback
   - target: context/permissions.md
     condition: when gating a feedback route
-last_updated: 2026-10-08
+last_updated: 2026-10-09
 ---
 
 # Teacher Feedback
@@ -110,6 +110,25 @@ an id join and both copies of the form go away.
   Two rounds in one month for *different* batches (Kurnool's 2027 and 2028
   cohorts) are normal.
 
+## Analysis (report)
+
+- Code: `src/components/teacher-feedback/` (`TeacherFeedbackTab` → `CycleCard` per
+  round, `TeacherCard` per teacher; `AnalysisModal`; `SetupModal`), scoring in
+  `src/lib/teacher-feedback-bq.ts`, round context + history in
+  `src/lib/teacher-feedback-history.ts`.
+- Each parameter and question gets a %, and each question its option counts.
+  Overall % per teacher card comes from `getTeacherFeedbackSummaries` (one
+  BigQuery query for many quizzes).
+- **History** = the teacher's rounds at the same school *and centre*, matched by
+  `teacher_id`, falling back to name only when either side has no id. Rounds with
+  zero responses (abandoned duplicate set-ups) are dropped. "▲ vs <month>"
+  compares with the same batches' previous round.
+- **Gender split** (`user.gender`, lower-cased; only male/female) is shown only
+  when both groups have ≥ 5 responses, so a split can't single anyone out.
+- **"Nothing"-style comments** ("nothing", "no comments", "nothing sir") are
+  counted, not listed; they used to bury the real suggestions.
+- Ended rounds say "didn't respond", live ones "pending".
+
 ## Gotchas
 
 - **`session_pk` and `centre_id` are bigints**, so pg returns them as strings.
@@ -120,9 +139,10 @@ an id join and both copies of the form go away.
   422s the whole quiz build and the Lambda then dies before writing `platform_id`.
 - **Times differ by store.** `lms_teacher_feedback` keeps the window in UTC; the
   db-service `session` row keeps it in IST. Never compare the two raw.
-- **No per-batch breakdown in the report.** BigQuery's `batch` column is
+- **No per-batch breakdown within a round.** BigQuery's `batch` column is
   `meta_data.parent_id` — the shared *quiz* batch, not the class batch the PM
-  picked.
+  picked. Across rounds the batch is known (each round has its own batches), so
+  the month trend is batch × month.
 - **A Lambda failure is invisible to the PM**: setup returns 201, the row reads
   `created`, and only CloudWatch says the quiz build failed.
 

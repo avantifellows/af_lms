@@ -5,11 +5,14 @@ vi.mock("@/lib/teacher-feedback-rounds", () => ({
   loadAuthorizedRound: vi.fn(),
   getRoundRoster: vi.fn(),
 }));
-vi.mock("@/lib/teacher-feedback-bq", () => ({ getRespondersByQuiz: vi.fn() }));
+vi.mock("@/lib/teacher-feedback-bq", () => ({
+  getRespondersByQuiz: vi.fn(),
+  getTeacherFeedbackSummaries: vi.fn(),
+}));
 
 import { authenticateTeacherFeedback } from "@/lib/teacher-feedback-access";
 import { getRoundRoster, loadAuthorizedRound } from "@/lib/teacher-feedback-rounds";
-import { getRespondersByQuiz } from "@/lib/teacher-feedback-bq";
+import { getRespondersByQuiz, getTeacherFeedbackSummaries } from "@/lib/teacher-feedback-bq";
 import { GET } from "./route";
 
 const get = () =>
@@ -29,6 +32,9 @@ beforeEach(() => {
     { user_id: "1", student_id: "S1", name: "Anil", batch_id: "B27" },
     { user_id: "2", student_id: "S2", name: "Bina", batch_id: "B27" },
   ]);
+  vi.mocked(getTeacherFeedbackSummaries).mockResolvedValue(
+    new Map([["q1", { responseCount: 3, percentage: 80, parameters: [] }]])
+  );
   vi.mocked(getRespondersByQuiz).mockResolvedValue(new Map([["q1", new Set(["1", "2", "99"])], ["q2", new Set(["2"])]]));
 });
 
@@ -40,13 +46,24 @@ describe("GET /api/teacher-feedback/cycles/:setupRunId/responses", () => {
     expect(getRespondersByQuiz).toHaveBeenCalledWith(["q1", "q2"]);
     expect(await res.json()).toEqual({
       teachers: [
-        { teacherName: "Asha", teacherOrder: 1, responded: 2, total: 2, outsideBatches: 1, notResponded: [] },
+        {
+          teacherName: "Asha",
+          teacherOrder: 1,
+          responded: 2,
+          total: 2,
+          outsideBatches: 1,
+          responseCount: 3,
+          percentage: 80,
+          notResponded: [],
+        },
         {
           teacherName: "Ravi",
           teacherOrder: 2,
           responded: 1,
           total: 2,
           outsideBatches: 0,
+          responseCount: 0,
+          percentage: 0,
           notResponded: [{ name: "Anil", studentId: "S1", batchId: "B27" }],
         },
       ],
