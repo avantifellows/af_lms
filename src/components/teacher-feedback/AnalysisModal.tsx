@@ -204,14 +204,14 @@ function ParameterRow({
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="grid w-full grid-cols-[minmax(9rem,14rem)_1fr_3.5rem] items-center gap-4 py-3 text-left hover:bg-hover-bg"
+        className="grid w-full grid-cols-[1fr_3.5rem] items-center gap-x-4 gap-y-2 py-3 text-left hover:bg-hover-bg sm:grid-cols-[minmax(9rem,14rem)_1fr_3.5rem]"
       >
         <span className="flex items-center gap-2 text-base font-medium text-text-primary">
           <span className="text-text-muted">{open ? "▾" : "▸"}</span>
           {parameter.parameter}
         </span>
         {view === "gender" ? (
-          <span className="space-y-1.5">
+          <span className="order-last col-span-2 space-y-1.5 sm:order-none sm:col-span-1">
             <span className="flex items-center gap-2 text-xs text-text-secondary">
               <span className="w-10">Girls</span>
               <Bar value={genderPct("female")} thin />
@@ -224,7 +224,9 @@ function ParameterRow({
             </span>
           </span>
         ) : (
-          <Bar value={rated ? parameter.percentage : 0} />
+          <span className="order-last col-span-2 sm:order-none sm:col-span-1">
+            <Bar value={rated ? parameter.percentage : 0} />
+          </span>
         )}
         <span className="text-right text-lg font-bold text-text-primary">
           {rated ? formatPct(parameter.percentage) : "–"}
@@ -352,7 +354,7 @@ function Report({ data, quizId }: { data: ReportData; quizId: string }) {
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
-        <div className="text-5xl font-bold text-text-primary">{formatPct(data.percentage)}</div>
+        <div className="text-4xl font-bold text-text-primary sm:text-5xl">{formatPct(data.percentage)}</div>
         <div className="text-base text-text-secondary">
           overall · {data.responseCount} response{data.responseCount === 1 ? "" : "s"}
         </div>
@@ -390,9 +392,9 @@ export default function AnalysisModal({
 
   return (
     <Modal open onClose={onClose} className="flex max-h-[94vh] max-w-4xl flex-col border border-border">
-      <div className="flex items-start justify-between gap-4 border-b-4 border-border-accent px-6 py-5">
+      <div className="flex items-start justify-between gap-4 border-b-4 border-border-accent px-4 py-4 sm:px-6 sm:py-5">
         <div>
-          <h2 className="text-2xl font-bold text-text-primary">{teacherName}</h2>
+          <h2 className="text-xl font-bold text-text-primary sm:text-2xl">{teacherName}</h2>
           {round && (
             <>
               <div className="mt-1 text-base text-text-primary">
@@ -410,7 +412,7 @@ export default function AnalysisModal({
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-6">
+      <div className="flex-1 overflow-y-auto p-4 sm:p-6">
         {loading ? (
           <p className="text-base text-text-secondary">Loading analysis…</p>
         ) : error ? (

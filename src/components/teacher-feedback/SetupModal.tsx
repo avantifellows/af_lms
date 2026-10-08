@@ -346,6 +346,36 @@ async function postSetup(body: Record<string, unknown>): Promise<{ result: Setup
   }
 }
 
+/**
+ * What's picked. Centre is picked first: it scopes BOTH the teachers and the
+ * batches (a school can host a CoE and a Nodal centre, each with its own
+ * cohorts), so changing it clears the rest. With exactly one centre there's
+ * nothing to pick — derived rather than set in an effect, since centres load
+ * asynchronously.
+ */
+function useSelection(centres: FeedbackCentre[]) {
+  const [picked, setPicked] = useState<{
+    centreId: number | null;
+    classBatchIds: string[];
+    teachers: FeedbackTeacher[];
+  }>({ centreId: null, classBatchIds: [], teachers: [] });
+  return {
+    centreId: picked.centreId ?? (centres.length === 1 ? centres[0].id : null),
+    setCentreId: (centreId: number | null) => setPicked({ centreId, classBatchIds: [], teachers: [] }),
+    classBatchIds: picked.classBatchIds,
+    toggleBatch: (id: string) => setPicked((p) => ({ ...p, classBatchIds: toggle(p.classBatchIds, id) })),
+    selectedTeachers: picked.teachers,
+    toggleTeacher: (t: FeedbackTeacher) => setPicked((p) => ({ ...p, teachers: toggle(p.teachers, t, teacherKey) })),
+  };
+}
+
+function useTiming() {
+  const [timingMode, setTimingMode] = useState<TimingMode>("start_now");
+  const [startTime, setStartTime] = useState(() => toDateTimeLocalValue(new Date()));
+  const [endTime, setEndTime] = useState(() => toDateTimeLocalValue(addHours(new Date(), DEFAULT_DURATION_HOURS)));
+  return { timingMode, setTimingMode, startTime, setStartTime, endTime, setEndTime };
+}
+
 /** Validates the window, posts the setup, and tracks saving and errors. */
 function useSetupSubmit(
   ready: boolean,
@@ -388,23 +418,10 @@ export default function SetupModal({
   // Centre is picked first: it scopes BOTH the teachers and the batches. A
   // school can host a CoE and a Nodal centre, each with its own cohorts, so
   // batches must not be fetched school-wide.
-  const [pickedCentreId, setPickedCentreId] = useState<number | null>(null);
-  // With exactly one centre there's nothing to pick. Derived rather than set in
-  // an effect, since centres load asynchronously.
-  const centreId = pickedCentreId ?? (centres.length === 1 ? centres[0].id : null);
+  const { centreId, setCentreId, classBatchIds, toggleBatch, selectedTeachers, toggleTeacher } = useSelection(centres);
   const options = useCentreOptions(centreId);
-  const [classBatchIds, setClassBatchIds] = useState<string[]>([]);
-  const [selectedTeachers, setSelectedTeachers] = useState<FeedbackTeacher[]>([]);
-  const [timingMode, setTimingMode] = useState<TimingMode>("start_now");
-  const [startTime, setStartTime] = useState(() => toDateTimeLocalValue(new Date()));
-  const [endTime, setEndTime] = useState(() =>
-    toDateTimeLocalValue(addHours(new Date(), DEFAULT_DURATION_HOURS))
-  );
-  const setCentreId = (id: number | null) => {
-    setPickedCentreId(id);
-    setClassBatchIds([]);
-    setSelectedTeachers([]);
-  };
+  const timing = useTiming();
+  const { timingMode, startTime, endTime } = timing;
 
   const { roundByBatch, sameMonth } = useRoundsThatMonth(cycles, timingMode, startTime);
 
@@ -429,7 +446,7 @@ export default function SetupModal({
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-5">
+      <div className="flex-1 overflow-y-auto p-3 sm:p-5">
         <div className="space-y-5">
           <SectionCard title="1. Select Centre">
             <CentrePicker centres={centres} loading={loading} centreId={centreId} onChange={setCentreId} />
@@ -440,7 +457,7 @@ export default function SetupModal({
               note={options.batchNote}
               batches={options.classBatches}
               selected={classBatchIds}
-              onToggle={(id) => setClassBatchIds((prev) => toggle(prev, id))}
+              onToggle={toggleBatch}
               roundByBatch={roundByBatch}
               sameMonth={sameMonth}
               onExtendInstead={onExtendInstead}
@@ -452,18 +469,18 @@ export default function SetupModal({
               note={options.teacherNote}
               teachers={options.teachers}
               selected={selectedTeachers}
-              onToggle={(t) => setSelectedTeachers((prev) => toggle(prev, t, teacherKey))}
+              onToggle={toggleTeacher}
             />
           </SectionCard>
 
           <SectionCard title="4. When">
             <TimingPicker
               mode={timingMode}
-              onMode={setTimingMode}
+              onMode={timing.setTimingMode}
               startTime={startTime}
               endTime={endTime}
-              onStart={setStartTime}
-              onEnd={setEndTime}
+              onStart={timing.setStartTime}
+              onEnd={timing.setEndTime}
             />
           </SectionCard>
 

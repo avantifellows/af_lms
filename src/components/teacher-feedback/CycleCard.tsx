@@ -168,7 +168,7 @@ function RoundHeader({ cycle, open, live, onToggle }: {
       type="button"
       onClick={onToggle}
       aria-expanded={open}
-      className="flex w-full items-center justify-between gap-4 px-5 py-4 text-left hover:bg-hover-bg"
+      className="flex w-full items-center justify-between gap-3 px-4 py-4 text-left hover:bg-hover-bg sm:px-5"
     >
       <div className="min-w-0">
         <div className="flex flex-wrap items-baseline gap-x-3">
@@ -233,7 +233,7 @@ export default function CycleCard({
             />
           )}
           {failed && <div className="px-5 pt-3 text-sm text-danger">Couldn’t load who has responded.</div>}
-          <ul className="grid gap-4 p-5 sm:grid-cols-2 xl:grid-cols-3">
+          <ul className="grid gap-4 p-4 sm:grid-cols-2 sm:p-5 xl:grid-cols-3">
             {cycle.teachers.map((t) => (
               <TeacherCard
                 key={`${t.teacherOrder}-${t.teacherName}`}
