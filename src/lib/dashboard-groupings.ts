@@ -207,12 +207,27 @@ export async function getCentreSwitcherEntries(
     program_name: string | null;
     school_name: string;
     school_code: string;
+    type_label: string | null;
+    category_label: string | null;
   }>(
+    // Type/category are stored as codes; show their configured labels (ADR 0004).
     `SELECT c.id, c.name, p.name AS program_name,
-            sch.name AS school_name, sch.code AS school_code
+            sch.name AS school_name, sch.code AS school_code,
+            type_options.label AS type_label,
+            category_options.label AS category_label
      FROM centres c
      JOIN school sch ON sch.id = c.school_id
      LEFT JOIN program p ON p.id = c.program_id
+     LEFT JOIN centre_option_sets type_set
+       ON type_set.code = 'type'
+     LEFT JOIN centre_options type_options
+       ON type_options.option_set_id = type_set.id
+      AND type_options.code = c.type_code
+     LEFT JOIN centre_option_sets category_set
+       ON category_set.code = 'category'
+     LEFT JOIN centre_options category_options
+       ON category_options.option_set_id = category_set.id
+      AND category_options.code = c.category_code
      WHERE c.is_active AND c.school_id IS NOT NULL ${scopeClause}`,
     params,
   );
@@ -222,6 +237,8 @@ export async function getCentreSwitcherEntries(
     programName: row.program_name,
     schoolName: row.school_name,
     schoolCode: row.school_code,
+    typeLabel: row.type_label ?? null,
+    categoryLabel: row.category_label ?? null,
   }));
 }
 

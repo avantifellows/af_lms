@@ -211,6 +211,9 @@ export default function CentreSwitcher({
                   {option.isCurrent && <Badge variant="accent">Current</Badge>}
                 </span>
                 <span className="block text-xs text-text-muted">{option.context}</span>
+                {option.disambiguator && (
+                  <span className="block text-xs text-text-muted">{option.disambiguator}</span>
+                )}
               </li>
             ))}
           </ul>

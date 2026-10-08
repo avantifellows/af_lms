@@ -482,6 +482,8 @@ type SwitcherRow = {
   program_name: string | null;
   school_name: string;
   school_code: string;
+  type_label?: string | null;
+  category_label?: string | null;
 };
 
 const BHAVNAGAR_COE: SwitcherRow = {
@@ -770,8 +772,9 @@ describe("CentrePage → Centre switcher", () => {
         "JNV Adilabad" + "JNV CoE · Adilabad Annex (36002)",
         "JNV Adilabad" + "JNV CoE · JNV Adilabad (36001)",
         "JNV Adilabad" + "JNV Nodal · JNV Adilabad (36001)",
-        "Nagaland Foundation" + "No Program · JNV Kohima (13001)",
-        "Nagaland Foundation" + "No Program · JNV Kohima (13001)",
+        // Fully identical (no type/category labels): the Centre ID tells them apart.
+        "Nagaland Foundation" + "No Program · JNV Kohima (13001)" + "Centre ID: 9",
+        "Nagaland Foundation" + "No Program · JNV Kohima (13001)" + "Centre ID: 16",
       ]);
       expect(options[0]).toHaveAttribute("aria-disabled", "true");
       expect(options[0]).toHaveAttribute("aria-selected", "true");
@@ -790,6 +793,94 @@ describe("CentrePage → Centre switcher", () => {
         "JNV Bhavnagar CoE" + "Current" + "JNV CoE · JNV Bhavnagar (70705)",
         "JNV Adilabad" + "JNV Nodal · JNV Adilabad (36001)",
       ]);
+    });
+
+    describe("disambiguation", () => {
+      // The listed rows besides the current Centre's own (unlabeled) row.
+      async function openWith(rows: SwitcherRow[], currentRow: SwitcherRow = BHAVNAGAR_COE) {
+        setupCentre();
+        stubSwitcherRows([currentRow, ...rows]);
+        await renderCentre("8");
+        await userEvent.setup().click(switcherTrigger()!);
+        return within(screen.getByRole("listbox"))
+          .getAllByRole("option")
+          .map((option) => option.textContent);
+      }
+
+      it("adds nothing when Program already separates same-named Centres at one School", async () => {
+        const texts = await openWith([
+          { ...ADILABAD_COE, type_label: "Residential", category_label: "Boys" },
+          { ...ADILABAD_NODAL, type_label: "Residential", category_label: "Boys" },
+        ]);
+
+        expect(texts).toEqual([
+          "JNV Bhavnagar CoE" + "Current" + "JNV CoE · JNV Bhavnagar (70705)",
+          "JNV Adilabad" + "JNV CoE · JNV Adilabad (36001)",
+          "JNV Adilabad" + "JNV Nodal · JNV Adilabad (36001)",
+        ]);
+      });
+
+      it("shows type/category labels for Centres that differ only by category", async () => {
+        const texts = await openWith([
+          { ...ADILABAD_COE, type_label: "Residential", category_label: "Boys" },
+          { ...ADILABAD_COE, id: "41", type_label: "Residential", category_label: "Girls" },
+        ]);
+
+        expect(texts).toEqual([
+          "JNV Bhavnagar CoE" + "Current" + "JNV CoE · JNV Bhavnagar (70705)",
+          "JNV Adilabad" + "JNV CoE · JNV Adilabad (36001)" + "Residential · Boys",
+          "JNV Adilabad" + "JNV CoE · JNV Adilabad (36001)" + "Residential · Girls",
+        ]);
+      });
+
+      it("shows the Centre ID for Centres whose labels are identical too", async () => {
+        const texts = await openWith([
+          { ...ADILABAD_COE, type_label: "Residential", category_label: "Boys" },
+          { ...ADILABAD_COE, id: "41", type_label: "Residential", category_label: "Boys" },
+        ]);
+
+        expect(texts.slice(1)).toEqual([
+          "JNV Adilabad" + "JNV CoE · JNV Adilabad (36001)" + "Centre ID: 30",
+          "JNV Adilabad" + "JNV CoE · JNV Adilabad (36001)" + "Centre ID: 41",
+        ]);
+      });
+
+      it("disambiguates the current Centre by the same rules, using its listed labels", async () => {
+        const texts = await openWith(
+          [{ ...BHAVNAGAR_COE, id: "9", type_label: "Residential", category_label: "Girls" }],
+          { ...BHAVNAGAR_COE, type_label: "Residential", category_label: "Boys" },
+        );
+
+        expect(texts).toEqual([
+          "JNV Bhavnagar CoE" + "Current" + "JNV CoE · JNV Bhavnagar (70705)" + "Residential · Boys",
+          "JNV Bhavnagar CoE" + "JNV CoE · JNV Bhavnagar (70705)" + "Residential · Girls",
+        ]);
+      });
+
+      it("reads type/category as configured option labels, keeping scope and $n params", async () => {
+        setupCentre({}, {
+          scope: {
+            schools: new Set(["70705", "36001"]),
+            centres: new Set([8, 30]),
+            programs: new Set([1]),
+          },
+        });
+        stubSwitcherRows([BHAVNAGAR_COE, ADILABAD_COE]);
+
+        await renderCentre("8");
+
+        const [[sql, params]] = switcherQueryCalls();
+        expect(sql).toContain("type_options.label AS type_label");
+        expect(sql).toContain("category_options.label AS category_label");
+        expect(sql).toMatch(/JOIN centre_option_sets type_set\s+ON type_set\.code = 'type'/);
+        expect(sql).toMatch(/AND type_options\.code = c\.type_code/);
+        expect(sql).toMatch(/JOIN centre_option_sets category_set\s+ON category_set\.code = 'category'/);
+        expect(sql).toMatch(/AND category_options\.code = c\.category_code/);
+        expect(sql).not.toMatch(/c\.(type|category)_code AS/);
+        expect(sql).toMatch(/WHERE c\.is_active AND c\.school_id IS NOT NULL AND c\.id = ANY\(\$1\)/);
+        expect(sql).not.toContain("centre_students");
+        expect(params).toEqual([[8, 30]]);
+      });
     });
 
     it("goes to another Centre's page when its option is clicked", async () => {
@@ -816,8 +907,8 @@ describe("CentrePage → Centre switcher", () => {
     describe("search", () => {
       it.each([
         ["Centre name", "foundation", [
-          "Nagaland Foundation" + "No Program · JNV Kohima (13001)",
-          "Nagaland Foundation" + "No Program · JNV Kohima (13001)",
+          "Nagaland Foundation" + "No Program · JNV Kohima (13001)" + "Centre ID: 9",
+          "Nagaland Foundation" + "No Program · JNV Kohima (13001)" + "Centre ID: 16",
         ]],
         ["Program name", "  NODAL ", [
           "JNV Adilabad" + "JNV Nodal · JNV Adilabad (36001)",
@@ -969,7 +1060,9 @@ describe("CentrePage → Centre switcher", () => {
 
         expect(searchInput()).not.toHaveAttribute("aria-activedescendant");
         await user.keyboard("{ArrowDown}");
-        expect(activeOptionText()).toBe("Nagaland Foundation" + "No Program · JNV Kohima (13001)");
+        expect(activeOptionText()).toBe(
+          "Nagaland Foundation" + "No Program · JNV Kohima (13001)" + "Centre ID: 9",
+        );
       });
     });
 

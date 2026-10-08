@@ -13,6 +13,10 @@ export interface CentreSwitcherEntry {
   programName: string | null;
   schoolName: string;
   schoolCode: string;
+  // Configured option labels, used only to tell otherwise identical entries
+  // apart. The page's own Centre takes them from its list row, if any.
+  typeLabel?: string | null;
+  categoryLabel?: string | null;
 }
 
 export interface CentreSwitcherOption {
@@ -67,10 +71,48 @@ export function buildCentreSwitcherOptions(
   entries: CentreSwitcherEntry[],
   current: CentreSwitcherEntry,
 ): CentreSwitcherOption[] {
+  const listed = entries.find((entry) => String(entry.id) === String(current.id));
+  const currentEntry: CentreSwitcherEntry = {
+    ...current,
+    typeLabel: current.typeLabel ?? listed?.typeLabel ?? null,
+    categoryLabel: current.categoryLabel ?? listed?.categoryLabel ?? null,
+  };
   const others = entries
     .filter((entry) => String(entry.id) !== String(current.id))
     .sort(compareEntries);
-  return [toOption(current, true), ...others.map((entry) => toOption(entry, false))];
+  const options = [toOption(currentEntry, true), ...others.map((entry) => toOption(entry, false))];
+  const disambiguators = disambiguate([currentEntry, ...others]);
+  return options.map((option) => {
+    const disambiguator = disambiguators.get(option.id);
+    return disambiguator ? { ...option, disambiguator } : option;
+  });
+}
+
+/**
+ * Extra context for entries that would otherwise look identical (same Centre
+ * name, Program, School name and School code): their type/category labels
+ * when those alone tell them apart within the group, else `Centre ID: <id>`.
+ * A unique entry gets nothing. Keyed by Centre id.
+ */
+function disambiguate(entries: CentreSwitcherEntry[]): Map<string, string> {
+  const groups = new Map<string, CentreSwitcherEntry[]>();
+  for (const entry of entries) {
+    const key = JSON.stringify([entry.name, entry.programName, entry.schoolName, entry.schoolCode]);
+    groups.set(key, [...(groups.get(key) ?? []), entry]);
+  }
+  const result = new Map<string, string>();
+  for (const group of groups.values()) {
+    if (group.length < 2) continue;
+    const labels = group.map((entry) =>
+      [entry.typeLabel, entry.categoryLabel].filter(Boolean).join(" · "),
+    );
+    group.forEach((entry, index) => {
+      const own = labels[index];
+      const sufficient = own !== "" && labels.filter((label) => label === own).length === 1;
+      result.set(String(entry.id), sufficient ? own : `Centre ID: ${entry.id}`);
+    });
+  }
+  return result;
 }
 
 /** Show the switcher only when there is somewhere else to go. */

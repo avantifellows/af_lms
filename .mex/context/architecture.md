@@ -169,8 +169,21 @@ same-turn double click inside one `act`) and `e2e/tests/centre-switcher-history.
 (an init-script recorder of `pushState`/`replaceState` proves the first write is the
 lone push; held RSC request for the pending case; scope revoked via the test pool).
 
-**Still planned (#400):** type/category → Centre ID disambiguation. The grilled
-plan follows.
+**Disambiguation ladder (#400):** `getCentreSwitcherEntries` also returns
+`typeLabel`/`categoryLabel`, resolved from `c.type_code`/`c.category_code` through
+`centre_option_sets`/`centre_options` (the admin Centre list's joins; codes stored,
+labels shown per ADR 0004; missing → `null`). `buildCentreSwitcherOptions` groups
+every option, the current Centre included (it borrows its labels from its own list
+row), by exact (name, Program, School name, School code). In a group of two or
+more, an entry whose present labels joined with " · " are non-empty and unique in
+the group shows them; every other member shows `Centre ID: <id>`; a unique entry
+gets no `disambiguator`. So CoE/Nodal Centres at one School (Program differs) show
+nothing. `CentreSwitcher` renders it as a second muted line under the Program ·
+School context; search, order, keyboard, and `select` are unchanged. Tests: the
+page seam's `popup › disambiguation` block (literal visible text plus option-label
+join SQL) and the mixed-group cases in `src/lib/centre-switcher.test.ts`.
+
+The grilled plan follows.
 
 
 Issue #388 will add a searchable switcher to the Centre page title when the
