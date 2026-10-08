@@ -56,6 +56,15 @@ type View = "all" | "gender";
 
 const batchKey = (names: string[]) => names.join(", ");
 
+/**
+ * The teacher's rounds up to and including this one. A round's analysis reads as
+ * of that round, so a later month never shows up in an earlier round's trend.
+ */
+export function historyUpTo(history: HistoryEntry[], quizId: string): HistoryEntry[] {
+  const index = history.findIndex((h) => h.quizId === quizId);
+  return index < 0 ? [] : history.slice(0, index + 1);
+}
+
 /** The same batches' most recent earlier round, for "vs last time". */
 export function previousRound(history: HistoryEntry[], quizId: string): HistoryEntry | null {
   const index = history.findIndex((h) => h.quizId === quizId);
@@ -266,7 +275,7 @@ function MonthTrend({ history, currentQuizId }: { history: HistoryEntry[]; curre
   }
 
   return (
-    <SectionCard title="Across months" subtitle="Overall score per round, by batch">
+    <SectionCard title="Up to this round" subtitle="This teacher's overall score per round, by batch">
       <div className="overflow-x-auto">
         <table className="w-full text-base">
           <thead>
@@ -325,6 +334,7 @@ function Comments({ title, items, nothingCount }: { title: string; items: string
 
 function Report({ data, quizId }: { data: ReportData; quizId: string }) {
   const previous = previousRound(data.history, quizId);
+  const history = historyUpTo(data.history, quizId);
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
@@ -335,7 +345,7 @@ function Report({ data, quizId }: { data: ReportData; quizId: string }) {
         {previous && <Delta now={data.percentage} before={previous.percentage} label={previous.cycleLabel} />}
       </div>
       <ParameterSection data={data} />
-      {data.history.length > 1 && <MonthTrend history={data.history} currentQuizId={quizId} />}
+      {history.length > 1 && <MonthTrend history={history} currentQuizId={quizId} />}
       <div className="grid gap-5 md:grid-cols-2">
         <Comments
           title="What students liked"

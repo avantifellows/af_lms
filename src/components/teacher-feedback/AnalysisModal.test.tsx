@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import AnalysisModal, { previousRound, type ReportData } from "./AnalysisModal";
+import AnalysisModal, { historyUpTo, previousRound, type ReportData } from "./AnalysisModal";
 
 const summary = (percentage: number, responseCount = 10) => ({
   responseCount,
@@ -151,5 +151,14 @@ describe("previousRound", () => {
     expect(previousRound(h, "a27")).toBeNull();
     expect(previousRound(h, "missing")).toBeNull();
     expect(previousRound(h, "a28")).toBeNull();
+  });
+});
+
+describe("historyUpTo", () => {
+  it("stops at this round, so an August analysis never shows September", () => {
+    const h = report().history;
+    expect(historyUpTo(h, "a28").map((x) => x.quizId)).toEqual(["a27", "a28"]);
+    expect(historyUpTo(h, "q1")).toHaveLength(3);
+    expect(historyUpTo(h, "missing")).toEqual([]);
   });
 });
