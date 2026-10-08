@@ -4,8 +4,8 @@
  *
  * Questions are matched by TEXT and options by their LABEL, never by position;
  * see the "identity by text" section of `teacher-feedback-form.ts`. No per-batch
- * breakdown: BigQuery's `batch` is the shared *quiz* batch, not the class batch
- * the PM picked.
+ * breakdown within a round: BigQuery's `batch` is the shared *quiz* batch, not the
+ * class batch the PM picked. (Across rounds, each round's batches are known.)
  */
 
 import { getBigQueryClient } from "@/lib/bigquery";
@@ -13,11 +13,13 @@ import {
   PARAMETERS,
   MAX_TOTAL_SCORE,
   FEEDBACK_FORM_VERSION,
+  MAX_QUESTION_SCORE,
   maxScoreForParameter,
   lookUpQuestionByText,
   scoreByOptionText,
   OPEN_QUESTIONS,
-  type FeedbackQuestion,
+  SCORED_QUESTIONS,
+  type FeedbackScoredQuestion,
 } from "@/lib/teacher-feedback-form";
 
 // Unset in staging and prod (both read prod BQ, as `bigquery.ts` does); set it
@@ -35,18 +37,40 @@ interface RawRow {
   user_response_labels: string | null;
 }
 
+export interface QuestionScore {
+  questionTag: string;
+  text: string;
+  /** Average score as a % of the question's max. */
+  percentage: number;
+  answeredBy: number;
+  /** Option texts and students per option, in form order (best option first). */
+  options: string[];
+  optionCounts: number[];
+}
+
 export interface ParameterScore {
   parameter: string;
   score: number;
   maxScore: number;
+  percentage: number;
   /** Distinct students who answered at least one question in this parameter. */
   answeredBy: number;
+  questions: QuestionScore[];
 }
 
 export interface SubjectiveComment {
   role: "liked" | "improve";
   text: string;
 }
+
+/** Headline numbers only: what a trend or a teacher card needs. */
+export interface ScoreSummary {
+  responseCount: number;
+  percentage: number;
+  parameters: { parameter: string; percentage: number; answeredBy: number }[];
+}
+
+export type Gender = "female" | "male";
 
 export interface TeacherFeedbackReport {
   quizId: string;
@@ -56,44 +80,74 @@ export interface TeacherFeedbackReport {
   percentage: number;
   parameters: ParameterScore[];
   comments: SubjectiveComment[];
+  /** Students whose answer amounted to "nothing", per open question. */
+  nothingCounts: Record<SubjectiveComment["role"], number>;
+  /** Only groups with at least MIN_GROUP_SIZE responses, so a split can't single anyone out. */
+  byGender: Partial<Record<Gender, ScoreSummary>>;
+}
+
+/** Smallest group shown on its own in a split. */
+const MIN_GROUP_SIZE = 5;
+
+// "Nothing", "nothing sir", "No comments." — a real answer (no complaints), but
+// listing each one buries the comments that say something. Counted instead.
+const NOTHING_WORDS = new Set(["no", "na", "n/a", "none", "nil", "nothing", "nope", "nothing much"]);
+const NOTHING_FILLER = /\b(sir|mam|madam|maam|ma'am|as such|to improve|to say|comments?|as per me|so far)\b/g;
+// "All good" is praise under "liked", but means "nothing" under "improve".
+const ALL_GOOD = /\b(everything is (fine|good|perfect)|all good|all is good)\b/g;
+
+function isNothing(text: string, role: SubjectiveComment["role"]): boolean {
+  // Only judge English: stripping a Hindi or Telugu comment to [a-z] would
+  // leave "" and wrongly count it as "nothing".
+  if (/[^\x00-\x7F‘’“”]/.test(text)) return false;
+  let t = text.toLowerCase().replace(/[^a-z/' ]/g, " ").replace(NOTHING_FILLER, " ");
+  if (role === "improve") t = t.replace(ALL_GOOD, " ");
+  t = t.replace(/\s+/g, " ").trim();
+  return t === "" || NOTHING_WORDS.has(t);
 }
 
 function isMeaningful(text: string): boolean {
   const t = text.trim();
   if (t.length < 3) return false;
-  if (["no", "na", "n/a", "none", "nil", "-"].includes(t.toLowerCase())) return false;
   if (!Number.isNaN(Number(t))) return false; // pure numbers aren't comments
   return true;
 }
 
+interface QuestionTally {
+  total: number;
+  responders: Set<string>;
+  optionCounts: number[];
+}
+
 interface Accumulator {
   users: Set<string>;
-  paramTotals: Map<string, number>;
+  /** Keyed by question text, in form order. */
+  questions: Map<string, QuestionTally>;
   /** Distinct users who answered ≥1 question in each parameter — the honest
    *  denominator, so a skipped parameter reads "0 rated" rather than a fake 0.0. */
   paramResponders: Map<string, Set<string>>;
   comments: SubjectiveComment[];
+  nothingCounts: Record<SubjectiveComment["role"], number>;
   /** Rows whose question text isn't in this form version (an older generation of
    *  the form under the same cms_test_id). Skipped, and counted so the drift is
    *  visible in the logs instead of silently altering the numbers. */
   unrecognizedQuestions: Map<string, number>;
 }
 
-function foldScored(
-  acc: Accumulator,
-  r: RawRow,
-  question: FeedbackQuestion,
-  parameter: string
-): void {
+function foldScored(acc: Accumulator, r: RawRow, question: FeedbackScoredQuestion): void {
   const score = scoreByOptionText(question, r.user_response_labels);
   if (score === null) return;
-  acc.paramTotals.set(parameter, (acc.paramTotals.get(parameter) ?? 0) + score);
-  acc.paramResponders.get(parameter)!.add(r.user_id);
+  const tally = acc.questions.get(question.text)!;
+  tally.total += score;
+  tally.responders.add(r.user_id);
+  tally.optionCounts[question.options.findIndex((o) => o.score === score)] += 1;
+  acc.paramResponders.get(question.parameter)!.add(r.user_id);
 }
 
 function foldComment(acc: Accumulator, r: RawRow, role: "liked" | "improve"): void {
   const text = (r.user_response_labels ?? "").trim();
-  if (isMeaningful(text)) acc.comments.push({ role, text });
+  if (text && isNothing(text, role)) acc.nothingCounts[role] += 1;
+  else if (isMeaningful(text)) acc.comments.push({ role, text });
 }
 
 /** Fold one row into the accumulator: track responders, sum scores, collect comments. */
@@ -110,118 +164,171 @@ function foldRow(acc: Accumulator, r: RawRow): void {
   }
 
   if (question.kind === "scored") {
-    foldScored(acc, r, question, question.parameter);
+    foldScored(acc, r, question);
   } else {
     foldComment(acc, r, question.role);
   }
 }
 
-/** Reduce all rows into per-student / per-parameter aggregates. */
+/** Reduce all rows into per-question / per-parameter aggregates. */
 function accumulate(rows: RawRow[]): Accumulator {
   const acc: Accumulator = {
     users: new Set<string>(),
-    paramTotals: new Map<string, number>(),
+    questions: new Map(),
     paramResponders: new Map<string, Set<string>>(),
     comments: [],
+    nothingCounts: { liked: 0, improve: 0 },
     unrecognizedQuestions: new Map<string, number>(),
   };
-  for (const p of PARAMETERS) {
-    acc.paramTotals.set(p, 0);
-    acc.paramResponders.set(p, new Set());
+  for (const q of SCORED_QUESTIONS) {
+    acc.questions.set(q.text, { total: 0, responders: new Set(), optionCounts: q.options.map(() => 0) });
   }
+  for (const p of PARAMETERS) acc.paramResponders.set(p, new Set());
   for (const r of rows) foldRow(acc, r);
   return acc;
 }
 
+const pct = (score: number, max: number) => (max > 0 ? (score / max) * 100 : 0);
+
 /**
- * Build the per-teacher report for one feedback quiz. Averages each scored
- * parameter across all responding students (so the % is comparable regardless
- * of how many students answered).
+ * Average each parameter across the students who actually rated it (not all
+ * responders), so a partially-skipped parameter isn't diluted toward 0.
  */
-export async function getTeacherFeedbackReport(
-  quizId: string
-): Promise<TeacherFeedbackReport> {
-  const client = getBigQueryClient();
-  // Per quiz id, so an older form generation under the same cms_test_id can't
-  // bleed in.
-  const sql = `
-    SELECT
-      user_id,
-      question_text,
-      user_response,
-      user_response_labels
-    FROM ${FORM_LEVEL_TABLE}
-    WHERE test_id = @quizId
-      AND is_answered = TRUE
-      AND user_id != '${ADMIN_TEST_USER}'
-  `;
-  const [rows] = await client.query({
-    query: sql,
-    params: { quizId },
-    location: BQ_LOCATION,
-  });
-
-  const acc = accumulate(rows as RawRow[]);
-
-  if (acc.unrecognizedQuestions.size > 0) {
-    const skipped = Array.from(acc.unrecognizedQuestions.entries())
-      .map(([text, n]) => `${n}× ${JSON.stringify(text)}`)
-      .join("; ");
-    console.warn(
-      `[teacher-feedback] quiz ${quizId}: skipped responses for ` +
-        `${acc.unrecognizedQuestions.size} question(s) absent from form ` +
-        `${FEEDBACK_FORM_VERSION} — ${skipped}`
+function scoreParameters(acc: Accumulator): ParameterScore[] {
+  return PARAMETERS.map((parameter) => {
+    const answeredBy = acc.paramResponders.get(parameter)?.size ?? 0;
+    const questions = SCORED_QUESTIONS.filter((q) => q.parameter === parameter).map((q) => {
+      const tally = acc.questions.get(q.text)!;
+      const n = tally.responders.size;
+      return {
+        questionTag: q.questionTag,
+        text: q.text,
+        percentage: n > 0 ? pct(tally.total / n, MAX_QUESTION_SCORE) : 0,
+        answeredBy: n,
+        options: q.options.map((o) => o.text),
+        optionCounts: tally.optionCounts,
+      };
+    });
+    const total = SCORED_QUESTIONS.filter((q) => q.parameter === parameter).reduce(
+      (sum, q) => sum + acc.questions.get(q.text)!.total,
+      0
     );
-  }
-  const { users, paramTotals, paramResponders, comments } = acc;
-
-  const responseCount = users.size;
-
-  // Average each parameter across the students who actually rated it (not all
-  // responders), so a partially-skipped parameter isn't diluted toward 0.
-  const parameters: ParameterScore[] = PARAMETERS.map((p) => {
-    const answeredBy = paramResponders.get(p)?.size ?? 0;
-    return {
-      parameter: p,
-      score: answeredBy > 0 ? (paramTotals.get(p) ?? 0) / answeredBy : 0,
-      maxScore: maxScoreForParameter(p),
-      answeredBy,
-    };
+    const score = answeredBy > 0 ? total / answeredBy : 0;
+    const maxScore = maxScoreForParameter(parameter);
+    return { parameter, score, maxScore, percentage: pct(score, maxScore), answeredBy, questions };
   });
-  const totalScore = parameters.reduce((acc, p) => acc + p.score, 0);
+}
 
-  // Order comments liked-first then improve, for stable rendering.
-  const order = OPEN_QUESTIONS.map((q) => q.role);
-  comments.sort((a, b) => order.indexOf(a.role) - order.indexOf(b.role));
-
+function summarize(acc: Accumulator): ScoreSummary {
+  const parameters = scoreParameters(acc);
+  const totalScore = parameters.reduce((sum, p) => sum + p.score, 0);
   return {
-    quizId,
-    responseCount,
-    totalScore,
-    maxTotalScore: MAX_TOTAL_SCORE,
-    percentage: MAX_TOTAL_SCORE > 0 ? (totalScore / MAX_TOTAL_SCORE) * 100 : 0,
-    parameters,
-    comments,
+    responseCount: acc.users.size,
+    percentage: pct(totalScore, MAX_TOTAL_SCORE),
+    parameters: parameters.map(({ parameter, percentage, answeredBy }) => ({ parameter, percentage, answeredBy })),
   };
 }
 
-/** user_ids (LMS user.id) who answered each feedback quiz, keyed by quiz id. */
-export async function getRespondersByQuiz(quizIds: string[]): Promise<Map<string, Set<string>>> {
-  const byQuiz = new Map<string, Set<string>>();
+function warnUnrecognized(quizId: string, acc: Accumulator): void {
+  if (acc.unrecognizedQuestions.size === 0) return;
+  const skipped = Array.from(acc.unrecognizedQuestions.entries())
+    .map(([text, n]) => `${n}× ${JSON.stringify(text)}`)
+    .join("; ");
+  console.warn(
+    `[teacher-feedback] quiz ${quizId}: skipped responses for ` +
+      `${acc.unrecognizedQuestions.size} question(s) absent from form ` +
+      `${FEEDBACK_FORM_VERSION} — ${skipped}`
+  );
+}
+
+export type FeedbackRows = Map<string, RawRow[]>;
+
+/** Answered rows for each quiz, keyed by quiz id: one scan serves every use below. */
+export async function fetchFeedbackRows(quizIds: string[]): Promise<FeedbackRows> {
+  const byQuiz: FeedbackRows = new Map(quizIds.map((id) => [id, []]));
   if (quizIds.length === 0) return byQuiz;
+  // Per quiz id, so an older form generation under the same cms_test_id can't
+  // bleed in.
   const [rows] = await getBigQueryClient().query({
     query: `
-      SELECT test_id, ARRAY_AGG(DISTINCT user_id) AS user_ids
+      SELECT test_id, user_id, question_text, user_response, user_response_labels
       FROM ${FORM_LEVEL_TABLE}
-      WHERE test_id IN UNNEST(@quizIds) AND is_answered = TRUE
+      WHERE test_id IN UNNEST(@quizIds)
+        AND is_answered = TRUE
         AND user_id != '${ADMIN_TEST_USER}'
-      GROUP BY test_id
     `,
     params: { quizIds },
     location: BQ_LOCATION,
   });
-  for (const r of rows as Array<{ test_id: string; user_ids: string[] }>) {
-    byQuiz.set(r.test_id, new Set((r.user_ids ?? []).map(String)));
-  }
+  for (const r of rows as Array<RawRow & { test_id: string }>) byQuiz.get(r.test_id)?.push(r);
   return byQuiz;
+}
+
+/** Headline numbers for one quiz's rows. */
+export function summarizeRows(rows: RawRow[]): ScoreSummary {
+  return summarize(accumulate(rows));
+}
+
+/**
+ * Build the per-teacher report from one quiz's rows. `genderOf` (LMS user id →
+ * gender) adds a split by gender — only when BOTH groups reach MIN_GROUP_SIZE.
+ * Returning one group alone would let the other be derived from the overall
+ * score (overall × n − group × m), so a lone girl's answers would be exposed.
+ */
+export async function buildTeacherFeedbackReport(
+  quizId: string,
+  rows: RawRow[],
+  genderOf?: (userIds: string[]) => Promise<Map<string, Gender>>
+): Promise<TeacherFeedbackReport> {
+  const acc = accumulate(rows);
+  warnUnrecognized(quizId, acc);
+
+  const parameters = scoreParameters(acc);
+  const totalScore = parameters.reduce((sum, p) => sum + p.score, 0);
+
+  // Order comments liked-first then improve, for stable rendering.
+  const order = OPEN_QUESTIONS.map((q) => q.role);
+  acc.comments.sort((a, b) => order.indexOf(a.role) - order.indexOf(b.role));
+
+  let byGender: Partial<Record<Gender, ScoreSummary>> = {};
+  if (genderOf && acc.users.size > 0) {
+    const genders = await genderOf([...acc.users]);
+    const split = (g: Gender) => summarizeRows(rows.filter((r) => genders.get(r.user_id) === g));
+    const female = split("female");
+    const male = split("male");
+    if (female.responseCount >= MIN_GROUP_SIZE && male.responseCount >= MIN_GROUP_SIZE) {
+      byGender = { female, male };
+    }
+  }
+
+  return {
+    quizId,
+    responseCount: acc.users.size,
+    totalScore,
+    maxTotalScore: MAX_TOTAL_SCORE,
+    percentage: pct(totalScore, MAX_TOTAL_SCORE),
+    parameters,
+    comments: acc.comments,
+    nothingCounts: acc.nothingCounts,
+    byGender,
+  };
+}
+
+/** The report for one quiz, fetched on its own. */
+export async function getTeacherFeedbackReport(
+  quizId: string,
+  genderOf?: (userIds: string[]) => Promise<Map<string, Gender>>
+): Promise<TeacherFeedbackReport> {
+  const rows = (await fetchFeedbackRows([quizId])).get(quizId) ?? [];
+  return buildTeacherFeedbackReport(quizId, rows, genderOf);
+}
+
+/** Who answered each quiz (LMS user ids) and its headline scores, from one scan. */
+export async function getRoundResults(
+  quizIds: string[]
+): Promise<Map<string, { responders: Set<string>; summary: ScoreSummary }>> {
+  const rows = await fetchFeedbackRows(quizIds);
+  return new Map(
+    [...rows].map(([id, r]) => [id, { responders: new Set(r.map((x) => String(x.user_id))), summary: summarizeRows(r) }])
+  );
 }
