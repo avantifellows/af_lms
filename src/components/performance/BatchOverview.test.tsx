@@ -339,3 +339,90 @@ describe("BatchOverview", () => {
     });
   });
 });
+
+describe("RetainedHeightFrame viewport recovery", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function rect(height: number, top: number) {
+    return {
+      width: 800,
+      height,
+      top,
+      right: 800,
+      bottom: top + height,
+      left: 0,
+      x: 0,
+      y: top,
+      toJSON: () => ({}),
+    };
+  }
+
+  it("brings a shorter overview back into view after leaving a deeply-scrolled report", () => {
+    let currentScrollY = 3_000;
+    let contentHeight = 3_500;
+    const documentTop = 300;
+    vi.spyOn(window, "scrollY", "get").mockImplementation(() => currentScrollY);
+    vi.spyOn(window, "innerHeight", "get").mockReturnValue(450);
+    const scrollTo = vi.spyOn(window, "scrollTo").mockImplementation((options) => {
+      currentScrollY = typeof options === "number" ? options : options.top ?? currentScrollY;
+    });
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function () {
+      const height = this.dataset.testid === "recovery-frame-content"
+        ? contentHeight
+        : Math.max(contentHeight, Number.parseFloat(this.style.minHeight) || 0);
+      return rect(height, documentTop - currentScrollY);
+    });
+
+    const view = (recoverViewportOnEnter: boolean) => (
+      <RetainedHeightFrame
+        loading={false}
+        testId="recovery-frame"
+        recoverViewportOnEnter={recoverViewportOnEnter}
+      >
+        <div>Performance content</div>
+      </RetainedHeightFrame>
+    );
+    const { rerender } = render(view(false));
+    expect(screen.getByTestId("recovery-frame")).toHaveStyle({ minHeight: "3500px" });
+
+    contentHeight = 640;
+    rerender(view(true));
+
+    expect(scrollTo).toHaveBeenCalledWith({ top: 490, behavior: "auto" });
+    expect(screen.getByTestId("recovery-frame")).toHaveStyle({ minHeight: "640px" });
+  });
+
+  it("keeps the scroll position when the overview already overlaps the viewport", () => {
+    let contentHeight = 2_000;
+    const currentScrollY = 120;
+    const documentTop = 300;
+    vi.spyOn(window, "scrollY", "get").mockReturnValue(currentScrollY);
+    vi.spyOn(window, "innerHeight", "get").mockReturnValue(450);
+    const scrollTo = vi.spyOn(window, "scrollTo").mockImplementation(() => {});
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function () {
+      const height = this.dataset.testid === "recovery-frame-content"
+        ? contentHeight
+        : Math.max(contentHeight, Number.parseFloat(this.style.minHeight) || 0);
+      return rect(height, documentTop - currentScrollY);
+    });
+
+    const view = (recoverViewportOnEnter: boolean) => (
+      <RetainedHeightFrame
+        loading={false}
+        testId="recovery-frame"
+        recoverViewportOnEnter={recoverViewportOnEnter}
+      >
+        <div>Performance content</div>
+      </RetainedHeightFrame>
+    );
+    const { rerender } = render(view(false));
+
+    contentHeight = 640;
+    rerender(view(true));
+
+    expect(scrollTo).not.toHaveBeenCalled();
+    expect(screen.getByTestId("recovery-frame")).toHaveStyle({ minHeight: "640px" });
+  });
+});

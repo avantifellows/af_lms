@@ -13,17 +13,28 @@ export function RetainedHeightFrame({
   children,
   className,
   testId,
+  recoverViewportOnEnter = false,
 }: {
   loading: boolean;
   children: ReactNode;
   className?: string;
   testId?: string;
+  /**
+   * When this changes from false to true, release a previous view's height and
+   * recover only if the new content is entirely above the viewport. This lets
+   * a short overview replace a deeply-scrolled report without leaving a blank
+   * screen, while ordinary filter reloads keep their scroll position.
+   */
+  recoverViewportOnEnter?: boolean;
 }) {
   const frameRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  const previousRecoveryState = useRef(recoverViewportOnEnter);
   const [retainedHeight, setRetainedHeight] = useState(0);
 
   useLayoutEffect(() => {
+    const enteringRecovery = recoverViewportOnEnter && !previousRecoveryState.current;
+    previousRecoveryState.current = recoverViewportOnEnter;
     if (loading || !frameRef.current || !contentRef.current) return;
 
     const frame = frameRef.current;
@@ -35,6 +46,21 @@ export function RetainedHeightFrame({
       const scrollFloor = window.scrollY > 0 ? Math.max(0, Math.ceil(viewportBottom - frameTop)) : 0;
       return { naturalHeight, requiredHeight: Math.max(naturalHeight, scrollFloor) };
     };
+
+    if (enteringRecovery) {
+      const naturalHeight = Math.ceil(content.getBoundingClientRect().height);
+      const frameTop = frame.getBoundingClientRect().top + window.scrollY;
+      const contentBottom = frameTop + naturalHeight;
+
+      if (window.scrollY > 0 && window.scrollY >= contentBottom) {
+        window.scrollTo({
+          top: Math.max(0, frameTop, contentBottom - window.innerHeight),
+          behavior: "auto",
+        });
+      }
+      setRetainedHeight(naturalHeight);
+    }
+
     const measure = () => {
       const { naturalHeight, requiredHeight } = heights();
       setRetainedHeight((current) => (
@@ -46,7 +72,7 @@ export function RetainedHeightFrame({
       setRetainedHeight((current) => Math.min(current, requiredHeight));
     };
 
-    measure();
+    if (!enteringRecovery) measure();
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
     observer?.observe(content);
     window.addEventListener("scroll", releaseOnScrollUp, { passive: true });
@@ -54,7 +80,7 @@ export function RetainedHeightFrame({
       observer?.disconnect();
       window.removeEventListener("scroll", releaseOnScrollUp);
     };
-  }, [loading]);
+  }, [loading, recoverViewportOnEnter]);
 
   const minHeight = retainedHeight > 0 ? `${retainedHeight}px` : undefined;
   return (

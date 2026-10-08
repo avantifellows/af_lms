@@ -83,7 +83,11 @@ export default function PerformanceTab({ schoolUdise, lockedProgram }: Props) {
   }
 
   return (
-    <RetainedHeightFrame loading={false} className="space-y-6">
+    <RetainedHeightFrame
+      loading={false}
+      className="space-y-6"
+      recoverViewportOnEnter
+    >
       {showProgramTabs && (
         <ProgramTabs
           programs={programs}

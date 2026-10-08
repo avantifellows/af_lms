@@ -297,6 +297,40 @@ test.describe("Performance filter history", () => {
     expect(new URL(page.url()).pathname).toBe(centrePath);
   });
 
+  test("multi-Program School: Back restores a report after a Grade change and Enrollment switch", async ({
+    adminPage: page,
+  }) => {
+    await stubAnalytics(page, () => ["JNV CoE", "JNV Nodal"]);
+
+    await page.goto("/dashboard?view=jnv-nvs");
+    await page.locator('a[href^="/school/"]').first().click();
+    await page.waitForURL(/\/school\/[^/?]+$/);
+    const schoolPath = new URL(page.url()).pathname;
+
+    await page.goto(`${schoolPath}?tab=performance&program=JNV+CoE&grade=12`);
+    await page.getByText("E2E Full Test", { exact: true }).click();
+    await expectQuery(page, "tab=performance&program=JNV+CoE&grade=12&session=e2e-full");
+    await expect(reportTitle(page, "E2E Full Test")).toBeVisible();
+
+    // Grade is available inside the report. Changing it pushes a new overview
+    // entry and clears the grade-specific session from only that new entry.
+    await button(page, "Grade", "11").click();
+    await expectQuery(page, "tab=performance&program=JNV+CoE&grade=11");
+    await expect(page.getByText("E2E Full Test", { exact: true })).toBeVisible();
+
+    // Section switches replace the current entry. The report remains directly
+    // behind it, so browser Back must remount Performance with its old Grade
+    // and session rather than restoring the Grade 11 overview.
+    await page.getByRole("tab", { name: "Enrollment" }).click();
+    await expectQuery(page, "program=JNV+CoE&grade=11");
+    await expect(page.getByRole("tab", { name: "Enrollment" })).toHaveAttribute("aria-selected", "true");
+
+    await page.goBack();
+    await expectQuery(page, "tab=performance&program=JNV+CoE&grade=12&session=e2e-full");
+    await expect(page.getByRole("tab", { name: "Performance" })).toHaveAttribute("aria-selected", "true");
+    await expect(reportTitle(page, "E2E Full Test")).toBeVisible();
+  });
+
   test("multi-Program School: report provenance through Grade change, tab switch and direct link", async ({ adminPage: page }) => {
     await stubAnalytics(page, () => ["JNV CoE", "JNV Nodal"]);
 
