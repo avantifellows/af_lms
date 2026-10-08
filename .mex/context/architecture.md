@@ -64,51 +64,42 @@ source. Phase links and locked-phase redirects preserve it, and the Student Back
 link restores `source=progress` on the School URL. Ordinary School drill-downs
 retain `source=school`, so their original dashboard return does not change.
 
-## Planned navigation work — issue #383
+## Issue #383 navigation fixes — implemented in PR #394
 
-The October 7 PRD retains the existing dashboard/roster/Performance boundaries.
-Shipped in #390: `resolveDashboardView` in `src/app/dashboard/page.tsx` defaults
-to Physical Centres from resolved `hasCoEOrNodal` (JNV NVS otherwise) after
-seated/PMU/Holistic routing and an explicit valid `?view=`; `defaultRosterBackHref`
-in `RosterPage` and JNV pagination name `?view=jnv-nvs`. It also plans an exact
-trimmed/case-folded owned non-deleted Visit count independent of Recent Visits;
-the capped Recent Visits query uses that same owner predicate (shipped in #389,
-see `context/visits.md`).
-Performance will push deliberate choices, rehydrate every selection from URL
-history, compose rapid pending choices, and reject stale grade, option, loading,
-error, and report-name responses. Outer
-tabs still replace but must follow historical `tab`; report return consumes only
-a proven internal step, otherwise replacing away `session` safely.
-Shipped in #391: dashboard School and Centre cards pass no `actions` (no Start
-Visit shortcut for any role or view); Visits start from the School/Centre page
-header or the School Visits tab, which keep their existing gates.
+The feature branch implements every published slice; child issues #389–#393 are
+closed and issue #383 remains open while PR #394 awaits review:
 
-This is a plan, not shipped behavior. Centre Switcher is separate (#388). No schema,
-new API, permission change, or persistent history store is planned. Existing
-rendered-page/component tests plus native browser journeys are the chosen seams;
-the owned Visit-count predicate needs a real local database fixture. Original and
-final issue bodies live under `.ralph/workspaces/383/`; configured council rounds
-were zero. No ADR conflicts were identified.
+- **#389 Visit totals:** both dashboard views use the exact trimmed/case-folded
+  count of the actor's owned non-deleted Visits. The capped JNV Recent Visits
+  query uses the same owner predicate (see `context/visits.md`).
+- **#390 dashboard routing:** `resolveDashboardView` defaults users with resolved
+  `hasCoEOrNodal` context to Physical Centres and others to JNV NVS Schools after
+  the existing seated/PMU/Holistic hard routes and an explicit valid `?view=`.
+  School/Centre returns and JNV pagination name their dashboard view explicitly.
+- **#391 card actions:** dashboard School and Centre cards receive no Start Visit
+  action. Their primary links and the existing gated Visit entry points on the
+  School/Centre pages remain unchanged.
+- **#392 filter history:** deliberate Performance choices push reversible entries;
+  automatic Grade reconciliation replaces; Back/Forward restores the complete
+  URL-backed selection. Rapid choices compose, and stale grade/overview results
+  cannot publish over the current state.
+- **#393 report and tab history:** reports push one entry, outer tabs follow
+  historical `tab`, and in-page report return consumes browser history only when
+  its in-memory trail proves the matching overview predecessor. Unknown provenance
+  safely replaces away only `session`; obsolete report data and names are inert.
 
-AFK implementation slices are published and natively linked under #383:
-#389 exact Visit totals; #390 dashboard defaults/returns/pagination; #391 card
-action removal; #392 reversible Performance filters; #393 report history and
-outer-tab restoration. Only #393 is blocked by #392, both in its body and as a
-native GitHub dependency. The three dashboard slices own distinct edit regions
-in the same page; broad page/test rewrites would create avoidable conflicts.
-The existing Performance controller and serializer make a separate prefactor
-unnecessary. Final issue bodies, write boundaries and verification are in
-`.ralph/workspaces/383/slices.md`. This publication implements no app behavior.
+The final follow-up pass also resolves the two low-severity review findings. A
+report-to-overview transition recovers a deeply scrolled viewport when the shorter
+overview would otherwise sit entirely above it, while preserving scroll when the
+overview still overlaps the viewport. Browser coverage now directly proves the
+report → Grade push → Enrollment replace → Back journey remounts Performance at
+the historical report and Grade.
 
-AFK implementation slices are published and natively linked under #383:
-#389 exact Visit totals; #390 dashboard defaults/returns/pagination; #391 card
-action removal; #392 reversible Performance filters; #393 report history and
-outer-tab restoration. Only #393 is blocked by #392, both in its body and as a
-native GitHub dependency. The three dashboard slices own distinct edit regions
-in the same page; broad page/test rewrites would create avoidable conflicts.
-The existing Performance controller and serializer make a separate prefactor
-unnecessary. Final issue bodies, write boundaries and verification are in
-`.ralph/workspaces/383/slices.md`. This publication implements no app behavior.
+This is implemented, PR-ready branch behavior, not merged production behavior.
+Centre Switcher remains separate in #388. The change adds no schema, API,
+permission, or persistent history store. The Ralph PRD/slice artifacts and write
+boundaries remain under `.ralph/workspaces/383/`; configured council rounds were
+zero, and no ADR conflict was identified.
 
 ## Key Components
 

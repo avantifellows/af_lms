@@ -97,7 +97,16 @@ test("closing a reloaded, deeply-scrolled report brings its shorter overview int
   await page.evaluate(() => window.scrollTo(0, 3_000));
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThanOrEqual(2_500);
 
-  await page.getByRole("button", { name: "Back to overview" }).click();
+  // A Playwright action click would scroll this top-of-report button into view
+  // before dispatching the event and hide the regression. A DOM click leaves
+  // the page at the deep position the handler must recover from.
+  const scrollAtHandler = await page.getByRole("button", { name: "Back to overview" })
+    .evaluate((button: HTMLButtonElement) => {
+      const y = window.scrollY;
+      button.click();
+      return y;
+    });
+  expect(scrollAtHandler).toBeGreaterThanOrEqual(2_500);
   await expect.poll(() => new URL(page.url()).searchParams.has("session")).toBe(false);
   const overviewTest = page.getByText("E2E Long Report", { exact: true });
   await expect(overviewTest).toBeVisible();

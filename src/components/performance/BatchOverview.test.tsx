@@ -394,9 +394,14 @@ describe("RetainedHeightFrame viewport recovery", () => {
     expect(screen.getByTestId("recovery-frame")).toHaveStyle({ minHeight: "640px" });
   });
 
-  it("keeps the scroll position when the overview already overlaps the viewport", () => {
+  it.each([
+    { currentScrollY: 600, expectedHeight: 750 },
+    { currentScrollY: 800, expectedHeight: 950 },
+  ])("keeps y=$currentScrollY when the overview still overlaps the viewport", ({
+    currentScrollY,
+    expectedHeight,
+  }) => {
     let contentHeight = 2_000;
-    const currentScrollY = 120;
     const documentTop = 300;
     vi.spyOn(window, "scrollY", "get").mockReturnValue(currentScrollY);
     vi.spyOn(window, "innerHeight", "get").mockReturnValue(450);
@@ -423,6 +428,6 @@ describe("RetainedHeightFrame viewport recovery", () => {
     rerender(view(true));
 
     expect(scrollTo).not.toHaveBeenCalled();
-    expect(screen.getByTestId("recovery-frame")).toHaveStyle({ minHeight: "640px" });
+    expect(screen.getByTestId("recovery-frame")).toHaveStyle({ minHeight: `${expectedHeight}px` });
   });
 });

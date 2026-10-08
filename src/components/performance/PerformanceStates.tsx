@@ -48,17 +48,22 @@ export function RetainedHeightFrame({
     };
 
     if (enteringRecovery) {
-      const naturalHeight = Math.ceil(content.getBoundingClientRect().height);
+      const { naturalHeight, requiredHeight } = heights();
       const frameTop = frame.getBoundingClientRect().top + window.scrollY;
       const contentBottom = frameTop + naturalHeight;
+      const viewportIsBelowContent = window.scrollY > 0 && window.scrollY >= contentBottom;
 
-      if (window.scrollY > 0 && window.scrollY >= contentBottom) {
+      if (viewportIsBelowContent) {
         window.scrollTo({
           top: Math.max(0, frameTop, contentBottom - window.innerHeight),
           behavior: "auto",
         });
+        setRetainedHeight(naturalHeight);
+      } else {
+        setRetainedHeight((current) => (
+          current === 0 ? requiredHeight : Math.max(naturalHeight, Math.min(current, requiredHeight))
+        ));
       }
-      setRetainedHeight(naturalHeight);
     }
 
     const measure = () => {
