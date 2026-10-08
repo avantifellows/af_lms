@@ -49,6 +49,9 @@ function report(overrides: Partial<ReportData> = {}): ReportData {
       startTime: "2026-09-17 11:32:28",
       endTime: "2026-09-18 11:32:28",
     },
+    summary: null,
+    summaryGeneratedAt: null,
+    roundClosed: true,
     history: [
       history("a27", "Aug 2026", "2027 Engineering", 92.8),
       history("a28", "Aug 2026", "2028 Engineering", 93.8),
@@ -141,6 +144,39 @@ describe("AnalysisModal", () => {
     response = () => Promise.resolve(new Response(JSON.stringify({ error: "Forbidden" }), { status: 403 }));
     show(null);
     expect(await screen.findByText("Forbidden")).toBeInTheDocument();
+  });
+});
+
+describe("summary", () => {
+  it("shows highlights and flagged concerns", async () => {
+    show(
+      report({
+        summary: {
+          highlights: ["Explains concepts clearly"],
+          concerns: [
+            { text: "Starts class late", serious: false, recurring: true },
+            { text: "Some students feel ignored", serious: true, recurring: false },
+          ],
+          response_count: 36,
+        },
+        summaryGeneratedAt: "2026-09-19 03:00:00",
+      })
+    );
+
+    expect(await screen.findByText("Explains concepts clearly")).toBeInTheDocument();
+    expect(screen.getByText("Starts class late").parentElement).toHaveTextContent("Also last time");
+    expect(screen.getByText("Some students feel ignored").previousElementSibling).toHaveTextContent("⚑");
+    expect(screen.getByText(/AI summary of 36 responses/)).toBeInTheDocument();
+  });
+
+  it("explains when there is no summary yet", async () => {
+    show(report({ roundClosed: false }));
+    expect(await screen.findByText(/A summary will appear after this round closes/)).toBeInTheDocument();
+  });
+
+  it("says closed rounds are summarised daily", async () => {
+    show();
+    expect(await screen.findByText(/prepared daily after a round closes/)).toBeInTheDocument();
   });
 });
 

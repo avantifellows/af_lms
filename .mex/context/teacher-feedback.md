@@ -143,6 +143,27 @@ an id join and both copies of the form go away.
   second round in a month is sometimes deliberate.
 - Ended rounds say "didn't respond", live ones "pending".
 
+## LLM summary (issue #316 item 3)
+
+- **Written by etl-next** `teacher_feedback_summaries_flow` (daily, seeded
+  disabled) onto `lms_teacher_feedback.summary` (+ `summary_prompt_version`,
+  `summary_fingerprint`, `summary_generated_at`) through db-service
+  `GET/PUT /api/teacher-feedback-summary`. The columns' migration lives in
+  db-service, like the table's.
+- **Only closed rounds** with ≥ 5 responders. The flow finds rounds in BigQuery
+  (`airbyte.session` meta_data carries the feedback teacher/school/batches), so it
+  needs no LMS reads. A fingerprint of answers + prompt version skips unchanged
+  rounds: a quiet day makes no LLM calls; late answers after an Extend regenerate
+  once the round closes again.
+- **Shape**: `{highlights[], concerns[{text, serious, recurring}], response_count,
+  model}`. "recurring" = also in the same teacher's earlier rounds sharing a batch.
+  Gemini via OpenRouter with zero-data-retention routing (Holistic Profiles' key).
+- **LMS reads it as `to_jsonb(tf) -> 'summary'`**, so af_lms works before the
+  db-service migration runs. Analysis shows it (or "after the round closes" /
+  "prepared daily"); the teacher card shows "⚑ N serious concerns".
+- No regenerate button and no job tables by design: re-run the flow with
+  `force` or bump `PROMPT_VERSION`.
+
 ## Gotchas
 
 - **`session_pk` and `centre_id` are bigints**, so pg returns them as strings.

@@ -49,6 +49,16 @@ export interface ReportData {
     endTime: string | null;
   } | null;
   history: HistoryEntry[];
+  summary: FeedbackSummary | null;
+  summaryGeneratedAt: string | null;
+  roundClosed: boolean;
+}
+
+/** Written daily by the etl-next summaries flow once a round has closed. */
+interface FeedbackSummary {
+  highlights: string[];
+  concerns: { text: string; serious: boolean; recurring: boolean }[];
+  response_count?: number;
 }
 
 type View = "all" | "gender";
@@ -348,6 +358,61 @@ function Comments({ title, items, nothingCount }: { title: string; items: string
   );
 }
 
+function SummarySection({ data }: { data: ReportData }) {
+  const { summary } = data;
+  if (!summary) {
+    return (
+      <SectionCard title="Summary">
+        <p className="text-base text-text-secondary">
+          {data.roundClosed
+            ? "The summary is prepared daily after a round closes. Check back tomorrow."
+            : "A summary will appear after this round closes. Until then, see the scores and comments below."}
+        </p>
+      </SectionCard>
+    );
+  }
+  const generated = data.summaryGeneratedAt ? ` · ${formatDateTime(data.summaryGeneratedAt)}` : "";
+  return (
+    <SectionCard title="Summary" subtitle={`AI summary of ${summary.response_count ?? data.responseCount} responses${generated}`}>
+      <div className="grid gap-5 md:grid-cols-2">
+        <div>
+          <div className="mb-2 text-sm font-bold uppercase tracking-wide text-text-secondary">Highlights</div>
+          <ul className="space-y-2 text-base text-text-primary">
+            {summary.highlights.map((h) => (
+              <li key={h} className="flex gap-2">
+                <span className="text-success">✓</span>
+                {h}
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div>
+          <div className="mb-2 text-sm font-bold uppercase tracking-wide text-text-secondary">Concerns</div>
+          {summary.concerns.length === 0 ? (
+            <p className="text-base text-text-muted">None raised.</p>
+          ) : (
+            <ul className="space-y-2 text-base text-text-primary">
+              {summary.concerns.map((c) => (
+                <li key={c.text} className="flex gap-2">
+                  <span className={c.serious ? "text-danger" : "text-warning-text"}>{c.serious ? "⚑" : "•"}</span>
+                  <span>
+                    {c.text}
+                    {c.recurring && (
+                      <span className="ml-2 rounded-full bg-warning-bg px-2 py-0.5 text-xs font-medium text-warning-text">
+                        Also last time
+                      </span>
+                    )}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+    </SectionCard>
+  );
+}
+
 function Report({ data, quizId }: { data: ReportData; quizId: string }) {
   const previous = previousRound(data.history, quizId);
   const history = batchHistory(data.history, quizId);
@@ -360,6 +425,7 @@ function Report({ data, quizId }: { data: ReportData; quizId: string }) {
         </div>
         {previous && <Delta now={data.percentage} before={previous.percentage} label={previous.cycleLabel} />}
       </div>
+      <SummarySection data={data} />
       <ParameterSection data={data} />
       {history.length > 1 && <MonthTrend history={history} currentQuizId={quizId} />}
       <div className="grid gap-5 md:grid-cols-2">

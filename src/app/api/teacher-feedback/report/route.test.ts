@@ -98,7 +98,16 @@ describe("GET /api/teacher-feedback/report", () => {
 
   it("returns the report with its round and the teacher's history", async () => {
     mockQuery.mockResolvedValueOnce([
-      { school_code: "34054", teacher_name: "Manjit Kumar", teacher_id: "42", school_id: 5, centre_id: null },
+      {
+        school_code: "34054",
+        teacher_name: "Manjit Kumar",
+        teacher_id: "42",
+        school_id: 5,
+        centre_id: null,
+        summary: { highlights: ["Clear"], concerns: [] },
+        summary_generated_at: "2026-09-19 03:00:00",
+        closed: true,
+      },
     ]);
     mockReport.mockResolvedValue(baseReport());
     vi.mocked(getRoundContext).mockResolvedValue({ cycleLabel: "Sep 2026", batchNames: ["2027 Engg"] } as never);
@@ -115,6 +124,9 @@ describe("GET /api/teacher-feedback/report", () => {
     expect(body.percentage).toBe(42.86);
     expect(body.round).toEqual({ cycleLabel: "Sep 2026", batchNames: ["2027 Engg"] });
     expect(body.history).toEqual([{ cycleLabel: "Aug 2026", percentage: 60 }]);
+    expect(body.summary).toEqual({ highlights: ["Clear"], concerns: [] });
+    expect(body.summaryGeneratedAt).toBe("2026-09-19 03:00:00");
+    expect(body.roundClosed).toBe(true);
     // One BigQuery scan covers the report and the teacher's other rounds.
     expect(fetchFeedbackRows).toHaveBeenCalledTimes(1);
     expect(fetchFeedbackRows).toHaveBeenCalledWith(["q1", "q0"]);

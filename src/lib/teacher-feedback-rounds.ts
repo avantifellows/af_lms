@@ -19,6 +19,8 @@ export interface RoundRow {
   batch_class_ids: string[];
   start_time: string | null;
   end_time: string | null;
+  /** LLM summary (etl-next), null until the round has closed and been summarised. */
+  summary: { concerns?: { serious?: boolean }[] } | null;
 }
 
 /**
@@ -34,7 +36,8 @@ export async function loadAuthorizedRound(
     SELECT tf.teacher_name, tf.teacher_order, tf.status, tf.session_pk,
            s.session_id, s.platform_id AS quiz_id,
            tf.school_code, sch.id AS school_id, tf.centre_id, tf.batch_class_ids,
-           tf.start_time::text AS start_time, tf.end_time::text AS end_time
+           tf.start_time::text AS start_time, tf.end_time::text AS end_time,
+           to_jsonb(tf) -> 'summary' AS summary
     FROM lms_teacher_feedback tf
     LEFT JOIN session s ON s.id = tf.session_pk
     LEFT JOIN school sch ON sch.code = tf.school_code
