@@ -300,6 +300,43 @@ function resolveWindow(mode: TimingMode, startTime: string, endTime: string): { 
   return { start, end };
 }
 
+/**
+ * Feedback is monthly per batch: a batch that already had a round in the month
+ * being set up (now, or the scheduled start) most likely needs that round
+ * extended, not a second form. Latest round wins: cycles come newest first.
+ */
+function useRoundsThatMonth(cycles: Cycle[], mode: TimingMode, startTime: string) {
+  const [nowMonth] = useState(() => istMonth(new Date()));
+  const scheduledStart = new Date(startTime);
+  const month =
+    mode === "schedule" && !Number.isNaN(scheduledStart.getTime()) ? istMonth(scheduledStart) : nowMonth;
+  const roundByBatch = useMemo(() => {
+    const byBatch = new Map<string, Cycle>();
+    for (const c of cycles) {
+      const start = parseDbTime(c.startTime);
+      if (start === null || istMonth(start) !== month) continue;
+      for (const id of c.batchClassIds) if (!byBatch.has(id)) byBatch.set(id, c);
+    }
+    return byBatch;
+  }, [cycles, month]);
+  return { roundByBatch, sameMonth: month === nowMonth };
+}
+
+async function postSetup(body: Record<string, unknown>): Promise<{ result: SetupResponse } | { error: string }> {
+  try {
+    const res = await fetch("/api/teacher-feedback/setup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const json = (await res.json()) as SetupResponse & { error?: string };
+    // 207: some teachers failed; the result says how many.
+    return res.ok || res.status === 207 ? { result: json } : { error: json.error || "Failed to set up feedback" };
+  } catch {
+    return { error: "Setup request failed" };
+  }
+}
+
 export default function SetupModal({
   schoolCode,
   centres,
@@ -320,7 +357,10 @@ export default function SetupModal({
   // Centre is picked first: it scopes BOTH the teachers and the batches. A
   // school can host a CoE and a Nodal centre, each with its own cohorts, so
   // batches must not be fetched school-wide.
-  const [centreId, setCentreIdState] = useState<number | null>(null);
+  const [pickedCentreId, setPickedCentreId] = useState<number | null>(null);
+  // With exactly one centre there's nothing to pick. Derived rather than set in
+  // an effect, since centres load asynchronously.
+  const centreId = pickedCentreId ?? (centres.length === 1 ? centres[0].id : null);
   const options = useCentreOptions(centreId);
   const [classBatchIds, setClassBatchIds] = useState<string[]>([]);
   const [selectedTeachers, setSelectedTeachers] = useState<FeedbackTeacher[]>([]);
@@ -333,35 +373,12 @@ export default function SetupModal({
   const [error, setError] = useState<string | null>(null);
 
   const setCentreId = (id: number | null) => {
-    setCentreIdState(id);
+    setPickedCentreId(id);
     setClassBatchIds([]);
     setSelectedTeachers([]);
   };
 
-  // Auto-select when there's exactly one centre. Centres load asynchronously, so
-  // this must be an effect (a one-time state initializer would see []).
-  useEffect(() => {
-    if (centreId === null && centres.length === 1) setCentreIdState(centres[0].id);
-  }, [centres, centreId]);
-
-  // The month the new round would run in: now, or the scheduled start.
-  const [nowMonth] = useState(() => istMonth(new Date()));
-  const scheduledStart = new Date(startTime);
-  const roundMonth =
-    timingMode === "schedule" && !Number.isNaN(scheduledStart.getTime()) ? istMonth(scheduledStart) : nowMonth;
-
-  // Feedback is monthly per batch: a batch that already had a round that month
-  // most likely needs that round extended, not a second form. Shown on the batch
-  // itself, before it's picked. (Latest round wins: cycles come newest first.)
-  const roundByBatch = useMemo(() => {
-    const byBatch = new Map<string, Cycle>();
-    for (const c of cycles) {
-      const start = parseDbTime(c.startTime);
-      if (start === null || istMonth(start) !== roundMonth) continue;
-      for (const id of c.batchClassIds) if (!byBatch.has(id)) byBatch.set(id, c);
-    }
-    return byBatch;
-  }, [cycles, roundMonth]);
+  const { roundByBatch, sameMonth } = useRoundsThatMonth(cycles, timingMode, startTime);
 
   const canSubmit = centreId !== null && classBatchIds.length > 0 && selectedTeachers.length > 0 && !saving;
 
@@ -374,28 +391,18 @@ export default function SetupModal({
     }
     setSaving(true);
     setError(null);
-    try {
-      const res = await fetch("/api/teacher-feedback/setup", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          schoolCode,
-          centreId,
-          parentBatchId: options.parentBatchIdFor(classBatchIds),
-          classBatchIds,
-          startTime: window.start.toISOString(),
-          endTime: window.end.toISOString(),
-          teachers: selectedTeachers.map((t, i) => ({ id: t.id, name: t.name, order: i + 1 })),
-        }),
-      });
-      const body = (await res.json()) as SetupResponse & { error?: string };
-      if (res.ok || res.status === 207) onDone(body);
-      else setError(body.error || "Failed to set up feedback");
-    } catch {
-      setError("Setup request failed");
-    } finally {
-      setSaving(false);
-    }
+    const outcome = await postSetup({
+      schoolCode,
+      centreId,
+      parentBatchId: options.parentBatchIdFor(classBatchIds),
+      classBatchIds,
+      startTime: window.start.toISOString(),
+      endTime: window.end.toISOString(),
+      teachers: selectedTeachers.map((t, i) => ({ id: t.id, name: t.name, order: i + 1 })),
+    });
+    setSaving(false);
+    if ("error" in outcome) setError(outcome.error);
+    else onDone(outcome.result);
   };
 
   const batchNote = pickerNote(
@@ -435,7 +442,7 @@ export default function SetupModal({
               selected={classBatchIds}
               onToggle={(id) => setClassBatchIds((prev) => toggle(prev, id))}
               roundByBatch={roundByBatch}
-              sameMonth={roundMonth === nowMonth}
+              sameMonth={sameMonth}
               onExtendInstead={onExtendInstead}
             />
           </SectionCard>
