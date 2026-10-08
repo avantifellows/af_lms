@@ -1,10 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useState } from "react";
 import Toast from "@/components/Toast";
 import AnalysisModal from "./AnalysisModal";
 import CycleCard from "./CycleCard";
-import SetupModal from "./SetupModal";
+import SetupModal, { type SetupResponse } from "./SetupModal";
 import type { Cycle, FeedbackCentre } from "./types";
 
 /**
@@ -12,6 +12,52 @@ import type { Cycle, FeedbackCentre } from "./types";
  * appear without a manual reload. Matches the Quiz Sessions tab's interval.
  */
 const CYCLE_REFRESH_MS = 40000;
+
+function TabHeader({ canEdit, onSetUp }: { canEdit: boolean; onSetUp: () => void }) {
+  return (
+    <div className="rounded-lg border border-border bg-bg-card shadow-sm">
+      <div className="flex flex-col gap-4 border-b-4 border-border-accent px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <h2 className="text-lg font-semibold text-text-primary">Teacher Feedback</h2>
+        {canEdit && (
+          <button
+            onClick={onSetUp}
+            className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-accent px-5 py-2.5 text-sm font-bold uppercase tracking-wide text-text-on-accent shadow-sm hover:bg-accent-hover"
+          >
+            <span aria-hidden="true" className="relative inline-block h-3.5 w-3.5 shrink-0">
+              <span className="absolute left-1/2 top-0 h-full w-0.5 -translate-x-1/2 bg-current" />
+              <span className="absolute left-0 top-1/2 h-0.5 w-full -translate-y-1/2 bg-current" />
+            </span>
+            <span>Set Up Feedback</span>
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function RoundList({ loading, empty, children }: { loading: boolean; empty: boolean; children: ReactNode }) {
+  if (loading) {
+    return (
+      <div className="rounded-lg border border-border bg-bg-card px-4 py-10 text-center text-sm text-text-secondary">
+        Loading feedback rounds…
+      </div>
+    );
+  }
+  if (empty) {
+    return (
+      <div className="rounded-lg border border-border bg-bg-card-alt px-4 py-10 text-center text-sm text-text-secondary">
+        No feedback rounds yet. Use “Set Up Feedback” to create one.
+      </div>
+    );
+  }
+  return <div className="space-y-3">{children}</div>;
+}
+
+function setupToast(result: SetupResponse): { variant: "success" | "info"; message: string } {
+  return result.failedCount > 0
+    ? { variant: "info", message: `Created ${result.createdCount}, ${result.failedCount} failed` }
+    : { variant: "success", message: `Created ${result.createdCount} feedback form(s) for ${result.cycleLabel}` };
+}
 
 export default function TeacherFeedbackTab({
   schoolCode,
@@ -104,51 +150,25 @@ export default function TeacherFeedbackTab({
         />
       )}
 
-      <div className="rounded-lg border border-border bg-bg-card shadow-sm">
-        <div className="flex flex-col gap-4 border-b-4 border-border-accent px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
-          <h2 className="text-lg font-semibold text-text-primary">Teacher Feedback</h2>
-          {canEdit ? (
-            <button
-              onClick={() => setIsCreateOpen(true)}
-              className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-accent px-5 py-2.5 text-sm font-bold uppercase tracking-wide text-text-on-accent shadow-sm hover:bg-accent-hover"
-            >
-              <span aria-hidden="true" className="relative inline-block h-3.5 w-3.5 shrink-0">
-                <span className="absolute left-1/2 top-0 h-full w-0.5 -translate-x-1/2 bg-current" />
-                <span className="absolute left-0 top-1/2 h-0.5 w-full -translate-y-1/2 bg-current" />
-              </span>
-              <span>Set Up Feedback</span>
-            </button>
-          ) : null}
-        </div>
-      </div>
+      <TabHeader canEdit={canEdit} onSetUp={() => setIsCreateOpen(true)} />
 
-      {loadingCycles ? (
-        <div className="rounded-lg border border-border bg-bg-card px-4 py-10 text-center text-sm text-text-secondary">
-          Loading feedback rounds…
-        </div>
-      ) : cycles.length === 0 ? (
-        <div className="rounded-lg border border-border bg-bg-card-alt px-4 py-10 text-center text-sm text-text-secondary">
-          No feedback rounds yet. Use “Set Up Feedback” to create one.
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {cycles.map((c) => (
-            <CycleCard
-              // Remount on focus so the card opens even if it was rendered closed.
-              key={c.setupRunId === focusRunId ? `${c.setupRunId}-focus` : c.setupRunId}
-              cycle={c}
-              canEdit={canEdit}
-              focused={c.setupRunId === focusRunId}
-              onAnalyze={(quizId, teacherName) => setAnalysisQuiz({ quizId, teacherName })}
-              onCopy={(msg) => setToast({ variant: "success", message: msg })}
-              onExtended={(message, variant) => {
-                setToast({ variant, message });
-                fetchCycles({ background: true });
-              }}
-            />
-          ))}
-        </div>
-      )}
+      <RoundList loading={loadingCycles} empty={cycles.length === 0}>
+        {cycles.map((c) => (
+          <CycleCard
+            // Remount on focus so the card opens even if it was rendered closed.
+            key={c.setupRunId === focusRunId ? `${c.setupRunId}-focus` : c.setupRunId}
+            cycle={c}
+            canEdit={canEdit}
+            focused={c.setupRunId === focusRunId}
+            onAnalyze={(quizId, teacherName) => setAnalysisQuiz({ quizId, teacherName })}
+            onCopy={(msg) => setToast({ variant: "success", message: msg })}
+            onExtended={(message, variant) => {
+              setToast({ variant, message });
+              fetchCycles({ background: true });
+            }}
+          />
+        ))}
+      </RoundList>
 
       {isCreateOpen && (
         <SetupModal
@@ -163,13 +183,7 @@ export default function TeacherFeedbackTab({
           }}
           onDone={(result) => {
             setIsCreateOpen(false);
-            setToast({
-              variant: result.failedCount > 0 ? "info" : "success",
-              message:
-                result.failedCount > 0
-                  ? `Created ${result.createdCount}, ${result.failedCount} failed`
-                  : `Created ${result.createdCount} feedback form(s) for ${result.cycleLabel}`,
-            });
+            setToast(setupToast(result));
             fetchCycles();
           }}
         />

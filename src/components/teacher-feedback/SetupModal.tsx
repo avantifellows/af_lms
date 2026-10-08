@@ -1,10 +1,9 @@
 "use client";
 
 import { type ReactNode, useEffect, useMemo, useState } from "react";
-import { Modal } from "@/components/ui";
+import { Modal, SectionCard } from "@/components/ui";
 import { addHours, toDateTimeLocalValue } from "@/lib/quiz-session-time";
 import { DEFAULT_DURATION_HOURS, formatDateTime, istMonth, parseDbTime } from "./format";
-import { SectionCard } from "./shared";
 import type { BatchOption, Cycle, FeedbackCentre, FeedbackTeacher } from "./types";
 
 export interface SetupResponse {
@@ -213,6 +212,81 @@ function TimingPicker({
   );
 }
 
+function BatchPicker({ note, batches, selected, onToggle, roundByBatch, sameMonth, onExtendInstead }: {
+  note: string | null;
+  batches: BatchOption[];
+  selected: string[];
+  onToggle: (batchId: string) => void;
+  roundByBatch: Map<string, Cycle>;
+  sameMonth: boolean;
+  onExtendInstead: (setupRunId: string) => void;
+}) {
+  if (note) return <div className={`${PICKER_BOX} ${NOTE}`}>{note}</div>;
+  return (
+    <div className={PICKER_BOX}>
+      {batches.map((b) => {
+        const round = roundByBatch.get(b.batch_id);
+        return (
+          <CheckRow key={b.id} checked={selected.includes(b.batch_id)} onChange={() => onToggle(b.batch_id)}>
+            <span>
+              <span className="block font-medium text-text-primary">{b.name}</span>
+              {round && <ExistingRoundNote round={round} sameMonth={sameMonth} onExtendInstead={onExtendInstead} />}
+            </span>
+          </CheckRow>
+        );
+      })}
+    </div>
+  );
+}
+
+function TeacherPicker({ note, teachers, selected, onToggle }: {
+  note: string | null;
+  teachers: FeedbackTeacher[];
+  selected: FeedbackTeacher[];
+  onToggle: (teacher: FeedbackTeacher) => void;
+}) {
+  if (note) return <div className={`${PICKER_BOX} ${NOTE}`}>{note}</div>;
+  return (
+    <div className={PICKER_BOX}>
+      {teachers.map((t) => (
+        <CheckRow
+          key={teacherKey(t)}
+          checked={selected.some((x) => teacherKey(x) === teacherKey(t))}
+          onChange={() => onToggle(t)}
+        >
+          <span className="font-medium text-text-primary">{t.name}</span>
+          {(t.subject || t.role) && <span className="text-xs text-text-secondary">{t.subject || t.role}</span>}
+        </CheckRow>
+      ))}
+    </div>
+  );
+}
+
+function ModalFooter({ onClose, onSubmit, canSubmit, saving }: {
+  onClose: () => void;
+  onSubmit: () => void;
+  canSubmit: boolean;
+  saving: boolean;
+}) {
+  return (
+    <div className="flex items-center justify-end gap-3 border-t border-border px-5 py-4">
+      <button
+        onClick={onClose}
+        className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-text-secondary hover:bg-hover-bg"
+      >
+        Cancel
+      </button>
+      <button
+        onClick={onSubmit}
+        disabled={!canSubmit}
+        className="rounded-lg bg-accent px-5 py-2 text-sm font-bold uppercase tracking-wide text-text-on-accent shadow-sm hover:bg-accent-hover disabled:opacity-50"
+      >
+        {saving ? "Setting up…" : "Create Feedback Forms"}
+      </button>
+    </div>
+  );
+}
+
 /** Start and end for the request, or an error message for a bad schedule. */
 function resolveWindow(mode: TimingMode, startTime: string, endTime: string): { start: Date; end: Date } | string {
   if (mode === "start_now") {
@@ -355,49 +429,24 @@ export default function SetupModal({
           </SectionCard>
 
           <SectionCard title="2. Select Class Batches">
-            <div className={PICKER_BOX}>
-              {batchNote ? (
-                <div className={NOTE}>{batchNote}</div>
-              ) : (
-                options.classBatches.map((b) => (
-                  <CheckRow
-                    key={b.id}
-                    checked={classBatchIds.includes(b.batch_id)}
-                    onChange={() => setClassBatchIds((prev) => toggle(prev, b.batch_id))}
-                  >
-                    <span>
-                      <span className="block font-medium text-text-primary">{b.name}</span>
-                      {roundByBatch.has(b.batch_id) && (
-                        <ExistingRoundNote
-                          round={roundByBatch.get(b.batch_id)!}
-                          sameMonth={roundMonth === nowMonth}
-                          onExtendInstead={onExtendInstead}
-                        />
-                      )}
-                    </span>
-                  </CheckRow>
-                ))
-              )}
-            </div>
+            <BatchPicker
+              note={batchNote}
+              batches={options.classBatches}
+              selected={classBatchIds}
+              onToggle={(id) => setClassBatchIds((prev) => toggle(prev, id))}
+              roundByBatch={roundByBatch}
+              sameMonth={roundMonth === nowMonth}
+              onExtendInstead={onExtendInstead}
+            />
           </SectionCard>
 
           <SectionCard title="3. Select Teachers">
-            <div className={PICKER_BOX}>
-              {teacherNote ? (
-                <div className={NOTE}>{teacherNote}</div>
-              ) : (
-                options.teachers.map((t) => (
-                  <CheckRow
-                    key={teacherKey(t)}
-                    checked={selectedTeachers.some((x) => teacherKey(x) === teacherKey(t))}
-                    onChange={() => setSelectedTeachers((prev) => toggle(prev, t, teacherKey))}
-                  >
-                    <span className="font-medium text-text-primary">{t.name}</span>
-                    {(t.subject || t.role) && <span className="text-xs text-text-secondary">{t.subject || t.role}</span>}
-                  </CheckRow>
-                ))
-              )}
-            </div>
+            <TeacherPicker
+              note={teacherNote}
+              teachers={options.teachers}
+              selected={selectedTeachers}
+              onToggle={(t) => setSelectedTeachers((prev) => toggle(prev, t, teacherKey))}
+            />
           </SectionCard>
 
           <SectionCard title="4. When">
@@ -417,21 +466,7 @@ export default function SetupModal({
         </div>
       </div>
 
-      <div className="flex items-center justify-end gap-3 border-t border-border px-5 py-4">
-        <button
-          onClick={onClose}
-          className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-text-secondary hover:bg-hover-bg"
-        >
-          Cancel
-        </button>
-        <button
-          onClick={submit}
-          disabled={!canSubmit}
-          className="rounded-lg bg-accent px-5 py-2 text-sm font-bold uppercase tracking-wide text-text-on-accent shadow-sm hover:bg-accent-hover disabled:opacity-50"
-        >
-          {saving ? "Setting up…" : "Create Feedback Forms"}
-        </button>
-      </div>
+      <ModalFooter onClose={onClose} onSubmit={submit} canSubmit={canSubmit} saving={saving} />
     </Modal>
   );
 }

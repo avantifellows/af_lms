@@ -1,9 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Modal } from "@/components/ui";
+import { Modal, SectionCard } from "@/components/ui";
 import { formatDateTime, formatPct, istMonth, parseDbTime } from "./format";
-import { SectionCard } from "./shared";
 
 interface QuestionScore {
   questionTag: string;

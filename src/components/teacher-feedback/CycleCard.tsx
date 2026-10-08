@@ -153,6 +153,39 @@ function TeacherCard({
   );
 }
 
+function RoundHeader({ cycle, open, live, onToggle }: {
+  cycle: Cycle;
+  open: boolean;
+  live: boolean;
+  onToggle: () => void;
+}) {
+  const batches = cycle.batchClassNames.join(", ") || `${cycle.batchClassIds.length} batches`;
+  const teachers = `${cycle.teachers.length} teacher${cycle.teachers.length === 1 ? "" : "s"}`;
+  const where = cycle.centreName ? `${cycle.centreName} · ` : "";
+  const badge = live ? "bg-success-bg text-accent-hover" : "bg-bg-card-alt text-text-secondary";
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-expanded={open}
+      className="flex w-full items-center justify-between gap-4 px-5 py-4 text-left hover:bg-hover-bg"
+    >
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-baseline gap-x-3">
+          <span className="text-text-muted">{open ? "▾" : "▸"}</span>
+          <span className="text-lg font-semibold text-text-primary">{cycle.cycleLabel}</span>
+          <span className="text-base text-text-primary">{batches}</span>
+        </div>
+        <div className="mt-0.5 pl-5 text-sm text-text-secondary">
+          {where}
+          {teachers} · {formatDateTime(cycle.startTime)} → {formatDateTime(cycle.endTime)}
+        </div>
+      </div>
+      <span className={`shrink-0 rounded-full px-3 py-1 text-sm font-medium ${badge}`}>{live ? "Live" : "Ended"}</span>
+    </button>
+  );
+}
+
 export default function CycleCard({
   cycle,
   canEdit,
@@ -187,34 +220,7 @@ export default function CycleCard({
         focused ? "border-accent ring-2 ring-accent/30" : "border-border"
       }`}
     >
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        className="flex w-full items-center justify-between gap-4 px-5 py-4 text-left hover:bg-hover-bg"
-      >
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-baseline gap-x-3">
-            <span className="text-text-muted">{open ? "▾" : "▸"}</span>
-            <span className="text-lg font-semibold text-text-primary">{cycle.cycleLabel}</span>
-            <span className="text-base text-text-primary">
-              {cycle.batchClassNames.join(", ") || `${cycle.batchClassIds.length} batches`}
-            </span>
-          </div>
-          <div className="mt-0.5 pl-5 text-sm text-text-secondary">
-            {cycle.centreName ? `${cycle.centreName} · ` : ""}
-            {cycle.teachers.length} teacher{cycle.teachers.length === 1 ? "" : "s"} ·{" "}
-            {formatDateTime(cycle.startTime)} → {formatDateTime(cycle.endTime)}
-          </div>
-        </div>
-        <span
-          className={`shrink-0 rounded-full px-3 py-1 text-sm font-medium ${
-            live ? "bg-success-bg text-accent-hover" : "bg-bg-card-alt text-text-secondary"
-          }`}
-        >
-          {live ? "Live" : "Ended"}
-        </span>
-      </button>
+      <RoundHeader cycle={cycle} open={open} live={live} onToggle={() => setOpen((v) => !v)} />
 
       {open && (
         <div className="border-t border-border">
