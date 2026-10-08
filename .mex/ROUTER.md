@@ -68,6 +68,16 @@ Then read this file fully before doing anything else in this session.
 - September 23 DB Service release: after #736 (`2df0e522`) and #737 (`2bea0794`) merged into main, main was merged cleanly into `release` as `1f70b41a`. The EC2 production deploy workflow succeeded for that SHA, its log shows the server fast-forwarded from `3f82649b` to `1f70b41a`, and live health/readiness returned 200. No historical data repair was run. See `context/student-addition.md` for cohort decisions and the unresolved attendance handoff.
 - September 23 fresh production-to-local repair retest: 37,892 LMS-created 2026–27 Students split 37,394 / 243 / 253 / 1 / 1. The owner confirmed the 91 newly found dropout/undo events were mistakes. A fresh local QA clone passed all five status repairs and 1,647 timestamp fixes in that order, with replay and full-table checks. All cohort current-status gaps are resolved locally. Production was read only. See `context/student-addition.md` and the private `release-records/repair-retest-confirmed-20260923/QA.md`.
 
+- Student Enrolment captures optional T-shirt and Track Pant sizes (issue #395). The Add
+  Student form offers the vendor chart XS–XXXL with its chest/waist measurements from the
+  shared `src/lib/uniform-sizes.ts` set, stores only the size code, and omits a blank size
+  from the row entirely. Both bulk-upload column contracts and the static templates are
+  unchanged, so the form submits the sizes alongside its mode's columns rather than through
+  them. Requires the coordinated DB Service change that allowlists `tshirt_size` /
+  `track_pant_size` for Phone Registration Mode and maps them into the ingestion student
+  attrs — without it, Phone mode rejects every row as an unknown field. See
+  `context/student-addition.md` and `patterns/add-student-enrolment-field.md`.
+
 - PR #335 follow-up: Student detail now retains a School's progress origin through phase changes and locked-phase redirects. Student → School restores `source=progress`, so the next School Back returns to the selected Holistic Program. Ordinary School-origin journeys remain unchanged. See `context/architecture.md`.
 
 - Holistic Assignment Coverage School links carry the fixed `source=progress` marker and selected Program. After School and Holistic authorization, the School header returns to the matching program-wide workspace. The Admin Program selector is URL-derived and updates `program_id` with native `history.replaceState(null, ...)`, so native Back and reload preserve the selected Program without adding a history entry or new storage contract. Ordinary School and Centre navigation remains unchanged. Local headless-Chromium QA passed for a non-default Program through native Back, reload, and the in-app header return.

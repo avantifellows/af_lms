@@ -24,6 +24,11 @@ import {
   validateStudentAdditionInput,
   type StudentAdditionInput,
 } from "@/lib/student-addition-fields";
+import {
+  ENROLMENT_UNIFORM_SIZES,
+  formatTrackPantSize,
+  formatTshirtSize,
+} from "@/lib/uniform-sizes";
 import { deriveLmsEnrollmentPeriod } from "@/lib/lms-enrollment-date";
 import {
   ACTIVE_REGISTRATION_MODE,
@@ -56,7 +61,13 @@ const initialForm: Record<keyof StudentAdditionInput, string> = {
   father_name: "",
   phone: "",
   annual_family_income: "",
+  tshirt_size: "",
+  track_pant_size: "",
 };
+
+// Collected on the form but not part of either bulk-upload column set, so they are
+// submitted alongside the mode's columns rather than through them.
+const FORM_ONLY_FIELDS = ["tshirt_size", "track_pant_size"] as const;
 
 const labelClassName = "block text-sm font-medium text-text-secondary";
 
@@ -64,9 +75,10 @@ function fieldsForRegistrationMode(
   form: Record<keyof StudentAdditionInput, string>,
   registrationMode: RegistrationMode,
 ): StudentAdditionInput {
-  return Object.fromEntries(
-    getStudentAdditionUploadColumns(registrationMode).map(({ key }) => [key, form[key]]),
-  );
+  return Object.fromEntries([
+    ...getStudentAdditionUploadColumns(registrationMode).map(({ key }) => [key, form[key]]),
+    ...FORM_ONLY_FIELDS.map((key) => [key, form[key]]),
+  ]);
 }
 
 // fallow-ignore-next-line complexity
@@ -220,6 +232,9 @@ export default function AddStudentModal({
     options: readonly string[],
     placeholder = "Select...",
     required = false,
+    // Only the option's code is stored; pass this when the dropdown should read as
+    // something longer, e.g. a size code with its measurement.
+    formatOption: (option: string) => string = (option) => option,
   ) => {
     const errorText = fieldError(name);
     const errorId = `${name}-error`;
@@ -240,7 +255,7 @@ export default function AddStudentModal({
           <option value="">{placeholder}</option>
           {options.map((option) => (
             <option key={option} value={option}>
-              {option}
+              {formatOption(option)}
             </option>
           ))}
         </Select>
@@ -469,6 +484,28 @@ export default function AddStudentModal({
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               {selectField("board_stream", "Board Stream", BOARD_STREAM_OPTIONS, "Select...", true)}
               {selectField("stream", "Primary Exam preparing for", STREAM_OPTIONS, "Select...", true)}
+            </div>
+          </FormSection>
+
+          <FormSection>
+            <h3 className="text-sm font-semibold text-text-primary">Uniform Size</h3>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              {selectField(
+                "tshirt_size",
+                "T-shirt Size",
+                ENROLMENT_UNIFORM_SIZES,
+                "Select...",
+                false,
+                formatTshirtSize,
+              )}
+              {selectField(
+                "track_pant_size",
+                "Track Pant Size",
+                ENROLMENT_UNIFORM_SIZES,
+                "Select...",
+                false,
+                formatTrackPantSize,
+              )}
             </div>
           </FormSection>
 
