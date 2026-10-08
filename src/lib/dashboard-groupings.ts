@@ -7,6 +7,7 @@ import {
 } from "@/lib/constants";
 import { isCentreSeated, type UserPermission } from "@/lib/permissions";
 import type { GradeCount } from "@/components/SchoolCard";
+import type { CentreSwitcherEntry } from "@/lib/centre-switcher";
 
 /**
  * Dashboard groupings — the disjoint scope views the dashboard tabs render.
@@ -175,6 +176,53 @@ export async function getBrowsableCentreIds(centreIds: number[]): Promise<number
     [centreIds],
   );
   return rows.map((r) => Number(r.id));
+}
+
+/**
+ * Every browsable centre (active + school-linked, the same rule as
+ * {@link getBrowsableCentreIds} and the centre page's notFound()) the viewer may
+ * open, for the centre page's title switcher. Same scope semantics as
+ * {@link getAccessibleCentresWithCounts}, but no counts: it renders with every
+ * centre page, so it stays a single lightweight read.
+ */
+export async function getCentreSwitcherEntries(
+  access: CentreAccess,
+): Promise<CentreSwitcherEntry[]> {
+  if (access.kind === "ids" && access.ids.length === 0) return [];
+  if (access.kind === "schools" && access.codes.length === 0) return [];
+
+  let scopeClause = "";
+  const params: unknown[] = [];
+  if (access.kind === "ids") {
+    scopeClause = "AND c.id = ANY($1)";
+    params.push(access.ids);
+  } else if (access.kind === "schools") {
+    scopeClause = "AND sch.code = ANY($1)";
+    params.push(access.codes);
+  }
+
+  const rows = await query<{
+    id: string;
+    name: string;
+    program_name: string | null;
+    school_name: string;
+    school_code: string;
+  }>(
+    `SELECT c.id, c.name, p.name AS program_name,
+            sch.name AS school_name, sch.code AS school_code
+     FROM centres c
+     JOIN school sch ON sch.id = c.school_id
+     LEFT JOIN program p ON p.id = c.program_id
+     WHERE c.is_active AND c.school_id IS NOT NULL ${scopeClause}`,
+    params,
+  );
+  return rows.map((row) => ({
+    id: String(row.id),
+    name: row.name,
+    programName: row.program_name,
+    schoolName: row.school_name,
+    schoolCode: row.school_code,
+  }));
 }
 
 /**

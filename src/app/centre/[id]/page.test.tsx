@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
 // ---- mocks (hoisted) ----
 
@@ -15,6 +16,7 @@ const {
   mockGetCentreStudents,
   mockGetSchoolRoster,
   mockRouterRefresh,
+  mockRouterPush,
   mockGetAcademicMentorshipActorUserId,
   mockListAcademicMentorshipMappings,
   mockListAcademicMentorshipTeacherMentees,
@@ -27,6 +29,7 @@ const {
   mockGetFeatureAccess: vi.fn(),
   mockQuery: vi.fn(),
   mockRouterRefresh: vi.fn(),
+  mockRouterPush: vi.fn(),
   mockRedirect: vi.fn((url: string) => {
     throw new Error(`REDIRECT:${url}`);
   }),
@@ -48,7 +51,7 @@ vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("next/navigation", () => ({
   redirect: mockRedirect,
   notFound: mockNotFound,
-  useRouter: () => ({ refresh: mockRouterRefresh }),
+  useRouter: () => ({ refresh: mockRouterRefresh, push: mockRouterPush }),
 }));
 vi.mock("@/lib/permissions", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/permissions")>();
@@ -61,9 +64,12 @@ vi.mock("@/lib/permissions", async (importOriginal) => {
   };
 });
 vi.mock("@/lib/db", () => ({ query: mockQuery }));
-vi.mock("@/lib/dashboard-groupings", () => ({
-  getCentreWithSchool: mockGetCentreWithSchool,
-}));
+// Only the page lookup is mocked: the Centre switcher list query stays real so
+// its SQL and params are asserted through mockQuery.
+vi.mock("@/lib/dashboard-groupings", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/dashboard-groupings")>();
+  return { ...actual, getCentreWithSchool: mockGetCentreWithSchool };
+});
 vi.mock("@/lib/school-students", () => ({
   getCentreStudents: mockGetCentreStudents,
   getSchoolRoster: mockGetSchoolRoster,
@@ -86,29 +92,9 @@ vi.mock("next/link", () => ({
   ),
 }));
 
-// Child components are stubs — this suite is about which tabs RosterPage builds
-// for a centre scope, not how each tab renders.
-vi.mock("@/components/PageHeader", () => ({
-  __esModule: true,
-  default: ({
-    title,
-    subtitle,
-    backHref,
-  }: {
-    title: string;
-    subtitle?: string;
-    backHref?: string;
-  }) => (
-    <div
-      data-testid="page-header"
-      data-title={title}
-      data-subtitle={subtitle || ""}
-      data-back-href={backHref || ""}
-    >
-      PageHeader
-    </div>
-  ),
-}));
+// Tab bodies are stubs — this suite is about which tabs RosterPage builds for a
+// centre scope, not how each tab renders. PageHeader is real so the Centre
+// switcher's heading/popup boundary is observable.
 vi.mock("@/components/SchoolTabs", () => ({
   __esModule: true,
   default: ({ tabs }: { tabs: { id: string; label: string; content: React.ReactNode }[] }) => (
@@ -382,10 +368,7 @@ describe("CentrePage → RosterPage (centre scope)", () => {
 
     await renderCentre("8");
 
-    expect(screen.getByTestId("page-header")).toHaveAttribute(
-      "data-back-href",
-      "/dashboard?view=centres"
-    );
+    expect(document.querySelector('header a[href="/dashboard?view=centres"]')).not.toBeNull();
   });
 
   // programsWithStudents counts a program when any student in scope merely dropped
@@ -482,5 +465,344 @@ describe("CentrePage → RosterPage (centre scope)", () => {
       "REDIRECT:/admin/holistic-mentorship",
     );
     expect(mockGetCentreStudents).not.toHaveBeenCalled();
+  });
+});
+
+// ---- Centre switcher ----
+
+// Rows the switcher list query returns, shaped as node-pg hands them back.
+type SwitcherRow = {
+  id: string;
+  name: string;
+  program_name: string | null;
+  school_name: string;
+  school_code: string;
+};
+
+const BHAVNAGAR_COE: SwitcherRow = {
+  id: "8",
+  name: "JNV Bhavnagar CoE",
+  program_name: "JNV CoE",
+  school_name: "JNV Bhavnagar",
+  school_code: "70705",
+};
+const ADILABAD_NODAL: SwitcherRow = {
+  id: "31",
+  name: "JNV Adilabad",
+  program_name: "JNV Nodal",
+  school_name: "JNV Adilabad",
+  school_code: "36001",
+};
+const ADILABAD_COE: SwitcherRow = {
+  id: "30",
+  name: "JNV Adilabad",
+  program_name: "JNV CoE",
+  school_name: "JNV Adilabad",
+  school_code: "36001",
+};
+const NAGALAND: SwitcherRow = {
+  id: "16",
+  name: "Nagaland Foundation",
+  program_name: null,
+  school_name: "JNV Kohima",
+  school_code: "13001",
+};
+
+// The list query is the only one that selects browsable centres joined to
+// their School code.
+const isSwitcherSql = (sql: string) =>
+  sql.includes("FROM centres c") && sql.includes("c.school_id IS NOT NULL");
+
+function switcherQueryCalls() {
+  return mockQuery.mock.calls.filter(([sql]) => isSwitcherSql(String(sql)));
+}
+
+function stubSwitcherRows(rows: SwitcherRow[]) {
+  mockQuery.mockImplementation(async (sql: string) => (isSwitcherSql(sql) ? rows : []));
+}
+
+function switcherTrigger() {
+  return within(screen.getByRole("heading", { level: 1 })).queryByRole("button");
+}
+
+describe("CentrePage → Centre switcher", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    mockRedirect.mockImplementation((url: string) => {
+      throw new Error(`REDIRECT:${url}`);
+    });
+    mockNotFound.mockImplementation(() => {
+      throw new Error("NOT_FOUND");
+    });
+    mockListAcademicMentorshipMappings.mockResolvedValue([]);
+    mockListAcademicMentorshipTeacherMentees.mockResolvedValue([]);
+    mockListHolisticAssignmentRoster.mockResolvedValue([]);
+    mockGetAcademicMentorshipActorUserId.mockResolvedValue(101);
+    mockRequireHolisticMentorshipAccess.mockResolvedValue({ ok: false, status: 403, error: "Forbidden" });
+  });
+
+  it("turns the Centre title into a switcher button when another Centre is browsable", async () => {
+    setupCentre();
+    stubSwitcherRows([BHAVNAGAR_COE, ADILABAD_COE]);
+
+    await renderCentre("8");
+
+    const trigger = switcherTrigger();
+    expect(trigger).not.toBeNull();
+    expect(trigger).toHaveTextContent("JNV Bhavnagar CoE");
+    expect(trigger).toHaveAttribute("aria-haspopup", "listbox");
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(trigger).toHaveAccessibleDescription("Switch Centre");
+  });
+
+  it("keeps the plain title when the current Centre is the only browsable one", async () => {
+    setupCentre();
+    stubSwitcherRows([BHAVNAGAR_COE]);
+
+    await renderCentre("8");
+
+    expect(screen.getByRole("heading", { level: 1, name: "JNV Bhavnagar CoE" })).toBeInTheDocument();
+    expect(switcherTrigger()).toBeNull();
+  });
+
+  // Mocked rows can't prove exclusion — the predicate in the SQL does. An
+  // inactive or School-less Centre is never a row, so it never earns a switcher.
+  it("lists only active, School-linked Centres", async () => {
+    setupCentre();
+    stubSwitcherRows([BHAVNAGAR_COE]);
+
+    await renderCentre("8");
+
+    const [[sql]] = switcherQueryCalls();
+    expect(sql).toMatch(/WHERE c\.is_active AND c\.school_id IS NOT NULL/);
+    expect(sql).not.toContain("centre_students");
+  });
+
+  it("scopes a seated user's list to their seat Centres", async () => {
+    setupCentre({}, {
+      scope: {
+        schools: new Set(["70705", "36001"]),
+        centres: new Set([8, 30]),
+        programs: new Set([1]),
+      },
+    });
+    stubSwitcherRows([BHAVNAGAR_COE, ADILABAD_COE]);
+
+    await renderCentre("8");
+
+    const [[sql, params]] = switcherQueryCalls();
+    expect(sql).toContain("AND c.id = ANY($1)");
+    expect(sql).not.toContain("sch.code = ANY");
+    expect(params).toEqual([[8, 30]]);
+  });
+
+  it("scopes a seatless School-scoped user's list to their School codes", async () => {
+    setupCentre({}, {
+      email: "pm@avantifellows.org",
+      role: "program_manager",
+      school_codes: ["70705", "36001"],
+      scope: {
+        schools: new Set(["70705", "36001"]),
+        centres: new Set(),
+        programs: new Set(),
+      },
+    });
+    stubSwitcherRows([BHAVNAGAR_COE, ADILABAD_COE]);
+
+    await renderCentre("8");
+
+    const [[sql, params]] = switcherQueryCalls();
+    expect(sql).toContain("AND sch.code = ANY($1)");
+    expect(sql).not.toContain("c.id = ANY");
+    expect(params).toEqual([["70705", "36001"]]);
+  });
+
+  it("gives a global admin an unscoped list", async () => {
+    setupCentre({}, {
+      email: "admin@avantifellows.org",
+      level: 3,
+      role: "admin",
+      school_codes: null,
+      scope: { schools: "all", centres: "all", programs: "all" },
+    });
+    stubSwitcherRows([BHAVNAGAR_COE, ADILABAD_COE]);
+
+    await renderCentre("8");
+
+    const [[sql, params]] = switcherQueryCalls();
+    expect(sql).not.toContain("= ANY(");
+    expect(params).toEqual([]);
+    expect(switcherTrigger()).not.toBeNull();
+  });
+
+  // A regional user reaches the page by region, but region expansion only
+  // yields JNV School codes — at a non-JNV School that leaves an empty scope,
+  // which must not become an unscoped query.
+  it("runs no list query for an empty School scope", async () => {
+    setupCentre({}, {
+      email: "pm@avantifellows.org",
+      role: "program_manager",
+      level: 2,
+      school_codes: null,
+      regions: ["West"],
+      scope: { schools: new Set(), centres: new Set(), programs: new Set() },
+    });
+    stubSwitcherRows([BHAVNAGAR_COE, ADILABAD_COE]);
+
+    await renderCentre("8");
+
+    expect(screen.getByTestId("enrollment-tab-content")).toBeInTheDocument();
+    expect(switcherQueryCalls()).toHaveLength(0);
+    expect(switcherTrigger()).toBeNull();
+  });
+
+  it.each(["pmu_manager", "pmu_govt_school_user"] as const)(
+    "gives %s Access Denied without running the list query",
+    async (role) => {
+      setupCentre({ program_id: 64, program_name: "JNV NVS" }, {
+        email: "pmu@avantifellows.org",
+        role,
+        program_ids: [64],
+        scope: undefined,
+      });
+      stubSwitcherRows([BHAVNAGAR_COE, ADILABAD_COE]);
+
+      await renderCentre();
+
+      expect(screen.getByText("Access Denied")).toBeInTheDocument();
+      expect(switcherQueryCalls()).toHaveLength(0);
+    },
+  );
+
+  describe("when the list can't load", () => {
+    const expectPlainPageAndSafeLog = (errorSpy: ReturnType<typeof vi.spyOn>) => {
+      expect(screen.getByRole("heading", { level: 1, name: "JNV Bhavnagar CoE" })).toBeInTheDocument();
+      expect(switcherTrigger()).toBeNull();
+      expect(screen.getByTestId("enrollment-tab-content")).toBeInTheDocument();
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      expect(errorSpy).toHaveBeenCalledWith("Centre switcher list unavailable");
+      const logged = JSON.stringify(errorSpy.mock.calls);
+      expect(logged).not.toContain("@avantifellows.org");
+      expect(logged).not.toMatch(/\b(8|30|70705|36001)\b/);
+    };
+
+    it("renders the plain title and roster when the list query rejects", async () => {
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      setupCentre();
+      mockQuery.mockImplementation(async (sql: string) => {
+        if (isSwitcherSql(sql)) throw new Error("query failed for centres 8, 30");
+        return [];
+      });
+
+      await renderCentre("8");
+
+      expectPlainPageAndSafeLog(errorSpy);
+      errorSpy.mockRestore();
+    });
+
+    it("renders the plain title and roster when School-scope expansion rejects", async () => {
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      setupCentre({}, {
+        email: "pm@avantifellows.org",
+        role: "program_manager",
+        level: 2,
+        school_codes: null,
+        regions: ["West"],
+        scope: { schools: new Set(), centres: new Set(), programs: new Set() },
+      });
+      mockQuery.mockImplementation(async (sql: string) => {
+        if (sql.includes("region = ANY")) throw new Error("region lookup failed for 70705");
+        return isSwitcherSql(sql) ? [BHAVNAGAR_COE, ADILABAD_COE] : [];
+      });
+
+      await renderCentre("8");
+
+      expectPlainPageAndSafeLog(errorSpy);
+      expect(switcherQueryCalls()).toHaveLength(0);
+      errorSpy.mockRestore();
+    });
+  });
+
+  describe("popup", () => {
+    // Same name, Program and School as NAGALAND but a lower id: the numeric id
+    // is the last tiebreak ("9" sorts after "16" as a string).
+    const NAGALAND_9: SwitcherRow = { ...NAGALAND, id: "9" };
+    // Same name and Program as ADILABAD_COE at a School that sorts first.
+    const ADILABAD_ANNEX: SwitcherRow = {
+      id: "40",
+      name: "JNV Adilabad",
+      program_name: "JNV CoE",
+      school_name: "Adilabad Annex",
+      school_code: "36002",
+    };
+
+    async function openSwitcher() {
+      setupCentre();
+      stubSwitcherRows([NAGALAND, ADILABAD_NODAL, NAGALAND_9, BHAVNAGAR_COE, ADILABAD_COE, ADILABAD_ANNEX]);
+      await renderCentre("8");
+      const user = userEvent.setup();
+      await user.click(switcherTrigger()!);
+      return user;
+    }
+
+    it("opens a listbox beside the heading, never inside it", async () => {
+      await openSwitcher();
+
+      const heading = screen.getByRole("heading", { level: 1 });
+      expect(heading).toHaveAccessibleName("JNV Bhavnagar CoE");
+      expect(switcherTrigger()).toHaveAttribute("aria-expanded", "true");
+      const listbox = screen.getByRole("listbox", { name: "Centres" });
+      expect(heading.contains(listbox)).toBe(false);
+    });
+
+    it("lists the current Centre first, then the rest by name, School, Program and id", async () => {
+      await openSwitcher();
+
+      const options = within(screen.getByRole("listbox")).getAllByRole("option");
+      expect(options.map((option) => option.textContent)).toEqual([
+        "JNV Bhavnagar CoE" + "Current" + "JNV CoE · JNV Bhavnagar (70705)",
+        "JNV Adilabad" + "JNV CoE · Adilabad Annex (36002)",
+        "JNV Adilabad" + "JNV CoE · JNV Adilabad (36001)",
+        "JNV Adilabad" + "JNV Nodal · JNV Adilabad (36001)",
+        "Nagaland Foundation" + "No Program · JNV Kohima (13001)",
+        "Nagaland Foundation" + "No Program · JNV Kohima (13001)",
+      ]);
+      expect(options[0]).toHaveAttribute("aria-disabled", "true");
+      expect(options[0]).toHaveAttribute("aria-selected", "true");
+      expect(options[1]).not.toHaveAttribute("aria-disabled");
+      expect(options[1]).toHaveAttribute("aria-selected", "false");
+    });
+
+    it("keeps the page's own Centre first even when the list omits it", async () => {
+      setupCentre();
+      stubSwitcherRows([ADILABAD_NODAL]);
+      await renderCentre("8");
+      await userEvent.setup().click(switcherTrigger()!);
+
+      const options = within(screen.getByRole("listbox")).getAllByRole("option");
+      expect(options.map((option) => option.textContent)).toEqual([
+        "JNV Bhavnagar CoE" + "Current" + "JNV CoE · JNV Bhavnagar (70705)",
+        "JNV Adilabad" + "JNV Nodal · JNV Adilabad (36001)",
+      ]);
+    });
+
+    it("goes to another Centre's page when its option is clicked", async () => {
+      const user = await openSwitcher();
+
+      const options = within(screen.getByRole("listbox")).getAllByRole("option");
+      await user.click(options[4]);
+
+      expect(mockRouterPush).toHaveBeenCalledTimes(1);
+      expect(mockRouterPush).toHaveBeenCalledWith("/centre/9");
+      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    });
+
+    it("does nothing when the current Centre is clicked", async () => {
+      const user = await openSwitcher();
+
+      await user.click(within(screen.getByRole("listbox")).getAllByRole("option")[0]);
+
+      expect(mockRouterPush).not.toHaveBeenCalled();
+    });
   });
 });

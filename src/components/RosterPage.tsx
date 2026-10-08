@@ -13,6 +13,7 @@ import {
 } from "@/lib/academic-mentorship";
 import {
   getResolvedPermission,
+  getAccessibleSchoolCodes,
   getProgramContextSync,
   getFeatureAccess,
   canAccessSchoolSync,
@@ -39,6 +40,13 @@ import {
   type SchoolRoster,
 } from "@/lib/school-students";
 import PageHeader from "@/components/PageHeader";
+import CentreSwitcher from "@/components/CentreSwitcher";
+import { getCentreSwitcherEntries, resolveCentreAccess } from "@/lib/dashboard-groupings";
+import {
+  buildCentreSwitcherOptions,
+  shouldShowSwitcher,
+  type CentreSwitcherOption,
+} from "@/lib/centre-switcher";
 import SchoolTabs from "@/components/SchoolTabs";
 import { Badge, Card } from "@/components/ui";
 import CurriculumTab from "@/components/curriculum/CurriculumTab";
@@ -531,6 +539,7 @@ function AccessDenied({
  */
 function RosterShell({
   title,
+  titleBlock,
   subtitle,
   backHref,
   userEmail,
@@ -538,6 +547,7 @@ function RosterShell({
   tabs,
 }: {
   title: string;
+  titleBlock?: ReactNode;
   subtitle: string;
   backHref?: string;
   userEmail?: string;
@@ -548,6 +558,7 @@ function RosterShell({
     <div className="min-h-screen bg-bg">
       <PageHeader
         title={title}
+        titleBlock={titleBlock}
         subtitle={subtitle}
         backHref={backHref}
         userEmail={userEmail}
@@ -804,6 +815,35 @@ async function fetchRosterData(scope: RosterScope) {
     getLmsSupportedProgramIds(),
   ]);
   return { roster, grades, batches, supportedProgramIds };
+}
+
+/**
+ * The Centre page's switcher options, or null when there is no switcher (a
+ * School page, nowhere else to go, or the list couldn't load). It's only a
+ * navigation aid — the destination page re-checks access — so any failure
+ * degrades to the plain title, logged once with no user scope in the message.
+ */
+async function loadCentreSwitcherOptions(
+  scope: RosterScope,
+  email: string,
+  permission: UserPermission,
+): Promise<CentreSwitcherOption[] | null> {
+  if (scope.kind !== "centre") return null;
+  try {
+    const schoolCodes = await getAccessibleSchoolCodes(email, permission);
+    const entries = await getCentreSwitcherEntries(resolveCentreAccess(permission, schoolCodes));
+    const options = buildCentreSwitcherOptions(entries, {
+      id: scope.centre.id,
+      name: scope.centre.name,
+      programName: scope.centre.program_name,
+      schoolName: scope.school.name,
+      schoolCode: scope.school.code,
+    });
+    return shouldShowSwitcher(options) ? options : null;
+  } catch {
+    console.error("Centre switcher list unavailable");
+    return null;
+  }
 }
 
 function isNvsStudent(s: RosterStudent): boolean {
@@ -1219,7 +1259,10 @@ export default async function RosterPage({
     access.students.canEdit,
   );
 
-  const { roster, grades, batches, supportedProgramIds } = await fetchRosterData(scope);
+  const [{ roster, grades, batches, supportedProgramIds }, switcherOptions] = await Promise.all([
+    fetchRosterData(scope),
+    loadCentreSwitcherOptions(scope, permission.email, permission),
+  ]);
   const isPmu = isPmuRole(permission.role);
   const { students, dataIssues } = scopeRosterToRole(roster.students, roster.issues, isPmu);
   const { activeStudents, dropoutStudents } = splitActiveAndDropout(
@@ -1344,6 +1387,7 @@ export default async function RosterPage({
   return (
     <RosterShell
       title={title}
+      titleBlock={switcherOptions ? <CentreSwitcher options={switcherOptions} /> : undefined}
       subtitle={subtitle}
       backHref={backHref}
       userEmail={session.user?.email || undefined}

@@ -101,7 +101,32 @@ permission, or persistent history store. The Ralph PRD/slice artifacts and write
 boundaries remain under `.ralph/workspaces/383/`; configured council rounds were
 zero, and no ADR conflict was identified.
 
-## Issue #388 Centre-page switcher — grilled plan
+## Issue #388 Centre-page switcher
+
+**Implemented so far (#397 tracer, on `feat/issue-388-centre-page-switcher`):**
+`getCentreSwitcherEntries(access)` in `src/lib/dashboard-groupings.ts` is the
+lightweight list read: `resolveCentreAccess` scope (`all` → no clause, `ids` →
+`c.id = ANY($1)`, `schools` → `sch.code = ANY($1)`, empty → no query), filtered
+`c.is_active AND c.school_id IS NOT NULL`, no counts. `RosterPage` loads it only
+for `scope.kind === "centre"`, after every existing gate, in parallel with the
+roster; any failure in School-code expansion, access resolution, or the query
+becomes "no switcher" with one fixed `console.error("Centre switcher list
+unavailable")`. The client-safe `src/lib/centre-switcher.ts` is the one place for
+option logic (current Centre first and merged, `<Program or No Program> · School
+(code)` context, name → School → Program → numeric id order, separate `search`
+fields, reserved `disambiguator`). `PageHeader` takes an optional `titleBlock`
+(default stays the plain `h1`); `src/components/CentreSwitcher.tsx` renders an
+`h1` holding only the trigger button and a sibling `listbox` popup, and its single
+`select` handler pushes `/centre/<id>` (no-op for the inert Current option).
+Tests: `src/app/centre/[id]/page.test.tsx` keeps the real header and query export;
+`e2e/tests/centre-switcher.spec.ts` uses `seedCentreSwitcherFixture` /
+`removeCentreSwitcherFixture` (`e2e/helpers/db.ts`) and `signInAs`
+(`e2e/fixtures/auth.ts`) — the shared fixture contract for #398–#400.
+
+**Still planned (#398–#400):** search, keyboard/combobox, focus, mobile layout,
+effective outer-tab carry, pending guard, Back/Forward journeys, and
+type/category → Centre ID disambiguation. The grilled plan follows.
+
 
 Issue #388 will add a searchable switcher to the Centre page title when the
 viewer has at least two browsable accessible Centres. It reuses the Physical

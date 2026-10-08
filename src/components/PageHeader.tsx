@@ -1,16 +1,24 @@
 import Link from "next/link";
+import type { ReactNode } from "react";
+
+/** The page title's look — shared with title blocks that replace the default. */
+export const PAGE_TITLE_CLASS =
+  "text-xl sm:text-2xl font-bold text-text-primary uppercase tracking-tight";
 
 interface PageHeaderProps {
   title: string;
+  // Replaces the default `<h1>{title}</h1>`; it must render its own h1.
+  titleBlock?: ReactNode;
   subtitle?: string;
   backHref?: string;
   userEmail?: string;
-  actions?: React.ReactNode;
+  actions?: ReactNode;
   containerClassName?: string;
 }
 
 export default function PageHeader({
   title,
+  titleBlock,
   subtitle,
   backHref,
   userEmail,
@@ -40,7 +48,7 @@ export default function PageHeader({
               </Link>
             )}
             <div className="min-w-0">
-              <h1 className="text-xl sm:text-2xl font-bold text-text-primary uppercase tracking-tight">{title}</h1>
+              {titleBlock ?? <h1 className={PAGE_TITLE_CLASS}>{title}</h1>}
               {subtitle && (
                 <p className="text-xs text-text-muted break-words">{subtitle}</p>
               )}
