@@ -1021,8 +1021,14 @@ describe("CentrePage → Centre switcher", () => {
         switcherTrigger()!.focus();
         await user.keyboard("{ArrowDown}");
 
+        const lastOption = within(screen.getByRole("listbox", { name: "Centres" }))
+          .getAllByRole("option")
+          .at(-1)!;
+        lastOption.scrollIntoView = vi.fn();
+
         await user.keyboard("{End}");
         expect(searchInput()).toHaveAttribute("aria-activedescendant", optionIdAt(5));
+        expect(lastOption.scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
 
         await user.keyboard("{Home}");
         expect(activeOptionText()).toBe("JNV Adilabad" + "JNV CoE · Adilabad Annex (36002)");
@@ -1090,10 +1096,36 @@ describe("CentrePage → Centre switcher", () => {
       it("closes on Tab and leaves focus on the next control", async () => {
         const user = await openSwitcher();
 
+        expect(screen.getByRole("listbox", { name: "Centres" })).toHaveAttribute("tabindex", "-1");
+
         await user.tab();
 
         expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
         expect(screen.getByRole("link", { name: "Start Visit" })).toHaveFocus();
+      });
+
+      it("closes after tabbing through the empty-state action", async () => {
+        const user = await openSwitcher();
+        await user.type(searchInput(), "zzz");
+
+        await user.tab();
+        expect(screen.getByRole("button", { name: "Clear search" })).toHaveFocus();
+        expect(screen.getByRole("listbox", { name: "Centres" })).toBeInTheDocument();
+
+        await user.tab();
+        expect(screen.queryByRole("listbox", { name: "Centres" })).not.toBeInTheDocument();
+        expect(screen.getByRole("link", { name: "Start Visit" })).toHaveFocus();
+      });
+
+      it("closes on Escape from the empty-state action and returns focus", async () => {
+        const user = await openSwitcher();
+        await user.type(searchInput(), "zzz");
+        await user.tab();
+
+        await user.keyboard("{Escape}");
+
+        expect(screen.queryByRole("listbox", { name: "Centres" })).not.toBeInTheDocument();
+        expect(switcherTrigger()).toHaveFocus();
       });
 
       it("closes on Shift+Tab and leaves focus on the previous control", async () => {

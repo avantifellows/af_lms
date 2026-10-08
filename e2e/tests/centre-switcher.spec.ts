@@ -93,6 +93,8 @@ test.describe("Centre switcher", () => {
     await page.setViewportSize({ width: 390, height: 740 });
     await page.goto(`/centre/${fixture.centres.alpha}`);
 
+    expect((await switcher(page).boundingBox())!.height).toBeGreaterThanOrEqual(44);
+
     await switcher(page).click();
     const search = page.getByRole("combobox", { name: "Search Centres" });
     await expect(search).toBeFocused();

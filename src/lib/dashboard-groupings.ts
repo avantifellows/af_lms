@@ -134,6 +134,23 @@ export type CentreAccess =
   | { kind: "ids"; ids: number[] }
   | { kind: "schools"; codes: string[] };
 
+function centreScopeClause(
+  access: CentreAccess,
+  paramIndex: number,
+): { clause: string; params: unknown[] } | null {
+  if (access.kind === "ids") {
+    return access.ids.length === 0
+      ? null
+      : { clause: `AND c.id = ANY($${paramIndex})`, params: [access.ids] };
+  }
+  if (access.kind === "schools") {
+    return access.codes.length === 0
+      ? null
+      : { clause: `AND sch.code = ANY($${paramIndex})`, params: [access.codes] };
+  }
+  return { clause: "", params: [] };
+}
+
 /**
  * Turn a resolved permission + accessible school codes into a {@link CentreAccess}.
  * A user with any centre seats is treated as seat-scoped (sees only those
@@ -188,18 +205,8 @@ export async function getBrowsableCentreIds(centreIds: number[]): Promise<number
 export async function getCentreSwitcherEntries(
   access: CentreAccess,
 ): Promise<CentreSwitcherEntry[]> {
-  if (access.kind === "ids" && access.ids.length === 0) return [];
-  if (access.kind === "schools" && access.codes.length === 0) return [];
-
-  let scopeClause = "";
-  const params: unknown[] = [];
-  if (access.kind === "ids") {
-    scopeClause = "AND c.id = ANY($1)";
-    params.push(access.ids);
-  } else if (access.kind === "schools") {
-    scopeClause = "AND sch.code = ANY($1)";
-    params.push(access.codes);
-  }
+  const scope = centreScopeClause(access, 1);
+  if (!scope) return [];
 
   const rows = await query<{
     id: string;
@@ -228,8 +235,8 @@ export async function getCentreSwitcherEntries(
      LEFT JOIN centre_options category_options
        ON category_options.option_set_id = category_set.id
       AND category_options.code = c.category_code
-     WHERE c.is_active AND c.school_id IS NOT NULL ${scopeClause}`,
-    params,
+     WHERE c.is_active AND c.school_id IS NOT NULL ${scope.clause}`,
+    scope.params,
   );
   return rows.map((row) => ({
     id: String(row.id),
@@ -254,18 +261,10 @@ export async function getAccessibleCentresWithCounts(
   access: CentreAccess,
   searchQuery?: string,
 ): Promise<Centre[]> {
-  if (access.kind === "ids" && access.ids.length === 0) return [];
-  if (access.kind === "schools" && access.codes.length === 0) return [];
-
-  let scopeClause = "";
-  const params: unknown[] = [CURRENT_ACADEMIC_YEAR];
-  if (access.kind === "ids") {
-    scopeClause = "AND c.id = ANY($2)";
-    params.push(access.ids);
-  } else if (access.kind === "schools") {
-    scopeClause = "AND sch.code = ANY($2)";
-    params.push(access.codes);
-  }
+  const scope = centreScopeClause(access, 2);
+  if (!scope) return [];
+  const scopeClause = scope.clause;
+  const params: unknown[] = [CURRENT_ACADEMIC_YEAR, ...scope.params];
 
   // Matches the school search's fields as closely as a centre allows: the
   // centre's own name plus its school's name and code, so "shimoga" finds the

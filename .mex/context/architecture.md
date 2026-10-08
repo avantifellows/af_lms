@@ -103,7 +103,7 @@ zero, and no ADR conflict was identified.
 
 ## Issue #388 Centre-page switcher
 
-**Implemented so far (#397 tracer, on `feat/issue-388-centre-page-switcher`):**
+**Implemented in PR #402 (stacked on PR #394):**
 `getCentreSwitcherEntries(access)` in `src/lib/dashboard-groupings.ts` is the
 lightweight list read: `resolveCentreAccess` scope (`all` → no clause, `ids` →
 `c.id = ANY($1)`, `schools` → `sch.code = ANY($1)`, empty → no query), filtered
@@ -130,16 +130,19 @@ the popup opens (click, Enter, Space, ArrowDown on the trigger) and starts empty
 `search` fields only (trimmed, case-insensitive substring; empty matches all), so
 the current Centre stays first when it matches. No match shows "No accessible
 Centres match your search" plus "Clear search" (empties and refocuses the input).
-ArrowUp/Down/Home/End move `aria-activedescendant` over non-current options only;
-the active option is derived from the filtered list, so filtering it away clears
-it at once. Enter calls the same `select` handler as a click (nothing without an
-active option). Escape and a trigger click close and focus the trigger; the input's
-blur closes on Tab/Shift+Tab or a click on another control without moving focus,
-and a click on non-focusable content returns focus to the trigger. Mouse-downs
-inside the popup and on the trigger are prevented so focus stays in the input.
+ArrowUp/Down/Home/End move `aria-activedescendant` over non-current options only
+and scroll the highlighted option into view; the active option is derived from the
+filtered list, so filtering it away clears it at once. Enter calls the same `select`
+handler as a click (nothing without an active option). Escape anywhere in the popup
+and a trigger click close and focus the trigger; popup-level focus-out closes after
+Tab/Shift+Tab or a click on another control without moving focus, including from the
+empty-state action, while a click on non-focusable content returns focus to the
+trigger. Mouse-downs inside the popup and on the trigger are prevented so focus
+stays in the input.
 Below `sm` the popup is positioned against `PageHeader`'s `<header>` (now
 `relative`) and spans its width; from `sm` up it anchors under the title. The
-list caps at `60vh`/`max-h-80` and scrolls; the input and options are ≥ 44px.
+list caps at `60vh`/`max-h-80` and scrolls; the trigger, input, and options are ≥
+44px, and long unbroken option names wrap.
 Tests: the page seam's `popup › search/keyboard/dismissal` blocks and the 390px
 Playwright journey (search by School code → select → Delta loads).
 
@@ -182,44 +185,6 @@ nothing. `CentreSwitcher` renders it as a second muted line under the Program ·
 School context; search, order, keyboard, and `select` are unchanged. Tests: the
 page seam's `popup › disambiguation` block (literal visible text plus option-label
 join SQL) and the mixed-group cases in `src/lib/centre-switcher.test.ts`.
-
-The grilled plan follows.
-
-
-Issue #388 will add a searchable switcher to the Centre page title when the
-viewer has at least two browsable accessible Centres. It reuses the Physical
-Centres access semantics: active Centre seats confine the list to those Centres;
-a seatless scoped user falls back to accessible Schools; admins may see all;
-PMU roles see none. Only active School-linked Centres are switch targets, because
-School-less Centre pages do not exist. The destination page remains the final
-authorization gate.
-
-The page server-loads one lightweight authorized list without student counts;
-the client searches Centre, Program, School name, and School code. Results show
-Program and School context, with type/category and finally Centre ID used only to
-disambiguate otherwise identical labels. The current Centre is first and inert.
-A single browsable Centre keeps the existing plain title. A list-read failure
-also falls back to the plain title without failing the current Centre page.
-
-Choosing a Centre pushes history and carries only the outer tab that is actually
-visible at the source; a stale or hidden raw `tab` cannot reappear on a later
-switch. It drops every Centre-specific query value and hash. Back therefore
-restores the previous Centre's untouched URL, including any earlier Performance
-report or filters. Destination-owned defaults may reconcile by `replace` without
-adding a history entry. A Program-less target keeps the tab and uses the existing
-no-Program state; a tab genuinely unavailable at the destination falls back to
-Enrollment.
-
-The reviewed implementation contract keeps the popup outside the heading subtree,
-uses dismissal-specific focus behavior, guards navigation synchronously before
-App Router's void-returning `push`, and adapts the Centre-page tests to retain the
-real header and switcher query. Browser fixtures prove inactive, School-less,
-unseated, and out-of-scope Centres are excluded rather than merely omitting them
-from mocked rows. No School-page switcher, dashboard redesign, new API, permission,
-persistence, schema, or School-less Centre page is part of #388.
-
-The implementation will be a separate stack on PR #394, then retarget to `main`
-after #394 merges. These are reversible navigation decisions, so no ADR is needed.
 
 ## Key Components
 

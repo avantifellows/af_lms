@@ -12,6 +12,44 @@ import {
 } from "@/lib/centre-switcher";
 import { resolveVisibleTab } from "@/lib/roster-tabs";
 
+function optionClassName(option: CentreSwitcherOption, activeId: string | null): string {
+  if (option.isCurrent) return "cursor-default bg-bg-card-alt";
+  if (option.id === activeId) return "cursor-pointer bg-bg-card-alt";
+  return "cursor-pointer hover:bg-bg-card-alt";
+}
+
+function CentreOption({
+  option,
+  activeId,
+  domId,
+  onSelect,
+}: {
+  option: CentreSwitcherOption;
+  activeId: string | null;
+  domId: string;
+  onSelect: (option: CentreSwitcherOption) => void;
+}) {
+  return (
+    <li
+      id={domId}
+      role="option"
+      aria-selected={option.isCurrent}
+      aria-disabled={option.isCurrent || undefined}
+      onClick={() => onSelect(option)}
+      className={`min-h-[44px] px-3 py-2 text-sm ${optionClassName(option, activeId)}`}
+    >
+      <span className="flex min-w-0 items-center gap-2">
+        <span className="min-w-0 break-words font-semibold text-text-primary">{option.primary}</span>
+        {option.isCurrent && <Badge variant="accent">Current</Badge>}
+      </span>
+      <span className="block text-xs text-text-muted">{option.context}</span>
+      {option.disambiguator && (
+        <span className="block text-xs text-text-muted">{option.disambiguator}</span>
+      )}
+    </li>
+  );
+}
+
 /**
  * The Centre page title as a switcher. The h1 holds only the trigger, so the
  * heading's accessible name stays exactly the Centre name; the popup is the
@@ -62,6 +100,13 @@ export default function CentreSwitcher({
     if (!isPending) navigatingRef.current = false;
   }, [isPending]);
 
+  useEffect(() => {
+    if (!activeId) return;
+    document
+      .getElementById(`${listboxId}-option-${activeId}`)
+      ?.scrollIntoView?.({ block: "nearest" });
+  }, [activeId, listboxId]);
+
   function openPopup() {
     setQuery("");
     setActiveId(null);
@@ -77,10 +122,17 @@ export default function CentreSwitcher({
 
   // Focus leaving the popup closes it. With nowhere to go (a click on
   // non-focusable content), focus returns to the trigger.
-  function handleInputBlur(event: React.FocusEvent<HTMLInputElement>) {
+  function handlePopupBlur(event: React.FocusEvent<HTMLDivElement>) {
     const next = event.relatedTarget;
     if (next && popupRef.current?.contains(next)) return;
     closePopup(next === null);
+  }
+
+  function handlePopupKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    event.stopPropagation();
+    closePopup(true);
   }
 
   function moveActive(index: number) {
@@ -101,9 +153,6 @@ export default function CentreSwitcher({
     } else if (event.key === "Enter") {
       event.preventDefault();
       if (active) select(active);
-    } else if (event.key === "Escape") {
-      event.preventDefault();
-      closePopup(true);
     }
   }
 
@@ -139,7 +188,7 @@ export default function CentreSwitcher({
               openPopup();
             }
           }}
-          className="inline-flex max-w-full items-center gap-1 rounded text-left uppercase hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          className="inline-flex min-h-[44px] max-w-full items-center gap-1 rounded text-left uppercase hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
         >
           <span className="min-w-0 break-words">{current.primary}</span>
           <ChevronDown aria-hidden="true" className="h-5 w-5 shrink-0" />
@@ -160,6 +209,8 @@ export default function CentreSwitcher({
       {open && (
         <div
           ref={popupRef}
+          onBlur={handlePopupBlur}
+          onKeyDown={handlePopupKeyDown}
           // Clicks inside the popup (options, padding) keep focus in the input.
           onMouseDown={(event) => {
             if (event.target !== inputRef.current) event.preventDefault();
@@ -179,7 +230,6 @@ export default function CentreSwitcher({
               value={query}
               onChange={(event) => setQuery(event.currentTarget.value)}
               onKeyDown={handleInputKeyDown}
-              onBlur={handleInputBlur}
               placeholder="Search Centre, Program, School or code"
               className="min-h-[44px] w-full rounded-md border border-border bg-bg-card px-3 py-2 text-sm text-text-primary"
             />
@@ -188,33 +238,17 @@ export default function CentreSwitcher({
             id={listboxId}
             role="listbox"
             aria-label="Centres"
+            tabIndex={-1}
             className="max-h-[60vh] overflow-y-auto py-1 sm:max-h-80"
           >
             {visible.map((option) => (
-              <li
+              <CentreOption
                 key={option.id}
-                id={optionDomId(option)}
-                role="option"
-                aria-selected={option.isCurrent}
-                aria-disabled={option.isCurrent || undefined}
-                onClick={() => select(option)}
-                className={`min-h-[44px] px-3 py-2 text-sm ${
-                  option.isCurrent
-                    ? "cursor-default bg-bg-card-alt"
-                    : option.id === active?.id
-                      ? "cursor-pointer bg-bg-card-alt"
-                      : "cursor-pointer hover:bg-bg-card-alt"
-                }`}
-              >
-                <span className="flex items-center gap-2">
-                  <span className="font-semibold text-text-primary">{option.primary}</span>
-                  {option.isCurrent && <Badge variant="accent">Current</Badge>}
-                </span>
-                <span className="block text-xs text-text-muted">{option.context}</span>
-                {option.disambiguator && (
-                  <span className="block text-xs text-text-muted">{option.disambiguator}</span>
-                )}
-              </li>
+                option={option}
+                activeId={active?.id ?? null}
+                domId={optionDomId(option)}
+                onSelect={select}
+              />
             ))}
           </ul>
           {visible.length === 0 && (
