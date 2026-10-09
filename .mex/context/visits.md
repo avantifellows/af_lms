@@ -18,7 +18,7 @@ edges:
     condition: when adding a new visit action type
   - target: context/data-access.md
     condition: when writing visit rows (direct Postgres, not the DB Service)
-last_updated: 2026-09-29
+last_updated: 2026-10-07
 ---
 
 # PM School Visits
@@ -84,6 +84,8 @@ the same address can exist as a second row and a case-insensitive join would dup
 `.../[id]/complete/route.ts` · `.../[id]/actions/route.ts` (add) ·
 `.../[id]/actions/[actionId]/route.ts` (get/patch) · `.../start` · `.../end`.
 Pages: `src/app/visits/[id]/...` and `src/app/school/[udise]/visit/...`; read-only summary under `src/app/school-visit-summary/[id]`.
+
+**Dashboard Total Visits (#389):** `/dashboard` (both explicit views) shows `getOwnedVisitTotal` — a `COUNT(*)` of every owned non-deleted Visit (either status) behind the `pm_dashboard` gate, independent of search, pagination and the Recent Visits cap. Ownership is `OWNED_VISIT_PREDICATE` (`LOWER(TRIM(v.pm_email)) = $1`, `$1` = trimmed/lower-cased session email), shared with the JNV-only five-row Recent Visits query. A failed count read throws rather than rendering 0. E2E: `e2e/tests/dashboard-visit-totals.spec.ts` uses its own actor (`e2e-visit-total-pm@test.local`) and enumerated rows.
 
 ## Gotchas
 - Use **`visits-policy` helpers**, not `permissions.ts` directly, in visit routes — they encode PM and Program Admin ownership plus Admin scope semantics.

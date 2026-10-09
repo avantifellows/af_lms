@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, waitFor, fireEvent, within } from "@testing-library/react";
+import { act, render, screen, waitFor, fireEvent, within } from "@testing-library/react";
 import CumulativeALTable from "./CumulativeALTable";
 
 function mockResponse(data: unknown, ok = true, status = 200): typeof fetch {
@@ -230,5 +230,47 @@ describe("CumulativeALTable", () => {
     // Both students have latest=M1 (rank 3) — tie broken by tests desc → Asha first
     const rows = screen.getAllByRole("row");
     expect(rows[1]).toHaveTextContent("Asha");
+  });
+
+  // A filter change or Back/Forward replaces (and aborts) the request in
+  // flight; the aborted request must not settle the new one.
+  describe("replaced requests", () => {
+    const PCB_URL = "/api/quiz-analytics/12345/cumulative-als?grade=12&stream=pcb";
+
+    // Rejects with AbortError on abort, as the browser's fetch does.
+    function controlledFetch() {
+      const pending = new Map<string, (v: unknown) => void>();
+      vi.stubGlobal(
+        "fetch",
+        vi.fn((url: string, init?: RequestInit) =>
+          new Promise((resolve, reject) => {
+            pending.set(url, resolve);
+            init?.signal?.addEventListener("abort", () =>
+              reject(new DOMException("Aborted", "AbortError"))
+            );
+          })
+        )
+      );
+      return async (url: string, response: unknown) => {
+        const resolve = pending.get(url);
+        if (!resolve) throw new Error(`no pending request for ${url}`);
+        await act(async () => resolve(response));
+      };
+    }
+
+    it("keeps loading when a stream change aborts the request in flight", async () => {
+      const settle = controlledFetch();
+      const { rerender } = render(<CumulativeALTable schoolUdise="12345" grade={12} stream="pcm" />);
+      rerender(<CumulativeALTable schoolUdise="12345" grade={12} stream="pcb" />);
+      // Let the aborted request's rejection and finalisation run.
+      await act(async () => {});
+
+      expect(screen.getByText("Loading cumulative data...")).toBeInTheDocument();
+      expect(screen.queryByText(/No cumulative AL data/)).not.toBeInTheDocument();
+
+      await settle(PCB_URL, { ok: true, json: () => Promise.resolve(MIXED_STREAM_SAMPLE) });
+      expect(screen.getByText("Chen")).toBeInTheDocument();
+      expect(screen.queryByText("Loading cumulative data...")).not.toBeInTheDocument();
+    });
   });
 });

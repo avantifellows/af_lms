@@ -426,7 +426,8 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
       deletedAt: new Date(),
     });
 
-    await pmPage.goto("/dashboard");
+    // Recent Visits render on JNV NVS Schools only.
+    await pmPage.goto("/dashboard?view=jnv-nvs");
 
     await expect(visitLink(pmPage, visitId)).toHaveCount(0);
   });

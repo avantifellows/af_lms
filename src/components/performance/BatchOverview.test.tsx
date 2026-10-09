@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, act } from "@testing-library/react";
 import BatchOverview from "./BatchOverview";
+import { RetainedHeightFrame } from "./PerformanceStates";
 import type { BatchOverviewData, TestTrendPoint } from "@/types/quiz";
 
 function test(overrides: Partial<TestTrendPoint>): TestTrendPoint {
@@ -120,5 +121,329 @@ describe("BatchOverview", () => {
     expect(
       await screen.findByText("No quiz data available for this grade yet.")
     ).toBeInTheDocument();
+  });
+
+  // The overview's request is bound to its School/Grade/Program/Stream: once
+  // the tab moves on (a filter click or Back/Forward), the old request's late
+  // answer must not land in the new view.
+  describe("obsolete responses", () => {
+    function controlledOverviewFetch() {
+      const pending = new Map<string, { resolve: (v: unknown) => void }>();
+      vi.stubGlobal(
+        "fetch",
+        vi.fn((url: string) => new Promise((resolve) => pending.set(url, { resolve })))
+      );
+      const settle = async (url: string, response: unknown) => {
+        const p = pending.get(url);
+        if (!p) throw new Error(`no pending request for ${url}`);
+        await act(async () => p.resolve(response));
+      };
+      return {
+        respond: (url: string, data: Omit<BatchOverviewData, "summary">) =>
+          settle(url, {
+            ok: true,
+            json: () => Promise.resolve({ summary: { tests_conducted: 0, avg_participation: 0 }, ...data }),
+          }),
+        fail: (url: string) => settle(url, { ok: false, status: 500 }),
+      };
+    }
+
+    const PCM_URL = "/api/quiz-analytics/12345/batch-overview?grade=12&program=JNV%20CoE&stream=pcm";
+    const PCB_URL = "/api/quiz-analytics/12345/batch-overview?grade=12&program=JNV%20CoE&stream=pcb";
+    const PCM_TEST = test({ session_id: "p1", test_name: "PCM Full Test", test_format: "full_test", student_count: 10 });
+    const PCB_TEST = test({ session_id: "b1", test_name: "PCB Full Test", test_format: "full_test", student_count: 20 });
+
+    function overview(stream: string, onFilterOptions = vi.fn()) {
+      return (
+        <BatchOverview
+          schoolUdise="12345" grade={12} testCategory="full" program="JNV CoE" stream={stream}
+          onTestClick={noop} onFilterOptions={onFilterOptions}
+        />
+      );
+    }
+
+    it("ignores a late success, and its finalisation, for a stream history has left", async () => {
+      const f = controlledOverviewFetch();
+      const onFilterOptions = vi.fn();
+      const { rerender } = render(overview("pcm", onFilterOptions));
+      rerender(overview("pcb", onFilterOptions));
+
+      await f.respond(PCM_URL, { tests: [PCM_TEST], totalEnrolled: 10, enrolledByStream: {}, streams: ["pcm", "pcb"] });
+      expect(screen.queryByText("PCM Full Test")).not.toBeInTheDocument();
+      expect(screen.getByText("Loading batch overview...")).toBeInTheDocument();
+      expect(onFilterOptions).not.toHaveBeenCalledWith(expect.objectContaining({ streams: ["pcm", "pcb"] }));
+
+      await f.respond(PCB_URL, { tests: [PCB_TEST], totalEnrolled: 20, enrolledByStream: {}, streams: ["pcm", "pcb"] });
+      expect(screen.getByText("PCB Full Test")).toBeInTheDocument();
+      expect(onFilterOptions).toHaveBeenLastCalledWith({ streams: ["pcm", "pcb"], subjects: [], testGrades: [] });
+    });
+
+    it("retains height while loading, then releases excess height for a shorter result", async () => {
+      let contentHeight = 640;
+      let currentScrollY = 120;
+      const resizeCallbacks = new Map<Element, ResizeObserverCallback>();
+      const disconnects = vi.fn();
+      class TestResizeObserver {
+        constructor(private callback: ResizeObserverCallback) {}
+        observe(target: Element) { resizeCallbacks.set(target, this.callback); }
+        unobserve(target: Element) { resizeCallbacks.delete(target); }
+        disconnect() { disconnects(); }
+      }
+      vi.stubGlobal("ResizeObserver", TestResizeObserver);
+      const addEventListener = vi.spyOn(window, "addEventListener");
+      const removeEventListener = vi.spyOn(window, "removeEventListener");
+      const rect = (height: number, top = 0) => ({
+        width: 800,
+        height,
+        top,
+        right: 800,
+        bottom: top + height,
+        left: 0,
+        x: 0,
+        y: top,
+        toJSON: () => ({}),
+      });
+      const displayedHeight = (element: HTMLElement, naturalHeight: number) =>
+        Math.max(naturalHeight, Number.parseFloat(element.style.minHeight) || 0);
+      const bounds = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect")
+        .mockImplementation(function () {
+          const top = 300 - currentScrollY;
+          if (this.dataset.testid === "batch-overview-frame-content") return rect(contentHeight, top);
+          if (this.dataset.testid === "batch-overview-frame") return rect(displayedHeight(this, contentHeight), top);
+          if (this.dataset.testid === "performance-frame-content") {
+            const batchFrame = this.querySelector<HTMLElement>('[data-testid="batch-overview-frame"]');
+            return rect(batchFrame ? displayedHeight(batchFrame, contentHeight) : contentHeight, top);
+          }
+          if (this.dataset.testid === "performance-frame") {
+            const child = this.querySelector<HTMLElement>('[data-testid="batch-overview-frame"]');
+            return rect(displayedHeight(this, child ? displayedHeight(child, contentHeight) : contentHeight), top);
+          }
+          return rect(0);
+        });
+      const scrollY = vi.spyOn(window, "scrollY", "get").mockImplementation(() => currentScrollY);
+      const innerHeight = vi.spyOn(window, "innerHeight", "get").mockReturnValue(450);
+      const f = controlledOverviewFetch();
+      const framedOverview = (stream: string) => (
+        <RetainedHeightFrame loading={false} testId="performance-frame">
+          {overview(stream)}
+        </RetainedHeightFrame>
+      );
+      const { rerender, unmount } = render(framedOverview("pcm"));
+      await f.respond(PCM_URL, {
+        tests: [PCM_TEST], totalEnrolled: 10, enrolledByStream: {}, streams: ["pcm", "pcb"],
+      });
+
+      rerender(framedOverview("pcb"));
+
+      expect(screen.getByTestId("batch-overview-frame")).toHaveStyle({ minHeight: "640px" });
+      expect(screen.getByTestId("performance-frame")).toHaveStyle({ minHeight: "640px" });
+      expect(screen.getByText("Loading batch overview...")).toBeInTheDocument();
+      expect(disconnects).toHaveBeenCalledTimes(1);
+      expect(removeEventListener.mock.calls.filter(([type]) => type === "scroll")).toHaveLength(1);
+
+      contentHeight = 240;
+      await f.respond(PCB_URL, {
+        tests: [PCB_TEST], totalEnrolled: 20, enrolledByStream: {}, streams: ["pcm", "pcb"],
+      });
+      expect(screen.getByText("PCB Full Test")).toBeInTheDocument();
+      // 270px is the minimum that keeps y=120 scrollable in a 450px viewport
+      // when the frame starts at document y=300. The old 640px is released.
+      expect(screen.getByTestId("batch-overview-frame")).toHaveStyle({ minHeight: "270px" });
+      await act(async () => {
+        resizeCallbacks.get(screen.getByTestId("performance-frame-content"))?.([], {} as ResizeObserver);
+      });
+      expect(screen.getByTestId("performance-frame")).toHaveStyle({ minHeight: "270px" });
+
+      currentScrollY = 40;
+      act(() => window.dispatchEvent(new Event("scroll")));
+      expect(screen.getByTestId("batch-overview-frame")).toHaveStyle({ minHeight: "240px" });
+      await act(async () => {
+        resizeCallbacks.get(screen.getByTestId("performance-frame-content"))?.([], {} as ResizeObserver);
+      });
+      expect(screen.getByTestId("performance-frame")).toHaveStyle({ minHeight: "240px" });
+
+      currentScrollY = 160;
+      act(() => window.dispatchEvent(new Event("scroll")));
+      expect(screen.getByTestId("batch-overview-frame")).toHaveStyle({ minHeight: "240px" });
+      expect(screen.getByTestId("performance-frame")).toHaveStyle({ minHeight: "240px" });
+
+      rerender(framedOverview("pcb"));
+      await act(async () => {
+        resizeCallbacks.get(screen.getByTestId("batch-overview-frame-content"))?.([], {} as ResizeObserver);
+        resizeCallbacks.get(screen.getByTestId("performance-frame-content"))?.([], {} as ResizeObserver);
+      });
+      expect(screen.getByTestId("batch-overview-frame")).toHaveStyle({ minHeight: "240px" });
+      expect(screen.getByTestId("performance-frame")).toHaveStyle({ minHeight: "240px" });
+
+      contentHeight = 400;
+      await act(async () => {
+        resizeCallbacks.get(screen.getByTestId("batch-overview-frame-content"))?.([], {} as ResizeObserver);
+      });
+      await act(async () => {
+        resizeCallbacks.get(screen.getByTestId("performance-frame-content"))?.([], {} as ResizeObserver);
+      });
+      expect(screen.getByTestId("batch-overview-frame")).toHaveStyle({ minHeight: "400px" });
+      expect(screen.getByTestId("performance-frame")).toHaveStyle({ minHeight: "400px" });
+
+      const addedScrollListeners = addEventListener.mock.calls
+        .filter(([type]) => type === "scroll")
+        .map(([, listener]) => listener);
+      unmount();
+      const removedScrollListeners = removeEventListener.mock.calls
+        .filter(([type]) => type === "scroll")
+        .map(([, listener]) => listener);
+      expect(disconnects).toHaveBeenCalledTimes(3);
+      expect(addedScrollListeners.every((listener) => removedScrollListeners.includes(listener))).toBe(true);
+      bounds.mockRestore();
+      scrollY.mockRestore();
+      innerHeight.mockRestore();
+      addEventListener.mockRestore();
+      removeEventListener.mockRestore();
+    });
+
+    it("ignores a late failure for a stream history has left", async () => {
+      const f = controlledOverviewFetch();
+      const { rerender } = render(overview("pcm"));
+      rerender(overview("pcb"));
+
+      await f.fail(PCM_URL);
+      expect(screen.queryByText("Failed to fetch batch overview")).not.toBeInTheDocument();
+      expect(screen.getByText("Loading batch overview...")).toBeInTheDocument();
+    });
+
+    it("a new request clears the old error, and recovers", async () => {
+      const f = controlledOverviewFetch();
+      const { rerender } = render(overview("pcm"));
+      await f.fail(PCM_URL);
+      expect(screen.getByText("Failed to fetch batch overview")).toBeInTheDocument();
+
+      rerender(overview("pcb"));
+      expect(screen.queryByText("Failed to fetch batch overview")).not.toBeInTheDocument();
+      await f.respond(PCB_URL, { tests: [PCB_TEST], totalEnrolled: 20, enrolledByStream: {}, streams: [] });
+      expect(screen.getByText("PCB Full Test")).toBeInTheDocument();
+    });
+
+    it("returning to filters that failed shows loading, not their old error", async () => {
+      const f = controlledOverviewFetch();
+      const { rerender } = render(overview("pcm"));
+      await f.fail(PCM_URL);
+      expect(screen.getByText("Failed to fetch batch overview")).toBeInTheDocument();
+
+      // PCB is still loading when Back returns to PCM, which asks again.
+      rerender(overview("pcb"));
+      rerender(overview("pcm"));
+      expect(screen.queryByText("Failed to fetch batch overview")).not.toBeInTheDocument();
+      expect(screen.getByText("Loading batch overview...")).toBeInTheDocument();
+
+      await f.respond(PCM_URL, { tests: [PCM_TEST], totalEnrolled: 10, enrolledByStream: {}, streams: [] });
+      expect(screen.getByText("PCM Full Test")).toBeInTheDocument();
+    });
+
+    it("a current empty result clears the option groups published before it", async () => {
+      const f = controlledOverviewFetch();
+      const onFilterOptions = vi.fn();
+      const { rerender } = render(overview("pcm", onFilterOptions));
+      await f.respond(PCM_URL, {
+        tests: [test({ session_id: "p1", test_format: "full_test", test_grade: 12, subjects: ["Physics"] })],
+        totalEnrolled: 10, enrolledByStream: {}, streams: ["pcm", "pcb"],
+      });
+      expect(onFilterOptions).toHaveBeenLastCalledWith({ streams: ["pcm", "pcb"], subjects: ["Physics"], testGrades: [12] });
+
+      rerender(overview("pcb", onFilterOptions));
+      await f.respond(PCB_URL, { tests: [], totalEnrolled: 0, enrolledByStream: {}, streams: [] });
+      expect(onFilterOptions).toHaveBeenLastCalledWith({ streams: [], subjects: [], testGrades: [] });
+    });
+  });
+});
+
+describe("RetainedHeightFrame viewport recovery", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function rect(height: number, top: number) {
+    return {
+      width: 800,
+      height,
+      top,
+      right: 800,
+      bottom: top + height,
+      left: 0,
+      x: 0,
+      y: top,
+      toJSON: () => ({}),
+    };
+  }
+
+  it("brings a shorter overview back into view after leaving a deeply-scrolled report", () => {
+    let currentScrollY = 3_000;
+    let contentHeight = 3_500;
+    const documentTop = 300;
+    vi.spyOn(window, "scrollY", "get").mockImplementation(() => currentScrollY);
+    vi.spyOn(window, "innerHeight", "get").mockReturnValue(450);
+    const scrollTo = vi.spyOn(window, "scrollTo").mockImplementation((options) => {
+      currentScrollY = typeof options === "number" ? options : options.top ?? currentScrollY;
+    });
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function () {
+      const height = this.dataset.testid === "recovery-frame-content"
+        ? contentHeight
+        : Math.max(contentHeight, Number.parseFloat(this.style.minHeight) || 0);
+      return rect(height, documentTop - currentScrollY);
+    });
+
+    const view = (recoverViewportOnEnter: boolean) => (
+      <RetainedHeightFrame
+        loading={false}
+        testId="recovery-frame"
+        recoverViewportOnEnter={recoverViewportOnEnter}
+      >
+        <div>Performance content</div>
+      </RetainedHeightFrame>
+    );
+    const { rerender } = render(view(false));
+    expect(screen.getByTestId("recovery-frame")).toHaveStyle({ minHeight: "3500px" });
+
+    contentHeight = 640;
+    rerender(view(true));
+
+    expect(scrollTo).toHaveBeenCalledWith({ top: 490, behavior: "auto" });
+    expect(screen.getByTestId("recovery-frame")).toHaveStyle({ minHeight: "640px" });
+  });
+
+  it.each([
+    { currentScrollY: 600, expectedHeight: 750 },
+    { currentScrollY: 800, expectedHeight: 950 },
+  ])("keeps y=$currentScrollY when the overview still overlaps the viewport", ({
+    currentScrollY,
+    expectedHeight,
+  }) => {
+    let contentHeight = 2_000;
+    const documentTop = 300;
+    vi.spyOn(window, "scrollY", "get").mockReturnValue(currentScrollY);
+    vi.spyOn(window, "innerHeight", "get").mockReturnValue(450);
+    const scrollTo = vi.spyOn(window, "scrollTo").mockImplementation(() => {});
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function () {
+      const height = this.dataset.testid === "recovery-frame-content"
+        ? contentHeight
+        : Math.max(contentHeight, Number.parseFloat(this.style.minHeight) || 0);
+      return rect(height, documentTop - currentScrollY);
+    });
+
+    const view = (recoverViewportOnEnter: boolean) => (
+      <RetainedHeightFrame
+        loading={false}
+        testId="recovery-frame"
+        recoverViewportOnEnter={recoverViewportOnEnter}
+      >
+        <div>Performance content</div>
+      </RetainedHeightFrame>
+    );
+    const { rerender } = render(view(false));
+
+    contentHeight = 640;
+    rerender(view(true));
+
+    expect(scrollTo).not.toHaveBeenCalled();
+    expect(screen.getByTestId("recovery-frame")).toHaveStyle({ minHeight: `${expectedHeight}px` });
   });
 });

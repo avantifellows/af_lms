@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useLayoutEffect, useCallback, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   applyPerformanceParams,
   readPerformanceParams,
   type PerformanceUrlPatch,
+  type PerformanceUrlState,
   type TestCategory,
   type FullTestView,
 } from "@/lib/performance-url-params";
@@ -64,116 +65,460 @@ export function effectiveSelection(
   return { testCategory: "full", fullTestView: "per_test", subject: null, testGrade: null };
 }
 
-/** The state the handlers drive. Grouped so the factory below takes one
- *  argument instead of eighteen. */
-interface FilterSetters {
-  selectedSubject: string | null;
-  selectedTestGrade: number | null;
-  setSelectedProgram: (v: string | null) => void;
-  setSelectedGrade: (v: number | null) => void;
-  setSelectedStream: (v: string | null) => void;
-  setSelectedSubject: (v: string | null) => void;
-  setSelectedTestGrade: (v: number | null) => void;
-  setDeepDiveSession: (v: { sessionId: string; testName: string } | null) => void;
-  setTestCategory: (v: TestCategory) => void;
-  setFullTestView: (v: FullTestView) => void;
-  setAvailableTestGrades: (v: number[]) => void;
-  setGrades: (v: number[] | null) => void;
-  updateUrl: (patch: PerformanceUrlPatch) => void;
+type NavigateMode = "push" | "replace";
+
+/**
+ * Where the tab's URL stands. `seen` is the query the router last rendered;
+ * `intended` is the query the tab has asked for, which runs ahead of `seen`
+ * while navigations are outstanding. `inFlight` is the one navigation handed
+ * to the router and not yet rendered; `queued` waits behind it.
+ *
+ * Navigations are handed over one at a time because the App Router discards a
+ * pending navigation when another starts — a Program push followed at once by
+ * its automatic Grade replace would otherwise lose the Program's history entry.
+ */
+interface UrlIntent {
+  seen: string;
+  intended: string;
+  inFlight: string | null;
+  queued: { query: string; mode: NavigateMode }[];
+  trail: Trail;
+}
+
+/**
+ * The history entries this mount has walked through, in order, with `at`
+ * marking the current one. `pushed` says the tab itself pushed that entry on
+ * top of the one before it; an entry the tab arrived at any other way, or
+ * whose URL was replaced since, proves nothing about what precedes it.
+ *
+ * Transient by design: a reload, a direct link or a remount starts a fresh
+ * trail of one unproven entry.
+ */
+interface Trail {
+  entries: { query: string; pushed: boolean }[];
+  at: number;
+}
+
+function freshTrail(query: string): Trail {
+  return { entries: [{ query, pushed: false }], at: 0 };
+}
+
+/** The trail after the tab hands a navigation to the router. */
+function record(trail: Trail, query: string, mode: NavigateMode): Trail {
+  if (mode === "push") {
+    const entries = [...trail.entries.slice(0, trail.at + 1), { query, pushed: true }];
+    return { entries, at: trail.at + 1 };
+  }
+  const entries = trail.entries.map((e, i) => (i === trail.at ? { query, pushed: false } : e));
+  return { entries, at: trail.at };
+}
+
+/**
+ * The trail after a URL the tab didn't ask for. Landing on exactly one
+ * neighbour's URL is Back or Forward to it. Anything else — an ambiguous
+ * step, a jump, a link, an outside replace — leaves nothing proven.
+ */
+function follow(trail: Trail, query: string): Trail {
+  const before = trail.entries[trail.at - 1]?.query === query;
+  const after = trail.entries[trail.at + 1]?.query === query;
+  if (before && !after) return { ...trail, at: trail.at - 1 };
+  if (after && !before) return { ...trail, at: trail.at + 1 };
+  return freshTrail(query);
+}
+
+/**
+ * Fold a newly rendered URL into the intent. The in-flight URL landing just
+ * frees the router for the next queued navigation. Any other URL is
+ * Back/Forward (or a link) and is authoritative: outstanding work is dropped
+ * and the tab rehydrates from it.
+ */
+function rehydrate(intent: UrlIntent, urlQuery: string): UrlIntent {
+  if (intent.seen === urlQuery) return intent;
+  if (intent.inFlight === urlQuery) return { ...intent, seen: urlQuery, inFlight: null };
+  return {
+    seen: urlQuery,
+    intended: urlQuery,
+    inFlight: null,
+    queued: [],
+    trail: follow(intent.trail, urlQuery),
+  };
+}
+
+/**
+ * Whether the current entry is an open report the tab pushed directly on top
+ * of its own overview — the only case in which browser Back is a safe way to
+ * close it. Nothing may be outstanding, or "current" isn't settled.
+ */
+function reportFollowsItsOverview(intent: UrlIntent): boolean {
+  if (intent.inFlight !== null || intent.queued.length > 0) return false;
+  const { entries, at } = intent.trail;
+  const current = entries[at];
+  if (!current?.pushed || current.query !== intent.seen) return false;
+  if (!new URLSearchParams(current.query).has("session")) return false;
+  return entries[at - 1]?.query === applyPerformanceParams(current.query, { session: null });
+}
+
+/**
+ * The URL as the tab's single source of truth for its raw selections.
+ *
+ * Deliberate choices push and automatic normalisation replaces; both compose
+ * against the latest *intended* query, so two clicks before the router
+ * re-renders keep each other and stay separately reversible. A patch that
+ * leaves the query unchanged writes nothing.
+ */
+function usePerformanceUrl() {
+  const router = useRouter();
+  const urlQuery = useSearchParams().toString();
+  const [stored, setStored] = useState<UrlIntent>(() => ({
+    seen: urlQuery,
+    intended: urlQuery,
+    inFlight: null,
+    queued: [],
+    trail: freshTrail(urlQuery),
+  }));
+  // Derived during render (React's "adjust state on prop change" pattern) so a
+  // Back/Forward never renders one frame of the previous entry's filters.
+  const intent = rehydrate(stored, urlQuery);
+  if (intent !== stored) setStored(intent);
+
+  // Handlers and effects read the newest intent through this ref: a second
+  // click can arrive before the first one's re-render.
+  const latest = useRef(intent);
+  useLayoutEffect(() => {
+    latest.current = intent;
+  });
+
+  // Hand the next queued navigation to the router once it is free.
+  const dispatch = useCallback(() => {
+    const current = latest.current;
+    if (current.inFlight !== null || current.queued.length === 0) return;
+    const [next, ...rest] = current.queued;
+    const updated = {
+      ...current,
+      inFlight: next.query,
+      queued: rest,
+      trail: record(current.trail, next.query, next.mode),
+    };
+    latest.current = updated;
+    setStored(updated);
+    router[next.mode](`?${next.query}`, { scroll: false });
+  }, [router]);
+
+  useEffect(dispatch, [intent, dispatch]);
+
+  const navigate = useCallback(
+    (patch: PerformanceUrlPatch, mode: NavigateMode) => {
+      const current = latest.current;
+      const next = applyPerformanceParams(current.intended, patch);
+      if (next === current.intended) return;
+      latest.current = {
+        ...current,
+        intended: next,
+        queued: [...current.queued, { query: next, mode }],
+      };
+      setStored(latest.current);
+      dispatch();
+    },
+    [dispatch]
+  );
+
+  /**
+   * Leave the open report. Browser Back when the tab can prove the entry
+   * behind this one is the report's own overview, so the report's step is
+   * consumed rather than doubled. Otherwise (a direct link, a reload, a
+   * remount, a replaced entry) drop only the report from this entry, which
+   * keeps every filter and never leaves the app.
+   */
+  const closeReport = useCallback(() => {
+    if (reportFollowsItsOverview(latest.current)) router.back();
+    else navigate({ session: null }, "replace");
+  }, [router, navigate]);
+
+  return { query: intent.intended, latest, navigate, closeReport };
+}
+
+/** The raw selections a query describes. */
+function readQuery(query: string): PerformanceUrlState {
+  return readPerformanceParams(new URLSearchParams(query));
+}
+
+/**
+ * The program the tab is scoped to. An authorised locked program (centre and
+ * PMU pages) wins over anything the URL or history says; otherwise the URL's
+ * program; otherwise a school's only program, derived rather than written.
+ */
+function resolveProgram(
+  lockedProgram: string | undefined,
+  urlProgram: string | null,
+  programs: string[] | null
+): string | null {
+  if (lockedProgram) return lockedProgram;
+  if (urlProgram) return urlProgram;
+  return programs?.length === 1 ? programs[0] : null;
+}
+
+/** One grades response, tagged with the School/Program it was asked for. */
+interface GradesResult {
+  key: string;
+  grades?: number[];
+  error?: string;
+}
+
+/**
+ * Loads the programs and grades available for this school and program scope.
+ *
+ * Every response is bound to the School/Program it was requested for: once
+ * the scope moves on (a click or Back/Forward), a late success or failure for
+ * the old scope is ignored, and the new scope starts with no error and no
+ * grades until its own answer arrives — even when history returns to a scope
+ * that already answered (A → B → A), so A's old failure can't show again.
+ */
+function useProgramsAndGrades(
+  schoolUdise: string,
+  lockedProgram: string | undefined,
+  urlProgram: string | null
+) {
+  const [schoolPrograms, setSchoolPrograms] = useState<{ udise: string; programs: string[] } | null>(null);
+  const [result, setResult] = useState<GradesResult | null>(null);
+
+  const programs = schoolPrograms?.udise === schoolUdise ? schoolPrograms.programs : null;
+  const program = resolveProgram(lockedProgram, urlProgram, programs);
+  const key = `${schoolUdise}|${program ?? ""}`;
+
+  // Drop the previous answer as soon as the scope changes, so returning to a
+  // scope (A → B → A) waits for its new request instead of its old answer.
+  const [resultScope, setResultScope] = useState(key);
+  if (resultScope !== key) {
+    setResultScope(key);
+    setResult(null);
+  }
+
+  useEffect(() => {
+    let current = true;
+    const controller = new AbortController();
+    const programParam = program ? `?program=${encodeURIComponent(program)}` : "";
+    fetch(`/api/quiz-analytics/${schoolUdise}/grades${programParam}`, {
+      signal: controller.signal,
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error("Failed to fetch grades");
+        return res.json();
+      })
+      .then((data: { grades: number[]; programs: string[] }) => {
+        if (!current) return;
+        setSchoolPrograms({ udise: schoolUdise, programs: data.programs });
+        setResult({ key, grades: data.grades });
+      })
+      .catch((err) => {
+        if (!current || err.name === "AbortError") return;
+        console.error("Failed to fetch grades:", err);
+        setResult({ key, error: "Failed to load quiz data" });
+      });
+
+    return () => {
+      current = false;
+      controller.abort();
+    };
+  }, [key]); // eslint-disable-line react-hooks/exhaustive-deps -- key encodes schoolUdise + program
+
+  const loaded = result?.key === key ? result : null;
+  return {
+    program,
+    programs,
+    grades: loaded?.grades ?? null,
+    error: loaded?.error ?? null,
+  };
+}
+
+/**
+ * Keeps the URL's grade valid for the loaded grade list, by replace so it adds
+ * no history entry. Re-reads the newest intent when it fires, so a grade that
+ * Back/Forward restored meanwhile is what gets checked — never overwritten
+ * with a pick computed for an older entry — and does nothing if the program
+ * has moved on since these grades were loaded.
+ */
+function useGradeNormalization({
+  grades,
+  program,
+  urlGrade,
+  latest,
+  navigate,
+  scopeFor,
+}: {
+  grades: number[] | null;
+  program: string | null;
+  urlGrade: number | null;
+  latest: { current: UrlIntent };
+  navigate: (patch: PerformanceUrlPatch, mode: NavigateMode) => void;
+  scopeFor: (urlProgram: string | null) => string | null;
+}) {
+  useEffect(() => {
+    if (grades === null) return;
+    const newest = readQuery(latest.current.intended);
+    if (scopeFor(newest.program) !== program) return;
+    const nextGrade = reconcileGrade(grades, newest.grade);
+    if (nextGrade !== KEEP_GRADE) navigate({ grade: nextGrade }, "replace");
+  }, [grades, program, urlGrade]); // eslint-disable-line react-hooks/exhaustive-deps
+}
+
+interface FilterOptions {
+  streams: string[];
+  subjects: string[];
+  testGrades: number[];
+}
+
+const NO_OPTIONS: FilterOptions = { streams: [], subjects: [], testGrades: [] };
+
+function sameList<T>(a: T[], b: T[]): boolean {
+  return a.length === b.length && a.every((v, i) => v === b[i]);
+}
+
+function sameOptions(a: FilterOptions & { key: string }, b: FilterOptions & { key: string }): boolean {
+  return (
+    a.key === b.key &&
+    sameList(a.streams, b.streams) &&
+    sameList(a.subjects, b.subjects) &&
+    sameList(a.testGrades, b.testGrades)
+  );
+}
+
+/**
+ * The stream/subject/test-grade options the overview publishes, bound to the
+ * School/Program/Grade they were published for. A publication for
+ * any other intent is dropped, and options for an intent the overview hasn't
+ * published yet read as empty.
+ */
+function useFilterOptions(intentKey: string) {
+  const [options, setOptions] = useState<(FilterOptions & { key: string }) | null>(null);
+  const currentKey = useRef(intentKey);
+  useLayoutEffect(() => {
+    currentKey.current = intentKey;
+  });
+
+  const handleFilterOptions = useCallback(
+    (opts: FilterOptions) => {
+      if (intentKey !== currentKey.current) return;
+      const next = {
+        key: intentKey,
+        streams: opts.streams ?? [],
+        subjects: opts.subjects ?? [],
+        testGrades: opts.testGrades ?? [],
+      };
+      // Re-publishing the same options must not re-render the tab, or an
+      // overview that publishes on render would loop.
+      setOptions((prev) => (prev && sameOptions(prev, next) ? prev : next));
+    },
+    [intentKey]
+  );
+
+  return {
+    options: options?.key === intentKey ? options : NO_OPTIONS,
+    handleFilterOptions,
+  };
+}
+
+/**
+ * The name of the open report. A report reached by URL starts nameless and
+ * takes its name from its data; a name is only ever shown for the session it
+ * was given for.
+ */
+function useReportName(session: string | null) {
+  const [named, setNamed] = useState<{ session: string; name: string } | null>(null);
+
+  const handleDeepDiveData = useCallback(
+    (testName: string) => {
+      if (!session) return;
+      setNamed((prev) =>
+        prev?.session === session && prev.name ? prev : { session, name: testName }
+      );
+    },
+    [session]
+  );
+
+  const deepDiveSession = session
+    ? { sessionId: session, testName: named?.session === session ? named.name : "" }
+    : null;
+  return { deepDiveSession, setNamed, handleDeepDiveData };
+}
+
+/** What the handlers compare against and write through. */
+interface HandlerContext {
+  selectedProgram: string | null;
+  selectedGrade: number | null;
+  selectedStream: string | null;
+  effective: OverridableSelection;
+  navigate: (patch: PerformanceUrlPatch, mode: NavigateMode) => void;
+  closeReport: () => void;
+  nameReport: (v: { session: string; name: string }) => void;
 }
 
 /**
  * Builds the tab's event handlers.
  *
- * A plain function rather than more lines inside the hook: nine handler
- * definitions nested in one hook body was most of what made that body too
- * complex to pass the health gate, and none of them needs to be a hook.
+ * Each deliberate choice is one push carrying its dependent resets, so Back
+ * undoes the whole choice at once. Choosing what is already selected does
+ * nothing at all — no reset, no history entry.
  */
 function createPerformanceHandlers({
-  selectedSubject,
-  selectedTestGrade,
-  setSelectedProgram,
-  setSelectedGrade,
-  setSelectedStream,
-  setSelectedSubject,
-  setSelectedTestGrade,
-  setDeepDiveSession,
-  setTestCategory,
-  setFullTestView,
-  setAvailableTestGrades,
-  setGrades,
-  updateUrl,
-}: FilterSetters) {
+  selectedProgram,
+  selectedGrade,
+  selectedStream,
+  effective,
+  navigate,
+  closeReport,
+  nameReport,
+}: HandlerContext) {
+  const push = (patch: PerformanceUrlPatch) => navigate(patch, "push");
+
   const handleProgramChange = (program: string) => {
-    setSelectedProgram(program);
-    setSelectedGrade(null);
-    setDeepDiveSession(null);
-    setSelectedStream(null);
-    setSelectedSubject(null);
-    setSelectedTestGrade(null);
-    setAvailableTestGrades([]);
-    setGrades(null); // trigger re-fetch
-    updateUrl({ program, grade: null, session: null, stream: null, subject: null, testGrade: null });
+    if (program === selectedProgram) return;
+    // Category and Per Test/Cumulative carry across programs; the rest don't.
+    push({ program, grade: null, session: null, stream: null, subject: null, testGrade: null });
   };
 
   const handleGradeChange = (grade: number) => {
-    setSelectedGrade(grade);
-    setDeepDiveSession(null);
-    setSelectedStream(null);
-    setSelectedSubject(null);
-    setSelectedTestGrade(null);
-    setAvailableTestGrades([]);
-    updateUrl({ grade, session: null, stream: null, subject: null, testGrade: null });
+    if (grade === selectedGrade) return;
+    push({ grade, session: null, stream: null, subject: null, testGrade: null });
   };
 
   // 0 is the "All test grades" sentinel — a segmented control needs a concrete
   // value for the all-option, and no test targets grade 0.
   const handleTestGradeChange = (value: number) => {
     const testGrade = value === 0 ? null : value;
-    setSelectedTestGrade(testGrade);
-    updateUrl({ testGrade });
+    if (testGrade === effective.testGrade) return;
+    push({ testGrade });
   };
 
+  // Opening a report is a step of its own, so Back closes it and Forward
+  // reopens it with the overview's filters intact.
   const handleTestClick = (sessionId: string, testName: string) => {
-    setDeepDiveSession({ sessionId, testName });
-    updateUrl({ session: sessionId });
+    nameReport({ session: sessionId, name: testName });
+    push({ session: sessionId });
   };
 
-  const handleBack = () => {
-    setDeepDiveSession(null);
-    updateUrl({ session: null });
-  };
+  const handleBack = closeReport;
 
   const handleCategoryChange = (cat: TestCategory) => {
-    setTestCategory(cat);
-    // Subject filter is chapter-only; clear when leaving chapter tab
-    const subjectReset = cat !== "chapter" && selectedSubject;
-    if (subjectReset) setSelectedSubject(null);
+    if (cat === effective.testCategory) return;
     // Chapter and full tests can target different grades, so a test-grade
-    // selection from one category may not exist in the other. Clear it on
-    // switch so the view never silently renders empty.
-    const testGradeReset = selectedTestGrade != null;
-    if (testGradeReset) setSelectedTestGrade(null);
-    updateUrl({
-      category: cat,
-      subject: subjectReset ? null : undefined,
-      testGrade: testGradeReset ? null : undefined,
-    });
+    // selection from one category may not exist in the other. The subject
+    // filter is chapter-only, so it goes when leaving Chapter tests.
+    push({ category: cat, testGrade: null, subject: cat === "chapter" ? undefined : null });
   };
 
   const handleStreamChange = (stream: string | null) => {
-    setSelectedStream(stream);
-    updateUrl({ stream });
+    if (stream === selectedStream) return;
+    push({ stream });
   };
 
   const handleSubjectChange = (subject: string | null) => {
-    setSelectedSubject(subject);
-    updateUrl({ subject });
+    if (subject === effective.subject) return;
+    push({ subject });
   };
 
   const handleFullViewChange = (view: FullTestView) => {
-    setFullTestView(view);
-    updateUrl({ view });
+    if (view === effective.fullTestView) return;
+    push({ view });
   };
 
   return {
@@ -190,147 +535,13 @@ function createPerformanceHandlers({
 }
 
 /**
- * Loads the programs and grades available for this school, re-fetching when the
- * program scope changes, and keeps the grade selection valid as that set moves.
- *
- * Its own hook because the fetch chain — three nested callbacks, each with its
- * own branch — is where usePerformanceFilters' cognitive complexity actually
- * lived. Owning programs/grades/error here also keeps the loading state next
- * to the thing that loads it.
- */
-function useProgramsAndGrades({
-  schoolUdise,
-  selectedProgram,
-  selectedGrade,
-  setSelectedProgram,
-  setSelectedGrade,
-  updateUrl,
-}: {
-  schoolUdise: string;
-  selectedProgram: string | null;
-  selectedGrade: number | null;
-  setSelectedProgram: (v: string | null) => void;
-  setSelectedGrade: (v: number | null) => void;
-  updateUrl: (patch: PerformanceUrlPatch) => void;
-}) {
-  const [programs, setPrograms] = useState<string[] | null>(null);
-  const [grades, setGrades] = useState<number[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  // Fetch programs + grades
-  useEffect(() => {
-    const controller = new AbortController();
-    const programParam = selectedProgram
-      ? `?program=${encodeURIComponent(selectedProgram)}`
-      : "";
-    fetch(`/api/quiz-analytics/${schoolUdise}/grades${programParam}`, {
-      signal: controller.signal,
-    })
-      .then((res) => {
-        if (!res.ok) throw new Error("Failed to fetch grades");
-        return res.json();
-      })
-      .then((data: { grades: number[]; programs: string[] }) => {
-        setPrograms(data.programs);
-        setGrades(data.grades);
-
-        // Auto-select single program
-        if (!selectedProgram && data.programs.length === 1) {
-          setSelectedProgram(data.programs[0]);
-        }
-
-        const nextGrade = reconcileGrade(data.grades, selectedGrade);
-        if (nextGrade !== KEEP_GRADE) {
-          setSelectedGrade(nextGrade);
-          updateUrl({ grade: nextGrade });
-        }
-      })
-      .catch((err) => {
-        if (err.name !== "AbortError") {
-          console.error("Failed to fetch grades:", err);
-          setError("Failed to load quiz data");
-        }
-      });
-
-    return () => controller.abort();
-  }, [schoolUdise, selectedProgram]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  return { programs, grades, error, setGrades };
-}
-
-/**
- * The tab's filter selections, seeded from the URL.
- *
- * Grouped into their own hook purely so no single function carries all of the
- * tab's state: eleven useState calls in one body is most of what the health
- * check counts as cognitive load, and they have no behaviour between them.
- */
-function usePerformanceSelection({
-  searchParams,
-  lockedProgram,
-}: {
-  searchParams: { get(name: string): string | null };
-  lockedProgram?: string;
-}) {
-  // Initial state from the URL, parsed in one place. Only useState initial
-  // values read this, so later renders ignoring it is the intended behaviour.
-  const fromUrl = readPerformanceParams(searchParams);
-
-  // lockedProgram (centre pages) must win over the URL param — otherwise a
-  // centre-confined viewer could open ?program=X and read another program's data.
-  const [selectedProgram, setSelectedProgram] = useState<string | null>(lockedProgram ?? fromUrl.program);
-  const [selectedGrade, setSelectedGrade] = useState<number | null>(fromUrl.grade);
-  const [deepDiveSession, setDeepDiveSession] = useState<{
-    sessionId: string;
-    testName: string;
-  } | null>(
-    // A session reached by URL starts nameless; the name arrives with the data.
-    fromUrl.session ? { sessionId: fromUrl.session, testName: "" } : null
-  );
-  const [testCategory, setTestCategory] = useState<TestCategory>(fromUrl.category);
-  const [selectedStream, setSelectedStream] = useState<string | null>(fromUrl.stream);
-  const [selectedSubject, setSelectedSubject] = useState<string | null>(fromUrl.subject);
-  const [selectedTestGrade, setSelectedTestGrade] = useState<number | null>(fromUrl.testGrade);
-  const [fullTestView, setFullTestView] = useState<FullTestView>(fromUrl.view);
-  const [availableStreams, setAvailableStreams] = useState<string[]>([]);
-  const [availableSubjects, setAvailableSubjects] = useState<string[]>([]);
-  const [availableTestGrades, setAvailableTestGrades] = useState<number[]>([]);
-
-  return {
-    selectedProgram,
-    setSelectedProgram,
-    selectedGrade,
-    setSelectedGrade,
-    deepDiveSession,
-    setDeepDiveSession,
-    testCategory,
-    setTestCategory,
-    selectedStream,
-    setSelectedStream,
-    selectedSubject,
-    setSelectedSubject,
-    selectedTestGrade,
-    setSelectedTestGrade,
-    fullTestView,
-    setFullTestView,
-    availableStreams,
-    setAvailableStreams,
-    availableSubjects,
-    setAvailableSubjects,
-    availableTestGrades,
-    setAvailableTestGrades,
-  };
-}
-
-/**
  * Everything the Performance tab remembers and every way it changes: the
  * filter state, the programs/grades fetch, the URL sync, and the handlers the
  * controls call.
  *
- * Split out of PerformanceTab so the component is left deciding what to render
- * rather than also owning fourteen pieces of state — which is what made it the
- * repo's worst function by CRAP score. Nothing here is presentational; nothing
- * in the component mutates state directly.
+ * The URL is the state: every raw selection is read from the latest intended
+ * query on each render, so Back/Forward restores the whole tab in place.
+ * Nothing in the component mutates state directly.
  */
 export function usePerformanceFilters({
   schoolUdise,
@@ -339,92 +550,57 @@ export function usePerformanceFilters({
   schoolUdise: string;
   lockedProgram?: string;
 }) {
-  const router = useRouter();
-  const searchParams = useSearchParams();
+  const { query, latest, navigate, closeReport } = usePerformanceUrl();
+  const raw = readQuery(query);
 
-  const sel = usePerformanceSelection({ searchParams, lockedProgram });
-
-  // Update URL when state changes. The per-param rules live in
-  // lib/performance-url-params so they can be unit-tested without a router.
-  const updateUrl = useCallback(
-    (patch: PerformanceUrlPatch) => {
-      router.replace(`?${applyPerformanceParams(searchParams, patch)}`, {
-        scroll: false,
-      });
-    },
-    [router, searchParams]
-  );
-
-  const { programs, grades, error, setGrades } = useProgramsAndGrades({
+  const { program, programs, grades, error } = useProgramsAndGrades(
     schoolUdise,
-    selectedProgram: sel.selectedProgram,
-    selectedGrade: sel.selectedGrade,
-    setSelectedProgram: sel.setSelectedProgram,
-    setSelectedGrade: sel.setSelectedGrade,
-    updateUrl,
-  });
-
-  // These two are memoised because children hold onto them across renders, so
-  // they close over the setters themselves rather than the selection object —
-  // useState setters are stable, `sel` is a fresh object every render.
-  const {
-    setDeepDiveSession,
-    setAvailableStreams,
-    setAvailableSubjects,
-    setAvailableTestGrades,
-  } = sel;
-
-  // When deep dive loads, fill in test name from URL if missing
-  const handleDeepDiveData = useCallback(
-    (testName: string) => {
-      setDeepDiveSession((prev) =>
-        prev && !prev.testName ? { ...prev, testName } : prev
-      );
-    },
-    [setDeepDiveSession]
+    lockedProgram,
+    raw.program
   );
 
-  // Receive available filter values from BatchOverview as it loads data.
-  const handleFilterOptions = useCallback(
-    (opts: { streams: string[]; subjects: string[]; testGrades: number[] }) => {
-      setAvailableStreams(opts.streams ?? []);
-      setAvailableSubjects(opts.subjects ?? []);
-      setAvailableTestGrades(opts.testGrades ?? []);
-    },
-    [setAvailableStreams, setAvailableSubjects, setAvailableTestGrades]
-  );
-
-  const handlers = createPerformanceHandlers({
-    selectedSubject: sel.selectedSubject,
-    selectedTestGrade: sel.selectedTestGrade,
-    setSelectedProgram: sel.setSelectedProgram,
-    setSelectedGrade: sel.setSelectedGrade,
-    setSelectedStream: sel.setSelectedStream,
-    setSelectedSubject: sel.setSelectedSubject,
-    setSelectedTestGrade: sel.setSelectedTestGrade,
-    setDeepDiveSession: sel.setDeepDiveSession,
-    setTestCategory: sel.setTestCategory,
-    setFullTestView: sel.setFullTestView,
-    setAvailableTestGrades: sel.setAvailableTestGrades,
-    setGrades,
-    updateUrl,
+  useGradeNormalization({
+    grades,
+    program,
+    urlGrade: raw.grade,
+    latest,
+    navigate,
+    scopeFor: (urlProgram) => resolveProgram(lockedProgram, urlProgram, programs),
   });
 
   // NVS schools get a narrower Performance tab (mandated tests only).
-  const isNvs = isNvsProgram(sel.selectedProgram);
+  const isNvs = isNvsProgram(program);
   const effective = effectiveSelection(isNvs, {
-    testCategory: sel.testCategory,
-    fullTestView: sel.fullTestView,
-    subject: sel.selectedSubject,
-    testGrade: sel.selectedTestGrade,
+    testCategory: raw.category,
+    fullTestView: raw.view,
+    subject: raw.subject,
+    testGrade: raw.testGrade,
+  });
+
+  // Options belong to one School/Program/Grade overview. Stream and category
+  // changes re-publish from the overview itself, which only ever publishes for
+  // its current request, so they keep the groups on screen meanwhile.
+  const { options, handleFilterOptions } = useFilterOptions(
+    [schoolUdise, program, raw.grade].join("|")
+  );
+  const { deepDiveSession, setNamed, handleDeepDiveData } = useReportName(raw.session);
+
+  const handlers = createPerformanceHandlers({
+    selectedProgram: program,
+    selectedGrade: raw.grade,
+    selectedStream: raw.stream,
+    effective,
+    navigate,
+    closeReport,
+    nameReport: setNamed,
   });
 
   // The filter scope every data component receives. Narrowed from null to
   // undefined once here rather than at each of the ten-odd prop sites, where
   // the repetition was both noise and a place for one of them to disagree.
   const scope: PerformanceScope = {
-    program: sel.selectedProgram || undefined,
-    stream: sel.selectedStream || undefined,
+    program: program || undefined,
+    stream: raw.stream || undefined,
     subject: effective.subject || undefined,
     testGrade: effective.testGrade ?? undefined,
   };
@@ -435,22 +611,22 @@ export function usePerformanceFilters({
     grades,
     error,
     // Current selection
-    selectedProgram: sel.selectedProgram,
+    selectedProgram: program,
     isNvs,
-    selectedGrade: sel.selectedGrade,
-    selectedStream: sel.selectedStream,
+    selectedGrade: raw.grade,
+    selectedStream: raw.stream,
     selectedSubject: effective.subject,
     selectedTestGrade: effective.testGrade,
     testCategory: effective.testCategory,
     fullTestView: effective.fullTestView,
-    deepDiveSession: sel.deepDiveSession,
+    deepDiveSession,
     scope,
     // Options offered by the loaded test set
-    availableStreams: sel.availableStreams,
-    availableSubjects: sel.availableSubjects,
-    availableTestGrades: sel.availableTestGrades,
+    availableStreams: options.streams,
+    availableSubjects: options.subjects,
+    availableTestGrades: options.testGrades,
     // Handlers — the nine filter/navigation ones come from the factory; the
-    // two below are memoised here because children hold onto them.
+    // two below are memoised because children hold onto them.
     ...handlers,
     handleDeepDiveData,
     handleFilterOptions,
