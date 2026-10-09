@@ -923,6 +923,28 @@ describe("PerformanceTab", () => {
       expect(batchOverviewRenders.at(-1)).toMatchObject({ program: "JNV CoE", grade: 11 });
     });
 
+    it("returning to a program whose grades failed shows loading, not the old error", async () => {
+      mockSearchParams = new URLSearchParams("program=JNV+CoE&grade=11");
+      const f = controlledFetch();
+      vi.stubGlobal("fetch", f.fetchMock);
+      const ui = <PerformanceTab schoolUdise="12345" />;
+      const { rerender } = render(ui);
+
+      await f.fail("/api/quiz-analytics/12345/grades?program=JNV%20CoE");
+      expect(screen.getByText("Failed to load quiz data")).toBeInTheDocument();
+
+      // Nodal is still loading when Back returns to CoE, which asks again.
+      urlBecomes(rerender, "program=JNV+Nodal&grade=11", ui);
+      urlBecomes(rerender, "program=JNV+CoE&grade=11", ui);
+      expect(screen.queryByText("Failed to load quiz data")).not.toBeInTheDocument();
+      expect(screen.getByText("Loading quiz data...")).toBeInTheDocument();
+
+      await f.respond("/api/quiz-analytics/12345/grades?program=JNV%20CoE", {
+        grades: [11], programs: ["JNV CoE", "JNV Nodal"],
+      });
+      expect(await screen.findByTestId("batch-overview")).toBeInTheDocument();
+    });
+
     it("drops option groups published for a grade that history has left", async () => {
       mockSearchParams = new URLSearchParams("grade=12");
       vi.stubGlobal("fetch", mockGradesResponse([11, 12], ["JNV CoE"]));

@@ -270,7 +270,8 @@ interface GradesResult {
  * Every response is bound to the School/Program it was requested for: once
  * the scope moves on (a click or Back/Forward), a late success or failure for
  * the old scope is ignored, and the new scope starts with no error and no
- * grades until its own answer arrives.
+ * grades until its own answer arrives — even when history returns to a scope
+ * that already answered (A → B → A), so A's old failure can't show again.
  */
 function useProgramsAndGrades(
   schoolUdise: string,
@@ -283,6 +284,14 @@ function useProgramsAndGrades(
   const programs = schoolPrograms?.udise === schoolUdise ? schoolPrograms.programs : null;
   const program = resolveProgram(lockedProgram, urlProgram, programs);
   const key = `${schoolUdise}|${program ?? ""}`;
+
+  // Drop the previous answer as soon as the scope changes, so returning to a
+  // scope (A → B → A) waits for its new request instead of its old answer.
+  const [resultScope, setResultScope] = useState(key);
+  if (resultScope !== key) {
+    setResultScope(key);
+    setResult(null);
+  }
 
   useEffect(() => {
     let current = true;

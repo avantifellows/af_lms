@@ -323,6 +323,22 @@ describe("BatchOverview", () => {
       expect(screen.getByText("PCB Full Test")).toBeInTheDocument();
     });
 
+    it("returning to filters that failed shows loading, not their old error", async () => {
+      const f = controlledOverviewFetch();
+      const { rerender } = render(overview("pcm"));
+      await f.fail(PCM_URL);
+      expect(screen.getByText("Failed to fetch batch overview")).toBeInTheDocument();
+
+      // PCB is still loading when Back returns to PCM, which asks again.
+      rerender(overview("pcb"));
+      rerender(overview("pcm"));
+      expect(screen.queryByText("Failed to fetch batch overview")).not.toBeInTheDocument();
+      expect(screen.getByText("Loading batch overview...")).toBeInTheDocument();
+
+      await f.respond(PCM_URL, { tests: [PCM_TEST], totalEnrolled: 10, enrolledByStream: {}, streams: [] });
+      expect(screen.getByText("PCM Full Test")).toBeInTheDocument();
+    });
+
     it("a current empty result clears the option groups published before it", async () => {
       const f = controlledOverviewFetch();
       const onFilterOptions = vi.fn();

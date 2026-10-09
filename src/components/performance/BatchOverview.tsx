@@ -158,13 +158,19 @@ export default function BatchOverview({
 }: Props) {
   // Each answer is tagged with the request it belongs to. Once the filters move
   // on, a late success or failure for the old request is never shown, and the
-  // new request starts loading with no stale data or error.
+  // new request starts loading with no stale data or error — even when history
+  // returns to filters that already answered (A → B → A).
   const requestKey = [schoolUdise, grade, program ?? "", stream ?? ""].join("|");
   const [result, setResult] = useState<{
     key: string;
     data?: BatchOverviewData;
     error?: string;
   } | null>(null);
+  const [resultRequest, setResultRequest] = useState(requestKey);
+  if (resultRequest !== requestKey) {
+    setResultRequest(requestKey);
+    setResult(null);
+  }
 
   useEffect(() => {
     let current = true;
