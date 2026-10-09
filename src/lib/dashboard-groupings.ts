@@ -7,6 +7,7 @@ import {
 } from "@/lib/constants";
 import { isCentreSeated, type UserPermission } from "@/lib/permissions";
 import type { GradeCount } from "@/components/SchoolCard";
+import type { CentreSwitcherEntry } from "@/lib/centre-switcher";
 
 /**
  * Dashboard groupings — the disjoint scope views the dashboard tabs render.
@@ -133,6 +134,23 @@ export type CentreAccess =
   | { kind: "ids"; ids: number[] }
   | { kind: "schools"; codes: string[] };
 
+function centreScopeClause(
+  access: CentreAccess,
+  paramIndex: number,
+): { clause: string; params: unknown[] } | null {
+  if (access.kind === "ids") {
+    return access.ids.length === 0
+      ? null
+      : { clause: `AND c.id = ANY($${paramIndex})`, params: [access.ids] };
+  }
+  if (access.kind === "schools") {
+    return access.codes.length === 0
+      ? null
+      : { clause: `AND sch.code = ANY($${paramIndex})`, params: [access.codes] };
+  }
+  return { clause: "", params: [] };
+}
+
 /**
  * Turn a resolved permission + accessible school codes into a {@link CentreAccess}.
  * A user with any centre seats is treated as seat-scoped (sees only those
@@ -178,6 +196,60 @@ export async function getBrowsableCentreIds(centreIds: number[]): Promise<number
 }
 
 /**
+ * Every browsable centre (active + school-linked, the same rule as
+ * {@link getBrowsableCentreIds} and the centre page's notFound()) the viewer may
+ * open, for the centre page's title switcher. Same scope semantics as
+ * {@link getAccessibleCentresWithCounts}, but no counts: it renders with every
+ * centre page, so it stays a single lightweight read.
+ */
+export async function getCentreSwitcherEntries(
+  access: CentreAccess,
+): Promise<CentreSwitcherEntry[]> {
+  const scope = centreScopeClause(access, 1);
+  if (!scope) return [];
+
+  const rows = await query<{
+    id: string;
+    name: string;
+    program_name: string | null;
+    school_name: string;
+    school_code: string;
+    type_label: string | null;
+    category_label: string | null;
+  }>(
+    // Type/category are stored as codes; show their configured labels (ADR 0004).
+    `SELECT c.id, c.name, p.name AS program_name,
+            sch.name AS school_name, sch.code AS school_code,
+            type_options.label AS type_label,
+            category_options.label AS category_label
+     FROM centres c
+     JOIN school sch ON sch.id = c.school_id
+     LEFT JOIN program p ON p.id = c.program_id
+     LEFT JOIN centre_option_sets type_set
+       ON type_set.code = 'type'
+     LEFT JOIN centre_options type_options
+       ON type_options.option_set_id = type_set.id
+      AND type_options.code = c.type_code
+     LEFT JOIN centre_option_sets category_set
+       ON category_set.code = 'category'
+     LEFT JOIN centre_options category_options
+       ON category_options.option_set_id = category_set.id
+      AND category_options.code = c.category_code
+     WHERE c.is_active AND c.school_id IS NOT NULL ${scope.clause}`,
+    scope.params,
+  );
+  return rows.map((row) => ({
+    id: String(row.id),
+    name: row.name,
+    programName: row.program_name,
+    schoolName: row.school_name,
+    schoolCode: row.school_code,
+    typeLabel: row.type_label ?? null,
+    categoryLabel: row.category_label ?? null,
+  }));
+}
+
+/**
  * Active centres the user can access, each with its current-year student count
  * and grade breakdown from the centre_students view. Scope is decided by
  * {@link resolveCentreAccess}: admins see all, seated teachers see only their
@@ -189,18 +261,10 @@ export async function getAccessibleCentresWithCounts(
   access: CentreAccess,
   searchQuery?: string,
 ): Promise<Centre[]> {
-  if (access.kind === "ids" && access.ids.length === 0) return [];
-  if (access.kind === "schools" && access.codes.length === 0) return [];
-
-  let scopeClause = "";
-  const params: unknown[] = [CURRENT_ACADEMIC_YEAR];
-  if (access.kind === "ids") {
-    scopeClause = "AND c.id = ANY($2)";
-    params.push(access.ids);
-  } else if (access.kind === "schools") {
-    scopeClause = "AND sch.code = ANY($2)";
-    params.push(access.codes);
-  }
+  const scope = centreScopeClause(access, 2);
+  if (!scope) return [];
+  const scopeClause = scope.clause;
+  const params: unknown[] = [CURRENT_ACADEMIC_YEAR, ...scope.params];
 
   // Matches the school search's fields as closely as a centre allows: the
   // centre's own name plus its school's name and code, so "shimoga" finds the

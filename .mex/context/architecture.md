@@ -101,6 +101,91 @@ permission, or persistent history store. The Ralph PRD/slice artifacts and write
 boundaries remain under `.ralph/workspaces/383/`; configured council rounds were
 zero, and no ADR conflict was identified.
 
+## Issue #388 Centre-page switcher
+
+**Implemented in PR #402 (stacked on PR #394):**
+`getCentreSwitcherEntries(access)` in `src/lib/dashboard-groupings.ts` is the
+lightweight list read: `resolveCentreAccess` scope (`all` → no clause, `ids` →
+`c.id = ANY($1)`, `schools` → `sch.code = ANY($1)`, empty → no query), filtered
+`c.is_active AND c.school_id IS NOT NULL`, no counts. `RosterPage` loads it only
+for `scope.kind === "centre"`, after every existing gate, in parallel with the
+roster; any failure in School-code expansion, access resolution, or the query
+becomes "no switcher" with one fixed `console.error("Centre switcher list
+unavailable")`. The client-safe `src/lib/centre-switcher.ts` is the one place for
+option logic (current Centre first and merged, `<Program or No Program> · School
+(code)` context, name → School → Program → numeric id order, separate `search`
+fields, reserved `disambiguator`). `PageHeader` takes an optional `titleBlock`
+(default stays the plain `h1`); `src/components/CentreSwitcher.tsx` renders an
+`h1` holding only the trigger button and a sibling `listbox` popup, and its single
+`select` handler pushes `/centre/<id>` (no-op for the inert Current option).
+Tests: `src/app/centre/[id]/page.test.tsx` keeps the real header and query export;
+`e2e/tests/centre-switcher.spec.ts` uses `seedCentreSwitcherFixture` /
+`removeCentreSwitcherFixture` (`e2e/helpers/db.ts`) and `signInAs`
+(`e2e/fixtures/auth.ts`) — the shared fixture contract for #398–#400.
+
+**Search, keyboard, and mobile (#398):** the popup opens with a `combobox` input
+("Search Centres", `aria-controls` → the "Centres" listbox) that takes focus however
+the popup opens (click, Enter, Space, ArrowDown on the trigger) and starts empty.
+`matchesCentreSearch` in `src/lib/centre-switcher.ts` filters on the separate
+`search` fields only (trimmed, case-insensitive substring; empty matches all), so
+the current Centre stays first when it matches. No match shows "No accessible
+Centres match your search" plus "Clear search" (empties and refocuses the input).
+ArrowUp/Down/Home/End move `aria-activedescendant` over non-current options only
+and scroll the highlighted option into view; the active option is derived from the
+filtered list, so filtering it away clears it at once. Enter calls the same `select`
+handler as a click (nothing without an active option). Escape anywhere in the popup
+and a trigger click close and focus the trigger; popup-level focus-out closes after
+Tab/Shift+Tab or a click on another control without moving focus, including from the
+empty-state action, while a click on non-focusable content returns focus to the
+trigger. Mouse-downs inside the popup and on the trigger are prevented so focus
+stays in the input.
+Below `sm` the popup is positioned against `PageHeader`'s `<header>` (now
+`relative`) and spans its width; from `sm` up it anchors under the title. The
+list caps at `60vh`/`max-h-80` and scrolls; the trigger, input, and options are ≥
+44px, and long unbroken option names wrap.
+Tests: the page seam's `popup › search/keyboard/dismissal` blocks and the 390px
+Playwright journey (search by School code → select → Delta loads).
+
+**Tab carry, history, and pending (#399):** `src/lib/roster-tabs.ts` (client-safe)
+owns `ROSTER_TAB_IDS` (the eight outer tab ids in display order; `RosterPage`'s
+`visibleRosterTabs` is typed by it), `DEFAULT_ROSTER_TAB` (`enrollment`), and
+`resolveVisibleTab(rawTab, visibleTabIds, defaultTab)` — raw tab if visible, else
+the default if visible, else the first visible tab. `SchoolTabs` and the switcher
+both use it, so they agree on which tab a URL shows. `RosterPage` passes the
+switcher the source page's visible tab ids and `tabs[0]` as default. `select`
+reads `?tab=` from `useSearchParams()` at selection time (tab clicks write it with
+`history.replaceState`, never a server prop), resolves it, and pushes
+`centreSwitchHref(id, tab)` from `src/lib/centre-switcher.ts`: `/centre/<id>` plus
+`?tab=<tab>` only for a non-default roster tab — Grade, stream, report session,
+every other parameter, and the hash are dropped, and a hidden/unknown raw tab
+resolves to Enrollment, so it is never carried. The push runs inside
+`useTransition`; a `navigatingRef` set synchronously before `push` (which returns
+`void`) ignores further choices until `isPending` falls back to false. The
+`role="status"` sibling of the `h1` shows "Switching Centre…" meanwhile; default
+scroll-to-top is kept. The destination re-runs `getCentreWithSchool` and
+`canViewCentre` (stale scope → Access Denied), `SchoolTabs` maps a hidden tab to
+Enrollment, a Program-less target keeps program-scoped tabs with
+`NoCentreProgram`, and Performance adds its own default Grade by `replace` — one
+history entry per switch, and Back restores the source's untouched query/report.
+Tests: the page seam's `where a switch lands` block (literal pushed URLs, a
+same-turn double click inside one `act`) and `e2e/tests/centre-switcher-history.spec.ts`
+(an init-script recorder of `pushState`/`replaceState` proves the first write is the
+lone push; held RSC request for the pending case; scope revoked via the test pool).
+
+**Disambiguation ladder (#400):** `getCentreSwitcherEntries` also returns
+`typeLabel`/`categoryLabel`, resolved from `c.type_code`/`c.category_code` through
+`centre_option_sets`/`centre_options` (the admin Centre list's joins; codes stored,
+labels shown per ADR 0004; missing → `null`). `buildCentreSwitcherOptions` groups
+every option, the current Centre included (it borrows its labels from its own list
+row), by exact (name, Program, School name, School code). In a group of two or
+more, an entry whose present labels joined with " · " are non-empty and unique in
+the group shows them; every other member shows `Centre ID: <id>`; a unique entry
+gets no `disambiguator`. So CoE/Nodal Centres at one School (Program differs) show
+nothing. `CentreSwitcher` renders it as a second muted line under the Program ·
+School context; search, order, keyboard, and `select` are unchanged. Tests: the
+page seam's `popup › disambiguation` block (literal visible text plus option-label
+join SQL) and the mixed-group cases in `src/lib/centre-switcher.test.ts`.
+
 ## Key Components
 
 - **`src/lib/db.ts`** — the `query<T>()` helper over a singleton `pg.Pool` (god node, ~137 edges). Reads and direct writes both go through it. `withTransaction()` for multi-statement writes.

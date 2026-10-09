@@ -41,6 +41,11 @@ async function authenticatedPage(
   return page;
 }
 
+/** Sign a page in as any seeded user, e.g. a spec's synthetic fixture user. */
+export async function signInAs(page: Page, user: { name: string; email: string }): Promise<Page> {
+  return authenticatedPage(page, { name: user.name, email: user.email, sub: `e2e-${user.email}` });
+}
+
 function googleUserPayload(role: TestUserRole): TokenPayload {
   const user = TEST_USERS[role];
   return {
