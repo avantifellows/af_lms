@@ -143,6 +143,31 @@ an id join and both copies of the form go away.
   second round in a month is sometimes deliberate.
 - Ended rounds say "didn't respond", live ones "pending".
 
+## LLM summary (issue #316 item 3)
+
+- **Written by etl-next** `teacher_feedback_summaries_flow` (daily, seeded
+  disabled) onto `lms_teacher_feedback.summary` (+ `summary_prompt_version`,
+  `summary_fingerprint`, `summary_generated_at`) through db-service
+  `GET/PUT /api/teacher-feedback-summary`. The columns' migration lives in
+  db-service, like the table's.
+- **Only closed rounds** with ≥ 5 responders. The flow finds rounds in BigQuery
+  (`airbyte.session` meta_data carries the feedback teacher/school/batches), so it
+  needs no LMS reads. A fingerprint of answers + prompt version skips unchanged
+  rounds: a quiet day makes no LLM calls; late answers after an Extend regenerate
+  once the round closes again.
+- **Comments only**: the summary groups the two open questions' comments into
+  themes (`{liked[{text, students}], improve[{text, students, kind, serious,
+  recurring}]}`); scores are already shown per parameter. "serious" is decided in
+  the flow, not by the model (fairness/respect/safety from 5+ students, or over
+  half). "recurring" = also among the teacher's earlier improvement themes for
+  rounds sharing a batch. Gemini via OpenRouter, strict JSON schema, ZDR.
+- **LMS reads it as `to_jsonb(tf) -> 'summary'`**, so af_lms works before the
+  db-service migration runs. Each comment box shows the themes, with "Show all N
+  comments" for the raw text; before a summary exists, the raw comments and a
+  note. The teacher card shows "⚑ N serious concerns".
+- No regenerate button and no job tables by design: re-run the flow with
+  `force` or bump `PROMPT_VERSION`.
+
 ## Gotchas
 
 - **`session_pk` and `centre_id` are bigints**, so pg returns them as strings.

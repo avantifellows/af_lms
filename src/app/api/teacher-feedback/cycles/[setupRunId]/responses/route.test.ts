@@ -21,7 +21,13 @@ beforeEach(() => {
   vi.mocked(loadAuthorizedRound).mockResolvedValue({
     ok: true,
     rows: [
-      { teacher_name: "Asha", teacher_order: 1, quiz_id: "q1", batch_class_ids: ["B27"] },
+      {
+        teacher_name: "Asha",
+        teacher_order: 1,
+        quiz_id: "q1",
+        batch_class_ids: ["B27"],
+        summary: { improve: [{ serious: true }, { serious: false }] },
+      },
       { teacher_name: "Ravi", teacher_order: 2, quiz_id: "q2", batch_class_ids: ["B27"] },
     ],
   } as never);
@@ -52,6 +58,7 @@ describe("GET /api/teacher-feedback/cycles/:setupRunId/responses", () => {
           responded: 2,
           total: 2,
           outsideBatches: 1,
+          seriousConcerns: 1,
           responseCount: 3,
           percentage: 80,
           notResponded: [],
@@ -62,6 +69,7 @@ describe("GET /api/teacher-feedback/cycles/:setupRunId/responses", () => {
           responded: 1,
           total: 2,
           outsideBatches: 0,
+          seriousConcerns: 0,
           responseCount: 0,
           percentage: 0,
           notResponded: [{ name: "Anil", studentId: "S1", batchId: "B27" }],

@@ -49,6 +49,9 @@ function report(overrides: Partial<ReportData> = {}): ReportData {
       startTime: "2026-09-17 11:32:28",
       endTime: "2026-09-18 11:32:28",
     },
+    summary: null,
+    summaryGeneratedAt: null,
+    roundClosed: true,
     history: [
       history("a27", "Aug 2026", "2027 Engineering", 92.8),
       history("a28", "Aug 2026", "2028 Engineering", 93.8),
@@ -141,6 +144,43 @@ describe("AnalysisModal", () => {
     response = () => Promise.resolve(new Response(JSON.stringify({ error: "Forbidden" }), { status: 403 }));
     show(null);
     expect(await screen.findByText("Forbidden")).toBeInTheDocument();
+  });
+});
+
+describe("comment summary", () => {
+  const summarised = () =>
+    report({
+      summary: {
+        liked: [{ text: "Explains concepts clearly", students: 19 }],
+        improve: [
+          { text: "Start class on time", students: 5, serious: false, recurring: true },
+          { text: "Equal attention for all", students: 6, serious: true, recurring: false },
+        ],
+      },
+    });
+
+  it("shows themes in place of the raw comments, which are a click away", async () => {
+    show(summarised());
+
+    expect(await screen.findByText("Explains concepts clearly")).toBeInTheDocument();
+    expect(screen.getByText(/· 19 students/)).toBeInTheDocument();
+    expect(screen.getByText("Start class on time").parentElement).toHaveTextContent("Also last time");
+    expect(screen.getByText("Equal attention for all").previousElementSibling).toHaveTextContent("⚑");
+    expect(screen.queryByText("Explains well")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByRole("button", { name: /Show all 1 comments/ })[0]);
+    expect(screen.getByText("Explains well")).toBeInTheDocument();
+  });
+
+  it("shows raw comments with a note until the round is summarised", async () => {
+    show(report({ roundClosed: false }));
+    expect(await screen.findByText(/will be summarised after this round closes/)).toBeInTheDocument();
+    expect(screen.getByText("Explains well")).toBeInTheDocument();
+  });
+
+  it("says closed rounds are summarised daily", async () => {
+    show();
+    expect(await screen.findByText(/summarised daily after a round closes/)).toBeInTheDocument();
   });
 });
 

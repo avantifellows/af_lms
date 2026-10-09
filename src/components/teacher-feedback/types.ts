@@ -50,6 +50,8 @@ export interface TeacherResponses {
   responded: number;
   total: number;
   outsideBatches: number;
+  /** Serious concerns in the round's LLM summary (0 before it exists). */
+  seriousConcerns: number;
   /** Everyone who answered, including outsiders — the same students Analysis scores. */
   responseCount: number;
   percentage: number;

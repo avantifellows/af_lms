@@ -30,9 +30,17 @@ export async function GET(request: NextRequest) {
     teacher_id: string | null;
     school_id: number | null;
     centre_id: number | string | null;
+    summary: unknown;
+    summary_generated_at: string | null;
+    closed: boolean;
   }>(
     `
-    SELECT tf.school_code, tf.teacher_name, tf.teacher_id, sch.id AS school_id, tf.centre_id
+    SELECT tf.school_code, tf.teacher_name, tf.teacher_id, sch.id AS school_id, tf.centre_id,
+           -- Written by the etl-next summaries flow. Read via to_jsonb so this
+           -- works before the db-service migration adding the columns has run.
+           to_jsonb(tf) -> 'summary' AS summary,
+           to_jsonb(tf) ->> 'summary_generated_at' AS summary_generated_at,
+           tf.end_time < (now() AT TIME ZONE 'UTC') AS closed
     FROM session s
     JOIN lms_teacher_feedback tf ON tf.session_pk = s.id AND tf.deleted_at IS NULL
     LEFT JOIN school sch ON sch.code = tf.school_code
@@ -74,7 +82,15 @@ export async function GET(request: NextRequest) {
     const report = await buildTeacherFeedbackReport(quizId, rows.get(quizId) ?? [], getGenders);
     const history = scoreRounds(rounds, rows);
 
-    return NextResponse.json({ teacherName: row.teacher_name, round, history, ...report });
+    return NextResponse.json({
+      teacherName: row.teacher_name,
+      round,
+      history,
+      ...report,
+      summary: row.summary ?? null,
+      summaryGeneratedAt: row.summary_generated_at,
+      roundClosed: row.closed === true,
+    });
   } catch (error) {
     console.error("Teacher feedback report error:", error);
     return NextResponse.json(

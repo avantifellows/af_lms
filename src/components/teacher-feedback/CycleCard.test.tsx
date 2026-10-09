@@ -44,6 +44,7 @@ const RESPONSES = {
       responded: 36,
       total: 41,
       outsideBatches: 2,
+      seriousConcerns: 1,
       responseCount: 38,
       percentage: 95.5,
       notResponded: [{ name: "Anil", studentId: "S1", batchId: "B28" }],
@@ -92,6 +93,7 @@ describe("CycleCard", () => {
 
     expect(await screen.findByText("96%")).toBeInTheDocument();
     expect(screen.getByText("+2 from outside these batches")).toBeInTheDocument();
+    expect(screen.getByText("⚑ 1 serious concern")).toBeInTheDocument();
     // The round has ended, so nobody is "pending" any more.
     fireEvent.click(screen.getByRole("button", { name: /responded · 1 didn’t respond/ }));
     expect(screen.getByText("Anil")).toBeInTheDocument();
