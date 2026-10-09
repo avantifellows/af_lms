@@ -347,8 +347,8 @@ function ThemeList({ themes }: { themes: Theme[] }) {
   if (themes.length === 0) return <p className="text-base text-text-muted">No common themes.</p>;
   return (
     <ul className="space-y-2 text-base text-text-primary">
-      {themes.map((t) => (
-        <li key={t.text} className="flex gap-2">
+      {themes.map((t, i) => (
+        <li key={i} className="flex gap-2">
           <span className={t.serious ? "text-danger" : "text-text-muted"}>{t.serious ? "⚑" : "•"}</span>
           <span>
             {t.text}
