@@ -154,6 +154,14 @@ describe("/api/mcp", () => {
     expect(JSON.parse(result.content[0].text).schools).toHaveLength(1);
   });
 
+  it("hides quiz views from a role without Performance access", async () => {
+    mockSession.mockResolvedValue(PM_SESSION);
+    mockPermission.mockResolvedValue({ ...(PM_PERMISSION as object), role: "holistic_mentorship_admin" } as never);
+    const paths = JSON.parse((await callTool("list_views")).content[0].text).map((v: { path: string }) => v.path);
+    expect(paths.some((p: string) => p.startsWith("/api/quiz-analytics/"))).toBe(false);
+    expect(paths).toContain("/api/holistic-mentorship/progress");
+  });
+
   describe("PMU roles", () => {
     const PMU_PERMISSION = { ...(PM_PERMISSION as object), level: 3, role: "pmu_manager" } as never;
 

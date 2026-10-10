@@ -13,7 +13,7 @@ export async function GET(
   { params }: { params: Promise<{ udise: string; jobId: string }> },
 ) {
   const { udise, jobId } = await params;
-  const auth = await authorizeSchoolAccess(udise);
+  const auth = await authorizeSchoolAccess(udise, { feature: "performance" });
   if (!auth.authorized) return auth.response;
 
   try {

@@ -217,7 +217,7 @@ describe("POST combined-reports gating", () => {
     mockSubmit.mockResolvedValue({ job_id: "j1", status: "queued" });
 
     await POST(postBody(), routeParams({ udise: "27361106702" }));
-    expect(mockAuth).toHaveBeenCalledWith("27361106702", { requireEdit: true });
+    expect(mockAuth).toHaveBeenCalledWith("27361106702", { requireEdit: true, feature: "performance" });
   });
 
   it("keeps auth ahead of the gate", async () => {
@@ -276,7 +276,7 @@ describe.each([
 
   it("POST still asks auth for edit rights", async () => {
     await POST(pmuPost(), routeParams({ udise: "27361106702" }));
-    expect(mockAuth).toHaveBeenCalledWith("27361106702", { requireEdit: true });
+    expect(mockAuth).toHaveBeenCalledWith("27361106702", { requireEdit: true, feature: "performance" });
   });
 
   it.each(["JNV CoE", "JNV Nodal", "Punjab CoE"])("POST 403s program=%s", async (program) => {

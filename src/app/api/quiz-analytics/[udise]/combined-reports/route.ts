@@ -26,7 +26,7 @@ export async function GET(
   { params }: { params: Promise<{ udise: string }> },
 ) {
   const { udise } = await params;
-  const auth = await authorizeSchoolAccess(udise);
+  const auth = await authorizeSchoolAccess(udise, { feature: "performance" });
   if (!auth.authorized) return auth.response;
 
   const url = new URL(request.url);
@@ -87,7 +87,7 @@ export async function POST(
   const { udise } = await params;
   // Generating a report is work, not a read: read-only callers get 403 here
   // even though they can list and download existing reports via GET.
-  const auth = await authorizeSchoolAccess(udise, { requireEdit: true });
+  const auth = await authorizeSchoolAccess(udise, { requireEdit: true, feature: "performance" });
   if (!auth.authorized) return auth.response;
 
   let body: {

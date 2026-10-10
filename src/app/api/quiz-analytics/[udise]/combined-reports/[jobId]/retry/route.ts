@@ -15,7 +15,7 @@ export async function POST(
 ) {
   const { udise, jobId } = await params;
   // Same rule as generation: a retry re-enqueues work, so read-only callers 403.
-  const auth = await authorizeSchoolAccess(udise, { requireEdit: true });
+  const auth = await authorizeSchoolAccess(udise, { requireEdit: true, feature: "performance" });
   if (!auth.authorized) return auth.response;
 
   try {

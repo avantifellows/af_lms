@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
-import { canAccessSchool, getResolvedPermission } from "@/lib/permissions";
-import type { UserPermission } from "@/lib/permissions";
+import { canAccessSchool, getFeatureAccess, getResolvedPermission } from "@/lib/permissions";
+import type { Feature, UserPermission } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import { isPmuRole } from "@/lib/constants";
 
@@ -35,9 +35,12 @@ type AuthResult =
   | { authorized: false; response: NextResponse };
 
 // `requireEdit`: additionally refuse read-only callers with 403.
+// `feature`: additionally refuse callers whose role can't view that feature
+// (e.g. performance for holistic_mentorship_admin), so the API enforces what
+// the page would otherwise only hide.
 export async function authorizeSchoolAccess(
   udise: string,
-  options?: { requireEdit?: boolean },
+  options?: { requireEdit?: boolean; feature?: Feature },
 ): Promise<AuthResult> {
   const session = await getSession();
   if (!session) {
@@ -75,6 +78,12 @@ export async function authorizeSchoolAccess(
   const permission = email ? await getResolvedPermission(email) : null;
   // PMU roles are NVS-only, so non-JNV schools are out of scope (as on the School page).
   if (isPmuRole(permission?.role) && school.af_school_category !== "JNV") {
+    return {
+      authorized: false,
+      response: NextResponse.json({ error: "Access denied" }, { status: 403 }),
+    };
+  }
+  if (options?.feature && !getFeatureAccess(permission ?? null, options.feature).canView) {
     return {
       authorized: false,
       response: NextResponse.json({ error: "Access denied" }, { status: 403 }),
