@@ -33,38 +33,42 @@ export async function POST(request: Request) {
   if (!clientId || !client || client.iss !== origin) {
     return oauthError("invalid_client", "Unknown client_id", 401);
   }
-  const cid = clientFingerprint(clientId);
-  const grantType = params.get("grant_type");
-
-  if (grantType === "authorization_code") {
-    const code = verify<CodePayload>("code", params.get("code"));
-    if (!code || code.cid !== cid || code.iss !== origin) {
-      return oauthError("invalid_grant", "Authorization code is invalid or expired");
-    }
-    if (params.get("redirect_uri") !== code.redirect_uri) {
-      return oauthError("invalid_grant", "redirect_uri does not match the authorization request");
-    }
-    const verifier = params.get("code_verifier");
-    if (!verifier || !pkceS256Matches(verifier, code.code_challenge)) {
-      return oauthError("invalid_grant", "PKCE verification failed");
-    }
-    return tokenResponse(code.email, clientId, origin);
+  switch (params.get("grant_type")) {
+    case "authorization_code":
+      return authorizationCodeGrant(params, clientId, origin);
+    case "refresh_token":
+      return refreshTokenGrant(params, clientId, origin);
+    default:
+      return oauthError("unsupported_grant_type", "Use authorization_code or refresh_token");
   }
+}
 
-  if (grantType === "refresh_token") {
-    const refresh = verify<TokenPayload>("refresh", params.get("refresh_token"));
-    if (!refresh || refresh.cid !== cid || refresh.aud !== mcpResource(origin)) {
-      return oauthError("invalid_grant", "Refresh token is invalid or expired");
-    }
-    // Refreshing is where a removed LMS user would otherwise keep a session
-    // going for 30 days; stop them here as well as on every MCP request.
-    if (!(await getResolvedPermission(refresh.email))) {
-      return oauthError("invalid_grant", "This account no longer has LMS access");
-    }
-    return tokenResponse(refresh.email, clientId, origin);
+function authorizationCodeGrant(params: URLSearchParams, clientId: string, origin: string) {
+  const code = verify<CodePayload>("code", params.get("code"));
+  if (!code || code.cid !== clientFingerprint(clientId) || code.iss !== origin) {
+    return oauthError("invalid_grant", "Authorization code is invalid or expired");
   }
+  if (params.get("redirect_uri") !== code.redirect_uri) {
+    return oauthError("invalid_grant", "redirect_uri does not match the authorization request");
+  }
+  const verifier = params.get("code_verifier");
+  if (!verifier || !pkceS256Matches(verifier, code.code_challenge)) {
+    return oauthError("invalid_grant", "PKCE verification failed");
+  }
+  return tokenResponse(code.email, clientId, origin);
+}
 
-  return oauthError("unsupported_grant_type", "Use authorization_code or refresh_token");
+async function refreshTokenGrant(params: URLSearchParams, clientId: string, origin: string) {
+  const refresh = verify<TokenPayload>("refresh", params.get("refresh_token"));
+  if (!refresh || refresh.cid !== clientFingerprint(clientId) || refresh.aud !== mcpResource(origin)) {
+    return oauthError("invalid_grant", "Refresh token is invalid or expired");
+  }
+  // Refreshing is where a removed LMS user would otherwise keep a session
+  // going for 30 days; stop them here as well as on every MCP request.
+  if (!(await getResolvedPermission(refresh.email))) {
+    return oauthError("invalid_grant", "This account no longer has LMS access");
+  }
+  return tokenResponse(refresh.email, clientId, origin);
 }
 
 function tokenResponse(email: string, clientId: string, origin: string) {

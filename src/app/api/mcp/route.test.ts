@@ -39,6 +39,7 @@ import { getTestDeepDiveFromDynamo } from "@/lib/dynamodb";
 import { requireHolisticMentorshipAccess } from "@/lib/holistic-mentorship";
 import { listHolisticProgress, formatHolisticProgressCsv } from "@/lib/holistic-progress";
 import {
+  canAccessSchool,
   getAccessibleSchoolCodes,
   getResolvedPermission,
   getUserPermission,
@@ -146,10 +147,42 @@ describe("/api/mcp", () => {
     mockSession.mockResolvedValue(PM_SESSION);
     mockSchoolCodes.mockResolvedValue(["S1", "S2"]);
     mockQuery.mockResolvedValue([{ code: "S1", udise_code: "U1", name: "JNV One", region: "R" }]);
+    mockPermission.mockResolvedValue(PM_PERMISSION);
     const result = await callTool("list_my_schools", { search: "One" });
-    expect(mockSchoolCodes).toHaveBeenCalledWith(PM_SESSION.user.email);
-    expect(mockQuery.mock.calls[0][1]).toEqual([["S1", "S2"], "%One%", 101]);
+    expect(mockSchoolCodes).toHaveBeenCalledWith(PM_SESSION.user.email, PM_PERMISSION);
+    expect(mockQuery.mock.calls[0][1]).toEqual([["S1", "S2"], "%One%", 101, false]);
     expect(JSON.parse(result.content[0].text).schools).toHaveLength(1);
+  });
+
+  describe("PMU roles", () => {
+    const PMU_PERMISSION = { ...(PM_PERMISSION as object), level: 3, role: "pmu_manager" } as never;
+
+    beforeEach(() => {
+      mockSession.mockResolvedValue(PM_SESSION);
+      mockPermission.mockResolvedValue(PMU_PERMISSION);
+    });
+
+    it("list_my_schools offers only JNV schools, as the LMS does", async () => {
+      mockSchoolCodes.mockResolvedValue("all");
+      mockQuery.mockResolvedValue([]);
+      await callTool("list_my_schools");
+      expect(mockQuery.mock.calls[0][0]).toContain("af_school_category = 'JNV'");
+      expect(mockQuery.mock.calls[0][1]).toEqual([null, null, 101, true]);
+    });
+
+    it("list_views leaves out views their role can't use", async () => {
+      const paths = JSON.parse((await callTool("list_views")).content[0].text).map((v: { path: string }) => v.path);
+      expect(paths.some((p: string) => p.startsWith("/api/curriculum/"))).toBe(false);
+      expect(paths).not.toContain("/api/holistic-mentorship/progress");
+      expect(paths).toContain("/api/quiz-analytics/[udise]/grades");
+    });
+
+    it("get_view refuses those views without invoking the route", async () => {
+      const result = await callTool("get_view", { path: "/api/curriculum/options", query: { school_code: "S1" } });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toMatch(/pmu_manager.*no access/);
+      expect(mockOptions).not.toHaveBeenCalled();
+    });
   });
 
   describe("get_view", () => {
@@ -184,14 +217,22 @@ describe("/api/mcp", () => {
 
     it("returns the handler's refusal as an error", async () => {
       mockSession.mockResolvedValue(PM_SESSION);
-      mockPermission.mockResolvedValue(null);
-      const result = await callTool("get_view", {
-        path: "/api/curriculum/options",
-        query: { school_code: "S1" },
-      });
+      mockPermission.mockResolvedValue(PM_PERMISSION);
+      mockQuery.mockResolvedValue([{ id: "1", code: "S9", name: "Elsewhere", region: "R" }]);
+      vi.mocked(canAccessSchool).mockResolvedValueOnce(false);
+      const result = await callTool("get_view", { path: "/api/quiz-analytics/U9/grades" });
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toMatch(/^HTTP 403/);
-      expect(mockOptions).not.toHaveBeenCalled();
+    });
+
+    it("refuses an oversized response instead of cutting it into broken JSON", async () => {
+      mockSession.mockResolvedValue(PM_SESSION);
+      mockPermission.mockResolvedValue(PM_PERMISSION);
+      mockOptions.mockResolvedValue({ ok: true, programs: [{ id: 1, name: "x".repeat(200_001) }] } as never);
+      const result = await callTool("get_view", { path: "/api/curriculum/options", query: { school_code: "S1" } });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toMatch(/^Response too large/);
+      expect(result.content[0].text).not.toContain("xxxx");
     });
   });
 
@@ -243,6 +284,7 @@ describe("/api/mcp", () => {
 
     beforeEach(() => {
       mockSession.mockResolvedValueOnce(PM_SESSION).mockResolvedValue(null);
+      mockPermission.mockResolvedValue(PM_PERMISSION);
       vi.mocked(requireHolisticMentorshipAccess).mockResolvedValue({ ok: true, permission: PM_PERMISSION } as never);
       vi.mocked(listHolisticProgress).mockResolvedValue({
         rows: [ROW],

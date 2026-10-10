@@ -7,6 +7,7 @@ import * as quizBatchOverview from "@/app/api/quiz-analytics/[udise]/batch-overv
 import * as quizCumulativeAls from "@/app/api/quiz-analytics/[udise]/cumulative-als/route";
 import * as quizTestDeepDive from "@/app/api/quiz-analytics/[udise]/test-deep-dive/route";
 import * as holisticProgress from "@/app/api/holistic-mentorship/progress/route";
+import type { Feature } from "@/lib/permissions";
 
 // LMS read endpoints Claude may call through `get_view`. An explicit
 // allow-list: a route only belongs here once it (and every gate it calls)
@@ -36,6 +37,11 @@ export interface LmsView {
   // narrows by program instead). get_view requires `program` and only allows
   // one the caller's own grades view lists — see `programGuard`.
   programScoped?: boolean;
+  // The LMS feature whose view access the route requires. Views the caller's
+  // role can't use are left out of list_views and refused by get_view before
+  // the call, so Claude doesn't spend calls collecting 403s. The route still
+  // runs its own gate; this only mirrors one it is known to apply.
+  feature?: Feature;
   // Rewrites a successful JSON body before Claude sees it, to drop fields the
   // LMS shows on screen that shouldn't reach Claude by default (e.g. mentorship
   // notes). `includeNotes` is the caller's explicit opt-in (see NOTES_PARAM).
@@ -61,6 +67,7 @@ export const LMS_VIEWS: LmsView[] = [
     description:
       "Curriculum tracker setup for a school: its programs, exam tracks, grades and subjects, and the defaults. Call first to get the values the other curriculum views need.",
     query: { school_code: "required — school code", program_id: "optional" },
+    feature: "curriculum",
     handler: handler(curriculumOptions.GET),
   },
   {
@@ -68,12 +75,14 @@ export const LMS_VIEWS: LmsView[] = [
     description:
       "Curriculum completion for one school / program / track / grade / subject: per chapter, taught time and completion, plus subject totals.",
     query: CURRICULUM_SCOPE,
+    feature: "curriculum",
     handler: handler(curriculumProgress.GET),
   },
   {
     path: "/api/curriculum/chapters",
     description: "The chapter and topic list (with planned time) for one curriculum scope.",
     query: CURRICULUM_SCOPE,
+    feature: "curriculum",
     handler: handler(curriculumChapters.GET),
   },
   {
@@ -120,6 +129,7 @@ export const LMS_VIEWS: LmsView[] = [
       include_notes:
         "optional — 'true' returns the mentors' submitted note answers. Set it ONLY when the user explicitly asks to read note content; counts and progress never need it.",
     },
+    feature: "holistic_mentorship",
     handler: handler(holisticProgress.GET),
     redact: redactHolisticProgress,
   },

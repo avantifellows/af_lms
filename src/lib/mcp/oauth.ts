@@ -14,8 +14,8 @@ import { createHash, createHmac, hkdfSync, timingSafeEqual } from "node:crypto";
 
 export const AUTH_CODE_TTL = 5 * 60;
 export const CONSENT_TTL = 10 * 60;
-export const ACCESS_TOKEN_TTL = 60 * 60;
-export const REFRESH_TOKEN_TTL = 30 * 24 * 60 * 60;
+const ACCESS_TOKEN_TTL = 60 * 60;
+const REFRESH_TOKEN_TTL = 30 * 24 * 60 * 60;
 
 type TokenType = "client" | "consent" | "code" | "access" | "refresh";
 
@@ -115,7 +115,17 @@ export interface ClientPayload {
 
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
-// https anywhere; http only on loopback (native apps such as Claude Code).
+// Claude's web/desktop OAuth callbacks. Registration is open, so any other
+// https host would let anyone register a client named "Claude" that sends the
+// code to their own server; the only https redirects allowed are Claude's.
+export const CLAUDE_REDIRECT_HOSTS = new Set(["claude.ai", "claude.com"]);
+
+export function isLoopbackRedirect(url: URL): boolean {
+  return url.protocol === "http:" && LOOPBACK_HOSTS.has(url.hostname);
+}
+
+// https only to Claude; http only on loopback (native apps such as Claude
+// Code, where the code never leaves the user's machine).
 export function isAllowedRedirectUri(uri: string): boolean {
   let url: URL;
   try {
@@ -123,9 +133,9 @@ export function isAllowedRedirectUri(uri: string): boolean {
   } catch {
     return false;
   }
-  if (url.hash) return false;
-  if (url.protocol === "https:") return true;
-  return url.protocol === "http:" && LOOPBACK_HOSTS.has(url.hostname);
+  if (url.hash || url.username || url.password) return false;
+  if (url.protocol === "https:") return CLAUDE_REDIRECT_HOSTS.has(url.hostname) && !url.port;
+  return isLoopbackRedirect(url);
 }
 
 // Exact match, except that a loopback redirect may use any port (RFC 8252
@@ -138,7 +148,7 @@ export function redirectUriRegistered(client: ClientPayload, uri: string): boole
   } catch {
     return false;
   }
-  if (given.protocol !== "http:" || !LOOPBACK_HOSTS.has(given.hostname)) return false;
+  if (!isLoopbackRedirect(given)) return false;
   return client.redirect_uris.some((registered) => {
     const r = new URL(registered);
     return (

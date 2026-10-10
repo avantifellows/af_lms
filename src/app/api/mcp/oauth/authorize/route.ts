@@ -3,8 +3,10 @@ import { authOptions } from "@/lib/auth";
 import { getResolvedPermission } from "@/lib/permissions";
 import {
   AUTH_CODE_TTL,
+  CLAUDE_REDIRECT_HOSTS,
   CONSENT_TTL,
   clientFingerprint,
+  isAllowedRedirectUri,
   mcpResource,
   publicOrigin,
   redirectUriRegistered,
@@ -33,7 +35,9 @@ export async function GET(request: Request) {
   // Until the client and redirect are known good, errors are shown here and
   // never sent to the redirect_uri (no open redirect).
   if (!client || client.iss !== origin) return page("Unknown application", "<p>This connector link is not valid. Remove the connector and add it again.</p>", 400);
-  if (!redirectUriRegistered(client, redirectUri)) {
+  // isAllowedRedirectUri again: client ids are signed, not stored, so one
+  // registered before the redirect rules tightened would otherwise still work.
+  if (!isAllowedRedirectUri(redirectUri) || !redirectUriRegistered(client, redirectUri)) {
     return page("Invalid redirect", "<p>The application's redirect address is not the one it registered.</p>", 400);
   }
 
@@ -64,12 +68,10 @@ export async function GET(request: Request) {
     { email, client_id: clientId, redirect_uri: redirectUri, code_challenge: codeChallenge, state },
     CONSENT_TTL,
   );
-  const appName = client.client_name || "An application";
   return page(
     "Connect to the Avanti LMS",
-    `<p><b>${esc(appName)}</b> wants to read the LMS as <b>${esc(email)}</b>.</p>
-<p>It will see what you can see in the LMS (schools, curriculum progress, test results) and nothing more. It can't change anything.</p>
-<p class="muted">You'll be sent back to ${esc(new URL(redirectUri).host)}.</p>
+    `${destinationNotice(client.client_name, new URL(redirectUri))}
+<p>It will read the LMS as <b>${esc(email)}</b>: what you can see in the LMS (schools, curriculum progress, test results) and nothing more. It can't change anything.</p>
 <form method="post">
   <input type="hidden" name="consent" value="${esc(consent)}">
   <button name="decision" value="approve" class="primary">Allow</button>
@@ -112,6 +114,16 @@ export async function POST(request: Request) {
   return redirectTo(consent.redirect_uri, { code, state: consent.state, iss: publicOrigin(request) });
 }
 
+// Where access goes, shown prominently. The client name is whatever the
+// registrant typed, so the redirect host is what the user should trust.
+function destinationNotice(clientName: string | undefined, redirect: URL): string {
+  const named = clientName ? ` (calls itself <b>${esc(clientName)}</b>)` : "";
+  if (CLAUDE_REDIRECT_HOSTS.has(redirect.hostname)) {
+    return `<p class="dest">Access will be sent to <b>${esc(redirect.host)}</b>${named}.</p>`;
+  }
+  return `<p class="dest warn">Access will be sent to an app on <b>this computer</b> (${esc(redirect.host)})${named}, such as Claude Code. Allow only if you just started this from an app on this computer.</p>`;
+}
+
 function redirectTo(uri: string, params: Record<string, string | undefined>): Response {
   const url = new URL(uri);
   for (const [k, v] of Object.entries(params)) if (v !== undefined) url.searchParams.set(k, v);
@@ -151,9 +163,11 @@ function page(title: string, body: string, status = 200): Response {
 <style>
 body{font-family:system-ui,sans-serif;background:#f6f7f9;color:#1d2433;margin:0;display:grid;place-items:center;min-height:100vh}
 main{background:#fff;max-width:420px;margin:16px;padding:28px;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,.08)}
-h1{font-size:1.25rem;margin:0 0 12px}.muted{color:#667085;font-size:.9rem}
+h1{font-size:1.25rem;margin:0 0 12px}
 button{font:inherit;padding:8px 16px;border-radius:8px;border:1px solid #d0d5dd;background:#fff;cursor:pointer;margin-right:8px}
 button.primary{background:#1d4ed8;border-color:#1d4ed8;color:#fff}
+.dest{font-size:1.05rem;padding:12px;border-radius:8px;background:#eef4ff;border:1px solid #c7d7fe}
+.dest.warn{background:#fffaeb;border-color:#fedf89}
 </style></head><body><main><h1>${esc(title)}</h1>${body}</main></body></html>`;
   return new Response(html, {
     status,

@@ -10,7 +10,7 @@ import { getResolvedPermission } from "@/lib/permissions";
 import { POST as register } from "./register/route";
 import { GET as authorize, POST as approve } from "./authorize/route";
 import { POST as token } from "./token/route";
-import { bearerEmail } from "@/lib/mcp/oauth";
+import { bearerEmail, sign } from "@/lib/mcp/oauth";
 
 const ORIGIN = "https://lms.example.org";
 const REDIRECT = "https://claude.ai/api/mcp/auth_callback";
@@ -87,7 +87,41 @@ describe("register", () => {
   });
 });
 
+describe("register", () => {
+  it("refuses https redirect URIs that aren't Claude's", async () => {
+    const res = await register(
+      new Request(`${ORIGIN}/r`, {
+        method: "POST",
+        body: JSON.stringify({ client_name: "Claude", redirect_uris: ["https://evil.example/cb"] }),
+      }),
+    );
+    expect(res.status).toBe(400);
+  });
+});
+
 describe("authorize", () => {
+  it("refuses a client signed before the redirect rules tightened", async () => {
+    mockSession.mockResolvedValue(signedIn());
+    const legacy = sign("client", { iss: ORIGIN, client_name: "Claude", redirect_uris: ["https://evil.example/cb"] });
+    const res = await authorize(new Request(authorizeUrl(legacy, { redirect_uri: "https://evil.example/cb" })));
+    expect(res.status).toBe(400);
+    expect(res.headers.get("location")).toBeNull();
+  });
+
+  it("names the redirect host on the consent page, not just the client's chosen name", async () => {
+    mockSession.mockResolvedValue(signedIn());
+    const html = await (await authorize(new Request(authorizeUrl(await registerClient())))).text();
+    expect(html).toContain("Access will be sent to <b>claude.ai</b>");
+  });
+
+  it("warns that a loopback redirect goes to an app on this computer", async () => {
+    mockSession.mockResolvedValue(signedIn());
+    const loopback = "http://localhost:33418/callback";
+    const clientId = await registerClient([loopback]);
+    const html = await (await authorize(new Request(authorizeUrl(clientId, { redirect_uri: loopback })))).text();
+    expect(html).toContain("an app on <b>this computer</b> (localhost:33418)");
+  });
+
   it("shows an error page (no redirect) for an unregistered redirect_uri", async () => {
     const clientId = await registerClient();
     const res = await authorize(new Request(authorizeUrl(clientId, { redirect_uri: "https://evil.example/cb" })));
@@ -180,7 +214,7 @@ describe("token", () => {
 
   it("refuses a code presented by another client", async () => {
     const code = await codeFor(await registerClient());
-    const other = await registerClient(["https://other.example/cb"]);
+    const other = await registerClient(["https://claude.com/api/mcp/auth_callback"]);
     const res = await exchange({
       grant_type: "authorization_code",
       code,

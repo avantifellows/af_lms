@@ -64,6 +64,11 @@ describe("PKCE S256", () => {
 describe("redirect URIs", () => {
   it.each([
     ["https://claude.ai/api/mcp/auth_callback", true],
+    ["https://claude.com/api/mcp/auth_callback", true],
+    ["https://evil.example/cb", false],
+    ["https://claude.ai.evil.example/cb", false],
+    ["https://claude.ai:8443/cb", false],
+    ["https://user@claude.ai/cb", false],
     ["http://localhost:33418/callback", true],
     ["http://127.0.0.1/cb", true],
     ["http://evil.example/cb", false],
