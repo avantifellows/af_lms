@@ -10,7 +10,7 @@ import { getResolvedPermission } from "@/lib/permissions";
 import { POST as register } from "./register/route";
 import { GET as authorize, POST as approve } from "./authorize/route";
 import { POST as token } from "./token/route";
-import { bearerEmail, sign } from "@/lib/mcp/oauth";
+import { bearerEmail, issueTokens, sign } from "@/lib/mcp/oauth";
 
 const ORIGIN = "https://lms.example.org";
 const REDIRECT = "https://claude.ai/api/mcp/auth_callback";
@@ -237,6 +237,14 @@ describe("token", () => {
     mockPermission.mockResolvedValue(null);
     const revoked = await exchange({ grant_type: "refresh_token", refresh_token, client_id: clientId });
     expect((await revoked.json()).error).toBe("invalid_grant");
+  });
+
+  it("won't refresh for a client signed before the redirect rules tightened", async () => {
+    const legacy = sign("client", { iss: ORIGIN, client_name: "Claude", redirect_uris: ["https://evil.example/cb"] });
+    const { refresh_token } = issueTokens(EMAIL, legacy, ORIGIN);
+    const res = await exchange({ grant_type: "refresh_token", refresh_token, client_id: legacy });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("invalid_grant");
   });
 
   it("refuses a client registered on another environment (shared NEXTAUTH_SECRET)", async () => {

@@ -2,6 +2,7 @@ import { getResolvedPermission } from "@/lib/permissions";
 import {
   CORS_HEADERS,
   clientFingerprint,
+  isAllowedRedirectUri,
   issueTokens,
   mcpResource,
   oauthError,
@@ -37,7 +38,7 @@ export async function POST(request: Request) {
     case "authorization_code":
       return authorizationCodeGrant(params, clientId, origin);
     case "refresh_token":
-      return refreshTokenGrant(params, clientId, origin);
+      return refreshTokenGrant(params, clientId, client, origin);
     default:
       return oauthError("unsupported_grant_type", "Use authorization_code or refresh_token");
   }
@@ -58,10 +59,15 @@ function authorizationCodeGrant(params: URLSearchParams, clientId: string, origi
   return tokenResponse(code.email, clientId, origin);
 }
 
-async function refreshTokenGrant(params: URLSearchParams, clientId: string, origin: string) {
+async function refreshTokenGrant(params: URLSearchParams, clientId: string, client: ClientPayload, origin: string) {
   const refresh = verify<TokenPayload>("refresh", params.get("refresh_token"));
   if (!refresh || refresh.cid !== clientFingerprint(clientId) || refresh.aud !== mcpResource(origin)) {
     return oauthError("invalid_grant", "Refresh token is invalid or expired");
+  }
+  // Each refresh mints a new 30-day refresh token, so a client registered
+  // before the redirect rules tightened would otherwise live on indefinitely.
+  if (!client.redirect_uris.every(isAllowedRedirectUri)) {
+    return oauthError("invalid_grant", "This client's redirect address is no longer allowed; reconnect");
   }
   // Refreshing is where a removed LMS user would otherwise keep a session
   // going for 30 days; stop them here as well as on every MCP request.
