@@ -44,7 +44,8 @@ export type Feature =
   | "summary_stats"
   | "pm_dashboard"
   | "quiz_sessions"
-  | "teacher_feedback";
+  | "teacher_feedback"
+  | "alumni";
 
 // Feature access levels
 export type FeatureAccess = "none" | "view" | "edit";
@@ -67,6 +68,9 @@ const FEATURE_PERMISSIONS: Record<Feature, Record<UserRole, FeatureAccess>> = {
   // program_admin: "edit" — feedback setup is the same class of PM fieldwork.
   // `holistic_mentorship_admin` is scoped to its own feature only.
   teacher_feedback: { teacher: "none", program_manager: "edit", program_admin: "edit", holistic_mentorship_admin: "none", admin: "edit", pmu_manager: "none", pmu_govt_school_user: "none" },
+  // Alumni tab (add pass-outs / update alumni records). Admin-only for the first
+  // release; a dedicated alumni role is a planned follow-up.
+  alumni: { teacher: "none", program_manager: "none", program_admin: "none", holistic_mentorship_admin: "none", admin: "edit", pmu_manager: "none", pmu_govt_school_user: "none" },
 };
 
 // Features gated to CoE/Nodal programs only (NVS-only users get "none")

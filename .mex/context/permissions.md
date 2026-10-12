@@ -22,7 +22,7 @@ edges:
     condition: when a user is wrongly denied or wrongly granted access
   - target: patterns/add-api-route.md
     condition: when adding a route that needs gating
-last_updated: 2026-09-30
+last_updated: 2026-10-12
 ---
 
 # Permissions
@@ -55,6 +55,7 @@ admin surface but every admin mutation route 403s it via the `forWrite` guard op
 - **Holistic Notes authorship:** only the current Mentor may draft or Submit; submitted Notes are correctable only by their author while that author remains the current Mentor. Draft content and draft-existence metadata (state, revision, timestamp, and answer count) are returned only to the authoring current Mentor, including when the read-only override removes edit access. Every other viewer derives progress as though the draft does not exist: normally Pending, while an otherwise Skipped Phase remains Skipped, until submission creates Completed. Replacement Mentors can read submitted history and receive an editable blank form with a public revision token of `0` after an unsubmitted draft is erased.
 - **Holistic privacy erasure:** the LMS privacy-deletion endpoint and shared action policy deny every role, including global Admin. Existing immutable tombstones remain enforced by Profile regeneration, Notes writes, Historical imports, and the read-side erased-content notice; erasure is owned by the coordinated external process.
 - **Staff Management Academic Mentor safeguards:** deleting a Teacher-linked permission blocks on any Academic Mentor-Mentee Mapping history; Teacher exit/revoke blocks only on active Mentees. These checks use `academic_mentorship_mentor_mentee_mappings.mentor_user_id` (`user.id`), not `user_permission.id`, and blocker messages link back to `/admin/academic-mentorship` when School/year context is available.
+- **Alumni:** the `alumni` feature (School page "Alumni" tab, `/api/alumni/*`) is `edit` for `admin` only and `none` for every other role in this first release; `read_only` admins can view but not save. Routes gate through `authorizeAlumni` (`src/lib/alumni/access.ts`): signed in → `alumni` feature (edit for saves) → `canAccessSchool` for the School or the Student's School (a Student with no School needs level 3). Centre pages never show the tab. Saves go to the DB Service (`POST /alumni`, `PATCH /alumni/:id`), never Postgres.
 - **`read_only` downgrade:** `edit` → `view`.
 
 Per-row ownership uses `ownsRecord(permission, programId)` — admins own all, null program_id (unassigned) is editable by anyone with feature edit, otherwise the record's `program_id` must be in the user's programs.
