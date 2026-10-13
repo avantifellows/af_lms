@@ -14,6 +14,7 @@ import {
   streamForCmsExamTrack,
   type CmsExamTrack,
 } from "@/lib/cms-tests";
+import { aiatNextStep } from "@/lib/aiat-survey";
 
 // Create a quiz session from a new-CMS test. This is the SYNCHRONOUS replacement for the
 // legacy SNS -> etl-data-flow sessionCreator Lambda: af_lms builds the quiz in quiz-backend,
@@ -239,6 +240,15 @@ export async function POST(request: NextRequest) {
   const showAnswers = body.showAnswers ?? true;
   const gurukulFormatType = shuffle ? "qa" : body.gurukulFormatType || "both";
 
+  // AIAT tests chain into a short feedback survey shown BEFORE the scorecard. Detected from
+  // the CMS test name and routed to one of three surveys by the student's group + stream
+  // (resolved above). Null for non-AIAT tests, in which case no next step is attached.
+  const aiatStep = aiatNextStep({
+    testName: body.testName,
+    group,
+    stream: body.stream,
+  });
+
   // 1. Build the quiz in quiz-backend from the CMS test (this writes to quiz Mongo).
   let quizId: string;
   let quizDuration: number | undefined;
@@ -258,6 +268,9 @@ export async function POST(request: NextRequest) {
         // no gate, so review_immediate=false would still show answers immediately.
         session_end_time: istWallClockWindowEnd(body.endTime),
         ...(quizLangCode ? { lang_code: quizLangCode } : {}),
+        // Attach the AIAT before-scorecard survey (if this is an AIAT). quiz-backend writes
+        // these onto the quiz doc's metadata, which the quiz-taking frontend reads.
+        ...(aiatStep ?? {}),
       }),
     });
     if (!quizRes.ok) {
