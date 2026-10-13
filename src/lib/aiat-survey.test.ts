@@ -84,7 +84,10 @@ describe("aiatNextStep", () => {
     // templating the frontend fills; no real id leaked in
     expect(step!.next_step_url).toContain("apiKey={apiKey}");
     expect(step!.next_step_url).toContain("return_to={quizId}");
-    expect(step!.next_step_url).toContain("autoStart=true");
+    // autoStart must NOT be in the URL — the player appends it from next_step_autostart,
+    // and a duplicate param would disable auto-start in the router.
+    expect(step!.next_step_url).not.toContain("autoStart");
+    expect(step!.next_step_autostart).toBe(true);
   });
 
   it("routes a broad EnableStudents AIAT to the report-only survey", () => {

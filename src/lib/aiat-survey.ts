@@ -69,9 +69,12 @@ export function aiatNextStep(params: {
   if (!isAiatTestName(params.testName)) return null;
   const surveyId = surveyQuizIdForAiat(params.group, params.stream);
   return {
+    // Note: do NOT put autoStart in this URL. The quiz player appends autoStart=true itself
+    // when next_step_autostart is set (below); a literal one here would duplicate the param,
+    // and the router reads the resulting array as "not true", silently disabling auto-start.
     next_step_url:
       `${QUIZ_FRONTEND_BASE}/form/${surveyId}` +
-      `?apiKey={apiKey}&singlePageMode=true&autoStart=true&return_to={quizId}`,
+      `?apiKey={apiKey}&singlePageMode=true&return_to={quizId}`,
     next_step_text: "Continue to survey",
     next_step_before_scores: true,
     next_step_autostart: true,
