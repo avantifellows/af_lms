@@ -5,6 +5,7 @@ import {
   resolveBatchGroups,
 } from "@/lib/quiz-session-access";
 import { istWallClockWindowEnd, utcToISTDate } from "@/lib/quiz-session-time";
+import { quizDurationSeconds } from "@/lib/quiz-duration";
 import { resolveGradeId } from "@/lib/curriculum-options";
 import {
   CMS_SOURCE,
@@ -240,6 +241,7 @@ export async function POST(request: NextRequest) {
 
   // 1. Build the quiz in quiz-backend from the CMS test (this writes to quiz Mongo).
   let quizId: string;
+  let quizDuration: number | undefined;
   let warnings: string[] = [];
   try {
     const quizRes = await fetch(`${QUIZ_BACKEND_URL}/quiz/from-cms`, {
@@ -266,7 +268,11 @@ export async function POST(request: NextRequest) {
         { status: 502 }
       );
     }
-    const quizData = (await quizRes.json()) as { id?: string; warnings?: string[] };
+    const quizData = (await quizRes.json()) as {
+      id?: string;
+      warnings?: string[];
+      time_limit?: unknown;
+    };
     if (!quizData.id) {
       console.error("quiz-backend /quiz/from-cms returned no quiz id:", quizData);
       return NextResponse.json(
@@ -276,6 +282,7 @@ export async function POST(request: NextRequest) {
     }
     quizId = quizData.id;
     warnings = quizData.warnings ?? [];
+    quizDuration = quizDurationSeconds(quizData);
   } catch (err) {
     console.error("Failed to reach quiz backend:", err);
     return NextResponse.json({ error: "Failed to reach quiz backend" }, { status: 502 });
@@ -382,6 +389,8 @@ export async function POST(request: NextRequest) {
       date_created: utcToISTDate(new Date().toISOString()),
       created_by: access.email,
       created_from: "lms",
+      // Only sessionCreator wrote this before, and this path never goes through it.
+      ...(quizDuration !== undefined ? { quiz_duration_seconds: quizDuration } : {}),
     },
   };
 
