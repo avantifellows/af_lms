@@ -13,7 +13,7 @@ edges:
     condition: when the field also needs to be editable after enrolment
   - target: context/conventions.md
     condition: for the closed-code-set rule a dropdown field must follow
-last_updated: 2026-10-08
+last_updated: 2026-10-13
 ---
 
 # Add a field to the Student Enrolment form
@@ -30,7 +30,23 @@ So a column existing on `student`, and even being cast by `Student.changeset`, i
 enough. `Student.changeset` covers `PATCH /student/:id` (Edit Student); it does not cover
 enrolment. Check `lms_student_ingestion.ex` directly, never the schema alone.
 
-## Steps
+## First decide which screen the field belongs on
+Add Student is **not** enabled for physical centres: their Students are captured and edited
+entirely through the Enrollment tab's Edit Student modal. A field put only on Add Student
+therefore reaches the online-centre cohort alone. Ask who fills it in before choosing:
+
+- **Needed for every Student, or correctable later** → Edit Student (`EditStudentModal.tsx`).
+  This is the `PATCH /api/student/[id]` path; it needs only the column and the
+  `Student.changeset` cast on the DB Service, so there is **no coordinated release**. Add the
+  key to `LmsStudentEditPayload` and `STUDENT_EDITABLE_FIELDS`, canonicalize it in
+  `canonicalizeStudentEditPayload`, add it to `STUDENT_COLUMNS` in `school-students.ts` (which
+  covers the school and centre rosters together) and to the `Student` type, then render it.
+  Issue #395 / PR #403 is the worked example.
+- **Must be captured at enrolment itself** → the Add Student form, with the coordinated
+  DB Service ingestion change below.
+- Both screens is fine, but it is two contracts, not one.
+
+## Steps (enrolment form)
 1. **DB Service first.** Confirm the column, its CHECK constraint and the `changeset` cast
    exist. Then in `lib/dbservice/lms_student_ingestion.ex`:
    - add the key to `@phone_allowed_row_keys`;
@@ -59,8 +75,9 @@ enrolment. Check `lms_student_ingestion.ex` directly, never the schema alone.
   measurement, a full exam name) still submits the bare code the CHECK constraint accepts.
 - An approved-mode test in the DB Service suite must call
   `LmsStudentRegistrationMode.put_test_active_mode("approved")`, or it gets a 409 mismatch.
-- A field added to the form but not to Edit Student can never be corrected afterwards —
-  decide that explicitly rather than by omission.
+- A field added to the form but not to Edit Student can never be corrected afterwards, and
+  never reaches a physical centre at all — decide which screen it belongs on explicitly
+  rather than by omission. Issue #395 shipped to Add Student first and had to be moved.
 
 ## Verify
 - [ ] `@phone_allowed_row_keys` names the key, and both normalize functions map it.

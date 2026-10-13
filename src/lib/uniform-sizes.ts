@@ -1,18 +1,18 @@
-// Shared uniform-size vocabulary for Student enrolment. Imported by the student-addition
-// validation and the Add Student form, so the sizes the UI offers can never drift from the
-// sizes the server accepts. No server-only imports here — safe for client bundles.
+// Shared uniform-size vocabulary. Imported by the student-edit validation and the Edit
+// Student form, so the sizes the UI offers can never drift from the sizes the server
+// accepts. No server-only imports here — safe for client bundles.
 
 // Everything the DB Service `student` table stores: the `student_tshirt_size_check` and
 // `student_track_pant_size_check` constraints accept exactly these codes, or NULL.
 export const UNIFORM_SIZES = ["XXS", "XS", "S", "M", "L", "XL", "XXL", "XXXL"] as const;
 
-// The subset the Student Enrolment form offers, smallest first. The vendor's size chart
-// starts at XS, so XXS stays storable but is never offered at enrolment.
-export const ENROLMENT_UNIFORM_SIZES = ["XS", "S", "M", "L", "XL", "XXL", "XXXL"] as const;
-export type EnrolmentUniformSize = (typeof ENROLMENT_UNIFORM_SIZES)[number];
+// The subset the form offers, smallest first. The vendor's size chart starts at XS, so
+// XXS stays storable (and editable where a row already has it) but is never offered.
+export const OFFERED_UNIFORM_SIZES = ["XS", "S", "M", "L", "XL", "XXL", "XXXL"] as const;
+export type OfferedUniformSize = (typeof OFFERED_UNIFORM_SIZES)[number];
 
 // Measurements come from the vendor's chart; only the code is stored.
-const TSHIRT_SIZE_LABELS: Record<EnrolmentUniformSize, string> = {
+const TSHIRT_SIZE_LABELS: Record<OfferedUniformSize, string> = {
   XS: 'XS (Chest 34")',
   S: 'S (Chest 36")',
   M: 'M (Chest 38–40")',
@@ -22,7 +22,7 @@ const TSHIRT_SIZE_LABELS: Record<EnrolmentUniformSize, string> = {
   XXXL: 'XXXL (Chest 46–48")',
 };
 
-const TRACK_PANT_SIZE_LABELS: Record<EnrolmentUniformSize, string> = {
+const TRACK_PANT_SIZE_LABELS: Record<OfferedUniformSize, string> = {
   XS: 'XS (Waist 26")',
   S: 'S (Waist 28")',
   M: 'M (Waist 30–32")',
@@ -32,19 +32,31 @@ const TRACK_PANT_SIZE_LABELS: Record<EnrolmentUniformSize, string> = {
   XXXL: 'XXXL (Waist 38–40")',
 };
 
-// Narrow an arbitrary value to a size the enrolment form offers.
-export function isEnrolmentUniformSize(value: unknown): value is EnrolmentUniformSize {
+// Narrow an arbitrary value to a size the form offers.
+export function isOfferedUniformSize(value: unknown): value is OfferedUniformSize {
   return typeof value === "string" &&
-    (ENROLMENT_UNIFORM_SIZES as readonly string[]).includes(value);
+    (OFFERED_UNIFORM_SIZES as readonly string[]).includes(value);
 }
 
 // Display label for a T-shirt size code. Unknown codes (e.g. the storable-but-unoffered
 // XXS on an existing row) render as-is rather than disappearing from the UI.
 export function formatTshirtSize(size: string): string {
-  return isEnrolmentUniformSize(size) ? TSHIRT_SIZE_LABELS[size] : size;
+  return isOfferedUniformSize(size) ? TSHIRT_SIZE_LABELS[size] : size;
 }
 
 // Display label for a Track Pant size code; same unknown-code behaviour as above.
 export function formatTrackPantSize(size: string): string {
-  return isEnrolmentUniformSize(size) ? TRACK_PANT_SIZE_LABELS[size] : size;
+  return isOfferedUniformSize(size) ? TRACK_PANT_SIZE_LABELS[size] : size;
+}
+
+// `{ value, label }` options for a select, in chart order.
+export function tshirtSizeOptions() {
+  return OFFERED_UNIFORM_SIZES.map((size) => ({ value: size, label: TSHIRT_SIZE_LABELS[size] }));
+}
+
+export function trackPantSizeOptions() {
+  return OFFERED_UNIFORM_SIZES.map((size) => ({
+    value: size,
+    label: TRACK_PANT_SIZE_LABELS[size],
+  }));
 }
