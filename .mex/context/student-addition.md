@@ -55,7 +55,7 @@ The planning branch is `grill/nvs-phone-registration-mode`; ADR 0006 records the
 
 GitHub issue https://github.com/avantifellows/af_lms/issues/395 asked for optional
 `tshirt_size` and `track_pant_size` so vendor orders can be placed from roster data. PR #401
-first put them on the Add Student form; PR #403 moved them to **Edit Student**, because
+first put them on the Add Student form; PR #407 moved them to **Edit Student**, because
 physical centres never open Add Student — all their Student information is captured and
 edited through the Enrollment tab, so collecting the sizes at enrolment reached only the
 online-centre cohort.

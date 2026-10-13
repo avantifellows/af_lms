@@ -69,7 +69,7 @@ Then read this file fully before doing anything else in this session.
 - September 23 fresh production-to-local repair retest: 37,892 LMS-created 2026–27 Students split 37,394 / 243 / 253 / 1 / 1. The owner confirmed the 91 newly found dropout/undo events were mistakes. A fresh local QA clone passed all five status repairs and 1,647 timestamp fixes in that order, with replay and full-table checks. All cohort current-status gaps are resolved locally. Production was read only. See `context/student-addition.md` and the private `release-records/repair-retest-confirmed-20260923/QA.md`.
 
 - Edit Student captures optional T-shirt and Track Pant sizes (issue #395). PR #401 put them
-  on Add Student; PR #403 moved them to Edit Student, because physical centres never open Add
+  on Add Student; PR #407 moved them to Edit Student, because physical centres never open Add
   Student — their Students are captured and edited through the Enrollment tab, so the
   enrolment form reached only the online-centre cohort. Both dropdowns offer the vendor chart
   XS–XXXL with its chest/waist measurements from the shared `src/lib/uniform-sizes.ts` set

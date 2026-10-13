@@ -41,7 +41,7 @@ therefore reaches the online-centre cohort alone. Ask who fills it in before cho
   key to `LmsStudentEditPayload` and `STUDENT_EDITABLE_FIELDS`, canonicalize it in
   `canonicalizeStudentEditPayload`, add it to `STUDENT_COLUMNS` in `school-students.ts` (which
   covers the school and centre rosters together) and to the `Student` type, then render it.
-  Issue #395 / PR #403 is the worked example.
+  Issue #395 / PR #407 is the worked example.
 - **Must be captured at enrolment itself** → the Add Student form, with the coordinated
   DB Service ingestion change below.
 - Both screens is fine, but it is two contracts, not one.
