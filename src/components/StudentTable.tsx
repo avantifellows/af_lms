@@ -63,6 +63,8 @@ export interface Student {
   guardian_profession?: string | null;
   annual_family_income?: string | null;
   monthly_family_income?: string | null;
+  tshirt_size?: string | null;
+  track_pant_size?: string | null;
   program_name: string | null;
   program_id: number | null;
   student_program_ids?: Array<number | string> | null;

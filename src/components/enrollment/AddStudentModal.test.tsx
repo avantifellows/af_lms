@@ -433,50 +433,19 @@ describe("AddStudentModal", () => {
       ),
     ).toBeInTheDocument();
   });
-  it("offers both uniform sizes with their measurements in either registration mode", () => {
+
+  // Sizes moved to Edit Student: physical centres never open this form, so collecting
+  // them here reached only the online-centre cohort.
+  it("does not collect uniform sizes in either registration mode", () => {
     const { unmount } = render(<AddStudentModal {...baseProps} />);
 
-    expect(screen.getByLabelText("T-shirt Size")).toBeInTheDocument();
-    expect(screen.getByLabelText("Track Pant Size")).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: 'M (Chest 38\u201340")' })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: 'M (Waist 30\u201332")' })).toBeInTheDocument();
-    expect(screen.queryByRole("option", { name: /^XXS/ })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("T-shirt Size")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Track Pant Size")).not.toBeInTheDocument();
 
     unmount();
     render(<AddStudentModal {...baseProps} registrationMode={PHONE_REGISTRATION_MODE} />);
 
-    expect(screen.getByLabelText("T-shirt Size")).toBeInTheDocument();
-    expect(screen.getByLabelText("Track Pant Size")).toBeInTheDocument();
-  });
-
-  it("leaves submit enabled when both sizes are left blank", async () => {
-    render(<AddStudentModal {...baseProps} />);
-    await fillValidForm();
-
-    expect(screen.getByLabelText("T-shirt Size")).toHaveValue("");
-    expect(screen.getByLabelText("Track Pant Size")).toHaveValue("");
-    expect(screen.getByRole("button", { name: "Add Student" })).toBeEnabled();
-  });
-
-  it("submits the selected size codes, not their measurement labels", async () => {
-    vi.mocked(fetch).mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          totals: { total: 1, created: 1, duplicate_in_file: 0, already_exists: 0, rejected: 0 },
-          results: [{ status: "created", generated_student_id: "6876543210" }],
-        }),
-        { status: 200 },
-      ),
-    );
-    render(<AddStudentModal {...baseProps} registrationMode={PHONE_REGISTRATION_MODE} />);
-    const user = await fillValidPhoneForm();
-    await user.selectOptions(screen.getByLabelText("T-shirt Size"), "XL");
-    await user.selectOptions(screen.getByLabelText("Track Pant Size"), "L");
-
-    await user.click(screen.getByRole("button", { name: "Add Student" }));
-
-    await waitFor(() => expect(fetch).toHaveBeenCalled());
-    const body = JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string);
-    expect(body).toMatchObject({ tshirt_size: "XL", track_pant_size: "L" });
+    expect(screen.queryByLabelText("T-shirt Size")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Track Pant Size")).not.toBeInTheDocument();
   });
 });

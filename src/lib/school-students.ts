@@ -65,6 +65,8 @@ const STUDENT_COLUMNS = `
       s.guardian_profession,
       s.annual_family_income,
       s.monthly_family_income,
+      s.tshirt_size,
+      s.track_pant_size,
       s.status,
       er_grade.group_id as grade_id,
       gr.number as grade,
