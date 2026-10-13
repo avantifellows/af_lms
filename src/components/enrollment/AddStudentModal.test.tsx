@@ -40,6 +40,24 @@ async function fillValidForm() {
   return user;
 }
 
+// The Phone-mode form drops PEN, Grade 10 Roll no and Annual Family Income, and takes the
+// parent phone as the Student ID.
+async function fillValidPhoneForm() {
+  const user = userEvent.setup();
+  await user.selectOptions(screen.getByLabelText("Grade"), "12");
+  await user.type(screen.getByLabelText("Student Name"), "asha k kumar");
+  await user.type(screen.getByLabelText("Date of Birth"), "2010-01-02");
+  await user.selectOptions(screen.getByLabelText("Gender"), "Female");
+  await user.selectOptions(screen.getByLabelText("Category"), "Gen");
+  await user.selectOptions(screen.getByLabelText("CWSN"), "No");
+  await user.selectOptions(screen.getByLabelText("G10 board"), "Others");
+  await user.selectOptions(screen.getByLabelText("Board Stream"), "PCM");
+  await user.selectOptions(screen.getByLabelText("Primary Exam preparing for"), "Engineering");
+  await user.type(screen.getByLabelText("Father Name"), "ravi kumar");
+  await user.type(screen.getByLabelText("Parents Phone Number"), "6876543210");
+  return user;
+}
+
 describe("AddStudentModal", () => {
   beforeEach(() => {
     vi.resetAllMocks();
@@ -77,19 +95,7 @@ describe("AddStudentModal", () => {
       ),
     );
     render(<AddStudentModal {...baseProps} registrationMode={PHONE_REGISTRATION_MODE} />);
-    const user = userEvent.setup();
-
-    await user.selectOptions(screen.getByLabelText("Grade"), "12");
-    await user.type(screen.getByLabelText("Student Name"), "asha k kumar");
-    await user.type(screen.getByLabelText("Date of Birth"), "2010-01-02");
-    await user.selectOptions(screen.getByLabelText("Gender"), "Female");
-    await user.selectOptions(screen.getByLabelText("Category"), "Gen");
-    await user.selectOptions(screen.getByLabelText("CWSN"), "No");
-    await user.selectOptions(screen.getByLabelText("G10 board"), "Others");
-    await user.selectOptions(screen.getByLabelText("Board Stream"), "PCM");
-    await user.selectOptions(screen.getByLabelText("Primary Exam preparing for"), "Engineering");
-    await user.type(screen.getByLabelText("Father Name"), "ravi kumar");
-    await user.type(screen.getByLabelText("Parents Phone Number"), "6876543210");
+    const user = await fillValidPhoneForm();
 
     expect(screen.getByText("Parent phone number will be the Student ID: 6876543210")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add Student" })).toBeEnabled();
@@ -426,5 +432,51 @@ describe("AddStudentModal", () => {
         /This identifier already belongs to Asha Kumar at JNV Other \(JNV999, UDISE 99999999999\), Jaipur, Rajasthan/,
       ),
     ).toBeInTheDocument();
+  });
+  it("offers both uniform sizes with their measurements in either registration mode", () => {
+    const { unmount } = render(<AddStudentModal {...baseProps} />);
+
+    expect(screen.getByLabelText("T-shirt Size")).toBeInTheDocument();
+    expect(screen.getByLabelText("Track Pant Size")).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: 'M (Chest 38\u201340")' })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: 'M (Waist 30\u201332")' })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /^XXS/ })).not.toBeInTheDocument();
+
+    unmount();
+    render(<AddStudentModal {...baseProps} registrationMode={PHONE_REGISTRATION_MODE} />);
+
+    expect(screen.getByLabelText("T-shirt Size")).toBeInTheDocument();
+    expect(screen.getByLabelText("Track Pant Size")).toBeInTheDocument();
+  });
+
+  it("leaves submit enabled when both sizes are left blank", async () => {
+    render(<AddStudentModal {...baseProps} />);
+    await fillValidForm();
+
+    expect(screen.getByLabelText("T-shirt Size")).toHaveValue("");
+    expect(screen.getByLabelText("Track Pant Size")).toHaveValue("");
+    expect(screen.getByRole("button", { name: "Add Student" })).toBeEnabled();
+  });
+
+  it("submits the selected size codes, not their measurement labels", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          totals: { total: 1, created: 1, duplicate_in_file: 0, already_exists: 0, rejected: 0 },
+          results: [{ status: "created", generated_student_id: "6876543210" }],
+        }),
+        { status: 200 },
+      ),
+    );
+    render(<AddStudentModal {...baseProps} registrationMode={PHONE_REGISTRATION_MODE} />);
+    const user = await fillValidPhoneForm();
+    await user.selectOptions(screen.getByLabelText("T-shirt Size"), "XL");
+    await user.selectOptions(screen.getByLabelText("Track Pant Size"), "L");
+
+    await user.click(screen.getByRole("button", { name: "Add Student" }));
+
+    await waitFor(() => expect(fetch).toHaveBeenCalled());
+    const body = JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string);
+    expect(body).toMatchObject({ tshirt_size: "XL", track_pant_size: "L" });
   });
 });

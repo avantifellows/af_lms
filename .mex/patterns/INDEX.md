@@ -1,6 +1,6 @@
 ---
 name: pattern-index
-last_updated: 2026-09-23
+last_updated: 2026-10-08
 ---
 
 # Pattern Index
@@ -30,6 +30,7 @@ Lookup table for all pattern files in this directory. Check here before starting
 |---------|----------|
 | [add-api-route.md](add-api-route.md) | Adding any endpoint under `src/app/api/` (gate + read/write) |
 | [add-component.md](add-component.md) | Adding a React component + its colocated Vitest/RTL test |
+| [add-student-enrolment-field.md](add-student-enrolment-field.md) | Adding a field to the Student Enrolment form (the AF LMS + DB Service pair) |
 | [add-visit-action-type.md](add-visit-action-type.md) | Adding a new PM visit action type (the ~8-file registry change) |
 | [db-service-write.md](db-service-write.md) | Writing students/batches/quiz-sessions/documents (proxy to the DB Service) |
 | [debug-access-denied.md](debug-access-denied.md) | Diagnosing unexpected 401/403, empty lists, or wrongly-granted access |

@@ -18,7 +18,7 @@ edges:
     condition: when adding LMS API routes for create or bulk upload
   - target: patterns/db-service-write.md
     condition: when proxying student writes to the DB Service
-last_updated: 2026-09-30
+last_updated: 2026-10-08
 ---
 
 # Student Addition
@@ -50,6 +50,36 @@ GitHub issue https://github.com/avantifellows/af_lms/issues/296 is the build-rea
 - Non-LMS phone correction for this cohort is unsupported until the generic import lookup is fixed in `avantifellows/db-service#703`; that follow-up is separate and assigned to Aman.
 
 The planning branch is `grill/nvs-phone-registration-mode`; ADR 0006 records the permanent phone-identity trade-off. AF LMS now has Phone Registration Mode active in code. The coordinated production deployment and no-write mode-mismatch probe completed on September 7. The separate EnableStudents manual Portal login smoke gate in `docs/nvs-phone-registration-release.md` remains to be recorded; the non-EnableStudents regression below does not substitute for it. The accepted concurrent-create race without a cross-table database constraint remains documented, not fixed.
+
+## Uniform Sizes on the Enrolment Form
+
+GitHub issue https://github.com/avantifellows/af_lms/issues/395 adds optional `tshirt_size`
+and `track_pant_size` to the Add Student form, so vendor orders can be placed from enrolment
+data. Both are dropdowns over the vendor chart XS–XXXL, labelled with their chest or waist
+measurement; only the bare size code is stored. The codes, the offered subset and the labels
+live in `src/lib/uniform-sizes.ts` — a dependency-free client-safe module, so the dropdown
+and the server validation cannot drift. `UNIFORM_SIZES` is the full set the DB Service
+`student_tshirt_size_check` / `student_track_pant_size_check` constraints accept;
+`ENROLMENT_UNIFORM_SIZES` is the narrower list the form offers, which is why XXS is storable
+but never offered.
+
+Both fields are optional: a blank is accepted and the key is **omitted from the row**, never
+sent as `""`. Neither field is a bulk-upload column, so `getStudentAdditionUploadColumns`,
+both static templates and the rejected-row CSV contract are unchanged. Because the Add
+Student form submits exactly its mode's upload columns in Phone mode, the two keys are
+carried by `FORM_ONLY_FIELDS` in `AddStudentModal.tsx` instead.
+
+**This is a coordinated release.** DB Service PR #750 added the columns, the CHECK
+constraints and the `Student.changeset` cast — which is enough for `PATCH /student/:id` but
+**not** for enrolment. `lib/dbservice/lms_student_ingestion.ex` builds its student attributes
+from a literal map and, in the active Phone Registration Mode, rejects any row key outside
+`@phone_allowed_row_keys`. Without the matching DB Service change, every Phone-mode
+enrolment row fails with
+"Unknown fields are not allowed in phone mode: track_pant_size, tshirt_size". See
+`patterns/add-student-enrolment-field.md`.
+
+Not in scope, and deliberately so: Edit Student cannot correct a size, the bulk templates do
+not collect one, and the roster export does not carry one.
 
 ## Settled Product Shape
 - v1 is JNV PMU / JNV NVS only. In current LMS code this is `PROGRAM_IDS.NVS` (`64`, label `JNV NVS`) from `src/lib/constants.ts`.

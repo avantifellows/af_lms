@@ -606,6 +606,85 @@ describe("validateStudentAdditionInput", () => {
   });
 });
 
+describe("uniform sizes on a student addition row", () => {
+  it("carries both canonical size codes through to the row", () => {
+    const result = validateStudentAdditionInput(
+      { ...validInput, tshirt_size: "m", track_pant_size: "XXXL" },
+      { mode: APPROVED_REGISTRATION_MODE, today: new Date("2026-07-01T00:00:00Z") },
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected valid input");
+    expect(result.row).toMatchObject({ tshirt_size: "M", track_pant_size: "XXXL" });
+  });
+
+  it("omits a blank size instead of sending an empty string the DB Service would reject", () => {
+    const result = validateStudentAdditionInput(
+      { ...validInput, tshirt_size: "L", track_pant_size: "   " },
+      { mode: APPROVED_REGISTRATION_MODE, today: new Date("2026-07-01T00:00:00Z") },
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected a blank Track Pant Size to be accepted");
+    expect(result.row).toMatchObject({ tshirt_size: "L" });
+    expect(result.row).not.toHaveProperty("track_pant_size");
+  });
+
+  it("omits both sizes when neither is selected", () => {
+    const result = validateStudentAdditionInput(
+      { ...validInput },
+      { mode: APPROVED_REGISTRATION_MODE, today: new Date("2026-07-01T00:00:00Z") },
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected sizes to be optional");
+    expect(result.row).not.toHaveProperty("tshirt_size");
+    expect(result.row).not.toHaveProperty("track_pant_size");
+  });
+
+  it("rejects a size outside the offered chart, including the storable-but-unoffered XXS", () => {
+    const result = validateStudentAdditionInput(
+      { ...validInput, tshirt_size: "XXS", track_pant_size: "XXXXL" },
+      { mode: APPROVED_REGISTRATION_MODE, today: new Date("2026-07-01T00:00:00Z") },
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected unsupported sizes to be rejected");
+    expect(result.fieldErrors.tshirt_size).toBe("T-shirt Size is not valid");
+    expect(result.fieldErrors.track_pant_size).toBe("Track Pant Size is not valid");
+  });
+
+  it("keeps the sizes out of the Phone-mode restricted and upload column contracts", () => {
+    const result = validateStudentAdditionInput(
+      {
+        grade: "12",
+        student_name: "asha k kumar",
+        date_of_birth: "02/01/2010",
+        gender: "Female",
+        category: "Gen",
+        physically_handicapped: "No",
+        g10_board: "Others",
+        board_stream: "PCM",
+        stream: "Engineering",
+        father_name: "ravi kumar",
+        phone: "6876543210",
+        tshirt_size: "XL",
+        track_pant_size: "L",
+      },
+      { mode: PHONE_REGISTRATION_MODE, today: new Date("2026-07-01T00:00:00Z") },
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected Phone-mode sizes to be accepted");
+    expect(result.row).toMatchObject({ tshirt_size: "XL", track_pant_size: "L" });
+    for (const mode of [PHONE_REGISTRATION_MODE, APPROVED_REGISTRATION_MODE] as const) {
+      const keys = getStudentAdditionUploadColumns(mode).map((column) => column.key);
+      expect(keys).not.toContain("tshirt_size");
+      expect(keys).not.toContain("track_pant_size");
+    }
+  });
+});
+
 describe("formatStudentAdditionExistingMatch", () => {
   it("includes every available safe identity", () => {
     expect(
