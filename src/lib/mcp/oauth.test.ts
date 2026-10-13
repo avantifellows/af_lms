@@ -73,6 +73,9 @@ describe("redirect URIs", () => {
     ["http://127.0.0.1/cb", true],
     ["http://evil.example/cb", false],
     ["https://claude.ai/cb#frag", false],
+    ["https://claude.ai/other/page", false],
+    ["https://claude.ai/api/mcp/auth_callback/x", false],
+    ["https://claude.ai/api/mcp/auth_callback?next=x", false],
     ["javascript:alert(1)", false],
     ["not a url", false],
   ])("%s allowed=%s", (uri, allowed) => expect(isAllowedRedirectUri(uri)).toBe(allowed));

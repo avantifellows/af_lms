@@ -118,7 +118,10 @@ const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 // Claude's web/desktop OAuth callbacks. Registration is open, so any other
 // https host would let anyone register a client named "Claude" that sends the
 // code to their own server; the only https redirects allowed are Claude's.
+// The path is pinned too: any other page on those hosts that echoes or
+// forwards its query string would hand over the code.
 export const CLAUDE_REDIRECT_HOSTS = new Set(["claude.ai", "claude.com"]);
+const CLAUDE_CALLBACK_PATH = "/api/mcp/auth_callback";
 
 export function isLoopbackRedirect(url: URL): boolean {
   return url.protocol === "http:" && LOOPBACK_HOSTS.has(url.hostname);
@@ -134,7 +137,9 @@ export function isAllowedRedirectUri(uri: string): boolean {
     return false;
   }
   if (url.hash || url.username || url.password) return false;
-  if (url.protocol === "https:") return CLAUDE_REDIRECT_HOSTS.has(url.hostname) && !url.port;
+  if (url.protocol === "https:") {
+    return CLAUDE_REDIRECT_HOSTS.has(url.hostname) && !url.port && url.pathname === CLAUDE_CALLBACK_PATH && !url.search;
+  }
   return isLoopbackRedirect(url);
 }
 
