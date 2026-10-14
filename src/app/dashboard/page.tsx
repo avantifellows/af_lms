@@ -30,7 +30,7 @@ import {
 } from "@/lib/dashboard-groupings";
 import Pagination from "@/components/Pagination";
 import { statusBadgeClass } from "@/lib/visit-actions";
-import { buildOwnOrManagedVisitPredicate, buildVisitsActor } from "@/lib/visits-policy";
+import { buildOwnOrManagedVisitPredicate, buildVisitsActor, canViewVisitSummary } from "@/lib/visits-policy";
 import { Card } from "@/components/ui";
 
 
@@ -276,9 +276,9 @@ type DashboardData = {
   visitTotal: number;
 };
 
-function canViewVisitSummary(permission: DashboardPermission) {
-  const supportedRole = permission.role === "admin" || permission.role === "program_admin";
-  return supportedRole && getFeatureAccess(permission, "visits").canView;
+function canOpenVisitSummary(email: string, permission: DashboardPermission) {
+  return getFeatureAccess(permission, "visits").canView &&
+    canViewVisitSummary(buildVisitsActor(email, permission));
 }
 
 function canViewCurriculumSummary(permission: DashboardPermission, context: DashboardProgramContext) {
@@ -287,13 +287,14 @@ function canViewCurriculumSummary(permission: DashboardPermission, context: Dash
 }
 
 function dashboardFeatures(
+  email: string,
   permission: DashboardPermission,
   context: DashboardProgramContext,
   canViewHolisticAdmin: boolean,
 ): DashboardFeatures {
   return {
     hasPMAccess: getFeatureAccess(permission, "pm_dashboard").canView,
-    canViewVisitSummary: canViewVisitSummary(permission),
+    canViewVisitSummary: canOpenVisitSummary(email, permission),
     showCurriculumSummary: canViewCurriculumSummary(permission, context),
     canViewHolisticAdmin,
   };
@@ -515,7 +516,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     { user: { email } },
     "program_read",
   );
-  const features = dashboardFeatures(permission, programContext, holisticAccess.ok);
+  const features = dashboardFeatures(email, permission, programContext, holisticAccess.ok);
   const seated = isCentreSeated(permission);
   const view = resolveDashboardView(viewParam, seated, permission, programContext);
   const schoolCodes = await getAccessibleSchoolCodes(email, permission);

@@ -1146,6 +1146,15 @@ describe("DashboardPage (server component)", () => {
         });
       }
 
+      it("shows the Visit Summary link to a manager", async () => {
+        setupManagerSession();
+        routeQueries({ visitTotal: "0", recentVisits: [] });
+
+        render(await DashboardPage({ searchParams: Promise.resolve({ view: "centres" }) }));
+
+        expect(screen.getByRole("link", { name: "Visit Summary" })).toHaveAttribute("href", "/school-visit-summary");
+      });
+
       it("reads own Visits plus every Visit at the managed Centres' Schools", async () => {
         setupManagerSession();
         routeQueries({ visitTotal: "9", recentVisits: [] });
