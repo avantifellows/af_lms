@@ -960,3 +960,138 @@ export async function seedVisitAction(
 
   return { actionId: result.rows[0].id };
 }
+
+/**
+ * Centre switcher fixture (#388), reusable by its sibling specs.
+ *
+ * Centres, all named "Switcher E2E …" so they sort after the other fixtures'
+ * Centres on the dashboard:
+ *  - alpha (A): JNV Surguja (19269), JNV CoE   — eligible
+ *  - alphaNodal (B): JNV Surguja, JNV Nodal    — eligible; same name and School
+ *    as A (the real JNV Adilabad CoE/Nodal shape)
+ *  - charlie (C): JNV Durg (19006), no Program — eligible
+ *  - delta (D): JNV Durg, JNV CoE              — eligible; at the seated user's
+ *    accessible School but not one of their seats
+ *  - inactive: JNV Surguja, is_active = false  — never listed
+ *  - schoolLess: no School                     — never listed
+ *  - outside (E): JNV Gariaband (19260)        — outside both users' scope
+ *
+ * Users (sign in with `signInAs` from e2e/fixtures/auth):
+ *  - seated: seats at A and C only → lists A, C
+ *  - schoolScoped: seatless level 1 at 19269 + 19006 → lists A, B, C, D
+ *
+ * Seed in beforeAll and remove in afterAll so other specs' Centre lists are
+ * unaffected. Seeding is idempotent (it removes any previous copy first).
+ */
+export const CENTRE_SWITCHER_USERS = {
+  seated: { name: "Switcher Seated Teacher", email: "e2e-switcher-seated@test.local" },
+  schoolScoped: { name: "Switcher School PM", email: "e2e-switcher-school@test.local" },
+} as const;
+
+export interface CentreSwitcherFixture {
+  centres: {
+    alpha: number;
+    alphaNodal: number;
+    charlie: number;
+    delta: number;
+    inactive: number;
+    schoolLess: number;
+    outside: number;
+  };
+}
+
+const CENTRE_SWITCHER_NAME_PREFIX = "Switcher E2E ";
+
+async function switcherSchoolId(pool: Pool, code: string): Promise<number> {
+  const result = await pool.query<{ id: number }>(`SELECT id FROM school WHERE code = $1`, [code]);
+  if (result.rows.length === 0) throw new Error(`Centre switcher fixture School ${code} is missing`);
+  return Number(result.rows[0].id);
+}
+
+async function insertSwitcherCentre(
+  pool: Pool,
+  name: string,
+  schoolId: number | null,
+  programId: number | null,
+  isActive = true
+): Promise<number> {
+  const result = await pool.query<{ id: number }>(
+    `INSERT INTO centres (name, school_id, program_id, is_physical, is_active, inserted_at, updated_at)
+     VALUES ($1, $2, $3, true, $4, (NOW() AT TIME ZONE 'UTC'), (NOW() AT TIME ZONE 'UTC'))
+     RETURNING id`,
+    [`${CENTRE_SWITCHER_NAME_PREFIX}${name}`, schoolId, programId, isActive]
+  );
+  return Number(result.rows[0].id);
+}
+
+async function upsertSwitcherUser(
+  pool: Pool,
+  user: { name: string; email: string },
+  schoolCodes: string[] | null
+): Promise<number> {
+  const userRows = await pool.query<{ id: number }>(
+    `WITH existing AS (
+       SELECT id FROM "user" WHERE LOWER(email) = LOWER($1) LIMIT 1
+     ), inserted AS (
+       INSERT INTO "user" (email, role, inserted_at, updated_at)
+       SELECT $1, 'teacher', (NOW() AT TIME ZONE 'UTC'), (NOW() AT TIME ZONE 'UTC')
+       WHERE NOT EXISTS (SELECT 1 FROM existing)
+       RETURNING id
+     )
+     SELECT id FROM inserted UNION ALL SELECT id FROM existing LIMIT 1`,
+    [user.email]
+  );
+  const userId = Number(userRows.rows[0].id);
+  await pool.query(
+    `INSERT INTO user_permission (
+       email, level, role, program_ids, school_codes, regions, full_name, read_only, user_id, revoked_at
+     )
+     VALUES ($1, 1, 'teacher', ARRAY[1, 2], $2, NULL, $3, false, $4, NULL)
+     ON CONFLICT (email) DO UPDATE SET
+       level = 1, role = 'teacher', program_ids = ARRAY[1, 2], school_codes = $2,
+       regions = NULL, full_name = $3, read_only = false, user_id = $4, revoked_at = NULL`,
+    [user.email, schoolCodes, user.name, userId]
+  );
+  return userId;
+}
+
+export async function removeCentreSwitcherFixture(pool: Pool): Promise<void> {
+  const emails = Object.values(CENTRE_SWITCHER_USERS).map((user) => user.email);
+  await pool.query(
+    `DELETE FROM centre_positions
+     WHERE centre_id IN (SELECT id FROM centres WHERE name LIKE $1)
+        OR user_id IN (SELECT id FROM "user" WHERE email = ANY($2))`,
+    [`${CENTRE_SWITCHER_NAME_PREFIX}%`, emails]
+  );
+  await pool.query(`DELETE FROM centres WHERE name LIKE $1`, [`${CENTRE_SWITCHER_NAME_PREFIX}%`]);
+  await pool.query(`DELETE FROM user_permission WHERE email = ANY($1)`, [emails]);
+}
+
+export async function seedCentreSwitcherFixture(pool: Pool): Promise<CentreSwitcherFixture> {
+  await removeCentreSwitcherFixture(pool);
+  const surguja = await switcherSchoolId(pool, "19269");
+  const durg = await switcherSchoolId(pool, "19006");
+  const gariaband = await switcherSchoolId(pool, "19260");
+
+  const centres = {
+    alpha: await insertSwitcherCentre(pool, "Alpha", surguja, 1),
+    alphaNodal: await insertSwitcherCentre(pool, "Alpha", surguja, 2),
+    charlie: await insertSwitcherCentre(pool, "Charlie", durg, null),
+    delta: await insertSwitcherCentre(pool, "Delta", durg, 1),
+    inactive: await insertSwitcherCentre(pool, "Inactive", surguja, 1, false),
+    schoolLess: await insertSwitcherCentre(pool, "Schoolless", null, 1),
+    outside: await insertSwitcherCentre(pool, "Outside", gariaband, 1),
+  };
+
+  const seatedUserId = await upsertSwitcherUser(pool, CENTRE_SWITCHER_USERS.seated, null);
+  for (const centreId of [centres.alpha, centres.charlie]) {
+    await pool.query(
+      `INSERT INTO centre_positions (centre_id, role, user_id, inserted_at, updated_at)
+       VALUES ($1, 'physics', $2, (NOW() AT TIME ZONE 'UTC'), (NOW() AT TIME ZONE 'UTC'))`,
+      [centreId, seatedUserId]
+    );
+  }
+  await upsertSwitcherUser(pool, CENTRE_SWITCHER_USERS.schoolScoped, ["19269", "19006"]);
+
+  return { centres };
+}

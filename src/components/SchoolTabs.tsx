@@ -3,6 +3,7 @@
 import { type KeyboardEvent, useId, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { resolveVisibleTab } from "@/lib/roster-tabs";
 import { statusBadgeClass } from "@/lib/visit-actions";
 import { Card } from "@/components/ui";
 
@@ -20,13 +21,13 @@ interface Props {
 export default function SchoolTabs({ tabs, defaultTab }: Props) {
   const searchParams = useSearchParams();
 
-  const visible = (id: string | null | undefined) => (id && tabs.some((t) => t.id === id) ? id : null);
-  const fallback = visible(defaultTab) ?? tabs[0]?.id ?? "";
+  const tabIds = tabs.map((t) => t.id);
+  const fallback = resolveVisibleTab(null, tabIds, defaultTab);
   const urlTab = searchParams.get("tab");
   // The URL decides the tab: a ?tab= naming a visible tab, otherwise the
   // fallback. A click shows its tab at once, ahead of its replace landing; any
   // later change to ?tab= (Back/Forward) wins over that click.
-  const fromUrl = visible(urlTab) ?? fallback;
+  const fromUrl = resolveVisibleTab(urlTab, tabIds, defaultTab);
   const [clicked, setClicked] = useState<{ tab: string; urlTab: string | null } | null>(null);
   // Once ?tab= moves on, the click is spent — even if history later returns
   // to the ?tab= it was made from.

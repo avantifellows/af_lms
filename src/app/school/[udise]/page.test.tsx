@@ -603,6 +603,18 @@ describe("SchoolPage (server component)", () => {
 
   // --- Page rendering ---
 
+  // The Centre switcher is a Centre-page aid: a School page never loads its list.
+  it("never runs the Centre switcher list query", async () => {
+    setupAdminDefaults();
+
+    await renderPage();
+
+    const switcherCalls = mockQuery.mock.calls.filter(([sql]) =>
+      String(sql).includes("c.school_id IS NOT NULL"),
+    );
+    expect(switcherCalls).toHaveLength(0);
+  });
+
   it("renders PageHeader with correct subtitle including UDISE code", async () => {
     setupAdminDefaults({
       district: "Bhavnagar",
