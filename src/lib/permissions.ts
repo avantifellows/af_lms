@@ -7,6 +7,7 @@ import {
   PROGRAM_IDS,
   PROGRAM_IDS_ORDERED,
 } from "./constants";
+import { VISIT_MANAGER_SEAT_ROLES } from "./staff-shared";
 
 // Re-exported from constants so existing `@/lib/permissions` imports keep
 // working while the definitions live in a client-safe module.
@@ -171,6 +172,11 @@ export interface ResolvedScope {
   // getProgramContextSync, so a seated user is never locked out of the program
   // their seat implies even when program_ids is empty. "all" for level-3 admins.
   programs: Set<number> | "all";
+  // Schools of the centres where the person holds a visit-manager seat
+  // (VISIT_MANAGER_SEAT_ROLES: PM, SPM, PH). They read every Visit at these
+  // Schools, whoever made it (#291). Absent means none; level-3 admins already
+  // read every Visit through their role.
+  visitManagedSchools?: Set<string>;
 }
 
 // Program permission context
@@ -219,15 +225,15 @@ export async function getUserPermission(
   };
 }
 
-// Centre ids the user holds an active seat at (centre_positions.user_id).
-async function centresForUser(userId: number): Promise<number[]> {
-  const rows = await query<{ centre_id: number | string }>(
-    `SELECT DISTINCT centre_id
+// The user's active seats (centre_positions.user_id): centre id + seat role.
+async function seatsForUser(userId: number): Promise<{ centreId: number; role: string }[]> {
+  const rows = await query<{ centre_id: number | string; role: string }>(
+    `SELECT DISTINCT centre_id, role
      FROM centre_positions
      WHERE user_id = $1 AND deleted_at IS NULL`,
     [userId]
   );
-  return rows.map((r) => Number(r.centre_id));
+  return rows.map((r) => ({ centreId: Number(r.centre_id), role: r.role }));
 }
 
 // School codes for a set of centres (centres.school_id → school.code). Returns
@@ -287,21 +293,31 @@ function resolvePmuScope(p: UserPermission): ResolvedScope {
 }
 
 // Adds the user's centre seats, and the schools and programs those centres
-// belong to, into the given sets (mutated in place, in that order).
+// belong to, into the given sets (mutated in place, in that order). Also adds
+// the schools of their visit-manager seats into visitManagedSchools.
 async function addSeatScope(
   userId: number,
   schools: Set<string>,
   centres: Set<number>,
-  programs: Set<number>
+  programs: Set<number>,
+  visitManagedSchools: Set<string>
 ): Promise<void> {
   try {
-    const centreIds = await centresForUser(userId);
+    const seats = await seatsForUser(userId);
+    const centreIds = [...new Set(seats.map((s) => s.centreId))];
     centreIds.forEach((id) => centres.add(id));
     for (const code of await schoolCodesForCentres(centreIds)) {
       schools.add(code);
     }
     for (const programId of await programsForCentres(centreIds)) {
       programs.add(programId);
+    }
+    const managerRoles: readonly string[] = VISIT_MANAGER_SEAT_ROLES;
+    const managedCentreIds = [
+      ...new Set(seats.filter((s) => managerRoles.includes(s.role)).map((s) => s.centreId)),
+    ];
+    for (const code of await schoolCodesForCentres(managedCentreIds)) {
+      visitManagedSchools.add(code);
     }
   } catch (err) {
     // The centre tables/columns may not exist yet on an environment that
@@ -330,10 +346,13 @@ export async function resolveScope(p: UserPermission): Promise<ResolvedScope> {
   // Seat-derived programs only — explicit program_ids are unioned in by
   // getProgramContextSync, which is where program access is actually decided.
   const programs = new Set<number>();
+  const visitManagedSchools = new Set<string>();
 
-  if (p.user_id != null) await addSeatScope(p.user_id, schools, centres, programs);
+  if (p.user_id != null) {
+    await addSeatScope(p.user_id, schools, centres, programs, visitManagedSchools);
+  }
 
-  return { schools, centres, programs };
+  return { schools, centres, programs, visitManagedSchools };
 }
 
 // getUserPermission + resolved scope. Use this (not getUserPermission) anywhere

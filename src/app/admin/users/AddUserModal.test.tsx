@@ -475,7 +475,7 @@ describe("AddUserModal — role descriptions", () => {
     await user.selectOptions(roleSelect, "program_manager");
 
     expect(screen.getByText(
-      "Program Managers can conduct school visits, view assigned schools, and monitor scoped Holistic Mentorship progress",
+      "Program Managers can conduct school visits, view all visits at centres where they hold a PM/SPM/PH seat, view assigned schools, and monitor scoped Holistic Mentorship progress",
     )).toBeInTheDocument();
   });
 

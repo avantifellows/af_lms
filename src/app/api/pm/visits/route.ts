@@ -3,10 +3,13 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { query } from "@/lib/db";
 import { validateGpsReading } from "@/lib/geo-validation";
+import { getFeatureAccess } from "@/lib/permissions";
 import {
   apiError,
+  buildOwnOrManagedVisitPredicate,
   buildVisitScopePredicate,
   canAccessVisitSchoolScope,
+  canEditVisit,
   isScopedVisitsRole,
   parseJsonBody,
   requireVisitsAccess,
@@ -38,9 +41,15 @@ export async function GET(request: NextRequest) {
   let paramIndex = 1;
 
   if (actor.role === "program_manager") {
-    whereClauses.push(`LOWER(v.pm_email) = LOWER($${paramIndex})`);
-    params.push(actor.email);
-    paramIndex++;
+    // Own Visits plus every Visit at their visit-manager Centres' Schools (#291).
+    const scope = buildOwnOrManagedVisitPredicate(actor, {
+      startIndex: paramIndex,
+      pmEmailColumn: "v.pm_email",
+      schoolCodeColumn: "v.school_code",
+    });
+    whereClauses.push(scope.clause);
+    params.push(...scope.params);
+    paramIndex += scope.params.length;
   } else if (pmEmail) {
     whereClauses.push(`LOWER(v.pm_email) = LOWER($${paramIndex})`);
     params.push(pmEmail);
@@ -85,7 +94,8 @@ export async function GET(request: NextRequest) {
              ORDER BY (up.revoked_at IS NULL) DESC
              LIMIT 1) AS pm_name,
            v.visit_date, v.status,
-           v.completed_at, v.inserted_at, v.updated_at
+           v.completed_at, v.inserted_at, v.updated_at,
+           s.region AS school_region
     FROM lms_pm_school_visits v
     LEFT JOIN school s ON s.code = v.school_code
   `;
@@ -95,7 +105,24 @@ export async function GET(request: NextRequest) {
   queryText += ` ORDER BY v.visit_date DESC, v.inserted_at DESC LIMIT $${paramIndex}`;
   params.push(limit);
 
-  const visits = await query(queryText, params);
+  const rows = await query<{
+    pm_email: string;
+    school_code: string;
+    school_region: string | null;
+  }>(queryText, params);
+
+  // can_edit tells the list whether to offer Continue: a manager now sees other
+  // people's Visits at their Centres (#291), which open read-only. Same verdict
+  // as the Visit page: feature edit access AND the per-Visit edit policy.
+  const featureCanEdit = getFeatureAccess(actor.permission, "visits").canEdit;
+  const visits = rows.map(({ school_region, ...visit }) => ({
+    ...visit,
+    can_edit: featureCanEdit && canEditVisit(actor, {
+      pmEmail: visit.pm_email,
+      schoolCode: visit.school_code,
+      schoolRegion: school_region,
+    }),
+  }));
 
   return NextResponse.json({ visits });
 }
