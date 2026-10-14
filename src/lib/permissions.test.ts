@@ -554,6 +554,38 @@ describe("resolveScope", () => {
     expect(scope.programs).toEqual(new Set([2]));
   });
 
+  // #291: PM/SPM/PH seats make their centres' Schools visit-managed; APM and
+  // teaching seats only give school access.
+  it("collects the Schools of active visit-manager seats into visitManagedSchools", async () => {
+    mockQuery
+      .mockResolvedValueOnce([
+        { centre_id: 5, role: "spm", centre_active: true },
+        { centre_id: 6, role: "apm", centre_active: true },
+        { centre_id: 7, role: "physics", centre_active: true },
+        { centre_id: 8, role: "pm", centre_active: false },
+      ]) // seatsForUser
+      .mockResolvedValueOnce([{ code: "11111" }, { code: "22222" }, { code: "33333" }, { code: "44444" }]) // seat schools
+      .mockResolvedValueOnce([{ program_id: 1 }]) // seat programs
+      .mockResolvedValueOnce([{ code: "11111" }]); // visit-manager seat schools
+    const scope = await resolveScope(makePermission({ level: 1, school_codes: [], user_id: 42 }));
+    expect(scope.centres).toEqual(new Set([5, 6, 7, 8]));
+    // The PM seat at inactive centre 8 manages nothing.
+    expect(scope.visitManagedSchools).toEqual(new Set(["11111"]));
+    const [managedSql, managedParams] = mockQuery.mock.calls[3] as [string, unknown[]];
+    expect(managedSql).toContain("FROM centres c");
+    expect(managedParams).toEqual([[5]]);
+  });
+
+  it("manages no Schools when the user holds no visit-manager seat", async () => {
+    mockQuery
+      .mockResolvedValueOnce([{ centre_id: 6, role: "apm", centre_active: true }])
+      .mockResolvedValueOnce([{ code: "22222" }])
+      .mockResolvedValueOnce([{ program_id: 1 }]);
+    const scope = await resolveScope(makePermission({ level: 1, school_codes: [], user_id: 42 }));
+    expect(scope.visitManagedSchools).toEqual(new Set());
+    expect(mockQuery).toHaveBeenCalledTimes(3);
+  });
+
   it("skips the seat lookup entirely when user_id is null", async () => {
     const scope = await resolveScope(
       makePermission({ level: 1, school_codes: ["70705"], user_id: null })

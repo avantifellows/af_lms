@@ -106,6 +106,9 @@ interface VisitHistoryProps {
     pm_name?: string | null;
     inserted_at?: string | null;
     completed_at?: string | null;
+    // False for a Visit this user can only read (e.g. a manager viewing someone
+    // else's Visit at their Centre, #291): offer View, never Continue.
+    can_edit?: boolean;
   }[];
   schoolCode: string;
   canEdit?: boolean;
@@ -200,7 +203,7 @@ export function VisitHistorySection({ visits, schoolCode, canEdit = false }: Vis
               href={`/visits/${visit.id}`}
               className="self-start sm:self-center px-5 py-2.5 text-sm font-bold uppercase tracking-wide border-2 border-accent text-accent hover:bg-accent hover:text-text-on-accent transition-colors shrink-0"
             >
-              {visit.status === "completed" ? "View" : "Continue"}
+              {visit.status === "completed" || visit.can_edit === false ? "View" : "Continue"}
             </Link>
           </div>
         ))}

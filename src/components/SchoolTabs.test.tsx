@@ -388,6 +388,22 @@ describe("VisitHistorySection", () => {
     expect(screen.getByRole("link", { name: "Continue" })).toBeInTheDocument();
   });
 
+  // #291: a manager sees other people's Visits at their Centres, read-only.
+  it("shows 'View', not 'Continue', for an in-progress visit the user cannot edit", () => {
+    const visits = [
+      {
+        id: 3,
+        visit_date: "2026-01-20",
+        status: "in_progress",
+        pm_email: "apm@avantifellows.org",
+        can_edit: false,
+      },
+    ];
+    render(<VisitHistorySection visits={visits} schoolCode="SCH001" />);
+    expect(screen.queryByRole("link", { name: "Continue" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View" })).toHaveAttribute("href", "/visits/3");
+  });
+
   it("shows 'Continue' link for in-progress visits without completed_at", () => {
     const visits = [
       {
