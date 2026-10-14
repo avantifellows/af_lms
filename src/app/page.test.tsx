@@ -46,6 +46,21 @@ describe("LoginPage", () => {
     });
   });
 
+  it.each([
+    ["/mcp", "/mcp"],
+    ["//evil.example", "/dashboard"],
+    ["/\\evil.example", "/dashboard"],
+    ["/\t/evil.example", "/dashboard"],
+    ["https://evil.example", "/dashboard"],
+  ])("returns to callbackUrl=%s → %s after Google sign-in", async (next, expected) => {
+    window.history.pushState({}, "", `/?callbackUrl=${encodeURIComponent(next)}`);
+    const user = userEvent.setup();
+    render(<LoginPage />);
+    await user.click(screen.getByText("Sign in with Google"));
+    expect(mockSignIn).toHaveBeenCalledWith("google", { callbackUrl: expected });
+    window.history.pushState({}, "", "/");
+  });
+
   // --- Dev login ---
 
   it("renders dev login buttons in non-production", () => {

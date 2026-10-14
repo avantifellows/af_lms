@@ -19,6 +19,16 @@ const DEV_PERSONAS = [
   { key: "pmu_govt_school_user", label: "PMU Govt School User", description: "Level 1, 1 JNV School" },
 ] as const;
 
+// Where to go after sign-in: a same-site path from ?callbackUrl= (e.g. /mcp),
+// else the dashboard. Resolved by the browser's own URL parser and kept only
+// if it stays on this origin, so tricks like "//x", "/\\x" or "/\tx" can't leave.
+function returnTo(): string {
+  const next = new URLSearchParams(window.location.search).get("callbackUrl");
+  if (!next?.startsWith("/")) return "/dashboard";
+  const url = new URL(next, window.location.origin);
+  return url.origin === window.location.origin ? url.pathname + url.search + url.hash : "/dashboard";
+}
+
 export default function LoginPage() {
   const [devLoading, setDevLoading] = useState<string | null>(null);
   const router = useRouter();
@@ -28,7 +38,7 @@ export default function LoginPage() {
     const result = await signIn("dev-login", { persona, redirect: false });
     setDevLoading(null);
     if (result?.ok) {
-      router.push("/dashboard");
+      router.push(returnTo());
     }
   };
 
@@ -42,7 +52,7 @@ export default function LoginPage() {
 
         <div className="mt-8 space-y-4">
           <button
-            onClick={() => signIn("google", { callbackUrl: "/dashboard" })}
+            onClick={() => signIn("google", { callbackUrl: returnTo() })}
             className="flex w-full items-center justify-center gap-3 rounded-lg border border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 transition-colors"
           >
             <svg className="h-5 w-5" viewBox="0 0 24 24">
