@@ -283,6 +283,28 @@ describe("SchoolVisitSummaryDetailPage", () => {
     await expect(SchoolVisitSummaryDetailPage(pageProps())).rejects.toThrow("REDIRECT:/dashboard");
   });
 
+  it("scopes a visit-manager PM's detail lookup to their Centres' Schools", async () => {
+    setupAuth(
+      {
+        ...pmPermission,
+        scope: {
+          schools: new Set(["SC001", "SC009"]),
+          centres: new Set([1]),
+          programs: new Set([1]),
+          visitManagedSchools: new Set(["SC001"]),
+        },
+      },
+      { user: { email: "pm@avantifellows.org" } }
+    );
+    mockQuery.mockResolvedValueOnce([]);
+
+    await expect(SchoolVisitSummaryDetailPage(pageProps("999"))).rejects.toThrow("NOT_FOUND");
+
+    const [sql, params] = mockQuery.mock.calls[0];
+    expect(sql).toContain("v.school_code = ANY($2)");
+    expect(params).toEqual(["999", ["SC001"]]);
+  });
+
   it("returns not found for out-of-scope or soft-deleted visits and uses scoped detail SQL", async () => {
     setupAuth(programAdminPermission, { user: { email: "program-admin@avantifellows.org" } });
     mockQuery.mockResolvedValueOnce([]);

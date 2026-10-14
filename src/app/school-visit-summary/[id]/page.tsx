@@ -20,9 +20,9 @@ import {
   type RemarkEntry,
 } from "@/lib/visit-summary";
 import {
-  buildVisitScopePredicate,
+  buildVisitSummaryScopePredicate,
   buildVisitsActor,
-  isScopedVisitsRole,
+  canViewVisitSummary,
 } from "@/lib/visits-policy";
 
 interface PageProps {
@@ -289,7 +289,7 @@ function collectRemarkGroups(actions: VisitActionDetail[]): RemarkGroup[] {
 
 async function getVisitSummaryDetail(id: string, actorEmail: string, permission: NonNullable<Awaited<ReturnType<typeof getUserPermission>>>) {
   const actor = buildVisitsActor(actorEmail, permission);
-  const scope = buildVisitScopePredicate(actor, {
+  const scope = buildVisitSummaryScopePredicate(actor, {
     startIndex: 2,
     schoolCodeColumn: "v.school_code",
     schoolRegionColumn: "s.region",
@@ -523,7 +523,7 @@ export default async function SchoolVisitSummaryDetailPage({ params }: PageProps
   }
 
   const actor = buildVisitsActor(session.user.email, permission);
-  if (!isScopedVisitsRole(actor)) {
+  if (!canViewVisitSummary(actor)) {
     if (actor.role === "program_manager") {
       redirect("/visits");
     }
