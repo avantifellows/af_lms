@@ -965,16 +965,16 @@ function rosterHeading(scope: RosterScope): { title: string; subtitle: string } 
 
 /**
  * Back link: to the dashboard when the user can see more than one school, or
- * always for a centre (it's reached from the dashboard's Centres tab). A bare
- * /dashboard is a loop for a single-seat user — the landing shortcut sends them
- * straight back here — so centre pages point at the Centres tab explicitly,
- * which is where the card they came from lives anyway.
+ * always for a centre (it's reached from the dashboard's Centres tab). Both name
+ * the dashboard view holding the card the user came from: a bare /dashboard
+ * lands physical-Program users on Centres (and loops a single-seat user back
+ * here via the landing shortcut), so School pages point at JNV NVS Schools.
  */
 function defaultRosterBackHref(isCentre: boolean, permission: UserPermission): string | undefined {
   if (isCentre) return "/dashboard?view=centres";
   // A PMU Govt School User has exactly one School, so never a back link.
   return hasMultipleSchools(permission) && permission.role !== PMU_GOVT_SCHOOL_USER_ROLE
-    ? "/dashboard"
+    ? "/dashboard?view=jnv-nvs"
     : undefined;
 }
 

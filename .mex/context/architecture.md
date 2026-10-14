@@ -18,7 +18,7 @@ edges:
     condition: when a route or page needs to gate access
   - target: context/visits.md
     condition: when working on PM school visits or visit action types
-last_updated: 2026-09-29
+last_updated: 2026-10-08
 ---
 
 # Architecture
@@ -64,7 +64,45 @@ source. Phase links and locked-phase redirects preserve it, and the Student Back
 link restores `source=progress` on the School URL. Ordinary School drill-downs
 retain `source=school`, so their original dashboard return does not change.
 
+## Issue #383 navigation fixes — implemented in PR #394
+
+The feature branch implements every published slice; child issues #389–#393 are
+closed and issue #383 remains open while PR #394 awaits review:
+
+- **#389 Visit totals:** both dashboard views use the exact trimmed/case-folded
+  count of the actor's owned non-deleted Visits. The capped JNV Recent Visits
+  query uses the same owner predicate (see `context/visits.md`).
+- **#390 dashboard routing:** `resolveDashboardView` defaults users with resolved
+  `hasCoEOrNodal` context to Physical Centres and others to JNV NVS Schools after
+  the existing seated/PMU/Holistic hard routes and an explicit valid `?view=`.
+  School/Centre returns and JNV pagination name their dashboard view explicitly.
+- **#391 card actions:** dashboard School and Centre cards receive no Start Visit
+  action. Their primary links and the existing gated Visit entry points on the
+  School/Centre pages remain unchanged.
+- **#392 filter history:** deliberate Performance choices push reversible entries;
+  automatic Grade reconciliation replaces; Back/Forward restores the complete
+  URL-backed selection. Rapid choices compose, and stale grade/overview results
+  cannot publish over the current state.
+- **#393 report and tab history:** reports push one entry, outer tabs follow
+  historical `tab`, and in-page report return consumes browser history only when
+  its in-memory trail proves the matching overview predecessor. Unknown provenance
+  safely replaces away only `session`; obsolete report data and names are inert.
+
+The final follow-up pass also resolves the two low-severity review findings. A
+report-to-overview transition recovers a deeply scrolled viewport when the shorter
+overview would otherwise sit entirely above it, while preserving scroll when the
+overview still overlaps the viewport. Browser coverage now directly proves the
+report → Grade push → Enrollment replace → Back journey remounts Performance at
+the historical report and Grade.
+
+This is implemented, PR-ready branch behavior, not merged production behavior.
+Centre Switcher remains separate in #388. The change adds no schema, API,
+permission, or persistent history store. The Ralph PRD/slice artifacts and write
+boundaries remain under `.ralph/workspaces/383/`; configured council rounds were
+zero, and no ADR conflict was identified.
+
 ## Key Components
+
 - **`src/lib/db.ts`** — the `query<T>()` helper over a singleton `pg.Pool` (god node, ~137 edges). Reads and direct writes both go through it. `withTransaction()` for multi-statement writes.
 - **`src/lib/permissions.ts`** — the access-control core: `getUserPermission`/`getResolvedPermission`, `getFeatureAccess` (feature×role matrix), `canAccessSchool*`, `isAdmin`. See `context/permissions.md`.
 - **`src/lib/visits-policy.ts`** — visit-specific gate (`requireVisitsAccess`, `enforceVisit*`, `buildVisitScopePredicate`, `apiError`). See `context/visits.md`.

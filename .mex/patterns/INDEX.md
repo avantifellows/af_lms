@@ -32,6 +32,7 @@ Lookup table for all pattern files in this directory. Check here before starting
 | [add-component.md](add-component.md) | Adding a React component + its colocated Vitest/RTL test |
 | [add-student-enrolment-field.md](add-student-enrolment-field.md) | Adding a Student field — choosing between Edit Student and the enrolment form, and the AF LMS + DB Service pair enrolment needs |
 | [add-visit-action-type.md](add-visit-action-type.md) | Adding a new PM visit action type (the ~8-file registry change) |
+| [create-ralph-slices.md](create-ralph-slices.md) | Publishing or refreshing Ralph AFK sub-issues and native blocking edges |
 | [db-service-write.md](db-service-write.md) | Writing students/batches/quiz-sessions/documents (proxy to the DB Service) |
 | [debug-access-denied.md](debug-access-denied.md) | Diagnosing unexpected 401/403, empty lists, or wrongly-granted access |
 | [debug-bulk-workbook.md](debug-bulk-workbook.md) | Diagnosing XLSX/CSV upload parsing, encryption, or row-validation failures |
@@ -43,3 +44,4 @@ Lookup table for all pattern files in this directory. Check here before starting
 | [local-enrollment-repair.md](local-enrollment-repair.md) | Rehearsing audit-derived enrollment repairs on a dedicated local snapshot |
 | [merge-roster-changes.md](merge-roster-changes.md) | Merging overlapping school/centre roster queries and SQL bindings |
 | [reconcile-local-scaffold.md](reconcile-local-scaffold.md) | Cleaning up local .mex notes left on an older branch after related PRs merge |
+| [refresh-ralph-prd.md](refresh-ralph-prd.md) | Refreshing an existing GitHub issue PRD in a Ralph workspace |

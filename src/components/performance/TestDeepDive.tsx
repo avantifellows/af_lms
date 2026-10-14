@@ -35,6 +35,7 @@ export default function TestDeepDive({
 
   useEffect(() => {
     const controller = new AbortController();
+    let isCurrent = true;
     setLoading(true);
     setError(null);
     setData(null);
@@ -53,17 +54,23 @@ export default function TestDeepDive({
         return res.json();
       })
       .then((d: TestDeepDiveData) => {
+        if (!isCurrent) return;
         setData(d);
         if (onDataLoaded && d.summary.test_name) {
           onDataLoaded(d.summary.test_name);
         }
       })
       .catch((err) => {
-        if (err.name !== "AbortError") setError(err.message);
+        if (isCurrent && err.name !== "AbortError") setError(err.message);
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (isCurrent) setLoading(false);
+      });
 
-    return () => controller.abort();
+    return () => {
+      isCurrent = false;
+      controller.abort();
+    };
   }, [schoolUdise, grade, sessionId, program, stream]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (

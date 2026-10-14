@@ -12,7 +12,7 @@ interface CentreCardProps {
 /**
  * A single "Physical Centre" on the dashboard's Centres tab. Clicks through to
  * the centre roster page; mirrors SchoolCard (student count, grade breakdown,
- * optional actions like Start Visit).
+ * optional actions).
  *
  * A school-less centre has no page to open, so its card renders unlinked rather
  * than as a link to a 404.
