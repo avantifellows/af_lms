@@ -153,8 +153,31 @@ describe("canonicalizeStudentEditPayload", () => {
     });
   });
 
+  it("canonicalizes a uniform size and accepts a blank as a clear", () => {
+    expect(
+      canonicalizeStudentEditPayload({ tshirt_size: "xl", track_pant_size: " l " }),
+    ).toEqual({
+      ok: true,
+      fields: { tshirt_size: "XL", track_pant_size: "L" },
+    });
+    expect(canonicalizeStudentEditPayload({ tshirt_size: "" })).toEqual({
+      ok: true,
+      fields: { tshirt_size: "" },
+    });
+  });
+
+  // The form offers XS upwards, but a row already holding XXS must stay saveable.
+  it("accepts every size the DB Service stores, including the unoffered XXS", () => {
+    expect(canonicalizeStudentEditPayload({ track_pant_size: "XXS" })).toEqual({
+      ok: true,
+      fields: { track_pant_size: "XXS" },
+    });
+  });
+
   it.each([
     ["gender", "Femalee", "Gender must be Female, Male, or Other"],
+    ["tshirt_size", "XXXXL", "T-shirt Size is not valid"],
+    ["track_pant_size", "Medium", "Track Pant Size is not valid"],
     ["category", "Gen EWS", "Category is not valid"],
     ["g10_board", "CBSE?", "G10 board must be CBSE or Others"],
     ["board_stream", "PC-M", "Board Stream is not valid"],

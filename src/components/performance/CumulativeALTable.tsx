@@ -134,7 +134,11 @@ export default function CumulativeALTable({ schoolUdise, grade, program, stream,
   const [sortKey, setSortKey] = useState<SortKey>("al");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
 
+  // Only the current request may settle the table: a request that a filter
+  // change or Back/Forward has replaced (and aborted) must not end the new
+  // request's loading state or show its error.
   useEffect(() => {
+    let current = true;
     const controller = new AbortController();
     setLoading(true);
     setError(null);
@@ -154,13 +158,20 @@ export default function CumulativeALTable({ schoolUdise, grade, program, stream,
         }
         return res.json();
       })
-      .then((d: CumulativeALData) => setData(d))
-      .catch((err) => {
-        if (err.name !== "AbortError") setError(err.message);
+      .then((d: CumulativeALData) => {
+        if (current) setData(d);
       })
-      .finally(() => setLoading(false));
+      .catch((err) => {
+        if (current && err.name !== "AbortError") setError(err.message);
+      })
+      .finally(() => {
+        if (current) setLoading(false);
+      });
 
-    return () => controller.abort();
+    return () => {
+      current = false;
+      controller.abort();
+    };
   }, [schoolUdise, grade, program, stream, testGrade]);
 
   const groups = useMemo(() => (data ? buildGroups(data) : []), [data]);

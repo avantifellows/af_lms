@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
 // ---- mocks (hoisted) ----
 
@@ -15,11 +16,13 @@ const {
   mockGetCentreStudents,
   mockGetSchoolRoster,
   mockRouterRefresh,
+  mockRouterPush,
   mockGetAcademicMentorshipActorUserId,
   mockListAcademicMentorshipMappings,
   mockListAcademicMentorshipTeacherMentees,
   mockListHolisticAssignmentRoster,
   mockRequireHolisticMentorshipAccess,
+  searchParamsState,
 } = vi.hoisted(() => ({
   mockGetServerSession: vi.fn(),
   mockGetUserPermission: vi.fn(),
@@ -27,6 +30,7 @@ const {
   mockGetFeatureAccess: vi.fn(),
   mockQuery: vi.fn(),
   mockRouterRefresh: vi.fn(),
+  mockRouterPush: vi.fn(),
   mockRedirect: vi.fn((url: string) => {
     throw new Error(`REDIRECT:${url}`);
   }),
@@ -41,6 +45,9 @@ const {
   mockListAcademicMentorshipTeacherMentees: vi.fn(),
   mockListHolisticAssignmentRoster: vi.fn(),
   mockRequireHolisticMentorshipAccess: vi.fn(),
+  // The page's query string as useSearchParams reports it (not a vi.fn, so
+  // resetAllMocks leaves it alone; each switcher test sets it).
+  searchParamsState: { current: new URLSearchParams() },
 }));
 
 vi.mock("next-auth", () => ({ getServerSession: mockGetServerSession }));
@@ -48,7 +55,8 @@ vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("next/navigation", () => ({
   redirect: mockRedirect,
   notFound: mockNotFound,
-  useRouter: () => ({ refresh: mockRouterRefresh }),
+  useRouter: () => ({ refresh: mockRouterRefresh, push: mockRouterPush }),
+  useSearchParams: () => searchParamsState.current,
 }));
 vi.mock("@/lib/permissions", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/permissions")>();
@@ -61,9 +69,12 @@ vi.mock("@/lib/permissions", async (importOriginal) => {
   };
 });
 vi.mock("@/lib/db", () => ({ query: mockQuery }));
-vi.mock("@/lib/dashboard-groupings", () => ({
-  getCentreWithSchool: mockGetCentreWithSchool,
-}));
+// Only the page lookup is mocked: the Centre switcher list query stays real so
+// its SQL and params are asserted through mockQuery.
+vi.mock("@/lib/dashboard-groupings", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/dashboard-groupings")>();
+  return { ...actual, getCentreWithSchool: mockGetCentreWithSchool };
+});
 vi.mock("@/lib/school-students", () => ({
   getCentreStudents: mockGetCentreStudents,
   getSchoolRoster: mockGetSchoolRoster,
@@ -86,29 +97,9 @@ vi.mock("next/link", () => ({
   ),
 }));
 
-// Child components are stubs — this suite is about which tabs RosterPage builds
-// for a centre scope, not how each tab renders.
-vi.mock("@/components/PageHeader", () => ({
-  __esModule: true,
-  default: ({
-    title,
-    subtitle,
-    backHref,
-  }: {
-    title: string;
-    subtitle?: string;
-    backHref?: string;
-  }) => (
-    <div
-      data-testid="page-header"
-      data-title={title}
-      data-subtitle={subtitle || ""}
-      data-back-href={backHref || ""}
-    >
-      PageHeader
-    </div>
-  ),
-}));
+// Tab bodies are stubs — this suite is about which tabs RosterPage builds for a
+// centre scope, not how each tab renders. PageHeader is real so the Centre
+// switcher's heading/popup boundary is observable.
 vi.mock("@/components/SchoolTabs", () => ({
   __esModule: true,
   default: ({ tabs }: { tabs: { id: string; label: string; content: React.ReactNode }[] }) => (
@@ -382,10 +373,7 @@ describe("CentrePage → RosterPage (centre scope)", () => {
 
     await renderCentre("8");
 
-    expect(screen.getByTestId("page-header")).toHaveAttribute(
-      "data-back-href",
-      "/dashboard?view=centres"
-    );
+    expect(document.querySelector('header a[href="/dashboard?view=centres"]')).not.toBeNull();
   });
 
   // programsWithStudents counts a program when any student in scope merely dropped
@@ -482,5 +470,811 @@ describe("CentrePage → RosterPage (centre scope)", () => {
       "REDIRECT:/admin/holistic-mentorship",
     );
     expect(mockGetCentreStudents).not.toHaveBeenCalled();
+  });
+});
+
+// ---- Centre switcher ----
+
+// Rows the switcher list query returns, shaped as node-pg hands them back.
+type SwitcherRow = {
+  id: string;
+  name: string;
+  program_name: string | null;
+  school_name: string;
+  school_code: string;
+  type_label?: string | null;
+  category_label?: string | null;
+};
+
+const BHAVNAGAR_COE: SwitcherRow = {
+  id: "8",
+  name: "JNV Bhavnagar CoE",
+  program_name: "JNV CoE",
+  school_name: "JNV Bhavnagar",
+  school_code: "70705",
+};
+const ADILABAD_NODAL: SwitcherRow = {
+  id: "31",
+  name: "JNV Adilabad",
+  program_name: "JNV Nodal",
+  school_name: "JNV Adilabad",
+  school_code: "36001",
+};
+const ADILABAD_COE: SwitcherRow = {
+  id: "30",
+  name: "JNV Adilabad",
+  program_name: "JNV CoE",
+  school_name: "JNV Adilabad",
+  school_code: "36001",
+};
+const NAGALAND: SwitcherRow = {
+  id: "16",
+  name: "Nagaland Foundation",
+  program_name: null,
+  school_name: "JNV Kohima",
+  school_code: "13001",
+};
+
+// The list query is the only one that selects browsable centres joined to
+// their School code.
+const isSwitcherSql = (sql: string) =>
+  sql.includes("FROM centres c") && sql.includes("c.school_id IS NOT NULL");
+
+function switcherQueryCalls() {
+  return mockQuery.mock.calls.filter(([sql]) => isSwitcherSql(String(sql)));
+}
+
+function stubSwitcherRows(rows: SwitcherRow[]) {
+  mockQuery.mockImplementation(async (sql: string) => (isSwitcherSql(sql) ? rows : []));
+}
+
+function switcherTrigger() {
+  return within(screen.getByRole("heading", { level: 1 })).queryByRole("button");
+}
+
+describe("CentrePage → Centre switcher", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    mockRedirect.mockImplementation((url: string) => {
+      throw new Error(`REDIRECT:${url}`);
+    });
+    mockNotFound.mockImplementation(() => {
+      throw new Error("NOT_FOUND");
+    });
+    mockListAcademicMentorshipMappings.mockResolvedValue([]);
+    mockListAcademicMentorshipTeacherMentees.mockResolvedValue([]);
+    mockListHolisticAssignmentRoster.mockResolvedValue([]);
+    mockGetAcademicMentorshipActorUserId.mockResolvedValue(101);
+    mockRequireHolisticMentorshipAccess.mockResolvedValue({ ok: false, status: 403, error: "Forbidden" });
+    searchParamsState.current = new URLSearchParams();
+  });
+
+  it("turns the Centre title into a switcher button when another Centre is browsable", async () => {
+    setupCentre();
+    stubSwitcherRows([BHAVNAGAR_COE, ADILABAD_COE]);
+
+    await renderCentre("8");
+
+    const trigger = switcherTrigger();
+    expect(trigger).not.toBeNull();
+    expect(trigger).toHaveTextContent("JNV Bhavnagar CoE");
+    expect(trigger).toHaveAttribute("aria-haspopup", "listbox");
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(trigger).toHaveAccessibleDescription("Switch Centre");
+  });
+
+  it("keeps the plain title when the current Centre is the only browsable one", async () => {
+    setupCentre();
+    stubSwitcherRows([BHAVNAGAR_COE]);
+
+    await renderCentre("8");
+
+    expect(screen.getByRole("heading", { level: 1, name: "JNV Bhavnagar CoE" })).toBeInTheDocument();
+    expect(switcherTrigger()).toBeNull();
+  });
+
+  // Mocked rows can't prove exclusion — the predicate in the SQL does. An
+  // inactive or School-less Centre is never a row, so it never earns a switcher.
+  it("lists only active, School-linked Centres", async () => {
+    setupCentre();
+    stubSwitcherRows([BHAVNAGAR_COE]);
+
+    await renderCentre("8");
+
+    const [[sql]] = switcherQueryCalls();
+    expect(sql).toMatch(/WHERE c\.is_active AND c\.school_id IS NOT NULL/);
+    expect(sql).not.toContain("centre_students");
+  });
+
+  it("scopes a seated user's list to their seat Centres", async () => {
+    setupCentre({}, {
+      scope: {
+        schools: new Set(["70705", "36001"]),
+        centres: new Set([8, 30]),
+        programs: new Set([1]),
+      },
+    });
+    stubSwitcherRows([BHAVNAGAR_COE, ADILABAD_COE]);
+
+    await renderCentre("8");
+
+    const [[sql, params]] = switcherQueryCalls();
+    expect(sql).toContain("AND c.id = ANY($1)");
+    expect(sql).not.toContain("sch.code = ANY");
+    expect(params).toEqual([[8, 30]]);
+  });
+
+  it("scopes a seatless School-scoped user's list to their School codes", async () => {
+    setupCentre({}, {
+      email: "pm@avantifellows.org",
+      role: "program_manager",
+      school_codes: ["70705", "36001"],
+      scope: {
+        schools: new Set(["70705", "36001"]),
+        centres: new Set(),
+        programs: new Set(),
+      },
+    });
+    stubSwitcherRows([BHAVNAGAR_COE, ADILABAD_COE]);
+
+    await renderCentre("8");
+
+    const [[sql, params]] = switcherQueryCalls();
+    expect(sql).toContain("AND sch.code = ANY($1)");
+    expect(sql).not.toContain("c.id = ANY");
+    expect(params).toEqual([["70705", "36001"]]);
+  });
+
+  it("gives a global admin an unscoped list", async () => {
+    setupCentre({}, {
+      email: "admin@avantifellows.org",
+      level: 3,
+      role: "admin",
+      school_codes: null,
+      scope: { schools: "all", centres: "all", programs: "all" },
+    });
+    stubSwitcherRows([BHAVNAGAR_COE, ADILABAD_COE]);
+
+    await renderCentre("8");
+
+    const [[sql, params]] = switcherQueryCalls();
+    expect(sql).not.toContain("= ANY(");
+    expect(params).toEqual([]);
+    expect(switcherTrigger()).not.toBeNull();
+  });
+
+  // A regional user reaches the page by region, but region expansion only
+  // yields JNV School codes — at a non-JNV School that leaves an empty scope,
+  // which must not become an unscoped query.
+  it("runs no list query for an empty School scope", async () => {
+    setupCentre({}, {
+      email: "pm@avantifellows.org",
+      role: "program_manager",
+      level: 2,
+      school_codes: null,
+      regions: ["West"],
+      scope: { schools: new Set(), centres: new Set(), programs: new Set() },
+    });
+    stubSwitcherRows([BHAVNAGAR_COE, ADILABAD_COE]);
+
+    await renderCentre("8");
+
+    expect(screen.getByTestId("enrollment-tab-content")).toBeInTheDocument();
+    expect(switcherQueryCalls()).toHaveLength(0);
+    expect(switcherTrigger()).toBeNull();
+  });
+
+  it.each(["pmu_manager", "pmu_govt_school_user"] as const)(
+    "gives %s Access Denied without running the list query",
+    async (role) => {
+      setupCentre({ program_id: 64, program_name: "JNV NVS" }, {
+        email: "pmu@avantifellows.org",
+        role,
+        program_ids: [64],
+        scope: undefined,
+      });
+      stubSwitcherRows([BHAVNAGAR_COE, ADILABAD_COE]);
+
+      await renderCentre();
+
+      expect(screen.getByText("Access Denied")).toBeInTheDocument();
+      expect(switcherQueryCalls()).toHaveLength(0);
+    },
+  );
+
+  describe("when the list can't load", () => {
+    const expectPlainPageAndSafeLog = (errorSpy: ReturnType<typeof vi.spyOn>) => {
+      expect(screen.getByRole("heading", { level: 1, name: "JNV Bhavnagar CoE" })).toBeInTheDocument();
+      expect(switcherTrigger()).toBeNull();
+      expect(screen.getByTestId("enrollment-tab-content")).toBeInTheDocument();
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      expect(errorSpy).toHaveBeenCalledWith("Centre switcher list unavailable");
+      const logged = JSON.stringify(errorSpy.mock.calls);
+      expect(logged).not.toContain("@avantifellows.org");
+      expect(logged).not.toMatch(/\b(8|30|70705|36001)\b/);
+    };
+
+    it("renders the plain title and roster when the list query rejects", async () => {
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      setupCentre();
+      mockQuery.mockImplementation(async (sql: string) => {
+        if (isSwitcherSql(sql)) throw new Error("query failed for centres 8, 30");
+        return [];
+      });
+
+      await renderCentre("8");
+
+      expectPlainPageAndSafeLog(errorSpy);
+      errorSpy.mockRestore();
+    });
+
+    it("renders the plain title and roster when School-scope expansion rejects", async () => {
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      setupCentre({}, {
+        email: "pm@avantifellows.org",
+        role: "program_manager",
+        level: 2,
+        school_codes: null,
+        regions: ["West"],
+        scope: { schools: new Set(), centres: new Set(), programs: new Set() },
+      });
+      mockQuery.mockImplementation(async (sql: string) => {
+        if (sql.includes("region = ANY")) throw new Error("region lookup failed for 70705");
+        return isSwitcherSql(sql) ? [BHAVNAGAR_COE, ADILABAD_COE] : [];
+      });
+
+      await renderCentre("8");
+
+      expectPlainPageAndSafeLog(errorSpy);
+      expect(switcherQueryCalls()).toHaveLength(0);
+      errorSpy.mockRestore();
+    });
+  });
+
+  describe("popup", () => {
+    // Same name, Program and School as NAGALAND but a lower id: the numeric id
+    // is the last tiebreak ("9" sorts after "16" as a string).
+    const NAGALAND_9: SwitcherRow = { ...NAGALAND, id: "9" };
+    // Same name and Program as ADILABAD_COE at a School that sorts first.
+    const ADILABAD_ANNEX: SwitcherRow = {
+      id: "40",
+      name: "JNV Adilabad",
+      program_name: "JNV CoE",
+      school_name: "Adilabad Annex",
+      school_code: "36002",
+    };
+
+    async function openSwitcher() {
+      setupCentre();
+      stubSwitcherRows([NAGALAND, ADILABAD_NODAL, NAGALAND_9, BHAVNAGAR_COE, ADILABAD_COE, ADILABAD_ANNEX]);
+      await renderCentre("8");
+      const user = userEvent.setup();
+      await user.click(switcherTrigger()!);
+      return user;
+    }
+
+    it("opens a listbox beside the heading, never inside it", async () => {
+      await openSwitcher();
+
+      const heading = screen.getByRole("heading", { level: 1 });
+      expect(heading).toHaveAccessibleName("JNV Bhavnagar CoE");
+      expect(switcherTrigger()).toHaveAttribute("aria-expanded", "true");
+      const listbox = screen.getByRole("listbox", { name: "Centres" });
+      expect(heading.contains(listbox)).toBe(false);
+    });
+
+    it("lists the current Centre first, then the rest by name, School, Program and id", async () => {
+      await openSwitcher();
+
+      const options = within(screen.getByRole("listbox")).getAllByRole("option");
+      expect(options.map((option) => option.textContent)).toEqual([
+        "JNV Bhavnagar CoE" + "Current" + "JNV CoE · JNV Bhavnagar (70705)",
+        "JNV Adilabad" + "JNV CoE · Adilabad Annex (36002)",
+        "JNV Adilabad" + "JNV CoE · JNV Adilabad (36001)",
+        "JNV Adilabad" + "JNV Nodal · JNV Adilabad (36001)",
+        // Fully identical (no type/category labels): the Centre ID tells them apart.
+        "Nagaland Foundation" + "No Program · JNV Kohima (13001)" + "Centre ID: 9",
+        "Nagaland Foundation" + "No Program · JNV Kohima (13001)" + "Centre ID: 16",
+      ]);
+      expect(options[0]).toHaveAttribute("aria-disabled", "true");
+      expect(options[0]).toHaveAttribute("aria-selected", "true");
+      expect(options[1]).not.toHaveAttribute("aria-disabled");
+      expect(options[1]).toHaveAttribute("aria-selected", "false");
+    });
+
+    it("keeps the page's own Centre first even when the list omits it", async () => {
+      setupCentre();
+      stubSwitcherRows([ADILABAD_NODAL]);
+      await renderCentre("8");
+      await userEvent.setup().click(switcherTrigger()!);
+
+      const options = within(screen.getByRole("listbox")).getAllByRole("option");
+      expect(options.map((option) => option.textContent)).toEqual([
+        "JNV Bhavnagar CoE" + "Current" + "JNV CoE · JNV Bhavnagar (70705)",
+        "JNV Adilabad" + "JNV Nodal · JNV Adilabad (36001)",
+      ]);
+    });
+
+    describe("disambiguation", () => {
+      // The listed rows besides the current Centre's own (unlabeled) row.
+      async function openWith(rows: SwitcherRow[], currentRow: SwitcherRow = BHAVNAGAR_COE) {
+        setupCentre();
+        stubSwitcherRows([currentRow, ...rows]);
+        await renderCentre("8");
+        await userEvent.setup().click(switcherTrigger()!);
+        return within(screen.getByRole("listbox"))
+          .getAllByRole("option")
+          .map((option) => option.textContent);
+      }
+
+      it("adds nothing when Program already separates same-named Centres at one School", async () => {
+        const texts = await openWith([
+          { ...ADILABAD_COE, type_label: "Residential", category_label: "Boys" },
+          { ...ADILABAD_NODAL, type_label: "Residential", category_label: "Boys" },
+        ]);
+
+        expect(texts).toEqual([
+          "JNV Bhavnagar CoE" + "Current" + "JNV CoE · JNV Bhavnagar (70705)",
+          "JNV Adilabad" + "JNV CoE · JNV Adilabad (36001)",
+          "JNV Adilabad" + "JNV Nodal · JNV Adilabad (36001)",
+        ]);
+      });
+
+      it("shows type/category labels for Centres that differ only by category", async () => {
+        const texts = await openWith([
+          { ...ADILABAD_COE, type_label: "Residential", category_label: "Boys" },
+          { ...ADILABAD_COE, id: "41", type_label: "Residential", category_label: "Girls" },
+        ]);
+
+        expect(texts).toEqual([
+          "JNV Bhavnagar CoE" + "Current" + "JNV CoE · JNV Bhavnagar (70705)",
+          "JNV Adilabad" + "JNV CoE · JNV Adilabad (36001)" + "Residential · Boys",
+          "JNV Adilabad" + "JNV CoE · JNV Adilabad (36001)" + "Residential · Girls",
+        ]);
+      });
+
+      it("shows the Centre ID for Centres whose labels are identical too", async () => {
+        const texts = await openWith([
+          { ...ADILABAD_COE, type_label: "Residential", category_label: "Boys" },
+          { ...ADILABAD_COE, id: "41", type_label: "Residential", category_label: "Boys" },
+        ]);
+
+        expect(texts.slice(1)).toEqual([
+          "JNV Adilabad" + "JNV CoE · JNV Adilabad (36001)" + "Centre ID: 30",
+          "JNV Adilabad" + "JNV CoE · JNV Adilabad (36001)" + "Centre ID: 41",
+        ]);
+      });
+
+      it("disambiguates the current Centre by the same rules, using its listed labels", async () => {
+        const texts = await openWith(
+          [{ ...BHAVNAGAR_COE, id: "9", type_label: "Residential", category_label: "Girls" }],
+          { ...BHAVNAGAR_COE, type_label: "Residential", category_label: "Boys" },
+        );
+
+        expect(texts).toEqual([
+          "JNV Bhavnagar CoE" + "Current" + "JNV CoE · JNV Bhavnagar (70705)" + "Residential · Boys",
+          "JNV Bhavnagar CoE" + "JNV CoE · JNV Bhavnagar (70705)" + "Residential · Girls",
+        ]);
+      });
+
+      it("reads type/category as configured option labels, keeping scope and $n params", async () => {
+        setupCentre({}, {
+          scope: {
+            schools: new Set(["70705", "36001"]),
+            centres: new Set([8, 30]),
+            programs: new Set([1]),
+          },
+        });
+        stubSwitcherRows([BHAVNAGAR_COE, ADILABAD_COE]);
+
+        await renderCentre("8");
+
+        const [[sql, params]] = switcherQueryCalls();
+        expect(sql).toContain("type_options.label AS type_label");
+        expect(sql).toContain("category_options.label AS category_label");
+        expect(sql).toMatch(/JOIN centre_option_sets type_set\s+ON type_set\.code = 'type'/);
+        expect(sql).toMatch(/AND type_options\.code = c\.type_code/);
+        expect(sql).toMatch(/JOIN centre_option_sets category_set\s+ON category_set\.code = 'category'/);
+        expect(sql).toMatch(/AND category_options\.code = c\.category_code/);
+        expect(sql).not.toMatch(/c\.(type|category)_code AS/);
+        expect(sql).toMatch(/WHERE c\.is_active AND c\.school_id IS NOT NULL AND c\.id = ANY\(\$1\)/);
+        expect(sql).not.toContain("centre_students");
+        expect(params).toEqual([[8, 30]]);
+      });
+    });
+
+    it("goes to another Centre's page when its option is clicked", async () => {
+      const user = await openSwitcher();
+
+      const options = within(screen.getByRole("listbox")).getAllByRole("option");
+      await user.click(options[4]);
+
+      expect(mockRouterPush).toHaveBeenCalledTimes(1);
+      expect(mockRouterPush).toHaveBeenCalledWith("/centre/9");
+      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    });
+
+    function visibleOptionLabels() {
+      return within(screen.getByRole("listbox", { name: "Centres" }))
+        .queryAllByRole("option")
+        .map((option) => option.textContent);
+    }
+
+    function searchInput() {
+      return screen.getByRole("combobox", { name: "Search Centres" });
+    }
+
+    describe("search", () => {
+      it.each([
+        ["Centre name", "foundation", [
+          "Nagaland Foundation" + "No Program · JNV Kohima (13001)" + "Centre ID: 9",
+          "Nagaland Foundation" + "No Program · JNV Kohima (13001)" + "Centre ID: 16",
+        ]],
+        ["Program name", "  NODAL ", [
+          "JNV Adilabad" + "JNV Nodal · JNV Adilabad (36001)",
+        ]],
+        ["School name", "Annex", [
+          "JNV Adilabad" + "JNV CoE · Adilabad Annex (36002)",
+        ]],
+        ["School code", " 36001", [
+          "JNV Adilabad" + "JNV CoE · JNV Adilabad (36001)",
+          "JNV Adilabad" + "JNV Nodal · JNV Adilabad (36001)",
+        ]],
+      ])("filters by %s, ignoring case and surrounding spaces", async (_field, query, expected) => {
+        const user = await openSwitcher();
+
+        await user.type(searchInput(), query);
+
+        expect(visibleOptionLabels()).toEqual(expected);
+      });
+
+      it("keeps the current Centre first when it matches", async () => {
+        const user = await openSwitcher();
+
+        await user.type(searchInput(), "coe");
+
+        expect(visibleOptionLabels()).toEqual([
+          "JNV Bhavnagar CoE" + "Current" + "JNV CoE · JNV Bhavnagar (70705)",
+          "JNV Adilabad" + "JNV CoE · Adilabad Annex (36002)",
+          "JNV Adilabad" + "JNV CoE · JNV Adilabad (36001)",
+        ]);
+      });
+
+      it("says nothing matches, and Clear search restores the list and refocuses the input", async () => {
+        const user = await openSwitcher();
+
+        await user.type(searchInput(), "zzz");
+
+        expect(visibleOptionLabels()).toEqual([]);
+        expect(screen.getByText("No accessible Centres match your search")).toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "Clear search" }));
+
+        expect(searchInput()).toHaveValue("");
+        expect(searchInput()).toHaveFocus();
+        expect(visibleOptionLabels()).toHaveLength(6);
+        expect(screen.queryByText("No accessible Centres match your search")).not.toBeInTheDocument();
+      });
+    });
+
+    describe("keyboard", () => {
+      async function renderClosed() {
+        setupCentre();
+        stubSwitcherRows([NAGALAND, ADILABAD_NODAL, NAGALAND_9, BHAVNAGAR_COE, ADILABAD_COE, ADILABAD_ANNEX]);
+        await renderCentre("8");
+        return userEvent.setup();
+      }
+
+      // The ids of the options in the order shown, for aria-activedescendant.
+      function optionIdAt(index: number) {
+        return within(screen.getByRole("listbox", { name: "Centres" })).getAllByRole("option")[index].id;
+      }
+
+      it.each([["{Enter}"], [" "], ["{ArrowDown}"]])(
+        "opens with %s on the trigger and focuses the named search input",
+        async (key) => {
+          const user = await renderClosed();
+          switcherTrigger()!.focus();
+
+          await user.keyboard(key);
+
+          expect(switcherTrigger()).toHaveAttribute("aria-expanded", "true");
+          expect(searchInput()).toHaveFocus();
+          expect(searchInput()).toHaveAttribute("aria-expanded", "true");
+          expect(searchInput()).toHaveAttribute(
+            "aria-controls",
+            screen.getByRole("listbox", { name: "Centres" }).id,
+          );
+          const heading = screen.getByRole("heading", { level: 1 });
+          expect(heading).toHaveAccessibleName("JNV Bhavnagar CoE");
+          expect(heading.contains(searchInput())).toBe(false);
+        },
+      );
+
+      // Shown order: Bhavnagar (Current), Adilabad Annex, Adilabad CoE,
+      // Adilabad Nodal, Nagaland 9, Nagaland 16.
+      function activeOptionText() {
+        const id = searchInput().getAttribute("aria-activedescendant");
+        return id ? document.getElementById(id)?.textContent : null;
+      }
+
+      it("moves the active option with the arrows, skipping the current Centre", async () => {
+        const user = await renderClosed();
+        switcherTrigger()!.focus();
+        await user.keyboard("{ArrowDown}");
+
+        expect(searchInput()).not.toHaveAttribute("aria-activedescendant");
+
+        await user.keyboard("{ArrowDown}");
+        expect(activeOptionText()).toBe("JNV Adilabad" + "JNV CoE · Adilabad Annex (36002)");
+        expect(searchInput()).toHaveAttribute("aria-activedescendant", optionIdAt(1));
+
+        await user.keyboard("{ArrowDown}{ArrowDown}");
+        expect(activeOptionText()).toBe("JNV Adilabad" + "JNV Nodal · JNV Adilabad (36001)");
+
+        await user.keyboard("{ArrowUp}{ArrowUp}{ArrowUp}");
+        expect(activeOptionText()).toBe("JNV Adilabad" + "JNV CoE · Adilabad Annex (36002)");
+      });
+
+      it("jumps to the last and first selectable options with End and Home", async () => {
+        const user = await renderClosed();
+        switcherTrigger()!.focus();
+        await user.keyboard("{ArrowDown}");
+
+        const lastOption = within(screen.getByRole("listbox", { name: "Centres" }))
+          .getAllByRole("option")
+          .at(-1)!;
+        lastOption.scrollIntoView = vi.fn();
+
+        await user.keyboard("{End}");
+        expect(searchInput()).toHaveAttribute("aria-activedescendant", optionIdAt(5));
+        expect(lastOption.scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
+
+        await user.keyboard("{Home}");
+        expect(activeOptionText()).toBe("JNV Adilabad" + "JNV CoE · Adilabad Annex (36002)");
+      });
+
+      it("goes to the active Centre's page on Enter, like a click", async () => {
+        const user = await renderClosed();
+        switcherTrigger()!.focus();
+        await user.keyboard("{ArrowDown}{End}{Enter}");
+
+        expect(mockRouterPush).toHaveBeenCalledTimes(1);
+        expect(mockRouterPush).toHaveBeenCalledWith("/centre/16");
+        expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+      });
+
+      it("does nothing on Enter when only the current Centre matches", async () => {
+        const user = await renderClosed();
+        switcherTrigger()!.focus();
+        await user.keyboard("{ArrowDown}");
+        await user.type(searchInput(), "bhavnagar");
+
+        await user.keyboard("{ArrowDown}{Enter}");
+
+        expect(mockRouterPush).not.toHaveBeenCalled();
+        expect(screen.getByRole("listbox", { name: "Centres" })).toBeInTheDocument();
+      });
+
+      it("clears the active option when the search filters it away", async () => {
+        const user = await renderClosed();
+        switcherTrigger()!.focus();
+        await user.keyboard("{ArrowDown}{ArrowDown}");
+        expect(activeOptionText()).toBe("JNV Adilabad" + "JNV CoE · Adilabad Annex (36002)");
+
+        await user.keyboard("kohima");
+
+        expect(searchInput()).not.toHaveAttribute("aria-activedescendant");
+        await user.keyboard("{ArrowDown}");
+        expect(activeOptionText()).toBe(
+          "Nagaland Foundation" + "No Program · JNV Kohima (13001)" + "Centre ID: 9",
+        );
+      });
+    });
+
+    describe("dismissal", () => {
+      it("closes on Escape and returns focus to the trigger", async () => {
+        const user = await openSwitcher();
+
+        await user.keyboard("{Escape}");
+
+        expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+        expect(switcherTrigger()).toHaveAttribute("aria-expanded", "false");
+        expect(switcherTrigger()).toHaveFocus();
+      });
+
+      it("closes when the trigger is clicked again, with focus on the trigger", async () => {
+        const user = await openSwitcher();
+        expect(searchInput()).toHaveFocus();
+
+        await user.click(switcherTrigger()!);
+
+        expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+        expect(switcherTrigger()).toHaveFocus();
+      });
+
+      it("closes on Tab and leaves focus on the next control", async () => {
+        const user = await openSwitcher();
+
+        expect(screen.getByRole("listbox", { name: "Centres" })).toHaveAttribute("tabindex", "-1");
+
+        await user.tab();
+
+        expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+        expect(screen.getByRole("link", { name: "Start Visit" })).toHaveFocus();
+      });
+
+      it("closes after tabbing through the empty-state action", async () => {
+        const user = await openSwitcher();
+        await user.type(searchInput(), "zzz");
+
+        await user.tab();
+        expect(screen.getByRole("button", { name: "Clear search" })).toHaveFocus();
+        expect(screen.getByRole("listbox", { name: "Centres" })).toBeInTheDocument();
+
+        await user.tab();
+        expect(screen.queryByRole("listbox", { name: "Centres" })).not.toBeInTheDocument();
+        expect(screen.getByRole("link", { name: "Start Visit" })).toHaveFocus();
+      });
+
+      it("closes on Escape from the empty-state action and returns focus", async () => {
+        const user = await openSwitcher();
+        await user.type(searchInput(), "zzz");
+        await user.tab();
+
+        await user.keyboard("{Escape}");
+
+        expect(screen.queryByRole("listbox", { name: "Centres" })).not.toBeInTheDocument();
+        expect(switcherTrigger()).toHaveFocus();
+      });
+
+      it("closes on Shift+Tab and leaves focus on the previous control", async () => {
+        const user = await openSwitcher();
+
+        await user.tab({ shift: true });
+
+        expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+        expect(switcherTrigger()).toHaveFocus();
+      });
+
+      it("closes on a click on another control without taking its focus", async () => {
+        const user = await openSwitcher();
+        const elsewhere = document.createElement("button");
+        elsewhere.textContent = "Elsewhere";
+        document.body.appendChild(elsewhere);
+
+        await user.click(elsewhere);
+
+        expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+        expect(elsewhere).toHaveFocus();
+        elsewhere.remove();
+      });
+
+      it("closes on a click on non-focusable page content", async () => {
+        const user = await openSwitcher();
+
+        await user.click(screen.getByTestId("school-tabs"));
+
+        expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+      });
+
+      it("reopens with an empty search", async () => {
+        const user = await openSwitcher();
+        await user.type(searchInput(), "kohima");
+        await user.keyboard("{Escape}");
+
+        await user.click(switcherTrigger()!);
+
+        expect(searchInput()).toHaveValue("");
+        expect(visibleOptionLabels()).toHaveLength(6);
+      });
+    });
+
+    it("does nothing when the current Centre is clicked", async () => {
+      const user = await openSwitcher();
+
+      await user.click(within(screen.getByRole("listbox")).getAllByRole("option")[0]);
+
+      expect(mockRouterPush).not.toHaveBeenCalled();
+    });
+  });
+});
+
+describe("CentrePage → Centre switcher → where a switch lands", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    mockRedirect.mockImplementation((url: string) => {
+      throw new Error(`REDIRECT:${url}`);
+    });
+    mockNotFound.mockImplementation(() => {
+      throw new Error("NOT_FOUND");
+    });
+    mockListAcademicMentorshipMappings.mockResolvedValue([]);
+    mockListAcademicMentorshipTeacherMentees.mockResolvedValue([]);
+    mockListHolisticAssignmentRoster.mockResolvedValue([]);
+    mockGetAcademicMentorshipActorUserId.mockResolvedValue(101);
+    // Holistic Mentorship is hidden unless a test grants it.
+    mockRequireHolisticMentorshipAccess.mockResolvedValue({ ok: false, status: 403, error: "Forbidden" });
+    searchParamsState.current = new URLSearchParams();
+  });
+
+  // Centre 8's page at the given query string; option 1 is JNV Adilabad (30).
+  async function switchFrom(search: string) {
+    searchParamsState.current = new URLSearchParams(search);
+    setupCentre();
+    stubSwitcherRows([BHAVNAGAR_COE, ADILABAD_COE]);
+    await renderCentre("8");
+    const user = userEvent.setup();
+    await user.click(switcherTrigger()!);
+    await user.click(within(screen.getByRole("listbox")).getAllByRole("option")[1]);
+  }
+
+  it("keeps the Performance tab and drops Grade, stream, report and hash", async () => {
+    await switchFrom("?tab=performance&grade=12&stream=pcm&session=x#h");
+
+    expect(mockRouterPush).toHaveBeenCalledTimes(1);
+    expect(mockRouterPush).toHaveBeenCalledWith("/centre/30?tab=performance");
+  });
+
+  it.each(["", "?tab=enrollment"])("lands on the bare Centre page from Enrollment (%s)", async (search) => {
+    await switchFrom(search);
+
+    expect(mockRouterPush).toHaveBeenCalledTimes(1);
+    expect(mockRouterPush).toHaveBeenCalledWith("/centre/30");
+  });
+
+  // Holistic Mentorship is hidden here, so both URLs display Enrollment.
+  it.each(["?tab=nonsense&grade=11", "?tab=holistic_mentorship"])(
+    "does not carry a tab the source isn't showing (%s)",
+    async (search) => {
+      await switchFrom(search);
+
+      expect(mockRouterPush).toHaveBeenCalledTimes(1);
+      expect(mockRouterPush).toHaveBeenCalledWith("/centre/30");
+    },
+  );
+
+  it.each([
+    ["curriculum", "/centre/30?tab=curriculum"],
+    ["quiz_sessions", "/centre/30?tab=quiz_sessions"],
+    ["teacher_feedback", "/centre/30?tab=teacher_feedback"],
+    ["mentorship", "/centre/30?tab=mentorship"],
+    ["visits", "/centre/30?tab=visits"],
+  ])("carries the %s tab", async (tab, expected) => {
+    await switchFrom(`?tab=${tab}`);
+
+    expect(mockRouterPush).toHaveBeenCalledWith(expected);
+  });
+
+  it("carries the Holistic Mentorship tab when the source shows it", async () => {
+    mockRequireHolisticMentorshipAccess.mockResolvedValue({
+      ok: true,
+      email: "teacher@avantifellows.org",
+      permission: makePermission(),
+      canEdit: true,
+      school: { id: 20, code: "70705", name: "JNV Bhavnagar", region: "West" },
+    });
+
+    await switchFrom("?tab=holistic_mentorship");
+
+    expect(mockRouterPush).toHaveBeenCalledWith("/centre/30?tab=holistic_mentorship");
+  });
+
+  // router.push returns void, so nothing to await: the guard must engage
+  // before push, while the closing popup's options are still clickable.
+  it("navigates once when two Centres are chosen in the same turn", async () => {
+    setupCentre();
+    stubSwitcherRows([BHAVNAGAR_COE, ADILABAD_COE, ADILABAD_NODAL]);
+    await renderCentre("8");
+    await userEvent.setup().click(switcherTrigger()!);
+    const options = within(screen.getByRole("listbox")).getAllByRole("option");
+
+    act(() => {
+      options[1].click();
+      options[2].click();
+    });
+
+    expect(mockRouterPush).toHaveBeenCalledTimes(1);
+    expect(mockRouterPush).toHaveBeenCalledWith("/centre/30");
   });
 });
