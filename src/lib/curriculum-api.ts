@@ -1,13 +1,12 @@
-import { getServerSession } from "next-auth";
 import { NextRequest, NextResponse } from "next/server";
 
-import { authOptions } from "@/lib/auth";
+import { getSession } from "@/lib/session";
 import { checkCurriculumSchema } from "@/lib/curriculum-schema";
 import { parseCurriculumRouteScope } from "@/lib/curriculum-route-scope";
 import { getFeatureAccess, getResolvedPermission } from "@/lib/permissions";
 
 export async function requireCurriculumRequestAccess(mode: "view" | "edit") {
-  const session = await getServerSession(authOptions);
+  const session = await getSession();
   if (!session?.user?.email) {
     return {
       ok: false as const,

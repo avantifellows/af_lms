@@ -2,7 +2,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("next-auth", () => ({ getServerSession: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
-vi.mock("@/lib/permissions", () => ({
+vi.mock("@/lib/permissions", async (importOriginal) => ({
+  getFeatureAccess: (await importOriginal<typeof import("@/lib/permissions")>()).getFeatureAccess,
   canAccessSchool: vi.fn(),
   getResolvedPermission: vi.fn(),
 }));
@@ -120,6 +121,22 @@ describe("authorizeSchoolAccess", () => {
 
     mockQuery.mockResolvedValue([{ ...SCHOOL_ROW, af_school_category: "JNV" }]);
     expect((await authorizeSchoolAccess("70705")).authorized).toBe(true);
+  });
+
+  it("refuses a role that can't view the requested feature, even with school access", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockCanAccessSchool.mockResolvedValue(true);
+    mockQuery.mockResolvedValue([SCHOOL_ROW]);
+
+    mockResolvedPermission.mockResolvedValue(permission({ role: "holistic_mentorship_admin" }));
+    const denied = await authorizeSchoolAccess("70705", { feature: "performance" });
+    expect(denied.authorized).toBe(false);
+    if (!denied.authorized) expect(denied.response.status).toBe(403);
+    // Without the option the school gate alone still lets them through.
+    expect((await authorizeSchoolAccess("70705")).authorized).toBe(true);
+
+    mockResolvedPermission.mockResolvedValue(permission({ role: "teacher" }));
+    expect((await authorizeSchoolAccess("70705", { feature: "performance" })).authorized).toBe(true);
   });
 
   it("returns 403 for email user without access", async () => {

@@ -9,7 +9,7 @@ export async function GET(
   { params }: { params: Promise<{ udise: string }> }
 ) {
   const { udise } = await params;
-  const auth = await authorizeSchoolAccess(udise);
+  const auth = await authorizeSchoolAccess(udise, { feature: "performance" });
   if (!auth.authorized) return auth.response;
 
   const url = new URL(request.url);

@@ -1,7 +1,6 @@
-import { getServerSession } from "next-auth";
 import { NextResponse } from "next/server";
 
-import { authOptions } from "@/lib/auth";
+import { getSession } from "@/lib/session";
 import {
   requireHolisticMentorshipAccess,
   type HolisticMentorshipAction,
@@ -23,7 +22,7 @@ export async function holisticRouteAccess(
   action: HolisticMentorshipAction,
   options?: Parameters<typeof requireHolisticMentorshipAccess>[2],
 ) {
-  const session = await getServerSession(authOptions);
+  const session = await getSession();
   return requireHolisticMentorshipAccess(session, action, options);
 }
 
