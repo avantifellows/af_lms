@@ -138,6 +138,24 @@ describe("getBatchOverviewData", () => {
     expect(result.streams).toEqual(["engg", "med"]);
   });
 
+  it("counts takers and enrolment by enrollment_user_id, so APAAR-only students count", async () => {
+    // COUNT(DISTINCT fk_student_id / pk_student_id) skips a student who has
+    // only an APAAR ID, because those columns are NULL for them.
+    mocks.mockQueryFn.mockResolvedValueOnce([[]]).mockResolvedValueOnce([[]]);
+
+    const { getBatchOverviewData } = await import("./bigquery");
+    await getBatchOverviewData("11223344", 12);
+
+    const [testListCall, enrolledCall] = mocks.mockQueryFn.mock.calls;
+    expect(testListCall[0].query).toContain("COUNT(DISTINCT enrollment_user_id) AS student_count");
+    expect(testListCall[0].query).toContain(
+      "COUNT(DISTINCT CASE WHEN student_stream = test_stream THEN enrollment_user_id END) AS stream_student_count"
+    );
+    expect(testListCall[0].query).not.toContain("fk_student_id");
+    expect(enrolledCall[0].query).toContain("COUNT(DISTINCT enrollment_user_id) AS total");
+    expect(enrolledCall[0].query).not.toContain("pk_student_id");
+  });
+
   it("filters the test list by stream but leaves the enrolment query unfiltered", async () => {
     mocks.mockQueryFn.mockResolvedValueOnce([[]]).mockResolvedValueOnce([[]]);
 
@@ -368,7 +386,23 @@ describe("getCumulativeALData", () => {
     const sql = mocks.mockQueryFn.mock.calls[0][0].query;
     expect(sql).toContain("production_dbt_final.dim_student");
     expect(sql).toContain("ds.academic_level) AS student_academic_level");
-    expect(sql).toContain("ds.pk_student_id = f.fk_student_id");
+    expect(sql).toContain("ds.enrollment_user_id = f.enrollment_user_id");
+  });
+
+  it("keys students on enrollment_user_id, so APAAR-only students are not dropped", async () => {
+    // fk_student_id / pk_student_id are NULL for a student who has only an
+    // APAAR ID; any filter, group or join on them loses that student.
+    mocks.mockQueryFn.mockResolvedValueOnce([[]]);
+
+    const { getCumulativeALData } = await import("./bigquery");
+    await getCumulativeALData("11223344", 11);
+
+    const sql = mocks.mockQueryFn.mock.calls[0][0].query;
+    expect(sql).toContain("CAST(f.enrollment_user_id AS STRING) AS student_id");
+    expect(sql).toContain("AND f.enrollment_user_id IS NOT NULL");
+    expect(sql).toContain("GROUP BY f.enrollment_user_id, f.session_id");
+    expect(sql).not.toContain("fk_student_id");
+    expect(sql).not.toContain("pk_student_id");
   });
 
   it("excludes unsubmitted attempts from the AL matrix", async () => {
