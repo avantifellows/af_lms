@@ -53,6 +53,9 @@ export interface ProgressionEntry {
 }
 
 export interface CumulativeALRow {
+  // The student's enrollment_user_id, as a string: a row key, not the business
+  // Student ID. Every student has one; fk_student_id is NULL for a student who
+  // has only an APAAR ID.
   student_id: string;
   student_name: string;
   stream: string | null;
