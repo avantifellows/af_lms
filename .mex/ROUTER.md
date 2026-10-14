@@ -26,7 +26,7 @@ edges:
     condition: when working on teacher feedback setup, the feedback form, or its report
   - target: patterns/INDEX.md
     condition: when starting a task — check the pattern index for a matching pattern file
-last_updated: 2026-10-09
+last_updated: 2026-10-13
 ---
 
 # Session Bootstrap
@@ -73,6 +73,16 @@ Then read this file fully before doing anything else in this session.
 - September 23 scaffold reconciliation: recovered useful September 7–18 local notes onto current main, preserving already-merged behavior and condensing superseded investigation stages. Context now records #304 rollout, #321 production smoke, #323 QA, and #332/#334/#335 staging/merge outcomes. New runbooks cover shared staging, local enrollment repair and cleanup of old-branch scaffold edits. Original local files are backed up privately under sibling `release-records/mex-cleanup-20260923-125614/`.
 - September 23 DB Service release: after #736 (`2df0e522`) and #737 (`2bea0794`) merged into main, main was merged cleanly into `release` as `1f70b41a`. The EC2 production deploy workflow succeeded for that SHA, its log shows the server fast-forwarded from `3f82649b` to `1f70b41a`, and live health/readiness returned 200. No historical data repair was run. See `context/student-addition.md` for cohort decisions and the unresolved attendance handoff.
 - September 23 fresh production-to-local repair retest: 37,892 LMS-created 2026–27 Students split 37,394 / 243 / 253 / 1 / 1. The owner confirmed the 91 newly found dropout/undo events were mistakes. A fresh local QA clone passed all five status repairs and 1,647 timestamp fixes in that order, with replay and full-table checks. All cohort current-status gaps are resolved locally. Production was read only. See `context/student-addition.md` and the private `release-records/repair-retest-confirmed-20260923/QA.md`.
+
+- Edit Student captures optional T-shirt and Track Pant sizes (issue #395). PR #401 put them
+  on Add Student; PR #407 moved them to Edit Student, because physical centres never open Add
+  Student — their Students are captured and edited through the Enrollment tab, so the
+  enrolment form reached only the online-centre cohort. Both dropdowns offer the vendor chart
+  XS–XXXL with its chest/waist measurements from the shared `src/lib/uniform-sizes.ts` set
+  and store only the size code. They ride the ordinary `PATCH /api/student/[id]` path, which
+  DB Service #750 already supports, so no coordinated DB Service release is needed; a blank
+  clears the stored size. Enrolment and both bulk-upload column contracts no longer mention
+  the sizes. See `context/student-addition.md` and `patterns/add-student-enrolment-field.md`.
 
 - PR #335 follow-up: Student detail now retains a School's progress origin through phase changes and locked-phase redirects. Student → School restores `source=progress`, so the next School Back returns to the selected Holistic Program. Ordinary School-origin journeys remain unchanged. See `context/architecture.md`.
 

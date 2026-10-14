@@ -1,4 +1,5 @@
 import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
+import { UNIFORM_SIZES } from "@/lib/uniform-sizes";
 
 import {
   ACTIVE_REGISTRATION_MODE,
@@ -80,7 +81,14 @@ interface LmsStudentEditPayload {
   pen_number?: string;
   g10_roll_no?: string;
   grade?: 11 | 12;
+  tshirt_size?: string;
+  track_pant_size?: string;
 }
+
+const UNIFORM_SIZE_EDIT_FIELDS = [
+  ["tshirt_size", "T-shirt Size"],
+  ["track_pant_size", "Track Pant Size"],
+] as const;
 
 const STUDENT_EDITABLE_FIELDS: ReadonlyArray<keyof LmsStudentEditPayload> = [
   "first_name",
@@ -96,6 +104,8 @@ const STUDENT_EDITABLE_FIELDS: ReadonlyArray<keyof LmsStudentEditPayload> = [
   "annual_family_income",
   "g10_board",
   "grade",
+  "tshirt_size",
+  "track_pant_size",
 ];
 
 export type StudentAdditionUploadColumn = {
@@ -417,6 +427,23 @@ function canonicalOptionValue(value: string, options: readonly string[]): string
   return options.find((option) => option.toLowerCase() === normalized) ?? null;
 }
 
+// A uniform size is optional and clearable: "" passes through so the DB Service stores
+// NULL. Validation uses the full stored vocabulary rather than the subset the form
+// offers, so a row already holding XXS can be saved back unchanged.
+function canonicalUniformSize(
+  value: unknown,
+  field: "tshirt_size" | "track_pant_size",
+  label: string,
+) {
+  if (typeof value !== "string") return editError(field, `${label} is not valid`);
+  const trimmed = value.trim();
+  if (!trimmed) return { ok: true as const, value: "" };
+  const canonical = canonicalOptionValue(trimmed, UNIFORM_SIZES);
+  return canonical
+    ? { ok: true as const, value: canonical }
+    : editError(field, `${label} is not valid`);
+}
+
 function canonicalGenderValue(value: string): string | null {
   return canonicalOptionValue(value, STUDENT_ADDITION_GENDER_OPTIONS) ??
     (value.toLowerCase() === "others" ? "Other" : null);
@@ -652,6 +679,12 @@ export function canonicalizeStudentEditPayload(
   }
   if (fields.grade !== undefined && fields.grade !== 11 && fields.grade !== 12) {
     return editError("grade", "Grade must be 11 or 12");
+  }
+  for (const [field, label] of UNIFORM_SIZE_EDIT_FIELDS) {
+    if (fields[field] === undefined) continue;
+    const size = canonicalUniformSize(fields[field], field, label);
+    if (!size.ok) return size;
+    fields[field] = size.value;
   }
 
   if (fields.first_name !== undefined) {

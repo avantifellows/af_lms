@@ -25,6 +25,7 @@ import {
   PHONE_REGISTRATION_MODE,
   type RegistrationMode,
 } from "@/lib/registration-mode";
+import { trackPantSizeOptions, tshirtSizeOptions } from "@/lib/uniform-sizes";
 
 export interface Batch {
   id: number;
@@ -124,6 +125,8 @@ function initialFormData(student: Student) {
     pen_number: textValue(student.pen_number),
     g10_roll_no: textValue(student.g10_roll_no),
     grade: textValue(student.grade?.toString()),
+    tshirt_size: textValue(student.tshirt_size),
+    track_pant_size: textValue(student.track_pant_size),
   };
 }
 
@@ -527,6 +530,18 @@ export default function EditStudentModal({
                 {selectField("stream", "Primary Exam preparing for", STREAM_OPTIONS)}
                 {selectField("board_stream", "Board Stream", BOARD_STREAM_OPTIONS)}
                 {selectField("g10_board", "G10 board", G10_BOARD_OPTIONS)}
+              </div>
+            </FormSection>
+
+            <FormSection>
+              <h3 className={sectionHeadingClassName}>Uniform Size</h3>
+              <p className="mb-4 text-xs text-text-muted">
+                Collected for vendor orders. Leave blank until the size is known; clearing a
+                size removes it.
+              </p>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                {selectField("tshirt_size", "T-shirt Size", tshirtSizeOptions())}
+                {selectField("track_pant_size", "Track Pant Size", trackPantSizeOptions())}
               </div>
             </FormSection>
 

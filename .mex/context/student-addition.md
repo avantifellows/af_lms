@@ -18,7 +18,7 @@ edges:
     condition: when adding LMS API routes for create or bulk upload
   - target: patterns/db-service-write.md
     condition: when proxying student writes to the DB Service
-last_updated: 2026-09-30
+last_updated: 2026-10-13
 ---
 
 # Student Addition
@@ -50,6 +50,35 @@ GitHub issue https://github.com/avantifellows/af_lms/issues/296 is the build-rea
 - Non-LMS phone correction for this cohort is unsupported until the generic import lookup is fixed in `avantifellows/db-service#703`; that follow-up is separate and assigned to Aman.
 
 The planning branch is `grill/nvs-phone-registration-mode`; ADR 0006 records the permanent phone-identity trade-off. AF LMS now has Phone Registration Mode active in code. The coordinated production deployment and no-write mode-mismatch probe completed on September 7. The separate EnableStudents manual Portal login smoke gate in `docs/nvs-phone-registration-release.md` remains to be recorded; the non-EnableStudents regression below does not substitute for it. The accepted concurrent-create race without a cross-table database constraint remains documented, not fixed.
+
+## Uniform Sizes on Edit Student
+
+GitHub issue https://github.com/avantifellows/af_lms/issues/395 asked for optional
+`tshirt_size` and `track_pant_size` so vendor orders can be placed from roster data. PR #401
+first put them on the Add Student form; PR #407 moved them to **Edit Student**, because
+physical centres never open Add Student — all their Student information is captured and
+edited through the Enrollment tab, so collecting the sizes at enrolment reached only the
+online-centre cohort.
+
+Both are dropdowns over the vendor chart XS–XXXL, labelled with their chest or waist
+measurement; only the bare size code is stored. The codes, the offered subset and the labels
+live in `src/lib/uniform-sizes.ts` — a dependency-free client-safe module, so the dropdown
+and the server validation cannot drift. `UNIFORM_SIZES` is the full set the DB Service
+`student_tshirt_size_check` / `student_track_pant_size_check` constraints accept;
+`OFFERED_UNIFORM_SIZES` is the narrower list the form offers, which is why XXS is storable,
+and editable on a row that already has it, but never offered.
+
+Both fields are optional and clearable. They ride the ordinary `PATCH /api/student/[id]`
+path: `STUDENT_EDITABLE_FIELDS` names them, `canonicalizeStudentEditPayload` canonicalizes
+the case and accepts `""`, and the DB Service `trim_to_nil` turns that blank into NULL. The
+Edit modal sends only changed fields, so an untouched size is never in the payload.
+`STUDENT_COLUMNS` in `src/lib/school-students.ts` selects both, which covers the school and
+centre rosters at once.
+
+Not collected at enrolment, and deliberately so: neither Add Student nor the bulk templates
+ask for a size, so `getStudentAdditionUploadColumns`, both static workbooks and the
+rejected-row CSV contract stay unchanged. The DB Service ingestion allowlist from #763 is
+left in place but is now unused by the LMS; removing it is a separate decision.
 
 ## Settled Product Shape
 - v1 is JNV PMU / JNV NVS only. In current LMS code this is `PROGRAM_IDS.NVS` (`64`, label `JNV NVS`) from `src/lib/constants.ts`.
