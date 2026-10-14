@@ -414,6 +414,10 @@ test.describe("Holistic Mentorship release workflows", () => {
     await expect((await autosave).status()).toBe(200);
     await holisticTeacherPage.reload();
     await expect(notes).toHaveValue("Synthetic submitted answer from the release workflow.");
+    const followUpSection = holisticTeacherPage.getByRole("region", { name: "Follow-up Notes" });
+    const addFollowUp = followUpSection.getByRole("button", { name: "Add notes" });
+    await expect(addFollowUp).toBeDisabled();
+    await expect(addFollowUp).toHaveAccessibleDescription("Submit Post-Session Notes first");
 
     holisticTeacherPage.once("dialog", (dialog) => dialog.accept());
     const submit = holisticTeacherPage.waitForResponse((response) =>
@@ -434,6 +438,25 @@ test.describe("Holistic Mentorship release workflows", () => {
     await holisticTeacherPage.getByRole("button", { name: "Save Changes" }).click();
     await expect((await correction).status()).toBe(200);
     await expect(holisticTeacherPage.getByText("Submitted Notes updated.")).toBeVisible();
+
+    // Follow-up Notes can't be deleted, so each attempt tags its own answers.
+    const token = String(Date.now());
+    await expect(addFollowUp).toBeEnabled();
+    await addFollowUpNote(holisticTeacherPage, {
+      "What challenges did the student talk about?": `Synthetic follow-up challenge ${token}`,
+    });
+    await addFollowUpNote(holisticTeacherPage, {
+      "What solutions did you suggest?": `Synthetic follow-up solution ${token}`,
+      "Was the student able to follow the action plan shared previously?": `Synthetic follow-up plan ${token}`,
+    });
+    const cards = followUpSection.locator("article");
+    await expect(cards.nth(0)).toContainText(`Synthetic follow-up solution ${token}`);
+    await expect(cards.nth(0).locator("h4")).toHaveText([
+      "What solutions did you suggest?",
+      "Was the student able to follow the action plan shared previously?",
+    ]);
+    await expect(cards.nth(1)).toContainText(`Synthetic follow-up challenge ${token}`);
+    await expect(cards.nth(1).locator("h4")).toHaveText(["What challenges did the student talk about?"]);
   });
 
   test("Holistic Admin verifies progress, CSV, read-only drill-down, Phase setup, and regeneration", async ({
@@ -736,6 +759,21 @@ async function openAdminProgress(page: Page) {
   await expect(progressTab).toBeVisible();
   if (await progressTab.getAttribute("aria-selected") !== "true") await progressTab.click();
   await expect(page.getByRole("table", { name: "Student progress results" })).toBeVisible();
+}
+
+async function addFollowUpNote(page: Page, answers: Record<string, string>) {
+  await page.getByRole("region", { name: "Follow-up Notes" }).getByRole("button", { name: "Add notes" }).click();
+  const dialog = page.getByRole("dialog", { name: "Add follow-up notes" });
+  await expect(dialog).toContainText("Follow-up notes can't be edited after saving.");
+  for (const [question, answer] of Object.entries(answers)) {
+    await dialog.getByRole("textbox", { name: question }).fill(answer);
+  }
+  const saved = page.waitForResponse((response) =>
+    response.url().includes("/follow-up-notes?") && response.request().method() === "POST"
+  );
+  await dialog.getByRole("button", { name: "Save" }).click();
+  await expect((await saved).status()).toBe(201);
+  await expect(dialog).toBeHidden();
 }
 
 function studentPhaseUrl(studentId: number, phaseId: number) {
