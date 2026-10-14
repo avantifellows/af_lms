@@ -85,6 +85,20 @@ function alumniRowsSql(where: string) {
 const clean = (s: string | null | undefined) => (s ?? "").replace(/\s+/g, " ").trim();
 const fullName = (first: string | null, last: string | null) => clean(`${first ?? ""} ${last ?? ""}`) || "(no name)";
 
+interface PersonRow {
+  user_id: string;
+  afid: string | null;
+  first_name: string | null;
+  last_name: string | null;
+}
+
+/** The fields every list row shares. */
+const person = (r: PersonRow) => ({ userId: String(r.user_id), afid: r.afid || "", name: fullName(r.first_name, r.last_name) });
+
+/** Newest cohort first, then by name. */
+const byCohortThenName = (a: { cohortYear: string; name: string }, b: { cohortYear: string; name: string }) =>
+  b.cohortYear.localeCompare(a.cohortYear) || a.name.localeCompare(b.name);
+
 export interface PendingStudent {
   userId: string;
   afid: string;
@@ -111,8 +125,7 @@ const SCHOOL_MEMBERS = (param: string) =>
 
 /** Pass-outs from this school with no alumni row yet (new entries). */
 export async function listPendingForSchool(school: { id: string | number; code: string }): Promise<PendingStudent[]> {
-  const rows = await query<{
-    user_id: string; afid: string | null; first_name: string | null; last_name: string | null;
+  const rows = await query<PersonRow & {
     passout_year: string; program: string; gender: string | null; stream: string | null;
   }>(
     `WITH ${cohortCte(`AND er.user_id IN (${SCHOOL_MEMBERS("$4")})`)}
@@ -123,21 +136,18 @@ export async function listPendingForSchool(school: { id: string | number; code: 
   );
   return rows
     .map((r) => ({
-      userId: String(r.user_id),
-      afid: r.afid || "",
-      name: fullName(r.first_name, r.last_name),
+      ...person(r),
       cohortYear: r.passout_year || "",
       program: r.program || "",
       gender: r.gender || "",
       stream: r.stream || "",
     }))
-    .sort((a, b) => b.cohortYear.localeCompare(a.cohortYear) || a.name.localeCompare(b.name));
+    .sort(byCohortThenName);
 }
 
 /** Existing alumni whose latest school is this one, all cohort years (edit list). */
 export async function listAlumniForSchool(school: { id: string | number; code: string }): Promise<AlumniListItem[]> {
-  const rows = await query<{
-    user_id: string; afid: string | null; first_name: string | null; last_name: string | null;
+  const rows = await query<PersonRow & {
     cohort_year: string | null; ug_status: string | null; current_status: string | null; college_ug: string | null;
   }>(
     `SELECT * FROM (${alumniRowsSql(`s.user_id IN (${SCHOOL_MEMBERS("$1")})`)}) x WHERE school_code = $2`,
@@ -145,13 +155,11 @@ export async function listAlumniForSchool(school: { id: string | number; code: s
   );
   return rows
     .map((r) => ({
-      userId: String(r.user_id),
-      afid: r.afid || "",
-      name: fullName(r.first_name, r.last_name),
+      ...person(r),
       cohortYear: r.cohort_year || "",
       ugStatus: r.ug_status || "",
       currentStatus: r.current_status || "",
       collegeUg: clean(r.college_ug),
     }))
-    .sort((a, b) => b.cohortYear.localeCompare(a.cohortYear) || a.name.localeCompare(b.name));
+    .sort(byCohortThenName);
 }

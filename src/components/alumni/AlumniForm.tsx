@@ -31,6 +31,13 @@ interface EntryContext {
   codeNames: Record<string, string>;
 }
 
+interface SavedEntry {
+  action: "inserted" | "updated";
+  alumniId: string;
+  changed: string[];
+  notCleared: string[];
+}
+
 interface Props {
   userId: string;
   /** Called after a successful save (e.g. to refresh the student lists). */
@@ -48,20 +55,12 @@ const SECTION_ICONS: Record<string, React.ReactNode> = {
 /** Statuses that mean the student took a gap year. */
 const GAP_STATUS_FIELDS = ["ug_status", "current_status"];
 
-export default function AlumniForm({ userId, onSaved }: Props) {
+/** Loads the student's form data; bumping `version` reloads it (after a save). */
+function useEntry(userId: string, version: number) {
   const [context, setContext] = useState<EntryContext | null>(null);
-  const [loadError, setLoadError] = useState("");
   const [values, setValues] = useState<Values>({});
   const [names, setNames] = useState<Record<string, string>>({});
-  const [errors, setErrors] = useState<Record<string, string>>({});
-  const [dirty, setDirty] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [justSaved, setJustSaved] = useState(false);
-  const [formError, setFormError] = useState("");
-  /** Unusual answers waiting for "yes, save anyway". */
-  const [confirming, setConfirming] = useState<Issue[] | null>(null);
-  /** Bumped after a save to reload the record from the database. */
-  const [version, setVersion] = useState(0);
+  const [loadError, setLoadError] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -70,10 +69,10 @@ export default function AlumniForm({ userId, onSaved }: Props) {
         const res = await fetch(`/api/alumni/student/${encodeURIComponent(userId)}`);
         const body = await res.json();
         if (cancelled) return;
-        if (!res.ok) throw new Error(body.error || "Couldn't load this student.");
+        if (!res.ok) throw new Error(body?.error || "Couldn't load this student.");
         setContext(body);
-        setValues(body.alumni);
-        setNames(body.codeNames);
+        setValues(body.alumni ?? {});
+        setNames(body.codeNames ?? {});
       } catch (err) {
         if (!cancelled) setLoadError(err instanceof Error ? err.message : "Couldn't load this student.");
       }
@@ -83,12 +82,11 @@ export default function AlumniForm({ userId, onSaved }: Props) {
     };
   }, [userId, version]);
 
-  const visibleSections = useMemo(
-    () => ALUMNI_SECTIONS.filter((s) => s.fields.some((f) => isFieldShown(s, f, values))),
-    [values],
-  );
+  return { context, values, setValues, names, setNames, loadError };
+}
 
-  // Live review: unusual answers show under their field while typing.
+/** The same review the server runs, live — unusual answers show under their field while typing. */
+function useReview(values: Values, context: EntryContext | null) {
   const review = useMemo(
     () => (context ? reviewValues(visibleValues(values), context.alumni, checkContext(context.profile)) : null),
     [values, context],
@@ -98,6 +96,65 @@ export default function AlumniForm({ userId, onSaved }: Props) {
     for (const w of review?.warnings ?? []) (map[w.field] ??= []).push(w);
     return map;
   }, [review]);
+  return { review, warningsByField };
+}
+
+type SaveOutcome =
+  | { kind: "saved"; entry: SavedEntry }
+  | { kind: "confirm"; warnings: Issue[] }
+  | { kind: "failed"; error: string; fieldErrors: Record<string, string> };
+
+/** Sends the answers; the server re-checks everything and saves through the DB Service. */
+async function postSave(userId: string, values: Values, confirmed: string[]): Promise<SaveOutcome> {
+  try {
+    const res = await fetch(`/api/alumni/student/${encodeURIComponent(userId)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ values, confirmed }),
+    });
+    const body = await res.json();
+    if (res.status === 409 && body?.warnings) return { kind: "confirm", warnings: body.warnings };
+    if (!res.ok) return { kind: "failed", error: body?.error || "Couldn't save. Try again.", fieldErrors: body?.fieldErrors ?? {} };
+    return { kind: "saved", entry: body as SavedEntry };
+  } catch {
+    return { kind: "failed", error: "Couldn't save. Check your connection and try again.", fieldErrors: {} };
+  }
+}
+
+function savedToast(name: string, entry: SavedEntry) {
+  const fields = `${entry.changed.length} field${entry.changed.length === 1 ? "" : "s"} written.`;
+  const kept = entry.notCleared.length ? `Kept on record (blank in form): ${entry.notCleared.join(", ")}.` : "";
+  toast.success(`${entry.action === "inserted" ? "Added to" : "Updated in"} the alumni table — ${name || "student"}`, {
+    description: [`alumni_id ${entry.alumniId} · ${fields}`, kept].filter(Boolean).join(" "),
+    duration: 8000,
+  });
+}
+
+/** Removes one key from a record, returning the same object when it wasn't there. */
+const without = (record: Record<string, string>, key: string) => {
+  if (!record[key]) return record;
+  const next = { ...record };
+  delete next[key];
+  return next;
+};
+
+export default function AlumniForm({ userId, onSaved }: Props) {
+  /** Bumped after a save to reload the record from the database. */
+  const [version, setVersion] = useState(0);
+  const { context, values, setValues, names, setNames, loadError } = useEntry(userId, version);
+  const { review, warningsByField } = useReview(values, context);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [justSaved, setJustSaved] = useState(false);
+  const [formError, setFormError] = useState("");
+  /** Unusual answers waiting for "yes, save anyway". */
+  const [confirming, setConfirming] = useState<Issue[] | null>(null);
+
+  const visibleSections = useMemo(
+    () => ALUMNI_SECTIONS.filter((s) => s.fields.some((f) => isFieldShown(s, f, values))),
+    [values],
+  );
 
   if (loadError) {
     return (
@@ -106,19 +163,14 @@ export default function AlumniForm({ userId, onSaved }: Props) {
       </div>
     );
   }
-  if (!context) return <FormSkeleton />;
+  if (!context || !review) return <FormSkeleton />;
 
   const setValue = (column: string, value: string) => {
     // A Gap Year status means they took a gap year — fill that in for them.
     const autoGap = GAP_STATUS_FIELDS.includes(column) && value === "Gap Year" && !values.did_you_take_a_gap_year;
     setValues((prev) => ({ ...prev, [column]: value, ...(autoGap ? { did_you_take_a_gap_year: "Yes" } : {}) }));
     if (autoGap) toast.info('"Took a gap year?" set to Yes', { duration: 3000 });
-    setErrors((prev) => {
-      if (!prev[column]) return prev;
-      const next = { ...prev };
-      delete next[column];
-      return next;
-    });
+    setErrors((prev) => without(prev, column));
     setDirty(true);
     setJustSaved(false);
     setFormError("");
@@ -127,88 +179,42 @@ export default function AlumniForm({ userId, onSaved }: Props) {
   const submit = async (confirmed: string[]) => {
     setSaving(true);
     setFormError("");
-    try {
-      const res = await fetch(`/api/alumni/student/${encodeURIComponent(userId)}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ values, confirmed }),
-      });
-      const body = await res.json();
-      if (res.status === 409 && body.warnings) {
-        setConfirming(body.warnings);
-        return;
-      }
-      if (!res.ok) {
-        setErrors(body.fieldErrors ?? {});
-        setFormError(body.error || "Couldn't save. Try again.");
-        return;
-      }
-      const entry = body as { action: "inserted" | "updated"; alumniId: string; changed: string[]; notCleared: string[] };
-      setConfirming(null);
-      setDirty(false);
-      setJustSaved(true);
-      setVersion((v) => v + 1); // reload what's now in the database
-      onSaved?.(userId);
-      toast.success(
-        `${entry.action === "inserted" ? "Added to" : "Updated in"} the alumni table — ${context.name || "student"}`,
-        {
-          description: [
-            `alumni_id ${entry.alumniId} · ${entry.changed.length} field${entry.changed.length === 1 ? "" : "s"} written.`,
-            entry.notCleared.length ? `Kept on record (blank in form): ${entry.notCleared.join(", ")}.` : "",
-          ].filter(Boolean).join(" "),
-          duration: 8000,
-        },
-      );
-    } catch {
-      setFormError("Couldn't save. Check your connection and try again.");
-    } finally {
-      setSaving(false);
+    const outcome = await postSave(userId, values, confirmed);
+    setSaving(false);
+    if (outcome.kind === "confirm") {
+      setConfirming(outcome.warnings);
+      return;
     }
+    if (outcome.kind === "failed") {
+      setErrors(outcome.fieldErrors);
+      setFormError(outcome.error);
+      return;
+    }
+    setConfirming(null);
+    setDirty(false);
+    setJustSaved(true);
+    setVersion((v) => v + 1); // reload what's now in the database
+    onSaved?.(userId);
+    savedToast(context.name, outcome.entry);
   };
 
   const save = () => {
     // Same review the server runs — catch problems without a round trip.
-    if (!review) return;
     setErrors(review.errors);
     setFormError("");
-    if (Object.keys(review.errors).length) {
-      document.getElementById(`f-${Object.keys(review.errors)[0]}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    const firstError = Object.keys(review.errors)[0];
+    if (firstError) {
+      document.getElementById(`f-${firstError}`)?.scrollIntoView?.({ behavior: "smooth", block: "center" });
       return;
     }
     const toConfirm = needsConfirm(review.warnings);
-    if (toConfirm.length) {
-      setConfirming(toConfirm);
-      return;
-    }
-    submit([]);
+    if (toConfirm.length) setConfirming(toConfirm);
+    else submit([]);
   };
-
-  const errorCount = Object.keys(errors).length;
-  const pendingWarnings = review ? needsConfirm(review.warnings).length : 0;
 
   return (
     <div className="space-y-5">
-      <header className="flex flex-wrap items-start gap-4">
-        <Initials name={context.name || "?"} size="lg" />
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-xl font-extrabold text-text-primary">{context.name || "(no name)"}</h2>
-            <Badge variant={context.kind === "new" ? "danger" : "default"}>
-              {context.kind === "new" ? "New alumni entry" : "Edit alumni record"}
-            </Badge>
-          </div>
-          <p className="mt-0.5 text-sm text-text-secondary">
-            {[context.program, context.school].filter(Boolean).join(" · ")}
-            {context.cohortYear && ` · cohort ${context.cohortYear}`}
-          </p>
-          <div className="mt-2 flex flex-wrap gap-1.5 font-mono text-[11px]">
-            <IdChip label="AFID" value={context.afid} />
-            <IdChip label="enrollment_user_id" value={context.ids.enrollmentUserId} />
-            <IdChip label="student.id" value={context.ids.studentId} />
-            {context.kind === "edit" && <IdChip label="alumni_id" value={context.ids.alumniId} />}
-          </div>
-        </div>
-      </header>
+      <FormHeader context={context} />
 
       {context.kind === "edit" && (
         <p className="flex items-start gap-2 rounded-lg bg-info-bg px-3 py-2 text-xs text-text-secondary">
@@ -242,22 +248,13 @@ export default function AlumniForm({ userId, onSaved }: Props) {
             </>
           ) : context.kind === "edit" ? "Save changes" : "Save"}
         </Button>
-        {errorCount > 0 && (
-          <span className="flex items-center gap-1 text-sm text-danger">
-            <AlertTriangle className="h-4 w-4" aria-hidden /> {errorCount} field{errorCount === 1 ? "" : "s"} need fixing.
-          </span>
-        )}
-        {formError && errorCount === 0 && <span className="text-sm text-danger">{formError}</span>}
-        {!errorCount && !formError && dirty && (
-          <span className="text-sm text-text-muted">
-            Unsaved changes{pendingWarnings > 0 && ` · ${pendingWarnings} answer${pendingWarnings === 1 ? "" : "s"} to confirm`}
-          </span>
-        )}
-        {!errorCount && !formError && !dirty && justSaved && (
-          <span className="inline-flex items-center gap-1 text-sm font-medium text-success">
-            <CheckCircle2 className="h-4 w-4" aria-hidden /> Saved to the alumni table
-          </span>
-        )}
+        <SaveStatus
+          errorCount={Object.keys(errors).length}
+          formError={formError}
+          dirty={dirty}
+          justSaved={justSaved}
+          pendingWarnings={needsConfirm(review.warnings).length}
+        />
       </div>
 
       {confirming && (
@@ -269,6 +266,59 @@ export default function AlumniForm({ userId, onSaved }: Props) {
         />
       )}
     </div>
+  );
+}
+
+function FormHeader({ context }: { context: EntryContext }) {
+  return (
+    <header className="flex flex-wrap items-start gap-4">
+      <Initials name={context.name || "?"} size="lg" />
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <h2 className="text-xl font-extrabold text-text-primary">{context.name || "(no name)"}</h2>
+          <Badge variant={context.kind === "new" ? "danger" : "default"}>
+            {context.kind === "new" ? "New alumni entry" : "Edit alumni record"}
+          </Badge>
+        </div>
+        <p className="mt-0.5 text-sm text-text-secondary">
+          {[context.program, context.school].filter(Boolean).join(" · ")}
+          {context.cohortYear && ` · cohort ${context.cohortYear}`}
+        </p>
+        <div className="mt-2 flex flex-wrap gap-1.5 font-mono text-[11px]">
+          <IdChip label="AFID" value={context.afid} />
+          <IdChip label="enrollment_user_id" value={context.ids.enrollmentUserId} />
+          <IdChip label="student.id" value={context.ids.studentId} />
+          {context.kind === "edit" && <IdChip label="alumni_id" value={context.ids.alumniId} />}
+        </div>
+      </div>
+    </header>
+  );
+}
+
+/** One line next to Save: what needs fixing, what's unsaved, or that it saved. */
+function SaveStatus({
+  errorCount, formError, dirty, justSaved, pendingWarnings,
+}: { errorCount: number; formError: string; dirty: boolean; justSaved: boolean; pendingWarnings: number }) {
+  if (errorCount > 0) {
+    return (
+      <span className="flex items-center gap-1 text-sm text-danger">
+        <AlertTriangle className="h-4 w-4" aria-hidden /> {errorCount} field{errorCount === 1 ? "" : "s"} need fixing.
+      </span>
+    );
+  }
+  if (formError) return <span className="text-sm text-danger">{formError}</span>;
+  if (dirty) {
+    return (
+      <span className="text-sm text-text-muted">
+        Unsaved changes{pendingWarnings > 0 && ` · ${pendingWarnings} answer${pendingWarnings === 1 ? "" : "s"} to confirm`}
+      </span>
+    );
+  }
+  if (!justSaved) return null;
+  return (
+    <span className="inline-flex items-center gap-1 text-sm font-medium text-success">
+      <CheckCircle2 className="h-4 w-4" aria-hidden /> Saved to the alumni table
+    </span>
   );
 }
 
@@ -479,64 +529,86 @@ interface FieldProps {
   onName: (name: string) => void;
 }
 
-function FieldControl({ field, value, name, error, warnings, hint, options: optionsOverride, stale, onRecord, onValue, onName }: FieldProps) {
+function FieldControl(props: FieldProps) {
+  const { field, error, warnings } = props;
   const id = `f-${field.column}`;
   const wide = field.type === "college" || field.type === "branch" || field.label.length > 40;
-  let control: React.ReactNode;
+  const live = (warnings ?? []).filter((w) => !w.onRecord);
+  const noted = (warnings ?? []).filter((w) => w.onRecord);
+  const ring = error ? "rounded-lg ring-2 ring-danger" : live.length ? "rounded-lg ring-2 ring-warning-border/50" : "";
 
+  return (
+    <div className={wide ? "sm:col-span-2" : ""}>
+      <FormLabel htmlFor={id}>{field.label}</FormLabel>
+      <div className={ring}>
+        <FieldInput {...props} id={id} />
+      </div>
+      <FieldNotes {...props} live={live} noted={noted} />
+    </div>
+  );
+}
+
+/** The control itself: college/branch search, a dropdown, or a text/number box. */
+function FieldInput({ field, id, value, name, error, options, onValue, onName }: FieldProps & { id: string }) {
   if (field.type === "college" || field.type === "branch") {
-    control = (
+    return (
       <ReferencePicker
         kind={field.type}
         id={id}
         code={value}
         name={name}
-        onChange={(code, newName) => { onValue(code); onName(newName); }}
-      />
-    );
-  } else if (field.type === "enum") {
-    const all = ENUMS[field.column] ?? [];
-    const options = optionsOverride ?? all;
-    const offListLabel = all.includes(value) ? "doesn't fit the branch" : "current value, not in list";
-    control = (
-      <Select id={id} value={value} onChange={(e) => onValue(e.target.value)} aria-invalid={!!error}>
-        <option value="">—</option>
-        {options.map((o) => (
-          <option key={o} value={o}>{o}</option>
-        ))}
-        {value && !options.includes(value) && <option value={value}>{value} ({offListLabel})</option>}
-      </Select>
-    );
-  } else {
-    control = (
-      <Input
-        id={id}
-        type={field.type === "year" || field.type === "number" ? "number" : "text"}
-        inputMode={field.type === "year" || field.type === "number" ? "numeric" : undefined}
-        min={field.type === "year" ? MIN_YEAR : field.type === "number" ? 0 : undefined}
-        max={field.type === "year" ? MAX_YEAR : undefined}
-        step={field.type === "year" ? 1 : undefined}
-        placeholder={field.type === "year" ? "e.g. 2025" : undefined}
-        value={value}
-        onChange={(e) => onValue(e.target.value)}
-        aria-invalid={!!error}
+        onChange={(code, newName) => {
+          onValue(code);
+          onName(newName);
+        }}
       />
     );
   }
-
-  const live = (warnings ?? []).filter((w) => !w.onRecord);
-  const noted = (warnings ?? []).filter((w) => w.onRecord);
-
+  if (field.type === "enum") {
+    return <EnumSelect column={field.column} id={id} value={value} error={error} options={options} onValue={onValue} />;
+  }
+  const numeric = field.type === "year" || field.type === "number";
+  const isYear = field.type === "year";
   return (
-    <div className={wide ? "sm:col-span-2" : ""}>
-      <FormLabel htmlFor={id}>{field.label}</FormLabel>
-      <div
-        className={
-          error ? "rounded-lg ring-2 ring-danger" : live.length ? "rounded-lg ring-2 ring-warning-border/50" : ""
-        }
-      >
-        {control}
-      </div>
+    <Input
+      id={id}
+      type={numeric ? "number" : "text"}
+      inputMode={numeric ? "numeric" : undefined}
+      min={isYear ? MIN_YEAR : numeric ? 0 : undefined}
+      max={isYear ? MAX_YEAR : undefined}
+      step={isYear ? 1 : undefined}
+      placeholder={isYear ? "e.g. 2025" : undefined}
+      value={value}
+      onChange={(e) => onValue(e.target.value)}
+      aria-invalid={!!error}
+    />
+  );
+}
+
+/** A dropdown; a value on record that isn't in the list stays selectable, labelled why. */
+function EnumSelect({
+  column, id, value, error, options, onValue,
+}: { column: string; id: string; value: string; error?: string; options?: readonly string[]; onValue: (v: string) => void }) {
+  const all = ENUMS[column] ?? [];
+  const list = options ?? all;
+  const offListLabel = all.includes(value) ? "doesn't fit the branch" : "current value, not in list";
+  return (
+    <Select id={id} value={value} onChange={(e) => onValue(e.target.value)} aria-invalid={!!error}>
+      <option value="">—</option>
+      {list.map((o) => (
+        <option key={o} value={o}>{o}</option>
+      ))}
+      {value && !list.includes(value) && <option value={value}>{value} ({offListLabel})</option>}
+    </Select>
+  );
+}
+
+/** Messages under a field: its error, unusual-answer warnings, notes on old records, a hint, or a stale value. */
+function FieldNotes({
+  error, hint, stale, onRecord, onValue, onName, live, noted,
+}: FieldProps & { live: Issue[]; noted: Issue[] }) {
+  return (
+    <>
       {error && (
         <p className="mt-1.5 flex items-start gap-1 text-xs text-danger">
           <AlertTriangle className="mt-px h-3 w-3 shrink-0" aria-hidden /> {error}
@@ -568,6 +640,6 @@ function FieldControl({ field, value, name, error, warnings, hint, options: opti
           )}
         </p>
       )}
-    </div>
+    </>
   );
 }

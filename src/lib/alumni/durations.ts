@@ -21,7 +21,7 @@ export interface DurationRule {
 
 const rule = (typical: number[], min: number, max: number, note?: string): DurationRule => ({ typical, min, max, note });
 
-export const UG_DURATIONS: Record<string, DurationRule> = {
+const UG_DURATIONS: Record<string, DurationRule> = {
   "BTech/BE": rule([4], 3, 8, "3 years is normal for lateral entry after a diploma; longer usually means backlogs or a break."),
   "BTech/MTech": rule([5], 4, 10, "Dual degree is 5 years."),
   BSc: rule([3, 4], 3, 6, "3 years, or 4 for a 4-year honours / research degree."),
@@ -53,7 +53,7 @@ export const UG_DURATIONS: Record<string, DurationRule> = {
   "Diploma - Medical": rule([2, 3], 1, 5),
 };
 
-export const PG_DURATIONS: Record<string, DurationRule> = {
+const PG_DURATIONS: Record<string, DurationRule> = {
   MTech: rule([2], 1, 4),
   MS: rule([2, 3], 1, 5, "MS by research can take 2–3 years."),
   MSc: rule([2], 1, 4),

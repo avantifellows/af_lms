@@ -38,7 +38,7 @@ export interface EntryContext {
 }
 
 /** Flattens a Postgres value (Date, boolean, number, null) to the string the form uses. */
-export function str(v: unknown): string {
+function str(v: unknown): string {
   if (v === null || v === undefined) return "";
   if (v instanceof Date) return v.toISOString().slice(0, 10);
   return String(v).replace(/\s+/g, " ").trim();
@@ -49,7 +49,7 @@ export function str(v: unknown): string {
  * its 63-character identifier limit. College/branch columns hold college.id /
  * branch.id in the table but codes (C-xxxx / branch_id) in the form.
  */
-export const ALUMNI_DB_COLUMN: Record<string, string> = Object.fromEntries(
+const ALUMNI_DB_COLUMN: Record<string, string> = Object.fromEntries(
   ALUMNI_FIELDS.map((f) => [f.column, f.column.slice(0, 63)]),
 );
 export const CODE_COLUMNS = {
