@@ -603,6 +603,18 @@ describe("SchoolPage (server component)", () => {
 
   // --- Page rendering ---
 
+  // The Centre switcher is a Centre-page aid: a School page never loads its list.
+  it("never runs the Centre switcher list query", async () => {
+    setupAdminDefaults();
+
+    await renderPage();
+
+    const switcherCalls = mockQuery.mock.calls.filter(([sql]) =>
+      String(sql).includes("c.school_id IS NOT NULL"),
+    );
+    expect(switcherCalls).toHaveLength(0);
+  });
+
   it("renders PageHeader with correct subtitle including UDISE code", async () => {
     setupAdminDefaults({
       district: "Bhavnagar",
@@ -634,13 +646,13 @@ describe("SchoolPage (server component)", () => {
     );
   });
 
-  it("renders backHref=/dashboard for level 4 admin (multi-school)", async () => {
+  it("renders backHref=/dashboard?view=jnv-nvs for level 4 admin (multi-school)", async () => {
     setupAdminDefaults();
 
     await renderPage();
 
     const header = screen.getByTestId("page-header");
-    expect(header).toHaveAttribute("data-back-href", "/dashboard");
+    expect(header).toHaveAttribute("data-back-href", "/dashboard?view=jnv-nvs");
   });
 
   it("returns an authorized Assignment Coverage School to its selected Program", async () => {
@@ -727,7 +739,7 @@ describe("SchoolPage (server component)", () => {
 
       expect(screen.getByTestId("page-header")).toHaveAttribute(
         "data-back-href",
-        "/dashboard",
+        "/dashboard?view=jnv-nvs",
       );
     },
   );
@@ -788,7 +800,7 @@ describe("SchoolPage (server component)", () => {
     await renderPage();
 
     const header = screen.getByTestId("page-header");
-    expect(header).toHaveAttribute("data-back-href", "/dashboard");
+    expect(header).toHaveAttribute("data-back-href", "/dashboard?view=jnv-nvs");
   });
 
   it("renders Google user email in PageHeader", async () => {
@@ -1321,7 +1333,7 @@ describe("SchoolPage (server component)", () => {
 
     expect(screen.getByTestId("page-header")).toHaveAttribute(
       "data-back-href",
-      "/dashboard",
+      "/dashboard?view=jnv-nvs",
     );
   });
 
@@ -1866,7 +1878,7 @@ describe("SchoolPage (server component)", () => {
     await renderPage();
 
     const header = screen.getByTestId("page-header");
-    expect(header).toHaveAttribute("data-back-href", "/dashboard");
+    expect(header).toHaveAttribute("data-back-href", "/dashboard?view=jnv-nvs");
   });
 
   it("sets hasMultipleSchools based on school_codes !== null condition", async () => {
@@ -2258,7 +2270,7 @@ describe("SchoolPage (server component)", () => {
     expect(screen.queryByTestId("tab-holistic_mentorship")).not.toBeInTheDocument();
     expect(screen.getByTestId("page-header")).toHaveAttribute(
       "data-back-href",
-      "/dashboard",
+      "/dashboard?view=jnv-nvs",
     );
   });
 

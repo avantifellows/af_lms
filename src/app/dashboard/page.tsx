@@ -191,18 +191,39 @@ async function getSchools(
   return { schools, totalCount: parseInt(countResult[0]?.total || "0", 10) };
 }
 
+// Visit ownership is matched on the trimmed, case-folded email (same rule as
+// visits-policy). Recent Visits and Total Visits share this predicate so the
+// newest rows can never disagree with the total. $1 is the normalized email.
+const OWNED_VISIT_PREDICATE = `LOWER(TRIM(v.pm_email)) = $1 AND v.deleted_at IS NULL`;
+
+function normalizeOwnerEmail(email: string) {
+  return email.trim().toLowerCase();
+}
+
 async function getRecentVisits(pmEmail: string, limit: number = 5): Promise<Visit[]> {
   return query<Visit>(
     `SELECT v.id, v.school_code, v.visit_date, v.status, v.inserted_at,
             s.name as school_name
      FROM lms_pm_school_visits v
      LEFT JOIN school s ON s.code = v.school_code
-     WHERE v.pm_email = $1
-       AND v.deleted_at IS NULL
+     WHERE ${OWNED_VISIT_PREDICATE}
      ORDER BY v.visit_date DESC, v.inserted_at DESC
      LIMIT $2`,
-    [pmEmail, limit]
+    [normalizeOwnerEmail(pmEmail), limit]
   );
+}
+
+// Exact count of every owned Visit (any status), independent of dashboard
+// search, pagination and the Recent Visits cap. A failed read throws rather
+// than rendering a false zero.
+async function getOwnedVisitTotal(pmEmail: string): Promise<number> {
+  const rows = await query<{ total: string }>(
+    `SELECT COUNT(*) AS total
+     FROM lms_pm_school_visits v
+     WHERE ${OWNED_VISIT_PREDICATE}`,
+    [normalizeOwnerEmail(pmEmail)]
+  );
+  return parseInt(rows[0].total, 10);
 }
 
 // Dashboard groupings, rendered as tabs. A student belongs to exactly one
@@ -228,6 +249,7 @@ type DashboardData = {
   totalCount: number;
   totalPages: number;
   recentVisits: Visit[];
+  visitTotal: number;
 };
 
 function canViewVisitSummary(permission: DashboardPermission) {
@@ -287,13 +309,15 @@ async function dashboardRequest(searchParams: PageProps["searchParams"]) {
   };
 }
 
-// Centre-seated staff are centre-scoped: their home is their centre, not the
-// whole-school roster. Default them to the Centres tab so the single-school
-// shortcut never bounces them to the school page — an explicit ?view= wins.
+// Hard-pinned roles/scopes first, then an explicit valid ?view=, then the
+// Program-context fallback: Physical Centres for anyone whose resolved Programs
+// include a physical-centre Program, JNV NVS Schools otherwise. A missing and an
+// invalid ?view= fall back alike (they differ only for the seated shortcut).
 function resolveDashboardView(
   viewParam: string | undefined,
   seated: boolean,
   permission: DashboardPermission,
+  programContext: DashboardProgramContext,
 ): DashboardView {
   // PMU Managers are JNV NVS only (ADR 0007): no Physical Centres tab to pick.
   if (permission.role === PMU_MANAGER_ROLE) return "jnv-nvs";
@@ -303,13 +327,14 @@ function resolveDashboardView(
   if (seated) return "centres";
   if (viewParam === "centres") return "centres";
   if (viewParam === "jnv-nvs") return "jnv-nvs";
-  return "jnv-nvs";
+  return programContext.hasCoEOrNodal ? "centres" : "jnv-nvs";
 }
 
-// Single-scope shortcuts, both taken only on the plain landing (no tab chosen,
-// no search): a single-seat user goes straight to their centre, and school
-// staff with exactly one school straight to it. Seated users are excluded from
-// the school shortcut — their home is the centre, resolved just above.
+// Single-scope shortcuts, both taken only without a search: a single-seat user
+// goes straight to their centre on the plain landing (any supplied ?view=, even
+// an invalid one, suppresses it), and non-seated staff with exactly one school
+// go straight to it when the resolved view is JNV NVS Schools. Seated users are
+// excluded from the school shortcut — their home is the centre.
 async function redirectSingleScope({
   seated,
   permission,
@@ -370,9 +395,9 @@ async function loadDashboardData({
   view: DashboardView;
 }): Promise<DashboardData> {
   if (view === "centres") {
-    // Centre list + the header's school count, in parallel. No visits query and
-    // no school grid on this tab.
-    const [centres, { totalCount }] = await Promise.all([
+    // Centre list + the header's school count + the Visit total, in parallel.
+    // No Recent Visits and no school grid on this tab.
+    const [centres, { totalCount }, visitTotal] = await Promise.all([
       getAccessibleCentresWithCounts(
         resolveCentreAccess(permission, schoolCodes),
         searchQuery,
@@ -380,6 +405,7 @@ async function loadDashboardData({
       // No searchQuery: on this tab the term filters CENTRES, while this count is
       // the header's "your scope" figure and drives no pagination here.
       getSchools(schoolCodes, undefined, currentPage, "centre-linked"),
+      hasPMAccess ? getOwnedVisitTotal(email) : Promise.resolve(0),
     ]);
     return {
       schools: [],
@@ -387,12 +413,14 @@ async function loadDashboardData({
       totalCount,
       totalPages: Math.ceil(totalCount / SCHOOLS_PER_PAGE),
       recentVisits: [],
+      visitTotal,
     };
   }
 
-  const [{ schools, totalCount }, recentVisits] = await Promise.all([
+  const [{ schools, totalCount }, recentVisits, visitTotal] = await Promise.all([
     getSchools(schoolCodes, searchQuery, currentPage, "jnv"),
     hasPMAccess ? getRecentVisits(email) : Promise.resolve([] as Visit[]),
+    hasPMAccess ? getOwnedVisitTotal(email) : Promise.resolve(0),
   ]);
   // NVS-attributed counts, not whole-school — keeps this tab disjoint from Centres.
   const nvsCounts = await getNvsGradeCounts(schools.map((school) => school.id));
@@ -409,6 +437,7 @@ async function loadDashboardData({
     totalCount,
     totalPages: Math.ceil(totalCount / SCHOOLS_PER_PAGE),
     recentVisits,
+    visitTotal,
   };
 }
 
@@ -462,7 +491,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   );
   const features = dashboardFeatures(permission, programContext, holisticAccess.ok);
   const seated = isCentreSeated(permission);
-  const view = resolveDashboardView(viewParam, seated, permission);
+  const view = resolveDashboardView(viewParam, seated, permission, programContext);
   const schoolCodes = await getAccessibleSchoolCodes(email, permission);
   await redirectSingleScope({ seated, permission, schoolCodes, searchQuery, viewParam, view });
 
@@ -488,6 +517,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         schools={data.schools}
         centres={data.centres}
         recentVisits={data.recentVisits}
+        visitTotal={data.visitTotal}
         hasPMAccess={features.hasPMAccess}
         showViewTabs={!seated && !isPmuRole(permission.role)}
         // A PMU Manager has no tab strip, so the heading names their one view.
@@ -581,7 +611,7 @@ function DashboardViewTabs({ view, show }: { view: DashboardView; show: boolean 
   </div>;
 }
 
-function DashboardMain({ view, searchQuery, currentPage, totalPages, totalCount, schools, centres, recentVisits, hasPMAccess, showViewTabs, showSchoolsHeading }: {
+function DashboardMain({ view, searchQuery, currentPage, totalPages, totalCount, schools, centres, recentVisits, visitTotal, hasPMAccess, showViewTabs, showSchoolsHeading }: {
   view: DashboardView;
   searchQuery?: string;
   currentPage: number;
@@ -590,13 +620,14 @@ function DashboardMain({ view, searchQuery, currentPage, totalPages, totalCount,
   schools: DashboardSchool[];
   centres: Centre[];
   recentVisits: Visit[];
+  visitTotal: number;
   hasPMAccess: boolean;
   showViewTabs: boolean;
   showSchoolsHeading: boolean;
 }) {
   return <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
     <DashboardViewTabs view={view} show={showViewTabs} />
-    <PMStats enabled={hasPMAccess} totalCount={totalCount} recentVisitCount={recentVisits.length} />
+    <PMStats enabled={hasPMAccess} totalCount={totalCount} visitTotal={visitTotal} />
     {view === "centres" ? (
       <CentresSection centres={centres} hasPMAccess={hasPMAccess} searchQuery={searchQuery} />
     ) : (
@@ -644,19 +675,15 @@ function CentresSection({ centres, hasPMAccess, searchQuery }: {
   </div>;
 }
 
+// Cards only open their Centre; Visits start from the destination page (#391).
 function DashboardCentreCard({ centre, hasPMAccess }: { centre: Centre; hasPMAccess: boolean }) {
-  // Visits are school-linked, so Start Visit needs the centre's parent school.
-  const actions = hasPMAccess && centre.school_code ? <Link href={`/school/${centre.school_code}/visit/new`}
-    className="inline-flex items-center rounded-lg px-3 py-2 text-sm font-bold text-text-on-accent bg-accent shadow-sm hover:bg-accent-hover active:bg-accent-hover/90 transition-colors">
-    Start Visit
-  </Link> : undefined;
-  return <CentreCard centre={centre} showRegion={hasPMAccess} actions={actions} />;
+  return <CentreCard centre={centre} showRegion={hasPMAccess} />;
 }
 
-function PMStats({ enabled, totalCount, recentVisitCount }: {
+function PMStats({ enabled, totalCount, visitTotal }: {
   enabled: boolean;
   totalCount: number;
-  recentVisitCount: number;
+  visitTotal: number;
 }) {
   if (!enabled) return null;
   return <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 mb-8">
@@ -666,7 +693,7 @@ function PMStats({ enabled, totalCount, recentVisitCount }: {
     </Card>
     <Card className="p-6 border-l-4 border-l-brand-amber">
       <div className="text-xs font-bold text-brand-amber uppercase tracking-wide">Total Visits</div>
-      <div className="mt-1 text-3xl font-bold text-text-primary font-mono">{recentVisitCount}</div>
+      <div className="mt-1 text-3xl font-bold text-text-primary font-mono">{visitTotal}</div>
     </Card>
   </div>;
 }
@@ -738,16 +765,15 @@ function SchoolsSection({ schools, hasPMAccess, showHeading, searchQuery, curren
     {schools.length === 0 && <div className="text-center py-12 text-text-muted">
       {searchQuery ? `No schools found matching "${searchQuery}"` : "No schools found"}
     </div>}
+    {/* Name the view explicitly: a bare /dashboard?page=2 would fall back to
+        Physical Centres for a physical-Program user. */}
     <Pagination currentPage={currentPage} totalPages={totalPages} basePath="/dashboard"
-      searchParams={searchQuery ? { q: searchQuery } : {}} />
+      searchParams={searchQuery ? { q: searchQuery, view: "jnv-nvs" } : { view: "jnv-nvs" }} />
   </div>;
 }
 
+// Cards only open their School; Visits start from the destination page (#391).
 function DashboardSchoolCard({ school, hasPMAccess }: { school: DashboardSchool; hasPMAccess: boolean }) {
-  const actions = hasPMAccess ? <Link href={`/school/${school.code}/visit/new`}
-    className="inline-flex items-center rounded-lg px-3 py-2 text-sm font-bold text-text-on-accent bg-accent shadow-sm hover:bg-accent-hover active:bg-accent-hover/90 transition-colors">
-    Start Visit
-  </Link> : undefined;
   return <SchoolCard school={school} href={`/school/${school.code}`} showStudentCount showGradeBreakdown
-    showRegion={hasPMAccess} actions={actions} />;
+    showRegion={hasPMAccess} />;
 }

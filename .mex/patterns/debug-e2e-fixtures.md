@@ -14,7 +14,7 @@ edges:
     condition: when failures are in PM school visit flows
   - target: context/data-access.md
     condition: when fixture rows need to match schema/read-path expectations
-last_updated: 2026-09-30
+last_updated: 2026-10-14
 ---
 
 # Debug E2E Fixtures
@@ -38,9 +38,11 @@ expectations, or fixture rows missing a relationship the app now requires.
 - That step shells out to `mix`. The asdf shim fails there: no version is pinned for `db-service`, and its per-version `MIX_HOME` has no Hex. Put the real binaries first: `PATH="$HOME/.asdf/installs/elixir/1.18.4-otp-27/bin:$HOME/.asdf/installs/erlang/27.0/bin:$PATH" MIX_HOME=$HOME/.mix npx playwright test`.
 - `relation "lms_student_intervention_flags" does not exist` in the webServer log (surfacing as browser 500s in the Holistic responsive/health test) means the local `e2e/fixtures/db-dump.sql` predates that table; nothing in the e2e migrations creates it. Refresh the dump rather than loosening the health assertions. Run e2e from a worktree by symlinking the gitignored `.env.test` and the dump from the main checkout (and remove the symlinks after).
 - A batch `enrollment_record.group_id` holds `batch.id`, not the batch `group.id`; join `batch ON batch.id = enrollment_record.group_id` (as `permissions.ts` does). Batch *membership* (`group_user`) is the one that goes through `"group".child_id`.
+- The `pmPage` fixture owns no Schools or Centres on `/dashboard` ("My Schools 0", empty card grids). Use `adminPage` for dashboard card → destination journeys.
 - Centre-seated Teachers are confined off `/school/<code>` (Access Denied); open their Holistic workspace at `/centre/<id>`.
 - `seedHolisticFixtures()` upserts the shared fixture actors' permissions, so do not call it a second time for another Program. The EMRS (Program 78) Admin journey uses the separate `LMS78` scope seeded by `seedHolisticE2eEmrsScope()` in `e2e/helpers/db.ts`.
 - Holistic Student/Phase APIs return 422 without `program_id`; an access-denial assertion (404) must still send a valid Program.
+- Centre-switcher journeys (#388) use `seedCentreSwitcherFixture()` / `removeCentreSwitcherFixture()` in `e2e/helpers/db.ts` (seed in `beforeAll`, remove in `afterAll` so other specs' Centre lists are unchanged) and `signInAs()` from `e2e/fixtures/auth.ts` for its synthetic seated and School-scoped users. Its "Switcher E2E …" Centres sit at Schools 19269/19006/19260, which no other fixture uses.
 - The dashboard's default tab heading is "JNV NVS Schools"; "My Schools" is only the stat label.
 - The Curriculum tab shows a Program selector only when the School has more than one Program from active physical Centres; single-Centre fixture Schools (e.g. `LMS75EMPTY`) have none.
 - Curriculum topics need `topic_curriculum` rows in the fixture migration, not just `chapter` and `topic` rows.

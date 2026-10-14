@@ -14,4 +14,5 @@ export { DetailField } from "./DetailField";
 export { DetailGroup } from "./DetailGroup";
 export { RadioPair } from "./RadioPair";
 export { RemarkField } from "./RemarkField";
+export { SectionCard } from "./SectionCard";
 export { baseInputClasses, touchTarget } from "./styles";

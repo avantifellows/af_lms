@@ -520,6 +520,80 @@ describe("EditStudentModal", () => {
     expect(props.onClose).not.toHaveBeenCalled();
   });
 
+  describe("uniform sizes", () => {
+    it("prefills the stored sizes and offers the chart with measurements", () => {
+      renderModal({
+        student: { ...baseStudent, tshirt_size: "L", track_pant_size: "M" },
+      });
+
+      expect(getByName("tshirt_size")).toHaveValue("L");
+      expect(getByName("track_pant_size")).toHaveValue("M");
+
+      const tshirt = getByName("tshirt_size") as HTMLSelectElement;
+      expect([...tshirt.options].map((option) => option.text)).toContain('M (Chest 38\u201340")');
+      expect([...tshirt.options].map((option) => option.value)).not.toContain("XXS");
+
+      const trackPant = getByName("track_pant_size") as HTMLSelectElement;
+      expect([...trackPant.options].map((option) => option.text)).toContain('M (Waist 30\u201332")');
+    });
+
+    it("keeps a stored size the chart no longer offers selectable", () => {
+      renderModal({ student: { ...baseStudent, tshirt_size: "XXS" } });
+
+      const tshirt = getByName("tshirt_size") as HTMLSelectElement;
+      expect(tshirt).toHaveValue("XXS");
+      expect([...tshirt.options].map((option) => option.value)).toContain("XXS");
+    });
+
+    it("submits the bare size code, not its measurement label", async () => {
+      const user = userEvent.setup();
+      mockFetch.mockResolvedValue(
+        new Response(JSON.stringify({ ok: true }), { status: 200 }),
+      );
+      renderModal();
+
+      await user.selectOptions(getByName("tshirt_size"), "XL");
+      await user.click(screen.getByText("Save Changes"));
+
+      await waitFor(() => expect(mockFetch).toHaveBeenCalled());
+      const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(body).toMatchObject({ tshirt_size: "XL" });
+      expect(body).not.toHaveProperty("track_pant_size");
+    });
+
+    it("sends a blank when a size is cleared, so the stored value is removed", async () => {
+      const user = userEvent.setup();
+      mockFetch.mockResolvedValue(
+        new Response(JSON.stringify({ ok: true }), { status: 200 }),
+      );
+      renderModal({ student: { ...baseStudent, track_pant_size: "M" } });
+
+      await user.selectOptions(getByName("track_pant_size"), "");
+      await user.click(screen.getByText("Save Changes"));
+
+      await waitFor(() => expect(mockFetch).toHaveBeenCalled());
+      const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(body).toMatchObject({ track_pant_size: "" });
+    });
+
+    it("leaves both sizes out of the payload when neither is touched", async () => {
+      const user = userEvent.setup();
+      mockFetch.mockResolvedValue(
+        new Response(JSON.stringify({ ok: true }), { status: 200 }),
+      );
+      renderModal({ student: { ...baseStudent, tshirt_size: "L" } });
+
+      await user.clear(getByName("father_name"));
+      await user.type(getByName("father_name"), "Mahesh Kumar");
+      await user.click(screen.getByText("Save Changes"));
+
+      await waitFor(() => expect(mockFetch).toHaveBeenCalled());
+      const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(body).not.toHaveProperty("tshirt_size");
+      expect(body).not.toHaveProperty("track_pant_size");
+    });
+  });
+
   it("blocks submit when the student primary key is missing", async () => {
     const user = userEvent.setup();
     renderModal({ student: { ...baseStudent, student_pk_id: null } });

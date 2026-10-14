@@ -5,6 +5,7 @@ import {
   resolveBatchGroups,
 } from "@/lib/quiz-session-access";
 import { istWallClockWindowEnd, utcToISTDate } from "@/lib/quiz-session-time";
+import { quizDurationSeconds } from "@/lib/quiz-duration";
 import { resolveGradeId } from "@/lib/curriculum-options";
 import {
   CMS_SOURCE,
@@ -13,6 +14,7 @@ import {
   streamForCmsExamTrack,
   type CmsExamTrack,
 } from "@/lib/cms-tests";
+import { aiatNextStep } from "@/lib/aiat-survey";
 
 // Create a quiz session from a new-CMS test. This is the SYNCHRONOUS replacement for the
 // legacy SNS -> etl-data-flow sessionCreator Lambda: af_lms builds the quiz in quiz-backend,
@@ -238,8 +240,18 @@ export async function POST(request: NextRequest) {
   const showAnswers = body.showAnswers ?? true;
   const gurukulFormatType = shuffle ? "qa" : body.gurukulFormatType || "both";
 
+  // AIAT tests chain into a short feedback survey shown BEFORE the scorecard. Detected from
+  // the CMS test name and routed to one of three surveys by the student's group + stream
+  // (resolved above). Null for non-AIAT tests, in which case no next step is attached.
+  const aiatStep = aiatNextStep({
+    testName: body.testName,
+    group,
+    stream: body.stream,
+  });
+
   // 1. Build the quiz in quiz-backend from the CMS test (this writes to quiz Mongo).
   let quizId: string;
+  let quizDuration: number | undefined;
   let warnings: string[] = [];
   try {
     const quizRes = await fetch(`${QUIZ_BACKEND_URL}/quiz/from-cms`, {
@@ -256,6 +268,9 @@ export async function POST(request: NextRequest) {
         // no gate, so review_immediate=false would still show answers immediately.
         session_end_time: istWallClockWindowEnd(body.endTime),
         ...(quizLangCode ? { lang_code: quizLangCode } : {}),
+        // Attach the AIAT before-scorecard survey (if this is an AIAT). quiz-backend writes
+        // these onto the quiz doc's metadata, which the quiz-taking frontend reads.
+        ...(aiatStep ?? {}),
       }),
     });
     if (!quizRes.ok) {
@@ -266,7 +281,11 @@ export async function POST(request: NextRequest) {
         { status: 502 }
       );
     }
-    const quizData = (await quizRes.json()) as { id?: string; warnings?: string[] };
+    const quizData = (await quizRes.json()) as {
+      id?: string;
+      warnings?: string[];
+      time_limit?: unknown;
+    };
     if (!quizData.id) {
       console.error("quiz-backend /quiz/from-cms returned no quiz id:", quizData);
       return NextResponse.json(
@@ -276,6 +295,7 @@ export async function POST(request: NextRequest) {
     }
     quizId = quizData.id;
     warnings = quizData.warnings ?? [];
+    quizDuration = quizDurationSeconds(quizData);
   } catch (err) {
     console.error("Failed to reach quiz backend:", err);
     return NextResponse.json({ error: "Failed to reach quiz backend" }, { status: 502 });
@@ -382,6 +402,8 @@ export async function POST(request: NextRequest) {
       date_created: utcToISTDate(new Date().toISOString()),
       created_by: access.email,
       created_from: "lms",
+      // Only sessionCreator wrote this before, and this path never goes through it.
+      ...(quizDuration !== undefined ? { quiz_duration_seconds: quizDuration } : {}),
     },
   };
 
