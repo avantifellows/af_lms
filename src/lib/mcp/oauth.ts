@@ -123,7 +123,7 @@ const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 export const CLAUDE_REDIRECT_HOSTS = new Set(["claude.ai", "claude.com"]);
 const CLAUDE_CALLBACK_PATH = "/api/mcp/auth_callback";
 
-export function isLoopbackRedirect(url: URL): boolean {
+function isLoopbackRedirect(url: URL): boolean {
   return url.protocol === "http:" && LOOPBACK_HOSTS.has(url.hostname);
 }
 
