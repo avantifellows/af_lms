@@ -89,7 +89,7 @@ Student Addition writes deliberately use a stricter gate than `ownsRecord`: admi
 
 - `getUserPermission(email)` — bare row from `user_permission` (only `revoked_at IS NULL`). Use for role/feature checks that don't touch school scope.
 - `getResolvedPermission(email)` — `getUserPermission` **+** `resolveScope`. Use **anywhere school/centre access is actually decided** so centre seats are included. `canAccessSchoolSync` only honours seats when `scope` is populated.
-- **Centre seats** (`centre_positions` → `centres` → `school`/`program`): additive. A seated user reaches that centre's school + program even with empty `school_codes`/`program_ids`. PM/SPM/PH seats also fill `scope.visitManagedSchools` (read every visit at that School, and the Visit Summary for those Schools; see `context/visits.md`). `resolveScope` degrades to explicit-only **only** on missing-schema errors (42P01/42703); any other DB error propagates (so a seated user is never silently handed an empty scope).
+- **Centre seats** (`centre_positions` → `centres` → `school`/`program`): additive. A seated user reaches that centre's school + program even with empty `school_codes`/`program_ids`. PM/SPM/PH seats at active centres also fill `scope.visitManagedSchools` (read every visit at that School, and the Visit Summary for those Schools; see `context/visits.md`). `resolveScope` degrades to explicit-only **only** on missing-schema errors (42P01/42703); any other DB error propagates (so a seated user is never silently handed an empty scope).
 
 ## The gate — what to call
 
