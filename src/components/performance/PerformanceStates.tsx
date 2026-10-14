@@ -1,6 +1,106 @@
 "use client";
 
-import type { ReactElement } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
+import type { ReactElement, ReactNode } from "react";
+
+/**
+ * Keeps the previous settled height while content reloads. Once new content
+ * settles, it releases that height down to the natural content height or the
+ * smaller floor needed to keep the current scroll position valid.
+ */
+export function RetainedHeightFrame({
+  loading,
+  children,
+  className,
+  testId,
+  recoverViewportOnEnter = false,
+}: {
+  loading: boolean;
+  children: ReactNode;
+  className?: string;
+  testId?: string;
+  /**
+   * When this changes from false to true, release a previous view's height and
+   * recover only if the new content is entirely above the viewport. This lets
+   * a short overview replace a deeply-scrolled report without leaving a blank
+   * screen, while ordinary filter reloads keep their scroll position.
+   */
+  recoverViewportOnEnter?: boolean;
+}) {
+  const frameRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const previousRecoveryState = useRef(recoverViewportOnEnter);
+  const [retainedHeight, setRetainedHeight] = useState(0);
+
+  useLayoutEffect(() => {
+    const enteringRecovery = recoverViewportOnEnter && !previousRecoveryState.current;
+    previousRecoveryState.current = recoverViewportOnEnter;
+    if (loading || !frameRef.current || !contentRef.current) return;
+
+    const frame = frameRef.current;
+    const content = contentRef.current;
+    const heights = () => {
+      const naturalHeight = Math.ceil(content.getBoundingClientRect().height);
+      const frameTop = frame.getBoundingClientRect().top + window.scrollY;
+      const viewportBottom = window.scrollY + window.innerHeight;
+      const scrollFloor = window.scrollY > 0 ? Math.max(0, Math.ceil(viewportBottom - frameTop)) : 0;
+      return { naturalHeight, requiredHeight: Math.max(naturalHeight, scrollFloor) };
+    };
+
+    if (enteringRecovery) {
+      const { naturalHeight, requiredHeight } = heights();
+      const frameTop = frame.getBoundingClientRect().top + window.scrollY;
+      const contentBottom = frameTop + naturalHeight;
+      const viewportIsBelowContent = window.scrollY > 0 && window.scrollY >= contentBottom;
+
+      if (viewportIsBelowContent) {
+        window.scrollTo({
+          top: Math.max(0, frameTop, contentBottom - window.innerHeight),
+          behavior: "auto",
+        });
+        setRetainedHeight(naturalHeight);
+      } else {
+        setRetainedHeight((current) => (
+          current === 0 ? requiredHeight : Math.max(naturalHeight, Math.min(current, requiredHeight))
+        ));
+      }
+    }
+
+    const measure = () => {
+      const { naturalHeight, requiredHeight } = heights();
+      setRetainedHeight((current) => (
+        current === 0 ? requiredHeight : Math.max(naturalHeight, Math.min(current, requiredHeight))
+      ));
+    };
+    const releaseOnScrollUp = () => {
+      const { requiredHeight } = heights();
+      setRetainedHeight((current) => Math.min(current, requiredHeight));
+    };
+
+    if (!enteringRecovery) measure();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    observer?.observe(content);
+    window.addEventListener("scroll", releaseOnScrollUp, { passive: true });
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("scroll", releaseOnScrollUp);
+    };
+  }, [loading, recoverViewportOnEnter]);
+
+  const minHeight = retainedHeight > 0 ? `${retainedHeight}px` : undefined;
+  return (
+    <div
+      ref={frameRef}
+      style={{ minHeight }}
+      data-testid={testId}
+      aria-busy={loading}
+    >
+      <div ref={contentRef} className={className} data-testid={testId ? `${testId}-content` : undefined}>
+        {children}
+      </div>
+    </div>
+  );
+}
 
 /** The tab's flat "nothing to show yet" panel, used for both the prompts
  *  (pick a program, pick a grade) and the no-data message. */

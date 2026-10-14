@@ -129,3 +129,35 @@ describe("createFeedbackSession", () => {
     await expect(createFeedbackSession(baseParams)).rejects.toThrow(/DB service/);
   });
 });
+
+describe("extendFeedbackSession", () => {
+  it("moves both the session and its occurrence to the new end, in IST", async () => {
+    mockFetch
+      .mockResolvedValueOnce(jsonResponse([{ id: 77 }]))
+      .mockResolvedValueOnce(jsonResponse({ id: 11 }))
+      .mockResolvedValueOnce(jsonResponse({ id: 77 }));
+    const { extendFeedbackSession } = await import("./teacher-feedback-session");
+
+    await extendFeedbackSession(11, "s-11", "2026-09-20T12:30:00.000Z");
+
+    const [occListCall, sessionCall, occCall] = mockFetch.mock.calls;
+    expect(sessionCall[0]).toBe("https://db.test/api/session/11");
+    expect(sessionCall[1].method).toBe("PATCH");
+    const endIst = JSON.parse(sessionCall[1].body).end_time;
+    expect(endIst).toContain("2026-09-20T18:00:00");
+    expect(occListCall[0]).toBe("https://db.test/api/session-occurrence?session_id=s-11");
+    expect(occCall[0]).toBe("https://db.test/api/session-occurrence/77");
+    expect(JSON.parse(occCall[1].body)).toEqual({ end_time: endIst });
+  });
+
+  it("fails loudly when the session has no occurrence to move", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse([]));
+    const { extendFeedbackSession } = await import("./teacher-feedback-session");
+
+    await expect(extendFeedbackSession(11, "s-11", "2026-09-20T12:30:00.000Z")).rejects.toThrow(
+      /no schedule/
+    );
+    // Nothing was written, so the session isn't left half-extended.
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+});
