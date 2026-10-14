@@ -25,25 +25,35 @@ export function visibleValues(values: Values): Values {
   return out;
 }
 
-/** The format problem with one field's value, if any (years, numbers, text length, dropdowns). */
-function fieldError(field: FieldDef, v: string, previous: Values): string | undefined {
-  if (field.type === "year") {
-    const n = Number(v);
-    return !Number.isInteger(n) || n < MIN_YEAR || n > MAX_YEAR ? `Enter a year between ${MIN_YEAR} and ${MAX_YEAR}.` : undefined;
-  }
-  if (field.type === "number") {
-    const n = Number(v);
-    if (!Number.isFinite(n) || n < 0) return "Enter a number (0 or more).";
-    return WHOLE_NUMBERS.has(field.column) && !Number.isInteger(n) ? "Enter a whole number." : undefined;
-  }
-  if (field.type === "text") return v.length > MAX_TEXT ? `Keep it under ${MAX_TEXT} characters.` : undefined;
-  if (field.type === "enum") {
-    const allowed = ENUMS[field.column] ?? [];
-    const onRecord = v === (previous[field.column] ?? "").trim();
-    return !allowed.includes(v) && !onRecord ? "Pick one of the listed options." : undefined;
-  }
-  return undefined;
-}
+type FieldRule = (field: FieldDef, v: string, previous: Values) => string | undefined;
+
+const yearRule: FieldRule = (_field, v) => {
+  const n = Number(v);
+  return Number.isInteger(n) && n >= MIN_YEAR && n <= MAX_YEAR ? undefined : `Enter a year between ${MIN_YEAR} and ${MAX_YEAR}.`;
+};
+
+const numberRule: FieldRule = (field, v) => {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 0) return "Enter a number (0 or more).";
+  return WHOLE_NUMBERS.has(field.column) && !Number.isInteger(n) ? "Enter a whole number." : undefined;
+};
+
+const textRule: FieldRule = (_field, v) => (v.length > MAX_TEXT ? `Keep it under ${MAX_TEXT} characters.` : undefined);
+
+/** A dropdown value must be in the list, unless it is the value already on record. */
+const enumRule: FieldRule = (field, v, previous) => {
+  const listed = (ENUMS[field.column] ?? []).includes(v);
+  const onRecord = v === (previous[field.column] ?? "").trim();
+  return listed || onRecord ? undefined : "Pick one of the listed options.";
+};
+
+/** Format checks by field type (college/branch codes are checked against the database on save). */
+const FIELD_RULES: Partial<Record<FieldDef["type"], FieldRule>> = {
+  year: yearRule,
+  number: numberRule,
+  text: textRule,
+  enum: enumRule,
+};
 
 /** Graduation can't come before starting (a pair already on record is left alone). */
 function checkGraduationOrder(values: Values, previous: Values, errors: Record<string, string>) {
@@ -79,7 +89,7 @@ export function validateValues(values: Values, previous: Values = {}): Record<st
   const errors: Record<string, string> = {};
   for (const field of ALUMNI_SECTIONS.flatMap((s) => s.fields)) {
     const v = (values[field.column] ?? "").trim();
-    const error = v ? fieldError(field, v, previous) : undefined;
+    const error = v ? FIELD_RULES[field.type]?.(field, v, previous) : undefined;
     if (error) errors[field.column] = error;
   }
   checkGraduationOrder(values, previous, errors);

@@ -130,6 +130,19 @@ function savedToast(name: string, entry: SavedEntry) {
   });
 }
 
+/**
+ * The answers after one change. A Gap Year status means they took a gap year,
+ * so "Took a gap year?" is filled in for them (with a short notice).
+ */
+function withAnswer(values: Values, column: string, value: string): Values {
+  const next = { ...values, [column]: value };
+  if (GAP_STATUS_FIELDS.includes(column) && value === "Gap Year" && !values.did_you_take_a_gap_year) {
+    next.did_you_take_a_gap_year = "Yes";
+    toast.info('"Took a gap year?" set to Yes', { duration: 3000 });
+  }
+  return next;
+}
+
 /** Removes one key from a record, returning the same object when it wasn't there. */
 const without = (record: Record<string, string>, key: string) => {
   if (!record[key]) return record;
@@ -166,10 +179,7 @@ export default function AlumniForm({ userId, onSaved }: Props) {
   if (!context || !review) return <FormSkeleton />;
 
   const setValue = (column: string, value: string) => {
-    // A Gap Year status means they took a gap year — fill that in for them.
-    const autoGap = GAP_STATUS_FIELDS.includes(column) && value === "Gap Year" && !values.did_you_take_a_gap_year;
-    setValues((prev) => ({ ...prev, [column]: value, ...(autoGap ? { did_you_take_a_gap_year: "Yes" } : {}) }));
-    if (autoGap) toast.info('"Took a gap year?" set to Yes', { duration: 3000 });
+    setValues(withAnswer(values, column, value));
     setErrors((prev) => without(prev, column));
     setDirty(true);
     setJustSaved(false);
@@ -202,13 +212,9 @@ export default function AlumniForm({ userId, onSaved }: Props) {
     // Same review the server runs — catch problems without a round trip.
     setErrors(review.errors);
     setFormError("");
-    const firstError = Object.keys(review.errors)[0];
-    if (firstError) {
-      document.getElementById(`f-${firstError}`)?.scrollIntoView?.({ behavior: "smooth", block: "center" });
-      return;
-    }
-    const toConfirm = needsConfirm(review.warnings);
-    if (toConfirm.length) setConfirming(toConfirm);
+    const step = nextStep(review);
+    if (step.kind === "fix") scrollToField(step.field);
+    else if (step.kind === "confirm") setConfirming(step.warnings);
     else submit([]);
   };
 
@@ -242,11 +248,7 @@ export default function AlumniForm({ userId, onSaved }: Props) {
 
       <div className="sticky bottom-0 z-10 -mx-6 -mb-6 flex flex-wrap items-center gap-3 rounded-b-xl border-t border-border bg-bg-card/95 px-6 py-4 backdrop-blur">
         <Button type="button" onClick={save} disabled={saving} className="min-w-[140px]">
-          {saving ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> Saving…
-            </>
-          ) : context.kind === "edit" ? "Save changes" : "Save"}
+          <SaveLabel saving={saving} kind={context.kind} />
         </Button>
         <SaveStatus
           errorCount={Object.keys(errors).length}
@@ -267,6 +269,21 @@ export default function AlumniForm({ userId, onSaved }: Props) {
       )}
     </div>
   );
+}
+
+/** After the local review: fix a field first, confirm unusual answers, or send. */
+function nextStep(review: { errors: Record<string, string>; warnings: Issue[] }):
+  | { kind: "fix"; field: string }
+  | { kind: "confirm"; warnings: Issue[] }
+  | { kind: "send" } {
+  const firstError = Object.keys(review.errors)[0];
+  if (firstError) return { kind: "fix", field: firstError };
+  const toConfirm = needsConfirm(review.warnings);
+  return toConfirm.length ? { kind: "confirm", warnings: toConfirm } : { kind: "send" };
+}
+
+function scrollToField(column: string) {
+  document.getElementById(`f-${column}`)?.scrollIntoView?.({ behavior: "smooth", block: "center" });
 }
 
 function FormHeader({ context }: { context: EntryContext }) {
@@ -292,6 +309,15 @@ function FormHeader({ context }: { context: EntryContext }) {
         </div>
       </div>
     </header>
+  );
+}
+
+function SaveLabel({ saving, kind }: { saving: boolean; kind: EntryContext["kind"] }) {
+  if (!saving) return <>{kind === "edit" ? "Save changes" : "Save"}</>;
+  return (
+    <>
+      <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> Saving…
+    </>
   );
 }
 
@@ -567,22 +593,24 @@ function FieldInput({ field, id, value, name, error, options, onValue, onName }:
   if (field.type === "enum") {
     return <EnumSelect column={field.column} id={id} value={value} error={error} options={options} onValue={onValue} />;
   }
-  const numeric = field.type === "year" || field.type === "number";
-  const isYear = field.type === "year";
   return (
     <Input
       id={id}
-      type={numeric ? "number" : "text"}
-      inputMode={numeric ? "numeric" : undefined}
-      min={isYear ? MIN_YEAR : numeric ? 0 : undefined}
-      max={isYear ? MAX_YEAR : undefined}
-      step={isYear ? 1 : undefined}
-      placeholder={isYear ? "e.g. 2025" : undefined}
+      {...inputProps(field.type)}
       value={value}
       onChange={(e) => onValue(e.target.value)}
       aria-invalid={!!error}
     />
   );
+}
+
+/** Text box settings by field type: years and numbers get a numeric keypad and limits. */
+function inputProps(type: FieldDef["type"]) {
+  if (type === "year") {
+    return { type: "number", inputMode: "numeric" as const, min: MIN_YEAR, max: MAX_YEAR, step: 1, placeholder: "e.g. 2025" };
+  }
+  if (type === "number") return { type: "number", inputMode: "numeric" as const, min: 0 };
+  return { type: "text" };
 }
 
 /** A dropdown; a value on record that isn't in the list stays selectable, labelled why. */
