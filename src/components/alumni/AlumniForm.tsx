@@ -218,9 +218,9 @@ export default function AlumniForm({ entry, onSaved }: Props) {
     setConfirming(null);
     setDirty(false);
     setJustSaved(true);
-    // Reload what's now in the database — a saved pass-out is now an alumnus.
-    if (ref.kind === "pass-out") setRef({ kind: "alumnus", id: outcome.entry.alumniId });
-    else setVersion((v) => v + 1);
+    // Reload what's now in the database, as the alumnus (a saved pass-out now is one).
+    setRef({ kind: "alumnus", id: outcome.entry.alumniId });
+    setVersion((v) => v + 1);
     onSaved?.();
     savedToast(context.name, outcome.entry);
   };
