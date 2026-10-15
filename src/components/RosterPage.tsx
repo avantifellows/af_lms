@@ -56,6 +56,7 @@ import VisitsTab from "@/components/VisitsTab";
 import { Batch } from "@/components/EditStudentModal";
 import QuizSessionsTab from "@/components/quiz-sessions/QuizSessionsTab";
 import TeacherFeedbackTab from "@/components/teacher-feedback/TeacherFeedbackTab";
+import AlumniTab from "@/components/alumni/AlumniTab";
 import {
   buildProgramStats,
   studentDroppedFromProgram,
@@ -780,6 +781,7 @@ function rosterFeatureAccess(permission: UserPermission) {
     visits: getFeatureAccess(permission, "visits"),
     quizSessions: getFeatureAccess(permission, "quiz_sessions"),
     teacherFeedback: getFeatureAccess(permission, "teacher_feedback"),
+    alumni: getFeatureAccess(permission, "alumni"),
   };
 }
 
@@ -1152,7 +1154,8 @@ function visibleRosterTabs({
     | "teacherFeedback"
     | "mentorship"
     | "holisticMentorship"
-    | "visits",
+    | "visits"
+    | "alumni",
     ReactNode
   >;
 }): Array<{ id: RosterTabId; label: string; content: ReactNode }> {
@@ -1193,6 +1196,8 @@ function visibleRosterTabs({
       show: Boolean(content.holisticMentorship),
     },
     { id: "visits", label: "School Visits", content: content.visits, show: access.visits.canView },
+    // School pages only — a centre page passes no alumni content.
+    { id: "alumni", label: "Alumni", content: content.alumni, show: access.alumni.canView && Boolean(content.alumni) },
   ];
   return candidates
     .filter((tab) => tab.show)
@@ -1383,6 +1388,7 @@ export default async function RosterPage({
       mentorship: mentorshipContent,
       holisticMentorship: holisticContent,
       visits: <VisitsTab schoolCode={school.code} canEdit={access.visits.canEdit} />,
+      alumni: isCentre ? null : <AlumniTab schoolCode={school.code} />,
     },
   });
 
