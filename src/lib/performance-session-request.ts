@@ -28,7 +28,7 @@ export async function authorizeSessionRead(
   request: Request,
   udise: string,
 ): Promise<SessionReadRequest> {
-  const auth = await authorizeSchoolAccess(udise);
+  const auth = await authorizeSchoolAccess(udise, { feature: "performance" });
   if (!auth.authorized) return { ok: false, response: auth.response };
 
   const url = new URL(request.url);

@@ -139,6 +139,20 @@ export async function getEntryContext(userId: string): Promise<EntryContext | nu
   };
 }
 
+/**
+ * The form data for an existing alumnus, addressed by alumni.id (ADR 0008).
+ * Null when there is no such alumni row.
+ */
+export async function getAlumnusContext(alumniId: string): Promise<EntryContext | null> {
+  const [row] = await query<{ user_id: string }>(
+    `SELECT s.user_id FROM alumni a JOIN student s ON s.id = a.student_id WHERE a.id = $1`,
+    [alumniId],
+  );
+  if (!row) return null;
+  const context = await getEntryContext(String(row.user_id));
+  return context?.kind === "edit" && context.ids.alumniId === alumniId ? context : null;
+}
+
 /** The student's alumni row (latest if somehow more than one), with college/branch as codes. */
 async function loadAlumni(studentPk: string) {
   const [r] = await query<Record<string, unknown>>(

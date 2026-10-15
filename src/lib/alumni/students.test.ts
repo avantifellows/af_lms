@@ -46,16 +46,16 @@ describe("listPendingForSchool", () => {
 describe("listAlumniForSchool", () => {
   it("keeps alumni whose latest School is this one, newest cohort first", async () => {
     mockQuery.mockResolvedValue([
-      { user_id: "5", afid: "B1", first_name: "Ravi", last_name: "Kumar", cohort_year: "2018-2019", ug_status: "Graduated", current_status: null, college_ug: " NIT  Calicut " },
-      { user_id: "6", afid: null, first_name: "Meena", last_name: null, cohort_year: null, ug_status: null, current_status: "Employed", college_ug: null },
-      { user_id: "4", afid: "B2", first_name: "Anil", last_name: null, cohort_year: "2019-2020", ug_status: null, current_status: null, college_ug: null },
+      { alumni_id: "95", user_id: "5", afid: "B1", first_name: "Ravi", last_name: "Kumar", cohort_year: "2018-2019", ug_status: "Graduated", current_status: null, college_ug: " NIT  Calicut " },
+      { alumni_id: "96", user_id: "6", afid: null, first_name: "Meena", last_name: null, cohort_year: null, ug_status: null, current_status: "Employed", college_ug: null },
+      { alumni_id: "94", user_id: "4", afid: "B2", first_name: "Anil", last_name: null, cohort_year: "2019-2020", ug_status: null, current_status: null, college_ug: null },
     ] as never);
 
     const rows = await listAlumniForSchool(SCHOOL);
 
     expect(rows.map((r) => r.name)).toEqual(["Anil", "Ravi Kumar", "Meena"]);
     expect(rows[1]).toEqual({
-      userId: "5", afid: "B1", name: "Ravi Kumar", cohortYear: "2018-2019", ugStatus: "Graduated", currentStatus: "", collegeUg: "NIT Calicut",
+      alumniId: "95", userId: "5", afid: "B1", name: "Ravi Kumar", cohortYear: "2018-2019", ugStatus: "Graduated", currentStatus: "", collegeUg: "NIT Calicut",
     });
     expect(rows[2]).toMatchObject({ afid: "", cohortYear: "", currentStatus: "Employed", collegeUg: "" });
     const [sql, params] = mockQuery.mock.calls[0];

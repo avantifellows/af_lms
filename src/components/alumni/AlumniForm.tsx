@@ -38,10 +38,22 @@ interface SavedEntry {
   notCleared: string[];
 }
 
+/**
+ * Which record the form is for. Alumni are not Students (ADR 0008): an
+ * existing alumnus is addressed by alumni.id; a pass-out not yet added, by
+ * user.id.
+ */
+export type AlumniEntryRef = { kind: "alumnus" | "pass-out"; id: string };
+
+function entryUrl(ref: AlumniEntryRef): string {
+  const id = encodeURIComponent(ref.id);
+  return ref.kind === "alumnus" ? `/api/alumni/${id}` : `/api/alumni/pass-out/${id}`;
+}
+
 interface Props {
-  userId: string;
+  entry: AlumniEntryRef;
   /** Called after a successful save (e.g. to refresh the student lists). */
-  onSaved?: (userId: string) => void;
+  onSaved?: () => void;
 }
 
 const SECTION_ICONS: Record<string, React.ReactNode> = {
@@ -55,8 +67,8 @@ const SECTION_ICONS: Record<string, React.ReactNode> = {
 /** Statuses that mean the student took a gap year. */
 const GAP_STATUS_FIELDS = ["ug_status", "current_status"];
 
-/** Loads the student's form data; bumping `version` reloads it (after a save). */
-function useEntry(userId: string, version: number) {
+/** Loads the form data from `url`; bumping `version` reloads it (after a save). */
+function useEntry(url: string, version: number) {
   const [context, setContext] = useState<EntryContext | null>(null);
   const [values, setValues] = useState<Values>({});
   const [names, setNames] = useState<Record<string, string>>({});
@@ -66,7 +78,7 @@ function useEntry(userId: string, version: number) {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(`/api/alumni/student/${encodeURIComponent(userId)}`);
+        const res = await fetch(url);
         const body = await res.json();
         if (cancelled) return;
         if (!res.ok) throw new Error(body?.error || "Couldn't load this student.");
@@ -80,7 +92,7 @@ function useEntry(userId: string, version: number) {
     return () => {
       cancelled = true;
     };
-  }, [userId, version]);
+  }, [url, version]);
 
   return { context, values, setValues, names, setNames, loadError };
 }
@@ -105,9 +117,9 @@ type SaveOutcome =
   | { kind: "failed"; error: string; fieldErrors: Record<string, string> };
 
 /** Sends the answers; the server re-checks everything and saves through the DB Service. */
-async function postSave(userId: string, values: Values, confirmed: string[]): Promise<SaveOutcome> {
+async function postSave(url: string, values: Values, confirmed: string[]): Promise<SaveOutcome> {
   try {
-    const res = await fetch(`/api/alumni/student/${encodeURIComponent(userId)}`, {
+    const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ values, confirmed }),
@@ -151,10 +163,13 @@ const without = (record: Record<string, string>, key: string) => {
   return next;
 };
 
-export default function AlumniForm({ userId, onSaved }: Props) {
+export default function AlumniForm({ entry, onSaved }: Props) {
+  /** Becomes the new alumnus once a pass-out is saved. */
+  const [ref, setRef] = useState(entry);
   /** Bumped after a save to reload the record from the database. */
   const [version, setVersion] = useState(0);
-  const { context, values, setValues, names, setNames, loadError } = useEntry(userId, version);
+  const url = entryUrl(ref);
+  const { context, values, setValues, names, setNames, loadError } = useEntry(url, version);
   const { review, warningsByField } = useReview(values, context);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [dirty, setDirty] = useState(false);
@@ -189,7 +204,7 @@ export default function AlumniForm({ userId, onSaved }: Props) {
   const submit = async (confirmed: string[]) => {
     setSaving(true);
     setFormError("");
-    const outcome = await postSave(userId, values, confirmed);
+    const outcome = await postSave(url, values, confirmed);
     setSaving(false);
     if (outcome.kind === "confirm") {
       setConfirming(outcome.warnings);
@@ -203,8 +218,10 @@ export default function AlumniForm({ userId, onSaved }: Props) {
     setConfirming(null);
     setDirty(false);
     setJustSaved(true);
-    setVersion((v) => v + 1); // reload what's now in the database
-    onSaved?.(userId);
+    // Reload what's now in the database — a saved pass-out is now an alumnus.
+    if (ref.kind === "pass-out") setRef({ kind: "alumnus", id: outcome.entry.alumniId });
+    else setVersion((v) => v + 1);
+    onSaved?.();
     savedToast(context.name, outcome.entry);
   };
 

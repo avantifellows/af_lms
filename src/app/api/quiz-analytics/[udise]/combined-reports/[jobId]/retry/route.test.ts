@@ -54,7 +54,7 @@ describe("POST combined-reports/[jobId]/retry", () => {
 
     const res = await POST(jsonRequest(URL, { method: "POST" }), PARAMS);
     expect(res.status).toBe(200);
-    expect(mockAuth).toHaveBeenCalledWith("27361106702", { requireEdit: true });
+    expect(mockAuth).toHaveBeenCalledWith("27361106702", { requireEdit: true, feature: "performance" });
     expect(mockRetry).toHaveBeenCalledWith("job-1");
   });
 

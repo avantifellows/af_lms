@@ -7,6 +7,7 @@ import { PROGRAM_IDS } from "@/lib/constants";
 const {
   mockGetServerSession,
   mockGetUserPermission,
+  mockGetAlumniPermission,
   mockGetProgramContextSync,
   mockGetFeatureAccess,
   mockGetAccessibleSchoolCodes,
@@ -16,6 +17,7 @@ const {
 } = vi.hoisted(() => ({
   mockGetServerSession: vi.fn(),
   mockGetUserPermission: vi.fn(),
+  mockGetAlumniPermission: vi.fn(),
   mockGetProgramContextSync: vi.fn(),
   mockGetFeatureAccess: vi.fn(),
   mockGetAccessibleSchoolCodes: vi.fn(),
@@ -32,6 +34,7 @@ vi.mock("next/navigation", () => ({ redirect: mockRedirect }));
 vi.mock("@/lib/permissions", () => ({
   getUserPermission: mockGetUserPermission,
   getResolvedPermission: mockGetUserPermission,
+  getAlumniPermission: mockGetAlumniPermission,
   getProgramContextSync: mockGetProgramContextSync,
   getFeatureAccess: mockGetFeatureAccess,
   getAccessibleSchoolCodes: mockGetAccessibleSchoolCodes,
@@ -246,6 +249,27 @@ const noProgramContext = {
 // setupAdmin: admin (level 4) has hasPMAccess=true via getFeatureAccess
 // Query order: schools, count, recent visits, visit total, then gradeCounts
 // (skipped when there are no schools — getNvsGradeCounts returns early)
+// Visit reads are routed by SQL (both views issue them, in parallel with the
+// school reads); every other read answers from a queue, in call order.
+function routeDashboardReads({ schools, totalCount, visits, visitTotal }: {
+  schools: unknown[];
+  totalCount: number;
+  visits: unknown[];
+  visitTotal: number;
+}) {
+  const queue: unknown[][] = [
+    schools, // schools query
+    [{ total: String(totalCount) }], // count query
+  ];
+  if (schools.length > 0) queue.push([]); // getNvsGradeCounts
+  mockQuery.mockImplementation(async (sql: string) => {
+    if (sql.includes("lms_pm_school_visits")) {
+      return /COUNT\(/i.test(sql) ? [{ total: String(visitTotal) }] : visits; // total / getRecentVisits
+    }
+    return queue.shift() ?? [];
+  });
+}
+
 function setupAdmin(schools: unknown[] = [], totalCount = 0) {
   mockGetServerSession.mockResolvedValue(adminSession);
   mockGetUserPermission.mockResolvedValue(adminPermission);
@@ -253,14 +277,7 @@ function setupAdmin(schools: unknown[] = [], totalCount = 0) {
   mockGetFeatureAccess.mockReturnValue({ canView: true, canEdit: true });
   mockGetAccessibleSchoolCodes.mockResolvedValue("all");
 
-  const hasSchools = schools.length > 0;
-  mockQuery.mockResolvedValueOnce(schools); // schools query
-  mockQuery.mockResolvedValueOnce([{ total: String(totalCount) }]); // count query
-  mockQuery.mockResolvedValueOnce([]); // getRecentVisits
-  mockQuery.mockResolvedValueOnce([{ total: "0" }]); // getOwnedVisitTotal
-  if (hasSchools) {
-    mockQuery.mockResolvedValueOnce([]); // getNvsGradeCounts
-  }
+  routeDashboardReads({ schools, totalCount, visits: [], visitTotal: 0 });
 }
 
 function setupPM(
@@ -275,14 +292,7 @@ function setupPM(
   mockGetFeatureAccess.mockReturnValue({ canView: true, canEdit: true });
   mockGetAccessibleSchoolCodes.mockResolvedValue("all");
 
-  const hasSchools = schools.length > 0;
-  mockQuery.mockResolvedValueOnce(schools); // schools query
-  mockQuery.mockResolvedValueOnce([{ total: String(totalCount) }]); // count query
-  mockQuery.mockResolvedValueOnce(visits); // getRecentVisits
-  mockQuery.mockResolvedValueOnce([{ total: String(visitTotal) }]); // getOwnedVisitTotal
-  if (hasSchools) {
-    mockQuery.mockResolvedValueOnce([]); // getNvsGradeCounts
-  }
+  routeDashboardReads({ schools, totalCount, visits, visitTotal });
 }
 
 function setupTeacher(
@@ -339,6 +349,14 @@ describe("DashboardPage (server component)", () => {
   });
 
   // --- No permission ---
+
+  it("sends an Alumni Manager to /alumni (no dashboard for alumni roles)", async () => {
+    mockGetServerSession.mockResolvedValue(pmSession);
+    mockGetUserPermission.mockResolvedValue(null);
+    mockGetAlumniPermission.mockResolvedValue({ role: "alumni_manager" });
+
+    await expect(DashboardPage({ searchParams: defaultSearchParams })).rejects.toThrow("REDIRECT:/alumni");
+  });
 
   it("renders 'no access' message when user has no permission", async () => {
     mockGetServerSession.mockResolvedValue(pmSession);
@@ -626,11 +644,7 @@ describe("DashboardPage (server component)", () => {
     mockGetProgramContextSync.mockReturnValue(defaultProgramContext);
     mockGetFeatureAccess.mockReturnValue({ canView: true, canEdit: true });
     mockGetAccessibleSchoolCodes.mockResolvedValue(["SC001", "SC002"]);
-    mockQuery
-      .mockResolvedValueOnce([]) // schools
-      .mockResolvedValueOnce([{ total: "0" }]) // count
-      .mockResolvedValueOnce([]) // visits
-      .mockResolvedValueOnce([{ total: "0" }]); // visit total
+    routeDashboardReads({ schools: [], totalCount: 0, visits: [], visitTotal: 0 });
 
     const jsx = await DashboardPage({ searchParams: defaultSearchParams });
     render(jsx);
@@ -712,11 +726,7 @@ describe("DashboardPage (server component)", () => {
     mockGetProgramContextSync.mockReturnValue(defaultProgramContext);
     mockGetFeatureAccess.mockReturnValue({ canView: true, canEdit: false });
     mockGetAccessibleSchoolCodes.mockResolvedValue(["SC001", "SC002"]);
-    mockQuery
-      .mockResolvedValueOnce([]) // schools
-      .mockResolvedValueOnce([{ total: "0" }]) // count
-      .mockResolvedValueOnce([]) // visits
-      .mockResolvedValueOnce([{ total: "0" }]); // visit total
+    routeDashboardReads({ schools: [], totalCount: 0, visits: [], visitTotal: 0 });
 
     const jsx = await DashboardPage({ searchParams: defaultSearchParams });
     render(jsx);
@@ -811,9 +821,9 @@ describe("DashboardPage (server component)", () => {
 
   it("renders PM stats cards", async () => {
     const visits = [
-      { id: 1, school_code: "SC001", visit_date: "2026-02-10", status: "completed", inserted_at: "2026-02-10T10:00:00Z" },
-      { id: 2, school_code: "SC002", visit_date: "2026-02-08", status: "in_progress", inserted_at: "2026-02-08T09:00:00Z" },
-      { id: 3, school_code: "SC003", visit_date: "2026-02-06", status: "completed", inserted_at: "2026-02-06T08:00:00Z" },
+      { id: 1, school_code: "SC001", pm_email: "pm@avantifellows.org", visit_date: "2026-02-10", status: "completed", inserted_at: "2026-02-10T10:00:00Z" },
+      { id: 2, school_code: "SC002", pm_email: "pm@avantifellows.org", visit_date: "2026-02-08", status: "in_progress", inserted_at: "2026-02-08T09:00:00Z" },
+      { id: 3, school_code: "SC003", pm_email: "pm@avantifellows.org", visit_date: "2026-02-06", status: "completed", inserted_at: "2026-02-06T08:00:00Z" },
     ];
     setupPM([], 5, visits);
 
@@ -973,6 +983,7 @@ describe("DashboardPage (server component)", () => {
         id: 10,
         school_code: "SC001",
         school_name: "JNV Bhavnagar",
+        pm_email: "pm@avantifellows.org",
         visit_date: "2026-02-10",
         status: "completed",
         inserted_at: "2026-02-10T10:00:00Z",
@@ -981,6 +992,7 @@ describe("DashboardPage (server component)", () => {
         id: 11,
         school_code: "SC002",
         school_name: null,
+        pm_email: "pm@avantifellows.org",
         visit_date: "2026-02-08",
         status: "in_progress",
         inserted_at: "2026-02-08T09:00:00Z",
@@ -1020,7 +1032,7 @@ describe("DashboardPage (server component)", () => {
     const [recentVisitsSql, recentVisitsParams] = mockQuery.mock.calls[2] as [string, unknown[]];
     expect(recentVisitsSql).toContain("FROM lms_pm_school_visits v");
     expect(recentVisitsSql).toContain("v.deleted_at IS NULL");
-    expect(recentVisitsParams).toEqual(["pm@avantifellows.org", 5]);
+    expect(recentVisitsParams).toEqual(["pm@avantifellows.org", 10]);
   });
 
   it("does not render recent visits when PM has no visits", async () => {
@@ -1053,6 +1065,7 @@ describe("DashboardPage (server component)", () => {
       id,
       school_code: `SC00${index}`,
       school_name: `School ${id}`,
+      pm_email: "pm@avantifellows.org",
       visit_date: `2026-02-1${index}`,
       status: index % 2 === 0 ? "completed" : "in_progress",
       inserted_at: `2026-02-1${index}T10:00:00Z`,
@@ -1105,17 +1118,94 @@ describe("DashboardPage (server component)", () => {
       expect(recentVisitRows()).toHaveLength(5);
     });
 
-    it("shows the same exact total on Physical Centres without Recent Visits", async () => {
+    // Seated staff are pinned to Physical Centres, so their Visits must show
+    // there too, or the homepage has no route to them (#291).
+    it("shows the same exact total and the Recent Visits on Physical Centres", async () => {
       setupPMSession();
       routeQueries({ visitTotal: "7", recentVisits: fiveRecentVisits });
 
       render(await DashboardPage({ searchParams: Promise.resolve({ view: "centres" }) }));
 
       expect(totalVisitsValue()).toBe("7");
-      expect(screen.queryByText("Recent Visits")).not.toBeInTheDocument();
-      expect(
-        mockQuery.mock.calls.some(([sql]) => isRecentVisitsSql(String(sql)))
-      ).toBe(false);
+      expect(recentVisitRows()).toHaveLength(5);
+      expect(screen.getByText("View all").closest("a")).toHaveAttribute("href", "/visits");
+    });
+
+    it("lists the user's own in-progress Visits first, then other in-progress Visits", async () => {
+      setupPMSession();
+      routeQueries({ visitTotal: "7", recentVisits: fiveRecentVisits });
+
+      render(await DashboardPage({ searchParams: Promise.resolve({ view: "centres" }) }));
+
+      const recentSql = mockQuery.mock.calls.map(([sql]) => String(sql)).find(isRecentVisitsSql);
+      expect(recentSql).toMatch(
+        /ORDER BY \(v\.status = 'in_progress' AND LOWER\(TRIM\(v\.pm_email\)\) = \$1\) DESC,\s+\(v\.status = 'in_progress'\) DESC,\s+v\.visit_date DESC/
+      );
+    });
+
+    describe("visit-manager Centre seats (#291)", () => {
+      function setupManagerSession() {
+        setupPMSession();
+        mockGetUserPermission.mockResolvedValue({
+          ...pmPermission,
+          scope: {
+            schools: new Set(["SC001", "SC002"]),
+            centres: new Set([1, 2]),
+            programs: new Set([1]),
+            visitManagedSchools: new Set(["SC001", "SC002"]),
+          },
+        });
+      }
+
+      it("shows the Visit Summary link to a manager", async () => {
+        setupManagerSession();
+        routeQueries({ visitTotal: "0", recentVisits: [] });
+
+        render(await DashboardPage({ searchParams: Promise.resolve({ view: "centres" }) }));
+
+        expect(screen.getByRole("link", { name: "Visit Summary" })).toHaveAttribute("href", "/school-visit-summary");
+      });
+
+      it("reads own Visits plus every Visit at the managed Centres' Schools", async () => {
+        setupManagerSession();
+        routeQueries({ visitTotal: "9", recentVisits: [] });
+
+        render(await DashboardPage({ searchParams: Promise.resolve({ view: "centres" }) }));
+
+        const visitCalls = mockQuery.mock.calls.filter(([sql]) =>
+          String(sql).includes("lms_pm_school_visits")
+        ) as [string, unknown[]][];
+        expect(visitCalls).toHaveLength(2);
+        for (const [sql, params] of visitCalls) {
+          expect(sql).toContain("(LOWER(TRIM(v.pm_email)) = $1 OR v.school_code = ANY($2))");
+          expect(params.slice(0, 2)).toEqual(["pm@avantifellows.org", ["SC001", "SC002"]]);
+        }
+        expect(totalVisitsValue()).toBe("9");
+        expect(screen.getByText("Yours and your centres'")).toBeInTheDocument();
+      });
+
+      it("names the visitor and offers only View on someone else's in-progress Visit", async () => {
+        setupManagerSession();
+        routeQueries({
+          visitTotal: "1",
+          recentVisits: [{
+            id: 21,
+            school_code: "SC001",
+            school_name: "JNV Bhavnagar",
+            pm_email: "apm@avantifellows.org",
+            pm_name: "Asha APM",
+            visit_date: "2026-02-10",
+            status: "in_progress",
+            inserted_at: "2026-02-10T10:00:00Z",
+          }],
+        });
+
+        render(await DashboardPage({ searchParams: Promise.resolve({ view: "centres" }) }));
+
+        expect(screen.getByText("Asha APM")).toBeInTheDocument();
+        expect(screen.queryByText("Continue")).not.toBeInTheDocument();
+        expect(screen.getByText("View").closest("a")).toHaveAttribute("href", "/visits/21");
+      });
     });
 
     it.each([

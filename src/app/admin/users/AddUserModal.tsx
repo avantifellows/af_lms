@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { Modal, Input, Select, Button } from "@/components/ui";
 import {
+  ALUMNI_MANAGER_ROLE,
   HOLISTIC_MENTORSHIP_PROGRAM_IDS,
   isPmuRole,
   PMU_GOVT_SCHOOL_USER_ROLE,
@@ -79,13 +80,14 @@ interface School {
 
 const labelClassName = "block text-sm font-medium text-gray-700";
 const ROLE_DESCRIPTIONS: Record<string, string> = {
-  program_manager: "Program Managers can conduct school visits, view assigned schools, and monitor scoped Holistic Mentorship progress",
+  program_manager: "Program Managers can conduct school visits, view all visits and the Visit Summary for centres where they hold a PM/SPM/PH seat, view assigned schools, and monitor scoped Holistic Mentorship progress",
   program_admin: "Program Admins can oversee scoped schools, manage their own school visits, and monitor scoped Holistic Mentorship progress",
   teacher: "Teachers can view and manage students in their assigned schools",
   holistic_mentorship_admin: `Holistic Mentorship Admins can manage ${HOLISTIC_PROGRAM_LABELS_TEXT} mentorship`,
   admin: "Admins have access to all features, all schools, and all programs — full edit unless marked read-only",
   pmu_manager: "PMU Managers can view and manage JNV NVS students and view performance in their assigned JNV Schools",
   pmu_govt_school_user: "PMU Govt School Users can view and manage JNV NVS students and view performance in their one JNV School",
+  alumni_manager: "Alumni Managers can view and update alumni of their assigned schools only — no access to students or any other feature",
 };
 
 type UserFormValues = {
@@ -364,6 +366,7 @@ function RoleField({ role, onChange }: { role: string; onChange: (role: string) 
       <option value="holistic_mentorship_admin">Holistic Mentorship Admin - All supported programs</option>
       <option value={PMU_MANAGER_ROLE}>PMU Manager - JNV NVS students + performance</option>
       <option value={PMU_GOVT_SCHOOL_USER_ROLE}>PMU Govt School User - One JNV NVS School</option>
+      <option value={ALUMNI_MANAGER_ROLE}>Alumni Manager - Alumni only</option>
       <option value="admin">Admin - Full access + user management</option>
     </Select>
     <p className="mt-1 text-xs text-gray-500">{ROLE_DESCRIPTIONS[role]}</p>

@@ -23,9 +23,9 @@ import {
   type ActionTypeRollupStatus,
 } from "@/lib/visit-summary";
 import {
-  buildVisitScopePredicate,
+  buildVisitSummaryScopePredicate,
   buildVisitsActor,
-  isScopedVisitsRole,
+  canViewVisitSummary,
 } from "@/lib/visits-policy";
 
 const VISITS_PER_PAGE = 20;
@@ -346,7 +346,7 @@ function buildWhereClause(
     }
   }
 
-  const scope = buildVisitScopePredicate(actor, {
+  const scope = buildVisitSummaryScopePredicate(actor, {
     startIndex: nextIndex,
     schoolCodeColumn: "v.school_code",
     schoolRegionColumn: "s.region",
@@ -922,7 +922,7 @@ export default async function SchoolVisitSummaryPage({ searchParams }: PageProps
   }
 
   const actor = buildVisitsActor(session.user.email, permission);
-  if (!isScopedVisitsRole(actor)) {
+  if (!canViewVisitSummary(actor)) {
     if (actor.role === "program_manager") {
       redirect("/visits");
     }

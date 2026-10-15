@@ -4,10 +4,10 @@ import AlumniTab from "./AlumniTab";
 
 // The form is exercised through its own test; here it's a stub that can report a save.
 vi.mock("./AlumniForm", () => ({
-  default: ({ userId, onSaved }: { userId: string; onSaved?: (id: string) => void }) => (
+  default: ({ entry, onSaved }: { entry: { kind: string; id: string }; onSaved?: () => void }) => (
     <div data-testid="alumni-form">
-      form for {userId}
-      <button type="button" onClick={() => onSaved?.(userId)}>fake save</button>
+      form for {entry.kind} {entry.id}
+      <button type="button" onClick={() => onSaved?.()}>fake save</button>
     </div>
   ),
 }));
@@ -16,7 +16,7 @@ const fetchMock = vi.fn();
 const pendingRow = (userId: string, name: string, cohortYear = "2025-2026") =>
   ({ userId, afid: `A${userId}`, name, cohortYear, program: "JNV CoE", gender: "", stream: "" });
 const alumniRow = (userId: string, name: string, cohortYear = "2019-2020") =>
-  ({ userId, afid: `B${userId}`, name, cohortYear, ugStatus: "Graduated", currentStatus: "", collegeUg: "NIT Calicut" });
+  ({ alumniId: `9${userId}`, userId, afid: `B${userId}`, name, cohortYear, ugStatus: "Graduated", currentStatus: "", collegeUg: "NIT Calicut" });
 
 function respond(body: unknown, ok = true) {
   fetchMock.mockResolvedValue({ ok, json: async () => body });
@@ -51,11 +51,12 @@ describe("AlumniTab", () => {
   it("opens the student passed in from search, in either list", async () => {
     respond({ pending: [pendingRow("1", "Asha Rao")], alumni: [alumniRow("2", "Ravi Kumar")] });
     const { unmount } = render(<AlumniTab schoolCode="59525" initialStudentId="2" />);
-    expect(await screen.findByTestId("alumni-form")).toHaveTextContent("form for 2");
+    // An existing alumnus is opened by alumni id, a pass-out by user id.
+    expect(await screen.findByTestId("alumni-form")).toHaveTextContent("form for alumnus 92");
     unmount();
 
     render(<AlumniTab schoolCode="59525" initialStudentId="1" />);
-    expect(await screen.findByTestId("alumni-form")).toHaveTextContent("form for 1");
+    expect(await screen.findByTestId("alumni-form")).toHaveTextContent("form for pass-out 1");
   });
 
   it("filters by name or AFID, and by year when there is more than one", async () => {
@@ -93,7 +94,7 @@ describe("AlumniTab", () => {
     respond({ pending: [pendingRow("1", "Asha Rao")], alumni: [alumniRow("2", "Ravi Kumar")] });
     render(<AlumniTab schoolCode="59525" />);
     fireEvent.click(await screen.findByText("Asha Rao"));
-    expect(screen.getByTestId("alumni-form")).toHaveTextContent("form for 1");
+    expect(screen.getByTestId("alumni-form")).toHaveTextContent("form for pass-out 1");
 
     // After saving, the student has moved to Existing alumni.
     respond({ pending: [], alumni: [alumniRow("1", "Asha Rao", "2025-2026"), alumniRow("2", "Ravi Kumar")] });

@@ -23,6 +23,13 @@ export const SEAT_ROLES = [
 export const PM_SEAT_ROLES = ["apm", "pm", "spm", "ph"] as const;
 
 /**
+ * PM tiers that oversee their centres' field visits (#291): a holder reads every
+ * Visit at the School of a centre they hold one of these seats at, whoever made
+ * it. APMs see only their own Visits. Read-only — editing stays with the owner.
+ */
+export const VISIT_MANAGER_SEAT_ROLES = ["pm", "spm", "ph"] as const;
+
+/**
  * Seat roles that name a teaching subject. These line up name-for-name
  * (case-insensitively) with rows in the `subject` table, so seating a teacher
  * with one of these is how Ops sets their subject — the value is mirrored onto

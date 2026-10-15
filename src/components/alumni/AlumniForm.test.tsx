@@ -31,6 +31,9 @@ function context(overrides: Ctx = {}): Ctx {
   };
 }
 
+const PASS_OUT = { kind: "pass-out" as const, id: "86655" };
+const ALUMNUS = { kind: "alumnus" as const, id: "8340" };
+
 const json = (body: unknown, status = 200) => ({ ok: status < 400, status, json: async () => body });
 
 /** GET returns `ctx`; each POST takes the next reply from `posts`. */
@@ -61,7 +64,7 @@ afterEach(() => {
 describe("AlumniForm", () => {
   it("shows the student, their ids and the starting questions", async () => {
     server(context());
-    render(<AlumniForm userId="86655" />);
+    render(<AlumniForm entry={PASS_OUT} />);
 
     expect(await screen.findByRole("heading", { name: "Ampoli Ram Charan" })).toBeInTheDocument();
     expect(screen.getByText("New alumni entry")).toBeInTheDocument();
@@ -69,18 +72,18 @@ describe("AlumniForm", () => {
     expect(screen.getByLabelText("Undergraduate (UG) status")).toBeInTheDocument();
     expect(screen.queryByLabelText("Start year")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledWith("/api/alumni/student/86655");
+    expect(fetchMock).toHaveBeenCalledWith("/api/alumni/pass-out/86655");
   });
 
   it("shows why a student couldn't be loaded", async () => {
     fetchMock.mockResolvedValue(json({ error: "Access denied" }, 403));
-    render(<AlumniForm userId="86655" />);
+    render(<AlumniForm entry={PASS_OUT} />);
     expect(await screen.findByText("Access denied")).toBeInTheDocument();
   });
 
   it("opens the UG section as answers come in, and fills the gap year from a Gap Year status", async () => {
     server(context());
-    render(<AlumniForm userId="86655" />);
+    render(<AlumniForm entry={PASS_OUT} />);
     await screen.findByRole("heading", { name: "Ampoli Ram Charan" });
 
     select("Undergraduate (UG) status", "Studying");
@@ -94,7 +97,7 @@ describe("AlumniForm", () => {
 
   it("blocks impossible answers without sending anything", async () => {
     server(context());
-    render(<AlumniForm userId="86655" />);
+    render(<AlumniForm entry={PASS_OUT} />);
     await screen.findByRole("heading", { name: "Ampoli Ram Charan" });
 
     select("Undergraduate (UG) status", "Graduated");
@@ -114,7 +117,7 @@ describe("AlumniForm", () => {
   it("asks to confirm unusual answers, can go back, and saves once confirmed", async () => {
     const onSaved = vi.fn();
     server(context(), [json({ ok: true, action: "inserted", alumniId: "8340", changed: ["UG status", "Start year"], notCleared: [] })]);
-    render(<AlumniForm userId="86655" onSaved={onSaved} />);
+    render(<AlumniForm entry={PASS_OUT} onSaved={onSaved} />);
     await screen.findByRole("heading", { name: "Ampoli Ram Charan" });
 
     select("Undergraduate (UG) status", "Studying");
@@ -134,7 +137,7 @@ describe("AlumniForm", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     fireEvent.click(await screen.findByRole("button", { name: /Yes, it's correct/ }));
 
-    await waitFor(() => expect(onSaved).toHaveBeenCalledWith("86655"));
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
     expect(postedBody()).toEqual({
       values: { ug_status: "Studying", start_year_ug: "2025" },
       confirmed: ["ug-before-g12"],
@@ -143,13 +146,13 @@ describe("AlumniForm", () => {
       "Added to the alumni table — Ampoli Ram Charan",
       expect.objectContaining({ description: "alumni_id 8340 · 2 fields written." }),
     );
-    // Reloads the record from the database after saving.
-    await waitFor(() => expect(fetchMock.mock.calls.filter(([, i]) => i?.method !== "POST")).toHaveLength(2));
+    // Reloads the record after saving — the pass-out is now alumnus 8340.
+    await waitFor(() => expect(fetchMock).toHaveBeenLastCalledWith("/api/alumni/8340"));
   });
 
   it("shows warnings the server asks to confirm", async () => {
     server(context(), [json({ error: "confirm", warnings: [{ id: "x", level: "warning", field: "ug_status", fields: [], message: "Server says check this." }] }, 409)]);
-    render(<AlumniForm userId="86655" />);
+    render(<AlumniForm entry={PASS_OUT} />);
     await screen.findByRole("heading", { name: "Ampoli Ram Charan" });
     select("Undergraduate (UG) status", "Studying");
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
@@ -161,7 +164,7 @@ describe("AlumniForm", () => {
       json({ error: "Some fields need fixing.", fieldErrors: { ug_status: "Server rejected this." } }, 400),
       new Error("offline"),
     ]);
-    render(<AlumniForm userId="86655" />);
+    render(<AlumniForm entry={PASS_OUT} />);
     await screen.findByRole("heading", { name: "Ampoli Ram Charan" });
     select("Undergraduate (UG) status", "Studying");
 
@@ -177,7 +180,7 @@ describe("AlumniForm", () => {
 
   it("narrows the degree list to the branch and flags a degree that doesn't fit", async () => {
     server(context({ alumni: { ug_status: "Studying", branch_id_ug: "CSIT057" }, codeNames: { branch_id_ug: "Computer Science" } }));
-    render(<AlumniForm userId="86655" />);
+    render(<AlumniForm entry={PASS_OUT} />);
     await screen.findByRole("heading", { name: "Ampoli Ram Charan" });
 
     const degree = screen.getByLabelText<HTMLSelectElement>("Degree");
@@ -211,7 +214,7 @@ describe("AlumniForm", () => {
         profile: { student_g12_graduating_year: "2012" },
       }),
     );
-    render(<AlumniForm userId="86655" />);
+    render(<AlumniForm entry={ALUMNUS} />);
 
     expect(await screen.findByText("Edit alumni record")).toBeInTheDocument();
     expect(screen.getByText(/never erases what's on record/)).toBeInTheDocument();
@@ -223,7 +226,7 @@ describe("AlumniForm", () => {
 
   it("lets a newly typed value that no longer fits be cleared", async () => {
     server(context());
-    render(<AlumniForm userId="86655" />);
+    render(<AlumniForm entry={PASS_OUT} />);
     await screen.findByRole("heading", { name: "Ampoli Ram Charan" });
 
     select("Undergraduate (UG) status", "Studying");

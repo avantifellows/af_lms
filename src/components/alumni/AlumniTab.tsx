@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CheckCircle2, MousePointerClick, Pencil, Search, UserPlus } from "lucide-react";
 import { Badge, Card, Input, Select } from "@/components/ui";
-import AlumniForm from "./AlumniForm";
+import AlumniForm, { type AlumniEntryRef } from "./AlumniForm";
 import Initials from "./Initials";
 
 interface PendingStudent {
@@ -20,6 +20,7 @@ interface PendingStudent {
 }
 
 interface AlumniListItem {
+  alumniId: string;
   userId: string;
   afid: string;
   name: string;
@@ -32,7 +33,7 @@ interface AlumniListItem {
 type View = "pending" | "alumni";
 
 interface SelectedStudent {
-  kind: "new" | "edit";
+  entry: AlumniEntryRef;
   userId: string;
   afid: string;
   name: string;
@@ -90,13 +91,15 @@ function useSchoolLists(schoolCode: string, refresh: number, onFirstLoad: (lists
 /** Open the student picked from search, else start on whichever list has work in it. */
 function initialSelection(lists: Lists, initialStudentId?: string): { view: View; selected: SelectedStudent | null } {
   const fromPending = initialStudentId ? lists.pending.find((s) => s.userId === initialStudentId) : undefined;
-  if (fromPending) return { view: "pending", selected: { kind: "new", ...pick(fromPending) } };
+  if (fromPending) return { view: "pending", selected: passOut(fromPending) };
   const fromAlumni = initialStudentId ? lists.alumni.find((s) => s.userId === initialStudentId) : undefined;
-  if (fromAlumni) return { view: "alumni", selected: { kind: "edit", ...pick(fromAlumni) } };
+  if (fromAlumni) return { view: "alumni", selected: alumnus(fromAlumni) };
   return { view: lists.pending.length > 0 ? "pending" : "alumni", selected: null };
 }
 
 const pick = (s: { userId: string; afid: string; name: string }) => ({ userId: s.userId, afid: s.afid, name: s.name });
+const passOut = (s: PendingStudent): SelectedStudent => ({ entry: { kind: "pass-out", id: s.userId }, ...pick(s) });
+const alumnus = (a: AlumniListItem): SelectedStudent => ({ entry: { kind: "alumnus", id: a.alumniId }, ...pick(a) });
 
 /** Rows matching the year filter and the name / AFID text filter. */
 function filterRows<T extends { name: string; afid: string; cohortYear: string }>(rows: T[], year: string, query: string): T[] {
@@ -137,8 +140,8 @@ export default function AlumniTab({ schoolCode, initialStudentId }: Props) {
     setView(next);
     setYear("");
   };
-  const onSaved = (id: string) => {
-    setSavedIds((prev) => new Set(prev).add(id));
+  const onSaved = (userId: string) => {
+    setSavedIds((prev) => new Set(prev).add(userId));
     setRefresh((n) => n + 1);
   };
 
@@ -163,7 +166,7 @@ export default function AlumniTab({ schoolCode, initialStudentId }: Props) {
               rows={filterRows(lists.pending, year, query)}
               selectedId={selected?.userId}
               savedIds={savedIds}
-              onPick={(s) => setSelected({ kind: "new", ...pick(s) })}
+              onPick={(s) => setSelected(passOut(s))}
             />
           ) : (
             <AlumniRows
@@ -171,7 +174,7 @@ export default function AlumniTab({ schoolCode, initialStudentId }: Props) {
               rows={filterRows(lists.alumni, year, query)}
               selectedId={selected?.userId}
               savedIds={savedIds}
-              onPick={(a) => setSelected({ kind: "edit", ...pick(a) })}
+              onPick={(a) => setSelected(alumnus(a))}
             />
           )}
         </ul>
@@ -179,7 +182,7 @@ export default function AlumniTab({ schoolCode, initialStudentId }: Props) {
 
       <Card elevation="sm" className="min-h-[300px] rounded-xl p-6">
         {selected ? (
-          <AlumniForm key={selected.userId} userId={selected.userId} onSaved={onSaved} />
+          <AlumniForm key={selected.userId} entry={selected.entry} onSaved={() => onSaved(selected.userId)} />
         ) : (
           <PickPrompt view={view} />
         )}

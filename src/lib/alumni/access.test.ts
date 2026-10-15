@@ -2,49 +2,51 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next-auth", () => ({ getServerSession: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
+vi.mock("@/lib/db", () => ({ query: vi.fn() }));
 vi.mock("@/lib/permissions", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/permissions")>();
-  // getFeatureAccess stays real, so these tests exercise the actual matrix row.
-  return { ...actual, getResolvedPermission: vi.fn(), canAccessSchool: vi.fn() };
+  // getFeatureAccess and canAccessSchoolSync stay real, so these tests exercise
+  // the actual matrix row and scope rules.
+  return { ...actual, getAlumniPermission: vi.fn() };
 });
 
 import { getServerSession } from "next-auth";
-import { canAccessSchool, getResolvedPermission, type UserPermission } from "@/lib/permissions";
-import { authorizeAlumni } from "./access";
+import { query } from "@/lib/db";
+import { getAlumniPermission, type UserPermission } from "@/lib/permissions";
+import { authorizeAlumni, reachesSchool } from "./access";
 
 const session = (email = "someone@avantifellows.org") => ({ user: { email }, expires: "" });
 const perm = (overrides: Partial<UserPermission>): UserPermission =>
   ({ email: "someone@avantifellows.org", level: 3, role: "admin", program_ids: [], read_only: false, ...overrides }) as UserPermission;
 
+async function expectDenied(promise: ReturnType<typeof authorizeAlumni>, status: number) {
+  const r = await promise;
+  if (r.ok) throw new Error("expected denial");
+  expect(r.response.status).toBe(status);
+}
+
 beforeEach(() => {
   vi.resetAllMocks();
   vi.mocked(getServerSession).mockResolvedValue(session() as never);
-  vi.mocked(getResolvedPermission).mockResolvedValue(perm({}));
-  vi.mocked(canAccessSchool).mockResolvedValue(true);
+  vi.mocked(getAlumniPermission).mockResolvedValue(perm({}));
 });
 
 describe("authorizeAlumni", () => {
   it("401 without a session", async () => {
     vi.mocked(getServerSession).mockResolvedValue(null as never);
-    const r = await authorizeAlumni();
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.response.status).toBe(401);
+    await expectDenied(authorizeAlumni(), 401);
   });
 
   it("403 with no permission row", async () => {
-    vi.mocked(getResolvedPermission).mockResolvedValue(null);
-    const r = await authorizeAlumni();
-    if (!r.ok) expect(r.response.status).toBe(403);
-    else throw new Error("expected denial");
+    vi.mocked(getAlumniPermission).mockResolvedValue(null);
+    await expectDenied(authorizeAlumni(), 403);
   });
 
   it.each(["teacher", "program_manager", "program_admin", "holistic_mentorship_admin", "pmu_manager", "pmu_govt_school_user"] as const)(
-    "403 for %s (alumni is admin-only)",
+    "403 for %s (no alumni feature)",
     async (role) => {
-      vi.mocked(getResolvedPermission).mockResolvedValue(perm({ role }));
-      const r = await authorizeAlumni();
-      if (!r.ok) expect(r.response.status).toBe(403);
-      else throw new Error("expected denial");
+      vi.mocked(getAlumniPermission).mockResolvedValue(perm({ role }));
+      await expectDenied(authorizeAlumni(), 403);
     },
   );
 
@@ -52,18 +54,31 @@ describe("authorizeAlumni", () => {
     expect((await authorizeAlumni({ schoolCode: "59525", requireEdit: true })).ok).toBe(true);
   });
 
-  it("lets a read-only admin view but not save", async () => {
-    vi.mocked(getResolvedPermission).mockResolvedValue(perm({ read_only: true }));
-    expect((await authorizeAlumni()).ok).toBe(true);
-    const r = await authorizeAlumni({ requireEdit: true });
-    if (!r.ok) expect(r.response.status).toBe(403);
-    else throw new Error("expected denial");
+  it("lets an alumni manager into a school in scope, and refuses others", async () => {
+    vi.mocked(getAlumniPermission).mockResolvedValue(perm({ role: "alumni_manager", level: 1, school_codes: ["59525"] }));
+    expect((await authorizeAlumni({ schoolCode: "59525", requireEdit: true })).ok).toBe(true);
+    await expectDenied(authorizeAlumni({ schoolCode: "11111" }), 403);
   });
 
-  it("403 when the school is out of scope", async () => {
-    vi.mocked(canAccessSchool).mockResolvedValue(false);
-    const r = await authorizeAlumni({ schoolCode: "59525" });
-    if (!r.ok) expect(r.response.status).toBe(403);
-    else throw new Error("expected denial");
+  it("lets a read-only user view but not save", async () => {
+    vi.mocked(getAlumniPermission).mockResolvedValue(perm({ read_only: true }));
+    expect((await authorizeAlumni()).ok).toBe(true);
+    await expectDenied(authorizeAlumni({ requireEdit: true }), 403);
+  });
+});
+
+describe("reachesSchool", () => {
+  it("checks school codes at level 1 without a lookup", async () => {
+    const p = perm({ role: "alumni_manager", level: 1, school_codes: ["59525"] });
+    expect(await reachesSchool(p, "59525")).toBe(true);
+    expect(await reachesSchool(p, "11111")).toBe(false);
+    expect(query).not.toHaveBeenCalled();
+  });
+
+  it("looks up the school's region at level 2", async () => {
+    const p = perm({ role: "alumni_manager", level: 2, regions: ["Pune"] });
+    vi.mocked(query).mockResolvedValueOnce([{ region: "Pune" }]).mockResolvedValueOnce([]);
+    expect(await reachesSchool(p, "59525")).toBe(true);
+    expect(await reachesSchool(p, "00000")).toBe(false);
   });
 });

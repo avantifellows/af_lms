@@ -212,13 +212,16 @@ export async function getBatchOverviewData(
   if (program) params.program = program;
   if (stream) params.stream = stream;
 
+  // Count students by enrollment_user_id, not fk_student_id / pk_student_id.
+  // Those are NULL for a student who has only an APAAR ID, and COUNT(DISTINCT)
+  // skips NULLs, so such students would never be counted.
   const testListQuery = `
     SELECT
       session_id,
       test_name,
       MIN(start_date) AS start_date,
-      COUNT(DISTINCT fk_student_id) AS student_count,
-      COUNT(DISTINCT CASE WHEN student_stream = test_stream THEN fk_student_id END) AS stream_student_count,
+      COUNT(DISTINCT enrollment_user_id) AS student_count,
+      COUNT(DISTINCT CASE WHEN student_stream = test_stream THEN enrollment_user_id END) AS stream_student_count,
       MAX(test_format) AS test_format,
       MAX(test_stream) AS test_stream,
       MAX(test_grade) AS test_grade,
@@ -238,7 +241,7 @@ export async function getBatchOverviewData(
   const enrolledQuery = `
     SELECT
       COALESCE(student_stream, '') AS stream,
-      COUNT(DISTINCT pk_student_id) AS total
+      COUNT(DISTINCT enrollment_user_id) AS total
     FROM ${DIM_STUDENT_TABLE}
     WHERE student_school_udise_code = @udise
       AND student_grade = @grade
@@ -326,15 +329,17 @@ export async function getCumulativeALData(
   if (testGrade != null) params.testGrade = testGrade;
 
   // One row per (student, session) — gives us both the test list (for the
-  // matrix columns) and per-test AL points. The student's own AL comes from
-  // dim_student via the join, keyed on student id alone: the dim row's
+  // matrix columns) and per-test AL points. A student is keyed on
+  // enrollment_user_id, which every student has. fk_student_id is NULL for a
+  // student who has only an APAAR ID, so keying on it dropped those students.
+  // The student's own AL comes from dim_student via the join, keyed on
+  // enrollment_user_id alone (the key the dbt AL MERGE writes on): the dim row's
   // denormalised school/grade can lag the fact rows, so filtering on them here
-  // would drop levelled students. A student can have more than one current-year
-  // dim row (the dbt MERGE also matches on enrollment_user_id / apaar_id), so
-  // pick deterministically with MAX rather than ANY_VALUE.
+  // would drop levelled students. Pick deterministically with MAX rather than
+  // ANY_VALUE, in case a student has more than one current-year dim row.
   const sql = `
     SELECT
-      f.fk_student_id AS student_id,
+      CAST(f.enrollment_user_id AS STRING) AS student_id,
       ANY_VALUE(f.student_full_name) AS student_name,
       ANY_VALUE(f.student_stream) AS student_stream,
       ANY_VALUE(ds.academic_level) AS student_academic_level,
@@ -347,12 +352,12 @@ export async function getCumulativeALData(
       ANY_VALUE(f.max_marks_possible) AS max_marks_possible
     FROM ${FACT_TABLE} f
     LEFT JOIN (
-      SELECT pk_student_id, MAX(academic_level) AS academic_level
+      SELECT enrollment_user_id, MAX(academic_level) AS academic_level
       FROM ${DIM_STUDENT_TABLE}
       WHERE academic_year = '${CURRENT_ACADEMIC_YEAR}'
         AND academic_level IS NOT NULL
-      GROUP BY pk_student_id
-    ) ds ON ds.pk_student_id = f.fk_student_id
+      GROUP BY enrollment_user_id
+    ) ds ON ds.enrollment_user_id = f.enrollment_user_id
     WHERE f.student_school_udise_code = @udise
       AND f.student_grade = @grade
       AND f.academic_year = '${CURRENT_ACADEMIC_YEAR}'
@@ -360,13 +365,13 @@ export async function getCumulativeALData(
       AND f.test_format IN (${formatList})
       AND f.academic_level IN (${alList})
       ${NOT_ADVANCED("f")}
-      AND f.fk_student_id IS NOT NULL
+      AND f.enrollment_user_id IS NOT NULL
       AND f.session_id IS NOT NULL
       ${SUBMITTED_ONLY}
       ${programFilter}
       ${streamFilter}
       ${testGradeFilter}
-    GROUP BY f.fk_student_id, f.session_id
+    GROUP BY f.enrollment_user_id, f.session_id
     ORDER BY start_date ASC
   `;
 

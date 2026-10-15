@@ -111,6 +111,8 @@ export interface PendingStudent {
 }
 
 export interface AlumniListItem {
+  /** alumni.id — how an existing alumnus is addressed (ADR 0008). */
+  alumniId: string;
   userId: string;
   afid: string;
   name: string;
@@ -148,6 +150,7 @@ export async function listPendingForSchool(school: { id: string | number; code: 
 /** Existing alumni whose latest school is this one, all cohort years (edit list). */
 export async function listAlumniForSchool(school: { id: string | number; code: string }): Promise<AlumniListItem[]> {
   const rows = await query<PersonRow & {
+    alumni_id: string;
     cohort_year: string | null; ug_status: string | null; current_status: string | null; college_ug: string | null;
   }>(
     `SELECT * FROM (${alumniRowsSql(`s.user_id IN (${SCHOOL_MEMBERS("$1")})`)}) x WHERE school_code = $2`,
@@ -155,6 +158,7 @@ export async function listAlumniForSchool(school: { id: string | number; code: s
   );
   return rows
     .map((r) => ({
+      alumniId: String(r.alumni_id),
       ...person(r),
       cohortYear: r.cohort_year || "",
       ugStatus: r.ug_status || "",
