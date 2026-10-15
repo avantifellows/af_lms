@@ -22,7 +22,7 @@ edges:
     condition: when a user is wrongly denied or wrongly granted access
   - target: patterns/add-api-route.md
     condition: when adding a route that needs gating
-last_updated: 2026-10-14
+last_updated: 2026-10-15
 ---
 
 # Permissions
@@ -35,7 +35,7 @@ Auth config: `src/lib/auth.ts`.
 Admin user create/update APIs reject unknown roles with 400 instead of silently defaulting them.
 
 ## The model — three independent axes
-1. **Role** (`UserRole`): `teacher` | `program_manager` | `program_admin` | `holistic_mentorship_admin` | `admin` | `pmu_manager` | `pmu_govt_school_user`. The two PMU roles are pinned to JNV NVS (see below).
+1. **Role** (`UserRole`): `teacher` | `program_manager` | `program_admin` | `holistic_mentorship_admin` | `admin` | `pmu_manager` | `pmu_govt_school_user` | `alumni_manager`. The two PMU roles are pinned to JNV NVS (see below); `alumni_manager` reaches alumni only (see below).
 2. **School scope** (`AccessLevel`): `1` = specific `school_codes`, `2` = `regions`, `3` = all schools. (`isAdmin` is by **role**, not level.)
 3. **Program eligibility** (`program_ids`): COE=1, NODAL=2, NVS=64, plus non-JNV centre programs. Some features are gated to CoE/Nodal.
 
@@ -85,6 +85,15 @@ Student Addition writes deliberately use a stricter gate than `ownsRecord`: admi
 - **Session-read pin (PR #376 Codex P1):** `test-deep-dive`, `test-questions` and `student-questions` take a caller-named `sessionId`, so they share `authorizeSessionRead` (`src/lib/performance-session-request.ts`): School access, then `resolvePerformanceProgram`, then grade/`sessionId` validation, then `refusePmuSessionOr502`. That last step wraps `refuseOutsidePmuSession`: 403 unless the session is only a JNV NVS test at this School, and 502 if the BigQuery lookup fails. All of it runs before any Dynamo/BigQuery read. Other roles skip the lookup.
 - **Intervention flags (PR #376 Codex P1):** `authorizeInterventionFlags` returns 403 for a PMU role at a non-JNV School, even at level 3. For PMU roles, `GET /api/schools/[code]/intervention-flags` lists only flags on the School's NVS roster (`flagStudentScopeForPmu`: `getSchoolRoster` + `studentInProgram(s, 64)`, the same set `RosterPage` keeps). Raise (`mayRaiseFlagForPmu`) and update/resolve (`mayUpdateFlagForPmu`) need a current NVS batch (`studentHasCurrentNvsBatch` / `hasCurrentNvsBatchSql`, the `canAccessStudent` rule), else the route's usual 404 ("Student not found at this school" / "Flag not found"). So a PMU user can read an NVS dropout's flags but not change them. Other roles skip these checks.
 - **Admin user management (#365):** `POST /api/admin/users` and `PATCH /api/admin/users/[id]` validate the *effective* PMU row through `resolvePmuRow` (`src/app/api/admin/users/pmu-rows.ts`); for `PATCH` that is the stored row with the body merged over it, so a role-only change is checked too. `program_ids` is always stored as `[64]` (body ignored). `pmu_govt_school_user` must be level 1 with exactly one JNV School code and no regions. `pmu_manager` level 1 needs ≥1 code, all JNV; level 2 needs ≥1 region, each with a JNV School; level 3 stores null codes and regions. Violations return 400 `{ error }`. A target with any active `centre_positions` row gets 409 (`PMU_SEATED_ERROR`, "remove their centre assignments first"); `POST` checks by email because it upserts; `PATCH` checks the `user_id` seat join and also `isSeatedEmail(stored email)` (`pmu-rows.ts`) so an email-only permission link counts as seated. In `PATCH` this PMU seat check runs before the generic seated-scope 409 ("Change their centre assignment instead"), so a seated user given a PMU role gets `PMU_SEATED_ERROR` even when the body carries `school_codes`/`regions` (review #9); non-PMU seated scope edits keep the generic message. The Admin modal shows a read-only "JNV NVS" program note, the level picker for Managers ("All JNV Schools" at level 3) and a single-School picker (a new pick replaces the old) with no level selector for Govt School Users. Switching an existing user's role to PMU Govt School User never trims their Schools (QA-11): with more than one School the modal shows an inline "must have exactly one School — remove the others" error and Save sends nothing until the Admin removes chips down to one (no School blocks Save too); switching the role back keeps the original list. The server 400 is still the backstop. `ROLE_DESCRIPTIONS`, `ROLE_LABELS` and `ROLE_COLORS` have both roles, and the user list's level-3 Level badge reads "All JNV Schools" for PMU roles ("All Schools" for everyone else).
+
+## Alumni Manager — alumni only (ADR 0008)
+
+- **Alumni are not Students.** An alumnus is identified by `alumni.id` and reached through the School they passed out from: `getAlumniSchool(alumniId)` (`alumni` → `student.user_id` → School group) and `canAccessAlumni(session, alumniId, { requireEdit })`. Never use `canAccessStudent` or the `students` feature for alumni.
+- **Constants:** `ALUMNI_MANAGER_ROLE` and `isAlumniRole` in client-safe `src/lib/constants.ts`; `USER_ROLES` includes it.
+- **Matrix:** new feature `alumni` — `admin` and `alumni_manager` edit, every other role none. `alumni_manager` is none on every other feature. `read_only` makes it view.
+- **Denied by default:** `getUserPermission` returns null for an alumni role, so `getResolvedPermission`, `canAccessSchool`, `canAccessStudent`, `isAdmin`, the dashboard and every guard built on them treat the user as having no permission. Alumni code reads the row through `getAlumniPermission` (any role, resolved scope) and must still check `getFeatureAccess(permission, "alumni")` and School scope — `canAccessAlumni` does both.
+- **Scope:** level 1/2/3 with School codes or regions; `resolveScope` skips centre seats for alumni roles (`resolveSeatlessScope`, shared with PMU roles).
+- **Admin Users:** role option, description, label and colour added; it uses the standard level/program fields.
 
 ## Scope resolution — `getResolvedPermission` vs `getUserPermission`
 

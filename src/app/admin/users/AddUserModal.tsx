@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { Modal, Input, Select, Button } from "@/components/ui";
 import {
+  ALUMNI_MANAGER_ROLE,
   HOLISTIC_MENTORSHIP_PROGRAM_IDS,
   isPmuRole,
   PMU_GOVT_SCHOOL_USER_ROLE,
@@ -86,6 +87,7 @@ const ROLE_DESCRIPTIONS: Record<string, string> = {
   admin: "Admins have access to all features, all schools, and all programs — full edit unless marked read-only",
   pmu_manager: "PMU Managers can view and manage JNV NVS students and view performance in their assigned JNV Schools",
   pmu_govt_school_user: "PMU Govt School Users can view and manage JNV NVS students and view performance in their one JNV School",
+  alumni_manager: "Alumni Managers can view and update alumni of their assigned schools only — no access to students or any other feature",
 };
 
 type UserFormValues = {
@@ -364,6 +366,7 @@ function RoleField({ role, onChange }: { role: string; onChange: (role: string) 
       <option value="holistic_mentorship_admin">Holistic Mentorship Admin - All supported programs</option>
       <option value={PMU_MANAGER_ROLE}>PMU Manager - JNV NVS students + performance</option>
       <option value={PMU_GOVT_SCHOOL_USER_ROLE}>PMU Govt School User - One JNV NVS School</option>
+      <option value={ALUMNI_MANAGER_ROLE}>Alumni Manager - Alumni only</option>
       <option value="admin">Admin - Full access + user management</option>
     </Select>
     <p className="mt-1 text-xs text-gray-500">{ROLE_DESCRIPTIONS[role]}</p>
