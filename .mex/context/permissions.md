@@ -88,7 +88,7 @@ Student Addition writes deliberately use a stricter gate than `ownsRecord`: admi
 
 ## Alumni Manager — alumni only (ADR 0008)
 
-- **Alumni are not Students.** An alumnus is identified by `alumni.id` and reached through the School they passed out from: `getAlumniSchool(alumniId)` (`alumni` → `student.user_id` → School group) and `canAccessAlumni(session, alumniId, { requireEdit })`. Never use `canAccessStudent` or the `students` feature for alumni.
+- **Alumni are not Students.** An alumnus is identified by `alumni.id` and reached through the School they passed out from: `getAlumniSchool(alumniId)` (`alumni` → `student.user_id` → latest School `enrollment_record`, the same rule the alumni lists use) and `canAccessAlumni(session, alumniId, { requireEdit })`. Never use `canAccessStudent` or the `students` feature for alumni.
 - **Constants:** `ALUMNI_MANAGER_ROLE` and `isAlumniRole` in client-safe `src/lib/constants.ts`; `USER_ROLES` includes it.
 - **Matrix:** new feature `alumni` — `admin` and `alumni_manager` edit, every other role none. `alumni_manager` is none on every other feature. `read_only` makes it view.
 - **Denied by default:** `getUserPermission` returns null for an alumni role, so `getResolvedPermission`, `canAccessSchool`, `canAccessStudent`, `isAdmin`, the dashboard and every guard built on them treat the user as having no permission. Alumni code reads the row through `getAlumniPermission` (any role, resolved scope) and must still check `getFeatureAccess(permission, "alumni")` and School scope — `canAccessAlumni` does both.

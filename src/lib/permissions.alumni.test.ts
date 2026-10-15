@@ -116,10 +116,11 @@ describe("alumni_manager role (ADR 0008)", () => {
 });
 
 describe("getAlumniSchool", () => {
-  it("finds the School through the alumni row, keyed by alumni.id", async () => {
+  it("finds the latest School enrollment through the alumni row, keyed by alumni.id", async () => {
     mockQuery.mockResolvedValueOnce([{ code: "70705", region: "West" }]);
     expect(await getAlumniSchool(8340)).toEqual({ code: "70705", region: "West" });
     expect(mockQuery.mock.calls[0][0]).toContain("FROM alumni a");
+    expect(mockQuery.mock.calls[0][0]).toContain("er.group_type = 'school'");
     expect(mockQuery.mock.calls[0][1]).toEqual([8340]);
   });
 

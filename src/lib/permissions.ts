@@ -648,8 +648,9 @@ export async function canAccessStudent(
 }
 
 // Alumni are not Students (ADR 0008). An alumnus is identified by alumni.id
-// and reached through the School they passed out from — never through
-// canAccessStudent or the "students" feature.
+// and reached through their School — the latest School enrollment record, the
+// same rule the alumni lists use — never through canAccessStudent or the
+// "students" feature.
 export interface AlumniScope {
   code: string;
   region: string | null;
@@ -662,10 +663,10 @@ export async function getAlumniSchool(
     `SELECT sch.code, sch.region
      FROM alumni a
      JOIN student s ON s.id = a.student_id
-     JOIN group_user gu_sch ON gu_sch.user_id = s.user_id
-     JOIN "group" g_sch ON g_sch.id = gu_sch.group_id AND g_sch.type = 'school'
-     JOIN school sch ON sch.id = g_sch.child_id
+     JOIN enrollment_record er ON er.user_id = s.user_id AND er.group_type = 'school'
+     JOIN school sch ON sch.id = er.group_id
      WHERE a.id = $1
+     ORDER BY er.academic_year DESC NULLS LAST, er.is_current DESC, er.id DESC
      LIMIT 1`,
     [alumniId],
   );
