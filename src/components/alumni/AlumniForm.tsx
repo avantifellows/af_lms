@@ -239,12 +239,7 @@ export default function AlumniForm({ entry, onSaved }: Props) {
     <div className="space-y-5">
       <FormHeader context={context} />
 
-      {context.kind === "edit" && (
-        <p className="flex items-start gap-2 rounded-lg bg-info-bg px-3 py-2 text-xs text-text-secondary">
-          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-text-muted" aria-hidden />
-          Saving writes only the fields you fill in or change. Leaving a field blank never erases what&apos;s on record.
-        </p>
-      )}
+      <EditNote kind={context.kind} />
 
       <ProfileSummary profile={context.profile} />
 
@@ -301,6 +296,17 @@ function nextStep(review: { errors: Record<string, string>; warnings: Issue[] })
 
 function scrollToField(column: string) {
   document.getElementById(`f-${column}`)?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+}
+
+/** For an existing record: saving never erases what's on record. */
+function EditNote({ kind }: { kind: EntryContext["kind"] }) {
+  if (kind !== "edit") return null;
+  return (
+    <p className="flex items-start gap-2 rounded-lg bg-info-bg px-3 py-2 text-xs text-text-secondary">
+      <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-text-muted" aria-hidden />
+      Saving writes only the fields you fill in or change. Leaving a field blank never erases what&apos;s on record.
+    </p>
+  );
 }
 
 function FormHeader({ context }: { context: EntryContext }) {
