@@ -21,7 +21,7 @@ edges:
     condition: when adding a write that must proxy to the DB Service
   - target: patterns/add-api-route.md
     condition: when adding a route that reads or writes
-last_updated: 2026-10-14
+last_updated: 2026-10-16
 ---
 
 # Data Access
@@ -164,7 +164,8 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
 - **Table ownership:** `holistic_mentorship_follow_up_notes` is created by the db-service
   migration `20260930120000_create_holistic_mentorship_follow_up_notes`, but LMS reads and
   inserts rows directly (ADR 0005).
-- **Immutable:** triggers reject every `UPDATE` and `DELETE`; a correction is another row. The
+- **Immutable:** triggers reject ordinary `UPDATE` and every `DELETE`; a correction is another
+  row. The only update exception is the complete privacy erasure described below. The
   insert trigger takes the per-Student privacy advisory lock, rejects a tombstoned Student, and
   requires submitted Post-Session Notes for the Student and Phase.
 - **Write path:** `POST .../phases/{phaseId}/follow-up-notes` authorizes `follow_up_note_add`,
@@ -177,10 +178,20 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
 - **Read audience:** the same as submitted Post-Session Notes. `getHolisticStudentPhase` loads
   `selectedPhase.followUpNotes` for the open selected Phase only, newest first. Locked Phase
   summaries, Student Context, progress, and the CSV never read this table.
-- **Privacy:** a tombstone hides Follow-up Notes on read (same-query `NOT EXISTS`) and blocks
-  new inserts. Erasure cannot remove Follow-up Note text because rows are immutable; it is hidden
-  by the tombstone, not erased. LMS privacy erasure is currently disabled; re-enabling it needs a
-  migration for this table.
+- **Privacy (#412):** a tombstone hides Follow-up Notes on read (same-query `NOT EXISTS`) and
+  blocks new inserts. The companion db-service migration allows only a full replacement of
+  non-null answers with `Content erased under approved privacy request` for that tombstoned
+  Student; null slots and all metadata remain unchanged. Ordinary updates and deletes still fail.
+  `deleteHolisticStudentContent` takes the Student advisory lock, clears the original content
+  families, inserts the original tombstone, then erases Follow-up answers in a separate statement.
+  It counts changed answer fields from their pre-update values and records a positive count in
+  the immutable `holistic_mentorship_follow_up_erasures` audit, with the actual actor and reason.
+  Existing tombstones use the same path without changing their original audit facts; repeats
+  return zero and add no audit. Any erasure/audit failure rolls back the entire transaction.
+  Deploy the schema before this LMS helper. Privacy erasure remains disabled in the endpoint
+  and action policy; the external erasure process must adopt this contract separately. This
+  change does not repair historical data or enable a production caller. See
+  `patterns/holistic-privacy-erasure.md` for ordering, verification and rollback limits.
 - **Code:** `src/lib/holistic-follow-up-notes.ts` (write), `src/lib/holistic-student-phase.ts`
   (read), `src/lib/holistic-follow-up-questions.ts` (client-safe question keys, text, and
   normaliser), `src/lib/holistic-mentor-write-scope.ts` (shared scope guard).
