@@ -26,7 +26,7 @@ edges:
     condition: when working on teacher feedback setup, the feedback form, or its report
   - target: patterns/INDEX.md
     condition: when starting a task — check the pattern index for a matching pattern file
-last_updated: 2026-10-14
+last_updated: 2026-10-16
 ---
 
 # Session Bootstrap
@@ -38,6 +38,7 @@ Then read this file fully before doing anything else in this session.
 ## Current Project State
 
 **Working:**
+- Issue #412 (feature branch): the dormant Holistic privacy helper erases Follow-up answers after creating the privacy tombstone and records the actual changed-answer count in a separate immutable audit. Existing tombstones are supported without rewriting their original audit. Requires the companion db-service migration first. The endpoint and action policy remain disabled; no historical data repair or external-process rollout is included. See `context/data-access.md` and `patterns/holistic-privacy-erasure.md`.
 - Issue #361 slice #363: PMU Manager (`pmu_manager`) and PMU Govt School User (`pmu_govt_school_user`) exist in the permission layer, pinned to JNV NVS (ADR 0007): matrix `students` edit + `performance` view only, program context always `[64]`/NVS-only, no centre seats or centre access, `ownsRecord` only for 64, and `canAccessStudent` requires a current NVS batch (`hasCurrentNvsBatchSql`). Admin user management, school page, dashboard and other PMU surfaces are later slices. See `context/permissions.md`.
 - Issue #361 slice #364: login is Google-only (ADR 0007); Dev Login stays in non-prod. `isRetiredToken` (`src/lib/retired-session.ts`, no DB imports) flags JWTs from the retired login by their raw token fields. The `jwt` callback throws on them, and `proxy` treats them as no token and clears the plain, `__Secure-` and chunked session cookies.
 - Issue #361 slice #365: Admins create and edit PMU Manager / PMU Govt School User rows in Admin Users. `POST`/`PATCH` validate the effective row via `resolvePmuRow` (`src/app/api/admin/users/pmu-rows.ts`), always store `program_ids = [64]`, return 400 for a non-JNV or wrongly shaped scope (Govt School User = level 1 + exactly one JNV School), and 409 when the target has an active centre seat. The modal shows a fixed "JNV NVS" note and a single-School picker for the Govt School User. PR #376 QA-11 fix: the modal never trims Schools on a role change; it blocks Save with an inline "exactly one School" error until one remains. The Admin list's level-3 badge reads "All JNV Schools" for PMU roles. See `context/permissions.md`.
