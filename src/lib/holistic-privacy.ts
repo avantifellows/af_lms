@@ -1,4 +1,52 @@
 import { withTransaction } from "./db";
+import type { PoolClient } from "pg";
+
+const ERASED_CONTENT = "Content erased under approved privacy request";
+
+async function eraseFollowUpAnswers(
+  client: PoolClient,
+  params: { actorUserId: number; studentId: number; reason: string }
+): Promise<number> {
+  // The tombstone must already exist in a previous statement. Keep the original
+  // values in the CTE so the audit counts answer fields, not note rows or markers.
+  const result = await client.query<{ count: number | string }>(
+    `WITH target_notes AS MATERIALIZED (
+       SELECT id,
+         (CASE WHEN challenges_answer <> $2 THEN 1 ELSE 0 END
+          + CASE WHEN solutions_answer <> $2 THEN 1 ELSE 0 END
+          + CASE WHEN action_plan_answer <> $2 THEN 1 ELSE 0 END) AS pending_count
+       FROM holistic_mentorship_follow_up_notes
+       WHERE student_id = $1
+         AND (challenges_answer <> $2 OR solutions_answer <> $2 OR action_plan_answer <> $2)
+       FOR UPDATE
+     ), erased AS (
+       UPDATE holistic_mentorship_follow_up_notes note
+       SET challenges_answer = CASE WHEN note.challenges_answer IS NULL THEN NULL ELSE $2 END,
+           solutions_answer = CASE WHEN note.solutions_answer IS NULL THEN NULL ELSE $2 END,
+           action_plan_answer = CASE WHEN note.action_plan_answer IS NULL THEN NULL ELSE $2 END
+       FROM target_notes target
+       WHERE note.id = target.id
+       RETURNING target.pending_count
+     ) SELECT COALESCE(SUM(pending_count), 0) AS count FROM erased`,
+    [params.studentId, ERASED_CONTENT]
+  );
+  const count = Number(result.rows[0]?.count ?? 0);
+  if (count > 0) {
+    // A separate immutable audit also supports erasure under an older tombstone
+    // without rewriting its original actor, date, reason or counts.
+    const audit = await client.query(
+      `INSERT INTO holistic_mentorship_follow_up_erasures
+         (privacy_deletion_id, actor_user_id, reason, answers_erased,
+          occurred_at, inserted_at, updated_at)
+       SELECT id, $2, $3, $4, now(), now(), now()
+       FROM holistic_mentorship_privacy_deletions WHERE student_id = $1
+       RETURNING id`,
+      [params.studentId, params.actorUserId, params.reason, count]
+    );
+    if (audit.rows.length !== 1) throw new Error("Follow-up erasure audit was not recorded");
+  }
+  return count;
+}
 
 export async function deleteHolisticStudentContent(params: {
   actorUserId: number;
@@ -10,6 +58,7 @@ export async function deleteHolisticStudentContent(params: {
     profileSummariesErased: number;
     postSessionAnswersErased: number;
     historicalAnswersErased: number;
+    followUpAnswersErased: number;
   }
   | { ok: false; status: 404; error: string }
 > {
@@ -30,14 +79,14 @@ export async function deleteHolisticStudentContent(params: {
     const profiles = await client.query<{ count: number | string }>(
       `WITH erased AS (
          UPDATE holistic_mentorship_student_profile_summaries summary
-         SET summary = 'Content erased under approved privacy request', updated_at = now()
+         SET summary = $2, updated_at = now()
          FROM holistic_mentorship_student_profiles profile
          JOIN holistic_mentorship_profile_journeys journey ON journey.id = profile.profile_journey_id
          WHERE summary.student_profile_id = profile.id AND journey.student_id = $1
-           AND summary.summary <> 'Content erased under approved privacy request'
+           AND summary.summary <> $2
          RETURNING summary.student_profile_id
        ) SELECT COUNT(*) AS count FROM erased`,
-      [params.studentId]
+      [params.studentId, ERASED_CONTENT]
     );
     const historicalNotes = await client.query<{ count: number | string }>(
       `WITH target_answers AS MATERIALIZED (
@@ -93,11 +142,13 @@ export async function deleteHolisticStudentContent(params: {
       [params.studentId, actorUserId, params.reason, profileSummariesErased,
         postSessionAnswersErased, historicalAnswersErased]
     );
+    const followUpAnswersErased = await eraseFollowUpAnswers(client, { ...params, actorUserId });
     return {
       ok: true,
       profileSummariesErased,
       postSessionAnswersErased,
       historicalAnswersErased,
+      followUpAnswersErased,
     };
   });
 }
