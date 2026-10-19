@@ -17,7 +17,7 @@ edges:
     condition: when writing the auth gate for a route
   - target: patterns/INDEX.md
     condition: when starting a concrete task that may have a runbook
-last_updated: 2026-08-06
+last_updated: 2026-10-19
 ---
 
 # Conventions
@@ -63,6 +63,13 @@ await query<Row>(`SELECT * FROM school WHERE code = '${code}'`);
 **Writes split by entity.** Student/batch/quiz-session/document mutations `fetch` the DB
 Service with `Authorization: Bearer ${DB_SERVICE_TOKEN}`; visit/curriculum writes use
 `query()` directly. See `context/data-access.md`.
+
+**Server-rendered GET filter forms follow the URL.** A plain `<form action>` with uncontrolled
+inputs (`defaultValue` / `defaultChecked` from search params) is a full page load per Apply, so on
+Back/Forward the browser restores what was typed before Apply (or the bfcache brings the page back
+as it was left). Wrap such forms in `src/app/curriculum-summary/UrlFilterForm.tsx` (resets to the
+URL defaults on mount and on a persisted `pageshow`) and key it on the serialized params so
+client-side navigations remount it. A key alone does not fix the page-load case.
 
 **Structured error responses.** Visit/PM routes return via `apiError(status, error, details?)`
 from `@/lib/visits-policy`; older routes use `NextResponse.json({ error }, { status })`.
