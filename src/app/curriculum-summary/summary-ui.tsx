@@ -122,21 +122,6 @@ export function AsOfField({ asOf }: { asOf: string }) {
   );
 }
 
-export function SearchField({ name, label, value, placeholder }: { name: string; label: string; value: string; placeholder: string }) {
-  return (
-    <label className={FIELD_LABEL_CLASS_NAME}>
-      {label}
-      <input
-        type="search"
-        name={name}
-        defaultValue={value}
-        placeholder={placeholder}
-        className={FIELD_CLASS_NAME}
-      />
-    </label>
-  );
-}
-
 export function ApplyButton() {
   return (
     <button type="submit" className={BUTTON_CLASS_NAME}>

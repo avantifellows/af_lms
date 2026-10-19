@@ -72,8 +72,8 @@ export interface CurriculumSummarySort {
 export interface CurriculumSummaryQuery {
   // Narrows the user's scoped rows; it never widens scope.
   regions: string[];
-  // Case-insensitive match on School name or code; "" = no search.
-  schoolSearch: string;
+  // Centre ids to list; [] = every Centre. Ids that aren't Centre options are ignored.
+  centreIds: number[];
   grade: CurriculumSummaryGrade;
   asOf: string;
   // Keeps rows with PCM or PCB Behind ≥ 1; header numbers ignore it.
@@ -90,7 +90,7 @@ function firstValue(value: SearchParamValue): string | undefined {
   return Array.isArray(value) ? value[0] : value;
 }
 
-// `regions` accepts repeated keys (the filter form) and comma-separated values.
+// `regions` and `centres` accept repeated keys (the filter form) and comma-separated values.
 function parseList(value: SearchParamValue): string[] {
   const values = Array.isArray(value) ? value : value ? [value] : [];
   return [...new Set(values.flatMap((item) => item.split(",")).map((item) => item.trim()))].filter(
@@ -109,7 +109,7 @@ export function normalizeCurriculumSummarySearchParams(
   const asOf = firstValue(searchParams.as_of);
   return {
     regions: parseList(searchParams.regions),
-    schoolSearch: (firstValue(searchParams.q) ?? "").trim(),
+    centreIds: parseList(searchParams.centres).filter((id) => /^[1-9]\d*$/.test(id)).map(Number),
     grade: firstValue(searchParams.grade) === "12" ? 12 : 11,
     // Invalid dates, and years too far out to name an academic year (0999, 9999), mean today.
     asOf: asOf && isAcademicYearDate(asOf) ? asOf : todayIstDate,
@@ -172,12 +172,21 @@ export interface CurriculumSummaryHeader {
   testsOverdue: number;
 }
 
+export interface CurriculumSummaryCentreOption {
+  id: number;
+  name: string;
+}
+
 export type CurriculumSummaryResult =
   | {
       ok: true;
       header: CurriculumSummaryHeader;
-      // Regions of every scoped row for the Grade, before the Region / School search filters.
+      // Regions of every scoped row for the Grade, before the Region and Centre filters.
       regionOptions: string[];
+      // Centres of the scoped rows in the chosen Regions, A–Z; Only behind doesn't narrow them.
+      centreOptions: CurriculumSummaryCentreOption[];
+      // The `centreIds` that are Centre options, in option order; the rows listed are these.
+      selectedCentreIds: number[];
       rows: CurriculumSummaryRow[];
       pagination: { page: number; pageSize: number; totalRows: number; totalPages: number };
     }
@@ -226,10 +235,8 @@ export async function getCurriculumSummary(
   const regionOptions = [
     ...new Set(scopedRows.flatMap((row) => (row.region ? [row.region] : []))),
   ].sort();
-  const rows = sortSummaryRows(
-    scopedRows.filter((row) => matchesSummaryFilters(row, params)),
-    params.sort
-  );
+  const filtered = applySummaryFilters(scopedRows, params);
+  const rows = sortSummaryRows(filtered.rows, params.sort);
   const listedRows = params.onlyBehind ? rows.filter((row) => worstGroupBehind(row) >= 1) : rows;
   const { page, totalPages, pageRows } = paginate(listedRows, params.page, params.pageSize);
 
@@ -237,6 +244,8 @@ export async function getCurriculumSummary(
     ok: true,
     header: summaryHeader(rows),
     regionOptions,
+    centreOptions: filtered.centreOptions,
+    selectedCentreIds: filtered.selectedCentreIds,
     rows: pageRows,
     pagination: { page, pageSize: params.pageSize, totalRows: listedRows.length, totalPages },
   };
@@ -249,15 +258,24 @@ async function checkSummarySchemas(): Promise<{ ok: true } | CurriculumSchemaUna
   return checkCurriculumPlansSchema();
 }
 
-// Region and School search narrow the user's scoped rows; they never widen scope.
-function matchesSummaryFilters(row: CurriculumSummaryRow, params: CurriculumSummaryQuery): boolean {
-  const search = params.schoolSearch.toLowerCase();
-  const regionMatches = params.regions.length === 0 || params.regions.includes(row.region ?? "");
-  const schoolMatches =
-    !search ||
-    row.schoolName.toLowerCase().includes(search) ||
-    row.schoolCode.toLowerCase().includes(search);
-  return regionMatches && schoolMatches;
+// Region and Centre narrow the user's scoped rows; they never widen scope. The Centre options
+// are the Centres in the chosen Regions, and a Centre id that isn't one (out of scope, another
+// Grade or Region, or gone) is ignored; with none left every Centre is listed.
+function applySummaryFilters(scopedRows: CurriculumSummaryRow[], params: CurriculumSummaryQuery) {
+  const regionRows = scopedRows.filter(
+    (row) => params.regions.length === 0 || params.regions.includes(row.region ?? "")
+  );
+  const centreOptions: CurriculumSummaryCentreOption[] = regionRows
+    .map((row) => ({ id: row.centreId, name: row.centreName }))
+    .sort((a, b) => a.name.localeCompare(b.name) || a.id - b.id);
+  const selectedCentreIds = centreOptions
+    .filter((option) => params.centreIds.includes(option.id))
+    .map((option) => option.id);
+  const rows =
+    selectedCentreIds.length > 0
+      ? regionRows.filter((row) => selectedCentreIds.includes(row.centreId))
+      : regionRows;
+  return { rows, centreOptions, selectedCentreIds };
 }
 
 // A page past the end shows the last page; no rows is page 1 of 0.

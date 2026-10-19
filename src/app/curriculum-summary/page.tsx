@@ -1,9 +1,11 @@
 import Link from "next/link";
+import type { ReactNode } from "react";
 
 import PageHeader from "@/components/PageHeader";
 import { Badge, Card } from "@/components/ui";
 import { getTodayIST } from "@/lib/curriculum-date-helpers";
 import { SUBJECT_GROUPS } from "@/lib/curriculum-plan-rules";
+import CentreFilterOptions from "./CentreFilterOptions";
 import CurriculumSummaryPageSizeSelect from "./CurriculumSummaryPageSizeSelect";
 import UrlFilterForm from "./UrlFilterForm";
 import {
@@ -12,6 +14,7 @@ import {
   defaultSortDirection,
   getCurriculumSummary,
   normalizeCurriculumSummarySearchParams,
+  type CurriculumSummaryCentreOption,
   type CurriculumSummaryQuery,
   type CurriculumSummaryResult,
   type CurriculumSummaryRow,
@@ -27,7 +30,6 @@ import {
   HiddenField,
   PAGE_CONTAINER_CLASS_NAME,
   SchemaUnavailableCard,
-  SearchField,
   SegmentLinks,
   SortableTableHead,
   TONE_BADGE_VARIANTS,
@@ -89,8 +91,10 @@ function AdminLinks() {
   );
 }
 
-function SummaryView({ summary, params }: { summary: SummaryData; params: CurriculumSummaryQuery }) {
+function SummaryView({ summary, params: requested }: { summary: SummaryData; params: CurriculumSummaryQuery }) {
   const { header } = summary;
+  // Links and the filter bar carry only the Centres the Summary applied.
+  const params = { ...requested, centreIds: summary.selectedCentreIds };
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-2 gap-3 sm:max-w-3xl sm:grid-cols-4">
@@ -114,7 +118,11 @@ function SummaryView({ summary, params }: { summary: SummaryData; params: Curric
         />
       </div>
 
-      <SummaryFilters params={params} regionOptions={summary.regionOptions} />
+      <SummaryFilters
+        params={params}
+        regionOptions={summary.regionOptions}
+        centreOptions={summary.centreOptions}
+      />
 
       <Card className="overflow-hidden">
         {summary.rows.length === 0 ? (
@@ -133,7 +141,7 @@ function SummaryView({ summary, params }: { summary: SummaryData; params: Curric
 }
 
 function emptyMessage(params: CurriculumSummaryQuery): string {
-  const filtered = params.regions.length > 0 || params.schoolSearch !== "" || params.onlyBehind;
+  const filtered = params.regions.length > 0 || params.centreIds.length > 0 || params.onlyBehind;
   return filtered
     ? "No classes match these filters."
     : `No Centres with Exam Tracks for Grade ${params.grade} are in your scope.`;
@@ -152,7 +160,7 @@ function filterSearchParams(
 ): URLSearchParams {
   const search = new URLSearchParams();
   for (const region of params.regions) search.append("regions", region);
-  if (params.schoolSearch) search.set("q", params.schoolSearch);
+  for (const centreId of params.centreIds) search.append("centres", String(centreId));
   search.set("grade", String(overrides.grade ?? params.grade));
   search.set("as_of", params.asOf);
   if (params.onlyBehind) search.set("only_behind", "1");
@@ -174,9 +182,11 @@ function summaryHref(params: CurriculumSummaryQuery, overrides: SummaryHrefOverr
 function SummaryFilters({
   params,
   regionOptions,
+  centreOptions,
 }: {
   params: CurriculumSummaryQuery;
   regionOptions: string[];
+  centreOptions: CurriculumSummaryCentreOption[];
 }) {
   return (
     <Card className="flex flex-col gap-4 p-4 sm:flex-row sm:items-end">
@@ -202,7 +212,7 @@ function SummaryFilters({
         <HiddenField name="sort" value={params.sort?.key ?? null} />
         <HiddenField name="dir" value={params.sort?.dir ?? null} />
         <RegionFilter regionOptions={regionOptions} selected={params.regions} />
-        <SearchField name="q" label="School" value={params.schoolSearch} placeholder="Name or code" />
+        <CentreFilter centreOptions={centreOptions} selected={params.centreIds} />
         <AsOfField asOf={params.asOf} />
         <label className="flex min-h-[44px] items-center gap-2 text-sm font-bold text-text-primary">
           <input type="checkbox" name="only_behind" value="1" defaultChecked={params.onlyBehind} />
@@ -214,34 +224,60 @@ function SummaryFilters({
   );
 }
 
-function RegionFilter({ regionOptions, selected }: { regionOptions: string[]; selected: string[] }) {
+// A checkbox list behind a summary button showing the selection, like a multi-select.
+function FilterDisclosure({ label, value, children }: { label: string; value: string; children: ReactNode }) {
   return (
     <details className="relative">
       <summary className="flex min-h-[44px] cursor-pointer list-none flex-col justify-end gap-1 text-xs font-bold uppercase tracking-wide text-text-muted">
-        Region
-        <span className="rounded-md border border-border bg-bg-card px-3 py-2 text-sm font-normal normal-case text-text-primary">
-          {selected.length === 0 ? "All regions" : selected.join(", ")}
+        {label}
+        <span className="max-w-xs truncate rounded-md border border-border bg-bg-card px-3 py-2 text-sm font-normal normal-case text-text-primary">
+          {value}
         </span>
       </summary>
       <fieldset className="absolute z-10 mt-1 flex max-h-64 min-w-48 flex-col gap-1 overflow-y-auto rounded-md border border-border bg-bg-card p-3 shadow-md">
-        <legend className="sr-only">Region</legend>
-        {regionOptions.length === 0 ? (
-          <span className="text-sm text-text-muted">No regions in scope</span>
-        ) : (
-          regionOptions.map((region) => (
-            <label key={region} className="flex items-center gap-2 text-sm text-text-primary">
-              <input
-                type="checkbox"
-                name="regions"
-                value={region}
-                defaultChecked={selected.includes(region)}
-              />
-              {region}
-            </label>
-          ))
-        )}
+        <legend className="sr-only">{label}</legend>
+        {children}
       </fieldset>
     </details>
+  );
+}
+
+function RegionFilter({ regionOptions, selected }: { regionOptions: string[]; selected: string[] }) {
+  return (
+    <FilterDisclosure label="Region" value={selected.length === 0 ? "All regions" : selected.join(", ")}>
+      {regionOptions.length === 0 ? (
+        <span className="text-sm text-text-muted">No regions in scope</span>
+      ) : (
+        regionOptions.map((region) => (
+          <label key={region} className="flex items-center gap-2 text-sm text-text-primary">
+            <input type="checkbox" name="regions" value={region} defaultChecked={selected.includes(region)} />
+            {region}
+          </label>
+        ))
+      )}
+    </FilterDisclosure>
+  );
+}
+
+// The Centres in scope for the Grade and chosen Regions, by id; the search box is client-side.
+function CentreFilter({
+  centreOptions,
+  selected,
+}: {
+  centreOptions: CurriculumSummaryCentreOption[];
+  selected: number[];
+}) {
+  const selectedNames = centreOptions
+    .filter((option) => selected.includes(option.id))
+    .map((option) => option.name);
+  return (
+    <FilterDisclosure label="Centre" value={selectedNames.length === 0 ? "All centres" : selectedNames.join(", ")}>
+      {centreOptions.length === 0 ? (
+        <span className="text-sm text-text-muted">No centres in scope</span>
+      ) : (
+        <CentreFilterOptions options={centreOptions} selected={selected} />
+      )}
+    </FilterDisclosure>
   );
 }
 

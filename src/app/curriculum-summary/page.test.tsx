@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { mockGetServerSession, mockGetResolvedPermission, mockGetCurriculumSummary, mockPush } = vi.hoisted(
@@ -31,7 +31,11 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: mockPush, refresh: vi.fn() }),
 }));
 
-import type { CurriculumSummaryResult, CurriculumSummaryRow } from "@/lib/curriculum-summary";
+import type {
+  CurriculumSummaryQuery,
+  CurriculumSummaryResult,
+  CurriculumSummaryRow,
+} from "@/lib/curriculum-summary";
 import CurriculumSummaryPage from "./page";
 
 const PM = {
@@ -74,11 +78,25 @@ function row(overrides: Partial<CurriculumSummaryRow>): CurriculumSummaryRow {
   };
 }
 
+const CENTRE_OPTIONS = [
+  { id: 1, name: "Anand Shared" },
+  { id: 2, name: "Bhuj Closed" },
+  { id: 3, name: "Surat" },
+  { id: 4, name: "Vapi" },
+];
+
+// Like the module: the requested Centre ids that are options, in option order.
+function selectedCentres(params: CurriculumSummaryQuery): number[] {
+  return CENTRE_OPTIONS.filter((option) => params.centreIds.includes(option.id)).map((option) => option.id);
+}
+
 function summary(overrides: Partial<Extract<CurriculumSummaryResult, { ok: true }>> = {}): CurriculumSummaryResult {
   return {
     ok: true,
     header: { centresOnPlan: 1, centresTotal: 3, chaptersBehind: { PCM: 1, PCB: 5 }, testsOverdue: 2 },
     regionOptions: ["NORTH", "SOUTH"],
+    centreOptions: CENTRE_OPTIONS,
+    selectedCentreIds: [],
     rows: [
       row({}),
       row({
@@ -125,7 +143,9 @@ beforeEach(() => {
   vi.resetAllMocks();
   mockGetServerSession.mockResolvedValue({ user: { email: PM.email } });
   mockGetResolvedPermission.mockResolvedValue(PM);
-  mockGetCurriculumSummary.mockResolvedValue(summary());
+  mockGetCurriculumSummary.mockImplementation(async (_permission, params: CurriculumSummaryQuery) =>
+    summary({ selectedCentreIds: selectedCentres(params) })
+  );
 });
 
 describe("Curriculum Summary page access", () => {
@@ -163,11 +183,11 @@ describe("Curriculum Summary page", () => {
   });
 
   it("passes the normalized filters and shows the header numbers", async () => {
-    await renderPage({ grade: "12", as_of: "2026-08-15", regions: "NORTH", q: "anand", only_behind: "1", page: "2", limit: "50" });
+    await renderPage({ grade: "12", as_of: "2026-08-15", regions: "NORTH", centres: "1", only_behind: "1", page: "2", limit: "50" });
 
     expect(mockGetCurriculumSummary).toHaveBeenCalledWith(PM, {
       regions: ["NORTH"],
-      schoolSearch: "anand",
+      centreIds: [1],
       grade: 12,
       asOf: "2026-08-15",
       onlyBehind: true,
@@ -261,21 +281,21 @@ describe("Curriculum Summary page", () => {
   });
 
   it("keeps every filter in the Grade, pagination and page-size links", async () => {
-    await renderPage({ grade: "11", as_of: "2026-08-15", regions: ["NORTH", "SOUTH"], q: "jnv", only_behind: "1", page: "2", limit: "50" });
+    await renderPage({ grade: "11", as_of: "2026-08-15", regions: ["NORTH", "SOUTH"], centres: ["2", "1"], only_behind: "1", page: "2", limit: "50" });
 
     const grades = screen.getByRole("navigation", { name: "Grade" });
     expect(within(grades).getByRole("link", { name: "Grade 11" })).toHaveAttribute("aria-current", "page");
     expect(within(grades).getByRole("link", { name: "Grade 12" })).toHaveAttribute(
       "href",
-      "/curriculum-summary?regions=NORTH&regions=SOUTH&q=jnv&grade=12&as_of=2026-08-15&only_behind=1&limit=50"
+      "/curriculum-summary?regions=NORTH&regions=SOUTH&centres=1&centres=2&grade=12&as_of=2026-08-15&only_behind=1&limit=50"
     );
     expect(screen.getByRole("link", { name: "Previous" })).toHaveAttribute(
       "href",
-      "/curriculum-summary?regions=NORTH&regions=SOUTH&q=jnv&grade=11&as_of=2026-08-15&only_behind=1&limit=50"
+      "/curriculum-summary?regions=NORTH&regions=SOUTH&centres=1&centres=2&grade=11&as_of=2026-08-15&only_behind=1&limit=50"
     );
     expect(screen.getByRole("link", { name: "Next" })).toHaveAttribute(
       "href",
-      "/curriculum-summary?regions=NORTH&regions=SOUTH&q=jnv&grade=11&as_of=2026-08-15&only_behind=1&limit=50&page=3"
+      "/curriculum-summary?regions=NORTH&regions=SOUTH&centres=1&centres=2&grade=11&as_of=2026-08-15&only_behind=1&limit=50&page=3"
     );
     expect(screen.getByText("Page 2 of 3")).toBeInTheDocument();
     expect(document.querySelector('input[type="hidden"][name="limit"]')).toHaveValue("50");
@@ -284,7 +304,7 @@ describe("Curriculum Summary page", () => {
 
     fireEvent.change(screen.getByRole("combobox", { name: "Rows per page" }), { target: { value: "20" } });
     expect(mockPush).toHaveBeenCalledWith(
-      "/curriculum-summary?regions=NORTH&regions=SOUTH&q=jnv&grade=11&as_of=2026-08-15&only_behind=1"
+      "/curriculum-summary?regions=NORTH&regions=SOUTH&centres=1&centres=2&grade=11&as_of=2026-08-15&only_behind=1"
     );
   });
 
@@ -323,7 +343,7 @@ describe("Curriculum Summary page", () => {
       grade: "11",
       as_of: "2026-08-15",
       regions: ["NORTH", "SOUTH"],
-      q: "jnv",
+      centres: ["2", "1"],
       only_behind: "1",
       sort: "pcb",
       dir: "desc",
@@ -332,7 +352,7 @@ describe("Curriculum Summary page", () => {
     });
 
     expect(mockGetCurriculumSummary).toHaveBeenCalledWith(PM, expect.objectContaining({ sort: { key: "pcb", dir: "desc" } }));
-    const filters = "regions=NORTH&regions=SOUTH&q=jnv&grade=11&as_of=2026-08-15&only_behind=1";
+    const filters = "regions=NORTH&regions=SOUTH&centres=1&centres=2&grade=11&as_of=2026-08-15&only_behind=1";
     const pcb = screen.getByRole("columnheader", { name: "PCB Behind" });
     expect(pcb).toHaveAttribute("aria-sort", "descending");
     expect(within(pcb).getByText("▼")).toHaveAttribute("aria-hidden", "true");
@@ -350,7 +370,7 @@ describe("Curriculum Summary page", () => {
 
     expect(screen.getByRole("link", { name: "Grade 12" })).toHaveAttribute(
       "href",
-      "/curriculum-summary?regions=NORTH&regions=SOUTH&q=jnv&grade=12&as_of=2026-08-15&only_behind=1&sort=pcb&dir=desc&limit=50"
+      "/curriculum-summary?regions=NORTH&regions=SOUTH&centres=1&centres=2&grade=12&as_of=2026-08-15&only_behind=1&sort=pcb&dir=desc&limit=50"
     );
     expect(screen.getByRole("link", { name: "Next" })).toHaveAttribute(
       "href",
@@ -384,32 +404,74 @@ describe("Curriculum Summary page", () => {
   it("re-renders the filter controls from the URL when it changes", async () => {
     const { rerender } = render(
       await CurriculumSummaryPage({
-        searchParams: Promise.resolve({ as_of: "2026-08-15", regions: "NORTH", q: "jnv", only_behind: "1" }),
+        searchParams: Promise.resolve({ as_of: "2026-08-15", regions: "NORTH", centres: "1", only_behind: "1" }),
       })
     );
+    const centreSearch = () => screen.getByRole("searchbox", { name: "Search centres" });
+    // Options sit in a closed <details>; the search hides a non-matching option's label, which
+    // also leaves its checkbox without an accessible name, so find it by Centre id.
+    const optionHidden = (centreId: number) =>
+      (document.querySelector(`input[name="centres"][value="${centreId}"]`)?.closest("label") as HTMLLabelElement)
+        .hidden;
     fireEvent.click(screen.getByRole("checkbox", { name: "SOUTH" }));
-    fireEvent.change(screen.getByRole("searchbox", { name: "School" }), { target: { value: "unapplied" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: "Bhuj Closed" }));
+    fireEvent.change(centreSearch(), { target: { value: "vapi" } });
     fireEvent.click(screen.getByRole("checkbox", { name: "Only behind" }));
 
     rerender(await CurriculumSummaryPage({ searchParams: Promise.resolve({ as_of: "2026-08-10", regions: "SOUTH" }) }));
 
     expect(screen.getByRole("checkbox", { name: "NORTH" })).not.toBeChecked();
     expect(screen.getByRole("checkbox", { name: "SOUTH" })).toBeChecked();
-    expect(screen.getByRole("searchbox", { name: "School" })).toHaveValue("");
+    expect(screen.getByRole("checkbox", { name: "Anand Shared" })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Bhuj Closed" })).not.toBeChecked();
+    expect(centreSearch()).toHaveValue("");
+    expect(optionHidden(3)).toBe(false);
     expect(screen.getByRole("checkbox", { name: "Only behind" })).not.toBeChecked();
     expect(screen.getByLabelText("As of")).toHaveValue("2026-08-10");
 
     // A page brought back from the back/forward cache drops edits that were never applied.
-    fireEvent.change(screen.getByRole("searchbox", { name: "School" }), { target: { value: "unapplied" } });
+    fireEvent.change(centreSearch(), { target: { value: "vapi" } });
     fireEvent.click(screen.getByRole("checkbox", { name: "NORTH" }));
-    window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
-    expect(screen.getByRole("searchbox", { name: "School" })).toHaveValue("");
+    fireEvent.click(screen.getByRole("checkbox", { name: "Vapi" }));
+    expect(optionHidden(3)).toBe(true);
+    act(() => {
+      window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+    });
     expect(screen.getByRole("checkbox", { name: "NORTH" })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Vapi" })).not.toBeChecked();
+    expect(centreSearch()).toHaveValue("");
+    expect(optionHidden(3)).toBe(false);
+  });
+
+  it("picks Centres by id from the scoped options and ignores ids that aren't options", async () => {
+    await renderPage({ as_of: "2026-08-15", centres: ["4", "99", "2"] });
+
+    expect(mockGetCurriculumSummary).toHaveBeenCalledWith(PM, expect.objectContaining({ centreIds: [4, 99, 2] }));
+    // The summary button names the applied Centres, A–Z; 99 is not an option, so it's dropped.
+    expect(screen.getByText("Bhuj Closed, Vapi")).toBeInTheDocument();
+    expect(screen.getAllByRole("checkbox", { name: /^(Anand Shared|Bhuj Closed|Surat|Vapi)$/ }).map((box) => [
+      (box as HTMLInputElement).value,
+      (box as HTMLInputElement).checked,
+    ])).toEqual([
+      ["1", false],
+      ["2", true],
+      ["3", false],
+      ["4", true],
+    ]);
+    expect(screen.getByRole("link", { name: "Grade 12" })).toHaveAttribute(
+      "href",
+      "/curriculum-summary?centres=2&centres=4&grade=12&as_of=2026-08-15"
+    );
+    expect(screen.queryByRole("searchbox", { name: "School" })).not.toBeInTheDocument();
   });
 
   it("disables paging past either end and drops defaults from links", async () => {
     mockGetCurriculumSummary.mockResolvedValue(
-      summary({ pagination: { page: 1, pageSize: 20, totalRows: 1, totalPages: 1 }, regionOptions: [] })
+      summary({
+        pagination: { page: 1, pageSize: 20, totalRows: 1, totalPages: 1 },
+        regionOptions: [],
+        centreOptions: [],
+      })
     );
 
     await renderPage({ as_of: "2026-08-15" });
@@ -419,7 +481,9 @@ describe("Curriculum Summary page", () => {
     expect(screen.getByText("Previous")).toBeInTheDocument();
     expect(document.querySelector('input[type="hidden"][name="limit"]')).toBeNull();
     expect(screen.getByText("No regions in scope")).toBeInTheDocument();
+    expect(screen.getByText("No centres in scope")).toBeInTheDocument();
     expect(screen.getByText("All regions")).toBeInTheDocument();
+    expect(screen.getByText("All centres")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Grade 12" })).toHaveAttribute(
       "href",
       "/curriculum-summary?grade=12&as_of=2026-08-15"
@@ -428,12 +492,16 @@ describe("Curriculum Summary page", () => {
 
   it.each([
     [{}, "No Centres with Exam Tracks for Grade 11 are in your scope."],
-    [{ q: "x" }, "No classes match these filters."],
+    [{ centres: "1" }, "No classes match these filters."],
     [{ regions: "NORTH" }, "No classes match these filters."],
     [{ only_behind: "1" }, "No classes match these filters."],
   ])("explains an empty list for %j", async (searchParams, message) => {
-    mockGetCurriculumSummary.mockResolvedValue(
-      summary({ rows: [], pagination: { page: 1, pageSize: 20, totalRows: 0, totalPages: 0 } })
+    mockGetCurriculumSummary.mockImplementation(async (_permission, params: CurriculumSummaryQuery) =>
+      summary({
+        rows: [],
+        selectedCentreIds: selectedCentres(params),
+        pagination: { page: 1, pageSize: 20, totalRows: 0, totalPages: 0 },
+      })
     );
 
     await renderPage(searchParams);

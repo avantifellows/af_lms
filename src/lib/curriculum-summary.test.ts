@@ -32,7 +32,7 @@ describe("normalizeCurriculumSummarySearchParams", () => {
   it("defaults to Grade 11, today, page 1 and 20 rows", () => {
     expect(normalizeCurriculumSummarySearchParams({}, TODAY)).toEqual({
       regions: [],
-      schoolSearch: "",
+      centreIds: [],
       grade: 11,
       asOf: "2026-10-19",
       onlyBehind: false,
@@ -50,7 +50,7 @@ describe("normalizeCurriculumSummarySearchParams", () => {
       )
     ).toEqual({
       regions: [],
-      schoolSearch: "",
+      centreIds: [],
       grade: 12,
       asOf: "2026-08-15",
       onlyBehind: false,
@@ -68,7 +68,7 @@ describe("normalizeCurriculumSummarySearchParams", () => {
       )
     ).toEqual({
       regions: [],
-      schoolSearch: "",
+      centreIds: [],
       grade: 11,
       asOf: "2026-10-19",
       onlyBehind: false,
@@ -86,7 +86,7 @@ describe("normalizeCurriculumSummarySearchParams", () => {
       )
     ).toEqual({
       regions: [],
-      schoolSearch: "",
+      centreIds: [],
       grade: 11,
       asOf: "2026-10-19",
       onlyBehind: false,
@@ -96,15 +96,21 @@ describe("normalizeCurriculumSummarySearchParams", () => {
     });
   });
 
-  it("reads Regions from repeated or comma-separated values, a trimmed School search and Only behind", () => {
+  it("reads Regions and Centre ids from repeated or comma-separated values, and Only behind", () => {
     expect(
       normalizeCurriculumSummarySearchParams(
-        { regions: ["NORTH", "SOUTH, NORTH", " "], q: "  Bhuj ", only_behind: "1" },
+        {
+          regions: ["NORTH", "SOUTH, NORTH", " "],
+          // Only positive whole ids count; the removed School search `q` is ignored.
+          centres: ["9000812", "12, x, 0, -3, 1.5, 012", "12"],
+          q: "Bhuj",
+          only_behind: "1",
+        },
         TODAY
       )
     ).toEqual({
       regions: ["NORTH", "SOUTH"],
-      schoolSearch: "Bhuj",
+      centreIds: [9000812, 12],
       grade: 11,
       asOf: "2026-10-19",
       onlyBehind: true,
@@ -215,7 +221,7 @@ const SETUP_ERROR = {
 function query(overrides: Partial<CurriculumSummaryQuery> = {}): CurriculumSummaryQuery {
   return {
     regions: [],
-    schoolSearch: "",
+    centreIds: [],
     grade: 11,
     asOf: AS_OF,
     onlyBehind: false,
@@ -401,25 +407,81 @@ describe("getCurriculumSummary", () => {
     expect(paged.rows.map((row) => row.centreId)).toEqual([5]);
   });
 
-  it("filters by Region and School search without changing the Region options", async () => {
+  it("filters by Region and Centre without changing the Region options", async () => {
     routeQueries({
       summary: [
-        raw(1, { region: "NORTH", school_name: "JNV Bhuj", school_code: "BHJ" }),
-        raw(2, { region: "SOUTH", school_name: "JNV Anand", school_code: "ANN" }),
-        raw(3, { region: null, school_name: null, school_code: "VPI" }),
+        raw(1, { centre_name: "Bhuj", region: "NORTH" }),
+        raw(2, { centre_name: "anand", region: "SOUTH" }),
+        raw(3, { centre_name: "Vapi", region: null }),
+        raw(4, { centre_name: "Chhapi", region: "SOUTH", chapters: [chapter(1, { dueDate: "2026-06-30", completedOn: "2026-06-28" })] }),
       ],
     });
 
     const byRegion = await getCurriculumSummary(ADMIN, query({ regions: ["SOUTH"] }));
-    expect(byRegion.ok && byRegion.rows.map((row) => row.centreId)).toEqual([2]);
-    expect(byRegion.ok && byRegion.regionOptions).toEqual(["NORTH", "SOUTH"]);
+    if (!byRegion.ok) throw new Error("expected rows");
+    expect(byRegion.rows.map((row) => row.centreId)).toEqual([2, 4]);
+    expect(byRegion.regionOptions).toEqual(["NORTH", "SOUTH"]);
+    // Centre options are the chosen Regions' Centres, A–Z.
+    expect(byRegion.centreOptions).toEqual([
+      { id: 2, name: "anand" },
+      { id: 4, name: "Chhapi" },
+    ]);
 
-    const byName = await getCurriculumSummary(ADMIN, query({ schoolSearch: "bhuj" }));
-    expect(byName.ok && byName.rows.map((row) => row.centreId)).toEqual([1]);
+    // Without a Region every scoped Centre is an option; the Centres narrow the rows.
+    const byCentre = await getCurriculumSummary(ADMIN, query({ centreIds: [3, 1] }));
+    if (!byCentre.ok) throw new Error("expected rows");
+    // Worst first: Centre 1's Alpha test was held (the default sessions), so Vapi has more overdue.
+    expect(byCentre.rows.map((row) => row.centreId)).toEqual([3, 1]);
+    expect(byCentre.selectedCentreIds).toEqual([1, 3]);
+    expect(byCentre.centreOptions.map((option) => option.name)).toEqual(["anand", "Bhuj", "Chhapi", "Vapi"]);
+  });
 
-    // A School without a name falls back to its code, which is searchable.
-    const byCode = await getCurriculumSummary(ADMIN, query({ schoolSearch: "vpi" }));
-    expect(byCode.ok && byCode.rows.map((row) => [row.centreId, row.schoolName])).toEqual([[3, "VPI"]]);
+  it("totals the header over the chosen Centres, like Region, and keeps Only-behind rows as options", async () => {
+    routeQueries({
+      summary: [
+        raw(1),
+        raw(2, { chapters: [chapter(1, { dueDate: "2026-06-30", completedOn: "2026-06-28" })] }),
+        raw(3),
+      ],
+    });
+
+    const result = await getCurriculumSummary(ADMIN, query({ centreIds: [1, 2], onlyBehind: true }));
+
+    if (!result.ok) throw new Error("expected rows");
+    // Centre 2 is on track, so Only behind lists Centre 1 alone, but it stays a chosen option.
+    expect(result.rows.map((row) => row.centreId)).toEqual([1]);
+    expect(result.selectedCentreIds).toEqual([1, 2]);
+    expect(result.centreOptions.map((option) => option.id)).toEqual([1, 2, 3]);
+    // Centre 1: PCM 1, PCB 2, 2 tests overdue; Centre 2: its one Chapter's test overdue.
+    expect(result.header).toEqual({
+      centresOnPlan: 2,
+      centresTotal: 2,
+      chaptersBehind: { PCM: 1, PCB: 2 },
+      testsOverdue: 3,
+    });
+  });
+
+  it.each([
+    ["an id outside the user's rows", [99]],
+    ["an id outside the chosen Region", [2]],
+  ])("ignores %s and lists every Centre when none is left", async (_name, centreIds) => {
+    routeQueries({ summary: [raw(1, { region: "NORTH" }), raw(2, { region: "SOUTH" }), raw(3, { region: "NORTH" })] });
+
+    const result = await getCurriculumSummary(ADMIN, query({ regions: ["NORTH"], centreIds: [...centreIds] }));
+
+    if (!result.ok) throw new Error("expected rows");
+    expect(result.selectedCentreIds).toEqual([]);
+    // Centre 1 has one test overdue fewer (its Alpha session), so Centre 3 is worse.
+    expect(result.rows.map((row) => row.centreId)).toEqual([3, 1]);
+  });
+
+  it("keeps a valid Centre id beside a stale one", async () => {
+    routeQueries({ summary: [raw(1), raw(2)] });
+
+    const result = await getCurriculumSummary(ADMIN, query({ centreIds: [99, 2] }));
+
+    expect(result.ok && result.rows.map((row) => row.centreId)).toEqual([2]);
+    expect(result.ok && result.selectedCentreIds).toEqual([2]);
   });
 
   it("Only behind narrows the listed rows but not the header", async () => {

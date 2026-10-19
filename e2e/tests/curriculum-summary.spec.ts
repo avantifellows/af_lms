@@ -438,19 +438,42 @@ test.describe("Curriculum Summary filters", () => {
     await page.context().close();
   });
 
-  test("School search matches School name or code", async ({ browser }) => {
+  test("the Centre filter lists the chosen Centres, totals the header over them and ignores stale ids", async ({
+    browser,
+  }) => {
     const page = await summaryPmPage(browser);
-    // "Summary Bhuj School": Bhuj Neet (on plan, 0 behind) and Bhuj Setup (not counted).
-    await page.goto(`/curriculum-summary?as_of=${AS_OF}&q=bhuj`);
+    await page.goto(`/curriculum-summary?as_of=${AS_OF}`);
+    await page.locator("summary", { hasText: "Centre" }).click();
+    await expect(page.getByText("All centres")).toBeVisible();
+    // The search box narrows the options as you type; it is not a filter itself.
+    await page.getByRole("searchbox", { name: "Search centres" }).fill("vapi");
+    await expect(page.getByRole("checkbox", { name: "Summary E2E Anand Main" })).toBeHidden();
+    await page.getByRole("checkbox", { name: "Summary E2E Vapi Unassigned" }).check();
+    await page.getByRole("checkbox", { name: "Summary E2E Vapi Closed" }).check();
+    await page.getByRole("button", { name: "Apply" }).click();
+
+    // Ids in option order (A–Z): Vapi Closed 9000852, Vapi Unassigned 9000851.
+    await expect(page).toHaveURL(/centres=/);
+    expect(new URL(page.url()).searchParams.getAll("centres")).toEqual(["9000852", "9000851"]);
+    await expect(page.getByText("Summary E2E Vapi Closed, Summary E2E Vapi Unassigned")).toBeVisible();
+    // Vapi Closed (PCM 1 behind, 2 tests overdue) and Vapi Unassigned (No plan): the header
+    // counts only these, as it does for a Region.
+    expect(await rowCentres(page)).toEqual(["Summary E2E Vapi Closed", "Summary E2E Vapi Unassigned"]);
+    await expect(page.getByTestId("summary-centres-on-plan")).toHaveText("1/2");
+    await expectChaptersBehind(page, "1", "0");
+    await expect(page.getByTestId("summary-tests-overdue")).toHaveText("2");
+
+    // Bhuj Neet (on plan, 0 behind) and Bhuj Setup (not counted).
+    await page.goto(`/curriculum-summary?as_of=${AS_OF}&centres=9000821&centres=9000822`);
     expect(await rowCentres(page)).toEqual(["Summary E2E Bhuj Neet", "Summary E2E Bhuj Setup"]);
     await expect(page.getByTestId("summary-centres-on-plan")).toHaveText("1/1");
     await expectChaptersBehind(page, "0", "0");
 
-    // School code SUMM85 (Vapi): Vapi Closed (PCM 1 behind) and Vapi Unassigned (No plan).
-    await page.goto(`/curriculum-summary?as_of=${AS_OF}&q=summ85`);
-    expect(await rowCentres(page)).toEqual(["Summary E2E Vapi Closed", "Summary E2E Vapi Unassigned"]);
-    await expect(page.getByTestId("summary-centres-on-plan")).toHaveText("1/2");
-    await expectChaptersBehind(page, "1", "0");
+    // Other Region (outside the PM's scope) and an unknown id are ignored: all 9 rows.
+    await page.goto(`/curriculum-summary?as_of=${AS_OF}&centres=9000841&centres=123456789`);
+    await expect(page.locator("[data-summary-row]")).toHaveCount(9);
+    await expect(page.getByText("All centres")).toBeVisible();
+    await expect(page.getByTestId("summary-centres-on-plan")).toHaveText("4/7");
     await page.context().close();
   });
 
@@ -481,19 +504,22 @@ test.describe("Curriculum Summary filters", () => {
 
     await adminPage.locator("summary", { hasText: "Region" }).click();
     await adminPage.getByRole("checkbox", { name: "SUMMARY_E2E", exact: true }).check();
-    await adminPage.getByRole("searchbox", { name: "School" }).fill("anand");
+    await adminPage.locator("summary", { hasText: "Centre" }).click();
+    await adminPage.getByRole("checkbox", { name: "Summary E2E Anand Shared" }).check();
+    await adminPage.getByRole("checkbox", { name: "Summary E2E Anand Main" }).check();
     await adminPage.getByRole("checkbox", { name: "Only behind" }).check();
     await adminPage.getByRole("button", { name: "Apply" }).click();
 
     await expect(adminPage).toHaveURL(/only_behind=1/);
     const url = new URL(adminPage.url());
     expect(url.searchParams.getAll("regions")).toEqual(["SUMMARY_E2E"]);
-    expect(url.searchParams.get("q")).toBe("anand");
+    // Anand Main 9000811 and Anand Shared 9000812, A–Z.
+    expect(url.searchParams.getAll("centres")).toEqual(["9000811", "9000812"]);
     expect(url.searchParams.get("as_of")).toBe(AS_OF);
     expect(url.searchParams.get("limit")).toBe("10");
     expect(url.searchParams.get("page")).toBeNull();
 
-    // Anand School in SUMMARY_E2E: Anand Shared (PCM 1, PCB 4) and Anand Main (PCM 1).
+    // Anand Shared (PCM 1, PCB 4) and Anand Main (PCM 1).
     const expectAnandRows = async () => {
       await expect(adminPage.getByText("Page 1 of 1")).toBeVisible();
       expect(await rowCentres(adminPage)).toEqual(["Summary E2E Anand Shared", "Summary E2E Anand Main"]);
@@ -506,17 +532,20 @@ test.describe("Curriculum Summary filters", () => {
 
     await adminPage.reload();
     await expectAnandRows();
-    await expect(adminPage.getByRole("searchbox", { name: "School" })).toHaveValue("anand");
+    for (const centre of ["Summary E2E Anand Shared", "Summary E2E Anand Main"]) {
+      await expect(adminPage.getByRole("checkbox", { name: centre, includeHidden: true })).toBeChecked();
+    }
     await expect(adminPage.getByRole("checkbox", { name: "Only behind" })).toBeChecked();
     await adminPage.locator("summary", { hasText: "Region" }).click();
     await expect(adminPage.getByRole("checkbox", { name: "SUMMARY_E2E", exact: true })).toBeChecked();
 
-    // The Grade toggle keeps every filter: only Anand Main runs Grade 12 (PCM 1 behind).
+    // The Grade toggle keeps every filter. Only Anand Main runs Grade 12 (PCM 1 behind), so Anand
+    // Shared's id is not a Grade 12 option and is ignored there.
     await adminPage.getByRole("link", { name: "Grade 12" }).click();
     await expect(adminPage).toHaveURL(/grade=12/);
     const gradeUrl = new URL(adminPage.url());
     expect(gradeUrl.searchParams.getAll("regions")).toEqual(["SUMMARY_E2E"]);
-    expect(gradeUrl.searchParams.get("q")).toBe("anand");
+    expect(gradeUrl.searchParams.getAll("centres")).toEqual(["9000811", "9000812"]);
     expect(gradeUrl.searchParams.get("only_behind")).toBe("1");
     expect(await rowCentres(adminPage)).toEqual(["Summary E2E Anand Main"]);
   });
@@ -528,14 +557,16 @@ test.describe("Curriculum Summary filters", () => {
     const region = () =>
       adminPage.getByRole("checkbox", { name: "SUMMARY_E2E", exact: true, includeHidden: true });
     const onlyBehind = () => adminPage.getByRole("checkbox", { name: "Only behind" });
-    const school = () => adminPage.getByRole("searchbox", { name: "School" });
+    const centre = () =>
+      adminPage.getByRole("checkbox", { name: "Summary E2E Anand Shared", exact: true, includeHidden: true });
     const apply = () => adminPage.getByRole("button", { name: "Apply" }).click();
-    const expectControls = async (expected: { region: boolean; onlyBehind: boolean; school: string }) => {
+    const expectControls = async (expected: { region: boolean; onlyBehind: boolean; centre: boolean }) => {
       if (expected.region) await expect(region()).toBeChecked();
       else await expect(region()).not.toBeChecked();
       if (expected.onlyBehind) await expect(onlyBehind()).toBeChecked();
       else await expect(onlyBehind()).not.toBeChecked();
-      await expect(school()).toHaveValue(expected.school);
+      if (expected.centre) await expect(centre()).toBeChecked();
+      else await expect(centre()).not.toBeChecked();
     };
 
     await adminPage.goto(`/curriculum-summary?as_of=${AS_OF}`);
@@ -546,31 +577,32 @@ test.describe("Curriculum Summary filters", () => {
     await onlyBehind().check();
     await apply();
     await expect(adminPage).toHaveURL(/only_behind=1/);
-    await school().fill("anand");
+    await adminPage.locator("summary", { hasText: "Centre" }).click();
+    await centre().check();
     await apply();
-    await expect(adminPage).toHaveURL(/q=anand/);
+    await expect(adminPage).toHaveURL(/centres=9000812/);
     await adminPage.getByRole("link", { name: "Grade 12" }).click();
     await expect(adminPage).toHaveURL(/grade=12/);
 
     await adminPage.goBack();
     await expect(adminPage).toHaveURL(/grade=11/);
-    await expectControls({ region: true, onlyBehind: true, school: "anand" });
+    await expectControls({ region: true, onlyBehind: true, centre: true });
     await adminPage.goBack();
-    await expect(adminPage).not.toHaveURL(/q=anand/);
-    await expectControls({ region: true, onlyBehind: true, school: "" });
+    await expect(adminPage).not.toHaveURL(/centres=/);
+    await expectControls({ region: true, onlyBehind: true, centre: false });
     await adminPage.goBack();
     await expect(adminPage).not.toHaveURL(/only_behind/);
-    await expectControls({ region: true, onlyBehind: false, school: "" });
+    await expectControls({ region: true, onlyBehind: false, centre: false });
     await adminPage.goBack();
     await expect(adminPage).not.toHaveURL(/regions=/);
-    await expectControls({ region: false, onlyBehind: false, school: "" });
+    await expectControls({ region: false, onlyBehind: false, centre: false });
 
     await adminPage.goForward();
     await expect(adminPage).toHaveURL(/regions=SUMMARY_E2E/);
-    await expectControls({ region: true, onlyBehind: false, school: "" });
+    await expectControls({ region: true, onlyBehind: false, centre: false });
     await adminPage.goForward();
     await expect(adminPage).toHaveURL(/only_behind=1/);
-    await expectControls({ region: true, onlyBehind: true, school: "" });
+    await expectControls({ region: true, onlyBehind: true, centre: false });
 
     // Back to the Region step, then Apply with nothing changed: the URL stays that step's.
     await adminPage.goBack();
@@ -579,9 +611,8 @@ test.describe("Curriculum Summary filters", () => {
     await expect(adminPage).toHaveURL(/regions=SUMMARY_E2E/);
     const applied = new URL(adminPage.url());
     expect(applied.searchParams.get("only_behind")).toBeNull();
-    // An empty School search goes as `q=`.
-    expect(applied.searchParams.get("q") ?? "").toBe("");
-    await expectControls({ region: true, onlyBehind: false, school: "" });
+    expect(applied.searchParams.getAll("centres")).toEqual([]);
+    await expectControls({ region: true, onlyBehind: false, centre: false });
   });
 });
 
@@ -627,8 +658,8 @@ test.describe("Curriculum Summary Chapter tests overdue", () => {
     await expect(summaryRow(page, "Summary E2E Vapi Unassigned").locator("[data-tests-conducted]")).toHaveText(
       "0 conducted"
     );
-    // School search for Surat: the Draft row only, so no overdue tests.
-    await page.goto(`/curriculum-summary?as_of=${AS_OF}&q=surat`);
+    // Surat CET and Surat Draft only: no plan rows, so no overdue tests.
+    await page.goto(`/curriculum-summary?as_of=${AS_OF}&centres=9000831&centres=9000832`);
     await expect(page.getByTestId("summary-tests-overdue")).toHaveText("0");
 
     // A day earlier the Surat Alpha session hasn't ended yet.
@@ -1129,7 +1160,7 @@ test.describe("Curriculum Summary shared JEE Advanced + NEET class", () => {
   const ADVANCED_CENTRE = "Summary E2E Valsad Advanced Neet";
 
   test("is one measured row with both PCM Behind and PCB Behind", async ({ adminPage }) => {
-    await adminPage.goto(`/curriculum-summary?grade=12&as_of=${AS_OF}&q=SUMM87`);
+    await adminPage.goto(`/curriculum-summary?grade=12&as_of=${AS_OF}&centres=9000871`);
 
     expect(await rowCentres(adminPage)).toEqual([ADVANCED_CENTRE]);
     const row = summaryRow(adminPage, ADVANCED_CENTRE);
