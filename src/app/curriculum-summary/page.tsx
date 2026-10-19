@@ -486,7 +486,7 @@ function PlanCells({
         {row.testsOverdue}
       </td>
       <td data-plan className={COMPACT_CELL_CLASS_NAME}>
-        <span className="block min-w-[7rem] max-w-[11rem]">
+        <span className="block min-w-[9.5rem] max-w-[11rem]">
           {row.plan?.title}
           {row.plan?.closed ? (
             <Badge className="ml-1" data-plan-closed>
