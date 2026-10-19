@@ -283,7 +283,13 @@ describe("CurriculumConfigPage", () => {
     expect(
       screen.getByRole("heading", { name: "LMS curriculum schema unavailable" })
     ).toBeInTheDocument();
+    expect(screen.getByText("Schema unavailable")).toBeInTheDocument();
     expect(screen.getByText("lms_chapter_exam_configs.id")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Curriculum Config cannot load until the LMS Chapter Exam Config management columns are available."
+      )
+    ).toBeInTheDocument();
   });
 
   it("redirects non-admin users away from the config page", async () => {

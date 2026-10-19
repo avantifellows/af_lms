@@ -2,6 +2,7 @@ import Link from "next/link";
 import { getServerSession } from "next-auth";
 import { redirect } from "next/navigation";
 
+import { SchemaUnavailableCard } from "@/app/curriculum-summary/summary-ui";
 import PageHeader from "@/components/PageHeader";
 import { Card } from "@/components/ui";
 import { authOptions } from "@/lib/auth";
@@ -16,7 +17,6 @@ import { EXAM_TRACKS, formatExamTrack } from "@/lib/exam-tracks";
 import CurriculumConfigChapterSearchFilter from "./CurriculumConfigChapterSearchFilter";
 import CurriculumConfigExportButton from "./CurriculumConfigExportButton";
 import CurriculumConfigTable from "./CurriculumConfigTable";
-import { SchemaUnavailableCard } from "../plans/PlanSchemaUnavailable";
 
 interface PageProps {
   searchParams: Promise<Record<string, string | undefined>>;
@@ -54,10 +54,12 @@ export default async function CurriculumConfigPage({ searchParams }: PageProps) 
       />
       <main className="w-full px-4 py-6 sm:px-6 lg:px-8">
         {!result.ok ? (
-          <SchemaUnavailableCard
-            result={result}
-            description="Curriculum Config cannot load until the LMS Chapter Exam Config management columns are available."
-          />
+          <SchemaUnavailableCard error={result.error} details={result.details}>
+            <p className="text-sm text-text-secondary">
+              Curriculum Config cannot load until the LMS Chapter Exam Config management columns
+              are available.
+            </p>
+          </SchemaUnavailableCard>
         ) : (
           <div className="space-y-5">
             <ConfigFilters result={result} />

@@ -55,7 +55,11 @@ describe("Curriculum Plan pages while the plan tables are missing", () => {
     render(await renderPage());
 
     expect(screen.getByText("Schema unavailable")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "LMS curriculum schema unavailable" })).toBeInTheDocument();
     expect(screen.getByText("lms_curriculum_plans.id")).toBeInTheDocument();
+    expect(
+      screen.getByText("Curriculum Plans cannot load until the Curriculum Plan tables are available.")
+    ).toBeInTheDocument();
     expect(mockQuery).not.toHaveBeenCalled();
   });
 });
