@@ -1,16 +1,11 @@
 import Link from "next/link";
-import { getServerSession } from "next-auth";
-import { notFound, redirect } from "next/navigation";
 
 import PageHeader from "@/components/PageHeader";
 import { Card } from "@/components/ui";
-import { authOptions } from "@/lib/auth";
-import {
-  getCurriculumPlan,
-  requireCurriculumPlanAdmin,
-} from "@/lib/curriculum-plans";
+import { getCurriculumPlan } from "@/lib/curriculum-plans";
 import CurriculumPlanMetadataForm from "../CurriculumPlanMetadataForm";
 import PlanSchemaUnavailable from "../PlanSchemaUnavailable";
+import { orNotFound, requirePlanAdminPage } from "../plan-page-access";
 import CurriculumPlanChapterDates from "./CurriculumPlanChapterDates";
 import CurriculumPlanCopy from "./CurriculumPlanCopy";
 import CurriculumPlanLifecycle from "./CurriculumPlanLifecycle";
@@ -21,18 +16,8 @@ interface PageProps {
 
 export default async function CurriculumPlanEditorPage({ params }: PageProps) {
   const { id } = await params;
-  const session = await getServerSession(authOptions);
-  const access = await requireCurriculumPlanAdmin(session);
-
-  if (!access.ok) {
-    redirect(access.status === 401 ? "/" : "/dashboard");
-  }
-
-  const result = await getCurriculumPlan(Number(id));
-  if (!result.ok && result.status === 404) {
-    notFound();
-  }
-
+  const access = await requirePlanAdminPage();
+  const result = orNotFound(await getCurriculumPlan(Number(id)));
   const readOnly = Boolean(access.permission.read_only);
 
   return (

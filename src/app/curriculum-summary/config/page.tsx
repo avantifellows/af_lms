@@ -16,6 +16,7 @@ import { EXAM_TRACKS, formatExamTrack } from "@/lib/exam-tracks";
 import CurriculumConfigChapterSearchFilter from "./CurriculumConfigChapterSearchFilter";
 import CurriculumConfigExportButton from "./CurriculumConfigExportButton";
 import CurriculumConfigTable from "./CurriculumConfigTable";
+import { SchemaUnavailableCard } from "../plans/PlanSchemaUnavailable";
 
 interface PageProps {
   searchParams: Promise<Record<string, string | undefined>>;
@@ -53,7 +54,10 @@ export default async function CurriculumConfigPage({ searchParams }: PageProps) 
       />
       <main className="w-full px-4 py-6 sm:px-6 lg:px-8">
         {!result.ok ? (
-          <SchemaUnavailable result={result} />
+          <SchemaUnavailableCard
+            result={result}
+            description="Curriculum Config cannot load until the LMS Chapter Exam Config management columns are available."
+          />
         ) : (
           <div className="space-y-5">
             <ConfigFilters result={result} />
@@ -86,32 +90,6 @@ export default async function CurriculumConfigPage({ searchParams }: PageProps) 
         )}
       </main>
     </div>
-  );
-}
-
-function SchemaUnavailable({
-  result,
-}: {
-  result: Extract<CurriculumConfigListResult, { ok: false }>;
-}) {
-  return (
-    <Card className="border-l-4 border-l-warning-border p-6">
-      <div className="flex flex-col gap-3">
-        <p className="text-xs font-bold uppercase tracking-wide text-warning-text">
-          Schema unavailable
-        </p>
-        <h2 className="text-lg font-bold text-text-primary">{result.error}</h2>
-        <p className="text-sm text-text-secondary">
-          Curriculum Config cannot load until the LMS Chapter Exam Config
-          management columns are available.
-        </p>
-        <ul className="list-disc space-y-1 pl-5 text-sm font-mono text-text-secondary">
-          {result.details.map((detail) => (
-            <li key={detail}>{detail}</li>
-          ))}
-        </ul>
-      </div>
-    </Card>
   );
 }
 

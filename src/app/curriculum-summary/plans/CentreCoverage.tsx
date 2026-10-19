@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 
 import { Badge, Button, Card } from "@/components/ui";
@@ -12,6 +12,7 @@ import type {
 import type { CurriculumPlanSummary } from "@/lib/curriculum-plans";
 import { formatExamTrack } from "@/lib/exam-tracks";
 import { PLAN_STATUS_BADGE_VARIANTS, PLAN_STATUS_LABELS } from "./plan-status";
+import { firstErrorMessage, planRequest, usePlanAction } from "./plan-requests";
 
 const GRADES: CoverageGrade[] = [11, 12];
 
@@ -45,65 +46,62 @@ function CoverageCell({ coverage }: { coverage: CentreCoverageGrade | null }) {
   );
 }
 
+type Choices = Partial<Record<CoverageGrade, string>>;
+
+// The Grades the Centre runs, each at its current plan id ("" = No plan).
+function currentChoices(centre: CentreCoverageRow): Choices {
+  return Object.fromEntries(
+    GRADES.filter((grade) => centre.grades[grade]).map((grade) => [
+      grade,
+      String(centre.grades[grade]?.plan?.id ?? ""),
+    ])
+  );
+}
+
+// Only the Grades whose choice differs from the current plan.
+function changedAssignments(centre: CentreCoverageRow, choices: Choices) {
+  const current = currentChoices(centre);
+  return GRADES.filter((grade) => grade in current && choices[grade] !== current[grade]).map(
+    (grade) => ({ grade, plan_id: choices[grade] ? Number(choices[grade]) : null })
+  );
+}
+
 // Centre coverage for one academic year: which plan each eligible Centre + Grade is on.
 // Assign by Centre: "Change plans" on a row picks a plan per Grade the Centre runs (only
 // that academic year's plans for the Grade) or none; Save sends only the changed Grades.
 export default function CentreCoverage({ academicYear, centres, plans, readOnly }: Props) {
   const router = useRouter();
   const [editingCentreId, setEditingCentreId] = useState<number | null>(null);
-  const [choices, setChoices] = useState<Partial<Record<CoverageGrade, string>>>({});
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
+  const [choices, setChoices] = useState<Choices>({});
   const [savedMessage, setSavedMessage] = useState("");
+  const action = usePlanAction();
 
   function startEditing(centre: CentreCoverageRow) {
     setEditingCentreId(centre.centreId);
-    setError("");
+    action.setError("");
     setSavedMessage("");
-    setChoices(
-      Object.fromEntries(
-        GRADES.filter((grade) => centre.grades[grade]).map((grade) => [
-          grade,
-          String(centre.grades[grade]?.plan?.id ?? ""),
-        ])
-      )
-    );
+    setChoices(currentChoices(centre));
   }
 
   async function save(centre: CentreCoverageRow) {
-    const assignments = GRADES.filter(
-      (grade) =>
-        centre.grades[grade] &&
-        choices[grade] !== String(centre.grades[grade]?.plan?.id ?? "")
-    ).map((grade) => ({ grade, plan_id: choices[grade] ? Number(choices[grade]) : null }));
+    const assignments = changedAssignments(centre, choices);
     if (assignments.length === 0) {
       setEditingCentreId(null);
       return;
     }
-    setSaving(true);
-    setError("");
-    try {
-      const response = await fetch(
-        `/api/curriculum/plans/centres/${centre.centreId}/assignments`,
-        {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ academic_year: academicYear, assignments }),
-        }
-      );
-      const json = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        setError(json.errors?.[0]?.message ?? json.error ?? "Could not save the plans");
-        return;
-      }
-      setEditingCentreId(null);
-      setSavedMessage(`Plans saved for ${centre.centreName}.`);
-      router.refresh();
-    } catch {
-      setError("Could not save the plans");
-    } finally {
-      setSaving(false);
-    }
+    const done = await action.run(
+      () =>
+        planRequest(`/api/curriculum/plans/centres/${centre.centreId}/assignments`, "PUT", {
+          academic_year: academicYear,
+          assignments,
+        }),
+      "Could not save the plans",
+      (body) => firstErrorMessage(body, "Could not save the plans")
+    );
+    if (!done) return;
+    setEditingCentreId(null);
+    setSavedMessage(`Plans saved for ${centre.centreName}.`);
+    router.refresh();
   }
 
   return (
@@ -136,84 +134,145 @@ export default function CentreCoverage({ academicYear, centres, plans, readOnly 
               </td>
             </tr>
           ) : (
-            centres.map((centre) => {
-              const editing = editingCentreId === centre.centreId;
-              return (
-                <tr key={centre.centreId} data-coverage-row className="align-top">
-                  <td className="px-4 py-3">
-                    <p className="font-bold text-text-primary">{centre.centreName}</p>
-                    <p className="text-text-secondary">
-                      {centre.schoolName}
-                      {centre.programName ? ` · ${centre.programName}` : ""}
-                    </p>
-                  </td>
-                  <td className="px-4 py-3">{centre.region || "No region"}</td>
-                  {GRADES.map((grade) => (
-                    <td key={grade} data-coverage-grade={grade} className="px-4 py-3">
-                      {editing && centre.grades[grade] ? (
-                        <label className="flex flex-col gap-1 text-xs font-bold text-text-muted">
-                          Grade {grade} plan
-                          <select
-                            value={choices[grade] ?? ""}
-                            onChange={(event) =>
-                              setChoices((current) => ({ ...current, [grade]: event.target.value }))
-                            }
-                            className={selectClassName}
-                          >
-                            <option value="">No plan</option>
-                            {plans
-                              .filter((plan) => plan.grade === grade)
-                              .map((plan) => (
-                                <option key={plan.id} value={plan.id}>
-                                  {plan.title} ({PLAN_STATUS_LABELS[plan.displayStatus]})
-                                </option>
-                              ))}
-                          </select>
-                        </label>
-                      ) : (
-                        <CoverageCell coverage={centre.grades[grade]} />
-                      )}
-                    </td>
-                  ))}
-                  <td className="px-4 py-3">
-                    {editing ? (
-                      <div className="flex flex-col gap-2">
-                        <div className="flex gap-2">
-                          <Button type="button" disabled={saving} onClick={() => save(centre)}>
-                            Save
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="secondary"
-                            disabled={saving}
-                            onClick={() => setEditingCentreId(null)}
-                          >
-                            Cancel
-                          </Button>
-                        </div>
-                        {error ? (
-                          <p data-testid="coverage-error" className="text-sm font-bold text-danger">
-                            {error}
-                          </p>
-                        ) : null}
-                      </div>
-                    ) : (
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        disabled={readOnly}
-                        onClick={() => startEditing(centre)}
-                      >
-                        Change plans
-                      </Button>
-                    )}
-                  </td>
-                </tr>
-              );
-            })
+            centres.map((centre) => (
+              <CoverageRow
+                key={centre.centreId}
+                centre={centre}
+                plans={plans}
+                editing={editingCentreId === centre.centreId}
+                choices={choices}
+                onChoose={(grade, value) => setChoices((current) => ({ ...current, [grade]: value }))}
+                actions={
+                  <RowActions
+                    editing={editingCentreId === centre.centreId}
+                    readOnly={readOnly}
+                    saving={action.working}
+                    error={action.error}
+                    onEdit={() => startEditing(centre)}
+                    onSave={() => save(centre)}
+                    onCancel={() => setEditingCentreId(null)}
+                  />
+                }
+              />
+            ))
           )}
         </tbody>
       </table>
     </Card>
+  );
+}
+
+function CoverageRow({
+  centre,
+  plans,
+  editing,
+  choices,
+  onChoose,
+  actions,
+}: {
+  centre: CentreCoverageRow;
+  plans: CurriculumPlanSummary[];
+  editing: boolean;
+  choices: Choices;
+  onChoose: (grade: CoverageGrade, value: string) => void;
+  actions: ReactNode;
+}) {
+  return (
+    <tr data-coverage-row className="align-top">
+      <td className="px-4 py-3">
+        <p className="font-bold text-text-primary">{centre.centreName}</p>
+        <p className="text-text-secondary">
+          {centre.schoolName}
+          {centre.programName ? ` · ${centre.programName}` : ""}
+        </p>
+      </td>
+      <td className="px-4 py-3">{centre.region || "No region"}</td>
+      {GRADES.map((grade) => (
+        <td key={grade} data-coverage-grade={grade} className="px-4 py-3">
+          {editing && centre.grades[grade] ? (
+            <GradePlanChoice
+              grade={grade}
+              plans={plans}
+              value={choices[grade] ?? ""}
+              onChange={(value) => onChoose(grade, value)}
+            />
+          ) : (
+            <CoverageCell coverage={centre.grades[grade]} />
+          )}
+        </td>
+      ))}
+      <td className="px-4 py-3">{actions}</td>
+    </tr>
+  );
+}
+
+function GradePlanChoice({
+  grade,
+  plans,
+  value,
+  onChange,
+}: {
+  grade: CoverageGrade;
+  plans: CurriculumPlanSummary[];
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="flex flex-col gap-1 text-xs font-bold text-text-muted">
+      Grade {grade} plan
+      <select value={value} onChange={(event) => onChange(event.target.value)} className={selectClassName}>
+        <option value="">No plan</option>
+        {plans
+          .filter((plan) => plan.grade === grade)
+          .map((plan) => (
+            <option key={plan.id} value={plan.id}>
+              {plan.title} ({PLAN_STATUS_LABELS[plan.displayStatus]})
+            </option>
+          ))}
+      </select>
+    </label>
+  );
+}
+
+function RowActions({
+  editing,
+  readOnly,
+  saving,
+  error,
+  onEdit,
+  onSave,
+  onCancel,
+}: {
+  editing: boolean;
+  readOnly: boolean;
+  saving: boolean;
+  error: string;
+  onEdit: () => void;
+  onSave: () => void;
+  onCancel: () => void;
+}) {
+  if (!editing) {
+    return (
+      <Button type="button" variant="secondary" disabled={readOnly} onClick={onEdit}>
+        Change plans
+      </Button>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex gap-2">
+        <Button type="button" disabled={saving} onClick={onSave}>
+          Save
+        </Button>
+        <Button type="button" variant="secondary" disabled={saving} onClick={onCancel}>
+          Cancel
+        </Button>
+      </div>
+      {error ? (
+        <p data-testid="coverage-error" className="text-sm font-bold text-danger">
+          {error}
+        </p>
+      ) : null}
+    </div>
   );
 }

@@ -10,6 +10,7 @@ import type {
   PlanAssignmentPreviewCentre,
 } from "@/lib/curriculum-plan-assignments";
 import { formatExamTrack } from "@/lib/exam-tracks";
+import { firstErrorMessage, planRequest } from "../../plan-requests";
 
 interface Props {
   planId: number;
@@ -66,14 +67,10 @@ function usePlanAssignmentPreview(planId: number, ticked: Set<number>, version: 
 
 async function saveAssignments(planId: number, ticked: Set<number>): Promise<string | null> {
   try {
-    const response = await fetch(`/api/curriculum/plans/${planId}/assignments`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ centre_ids: [...ticked] }),
+    const response = await planRequest(`/api/curriculum/plans/${planId}/assignments`, "PUT", {
+      centre_ids: [...ticked],
     });
-    if (response.ok) return null;
-    const json = await response.json().catch(() => ({}));
-    return json.errors?.[0]?.message ?? json.error ?? "Could not save the assignments";
+    return response.ok ? null : firstErrorMessage(response.body, "Could not save the assignments");
   } catch {
     return "Could not save the assignments";
   }

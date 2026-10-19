@@ -10,6 +10,8 @@ import type {
   CurriculumPlanError,
   CurriculumPlanWarning,
 } from "@/lib/curriculum-plans";
+import PlanErrorItems from "../PlanErrorItems";
+import { planErrors, planRequest } from "../plan-requests";
 
 interface Props {
   planId: number;
@@ -53,15 +55,73 @@ function groupBySubject(chapters: CurriculumPlanChapter[]) {
   return groups;
 }
 
-export default function CurriculumPlanChapterDates({ planId, chapters, readOnly }: Props) {
+type ChapterDateChange = { chapter_id: number; due_date: string | null; test_date: string | null };
+
+// The Chapters whose dates differ from the last saved ones, as the API takes them.
+function changedChapterDates(
+  chapters: CurriculumPlanChapter[],
+  saved: ChapterDates,
+  values: ChapterDates
+): ChapterDateChange[] {
+  return chapters
+    .filter((chapter) => {
+      const before = datesFor(saved, chapter);
+      const after = datesFor(values, chapter);
+      return before.dueDate !== after.dueDate || before.testDate !== after.testDate;
+    })
+    .map((chapter) => ({
+      chapter_id: chapter.chapterId,
+      due_date: datesFor(values, chapter).dueDate || null,
+      test_date: datesFor(values, chapter).testDate || null,
+    }));
+}
+
+// Saves a batch of changed dates: all-or-nothing errors per Chapter, or warnings on success.
+function useChapterDatesSave(planId: number) {
   const router = useRouter();
-  const [saved, setSaved] = useState(() => datesFromChapters(chapters));
-  const [values, setValues] = useState(saved);
   const [errors, setErrors] = useState<CurriculumPlanError[]>([]);
   const [warnings, setWarnings] = useState<CurriculumPlanWarning[]>([]);
   const [savedMessage, setSavedMessage] = useState("");
   const [saving, setSaving] = useState(false);
+
+  // Resolves true once the batch is saved.
+  async function save(changed: ChapterDateChange[]): Promise<boolean> {
+    setErrors([]);
+    setWarnings([]);
+    setSavedMessage("");
+    if (changed.length === 0) {
+      setSavedMessage("No date changes to save.");
+      return false;
+    }
+    setSaving(true);
+    try {
+      const response = await planRequest(`/api/curriculum/plans/${planId}/chapters`, "PUT", {
+        chapters: changed,
+      });
+      if (!response.ok) {
+        setErrors(planErrors(response.body, "Could not save Chapter dates"));
+        return false;
+      }
+      setWarnings(Array.isArray(response.body.warnings) ? response.body.warnings : []);
+      setSavedMessage("Chapter dates saved.");
+      router.refresh();
+      return true;
+    } catch {
+      setErrors([{ field: "form", message: "Could not save Chapter dates" }]);
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return { errors, warnings, savedMessage, saving, save };
+}
+
+export default function CurriculumPlanChapterDates({ planId, chapters, readOnly }: Props) {
+  const [saved, setSaved] = useState(() => datesFromChapters(chapters));
+  const [values, setValues] = useState(saved);
   const groups = useMemo(() => groupBySubject(chapters), [chapters]);
+  const feedback = useChapterDatesSave(planId);
 
   function setDate(chapter: CurriculumPlanChapter, field: "dueDate" | "testDate", value: string) {
     setValues((current) => ({
@@ -72,51 +132,8 @@ export default function CurriculumPlanChapterDates({ planId, chapters, readOnly 
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const changed = chapters
-      .filter((chapter) => {
-        const before = datesFor(saved, chapter);
-        const after = datesFor(values, chapter);
-        return before.dueDate !== after.dueDate || before.testDate !== after.testDate;
-      })
-      .map((chapter) => ({
-        chapter_id: chapter.chapterId,
-        due_date: datesFor(values, chapter).dueDate || null,
-        test_date: datesFor(values, chapter).testDate || null,
-      }));
-
-    setErrors([]);
-    setWarnings([]);
-    setSavedMessage("");
-    if (changed.length === 0) {
-      setSavedMessage("No date changes to save.");
-      return;
-    }
-
-    setSaving(true);
-    try {
-      const response = await fetch(`/api/curriculum/plans/${planId}/chapters`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chapters: changed }),
-      });
-      const json = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        setErrors(
-          Array.isArray(json.errors) && json.errors.length > 0
-            ? json.errors
-            : [{ field: "form", message: json.error ?? "Could not save Chapter dates" }]
-        );
-        return;
-      }
-      setSaved(values);
-      setWarnings(Array.isArray(json.warnings) ? json.warnings : []);
-      setSavedMessage("Chapter dates saved.");
-      router.refresh();
-    } catch {
-      setErrors([{ field: "form", message: "Could not save Chapter dates" }]);
-    } finally {
-      setSaving(false);
-    }
+    const submitted = values;
+    if (await feedback.save(changedChapterDates(chapters, saved, submitted))) setSaved(submitted);
   }
 
   return (
@@ -126,82 +143,139 @@ export default function CurriculumPlanChapterDates({ planId, chapters, readOnly 
           No in-syllabus Chapters for this plan&apos;s Grade and Exam Tracks.
         </Card>
       ) : null}
-      {groups.map((group) => {
-        const headingId = `plan-subject-${group.subjectId}`;
-        return (
-          <section key={group.subjectId} aria-labelledby={headingId}>
-            <Card className="overflow-x-auto">
-              <h2
-                id={headingId}
-                className="border-b border-border px-4 py-3 text-lg font-bold text-text-primary"
-              >
-                {group.subjectName}
-              </h2>
-              <table className="min-w-full divide-y divide-border text-sm">
-                <thead className="bg-bg-muted">
-                  <tr>
-                    {["Chapter", "Chapter Due Date", "Chapter Test Date", "Plan"].map((header) => (
-                      <th
-                        key={header}
-                        scope="col"
-                        className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-text-muted"
-                      >
-                        {header}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {group.chapters.map((chapter) => {
-                    const dates = datesFor(values, chapter);
-                    return (
-                      <tr key={chapter.chapterId} data-plan-chapter-row>
-                        <td className="px-4 py-3">
-                          <span className="font-mono text-xs text-text-muted">
-                            {chapter.chapterCode}
-                          </span>{" "}
-                          <span className="font-bold text-text-primary">{chapter.chapterName}</span>
-                        </td>
-                        <td className="px-4 py-3">
-                          <input
-                            type="date"
-                            aria-label={`Due date for ${chapter.chapterName}`}
-                            value={dates.dueDate}
-                            onChange={(event) =>
-                              setDate(chapter, "dueDate", event.target.value)
-                            }
-                            disabled={readOnly}
-                            className={dateInputClassName}
-                          />
-                        </td>
-                        <td className="px-4 py-3">
-                          <input
-                            type="date"
-                            aria-label={`Test date for ${chapter.chapterName}`}
-                            value={dates.testDate}
-                            onChange={(event) =>
-                              setDate(chapter, "testDate", event.target.value)
-                            }
-                            disabled={readOnly}
-                            className={dateInputClassName}
-                          />
-                        </td>
-                        <td className="px-4 py-3">
-                          {datesFor(saved, chapter).dueDate ? (
-                            <Badge variant="info">Dated</Badge>
-                          ) : (
-                            <Badge>Not in plan</Badge>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </Card>
-          </section>
-        );
-      })}
+      {groups.map((group) => (
+        <SubjectDates
+          key={group.subjectId}
+          group={group}
+          values={values}
+          saved={saved}
+          readOnly={readOnly}
+          onDate={setDate}
+        />
+      ))}
+      <ChapterDatesFeedback
+        errors={feedback.errors}
+        warnings={feedback.warnings}
+        savedMessage={feedback.savedMessage}
+      />
+      {chapters.length > 0 ? (
+        <Button type="submit" disabled={readOnly || feedback.saving}>
+          Save Chapter dates
+        </Button>
+      ) : null}
+    </form>
+  );
+}
+
+function SubjectDates({
+  group,
+  values,
+  saved,
+  readOnly,
+  onDate,
+}: {
+  group: ReturnType<typeof groupBySubject>[number];
+  values: ChapterDates;
+  saved: ChapterDates;
+  readOnly: boolean;
+  onDate: (chapter: CurriculumPlanChapter, field: "dueDate" | "testDate", value: string) => void;
+}) {
+  const headingId = `plan-subject-${group.subjectId}`;
+  return (
+    <section aria-labelledby={headingId}>
+      <Card className="overflow-x-auto">
+        <h2 id={headingId} className="border-b border-border px-4 py-3 text-lg font-bold text-text-primary">
+          {group.subjectName}
+        </h2>
+        <table className="min-w-full divide-y divide-border text-sm">
+          <thead className="bg-bg-muted">
+            <tr>
+              {["Chapter", "Chapter Due Date", "Chapter Test Date", "Plan"].map((header) => (
+                <th
+                  key={header}
+                  scope="col"
+                  className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-text-muted"
+                >
+                  {header}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {group.chapters.map((chapter) => (
+              <ChapterDatesRow
+                key={chapter.chapterId}
+                chapter={chapter}
+                dates={datesFor(values, chapter)}
+                dated={Boolean(datesFor(saved, chapter).dueDate)}
+                readOnly={readOnly}
+                onDate={onDate}
+              />
+            ))}
+          </tbody>
+        </table>
+      </Card>
+    </section>
+  );
+}
+
+function ChapterDatesRow({
+  chapter,
+  dates,
+  dated,
+  readOnly,
+  onDate,
+}: {
+  chapter: CurriculumPlanChapter;
+  dates: { dueDate: string; testDate: string };
+  dated: boolean;
+  readOnly: boolean;
+  onDate: (chapter: CurriculumPlanChapter, field: "dueDate" | "testDate", value: string) => void;
+}) {
+  return (
+    <tr data-plan-chapter-row>
+      <td className="px-4 py-3">
+        <span className="font-mono text-xs text-text-muted">{chapter.chapterCode}</span>{" "}
+        <span className="font-bold text-text-primary">{chapter.chapterName}</span>
+      </td>
+      <td className="px-4 py-3">
+        <input
+          type="date"
+          aria-label={`Due date for ${chapter.chapterName}`}
+          value={dates.dueDate}
+          onChange={(event) => onDate(chapter, "dueDate", event.target.value)}
+          disabled={readOnly}
+          className={dateInputClassName}
+        />
+      </td>
+      <td className="px-4 py-3">
+        <input
+          type="date"
+          aria-label={`Test date for ${chapter.chapterName}`}
+          value={dates.testDate}
+          onChange={(event) => onDate(chapter, "testDate", event.target.value)}
+          disabled={readOnly}
+          className={dateInputClassName}
+        />
+      </td>
+      <td className="px-4 py-3">
+        {dated ? <Badge variant="info">Dated</Badge> : <Badge>Not in plan</Badge>}
+      </td>
+    </tr>
+  );
+}
+
+function ChapterDatesFeedback({
+  errors,
+  warnings,
+  savedMessage,
+}: {
+  errors: CurriculumPlanError[];
+  warnings: CurriculumPlanWarning[];
+  savedMessage: string;
+}) {
+  return (
+    <>
       {errors.length > 0 ? (
         <div
           role="alert"
@@ -210,12 +284,7 @@ export default function CurriculumPlanChapterDates({ planId, chapters, readOnly 
         >
           <p className="font-bold">Chapter dates were not saved.</p>
           <ul className="mt-2 list-disc space-y-1 pl-5">
-            {errors.map((error) => (
-              <li key={`${error.chapterId ?? error.field}-${error.message}`}>
-                {error.chapterName ? `${error.chapterName}: ` : ""}
-                {error.message}
-              </li>
-            ))}
+            <PlanErrorItems errors={errors} />
           </ul>
         </div>
       ) : null}
@@ -238,11 +307,6 @@ export default function CurriculumPlanChapterDates({ planId, chapters, readOnly 
           {savedMessage}
         </p>
       ) : null}
-      {chapters.length > 0 ? (
-        <Button type="submit" disabled={readOnly || saving}>
-          Save Chapter dates
-        </Button>
-      ) : null}
-    </form>
+    </>
   );
 }

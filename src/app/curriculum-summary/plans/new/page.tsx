@@ -1,22 +1,12 @@
-import { getServerSession } from "next-auth";
-import { redirect } from "next/navigation";
-
 import PageHeader from "@/components/PageHeader";
-import { authOptions } from "@/lib/auth";
 import { currentAcademicYearIST } from "@/lib/curriculum-plan-rules";
-import { requireCurriculumPlanAdmin } from "@/lib/curriculum-plans";
 import { checkCurriculumPlansSchema } from "@/lib/curriculum-schema";
 import CurriculumPlanMetadataForm from "../CurriculumPlanMetadataForm";
 import PlanSchemaUnavailable from "../PlanSchemaUnavailable";
+import { requirePlanAdminPage } from "../plan-page-access";
 
 export default async function NewCurriculumPlanPage() {
-  const session = await getServerSession(authOptions);
-  const access = await requireCurriculumPlanAdmin(session);
-
-  if (!access.ok) {
-    redirect(access.status === 401 ? "/" : "/dashboard");
-  }
-
+  const access = await requirePlanAdminPage();
   const schema = await checkCurriculumPlansSchema();
 
   return (
