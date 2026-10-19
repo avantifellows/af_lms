@@ -16,7 +16,7 @@ export interface CanonicalExamRecordInput {
   sessions_applied: number[] | null;
 }
 
-export interface CanonicalExamRecordsPayload {
+interface CanonicalExamRecordsPayload {
   exams: CanonicalExamRecordInput[];
   removed_record_ids: number[];
 }
@@ -62,6 +62,123 @@ function canonicalizeSessions(
   return { ok: true, sessions: (sessions as number[]).sort((a, b) => a - b) };
 }
 
+type ExamResult =
+  | { ok: true; exam: CanonicalExamRecordInput }
+  | { ok: false; error: string };
+
+/** One entry of `exams`, against the exam the picker says it is. */
+function canonicalizeExam(raw: unknown, exam: ExamOption): ExamResult {
+  const entry = raw as Record<string, unknown>;
+
+  const applicationNumber = trimmed(entry.application_number);
+  if (!applicationNumber) {
+    return { ok: false, error: `Application number is required for ${exam.name}` };
+  }
+  if (applicationNumber.length > APPLICATION_NUMBER_MAX_LENGTH) {
+    return { ok: false, error: `Application number for ${exam.name} is too long` };
+  }
+
+  const password = trimmed(entry.application_password);
+  if (password.length > APPLICATION_PASSWORD_MAX_LENGTH) {
+    return { ok: false, error: `Application password for ${exam.name} is too long` };
+  }
+
+  const sessions = canonicalizeSessions(entry.sessions_applied, exam.name);
+  if (!sessions.ok) return { ok: false, error: sessions.error };
+
+  return {
+    ok: true,
+    exam: {
+      exam_id: exam.id,
+      exam_name: exam.name,
+      application_number: applicationNumber,
+      application_password: password || null,
+      sessions_applied: sessions.sessions,
+    },
+  };
+}
+
+/** The exam each entry names, refused unless the picker offers it. */
+function resolveExam(
+  raw: unknown,
+  examsById: Map<number, ExamOption>,
+): { ok: true; exam: ExamOption } | { ok: false; error: string } {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return { ok: false, error: "Each exam must be an object" };
+  }
+  const examId = (raw as Record<string, unknown>).exam_id;
+  if (!isPositiveInteger(examId)) return { ok: false, error: "exam_id is not valid" };
+  const exam = examsById.get(examId);
+  if (!exam) {
+    return { ok: false, error: "That exam cannot be recorded against a Student" };
+  }
+  return { ok: true, exam };
+}
+
+function canonicalizeRemovedIds(
+  raw: unknown[],
+): { ok: true; ids: number[] } | { ok: false; error: string } {
+  const ids: number[] = [];
+  for (const id of raw) {
+    if (!isPositiveInteger(id)) {
+      return { ok: false, error: "removed_record_ids is not valid" };
+    }
+    if (!ids.includes(id)) ids.push(id);
+  }
+  return { ok: true, ids };
+}
+
+/** The two lists the body may carry, each optional but each a list if present. */
+function readLists(
+  input: unknown,
+): { ok: true; exams: unknown[]; removed: unknown[] } | { ok: false; error: string } {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return { ok: false, error: "Request body must be an object" };
+  }
+  const body = input as Record<string, unknown>;
+  const exams = body.exams ?? [];
+  if (!Array.isArray(exams)) return { ok: false, error: "exams must be a list" };
+  const removed = body.removed_record_ids ?? [];
+  if (!Array.isArray(removed)) {
+    return { ok: false, error: "removed_record_ids must be a list" };
+  }
+  return { ok: true, exams, removed };
+}
+
+/** The set of registrations to store: one per exam, one per application number. */
+function canonicalizeExams(
+  rawExams: unknown[],
+  examsById: Map<number, ExamOption>,
+): { ok: true; exams: CanonicalExamRecordInput[] } | { ok: false; error: string } {
+  const exams: CanonicalExamRecordInput[] = [];
+  const seenExamIds = new Set<number>();
+  // Application numbers are compared case-insensitively: the DB Service's
+  // create upserts on (student, application number), so two registrations that
+  // differ only in case would collide there rather than here.
+  const seenApplicationNumbers = new Set<string>();
+
+  for (const raw of rawExams) {
+    const resolved = resolveExam(raw, examsById);
+    if (!resolved.ok) return resolved;
+    const { exam } = resolved;
+    if (seenExamIds.has(exam.id)) {
+      return { ok: false, error: `${exam.name} is listed twice` };
+    }
+    seenExamIds.add(exam.id);
+
+    const canonical = canonicalizeExam(raw, exam);
+    if (!canonical.ok) return canonical;
+
+    const { application_number: number } = canonical.exam;
+    if (seenApplicationNumbers.has(number.toLowerCase())) {
+      return { ok: false, error: `Application number ${number} is used for two exams` };
+    }
+    seenApplicationNumbers.add(number.toLowerCase());
+    exams.push(canonical.exam);
+  }
+  return { ok: true, exams };
+}
+
 /**
  * Turn the request body into the exact set of registrations to store.
  *
@@ -73,74 +190,18 @@ export function canonicalizeExamRecordsPayload(
   input: unknown,
   examOptions: ExamOption[],
 ): PayloadResult {
-  if (!input || typeof input !== "object" || Array.isArray(input)) {
-    return fail("Request body must be an object");
-  }
-  const body = input as Record<string, unknown>;
-  const rawExams = body.exams;
-  if (rawExams !== undefined && !Array.isArray(rawExams)) {
-    return fail("exams must be a list");
-  }
-  const rawRemoved = body.removed_record_ids;
-  if (rawRemoved !== undefined && !Array.isArray(rawRemoved)) {
-    return fail("removed_record_ids must be a list");
-  }
+  const lists = readLists(input);
+  if (!lists.ok) return fail(lists.error);
 
   const examsById = new Map(examOptions.map((exam) => [exam.id, exam]));
-  const exams: CanonicalExamRecordInput[] = [];
-  const seenExamIds = new Set<number>();
-  // Application numbers are compared case-insensitively: the DB Service's
-  // create upserts on (student, application number), so two registrations that
-  // differ only in case would collide there rather than here.
-  const seenApplicationNumbers = new Set<string>();
+  const exams = canonicalizeExams(lists.exams, examsById);
+  if (!exams.ok) return fail(exams.error);
 
-  for (const raw of rawExams ?? []) {
-    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-      return fail("Each exam must be an object");
-    }
-    const entry = raw as Record<string, unknown>;
-    const examId = entry.exam_id;
-    if (!isPositiveInteger(examId)) return fail("exam_id is not valid");
-    const exam = examsById.get(examId);
-    if (!exam) return fail("That exam cannot be recorded against a Student");
-    if (seenExamIds.has(examId)) return fail(`${exam.name} is listed twice`);
-    seenExamIds.add(examId);
+  const removed = canonicalizeRemovedIds(lists.removed);
+  if (!removed.ok) return fail(removed.error);
 
-    const applicationNumber = trimmed(entry.application_number);
-    if (!applicationNumber) {
-      return fail(`Application number is required for ${exam.name}`);
-    }
-    if (applicationNumber.length > APPLICATION_NUMBER_MAX_LENGTH) {
-      return fail(`Application number for ${exam.name} is too long`);
-    }
-    const applicationKey = applicationNumber.toLowerCase();
-    if (seenApplicationNumbers.has(applicationKey)) {
-      return fail(`Application number ${applicationNumber} is used for two exams`);
-    }
-    seenApplicationNumbers.add(applicationKey);
-
-    const password = trimmed(entry.application_password);
-    if (password.length > APPLICATION_PASSWORD_MAX_LENGTH) {
-      return fail(`Application password for ${exam.name} is too long`);
-    }
-
-    const sessions = canonicalizeSessions(entry.sessions_applied, exam.name);
-    if (!sessions.ok) return fail(sessions.error);
-
-    exams.push({
-      exam_id: examId,
-      exam_name: exam.name,
-      application_number: applicationNumber,
-      application_password: password || null,
-      sessions_applied: sessions.sessions,
-    });
-  }
-
-  const removed: number[] = [];
-  for (const id of rawRemoved ?? []) {
-    if (!isPositiveInteger(id)) return fail("removed_record_ids is not valid");
-    if (!removed.includes(id)) removed.push(id);
-  }
-
-  return { ok: true, payload: { exams, removed_record_ids: removed } };
+  return {
+    ok: true,
+    payload: { exams: exams.exams, removed_record_ids: removed.ids },
+  };
 }

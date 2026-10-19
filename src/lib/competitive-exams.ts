@@ -49,10 +49,6 @@ const EXAM_NAME_ORDER = new Map<string, number>(
   COMPETITIVE_EXAM_NAMES.map((name, index) => [name, index]),
 );
 
-export function isCompetitiveExamName(value: unknown): value is CompetitiveExamName {
-  return typeof value === "string" && EXAM_NAME_ORDER.has(value);
-}
-
 export function compareExamNames(a: string, b: string): number {
   const rankA = EXAM_NAME_ORDER.get(a) ?? Number.MAX_SAFE_INTEGER;
   const rankB = EXAM_NAME_ORDER.get(b) ?? Number.MAX_SAFE_INTEGER;
@@ -87,10 +83,6 @@ const EXAM_SESSIONS: Record<string, readonly number[]> = {
 
 export function examSessionsFor(examName: string): readonly number[] {
   return EXAM_SESSIONS[examName] ?? [];
-}
-
-export function hasExamSessions(examName: string): boolean {
-  return examSessionsFor(examName).length > 0;
 }
 
 /** An exam a teacher can pick, as the `exam` table stores it. */

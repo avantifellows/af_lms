@@ -11,7 +11,7 @@ export interface ExamRecordWrite {
 }
 
 /** Thrown on a non-2xx from the DB Service; carries the upstream body. */
-export class DbServiceExamRecordError extends Error {
+class DbServiceExamRecordError extends Error {
   readonly status: number;
   readonly body: string;
   constructor(message: string, status: number, body: string) {

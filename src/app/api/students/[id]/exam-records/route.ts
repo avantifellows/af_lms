@@ -12,7 +12,10 @@ import {
   updateExamRecord,
   type ExamRecordWrite,
 } from "@/lib/db-service-exam-records";
-import { canonicalizeExamRecordsPayload } from "@/lib/exam-records-payload";
+import {
+  canonicalizeExamRecordsPayload,
+  type CanonicalExamRecordInput,
+} from "@/lib/exam-records-payload";
 import type { StudentExamRecord } from "@/lib/competitive-exams";
 
 // The Exams tab of Edit Student. Both verbs require edit rights on the
@@ -88,6 +91,87 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+interface WriteOutcome {
+  attempted: number;
+  failed: number;
+  warnings: string[];
+}
+
+/**
+ * Delete the removals first: a registration moved from one exam to another
+ * keeps its application number, and the DB Service's create upserts on that
+ * number, so the old row has to be gone before the new one is written.
+ */
+async function applyRemovals(
+  recordIds: number[],
+  existingById: Map<number, StudentExamRecord>,
+  existingByExam: Map<number, StudentExamRecord>,
+  outcome: WriteOutcome,
+): Promise<void> {
+  for (const recordId of recordIds) {
+    outcome.attempted += 1;
+    try {
+      await deleteExamRecord(recordId);
+      const record = existingById.get(recordId);
+      if (record) existingByExam.delete(record.exam_id);
+    } catch (error) {
+      outcome.failed += 1;
+      const name = existingById.get(recordId)?.exam_name ?? `record ${recordId}`;
+      outcome.warnings.push(`Could not remove ${name}: ${errorText(error)}`);
+    }
+  }
+}
+
+/**
+ * An application number the Student already carries on an exam that is staying
+ * put would be hijacked by the DB Service's upsert, so the whole save is
+ * refused rather than another registration silently moving.
+ */
+function clashingApplicationNumber(
+  exams: CanonicalExamRecordInput[],
+  kept: Iterable<StudentExamRecord>,
+): string | null {
+  const keptNumbers = new Map<string, string>();
+  for (const record of kept) {
+    if (!record.application_number) continue;
+    keptNumbers.set(record.application_number.toLowerCase(), record.exam_name);
+  }
+  for (const exam of exams) {
+    const clash = keptNumbers.get(exam.application_number.toLowerCase());
+    if (clash && clash !== exam.exam_name) {
+      return `Application number ${exam.application_number} is already recorded for ${clash}`;
+    }
+  }
+  return null;
+}
+
+async function applyUpserts(
+  studentId: number,
+  exams: CanonicalExamRecordInput[],
+  existingByExam: Map<number, StudentExamRecord>,
+  outcome: WriteOutcome,
+): Promise<void> {
+  for (const exam of exams) {
+    const write: ExamRecordWrite = {
+      student_id: studentId,
+      exam_id: exam.exam_id,
+      application_number: exam.application_number,
+      application_password: exam.application_password,
+      sessions_applied: exam.sessions_applied,
+    };
+    const current = existingByExam.get(exam.exam_id);
+    if (current && unchanged(current, write)) continue;
+    outcome.attempted += 1;
+    try {
+      if (current) await updateExamRecord(current.id, write);
+      else await createExamRecord(write);
+    } catch (error) {
+      outcome.failed += 1;
+      outcome.warnings.push(`Could not save ${exam.exam_name}: ${errorText(error)}`);
+    }
+  }
+}
+
 export async function PUT(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -114,77 +198,29 @@ export async function PUT(
     const existing = await listStudentExamRecords(studentId);
     const existingById = new Map(existing.map((record) => [record.id, record]));
     const existingByExam = new Map(existing.map((record) => [record.exam_id, record]));
+    const outcome: WriteOutcome = { attempted: 0, failed: 0, warnings: [] };
 
-    // Removals run first: a registration moved from one exam to another keeps
-    // its application number, and the DB Service's create upserts on that
-    // number, so the old row has to be gone before the new one is written.
-    const removedIds = parsed.payload.removed_record_ids.filter((recordId) =>
-      existingById.has(recordId),
+    await applyRemovals(
+      parsed.payload.removed_record_ids.filter((recordId) => existingById.has(recordId)),
+      existingById,
+      existingByExam,
+      outcome,
     );
-    const warnings: string[] = [];
-    let attempted = 0;
-    let failed = 0;
 
-    for (const recordId of removedIds) {
-      attempted += 1;
-      try {
-        await deleteExamRecord(recordId);
-        const record = existingById.get(recordId);
-        if (record) existingByExam.delete(record.exam_id);
-      } catch (error) {
-        failed += 1;
-        const name = existingById.get(recordId)?.exam_name ?? `record ${recordId}`;
-        warnings.push(`Could not remove ${name}: ${errorText(error)}`);
-      }
-    }
+    const clash = clashingApplicationNumber(parsed.payload.exams, existingByExam.values());
+    if (clash) return NextResponse.json({ error: clash }, { status: 400 });
 
-    // An application number the Student already carries on an exam that is
-    // staying put would be hijacked by the DB Service's upsert, so refuse the
-    // whole save rather than silently moving the other registration.
-    const keptNumbers = new Map<string, string>();
-    for (const record of existingByExam.values()) {
-      if (!record.application_number) continue;
-      keptNumbers.set(record.application_number.toLowerCase(), record.exam_name);
-    }
-    for (const exam of parsed.payload.exams) {
-      const clash = keptNumbers.get(exam.application_number.toLowerCase());
-      if (clash && clash !== exam.exam_name) {
-        return NextResponse.json(
-          {
-            error: `Application number ${exam.application_number} is already recorded for ${clash}`,
-          },
-          { status: 400 },
-        );
-      }
-    }
-
-    for (const exam of parsed.payload.exams) {
-      const write: ExamRecordWrite = {
-        student_id: studentId,
-        exam_id: exam.exam_id,
-        application_number: exam.application_number,
-        application_password: exam.application_password,
-        sessions_applied: exam.sessions_applied,
-      };
-      const current = existingByExam.get(exam.exam_id);
-      if (current && unchanged(current, write)) continue;
-      attempted += 1;
-      try {
-        if (current) await updateExamRecord(current.id, write);
-        else await createExamRecord(write);
-      } catch (error) {
-        failed += 1;
-        warnings.push(`Could not save ${exam.exam_name}: ${errorText(error)}`);
-      }
-    }
+    await applyUpserts(studentId, parsed.payload.exams, existingByExam, outcome);
 
     // Every call failing is a failed save, not a partial one.
-    if (attempted > 0 && failed === attempted) {
-      return NextResponse.json({ error: warnings.join("; ") }, { status: 502 });
+    if (outcome.attempted > 0 && outcome.failed === outcome.attempted) {
+      return NextResponse.json({ error: outcome.warnings.join("; ") }, { status: 502 });
     }
 
     const records = await listStudentExamRecords(studentId);
-    return NextResponse.json(warnings.length ? { records, warnings } : { records });
+    return NextResponse.json(
+      outcome.warnings.length ? { records, warnings: outcome.warnings } : { records },
+    );
   } catch (error) {
     console.error("Error saving student exam records:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
