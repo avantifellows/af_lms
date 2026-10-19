@@ -27,6 +27,7 @@ import {
   primaryExamTrackForChapter,
   subjectGroupProgress,
   subjectGroupsForClass,
+  subjectGroupsForSubject,
   SUBJECT_GROUPS,
   type BehindPillTone,
   type ChapterStatus,
@@ -891,10 +892,8 @@ export interface ChapterTimeline {
   // no-content and configuration-error classes.
   chapters: ChapterTimelineChapter[];
   header: {
-    due: number;
-    done: number;
-    syllabusDone: number;
-    syllabusTotal: number;
+    // PCM / PCB syllabus status for the groups the class's tracks take, in SUBJECT_GROUPS order.
+    subjectGroups: ChapterTimelineGroupStatus[];
     testsOverdue: number;
     // Σ over the class's Chapters: hours taught in the window and prescribed time.
     taughtMinutes: number;
@@ -902,6 +901,17 @@ export interface ChapterTimeline {
     cancellations: number;
     doubtSolvingMinutes: number;
   };
+}
+
+// One subject group's syllabus status on the timeline header (curriculum owner decision Q24).
+export interface ChapterTimelineGroupStatus {
+  group: SubjectGroup;
+  // The Summary row's PCM / PCB Behind cell (due, done, behind, tone, label); null without an
+  // Active plan, since nothing is due.
+  progress: CurriculumSummarySubjectProgress | null;
+  // The group's Chapters for the class completed within [1 Apr, as-of], out of all of them.
+  syllabusDone: number;
+  syllabusTotal: number;
 }
 
 export type ChapterTimelineResult =
@@ -951,7 +961,7 @@ export async function getChapterTimeline(
       row,
       subjects: timelineSubjects(row, chapters, params.asOf),
       chapters: timelineChapters,
-      header: timelineHeader(row, chapters, timelineChapters, params.asOf),
+      header: timelineHeader(row, chapters, timelineChapters, classTracks),
     },
   };
 }
@@ -1004,16 +1014,21 @@ function timelineHeader(
   row: CurriculumSummaryRow,
   chapters: SummaryChapter[],
   timelineChapters: ChapterTimelineChapter[],
-  asOf: string
+  classTracks: ExamTrack[]
 ): ChapterTimeline["header"] {
-  const progress = chapterProgress(chapters, asOf);
   const total = (value: (chapter: ChapterTimelineChapter) => number) =>
     timelineChapters.reduce((sum, chapter) => sum + value(chapter), 0);
   return {
-    due: progress.due,
-    done: progress.done,
-    syllabusDone: chapters.filter((chapter) => chapter.completedOn !== null).length,
-    syllabusTotal: chapters.length,
+    subjectGroups: subjectGroupsForClass(classTracks).map((group) => {
+      const groupChapters = chapters.filter((chapter) => subjectGroupsForSubject(chapter.subject).includes(group));
+      return {
+        group,
+        // The Summary row's own cell, so the timeline and the Summary always agree.
+        progress: row.kind === "plan" ? (row.subjectGroups?.[group] ?? null) : null,
+        syllabusDone: groupChapters.filter((chapter) => chapter.completedOn !== null).length,
+        syllabusTotal: groupChapters.length,
+      };
+    }),
     testsOverdue: row.testsOverdue,
     taughtMinutes: total((chapter) => chapter.taughtMinutes),
     prescribedMinutes: total((chapter) => chapter.prescribedMinutes),

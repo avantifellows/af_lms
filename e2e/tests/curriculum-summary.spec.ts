@@ -799,6 +799,28 @@ function timelineRow(page: Page, chapter: string) {
   return page.locator(`[data-timeline-row][data-chapter="${chapter}"]`);
 }
 
+// A PCM / PCB syllabus status card (Q24): the pill label and tone, then "done/due due done" and
+// "done/total syllabus done"; without an Active plan, "No Active plan" and the syllabus line only.
+async function expectGroupStatus(
+  page: Page,
+  group: "PCM" | "PCB",
+  status: { label: string; tone?: "green" | "amber" | "red"; dueDone?: string; syllabusDone: string }
+) {
+  const card = page.getByTestId(`timeline-${group.toLowerCase()}-status`);
+  await expect(card.locator("[data-status-label]")).toHaveText(status.label);
+  if (status.tone) await expect(card.locator("[data-status-label]")).toHaveAttribute("data-tone", status.tone);
+  else await expect(card.locator("[data-tone]")).toHaveCount(0);
+  if (status.dueDone) await expect(card.locator("[data-due-done]")).toHaveText(status.dueDone);
+  else await expect(card.locator("[data-due-done]")).toHaveCount(0);
+  await expect(card.locator("[data-syllabus-done]")).toHaveText(status.syllabusDone);
+}
+
+// The hours card: hours taught in the window over "of N prescribed".
+async function expectHours(page: Page, taught: string, prescribed: string) {
+  await expect(page.getByTestId("timeline-hours")).toHaveText(taught);
+  await expect(page.getByTestId("timeline-prescribed")).toHaveText(`of ${prescribed} prescribed`);
+}
+
 test.describe("Curriculum Summary chapter timeline", () => {
   test("clicking a Summary row opens the class's timeline for the same Grade and as-of date", async ({
     browser,
@@ -1002,10 +1024,24 @@ test.describe("Curriculum Summary chapter timeline", () => {
     const page = await summaryPmPage(browser);
     await page.goto(`/curriculum-summary/centres/9000812?grade=11&as_of=${AS_OF}`);
 
-    // Due: Cells, Alpha, Plants, Bonding, Beta, Animals, Genetics; done: Cells, Alpha, Beta.
-    await expect(page.getByTestId("timeline-due-done")).toHaveText("3/7");
-    // Completed in window: Cells, Alpha, Beta, Thermo of the class's 10 in-syllabus Chapters.
-    await expect(page.getByTestId("timeline-syllabus-done")).toHaveText("4/10");
+    // PCM (Physics, Chemistry): due Alpha, Bonding, Beta, of which Alpha and Beta are done;
+    // completed in window Alpha, Beta, Thermo of Alpha, Beta, Bonding, Thermo, Organic.
+    await expectGroupStatus(page, "PCM", {
+      label: "1 behind",
+      tone: "amber",
+      dueDone: "2/3 due done",
+      syllabusDone: "3/5 syllabus done",
+    });
+    // PCB (Physics, Chemistry, Biology): due Cells, Alpha, Plants, Bonding, Beta, Animals,
+    // Genetics, done Cells, Alpha, Beta; completed Cells, Alpha, Beta, Thermo of all 10 Chapters.
+    await expectGroupStatus(page, "PCB", {
+      label: "4 behind",
+      tone: "red",
+      dueDone: "3/7 due done",
+      syllabusDone: "4/10 syllabus done",
+    });
+    await expect(page.getByText("Due done", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("Syllabus done", { exact: true })).toHaveCount(0);
     await expect(page.getByTestId("timeline-tests-overdue")).toHaveText("2");
 
     // Same text as the Anand Shared Summary pills; no Maths content, so no Maths tab.
@@ -1027,7 +1063,64 @@ test.describe("Curriculum Summary chapter timeline", () => {
       /Summary Bio Ecology/,
     ]);
     // The header still covers the whole class.
-    await expect(page.getByTestId("timeline-due-done")).toHaveText("3/7");
+    await expectGroupStatus(page, "PCB", {
+      label: "4 behind",
+      tone: "red",
+      dueDone: "3/7 due done",
+      syllabusDone: "4/10 syllabus done",
+    });
+    await page.context().close();
+  });
+
+  test("PCM and PCB syllabus status match the Summary row; a class shows only its tracks' groups", async ({
+    browser,
+  }) => {
+    const page = await summaryPmPage(browser);
+    // The Summary row's PCM Behind / PCB Behind for Anand Shared on the same as-of date...
+    await page.goto(`/curriculum-summary?as_of=${AS_OF}`);
+    await expectGroup(page, "Summary E2E Anand Shared", "PCM", "1 behind", "2/3 done", "amber");
+    await expectGroup(page, "Summary E2E Anand Shared", "PCB", "4 behind", "3/7 done", "red");
+    // ...are the timeline's cards, which lead one row of six.
+    await page.getByRole("link", { name: "Summary E2E Anand Shared" }).click();
+    await expect(page.getByTestId("timeline-pcm-status").locator("[data-status-label]")).toHaveText("1 behind");
+    await expect(page.getByTestId("timeline-pcm-status").locator("[data-due-done]")).toHaveText("2/3 due done");
+    await expect(page.getByTestId("timeline-pcb-status").locator("[data-status-label]")).toHaveText("4 behind");
+    await expect(page.getByTestId("timeline-pcb-status").locator("[data-due-done]")).toHaveText("3/7 due done");
+    await page.setViewportSize({ width: 1280, height: 900 });
+    const cardTops = await page
+      .getByTestId("timeline-pcm-status")
+      .locator("xpath=..")
+      .locator(":scope > *")
+      .evaluateAll((cards) => cards.map((card) => Math.round(card.getBoundingClientRect().top)));
+    expect(cardTops).toHaveLength(6);
+    expect(new Set(cardTops).size).toBe(1);
+
+    // JEE Main only: PCM alone. Anand Main has Alpha (done 20 Jun) and Beta (due 31 Jul, its
+    // only completion last academic year), both Physics.
+    await page.goto(`/curriculum-summary/centres/9000811?grade=11&as_of=${AS_OF}`);
+    await expectGroupStatus(page, "PCM", {
+      label: "1 behind",
+      tone: "amber",
+      dueDone: "1/2 due done",
+      syllabusDone: "1/2 syllabus done",
+    });
+    await expect(page.getByTestId("timeline-pcb-status")).toHaveCount(0);
+
+    // NEET only: PCB alone. Bhuj Neet has done all six due Chapters; Thermo (due 30 Sep), Organic
+    // and Ecology are open, so 6 of its 9 Chapters are done.
+    await page.goto(`/curriculum-summary/centres/9000821?grade=11&as_of=${AS_OF}`);
+    await expectGroupStatus(page, "PCB", {
+      label: "On track",
+      tone: "green",
+      dueDone: "6/6 due done",
+      syllabusDone: "6/9 syllabus done",
+    });
+    await expect(page.getByTestId("timeline-pcm-status")).toHaveCount(0);
+
+    // Surat Draft (JEE Main) has only a Draft plan: no due line, and no completions.
+    await page.goto(`/curriculum-summary/centres/9000832?grade=11&as_of=${AS_OF}`);
+    await expectGroupStatus(page, "PCM", { label: "No Active plan", syllabusDone: "0/2 syllabus done" });
+    await expect(page.getByTestId("timeline-pcb-status")).toHaveCount(0);
     await page.context().close();
   });
 
@@ -1138,7 +1231,8 @@ test.describe("Curriculum Summary chapter timeline", () => {
       await page.goto(`/curriculum-summary/centres/${centreId}?grade=11&as_of=${AS_OF}`);
       await expect(page.getByTestId("timeline-explanation")).toHaveText(message);
       await expect(page.locator("[data-timeline-row]")).toHaveCount(0);
-      await expect(page.getByTestId("timeline-due-done")).toHaveCount(0);
+      await expect(page.getByTestId("timeline-pcm-status")).toHaveCount(0);
+      await expect(page.getByTestId("timeline-pcb-status")).toHaveCount(0);
       await expect(page.locator("[data-subject-tab]")).toHaveCount(0);
     }
     await page.context().close();
@@ -1172,7 +1266,7 @@ test.describe("Curriculum Summary chapter timeline hours", () => {
       await expect(timelineRow(page, "Summary Bio Plants").locator("[data-hours]")).toHaveText(plants);
       await expect(timelineRow(page, "Fixture Beta Physics").locator("[data-hours]")).toHaveText(beta);
       // Prescribed: Alpha 1h 30m, Beta 2h and eight NEET-only Chapters at 1h each = 11h 30m.
-      await expect(page.getByTestId("timeline-hours")).toHaveText(`${header} / 11h 30m`);
+      await expectHours(page, header, "11h 30m");
     }
     await page.context().close();
   });
@@ -1214,7 +1308,7 @@ test.describe("Curriculum Summary chapter timeline hours", () => {
     // Plants was cancelled and is still Overdue; Alpha had doubt solving and is still Done.
     await expect(timelineRow(page, "Summary Bio Plants").locator("[data-status]")).toHaveText("Overdue 36 days");
     await expect(timelineRow(page, "Fixture Alpha Physics").locator("[data-status]")).toHaveText("Done");
-    await expect(page.getByTestId("timeline-due-done")).toHaveText("3/7");
+    await expect(page.getByTestId("timeline-pcb-status").locator("[data-due-done]")).toHaveText("3/7 due done");
     await page.context().close();
   });
 
@@ -1228,9 +1322,9 @@ test.describe("Curriculum Summary chapter timeline hours", () => {
 
     // [window, header hours, cancelled, doubt solving, Alpha hours, Alpha cancelled, Alpha doubt].
     const expected: [string, string, string, string, string, string, string, string][] = [
-      ["Last 30 days", "30d", "3h 30m / 11h 30m", "2", "1h 15m", "2h", "1", "30m"],
-      ["Last 7 days", "7d", "1h 30m / 11h 30m", "1", "45m", "0h", "0", "0h"],
-      ["This AY", "", "4h 30m / 11h 30m", "3", "2h 15m", "3h", "2", "1h 30m"],
+      ["Last 30 days", "30d", "3h 30m", "2", "1h 15m", "2h", "1", "30m"],
+      ["Last 7 days", "7d", "1h 30m", "1", "45m", "0h", "0", "0h"],
+      ["This AY", "", "4h 30m", "3", "2h 15m", "3h", "2", "1h 30m"],
     ];
     for (const [label, param, hours, cancelled, doubt, alphaHours, alphaCancelled, alphaDoubt] of expected) {
       await window.getByRole("link", { name: label }).click();
@@ -1242,7 +1336,8 @@ test.describe("Curriculum Summary chapter timeline hours", () => {
         await expect(page).toHaveURL(`/curriculum-summary/centres/9000812?grade=11&as_of=${AS_OF}`);
       }
       await expect(window.getByRole("link", { name: label })).toHaveAttribute("aria-current", "page");
-      await expect(page.getByTestId("timeline-hours")).toHaveText(hours);
+      await expectHours(page, hours, "11h 30m");
+      await expect(page.getByText(`Hours taught · ${label}`, { exact: true })).toBeVisible();
       await expect(page.getByTestId("timeline-cancellations")).toHaveText(cancelled);
       await expect(page.getByTestId("timeline-doubt-solving")).toHaveText(doubt);
       const alpha = timelineRow(page, "Fixture Alpha Physics");
@@ -1253,7 +1348,7 @@ test.describe("Curriculum Summary chapter timeline hours", () => {
       await expect(alpha.locator("[data-status]")).toHaveText("Done");
       await expect(alpha.locator("[data-test-status]")).toHaveText("Conducted 2 Jul 2026");
       await expect(timelineRow(page, "Summary Bio Plants").locator("[data-status]")).toHaveText("Overdue 36 days");
-      await expect(page.getByTestId("timeline-due-done")).toHaveText("3/7");
+      await expect(page.getByTestId("timeline-pcb-status").locator("[data-due-done]")).toHaveText("3/7 due done");
       await expect(page.getByTestId("timeline-tests-overdue")).toHaveText("2");
     }
 
@@ -1263,14 +1358,14 @@ test.describe("Curriculum Summary chapter timeline hours", () => {
     await page.locator('[data-subject-tab="Biology"]').click();
     await expect(page).toHaveURL(/hours=7d/);
     await expect(page).toHaveURL(/subject=Biology/);
-    await expect(page.getByTestId("timeline-hours")).toHaveText("1h 30m / 11h 30m");
+    await expectHours(page, "1h 30m", "11h 30m");
 
     // On 20 Aug the last 7 days are 14–20 Aug: only the 16 Aug log (30 min of Cells).
     await page.getByLabel("As of").fill("2026-08-20");
     await page.getByRole("button", { name: "Apply" }).click();
     await expect(page).toHaveURL(/hours=7d/);
     await expect(page).toHaveURL(/as_of=2026-08-20/);
-    await expect(page.getByTestId("timeline-hours")).toHaveText("30m / 11h 30m");
+    await expectHours(page, "30m", "11h 30m");
 
     await page.context().close();
   });
@@ -1284,7 +1379,7 @@ test.describe("Curriculum Summary chapter timeline hours", () => {
     await expect(cells.locator("[data-hours]")).toHaveText("50m");
     await expect(cells.locator("[data-cancellations]")).toHaveText("1");
     await expect(cells.locator("[data-doubt-solving]")).toHaveText("15m");
-    await expect(page.getByTestId("timeline-hours")).toHaveText("50m / 11h 30m");
+    await expectHours(page, "50m", "11h 30m");
     await page.context().close();
   });
 });
@@ -1325,7 +1420,19 @@ test.describe("Curriculum Summary shared JEE Advanced + NEET class", () => {
     await expect(timelineRow(adminPage, "Summary Advanced Optics").locator("[data-prescribed]")).toHaveText("2h");
     // Biology has no JEE Advanced config.
     await expect(timelineRow(adminPage, "Fixture Biology").locator("[data-prescribed]")).toHaveText("3h");
-    await expect(adminPage.getByTestId("timeline-due-done")).toHaveText("1/2");
+    // The same PCM / PCB numbers as the class's Summary row; Optics is the only PCM Chapter.
+    await expectGroupStatus(adminPage, "PCM", {
+      label: "On track",
+      tone: "green",
+      dueDone: "1/1 due done",
+      syllabusDone: "1/1 syllabus done",
+    });
+    await expectGroupStatus(adminPage, "PCB", {
+      label: "1 behind",
+      tone: "amber",
+      dueDone: "1/2 due done",
+      syllabusDone: "1/2 syllabus done",
+    });
   });
 });
 

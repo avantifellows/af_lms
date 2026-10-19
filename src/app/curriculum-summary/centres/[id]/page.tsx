@@ -20,6 +20,7 @@ import {
   parseChapterTimelineSort,
   sortTimelineChapters,
   type ChapterTimeline,
+  type ChapterTimelineGroupStatus,
   type ChapterTimelineResult,
   type ChapterTimelineSort,
   type ChapterTimelineSortKey,
@@ -32,6 +33,9 @@ import {
   CELL_CLASS_NAME,
   COMPACT_CELL_CLASS_NAME,
   COMPACT_COLUMN_CLASS_NAME,
+  HEADER_DETAIL_CLASS_NAME,
+  HEADER_GRID_CLASS_NAME,
+  HEADER_LABEL_CLASS_NAME,
   HeaderNumber,
   HiddenField,
   NUMBER_CELL_CLASS_NAME,
@@ -42,6 +46,8 @@ import {
   SortableTableHead,
   sortableHeaders,
   TONE_BADGE_VARIANTS,
+  TONE_PILL_CLASS_NAMES,
+  TONE_TEXT_CLASS_NAMES,
   type SortableColumn,
 } from "../../summary-ui";
 import UrlFilterForm from "../../UrlFilterForm";
@@ -241,31 +247,33 @@ function TimelineView({
   );
 }
 
+// From `xl` every header card sits on one row: 6 with PCM and PCB, 5 with one group.
+const XL_HEADER_COLUMNS: Record<number, string> = {
+  4: "xl:grid-cols-4",
+  5: "xl:grid-cols-5",
+  6: "xl:grid-cols-6",
+};
+
 function TimelineHeader({ timeline }: { timeline: ChapterTimeline }) {
   const { header } = timeline;
-  // Due done and Tests overdue need plan dates.
+  // Tests overdue needs plan dates.
   const measured = timeline.row.kind === "plan";
+  const cards = header.subjectGroups.length + 4;
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:max-w-3xl">
-      <HeaderNumber
-        label="Due done"
-        value={measured ? `${header.done}/${header.due}` : "—"}
-        testId="timeline-due-done"
-      />
-      <HeaderNumber
-        label="Syllabus done"
-        value={`${header.syllabusDone}/${header.syllabusTotal}`}
-        testId="timeline-syllabus-done"
-      />
+    <div className={`${HEADER_GRID_CLASS_NAME} ${XL_HEADER_COLUMNS[cards] ?? ""}`}>
+      {header.subjectGroups.map((status) => (
+        <SubjectGroupCard key={status.group} status={status} />
+      ))}
       <HeaderNumber
         label="Tests overdue"
         value={measured ? String(header.testsOverdue) : "—"}
         testId="timeline-tests-overdue"
       />
       <HeaderNumber
-        label={`Hours vs prescribed · ${HOURS_WINDOW_LABELS[timeline.hoursWindow]}`}
-        value={`${formatHours(header.taughtMinutes)} / ${formatHours(header.prescribedMinutes)}`}
+        label={`Hours taught · ${HOURS_WINDOW_LABELS[timeline.hoursWindow]}`}
+        value={formatHours(header.taughtMinutes)}
         testId="timeline-hours"
+        detail={{ text: `of ${formatHours(header.prescribedMinutes)} prescribed`, testId: "timeline-prescribed" }}
       />
       <HeaderNumber label="Classes cancelled" value={String(header.cancellations)} testId="timeline-cancellations" />
       <HeaderNumber
@@ -274,6 +282,49 @@ function TimelineHeader({ timeline }: { timeline: ChapterTimeline }) {
         testId="timeline-doubt-solving"
       />
     </div>
+  );
+}
+
+const chapters = (count: number) => (count === 1 ? "chapter" : "chapters");
+
+// PCM / PCB syllabus status (curriculum owner decision Q24, option A): the Summary's PCM / PCB
+// Behind pill, scaled up, over "done/due due done" and "done/total syllabus done". Without an
+// Active plan nothing is due, so only the syllabus line shows. Screen readers get one phrase.
+function SubjectGroupCard({ status }: { status: ChapterTimelineGroupStatus }) {
+  const { group, progress, syllabusDone, syllabusTotal } = status;
+  const label = `${group} syllabus status`;
+  const syllabus = `${syllabusDone} of ${syllabusTotal} ${chapters(syllabusTotal)} in the syllabus done`;
+  const phrase = progress
+    ? `${label}: ${progress.label}, ${progress.done} of ${progress.due} due ${chapters(progress.due)} done, ${syllabus}`
+    : `${label}: no Active plan, ${syllabus}`;
+  return (
+    <Card elevation="sm" data-testid={`timeline-${group.toLowerCase()}-status`} className="p-3 sm:p-4">
+      <span className={HEADER_LABEL_CLASS_NAME}>{label}</span>
+      <span className="sr-only">{phrase}</span>
+      <span aria-hidden="true" className="mt-1 block">
+        {progress ? (
+          <span
+            data-status-label
+            data-tone={progress.tone}
+            className={`inline-flex items-center whitespace-nowrap rounded-full px-3 py-0.5 text-xl font-bold ${TONE_PILL_CLASS_NAMES[progress.tone]}`}
+          >
+            {progress.label}
+          </span>
+        ) : (
+          <span data-status-label className="block whitespace-nowrap py-0.5 text-xl font-bold text-text-muted">
+            No Active plan
+          </span>
+        )}
+        {progress ? (
+          <span data-due-done className={`mt-1 ${HEADER_DETAIL_CLASS_NAME}`}>
+            {progress.done}/{progress.due} due done
+          </span>
+        ) : null}
+        <span data-syllabus-done className={`mt-0.5 ${HEADER_DETAIL_CLASS_NAME}`}>
+          {syllabusDone}/{syllabusTotal} syllabus done
+        </span>
+      </span>
+    </Card>
   );
 }
 
@@ -315,12 +366,7 @@ function SubjectTabLink({ tab, href, active }: { tab: SubjectTab; href: string; 
 type TabProgress = NonNullable<SubjectTab["progress"]>;
 
 // The selected tab is solid accent, so its badge is drawn on the card colour with the tone as
-// text; the tinted Badge backgrounds would vanish into the accent.
-const ACTIVE_TAB_BADGE_TEXT_CLASS_NAMES: Record<TabProgress["tone"], string> = {
-  green: "text-success",
-  amber: "text-warning-text",
-  red: "text-danger",
-};
+// text (TONE_TEXT_CLASS_NAMES); the tinted Badge backgrounds would vanish into the accent.
 
 function TabProgressBadge({ progress, active }: { progress: TabProgress; active: boolean }) {
   const text = `${progress.label} · ${progress.done}/${progress.due}`;
@@ -336,7 +382,7 @@ function TabProgressBadge({ progress, active }: { progress: TabProgress; active:
       data-tab-progress
       data-tone={progress.tone}
       className={`inline-flex items-center rounded-full bg-bg-card px-2.5 py-1 text-xs font-bold ${
-        ACTIVE_TAB_BADGE_TEXT_CLASS_NAMES[progress.tone]
+        TONE_TEXT_CLASS_NAMES[progress.tone]
       }`}
     >
       {text}

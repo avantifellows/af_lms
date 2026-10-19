@@ -1017,11 +1017,22 @@ describe("getChapterTimeline", () => {
       { subject: "Chemistry", progress: { due: 1, done: 1, behind: 0, tone: "green", label: "On track" } },
       { subject: "Biology", progress: { due: 1, done: 0, behind: 1, tone: "amber", label: "1 behind" } },
     ]);
+    // PCM (Physics, Chemistry): 1, 2, 3 due, 1 and 3 done; PCB adds Biology 4 (due) and 5.
     expect(timeline.header).toEqual({
-      due: 4,
-      done: 2,
-      syllabusDone: 2,
-      syllabusTotal: 5,
+      subjectGroups: [
+        {
+          group: "PCM",
+          progress: { due: 3, done: 2, behind: 1, tone: "amber", label: "1 behind" },
+          syllabusDone: 2,
+          syllabusTotal: 3,
+        },
+        {
+          group: "PCB",
+          progress: { due: 4, done: 2, behind: 2, tone: "amber", label: "2 behind" },
+          syllabusDone: 2,
+          syllabusTotal: 5,
+        },
+      ],
       testsOverdue: 2,
       taughtMinutes: 120,
       prescribedMinutes: 360,
@@ -1031,6 +1042,70 @@ describe("getChapterTimeline", () => {
     // Last 7 days to 15 Aug, for the class's tracks and Chapters.
     const activityCall = mockQuery.mock.calls.find(([sql]) => String(sql).includes(ACTIVITY_TABLE));
     expect(activityCall?.[1]).toEqual(["SC1", 2, 11, ["jee_main", "neet"], "2026-08-09", AS_OF, [1, 2, 3, 4, 5]]);
+  });
+
+  it("gives each header syllabus status the same PCM / PCB numbers as the class's Summary row", async () => {
+    // Maths counts only in PCM; another subject in neither group.
+    const chapters = [
+      ...PLAN_CHAPTERS,
+      chapter(6, { subject: "Mathematics", dueDate: "2026-07-01", tracks: ["jee_main"] }),
+      chapter(7, { subject: "Maths", dueDate: "2026-09-01", completedOn: "2026-08-01", tracks: ["jee_main"] }),
+      chapter(8, { subject: "English", dueDate: "2026-07-01", tracks: ["jee_main", "neet"] }),
+    ];
+    routeQueries({ summary: [raw(1, { chapters })], grades: [{ grade: 11 }] });
+
+    const summary = await getCurriculumSummary(ADMIN, query());
+    const result = await getChapterTimeline(ADMIN, 1, params);
+
+    if (!summary.ok || !result.ok) throw new Error("expected a Summary and a timeline");
+    const [row] = summary.rows;
+    const groups = result.timeline.header.subjectGroups;
+    expect(groups.map((status) => status.group)).toEqual(["PCM", "PCB"]);
+    expect(groups[0].progress).toEqual(row.subjectGroups?.PCM);
+    expect(groups[1].progress).toEqual(row.subjectGroups?.PCB);
+    expect(groups[0].progress).toEqual({ due: 4, done: 2, behind: 2, tone: "amber", label: "2 behind" });
+    // PCM: Chapters 1, 2, 3, 6, 7 with 1, 3 and 7 completed (7 early). PCB: 1–5, with 1 and 3.
+    expect(groups.map(({ syllabusDone, syllabusTotal }) => [syllabusDone, syllabusTotal])).toEqual([
+      [3, 5],
+      [2, 5],
+    ]);
+  });
+
+  it.each([
+    [["jee_main"], ["PCM"]],
+    [["jee_advanced"], ["PCM"]],
+    [["neet"], ["PCB"]],
+    [["neet", "jee_main"], ["PCM", "PCB"]],
+  ])("shows the syllabus status of the groups a %j class takes", async (mappedTracks, expected) => {
+    const chapters = PLAN_CHAPTERS.map((raw) => ({ ...raw, tracks: mappedTracks }));
+    routeQueries({ summary: [raw(1, { mapped_tracks: mappedTracks, chapters })], grades: [{ grade: 11 }] });
+
+    const result = await getChapterTimeline(ADMIN, 1, params);
+
+    if (!result.ok) throw new Error("expected a timeline");
+    expect(result.timeline.header.subjectGroups.map((status) => status.group)).toEqual(expected);
+  });
+
+  it("has no due progress without an Active plan, but still counts the syllabus", async () => {
+    routeQueries({ summary: [raw(1, { plan_status: "draft" })], grades: [{ grade: 11 }] });
+
+    const result = await getChapterTimeline(ADMIN, 1, params);
+
+    if (!result.ok) throw new Error("expected a timeline");
+    expect(result.timeline.row.kind).toBe("no_plan");
+    expect(result.timeline.header.subjectGroups).toEqual([
+      { group: "PCM", progress: null, syllabusDone: 2, syllabusTotal: 3 },
+      { group: "PCB", progress: null, syllabusDone: 2, syllabusTotal: 5 },
+    ]);
+  });
+
+  it("has no syllabus status for a class it can't measure", async () => {
+    routeQueries({ summary: [raw(1, SETUP_ERROR)], grades: [{ grade: 11 }] });
+
+    const result = await getChapterTimeline(ADMIN, 1, params);
+
+    if (!result.ok) throw new Error("expected a timeline");
+    expect(result.timeline.header.subjectGroups).toEqual([]);
   });
 
   it("measures a shared JEE Advanced + NEET class once, with JEE Advanced's prescribed time", async () => {

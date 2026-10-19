@@ -101,6 +101,19 @@ const CHAPTERS: ChapterTimelineChapter[] = [
   }),
 ];
 
+// PCM: Motion and Bonding, both due and done. PCB: Cells is due and open too.
+const PCM_ON_TRACK = { due: 2, done: 2, behind: 0, tone: "green", label: "On track" } as const;
+const PCB_BEHIND = { due: 3, done: 2, behind: 1, tone: "amber", label: "1 behind" } as const;
+
+type GroupStatus = ChapterTimeline["header"]["subjectGroups"][number];
+
+function withGroups(subjectGroups: GroupStatus[], row: Partial<ChapterTimeline["row"]> = {}): ChapterTimeline {
+  const base = timeline({}, row);
+  return { ...base, header: { ...base.header, subjectGroups } };
+}
+
+const groupCard = (group: string) => screen.getByTestId(`timeline-${group.toLowerCase()}-status`);
+
 function timeline(overrides: Partial<ChapterTimeline> = {}, row: Partial<ChapterTimeline["row"]> = {}): ChapterTimeline {
   return {
     grade: 11,
@@ -132,10 +145,10 @@ function timeline(overrides: Partial<ChapterTimeline> = {}, row: Partial<Chapter
     ],
     chapters: CHAPTERS,
     header: {
-      due: 3,
-      done: 2,
-      syllabusDone: 2,
-      syllabusTotal: 5,
+      subjectGroups: [
+        { group: "PCM", progress: PCM_ON_TRACK, syllabusDone: 2, syllabusTotal: 2 },
+        { group: "PCB", progress: PCB_BEHIND, syllabusDone: 2, syllabusTotal: 5 },
+      ],
       testsOverdue: 1,
       taughtMinutes: 450,
       prescribedMinutes: 600,
@@ -212,11 +225,10 @@ describe("Chapter timeline page", () => {
 
     expect(screen.getByText("Anand Shared")).toBeInTheDocument();
     expect(screen.getByText("JNV Anand · JNV Nodal · JEE Main + NEET · Grade 11")).toBeInTheDocument();
-    expect(screen.getByTestId("timeline-due-done")).toHaveTextContent("2/3");
-    expect(screen.getByTestId("timeline-syllabus-done")).toHaveTextContent("2/5");
     expect(screen.getByTestId("timeline-tests-overdue")).toHaveTextContent("1");
-    expect(screen.getByTestId("timeline-hours")).toHaveTextContent("7h 30m / 10h");
-    expect(screen.getByText("Hours vs prescribed · This AY")).toBeInTheDocument();
+    expect(screen.getByTestId("timeline-hours")).toHaveTextContent(/^7h 30m$/);
+    expect(screen.getByTestId("timeline-prescribed")).toHaveTextContent(/^of 10h prescribed$/);
+    expect(screen.getByText("Hours taught · This AY")).toBeInTheDocument();
     expect(screen.getByTestId("timeline-cancellations")).toHaveTextContent("5");
     expect(screen.getByTestId("timeline-doubt-solving")).toHaveTextContent("45m");
 
@@ -239,6 +251,112 @@ describe("Chapter timeline page", () => {
     expect(timelineRow("Motion").querySelector("[data-doubt-solving]")).toHaveTextContent("0h");
     expect(timelineRow("Genetics").querySelector("[data-hours]")).toHaveTextContent("0h");
     expect(timelineRow("Ecology")).toHaveTextContent("—");
+  });
+
+  it("shows PCM and PCB syllabus status cards for a shared class, all six cards on one row", async () => {
+    await renderPage();
+
+    const pcm = groupCard("PCM");
+    expect(pcm).toHaveTextContent("PCM syllabus status");
+    expect(pcm.querySelector("[data-status-label]")).toHaveTextContent("On track");
+    expect(pcm.querySelector("[data-status-label]")).toHaveAttribute("data-tone", "green");
+    expect(pcm.querySelector("[data-status-label]")).toHaveClass("bg-green-100", "text-green-800", "text-xl", "whitespace-nowrap");
+    expect(pcm.querySelector("[data-due-done]")).toHaveTextContent(/^2\/2 due done$/);
+    expect(pcm.querySelector("[data-syllabus-done]")).toHaveTextContent(/^2\/2 syllabus done$/);
+
+    const pcb = groupCard("PCB");
+    expect(pcb.querySelector("[data-status-label]")).toHaveTextContent("1 behind");
+    expect(pcb.querySelector("[data-status-label]")).toHaveClass("bg-warning-bg", "text-warning-text");
+    expect(pcb.querySelector("[data-due-done]")).toHaveTextContent(/^2\/3 due done$/);
+    expect(pcb.querySelector("[data-syllabus-done]")).toHaveTextContent(/^2\/5 syllabus done$/);
+
+    // The cards replace Due done and Syllabus done; PCM and PCB lead the one row of six.
+    expect(screen.queryByText("Due done")).not.toBeInTheDocument();
+    expect(screen.queryByText("Syllabus done")).not.toBeInTheDocument();
+    const grid = pcm.parentElement as HTMLElement;
+    expect(grid).toHaveClass("xl:grid-cols-6");
+    expect([...grid.children].map((card) => card.querySelector("span")?.textContent)).toEqual([
+      "PCM syllabus status",
+      "PCB syllabus status",
+      "Tests overdue",
+      "Hours taught · This AY",
+      "Classes cancelled",
+      "Doubt solving",
+    ]);
+  });
+
+  it("gives screen readers one phrase per card, singular where it is one Chapter", async () => {
+    mockGetChapterTimeline.mockResolvedValue({
+      ok: true,
+      timeline: withGroups([
+        {
+          group: "PCM",
+          progress: { due: 1, done: 0, behind: 1, tone: "amber", label: "1 behind" },
+          syllabusDone: 0,
+          syllabusTotal: 1,
+        },
+        { group: "PCB", progress: PCB_BEHIND, syllabusDone: 2, syllabusTotal: 5 },
+      ]),
+    });
+    await renderPage();
+
+    expect(within(groupCard("PCM")).getByText(/^PCM syllabus status:/)).toHaveTextContent(
+      "PCM syllabus status: 1 behind, 0 of 1 due chapter done, 0 of 1 chapter in the syllabus done"
+    );
+    expect(within(groupCard("PCB")).getByText(/^PCB syllabus status:/)).toHaveTextContent(
+      "PCB syllabus status: 1 behind, 2 of 3 due chapters done, 2 of 5 chapters in the syllabus done"
+    );
+    // The visible fragments are hidden from screen readers.
+    expect(groupCard("PCB").querySelector("[data-status-label]")?.closest('[aria-hidden="true"]')).not.toBeNull();
+  });
+
+  it.each([
+    ["JEE Main", "PCM", { due: 4, done: 0, behind: 4, tone: "red", label: "4 behind" } as const, "bg-danger-bg"],
+    ["NEET", "PCB", PCB_BEHIND, "bg-warning-bg"],
+  ])("shows only the %s class's %s card, five cards on one row", async (tracksLabel, group, progress, toneClass) => {
+    mockGetChapterTimeline.mockResolvedValue({
+      ok: true,
+      timeline: withGroups([{ group: group as "PCM" | "PCB", progress, syllabusDone: 1, syllabusTotal: 30 }], {
+        tracksLabel,
+      }),
+    });
+    await renderPage();
+
+    const other = group === "PCM" ? "PCB" : "PCM";
+    expect(screen.queryByTestId(`timeline-${other.toLowerCase()}-status`)).not.toBeInTheDocument();
+    const card = groupCard(group);
+    expect(card.querySelector("[data-status-label]")).toHaveTextContent(progress.label);
+    expect(card.querySelector("[data-status-label]")).toHaveClass(toneClass);
+    expect(card.querySelector("[data-syllabus-done]")).toHaveTextContent(/^1\/30 syllabus done$/);
+    expect(card.parentElement).toHaveClass("xl:grid-cols-5");
+    expect(card.parentElement?.children).toHaveLength(5);
+  });
+
+  it("shows only the syllabus line under a muted No Active plan without an Active plan", async () => {
+    mockGetChapterTimeline.mockResolvedValue({
+      ok: true,
+      timeline: withGroups(
+        [
+          { group: "PCM", progress: null, syllabusDone: 12, syllabusTotal: 30 },
+          { group: "PCB", progress: null, syllabusDone: 1, syllabusTotal: 1 },
+        ],
+        { kind: "no_plan", plan: null }
+      ),
+    });
+    await renderPage();
+
+    const pcm = groupCard("PCM");
+    expect(pcm.querySelector("[data-status-label]")).toHaveTextContent("No Active plan");
+    expect(pcm.querySelector("[data-status-label]")).toHaveClass("text-text-muted");
+    expect(pcm.querySelector("[data-tone]")).toBeNull();
+    expect(pcm.querySelector("[data-due-done]")).toBeNull();
+    expect(pcm.querySelector("[data-syllabus-done]")).toHaveTextContent(/^12\/30 syllabus done$/);
+    expect(within(pcm).getByText(/^PCM syllabus status:/)).toHaveTextContent(
+      "PCM syllabus status: no Active plan, 12 of 30 chapters in the syllabus done"
+    );
+    expect(within(groupCard("PCB")).getByText(/^PCB syllabus status:/)).toHaveTextContent(
+      "PCB syllabus status: no Active plan, 1 of 1 chapter in the syllabus done"
+    );
   });
 
   it("puts the as-of marker after the Chapters due by as-of", async () => {
@@ -373,7 +491,6 @@ describe("Chapter timeline page", () => {
     await renderPage();
 
     expect(document.querySelector("[data-timeline-plan]")).toHaveTextContent("No plan");
-    expect(screen.getByTestId("timeline-due-done")).toHaveTextContent("—");
     expect(screen.getByTestId("timeline-tests-overdue")).toHaveTextContent("—");
   });
 
@@ -527,7 +644,8 @@ describe("Chapter timeline page", () => {
 
     expect(screen.getByTestId("timeline-explanation")).toHaveTextContent("Fix tracks in Centre Management");
     expect(document.querySelector("[data-timeline-row]")).toBeNull();
-    expect(screen.queryByTestId("timeline-due-done")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("timeline-pcm-status")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("timeline-tests-overdue")).not.toBeInTheDocument();
     expect(screen.getByRole("navigation", { name: "Grade" })).toBeInTheDocument();
   });
 });

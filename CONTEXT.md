@@ -376,6 +376,7 @@ _Avoid_: Unmapped Student, Mapping not done, unassigned Mentee
 - At a past as-of date, a **Chapter Test** session created after that date does not count
 - Clearing clashing Chapter dates on a **Curriculum Plan** may, with the Admin's explicit consent, clear dates on Chapters hidden from the plan (out of the syllabus or its served Exam Tracks); such a Chapter returns undated if re-added
 - Clicking a **Curriculum Summary** row opens the Centre's chapter timeline, which carries teaching hours against the **Primary Exam Track**'s prescribed time, Class Cancellation Count, and Doubt Solving Hours per Chapter
+- The chapter timeline's header shows a syllabus status per subject group the class takes (decision Q24): the same **PCM Behind** / **PCB Behind** as the class's **Curriculum Summary** row with its done/due, plus how many of the group's Chapters in the syllabus are done; without an Active **Curriculum Plan** only the syllabus count shows
 - Class Cancellation Count includes active Class Cancellation Logs, while Doubt Solving Hours sum active Doubt Solving Log duration without changing Actual Hours or Curriculum Progress
 - **Curriculum Summary** uses **Chapter Completion** as its source for chapter completion state
 - Only **Admins** create, edit, and assign **Curriculum Plans**; the curriculum team works through Admin accounts

@@ -13,6 +13,26 @@ export const TONE_BADGE_VARIANTS: Record<BehindPillTone, BadgeVariant> = {
   red: "danger",
 };
 
+// A pill tone as text on a plain background (the selected subject tab, the header cards).
+export const TONE_TEXT_CLASS_NAMES: Record<BehindPillTone, string> = {
+  green: "text-success",
+  amber: "text-warning-text",
+  red: "text-danger",
+};
+
+// The Summary pill's tinted colours (the Badge success / warning / danger variants) for a pill
+// drawn larger than a Badge, such as the timeline's syllabus status cards.
+export const TONE_PILL_CLASS_NAMES: Record<BehindPillTone, string> = {
+  green: "bg-green-100 text-green-800",
+  amber: "bg-warning-bg text-warning-text",
+  red: "bg-danger-bg text-danger",
+};
+
+// Header cards: two per row on phones, three from `sm`, and all on one row from `xl`.
+export const HEADER_GRID_CLASS_NAME = "grid grid-cols-2 gap-3 sm:grid-cols-3";
+export const HEADER_LABEL_CLASS_NAME = "block text-xs uppercase tracking-wider text-text-muted";
+export const HEADER_DETAIL_CLASS_NAME = "block text-xs text-text-muted";
+
 export const PAGE_CONTAINER_CLASS_NAME = "w-full px-4 py-3 sm:px-6 lg:px-8";
 
 // Table layout shared by the Summary and the chapter timeline (curriculum owner feedback): key
@@ -33,13 +53,29 @@ const FIELD_CLASS_NAME =
 const BUTTON_CLASS_NAME =
   "min-h-[44px] rounded-md border border-border px-3 py-1.5 text-sm font-bold text-accent hover:text-accent-hover";
 
-export function HeaderNumber({ label, value, testId }: { label: string; value: string; testId: string }) {
+// A header card: label, a large value and an optional small grey line under it.
+export function HeaderNumber({
+  label,
+  value,
+  testId,
+  detail,
+}: {
+  label: string;
+  value: string;
+  testId: string;
+  detail?: { text: string; testId: string };
+}) {
   return (
     <Card elevation="sm" className="p-3 sm:p-4">
-      <span className="block text-xs uppercase tracking-wider text-text-muted">{label}</span>
+      <span className={HEADER_LABEL_CLASS_NAME}>{label}</span>
       <span data-testid={testId} className="mt-1 block font-mono text-2xl font-bold text-text-primary">
         {value}
       </span>
+      {detail ? (
+        <span data-testid={detail.testId} className={`mt-1 ${HEADER_DETAIL_CLASS_NAME}`}>
+          {detail.text}
+        </span>
+      ) : null}
     </Card>
   );
 }
