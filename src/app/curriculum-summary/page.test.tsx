@@ -72,7 +72,8 @@ function row(overrides: Partial<CurriculumSummaryRow>): CurriculumSummaryRow {
       PCM: { due: 3, done: 2, behind: 1, tone: "amber", label: "1 behind" },
       PCB: { due: 7, done: 2, behind: 5, tone: "red", label: "5 behind" },
     },
-    testsOverdue: 2,
+    testsOverdue: 3,
+    testsOverdueBySubject: { Physics: 1, Chemistry: 0, Maths: 0, Biology: 2 },
     testsConducted: null,
     ...overrides,
   };
@@ -102,7 +103,6 @@ function selectedCentres(params: CurriculumSummaryQuery): number[] {
 function summary(overrides: Partial<Extract<CurriculumSummaryResult, { ok: true }>> = {}): CurriculumSummaryResult {
   return {
     ok: true,
-    header: { centresOnPlan: 1, centresTotal: 3, chaptersBehind: { PCM: 1, PCB: 5 }, testsOverdue: 2 },
     regionOptions: ["NORTH", "SOUTH"],
     programOptions: PROGRAM_OPTIONS,
     centreOptions: CENTRE_OPTIONS,
@@ -149,13 +149,13 @@ async function renderPage(searchParams: Record<string, string | string[]> = {}) 
 
 // A pill cell: the pill alone (never wrapping), "done/due done" under it in small grey text, and
 // one phrase for screen readers in place of both.
+// One tag holds the pill label over "done/due done"; screen readers get the spoken phrase.
 function expectProgress(cell: Element | null, pill: string, done: string, spoken: string) {
   const badge = cell?.querySelector("[data-tone]");
-  expect(badge).toHaveTextContent(new RegExp(`^${pill}$`));
-  expect(badge).toHaveClass("whitespace-nowrap");
-  expect(cell?.querySelector("[data-done]")).toHaveTextContent(new RegExp(`^${done}$`));
-  expect(cell?.querySelector("[data-done]")).toHaveClass("text-xs", "text-text-muted", "whitespace-nowrap");
-  expect(badge?.parentElement).toHaveAttribute("aria-hidden", "true");
+  expect(badge?.querySelector("[data-label]")).toHaveTextContent(new RegExp(`^${pill}$`));
+  expect(badge?.querySelector("[data-done]")).toHaveTextContent(new RegExp(`^${done}$`));
+  expect(badge).toHaveClass("flex-col", "whitespace-nowrap", "rounded-full");
+  expect(badge).toHaveAttribute("aria-hidden", "true");
   expect(cell?.querySelector("[data-progress-text]")).toHaveTextContent(new RegExp(`^${spoken}$`));
 }
 
@@ -205,7 +205,7 @@ describe("Curriculum Summary page", () => {
     expect(screen.getByText(/cannot load until the LMS Curriculum/)).toBeInTheDocument();
   });
 
-  it("passes the normalized filters and shows the header numbers", async () => {
+  it("passes the normalized filters and shows no header numbers", async () => {
     await renderPage({ grade: "12", as_of: "2026-08-15", regions: "NORTH", centres: "1", only_behind: "1", page: "2", limit: "50" });
 
     expect(mockGetCurriculumSummary).toHaveBeenCalledWith(PM, {
@@ -219,13 +219,10 @@ describe("Curriculum Summary page", () => {
       page: 2,
       pageSize: 50,
     });
-    expect(screen.getByTestId("summary-centres-on-plan")).toHaveTextContent("1/3");
-    expect(screen.getByText("PCM chapters behind")).toBeInTheDocument();
-    expect(screen.getByTestId("summary-pcm-chapters-behind")).toHaveTextContent("1");
-    expect(screen.getByText("PCB chapters behind")).toBeInTheDocument();
-    expect(screen.getByTestId("summary-pcb-chapters-behind")).toHaveTextContent("5");
-    expect(screen.queryByText("Chapters behind")).not.toBeInTheDocument();
-    expect(screen.getByTestId("summary-tests-overdue")).toHaveTextContent("2");
+    // The header cards were removed (curriculum owner feedback).
+    for (const label of ["Centres on plan", "PCM chapters behind", "PCB chapters behind", "Chapter tests overdue"]) {
+      expect(screen.queryByText(label)).not.toBeInTheDocument();
+    }
     expect(screen.queryByRole("link", { name: "Plans" })).not.toBeInTheDocument();
   });
 
@@ -248,7 +245,12 @@ describe("Curriculum Summary page", () => {
     expect(plan.querySelector('[data-subject-group="PCM"] [data-tone]')).toHaveAttribute("data-tone", "amber");
     expectProgress(plan.querySelector('[data-subject-group="PCB"]'), "5 behind", "2/7 done", "5 behind, 2 of 7 due chapters done");
     expect(plan.querySelector('[data-subject-group="PCB"] [data-tone]')).toHaveAttribute("data-tone", "red");
-    expect(plan.querySelector("[data-tests-overdue]")).toHaveTextContent("2");
+    // Tests overdue sit under their subject's tag only, and only when there are any.
+    expect(plan.querySelector('[data-subject="Physics"] [data-tests-overdue]')).toHaveTextContent(/^1 test overdue$/);
+    expect(plan.querySelector('[data-subject="Biology"] [data-tests-overdue]')).toHaveTextContent(/^2 tests overdue$/);
+    expect(plan.querySelector('[data-subject="Biology"] [data-tests-overdue]')).toHaveClass("text-xs");
+    expect(plan.querySelector('[data-subject="Chemistry"] [data-tests-overdue]')).toBeNull();
+    expect(plan.querySelector("[data-subject-group] [data-tests-overdue]")).toBeNull();
     expect(plan.querySelector("[data-plan]")).toHaveTextContent("G11 Plan");
     expect(plan.querySelector("[data-plan-closed]")).toBeNull();
 
@@ -261,7 +263,9 @@ describe("Curriculum Summary page", () => {
     expect(closed.querySelector('[data-subject-group="PCB"] [data-tone]')).toBeNull();
 
     const noPlan = summaryRow("Surat");
-    expect(noPlan.querySelector("[data-tests-conducted]")).toHaveTextContent("1 conducted");
+    expect(noPlan.querySelector("[data-not-measured]")).toHaveTextContent(
+      /^Not measured without an Active plan · 1 test conducted$/
+    );
     expect(noPlan.querySelector("[data-plan]")).toHaveTextContent("No plan");
     expect(noPlan.querySelector("[data-subject-group]")).toBeNull();
 
@@ -286,12 +290,11 @@ describe("Curriculum Summary page", () => {
       "Biology",
       "PCM Behind",
       "PCB Behind",
-      "Tests overdue",
       "Plan",
     ]);
     const width = (centre: string) =>
       [...summaryRow(centre).querySelectorAll("td")].reduce((sum, cell) => sum + cell.colSpan, 0);
-    expect(["Anand Shared", "Bhuj Closed", "Surat", "Vapi"].map(width)).toEqual([12, 12, 12, 12]);
+    expect(["Anand Shared", "Bhuj Closed", "Surat", "Vapi"].map(width)).toEqual([11, 11, 11, 11]);
   });
 
   it("says chapter for a single due Chapter and keeps Program and track names on one line", async () => {
@@ -334,7 +337,6 @@ describe("Curriculum Summary page", () => {
     // The sort link and aria-sort are unchanged by the layout.
     expect(header("PCM Behind")).toHaveAttribute("aria-sort", "descending");
     expect(within(header("PCM Behind")).getByRole("link", { name: "PCM Behind" })).toBeInTheDocument();
-    expect(header("Tests overdue")).toHaveClass("w-20", "text-center");
     for (const name of ["Program", "Tracks", "Region", "Plan"]) {
       expect(header(name)).toHaveClass("px-2", "text-left");
     }
@@ -343,21 +345,22 @@ describe("Curriculum Summary page", () => {
     const plan = summaryRow("Anand Shared");
     expect(plan.querySelector('[data-subject="Physics"]')).toHaveClass("text-center");
     expect(plan.querySelector('[data-subject-group="PCB"]')).toHaveClass("text-center");
-    expect(plan.querySelector("[data-tests-overdue]")).toHaveClass("text-center");
     expect(plan.querySelector("[data-plan]")).toHaveClass("text-xs");
     expect(within(plan).getByRole("link", { name: "Anand Shared" })).toHaveClass("max-w-[11rem]");
     // "Not measured" still spans the measured columns.
     expect(summaryRow("Surat").querySelector("td[colspan]")).toHaveAttribute("colspan", "6");
   });
 
-  it("counts a No plan row without a conducted count as 0", async () => {
+  it("counts a No plan row without a conducted count as 0 tests", async () => {
     mockGetCurriculumSummary.mockResolvedValue(
       summary({ rows: [row({ kind: "no_plan", plan: null, subjects: null, testsConducted: null })] })
     );
 
     await renderPage();
 
-    expect(document.querySelector("[data-tests-conducted]")).toHaveTextContent("0 conducted");
+    expect(document.querySelector("[data-not-measured]")).toHaveTextContent(
+      /^Not measured without an Active plan · 0 tests conducted$/
+    );
   });
 
   it("keeps every filter in the Grade, pagination and page-size links", async () => {
@@ -388,12 +391,21 @@ describe("Curriculum Summary page", () => {
     );
   });
 
+  it("treats the removed Tests overdue sort as the default order", async () => {
+    await renderPage({ sort: "tests_overdue", dir: "desc" });
+
+    expect(mockGetCurriculumSummary).toHaveBeenCalledWith(PM, expect.objectContaining({ sort: null }));
+    expect(screen.queryByRole("columnheader", { name: /Tests overdue/ })).not.toBeInTheDocument();
+    expect(document.querySelector("[aria-sort]")).toBeNull();
+    expect(document.querySelector('input[type="hidden"][name="sort"]')).toBeNull();
+  });
+
   it("links every column header to its first-click sort from page 1, without an arrow", async () => {
     await renderPage({ grade: "11", as_of: "2026-08-15", page: "2" });
 
     const header = (name: string) => screen.getByRole("columnheader", { name });
     const sortLink = (name: string) => within(header(name)).getByRole("link", { name });
-    // Text columns start A–Z; the measured columns most behind (or overdue) first.
+    // Text columns start A–Z; the measured columns most behind first.
     const expected: [string, string, string][] = [
       ["Centre", "centre", "asc"],
       ["Program", "program", "asc"],
@@ -405,7 +417,6 @@ describe("Curriculum Summary page", () => {
       ["Biology", "biology", "desc"],
       ["PCM Behind", "pcm", "desc"],
       ["PCB Behind", "pcb", "desc"],
-      ["Tests overdue", "tests_overdue", "desc"],
       ["Plan", "plan", "asc"],
     ];
     for (const [name, key, dir] of expected) {

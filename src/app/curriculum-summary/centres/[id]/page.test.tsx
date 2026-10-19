@@ -135,6 +135,7 @@ function timeline(overrides: Partial<ChapterTimeline> = {}, row: Partial<Chapter
       subjects: null,
       subjectGroups: null,
       testsOverdue: 1,
+      testsOverdueBySubject: { Physics: 0, Chemistry: 1, Maths: 0, Biology: 0 },
       testsConducted: null,
       ...row,
     },

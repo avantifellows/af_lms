@@ -136,13 +136,15 @@ describe("normalizeCurriculumSummarySearchParams", () => {
     [{ sort: "pcb", dir: "asc" }, { key: "pcb", dir: "asc" }],
     [{ sort: ["centre", "plan"], dir: ["desc", "asc"] }, { key: "centre", dir: "desc" }],
     // Without a valid direction a column starts in its first-click direction.
-    [{ sort: "tests_overdue" }, { key: "tests_overdue", dir: "desc" }],
+    [{ sort: "pcm" }, { key: "pcm", dir: "desc" }],
     [{ sort: "physics", dir: "up" }, { key: "physics", dir: "desc" }],
     [{ sort: "region", dir: "DESC" }, { key: "region", dir: "asc" }],
     // Unknown columns mean the default order, whatever the direction.
     [{ sort: "school", dir: "asc" }, null],
     [{ sort: "Centre", dir: "asc" }, null],
     [{ sort: "toString" }, null],
+    // Tests overdue is no longer a column.
+    [{ sort: "tests_overdue", dir: "desc" }, null],
     [{ sort: "", dir: "desc" }, null],
     [{ dir: "asc" }, null],
   ])("reads the sort from %j", (searchParams, sort) => {
@@ -311,23 +313,48 @@ describe("getCurriculumSummary", () => {
           PCM: { due: 3, done: 2, behind: 1, tone: "amber", label: "1 behind" },
           PCB: { due: 4, done: 2, behind: 2, tone: "amber", label: "2 behind" },
         },
-        // Chapter 2 (test date 1 Aug) and Chapter 3 (16 Jul) have no session.
+        // Chapter 2 (Physics, test date 1 Aug) and Chapter 3 (Chemistry, 16 Jul) have no session.
         testsOverdue: 2,
+        testsOverdueBySubject: { Physics: 1, Chemistry: 1, Maths: 0, Biology: 0 },
         testsConducted: null,
       },
     ]);
-    expect(result.header).toEqual({
-      centresOnPlan: 1,
-      centresTotal: 1,
-      chaptersBehind: { PCM: 1, PCB: 2 },
-      testsOverdue: 2,
-    });
     expect(mockLoadSessions).toHaveBeenCalledWith({
       centreIds: [1],
       grade: 11,
       academicYear: "2026-2027",
       asOf: AS_OF,
     });
+  });
+
+  it("splits Tests overdue by pill subject, adding up to the class's count", async () => {
+    // As of 15 Aug, no sessions: a Chapter Test is overdue more than 7 days after its test date
+    // (due + 1 when unset). Overdue: 1 (Physics, test 1 Jul), 2 (Physics, due 31 Jul), 3
+    // (Chemistry, due 15 Jul), 4 (Mathematics → Maths, test 2 Aug), 6 (Biology, due 1 Jul).
+    // Not overdue: 5 (Maths, test 10 Aug, inside the grace), 7 (Biology, undated).
+    mockLoadSessions.mockResolvedValue(new Map());
+    const chapters = [
+      chapter(1, { dueDate: "2026-06-30", testDate: "2026-07-01", completedOn: "2026-06-28" }),
+      chapter(2, { dueDate: "2026-07-31" }),
+      chapter(3, { subject: "Chemistry", dueDate: "2026-07-15" }),
+      chapter(4, { subject: "Mathematics", dueDate: "2026-07-31", testDate: "2026-08-02", tracks: ["jee_main"] }),
+      chapter(5, { subject: "Maths", dueDate: "2026-08-01", testDate: "2026-08-10", tracks: ["jee_main"] }),
+      chapter(6, { subject: "Biology", dueDate: "2026-07-01", tracks: ["neet"] }),
+      chapter(7, { subject: "Biology", tracks: ["neet"] }),
+    ];
+    routeQueries({ summary: [raw(1, { chapters }), raw(2, { chapters: chapters.slice(5) })] });
+
+    const result = await getCurriculumSummary(ADMIN, query());
+
+    if (!result.ok) throw new Error("expected rows");
+    const byId = new Map(result.rows.map((row) => [row.centreId, row]));
+    expect(byId.get(1)?.testsOverdueBySubject).toEqual({ Physics: 2, Chemistry: 1, Maths: 1, Biology: 1 });
+    expect(byId.get(1)?.testsOverdue).toBe(5);
+    expect(byId.get(2)?.testsOverdueBySubject).toEqual({ Physics: 0, Chemistry: 0, Maths: 0, Biology: 1 });
+    for (const row of result.rows) {
+      const perSubject = Object.values(row.testsOverdueBySubject ?? {}).reduce((sum, count) => sum + count, 0);
+      expect(perSubject).toBe(row.testsOverdue);
+    }
   });
 
   it("marks a plan Closed after its closure date", async () => {
@@ -352,6 +379,7 @@ describe("getCurriculumSummary", () => {
       subjects: null,
       subjectGroups: null,
       testsOverdue: 0,
+      testsOverdueBySubject: null,
       testsConducted: 1,
     });
   });
@@ -388,7 +416,7 @@ describe("getCurriculumSummary", () => {
     });
   });
 
-  it("sorts worst first, counts the header over every row and pages the list", async () => {
+  it("sorts worst first and pages the list", async () => {
     routeQueries({
       summary: [
         raw(1, { centre_name: "Zeta" }),
@@ -404,14 +432,6 @@ describe("getCurriculumSummary", () => {
     const first = await getCurriculumSummary(ADMIN, query({ pageSize: 10 }));
     if (!first.ok) throw new Error("expected rows");
     expect(first.rows.map((row) => row.centreId)).toEqual([1, 2, 7, 3, 6, 4, 5]);
-    // Setup-error and no-content rows don't count towards Centres on plan. Centres 2 and 7 have
-    // no Chapter Test session, so their one Chapter's test is overdue too.
-    expect(first.header).toEqual({
-      centresOnPlan: 3,
-      centresTotal: 5,
-      chaptersBehind: { PCM: 1, PCB: 2 },
-      testsOverdue: 4,
-    });
     expect(first.pagination).toEqual({ page: 1, pageSize: 10, totalRows: 7, totalPages: 1 });
 
     const paged = await getCurriculumSummary(ADMIN, query({ pageSize: 2, page: 9 }));
@@ -449,7 +469,7 @@ describe("getCurriculumSummary", () => {
     expect(byCentre.centreOptions.map((option) => option.name)).toEqual(["anand", "Bhuj", "Chhapi", "Vapi"]);
   });
 
-  it("totals the header over the chosen Centres, like Region, and keeps Only-behind rows as options", async () => {
+  it("narrows to the chosen Centres, like Region, and keeps Only-behind rows as options", async () => {
     routeQueries({
       summary: [
         raw(1),
@@ -465,13 +485,6 @@ describe("getCurriculumSummary", () => {
     expect(result.rows.map((row) => row.centreId)).toEqual([1]);
     expect(result.selectedCentreIds).toEqual([1, 2]);
     expect(result.centreOptions.map((option) => option.id)).toEqual([1, 2, 3]);
-    // Centre 1: PCM 1, PCB 2, 2 tests overdue; Centre 2: its one Chapter's test overdue.
-    expect(result.header).toEqual({
-      centresOnPlan: 2,
-      centresTotal: 2,
-      chaptersBehind: { PCM: 1, PCB: 2 },
-      testsOverdue: 3,
-    });
   });
 
   it.each([
@@ -504,7 +517,7 @@ describe("getCurriculumSummary", () => {
       }),
     ];
 
-    it("lists the chosen Programs' rows, totals the header over them, and narrows Region and Centre options", async () => {
+    it("lists the chosen Programs' rows and narrows Region and Centre options", async () => {
       routeQueries({ summary: PROGRAM_ROWS });
 
       const result = await getCurriculumSummary(ADMIN, query({ programIds: [2] }));
@@ -520,14 +533,6 @@ describe("getCurriculumSummary", () => {
       expect(result.rows.map((row) => row.centreName)).toEqual(["Bhuj Nodal", "Dahod Nodal"]);
       expect(result.regionOptions).toEqual(["NORTH", "SOUTH"]);
       expect(result.centreOptions.map((option) => option.name)).toEqual(["Bhuj Nodal", "Dahod Nodal"]);
-      // Bhuj has no Chapter Test sessions (the default ones are Centre 1's): Chapters 1, 2 and 3
-      // are overdue; Dahod: its one Chapter's test.
-      expect(result.header).toEqual({
-        centresOnPlan: 2,
-        centresTotal: 2,
-        chaptersBehind: { PCM: 1, PCB: 2 },
-        testsOverdue: 4,
-      });
     });
 
     it("applies Program, then Region, then Centre", async () => {
@@ -569,7 +574,7 @@ describe("getCurriculumSummary", () => {
     expect(result.ok && result.selectedCentreIds).toEqual([2]);
   });
 
-  it("Only behind narrows the listed rows but not the header", async () => {
+  it("Only behind narrows the listed rows", async () => {
     routeQueries({
       summary: [raw(1), raw(2, { chapters: [chapter(1, { dueDate: "2026-06-30", completedOn: "2026-06-28" })] })],
     });
@@ -578,7 +583,6 @@ describe("getCurriculumSummary", () => {
 
     if (!result.ok) throw new Error("expected rows");
     expect(result.rows.map((row) => row.centreId)).toEqual([1]);
-    expect(result.header.centresOnPlan).toBe(2);
     expect(result.pagination).toEqual({ page: 1, pageSize: 20, totalRows: 1, totalPages: 1 });
   });
 
@@ -732,7 +736,7 @@ describe("PCM Behind and PCB Behind", () => {
     expect(result.ok && result.rows.map((row) => row.centreName)).toEqual(["Neet", "Main", "Shared", "Done", "Draft"]);
   });
 
-  it("sums each group over every row for the header, whatever Only behind lists", async () => {
+  it("Only behind keeps a row behind in either group", async () => {
     routeQueries({ summary: SORT_ROWS });
 
     const result = await getCurriculumSummary(ADMIN, query({ onlyBehind: true }));
@@ -740,8 +744,6 @@ describe("PCM Behind and PCB Behind", () => {
     if (!result.ok) throw new Error("expected rows");
     // A row behind in either group stays; Done (0 / 0) and the No plan row go.
     expect(result.rows.map((row) => row.centreName)).toEqual(["Neet", "Main", "Shared"]);
-    // PCM: Shared 2 + Main 2; PCB: Shared 2 + Neet 3.
-    expect(result.header.chaptersBehind).toEqual({ PCM: 4, PCB: 5 });
   });
 
   it("Only behind keeps a row behind in one group only", async () => {
@@ -781,6 +783,7 @@ describe("sortSummaryRows", () => {
       subjects: { Physics: null, Chemistry: null, Maths: null, Biology: null },
       subjectGroups: { PCM: null, PCB: null },
       testsOverdue: 0,
+      testsOverdueBySubject: { Physics: 0, Chemistry: 0, Maths: 0, Biology: 0 },
       testsConducted: null,
       ...overrides,
     };
@@ -894,31 +897,6 @@ describe("sortSummaryRows", () => {
     ];
     expect(names(sortSummaryRows(plans, { key: "plan", dir: "asc" }))).toEqual(["Anand", "Bhuj", "Surat", "Vapi"]);
     expect(names(sortSummaryRows(plans, { key: "plan", dir: "desc" }))).toEqual(["Bhuj", "Anand", "Surat", "Vapi"]);
-  });
-
-  it("sorts Tests overdue as numbers, with rows that show none last", () => {
-    const rows = [
-      summaryRow(1, "Surat", NO_PLAN),
-      summaryRow(2, "Anand", { testsOverdue: 9 }),
-      summaryRow(3, "Bhuj", { testsOverdue: 10 }),
-      summaryRow(4, "Vapi", { ...SETUP_ERROR_ROW, testsOverdue: 0 }),
-      summaryRow(5, "Chhapi", { testsOverdue: 0 }),
-    ];
-
-    expect(names(sortSummaryRows(rows, { key: "tests_overdue", dir: "desc" }))).toEqual([
-      "Bhuj",
-      "Anand",
-      "Chhapi",
-      "Surat",
-      "Vapi",
-    ]);
-    expect(names(sortSummaryRows(rows, { key: "tests_overdue", dir: "asc" }))).toEqual([
-      "Chhapi",
-      "Anand",
-      "Bhuj",
-      "Surat",
-      "Vapi",
-    ]);
   });
 
   it("keeps the worst-first order without a sort and never mutates its input", () => {

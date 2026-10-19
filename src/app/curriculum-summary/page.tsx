@@ -26,7 +26,6 @@ import { requireCurriculumSummaryViewer } from "./summary-access";
 import {
   ApplyButton,
   AsOfField,
-  HeaderNumber,
   HiddenField,
   PAGE_CONTAINER_CLASS_NAME,
   SchemaUnavailableCard,
@@ -36,7 +35,6 @@ import {
   CELL_CLASS_NAME,
   COMPACT_CELL_CLASS_NAME,
   COMPACT_COLUMN_CLASS_NAME,
-  NUMBER_COLUMN_CLASS_NAME,
   sortableHeaders,
   type SortableColumn,
 } from "./summary-ui";
@@ -100,7 +98,6 @@ function AdminLinks() {
 }
 
 function SummaryView({ summary, params: requested }: { summary: SummaryData; params: CurriculumSummaryQuery }) {
-  const { header } = summary;
   // Links and the filter bar carry only the Programs and Centres the Summary applied.
   const params = {
     ...requested,
@@ -109,27 +106,6 @@ function SummaryView({ summary, params: requested }: { summary: SummaryData; par
   };
   return (
     <div className="space-y-5">
-      <div className="grid grid-cols-2 gap-3 sm:max-w-3xl sm:grid-cols-4">
-        <HeaderNumber
-          label="Centres on plan"
-          value={`${header.centresOnPlan}/${header.centresTotal}`}
-          testId="summary-centres-on-plan"
-        />
-        {SUBJECT_GROUPS.map((group) => (
-          <HeaderNumber
-            key={group}
-            label={`${group} chapters behind`}
-            value={String(header.chaptersBehind[group])}
-            testId={`summary-${group.toLowerCase()}-chapters-behind`}
-          />
-        ))}
-        <HeaderNumber
-          label="Chapter tests overdue"
-          value={String(header.testsOverdue)}
-          testId="summary-tests-overdue"
-        />
-      </div>
-
       <SummaryFilters params={params} options={summary} />
 
       <Card className="overflow-hidden">
@@ -371,7 +347,6 @@ const SUMMARY_COLUMNS: SortableColumn<CurriculumSummarySortKey>[] = [
     sortKey: lowercase(group),
     className: KEY_COLUMN_CLASS_NAME,
   })),
-  { label: "Tests overdue", sortKey: "tests_overdue", className: NUMBER_COLUMN_CLASS_NAME },
   { label: "Plan", sortKey: "plan", className: COMPACT_COLUMN_CLASS_NAME },
 ];
 
@@ -451,7 +426,7 @@ function RowMetrics({ row }: { row: CurriculumSummaryRow }) {
   if (row.kind === "no_plan") return <NoPlanCells testsConducted={row.testsConducted ?? 0} />;
   return (
     <td
-      colSpan={MEASURE_COLUMNS + 2}
+      colSpan={MEASURE_COLUMNS + 1}
       data-explanation
       className={`${CELL_CLASS_NAME} px-2 font-bold text-warning-text`}
     >
@@ -474,6 +449,7 @@ function PlanCells({
       {CURRICULUM_SUMMARY_SUBJECTS.map((subject) => (
         <td key={subject} data-subject={subject} className={`${CELL_CLASS_NAME} px-2 text-center`}>
           <ProgressPill progress={subjects[subject]} />
+          <TestsOverdueNote count={row.testsOverdueBySubject?.[subject] ?? 0} />
         </td>
       ))}
       {SUBJECT_GROUPS.map((group) => (
@@ -481,9 +457,6 @@ function PlanCells({
           <ProgressPill progress={subjectGroups[group]} />
         </td>
       ))}
-      <td data-tests-overdue className={`${CELL_CLASS_NAME} px-2 text-center font-mono font-bold`}>
-        {row.testsOverdue}
-      </td>
       <td data-plan className={COMPACT_CELL_CLASS_NAME}>
         <span className="block min-w-[9.5rem] max-w-[11rem]">
           {row.plan?.title}
@@ -498,8 +471,9 @@ function PlanCells({
   );
 }
 
-// A subject pill or a PCM / PCB Behind cell: the pill reads "N behind" or "On track", with
-// "done/due done" centred under it. Screen readers get one phrase instead of the two fragments.
+// A subject pill or a PCM / PCB Behind cell: one tag in the tone's colour holding "N behind" or
+// "On track" over "done/due done" (curriculum owner feedback). Screen readers get one phrase
+// instead of the two fragments.
 function ProgressPill({ progress }: { progress: CurriculumSummarySubjectProgress | null }) {
   if (!progress) return <span className="text-text-muted">—</span>;
   const chapters = progress.due === 1 ? "chapter" : "chapters";
@@ -508,26 +482,42 @@ function ProgressPill({ progress }: { progress: CurriculumSummarySubjectProgress
       <span data-progress-text className="sr-only">
         {`${progress.label}, ${progress.done} of ${progress.due} due ${chapters} done`}
       </span>
-      <span aria-hidden="true" className="inline-flex flex-col items-center gap-1">
-        <Badge variant={TONE_BADGE_VARIANTS[progress.tone]} data-tone={progress.tone} className="whitespace-nowrap">
+      <Badge
+        aria-hidden="true"
+        variant={TONE_BADGE_VARIANTS[progress.tone]}
+        data-tone={progress.tone}
+        className="flex-col whitespace-nowrap leading-tight"
+      >
+        <span data-label className="font-bold">
           {progress.label}
-        </Badge>
-        <span data-done className="whitespace-nowrap text-xs text-text-muted">
+        </span>
+        <span data-done>
           {progress.done}/{progress.due} done
         </span>
-      </span>
+      </Badge>
     </>
   );
 }
 
+// "N tests overdue" under a subject pill; nothing when none is.
+function TestsOverdueNote({ count }: { count: number }) {
+  if (count === 0) return null;
+  return (
+    <span data-tests-overdue className="mt-1 block whitespace-nowrap text-xs text-danger">
+      {count} {count === 1 ? "test" : "tests"} overdue
+    </span>
+  );
+}
+
+// A No plan row's Conducted Chapter Tests close its "Not measured" message.
 function NoPlanCells({ testsConducted }: { testsConducted: number }) {
   return (
     <>
-      <td colSpan={MEASURE_COLUMNS} className={`${CELL_CLASS_NAME} px-2 text-text-muted`}>
-        Not measured without an Active plan
-      </td>
-      <td data-tests-conducted className={`${COMPACT_CELL_CLASS_NAME} whitespace-nowrap text-center text-text-secondary`}>
-        {testsConducted} conducted
+      <td colSpan={MEASURE_COLUMNS} data-not-measured className={`${CELL_CLASS_NAME} px-2 text-text-muted`}>
+        Not measured without an Active plan ·{" "}
+        <span data-tests-conducted>
+          {testsConducted} {testsConducted === 1 ? "test" : "tests"} conducted
+        </span>
       </td>
       <td data-plan className={`${COMPACT_CELL_CLASS_NAME} text-text-muted`}>
         No plan

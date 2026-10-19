@@ -1,7 +1,7 @@
 // Curriculum Summary v2 (#417): one row per Summary Class (Centre + Grade) measured against its
 // Curriculum Plan, and the chapter timeline for one of those classes. One set-based SQL pass
 // loads the whole bounded row set for the user's scope (or one Centre of it); classification,
-// Due / Done / Behind, Tests overdue, header numbers, sort and pagination are computed here with
+// Due / Done / Behind, Tests overdue, sort and pagination are computed here with
 // the shared rules in `curriculum-plan-rules`. Chapter Test sessions come from
 // `curriculum-chapter-tests`.
 
@@ -60,7 +60,6 @@ export type CurriculumSummarySortKey =
   | "region"
   | Lowercase<CurriculumSummarySubject>
   | Lowercase<SubjectGroup>
-  | "tests_overdue"
   | "plan";
 
 export type CurriculumSummarySortDirection = "asc" | "desc";
@@ -82,7 +81,7 @@ export interface CurriculumSummaryQuery {
   centreIds: number[];
   grade: CurriculumSummaryGrade;
   asOf: string;
-  // Keeps rows with PCM or PCB Behind ≥ 1; header numbers ignore it.
+  // Keeps rows with PCM or PCB Behind ≥ 1.
   onlyBehind: boolean;
   // A column header's sort; null = the default worst-first order.
   sort: CurriculumSummarySort | null;
@@ -182,18 +181,14 @@ export interface CurriculumSummaryRow {
   // PCM Behind and PCB Behind for plan rows, with done/due like the subject pills; null = "—":
   // the group doesn't apply to the class.
   subjectGroups: Record<SubjectGroup, CurriculumSummarySubjectProgress | null> | null;
-  // Plan Chapters whose Chapter Test Status is Overdue; 0 for rows without a plan.
+  // Plan Chapters whose Chapter Test Status is Overdue; 0 for rows without a plan. No longer a
+  // column, but it still breaks ties in the default worst-first order.
   testsOverdue: number;
+  // Tests overdue per pill subject, shown under its pill; plan rows only. They add up to
+  // `testsOverdue` when every Chapter is in a pill subject.
+  testsOverdueBySubject: Record<CurriculumSummarySubject, number> | null;
   // Set only for No plan rows: Chapters with a Conducted Chapter Test.
   testsConducted: number | null;
-}
-
-export interface CurriculumSummaryHeader {
-  centresOnPlan: number;
-  centresTotal: number;
-  // PCM and PCB chapters behind: each group's Behind summed over the rows.
-  chaptersBehind: Record<SubjectGroup, number>;
-  testsOverdue: number;
 }
 
 export interface CurriculumSummaryFilterOption {
@@ -204,7 +199,6 @@ export interface CurriculumSummaryFilterOption {
 export type CurriculumSummaryResult =
   | {
       ok: true;
-      header: CurriculumSummaryHeader;
       // Each filter's options follow the filters before it (Program, Region, Centre), never Only
       // behind: Programs of every scoped row for the Grade, A–Z; Regions of the rows in the chosen
       // Programs; Centres of the rows in the chosen Programs and Regions, A–Z.
@@ -266,7 +260,6 @@ export async function getCurriculumSummary(
 
   return {
     ok: true,
-    header: summaryHeader(rows),
     ...filters,
     rows: pageRows,
     pagination: { page, pageSize: params.pageSize, totalRows: listedRows.length, totalPages },
@@ -610,11 +603,23 @@ function buildSummaryRow(data: SummaryClassData): CurriculumSummaryRow {
     subjects,
     subjectGroups: subjectGroupsBehind(raw, chapters, asOf),
     testsOverdue: testStatusCount(data, "overdue"),
+    testsOverdueBySubject: Object.fromEntries(
+      CURRICULUM_SUMMARY_SUBJECTS.map((subject) => [
+        subject,
+        testStatusCount(data, "overdue", (chapter) => chapter.subject === subject),
+      ])
+    ) as Record<CurriculumSummarySubject, number>,
   };
 }
 
-function testStatusCount(data: SummaryClassData, kind: ChapterTestStatus["kind"]): number {
-  return data.chapters.filter((chapter) => chapterTestStatusFor(data, chapter).kind === kind).length;
+// The class's Chapters (optionally only those `include` keeps) with that Chapter Test Status.
+function testStatusCount(
+  data: SummaryClassData,
+  kind: ChapterTestStatus["kind"],
+  include: (chapter: SummaryChapter) => boolean = () => true
+): number {
+  return data.chapters.filter((chapter) => include(chapter) && chapterTestStatusFor(data, chapter).kind === kind)
+    .length;
 }
 
 function summaryRowBase(raw: SummaryQueryRow) {
@@ -632,6 +637,7 @@ function summaryRowBase(raw: SummaryQueryRow) {
     subjects: null,
     subjectGroups: null,
     testsOverdue: 0,
+    testsOverdueBySubject: null,
     testsConducted: null,
   };
 }
@@ -779,14 +785,12 @@ const SORT_VALUES: Record<CurriculumSummarySortKey, (row: CurriculumSummaryRow) 
   biology: (row) => pillSortValue(row.subjects?.Biology),
   pcm: (row) => pillSortValue(row.subjectGroups?.PCM),
   pcb: (row) => pillSortValue(row.subjectGroups?.PCB),
-  // No plan rows show Conducted tests instead, and error rows show neither.
-  tests_overdue: (row) => (row.kind === "plan" ? [row.testsOverdue] : null),
   plan: (row) => textSortValue(row.plan?.title ?? null),
 };
 
 const TEXT_SORT_KEYS: CurriculumSummarySortKey[] = ["centre", "program", "tracks", "region", "plan"];
 
-// A header's first click: A–Z for the text columns, most behind (or overdue) first for the rest.
+// A header's first click: A–Z for the text columns, most behind first for the rest.
 export function defaultSortDirection(key: CurriculumSummarySortKey): CurriculumSummarySortDirection {
   return TEXT_SORT_KEYS.includes(key) ? "asc" : "desc";
 }
@@ -841,21 +845,6 @@ export function sortSummaryRows(
     compareBlanks: (a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind],
     tieBreak: compareCentreNames,
   });
-}
-
-// Centres on plan = rows with an Active or Closed plan out of every row except setup-error and
-// no-content rows; PCM / PCB chapters behind = Σ PCM / PCB Behind; Chapter tests overdue =
-// Σ Tests overdue. Covers all rows, not just the current page.
-function summaryHeader(rows: CurriculumSummaryRow[]): CurriculumSummaryHeader {
-  return {
-    centresOnPlan: rows.filter((row) => row.kind === "plan").length,
-    centresTotal: rows.filter((row) => row.kind !== "setup_error" && row.kind !== "no_content")
-      .length,
-    chaptersBehind: Object.fromEntries(
-      SUBJECT_GROUPS.map((group) => [group, rows.reduce((sum, row) => sum + groupBehind(row, group), 0)])
-    ) as Record<SubjectGroup, number>,
-    testsOverdue: rows.reduce((sum, row) => sum + row.testsOverdue, 0),
-  };
 }
 
 export interface ChapterTimelineChapter {
