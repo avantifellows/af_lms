@@ -136,6 +136,18 @@ async function renderPage(searchParams: Record<string, string | string[]> = {}) 
   render(await CurriculumSummaryPage({ searchParams: Promise.resolve(searchParams) }));
 }
 
+// A pill cell: the pill alone (never wrapping), "done/due done" under it in small grey text, and
+// one phrase for screen readers in place of both.
+function expectProgress(cell: Element | null, pill: string, done: string, spoken: string) {
+  const badge = cell?.querySelector("[data-tone]");
+  expect(badge).toHaveTextContent(new RegExp(`^${pill}$`));
+  expect(badge).toHaveClass("whitespace-nowrap");
+  expect(cell?.querySelector("[data-done]")).toHaveTextContent(new RegExp(`^${done}$`));
+  expect(cell?.querySelector("[data-done]")).toHaveClass("text-xs", "text-text-muted", "whitespace-nowrap");
+  expect(badge?.parentElement).toHaveAttribute("aria-hidden", "true");
+  expect(cell?.querySelector("[data-progress-text]")).toHaveTextContent(new RegExp(`^${spoken}$`));
+}
+
 const summaryRow = (centre: string) =>
   document.querySelector(`[data-summary-row][data-centre="${centre}"]`) as HTMLElement;
 
@@ -216,13 +228,13 @@ describe("Curriculum Summary page", () => {
     // The Centre name alone: no School name line under it.
     expect(plan.querySelector("td")).toHaveTextContent(/^Anand Shared$/);
     expect(within(plan).queryByText("JNV Anand")).not.toBeInTheDocument();
-    expect(plan.querySelector('[data-subject="Physics"]')).toHaveTextContent("1 behind · 1/2");
+    expectProgress(plan.querySelector('[data-subject="Physics"]'), "1 behind", "1/2 done", "1 behind, 1 of 2 due chapters done");
     expect(plan.querySelector('[data-subject="Physics"] [data-tone]')).toHaveAttribute("data-tone", "amber");
     expect(plan.querySelector('[data-subject="Maths"]')).toHaveTextContent("—");
     // Group cells read like the subject pills: Behind, then done/due.
-    expect(plan.querySelector('[data-subject-group="PCM"]')).toHaveTextContent(/^1 behind · 2\/3$/);
+    expectProgress(plan.querySelector('[data-subject-group="PCM"]'), "1 behind", "2/3 done", "1 behind, 2 of 3 due chapters done");
     expect(plan.querySelector('[data-subject-group="PCM"] [data-tone]')).toHaveAttribute("data-tone", "amber");
-    expect(plan.querySelector('[data-subject-group="PCB"]')).toHaveTextContent(/^5 behind · 2\/7$/);
+    expectProgress(plan.querySelector('[data-subject-group="PCB"]'), "5 behind", "2/7 done", "5 behind, 2 of 7 due chapters done");
     expect(plan.querySelector('[data-subject-group="PCB"] [data-tone]')).toHaveAttribute("data-tone", "red");
     expect(plan.querySelector("[data-tests-overdue]")).toHaveTextContent("2");
     expect(plan.querySelector("[data-plan]")).toHaveTextContent("G11 Plan");
@@ -230,7 +242,7 @@ describe("Curriculum Summary page", () => {
 
     const closed = summaryRow("Bhuj Closed");
     expect(closed.querySelector("[data-plan-closed]")).toHaveTextContent("Closed");
-    expect(closed.querySelector('[data-subject-group="PCM"]')).toHaveTextContent(/^On track · 2\/2$/);
+    expectProgress(closed.querySelector('[data-subject-group="PCM"]'), "On track", "2/2 done", "On track, 2 of 2 due chapters done");
     expect(closed.querySelector('[data-subject-group="PCM"] [data-tone]')).toHaveAttribute("data-tone", "green");
     // PCB doesn't apply to a JEE Main class.
     expect(closed.querySelector('[data-subject-group="PCB"]')).toHaveTextContent("—");
@@ -268,6 +280,36 @@ describe("Curriculum Summary page", () => {
     const width = (centre: string) =>
       [...summaryRow(centre).querySelectorAll("td")].reduce((sum, cell) => sum + cell.colSpan, 0);
     expect(["Anand Shared", "Bhuj Closed", "Surat", "Vapi"].map(width)).toEqual([12, 12, 12, 12]);
+  });
+
+  it("says chapter for a single due Chapter and keeps Program and track names on one line", async () => {
+    mockGetCurriculumSummary.mockResolvedValue(
+      summary({
+        rows: [
+          row({
+            tracksLabel: "JEE Main + JEE Advanced",
+            subjects: {
+              Physics: { due: 1, done: 0, behind: 1, tone: "amber", label: "1 behind" },
+              Chemistry: null,
+              Maths: null,
+              Biology: null,
+            },
+          }),
+        ],
+      })
+    );
+
+    await renderPage();
+
+    const plan = summaryRow("Anand Shared");
+    expectProgress(plan.querySelector('[data-subject="Physics"]'), "1 behind", "0/1 done", "1 behind, 0 of 1 due chapter done");
+    const [, program, tracks] = plan.querySelectorAll("td");
+    expect(program).toHaveClass("whitespace-nowrap");
+    expect(tracks).toHaveTextContent(/^JEE Main \+ JEE Advanced$/);
+    expect([...tracks.querySelectorAll(".whitespace-nowrap")].map((track) => track.textContent)).toEqual([
+      "JEE Main",
+      "JEE Advanced",
+    ]);
   });
 
   it("counts a No plan row without a conducted count as 0", async () => {

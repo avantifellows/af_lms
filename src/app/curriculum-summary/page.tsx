@@ -1,5 +1,5 @@
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 
 import PageHeader from "@/components/PageHeader";
 import { Badge, Card } from "@/components/ui";
@@ -341,12 +341,24 @@ function SummaryTableRow({ row, params }: { row: CurriculumSummaryRow; params: C
           {row.centreName}
         </Link>
       </td>
-      <td className={CELL_CLASS_NAME}>{row.programName}</td>
-      <td className={CELL_CLASS_NAME}>{row.tracksLabel}</td>
+      <td className={`${CELL_CLASS_NAME} whitespace-nowrap`}>{row.programName}</td>
+      <td className={CELL_CLASS_NAME}>
+        <TracksLabel label={row.tracksLabel} />
+      </td>
       <td className={CELL_CLASS_NAME}>{row.region ?? "—"}</td>
       <RowMetrics row={row} />
     </tr>
   );
+}
+
+// "JEE Main + JEE Advanced" breaks only between tracks, never inside a track name.
+function TracksLabel({ label }: { label: string }) {
+  return label.split(" + ").map((track, index) => (
+    <Fragment key={track}>
+      {index > 0 ? " + " : null}
+      <span className="whitespace-nowrap">{track}</span>
+    </Fragment>
+  ));
 }
 
 function RowMetrics({ row }: { row: CurriculumSummaryRow }) {
@@ -401,13 +413,25 @@ function PlanCells({
   );
 }
 
-// A subject pill or a PCM / PCB Behind cell: "N behind · done/due" or "On track · done/due".
+// A subject pill or a PCM / PCB Behind cell: the pill reads "N behind" or "On track", with
+// "done/due done" under it. Screen readers get one phrase instead of the two fragments.
 function ProgressPill({ progress }: { progress: CurriculumSummarySubjectProgress | null }) {
   if (!progress) return <span className="text-text-muted">—</span>;
+  const chapters = progress.due === 1 ? "chapter" : "chapters";
   return (
-    <Badge variant={TONE_BADGE_VARIANTS[progress.tone]} data-tone={progress.tone}>
-      {progress.label} · {progress.done}/{progress.due}
-    </Badge>
+    <>
+      <span data-progress-text className="sr-only">
+        {`${progress.label}, ${progress.done} of ${progress.due} due ${chapters} done`}
+      </span>
+      <span aria-hidden="true" className="flex flex-col items-start gap-1">
+        <Badge variant={TONE_BADGE_VARIANTS[progress.tone]} data-tone={progress.tone} className="whitespace-nowrap">
+          {progress.label}
+        </Badge>
+        <span data-done className="whitespace-nowrap text-xs text-text-muted">
+          {progress.done}/{progress.due} done
+        </span>
+      </span>
+    </>
   );
 }
 
