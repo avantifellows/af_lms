@@ -2,7 +2,7 @@
 // matches a SQL fragment and returns rows; every call is recorded so tests can assert what was
 // (and was not) written. Unmatched SQL returns no rows.
 
-export interface FakeDbCall {
+interface FakeDbCall {
   sql: string;
   params: unknown[];
 }

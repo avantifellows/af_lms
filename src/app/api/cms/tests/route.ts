@@ -24,7 +24,7 @@ interface RawCmsTest {
   type_params?: { chapter_id?: number; marks?: number; duration?: string };
 }
 
-export interface CmsTestOption {
+interface CmsTestOption {
   id: number;
   code: string;
   name: string;

@@ -91,6 +91,33 @@ const G11_CHAPTERS: SeedChapter[] = [
 const CHAPTERS_BY_GRADE = { 11: G11_CHAPTERS, 12: G12_CHAPTERS };
 
 describe("buildCurriculumPlanSeed", () => {
+  it("reads rich-text, hyperlink and formula cells, and a formula date", async () => {
+    const workbook = await buildWorkbook({
+      G12: [day("2026-07-08"), day("2026-07-09"), day("2026-07-10"), day("2026-11-30")],
+      "G11 (Others)": [day("2026-07-07", { Chemistry: "Mole Concept -1" }), day("2027-03-08")],
+      "G11 (HYD)": [day("2027-02-08")],
+    });
+    const g12 = workbook.getWorksheet("G12")!;
+    // Rows 3–5 are 8–10 Jul; columns 4–7 are Physics, Chemistry, Mathematics, Biology.
+    g12.getCell(3, 4).value = { richText: [{ text: "Ray " }, { text: "Optics -1" }] };
+    g12.getCell(4, 5).value = { text: "Coordination Compounds -1", hyperlink: "https://example.org" };
+    g12.getCell(5, 7).value = { formula: "A1", result: "Evolution -1" };
+    g12.getCell(5, 2).value = { formula: "B4+1", result: new Date("2026-07-10T00:00:00Z") };
+    g12.getCell(5, 6).value = 42;
+    g12.getCell(4, 6).value = { formula: "C1", result: undefined } as unknown as ExcelJS.CellValue;
+
+    const { drafts, report } = buildCurriculumPlanSeed(workbook, CHAPTERS_BY_GRADE);
+
+    expect(drafts[0].chapters).toEqual([
+      { chapterId: 1223, dueDate: "2026-07-08", testDate: null },
+      { chapterId: 1324, dueDate: "2026-07-09", testDate: null },
+      { chapterId: 1529, dueDate: "2026-07-10", testDate: null },
+    ]);
+    expect(report[0].unmatchedRows).toEqual([
+      { subject: "Mathematics", sheetName: "42", kind: "teaching", dates: ["2026-07-10"], reason: "no_match", candidates: [] },
+    ]);
+  });
+
   it("dates a Chapter by its last teaching day and closes each plan on its tab's last date", async () => {
     const workbook = await buildWorkbook({
       G12: [

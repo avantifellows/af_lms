@@ -91,7 +91,7 @@ export type CurriculumPlanCreateResult =
   | CurriculumPlanValidationFailure
   | CurriculumSchemaUnavailable;
 
-export interface CurriculumPlanMetadata {
+interface CurriculumPlanMetadata {
   title: string;
   examTracks: ExamTrack[];
   academicYear: string;
@@ -124,60 +124,104 @@ export function validationFailure(errors: CurriculumPlanError[]): CurriculumPlan
   return { ok: false, status: 400, error: "Invalid Curriculum Plan", errors };
 }
 
-export function normalizeCurriculumPlanMetadata(
+type FieldCheck<T> = { value: T; error: CurriculumPlanError | null };
+
+function stringField(input: Record<string, unknown>, key: string): string {
+  const value = input[key];
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function checkTitle(input: Record<string, unknown>): FieldCheck<string> {
+  const title = stringField(input, "title");
+  if (!title) return { value: title, error: { field: "title", message: "Title is required" } };
+  if (title.length > TITLE_MAX_LENGTH) {
+    return {
+      value: title,
+      error: { field: "title", message: `Title must be at most ${TITLE_MAX_LENGTH} characters` },
+    };
+  }
+  return { value: title, error: null };
+}
+
+function checkExamTracks(input: Record<string, unknown>): FieldCheck<ExamTrack[]> {
+  const rawTracks: unknown[] = Array.isArray(input.exam_tracks) ? input.exam_tracks : [];
+  const value = CONTENT_EXAM_TRACKS.filter((track) => rawTracks.includes(track));
+  if (rawTracks.length === 0) {
+    return { value, error: { field: "exam_tracks", message: "Choose at least one served Exam Track" } };
+  }
+  const unknownTrack = rawTracks.some((track) => !CONTENT_EXAM_TRACKS.includes(track as ExamTrack));
+  return {
+    value,
+    error: unknownTrack
+      ? { field: "exam_tracks", message: "Served Exam Tracks must be JEE Main, JEE Advanced or NEET" }
+      : null,
+  };
+}
+
+function checkAcademicYear(input: Record<string, unknown>): FieldCheck<string> {
+  const academicYear = stringField(input, "academic_year");
+  return {
+    value: academicYear,
+    error:
+      parseAcademicYear(academicYear) === null
+        ? { field: "academic_year", message: "Academic year must look like 2026-2027" }
+        : null,
+  };
+}
+
+function checkGrade(input: Record<string, unknown>): FieldCheck<number> {
+  const grade = Number(input.grade);
+  return {
+    value: grade,
+    error: PLAN_GRADES.includes(grade) ? null : { field: "grade", message: "Grade must be 11 or 12" },
+  };
+}
+
+// The closure date must be a real date within the academic year (checked only when the
+// academic year itself is valid).
+function checkClosureDate(input: Record<string, unknown>, academicYear: string): FieldCheck<string> {
+  const closureDate = typeof input.closure_date === "string" ? input.closure_date : "";
+  if (!isDateString(closureDate)) {
+    return {
+      value: closureDate,
+      error: { field: "closure_date", message: "Plan Closure Date must be a valid date" },
+    };
+  }
+  const outside =
+    parseAcademicYear(academicYear) !== null &&
+    (closureDate < academicYearStartDate(academicYear) || closureDate > academicYearEndDate(academicYear));
+  return {
+    value: closureDate,
+    error: outside
+      ? { field: "closure_date", message: `Plan Closure Date must fall within academic year ${academicYear}` }
+      : null,
+  };
+}
+
+function normalizeCurriculumPlanMetadata(
   body: unknown
 ): { ok: true; metadata: CurriculumPlanMetadata } | CurriculumPlanValidationFailure {
   const input = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
-  const errors: CurriculumPlanError[] = [];
-
-  const title = typeof input.title === "string" ? input.title.trim() : "";
-  if (!title) {
-    errors.push({ field: "title", message: "Title is required" });
-  } else if (title.length > TITLE_MAX_LENGTH) {
-    errors.push({ field: "title", message: `Title must be at most ${TITLE_MAX_LENGTH} characters` });
-  }
-
-  const rawTracks = Array.isArray(input.exam_tracks) ? input.exam_tracks : [];
-  const examTracks = CONTENT_EXAM_TRACKS.filter((track) => rawTracks.includes(track));
-  if (rawTracks.length === 0) {
-    errors.push({ field: "exam_tracks", message: "Choose at least one served Exam Track" });
-  } else if (rawTracks.some((track) => !CONTENT_EXAM_TRACKS.includes(track as ExamTrack))) {
-    errors.push({
-      field: "exam_tracks",
-      message: "Served Exam Tracks must be JEE Main, JEE Advanced or NEET",
-    });
-  }
-
-  const academicYear = typeof input.academic_year === "string" ? input.academic_year.trim() : "";
-  const academicYearValid = parseAcademicYear(academicYear) !== null;
-  if (!academicYearValid) {
-    errors.push({
-      field: "academic_year",
-      message: "Academic year must look like 2026-2027",
-    });
-  }
-
-  const grade = Number(input.grade);
-  if (!PLAN_GRADES.includes(grade)) {
-    errors.push({ field: "grade", message: "Grade must be 11 or 12" });
-  }
-
-  const closureDate = typeof input.closure_date === "string" ? input.closure_date : "";
-  if (!isDateString(closureDate)) {
-    errors.push({ field: "closure_date", message: "Plan Closure Date must be a valid date" });
-  } else if (
-    academicYearValid &&
-    (closureDate < academicYearStartDate(academicYear) ||
-      closureDate > academicYearEndDate(academicYear))
-  ) {
-    errors.push({
-      field: "closure_date",
-      message: `Plan Closure Date must fall within academic year ${academicYear}`,
-    });
-  }
+  const title = checkTitle(input);
+  const examTracks = checkExamTracks(input);
+  const academicYear = checkAcademicYear(input);
+  const grade = checkGrade(input);
+  const closureDate = checkClosureDate(input, academicYear.value);
+  const errors = [title, examTracks, academicYear, grade, closureDate]
+    .map((check) => check.error)
+    .filter((error): error is CurriculumPlanError => error !== null);
 
   if (errors.length > 0) return validationFailure(errors);
-  return { ok: true, metadata: { title, examTracks, academicYear, grade, closureDate } };
+  return {
+    ok: true,
+    metadata: {
+      title: title.value,
+      examTracks: examTracks.value,
+      academicYear: academicYear.value,
+      grade: grade.value,
+      closureDate: closureDate.value,
+    },
+  };
 }
 
 interface PlanRow {
@@ -438,6 +482,32 @@ interface ChapterDateInput {
   testDate: string | null;
 }
 
+// "" and null/undefined clear a date; anything else must be a real YYYY-MM-DD date. Returns
+// undefined for an invalid value.
+function optionalDate(value: unknown): string | null | undefined {
+  if (value == null || value === "") return null;
+  return typeof value === "string" && isDateString(value) ? value : undefined;
+}
+
+// One raw `{ chapter_id, due_date, test_date }` entry; `seen` rejects a repeated Chapter.
+function normalizeChapterDateInput(
+  raw: unknown,
+  seen: Set<number>
+): { input: ChapterDateInput } | { error: CurriculumPlanError } {
+  const item = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const chapterId = Number(item.chapter_id);
+  if (!Number.isInteger(chapterId) || chapterId <= 0 || seen.has(chapterId)) {
+    return { error: { field: "chapters", message: "Each Chapter must appear once with a valid id" } };
+  }
+  seen.add(chapterId);
+  const dueDate = optionalDate(item.due_date);
+  const testDate = optionalDate(item.test_date);
+  if (dueDate === undefined || testDate === undefined) {
+    return { error: { field: "chapters", chapterId, message: "Dates must be valid YYYY-MM-DD dates" } };
+  }
+  return { input: { chapterId, dueDate, testDate } };
+}
+
 function normalizeChapterDateInputs(
   body: unknown
 ): { ok: true; inputs: ChapterDateInput[] } | CurriculumPlanValidationFailure {
@@ -445,30 +515,11 @@ function normalizeChapterDateInputs(
   if (!Array.isArray(input.chapters) || input.chapters.length === 0) {
     return validationFailure([{ field: "chapters", message: "No Chapter dates to save" }]);
   }
-  const errors: CurriculumPlanError[] = [];
-  const inputs: ChapterDateInput[] = [];
   const seen = new Set<number>();
-  for (const raw of input.chapters) {
-    const item = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
-    const chapterId = Number(item.chapter_id);
-    if (!Number.isInteger(chapterId) || chapterId <= 0 || seen.has(chapterId)) {
-      errors.push({ field: "chapters", message: "Each Chapter must appear once with a valid id" });
-      continue;
-    }
-    seen.add(chapterId);
-    const dueDate = item.due_date == null || item.due_date === "" ? null : item.due_date;
-    const testDate = item.test_date == null || item.test_date === "" ? null : item.test_date;
-    if (
-      (dueDate !== null && (typeof dueDate !== "string" || !isDateString(dueDate))) ||
-      (testDate !== null && (typeof testDate !== "string" || !isDateString(testDate)))
-    ) {
-      errors.push({ field: "chapters", chapterId, message: "Dates must be valid YYYY-MM-DD dates" });
-      continue;
-    }
-    inputs.push({ chapterId, dueDate: dueDate as string | null, testDate: testDate as string | null });
-  }
+  const results = input.chapters.map((raw) => normalizeChapterDateInput(raw, seen));
+  const errors = results.flatMap((result) => ("error" in result ? [result.error] : []));
   if (errors.length > 0) return validationFailure(errors);
-  return { ok: true, inputs };
+  return { ok: true, inputs: results.flatMap((result) => ("input" in result ? [result.input] : [])) };
 }
 
 export interface LockedPlanRow {
@@ -704,20 +755,8 @@ export async function updateCurriculumPlanMetadata(params: {
     if (gradeId === null) {
       return validationFailure([{ field: "grade", message: "Grade was not found" }]);
     }
-
-    if (metadata.academicYear !== plan.academic_year || gradeId !== Number(plan.grade_id)) {
-      const assigned = await db(
-        "SELECT 1 FROM lms_curriculum_plan_assignments WHERE plan_id = $1 LIMIT 1",
-        [params.id]
-      );
-      if (assigned.length > 0) {
-        return {
-          ok: false as const,
-          status: 409 as const,
-          error: "Academic year and Grade are locked while the plan has Plan Assignments",
-        };
-      }
-    }
+    const conflict = await yearOrGradeLockConflict(db, plan, metadata.academicYear, gradeId);
+    if (conflict) return conflict;
 
     const updated = { academic_year: metadata.academicYear, closure_date: metadata.closureDate };
     const errors = storedDateErrors(await loadStoredChapterDates(db, params.id), updated);
@@ -743,8 +782,49 @@ export async function updateCurriculumPlanMetadata(params: {
         params.adminEmail,
       ]
     );
-    const rows = await db<PlanRow>(`${PLAN_SELECT} WHERE p.id = $1`, [params.id]);
-    return { ok: true as const, plan: mapPlanRow(rows[0]) };
+    return { ok: true as const, plan: await readPlanSummary(db, params.id) };
+  });
+}
+
+// Academic year and Grade are locked while the plan has any Plan Assignment.
+async function yearOrGradeLockConflict(
+  db: Db,
+  plan: LockedPlanRow,
+  academicYear: string,
+  gradeId: number
+): Promise<Conflict | null> {
+  if (academicYear === plan.academic_year && gradeId === Number(plan.grade_id)) return null;
+  const assigned = await db(
+    "SELECT 1 FROM lms_curriculum_plan_assignments WHERE plan_id = $1 LIMIT 1",
+    [plan.id]
+  );
+  if (assigned.length === 0) return null;
+  return {
+    ok: false,
+    status: 409,
+    error: "Academic year and Grade are locked while the plan has Plan Assignments",
+  };
+}
+
+// Schema check, then in one transaction lock the plan and require it to be a Draft before
+// `run` changes it (activate and delete).
+async function withLockedDraftPlan<T>(
+  id: number,
+  action: "activated" | "deleted",
+  run: (db: Db, plan: LockedPlanRow) => Promise<T>
+): Promise<T | CurriculumSchemaUnavailable | NotFound | Conflict> {
+  const schema = await checkCurriculumPlansSchema();
+  if (!schema.ok) return schema;
+  if (!Number.isInteger(id) || id <= 0) return planNotFound();
+
+  return withTransaction(async (client) => {
+    const db = clientDb(client);
+    const plan = await lockPlan(db, id);
+    if (!plan) return planNotFound();
+    if (plan.status !== "draft") {
+      return { ok: false as const, status: 409 as const, error: `Only Draft plans can be ${action}` };
+    }
+    return run(db, plan);
   });
 }
 
@@ -760,18 +840,7 @@ export async function activateCurriculumPlan(params: {
   id: number;
   adminEmail: string;
 }): Promise<CurriculumPlanActivateResult> {
-  const schema = await checkCurriculumPlansSchema();
-  if (!schema.ok) return schema;
-  if (!Number.isInteger(params.id) || params.id <= 0) return planNotFound();
-
-  return withTransaction(async (client) => {
-    const db = clientDb(client);
-    const plan = await lockPlan(db, params.id);
-    if (!plan) return planNotFound();
-    if (plan.status !== "draft") {
-      return { ok: false as const, status: 409 as const, error: "Only Draft plans can be activated" };
-    }
-
+  return withLockedDraftPlan(params.id, "activated", async (db, plan) => {
     const chapters = await loadEffectiveChapters(db, {
       id: params.id,
       gradeId: Number(plan.grade_id),
@@ -794,8 +863,7 @@ export async function activateCurriculumPlan(params: {
        WHERE id = $1`,
       [params.id, params.adminEmail]
     );
-    const rows = await db<PlanRow>(`${PLAN_SELECT} WHERE p.id = $1`, [params.id]);
-    return { ok: true as const, plan: mapPlanRow(rows[0]), warnings };
+    return { ok: true as const, plan: await readPlanSummary(db, params.id), warnings };
   });
 }
 
@@ -811,17 +879,7 @@ export type CurriculumPlanDeleteResult =
 export async function deleteCurriculumPlan(params: {
   id: number;
 }): Promise<CurriculumPlanDeleteResult> {
-  const schema = await checkCurriculumPlansSchema();
-  if (!schema.ok) return schema;
-  if (!Number.isInteger(params.id) || params.id <= 0) return planNotFound();
-
-  return withTransaction(async (client) => {
-    const db = clientDb(client);
-    const plan = await lockPlan(db, params.id);
-    if (!plan) return planNotFound();
-    if (plan.status !== "draft") {
-      return { ok: false as const, status: 409 as const, error: "Only Draft plans can be deleted" };
-    }
+  return withLockedDraftPlan(params.id, "deleted", async (db) => {
     await db("DELETE FROM lms_curriculum_plans WHERE id = $1", [params.id]);
     return { ok: true as const };
   });

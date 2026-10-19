@@ -31,7 +31,3 @@ export function isPastOrTodayIST(dateStr: string): boolean {
 export function isFutureIST(dateStr: string): boolean {
   return isDateString(dateStr) && dateStr > getTodayIST();
 }
-
-export function getTodayDate(): string {
-  return getTodayIST();
-}

@@ -46,11 +46,17 @@ interface DayEntry {
 }
 
 function cellText(value: ExcelJS.CellValue): string {
-  if (value === null || value === undefined) return "";
   if (typeof value === "string") return value;
   if (typeof value === "number" || typeof value === "boolean") return String(value);
-  if (value instanceof Date) return "";
-  if ("richText" in value) return value.richText.map((part) => part.text).join("");
+  if (!value || value instanceof Date) return "";
+  return objectCellText(value);
+}
+
+// Rich text, hyperlink ({ text }) and formula ({ result }) cells.
+function objectCellText(value: object): string {
+  if ("richText" in value) {
+    return (value as ExcelJS.CellRichTextValue).richText.map((part) => part.text).join("");
+  }
   if ("text" in value && typeof value.text === "string") return value.text;
   if ("result" in value && value.result !== undefined) return cellText(value.result as ExcelJS.CellValue);
   return "";
@@ -262,99 +268,143 @@ function addDistinct(values: string[], value: string): void {
   if (!values.includes(value)) values.push(value);
 }
 
-export function buildCurriculumPlanSeed(
+type Unmatched = Map<string, UnmatchedSheetRow>;
+
+// Per subject, what was last taught: a resolved Chapter (`id:…`) or an unresolved name, so a
+// Chapter taught again after another one starts a new run.
+interface TabScan {
+  chapters: SeedChapter[];
+  days: Map<number, ChapterDays>;
+  lastTaught: Map<string, string>;
+  unmatched: Unmatched;
+}
+
+function recordUnmatched(
+  scan: TabScan,
+  entry: DayEntry,
+  classified: { kind: EntryKind; sheetName: string; name: string },
+  resolution: Extract<Resolution, { ok: false }>
+): void {
+  const { kind, sheetName, name } = classified;
+  if (kind === "teaching") scan.lastTaught.set(entry.subject, `name:${name}`);
+  const key = `${kind}|${entry.subject}|${name}`;
+  const row = scan.unmatched.get(key) ?? {
+    subject: entry.subject,
+    sheetName,
+    kind,
+    dates: [],
+    reason: resolution.reason,
+    candidates: resolution.candidates.map(chapterLabel),
+  };
+  row.dates.push(entry.date);
+  scan.unmatched.set(key, row);
+}
+
+function recordMatched(
+  scan: TabScan,
+  entry: DayEntry,
+  classified: { kind: EntryKind; sheetName: string },
+  chapterId: number
+): void {
+  const chapterDays = scan.days.get(chapterId) ?? { sheetNames: [], runs: [], tests: [] };
+  scan.days.set(chapterId, chapterDays);
+  addDistinct(chapterDays.sheetNames, classified.sheetName);
+  if (classified.kind === "test") {
+    addDistinct(chapterDays.tests, entry.date);
+    return;
+  }
+  const runKey = `id:${chapterId}`;
+  const currentRun = chapterDays.runs[chapterDays.runs.length - 1];
+  if (currentRun && scan.lastTaught.get(entry.subject) === runKey) currentRun.to = entry.date;
+  else chapterDays.runs.push({ from: entry.date, to: entry.date });
+  scan.lastTaught.set(entry.subject, runKey);
+}
+
+function scanEntries(entries: DayEntry[], chapters: SeedChapter[]): TabScan {
+  const scan: TabScan = { chapters, days: new Map(), lastTaught: new Map(), unmatched: new Map() };
+  for (const entry of entries) {
+    if (NON_TEACHING_PATTERN.test(normalizeName(entry.label))) continue;
+    const classified = classifyEntry(entry.label);
+    const resolution = resolveChapter(entry.subject, classified.name, chapters);
+    if (resolution.ok) recordMatched(scan, entry, classified, resolution.chapter.chapterId);
+    else recordUnmatched(scan, entry, classified, resolution);
+  }
+  return scan;
+}
+
+function latest(dates: string[]): string {
+  return dates.reduce((last, date) => (date > last ? date : last), "");
+}
+
+interface TabChapters {
+  matched: MatchedChapter[];
+  uncoveredChapters: UncoveredChapter[];
+  duplicates: DuplicateChapter[];
+  draftChapters: PlanDraftChapter[];
+}
+
+// A Chapter with no teaching day is uncovered; its test days (if any) become an unmatched
+// "test without teaching" row, since a test date needs a due date.
+function addUncovered(scan: TabScan, result: TabChapters, chapter: SeedChapter): void {
+  const chapterDays = scan.days.get(chapter.chapterId);
+  const label = chapterLabel(chapter);
+  result.uncoveredChapters.push({ subject: chapter.subjectName, chapter: label });
+  if (!chapterDays) return;
+  scan.unmatched.set(`untaught|${chapter.chapterId}`, {
+    subject: chapter.subjectName,
+    sheetName: chapterDays.sheetNames[0],
+    kind: "test",
+    dates: chapterDays.tests,
+    reason: "test_without_teaching",
+    candidates: [label],
+  });
+}
+
+// Due date = last teaching day; test date = last test day. Several runs or test days are
+// reported as duplicates.
+function addTaught(result: TabChapters, chapter: SeedChapter, chapterDays: ChapterDays): void {
+  const subject = chapter.subjectName;
+  const label = chapterLabel(chapter);
+  const dueDate = latest(chapterDays.runs.map((run) => run.to));
+  const testDate = chapterDays.tests.length > 0 ? latest(chapterDays.tests) : null;
+  result.matched.push({ subject, chapter: label, sheetNames: chapterDays.sheetNames, dueDate, testDate });
+  result.draftChapters.push({ chapterId: chapter.chapterId, dueDate, testDate });
+  if (chapterDays.runs.length > 1) {
+    result.duplicates.push({
+      subject,
+      chapter: label,
+      kind: "teaching",
+      dates: chapterDays.runs.map((run) => `${run.from} to ${run.to}`),
+    });
+  }
+  if (chapterDays.tests.length > 1) {
+    result.duplicates.push({ subject, chapter: label, kind: "test", dates: chapterDays.tests });
+  }
+}
+
+function summarizeChapters(scan: TabScan): TabChapters {
+  const result: TabChapters = { matched: [], uncoveredChapters: [], duplicates: [], draftChapters: [] };
+  for (const chapter of scan.chapters) {
+    const chapterDays = scan.days.get(chapter.chapterId);
+    if (chapterDays && chapterDays.runs.length > 0) addTaught(result, chapter, chapterDays);
+    else addUncovered(scan, result, chapter);
+  }
+  return result;
+}
+
+function buildTab(
   workbook: ExcelJS.Workbook,
-  chaptersByGrade: Record<number, SeedChapter[]>
-): { drafts: PlanDraft[]; report: SeedTabReport[] } {
-  const drafts: PlanDraft[] = [];
-  const report: SeedTabReport[] = [];
-  for (const { tab, title, grade } of SEED_TABS) {
-    const sheet = workbook.getWorksheet(tab);
-    if (!sheet) throw new Error(`Workbook has no "${tab}" tab`);
-    const { dates, entries } = readTab(sheet);
-    const chapters = chaptersByGrade[grade] ?? [];
-    const closureDate = dates.reduce((last, date) => (date > last ? date : last), "");
-
-    const days = new Map<number, ChapterDays>();
-    const lastTaught = new Map<string, string>();
-    const unmatched = new Map<string, UnmatchedSheetRow>();
-    for (const entry of entries) {
-      if (NON_TEACHING_PATTERN.test(normalizeName(entry.label))) continue;
-      const { kind, sheetName, name } = classifyEntry(entry.label);
-      const resolution = resolveChapter(entry.subject, name, chapters);
-      if (!resolution.ok) {
-        if (kind === "teaching") lastTaught.set(entry.subject, `name:${name}`);
-        const key = `${kind}|${entry.subject}|${name}`;
-        const row = unmatched.get(key) ?? {
-          subject: entry.subject,
-          sheetName,
-          kind,
-          dates: [],
-          reason: resolution.reason,
-          candidates: resolution.candidates.map(chapterLabel),
-        };
-        row.dates.push(entry.date);
-        unmatched.set(key, row);
-        continue;
-      }
-
-      const { chapterId } = resolution.chapter;
-      const chapterDays = days.get(chapterId) ?? { sheetNames: [], runs: [], tests: [] };
-      days.set(chapterId, chapterDays);
-      addDistinct(chapterDays.sheetNames, sheetName);
-      if (kind === "test") {
-        addDistinct(chapterDays.tests, entry.date);
-        continue;
-      }
-      const runKey = `id:${chapterId}`;
-      const currentRun = chapterDays.runs[chapterDays.runs.length - 1];
-      if (currentRun && lastTaught.get(entry.subject) === runKey) currentRun.to = entry.date;
-      else chapterDays.runs.push({ from: entry.date, to: entry.date });
-      lastTaught.set(entry.subject, runKey);
-    }
-
-    const matched: MatchedChapter[] = [];
-    const uncoveredChapters: UncoveredChapter[] = [];
-    const duplicates: DuplicateChapter[] = [];
-    const draftChapters: PlanDraftChapter[] = [];
-    for (const chapter of chapters) {
-      const chapterDays = days.get(chapter.chapterId);
-      const subject = chapter.subjectName;
-      const label = chapterLabel(chapter);
-      if (!chapterDays || chapterDays.runs.length === 0) {
-        uncoveredChapters.push({ subject, chapter: label });
-        if (chapterDays) {
-          unmatched.set(`untaught|${chapter.chapterId}`, {
-            subject,
-            sheetName: chapterDays.sheetNames[0],
-            kind: "test",
-            dates: chapterDays.tests,
-            reason: "test_without_teaching",
-            candidates: [label],
-          });
-        }
-        continue;
-      }
-      const dueDate = chapterDays.runs.reduce((last, run) => (run.to > last ? run.to : last), "");
-      const testDate = chapterDays.tests.length > 0
-        ? chapterDays.tests.reduce((last, date) => (date > last ? date : last))
-        : null;
-      matched.push({ subject, chapter: label, sheetNames: chapterDays.sheetNames, dueDate, testDate });
-      draftChapters.push({ chapterId: chapter.chapterId, dueDate, testDate });
-      if (chapterDays.runs.length > 1) {
-        duplicates.push({
-          subject,
-          chapter: label,
-          kind: "teaching",
-          dates: chapterDays.runs.map((run) => `${run.from} to ${run.to}`),
-        });
-      }
-      if (chapterDays.tests.length > 1) {
-        duplicates.push({ subject, chapter: label, kind: "test", dates: chapterDays.tests });
-      }
-    }
-
-    drafts.push({
+  { tab, title, grade }: (typeof SEED_TABS)[number],
+  chapters: SeedChapter[]
+): { draft: PlanDraft; report: SeedTabReport } {
+  const sheet = workbook.getWorksheet(tab);
+  if (!sheet) throw new Error(`Workbook has no "${tab}" tab`);
+  const { dates, entries } = readTab(sheet);
+  const closureDate = latest(dates);
+  const scan = scanEntries(entries, chapters);
+  const { draftChapters, ...summary } = summarizeChapters(scan);
+  return {
+    draft: {
       tab,
       title,
       academicYear: SEED_ACADEMIC_YEAR,
@@ -362,19 +412,26 @@ export function buildCurriculumPlanSeed(
       examTracks: [...CONTENT_EXAM_TRACKS],
       closureDate,
       chapters: draftChapters,
-    });
-    report.push({
+    },
+    report: {
       tab,
       title,
       grade,
       closureDate,
-      matched,
-      unmatchedRows: [...unmatched.values()],
-      uncoveredChapters,
-      duplicates,
-    });
-  }
-  return { drafts, report };
+      matched: summary.matched,
+      unmatchedRows: [...scan.unmatched.values()],
+      uncoveredChapters: summary.uncoveredChapters,
+      duplicates: summary.duplicates,
+    },
+  };
+}
+
+export function buildCurriculumPlanSeed(
+  workbook: ExcelJS.Workbook,
+  chaptersByGrade: Record<number, SeedChapter[]>
+): { drafts: PlanDraft[]; report: SeedTabReport[] } {
+  const tabs = SEED_TABS.map((spec) => buildTab(workbook, spec, chaptersByGrade[spec.grade] ?? []));
+  return { drafts: tabs.map((built) => built.draft), report: tabs.map((built) => built.report) };
 }
 
 export type CurriculumPlanSeedMode = "dry-run" | "apply";

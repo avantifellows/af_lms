@@ -288,15 +288,27 @@ function previewAgainst(
   };
 }
 
+// Shared prelude of preview and save by plan: schema, plan id and the ticked Centre ids.
+async function prepareByPlan(params: {
+  id: number;
+  body: unknown;
+}): Promise<
+  | { ok: true; centreIds: number[] }
+  | CurriculumPlanValidationFailure
+  | CurriculumSchemaUnavailable
+  | NotFound
+> {
+  const schema = await checkCurriculumPlansSchema();
+  if (!schema.ok) return schema;
+  if (!Number.isInteger(params.id) || params.id <= 0) return planNotFound();
+  return normalizeCentreIds(params.body);
+}
+
 export async function previewPlanAssignment(params: {
   id: number;
   body: unknown;
 }): Promise<PlanAssignmentPreviewResult> {
-  const schema = await checkCurriculumPlansSchema();
-  if (!schema.ok) return schema;
-  if (!Number.isInteger(params.id) || params.id <= 0) return planNotFound();
-
-  const normalized = normalizeCentreIds(params.body);
+  const normalized = await prepareByPlan(params);
   if (!normalized.ok) return normalized;
 
   const plan = await readPlan(poolDb, params.id);
@@ -322,11 +334,7 @@ export async function savePlanAssignmentByPlan(params: {
   adminEmail: string;
   body: unknown;
 }): Promise<PlanAssignmentSaveResult> {
-  const schema = await checkCurriculumPlansSchema();
-  if (!schema.ok) return schema;
-  if (!Number.isInteger(params.id) || params.id <= 0) return planNotFound();
-
-  const normalized = normalizeCentreIds(params.body);
+  const normalized = await prepareByPlan(params);
   if (!normalized.ok) return normalized;
   const centreIds = normalized.centreIds;
 
@@ -417,7 +425,7 @@ export async function savePlanAssignmentByPlan(params: {
 // Centre coverage: for one academic year, every Centre that is eligible for a Grade 11 or
 // Grade 12 plan, with its assigned plan per Grade. A Grade the Centre doesn't run (no Centre
 // Exam Track mapped) is null, shown as not applicable.
-export const COVERAGE_GRADES = [11, 12] as const;
+const COVERAGE_GRADES = [11, 12] as const;
 export type CoverageGrade = (typeof COVERAGE_GRADES)[number];
 
 export interface CoveragePlan {
@@ -518,46 +526,61 @@ export async function listCentreCoverage(academicYear: string): Promise<CentreCo
   ]);
   if (!plans.ok) return plans;
 
-  const today = getTodayIST();
+  return {
+    ok: true,
+    academicYear,
+    centres: groupCoverageRows(rows, contentRows, getTodayIST()),
+    plans: plans.plans,
+  };
+}
+
+// One Centre + Grade's coverage: its assigned plan (if any) and the mapped tracks that plan
+// can't measure.
+function coverageGrade(
+  row: CoverageRow,
+  tracksWithContent: string[],
+  today: string
+): CentreCoverageGrade {
+  if (row.plan_id === null) return { mappedTracks: row.mapped_tracks, plan: null, uncoveredTracks: [] };
+  return {
+    mappedTracks: row.mapped_tracks,
+    plan: {
+      id: Number(row.plan_id),
+      title: row.plan_title ?? "",
+      displayStatus: planStatusAsOf(
+        { status: row.plan_status ?? "draft", closureDate: row.plan_closure_date ?? "" },
+        today
+      ),
+    },
+    uncoveredTracks: uncoveredExamTracks(row.mapped_tracks, row.plan_exam_tracks ?? [], tracksWithContent),
+  };
+}
+
+// The query returns one row per Centre + Grade; fold them into one row per Centre.
+function groupCoverageRows(
+  rows: CoverageRow[],
+  contentRows: { grade: string | number; exam_track: string }[],
+  today: string
+): CentreCoverageRow[] {
   const centres = new Map<number, CentreCoverageRow>();
   for (const row of rows) {
     const centreId = Number(row.centre_id);
     const grade = Number(row.grade) as CoverageGrade;
-    let centre = centres.get(centreId);
-    if (!centre) {
-      centre = {
-        centreId,
-        centreName: row.centre_name,
-        schoolName: row.school_name,
-        region: row.region ?? "",
-        programName: row.program_name,
-        grades: { 11: null, 12: null },
-      };
-      centres.set(centreId, centre);
-    }
+    const centre = centres.get(centreId) ?? {
+      centreId,
+      centreName: row.centre_name,
+      schoolName: row.school_name,
+      region: row.region ?? "",
+      programName: row.program_name,
+      grades: { 11: null, 12: null },
+    };
+    centres.set(centreId, centre);
     const tracksWithContent = contentRows
       .filter((content) => Number(content.grade) === grade)
       .map((content) => content.exam_track);
-    centre.grades[grade] = {
-      mappedTracks: row.mapped_tracks,
-      plan:
-        row.plan_id === null
-          ? null
-          : {
-              id: Number(row.plan_id),
-              title: row.plan_title ?? "",
-              displayStatus: planStatusAsOf(
-                { status: row.plan_status ?? "draft", closureDate: row.plan_closure_date ?? "" },
-                today
-              ),
-            },
-      uncoveredTracks:
-        row.plan_id === null
-          ? []
-          : uncoveredExamTracks(row.mapped_tracks, row.plan_exam_tracks ?? [], tracksWithContent),
-    };
+    centre.grades[grade] = coverageGrade(row, tracksWithContent, today);
   }
-  return { ok: true, academicYear, centres: [...centres.values()], plans: plans.plans };
+  return [...centres.values()];
 }
 
 export interface CentrePlanAssignment {
@@ -576,6 +599,34 @@ export type CentrePlanAssignmentSaveResult =
 const ASSIGNMENTS_MESSAGE =
   "assignments must list Grade 11 or 12 at most once each, with a plan id or null";
 
+// One `{ grade, plan_id }` entry: Grade 11 or 12 not already listed, and a positive plan id or
+// null. Anything else is null.
+function parseCentrePlanAssignment(
+  item: unknown,
+  listed: CentrePlanAssignment[]
+): CentrePlanAssignment | null {
+  const entry = (item && typeof item === "object" ? item : {}) as Record<string, unknown>;
+  const grade = Number(entry.grade) as CoverageGrade;
+  const planId = entry.plan_id === null ? null : Number(entry.plan_id);
+  const gradeValid =
+    COVERAGE_GRADES.includes(grade) && !listed.some((assignment) => assignment.grade === grade);
+  const planValid = planId === null || (Number.isInteger(planId) && planId > 0);
+  return gradeValid && planValid ? { grade, planId } : null;
+}
+
+// The whole list, or null when it is empty or any entry is invalid.
+function parseCentrePlanAssignments(value: unknown): CentrePlanAssignment[] | null {
+  const raw = Array.isArray(value) ? value : [];
+  if (raw.length === 0) return null;
+  const assignments: CentrePlanAssignment[] = [];
+  for (const item of raw) {
+    const assignment = parseCentrePlanAssignment(item, assignments);
+    if (!assignment) return null;
+    assignments.push(assignment);
+  }
+  return assignments;
+}
+
 function normalizeCentrePlanAssignments(
   body: unknown
 ):
@@ -588,28 +639,118 @@ function normalizeCentrePlanAssignments(
   if (parseAcademicYear(academicYear) === null) {
     errors.push({ field: "academic_year", message: "Academic year must look like 2026-2027" });
   }
+  const assignments = parseCentrePlanAssignments(input.assignments);
+  if (!assignments) errors.push({ field: "assignments", message: ASSIGNMENTS_MESSAGE });
 
-  const assignments: CentrePlanAssignment[] = [];
-  const raw = Array.isArray(input.assignments) ? input.assignments : [];
-  let valid = raw.length > 0;
-  for (const item of raw) {
-    const entry = (item && typeof item === "object" ? item : {}) as Record<string, unknown>;
-    const grade = Number(entry.grade);
-    const planId = entry.plan_id === null ? null : Number(entry.plan_id);
-    if (
-      !COVERAGE_GRADES.includes(grade as CoverageGrade) ||
-      assignments.some((assignment) => assignment.grade === grade) ||
-      (planId !== null && (!Number.isInteger(planId) || planId <= 0))
-    ) {
-      valid = false;
-      break;
-    }
-    assignments.push({ grade: grade as CoverageGrade, planId });
-  }
-  if (!valid) errors.push({ field: "assignments", message: ASSIGNMENTS_MESSAGE });
-
-  if (errors.length > 0) return validationFailure(errors);
+  if (errors.length > 0 || !assignments) return validationFailure(errors);
   return { ok: true, academicYear, assignments };
+}
+
+interface ChosenPlanRow {
+  id: string | number;
+  academic_year: string;
+  grade_id: string | number;
+  grade: string | number;
+}
+
+// Lock the plans chosen for the Centre (in id order, so concurrent saves don't deadlock).
+async function lockChosenPlans(
+  db: Db,
+  assignments: CentrePlanAssignment[]
+): Promise<Map<number, ChosenPlanRow>> {
+  const planIds = assignments
+    .map((assignment) => assignment.planId)
+    .filter((planId): planId is number => planId !== null)
+    .sort((a, b) => a - b);
+  const plans = await db<ChosenPlanRow>(
+    `SELECT p.id, p.academic_year, p.grade_id, g.number AS grade
+     FROM lms_curriculum_plans p
+     JOIN grade g ON g.id = p.grade_id
+     WHERE p.id = ANY($1::bigint[])
+     ORDER BY p.id
+     FOR UPDATE OF p`,
+    [planIds]
+  );
+  return new Map(plans.map((plan) => [Number(plan.id), plan]));
+}
+
+// The Grades the Centre is eligible for: an active physical JNV Centre with a Centre Exam
+// Track mapped for the Grade.
+async function loadEligibleGrades(db: Db, centreId: number): Promise<Set<number>> {
+  const eligible = await db<{ grade: string | number }>(
+    `SELECT DISTINCT g.number AS grade
+     FROM centres c
+     JOIN school s ON s.id = c.school_id
+     JOIN centre_exam_tracks cet ON cet.centre_id = c.id
+     JOIN grade g ON g.id = cet.grade_id
+     WHERE c.id = $1
+       AND c.is_active = true
+       AND c.is_physical = true
+       AND s.af_school_category = 'JNV'`,
+    [centreId]
+  );
+  return new Set(eligible.map((row) => Number(row.grade)));
+}
+
+function centreAssignmentErrors(
+  { grade, planId }: CentrePlanAssignment,
+  context: {
+    centreId: number;
+    academicYear: string;
+    eligibleGrades: Set<number>;
+    plansById: Map<number, ChosenPlanRow>;
+  }
+): { field: string; message: string }[] {
+  const errors: { field: string; message: string }[] = [];
+  if (!context.eligibleGrades.has(grade)) {
+    errors.push({
+      field: "assignments",
+      message: `Centre ${context.centreId} is not an eligible Centre for Grade ${grade}`,
+    });
+  }
+  if (planId === null) return errors;
+  const plan = context.plansById.get(planId);
+  if (!plan) {
+    errors.push({ field: "assignments", message: `Curriculum Plan ${planId} was not found` });
+  } else if (plan.academic_year !== context.academicYear || Number(plan.grade) !== grade) {
+    errors.push({
+      field: "assignments",
+      message: `Curriculum Plan ${planId} is not a Grade ${grade} plan for ${context.academicYear}`,
+    });
+  }
+  return errors;
+}
+
+// Move the Centre + Grade off any other plan for the academic year, then onto the chosen plan
+// (none when `plan` is null).
+async function writeCentreAssignment(
+  db: Db,
+  { grade, planId }: CentrePlanAssignment,
+  context: { centreId: number; academicYear: string; adminEmail: string; plan: ChosenPlanRow | null }
+): Promise<void> {
+  await db(
+    `DELETE FROM lms_curriculum_plan_assignments
+     WHERE centre_id = $1
+       AND academic_year = $2
+       AND grade_id IN (SELECT id FROM grade WHERE number = $3)
+       AND plan_id IS DISTINCT FROM $4::bigint`,
+    [context.centreId, context.academicYear, grade, planId]
+  );
+  if (!context.plan) return;
+  await db(
+    `INSERT INTO lms_curriculum_plan_assignments
+       (plan_id, centre_id, grade_id, academic_year,
+        inserted_by_email, updated_by_email, inserted_at, updated_at)
+     SELECT $1, $2, $3, $4, $5, $5,
+            (NOW() AT TIME ZONE 'UTC'), (NOW() AT TIME ZONE 'UTC')
+     WHERE NOT EXISTS (
+       SELECT 1
+       FROM lms_curriculum_plan_assignments a
+       WHERE a.plan_id = $1
+         AND a.centre_id = $2
+     )`,
+    [planId, context.centreId, context.plan.grade_id, context.plan.academic_year, context.adminEmail]
+  );
 }
 
 // Assign by Centre: set the Centre's plan for each listed Grade of one academic year (or
@@ -634,85 +775,25 @@ export async function saveCentrePlanAssignments(params: {
   try {
     return await withTransaction(async (client) => {
       const db = clientDb(client);
-      const planIds = assignments
-        .map((assignment) => assignment.planId)
-        .filter((planId): planId is number => planId !== null)
-        .sort((a, b) => a - b);
-      const plans = await db<{
-        id: string | number;
-        academic_year: string;
-        grade_id: string | number;
-        grade: string | number;
-      }>(
-        `SELECT p.id, p.academic_year, p.grade_id, g.number AS grade
-         FROM lms_curriculum_plans p
-         JOIN grade g ON g.id = p.grade_id
-         WHERE p.id = ANY($1::bigint[])
-         ORDER BY p.id
-         FOR UPDATE OF p`,
-        [planIds]
+      const plansById = await lockChosenPlans(db, assignments);
+      const eligibleGrades = await loadEligibleGrades(db, params.centreId);
+      const errors = assignments.flatMap((assignment) =>
+        centreAssignmentErrors(assignment, {
+          centreId: params.centreId,
+          academicYear,
+          eligibleGrades,
+          plansById,
+        })
       );
-      const eligible = await db<{ grade: string | number }>(
-        `SELECT DISTINCT g.number AS grade
-         FROM centres c
-         JOIN school s ON s.id = c.school_id
-         JOIN centre_exam_tracks cet ON cet.centre_id = c.id
-         JOIN grade g ON g.id = cet.grade_id
-         WHERE c.id = $1
-           AND c.is_active = true
-           AND c.is_physical = true
-           AND s.af_school_category = 'JNV'`,
-        [params.centreId]
-      );
-      const eligibleGrades = new Set(eligible.map((row) => Number(row.grade)));
-      const plansById = new Map(plans.map((plan) => [Number(plan.id), plan]));
-
-      const errors: { field: string; message: string }[] = [];
-      for (const { grade, planId } of assignments) {
-        if (!eligibleGrades.has(grade)) {
-          errors.push({
-            field: "assignments",
-            message: `Centre ${params.centreId} is not an eligible Centre for Grade ${grade}`,
-          });
-        }
-        if (planId === null) continue;
-        const plan = plansById.get(planId);
-        if (!plan) {
-          errors.push({ field: "assignments", message: `Curriculum Plan ${planId} was not found` });
-        } else if (plan.academic_year !== academicYear || Number(plan.grade) !== grade) {
-          errors.push({
-            field: "assignments",
-            message: `Curriculum Plan ${planId} is not a Grade ${grade} plan for ${academicYear}`,
-          });
-        }
-      }
       if (errors.length > 0) return validationFailure(errors);
 
-      for (const { grade, planId } of assignments) {
-        await db(
-          `DELETE FROM lms_curriculum_plan_assignments
-           WHERE centre_id = $1
-             AND academic_year = $2
-             AND grade_id IN (SELECT id FROM grade WHERE number = $3)
-             AND plan_id IS DISTINCT FROM $4::bigint`,
-          [params.centreId, academicYear, grade, planId]
-        );
-        if (planId === null) continue;
-        const plan = plansById.get(planId)!;
-        await db(
-          `INSERT INTO lms_curriculum_plan_assignments
-             (plan_id, centre_id, grade_id, academic_year,
-              inserted_by_email, updated_by_email, inserted_at, updated_at)
-           SELECT $1, $2, $3, $4, $5, $5,
-                  (NOW() AT TIME ZONE 'UTC'), (NOW() AT TIME ZONE 'UTC')
-           WHERE NOT EXISTS (
-             SELECT 1
-             FROM lms_curriculum_plan_assignments a
-             WHERE a.plan_id = $1
-               AND a.centre_id = $2
-           )`,
-          [planId, params.centreId, plan.grade_id, plan.academic_year, params.adminEmail]
-        );
+      for (const assignment of assignments) {
+        await writeCentreAssignment(db, assignment, {
+          centreId: params.centreId,
+          academicYear,
+          adminEmail: params.adminEmail,
+          plan: assignment.planId === null ? null : plansById.get(assignment.planId)!,
+        });
       }
       return { ok: true as const, assignments };
     });

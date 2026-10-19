@@ -1,84 +1,35 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
 
-import { authOptions } from "@/lib/auth";
 import {
   deleteCurriculumPlan,
   getCurriculumPlan,
-  requireCurriculumPlanAdmin,
   updateCurriculumPlanMetadata,
 } from "@/lib/curriculum-plans";
+import { handlePlanRoute } from "../plan-route";
 
-export async function GET(
-  _request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const session = await getServerSession(authOptions);
-  const access = await requireCurriculumPlanAdmin(session);
+type Params = { params: Promise<{ id: string }> };
 
-  if (!access.ok) {
-    return NextResponse.json({ error: access.error }, { status: access.status });
-  }
-
-  const { id } = await params;
-  const result = await getCurriculumPlan(Number(id));
-
-  if (!result.ok) {
-    return NextResponse.json(result, { status: result.status });
-  }
-
-  return NextResponse.json({ plan: result.plan });
+export async function GET(_request: NextRequest, { params }: Params) {
+  return handlePlanRoute(
+    {},
+    async () => getCurriculumPlan(Number((await params).id)),
+    (result) => NextResponse.json({ plan: result.plan })
+  );
 }
 
-export async function PATCH(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const session = await getServerSession(authOptions);
-  const access = await requireCurriculumPlanAdmin(session, { forWrite: true });
-
-  if (!access.ok) {
-    return NextResponse.json({ error: access.error }, { status: access.status });
-  }
-
-  const { id } = await params;
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    body = {};
-  }
-
-  const result = await updateCurriculumPlanMetadata({
-    id: Number(id),
-    adminEmail: access.email,
-    body,
-  });
-
-  if (!result.ok) {
-    return NextResponse.json(result, { status: result.status });
-  }
-
-  return NextResponse.json({ plan: result.plan });
+export async function PATCH(request: NextRequest, { params }: Params) {
+  return handlePlanRoute(
+    { forWrite: true, request },
+    async ({ email, body }) =>
+      updateCurriculumPlanMetadata({ id: Number((await params).id), adminEmail: email, body }),
+    (result) => NextResponse.json({ plan: result.plan })
+  );
 }
 
-export async function DELETE(
-  _request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const session = await getServerSession(authOptions);
-  const access = await requireCurriculumPlanAdmin(session, { forWrite: true });
-
-  if (!access.ok) {
-    return NextResponse.json({ error: access.error }, { status: access.status });
-  }
-
-  const { id } = await params;
-  const result = await deleteCurriculumPlan({ id: Number(id) });
-
-  if (!result.ok) {
-    return NextResponse.json(result, { status: result.status });
-  }
-
-  return NextResponse.json({ deleted: true });
+export async function DELETE(_request: NextRequest, { params }: Params) {
+  return handlePlanRoute(
+    { forWrite: true },
+    async () => deleteCurriculumPlan({ id: Number((await params).id) }),
+    () => NextResponse.json({ deleted: true })
+  );
 }
