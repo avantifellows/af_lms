@@ -10,15 +10,21 @@ import { getTestPool } from "../helpers/db";
 
 async function createPlan(
   page: Page,
-  plan: { title: string; examTracks: string[]; grade: number }
+  plan: {
+    title: string;
+    examTracks: string[];
+    grade: number;
+    academicYear?: string;
+    closureDate?: string;
+  }
 ): Promise<number> {
   const response = await page.request.post("/api/curriculum/plans", {
     data: {
       title: plan.title,
       exam_tracks: plan.examTracks,
-      academic_year: "2026-2027",
+      academic_year: plan.academicYear ?? "2026-2027",
       grade: plan.grade,
-      closure_date: "2027-02-28",
+      closure_date: plan.closureDate ?? "2027-02-28",
     },
   });
   expect(response.status()).toBe(201);
@@ -274,6 +280,8 @@ test.describe("Curriculum Plans", () => {
       await expect(page.getByTestId("plan-status")).toHaveText("Draft");
       await expect(page.getByRole("button", { name: "Activate plan" })).toBeDisabled();
       await expect(page.getByRole("button", { name: "Delete plan" })).toBeDisabled();
+      await expect(page.getByRole("button", { name: "Copy plan" })).toBeDisabled();
+      await expect(page.getByRole("button", { name: "Copy to next year" })).toBeDisabled();
 
       const create = await page.request.post("/api/curriculum/plans", {
         data: {
@@ -293,6 +301,18 @@ test.describe("Curriculum Plans", () => {
       expect(activate.status()).toBe(403);
       const remove = await page.request.delete(`/api/curriculum/plans/${planId}`);
       expect(remove.status()).toBe(403);
+      for (const mode of ["same_year", "next_year"]) {
+        const copy = await page.request.post(`/api/curriculum/plans/${planId}/copy`, {
+          data: { mode },
+        });
+        expect(copy.status()).toBe(403);
+      }
+      const plans = await page.request.get("/api/curriculum/plans?academic_year=2026-2027&grade=11");
+      expect(
+        (await plans.json()).plans.filter((plan: { title: string }) =>
+          plan.title.includes("E2E G11 Read-only Plan")
+        )
+      ).toHaveLength(1);
       const unchanged = await page.request.get(`/api/curriculum/plans/${planId}`);
       expect((await unchanged.json()).plan.status).toBe("draft");
       const list = await page.request.get("/api/curriculum/plans?academic_year=2026-2027");
@@ -516,5 +536,157 @@ test.describe("Curriculum Plans", () => {
     await expect(
       adminPage.getByRole("row").filter({ hasText: "E2E G11 Closed Plan" })
     ).toContainText("Closed");
+  });
+
+  test("copying to next year opens a Draft for the next academic year with every date one year later", async ({
+    adminPage,
+  }) => {
+    const planId = await createPlan(adminPage, {
+      title: "E2E G11 Copy Next Year Plan",
+      examTracks: ["jee_main"],
+      grade: 11,
+    });
+    const saved = await adminPage.request.put(`/api/curriculum/plans/${planId}/chapters`, {
+      data: {
+        chapters: [
+          { chapter_id: 90007501, due_date: "2026-06-30", test_date: "2026-07-02" },
+          { chapter_id: 90007502, due_date: "2027-02-28", test_date: null },
+        ],
+      },
+    });
+    expect(saved.status()).toBe(200);
+
+    await adminPage.goto(`/curriculum-summary/plans/${planId}`);
+    await adminPage.getByRole("button", { name: "Copy to next year" }).click();
+
+    await expect(adminPage).toHaveURL(/\/curriculum-summary\/plans\/\d+$/);
+    await expect(adminPage).not.toHaveURL(new RegExp(`/plans/${planId}$`));
+    await expect(
+      adminPage.getByRole("heading", { name: "Copy of E2E G11 Copy Next Year Plan" })
+    ).toBeVisible();
+    await expect(adminPage.getByTestId("plan-status")).toHaveText("Draft");
+    await expect(adminPage.getByLabel("Academic year")).toHaveValue("2027-2028");
+    await expect(adminPage.getByLabel("Plan Closure Date")).toHaveValue("2028-02-28");
+    await expect(adminPage.getByLabel("JEE Main")).toBeChecked();
+    await expect(adminPage.getByLabel("JEE Advanced")).not.toBeChecked();
+    await expect(adminPage.getByLabel("Due date for Fixture Alpha Physics")).toHaveValue("2027-06-30");
+    await expect(adminPage.getByLabel("Test date for Fixture Alpha Physics")).toHaveValue("2027-07-02");
+    await expect(adminPage.getByLabel("Due date for Fixture Beta Physics")).toHaveValue("2028-02-28");
+    await expect(adminPage.getByLabel("Test date for Fixture Beta Physics")).toHaveValue("");
+
+    // The source plan is untouched.
+    const source = (await (await adminPage.request.get(`/api/curriculum/plans/${planId}`)).json()).plan;
+    expect(source.title).toBe("E2E G11 Copy Next Year Plan");
+    expect(source.academicYear).toBe("2026-2027");
+    expect(source.closureDate).toBe("2027-02-28");
+    expect(
+      source.chapters.map((chapter: { chapterName: string; dueDate: string; testDate: string }) => [
+        chapter.chapterName,
+        chapter.dueDate,
+        chapter.testDate,
+      ])
+    ).toEqual([
+      ["Fixture Alpha Physics", "2026-06-30", "2026-07-02"],
+      ["Fixture Beta Physics", "2027-02-28", null],
+    ]);
+  });
+
+  test("copying to next year turns a 29 Feb date into 28 Feb", async ({ adminPage }) => {
+    const planId = await createPlan(adminPage, {
+      title: "E2E G11 Leap Day Plan",
+      examTracks: ["jee_main"],
+      grade: 11,
+      academicYear: "2027-2028",
+      closureDate: "2028-02-29",
+    });
+    const saved = await adminPage.request.put(`/api/curriculum/plans/${planId}/chapters`, {
+      data: {
+        chapters: [{ chapter_id: 90007501, due_date: "2028-02-29", test_date: "2028-02-29" }],
+      },
+    });
+    expect(saved.status()).toBe(200);
+
+    const copied = await adminPage.request.post(`/api/curriculum/plans/${planId}/copy`, {
+      data: { mode: "next_year" },
+    });
+    expect(copied.status()).toBe(201);
+    const copy = (await copied.json()).plan;
+
+    await adminPage.goto(`/curriculum-summary/plans/${copy.id}`);
+    await expect(adminPage.getByLabel("Academic year")).toHaveValue("2028-2029");
+    await expect(adminPage.getByLabel("Plan Closure Date")).toHaveValue("2029-02-28");
+    await expect(adminPage.getByLabel("Due date for Fixture Alpha Physics")).toHaveValue("2029-02-28");
+    await expect(adminPage.getByLabel("Test date for Fixture Alpha Physics")).toHaveValue("2029-02-28");
+  });
+
+  test("a same-year copy of an Active, assigned plan is a Draft with the same dates and no assignments", async ({
+    adminPage,
+  }) => {
+    const planId = await createPlan(adminPage, {
+      title: "E2E G11 Copy Same Year Plan",
+      examTracks: ["jee_main", "jee_advanced"],
+      grade: 11,
+    });
+    const saved = await adminPage.request.put(`/api/curriculum/plans/${planId}/chapters`, {
+      data: {
+        chapters: [{ chapter_id: 90007501, due_date: "2026-08-14", test_date: "2026-08-20" }],
+      },
+    });
+    expect(saved.status()).toBe(200);
+    expect((await adminPage.request.post(`/api/curriculum/plans/${planId}/activate`)).status()).toBe(200);
+
+    // Plan Assignment authoring is a later slice; assign the source directly as fixture setup.
+    const pool = getTestPool();
+    try {
+      await pool.query(
+        `INSERT INTO lms_curriculum_plan_assignments (plan_id, centre_id, grade_id, academic_year)
+         SELECT p.id, (SELECT id FROM centres ORDER BY id LIMIT 1), p.grade_id, p.academic_year
+         FROM lms_curriculum_plans p
+         WHERE p.id = $1`,
+        [planId]
+      );
+    } finally {
+      await pool.end();
+    }
+
+    try {
+      await adminPage.goto(`/curriculum-summary/plans/${planId}`);
+      await expect(adminPage.getByTestId("plan-status")).toHaveText("Active");
+      await adminPage.getByRole("button", { name: "Copy plan" }).click();
+
+      await expect(adminPage).toHaveURL(/\/curriculum-summary\/plans\/\d+$/);
+      await expect(adminPage).not.toHaveURL(new RegExp(`/plans/${planId}$`));
+      await expect(
+        adminPage.getByRole("heading", { name: "Copy of E2E G11 Copy Same Year Plan" })
+      ).toBeVisible();
+      await expect(adminPage.getByTestId("plan-status")).toHaveText("Draft");
+      await expect(adminPage.getByLabel("Academic year")).toHaveValue("2026-2027");
+      await expect(adminPage.getByLabel("Plan Closure Date")).toHaveValue("2027-02-28");
+      await expect(adminPage.getByLabel("JEE Main")).toBeChecked();
+      await expect(adminPage.getByLabel("JEE Advanced")).toBeChecked();
+      await expect(adminPage.getByLabel("Due date for Fixture Alpha Physics")).toHaveValue("2026-08-14");
+      await expect(adminPage.getByLabel("Test date for Fixture Alpha Physics")).toHaveValue("2026-08-20");
+      await expect(adminPage.getByLabel("Due date for Fixture Beta Physics")).toHaveValue("");
+
+      const plans = (
+        await (await adminPage.request.get("/api/curriculum/plans?academic_year=2026-2027&grade=11")).json()
+      ).plans as Array<{ title: string; status: string; assignmentCount: number }>;
+      expect(
+        plans
+          .filter((plan) => plan.title.endsWith("E2E G11 Copy Same Year Plan"))
+          .map((plan) => [plan.title, plan.status, plan.assignmentCount])
+          .sort()
+      ).toEqual([
+        ["Copy of E2E G11 Copy Same Year Plan", "draft", 0],
+        ["E2E G11 Copy Same Year Plan", "active", 1],
+      ]);
+    } finally {
+      const cleanup = getTestPool();
+      try {
+        await cleanup.query("DELETE FROM lms_curriculum_plan_assignments WHERE plan_id = $1", [planId]);
+      } finally {
+        await cleanup.end();
+      }
+    }
   });
 });

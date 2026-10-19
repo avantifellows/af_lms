@@ -14,6 +14,8 @@ import {
   currentAcademicYearIST,
   parseAcademicYear,
   planStatusAsOf,
+  shiftAcademicYearForward,
+  shiftDateForwardOneYear,
   type CurriculumPlanDisplayStatus,
 } from "./curriculum-plan-rules";
 import {
@@ -441,6 +443,7 @@ function normalizeChapterDateInputs(
 
 interface LockedPlanRow {
   id: string | number;
+  title: string;
   status: CurriculumPlanStatus;
   academic_year: string;
   grade_id: string | number;
@@ -450,7 +453,7 @@ interface LockedPlanRow {
 
 async function lockPlan(db: Db, id: number): Promise<LockedPlanRow | null> {
   const rows = await db<LockedPlanRow>(
-    `SELECT id, status, academic_year, grade_id, exam_tracks, closure_date::text AS closure_date
+    `SELECT id, title, status, academic_year, grade_id, exam_tracks, closure_date::text AS closure_date
      FROM lms_curriculum_plans
      WHERE id = $1
      FOR UPDATE`,
@@ -725,5 +728,102 @@ export async function deleteCurriculumPlan(params: {
     }
     await db("DELETE FROM lms_curriculum_plans WHERE id = $1", [params.id]);
     return { ok: true as const };
+  });
+}
+
+export type CurriculumPlanCopyMode = "same_year" | "next_year";
+
+const COPY_MODES: readonly CurriculumPlanCopyMode[] = ["same_year", "next_year"];
+
+export type CurriculumPlanCopyResult =
+  | { ok: true; plan: CurriculumPlanSummary }
+  | CurriculumPlanValidationFailure
+  | CurriculumSchemaUnavailable
+  | NotFound;
+
+// Copy a plan as a same-year variant (dates kept) or as next year's starting point (academic
+// year, Plan Closure Date and every Chapter date moved forward one year). The copy is titled
+// "Copy of …", keeps the served tracks, Grade and dated Chapters, starts as a Draft and has no
+// Plan Assignments. The source plan is untouched.
+export async function copyCurriculumPlan(params: {
+  id: number;
+  adminEmail: string;
+  body: unknown;
+}): Promise<CurriculumPlanCopyResult> {
+  const schema = await checkCurriculumPlansSchema();
+  if (!schema.ok) return schema;
+  if (!Number.isInteger(params.id) || params.id <= 0) return planNotFound();
+
+  const input = (params.body && typeof params.body === "object" ? params.body : {}) as Record<
+    string,
+    unknown
+  >;
+  const mode = input.mode as CurriculumPlanCopyMode;
+  if (!COPY_MODES.includes(mode)) {
+    return validationFailure([
+      { field: "mode", message: "Copy mode must be same_year or next_year" },
+    ]);
+  }
+
+  return withTransaction(async (client) => {
+    const db = clientDb(client);
+    const plan = await lockPlan(db, params.id);
+    if (!plan) return planNotFound();
+
+    const storedChapters = await db<{
+      chapter_id: string | number;
+      due_date: string;
+      test_date: string | null;
+    }>(
+      `SELECT chapter_id, due_date::text AS due_date, test_date::text AS test_date
+       FROM lms_curriculum_plan_chapters
+       WHERE plan_id = $1 AND due_date IS NOT NULL
+       ORDER BY chapter_id`,
+      [params.id]
+    );
+
+    const shift = (date: string) => (mode === "next_year" ? shiftDateForwardOneYear(date) : date);
+    const title = `Copy of ${plan.title}`.slice(0, TITLE_MAX_LENGTH);
+    const academicYear =
+      mode === "next_year" ? shiftAcademicYearForward(plan.academic_year) : plan.academic_year;
+
+    const inserted = await db<{ id: string | number }>(
+      `INSERT INTO lms_curriculum_plans
+         (title, academic_year, grade_id, exam_tracks, status, closure_date,
+          inserted_by_email, updated_by_email, inserted_at, updated_at)
+       VALUES ($1, $2, $3, $4::text[], 'draft', $5::date, $6, $6,
+               (NOW() AT TIME ZONE 'UTC'), (NOW() AT TIME ZONE 'UTC'))
+       RETURNING id`,
+      [
+        title,
+        academicYear,
+        plan.grade_id,
+        plan.exam_tracks,
+        shift(plan.closure_date),
+        params.adminEmail,
+      ]
+    );
+    const copyId = inserted[0].id;
+
+    if (storedChapters.length > 0) {
+      await db(
+        `INSERT INTO lms_curriculum_plan_chapters
+           (plan_id, chapter_id, due_date, test_date,
+            inserted_by_email, updated_by_email, inserted_at, updated_at)
+         SELECT $1, chapter_id, due_date, test_date, $5, $5,
+                (NOW() AT TIME ZONE 'UTC'), (NOW() AT TIME ZONE 'UTC')
+         FROM unnest($2::bigint[], $3::date[], $4::date[]) AS c(chapter_id, due_date, test_date)`,
+        [
+          copyId,
+          storedChapters.map((chapter) => Number(chapter.chapter_id)),
+          storedChapters.map((chapter) => shift(chapter.due_date)),
+          storedChapters.map((chapter) => (chapter.test_date ? shift(chapter.test_date) : null)),
+          params.adminEmail,
+        ]
+      );
+    }
+
+    const rows = await db<PlanRow>(`${PLAN_SELECT} WHERE p.id = $1`, [copyId]);
+    return { ok: true as const, plan: mapPlanRow(rows[0]) };
   });
 }

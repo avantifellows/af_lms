@@ -10,6 +10,7 @@ import {
 import CurriculumPlanMetadataForm from "../CurriculumPlanMetadataForm";
 import PlanSchemaUnavailable from "../PlanSchemaUnavailable";
 import CurriculumPlanChapterDates from "./CurriculumPlanChapterDates";
+import CurriculumPlanCopy from "./CurriculumPlanCopy";
 import CurriculumPlanLifecycle from "./CurriculumPlanLifecycle";
 
 interface PageProps {
@@ -58,6 +59,7 @@ export default async function CurriculumPlanEditorPage({ params }: PageProps) {
               chapters={result.plan.chapters}
               readOnly={readOnly}
             />
+            <CurriculumPlanCopy planId={result.plan.id} readOnly={readOnly} />
             <CurriculumPlanMetadataForm
               planId={result.plan.id}
               initialValues={{
