@@ -529,6 +529,35 @@ describe("Chapter timeline page", () => {
     expect(timelineRow("Motion").querySelector("[data-hours]")).toHaveClass("font-mono", "text-center", "whitespace-nowrap");
   });
 
+  it("shows Status and Chapter test as coloured tags with the same text", async () => {
+    await renderPage();
+
+    // [Chapter, Status text, its variant, Chapter test text, its variant]; Not in plan is muted text.
+    const expected: [string, string, string | null, string, string][] = [
+      ["Motion", "Done", "success", "Conducted 2 Jul 2026", "success"],
+      ["Bonding", "Done 5 days late", "warning", "Overdue", "danger"],
+      ["Cells", "Overdue 1 day", "danger", "Scheduled", "info"],
+      ["Genetics", "Not due", "default", "Not due", "default"],
+      ["Ecology", "Not in plan", null, "Not due", "default"],
+    ];
+    for (const [name, status, statusVariant, test, testVariant] of expected) {
+      const statusCell = timelineRow(name).querySelector("[data-status]") as HTMLElement;
+      expect(statusCell).toHaveTextContent(new RegExp(`^${status}$`));
+      if (statusVariant) {
+        expect(statusCell.querySelector("[data-variant]")).toHaveAttribute("data-variant", statusVariant);
+      } else {
+        expect(statusCell.querySelector("[data-variant]")).toBeNull();
+        expect(within(statusCell).getByText(status)).toHaveClass("text-text-muted");
+      }
+      const testCell = timelineRow(name).querySelector("[data-test-status]") as HTMLElement;
+      expect(testCell).toHaveTextContent(new RegExp(`^${test}$`));
+      expect(testCell.querySelector("[data-variant]")).toHaveAttribute("data-variant", testVariant);
+      expect(testCell.querySelector("[data-variant]")).toHaveClass("whitespace-nowrap", "rounded-full");
+    }
+    expect(timelineRow("Cells").querySelector("[data-status] [data-variant]")).toHaveClass("bg-danger-bg", "text-danger");
+    expect(timelineRow("Cells").querySelector("[data-test-status] [data-variant]")).toHaveClass("bg-info-bg", "text-info");
+  });
+
   it("prefixes each Chapter's name with its code, as the Plan editor does", async () => {
     await renderPage();
 

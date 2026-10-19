@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { Fragment } from "react";
 
 import PageHeader from "@/components/PageHeader";
-import { Badge, Card } from "@/components/ui";
+import { Badge, Card, type BadgeVariant } from "@/components/ui";
 import { getTodayIST } from "@/lib/curriculum-date-helpers";
 import { formatDuration } from "@/lib/curriculum-helpers";
 import {
@@ -473,10 +473,13 @@ function TimelineRow({ chapter }: { chapter: ChapterTimeline["chapters"][number]
         {formatOptionalDate(chapter.completedOn)}
       </td>
       <td data-status className={`${CELL_CLASS_NAME} whitespace-nowrap px-2 text-center`}>
-        {chapterStatusLabel(chapter.status)}
+        <StatusTag label={chapterStatusLabel(chapter.status)} variant={CHAPTER_STATUS_VARIANTS[chapter.status.kind]} />
       </td>
       <td data-test-status className={`${CELL_CLASS_NAME} whitespace-nowrap px-2 text-center`}>
-        {chapterTestStatusLabel(chapter.testStatus)}
+        <StatusTag
+          label={chapterTestStatusLabel(chapter.testStatus)}
+          variant={CHAPTER_TEST_STATUS_VARIANTS[chapter.testStatus.kind]}
+        />
       </td>
       <td data-hours className={NUMBER_CELL_CLASS_NAME}>
         {formatHours(chapter.taughtMinutes)}
@@ -560,6 +563,32 @@ function formatHours(minutes: number): string {
 
 function days(count: number): string {
   return `${count} ${count === 1 ? "day" : "days"}`;
+}
+
+// Status and Chapter test tags in the Summary pills' Badge colours (curriculum owner feedback).
+// Not in plan has no due date to be measured against, so it stays muted text, not a tag.
+const CHAPTER_STATUS_VARIANTS: Record<ChapterStatus["kind"], BadgeVariant | null> = {
+  overdue: "danger",
+  done_late: "warning",
+  done: "success",
+  not_due: "default",
+  not_in_plan: null,
+};
+
+const CHAPTER_TEST_STATUS_VARIANTS: Record<ChapterTestStatus["kind"], BadgeVariant> = {
+  overdue: "danger",
+  scheduled: "info",
+  conducted: "success",
+  not_due: "default",
+};
+
+function StatusTag({ label, variant }: { label: string; variant: BadgeVariant | null }) {
+  if (!variant) return <span className="text-xs text-text-muted">{label}</span>;
+  return (
+    <Badge variant={variant} data-variant={variant} className="whitespace-nowrap">
+      {label}
+    </Badge>
+  );
 }
 
 function chapterStatusLabel(status: ChapterStatus): string {
