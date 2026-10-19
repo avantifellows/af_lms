@@ -18,7 +18,7 @@ edges:
     condition: when a route or page needs to gate access
   - target: context/visits.md
     condition: when working on PM school visits or visit action types
-last_updated: 2026-10-08
+last_updated: 2026-10-19
 ---
 
 # Architecture
@@ -194,6 +194,7 @@ join SQL) and the mixed-group cases in `src/lib/centre-switcher.test.ts`.
 - **`src/lib/auth.ts`** — NextAuth v4 config: Google OAuth (+ dev-login personas in non-prod). The `jwt` callback throws on a retired passcode token, signing it out.
 - **`src/lib/centres.ts`** — admin-only Centre Management reads and direct writes, including current Grade 11/12 Centre Exam Track mappings. The API accepts only the shared fixed Exam Track codes; mapping unassignment is a hard delete. Legacy Centre Stream storage and configurable options are removed. Admins enter the reviewed initial mappings manually through Centre Management; there is no one-off importer or live Sheet sync.
 - **`src/lib/centre-resolver.ts`** — shared fail-closed School + Program resolver for exactly one active physical Centre. Curriculum options use that Centre's Grade-specific Exam Track mappings, annotate Tracks with curriculum-content availability, and reject new logs or standalone Chapter Completion writes outside the current mapping; scopes with retained logs remain available as read-only history. Curriculum Summary expresses the same cardinality rule in its bulk query: current mappings produce normal or unavailable rows, zero/multiple Centres produce per-combination configuration-error rows, and filter options use the complete mapped union for the selected Schools.
+- **`src/lib/curriculum-plan-rules.ts`** — pure, client-safe Curriculum Plan domain rules for #417 (academic year, Summary Class, Primary Exam Track, Chapter status, Chapter Test Status, Behind pill, uncovered tracks). Dates are `YYYY-MM-DD` IST strings; session end times are IST wall-clock strings compared by date. No DB access — server modules load data and call it.
 - **Visit action-type registry** — 7 action types, each a `src/lib/<type>.ts` config/validator + a `src/components/visits/<Type>Form.tsx`, dispatched by `ActionDetailForm.tsx`. Registered in `ACTION_TYPES` (`src/lib/visit-actions.ts`).
 - **Analytics clients** — `src/lib/bigquery.ts` (quiz analytics), `src/lib/dynamodb.ts` (performance), each a lazily-initialised singleton client.
 
