@@ -116,6 +116,10 @@ _Avoid_: Plan mapping, plan allocation
 The count of a Centre and Grade's Chapters whose Chapter Due Date has passed without Chapter Completion.
 _Avoid_: Delay, lag, overdue chapters
 
+**PCM Behind** / **PCB Behind**:
+A Summary Class's Chapters Behind in Physics, Chemistry and Maths (PCM) or in Physics, Chemistry and Biology (PCB); Chapters of any other subject count in neither.
+_Avoid_: Stream behind, Behind total
+
 **Chapter Test**:
 A quiz session of a CMS chapter test, attributed to one Chapter and to the Centre and Grade whose batches it was created for.
 _Avoid_: Unit test, chapter quiz, combined chapter test
@@ -358,7 +362,9 @@ _Avoid_: Unmapped Student, Mapping not done, unassigned Mentee
 - All three LMS Curriculum Log types reuse the existing Curriculum permission: Teacher, Program Admin, and Admin can edit, while Program Manager can view
 - **Chapter Completion** is stored independently from **LMS Curriculum Logs**
 - **Curriculum Progress** combines covered topics and teaching time from **LMS Curriculum Logs** with stored **Chapter Completion**
-- Issue #417 replaces the School-Program-Grade-Subject-Exam Track table with one **Curriculum Summary** row per **Summary Class**, showing per-subject **Chapters Behind** against the assigned **Curriculum Plan** and overdue **Chapter Tests**
+- Issue #417 replaces the School-Program-Grade-Subject-Exam Track table with one **Curriculum Summary** row per **Summary Class**, showing per-subject **Chapters Behind**, **PCM Behind** and **PCB Behind** against the assigned **Curriculum Plan**, and overdue **Chapter Tests**
+- A JEE Main or JEE Advanced **Summary Class** shows **PCM Behind** only, a NEET class **PCB Behind** only, and a shared JEE Main and NEET class both
+- **Curriculum Summary** lists the classes worst first by the larger of **PCM Behind** and **PCB Behind**, and its header totals each over the classes it covers
 - A **Summary Class** counts **LMS Curriculum Logs** and **Chapter Completion** from every Exam Track in the class; teachers still log and complete Chapters under one Exam Track (ADR 0008)
 - JEE Main and JEE Advanced are never one **Summary Class**; a Centre and Grade mapped to both is a Centre Management setup problem
 - One **Curriculum Plan** applies to a Centre and Grade for an academic year, whatever Exam Tracks it runs; G11 and G12 at one Centre have separate plans
