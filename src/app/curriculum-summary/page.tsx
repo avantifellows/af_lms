@@ -244,7 +244,7 @@ function FilterDisclosure({ label, value, children }: { label: string; value: st
           {value}
         </span>
       </summary>
-      <fieldset className="absolute z-10 mt-1 flex max-h-64 min-w-48 flex-col gap-1 overflow-y-auto rounded-md border border-border bg-bg-card p-3 shadow-md">
+      <fieldset className="absolute z-10 mt-1 flex max-h-80 min-w-64 flex-col gap-1 overflow-y-auto rounded-md border border-border bg-bg-card p-3 shadow-md">
         <legend className="sr-only">{label}</legend>
         {children}
       </fieldset>
@@ -486,7 +486,7 @@ function PlanCells({
         {row.testsOverdue}
       </td>
       <td data-plan className={COMPACT_CELL_CLASS_NAME}>
-        <span className="block min-w-[7rem] max-w-[9rem]">
+        <span className="block min-w-[7rem] max-w-[11rem]">
           {row.plan?.title}
           {row.plan?.closed ? (
             <Badge className="ml-1" data-plan-closed>
@@ -527,7 +527,7 @@ function NoPlanCells({ testsConducted }: { testsConducted: number }) {
       <td colSpan={MEASURE_COLUMNS} className={`${CELL_CLASS_NAME} px-2 text-text-muted`}>
         Not measured without an Active plan
       </td>
-      <td data-tests-conducted className={`${COMPACT_CELL_CLASS_NAME} text-center text-text-secondary`}>
+      <td data-tests-conducted className={`${COMPACT_CELL_CLASS_NAME} whitespace-nowrap text-center text-text-secondary`}>
         {testsConducted} conducted
       </td>
       <td data-plan className={`${COMPACT_CELL_CLASS_NAME} text-text-muted`}>
