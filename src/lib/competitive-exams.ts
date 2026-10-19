@@ -8,7 +8,9 @@
 // ones, then the state CETs, then the rest. A name not in this list is never
 // offered — the `exam` table also holds internal rows (Baseline, Selection,
 // Hiring Test, TET, Board Exam, Miscellaneous) that are not applications a
-// Student makes.
+// Student makes. Its generic "State CET" row is left out as well: the state
+// CETs worth recording are each named below, so offering it too would only
+// invite an ambiguous answer.
 export const COMPETITIVE_EXAM_NAMES = [
   "JEE Mains",
   "NEET",
@@ -22,7 +24,6 @@ export const COMPETITIVE_EXAM_NAMES = [
   "NEST",
   "NIFTEE",
   "NCHMJEE",
-  "State CET",
   "MHT CET",
   "KCET",
   "WBJEE",

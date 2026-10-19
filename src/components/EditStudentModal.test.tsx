@@ -634,11 +634,11 @@ describe("EditStudentModal", () => {
   });
 
   describe("exams tab", () => {
-    it("sits between Details and Documents", () => {
+    it("sits after Documents", () => {
       renderModal({ programId: 1 });
 
       const tabs = screen.getAllByRole("tab").map((tab) => tab.textContent);
-      expect(tabs).toEqual(["Details", "Exams", "Documents"]);
+      expect(tabs).toEqual(["Details", "Documents", "Exams"]);
     });
 
     it("is offered under the PMU program too, where Documents is not", () => {

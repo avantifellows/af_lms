@@ -100,13 +100,14 @@ every program. Keep the two in sync when an Edit Student field is added or remov
 
 GitHub issue https://github.com/avantifellows/af_lms/issues/434 asked for the competitive
 exams a Student applies for to be captured in the LMS instead of an ops sheet. Edit Student
-has an **Exams** tab between Details and Documents, one block per exam. It is offered under
+has an **Exams** tab after Documents, one block per exam. It is offered under
 every program, NVS included — the issue draws no program distinction.
 
 The exams on offer are a curated list of `exam.name` values in `src/lib/competitive-exams.ts`
 — client-safe, so the picker and the server validation cannot drift. The `exam` table also
-holds internal rows (Baseline, Selection, Hiring Test, TET, Board Exam, Miscellaneous) that
-are never offered, and the API refuses an exam outside the list, so the endpoint can't be
+holds internal rows (Baseline, Selection, Hiring Test, TET, Board Exam, Miscellaneous) and a
+generic "State CET" row that are never offered (the state CETs worth recording are named
+individually), and the API refuses an exam outside the list, so the endpoint can't be
 used to attach one to a Student. BITSAT has no `exam` row and so is not offered. The same
 module holds the Board Stream rules (PCM → JEE Mains, PCB → NEET, PCMB → both), which only
 decide which blocks *open* — nothing is stored until a teacher fills one in, and any block

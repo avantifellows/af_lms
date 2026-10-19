@@ -437,20 +437,6 @@ export default function EditStudentModal({
         >
           Details
         </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeTab === "exams"}
-          onClick={() => setActiveTab("exams")}
-          disabled={studentPkId === null}
-          className={`min-h-[48px] px-4 py-3 text-sm font-bold uppercase tracking-wide transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-            activeTab === "exams"
-              ? "border-b-2 border-accent text-text-primary"
-              : "text-text-muted hover:text-text-primary"
-          }`}
-        >
-          Exams
-        </button>
         {!isPmuProgram && (
           <button
             type="button"
@@ -467,6 +453,20 @@ export default function EditStudentModal({
             Documents
           </button>
         )}
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === "exams"}
+          onClick={() => setActiveTab("exams")}
+          disabled={studentPkId === null}
+          className={`min-h-[48px] px-4 py-3 text-sm font-bold uppercase tracking-wide transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+            activeTab === "exams"
+              ? "border-b-2 border-accent text-text-primary"
+              : "text-text-muted hover:text-text-primary"
+          }`}
+        >
+          Exams
+        </button>
       </div>
 
       {/* A Student with no record id has nothing to hang exams or documents

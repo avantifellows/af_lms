@@ -38,7 +38,7 @@ Then read this file fully before doing anything else in this session.
 ## Current Project State
 
 **Working:**
-- Edit Student has an Exams tab that records competitive-exam registrations per Student
+- Edit Student has an Exams tab (after Documents) that records competitive-exam registrations per Student
   (issue #434). Required exams open by Board Stream (PCM → JEE Mains, PCB → NEET, PCMB →
   both) as removable suggestions; any other exam comes from a curated picker over the `exam`
   table. Each row holds an application number, a password (hidden, with a Show toggle) and,
