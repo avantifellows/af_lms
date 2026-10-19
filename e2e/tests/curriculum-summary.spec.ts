@@ -93,6 +93,9 @@ test.describe("Curriculum Summary", () => {
     await expect(shared).toContainText("JNV Nodal");
     await expect(shared).toContainText("JEE Main + NEET");
     await expect(shared).toContainText("SUMMARY_E2E");
+    // The first column is the Centre name alone, without its School's name.
+    await expect(shared.locator("td").first()).toHaveText("Summary E2E Anand Shared");
+    await expect(shared).not.toContainText("Summary Anand School");
     // Physics: Alpha (done under both tracks, counted once) and Beta (done under NEET).
     await expect(pill(page, "Summary E2E Anand Shared", "Physics")).toHaveText("On track · 2/2");
     await expect(pill(page, "Summary E2E Anand Shared", "Physics").locator("[data-tone]")).toHaveAttribute(

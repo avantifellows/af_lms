@@ -304,7 +304,6 @@ function SummaryTableRow({ row, params }: { row: CurriculumSummaryRow; params: C
         <Link href={timelineHref} className="font-bold text-accent hover:text-accent-hover">
           {row.centreName}
         </Link>
-        <span className="block text-xs text-text-muted">{row.schoolName}</span>
       </td>
       <td className={CELL_CLASS_NAME}>{row.programName}</td>
       <td className={CELL_CLASS_NAME}>{row.tracksLabel}</td>

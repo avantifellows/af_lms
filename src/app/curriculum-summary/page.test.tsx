@@ -193,6 +193,9 @@ describe("Curriculum Summary page", () => {
       "href",
       "/curriculum-summary/centres/1?grade=11&as_of=2026-08-15"
     );
+    // The Centre name alone: no School name line under it.
+    expect(plan.querySelector("td")).toHaveTextContent(/^Anand Shared$/);
+    expect(within(plan).queryByText("JNV Anand")).not.toBeInTheDocument();
     expect(plan.querySelector('[data-subject="Physics"]')).toHaveTextContent("1 behind · 1/2");
     expect(plan.querySelector('[data-subject="Physics"] [data-tone]')).toHaveAttribute("data-tone", "amber");
     expect(plan.querySelector('[data-subject="Maths"]')).toHaveTextContent("—");
