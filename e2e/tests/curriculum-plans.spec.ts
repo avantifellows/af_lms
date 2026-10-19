@@ -690,3 +690,368 @@ test.describe("Curriculum Plans", () => {
     }
   });
 });
+
+// Plan Assignment (#423). Fixture Centres live at their own Schools in two fixture regions
+// so the picker grouping and eligibility can be read off by name. Seeded for this block only
+// and removed afterwards so no other spec sees extra JNV Schools.
+const ASSIGN_PREFIX = "Plan Assign E2E ";
+const ASSIGN_SCHOOLS = [
+  { id: 900091, code: "PLANE2EN", name: "Plan Assign North School", category: "JNV", region: "PLAN_E2E_NORTH" },
+  { id: 900092, code: "PLANE2ES", name: "Plan Assign South School", category: "JNV", region: "PLAN_E2E_SOUTH" },
+  { id: 900093, code: "PLANE2EX", name: "Plan Assign Other School", category: "EMRS", region: "PLAN_E2E_NORTH" },
+];
+// Centre → [School id, Program id, active, physical, Grade-number:track mappings]
+const ASSIGN_CENTRES: Record<string, [number, number, boolean, boolean, string[]]> = {
+  Alpha: [900091, 1, true, true, ["11:jee_main"]],
+  Bravo: [900091, 2, true, true, ["11:jee_main", "11:cet"]],
+  Charlie: [900092, 1, true, true, ["11:jee_main", "11:jee_advanced"]],
+  Delta: [900092, 2, true, true, ["11:jee_main"]],
+  Inactive: [900091, 1, false, true, ["11:jee_main"]],
+  Virtual: [900091, 2, true, false, ["11:jee_main"]],
+  "Non-JNV": [900093, 1, true, true, ["11:jee_main"]],
+  "G12 Only": [900092, 64, true, true, ["12:neet"]],
+};
+
+async function removeAssignFixture(): Promise<void> {
+  const pool = getTestPool();
+  try {
+    const centres = `SELECT id FROM centres WHERE name LIKE '${ASSIGN_PREFIX}%'`;
+    await pool.query(`DELETE FROM lms_curriculum_plan_assignments WHERE centre_id IN (${centres})`);
+    await pool.query(`DELETE FROM centre_exam_tracks WHERE centre_id IN (${centres})`);
+    await pool.query(`DELETE FROM centres WHERE name LIKE '${ASSIGN_PREFIX}%'`);
+    await pool.query("DELETE FROM school WHERE id = ANY($1::bigint[])", [
+      ASSIGN_SCHOOLS.map((school) => school.id),
+    ]);
+  } finally {
+    await pool.end();
+  }
+}
+
+async function seedAssignFixture(): Promise<Record<string, number>> {
+  await removeAssignFixture();
+  const pool = getTestPool();
+  const ids: Record<string, number> = {};
+  try {
+    for (const school of ASSIGN_SCHOOLS) {
+      await pool.query(
+        `INSERT INTO school
+           (id, code, name, inserted_at, updated_at, udise_code, af_school_category, region, state, district, program_ids)
+         VALUES ($1, $2, $3, NOW(), NOW(), $4, $5, $6, 'Gujarat', 'Ahmedabad', ARRAY[1, 2, 64]::integer[])`,
+        [school.id, school.code, school.name, `9100${school.id}`, school.category, school.region]
+      );
+    }
+    for (const [name, [schoolId, programId, isActive, isPhysical, mappings]] of Object.entries(ASSIGN_CENTRES)) {
+      const inserted = await pool.query<{ id: string }>(
+        `INSERT INTO centres (name, school_id, program_id, is_physical, is_active, inserted_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, (NOW() AT TIME ZONE 'UTC'), (NOW() AT TIME ZONE 'UTC'))
+         RETURNING id`,
+        [`${ASSIGN_PREFIX}${name}`, schoolId, programId, isPhysical, isActive]
+      );
+      ids[name] = Number(inserted.rows[0].id);
+      for (const mapping of mappings) {
+        const [grade, track] = mapping.split(":");
+        await pool.query(
+          `INSERT INTO centre_exam_tracks (centre_id, grade_id, exam_track_code)
+           SELECT $1, id, $3 FROM grade WHERE number = $2 ORDER BY id LIMIT 1`,
+          [ids[name], Number(grade), track]
+        );
+      }
+    }
+  } finally {
+    await pool.end();
+  }
+  return ids;
+}
+
+async function clearAssignFixtureAssignments(): Promise<void> {
+  const pool = getTestPool();
+  try {
+    await pool.query(
+      `DELETE FROM lms_curriculum_plan_assignments
+       WHERE centre_id IN (SELECT id FROM centres WHERE name LIKE '${ASSIGN_PREFIX}%')`
+    );
+  } finally {
+    await pool.end();
+  }
+}
+
+function assignRow(page: Page, centre: string) {
+  return page.locator("[data-assign-centre-row]").filter({ hasText: `${ASSIGN_PREFIX}${centre}` });
+}
+
+test.describe("Curriculum Plan assignment", () => {
+  let centreIds: Record<string, number>;
+
+  test.beforeAll(async () => {
+    centreIds = await seedAssignFixture();
+  });
+
+  test.afterAll(async () => {
+    await removeAssignFixture();
+  });
+
+  test.beforeEach(async () => {
+    await clearAssignFixtureAssignments();
+  });
+
+  test("only active physical JNV Centres mapped for the plan's Grade are offered, grouped by region, and others are rejected", async ({
+    adminPage,
+  }) => {
+    const planId = await createPlan(adminPage, {
+      title: "E2E G11 Eligibility Plan",
+      examTracks: ["jee_main"],
+      grade: 11,
+    });
+
+    await adminPage.goto(`/curriculum-summary/plans/${planId}/assign`);
+    await expect(
+      adminPage
+        .getByRole("group", { name: "PLAN_E2E_NORTH" })
+        .locator("[data-assign-centre-row]")
+        .filter({ hasText: ASSIGN_PREFIX })
+    ).toHaveText([/Plan Assign E2E Alpha/, /Plan Assign E2E Bravo/]);
+    await expect(
+      adminPage
+        .getByRole("group", { name: "PLAN_E2E_SOUTH" })
+        .locator("[data-assign-centre-row]")
+        .filter({ hasText: ASSIGN_PREFIX })
+    ).toHaveText([/Plan Assign E2E Charlie/, /Plan Assign E2E Delta/]);
+    for (const absent of ["Inactive", "Virtual", "Non-JNV", "G12 Only"]) {
+      await expect(adminPage.getByText(`${ASSIGN_PREFIX}${absent}`)).toHaveCount(0);
+    }
+
+    for (const ineligible of ["Inactive", "Virtual", "Non-JNV", "G12 Only"]) {
+      const response = await adminPage.request.put(`/api/curriculum/plans/${planId}/assignments`, {
+        data: { centre_ids: [centreIds.Alpha, centreIds[ineligible]] },
+      });
+      expect(response.status()).toBe(400);
+    }
+    const unknown = await adminPage.request.put(`/api/curriculum/plans/${planId}/assignments`, {
+      data: { centre_ids: [999999999] },
+    });
+    expect(unknown.status()).toBe(400);
+    // A rejected save writes nothing.
+    const plan = (await (await adminPage.request.get(`/api/curriculum/plans/${planId}`)).json()).plan;
+    expect(plan.assignmentCount).toBe(0);
+  });
+
+  test("assign by plan shows moves and not-covered tracks before Save, then moves the Centre onto this plan", async ({
+    adminPage,
+  }) => {
+    const sourceId = await createPlan(adminPage, {
+      title: "E2E G11 Assign Source Plan",
+      examTracks: ["jee_main"],
+      grade: 11,
+    });
+    const targetId = await createPlan(adminPage, {
+      title: "E2E G11 Assign Target Plan",
+      examTracks: ["jee_main"],
+      grade: 11,
+    });
+    const seeded = await adminPage.request.put(`/api/curriculum/plans/${sourceId}/assignments`, {
+      data: { centre_ids: [centreIds.Delta] },
+    });
+    expect(seeded.status()).toBe(200);
+
+    await adminPage.goto(`/curriculum-summary/plans/${targetId}/assign`);
+    await expect(assignRow(adminPage, "Delta")).toContainText("On E2E G11 Assign Source Plan");
+    for (const centre of ["Alpha", "Bravo", "Charlie", "Delta"]) {
+      await assignRow(adminPage, centre).getByRole("checkbox").check();
+    }
+
+    await expect(adminPage.getByTestId("assign-move-count")).toHaveText(
+      "1 Centre moves from another plan"
+    );
+    await expect(assignRow(adminPage, "Delta")).toContainText("Moves from E2E G11 Assign Source Plan");
+    await expect(assignRow(adminPage, "Bravo")).toContainText("⚠ not covered: CET");
+    await expect(assignRow(adminPage, "Charlie")).toContainText("⚠ not covered: JEE Advanced");
+    await expect(assignRow(adminPage, "Alpha")).not.toContainText("⚠ not covered");
+    await expect(assignRow(adminPage, "Delta")).not.toContainText("⚠ not covered");
+
+    await adminPage.getByRole("button", { name: "Save assignments" }).click();
+    await expect(adminPage.getByText("Assignments saved.")).toBeVisible();
+    await expect(adminPage.getByTestId("assign-move-count")).toHaveText(
+      "No Centres move from another plan"
+    );
+
+    await adminPage.reload();
+    for (const centre of ["Alpha", "Bravo", "Charlie", "Delta"]) {
+      await expect(assignRow(adminPage, centre).getByRole("checkbox")).toBeChecked();
+    }
+    await expect(assignRow(adminPage, "Delta")).not.toContainText("E2E G11 Assign Source Plan");
+
+    await adminPage.goto(`/curriculum-summary/plans/${sourceId}/assign`);
+    await expect(assignRow(adminPage, "Delta").getByRole("checkbox")).not.toBeChecked();
+    await expect(assignRow(adminPage, "Delta")).toContainText("On E2E G11 Assign Target Plan");
+
+    await adminPage.goto("/curriculum-summary/plans?academic_year=2026-2027&grade=11");
+    await expect(
+      adminPage.getByRole("row").filter({ hasText: "E2E G11 Assign Source Plan" }).locator("td").last()
+    ).toHaveText("0");
+    await expect(
+      adminPage.getByRole("row").filter({ hasText: "E2E G11 Assign Target Plan" }).locator("td").last()
+    ).toHaveText("4");
+  });
+
+  test("unticking an assigned Centre removes its assignment", async ({ adminPage }) => {
+    const planId = await createPlan(adminPage, {
+      title: "E2E G11 Untick Plan",
+      examTracks: ["jee_main"],
+      grade: 11,
+    });
+    const seeded = await adminPage.request.put(`/api/curriculum/plans/${planId}/assignments`, {
+      data: { centre_ids: [centreIds.Alpha, centreIds.Bravo] },
+    });
+    expect(seeded.status()).toBe(200);
+
+    await adminPage.goto(`/curriculum-summary/plans/${planId}/assign`);
+    await expect(assignRow(adminPage, "Bravo").getByRole("checkbox")).toBeChecked();
+    await assignRow(adminPage, "Bravo").getByRole("checkbox").uncheck();
+    await expect(adminPage.getByTestId("assign-move-count")).toHaveText(
+      "No Centres move from another plan · 1 assignment removed"
+    );
+    await adminPage.getByRole("button", { name: "Save assignments" }).click();
+    await expect(adminPage.getByText("Assignments saved.")).toBeVisible();
+
+    await adminPage.reload();
+    await expect(assignRow(adminPage, "Alpha").getByRole("checkbox")).toBeChecked();
+    await expect(assignRow(adminPage, "Bravo").getByRole("checkbox")).not.toBeChecked();
+    const plan = (await (await adminPage.request.get(`/api/curriculum/plans/${planId}`)).json()).plan;
+    expect(plan.assignmentCount).toBe(1);
+  });
+
+  test("academic year and Grade are locked while the plan has a Plan Assignment", async ({
+    adminPage,
+  }) => {
+    const planId = await createPlan(adminPage, {
+      title: "E2E G11 Locked Plan",
+      examTracks: ["jee_main"],
+      grade: 11,
+    });
+    const details = {
+      title: "E2E G11 Locked Plan",
+      exam_tracks: ["jee_main"],
+      academic_year: "2026-2027",
+      grade: 11,
+      closure_date: "2027-02-28",
+    };
+    const seeded = await adminPage.request.put(`/api/curriculum/plans/${planId}/assignments`, {
+      data: { centre_ids: [centreIds.Alpha] },
+    });
+    expect(seeded.status()).toBe(200);
+
+    const regrade = await adminPage.request.patch(`/api/curriculum/plans/${planId}`, {
+      data: { ...details, grade: 12 },
+    });
+    expect(regrade.status()).toBe(409);
+    const moveYear = await adminPage.request.patch(`/api/curriculum/plans/${planId}`, {
+      data: { ...details, academic_year: "2027-2028", closure_date: "2028-02-28" },
+    });
+    expect(moveYear.status()).toBe(409);
+    // Other details stay editable.
+    const rename = await adminPage.request.patch(`/api/curriculum/plans/${planId}`, {
+      data: { ...details, title: "E2E G11 Locked Plan (renamed)" },
+    });
+    expect(rename.status()).toBe(200);
+
+    await adminPage.goto(`/curriculum-summary/plans/${planId}`);
+    await expect(adminPage.getByLabel("Academic year")).toBeDisabled();
+    await expect(adminPage.getByLabel("Grade")).toBeDisabled();
+    await expect(adminPage.getByTestId("plan-assignment-lock")).toHaveText(
+      "Academic year and Grade are locked while 1 Centre is assigned to this plan."
+    );
+    await expect(adminPage.getByLabel("Title")).toBeEnabled();
+
+    // Once unassigned, they unlock.
+    const cleared = await adminPage.request.put(`/api/curriculum/plans/${planId}/assignments`, {
+      data: { centre_ids: [] },
+    });
+    expect(cleared.status()).toBe(200);
+    await adminPage.reload();
+    await expect(adminPage.getByLabel("Academic year")).toBeEnabled();
+    await expect(adminPage.getByLabel("Grade")).toBeEnabled();
+    await expect(adminPage.getByTestId("plan-assignment-lock")).toHaveCount(0);
+    const regradeUnassigned = await adminPage.request.patch(`/api/curriculum/plans/${planId}`, {
+      data: { ...details, grade: 12 },
+    });
+    expect(regradeUnassigned.status()).toBe(200);
+  });
+
+  test("the editor links to the assign page with the assigned count", async ({ adminPage }) => {
+    const planId = await createPlan(adminPage, {
+      title: "E2E G11 Assign Link Plan",
+      examTracks: ["jee_main"],
+      grade: 11,
+    });
+    const seeded = await adminPage.request.put(`/api/curriculum/plans/${planId}/assignments`, {
+      data: { centre_ids: [centreIds.Alpha, centreIds.Charlie] },
+    });
+    expect(seeded.status()).toBe(200);
+
+    await adminPage.goto(`/curriculum-summary/plans/${planId}`);
+    await expect(adminPage.getByTestId("plan-assignment-count")).toHaveText("2 Centres assigned");
+    await adminPage.getByRole("link", { name: "Assign Centres" }).click();
+    await expect(adminPage).toHaveURL(new RegExp(`/curriculum-summary/plans/${planId}/assign$`));
+    await expect(
+      adminPage.getByRole("heading", { name: "Assign E2E G11 Assign Link Plan" })
+    ).toBeVisible();
+  });
+
+  test("read-only Admin sees the assign page with disabled controls and gets 403 on save", async ({
+    adminPage,
+    browser,
+  }) => {
+    const planId = await createPlan(adminPage, {
+      title: "E2E G11 Read-only Assign Plan",
+      examTracks: ["jee_main"],
+      grade: 11,
+    });
+    const seeded = await adminPage.request.put(`/api/curriculum/plans/${planId}/assignments`, {
+      data: { centre_ids: [centreIds.Alpha] },
+    });
+    expect(seeded.status()).toBe(200);
+
+    const page = await readOnlyAdminPage(browser);
+    try {
+      await page.goto(`/curriculum-summary/plans/${planId}/assign`);
+      await expect(assignRow(page, "Alpha").getByRole("checkbox")).toBeChecked();
+      await expect(assignRow(page, "Alpha").getByRole("checkbox")).toBeDisabled();
+      await expect(assignRow(page, "Bravo").getByRole("checkbox")).toBeDisabled();
+      await expect(page.getByRole("button", { name: "Save assignments" })).toBeDisabled();
+
+      const save = await page.request.put(`/api/curriculum/plans/${planId}/assignments`, {
+        data: { centre_ids: [centreIds.Alpha, centreIds.Bravo] },
+      });
+      expect(save.status()).toBe(403);
+      const plan = (await (await page.request.get(`/api/curriculum/plans/${planId}`)).json()).plan;
+      expect(plan.assignmentCount).toBe(1);
+    } finally {
+      await page.context().close();
+    }
+  });
+
+  test("PMs and program admins cannot open the assign page or call the assignment APIs", async ({
+    adminPage,
+    pmPage,
+    programAdminPage,
+  }) => {
+    const planId = await createPlan(adminPage, {
+      title: "E2E G11 Denied Assign Plan",
+      examTracks: ["jee_main"],
+      grade: 11,
+    });
+    for (const page of [pmPage, programAdminPage]) {
+      expect((await page.request.get(`/api/curriculum/plans/${planId}/assignments`)).status()).toBe(403);
+      const preview = await page.request.post(`/api/curriculum/plans/${planId}/assignments/preview`, {
+        data: { centre_ids: [centreIds.Alpha] },
+      });
+      expect(preview.status()).toBe(403);
+      const save = await page.request.put(`/api/curriculum/plans/${planId}/assignments`, {
+        data: { centre_ids: [centreIds.Alpha] },
+      });
+      expect(save.status()).toBe(403);
+      await page.goto(`/curriculum-summary/plans/${planId}/assign`);
+      await expect(page).toHaveURL(/\/dashboard/);
+    }
+  });
+});

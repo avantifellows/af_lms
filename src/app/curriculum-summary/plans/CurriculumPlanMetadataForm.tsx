@@ -22,19 +22,27 @@ interface Props {
   planId?: number;
   initialValues: CurriculumPlanMetadataValues;
   readOnly: boolean;
+  // Plan Assignments lock the academic year and Grade.
+  assignmentCount?: number;
 }
 
 const fieldClassName =
   "min-h-[44px] rounded-md border border-border bg-bg-card px-3 py-2 text-sm font-normal text-text-primary disabled:cursor-not-allowed disabled:opacity-60";
 const labelClassName = "flex flex-col gap-1 text-sm font-bold text-text-primary";
 
-export default function CurriculumPlanMetadataForm({ planId, initialValues, readOnly }: Props) {
+export default function CurriculumPlanMetadataForm({
+  planId,
+  initialValues,
+  readOnly,
+  assignmentCount = 0,
+}: Props) {
   const router = useRouter();
   const [values, setValues] = useState(initialValues);
   const [errors, setErrors] = useState<CurriculumPlanError[]>([]);
   const [saving, setSaving] = useState(false);
   const [savedMessage, setSavedMessage] = useState("");
   const isNew = planId === undefined;
+  const yearAndGradeLocked = assignmentCount > 0;
 
   function toggleTrack(track: ExamTrack, checked: boolean) {
     setValues((current) => ({
@@ -122,7 +130,7 @@ export default function CurriculumPlanMetadataForm({ planId, initialValues, read
             placeholder="2026-2027"
             value={values.academicYear}
             onChange={(event) => setValues({ ...values, academicYear: event.target.value })}
-            disabled={readOnly}
+            disabled={readOnly || yearAndGradeLocked}
             className={fieldClassName}
           />
         </label>
@@ -131,13 +139,20 @@ export default function CurriculumPlanMetadataForm({ planId, initialValues, read
           <select
             value={values.grade}
             onChange={(event) => setValues({ ...values, grade: Number(event.target.value) })}
-            disabled={readOnly}
+            disabled={readOnly || yearAndGradeLocked}
             className={fieldClassName}
           >
             <option value={11}>11</option>
             <option value={12}>12</option>
           </select>
         </label>
+        {yearAndGradeLocked ? (
+          <p data-testid="plan-assignment-lock" className="text-sm text-text-secondary md:col-span-2">
+            Academic year and Grade are locked while{" "}
+            {assignmentCount === 1 ? "1 Centre is" : `${assignmentCount} Centres are`} assigned to
+            this plan.
+          </p>
+        ) : null}
         <label className={labelClassName}>
           Plan Closure Date
           <input

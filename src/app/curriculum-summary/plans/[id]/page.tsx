@@ -1,7 +1,9 @@
+import Link from "next/link";
 import { getServerSession } from "next-auth";
 import { notFound, redirect } from "next/navigation";
 
 import PageHeader from "@/components/PageHeader";
+import { Card } from "@/components/ui";
 import { authOptions } from "@/lib/auth";
 import {
   getCurriculumPlan,
@@ -60,6 +62,22 @@ export default async function CurriculumPlanEditorPage({ params }: PageProps) {
               readOnly={readOnly}
             />
             <CurriculumPlanCopy planId={result.plan.id} readOnly={readOnly} />
+            <Card className="flex flex-wrap items-center gap-3 p-4">
+              <div>
+                <p className="text-sm font-bold text-text-primary">Plan Assignments</p>
+                <p data-testid="plan-assignment-count" className="text-sm text-text-secondary">
+                  {result.plan.assignmentCount === 1
+                    ? "1 Centre assigned"
+                    : `${result.plan.assignmentCount} Centres assigned`}
+                </p>
+              </div>
+              <Link
+                href={`/curriculum-summary/plans/${result.plan.id}/assign`}
+                className="ml-auto inline-flex min-h-[44px] items-center rounded-md border border-border px-3 py-1.5 text-sm font-bold text-accent hover:text-accent-hover"
+              >
+                Assign Centres
+              </Link>
+            </Card>
             <CurriculumPlanMetadataForm
               planId={result.plan.id}
               initialValues={{
@@ -70,6 +88,7 @@ export default async function CurriculumPlanEditorPage({ params }: PageProps) {
                 closureDate: result.plan.closureDate,
               }}
               readOnly={readOnly}
+              assignmentCount={result.plan.assignmentCount}
             />
             <CurriculumPlanChapterDates
               // Grade or served tracks change the Chapter list; start a fresh grid.

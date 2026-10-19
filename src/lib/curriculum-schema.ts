@@ -86,6 +86,9 @@ const PLANS_REQUIRED_COLUMNS: Array<{ table: string; column: string }> = [
   { table: "lms_curriculum_plan_chapters", column: "updated_by_email" },
   { table: "lms_curriculum_plan_chapters", column: "updated_at" },
   { table: "lms_curriculum_plan_assignments", column: "plan_id" },
+  { table: "lms_curriculum_plan_assignments", column: "centre_id" },
+  { table: "lms_curriculum_plan_assignments", column: "grade_id" },
+  { table: "lms_curriculum_plan_assignments", column: "academic_year" },
 ];
 
 let cachedStatus: Promise<CurriculumSchemaStatus> | null = null;

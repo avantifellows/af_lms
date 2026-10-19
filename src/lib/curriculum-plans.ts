@@ -74,8 +74,8 @@ export type CurriculumPlanValidationFailure = {
   errors: CurriculumPlanError[];
 };
 
-type NotFound = { ok: false; status: 404; error: string };
-type Conflict = { ok: false; status: 409; error: string };
+export type NotFound = { ok: false; status: 404; error: string };
+export type Conflict = { ok: false; status: 409; error: string };
 
 export type CurriculumPlanListResult =
   | { ok: true; plans: CurriculumPlanSummary[] }
@@ -108,9 +108,9 @@ export function requireCurriculumPlanAdmin(
   return requireAdmin(session, opts);
 }
 
-type Db = <T>(sql: string, params: unknown[]) => Promise<T[]>;
+export type Db = <T>(sql: string, params: unknown[]) => Promise<T[]>;
 
-function clientDb(client: PoolClient): Db {
+export function clientDb(client: PoolClient): Db {
   return async <T>(sql: string, params: unknown[]) =>
     (await client.query(sql, params)).rows as T[];
 }
@@ -120,7 +120,7 @@ const poolDb: Db = (sql, params) => query(sql, params);
 const PLAN_GRADES = [11, 12];
 const TITLE_MAX_LENGTH = 200;
 
-function validationFailure(errors: CurriculumPlanError[]): CurriculumPlanValidationFailure {
+export function validationFailure(errors: CurriculumPlanError[]): CurriculumPlanValidationFailure {
   return { ok: false, status: 400, error: "Invalid Curriculum Plan", errors };
 }
 
@@ -328,7 +328,7 @@ export async function getCurriculumPlan(id: number): Promise<CurriculumPlanGetRe
   return { ok: true, plan: { ...plan, chapters } };
 }
 
-function planNotFound(): NotFound {
+export function planNotFound(): NotFound {
   return { ok: false, status: 404, error: "Curriculum Plan not found" };
 }
 
@@ -441,7 +441,7 @@ function normalizeChapterDateInputs(
   return { ok: true, inputs };
 }
 
-interface LockedPlanRow {
+export interface LockedPlanRow {
   id: string | number;
   title: string;
   status: CurriculumPlanStatus;
@@ -451,7 +451,7 @@ interface LockedPlanRow {
   closure_date: string;
 }
 
-async function lockPlan(db: Db, id: number): Promise<LockedPlanRow | null> {
+export async function lockPlan(db: Db, id: number): Promise<LockedPlanRow | null> {
   const rows = await db<LockedPlanRow>(
     `SELECT id, title, status, academic_year, grade_id, exam_tracks, closure_date::text AS closure_date
      FROM lms_curriculum_plans
@@ -574,11 +574,13 @@ export type CurriculumPlanUpdateResult =
   | { ok: true; plan: CurriculumPlanSummary }
   | CurriculumPlanValidationFailure
   | CurriculumSchemaUnavailable
-  | NotFound;
+  | NotFound
+  | Conflict;
 
 // Update title, served tracks, academic year, Grade and Plan Closure Date. Every stored date
 // on the resulting effective Chapter list must still fall within the academic year and on or
 // before the closure date; dates of Chapters outside the new list stay stored but hidden.
+// Academic year and Grade are locked while the plan has any Plan Assignment.
 export async function updateCurriculumPlanMetadata(params: {
   id: number;
   adminEmail: string;
@@ -600,6 +602,20 @@ export async function updateCurriculumPlanMetadata(params: {
     const gradeId = await resolveGradeId(db, metadata.grade);
     if (gradeId === null) {
       return validationFailure([{ field: "grade", message: "Grade was not found" }]);
+    }
+
+    if (metadata.academicYear !== plan.academic_year || gradeId !== Number(plan.grade_id)) {
+      const assigned = await db(
+        "SELECT 1 FROM lms_curriculum_plan_assignments WHERE plan_id = $1 LIMIT 1",
+        [params.id]
+      );
+      if (assigned.length > 0) {
+        return {
+          ok: false as const,
+          status: 409 as const,
+          error: "Academic year and Grade are locked while the plan has Plan Assignments",
+        };
+      }
     }
 
     const chapters = await loadEffectiveChapters(db, {
