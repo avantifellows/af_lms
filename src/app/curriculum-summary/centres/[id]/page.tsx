@@ -283,12 +283,40 @@ function SubjectTabLink({ tab, href, active }: { tab: SubjectTab; href: string; 
       }`}
     >
       {tab.subject ?? "All"}
-      {tab.progress ? (
-        <Badge variant={TONE_BADGE_VARIANTS[tab.progress.tone]} data-tab-progress>
-          {tab.progress.label} · {tab.progress.done}/{tab.progress.due}
-        </Badge>
-      ) : null}
+      {tab.progress ? <TabProgressBadge progress={tab.progress} active={active} /> : null}
     </Link>
+  );
+}
+
+type TabProgress = NonNullable<SubjectTab["progress"]>;
+
+// The selected tab is solid accent, so its badge is drawn on the card colour with the tone as
+// text; the tinted Badge backgrounds would vanish into the accent.
+const ACTIVE_TAB_BADGE_TEXT_CLASS_NAMES: Record<TabProgress["tone"], string> = {
+  green: "text-success",
+  amber: "text-warning-text",
+  red: "text-danger",
+};
+
+function TabProgressBadge({ progress, active }: { progress: TabProgress; active: boolean }) {
+  const text = `${progress.label} · ${progress.done}/${progress.due}`;
+  if (!active) {
+    return (
+      <Badge variant={TONE_BADGE_VARIANTS[progress.tone]} data-tab-progress data-tone={progress.tone}>
+        {text}
+      </Badge>
+    );
+  }
+  return (
+    <span
+      data-tab-progress
+      data-tone={progress.tone}
+      className={`inline-flex items-center rounded-full bg-bg-card px-2.5 py-1 text-xs font-bold ${
+        ACTIVE_TAB_BADGE_TEXT_CLASS_NAMES[progress.tone]
+      }`}
+    >
+      {text}
+    </span>
   );
 }
 

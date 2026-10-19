@@ -291,6 +291,37 @@ describe("Chapter timeline page", () => {
     expect(document.querySelector('input[type="hidden"][name="subject"]')).toHaveValue("Biology");
   });
 
+  it("draws the selected tab's badge on the card colour so it reads against the accent tab", async () => {
+    mockGetChapterTimeline.mockResolvedValue({
+      ok: true,
+      timeline: timeline({
+        subjects: [
+          { subject: "Physics", progress: { due: 1, done: 1, behind: 0, tone: "green", label: "On track" } },
+          { subject: "Chemistry", progress: { due: 2, done: 0, behind: 2, tone: "amber", label: "2 behind" } },
+          { subject: "Biology", progress: { due: 3, done: 0, behind: 3, tone: "red", label: "3 behind" } },
+        ],
+      }),
+    });
+
+    const badgeClasses = async (subject: string) => {
+      document.body.innerHTML = "";
+      await renderPage({ subject });
+      return document.querySelector(`[data-subject-tab="${subject}"] [data-tab-progress]`)?.className ?? "";
+    };
+
+    const selectedRed = await badgeClasses("Biology");
+    expect(selectedRed).toContain("bg-bg-card");
+    expect(selectedRed).toContain("text-danger");
+    expect(selectedRed).not.toContain("bg-danger-bg");
+    expect(await badgeClasses("Chemistry")).toMatch(/bg-bg-card.*text-warning-text|text-warning-text.*bg-bg-card/);
+    expect(await badgeClasses("Physics")).toMatch(/bg-bg-card.*text-success|text-success.*bg-bg-card/);
+
+    // Tabs that aren't selected keep the tinted tone badge.
+    const unselected = document.querySelector('[data-subject-tab="Biology"] [data-tab-progress]');
+    expect(unselected).toHaveClass("bg-danger-bg", "text-danger");
+    expect(unselected).not.toHaveClass("bg-bg-card");
+  });
+
   it("ignores an unknown subject", async () => {
     await renderPage({ subject: "Astronomy" });
 
