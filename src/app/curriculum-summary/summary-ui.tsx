@@ -39,7 +39,7 @@ export const PAGE_CONTAINER_CLASS_NAME = "w-full px-4 py-3 sm:px-6 lg:px-8";
 // columns are wide and centred, the rest compact. Table cells ignore max-width, so width caps sit
 // on the cell contents.
 export const CELL_CLASS_NAME = "py-3 align-top";
-export const COMPACT_CELL_CLASS_NAME = `${CELL_CLASS_NAME} px-2 text-xs`;
+export const COMPACT_CELL_CLASS_NAME = `${CELL_CLASS_NAME} px-2 text-xs leading-5`;
 // A number cell: centred, never wrapping, in the Summary's number font.
 export const NUMBER_CELL_CLASS_NAME = `${CELL_CLASS_NAME} whitespace-nowrap px-2 text-center font-mono`;
 // Header classes: a narrow centred number column, and a compact left-aligned one.

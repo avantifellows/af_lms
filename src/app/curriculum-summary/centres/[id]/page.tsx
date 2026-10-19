@@ -461,7 +461,7 @@ function TimelineRow({ chapter }: { chapter: ChapterTimeline["chapters"][number]
     <tr data-timeline-row data-chapter={chapter.name}>
       <td data-chapter-label className={`${CELL_CLASS_NAME} px-4`}>
         {/* At most three lines; the full label is in the title. */}
-        <span title={chapterTitle(chapter)} className="line-clamp-3 min-w-[12rem] max-w-[18rem]">
+        <span title={chapterTitle(chapter)} className="line-clamp-3 min-w-[12rem] max-w-[24rem]">
           <ChapterLabel code={chapter.code} name={chapter.name} />
         </span>
       </td>
