@@ -24,10 +24,14 @@ import {
   isAcademicYearDate,
   planStatusAsOf,
   primaryExamTrackForChapter,
+  subjectGroupBehind,
+  subjectGroupsForClass,
+  SUBJECT_GROUPS,
   type BehindPillTone,
   type ChapterStatus,
   type ChapterTestStatus,
   type HoursWindow,
+  type SubjectGroup,
 } from "./curriculum-plan-rules";
 import { query } from "./db";
 import { EXAM_TRACKS, formatExamTrack, type ExamTrack } from "./exam-tracks";
@@ -54,7 +58,7 @@ export interface CurriculumSummaryQuery {
   schoolSearch: string;
   grade: CurriculumSummaryGrade;
   asOf: string;
-  // Keeps rows with Behind ≥ 1; header numbers ignore it.
+  // Keeps rows with PCM or PCB Behind ≥ 1; header numbers ignore it.
   onlyBehind: boolean;
   page: number;
   pageSize: number;
@@ -109,6 +113,12 @@ export interface CurriculumSummarySubjectProgress {
   label: string;
 }
 
+export interface CurriculumSummaryGroupBehind {
+  behind: number;
+  tone: BehindPillTone;
+  label: string;
+}
+
 export interface CurriculumSummaryRow {
   centreId: number;
   centreName: string;
@@ -124,7 +134,8 @@ export interface CurriculumSummaryRow {
   plan: { id: number; title: string; closed: boolean } | null;
   // null = "—": no in-syllabus Chapter of that subject for the class's tracks.
   subjects: Record<CurriculumSummarySubject, CurriculumSummarySubjectProgress | null> | null;
-  behind: number;
+  // PCM Behind and PCB Behind for plan rows; null = "—": the group doesn't apply to the class.
+  subjectGroups: Record<SubjectGroup, CurriculumSummaryGroupBehind | null> | null;
   // Plan Chapters whose Chapter Test Status is Overdue; 0 for rows without a plan.
   testsOverdue: number;
   // Set only for No plan rows: Chapters with a Conducted Chapter Test.
@@ -134,7 +145,8 @@ export interface CurriculumSummaryRow {
 export interface CurriculumSummaryHeader {
   centresOnPlan: number;
   centresTotal: number;
-  chaptersBehind: number;
+  // PCM and PCB chapters behind: each group's Behind summed over the rows.
+  chaptersBehind: Record<SubjectGroup, number>;
   testsOverdue: number;
 }
 
@@ -193,7 +205,7 @@ export async function getCurriculumSummary(
     ...new Set(scopedRows.flatMap((row) => (row.region ? [row.region] : []))),
   ].sort();
   const rows = sortSummaryRows(scopedRows.filter((row) => matchesSummaryFilters(row, params)));
-  const listedRows = params.onlyBehind ? rows.filter((row) => row.behind >= 1) : rows;
+  const listedRows = params.onlyBehind ? rows.filter((row) => worstGroupBehind(row) >= 1) : rows;
   const { page, totalPages, pageRows } = paginate(listedRows, params.page, params.pageSize);
 
   return {
@@ -503,7 +515,7 @@ function buildSummaryRow(data: SummaryClassData): CurriculumSummaryRow {
       closed: planStatusAsOf({ status: "active", closureDate }, asOf) === "closed",
     },
     subjects,
-    behind: chapterProgress(chapters, asOf).behind,
+    subjectGroups: subjectGroupsBehind(raw, chapters, asOf),
     testsOverdue: testStatusCount(data, "overdue"),
   };
 }
@@ -525,7 +537,7 @@ function summaryRowBase(raw: SummaryQueryRow) {
     tracksLabel: mappedTracks.map(formatExamTrack).join(" + "),
     plan: null,
     subjects: null,
-    behind: 0,
+    subjectGroups: null,
     testsOverdue: 0,
     testsConducted: null,
   };
@@ -569,6 +581,31 @@ function subjectProgress(
   return { ...progress, ...behindPill(progress.behind) };
 }
 
+// PCM Behind and PCB Behind; a group the Summary Class's tracks don't take is null.
+function subjectGroupsBehind(
+  raw: SummaryQueryRow,
+  chapters: SummaryChapter[],
+  asOf: string
+): Record<SubjectGroup, CurriculumSummaryGroupBehind | null> {
+  const classGroups = subjectGroupsForClass(summaryClassTracks(raw.mapped_tracks, chapters));
+  return Object.fromEntries(
+    SUBJECT_GROUPS.map((group) => {
+      if (!classGroups.includes(group)) return [group, null];
+      const behind = subjectGroupBehind(chapters, group, asOf);
+      return [group, { behind, ...behindPill(behind) }];
+    })
+  ) as Record<SubjectGroup, CurriculumSummaryGroupBehind | null>;
+}
+
+function groupBehind(row: CurriculumSummaryRow, group: SubjectGroup): number {
+  return row.subjectGroups?.[group]?.behind ?? 0;
+}
+
+// The larger of PCM and PCB Behind; a group that doesn't apply counts as 0.
+function worstGroupBehind(row: CurriculumSummaryRow): number {
+  return Math.max(...SUBJECT_GROUPS.map((group) => groupBehind(row, group)));
+}
+
 function parseChapters(value: unknown): SummaryChapter[] {
   const parsed = typeof value === "string" ? JSON.parse(value) : value;
   if (!Array.isArray(parsed)) return [];
@@ -609,13 +646,14 @@ const KIND_ORDER: Record<CurriculumSummaryRowKind, number> = {
   configuration_error: 4,
 };
 
-// Worst first: plan rows by Behind desc then Tests overdue desc, then No-plan rows, then
-// setup-error, no-content and configuration-error rows; Centre name breaks ties.
+// Worst first: plan rows by the larger of PCM and PCB Behind desc then Tests overdue desc, then
+// No-plan rows, then setup-error, no-content and configuration-error rows; Centre name breaks
+// ties.
 function sortSummaryRows(rows: CurriculumSummaryRow[]): CurriculumSummaryRow[] {
   return [...rows].sort(
     (a, b) =>
       KIND_ORDER[a.kind] - KIND_ORDER[b.kind] ||
-      b.behind - a.behind ||
+      worstGroupBehind(b) - worstGroupBehind(a) ||
       b.testsOverdue - a.testsOverdue ||
       a.centreName.localeCompare(b.centreName) ||
       a.centreId - b.centreId
@@ -623,14 +661,16 @@ function sortSummaryRows(rows: CurriculumSummaryRow[]): CurriculumSummaryRow[] {
 }
 
 // Centres on plan = rows with an Active or Closed plan out of every row except setup-error and
-// no-content rows; Chapters behind = Σ Behind; Chapter tests overdue = Σ Tests overdue. Covers
-// all rows, not just the current page.
+// no-content rows; PCM / PCB chapters behind = Σ PCM / PCB Behind; Chapter tests overdue =
+// Σ Tests overdue. Covers all rows, not just the current page.
 function summaryHeader(rows: CurriculumSummaryRow[]): CurriculumSummaryHeader {
   return {
     centresOnPlan: rows.filter((row) => row.kind === "plan").length,
     centresTotal: rows.filter((row) => row.kind !== "setup_error" && row.kind !== "no_content")
       .length,
-    chaptersBehind: rows.reduce((sum, row) => sum + row.behind, 0),
+    chaptersBehind: Object.fromEntries(
+      SUBJECT_GROUPS.map((group) => [group, rows.reduce((sum, row) => sum + groupBehind(row, group), 0)])
+    ) as Record<SubjectGroup, number>,
     testsOverdue: rows.reduce((sum, row) => sum + row.testsOverdue, 0),
   };
 }

@@ -120,7 +120,7 @@ function timeline(overrides: Partial<ChapterTimeline> = {}, row: Partial<Chapter
       explanation: null,
       plan: { id: 900, title: "G11 Plan", closed: false },
       subjects: null,
-      behind: 2,
+      subjectGroups: null,
       testsOverdue: 1,
       testsConducted: null,
       ...row,

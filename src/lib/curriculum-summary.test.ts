@@ -232,7 +232,7 @@ describe("getCurriculumSummary", () => {
     expect(mockQuery).not.toHaveBeenCalled();
   });
 
-  it("measures a plan row: pills, Behind, Tests overdue and the plan", async () => {
+  it("measures a plan row: pills, PCM / PCB Behind, Tests overdue and the plan", async () => {
     routeQueries({ summary: [raw(1)] });
 
     const result = await getCurriculumSummary(ADMIN, query());
@@ -257,13 +257,22 @@ describe("getCurriculumSummary", () => {
           Maths: null,
           Biology: { due: 1, done: 0, behind: 1, tone: "amber", label: "1 behind" },
         },
-        behind: 2,
+        // PCM = Physics 1 + Chemistry 0; PCB = Physics 1 + Chemistry 0 + Biology 1.
+        subjectGroups: {
+          PCM: { behind: 1, tone: "amber", label: "1 behind" },
+          PCB: { behind: 2, tone: "amber", label: "2 behind" },
+        },
         // Chapter 2 (test date 1 Aug) and Chapter 3 (16 Jul) have no session.
         testsOverdue: 2,
         testsConducted: null,
       },
     ]);
-    expect(result.header).toEqual({ centresOnPlan: 1, centresTotal: 1, chaptersBehind: 2, testsOverdue: 2 });
+    expect(result.header).toEqual({
+      centresOnPlan: 1,
+      centresTotal: 1,
+      chaptersBehind: { PCM: 1, PCB: 2 },
+      testsOverdue: 2,
+    });
     expect(mockLoadSessions).toHaveBeenCalledWith({
       centreIds: [1],
       grade: 11,
@@ -292,7 +301,7 @@ describe("getCurriculumSummary", () => {
       kind: "no_plan",
       plan: null,
       subjects: null,
-      behind: 0,
+      subjectGroups: null,
       testsOverdue: 0,
       testsConducted: 1,
     });
@@ -312,7 +321,13 @@ describe("getCurriculumSummary", () => {
 
     const result = await getCurriculumSummary(ADMIN, query());
 
-    expect(result.ok && result.rows[0]).toMatchObject({ kind, explanation, plan: null, subjects: null });
+    expect(result.ok && result.rows[0]).toMatchObject({
+      kind,
+      explanation,
+      plan: null,
+      subjects: null,
+      subjectGroups: null,
+    });
   });
 
   it("sorts worst first, counts the header over every row and pages the list", async () => {
@@ -333,7 +348,12 @@ describe("getCurriculumSummary", () => {
     expect(first.rows.map((row) => row.centreId)).toEqual([1, 2, 7, 3, 6, 4, 5]);
     // Setup-error and no-content rows don't count towards Centres on plan. Centres 2 and 7 have
     // no Chapter Test session, so their one Chapter's test is overdue too.
-    expect(first.header).toEqual({ centresOnPlan: 3, centresTotal: 5, chaptersBehind: 2, testsOverdue: 4 });
+    expect(first.header).toEqual({
+      centresOnPlan: 3,
+      centresTotal: 5,
+      chaptersBehind: { PCM: 1, PCB: 2 },
+      testsOverdue: 4,
+    });
     expect(first.pagination).toEqual({ page: 1, pageSize: 10, totalRows: 7, totalPages: 1 });
 
     const paged = await getCurriculumSummary(ADMIN, query({ pageSize: 2, page: 9 }));
@@ -436,6 +456,119 @@ describe("getCurriculumSummary", () => {
 
     const [, params] = mockQuery.mock.calls[0] as [string, unknown[]];
     expect(params).toEqual([...scope, 12, "2026-2027", "2026-04-01", AS_OF, null]);
+  });
+});
+
+describe("PCM Behind and PCB Behind", () => {
+  const ALL_TRACKS = ["jee_main", "jee_advanced", "neet"];
+
+  // A due, uncompleted Chapter; due 14 Aug its test is not yet overdue on 15 Aug, due 1 Jul it is.
+  function open(id: number, subject: string, dueDate = "2026-08-14"): RawChapter {
+    return chapter(id, { subject, dueDate, tracks: ALL_TRACKS });
+  }
+
+  // Physics 1, Maths 1 ("Mathematics" label), Biology 2, English 1 (in neither group).
+  const MIXED = [
+    open(1, "Physics"),
+    open(2, "Mathematics"),
+    open(3, "Biology"),
+    open(4, "Biology"),
+    open(5, "English"),
+    chapter(6, { subject: "Chemistry", dueDate: "2026-07-01", completedOn: "2026-07-01", tracks: ALL_TRACKS }),
+  ];
+
+  beforeEach(() => mockLoadSessions.mockResolvedValue(new Map()));
+
+  it.each([
+    ["a JEE Main row", { mapped_tracks: ["jee_main"] }, { PCM: 2, PCB: null }],
+    ["a JEE Advanced row", { mapped_tracks: ["jee_advanced"] }, { PCM: 2, PCB: null }],
+    ["a NEET row", { mapped_tracks: ["neet"] }, { PCM: null, PCB: 3 }],
+    ["a shared JEE Main + NEET row", { mapped_tracks: ["jee_main", "neet"] }, { PCM: 2, PCB: 3 }],
+    ["a No plan row", { plan_status: "draft" }, null],
+    ["a setup-error row", { mapped_tracks: ["jee_main", "jee_advanced"] }, null],
+    ["a no-content row", { mapped_tracks: ["cet"] }, null],
+    ["a configuration-error row", { centre_count: 2 }, null],
+  ])("totals %s by subject group", async (_name, overrides, expected) => {
+    routeQueries({ summary: [raw(11, { chapters: MIXED, ...overrides })] });
+
+    const result = await getCurriculumSummary(ADMIN, query());
+
+    if (!result.ok) throw new Error("expected rows");
+    const groups = result.rows[0].subjectGroups;
+    expect(groups && { PCM: groups.PCM?.behind ?? null, PCB: groups.PCB?.behind ?? null }).toEqual(expected);
+  });
+
+  it("uses the Behind pill tones and labels", async () => {
+    routeQueries({ summary: [raw(11, { chapters: MIXED, mapped_tracks: ["jee_main", "neet"] })] });
+
+    const result = await getCurriculumSummary(ADMIN, query());
+
+    expect(result.ok && result.rows[0].subjectGroups).toEqual({
+      PCM: { behind: 2, tone: "amber", label: "2 behind" },
+      PCB: { behind: 3, tone: "red", label: "3 behind" },
+    });
+  });
+
+  // Shared: PCM 2 (Maths ×2), PCB 2 (Biology ×2): larger 2, 0 tests overdue.
+  // NEET: PCB 3: larger 3. JEE Main: PCM 2 with 1 test overdue (Physics due 1 Jul).
+  // Done: everything due completed, so neither group is behind.
+  const SORT_ROWS = [
+    raw(11, {
+      centre_name: "Shared",
+      mapped_tracks: ["jee_main", "neet"],
+      chapters: [open(1, "Maths"), open(2, "Maths"), open(3, "Biology"), open(4, "Biology")],
+    }),
+    raw(12, {
+      centre_name: "Neet",
+      mapped_tracks: ["neet"],
+      chapters: [open(1, "Biology"), open(2, "Biology"), open(3, "Biology")],
+    }),
+    raw(13, {
+      centre_name: "Main",
+      mapped_tracks: ["jee_main"],
+      chapters: [open(1, "Physics", "2026-07-01"), open(2, "Maths")],
+    }),
+    raw(14, {
+      centre_name: "Done",
+      mapped_tracks: ["jee_main", "neet"],
+      chapters: [chapter(1, { dueDate: "2026-08-14", completedOn: "2026-08-14", tracks: ALL_TRACKS })],
+    }),
+    raw(15, { centre_name: "Draft", plan_status: "draft" }),
+  ];
+
+  it("sorts plan rows by the larger group total, then Tests overdue", async () => {
+    routeQueries({ summary: SORT_ROWS });
+
+    const result = await getCurriculumSummary(ADMIN, query());
+
+    expect(result.ok && result.rows.map((row) => row.centreName)).toEqual(["Neet", "Main", "Shared", "Done", "Draft"]);
+  });
+
+  it("sums each group over every row for the header, whatever Only behind lists", async () => {
+    routeQueries({ summary: SORT_ROWS });
+
+    const result = await getCurriculumSummary(ADMIN, query({ onlyBehind: true }));
+
+    if (!result.ok) throw new Error("expected rows");
+    // A row behind in either group stays; Done (0 / 0) and the No plan row go.
+    expect(result.rows.map((row) => row.centreName)).toEqual(["Neet", "Main", "Shared"]);
+    // PCM: Shared 2 + Main 2; PCB: Shared 2 + Neet 3.
+    expect(result.header.chaptersBehind).toEqual({ PCM: 4, PCB: 5 });
+  });
+
+  it("Only behind keeps a row behind in one group only", async () => {
+    routeQueries({
+      summary: [
+        raw(11, { mapped_tracks: ["jee_main"], chapters: [open(1, "Maths")] }),
+        raw(12, { mapped_tracks: ["neet"], chapters: [open(1, "Biology")] }),
+        raw(13, { mapped_tracks: ["jee_main", "neet"], chapters: [open(1, "Biology")] }),
+        raw(14, { mapped_tracks: ["jee_main", "neet"], chapters: [open(1, "English")] }),
+      ],
+    });
+
+    const result = await getCurriculumSummary(ADMIN, query({ onlyBehind: true }));
+
+    expect(result.ok && result.rows.map((row) => row.centreId)).toEqual([11, 12, 13]);
   });
 });
 

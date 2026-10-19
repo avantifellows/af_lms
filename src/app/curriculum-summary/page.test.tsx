@@ -63,7 +63,10 @@ function row(overrides: Partial<CurriculumSummaryRow>): CurriculumSummaryRow {
       Maths: null,
       Biology: { due: 4, done: 0, behind: 4, tone: "red", label: "4 behind" },
     },
-    behind: 5,
+    subjectGroups: {
+      PCM: { behind: 1, tone: "amber", label: "1 behind" },
+      PCB: { behind: 5, tone: "red", label: "5 behind" },
+    },
     testsOverdue: 2,
     testsConducted: null,
     ...overrides,
@@ -73,7 +76,7 @@ function row(overrides: Partial<CurriculumSummaryRow>): CurriculumSummaryRow {
 function summary(overrides: Partial<Extract<CurriculumSummaryResult, { ok: true }>> = {}): CurriculumSummaryResult {
   return {
     ok: true,
-    header: { centresOnPlan: 1, centresTotal: 3, chaptersBehind: 5, testsOverdue: 2 },
+    header: { centresOnPlan: 1, centresTotal: 3, chaptersBehind: { PCM: 1, PCB: 5 }, testsOverdue: 2 },
     regionOptions: ["NORTH", "SOUTH"],
     rows: [
       row({}),
@@ -81,9 +84,20 @@ function summary(overrides: Partial<Extract<CurriculumSummaryResult, { ok: true 
         centreId: 2,
         centreName: "Bhuj Closed",
         region: null,
+        tracksLabel: "JEE Main",
         plan: { id: 901, title: "Old Plan", closed: true },
+        subjectGroups: { PCM: { behind: 0, tone: "green", label: "On track" }, PCB: null },
       }),
-      row({ centreId: 3, centreName: "Surat", kind: "no_plan", plan: null, subjects: null, behind: 0, testsOverdue: 0, testsConducted: 1 }),
+      row({
+        centreId: 3,
+        centreName: "Surat",
+        kind: "no_plan",
+        plan: null,
+        subjects: null,
+        subjectGroups: null,
+        testsOverdue: 0,
+        testsConducted: 1,
+      }),
       row({
         centreId: 4,
         centreName: "Vapi",
@@ -91,6 +105,7 @@ function summary(overrides: Partial<Extract<CurriculumSummaryResult, { ok: true 
         explanation: "Fix tracks in Centre Management",
         plan: null,
         subjects: null,
+        subjectGroups: null,
       }),
     ],
     pagination: { page: 2, pageSize: 50, totalRows: 120, totalPages: 3 },
@@ -159,7 +174,11 @@ describe("Curriculum Summary page", () => {
       pageSize: 50,
     });
     expect(screen.getByTestId("summary-centres-on-plan")).toHaveTextContent("1/3");
-    expect(screen.getByTestId("summary-chapters-behind")).toHaveTextContent("5");
+    expect(screen.getByText("PCM chapters behind")).toBeInTheDocument();
+    expect(screen.getByTestId("summary-pcm-chapters-behind")).toHaveTextContent("1");
+    expect(screen.getByText("PCB chapters behind")).toBeInTheDocument();
+    expect(screen.getByTestId("summary-pcb-chapters-behind")).toHaveTextContent("5");
+    expect(screen.queryByText("Chapters behind")).not.toBeInTheDocument();
     expect(screen.getByTestId("summary-tests-overdue")).toHaveTextContent("2");
     expect(screen.queryByRole("link", { name: "Plans" })).not.toBeInTheDocument();
   });
@@ -175,22 +194,54 @@ describe("Curriculum Summary page", () => {
     expect(plan.querySelector('[data-subject="Physics"]')).toHaveTextContent("1 behind · 1/2");
     expect(plan.querySelector('[data-subject="Physics"] [data-tone]')).toHaveAttribute("data-tone", "amber");
     expect(plan.querySelector('[data-subject="Maths"]')).toHaveTextContent("—");
-    expect(plan.querySelector("[data-behind]")).toHaveTextContent("5");
+    expect(plan.querySelector('[data-subject-group="PCM"]')).toHaveTextContent("1 behind");
+    expect(plan.querySelector('[data-subject-group="PCM"] [data-tone]')).toHaveAttribute("data-tone", "amber");
+    expect(plan.querySelector('[data-subject-group="PCB"]')).toHaveTextContent("5 behind");
+    expect(plan.querySelector('[data-subject-group="PCB"] [data-tone]')).toHaveAttribute("data-tone", "red");
     expect(plan.querySelector("[data-tests-overdue]")).toHaveTextContent("2");
     expect(plan.querySelector("[data-plan]")).toHaveTextContent("G11 Plan");
     expect(plan.querySelector("[data-plan-closed]")).toBeNull();
 
     const closed = summaryRow("Bhuj Closed");
     expect(closed.querySelector("[data-plan-closed]")).toHaveTextContent("Closed");
-    expect(closed).toHaveTextContent("—");
+    expect(closed.querySelector('[data-subject-group="PCM"]')).toHaveTextContent("On track");
+    expect(closed.querySelector('[data-subject-group="PCM"] [data-tone]')).toHaveAttribute("data-tone", "green");
+    // PCB doesn't apply to a JEE Main class.
+    expect(closed.querySelector('[data-subject-group="PCB"]')).toHaveTextContent("—");
+    expect(closed.querySelector('[data-subject-group="PCB"] [data-tone]')).toBeNull();
 
     const noPlan = summaryRow("Surat");
     expect(noPlan.querySelector("[data-tests-conducted]")).toHaveTextContent("1 conducted");
     expect(noPlan.querySelector("[data-plan]")).toHaveTextContent("No plan");
+    expect(noPlan.querySelector("[data-subject-group]")).toBeNull();
 
     expect(summaryRow("Vapi").querySelector("[data-explanation]")).toHaveTextContent(
       "Fix tracks in Centre Management"
     );
+    expect(summaryRow("Vapi").querySelector("[data-subject-group]")).toBeNull();
+  });
+
+  it("heads PCM Behind and PCB Behind columns and keeps every row as wide as the header", async () => {
+    await renderPage();
+
+    const headers = screen.getAllByRole("columnheader").map((header) => header.textContent);
+    expect(headers).toEqual([
+      "Centre",
+      "Program",
+      "Tracks",
+      "Region",
+      "Physics",
+      "Chemistry",
+      "Maths",
+      "Biology",
+      "PCM Behind",
+      "PCB Behind",
+      "Tests overdue",
+      "Plan",
+    ]);
+    const width = (centre: string) =>
+      [...summaryRow(centre).querySelectorAll("td")].reduce((sum, cell) => sum + cell.colSpan, 0);
+    expect(["Anand Shared", "Bhuj Closed", "Surat", "Vapi"].map(width)).toEqual([12, 12, 12, 12]);
   });
 
   it("counts a No plan row without a conducted count as 0", async () => {

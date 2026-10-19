@@ -3,12 +3,14 @@ import Link from "next/link";
 import PageHeader from "@/components/PageHeader";
 import { Badge, Card } from "@/components/ui";
 import { getTodayIST } from "@/lib/curriculum-date-helpers";
+import { SUBJECT_GROUPS } from "@/lib/curriculum-plan-rules";
 import CurriculumSummaryPageSizeSelect from "./CurriculumSummaryPageSizeSelect";
 import {
   CURRICULUM_SUMMARY_GRADES,
   CURRICULUM_SUMMARY_SUBJECTS,
   getCurriculumSummary,
   normalizeCurriculumSummarySearchParams,
+  type CurriculumSummaryGroupBehind,
   type CurriculumSummaryQuery,
   type CurriculumSummaryResult,
   type CurriculumSummaryRow,
@@ -88,13 +90,20 @@ function SummaryView({ summary, params }: { summary: SummaryData; params: Curric
   const { header } = summary;
   return (
     <div className="space-y-5">
-      <div className="grid grid-cols-3 gap-3 sm:max-w-2xl">
+      <div className="grid grid-cols-2 gap-3 sm:max-w-3xl sm:grid-cols-4">
         <HeaderNumber
           label="Centres on plan"
           value={`${header.centresOnPlan}/${header.centresTotal}`}
           testId="summary-centres-on-plan"
         />
-        <HeaderNumber label="Chapters behind" value={String(header.chaptersBehind)} testId="summary-chapters-behind" />
+        {SUBJECT_GROUPS.map((group) => (
+          <HeaderNumber
+            key={group}
+            label={`${group} chapters behind`}
+            value={String(header.chaptersBehind[group])}
+            testId={`summary-${group.toLowerCase()}-chapters-behind`}
+          />
+        ))}
         <HeaderNumber
           label="Chapter tests overdue"
           value={String(header.testsOverdue)}
@@ -218,13 +227,16 @@ function RegionFilter({ regionOptions, selected }: { regionOptions: string[]; se
   );
 }
 
+// Subject pills, then PCM Behind and PCB Behind.
+const MEASURE_COLUMNS = CURRICULUM_SUMMARY_SUBJECTS.length + SUBJECT_GROUPS.length;
+
 const SUMMARY_HEADERS = [
   "Centre",
   "Program",
   "Tracks",
   "Region",
   ...CURRICULUM_SUMMARY_SUBJECTS,
-  "Behind",
+  ...SUBJECT_GROUPS.map((group) => `${group} Behind`),
   "Tests overdue",
   "Plan",
 ];
@@ -273,11 +285,13 @@ function SummaryTableRow({ row, params }: { row: CurriculumSummaryRow; params: C
 }
 
 function RowMetrics({ row }: { row: CurriculumSummaryRow }) {
-  if (row.kind === "plan" && row.subjects) return <PlanCells row={row} subjects={row.subjects} />;
+  if (row.kind === "plan" && row.subjects && row.subjectGroups) {
+    return <PlanCells row={row} subjects={row.subjects} subjectGroups={row.subjectGroups} />;
+  }
   if (row.kind === "no_plan") return <NoPlanCells testsConducted={row.testsConducted ?? 0} />;
   return (
     <td
-      colSpan={CURRICULUM_SUMMARY_SUBJECTS.length + 3}
+      colSpan={MEASURE_COLUMNS + 2}
       data-explanation
       className={`${CELL_CLASS_NAME} font-bold text-warning-text`}
     >
@@ -289,9 +303,11 @@ function RowMetrics({ row }: { row: CurriculumSummaryRow }) {
 function PlanCells({
   row,
   subjects,
+  subjectGroups,
 }: {
   row: CurriculumSummaryRow;
   subjects: NonNullable<CurriculumSummaryRow["subjects"]>;
+  subjectGroups: NonNullable<CurriculumSummaryRow["subjectGroups"]>;
 }) {
   return (
     <>
@@ -300,9 +316,11 @@ function PlanCells({
           <SubjectPill progress={subjects[subject]} />
         </td>
       ))}
-      <td data-behind className={`${CELL_CLASS_NAME} font-mono font-bold`}>
-        {row.behind}
-      </td>
+      {SUBJECT_GROUPS.map((group) => (
+        <td key={group} data-subject-group={group} className={CELL_CLASS_NAME}>
+          <GroupPill groupBehind={subjectGroups[group]} />
+        </td>
+      ))}
       <td data-tests-overdue className={`${CELL_CLASS_NAME} font-mono font-bold`}>
         {row.testsOverdue}
       </td>
@@ -327,10 +345,19 @@ function SubjectPill({ progress }: { progress: CurriculumSummarySubjectProgress 
   );
 }
 
+function GroupPill({ groupBehind }: { groupBehind: CurriculumSummaryGroupBehind | null }) {
+  if (!groupBehind) return <span className="text-text-muted">—</span>;
+  return (
+    <Badge variant={TONE_BADGE_VARIANTS[groupBehind.tone]} data-tone={groupBehind.tone}>
+      {groupBehind.label}
+    </Badge>
+  );
+}
+
 function NoPlanCells({ testsConducted }: { testsConducted: number }) {
   return (
     <>
-      <td colSpan={CURRICULUM_SUMMARY_SUBJECTS.length + 1} className={`${CELL_CLASS_NAME} text-text-muted`}>
+      <td colSpan={MEASURE_COLUMNS} className={`${CELL_CLASS_NAME} text-text-muted`}>
         Not measured without an Active plan
       </td>
       <td data-tests-conducted className={`${CELL_CLASS_NAME} text-text-secondary`}>
