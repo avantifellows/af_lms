@@ -229,6 +229,48 @@ export function behindPill(behind: number): { tone: BehindPillTone; label: strin
   return { tone: behind <= 2 ? "amber" : "red", label: `${behind} behind` };
 }
 
+// Summary rows total Chapters Behind per subject group: PCM Behind and PCB Behind.
+export const SUBJECT_GROUPS = ["PCM", "PCB"] as const;
+export type SubjectGroup = (typeof SUBJECT_GROUPS)[number];
+
+// Physics and Chemistry count in both groups, Maths only in PCM, Biology only in PCB; any other
+// subject counts in neither.
+const SUBJECT_GROUPS_BY_SUBJECT = new Map<string, readonly SubjectGroup[]>([
+  ["Physics", ["PCM", "PCB"]],
+  ["Chemistry", ["PCM", "PCB"]],
+  ["Maths", ["PCM"]],
+  ["Mathematics", ["PCM"]],
+  ["Biology", ["PCB"]],
+]);
+
+export function subjectGroupsForSubject(subject: string): readonly SubjectGroup[] {
+  return SUBJECT_GROUPS_BY_SUBJECT.get(subject) ?? [];
+}
+
+const SUBJECT_GROUP_BY_TRACK: Partial<Record<ExamTrack, SubjectGroup>> = {
+  jee_main: "PCM",
+  jee_advanced: "PCM",
+  neet: "PCB",
+};
+
+// The groups a Summary Class shows: PCM for JEE Main or JEE Advanced, PCB for NEET, both for a
+// shared JEE Main + NEET class.
+export function subjectGroupsForClass(classTracks: readonly ExamTrack[]): SubjectGroup[] {
+  return SUBJECT_GROUPS.filter((group) =>
+    classTracks.some((track) => SUBJECT_GROUP_BY_TRACK[track] === group),
+  );
+}
+
+// Chapters Behind over the group's subjects, by the same rule as `chapterProgress`.
+export function subjectGroupBehind(
+  chapters: readonly { subject: string; dueDate: string | null; completedOn: string | null }[],
+  group: SubjectGroup,
+  asOf: string,
+): number {
+  const groupChapters = chapters.filter((chapter) => subjectGroupsForSubject(chapter.subject).includes(group));
+  return chapterProgress(groupChapters, asOf).behind;
+}
+
 // A Centre + Grade's mapped tracks that a plan cannot measure: tracks the plan doesn't serve,
 // and tracks without in-syllabus content for the Grade (such as CET). Shown as "⚠ not
 // covered" in the assignment preview.

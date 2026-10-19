@@ -17,8 +17,12 @@ import {
   primaryExamTrackForChapter,
   shiftAcademicYearForward,
   shiftDateForwardOneYear,
+  subjectGroupBehind,
+  subjectGroupsForClass,
+  subjectGroupsForSubject,
   uncoveredExamTracks,
 } from "./curriculum-plan-rules";
+import type { ExamTrack } from "./exam-tracks";
 
 describe("academic year", () => {
   it.each([
@@ -294,6 +298,51 @@ describe("Behind", () => {
     [12, { tone: "red", label: "12 behind" }],
   ])("shows %i behind as %j", (behind, expected) => {
     expect(behindPill(behind)).toEqual(expected);
+  });
+});
+
+describe("PCM Behind and PCB Behind", () => {
+  it.each([
+    ["Physics", ["PCM", "PCB"]],
+    ["Chemistry", ["PCM", "PCB"]],
+    ["Maths", ["PCM"]],
+    ["Mathematics", ["PCM"]],
+    ["Biology", ["PCB"]],
+    ["English", []],
+    ["Unknown subject", []],
+    ["constructor", []],
+  ])("counts a %s Chapter in %j", (subject, expected) => {
+    expect(subjectGroupsForSubject(subject)).toEqual(expected);
+  });
+
+  it.each([
+    ["a JEE Main class", ["jee_main"], ["PCM"]],
+    ["a JEE Advanced class", ["jee_advanced"], ["PCM"]],
+    ["a NEET class", ["neet"], ["PCB"]],
+    ["a shared JEE Main + NEET class", ["jee_main", "neet"], ["PCM", "PCB"]],
+    ["a class without content tracks", [], []],
+  ] as [string, ExamTrack[], string[]][])("shows %s %j", (_name, tracks, expected) => {
+    expect(subjectGroupsForClass(tracks)).toEqual(expected);
+  });
+
+  // Due by 10 Jul unless noted; one open Chapter per subject plus done and not-yet-due ones.
+  const chapters = [
+    { subject: "Physics", dueDate: "2026-07-01", completedOn: null },
+    { subject: "Physics", dueDate: "2026-07-02", completedOn: "2026-07-02" },
+    { subject: "Chemistry", dueDate: "2026-07-03", completedOn: null },
+    { subject: "Maths", dueDate: "2026-07-04", completedOn: null },
+    { subject: "Mathematics", dueDate: "2026-07-05", completedOn: null },
+    { subject: "Biology", dueDate: "2026-07-06", completedOn: null },
+    { subject: "Biology", dueDate: "2026-07-20", completedOn: null }, // not yet due
+    { subject: "English", dueDate: "2026-07-07", completedOn: null }, // neither group
+    { subject: "Biology", dueDate: null, completedOn: null }, // not in plan
+  ];
+
+  it.each([
+    ["PCM", 4], // Physics 1 + Chemistry 1 + Maths 1 + Mathematics 1
+    ["PCB", 3], // Physics 1 + Chemistry 1 + Biology 1
+  ] as const)("counts %s Behind with the Chapters Behind rule", (group, expected) => {
+    expect(subjectGroupBehind(chapters, group, "2026-07-10")).toBe(expected);
   });
 });
 
