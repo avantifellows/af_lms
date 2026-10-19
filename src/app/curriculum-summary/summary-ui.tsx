@@ -4,8 +4,10 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 
+import { PAGE_TITLE_CLASS } from "@/components/PageHeader";
 import { Card, type BadgeVariant } from "@/components/ui";
 import type { BehindPillTone } from "@/lib/curriculum-plan-rules";
+import PageGuide from "./PageGuide";
 
 export const TONE_BADGE_VARIANTS: Record<BehindPillTone, BadgeVariant> = {
   green: "success",
@@ -247,4 +249,14 @@ export function SortableTableHead({ headers }: { headers: readonly SortableHeade
 // Optional hidden form field: omitted when there is no value to carry.
 export function HiddenField({ name, value }: { name: string; value: string | number | null }) {
   return value === null ? null : <input type="hidden" name={name} value={value} />;
+}
+
+// A page title with its ⓘ "How to read this page" guide beside it (PageHeader's `titleBlock`).
+export function TitleWithGuide({ title, guide }: { title: string; guide: readonly string[] }) {
+  return (
+    <div className="flex items-center gap-2">
+      <h1 className={`${PAGE_TITLE_CLASS} min-w-0 break-words`}>{title}</h1>
+      <PageGuide items={guide} />
+    </div>
+  );
 }

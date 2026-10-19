@@ -420,6 +420,27 @@ test.describe("Curriculum Summary", () => {
     await page.context().close();
   });
 
+  test("the ⓘ guide opens beside the title and closes on Esc or a click outside", async ({ browser }) => {
+    const page = await summaryPmPage(browser);
+    for (const path of [`/curriculum-summary?as_of=${AS_OF}`, `/curriculum-summary/centres/9000812?grade=11&as_of=${AS_OF}`]) {
+      await page.goto(path);
+      const button = page.getByRole("button", { name: "How to read this page" });
+      const guide = page.getByRole("dialog", { name: "How to read this page" });
+      await button.click();
+      await expect(guide).toBeVisible();
+      await expect(guide).toBeFocused();
+      await page.keyboard.press("Escape");
+      await expect(guide).toHaveCount(0);
+      await expect(button).toBeFocused();
+
+      await button.click();
+      await expect(guide).toBeVisible();
+      await page.locator("main").click({ position: { x: 5, y: 5 } });
+      await expect(guide).toHaveCount(0);
+    }
+    await page.context().close();
+  });
+
   test("an invalid as-of date falls back to today in IST", async ({ browser }) => {
     const todayIst = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
     const page = await summaryPmPage(browser);

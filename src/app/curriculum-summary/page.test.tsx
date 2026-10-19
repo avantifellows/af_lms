@@ -391,6 +391,32 @@ describe("Curriculum Summary page", () => {
     );
   });
 
+  it("puts the How to read this page guide beside the title", async () => {
+    await renderPage();
+
+    expect(screen.getByRole("heading", { level: 1, name: "Curriculum Summary" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "How to read this page" }));
+    const guide = screen.getByRole("dialog", { name: "How to read this page" });
+    const items = within(guide).getAllByRole("listitem").map((item) => item.textContent);
+    expect(items).toEqual([
+      "Each row is one class (Centre + Grade), checked against its Active Curriculum Plan on the As of date.",
+      "“3 behind · 4/6 done”: 6 chapters were due by the As of date. 4 are completed and 3 are not. Green = on track, amber = 1–2 behind, red = 3 or more behind.",
+      "PCM / PCB Behind: chapters behind across Physics + Chemistry + Maths (PCM) or Physics + Chemistry + Biology (PCB). JEE classes show PCM, NEET classes show PCB, JEE + NEET classes show both.",
+      "Tests overdue: a chapter’s test is overdue if no test was conducted within 7 days after its test date.",
+      "“Not measured”: the class has no Active plan yet.",
+      "Click a column name to sort. Click a Centre to see its chapters.",
+    ]);
+    expect([...guide.querySelectorAll("strong")].map((term) => term.textContent)).toEqual([
+      "one class",
+      "Active Curriculum Plan",
+      "As of",
+      "“3 behind · 4/6 done”",
+      "PCM / PCB Behind",
+      "Tests overdue",
+      "“Not measured”",
+    ]);
+  });
+
   it("treats the removed Tests overdue sort as the default order", async () => {
     await renderPage({ sort: "tests_overdue", dir: "desc" });
 

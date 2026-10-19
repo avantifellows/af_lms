@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { mockGetServerSession, mockGetResolvedPermission, mockGetChapterTimeline } = vi.hoisted(() => ({
@@ -210,6 +210,29 @@ describe("Chapter timeline page", () => {
 
     await renderPage({ hours: ["weekly"] });
     expect(mockGetChapterTimeline).toHaveBeenLastCalledWith(PM, 7, { grade: 11, asOf: AS_OF, hoursWindow: "ay" });
+  });
+
+  it("puts the How to read this page guide beside the Centre's name", async () => {
+    await renderPage();
+
+    expect(screen.getByRole("heading", { level: 1, name: "Anand Shared" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "How to read this page" }));
+    const guide = screen.getByRole("dialog", { name: "How to read this page" });
+    expect(within(guide).getAllByRole("listitem").map((item) => item.textContent)).toEqual([
+      "Cards: for PCM and PCB, how many chapters are behind, due chapters done, and how much of the whole syllabus is done.",
+      "Status: Done, Done N days late, Overdue N days (due but not completed), or Not due yet.",
+      "Chapter test: Conducted, Scheduled (test created but not finished), Overdue (more than 7 days past the test date with no test), or Not due.",
+      "As of line: chapters above it were due by the As of date; chapters below are upcoming.",
+      "Hours: class time logged for the chapter. Prescribed: the time planned for it.",
+    ]);
+    expect([...guide.querySelectorAll("strong")].map((term) => term.textContent)).toEqual([
+      "Cards",
+      "Status",
+      "Chapter test",
+      "As of line",
+      "Hours",
+      "Prescribed",
+    ]);
   });
 
   it("shows the schema-unavailable card", async () => {

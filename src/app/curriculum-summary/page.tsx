@@ -36,6 +36,7 @@ import {
   COMPACT_CELL_CLASS_NAME,
   COMPACT_COLUMN_CLASS_NAME,
   sortableHeaders,
+  TitleWithGuide,
   type SortableColumn,
 } from "./summary-ui";
 
@@ -46,6 +47,17 @@ interface PageProps {
 type SummaryData = Extract<CurriculumSummaryResult, { ok: true }>;
 
 const DEFAULT_PAGE_SIZE = 20;
+
+// The ⓘ guide beside the title (approved by the curriculum owner): one string per bullet, with
+// **bold** terms.
+const SUMMARY_GUIDE: readonly string[] = [
+  "Each row is **one class** (Centre + Grade), checked against its **Active Curriculum Plan** on the **As of** date.",
+  "**“3 behind · 4/6 done”**: 6 chapters were due by the As of date. 4 are completed and 3 are not. Green = on track, amber = 1–2 behind, red = 3 or more behind.",
+  "**PCM / PCB Behind**: chapters behind across Physics + Chemistry + Maths (PCM) or Physics + Chemistry + Biology (PCB). JEE classes show PCM, NEET classes show PCB, JEE + NEET classes show both.",
+  "**Tests overdue**: a chapter’s test is overdue if no test was conducted within 7 days after its test date.",
+  "**“Not measured”**: the class has no Active plan yet.",
+  "Click a column name to sort. Click a Centre to see its chapters.",
+];
 const ACTION_LINK_CLASS_NAME =
   "rounded-md border border-border px-3 py-1.5 text-sm font-bold text-accent hover:text-accent-hover";
 // Column layout (curriculum owner feedback): the subject and PCM / PCB Behind columns are the
@@ -62,6 +74,7 @@ export default async function CurriculumSummaryPage({ searchParams }: PageProps)
     <div className="min-h-screen bg-bg">
       <PageHeader
         title="Curriculum Summary"
+        titleBlock={<TitleWithGuide title="Curriculum Summary" guide={SUMMARY_GUIDE} />}
         subtitle="Each class's progress against its Curriculum Plan"
         backHref="/dashboard"
         userEmail={email}

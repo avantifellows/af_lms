@@ -47,6 +47,7 @@ import {
   TONE_BADGE_VARIANTS,
   TONE_PILL_CLASS_NAMES,
   TONE_TEXT_CLASS_NAMES,
+  TitleWithGuide,
   type SortableColumn,
 } from "../../summary-ui";
 import UrlFilterForm from "../../UrlFilterForm";
@@ -84,6 +85,16 @@ function timelineQuery(searchParams: SearchParams) {
 
 type TimelineResult = Exclude<ChapterTimelineResult, { status: 404 }>;
 
+// The ⓘ guide beside the title (approved by the curriculum owner): one string per bullet, with
+// **bold** terms.
+const TIMELINE_GUIDE: readonly string[] = [
+  "**Cards**: for PCM and PCB, how many chapters are behind, due chapters done, and how much of the whole syllabus is done.",
+  "**Status**: Done, Done N days late, Overdue N days (due but not completed), or Not due yet.",
+  "**Chapter test**: Conducted, Scheduled (test created but not finished), Overdue (more than 7 days past the test date with no test), or Not due.",
+  "**As of line**: chapters above it were due by the As of date; chapters below are upcoming.",
+  "**Hours**: class time logged for the chapter. **Prescribed**: the time planned for it.",
+];
+
 function pageHeading(result: TimelineResult, grade: number): { title: string; subtitle?: string } {
   if (!result.ok) return { title: "Chapter timeline" };
   const { row } = result.timeline;
@@ -104,11 +115,13 @@ export default async function ChapterTimelinePage({ params, searchParams }: Page
     hoursWindow: query.hoursWindow,
   });
   if (!result.ok && result.status === 404) notFound();
+  const heading = pageHeading(result, query.grade);
 
   return (
     <div className="min-h-screen bg-bg">
       <PageHeader
-        {...pageHeading(result, query.grade)}
+        {...heading}
+        titleBlock={<TitleWithGuide title={heading.title} guide={TIMELINE_GUIDE} />}
         backHref={`/curriculum-summary?${new URLSearchParams({ grade: String(query.grade), as_of: query.asOf })}`}
         userEmail={email}
         containerClassName={PAGE_CONTAINER_CLASS_NAME}
