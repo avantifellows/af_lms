@@ -20,10 +20,13 @@ import {
   chapterStatus,
   chapterTestStatus,
   classifySummaryClass,
+  hoursWindowStart,
   planStatusAsOf,
+  primaryExamTrackForChapter,
   type BehindPillTone,
   type ChapterStatus,
   type ChapterTestStatus,
+  type HoursWindow,
 } from "./curriculum-plan-rules";
 import { query } from "./db";
 import { EXAM_TRACKS, formatExamTrack } from "./exam-tracks";
@@ -152,6 +155,8 @@ interface SummaryChapter {
   // Lowest coverage sequence across the class's tracks: syllabus order within a subject.
   sequence: number;
   tracks: string[];
+  // Exam Track → prescribed lecture minutes, for the tracks whose syllabus has the Chapter.
+  prescribedMinutes: Record<string, number>;
   dueDate: string | null;
   testDate: string | null;
   completedOn: string | null;
@@ -350,7 +355,8 @@ const SUMMARY_SQL = `
         'Unknown subject'
       ) AS subject_name,
       ARRAY_AGG(DISTINCT cfg.exam_track::text) AS tracks,
-      JSONB_OBJECT_AGG(cfg.exam_track::text, cfg.coverage_sequence) AS sequences
+      JSONB_OBJECT_AGG(cfg.exam_track::text, cfg.coverage_sequence) AS sequences,
+      JSONB_OBJECT_AGG(cfg.exam_track::text, cfg.prescribed_minutes) AS prescribed_minutes
     FROM lms_chapter_exam_configs cfg
     JOIN chapter ch ON ch.id = cfg.chapter_id
     JOIN grade g ON g.id = ch.grade_id AND g.number = $7
@@ -379,6 +385,7 @@ const SUMMARY_SQL = `
       gc.chapter_name,
       gc.subject_name,
       gc.tracks,
+      gc.prescribed_minutes,
       (
         SELECT MIN((gc.sequences->>track)::int)
         FROM unnest(m.mapped_tracks) AS track
@@ -430,6 +437,7 @@ const SUMMARY_SQL = `
           'subject', cch.subject_name,
           'sequence', cch.sequence,
           'tracks', cch.tracks,
+          'prescribedMinutes', cch.prescribed_minutes,
           'dueDate', cch.due_date::text,
           'testDate', cch.test_date::text,
           'completedOn', cch.completed_on::text
@@ -543,10 +551,18 @@ function parseChapters(value: unknown): SummaryChapter[] {
     sequence: typeof chapter.sequence === "number" ? chapter.sequence : Number.MAX_SAFE_INTEGER,
     subject: chapter.subject === "Mathematics" ? "Maths" : String(chapter.subject),
     tracks: Array.isArray(chapter.tracks) ? chapter.tracks.map(String) : [],
+    prescribedMinutes: parsePrescribedMinutes(chapter.prescribedMinutes),
     dueDate: typeof chapter.dueDate === "string" ? chapter.dueDate : null,
     testDate: typeof chapter.testDate === "string" ? chapter.testDate : null,
     completedOn: typeof chapter.completedOn === "string" ? chapter.completedOn : null,
   }));
+}
+
+function parsePrescribedMinutes(value: unknown): Record<string, number> {
+  if (!value || typeof value !== "object") return {};
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([track, minutes]) => [track, Number(minutes) || 0])
+  );
 }
 
 const KIND_ORDER: Record<CurriculumSummaryRowKind, number> = {
@@ -593,11 +609,19 @@ export interface ChapterTimelineChapter {
   completedOn: string | null;
   status: ChapterStatus;
   testStatus: ChapterTestStatus;
+  // Regular-log minutes in the hours window, split to the Chapter by topic share.
+  taughtMinutes: number;
+  // The Primary Exam Track's prescribed minutes, falling back through the class's other tracks.
+  prescribedMinutes: number;
+  // Class Cancellation Logs and Doubt Solving Log minutes for the Chapter in the hours window.
+  cancellations: number;
+  doubtSolvingMinutes: number;
 }
 
 export interface ChapterTimeline {
   grade: CurriculumSummaryGrade;
   asOf: string;
+  hoursWindow: HoursWindow;
   // The class as the Summary shows it: Centre, kind, explanation, plan and Behind.
   row: CurriculumSummaryRow;
   // Subjects with Chapters for the class, in pill-column order; `progress` is null without a plan.
@@ -611,6 +635,11 @@ export interface ChapterTimeline {
     syllabusDone: number;
     syllabusTotal: number;
     testsOverdue: number;
+    // Σ over the class's Chapters: hours taught in the window and prescribed time.
+    taughtMinutes: number;
+    prescribedMinutes: number;
+    cancellations: number;
+    doubtSolvingMinutes: number;
   };
 }
 
@@ -624,7 +653,7 @@ export type ChapterTimelineResult =
 export async function getChapterTimeline(
   permission: UserPermission,
   centreId: number,
-  params: { grade: CurriculumSummaryGrade; asOf: string }
+  params: { grade: CurriculumSummaryGrade; asOf: string; hoursWindow: HoursWindow }
 ): Promise<ChapterTimelineResult> {
   for (const check of [checkCurriculumSchema, checkCurriculumPlansSchema]) {
     const schema = await check();
@@ -639,12 +668,36 @@ export async function getChapterTimeline(
   const measured = row.kind === "plan" || row.kind === "no_plan";
   const chapters = measured ? data.chapters : [];
   const progress = chapterProgress(chapters, params.asOf);
+  const summaryClass = classifySummaryClass(
+    data.raw.mapped_tracks,
+    chapters.flatMap((chapter) => chapter.tracks)
+  );
+  const classTracks =
+    summaryClass.kind === "single" || summaryClass.kind === "shared" ? summaryClass.tracks : [];
+  const activity = await loadTimelineActivity({
+    schoolCode: data.raw.school_code,
+    programId: Number(data.raw.program_id),
+    grade: params.grade,
+    tracks: classTracks,
+    from: hoursWindowStart(params.hoursWindow, params.asOf),
+    to: params.asOf,
+    chapterIds: chapters.map((chapter) => chapter.chapterId),
+  });
+  const prescribedMinutes = (chapter: SummaryChapter) => {
+    const track = primaryExamTrackForChapter(classTracks, chapter.tracks);
+    return track ? chapter.prescribedMinutes[track] ?? 0 : 0;
+  };
+  const activityFor = (chapter: SummaryChapter) =>
+    activity.get(chapter.chapterId) ?? { taughtMinutes: 0, cancellations: 0, doubtSolvingMinutes: 0 };
+  const total = (value: (chapter: SummaryChapter) => number) =>
+    chapters.reduce((sum, chapter) => sum + value(chapter), 0);
 
   return {
     ok: true,
     timeline: {
       grade: params.grade,
       asOf: params.asOf,
+      hoursWindow: params.hoursWindow,
       row,
       subjects: [...new Set(chapters.map((chapter) => chapter.subject))]
         .sort((a, b) => subjectRank(a) - subjectRank(b) || a.localeCompare(b))
@@ -661,6 +714,8 @@ export async function getChapterTimeline(
         completedOn: chapter.completedOn,
         status: chapterStatus({ dueDate: chapter.dueDate, completedOn: chapter.completedOn, asOf: params.asOf }),
         testStatus: chapterTestStatusFor(data, chapter),
+        ...activityFor(chapter),
+        prescribedMinutes: prescribedMinutes(chapter),
       })),
       header: {
         due: progress.due,
@@ -668,10 +723,117 @@ export async function getChapterTimeline(
         syllabusDone: chapters.filter((chapter) => chapter.completedOn !== null).length,
         syllabusTotal: chapters.length,
         testsOverdue: row.testsOverdue,
+        taughtMinutes: total((chapter) => activityFor(chapter).taughtMinutes),
+        prescribedMinutes: total(prescribedMinutes),
+        cancellations: total((chapter) => activityFor(chapter).cancellations),
+        doubtSolvingMinutes: total((chapter) => activityFor(chapter).doubtSolvingMinutes),
       },
     },
   };
 }
+
+interface TimelineActivityRow {
+  chapter_id: string | number;
+  taught_minutes: string | number;
+  cancellations: string | number;
+  doubt_solving_minutes: string | number;
+}
+
+interface TimelineActivity {
+  taughtMinutes: number;
+  cancellations: number;
+  doubtSolvingMinutes: number;
+}
+
+// Per Chapter of the class, from LMS Curriculum Logs at the Centre's School + Program + Grade
+// under any class track within [from, to]: regular minutes, each log split to Chapters by topic
+// share (its minutes × the Chapter's topics / the log's topics, rounded per log); Class
+// Cancellation Logs and Doubt Solving minutes by their `chapter_id`. A shared class's logs under
+// both tracks are summed without de-duplication (ADR 0008).
+async function loadTimelineActivity(params: {
+  schoolCode: string;
+  programId: number;
+  grade: CurriculumSummaryGrade;
+  tracks: string[];
+  from: string;
+  to: string;
+  chapterIds: number[];
+}): Promise<Map<number, TimelineActivity>> {
+  if (params.tracks.length === 0 || params.chapterIds.length === 0) return new Map();
+  const rows = await query<TimelineActivityRow>(TIMELINE_ACTIVITY_SQL, [
+    params.schoolCode,
+    params.programId,
+    params.grade,
+    params.tracks,
+    params.from,
+    params.to,
+    params.chapterIds,
+  ]);
+  return new Map(
+    rows.map((row) => [
+      Number(row.chapter_id),
+      {
+        taughtMinutes: Number(row.taught_minutes),
+        cancellations: Number(row.cancellations),
+        doubtSolvingMinutes: Number(row.doubt_solving_minutes),
+      },
+    ])
+  );
+}
+
+// $1 School code, $2 Program id, $3 Grade number, $4 class tracks, $5 window start, $6 as-of,
+// $7 the class's Chapter ids.
+const TIMELINE_ACTIVITY_SQL = `
+  WITH window_logs AS (
+    SELECT l.id, l.log_type, l.duration_minutes, l.chapter_id
+    FROM lms_curriculum_logs l
+    JOIN grade g ON g.id = l.grade_id AND g.number = $3
+    WHERE l.school_code = $1
+      AND l.program_id = $2
+      AND l.exam_track = ANY($4::text[])
+      AND l.deleted_at IS NULL
+      AND l.log_date BETWEEN $5::date AND $6::date
+  ),
+  log_topics AS (
+    SELECT
+      wl.id AS log_id,
+      wl.duration_minutes,
+      t.chapter_id,
+      COUNT(*) OVER (PARTITION BY wl.id) AS total_topics_in_log
+    FROM window_logs wl
+    JOIN lms_curriculum_log_topics lt ON lt.curriculum_log_id = wl.id
+    JOIN topic t ON t.id = lt.topic_id
+    WHERE wl.log_type = 'regular'
+  ),
+  chapter_log_minutes AS (
+    SELECT
+      chapter_id,
+      ROUND(
+        MAX(duration_minutes)::numeric * COUNT(*)::numeric / MAX(total_topics_in_log)::numeric
+      ) AS minutes
+    FROM log_topics
+    GROUP BY log_id, chapter_id
+  ),
+  chapter_activity AS (
+    SELECT chapter_id, minutes AS taught_minutes, 0 AS cancellations, 0 AS doubt_solving_minutes
+    FROM chapter_log_minutes
+    UNION ALL
+    SELECT
+      chapter_id,
+      0,
+      CASE WHEN log_type = 'class_cancelled' THEN 1 ELSE 0 END,
+      CASE WHEN log_type = 'doubt_solving' THEN duration_minutes ELSE 0 END
+    FROM window_logs
+    WHERE log_type IN ('class_cancelled', 'doubt_solving')
+  )
+  SELECT
+    chapter_id,
+    SUM(taught_minutes)::int AS taught_minutes,
+    SUM(cancellations)::int AS cancellations,
+    SUM(doubt_solving_minutes)::int AS doubt_solving_minutes
+  FROM chapter_activity
+  WHERE chapter_id = ANY($7::bigint[])
+  GROUP BY chapter_id`;
 
 function subjectRank(subject: string): number {
   const index = (CURRICULUM_SUMMARY_SUBJECTS as readonly string[]).indexOf(subject);

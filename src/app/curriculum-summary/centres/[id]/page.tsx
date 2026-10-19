@@ -7,10 +7,13 @@ import PageHeader from "@/components/PageHeader";
 import { Badge, Card, type BadgeVariant } from "@/components/ui";
 import { authOptions } from "@/lib/auth";
 import { getTodayIST } from "@/lib/curriculum-date-helpers";
-import type {
-  BehindPillTone,
-  ChapterStatus,
-  ChapterTestStatus,
+import { formatDuration } from "@/lib/curriculum-helpers";
+import {
+  HOURS_WINDOWS,
+  type BehindPillTone,
+  type ChapterStatus,
+  type ChapterTestStatus,
+  type HoursWindow,
 } from "@/lib/curriculum-plan-rules";
 import {
   CURRICULUM_SUMMARY_GRADES,
@@ -23,6 +26,12 @@ import {
   getProgramContextSync,
   getResolvedPermission,
 } from "@/lib/permissions";
+
+const HOURS_WINDOW_LABELS: Record<HoursWindow, string> = {
+  ay: "This AY",
+  "30d": "Last 30 days",
+  "7d": "Last 7 days",
+};
 
 const TONE_BADGE_VARIANTS: Record<BehindPillTone, BadgeVariant> = {
   green: "success",
@@ -62,7 +71,12 @@ export default async function ChapterTimelinePage({ params, searchParams }: Page
   const { grade, asOf } = normalizeCurriculumSummarySearchParams(resolvedSearchParams, getTodayIST());
   const subjectParam = resolvedSearchParams.subject;
   const requestedSubject = Array.isArray(subjectParam) ? subjectParam[0] : subjectParam;
-  const result = await getChapterTimeline(permission, Number(id), { grade, asOf });
+  const hoursParam = resolvedSearchParams.hours;
+  const requestedHours = Array.isArray(hoursParam) ? hoursParam[0] : hoursParam;
+  // Unknown values fall back to This AY.
+  const hoursWindow =
+    HOURS_WINDOWS.find((window) => window === requestedHours) ?? HOURS_WINDOWS[0];
+  const result = await getChapterTimeline(permission, Number(id), { grade, asOf, hoursWindow });
   if (!result.ok && result.status === 404) {
     notFound();
   }
@@ -116,12 +130,15 @@ export default async function ChapterTimelinePage({ params, searchParams }: Page
 function timelineHref(
   centreId: number,
   timeline: ChapterTimeline,
-  overrides: { grade?: number; subject?: string | null } = {}
+  overrides: { grade?: number; subject?: string | null; hours?: HoursWindow } = {}
 ): string {
   const search = new URLSearchParams({
     grade: String(overrides.grade ?? timeline.grade),
     as_of: timeline.asOf,
   });
+  // This AY is the default, so it stays out of the URL.
+  const hours = overrides.hours ?? timeline.hoursWindow;
+  if (hours !== "ay") search.set("hours", hours);
   if (overrides.subject) search.set("subject", overrides.subject);
   return `/curriculum-summary/centres/${centreId}?${search.toString()}`;
 }
@@ -157,11 +174,33 @@ function TimelineFilters({
           ))}
         </nav>
       </div>
+      <div className="flex flex-col gap-1">
+        <span className="text-xs font-bold uppercase tracking-wide text-text-muted">Hours</span>
+        <nav aria-label="Hours window" className="flex gap-1">
+          {HOURS_WINDOWS.map((hours) => (
+            <Link
+              key={hours}
+              href={timelineHref(centreId, timeline, { hours, subject })}
+              aria-current={timeline.hoursWindow === hours ? "page" : undefined}
+              className={`rounded-md border px-3 py-1.5 text-sm font-bold ${
+                timeline.hoursWindow === hours
+                  ? "border-accent bg-accent text-white"
+                  : "border-border text-accent hover:text-accent-hover"
+              }`}
+            >
+              {HOURS_WINDOW_LABELS[hours]}
+            </Link>
+          ))}
+        </nav>
+      </div>
       <form
         action={`/curriculum-summary/centres/${centreId}`}
         className="flex flex-wrap items-end gap-2"
       >
         <input type="hidden" name="grade" value={timeline.grade} />
+        {timeline.hoursWindow !== "ay" ? (
+          <input type="hidden" name="hours" value={timeline.hoursWindow} />
+        ) : null}
         {subject ? <input type="hidden" name="subject" value={subject} /> : null}
         <label className="flex flex-col gap-1 text-xs font-bold uppercase tracking-wide text-text-muted">
           As of
@@ -215,7 +254,7 @@ function TimelineView({
     <>
       <TimelineFilters timeline={timeline} centreId={centreId} subject={subject ?? null} />
       <PlanLabel timeline={timeline} isAdmin={isAdmin} />
-      <div className="grid grid-cols-3 gap-3 sm:max-w-2xl">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:max-w-3xl">
         <HeaderNumber
           label="Due done"
           value={measured ? `${header.done}/${header.due}` : "—"}
@@ -230,6 +269,21 @@ function TimelineView({
           label="Tests overdue"
           value={measured ? String(header.testsOverdue) : "—"}
           testId="timeline-tests-overdue"
+        />
+        <HeaderNumber
+          label={`Hours vs prescribed · ${HOURS_WINDOW_LABELS[timeline.hoursWindow]}`}
+          value={`${formatHours(header.taughtMinutes)} / ${formatHours(header.prescribedMinutes)}`}
+          testId="timeline-hours"
+        />
+        <HeaderNumber
+          label="Classes cancelled"
+          value={String(header.cancellations)}
+          testId="timeline-cancellations"
+        />
+        <HeaderNumber
+          label="Doubt solving"
+          value={formatHours(header.doubtSolvingMinutes)}
+          testId="timeline-doubt-solving"
         />
       </div>
       <nav aria-label="Subject" className="flex flex-wrap gap-1">
@@ -278,7 +332,18 @@ function HeaderNumber({ label, value, testId }: { label: string; value: string; 
 }
 
 function TimelineTable({ timeline }: { timeline: ChapterTimeline }) {
-  const headers = ["Chapter", "Subject", "Due", "Status", "Completed", "Chapter test"];
+  const headers = [
+    "Chapter",
+    "Subject",
+    "Due",
+    "Status",
+    "Completed",
+    "Chapter test",
+    "Hours",
+    "Prescribed",
+    "Cancelled",
+    "Doubt solving",
+  ];
   // The as-of line sits after the Chapters due on or before as-of; without plan dates there is
   // nothing to divide.
   const hasDueDates = timeline.chapters.some((chapter) => chapter.dueDate !== null);
@@ -322,6 +387,18 @@ function TimelineTable({ timeline }: { timeline: ChapterTimeline }) {
                 </td>
                 <td data-test-status className="px-4 py-3">
                   {chapterTestStatusLabel(chapter.testStatus)}
+                </td>
+                <td data-hours className="px-4 py-3 font-mono">
+                  {formatHours(chapter.taughtMinutes)}
+                </td>
+                <td data-prescribed className="px-4 py-3 font-mono">
+                  {formatHours(chapter.prescribedMinutes)}
+                </td>
+                <td data-cancellations className="px-4 py-3 font-mono">
+                  {chapter.cancellations}
+                </td>
+                <td data-doubt-solving className="px-4 py-3 font-mono">
+                  {formatHours(chapter.doubtSolvingMinutes)}
                 </td>
               </tr>
             </Fragment>
@@ -385,6 +462,11 @@ function formatDate(date: string): string {
     year: "numeric",
     timeZone: "UTC",
   }).format(new Date(`${date}T00:00:00Z`));
+}
+
+// Minutes → "1h 30m"; nothing logged shows as "0h".
+function formatHours(minutes: number): string {
+  return minutes === 0 ? "0h" : formatDuration(minutes);
 }
 
 function days(count: number): string {

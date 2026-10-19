@@ -193,6 +193,18 @@ export function chapterTestStatus(input: {
   return { kind: "not_due" };
 }
 
+// The chapter timeline's hours window, ending at the as-of date: This AY, Last 30 days or Last
+// 7 days. Hours, class cancellations and doubt solving are counted within it.
+export const HOURS_WINDOWS = ["ay", "30d", "7d"] as const;
+export type HoursWindow = (typeof HOURS_WINDOWS)[number];
+
+// Inclusive first date of the window: 1 Apr of the as-of date's academic year, or the as-of
+// date and the N − 1 days before it.
+export function hoursWindowStart(window: HoursWindow, asOf: string): string {
+  if (window === "ay") return academicYearStartDate(academicYearForDate(asOf));
+  return addDays(asOf, -((window === "30d" ? 30 : 7) - 1));
+}
+
 // Due = Chapters with a due date on or before as-of; Done = Due Chapters with an in-window
 // completion; Behind = Due − Done. Early completions of not-yet-due Chapters count in neither.
 export function chapterProgress(

@@ -9,6 +9,7 @@ import {
   chapterTestStatus,
   classifySummaryClass,
   currentAcademicYearIST,
+  hoursWindowStart,
   parseAcademicYear,
   planStatusAsOf,
   primaryExamTrack,
@@ -58,6 +59,22 @@ describe("academic year", () => {
       vi.setSystemTime(new Date("2027-03-31T18:31:00.000Z"));
       expect(currentAcademicYearIST()).toBe("2027-2028");
     });
+  });
+});
+
+describe("hours window", () => {
+  it.each([
+    // This AY runs from 1 Apr of the as-of date's academic year.
+    ["ay", "2026-08-15", "2026-04-01"],
+    ["ay", "2026-04-01", "2026-04-01"],
+    ["ay", "2027-03-31", "2026-04-01"],
+    // Last N days are the as-of date and the N − 1 days before it.
+    ["30d", "2026-08-15", "2026-07-17"],
+    ["30d", "2026-04-10", "2026-03-12"],
+    ["7d", "2026-08-15", "2026-08-09"],
+    ["7d", "2026-03-03", "2026-02-25"],
+  ] as const)("%s ending %s starts on %s", (window, asOf, expected) => {
+    expect(hoursWindowStart(window, asOf)).toBe(expected);
   });
 });
 

@@ -729,3 +729,219 @@ test.describe("Curriculum Summary chapter timeline", () => {
     await page.context().close();
   });
 });
+
+// #430: hours taught against the Primary Exam Track's prescribed time, class cancellations and
+// doubt solving on the chapter timeline. Fixture:
+// e2e/fixtures/migrations/20261019160000_seed_curriculum_timeline_hours_fixture.sql. Windows end
+// at as-of 15 Aug: This AY = 1 Apr–15 Aug, Last 30 days = 17 Jul–15 Aug, Last 7 days = 9–15 Aug.
+test.describe("Curriculum Summary chapter timeline hours", () => {
+  test("hours split to Chapters by topic share and sum both tracks of a shared class per window", async ({
+    browser,
+  }) => {
+    const page = await summaryPmPage(browser);
+    const base = `/curriculum-summary/centres/9000812?grade=11&as_of=${AS_OF}`;
+
+    // [hours param, Alpha, Bio Cells, Bio Plants, Beta, header]. Alpha: 120 min under JEE Main on
+    // 1 Aug + 60 min under NEET on 10 Jun. The 90 min log on 12 Aug covers two Cells topics and
+    // one Plants topic. Last-year, after-as-of, deleted and JEE Advanced logs never count.
+    const expected: [string, string, string, string, string, string][] = [
+      ["", "3h", "1h", "30m", "0h", "4h 30m"],
+      ["&hours=ay", "3h", "1h", "30m", "0h", "4h 30m"],
+      ["&hours=30d", "2h", "1h", "30m", "0h", "3h 30m"],
+      ["&hours=7d", "0h", "1h", "30m", "0h", "1h 30m"],
+    ];
+    for (const [hours, alpha, cells, plants, beta, header] of expected) {
+      await page.goto(`${base}${hours}`);
+      await expect(timelineRow(page, "Fixture Alpha Physics").locator("[data-hours]")).toHaveText(alpha);
+      await expect(timelineRow(page, "Summary Bio Cells").locator("[data-hours]")).toHaveText(cells);
+      await expect(timelineRow(page, "Summary Bio Plants").locator("[data-hours]")).toHaveText(plants);
+      await expect(timelineRow(page, "Fixture Beta Physics").locator("[data-hours]")).toHaveText(beta);
+      // Prescribed: Alpha 1h 30m, Beta 2h and eight NEET-only Chapters at 1h each = 11h 30m.
+      await expect(page.getByTestId("timeline-hours")).toHaveText(`${header} / 11h 30m`);
+    }
+    await page.context().close();
+  });
+
+  test("a shared class's prescribed time is JEE Main's, falling back to NEET for Biology", async ({
+    browser,
+  }) => {
+    const page = await summaryPmPage(browser);
+    await page.goto(`/curriculum-summary/centres/9000812?grade=11&as_of=${AS_OF}`);
+    // Alpha: JEE Main 90 min, not NEET's 60. Beta: JEE Main 120. Biology has no JEE Main config.
+    await expect(timelineRow(page, "Fixture Alpha Physics").locator("[data-prescribed]")).toHaveText("1h 30m");
+    await expect(timelineRow(page, "Fixture Beta Physics").locator("[data-prescribed]")).toHaveText("2h");
+    await expect(timelineRow(page, "Summary Bio Cells").locator("[data-prescribed]")).toHaveText("1h");
+    await page.context().close();
+  });
+
+  test("class cancellations and doubt solving show per Chapter and in the header without changing status", async ({
+    browser,
+  }) => {
+    const page = await summaryPmPage(browser);
+    await page.goto(`/curriculum-summary/centres/9000812?grade=11&as_of=${AS_OF}`);
+
+    // This AY. Alpha: cancelled 20 Jul (JEE Main) and 5 May (NEET); doubt solving 30 min on
+    // 25 Jul and 60 min on 1 Apr (the 31 Mar log is last academic year). Plants: cancelled 13 Aug
+    // (the 14 Aug cancellation is deleted). Cells: 45 min doubt solving on 14 Aug.
+    const expected: [string, string, string][] = [
+      ["Fixture Alpha Physics", "2", "1h 30m"],
+      ["Summary Bio Plants", "1", "0h"],
+      ["Summary Bio Cells", "0", "45m"],
+      ["Fixture Beta Physics", "0", "0h"],
+    ];
+    for (const [chapter, cancellations, doubtSolving] of expected) {
+      await expect(timelineRow(page, chapter).locator("[data-cancellations]")).toHaveText(cancellations);
+      await expect(timelineRow(page, chapter).locator("[data-doubt-solving]")).toHaveText(doubtSolving);
+    }
+    await expect(page.getByTestId("timeline-cancellations")).toHaveText("3");
+    await expect(page.getByTestId("timeline-doubt-solving")).toHaveText("2h 15m");
+
+    // Plants was cancelled and is still Overdue; Alpha had doubt solving and is still Done.
+    await expect(timelineRow(page, "Summary Bio Plants").locator("[data-status]")).toHaveText("Overdue 36 days");
+    await expect(timelineRow(page, "Fixture Alpha Physics").locator("[data-status]")).toHaveText("Done");
+    await expect(page.getByTestId("timeline-due-done")).toHaveText("3/7");
+    await page.context().close();
+  });
+
+  test("switching the hours window updates hours, cancellations and doubt solving but not status", async ({
+    browser,
+  }) => {
+    const page = await summaryPmPage(browser);
+    await page.goto(`/curriculum-summary/centres/9000812?grade=11&as_of=${AS_OF}`);
+    const window = page.getByRole("navigation", { name: "Hours window" });
+    await expect(window.getByRole("link", { name: "This AY" })).toHaveAttribute("aria-current", "page");
+
+    // [window, header hours, cancelled, doubt solving, Alpha hours, Alpha cancelled, Alpha doubt].
+    const expected: [string, string, string, string, string, string, string, string][] = [
+      ["Last 30 days", "30d", "3h 30m / 11h 30m", "2", "1h 15m", "2h", "1", "30m"],
+      ["Last 7 days", "7d", "1h 30m / 11h 30m", "1", "45m", "0h", "0", "0h"],
+      ["This AY", "", "4h 30m / 11h 30m", "3", "2h 15m", "3h", "2", "1h 30m"],
+    ];
+    for (const [label, param, hours, cancelled, doubt, alphaHours, alphaCancelled, alphaDoubt] of expected) {
+      await window.getByRole("link", { name: label }).click();
+      if (param) {
+        await expect(page).toHaveURL(
+          `/curriculum-summary/centres/9000812?grade=11&as_of=${AS_OF}&hours=${param}`
+        );
+      } else {
+        await expect(page).toHaveURL(`/curriculum-summary/centres/9000812?grade=11&as_of=${AS_OF}`);
+      }
+      await expect(window.getByRole("link", { name: label })).toHaveAttribute("aria-current", "page");
+      await expect(page.getByTestId("timeline-hours")).toHaveText(hours);
+      await expect(page.getByTestId("timeline-cancellations")).toHaveText(cancelled);
+      await expect(page.getByTestId("timeline-doubt-solving")).toHaveText(doubt);
+      const alpha = timelineRow(page, "Fixture Alpha Physics");
+      await expect(alpha.locator("[data-hours]")).toHaveText(alphaHours);
+      await expect(alpha.locator("[data-cancellations]")).toHaveText(alphaCancelled);
+      await expect(alpha.locator("[data-doubt-solving]")).toHaveText(alphaDoubt);
+      // Status columns and the header's Due done never depend on the window.
+      await expect(alpha.locator("[data-status]")).toHaveText("Done");
+      await expect(alpha.locator("[data-test-status]")).toHaveText("Conducted 2 Jul 2026");
+      await expect(timelineRow(page, "Summary Bio Plants").locator("[data-status]")).toHaveText("Overdue 36 days");
+      await expect(page.getByTestId("timeline-due-done")).toHaveText("3/7");
+      await expect(page.getByTestId("timeline-tests-overdue")).toHaveText("2");
+    }
+
+    // The window stays in the URL through subject tabs, the As of form and the Grade toggle.
+    await window.getByRole("link", { name: "Last 7 days" }).click();
+    await expect(page).toHaveURL(/hours=7d/);
+    await page.locator('[data-subject-tab="Biology"]').click();
+    await expect(page).toHaveURL(/hours=7d/);
+    await expect(page).toHaveURL(/subject=Biology/);
+    await expect(page.getByTestId("timeline-hours")).toHaveText("1h 30m / 11h 30m");
+
+    // On 20 Aug the last 7 days are 14–20 Aug: only the 16 Aug log (30 min of Cells).
+    await page.getByLabel("As of").fill("2026-08-20");
+    await page.getByRole("button", { name: "Apply" }).click();
+    await expect(page).toHaveURL(/hours=7d/);
+    await expect(page).toHaveURL(/as_of=2026-08-20/);
+    await expect(page.getByTestId("timeline-hours")).toHaveText("30m / 11h 30m");
+
+    await page.getByRole("link", { name: "Grade 12" }).click();
+    await expect(page).toHaveURL(/grade=12/);
+    await expect(page).toHaveURL(/hours=7d/);
+    await page.context().close();
+  });
+});
+
+// Grade 12 classes running one track each, seeded and removed here so no other spec counts
+// them: a Chemistry Chapter prescribed 10h for JEE Main, 14h for JEE Advanced and 8h for NEET.
+const PRIMARY_TRACK_CENTRES: [number, string, number, number, string][] = [
+  [9000881, "Summary E2E Hours Main", 900088, 1, "jee_main"],
+  [9000882, "Summary E2E Hours Advanced", 900088, 2, "jee_advanced"],
+  [9000891, "Summary E2E Hours Neet", 900089, 1, "neet"],
+];
+const PRIMARY_TRACK_CHAPTER_ID = 90008801;
+
+test.describe("Curriculum Summary chapter timeline prescribed time", () => {
+  test.beforeAll(async () => {
+    const pool = getTestPool();
+    try {
+      await pool.query(
+        `INSERT INTO school
+           (id, code, name, inserted_at, updated_at, udise_code, af_school_category, region, state, district, program_ids)
+         VALUES
+           (900088, 'SUMM88', 'Summary Hours School', NOW(), NOW(), '81000000088', 'JNV', 'SUMMARY_HOURS_E2E', 'Gujarat', 'Anand', ARRAY[1, 2]::integer[]),
+           (900089, 'SUMM89', 'Summary Hours Neet School', NOW(), NOW(), '81000000089', 'JNV', 'SUMMARY_HOURS_E2E', 'Gujarat', 'Anand', ARRAY[1]::integer[])
+         ON CONFLICT (id) DO NOTHING`
+      );
+      for (const [centreId, name, schoolId, programId, track] of PRIMARY_TRACK_CENTRES) {
+        await pool.query(
+          `INSERT INTO centres (id, name, school_id, is_physical, is_active, program_id)
+           VALUES ($1, $2, $3, true, true, $4) ON CONFLICT (id) DO NOTHING`,
+          [centreId, name, schoolId, programId]
+        );
+        await pool.query(
+          `INSERT INTO centre_exam_tracks (centre_id, grade_id, exam_track_code)
+           VALUES ($1, 4, $2) ON CONFLICT DO NOTHING`,
+          [centreId, track]
+        );
+      }
+      await pool.query(
+        `INSERT INTO chapter (id, code, grade_id, subject_id, inserted_at, updated_at, name)
+         VALUES ($1, 'SUM-HRS01', 4, 2, NOW(), NOW(), '[{"chapter":"Summary Chem Equilibrium","lang_code":"en"}]'::jsonb)
+         ON CONFLICT (id) DO NOTHING`,
+        [PRIMARY_TRACK_CHAPTER_ID]
+      );
+      await pool.query(
+        `INSERT INTO lms_chapter_exam_configs
+           (chapter_id, exam_track, is_in_syllabus, prescribed_minutes, coverage_sequence, inserted_by_email, updated_by_email)
+         VALUES
+           ($1, 'jee_main', true, 600, 1, 'e2e@avantifellows.org', 'e2e@avantifellows.org'),
+           ($1, 'jee_advanced', true, 840, 1, 'e2e@avantifellows.org', 'e2e@avantifellows.org'),
+           ($1, 'neet', true, 480, 1, 'e2e@avantifellows.org', 'e2e@avantifellows.org')
+         ON CONFLICT (chapter_id, exam_track) DO NOTHING`,
+        [PRIMARY_TRACK_CHAPTER_ID]
+      );
+    } finally {
+      await pool.end();
+    }
+  });
+
+  test.afterAll(async () => {
+    const pool = getTestPool();
+    const centreIds = PRIMARY_TRACK_CENTRES.map(([centreId]) => centreId);
+    try {
+      await pool.query("DELETE FROM lms_chapter_exam_configs WHERE chapter_id = $1", [PRIMARY_TRACK_CHAPTER_ID]);
+      await pool.query("DELETE FROM chapter WHERE id = $1", [PRIMARY_TRACK_CHAPTER_ID]);
+      await pool.query("DELETE FROM centre_exam_tracks WHERE centre_id = ANY($1::int[])", [centreIds]);
+      await pool.query("DELETE FROM centres WHERE id = ANY($1::int[])", [centreIds]);
+      await pool.query("DELETE FROM school WHERE id IN (900088, 900089)");
+    } finally {
+      await pool.end();
+    }
+  });
+
+  test("each class's prescribed time follows its Primary Exam Track", async ({ adminPage }) => {
+    for (const [centreId, prescribed] of [
+      [9000881, "10h"],
+      [9000882, "14h"],
+      [9000891, "8h"],
+    ]) {
+      await adminPage.goto(`/curriculum-summary/centres/${centreId}?grade=12&as_of=${AS_OF}`);
+      await expect(timelineRow(adminPage, "Summary Chem Equilibrium").locator("[data-prescribed]")).toHaveText(
+        prescribed
+      );
+    }
+  });
+});
