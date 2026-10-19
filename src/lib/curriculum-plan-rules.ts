@@ -4,7 +4,7 @@
 // agree. Pure functions over `YYYY-MM-DD` IST calendar dates — no server-only imports, so
 // client components may use it.
 
-import { getTodayIST } from "./curriculum-date-helpers";
+import { getTodayIST, isDateString } from "./curriculum-date-helpers";
 import { EXAM_TRACKS, type ExamTrack } from "./exam-tracks";
 
 // An academic year `YYYY-YYYY+1` runs 1 Apr–31 Mar.
@@ -27,6 +27,12 @@ export function parseAcademicYear(value: string): AcademicYearRange | null {
   const startYear = Number(match[1]);
   const endYear = Number(match[2]);
   return endYear === startYear + 1 ? { startYear, endYear } : null;
+}
+
+// A real calendar date whose academic year can be named (`YYYY-YYYY`): years 1000–9998 in
+// practice. Anything else (0999-06-01, 9999-06-01) cannot be a Summary as-of date.
+export function isAcademicYearDate(value: string): boolean {
+  return isDateString(value) && parseAcademicYear(academicYearForDate(value)) !== null;
 }
 
 function requireAcademicYear(academicYear: string): AcademicYearRange {

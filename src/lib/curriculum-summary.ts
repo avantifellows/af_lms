@@ -11,7 +11,7 @@ import {
   type CurriculumSchemaUnavailable,
 } from "./curriculum-schema";
 import { loadChapterTestSessions } from "./curriculum-chapter-tests";
-import { isDateString } from "./curriculum-date-helpers";
+import { chapterSharesCodeSql } from "./chapter-siblings";
 import {
   academicYearForDate,
   academicYearStartDate,
@@ -21,6 +21,7 @@ import {
   chapterTestStatus,
   classifySummaryClass,
   hoursWindowStart,
+  isAcademicYearDate,
   planStatusAsOf,
   primaryExamTrackForChapter,
   type BehindPillTone,
@@ -85,7 +86,8 @@ export function normalizeCurriculumSummarySearchParams(
     regions: parseList(searchParams.regions),
     schoolSearch: (firstValue(searchParams.q) ?? "").trim(),
     grade: firstValue(searchParams.grade) === "12" ? 12 : 11,
-    asOf: asOf && isDateString(asOf) ? asOf : todayIstDate,
+    // Invalid dates, and years too far out to name an academic year (0999, 9999), mean today.
+    asOf: asOf && isAcademicYearDate(asOf) ? asOf : todayIstDate,
     onlyBehind: ["1", "true"].includes(firstValue(searchParams.only_behind) ?? ""),
     page: Number.isFinite(page) && page > 0 ? page : 1,
     pageSize: PAGE_SIZES.includes(pageSize) ? pageSize : DEFAULT_PAGE_SIZE,
@@ -246,6 +248,7 @@ async function loadSummaryClasses(
     centreIds: rawRows.map((row) => Number(row.centre_id)),
     grade: params.grade,
     academicYear,
+    asOf: params.asOf,
   });
   return rawRows.map((raw) => ({
     raw,
@@ -620,6 +623,9 @@ export interface ChapterTimelineChapter {
 
 export interface ChapterTimeline {
   grade: CurriculumSummaryGrade;
+  // Grades with a Summary Class at this Centre (a Centre Exam Track mapped); the timeline's
+  // Grade switch links only these, since any other Grade's timeline does not exist.
+  grades: CurriculumSummaryGrade[];
   asOf: string;
   hoursWindow: HoursWindow;
   // The class as the Summary shows it: Centre, kind, explanation, plan and Behind.
@@ -665,6 +671,7 @@ export async function getChapterTimeline(
   if (!data) return { ok: false, status: 404 };
 
   const row = buildSummaryRow(data);
+  const grades = await loadCentreGrades(centreId);
   const measured = row.kind === "plan" || row.kind === "no_plan";
   const chapters = measured ? data.chapters : [];
   const progress = chapterProgress(chapters, params.asOf);
@@ -696,6 +703,7 @@ export async function getChapterTimeline(
     ok: true,
     timeline: {
       grade: params.grade,
+      grades,
       asOf: params.asOf,
       hoursWindow: params.hoursWindow,
       row,
@@ -730,6 +738,21 @@ export async function getChapterTimeline(
       },
     },
   };
+}
+
+// The Centre is already known to be in the user's scope; a Grade has a Summary Class there when
+// the Centre maps an Exam Track for it (the Summary's own row rule).
+async function loadCentreGrades(centreId: number): Promise<CurriculumSummaryGrade[]> {
+  const rows = await query<{ grade: string | number }>(
+    `SELECT DISTINCT g.number AS grade
+     FROM centre_exam_tracks cet
+     JOIN grade g ON g.id = cet.grade_id
+     WHERE cet.centre_id = $1
+       AND g.number = ANY($2::int[])
+     ORDER BY g.number`,
+    [centreId, CURRICULUM_SUMMARY_GRADES]
+  );
+  return CURRICULUM_SUMMARY_GRADES.filter((grade) => rows.some((row) => Number(row.grade) === grade));
 }
 
 interface TimelineActivityRow {
@@ -826,14 +849,25 @@ const TIMELINE_ACTIVITY_SQL = `
     FROM window_logs
     WHERE log_type IN ('class_cancelled', 'doubt_solving')
   )
+  -- Activity under a duplicate Chapter row (same code + subject + Grade) counts toward the
+  -- class's row for that Chapter: the logged row itself when listed, else its lowest listed
+  -- sibling, so nothing is counted twice.
   SELECT
-    chapter_id,
-    SUM(taught_minutes)::int AS taught_minutes,
-    SUM(cancellations)::int AS cancellations,
-    SUM(doubt_solving_minutes)::int AS doubt_solving_minutes
-  FROM chapter_activity
-  WHERE chapter_id = ANY($7::bigint[])
-  GROUP BY chapter_id`;
+    target.chapter_id,
+    SUM(ca.taught_minutes)::int AS taught_minutes,
+    SUM(ca.cancellations)::int AS cancellations,
+    SUM(ca.doubt_solving_minutes)::int AS doubt_solving_minutes
+  FROM chapter_activity ca
+  JOIN chapter logged ON logged.id = ca.chapter_id
+  CROSS JOIN LATERAL (
+    SELECT listed.id AS chapter_id
+    FROM chapter listed
+    WHERE listed.id = ANY($7::bigint[])
+      AND (listed.id = logged.id OR (${chapterSharesCodeSql("logged", "listed")}))
+    ORDER BY listed.id = logged.id DESC, listed.id
+    LIMIT 1
+  ) target
+  GROUP BY target.chapter_id`;
 
 function subjectRank(subject: string): number {
   const index = (CURRICULUM_SUMMARY_SUBJECTS as readonly string[]).indexOf(subject);

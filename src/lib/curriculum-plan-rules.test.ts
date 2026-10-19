@@ -10,6 +10,7 @@ import {
   classifySummaryClass,
   currentAcademicYearIST,
   hoursWindowStart,
+  isAcademicYearDate,
   parseAcademicYear,
   planStatusAsOf,
   primaryExamTrack,
@@ -28,6 +29,19 @@ describe("academic year", () => {
     ["2027-01-01", "2026-2027"],
   ])("puts %s in academic year %s", (date, expected) => {
     expect(academicYearForDate(date)).toBe(expected);
+  });
+
+  it.each([
+    ["2026-08-15", true],
+    ["1000-04-01", true],
+    ["9998-12-31", true],
+    ["2026-02-30", false],
+    ["0999-06-01", false],
+    ["1000-03-31", false],
+    ["9999-06-01", false],
+    ["not-a-date", false],
+  ])("treats %s as a date with a nameable academic year: %s", (date, expected) => {
+    expect(isAcademicYearDate(date)).toBe(expected);
   });
 
   it("parses a consecutive academic year", () => {

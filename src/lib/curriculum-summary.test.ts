@@ -83,4 +83,13 @@ describe("normalizeCurriculumSummarySearchParams", () => {
       pageSize: 20,
     });
   });
+
+  it("falls back to today for an as-of year too far out to name an academic year", () => {
+    for (const asOf of ["0999-06-01", "9999-06-01", "1000-02-01"]) {
+      expect(normalizeCurriculumSummarySearchParams({ as_of: asOf }, TODAY).asOf).toBe(TODAY);
+    }
+    expect(normalizeCurriculumSummarySearchParams({ as_of: "9998-06-01" }, TODAY).asOf).toBe(
+      "9998-06-01"
+    );
+  });
 });

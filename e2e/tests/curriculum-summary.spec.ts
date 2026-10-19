@@ -277,8 +277,10 @@ test.describe("Curriculum Summary", () => {
   test("an invalid as-of date falls back to today in IST", async ({ browser }) => {
     const todayIst = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
     const page = await summaryPmPage(browser);
-    await page.goto("/curriculum-summary?as_of=2026-02-30");
-    await expect(page.getByLabel("As of")).toHaveValue(todayIst);
+    for (const asOf of ["2026-02-30", "0999-06-01", "9999-06-01"]) {
+      await page.goto(`/curriculum-summary?as_of=${asOf}`);
+      await expect(page.getByLabel("As of")).toHaveValue(todayIst);
+    }
     await page.context().close();
   });
 });
@@ -460,6 +462,47 @@ test.describe("Curriculum Summary Chapter tests overdue", () => {
     await expect(summaryRow(page, "Summary E2E Bhuj Neet").locator("[data-tests-overdue]")).toHaveText("2");
     await expect(summaryRow(page, "Summary E2E Vapi Closed").locator("[data-tests-overdue]")).toHaveText("2");
     await expect(page.getByTestId("summary-tests-overdue")).toHaveText("6");
+    await page.context().close();
+  });
+});
+
+// Fixture: e2e/fixtures/migrations/20261019170000_seed_curriculum_summary_as_of_fixture.sql. A
+// session counts for an as-of date only if it is in that date's academic year and was created
+// or had started by the end of that day.
+test.describe("Curriculum Summary Chapter Test Status as of a past date", () => {
+  test("a session from the next academic year never counts", async ({ browser }) => {
+    const page = await summaryPmPage(browser);
+    // Anand Shared's only countable Bio Plants session is on 10 Jul 2027, next academic year:
+    // viewed today, 1 Feb 2027 still shows the test Overdue rather than Scheduled.
+    await page.goto("/curriculum-summary/centres/9000812?grade=11&as_of=2027-02-01");
+    await expect(timelineRow(page, "Summary Bio Plants").locator("[data-test-status]")).toHaveText("Overdue");
+    await page.context().close();
+  });
+
+  test("a session created after the as-of date does not count for it", async ({ browser }) => {
+    const page = await summaryPmPage(browser);
+    // The Bio Animals session for 25 Aug was created on 18 Aug.
+    for (const [asOf, testStatus] of [
+      ["2026-08-17", "Overdue"],
+      ["2026-08-18", "Scheduled"],
+    ] as const) {
+      await page.goto(`/curriculum-summary/centres/9000812?grade=11&as_of=${asOf}`);
+      await expect(timelineRow(page, "Summary Bio Animals").locator("[data-test-status]")).toHaveText(testStatus);
+    }
+    await page.context().close();
+  });
+
+  test("the majority fallback counts duplicate Chapter rows as one Chapter", async ({ browser }) => {
+    const page = await summaryPmPage(browser);
+    // Bhuj Neet's 17 Aug test has problems Alpha ×2, Bio Cells ×2 and duplicate Bio Cells ×1: it
+    // is a Bio Cells test. Alpha keeps its earlier 5 Jul session.
+    await page.goto("/curriculum-summary/centres/9000821?grade=11&as_of=2026-08-20");
+    await expect(timelineRow(page, "Summary Bio Cells").locator("[data-test-status]")).toHaveText(
+      "Conducted 17 Aug 2026"
+    );
+    await expect(timelineRow(page, "Fixture Alpha Physics").locator("[data-test-status]")).toHaveText(
+      "Conducted 5 Jul 2026"
+    );
     await page.context().close();
   });
 });
@@ -708,6 +751,22 @@ test.describe("Curriculum Summary chapter timeline", () => {
     const todayIst = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
     await page.goto("/curriculum-summary/centres/9000811?grade=12&as_of=2026-02-30");
     await expect(page.getByLabel("As of")).toHaveValue(todayIst);
+    // Years outside the supported range fall back to today too instead of failing.
+    for (const asOf of ["0999-06-01", "9999-06-01"]) {
+      await page.goto(`/curriculum-summary/centres/9000811?grade=12&as_of=${asOf}`);
+      await expect(page.getByLabel("As of")).toHaveValue(todayIst);
+    }
+    await page.context().close();
+  });
+
+  test("a Grade the Centre has no class for is shown but not linked", async ({ browser }) => {
+    const page = await summaryPmPage(browser);
+    // Anand Shared runs only Grade 11, so its Grade 12 timeline does not exist.
+    await page.goto(`/curriculum-summary/centres/9000812?grade=11&as_of=${AS_OF}&hours=7d`);
+    const grades = page.getByRole("navigation", { name: "Grade" });
+    await expect(grades.getByRole("link", { name: "Grade 11" })).toHaveAttribute("aria-current", "page");
+    await expect(grades.getByRole("link", { name: "Grade 12" })).toHaveCount(0);
+    await expect(grades.getByText("Grade 12")).toHaveAttribute("aria-disabled", "true");
     await page.context().close();
   });
 
@@ -857,9 +916,19 @@ test.describe("Curriculum Summary chapter timeline hours", () => {
     await expect(page).toHaveURL(/as_of=2026-08-20/);
     await expect(page.getByTestId("timeline-hours")).toHaveText("30m / 11h 30m");
 
-    await page.getByRole("link", { name: "Grade 12" }).click();
-    await expect(page).toHaveURL(/grade=12/);
-    await expect(page).toHaveURL(/hours=7d/);
+    await page.context().close();
+  });
+
+  test("logs under a duplicate Chapter row count toward the plan's Chapter", async ({ browser }) => {
+    const page = await summaryPmPage(browser);
+    // Last 7 days to 22 Aug = 16–22 Aug: the 16 Aug Cells log (30 min) and, under the duplicate
+    // Bio Cells row on 21 Aug, 20 min taught, one cancellation and 15 min of doubt solving.
+    await page.goto("/curriculum-summary/centres/9000812?grade=11&as_of=2026-08-22&hours=7d");
+    const cells = timelineRow(page, "Summary Bio Cells");
+    await expect(cells.locator("[data-hours]")).toHaveText("50m");
+    await expect(cells.locator("[data-cancellations]")).toHaveText("1");
+    await expect(cells.locator("[data-doubt-solving]")).toHaveText("15m");
+    await expect(page.getByTestId("timeline-hours")).toHaveText("50m / 11h 30m");
     await page.context().close();
   });
 });
@@ -937,7 +1006,7 @@ test.describe("Curriculum Summary chapter timeline prescribed time", () => {
       [9000881, "10h"],
       [9000882, "14h"],
       [9000891, "8h"],
-    ]) {
+    ] as const) {
       await adminPage.goto(`/curriculum-summary/centres/${centreId}?grade=12&as_of=${AS_OF}`);
       await expect(timelineRow(adminPage, "Summary Chem Equilibrium").locator("[data-prescribed]")).toHaveText(
         prescribed

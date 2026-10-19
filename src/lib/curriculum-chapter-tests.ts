@@ -5,7 +5,7 @@
 
 import { chapterSharesCodeSql } from "./chapter-siblings";
 import { cmsTestIdSql } from "./cms-tests";
-import { academicYearStartDate } from "./curriculum-plan-rules";
+import { academicYearEndDate, academicYearStartDate } from "./curriculum-plan-rules";
 import { query } from "./db";
 
 // Centre id → Chapter id → end times (IST wall clock, `YYYY-MM-DD HH:mm:ss`; null = no end
@@ -13,17 +13,26 @@ import { query } from "./db";
 // sharing code + subject + Grade all carry the session, so any plan Chapter id finds it.
 export type ChapterTestSessions = Map<number, Map<number, (string | null)[]>>;
 
+// `asOf` replays a past date: only sessions that existed by the end of that day count. See
+// CHAPTER_TEST_SESSIONS_SQL for the rule.
 export async function loadChapterTestSessions(params: {
   centreIds: number[];
   grade: number;
   academicYear: string;
+  asOf: string;
 }): Promise<ChapterTestSessions> {
   const byCentre: ChapterTestSessions = new Map();
   if (params.centreIds.length === 0) return byCentre;
 
   const rows = await query<{ centre_id: string | number; chapter_id: string | number; end_time: string | null }>(
     CHAPTER_TEST_SESSIONS_SQL,
-    [params.centreIds, params.grade, academicYearStartDate(params.academicYear)]
+    [
+      params.centreIds,
+      params.grade,
+      academicYearStartDate(params.academicYear),
+      academicYearEndDate(params.academicYear),
+      params.asOf,
+    ]
   );
   for (const row of rows) {
     const centreId = Number(row.centre_id);
@@ -35,17 +44,25 @@ export async function loadChapterTestSessions(params: {
   return byCentre;
 }
 
-// $1 Centre ids, $2 Grade number, $3 1 Apr of the academic year.
+// $1 Centre ids, $2 Grade number, $3 1 Apr and $4 31 Mar of the academic year, $5 as-of.
 //
 // Sessions: active new-CMS quiz sessions with test_format 'chapter_test' (so not
-// 'combined_chapter_test'), not failed, for the Grade, starting on or after 1 Apr.
+// 'combined_chapter_test'), not failed, for the Grade, starting within the academic year
+// (1 Apr–31 Mar), so a later cohort's sessions never count.
+//
+// As of a past date: a session counts only if it existed by the end of the as-of day, i.e. it
+// had been created (`inserted_at`, UTC, converted to IST) or had started (`start_time`, IST wall
+// clock) by then. Sessions keep no history, so this is the closest replay: a session scheduled
+// on or before as-of counts (Scheduled until its end time has passed, then Conducted), and one
+// created later does not, even when viewed today. `start_time` also covers rows inserted after
+// the fact for a session that had already been held.
 //
 // Class: each comma-separated meta_data.batch_id → batch → school_batch → School, and the
 // batch's Program → the Centre at that School with that Program. A session whose batches span
 // several Centres counts for each.
 //
-// Chapter, in order: the CMS test's first type_params.chapter_id; else the majority
-// resource_chapter of the test's problems; else the Chapter code leading the session or test
+// Chapter, in order: the CMS test's first type_params.chapter_id; else the majority Chapter of
+// the test's problems (resource_chapter, duplicate rows unified); else the Chapter code leading the session or test
 // name ("12C17 - …").
 const CHAPTER_CODE_PATTERN = "^\\s*([A-Za-z0-9-]*[0-9][A-Za-z0-9-]*)\\s+-\\s";
 
@@ -65,6 +82,11 @@ const CHAPTER_TEST_SESSIONS_SQL = `
       AND s.meta_data->>'status' IS DISTINCT FROM 'failed'
       AND s.meta_data->>'grade' = $2::int::text
       AND s.start_time >= $3::date
+      AND s.start_time < $4::date + 1
+      AND LEAST(
+        s.start_time,
+        s.inserted_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata'
+      ) < $5::date + 1
   ),
   session_centres AS (
     SELECT DISTINCT cts.id AS session_id, c.id AS centre_id
@@ -88,7 +110,7 @@ const CHAPTER_TEST_SESSIONS_SQL = `
           WHERE r.id = cts.cms_test_id
         ),
         (
-          SELECT rc.chapter_id
+          SELECT MIN(majority.id)
           FROM resource r
           CROSS JOIN LATERAL jsonb_path_query(
             r.type_params, 'lax $.subjects[*].sections[*].*.problems[*].id'
@@ -97,10 +119,13 @@ const CHAPTER_TEST_SESSIONS_SQL = `
             ON rc.resource_id = CASE
               WHEN (p.problem_id #>> '{}') ~ '^[0-9]+$' THEN (p.problem_id #>> '{}')::bigint
             END
+          JOIN chapter majority ON majority.id = rc.chapter_id
           WHERE r.id = cts.cms_test_id
-            AND rc.chapter_id IS NOT NULL
-          GROUP BY rc.chapter_id
-          ORDER BY COUNT(*) DESC, rc.chapter_id
+          -- Duplicate Chapter rows (same code + subject + Grade) count as one Chapter; a row
+          -- without a code is its own Chapter.
+          GROUP BY majority.code, majority.subject_id, majority.grade_id,
+            CASE WHEN majority.code IS NULL THEN majority.id END
+          ORDER BY COUNT(*) DESC, MIN(majority.id)
           LIMIT 1
         ),
         (

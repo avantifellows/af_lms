@@ -158,20 +158,32 @@ function TimelineFilters({
         <span className="text-xs font-bold uppercase tracking-wide text-text-muted">Grade</span>
         {/* Another Grade may have other subjects, so switching Grade starts at All. */}
         <nav aria-label="Grade" className="flex gap-1">
-          {CURRICULUM_SUMMARY_GRADES.map((grade) => (
-            <Link
-              key={grade}
-              href={timelineHref(centreId, timeline, { grade })}
-              aria-current={timeline.grade === grade ? "page" : undefined}
-              className={`rounded-md border px-3 py-1.5 text-sm font-bold ${
-                timeline.grade === grade
-                  ? "border-accent bg-accent text-white"
-                  : "border-border text-accent hover:text-accent-hover"
-              }`}
-            >
-              Grade {grade}
-            </Link>
-          ))}
+          {CURRICULUM_SUMMARY_GRADES.map((grade) =>
+            timeline.grades.includes(grade) ? (
+              <Link
+                key={grade}
+                href={timelineHref(centreId, timeline, { grade })}
+                aria-current={timeline.grade === grade ? "page" : undefined}
+                className={`rounded-md border px-3 py-1.5 text-sm font-bold ${
+                  timeline.grade === grade
+                    ? "border-accent bg-accent text-white"
+                    : "border-border text-accent hover:text-accent-hover"
+                }`}
+              >
+                Grade {grade}
+              </Link>
+            ) : (
+              // This Centre has no class for the Grade, so there is no timeline to link to.
+              <span
+                key={grade}
+                aria-disabled="true"
+                title={`No Grade ${grade} class at this Centre`}
+                className="rounded-md border border-border px-3 py-1.5 text-sm font-bold text-text-muted"
+              >
+                Grade {grade}
+              </span>
+            )
+          )}
         </nav>
       </div>
       <div className="flex flex-col gap-1">
