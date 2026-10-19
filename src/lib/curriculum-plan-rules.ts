@@ -59,6 +59,19 @@ export function shiftAcademicYearForward(academicYear: string): string {
   return `${startYear + 1}-${endYear + 1}`;
 }
 
+// A Curriculum Plan is stored as Draft or Active. Closed is derived, never stored: an Active
+// plan is Closed once the as-of date (today IST on plan pages) is after its Plan Closure Date.
+// A Draft stays Draft whatever its closure date.
+export type CurriculumPlanDisplayStatus = "draft" | "active" | "closed";
+
+export function planStatusAsOf(
+  plan: { status: "draft" | "active"; closureDate: string },
+  asOf: string,
+): CurriculumPlanDisplayStatus {
+  if (plan.status === "active" && asOf > plan.closureDate) return "closed";
+  return plan.status;
+}
+
 // Exam Tracks with LMS curriculum content. CET and Math Foundation have none and are
 // ignored for progress.
 export const CONTENT_EXAM_TRACKS: readonly ExamTrack[] = ["jee_main", "jee_advanced", "neet"];

@@ -6,13 +6,15 @@
 import type { PoolClient } from "pg";
 
 import { requireAdmin, type AdminSession } from "./admin-guard";
-import { isDateString } from "./curriculum-date-helpers";
+import { getTodayIST, isDateString } from "./curriculum-date-helpers";
 import {
   CONTENT_EXAM_TRACKS,
   academicYearEndDate,
   academicYearStartDate,
   currentAcademicYearIST,
   parseAcademicYear,
+  planStatusAsOf,
+  type CurriculumPlanDisplayStatus,
 } from "./curriculum-plan-rules";
 import {
   checkCurriculumPlansSchema,
@@ -30,6 +32,8 @@ export interface CurriculumPlanSummary {
   grade: number;
   examTracks: ExamTrack[];
   status: CurriculumPlanStatus;
+  // Draft / Active / Closed as of today IST; Closed is derived, never stored.
+  displayStatus: CurriculumPlanDisplayStatus;
   closureDate: string;
   assignmentCount: number;
 }
@@ -69,6 +73,7 @@ export type CurriculumPlanValidationFailure = {
 };
 
 type NotFound = { ok: false; status: 404; error: string };
+type Conflict = { ok: false; status: 409; error: string };
 
 export type CurriculumPlanListResult =
   | { ok: true; plans: CurriculumPlanSummary[] }
@@ -204,6 +209,7 @@ const PLAN_SELECT = `
   JOIN grade g ON g.id = p.grade_id`;
 
 function mapPlanRow(row: PlanRow): CurriculumPlanSummary {
+  const closureDate = row.closure_date;
   return {
     id: Number(row.id),
     title: row.title,
@@ -211,7 +217,8 @@ function mapPlanRow(row: PlanRow): CurriculumPlanSummary {
     grade: Number(row.grade),
     examTracks: CONTENT_EXAM_TRACKS.filter((track) => row.exam_tracks.includes(track)),
     status: row.status,
-    closureDate: row.closure_date,
+    displayStatus: planStatusAsOf({ status: row.status, closureDate }, getTodayIST()),
+    closureDate,
     assignmentCount: Number(row.assignment_count),
   };
 }
@@ -434,6 +441,7 @@ function normalizeChapterDateInputs(
 
 interface LockedPlanRow {
   id: string | number;
+  status: CurriculumPlanStatus;
   academic_year: string;
   grade_id: string | number;
   exam_tracks: string[];
@@ -442,7 +450,7 @@ interface LockedPlanRow {
 
 async function lockPlan(db: Db, id: number): Promise<LockedPlanRow | null> {
   const rows = await db<LockedPlanRow>(
-    `SELECT id, academic_year, grade_id, exam_tracks, closure_date::text AS closure_date
+    `SELECT id, status, academic_year, grade_id, exam_tracks, closure_date::text AS closure_date
      FROM lms_curriculum_plans
      WHERE id = $1
      FOR UPDATE`,
@@ -638,5 +646,84 @@ export async function updateCurriculumPlanMetadata(params: {
     );
     const rows = await db<PlanRow>(`${PLAN_SELECT} WHERE p.id = $1`, [params.id]);
     return { ok: true as const, plan: mapPlanRow(rows[0]) };
+  });
+}
+
+export type CurriculumPlanActivateResult =
+  | { ok: true; plan: CurriculumPlanSummary; warnings: CurriculumPlanWarning[] }
+  | CurriculumSchemaUnavailable
+  | NotFound
+  | Conflict;
+
+// Draft → Active. Undated in-syllabus Chapters don't block activation; they come back as
+// warnings. There is no way back to Draft.
+export async function activateCurriculumPlan(params: {
+  id: number;
+  adminEmail: string;
+}): Promise<CurriculumPlanActivateResult> {
+  const schema = await checkCurriculumPlansSchema();
+  if (!schema.ok) return schema;
+  if (!Number.isInteger(params.id) || params.id <= 0) return planNotFound();
+
+  return withTransaction(async (client) => {
+    const db = clientDb(client);
+    const plan = await lockPlan(db, params.id);
+    if (!plan) return planNotFound();
+    if (plan.status !== "draft") {
+      return { ok: false as const, status: 409 as const, error: "Only Draft plans can be activated" };
+    }
+
+    const chapters = await loadEffectiveChapters(db, {
+      id: params.id,
+      gradeId: Number(plan.grade_id),
+      examTracks: plan.exam_tracks,
+    });
+    const warnings = chapters
+      .filter((chapter) => !chapter.dueDate)
+      .map((chapter) => ({
+        chapterId: chapter.chapterId,
+        chapterName: chapter.chapterName,
+        message: "Chapter has no Chapter Due Date",
+      }));
+
+    await db(
+      `UPDATE lms_curriculum_plans
+       SET status = 'active',
+           activated_at = (NOW() AT TIME ZONE 'UTC'),
+           updated_by_email = $2,
+           updated_at = (NOW() AT TIME ZONE 'UTC')
+       WHERE id = $1`,
+      [params.id, params.adminEmail]
+    );
+    const rows = await db<PlanRow>(`${PLAN_SELECT} WHERE p.id = $1`, [params.id]);
+    return { ok: true as const, plan: mapPlanRow(rows[0]), warnings };
+  });
+}
+
+export type CurriculumPlanDeleteResult =
+  | { ok: true }
+  | CurriculumSchemaUnavailable
+  | NotFound
+  | Conflict;
+
+// Only Drafts can be deleted, whatever their closure date; the plan's Chapter dates and
+// Plan Assignments go with it (ON DELETE CASCADE). A plan PMs have been measured against
+// (Active or Closed) cannot disappear.
+export async function deleteCurriculumPlan(params: {
+  id: number;
+}): Promise<CurriculumPlanDeleteResult> {
+  const schema = await checkCurriculumPlansSchema();
+  if (!schema.ok) return schema;
+  if (!Number.isInteger(params.id) || params.id <= 0) return planNotFound();
+
+  return withTransaction(async (client) => {
+    const db = clientDb(client);
+    const plan = await lockPlan(db, params.id);
+    if (!plan) return planNotFound();
+    if (plan.status !== "draft") {
+      return { ok: false as const, status: 409 as const, error: "Only Draft plans can be deleted" };
+    }
+    await db("DELETE FROM lms_curriculum_plans WHERE id = $1", [params.id]);
+    return { ok: true as const };
   });
 }

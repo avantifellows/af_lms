@@ -16,7 +16,7 @@ vi.mock("@/lib/permissions", () => ({ getUserPermission: mockGetUserPermission }
 vi.mock("@/lib/db", () => ({ query: mockQuery, withTransaction: mockWithTransaction }));
 vi.mock("@/lib/curriculum-schema", () => ({ checkCurriculumPlansSchema: mockCheckSchema }));
 
-import { GET, PATCH } from "./route";
+import { DELETE, GET, PATCH } from "./route";
 import { ADMIN_SESSION, routeParams } from "../../../__test-utils__/api-test-helpers";
 
 const ADMIN = {
@@ -73,8 +73,13 @@ const handlers = {
       req("/api/curriculum/plans/7", { method: "PATCH", body: PLAN_BODY }),
       routeParams({ id: "7" })
     ),
+  "DELETE /api/curriculum/plans/7": () =>
+    DELETE(req("/api/curriculum/plans/7", { method: "DELETE" }), routeParams({ id: "7" })),
 };
-const writes = { "PATCH /api/curriculum/plans/7": handlers["PATCH /api/curriculum/plans/7"] };
+const writes = {
+  "PATCH /api/curriculum/plans/7": handlers["PATCH /api/curriculum/plans/7"],
+  "DELETE /api/curriculum/plans/7": handlers["DELETE /api/curriculum/plans/7"],
+};
 const reads = { "GET /api/curriculum/plans/7": handlers["GET /api/curriculum/plans/7"] };
 
 describe.each(Object.entries(handlers))("%s guard", (_name, call) => {

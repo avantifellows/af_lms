@@ -10,6 +10,7 @@ import {
   classifySummaryClass,
   currentAcademicYearIST,
   parseAcademicYear,
+  planStatusAsOf,
   primaryExamTrack,
   primaryExamTrackForChapter,
   shiftAcademicYearForward,
@@ -73,6 +74,16 @@ describe("copy from last year", () => {
 
   it("shifts an academic year to the next one", () => {
     expect(shiftAcademicYearForward("2026-2027")).toBe("2027-2028");
+  });
+});
+
+describe("plan status", () => {
+  it.each([
+    ["draft", "2026-11-30", "2026-12-01", "draft"],
+    ["active", "2026-11-30", "2026-11-30", "active"],
+    ["active", "2026-11-30", "2026-12-01", "closed"],
+  ] as const)("a %s plan closing %s, on %s, is %s", (status, closureDate, asOf, expected) => {
+    expect(planStatusAsOf({ status, closureDate }, asOf)).toBe(expected);
   });
 });
 

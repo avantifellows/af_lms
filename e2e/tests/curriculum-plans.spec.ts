@@ -271,6 +271,9 @@ test.describe("Curriculum Plans", () => {
       await expect(page.getByLabel("Due date for Fixture Alpha Physics")).toBeDisabled();
       await expect(page.getByLabel("Test date for Fixture Alpha Physics")).toBeDisabled();
       await expect(page.getByRole("button", { name: "Save Chapter dates" })).toBeDisabled();
+      await expect(page.getByTestId("plan-status")).toHaveText("Draft");
+      await expect(page.getByRole("button", { name: "Activate plan" })).toBeDisabled();
+      await expect(page.getByRole("button", { name: "Delete plan" })).toBeDisabled();
 
       const create = await page.request.post("/api/curriculum/plans", {
         data: {
@@ -286,6 +289,12 @@ test.describe("Curriculum Plans", () => {
         data: { chapters: [{ chapter_id: 90007501, due_date: "2026-06-30", test_date: null }] },
       });
       expect(dates.status()).toBe(403);
+      const activate = await page.request.post(`/api/curriculum/plans/${planId}/activate`);
+      expect(activate.status()).toBe(403);
+      const remove = await page.request.delete(`/api/curriculum/plans/${planId}`);
+      expect(remove.status()).toBe(403);
+      const unchanged = await page.request.get(`/api/curriculum/plans/${planId}`);
+      expect((await unchanged.json()).plan.status).toBe("draft");
       const list = await page.request.get("/api/curriculum/plans?academic_year=2026-2027");
       expect(list.status()).toBe(200);
     } finally {
@@ -378,5 +387,134 @@ test.describe("Curriculum Plans", () => {
       const json = await response.json();
       expect(json.errors.map((error: { message: string }) => error.message)).toContain(message);
     }
+  });
+
+  test("activating a partly dated Draft warns about undated Chapters, then shows Active with no way back to Draft", async ({
+    adminPage,
+  }) => {
+    const planId = await createPlan(adminPage, {
+      title: "E2E G11 Activate Plan",
+      examTracks: ["jee_main"],
+      grade: 11,
+    });
+    const saved = await adminPage.request.put(`/api/curriculum/plans/${planId}/chapters`, {
+      data: { chapters: [{ chapter_id: 90007501, due_date: "2026-06-30", test_date: null }] },
+    });
+    expect(saved.status()).toBe(200);
+
+    await adminPage.goto(`/curriculum-summary/plans/${planId}`);
+    await expect(adminPage.getByTestId("plan-status")).toHaveText("Draft");
+    await adminPage.getByRole("button", { name: "Activate plan" }).click();
+
+    const confirm = adminPage.getByTestId("plan-activate-confirm");
+    await expect(confirm).toContainText("1 Chapter has no Chapter Due Date");
+    await expect(confirm).toContainText("Fixture Beta Physics");
+    await expect(confirm).not.toContainText("Fixture Alpha Physics");
+    await confirm.getByRole("button", { name: "Activate anyway" }).click();
+    await expect(adminPage.getByText("Plan activated.")).toBeVisible();
+
+    await adminPage.reload();
+    await expect(adminPage.getByTestId("plan-status")).toHaveText("Active");
+    await expect(adminPage.getByRole("button", { name: "Activate plan" })).toHaveCount(0);
+    await expect(adminPage.getByRole("button", { name: "Delete plan" })).toHaveCount(0);
+
+    await adminPage.goto("/curriculum-summary/plans?academic_year=2026-2027&grade=11");
+    await expect(
+      adminPage.getByRole("row").filter({ hasText: "E2E G11 Activate Plan" })
+    ).toContainText("Active");
+
+    // Activation is one-way: a second activate is refused and the plan stays Active.
+    const again = await adminPage.request.post(`/api/curriculum/plans/${planId}/activate`);
+    expect(again.status()).toBe(409);
+    const plan = await adminPage.request.get(`/api/curriculum/plans/${planId}`);
+    expect((await plan.json()).plan.status).toBe("active");
+  });
+
+  test("deleting a Draft removes it from the list; deleting an Active plan is refused with 409", async ({
+    adminPage,
+  }) => {
+    const draftId = await createPlan(adminPage, {
+      title: "E2E G11 Delete Draft Plan",
+      examTracks: ["jee_main"],
+      grade: 11,
+    });
+    const activeId = await createPlan(adminPage, {
+      title: "E2E G11 Delete Active Plan",
+      examTracks: ["jee_main"],
+      grade: 11,
+    });
+    const activated = await adminPage.request.post(`/api/curriculum/plans/${activeId}/activate`);
+    expect(activated.status()).toBe(200);
+
+    await adminPage.goto(`/curriculum-summary/plans/${draftId}`);
+    await adminPage.getByRole("button", { name: "Delete plan" }).click();
+    await adminPage
+      .getByTestId("plan-delete-confirm")
+      .getByRole("button", { name: "Confirm delete" })
+      .click();
+    await expect(adminPage).toHaveURL(/\/curriculum-summary\/plans\?academic_year=2026-2027&grade=11$/);
+    await expect(adminPage.getByText("E2E G11 Delete Draft Plan")).toHaveCount(0);
+    expect((await adminPage.request.get(`/api/curriculum/plans/${draftId}`)).status()).toBe(404);
+
+    const refused = await adminPage.request.delete(`/api/curriculum/plans/${activeId}`);
+    expect(refused.status()).toBe(409);
+    expect((await refused.json()).error).toBe("Only Draft plans can be deleted");
+    await adminPage.goto("/curriculum-summary/plans?academic_year=2026-2027&grade=11");
+    await expect(
+      adminPage.getByRole("row").filter({ hasText: "E2E G11 Delete Active Plan" })
+    ).toContainText("Active");
+  });
+
+  test("an Active plan past its closure date shows Closed; a Draft past closure stays Draft and can be deleted", async ({
+    adminPage,
+  }) => {
+    // Fixture rows pinned to academic year 2025-2026 so the closure date is always before
+    // today (IST) without depending on the clock.
+    const pool = getTestPool();
+    let closedId: number;
+    let staleDraftId: number;
+    try {
+      const inserted = await pool.query<{ id: string; status: string }>(
+        `INSERT INTO lms_curriculum_plans
+           (title, academic_year, grade_id, exam_tracks, status, closure_date, activated_at)
+         SELECT v.title, '2025-2026', g.id, ARRAY['jee_main']::text[], v.status, '2026-03-31'::date,
+                CASE WHEN v.status = 'active' THEN TIMESTAMP '2025-04-01 00:00:00' END
+         FROM (VALUES ('E2E G11 Closed Plan', 'active'), ('E2E G11 Stale Draft Plan', 'draft'))
+           AS v(title, status)
+         CROSS JOIN LATERAL (SELECT id FROM grade WHERE number = 11 ORDER BY id LIMIT 1) g
+         RETURNING id, status`
+      );
+      closedId = Number(inserted.rows.find((row) => row.status === "active")!.id);
+      staleDraftId = Number(inserted.rows.find((row) => row.status === "draft")!.id);
+    } finally {
+      await pool.end();
+    }
+
+    await adminPage.goto("/curriculum-summary/plans?academic_year=2025-2026&grade=11");
+    await expect(
+      adminPage.getByRole("row").filter({ hasText: "E2E G11 Closed Plan" })
+    ).toContainText("Closed");
+    await expect(
+      adminPage.getByRole("row").filter({ hasText: "E2E G11 Stale Draft Plan" })
+    ).toContainText("Draft");
+
+    await adminPage.goto(`/curriculum-summary/plans/${closedId}`);
+    await expect(adminPage.getByTestId("plan-status")).toHaveText("Closed");
+    await expect(adminPage.getByRole("button", { name: "Activate plan" })).toHaveCount(0);
+    await expect(adminPage.getByRole("button", { name: "Delete plan" })).toHaveCount(0);
+    expect((await adminPage.request.delete(`/api/curriculum/plans/${closedId}`)).status()).toBe(409);
+
+    await adminPage.goto(`/curriculum-summary/plans/${staleDraftId}`);
+    await expect(adminPage.getByTestId("plan-status")).toHaveText("Draft");
+    await adminPage.getByRole("button", { name: "Delete plan" }).click();
+    await adminPage
+      .getByTestId("plan-delete-confirm")
+      .getByRole("button", { name: "Confirm delete" })
+      .click();
+    await expect(adminPage).toHaveURL(/\/curriculum-summary\/plans\?academic_year=2025-2026&grade=11$/);
+    await expect(adminPage.getByText("E2E G11 Stale Draft Plan")).toHaveCount(0);
+    await expect(
+      adminPage.getByRole("row").filter({ hasText: "E2E G11 Closed Plan" })
+    ).toContainText("Closed");
   });
 });

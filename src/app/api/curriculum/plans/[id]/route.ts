@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 
 import { authOptions } from "@/lib/auth";
 import {
+  deleteCurriculumPlan,
   getCurriculumPlan,
   requireCurriculumPlanAdmin,
   updateCurriculumPlanMetadata,
@@ -59,4 +60,25 @@ export async function PATCH(
   }
 
   return NextResponse.json({ plan: result.plan });
+}
+
+export async function DELETE(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const session = await getServerSession(authOptions);
+  const access = await requireCurriculumPlanAdmin(session, { forWrite: true });
+
+  if (!access.ok) {
+    return NextResponse.json({ error: access.error }, { status: access.status });
+  }
+
+  const { id } = await params;
+  const result = await deleteCurriculumPlan({ id: Number(id) });
+
+  if (!result.ok) {
+    return NextResponse.json(result, { status: result.status });
+  }
+
+  return NextResponse.json({ deleted: true });
 }

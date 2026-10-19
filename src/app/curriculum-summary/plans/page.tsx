@@ -9,19 +9,14 @@ import {
   listCurriculumPlans,
   normalizeCurriculumPlanListFilters,
   requireCurriculumPlanAdmin,
-  type CurriculumPlanStatus,
 } from "@/lib/curriculum-plans";
 import { formatExamTrack } from "@/lib/exam-tracks";
 import PlanSchemaUnavailable from "./PlanSchemaUnavailable";
+import { PLAN_STATUS_BADGE_VARIANTS, PLAN_STATUS_LABELS } from "./plan-status";
 
 interface PageProps {
   searchParams: Promise<Record<string, string | undefined>>;
 }
-
-const STATUS_LABELS: Record<CurriculumPlanStatus, string> = {
-  draft: "Draft",
-  active: "Active",
-};
 
 const fieldClassName =
   "min-h-[44px] rounded-md border border-border bg-bg-card px-3 py-2 text-sm font-normal text-text-primary";
@@ -145,8 +140,8 @@ export default async function CurriculumPlansPage({ searchParams }: PageProps) {
                           {plan.examTracks.map(formatExamTrack).join(", ")}
                         </td>
                         <td className="px-4 py-3">
-                          <Badge variant={plan.status === "active" ? "success" : "default"}>
-                            {STATUS_LABELS[plan.status]}
+                          <Badge variant={PLAN_STATUS_BADGE_VARIANTS[plan.displayStatus]}>
+                            {PLAN_STATUS_LABELS[plan.displayStatus]}
                           </Badge>
                         </td>
                         <td className="px-4 py-3 font-mono">{plan.closureDate}</td>
