@@ -145,17 +145,55 @@ export function ApplyButton() {
   );
 }
 
+const TABLE_HEADER_CLASS_NAME = "px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-text-muted";
+
 export function TableHead({ headers }: { headers: readonly string[] }) {
   return (
     <thead className="bg-bg-muted">
       <tr>
         {headers.map((header) => (
-          <th
-            key={header}
-            scope="col"
-            className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-text-muted"
-          >
+          <th key={header} scope="col" className={TABLE_HEADER_CLASS_NAME}>
             {header}
+          </th>
+        ))}
+      </tr>
+    </thead>
+  );
+}
+
+export interface SortableHeader {
+  label: string;
+  // The link that sorts by this column.
+  href: string;
+  // Set on the column the table is sorted by.
+  direction: "asc" | "desc" | null;
+}
+
+const ARIA_SORT = { asc: "ascending", desc: "descending" } as const;
+
+// A table head whose every header is a sort link; the sorted column shows ▲ / ▼ and `aria-sort`.
+export function SortableTableHead({ headers }: { headers: readonly SortableHeader[] }) {
+  return (
+    <thead className="bg-bg-muted">
+      <tr>
+        {headers.map((header) => (
+          <th
+            key={header.label}
+            scope="col"
+            aria-sort={header.direction ? ARIA_SORT[header.direction] : undefined}
+            className={TABLE_HEADER_CLASS_NAME}
+          >
+            <Link
+              href={header.href}
+              className={`inline-flex items-center gap-1 hover:text-accent-hover ${
+                header.direction ? "text-text-primary" : ""
+              }`}
+            >
+              {header.label}
+              {header.direction ? (
+                <span aria-hidden="true">{header.direction === "asc" ? "▲" : "▼"}</span>
+              ) : null}
+            </Link>
           </th>
         ))}
       </tr>

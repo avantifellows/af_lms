@@ -52,6 +52,23 @@ export type CurriculumSummarySubject = (typeof CURRICULUM_SUMMARY_SUBJECTS)[numb
 const PAGE_SIZES = [10, 20, 50, 100];
 const DEFAULT_PAGE_SIZE = 20;
 
+export type CurriculumSummarySortKey =
+  | "centre"
+  | "program"
+  | "tracks"
+  | "region"
+  | Lowercase<CurriculumSummarySubject>
+  | Lowercase<SubjectGroup>
+  | "tests_overdue"
+  | "plan";
+
+export type CurriculumSummarySortDirection = "asc" | "desc";
+
+export interface CurriculumSummarySort {
+  key: CurriculumSummarySortKey;
+  dir: CurriculumSummarySortDirection;
+}
+
 export interface CurriculumSummaryQuery {
   // Narrows the user's scoped rows; it never widens scope.
   regions: string[];
@@ -61,6 +78,8 @@ export interface CurriculumSummaryQuery {
   asOf: string;
   // Keeps rows with PCM or PCB Behind ≥ 1; header numbers ignore it.
   onlyBehind: boolean;
+  // A column header's sort; null = the default worst-first order.
+  sort: CurriculumSummarySort | null;
   page: number;
   pageSize: number;
 }
@@ -79,7 +98,8 @@ function parseList(value: SearchParamValue): string[] {
   );
 }
 
-// Unknown or removed params (programs, subjects, tracks, date range, flags, sort) are ignored.
+// Unknown or removed params (programs, subjects, tracks, date range, flags) are ignored, and so
+// is an unknown sort column; an unknown direction falls back to the column's first-click one.
 export function normalizeCurriculumSummarySearchParams(
   searchParams: Record<string, SearchParamValue>,
   todayIstDate: string
@@ -94,9 +114,15 @@ export function normalizeCurriculumSummarySearchParams(
     // Invalid dates, and years too far out to name an academic year (0999, 9999), mean today.
     asOf: asOf && isAcademicYearDate(asOf) ? asOf : todayIstDate,
     onlyBehind: ["1", "true"].includes(firstValue(searchParams.only_behind) ?? ""),
+    sort: parseSort(firstValue(searchParams.sort), firstValue(searchParams.dir)),
     page: Number.isFinite(page) && page > 0 ? page : 1,
     pageSize: PAGE_SIZES.includes(pageSize) ? pageSize : DEFAULT_PAGE_SIZE,
   };
+}
+
+function parseSort(key: string | undefined, dir: string | undefined): CurriculumSummarySort | null {
+  if (!isSortKey(key)) return null;
+  return { key, dir: dir === "asc" || dir === "desc" ? dir : defaultSortDirection(key) };
 }
 
 export type CurriculumSummaryRowKind =
@@ -200,7 +226,10 @@ export async function getCurriculumSummary(
   const regionOptions = [
     ...new Set(scopedRows.flatMap((row) => (row.region ? [row.region] : []))),
   ].sort();
-  const rows = sortSummaryRows(scopedRows.filter((row) => matchesSummaryFilters(row, params)));
+  const rows = sortSummaryRows(
+    scopedRows.filter((row) => matchesSummaryFilters(row, params)),
+    params.sort
+  );
   const listedRows = params.onlyBehind ? rows.filter((row) => worstGroupBehind(row) >= 1) : rows;
   const { page, totalPages, pageRows } = paginate(listedRows, params.page, params.pageSize);
 
@@ -644,15 +673,96 @@ const KIND_ORDER: Record<CurriculumSummaryRowKind, number> = {
 // Worst first: plan rows by the larger of PCM and PCB Behind desc then Tests overdue desc, then
 // No-plan rows, then setup-error, no-content and configuration-error rows; Centre name breaks
 // ties.
-function sortSummaryRows(rows: CurriculumSummaryRow[]): CurriculumSummaryRow[] {
-  return [...rows].sort(
-    (a, b) =>
-      KIND_ORDER[a.kind] - KIND_ORDER[b.kind] ||
-      worstGroupBehind(b) - worstGroupBehind(a) ||
-      b.testsOverdue - a.testsOverdue ||
-      a.centreName.localeCompare(b.centreName) ||
-      a.centreId - b.centreId
+function compareWorstFirst(a: CurriculumSummaryRow, b: CurriculumSummaryRow): number {
+  return (
+    KIND_ORDER[a.kind] - KIND_ORDER[b.kind] ||
+    worstGroupBehind(b) - worstGroupBehind(a) ||
+    b.testsOverdue - a.testsOverdue ||
+    compareCentreNames(a, b)
   );
+}
+
+function compareCentreNames(a: CurriculumSummaryRow, b: CurriculumSummaryRow): number {
+  return a.centreName.localeCompare(b.centreName) || a.centreId - b.centreId;
+}
+
+// A row's value in a sorted column: text, or numbers compared in order; null = the cell has no
+// value there ("—", "Not measured without an Active plan", No plan, an explanation, a blank).
+type SortValue = string | number[] | null;
+
+function textSortValue(value: string | null): SortValue {
+  return value?.trim() ? value : null;
+}
+
+// A pill sorts by chapters behind ("On track" is 0), then by due count.
+function pillSortValue(progress: CurriculumSummarySubjectProgress | null | undefined): SortValue {
+  return progress ? [progress.behind, progress.due] : null;
+}
+
+const SORT_VALUES: Record<CurriculumSummarySortKey, (row: CurriculumSummaryRow) => SortValue> = {
+  centre: (row) => textSortValue(row.centreName),
+  program: (row) => textSortValue(row.programName),
+  tracks: (row) => textSortValue(row.tracksLabel),
+  region: (row) => textSortValue(row.region),
+  physics: (row) => pillSortValue(row.subjects?.Physics),
+  chemistry: (row) => pillSortValue(row.subjects?.Chemistry),
+  maths: (row) => pillSortValue(row.subjects?.Maths),
+  biology: (row) => pillSortValue(row.subjects?.Biology),
+  pcm: (row) => pillSortValue(row.subjectGroups?.PCM),
+  pcb: (row) => pillSortValue(row.subjectGroups?.PCB),
+  // No plan rows show Conducted tests instead, and error rows show neither.
+  tests_overdue: (row) => (row.kind === "plan" ? [row.testsOverdue] : null),
+  plan: (row) => textSortValue(row.plan?.title ?? null),
+};
+
+const TEXT_SORT_KEYS: CurriculumSummarySortKey[] = ["centre", "program", "tracks", "region", "plan"];
+
+function isSortKey(key: string | undefined): key is CurriculumSummarySortKey {
+  return key !== undefined && Object.prototype.hasOwnProperty.call(SORT_VALUES, key);
+}
+
+// A header's first click: A–Z for the text columns, most behind (or overdue) first for the rest.
+export function defaultSortDirection(key: CurriculumSummarySortKey): CurriculumSummarySortDirection {
+  return TEXT_SORT_KEYS.includes(key) ? "asc" : "desc";
+}
+
+// Text case-insensitively; numbers in order (behind, then due for a pill).
+function compareSortValues(a: string | number[], b: string | number[]): number {
+  if (Array.isArray(a) && Array.isArray(b)) {
+    const index = a.findIndex((value, i) => value !== b[i]);
+    return index === -1 ? 0 : a[index] - b[index];
+  }
+  return String(a).localeCompare(String(b), "en", { sensitivity: "base" });
+}
+
+interface SortEntry {
+  row: CurriculumSummaryRow;
+  value: SortValue;
+}
+
+// Rows without a value go last in both directions, in the default order's row-kind order.
+function compareSortEntries(a: SortEntry, b: SortEntry, sign: number): number {
+  if (a.value === null || b.value === null) {
+    if (a.value !== null) return -1;
+    if (b.value !== null) return 1;
+    return KIND_ORDER[a.row.kind] - KIND_ORDER[b.row.kind];
+  }
+  return sign * compareSortValues(a.value, b.value);
+}
+
+// The default worst-first order, or a column header's sort with Centre name (A–Z) breaking ties.
+// Runs over every listed row before pagination; each row is one Summary Class.
+export function sortSummaryRows(
+  rows: CurriculumSummaryRow[],
+  sort: CurriculumSummarySort | null
+): CurriculumSummaryRow[] {
+  if (!sort) return [...rows].sort(compareWorstFirst);
+  const sortValue = SORT_VALUES[sort.key];
+  const sign = sort.dir === "asc" ? 1 : -1;
+  return rows
+    .map((row): SortEntry => ({ row, value: sortValue(row) }))
+    .sort((a, b) => compareSortEntries(a, b, sign) || compareCentreNames(a.row, b.row))
+    .map((entry) => entry.row);
 }
 
 // Centres on plan = rows with an Active or Closed plan out of every row except setup-error and

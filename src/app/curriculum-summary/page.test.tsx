@@ -171,6 +171,7 @@ describe("Curriculum Summary page", () => {
       grade: 12,
       asOf: "2026-08-15",
       onlyBehind: true,
+      sort: null,
       page: 2,
       pageSize: 50,
     });
@@ -282,6 +283,97 @@ describe("Curriculum Summary page", () => {
     expect(mockPush).toHaveBeenCalledWith(
       "/curriculum-summary?regions=NORTH&regions=SOUTH&q=jnv&grade=11&as_of=2026-08-15&only_behind=1"
     );
+  });
+
+  it("links every column header to its first-click sort from page 1, without an arrow", async () => {
+    await renderPage({ grade: "11", as_of: "2026-08-15", page: "2" });
+
+    const header = (name: string) => screen.getByRole("columnheader", { name });
+    const sortLink = (name: string) => within(header(name)).getByRole("link", { name });
+    // Text columns start A–Z; the measured columns most behind (or overdue) first.
+    const expected: [string, string, string][] = [
+      ["Centre", "centre", "asc"],
+      ["Program", "program", "asc"],
+      ["Tracks", "tracks", "asc"],
+      ["Region", "region", "asc"],
+      ["Physics", "physics", "desc"],
+      ["Chemistry", "chemistry", "desc"],
+      ["Maths", "maths", "desc"],
+      ["Biology", "biology", "desc"],
+      ["PCM Behind", "pcm", "desc"],
+      ["PCB Behind", "pcb", "desc"],
+      ["Tests overdue", "tests_overdue", "desc"],
+      ["Plan", "plan", "asc"],
+    ];
+    for (const [name, key, dir] of expected) {
+      expect(sortLink(name)).toHaveAttribute("href", `/curriculum-summary?grade=11&as_of=2026-08-15&sort=${key}&dir=${dir}`);
+      expect(header(name)).not.toHaveAttribute("aria-sort");
+    }
+    expect(screen.queryByText("▲")).not.toBeInTheDocument();
+    expect(screen.queryByText("▼")).not.toBeInTheDocument();
+    expect(document.querySelector('input[type="hidden"][name="sort"]')).toBeNull();
+    expect(document.querySelector('input[type="hidden"][name="dir"]')).toBeNull();
+  });
+
+  it("marks the sorted column, reverses it on the next click and keeps the sort in every link", async () => {
+    await renderPage({
+      grade: "11",
+      as_of: "2026-08-15",
+      regions: ["NORTH", "SOUTH"],
+      q: "jnv",
+      only_behind: "1",
+      sort: "pcb",
+      dir: "desc",
+      page: "2",
+      limit: "50",
+    });
+
+    expect(mockGetCurriculumSummary).toHaveBeenCalledWith(PM, expect.objectContaining({ sort: { key: "pcb", dir: "desc" } }));
+    const filters = "regions=NORTH&regions=SOUTH&q=jnv&grade=11&as_of=2026-08-15&only_behind=1";
+    const pcb = screen.getByRole("columnheader", { name: "PCB Behind" });
+    expect(pcb).toHaveAttribute("aria-sort", "descending");
+    expect(within(pcb).getByText("▼")).toHaveAttribute("aria-hidden", "true");
+    // Same column: the other direction, back on page 1, every filter and the page size kept.
+    expect(within(pcb).getByRole("link", { name: "PCB Behind" })).toHaveAttribute(
+      "href",
+      `/curriculum-summary?${filters}&sort=pcb&dir=asc&limit=50`
+    );
+    const centre = screen.getByRole("columnheader", { name: "Centre" });
+    expect(centre).not.toHaveAttribute("aria-sort");
+    expect(within(centre).getByRole("link", { name: "Centre" })).toHaveAttribute(
+      "href",
+      `/curriculum-summary?${filters}&sort=centre&dir=asc&limit=50`
+    );
+
+    expect(screen.getByRole("link", { name: "Grade 12" })).toHaveAttribute(
+      "href",
+      "/curriculum-summary?regions=NORTH&regions=SOUTH&q=jnv&grade=12&as_of=2026-08-15&only_behind=1&sort=pcb&dir=desc&limit=50"
+    );
+    expect(screen.getByRole("link", { name: "Next" })).toHaveAttribute(
+      "href",
+      `/curriculum-summary?${filters}&sort=pcb&dir=desc&limit=50&page=3`
+    );
+    // Apply carries the sort; changing the page size keeps it.
+    expect(document.querySelector('input[type="hidden"][name="sort"]')).toHaveValue("pcb");
+    expect(document.querySelector('input[type="hidden"][name="dir"]')).toHaveValue("desc");
+    fireEvent.change(screen.getByRole("combobox", { name: "Rows per page" }), { target: { value: "20" } });
+    expect(mockPush).toHaveBeenCalledWith(`/curriculum-summary?${filters}&sort=pcb&dir=desc`);
+  });
+
+  it("shows an ascending arrow and ignores an unknown sort", async () => {
+    await renderPage({ as_of: "2026-08-15", sort: "centre", dir: "asc" });
+
+    const centre = screen.getByRole("columnheader", { name: "Centre" });
+    expect(centre).toHaveAttribute("aria-sort", "ascending");
+    expect(within(centre).getByText("▲")).toBeInTheDocument();
+    expect(within(centre).getByRole("link", { name: "Centre" })).toHaveAttribute(
+      "href",
+      "/curriculum-summary?grade=11&as_of=2026-08-15&sort=centre&dir=desc"
+    );
+
+    vi.mocked(mockGetCurriculumSummary).mockClear();
+    await renderPage({ as_of: "2026-08-15", sort: "school", dir: "asc" });
+    expect(mockGetCurriculumSummary).toHaveBeenCalledWith(PM, expect.objectContaining({ sort: null }));
   });
 
   // QA-03: Back / Forward and the page-size select change the URL under a mounted page; the

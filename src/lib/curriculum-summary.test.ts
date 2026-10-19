@@ -18,7 +18,11 @@ import {
   getChapterTimeline,
   getCurriculumSummary,
   normalizeCurriculumSummarySearchParams,
+  sortSummaryRows,
   type CurriculumSummaryQuery,
+  type CurriculumSummaryRow,
+  type CurriculumSummarySortKey,
+  type CurriculumSummarySubjectProgress,
 } from "./curriculum-summary";
 import { PHYSICAL_CENTRE_PROGRAM_IDS as P, type UserPermission } from "./permissions";
 
@@ -32,6 +36,7 @@ describe("normalizeCurriculumSummarySearchParams", () => {
       grade: 11,
       asOf: "2026-10-19",
       onlyBehind: false,
+      sort: null,
       page: 1,
       pageSize: 20,
     });
@@ -49,6 +54,7 @@ describe("normalizeCurriculumSummarySearchParams", () => {
       grade: 12,
       asOf: "2026-08-15",
       onlyBehind: false,
+      sort: null,
       page: 3,
       pageSize: 50,
     });
@@ -66,6 +72,7 @@ describe("normalizeCurriculumSummarySearchParams", () => {
       grade: 11,
       asOf: "2026-10-19",
       onlyBehind: false,
+      sort: null,
       page: 1,
       pageSize: 20,
     });
@@ -83,6 +90,7 @@ describe("normalizeCurriculumSummarySearchParams", () => {
       grade: 11,
       asOf: "2026-10-19",
       onlyBehind: false,
+      sort: null,
       page: 1,
       pageSize: 20,
     });
@@ -100,9 +108,27 @@ describe("normalizeCurriculumSummarySearchParams", () => {
       grade: 11,
       asOf: "2026-10-19",
       onlyBehind: true,
+      sort: null,
       page: 1,
       pageSize: 20,
     });
+  });
+
+  it.each([
+    [{ sort: "pcb", dir: "asc" }, { key: "pcb", dir: "asc" }],
+    [{ sort: ["centre", "plan"], dir: ["desc", "asc"] }, { key: "centre", dir: "desc" }],
+    // Without a valid direction a column starts in its first-click direction.
+    [{ sort: "tests_overdue" }, { key: "tests_overdue", dir: "desc" }],
+    [{ sort: "physics", dir: "up" }, { key: "physics", dir: "desc" }],
+    [{ sort: "region", dir: "DESC" }, { key: "region", dir: "asc" }],
+    // Unknown columns mean the default order, whatever the direction.
+    [{ sort: "school", dir: "asc" }, null],
+    [{ sort: "Centre", dir: "asc" }, null],
+    [{ sort: "toString" }, null],
+    [{ sort: "", dir: "desc" }, null],
+    [{ dir: "asc" }, null],
+  ])("reads the sort from %j", (searchParams, sort) => {
+    expect(normalizeCurriculumSummarySearchParams(searchParams, TODAY).sort).toEqual(sort);
   });
 
   it("falls back to today for an as-of year too far out to name an academic year", () => {
@@ -193,6 +219,7 @@ function query(overrides: Partial<CurriculumSummaryQuery> = {}): CurriculumSumma
     grade: 11,
     asOf: AS_OF,
     onlyBehind: false,
+    sort: null,
     page: 1,
     pageSize: 20,
     ...overrides,
@@ -583,6 +610,203 @@ describe("PCM Behind and PCB Behind", () => {
     const result = await getCurriculumSummary(ADMIN, query({ onlyBehind: true }));
 
     expect(result.ok && result.rows.map((row) => row.centreId)).toEqual([11, 12, 13]);
+  });
+});
+
+describe("sortSummaryRows", () => {
+  function progress(behind: number, due: number): CurriculumSummarySubjectProgress {
+    return { due, done: due - behind, behind, tone: behind === 0 ? "green" : "amber", label: "" };
+  }
+
+  function summaryRow(id: number, centreName: string, overrides: Partial<CurriculumSummaryRow> = {}): CurriculumSummaryRow {
+    return {
+      centreId: id,
+      centreName,
+      schoolCode: `SC${id}`,
+      schoolName: `School ${id}`,
+      region: "NORTH",
+      programId: 2,
+      programName: "JNV Nodal",
+      tracksLabel: "JEE Main + NEET",
+      kind: "plan",
+      explanation: null,
+      plan: { id: 900, title: "G11 Plan", closed: false },
+      subjects: { Physics: null, Chemistry: null, Maths: null, Biology: null },
+      subjectGroups: { PCM: null, PCB: null },
+      testsOverdue: 0,
+      testsConducted: null,
+      ...overrides,
+    };
+  }
+
+  const NO_PLAN = { kind: "no_plan", plan: null, subjects: null, subjectGroups: null, testsConducted: 1 } as const;
+  const SETUP_ERROR_ROW = {
+    kind: "setup_error",
+    explanation: "Fix tracks in Centre Management",
+    plan: null,
+    subjects: null,
+    subjectGroups: null,
+  } as const;
+
+  const names = (rows: CurriculumSummaryRow[]) => rows.map((row) => row.centreName);
+
+  // Each pill column gets its progress (or "—") from the same place in the row.
+  function withPill(key: CurriculumSummarySortKey, value: CurriculumSummarySubjectProgress | null) {
+    const subjects = { Physics: null, Chemistry: null, Maths: null, Biology: null };
+    const subjectGroups = { PCM: null, PCB: null };
+    const subject = { physics: "Physics", chemistry: "Chemistry", maths: "Maths", biology: "Biology" }[key as string];
+    if (subject) return { subjects: { ...subjects, [subject]: value }, subjectGroups };
+    return { subjects, subjectGroups: { ...subjectGroups, [key.toUpperCase()]: value } };
+  }
+
+  it.each(["physics", "chemistry", "maths", "biology", "pcm", "pcb"] as CurriculumSummarySortKey[])(
+    "sorts the %s column by behind, then due, then Centre name, with unmeasured rows last",
+    (key) => {
+      const rows = [
+        summaryRow(1, "Vapi", SETUP_ERROR_ROW),
+        summaryRow(2, "Surat", NO_PLAN),
+        summaryRow(3, "Dahod", withPill(key, null)),
+        summaryRow(4, "Chhapi", withPill(key, progress(0, 4))),
+        summaryRow(5, "Bhuj", withPill(key, progress(2, 3))),
+        summaryRow(6, "Anand", withPill(key, progress(2, 5))),
+        summaryRow(7, "Amreli", withPill(key, progress(2, 5))),
+      ];
+
+      // On track counts as 0 behind; Amreli and Anand tie on behind and due, so the Centre name
+      // decides. "—", No plan and the setup error stay at the bottom in row-kind order.
+      expect(names(sortSummaryRows(rows, { key, dir: "desc" }))).toEqual([
+        "Amreli",
+        "Anand",
+        "Bhuj",
+        "Chhapi",
+        "Dahod",
+        "Surat",
+        "Vapi",
+      ]);
+      expect(names(sortSummaryRows(rows, { key, dir: "asc" }))).toEqual([
+        "Chhapi",
+        "Bhuj",
+        "Amreli",
+        "Anand",
+        "Dahod",
+        "Surat",
+        "Vapi",
+      ]);
+    }
+  );
+
+  it("keeps every bottom row in row-kind order, then Centre name, in both directions", () => {
+    const rows = [
+      summaryRow(1, "Navsari", { ...SETUP_ERROR_ROW, kind: "configuration_error" }),
+      summaryRow(2, "Valsad", { ...SETUP_ERROR_ROW, kind: "no_content" }),
+      summaryRow(3, "Bhuj", SETUP_ERROR_ROW),
+      summaryRow(4, "Surat", NO_PLAN),
+      summaryRow(5, "Anand", NO_PLAN),
+      summaryRow(6, "Dahod"),
+      summaryRow(7, "Chhapi", withPill("pcm", progress(1, 1))),
+    ];
+    const expected = ["Chhapi", "Dahod", "Anand", "Surat", "Bhuj", "Valsad", "Navsari"];
+
+    expect(names(sortSummaryRows(rows, { key: "pcm", dir: "desc" }))).toEqual(expected);
+    expect(names(sortSummaryRows(rows, { key: "pcm", dir: "asc" }))).toEqual(expected);
+  });
+
+  it.each([
+    ["centre", (name: string) => ({ centreName: name })],
+    ["program", (name: string) => ({ programName: name })],
+    ["tracks", (name: string) => ({ tracksLabel: name })],
+    ["region", (name: string) => ({ region: name })],
+    ["plan", (name: string) => ({ plan: { id: 1, title: name, closed: false } })],
+  ] as const)("sorts the %s column case-insensitively", (key, value) => {
+    const rows = [
+      summaryRow(1, "Row 1", value("bravo")),
+      summaryRow(2, "Row 2", value("Charlie")),
+      summaryRow(3, "Row 3", value("alpha")),
+    ];
+    const values = (sorted: CurriculumSummaryRow[]) => sorted.map((row) => row.centreId);
+
+    expect(values(sortSummaryRows(rows, { key, dir: "asc" }))).toEqual([3, 1, 2]);
+    expect(values(sortSummaryRows(rows, { key, dir: "desc" }))).toEqual([2, 1, 3]);
+  });
+
+  it("puts blank Regions and rows without a plan last in both directions", () => {
+    const regions = [
+      summaryRow(1, "Anand", { region: null }),
+      summaryRow(2, "Bhuj", { region: "SOUTH" }),
+      summaryRow(3, "Chhapi", { region: "  " }),
+      summaryRow(4, "Dahod", { region: "north" }),
+    ];
+    expect(names(sortSummaryRows(regions, { key: "region", dir: "asc" }))).toEqual(["Dahod", "Bhuj", "Anand", "Chhapi"]);
+    expect(names(sortSummaryRows(regions, { key: "region", dir: "desc" }))).toEqual(["Bhuj", "Dahod", "Anand", "Chhapi"]);
+
+    const plans = [
+      summaryRow(1, "Surat", NO_PLAN),
+      summaryRow(2, "Vapi", SETUP_ERROR_ROW),
+      summaryRow(3, "Bhuj", { plan: { id: 2, title: "Old Plan", closed: true } }),
+      summaryRow(4, "Anand", { plan: { id: 1, title: "G11 Plan", closed: false } }),
+    ];
+    expect(names(sortSummaryRows(plans, { key: "plan", dir: "asc" }))).toEqual(["Anand", "Bhuj", "Surat", "Vapi"]);
+    expect(names(sortSummaryRows(plans, { key: "plan", dir: "desc" }))).toEqual(["Bhuj", "Anand", "Surat", "Vapi"]);
+  });
+
+  it("sorts Tests overdue as numbers, with rows that show none last", () => {
+    const rows = [
+      summaryRow(1, "Surat", NO_PLAN),
+      summaryRow(2, "Anand", { testsOverdue: 9 }),
+      summaryRow(3, "Bhuj", { testsOverdue: 10 }),
+      summaryRow(4, "Vapi", { ...SETUP_ERROR_ROW, testsOverdue: 0 }),
+      summaryRow(5, "Chhapi", { testsOverdue: 0 }),
+    ];
+
+    expect(names(sortSummaryRows(rows, { key: "tests_overdue", dir: "desc" }))).toEqual([
+      "Bhuj",
+      "Anand",
+      "Chhapi",
+      "Surat",
+      "Vapi",
+    ]);
+    expect(names(sortSummaryRows(rows, { key: "tests_overdue", dir: "asc" }))).toEqual([
+      "Chhapi",
+      "Anand",
+      "Bhuj",
+      "Surat",
+      "Vapi",
+    ]);
+  });
+
+  it("keeps the worst-first order without a sort and never mutates its input", () => {
+    const rows = [
+      summaryRow(1, "Surat", NO_PLAN),
+      summaryRow(2, "Anand", withPill("pcm", progress(1, 2))),
+      summaryRow(3, "Bhuj", { ...withPill("pcb", progress(3, 4)), testsOverdue: 1 }),
+    ];
+
+    expect(names(sortSummaryRows(rows, null))).toEqual(["Bhuj", "Anand", "Surat"]);
+    expect(names(rows)).toEqual(["Surat", "Anand", "Bhuj"]);
+  });
+
+  it("sorts every listed row before paging and keeps a shared class as one row", async () => {
+    routeQueries({
+      summary: [
+        raw(1, { centre_name: "Delta" }),
+        raw(2, { centre_name: "alpha", mapped_tracks: ["neet"] }),
+        raw(3, { centre_name: "Charlie", plan_status: "draft" }),
+        raw(4, { centre_name: "Bravo", mapped_tracks: ["jee_main"] }),
+      ],
+    });
+
+    const first = await getCurriculumSummary(ADMIN, query({ sort: { key: "centre", dir: "asc" }, pageSize: 2 }));
+    const second = await getCurriculumSummary(
+      ADMIN,
+      query({ sort: { key: "centre", dir: "asc" }, pageSize: 2, page: 2 })
+    );
+
+    expect(first.ok && first.rows.map((row) => row.centreName)).toEqual(["alpha", "Bravo"]);
+    expect(second.ok && second.rows.map((row) => [row.centreName, row.tracksLabel])).toEqual([
+      ["Charlie", "JEE Main + NEET"],
+      ["Delta", "JEE Main + NEET"],
+    ]);
+    expect(second.ok && second.pagination.totalRows).toBe(4);
   });
 });
 

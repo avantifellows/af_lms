@@ -9,11 +9,14 @@ import UrlFilterForm from "./UrlFilterForm";
 import {
   CURRICULUM_SUMMARY_GRADES,
   CURRICULUM_SUMMARY_SUBJECTS,
+  defaultSortDirection,
   getCurriculumSummary,
   normalizeCurriculumSummarySearchParams,
   type CurriculumSummaryQuery,
   type CurriculumSummaryResult,
   type CurriculumSummaryRow,
+  type CurriculumSummarySort,
+  type CurriculumSummarySortKey,
   type CurriculumSummarySubjectProgress,
 } from "@/lib/curriculum-summary";
 import { requireCurriculumSummaryViewer } from "./summary-access";
@@ -26,7 +29,7 @@ import {
   SchemaUnavailableCard,
   SearchField,
   SegmentLinks,
-  TableHead,
+  SortableTableHead,
   TONE_BADGE_VARIANTS,
 } from "./summary-ui";
 
@@ -136,10 +139,16 @@ function emptyMessage(params: CurriculumSummaryQuery): string {
     : `No Centres with Exam Tracks for Grade ${params.grade} are in your scope.`;
 }
 
-// Filters carried by every Summary link; page and limit are added per link.
+interface SummaryHrefOverrides {
+  grade?: number;
+  page?: number;
+  sort?: CurriculumSummarySort;
+}
+
+// Filters and sort carried by every Summary link; page and limit are added per link.
 function filterSearchParams(
   params: CurriculumSummaryQuery,
-  overrides: { grade?: number } = {}
+  overrides: SummaryHrefOverrides = {}
 ): URLSearchParams {
   const search = new URLSearchParams();
   for (const region of params.regions) search.append("regions", region);
@@ -147,13 +156,15 @@ function filterSearchParams(
   search.set("grade", String(overrides.grade ?? params.grade));
   search.set("as_of", params.asOf);
   if (params.onlyBehind) search.set("only_behind", "1");
+  const sort = overrides.sort ?? params.sort;
+  if (sort) {
+    search.set("sort", sort.key);
+    search.set("dir", sort.dir);
+  }
   return search;
 }
 
-function summaryHref(
-  params: CurriculumSummaryQuery,
-  overrides: { grade?: number; page?: number } = {}
-): string {
+function summaryHref(params: CurriculumSummaryQuery, overrides: SummaryHrefOverrides = {}): string {
   const search = filterSearchParams(params, overrides);
   if (params.pageSize !== DEFAULT_PAGE_SIZE) search.set("limit", String(params.pageSize));
   if (overrides.page && overrides.page > 1) search.set("page", String(overrides.page));
@@ -188,6 +199,8 @@ function SummaryFilters({
       >
         <input type="hidden" name="grade" value={params.grade} />
         <HiddenField name="limit" value={params.pageSize !== DEFAULT_PAGE_SIZE ? params.pageSize : null} />
+        <HiddenField name="sort" value={params.sort?.key ?? null} />
+        <HiddenField name="dir" value={params.sort?.dir ?? null} />
         <RegionFilter regionOptions={regionOptions} selected={params.regions} />
         <SearchField name="q" label="School" value={params.schoolSearch} placeholder="Name or code" />
         <AsOfField asOf={params.asOf} />
@@ -235,16 +248,28 @@ function RegionFilter({ regionOptions, selected }: { regionOptions: string[]; se
 // Subject pills, then PCM Behind and PCB Behind.
 const MEASURE_COLUMNS = CURRICULUM_SUMMARY_SUBJECTS.length + SUBJECT_GROUPS.length;
 
-const SUMMARY_HEADERS = [
-  "Centre",
-  "Program",
-  "Tracks",
-  "Region",
-  ...CURRICULUM_SUMMARY_SUBJECTS,
-  ...SUBJECT_GROUPS.map((group) => `${group} Behind`),
-  "Tests overdue",
-  "Plan",
+const lowercase = <T extends string>(label: T) => label.toLowerCase() as Lowercase<T>;
+
+const SUMMARY_COLUMNS: { label: string; sortKey: CurriculumSummarySortKey }[] = [
+  { label: "Centre", sortKey: "centre" },
+  { label: "Program", sortKey: "program" },
+  { label: "Tracks", sortKey: "tracks" },
+  { label: "Region", sortKey: "region" },
+  ...CURRICULUM_SUMMARY_SUBJECTS.map((subject) => ({ label: subject, sortKey: lowercase(subject) })),
+  ...SUBJECT_GROUPS.map((group) => ({ label: `${group} Behind`, sortKey: lowercase(group) })),
+  { label: "Tests overdue", sortKey: "tests_overdue" },
+  { label: "Plan", sortKey: "plan" },
 ];
+
+// Every header links to its sort from page 1, keeping the filters: the active column's link
+// reverses its direction, any other column's starts in its first-click direction.
+function sortableHeaders(params: CurriculumSummaryQuery) {
+  return SUMMARY_COLUMNS.map(({ label, sortKey: key }) => {
+    const direction = params.sort?.key === key ? params.sort.dir : null;
+    const nextDirection = direction ? (direction === "asc" ? "desc" : "asc") : defaultSortDirection(key);
+    return { label, direction, href: summaryHref(params, { sort: { key, dir: nextDirection } }) };
+  });
+}
 
 function SummaryTable({
   rows,
@@ -256,7 +281,7 @@ function SummaryTable({
   return (
     <div className="overflow-x-auto">
       <table className="min-w-full divide-y divide-border text-sm">
-        <TableHead headers={SUMMARY_HEADERS} />
+        <SortableTableHead headers={sortableHeaders(params)} />
         <tbody className="divide-y divide-border">
           {rows.map((row) => (
             <SummaryTableRow key={row.centreId} row={row} params={params} />

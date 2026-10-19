@@ -257,6 +257,63 @@ test.describe("Curriculum Summary", () => {
     ]);
     await page.context().close();
   });
+
+  test("a column header sorts every row, reverses on the next click and survives Apply", async ({
+    browser,
+  }) => {
+    const page = await summaryPmPage(browser);
+    await page.goto(`/curriculum-summary?as_of=${AS_OF}`);
+    const pcm = page.getByRole("columnheader", { name: "PCM Behind", exact: true });
+    // Rows without a PCM value stay last in both directions: Bhuj Neet (NEET, "—"), then the No
+    // plan rows, then setup-error, no-content and configuration-error rows.
+    const bottomRows = [
+      "Summary E2E Bhuj Neet",
+      "Summary E2E Surat Draft",
+      "Summary E2E Vapi Unassigned",
+      "Summary E2E Bhuj Setup",
+      "Summary E2E Surat CET",
+      "Summary E2E Navsari One",
+    ];
+
+    // First click: most behind first. All three are 1 behind; Anand Shared has 3 due, Anand Main
+    // and Vapi Closed 2 each, so the Centre name puts Anand Main first.
+    await pcm.getByRole("link", { name: "PCM Behind" }).click();
+    await expect(page).toHaveURL(/sort=pcm&dir=desc/);
+    await expect(pcm).toHaveAttribute("aria-sort", "descending");
+    expect(await rowCentres(page)).toEqual([
+      "Summary E2E Anand Shared",
+      "Summary E2E Anand Main",
+      "Summary E2E Vapi Closed",
+      ...bottomRows,
+    ]);
+
+    await pcm.getByRole("link", { name: "PCM Behind" }).click();
+    await expect(page).toHaveURL(/sort=pcm&dir=asc/);
+    await expect(pcm).toHaveAttribute("aria-sort", "ascending");
+    expect(await rowCentres(page)).toEqual([
+      "Summary E2E Anand Main",
+      "Summary E2E Vapi Closed",
+      "Summary E2E Anand Shared",
+      ...bottomRows,
+    ]);
+    const url = new URL(page.url());
+    expect(url.searchParams.get("as_of")).toBe(AS_OF);
+    expect(url.searchParams.get("page")).toBeNull();
+
+    // Only behind keeps the three PCM rows, still sorted.
+    await page.getByRole("checkbox", { name: "Only behind" }).check();
+    await page.getByRole("button", { name: "Apply" }).click();
+    await expect(page).toHaveURL(/only_behind=1/);
+    await expect(page).toHaveURL(/sort=pcm&dir=asc/);
+    await expect(page.locator("[data-summary-row]")).toHaveCount(3);
+    expect(await rowCentres(page)).toEqual([
+      "Summary E2E Anand Main",
+      "Summary E2E Vapi Closed",
+      "Summary E2E Anand Shared",
+    ]);
+    await page.context().close();
+  });
+
   test("the Grade toggle switches to Grade 12 rows and keeps the as-of date", async ({ browser }) => {
     const page = await summaryPmPage(browser);
     await page.goto(`/curriculum-summary?as_of=${AS_OF}`);
