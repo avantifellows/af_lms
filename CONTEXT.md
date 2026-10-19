@@ -73,11 +73,11 @@ A top-level read-only dashboard for reviewing each Summary Class's progress agai
 _Avoid_: Curriculum tab, curriculum report, curriculum overview
 
 **Summary Class**:
-The group of students a Centre teaches together in one Grade: a single Exam Track, or JEE Main and NEET taught as one shared class.
+The group of students a Centre teaches together in one Grade: a single Exam Track, or JEE Main or JEE Advanced taught with NEET as one shared class.
 _Avoid_: Merged stream, combined batch, School row
 
 **Primary Exam Track**:
-The Exam Track whose prescribed lecture time a Summary Class uses: JEE Main for a shared JEE Main and NEET class, otherwise its only Exam Track.
+The Exam Track whose prescribed lecture time a Summary Class uses: the JEE track (JEE Main or JEE Advanced) for a shared class with NEET, falling back to NEET for a Chapter the JEE track doesn't cover, otherwise its only Exam Track.
 _Avoid_: Main stream, default track
 
 **Exam Track**:
@@ -363,14 +363,17 @@ _Avoid_: Unmapped Student, Mapping not done, unassigned Mentee
 - **Chapter Completion** is stored independently from **LMS Curriculum Logs**
 - **Curriculum Progress** combines covered topics and teaching time from **LMS Curriculum Logs** with stored **Chapter Completion**
 - Issue #417 replaces the School-Program-Grade-Subject-Exam Track table with one **Curriculum Summary** row per **Summary Class**, showing per-subject **Chapters Behind**, **PCM Behind** and **PCB Behind** against the assigned **Curriculum Plan**, and overdue **Chapter Tests**
-- A JEE Main or JEE Advanced **Summary Class** shows **PCM Behind** only, a NEET class **PCB Behind** only, and a shared JEE Main and NEET class both
+- A JEE Main or JEE Advanced **Summary Class** shows **PCM Behind** only, a NEET class **PCB Behind** only, and a shared JEE Main or JEE Advanced and NEET class both
+- **PCM Behind** and **PCB Behind** show done/due like the subject pills: how many of the group's Chapters due by the as-of date are done
 - **Curriculum Summary** lists the classes worst first by the larger of **PCM Behind** and **PCB Behind**, and its header totals each over the classes it covers
 - A **Summary Class** counts **LMS Curriculum Logs** and **Chapter Completion** from every Exam Track in the class; teachers still log and complete Chapters under one Exam Track (ADR 0008)
-- JEE Main and JEE Advanced are never one **Summary Class**; a Centre and Grade mapped to both is a Centre Management setup problem
+- JEE Main and JEE Advanced are never one **Summary Class**; a Centre and Grade mapped to both, with or without NEET, is a Centre Management setup problem
 - One **Curriculum Plan** applies to a Centre and Grade for an academic year, whatever Exam Tracks it runs; G11 and G12 at one Centre have separate plans
 - A Chapter is due when its **Chapter Due Date** is on or before the as-of date, and done when it has **Chapter Completion** under any Exam Track of the **Summary Class** dated in the plan's academic year on or before the as-of date
 - A **Curriculum Plan** is Draft, Active, or Closed; only Active and Closed plans drive the **Curriculum Summary**, and a plan is Closed once the as-of date passes its **Plan Closure Date**
 - **Chapter Test Status** comes from existing chapter-test quiz sessions; teachers do not record it
+- At a past as-of date, a **Chapter Test** session created after that date does not count
+- Clearing clashing Chapter dates on a **Curriculum Plan** may, with the Admin's explicit consent, clear dates on Chapters hidden from the plan (out of the syllabus or its served Exam Tracks); such a Chapter returns undated if re-added
 - Clicking a **Curriculum Summary** row opens the Centre's chapter timeline, which carries teaching hours against the **Primary Exam Track**'s prescribed time, Class Cancellation Count, and Doubt Solving Hours per Chapter
 - Class Cancellation Count includes active Class Cancellation Logs, while Doubt Solving Hours sum active Doubt Solving Log duration without changing Actual Hours or Curriculum Progress
 - **Curriculum Summary** uses **Chapter Completion** as its source for chapter completion state
