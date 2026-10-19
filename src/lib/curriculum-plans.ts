@@ -727,11 +727,27 @@ function clearConflictingDatesRequested(body: unknown): boolean {
   return Boolean(body && typeof body === "object" && (body as Record<string, unknown>).clear_conflicting_dates === true);
 }
 
-async function clearChapterDates(db: Db, planId: number, errors: CurriculumPlanError[]): Promise<void> {
-  const chapterIds = [...new Set(errors.map((error) => error.chapterId))];
+// Clear only the dates that clash. A clashing test date goes on its own and the due date stays.
+// A clashing due date takes the test date with it, since a test date needs a due date. The row
+// stays with NULL dates, the same as a Chapter undated in the editor.
+async function clearChapterDates(
+  db: Db,
+  planId: number,
+  rows: StoredChapterDateRow[],
+  plan: { academic_year: string; closure_date: string },
+  adminEmail: string
+): Promise<void> {
+  const clashing = (date: string | null) => planDateError("", date, plan) !== null;
+  const dueClashIds = rows.filter((row) => clashing(row.due_date)).map((row) => Number(row.chapter_id));
+  const testClashIds = rows.filter((row) => clashing(row.test_date)).map((row) => Number(row.chapter_id));
   await db(
-    "DELETE FROM lms_curriculum_plan_chapters WHERE plan_id = $1 AND chapter_id = ANY($2::bigint[])",
-    [planId, chapterIds]
+    `UPDATE lms_curriculum_plan_chapters
+     SET due_date = CASE WHEN chapter_id = ANY($2::bigint[]) THEN NULL ELSE due_date END,
+         test_date = NULL,
+         updated_by_email = $4,
+         updated_at = (NOW() AT TIME ZONE 'UTC')
+     WHERE plan_id = $1 AND (chapter_id = ANY($2::bigint[]) OR chapter_id = ANY($3::bigint[]))`,
+    [planId, dueClashIds, testClashIds, adminEmail]
   );
 }
 
@@ -745,8 +761,8 @@ export type CurriculumPlanUpdateResult =
 // Update title, served tracks, academic year, Grade and Plan Closure Date. Every stored date of
 // the plan must still fall within the academic year and on or before the closure date,
 // including dates of Chapters hidden because they left the syllabus or the served tracks: they
-// come back when the Chapter does. With `clear_conflicting_dates: true` the clashing Chapters'
-// dates are cleared instead of rejected. Academic year and Grade are locked while the plan has
+// come back when the Chapter does. With `clear_conflicting_dates: true` the clashing dates are
+// cleared instead of rejected. Academic year and Grade are locked while the plan has
 // any Plan Assignment.
 export async function updateCurriculumPlanMetadata(params: {
   id: number;
@@ -774,10 +790,11 @@ export async function updateCurriculumPlanMetadata(params: {
     if (conflict) return conflict;
 
     const updated = { academic_year: metadata.academicYear, closure_date: metadata.closureDate };
-    const errors = storedDateErrors(await loadStoredChapterDates(db, params.id), updated);
+    const storedDates = await loadStoredChapterDates(db, params.id);
+    const errors = storedDateErrors(storedDates, updated);
     if (errors.length > 0) {
       if (!clearConflictingDatesRequested(params.body)) return validationFailure(errors);
-      await clearChapterDates(db, params.id, errors);
+      await clearChapterDates(db, params.id, storedDates, updated, params.adminEmail);
     }
 
     await db(

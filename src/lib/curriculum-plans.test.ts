@@ -128,10 +128,35 @@ describe("updateCurriculumPlanMetadata", () => {
     });
 
     expect(result.ok).toBe(true);
-    const cleared = db.current.sqlCalls("DELETE FROM lms_curriculum_plan_chapters");
+    expect(db.current.sqlCalls("DELETE FROM lms_curriculum_plan_chapters")).toHaveLength(0);
+    const cleared = db.current.sqlCalls("UPDATE lms_curriculum_plan_chapters");
     expect(cleared).toHaveLength(1);
-    expect(cleared[0].params).toEqual([7, [501]]);
+    // 501's due date clashes, so both its dates go; 502 is untouched.
+    expect(cleared[0].params).toEqual([7, [501], [501], ADMIN_EMAIL]);
+    expect(cleared[0].sql).toContain("due_date = CASE WHEN chapter_id = ANY($2::bigint[]) THEN NULL ELSE due_date END");
+    expect(cleared[0].sql).toContain("test_date = NULL");
     expect(db.current.sqlCalls("UPDATE lms_curriculum_plans")).toHaveLength(1);
+  });
+
+  // Only the test date is after the new closure date, so the valid due date stays.
+  it("clears only a clashing test date and keeps the Chapter's due date", async () => {
+    db.current.on("FROM lms_curriculum_plan_chapters pc", [
+      { chapter_id: 501, chapter_name: "Rotational Dynamics", due_date: "2026-12-20", test_date: "2027-01-05" },
+      { chapter_id: 502, chapter_name: "Motion", due_date: "2026-07-01", test_date: "2026-07-03" },
+    ]);
+
+    const result = await updateCurriculumPlanMetadata({
+      id: 7,
+      adminEmail: ADMIN_EMAIL,
+      body: metadataBody({ clear_conflicting_dates: true }),
+    });
+
+    expect(result.ok).toBe(true);
+    const cleared = db.current.sqlCalls("UPDATE lms_curriculum_plan_chapters");
+    expect(cleared).toHaveLength(1);
+    // No due date clashes ($2 empty), so the CASE keeps 501's due date; its test date is cleared.
+    expect(cleared[0].params).toEqual([7, [], [501], ADMIN_EMAIL]);
+    expect(cleared[0].sql).toContain("WHERE plan_id = $1 AND (chapter_id = ANY($2::bigint[]) OR chapter_id = ANY($3::bigint[]))");
   });
 
   it("rejects an academic year change that leaves stored dates outside the new year", async () => {
