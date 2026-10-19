@@ -23,7 +23,7 @@ import {
 } from "@/lib/permissions";
 
 interface PageProps {
-  searchParams: Promise<Record<string, string | undefined>>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }
 
 const TONE_BADGE_VARIANTS: Record<BehindPillTone, BadgeVariant> = {
@@ -128,12 +128,14 @@ export default async function CurriculumSummaryPage({ searchParams }: PageProps)
               />
             </div>
 
-            <SummaryFilters params={params} />
+            <SummaryFilters params={params} regionOptions={summary.regionOptions} />
 
             <Card className="overflow-hidden">
               {summary.rows.length === 0 ? (
                 <div className="px-4 py-10 text-sm text-text-secondary">
-                  No Centres with Exam Tracks for Grade {params.grade} are in your scope.
+                  {params.regions.length > 0 || params.schoolSearch || params.onlyBehind
+                    ? "No classes match these filters."
+                    : `No Centres with Exam Tracks for Grade ${params.grade} are in your scope.`}
                 </div>
               ) : (
                 <SummaryTable rows={summary.rows} params={params} />
@@ -162,20 +164,37 @@ function HeaderNumber({ label, value, testId }: { label: string; value: string; 
   );
 }
 
+// Filters carried by every Summary link; page and limit are added per link.
+function filterSearchParams(
+  params: CurriculumSummaryQuery,
+  overrides: { grade?: number } = {}
+): URLSearchParams {
+  const search = new URLSearchParams();
+  for (const region of params.regions) search.append("regions", region);
+  if (params.schoolSearch) search.set("q", params.schoolSearch);
+  search.set("grade", String(overrides.grade ?? params.grade));
+  search.set("as_of", params.asOf);
+  if (params.onlyBehind) search.set("only_behind", "1");
+  return search;
+}
+
 function summaryHref(
   params: CurriculumSummaryQuery,
   overrides: { grade?: number; page?: number } = {}
 ): string {
-  const search = new URLSearchParams({
-    grade: String(overrides.grade ?? params.grade),
-    as_of: params.asOf,
-  });
+  const search = filterSearchParams(params, overrides);
   if (params.pageSize !== 20) search.set("limit", String(params.pageSize));
   if (overrides.page && overrides.page > 1) search.set("page", String(overrides.page));
   return `/curriculum-summary?${search.toString()}`;
 }
 
-function SummaryFilters({ params }: { params: CurriculumSummaryQuery }) {
+function SummaryFilters({
+  params,
+  regionOptions,
+}: {
+  params: CurriculumSummaryQuery;
+  regionOptions: string[];
+}) {
   return (
     <Card className="flex flex-col gap-4 p-4 sm:flex-row sm:items-end">
       <div className="flex flex-col gap-1">
@@ -197,11 +216,23 @@ function SummaryFilters({ params }: { params: CurriculumSummaryQuery }) {
           ))}
         </nav>
       </div>
-      <form action="/curriculum-summary" className="flex items-end gap-2">
+      {/* Submitting drops `page`, so changed filters start again at page 1. */}
+      <form action="/curriculum-summary" className="flex flex-wrap items-end gap-2">
         <input type="hidden" name="grade" value={params.grade} />
         {params.pageSize !== 20 ? (
           <input type="hidden" name="limit" value={params.pageSize} />
         ) : null}
+        <RegionFilter regionOptions={regionOptions} selected={params.regions} />
+        <label className="flex flex-col gap-1 text-xs font-bold uppercase tracking-wide text-text-muted">
+          School
+          <input
+            type="search"
+            name="q"
+            defaultValue={params.schoolSearch}
+            placeholder="Name or code"
+            className="min-h-[44px] rounded-md border border-border bg-bg-card px-3 py-2 text-sm font-normal normal-case text-text-primary"
+          />
+        </label>
         <label className="flex flex-col gap-1 text-xs font-bold uppercase tracking-wide text-text-muted">
           As of
           <input
@@ -211,6 +242,10 @@ function SummaryFilters({ params }: { params: CurriculumSummaryQuery }) {
             className="min-h-[44px] rounded-md border border-border bg-bg-card px-3 py-2 text-sm font-normal normal-case text-text-primary"
           />
         </label>
+        <label className="flex min-h-[44px] items-center gap-2 text-sm font-bold text-text-primary">
+          <input type="checkbox" name="only_behind" value="1" defaultChecked={params.onlyBehind} />
+          Only behind
+        </label>
         <button
           type="submit"
           className="min-h-[44px] rounded-md border border-border px-3 py-1.5 text-sm font-bold text-accent hover:text-accent-hover"
@@ -219,6 +254,37 @@ function SummaryFilters({ params }: { params: CurriculumSummaryQuery }) {
         </button>
       </form>
     </Card>
+  );
+}
+
+function RegionFilter({ regionOptions, selected }: { regionOptions: string[]; selected: string[] }) {
+  return (
+    <details className="relative">
+      <summary className="flex min-h-[44px] cursor-pointer list-none flex-col justify-end gap-1 text-xs font-bold uppercase tracking-wide text-text-muted">
+        Region
+        <span className="rounded-md border border-border bg-bg-card px-3 py-2 text-sm font-normal normal-case text-text-primary">
+          {selected.length === 0 ? "All regions" : selected.join(", ")}
+        </span>
+      </summary>
+      <fieldset className="absolute z-10 mt-1 flex max-h-64 min-w-48 flex-col gap-1 overflow-y-auto rounded-md border border-border bg-bg-card p-3 shadow-md">
+        <legend className="sr-only">Region</legend>
+        {regionOptions.length === 0 ? (
+          <span className="text-sm text-text-muted">No regions in scope</span>
+        ) : (
+          regionOptions.map((region) => (
+            <label key={region} className="flex items-center gap-2 text-sm text-text-primary">
+              <input
+                type="checkbox"
+                name="regions"
+                value={region}
+                defaultChecked={selected.includes(region)}
+              />
+              {region}
+            </label>
+          ))
+        )}
+      </fieldset>
+    </details>
   );
 }
 
@@ -345,7 +411,7 @@ function SummaryPagination({
       </span>
       <div className="flex flex-wrap items-center justify-end gap-2">
         <CurriculumSummaryPageSizeSelect
-          currentParams={{ grade: String(params.grade), as_of: params.asOf }}
+          filterQuery={filterSearchParams(params).toString()}
           pageSize={params.pageSize}
         />
         {hasPrevious ? (

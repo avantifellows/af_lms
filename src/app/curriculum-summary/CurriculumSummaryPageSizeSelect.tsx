@@ -6,22 +6,17 @@ const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 const DEFAULT_PAGE_SIZE = 20;
 
 export default function CurriculumSummaryPageSizeSelect({
-  currentParams,
+  filterQuery,
   pageSize,
 }: {
-  currentParams: Record<string, string | undefined>;
+  // The current filters as a query string, without `page` or `limit`.
+  filterQuery: string;
   pageSize: number;
 }) {
   const router = useRouter();
 
   function handlePageSizeChange(nextPageSize: string) {
-    const params = new URLSearchParams();
-    for (const [key, value] of Object.entries(currentParams)) {
-      if (value && key !== "page" && key !== "limit") {
-        params.set(key, value);
-      }
-    }
-
+    const params = new URLSearchParams(filterQuery);
     const parsedPageSize = Number(nextPageSize);
     if (parsedPageSize !== DEFAULT_PAGE_SIZE) {
       params.set("limit", String(parsedPageSize));

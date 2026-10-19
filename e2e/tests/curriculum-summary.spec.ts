@@ -277,3 +277,110 @@ test.describe("Curriculum Summary", () => {
     await page.context().close();
   });
 });
+
+// #427: Region, School search and Only behind narrow the rows; header numbers ignore Only behind.
+test.describe("Curriculum Summary filters", () => {
+  test("Region shows only rows in the chosen region and cannot widen a PM's scope", async ({
+    browser,
+    adminPage,
+  }) => {
+    await adminPage.goto(`/curriculum-summary?as_of=${AS_OF}&regions=SUMMARY_E2E_OTHER`);
+    expect(await rowCentres(adminPage)).toEqual(["Summary E2E Other Region"]);
+    await expect(adminPage.getByTestId("summary-centres-on-plan")).toHaveText("0/1");
+    await expect(adminPage.getByTestId("summary-chapters-behind")).toHaveText("0");
+
+    // The PM's 9 SUMMARY_E2E rows; the out-of-scope region in the URL adds nothing.
+    const page = await summaryPmPage(browser);
+    await page.goto(`/curriculum-summary?as_of=${AS_OF}&regions=SUMMARY_E2E,SUMMARY_E2E_OTHER`);
+    await expect(page.locator("[data-summary-row]")).toHaveCount(9);
+    await expect(summaryRow(page, "Summary E2E Other Region")).toHaveCount(0);
+    await expect(page.getByTestId("summary-centres-on-plan")).toHaveText("4/7");
+
+    await page.goto(`/curriculum-summary?as_of=${AS_OF}&regions=SUMMARY_E2E_OTHER`);
+    await expect(page.locator("[data-summary-row]")).toHaveCount(0);
+    await expect(page.getByTestId("summary-centres-on-plan")).toHaveText("0/0");
+    // Region choices are limited to the PM's scope.
+    await page.locator("summary", { hasText: "Region" }).click();
+    await expect(page.getByRole("checkbox", { name: "SUMMARY_E2E", exact: true })).toHaveCount(1);
+    await expect(page.getByRole("checkbox", { name: "SUMMARY_E2E_OTHER", exact: true })).toHaveCount(0);
+    await page.context().close();
+  });
+
+  test("School search matches School name or code", async ({ browser }) => {
+    const page = await summaryPmPage(browser);
+    // "Summary Bhuj School": Bhuj Neet (on plan, 0 behind) and Bhuj Setup (not counted).
+    await page.goto(`/curriculum-summary?as_of=${AS_OF}&q=bhuj`);
+    expect(await rowCentres(page)).toEqual(["Summary E2E Bhuj Neet", "Summary E2E Bhuj Setup"]);
+    await expect(page.getByTestId("summary-centres-on-plan")).toHaveText("1/1");
+    await expect(page.getByTestId("summary-chapters-behind")).toHaveText("0");
+
+    // School code SUMM85 (Vapi): Vapi Closed (1 behind) and Vapi Unassigned (No plan).
+    await page.goto(`/curriculum-summary?as_of=${AS_OF}&q=summ85`);
+    expect(await rowCentres(page)).toEqual(["Summary E2E Vapi Closed", "Summary E2E Vapi Unassigned"]);
+    await expect(page.getByTestId("summary-centres-on-plan")).toHaveText("1/2");
+    await expect(page.getByTestId("summary-chapters-behind")).toHaveText("1");
+    await page.context().close();
+  });
+
+  test("Only behind hides on-track, No plan and error rows but keeps the header numbers", async ({
+    browser,
+  }) => {
+    const page = await summaryPmPage(browser);
+    await page.goto(`/curriculum-summary?as_of=${AS_OF}&only_behind=1`);
+    // Behind ≥ 1: Anand Shared 4, Anand Main 1, Vapi Closed 1. Bhuj Neet (0), the No plan rows
+    // and the setup / no-content / configuration-error rows are hidden.
+    expect(await rowCentres(page)).toEqual([
+      "Summary E2E Anand Shared",
+      "Summary E2E Anand Main",
+      "Summary E2E Vapi Closed",
+    ]);
+    // Same as the unfiltered page: on plan 4 of 7, 6 Chapters behind.
+    await expect(page.getByTestId("summary-centres-on-plan")).toHaveText("4/7");
+    await expect(page.getByTestId("summary-chapters-behind")).toHaveText("6");
+    await page.context().close();
+  });
+
+  test("filters apply from the filter bar, reset to page 1 and survive a reload", async ({ adminPage }) => {
+    await adminPage.goto(`/curriculum-summary?as_of=${AS_OF}&limit=10&page=2`);
+    await expect(adminPage.getByText("Page 2 of 2")).toBeVisible();
+
+    await adminPage.locator("summary", { hasText: "Region" }).click();
+    await adminPage.getByRole("checkbox", { name: "SUMMARY_E2E", exact: true }).check();
+    await adminPage.getByRole("searchbox", { name: "School" }).fill("anand");
+    await adminPage.getByRole("checkbox", { name: "Only behind" }).check();
+    await adminPage.getByRole("button", { name: "Apply" }).click();
+
+    await expect(adminPage).toHaveURL(/only_behind=1/);
+    const url = new URL(adminPage.url());
+    expect(url.searchParams.getAll("regions")).toEqual(["SUMMARY_E2E"]);
+    expect(url.searchParams.get("q")).toBe("anand");
+    expect(url.searchParams.get("as_of")).toBe(AS_OF);
+    expect(url.searchParams.get("limit")).toBe("10");
+    expect(url.searchParams.get("page")).toBeNull();
+
+    // Anand School in SUMMARY_E2E: Anand Shared (4 behind) and Anand Main (1 behind).
+    const expectAnandRows = async () => {
+      await expect(adminPage.getByText("Page 1 of 1")).toBeVisible();
+      expect(await rowCentres(adminPage)).toEqual(["Summary E2E Anand Shared", "Summary E2E Anand Main"]);
+      await expect(adminPage.getByTestId("summary-centres-on-plan")).toHaveText("2/2");
+      await expect(adminPage.getByTestId("summary-chapters-behind")).toHaveText("5");
+    };
+    await expectAnandRows();
+
+    await adminPage.reload();
+    await expectAnandRows();
+    await expect(adminPage.getByRole("searchbox", { name: "School" })).toHaveValue("anand");
+    await expect(adminPage.getByRole("checkbox", { name: "Only behind" })).toBeChecked();
+    await adminPage.locator("summary", { hasText: "Region" }).click();
+    await expect(adminPage.getByRole("checkbox", { name: "SUMMARY_E2E", exact: true })).toBeChecked();
+
+    // The Grade toggle keeps every filter: only Anand Main runs Grade 12 (1 behind).
+    await adminPage.getByRole("link", { name: "Grade 12" }).click();
+    await expect(adminPage).toHaveURL(/grade=12/);
+    const gradeUrl = new URL(adminPage.url());
+    expect(gradeUrl.searchParams.getAll("regions")).toEqual(["SUMMARY_E2E"]);
+    expect(gradeUrl.searchParams.get("q")).toBe("anand");
+    expect(gradeUrl.searchParams.get("only_behind")).toBe("1");
+    expect(await rowCentres(adminPage)).toEqual(["Summary E2E Anand Main"]);
+  });
+});

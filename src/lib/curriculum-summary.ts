@@ -37,23 +37,46 @@ const PAGE_SIZES = [10, 20, 50, 100];
 const DEFAULT_PAGE_SIZE = 20;
 
 export interface CurriculumSummaryQuery {
+  // Narrows the user's scoped rows; it never widens scope.
+  regions: string[];
+  // Case-insensitive match on School name or code; "" = no search.
+  schoolSearch: string;
   grade: CurriculumSummaryGrade;
   asOf: string;
+  // Keeps rows with Behind ≥ 1; header numbers ignore it.
+  onlyBehind: boolean;
   page: number;
   pageSize: number;
 }
 
+type SearchParamValue = string | string[] | undefined;
+
+function firstValue(value: SearchParamValue): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+// `regions` accepts repeated keys (the filter form) and comma-separated values.
+function parseList(value: SearchParamValue): string[] {
+  const values = Array.isArray(value) ? value : value ? [value] : [];
+  return [...new Set(values.flatMap((item) => item.split(",")).map((item) => item.trim()))].filter(
+    Boolean
+  );
+}
+
 // Unknown or removed params (programs, subjects, tracks, date range, flags, sort) are ignored.
 export function normalizeCurriculumSummarySearchParams(
-  searchParams: Record<string, string | undefined>,
+  searchParams: Record<string, SearchParamValue>,
   todayIstDate: string
 ): CurriculumSummaryQuery {
-  const page = Number.parseInt(searchParams.page ?? "1", 10);
-  const pageSize = Number.parseInt(searchParams.limit ?? String(DEFAULT_PAGE_SIZE), 10);
-  const asOf = searchParams.as_of;
+  const page = Number.parseInt(firstValue(searchParams.page) ?? "1", 10);
+  const pageSize = Number.parseInt(firstValue(searchParams.limit) ?? String(DEFAULT_PAGE_SIZE), 10);
+  const asOf = firstValue(searchParams.as_of);
   return {
-    grade: searchParams.grade === "12" ? 12 : 11,
+    regions: parseList(searchParams.regions),
+    schoolSearch: (firstValue(searchParams.q) ?? "").trim(),
+    grade: firstValue(searchParams.grade) === "12" ? 12 : 11,
     asOf: asOf && isDateString(asOf) ? asOf : todayIstDate,
+    onlyBehind: ["1", "true"].includes(firstValue(searchParams.only_behind) ?? ""),
     page: Number.isFinite(page) && page > 0 ? page : 1,
     pageSize: PAGE_SIZES.includes(pageSize) ? pageSize : DEFAULT_PAGE_SIZE,
   };
@@ -102,6 +125,8 @@ export type CurriculumSummaryResult =
   | {
       ok: true;
       header: CurriculumSummaryHeader;
+      // Regions of every scoped row for the Grade, before the Region / School search filters.
+      regionOptions: string[];
       rows: CurriculumSummaryRow[];
       pagination: { page: number; pageSize: number; totalRows: number; totalPages: number };
     }
@@ -148,9 +173,24 @@ export async function getCurriculumSummary(
     academicYearStartDate(academicYear),
     params.asOf,
   ]);
-  const rows = sortSummaryRows(rawRows.map((row) => buildSummaryRow(row, params.asOf)));
+  const scopedRows = rawRows.map((row) => buildSummaryRow(row, params.asOf));
+  const regionOptions = [
+    ...new Set(scopedRows.flatMap((row) => (row.region ? [row.region] : []))),
+  ].sort();
+  const search = params.schoolSearch.toLowerCase();
+  const rows = sortSummaryRows(
+    scopedRows.filter(
+      (row) =>
+        (params.regions.length === 0 || params.regions.includes(row.region ?? "")) &&
+        (!search ||
+          row.schoolName.toLowerCase().includes(search) ||
+          row.schoolCode.toLowerCase().includes(search))
+    )
+  );
 
-  const totalRows = rows.length;
+  const listedRows = params.onlyBehind ? rows.filter((row) => row.behind >= 1) : rows;
+
+  const totalRows = listedRows.length;
   const totalPages = Math.ceil(totalRows / params.pageSize);
   const page = totalPages === 0 ? 1 : Math.min(params.page, totalPages);
   const offset = (page - 1) * params.pageSize;
@@ -158,7 +198,8 @@ export async function getCurriculumSummary(
   return {
     ok: true,
     header: summaryHeader(rows),
-    rows: rows.slice(offset, offset + params.pageSize),
+    regionOptions,
+    rows: listedRows.slice(offset, offset + params.pageSize),
     pagination: { page, pageSize: params.pageSize, totalRows, totalPages },
   };
 }
