@@ -1,8 +1,9 @@
 // Curriculum Summary v2 (#417): one row per Summary Class (Centre + Grade) measured against its
-// Curriculum Plan. One set-based SQL pass loads the whole bounded row set for the user's scope;
-// classification, Due / Done / Behind, Tests overdue, header numbers, sort and pagination are
-// computed here with the shared rules in `curriculum-plan-rules`. Chapter Test sessions come
-// from `curriculum-chapter-tests`.
+// Curriculum Plan, and the chapter timeline for one of those classes. One set-based SQL pass
+// loads the whole bounded row set for the user's scope (or one Centre of it); classification,
+// Due / Done / Behind, Tests overdue, header numbers, sort and pagination are computed here with
+// the shared rules in `curriculum-plan-rules`. Chapter Test sessions come from
+// `curriculum-chapter-tests`.
 
 import {
   checkCurriculumPlansSchema,
@@ -16,10 +17,13 @@ import {
   academicYearStartDate,
   behindPill,
   chapterProgress,
+  chapterStatus,
   chapterTestStatus,
   classifySummaryClass,
   planStatusAsOf,
   type BehindPillTone,
+  type ChapterStatus,
+  type ChapterTestStatus,
 } from "./curriculum-plan-rules";
 import { query } from "./db";
 import { EXAM_TRACKS, formatExamTrack } from "./exam-tracks";
@@ -142,7 +146,11 @@ export type CurriculumSummaryResult =
 
 interface SummaryChapter {
   chapterId: number;
+  code: string;
+  name: string;
   subject: string;
+  // Lowest coverage sequence across the class's tracks: syllabus order within a subject.
+  sequence: number;
   tracks: string[];
   dueDate: string | null;
   testDate: string | null;
@@ -175,22 +183,7 @@ export async function getCurriculumSummary(
     if (!schema.ok) return schema;
   }
 
-  const academicYear = academicYearForDate(params.asOf);
-  const rawRows = await query<SummaryQueryRow>(SUMMARY_SQL, [
-    ...scopeParams(permission),
-    params.grade,
-    academicYear,
-    academicYearStartDate(academicYear),
-    params.asOf,
-  ]);
-  const chapterTests = await loadChapterTestSessions({
-    centreIds: rawRows.map((row) => Number(row.centre_id)),
-    grade: params.grade,
-    academicYear,
-  });
-  const scopedRows = rawRows.map((row) =>
-    buildSummaryRow(row, params.asOf, chapterTests.get(Number(row.centre_id)) ?? new Map())
-  );
+  const scopedRows = (await loadSummaryClasses(permission, params)).map(buildSummaryRow);
   const regionOptions = [
     ...new Set(scopedRows.flatMap((row) => (row.region ? [row.region] : []))),
   ].sort();
@@ -221,6 +214,42 @@ export async function getCurriculumSummary(
   };
 }
 
+interface SummaryClassData {
+  raw: SummaryQueryRow;
+  chapters: SummaryChapter[];
+  // Chapter id → Chapter Test session end times for this Centre's class.
+  chapterTestSessions: Map<number, (string | null)[]>;
+  asOf: string;
+}
+
+// Every Summary Class in the user's scope for the Grade, or only `centreId`'s when given (none
+// when that Centre is out of scope or maps no Exam Track for the Grade).
+async function loadSummaryClasses(
+  permission: UserPermission,
+  params: { grade: CurriculumSummaryGrade; asOf: string; centreId?: number }
+): Promise<SummaryClassData[]> {
+  const academicYear = academicYearForDate(params.asOf);
+  const rawRows = await query<SummaryQueryRow>(SUMMARY_SQL, [
+    ...scopeParams(permission),
+    params.grade,
+    academicYear,
+    academicYearStartDate(academicYear),
+    params.asOf,
+    params.centreId ?? null,
+  ]);
+  const chapterTests = await loadChapterTestSessions({
+    centreIds: rawRows.map((row) => Number(row.centre_id)),
+    grade: params.grade,
+    academicYear,
+  });
+  return rawRows.map((raw) => ({
+    raw,
+    chapters: parseChapters(raw.chapters),
+    chapterTestSessions: chapterTests.get(Number(raw.centre_id)) ?? new Map(),
+    asOf: params.asOf,
+  }));
+}
+
 // $1 all schools, $2 school codes (explicit ∪ seat scope), $3 regions, $4 physical-centre
 // Programs, $5 Admin (all Programs), $6 the user's Programs.
 function scopeParams(permission: UserPermission): unknown[] {
@@ -240,11 +269,11 @@ function scopeParams(permission: UserPermission): unknown[] {
   ];
 }
 
-// $7 Grade number, $8 academic year of as-of, $9 its 1 Apr, $10 as-of. Every in-scope active
-// physical JNV Centre with a Centre Exam Track for the Grade is one row; its Chapters are the
-// Grade's in-syllabus Chapters for any mapped track, each with its plan due and test dates (only
-// for an Active plan serving one of the Chapter's tracks) and its earliest Chapter Completion
-// IST date within [1 Apr, as-of] under any mapped track.
+// $7 Grade number, $8 academic year of as-of, $9 its 1 Apr, $10 as-of, $11 one Centre id (null
+// = all). Every in-scope active physical JNV Centre with a Centre Exam Track for the Grade is
+// one row; its Chapters are the Grade's in-syllabus Chapters for any mapped track, each with its
+// plan due and test dates (only for an Active plan serving one of the Chapter's tracks) and its
+// earliest Chapter Completion IST date within [1 Apr, as-of] under any mapped track.
 const SUMMARY_SQL = `
   WITH scoped_centres AS (
     SELECT
@@ -269,6 +298,7 @@ const SUMMARY_SQL = `
       )
       AND c.program_id = ANY($4::int[])
       AND ($5::boolean OR c.program_id = ANY($6::int[]))
+      AND ($11::int IS NULL OR c.id = $11::int)
   ),
   mapped AS (
     SELECT
@@ -299,6 +329,17 @@ const SUMMARY_SQL = `
   grade_chapters AS (
     SELECT
       ch.id AS chapter_id,
+      ch.code AS chapter_code,
+      COALESCE(
+        (
+          SELECT item->>'chapter'
+          FROM jsonb_array_elements(ch.name::jsonb) item
+          WHERE item->>'lang_code' = 'en'
+          LIMIT 1
+        ),
+        ch.code,
+        'Unknown chapter'
+      ) AS chapter_name,
       COALESCE(
         (
           SELECT item->>'subject'
@@ -308,13 +349,14 @@ const SUMMARY_SQL = `
         ),
         'Unknown subject'
       ) AS subject_name,
-      ARRAY_AGG(DISTINCT cfg.exam_track::text) AS tracks
+      ARRAY_AGG(DISTINCT cfg.exam_track::text) AS tracks,
+      JSONB_OBJECT_AGG(cfg.exam_track::text, cfg.coverage_sequence) AS sequences
     FROM lms_chapter_exam_configs cfg
     JOIN chapter ch ON ch.id = cfg.chapter_id
     JOIN grade g ON g.id = ch.grade_id AND g.number = $7
     JOIN subject s ON s.id = ch.subject_id
     WHERE cfg.is_in_syllabus = true
-    GROUP BY ch.id, s.name
+    GROUP BY ch.id, ch.code, ch.name, s.name
   ),
   assigned_plans AS (
     SELECT
@@ -333,8 +375,14 @@ const SUMMARY_SQL = `
     SELECT
       m.centre_id,
       gc.chapter_id,
+      gc.chapter_code,
+      gc.chapter_name,
       gc.subject_name,
       gc.tracks,
+      (
+        SELECT MIN((gc.sequences->>track)::int)
+        FROM unnest(m.mapped_tracks) AS track
+      ) AS sequence,
       CASE
         WHEN ap.status = 'active' AND ap.exam_tracks && gc.tracks THEN pc.due_date
       END AS due_date,
@@ -377,7 +425,10 @@ const SUMMARY_SQL = `
       (
         SELECT jsonb_agg(jsonb_build_object(
           'chapterId', cch.chapter_id,
+          'code', cch.chapter_code,
+          'name', cch.chapter_name,
           'subject', cch.subject_name,
+          'sequence', cch.sequence,
           'tracks', cch.tracks,
           'dueDate', cch.due_date::text,
           'testDate', cch.test_date::text,
@@ -391,23 +442,23 @@ const SUMMARY_SQL = `
   FROM mapped m
   LEFT JOIN assigned_plans ap ON ap.centre_id = m.centre_id`;
 
-function buildSummaryRow(
-  raw: SummaryQueryRow,
-  asOf: string,
-  chapterTestSessions: Map<number, (string | null)[]>
-): CurriculumSummaryRow {
+function chapterTestStatusFor(
+  { chapterTestSessions, asOf }: SummaryClassData,
+  chapter: SummaryChapter
+): ChapterTestStatus {
+  return chapterTestStatus({
+    dueDate: chapter.dueDate,
+    testDate: chapter.testDate,
+    sessionEndTimes: chapterTestSessions.get(chapter.chapterId) ?? [],
+    asOf,
+  });
+}
+
+function buildSummaryRow(data: SummaryClassData): CurriculumSummaryRow {
+  const { raw, chapters, asOf } = data;
   const mappedTracks = EXAM_TRACKS.filter((track) => raw.mapped_tracks.includes(track));
-  const chapters = parseChapters(raw.chapters);
-  const testStatusCount = (kind: ReturnType<typeof chapterTestStatus>["kind"]) =>
-    chapters.filter(
-      (chapter) =>
-        chapterTestStatus({
-          dueDate: chapter.dueDate,
-          testDate: chapter.testDate,
-          sessionEndTimes: chapterTestSessions.get(chapter.chapterId) ?? [],
-          asOf,
-        }).kind === kind
-    ).length;
+  const testStatusCount = (kind: ChapterTestStatus["kind"]) =>
+    chapters.filter((chapter) => chapterTestStatusFor(data, chapter).kind === kind).length;
   const base = {
     centreId: Number(raw.centre_id),
     centreName: raw.centre_name,
@@ -450,12 +501,7 @@ function buildSummaryRow(
   }
 
   const subjects = Object.fromEntries(
-    CURRICULUM_SUMMARY_SUBJECTS.map((subject) => {
-      const subjectChapters = chapters.filter((chapter) => chapter.subject === subject);
-      if (subjectChapters.length === 0) return [subject, null];
-      const progress = chapterProgress(subjectChapters, asOf);
-      return [subject, { ...progress, ...behindPill(progress.behind) }];
-    })
+    CURRICULUM_SUMMARY_SUBJECTS.map((subject) => [subject, subjectProgress(chapters, subject, asOf)])
   ) as Record<CurriculumSummarySubject, CurriculumSummarySubjectProgress | null>;
 
   return {
@@ -475,11 +521,26 @@ function buildSummaryRow(
   };
 }
 
+// null when the class has no Chapter of the subject.
+function subjectProgress(
+  chapters: SummaryChapter[],
+  subject: string,
+  asOf: string
+): CurriculumSummarySubjectProgress | null {
+  const subjectChapters = chapters.filter((chapter) => chapter.subject === subject);
+  if (subjectChapters.length === 0) return null;
+  const progress = chapterProgress(subjectChapters, asOf);
+  return { ...progress, ...behindPill(progress.behind) };
+}
+
 function parseChapters(value: unknown): SummaryChapter[] {
   const parsed = typeof value === "string" ? JSON.parse(value) : value;
   if (!Array.isArray(parsed)) return [];
   return parsed.map((chapter: Record<string, unknown>) => ({
     chapterId: Number(chapter.chapterId),
+    code: typeof chapter.code === "string" ? chapter.code : "",
+    name: String(chapter.name),
+    sequence: typeof chapter.sequence === "number" ? chapter.sequence : Number.MAX_SAFE_INTEGER,
     subject: chapter.subject === "Mathematics" ? "Maths" : String(chapter.subject),
     tracks: Array.isArray(chapter.tracks) ? chapter.tracks.map(String) : [],
     dueDate: typeof chapter.dueDate === "string" ? chapter.dueDate : null,
@@ -520,4 +581,119 @@ function summaryHeader(rows: CurriculumSummaryRow[]): CurriculumSummaryHeader {
     chaptersBehind: rows.reduce((sum, row) => sum + row.behind, 0),
     testsOverdue: rows.reduce((sum, row) => sum + row.testsOverdue, 0),
   };
+}
+
+export interface ChapterTimelineChapter {
+  chapterId: number;
+  code: string;
+  name: string;
+  subject: string;
+  dueDate: string | null;
+  // Earliest Chapter Completion IST date within [1 Apr of the academic year, as-of].
+  completedOn: string | null;
+  status: ChapterStatus;
+  testStatus: ChapterTestStatus;
+}
+
+export interface ChapterTimeline {
+  grade: CurriculumSummaryGrade;
+  asOf: string;
+  // The class as the Summary shows it: Centre, kind, explanation, plan and Behind.
+  row: CurriculumSummaryRow;
+  // Subjects with Chapters for the class, in pill-column order; `progress` is null without a plan.
+  subjects: { subject: string; progress: CurriculumSummarySubjectProgress | null }[];
+  // By Chapter Due Date; undated Chapters last in syllabus order. Empty for setup-error,
+  // no-content and configuration-error classes.
+  chapters: ChapterTimelineChapter[];
+  header: {
+    due: number;
+    done: number;
+    syllabusDone: number;
+    syllabusTotal: number;
+    testsOverdue: number;
+  };
+}
+
+export type ChapterTimelineResult =
+  | { ok: true; timeline: ChapterTimeline }
+  | { ok: false; status: 404 }
+  | CurriculumSchemaUnavailable;
+
+// The chapter timeline for the Summary Class of `centreId` + Grade. A Centre outside the user's
+// Summary row universe for that Grade is not found, so nothing about it leaks.
+export async function getChapterTimeline(
+  permission: UserPermission,
+  centreId: number,
+  params: { grade: CurriculumSummaryGrade; asOf: string }
+): Promise<ChapterTimelineResult> {
+  for (const check of [checkCurriculumSchema, checkCurriculumPlansSchema]) {
+    const schema = await check();
+    if (!schema.ok) return schema;
+  }
+  if (!Number.isInteger(centreId) || centreId <= 0) return { ok: false, status: 404 };
+
+  const [data] = await loadSummaryClasses(permission, { ...params, centreId });
+  if (!data) return { ok: false, status: 404 };
+
+  const row = buildSummaryRow(data);
+  const measured = row.kind === "plan" || row.kind === "no_plan";
+  const chapters = measured ? data.chapters : [];
+  const progress = chapterProgress(chapters, params.asOf);
+
+  return {
+    ok: true,
+    timeline: {
+      grade: params.grade,
+      asOf: params.asOf,
+      row,
+      subjects: [...new Set(chapters.map((chapter) => chapter.subject))]
+        .sort((a, b) => subjectRank(a) - subjectRank(b) || a.localeCompare(b))
+        .map((subject) => ({
+          subject,
+          progress: row.kind === "plan" ? subjectProgress(chapters, subject, params.asOf) : null,
+        })),
+      chapters: [...chapters].sort(compareTimelineChapters).map((chapter) => ({
+        chapterId: chapter.chapterId,
+        code: chapter.code,
+        name: chapter.name,
+        subject: chapter.subject,
+        dueDate: chapter.dueDate,
+        completedOn: chapter.completedOn,
+        status: chapterStatus({ dueDate: chapter.dueDate, completedOn: chapter.completedOn, asOf: params.asOf }),
+        testStatus: chapterTestStatusFor(data, chapter),
+      })),
+      header: {
+        due: progress.due,
+        done: progress.done,
+        syllabusDone: chapters.filter((chapter) => chapter.completedOn !== null).length,
+        syllabusTotal: chapters.length,
+        testsOverdue: row.testsOverdue,
+      },
+    },
+  };
+}
+
+function subjectRank(subject: string): number {
+  const index = (CURRICULUM_SUMMARY_SUBJECTS as readonly string[]).indexOf(subject);
+  return index === -1 ? CURRICULUM_SUMMARY_SUBJECTS.length : index;
+}
+
+// Syllabus order: pill-column subject order, then coverage sequence, then Chapter code.
+function compareSyllabusOrder(a: SummaryChapter, b: SummaryChapter): number {
+  return (
+    subjectRank(a.subject) - subjectRank(b.subject) ||
+    a.subject.localeCompare(b.subject) ||
+    a.sequence - b.sequence ||
+    a.code.localeCompare(b.code) ||
+    a.chapterId - b.chapterId
+  );
+}
+
+function compareTimelineChapters(a: SummaryChapter, b: SummaryChapter): number {
+  if (a.dueDate !== b.dueDate) {
+    if (a.dueDate === null) return 1;
+    if (b.dueDate === null) return -1;
+    return a.dueDate < b.dueDate ? -1 : 1;
+  }
+  return compareSyllabusOrder(a, b);
 }

@@ -463,3 +463,269 @@ test.describe("Curriculum Summary Chapter tests overdue", () => {
     await page.context().close();
   });
 });
+
+// #429: the chapter timeline for one Summary Class at /curriculum-summary/centres/[id]. Every
+// status, date and count below is worked out by hand from the Summary and Chapter Test fixtures
+// with as_of pinned.
+function timelineRow(page: Page, chapter: string) {
+  return page.locator(`[data-timeline-row][data-chapter="${chapter}"]`);
+}
+
+test.describe("Curriculum Summary chapter timeline", () => {
+  test("clicking a Summary row opens the class's timeline for the same Grade and as-of date", async ({
+    browser,
+  }) => {
+    const page = await summaryPmPage(browser);
+    await page.goto(`/curriculum-summary?as_of=${AS_OF}`);
+    await page.getByRole("link", { name: "Summary E2E Anand Shared" }).click();
+
+    await expect(page).toHaveURL(`/curriculum-summary/centres/9000812?grade=11&as_of=${AS_OF}`);
+    await expect(page.getByRole("heading", { name: "Summary E2E Anand Shared" })).toBeVisible();
+    // Bio Plants was due 10 Jul and its only completion is 01:30 IST on 16 Aug, after as-of.
+    await expect(timelineRow(page, "Summary Bio Plants").locator("[data-status]")).toHaveText("Overdue 36 days");
+    await page.context().close();
+  });
+
+  test("each Chapter shows its status and earliest in-window completion date (IST)", async ({ browser }) => {
+    const page = await summaryPmPage(browser);
+    await page.goto(`/curriculum-summary/centres/9000812?grade=11&as_of=${AS_OF}`);
+
+    // [Chapter, status, completion date] for Anand Shared (JEE Main + NEET) on 15 Aug.
+    const expected: [string, string, string][] = [
+      ["Summary Bio Cells", "Done", "10 Jun 2026"],
+      // Completed under JEE Main (25 Jun) and NEET (28 Jun): one row, the earlier date.
+      ["Fixture Alpha Physics", "Done", "25 Jun 2026"],
+      ["Summary Bio Plants", "Overdue 36 days", "—"],
+      ["Summary Chem Bonding", "Overdue 31 days", "—"],
+      // A JEE Main Chapter completed only under the class's NEET track.
+      ["Fixture Beta Physics", "Done", "25 Jul 2026"],
+      ["Summary Bio Animals", "Overdue 5 days", "—"],
+      ["Summary Bio Genetics", "Overdue 3 days", "—"],
+      // Completed 1 Aug, ahead of its 30 Sep due date.
+      ["Summary Chem Thermo", "Done", "1 Aug 2026"],
+    ];
+    for (const [chapter, status, completedOn] of expected) {
+      await expect(timelineRow(page, chapter)).toHaveCount(1);
+      await expect(timelineRow(page, chapter).locator("[data-status]")).toHaveText(status);
+      await expect(timelineRow(page, chapter).locator("[data-completed-on]")).toHaveText(completedOn);
+    }
+
+    // Plants' completion at 01:30 IST on 16 Aug (20:00 UTC on 15 Aug) counts from 16 Aug.
+    await page.goto("/curriculum-summary/centres/9000812?grade=11&as_of=2026-08-20");
+    await expect(timelineRow(page, "Summary Bio Plants").locator("[data-status]")).toHaveText("Done 37 days late");
+    await expect(timelineRow(page, "Summary Bio Plants").locator("[data-completed-on]")).toHaveText("16 Aug 2026");
+
+    // Bhuj Neet: Alpha due 30 Jun, completed 5 Jul.
+    await page.goto(`/curriculum-summary/centres/9000821?grade=11&as_of=${AS_OF}`);
+    await expect(timelineRow(page, "Fixture Alpha Physics").locator("[data-status]")).toHaveText("Done 5 days late");
+    await expect(timelineRow(page, "Fixture Alpha Physics").locator("[data-completed-on]")).toHaveText("5 Jul 2026");
+
+    // Anand Main: Beta's only completion (20 Mar 2026) is in the previous academic year.
+    await page.goto(`/curriculum-summary/centres/9000811?grade=11&as_of=${AS_OF}`);
+    await expect(timelineRow(page, "Fixture Beta Physics").locator("[data-status]")).toHaveText("Overdue 15 days");
+    await expect(timelineRow(page, "Fixture Beta Physics").locator("[data-completed-on]")).toHaveText("—");
+
+    // Surat Draft has only a Draft plan: no Chapter is in a plan.
+    await page.goto(`/curriculum-summary/centres/9000832?grade=11&as_of=${AS_OF}`);
+    await expect(timelineRow(page, "Fixture Alpha Physics").locator("[data-status]")).toHaveText("Not in plan");
+    await expect(timelineRow(page, "Fixture Beta Physics").locator("[data-status]")).toHaveText("Not in plan");
+    await expect(page.locator("[data-timeline-plan]")).toHaveText("No plan");
+    await page.context().close();
+  });
+
+  test("each Chapter shows its Chapter Test Status from the counted sessions", async ({ browser }) => {
+    const page = await summaryPmPage(browser);
+    await page.goto(`/curriculum-summary/centres/9000812?grade=11&as_of=${AS_OF}`);
+
+    // Anand Shared on 15 Aug. Plants has only never-counting sessions and Animals (test date
+    // 5 Aug) none, both more than 7 days past their test dates; Genetics' test date is 13 Aug.
+    const expected: [string, string][] = [
+      ["Fixture Alpha Physics", "Conducted 2 Jul 2026"],
+      ["Fixture Beta Physics", "Scheduled"],
+      ["Summary Chem Bonding", "Conducted 20 Jul 2026"],
+      ["Summary Bio Cells", "Conducted 20 Jun 2026"],
+      ["Summary Bio Plants", "Overdue"],
+      ["Summary Bio Animals", "Overdue"],
+      ["Summary Bio Genetics", "Not due"],
+      ["Summary Chem Thermo", "Not due"],
+    ];
+    for (const [chapter, testStatus] of expected) {
+      await expect(timelineRow(page, chapter).locator("[data-test-status]")).toHaveText(testStatus);
+    }
+
+    // Bhuj Neet: the Bonding session has started but has no end time.
+    await page.goto(`/curriculum-summary/centres/9000821?grade=11&as_of=${AS_OF}`);
+    await expect(timelineRow(page, "Summary Chem Bonding").locator("[data-test-status]")).toHaveText("Scheduled");
+
+    // Surat Draft has no plan, but its test statuses still show: Alpha ended 23:30 on the as-of
+    // day; the Majority (Beta) test is on 20 Aug.
+    await page.goto(`/curriculum-summary/centres/9000832?grade=11&as_of=${AS_OF}`);
+    await expect(timelineRow(page, "Fixture Alpha Physics").locator("[data-test-status]")).toHaveText(
+      "Conducted 15 Aug 2026"
+    );
+    await expect(timelineRow(page, "Fixture Beta Physics").locator("[data-test-status]")).toHaveText("Scheduled");
+    await page.context().close();
+  });
+
+  test("Chapters run in due-date order with the as-of marker between due and not-yet-due rows", async ({
+    browser,
+  }) => {
+    const page = await summaryPmPage(browser);
+    await page.goto(`/curriculum-summary/centres/9000812?grade=11&as_of=${AS_OF}`);
+
+    const order = await page
+      .locator("[data-timeline-row], [data-as-of-marker]")
+      .evaluateAll((rows) =>
+        rows.map((row) => (row.hasAttribute("data-as-of-marker") ? "AS OF" : row.getAttribute("data-chapter")))
+      );
+    // Dated rows by due date; the timeline fixture's undated Chem Organic (sequence 3) and Bio
+    // Ecology (sequence 5) come last, Chemistry before Biology.
+    expect(order).toEqual([
+      "Summary Bio Cells",
+      "Fixture Alpha Physics",
+      "Summary Bio Plants",
+      "Summary Chem Bonding",
+      "Fixture Beta Physics",
+      "Summary Bio Animals",
+      "Summary Bio Genetics",
+      "AS OF",
+      "Summary Chem Thermo",
+      "Summary Chem Organic",
+      "Summary Bio Ecology",
+    ]);
+    await expect(page.locator("[data-as-of-marker]")).toContainText("As of 15 Aug 2026");
+    await expect(timelineRow(page, "Summary Chem Organic").locator("[data-status]")).toHaveText("Not in plan");
+    await expect(timelineRow(page, "Summary Bio Ecology").locator("[data-test-status]")).toHaveText("Not due");
+    await page.context().close();
+  });
+
+  test("the header counts the class and subject tabs carry the Summary pills", async ({ browser }) => {
+    const page = await summaryPmPage(browser);
+    await page.goto(`/curriculum-summary/centres/9000812?grade=11&as_of=${AS_OF}`);
+
+    // Due: Cells, Alpha, Plants, Bonding, Beta, Animals, Genetics; done: Cells, Alpha, Beta.
+    await expect(page.getByTestId("timeline-due-done")).toHaveText("3/7");
+    // Completed in window: Cells, Alpha, Beta, Thermo of the class's 10 in-syllabus Chapters.
+    await expect(page.getByTestId("timeline-syllabus-done")).toHaveText("4/10");
+    await expect(page.getByTestId("timeline-tests-overdue")).toHaveText("2");
+
+    // Same text as the Anand Shared Summary pills; no Maths content, so no Maths tab.
+    await expect(page.locator("[data-subject-tab]")).toHaveText([/^All$/, /^Physics/, /^Chemistry/, /^Biology/]);
+    await expect(page.locator('[data-subject-tab="Physics"] [data-tab-progress]')).toHaveText("On track · 2/2");
+    await expect(page.locator('[data-subject-tab="Chemistry"] [data-tab-progress]')).toHaveText("1 behind · 0/1");
+    await expect(page.locator('[data-subject-tab="Biology"] [data-tab-progress]')).toHaveText("3 behind · 1/4");
+    await expect(page.locator('[data-subject-tab="All"]')).toHaveAttribute("aria-current", "page");
+
+    await page.locator('[data-subject-tab="Biology"]').click();
+    await expect(page).toHaveURL(/subject=Biology/);
+    await expect(page).toHaveURL(new RegExp(`as_of=${AS_OF}`));
+    await expect(page.locator('[data-subject-tab="Biology"]')).toHaveAttribute("aria-current", "page");
+    await expect(page.locator("[data-timeline-row]")).toHaveText([
+      /Summary Bio Cells/,
+      /Summary Bio Plants/,
+      /Summary Bio Animals/,
+      /Summary Bio Genetics/,
+      /Summary Bio Ecology/,
+    ]);
+    // The header still covers the whole class.
+    await expect(page.getByTestId("timeline-due-done")).toHaveText("3/7");
+    await page.context().close();
+  });
+
+  test("a PM opening a Centre outside their Summary rows gets not found with no data", async ({
+    browser,
+    adminPage,
+  }) => {
+    const page = await summaryPmPage(browser);
+    // Other Region is outside the PM's region; Navsari Two maps no Exam Track; Anand Shared runs
+    // no Grade 12 class.
+    for (const path of [
+      `/curriculum-summary/centres/9000841?grade=11&as_of=${AS_OF}`,
+      `/curriculum-summary/centres/9000862?grade=11&as_of=${AS_OF}`,
+      `/curriculum-summary/centres/9000812?grade=12&as_of=${AS_OF}`,
+      `/curriculum-summary/centres/not-a-centre?grade=11&as_of=${AS_OF}`,
+    ]) {
+      const response = await page.goto(path);
+      expect(response?.status()).toBe(404);
+      await expect(page.locator("[data-timeline-row]")).toHaveCount(0);
+      await expect(page.getByText(/Summary E2E/)).toHaveCount(0);
+    }
+    await page.context().close();
+
+    await adminPage.goto(`/curriculum-summary/centres/9000841?grade=11&as_of=${AS_OF}`);
+    await expect(adminPage.getByRole("heading", { name: "Summary E2E Other Region" })).toBeVisible();
+    await expect(adminPage.locator("[data-timeline-plan]")).toHaveText("No plan");
+  });
+
+  test("every viewer sees the plan name and Closed label; only Admins get a link to the plan", async ({
+    browser,
+    adminPage,
+  }) => {
+    const page = await summaryPmPage(browser);
+    await page.goto(`/curriculum-summary/centres/9000812?grade=11&as_of=${AS_OF}`);
+    await expect(page.locator("[data-timeline-plan]")).toHaveText("Summary G11 Active Plan");
+    await expect(page.getByRole("link", { name: "Summary G11 Active Plan" })).toHaveCount(0);
+    await expect(page.locator("[data-timeline-plan-closed]")).toHaveCount(0);
+
+    // Closed 31 Jul: Alpha completed 5 Aug against its 30 Jun due date still counts.
+    await page.goto(`/curriculum-summary/centres/9000852?grade=11&as_of=${AS_OF}`);
+    await expect(page.locator("[data-timeline-plan]")).toHaveText("Summary G11 Closed Plan");
+    await expect(page.locator("[data-timeline-plan-closed]")).toHaveText("Closed");
+    await expect(timelineRow(page, "Fixture Alpha Physics").locator("[data-status]")).toHaveText("Done 36 days late");
+    await expect(timelineRow(page, "Fixture Beta Physics").locator("[data-status]")).toHaveText("Overdue 26 days");
+    await page.context().close();
+
+    await adminPage.goto(`/curriculum-summary/centres/9000812?grade=11&as_of=${AS_OF}`);
+    await expect(adminPage.getByRole("link", { name: "Summary G11 Active Plan" })).toHaveAttribute(
+      "href",
+      "/curriculum-summary/plans/900001"
+    );
+  });
+
+  test("the Grade toggle and As of date reload the timeline; an invalid as-of falls back to today", async ({
+    browser,
+  }) => {
+    const page = await summaryPmPage(browser);
+    await page.goto(`/curriculum-summary/centres/9000811?grade=11&as_of=${AS_OF}`);
+    await expect(page.getByRole("link", { name: "Grade 11" })).toHaveAttribute("aria-current", "page");
+    await expect(page.getByLabel("As of")).toHaveValue(AS_OF);
+
+    await page.getByRole("link", { name: "Grade 12" }).click();
+    await expect(page).toHaveURL(`/curriculum-summary/centres/9000811?grade=12&as_of=${AS_OF}`);
+    await expect(page.locator("[data-timeline-plan]")).toHaveText("Summary G12 Active Plan");
+    // Limits due 1 Jul, completed 2 Jul; Vectors due 1 Aug, open.
+    await expect(timelineRow(page, "Summary Maths Limits").locator("[data-status]")).toHaveText("Done 1 day late");
+    await expect(timelineRow(page, "Summary Maths Limits").locator("[data-completed-on]")).toHaveText("2 Jul 2026");
+    await expect(timelineRow(page, "Summary Maths Vectors").locator("[data-status]")).toHaveText("Overdue 14 days");
+
+    // On 1 Aug Vectors is due that day: Overdue 0 days.
+    await page.getByLabel("As of").fill("2026-08-01");
+    await page.getByRole("button", { name: "Apply" }).click();
+    await expect(page).toHaveURL(/grade=12/);
+    await expect(page).toHaveURL(/as_of=2026-08-01/);
+    await expect(timelineRow(page, "Summary Maths Vectors").locator("[data-status]")).toHaveText("Overdue 0 days");
+
+    const todayIst = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
+    await page.goto("/curriculum-summary/centres/9000811?grade=12&as_of=2026-02-30");
+    await expect(page.getByLabel("As of")).toHaveValue(todayIst);
+    await page.context().close();
+  });
+
+  test("setup-error, no-content and ambiguous-Centre classes show the Summary's message instead of metrics", async ({
+    browser,
+  }) => {
+    const page = await summaryPmPage(browser);
+    for (const [centreId, message] of [
+      ["9000822", "Fix tracks in Centre Management"],
+      ["9000831", "Curriculum configuration is unavailable"],
+      ["9000861", "Multiple active physical Centres are configured for this School and Program"],
+    ]) {
+      await page.goto(`/curriculum-summary/centres/${centreId}?grade=11&as_of=${AS_OF}`);
+      await expect(page.getByTestId("timeline-explanation")).toHaveText(message);
+      await expect(page.locator("[data-timeline-row]")).toHaveCount(0);
+      await expect(page.getByTestId("timeline-due-done")).toHaveCount(0);
+      await expect(page.locator("[data-subject-tab]")).toHaveCount(0);
+    }
+    await page.context().close();
+  });
+});
