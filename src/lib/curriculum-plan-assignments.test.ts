@@ -54,7 +54,13 @@ beforeEach(() => {
   mockCheckSchema.mockResolvedValue({ ok: true });
   db.current = createFakeDb([
     [/FROM lms_curriculum_plans\s+WHERE id = \$1/, [PLAN]],
-    ["SELECT DISTINCT cfg.exam_track", [{ exam_track: "jee_main" }, { exam_track: "neet" }]],
+    [
+      "SELECT DISTINCT g.number AS grade, cfg.exam_track",
+      [
+        { grade: 11, exam_track: "jee_main" },
+        { grade: 11, exam_track: "neet" },
+      ],
+    ],
     [
       "AS current_plan_title",
       [

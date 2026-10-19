@@ -12,6 +12,7 @@ import {
 } from "./curriculum-schema";
 import { loadChapterTestSessions } from "./curriculum-chapter-tests";
 import { chapterSharesCodeSql } from "./chapter-siblings";
+import { ELIGIBLE_CENTRE_SQL, ELIGIBLE_CENTRE_TRACKS_FROM_SQL } from "./curriculum-eligible-centres";
 import {
   academicYearForDate,
   academicYearStartDate,
@@ -307,6 +308,8 @@ function scopedSchoolCodes(permission: UserPermission): string[] {
 // one row; its Chapters are the Grade's in-syllabus Chapters for any mapped track, each with its
 // plan due and test dates (only for an Active plan serving one of the Chapter's tracks) and its
 // earliest Chapter Completion IST date within [1 Apr, as-of] under any mapped track.
+// `scoped_centres` holds one row per in-scope eligible Centre + mapped track for the Grade;
+// `mapped` folds them into one row per Centre.
 const SUMMARY_SQL = `
   WITH scoped_centres AS (
     SELECT
@@ -317,13 +320,12 @@ const SUMMARY_SQL = `
       s.code AS school_code,
       s.name AS school_name,
       s.region,
-      p.name AS program_name
-    FROM centres c
-    JOIN school s ON s.id = c.school_id
+      p.name AS program_name,
+      cet.exam_track_code
+    FROM ${ELIGIBLE_CENTRE_TRACKS_FROM_SQL}
+    JOIN grade g ON g.id = cet.grade_id AND g.number = $7
     JOIN program p ON p.id = c.program_id
-    WHERE c.is_active = true
-      AND c.is_physical = true
-      AND s.af_school_category = 'JNV'
+    WHERE ${ELIGIBLE_CENTRE_SQL}
       AND (
         $1::boolean
         OR ($2::text[] IS NOT NULL AND s.code = ANY($2::text[]))
@@ -343,7 +345,7 @@ const SUMMARY_SQL = `
       sc.school_name,
       sc.region,
       sc.program_name,
-      ARRAY_AGG(DISTINCT cet.exam_track_code::text) AS mapped_tracks,
+      ARRAY_AGG(DISTINCT sc.exam_track_code::text) AS mapped_tracks,
       (
         SELECT COUNT(*)
         FROM centres other
@@ -353,8 +355,6 @@ const SUMMARY_SQL = `
           AND other.is_physical = true
       )::int AS centre_count
     FROM scoped_centres sc
-    JOIN centre_exam_tracks cet ON cet.centre_id = sc.centre_id
-    JOIN grade g ON g.id = cet.grade_id AND g.number = $7
     GROUP BY
       sc.centre_id, sc.centre_name, sc.school_id, sc.program_id,
       sc.school_code, sc.school_name, sc.region, sc.program_name

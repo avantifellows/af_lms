@@ -30,6 +30,11 @@ import {
   type CurriculumSchemaUnavailable,
 } from "./curriculum-schema";
 import { query, withTransaction } from "./db";
+import {
+  ELIGIBLE_CENTRE_SQL,
+  ELIGIBLE_CENTRE_TRACKS_FROM_SQL,
+  loadTracksWithContent,
+} from "./curriculum-eligible-centres";
 import type { ExamTrack } from "./exam-tracks";
 
 export interface AssignedPlan {
@@ -113,7 +118,7 @@ interface EligibleCentreRow {
 }
 
 async function loadEligibleCentres(db: Db, plan: LockedPlanRow): Promise<EligibleCentre[]> {
-  const [rows, contentRows] = await Promise.all([
+  const [rows, contentByGrade] = await Promise.all([
     db<EligibleCentreRow>(
       `SELECT
          c.id AS centre_id,
@@ -125,34 +130,23 @@ async function loadEligibleCentres(db: Db, plan: LockedPlanRow): Promise<Eligibl
          array_agg(DISTINCT cet.exam_track_code ORDER BY cet.exam_track_code) AS mapped_tracks,
          a.plan_id AS current_plan_id,
          cp.title AS current_plan_title
-       FROM centres c
-       JOIN school s ON s.id = c.school_id
-       JOIN centre_exam_tracks cet
-         ON cet.centre_id = c.id
-        AND cet.grade_id = $1
+       FROM ${ELIGIBLE_CENTRE_TRACKS_FROM_SQL}
        LEFT JOIN program p ON p.id = c.program_id
        LEFT JOIN lms_curriculum_plan_assignments a
          ON a.centre_id = c.id
         AND a.grade_id = $1
         AND a.academic_year = $2
        LEFT JOIN lms_curriculum_plans cp ON cp.id = a.plan_id
-       WHERE c.is_active = true
-         AND c.is_physical = true
-         AND s.af_school_category = 'JNV'
+       WHERE ${ELIGIBLE_CENTRE_SQL}
+         AND cet.grade_id = $1
        GROUP BY c.id, c.name, s.name, s.code, s.region, p.name, a.plan_id, cp.title
        ORDER BY s.region NULLS LAST, s.name, c.name, c.id`,
       [plan.grade_id, plan.academic_year]
     ),
-    db<{ exam_track: string }>(
-      `SELECT DISTINCT cfg.exam_track
-       FROM lms_chapter_exam_configs cfg
-       JOIN chapter ch ON ch.id = cfg.chapter_id
-       WHERE cfg.is_in_syllabus = true
-         AND ch.grade_id = $1`,
-      [plan.grade_id]
-    ),
+    loadTracksWithContent(db, { gradeIds: [Number(plan.grade_id)] }),
   ]);
-  const tracksWithContent = contentRows.map((row) => row.exam_track);
+  // Filtered to the plan's one Grade, so every track listed belongs to it.
+  const tracksWithContent = [...contentByGrade.values()].flat();
   return rows.map((row) => ({
     centreId: Number(row.centre_id),
     centreName: row.centre_name,
@@ -480,7 +474,7 @@ export async function listCentreCoverage(academicYear: string): Promise<CentreCo
   const schema = await checkCurriculumPlansSchema();
   if (!schema.ok) return schema;
 
-  const [rows, contentRows, plans] = await Promise.all([
+  const [rows, contentByGrade, plans] = await Promise.all([
     query<CoverageRow>(
       `SELECT
          c.id AS centre_id,
@@ -495,9 +489,7 @@ export async function listCentreCoverage(academicYear: string): Promise<CentreCo
          cp.status AS plan_status,
          cp.closure_date::text AS plan_closure_date,
          cp.exam_tracks AS plan_exam_tracks
-       FROM centres c
-       JOIN school s ON s.id = c.school_id
-       JOIN centre_exam_tracks cet ON cet.centre_id = c.id
+       FROM ${ELIGIBLE_CENTRE_TRACKS_FROM_SQL}
        JOIN grade g ON g.id = cet.grade_id AND g.number = ANY($2::integer[])
        LEFT JOIN program p ON p.id = c.program_id
        LEFT JOIN lms_curriculum_plan_assignments a
@@ -505,23 +497,13 @@ export async function listCentreCoverage(academicYear: string): Promise<CentreCo
         AND a.academic_year = $1
         AND a.grade_id IN (SELECT ag.id FROM grade ag WHERE ag.number = g.number)
        LEFT JOIN lms_curriculum_plans cp ON cp.id = a.plan_id
-       WHERE c.is_active = true
-         AND c.is_physical = true
-         AND s.af_school_category = 'JNV'
+       WHERE ${ELIGIBLE_CENTRE_SQL}
        GROUP BY c.id, c.name, s.name, s.region, p.name, g.number,
                 a.plan_id, cp.title, cp.status, cp.closure_date, cp.exam_tracks
        ORDER BY s.region NULLS LAST, s.name, c.name, c.id, g.number`,
       [academicYear, COVERAGE_GRADES]
     ),
-    query<{ grade: string | number; exam_track: string }>(
-      `SELECT DISTINCT g.number AS grade, cfg.exam_track
-       FROM lms_chapter_exam_configs cfg
-       JOIN chapter ch ON ch.id = cfg.chapter_id
-       JOIN grade g ON g.id = ch.grade_id
-       WHERE cfg.is_in_syllabus = true
-         AND g.number = ANY($1::integer[])`,
-      [COVERAGE_GRADES]
-    ),
+    loadTracksWithContent(poolDb, { gradeNumbers: COVERAGE_GRADES }),
     listCurriculumPlans({ academicYear, grade: null }),
   ]);
   if (!plans.ok) return plans;
@@ -529,7 +511,7 @@ export async function listCentreCoverage(academicYear: string): Promise<CentreCo
   return {
     ok: true,
     academicYear,
-    centres: groupCoverageRows(rows, contentRows, getTodayIST()),
+    centres: groupCoverageRows(rows, contentByGrade, getTodayIST()),
     plans: plans.plans,
   };
 }
@@ -559,7 +541,7 @@ function coverageGrade(
 // The query returns one row per Centre + Grade; fold them into one row per Centre.
 function groupCoverageRows(
   rows: CoverageRow[],
-  contentRows: { grade: string | number; exam_track: string }[],
+  contentByGrade: Map<number, string[]>,
   today: string
 ): CentreCoverageRow[] {
   const centres = new Map<number, CentreCoverageRow>();
@@ -575,10 +557,7 @@ function groupCoverageRows(
       grades: { 11: null, 12: null },
     };
     centres.set(centreId, centre);
-    const tracksWithContent = contentRows
-      .filter((content) => Number(content.grade) === grade)
-      .map((content) => content.exam_track);
-    centre.grades[grade] = coverageGrade(row, tracksWithContent, today);
+    centre.grades[grade] = coverageGrade(row, contentByGrade.get(grade) ?? [], today);
   }
   return [...centres.values()];
 }
@@ -679,14 +658,10 @@ async function lockChosenPlans(
 async function loadEligibleGrades(db: Db, centreId: number): Promise<Set<number>> {
   const eligible = await db<{ grade: string | number }>(
     `SELECT DISTINCT g.number AS grade
-     FROM centres c
-     JOIN school s ON s.id = c.school_id
-     JOIN centre_exam_tracks cet ON cet.centre_id = c.id
+     FROM ${ELIGIBLE_CENTRE_TRACKS_FROM_SQL}
      JOIN grade g ON g.id = cet.grade_id
      WHERE c.id = $1
-       AND c.is_active = true
-       AND c.is_physical = true
-       AND s.af_school_category = 'JNV'`,
+       AND ${ELIGIBLE_CENTRE_SQL}`,
     [centreId]
   );
   return new Set(eligible.map((row) => Number(row.grade)));
