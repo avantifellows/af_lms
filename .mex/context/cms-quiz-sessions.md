@@ -172,6 +172,12 @@ never blocked by it.
 Curriculum Summary v2 reads chapter-test sessions straight from Postgres
 (`src/lib/curriculum-chapter-tests.ts`, #428) to derive Chapter Test Status. It relies on
 `meta_data.cms_source`, `test_format` (`chapter_test`, not `combined_chapter_test`), `status`,
-`grade`, the comma-separated `batch_id` list, `cms_test_id` / `cms_source_id`, and the IST
-wall-clock `start_time` / `end_time`. Renaming or reshaping any of those on the create path
-silently drops sessions from the Summary.
+`grade`, the comma-separated `batch_id` list, `cms_test_id` / `cms_source_id`, the IST
+wall-clock `start_time` / `end_time`, and `inserted_at` (UTC). Renaming or reshaping any of
+those on the create path silently drops sessions from the Summary.
+
+A session counts only when its `start_time` falls within the as-of date's academic year
+(1 Apr–31 Mar), and only for an as-of date by whose end it had been created (`inserted_at`
+converted to IST) or had started. Sessions keep no history, so this is how a past as-of
+replays: a session created later never makes a Chapter Scheduled or Conducted for an earlier
+as-of, and next year's cohort never counts for this year.
