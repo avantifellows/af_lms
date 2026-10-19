@@ -32,18 +32,27 @@ const fieldClassName =
   "min-h-[44px] rounded-md border border-border bg-bg-card px-3 py-2 text-sm font-normal text-text-primary disabled:cursor-not-allowed disabled:opacity-60";
 const labelClassName = "flex flex-col gap-1 text-sm font-bold text-text-primary";
 
+// The save that clashed with stored Chapter dates, and the Chapters it named. Clearing resubmits
+// exactly this, so the server clears only what the Admin was shown.
+interface ClearOffer {
+  values: CurriculumPlanMetadataValues;
+  chapterIds: number[];
+}
+
 // Create (POST) or update (PATCH) the plan's details. A new plan opens its editor; an update
-// refreshes the page. `clearConflictingDates` consents to clearing the stored Chapter dates that
-// clash with the new academic year or closure date.
+// refreshes the page. `clearOffer` consents to clearing the stored Chapter dates a previous save
+// listed as clashing with the new academic year or closure date.
 function usePlanDetailsSave(planId: number | undefined) {
   const router = useRouter();
   const [errors, setErrors] = useState<CurriculumPlanError[]>([]);
+  const [clearOffer, setClearOffer] = useState<ClearOffer | null>(null);
   const [saving, setSaving] = useState(false);
   const [savedMessage, setSavedMessage] = useState("");
 
-  async function save(values: CurriculumPlanMetadataValues, clearConflictingDates = false) {
+  async function save(values: CurriculumPlanMetadataValues, consent?: ClearOffer) {
     setSaving(true);
     setErrors([]);
+    setClearOffer(null);
     setSavedMessage("");
     try {
       const response = await planRequest(
@@ -55,11 +64,16 @@ function usePlanDetailsSave(planId: number | undefined) {
           academic_year: values.academicYear,
           grade: values.grade,
           closure_date: values.closureDate,
-          ...(clearConflictingDates ? { clear_conflicting_dates: true } : {}),
+          ...(consent
+            ? { clear_conflicting_dates: true, expected_chapter_ids: consent.chapterIds }
+            : {}),
         }
       );
       if (!response.ok) {
-        setErrors(planErrors(response.body, "Could not save the plan"));
+        const failed = planErrors(response.body, "Could not save the plan");
+        setErrors(failed);
+        const chapterIds = storedDateClashIds(failed);
+        if (planId !== undefined && chapterIds.length > 0) setClearOffer({ values, chapterIds });
       } else if (planId === undefined) {
         router.push(`/curriculum-summary/plans/${(response.body.plan as { id: number }).id}`);
       } else {
@@ -73,7 +87,14 @@ function usePlanDetailsSave(planId: number | undefined) {
     }
   }
 
-  return { errors, saving, savedMessage, save };
+  // Any edit after a clash withdraws the offer: the clashing set may no longer be what was shown.
+  function withdrawClearOffer() {
+    if (!clearOffer) return;
+    setClearOffer(null);
+    setErrors((current) => current.filter((error) => !isStoredDateClash(error)));
+  }
+
+  return { errors, clearOffer, saving, savedMessage, save, withdrawClearOffer };
 }
 
 export default function CurriculumPlanMetadataForm({
@@ -83,7 +104,8 @@ export default function CurriculumPlanMetadataForm({
   assignmentCount = 0,
 }: Props) {
   const [values, setValues] = useState(initialValues);
-  const { errors, saving, savedMessage, save } = usePlanDetailsSave(planId);
+  const { errors, clearOffer, saving, savedMessage, save, withdrawClearOffer } =
+    usePlanDetailsSave(planId);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -95,7 +117,10 @@ export default function CurriculumPlanMetadataForm({
       <form onSubmit={handleSubmit} className="grid gap-4 md:grid-cols-2">
         <PlanDetailsFields
           values={values}
-          onChange={(changes) => setValues((current) => ({ ...current, ...changes }))}
+          onChange={(changes) => {
+            setValues((current) => ({ ...current, ...changes }));
+            withdrawClearOffer();
+          }}
           readOnly={readOnly}
           assignmentCount={assignmentCount}
         />
@@ -108,13 +133,13 @@ export default function CurriculumPlanMetadataForm({
             <PlanErrorItems errors={errors} />
           </ul>
         ) : null}
-        {planId !== undefined && hasStoredDateClash(errors) ? (
+        {clearOffer ? (
           <div className="md:col-span-2">
             <Button
               type="button"
               variant="secondary"
               disabled={readOnly || saving}
-              onClick={() => void save(values, true)}
+              onClick={() => void save(clearOffer.values, clearOffer)}
             >
               Clear these Chapters&apos; dates and save
             </Button>
@@ -137,8 +162,12 @@ export default function CurriculumPlanMetadataForm({
 
 // Stored Chapter dates outside the new academic year or after the new closure date. Some may be
 // on hidden Chapters that the editor grid doesn't show, so the form offers to clear them.
-function hasStoredDateClash(errors: CurriculumPlanError[]): boolean {
-  return errors.some((error) => error.field === "closure_date" && error.chapterId !== undefined);
+function isStoredDateClash(error: CurriculumPlanError): boolean {
+  return error.field === "closure_date" && error.chapterId !== undefined;
+}
+
+function storedDateClashIds(errors: CurriculumPlanError[]): number[] {
+  return [...new Set(errors.filter(isStoredDateClash).map((error) => error.chapterId as number))];
 }
 
 function PlanDetailsFields({

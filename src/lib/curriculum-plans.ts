@@ -722,10 +722,41 @@ function storedDateErrors(
 }
 
 // The Admin's consent to clear the dates that clash with the new academic year or closure date.
-// Hidden Chapters aren't in the editor grid, so this is the only way to clear their dates.
-function clearConflictingDatesRequested(body: unknown): boolean {
-  return Boolean(body && typeof body === "object" && (body as Record<string, unknown>).clear_conflicting_dates === true);
+// Hidden Chapters aren't in the editor grid, so this is the only way to clear their dates. The
+// consent names the Chapters the Admin was shown (`expected_chapter_ids`), so a closure date or
+// academic year edited after that 400 can't clear dates the Admin never saw.
+type ClearConsent =
+  | { ok: true; expectedChapterIds: Set<number> | null }
+  | CurriculumPlanValidationFailure;
+
+function readClearConsent(body: unknown): ClearConsent {
+  const input = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+  if (input.clear_conflicting_dates !== true) return { ok: true, expectedChapterIds: null };
+  const expected = input.expected_chapter_ids;
+  const valid =
+    Array.isArray(expected) &&
+    expected.length > 0 &&
+    expected.every((id) => typeof id === "number" && Number.isInteger(id) && id > 0);
+  if (!valid) {
+    return validationFailure([
+      {
+        field: "expected_chapter_ids",
+        message: "Clearing clashing dates needs the Chapters you reviewed (expected_chapter_ids)",
+      },
+    ]);
+  }
+  return { ok: true, expectedChapterIds: new Set(expected as number[]) };
 }
+
+function sameIds(a: Set<number>, b: Set<number>): boolean {
+  return a.size === b.size && [...a].every((id) => b.has(id));
+}
+
+const CLASHING_DATES_CHANGED: Conflict = {
+  ok: false,
+  status: 409,
+  error: "The dates that clash have changed; review them and try again",
+};
 
 // Clear only the dates that clash. A clashing test date goes on its own and the due date stays.
 // A clashing due date takes the test date with it, since a test date needs a due date. The row
@@ -762,8 +793,9 @@ export type CurriculumPlanUpdateResult =
 // the plan must still fall within the academic year and on or before the closure date,
 // including dates of Chapters hidden because they left the syllabus or the served tracks: they
 // come back when the Chapter does. With `clear_conflicting_dates: true` the clashing dates are
-// cleared instead of rejected. Academic year and Grade are locked while the plan has
-// any Plan Assignment.
+// cleared instead of rejected, but only when they are exactly the Chapters the Admin was shown
+// (`expected_chapter_ids`); otherwise 409 and nothing is cleared. Academic year and Grade are
+// locked while the plan has any Plan Assignment.
 export async function updateCurriculumPlanMetadata(params: {
   id: number;
   adminEmail: string;
@@ -776,6 +808,8 @@ export async function updateCurriculumPlanMetadata(params: {
   const normalized = normalizeCurriculumPlanMetadata(params.body);
   if (!normalized.ok) return normalized;
   const metadata = normalized.metadata;
+  const consent = readClearConsent(params.body);
+  if (!consent.ok) return consent;
 
   return withTransaction(async (client) => {
     const db = clientDb(client);
@@ -792,9 +826,12 @@ export async function updateCurriculumPlanMetadata(params: {
     const updated = { academic_year: metadata.academicYear, closure_date: metadata.closureDate };
     const storedDates = await loadStoredChapterDates(db, params.id);
     const errors = storedDateErrors(storedDates, updated);
-    if (errors.length > 0) {
-      if (!clearConflictingDatesRequested(params.body)) return validationFailure(errors);
+    if (consent.expectedChapterIds) {
+      const clashingIds = new Set(errors.map((error) => Number(error.chapterId)));
+      if (!sameIds(clashingIds, consent.expectedChapterIds)) return CLASHING_DATES_CHANGED;
       await clearChapterDates(db, params.id, storedDates, updated, params.adminEmail);
+    } else if (errors.length > 0) {
+      return validationFailure(errors);
     }
 
     await db(

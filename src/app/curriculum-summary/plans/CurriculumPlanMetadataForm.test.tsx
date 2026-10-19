@@ -111,33 +111,99 @@ describe("CurriculumPlanMetadataForm", () => {
     expect(await screen.findByTestId("plan-details-errors")).toHaveTextContent(message);
   });
 
-  it("offers to clear the clashing Chapters' dates, then saves with that consent", async () => {
+  const CLASH_RESPONSE = {
+    ok: false,
+    json: async () => ({
+      error: "Invalid Curriculum Plan",
+      errors: [
+        {
+          field: "closure_date",
+          chapterId: 9,
+          chapterName: "Rotational Dynamics (Advanced)",
+          message: "Chapter Due Date 2027-02-20 is after the Plan Closure Date 2027-02-28",
+        },
+        {
+          field: "closure_date",
+          chapterId: 9,
+          chapterName: "Rotational Dynamics (Advanced)",
+          message: "Chapter Test Date 2027-03-01 is after the Plan Closure Date 2027-02-28",
+        },
+        {
+          field: "closure_date",
+          chapterId: 12,
+          chapterName: "Waves",
+          message: "Chapter Due Date 2027-03-02 is after the Plan Closure Date 2027-02-28",
+        },
+      ],
+    }),
+  };
+  const CLEAR_BUTTON = { name: "Clear these Chapters' dates and save" };
+
+  it("offers to clear the clashing Chapters' dates, then resubmits what the Admin saw with that consent", async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce({
-        ok: false,
-        json: async () => ({
-          error: "Invalid Curriculum Plan",
-          errors: [
-            {
-              field: "closure_date",
-              chapterId: 9,
-              chapterName: "Rotational Dynamics (Advanced)",
-              message: "Chapter Due Date 2027-02-20 is after the Plan Closure Date 2026-12-31",
-            },
-          ],
-        }),
-      })
+      .mockResolvedValueOnce(CLASH_RESPONSE)
       .mockResolvedValueOnce({ ok: true, json: async () => ({ plan: { id: 7 } }) });
     vi.stubGlobal("fetch", fetchMock);
     render(<CurriculumPlanMetadataForm planId={7} initialValues={VALUES} readOnly={false} />);
 
+    fireEvent.change(screen.getByLabelText("Plan Closure Date"), { target: { value: "2027-02-28" } });
     fireEvent.click(screen.getByRole("button", { name: "Save plan details" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Clear these Chapters' dates and save" }));
+    fireEvent.click(await screen.findByRole("button", CLEAR_BUTTON));
 
     expect(await screen.findByRole("status")).toHaveTextContent("Plan details saved.");
-    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).not.toHaveProperty("clear_conflicting_dates");
-    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toMatchObject({ clear_conflicting_dates: true });
+    const first = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(first).not.toHaveProperty("clear_conflicting_dates");
+    expect(first).not.toHaveProperty("expected_chapter_ids");
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({
+      ...first,
+      closure_date: "2027-02-28",
+      clear_conflicting_dates: true,
+      expected_chapter_ids: [9, 12],
+    });
+  });
+
+  it("withdraws the offer to clear once the Admin edits a field after the clash", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(CLASH_RESPONSE);
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CurriculumPlanMetadataForm planId={7} initialValues={VALUES} readOnly={false} />);
+
+    fireEvent.change(screen.getByLabelText("Plan Closure Date"), { target: { value: "2027-02-28" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save plan details" }));
+    await screen.findByRole("button", CLEAR_BUTTON);
+
+    fireEvent.change(screen.getByLabelText("Plan Closure Date"), { target: { value: "2026-12-31" } });
+
+    expect(screen.queryByRole("button", CLEAR_BUTTON)).toBeNull();
+    expect(screen.queryByTestId("plan-details-errors")).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the server's refusal when the clashing dates changed before the clear", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(CLASH_RESPONSE)
+      .mockResolvedValueOnce({
+        ok: false,
+        json: async () => ({
+          ok: false,
+          status: 409,
+          error: "The dates that clash have changed; review them and try again",
+        }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CurriculumPlanMetadataForm planId={7} initialValues={VALUES} readOnly={false} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Save plan details" }));
+    fireEvent.click(await screen.findByRole("button", CLEAR_BUTTON));
+
+    await vi.waitFor(() =>
+      expect(screen.getByTestId("plan-details-errors")).toHaveTextContent(
+        "The dates that clash have changed; review them and try again"
+      )
+    );
+    expect(screen.queryByRole("button", CLEAR_BUTTON)).toBeNull();
+    expect(mockRefresh).not.toHaveBeenCalled();
   });
 
   it("does not offer to clear dates for errors that aren't about stored Chapter dates", async () => {

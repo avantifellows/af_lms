@@ -124,7 +124,7 @@ describe("updateCurriculumPlanMetadata", () => {
     const result = await updateCurriculumPlanMetadata({
       id: 7,
       adminEmail: ADMIN_EMAIL,
-      body: metadataBody({ clear_conflicting_dates: true }),
+      body: metadataBody({ clear_conflicting_dates: true, expected_chapter_ids: [501] }),
     });
 
     expect(result.ok).toBe(true);
@@ -148,7 +148,7 @@ describe("updateCurriculumPlanMetadata", () => {
     const result = await updateCurriculumPlanMetadata({
       id: 7,
       adminEmail: ADMIN_EMAIL,
-      body: metadataBody({ clear_conflicting_dates: true }),
+      body: metadataBody({ clear_conflicting_dates: true, expected_chapter_ids: [501] }),
     });
 
     expect(result.ok).toBe(true);
@@ -157,6 +157,90 @@ describe("updateCurriculumPlanMetadata", () => {
     // No due date clashes ($2 empty), so the CASE keeps 501's due date; its test date is cleared.
     expect(cleared[0].params).toEqual([7, [], [501], ADMIN_EMAIL]);
     expect(cleared[0].sql).toContain("WHERE plan_id = $1 AND (chapter_id = ANY($2::bigint[]) OR chapter_id = ANY($3::bigint[]))");
+  });
+
+  // The Admin consented to clear the Chapters a 400 listed. If the closure date was edited
+  // since, the clashing set differs: clearing it would wipe dates the Admin never saw.
+  it("refuses to clear when the clashing Chapters differ from the ones the Admin saw", async () => {
+    db.current.on("FROM lms_curriculum_plan_chapters pc", [
+      { chapter_id: 501, chapter_name: "Rotational Dynamics", due_date: "2027-02-20", test_date: null },
+      { chapter_id: 503, chapter_name: "Waves", due_date: "2027-01-10", test_date: null },
+    ]);
+
+    const result = await updateCurriculumPlanMetadata({
+      id: 7,
+      adminEmail: ADMIN_EMAIL,
+      body: metadataBody({ clear_conflicting_dates: true, expected_chapter_ids: [501] }),
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      status: 409,
+      error: "The dates that clash have changed; review them and try again",
+    });
+    expect(db.current.sqlCalls("UPDATE lms_curriculum_plan_chapters")).toHaveLength(0);
+    expect(db.current.sqlCalls("UPDATE lms_curriculum_plans")).toHaveLength(0);
+  });
+
+  it("refuses to clear when nothing clashes any more but the Admin expected Chapters to", async () => {
+    db.current.on("FROM lms_curriculum_plan_chapters pc", [
+      { chapter_id: 501, chapter_name: "Rotational Dynamics", due_date: "2026-11-20", test_date: null },
+    ]);
+
+    const result = await updateCurriculumPlanMetadata({
+      id: 7,
+      adminEmail: ADMIN_EMAIL,
+      body: metadataBody({ clear_conflicting_dates: true, expected_chapter_ids: [501] }),
+    });
+
+    expect(result).toMatchObject({ ok: false, status: 409 });
+    expect(db.current.sqlCalls("UPDATE lms_curriculum_plan_chapters")).toHaveLength(0);
+    expect(db.current.sqlCalls("UPDATE lms_curriculum_plans")).toHaveLength(0);
+  });
+
+  it("clears when the clashing set matches regardless of order or repeats", async () => {
+    db.current.on("FROM lms_curriculum_plan_chapters pc", [
+      { chapter_id: 501, chapter_name: "Rotational Dynamics", due_date: "2027-02-20", test_date: "2027-02-21" },
+      { chapter_id: 503, chapter_name: "Waves", due_date: "2026-12-10", test_date: "2027-01-10" },
+    ]);
+
+    const result = await updateCurriculumPlanMetadata({
+      id: 7,
+      adminEmail: ADMIN_EMAIL,
+      body: metadataBody({ clear_conflicting_dates: true, expected_chapter_ids: [503, 501, 501] }),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(db.current.sqlCalls("UPDATE lms_curriculum_plan_chapters")).toHaveLength(1);
+    expect(db.current.sqlCalls("UPDATE lms_curriculum_plans")).toHaveLength(1);
+  });
+
+  it.each([
+    ["missing", undefined],
+    ["not an array", "501"],
+    ["empty", []],
+    ["a string id", ["501"]],
+    ["zero", [0]],
+    ["negative", [-1]],
+    ["a fraction", [501.5]],
+  ])("rejects clear_conflicting_dates with %s expected_chapter_ids", async (_label, expected) => {
+    db.current.on("FROM lms_curriculum_plan_chapters pc", [
+      { chapter_id: 501, chapter_name: "Rotational Dynamics", due_date: "2027-02-20", test_date: null },
+    ]);
+
+    const result = await updateCurriculumPlanMetadata({
+      id: 7,
+      adminEmail: ADMIN_EMAIL,
+      body: metadataBody({ clear_conflicting_dates: true, expected_chapter_ids: expected }),
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      status: 400,
+      errors: [{ field: "expected_chapter_ids" }],
+    });
+    expect(db.current.sqlCalls("UPDATE lms_curriculum_plan_chapters")).toHaveLength(0);
+    expect(db.current.sqlCalls("UPDATE lms_curriculum_plans")).toHaveLength(0);
   });
 
   it("rejects an academic year change that leaves stored dates outside the new year", async () => {
