@@ -106,6 +106,73 @@ describe("CurriculumPlanChapterDates", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  // A plan details save with "Clear these Chapters' dates and save" refreshes the page with the
+  // clashing dates gone; the grid must show that, without losing unsaved edits elsewhere.
+  it("takes cleared dates from a refresh and keeps unsaved edits on other Chapters", async () => {
+    const fetchMock = respond({ warnings: [] });
+    const chapters = [...CHAPTERS, chapter(4, "Optics", PHYSICS, "2026-08-10", "2026-08-12")];
+    const { rerender } = render(<CurriculumPlanChapterDates planId={7} chapters={chapters} readOnly={false} />);
+
+    fireEvent.change(screen.getByLabelText("Due date for Waves"), { target: { value: "2026-07-20" } });
+    fireEvent.change(screen.getByLabelText("Test date for Optics"), { target: { value: "2026-08-15" } });
+
+    // The server cleared Motion's dates and Optics' test date.
+    rerender(
+      <CurriculumPlanChapterDates
+        planId={7}
+        chapters={[
+          chapter(1, "Motion", PHYSICS),
+          chapter(2, "Waves", PHYSICS),
+          chapter(3, "Bonding", CHEMISTRY),
+          chapter(4, "Optics", PHYSICS, "2026-08-10"),
+        ]}
+        readOnly={false}
+      />
+    );
+
+    expect(screen.getByLabelText("Due date for Motion")).toHaveValue("");
+    expect(screen.getByLabelText("Test date for Motion")).toHaveValue("");
+    const motionRow = screen.getByLabelText("Due date for Motion").closest("tr") as HTMLElement;
+    expect(within(motionRow).getByText("Not in plan")).toBeInTheDocument();
+    // Unsaved edits survive: Waves never changed on the server, and Optics' edit wins over the
+    // cleared test date.
+    expect(screen.getByLabelText("Due date for Waves")).toHaveValue("2026-07-20");
+    expect(screen.getByLabelText("Due date for Optics")).toHaveValue("2026-08-10");
+    expect(screen.getByLabelText("Test date for Optics")).toHaveValue("2026-08-15");
+
+    save();
+    await screen.findByRole("status");
+    // Motion matches the server, so only the two edited Chapters are sent.
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+      chapters: [
+        { chapter_id: 2, due_date: "2026-07-20", test_date: null },
+        { chapter_id: 4, due_date: "2026-08-10", test_date: "2026-08-15" },
+      ],
+    });
+  });
+
+  it("keeps its saved message when the refresh after its own save arrives", async () => {
+    respond({ warnings: [] });
+    const { rerender } = render(<CurriculumPlanChapterDates planId={7} chapters={CHAPTERS} readOnly={false} />);
+
+    fireEvent.change(screen.getByLabelText("Due date for Waves"), { target: { value: "2026-07-20" } });
+    save();
+    expect(await screen.findByRole("status")).toHaveTextContent("Chapter dates saved.");
+
+    rerender(
+      <CurriculumPlanChapterDates
+        planId={7}
+        chapters={[CHAPTERS[0], chapter(2, "Waves", PHYSICS, "2026-07-20"), CHAPTERS[2]]}
+        readOnly={false}
+      />
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent("Chapter dates saved.");
+    expect(screen.getByLabelText("Due date for Waves")).toHaveValue("2026-07-20");
+    save();
+    expect(screen.getByRole("status")).toHaveTextContent("No date changes to save.");
+  });
+
   it("names each rejected Chapter and keeps the edits unsaved", async () => {
     const fetchMock = respond(
       {

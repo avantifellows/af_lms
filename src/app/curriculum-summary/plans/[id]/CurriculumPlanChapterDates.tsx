@@ -37,6 +37,45 @@ function datesFor(dates: ChapterDates, chapter: CurriculumPlanChapter) {
   return dates[chapter.chapterId] ?? storedDates(chapter);
 }
 
+function sameDates(a: ChapterDates[number], b: ChapterDates[number]): boolean {
+  return a.dueDate === b.dueDate && a.testDate === b.testDate;
+}
+
+// Fold refreshed server dates into the grid. A Chapter whose stored dates changed on the server
+// (a plan details save that cleared clashing dates) takes them as its saved dates, and as its
+// shown dates too unless it has an unsaved edit. Other Chapters keep their unsaved edits.
+function reconcileServerDates(
+  server: ChapterDates,
+  saved: ChapterDates,
+  values: ChapterDates
+): { saved: ChapterDates; values: ChapterDates } {
+  const nextSaved = { ...saved };
+  const nextValues = { ...values };
+  for (const [id, serverDates] of Object.entries(server)) {
+    const chapterId = Number(id);
+    const before = saved[chapterId];
+    if (!before || sameDates(before, serverDates)) continue;
+    nextSaved[chapterId] = serverDates;
+    if (!values[chapterId] || sameDates(values[chapterId], before)) nextValues[chapterId] = serverDates;
+  }
+  return { saved: nextSaved, values: nextValues };
+}
+
+// The saved and shown dates, kept in step with the server's after each refresh.
+function useServerSyncedDates(chapters: CurriculumPlanChapter[]) {
+  const serverDates = useMemo(() => datesFromChapters(chapters), [chapters]);
+  const [synced, setSynced] = useState(serverDates);
+  const [saved, setSaved] = useState(serverDates);
+  const [values, setValues] = useState(serverDates);
+  if (synced !== serverDates) {
+    const next = reconcileServerDates(serverDates, saved, values);
+    setSynced(serverDates);
+    setSaved(next.saved);
+    setValues(next.values);
+  }
+  return { saved, setSaved, values, setValues };
+}
+
 // Chapters arrive in syllabus order (subject, then coverage sequence); keep that order.
 function groupBySubject(chapters: CurriculumPlanChapter[]) {
   const groups: Array<{ subjectId: number; subjectName: string; chapters: CurriculumPlanChapter[] }> = [];
@@ -118,8 +157,7 @@ function useChapterDatesSave(planId: number) {
 }
 
 export default function CurriculumPlanChapterDates({ planId, chapters, readOnly }: Props) {
-  const [saved, setSaved] = useState(() => datesFromChapters(chapters));
-  const [values, setValues] = useState(saved);
+  const { saved, setSaved, values, setValues } = useServerSyncedDates(chapters);
   const groups = useMemo(() => groupBySubject(chapters), [chapters]);
   const feedback = useChapterDatesSave(planId);
 
