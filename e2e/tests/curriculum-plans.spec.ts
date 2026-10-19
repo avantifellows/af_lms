@@ -920,6 +920,42 @@ test.describe("Curriculum Plan assignment", () => {
     expect(plan.assignmentCount).toBe(1);
   });
 
+  test("an assigned Centre that is no longer eligible is named before Save removes it", async ({
+    adminPage,
+  }) => {
+    const planId = await createPlan(adminPage, {
+      title: "E2E G11 Ineligible Plan",
+      examTracks: ["jee_main"],
+      grade: 11,
+    });
+    const seeded = await adminPage.request.put(`/api/curriculum/plans/${planId}/assignments`, {
+      data: { centre_ids: [centreIds.Alpha, centreIds.Bravo] },
+    });
+    expect(seeded.status()).toBe(200);
+
+    const pool = getTestPool();
+    try {
+      // Bravo stops being eligible (deactivated) while still assigned.
+      await pool.query("UPDATE centres SET is_active = false WHERE id = $1", [centreIds.Bravo]);
+      await adminPage.goto(`/curriculum-summary/plans/${planId}/assign`);
+      await expect(assignRow(adminPage, "Bravo")).toHaveCount(0);
+      await expect(adminPage.getByTestId("assign-move-count")).toHaveText(
+        "No Centres move from another plan · 1 assignment removed"
+      );
+      await expect(adminPage.getByTestId("assign-ineligible-removals")).toHaveText(
+        `Saving also removes 1 Centre no longer eligible for this plan: ${ASSIGN_PREFIX}Bravo`
+      );
+      await adminPage.getByRole("button", { name: "Save assignments" }).click();
+      await expect(adminPage.getByText("Assignments saved.")).toBeVisible();
+      await expect(adminPage.getByTestId("assign-ineligible-removals")).toHaveCount(0);
+      const plan = (await (await adminPage.request.get(`/api/curriculum/plans/${planId}`)).json()).plan;
+      expect(plan.assignmentCount).toBe(1);
+    } finally {
+      await pool.query("UPDATE centres SET is_active = true WHERE id = $1", [centreIds.Bravo]);
+      await pool.end();
+    }
+  });
+
   test("academic year and Grade are locked while the plan has a Plan Assignment", async ({
     adminPage,
   }) => {

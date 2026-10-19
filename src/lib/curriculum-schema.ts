@@ -62,7 +62,8 @@ const CONFIG_MANAGEMENT_REQUIRED_COLUMNS: Array<{
   { table: "lms_chapter_exam_configs", column: "updated_at" },
 ];
 
-// Curriculum Plans (#417) read the in-syllabus config join plus the three plan tables.
+// Curriculum Plans (#417) read the in-syllabus config join plus the three plan tables, and write
+// every audit column below; a partially applied migration must 503, not fail mid-request.
 const PLANS_REQUIRED_COLUMNS: Array<{ table: string; column: string }> = [
   { table: "lms_chapter_exam_configs", column: "chapter_id" },
   { table: "lms_chapter_exam_configs", column: "exam_track" },
@@ -75,8 +76,10 @@ const PLANS_REQUIRED_COLUMNS: Array<{ table: string; column: string }> = [
   { table: "lms_curriculum_plans", column: "exam_tracks" },
   { table: "lms_curriculum_plans", column: "status" },
   { table: "lms_curriculum_plans", column: "closure_date" },
+  { table: "lms_curriculum_plans", column: "activated_at" },
   { table: "lms_curriculum_plans", column: "inserted_by_email" },
   { table: "lms_curriculum_plans", column: "updated_by_email" },
+  { table: "lms_curriculum_plans", column: "inserted_at" },
   { table: "lms_curriculum_plans", column: "updated_at" },
   { table: "lms_curriculum_plan_chapters", column: "plan_id" },
   { table: "lms_curriculum_plan_chapters", column: "chapter_id" },
@@ -84,11 +87,16 @@ const PLANS_REQUIRED_COLUMNS: Array<{ table: string; column: string }> = [
   { table: "lms_curriculum_plan_chapters", column: "test_date" },
   { table: "lms_curriculum_plan_chapters", column: "inserted_by_email" },
   { table: "lms_curriculum_plan_chapters", column: "updated_by_email" },
+  { table: "lms_curriculum_plan_chapters", column: "inserted_at" },
   { table: "lms_curriculum_plan_chapters", column: "updated_at" },
   { table: "lms_curriculum_plan_assignments", column: "plan_id" },
   { table: "lms_curriculum_plan_assignments", column: "centre_id" },
   { table: "lms_curriculum_plan_assignments", column: "grade_id" },
   { table: "lms_curriculum_plan_assignments", column: "academic_year" },
+  { table: "lms_curriculum_plan_assignments", column: "inserted_by_email" },
+  { table: "lms_curriculum_plan_assignments", column: "updated_by_email" },
+  { table: "lms_curriculum_plan_assignments", column: "inserted_at" },
+  { table: "lms_curriculum_plan_assignments", column: "updated_at" },
 ];
 
 let cachedStatus: Promise<CurriculumSchemaStatus> | null = null;

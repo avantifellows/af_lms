@@ -368,29 +368,45 @@ export async function createCurriculumPlan(params: {
 
   return withTransaction(async (client) => {
     const db = clientDb(client);
-    const gradeId = await resolveGradeId(db, metadata.grade);
-    if (gradeId === null) {
-      return validationFailure([{ field: "grade", message: "Grade was not found" }]);
-    }
-    const inserted = await db<{ id: string | number }>(
-      `INSERT INTO lms_curriculum_plans
-         (title, academic_year, grade_id, exam_tracks, status, closure_date,
-          inserted_by_email, updated_by_email, inserted_at, updated_at)
-       VALUES ($1, $2, $3, $4::text[], 'draft', $5::date, $6, $6,
-               (NOW() AT TIME ZONE 'UTC'), (NOW() AT TIME ZONE 'UTC'))
-       RETURNING id`,
-      [
-        metadata.title,
-        metadata.academicYear,
-        gradeId,
-        metadata.examTracks,
-        metadata.closureDate,
-        params.adminEmail,
-      ]
-    );
-    const rows = await db<PlanRow>(`${PLAN_SELECT} WHERE p.id = $1`, [inserted[0].id]);
-    return { ok: true as const, plan: mapPlanRow(rows[0]) };
+    const created = await insertDraftPlan(db, metadata, params.adminEmail);
+    if (!created.ok) return created;
+    return { ok: true as const, plan: await readPlanSummary(db, created.id) };
   });
+}
+
+async function readPlanSummary(db: Db, id: number | string): Promise<CurriculumPlanSummary> {
+  const rows = await db<PlanRow>(`${PLAN_SELECT} WHERE p.id = $1`, [id]);
+  return mapPlanRow(rows[0]);
+}
+
+// Insert a Draft plan row; `gradeId` is the Grade's id (metadata carries its number).
+async function insertPlanRow(
+  db: Db,
+  plan: Omit<CurriculumPlanMetadata, "grade"> & { gradeId: number | string },
+  adminEmail: string
+): Promise<number> {
+  const inserted = await db<{ id: string | number }>(
+    `INSERT INTO lms_curriculum_plans
+       (title, academic_year, grade_id, exam_tracks, status, closure_date,
+        inserted_by_email, updated_by_email, inserted_at, updated_at)
+     VALUES ($1, $2, $3, $4::text[], 'draft', $5::date, $6, $6,
+             (NOW() AT TIME ZONE 'UTC'), (NOW() AT TIME ZONE 'UTC'))
+     RETURNING id`,
+    [plan.title, plan.academicYear, plan.gradeId, plan.examTracks, plan.closureDate, adminEmail]
+  );
+  return Number(inserted[0].id);
+}
+
+async function insertDraftPlan(
+  db: Db,
+  metadata: CurriculumPlanMetadata,
+  adminEmail: string
+): Promise<{ ok: true; id: number } | CurriculumPlanValidationFailure> {
+  const gradeId = await resolveGradeId(db, metadata.grade);
+  if (gradeId === null) {
+    return validationFailure([{ field: "grade", message: "Grade was not found" }]);
+  }
+  return { ok: true, id: await insertPlanRow(db, { ...metadata, gradeId }, adminEmail) };
 }
 
 export interface CurriculumPlanListFilters {
@@ -495,6 +511,91 @@ function planDateError(
   return null;
 }
 
+// Lock the plan, validate every input against its effective Chapters and date rules, then
+// upsert them. Nothing is written when any input is invalid.
+async function applyChapterDates(
+  db: Db,
+  planId: number,
+  inputs: ChapterDateInput[],
+  adminEmail: string
+): Promise<{ ok: true; warnings: CurriculumPlanWarning[] } | CurriculumPlanValidationFailure | NotFound> {
+  const plan = await lockPlan(db, planId);
+  if (!plan) return planNotFound();
+
+  const chapters = await loadEffectiveChapters(db, {
+    id: planId,
+    gradeId: Number(plan.grade_id),
+    examTracks: plan.exam_tracks,
+  });
+  const chaptersById = new Map(chapters.map((chapter) => [chapter.chapterId, chapter]));
+  const checked = inputs.map((input) => checkChapterDateInput(input, chaptersById.get(input.chapterId), plan));
+  const errors = checked.flatMap((item) => item.errors);
+  if (errors.length > 0) return validationFailure(errors);
+
+  for (const input of inputs) {
+    await db(
+      `INSERT INTO lms_curriculum_plan_chapters
+         (plan_id, chapter_id, due_date, test_date,
+          inserted_by_email, updated_by_email, inserted_at, updated_at)
+       VALUES ($1, $2, $3::date, $4::date, $5, $5,
+               (NOW() AT TIME ZONE 'UTC'), (NOW() AT TIME ZONE 'UTC'))
+       ON CONFLICT (plan_id, chapter_id) DO UPDATE SET
+         due_date = EXCLUDED.due_date,
+         test_date = EXCLUDED.test_date,
+         updated_by_email = EXCLUDED.updated_by_email,
+         updated_at = EXCLUDED.updated_at`,
+      [planId, input.chapterId, input.dueDate, input.testDate, adminEmail]
+    );
+  }
+  await db(
+    `UPDATE lms_curriculum_plans
+     SET updated_by_email = $2, updated_at = (NOW() AT TIME ZONE 'UTC')
+     WHERE id = $1`,
+    [planId, adminEmail]
+  );
+  return { ok: true, warnings: checked.flatMap((item) => item.warnings) };
+}
+
+// One Chapter's dates: errors (not an in-syllabus Chapter of the plan, outside the academic
+// year, after closure, test without due) and the test-before-due warning.
+function checkChapterDateInput(
+  input: ChapterDateInput,
+  chapter: CurriculumPlanChapter | undefined,
+  plan: { academic_year: string; closure_date: string }
+): { errors: CurriculumPlanError[]; warnings: CurriculumPlanWarning[] } {
+  if (!chapter) {
+    return {
+      errors: [
+        {
+          field: "chapters",
+          chapterId: input.chapterId,
+          message: `Chapter ${input.chapterId} is not an in-syllabus Chapter of this plan`,
+        },
+      ],
+      warnings: [],
+    };
+  }
+  const named = { field: "chapters", chapterId: chapter.chapterId, chapterName: chapter.chapterName };
+  const messages = [
+    planDateError("Chapter Due Date", input.dueDate, plan),
+    planDateError("Chapter Test Date", input.testDate, plan),
+    input.testDate && !input.dueDate ? "Chapter Test Date needs a Chapter Due Date" : null,
+  ].filter((message): message is string => message !== null);
+  const testBeforeDue = Boolean(input.dueDate && input.testDate && input.testDate < input.dueDate);
+  return {
+    errors: messages.map((message) => ({ ...named, message })),
+    warnings: testBeforeDue
+      ? [
+          {
+            chapterId: chapter.chapterId,
+            chapterName: chapter.chapterName,
+            message: "Chapter Test Date is before its Chapter Due Date",
+          },
+        ]
+      : [],
+  };
+}
+
 // Batch upsert of Chapter Due / Test Dates. All-or-nothing: any invalid Chapter rejects the
 // whole batch with per-Chapter errors. A test date before its due date is saved with a warning.
 export async function saveCurriculumPlanChapterDates(params: {
@@ -509,74 +610,9 @@ export async function saveCurriculumPlanChapterDates(params: {
   const normalized = normalizeChapterDateInputs(params.body);
   if (!normalized.ok) return normalized;
 
-  const outcome = await withTransaction(async (client) => {
-    const db = clientDb(client);
-    const plan = await lockPlan(db, params.id);
-    if (!plan) return planNotFound();
-
-    const chapters = await loadEffectiveChapters(db, {
-      id: params.id,
-      gradeId: Number(plan.grade_id),
-      examTracks: plan.exam_tracks,
-    });
-    const chaptersById = new Map(chapters.map((chapter) => [chapter.chapterId, chapter]));
-    const errors: CurriculumPlanError[] = [];
-    const warnings: CurriculumPlanWarning[] = [];
-
-    for (const input of normalized.inputs) {
-      const chapter = chaptersById.get(input.chapterId);
-      if (!chapter) {
-        errors.push({
-          field: "chapters",
-          chapterId: input.chapterId,
-          message: `Chapter ${input.chapterId} is not an in-syllabus Chapter of this plan`,
-        });
-        continue;
-      }
-      const named = { field: "chapters", chapterId: chapter.chapterId, chapterName: chapter.chapterName };
-      for (const [label, date] of [
-        ["Chapter Due Date", input.dueDate],
-        ["Chapter Test Date", input.testDate],
-      ] as const) {
-        const message = planDateError(label, date, plan);
-        if (message) errors.push({ ...named, message });
-      }
-      if (input.testDate && !input.dueDate) {
-        errors.push({ ...named, message: "Chapter Test Date needs a Chapter Due Date" });
-      }
-      if (input.dueDate && input.testDate && input.testDate < input.dueDate) {
-        warnings.push({
-          chapterId: chapter.chapterId,
-          chapterName: chapter.chapterName,
-          message: "Chapter Test Date is before its Chapter Due Date",
-        });
-      }
-    }
-    if (errors.length > 0) return validationFailure(errors);
-
-    for (const input of normalized.inputs) {
-      await db(
-        `INSERT INTO lms_curriculum_plan_chapters
-           (plan_id, chapter_id, due_date, test_date,
-            inserted_by_email, updated_by_email, inserted_at, updated_at)
-         VALUES ($1, $2, $3::date, $4::date, $5, $5,
-                 (NOW() AT TIME ZONE 'UTC'), (NOW() AT TIME ZONE 'UTC'))
-         ON CONFLICT (plan_id, chapter_id) DO UPDATE SET
-           due_date = EXCLUDED.due_date,
-           test_date = EXCLUDED.test_date,
-           updated_by_email = EXCLUDED.updated_by_email,
-           updated_at = EXCLUDED.updated_at`,
-        [params.id, input.chapterId, input.dueDate, input.testDate, params.adminEmail]
-      );
-    }
-    await db(
-      `UPDATE lms_curriculum_plans
-       SET updated_by_email = $2, updated_at = (NOW() AT TIME ZONE 'UTC')
-       WHERE id = $1`,
-      [params.id, params.adminEmail]
-    );
-    return { ok: true as const, warnings };
-  });
+  const outcome = await withTransaction((client) =>
+    applyChapterDates(clientDb(client), params.id, normalized.inputs, params.adminEmail)
+  );
 
   if (!outcome.ok) return outcome;
   const reloaded = await getCurriculumPlan(params.id);
@@ -847,23 +883,17 @@ export async function copyCurriculumPlan(params: {
     const academicYear =
       mode === "next_year" ? shiftAcademicYearForward(plan.academic_year) : plan.academic_year;
 
-    const inserted = await db<{ id: string | number }>(
-      `INSERT INTO lms_curriculum_plans
-         (title, academic_year, grade_id, exam_tracks, status, closure_date,
-          inserted_by_email, updated_by_email, inserted_at, updated_at)
-       VALUES ($1, $2, $3, $4::text[], 'draft', $5::date, $6, $6,
-               (NOW() AT TIME ZONE 'UTC'), (NOW() AT TIME ZONE 'UTC'))
-       RETURNING id`,
-      [
+    const copyId = await insertPlanRow(
+      db,
+      {
         title,
         academicYear,
-        plan.grade_id,
-        plan.exam_tracks,
-        shift(plan.closure_date),
-        params.adminEmail,
-      ]
+        gradeId: plan.grade_id,
+        examTracks: plan.exam_tracks as ExamTrack[],
+        closureDate: shift(plan.closure_date),
+      },
+      params.adminEmail
     );
-    const copyId = inserted[0].id;
 
     if (storedChapters.length > 0) {
       await db(
@@ -883,7 +913,86 @@ export async function copyCurriculumPlan(params: {
       );
     }
 
-    const rows = await db<PlanRow>(`${PLAN_SELECT} WHERE p.id = $1`, [copyId]);
-    return { ok: true as const, plan: mapPlanRow(rows[0]) };
+    return { ok: true as const, plan: await readPlanSummary(db, copyId) };
   });
+}
+
+export interface CurriculumPlanDraftInput {
+  title: string;
+  examTracks: readonly ExamTrack[];
+  academicYear: string;
+  grade: number;
+  closureDate: string;
+  chapters: ChapterDateInput[];
+}
+
+export type CurriculumPlanDraftsResult =
+  | { ok: true; plans: { id: number; title: string; warnings: CurriculumPlanWarning[] }[] }
+  | { ok: false; error: string };
+
+class DraftRejected extends Error {}
+
+function draftRejection(title: string, failure: CurriculumPlanValidationFailure | NotFound): string {
+  const details =
+    "errors" in failure
+      ? failure.errors.map((e) => `${e.chapterName ?? e.chapterId ?? e.field}: ${e.message}`)
+      : [];
+  return [`Could not create "${title}": ${failure.error}`, ...details].join("; ");
+}
+
+// Create several Draft plans with their Chapter dates in one transaction, through the same
+// validation as the plan editor: every plan is created, or none is (the one-time workbook
+// seed, #425).
+export async function createCurriculumPlanDrafts(params: {
+  adminEmail: string;
+  drafts: CurriculumPlanDraftInput[];
+}): Promise<CurriculumPlanDraftsResult> {
+  const schema = await checkCurriculumPlansSchema();
+  if (!schema.ok) return { ok: false, error: `${schema.error}: ${schema.details.join("; ")}` };
+
+  try {
+    const plans = await withTransaction(async (client) => {
+      const db = clientDb(client);
+      const created: { id: number; title: string; warnings: CurriculumPlanWarning[] }[] = [];
+      for (const draft of params.drafts) {
+        created.push(await createDraftWithDates(db, draft, params.adminEmail));
+      }
+      return created;
+    });
+    return { ok: true, plans };
+  } catch (error) {
+    if (error instanceof DraftRejected) return { ok: false, error: error.message };
+    throw error;
+  }
+}
+
+// Throws DraftRejected (rolling the whole transaction back) when the draft is invalid.
+async function createDraftWithDates(
+  db: Db,
+  draft: CurriculumPlanDraftInput,
+  adminEmail: string
+): Promise<{ id: number; title: string; warnings: CurriculumPlanWarning[] }> {
+  const normalized = normalizeCurriculumPlanMetadata({
+    title: draft.title,
+    exam_tracks: draft.examTracks,
+    academic_year: draft.academicYear,
+    grade: draft.grade,
+    closure_date: draft.closureDate,
+  });
+  if (!normalized.ok) throw new DraftRejected(draftRejection(draft.title, normalized));
+  const created = await insertDraftPlan(db, normalized.metadata, adminEmail);
+  if (!created.ok) throw new DraftRejected(draftRejection(draft.title, created));
+  if (draft.chapters.length === 0) return { id: created.id, title: draft.title, warnings: [] };
+
+  const inputs = normalizeChapterDateInputs({
+    chapters: draft.chapters.map((chapter) => ({
+      chapter_id: chapter.chapterId,
+      due_date: chapter.dueDate,
+      test_date: chapter.testDate,
+    })),
+  });
+  if (!inputs.ok) throw new DraftRejected(draftRejection(draft.title, inputs));
+  const dated = await applyChapterDates(db, created.id, inputs.inputs, adminEmail);
+  if (!dated.ok) throw new DraftRejected(draftRejection(draft.title, dated));
+  return { id: created.id, title: draft.title, warnings: dated.warnings };
 }

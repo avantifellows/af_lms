@@ -383,7 +383,9 @@ export type CurriculumPlanSeedMode = "dry-run" | "apply";
 export interface CurriculumPlanSeedStore {
   loadChapters(grade: number): Promise<SeedChapter[]>;
   existingPlanTitles(academicYear: string, grade: number): Promise<string[]>;
-  createDraftPlan(draft: PlanDraft): Promise<{ id: number }>;
+  // Creates every draft, in order, in one transaction: all of them or none. Returns their ids
+  // in the same order; throws when any draft is rejected.
+  createDraftPlans(drafts: PlanDraft[]): Promise<Array<{ id: number }>>;
 }
 
 export interface CurriculumPlanSeedResult {
@@ -454,9 +456,7 @@ export async function runCurriculumPlanSeed(params: {
     };
   }
 
-  for (const draft of drafts) {
-    const { id } = await params.store.createDraftPlan(draft);
-    result.created.push({ title: draft.title, id });
-  }
+  const created = await params.store.createDraftPlans(drafts);
+  result.created = drafts.map((draft, index) => ({ title: draft.title, id: created[index].id }));
   return result;
 }

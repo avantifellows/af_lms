@@ -69,7 +69,6 @@ const handlers = {
     ),
 };
 const writes = handlers;
-const reads = {};
 
 describe.each(Object.entries(handlers))("%s guard", (_name, call) => {
   it("returns 401 without a session", async () => {
@@ -104,13 +103,3 @@ describe.each(Object.entries(writes))("%s for a read-only Admin", (_name, call) 
     expectNoDataAccess();
   });
 });
-
-if (Object.keys(reads).length > 0) {
-  describe.each(Object.entries(reads))("%s for a read-only Admin", (_name, call) => {
-    it("passes the guard (read-only Admins can view)", async () => {
-      mockGetUserPermission.mockResolvedValue(READ_ONLY_ADMIN);
-      const res = await call();
-      expect(res.status).toBe(503);
-    });
-  });
-}

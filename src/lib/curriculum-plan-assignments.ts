@@ -61,12 +61,21 @@ export interface PlanAssignmentPreviewCentre {
   uncoveredTracks: ExamTrack[];
 }
 
+// A Centre on this plan that the save takes off it: unticked, or no longer eligible (it can't
+// be ticked, so saving always removes it).
+export interface PlanAssignmentRemovedCentre {
+  centreId: number;
+  centreName: string;
+  eligible: boolean;
+}
+
 export interface PlanAssignmentPreview {
   centres: PlanAssignmentPreviewCentre[];
   // Ticked Centres currently on another plan for the same Grade + academic year.
   moveCount: number;
-  // Centres assigned to this plan that are no longer ticked.
+  // Centres assigned to this plan that the save removes (= removedCentres.length).
   removeCount: number;
+  removedCentres: PlanAssignmentRemovedCentre[];
 }
 
 export type PlanAssignmentCentresResult =
@@ -209,11 +218,41 @@ function normalizeCentreIds(
   return { ok: true, centreIds: [...new Set(centreIds)] };
 }
 
+// The Centres currently assigned to the plan, eligible or not.
+async function loadAssignedCentres(
+  db: Db,
+  planId: number
+): Promise<{ centreId: number; centreName: string }[]> {
+  const rows = await db<{ centre_id: string | number; assigned_centre_name: string | null }>(
+    `SELECT a.centre_id, c.name AS assigned_centre_name
+     FROM lms_curriculum_plan_assignments a
+     LEFT JOIN centres c ON c.id = a.centre_id
+     WHERE a.plan_id = $1
+     ORDER BY c.name, a.centre_id`,
+    [planId]
+  );
+  return rows.map((row) => ({
+    centreId: Number(row.centre_id),
+    centreName: row.assigned_centre_name ?? `Centre ${row.centre_id}`,
+  }));
+}
+
+function removedCentres(
+  assigned: { centreId: number; centreName: string }[],
+  eligibleIds: Set<number>,
+  ticked: Set<number>
+): PlanAssignmentRemovedCentre[] {
+  return assigned
+    .filter((centre) => !ticked.has(centre.centreId))
+    .map((centre) => ({ ...centre, eligible: eligibleIds.has(centre.centreId) }));
+}
+
 // Ticked Centres must all be eligible for the plan; an unknown or ineligible Centre rejects
 // the whole request.
 function previewAgainst(
   planId: number,
   eligible: EligibleCentre[],
+  assigned: { centreId: number; centreName: string }[],
   centreIds: number[]
 ): { ok: true; preview: PlanAssignmentPreview } | CurriculumPlanValidationFailure {
   const byId = new Map(eligible.map((centre) => [centre.centreId, centre]));
@@ -237,14 +276,14 @@ function previewAgainst(
       uncoveredTracks: centre.uncoveredTracks,
     };
   });
+  const removed = removedCentres(assigned, new Set(byId.keys()), ticked);
   return {
     ok: true,
     preview: {
       centres,
       moveCount: centres.filter((centre) => centre.moves).length,
-      removeCount: eligible.filter(
-        (centre) => centre.currentPlan?.id === planId && !ticked.has(centre.centreId)
-      ).length,
+      removeCount: removed.length,
+      removedCentres: removed,
     },
   };
 }
@@ -262,7 +301,11 @@ export async function previewPlanAssignment(params: {
 
   const plan = await readPlan(poolDb, params.id);
   if (!plan) return planNotFound();
-  return previewAgainst(params.id, await loadEligibleCentres(poolDb, plan), normalized.centreIds);
+  const [eligible, assigned] = await Promise.all([
+    loadEligibleCentres(poolDb, plan),
+    loadAssignedCentres(poolDb, params.id),
+  ]);
+  return previewAgainst(params.id, eligible, assigned, normalized.centreIds);
 }
 
 function isUniqueViolation(error: unknown): boolean {
@@ -271,8 +314,9 @@ function isUniqueViolation(error: unknown): boolean {
 
 // Save the plan's assignments as exactly the ticked Centres. In one transaction with the plan
 // row locked: ticked Centres on another plan for the same Grade + academic year move here,
-// new Centres are added, and unticked Centres lose their assignment. Moves are recomputed
-// here, never trusted from the client.
+// new Centres are added, and unticked Centres lose their assignment (including Centres no
+// longer eligible, which the preview names). Moves are recomputed here, never trusted from
+// the client.
 export async function savePlanAssignmentByPlan(params: {
   id: number;
   adminEmail: string;
@@ -292,7 +336,12 @@ export async function savePlanAssignmentByPlan(params: {
       const plan = await lockPlan(db, params.id);
       if (!plan) return planNotFound();
 
-      const checked = previewAgainst(params.id, await loadEligibleCentres(db, plan), centreIds);
+      const checked = previewAgainst(
+        params.id,
+        await loadEligibleCentres(db, plan),
+        await loadAssignedCentres(db, params.id),
+        centreIds
+      );
       if (!checked.ok) return checked;
 
       // Assignment rows carry the plan's academic year and Grade; with the plan locked they

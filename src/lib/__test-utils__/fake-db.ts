@@ -24,15 +24,29 @@ export function createFakeDb(handlers: Handler[] = []) {
     return typeof rows === "function" ? rows(params) : rows;
   }
 
+  // One entry per withTransaction call: committed, or rolled back by a thrown error.
+  const transactions: Array<"committed" | "rolled back"> = [];
+
   return {
     calls,
+    transactions,
     // Handlers added later win over earlier ones.
     on(match: string | RegExp, rows: Rows | ((params: unknown[]) => Rows)) {
       routes.unshift([match, rows]);
     },
     query: (sql: string, params?: unknown[]) => run(sql, params),
-    withTransaction: <T>(fn: (client: unknown) => Promise<T>) =>
-      fn({ query: async (sql: string, params?: unknown[]) => ({ rows: await run(sql, params) }) }),
+    async withTransaction<T>(fn: (client: unknown) => Promise<T>): Promise<T> {
+      try {
+        const result = await fn({
+          query: async (sql: string, params?: unknown[]) => ({ rows: await run(sql, params) }),
+        });
+        transactions.push("committed");
+        return result;
+      } catch (error) {
+        transactions.push("rolled back");
+        throw error;
+      }
+    },
     sqlCalls: (match: string) => calls.filter((call) => call.sql.includes(match)),
   };
 }

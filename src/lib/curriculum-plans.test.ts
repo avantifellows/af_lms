@@ -13,7 +13,7 @@ vi.mock("./db", () => ({
 }));
 vi.mock("./curriculum-schema", () => ({ checkCurriculumPlansSchema: mockCheckSchema }));
 
-import { updateCurriculumPlanMetadata } from "./curriculum-plans";
+import { createCurriculumPlanDrafts, updateCurriculumPlanMetadata } from "./curriculum-plans";
 
 const ADMIN_EMAIL = "admin@avantifellows.org";
 
@@ -157,5 +157,100 @@ describe("updateCurriculumPlanMetadata", () => {
       "2026-12-31",
       ADMIN_EMAIL,
     ]);
+  });
+});
+
+describe("createCurriculumPlanDrafts", () => {
+  const CHAPTERS = [
+    {
+      chapter_id: 501,
+      chapter_code: "11P01",
+      chapter_name: "Motion",
+      subject_id: 4,
+      subject_name: "Physics",
+      due_date: null,
+      test_date: null,
+    },
+  ];
+
+  function draft(title: string, dueDate: string) {
+    return {
+      title,
+      examTracks: ["jee_main", "jee_advanced", "neet"] as const,
+      academicYear: "2026-2027",
+      grade: 11,
+      closureDate: "2027-03-08",
+      chapters: [{ chapterId: 501, dueDate, testDate: null }],
+    };
+  }
+
+  beforeEach(() => {
+    let nextId = 100;
+    db.current.on("INSERT INTO lms_curriculum_plans", () => [{ id: nextId++ }]);
+    db.current.on("FROM lms_chapter_exam_configs cfg", CHAPTERS);
+  });
+
+  it("creates every Draft with its Chapter dates in one transaction", async () => {
+    const result = await createCurriculumPlanDrafts({
+      adminEmail: ADMIN_EMAIL,
+      drafts: [draft("G12 2026-27", "2026-07-10"), draft("G11 2026-27 (HYD)", "2026-06-09")],
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      plans: [
+        { id: 100, title: "G12 2026-27", warnings: [] },
+        { id: 101, title: "G11 2026-27 (HYD)", warnings: [] },
+      ],
+    });
+    expect(db.current.transactions).toEqual(["committed"]);
+    expect(db.current.sqlCalls("INSERT INTO lms_curriculum_plan_chapters").map((call) => call.params)).toEqual([
+      [100, 501, "2026-07-10", null, ADMIN_EMAIL],
+      [101, 501, "2026-06-09", null, ADMIN_EMAIL],
+    ]);
+  });
+
+  it("rolls every plan back when a later plan's dates are rejected", async () => {
+    const result = await createCurriculumPlanDrafts({
+      adminEmail: ADMIN_EMAIL,
+      drafts: [draft("G12 2026-27", "2026-07-10"), draft("G11 2026-27 (HYD)", "2027-06-09")],
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error:
+        'Could not create "G11 2026-27 (HYD)": Invalid Curriculum Plan; Motion: Chapter Due Date 2027-06-09 is outside academic year 2026-2027',
+    });
+    expect(db.current.transactions).toEqual(["rolled back"]);
+  });
+
+  it("rejects invalid plan details before writing any Chapter dates", async () => {
+    const result = await createCurriculumPlanDrafts({
+      adminEmail: ADMIN_EMAIL,
+      drafts: [{ ...draft("", "2026-07-10") }],
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: 'Could not create "": Invalid Curriculum Plan; title: Title is required',
+    });
+    expect(db.current.sqlCalls("INSERT INTO lms_curriculum_plans")).toHaveLength(0);
+  });
+
+  it("reports the schema as unavailable without opening a transaction", async () => {
+    mockCheckSchema.mockResolvedValue({
+      ok: false,
+      status: 503,
+      error: "LMS curriculum schema unavailable",
+      details: ["lms_curriculum_plans.id"],
+    });
+
+    const result = await createCurriculumPlanDrafts({ adminEmail: ADMIN_EMAIL, drafts: [] });
+
+    expect(result).toEqual({
+      ok: false,
+      error: "LMS curriculum schema unavailable: lms_curriculum_plans.id",
+    });
+    expect(db.current.transactions).toEqual([]);
   });
 });

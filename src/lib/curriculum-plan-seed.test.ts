@@ -1,5 +1,5 @@
 import ExcelJS from "exceljs";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   buildCurriculumPlanSeed,
@@ -326,10 +326,10 @@ function fakeStore(existing: Array<{ title: string; academicYear: string; grade:
         .filter((plan) => plan.academicYear === academicYear && plan.grade === grade)
         .map((plan) => plan.title);
     },
-    async createDraftPlan(draft) {
-      const id = 100 + plans.length;
-      plans.push({ ...draft, id });
-      return { id };
+    async createDraftPlans(drafts) {
+      const ids = drafts.map((_draft, index) => ({ id: 100 + plans.length + index }));
+      plans.push(...drafts.map((draft, index) => ({ ...draft, ...ids[index] })));
+      return ids;
     },
   };
   return { store, plans };
@@ -425,6 +425,22 @@ describe("runCurriculumPlanSeed", () => {
     );
     expect(second.created).toEqual([]);
     expect(plans).toHaveLength(3);
+  });
+
+  it("creates the three plans in one store call, so a rejected plan leaves none behind", async () => {
+    const { store, plans } = fakeStore();
+    store.createDraftPlans = vi.fn().mockRejectedValue(new Error('Could not create "G11 2026-27 (HYD)"'));
+
+    await expect(
+      runCurriculumPlanSeed({ workbook: await seedWorkbook(), mode: "apply", store })
+    ).rejects.toThrow('Could not create "G11 2026-27 (HYD)"');
+    expect(store.createDraftPlans).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(store.createDraftPlans).mock.calls[0][0].map((draft) => draft.title)).toEqual([
+      "G12 2026-27",
+      "G11 2026-27 (Others)",
+      "G11 2026-27 (HYD)",
+    ]);
+    expect(plans).toEqual([]);
   });
 
   it("refuses to apply when any one of the plans already exists, creating none", async () => {

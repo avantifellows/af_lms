@@ -7,6 +7,7 @@ import { Button, Card } from "@/components/ui";
 import type {
   EligibleCentre,
   PlanAssignmentPreview,
+  PlanAssignmentPreviewCentre,
 } from "@/lib/curriculum-plan-assignments";
 import { formatExamTrack } from "@/lib/exam-tracks";
 
@@ -16,39 +17,34 @@ interface Props {
   readOnly: boolean;
 }
 
+type PreviewState =
+  | { status: "loading" }
+  | { status: "error" }
+  | { status: "ready"; preview: PlanAssignmentPreview };
+
 function plural(count: number, one: string, many: string): string {
   return `${count} ${count === 1 ? one : many}`;
 }
 
-// Assign by plan: tick the eligible Centres (grouped by region) that should be on this plan.
-// The server previews moves and uncovered tracks for the ticked set before Save, and
-// recomputes them on Save.
-export default function CurriculumPlanAssignForm({ planId, centres, readOnly }: Props) {
-  const router = useRouter();
-  const [ticked, setTicked] = useState<Set<number>>(
-    () =>
-      new Set(
-        centres.filter((centre) => centre.currentPlan?.id === planId).map((centre) => centre.centreId)
-      )
-  );
-  const [preview, setPreview] = useState<PlanAssignmentPreview | null>(null);
-  const [previewVersion, setPreviewVersion] = useState(0);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-  const [savedMessage, setSavedMessage] = useState("");
+function groupByRegion(centres: EligibleCentre[]): [string, EligibleCentre[]][] {
+  const groups = new Map<string, EligibleCentre[]>();
+  for (const centre of centres) {
+    const region = centre.region || "No region";
+    groups.set(region, [...(groups.get(region) ?? []), centre]);
+  }
+  return [...groups.entries()];
+}
 
-  const regions = useMemo(() => {
-    const groups = new Map<string, EligibleCentre[]>();
-    for (const centre of centres) {
-      const region = centre.region || "No region";
-      groups.set(region, [...(groups.get(region) ?? []), centre]);
-    }
-    return [...groups.entries()];
-  }, [centres]);
+// The server's preview of saving the ticked set: moves, removals and uncovered tracks. Reloads
+// whenever the ticked set changes or `version` is bumped (after a save, or Retry); until the
+// answer for the current request arrives the preview is loading.
+function usePlanAssignmentPreview(planId: number, ticked: Set<number>, version: number): PreviewState {
+  const requestKey = `${planId}:${version}:${[...ticked].join(",")}`;
+  const [answer, setAnswer] = useState<{ key: string; state: PreviewState } | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
-    setPreview(null);
+    const settle = (state: PreviewState) => setAnswer({ key: requestKey, state });
     fetch(`/api/curriculum/plans/${planId}/assignments/preview`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -57,13 +53,52 @@ export default function CurriculumPlanAssignForm({ planId, centres, readOnly }: 
     })
       .then(async (response) => {
         const json = await response.json().catch(() => ({}));
-        if (response.ok) setPreview(json.preview);
+        settle(response.ok && json.preview ? { status: "ready", preview: json.preview } : { status: "error" });
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!controller.signal.aborted) settle({ status: "error" });
+      });
     return () => controller.abort();
-  }, [planId, ticked, previewVersion]);
+  }, [planId, ticked, requestKey]);
 
-  const previewById = new Map(preview?.centres.map((centre) => [centre.centreId, centre]));
+  return answer?.key === requestKey ? answer.state : { status: "loading" };
+}
+
+async function saveAssignments(planId: number, ticked: Set<number>): Promise<string | null> {
+  try {
+    const response = await fetch(`/api/curriculum/plans/${planId}/assignments`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ centre_ids: [...ticked] }),
+    });
+    if (response.ok) return null;
+    const json = await response.json().catch(() => ({}));
+    return json.errors?.[0]?.message ?? json.error ?? "Could not save the assignments";
+  } catch {
+    return "Could not save the assignments";
+  }
+}
+
+// Assign by plan: tick the eligible Centres (grouped by region) that should be on this plan.
+// The server previews moves, removals and uncovered tracks for the ticked set; Save waits for
+// that preview, and the server recomputes everything on Save.
+export default function CurriculumPlanAssignForm({ planId, centres, readOnly }: Props) {
+  const router = useRouter();
+  const [ticked, setTicked] = useState<Set<number>>(
+    () =>
+      new Set(
+        centres.filter((centre) => centre.currentPlan?.id === planId).map((centre) => centre.centreId)
+      )
+  );
+  const [previewVersion, setPreviewVersion] = useState(0);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [savedMessage, setSavedMessage] = useState("");
+  const preview = usePlanAssignmentPreview(planId, ticked, previewVersion);
+  const regions = useMemo(() => groupByRegion(centres), [centres]);
+  const previewById = new Map(
+    preview.status === "ready" ? preview.preview.centres.map((centre) => [centre.centreId, centre]) : []
+  );
 
   function toggle(centreId: number, checked: boolean) {
     setSavedMessage("");
@@ -79,25 +114,15 @@ export default function CurriculumPlanAssignForm({ planId, centres, readOnly }: 
     setSaving(true);
     setError("");
     setSavedMessage("");
-    try {
-      const response = await fetch(`/api/curriculum/plans/${planId}/assignments`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ centre_ids: [...ticked] }),
-      });
-      const json = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        setError(json.errors?.[0]?.message ?? json.error ?? "Could not save the assignments");
-        return;
-      }
-      setSavedMessage("Assignments saved.");
-      setPreviewVersion((version) => version + 1);
-      router.refresh();
-    } catch {
-      setError("Could not save the assignments");
-    } finally {
-      setSaving(false);
+    const saveError = await saveAssignments(planId, ticked);
+    setSaving(false);
+    if (saveError) {
+      setError(saveError);
+      return;
     }
+    setSavedMessage("Assignments saved.");
+    setPreviewVersion((version) => version + 1);
+    router.refresh();
   }
 
   return (
@@ -105,34 +130,22 @@ export default function CurriculumPlanAssignForm({ planId, centres, readOnly }: 
       <Card className="flex flex-wrap items-center gap-3 p-4">
         <div data-testid="assign-summary" className="text-sm text-text-primary">
           <p className="font-bold">{plural(ticked.size, "Centre", "Centres")} ticked</p>
-          {preview ? (
-            <p data-testid="assign-move-count">
-              {preview.moveCount === 0
-                ? "No Centres move from another plan"
-                : `${plural(preview.moveCount, "Centre moves", "Centres move")} from another plan`}
-              {preview.removeCount > 0
-                ? ` · ${plural(preview.removeCount, "assignment", "assignments")} removed`
-                : ""}
-            </p>
-          ) : (
-            <p className="text-text-muted">Checking moves…</p>
-          )}
+          <PreviewSummary
+            state={preview}
+            onRetry={() => setPreviewVersion((version) => version + 1)}
+          />
         </div>
         <div className="ml-auto">
-          <Button type="button" disabled={readOnly || saving} onClick={save}>
+          <Button
+            type="button"
+            disabled={readOnly || saving || preview.status !== "ready"}
+            onClick={save}
+          >
             Save assignments
           </Button>
         </div>
-        {error ? (
-          <p data-testid="assign-error" className="w-full text-sm font-bold text-danger">
-            {error}
-          </p>
-        ) : null}
-        {savedMessage ? (
-          <p role="status" className="w-full text-sm font-bold text-success">
-            {savedMessage}
-          </p>
-        ) : null}
+        <Message testId="assign-error" className="text-danger" text={error} />
+        <Message role="status" className="text-success" text={savedMessage} />
       </Card>
       {centres.length === 0 ? (
         <Card className="p-6 text-sm text-text-secondary">
@@ -146,47 +159,137 @@ export default function CurriculumPlanAssignForm({ planId, centres, readOnly }: 
             <legend className="text-sm font-bold uppercase tracking-wide text-text-muted">
               {region}
             </legend>
-            {regionCentres.map((centre) => {
-              const isTicked = ticked.has(centre.centreId);
-              const centrePreview = isTicked ? previewById.get(centre.centreId) : undefined;
-              return (
-                <div
-                  key={centre.centreId}
-                  data-assign-centre-row
-                  className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border py-2 text-sm last:border-b-0"
-                >
-                  <label className="flex items-center gap-2 font-bold text-text-primary">
-                    <input
-                      type="checkbox"
-                      checked={isTicked}
-                      onChange={(event) => toggle(centre.centreId, event.target.checked)}
-                    />
-                    {centre.centreName}
-                  </label>
-                  <span className="text-text-secondary">
-                    {centre.schoolName}
-                    {centre.programName ? ` · ${centre.programName}` : ""} ·{" "}
-                    {centre.mappedTracks.map(formatExamTrack).join(", ")}
-                  </span>
-                  {centre.currentPlan && centre.currentPlan.id !== planId && !centrePreview?.moves ? (
-                    <span className="text-text-muted">On {centre.currentPlan.title}</span>
-                  ) : null}
-                  {centrePreview?.moves && centrePreview.currentPlan ? (
-                    <span className="font-bold text-warning-text">
-                      Moves from {centrePreview.currentPlan.title}
-                    </span>
-                  ) : null}
-                  {centrePreview && centrePreview.uncoveredTracks.length > 0 ? (
-                    <span className="font-bold text-warning-text">
-                      ⚠ not covered: {centrePreview.uncoveredTracks.map(formatExamTrack).join(", ")}
-                    </span>
-                  ) : null}
-                </div>
-              );
-            })}
+            {regionCentres.map((centre) => (
+              <CentreRow
+                key={centre.centreId}
+                centre={centre}
+                planId={planId}
+                ticked={ticked.has(centre.centreId)}
+                preview={ticked.has(centre.centreId) ? previewById.get(centre.centreId) : undefined}
+                onToggle={toggle}
+              />
+            ))}
           </fieldset>
         </Card>
       ))}
     </div>
+  );
+}
+
+function Message({
+  text,
+  className,
+  testId,
+  role,
+}: {
+  text: string;
+  className: string;
+  testId?: string;
+  role?: string;
+}) {
+  if (!text) return null;
+  return (
+    <p data-testid={testId} role={role} className={`w-full text-sm font-bold ${className}`}>
+      {text}
+    </p>
+  );
+}
+
+function PreviewSummary({ state, onRetry }: { state: PreviewState; onRetry: () => void }) {
+  if (state.status === "loading") {
+    return <p className="text-text-muted">Checking moves…</p>;
+  }
+  if (state.status === "error") {
+    return (
+      <p data-testid="assign-preview-error" className="font-bold text-danger">
+        Could not check moves and removals, so saving is paused.{" "}
+        <button type="button" onClick={onRetry} className="underline">
+          Try again
+        </button>
+      </p>
+    );
+  }
+  const { preview } = state;
+  const ineligible = preview.removedCentres.filter((centre) => !centre.eligible);
+  return (
+    <>
+      <p data-testid="assign-move-count">
+        {preview.moveCount === 0
+          ? "No Centres move from another plan"
+          : `${plural(preview.moveCount, "Centre moves", "Centres move")} from another plan`}
+        {preview.removeCount > 0
+          ? ` · ${plural(preview.removeCount, "assignment", "assignments")} removed`
+          : ""}
+      </p>
+      {ineligible.length > 0 ? (
+        <p data-testid="assign-ineligible-removals" className="font-bold text-warning-text">
+          Saving also removes {plural(ineligible.length, "Centre", "Centres")} no longer eligible
+          for this plan: {ineligible.map((centre) => centre.centreName).join(", ")}
+        </p>
+      ) : null}
+    </>
+  );
+}
+
+function CentreRow({
+  centre,
+  planId,
+  ticked,
+  preview,
+  onToggle,
+}: {
+  centre: EligibleCentre;
+  planId: number;
+  ticked: boolean;
+  preview: PlanAssignmentPreviewCentre | undefined;
+  onToggle: (centreId: number, checked: boolean) => void;
+}) {
+  const onOtherPlan = centre.currentPlan !== null && centre.currentPlan.id !== planId;
+  return (
+    <div
+      data-assign-centre-row
+      className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border py-2 text-sm last:border-b-0"
+    >
+      <label className="flex items-center gap-2 font-bold text-text-primary">
+        <input
+          type="checkbox"
+          checked={ticked}
+          onChange={(event) => onToggle(centre.centreId, event.target.checked)}
+        />
+        {centre.centreName}
+      </label>
+      <span className="text-text-secondary">
+        {centre.schoolName}
+        {centre.programName ? ` · ${centre.programName}` : ""} ·{" "}
+        {centre.mappedTracks.map(formatExamTrack).join(", ")}
+      </span>
+      <PreviewNotes centre={centre} onOtherPlan={onOtherPlan} preview={preview} />
+    </div>
+  );
+}
+
+function PreviewNotes({
+  centre,
+  onOtherPlan,
+  preview,
+}: {
+  centre: EligibleCentre;
+  onOtherPlan: boolean;
+  preview: PlanAssignmentPreviewCentre | undefined;
+}) {
+  const moving = preview?.moves && preview.currentPlan ? preview.currentPlan : null;
+  const uncovered = preview?.uncoveredTracks ?? [];
+  return (
+    <>
+      {onOtherPlan && !preview?.moves ? (
+        <span className="text-text-muted">On {centre.currentPlan?.title}</span>
+      ) : null}
+      {moving ? <span className="font-bold text-warning-text">Moves from {moving.title}</span> : null}
+      {uncovered.length > 0 ? (
+        <span className="font-bold text-warning-text">
+          ⚠ not covered: {uncovered.map(formatExamTrack).join(", ")}
+        </span>
+      ) : null}
+    </>
   );
 }
