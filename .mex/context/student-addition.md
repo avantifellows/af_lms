@@ -88,7 +88,11 @@ fields, and the modal never sends them for NVS because they are never rendered.
 Student documents follow the same rule (PR #433): under the NVS program the Edit Student
 Details/Documents tab strip is not rendered (the modal shows Details only), and the roster
 card's expanded Documents list is hidden via `StudentCard`'s `isNvs`. The
-`/api/students/[id]/documents` routes are unchanged.
+`/api/students/[id]/documents` routes are unchanged. The NVS roster card's expanded view is
+also limited to the Edit Student fields its summary doesn't already show (`NvsDetailGroups` in
+`StudentTable.tsx`: CWSN, Father Name, Annual Family Income, Board Stream, G10 board, Grade 10
+Roll no), so the card never shows fields the Edit form can't change. Keep the two in sync when
+an Edit Student field is added or removed for NVS.
 
 ## Settled Product Shape
 - v1 is JNV PMU / JNV NVS only. In current LMS code this is `PROGRAM_IDS.NVS` (`64`, label `JNV NVS`) from `src/lib/constants.ts`.

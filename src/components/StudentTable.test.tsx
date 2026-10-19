@@ -623,7 +623,13 @@ describe("StudentTable - expand/collapse", () => {
       annual_family_income: "200000",
       monthly_family_income: "16000",
     };
-    render(<StudentTable students={[student]} grades={defaultGrades} />);
+    render(
+      <StudentTable
+        students={[student]}
+        grades={defaultGrades}
+        selectedProgramId={PROGRAM_IDS.COE}
+      />,
+    );
 
     await user.click(screen.getByLabelText("Expand"));
 
@@ -645,12 +651,60 @@ describe("StudentTable - expand/collapse", () => {
     expect(screen.getByText("Guardian")).toBeInTheDocument();
   });
 
+  it("limits an NVS card's expanded details to the Edit Student fields", async () => {
+    const user = userEvent.setup();
+    const student = {
+      ...makeStudent(),
+      physically_handicapped: true,
+      father_name: "Suresh Kumar",
+      annual_family_income: "1 - 3 Lakhs",
+      board_stream: "PCM",
+      g10_board: "CBSE",
+      g10_roll_no: "12345678",
+      email: "nvs@example.com",
+      school_medium: "English",
+      city: "Pune",
+      mother_name: "Sunita Kumar",
+      guardian_name: "Ramesh Kumar",
+      monthly_family_income: "16000",
+    };
+    render(
+      <StudentTable
+        students={[student]}
+        grades={defaultGrades}
+        selectedProgramId={PROGRAM_IDS.NVS}
+      />,
+    );
+
+    await user.click(screen.getByLabelText("Expand"));
+
+    for (const label of ["CWSN", "Father Name", "Annual Family Income", "Board Stream", "G10 board", "Grade 10 Roll no"]) {
+      expect(screen.getByText(label)).toBeInTheDocument();
+    }
+    expect(screen.getByText("Yes")).toBeInTheDocument();
+    expect(screen.getByText("Suresh Kumar")).toBeInTheDocument();
+    expect(screen.getByText("CBSE")).toBeInTheDocument();
+    expect(screen.getByText("12345678")).toBeInTheDocument();
+
+    for (const value of ["nvs@example.com", "English", "Pune", "Sunita Kumar", "Ramesh Kumar", "16000"]) {
+      expect(screen.queryByText(value)).not.toBeInTheDocument();
+    }
+    expect(screen.queryByText("Mother")).not.toBeInTheDocument();
+    expect(screen.queryByText("Contact & Address")).not.toBeInTheDocument();
+  });
+
   it("hides details after collapsing", async () => {
     const user = userEvent.setup();
     // Use an expanded-only field (email) as the sentinel — phone now shows in
     // the always-visible summary.
     const student = makeStudent({ email: "collapse-test@example.com" });
-    render(<StudentTable students={[student]} grades={defaultGrades} />);
+    render(
+      <StudentTable
+        students={[student]}
+        grades={defaultGrades}
+        selectedProgramId={PROGRAM_IDS.COE}
+      />,
+    );
 
     await user.click(screen.getByLabelText("Expand"));
     expect(screen.getByText("collapse-test@example.com")).toBeInTheDocument();
