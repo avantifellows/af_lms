@@ -318,6 +318,15 @@ describe("getCurriculumSummary", () => {
       "Multiple active physical Centres are configured for this School and Program",
     ],
     ["JEE Main + JEE Advanced", SETUP_ERROR, "setup_error", "Fix tracks in Centre Management"],
+    [
+      "JEE Main + JEE Advanced + NEET",
+      {
+        mapped_tracks: ["jee_main", "jee_advanced", "neet"],
+        chapters: [chapter(1, { tracks: ["jee_main", "jee_advanced", "neet"] })],
+      },
+      "setup_error",
+      "Fix tracks in Centre Management",
+    ],
     ["only tracks without content", { mapped_tracks: ["cet"] }, "no_content", "Curriculum configuration is unavailable"],
   ])("explains %s instead of measuring", async (_name, overrides, kind, explanation) => {
     routeQueries({ summary: [raw(1, overrides)] });
@@ -487,6 +496,7 @@ describe("PCM Behind and PCB Behind", () => {
     ["a JEE Advanced row", { mapped_tracks: ["jee_advanced"] }, { PCM: 2, PCB: null }],
     ["a NEET row", { mapped_tracks: ["neet"] }, { PCM: null, PCB: 3 }],
     ["a shared JEE Main + NEET row", { mapped_tracks: ["jee_main", "neet"] }, { PCM: 2, PCB: 3 }],
+    ["a shared JEE Advanced + NEET row", { mapped_tracks: ["neet", "jee_advanced", "cet"] }, { PCM: 2, PCB: 3 }],
     ["a No plan row", { plan_status: "draft" }, null],
     ["a setup-error row", { mapped_tracks: ["jee_main", "jee_advanced"] }, null],
     ["a no-content row", { mapped_tracks: ["cet"] }, null],
@@ -650,6 +660,41 @@ describe("getChapterTimeline", () => {
     // Last 7 days to 15 Aug, for the class's tracks and Chapters.
     const activityCall = mockQuery.mock.calls.find(([sql]) => String(sql).includes(ACTIVITY_TABLE));
     expect(activityCall?.[1]).toEqual(["SC1", 2, 11, ["jee_main", "neet"], "2026-08-09", AS_OF, [1, 2, 3, 4, 5]]);
+  });
+
+  it("measures a shared JEE Advanced + NEET class once, with JEE Advanced's prescribed time", async () => {
+    routeQueries({
+      summary: [
+        raw(1, {
+          mapped_tracks: ["neet", "jee_advanced"],
+          chapters: [
+            chapter(1, {
+              dueDate: "2026-06-30",
+              completedOn: "2026-06-28",
+              tracks: ["jee_advanced", "neet"],
+              prescribedMinutes: { jee_advanced: 150, neet: 60 },
+            }),
+            chapter(2, { subject: "Biology", dueDate: "2026-07-31", tracks: ["neet"], prescribedMinutes: { neet: 45 } }),
+          ],
+        }),
+      ],
+      grades: [{ grade: 11 }],
+    });
+
+    const result = await getChapterTimeline(ADMIN, 1, params);
+
+    if (!result.ok) throw new Error("expected a timeline");
+    const { timeline } = result;
+    expect(timeline.row).toMatchObject({ kind: "plan", tracksLabel: "JEE Advanced + NEET", explanation: null });
+    expect(timeline.row.subjectGroups).toMatchObject({ PCM: { behind: 0 }, PCB: { behind: 1 } });
+    // JEE Advanced's 150 min, not NEET's 60; Biology falls back to NEET.
+    expect(timeline.chapters.map((c) => [c.chapterId, c.prescribedMinutes])).toEqual([
+      [1, 150],
+      [2, 45],
+    ]);
+    // Logs under either track of the class count.
+    const activityCall = mockQuery.mock.calls.find(([sql]) => String(sql).includes(ACTIVITY_TABLE));
+    expect(activityCall?.[1]?.[3]).toEqual(["jee_advanced", "neet"]);
   });
 
   it("orders undated Chapters in syllabus order: subject column, sequence, then code", async () => {

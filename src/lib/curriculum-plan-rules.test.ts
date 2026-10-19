@@ -134,7 +134,7 @@ describe("Summary Class classification", () => {
     { mapped: ["neet"], expected: { kind: "single", tracks: ["neet"] } },
     { mapped: ["jee_main", "jee_advanced"], expected: { kind: "setup_error" } },
     { mapped: ["jee_main", "neet"], expected: { kind: "shared", tracks: ["jee_main", "neet"] } },
-    { mapped: ["jee_advanced", "neet"], expected: { kind: "setup_error" } },
+    { mapped: ["jee_advanced", "neet"], expected: { kind: "shared", tracks: ["jee_advanced", "neet"] } },
     { mapped: ["jee_main", "jee_advanced", "neet"], expected: { kind: "setup_error" } },
   ];
   const tracksWithoutContent = [[], ["cet"], ["math_foundation"], ["cet", "math_foundation"]];
@@ -156,10 +156,23 @@ describe("Summary Class classification", () => {
     });
   });
 
-  it("lists a shared class's tracks JEE Main first whatever the mapping order", () => {
-    expect(classifySummaryClass(["neet", "jee_main"], tracksWithContent)).toEqual({
-      kind: "shared",
-      tracks: ["jee_main", "neet"],
+  it.each([
+    [["neet", "jee_main"], ["jee_main", "neet"]],
+    [["neet", "jee_advanced"], ["jee_advanced", "neet"]],
+  ])("lists shared class %j's JEE track first: %j", (mapped, expected) => {
+    expect(classifySummaryClass(mapped, tracksWithContent)).toEqual({ kind: "shared", tracks: expected });
+  });
+
+  it("keeps JEE Main + JEE Advanced a setup error when NEET has no content for the Grade", () => {
+    expect(classifySummaryClass(["jee_main", "jee_advanced", "neet"], ["jee_main", "jee_advanced"])).toEqual({
+      kind: "setup_error",
+    });
+  });
+
+  it("is a single JEE Advanced class when NEET has no content for the Grade", () => {
+    expect(classifySummaryClass(["jee_advanced", "neet"], ["jee_advanced"])).toEqual({
+      kind: "single",
+      tracks: ["jee_advanced"],
     });
   });
 });
@@ -168,6 +181,8 @@ describe("Primary Exam Track", () => {
   it.each([
     [["jee_main", "neet"], "jee_main"],
     [["neet", "jee_main"], "jee_main"],
+    [["jee_advanced", "neet"], "jee_advanced"],
+    [["neet", "jee_advanced"], "jee_advanced"],
     [["jee_advanced"], "jee_advanced"],
     [["neet"], "neet"],
   ] as const)("is %s's primary track %s", (classTracks, expected) => {
@@ -181,6 +196,18 @@ describe("Primary Exam Track", () => {
   it("keeps JEE Main for a shared class's Chapter that both tracks cover", () => {
     expect(primaryExamTrackForChapter(["jee_main", "neet"], ["neet", "jee_main"])).toBe("jee_main");
   });
+
+  it.each([
+    ["both tracks cover", ["neet", "jee_advanced"], "jee_advanced"],
+    ["only JEE Advanced covers", ["jee_advanced"], "jee_advanced"],
+    ["only NEET covers (Biology)", ["neet"], "neet"],
+    ["JEE Main and NEET cover", ["jee_main", "neet"], "neet"],
+  ] as const)(
+    "uses, for a shared JEE Advanced + NEET Chapter that %s (%j), %s",
+    (_name, chapterTracks, expected) => {
+      expect(primaryExamTrackForChapter(["jee_advanced", "neet"], chapterTracks)).toBe(expected);
+    }
+  );
 
   it("ignores tracks that cover the Chapter but are not the class's", () => {
     expect(primaryExamTrackForChapter(["neet"], ["jee_main", "jee_advanced", "neet"])).toBe("neet");
@@ -320,6 +347,7 @@ describe("PCM Behind and PCB Behind", () => {
     ["a JEE Advanced class", ["jee_advanced"], ["PCM"]],
     ["a NEET class", ["neet"], ["PCB"]],
     ["a shared JEE Main + NEET class", ["jee_main", "neet"], ["PCM", "PCB"]],
+    ["a shared JEE Advanced + NEET class", ["jee_advanced", "neet"], ["PCM", "PCB"]],
     ["a class without content tracks", [], []],
   ] as [string, ExamTrack[], string[]][])("shows %s %j", (_name, tracks, expected) => {
     expect(subjectGroupsForClass(tracks)).toEqual(expected);

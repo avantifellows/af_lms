@@ -89,8 +89,9 @@ export type SummaryClass =
   | { kind: "no_content" };
 
 // Classify a Centre + Grade from its mapped Exam Tracks and the tracks with in-syllabus
-// content for the Grade (ADR 0008). Only JEE Main + NEET form one shared class; any other
-// pair of content tracks is a Centre Management setup error.
+// content for the Grade (ADR 0008). A JEE track with NEET (JEE Main + NEET or JEE Advanced +
+// NEET) is one shared class; JEE Main with JEE Advanced, with or without NEET, is a Centre
+// Management setup error.
 export function classifySummaryClass(
   mappedTracks: readonly string[],
   tracksWithContent: readonly string[],
@@ -103,14 +104,14 @@ export function classifySummaryClass(
   );
   if (tracks.length === 0) return { kind: "no_content" };
   if (tracks.length === 1) return { kind: "single", tracks };
-  if (tracks.length === 2 && tracks[0] === "jee_main" && tracks[1] === "neet") {
-    return { kind: "shared", tracks };
-  }
+  // `tracks` follows `EXAM_TRACKS` order, so a pair ending in NEET starts with one JEE track.
+  if (tracks.length === 2 && tracks[1] === "neet") return { kind: "shared", tracks };
   return { kind: "setup_error" };
 }
 
-// The Primary Exam Track supplies prescribed lecture time: JEE Main for a shared class,
-// otherwise the only track. `EXAM_TRACKS` lists JEE Main first, so curriculum order decides.
+// The Primary Exam Track supplies prescribed lecture time: the JEE track (JEE Main or JEE
+// Advanced) for a shared class, otherwise the only track. `EXAM_TRACKS` lists both JEE tracks
+// before NEET, so curriculum order decides.
 export function primaryExamTrack(classTracks: readonly ExamTrack[]): ExamTrack | null {
   return EXAM_TRACKS.find((track) => classTracks.includes(track)) ?? null;
 }
@@ -254,7 +255,7 @@ const SUBJECT_GROUP_BY_TRACK: Partial<Record<ExamTrack, SubjectGroup>> = {
 };
 
 // The groups a Summary Class shows: PCM for JEE Main or JEE Advanced, PCB for NEET, both for a
-// shared JEE Main + NEET class.
+// shared JEE + NEET class.
 export function subjectGroupsForClass(classTracks: readonly ExamTrack[]): SubjectGroup[] {
   return SUBJECT_GROUPS.filter((group) =>
     classTracks.some((track) => SUBJECT_GROUP_BY_TRACK[track] === group),

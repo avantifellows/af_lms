@@ -1060,6 +1060,46 @@ test.describe("Curriculum Summary chapter timeline hours", () => {
   });
 });
 
+// Q20: a JEE Advanced + NEET Centre + Grade is one shared class, like JEE Main + NEET. Fixture:
+// e2e/fixtures/migrations/20261019180000_seed_curriculum_summary_advanced_neet_fixture.sql
+// (Grade 12, region SUMMARY_ADV_E2E). Optics (JEE Advanced only, due 1 Jul) was completed under
+// both tracks; Fixture Biology (NEET only, due 15 Jul) is open.
+test.describe("Curriculum Summary shared JEE Advanced + NEET class", () => {
+  const ADVANCED_CENTRE = "Summary E2E Valsad Advanced Neet";
+
+  test("is one measured row with both PCM Behind and PCB Behind", async ({ adminPage }) => {
+    await adminPage.goto(`/curriculum-summary?grade=12&as_of=${AS_OF}&q=SUMM87`);
+
+    expect(await rowCentres(adminPage)).toEqual([ADVANCED_CENTRE]);
+    const row = summaryRow(adminPage, ADVANCED_CENTRE);
+    await expect(row).toContainText("JEE Advanced + NEET");
+    await expect(row).not.toContainText("Fix tracks in Centre Management");
+    await expect(row.locator("[data-plan]")).toHaveText("Summary G12 Advanced NEET Plan");
+    // A completion under either track counts once.
+    await expect(pill(adminPage, ADVANCED_CENTRE, "Physics")).toHaveText("On track · 1/1");
+    await expect(pill(adminPage, ADVANCED_CENTRE, "Biology")).toHaveText("1 behind · 0/1");
+    await expect(pill(adminPage, ADVANCED_CENTRE, "Chemistry")).toHaveText("—");
+    await expect(pill(adminPage, ADVANCED_CENTRE, "Maths")).toHaveText("—");
+    await expectGroup(adminPage, ADVANCED_CENTRE, "PCM", "On track", "green");
+    await expectGroup(adminPage, ADVANCED_CENTRE, "PCB", "1 behind", "amber");
+    await expect(adminPage.getByTestId("summary-centres-on-plan")).toHaveText("1/1");
+    await expectChaptersBehind(adminPage, "0", "1");
+    // No sessions: Optics (test 2 Jul) and Biology (16 Jul) are both past the 7-day grace.
+    await expect(row.locator("[data-tests-overdue]")).toHaveText("2");
+  });
+
+  test("its timeline takes prescribed time from JEE Advanced, falling back to NEET", async ({ adminPage }) => {
+    await adminPage.goto(`/curriculum-summary/centres/9000871?grade=12&as_of=${AS_OF}`);
+
+    await expect(adminPage.getByText(/JEE Advanced \+ NEET · Grade 12/)).toBeVisible();
+    await expect(timelineRow(adminPage, "Summary Advanced Optics").locator("[data-status]")).toHaveText("Done");
+    await expect(timelineRow(adminPage, "Summary Advanced Optics").locator("[data-prescribed]")).toHaveText("2h");
+    // Biology has no JEE Advanced config.
+    await expect(timelineRow(adminPage, "Fixture Biology").locator("[data-prescribed]")).toHaveText("3h");
+    await expect(adminPage.getByTestId("timeline-due-done")).toHaveText("1/2");
+  });
+});
+
 // Grade 12 classes running one track each, seeded and removed here so no other spec counts
 // them: a Chemistry Chapter prescribed 10h for JEE Main, 14h for JEE Advanced and 8h for NEET.
 const PRIMARY_TRACK_CENTRES: [number, string, number, number, string][] = [
@@ -1133,6 +1173,8 @@ test.describe("Curriculum Summary chapter timeline prescribed time", () => {
       [9000881, "10h"],
       [9000882, "14h"],
       [9000891, "8h"],
+      // The shared JEE Advanced + NEET fixture class takes JEE Advanced's, not NEET's.
+      [9000871, "14h"],
     ] as const) {
       await adminPage.goto(`/curriculum-summary/centres/${centreId}?grade=12&as_of=${AS_OF}`);
       await expect(timelineRow(adminPage, "Summary Chem Equilibrium").locator("[data-prescribed]")).toHaveText(
