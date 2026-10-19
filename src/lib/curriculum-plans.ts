@@ -1,0 +1,642 @@
+// Curriculum Plans (issue #417): Admin-authored plans that give the Chapters of their served
+// Exam Tracks a Chapter Due Date (and optional Chapter Test Date) for one academic year and
+// Grade. db-service owns the schema (ADR 0001); af_lms owns these reads, writes and
+// validation. Date rules come from `curriculum-plan-rules.ts`.
+
+import type { PoolClient } from "pg";
+
+import { requireAdmin, type AdminSession } from "./admin-guard";
+import { isDateString } from "./curriculum-date-helpers";
+import {
+  CONTENT_EXAM_TRACKS,
+  academicYearEndDate,
+  academicYearStartDate,
+  currentAcademicYearIST,
+  parseAcademicYear,
+} from "./curriculum-plan-rules";
+import {
+  checkCurriculumPlansSchema,
+  type CurriculumSchemaUnavailable,
+} from "./curriculum-schema";
+import { query, withTransaction } from "./db";
+import type { ExamTrack } from "./exam-tracks";
+
+export type CurriculumPlanStatus = "draft" | "active";
+
+export interface CurriculumPlanSummary {
+  id: number;
+  title: string;
+  academicYear: string;
+  grade: number;
+  examTracks: ExamTrack[];
+  status: CurriculumPlanStatus;
+  closureDate: string;
+  assignmentCount: number;
+}
+
+export interface CurriculumPlanChapter {
+  chapterId: number;
+  chapterCode: string;
+  chapterName: string;
+  subjectId: number;
+  subjectName: string;
+  dueDate: string | null;
+  testDate: string | null;
+}
+
+export interface CurriculumPlanDetail extends CurriculumPlanSummary {
+  chapters: CurriculumPlanChapter[];
+}
+
+export interface CurriculumPlanError {
+  field: string;
+  message: string;
+  chapterId?: number;
+  chapterName?: string;
+}
+
+export interface CurriculumPlanWarning {
+  chapterId: number;
+  chapterName: string;
+  message: string;
+}
+
+export type CurriculumPlanValidationFailure = {
+  ok: false;
+  status: 400;
+  error: string;
+  errors: CurriculumPlanError[];
+};
+
+type NotFound = { ok: false; status: 404; error: string };
+
+export type CurriculumPlanListResult =
+  | { ok: true; plans: CurriculumPlanSummary[] }
+  | CurriculumSchemaUnavailable;
+
+export type CurriculumPlanGetResult =
+  | { ok: true; plan: CurriculumPlanDetail }
+  | CurriculumSchemaUnavailable
+  | NotFound;
+
+export type CurriculumPlanCreateResult =
+  | { ok: true; plan: CurriculumPlanSummary }
+  | CurriculumPlanValidationFailure
+  | CurriculumSchemaUnavailable;
+
+export interface CurriculumPlanMetadata {
+  title: string;
+  examTracks: ExamTrack[];
+  academicYear: string;
+  grade: number;
+  closureDate: string;
+}
+
+// Every plan page and API uses the existing Admin guard. Reads stay bare so read-only
+// Admins can view; mutating handlers pass `{ forWrite: true }`.
+export function requireCurriculumPlanAdmin(
+  session: AdminSession,
+  opts?: { forWrite?: boolean }
+) {
+  return requireAdmin(session, opts);
+}
+
+type Db = <T>(sql: string, params: unknown[]) => Promise<T[]>;
+
+function clientDb(client: PoolClient): Db {
+  return async <T>(sql: string, params: unknown[]) =>
+    (await client.query(sql, params)).rows as T[];
+}
+
+const poolDb: Db = (sql, params) => query(sql, params);
+
+const PLAN_GRADES = [11, 12];
+const TITLE_MAX_LENGTH = 200;
+
+function validationFailure(errors: CurriculumPlanError[]): CurriculumPlanValidationFailure {
+  return { ok: false, status: 400, error: "Invalid Curriculum Plan", errors };
+}
+
+export function normalizeCurriculumPlanMetadata(
+  body: unknown
+): { ok: true; metadata: CurriculumPlanMetadata } | CurriculumPlanValidationFailure {
+  const input = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
+  const errors: CurriculumPlanError[] = [];
+
+  const title = typeof input.title === "string" ? input.title.trim() : "";
+  if (!title) {
+    errors.push({ field: "title", message: "Title is required" });
+  } else if (title.length > TITLE_MAX_LENGTH) {
+    errors.push({ field: "title", message: `Title must be at most ${TITLE_MAX_LENGTH} characters` });
+  }
+
+  const rawTracks = Array.isArray(input.exam_tracks) ? input.exam_tracks : [];
+  const examTracks = CONTENT_EXAM_TRACKS.filter((track) => rawTracks.includes(track));
+  if (rawTracks.length === 0) {
+    errors.push({ field: "exam_tracks", message: "Choose at least one served Exam Track" });
+  } else if (rawTracks.some((track) => !CONTENT_EXAM_TRACKS.includes(track as ExamTrack))) {
+    errors.push({
+      field: "exam_tracks",
+      message: "Served Exam Tracks must be JEE Main, JEE Advanced or NEET",
+    });
+  }
+
+  const academicYear = typeof input.academic_year === "string" ? input.academic_year.trim() : "";
+  const academicYearValid = parseAcademicYear(academicYear) !== null;
+  if (!academicYearValid) {
+    errors.push({
+      field: "academic_year",
+      message: "Academic year must look like 2026-2027",
+    });
+  }
+
+  const grade = Number(input.grade);
+  if (!PLAN_GRADES.includes(grade)) {
+    errors.push({ field: "grade", message: "Grade must be 11 or 12" });
+  }
+
+  const closureDate = typeof input.closure_date === "string" ? input.closure_date : "";
+  if (!isDateString(closureDate)) {
+    errors.push({ field: "closure_date", message: "Plan Closure Date must be a valid date" });
+  } else if (
+    academicYearValid &&
+    (closureDate < academicYearStartDate(academicYear) ||
+      closureDate > academicYearEndDate(academicYear))
+  ) {
+    errors.push({
+      field: "closure_date",
+      message: `Plan Closure Date must fall within academic year ${academicYear}`,
+    });
+  }
+
+  if (errors.length > 0) return validationFailure(errors);
+  return { ok: true, metadata: { title, examTracks, academicYear, grade, closureDate } };
+}
+
+interface PlanRow {
+  id: string | number;
+  title: string;
+  academic_year: string;
+  grade_id: string | number;
+  grade: string | number;
+  exam_tracks: string[];
+  status: CurriculumPlanStatus;
+  closure_date: string;
+  assignment_count: string | number;
+}
+
+const PLAN_SELECT = `
+  SELECT
+    p.id,
+    p.title,
+    p.academic_year,
+    p.grade_id,
+    g.number AS grade,
+    p.exam_tracks,
+    p.status,
+    p.closure_date::text AS closure_date,
+    (
+      SELECT COUNT(*)
+      FROM lms_curriculum_plan_assignments a
+      WHERE a.plan_id = p.id
+    ) AS assignment_count
+  FROM lms_curriculum_plans p
+  JOIN grade g ON g.id = p.grade_id`;
+
+function mapPlanRow(row: PlanRow): CurriculumPlanSummary {
+  return {
+    id: Number(row.id),
+    title: row.title,
+    academicYear: row.academic_year,
+    grade: Number(row.grade),
+    examTracks: CONTENT_EXAM_TRACKS.filter((track) => row.exam_tracks.includes(track)),
+    status: row.status,
+    closureDate: row.closure_date,
+    assignmentCount: Number(row.assignment_count),
+  };
+}
+
+export async function listCurriculumPlans(filters: {
+  academicYear: string;
+  grade: number | null;
+}): Promise<CurriculumPlanListResult> {
+  const schema = await checkCurriculumPlansSchema();
+  if (!schema.ok) return schema;
+
+  const rows = await query<PlanRow>(
+    `${PLAN_SELECT}
+     WHERE p.academic_year = $1
+       AND ($2::integer IS NULL OR g.number = $2::integer)
+     ORDER BY g.number, p.title, p.id`,
+    [filters.academicYear, filters.grade]
+  );
+  return { ok: true, plans: rows.map(mapPlanRow) };
+}
+
+interface ChapterRow {
+  chapter_id: string | number;
+  chapter_code: string | null;
+  chapter_name: string;
+  subject_id: string | number;
+  subject_name: string;
+  due_date: string | null;
+  test_date: string | null;
+}
+
+// The plan's effective Chapter list: in-syllabus LMS Chapter Exam Configs for the Grade and
+// served tracks, one row per Chapter, by subject then lowest coverage sequence across the
+// served tracks. Stored dates for Chapters that left the syllabus are kept in the table but
+// not returned.
+async function loadEffectiveChapters(
+  db: Db,
+  plan: { id: number | null; gradeId: number; examTracks: readonly string[] }
+): Promise<CurriculumPlanChapter[]> {
+  const rows = await db<ChapterRow>(
+    `SELECT
+       ch.id AS chapter_id,
+       ch.code AS chapter_code,
+       COALESCE(
+         (
+           SELECT item->>'chapter'
+           FROM jsonb_array_elements(ch.name::jsonb) item
+           WHERE item->>'lang_code' = 'en'
+           LIMIT 1
+         ),
+         ch.code,
+         'Unknown chapter'
+       ) AS chapter_name,
+       s.id AS subject_id,
+       COALESCE(
+         (
+           SELECT item->>'subject'
+           FROM jsonb_array_elements(s.name::jsonb) item
+           WHERE item->>'lang_code' = 'en'
+           LIMIT 1
+         ),
+         'Unknown subject'
+       ) AS subject_name,
+       pc.due_date::text AS due_date,
+       pc.test_date::text AS test_date
+     FROM lms_chapter_exam_configs cfg
+     JOIN chapter ch ON ch.id = cfg.chapter_id
+     JOIN subject s ON s.id = ch.subject_id
+     LEFT JOIN lms_curriculum_plan_chapters pc
+       ON pc.plan_id = $1
+      AND pc.chapter_id = ch.id
+     WHERE cfg.is_in_syllabus = true
+       AND ch.grade_id = $2
+       AND cfg.exam_track = ANY($3::text[])
+     GROUP BY ch.id, ch.code, ch.name, s.id, s.name, pc.due_date, pc.test_date
+     ORDER BY s.id, MIN(cfg.coverage_sequence), ch.code, ch.id`,
+    [plan.id, plan.gradeId, plan.examTracks]
+  );
+  return rows.map((row) => ({
+    chapterId: Number(row.chapter_id),
+    chapterCode: row.chapter_code ?? "",
+    chapterName: row.chapter_name,
+    subjectId: Number(row.subject_id),
+    subjectName: row.subject_name,
+    dueDate: row.due_date,
+    testDate: row.test_date,
+  }));
+}
+
+export async function getCurriculumPlan(id: number): Promise<CurriculumPlanGetResult> {
+  const schema = await checkCurriculumPlansSchema();
+  if (!schema.ok) return schema;
+
+  if (!Number.isInteger(id) || id <= 0) return planNotFound();
+  const rows = await query<PlanRow>(`${PLAN_SELECT} WHERE p.id = $1`, [id]);
+  const row = rows[0];
+  if (!row) return planNotFound();
+
+  const plan = mapPlanRow(row);
+  const chapters = await loadEffectiveChapters(poolDb, {
+    id: plan.id,
+    gradeId: Number(row.grade_id),
+    examTracks: plan.examTracks,
+  });
+  return { ok: true, plan: { ...plan, chapters } };
+}
+
+function planNotFound(): NotFound {
+  return { ok: false, status: 404, error: "Curriculum Plan not found" };
+}
+
+async function resolveGradeId(db: Db, grade: number): Promise<number | null> {
+  const rows = await db<{ id: string | number }>(
+    "SELECT id FROM grade WHERE number = $1 ORDER BY id LIMIT 1",
+    [grade]
+  );
+  return rows[0] ? Number(rows[0].id) : null;
+}
+
+// New plans are stored as Draft.
+export async function createCurriculumPlan(params: {
+  adminEmail: string;
+  body: unknown;
+}): Promise<CurriculumPlanCreateResult> {
+  const schema = await checkCurriculumPlansSchema();
+  if (!schema.ok) return schema;
+
+  const normalized = normalizeCurriculumPlanMetadata(params.body);
+  if (!normalized.ok) return normalized;
+  const metadata = normalized.metadata;
+
+  return withTransaction(async (client) => {
+    const db = clientDb(client);
+    const gradeId = await resolveGradeId(db, metadata.grade);
+    if (gradeId === null) {
+      return validationFailure([{ field: "grade", message: "Grade was not found" }]);
+    }
+    const inserted = await db<{ id: string | number }>(
+      `INSERT INTO lms_curriculum_plans
+         (title, academic_year, grade_id, exam_tracks, status, closure_date,
+          inserted_by_email, updated_by_email, inserted_at, updated_at)
+       VALUES ($1, $2, $3, $4::text[], 'draft', $5::date, $6, $6,
+               (NOW() AT TIME ZONE 'UTC'), (NOW() AT TIME ZONE 'UTC'))
+       RETURNING id`,
+      [
+        metadata.title,
+        metadata.academicYear,
+        gradeId,
+        metadata.examTracks,
+        metadata.closureDate,
+        params.adminEmail,
+      ]
+    );
+    const rows = await db<PlanRow>(`${PLAN_SELECT} WHERE p.id = $1`, [inserted[0].id]);
+    return { ok: true as const, plan: mapPlanRow(rows[0]) };
+  });
+}
+
+export interface CurriculumPlanListFilters {
+  academicYear: string;
+  grade: number | null;
+}
+
+// Invalid input falls back to the defaults: the current IST academic year and all Grades.
+export function normalizeCurriculumPlanListFilters(
+  params: Record<string, string | undefined>
+): CurriculumPlanListFilters {
+  const academicYear = params.academic_year?.trim() ?? "";
+  const grade = Number(params.grade);
+  return {
+    academicYear: parseAcademicYear(academicYear) ? academicYear : currentAcademicYearIST(),
+    grade: PLAN_GRADES.includes(grade) ? grade : null,
+  };
+}
+
+export type CurriculumPlanChapterDatesResult =
+  | { ok: true; plan: CurriculumPlanDetail; warnings: CurriculumPlanWarning[] }
+  | CurriculumPlanValidationFailure
+  | CurriculumSchemaUnavailable
+  | NotFound;
+
+interface ChapterDateInput {
+  chapterId: number;
+  dueDate: string | null;
+  testDate: string | null;
+}
+
+function normalizeChapterDateInputs(
+  body: unknown
+): { ok: true; inputs: ChapterDateInput[] } | CurriculumPlanValidationFailure {
+  const input = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
+  if (!Array.isArray(input.chapters) || input.chapters.length === 0) {
+    return validationFailure([{ field: "chapters", message: "No Chapter dates to save" }]);
+  }
+  const errors: CurriculumPlanError[] = [];
+  const inputs: ChapterDateInput[] = [];
+  const seen = new Set<number>();
+  for (const raw of input.chapters) {
+    const item = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+    const chapterId = Number(item.chapter_id);
+    if (!Number.isInteger(chapterId) || chapterId <= 0 || seen.has(chapterId)) {
+      errors.push({ field: "chapters", message: "Each Chapter must appear once with a valid id" });
+      continue;
+    }
+    seen.add(chapterId);
+    const dueDate = item.due_date == null || item.due_date === "" ? null : item.due_date;
+    const testDate = item.test_date == null || item.test_date === "" ? null : item.test_date;
+    if (
+      (dueDate !== null && (typeof dueDate !== "string" || !isDateString(dueDate))) ||
+      (testDate !== null && (typeof testDate !== "string" || !isDateString(testDate)))
+    ) {
+      errors.push({ field: "chapters", chapterId, message: "Dates must be valid YYYY-MM-DD dates" });
+      continue;
+    }
+    inputs.push({ chapterId, dueDate: dueDate as string | null, testDate: testDate as string | null });
+  }
+  if (errors.length > 0) return validationFailure(errors);
+  return { ok: true, inputs };
+}
+
+interface LockedPlanRow {
+  id: string | number;
+  academic_year: string;
+  grade_id: string | number;
+  exam_tracks: string[];
+  closure_date: string;
+}
+
+async function lockPlan(db: Db, id: number): Promise<LockedPlanRow | null> {
+  const rows = await db<LockedPlanRow>(
+    `SELECT id, academic_year, grade_id, exam_tracks, closure_date::text AS closure_date
+     FROM lms_curriculum_plans
+     WHERE id = $1
+     FOR UPDATE`,
+    [id]
+  );
+  return rows[0] ?? null;
+}
+
+// Every plan date must fall within the academic year and on or before the Plan Closure Date.
+function planDateError(
+  label: string,
+  date: string | null,
+  plan: { academic_year: string; closure_date: string }
+): string | null {
+  if (!date) return null;
+  if (
+    date < academicYearStartDate(plan.academic_year) ||
+    date > academicYearEndDate(plan.academic_year)
+  ) {
+    return `${label} ${date} is outside academic year ${plan.academic_year}`;
+  }
+  if (date > plan.closure_date) {
+    return `${label} ${date} is after the Plan Closure Date ${plan.closure_date}`;
+  }
+  return null;
+}
+
+// Batch upsert of Chapter Due / Test Dates. All-or-nothing: any invalid Chapter rejects the
+// whole batch with per-Chapter errors. A test date before its due date is saved with a warning.
+export async function saveCurriculumPlanChapterDates(params: {
+  id: number;
+  adminEmail: string;
+  body: unknown;
+}): Promise<CurriculumPlanChapterDatesResult> {
+  const schema = await checkCurriculumPlansSchema();
+  if (!schema.ok) return schema;
+  if (!Number.isInteger(params.id) || params.id <= 0) return planNotFound();
+
+  const normalized = normalizeChapterDateInputs(params.body);
+  if (!normalized.ok) return normalized;
+
+  const outcome = await withTransaction(async (client) => {
+    const db = clientDb(client);
+    const plan = await lockPlan(db, params.id);
+    if (!plan) return planNotFound();
+
+    const chapters = await loadEffectiveChapters(db, {
+      id: params.id,
+      gradeId: Number(plan.grade_id),
+      examTracks: plan.exam_tracks,
+    });
+    const chaptersById = new Map(chapters.map((chapter) => [chapter.chapterId, chapter]));
+    const errors: CurriculumPlanError[] = [];
+    const warnings: CurriculumPlanWarning[] = [];
+
+    for (const input of normalized.inputs) {
+      const chapter = chaptersById.get(input.chapterId);
+      if (!chapter) {
+        errors.push({
+          field: "chapters",
+          chapterId: input.chapterId,
+          message: `Chapter ${input.chapterId} is not an in-syllabus Chapter of this plan`,
+        });
+        continue;
+      }
+      const named = { field: "chapters", chapterId: chapter.chapterId, chapterName: chapter.chapterName };
+      for (const [label, date] of [
+        ["Chapter Due Date", input.dueDate],
+        ["Chapter Test Date", input.testDate],
+      ] as const) {
+        const message = planDateError(label, date, plan);
+        if (message) errors.push({ ...named, message });
+      }
+      if (input.testDate && !input.dueDate) {
+        errors.push({ ...named, message: "Chapter Test Date needs a Chapter Due Date" });
+      }
+      if (input.dueDate && input.testDate && input.testDate < input.dueDate) {
+        warnings.push({
+          chapterId: chapter.chapterId,
+          chapterName: chapter.chapterName,
+          message: "Chapter Test Date is before its Chapter Due Date",
+        });
+      }
+    }
+    if (errors.length > 0) return validationFailure(errors);
+
+    for (const input of normalized.inputs) {
+      await db(
+        `INSERT INTO lms_curriculum_plan_chapters
+           (plan_id, chapter_id, due_date, test_date,
+            inserted_by_email, updated_by_email, inserted_at, updated_at)
+         VALUES ($1, $2, $3::date, $4::date, $5, $5,
+                 (NOW() AT TIME ZONE 'UTC'), (NOW() AT TIME ZONE 'UTC'))
+         ON CONFLICT (plan_id, chapter_id) DO UPDATE SET
+           due_date = EXCLUDED.due_date,
+           test_date = EXCLUDED.test_date,
+           updated_by_email = EXCLUDED.updated_by_email,
+           updated_at = EXCLUDED.updated_at`,
+        [params.id, input.chapterId, input.dueDate, input.testDate, params.adminEmail]
+      );
+    }
+    await db(
+      `UPDATE lms_curriculum_plans
+       SET updated_by_email = $2, updated_at = (NOW() AT TIME ZONE 'UTC')
+       WHERE id = $1`,
+      [params.id, params.adminEmail]
+    );
+    return { ok: true as const, warnings };
+  });
+
+  if (!outcome.ok) return outcome;
+  const reloaded = await getCurriculumPlan(params.id);
+  if (!reloaded.ok) return reloaded;
+  return { ok: true, plan: reloaded.plan, warnings: outcome.warnings };
+}
+
+export type CurriculumPlanUpdateResult =
+  | { ok: true; plan: CurriculumPlanSummary }
+  | CurriculumPlanValidationFailure
+  | CurriculumSchemaUnavailable
+  | NotFound;
+
+// Update title, served tracks, academic year, Grade and Plan Closure Date. Every stored date
+// on the resulting effective Chapter list must still fall within the academic year and on or
+// before the closure date; dates of Chapters outside the new list stay stored but hidden.
+export async function updateCurriculumPlanMetadata(params: {
+  id: number;
+  adminEmail: string;
+  body: unknown;
+}): Promise<CurriculumPlanUpdateResult> {
+  const schema = await checkCurriculumPlansSchema();
+  if (!schema.ok) return schema;
+  if (!Number.isInteger(params.id) || params.id <= 0) return planNotFound();
+
+  const normalized = normalizeCurriculumPlanMetadata(params.body);
+  if (!normalized.ok) return normalized;
+  const metadata = normalized.metadata;
+
+  return withTransaction(async (client) => {
+    const db = clientDb(client);
+    const plan = await lockPlan(db, params.id);
+    if (!plan) return planNotFound();
+
+    const gradeId = await resolveGradeId(db, metadata.grade);
+    if (gradeId === null) {
+      return validationFailure([{ field: "grade", message: "Grade was not found" }]);
+    }
+
+    const chapters = await loadEffectiveChapters(db, {
+      id: params.id,
+      gradeId,
+      examTracks: metadata.examTracks,
+    });
+    const updated = { academic_year: metadata.academicYear, closure_date: metadata.closureDate };
+    const errors: CurriculumPlanError[] = [];
+    for (const chapter of chapters) {
+      for (const [label, date] of [
+        ["Chapter Due Date", chapter.dueDate],
+        ["Chapter Test Date", chapter.testDate],
+      ] as const) {
+        const message = planDateError(label, date, updated);
+        if (message) {
+          errors.push({
+            field: "closure_date",
+            chapterId: chapter.chapterId,
+            chapterName: chapter.chapterName,
+            message,
+          });
+        }
+      }
+    }
+    if (errors.length > 0) return validationFailure(errors);
+
+    await db(
+      `UPDATE lms_curriculum_plans
+       SET title = $2,
+           academic_year = $3,
+           grade_id = $4,
+           exam_tracks = $5::text[],
+           closure_date = $6::date,
+           updated_by_email = $7,
+           updated_at = (NOW() AT TIME ZONE 'UTC')
+       WHERE id = $1`,
+      [
+        params.id,
+        metadata.title,
+        metadata.academicYear,
+        gradeId,
+        metadata.examTracks,
+        metadata.closureDate,
+        params.adminEmail,
+      ]
+    );
+    const rows = await db<PlanRow>(`${PLAN_SELECT} WHERE p.id = $1`, [params.id]);
+    return { ok: true as const, plan: mapPlanRow(rows[0]) };
+  });
+}

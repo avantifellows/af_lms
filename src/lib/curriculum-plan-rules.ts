@@ -61,7 +61,7 @@ export function shiftAcademicYearForward(academicYear: string): string {
 
 // Exam Tracks with LMS curriculum content. CET and Math Foundation have none and are
 // ignored for progress.
-const CONTENT_EXAM_TRACKS: readonly ExamTrack[] = ["jee_main", "jee_advanced", "neet"];
+export const CONTENT_EXAM_TRACKS: readonly ExamTrack[] = ["jee_main", "jee_advanced", "neet"];
 
 export type SummaryClass =
   | { kind: "single"; tracks: ExamTrack[] }

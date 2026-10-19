@@ -114,12 +114,20 @@ export default async function CurriculumSummaryPage({ searchParams }: PageProps)
         userEmail={email}
         actions={
           permission.role === "admin" ? (
-            <Link
-              href="/curriculum-summary/config"
-              className="rounded-md border border-border px-3 py-1.5 text-sm font-bold text-accent hover:text-accent-hover"
-            >
-              Manage config
-            </Link>
+            <div className="flex items-center gap-2">
+              <Link
+                href="/curriculum-summary/plans"
+                className="rounded-md border border-border px-3 py-1.5 text-sm font-bold text-accent hover:text-accent-hover"
+              >
+                Plans
+              </Link>
+              <Link
+                href="/curriculum-summary/config"
+                className="rounded-md border border-border px-3 py-1.5 text-sm font-bold text-accent hover:text-accent-hover"
+              >
+                Manage config
+              </Link>
+            </div>
           ) : undefined
         }
         containerClassName="w-full px-4 py-3 sm:px-6 lg:px-8"

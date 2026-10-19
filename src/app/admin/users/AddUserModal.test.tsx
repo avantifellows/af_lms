@@ -486,7 +486,9 @@ describe("AddUserModal — role descriptions", () => {
     const roleSelect = screen.getAllByRole("combobox")[0];
     await user.selectOptions(roleSelect, "admin");
 
-    expect(screen.getByText(/Admins have access to all features/)).toBeInTheDocument();
+    expect(screen.getByText(
+      "Admins have access to all features, all schools, and all programs, including authoring Curriculum Plans — full edit unless marked read-only",
+    )).toBeInTheDocument();
   });
 
   it("offers the read-only checkbox for admins and sends read_only on submit", async () => {

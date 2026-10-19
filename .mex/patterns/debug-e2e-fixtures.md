@@ -14,7 +14,7 @@ edges:
     condition: when failures are in PM school visit flows
   - target: context/data-access.md
     condition: when fixture rows need to match schema/read-path expectations
-last_updated: 2026-10-14
+last_updated: 2026-10-19
 ---
 
 # Debug E2E Fixtures
@@ -46,6 +46,9 @@ expectations, or fixture rows missing a relationship the app now requires.
 - The dashboard's default tab heading is "JNV NVS Schools"; "My Schools" is only the stat label.
 - The Curriculum tab shows a Program selector only when the School has more than one Program from active physical Centres; single-Centre fixture Schools (e.g. `LMS75EMPTY`) have none.
 - Curriculum topics need `topic_curriculum` rows in the fixture migration, not just `chapter` and `topic` rows.
+- `column s.tshirt_size does not exist` (42703 from `src/lib/school-students.ts` via `RosterPage`) means the local `e2e/fixtures/db-dump.sql` predates the db-service Student coaching fields; every School/Centre page spec (school, curriculum School tab, dashboard card journeys, centre switcher, performance, Student-interaction visits, Holistic responsive) then fails, about 33 tests on 2026-10-19. Refresh the dump; do not patch the specs.
+- Toggling an `lms_chapter_exam_configs` row out of syllabus in a spec must also set `prescribed_minutes = 0` (`lms_chapter_exam_configs_out_of_syllabus_minutes_check`); restore the original minutes in a `finally` so later specs keep the fixture syllabus (see `e2e/tests/curriculum-plans.spec.ts`).
+- `getByRole("alert")` also matches Next's route announcer, so it hits strict-mode violations; give inline error panels a `data-testid` and target that.
 - Responsive visit lists can render hidden duplicate links; target visible links or rows.
 - Program-admin `/visits` redirects to `/school-visit-summary`; go directly to visit detail when asserting read-only access.
 - Visit action schemas should match the canonical validator shape; do not revive older legacy payload forms just to make an e2e pass.
