@@ -366,7 +366,7 @@ _Avoid_: Unmapped Student, Mapping not done, unassigned Mentee
 - A JEE Main or JEE Advanced **Summary Class** shows **PCM Behind** only, a NEET class **PCB Behind** only, and a shared JEE Main or JEE Advanced and NEET class both
 - **PCM Behind** and **PCB Behind** show done/due like the subject pills: how many of the group's Chapters due by the as-of date are done
 - **Curriculum Summary** lists the classes worst first by the larger of **PCM Behind** and **PCB Behind**, and its header totals each over the classes it covers
-- **Curriculum Summary** filters by Region and by Centre (picked from the Centres in scope for the Grade and Regions, not by School name); both narrow the header totals, while Only behind narrows only the listed classes
+- **Curriculum Summary** filters by Program, Region and Centre, in that order: each offers only what is in scope for the Grade and the filters before it, and Centres are picked by name rather than by School name; all three narrow the header totals, while Only behind narrows only the listed classes
 - A **Summary Class** counts **LMS Curriculum Logs** and **Chapter Completion** from every Exam Track in the class; teachers still log and complete Chapters under one Exam Track (ADR 0008)
 - JEE Main and JEE Advanced are never one **Summary Class**; a Centre and Grade mapped to both, with or without NEET, is a Centre Management setup problem
 - One **Curriculum Plan** applies to a Centre and Grade for an academic year, whatever Exam Tracks it runs; G11 and G12 at one Centre have separate plans

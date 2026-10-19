@@ -86,6 +86,15 @@ const CENTRE_OPTIONS = [
 ];
 
 // Like the module: the requested Centre ids that are options, in option order.
+const PROGRAM_OPTIONS = [
+  { id: 1, name: "JNV CoE" },
+  { id: 2, name: "JNV Nodal" },
+];
+
+function selectedPrograms(params: CurriculumSummaryQuery): number[] {
+  return PROGRAM_OPTIONS.filter((option) => params.programIds.includes(option.id)).map((option) => option.id);
+}
+
 function selectedCentres(params: CurriculumSummaryQuery): number[] {
   return CENTRE_OPTIONS.filter((option) => params.centreIds.includes(option.id)).map((option) => option.id);
 }
@@ -95,7 +104,9 @@ function summary(overrides: Partial<Extract<CurriculumSummaryResult, { ok: true 
     ok: true,
     header: { centresOnPlan: 1, centresTotal: 3, chaptersBehind: { PCM: 1, PCB: 5 }, testsOverdue: 2 },
     regionOptions: ["NORTH", "SOUTH"],
+    programOptions: PROGRAM_OPTIONS,
     centreOptions: CENTRE_OPTIONS,
+    selectedProgramIds: [],
     selectedCentreIds: [],
     rows: [
       row({}),
@@ -156,7 +167,7 @@ beforeEach(() => {
   mockGetServerSession.mockResolvedValue({ user: { email: PM.email } });
   mockGetResolvedPermission.mockResolvedValue(PM);
   mockGetCurriculumSummary.mockImplementation(async (_permission, params: CurriculumSummaryQuery) =>
-    summary({ selectedCentreIds: selectedCentres(params) })
+    summary({ selectedProgramIds: selectedPrograms(params), selectedCentreIds: selectedCentres(params) })
   );
 });
 
@@ -198,6 +209,7 @@ describe("Curriculum Summary page", () => {
     await renderPage({ grade: "12", as_of: "2026-08-15", regions: "NORTH", centres: "1", only_behind: "1", page: "2", limit: "50" });
 
     expect(mockGetCurriculumSummary).toHaveBeenCalledWith(PM, {
+      programIds: [],
       regions: ["NORTH"],
       centreIds: [1],
       grade: 12,
@@ -456,14 +468,21 @@ describe("Curriculum Summary page", () => {
       (document.querySelector(`input[name="centres"][value="${centreId}"]`)?.closest("label") as HTMLLabelElement)
         .hidden;
     fireEvent.click(screen.getByRole("checkbox", { name: "SOUTH" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "JNV Nodal" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Bhuj Closed" }));
     fireEvent.change(centreSearch(), { target: { value: "vapi" } });
     fireEvent.click(screen.getByRole("checkbox", { name: "Only behind" }));
 
-    rerender(await CurriculumSummaryPage({ searchParams: Promise.resolve({ as_of: "2026-08-10", regions: "SOUTH" }) }));
+    rerender(
+      await CurriculumSummaryPage({
+        searchParams: Promise.resolve({ as_of: "2026-08-10", programs: "1", regions: "SOUTH" }),
+      })
+    );
 
     expect(screen.getByRole("checkbox", { name: "NORTH" })).not.toBeChecked();
     expect(screen.getByRole("checkbox", { name: "SOUTH" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "JNV CoE" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "JNV Nodal" })).not.toBeChecked();
     expect(screen.getByRole("checkbox", { name: "Anand Shared" })).not.toBeChecked();
     expect(screen.getByRole("checkbox", { name: "Bhuj Closed" })).not.toBeChecked();
     expect(centreSearch()).toHaveValue("");
@@ -483,6 +502,30 @@ describe("Curriculum Summary page", () => {
     expect(screen.getByRole("checkbox", { name: "Vapi" })).not.toBeChecked();
     expect(centreSearch()).toHaveValue("");
     expect(optionHidden(3)).toBe(false);
+  });
+
+  it("picks Programs by id, before Region and Centre, and ignores ids that aren't options", async () => {
+    await renderPage({ as_of: "2026-08-15", programs: ["2", "64"], regions: "NORTH", sort: "plan", dir: "asc" });
+
+    expect(mockGetCurriculumSummary).toHaveBeenCalledWith(PM, expect.objectContaining({ programIds: [2, 64] }));
+    expect(screen.getByText("JNV Nodal", { selector: "summary span" })).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "JNV Nodal" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "JNV CoE" })).not.toBeChecked();
+    // Grade, Program, Region, Centre.
+    expect([...document.querySelectorAll("summary")].map((summary) => summary.firstChild?.textContent)).toEqual([
+      "Program",
+      "Region",
+      "Centre",
+    ]);
+    // Program 64 isn't an option, so links carry only 2; the sort and Region stay.
+    expect(screen.getByRole("link", { name: "Grade 12" })).toHaveAttribute(
+      "href",
+      "/curriculum-summary?programs=2&regions=NORTH&grade=12&as_of=2026-08-15&sort=plan&dir=asc"
+    );
+    expect(within(screen.getByRole("columnheader", { name: "Centre" })).getByRole("link")).toHaveAttribute(
+      "href",
+      "/curriculum-summary?programs=2&regions=NORTH&grade=11&as_of=2026-08-15&sort=centre&dir=asc"
+    );
   });
 
   it("picks Centres by id from the scoped options and ignores ids that aren't options", async () => {
@@ -511,6 +554,7 @@ describe("Curriculum Summary page", () => {
     mockGetCurriculumSummary.mockResolvedValue(
       summary({
         pagination: { page: 1, pageSize: 20, totalRows: 1, totalPages: 1 },
+        programOptions: [],
         regionOptions: [],
         centreOptions: [],
       })
@@ -522,8 +566,10 @@ describe("Curriculum Summary page", () => {
     expect(screen.queryByRole("link", { name: "Next" })).not.toBeInTheDocument();
     expect(screen.getByText("Previous")).toBeInTheDocument();
     expect(document.querySelector('input[type="hidden"][name="limit"]')).toBeNull();
+    expect(screen.getByText("No programs in scope")).toBeInTheDocument();
     expect(screen.getByText("No regions in scope")).toBeInTheDocument();
     expect(screen.getByText("No centres in scope")).toBeInTheDocument();
+    expect(screen.getByText("All programs")).toBeInTheDocument();
     expect(screen.getByText("All regions")).toBeInTheDocument();
     expect(screen.getByText("All centres")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Grade 12" })).toHaveAttribute(
@@ -534,6 +580,7 @@ describe("Curriculum Summary page", () => {
 
   it.each([
     [{}, "No Centres with Exam Tracks for Grade 11 are in your scope."],
+    [{ programs: "1" }, "No classes match these filters."],
     [{ centres: "1" }, "No classes match these filters."],
     [{ regions: "NORTH" }, "No classes match these filters."],
     [{ only_behind: "1" }, "No classes match these filters."],
@@ -541,6 +588,7 @@ describe("Curriculum Summary page", () => {
     mockGetCurriculumSummary.mockImplementation(async (_permission, params: CurriculumSummaryQuery) =>
       summary({
         rows: [],
+        selectedProgramIds: selectedPrograms(params),
         selectedCentreIds: selectedCentres(params),
         pagination: { page: 1, pageSize: 20, totalRows: 0, totalPages: 0 },
       })

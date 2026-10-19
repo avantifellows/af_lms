@@ -398,14 +398,14 @@ test.describe("Curriculum Summary", () => {
   }) => {
     const page = await summaryPmPage(browser);
     await page.goto(
-      `/curriculum-summary?as_of=${AS_OF}&programs=2&subjects=4&exam_tracks=neet&preset=all&flagged=true&sort=school&dir=asc`
+      `/curriculum-summary?as_of=${AS_OF}&subjects=4&exam_tracks=neet&preset=all&flagged=true&sort=school&dir=asc`
     );
     await expect(page.locator("[data-summary-row]")).toHaveCount(9);
     await expect(page.getByTestId("summary-centres-on-plan")).toHaveText("4/7");
     for (const removed of ["Flagged Rows", "Avg Completion", "Actual Hours", "Filters"]) {
       await expect(page.getByText(removed, { exact: true })).toHaveCount(0);
     }
-    for (const label of ["Program", "Subject", "Exam Track", "From", "To"]) {
+    for (const label of ["Subject", "Exam Track", "From", "To"]) {
       await expect(page.getByLabel(label, { exact: true })).toHaveCount(0);
     }
     await expect(page.getByRole("button", { name: /Show chapters for/ })).toHaveCount(0);
@@ -454,6 +454,53 @@ test.describe("Curriculum Summary filters", () => {
     await page.locator("summary", { hasText: "Region" }).click();
     await expect(page.getByRole("checkbox", { name: "SUMMARY_E2E", exact: true })).toHaveCount(1);
     await expect(page.getByRole("checkbox", { name: "SUMMARY_E2E_OTHER", exact: true })).toHaveCount(0);
+    await page.context().close();
+  });
+
+  test("the Program filter lists the chosen Program's rows and narrows the header, Region and Centre", async ({
+    browser,
+  }) => {
+    const page = await summaryPmPage(browser);
+    await page.goto(`/curriculum-summary?as_of=${AS_OF}&sort=centre&dir=asc`);
+    await page.locator("summary", { hasText: "Program" }).click();
+    await expect(page.getByRole("checkbox", { name: "JNV Nodal" })).not.toBeChecked();
+    await page.getByRole("checkbox", { name: "JNV CoE" }).check();
+    await page.getByRole("button", { name: "Apply" }).click();
+
+    // JNV CoE is Program 1; the sort survives Apply.
+    await expect(page).toHaveURL(/programs=1/);
+    const url = new URL(page.url());
+    expect(url.searchParams.getAll("programs")).toEqual(["1"]);
+    expect(url.searchParams.get("sort")).toBe("centre");
+    await expect(page.locator("summary", { hasText: "Program" })).toContainText("JNV CoE");
+    // The PM's JNV CoE Centres, A–Z by Centre: Anand Main (PCM 1 behind), Bhuj Neet (on track),
+    // Navsari One (ambiguous Centre), Surat CET (no content), Vapi Unassigned (No plan).
+    expect(await rowCentres(page)).toEqual([
+      "Summary E2E Anand Main",
+      "Summary E2E Bhuj Neet",
+      "Summary E2E Navsari One",
+      "Summary E2E Surat CET",
+      "Summary E2E Vapi Unassigned",
+    ]);
+    // On plan: Anand Main and Bhuj Neet, of 5 rows less Surat CET: 2/4. PCM: Anand Main 1; PCB:
+    // Bhuj Neet 0. Tests overdue: Anand Main 1 + Bhuj Neet 3.
+    await expect(page.getByTestId("summary-centres-on-plan")).toHaveText("2/4");
+    await expectChaptersBehind(page, "1", "0");
+    await expect(page.getByTestId("summary-tests-overdue")).toHaveText("4");
+    // Centre options follow the Program: no Nodal Centres.
+    await expect(
+      page.getByRole("checkbox", { name: "Summary E2E Anand Shared", exact: true, includeHidden: true })
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("checkbox", { name: "Summary E2E Anand Main", exact: true, includeHidden: true })
+    ).toHaveCount(1);
+    // The Grade link keeps the Program.
+    await expect(page.getByRole("link", { name: "Grade 12" })).toHaveAttribute("href", /programs=1/);
+
+    // Anand Shared (JNV Nodal) is not a JNV CoE Centre, so its id is ignored: all 5 rows.
+    await page.goto(`/curriculum-summary?as_of=${AS_OF}&programs=1&centres=9000812`);
+    await expect(page.locator("[data-summary-row]")).toHaveCount(5);
+    await expect(page.getByText("All centres")).toBeVisible();
     await page.context().close();
   });
 

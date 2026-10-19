@@ -70,6 +70,8 @@ export interface CurriculumSummarySort {
 }
 
 export interface CurriculumSummaryQuery {
+  // Program ids to list; [] = every Program. Ids that aren't Program options are ignored.
+  programIds: number[];
   // Narrows the user's scoped rows; it never widens scope.
   regions: string[];
   // Centre ids to list; [] = every Centre. Ids that aren't Centre options are ignored.
@@ -90,7 +92,8 @@ function firstValue(value: SearchParamValue): string | undefined {
   return Array.isArray(value) ? value[0] : value;
 }
 
-// `regions` and `centres` accept repeated keys (the filter form) and comma-separated values.
+// `programs`, `regions` and `centres` accept repeated keys (the filter form) and comma-separated
+// values.
 function parseList(value: SearchParamValue): string[] {
   const values = Array.isArray(value) ? value : value ? [value] : [];
   return [...new Set(values.flatMap((item) => item.split(",")).map((item) => item.trim()))].filter(
@@ -98,7 +101,7 @@ function parseList(value: SearchParamValue): string[] {
   );
 }
 
-// Unknown or removed params (programs, subjects, tracks, date range, flags) are ignored, and so
+// Unknown or removed params (subjects, tracks, date range, flags) are ignored, and so
 // is an unknown sort column; an unknown direction falls back to the column's first-click one.
 export function normalizeCurriculumSummarySearchParams(
   searchParams: Record<string, SearchParamValue>,
@@ -108,8 +111,9 @@ export function normalizeCurriculumSummarySearchParams(
   const pageSize = Number.parseInt(firstValue(searchParams.limit) ?? String(DEFAULT_PAGE_SIZE), 10);
   const asOf = firstValue(searchParams.as_of);
   return {
+    programIds: parseIds(searchParams.programs),
     regions: parseList(searchParams.regions),
-    centreIds: parseList(searchParams.centres).filter((id) => /^[1-9]\d*$/.test(id)).map(Number),
+    centreIds: parseIds(searchParams.centres),
     grade: firstValue(searchParams.grade) === "12" ? 12 : 11,
     // Invalid dates, and years too far out to name an academic year (0999, 9999), mean today.
     asOf: asOf && isAcademicYearDate(asOf) ? asOf : todayIstDate,
@@ -118,6 +122,11 @@ export function normalizeCurriculumSummarySearchParams(
     page: Number.isFinite(page) && page > 0 ? page : 1,
     pageSize: PAGE_SIZES.includes(pageSize) ? pageSize : DEFAULT_PAGE_SIZE,
   };
+}
+
+// Positive whole ids only.
+function parseIds(value: SearchParamValue): number[] {
+  return parseList(value).filter((id) => /^[1-9]\d*$/.test(id)).map(Number);
 }
 
 function parseSort(key: string | undefined, dir: string | undefined): CurriculumSummarySort | null {
@@ -172,7 +181,7 @@ export interface CurriculumSummaryHeader {
   testsOverdue: number;
 }
 
-export interface CurriculumSummaryCentreOption {
+export interface CurriculumSummaryFilterOption {
   id: number;
   name: string;
 }
@@ -181,11 +190,14 @@ export type CurriculumSummaryResult =
   | {
       ok: true;
       header: CurriculumSummaryHeader;
-      // Regions of every scoped row for the Grade, before the Region and Centre filters.
+      // Each filter's options follow the filters before it (Program, Region, Centre), never Only
+      // behind: Programs of every scoped row for the Grade, A–Z; Regions of the rows in the chosen
+      // Programs; Centres of the rows in the chosen Programs and Regions, A–Z.
+      programOptions: CurriculumSummaryFilterOption[];
       regionOptions: string[];
-      // Centres of the scoped rows in the chosen Regions, A–Z; Only behind doesn't narrow them.
-      centreOptions: CurriculumSummaryCentreOption[];
-      // The `centreIds` that are Centre options, in option order; the rows listed are these.
+      centreOptions: CurriculumSummaryFilterOption[];
+      // The requested Program and Centre ids that are options, in option order.
+      selectedProgramIds: number[];
       selectedCentreIds: number[];
       rows: CurriculumSummaryRow[];
       pagination: { page: number; pageSize: number; totalRows: number; totalPages: number };
@@ -232,20 +244,15 @@ export async function getCurriculumSummary(
   if (!schema.ok) return schema;
 
   const scopedRows = (await loadSummaryClasses(permission, params)).map(buildSummaryRow);
-  const regionOptions = [
-    ...new Set(scopedRows.flatMap((row) => (row.region ? [row.region] : []))),
-  ].sort();
-  const filtered = applySummaryFilters(scopedRows, params);
-  const rows = sortSummaryRows(filtered.rows, params.sort);
+  const { rows: filteredRows, ...filters } = applySummaryFilters(scopedRows, params);
+  const rows = sortSummaryRows(filteredRows, params.sort);
   const listedRows = params.onlyBehind ? rows.filter((row) => worstGroupBehind(row) >= 1) : rows;
   const { page, totalPages, pageRows } = paginate(listedRows, params.page, params.pageSize);
 
   return {
     ok: true,
     header: summaryHeader(rows),
-    regionOptions,
-    centreOptions: filtered.centreOptions,
-    selectedCentreIds: filtered.selectedCentreIds,
+    ...filters,
     rows: pageRows,
     pagination: { page, pageSize: params.pageSize, totalRows: listedRows.length, totalPages },
   };
@@ -258,24 +265,53 @@ async function checkSummarySchemas(): Promise<{ ok: true } | CurriculumSchemaUna
   return checkCurriculumPlansSchema();
 }
 
-// Region and Centre narrow the user's scoped rows; they never widen scope. The Centre options
-// are the Centres in the chosen Regions, and a Centre id that isn't one (out of scope, another
-// Grade or Region, or gone) is ignored; with none left every Centre is listed.
+// Program, Region and Centre narrow the user's scoped rows in that order; they never widen scope.
+// Each filter's options come from the rows the filters before it leave. A Program or Centre id
+// that isn't an option (out of scope, another Grade, Program or Region, or gone) is ignored, and
+// with none left that filter lists every option's rows.
 function applySummaryFilters(scopedRows: CurriculumSummaryRow[], params: CurriculumSummaryQuery) {
-  const regionRows = scopedRows.filter(
+  const programs = filterByOption(
+    scopedRows,
+    (row) => ({ id: row.programId, name: row.programName }),
+    params.programIds
+  );
+  const regionOptions = [
+    ...new Set(programs.rows.flatMap((row) => (row.region ? [row.region] : []))),
+  ].sort();
+  const regionRows = programs.rows.filter(
     (row) => params.regions.length === 0 || params.regions.includes(row.region ?? "")
   );
-  const centreOptions: CurriculumSummaryCentreOption[] = regionRows
-    .map((row) => ({ id: row.centreId, name: row.centreName }))
-    .sort((a, b) => a.name.localeCompare(b.name) || a.id - b.id);
-  const selectedCentreIds = centreOptions
-    .filter((option) => params.centreIds.includes(option.id))
-    .map((option) => option.id);
-  const rows =
-    selectedCentreIds.length > 0
-      ? regionRows.filter((row) => selectedCentreIds.includes(row.centreId))
-      : regionRows;
-  return { rows, centreOptions, selectedCentreIds };
+  const centres = filterByOption(
+    regionRows,
+    (row) => ({ id: row.centreId, name: row.centreName }),
+    params.centreIds
+  );
+  return {
+    rows: centres.rows,
+    programOptions: programs.options,
+    regionOptions,
+    centreOptions: centres.options,
+    selectedProgramIds: programs.selected,
+    selectedCentreIds: centres.selected,
+  };
+}
+
+// The rows' distinct options A–Z, the requested ids among them, and the rows they pick (every row
+// when none is picked).
+function filterByOption(
+  rows: CurriculumSummaryRow[],
+  optionOf: (row: CurriculumSummaryRow) => CurriculumSummaryFilterOption,
+  requested: number[]
+) {
+  const options = [...new Map(rows.map((row) => [optionOf(row).id, optionOf(row)])).values()].sort(
+    (a, b) => a.name.localeCompare(b.name) || a.id - b.id
+  );
+  const selected = options.filter((option) => requested.includes(option.id)).map((option) => option.id);
+  return {
+    options,
+    selected,
+    rows: selected.length > 0 ? rows.filter((row) => selected.includes(optionOf(row).id)) : rows,
+  };
 }
 
 // A page past the end shows the last page; no rows is page 1 of 0.

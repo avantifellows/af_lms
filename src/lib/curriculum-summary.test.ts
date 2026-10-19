@@ -31,6 +31,7 @@ const TODAY = "2026-10-19";
 describe("normalizeCurriculumSummarySearchParams", () => {
   it("defaults to Grade 11, today, page 1 and 20 rows", () => {
     expect(normalizeCurriculumSummarySearchParams({}, TODAY)).toEqual({
+      programIds: [],
       regions: [],
       centreIds: [],
       grade: 11,
@@ -49,6 +50,7 @@ describe("normalizeCurriculumSummarySearchParams", () => {
         TODAY
       )
     ).toEqual({
+      programIds: [],
       regions: [],
       centreIds: [],
       grade: 12,
@@ -67,6 +69,7 @@ describe("normalizeCurriculumSummarySearchParams", () => {
         TODAY
       )
     ).toEqual({
+      programIds: [],
       regions: [],
       centreIds: [],
       grade: 11,
@@ -81,10 +84,11 @@ describe("normalizeCurriculumSummarySearchParams", () => {
   it("ignores removed filters", () => {
     expect(
       normalizeCurriculumSummarySearchParams(
-        { programs: "2", subjects: "4", exam_tracks: "neet", preset: "all", flagged: "true", sort: "school" },
+        { subjects: "4", exam_tracks: "neet", preset: "all", flagged: "true", sort: "school" },
         TODAY
       )
     ).toEqual({
+      programIds: [],
       regions: [],
       centreIds: [],
       grade: 11,
@@ -96,10 +100,11 @@ describe("normalizeCurriculumSummarySearchParams", () => {
     });
   });
 
-  it("reads Regions and Centre ids from repeated or comma-separated values, and Only behind", () => {
+  it("reads Program ids, Regions and Centre ids from repeated or comma-separated values, and Only behind", () => {
     expect(
       normalizeCurriculumSummarySearchParams(
         {
+          programs: ["2", "1, x, 2"],
           regions: ["NORTH", "SOUTH, NORTH", " "],
           // Only positive whole ids count; the removed School search `q` is ignored.
           centres: ["9000812", "12, x, 0, -3, 1.5, 012", "12"],
@@ -109,6 +114,7 @@ describe("normalizeCurriculumSummarySearchParams", () => {
         TODAY
       )
     ).toEqual({
+      programIds: [2, 1],
       regions: ["NORTH", "SOUTH"],
       centreIds: [9000812, 12],
       grade: 11,
@@ -220,6 +226,7 @@ const SETUP_ERROR = {
 
 function query(overrides: Partial<CurriculumSummaryQuery> = {}): CurriculumSummaryQuery {
   return {
+    programIds: [],
     regions: [],
     centreIds: [],
     grade: 11,
@@ -473,6 +480,78 @@ describe("getCurriculumSummary", () => {
     expect(result.selectedCentreIds).toEqual([]);
     // Centre 1 has one test overdue fewer (its Alpha session), so Centre 3 is worse.
     expect(result.rows.map((row) => row.centreId)).toEqual([3, 1]);
+  });
+
+  describe("Program filter", () => {
+    // Program 1 "JNV CoE": Centres 1 (NORTH) and 3 (WEST); Program 2 "JNV Nodal": Centre 2 (SOUTH)
+    // and Centre 4 (NORTH, on track).
+    const PROGRAM_ROWS = [
+      raw(1, { centre_name: "Anand CoE", program_id: 1, program_name: "JNV CoE", region: "NORTH" }),
+      raw(2, { centre_name: "Bhuj Nodal", program_id: 2, program_name: "JNV Nodal", region: "SOUTH" }),
+      raw(3, { centre_name: "Chhapi CoE", program_id: 1, program_name: "JNV CoE", region: "WEST", plan_status: "draft" }),
+      raw(4, {
+        centre_name: "Dahod Nodal",
+        program_id: 2,
+        program_name: "JNV Nodal",
+        region: "NORTH",
+        chapters: [chapter(1, { dueDate: "2026-06-30", completedOn: "2026-06-28" })],
+      }),
+    ];
+
+    it("lists the chosen Programs' rows, totals the header over them, and narrows Region and Centre options", async () => {
+      routeQueries({ summary: PROGRAM_ROWS });
+
+      const result = await getCurriculumSummary(ADMIN, query({ programIds: [2] }));
+
+      if (!result.ok) throw new Error("expected rows");
+      // Programs come from every scoped row, A–Z.
+      expect(result.programOptions).toEqual([
+        { id: 1, name: "JNV CoE" },
+        { id: 2, name: "JNV Nodal" },
+      ]);
+      expect(result.selectedProgramIds).toEqual([2]);
+      // Bhuj (PCM 1, PCB 2) before Dahod (on track).
+      expect(result.rows.map((row) => row.centreName)).toEqual(["Bhuj Nodal", "Dahod Nodal"]);
+      expect(result.regionOptions).toEqual(["NORTH", "SOUTH"]);
+      expect(result.centreOptions.map((option) => option.name)).toEqual(["Bhuj Nodal", "Dahod Nodal"]);
+      // Bhuj has no Chapter Test sessions (the default ones are Centre 1's): Chapters 1, 2 and 3
+      // are overdue; Dahod: its one Chapter's test.
+      expect(result.header).toEqual({
+        centresOnPlan: 2,
+        centresTotal: 2,
+        chaptersBehind: { PCM: 1, PCB: 2 },
+        testsOverdue: 4,
+      });
+    });
+
+    it("applies Program, then Region, then Centre", async () => {
+      routeQueries({ summary: PROGRAM_ROWS });
+
+      // NORTH within JNV CoE is Centre 1 only; Centre 4 (NORTH, Nodal) is not a Centre option, so
+      // its id is ignored, as is the unknown Program 9.
+      const result = await getCurriculumSummary(
+        ADMIN,
+        query({ programIds: [9, 1], regions: ["NORTH"], centreIds: [4] })
+      );
+
+      if (!result.ok) throw new Error("expected rows");
+      expect(result.selectedProgramIds).toEqual([1]);
+      expect(result.regionOptions).toEqual(["NORTH", "WEST"]);
+      expect(result.centreOptions).toEqual([{ id: 1, name: "Anand CoE" }]);
+      expect(result.selectedCentreIds).toEqual([]);
+      expect(result.rows.map((row) => row.centreId)).toEqual([1]);
+    });
+
+    it("ignores Program ids that aren't options and lists every Program", async () => {
+      routeQueries({ summary: PROGRAM_ROWS });
+
+      const result = await getCurriculumSummary(ADMIN, query({ programIds: [64] }));
+
+      if (!result.ok) throw new Error("expected rows");
+      expect(result.selectedProgramIds).toEqual([]);
+      expect(result.rows).toHaveLength(4);
+      expect(result.regionOptions).toEqual(["NORTH", "SOUTH", "WEST"]);
+    });
   });
 
   it("keeps a valid Centre id beside a stale one", async () => {
