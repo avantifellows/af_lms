@@ -18,6 +18,12 @@ function renderForm() {
   );
 }
 
+function navigationType(type: NavigationTimingType) {
+  vi.spyOn(performance, "getEntriesByType").mockReturnValue([
+    { type } as PerformanceNavigationTiming,
+  ]);
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
 });
@@ -33,13 +39,24 @@ describe("UrlFilterForm", () => {
 
   // On a Back / Forward page load the browser restores the values typed before Apply; the
   // mount reset puts the URL's values back.
-  it("resets the controls to their URL defaults when it mounts", () => {
+  it("resets the controls to their URL defaults when a Back / Forward load mounts it", () => {
+    navigationType("back_forward");
     const reset = vi.spyOn(HTMLFormElement.prototype, "reset");
 
     renderForm();
 
     expect(reset).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("searchbox", { name: "School" })).toHaveValue("anand");
+  });
+
+  // A normal load must keep anything typed before hydration finished.
+  it("leaves the controls alone when a normal page load mounts it", () => {
+    navigationType("navigate");
+    const reset = vi.spyOn(HTMLFormElement.prototype, "reset");
+
+    renderForm();
+
+    expect(reset).not.toHaveBeenCalled();
   });
 
   it("resets a page restored from the back/forward cache, and only that page", () => {

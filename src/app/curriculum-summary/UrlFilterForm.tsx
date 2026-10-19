@@ -9,6 +9,14 @@ import type { ReactNode } from "react";
 // back from the back/forward cache as it was left. Resetting the form puts every control back to
 // the defaults rendered from its URL. Key the form on the search params as well, so a client-side
 // navigation that keeps this component mounted starts it again.
+//
+// The mount reset runs only on a Back / Forward load: on a normal load it would wipe anything the
+// user typed before hydration finished.
+function loadedFromHistory(): boolean {
+  const [entry] = performance.getEntriesByType("navigation") as PerformanceNavigationTiming[];
+  return entry?.type === "back_forward";
+}
+
 export default function UrlFilterForm({
   action,
   className,
@@ -22,7 +30,7 @@ export default function UrlFilterForm({
 
   useEffect(() => {
     const form = formRef.current;
-    form?.reset();
+    if (loadedFromHistory()) form?.reset();
     const resetRestoredPage = (event: PageTransitionEvent) => {
       if (event.persisted) form?.reset();
     };
