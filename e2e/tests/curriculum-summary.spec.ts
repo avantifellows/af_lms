@@ -62,6 +62,26 @@ function pill(page: Page, centre: string, subject: string) {
   return summaryRow(page, centre).locator(`[data-subject="${subject}"]`);
 }
 
+// PCM Behind / PCB Behind cell: its label ("—" where the group doesn't apply) and pill tone.
+async function expectGroup(
+  page: Page,
+  centre: string,
+  group: "PCM" | "PCB",
+  label: string,
+  tone?: "green" | "amber" | "red"
+) {
+  const cell = summaryRow(page, centre).locator(`[data-subject-group="${group}"]`);
+  await expect(cell).toHaveText(label);
+  if (tone) await expect(cell.locator("[data-tone]")).toHaveAttribute("data-tone", tone);
+  else await expect(cell.locator("[data-tone]")).toHaveCount(0);
+}
+
+// Header PCM and PCB chapters behind.
+async function expectChaptersBehind(page: Page, pcm: string, pcb: string) {
+  await expect(page.getByTestId("summary-pcm-chapters-behind")).toHaveText(pcm);
+  await expect(page.getByTestId("summary-pcb-chapters-behind")).toHaveText(pcb);
+}
+
 test.describe("Curriculum Summary", () => {
   test("a shared JEE Main + NEET Centre has one row and counts each Chapter once", async ({ browser }) => {
     const page = await summaryPmPage(browser);
@@ -91,7 +111,9 @@ test.describe("Curriculum Summary", () => {
       "data-tone",
       "red"
     );
-    await expect(shared.locator("[data-behind]")).toHaveText("4");
+    // PCM = Physics 0 + Chemistry 1 (no Maths); PCB = Physics 0 + Chemistry 1 + Biology 3.
+    await expectGroup(page, "Summary E2E Anand Shared", "PCM", "1 behind", "amber");
+    await expectGroup(page, "Summary E2E Anand Shared", "PCB", "4 behind", "red");
     await expect(shared.locator("[data-plan]")).toHaveText("Summary G11 Active Plan");
     await page.context().close();
   });
@@ -116,14 +138,51 @@ test.describe("Curriculum Summary", () => {
       "data-tone",
       "amber"
     );
-    await expect(summaryRow(page, "Summary E2E Anand Shared").locator("[data-behind]")).toHaveText("3");
+    await expectGroup(page, "Summary E2E Anand Shared", "PCM", "1 behind", "amber");
+    await expectGroup(page, "Summary E2E Anand Shared", "PCB", "3 behind", "red");
 
     // On 1 Jul only Alpha (30 Jun) and Bio Cells (15 Jun) were due, and both were done.
     await page.goto("/curriculum-summary?as_of=2026-07-01");
     await expect(pill(page, "Summary E2E Anand Shared", "Physics")).toHaveText("On track · 1/1");
     await expect(pill(page, "Summary E2E Anand Shared", "Chemistry")).toHaveText("On track · 0/0");
     await expect(pill(page, "Summary E2E Anand Shared", "Biology")).toHaveText("On track · 1/1");
-    await expect(summaryRow(page, "Summary E2E Anand Shared").locator("[data-behind]")).toHaveText("0");
+    await expectGroup(page, "Summary E2E Anand Shared", "PCM", "On track", "green");
+    await expectGroup(page, "Summary E2E Anand Shared", "PCB", "On track", "green");
+    await page.context().close();
+  });
+
+  test("PCM Behind and PCB Behind follow each row's tracks", async ({ browser }) => {
+    const page = await summaryPmPage(browser);
+    await page.goto(`/curriculum-summary?as_of=${AS_OF}`);
+
+    // JEE Main rows show PCM only: Anand Main and Vapi Closed have Beta Physics open.
+    await expectGroup(page, "Summary E2E Anand Main", "PCM", "1 behind", "amber");
+    await expectGroup(page, "Summary E2E Anand Main", "PCB", "—");
+    await expectGroup(page, "Summary E2E Vapi Closed", "PCM", "1 behind", "amber");
+    await expectGroup(page, "Summary E2E Vapi Closed", "PCB", "—");
+    // A NEET row shows PCB only; everything due at Bhuj Neet is done.
+    await expectGroup(page, "Summary E2E Bhuj Neet", "PCM", "—");
+    await expectGroup(page, "Summary E2E Bhuj Neet", "PCB", "On track", "green");
+    // No plan rows keep "Not measured" across the subject and group columns.
+    await expect(summaryRow(page, "Summary E2E Surat Draft").locator("[data-subject-group]")).toHaveCount(0);
+    await expect(summaryRow(page, "Summary E2E Surat Draft")).toContainText("Not measured without an Active plan");
+    await expect(summaryRow(page, "Summary E2E Bhuj Setup").locator("[data-subject-group]")).toHaveCount(0);
+    for (const header of ["PCM Behind", "PCB Behind"]) {
+      await expect(page.getByRole("columnheader", { name: header, exact: true })).toHaveCount(1);
+    }
+    await expect(page.getByRole("columnheader", { name: "Behind", exact: true })).toHaveCount(0);
+
+    // On 1 Oct Chem Thermo (due 30 Sep) is due: Bhuj Neet hasn't completed it, while Anand
+    // Shared completed it early on 1 Aug. Anand Shared PCB = Chem Bonding 1 + Bio Animals and
+    // Genetics 2 (Plants was completed on 16 Aug).
+    await page.goto("/curriculum-summary?as_of=2026-10-01");
+    await expectGroup(page, "Summary E2E Bhuj Neet", "PCM", "—");
+    await expectGroup(page, "Summary E2E Bhuj Neet", "PCB", "1 behind", "amber");
+    await expectGroup(page, "Summary E2E Anand Shared", "PCM", "1 behind", "amber");
+    await expectGroup(page, "Summary E2E Anand Shared", "PCB", "3 behind", "red");
+    await expectGroup(page, "Summary E2E Anand Main", "PCM", "1 behind", "amber");
+    // PCM: Anand Shared 1 + Anand Main 1 + Vapi Closed 1; PCB: Anand Shared 3 + Bhuj Neet 1.
+    await expectChaptersBehind(page, "3", "4");
     await page.context().close();
   });
 
@@ -176,11 +235,14 @@ test.describe("Curriculum Summary", () => {
     await page.goto(`/curriculum-summary?as_of=${AS_OF}`);
 
     // On plan: Anand Main, Anand Shared, Bhuj Neet, Vapi Closed. Out of 9 rows, Bhuj Setup and
-    // Surat CET don't count: 4/7. Behind: 1 + 4 + 0 + 1 = 6.
+    // Surat CET don't count: 4/7. PCM: Anand Shared 1 + Anand Main 1 + Vapi Closed 1 (both JEE
+    // Main); PCB: Anand Shared 4 + Bhuj Neet 0 (NEET).
     await expect(page.getByTestId("summary-centres-on-plan")).toHaveText("4/7");
-    await expect(page.getByTestId("summary-chapters-behind")).toHaveText("6");
+    await expectChaptersBehind(page, "3", "4");
+    await expect(page.getByText("Chapters behind", { exact: true })).toHaveCount(0);
     await expect(page.locator("[data-summary-row]")).toHaveCount(9);
-    // Vapi Closed and Anand Main are both 1 behind; Vapi Closed has more tests overdue (2 vs 1).
+    // By the larger of PCM and PCB Behind: Anand Shared 4; Vapi Closed and Anand Main are both
+    // 1 behind and Vapi Closed has more tests overdue (2 vs 1); Bhuj Neet 0.
     expect(await rowCentres(page)).toEqual([
       "Summary E2E Anand Shared",
       "Summary E2E Vapi Closed",
@@ -210,7 +272,9 @@ test.describe("Curriculum Summary", () => {
       "Summary G12 Active Plan"
     );
     await expect(page.getByTestId("summary-centres-on-plan")).toHaveText("1/1");
-    await expect(page.getByTestId("summary-chapters-behind")).toHaveText("1");
+    await expectChaptersBehind(page, "1", "0");
+    await expectGroup(page, "Summary E2E Anand Main", "PCM", "1 behind", "amber");
+    await expectGroup(page, "Summary E2E Anand Main", "PCB", "—");
     // No Grade 12 chapter-test sessions: Limits (test date 2 Jul) and Vectors (2 Aug) overdue.
     await expect(page.getByTestId("summary-tests-overdue")).toHaveText("2");
     await page.context().close();
@@ -233,7 +297,7 @@ test.describe("Curriculum Summary", () => {
     // Advanced setup errors): 13 rows, on plan 4 of 13 − 4 = 9.
     await adminPage.goto(`/curriculum-summary?as_of=${AS_OF}&limit=10`);
     await expect(adminPage.getByTestId("summary-centres-on-plan")).toHaveText("4/9");
-    await expect(adminPage.getByTestId("summary-chapters-behind")).toHaveText("6");
+    await expectChaptersBehind(adminPage, "3", "4");
     await expect(adminPage.locator("[data-summary-row]")).toHaveCount(10);
     await expect(adminPage.getByText("Page 1 of 2")).toBeVisible();
 
@@ -294,7 +358,7 @@ test.describe("Curriculum Summary filters", () => {
     await adminPage.goto(`/curriculum-summary?as_of=${AS_OF}&regions=SUMMARY_E2E_OTHER`);
     expect(await rowCentres(adminPage)).toEqual(["Summary E2E Other Region"]);
     await expect(adminPage.getByTestId("summary-centres-on-plan")).toHaveText("0/1");
-    await expect(adminPage.getByTestId("summary-chapters-behind")).toHaveText("0");
+    await expectChaptersBehind(adminPage, "0", "0");
 
     // The PM's 9 SUMMARY_E2E rows; the out-of-scope region in the URL adds nothing.
     const page = await summaryPmPage(browser);
@@ -319,13 +383,13 @@ test.describe("Curriculum Summary filters", () => {
     await page.goto(`/curriculum-summary?as_of=${AS_OF}&q=bhuj`);
     expect(await rowCentres(page)).toEqual(["Summary E2E Bhuj Neet", "Summary E2E Bhuj Setup"]);
     await expect(page.getByTestId("summary-centres-on-plan")).toHaveText("1/1");
-    await expect(page.getByTestId("summary-chapters-behind")).toHaveText("0");
+    await expectChaptersBehind(page, "0", "0");
 
-    // School code SUMM85 (Vapi): Vapi Closed (1 behind) and Vapi Unassigned (No plan).
+    // School code SUMM85 (Vapi): Vapi Closed (PCM 1 behind) and Vapi Unassigned (No plan).
     await page.goto(`/curriculum-summary?as_of=${AS_OF}&q=summ85`);
     expect(await rowCentres(page)).toEqual(["Summary E2E Vapi Closed", "Summary E2E Vapi Unassigned"]);
     await expect(page.getByTestId("summary-centres-on-plan")).toHaveText("1/2");
-    await expect(page.getByTestId("summary-chapters-behind")).toHaveText("1");
+    await expectChaptersBehind(page, "1", "0");
     await page.context().close();
   });
 
@@ -334,18 +398,18 @@ test.describe("Curriculum Summary filters", () => {
   }) => {
     const page = await summaryPmPage(browser);
     await page.goto(`/curriculum-summary?as_of=${AS_OF}&only_behind=1`);
-    // Behind ≥ 1: Anand Shared 4, Vapi Closed 1 (2 tests overdue), Anand Main 1 (1 test
-    // overdue). Bhuj Neet (0), the No plan rows and the setup / no-content / configuration-error
-    // rows are hidden.
+    // PCM or PCB Behind ≥ 1: Anand Shared (PCM 1, PCB 4), Vapi Closed PCM 1 (2 tests overdue),
+    // Anand Main PCM 1 (1 test overdue). Bhuj Neet (PCB 0), the No plan rows and the setup /
+    // no-content / configuration-error rows are hidden.
     expect(await rowCentres(page)).toEqual([
       "Summary E2E Anand Shared",
       "Summary E2E Vapi Closed",
       "Summary E2E Anand Main",
     ]);
-    // Same as the unfiltered page: on plan 4 of 7, 6 Chapters behind, 8 tests overdue (Bhuj
-    // Neet's 3 still count).
+    // Same as the unfiltered page: on plan 4 of 7, PCM 3 and PCB 4 chapters behind, 8 tests
+    // overdue (Bhuj Neet's 3 still count).
     await expect(page.getByTestId("summary-centres-on-plan")).toHaveText("4/7");
-    await expect(page.getByTestId("summary-chapters-behind")).toHaveText("6");
+    await expectChaptersBehind(page, "3", "4");
     await expect(page.getByTestId("summary-tests-overdue")).toHaveText("8");
     await page.context().close();
   });
@@ -368,12 +432,12 @@ test.describe("Curriculum Summary filters", () => {
     expect(url.searchParams.get("limit")).toBe("10");
     expect(url.searchParams.get("page")).toBeNull();
 
-    // Anand School in SUMMARY_E2E: Anand Shared (4 behind) and Anand Main (1 behind).
+    // Anand School in SUMMARY_E2E: Anand Shared (PCM 1, PCB 4) and Anand Main (PCM 1).
     const expectAnandRows = async () => {
       await expect(adminPage.getByText("Page 1 of 1")).toBeVisible();
       expect(await rowCentres(adminPage)).toEqual(["Summary E2E Anand Shared", "Summary E2E Anand Main"]);
       await expect(adminPage.getByTestId("summary-centres-on-plan")).toHaveText("2/2");
-      await expect(adminPage.getByTestId("summary-chapters-behind")).toHaveText("5");
+      await expectChaptersBehind(adminPage, "2", "4");
       // Anand Shared 2 + Anand Main 1.
       await expect(adminPage.getByTestId("summary-tests-overdue")).toHaveText("3");
     };
@@ -386,7 +450,7 @@ test.describe("Curriculum Summary filters", () => {
     await adminPage.locator("summary", { hasText: "Region" }).click();
     await expect(adminPage.getByRole("checkbox", { name: "SUMMARY_E2E", exact: true })).toBeChecked();
 
-    // The Grade toggle keeps every filter: only Anand Main runs Grade 12 (1 behind).
+    // The Grade toggle keeps every filter: only Anand Main runs Grade 12 (PCM 1 behind).
     await adminPage.getByRole("link", { name: "Grade 12" }).click();
     await expect(adminPage).toHaveURL(/grade=12/);
     const gradeUrl = new URL(adminPage.url());
