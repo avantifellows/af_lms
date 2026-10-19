@@ -1,0 +1,280 @@
+import { fireEvent, render, screen, within } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const { mockGetServerSession, mockGetResolvedPermission, mockGetCurriculumSummary, mockPush } = vi.hoisted(
+  () => ({
+    mockGetServerSession: vi.fn(),
+    mockGetResolvedPermission: vi.fn(),
+    mockGetCurriculumSummary: vi.fn(),
+    mockPush: vi.fn(),
+  })
+);
+
+vi.mock("next-auth", () => ({ getServerSession: mockGetServerSession }));
+vi.mock("@/lib/auth", () => ({ authOptions: {} }));
+vi.mock("@/lib/db", () => ({ query: vi.fn(), withTransaction: vi.fn() }));
+vi.mock("@/lib/permissions", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/permissions")>()),
+  getResolvedPermission: mockGetResolvedPermission,
+}));
+vi.mock("@/lib/curriculum-summary", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/curriculum-summary")>()),
+  getCurriculumSummary: mockGetCurriculumSummary,
+}));
+vi.mock("next/navigation", () => ({
+  redirect: vi.fn((url: string) => {
+    throw new Error(`REDIRECT:${url}`);
+  }),
+  notFound: vi.fn(() => {
+    throw new Error("NOT_FOUND");
+  }),
+  useRouter: () => ({ push: mockPush, refresh: vi.fn() }),
+}));
+
+import type { CurriculumSummaryResult, CurriculumSummaryRow } from "@/lib/curriculum-summary";
+import CurriculumSummaryPage from "./page";
+
+const PM = {
+  email: "pm@avantifellows.org",
+  level: 2,
+  role: "program_manager",
+  regions: ["NORTH"],
+  program_ids: [1, 2],
+  read_only: false,
+};
+const ADMIN = { ...PM, email: "admin@avantifellows.org", level: 3, role: "admin" };
+
+function row(overrides: Partial<CurriculumSummaryRow>): CurriculumSummaryRow {
+  return {
+    centreId: 1,
+    centreName: "Anand Shared",
+    schoolCode: "SC1",
+    schoolName: "JNV Anand",
+    region: "NORTH",
+    programId: 2,
+    programName: "JNV Nodal",
+    tracksLabel: "JEE Main + NEET",
+    kind: "plan",
+    explanation: null,
+    plan: { id: 900, title: "G11 Plan", closed: false },
+    subjects: {
+      Physics: { due: 2, done: 1, behind: 1, tone: "amber", label: "1 behind" },
+      Chemistry: { due: 1, done: 1, behind: 0, tone: "green", label: "On track" },
+      Maths: null,
+      Biology: { due: 4, done: 0, behind: 4, tone: "red", label: "4 behind" },
+    },
+    behind: 5,
+    testsOverdue: 2,
+    testsConducted: null,
+    ...overrides,
+  };
+}
+
+function summary(overrides: Partial<Extract<CurriculumSummaryResult, { ok: true }>> = {}): CurriculumSummaryResult {
+  return {
+    ok: true,
+    header: { centresOnPlan: 1, centresTotal: 3, chaptersBehind: 5, testsOverdue: 2 },
+    regionOptions: ["NORTH", "SOUTH"],
+    rows: [
+      row({}),
+      row({
+        centreId: 2,
+        centreName: "Bhuj Closed",
+        region: null,
+        plan: { id: 901, title: "Old Plan", closed: true },
+      }),
+      row({ centreId: 3, centreName: "Surat", kind: "no_plan", plan: null, subjects: null, behind: 0, testsOverdue: 0, testsConducted: 1 }),
+      row({
+        centreId: 4,
+        centreName: "Vapi",
+        kind: "setup_error",
+        explanation: "Fix tracks in Centre Management",
+        plan: null,
+        subjects: null,
+      }),
+    ],
+    pagination: { page: 2, pageSize: 50, totalRows: 120, totalPages: 3 },
+    ...overrides,
+  };
+}
+
+async function renderPage(searchParams: Record<string, string | string[]> = {}) {
+  render(await CurriculumSummaryPage({ searchParams: Promise.resolve(searchParams) }));
+}
+
+const summaryRow = (centre: string) =>
+  document.querySelector(`[data-summary-row][data-centre="${centre}"]`) as HTMLElement;
+
+beforeEach(() => {
+  vi.resetAllMocks();
+  mockGetServerSession.mockResolvedValue({ user: { email: PM.email } });
+  mockGetResolvedPermission.mockResolvedValue(PM);
+  mockGetCurriculumSummary.mockResolvedValue(summary());
+});
+
+describe("Curriculum Summary page access", () => {
+  it("sends a signed-out visitor to the sign-in page", async () => {
+    mockGetServerSession.mockResolvedValue(null);
+    await expect(renderPage()).rejects.toThrow("REDIRECT:/");
+  });
+
+  it.each([
+    ["no permission row", null],
+    ["a teacher", { ...PM, role: "teacher" }],
+    ["a PM with only JNV NVS", { ...PM, program_ids: [64] }],
+    ["a PMU Manager", { ...PM, role: "pmu_manager" }],
+  ])("sends %s to the dashboard", async (_name, permission) => {
+    mockGetResolvedPermission.mockResolvedValue(permission);
+    await expect(renderPage()).rejects.toThrow("REDIRECT:/dashboard");
+    expect(mockGetCurriculumSummary).not.toHaveBeenCalled();
+  });
+});
+
+describe("Curriculum Summary page", () => {
+  it("shows the schema-unavailable card", async () => {
+    mockGetCurriculumSummary.mockResolvedValue({
+      ok: false,
+      status: 503,
+      error: "LMS curriculum schema unavailable",
+      details: ["lms_curriculum_plans.id"],
+    });
+
+    await renderPage();
+
+    expect(screen.getByText("Schema unavailable")).toBeInTheDocument();
+    expect(screen.getByText("lms_curriculum_plans.id")).toBeInTheDocument();
+    expect(screen.getByText(/cannot load until the LMS Curriculum/)).toBeInTheDocument();
+  });
+
+  it("passes the normalized filters and shows the header numbers", async () => {
+    await renderPage({ grade: "12", as_of: "2026-08-15", regions: "NORTH", q: "anand", only_behind: "1", page: "2", limit: "50" });
+
+    expect(mockGetCurriculumSummary).toHaveBeenCalledWith(PM, {
+      regions: ["NORTH"],
+      schoolSearch: "anand",
+      grade: 12,
+      asOf: "2026-08-15",
+      onlyBehind: true,
+      page: 2,
+      pageSize: 50,
+    });
+    expect(screen.getByTestId("summary-centres-on-plan")).toHaveTextContent("1/3");
+    expect(screen.getByTestId("summary-chapters-behind")).toHaveTextContent("5");
+    expect(screen.getByTestId("summary-tests-overdue")).toHaveTextContent("2");
+    expect(screen.queryByRole("link", { name: "Plans" })).not.toBeInTheDocument();
+  });
+
+  it("shows each row kind: pills, Closed plan, No plan and the explanation", async () => {
+    await renderPage({ as_of: "2026-08-15", grade: "11" });
+
+    const plan = summaryRow("Anand Shared");
+    expect(within(plan).getByRole("link", { name: "Anand Shared" })).toHaveAttribute(
+      "href",
+      "/curriculum-summary/centres/1?grade=11&as_of=2026-08-15"
+    );
+    expect(plan.querySelector('[data-subject="Physics"]')).toHaveTextContent("1 behind · 1/2");
+    expect(plan.querySelector('[data-subject="Physics"] [data-tone]')).toHaveAttribute("data-tone", "amber");
+    expect(plan.querySelector('[data-subject="Maths"]')).toHaveTextContent("—");
+    expect(plan.querySelector("[data-behind]")).toHaveTextContent("5");
+    expect(plan.querySelector("[data-tests-overdue]")).toHaveTextContent("2");
+    expect(plan.querySelector("[data-plan]")).toHaveTextContent("G11 Plan");
+    expect(plan.querySelector("[data-plan-closed]")).toBeNull();
+
+    const closed = summaryRow("Bhuj Closed");
+    expect(closed.querySelector("[data-plan-closed]")).toHaveTextContent("Closed");
+    expect(closed).toHaveTextContent("—");
+
+    const noPlan = summaryRow("Surat");
+    expect(noPlan.querySelector("[data-tests-conducted]")).toHaveTextContent("1 conducted");
+    expect(noPlan.querySelector("[data-plan]")).toHaveTextContent("No plan");
+
+    expect(summaryRow("Vapi").querySelector("[data-explanation]")).toHaveTextContent(
+      "Fix tracks in Centre Management"
+    );
+  });
+
+  it("counts a No plan row without a conducted count as 0", async () => {
+    mockGetCurriculumSummary.mockResolvedValue(
+      summary({ rows: [row({ kind: "no_plan", plan: null, subjects: null, testsConducted: null })] })
+    );
+
+    await renderPage();
+
+    expect(document.querySelector("[data-tests-conducted]")).toHaveTextContent("0 conducted");
+  });
+
+  it("keeps every filter in the Grade, pagination and page-size links", async () => {
+    await renderPage({ grade: "11", as_of: "2026-08-15", regions: ["NORTH", "SOUTH"], q: "jnv", only_behind: "1", page: "2", limit: "50" });
+
+    const grades = screen.getByRole("navigation", { name: "Grade" });
+    expect(within(grades).getByRole("link", { name: "Grade 11" })).toHaveAttribute("aria-current", "page");
+    expect(within(grades).getByRole("link", { name: "Grade 12" })).toHaveAttribute(
+      "href",
+      "/curriculum-summary?regions=NORTH&regions=SOUTH&q=jnv&grade=12&as_of=2026-08-15&only_behind=1&limit=50"
+    );
+    expect(screen.getByRole("link", { name: "Previous" })).toHaveAttribute(
+      "href",
+      "/curriculum-summary?regions=NORTH&regions=SOUTH&q=jnv&grade=11&as_of=2026-08-15&only_behind=1&limit=50"
+    );
+    expect(screen.getByRole("link", { name: "Next" })).toHaveAttribute(
+      "href",
+      "/curriculum-summary?regions=NORTH&regions=SOUTH&q=jnv&grade=11&as_of=2026-08-15&only_behind=1&limit=50&page=3"
+    );
+    expect(screen.getByText("Page 2 of 3")).toBeInTheDocument();
+    expect(document.querySelector('input[type="hidden"][name="limit"]')).toHaveValue("50");
+    expect(screen.getByRole("checkbox", { name: "NORTH" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Only behind" })).toBeChecked();
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Rows per page" }), { target: { value: "20" } });
+    expect(mockPush).toHaveBeenCalledWith(
+      "/curriculum-summary?regions=NORTH&regions=SOUTH&q=jnv&grade=11&as_of=2026-08-15&only_behind=1"
+    );
+  });
+
+  it("disables paging past either end and drops defaults from links", async () => {
+    mockGetCurriculumSummary.mockResolvedValue(
+      summary({ pagination: { page: 1, pageSize: 20, totalRows: 1, totalPages: 1 }, regionOptions: [] })
+    );
+
+    await renderPage({ as_of: "2026-08-15" });
+
+    expect(screen.queryByRole("link", { name: "Previous" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Next" })).not.toBeInTheDocument();
+    expect(screen.getByText("Previous")).toBeInTheDocument();
+    expect(document.querySelector('input[type="hidden"][name="limit"]')).toBeNull();
+    expect(screen.getByText("No regions in scope")).toBeInTheDocument();
+    expect(screen.getByText("All regions")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Grade 12" })).toHaveAttribute(
+      "href",
+      "/curriculum-summary?grade=12&as_of=2026-08-15"
+    );
+  });
+
+  it.each([
+    [{}, "No Centres with Exam Tracks for Grade 11 are in your scope."],
+    [{ q: "x" }, "No classes match these filters."],
+    [{ regions: "NORTH" }, "No classes match these filters."],
+    [{ only_behind: "1" }, "No classes match these filters."],
+  ])("explains an empty list for %j", async (searchParams, message) => {
+    mockGetCurriculumSummary.mockResolvedValue(
+      summary({ rows: [], pagination: { page: 1, pageSize: 20, totalRows: 0, totalPages: 0 } })
+    );
+
+    await renderPage(searchParams);
+
+    expect(screen.getByText(message)).toBeInTheDocument();
+    expect(screen.getByText("Page 1 of 1")).toBeInTheDocument();
+  });
+
+  it("gives Admins the Plans and config links", async () => {
+    mockGetResolvedPermission.mockResolvedValue(ADMIN);
+
+    await renderPage();
+
+    expect(screen.getByRole("link", { name: "Plans" })).toHaveAttribute("href", "/curriculum-summary/plans");
+    expect(screen.getByRole("link", { name: "Manage config" })).toHaveAttribute(
+      "href",
+      "/curriculum-summary/config"
+    );
+  });
+});

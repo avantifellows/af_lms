@@ -1,12 +1,8 @@
 import Link from "next/link";
-import { getServerSession } from "next-auth";
-import { redirect } from "next/navigation";
 
 import PageHeader from "@/components/PageHeader";
-import { Badge, Card, type BadgeVariant } from "@/components/ui";
-import { authOptions } from "@/lib/auth";
+import { Badge, Card } from "@/components/ui";
 import { getTodayIST } from "@/lib/curriculum-date-helpers";
-import type { BehindPillTone } from "@/lib/curriculum-plan-rules";
 import CurriculumSummaryPageSizeSelect from "./CurriculumSummaryPageSizeSelect";
 import {
   CURRICULUM_SUMMARY_GRADES,
@@ -14,56 +10,38 @@ import {
   getCurriculumSummary,
   normalizeCurriculumSummarySearchParams,
   type CurriculumSummaryQuery,
+  type CurriculumSummaryResult,
   type CurriculumSummaryRow,
+  type CurriculumSummarySubjectProgress,
 } from "@/lib/curriculum-summary";
+import { requireCurriculumSummaryViewer } from "./summary-access";
 import {
-  getFeatureAccess,
-  getProgramContextSync,
-  getResolvedPermission,
-} from "@/lib/permissions";
+  ApplyButton,
+  AsOfField,
+  HeaderNumber,
+  HiddenField,
+  PAGE_CONTAINER_CLASS_NAME,
+  SchemaUnavailableCard,
+  SearchField,
+  SegmentLinks,
+  TableHead,
+  TONE_BADGE_VARIANTS,
+} from "./summary-ui";
 
 interface PageProps {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }
 
-const TONE_BADGE_VARIANTS: Record<BehindPillTone, BadgeVariant> = {
-  green: "success",
-  amber: "warning",
-  red: "danger",
-};
+type SummaryData = Extract<CurriculumSummaryResult, { ok: true }>;
+
+const DEFAULT_PAGE_SIZE = 20;
+const ACTION_LINK_CLASS_NAME =
+  "rounded-md border border-border px-3 py-1.5 text-sm font-bold text-accent hover:text-accent-hover";
+const CELL_CLASS_NAME = "px-4 py-3 align-top";
 
 export default async function CurriculumSummaryPage({ searchParams }: PageProps) {
   const resolvedSearchParams = await searchParams;
-  const session = await getServerSession(authOptions);
-
-  if (!session?.user?.email) {
-    redirect("/");
-  }
-
-  const email = session.user.email;
-  const permission = await getResolvedPermission(email);
-
-  if (!permission) {
-    redirect("/dashboard");
-  }
-
-  if (
-    permission.role !== "program_manager" &&
-    permission.role !== "program_admin" &&
-    permission.role !== "admin"
-  ) {
-    redirect("/dashboard");
-  }
-
-  if (!getFeatureAccess(permission, "curriculum").canView) {
-    redirect("/dashboard");
-  }
-
-  const programContext = getProgramContextSync(permission);
-  if (!programContext.hasCoEOrNodal) {
-    redirect("/dashboard");
-  }
-
+  const { email, permission } = await requireCurriculumSummaryViewer();
   const params = normalizeCurriculumSummarySearchParams(resolvedSearchParams, getTodayIST());
   const summary = await getCurriculumSummary(permission, params);
 
@@ -74,99 +52,79 @@ export default async function CurriculumSummaryPage({ searchParams }: PageProps)
         subtitle="Each class's progress against its Curriculum Plan"
         backHref="/dashboard"
         userEmail={email}
-        actions={
-          permission.role === "admin" ? (
-            <div className="flex items-center gap-2">
-              <Link
-                href="/curriculum-summary/plans"
-                className="rounded-md border border-border px-3 py-1.5 text-sm font-bold text-accent hover:text-accent-hover"
-              >
-                Plans
-              </Link>
-              <Link
-                href="/curriculum-summary/config"
-                className="rounded-md border border-border px-3 py-1.5 text-sm font-bold text-accent hover:text-accent-hover"
-              >
-                Manage config
-              </Link>
-            </div>
-          ) : undefined
-        }
-        containerClassName="w-full px-4 py-3 sm:px-6 lg:px-8"
+        actions={permission.role === "admin" ? <AdminLinks /> : undefined}
+        containerClassName={PAGE_CONTAINER_CLASS_NAME}
       />
       <main className="w-full px-4 py-6 sm:px-6 lg:px-8">
-        {!summary.ok ? (
-          <Card className="border-l-4 border-l-warning-border p-6">
-            <div className="flex flex-col gap-3">
-              <p className="text-xs font-bold uppercase tracking-wide text-warning-text">
-                Schema unavailable
-              </p>
-              <h2 className="text-lg font-bold text-text-primary">{summary.error}</h2>
-              <p className="text-sm text-text-secondary">
-                Curriculum Summary is read-only and cannot load until the LMS Curriculum and
-                Curriculum Plan schema is available.
-              </p>
-              <ul className="list-disc space-y-1 pl-5 font-mono text-sm text-text-secondary">
-                {summary.details.map((detail) => (
-                  <li key={detail}>{detail}</li>
-                ))}
-              </ul>
-            </div>
-          </Card>
+        {summary.ok ? (
+          <SummaryView summary={summary} params={params} />
         ) : (
-          <div className="space-y-5">
-            <div className="grid grid-cols-3 gap-3 sm:max-w-2xl">
-              <HeaderNumber
-                label="Centres on plan"
-                value={`${summary.header.centresOnPlan}/${summary.header.centresTotal}`}
-                testId="summary-centres-on-plan"
-              />
-              <HeaderNumber
-                label="Chapters behind"
-                value={String(summary.header.chaptersBehind)}
-                testId="summary-chapters-behind"
-              />
-              <HeaderNumber
-                label="Chapter tests overdue"
-                value={String(summary.header.testsOverdue)}
-                testId="summary-tests-overdue"
-              />
-            </div>
-
-            <SummaryFilters params={params} regionOptions={summary.regionOptions} />
-
-            <Card className="overflow-hidden">
-              {summary.rows.length === 0 ? (
-                <div className="px-4 py-10 text-sm text-text-secondary">
-                  {params.regions.length > 0 || params.schoolSearch || params.onlyBehind
-                    ? "No classes match these filters."
-                    : `No Centres with Exam Tracks for Grade ${params.grade} are in your scope.`}
-                </div>
-              ) : (
-                <SummaryTable rows={summary.rows} params={params} />
-              )}
-              <SummaryPagination
-                page={summary.pagination.page}
-                totalPages={summary.pagination.totalPages}
-                params={params}
-              />
-            </Card>
-          </div>
+          <SchemaUnavailableCard error={summary.error} details={summary.details}>
+            <p className="text-sm text-text-secondary">
+              Curriculum Summary is read-only and cannot load until the LMS Curriculum and
+              Curriculum Plan schema is available.
+            </p>
+          </SchemaUnavailableCard>
         )}
       </main>
     </div>
   );
 }
 
-function HeaderNumber({ label, value, testId }: { label: string; value: string; testId: string }) {
+function AdminLinks() {
   return (
-    <Card elevation="sm" className="p-3 sm:p-4">
-      <span className="block text-xs uppercase tracking-wider text-text-muted">{label}</span>
-      <span data-testid={testId} className="mt-1 block font-mono text-2xl font-bold text-text-primary">
-        {value}
-      </span>
-    </Card>
+    <div className="flex items-center gap-2">
+      <Link href="/curriculum-summary/plans" className={ACTION_LINK_CLASS_NAME}>
+        Plans
+      </Link>
+      <Link href="/curriculum-summary/config" className={ACTION_LINK_CLASS_NAME}>
+        Manage config
+      </Link>
+    </div>
   );
+}
+
+function SummaryView({ summary, params }: { summary: SummaryData; params: CurriculumSummaryQuery }) {
+  const { header } = summary;
+  return (
+    <div className="space-y-5">
+      <div className="grid grid-cols-3 gap-3 sm:max-w-2xl">
+        <HeaderNumber
+          label="Centres on plan"
+          value={`${header.centresOnPlan}/${header.centresTotal}`}
+          testId="summary-centres-on-plan"
+        />
+        <HeaderNumber label="Chapters behind" value={String(header.chaptersBehind)} testId="summary-chapters-behind" />
+        <HeaderNumber
+          label="Chapter tests overdue"
+          value={String(header.testsOverdue)}
+          testId="summary-tests-overdue"
+        />
+      </div>
+
+      <SummaryFilters params={params} regionOptions={summary.regionOptions} />
+
+      <Card className="overflow-hidden">
+        {summary.rows.length === 0 ? (
+          <div className="px-4 py-10 text-sm text-text-secondary">{emptyMessage(params)}</div>
+        ) : (
+          <SummaryTable rows={summary.rows} params={params} />
+        )}
+        <SummaryPagination
+          page={summary.pagination.page}
+          totalPages={summary.pagination.totalPages}
+          params={params}
+        />
+      </Card>
+    </div>
+  );
+}
+
+function emptyMessage(params: CurriculumSummaryQuery): string {
+  const filtered = params.regions.length > 0 || params.schoolSearch !== "" || params.onlyBehind;
+  return filtered
+    ? "No classes match these filters."
+    : `No Centres with Exam Tracks for Grade ${params.grade} are in your scope.`;
 }
 
 // Filters carried by every Summary link; page and limit are added per link.
@@ -188,7 +146,7 @@ function summaryHref(
   overrides: { grade?: number; page?: number } = {}
 ): string {
   const search = filterSearchParams(params, overrides);
-  if (params.pageSize !== 20) search.set("limit", String(params.pageSize));
+  if (params.pageSize !== DEFAULT_PAGE_SIZE) search.set("limit", String(params.pageSize));
   if (overrides.page && overrides.page > 1) search.set("page", String(overrides.page));
   return `/curriculum-summary?${search.toString()}`;
 }
@@ -202,61 +160,28 @@ function SummaryFilters({
 }) {
   return (
     <Card className="flex flex-col gap-4 p-4 sm:flex-row sm:items-end">
-      <div className="flex flex-col gap-1">
-        <span className="text-xs font-bold uppercase tracking-wide text-text-muted">Grade</span>
-        <nav aria-label="Grade" className="flex gap-1">
-          {CURRICULUM_SUMMARY_GRADES.map((grade) => (
-            <Link
-              key={grade}
-              href={summaryHref(params, { grade })}
-              aria-current={params.grade === grade ? "page" : undefined}
-              className={`rounded-md border px-3 py-1.5 text-sm font-bold ${
-                params.grade === grade
-                  ? "border-accent bg-accent text-white"
-                  : "border-border text-accent hover:text-accent-hover"
-              }`}
-            >
-              Grade {grade}
-            </Link>
-          ))}
-        </nav>
-      </div>
+      <SegmentLinks
+        label="Grade"
+        navLabel="Grade"
+        links={CURRICULUM_SUMMARY_GRADES.map((grade) => ({
+          key: String(grade),
+          label: `Grade ${grade}`,
+          href: summaryHref(params, { grade }),
+          active: params.grade === grade,
+        }))}
+      />
       {/* Submitting drops `page`, so changed filters start again at page 1. */}
       <form action="/curriculum-summary" className="flex flex-wrap items-end gap-2">
         <input type="hidden" name="grade" value={params.grade} />
-        {params.pageSize !== 20 ? (
-          <input type="hidden" name="limit" value={params.pageSize} />
-        ) : null}
+        <HiddenField name="limit" value={params.pageSize !== DEFAULT_PAGE_SIZE ? params.pageSize : null} />
         <RegionFilter regionOptions={regionOptions} selected={params.regions} />
-        <label className="flex flex-col gap-1 text-xs font-bold uppercase tracking-wide text-text-muted">
-          School
-          <input
-            type="search"
-            name="q"
-            defaultValue={params.schoolSearch}
-            placeholder="Name or code"
-            className="min-h-[44px] rounded-md border border-border bg-bg-card px-3 py-2 text-sm font-normal normal-case text-text-primary"
-          />
-        </label>
-        <label className="flex flex-col gap-1 text-xs font-bold uppercase tracking-wide text-text-muted">
-          As of
-          <input
-            type="date"
-            name="as_of"
-            defaultValue={params.asOf}
-            className="min-h-[44px] rounded-md border border-border bg-bg-card px-3 py-2 text-sm font-normal normal-case text-text-primary"
-          />
-        </label>
+        <SearchField name="q" label="School" value={params.schoolSearch} placeholder="Name or code" />
+        <AsOfField asOf={params.asOf} />
         <label className="flex min-h-[44px] items-center gap-2 text-sm font-bold text-text-primary">
           <input type="checkbox" name="only_behind" value="1" defaultChecked={params.onlyBehind} />
           Only behind
         </label>
-        <button
-          type="submit"
-          className="min-h-[44px] rounded-md border border-border px-3 py-1.5 text-sm font-bold text-accent hover:text-accent-hover"
-        >
-          Apply
-        </button>
+        <ApplyButton />
       </form>
     </Card>
   );
@@ -293,6 +218,17 @@ function RegionFilter({ regionOptions, selected }: { regionOptions: string[]; se
   );
 }
 
+const SUMMARY_HEADERS = [
+  "Centre",
+  "Program",
+  "Tracks",
+  "Region",
+  ...CURRICULUM_SUMMARY_SUBJECTS,
+  "Behind",
+  "Tests overdue",
+  "Plan",
+];
+
 function SummaryTable({
   rows,
   params,
@@ -300,23 +236,10 @@ function SummaryTable({
   rows: CurriculumSummaryRow[];
   params: CurriculumSummaryQuery;
 }) {
-  const headers = ["Centre", "Program", "Tracks", "Region", ...CURRICULUM_SUMMARY_SUBJECTS, "Behind", "Tests overdue", "Plan"];
   return (
     <div className="overflow-x-auto">
       <table className="min-w-full divide-y divide-border text-sm">
-        <thead className="bg-bg-muted">
-          <tr>
-            {headers.map((header) => (
-              <th
-                key={header}
-                scope="col"
-                className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-text-muted"
-              >
-                {header}
-              </th>
-            ))}
-          </tr>
-        </thead>
+        <TableHead headers={SUMMARY_HEADERS} />
         <tbody className="divide-y divide-border">
           {rows.map((row) => (
             <SummaryTableRow key={row.centreId} row={row} params={params} />
@@ -332,72 +255,91 @@ function SummaryTableRow({ row, params }: { row: CurriculumSummaryRow; params: C
     grade: String(params.grade),
     as_of: params.asOf,
   }).toString()}`;
-  const cellClassName = "px-4 py-3 align-top";
 
   return (
     <tr data-summary-row data-centre={row.centreName} data-kind={row.kind}>
-      <td className={cellClassName}>
+      <td className={CELL_CLASS_NAME}>
         <Link href={timelineHref} className="font-bold text-accent hover:text-accent-hover">
           {row.centreName}
         </Link>
         <span className="block text-xs text-text-muted">{row.schoolName}</span>
       </td>
-      <td className={cellClassName}>{row.programName}</td>
-      <td className={cellClassName}>{row.tracksLabel}</td>
-      <td className={cellClassName}>{row.region ?? "—"}</td>
-      {row.kind === "plan" && row.subjects ? (
-        <>
-          {CURRICULUM_SUMMARY_SUBJECTS.map((subject) => {
-            const progress = row.subjects?.[subject] ?? null;
-            return (
-              <td key={subject} data-subject={subject} className={cellClassName}>
-                {progress ? (
-                  <Badge variant={TONE_BADGE_VARIANTS[progress.tone]} data-tone={progress.tone}>
-                    {progress.label} · {progress.done}/{progress.due}
-                  </Badge>
-                ) : (
-                  <span className="text-text-muted">—</span>
-                )}
-              </td>
-            );
-          })}
-          <td data-behind className={`${cellClassName} font-mono font-bold`}>
-            {row.behind}
-          </td>
-          <td data-tests-overdue className={`${cellClassName} font-mono font-bold`}>
-            {row.testsOverdue}
-          </td>
-          <td data-plan className={cellClassName}>
-            {row.plan?.title}
-            {row.plan?.closed ? (
-              <Badge className="ml-2" data-plan-closed>
-                Closed
-              </Badge>
-            ) : null}
-          </td>
-        </>
-      ) : row.kind === "no_plan" ? (
-        <>
-          <td colSpan={CURRICULUM_SUMMARY_SUBJECTS.length + 1} className={`${cellClassName} text-text-muted`}>
-            Not measured without an Active plan
-          </td>
-          <td data-tests-conducted className={`${cellClassName} text-text-secondary`}>
-            {row.testsConducted ?? 0} conducted
-          </td>
-          <td data-plan className={`${cellClassName} text-text-muted`}>
-            No plan
-          </td>
-        </>
-      ) : (
-        <td
-          colSpan={CURRICULUM_SUMMARY_SUBJECTS.length + 3}
-          data-explanation
-          className={`${cellClassName} font-bold text-warning-text`}
-        >
-          {row.explanation}
-        </td>
-      )}
+      <td className={CELL_CLASS_NAME}>{row.programName}</td>
+      <td className={CELL_CLASS_NAME}>{row.tracksLabel}</td>
+      <td className={CELL_CLASS_NAME}>{row.region ?? "—"}</td>
+      <RowMetrics row={row} />
     </tr>
+  );
+}
+
+function RowMetrics({ row }: { row: CurriculumSummaryRow }) {
+  if (row.kind === "plan" && row.subjects) return <PlanCells row={row} subjects={row.subjects} />;
+  if (row.kind === "no_plan") return <NoPlanCells testsConducted={row.testsConducted ?? 0} />;
+  return (
+    <td
+      colSpan={CURRICULUM_SUMMARY_SUBJECTS.length + 3}
+      data-explanation
+      className={`${CELL_CLASS_NAME} font-bold text-warning-text`}
+    >
+      {row.explanation}
+    </td>
+  );
+}
+
+function PlanCells({
+  row,
+  subjects,
+}: {
+  row: CurriculumSummaryRow;
+  subjects: NonNullable<CurriculumSummaryRow["subjects"]>;
+}) {
+  return (
+    <>
+      {CURRICULUM_SUMMARY_SUBJECTS.map((subject) => (
+        <td key={subject} data-subject={subject} className={CELL_CLASS_NAME}>
+          <SubjectPill progress={subjects[subject]} />
+        </td>
+      ))}
+      <td data-behind className={`${CELL_CLASS_NAME} font-mono font-bold`}>
+        {row.behind}
+      </td>
+      <td data-tests-overdue className={`${CELL_CLASS_NAME} font-mono font-bold`}>
+        {row.testsOverdue}
+      </td>
+      <td data-plan className={CELL_CLASS_NAME}>
+        {row.plan?.title}
+        {row.plan?.closed ? (
+          <Badge className="ml-2" data-plan-closed>
+            Closed
+          </Badge>
+        ) : null}
+      </td>
+    </>
+  );
+}
+
+function SubjectPill({ progress }: { progress: CurriculumSummarySubjectProgress | null }) {
+  if (!progress) return <span className="text-text-muted">—</span>;
+  return (
+    <Badge variant={TONE_BADGE_VARIANTS[progress.tone]} data-tone={progress.tone}>
+      {progress.label} · {progress.done}/{progress.due}
+    </Badge>
+  );
+}
+
+function NoPlanCells({ testsConducted }: { testsConducted: number }) {
+  return (
+    <>
+      <td colSpan={CURRICULUM_SUMMARY_SUBJECTS.length + 1} className={`${CELL_CLASS_NAME} text-text-muted`}>
+        Not measured without an Active plan
+      </td>
+      <td data-tests-conducted className={`${CELL_CLASS_NAME} text-text-secondary`}>
+        {testsConducted} conducted
+      </td>
+      <td data-plan className={`${CELL_CLASS_NAME} text-text-muted`}>
+        No plan
+      </td>
+    </>
   );
 }
 
@@ -410,11 +352,6 @@ function SummaryPagination({
   totalPages: number;
   params: CurriculumSummaryQuery;
 }) {
-  const hasPrevious = page > 1;
-  const hasNext = page < totalPages;
-  const linkClassName = "rounded-md border border-border px-3 py-1.5 font-bold text-accent hover:text-accent-hover";
-  const disabledClassName = "rounded-md border border-border px-3 py-1.5 font-bold text-text-muted";
-
   return (
     <div className="flex flex-col gap-3 border-t border-border px-4 py-3 text-sm text-text-secondary sm:flex-row sm:items-center sm:justify-between">
       <span>
@@ -425,21 +362,20 @@ function SummaryPagination({
           filterQuery={filterSearchParams(params).toString()}
           pageSize={params.pageSize}
         />
-        {hasPrevious ? (
-          <Link href={summaryHref(params, { page: page - 1 })} className={linkClassName}>
-            Previous
-          </Link>
-        ) : (
-          <span className={disabledClassName}>Previous</span>
-        )}
-        {hasNext ? (
-          <Link href={summaryHref(params, { page: page + 1 })} className={linkClassName}>
-            Next
-          </Link>
-        ) : (
-          <span className={disabledClassName}>Next</span>
-        )}
+        <PageLink label="Previous" href={page > 1 ? summaryHref(params, { page: page - 1 }) : null} />
+        <PageLink label="Next" href={page < totalPages ? summaryHref(params, { page: page + 1 }) : null} />
       </div>
     </div>
+  );
+}
+
+function PageLink({ label, href }: { label: string; href: string | null }) {
+  if (!href) {
+    return <span className="rounded-md border border-border px-3 py-1.5 font-bold text-text-muted">{label}</span>;
+  }
+  return (
+    <Link href={href} className="rounded-md border border-border px-3 py-1.5 font-bold text-accent hover:text-accent-hover">
+      {label}
+    </Link>
   );
 }

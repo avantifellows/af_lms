@@ -30,7 +30,7 @@ import {
   type HoursWindow,
 } from "./curriculum-plan-rules";
 import { query } from "./db";
-import { EXAM_TRACKS, formatExamTrack } from "./exam-tracks";
+import { EXAM_TRACKS, formatExamTrack, type ExamTrack } from "./exam-tracks";
 import {
   PHYSICAL_CENTRE_PROGRAM_IDS,
   getProgramContextSync,
@@ -185,40 +185,50 @@ export async function getCurriculumSummary(
   permission: UserPermission,
   params: CurriculumSummaryQuery
 ): Promise<CurriculumSummaryResult> {
-  for (const check of [checkCurriculumSchema, checkCurriculumPlansSchema]) {
-    const schema = await check();
-    if (!schema.ok) return schema;
-  }
+  const schema = await checkSummarySchemas();
+  if (!schema.ok) return schema;
 
   const scopedRows = (await loadSummaryClasses(permission, params)).map(buildSummaryRow);
   const regionOptions = [
     ...new Set(scopedRows.flatMap((row) => (row.region ? [row.region] : []))),
   ].sort();
-  const search = params.schoolSearch.toLowerCase();
-  const rows = sortSummaryRows(
-    scopedRows.filter(
-      (row) =>
-        (params.regions.length === 0 || params.regions.includes(row.region ?? "")) &&
-        (!search ||
-          row.schoolName.toLowerCase().includes(search) ||
-          row.schoolCode.toLowerCase().includes(search))
-    )
-  );
-
+  const rows = sortSummaryRows(scopedRows.filter((row) => matchesSummaryFilters(row, params)));
   const listedRows = params.onlyBehind ? rows.filter((row) => row.behind >= 1) : rows;
-
-  const totalRows = listedRows.length;
-  const totalPages = Math.ceil(totalRows / params.pageSize);
-  const page = totalPages === 0 ? 1 : Math.min(params.page, totalPages);
-  const offset = (page - 1) * params.pageSize;
+  const { page, totalPages, pageRows } = paginate(listedRows, params.page, params.pageSize);
 
   return {
     ok: true,
     header: summaryHeader(rows),
     regionOptions,
-    rows: listedRows.slice(offset, offset + params.pageSize),
-    pagination: { page, pageSize: params.pageSize, totalRows, totalPages },
+    rows: pageRows,
+    pagination: { page, pageSize: params.pageSize, totalRows: listedRows.length, totalPages },
   };
+}
+
+// Both the Summary and the timeline need the curriculum and Curriculum Plan schemas.
+async function checkSummarySchemas(): Promise<{ ok: true } | CurriculumSchemaUnavailable> {
+  const curriculum = await checkCurriculumSchema();
+  if (!curriculum.ok) return curriculum;
+  return checkCurriculumPlansSchema();
+}
+
+// Region and School search narrow the user's scoped rows; they never widen scope.
+function matchesSummaryFilters(row: CurriculumSummaryRow, params: CurriculumSummaryQuery): boolean {
+  const search = params.schoolSearch.toLowerCase();
+  const regionMatches = params.regions.length === 0 || params.regions.includes(row.region ?? "");
+  const schoolMatches =
+    !search ||
+    row.schoolName.toLowerCase().includes(search) ||
+    row.schoolCode.toLowerCase().includes(search);
+  return regionMatches && schoolMatches;
+}
+
+// A page past the end shows the last page; no rows is page 1 of 0.
+function paginate<T>(rows: T[], requestedPage: number, pageSize: number) {
+  const totalPages = Math.ceil(rows.length / pageSize);
+  const page = totalPages === 0 ? 1 : Math.min(requestedPage, totalPages);
+  const offset = (page - 1) * pageSize;
+  return { page, totalPages, pageRows: rows.slice(offset, offset + pageSize) };
 }
 
 interface SummaryClassData {
@@ -261,20 +271,23 @@ async function loadSummaryClasses(
 // $1 all schools, $2 school codes (explicit ∪ seat scope), $3 regions, $4 physical-centre
 // Programs, $5 Admin (all Programs), $6 the user's Programs.
 function scopeParams(permission: UserPermission): unknown[] {
-  const scopeSchools =
-    permission.scope && permission.scope.schools !== "all"
-      ? [...permission.scope.schools]
-      : permission.level === 1
-        ? permission.school_codes ?? []
-        : null;
+  const schools = scopedSchoolCodes(permission);
   return [
     permission.level === 3,
-    scopeSchools && scopeSchools.length > 0 ? scopeSchools : null,
+    schools.length > 0 ? schools : null,
     permission.level === 2 ? permission.regions ?? [] : null,
     PHYSICAL_CENTRE_PROGRAM_IDS,
     permission.role === "admin",
     getProgramContextSync(permission).programIds,
   ];
+}
+
+// The resolved scope's School codes (explicit codes ∪ seat Schools), else a level-1 user's
+// explicit codes; empty means no School-code scope.
+function scopedSchoolCodes(permission: UserPermission): string[] {
+  if (permission.scope && permission.scope.schools !== "all") return [...permission.scope.schools];
+  if (permission.level === 1) return permission.school_codes ?? [];
+  return [];
 }
 
 // $7 Grade number, $8 academic year of as-of, $9 its 1 Apr, $10 as-of, $11 one Centre id (null
@@ -467,10 +480,41 @@ function chapterTestStatusFor(
 
 function buildSummaryRow(data: SummaryClassData): CurriculumSummaryRow {
   const { raw, chapters, asOf } = data;
+  const base = summaryRowBase(raw);
+  const problem = summaryClassProblem(raw, chapters);
+  if (problem) return { ...base, ...problem };
+  if (raw.plan_id === null || raw.plan_status !== "active" || !raw.plan_title) {
+    // Without plan dates no Chapter Test can be Overdue; show what was held instead.
+    return { ...base, kind: "no_plan", explanation: null, testsConducted: testStatusCount(data, "conducted") };
+  }
+
+  const subjects = Object.fromEntries(
+    CURRICULUM_SUMMARY_SUBJECTS.map((subject) => [subject, subjectProgress(chapters, subject, asOf)])
+  ) as Record<CurriculumSummarySubject, CurriculumSummarySubjectProgress | null>;
+  const closureDate = raw.plan_closure_date ?? asOf;
+
+  return {
+    ...base,
+    kind: "plan",
+    explanation: null,
+    plan: {
+      id: Number(raw.plan_id),
+      title: raw.plan_title,
+      closed: planStatusAsOf({ status: "active", closureDate }, asOf) === "closed",
+    },
+    subjects,
+    behind: chapterProgress(chapters, asOf).behind,
+    testsOverdue: testStatusCount(data, "overdue"),
+  };
+}
+
+function testStatusCount(data: SummaryClassData, kind: ChapterTestStatus["kind"]): number {
+  return data.chapters.filter((chapter) => chapterTestStatusFor(data, chapter).kind === kind).length;
+}
+
+function summaryRowBase(raw: SummaryQueryRow) {
   const mappedTracks = EXAM_TRACKS.filter((track) => raw.mapped_tracks.includes(track));
-  const testStatusCount = (kind: ChapterTestStatus["kind"]) =>
-    chapters.filter((chapter) => chapterTestStatusFor(data, chapter).kind === kind).length;
-  const base = {
+  return {
     centreId: Number(raw.centre_id),
     centreName: raw.centre_name,
     schoolCode: raw.school_code,
@@ -485,51 +529,32 @@ function buildSummaryRow(data: SummaryClassData): CurriculumSummaryRow {
     testsOverdue: 0,
     testsConducted: null,
   };
+}
 
+// Classes the Summary can't measure: an ambiguous Centre, a track setup error, or no content.
+function summaryClassProblem(
+  raw: SummaryQueryRow,
+  chapters: SummaryChapter[]
+): { kind: CurriculumSummaryRowKind; explanation: string } | null {
   // Logs and completions are keyed by School + Program, so a second active physical Centre
   // there makes this Centre's progress ambiguous.
   if (Number(raw.centre_count) > 1) {
     return {
-      ...base,
       kind: "configuration_error",
       explanation: "Multiple active physical Centres are configured for this School and Program",
     };
   }
-
   const summaryClass = classifySummaryClass(
-    mappedTracks,
+    raw.mapped_tracks,
     chapters.flatMap((chapter) => chapter.tracks)
   );
   if (summaryClass.kind === "setup_error") {
-    return { ...base, kind: "setup_error", explanation: "Fix tracks in Centre Management" };
+    return { kind: "setup_error", explanation: "Fix tracks in Centre Management" };
   }
   if (summaryClass.kind === "no_content") {
-    return { ...base, kind: "no_content", explanation: "Curriculum configuration is unavailable" };
+    return { kind: "no_content", explanation: "Curriculum configuration is unavailable" };
   }
-  if (raw.plan_id === null || raw.plan_status !== "active" || !raw.plan_title) {
-    // Without plan dates no Chapter Test can be Overdue; show what was held instead.
-    return { ...base, kind: "no_plan", explanation: null, testsConducted: testStatusCount("conducted") };
-  }
-
-  const subjects = Object.fromEntries(
-    CURRICULUM_SUMMARY_SUBJECTS.map((subject) => [subject, subjectProgress(chapters, subject, asOf)])
-  ) as Record<CurriculumSummarySubject, CurriculumSummarySubjectProgress | null>;
-
-  return {
-    ...base,
-    kind: "plan",
-    explanation: null,
-    plan: {
-      id: Number(raw.plan_id),
-      title: raw.plan_title,
-      closed:
-        planStatusAsOf({ status: "active", closureDate: raw.plan_closure_date ?? asOf }, asOf) ===
-        "closed",
-    },
-    subjects,
-    behind: chapterProgress(chapters, asOf).behind,
-    testsOverdue: testStatusCount("overdue"),
-  };
+  return null;
 }
 
 // null when the class has no Chapter of the subject.
@@ -547,18 +572,26 @@ function subjectProgress(
 function parseChapters(value: unknown): SummaryChapter[] {
   const parsed = typeof value === "string" ? JSON.parse(value) : value;
   if (!Array.isArray(parsed)) return [];
-  return parsed.map((chapter: Record<string, unknown>) => ({
+  return parsed.map(parseChapter);
+}
+
+function stringOrNull(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+function parseChapter(chapter: Record<string, unknown>): SummaryChapter {
+  return {
     chapterId: Number(chapter.chapterId),
-    code: typeof chapter.code === "string" ? chapter.code : "",
+    code: stringOrNull(chapter.code) ?? "",
     name: String(chapter.name),
     sequence: typeof chapter.sequence === "number" ? chapter.sequence : Number.MAX_SAFE_INTEGER,
     subject: chapter.subject === "Mathematics" ? "Maths" : String(chapter.subject),
     tracks: Array.isArray(chapter.tracks) ? chapter.tracks.map(String) : [],
     prescribedMinutes: parsePrescribedMinutes(chapter.prescribedMinutes),
-    dueDate: typeof chapter.dueDate === "string" ? chapter.dueDate : null,
-    testDate: typeof chapter.testDate === "string" ? chapter.testDate : null,
-    completedOn: typeof chapter.completedOn === "string" ? chapter.completedOn : null,
-  }));
+    dueDate: stringOrNull(chapter.dueDate),
+    testDate: stringOrNull(chapter.testDate),
+    completedOn: stringOrNull(chapter.completedOn),
+  };
 }
 
 function parsePrescribedMinutes(value: unknown): Record<string, number> {
@@ -661,10 +694,8 @@ export async function getChapterTimeline(
   centreId: number,
   params: { grade: CurriculumSummaryGrade; asOf: string; hoursWindow: HoursWindow }
 ): Promise<ChapterTimelineResult> {
-  for (const check of [checkCurriculumSchema, checkCurriculumPlansSchema]) {
-    const schema = await check();
-    if (!schema.ok) return schema;
-  }
+  const schema = await checkSummarySchemas();
+  if (!schema.ok) return schema;
   if (!Number.isInteger(centreId) || centreId <= 0) return { ok: false, status: 404 };
 
   const [data] = await loadSummaryClasses(permission, { ...params, centreId });
@@ -672,15 +703,9 @@ export async function getChapterTimeline(
 
   const row = buildSummaryRow(data);
   const grades = await loadCentreGrades(centreId);
-  const measured = row.kind === "plan" || row.kind === "no_plan";
-  const chapters = measured ? data.chapters : [];
-  const progress = chapterProgress(chapters, params.asOf);
-  const summaryClass = classifySummaryClass(
-    data.raw.mapped_tracks,
-    chapters.flatMap((chapter) => chapter.tracks)
-  );
-  const classTracks =
-    summaryClass.kind === "single" || summaryClass.kind === "shared" ? summaryClass.tracks : [];
+  // Setup-error, no-content and configuration-error classes list no Chapters.
+  const chapters = row.kind === "plan" || row.kind === "no_plan" ? data.chapters : [];
+  const classTracks = summaryClassTracks(data.raw.mapped_tracks, chapters);
   const activity = await loadTimelineActivity({
     schoolCode: data.raw.school_code,
     programId: Number(data.raw.program_id),
@@ -690,14 +715,9 @@ export async function getChapterTimeline(
     to: params.asOf,
     chapterIds: chapters.map((chapter) => chapter.chapterId),
   });
-  const prescribedMinutes = (chapter: SummaryChapter) => {
-    const track = primaryExamTrackForChapter(classTracks, chapter.tracks);
-    return track ? chapter.prescribedMinutes[track] ?? 0 : 0;
-  };
-  const activityFor = (chapter: SummaryChapter) =>
-    activity.get(chapter.chapterId) ?? { taughtMinutes: 0, cancellations: 0, doubtSolvingMinutes: 0 };
-  const total = (value: (chapter: SummaryChapter) => number) =>
-    chapters.reduce((sum, chapter) => sum + value(chapter), 0);
+  const timelineChapters = [...chapters]
+    .sort(compareTimelineChapters)
+    .map((chapter) => timelineChapter(data, chapter, { classTracks, activity, asOf: params.asOf }));
 
   return {
     ok: true,
@@ -707,36 +727,76 @@ export async function getChapterTimeline(
       asOf: params.asOf,
       hoursWindow: params.hoursWindow,
       row,
-      subjects: [...new Set(chapters.map((chapter) => chapter.subject))]
-        .sort((a, b) => subjectRank(a) - subjectRank(b) || a.localeCompare(b))
-        .map((subject) => ({
-          subject,
-          progress: row.kind === "plan" ? subjectProgress(chapters, subject, params.asOf) : null,
-        })),
-      chapters: [...chapters].sort(compareTimelineChapters).map((chapter) => ({
-        chapterId: chapter.chapterId,
-        code: chapter.code,
-        name: chapter.name,
-        subject: chapter.subject,
-        dueDate: chapter.dueDate,
-        completedOn: chapter.completedOn,
-        status: chapterStatus({ dueDate: chapter.dueDate, completedOn: chapter.completedOn, asOf: params.asOf }),
-        testStatus: chapterTestStatusFor(data, chapter),
-        ...activityFor(chapter),
-        prescribedMinutes: prescribedMinutes(chapter),
-      })),
-      header: {
-        due: progress.due,
-        done: progress.done,
-        syllabusDone: chapters.filter((chapter) => chapter.completedOn !== null).length,
-        syllabusTotal: chapters.length,
-        testsOverdue: row.testsOverdue,
-        taughtMinutes: total((chapter) => activityFor(chapter).taughtMinutes),
-        prescribedMinutes: total(prescribedMinutes),
-        cancellations: total((chapter) => activityFor(chapter).cancellations),
-        doubtSolvingMinutes: total((chapter) => activityFor(chapter).doubtSolvingMinutes),
-      },
+      subjects: timelineSubjects(row, chapters, params.asOf),
+      chapters: timelineChapters,
+      header: timelineHeader(row, chapters, timelineChapters, params.asOf),
     },
+  };
+}
+
+function summaryClassTracks(mappedTracks: string[], chapters: SummaryChapter[]): ExamTrack[] {
+  const summaryClass = classifySummaryClass(
+    mappedTracks,
+    chapters.flatMap((chapter) => chapter.tracks)
+  );
+  return summaryClass.kind === "single" || summaryClass.kind === "shared" ? summaryClass.tracks : [];
+}
+
+const NO_ACTIVITY: TimelineActivity = { taughtMinutes: 0, cancellations: 0, doubtSolvingMinutes: 0 };
+
+function timelineChapter(
+  data: SummaryClassData,
+  chapter: SummaryChapter,
+  context: { classTracks: ExamTrack[]; activity: Map<number, TimelineActivity>; asOf: string }
+): ChapterTimelineChapter {
+  const track = primaryExamTrackForChapter(context.classTracks, chapter.tracks);
+  return {
+    chapterId: chapter.chapterId,
+    code: chapter.code,
+    name: chapter.name,
+    subject: chapter.subject,
+    dueDate: chapter.dueDate,
+    completedOn: chapter.completedOn,
+    status: chapterStatus({ dueDate: chapter.dueDate, completedOn: chapter.completedOn, asOf: context.asOf }),
+    testStatus: chapterTestStatusFor(data, chapter),
+    ...(context.activity.get(chapter.chapterId) ?? NO_ACTIVITY),
+    prescribedMinutes: track ? chapter.prescribedMinutes[track] ?? 0 : 0,
+  };
+}
+
+// Subjects with Chapters for the class in pill-column order; progress only with a plan.
+function timelineSubjects(
+  row: CurriculumSummaryRow,
+  chapters: SummaryChapter[],
+  asOf: string
+): ChapterTimeline["subjects"] {
+  return [...new Set(chapters.map((chapter) => chapter.subject))]
+    .sort((a, b) => subjectRank(a) - subjectRank(b) || a.localeCompare(b))
+    .map((subject) => ({
+      subject,
+      progress: row.kind === "plan" ? subjectProgress(chapters, subject, asOf) : null,
+    }));
+}
+
+function timelineHeader(
+  row: CurriculumSummaryRow,
+  chapters: SummaryChapter[],
+  timelineChapters: ChapterTimelineChapter[],
+  asOf: string
+): ChapterTimeline["header"] {
+  const progress = chapterProgress(chapters, asOf);
+  const total = (value: (chapter: ChapterTimelineChapter) => number) =>
+    timelineChapters.reduce((sum, chapter) => sum + value(chapter), 0);
+  return {
+    due: progress.due,
+    done: progress.done,
+    syllabusDone: chapters.filter((chapter) => chapter.completedOn !== null).length,
+    syllabusTotal: chapters.length,
+    testsOverdue: row.testsOverdue,
+    taughtMinutes: total((chapter) => chapter.taughtMinutes),
+    prescribedMinutes: total((chapter) => chapter.prescribedMinutes),
+    cancellations: total((chapter) => chapter.cancellations),
+    doubtSolvingMinutes: total((chapter) => chapter.doubtSolvingMinutes),
   };
 }
 
