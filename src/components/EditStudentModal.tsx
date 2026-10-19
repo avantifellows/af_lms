@@ -26,6 +26,7 @@ import {
   type RegistrationMode,
 } from "@/lib/registration-mode";
 import { trackPantSizeOptions, tshirtSizeOptions } from "@/lib/uniform-sizes";
+import { PMU_PROGRAM_ID } from "@/lib/constants";
 
 export interface Batch {
   id: number;
@@ -151,6 +152,9 @@ export default function EditStudentModal({
   const phoneMode = registrationMode === PHONE_REGISTRATION_MODE;
   const approvedPhoneBackfill =
     isPhoneRegistrationStudent && registrationMode === APPROVED_REGISTRATION_MODE;
+  // Uniforms are ordered for physical-centre programs only; PMU (JNV NVS) Students
+  // get none, so the sizes are never collected under that program.
+  const showUniformSizes = programId == null || Number(programId) !== PMU_PROGRAM_ID;
   const [formData, setFormData] = useState(initialData);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -533,17 +537,19 @@ export default function EditStudentModal({
               </div>
             </FormSection>
 
-            <FormSection>
-              <h3 className={sectionHeadingClassName}>Uniform Size</h3>
-              <p className="mb-4 text-xs text-text-muted">
-                Collected for vendor orders. Leave blank until the size is known; clearing a
-                size removes it.
-              </p>
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                {selectField("tshirt_size", "T-shirt Size", tshirtSizeOptions())}
-                {selectField("track_pant_size", "Track Pant Size", trackPantSizeOptions())}
-              </div>
-            </FormSection>
+            {showUniformSizes && (
+              <FormSection>
+                <h3 className={sectionHeadingClassName}>Uniform Size</h3>
+                <p className="mb-4 text-xs text-text-muted">
+                  Collected for vendor orders. Leave blank until the size is known; clearing a
+                  size removes it.
+                </p>
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  {selectField("tshirt_size", "T-shirt Size", tshirtSizeOptions())}
+                  {selectField("track_pant_size", "Track Pant Size", trackPantSizeOptions())}
+                </div>
+              </FormSection>
+            )}
 
             {approvedPhoneBackfill && (
               <FormSection>

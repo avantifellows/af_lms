@@ -521,8 +521,20 @@ describe("EditStudentModal", () => {
   });
 
   describe("uniform sizes", () => {
+    // Sizes are collected for physical-centre programs; the default props are JNV NVS.
+    const CENTRE_PROGRAM_ID = 1;
+
+    it("hides the section for PMU (JNV NVS) Students", () => {
+      renderModal({ student: { ...baseStudent, tshirt_size: "L" } });
+
+      expect(screen.queryByText("Uniform Size")).not.toBeInTheDocument();
+      expect(document.querySelector('[name="tshirt_size"]')).toBeNull();
+      expect(document.querySelector('[name="track_pant_size"]')).toBeNull();
+    });
+
     it("prefills the stored sizes and offers the chart with measurements", () => {
       renderModal({
+        programId: CENTRE_PROGRAM_ID,
         student: { ...baseStudent, tshirt_size: "L", track_pant_size: "M" },
       });
 
@@ -538,7 +550,7 @@ describe("EditStudentModal", () => {
     });
 
     it("keeps a stored size the chart no longer offers selectable", () => {
-      renderModal({ student: { ...baseStudent, tshirt_size: "XXS" } });
+      renderModal({ programId: CENTRE_PROGRAM_ID, student: { ...baseStudent, tshirt_size: "XXS" } });
 
       const tshirt = getByName("tshirt_size") as HTMLSelectElement;
       expect(tshirt).toHaveValue("XXS");
@@ -550,7 +562,7 @@ describe("EditStudentModal", () => {
       mockFetch.mockResolvedValue(
         new Response(JSON.stringify({ ok: true }), { status: 200 }),
       );
-      renderModal();
+      renderModal({ programId: CENTRE_PROGRAM_ID });
 
       await user.selectOptions(getByName("tshirt_size"), "XL");
       await user.click(screen.getByText("Save Changes"));
@@ -566,7 +578,7 @@ describe("EditStudentModal", () => {
       mockFetch.mockResolvedValue(
         new Response(JSON.stringify({ ok: true }), { status: 200 }),
       );
-      renderModal({ student: { ...baseStudent, track_pant_size: "M" } });
+      renderModal({ programId: CENTRE_PROGRAM_ID, student: { ...baseStudent, track_pant_size: "M" } });
 
       await user.selectOptions(getByName("track_pant_size"), "");
       await user.click(screen.getByText("Save Changes"));
@@ -581,7 +593,7 @@ describe("EditStudentModal", () => {
       mockFetch.mockResolvedValue(
         new Response(JSON.stringify({ ok: true }), { status: 200 }),
       );
-      renderModal({ student: { ...baseStudent, tshirt_size: "L" } });
+      renderModal({ programId: CENTRE_PROGRAM_ID, student: { ...baseStudent, tshirt_size: "L" } });
 
       await user.clear(getByName("father_name"));
       await user.type(getByName("father_name"), "Mahesh Kumar");

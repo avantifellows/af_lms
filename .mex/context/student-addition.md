@@ -18,7 +18,7 @@ edges:
     condition: when adding LMS API routes for create or bulk upload
   - target: patterns/db-service-write.md
     condition: when proxying student writes to the DB Service
-last_updated: 2026-10-13
+last_updated: 2026-10-19
 ---
 
 # Student Addition
@@ -79,6 +79,11 @@ Not collected at enrolment, and deliberately so: neither Add Student nor the bul
 ask for a size, so `getStudentAdditionUploadColumns`, both static workbooks and the
 rejected-row CSV contract stay unchanged. The DB Service ingestion allowlist from #763 is
 left in place but is now unused by the LMS; removing it is a separate decision.
+
+Hidden for PMU (JNV NVS) Students: uniforms are ordered only for physical-centre programs, so
+`EditStudentModal` renders the Uniform Size section only when its `programId` (the roster's
+selected program) is not `PMU_PROGRAM_ID`. UI-only gate; the PATCH path still accepts the
+fields, and the modal never sends them for NVS because they are never rendered.
 
 ## Settled Product Shape
 - v1 is JNV PMU / JNV NVS only. In current LMS code this is `PROGRAM_IDS.NVS` (`64`, label `JNV NVS`) from `src/lib/constants.ts`.
