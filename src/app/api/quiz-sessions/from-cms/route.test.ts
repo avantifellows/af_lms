@@ -83,6 +83,21 @@ describe("POST /api/quiz-sessions/from-cms quiz language", () => {
     vi.stubGlobal("fetch", fetchMock);
   });
 
+  it("derives meta_data.course from the exam track", async () => {
+    const POST = await loadPost();
+
+    for (const [examTrack, course] of [
+      ["jee_main", "JEE Mains"],
+      ["jee_advanced", "JEE Advanced"],
+      ["neet", "NEET"],
+    ] as const) {
+      fetchMock.mockClear();
+      const stream = examTrack === "neet" ? "medical" : "engineering";
+      expect((await post(POST, { examTrack, stream })).status).toBe(200);
+      expect(bodyOf("db-service.local/session").meta_data.course).toBe(course);
+    }
+  });
+
   it("sends the language to quiz-backend and stores it on the session", async () => {
     const POST = await loadPost();
 
