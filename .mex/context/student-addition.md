@@ -18,7 +18,7 @@ edges:
     condition: when adding LMS API routes for create or bulk upload
   - target: patterns/db-service-write.md
     condition: when proxying student writes to the DB Service
-last_updated: 2026-10-13
+last_updated: 2026-10-19
 ---
 
 # Student Addition
@@ -79,6 +79,42 @@ Not collected at enrolment, and deliberately so: neither Add Student nor the bul
 ask for a size, so `getStudentAdditionUploadColumns`, both static workbooks and the
 rejected-row CSV contract stay unchanged. The DB Service ingestion allowlist from #763 is
 left in place but is now unused by the LMS; removing it is a separate decision.
+
+## Exam Registrations (Exams tab)
+
+GitHub issue https://github.com/avantifellows/af_lms/issues/434 asked for the competitive
+exams a Student applies for to be captured in the LMS instead of an ops sheet. Edit Student
+has an **Exams** tab between Details and Documents, one block per exam.
+
+The exams on offer are a curated list of `exam.name` values in `src/lib/competitive-exams.ts`
+— client-safe, so the picker and the server validation cannot drift. The `exam` table also
+holds internal rows (Baseline, Selection, Hiring Test, TET, Board Exam, Miscellaneous) that
+are never offered, and the API refuses an exam outside the list, so the endpoint can't be
+used to attach one to a Student. BITSAT has no `exam` row and so is not offered. The same
+module holds the Board Stream rules (PCM → JEE Mains, PCB → NEET, PCMB → both), which only
+decide which blocks *open* — nothing is stored until a teacher fills one in, and any block
+can be removed.
+
+Per exam: application number (required — see the DB Service note below), application
+password (type=password with a Show toggle) and, for an exam that runs more than once a
+year, the sittings applied for. Only JEE Mains has sittings today (`EXAM_SESSIONS`).
+
+Reads go through Postgres (`src/lib/student-exam-records.ts`), writes through
+`PUT /api/students/[id]/exam-records`, which both verbs gate with
+`canAccessStudent(..., { requireEdit: true })` — not just view, because the response carries
+exam-portal passwords. The route reconciles against what is stored: removals first (an
+application number moved between exams would otherwise collide with the DB Service's
+upsert), then a PATCH per changed registration and a POST per new one, skipping no-ops.
+Per-call failures come back as `warnings`; everything failing is a 502.
+
+The roster never carries a password — `listExamSummariesForStudents` selects
+`application_password IS NOT NULL` as `has_password`, and the card renders a fixed mask. That
+read is wrapped in a try/catch: the roster is the point of the page, so a database without
+the DB Service migration loses the exam tags rather than the roster.
+
+Deferred, per the issue: exam results (date, score, percentile, ranks), bulk upload of exam
+details, and the ops sheet's email / contact number / roll number — db-service PR #776 adds
+those columns but the tab does not collect them yet.
 
 ## Settled Product Shape
 - v1 is JNV PMU / JNV NVS only. In current LMS code this is `PROGRAM_IDS.NVS` (`64`, label `JNV NVS`) from `src/lib/constants.ts`.

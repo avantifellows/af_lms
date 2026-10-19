@@ -5,6 +5,7 @@ import { type Grade, type Student } from "./StudentTable";
 import { Modal, Button, FormSection } from "@/components/ui";
 import { UploadDocumentForm } from "@/components/documents/UploadDocumentForm";
 import { DocumentsList } from "@/components/documents/DocumentsList";
+import { ExamsTab } from "@/components/exams/ExamsTab";
 import {
   ANNUAL_FAMILY_INCOME_OPTIONS,
   BOARD_STREAM_OPTIONS,
@@ -155,7 +156,9 @@ export default function EditStudentModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
-  const [activeTab, setActiveTab] = useState<"details" | "documents">("details");
+  const [activeTab, setActiveTab] = useState<"details" | "exams" | "documents">(
+    "details",
+  );
   const [documentsRefresh, setDocumentsRefresh] = useState(0);
 
   const studentName = fullName(student);
@@ -430,6 +433,20 @@ export default function EditStudentModal({
         <button
           type="button"
           role="tab"
+          aria-selected={activeTab === "exams"}
+          onClick={() => setActiveTab("exams")}
+          disabled={studentPkId === null}
+          className={`min-h-[48px] px-4 py-3 text-sm font-bold uppercase tracking-wide transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+            activeTab === "exams"
+              ? "border-b-2 border-accent text-text-primary"
+              : "text-text-muted hover:text-text-primary"
+          }`}
+        >
+          Exams
+        </button>
+        <button
+          type="button"
+          role="tab"
           aria-selected={activeTab === "documents"}
           onClick={() => setActiveTab("documents")}
           disabled={studentPkId === null}
@@ -443,6 +460,8 @@ export default function EditStudentModal({
         </button>
       </div>
 
+      {/* A Student with no record id has nothing to hang exams or documents
+          on; both tabs are disabled in that case, so the form is what shows. */}
       {activeTab === "documents" && studentPkId !== null ? (
         <div className="flex-1 space-y-6 overflow-y-auto px-6 py-5">
           <UploadDocumentForm
@@ -464,6 +483,12 @@ export default function EditStudentModal({
             />
           </div>
         </div>
+      ) : activeTab === "exams" && studentPkId !== null ? (
+        <ExamsTab
+          studentId={studentPkId}
+          boardStream={student.board_stream}
+          onSaved={onSave}
+        />
       ) : (
         <form noValidate onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
           <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">

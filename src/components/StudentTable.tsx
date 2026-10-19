@@ -4,6 +4,11 @@ import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import EditStudentModal, { Batch } from "./EditStudentModal";
 import {
+  formatSessionsApplied,
+  MASKED_PASSWORD,
+  type StudentExamSummary,
+} from "@/lib/competitive-exams";
+import {
   Card,
   Badge,
   Button,
@@ -65,6 +70,8 @@ export interface Student {
   monthly_family_income?: string | null;
   tshirt_size?: string | null;
   track_pant_size?: string | null;
+  /** Exam registrations for this Student; never carries the portal password. */
+  exam_records?: StudentExamSummary[];
   program_name: string | null;
   program_id: number | null;
   student_program_ids?: Array<number | string> | null;
@@ -188,6 +195,44 @@ function parseStudentPkId(raw: string | null): number | null {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+// The expanded card's exam table. The password column is a mask: the stored
+// value never leaves the Exams tab of Edit Student, so the roster can only say
+// whether one is on file. The Sessions column appears only for exams that run
+// more than once a year, so it isn't an empty column for everyone else.
+function ExamRegistrationsTable({ records }: { records: StudentExamSummary[] }) {
+  const showSessions = records.some((record) => record.sessions_applied?.length);
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-left text-sm">
+        <thead>
+          <tr className="text-xs uppercase tracking-wide text-text-muted">
+            <th className="pb-2 pr-4 font-semibold">Exam</th>
+            <th className="pb-2 pr-4 font-semibold">Application no.</th>
+            <th className="pb-2 pr-4 font-semibold">Password</th>
+            {showSessions && <th className="pb-2 font-semibold">Sessions</th>}
+          </tr>
+        </thead>
+        <tbody>
+          {records.map((record) => (
+            <tr key={record.id} className="border-t border-border">
+              <td className="py-2 pr-4 font-medium text-gray-700">{record.exam_name}</td>
+              <td className="py-2 pr-4 text-gray-700">{record.application_number || "—"}</td>
+              <td className="py-2 pr-4 text-gray-700">
+                {record.has_password ? MASKED_PASSWORD : "—"}
+              </td>
+              {showSessions && (
+                <td className="py-2 text-gray-700">
+                  {formatSessionsApplied(record.sessions_applied) || "—"}
+                </td>
+              )}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 // A compact labeled field for the collapsed card summary grid.
 function KeyField({
   label,
@@ -224,6 +269,9 @@ function StudentCard({
   const [expanded, setExpanded] = useState(false);
   const isDropout = isDropoutView || student.status === "dropout";
   const studentPkId = parseStudentPkId(student.student_pk_id);
+  // "Exams applied" tags, and the table behind them. The roster never carries
+  // the portal password, only whether one is stored.
+  const examRecords = student.exam_records ?? [];
 
   return (
     <Card elevation="md" className="overflow-hidden">
@@ -242,6 +290,11 @@ function StudentCard({
             )}
             {isDropout && <Badge variant="danger">Dropout</Badge>}
             {hasOpenFlag && <Badge variant="warning">Needs intervention</Badge>}
+            {examRecords.map((record) => (
+              <Badge key={record.id} variant="accent">
+                {record.exam_name}
+              </Badge>
+            ))}
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <Button
@@ -407,6 +460,15 @@ function StudentCard({
               value={student.monthly_family_income}
             />
           </DetailGroup>
+
+          {examRecords.length > 0 && (
+            <section className="rounded-lg border border-border bg-bg-card p-4 shadow-sm">
+              <h4 className="mb-3 border-b border-border pb-2 text-xs font-bold uppercase tracking-wide text-text-muted">
+                Exam Registrations
+              </h4>
+              <ExamRegistrationsTable records={examRecords} />
+            </section>
+          )}
 
           {studentPkId !== null && (
             <section className="rounded-lg border border-border bg-bg-card p-4 shadow-sm">

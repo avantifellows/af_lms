@@ -5,6 +5,7 @@ import {
   type DataIssue,
 } from "@/lib/school-student-list-data-issues";
 import type { Student } from "@/components/StudentTable";
+import { listExamSummariesForStudents } from "@/lib/student-exam-records";
 
 export interface SchoolRoster {
   students: Student[];
@@ -129,6 +130,26 @@ const STUDENT_COLUMNS = `
  * must consume this function instead of writing its own query, so the lists
  * can never drift apart.
  */
+/**
+ * Hang each Student's exam registrations off the roster, in one query for the
+ * whole page. Passwords are never part of this shape — the card only says
+ * whether one is stored.
+ */
+async function withExamRecords(roster: SchoolRoster): Promise<SchoolRoster> {
+  const studentIds = roster.students
+    .map((student) => Number(student.student_pk_id))
+    .filter((id) => Number.isFinite(id) && id > 0);
+  const byStudent = await listExamSummariesForStudents(studentIds);
+  if (byStudent.size === 0) return roster;
+  return {
+    ...roster,
+    students: roster.students.map((student) => {
+      const records = byStudent.get(Number(student.student_pk_id));
+      return records ? { ...student, exam_records: records } : student;
+    }),
+  };
+}
+
 export async function getSchoolRoster(
   schoolId: string | number,
 ): Promise<SchoolRoster> {
@@ -212,7 +233,7 @@ export async function getSchoolRoster(
     ORDER BY gr.number, u.first_name, u.last_name`,
     [schoolId, CURRENT_ACADEMIC_YEAR, PROGRAM_IDS.NVS, PROGRAM_ATTRIBUTION_ORDER],
   );
-  return processStudents(rows);
+  return withExamRecords(await processStudents(rows));
 }
 
 /**
@@ -287,7 +308,7 @@ export async function getCentreStudents(
     ORDER BY gr.number, u.first_name, u.last_name`,
     [centreId, CURRENT_ACADEMIC_YEAR, PROGRAM_IDS.NVS],
   );
-  return processStudents(rows);
+  return withExamRecords(await processStudents(rows));
 }
 
 export interface RosterFilters {

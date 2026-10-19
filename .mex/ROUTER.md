@@ -26,7 +26,7 @@ edges:
     condition: when working on teacher feedback setup, the feedback form, or its report
   - target: patterns/INDEX.md
     condition: when starting a task — check the pattern index for a matching pattern file
-last_updated: 2026-10-16
+last_updated: 2026-10-19
 ---
 
 # Session Bootstrap
@@ -38,6 +38,16 @@ Then read this file fully before doing anything else in this session.
 ## Current Project State
 
 **Working:**
+- Edit Student has an Exams tab that records competitive-exam registrations per Student
+  (issue #434). Required exams open by Board Stream (PCM → JEE Mains, PCB → NEET, PCMB →
+  both) as removable suggestions; any other exam comes from a curated picker over the `exam`
+  table. Each row holds an application number, a password (hidden, with a Show toggle) and,
+  for JEE Mains only, the sittings applied for. The roster card tags every exam applied for
+  and lists them in an Exam Registrations table whose password column is always a mask — the
+  stored password reaches a browser only through the edit-gated Exams tab. Reads come from
+  Postgres; writes proxy to the DB Service's `/student-exam-record`. Needs DB Service
+  `sessions_applied` (db-service PR, see below) deployed first. See
+  `context/student-addition.md` and `context/data-access.md` §2.
 - Issue #412 (feature branch): the dormant Holistic privacy helper erases Follow-up answers after creating the privacy tombstone and records the actual changed-answer count in a separate immutable audit. Existing tombstones are supported without rewriting their original audit. Requires the companion db-service migration first. The endpoint and action policy remain disabled; no historical data repair or external-process rollout is included. See `context/data-access.md` and `patterns/holistic-privacy-erasure.md`.
 - Issue #361 slice #363: PMU Manager (`pmu_manager`) and PMU Govt School User (`pmu_govt_school_user`) exist in the permission layer, pinned to JNV NVS (ADR 0007): matrix `students` edit + `performance` view only, program context always `[64]`/NVS-only, no centre seats or centre access, `ownsRecord` only for 64, and `canAccessStudent` requires a current NVS batch (`hasCurrentNvsBatchSql`). Admin user management, school page, dashboard and other PMU surfaces are later slices. See `context/permissions.md`.
 - Issue #361 slice #364: login is Google-only (ADR 0007); Dev Login stays in non-prod. `isRetiredToken` (`src/lib/retired-session.ts`, no DB imports) flags JWTs from the retired login by their raw token fields. The `jwt` callback throws on them, and `proxy` treats them as no token and clears the plain, `__Secure-` and chunked session cookies.

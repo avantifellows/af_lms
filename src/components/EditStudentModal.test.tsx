@@ -603,4 +603,36 @@ describe("EditStudentModal", () => {
     expect(await screen.findByText("Cannot update student: missing student record ID")).toBeInTheDocument();
     expect(mockFetch).not.toHaveBeenCalled();
   });
+
+  describe("exams tab", () => {
+    it("sits between Details and Documents", () => {
+      renderModal();
+
+      const tabs = screen.getAllByRole("tab").map((tab) => tab.textContent);
+      expect(tabs).toEqual(["Details", "Exams", "Documents"]);
+    });
+
+    it("loads the student's exam registrations when opened", async () => {
+      const user = userEvent.setup();
+      mockFetch.mockResolvedValue(
+        new Response(JSON.stringify({ exams: [], records: [] }), { status: 200 }),
+      );
+      renderModal();
+
+      await user.click(screen.getByRole("tab", { name: "Exams" }));
+
+      await waitFor(() =>
+        expect(mockFetch).toHaveBeenCalledWith(
+          "/api/students/123/exam-records",
+          expect.objectContaining({ cache: "no-store" }),
+        ),
+      );
+    });
+
+    it("is unreachable for a student with no record id", () => {
+      renderModal({ student: { ...baseStudent, student_pk_id: null } });
+
+      expect(screen.getByRole("tab", { name: "Exams" })).toBeDisabled();
+    });
+  });
 });
