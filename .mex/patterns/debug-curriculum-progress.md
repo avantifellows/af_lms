@@ -15,7 +15,7 @@ edges:
     condition: when the mismatch depends on user role, school scope, program ids, or centre seats
   - target: patterns/debug-access-denied.md
     condition: when the symptom is an empty view, 403, or wrong school/program scope
-last_updated: 2026-08-07
+last_updated: 2026-10-19
 ---
 
 # Debug Curriculum Progress
@@ -41,7 +41,10 @@ must include both explicit `program_ids` and seat-derived `scope.programs`.
    `getResolvedPermission` and `getProgramContextSync(permission).programIds`
    instead of raw `permission.program_ids`.
 6. Check both school-tab APIs and `/curriculum-summary`; both need effective
-   programs, not raw `program_ids`.
+   programs, not raw `program_ids`. The Summary (#426) only counts a Chapter
+   Completion whose IST date is between 1 Apr of the as-of date's academic year
+   and the as-of date, and only for Centres with an Active (or Closed) Plan
+   Assignment for that Grade and academic year; others show "No plan".
 7. Resolve exactly one Centre for the selected School + Program with
    `is_active = true` and `is_physical = true`; zero or multiple matches are a
    configuration error, not a reason to guess or combine Centres.
