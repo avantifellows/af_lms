@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import UrlFilterForm from "@/app/curriculum-summary/UrlFilterForm";
 import PageHeader from "@/components/PageHeader";
 import { Badge, Card } from "@/components/ui";
 import { listCentreCoverage } from "@/lib/curriculum-plan-assignments";
@@ -120,7 +121,13 @@ function PlansFilters({
 }) {
   return (
     <Card className="p-4">
-      <form action="/curriculum-summary/plans" className="flex flex-wrap items-end gap-4">
+      {/* Keyed on the filters so a client-side navigation re-renders the controls from the new URL;
+          UrlFilterForm resets them on page load and bfcache restore. */}
+      <UrlFilterForm
+        key={tabHref(tab, filters)}
+        action="/curriculum-summary/plans"
+        className="flex flex-wrap items-end gap-4"
+      >
         <label className="flex flex-col gap-1 text-sm font-bold text-text-primary">
           Academic year
           <input
@@ -151,7 +158,7 @@ function PlansFilters({
         <div className="ml-auto">
           <NewPlanAction readOnly={readOnly} />
         </div>
-      </form>
+      </UrlFilterForm>
     </Card>
   );
 }

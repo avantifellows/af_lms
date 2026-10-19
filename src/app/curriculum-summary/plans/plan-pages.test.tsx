@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -136,6 +136,26 @@ describe("Curriculum Plans list page", () => {
     );
   });
 
+  // Back / Forward changes the URL under a mounted page; the filter controls must show the new
+  // URL, not what was last typed or picked.
+  it("re-renders the filter controls from the URL when it changes", async () => {
+    const { rerender } = render(await plansPage({ academic_year: "2026-2027", grade: "11" }));
+    fireEvent.change(screen.getByLabelText("Academic year"), { target: { value: "unapplied" } });
+    fireEvent.change(screen.getByLabelText("Grade"), { target: { value: "12" } });
+
+    rerender(await plansPage({ academic_year: "2027-2028" }));
+
+    expect(screen.getByLabelText("Academic year")).toHaveValue("2027-2028");
+    expect(screen.getByLabelText("Grade")).toHaveValue("");
+
+    // A page brought back from the back/forward cache drops edits that were never applied.
+    fireEvent.change(screen.getByLabelText("Academic year"), { target: { value: "unapplied" } });
+    fireEvent.change(screen.getByLabelText("Grade"), { target: { value: "11" } });
+    window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+    expect(screen.getByLabelText("Academic year")).toHaveValue("2027-2028");
+    expect(screen.getByLabelText("Grade")).toHaveValue("");
+  });
+
   it("says when the academic year has no plans", async () => {
     mocks.listCurriculumPlans.mockResolvedValue({ ok: true, plans: [] });
 
@@ -191,7 +211,9 @@ describe("Curriculum Plans list page", () => {
     render(await plansPage(searchParams));
 
     expect(screen.getByText("Schema unavailable")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "LMS curriculum schema unavailable" })).toBeInTheDocument();
     expect(screen.getByText("lms_curriculum_plans.id")).toBeInTheDocument();
+    expect(screen.getByText("Curriculum Plans cannot load until the Curriculum Plan tables are available.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Apply" })).not.toBeInTheDocument();
   });
 });
@@ -258,6 +280,8 @@ describe("assign page", () => {
 
     expect(screen.getByRole("heading", { name: "Assign Curriculum Plan" })).toBeInTheDocument();
     expect(screen.getByText("Schema unavailable")).toBeInTheDocument();
+    expect(screen.getByText("lms_curriculum_plans.id")).toBeInTheDocument();
+    expect(screen.getByText("Curriculum Plans cannot load until the Curriculum Plan tables are available.")).toBeInTheDocument();
   });
 });
 
