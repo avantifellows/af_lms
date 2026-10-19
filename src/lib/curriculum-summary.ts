@@ -25,7 +25,7 @@ import {
   isAcademicYearDate,
   planStatusAsOf,
   primaryExamTrackForChapter,
-  subjectGroupBehind,
+  subjectGroupProgress,
   subjectGroupsForClass,
   SUBJECT_GROUPS,
   type BehindPillTone,
@@ -114,12 +114,6 @@ export interface CurriculumSummarySubjectProgress {
   label: string;
 }
 
-export interface CurriculumSummaryGroupBehind {
-  behind: number;
-  tone: BehindPillTone;
-  label: string;
-}
-
 export interface CurriculumSummaryRow {
   centreId: number;
   centreName: string;
@@ -135,8 +129,9 @@ export interface CurriculumSummaryRow {
   plan: { id: number; title: string; closed: boolean } | null;
   // null = "—": no in-syllabus Chapter of that subject for the class's tracks.
   subjects: Record<CurriculumSummarySubject, CurriculumSummarySubjectProgress | null> | null;
-  // PCM Behind and PCB Behind for plan rows; null = "—": the group doesn't apply to the class.
-  subjectGroups: Record<SubjectGroup, CurriculumSummaryGroupBehind | null> | null;
+  // PCM Behind and PCB Behind for plan rows, with done/due like the subject pills; null = "—":
+  // the group doesn't apply to the class.
+  subjectGroups: Record<SubjectGroup, CurriculumSummarySubjectProgress | null> | null;
   // Plan Chapters whose Chapter Test Status is Overdue; 0 for rows without a plan.
   testsOverdue: number;
   // Set only for No plan rows: Chapters with a Conducted Chapter Test.
@@ -581,20 +576,20 @@ function subjectProgress(
   return { ...progress, ...behindPill(progress.behind) };
 }
 
-// PCM Behind and PCB Behind; a group the Summary Class's tracks don't take is null.
+// PCM Behind and PCB Behind with done/due; a group the Summary Class's tracks don't take is null.
 function subjectGroupsBehind(
   raw: SummaryQueryRow,
   chapters: SummaryChapter[],
   asOf: string
-): Record<SubjectGroup, CurriculumSummaryGroupBehind | null> {
+): Record<SubjectGroup, CurriculumSummarySubjectProgress | null> {
   const classGroups = subjectGroupsForClass(summaryClassTracks(raw.mapped_tracks, chapters));
   return Object.fromEntries(
     SUBJECT_GROUPS.map((group) => {
       if (!classGroups.includes(group)) return [group, null];
-      const behind = subjectGroupBehind(chapters, group, asOf);
-      return [group, { behind, ...behindPill(behind) }];
+      const progress = subjectGroupProgress(chapters, group, asOf);
+      return [group, { ...progress, ...behindPill(progress.behind) }];
     })
-  ) as Record<SubjectGroup, CurriculumSummaryGroupBehind | null>;
+  ) as Record<SubjectGroup, CurriculumSummarySubjectProgress | null>;
 }
 
 function groupBehind(row: CurriculumSummaryRow, group: SubjectGroup): number {

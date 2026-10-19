@@ -11,7 +11,6 @@ import {
   CURRICULUM_SUMMARY_SUBJECTS,
   getCurriculumSummary,
   normalizeCurriculumSummarySearchParams,
-  type CurriculumSummaryGroupBehind,
   type CurriculumSummaryQuery,
   type CurriculumSummaryResult,
   type CurriculumSummaryRow,
@@ -319,12 +318,12 @@ function PlanCells({
     <>
       {CURRICULUM_SUMMARY_SUBJECTS.map((subject) => (
         <td key={subject} data-subject={subject} className={CELL_CLASS_NAME}>
-          <SubjectPill progress={subjects[subject]} />
+          <ProgressPill progress={subjects[subject]} />
         </td>
       ))}
       {SUBJECT_GROUPS.map((group) => (
         <td key={group} data-subject-group={group} className={CELL_CLASS_NAME}>
-          <GroupPill groupBehind={subjectGroups[group]} />
+          <ProgressPill progress={subjectGroups[group]} />
         </td>
       ))}
       <td data-tests-overdue className={`${CELL_CLASS_NAME} font-mono font-bold`}>
@@ -342,20 +341,12 @@ function PlanCells({
   );
 }
 
-function SubjectPill({ progress }: { progress: CurriculumSummarySubjectProgress | null }) {
+// A subject pill or a PCM / PCB Behind cell: "N behind · done/due" or "On track · done/due".
+function ProgressPill({ progress }: { progress: CurriculumSummarySubjectProgress | null }) {
   if (!progress) return <span className="text-text-muted">—</span>;
   return (
     <Badge variant={TONE_BADGE_VARIANTS[progress.tone]} data-tone={progress.tone}>
       {progress.label} · {progress.done}/{progress.due}
-    </Badge>
-  );
-}
-
-function GroupPill({ groupBehind }: { groupBehind: CurriculumSummaryGroupBehind | null }) {
-  if (!groupBehind) return <span className="text-text-muted">—</span>;
-  return (
-    <Badge variant={TONE_BADGE_VARIANTS[groupBehind.tone]} data-tone={groupBehind.tone}>
-      {groupBehind.label}
     </Badge>
   );
 }

@@ -62,7 +62,8 @@ function pill(page: Page, centre: string, subject: string) {
   return summaryRow(page, centre).locator(`[data-subject="${subject}"]`);
 }
 
-// PCM Behind / PCB Behind cell: its label ("—" where the group doesn't apply) and pill tone.
+// PCM Behind / PCB Behind cell: its text ("N behind · done/due" like the subject pills, "—" where
+// the group doesn't apply) and pill tone.
 async function expectGroup(
   page: Page,
   centre: string,
@@ -111,9 +112,9 @@ test.describe("Curriculum Summary", () => {
       "data-tone",
       "red"
     );
-    // PCM = Physics 0 + Chemistry 1 (no Maths); PCB = Physics 0 + Chemistry 1 + Biology 3.
-    await expectGroup(page, "Summary E2E Anand Shared", "PCM", "1 behind", "amber");
-    await expectGroup(page, "Summary E2E Anand Shared", "PCB", "4 behind", "red");
+    // PCM = Physics 2/2 + Chemistry 0/1 (no Maths); PCB = those + Biology 1/4.
+    await expectGroup(page, "Summary E2E Anand Shared", "PCM", "1 behind · 2/3", "amber");
+    await expectGroup(page, "Summary E2E Anand Shared", "PCB", "4 behind · 3/7", "red");
     await expect(shared.locator("[data-plan]")).toHaveText("Summary G11 Active Plan");
     await page.context().close();
   });
@@ -138,16 +139,16 @@ test.describe("Curriculum Summary", () => {
       "data-tone",
       "amber"
     );
-    await expectGroup(page, "Summary E2E Anand Shared", "PCM", "1 behind", "amber");
-    await expectGroup(page, "Summary E2E Anand Shared", "PCB", "3 behind", "red");
+    await expectGroup(page, "Summary E2E Anand Shared", "PCM", "1 behind · 2/3", "amber");
+    await expectGroup(page, "Summary E2E Anand Shared", "PCB", "3 behind · 4/7", "red");
 
     // On 1 Jul only Alpha (30 Jun) and Bio Cells (15 Jun) were due, and both were done.
     await page.goto("/curriculum-summary?as_of=2026-07-01");
     await expect(pill(page, "Summary E2E Anand Shared", "Physics")).toHaveText("On track · 1/1");
     await expect(pill(page, "Summary E2E Anand Shared", "Chemistry")).toHaveText("On track · 0/0");
     await expect(pill(page, "Summary E2E Anand Shared", "Biology")).toHaveText("On track · 1/1");
-    await expectGroup(page, "Summary E2E Anand Shared", "PCM", "On track", "green");
-    await expectGroup(page, "Summary E2E Anand Shared", "PCB", "On track", "green");
+    await expectGroup(page, "Summary E2E Anand Shared", "PCM", "On track · 1/1", "green");
+    await expectGroup(page, "Summary E2E Anand Shared", "PCB", "On track · 2/2", "green");
     await page.context().close();
   });
 
@@ -156,13 +157,13 @@ test.describe("Curriculum Summary", () => {
     await page.goto(`/curriculum-summary?as_of=${AS_OF}`);
 
     // JEE Main rows show PCM only: Anand Main and Vapi Closed have Beta Physics open.
-    await expectGroup(page, "Summary E2E Anand Main", "PCM", "1 behind", "amber");
+    await expectGroup(page, "Summary E2E Anand Main", "PCM", "1 behind · 1/2", "amber");
     await expectGroup(page, "Summary E2E Anand Main", "PCB", "—");
-    await expectGroup(page, "Summary E2E Vapi Closed", "PCM", "1 behind", "amber");
+    await expectGroup(page, "Summary E2E Vapi Closed", "PCM", "1 behind · 1/2", "amber");
     await expectGroup(page, "Summary E2E Vapi Closed", "PCB", "—");
     // A NEET row shows PCB only; everything due at Bhuj Neet is done.
     await expectGroup(page, "Summary E2E Bhuj Neet", "PCM", "—");
-    await expectGroup(page, "Summary E2E Bhuj Neet", "PCB", "On track", "green");
+    await expectGroup(page, "Summary E2E Bhuj Neet", "PCB", "On track · 6/6", "green");
     // No plan rows keep "Not measured" across the subject and group columns.
     await expect(summaryRow(page, "Summary E2E Surat Draft").locator("[data-subject-group]")).toHaveCount(0);
     await expect(summaryRow(page, "Summary E2E Surat Draft")).toContainText("Not measured without an Active plan");
@@ -177,10 +178,10 @@ test.describe("Curriculum Summary", () => {
     // Genetics 2 (Plants was completed on 16 Aug).
     await page.goto("/curriculum-summary?as_of=2026-10-01");
     await expectGroup(page, "Summary E2E Bhuj Neet", "PCM", "—");
-    await expectGroup(page, "Summary E2E Bhuj Neet", "PCB", "1 behind", "amber");
-    await expectGroup(page, "Summary E2E Anand Shared", "PCM", "1 behind", "amber");
-    await expectGroup(page, "Summary E2E Anand Shared", "PCB", "3 behind", "red");
-    await expectGroup(page, "Summary E2E Anand Main", "PCM", "1 behind", "amber");
+    await expectGroup(page, "Summary E2E Bhuj Neet", "PCB", "1 behind · 6/7", "amber");
+    await expectGroup(page, "Summary E2E Anand Shared", "PCM", "1 behind · 3/4", "amber");
+    await expectGroup(page, "Summary E2E Anand Shared", "PCB", "3 behind · 5/8", "red");
+    await expectGroup(page, "Summary E2E Anand Main", "PCM", "1 behind · 1/2", "amber");
     // PCM: Anand Shared 1 + Anand Main 1 + Vapi Closed 1; PCB: Anand Shared 3 + Bhuj Neet 1.
     await expectChaptersBehind(page, "3", "4");
     await page.context().close();
@@ -273,7 +274,7 @@ test.describe("Curriculum Summary", () => {
     );
     await expect(page.getByTestId("summary-centres-on-plan")).toHaveText("1/1");
     await expectChaptersBehind(page, "1", "0");
-    await expectGroup(page, "Summary E2E Anand Main", "PCM", "1 behind", "amber");
+    await expectGroup(page, "Summary E2E Anand Main", "PCM", "1 behind · 1/2", "amber");
     await expectGroup(page, "Summary E2E Anand Main", "PCB", "—");
     // No Grade 12 chapter-test sessions: Limits (test date 2 Jul) and Vectors (2 Aug) overdue.
     await expect(page.getByTestId("summary-tests-overdue")).toHaveText("2");
@@ -1080,8 +1081,8 @@ test.describe("Curriculum Summary shared JEE Advanced + NEET class", () => {
     await expect(pill(adminPage, ADVANCED_CENTRE, "Biology")).toHaveText("1 behind · 0/1");
     await expect(pill(adminPage, ADVANCED_CENTRE, "Chemistry")).toHaveText("—");
     await expect(pill(adminPage, ADVANCED_CENTRE, "Maths")).toHaveText("—");
-    await expectGroup(adminPage, ADVANCED_CENTRE, "PCM", "On track", "green");
-    await expectGroup(adminPage, ADVANCED_CENTRE, "PCB", "1 behind", "amber");
+    await expectGroup(adminPage, ADVANCED_CENTRE, "PCM", "On track · 1/1", "green");
+    await expectGroup(adminPage, ADVANCED_CENTRE, "PCB", "1 behind · 1/2", "amber");
     await expect(adminPage.getByTestId("summary-centres-on-plan")).toHaveText("1/1");
     await expectChaptersBehind(adminPage, "0", "1");
     // No sessions: Optics (test 2 Jul) and Biology (16 Jul) are both past the 7-day grace.

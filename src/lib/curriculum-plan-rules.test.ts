@@ -17,7 +17,7 @@ import {
   primaryExamTrackForChapter,
   shiftAcademicYearForward,
   shiftDateForwardOneYear,
-  subjectGroupBehind,
+  subjectGroupProgress,
   subjectGroupsForClass,
   subjectGroupsForSubject,
   uncoveredExamTracks,
@@ -367,10 +367,12 @@ describe("PCM Behind and PCB Behind", () => {
   ];
 
   it.each([
-    ["PCM", 4], // Physics 1 + Chemistry 1 + Maths 1 + Mathematics 1
-    ["PCB", 3], // Physics 1 + Chemistry 1 + Biology 1
-  ] as const)("counts %s Behind with the Chapters Behind rule", (group, expected) => {
-    expect(subjectGroupBehind(chapters, group, "2026-07-10")).toBe(expected);
+    // Due: Physics 2 + Chemistry 1 + Maths 1 + Mathematics 1; done: Physics 1.
+    ["PCM", { due: 5, done: 1, behind: 4 }],
+    // Due: Physics 2 + Chemistry 1 + Biology 1; done: Physics 1.
+    ["PCB", { due: 4, done: 1, behind: 3 }],
+  ] as const)("counts %s done/due and Behind with the Chapters Behind rule", (group, expected) => {
+    expect(subjectGroupProgress(chapters, group, "2026-07-10")).toEqual(expected);
   });
 });
 

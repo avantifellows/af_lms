@@ -260,10 +260,10 @@ describe("getCurriculumSummary", () => {
           Maths: null,
           Biology: { due: 1, done: 0, behind: 1, tone: "amber", label: "1 behind" },
         },
-        // PCM = Physics 1 + Chemistry 0; PCB = Physics 1 + Chemistry 0 + Biology 1.
+        // PCM = Physics + Chemistry (2/3 done); PCB = Physics + Chemistry + Biology (2/4 done).
         subjectGroups: {
-          PCM: { behind: 1, tone: "amber", label: "1 behind" },
-          PCB: { behind: 2, tone: "amber", label: "2 behind" },
+          PCM: { due: 3, done: 2, behind: 1, tone: "amber", label: "1 behind" },
+          PCB: { due: 4, done: 2, behind: 2, tone: "amber", label: "2 behind" },
         },
         // Chapter 2 (test date 1 Aug) and Chapter 3 (16 Jul) have no session.
         testsOverdue: 2,
@@ -511,14 +511,15 @@ describe("PCM Behind and PCB Behind", () => {
     expect(groups && { PCM: groups.PCM?.behind ?? null, PCB: groups.PCB?.behind ?? null }).toEqual(expected);
   });
 
-  it("uses the Behind pill tones and labels", async () => {
+  it("uses the Behind pill tones and labels with done/due", async () => {
     routeQueries({ summary: [raw(11, { chapters: MIXED, mapped_tracks: ["jee_main", "neet"] })] });
 
     const result = await getCurriculumSummary(ADMIN, query());
 
+    // PCM: Physics, Mathematics, Chemistry (done) due; PCB: Physics, Biology ×2, Chemistry.
     expect(result.ok && result.rows[0].subjectGroups).toEqual({
-      PCM: { behind: 2, tone: "amber", label: "2 behind" },
-      PCB: { behind: 3, tone: "red", label: "3 behind" },
+      PCM: { due: 3, done: 1, behind: 2, tone: "amber", label: "2 behind" },
+      PCB: { due: 4, done: 1, behind: 3, tone: "red", label: "3 behind" },
     });
   });
 

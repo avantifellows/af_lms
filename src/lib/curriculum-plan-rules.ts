@@ -230,7 +230,7 @@ export function behindPill(behind: number): { tone: BehindPillTone; label: strin
   return { tone: behind <= 2 ? "amber" : "red", label: `${behind} behind` };
 }
 
-// Summary rows total Chapters Behind per subject group: PCM Behind and PCB Behind.
+// Summary rows measure each subject group: PCM Behind and PCB Behind, with done/due.
 export const SUBJECT_GROUPS = ["PCM", "PCB"] as const;
 export type SubjectGroup = (typeof SUBJECT_GROUPS)[number];
 
@@ -262,14 +262,14 @@ export function subjectGroupsForClass(classTracks: readonly ExamTrack[]): Subjec
   );
 }
 
-// Chapters Behind over the group's subjects, by the same rule as `chapterProgress`.
-export function subjectGroupBehind(
+// Due / Done / Behind over the group's subjects' Chapters, by the `chapterProgress` rule.
+export function subjectGroupProgress(
   chapters: readonly { subject: string; dueDate: string | null; completedOn: string | null }[],
   group: SubjectGroup,
   asOf: string,
-): number {
+): { due: number; done: number; behind: number } {
   const groupChapters = chapters.filter((chapter) => subjectGroupsForSubject(chapter.subject).includes(group));
-  return chapterProgress(groupChapters, asOf).behind;
+  return chapterProgress(groupChapters, asOf);
 }
 
 // A Centre + Grade's mapped tracks that a plan cannot measure: tracks the plan doesn't serve,

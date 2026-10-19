@@ -64,8 +64,9 @@ function row(overrides: Partial<CurriculumSummaryRow>): CurriculumSummaryRow {
       Biology: { due: 4, done: 0, behind: 4, tone: "red", label: "4 behind" },
     },
     subjectGroups: {
-      PCM: { behind: 1, tone: "amber", label: "1 behind" },
-      PCB: { behind: 5, tone: "red", label: "5 behind" },
+      // PCM = Physics + Chemistry; PCB = Physics + Chemistry + Biology.
+      PCM: { due: 3, done: 2, behind: 1, tone: "amber", label: "1 behind" },
+      PCB: { due: 7, done: 2, behind: 5, tone: "red", label: "5 behind" },
     },
     testsOverdue: 2,
     testsConducted: null,
@@ -86,7 +87,7 @@ function summary(overrides: Partial<Extract<CurriculumSummaryResult, { ok: true 
         region: null,
         tracksLabel: "JEE Main",
         plan: { id: 901, title: "Old Plan", closed: true },
-        subjectGroups: { PCM: { behind: 0, tone: "green", label: "On track" }, PCB: null },
+        subjectGroups: { PCM: { due: 2, done: 2, behind: 0, tone: "green", label: "On track" }, PCB: null },
       }),
       row({
         centreId: 3,
@@ -194,9 +195,10 @@ describe("Curriculum Summary page", () => {
     expect(plan.querySelector('[data-subject="Physics"]')).toHaveTextContent("1 behind · 1/2");
     expect(plan.querySelector('[data-subject="Physics"] [data-tone]')).toHaveAttribute("data-tone", "amber");
     expect(plan.querySelector('[data-subject="Maths"]')).toHaveTextContent("—");
-    expect(plan.querySelector('[data-subject-group="PCM"]')).toHaveTextContent("1 behind");
+    // Group cells read like the subject pills: Behind, then done/due.
+    expect(plan.querySelector('[data-subject-group="PCM"]')).toHaveTextContent(/^1 behind · 2\/3$/);
     expect(plan.querySelector('[data-subject-group="PCM"] [data-tone]')).toHaveAttribute("data-tone", "amber");
-    expect(plan.querySelector('[data-subject-group="PCB"]')).toHaveTextContent("5 behind");
+    expect(plan.querySelector('[data-subject-group="PCB"]')).toHaveTextContent(/^5 behind · 2\/7$/);
     expect(plan.querySelector('[data-subject-group="PCB"] [data-tone]')).toHaveAttribute("data-tone", "red");
     expect(plan.querySelector("[data-tests-overdue]")).toHaveTextContent("2");
     expect(plan.querySelector("[data-plan]")).toHaveTextContent("G11 Plan");
@@ -204,7 +206,7 @@ describe("Curriculum Summary page", () => {
 
     const closed = summaryRow("Bhuj Closed");
     expect(closed.querySelector("[data-plan-closed]")).toHaveTextContent("Closed");
-    expect(closed.querySelector('[data-subject-group="PCM"]')).toHaveTextContent("On track");
+    expect(closed.querySelector('[data-subject-group="PCM"]')).toHaveTextContent(/^On track · 2\/2$/);
     expect(closed.querySelector('[data-subject-group="PCM"] [data-tone]')).toHaveAttribute("data-tone", "green");
     // PCB doesn't apply to a JEE Main class.
     expect(closed.querySelector('[data-subject-group="PCB"]')).toHaveTextContent("—");
