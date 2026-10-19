@@ -414,7 +414,7 @@ function PlanCells({
 }
 
 // A subject pill or a PCM / PCB Behind cell: the pill reads "N behind" or "On track", with
-// "done/due done" under it. Screen readers get one phrase instead of the two fragments.
+// "done/due done" centred under it. Screen readers get one phrase instead of the two fragments.
 function ProgressPill({ progress }: { progress: CurriculumSummarySubjectProgress | null }) {
   if (!progress) return <span className="text-text-muted">—</span>;
   const chapters = progress.due === 1 ? "chapter" : "chapters";
@@ -423,7 +423,7 @@ function ProgressPill({ progress }: { progress: CurriculumSummarySubjectProgress
       <span data-progress-text className="sr-only">
         {`${progress.label}, ${progress.done} of ${progress.due} due ${chapters} done`}
       </span>
-      <span aria-hidden="true" className="flex flex-col items-start gap-1">
+      <span aria-hidden="true" className="inline-flex flex-col items-center gap-1">
         <Badge variant={TONE_BADGE_VARIANTS[progress.tone]} data-tone={progress.tone} className="whitespace-nowrap">
           {progress.label}
         </Badge>
