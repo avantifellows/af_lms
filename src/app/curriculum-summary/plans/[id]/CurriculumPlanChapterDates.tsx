@@ -10,6 +10,7 @@ import type {
   CurriculumPlanError,
   CurriculumPlanWarning,
 } from "@/lib/curriculum-plans";
+import ChapterLabel from "../../ChapterLabel";
 import PlanErrorItems from "../PlanErrorItems";
 import { planErrors, planRequest } from "../plan-requests";
 
@@ -273,8 +274,7 @@ function ChapterDatesRow({
   return (
     <tr data-plan-chapter-row>
       <td className="px-4 py-3">
-        <span className="font-mono text-xs text-text-muted">{chapter.chapterCode}</span>{" "}
-        <span className="font-bold text-text-primary">{chapter.chapterName}</span>
+        <ChapterLabel code={chapter.chapterCode} name={chapter.chapterName} />
       </td>
       <td className="px-4 py-3">
         <input

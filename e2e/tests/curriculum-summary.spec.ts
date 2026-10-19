@@ -927,6 +927,77 @@ test.describe("Curriculum Summary chapter timeline", () => {
     await page.context().close();
   });
 
+  test("a column header sorts the Chapters server-side, reverses on the next click and survives a subject tab", async ({
+    browser,
+  }) => {
+    const page = await summaryPmPage(browser);
+    const base = "/curriculum-summary/centres/9000812?grade=11&as_of=2026-08-20";
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto(base);
+    // At 1440px neither the page nor the table scrolls sideways.
+    const overflow = await page.evaluate(() => {
+      const card = document.querySelector("table")?.parentElement;
+      return {
+        page: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        table: card ? card.scrollWidth - card.clientWidth : -1,
+      };
+    });
+    expect(overflow).toEqual({ page: 0, table: 0 });
+    const rowOrder = () =>
+      page.locator("[data-timeline-row]").evaluateAll((rows) => rows.map((row) => row.getAttribute("data-chapter")));
+
+    // Anand Shared on 20 Aug. Overdue: Bonding (due 15 Jul) 36 days, Animals (10 Aug) 10, Genetics
+    // (12 Aug) 8. Done late: Plants (due 10 Jul, completed 16 Aug) 37 days. Done on time, in due
+    // order: Cells, Alpha, Beta, Thermo (completed 1 Aug, due 30 Sep). Undated Organic and Ecology
+    // are Not in plan and stay last.
+    const status = page.getByRole("columnheader", { name: "Status", exact: true });
+    await status.getByRole("link").click();
+    await expect(page).toHaveURL(`${base}&sort=status&dir=desc`);
+    await expect(status).toHaveAttribute("aria-sort", "descending");
+    expect(await rowOrder()).toEqual([
+      "Summary Chem Bonding",
+      "Summary Bio Animals",
+      "Summary Bio Genetics",
+      "Summary Bio Plants",
+      "Summary Bio Cells",
+      "Fixture Alpha Physics",
+      "Fixture Beta Physics",
+      "Summary Chem Thermo",
+      "Summary Chem Organic",
+      "Summary Bio Ecology",
+    ]);
+    // The as-of line belongs to the due-date order only.
+    await expect(page.locator("[data-as-of-marker]")).toHaveCount(0);
+
+    await status.getByRole("link").click();
+    await expect(page).toHaveURL(`${base}&sort=status&dir=asc`);
+    await expect(status).toHaveAttribute("aria-sort", "ascending");
+    expect(await rowOrder()).toEqual([
+      "Summary Bio Cells",
+      "Fixture Alpha Physics",
+      "Fixture Beta Physics",
+      "Summary Chem Thermo",
+      "Summary Bio Plants",
+      "Summary Bio Genetics",
+      "Summary Bio Animals",
+      "Summary Chem Bonding",
+      "Summary Chem Organic",
+      "Summary Bio Ecology",
+    ]);
+
+    await page.locator('[data-subject-tab="Biology"]').click();
+    await expect(page).toHaveURL(`${base}&subject=Biology&sort=status&dir=asc`);
+    await expect(status).toHaveAttribute("aria-sort", "ascending");
+    expect(await rowOrder()).toEqual([
+      "Summary Bio Cells",
+      "Summary Bio Plants",
+      "Summary Bio Genetics",
+      "Summary Bio Animals",
+      "Summary Bio Ecology",
+    ]);
+    await page.context().close();
+  });
+
   test("the header counts the class and subject tabs carry the Summary pills", async ({ browser }) => {
     const page = await summaryPmPage(browser);
     await page.goto(`/curriculum-summary/centres/9000812?grade=11&as_of=${AS_OF}`);

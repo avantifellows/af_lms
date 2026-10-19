@@ -15,6 +15,17 @@ export const TONE_BADGE_VARIANTS: Record<BehindPillTone, BadgeVariant> = {
 
 export const PAGE_CONTAINER_CLASS_NAME = "w-full px-4 py-3 sm:px-6 lg:px-8";
 
+// Table layout shared by the Summary and the chapter timeline (curriculum owner feedback): key
+// columns are wide and centred, the rest compact. Table cells ignore max-width, so width caps sit
+// on the cell contents.
+export const CELL_CLASS_NAME = "py-3 align-top";
+export const COMPACT_CELL_CLASS_NAME = `${CELL_CLASS_NAME} px-2 text-xs`;
+// A number cell: centred, never wrapping, in the Summary's number font.
+export const NUMBER_CELL_CLASS_NAME = `${CELL_CLASS_NAME} whitespace-nowrap px-2 text-center font-mono`;
+// Header classes: a narrow centred number column, and a compact left-aligned one.
+export const NUMBER_COLUMN_CLASS_NAME = "w-20 px-2 text-center";
+export const COMPACT_COLUMN_CLASS_NAME = "px-2 text-left";
+
 const FIELD_LABEL_CLASS_NAME =
   "flex flex-col gap-1 text-xs font-bold uppercase tracking-wide text-text-muted";
 const FIELD_CLASS_NAME =
@@ -131,21 +142,6 @@ export function ApplyButton() {
 }
 
 const HEADER_TEXT_CLASS_NAME = "py-3 text-xs font-bold uppercase tracking-wide text-text-muted";
-const TABLE_HEADER_CLASS_NAME = `px-4 text-left ${HEADER_TEXT_CLASS_NAME}`;
-
-export function TableHead({ headers }: { headers: readonly string[] }) {
-  return (
-    <thead className="bg-bg-muted">
-      <tr>
-        {headers.map((header) => (
-          <th key={header} scope="col" className={TABLE_HEADER_CLASS_NAME}>
-            {header}
-          </th>
-        ))}
-      </tr>
-    </thead>
-  );
-}
 
 export interface SortableHeader {
   label: string;
@@ -158,6 +154,29 @@ export interface SortableHeader {
 }
 
 const ARIA_SORT = { asc: "ascending", desc: "descending" } as const;
+
+type SortDirection = keyof typeof ARIA_SORT;
+
+export interface SortableColumn<K extends string> {
+  label: string;
+  sortKey: K;
+  className?: string;
+}
+
+// Every header links to its sort: the sorted column's link reverses its direction, any other
+// column's starts in its first-click direction. `href` builds the link, keeping the page's params.
+export function sortableHeaders<K extends string>(
+  columns: readonly SortableColumn<K>[],
+  sort: { key: K; dir: SortDirection } | null,
+  firstDirection: (key: K) => SortDirection,
+  href: (sort: { key: K; dir: SortDirection }) => string
+): SortableHeader[] {
+  return columns.map(({ label, sortKey: key, className }) => {
+    const direction = sort?.key === key ? sort.dir : null;
+    const nextDirection = direction ? (direction === "asc" ? "desc" : "asc") : firstDirection(key);
+    return { label, direction, className, href: href({ key, dir: nextDirection }) };
+  });
+}
 
 // A table head whose every header is a sort link; the sorted column shows ▲ / ▼ and `aria-sort`.
 export function SortableTableHead({ headers }: { headers: readonly SortableHeader[] }) {

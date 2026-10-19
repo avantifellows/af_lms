@@ -377,6 +377,143 @@ describe("Chapter timeline page", () => {
     expect(screen.getByTestId("timeline-tests-overdue")).toHaveTextContent("—");
   });
 
+  it("lists the columns in order with Status and Chapter test centred and never wrapping", async () => {
+    await renderPage();
+
+    expect(screen.getAllByRole("columnheader").map((header) => header.textContent)).toEqual([
+      "Chapter",
+      "Subject",
+      "Due",
+      "Completed",
+      "Status",
+      "Chapter test",
+      "Hours",
+      "Prescribed",
+      "Cancelled",
+      "Doubt solving",
+    ]);
+    const cells = [...timelineRow("Motion").querySelectorAll("td")].map((cell) => cell.textContent);
+    expect(cells).toEqual([
+      "P1 Motion",
+      "Physics",
+      "30 Jun 2026",
+      "28 Jun 2026",
+      "Done",
+      "Conducted 2 Jul 2026",
+      "1h 30m",
+      "2h",
+      "1",
+      "0h",
+    ]);
+    for (const selector of ["[data-status]", "[data-test-status]"]) {
+      expect(timelineRow("Bonding").querySelector(selector)).toHaveClass("whitespace-nowrap", "text-center");
+    }
+    expect(screen.getByRole("columnheader", { name: "Status" })).toHaveClass("text-center");
+    expect(timelineRow("Motion").querySelector("[data-hours]")).toHaveClass("font-mono", "text-center", "whitespace-nowrap");
+  });
+
+  it("prefixes each Chapter's name with its code, as the Plan editor does", async () => {
+    await renderPage();
+
+    const label = timelineRow("Motion").querySelector("[data-chapter-label]") as HTMLElement;
+    expect(label.querySelector("[data-chapter-code]")).toHaveTextContent("P1");
+    expect(label.querySelector("[data-chapter-code]")).toHaveClass("font-mono", "text-xs", "text-text-muted");
+    expect(within(label).getByText("Motion")).toHaveClass("font-bold");
+    expect(label.querySelector("[title]")).toHaveAttribute("title", "P1 Motion");
+  });
+
+  it("links every header to its first-click sort, keeping Grade, as-of, window and subject", async () => {
+    mockGetChapterTimeline.mockResolvedValue({ ok: true, timeline: timeline({ hoursWindow: "7d" }) });
+    await renderPage({ hours: "7d", subject: "Biology" });
+
+    const base = "/curriculum-summary/centres/7?grade=11&as_of=2026-08-15&hours=7d&subject=Biology";
+    const expected: [string, string][] = [
+      ["Chapter", "sort=chapter&dir=asc"],
+      ["Subject", "sort=subject&dir=asc"],
+      ["Due", "sort=due&dir=asc"],
+      ["Completed", "sort=completed&dir=asc"],
+      ["Status", "sort=status&dir=desc"],
+      ["Chapter test", "sort=test&dir=desc"],
+      ["Hours", "sort=hours&dir=desc"],
+      ["Prescribed", "sort=prescribed&dir=desc"],
+      ["Cancelled", "sort=cancelled&dir=desc"],
+      ["Doubt solving", "sort=doubt_solving&dir=desc"],
+    ];
+    for (const [label, sort] of expected) {
+      const header = screen.getByRole("columnheader", { name: label });
+      expect(header).not.toHaveAttribute("aria-sort");
+      expect(within(header).getByRole("link")).toHaveAttribute("href", `${base}&${sort}`);
+    }
+  });
+
+  it("sorts by the URL's column, marks it with aria-sort and an arrow, and its link reverses it", async () => {
+    await renderPage({ sort: "status", dir: "desc" });
+
+    const header = screen.getByRole("columnheader", { name: /Status/ });
+    expect(header).toHaveAttribute("aria-sort", "descending");
+    expect(header).toHaveTextContent("Status▼");
+    expect(within(header).getByRole("link")).toHaveAttribute(
+      "href",
+      "/curriculum-summary/centres/7?grade=11&as_of=2026-08-15&sort=status&dir=asc"
+    );
+    // Worst first; Not in plan last. The as-of line only belongs to the due-date order.
+    const order = [...document.querySelectorAll("[data-timeline-row]")].map((row) => row.getAttribute("data-chapter"));
+    expect(order).toEqual(["Cells", "Bonding", "Motion", "Genetics", "Ecology"]);
+    expect(document.querySelector("[data-as-of-marker]")).toBeNull();
+
+    document.body.innerHTML = "";
+    await renderPage({ sort: "status", dir: "asc" });
+    expect(screen.getByRole("columnheader", { name: /Status/ })).toHaveAttribute("aria-sort", "ascending");
+    expect(screen.getByRole("columnheader", { name: /Status/ })).toHaveTextContent("Status▲");
+    expect(
+      [...document.querySelectorAll("[data-timeline-row]")].map((row) => row.getAttribute("data-chapter"))
+    ).toEqual(["Genetics", "Motion", "Bonding", "Cells", "Ecology"]);
+  });
+
+  it("keeps the sort in subject tabs, window and Grade links and the As of form", async () => {
+    mockGetChapterTimeline.mockResolvedValue({ ok: true, timeline: timeline({ grades: [11, 12] }) });
+    await renderPage({ sort: "test", dir: "asc", subject: "Biology" });
+
+    // Biology only, best Chapter Test first.
+    expect(
+      [...document.querySelectorAll("[data-timeline-row]")].map((row) => row.getAttribute("data-chapter"))
+    ).toEqual(["Genetics", "Ecology", "Cells"]);
+    const tabs = screen.getByRole("navigation", { name: "Subject" });
+    expect(within(tabs).getByRole("link", { name: "All" })).toHaveAttribute(
+      "href",
+      "/curriculum-summary/centres/7?grade=11&as_of=2026-08-15&sort=test&dir=asc"
+    );
+    const windows = screen.getByRole("navigation", { name: "Hours window" });
+    expect(within(windows).getByRole("link", { name: "Last 30 days" })).toHaveAttribute(
+      "href",
+      "/curriculum-summary/centres/7?grade=11&as_of=2026-08-15&hours=30d&subject=Biology&sort=test&dir=asc"
+    );
+    expect(screen.getByRole("link", { name: "Grade 12" })).toHaveAttribute(
+      "href",
+      "/curriculum-summary/centres/7?grade=12&as_of=2026-08-15&sort=test&dir=asc"
+    );
+    expect(document.querySelector('input[type="hidden"][name="sort"]')).toHaveValue("test");
+    expect(document.querySelector('input[type="hidden"][name="dir"]')).toHaveValue("asc");
+  });
+
+  it("ignores an unknown sort column and falls back to the first click for an unknown direction", async () => {
+    await renderPage({ sort: "centre", dir: "asc" });
+    expect(
+      [...document.querySelectorAll("[data-timeline-row]")].map((row) => row.getAttribute("data-chapter"))
+    ).toEqual(["Motion", "Bonding", "Cells", "Genetics", "Ecology"]);
+    expect(document.querySelector("[aria-sort]")).toBeNull();
+    expect(document.querySelector("[data-as-of-marker]")).not.toBeNull();
+    expect(document.querySelector('input[type="hidden"][name="sort"]')).toBeNull();
+
+    document.body.innerHTML = "";
+    await renderPage({ sort: "hours", dir: "up" });
+    expect(screen.getByRole("columnheader", { name: /Hours/ })).toHaveAttribute("aria-sort", "descending");
+    // Genetics has no hours; the rest tie at 1h 30m and keep the default order.
+    expect(
+      [...document.querySelectorAll("[data-timeline-row]")].map((row) => row.getAttribute("data-chapter"))
+    ).toEqual(["Motion", "Bonding", "Cells", "Ecology", "Genetics"]);
+  });
+
   it("shows the Summary's message instead of metrics for a class it can't measure", async () => {
     mockGetChapterTimeline.mockResolvedValue({
       ok: true,

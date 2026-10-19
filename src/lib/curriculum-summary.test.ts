@@ -15,10 +15,15 @@ vi.mock("./curriculum-schema", () => ({
 vi.mock("./curriculum-chapter-tests", () => ({ loadChapterTestSessions: mockLoadSessions }));
 
 import {
+  defaultChapterTimelineSortDirection,
   getChapterTimeline,
   getCurriculumSummary,
   normalizeCurriculumSummarySearchParams,
+  parseChapterTimelineSort,
   sortSummaryRows,
+  sortTimelineChapters,
+  type ChapterTimelineChapter,
+  type ChapterTimelineSortKey,
   type CurriculumSummaryQuery,
   type CurriculumSummaryRow,
   type CurriculumSummarySortKey,
@@ -1113,4 +1118,160 @@ describe("getChapterTimeline", () => {
     expect(result.timeline.subjects).toEqual([]);
     expect(mockQuery.mock.calls.some(([sql]) => String(sql).includes(ACTIVITY_TABLE))).toBe(false);
   });
+});
+
+describe("sortTimelineChapters", () => {
+  // `id` doubles as the Chapter's place in the default order (due date, then syllabus order).
+  function timelineChapter(id: number, overrides: Partial<ChapterTimelineChapter> = {}): ChapterTimelineChapter {
+    return {
+      chapterId: id,
+      code: `C${id}`,
+      name: `Chapter ${id}`,
+      subject: "Physics",
+      dueDate: null,
+      completedOn: null,
+      status: { kind: "not_in_plan" },
+      testStatus: { kind: "not_due" },
+      taughtMinutes: 0,
+      prescribedMinutes: 0,
+      cancellations: 0,
+      doubtSolvingMinutes: 0,
+      ...overrides,
+    };
+  }
+  const ids = (chapters: ChapterTimelineChapter[]) => chapters.map((chapter) => chapter.chapterId);
+
+  it("keeps the default order without a sort", () => {
+    const chapters = [timelineChapter(2), timelineChapter(1)];
+    expect(sortTimelineChapters(chapters, null)).toBe(chapters);
+  });
+
+  it("sorts Chapter and Subject A–Z case-insensitively, reversing on desc, with ties in default order", () => {
+    const chapters = [
+      timelineChapter(1, { name: "motion", subject: "Physics" }),
+      timelineChapter(2, { name: "Atoms", subject: "Chemistry" }),
+      timelineChapter(3, { name: "Cells", subject: "Biology" }),
+      timelineChapter(4, { name: "Bonding", subject: "Chemistry" }),
+    ];
+    expect(ids(sortTimelineChapters(chapters, { key: "chapter", dir: "asc" }))).toEqual([2, 4, 3, 1]);
+    expect(ids(sortTimelineChapters(chapters, { key: "chapter", dir: "desc" }))).toEqual([1, 3, 4, 2]);
+    expect(ids(sortTimelineChapters(chapters, { key: "subject", dir: "asc" }))).toEqual([3, 2, 4, 1]);
+    expect(ids(sortTimelineChapters(chapters, { key: "subject", dir: "desc" }))).toEqual([1, 2, 4, 3]);
+  });
+
+  it.each<[ChapterTimelineSortKey, keyof ChapterTimelineChapter]>([
+    ["due", "dueDate"],
+    ["completed", "completedOn"],
+  ])("sorts %s earliest first with blanks last in both directions", (key, field) => {
+    const chapters = [
+      timelineChapter(1, { [field]: null }),
+      timelineChapter(2, { [field]: "2026-07-15" }),
+      timelineChapter(3, { [field]: "2026-06-30" }),
+      timelineChapter(4, { [field]: null }),
+      timelineChapter(5, { [field]: "2026-12-01" }),
+    ];
+    expect(ids(sortTimelineChapters(chapters, { key, dir: "asc" }))).toEqual([3, 2, 5, 1, 4]);
+    expect(ids(sortTimelineChapters(chapters, { key, dir: "desc" }))).toEqual([5, 2, 3, 1, 4]);
+  });
+
+  it.each<[ChapterTimelineSortKey, keyof ChapterTimelineChapter]>([
+    ["hours", "taughtMinutes"],
+    ["prescribed", "prescribedMinutes"],
+    ["cancelled", "cancellations"],
+    ["doubt_solving", "doubtSolvingMinutes"],
+  ])("sorts %s highest first on desc, zero being a value", (key, field) => {
+    const chapters = [
+      timelineChapter(1, { [field]: 0 }),
+      timelineChapter(2, { [field]: 90 }),
+      timelineChapter(3, { [field]: 120 }),
+      timelineChapter(4, { [field]: 90 }),
+    ];
+    expect(ids(sortTimelineChapters(chapters, { key, dir: "desc" }))).toEqual([3, 2, 4, 1]);
+    expect(ids(sortTimelineChapters(chapters, { key, dir: "asc" }))).toEqual([1, 2, 4, 3]);
+  });
+
+  it("sorts Status worst first: Overdue then Done late by most days, Done, Not due, Not in plan last", () => {
+    const chapters = [
+      timelineChapter(1, { status: { kind: "done" } }),
+      timelineChapter(2, { status: { kind: "overdue", days: 3 } }),
+      timelineChapter(3, { status: { kind: "not_in_plan" } }),
+      timelineChapter(4, { status: { kind: "done_late", days: 2 } }),
+      timelineChapter(5, { status: { kind: "not_due" } }),
+      timelineChapter(6, { status: { kind: "overdue", days: 36 } }),
+      timelineChapter(7, { status: { kind: "done_late", days: 40 } }),
+      timelineChapter(8, { status: { kind: "done" } }),
+      timelineChapter(9, { status: { kind: "not_in_plan" } }),
+    ];
+    expect(ids(sortTimelineChapters(chapters, { key: "status", dir: "desc" }))).toEqual([
+      6, 2, 7, 4, 1, 8, 5, 3, 9,
+    ]);
+    // Reversed, except that Not in plan stays last and ties keep the default order.
+    expect(ids(sortTimelineChapters(chapters, { key: "status", dir: "asc" }))).toEqual([
+      5, 1, 8, 4, 7, 2, 6, 3, 9,
+    ]);
+  });
+
+  it("sorts Chapter Test worst first: Overdue, Scheduled, Not due, Conducted", () => {
+    const chapters = [
+      timelineChapter(1, { testStatus: { kind: "conducted", conductedOn: "2026-07-02" } }),
+      timelineChapter(2, { testStatus: { kind: "not_due" } }),
+      timelineChapter(3, { testStatus: { kind: "overdue" } }),
+      timelineChapter(4, { testStatus: { kind: "scheduled" } }),
+      timelineChapter(5, { testStatus: { kind: "overdue" } }),
+    ];
+    expect(ids(sortTimelineChapters(chapters, { key: "test", dir: "desc" }))).toEqual([3, 5, 4, 2, 1]);
+    expect(ids(sortTimelineChapters(chapters, { key: "test", dir: "asc" }))).toEqual([1, 2, 4, 3, 5]);
+  });
+
+  it("does not change its input", () => {
+    const chapters = [timelineChapter(1, { taughtMinutes: 0 }), timelineChapter(2, { taughtMinutes: 60 })];
+    sortTimelineChapters(chapters, { key: "hours", dir: "desc" });
+    expect(ids(chapters)).toEqual([1, 2]);
+  });
+});
+
+describe("parseChapterTimelineSort", () => {
+  it("first clicks: A–Z text, earliest dates, worst Status and Chapter Test, highest numbers", () => {
+    const keys: ChapterTimelineSortKey[] = [
+      "chapter",
+      "subject",
+      "due",
+      "completed",
+      "status",
+      "test",
+      "hours",
+      "prescribed",
+      "cancelled",
+      "doubt_solving",
+    ];
+    expect(keys.map(defaultChapterTimelineSortDirection)).toEqual([
+      "asc",
+      "asc",
+      "asc",
+      "asc",
+      "desc",
+      "desc",
+      "desc",
+      "desc",
+      "desc",
+      "desc",
+    ]);
+  });
+
+  it("keeps a known column and direction", () => {
+    expect(parseChapterTimelineSort("status", "asc")).toEqual({ key: "status", dir: "asc" });
+    expect(parseChapterTimelineSort("due", "desc")).toEqual({ key: "due", dir: "desc" });
+  });
+
+  it("falls back to the column's first click for an unknown or missing direction", () => {
+    expect(parseChapterTimelineSort("status", "sideways")).toEqual({ key: "status", dir: "desc" });
+    expect(parseChapterTimelineSort("chapter", undefined)).toEqual({ key: "chapter", dir: "asc" });
+  });
+
+  it.each([[undefined], [""], ["centre"], ["toString"], ["__proto__"]])(
+    "ignores the unknown column %s",
+    (key) => {
+      expect(parseChapterTimelineSort(key, "asc")).toBeNull();
+    }
+  );
 });

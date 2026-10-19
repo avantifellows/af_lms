@@ -64,10 +64,13 @@ export type CurriculumSummarySortKey =
 
 export type CurriculumSummarySortDirection = "asc" | "desc";
 
-export interface CurriculumSummarySort {
-  key: CurriculumSummarySortKey;
+// A sortable table's `?sort=&dir=`: the column and its direction.
+export interface ColumnSort<K extends string> {
+  key: K;
   dir: CurriculumSummarySortDirection;
 }
+
+export type CurriculumSummarySort = ColumnSort<CurriculumSummarySortKey>;
 
 export interface CurriculumSummaryQuery {
   // Program ids to list; [] = every Program. Ids that aren't Program options are ignored.
@@ -130,8 +133,19 @@ function parseIds(value: SearchParamValue): number[] {
 }
 
 function parseSort(key: string | undefined, dir: string | undefined): CurriculumSummarySort | null {
-  if (!isSortKey(key)) return null;
-  return { key, dir: dir === "asc" || dir === "desc" ? dir : defaultSortDirection(key) };
+  return parseColumnSort(SORT_VALUES, defaultSortDirection, key, dir);
+}
+
+// An unknown column is no sort; an unknown direction is the column's first-click one.
+function parseColumnSort<K extends string>(
+  columns: Record<K, unknown>,
+  firstDirection: (key: K) => CurriculumSummarySortDirection,
+  key: string | undefined,
+  dir: string | undefined
+): ColumnSort<K> | null {
+  if (key === undefined || !Object.prototype.hasOwnProperty.call(columns, key)) return null;
+  const column = key as K;
+  return { key: column, dir: dir === "asc" || dir === "desc" ? dir : firstDirection(column) };
 }
 
 export type CurriculumSummaryRowKind =
@@ -771,10 +785,6 @@ const SORT_VALUES: Record<CurriculumSummarySortKey, (row: CurriculumSummaryRow) 
 
 const TEXT_SORT_KEYS: CurriculumSummarySortKey[] = ["centre", "program", "tracks", "region", "plan"];
 
-function isSortKey(key: string | undefined): key is CurriculumSummarySortKey {
-  return key !== undefined && Object.prototype.hasOwnProperty.call(SORT_VALUES, key);
-}
-
 // A header's first click: A–Z for the text columns, most behind (or overdue) first for the rest.
 export function defaultSortDirection(key: CurriculumSummarySortKey): CurriculumSummarySortDirection {
   return TEXT_SORT_KEYS.includes(key) ? "asc" : "desc";
@@ -789,34 +799,47 @@ function compareSortValues(a: string | number[], b: string | number[]): number {
   return String(a).localeCompare(String(b), "en", { sensitivity: "base" });
 }
 
-interface SortEntry {
-  row: CurriculumSummaryRow;
+interface SortEntry<T> {
+  item: T;
   value: SortValue;
 }
 
-// Rows without a value go last in both directions, in the default order's row-kind order.
-function compareSortEntries(a: SortEntry, b: SortEntry, sign: number): number {
-  if (a.value === null || b.value === null) {
-    if (a.value !== null) return -1;
-    if (b.value !== null) return 1;
-    return KIND_ORDER[a.row.kind] - KIND_ORDER[b.row.kind];
-  }
-  return sign * compareSortValues(a.value, b.value);
+// Sorts by one column. Items without a value go last in both directions, ordered among
+// themselves by `compareBlanks`; `tieBreak` orders equal values (and blanks `compareBlanks`
+// leaves tied). The sort is stable, so items still tied keep their input order.
+function sortByColumn<T>(
+  items: T[],
+  valueOf: (item: T) => SortValue,
+  dir: CurriculumSummarySortDirection,
+  order: { compareBlanks?: (a: T, b: T) => number; tieBreak?: (a: T, b: T) => number } = {}
+): T[] {
+  const sign = dir === "asc" ? 1 : -1;
+  const compareEntries = (a: SortEntry<T>, b: SortEntry<T>): number => {
+    if (a.value === null || b.value === null) {
+      if (a.value !== null) return -1;
+      if (b.value !== null) return 1;
+      return order.compareBlanks?.(a.item, b.item) ?? 0;
+    }
+    return sign * compareSortValues(a.value, b.value);
+  };
+  return items
+    .map((item): SortEntry<T> => ({ item, value: valueOf(item) }))
+    .sort((a, b) => compareEntries(a, b) || (order.tieBreak?.(a.item, b.item) ?? 0))
+    .map((entry) => entry.item);
 }
 
-// The default worst-first order, or a column header's sort with Centre name (A–Z) breaking ties.
-// Runs over every listed row before pagination; each row is one Summary Class.
+// The default worst-first order, or a column header's sort with Centre name (A–Z) breaking ties
+// and rows without a value in the default order's row-kind order. Runs over every listed row
+// before pagination; each row is one Summary Class.
 export function sortSummaryRows(
   rows: CurriculumSummaryRow[],
   sort: CurriculumSummarySort | null
 ): CurriculumSummaryRow[] {
   if (!sort) return [...rows].sort(compareWorstFirst);
-  const sortValue = SORT_VALUES[sort.key];
-  const sign = sort.dir === "asc" ? 1 : -1;
-  return rows
-    .map((row): SortEntry => ({ row, value: sortValue(row) }))
-    .sort((a, b) => compareSortEntries(a, b, sign) || compareCentreNames(a.row, b.row))
-    .map((entry) => entry.row);
+  return sortByColumn(rows, SORT_VALUES[sort.key], sort.dir, {
+    compareBlanks: (a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind],
+    tieBreak: compareCentreNames,
+  });
 }
 
 // Centres on plan = rows with an Active or Closed plan out of every row except setup-error and
@@ -1151,4 +1174,90 @@ function compareTimelineChapters(a: SummaryChapter, b: SummaryChapter): number {
     return a.dueDate < b.dueDate ? -1 : 1;
   }
   return compareSyllabusOrder(a, b);
+}
+
+export type ChapterTimelineSortKey =
+  | "chapter"
+  | "subject"
+  | "due"
+  | "completed"
+  | "status"
+  | "test"
+  | "hours"
+  | "prescribed"
+  | "cancelled"
+  | "doubt_solving";
+
+export type ChapterTimelineSort = ColumnSort<ChapterTimelineSortKey>;
+
+// `YYYY-MM-DD` → one comparable number; no date is a blank.
+function dateSortValue(date: string | null): SortValue {
+  return date ? [Number(date.replaceAll("-", ""))] : null;
+}
+
+// Status, worst first on the first click (desc): Overdue (most days first), Done late (most
+// days first), Done on time, Not due. Not in plan has no Chapter Due Date, so like a blank it
+// stays last in both directions.
+function chapterStatusSortValue(status: ChapterStatus): SortValue {
+  switch (status.kind) {
+    case "overdue":
+      return [4, status.days];
+    case "done_late":
+      return [3, status.days];
+    case "done":
+      return [2, 0];
+    case "not_due":
+      return [1, 0];
+    case "not_in_plan":
+      return null;
+  }
+}
+
+// Chapter Test Status, worst first on the first click (desc): Overdue, Scheduled, Not due,
+// Conducted. Every Chapter has one of the four, so there are no blanks.
+const CHAPTER_TEST_STATUS_RANK: Record<ChapterTestStatus["kind"], number> = {
+  overdue: 4,
+  scheduled: 3,
+  not_due: 2,
+  conducted: 1,
+};
+
+const TIMELINE_SORT_VALUES: Record<ChapterTimelineSortKey, (chapter: ChapterTimelineChapter) => SortValue> = {
+  chapter: (chapter) => textSortValue(chapter.name),
+  subject: (chapter) => textSortValue(chapter.subject),
+  due: (chapter) => dateSortValue(chapter.dueDate),
+  completed: (chapter) => dateSortValue(chapter.completedOn),
+  status: (chapter) => chapterStatusSortValue(chapter.status),
+  test: (chapter) => [CHAPTER_TEST_STATUS_RANK[chapter.testStatus.kind]],
+  hours: (chapter) => [chapter.taughtMinutes],
+  prescribed: (chapter) => [chapter.prescribedMinutes],
+  cancelled: (chapter) => [chapter.cancellations],
+  doubt_solving: (chapter) => [chapter.doubtSolvingMinutes],
+};
+
+const TIMELINE_ASC_SORT_KEYS: ChapterTimelineSortKey[] = ["chapter", "subject", "due", "completed"];
+
+// A timeline header's first click: A–Z for Chapter and Subject, earliest first for the dates,
+// worst first for Status and Chapter Test, highest first for the numbers.
+export function defaultChapterTimelineSortDirection(key: ChapterTimelineSortKey): CurriculumSummarySortDirection {
+  return TIMELINE_ASC_SORT_KEYS.includes(key) ? "asc" : "desc";
+}
+
+// The timeline's `sort` / `dir` params; an unknown column is the default order.
+export function parseChapterTimelineSort(
+  key: string | undefined,
+  dir: string | undefined
+): ChapterTimelineSort | null {
+  return parseColumnSort(TIMELINE_SORT_VALUES, defaultChapterTimelineSortDirection, key, dir);
+}
+
+// A column header's sort of the timeline's Chapters (already in the default order: Chapter Due
+// Date, then syllabus order). Blanks (no date, Not in plan) go last in both directions; ties and
+// blanks keep the default order. No sort leaves the default order.
+export function sortTimelineChapters(
+  chapters: ChapterTimelineChapter[],
+  sort: ChapterTimelineSort | null
+): ChapterTimelineChapter[] {
+  if (!sort) return chapters;
+  return sortByColumn(chapters, TIMELINE_SORT_VALUES[sort.key], sort.dir);
 }

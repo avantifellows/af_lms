@@ -14,22 +14,35 @@ import {
 } from "@/lib/curriculum-plan-rules";
 import {
   CURRICULUM_SUMMARY_GRADES,
+  defaultChapterTimelineSortDirection,
   getChapterTimeline,
   normalizeCurriculumSummarySearchParams,
+  parseChapterTimelineSort,
+  sortTimelineChapters,
   type ChapterTimeline,
   type ChapterTimelineResult,
+  type ChapterTimelineSort,
+  type ChapterTimelineSortKey,
 } from "@/lib/curriculum-summary";
+import ChapterLabel from "../../ChapterLabel";
 import { requireCurriculumSummaryViewer } from "../../summary-access";
 import {
   ApplyButton,
   AsOfField,
+  CELL_CLASS_NAME,
+  COMPACT_CELL_CLASS_NAME,
+  COMPACT_COLUMN_CLASS_NAME,
   HeaderNumber,
   HiddenField,
+  NUMBER_CELL_CLASS_NAME,
+  NUMBER_COLUMN_CLASS_NAME,
   PAGE_CONTAINER_CLASS_NAME,
   SchemaUnavailableCard,
   SegmentLinks,
-  TableHead,
+  SortableTableHead,
+  sortableHeaders,
   TONE_BADGE_VARIANTS,
+  type SortableColumn,
 } from "../../summary-ui";
 import UrlFilterForm from "../../UrlFilterForm";
 
@@ -50,7 +63,8 @@ function firstValue(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
 }
 
-// Grade and as-of as the Summary reads them; an unknown hours window falls back to This AY.
+// Grade and as-of as the Summary reads them; an unknown hours window falls back to This AY, and
+// an unknown sort column to the default order.
 function timelineQuery(searchParams: SearchParams) {
   const { grade, asOf } = normalizeCurriculumSummarySearchParams(searchParams, getTodayIST());
   const requestedHours = firstValue(searchParams.hours);
@@ -59,6 +73,7 @@ function timelineQuery(searchParams: SearchParams) {
     asOf,
     requestedSubject: firstValue(searchParams.subject),
     hoursWindow: HOURS_WINDOWS.find((window) => window === requestedHours) ?? HOURS_WINDOWS[0],
+    sort: parseChapterTimelineSort(firstValue(searchParams.sort), firstValue(searchParams.dir)),
   };
 }
 
@@ -99,6 +114,7 @@ export default async function ChapterTimelinePage({ params, searchParams }: Page
             timeline={result.timeline}
             centreId={Number(id)}
             requestedSubject={query.requestedSubject}
+            sort={query.sort}
             isAdmin={permission.role === "admin"}
           />
         ) : (
@@ -109,10 +125,17 @@ export default async function ChapterTimelinePage({ params, searchParams }: Page
   );
 }
 
+// What every timeline link starts from: the page's Centre, timeline and column sort.
+interface TimelineLinks {
+  centreId: number;
+  timeline: ChapterTimeline;
+  sort: ChapterTimelineSort | null;
+}
+
+// Links keep the hours window and the column sort; the subject only when given.
 function timelineHref(
-  centreId: number,
-  timeline: ChapterTimeline,
-  overrides: { grade?: number; subject?: string | null; hours?: HoursWindow } = {}
+  { centreId, timeline, sort: currentSort }: TimelineLinks,
+  overrides: { grade?: number; subject?: string | null; hours?: HoursWindow; sort?: ChapterTimelineSort } = {}
 ): string {
   const search = new URLSearchParams({
     grade: String(overrides.grade ?? timeline.grade),
@@ -122,18 +145,16 @@ function timelineHref(
   const hours = overrides.hours ?? timeline.hoursWindow;
   if (hours !== "ay") search.set("hours", hours);
   if (overrides.subject) search.set("subject", overrides.subject);
+  const sort = overrides.sort ?? currentSort;
+  if (sort) {
+    search.set("sort", sort.key);
+    search.set("dir", sort.dir);
+  }
   return `/curriculum-summary/centres/${centreId}?${search.toString()}`;
 }
 
-function TimelineFilters({
-  timeline,
-  centreId,
-  subject,
-}: {
-  timeline: ChapterTimeline;
-  centreId: number;
-  subject: string | null;
-}) {
+function TimelineFilters({ links, subject }: { links: TimelineLinks; subject: string | null }) {
+  const { centreId, timeline, sort } = links;
   return (
     <Card className="flex flex-col gap-4 p-4 sm:flex-row sm:items-end">
       {/* Another Grade may have other subjects, so switching Grade starts at All. A Grade the
@@ -144,7 +165,7 @@ function TimelineFilters({
         links={CURRICULUM_SUMMARY_GRADES.map((grade) => ({
           key: String(grade),
           label: `Grade ${grade}`,
-          href: timelineHref(centreId, timeline, { grade }),
+          href: timelineHref(links, { grade }),
           active: timeline.grade === grade,
           disabledTitle: timeline.grades.includes(grade)
             ? undefined
@@ -157,18 +178,20 @@ function TimelineFilters({
         links={HOURS_WINDOWS.map((hours) => ({
           key: hours,
           label: HOURS_WINDOW_LABELS[hours],
-          href: timelineHref(centreId, timeline, { hours, subject }),
+          href: timelineHref(links, { hours, subject }),
           active: timeline.hoursWindow === hours,
         }))}
       />
       <UrlFilterForm
-        key={timelineHref(centreId, timeline, { subject })}
+        key={timelineHref(links, { subject })}
         action={`/curriculum-summary/centres/${centreId}`}
         className="flex flex-wrap items-end gap-2"
       >
         <input type="hidden" name="grade" value={timeline.grade} />
         <HiddenField name="hours" value={timeline.hoursWindow !== "ay" ? timeline.hoursWindow : null} />
         <HiddenField name="subject" value={subject} />
+        <HiddenField name="sort" value={sort?.key ?? null} />
+        <HiddenField name="dir" value={sort?.dir ?? null} />
         <AsOfField asOf={timeline.asOf} />
         <ApplyButton />
       </UrlFilterForm>
@@ -180,17 +203,20 @@ function TimelineView({
   timeline,
   centreId,
   requestedSubject,
+  sort,
   isAdmin,
 }: {
   timeline: ChapterTimeline;
   centreId: number;
   requestedSubject: string | undefined;
+  sort: ChapterTimelineSort | null;
   isAdmin: boolean;
 }) {
+  const links: TimelineLinks = { centreId, timeline, sort };
   if (timeline.row.kind !== "plan" && timeline.row.kind !== "no_plan") {
     return (
       <>
-        <TimelineFilters timeline={timeline} centreId={centreId} subject={null} />
+        <TimelineFilters links={links} subject={null} />
         <Card className="border-l-4 border-l-warning-border p-6">
           <p data-testid="timeline-explanation" className="font-bold text-warning-text">
             {timeline.row.explanation}
@@ -200,16 +226,17 @@ function TimelineView({
     );
   }
   const subject = timeline.subjects.find((tab) => tab.subject === requestedSubject)?.subject ?? null;
-  const chapters = subject
-    ? timeline.chapters.filter((chapter) => chapter.subject === subject)
-    : timeline.chapters;
+  const chapters = sortTimelineChapters(
+    subject ? timeline.chapters.filter((chapter) => chapter.subject === subject) : timeline.chapters,
+    sort
+  );
   return (
     <>
-      <TimelineFilters timeline={timeline} centreId={centreId} subject={subject} />
+      <TimelineFilters links={links} subject={subject} />
       <PlanLabel timeline={timeline} isAdmin={isAdmin} />
       <TimelineHeader timeline={timeline} />
-      <SubjectTabs timeline={timeline} centreId={centreId} subject={subject} />
-      <TimelineTable timeline={{ ...timeline, chapters }} />
+      <SubjectTabs links={links} subject={subject} />
+      <TimelineTable timeline={{ ...timeline, chapters }} links={links} subject={subject} />
     </>
   );
 }
@@ -250,23 +277,15 @@ function TimelineHeader({ timeline }: { timeline: ChapterTimeline }) {
   );
 }
 
-function SubjectTabs({
-  timeline,
-  centreId,
-  subject,
-}: {
-  timeline: ChapterTimeline;
-  centreId: number;
-  subject: string | null;
-}) {
-  const tabs: SubjectTab[] = [{ subject: null, progress: null }, ...timeline.subjects];
+function SubjectTabs({ links, subject }: { links: TimelineLinks; subject: string | null }) {
+  const tabs: SubjectTab[] = [{ subject: null, progress: null }, ...links.timeline.subjects];
   return (
     <nav aria-label="Subject" className="flex flex-wrap gap-1">
       {tabs.map((tab) => (
         <SubjectTabLink
           key={tab.subject ?? "all"}
           tab={tab}
-          href={timelineHref(centreId, timeline, { subject: tab.subject })}
+          href={timelineHref(links, { subject: tab.subject })}
           active={subject === tab.subject}
         />
       ))}
@@ -325,36 +344,58 @@ function TabProgressBadge({ progress, active }: { progress: TabProgress; active:
   );
 }
 
-const TIMELINE_HEADERS = [
-  "Chapter",
-  "Subject",
-  "Due",
-  "Status",
-  "Completed",
-  "Chapter test",
-  "Hours",
-  "Prescribed",
-  "Cancelled",
-  "Doubt solving",
+// Status and Chapter test are the key columns: wide enough that their labels never wrap, centred.
+const STATUS_COLUMN_CLASS_NAME = "w-36 px-2 text-center";
+const TEST_COLUMN_CLASS_NAME = "w-44 px-2 text-center";
+
+// Column order (curriculum owner feedback): Chapter, Subject and dates, then the two statuses,
+// then the hours-window numbers.
+const TIMELINE_COLUMNS: SortableColumn<ChapterTimelineSortKey>[] = [
+  { label: "Chapter", sortKey: "chapter" },
+  { label: "Subject", sortKey: "subject", className: COMPACT_COLUMN_CLASS_NAME },
+  { label: "Due", sortKey: "due", className: COMPACT_COLUMN_CLASS_NAME },
+  { label: "Completed", sortKey: "completed", className: COMPACT_COLUMN_CLASS_NAME },
+  { label: "Status", sortKey: "status", className: STATUS_COLUMN_CLASS_NAME },
+  { label: "Chapter test", sortKey: "test", className: TEST_COLUMN_CLASS_NAME },
+  { label: "Hours", sortKey: "hours", className: NUMBER_COLUMN_CLASS_NAME },
+  { label: "Prescribed", sortKey: "prescribed", className: NUMBER_COLUMN_CLASS_NAME },
+  { label: "Cancelled", sortKey: "cancelled", className: NUMBER_COLUMN_CLASS_NAME },
+  { label: "Doubt solving", sortKey: "doubt_solving", className: NUMBER_COLUMN_CLASS_NAME },
 ];
 
-// The as-of line sits after the Chapters due on or before as-of; without plan dates there is
-// nothing to divide (-1).
-function asOfMarkerIndex(timeline: ChapterTimeline): number {
-  if (!timeline.chapters.some((chapter) => chapter.dueDate !== null)) return -1;
+// Every header links to its sort, keeping Grade, as-of, hours window and subject.
+function timelineSortHeaders(links: TimelineLinks, subject: string | null) {
+  return sortableHeaders(TIMELINE_COLUMNS, links.sort, defaultChapterTimelineSortDirection, (sort) =>
+    timelineHref(links, { subject, sort })
+  );
+}
+
+// The as-of line sits after the Chapters due on or before as-of. It only means something in the
+// default due-date order, so a column sort leaves it out, as does a timeline without plan
+// dates (-1).
+function asOfMarkerIndex(timeline: ChapterTimeline, sorted: boolean): number {
+  if (sorted || !timeline.chapters.some((chapter) => chapter.dueDate !== null)) return -1;
   const firstNotYetDue = timeline.chapters.findIndex(
     (chapter) => chapter.dueDate === null || chapter.dueDate > timeline.asOf
   );
   return firstNotYetDue === -1 ? timeline.chapters.length : firstNotYetDue;
 }
 
-function TimelineTable({ timeline }: { timeline: ChapterTimeline }) {
-  const markerIndex = asOfMarkerIndex(timeline);
-  const marker = <AsOfMarker asOf={timeline.asOf} columns={TIMELINE_HEADERS.length} />;
+function TimelineTable({
+  timeline,
+  links,
+  subject,
+}: {
+  timeline: ChapterTimeline;
+  links: TimelineLinks;
+  subject: string | null;
+}) {
+  const markerIndex = asOfMarkerIndex(timeline, links.sort !== null);
+  const marker = <AsOfMarker asOf={timeline.asOf} columns={TIMELINE_COLUMNS.length} />;
   return (
     <Card className="overflow-x-auto">
       <table className="min-w-full divide-y divide-border text-sm">
-        <TableHead headers={TIMELINE_HEADERS} />
+        <SortableTableHead headers={timelineSortHeaders(links, subject)} />
         <tbody className="divide-y divide-border">
           {timeline.chapters.map((chapter, index) => (
             <Fragment key={chapter.chapterId}>
@@ -372,32 +413,43 @@ function TimelineTable({ timeline }: { timeline: ChapterTimeline }) {
 function TimelineRow({ chapter }: { chapter: ChapterTimeline["chapters"][number] }) {
   return (
     <tr data-timeline-row data-chapter={chapter.name}>
-      <td className="px-4 py-3 font-bold text-text-primary">{chapter.name}</td>
-      <td className="px-4 py-3">{chapter.subject}</td>
-      <td className="px-4 py-3">{formatOptionalDate(chapter.dueDate)}</td>
-      <td data-status className="px-4 py-3">
-        {chapterStatusLabel(chapter.status)}
+      <td data-chapter-label className={`${CELL_CLASS_NAME} px-4`}>
+        {/* At most three lines; the full label is in the title. */}
+        <span title={chapterTitle(chapter)} className="line-clamp-3 min-w-[12rem] max-w-[18rem]">
+          <ChapterLabel code={chapter.code} name={chapter.name} />
+        </span>
       </td>
-      <td data-completed-on className="px-4 py-3">
+      <td className={`${COMPACT_CELL_CLASS_NAME} whitespace-nowrap`}>{chapter.subject}</td>
+      <td data-due className={`${COMPACT_CELL_CLASS_NAME} whitespace-nowrap`}>
+        {formatOptionalDate(chapter.dueDate)}
+      </td>
+      <td data-completed-on className={`${COMPACT_CELL_CLASS_NAME} whitespace-nowrap`}>
         {formatOptionalDate(chapter.completedOn)}
       </td>
-      <td data-test-status className="px-4 py-3">
+      <td data-status className={`${CELL_CLASS_NAME} whitespace-nowrap px-2 text-center`}>
+        {chapterStatusLabel(chapter.status)}
+      </td>
+      <td data-test-status className={`${CELL_CLASS_NAME} whitespace-nowrap px-2 text-center`}>
         {chapterTestStatusLabel(chapter.testStatus)}
       </td>
-      <td data-hours className="px-4 py-3 font-mono">
+      <td data-hours className={NUMBER_CELL_CLASS_NAME}>
         {formatHours(chapter.taughtMinutes)}
       </td>
-      <td data-prescribed className="px-4 py-3 font-mono">
+      <td data-prescribed className={NUMBER_CELL_CLASS_NAME}>
         {formatHours(chapter.prescribedMinutes)}
       </td>
-      <td data-cancellations className="px-4 py-3 font-mono">
+      <td data-cancellations className={NUMBER_CELL_CLASS_NAME}>
         {chapter.cancellations}
       </td>
-      <td data-doubt-solving className="px-4 py-3 font-mono">
+      <td data-doubt-solving className={NUMBER_CELL_CLASS_NAME}>
         {formatHours(chapter.doubtSolvingMinutes)}
       </td>
     </tr>
   );
+}
+
+function chapterTitle(chapter: ChapterTimeline["chapters"][number]): string {
+  return chapter.code ? `${chapter.code} ${chapter.name}` : chapter.name;
 }
 
 function AsOfMarker({ asOf, columns }: { asOf: string; columns: number }) {

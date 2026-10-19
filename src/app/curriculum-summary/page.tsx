@@ -33,6 +33,12 @@ import {
   SegmentLinks,
   SortableTableHead,
   TONE_BADGE_VARIANTS,
+  CELL_CLASS_NAME,
+  COMPACT_CELL_CLASS_NAME,
+  COMPACT_COLUMN_CLASS_NAME,
+  NUMBER_COLUMN_CLASS_NAME,
+  sortableHeaders,
+  type SortableColumn,
 } from "./summary-ui";
 
 interface PageProps {
@@ -45,12 +51,8 @@ const DEFAULT_PAGE_SIZE = 20;
 const ACTION_LINK_CLASS_NAME =
   "rounded-md border border-border px-3 py-1.5 text-sm font-bold text-accent hover:text-accent-hover";
 // Column layout (curriculum owner feedback): the subject and PCM / PCB Behind columns are the
-// wide, centred ones; the others are compact. Table cells ignore max-width, so the compact caps
-// sit on the cell contents.
-const CELL_CLASS_NAME = "py-3 align-top";
-const COMPACT_CELL_CLASS_NAME = `${CELL_CLASS_NAME} px-2 text-xs`;
+// wide, centred ones; the others are compact (see the shared classes in summary-ui).
 const KEY_COLUMN_CLASS_NAME = "w-[7.5rem] px-2 text-center";
-const TESTS_COLUMN_CLASS_NAME = "w-20 px-2 text-center";
 
 export default async function CurriculumSummaryPage({ searchParams }: PageProps) {
   const resolvedSearchParams = await searchParams;
@@ -354,11 +356,11 @@ const MEASURE_COLUMNS = CURRICULUM_SUMMARY_SUBJECTS.length + SUBJECT_GROUPS.leng
 
 const lowercase = <T extends string>(label: T) => label.toLowerCase() as Lowercase<T>;
 
-const SUMMARY_COLUMNS: { label: string; sortKey: CurriculumSummarySortKey; className?: string }[] = [
+const SUMMARY_COLUMNS: SortableColumn<CurriculumSummarySortKey>[] = [
   { label: "Centre", sortKey: "centre" },
-  { label: "Program", sortKey: "program", className: "px-2 text-left" },
-  { label: "Tracks", sortKey: "tracks", className: "px-2 text-left" },
-  { label: "Region", sortKey: "region", className: "px-2 text-left" },
+  { label: "Program", sortKey: "program", className: COMPACT_COLUMN_CLASS_NAME },
+  { label: "Tracks", sortKey: "tracks", className: COMPACT_COLUMN_CLASS_NAME },
+  { label: "Region", sortKey: "region", className: COMPACT_COLUMN_CLASS_NAME },
   ...CURRICULUM_SUMMARY_SUBJECTS.map((subject) => ({
     label: subject,
     sortKey: lowercase(subject),
@@ -369,18 +371,15 @@ const SUMMARY_COLUMNS: { label: string; sortKey: CurriculumSummarySortKey; class
     sortKey: lowercase(group),
     className: KEY_COLUMN_CLASS_NAME,
   })),
-  { label: "Tests overdue", sortKey: "tests_overdue", className: TESTS_COLUMN_CLASS_NAME },
-  { label: "Plan", sortKey: "plan", className: "px-2 text-left" },
+  { label: "Tests overdue", sortKey: "tests_overdue", className: NUMBER_COLUMN_CLASS_NAME },
+  { label: "Plan", sortKey: "plan", className: COMPACT_COLUMN_CLASS_NAME },
 ];
 
-// Every header links to its sort from page 1, keeping the filters: the active column's link
-// reverses its direction, any other column's starts in its first-click direction.
-function sortableHeaders(params: CurriculumSummaryQuery) {
-  return SUMMARY_COLUMNS.map(({ label, sortKey: key, className }) => {
-    const direction = params.sort?.key === key ? params.sort.dir : null;
-    const nextDirection = direction ? (direction === "asc" ? "desc" : "asc") : defaultSortDirection(key);
-    return { label, direction, className, href: summaryHref(params, { sort: { key, dir: nextDirection } }) };
-  });
+// Every header links to its sort from page 1, keeping the filters.
+function summarySortHeaders(params: CurriculumSummaryQuery) {
+  return sortableHeaders(SUMMARY_COLUMNS, params.sort, defaultSortDirection, (sort) =>
+    summaryHref(params, { sort })
+  );
 }
 
 function SummaryTable({
@@ -393,7 +392,7 @@ function SummaryTable({
   return (
     <div className="overflow-x-auto">
       <table className="min-w-full divide-y divide-border text-sm">
-        <SortableTableHead headers={sortableHeaders(params)} />
+        <SortableTableHead headers={summarySortHeaders(params)} />
         <tbody className="divide-y divide-border">
           {rows.map((row) => (
             <SummaryTableRow key={row.centreId} row={row} params={params} />
