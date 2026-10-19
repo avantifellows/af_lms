@@ -168,6 +168,12 @@ async function renderPage(searchParams: Record<string, string | string[]> = {}, 
   );
 }
 
+// Chapter names in table order, with "AS OF" for the As of line.
+const tableOrder = () =>
+  [...document.querySelectorAll("[data-timeline-row], [data-as-of-marker]")].map((element) =>
+    element.hasAttribute("data-as-of-marker") ? "AS OF" : element.getAttribute("data-chapter")
+  );
+
 const timelineRow = (name: string) =>
   document.querySelector(`[data-timeline-row][data-chapter="${name}"]`) as HTMLElement;
 
@@ -362,10 +368,7 @@ describe("Chapter timeline page", () => {
   it("puts the as-of marker after the Chapters due by as-of", async () => {
     await renderPage();
 
-    const order = [...document.querySelectorAll("[data-timeline-row], [data-as-of-marker]")].map((element) =>
-      element.hasAttribute("data-as-of-marker") ? "AS OF" : element.getAttribute("data-chapter")
-    );
-    expect(order).toEqual(["Motion", "Bonding", "Cells", "AS OF", "Genetics", "Ecology"]);
+    expect(tableOrder()).toEqual(["Motion", "Bonding", "Cells", "AS OF", "Genetics", "Ecology"]);
     expect(document.querySelector("[data-as-of-marker]")).toHaveTextContent("As of 15 Aug 2026");
   });
 
@@ -602,28 +605,22 @@ describe("Chapter timeline page", () => {
       "href",
       "/curriculum-summary/centres/7?grade=11&as_of=2026-08-15&sort=status&dir=asc"
     );
-    // Worst first; Not in plan last. The as-of line only belongs to the due-date order.
-    const order = [...document.querySelectorAll("[data-timeline-row]")].map((row) => row.getAttribute("data-chapter"));
-    expect(order).toEqual(["Cells", "Bonding", "Motion", "Genetics", "Ecology"]);
-    expect(document.querySelector("[data-as-of-marker]")).toBeNull();
+    // Worst first within each side of the As of line; Not in plan last.
+    expect(tableOrder()).toEqual(["Cells", "Bonding", "Motion", "AS OF", "Genetics", "Ecology"]);
 
     document.body.innerHTML = "";
     await renderPage({ sort: "status", dir: "asc" });
     expect(screen.getByRole("columnheader", { name: /Status/ })).toHaveAttribute("aria-sort", "ascending");
     expect(screen.getByRole("columnheader", { name: /Status/ })).toHaveTextContent("Status▲");
-    expect(
-      [...document.querySelectorAll("[data-timeline-row]")].map((row) => row.getAttribute("data-chapter"))
-    ).toEqual(["Genetics", "Motion", "Bonding", "Cells", "Ecology"]);
+    expect(tableOrder()).toEqual(["Motion", "Bonding", "Cells", "AS OF", "Genetics", "Ecology"]);
   });
 
   it("keeps the sort in subject tabs, window and Grade links and the As of form", async () => {
     mockGetChapterTimeline.mockResolvedValue({ ok: true, timeline: timeline({ grades: [11, 12] }) });
     await renderPage({ sort: "test", dir: "asc", subject: "Biology" });
 
-    // Biology only, best Chapter Test first.
-    expect(
-      [...document.querySelectorAll("[data-timeline-row]")].map((row) => row.getAttribute("data-chapter"))
-    ).toEqual(["Genetics", "Ecology", "Cells"]);
+    // Biology only, best Chapter Test first on each side of the As of line.
+    expect(tableOrder()).toEqual(["Cells", "AS OF", "Genetics", "Ecology"]);
     const tabs = screen.getByRole("navigation", { name: "Subject" });
     expect(within(tabs).getByRole("link", { name: "All" })).toHaveAttribute(
       "href",
@@ -644,20 +641,15 @@ describe("Chapter timeline page", () => {
 
   it("ignores an unknown sort column and falls back to the first click for an unknown direction", async () => {
     await renderPage({ sort: "centre", dir: "asc" });
-    expect(
-      [...document.querySelectorAll("[data-timeline-row]")].map((row) => row.getAttribute("data-chapter"))
-    ).toEqual(["Motion", "Bonding", "Cells", "Genetics", "Ecology"]);
+    expect(tableOrder()).toEqual(["Motion", "Bonding", "Cells", "AS OF", "Genetics", "Ecology"]);
     expect(document.querySelector("[aria-sort]")).toBeNull();
-    expect(document.querySelector("[data-as-of-marker]")).not.toBeNull();
     expect(document.querySelector('input[type="hidden"][name="sort"]')).toBeNull();
 
     document.body.innerHTML = "";
     await renderPage({ sort: "hours", dir: "up" });
     expect(screen.getByRole("columnheader", { name: /Hours/ })).toHaveAttribute("aria-sort", "descending");
     // Genetics has no hours; the rest tie at 1h 30m and keep the default order.
-    expect(
-      [...document.querySelectorAll("[data-timeline-row]")].map((row) => row.getAttribute("data-chapter"))
-    ).toEqual(["Motion", "Bonding", "Cells", "Ecology", "Genetics"]);
+    expect(tableOrder()).toEqual(["Motion", "Bonding", "Cells", "AS OF", "Ecology", "Genetics"]);
   });
 
   it("shows the Summary's message instead of metrics for a class it can't measure", async () => {

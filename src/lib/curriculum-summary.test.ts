@@ -22,6 +22,7 @@ import {
   parseChapterTimelineSort,
   sortSummaryRows,
   sortTimelineChapters,
+  splitTimelineAtAsOf,
   type ChapterTimelineChapter,
   type ChapterTimelineSortKey,
   type CurriculumSummaryQuery,
@@ -1302,6 +1303,72 @@ describe("sortTimelineChapters", () => {
     const chapters = [timelineChapter(1, { taughtMinutes: 0 }), timelineChapter(2, { taughtMinutes: 60 })];
     sortTimelineChapters(chapters, { key: "hours", dir: "desc" });
     expect(ids(chapters)).toEqual([1, 2]);
+  });
+});
+
+describe("splitTimelineAtAsOf", () => {
+  function dated(id: number, dueDate: string | null, overrides: Partial<ChapterTimelineChapter> = {}) {
+    return {
+      chapterId: id,
+      code: `C${id}`,
+      name: `Chapter ${id}`,
+      subject: "Physics",
+      dueDate,
+      completedOn: null,
+      status: dueDate === null ? { kind: "not_in_plan" } : { kind: "not_due" },
+      testStatus: { kind: "not_due" },
+      taughtMinutes: 0,
+      prescribedMinutes: 0,
+      cancellations: 0,
+      doubtSolvingMinutes: 0,
+      ...overrides,
+    } as ChapterTimelineChapter;
+  }
+  const ids = (chapters: ChapterTimelineChapter[]) => chapters.map((chapter) => chapter.chapterId);
+  // Default order: by due date, undated last.
+  const CHAPTERS = [
+    dated(1, "2026-06-30", { taughtMinutes: 30 }),
+    dated(2, "2026-08-15", { taughtMinutes: 90 }),
+    dated(3, "2026-08-16", { taughtMinutes: 120 }),
+    dated(4, "2026-09-01", { taughtMinutes: 0 }),
+    dated(5, null, { taughtMinutes: 60 }),
+  ];
+
+  it("splits the default order at as-of, a Chapter due on as-of being above the line", () => {
+    const halves = splitTimelineAtAsOf(CHAPTERS, null, "2026-08-15");
+    expect(ids(halves.dueByAsOf)).toEqual([1, 2]);
+    expect(ids(halves.upcoming)).toEqual([3, 4, 5]);
+    expect(halves.showAsOfMarker).toBe(true);
+  });
+
+  it("sorts each half by the column sort, keeping the line between them", () => {
+    const desc = splitTimelineAtAsOf(CHAPTERS, { key: "hours", dir: "desc" }, "2026-08-15");
+    expect([ids(desc.dueByAsOf), ids(desc.upcoming)]).toEqual([
+      [2, 1],
+      [3, 5, 4],
+    ]);
+    const asc = splitTimelineAtAsOf(CHAPTERS, { key: "hours", dir: "asc" }, "2026-08-15");
+    expect([ids(asc.dueByAsOf), ids(asc.upcoming)]).toEqual([
+      [1, 2],
+      [4, 5, 3],
+    ]);
+    // Reversing Due keeps undated Chapters last below the line.
+    const due = splitTimelineAtAsOf(CHAPTERS, { key: "due", dir: "desc" }, "2026-08-15");
+    expect([ids(due.dueByAsOf), ids(due.upcoming)]).toEqual([
+      [2, 1],
+      [4, 3, 5],
+    ]);
+  });
+
+  it("puts everything above the line when all is due, and below it when nothing is", () => {
+    expect(ids(splitTimelineAtAsOf(CHAPTERS.slice(0, 4), null, "2026-12-31").upcoming)).toEqual([]);
+    expect(ids(splitTimelineAtAsOf(CHAPTERS, null, "2026-06-01").dueByAsOf)).toEqual([]);
+  });
+
+  it("has no line without plan dates", () => {
+    const halves = splitTimelineAtAsOf([dated(5, null), dated(6, null)], { key: "chapter", dir: "asc" }, "2026-08-15");
+    expect(halves).toMatchObject({ dueByAsOf: [], showAsOfMarker: false });
+    expect(ids(halves.upcoming)).toEqual([5, 6]);
   });
 });
 

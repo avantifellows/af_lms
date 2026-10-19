@@ -1276,3 +1276,31 @@ export function sortTimelineChapters(
   if (!sort) return chapters;
   return sortByColumn(chapters, TIMELINE_SORT_VALUES[sort.key], sort.dir);
 }
+
+export interface ChapterTimelineHalves {
+  // Chapters due on or before as-of, above the As of line.
+  dueByAsOf: ChapterTimelineChapter[];
+  // Chapters due after as-of, then undated ones, below it.
+  upcoming: ChapterTimelineChapter[];
+  // No Chapter has a plan date (No plan), so there is nothing to divide.
+  showAsOfMarker: boolean;
+}
+
+// The timeline table's rows on either side of the As of line, each half sorted by the column
+// sort (curriculum owner feedback: the line stays when sorted). Chapters arrive in the default
+// due-date order, so without a sort the halves are that order split at the line.
+export function splitTimelineAtAsOf(
+  chapters: ChapterTimelineChapter[],
+  sort: ChapterTimelineSort | null,
+  asOf: string
+): ChapterTimelineHalves {
+  const isDue = (chapter: ChapterTimelineChapter) => chapter.dueDate !== null && chapter.dueDate <= asOf;
+  return {
+    dueByAsOf: sortTimelineChapters(chapters.filter(isDue), sort),
+    upcoming: sortTimelineChapters(
+      chapters.filter((chapter) => !isDue(chapter)),
+      sort
+    ),
+    showAsOfMarker: chapters.some((chapter) => chapter.dueDate !== null),
+  };
+}

@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Fragment } from "react";
 
 import PageHeader from "@/components/PageHeader";
 import { Badge, Card, type BadgeVariant } from "@/components/ui";
@@ -18,7 +17,7 @@ import {
   getChapterTimeline,
   normalizeCurriculumSummarySearchParams,
   parseChapterTimelineSort,
-  sortTimelineChapters,
+  splitTimelineAtAsOf,
   type ChapterTimeline,
   type ChapterTimelineGroupStatus,
   type ChapterTimelineResult,
@@ -232,10 +231,7 @@ function TimelineView({
     );
   }
   const subject = timeline.subjects.find((tab) => tab.subject === requestedSubject)?.subject ?? null;
-  const chapters = sortTimelineChapters(
-    subject ? timeline.chapters.filter((chapter) => chapter.subject === subject) : timeline.chapters,
-    sort
-  );
+  const chapters = subject ? timeline.chapters.filter((chapter) => chapter.subject === subject) : timeline.chapters;
   return (
     <>
       <TimelineFilters links={links} subject={subject} />
@@ -416,16 +412,6 @@ function timelineSortHeaders(links: TimelineLinks, subject: string | null) {
   );
 }
 
-// The as-of line sits after the Chapters due on or before as-of. It only means something in the
-// default due-date order, so a column sort leaves it out, as does a timeline without plan
-// dates (-1).
-function asOfMarkerIndex(timeline: ChapterTimeline, sorted: boolean): number {
-  if (sorted || !timeline.chapters.some((chapter) => chapter.dueDate !== null)) return -1;
-  const firstNotYetDue = timeline.chapters.findIndex(
-    (chapter) => chapter.dueDate === null || chapter.dueDate > timeline.asOf
-  );
-  return firstNotYetDue === -1 ? timeline.chapters.length : firstNotYetDue;
-}
 
 function TimelineTable({
   timeline,
@@ -436,20 +422,20 @@ function TimelineTable({
   links: TimelineLinks;
   subject: string | null;
 }) {
-  const markerIndex = asOfMarkerIndex(timeline, links.sort !== null);
-  const marker = <AsOfMarker asOf={timeline.asOf} columns={TIMELINE_COLUMNS.length} />;
+  // Chapters due by as-of, the As of line, then the rest; a column sort orders each half.
+  const { dueByAsOf, upcoming, showAsOfMarker } = splitTimelineAtAsOf(timeline.chapters, links.sort, timeline.asOf);
   return (
     <Card className="overflow-x-auto">
       <table className="min-w-full divide-y divide-border text-sm">
         <SortableTableHead headers={timelineSortHeaders(links, subject)} />
         <tbody className="divide-y divide-border">
-          {timeline.chapters.map((chapter, index) => (
-            <Fragment key={chapter.chapterId}>
-              {index === markerIndex ? marker : null}
-              <TimelineRow chapter={chapter} />
-            </Fragment>
+          {dueByAsOf.map((chapter) => (
+            <TimelineRow key={chapter.chapterId} chapter={chapter} />
           ))}
-          {markerIndex === timeline.chapters.length ? marker : null}
+          {showAsOfMarker ? <AsOfMarker asOf={timeline.asOf} columns={TIMELINE_COLUMNS.length} /> : null}
+          {upcoming.map((chapter) => (
+            <TimelineRow key={chapter.chapterId} chapter={chapter} />
+          ))}
         </tbody>
       </table>
     </Card>

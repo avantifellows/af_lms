@@ -966,12 +966,16 @@ test.describe("Curriculum Summary chapter timeline", () => {
     });
     expect(overflow).toEqual({ page: 0, table: 0 });
     const rowOrder = () =>
-      page.locator("[data-timeline-row]").evaluateAll((rows) => rows.map((row) => row.getAttribute("data-chapter")));
+      page
+        .locator("[data-timeline-row], [data-as-of-marker]")
+        .evaluateAll((rows) =>
+          rows.map((row) => (row.hasAttribute("data-as-of-marker") ? "AS OF" : row.getAttribute("data-chapter")))
+        );
 
-    // Anand Shared on 20 Aug. Overdue: Bonding (due 15 Jul) 36 days, Animals (10 Aug) 10, Genetics
-    // (12 Aug) 8. Done late: Plants (due 10 Jul, completed 16 Aug) 37 days. Done on time, in due
-    // order: Cells, Alpha, Beta, Thermo (completed 1 Aug, due 30 Sep). Undated Organic and Ecology
-    // are Not in plan and stay last.
+    // Anand Shared on 20 Aug. Due by then: Overdue Bonding (due 15 Jul) 36 days, Animals (10 Aug)
+    // 10, Genetics (12 Aug) 8; Done late Plants (due 10 Jul, completed 16 Aug) 37 days; Done on
+    // time, in due order, Cells, Alpha, Beta. Below the As of line, each sorted on its own: Thermo
+    // (due 30 Sep, completed 1 Aug) is Done; undated Organic and Ecology are Not in plan, last.
     const status = page.getByRole("columnheader", { name: "Status", exact: true });
     await status.getByRole("link").click();
     await expect(page).toHaveURL(`${base}&sort=status&dir=desc`);
@@ -984,12 +988,11 @@ test.describe("Curriculum Summary chapter timeline", () => {
       "Summary Bio Cells",
       "Fixture Alpha Physics",
       "Fixture Beta Physics",
+      "AS OF",
       "Summary Chem Thermo",
       "Summary Chem Organic",
       "Summary Bio Ecology",
     ]);
-    // The as-of line belongs to the due-date order only.
-    await expect(page.locator("[data-as-of-marker]")).toHaveCount(0);
 
     await status.getByRole("link").click();
     await expect(page).toHaveURL(`${base}&sort=status&dir=asc`);
@@ -998,11 +1001,12 @@ test.describe("Curriculum Summary chapter timeline", () => {
       "Summary Bio Cells",
       "Fixture Alpha Physics",
       "Fixture Beta Physics",
-      "Summary Chem Thermo",
       "Summary Bio Plants",
       "Summary Bio Genetics",
       "Summary Bio Animals",
       "Summary Chem Bonding",
+      "AS OF",
+      "Summary Chem Thermo",
       "Summary Chem Organic",
       "Summary Bio Ecology",
     ]);
@@ -1015,6 +1019,7 @@ test.describe("Curriculum Summary chapter timeline", () => {
       "Summary Bio Plants",
       "Summary Bio Genetics",
       "Summary Bio Animals",
+      "AS OF",
       "Summary Bio Ecology",
     ]);
     await page.context().close();
