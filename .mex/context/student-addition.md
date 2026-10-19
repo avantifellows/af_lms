@@ -85,6 +85,11 @@ Hidden for PMU (JNV NVS) Students: uniforms are ordered only for physical-centre
 selected program) is not `PMU_PROGRAM_ID`. UI-only gate; the PATCH path still accepts the
 fields, and the modal never sends them for NVS because they are never rendered.
 
+Student documents follow the same rule (PR #433): under the NVS program the Edit Student
+Details/Documents tab strip is not rendered (the modal shows Details only), and the roster
+card's expanded Documents list is hidden via `StudentCard`'s `isNvs`. The
+`/api/students/[id]/documents` routes are unchanged.
+
 ## Settled Product Shape
 - v1 is JNV PMU / JNV NVS only. In current LMS code this is `PROGRAM_IDS.NVS` (`64`, label `JNV NVS`) from `src/lib/constants.ts`.
 - Rollout plan is staff/PMs first, then schools after real upload feedback. In the #155 implementation build, student writes are allowed only for `admin`, `program_manager`, and `program_admin`; teachers/staff roles and `read_only` users cannot create, bulk upload, edit, or dropout students. Issue #361 slice #367 adds `pmu_manager` and `pmu_govt_school_user` to `ALLOWED_STUDENT_ADDITION_ROLES` (ADR 0007, ADR 0006 as amended): Add Student, Bulk Upload, NVS dropout and undo, Download List, and phone correction/backfill still require a JNV School, the pinned NVS context, School scope and `students` edit (so `read_only` PMU users are refused) — except Download List, which for PMU roles only needs `students` view (`requireStudentExportAccess`, PR #376 QA), so a `read_only` PMU user can still export NVS Students. Other roles' `read_only` accounts still get no Download List. The roster's `canDropoutStudent` allowlist (`RosterPage.tsx`) includes both roles. Their general profile edits deny non-NVS programs via the pinned context, and centre-program dropout is unreachable. Audit `actor.role` carries the PMU role string (free text in DB Service). Covered through the real permission layer in `src/lib/student-addition-access.pmu.test.ts` and `src/app/api/school/[udise]/students/route.pmu.test.ts`.

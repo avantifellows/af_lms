@@ -174,7 +174,10 @@ interface StudentCardProps {
    * to the inline DocumentsList so it refetches.
    */
   documentsRefreshNonce?: number;
-  /** JNV NVS card: shows "Exam Preparing For" in place of Program and Stream. */
+  /**
+   * JNV NVS card: shows "Exam Preparing For" in place of Program and Stream,
+   * and hides the Documents list.
+   */
   isNvs?: boolean;
 }
 
@@ -408,7 +411,8 @@ function StudentCard({
             />
           </DetailGroup>
 
-          {studentPkId !== null && (
+          {/* Document collection is for physical-centre programs; JNV NVS Students have none. */}
+          {studentPkId !== null && !isNvs && (
             <section className="rounded-lg border border-border bg-bg-card p-4 shadow-sm">
               <h4 className="mb-3 border-b border-border pb-2 text-xs font-bold uppercase tracking-wide text-text-muted">
                 Documents

@@ -86,7 +86,8 @@ Then read this file fully before doing anything else in this session.
   DB Service #750 already supports, so no coordinated DB Service release is needed; a blank
   clears the stored size. Enrolment and both bulk-upload column contracts no longer mention
   the sizes. The section is hidden when Edit Student is opened under the PMU program (JNV
-  NVS), since uniforms are ordered only for physical centres. See `context/student-addition.md`
+  NVS), since uniforms are ordered only for physical centres; PR #433 hides the Edit Student
+  Documents tab and the roster card's Documents list under NVS too. See `context/student-addition.md`
   and `patterns/add-student-enrolment-field.md`.
 
 - PR #335 follow-up: Student detail now retains a School's progress origin through phase changes and locked-phase redirects. Student → School restores `source=progress`, so the next School Back returns to the selected Holistic Program. Ordinary School-origin journeys remain unchanged. See `context/architecture.md`.

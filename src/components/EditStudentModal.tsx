@@ -152,9 +152,9 @@ export default function EditStudentModal({
   const phoneMode = registrationMode === PHONE_REGISTRATION_MODE;
   const approvedPhoneBackfill =
     isPhoneRegistrationStudent && registrationMode === APPROVED_REGISTRATION_MODE;
-  // Uniforms are ordered for physical-centre programs only; PMU (JNV NVS) Students
-  // get none, so the sizes are never collected under that program.
-  const showUniformSizes = programId == null || Number(programId) !== PMU_PROGRAM_ID;
+  // Uniform sizes and documents are collected for physical-centre programs only; PMU
+  // (JNV NVS) Students get neither, so both are hidden under that program.
+  const isPmuProgram = programId != null && Number(programId) === PMU_PROGRAM_ID;
   const [formData, setFormData] = useState(initialData);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -417,37 +417,39 @@ export default function EditStudentModal({
         </Button>
       </div>
 
-      <div role="tablist" aria-label="Edit student sections" className="flex border-b border-border px-6">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeTab === "details"}
-          onClick={() => setActiveTab("details")}
-          className={`min-h-[48px] px-4 py-3 text-sm font-bold uppercase tracking-wide transition-colors ${
-            activeTab === "details"
-              ? "border-b-2 border-accent text-text-primary"
-              : "text-text-muted hover:text-text-primary"
-          }`}
-        >
-          Details
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeTab === "documents"}
-          onClick={() => setActiveTab("documents")}
-          disabled={studentPkId === null}
-          className={`min-h-[48px] px-4 py-3 text-sm font-bold uppercase tracking-wide transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-            activeTab === "documents"
-              ? "border-b-2 border-accent text-text-primary"
-              : "text-text-muted hover:text-text-primary"
-          }`}
-        >
-          Documents
-        </button>
-      </div>
+      {!isPmuProgram && (
+        <div role="tablist" aria-label="Edit student sections" className="flex border-b border-border px-6">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "details"}
+            onClick={() => setActiveTab("details")}
+            className={`min-h-[48px] px-4 py-3 text-sm font-bold uppercase tracking-wide transition-colors ${
+              activeTab === "details"
+                ? "border-b-2 border-accent text-text-primary"
+                : "text-text-muted hover:text-text-primary"
+            }`}
+          >
+            Details
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "documents"}
+            onClick={() => setActiveTab("documents")}
+            disabled={studentPkId === null}
+            className={`min-h-[48px] px-4 py-3 text-sm font-bold uppercase tracking-wide transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+              activeTab === "documents"
+                ? "border-b-2 border-accent text-text-primary"
+                : "text-text-muted hover:text-text-primary"
+            }`}
+          >
+            Documents
+          </button>
+        </div>
+      )}
 
-      {activeTab === "documents" && studentPkId !== null ? (
+      {activeTab === "documents" && studentPkId !== null && !isPmuProgram ? (
         <div className="flex-1 space-y-6 overflow-y-auto px-6 py-5">
           <UploadDocumentForm
             studentId={studentPkId}
@@ -537,7 +539,7 @@ export default function EditStudentModal({
               </div>
             </FormSection>
 
-            {showUniformSizes && (
+            {!isPmuProgram && (
               <FormSection>
                 <h3 className={sectionHeadingClassName}>Uniform Size</h3>
                 <p className="mb-4 text-xs text-text-muted">

@@ -520,6 +520,21 @@ describe("EditStudentModal", () => {
     expect(props.onClose).not.toHaveBeenCalled();
   });
 
+  describe("documents tab", () => {
+    it("hides the Details/Documents tabs for PMU (JNV NVS) Students", () => {
+      renderModal();
+
+      expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
+      expect(screen.queryByRole("tab", { name: "Documents" })).not.toBeInTheDocument();
+    });
+
+    it("keeps the Documents tab for physical-centre programs", () => {
+      renderModal({ programId: 1 });
+
+      expect(screen.getByRole("tab", { name: "Documents" })).toBeInTheDocument();
+    });
+  });
+
   describe("uniform sizes", () => {
     // Sizes are collected for physical-centre programs; the default props are JNV NVS.
     const CENTRE_PROGRAM_ID = 1;

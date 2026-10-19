@@ -528,6 +528,34 @@ describe("StudentTable - NVS Exam Preparing For", () => {
   });
 });
 
+describe("StudentTable - Documents on the card", () => {
+  const renderExpanded = async (selectedProgramId: number) => {
+    const user = userEvent.setup();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: true, json: async () => [] }),
+    );
+    render(
+      <StudentTable
+        students={[makeStudent({ student_pk_id: "101" })]}
+        grades={defaultGrades}
+        selectedProgramId={selectedProgramId}
+      />,
+    );
+    await user.click(screen.getByLabelText("Expand"));
+  };
+
+  it("hides the Documents list on a JNV NVS card", async () => {
+    await renderExpanded(PROGRAM_IDS.NVS);
+    expect(screen.queryByRole("heading", { name: "Documents" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the Documents list on a physical-centre card", async () => {
+    await renderExpanded(PROGRAM_IDS.COE);
+    expect(screen.getByRole("heading", { name: "Documents" })).toBeInTheDocument();
+  });
+});
+
 // ─── 5. Expand / collapse card details ──────────────────────────────────────
 
 describe("StudentTable - expand/collapse", () => {
