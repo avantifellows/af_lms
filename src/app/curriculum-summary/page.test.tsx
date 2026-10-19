@@ -282,6 +282,34 @@ describe("Curriculum Summary page", () => {
     );
   });
 
+  // QA-03: Back / Forward and the page-size select change the URL under a mounted page; the
+  // filter controls must show the new URL, not what was last typed or ticked.
+  it("re-renders the filter controls from the URL when it changes", async () => {
+    const { rerender } = render(
+      await CurriculumSummaryPage({
+        searchParams: Promise.resolve({ as_of: "2026-08-15", regions: "NORTH", q: "jnv", only_behind: "1" }),
+      })
+    );
+    fireEvent.click(screen.getByRole("checkbox", { name: "SOUTH" }));
+    fireEvent.change(screen.getByRole("searchbox", { name: "School" }), { target: { value: "unapplied" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: "Only behind" }));
+
+    rerender(await CurriculumSummaryPage({ searchParams: Promise.resolve({ as_of: "2026-08-10", regions: "SOUTH" }) }));
+
+    expect(screen.getByRole("checkbox", { name: "NORTH" })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "SOUTH" })).toBeChecked();
+    expect(screen.getByRole("searchbox", { name: "School" })).toHaveValue("");
+    expect(screen.getByRole("checkbox", { name: "Only behind" })).not.toBeChecked();
+    expect(screen.getByLabelText("As of")).toHaveValue("2026-08-10");
+
+    // A page brought back from the back/forward cache drops edits that were never applied.
+    fireEvent.change(screen.getByRole("searchbox", { name: "School" }), { target: { value: "unapplied" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: "NORTH" }));
+    window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+    expect(screen.getByRole("searchbox", { name: "School" })).toHaveValue("");
+    expect(screen.getByRole("checkbox", { name: "NORTH" })).not.toBeChecked();
+  });
+
   it("disables paging past either end and drops defaults from links", async () => {
     mockGetCurriculumSummary.mockResolvedValue(
       summary({ pagination: { page: 1, pageSize: 20, totalRows: 1, totalPages: 1 }, regionOptions: [] })

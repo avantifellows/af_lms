@@ -459,6 +459,69 @@ test.describe("Curriculum Summary filters", () => {
     expect(gradeUrl.searchParams.get("only_behind")).toBe("1");
     expect(await rowCentres(adminPage)).toEqual(["Summary E2E Anand Main"]);
   });
+
+  // QA-03: every filter control shows its history step's URL after Back / Forward, so the next
+  // Apply never re-sends a filter the URL doesn't have.
+  test("filter controls follow the URL on browser Back and Forward", async ({ adminPage }) => {
+    // The Region checkboxes sit in a <details> that may be closed.
+    const region = () =>
+      adminPage.getByRole("checkbox", { name: "SUMMARY_E2E", exact: true, includeHidden: true });
+    const onlyBehind = () => adminPage.getByRole("checkbox", { name: "Only behind" });
+    const school = () => adminPage.getByRole("searchbox", { name: "School" });
+    const apply = () => adminPage.getByRole("button", { name: "Apply" }).click();
+    const expectControls = async (expected: { region: boolean; onlyBehind: boolean; school: string }) => {
+      if (expected.region) await expect(region()).toBeChecked();
+      else await expect(region()).not.toBeChecked();
+      if (expected.onlyBehind) await expect(onlyBehind()).toBeChecked();
+      else await expect(onlyBehind()).not.toBeChecked();
+      await expect(school()).toHaveValue(expected.school);
+    };
+
+    await adminPage.goto(`/curriculum-summary?as_of=${AS_OF}`);
+    await adminPage.locator("summary", { hasText: "Region" }).click();
+    await region().check();
+    await apply();
+    await expect(adminPage).toHaveURL(/regions=SUMMARY_E2E/);
+    await onlyBehind().check();
+    await apply();
+    await expect(adminPage).toHaveURL(/only_behind=1/);
+    await school().fill("anand");
+    await apply();
+    await expect(adminPage).toHaveURL(/q=anand/);
+    await adminPage.getByRole("link", { name: "Grade 12" }).click();
+    await expect(adminPage).toHaveURL(/grade=12/);
+
+    await adminPage.goBack();
+    await expect(adminPage).toHaveURL(/grade=11/);
+    await expectControls({ region: true, onlyBehind: true, school: "anand" });
+    await adminPage.goBack();
+    await expect(adminPage).not.toHaveURL(/q=anand/);
+    await expectControls({ region: true, onlyBehind: true, school: "" });
+    await adminPage.goBack();
+    await expect(adminPage).not.toHaveURL(/only_behind/);
+    await expectControls({ region: true, onlyBehind: false, school: "" });
+    await adminPage.goBack();
+    await expect(adminPage).not.toHaveURL(/regions=/);
+    await expectControls({ region: false, onlyBehind: false, school: "" });
+
+    await adminPage.goForward();
+    await expect(adminPage).toHaveURL(/regions=SUMMARY_E2E/);
+    await expectControls({ region: true, onlyBehind: false, school: "" });
+    await adminPage.goForward();
+    await expect(adminPage).toHaveURL(/only_behind=1/);
+    await expectControls({ region: true, onlyBehind: true, school: "" });
+
+    // Back to the Region step, then Apply with nothing changed: the URL stays that step's.
+    await adminPage.goBack();
+    await expect(adminPage).not.toHaveURL(/only_behind/);
+    await apply();
+    await expect(adminPage).toHaveURL(/regions=SUMMARY_E2E/);
+    const applied = new URL(adminPage.url());
+    expect(applied.searchParams.get("only_behind")).toBeNull();
+    // An empty School search goes as `q=`.
+    expect(applied.searchParams.get("q") ?? "").toBe("");
+    await expectControls({ region: true, onlyBehind: false, school: "" });
+  });
 });
 
 // #428: Chapter Test Status from new-CMS chapter-test quiz sessions. Fixture:

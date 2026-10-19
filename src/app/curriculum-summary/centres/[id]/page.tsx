@@ -31,6 +31,7 @@ import {
   TableHead,
   TONE_BADGE_VARIANTS,
 } from "../../summary-ui";
+import UrlFilterForm from "../../UrlFilterForm";
 
 const HOURS_WINDOW_LABELS: Record<HoursWindow, string> = {
   ay: "This AY",
@@ -160,13 +161,17 @@ function TimelineFilters({
           active: timeline.hoursWindow === hours,
         }))}
       />
-      <form action={`/curriculum-summary/centres/${centreId}`} className="flex flex-wrap items-end gap-2">
+      <UrlFilterForm
+        key={timelineHref(centreId, timeline, { subject })}
+        action={`/curriculum-summary/centres/${centreId}`}
+        className="flex flex-wrap items-end gap-2"
+      >
         <input type="hidden" name="grade" value={timeline.grade} />
         <HiddenField name="hours" value={timeline.hoursWindow !== "ay" ? timeline.hoursWindow : null} />
         <HiddenField name="subject" value={subject} />
         <AsOfField asOf={timeline.asOf} />
         <ApplyButton />
-      </form>
+      </UrlFilterForm>
     </Card>
   );
 }

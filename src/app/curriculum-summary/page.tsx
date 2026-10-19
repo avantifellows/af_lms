@@ -5,6 +5,7 @@ import { Badge, Card } from "@/components/ui";
 import { getTodayIST } from "@/lib/curriculum-date-helpers";
 import { SUBJECT_GROUPS } from "@/lib/curriculum-plan-rules";
 import CurriculumSummaryPageSizeSelect from "./CurriculumSummaryPageSizeSelect";
+import UrlFilterForm from "./UrlFilterForm";
 import {
   CURRICULUM_SUMMARY_GRADES,
   CURRICULUM_SUMMARY_SUBJECTS,
@@ -179,8 +180,13 @@ function SummaryFilters({
           active: params.grade === grade,
         }))}
       />
-      {/* Submitting drops `page`, so changed filters start again at page 1. */}
-      <form action="/curriculum-summary" className="flex flex-wrap items-end gap-2">
+      {/* Submitting drops `page`, so changed filters start again at page 1. Keyed on the
+          filters so a client-side navigation re-renders the controls from the new URL. */}
+      <UrlFilterForm
+        key={summaryHref(params)}
+        action="/curriculum-summary"
+        className="flex flex-wrap items-end gap-2"
+      >
         <input type="hidden" name="grade" value={params.grade} />
         <HiddenField name="limit" value={params.pageSize !== DEFAULT_PAGE_SIZE ? params.pageSize : null} />
         <RegionFilter regionOptions={regionOptions} selected={params.regions} />
@@ -191,7 +197,7 @@ function SummaryFilters({
           Only behind
         </label>
         <ApplyButton />
-      </form>
+      </UrlFilterForm>
     </Card>
   );
 }
