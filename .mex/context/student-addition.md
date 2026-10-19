@@ -80,11 +80,28 @@ ask for a size, so `getStudentAdditionUploadColumns`, both static workbooks and 
 rejected-row CSV contract stay unchanged. The DB Service ingestion allowlist from #763 is
 left in place but is now unused by the LMS; removing it is a separate decision.
 
+Hidden for PMU (JNV NVS) Students: uniforms are ordered only for physical-centre programs, so
+`EditStudentModal` renders the Uniform Size section only when its `programId` (the roster's
+selected program) is not `PMU_PROGRAM_ID`. UI-only gate; the PATCH path still accepts the
+fields, and the modal never sends them for NVS because they are never rendered.
+
+Student documents follow the same rule (PR #433): under the NVS program the Edit Student
+Documents tab is not rendered and the roster card's expanded Documents list is hidden via
+`StudentCard`'s `isNvs`. The `/api/students/[id]/documents` routes are unchanged. #433 left
+NVS with no tab strip at all, since Details was then the only tab; the Exams tab (#434) is
+offered under every program, so the strip is back for NVS with Details and Exams on it. The
+NVS roster card's expanded view is also limited to the Edit Student fields its summary
+doesn't already show (`NvsDetailGroups` in `StudentTable.tsx`: CWSN, Father Name, Annual
+Family Income, Board Stream, G10 board, Grade 10 Roll no), so the card never shows fields the
+Edit form can't change — the Exam Registrations table sits outside that split and shows for
+every program. Keep the two in sync when an Edit Student field is added or removed for NVS.
+
 ## Exam Registrations (Exams tab)
 
 GitHub issue https://github.com/avantifellows/af_lms/issues/434 asked for the competitive
 exams a Student applies for to be captured in the LMS instead of an ops sheet. Edit Student
-has an **Exams** tab between Details and Documents, one block per exam.
+has an **Exams** tab between Details and Documents, one block per exam. It is offered under
+every program, NVS included — the issue draws no program distinction.
 
 The exams on offer are a curated list of `exam.name` values in `src/lib/competitive-exams.ts`
 — client-safe, so the picker and the server validation cannot drift. The `exam` table also

@@ -520,9 +520,38 @@ describe("EditStudentModal", () => {
     expect(props.onClose).not.toHaveBeenCalled();
   });
 
+  describe("documents tab", () => {
+    it("hides the Documents tab for PMU (JNV NVS) Students", () => {
+      renderModal();
+
+      // #433 left NVS with no tab strip, Details being the only tab then. Exams
+      // is offered under every program, so the strip is back — without Documents.
+      expect(screen.getByRole("tablist")).toBeInTheDocument();
+      expect(screen.queryByRole("tab", { name: "Documents" })).not.toBeInTheDocument();
+    });
+
+    it("keeps the Documents tab for physical-centre programs", () => {
+      renderModal({ programId: 1 });
+
+      expect(screen.getByRole("tab", { name: "Documents" })).toBeInTheDocument();
+    });
+  });
+
   describe("uniform sizes", () => {
+    // Sizes are collected for physical-centre programs; the default props are JNV NVS.
+    const CENTRE_PROGRAM_ID = 1;
+
+    it("hides the section for PMU (JNV NVS) Students", () => {
+      renderModal({ student: { ...baseStudent, tshirt_size: "L" } });
+
+      expect(screen.queryByText("Uniform Size")).not.toBeInTheDocument();
+      expect(document.querySelector('[name="tshirt_size"]')).toBeNull();
+      expect(document.querySelector('[name="track_pant_size"]')).toBeNull();
+    });
+
     it("prefills the stored sizes and offers the chart with measurements", () => {
       renderModal({
+        programId: CENTRE_PROGRAM_ID,
         student: { ...baseStudent, tshirt_size: "L", track_pant_size: "M" },
       });
 
@@ -538,7 +567,7 @@ describe("EditStudentModal", () => {
     });
 
     it("keeps a stored size the chart no longer offers selectable", () => {
-      renderModal({ student: { ...baseStudent, tshirt_size: "XXS" } });
+      renderModal({ programId: CENTRE_PROGRAM_ID, student: { ...baseStudent, tshirt_size: "XXS" } });
 
       const tshirt = getByName("tshirt_size") as HTMLSelectElement;
       expect(tshirt).toHaveValue("XXS");
@@ -550,7 +579,7 @@ describe("EditStudentModal", () => {
       mockFetch.mockResolvedValue(
         new Response(JSON.stringify({ ok: true }), { status: 200 }),
       );
-      renderModal();
+      renderModal({ programId: CENTRE_PROGRAM_ID });
 
       await user.selectOptions(getByName("tshirt_size"), "XL");
       await user.click(screen.getByText("Save Changes"));
@@ -566,7 +595,7 @@ describe("EditStudentModal", () => {
       mockFetch.mockResolvedValue(
         new Response(JSON.stringify({ ok: true }), { status: 200 }),
       );
-      renderModal({ student: { ...baseStudent, track_pant_size: "M" } });
+      renderModal({ programId: CENTRE_PROGRAM_ID, student: { ...baseStudent, track_pant_size: "M" } });
 
       await user.selectOptions(getByName("track_pant_size"), "");
       await user.click(screen.getByText("Save Changes"));
@@ -581,7 +610,7 @@ describe("EditStudentModal", () => {
       mockFetch.mockResolvedValue(
         new Response(JSON.stringify({ ok: true }), { status: 200 }),
       );
-      renderModal({ student: { ...baseStudent, tshirt_size: "L" } });
+      renderModal({ programId: CENTRE_PROGRAM_ID, student: { ...baseStudent, tshirt_size: "L" } });
 
       await user.clear(getByName("father_name"));
       await user.type(getByName("father_name"), "Mahesh Kumar");
@@ -606,10 +635,17 @@ describe("EditStudentModal", () => {
 
   describe("exams tab", () => {
     it("sits between Details and Documents", () => {
-      renderModal();
+      renderModal({ programId: 1 });
 
       const tabs = screen.getAllByRole("tab").map((tab) => tab.textContent);
       expect(tabs).toEqual(["Details", "Exams", "Documents"]);
+    });
+
+    it("is offered under the PMU program too, where Documents is not", () => {
+      renderModal();
+
+      const tabs = screen.getAllByRole("tab").map((tab) => tab.textContent);
+      expect(tabs).toEqual(["Details", "Exams"]);
     });
 
     it("loads the student's exam registrations when opened", async () => {
