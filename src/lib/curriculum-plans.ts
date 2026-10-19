@@ -252,6 +252,18 @@ interface ChapterRow {
   test_date: string | null;
 }
 
+// English Chapter name of chapter row `ch`, falling back to its code.
+const CHAPTER_NAME_SQL = `COALESCE(
+  (
+    SELECT item->>'chapter'
+    FROM jsonb_array_elements(ch.name::jsonb) item
+    WHERE item->>'lang_code' = 'en'
+    LIMIT 1
+  ),
+  ch.code,
+  'Unknown chapter'
+)`;
+
 // The plan's effective Chapter list: in-syllabus LMS Chapter Exam Configs for the Grade and
 // served tracks, one row per Chapter, by subject then lowest coverage sequence across the
 // served tracks. Stored dates for Chapters that left the syllabus are kept in the table but
@@ -264,16 +276,7 @@ async function loadEffectiveChapters(
     `SELECT
        ch.id AS chapter_id,
        ch.code AS chapter_code,
-       COALESCE(
-         (
-           SELECT item->>'chapter'
-           FROM jsonb_array_elements(ch.name::jsonb) item
-           WHERE item->>'lang_code' = 'en'
-           LIMIT 1
-         ),
-         ch.code,
-         'Unknown chapter'
-       ) AS chapter_name,
+       ${CHAPTER_NAME_SQL} AS chapter_name,
        s.id AS subject_id,
        COALESCE(
          (
@@ -581,6 +584,56 @@ export async function saveCurriculumPlanChapterDates(params: {
   return { ok: true, plan: reloaded.plan, warnings: outcome.warnings };
 }
 
+interface StoredChapterDateRow {
+  chapter_id: string | number;
+  chapter_name: string;
+  due_date: string | null;
+  test_date: string | null;
+}
+
+// Every dated row stored for the plan, whether or not its Chapter is on the effective list.
+async function loadStoredChapterDates(db: Db, planId: number): Promise<StoredChapterDateRow[]> {
+  return db<StoredChapterDateRow>(
+    `SELECT
+       pc.chapter_id,
+       ${CHAPTER_NAME_SQL} AS chapter_name,
+       pc.due_date::text AS due_date,
+       pc.test_date::text AS test_date
+     FROM lms_curriculum_plan_chapters pc
+     JOIN chapter ch ON ch.id = pc.chapter_id
+     WHERE pc.plan_id = $1
+       AND (pc.due_date IS NOT NULL OR pc.test_date IS NOT NULL)
+     ORDER BY ch.subject_id, ch.code, ch.id`,
+    [planId]
+  );
+}
+
+function storedDateErrors(
+  rows: StoredChapterDateRow[],
+  plan: { academic_year: string; closure_date: string }
+): CurriculumPlanError[] {
+  return rows.flatMap((row) =>
+    (
+      [
+        ["Chapter Due Date", row.due_date],
+        ["Chapter Test Date", row.test_date],
+      ] as const
+    ).flatMap(([label, date]) => {
+      const message = planDateError(label, date, plan);
+      return message
+        ? [
+            {
+              field: "closure_date",
+              chapterId: Number(row.chapter_id),
+              chapterName: row.chapter_name,
+              message,
+            },
+          ]
+        : [];
+    })
+  );
+}
+
 export type CurriculumPlanUpdateResult =
   | { ok: true; plan: CurriculumPlanSummary }
   | CurriculumPlanValidationFailure
@@ -588,10 +641,11 @@ export type CurriculumPlanUpdateResult =
   | NotFound
   | Conflict;
 
-// Update title, served tracks, academic year, Grade and Plan Closure Date. Every stored date
-// on the resulting effective Chapter list must still fall within the academic year and on or
-// before the closure date; dates of Chapters outside the new list stay stored but hidden.
-// Academic year and Grade are locked while the plan has any Plan Assignment.
+// Update title, served tracks, academic year, Grade and Plan Closure Date. Every stored date of
+// the plan must still fall within the academic year and on or before the closure date,
+// including dates of Chapters hidden because they left the syllabus or the served tracks: they
+// come back when the Chapter does. Academic year and Grade are locked while the plan has any
+// Plan Assignment.
 export async function updateCurriculumPlanMetadata(params: {
   id: number;
   adminEmail: string;
@@ -629,29 +683,8 @@ export async function updateCurriculumPlanMetadata(params: {
       }
     }
 
-    const chapters = await loadEffectiveChapters(db, {
-      id: params.id,
-      gradeId,
-      examTracks: metadata.examTracks,
-    });
     const updated = { academic_year: metadata.academicYear, closure_date: metadata.closureDate };
-    const errors: CurriculumPlanError[] = [];
-    for (const chapter of chapters) {
-      for (const [label, date] of [
-        ["Chapter Due Date", chapter.dueDate],
-        ["Chapter Test Date", chapter.testDate],
-      ] as const) {
-        const message = planDateError(label, date, updated);
-        if (message) {
-          errors.push({
-            field: "closure_date",
-            chapterId: chapter.chapterId,
-            chapterName: chapter.chapterName,
-            message,
-          });
-        }
-      }
-    }
+    const errors = storedDateErrors(await loadStoredChapterDates(db, params.id), updated);
     if (errors.length > 0) return validationFailure(errors);
 
     await db(
