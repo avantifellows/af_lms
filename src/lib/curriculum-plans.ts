@@ -328,6 +328,17 @@ export async function getCurriculumPlan(id: number): Promise<CurriculumPlanGetRe
   return { ok: true, plan: { ...plan, chapters } };
 }
 
+// The effective Chapter list a plan for this Grade and served tracks would have (no stored
+// dates). Used by the one-time workbook seed before any plan exists.
+export async function listEffectiveChaptersForGrade(
+  grade: number,
+  examTracks: readonly ExamTrack[]
+): Promise<CurriculumPlanChapter[]> {
+  const gradeId = await resolveGradeId(poolDb, grade);
+  if (gradeId === null) return [];
+  return loadEffectiveChapters(poolDb, { id: null, gradeId, examTracks });
+}
+
 export function planNotFound(): NotFound {
   return { ok: false, status: 404, error: "Curriculum Plan not found" };
 }
