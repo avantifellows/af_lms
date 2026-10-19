@@ -33,14 +33,15 @@ const fieldClassName =
 const labelClassName = "flex flex-col gap-1 text-sm font-bold text-text-primary";
 
 // Create (POST) or update (PATCH) the plan's details. A new plan opens its editor; an update
-// refreshes the page.
+// refreshes the page. `clearConflictingDates` consents to clearing the stored Chapter dates that
+// clash with the new academic year or closure date.
 function usePlanDetailsSave(planId: number | undefined) {
   const router = useRouter();
   const [errors, setErrors] = useState<CurriculumPlanError[]>([]);
   const [saving, setSaving] = useState(false);
   const [savedMessage, setSavedMessage] = useState("");
 
-  async function save(values: CurriculumPlanMetadataValues) {
+  async function save(values: CurriculumPlanMetadataValues, clearConflictingDates = false) {
     setSaving(true);
     setErrors([]);
     setSavedMessage("");
@@ -54,6 +55,7 @@ function usePlanDetailsSave(planId: number | undefined) {
           academic_year: values.academicYear,
           grade: values.grade,
           closure_date: values.closureDate,
+          ...(clearConflictingDates ? { clear_conflicting_dates: true } : {}),
         }
       );
       if (!response.ok) {
@@ -106,6 +108,18 @@ export default function CurriculumPlanMetadataForm({
             <PlanErrorItems errors={errors} />
           </ul>
         ) : null}
+        {planId !== undefined && hasStoredDateClash(errors) ? (
+          <div className="md:col-span-2">
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={readOnly || saving}
+              onClick={() => void save(values, true)}
+            >
+              Clear these Chapters&apos; dates and save
+            </Button>
+          </div>
+        ) : null}
         {savedMessage ? (
           <p role="status" className="text-sm font-bold text-success md:col-span-2">
             {savedMessage}
@@ -119,6 +133,12 @@ export default function CurriculumPlanMetadataForm({
       </form>
     </Card>
   );
+}
+
+// Stored Chapter dates outside the new academic year or after the new closure date. Some may be
+// on hidden Chapters that the editor grid doesn't show, so the form offers to clear them.
+function hasStoredDateClash(errors: CurriculumPlanError[]): boolean {
+  return errors.some((error) => error.field === "closure_date" && error.chapterId !== undefined);
 }
 
 function PlanDetailsFields({

@@ -721,6 +721,20 @@ function storedDateErrors(
   );
 }
 
+// The Admin's consent to clear the dates that clash with the new academic year or closure date.
+// Hidden Chapters aren't in the editor grid, so this is the only way to clear their dates.
+function clearConflictingDatesRequested(body: unknown): boolean {
+  return Boolean(body && typeof body === "object" && (body as Record<string, unknown>).clear_conflicting_dates === true);
+}
+
+async function clearChapterDates(db: Db, planId: number, errors: CurriculumPlanError[]): Promise<void> {
+  const chapterIds = [...new Set(errors.map((error) => error.chapterId))];
+  await db(
+    "DELETE FROM lms_curriculum_plan_chapters WHERE plan_id = $1 AND chapter_id = ANY($2::bigint[])",
+    [planId, chapterIds]
+  );
+}
+
 export type CurriculumPlanUpdateResult =
   | { ok: true; plan: CurriculumPlanSummary }
   | CurriculumPlanValidationFailure
@@ -731,8 +745,9 @@ export type CurriculumPlanUpdateResult =
 // Update title, served tracks, academic year, Grade and Plan Closure Date. Every stored date of
 // the plan must still fall within the academic year and on or before the closure date,
 // including dates of Chapters hidden because they left the syllabus or the served tracks: they
-// come back when the Chapter does. Academic year and Grade are locked while the plan has any
-// Plan Assignment.
+// come back when the Chapter does. With `clear_conflicting_dates: true` the clashing Chapters'
+// dates are cleared instead of rejected. Academic year and Grade are locked while the plan has
+// any Plan Assignment.
 export async function updateCurriculumPlanMetadata(params: {
   id: number;
   adminEmail: string;
@@ -760,7 +775,10 @@ export async function updateCurriculumPlanMetadata(params: {
 
     const updated = { academic_year: metadata.academicYear, closure_date: metadata.closureDate };
     const errors = storedDateErrors(await loadStoredChapterDates(db, params.id), updated);
-    if (errors.length > 0) return validationFailure(errors);
+    if (errors.length > 0) {
+      if (!clearConflictingDatesRequested(params.body)) return validationFailure(errors);
+      await clearChapterDates(db, params.id, errors);
+    }
 
     await db(
       `UPDATE lms_curriculum_plans

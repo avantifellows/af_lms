@@ -111,6 +111,45 @@ describe("CurriculumPlanMetadataForm", () => {
     expect(await screen.findByTestId("plan-details-errors")).toHaveTextContent(message);
   });
 
+  it("offers to clear the clashing Chapters' dates, then saves with that consent", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        json: async () => ({
+          error: "Invalid Curriculum Plan",
+          errors: [
+            {
+              field: "closure_date",
+              chapterId: 9,
+              chapterName: "Rotational Dynamics (Advanced)",
+              message: "Chapter Due Date 2027-02-20 is after the Plan Closure Date 2026-12-31",
+            },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ plan: { id: 7 } }) });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CurriculumPlanMetadataForm planId={7} initialValues={VALUES} readOnly={false} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Save plan details" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Clear these Chapters' dates and save" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent("Plan details saved.");
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).not.toHaveProperty("clear_conflicting_dates");
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toMatchObject({ clear_conflicting_dates: true });
+  });
+
+  it("does not offer to clear dates for errors that aren't about stored Chapter dates", async () => {
+    respond({ error: "Invalid Curriculum Plan", errors: [{ field: "title", message: "Title is required" }] }, false);
+    render(<CurriculumPlanMetadataForm planId={7} initialValues={VALUES} readOnly={false} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Save plan details" }));
+
+    await screen.findByTestId("plan-details-errors");
+    expect(screen.queryByRole("button", { name: "Clear these Chapters' dates and save" })).toBeNull();
+  });
+
   it("shows an error when the request fails", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
     render(<CurriculumPlanMetadataForm planId={7} initialValues={VALUES} readOnly={false} />);

@@ -108,6 +108,32 @@ describe("updateCurriculumPlanMetadata", () => {
     expect(db.current.sqlCalls("UPDATE lms_curriculum_plans")).toHaveLength(0);
   });
 
+  // The hidden Chapter isn't in the editor grid, so the Admin can't clear it there; consenting
+  // with `clear_conflicting_dates` clears the clashing Chapters' dates and saves.
+  it("clears the clashing Chapters' dates and saves when asked to", async () => {
+    db.current.on("FROM lms_curriculum_plan_chapters pc", [
+      {
+        chapter_id: 501,
+        chapter_name: "Rotational Dynamics (Advanced)",
+        due_date: "2027-02-20",
+        test_date: "2027-02-21",
+      },
+      { chapter_id: 502, chapter_name: "Motion", due_date: "2026-07-01", test_date: null },
+    ]);
+
+    const result = await updateCurriculumPlanMetadata({
+      id: 7,
+      adminEmail: ADMIN_EMAIL,
+      body: metadataBody({ clear_conflicting_dates: true }),
+    });
+
+    expect(result.ok).toBe(true);
+    const cleared = db.current.sqlCalls("DELETE FROM lms_curriculum_plan_chapters");
+    expect(cleared).toHaveLength(1);
+    expect(cleared[0].params).toEqual([7, [501]]);
+    expect(db.current.sqlCalls("UPDATE lms_curriculum_plans")).toHaveLength(1);
+  });
+
   it("rejects an academic year change that leaves stored dates outside the new year", async () => {
     db.current.on("FROM lms_curriculum_plan_chapters pc", [
       { chapter_id: 501, chapter_name: "Hidden Chapter", due_date: "2026-06-30", test_date: "2026-07-05" },

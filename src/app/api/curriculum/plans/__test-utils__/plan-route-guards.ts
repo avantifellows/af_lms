@@ -14,6 +14,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ADMIN_SESSION } from "../../../__test-utils__/api-test-helpers";
 
+// Used only through the dynamic import inside each test's `vi.hoisted`, which Fallow can't trace.
+// fallow-ignore-next-line unused-export
 export function createPlanRouteMocks() {
   return {
     getServerSession: vi.fn(),
