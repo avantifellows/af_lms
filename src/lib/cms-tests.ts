@@ -31,12 +31,26 @@ const CMS_EXAM_TRACK_STREAMS: Record<CmsExamTrack, string> = {
   cet: "",
 };
 
+// meta_data.course, which reporting groups by. The exam track already names the
+// exam, so deriving it keeps CMS sessions consistent with legacy ones instead of
+// leaving the key absent. CET stays generic: the track does not say which state.
+const CMS_EXAM_TRACK_COURSES: Record<CmsExamTrack, string> = {
+  jee_main: "JEE Mains",
+  jee_advanced: "JEE Advanced",
+  neet: "NEET",
+  cet: "CET",
+};
+
 export function curriculumIdForCmsExamTrack(examTrack: CmsExamTrack): number {
   return CMS_EXAM_TRACK_CURRICULUM_IDS[examTrack];
 }
 
 export function streamForCmsExamTrack(examTrack: CmsExamTrack): string {
   return CMS_EXAM_TRACK_STREAMS[examTrack];
+}
+
+export function courseForCmsExamTrack(examTrack: CmsExamTrack): string {
+  return CMS_EXAM_TRACK_COURSES[examTrack];
 }
 
 // Test subtypes the picker supports. chapter_test is chapter-scoped; major_test is
