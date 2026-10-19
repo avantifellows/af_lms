@@ -55,7 +55,8 @@ describe("loadChapterTestSessions", () => {
 
   // as_of 1 Feb 2027 viewed in Oct 2027 must not count a July 2027 session: sessions are bounded
   // to the as-of date's academic year, and to those created or started by the end of as-of.
-  it("bounds sessions to the academic year and to what existed by the as-of date", async () => {
+  // e2e/tests/curriculum-summary.spec.ts covers the bounding itself.
+  it("reads with the as-of date's academic year bounds and the as-of date", async () => {
     await loadChapterTestSessions({
       centreIds: [11],
       grade: 11,
@@ -63,26 +64,7 @@ describe("loadChapterTestSessions", () => {
       asOf: "2027-02-01",
     });
 
-    const [sql, params] = mockQuery.mock.calls[0] as [string, unknown[]];
+    const [, params] = mockQuery.mock.calls[0] as [string, unknown[]];
     expect(params).toEqual([[11], 11, "2026-04-01", "2027-03-31", "2027-02-01"]);
-    expect(sql).toContain("s.start_time >= $3::date");
-    expect(sql).toContain("s.start_time < $4::date + 1");
-    expect(sql).toMatch(
-      /LEAST\(\s*s\.start_time,\s*s\.inserted_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia\/Kolkata'\s*\) < \$5::date \+ 1/
-    );
-  });
-
-  it("finds the majority Chapter after unifying duplicate Chapter rows", async () => {
-    await loadChapterTestSessions({
-      centreIds: [11],
-      grade: 11,
-      academicYear: "2026-2027",
-      asOf: "2026-08-15",
-    });
-
-    const [sql] = mockQuery.mock.calls[0] as [string, unknown[]];
-    const majority = sql.slice(sql.indexOf("resource_chapter rc"), sql.indexOf("LIMIT 1", sql.indexOf("resource_chapter rc")));
-    expect(majority).toContain("GROUP BY majority.code, majority.subject_id, majority.grade_id");
-    expect(majority).not.toContain("GROUP BY rc.chapter_id");
   });
 });

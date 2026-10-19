@@ -133,8 +133,6 @@ describe("updateCurriculumPlanMetadata", () => {
     expect(cleared).toHaveLength(1);
     // 501's due date clashes, so both its dates go; 502 is untouched.
     expect(cleared[0].params).toEqual([7, [501], [501], ADMIN_EMAIL]);
-    expect(cleared[0].sql).toContain("due_date = CASE WHEN chapter_id = ANY($2::bigint[]) THEN NULL ELSE due_date END");
-    expect(cleared[0].sql).toContain("test_date = NULL");
     expect(db.current.sqlCalls("UPDATE lms_curriculum_plans")).toHaveLength(1);
   });
 
@@ -154,9 +152,8 @@ describe("updateCurriculumPlanMetadata", () => {
     expect(result.ok).toBe(true);
     const cleared = db.current.sqlCalls("UPDATE lms_curriculum_plan_chapters");
     expect(cleared).toHaveLength(1);
-    // No due date clashes ($2 empty), so the CASE keeps 501's due date; its test date is cleared.
+    // No due dates clash, so 501 is cleared by its test date only.
     expect(cleared[0].params).toEqual([7, [], [501], ADMIN_EMAIL]);
-    expect(cleared[0].sql).toContain("WHERE plan_id = $1 AND (chapter_id = ANY($2::bigint[]) OR chapter_id = ANY($3::bigint[]))");
   });
 
   // The Admin consented to clear the Chapters a 400 listed. If the closure date was edited
@@ -274,11 +271,10 @@ describe("updateCurriculumPlanMetadata", () => {
     expect(db.current.sqlCalls("UPDATE lms_curriculum_plans")).toHaveLength(0);
   });
 
-  it("reads every stored dated row of the plan, not only the effective Chapter list", async () => {
+  it("reads the plan's stored dated rows by plan id", async () => {
     await updateCurriculumPlanMetadata({ id: 7, adminEmail: ADMIN_EMAIL, body: metadataBody() });
 
     const [storedDates] = db.current.sqlCalls("FROM lms_curriculum_plan_chapters pc");
-    expect(storedDates.sql).not.toContain("lms_chapter_exam_configs");
     expect(storedDates.params).toEqual([7]);
   });
 

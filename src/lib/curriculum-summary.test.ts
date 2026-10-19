@@ -204,13 +204,16 @@ function routeQueries(routes: {
   grades?: unknown[];
   activity?: unknown[];
 }) {
+  // Routed by the table each read is about; the summary read also joins centre_exam_tracks.
   mockQuery.mockImplementation(async (sql: string) => {
-    if (sql.includes("WITH scoped_centres")) return routes.summary ?? [];
-    if (sql.includes("WITH window_logs")) return routes.activity ?? [];
-    if (sql.includes("FROM centre_exam_tracks cet")) return routes.grades ?? [];
+    if (sql.includes("lms_curriculum_plan_assignments")) return routes.summary ?? [];
+    if (sql.includes(ACTIVITY_TABLE)) return routes.activity ?? [];
+    if (sql.includes("centre_exam_tracks")) return routes.grades ?? [];
     return [];
   });
 }
+
+const ACTIVITY_TABLE = "lms_curriculum_logs";
 
 beforeEach(() => {
   mockQuery.mockReset();
@@ -645,7 +648,7 @@ describe("getChapterTimeline", () => {
       doubtSolvingMinutes: 30,
     });
     // Last 7 days to 15 Aug, for the class's tracks and Chapters.
-    const activityCall = mockQuery.mock.calls.find(([sql]) => String(sql).includes("WITH window_logs"));
+    const activityCall = mockQuery.mock.calls.find(([sql]) => String(sql).includes(ACTIVITY_TABLE));
     expect(activityCall?.[1]).toEqual(["SC1", 2, 11, ["jee_main", "neet"], "2026-08-09", AS_OF, [1, 2, 3, 4, 5]]);
   });
 
@@ -697,6 +700,6 @@ describe("getChapterTimeline", () => {
     expect(result.timeline.row.explanation).toBe("Fix tracks in Centre Management");
     expect(result.timeline.chapters).toEqual([]);
     expect(result.timeline.subjects).toEqual([]);
-    expect(mockQuery.mock.calls.some(([sql]) => String(sql).includes("WITH window_logs"))).toBe(false);
+    expect(mockQuery.mock.calls.some(([sql]) => String(sql).includes(ACTIVITY_TABLE))).toBe(false);
   });
 });
