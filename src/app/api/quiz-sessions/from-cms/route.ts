@@ -9,6 +9,7 @@ import { quizDurationSeconds } from "@/lib/quiz-duration";
 import { resolveGradeId } from "@/lib/curriculum-options";
 import {
   CMS_SOURCE,
+  courseForCmsExamTrack,
   isCmsExamTrack,
   isCmsTestType,
   streamForCmsExamTrack,
@@ -368,6 +369,7 @@ export async function POST(request: NextRequest) {
       batch_id: body.classBatchIds.join(","),
       grade: body.grade,
       stream: body.stream,
+      course: courseForCmsExamTrack(body.examTrack),
       test_code: body.testCode ?? "",
       test_name: body.testName ?? sessionName,
       test_format: body.testType,
