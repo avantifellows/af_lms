@@ -44,7 +44,13 @@ type SummaryData = Extract<CurriculumSummaryResult, { ok: true }>;
 const DEFAULT_PAGE_SIZE = 20;
 const ACTION_LINK_CLASS_NAME =
   "rounded-md border border-border px-3 py-1.5 text-sm font-bold text-accent hover:text-accent-hover";
-const CELL_CLASS_NAME = "px-4 py-3 align-top";
+// Column layout (curriculum owner feedback): the subject and PCM / PCB Behind columns are the
+// wide, centred ones; the others are compact. Table cells ignore max-width, so the compact caps
+// sit on the cell contents.
+const CELL_CLASS_NAME = "py-3 align-top";
+const COMPACT_CELL_CLASS_NAME = `${CELL_CLASS_NAME} px-2 text-xs`;
+const KEY_COLUMN_CLASS_NAME = "w-[7.5rem] px-2 text-center";
+const TESTS_COLUMN_CLASS_NAME = "w-20 px-2 text-center";
 
 export default async function CurriculumSummaryPage({ searchParams }: PageProps) {
   const resolvedSearchParams = await searchParams;
@@ -348,24 +354,32 @@ const MEASURE_COLUMNS = CURRICULUM_SUMMARY_SUBJECTS.length + SUBJECT_GROUPS.leng
 
 const lowercase = <T extends string>(label: T) => label.toLowerCase() as Lowercase<T>;
 
-const SUMMARY_COLUMNS: { label: string; sortKey: CurriculumSummarySortKey }[] = [
+const SUMMARY_COLUMNS: { label: string; sortKey: CurriculumSummarySortKey; className?: string }[] = [
   { label: "Centre", sortKey: "centre" },
-  { label: "Program", sortKey: "program" },
-  { label: "Tracks", sortKey: "tracks" },
-  { label: "Region", sortKey: "region" },
-  ...CURRICULUM_SUMMARY_SUBJECTS.map((subject) => ({ label: subject, sortKey: lowercase(subject) })),
-  ...SUBJECT_GROUPS.map((group) => ({ label: `${group} Behind`, sortKey: lowercase(group) })),
-  { label: "Tests overdue", sortKey: "tests_overdue" },
-  { label: "Plan", sortKey: "plan" },
+  { label: "Program", sortKey: "program", className: "px-2 text-left" },
+  { label: "Tracks", sortKey: "tracks", className: "px-2 text-left" },
+  { label: "Region", sortKey: "region", className: "px-2 text-left" },
+  ...CURRICULUM_SUMMARY_SUBJECTS.map((subject) => ({
+    label: subject,
+    sortKey: lowercase(subject),
+    className: KEY_COLUMN_CLASS_NAME,
+  })),
+  ...SUBJECT_GROUPS.map((group) => ({
+    label: `${group} Behind`,
+    sortKey: lowercase(group),
+    className: KEY_COLUMN_CLASS_NAME,
+  })),
+  { label: "Tests overdue", sortKey: "tests_overdue", className: TESTS_COLUMN_CLASS_NAME },
+  { label: "Plan", sortKey: "plan", className: "px-2 text-left" },
 ];
 
 // Every header links to its sort from page 1, keeping the filters: the active column's link
 // reverses its direction, any other column's starts in its first-click direction.
 function sortableHeaders(params: CurriculumSummaryQuery) {
-  return SUMMARY_COLUMNS.map(({ label, sortKey: key }) => {
+  return SUMMARY_COLUMNS.map(({ label, sortKey: key, className }) => {
     const direction = params.sort?.key === key ? params.sort.dir : null;
     const nextDirection = direction ? (direction === "asc" ? "desc" : "asc") : defaultSortDirection(key);
-    return { label, direction, href: summaryHref(params, { sort: { key, dir: nextDirection } }) };
+    return { label, direction, className, href: summaryHref(params, { sort: { key, dir: nextDirection } }) };
   });
 }
 
@@ -398,16 +412,24 @@ function SummaryTableRow({ row, params }: { row: CurriculumSummaryRow; params: C
 
   return (
     <tr data-summary-row data-centre={row.centreName} data-kind={row.kind}>
-      <td className={CELL_CLASS_NAME}>
-        <Link href={timelineHref} className="font-bold text-accent hover:text-accent-hover">
+      <td className={`${CELL_CLASS_NAME} px-4`}>
+        {/* Between 10 and 11rem: a long Centre name takes at most two lines. */}
+        <Link
+          href={timelineHref}
+          className="block min-w-[10rem] max-w-[11rem] font-bold text-accent hover:text-accent-hover"
+        >
           {row.centreName}
         </Link>
       </td>
-      <td className={`${CELL_CLASS_NAME} whitespace-nowrap`}>{row.programName}</td>
-      <td className={CELL_CLASS_NAME}>
-        <TracksLabel label={row.tracksLabel} />
+      <td className={`${COMPACT_CELL_CLASS_NAME} whitespace-nowrap`}>{row.programName}</td>
+      <td className={COMPACT_CELL_CLASS_NAME}>
+        <span className="block max-w-[7rem]">
+          <TracksLabel label={row.tracksLabel} />
+        </span>
       </td>
-      <td className={CELL_CLASS_NAME}>{row.region ?? "—"}</td>
+      <td className={COMPACT_CELL_CLASS_NAME}>
+        <span className="block max-w-[8rem] break-words">{row.region ?? "—"}</span>
+      </td>
       <RowMetrics row={row} />
     </tr>
   );
@@ -432,7 +454,7 @@ function RowMetrics({ row }: { row: CurriculumSummaryRow }) {
     <td
       colSpan={MEASURE_COLUMNS + 2}
       data-explanation
-      className={`${CELL_CLASS_NAME} font-bold text-warning-text`}
+      className={`${CELL_CLASS_NAME} px-2 font-bold text-warning-text`}
     >
       {row.explanation}
     </td>
@@ -451,25 +473,27 @@ function PlanCells({
   return (
     <>
       {CURRICULUM_SUMMARY_SUBJECTS.map((subject) => (
-        <td key={subject} data-subject={subject} className={CELL_CLASS_NAME}>
+        <td key={subject} data-subject={subject} className={`${CELL_CLASS_NAME} px-2 text-center`}>
           <ProgressPill progress={subjects[subject]} />
         </td>
       ))}
       {SUBJECT_GROUPS.map((group) => (
-        <td key={group} data-subject-group={group} className={CELL_CLASS_NAME}>
+        <td key={group} data-subject-group={group} className={`${CELL_CLASS_NAME} px-2 text-center`}>
           <ProgressPill progress={subjectGroups[group]} />
         </td>
       ))}
-      <td data-tests-overdue className={`${CELL_CLASS_NAME} font-mono font-bold`}>
+      <td data-tests-overdue className={`${CELL_CLASS_NAME} px-2 text-center font-mono font-bold`}>
         {row.testsOverdue}
       </td>
-      <td data-plan className={CELL_CLASS_NAME}>
-        {row.plan?.title}
-        {row.plan?.closed ? (
-          <Badge className="ml-2" data-plan-closed>
-            Closed
-          </Badge>
-        ) : null}
+      <td data-plan className={COMPACT_CELL_CLASS_NAME}>
+        <span className="block min-w-[7rem] max-w-[9rem]">
+          {row.plan?.title}
+          {row.plan?.closed ? (
+            <Badge className="ml-1" data-plan-closed>
+              Closed
+            </Badge>
+          ) : null}
+        </span>
       </td>
     </>
   );
@@ -500,13 +524,13 @@ function ProgressPill({ progress }: { progress: CurriculumSummarySubjectProgress
 function NoPlanCells({ testsConducted }: { testsConducted: number }) {
   return (
     <>
-      <td colSpan={MEASURE_COLUMNS} className={`${CELL_CLASS_NAME} text-text-muted`}>
+      <td colSpan={MEASURE_COLUMNS} className={`${CELL_CLASS_NAME} px-2 text-text-muted`}>
         Not measured without an Active plan
       </td>
-      <td data-tests-conducted className={`${CELL_CLASS_NAME} text-text-secondary`}>
+      <td data-tests-conducted className={`${COMPACT_CELL_CLASS_NAME} text-center text-text-secondary`}>
         {testsConducted} conducted
       </td>
-      <td data-plan className={`${CELL_CLASS_NAME} text-text-muted`}>
+      <td data-plan className={`${COMPACT_CELL_CLASS_NAME} text-text-muted`}>
         No plan
       </td>
     </>

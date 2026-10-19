@@ -324,6 +324,32 @@ describe("Curriculum Summary page", () => {
     ]);
   });
 
+  it("makes the subject and PCM / PCB Behind columns wide and centred, and the others compact", async () => {
+    await renderPage({ sort: "pcm", dir: "desc" });
+
+    const header = (name: string) => screen.getByRole("columnheader", { name });
+    for (const name of ["Physics", "Chemistry", "Maths", "Biology", "PCM Behind", "PCB Behind"]) {
+      expect(header(name)).toHaveClass("w-[7.5rem]", "text-center");
+    }
+    // The sort link and aria-sort are unchanged by the layout.
+    expect(header("PCM Behind")).toHaveAttribute("aria-sort", "descending");
+    expect(within(header("PCM Behind")).getByRole("link", { name: "PCM Behind" })).toBeInTheDocument();
+    expect(header("Tests overdue")).toHaveClass("w-20", "text-center");
+    for (const name of ["Program", "Tracks", "Region", "Plan"]) {
+      expect(header(name)).toHaveClass("px-2", "text-left");
+    }
+    expect(header("Centre")).toHaveClass("px-4", "text-left");
+
+    const plan = summaryRow("Anand Shared");
+    expect(plan.querySelector('[data-subject="Physics"]')).toHaveClass("text-center");
+    expect(plan.querySelector('[data-subject-group="PCB"]')).toHaveClass("text-center");
+    expect(plan.querySelector("[data-tests-overdue]")).toHaveClass("text-center");
+    expect(plan.querySelector("[data-plan]")).toHaveClass("text-xs");
+    expect(within(plan).getByRole("link", { name: "Anand Shared" })).toHaveClass("max-w-[11rem]");
+    // "Not measured" still spans the measured columns.
+    expect(summaryRow("Surat").querySelector("td[colspan]")).toHaveAttribute("colspan", "6");
+  });
+
   it("counts a No plan row without a conducted count as 0", async () => {
     mockGetCurriculumSummary.mockResolvedValue(
       summary({ rows: [row({ kind: "no_plan", plan: null, subjects: null, testsConducted: null })] })

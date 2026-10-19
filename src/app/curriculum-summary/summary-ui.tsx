@@ -130,7 +130,8 @@ export function ApplyButton() {
   );
 }
 
-const TABLE_HEADER_CLASS_NAME = "px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-text-muted";
+const HEADER_TEXT_CLASS_NAME = "py-3 text-xs font-bold uppercase tracking-wide text-text-muted";
+const TABLE_HEADER_CLASS_NAME = `px-4 text-left ${HEADER_TEXT_CLASS_NAME}`;
 
 export function TableHead({ headers }: { headers: readonly string[] }) {
   return (
@@ -152,6 +153,8 @@ export interface SortableHeader {
   href: string;
   // Set on the column the table is sorted by.
   direction: "asc" | "desc" | null;
+  // The column's width, padding and alignment; default `px-4 text-left`.
+  className?: string;
 }
 
 const ARIA_SORT = { asc: "ascending", desc: "descending" } as const;
@@ -166,7 +169,7 @@ export function SortableTableHead({ headers }: { headers: readonly SortableHeade
             key={header.label}
             scope="col"
             aria-sort={header.direction ? ARIA_SORT[header.direction] : undefined}
-            className={TABLE_HEADER_CLASS_NAME}
+            className={`${header.className ?? "px-4 text-left"} ${HEADER_TEXT_CLASS_NAME}`}
           >
             <Link
               href={header.href}
