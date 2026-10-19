@@ -180,10 +180,11 @@ test.describe("Curriculum Summary", () => {
     await expect(page.getByTestId("summary-centres-on-plan")).toHaveText("4/7");
     await expect(page.getByTestId("summary-chapters-behind")).toHaveText("6");
     await expect(page.locator("[data-summary-row]")).toHaveCount(9);
+    // Vapi Closed and Anand Main are both 1 behind; Vapi Closed has more tests overdue (2 vs 1).
     expect(await rowCentres(page)).toEqual([
       "Summary E2E Anand Shared",
-      "Summary E2E Anand Main",
       "Summary E2E Vapi Closed",
+      "Summary E2E Anand Main",
       "Summary E2E Bhuj Neet",
       "Summary E2E Surat Draft",
       "Summary E2E Vapi Unassigned",
@@ -210,6 +211,8 @@ test.describe("Curriculum Summary", () => {
     );
     await expect(page.getByTestId("summary-centres-on-plan")).toHaveText("1/1");
     await expect(page.getByTestId("summary-chapters-behind")).toHaveText("1");
+    // No Grade 12 chapter-test sessions: Limits (test date 2 Jul) and Vectors (2 Aug) overdue.
+    await expect(page.getByTestId("summary-tests-overdue")).toHaveText("2");
     await page.context().close();
   });
 
@@ -237,6 +240,8 @@ test.describe("Curriculum Summary", () => {
     await adminPage.getByRole("link", { name: "Next" }).click();
     await expect(adminPage.getByText("Page 2 of 2")).toBeVisible();
     await expect(adminPage.getByTestId("summary-centres-on-plan")).toHaveText("4/9");
+    // The Admin-only rows have no plan, so they add no tests overdue to the PM's 8.
+    await expect(adminPage.getByTestId("summary-tests-overdue")).toHaveText("8");
     expect(await rowCentres(adminPage)).toEqual([
       "Summary E2E Bhuj Setup",
       "Summary E2E Surat CET",
@@ -327,16 +332,19 @@ test.describe("Curriculum Summary filters", () => {
   }) => {
     const page = await summaryPmPage(browser);
     await page.goto(`/curriculum-summary?as_of=${AS_OF}&only_behind=1`);
-    // Behind ≥ 1: Anand Shared 4, Anand Main 1, Vapi Closed 1. Bhuj Neet (0), the No plan rows
-    // and the setup / no-content / configuration-error rows are hidden.
+    // Behind ≥ 1: Anand Shared 4, Vapi Closed 1 (2 tests overdue), Anand Main 1 (1 test
+    // overdue). Bhuj Neet (0), the No plan rows and the setup / no-content / configuration-error
+    // rows are hidden.
     expect(await rowCentres(page)).toEqual([
       "Summary E2E Anand Shared",
-      "Summary E2E Anand Main",
       "Summary E2E Vapi Closed",
+      "Summary E2E Anand Main",
     ]);
-    // Same as the unfiltered page: on plan 4 of 7, 6 Chapters behind.
+    // Same as the unfiltered page: on plan 4 of 7, 6 Chapters behind, 8 tests overdue (Bhuj
+    // Neet's 3 still count).
     await expect(page.getByTestId("summary-centres-on-plan")).toHaveText("4/7");
     await expect(page.getByTestId("summary-chapters-behind")).toHaveText("6");
+    await expect(page.getByTestId("summary-tests-overdue")).toHaveText("8");
     await page.context().close();
   });
 
@@ -364,6 +372,8 @@ test.describe("Curriculum Summary filters", () => {
       expect(await rowCentres(adminPage)).toEqual(["Summary E2E Anand Shared", "Summary E2E Anand Main"]);
       await expect(adminPage.getByTestId("summary-centres-on-plan")).toHaveText("2/2");
       await expect(adminPage.getByTestId("summary-chapters-behind")).toHaveText("5");
+      // Anand Shared 2 + Anand Main 1.
+      await expect(adminPage.getByTestId("summary-tests-overdue")).toHaveText("3");
     };
     await expectAnandRows();
 
@@ -382,5 +392,74 @@ test.describe("Curriculum Summary filters", () => {
     expect(gradeUrl.searchParams.get("q")).toBe("anand");
     expect(gradeUrl.searchParams.get("only_behind")).toBe("1");
     expect(await rowCentres(adminPage)).toEqual(["Summary E2E Anand Main"]);
+  });
+});
+
+// #428: Chapter Test Status from new-CMS chapter-test quiz sessions. Fixture:
+// e2e/fixtures/migrations/20261019140000_seed_curriculum_summary_chapter_tests.sql. A Chapter
+// Test is Overdue when no session counts for it and as-of is more than 7 days after its test
+// date (plan test date, else due + 1). Bio Animals has a plan test date of 5 Aug.
+test.describe("Curriculum Summary Chapter tests overdue", () => {
+  test("Tests overdue per row and in the header follow the counted sessions", async ({ browser }) => {
+    const page = await summaryPmPage(browser);
+    await page.goto(`/curriculum-summary?as_of=${AS_OF}`);
+
+    // Anand Shared: Alpha ended 2 Jul (test id in cms_source_id); Beta is scheduled for 20 Aug
+    // (majority of its test's problems); Chem Bonding ended 20 Jul (code in the session name);
+    // Bio Cells ended 20 Jun (test linked to the duplicate Cells row). Bio Plants has only
+    // inactive / failed / combined / legacy-CMS / last-year sessions, and Bio Animals (test date
+    // 5 Aug) none: 2 overdue. Genetics (test date 13 Aug) and Thermo are not due yet.
+    await expect(summaryRow(page, "Summary E2E Anand Shared").locator("[data-tests-overdue]")).toHaveText("2");
+    // Anand Main: the two-Centre Alpha session ended 5 Jul; Beta (test date 1 Aug) overdue: 1.
+    await expect(summaryRow(page, "Summary E2E Anand Main").locator("[data-tests-overdue]")).toHaveText("1");
+    // Bhuj Neet: the same two-Centre session covers Alpha; Chem Bonding started with no end time
+    // (Scheduled); Bio Cells, Plants and Animals overdue: 3.
+    await expect(summaryRow(page, "Summary E2E Bhuj Neet").locator("[data-tests-overdue]")).toHaveText("3");
+    // Vapi Closed: no sessions; Alpha (test date 1 Jul) and Beta (21 Jul) overdue: 2.
+    await expect(summaryRow(page, "Summary E2E Vapi Closed").locator("[data-tests-overdue]")).toHaveText("2");
+    // 2 + 1 + 3 + 2.
+    await expect(page.getByTestId("summary-tests-overdue")).toHaveText("8");
+
+    // Setup-error rows show no test number.
+    await expect(summaryRow(page, "Summary E2E Bhuj Setup").locator("[data-tests-overdue]")).toHaveCount(0);
+    await expect(summaryRow(page, "Summary E2E Bhuj Setup").locator("[data-tests-conducted]")).toHaveCount(0);
+    await page.context().close();
+  });
+
+  test("No plan rows show Conducted Chapter Tests and add nothing to the header", async ({ browser }) => {
+    const page = await summaryPmPage(browser);
+    await page.goto(`/curriculum-summary?as_of=${AS_OF}`);
+
+    // Surat Draft: Alpha ends at 23:30 on the as-of day (Conducted); the Majority test is on 20 Aug.
+    const draft = summaryRow(page, "Summary E2E Surat Draft");
+    await expect(draft.locator("[data-tests-conducted]")).toHaveText("1 conducted");
+    await expect(draft.locator("[data-tests-overdue]")).toHaveCount(0);
+    await expect(summaryRow(page, "Summary E2E Vapi Unassigned").locator("[data-tests-conducted]")).toHaveText(
+      "0 conducted"
+    );
+    // School search for Surat: the Draft row only, so no overdue tests.
+    await page.goto(`/curriculum-summary?as_of=${AS_OF}&q=surat`);
+    await expect(page.getByTestId("summary-tests-overdue")).toHaveText("0");
+
+    // A day earlier the Surat Alpha session hasn't ended yet.
+    await page.goto("/curriculum-summary?as_of=2026-08-14");
+    await expect(summaryRow(page, "Summary E2E Surat Draft").locator("[data-tests-conducted]")).toHaveText(
+      "0 conducted"
+    );
+    await page.context().close();
+  });
+
+  test("an earlier as-of date has fewer overdue tests", async ({ browser }) => {
+    const page = await summaryPmPage(browser);
+    // On 9 Aug: Vapi Closed Alpha (test date 1 Jul) and Beta (21 Jul) overdue; Anand Main Beta
+    // (test date 1 Aug) is on day 8 of the grace period, so overdue; Bhuj Neet Cells and Plants
+    // overdue, Animals (test date 5 Aug) only on day 4; Anand Shared only Plants.
+    await page.goto("/curriculum-summary?as_of=2026-08-09");
+    await expect(summaryRow(page, "Summary E2E Anand Shared").locator("[data-tests-overdue]")).toHaveText("1");
+    await expect(summaryRow(page, "Summary E2E Anand Main").locator("[data-tests-overdue]")).toHaveText("1");
+    await expect(summaryRow(page, "Summary E2E Bhuj Neet").locator("[data-tests-overdue]")).toHaveText("2");
+    await expect(summaryRow(page, "Summary E2E Vapi Closed").locator("[data-tests-overdue]")).toHaveText("2");
+    await expect(page.getByTestId("summary-tests-overdue")).toHaveText("6");
+    await page.context().close();
   });
 });

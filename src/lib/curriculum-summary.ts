@@ -1,19 +1,22 @@
 // Curriculum Summary v2 (#417): one row per Summary Class (Centre + Grade) measured against its
 // Curriculum Plan. One set-based SQL pass loads the whole bounded row set for the user's scope;
-// classification, Due / Done / Behind, header numbers, sort and pagination are computed here
-// with the shared rules in `curriculum-plan-rules`.
+// classification, Due / Done / Behind, Tests overdue, header numbers, sort and pagination are
+// computed here with the shared rules in `curriculum-plan-rules`. Chapter Test sessions come
+// from `curriculum-chapter-tests`.
 
 import {
   checkCurriculumPlansSchema,
   checkCurriculumSchema,
   type CurriculumSchemaUnavailable,
 } from "./curriculum-schema";
+import { loadChapterTestSessions } from "./curriculum-chapter-tests";
 import { isDateString } from "./curriculum-date-helpers";
 import {
   academicYearForDate,
   academicYearStartDate,
   behindPill,
   chapterProgress,
+  chapterTestStatus,
   classifySummaryClass,
   planStatusAsOf,
   type BehindPillTone,
@@ -113,12 +116,17 @@ export interface CurriculumSummaryRow {
   // null = "—": no in-syllabus Chapter of that subject for the class's tracks.
   subjects: Record<CurriculumSummarySubject, CurriculumSummarySubjectProgress | null> | null;
   behind: number;
+  // Plan Chapters whose Chapter Test Status is Overdue; 0 for rows without a plan.
+  testsOverdue: number;
+  // Set only for No plan rows: Chapters with a Conducted Chapter Test.
+  testsConducted: number | null;
 }
 
 export interface CurriculumSummaryHeader {
   centresOnPlan: number;
   centresTotal: number;
   chaptersBehind: number;
+  testsOverdue: number;
 }
 
 export type CurriculumSummaryResult =
@@ -133,9 +141,11 @@ export type CurriculumSummaryResult =
   | CurriculumSchemaUnavailable;
 
 interface SummaryChapter {
+  chapterId: number;
   subject: string;
   tracks: string[];
   dueDate: string | null;
+  testDate: string | null;
   completedOn: string | null;
 }
 
@@ -173,7 +183,14 @@ export async function getCurriculumSummary(
     academicYearStartDate(academicYear),
     params.asOf,
   ]);
-  const scopedRows = rawRows.map((row) => buildSummaryRow(row, params.asOf));
+  const chapterTests = await loadChapterTestSessions({
+    centreIds: rawRows.map((row) => Number(row.centre_id)),
+    grade: params.grade,
+    academicYear,
+  });
+  const scopedRows = rawRows.map((row) =>
+    buildSummaryRow(row, params.asOf, chapterTests.get(Number(row.centre_id)) ?? new Map())
+  );
   const regionOptions = [
     ...new Set(scopedRows.flatMap((row) => (row.region ? [row.region] : []))),
   ].sort();
@@ -225,9 +242,9 @@ function scopeParams(permission: UserPermission): unknown[] {
 
 // $7 Grade number, $8 academic year of as-of, $9 its 1 Apr, $10 as-of. Every in-scope active
 // physical JNV Centre with a Centre Exam Track for the Grade is one row; its Chapters are the
-// Grade's in-syllabus Chapters for any mapped track, each with its plan due date (only for an
-// Active plan serving one of the Chapter's tracks) and its earliest Chapter Completion IST date
-// within [1 Apr, as-of] under any mapped track.
+// Grade's in-syllabus Chapters for any mapped track, each with its plan due and test dates (only
+// for an Active plan serving one of the Chapter's tracks) and its earliest Chapter Completion
+// IST date within [1 Apr, as-of] under any mapped track.
 const SUMMARY_SQL = `
   WITH scoped_centres AS (
     SELECT
@@ -315,11 +332,15 @@ const SUMMARY_SQL = `
   centre_chapters AS (
     SELECT
       m.centre_id,
+      gc.chapter_id,
       gc.subject_name,
       gc.tracks,
       CASE
         WHEN ap.status = 'active' AND ap.exam_tracks && gc.tracks THEN pc.due_date
       END AS due_date,
+      CASE
+        WHEN ap.status = 'active' AND ap.exam_tracks && gc.tracks THEN pc.test_date
+      END AS test_date,
       (
         SELECT MIN((cc.completed_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date)
         FROM lms_curriculum_chapter_completions cc
@@ -355,9 +376,11 @@ const SUMMARY_SQL = `
     COALESCE(
       (
         SELECT jsonb_agg(jsonb_build_object(
+          'chapterId', cch.chapter_id,
           'subject', cch.subject_name,
           'tracks', cch.tracks,
           'dueDate', cch.due_date::text,
+          'testDate', cch.test_date::text,
           'completedOn', cch.completed_on::text
         ))
         FROM centre_chapters cch
@@ -368,9 +391,23 @@ const SUMMARY_SQL = `
   FROM mapped m
   LEFT JOIN assigned_plans ap ON ap.centre_id = m.centre_id`;
 
-function buildSummaryRow(raw: SummaryQueryRow, asOf: string): CurriculumSummaryRow {
+function buildSummaryRow(
+  raw: SummaryQueryRow,
+  asOf: string,
+  chapterTestSessions: Map<number, (string | null)[]>
+): CurriculumSummaryRow {
   const mappedTracks = EXAM_TRACKS.filter((track) => raw.mapped_tracks.includes(track));
   const chapters = parseChapters(raw.chapters);
+  const testStatusCount = (kind: ReturnType<typeof chapterTestStatus>["kind"]) =>
+    chapters.filter(
+      (chapter) =>
+        chapterTestStatus({
+          dueDate: chapter.dueDate,
+          testDate: chapter.testDate,
+          sessionEndTimes: chapterTestSessions.get(chapter.chapterId) ?? [],
+          asOf,
+        }).kind === kind
+    ).length;
   const base = {
     centreId: Number(raw.centre_id),
     centreName: raw.centre_name,
@@ -383,6 +420,8 @@ function buildSummaryRow(raw: SummaryQueryRow, asOf: string): CurriculumSummaryR
     plan: null,
     subjects: null,
     behind: 0,
+    testsOverdue: 0,
+    testsConducted: null,
   };
 
   // Logs and completions are keyed by School + Program, so a second active physical Centre
@@ -406,7 +445,8 @@ function buildSummaryRow(raw: SummaryQueryRow, asOf: string): CurriculumSummaryR
     return { ...base, kind: "no_content", explanation: "Curriculum configuration is unavailable" };
   }
   if (raw.plan_id === null || raw.plan_status !== "active" || !raw.plan_title) {
-    return { ...base, kind: "no_plan", explanation: null };
+    // Without plan dates no Chapter Test can be Overdue; show what was held instead.
+    return { ...base, kind: "no_plan", explanation: null, testsConducted: testStatusCount("conducted") };
   }
 
   const subjects = Object.fromEntries(
@@ -431,6 +471,7 @@ function buildSummaryRow(raw: SummaryQueryRow, asOf: string): CurriculumSummaryR
     },
     subjects,
     behind: chapterProgress(chapters, asOf).behind,
+    testsOverdue: testStatusCount("overdue"),
   };
 }
 
@@ -438,9 +479,11 @@ function parseChapters(value: unknown): SummaryChapter[] {
   const parsed = typeof value === "string" ? JSON.parse(value) : value;
   if (!Array.isArray(parsed)) return [];
   return parsed.map((chapter: Record<string, unknown>) => ({
+    chapterId: Number(chapter.chapterId),
     subject: chapter.subject === "Mathematics" ? "Maths" : String(chapter.subject),
     tracks: Array.isArray(chapter.tracks) ? chapter.tracks.map(String) : [],
     dueDate: typeof chapter.dueDate === "string" ? chapter.dueDate : null,
+    testDate: typeof chapter.testDate === "string" ? chapter.testDate : null,
     completedOn: typeof chapter.completedOn === "string" ? chapter.completedOn : null,
   }));
 }
@@ -453,25 +496,28 @@ const KIND_ORDER: Record<CurriculumSummaryRowKind, number> = {
   configuration_error: 4,
 };
 
-// Worst first: plan rows by Behind desc, then No-plan rows, then setup-error, no-content and
-// configuration-error rows; Centre name breaks ties.
+// Worst first: plan rows by Behind desc then Tests overdue desc, then No-plan rows, then
+// setup-error, no-content and configuration-error rows; Centre name breaks ties.
 function sortSummaryRows(rows: CurriculumSummaryRow[]): CurriculumSummaryRow[] {
   return [...rows].sort(
     (a, b) =>
       KIND_ORDER[a.kind] - KIND_ORDER[b.kind] ||
       b.behind - a.behind ||
+      b.testsOverdue - a.testsOverdue ||
       a.centreName.localeCompare(b.centreName) ||
       a.centreId - b.centreId
   );
 }
 
 // Centres on plan = rows with an Active or Closed plan out of every row except setup-error and
-// no-content rows; Chapters behind = Σ Behind. Covers all rows, not just the current page.
+// no-content rows; Chapters behind = Σ Behind; Chapter tests overdue = Σ Tests overdue. Covers
+// all rows, not just the current page.
 function summaryHeader(rows: CurriculumSummaryRow[]): CurriculumSummaryHeader {
   return {
     centresOnPlan: rows.filter((row) => row.kind === "plan").length,
     centresTotal: rows.filter((row) => row.kind !== "setup_error" && row.kind !== "no_content")
       .length,
     chaptersBehind: rows.reduce((sum, row) => sum + row.behind, 0),
+    testsOverdue: rows.reduce((sum, row) => sum + row.testsOverdue, 0),
   };
 }

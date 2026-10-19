@@ -115,7 +115,7 @@ export default async function CurriculumSummaryPage({ searchParams }: PageProps)
           </Card>
         ) : (
           <div className="space-y-5">
-            <div className="grid grid-cols-2 gap-3 sm:max-w-md">
+            <div className="grid grid-cols-3 gap-3 sm:max-w-2xl">
               <HeaderNumber
                 label="Centres on plan"
                 value={`${summary.header.centresOnPlan}/${summary.header.centresTotal}`}
@@ -125,6 +125,11 @@ export default async function CurriculumSummaryPage({ searchParams }: PageProps)
                 label="Chapters behind"
                 value={String(summary.header.chaptersBehind)}
                 testId="summary-chapters-behind"
+              />
+              <HeaderNumber
+                label="Chapter tests overdue"
+                value={String(summary.header.testsOverdue)}
+                testId="summary-tests-overdue"
               />
             </div>
 
@@ -295,7 +300,7 @@ function SummaryTable({
   rows: CurriculumSummaryRow[];
   params: CurriculumSummaryQuery;
 }) {
-  const headers = ["Centre", "Program", "Tracks", "Region", ...CURRICULUM_SUMMARY_SUBJECTS, "Behind", "Plan"];
+  const headers = ["Centre", "Program", "Tracks", "Region", ...CURRICULUM_SUMMARY_SUBJECTS, "Behind", "Tests overdue", "Plan"];
   return (
     <div className="overflow-x-auto">
       <table className="min-w-full divide-y divide-border text-sm">
@@ -359,6 +364,9 @@ function SummaryTableRow({ row, params }: { row: CurriculumSummaryRow; params: C
           <td data-behind className={`${cellClassName} font-mono font-bold`}>
             {row.behind}
           </td>
+          <td data-tests-overdue className={`${cellClassName} font-mono font-bold`}>
+            {row.testsOverdue}
+          </td>
           <td data-plan className={cellClassName}>
             {row.plan?.title}
             {row.plan?.closed ? (
@@ -373,13 +381,16 @@ function SummaryTableRow({ row, params }: { row: CurriculumSummaryRow; params: C
           <td colSpan={CURRICULUM_SUMMARY_SUBJECTS.length + 1} className={`${cellClassName} text-text-muted`}>
             Not measured without an Active plan
           </td>
+          <td data-tests-conducted className={`${cellClassName} text-text-secondary`}>
+            {row.testsConducted ?? 0} conducted
+          </td>
           <td data-plan className={`${cellClassName} text-text-muted`}>
             No plan
           </td>
         </>
       ) : (
         <td
-          colSpan={CURRICULUM_SUMMARY_SUBJECTS.length + 2}
+          colSpan={CURRICULUM_SUMMARY_SUBJECTS.length + 3}
           data-explanation
           className={`${cellClassName} font-bold text-warning-text`}
         >
