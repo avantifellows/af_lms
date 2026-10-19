@@ -38,6 +38,17 @@ Then read this file fully before doing anything else in this session.
 ## Current Project State
 
 **Working:**
+- Edit Student and the roster card now cover the same fields (issue #431). Edit Student
+  gained Contact & Address, Father, Mother, Guardian and Socio-economic sections — the
+  twenty contact and household details the card already displayed — and the card gained
+  CWSN, G10 board and (for physical centres) the uniform sizes. CWSN reads "Children with
+  Special Needs (CWSN)" in both, the Locked Identity section says why its fields can't be
+  edited, and School Medium left the card because the program team does not want it
+  edited (it is still selected by `STUDENT_COLUMNS`). `NvsDetailGroups` is gone: #433
+  trimmed the NVS card because Edit couldn't change those fields, which no longer holds,
+  so every program shows the same groups bar the uniform sizes. Needs DB Service
+  `feat/lms-student-contact-family-fields` deployed first — the LMS update endpoint
+  rejects a field outside its contract with 422. See `context/student-addition.md`.
 - Issue #412 (feature branch): the dormant Holistic privacy helper erases Follow-up answers after creating the privacy tombstone and records the actual changed-answer count in a separate immutable audit. Existing tombstones are supported without rewriting their original audit. Requires the companion db-service migration first. The endpoint and action policy remain disabled; no historical data repair or external-process rollout is included. See `context/data-access.md` and `patterns/holistic-privacy-erasure.md`.
 - Issue #361 slice #363: PMU Manager (`pmu_manager`) and PMU Govt School User (`pmu_govt_school_user`) exist in the permission layer, pinned to JNV NVS (ADR 0007): matrix `students` edit + `performance` view only, program context always `[64]`/NVS-only, no centre seats or centre access, `ownsRecord` only for 64, and `canAccessStudent` requires a current NVS batch (`hasCurrentNvsBatchSql`). Admin user management, school page, dashboard and other PMU surfaces are later slices. See `context/permissions.md`.
 - Issue #361 slice #364: login is Google-only (ADR 0007); Dev Login stays in non-prod. `isRetiredToken` (`src/lib/retired-session.ts`, no DB imports) flags JWTs from the retired login by their raw token fields. The `jwt` callback throws on them, and `proxy` treats them as no token and clears the plain, `__Secure-` and chunked session cookies.

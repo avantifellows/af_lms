@@ -8,6 +8,8 @@ import { DocumentsList } from "@/components/documents/DocumentsList";
 import {
   ANNUAL_FAMILY_INCOME_OPTIONS,
   BOARD_STREAM_OPTIONS,
+  EDUCATION_LEVEL_OPTIONS,
+  MONTHLY_FAMILY_INCOME_OPTIONS,
   CBSE_BOARD,
   CATEGORY_OPTIONS,
   G10_BOARD_OPTIONS,
@@ -128,6 +130,26 @@ function initialFormData(student: Student) {
     grade: textValue(student.grade?.toString()),
     tshirt_size: textValue(student.tshirt_size),
     track_pant_size: textValue(student.track_pant_size),
+    email: textValue(student.email),
+    whatsapp_phone: textValue(student.whatsapp_phone),
+    address: textValue(student.address),
+    city: textValue(student.city),
+    district: textValue(student.district),
+    state: textValue(student.state),
+    pincode: textValue(student.pincode),
+    father_phone: textValue(student.father_phone),
+    father_profession: textValue(student.father_profession),
+    father_education_level: textValue(student.father_education_level),
+    mother_name: textValue(student.mother_name),
+    mother_phone: textValue(student.mother_phone),
+    mother_profession: textValue(student.mother_profession),
+    mother_education_level: textValue(student.mother_education_level),
+    guardian_name: textValue(student.guardian_name),
+    guardian_relation: textValue(student.guardian_relation),
+    guardian_phone: textValue(student.guardian_phone),
+    guardian_profession: textValue(student.guardian_profession),
+    guardian_education_level: textValue(student.guardian_education_level),
+    monthly_family_income: textValue(student.monthly_family_income),
   };
 }
 
@@ -508,15 +530,10 @@ export default function EditStudentModal({
                     onChange={handleChange}
                     className="h-4 w-4 rounded border-2 border-border text-accent focus:ring-accent/20"
                   />
-                  <span className={labelClassName}>CWSN</span>
+                  <span className={labelClassName}>Children with Special Needs (CWSN)</span>
                 </label>
                 {textField("phone", "Parents Phone Number", "tel")}
-                {textField("father_name", "Father Name")}
-                {(!phoneMode || !isPhoneRegistrationStudent) && selectField(
-                  "annual_family_income",
-                  "Yearly / Annual Family Income",
-                  ANNUAL_FAMILY_INCOME_OPTIONS,
-                )}
+                {textField("email", "Email")}
               </div>
             </FormSection>
 
@@ -536,6 +553,77 @@ export default function EditStudentModal({
                 {selectField("stream", "Primary Exam preparing for", STREAM_OPTIONS)}
                 {selectField("board_stream", "Board Stream", BOARD_STREAM_OPTIONS)}
                 {selectField("g10_board", "G10 board", G10_BOARD_OPTIONS)}
+              </div>
+            </FormSection>
+
+            <FormSection>
+              <h3 className={sectionHeadingClassName}>Contact &amp; Address</h3>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                {textField("whatsapp_phone", "WhatsApp Number", "tel")}
+                {textField("address", "Address")}
+                {textField("city", "City")}
+                {textField("district", "District")}
+                {textField("state", "State")}
+                {textField("pincode", "Pincode", "numeric")}
+              </div>
+            </FormSection>
+
+            <FormSection>
+              <h3 className={sectionHeadingClassName}>Father</h3>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                {textField("father_name", "Father Name")}
+                {textField("father_phone", "Father Phone", "tel")}
+                {textField("father_profession", "Father Profession")}
+                {selectField(
+                  "father_education_level",
+                  "Father Education Level",
+                  EDUCATION_LEVEL_OPTIONS,
+                )}
+              </div>
+            </FormSection>
+
+            <FormSection>
+              <h3 className={sectionHeadingClassName}>Mother</h3>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                {textField("mother_name", "Mother Name")}
+                {textField("mother_phone", "Mother Phone", "tel")}
+                {textField("mother_profession", "Mother Profession")}
+                {selectField(
+                  "mother_education_level",
+                  "Mother Education Level",
+                  EDUCATION_LEVEL_OPTIONS,
+                )}
+              </div>
+            </FormSection>
+
+            <FormSection>
+              <h3 className={sectionHeadingClassName}>Guardian</h3>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                {textField("guardian_name", "Guardian Name")}
+                {textField("guardian_relation", "Guardian Relation")}
+                {textField("guardian_phone", "Guardian Phone", "tel")}
+                {textField("guardian_profession", "Guardian Profession")}
+                {selectField(
+                  "guardian_education_level",
+                  "Guardian Education Level",
+                  EDUCATION_LEVEL_OPTIONS,
+                )}
+              </div>
+            </FormSection>
+
+            <FormSection>
+              <h3 className={sectionHeadingClassName}>Socio-economic</h3>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                {(!phoneMode || !isPhoneRegistrationStudent) && selectField(
+                  "annual_family_income",
+                  "Yearly / Annual Family Income",
+                  ANNUAL_FAMILY_INCOME_OPTIONS,
+                )}
+                {selectField(
+                  "monthly_family_income",
+                  "Monthly Family Income",
+                  MONTHLY_FAMILY_INCOME_OPTIONS,
+                )}
               </div>
             </FormSection>
 
@@ -598,6 +686,11 @@ export default function EditStudentModal({
 
             <FormSection>
               <h3 className={sectionHeadingClassName}>Locked Identity</h3>
+              <p className="mb-4 text-xs text-text-muted">
+                These identify the Student across Avanti and the boards, so they are set
+                once at enrolment and cannot be edited here. Ask the program team if one
+                of them is wrong.
+              </p>
               <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
                 <div>
                   <label className={labelClassName}>Student ID</label>

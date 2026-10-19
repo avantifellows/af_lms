@@ -188,6 +188,76 @@ describe("PATCH /api/student/[id]", () => {
     });
   });
 
+  it("proxies the contact and household details the card shows (#431)", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockFetch.mockResolvedValue(
+      new Response(JSON.stringify({ status: "updated" }), { status: 200 }),
+    );
+
+    const req = jsonRequest("http://localhost/api/student/100", {
+      method: "PATCH",
+      body: {
+        program_id: 64,
+        email: " ravi@example.com ",
+        whatsapp_phone: "9876543210",
+        address: " 12 Main Road ",
+        city: "Jaipur",
+        district: "Jaipur",
+        state: "Rajasthan",
+        pincode: "302001",
+        father_phone: "9876543211",
+        father_education_level: "grades 6-10",
+        mother_name: " Sunita Devi ",
+        guardian_relation: "Uncle",
+        guardian_phone: "",
+        monthly_family_income: "Rs. 10,000-20,000",
+      },
+    });
+
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(200);
+    const payload = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(payload).toMatchObject({
+      email: "ravi@example.com",
+      whatsapp_phone: "9876543210",
+      address: "12 Main Road",
+      pincode: "302001",
+      father_phone: "9876543211",
+      father_education_level: "Grades 6-10",
+      mother_name: "Sunita Devi",
+      guardian_relation: "Uncle",
+      // A blank clears the stored number.
+      guardian_phone: "",
+      monthly_family_income: "Rs. 10,000-20,000",
+    });
+  });
+
+  it("rejects a malformed household phone or pincode before proxying (#431)", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+
+    for (const [field, value, message] of [
+      ["father_phone", "98765", "Father Phone must be exactly 10 digits"],
+      ["pincode", "30200", "Pincode must be exactly 6 digits"],
+    ] as const) {
+      mockFetch.mockClear();
+      const req = jsonRequest("http://localhost/api/student/100", {
+        method: "PATCH",
+        body: { program_id: 64, [field]: value },
+      });
+
+      const res = await PATCH(req as never, params);
+
+      // Same 422 the other canonicalisation failures answer with.
+      expect(res.status).toBe(422);
+      expect(await res.json()).toMatchObject({
+        error: message,
+        field_errors: { [field]: message },
+      });
+      expect(mockFetch).not.toHaveBeenCalled();
+    }
+  });
+
   it("canonicalizes case-insensitive choice labels in an Approved-mode edit payload", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
     mockFetch.mockResolvedValue(

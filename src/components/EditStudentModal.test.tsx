@@ -101,7 +101,9 @@ describe("EditStudentModal", () => {
 
     const stream = getByName("stream") as HTMLSelectElement;
     expect([...stream.options].map((option) => option.value)).toContain("nda");
-    expect(screen.getByText("CWSN")).toBeInTheDocument();
+    expect(
+      screen.getByText("Children with Special Needs (CWSN)"),
+    ).toBeInTheDocument();
 
     const boardStream = getByName("board_stream") as HTMLSelectElement;
     expect([...boardStream.options].map((option) => option.value)).toEqual(
@@ -532,6 +534,114 @@ describe("EditStudentModal", () => {
       renderModal({ programId: 1 });
 
       expect(screen.getByRole("tab", { name: "Documents" })).toBeInTheDocument();
+    });
+  });
+
+  describe("contact and household details (#431)", () => {
+    const withDetails = {
+      ...baseStudent,
+      whatsapp_phone: "9000000001",
+      address: "12 MG Road",
+      city: "Pune",
+      district: "Pune City",
+      state: "Maharashtra",
+      pincode: "411001",
+      father_phone: "9000000002",
+      father_profession: "Farmer",
+      father_education_level: "Grades 6-10",
+      mother_name: "Sunita Kumar",
+      mother_phone: "9000000003",
+      guardian_name: "Ramesh Kumar",
+      guardian_relation: "Uncle",
+      monthly_family_income: "Rs. 10,000-20,000",
+    };
+
+    it("prefills every detail the roster card shows", () => {
+      renderModal({ student: withDetails });
+
+      expect(getByName("whatsapp_phone")).toHaveValue("9000000001");
+      expect(getByName("address")).toHaveValue("12 MG Road");
+      expect(getByName("pincode")).toHaveValue("411001");
+      expect(getByName("father_phone")).toHaveValue("9000000002");
+      expect(getByName("father_education_level")).toHaveValue("Grades 6-10");
+      expect(getByName("mother_name")).toHaveValue("Sunita Kumar");
+      expect(getByName("guardian_relation")).toHaveValue("Uncle");
+      expect(getByName("monthly_family_income")).toHaveValue("Rs. 10,000-20,000");
+    });
+
+    it("keeps a stored education level the list no longer offers", () => {
+      renderModal({ student: { ...baseStudent, father_education_level: "10th" } });
+
+      const select = getByName("father_education_level") as HTMLSelectElement;
+      expect(select).toHaveValue("10th");
+      expect([...select.options].map((option) => option.value)).toContain("10th");
+    });
+
+    it("sends only the details that changed", async () => {
+      const user = userEvent.setup();
+      mockFetch.mockResolvedValue(
+        new Response(JSON.stringify({ ok: true }), { status: 200 }),
+      );
+      renderModal({ student: withDetails });
+
+      await user.clear(getByName("city"));
+      await user.type(getByName("city"), "Nashik");
+      await user.selectOptions(getByName("monthly_family_income"), "Rs. 20,000-30,000");
+      await user.click(screen.getByText("Save Changes"));
+
+      await waitFor(() => expect(mockFetch).toHaveBeenCalled());
+      const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(body).toMatchObject({
+        city: "Nashik",
+        monthly_family_income: "Rs. 20,000-30,000",
+      });
+      expect(body).not.toHaveProperty("address");
+      expect(body).not.toHaveProperty("father_phone");
+    });
+
+    it("sends a blank when a detail is cleared", async () => {
+      const user = userEvent.setup();
+      mockFetch.mockResolvedValue(
+        new Response(JSON.stringify({ ok: true }), { status: 200 }),
+      );
+      renderModal({ student: withDetails });
+
+      await user.clear(getByName("guardian_relation"));
+      await user.click(screen.getByText("Save Changes"));
+
+      await waitFor(() => expect(mockFetch).toHaveBeenCalled());
+      expect(JSON.parse(mockFetch.mock.calls[0][1].body)).toMatchObject({
+        guardian_relation: "",
+      });
+    });
+
+    it("shows the server's field error against the field", async () => {
+      const user = userEvent.setup();
+      mockFetch.mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            error: "Father Phone must be exactly 10 digits",
+            field_errors: { father_phone: "Father Phone must be exactly 10 digits" },
+          }),
+          { status: 400 },
+        ),
+      );
+      renderModal({ student: withDetails });
+
+      await user.clear(getByName("father_phone"));
+      await user.type(getByName("father_phone"), "98765");
+      await user.click(screen.getByText("Save Changes"));
+
+      // Once in the banner, once under the field it belongs to.
+      expect(
+        await screen.findAllByText("Father Phone must be exactly 10 digits"),
+      ).toHaveLength(2);
+    });
+
+    it("says why the locked identifiers cannot be edited", () => {
+      renderModal();
+
+      expect(screen.getByText(/cannot be edited here/)).toBeInTheDocument();
     });
   });
 

@@ -215,25 +215,6 @@ function formatCwsn(value: boolean | null | undefined): string {
   return value ? "Yes" : "No";
 }
 
-// The Edit Student fields an NVS card's summary doesn't already show.
-function NvsDetailGroups({ student }: { student: Student }) {
-  return (
-    <>
-      <DetailGroup title="Personal">
-        <DetailField label="CWSN" value={formatCwsn(student.physically_handicapped)} />
-        <DetailField label="Father Name" value={student.father_name} />
-        <DetailField label="Annual Family Income" value={student.annual_family_income} />
-      </DetailGroup>
-
-      <DetailGroup title="Academic">
-        <DetailField label="Board Stream" value={student.board_stream} />
-        <DetailField label="G10 board" value={student.g10_board} />
-        <DetailField label="Grade 10 Roll no" value={student.g10_roll_no} />
-      </DetailGroup>
-    </>
-  );
-}
-
 // fallow-ignore-next-line complexity
 function StudentCard({
   student,
@@ -361,85 +342,95 @@ function StudentCard({
       {expanded && (
         <div className="space-y-3 border-t border-border bg-bg-card-alt px-4 pb-4 pt-4">
           {/* Phone / Gender / Category / Program now live in the always-visible
-              card summary above, so the expanded view covers the rest. A JNV NVS
-              card covers only the rest of the Edit Student fields, so the card
-              and the Edit form never disagree. */}
-          {isNvs ? (
-            <NvsDetailGroups student={student} />
-          ) : (
-            <>
-              <DetailGroup title="Personal">
-                <DetailField
-                  label="Stream"
-                  value={student.stream}
-                  className="capitalize"
-                />
-                <DetailField
-                  label="Email"
-                  value={student.email}
-                  className="truncate"
-                />
-              </DetailGroup>
+              card summary above, so the expanded view covers the rest. Every
+              field here is one Edit Student can change (#431), bar the locked
+              identifiers it shows read-only. */}
+          <DetailGroup title="Personal">
+            {!isNvs && (
+              <DetailField
+                label="Stream"
+                value={student.stream}
+                className="capitalize"
+              />
+            )}
+            <DetailField
+              label="Email"
+              value={student.email}
+              className="truncate"
+            />
+            <DetailField
+              label="Children with Special Needs (CWSN)"
+              value={formatCwsn(student.physically_handicapped)}
+            />
+          </DetailGroup>
 
-              <DetailGroup title="Academic">
-                <DetailField label="Board Stream" value={student.board_stream} />
-                <DetailField label="School Medium" value={student.school_medium} />
-              </DetailGroup>
+          <DetailGroup title="Academic">
+            <DetailField label="Board Stream" value={student.board_stream} />
+            <DetailField label="G10 board" value={student.g10_board} />
+            <DetailField label="Grade 10 Roll no" value={student.g10_roll_no} />
+          </DetailGroup>
 
-              <DetailGroup title="Contact & Address">
-                <DetailField label="WhatsApp" value={student.whatsapp_phone} />
-                <DetailField label="Address" value={student.address} />
-                <DetailField label="City" value={student.city} />
-                <DetailField label="District" value={student.district} />
-                <DetailField label="State" value={student.state} />
-                <DetailField label="Pincode" value={student.pincode} />
-              </DetailGroup>
+          <DetailGroup title="Contact & Address">
+            <DetailField label="WhatsApp" value={student.whatsapp_phone} />
+            <DetailField label="Address" value={student.address} />
+            <DetailField label="City" value={student.city} />
+            <DetailField label="District" value={student.district} />
+            <DetailField label="State" value={student.state} />
+            <DetailField label="Pincode" value={student.pincode} />
+          </DetailGroup>
 
-              <DetailGroup title="Father">
-                <DetailField label="Name" value={student.father_name} />
-                <DetailField label="Phone" value={student.father_phone} />
-                <DetailField label="Profession" value={student.father_profession} />
-                <DetailField
-                  label="Education Level"
-                  value={student.father_education_level}
-                />
-              </DetailGroup>
+          <DetailGroup title="Father">
+            <DetailField label="Name" value={student.father_name} />
+            <DetailField label="Phone" value={student.father_phone} />
+            <DetailField label="Profession" value={student.father_profession} />
+            <DetailField
+              label="Education Level"
+              value={student.father_education_level}
+            />
+          </DetailGroup>
 
-              <DetailGroup title="Mother">
-                <DetailField label="Name" value={student.mother_name} />
-                <DetailField label="Phone" value={student.mother_phone} />
-                <DetailField label="Profession" value={student.mother_profession} />
-                <DetailField
-                  label="Education Level"
-                  value={student.mother_education_level}
-                />
-              </DetailGroup>
+          <DetailGroup title="Mother">
+            <DetailField label="Name" value={student.mother_name} />
+            <DetailField label="Phone" value={student.mother_phone} />
+            <DetailField label="Profession" value={student.mother_profession} />
+            <DetailField
+              label="Education Level"
+              value={student.mother_education_level}
+            />
+          </DetailGroup>
 
-              <DetailGroup title="Guardian">
-                <DetailField label="Name" value={student.guardian_name} />
-                <DetailField label="Relation" value={student.guardian_relation} />
-                <DetailField label="Phone" value={student.guardian_phone} />
-                <DetailField
-                  label="Profession"
-                  value={student.guardian_profession}
-                />
-                <DetailField
-                  label="Education Level"
-                  value={student.guardian_education_level}
-                />
-              </DetailGroup>
+          <DetailGroup title="Guardian">
+            <DetailField label="Name" value={student.guardian_name} />
+            <DetailField label="Relation" value={student.guardian_relation} />
+            <DetailField label="Phone" value={student.guardian_phone} />
+            <DetailField
+              label="Profession"
+              value={student.guardian_profession}
+            />
+            <DetailField
+              label="Education Level"
+              value={student.guardian_education_level}
+            />
+          </DetailGroup>
 
-              <DetailGroup title="Socio-economic">
-                <DetailField
-                  label="Annual Family Income"
-                  value={student.annual_family_income}
-                />
-                <DetailField
-                  label="Monthly Family Income"
-                  value={student.monthly_family_income}
-                />
-              </DetailGroup>
-            </>
+          <DetailGroup title="Socio-economic">
+            <DetailField
+              label="Annual Family Income"
+              value={student.annual_family_income}
+            />
+            <DetailField
+              label="Monthly Family Income"
+              value={student.monthly_family_income}
+            />
+          </DetailGroup>
+
+          {/* Uniforms are ordered for physical centres only, so the sizes are
+              hidden here exactly as they are in Edit Student (#433). */}
+          {!isNvs && (
+            <DetailGroup title="Uniform">
+              <DetailField label="T-shirt Size" value={student.tshirt_size} />
+              <DetailField label="Track Pant Size" value={student.track_pant_size} />
+            </DetailGroup>
           )}
 
           {/* Document collection is for physical-centre programs; JNV NVS Students have none. */}

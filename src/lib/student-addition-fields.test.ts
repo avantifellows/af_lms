@@ -96,6 +96,119 @@ describe("canonicalizeStudentEditPayload", () => {
     });
   });
 
+  it("accepts the contact and household details the card shows", () => {
+    expect(canonicalizeStudentEditPayload({
+      email: " ravi@example.com ",
+      whatsapp_phone: " 9876543210 ",
+      address: " 12 Main Road ",
+      city: " Jaipur ",
+      district: "Jaipur",
+      state: "Rajasthan",
+      pincode: " 302001 ",
+      father_phone: "9876543211",
+      father_profession: " Farmer ",
+      father_education_level: "grades 6-10",
+      mother_name: " Sunita Devi ",
+      mother_phone: "9876543212",
+      mother_profession: "Homemaker",
+      mother_education_level: "Grades 1-5",
+      guardian_name: "Ramesh",
+      guardian_relation: " Uncle ",
+      guardian_phone: "9876543213",
+      guardian_profession: "Shopkeeper",
+      guardian_education_level: "Grades 11-12",
+      monthly_family_income: "rs. 10,000-20,000",
+    })).toEqual({
+      ok: true,
+      fields: {
+        email: "ravi@example.com",
+        whatsapp_phone: "9876543210",
+        address: "12 Main Road",
+        city: "Jaipur",
+        district: "Jaipur",
+        state: "Rajasthan",
+        pincode: "302001",
+        father_phone: "9876543211",
+        father_profession: "Farmer",
+        // Canonicalised to the stored spelling, as the other choices are.
+        father_education_level: "Grades 6-10",
+        mother_name: "Sunita Devi",
+        mother_phone: "9876543212",
+        mother_profession: "Homemaker",
+        mother_education_level: "Grades 1-5",
+        guardian_name: "Ramesh",
+        guardian_relation: "Uncle",
+        guardian_phone: "9876543213",
+        guardian_profession: "Shopkeeper",
+        guardian_education_level: "Grades 11-12",
+        monthly_family_income: "Rs. 10,000-20,000",
+      },
+    });
+  });
+
+  it("passes a blank through so the stored detail is cleared", () => {
+    expect(canonicalizeStudentEditPayload({
+      guardian_phone: "   ",
+      mother_name: "",
+      monthly_family_income: " ",
+      pincode: "",
+    })).toEqual({
+      ok: true,
+      fields: {
+        guardian_phone: "",
+        mother_name: "",
+        monthly_family_income: "",
+        pincode: "",
+      },
+    });
+  });
+
+  it("rejects a household phone that is not ten digits", () => {
+    expect(canonicalizeStudentEditPayload({ father_phone: "98765" })).toEqual({
+      ok: false,
+      error: "Father Phone must be exactly 10 digits",
+      field_errors: { father_phone: "Father Phone must be exactly 10 digits" },
+    });
+  });
+
+  it("rejects a pincode that is not six digits", () => {
+    expect(canonicalizeStudentEditPayload({ pincode: "30200" })).toEqual({
+      ok: false,
+      error: "Pincode must be exactly 6 digits",
+      field_errors: { pincode: "Pincode must be exactly 6 digits" },
+    });
+  });
+
+  it("rejects an address that could not reach the column", () => {
+    const result = canonicalizeStudentEditPayload({ address: "x".repeat(501) });
+    expect(result.ok).toBe(false);
+  });
+
+  it("rejects an email that could not reach a mailbox", () => {
+    expect(canonicalizeStudentEditPayload({ email: "ravi.example.com" })).toEqual({
+      ok: false,
+      error: "Email is not valid",
+      field_errors: { email: "Email is not valid" },
+    });
+  });
+
+  it("rejects an education level outside the offered list", () => {
+    expect(canonicalizeStudentEditPayload({ mother_education_level: "B.Tech" })).toEqual({
+      ok: false,
+      error: "Mother Education Level is not valid",
+      field_errors: { mother_education_level: "Mother Education Level is not valid" },
+    });
+  });
+
+  it("still drops a field outside the editable contract", () => {
+    // School medium is on neither side any more: the program team does not
+    // want it edited, so it is not in the allowlist.
+    expect(canonicalizeStudentEditPayload({ school_medium: "English" })).toEqual({
+      ok: true,
+      fields: {},
+    });
+  });
+
   it("rejects periods in manually edited student names", () => {
     expect(canonicalizeStudentEditPayload({ first_name: "Ravi.Kumar" })).toEqual({
       ok: false,

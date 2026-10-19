@@ -94,6 +94,40 @@ also limited to the Edit Student fields its summary doesn't already show (`NvsDe
 Roll no), so the card never shows fields the Edit form can't change. Keep the two in sync when
 an Edit Student field is added or removed for NVS.
 
+## Edit Student and the card show the same fields (#431)
+
+GitHub issue https://github.com/avantifellows/af_lms/issues/431 found the roster card
+showing 21 profile fields Edit Student could not change, and 4 editable fields the card
+never showed. Teachers do most of these edits, so they could see data they had no way to
+correct and save data they could not see afterwards.
+
+Edit Student gained Contact & Address, Father, Mother, Guardian and Socio-economic
+sections, mirroring the card's groups; `father_name` and Annual Family Income moved into
+the sections they belong to. The card gained CWSN, G10 board and the uniform sizes. CWSN is
+spelled "Children with Special Needs (CWSN)" in both places, and Locked Identity carries a
+line saying why those fields can't be edited.
+
+School Medium is the one field dropped rather than made editable — the program team does
+not want it edited (Venu, on the issue) — so it left the card too. `STUDENT_COLUMNS` still
+selects it, so showing it again is a one-line change.
+
+`NvsDetailGroups` is gone. #433 trimmed the NVS card to the Edit Student fields precisely
+because Edit could not change the rest; now that it can, every program renders the same
+groups, with the uniform sizes as the only program-specific part (hidden for NVS in the
+card exactly as in Edit).
+
+Validation lives in `canonicalizeStudentEditPayload`: contact phones (WhatsApp, father,
+mother, guardian) are ten digits, pincode is six, email must be able to reach a mailbox,
+and the three education levels plus Monthly Family Income are dropdowns
+(`EDUCATION_LEVEL_OPTIONS`, `MONTHLY_FAMILY_INCOME_OPTIONS`). Blank clears, as the uniform
+sizes already did. A stored value the list no longer offers (e.g. an education level of
+"10th") still renders, because `selectField` prepends the current value.
+
+**DB Service dependency:** `PATCH /lms/students/:id/update-with-enrollments` answers 422
+for any field outside its contract, so the db-service branch
+`feat/lms-student-contact-family-fields` (seven `user` fields, thirteen `student` fields,
+plus phone/pincode guards and blank-to-NULL) must be deployed before this ships.
+
 ## Settled Product Shape
 - v1 is JNV PMU / JNV NVS only. In current LMS code this is `PROGRAM_IDS.NVS` (`64`, label `JNV NVS`) from `src/lib/constants.ts`.
 - Rollout plan is staff/PMs first, then schools after real upload feedback. In the #155 implementation build, student writes are allowed only for `admin`, `program_manager`, and `program_admin`; teachers/staff roles and `read_only` users cannot create, bulk upload, edit, or dropout students. Issue #361 slice #367 adds `pmu_manager` and `pmu_govt_school_user` to `ALLOWED_STUDENT_ADDITION_ROLES` (ADR 0007, ADR 0006 as amended): Add Student, Bulk Upload, NVS dropout and undo, Download List, and phone correction/backfill still require a JNV School, the pinned NVS context, School scope and `students` edit (so `read_only` PMU users are refused) — except Download List, which for PMU roles only needs `students` view (`requireStudentExportAccess`, PR #376 QA), so a `read_only` PMU user can still export NVS Students. Other roles' `read_only` accounts still get no Download List. The roster's `canDropoutStudent` allowlist (`RosterPage.tsx`) includes both roles. Their general profile edits deny non-NVS programs via the pinned context, and centre-program dropout is unreachable. Audit `actor.role` carries the PMU role string (free text in DB Service). Covered through the real permission layer in `src/lib/student-addition-access.pmu.test.ts` and `src/app/api/school/[udise]/students/route.pmu.test.ts`.

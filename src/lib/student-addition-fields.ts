@@ -37,6 +37,37 @@ export const ANNUAL_FAMILY_INCOME_OPTIONS = [
   "More than Rs. 8,00,000",
 ] as const;
 
+// Education levels as the Student records already spell them. A handful of
+// older rows hold values outside this list ("10th", "12th"); those stay stored
+// and the Edit select keeps showing them, but they are not offered.
+export const EDUCATION_LEVEL_OPTIONS = [
+  "No formal education",
+  "Grades 1-5",
+  "Grades 6-10",
+  "Grades 11-12",
+  "Certificate course",
+  "Diploma course",
+  "Vocational training",
+  "Graduation (Bachelors)",
+  "Post Graduation (Masters)",
+  "PhD or equivalent degree",
+] as const;
+
+// Monthly bands, the counterpart to ANNUAL_FAMILY_INCOME_OPTIONS above.
+export const MONTHLY_FAMILY_INCOME_OPTIONS = [
+  "Less than Rs. 10,000",
+  "Rs. 10,000-20,000",
+  "Rs. 20,000-30,000",
+  "Rs. 30,000-40,000",
+  "Rs. 40,000-50,000",
+  "Rs. 50,000-60,000",
+  "Rs. 60,000-70,000",
+  "Rs. 70,000-80,000",
+  "Rs. 80,000-90,000",
+  "Rs. 90,000-100,000",
+  "More than Rs. 100,000",
+] as const;
+
 const STREAM_MAP: Record<string, LmsStudentStream> = {
   engineering: "engineering",
   medical: "medical",
@@ -83,7 +114,61 @@ interface LmsStudentEditPayload {
   grade?: 11 | 12;
   tshirt_size?: string;
   track_pant_size?: string;
+  // Contact and household details the roster card shows (#431). All optional,
+  // all cleared by sending a blank.
+  email?: string;
+  whatsapp_phone?: string;
+  address?: string;
+  city?: string;
+  district?: string;
+  state?: string;
+  pincode?: string;
+  father_phone?: string;
+  father_profession?: string;
+  father_education_level?: string;
+  mother_name?: string;
+  mother_phone?: string;
+  mother_profession?: string;
+  mother_education_level?: string;
+  guardian_name?: string;
+  guardian_relation?: string;
+  guardian_phone?: string;
+  guardian_profession?: string;
+  guardian_education_level?: string;
+  monthly_family_income?: string;
 }
+
+// Free text, with the column width as the cap so a value can't be rejected by
+// the database after passing here. `address` is a TEXT column; the limit is a
+// sanity bound, not a schema one.
+const CONTACT_TEXT_EDIT_FIELDS = [
+  ["address", "Address", 500],
+  ["city", "City", 255],
+  ["district", "District", 255],
+  ["state", "State", 255],
+  ["father_profession", "Father Profession", 255],
+  ["mother_name", "Mother Name", 255],
+  ["mother_profession", "Mother Profession", 255],
+  ["guardian_name", "Guardian Name", 255],
+  ["guardian_relation", "Guardian Relation", 255],
+  ["guardian_profession", "Guardian Profession", 255],
+] as const;
+
+// Ten digits each, the same shape as the Student's own number.
+const CONTACT_PHONE_EDIT_FIELDS = [
+  ["whatsapp_phone", "WhatsApp Number"],
+  ["father_phone", "Father Phone"],
+  ["mother_phone", "Mother Phone"],
+  ["guardian_phone", "Guardian Phone"],
+] as const;
+
+// Dropdowns: a blank clears, anything else must be one of the offered values.
+const CHOICE_EDIT_FIELDS = [
+  ["father_education_level", "Father Education Level", EDUCATION_LEVEL_OPTIONS],
+  ["mother_education_level", "Mother Education Level", EDUCATION_LEVEL_OPTIONS],
+  ["guardian_education_level", "Guardian Education Level", EDUCATION_LEVEL_OPTIONS],
+  ["monthly_family_income", "Monthly Family Income", MONTHLY_FAMILY_INCOME_OPTIONS],
+] as const;
 
 const UNIFORM_SIZE_EDIT_FIELDS = [
   ["tshirt_size", "T-shirt Size"],
@@ -106,6 +191,28 @@ const STUDENT_EDITABLE_FIELDS: ReadonlyArray<keyof LmsStudentEditPayload> = [
   "grade",
   "tshirt_size",
   "track_pant_size",
+  // Contact and household details, added with #431 so Edit Student covers
+  // every field the roster card shows.
+  "email",
+  "whatsapp_phone",
+  "address",
+  "city",
+  "district",
+  "state",
+  "pincode",
+  "father_phone",
+  "father_profession",
+  "father_education_level",
+  "mother_name",
+  "mother_phone",
+  "mother_profession",
+  "mother_education_level",
+  "guardian_name",
+  "guardian_relation",
+  "guardian_phone",
+  "guardian_profession",
+  "guardian_education_level",
+  "monthly_family_income",
 ];
 
 export type StudentAdditionUploadColumn = {
@@ -444,6 +551,46 @@ function canonicalUniformSize(
     : editError(field, `${label} is not valid`);
 }
 
+// A contact detail is optional and clearable: "" passes through so the DB
+// Service stores NULL.
+function canonicalOptionalText(
+  value: unknown,
+  field: string,
+  label: string,
+  maxLength: number,
+) {
+  if (typeof value !== "string") return editError(field, `${label} is not valid`);
+  const trimmed = value.trim();
+  if (trimmed.length > maxLength) {
+    return editError(field, `${label} must be ${maxLength} characters or fewer`);
+  }
+  return { ok: true as const, value: trimmed };
+}
+
+function canonicalContactPhone(value: unknown, field: string, label: string) {
+  if (typeof value !== "string") return editError(field, `${label} is not valid`);
+  const trimmed = value.trim();
+  if (!trimmed) return { ok: true as const, value: "" };
+  return /^\d{10}$/.test(trimmed)
+    ? { ok: true as const, value: trimmed }
+    : editError(field, `${label} must be exactly 10 digits`);
+}
+
+function canonicalOptionalChoice(
+  value: unknown,
+  field: string,
+  label: string,
+  options: readonly string[],
+) {
+  if (typeof value !== "string") return editError(field, `${label} is not valid`);
+  const trimmed = value.trim();
+  if (!trimmed) return { ok: true as const, value: "" };
+  const canonical = canonicalOptionValue(trimmed, options);
+  return canonical
+    ? { ok: true as const, value: canonical }
+    : editError(field, `${label} is not valid`);
+}
+
 function canonicalGenderValue(value: string): string | null {
   return canonicalOptionValue(value, STUDENT_ADDITION_GENDER_OPTIONS) ??
     (value.toLowerCase() === "others" ? "Other" : null);
@@ -685,6 +832,42 @@ export function canonicalizeStudentEditPayload(
     const size = canonicalUniformSize(fields[field], field, label);
     if (!size.ok) return size;
     fields[field] = size.value;
+  }
+  for (const [field, label, maxLength] of CONTACT_TEXT_EDIT_FIELDS) {
+    if (fields[field] === undefined) continue;
+    const text = canonicalOptionalText(fields[field], field, label, maxLength);
+    if (!text.ok) return text;
+    fields[field] = text.value;
+  }
+  for (const [field, label] of CONTACT_PHONE_EDIT_FIELDS) {
+    if (fields[field] === undefined) continue;
+    const phone = canonicalContactPhone(fields[field], field, label);
+    if (!phone.ok) return phone;
+    fields[field] = phone.value;
+  }
+  for (const [field, label, options] of CHOICE_EDIT_FIELDS) {
+    if (fields[field] === undefined) continue;
+    const choice = canonicalOptionalChoice(fields[field], field, label, options);
+    if (!choice.ok) return choice;
+    fields[field] = choice.value;
+  }
+  if (fields.email !== undefined) {
+    const email = canonicalOptionalText(fields.email, "email", "Email", 255);
+    if (!email.ok) return email;
+    // Deliberately loose: the only thing worth rejecting is a value that could
+    // not reach a mailbox.
+    if (email.value && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.value)) {
+      return editError("email", "Email is not valid");
+    }
+    fields.email = email.value;
+  }
+  if (fields.pincode !== undefined) {
+    const pincode = canonicalOptionalText(fields.pincode, "pincode", "Pincode", 6);
+    if (!pincode.ok) return pincode;
+    if (pincode.value && !/^\d{6}$/.test(pincode.value)) {
+      return editError("pincode", "Pincode must be exactly 6 digits");
+    }
+    fields.pincode = pincode.value;
   }
 
   if (fields.first_name !== undefined) {

@@ -639,7 +639,7 @@ describe("StudentTable - expand/collapse", () => {
     expect(screen.getByText("Maharashtra")).toBeInTheDocument();
     expect(screen.getByText("411001")).toBeInTheDocument();
     expect(screen.getByText("PCM")).toBeInTheDocument();
-    expect(screen.getByText("English")).toBeInTheDocument();
+    expect(screen.queryByText("School Medium")).not.toBeInTheDocument();
     expect(screen.getByText("Suresh Kumar")).toBeInTheDocument();
     expect(screen.getByText("Sunita Kumar")).toBeInTheDocument();
     expect(screen.getByText("Ramesh Kumar")).toBeInTheDocument();
@@ -651,7 +651,7 @@ describe("StudentTable - expand/collapse", () => {
     expect(screen.getByText("Guardian")).toBeInTheDocument();
   });
 
-  it("limits an NVS card's expanded details to the Edit Student fields", async () => {
+  it("shows an NVS card the same details, minus the uniform sizes", async () => {
     const user = userEvent.setup();
     const student = {
       ...makeStudent(),
@@ -662,11 +662,12 @@ describe("StudentTable - expand/collapse", () => {
       g10_board: "CBSE",
       g10_roll_no: "12345678",
       email: "nvs@example.com",
-      school_medium: "English",
       city: "Pune",
       mother_name: "Sunita Kumar",
       guardian_name: "Ramesh Kumar",
       monthly_family_income: "16000",
+      tshirt_size: "L",
+      track_pant_size: "M",
     };
     render(
       <StudentTable
@@ -678,19 +679,58 @@ describe("StudentTable - expand/collapse", () => {
 
     await user.click(screen.getByLabelText("Expand"));
 
-    for (const label of ["CWSN", "Father Name", "Annual Family Income", "Board Stream", "G10 board", "Grade 10 Roll no"]) {
-      expect(screen.getByText(label)).toBeInTheDocument();
+    // Everything Edit Student can change for an NVS Student is on the card.
+    for (const value of [
+      "nvs@example.com",
+      "Pune",
+      "Sunita Kumar",
+      "Ramesh Kumar",
+      "16000",
+      "Suresh Kumar",
+      "CBSE",
+    ]) {
+      expect(screen.getByText(value)).toBeInTheDocument();
     }
-    expect(screen.getByText("Yes")).toBeInTheDocument();
-    expect(screen.getByText("Suresh Kumar")).toBeInTheDocument();
-    expect(screen.getByText("CBSE")).toBeInTheDocument();
-    expect(screen.getByText("12345678")).toBeInTheDocument();
+    expect(
+      screen.getByText("Children with Special Needs (CWSN)"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Mother")).toBeInTheDocument();
+    expect(screen.getByText("Contact & Address")).toBeInTheDocument();
 
-    for (const value of ["nvs@example.com", "English", "Pune", "Sunita Kumar", "Ramesh Kumar", "16000"]) {
-      expect(screen.queryByText(value)).not.toBeInTheDocument();
-    }
-    expect(screen.queryByText("Mother")).not.toBeInTheDocument();
-    expect(screen.queryByText("Contact & Address")).not.toBeInTheDocument();
+    // Uniforms are a physical-centre concern, hidden here as in Edit Student.
+    expect(screen.queryByText("Uniform")).not.toBeInTheDocument();
+    expect(screen.queryByText("L")).not.toBeInTheDocument();
+  });
+
+  it("shows the Edit Student fields the card used to leave out (#431)", async () => {
+    const user = userEvent.setup();
+    const student = {
+      ...makeStudent(),
+      physically_handicapped: true,
+      g10_board: "CBSE",
+      tshirt_size: "L",
+      track_pant_size: "M",
+    };
+    render(
+      <StudentTable
+        students={[student]}
+        grades={defaultGrades}
+        selectedProgramId={PROGRAM_IDS.COE}
+      />,
+    );
+
+    await user.click(screen.getByLabelText("Expand"));
+
+    expect(
+      screen.getByText("Children with Special Needs (CWSN)"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Yes")).toBeInTheDocument();
+    expect(screen.getByText("G10 board")).toBeInTheDocument();
+    expect(screen.getByText("CBSE")).toBeInTheDocument();
+    expect(screen.getByText("T-shirt Size")).toBeInTheDocument();
+    expect(screen.getByText("L")).toBeInTheDocument();
+    expect(screen.getByText("Track Pant Size")).toBeInTheDocument();
+    expect(screen.getByText("M")).toBeInTheDocument();
   });
 
   it("hides details after collapsing", async () => {
