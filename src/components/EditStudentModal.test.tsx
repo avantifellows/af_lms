@@ -683,20 +683,22 @@ describe("EditStudentModal", () => {
   });
 
   describe("typing in the new fields", () => {
-    it("keeps only digits in a contact phone, capped at ten", async () => {
+    it("keeps only the digits of a contact phone, all of them", async () => {
       const user = userEvent.setup();
       renderModal({ programId: 1 });
 
-      await user.type(getByName("father_phone"), "+91 98765 4321012");
+      await user.type(getByName("father_phone"), "+91 98765 43210");
 
-      expect(getByName("father_phone")).toHaveValue("9198765432");
+      // Not truncated to ten: that would turn a pasted country code into a
+      // different number that validation would happily accept.
+      expect(getByName("father_phone")).toHaveValue("919876543210");
     });
 
-    it("keeps only digits in a pincode, capped at six", async () => {
+    it("keeps only the digits of a pincode", async () => {
       const user = userEvent.setup();
       renderModal({ programId: 1 });
 
-      await user.type(getByName("pincode"), "30 2001 9");
+      await user.type(getByName("pincode"), "30 2001");
 
       expect(getByName("pincode")).toHaveValue("302001");
     });

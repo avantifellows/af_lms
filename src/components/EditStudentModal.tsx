@@ -182,10 +182,11 @@ function normalizeTypedValue(name: string, value: string, g10Board: string): str
       ? digitsOnly(value).replace(/^0+/, "").slice(0, 8)
       : rollCharactersOnly(value).slice(0, 10);
   }
-  // Ten digits is the whole number, so capping here can't turn one valid
-  // number into another.
-  if (CONTACT_PHONE_FIELDS.has(name)) return digitsOnly(value).slice(0, 10);
-  if (name === "pincode") return digitsOnly(value).slice(0, 6);
+  // Same reasoning as the Student's own phone: keep every digit typed. A
+  // pasted "+91 98765 43210" is twelve digits, and truncating it to ten would
+  // save a different, perfectly valid-looking number instead of failing.
+  if (CONTACT_PHONE_FIELDS.has(name)) return digitsOnly(value);
+  if (name === "pincode") return digitsOnly(value);
   if (NAME_FIELDS.has(name)) return lettersAndSpacesOnly(value);
   return value;
 }
