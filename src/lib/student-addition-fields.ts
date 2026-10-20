@@ -1,4 +1,4 @@
-import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
+import { CURRENT_ACADEMIC_YEAR, PMU_PROGRAM_ID } from "@/lib/constants";
 import { UNIFORM_SIZES } from "@/lib/uniform-sizes";
 
 import {
@@ -162,6 +162,34 @@ const CONTACT_PHONE_EDIT_FIELDS = [
   ["mother_phone", "Mother Phone"],
   ["guardian_phone", "Guardian Phone"],
 ] as const;
+
+// The contact and household details are collected for physical centres only:
+// JNV NVS PMU did not ask for them, and HQ has not approved collecting family
+// income for the Phone-mode cohort (#296), every member of which is an NVS
+// Student. The Edit form hides them under that program and this refuses them,
+// so a direct PATCH cannot write them either.
+const CENTRE_ONLY_EDIT_FIELDS = [
+  "email",
+  "whatsapp_phone",
+  "address",
+  "city",
+  "district",
+  "state",
+  "pincode",
+  "father_phone",
+  "father_profession",
+  "father_education_level",
+  "mother_name",
+  "mother_phone",
+  "mother_profession",
+  "mother_education_level",
+  "guardian_name",
+  "guardian_relation",
+  "guardian_phone",
+  "guardian_profession",
+  "guardian_education_level",
+  "monthly_family_income",
+] as const satisfies ReadonlyArray<keyof LmsStudentEditPayload>;
 
 // Dropdowns: a blank clears, anything else must be one of the offered values.
 const CHOICE_EDIT_FIELDS = [
@@ -709,9 +737,27 @@ function editError(field: string, message: string, otherField?: string) {
 // fallow-ignore-next-line complexity
 export function canonicalizeStudentEditPayload(
   input: Record<string, unknown>,
-  options: { mode?: RegistrationMode; allowPhoneBackfill?: boolean } = {},
+  options: {
+    mode?: RegistrationMode;
+    allowPhoneBackfill?: boolean;
+    /** The program the edit is being made under; NVS gets no centre-only fields. */
+    programId?: number | null;
+  } = {},
 ) {
   const mode = options.mode ?? ACTIVE_REGISTRATION_MODE;
+  if (options.programId != null && Number(options.programId) === PMU_PROGRAM_ID) {
+    const refused = CENTRE_ONLY_EDIT_FIELDS.filter((field) =>
+      Object.prototype.hasOwnProperty.call(input, field),
+    );
+    if (refused.length > 0) {
+      const message = "These details are not collected for JNV NVS Students";
+      return {
+        ok: false as const,
+        error: message,
+        field_errors: Object.fromEntries(refused.map((field) => [field, message])),
+      };
+    }
+  }
   const editableFields = options.allowPhoneBackfill
     ? [...STUDENT_EDITABLE_FIELDS, "pen_number", "g10_roll_no"]
     : STUDENT_EDITABLE_FIELDS;
@@ -863,7 +909,9 @@ export function canonicalizeStudentEditPayload(
     fields.email = email.value;
   }
   if (fields.pincode !== undefined) {
-    const pincode = canonicalOptionalText(fields.pincode, "pincode", "Pincode", 6);
+    // The digits rule speaks first: a seven-digit pincode is a wrong pincode,
+    // not a string that is one character too long.
+    const pincode = canonicalOptionalText(fields.pincode, "pincode", "Pincode", 255);
     if (!pincode.ok) return pincode;
     // No Indian pincode starts with a zero, so one is a typo rather than a place.
     if (pincode.value && !/^[1-9]\d{5}$/.test(pincode.value)) {

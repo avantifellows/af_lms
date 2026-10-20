@@ -86,50 +86,60 @@ selected program) is not `PMU_PROGRAM_ID`. UI-only gate; the PATCH path still ac
 fields, and the modal never sends them for NVS because they are never rendered.
 
 Student documents follow the same rule (PR #433): under the NVS program the Edit Student
-Details/Documents tab strip is not rendered (the modal shows Details only), and the roster
-card's expanded Documents list is hidden via `StudentCard`'s `isNvs`. The
-`/api/students/[id]/documents` routes are unchanged. The NVS roster card's expanded view is
-also limited to the Edit Student fields its summary doesn't already show (`NvsDetailGroups` in
-`StudentTable.tsx`: CWSN, Father Name, Annual Family Income, Board Stream, G10 board, Grade 10
-Roll no), so the card never shows fields the Edit form can't change. Keep the two in sync when
-an Edit Student field is added or removed for NVS.
+Documents tab is not rendered and the roster card's expanded Documents list is hidden via
+`StudentCard`'s `isNvs`. The `/api/students/[id]/documents` routes are unchanged. The NVS
+roster card's expanded view is limited to the Edit Student fields its summary doesn't already
+show (`NvsDetailGroups` in `StudentTable.tsx`: CWSN, Father Name, Annual Family Income, Board
+Stream, G10 board, Grade 10 Roll no), so the card never shows fields the Edit form can't
+change. Keep the two in sync when an Edit Student field is added or removed for NVS.
 
-## Edit Student and the card show the same fields (#431)
+## Edit Student and the card show the same fields, for centres (#431)
 
 GitHub issue https://github.com/avantifellows/af_lms/issues/431 found the roster card
 showing 21 profile fields Edit Student could not change, and 4 editable fields the card
 never showed. Teachers do most of these edits, so they could see data they had no way to
 correct and save data they could not see afterwards.
 
-Edit Student gained Contact & Address, Father, Mother, Guardian and Socio-economic
-sections, mirroring the card's groups; `father_name` and Annual Family Income moved into
-the sections they belong to. The card gained CWSN, G10 board and the uniform sizes. CWSN is
-spelled "Children with Special Needs (CWSN)" in both places, and Locked Identity carries a
-line saying why those fields can't be edited.
+**Physical centres only.** JNV NVS PMU did not ask for the contact and household details
+(checked with Dhyanesh on PR #437), #431 was raised for the centres, and HQ has not
+approved collecting family income for the Phone-mode cohort (#296) — every member of which
+is an NVS Student. So under `PMU_PROGRAM_ID` the Edit form hides the new sections, the card
+keeps the `NvsDetailGroups` shape #433 gave it, and both services refuse the fields:
+`canonicalizeStudentEditPayload` takes the authorized `programId` from the route and answers
+a field error for `CENTRE_ONLY_EDIT_FIELDS`, and the DB Service answers 422
+`unsupported_for_nvs` for the same set. Father Name and Annual Family Income are *not* new,
+so they stay on the NVS form, where they sit in Student Details rather than the new sections.
+
+For centres, Edit Student gained Contact & Address, Father, Mother, Guardian and
+Socio-economic sections mirroring the card's groups, and the card gained CWSN, G10 board and
+the uniform sizes. CWSN is spelled "Children with Special Needs (CWSN)" in both places for
+every program, as is the Locked Identity hint.
 
 School Medium is the one field dropped rather than made editable — the program team does
 not want it edited (Venu, on the issue) — so it left the card too. `STUDENT_COLUMNS` still
-selects it, so showing it again is a one-line change.
-
-`NvsDetailGroups` is gone. #433 trimmed the NVS card to the Edit Student fields precisely
-because Edit could not change the rest; now that it can, every program renders the same
-groups, with the uniform sizes as the only program-specific part (hidden for NVS in the
-card exactly as in Edit).
+selects it, so showing it again is a one-line change. G10 board renders as CBSE / Others on
+the card (`formatG10Board`), the way Edit Student offers it, rather than the raw board name.
 
 Validation lives in `canonicalizeStudentEditPayload`: contact phones (WhatsApp, father,
 mother, guardian) are ten digits with no leading zero, pincode is six with no leading zero
-(no Indian pincode starts with one), email must be able to reach a mailbox,
-and the three education levels plus Monthly Family Income are dropdowns
-(`EDUCATION_LEVEL_OPTIONS`, `MONTHLY_FAMILY_INCOME_OPTIONS`). Blank clears, as the uniform
-sizes already did. A stored value the list no longer offers (e.g. an education level of
-"10th") still renders, because `selectField` prepends the current value.
+(no Indian pincode starts with one), email must be able to reach a mailbox, and the three
+education levels plus Monthly Family Income are dropdowns (`EDUCATION_LEVEL_OPTIONS`,
+`MONTHLY_FAMILY_INCOME_OPTIONS`). Blank clears, as the uniform sizes already did. A stored
+value the list no longer offers (e.g. an education level of "10th") still renders, because
+`selectField` prepends the current value. The modal filters as you type — digits for the
+phones and pincode, letters and spaces for the parent names — matching the Student's own
+phone and Father Name.
+
+Because the form is now long, a failed save scrolls the first field error (or the banner,
+which carries `role="alert"`) into view and focuses it. Without that, Save looked like it
+did nothing: the error sat about 1650px above the viewport on a laptop.
 
 **DB Service dependency:** `PATCH /lms/students/:id/update-with-enrollments` answers 422
 for any field outside its contract, so the db-service branch
 `feat/lms-student-contact-family-fields` (seven `user` fields, thirteen `student` fields,
-plus blank-to-NULL and guards for length, phone, pincode and email) must be deployed
-before this ships. Its rules and these are deliberately identical — change them together,
-or the form will accept what the Service refuses.
+blank-to-NULL, the NVS refusal, and guards for length, phone, pincode and email) must be
+deployed before this ships. Its rules and these are deliberately identical — change them
+together, or the form will accept what the Service refuses.
 
 ## Settled Product Shape
 - v1 is JNV PMU / JNV NVS only. In current LMS code this is `PROGRAM_IDS.NVS` (`64`, label `JNV NVS`) from `src/lib/constants.ts`.

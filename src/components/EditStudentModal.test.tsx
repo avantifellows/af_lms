@@ -538,6 +538,11 @@ describe("EditStudentModal", () => {
   });
 
   describe("contact and household details (#431)", () => {
+    // Centre-only: JNV NVS PMU does not collect these (#431 review).
+    const CENTRE_PROGRAM_ID = 1;
+    const renderCentreModal = (overrides: Partial<typeof defaultProps> = {}) =>
+      renderModal({ programId: CENTRE_PROGRAM_ID, ...overrides });
+
     const withDetails = {
       ...baseStudent,
       whatsapp_phone: "9000000001",
@@ -557,7 +562,7 @@ describe("EditStudentModal", () => {
     };
 
     it("prefills every detail the roster card shows", () => {
-      renderModal({ student: withDetails });
+      renderCentreModal({ student: withDetails });
 
       expect(getByName("whatsapp_phone")).toHaveValue("9000000001");
       expect(getByName("address")).toHaveValue("12 MG Road");
@@ -570,7 +575,7 @@ describe("EditStudentModal", () => {
     });
 
     it("keeps a stored education level the list no longer offers", () => {
-      renderModal({ student: { ...baseStudent, father_education_level: "10th" } });
+      renderCentreModal({ student: { ...baseStudent, father_education_level: "10th" } });
 
       const select = getByName("father_education_level") as HTMLSelectElement;
       expect(select).toHaveValue("10th");
@@ -582,7 +587,7 @@ describe("EditStudentModal", () => {
       mockFetch.mockResolvedValue(
         new Response(JSON.stringify({ ok: true }), { status: 200 }),
       );
-      renderModal({ student: withDetails });
+      renderCentreModal({ student: withDetails });
 
       await user.clear(getByName("city"));
       await user.type(getByName("city"), "Nashik");
@@ -604,7 +609,7 @@ describe("EditStudentModal", () => {
       mockFetch.mockResolvedValue(
         new Response(JSON.stringify({ ok: true }), { status: 200 }),
       );
-      renderModal({ student: withDetails });
+      renderCentreModal({ student: withDetails });
 
       await user.clear(getByName("guardian_relation"));
       await user.click(screen.getByText("Save Changes"));
@@ -626,7 +631,7 @@ describe("EditStudentModal", () => {
           { status: 400 },
         ),
       );
-      renderModal({ student: withDetails });
+      renderCentreModal({ student: withDetails });
 
       await user.clear(getByName("father_phone"));
       await user.type(getByName("father_phone"), "98765");
@@ -641,7 +646,99 @@ describe("EditStudentModal", () => {
     it("says why the locked identifiers cannot be edited", () => {
       renderModal();
 
-      expect(screen.getByText(/cannot be edited here/)).toBeInTheDocument();
+      expect(screen.getByText(/can't be edited here/)).toBeInTheDocument();
+    });
+  });
+
+  describe("NVS keeps the form it had before #431", () => {
+    it("hides the contact and household sections for PMU (JNV NVS) Students", () => {
+      renderModal();
+
+      for (const heading of ["Contact & Address", "Mother", "Guardian", "Socio-economic"]) {
+        expect(screen.queryByText(heading)).not.toBeInTheDocument();
+      }
+      expect(document.querySelector('[name="mother_name"]')).toBeNull();
+      expect(document.querySelector('[name="monthly_family_income"]')).toBeNull();
+      expect(document.querySelector('[name="whatsapp_phone"]')).toBeNull();
+    });
+
+    it("keeps the fields NVS already had", () => {
+      renderModal();
+
+      // Father Name and Annual Family Income predate #431 and stay put.
+      expect(getByName("father_name")).toBeInTheDocument();
+      expect(getByName("annual_family_income")).toBeInTheDocument();
+      expect(
+        screen.getByText("Children with Special Needs (CWSN)"),
+      ).toBeInTheDocument();
+    });
+
+    it("offers the sections to a physical centre", () => {
+      renderModal({ programId: 1 });
+
+      expect(screen.getByText("Contact & Address")).toBeInTheDocument();
+      expect(getByName("mother_name")).toBeInTheDocument();
+      expect(getByName("father_name")).toBeInTheDocument();
+    });
+  });
+
+  describe("typing in the new fields", () => {
+    it("keeps only digits in a contact phone, capped at ten", async () => {
+      const user = userEvent.setup();
+      renderModal({ programId: 1 });
+
+      await user.type(getByName("father_phone"), "+91 98765 4321012");
+
+      expect(getByName("father_phone")).toHaveValue("9198765432");
+    });
+
+    it("keeps only digits in a pincode, capped at six", async () => {
+      const user = userEvent.setup();
+      renderModal({ programId: 1 });
+
+      await user.type(getByName("pincode"), "30 2001 9");
+
+      expect(getByName("pincode")).toHaveValue("302001");
+    });
+
+    it("keeps letters and spaces in the parent names, like Father Name", async () => {
+      const user = userEvent.setup();
+      renderModal({ programId: 1 });
+
+      await user.type(getByName("mother_name"), "Sita 2.");
+
+      expect(getByName("mother_name")).toHaveValue("Sita ");
+    });
+  });
+
+  describe("a failed save says so where it can be seen", () => {
+    it("moves focus to the field the server rejected", async () => {
+      const user = userEvent.setup();
+      const message = "Pincode must be exactly 6 digits and cannot start with zero";
+      mockFetch.mockResolvedValue(
+        new Response(JSON.stringify({ error: message, field_errors: { pincode: message } }), {
+          status: 422,
+        }),
+      );
+      renderModal({ programId: 1 });
+
+      // Five digits passes the input filter and fails at the API, which is
+      // where the error used to land thousands of pixels out of view.
+      await user.type(getByName("pincode"), "12345");
+      await user.click(screen.getByText("Save Changes"));
+
+      await waitFor(() => expect(getByName("pincode")).toHaveFocus());
+    });
+
+    it("announces a save error that has no field of its own", async () => {
+      const user = userEvent.setup();
+      renderModal({ programId: 1 });
+
+      await user.click(screen.getByText("Save Changes"));
+
+      const banner = await screen.findByRole("alert");
+      expect(banner).toHaveTextContent("No changes to save");
+      expect(banner).toHaveFocus();
     });
   });
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { type Grade, type Student } from "./StudentTable";
 import { Modal, Button, FormSection } from "@/components/ui";
 import { UploadDocumentForm } from "@/components/documents/UploadDocumentForm";
@@ -153,11 +153,42 @@ function initialFormData(student: Student) {
   };
 }
 
+// Typed the same way as the Student's own phone and Father Name, which have
+// filtered as you type since before these fields existed.
+const CONTACT_PHONE_FIELDS = new Set([
+  "whatsapp_phone",
+  "father_phone",
+  "mother_phone",
+  "guardian_phone",
+]);
+const NAME_FIELDS = new Set(["father_name", "mother_name", "guardian_name"]);
+
 const inputClassName =
   "mt-1 block w-full rounded-lg border-2 border-border bg-bg-input px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 disabled:cursor-not-allowed disabled:bg-bg-card-alt disabled:text-text-muted transition-colors";
 const labelClassName = "block text-sm font-medium text-text-secondary";
 const sectionHeadingClassName = "mb-4 text-sm font-semibold text-text-primary";
 const errorClassName = "mt-1 text-xs text-danger";
+
+// What each field accepts as it is typed, so a stray space or a +91 never
+// reaches Save. The rules match what the server would refuse anyway.
+function normalizeTypedValue(name: string, value: string, g10Board: string): string {
+  // The Student's own phone keeps its whole digit sequence, so validation can
+  // reject a leading-zero or overlong number instead of silently turning it
+  // into a different one.
+  if (name === "phone") return digitsOnly(value);
+  if (name === "pen_number") return digitsOnly(value).slice(0, 11);
+  if (name === "g10_roll_no") {
+    return g10Board === CBSE_BOARD
+      ? digitsOnly(value).replace(/^0+/, "").slice(0, 8)
+      : rollCharactersOnly(value).slice(0, 10);
+  }
+  // Ten digits is the whole number, so capping here can't turn one valid
+  // number into another.
+  if (CONTACT_PHONE_FIELDS.has(name)) return digitsOnly(value).slice(0, 10);
+  if (name === "pincode") return digitsOnly(value).slice(0, 6);
+  if (NAME_FIELDS.has(name)) return lettersAndSpacesOnly(value);
+  return value;
+}
 
 // fallow-ignore-next-line complexity
 export default function EditStudentModal({
@@ -183,6 +214,20 @@ export default function EditStudentModal({
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [activeTab, setActiveTab] = useState<"details" | "documents">("details");
   const [documentsRefresh, setDocumentsRefresh] = useState(0);
+
+  // Save sits in a fixed footer while the errors sit in the scrolling body, so
+  // on a form this long a failed save would otherwise leave the reason
+  // thousands of pixels out of view and look like Save doing nothing.
+  const errorBannerRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const [firstFieldError] = Object.keys(fieldErrors);
+    if (!firstFieldError && !error) return;
+    const target = firstFieldError
+      ? document.getElementById(`edit-student-${firstFieldError}`)
+      : errorBannerRef.current;
+    target?.scrollIntoView?.({ block: "center" });
+    target?.focus?.();
+  }, [error, fieldErrors]);
 
   const studentName = fullName(student);
   const studentPkId = (() => {
@@ -333,21 +378,7 @@ export default function EditStudentModal({
     }
     setFormData((prev) => ({
       ...prev,
-      [name]:
-        name === "phone"
-          // Keep the complete digit sequence so validation can reject
-          // leading-zero and overlength values instead of silently changing
-          // them into a different phone number.
-          ? digitsOnly(value)
-          : name === "pen_number"
-            ? digitsOnly(value).slice(0, 11)
-            : name === "g10_roll_no"
-              ? (formData.g10_board === CBSE_BOARD
-                ? digitsOnly(value).replace(/^0+/, "").slice(0, 8)
-                : rollCharactersOnly(value).slice(0, 10))
-          : name === "father_name"
-            ? lettersAndSpacesOnly(value)
-            : value,
+      [name]: normalizeTypedValue(name, value, formData.g10_board),
     }));
     setError("");
     setFieldErrors((prev) => {
@@ -364,9 +395,12 @@ export default function EditStudentModal({
     inputMode?: "text" | "numeric" | "tel",
   ) => (
     <div>
-      <label className={labelClassName}>{label}</label>
+      <label className={labelClassName} htmlFor={`edit-student-${name}`}>
+        {label}
+      </label>
       <input
         type="text"
+        id={`edit-student-${name}`}
         name={name}
         inputMode={inputMode}
         value={String(formData[name] ?? "")}
@@ -398,8 +432,11 @@ export default function EditStudentModal({
 
     return (
       <div>
-        <label className={labelClassName}>{label}</label>
+        <label className={labelClassName} htmlFor={`edit-student-${name}`}>
+          {label}
+        </label>
         <select
+          id={`edit-student-${name}`}
           name={name}
           value={current}
           onChange={handleChange}
@@ -496,7 +533,12 @@ export default function EditStudentModal({
         <form noValidate onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
           <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
             {error && (
-              <div className="rounded-lg border border-danger/30 bg-danger-bg p-3 text-sm text-danger">
+              <div
+                ref={errorBannerRef}
+                role="alert"
+                tabIndex={-1}
+                className="rounded-lg border border-danger/30 bg-danger-bg p-3 text-sm text-danger"
+              >
                 {error}
               </div>
             )}
@@ -533,7 +575,16 @@ export default function EditStudentModal({
                   <span className={labelClassName}>Children with Special Needs (CWSN)</span>
                 </label>
                 {textField("phone", "Parents Phone Number", "tel")}
-                {textField("email", "Email")}
+                {!isPmuProgram && textField("email", "Email")}
+                {/* Father Name and Annual Family Income are not new fields:
+                    they stay here for NVS, where the sections below are not
+                    rendered, and move into those sections for centres. */}
+                {isPmuProgram && textField("father_name", "Father Name")}
+                {isPmuProgram && (!phoneMode || !isPhoneRegistrationStudent) && selectField(
+                  "annual_family_income",
+                  "Yearly / Annual Family Income",
+                  ANNUAL_FAMILY_INCOME_OPTIONS,
+                )}
               </div>
             </FormSection>
 
@@ -556,76 +607,84 @@ export default function EditStudentModal({
               </div>
             </FormSection>
 
-            <FormSection>
-              <h3 className={sectionHeadingClassName}>Contact &amp; Address</h3>
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-                {textField("whatsapp_phone", "WhatsApp Number", "tel")}
-                {textField("address", "Address")}
-                {textField("city", "City")}
-                {textField("district", "District")}
-                {textField("state", "State")}
-                {textField("pincode", "Pincode", "numeric")}
-              </div>
-            </FormSection>
+            {/* Contact and household details are collected for physical
+                centres only (#431); JNV NVS PMU did not ask for them, and the
+                API refuses them under that program. */}
+            {!isPmuProgram && (
+              <>
+              <FormSection>
+                <h3 className={sectionHeadingClassName}>Contact &amp; Address</h3>
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                  {textField("email", "Email")}
+                  {textField("whatsapp_phone", "WhatsApp Number", "tel")}
+                  {textField("address", "Address")}
+                  {textField("city", "City")}
+                  {textField("district", "District")}
+                  {textField("state", "State")}
+                  {textField("pincode", "Pincode", "numeric")}
+                </div>
+              </FormSection>
 
-            <FormSection>
-              <h3 className={sectionHeadingClassName}>Father</h3>
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                {textField("father_name", "Father Name")}
-                {textField("father_phone", "Father Phone", "tel")}
-                {textField("father_profession", "Father Profession")}
-                {selectField(
-                  "father_education_level",
-                  "Father Education Level",
-                  EDUCATION_LEVEL_OPTIONS,
-                )}
-              </div>
-            </FormSection>
+              <FormSection>
+                <h3 className={sectionHeadingClassName}>Father</h3>
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  {textField("father_name", "Father Name")}
+                  {textField("father_phone", "Father Phone", "tel")}
+                  {textField("father_profession", "Father Profession")}
+                  {selectField(
+                    "father_education_level",
+                    "Father Education Level",
+                    EDUCATION_LEVEL_OPTIONS,
+                  )}
+                </div>
+              </FormSection>
 
-            <FormSection>
-              <h3 className={sectionHeadingClassName}>Mother</h3>
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                {textField("mother_name", "Mother Name")}
-                {textField("mother_phone", "Mother Phone", "tel")}
-                {textField("mother_profession", "Mother Profession")}
-                {selectField(
-                  "mother_education_level",
-                  "Mother Education Level",
-                  EDUCATION_LEVEL_OPTIONS,
-                )}
-              </div>
-            </FormSection>
+              <FormSection>
+                <h3 className={sectionHeadingClassName}>Mother</h3>
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  {textField("mother_name", "Mother Name")}
+                  {textField("mother_phone", "Mother Phone", "tel")}
+                  {textField("mother_profession", "Mother Profession")}
+                  {selectField(
+                    "mother_education_level",
+                    "Mother Education Level",
+                    EDUCATION_LEVEL_OPTIONS,
+                  )}
+                </div>
+              </FormSection>
 
-            <FormSection>
-              <h3 className={sectionHeadingClassName}>Guardian</h3>
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                {textField("guardian_name", "Guardian Name")}
-                {textField("guardian_relation", "Guardian Relation")}
-                {textField("guardian_phone", "Guardian Phone", "tel")}
-                {textField("guardian_profession", "Guardian Profession")}
-                {selectField(
-                  "guardian_education_level",
-                  "Guardian Education Level",
-                  EDUCATION_LEVEL_OPTIONS,
-                )}
-              </div>
-            </FormSection>
+              <FormSection>
+                <h3 className={sectionHeadingClassName}>Guardian</h3>
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  {textField("guardian_name", "Guardian Name")}
+                  {textField("guardian_relation", "Guardian Relation")}
+                  {textField("guardian_phone", "Guardian Phone", "tel")}
+                  {textField("guardian_profession", "Guardian Profession")}
+                  {selectField(
+                    "guardian_education_level",
+                    "Guardian Education Level",
+                    EDUCATION_LEVEL_OPTIONS,
+                  )}
+                </div>
+              </FormSection>
 
-            <FormSection>
-              <h3 className={sectionHeadingClassName}>Socio-economic</h3>
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                {(!phoneMode || !isPhoneRegistrationStudent) && selectField(
-                  "annual_family_income",
-                  "Yearly / Annual Family Income",
-                  ANNUAL_FAMILY_INCOME_OPTIONS,
-                )}
-                {selectField(
-                  "monthly_family_income",
-                  "Monthly Family Income",
-                  MONTHLY_FAMILY_INCOME_OPTIONS,
-                )}
-              </div>
-            </FormSection>
+              <FormSection>
+                <h3 className={sectionHeadingClassName}>Socio-economic</h3>
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  {(!phoneMode || !isPhoneRegistrationStudent) && selectField(
+                    "annual_family_income",
+                    "Yearly / Annual Family Income",
+                    ANNUAL_FAMILY_INCOME_OPTIONS,
+                  )}
+                  {selectField(
+                    "monthly_family_income",
+                    "Monthly Family Income",
+                    MONTHLY_FAMILY_INCOME_OPTIONS,
+                  )}
+                </div>
+              </FormSection>
+              </>
+            )}
 
             {!isPmuProgram && (
               <FormSection>
@@ -687,9 +746,8 @@ export default function EditStudentModal({
             <FormSection>
               <h3 className={sectionHeadingClassName}>Locked Identity</h3>
               <p className="mb-4 text-xs text-text-muted">
-                These identify the Student across Avanti and the boards, so they are set
-                once at enrolment and cannot be edited here. Ask the program team if one
-                of them is wrong.
+                These are fixed identifiers and can&apos;t be edited here. Ask the program
+                team if one is wrong.
               </p>
               <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
                 <div>

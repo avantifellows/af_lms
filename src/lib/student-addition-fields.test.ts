@@ -206,6 +206,39 @@ describe("canonicalizeStudentEditPayload", () => {
     });
   });
 
+  it("refuses the centre-only details for a JNV NVS edit", () => {
+    const message = "These details are not collected for JNV NVS Students";
+    expect(canonicalizeStudentEditPayload(
+      { mother_name: "Sunita Devi", city: "Jaipur", father_name: "Suresh Kumar" },
+      { programId: 64 },
+    )).toEqual({
+      ok: false,
+      error: message,
+      field_errors: { mother_name: message, city: message },
+    });
+  });
+
+  it("still takes the fields NVS always had", () => {
+    expect(canonicalizeStudentEditPayload(
+      { father_name: " suresh kumar ", annual_family_income: "Less than Rs. 1,00,000" },
+      { programId: 64 },
+    )).toEqual({
+      ok: true,
+      fields: {
+        father_name: "Suresh Kumar",
+        annual_family_income: "Less than Rs. 1,00,000",
+      },
+    });
+  });
+
+  it("reports a seven-digit pincode as a pincode problem, not a length one", () => {
+    expect(canonicalizeStudentEditPayload({ pincode: "3020011" })).toEqual({
+      ok: false,
+      error: "Pincode must be exactly 6 digits and cannot start with zero",
+      field_errors: { pincode: "Pincode must be exactly 6 digits and cannot start with zero" },
+    });
+  });
+
   it("still drops a field outside the editable contract", () => {
     // School medium is on neither side any more: the program team does not
     // want it edited, so it is not in the allowlist.

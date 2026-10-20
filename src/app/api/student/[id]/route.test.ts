@@ -188,8 +188,25 @@ describe("PATCH /api/student/[id]", () => {
     });
   });
 
+  /** Re-authorize the next PATCH under a physical-centre program. */
+  function authorizeCentreProgram() {
+    mockRequireStudentEditAccess.mockResolvedValue({
+      ok: true,
+      programId: 1,
+      permission: {} as never,
+      actor: {
+        user_id: 501,
+        email: "pm@example.org",
+        login_type: "google",
+        role: "program_manager",
+      },
+      school: { code: "JNV001", udise_code: "12345678901" },
+    });
+  }
+
   it("proxies the contact and household details the card shows (#431)", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
+    authorizeCentreProgram();
     mockFetch.mockResolvedValue(
       new Response(JSON.stringify({ status: "updated" }), { status: 200 }),
     );
@@ -197,7 +214,7 @@ describe("PATCH /api/student/[id]", () => {
     const req = jsonRequest("http://localhost/api/student/100", {
       method: "PATCH",
       body: {
-        program_id: 64,
+        program_id: 1,
         email: " ravi@example.com ",
         whatsapp_phone: "9876543210",
         address: " 12 Main Road ",
@@ -235,6 +252,7 @@ describe("PATCH /api/student/[id]", () => {
 
   it("rejects a malformed household phone or pincode before proxying (#431)", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
+    authorizeCentreProgram();
 
     for (const [field, value, message] of [
       [
@@ -261,7 +279,7 @@ describe("PATCH /api/student/[id]", () => {
       mockFetch.mockClear();
       const req = jsonRequest("http://localhost/api/student/100", {
         method: "PATCH",
-        body: { program_id: 64, [field]: value },
+        body: { program_id: 1, [field]: value },
       });
 
       const res = await PATCH(req as never, params);
@@ -274,6 +292,26 @@ describe("PATCH /api/student/[id]", () => {
       });
       expect(mockFetch).not.toHaveBeenCalled();
     }
+  });
+
+  it("refuses the contact and household details for a JNV NVS edit (#431)", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+
+    const req = jsonRequest("http://localhost/api/student/100", {
+      method: "PATCH",
+      body: { program_id: 64, mother_name: "Sunita Devi", city: "Jaipur" },
+    });
+
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(422);
+    const body = await res.json();
+    expect(body.error).toBe("These details are not collected for JNV NVS Students");
+    expect(body.field_errors).toEqual({
+      mother_name: "These details are not collected for JNV NVS Students",
+      city: "These details are not collected for JNV NVS Students",
+    });
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it("canonicalizes case-insensitive choice labels in an Approved-mode edit payload", async () => {

@@ -651,7 +651,7 @@ describe("StudentTable - expand/collapse", () => {
     expect(screen.getByText("Guardian")).toBeInTheDocument();
   });
 
-  it("shows an NVS card the same details, minus the uniform sizes", async () => {
+  it("keeps an NVS card trimmed to the fields Edit Student offers there", async () => {
     const user = userEvent.setup();
     const student = {
       ...makeStudent(),
@@ -667,7 +667,6 @@ describe("StudentTable - expand/collapse", () => {
       guardian_name: "Ramesh Kumar",
       monthly_family_income: "16000",
       tshirt_size: "L",
-      track_pant_size: "M",
     };
     render(
       <StudentTable
@@ -679,27 +678,56 @@ describe("StudentTable - expand/collapse", () => {
 
     await user.click(screen.getByLabelText("Expand"));
 
-    // Everything Edit Student can change for an NVS Student is on the card.
+    for (const label of [
+      "Children with Special Needs (CWSN)",
+      "Father Name",
+      "Annual Family Income",
+      "Board Stream",
+      "G10 board",
+      "Grade 10 Roll no",
+    ]) {
+      expect(screen.getByText(label)).toBeInTheDocument();
+    }
+    expect(screen.getByText("Yes")).toBeInTheDocument();
+    expect(screen.getByText("CBSE")).toBeInTheDocument();
+
+    // The contact and household details are collected for centres only, so
+    // they are neither editable nor shown here (#431 review).
     for (const value of [
       "nvs@example.com",
       "Pune",
       "Sunita Kumar",
       "Ramesh Kumar",
       "16000",
-      "Suresh Kumar",
-      "CBSE",
     ]) {
-      expect(screen.getByText(value)).toBeInTheDocument();
+      expect(screen.queryByText(value)).not.toBeInTheDocument();
     }
-    expect(
-      screen.getByText("Children with Special Needs (CWSN)"),
-    ).toBeInTheDocument();
-    expect(screen.getByText("Mother")).toBeInTheDocument();
-    expect(screen.getByText("Contact & Address")).toBeInTheDocument();
-
-    // Uniforms are a physical-centre concern, hidden here as in Edit Student.
+    expect(screen.queryByText("Mother")).not.toBeInTheDocument();
+    expect(screen.queryByText("Contact & Address")).not.toBeInTheDocument();
     expect(screen.queryByText("Uniform")).not.toBeInTheDocument();
-    expect(screen.queryByText("L")).not.toBeInTheDocument();
+  });
+
+  it("reads G10 board as CBSE or Others, the way Edit Student offers it", async () => {
+    const user = userEvent.setup();
+    render(
+      <StudentTable
+        students={[
+          {
+            ...makeStudent(),
+            g10_board: "RAJASTHAN BOARD OF SECONDARY EDUCATION",
+          },
+        ]}
+        grades={defaultGrades}
+        selectedProgramId={PROGRAM_IDS.COE}
+      />,
+    );
+
+    await user.click(screen.getByLabelText("Expand"));
+
+    expect(screen.getByText("Others")).toBeInTheDocument();
+    expect(
+      screen.queryByText("RAJASTHAN BOARD OF SECONDARY EDUCATION"),
+    ).not.toBeInTheDocument();
   });
 
   it("shows the Edit Student fields the card used to leave out (#431)", async () => {
