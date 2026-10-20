@@ -117,7 +117,8 @@ groups, with the uniform sizes as the only program-specific part (hidden for NVS
 card exactly as in Edit).
 
 Validation lives in `canonicalizeStudentEditPayload`: contact phones (WhatsApp, father,
-mother, guardian) are ten digits, pincode is six, email must be able to reach a mailbox,
+mother, guardian) are ten digits with no leading zero, pincode is six with no leading zero
+(no Indian pincode starts with one), email must be able to reach a mailbox,
 and the three education levels plus Monthly Family Income are dropdowns
 (`EDUCATION_LEVEL_OPTIONS`, `MONTHLY_FAMILY_INCOME_OPTIONS`). Blank clears, as the uniform
 sizes already did. A stored value the list no longer offers (e.g. an education level of
@@ -126,7 +127,9 @@ sizes already did. A stored value the list no longer offers (e.g. an education l
 **DB Service dependency:** `PATCH /lms/students/:id/update-with-enrollments` answers 422
 for any field outside its contract, so the db-service branch
 `feat/lms-student-contact-family-fields` (seven `user` fields, thirteen `student` fields,
-plus phone/pincode guards and blank-to-NULL) must be deployed before this ships.
+plus blank-to-NULL and guards for length, phone, pincode and email) must be deployed
+before this ships. Its rules and these are deliberately identical — change them together,
+or the form will accept what the Service refuses.
 
 ## Settled Product Shape
 - v1 is JNV PMU / JNV NVS only. In current LMS code this is `PROGRAM_IDS.NVS` (`64`, label `JNV NVS`) from `src/lib/constants.ts`.

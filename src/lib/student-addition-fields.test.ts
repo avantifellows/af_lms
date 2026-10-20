@@ -163,20 +163,26 @@ describe("canonicalizeStudentEditPayload", () => {
     });
   });
 
-  it("rejects a household phone that is not ten digits", () => {
-    expect(canonicalizeStudentEditPayload({ father_phone: "98765" })).toEqual({
-      ok: false,
-      error: "Father Phone must be exactly 10 digits",
-      field_errors: { father_phone: "Father Phone must be exactly 10 digits" },
-    });
+  it("rejects a household phone that is not ten digits or starts with zero", () => {
+    const message = "Father Phone must be exactly 10 digits and cannot start with zero";
+    for (const father_phone of ["98765", "0123456789"]) {
+      expect(canonicalizeStudentEditPayload({ father_phone })).toEqual({
+        ok: false,
+        error: message,
+        field_errors: { father_phone: message },
+      });
+    }
   });
 
-  it("rejects a pincode that is not six digits", () => {
-    expect(canonicalizeStudentEditPayload({ pincode: "30200" })).toEqual({
-      ok: false,
-      error: "Pincode must be exactly 6 digits",
-      field_errors: { pincode: "Pincode must be exactly 6 digits" },
-    });
+  it("rejects a pincode that is not six digits or starts with zero", () => {
+    const message = "Pincode must be exactly 6 digits and cannot start with zero";
+    for (const pincode of ["30200", "012345"]) {
+      expect(canonicalizeStudentEditPayload({ pincode })).toEqual({
+        ok: false,
+        error: message,
+        field_errors: { pincode: message },
+      });
+    }
   });
 
   it("rejects an address that could not reach the column", () => {

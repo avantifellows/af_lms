@@ -620,8 +620,8 @@ describe("EditStudentModal", () => {
       mockFetch.mockResolvedValue(
         new Response(
           JSON.stringify({
-            error: "Father Phone must be exactly 10 digits",
-            field_errors: { father_phone: "Father Phone must be exactly 10 digits" },
+            error: "Father Phone must be exactly 10 digits and cannot start with zero",
+            field_errors: { father_phone: "Father Phone must be exactly 10 digits and cannot start with zero" },
           }),
           { status: 400 },
         ),
@@ -634,7 +634,7 @@ describe("EditStudentModal", () => {
 
       // Once in the banner, once under the field it belongs to.
       expect(
-        await screen.findAllByText("Father Phone must be exactly 10 digits"),
+        await screen.findAllByText("Father Phone must be exactly 10 digits and cannot start with zero"),
       ).toHaveLength(2);
     });
 

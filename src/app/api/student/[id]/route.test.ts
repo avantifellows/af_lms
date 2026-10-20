@@ -237,8 +237,26 @@ describe("PATCH /api/student/[id]", () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
 
     for (const [field, value, message] of [
-      ["father_phone", "98765", "Father Phone must be exactly 10 digits"],
-      ["pincode", "30200", "Pincode must be exactly 6 digits"],
+      [
+        "father_phone",
+        "98765",
+        "Father Phone must be exactly 10 digits and cannot start with zero",
+      ],
+      [
+        "mother_phone",
+        "0123456789",
+        "Mother Phone must be exactly 10 digits and cannot start with zero",
+      ],
+      [
+        "pincode",
+        "30200",
+        "Pincode must be exactly 6 digits and cannot start with zero",
+      ],
+      [
+        "pincode",
+        "012345",
+        "Pincode must be exactly 6 digits and cannot start with zero",
+      ],
     ] as const) {
       mockFetch.mockClear();
       const req = jsonRequest("http://localhost/api/student/100", {

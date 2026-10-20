@@ -154,7 +154,8 @@ const CONTACT_TEXT_EDIT_FIELDS = [
   ["guardian_profession", "Guardian Profession", 255],
 ] as const;
 
-// Ten digits each, the same shape as the Student's own number.
+// Ten digits with no leading zero, the same shape as the Student's own
+// number. Not narrowed to 6-9: a parent's number may still be a landline.
 const CONTACT_PHONE_EDIT_FIELDS = [
   ["whatsapp_phone", "WhatsApp Number"],
   ["father_phone", "Father Phone"],
@@ -571,9 +572,9 @@ function canonicalContactPhone(value: unknown, field: string, label: string) {
   if (typeof value !== "string") return editError(field, `${label} is not valid`);
   const trimmed = value.trim();
   if (!trimmed) return { ok: true as const, value: "" };
-  return /^\d{10}$/.test(trimmed)
+  return /^[1-9]\d{9}$/.test(trimmed)
     ? { ok: true as const, value: trimmed }
-    : editError(field, `${label} must be exactly 10 digits`);
+    : editError(field, `${label} must be exactly 10 digits and cannot start with zero`);
 }
 
 function canonicalOptionalChoice(
@@ -864,8 +865,9 @@ export function canonicalizeStudentEditPayload(
   if (fields.pincode !== undefined) {
     const pincode = canonicalOptionalText(fields.pincode, "pincode", "Pincode", 6);
     if (!pincode.ok) return pincode;
-    if (pincode.value && !/^\d{6}$/.test(pincode.value)) {
-      return editError("pincode", "Pincode must be exactly 6 digits");
+    // No Indian pincode starts with a zero, so one is a typo rather than a place.
+    if (pincode.value && !/^[1-9]\d{5}$/.test(pincode.value)) {
+      return editError("pincode", "Pincode must be exactly 6 digits and cannot start with zero");
     }
     fields.pincode = pincode.value;
   }
