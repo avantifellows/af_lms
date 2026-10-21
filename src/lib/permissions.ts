@@ -688,7 +688,9 @@ export async function canAccessAlumni(
   const access = getFeatureAccess(permission, "alumni");
   if (!(options?.requireEdit ? access.canEdit : access.canView)) return false;
   const school = await getAlumniSchool(alumniId);
-  if (!school) return false;
+  // Many bulk-imported alumni have no School on record: only all-schools
+  // (level 3) access reaches them, the same rule as a pass-out with no School.
+  if (!school) return permission?.level === 3;
   return canAccessSchoolSync(permission, school.code, school.region || undefined);
 }
 

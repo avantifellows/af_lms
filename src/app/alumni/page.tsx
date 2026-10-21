@@ -5,9 +5,11 @@ import { authOptions } from "@/lib/auth";
 import { listAlumniSchools } from "@/lib/alumni/schools";
 import { getAlumniPermission, getFeatureAccess } from "@/lib/permissions";
 import AlumniShell, { AlumniNotice } from "@/components/alumni/AlumniShell";
+import FindAlumnus from "@/components/alumni/FindAlumnus";
 
-// Alumni home: the schools in the person's scope with pass-outs to add or
-// alumni on record. One school → straight to it.
+// Alumni home: "Find an alumnus" (by AFID or name), then the schools in the
+// person's scope with pass-outs to add or alumni on record. One school →
+// straight to it.
 
 export default async function AlumniHomePage() {
   const session = await getServerSession(authOptions);
@@ -28,6 +30,7 @@ export default async function AlumniHomePage() {
 
   return (
     <AlumniShell title="Alumni" email={email}>
+      <FindAlumnus />
       {schools.length === 0 ? (
         <AlumniNotice>None of your schools have pass-outs or alumni yet.</AlumniNotice>
       ) : (

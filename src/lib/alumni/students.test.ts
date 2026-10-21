@@ -3,7 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/lib/db", () => ({ query: vi.fn() }));
 
 import { query } from "@/lib/db";
-import { cohortParams, listAlumniForSchool, listPendingForSchool } from "./students";
+import type { UserPermission } from "@/lib/permissions";
+import { cohortParams, findAlumni, listAlumniForSchool, listPendingForSchool } from "./students";
 
 const mockQuery = vi.mocked(query);
 const SCHOOL = { id: "7", code: "59525" };
@@ -61,5 +62,47 @@ describe("listAlumniForSchool", () => {
     const [sql, params] = mockQuery.mock.calls[0];
     expect(sql).toContain("WHERE school_code = $2");
     expect(params).toEqual(["7", "59525"]);
+  });
+});
+
+describe("findAlumni", () => {
+  const scoped = { level: 1, role: "alumni_manager", school_codes: ["59525"], regions: null, read_only: false } as unknown as UserPermission;
+  const everywhere = { ...scoped, level: 3, school_codes: null } as unknown as UserPermission;
+  const ROWS = [
+    { alumni_id: "1", afid: "2632401171", first_name: "Asha", last_name: "Rao", cohort_year: "2019-2020", school_code: "59525", school_name: " JNV  Adilabad", school_region: null },
+    { alumni_id: "2", afid: "2632401172", first_name: "Asha", last_name: "Devi", cohort_year: null, school_code: "11111", school_name: "Other", school_region: null },
+    { alumni_id: "3", afid: "2632401173", first_name: "Asha", last_name: "K", cohort_year: null, school_code: null, school_name: null, school_region: null },
+  ];
+
+  it("searches the AFID by prefix when the query is digits", async () => {
+    mockQuery.mockResolvedValue([] as never);
+    await findAlumni(scoped, " 26324 ");
+    const [sql, params] = mockQuery.mock.calls[0];
+    expect(sql).toContain("s.student_id LIKE $1");
+    expect(params).toEqual(["26324%"]);
+  });
+
+  it("matches every name word, with % and _ taken literally", async () => {
+    mockQuery.mockResolvedValue([] as never);
+    await findAlumni(scoped, "asha 50%_x");
+    const [sql, params] = mockQuery.mock.calls[0];
+    expect(sql).toMatch(/ILIKE \$1 AND .*ILIKE \$2/s);
+    expect(params).toEqual(["%asha%", "%50\\%\\_x%"]);
+  });
+
+  it("doesn't query for a too-short search", async () => {
+    expect(await findAlumni(scoped, " a ")).toEqual([]);
+    expect(mockQuery).not.toHaveBeenCalled();
+  });
+
+  it("keeps only alumni in scope; no-School alumni only for level 3", async () => {
+    mockQuery.mockResolvedValue(ROWS as never);
+    expect((await findAlumni(scoped, "asha")).map((a) => a.alumniId)).toEqual(["1"]);
+    const all = await findAlumni(everywhere, "asha");
+    expect(all.map((a) => a.alumniId)).toEqual(["1", "2", "3"]);
+    expect(all[0]).toEqual({
+      alumniId: "1", afid: "2632401171", name: "Asha Rao", cohortYear: "2019-2020", schoolCode: "59525", schoolName: "JNV Adilabad",
+    });
+    expect(all[2]).toMatchObject({ schoolCode: "", schoolName: "", cohortYear: "" });
   });
 });

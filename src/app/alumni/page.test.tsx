@@ -50,6 +50,7 @@ describe("Alumni home page", () => {
     render(await AlumniHomePage());
     expect(screen.getByRole("link", { name: /RSMS Bathinda/ })).toHaveAttribute("href", "/alumni/1");
     expect(screen.getByText("9 to add · 7 alumni")).toBeInTheDocument();
+    expect(screen.getByLabelText("Find an alumnus")).toBeInTheDocument();
   });
 
   it("goes straight to the only school", async () => {

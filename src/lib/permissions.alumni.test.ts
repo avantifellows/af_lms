@@ -173,10 +173,17 @@ describe("canAccessAlumni", () => {
     expect(mockQuery.mock.calls.some(([sql]) => String(sql).includes("FROM alumni a"))).toBe(false);
   });
 
-  it("lets admins in at every School, and refuses an unknown alumnus", async () => {
+  it("lets admins in at every School", async () => {
     answer(row({ role: "admin", level: 3, school_codes: null }), { code: "99999", region: null });
     expect(await canAccessAlumni(session, 8340, { requireEdit: true })).toBe(true);
-    answer(row({ role: "admin", level: 3, school_codes: null }), null);
+  });
+
+  it("opens an alumnus with no School on record only for all-schools (level 3) access", async () => {
+    answer(row({ level: 3, school_codes: null }), null);
+    expect(await canAccessAlumni(session, 8340)).toBe(true);
+    answer(row(), null);
+    expect(await canAccessAlumni(session, 8340)).toBe(false);
+    answer(row({ level: 2, school_codes: null, regions: ["West"] }), null);
     expect(await canAccessAlumni(session, 8340)).toBe(false);
   });
 });

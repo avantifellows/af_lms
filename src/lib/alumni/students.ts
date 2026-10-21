@@ -1,4 +1,5 @@
 import { query } from "@/lib/db";
+import { canAccessSchoolSync, type UserPermission } from "@/lib/permissions";
 import { ALUMNI_COHORT_GRADE, ALUMNI_PROGRAM_ORDER, currentAcademicYear } from "./config";
 
 // Reads for the Alumni tab, the same way the roster reads: grade from
@@ -60,13 +61,14 @@ export function cohortCte(userFilter = "") {
 function alumniRowsSql(where: string) {
   return `
   SELECT a.id AS alumni_id, s.user_id, s.student_id AS afid, u.first_name, u.last_name,
-    a.ug_status, a.current_status, c.name AS college_ug, sch.code AS school_code, coh.academic_year AS cohort_year
+    a.ug_status, a.current_status, c.name AS college_ug, sch.code AS school_code,
+    sch.name AS school_name, sch.region AS school_region, coh.academic_year AS cohort_year
   FROM alumni a
   JOIN student s ON s.id = a.student_id
   JOIN "user" u ON u.id = s.user_id
   LEFT JOIN college c ON c.id = a.college_id_ug
   LEFT JOIN LATERAL (
-    SELECT sc.code
+    SELECT sc.code, sc.name, sc.region
     FROM enrollment_record er JOIN school sc ON sc.id = er.group_id
     WHERE er.user_id = s.user_id AND er.group_type = 'school'
     ORDER BY er.academic_year DESC NULLS LAST, er.is_current DESC, er.id DESC
@@ -168,4 +170,64 @@ export async function listAlumniForSchool(school: { id: string | number; code: s
       collegeUg: clean(r.college_ug),
     }))
     .sort(byCohortThenName);
+}
+
+export interface FoundAlumnus {
+  alumniId: string;
+  afid: string;
+  name: string;
+  cohortYear: string;
+  /** "" when the alumnus has no School on record (many bulk-imported records). */
+  schoolCode: string;
+  schoolName: string;
+}
+
+const FIND_LIMIT = 20;
+/** Rows read before the scope filter, so out-of-scope matches don't crowd out the rest. */
+const FIND_SCAN = 100;
+const MAX_NAME_WORDS = 4;
+
+const likeEscape = (s: string) => s.replace(/[\\%_]/g, (c) => `\\${c}`);
+
+/** "AFID starts with" for digits, else every word in the name. */
+function findFilter(q: string): { where: string; params: string[] } | null {
+  const text = q.trim();
+  if (/^\d{4,}$/.test(text)) return { where: "s.student_id LIKE $1", params: [`${text}%`] };
+  const words = text.toLowerCase().split(/\s+/).filter((w) => w.length >= 2).slice(0, MAX_NAME_WORDS);
+  if (!words.length) return null;
+  return {
+    where: words.map((_, i) => `(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')) ILIKE $${i + 1}`).join(" AND "),
+    params: words.map((w) => `%${likeEscape(w)}%`),
+  };
+}
+
+/**
+ * Existing alumni by AFID (digits, prefix) or name (every word), in the
+ * person's alumni scope. Alumni with no School on record are found only by
+ * all-schools (level 3) access, the same rule as canAccessAlumni.
+ */
+export async function findAlumni(permission: UserPermission, q: string): Promise<FoundAlumnus[]> {
+  const filter = findFilter(q);
+  if (!filter) return [];
+  const rows = await query<PersonRow & {
+    alumni_id: string; cohort_year: string | null; school_code: string | null; school_name: string | null; school_region: string | null;
+  }>(
+    `${alumniRowsSql(filter.where)} ORDER BY u.first_name, u.last_name, a.id LIMIT ${FIND_SCAN}`,
+    filter.params,
+  );
+  return rows
+    .filter((r) =>
+      r.school_code
+        ? canAccessSchoolSync(permission, r.school_code, r.school_region || undefined)
+        : permission.level === 3,
+    )
+    .slice(0, FIND_LIMIT)
+    .map((r) => ({
+      alumniId: String(r.alumni_id),
+      afid: r.afid || "",
+      name: fullName(r.first_name, r.last_name),
+      cohortYear: r.cohort_year || "",
+      schoolCode: r.school_code || "",
+      schoolName: clean(r.school_name),
+    }));
 }

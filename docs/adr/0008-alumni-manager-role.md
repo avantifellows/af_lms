@@ -16,5 +16,6 @@ The role is denied by default everywhere else. `getUserPermission` (and so `getR
 - `read_only` turns `alumni` edit into view: saving is refused, and the form shows "View only" instead of Save.
 - Alumni APIs send only the profile fields the form displays (plus the Class 12 year used by the checks), never the rest of the Student record (address, guardian, Grade 10 marks).
 - `admin` also gets `alumni` edit; every other role gets none.
-- An alumni manager's only pages are `/alumni` (their schools) and `/alumni/[code]`; `/dashboard` sends them there.
+- An alumni manager's only pages are `/alumni` (their schools, plus "Find an alumnus" by AFID or name), `/alumni/[code]` and `/alumni/record/[alumniId]`; `/dashboard` sends them there.
+- An alumnus with no School on record (most of the December 2025 bulk import) is reached only with all-schools (level 3) access, the same rule as a pass-out with no School.
 - Staging first: the role is tested on staging before it reaches production.
