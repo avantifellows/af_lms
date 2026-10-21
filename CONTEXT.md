@@ -280,6 +280,18 @@ _Avoid_: Pending Conversation, auto-saved Conversation
 An audio file of a Conversation, uploaded by the Mentor and used to draft the write-up; retained for a limited period and playable only by Blended Learning Admins.
 _Avoid_: Voice note, audio attachment
 
+**Transcription Request**:
+The queued, running, completed, or failed record the LMS creates after a Call Recording upload, asking etl-next to transcribe it and fill the Conversation Draft.
+_Avoid_: Regeneration Request, transcription job
+
+**Summary Tag**:
+One of up to four short labels the drafting model appends to a Conversation Draft's summary. It is text, not a Mentor Flag.
+_Avoid_: flag
+
+**Items to Verify**:
+Names, numbers, or phrases the drafting model could not make out with confidence, listed on the Conversation Draft for the Mentor to check before saving.
+_Avoid_: errors, warnings
+
 **Action Item**:
 A follow-up agreed in a Conversation, owned by the Student, the Mentor, or the Parent, with an optional due date, that stays open until a later Conversation marks it done.
 _Avoid_: Action (that is a School Visit term), task, to-do
@@ -702,6 +714,6 @@ _Avoid_: Screener Form (as a Quiz Form), Holistic Student Profile Questionnaire
 - "deleted" for actions vs visits: Actions already support soft delete (`deleted_at` on `lms_pm_school_visit_actions`). Issue #35 extends this to visits (`lms_pm_school_visits`).
 - "mentorship" as a UI label vs domain terms: the School page has separate **Academic Mentorship Tab** and **Holistic Mentorship Tab** surfaces; do not use a generic Mentorship Tab as their umbrella.
 - "teacher" in School Visit forms means **Visit Teacher**, not every `user_permission.role = "teacher"` account.
-- "flag": a **Mentor Flag** belongs to one Conversation and names a Flag Recipient; it is unrelated to the School roster's needs-intervention flag.
+- "flag": a **Mentor Flag** belongs to one Conversation and names a Flag Recipient; it is unrelated to the School roster's needs-intervention flag, and to a **Summary Tag**.
 - "action": an **Action** is part of a School Visit; an **Action Item** is a follow-up agreed in a Blended Learning **Conversation**.
 - "mentor" alone is ambiguous across Academic, Holistic, and Blended Learning Mentoring; always use the full term.
