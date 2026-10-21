@@ -97,9 +97,9 @@ describe("StudentResultsTable", () => {
       <StudentResultsTable
         {...props}
         students={[
-          { ...STUDENTS[0], student_name: "Top Scorer", percentage: 90, has_quiz_ended: true },
-          { ...STUDENTS[0], student_name: "Walked Out", percentage: 4, has_quiz_ended: false },
-          { ...STUDENTS[0], student_name: "Second", percentage: 50, has_quiz_ended: true },
+          { ...STUDENTS[0], student_name: "Top Scorer", enrollment_user_id: "1", percentage: 90, has_quiz_ended: true },
+          { ...STUDENTS[0], student_name: "Walked Out", enrollment_user_id: "2", percentage: 4, has_quiz_ended: false },
+          { ...STUDENTS[0], student_name: "Second", enrollment_user_id: "3", percentage: 50, has_quiz_ended: true },
         ]}
       />
     );
@@ -118,8 +118,8 @@ describe("StudentResultsTable", () => {
       <StudentResultsTable
         {...props}
         students={[
-          { ...STUDENTS[0], student_name: "Walked Out", percentage: 0, has_quiz_ended: false },
-          { ...STUDENTS[0], student_name: "Scored Zero", percentage: 0, has_quiz_ended: true },
+          { ...STUDENTS[0], student_name: "Walked Out", enrollment_user_id: "1", percentage: 0, has_quiz_ended: false },
+          { ...STUDENTS[0], student_name: "Scored Zero", enrollment_user_id: "2", percentage: 0, has_quiz_ended: true },
         ]}
       />
     );
@@ -386,6 +386,8 @@ describe("StudentResultsTable", () => {
     ): StudentDeepDiveRow => ({
       ...STUDENTS[0],
       student_name: name,
+      // Each row is a different Student, so each gets its own id.
+      enrollment_user_id: `id-${name}`,
       time_spent_seconds: seconds,
       ...extra,
     });
@@ -457,9 +459,11 @@ describe("StudentResultsTable", () => {
     });
 
     it("widens question rows by one column so they stay aligned", async () => {
-      render(
-        <StudentResultsTable {...props} program="JNV NVS" students={[nvsStudent("Asha Rao", 1530)]} />
-      );
+      // The mocked QUESTIONS belong to STUDENTS[0], so keep its id.
+      const student = nvsStudent("Asha Rao", 1530, {
+        enrollment_user_id: STUDENTS[0].enrollment_user_id,
+      });
+      render(<StudentResultsTable {...props} program="JNV NVS" students={[student]} />);
       fireEvent.click(screen.getByText("Asha Rao"));
       fireEvent.click(screen.getByText("Physics"));
       fireEvent.click(await screen.findByText("Kinematics"));
