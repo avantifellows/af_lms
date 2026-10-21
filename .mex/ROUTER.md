@@ -26,7 +26,7 @@ edges:
     condition: when working on teacher feedback setup, the feedback form, or its report
   - target: patterns/INDEX.md
     condition: when starting a task — check the pattern index for a matching pattern file
-last_updated: 2026-10-19
+last_updated: 2026-10-21
 ---
 
 # Session Bootstrap
@@ -71,6 +71,7 @@ Then read this file fully before doing anything else in this session.
 - Issue #351 slice #356: with JNV NVS selected, the Performance filter bar shows only Grade and Stream (no Test grade, Test type, Subject, or View), and the content is always the per-test full-test overview. `effectiveSelection()` in `usePerformanceFilters.ts` overrides only the effective values (`category=full`, `view=per_test`, no subject/testGrade); raw state and the URL are untouched, so old links are ignored (not rewritten) and another program tab gets its own selections back. See `context/data-access.md` §3.
 - Issue #351 slice #357: the JNV NVS test deep dive's Student Results table has a sortable "Time Spent (min)" column after Attempt Rate, on student and subject rows (chapter rows are blank). Times come from BigQuery `total_time_spent` via `getStudentTimeSpentData()`, merged server-side in the `test-deep-dive` route only for NVS. A BigQuery failure still returns the deep dive with null times ("—", sorted last). See `context/data-access.md` §3.
 - APAAR-only Students (14 Oct 2026): the Performance batch overview and the Cumulative AL table count and key Students on `enrollment_user_id`, not `fk_student_id` / `pk_student_id`, which are NULL for a Student who has only an APAAR ID. Before this, af_lms never counted those Students (JNV Barabanki Grade 12: 8 enrolled shown, 75 real). See `context/data-access.md` §3 "Student key".
+- Student Results row identity (21 Oct 2026): the test deep dive's `StudentResultsTable` identifies a row by `enrollment_user_id` (`studentKey()`), not by `student_name`. The row `key`, the expanded row (`expandedKey`) and the rank map (`rankByKey`) use it. Before this, two Students with the same name in one test had one React key, expanded together and showed the same rank. See `context/data-access.md` §3.
 
 - Issue #340 complete (slices #342–#345, PR #346): Students & Progress says "Assigned" (`counts.total` replaces `counts.totalMapped`). It shows current-year Coverage cards (Eligible / Assigned / Unassigned; `coverage` is `null` under a Mentor filter or for a past year). Progress = Unassigned lists, opens (read-only) and exports eligible Students without a Mentor. The API returns 422 for `progress=unassigned` with a past year or `mentor_user_id`, and the client resets such view states to All Assigned. `holistic-mentorship.spec.ts` passes again (see `patterns/debug-e2e-fixtures.md`). Local e2e needs a sibling `../db-service_holistic_mentorship` (symlink to `../db-service`). See `context/data-access.md` and `patterns/debug-holistic-progress.md`.
 - September 23 scaffold reconciliation: recovered useful September 7–18 local notes onto current main, preserving already-merged behavior and condensing superseded investigation stages. Context now records #304 rollout, #321 production smoke, #323 QA, and #332/#334/#335 staging/merge outcomes. New runbooks cover shared staging, local enrollment repair and cleanup of old-branch scaffold edits. Original local files are backed up privately under sibling `release-records/mex-cleanup-20260923-125614/`.
@@ -144,7 +145,6 @@ Then read this file fully before doing anything else in this session.
 
 **Known issues:**
 
-- The test deep dive's `StudentResultsTable` uses `student_name` as the Student identity: the row `key`, the expanded-row state (`expandedName`) and the rank map (`rankByName`). Two Students with the same name in one test share a row key, expand together and share a rank. Each row has `enrollment_user_id`; key on that (fall back to the name only when it is null). Not fixed yet.
 - DB Service #736 retains the explicitly deferred future-date dropout/undo defect: undo before the recorded dropout date can create overlapping status periods and end a period before it starts. A resolved review thread does not establish a fix. See `context/student-addition.md` for the finding and deferral evidence.
 
 - Two write paths exist — sending a student/batch/quiz-session write to Postgres instead of the DB Service is a real bug (see `context/data-access.md`).
