@@ -21,7 +21,7 @@ edges:
     condition: when adding a write that must proxy to the DB Service
   - target: patterns/add-api-route.md
     condition: when adding a route that reads or writes
-last_updated: 2026-10-14
+last_updated: 2026-10-21
 ---
 
 # Data Access
@@ -57,6 +57,7 @@ if (!res.ok) { const text = await res.text(); /* surface upstream error */ }
 - **NVS batch overview:** when the program is JNV NVS (`isNvsProgram()` in `src/lib/constants.ts` — the one client-safe place that compares the label), `getBatchOverviewData`'s test-list query adds the static literal `AND test_purpose = 'system_wide_mandated'`. Enrollment counts, params, and the response shape don't change. On the client, `usePerformanceFilters` exposes `isNvs`; `BatchOverview` then lists every returned test (no Chapter/Full split, no subject/test-grade filters) and uses the empty state "No system-wide mandated tests yet for this grade/stream". A single-program school's program is derived from the grades response (never written to the URL), so the first overview render is already scoped (#352, #392).
 - **Batch-overview stream options (PR #376):** `getBatchOverviewData`'s enrolment query (`GROUP BY student_stream`) doesn't filter by stream, so the returned `streams` always lists every stream at the School and grade. The Performance Stream filter therefore keeps all its options after one is picked. `summariseEnrolment` applies the selected stream to `totalEnrolled` and `enrolledByStream` in JS, with the same `LOWER(stream) = @stream` semantics as before; the test-list query still filters by stream.
 - **NVS Student Results:** `StudentResultsTable` hides the AL and On Track columns when `isNvsProgram(program)` is true, exactly as it does for Advanced tests (`showALColumns`). Its header cells are built as one list, and the expanded row's `colSpan` is `headerCells.length`. So to add a column, add it to that list (#353).
+- **Student Results row identity:** `StudentResultsTable` identifies each row by `studentKey()`: `enrollment_user_id`, or `student_name` only when the id is null (with `id:` / `name:` prefixes, so the two never collide). The row `key`, the expanded-row state and the rank map all use it. Sorting and display still use the name. Two Students with the same name in one test are common in large Schools, so never key a Student on the name.
 - **NVS Performance filters:** for JNV NVS, `effectiveSelection()` in `src/components/performance/usePerformanceFilters.ts` forces the effective `testCategory="full"`, `fullTestView="per_test"`, and no subject/testGrade, so the overview never gets a subject or test grade and the Cumulative AL table never renders. `PerformanceFilterBar` gets `isNvs` and renders only Grade and Stream. The raw selection and URL are left as they are: `?view=cumulative&category=chapter&subject=…&testGrade=…` is ignored on NVS, not rewritten.
 - **Performance filter history (#392):** `usePerformanceFilters` reads every raw selection (program, grade, stream, subject, testGrade, category, view, session) from the URL on each render, so Back/Forward rehydrates the mounted tab in place. Deliberate choices `router.push` one entry each with `scroll: false`, carrying their resets atomically (Program clears grade/session/stream/subject/testGrade; Grade clears session/stream/subject/testGrade; Category clears testGrade, and subject when leaving Chapter). Reselecting is a no-op. Automatic Grade reconciliation uses `replace`. Patches compose against the latest *intended* query, but navigations go to the router one at a time (the App Router drops a pending navigation when another starts, which would lose a history entry); any other URL landing is Back/Forward and discards the queue. Grades and `BatchOverview` responses are keyed to their request, so obsolete success/failure/option publications are inert. Report open/close: see #393 below.
 - **Performance report history (#393):** opening a report pushes `session` (one step, `scroll: false`); `TestDeepDiveView` is keyed by session, so a new report starts fresh and nameless until its own data names it. "Back to overview" calls `router.back()` only when the hook's transient trail (in `usePerformanceUrl`, in memory per mount) proves the current entry was pushed by the tab directly on top of its own overview (same query without `session`). The trail follows Back/Forward by matching exactly one neighbouring entry's URL; an ambiguous or unrelated URL, a replace of the entry, a reload, a direct link or a remount leaves nothing proven, and then the in-page Back replaces away only `session`. No storage. `SchoolTabs` derives the visible tab from `?tab=` (absent/invalid → `defaultTab` if visible, else the first tab), so history to `tab=performance` remounts Performance from its URL. A tab click synchronously uses native `history.replaceState`, preserving every unrelated query parameter and the hash before its content mounts; this prevents a fast automatic Grade replace from erasing `tab=performance`. Performance loading frames keep the previous settled height only while data reloads, then release it to the new content's natural height or the minimum needed to keep the current non-zero scroll valid. Scrolling upward can only shrink that floor, while downward scrolling cannot grow it; stale interactive content is never kept on screen. On report-to-overview transitions, if the shorter natural overview is entirely above the current viewport, the frame releases the report height and scrolls only as far as the last viewport that intersects the overview. Normal filter/history transitions and report exits that already overlap the viewport keep their scroll position.
@@ -164,7 +165,8 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
 - **Table ownership:** `holistic_mentorship_follow_up_notes` is created by the db-service
   migration `20260930120000_create_holistic_mentorship_follow_up_notes`, but LMS reads and
   inserts rows directly (ADR 0005).
-- **Immutable:** triggers reject every `UPDATE` and `DELETE`; a correction is another row. The
+- **Immutable:** triggers reject ordinary `UPDATE` and every `DELETE`; a correction is another
+  row. The only update exception is the complete privacy erasure described below. The
   insert trigger takes the per-Student privacy advisory lock, rejects a tombstoned Student, and
   requires submitted Post-Session Notes for the Student and Phase.
 - **Write path:** `POST .../phases/{phaseId}/follow-up-notes` authorizes `follow_up_note_add`,
@@ -177,10 +179,20 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
 - **Read audience:** the same as submitted Post-Session Notes. `getHolisticStudentPhase` loads
   `selectedPhase.followUpNotes` for the open selected Phase only, newest first. Locked Phase
   summaries, Student Context, progress, and the CSV never read this table.
-- **Privacy:** a tombstone hides Follow-up Notes on read (same-query `NOT EXISTS`) and blocks
-  new inserts. Erasure cannot remove Follow-up Note text because rows are immutable; it is hidden
-  by the tombstone, not erased. LMS privacy erasure is currently disabled; re-enabling it needs a
-  migration for this table.
+- **Privacy (#412):** a tombstone hides Follow-up Notes on read (same-query `NOT EXISTS`) and
+  blocks new inserts. The companion db-service migration allows only a full replacement of
+  non-null answers with `Content erased under approved privacy request` for that tombstoned
+  Student; null slots and all metadata remain unchanged. Ordinary updates and deletes still fail.
+  `deleteHolisticStudentContent` takes the Student advisory lock, clears the original content
+  families, inserts the original tombstone, then erases Follow-up answers in a separate statement.
+  It counts changed answer fields from their pre-update values and records a positive count in
+  the immutable `holistic_mentorship_follow_up_erasures` audit, with the actual actor and reason.
+  Existing tombstones use the same path without changing their original audit facts; repeats
+  return zero and add no audit. Any erasure/audit failure rolls back the entire transaction.
+  Deploy the schema before this LMS helper. Privacy erasure remains disabled in the endpoint
+  and action policy; the external erasure process must adopt this contract separately. This
+  change does not repair historical data or enable a production caller. See
+  `patterns/holistic-privacy-erasure.md` for ordering, verification and rollback limits.
 - **Code:** `src/lib/holistic-follow-up-notes.ts` (write), `src/lib/holistic-student-phase.ts`
   (read), `src/lib/holistic-follow-up-questions.ts` (client-safe question keys, text, and
   normaliser), `src/lib/holistic-mentor-write-scope.ts` (shared scope guard).

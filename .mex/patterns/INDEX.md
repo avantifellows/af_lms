@@ -1,6 +1,6 @@
 ---
 name: pattern-index
-last_updated: 2026-10-13
+last_updated: 2026-10-16
 ---
 
 # Pattern Index
@@ -40,6 +40,7 @@ Lookup table for all pattern files in this directory. Check here before starting
 | [debug-e2e-fixtures.md](debug-e2e-fixtures.md) | Diagnosing Playwright failures caused by stale local fixtures or app flow drift |
 | [debug-holistic-progress.md](debug-holistic-progress.md) | Diagnosing empty 500 responses, JSON parse errors, or slow Holistic Admin progress |
 | [deploy-staging-pr.md](deploy-staging-pr.md) | Setting up a reviewed LMS PR on shared staging for QA |
+| [holistic-privacy-erasure.md](holistic-privacy-erasure.md) | Extending Holistic privacy erasure across immutable content and audit tables |
 | [local-browser-qa.md](local-browser-qa.md) | Running a PR branch from a worktree on a spare port and QA-ing it in headless Chromium |
 | [local-enrollment-repair.md](local-enrollment-repair.md) | Rehearsing audit-derived enrollment repairs on a dedicated local snapshot |
 | [merge-roster-changes.md](merge-roster-changes.md) | Merging overlapping school/centre roster queries and SQL bindings |

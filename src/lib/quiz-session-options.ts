@@ -34,20 +34,6 @@ export const TestPurposeOptions: Option[] = [
   { value: "assignment", label: "Assignment" },
 ];
 
-export const CourseOptions: Option[] = [
-  { value: "NEET", label: "NEET" },
-  { value: "Catalyst", label: "Catalyst" },
-  { value: "Alpha", label: "Alpha" },
-  { value: "Hiring", label: "Hiring" },
-  { value: "Certification", label: "Certification" },
-  { value: "Foundation", label: "Foundation" },
-  { value: "Photon", label: "Photon" },
-  { value: "JEE", label: "JEE" },
-  { value: "CUET", label: "CUET" },
-  { value: "CA", label: "CA" },
-  { value: "CLAT", label: "CLAT" },
-];
-
 export const StreamOptions: Option[] = [
   { value: "engineering", label: "Engineering" },
   { value: "medical", label: "Medical" },

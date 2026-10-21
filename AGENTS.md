@@ -28,6 +28,16 @@ The `.mex/` scaffold is the source of truth for *how* this project works.
 - Never import server-only modules (`@/lib/db`, `@/lib/permissions`) into client components.
 - Never log GPS lat/lng; never commit secrets.
 
+## Before building a feature — ask who it's for
+
+Before planning any new feature or change to an existing one, ask:
+**"Is this for physical centres (CoE/Nodal), NVS schools, or both?"**
+Don't infer it from the issue text, even when it seems obvious — the decision is the team's.
+Record the answer in the plan and in the PR's **Audience** line, and build so the feature
+shows only where it belongs: a physical-only feature must not appear on NVS school pages,
+for any role. If nobody can answer, stop and ask the issue author before building.
+(T-shirt sizes, #395, and the student card fields, #431, were physical-only and got built for NVS too.)
+
 ## After every task — run GROW
 
 - **Ground** — what actually changed in reality?
