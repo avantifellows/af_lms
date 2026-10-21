@@ -170,14 +170,8 @@ const without = (record: Record<string, string>, key: string) => {
   return next;
 };
 
-export default function AlumniForm({ entry, onSaved, canEdit = true }: Props) {
-  /** Becomes the new alumnus once a pass-out is saved. */
-  const [ref, setRef] = useState(entry);
-  /** Bumped after a save to reload the record from the database. */
-  const [version, setVersion] = useState(0);
-  const url = entryUrl(ref);
-  const { context, values, setValues, names, setNames, loadError } = useEntry(url, version);
-  const { review, warningsByField } = useReview(values, context);
+/** Save state: field errors, unsaved changes, saving, and the unusual answers waiting for "yes, save anyway". */
+function useSaveFlow() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -187,6 +181,57 @@ export default function AlumniForm({ entry, onSaved, canEdit = true }: Props) {
   const [confirming, setConfirming] = useState<Issue[] | null>(null);
   /** Warning ids already confirmed for the save in progress. */
   const [confirmed, setConfirmed] = useState<string[]>([]);
+
+  return {
+    errors, dirty, saving, justSaved, formError, confirming, confirmed, setConfirming,
+    /** A field changed: clear its error, mark the form unsaved. */
+    edited(column: string) {
+      setErrors((prev) => without(prev, column));
+      setDirty(true);
+      setJustSaved(false);
+      setFormError("");
+    },
+    /** The local review ran: show its errors. */
+    reviewed(fieldErrors: Record<string, string>) {
+      setErrors(fieldErrors);
+      setFormError("");
+    },
+    start(ids: string[]) {
+      setSaving(true);
+      setFormError("");
+      setConfirmed(ids);
+    },
+    /** Applies the server's answer; returns the saved entry, or null if it wasn't saved. */
+    finish(outcome: SaveOutcome): SavedEntry | null {
+      setSaving(false);
+      if (outcome.kind === "confirm") {
+        setConfirming(outcome.warnings);
+        return null;
+      }
+      if (outcome.kind === "failed") {
+        setErrors(outcome.fieldErrors);
+        setFormError(outcome.error);
+        return null;
+      }
+      setConfirming(null);
+      setConfirmed([]);
+      setDirty(false);
+      setJustSaved(true);
+      return outcome.entry;
+    },
+  };
+}
+
+export default function AlumniForm({ entry, onSaved, canEdit = true }: Props) {
+  /** Becomes the new alumnus once a pass-out is saved. */
+  const [ref, setRef] = useState(entry);
+  /** Bumped after a save to reload the record from the database. */
+  const [version, setVersion] = useState(0);
+  const url = entryUrl(ref);
+  const { context, values, setValues, names, setNames, loadError } = useEntry(url, version);
+  const { review, warningsByField } = useReview(values, context);
+  const flow = useSaveFlow();
+  const { errors, dirty, saving, justSaved, formError, confirming, confirmed } = flow;
 
   const visibleSections = useMemo(
     () => ALUMNI_SECTIONS.filter((s) => s.fields.some((f) => isFieldShown(s, f, values))),
@@ -204,43 +249,24 @@ export default function AlumniForm({ entry, onSaved, canEdit = true }: Props) {
 
   const setValue = (column: string, value: string) => {
     setValues(withAnswer(values, column, value));
-    setErrors((prev) => without(prev, column));
-    setDirty(true);
-    setJustSaved(false);
-    setFormError("");
+    flow.edited(column);
   };
 
   const submit = async (ids: string[]) => {
-    setSaving(true);
-    setFormError("");
-    setConfirmed(ids);
-    const outcome = await postSave(url, values, ids, context.version);
-    setSaving(false);
-    if (outcome.kind === "confirm") {
-      setConfirming(outcome.warnings);
-      return;
-    }
-    if (outcome.kind === "failed") {
-      setErrors(outcome.fieldErrors);
-      setFormError(outcome.error);
-      return;
-    }
-    setConfirming(null);
-    setConfirmed([]);
-    setDirty(false);
-    setJustSaved(true);
+    flow.start(ids);
+    const saved = flow.finish(await postSave(url, values, ids, context.version));
+    if (!saved) return;
     // Reload what's now in the database, as the alumnus (a saved pass-out now is one).
-    setRef({ kind: "alumnus", id: outcome.entry.alumniId });
+    setRef({ kind: "alumnus", id: saved.alumniId });
     setVersion((v) => v + 1);
     onSaved?.();
-    savedToast(context.name, outcome.entry);
+    savedToast(context.name, saved);
   };
 
   const save = () => {
     // Same review the server runs — catch problems without a round trip.
-    setErrors(review.errors);
-    setFormError("");
-    runStep(nextStep(review), { fix: scrollToField, confirm: setConfirming, send: () => submit([]) });
+    flow.reviewed(review.errors);
+    runStep(nextStep(review), { fix: scrollToField, confirm: flow.setConfirming, send: () => submit([]) });
   };
 
   return (
@@ -283,7 +309,7 @@ export default function AlumniForm({ entry, onSaved, canEdit = true }: Props) {
         <ConfirmDialog
           issues={confirming}
           saving={saving}
-          onCancel={() => setConfirming(null)}
+          onCancel={() => flow.setConfirming(null)}
           onConfirm={() => submit(withConfirmed(confirmed, confirming))}
         />
       )}
