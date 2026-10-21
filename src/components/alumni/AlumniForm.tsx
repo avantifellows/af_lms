@@ -240,10 +240,7 @@ export default function AlumniForm({ entry, onSaved, canEdit = true }: Props) {
     // Same review the server runs — catch problems without a round trip.
     setErrors(review.errors);
     setFormError("");
-    const step = nextStep(review);
-    if (step.kind === "fix") scrollToField(step.field);
-    else if (step.kind === "confirm") setConfirming(step.warnings);
-    else submit([]);
+    runStep(nextStep(review), { fix: scrollToField, confirm: setConfirming, send: () => submit([]) });
   };
 
   return (
@@ -303,6 +300,16 @@ function nextStep(review: { errors: Record<string, string>; warnings: Issue[] })
   if (firstError) return { kind: "fix", field: firstError };
   const toConfirm = needsConfirm(review.warnings);
   return toConfirm.length ? { kind: "confirm", warnings: toConfirm } : { kind: "send" };
+}
+
+/** Does what the step says: scroll to the field to fix, ask to confirm, or send. */
+function runStep(
+  step: ReturnType<typeof nextStep>,
+  on: { fix: (field: string) => void; confirm: (warnings: Issue[]) => void; send: () => void },
+) {
+  if (step.kind === "fix") on.fix(step.field);
+  else if (step.kind === "confirm") on.confirm(step.warnings);
+  else on.send();
 }
 
 function scrollToField(column: string) {
