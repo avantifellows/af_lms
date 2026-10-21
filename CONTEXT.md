@@ -242,6 +242,72 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 A current-year Student who is eligible to be a Holistic Mentee but has no active Holistic Mentor-Mentee Mapping.
 _Avoid_: Unmapped Student, Mapping not done, unassigned Mentee
 
+### Blended Learning Mentoring
+
+**Blended Learning Mentoring**:
+The LMS domain in which Blended Learning Mentors keep in touch with their assigned STP Voucher and STP Dropper Students, log each contact, and raise concerns to the right person.
+_Avoid_: Holistic Mentorship, Academic Mentorship, BLP app, mentor app
+
+**Blended Learning Mentor**:
+A staff User with the dedicated Blended Learning Mentor LMS role who is responsible for one or more Blended Learning Mentees.
+_Avoid_: Holistic Mentor, Academic Mentor, counsellor, POC
+
+**Blended Learning Admin**:
+A staff User who can see every Blended Learning Mentor's Students and every Mentor Flag, and can log on any Mentor's behalf: either an LMS Admin or a User with the dedicated Blended Learning Admin role. A read-only Blended Learning Admin can view but not log.
+_Avoid_: Program lead, mentor manager
+
+**Blended Learning Mentee**:
+A Student with an active Blended Learning Mentor-Mentee Mapping.
+_Avoid_: Holistic Mentee, Academic Mentee, caseload student
+
+**Blended Learning Mentor-Mentee Mapping**:
+An academic-year assignment connecting one Blended Learning Mentor to one Student in one Program, maintained through the DB Service import, with ended assignments retained as history.
+_Avoid_: Holistic Mentor-Mentee Mapping, POC column, assignment sheet row
+
+**Conversation**:
+A saved record of one contact between a Blended Learning Mentor and a Blended Learning Mentee, the parent or sibling, or both, by call or in person, with a summary, Action Items, and notes.
+_Avoid_: Session, check-in, call log, Post-Session Notes, Follow-up Note
+
+**Attempt**:
+A logged contact that did not connect, with a date and an optional note. It is not a Conversation.
+_Avoid_: Missed call, failed Conversation, not-reachable Conversation
+
+**Conversation Draft**:
+An unsaved write-up for one Blended Learning Mentee, created when a Mentor uploads a call recording, that becomes a Conversation only when the Mentor reviews and saves it.
+_Avoid_: Pending Conversation, auto-saved Conversation
+
+**Call Recording**:
+An audio file of a Conversation, uploaded by the Mentor and used to draft the write-up; retained for a limited period and playable only by Blended Learning Admins.
+_Avoid_: Voice note, audio attachment
+
+**Action Item**:
+A follow-up agreed in a Conversation, owned by the Student, the Mentor, or the Parent, with an optional due date, that stays open until a later Conversation marks it done.
+_Avoid_: Action (that is a School Visit term), task, to-do
+
+**Mentor Flag**:
+A concern raised on one Conversation for one Flag Recipient, with an optional comment. A Conversation can carry several.
+_Avoid_: Intervention Flag, escalation, needs-intervention
+
+**Flag Recipient**:
+The area a Mentor Flag is raised to: Emotional Well-being, Physics Teacher, Chemistry Teacher, or Maths Teacher. It names an area, not a person.
+_Avoid_: Assignee, named teacher
+
+**Last Contact**:
+The date of a Blended Learning Mentee's most recent Conversation. Attempts do not count.
+_Avoid_: Last call, last attempt
+
+**Talk to First**:
+The group of Blended Learning Mentees whose most recent logged entry is an Attempt, who have no Conversation, or whose Last Contact was 30 or more days ago.
+_Avoid_: Priority list, overdue students, at-risk students
+
+**Profile Doc**:
+The Google Doc kept for each Blended Learning Mentee before the app, holding their intake interview, parent notes, documents, and past check-ins. The app links to it and does not copy it.
+_Avoid_: Student Profile, Holistic Student Profile
+
+**Screener Link**:
+The per-Student link from the Profile Dashboard Sheet's Screener Form column, shown to whoever handles a Mentor Flag.
+_Avoid_: Screener Form (as a Quiz Form), Holistic Student Profile Questionnaire
+
 ## Relationships
 
 - A **School** has many **Students** (via `group` → `group_user`)
@@ -607,6 +673,12 @@ _Avoid_: Unmapped Student, Mapping not done, unassigned Mentee
 - `/api/pm/teachers` is the shared School Visit **Visit Teacher** source; Classroom Observation does not get a separate teacher API
 - School Visit permissions gate access to **Visit Teacher** pickers; Staff Management admin permission is not required to select a teacher during a Visit
 - The **Visit Teacher** source change is limited to shared School Visit teacher lookup and Individual AF Teacher Interaction completion validation; it does not change Staff Management, Visit payload shape, picker UI, or completed Visit summaries
+- A **Blended Learning Mentee** has at most one active **Blended Learning Mentor-Mentee Mapping** per academic year; reassignment ends the old Mapping, and the Student's **Conversations**, **Attempts**, and **Action Items** stay with the Student
+- A **Blended Learning Mentor** sees only their own **Blended Learning Mentees**; a **Blended Learning Admin** sees every Mentor's Mentees and every **Mentor Flag**
+- A **Conversation** has zero or more **Action Items**, zero or more photo attachments, and zero or more **Mentor Flags**, at most one per **Flag Recipient**
+- A **Conversation Draft** becomes a **Conversation** only when the Mentor saves it; a draft does not change **Last Contact**, **Talk to First**, counts, or **Mentor Flags**; a Mentee has at most one open draft
+- A saved **Conversation** is not edited; a later Conversation can mark earlier **Action Items** done
+- A **Mentor Flag** to **Emotional Well-being** notifies its recipient by email without the notes or comment; Physics, Chemistry, and Maths Teacher flags notify no one until those people are named
 
 ## Example dialogue
 
@@ -630,3 +702,6 @@ _Avoid_: Unmapped Student, Mapping not done, unassigned Mentee
 - "deleted" for actions vs visits: Actions already support soft delete (`deleted_at` on `lms_pm_school_visit_actions`). Issue #35 extends this to visits (`lms_pm_school_visits`).
 - "mentorship" as a UI label vs domain terms: the School page has separate **Academic Mentorship Tab** and **Holistic Mentorship Tab** surfaces; do not use a generic Mentorship Tab as their umbrella.
 - "teacher" in School Visit forms means **Visit Teacher**, not every `user_permission.role = "teacher"` account.
+- "flag": a **Mentor Flag** belongs to one Conversation and names a Flag Recipient; it is unrelated to the School roster's needs-intervention flag.
+- "action": an **Action** is part of a School Visit; an **Action Item** is a follow-up agreed in a Blended Learning **Conversation**.
+- "mentor" alone is ambiguous across Academic, Holistic, and Blended Learning Mentoring; always use the full term.
