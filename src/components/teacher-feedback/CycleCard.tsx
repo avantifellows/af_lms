@@ -135,6 +135,11 @@ function TeacherCard({
             </div>
           )}
           {showPending && <PendingList pending={pending} showBatch={multiBatch} />}
+          {responses.seriousConcerns > 0 && (
+            <div className="text-sm font-medium text-danger" title="From the summary — see View analysis">
+              ⚑ {responses.seriousConcerns} serious concern{responses.seriousConcerns === 1 ? "" : "s"}
+            </div>
+          )}
         </div>
       )}
 
