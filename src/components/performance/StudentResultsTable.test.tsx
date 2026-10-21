@@ -129,6 +129,40 @@ describe("StudentResultsTable", () => {
     expect(iZero).toBeLessThan(iOut);
   });
 
+  it("gives two Students with the same name their own rank", () => {
+    render(
+      <StudentResultsTable
+        {...props}
+        students={[
+          { ...STUDENTS[0], student_name: "Priya Kumari", enrollment_user_id: "1001", percentage: 80 },
+          { ...STUDENTS[0], student_name: "Priya Kumari", enrollment_user_id: "1002", percentage: 30 },
+          // No id: the row falls back to the name and still gets a rank.
+          { ...STUDENTS[0], student_name: "No Id", enrollment_user_id: null, percentage: 50 },
+        ]}
+      />
+    );
+    const ranks = screen
+      .getAllByRole("row")
+      .slice(1)
+      .map((r) => r.querySelector("td")?.textContent);
+    expect(ranks).toEqual(["01", "02", "03"]);
+  });
+
+  it("expands only the clicked Student when two Students share a name", async () => {
+    render(
+      <StudentResultsTable
+        {...props}
+        students={[
+          { ...STUDENTS[0], student_name: "Priya Kumari", enrollment_user_id: "1001", percentage: 80 },
+          { ...STUDENTS[0], student_name: "Priya Kumari", enrollment_user_id: "1002", percentage: 30 },
+        ]}
+      />
+    );
+    fireEvent.click(screen.getAllByText("Priya Kumari")[0]);
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+    expect(screen.getAllByText("Physics")).toHaveLength(1);
+  });
+
   it("shows no badge when submission status is unknown", () => {
     // Report docs written before etl-next carried the flag have no value at all.
     // Treating that as unsubmitted would badge every historical test.
