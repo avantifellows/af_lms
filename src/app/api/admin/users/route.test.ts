@@ -312,6 +312,14 @@ describe("POST /api/admin/users — PMU roles", () => {
     ]);
   });
 
+  it("returns 409 when a seated person is added as an alumni_manager", async () => {
+    mockDb({ seats: [{ one: 1 }] });
+    const res = await post({ role: "alumni_manager", level: 1, school_codes: ["JNV001"], program_ids: [1] });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toMatch(/Alumni Manager/);
+    expect(insertParams()).toBeUndefined();
+  });
+
   it("returns 409 when the target already holds a centre seat", async () => {
     mockDb({ seats: [{ one: 1 }] });
     const res = await post({ role: "pmu_manager", level: 3 });

@@ -92,7 +92,7 @@ Student Addition writes deliberately use a stricter gate than `ownsRecord`: admi
 - **Constants:** `ALUMNI_MANAGER_ROLE` and `isAlumniRole` in client-safe `src/lib/constants.ts`; `USER_ROLES` includes it.
 - **Matrix:** new feature `alumni` — `admin` and `alumni_manager` edit, every other role none. `alumni_manager` is none on every other feature. `read_only` makes it view.
 - **Denied by default:** `getUserPermission` returns null for an alumni role, so `getResolvedPermission`, `canAccessSchool`, `canAccessStudent`, `isAdmin`, the dashboard and every guard built on them treat the user as having no permission. Alumni code reads the row through `getAlumniPermission` (any role, resolved scope) and must still check `getFeatureAccess(permission, "alumni")` and School scope — `canAccessAlumni` does both.
-- **Scope:** level 1/2/3 with School codes or regions; `resolveScope` skips centre seats for alumni roles (`resolveSeatlessScope`, shared with PMU roles).
+- **Scope:** level 1/2/3 with School codes or regions; `resolveScope` skips centre seats for alumni roles (`resolveSeatlessScope`, shared with PMU roles). Seating one is refused too, as for PMU roles: `rejectIneligibleSeatUser` returns 409 in Staff Management. In Admin → Users, `POST` and `PATCH` return 409 `ALUMNI_SEATED_ERROR` (`pmu-rows.ts`) when the effective role is `alumni_manager` and the person is seated (by `user_id`, or by email via `isSeatedEmail`). A seat would otherwise clear their `school_codes` and leave them with no schools.
 - **Admin Users:** role option, description, label and colour added; it uses the standard level/program fields.
 
 ## Scope resolution — `getResolvedPermission` vs `getUserPermission`

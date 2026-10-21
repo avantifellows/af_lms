@@ -6,9 +6,9 @@ import {
   endIneligibleHolisticMappings,
 } from "@/lib/staff-admin";
 import { isUserRole } from "@/lib/permissions";
-import { HOLISTIC_MENTORSHIP_PROGRAM_IDS, isPmuRole, type PmuRole } from "@/lib/constants";
+import { HOLISTIC_MENTORSHIP_PROGRAM_IDS, isAlumniRole, isPmuRole, type PmuRole } from "@/lib/constants";
 import { requireAdminApiAccess } from "../../route-helpers";
-import { isSeatedEmail, PMU_SEATED_ERROR, resolvePmuRow } from "../pmu-rows";
+import { ALUMNI_SEATED_ERROR, isSeatedEmail, PMU_SEATED_ERROR, resolvePmuRow } from "../pmu-rows";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -150,9 +150,12 @@ function wantsScopeEdit({ school_codes, regions }: UserPatchBody) {
 }
 
 // A PMU row is validated as the stored row with the body merged over it, so
-// a role-only change can't leave a multi-school Govt School User behind.
+// a role-only change can't leave a multi-school Govt School User behind. An
+// Alumni Manager needs the stored email for the seat check.
 async function storedForPmuCheck(id: string, role: string | undefined) {
-  return role === undefined || isPmuRole(role) ? storedPermission(id) : null;
+  return role === undefined || isPmuRole(role) || isAlumniRole(role)
+    ? storedPermission(id)
+    : null;
 }
 
 async function applyPatch(id: string, body: UserPatchBody) {
@@ -166,6 +169,11 @@ async function applyPatch(id: string, body: UserPatchBody) {
   // also carries school_codes/regions.
   if (isPmu && (await pmuSeatTaken(seat.isSeated, stored))) {
     return NextResponse.json({ error: PMU_SEATED_ERROR }, { status: 409 });
+  }
+
+  // Alumni Managers ignore seats (ADR 0008), so a seated one would reach nothing.
+  if (isAlumniRole(effectiveRole) && (await pmuSeatTaken(seat.isSeated, stored))) {
+    return NextResponse.json({ error: ALUMNI_SEATED_ERROR }, { status: 409 });
   }
 
   if (seat.isSeated && wantsScopeEdit(body)) {
