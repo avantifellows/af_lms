@@ -18,7 +18,7 @@ describe("cohortParams", () => {
     const [year, grade, programs] = cohortParams();
     expect(year).toMatch(/^\d{4}-\d{4}$/);
     expect(grade).toBe(12);
-    expect(programs).toEqual([1, 86, 87, 2, 94]);
+    expect(programs).toEqual([1, 86, 87, 74, 2, 94]);
   });
 });
 

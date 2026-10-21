@@ -31,6 +31,8 @@ export const academicYearEnd = (academicYear: string) => academicYear.split("-")
 /**
  * Alumni programs (program.id), in attribution order: a student in more than
  * one is counted under the first — CoE before Nodal, like PROGRAM_ATTRIBUTION_ORDER.
- * 1 JNV CoE · 86 Dakshana CoE · 87 ENF CoE · 2 JNV Nodal · 94 Punjab Nodal.
+ * 1 JNV CoE · 86 Dakshana CoE · 87 ENF CoE · 74 Punjab CoE · 2 JNV Nodal · 94 Punjab Nodal.
+ * Punjab pass-outs can be under either Punjab program (production has
+ * 2025-26 Grade 12 under Punjab CoE; staging under Punjab Nodal).
  */
-export const ALUMNI_PROGRAM_ORDER = [1, 86, 87, 2, 94];
+export const ALUMNI_PROGRAM_ORDER = [1, 86, 87, 74, 2, 94];
