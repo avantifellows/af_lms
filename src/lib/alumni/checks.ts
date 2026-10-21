@@ -125,20 +125,23 @@ const checkOrder: Check = (v, ctx, add) => {
   }
 };
 
+/** Case-insensitive, so old records' spellings ("NO", "Gap year") are checked too. */
+const lower = (s: string | undefined) => (s ?? "").trim().toLowerCase();
+
 /** Gap year answers agree with each other. */
 const checkGapYear: Check = (v, ctx, add) => {
-  const gap = v.did_you_take_a_gap_year;
+  const gap = lower(v.did_you_take_a_gap_year);
   const ugStart = yearOf(v, "start_year_ug");
-  const gapStatus = v.ug_status === "Gap Year" || v.current_status === "Gap Year";
-  if (gap === "No" && gapStatus) {
+  const gapStatus = lower(v.ug_status) === "gap year" || lower(v.current_status) === "gap year";
+  if (gap === "no" && gapStatus) {
     add("error", "gap-conflict", "did_you_take_a_gap_year", ["did_you_take_a_gap_year", "ug_status", "current_status"],
       `Says no gap year, but the status is Gap Year.`);
   }
-  if (gap === "No" && ugStart && ctx.g12Year && ugStart > ctx.g12Year) {
+  if (gap === "no" && ugStart && ctx.g12Year && ugStart > ctx.g12Year) {
     add("warning", "gap-implied", "did_you_take_a_gap_year", ["did_you_take_a_gap_year", "start_year_ug"],
       `Started UG in ${ugStart}, ${plural(ugStart - ctx.g12Year)} after Class 12 (${ctx.g12Year}) — that looks like a gap year.`);
   }
-  if (gap === "Yes" && !v.why_did_you_take_a_gap_year) {
+  if (gap === "yes" && !v.why_did_you_take_a_gap_year) {
     add("warning", "gap-reason", "why_did_you_take_a_gap_year", ["did_you_take_a_gap_year", "why_did_you_take_a_gap_year"],
       `Took a gap year, but no reason is filled in.`);
   }

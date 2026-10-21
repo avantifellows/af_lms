@@ -16,7 +16,9 @@ vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("@/lib/alumni/schools", () => ({ getSchoolName: vi.fn() }));
 vi.mock("@/lib/alumni/access", () => ({ reachesSchool: vi.fn() }));
 vi.mock("@/components/alumni/AlumniTab", () => ({
-  default: ({ schoolCode }: { schoolCode: string }) => <div data-testid="alumni-tab">tab for {schoolCode}</div>,
+  default: ({ schoolCode, canEdit }: { schoolCode: string; canEdit?: boolean }) => (
+    <div data-testid="alumni-tab" data-can-edit={String(canEdit)}>tab for {schoolCode}</div>
+  ),
 }));
 vi.mock("@/lib/permissions", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/permissions")>();
@@ -52,6 +54,13 @@ describe("Alumni school page", () => {
     expect(screen.getByRole("heading", { name: "RSMS Bathinda · Alumni" })).toBeInTheDocument();
     expect(screen.getByTestId("alumni-tab")).toHaveTextContent("tab for 1");
     expect(screen.getByRole("link", { name: /All schools/ })).toHaveAttribute("href", "/alumni");
+    expect(screen.getByTestId("alumni-tab")).toHaveAttribute("data-can-edit", "true");
+  });
+
+  it("opens the lists view-only for read-only access", async () => {
+    vi.mocked(getAlumniPermission).mockResolvedValueOnce({ ...manager, read_only: true });
+    render(await open());
+    expect(screen.getByTestId("alumni-tab")).toHaveAttribute("data-can-edit", "false");
   });
 
   it("refuses a school out of scope, and roles without the alumni feature", async () => {

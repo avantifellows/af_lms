@@ -13,7 +13,8 @@ The role is denied by default everywhere else. `getUserPermission` (and so `getR
 ## Consequences
 
 - Scope reuses level 1/2/3 with School codes or regions. Centre seats never widen it (`resolveScope` skips seats, as for PMU roles). Seating one is refused too, as for PMU roles: Staff Management returns 409 (`rejectIneligibleSeatUser`), and Admin → Users returns 409 (`ALUMNI_SEATED_ERROR`) when a seated person is made, or already is, an Alumni Manager. Otherwise the seat would clear their School codes and leave them with no schools.
-- `read_only` turns `alumni` edit into view, so saving is refused.
+- `read_only` turns `alumni` edit into view: saving is refused, and the form shows "View only" instead of Save.
+- Alumni APIs send only the profile fields the form displays (plus the Class 12 year used by the checks), never the rest of the Student record (address, guardian, Grade 10 marks).
 - `admin` also gets `alumni` edit; every other role gets none.
 - An alumni manager's only pages are `/alumni` (their schools) and `/alumni/[code]`; `/dashboard` sends them there.
 - Staging first: the role is tested on staging before it reaches production.

@@ -10,10 +10,18 @@ export const ALUMNI_COHORT_GRADE = 12;
 
 /** The Indian academic year starts in April. */
 const ACADEMIC_YEAR_START_MONTH = 4;
+/** India Standard Time is UTC+5:30 (no daylight saving). */
+const IST_OFFSET_MS = 330 * 60 * 1000;
 
-/** The academic year running on `now`, e.g. "2026-2027" for April 2026 – March 2027. */
+/**
+ * The academic year running on `now` in India, e.g. "2026-2027" for April
+ * 2026 – March 2027. Uses IST, not the server's clock, so a UTC server flips
+ * at midnight IST on 1 April, not at 05:30.
+ */
 export function currentAcademicYear(now = new Date()): string {
-  const start = now.getMonth() + 1 >= ACADEMIC_YEAR_START_MONTH ? now.getFullYear() : now.getFullYear() - 1;
+  const ist = new Date(now.getTime() + IST_OFFSET_MS);
+  const year = ist.getUTCFullYear();
+  const start = ist.getUTCMonth() + 1 >= ACADEMIC_YEAR_START_MONTH ? year : year - 1;
   return `${start}-${start + 1}`;
 }
 

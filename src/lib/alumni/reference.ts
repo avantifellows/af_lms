@@ -81,16 +81,25 @@ export interface CodeInfo {
   name: string;
 }
 
-/** Id and name for each college / branch code that exists. A code missing from the result doesn't exist. */
-export async function lookupCodes(colleges: string[], branches: string[]): Promise<Map<string, CodeInfo>> {
-  if (!colleges.length && !branches.length) return new Map();
-  const rows = await query<{ code: string; id: string; name: string }>(
-    `SELECT college_id AS code, id, name FROM college WHERE college_id = ANY($1::text[])
+export type CodeKind = "college" | "branch";
+export type CodeLookup = Record<CodeKind, Map<string, CodeInfo>>;
+
+/**
+ * Id and name for each college / branch code that exists, kept apart by kind
+ * (the two tables share codes and ids, so a branch code must never pass as a
+ * college). A code missing from its map doesn't exist.
+ */
+export async function lookupCodes(colleges: string[], branches: string[]): Promise<CodeLookup> {
+  const lookup: CodeLookup = { college: new Map(), branch: new Map() };
+  if (!colleges.length && !branches.length) return lookup;
+  const rows = await query<{ kind: CodeKind; code: string; id: string; name: string }>(
+    `SELECT 'college' AS kind, college_id AS code, id, name FROM college WHERE college_id = ANY($1::text[])
      UNION ALL
-     SELECT branch_id, id, name FROM branch WHERE branch_id = ANY($2::text[])`,
+     SELECT 'branch', branch_id, id, name FROM branch WHERE branch_id = ANY($2::text[])`,
     [colleges, branches],
   );
-  return new Map(rows.map((r) => [r.code, { id: String(r.id), name: clean(r.name) }]));
+  for (const r of rows) lookup[r.kind]?.set(r.code, { id: String(r.id), name: clean(r.name) });
+  return lookup;
 }
 
 /** Shortest names first, so the generic branch ("VLSI") ranks above "(4 Years, ...)" variants. */

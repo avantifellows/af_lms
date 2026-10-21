@@ -1388,7 +1388,7 @@ export default async function RosterPage({
       mentorship: mentorshipContent,
       holisticMentorship: holisticContent,
       visits: <VisitsTab schoolCode={school.code} canEdit={access.visits.canEdit} />,
-      alumni: isCentre ? null : <AlumniTab schoolCode={school.code} />,
+      alumni: isCentre ? null : <AlumniTab schoolCode={school.code} canEdit={access.alumni.canEdit} />,
     },
   });
 

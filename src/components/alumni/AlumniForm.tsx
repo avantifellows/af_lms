@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import {
   AlertTriangle, BookOpen, Briefcase, CheckCircle2, ChevronDown, Compass, GraduationCap, Info, Loader2, Sparkles, X,
@@ -15,7 +15,7 @@ import {
 import { needsConfirm, type Issue } from "@/lib/alumni/checks";
 import { allowedDegrees, isDegreeCompatible } from "@/lib/alumni/compat";
 import {
-  MAX_YEAR, MIN_YEAR, checkContext, degreeMismatchMessage, reviewValues, visibleValues,
+  MAX_YEAR, MIN_YEAR, checkContext, degreeMismatchMessage, reviewSave,
 } from "@/lib/alumni/validation";
 
 interface EntryContext {
@@ -29,6 +29,8 @@ interface EntryContext {
   profile: Values;
   alumni: Values;
   codeNames: Record<string, string>;
+  /** The record's version; sent back on save so another person's save isn't overwritten. */
+  version: string;
 }
 
 interface SavedEntry {
@@ -54,6 +56,8 @@ interface Props {
   entry: AlumniEntryRef;
   /** Called after a successful save (e.g. to refresh the student lists). */
   onSaved?: () => void;
+  /** False for view-only access (read_only): the form shows, but there's no Save. */
+  canEdit?: boolean;
 }
 
 const SECTION_ICONS: Record<string, React.ReactNode> = {
@@ -100,7 +104,7 @@ function useEntry(url: string, version: number) {
 /** The same review the server runs, live — unusual answers show under their field while typing. */
 function useReview(values: Values, context: EntryContext | null) {
   const review = useMemo(
-    () => (context ? reviewValues(visibleValues(values), context.alumni, checkContext(context.profile)) : null),
+    () => (context ? reviewSave(values, context.alumni, checkContext(context.profile)) : null),
     [values, context],
   );
   const warningsByField = useMemo(() => {
@@ -117,12 +121,12 @@ type SaveOutcome =
   | { kind: "failed"; error: string; fieldErrors: Record<string, string> };
 
 /** Sends the answers; the server re-checks everything and saves through the DB Service. */
-async function postSave(url: string, values: Values, confirmed: string[]): Promise<SaveOutcome> {
+async function postSave(url: string, values: Values, confirmed: string[], version: string): Promise<SaveOutcome> {
   try {
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ values, confirmed }),
+      body: JSON.stringify({ values, confirmed, version }),
     });
     const body = await res.json();
     if (res.status === 409 && body?.warnings) return { kind: "confirm", warnings: body.warnings };
@@ -155,6 +159,9 @@ function withAnswer(values: Values, column: string, value: string): Values {
   return next;
 }
 
+/** Every warning confirmed so far in this save, plus the ones just confirmed (so the dialog can't loop). */
+const withConfirmed = (confirmed: string[], issues: Issue[]) => [...new Set([...confirmed, ...issues.map((w) => w.id)])];
+
 /** Removes one key from a record, returning the same object when it wasn't there. */
 const without = (record: Record<string, string>, key: string) => {
   if (!record[key]) return record;
@@ -163,7 +170,7 @@ const without = (record: Record<string, string>, key: string) => {
   return next;
 };
 
-export default function AlumniForm({ entry, onSaved }: Props) {
+export default function AlumniForm({ entry, onSaved, canEdit = true }: Props) {
   /** Becomes the new alumnus once a pass-out is saved. */
   const [ref, setRef] = useState(entry);
   /** Bumped after a save to reload the record from the database. */
@@ -178,6 +185,8 @@ export default function AlumniForm({ entry, onSaved }: Props) {
   const [formError, setFormError] = useState("");
   /** Unusual answers waiting for "yes, save anyway". */
   const [confirming, setConfirming] = useState<Issue[] | null>(null);
+  /** Warning ids already confirmed for the save in progress. */
+  const [confirmed, setConfirmed] = useState<string[]>([]);
 
   const visibleSections = useMemo(
     () => ALUMNI_SECTIONS.filter((s) => s.fields.some((f) => isFieldShown(s, f, values))),
@@ -201,10 +210,11 @@ export default function AlumniForm({ entry, onSaved }: Props) {
     setFormError("");
   };
 
-  const submit = async (confirmed: string[]) => {
+  const submit = async (ids: string[]) => {
     setSaving(true);
     setFormError("");
-    const outcome = await postSave(url, values, confirmed);
+    setConfirmed(ids);
+    const outcome = await postSave(url, values, ids, context.version);
     setSaving(false);
     if (outcome.kind === "confirm") {
       setConfirming(outcome.warnings);
@@ -216,6 +226,7 @@ export default function AlumniForm({ entry, onSaved }: Props) {
       return;
     }
     setConfirming(null);
+    setConfirmed([]);
     setDirty(false);
     setJustSaved(true);
     // Reload what's now in the database, as the alumnus (a saved pass-out now is one).
@@ -258,7 +269,7 @@ export default function AlumniForm({ entry, onSaved }: Props) {
         />
       ))}
 
-      <div className="sticky bottom-0 z-10 -mx-6 -mb-6 flex flex-wrap items-center gap-3 rounded-b-xl border-t border-border bg-bg-card/95 px-6 py-4 backdrop-blur">
+      <SaveBar canEdit={canEdit}>
         <Button type="button" onClick={save} disabled={saving} className="min-w-[140px]">
           <SaveLabel saving={saving} kind={context.kind} />
         </Button>
@@ -269,14 +280,14 @@ export default function AlumniForm({ entry, onSaved }: Props) {
           justSaved={justSaved}
           pendingWarnings={needsConfirm(review.warnings).length}
         />
-      </div>
+      </SaveBar>
 
       {confirming && (
         <ConfirmDialog
           issues={confirming}
           saving={saving}
           onCancel={() => setConfirming(null)}
-          onConfirm={() => submit(confirming.map((w) => w.id))}
+          onConfirm={() => submit(withConfirmed(confirmed, confirming))}
         />
       )}
     </div>
@@ -332,6 +343,21 @@ function FormHeader({ context }: { context: EntryContext }) {
         </div>
       </div>
     </header>
+  );
+}
+
+/** The sticky bar under the form: Save and its status, or a view-only note. */
+function SaveBar({ canEdit, children }: { canEdit: boolean; children: ReactNode }) {
+  return (
+    <div className="sticky bottom-0 z-10 -mx-6 -mb-6 flex flex-wrap items-center gap-3 rounded-b-xl border-t border-border bg-bg-card/95 px-6 py-4 backdrop-blur">
+      {canEdit ? (
+        children
+      ) : (
+        <span className="flex items-center gap-1.5 text-sm text-text-muted">
+          <Info className="h-4 w-4" aria-hidden /> View only: your access can&apos;t save alumni changes.
+        </span>
+      )}
+    </div>
   );
 }
 

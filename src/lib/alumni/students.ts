@@ -130,7 +130,9 @@ export async function listPendingForSchool(school: { id: string | number; code: 
   const rows = await query<PersonRow & {
     passout_year: string; program: string; gender: string | null; stream: string | null;
   }>(
-    `WITH ${cohortCte(`AND er.user_id IN (${SCHOOL_MEMBERS("$4")})`)}
+    // Members are read once (MATERIALIZED): inlined, the big Punjab schools took ~450 ms, not ~130.
+    `WITH school_members AS MATERIALIZED (${SCHOOL_MEMBERS("$4")}),
+     ${cohortCte("AND er.user_id IN (SELECT user_id FROM school_members)")}
      SELECT user_id, afid, first_name, last_name, passout_year, program, gender, stream
      FROM cohort_flagged
      WHERE school_code = $5 AND NOT is_alumni AND COALESCE(status, '') <> 'dropout'`,

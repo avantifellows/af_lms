@@ -106,6 +106,43 @@ describe("getEntryContext", () => {
     expect(ctx!.profile.student_g12_graduating_year).toBe("2026");
   });
 
+  it("gives an existing alumnus their version and, with no Class 12 year on record, their last Grade 12 year", async () => {
+    answer({
+      student: [STUDENT],
+      alumni: [{ id: 8340, row_version: "2026-10-01 10:00:00.123+00" }],
+      meta: [{ program: "JNV CoE", school_code: "59525", school_name: "JNV Adilabad", cohort_year: "2019-2020" }],
+    });
+    const ctx = await getEntryContext("86655");
+    expect(ctx!.version).toBe("2026-10-01 10:00:00.123+00");
+    expect(ctx!.profile.student_g12_graduating_year).toBe("2020");
+  });
+
+  it("keeps the Class 12 year on record over the Grade 12 fallback", async () => {
+    answer({
+      student: [{ ...STUDENT, student_g12_graduating_year: 2019 }],
+      alumni: [{ id: 8340 }],
+      meta: [{ program: null, school_code: null, school_name: null, cohort_year: "2019-2020" }],
+    });
+    expect((await getEntryContext("86655"))!.profile.student_g12_graduating_year).toBe("2019");
+  });
+
+  it("refuses a dropout pass-out (they can't be added)", async () => {
+    answer({
+      student: [STUDENT],
+      cohort: [{ program: "JNV CoE", passout_year: "2025-2026", school_code: "59525", school_name: "JNV Adilabad", status: "dropout" }],
+    });
+    expect(await getEntryContext("86655")).toBeNull();
+  });
+
+  it("reads only the profile fields the form shows (no address, guardian or Grade 10 marks)", async () => {
+    answer({});
+    await getEntryContext("1");
+    const sql = String(mockQuery.mock.calls[0][0]);
+    for (const column of ["address", "guardian", "percentage_in_grade_10", "family_type", "has_category_certificate"]) {
+      expect(sql).not.toContain(column);
+    }
+  });
+
   it("returns null for someone who is neither an alumnus nor a pass-out", async () => {
     answer({ student: [STUDENT] });
     expect(await getEntryContext("86655")).toBeNull();

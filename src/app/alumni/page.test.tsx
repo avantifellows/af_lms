@@ -25,10 +25,11 @@ const manager = { email: "caller@avantifellows.org", level: 1, role: "alumni_man
 const school = (code: string, name: string, toAdd: number, alumni: number) => ({ code, name, toAdd, alumni });
 
 beforeEach(() => {
+  // Clear every mock's calls, so "not called" checks don't see earlier tests.
+  vi.clearAllMocks();
   vi.mocked(getServerSession).mockResolvedValue({ user: { email: "caller@avantifellows.org" } } as never);
   vi.mocked(getAlumniPermission).mockResolvedValue(manager);
   vi.mocked(listAlumniSchools).mockResolvedValue([]);
-  mockRedirect.mockClear();
 });
 
 describe("Alumni home page", () => {

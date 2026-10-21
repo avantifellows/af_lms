@@ -4,11 +4,16 @@ import { saveAlumni } from "./save";
 
 // Shared by the two save routes (an existing alumnus, a pass-out being added).
 
-/** The form's answers and the warnings the person confirmed, or a 400. */
-export async function readSaveBody(
-  request: Request,
-): Promise<{ values: Record<string, string>; confirmed: string[] } | NextResponse> {
-  let body: { values?: unknown; confirmed?: unknown };
+export interface SaveBody {
+  values: Record<string, string>;
+  confirmed: string[];
+  /** The record's version when the form loaded it (edits). */
+  version?: string;
+}
+
+/** The form's answers, the warnings the person confirmed and the version they edited, or a 400. */
+export async function readSaveBody(request: Request): Promise<SaveBody | NextResponse> {
+  let body: { values?: unknown; confirmed?: unknown; version?: unknown };
   try {
     body = await request.json();
   } catch {
@@ -24,17 +29,14 @@ export async function readSaveBody(
   const confirmed = Array.isArray(body.confirmed)
     ? body.confirmed.filter((c): c is string => typeof c === "string")
     : [];
-  return { values, confirmed };
+  const version = typeof body.version === "string" ? body.version : undefined;
+  return { values, confirmed, version };
 }
 
 /** Saves through the DB Service and turns the outcome into the response. */
-export async function respondWithSave(
-  context: EntryContext,
-  values: Record<string, string>,
-  confirmed: string[],
-): Promise<NextResponse> {
+export async function respondWithSave(context: EntryContext, body: SaveBody): Promise<NextResponse> {
   try {
-    const result = await saveAlumni(context, values, confirmed);
+    const result = await saveAlumni(context, body.values, body.confirmed, body.version);
     if (!result.ok) {
       return NextResponse.json(
         { error: result.error, fieldErrors: result.fieldErrors, warnings: result.warnings },

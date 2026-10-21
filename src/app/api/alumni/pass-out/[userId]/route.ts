@@ -44,5 +44,5 @@ export async function POST(request: Request, { params }: { params: Promise<{ use
   if (body instanceof NextResponse) return body;
   const loaded = await loadPassOut((await params).userId, auth.permission);
   if (!loaded.ok) return loaded.response;
-  return respondWithSave(loaded.context, body.values, body.confirmed);
+  return respondWithSave(loaded.context, body);
 }

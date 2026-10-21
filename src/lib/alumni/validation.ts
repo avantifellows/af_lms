@@ -1,7 +1,7 @@
 // Field checks shared by the form (browser) and the save route (server).
 import { findIssues, type CheckContext, type Issue } from "./checks";
 import { allowedDegrees, isDegreeCompatible, type Level } from "./compat";
-import { ALUMNI_SECTIONS, ENUMS, isFieldShown, type FieldDef, type Values } from "./fields";
+import { ALUMNI_SECTIONS, ENUMS, isFieldShown, isFieldStale, type FieldDef, type Values } from "./fields";
 
 export const MIN_YEAR = 2000;
 export const MAX_YEAR = 2035;
@@ -11,18 +11,32 @@ const MAX_TEXT = 255;
 const WHOLE_NUMBERS = new Set(["years_of_experience"]);
 
 /**
- * The values that will be saved: only fields that are shown. Fields hidden by
- * the answers above (e.g. PG fields when UG isn't Graduated) are left out, so
- * stale values never get saved.
+ * The values that will be saved: only fields that apply. Fields hidden by the
+ * answers above (e.g. PG fields when UG isn't Graduated), and stale values
+ * that no longer apply (e.g. an organisation after switching to Not
+ * Employed), are left out, so they never get saved.
  */
 export function visibleValues(values: Values): Values {
   const out: Values = {};
   for (const section of ALUMNI_SECTIONS) {
     for (const field of section.fields) {
-      if (isFieldShown(section, field, values)) out[field.column] = (values[field.column] ?? "").trim();
+      if (isFieldShown(section, field, values) && !isFieldStale(section, field, values)) {
+        out[field.column] = (values[field.column] ?? "").trim();
+      }
     }
   }
   return out;
+}
+
+/**
+ * The record as it will be after the save. A blank is never sent, so the
+ * saved value stays: checks must see it, or clearing one field of a blocked
+ * pair (e.g. the branch, before picking MBBS) would get past them.
+ */
+export function afterSave(values: Values, previous: Values): Values {
+  const after: Values = { ...previous };
+  for (const [column, v] of Object.entries(values)) if (v) after[column] = v;
+  return after;
 }
 
 type FieldRule = (field: FieldDef, v: string, previous: Values) => string | undefined;
@@ -109,7 +123,17 @@ export interface Review {
   warnings: Issue[];
 }
 
-/** Everything checked before a save — the form and the server run the same review. */
+/**
+ * Everything checked before a save — the form and the server run the same
+ * review. `values` is what will be sent; the checks run on the record as it
+ * will be after the save.
+ */
+export function reviewSave(submitted: Values, previous: Values, ctx: CheckContext): Review & { values: Values } {
+  const values = visibleValues(submitted);
+  return { values, ...reviewValues(afterSave(values, previous), previous, ctx) };
+}
+
+/** The checks on one set of values (normally the record after the save, see `reviewSave`). */
 export function reviewValues(values: Values, previous: Values, ctx: CheckContext): Review {
   const errors = validateValues(values, previous);
   const warnings: Issue[] = [];

@@ -50,7 +50,10 @@ beforeEach(() => {
   vi.mocked(authorizeAlumni).mockResolvedValue(ADMIN);
   vi.mocked(getEntryContext).mockResolvedValue(context());
   vi.mocked(reachesSchool).mockResolvedValue(true);
-  vi.mocked(lookupCodes).mockResolvedValue(new Map([["C-19609", { id: "40947", name: "Nalla Malla Reddy Engineering College" }]]));
+  vi.mocked(lookupCodes).mockResolvedValue({
+    college: new Map([["C-19609", { id: "40947", name: "Nalla Malla Reddy Engineering College" }]]),
+    branch: new Map(),
+  });
   vi.mocked(query).mockResolvedValue([]); // no alumni row yet
   vi.mocked(getDbServiceConfig).mockReturnValue({
     baseUrl: "https://db.test/api",

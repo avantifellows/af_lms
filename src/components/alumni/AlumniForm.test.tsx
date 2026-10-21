@@ -159,6 +159,45 @@ describe("AlumniForm", () => {
     expect(await screen.findByText("Server says check this.")).toBeInTheDocument();
   });
 
+  it("keeps every confirmed warning when the server asks about another one", async () => {
+    const warning = (id: string) => ({ id, level: "warning", field: "ug_status", fields: [], message: `Check ${id}.` });
+    server(context(), [
+      json({ error: "confirm", warnings: [warning("a")] }, 409),
+      json({ error: "confirm", warnings: [warning("b")] }, 409),
+      json({ ok: true, action: "inserted", alumniId: "8340", changed: ["UG status"], notCleared: [] }),
+    ]);
+    render(<AlumniForm entry={PASS_OUT} />);
+    await screen.findByRole("heading", { name: "Ampoli Ram Charan" });
+    select("Undergraduate (UG) status", "Studying");
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await screen.findByText("Check a.");
+    fireEvent.click(screen.getByRole("button", { name: /Yes, it's correct/ }));
+    await screen.findByText("Check b.");
+    fireEvent.click(screen.getByRole("button", { name: /Yes, it's correct/ }));
+    await waitFor(() => expect(posts()).toHaveLength(3));
+    expect(postedBody(2).confirmed).toEqual(["a", "b"]);
+  });
+
+  it("sends back the version it loaded when editing an alumnus", async () => {
+    server(context({ kind: "edit", ids: { enrollmentUserId: "86655", studentId: "86544", alumniId: "8340" }, version: "v1" }), [
+      json({ ok: true, action: "updated", alumniId: "8340", changed: ["UG status"], notCleared: [] }),
+    ]);
+    render(<AlumniForm entry={ALUMNUS} />);
+    await screen.findByRole("heading", { name: "Ampoli Ram Charan" });
+    select("Undergraduate (UG) status", "Studying");
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(posts()).toHaveLength(1));
+    expect(postedBody().version).toBe("v1");
+  });
+
+  it("has no Save for view-only access", async () => {
+    server(context());
+    render(<AlumniForm entry={PASS_OUT} canEdit={false} />);
+    await screen.findByRole("heading", { name: "Ampoli Ram Charan" });
+    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+    expect(screen.getByText(/View only/)).toBeInTheDocument();
+  });
+
   it("shows the server's errors, and a connection problem", async () => {
     server(context(), [
       json({ error: "Some fields need fixing.", fieldErrors: { ug_status: "Server rejected this." } }, 400),

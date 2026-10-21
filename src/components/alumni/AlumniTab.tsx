@@ -42,6 +42,8 @@ interface SelectedStudent {
 interface Props {
   schoolCode: string;
   initialStudentId?: string;
+  /** False for view-only access to alumni (read_only): no Save. */
+  canEdit?: boolean;
 }
 
 interface Lists {
@@ -111,7 +113,7 @@ function filterRows<T extends { name: string; afid: string; cohortYear: string }
   );
 }
 
-export default function AlumniTab({ schoolCode, initialStudentId }: Props) {
+export default function AlumniTab({ schoolCode, initialStudentId, canEdit = true }: Props) {
   /** Bumped after a save to reload the lists (a new alumnus moves to "Existing alumni"). */
   const [refresh, setRefresh] = useState(0);
   const [view, setView] = useState<View>("pending");
@@ -182,7 +184,12 @@ export default function AlumniTab({ schoolCode, initialStudentId }: Props) {
 
       <Card elevation="sm" className="min-h-[300px] rounded-xl p-6">
         {selected ? (
-          <AlumniForm key={selected.userId} entry={selected.entry} onSaved={() => onSaved(selected.userId)} />
+          <AlumniForm
+            key={selected.userId}
+            entry={selected.entry}
+            canEdit={canEdit}
+            onSaved={() => onSaved(selected.userId)}
+          />
         ) : (
           <PickPrompt view={view} />
         )}

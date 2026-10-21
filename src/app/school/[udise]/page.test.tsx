@@ -240,6 +240,16 @@ vi.mock("@/components/VisitsTab", () => ({
   ),
 }));
 
+// The real Alumni tab fetches on mount; its own tests cover it.
+vi.mock("@/components/alumni/AlumniTab", () => ({
+  __esModule: true,
+  default: ({ schoolCode, canEdit }: { schoolCode: string; canEdit?: boolean }) => (
+    <div data-testid="alumni-tab" data-school-code={schoolCode} data-can-edit={String(canEdit)}>
+      AlumniTab
+    </div>
+  ),
+}));
+
 vi.mock("@/components/EditStudentModal", () => ({
   __esModule: true,
   default: () => null,

@@ -20,8 +20,8 @@ export default async function AlumniSchoolPage({ params }: { params: Promise<{ c
   if (!name) notFound();
 
   const permission = await getAlumniPermission(email);
-  const allowed =
-    !!permission && getFeatureAccess(permission, "alumni").canView && (await reachesSchool(permission, code));
+  const access = permission ? getFeatureAccess(permission, "alumni") : null;
+  const allowed = !!permission && !!access?.canView && (await reachesSchool(permission, code));
   if (!allowed) {
     return (
       <AlumniShell title="Alumni" email={email} back>
@@ -32,7 +32,7 @@ export default async function AlumniSchoolPage({ params }: { params: Promise<{ c
 
   return (
     <AlumniShell title={`${name} · Alumni`} email={email} back>
-      <AlumniTab schoolCode={code} />
+      <AlumniTab schoolCode={code} canEdit={access?.canEdit ?? false} />
     </AlumniShell>
   );
 }

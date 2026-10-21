@@ -3,8 +3,8 @@ import { getDbServiceConfig } from "@/lib/db-service-config";
 import { needsConfirm, type Issue } from "./checks";
 import { CODE_COLUMNS, type EntryContext } from "./entry";
 import { ALUMNI_FIELDS, type Values } from "./fields";
-import { lookupCodes } from "./reference";
-import { checkContext, reviewValues, visibleValues } from "./validation";
+import { lookupCodes, type CodeLookup } from "./reference";
+import { checkContext, reviewSave } from "./validation";
 
 // Saving one student's alumni answers. Nothing from the browser is trusted
 // except the answers, and those are re-checked here; who the student is,
@@ -22,19 +22,19 @@ export type SaveResult =
 
 const FIELD = new Map(ALUMNI_FIELDS.map((f) => [f.column, f]));
 
-type CodeInfo = Awaited<ReturnType<typeof lookupCodes>>;
 type Failure = Extract<SaveResult, { ok: false }>;
+type CodeColumn = keyof typeof CODE_COLUMNS;
 
-/** College/branch codes must exist; their ids are what the alumni table stores. */
-async function resolveCodes(values: Values, fieldErrors: Record<string, string>): Promise<CodeInfo> {
-  const codeCols = Object.keys(CODE_COLUMNS) as (keyof typeof CODE_COLUMNS)[];
+/** College/branch codes must exist, as that kind; their ids are what the alumni table stores. */
+async function resolveCodes(values: Values, fieldErrors: Record<string, string>): Promise<CodeLookup> {
+  const codeCols = Object.keys(CODE_COLUMNS) as CodeColumn[];
   const filled = codeCols.filter((c) => values[c]);
   const codes = await lookupCodes(
     filled.filter((c) => CODE_COLUMNS[c] === "college").map((c) => values[c]),
     filled.filter((c) => CODE_COLUMNS[c] === "branch").map((c) => values[c]),
   );
   for (const col of filled) {
-    if (!codes.has(values[col])) fieldErrors[col] = "Unknown code — pick from the search list.";
+    if (!codes[CODE_COLUMNS[col]].has(values[col])) fieldErrors[col] = "Unknown code — pick from the search list.";
   }
   return codes;
 }
@@ -48,12 +48,12 @@ function nothingToSave(context: EntryContext, notCleared: string[]): Failure {
 }
 
 /** DB Service payload: the form's (full) field names; college/branch as ids, years/numbers as numbers. */
-function toDbFields(changed: string[], values: Values, codes: CodeInfo): Record<string, string | number> {
+function toDbFields(changed: string[], values: Values, codes: CodeLookup): Record<string, string | number> {
   const fields: Record<string, string | number> = {};
   for (const col of changed) {
     const type = FIELD.get(col)!.type;
     const v = values[col];
-    if (col in CODE_COLUMNS) fields[col] = Number(codes.get(v)!.id);
+    if (col in CODE_COLUMNS) fields[col] = Number(codes[CODE_COLUMNS[col as CodeColumn]].get(v)!.id);
     else fields[col] = type === "year" || type === "number" ? Number(v) : v;
   }
   return fields;
@@ -89,19 +89,29 @@ async function sendToDbService(
   return { ok: true, alumniId: String(saved.id), action: existing ? "updated" : "inserted" };
 }
 
+/** Someone else saved this alumnus after the form loaded it. */
+const CONFLICT: Failure = {
+  ok: false,
+  status: 409,
+  error: "Someone else saved changes to this alumnus after you opened it. Reload to see them, then make your changes again.",
+};
+
 /**
  * `context` must be the student's entry context (already loaded by the route
  * to check school access). `confirmed`: ids of the unusual-answer warnings the
  * person has accepted; any other warning stops the save and is sent back.
+ * `version`: the record's version when the form loaded it (edits must send it).
  */
 export async function saveAlumni(
   context: EntryContext,
   submitted: Values,
   confirmed: string[] = [],
+  version?: string,
 ): Promise<SaveResult> {
+  if (context.kind === "edit" && version !== context.version) return CONFLICT;
   const previous = context.alumni;
-  const values = visibleValues(submitted);
-  const review = reviewValues(values, previous, checkContext(context.profile));
+  const review = reviewSave(submitted, previous, checkContext(context.profile));
+  const { values } = review;
   const codes = await resolveCodes(values, review.errors);
   if (Object.keys(review.errors).length) {
     return { ok: false, status: 400, error: "Some fields need fixing.", fieldErrors: review.errors };

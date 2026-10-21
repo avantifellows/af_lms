@@ -41,5 +41,5 @@ export async function POST(request: Request, { params }: Params) {
   if (body instanceof NextResponse) return body;
   const context = await getAlumnusContext(alumniId);
   if (!context) return notFound();
-  return respondWithSave(context, body.values, body.confirmed);
+  return respondWithSave(context, body);
 }
