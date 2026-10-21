@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { CENTRE_ASSIGNMENTS_SUBQUERY } from "@/lib/centres";
 import { query } from "@/lib/db";
 import { isUserRole, type UserRole } from "@/lib/permissions";
-import { HOLISTIC_MENTORSHIP_PROGRAM_IDS, isPmuRole } from "@/lib/constants";
+import { HOLISTIC_MENTORSHIP_PROGRAM_IDS, isAlumniRole, isPmuRole } from "@/lib/constants";
 import { requireAdminApiAccess } from "../route-helpers";
-import { isSeatedEmail, PMU_SEATED_ERROR, resolvePmuRow, type PmuRow } from "./pmu-rows";
+import { ALUMNI_SEATED_ERROR, isSeatedEmail, PMU_SEATED_ERROR, resolvePmuRow, type PmuRow } from "./pmu-rows";
 
 // Disable Next.js caching for this route
 export const dynamic = "force-dynamic";
@@ -124,6 +124,9 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: PMU_SEATED_ERROR }, { status: 409 });
       }
       pmuRow = resolved.row;
+    }
+    if (isAlumniRole(role) && (await isSeatedEmail(body.email))) {
+      return NextResponse.json({ error: ALUMNI_SEATED_ERROR }, { status: 409 });
     }
 
     const result = await query<{ id: number }>(

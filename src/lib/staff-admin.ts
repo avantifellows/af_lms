@@ -19,7 +19,7 @@ import {
   eraseDraftHolisticNotes,
   lockHolisticMentorMappingMutation,
 } from "./holistic-mappings";
-import { isPmuRole, PMU_ROLES } from "./constants";
+import { isAlumniRole, isPmuRole, PMU_ROLES } from "./constants";
 import {
   type AdminGuardResult,
   type AdminSession,
@@ -752,6 +752,15 @@ async function rejectIneligibleSeatUser(
       ok: false,
       status: 409,
       error: "PMU users can't hold centre seats — their access is pinned to JNV NVS.",
+    };
+  }
+  // Alumni Managers ignore seats (ADR 0008); seating one would clear their
+  // school_codes and leave them with no schools at all.
+  if (rows.some((r) => isAlumniRole(r.role))) {
+    return {
+      ok: false,
+      status: 409,
+      error: "Alumni Managers can't hold centre seats — their access is set in Admin → Users.",
     };
   }
   if (rows.some((r) => !r.email_only && r.level === 2)) {

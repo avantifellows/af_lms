@@ -32,7 +32,7 @@ vi.mock("@/lib/db", () => ({
 import { getServerSession } from "next-auth";
 import { getUserPermission, type UserPermission } from "@/lib/permissions";
 import { DELETE, PATCH } from "./route";
-import { PMU_SEATED_ERROR } from "../pmu-rows";
+import { ALUMNI_SEATED_ERROR, PMU_SEATED_ERROR } from "../pmu-rows";
 import {
   jsonRequest,
   routeParams,
@@ -551,6 +551,28 @@ describe("PATCH /api/admin/users/[id] — PMU roles", () => {
     expect(res.status).toBe(409);
     expect(await res.json()).toEqual({ error: PMU_SEATED_ERROR });
     expect(updateParams()).toBeUndefined();
+  });
+
+  it("returns ALUMNI_SEATED_ERROR when a seated user is made an alumni_manager", async () => {
+    mockDb({ seats: [{ one: 1, user_id: 70 }] });
+    const res = await patch({ role: "alumni_manager", level: 1, program_ids: [1] });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: ALUMNI_SEATED_ERROR });
+    expect(updateParams()).toBeUndefined();
+  });
+
+  it("returns ALUMNI_SEATED_ERROR when a seated alumni_manager's row is edited", async () => {
+    mockDb({ seats: [{ one: 1, user_id: 70 }], stored: { ...MULTI_SCHOOL_PM, role: "alumni_manager" } });
+    const res = await patch({ read_only: true });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: ALUMNI_SEATED_ERROR });
+  });
+
+  it("lets an unseated user become an alumni_manager", async () => {
+    mockDb();
+    const res = await patch({ role: "alumni_manager", level: 1, school_codes: ["JNV001"], program_ids: [1] });
+    expect(res.status).toBe(200);
+    expect(updateParams()?.[1]).toBe("alumni_manager");
   });
 
   it("returns 409 when the target is seated through an email-only permission link", async () => {
