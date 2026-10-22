@@ -2,8 +2,10 @@ import { test, expect, signInAs } from "../fixtures/auth";
 import type { Locator, Page } from "@playwright/test";
 import { getTestPool } from "../helpers/db";
 import {
+  ACTION_ITEM_MENTEES,
   BLENDED_MENTOR_A,
   CONTACTS,
+  EARLIER_ACTION_ITEMS,
   IRA_HISTORY,
   MENTEES,
   OTHER_STUDENTS,
@@ -15,7 +17,8 @@ import {
 // Attempt inserted later), Conversation 20 days ago with notes, Action Items,
 // two Mentor Flags and two photo rows; WhatsApp differs from her phone; no
 // links. Meera — Profile Doc only. Rohan — both links, WhatsApp equal to his
-// phone, a failed draft. Kabir — nothing logged, a ready draft.
+// phone, a failed draft. Kabir — nothing logged, a ready draft. Devika (D1,
+// Mentor C) — an open Action Item stored with a due date, which never shows.
 const BLENDED_ADMIN = { name: "Synthetic Blended Admin", email: "e2e-blended-admin@test.local" };
 
 const VIEWPORTS = [
@@ -79,43 +82,61 @@ for (const { label, viewport } of VIEWPORTS) {
       await page.getByRole("link", { name: new RegExp(fullName(ira)) }).first().click();
 
       await expect(page).toHaveURL(new RegExp(`${detailPath(ira)}$`));
-      await expect(page.getByRole("heading", { name: fullName(ira) })).toBeVisible();
+      await expect(page.getByRole("heading", { level: 1, name: fullName(ira) })).toBeVisible();
       await expect(page.getByText("Grade 12")).toBeVisible();
       await expect(page.getByText("STP Voucher Delhi")).toBeVisible();
       await expect(page.getByText("Female")).toBeVisible();
+      await expect(page.getByRole("link", { name: "Log conversation" })).toHaveAttribute(
+        "href",
+        `${detailPath(ira)}/log`
+      );
+
+      await page.getByRole("link", { name: "Back to students" }).click();
+      await expect(page).toHaveURL(/\/blended-learning$/);
     });
 
     test("history is newest first, Conversations and Attempts interleaved", async ({ page }) => {
       await page.goto(detailPath(ira));
 
+      // Two Conversations; the Attempts are listed but not counted.
+      await expect(
+        page.getByRole("region", { name: "History" }).getByRole("heading", { level: 2, name: "Conversations (2)" })
+      ).toBeVisible();
       await expect(historyEntries(page)).toHaveText([
         new RegExp(attempt2.note),
         new RegExp(attempt10.note),
         new RegExp(conversation10.summary),
         new RegExp(conversation20.summary),
       ]);
-      await expect(entryWith(page, attempt2.note).getByText("Attempt", { exact: true })).toBeVisible();
+      const attempt = entryWith(page, attempt2.note);
+      await expect(attempt.getByText("Attempt", { exact: true })).toBeVisible();
+      await expect(attempt.getByText("Not reachable", { exact: true })).toBeVisible();
     });
 
     test("a Conversation shows its details, Action Items, Mentor Flags and photos", async ({ page }) => {
       await page.goto(detailPath(ira));
       const entry = entryWith(page, conversation20.summary);
 
-      await expect(entry.getByText("In person")).toBeVisible();
-      await expect(entry.getByText("Parent or sibling")).toBeVisible();
-      await expect(entry.getByText("40 min")).toBeVisible();
+      await expect(entry.getByText("In person · 40 min · Spoke with parent or sibling")).toBeVisible();
+      await expect(entry.getByRole("heading", { level: 4 })).toHaveText([
+        "Summary",
+        "Action items",
+        "Photos",
+        "Flag note for Shalini",
+      ]);
 
+      // Owner pill, text, then Open or Done.
       const actionItems = entry.getByRole("list", { name: "Action Items" }).getByRole("listitem");
       await expect(actionItems).toHaveText([
-        new RegExp(`${conversation20.actionItems.done}.*Done`),
-        new RegExp(`${conversation20.actionItems.open}.*Open`),
+        `Mentor${conversation20.actionItems.done}Done`,
+        `Mentor${conversation20.actionItems.open}Open`,
       ]);
 
-      const flags = entry.getByRole("list", { name: "Mentor Flags" }).getByRole("listitem");
-      await expect(flags).toHaveText([
-        new RegExp(`Emotional Well-being.*${conversation20.flags.wellbeing}`),
-        /^Physics Teacher$/,
-      ]);
+      // Flags are chips in the entry's header; the commented one has its note.
+      const flags = entry.locator("header").getByRole("list", { name: "Mentor Flags" }).getByRole("listitem");
+      await expect(flags).toHaveText(["Flagged to Shalini", "Flagged to Physics teacher"]);
+      await expect(entry.getByText(conversation20.flags.wellbeing, { exact: true })).toBeVisible();
+      await expect(entry.getByText("Flag note for the Physics teacher")).toHaveCount(0);
 
       const photos = entry.getByRole("img", { name: /Conversation photo/ });
       await expect(photos).toHaveCount(conversation20.photoCount);
@@ -158,31 +179,30 @@ for (const { label, viewport } of VIEWPORTS) {
     });
 
     test("links show only when present", async ({ page }) => {
+      const profileDoc = (p: Page) => p.getByRole("link", { name: "Profile doc (opens in a new tab)" });
+      const screener = (p: Page) => p.getByRole("link", { name: "Screener form (opens in a new tab)" });
+
       await page.goto(detailPath(rohan));
-      await expect(page.getByRole("link", { name: "Profile Doc" })).toHaveAttribute(
-        "href",
-        "https://docs.google.com/document/d/e2e-recent"
-      );
-      await expect(page.getByRole("link", { name: "Screener Link" })).toHaveAttribute(
-        "href",
-        "https://forms.gle/e2e-recent"
-      );
+      await expect(profileDoc(page)).toHaveAttribute("href", "https://docs.google.com/document/d/e2e-recent");
+      await expect(profileDoc(page)).toHaveAttribute("target", "_blank");
+      await expect(screener(page)).toHaveAttribute("href", "https://forms.gle/e2e-recent");
 
       await page.goto(detailPath(meera));
-      await expect(page.getByRole("link", { name: "Profile Doc" })).toBeVisible();
-      await expect(page.getByRole("link", { name: "Screener Link" })).toHaveCount(0);
+      await expect(profileDoc(page)).toBeVisible();
+      await expect(screener(page)).toHaveCount(0);
 
       await page.goto(detailPath(ira));
       await expect(page.getByRole("heading", { name: fullName(ira) })).toBeVisible();
-      await expect(page.getByRole("link", { name: "Profile Doc" })).toHaveCount(0);
-      await expect(page.getByRole("link", { name: "Screener Link" })).toHaveCount(0);
+      await expect(profileDoc(page)).toHaveCount(0);
+      await expect(screener(page)).toHaveCount(0);
     });
 
     test("an open Conversation Draft shows its state", async ({ page }) => {
       await page.goto(detailPath(kabir));
       const kabirDraft = page.getByRole("region", { name: "Conversation Draft" });
       await expect(kabirDraft.getByText("Draft ready to review")).toBeVisible();
-      await expect(page.getByText("No Conversations or Attempts yet.")).toBeVisible();
+      await expect(page.getByText("No conversations yet")).toBeVisible();
+      await expect(page.getByRole("heading", { level: 2, name: "Conversations (0)" })).toBeVisible();
 
       await page.goto(detailPath(rohan));
       await expect(page.getByRole("region", { name: "Conversation Draft" }).getByText("Drafting failed")).toBeVisible();
@@ -221,5 +241,15 @@ test.describe("Blended Learning Mentee detail — admin", () => {
 
     const previousYear = await page.goto(detailPath(OTHER_STUDENTS.previousYear));
     expect(previousYear?.status()).toBe(404);
+  });
+
+  test("an Action Item stored with a due date shows its owner but never the due date", async ({ page }) => {
+    await signInAs(page, BLENDED_ADMIN);
+    await page.goto(detailPath(ACTION_ITEM_MENTEES.desktop));
+    // The Action Item spec may tick it done meanwhile; either way it is listed.
+    const item = page.getByRole("listitem").filter({ hasText: EARLIER_ACTION_ITEMS.toTick.text }).first();
+    await expect(item).toBeVisible();
+    await expect(item.getByText("Student", { exact: true })).toBeVisible();
+    await expect(page.getByText(/Due \d/)).toHaveCount(0);
   });
 });

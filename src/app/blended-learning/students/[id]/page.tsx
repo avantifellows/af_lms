@@ -1,124 +1,228 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import type { ReactNode } from "react";
+import { ArrowUpRight, ClipboardList, FileText, type LucideIcon } from "lucide-react";
 
 import { Badge, Card } from "@/components/ui";
 import { canBlendedLearning } from "@/lib/blended-learning-access";
 import { requireBlendedLearningPage, requireNumericPageId } from "@/lib/blended-learning-guard";
 import { getDraftStatus } from "@/lib/blended-learning-drafts";
-import { describeSession, formatCalendarDate } from "@/lib/blended-learning-format";
+import { formatCalendarDate } from "@/lib/blended-learning-format";
 import {
   getMenteeDetail,
+  type ActionItem,
   type HistoryEntry,
   type MenteeDetail,
+  type MentorFlag,
 } from "@/lib/blended-learning-mentee-detail";
 
 import { BlendedLearningHeader } from "../../BlendedLearningHeader";
-import { ActionItemMeta } from "./ActionItemMeta";
+import { ActionItemMeta, OwnerPill } from "./ActionItemMeta";
 import { ConversationNotes } from "./ConversationNotes";
 import { ConversationPhotos } from "./ConversationPhotos";
 import { ConversationRecording } from "./ConversationRecording";
 import { DraftStatus } from "./DraftStatus";
-import { FLAG_RECIPIENT } from "./flagRecipients";
+import { FLAG_HISTORY } from "./flagRecipients";
 
-// One Mentee: profile, contact, links, any open Conversation Draft (polled
-// while drafting) and the newest-first history. Notes and photos load on
-// demand from their API routes.
+// One Mentee: name, profile line, contact, links, any open Conversation Draft
+// (polled while drafting) and the newest-first history, laid out as in the
+// mockup. Notes and photos load on demand from their API routes.
 // Users who can log (not read-only) get the entry point to the log page and
 // the draft's Retry and Discard controls; Open Action Items are listed for
 // everyone, and ticked done only from there. Only Blended Learning Admins
 // (read-only too) can play a saved Call Recording or read its transcript.
 
-function Profile({ mentee }: { mentee: MenteeDetail }) {
-  const meta = [mentee.grade === null ? null : `Grade ${mentee.grade}`, mentee.programName, mentee.gender].filter(
+type Conversation = Extract<HistoryEntry, { kind: "conversation" }>;
+
+const MODE: Record<Conversation["mode"], string> = { call: "Call", in_person: "In person" };
+const SPOKE_WITH: Record<Conversation["spokeWith"], string> = {
+  student: "student",
+  parent_or_sibling: "parent or sibling",
+  both: "student and parent",
+};
+
+// "Call · 20 min · Spoke with student", as the mockup's entry header.
+function conversationMeta(entry: Conversation): string {
+  return `${MODE[entry.mode]} · ${entry.durationMinutes} min · Spoke with ${SPOKE_WITH[entry.spokeWith]}`;
+}
+
+function profileMeta(mentee: MenteeDetail): string[] {
+  return [mentee.grade === null ? null : `Grade ${mentee.grade}`, mentee.programName, mentee.gender].filter(
     (part): part is string => Boolean(part)
-  );
-  const linkClass =
-    "flex min-h-11 items-center text-sm font-bold text-accent hover:text-accent-hover underline-offset-2 hover:underline";
-  return (
-    <Card elevation="sm" className="space-y-4 p-4 sm:p-6">
-      <div className="min-w-0">
-        <h2 className="break-words text-xl font-bold text-text-primary">{mentee.name}</h2>
-        <p className="mt-1 flex flex-wrap gap-x-1.5 text-sm text-text-secondary">
-          {meta.map((part, index) => (
-            <span key={part} className="flex gap-x-1.5">
-              {index > 0 && <span aria-hidden="true">·</span>}
-              <span>{part}</span>
-            </span>
-          ))}
-        </p>
-      </div>
-      <section aria-label="Contact" className="space-y-1">
-        {mentee.phone ? (
-          <a href={`tel:${mentee.phone}`} className={`${linkClass} font-mono`}>
-            {mentee.phone}
-          </a>
-        ) : (
-          <p className="text-sm text-text-muted">No contact number</p>
-        )}
-        {mentee.whatsappPhone && (
-          <p className="font-mono text-sm text-text-secondary">WhatsApp {mentee.whatsappPhone}</p>
-        )}
-      </section>
-      {(mentee.profileDocUrl || mentee.screenerUrl) && (
-        <div className="flex flex-wrap gap-x-6">
-          {mentee.profileDocUrl && (
-            <a href={mentee.profileDocUrl} target="_blank" rel="noopener noreferrer" className={linkClass}>
-              Profile Doc
-            </a>
-          )}
-          {mentee.screenerUrl && (
-            <a href={mentee.screenerUrl} target="_blank" rel="noopener noreferrer" className={linkClass}>
-              Screener Link
-            </a>
-          )}
-        </div>
-      )}
-    </Card>
   );
 }
 
-function ConversationEntry({
-  entry,
-  canPlayRecording,
-}: {
-  entry: Extract<HistoryEntry, { kind: "conversation" }>;
-  canPlayRecording: boolean;
-}) {
+function MetaLine({ parts }: { parts: string[] }) {
+  if (parts.length === 0) return null;
+  return (
+    <p className="mt-1 flex flex-wrap gap-x-1.5 text-sm text-text-secondary sm:text-base">
+      {parts.map((part, index) => (
+        <span key={part} className="flex gap-x-1.5">
+          {index > 0 && <span aria-hidden="true">·</span>}
+          <span>{part}</span>
+        </span>
+      ))}
+    </p>
+  );
+}
+
+// The Student's own numbers, as a smaller line under the profile line.
+function ContactLine({ phone, whatsappPhone }: { phone: string | null; whatsappPhone: string | null }) {
+  return (
+    <section aria-label="Contact" className="flex flex-wrap items-center gap-x-4 text-sm text-text-secondary">
+      {phone ? (
+        <a
+          href={`tel:${phone}`}
+          className="inline-flex min-h-11 items-center font-mono text-text-primary underline-offset-4 hover:text-accent hover:underline sm:min-h-8"
+        >
+          {phone}
+        </a>
+      ) : (
+        <p className="py-1.5">No contact number</p>
+      )}
+      {whatsappPhone && <p className="font-mono">WhatsApp {whatsappPhone}</p>}
+    </section>
+  );
+}
+
+function ExternalLink({ href, icon: Icon, children }: { href: string; icon: LucideIcon; children: string }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label={`${children} (opens in a new tab)`}
+      className="inline-flex min-h-11 items-center gap-1.5 text-sm font-semibold text-text-primary underline underline-offset-4 hover:text-accent"
+    >
+      <Icon aria-hidden="true" className="h-4 w-4 shrink-0" />
+      {children}
+      <ArrowUpRight aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
+    </a>
+  );
+}
+
+function ProfileLinks({ mentee }: { mentee: MenteeDetail }) {
+  if (!mentee.profileDocUrl && !mentee.screenerUrl) return null;
+  return (
+    <div className="flex flex-wrap gap-x-6">
+      {mentee.profileDocUrl && (
+        <ExternalLink href={mentee.profileDocUrl} icon={FileText}>
+          Profile doc
+        </ExternalLink>
+      )}
+      {mentee.screenerUrl && (
+        <ExternalLink href={mentee.screenerUrl} icon={ClipboardList}>
+          Screener form
+        </ExternalLink>
+      )}
+    </div>
+  );
+}
+
+// The page heading: name, profile line, contact and links, with the way to
+// log beside it (below it on a phone).
+function Profile({ mentee, canLog }: { mentee: MenteeDetail; canLog: boolean }) {
+  return (
+    <div className="flex flex-wrap items-end justify-between gap-4">
+      <div className="min-w-0">
+        <h1 className="break-words text-2xl font-bold text-text-primary sm:text-3xl">{mentee.name}</h1>
+        <MetaLine parts={profileMeta(mentee)} />
+        <ContactLine phone={mentee.phone} whatsappPhone={mentee.whatsappPhone} />
+        <ProfileLinks mentee={mentee} />
+      </div>
+      {canLog && (
+        <Link
+          href={`/blended-learning/students/${mentee.studentId}/log`}
+          className="inline-flex min-h-11 items-center justify-center rounded-lg bg-accent px-5 text-sm font-bold text-text-on-accent shadow-sm hover:bg-accent-hover"
+        >
+          Log conversation
+        </Link>
+      )}
+    </div>
+  );
+}
+
+// A labelled block inside a history entry: SUMMARY, ACTION ITEMS and so on.
+function EntrySection({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="space-y-1.5">
+      <h4 className="text-xs font-bold uppercase tracking-wide text-text-secondary">{label}</h4>
+      {children}
+    </div>
+  );
+}
+
+function EntryHeader({ date, meta, chips }: { date: string; meta: string; chips: ReactNode }) {
+  return (
+    <header className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
+      <div className="min-w-0">
+        <h3 className="text-base font-bold text-text-primary sm:text-lg">{formatCalendarDate(date)}</h3>
+        <p className="text-sm text-text-secondary">{meta}</p>
+      </div>
+      {chips}
+    </header>
+  );
+}
+
+function FlagChips({ flags }: { flags: MentorFlag[] }) {
+  if (flags.length === 0) return null;
+  return (
+    <ul aria-label="Mentor Flags" className="flex flex-wrap gap-1.5">
+      {flags.map((flag) => (
+        <li key={flag.recipient}>
+          <Badge variant={flag.recipient === "emotional_wellbeing" ? "danger" : "warning"}>
+            {FLAG_HISTORY[flag.recipient].chip}
+          </Badge>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function ActionItemRow({ item }: { item: ActionItem }) {
+  const done = item.status === "done";
+  return (
+    <li className="grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-2.5 gap-y-0.5 text-sm sm:grid-cols-[auto_minmax(0,1fr)_auto]">
+      <OwnerPill owner={item.owner} />
+      <span className={`break-words ${done ? "text-text-muted line-through" : "text-text-primary"}`}>{item.text}</span>
+      <span className={`col-start-2 text-xs font-bold sm:col-start-auto ${done ? "text-success" : "text-accent"}`}>
+        {done ? "Done" : "Open"}
+      </span>
+    </li>
+  );
+}
+
+function ActionItems({ items }: { items: ActionItem[] }) {
+  return (
+    <EntrySection label="Action items">
+      {items.length === 0 ? (
+        <p className="text-sm text-text-secondary">None agreed.</p>
+      ) : (
+        <ul aria-label="Action Items" className="space-y-2">
+          {items.map((item) => (
+            <ActionItemRow key={item.id} item={item} />
+          ))}
+        </ul>
+      )}
+    </EntrySection>
+  );
+}
+
+// Each flag's comment, under "Flag note for …". Flags without one show only
+// their header chip.
+function FlagNotes({ flags }: { flags: MentorFlag[] }) {
+  return flags
+    .filter((flag) => flag.comment)
+    .map((flag) => (
+      <EntrySection key={flag.recipient} label={FLAG_HISTORY[flag.recipient].noteLabel}>
+        <p className="whitespace-pre-line break-words text-sm text-text-primary">{flag.comment}</p>
+      </EntrySection>
+    ));
+}
+
+function ConversationMedia({ entry, canPlayRecording }: { entry: Conversation; canPlayRecording: boolean }) {
   return (
     <>
-      <p className="text-xs text-text-secondary">
-        {describeSession(entry)}
-      </p>
-      <p className="whitespace-pre-line break-words text-sm text-text-primary">{entry.summary}</p>
-      {entry.actionItems.length > 0 && (
-        <ul aria-label="Action Items" className="space-y-1.5">
-          {entry.actionItems.map((item) => (
-            <li key={item.id} className="flex items-start justify-between gap-3 text-sm">
-              <span className="min-w-0 break-words">
-                <span className={item.status === "done" ? "text-text-muted line-through" : ""}>{item.text}</span>
-                <ActionItemMeta owner={item.owner} dueOn={item.dueOn} />
-              </span>
-              <Badge variant={item.status === "done" ? "success" : "warning"} className="shrink-0">
-                {item.status === "done" ? "Done" : "Open"}
-              </Badge>
-            </li>
-          ))}
-        </ul>
-      )}
-      {entry.flags.length > 0 && (
-        <ul aria-label="Mentor Flags" className="flex flex-wrap gap-2">
-          {entry.flags.map((flag) => (
-            <li
-              key={flag.recipient}
-              className="max-w-full rounded-lg bg-danger-bg px-2.5 py-1 text-xs text-danger break-words"
-            >
-              <span className="font-bold">{FLAG_RECIPIENT[flag.recipient]}</span>
-              {flag.comment && <span className="text-text-primary"> · {flag.comment}</span>}
-            </li>
-          ))}
-        </ul>
-      )}
-      {entry.photoCount > 0 && <ConversationPhotos conversationId={entry.id} count={entry.photoCount} />}
       {entry.hasNotes && <ConversationNotes conversationId={entry.id} />}
       {canPlayRecording && (entry.hasRecording || entry.hasTranscript) && (
         <ConversationRecording
@@ -131,16 +235,51 @@ function ConversationEntry({
   );
 }
 
+function ConversationEntry({ entry, canPlayRecording }: { entry: Conversation; canPlayRecording: boolean }) {
+  return (
+    <>
+      <EntryHeader date={entry.occurredOn} meta={conversationMeta(entry)} chips={<FlagChips flags={entry.flags} />} />
+      <div className="mt-4 space-y-4">
+        <EntrySection label="Summary">
+          <p className="whitespace-pre-line break-words text-sm text-text-primary">{entry.summary}</p>
+        </EntrySection>
+        <ActionItems items={entry.actionItems} />
+        {entry.photoCount > 0 && (
+          <EntrySection label="Photos">
+            <ConversationPhotos conversationId={entry.id} count={entry.photoCount} />
+          </EntrySection>
+        )}
+        <FlagNotes flags={entry.flags} />
+      </div>
+      <div className="mt-2">
+        <ConversationMedia entry={entry} canPlayRecording={canPlayRecording} />
+      </div>
+    </>
+  );
+}
+
+function AttemptEntry({ entry }: { entry: Extract<HistoryEntry, { kind: "attempt" }> }) {
+  return (
+    <>
+      <EntryHeader date={entry.occurredOn} meta="Attempt" chips={<Badge variant="danger">Not reachable</Badge>} />
+      {entry.note && <p className="mt-2 break-words text-sm text-text-primary">{entry.note}</p>}
+    </>
+  );
+}
+
 function OpenActionItems({ items }: { items: MenteeDetail["openActionItems"] }) {
   return (
     <section aria-label="Open Action Items">
-      <Card elevation="sm" className="space-y-2 p-4 sm:px-6">
-        <h3 className="text-sm font-bold uppercase tracking-wide text-text-secondary">Open Action Items</h3>
+      <Card elevation="sm" className="space-y-3 p-4 sm:px-6">
+        <h2 className="text-xs font-bold uppercase tracking-wide text-text-secondary">Open action items</h2>
         <ul className="space-y-2">
           {items.map((item) => (
-            <li key={item.id} className="break-words text-sm text-text-primary">
-              {item.text}
-              <ActionItemMeta owner={item.owner} dueOn={item.dueOn} agreedOn={item.agreedOn} />
+            <li key={item.id} className="flex items-baseline gap-2.5 text-sm text-text-primary">
+              <OwnerPill owner={item.owner} />
+              <span className="min-w-0 break-words">
+                {item.text}
+                <ActionItemMeta agreedOn={item.agreedOn} />
+              </span>
             </li>
           ))}
         </ul>
@@ -149,27 +288,37 @@ function OpenActionItems({ items }: { items: MenteeDetail["openActionItems"] }) 
   );
 }
 
-function History({ history, canPlayRecording }: { history: HistoryEntry[]; canPlayRecording: boolean }) {
+function EmptyHistory({ canLog }: { canLog: boolean }) {
+  return (
+    <Card elevation="sm" className="p-6 text-center sm:p-8">
+      <p className="text-sm font-bold text-text-primary">No conversations yet</p>
+      {canLog && <p className="mt-1 text-sm text-text-secondary">Log the first one to start this student&apos;s history.</p>}
+    </Card>
+  );
+}
+
+function History({
+  history,
+  canPlayRecording,
+  canLog,
+}: {
+  history: HistoryEntry[];
+  canPlayRecording: boolean;
+  canLog: boolean;
+}) {
+  const conversations = history.filter((entry) => entry.kind === "conversation").length;
   return (
     <section aria-label="History" className="space-y-3">
-      <h3 className="text-sm font-bold uppercase tracking-wide text-text-secondary">History</h3>
+      <h2 className="text-lg font-bold text-text-primary sm:text-xl">Conversations ({conversations})</h2>
       {history.length === 0 ? (
-        <Card elevation="sm" className="p-4 sm:p-6">
-          <p className="text-sm text-text-secondary">No Conversations or Attempts yet.</p>
-        </Card>
+        <EmptyHistory canLog={canLog} />
       ) : (
         <ol className="space-y-3">
           {history.map((entry) => (
             <li key={entry.id}>
-              <article className="space-y-2 rounded-lg border border-border bg-bg-card p-4 shadow-sm sm:px-6">
-                <header className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm font-bold text-text-primary">{formatCalendarDate(entry.occurredOn)}</span>
-                  <Badge variant={entry.kind === "attempt" ? "warning" : "default"}>
-                    {entry.kind === "attempt" ? "Attempt" : "Conversation"}
-                  </Badge>
-                </header>
+              <article className="rounded-lg border border-border bg-bg-card p-4 shadow-sm sm:p-6">
                 {entry.kind === "attempt" ? (
-                  <p className="break-words text-sm text-text-secondary">{entry.note ?? "No note"}</p>
+                  <AttemptEntry entry={entry} />
                 ) : (
                   <ConversationEntry entry={entry} canPlayRecording={canPlayRecording} />
                 )}
@@ -187,26 +336,19 @@ export default async function MenteeDetailPage({ params }: { params: Promise<{ i
   const mentee = await getMenteeDetail(access, Number(await requireNumericPageId(params)));
   if (!mentee) notFound();
   const draftStatus = mentee.openDraft ? await getDraftStatus(access, mentee.openDraft.id) : null;
+  const canLog = canBlendedLearning(access, "log");
 
   return (
     <>
       <BlendedLearningHeader access={access} />
-      <main className="mx-auto max-w-3xl space-y-4 px-4 py-4 sm:px-6 sm:py-6">
+      <main className="mx-auto max-w-3xl space-y-6 px-4 py-4 sm:px-6 sm:py-6">
         <Link
           href="/blended-learning"
-          className="-ml-1 inline-flex min-h-11 items-center gap-1 text-sm font-bold text-text-secondary hover:text-text-primary"
+          className="-ml-1 inline-flex min-h-11 items-center gap-1 text-sm text-text-secondary underline underline-offset-4 hover:text-text-primary"
         >
-          <span aria-hidden="true">←</span> Mentees
+          <span aria-hidden="true">←</span> Back to students
         </Link>
-        <Profile mentee={mentee} />
-        {canBlendedLearning(access, "log") && (
-          <Link
-            href={`/blended-learning/students/${mentee.studentId}/log`}
-            className="flex min-h-11 w-full items-center justify-center rounded-lg bg-accent px-4 text-sm font-bold text-text-on-accent shadow-sm hover:bg-accent-hover sm:inline-flex sm:w-auto"
-          >
-            Log a Conversation or Attempt
-          </Link>
-        )}
+        <Profile mentee={mentee} canLog={canLog} />
         {mentee.openDraft && (
           <DraftStatus
             key={mentee.openDraft.id}
@@ -214,11 +356,15 @@ export default async function MenteeDetailPage({ params }: { params: Promise<{ i
             initialState={mentee.openDraft.state}
             initialRetryOffered={draftStatus?.retryOffered ?? false}
             canManage={canBlendedLearning(access, "manage_draft")}
-            reviewHref={canBlendedLearning(access, "log") ? `/blended-learning/students/${mentee.studentId}/log` : null}
+            reviewHref={canLog ? `/blended-learning/students/${mentee.studentId}/log` : null}
           />
         )}
         {mentee.openActionItems.length > 0 && <OpenActionItems items={mentee.openActionItems} />}
-        <History history={mentee.history} canPlayRecording={canBlendedLearning(access, "play_recording")} />
+        <History
+          history={mentee.history}
+          canPlayRecording={canBlendedLearning(access, "play_recording")}
+          canLog={canLog}
+        />
       </main>
     </>
   );

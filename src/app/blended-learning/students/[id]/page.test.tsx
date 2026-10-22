@@ -122,7 +122,7 @@ describe("MenteeDetailPage", () => {
     expect(mockGetDraftStatus).not.toHaveBeenCalled();
   });
 
-  it("shows a Mentor the profile, contact and links, with the way to log", async () => {
+  it("shows a Mentor the name, profile line, contact and links, with the way to log", async () => {
     signedInAs(MENTOR);
     mockGetMenteeDetail.mockResolvedValue({
       ...MENTEE,
@@ -133,23 +133,31 @@ describe("MenteeDetailPage", () => {
 
     await renderPage();
 
-    expect(screen.getByRole("heading", { name: "Ira Sharma" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Ira Sharma" })).toBeInTheDocument();
     expect(screen.getByText("Grade 12")).toBeInTheDocument();
     expect(screen.getByText("STP Voucher Delhi")).toBeInTheDocument();
     expect(screen.getByText("Female")).toBeInTheDocument();
     const contact = screen.getByRole("region", { name: "Contact" });
     expect(within(contact).getByRole("link", { name: "+91 98765 43210" })).toHaveAttribute("href", "tel:+91 98765 43210");
     expect(within(contact).getByText("WhatsApp 91234 56789")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Profile Doc" })).toHaveAttribute("href", "https://docs.example/ira");
-    expect(screen.getByRole("link", { name: "Screener Link" })).toHaveAttribute("href", "https://forms.example/screener");
-    expect(screen.getByRole("link", { name: "Log a Conversation or Attempt" })).toHaveAttribute(
+    const profileDoc = screen.getByRole("link", { name: "Profile doc (opens in a new tab)" });
+    expect(profileDoc).toHaveAttribute("href", "https://docs.example/ira");
+    expect(profileDoc).toHaveAttribute("target", "_blank");
+    expect(screen.getByRole("link", { name: "Screener form (opens in a new tab)" })).toHaveAttribute(
+      "href",
+      "https://forms.example/screener"
+    );
+    expect(screen.getByRole("link", { name: "Log conversation" })).toHaveAttribute(
       "href",
       "/blended-learning/students/501/log"
     );
-    expect(screen.getByRole("link", { name: /Mentees/ })).toHaveAttribute("href", "/blended-learning");
+    expect(screen.getByRole("link", { name: "Back to students" })).toHaveAttribute("href", "/blended-learning");
+    expect(screen.queryByText(/Mentee/)).not.toBeInTheDocument();
     expect(screen.queryByTestId("draft-status")).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Open Action Items" })).not.toBeInTheDocument();
-    expect(screen.getByText("No Conversations or Attempts yet.")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Conversations (0)" })).toBeInTheDocument();
+    expect(screen.getByText("No conversations yet")).toBeInTheDocument();
+    expect(screen.getByText("Log the first one to start this student's history.")).toBeInTheDocument();
   });
 
   it("shows a sparse profile without a grade, contact number or links", async () => {
@@ -163,8 +171,8 @@ describe("MenteeDetailPage", () => {
     expect(screen.queryByText(/Grade/)).not.toBeInTheDocument();
     expect(screen.getByText("No contact number")).toBeInTheDocument();
     expect(screen.queryByText(/WhatsApp/)).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "Profile Doc" })).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Screener Link" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Profile doc/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Screener form/ })).toBeInTheDocument();
   });
 
   it("gives a Mentor an open draft they can manage and review, with its retry offer", async () => {
@@ -198,7 +206,9 @@ describe("MenteeDetailPage", () => {
       canManage: false,
       reviewHref: null,
     });
-    expect(screen.queryByRole("link", { name: "Log a Conversation or Attempt" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Log conversation" })).not.toBeInTheDocument();
+    expect(screen.getByText("No conversations yet")).toBeInTheDocument();
+    expect(screen.queryByText(/Log the first one/)).not.toBeInTheDocument();
   });
 
   it("lists Open Action Items with their owner and when they were agreed, never a due date", async () => {
@@ -213,12 +223,13 @@ describe("MenteeDetailPage", () => {
     await renderPage();
 
     const section = screen.getByRole("region", { name: "Open Action Items" });
+    expect(within(section).getByText("Student")).toBeInTheDocument();
     expect(within(section).getByText("Revise optics")).toBeInTheDocument();
-    expect(within(section).getByText("Student · From 20 Oct 2026")).toBeInTheDocument();
+    expect(within(section).getByText("From 20 Oct 2026")).toBeInTheDocument();
     expect(within(section).queryByText(/Due/)).not.toBeInTheDocument();
   });
 
-  it("shows the history newest first: Attempts with their note, Conversations with items, flags and media", async () => {
+  it("shows the history newest first: Attempts with their note, Conversations with labelled sections", async () => {
     signedInAs(MENTOR);
     mockGetMenteeDetail.mockResolvedValue({
       ...MENTEE,
@@ -248,42 +259,60 @@ describe("MenteeDetailPage", () => {
 
     await renderPage();
 
-    const entries = within(screen.getByRole("region", { name: "History" })).getAllByRole("article");
+    const history = screen.getByRole("region", { name: "History" });
+    // Only Conversations count; Attempts are still listed.
+    expect(within(history).getByRole("heading", { level: 2, name: "Conversations (1)" })).toBeInTheDocument();
+    const entries = within(history).getAllByRole("article");
     expect(entries).toHaveLength(3);
 
     const latest = within(entries[0]);
-    expect(latest.getByText("20 Oct 2026")).toBeInTheDocument();
-    expect(latest.getByText("Conversation")).toBeInTheDocument();
-    expect(latest.getByText("In person · Student and parent · 35 min")).toBeInTheDocument();
+    expect(latest.getByRole("heading", { level: 3, name: "20 Oct 2026" })).toBeInTheDocument();
+    expect(latest.getByText("In person · 35 min · Spoke with student and parent")).toBeInTheDocument();
+    expect(latest.getAllByRole("heading", { level: 4 }).map((heading) => heading.textContent)).toEqual([
+      "Summary",
+      "Action items",
+      "Photos",
+      "Flag note for Shalini",
+    ]);
     expect(latest.getByText("Planned the week.")).toBeInTheDocument();
-    const items = latest.getAllByRole("listitem").filter((item) => item.closest("ul")?.getAttribute("aria-label") === "Action Items");
-    expect(items[0]).toHaveTextContent("Revise optics");
-    expect(items[0]).toHaveTextContent("Open");
-    expect(items[1]).toHaveTextContent("Done");
+    const items = within(latest.getByRole("list", { name: "Action Items" })).getAllByRole("listitem");
+    expect(items.map((item) => item.textContent)).toEqual(["StudentRevise opticsOpen", "MentorShare notesDone"]);
+    expect(items[0]).not.toHaveTextContent(/Due/);
     expect(latest.getByText("Share notes")).toHaveClass("line-through");
-    const flags = latest.getByRole("list", { name: "Mentor Flags" });
-    expect(flags).toHaveTextContent("Emotional Well-being · Seemed anxious");
-    expect(within(flags).getByText("Physics Teacher").parentElement).toHaveTextContent(/^Physics Teacher$/);
+    // Flags are chips in the entry header; only commented flags get a note.
+    const chips = within(latest.getByRole("list", { name: "Mentor Flags" })).getAllByRole("listitem");
+    expect(chips.map((chip) => chip.textContent)).toEqual(["Flagged to Shalini", "Flagged to Physics teacher"]);
+    expect(latest.getByRole("list", { name: "Mentor Flags" }).closest("header")).not.toBeNull();
+    expect(latest.getByText("Seemed anxious")).toBeInTheDocument();
+    expect(latest.queryByText(/Flag note for the Physics teacher/)).not.toBeInTheDocument();
     expect(latest.getByText("Loading photos…")).toBeInTheDocument();
     expect(latest.getByRole("button", { name: "Show notes" })).toBeInTheDocument();
     // A Mentor never gets the Call Recording.
     expect(latest.queryByRole("region", { name: "Call Recording" })).not.toBeInTheDocument();
 
-    expect(within(entries[1]).getByText("Attempt")).toBeInTheDocument();
-    expect(within(entries[1]).getByText("No answer")).toBeInTheDocument();
-    expect(within(entries[2]).getByText("No note")).toBeInTheDocument();
+    const attempt = within(entries[1]);
+    expect(attempt.getByRole("heading", { level: 3, name: "18 Oct 2026" })).toBeInTheDocument();
+    expect(attempt.getByText("Attempt")).toBeInTheDocument();
+    expect(attempt.getByText("Not reachable")).toBeInTheDocument();
+    expect(attempt.getByText("No answer")).toBeInTheDocument();
+    // An Attempt without a note shows only its header.
+    expect(entries[2].querySelectorAll("p")).toHaveLength(1);
   });
 
-  it("shows a plain Conversation without item, flag, photo or notes sections", async () => {
+  it("shows a plain Conversation with None agreed and no flag, photo or notes sections", async () => {
     signedInAs(MENTOR);
     mockGetMenteeDetail.mockResolvedValue({ ...MENTEE, history: [conversation()] });
 
     await renderPage();
 
     const entry = within(screen.getByRole("article"));
-    expect(entry.getByText("Call · Student · 20 min")).toBeInTheDocument();
+    expect(entry.getByText("Call · 20 min · Spoke with student")).toBeInTheDocument();
+    expect(entry.getByRole("heading", { level: 4, name: "Action items" })).toBeInTheDocument();
+    expect(entry.getByText("None agreed.")).toBeInTheDocument();
     expect(entry.queryByRole("list", { name: "Action Items" })).not.toBeInTheDocument();
     expect(entry.queryByRole("list", { name: "Mentor Flags" })).not.toBeInTheDocument();
+    expect(entry.queryByRole("heading", { name: "Photos" })).not.toBeInTheDocument();
+    expect(entry.queryByText(/Flag note/)).not.toBeInTheDocument();
     expect(entry.queryByText("Loading photos…")).not.toBeInTheDocument();
     expect(entry.queryByRole("button", { name: "Show notes" })).not.toBeInTheDocument();
   });
