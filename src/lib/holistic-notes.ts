@@ -1,9 +1,6 @@
 import { query, withTransaction } from "./db";
 import type { PoolClient } from "pg";
-import {
-  HOLISTIC_CHALLENGE_CATEGORIES,
-  validateHolisticChallengeCategories,
-} from "./holistic-challenge-categories";
+import { validateHolisticChallengeCategories } from "./holistic-challenge-categories";
 import {
   checkHolisticMentorWriteScope,
   loadHolisticMentorWriteScope,
@@ -241,15 +238,13 @@ async function replaceChallengeCategories(client: PoolClient, notesId: number, i
       `DELETE FROM holistic_mentorship_post_session_note_challenges WHERE notes_id = $1`,
       [notesId]
   );
-  const selected = new Set(input.challengeCategories);
-  for (const { code } of HOLISTIC_CHALLENGE_CATEGORIES.filter(({ code }) => selected.has(code))) {
-    await client.query(
-        `INSERT INTO holistic_mentorship_post_session_note_challenges
-           (notes_id, category_code, inserted_at, updated_at)
-         VALUES ($1, $2, now(), now())`,
-      [notesId, code]
-    );
-  }
+  // The route has already validated the codes (known, no duplicates).
+  await client.query(
+      `INSERT INTO holistic_mentorship_post_session_note_challenges
+         (notes_id, category_code, inserted_at, updated_at)
+       SELECT $1, unnest($2::text[]), now(), now()`,
+    [notesId, input.challengeCategories]
+  );
 }
 
 async function freezeNewNotesPhase(client: PoolClient, existing: ExistingNotes | null, input: NotesInput) {
