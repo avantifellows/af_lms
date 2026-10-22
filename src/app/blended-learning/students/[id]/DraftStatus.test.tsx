@@ -181,4 +181,32 @@ describe("DraftStatus retry and discard", () => {
     expect(screen.getByText("Drafting failed")).toBeInTheDocument();
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
+
+  it("shows the server's unreadable refusal and a lost connection as errors", async () => {
+    render(<DraftStatus draftId={43} initialState="failed" initialRetryOffered canManage />);
+
+    mockFetch.mockResolvedValueOnce(new Response("oops", { status: 500 }));
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Something went wrong. Try again.");
+
+    mockFetch.mockRejectedValueOnce(new TypeError("offline"));
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't reach the server. Try again.");
+  });
+});
+
+describe("DraftStatus review link", () => {
+  it("links a ready draft to its review for someone who can log, even without managing drafts", () => {
+    render(<DraftStatus draftId={44} initialState="ready" reviewHref="/blended-learning/students/501/log?draft=44" />);
+    expect(screen.getByRole("link", { name: "Review draft" })).toHaveAttribute(
+      "href",
+      "/blended-learning/students/501/log?draft=44"
+    );
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+  });
+
+  it("offers no review link until the draft is ready", () => {
+    render(<DraftStatus draftId={42} initialState="transcribing" reviewHref="/blended-learning/students/501/log" />);
+    expect(screen.queryByRole("link", { name: "Review draft" })).not.toBeInTheDocument();
+  });
 });

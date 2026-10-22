@@ -24,6 +24,95 @@ const DRAFT_STATE: Partial<Record<DraftState, { label: string; variant: "info" |
 };
 
 type DraftStatusBody = { state: DraftState; retryOffered: boolean };
+type DraftAction = "retry" | "discard";
+
+// The draft's state and retry offer, polled while etl-next is drafting.
+function usePolledDraft(draftId: number, initial: DraftStatusBody) {
+  const [status, setStatus] = useState<DraftStatusBody>(initial);
+  // Bumped after every poll, so the next one is scheduled even when the state
+  // hasn't changed.
+  const [polls, setPolls] = useState(0);
+
+  useEffect(() => {
+    if (status.state !== "transcribing") return;
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/blended-learning/drafts/${draftId}`, { cache: "no-store" });
+        if (!res.ok) throw new Error(String(res.status));
+        const json = (await res.json()) as DraftStatusBody;
+        if (!cancelled) setStatus({ state: json.state, retryOffered: json.retryOffered });
+      } catch {
+        // Keep the last known state and try again on the next poll.
+      }
+      if (!cancelled) setPolls((count) => count + 1);
+    }, DRAFT_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [draftId, status.state, polls]);
+
+  return [status, setStatus] as const;
+}
+
+// Retry or discard the draft: its new status, or the error to show.
+async function postDraftAction(
+  draftId: number,
+  action: DraftAction
+): Promise<{ draft: DraftStatusBody } | { error: string }> {
+  try {
+    const res = await fetch(`/api/blended-learning/drafts/${draftId}/${action}`, { method: "POST" });
+    const json = await res.json().catch(() => ({}));
+    if (res.ok) return { draft: json as DraftStatusBody };
+    return { error: typeof json.error === "string" ? json.error : "Something went wrong. Try again." };
+  } catch {
+    return { error: "Couldn't reach the server. Try again." };
+  }
+}
+
+function DraftActions({
+  state,
+  reviewHref,
+  showRetry,
+  canManage,
+  busy,
+  onRetry,
+  onDiscard,
+}: {
+  state: DraftState;
+  // Set only when a ready draft can be opened for review.
+  reviewHref: string | null;
+  showRetry: boolean;
+  canManage: boolean;
+  busy: boolean;
+  onRetry: () => void;
+  onDiscard: () => void;
+}) {
+  if (!canManage && reviewHref === null) return null;
+  return (
+    <div className="flex flex-col gap-2 sm:flex-row">
+      {reviewHref !== null && (
+        <Link
+          href={reviewHref}
+          className="inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-accent px-4 text-sm font-bold text-text-on-accent shadow-sm hover:bg-accent-hover sm:w-auto"
+        >
+          Review draft
+        </Link>
+      )}
+      {showRetry && (
+        <Button type="button" onClick={onRetry} disabled={busy} className="w-full sm:w-auto">
+          {state === "failed" ? "Retry" : "Retry drafting"}
+        </Button>
+      )}
+      {canManage && (
+        <Button type="button" variant="secondary" onClick={onDiscard} disabled={busy} className="w-full sm:w-auto">
+          Discard
+        </Button>
+      )}
+    </div>
+  );
+}
 
 export function DraftStatus({
   draftId,
@@ -40,63 +129,28 @@ export function DraftStatus({
   reviewHref?: string | null;
 }) {
   const router = useRouter();
-  const [state, setState] = useState<DraftState>(initialState);
-  const [retryOffered, setRetryOffered] = useState(initialRetryOffered);
-  // Bumped after every poll, so the next one is scheduled even when the state
-  // hasn't changed.
-  const [polls, setPolls] = useState(0);
+  const [status, setStatus] = usePolledDraft(draftId, { state: initialState, retryOffered: initialRetryOffered });
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (state !== "transcribing") return;
-    let cancelled = false;
-    const timer = setTimeout(async () => {
-      try {
-        const res = await fetch(`/api/blended-learning/drafts/${draftId}`, { cache: "no-store" });
-        if (!res.ok) throw new Error(String(res.status));
-        const json = (await res.json()) as DraftStatusBody;
-        if (!cancelled) {
-          setState(json.state);
-          setRetryOffered(json.retryOffered);
-        }
-      } catch {
-        // Keep the last known state and try again on the next poll.
-      }
-      if (!cancelled) setPolls((count) => count + 1);
-    }, DRAFT_POLL_MS);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [draftId, state, polls]);
-
-  async function send(action: "retry" | "discard"): Promise<DraftStatusBody | null> {
+  async function send(action: DraftAction): Promise<DraftStatusBody | null> {
     setBusy(true);
     setError(null);
     setMessage(null);
-    try {
-      const res = await fetch(`/api/blended-learning/drafts/${draftId}/${action}`, { method: "POST" });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setError(typeof json.error === "string" ? json.error : "Something went wrong. Try again.");
-        return null;
-      }
-      return json as DraftStatusBody;
-    } catch {
-      setError("Couldn't reach the server. Try again.");
+    const result = await postDraftAction(draftId, action);
+    setBusy(false);
+    if ("error" in result) {
+      setError(result.error);
       return null;
-    } finally {
-      setBusy(false);
     }
+    return result.draft;
   }
 
   async function retry() {
     const draft = await send("retry");
     if (!draft) return;
-    setState(draft.state);
-    setRetryOffered(draft.retryOffered);
+    setStatus({ state: draft.state, retryOffered: draft.retryOffered });
     if (draft.state === "transcribing") setMessage("Asked to draft it again.");
   }
 
@@ -104,14 +158,12 @@ export function DraftStatus({
     if (!window.confirm("Discard this Conversation Draft? The recording won't be drafted.")) return;
     const draft = await send("discard");
     if (!draft) return;
-    setState(draft.state);
+    setStatus((current) => ({ ...current, state: draft.state }));
     router.refresh();
   }
 
-  const shown = DRAFT_STATE[state];
+  const shown = DRAFT_STATE[status.state];
   if (!shown) return null;
-  const showRetry = canManage && retryOffered;
-  const showReview = state === "ready" && reviewHref !== null;
   return (
     <section aria-label="Conversation Draft">
       <Card elevation="sm" className="space-y-3 p-4 sm:px-6">
@@ -119,28 +171,15 @@ export function DraftStatus({
           <span className="text-sm font-bold text-text-primary">Conversation Draft</span>
           <Badge variant={shown.variant}>{shown.label}</Badge>
         </div>
-        {(canManage || showReview) && (
-          <div className="flex flex-col gap-2 sm:flex-row">
-            {showReview && (
-              <Link
-                href={reviewHref}
-                className="inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-accent px-4 text-sm font-bold text-text-on-accent shadow-sm hover:bg-accent-hover sm:w-auto"
-              >
-                Review draft
-              </Link>
-            )}
-            {showRetry && (
-              <Button type="button" onClick={retry} disabled={busy} className="w-full sm:w-auto">
-                {state === "failed" ? "Retry" : "Retry drafting"}
-              </Button>
-            )}
-            {canManage && (
-              <Button type="button" variant="secondary" onClick={discard} disabled={busy} className="w-full sm:w-auto">
-                Discard
-              </Button>
-            )}
-          </div>
-        )}
+        <DraftActions
+          state={status.state}
+          reviewHref={status.state === "ready" ? reviewHref : null}
+          showRetry={canManage && status.retryOffered}
+          canManage={canManage}
+          busy={busy}
+          onRetry={retry}
+          onDiscard={discard}
+        />
         {message && (
           <p role="status" className="text-sm text-text-secondary">
             {message}
