@@ -616,6 +616,38 @@ function SidePanels({
   );
 }
 
+// Saving the entry: the error to show, whether a save is in flight, and what
+// was saved. A failure's field errors replace the form's.
+function useEntrySave(studentId: number, setFieldErrors: Dispatch<SetStateAction<FieldErrors>>) {
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState<Saved | null>(null);
+
+  async function save(kind: Kind, body: Record<string, unknown>) {
+    setSaving(true);
+    setError(null);
+    const outcome = await postEntry(studentId, body);
+    setSaving(false);
+    if (outcome.ok) {
+      setSaved({ kind, mentee: outcome.mentee });
+      return;
+    }
+    if (outcome.fieldErrors) setFieldErrors(outcome.fieldErrors);
+    setError(outcome.error);
+  }
+
+  return { error, setError, saving, saved, save };
+}
+
+function FormAlert({ error }: { error: string | null }) {
+  if (!error) return null;
+  return (
+    <p role="alert" className="rounded-lg bg-danger-bg px-3 py-2 text-sm text-danger">
+      {error}
+    </p>
+  );
+}
+
 function submitLabel(saving: boolean, kind: Kind): string {
   if (saving) return "Saving…";
   return kind === "conversation" ? "Save Conversation" : "Save Attempt";
@@ -650,9 +682,7 @@ export function LogEntryForm({
   const [values, setValues] = useState(() => initialEntryValues(draft, today));
   const [photos, setPhotos] = useState<PickedPhoto[]>([]);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
-  const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState<Saved | null>(null);
+  const { error, setError, saving, saved, save } = useEntrySave(studentId, setFieldErrors);
   const change: ChangeValues = (update) => setValues((current) => ({ ...current, ...update(current) }));
   const { kind } = values;
 
@@ -662,22 +692,13 @@ export function LogEntryForm({
     );
   }
 
-  async function submit(event: FormEvent) {
+  function submit(event: FormEvent) {
     event.preventDefault();
     if (photosPending(kind, photos)) {
       setError("Wait for the photos to finish uploading, or remove the ones that failed.");
       return;
     }
-    setSaving(true);
-    setError(null);
-    const outcome = await postEntry(studentId, buildEntryPayload(values, photos, draft?.id ?? null));
-    setSaving(false);
-    if (outcome.ok) {
-      setSaved({ kind, mentee: outcome.mentee });
-      return;
-    }
-    if (outcome.fieldErrors) setFieldErrors(outcome.fieldErrors);
-    setError(outcome.error);
+    void save(kind, buildEntryPayload(values, photos, draft?.id ?? null));
   }
 
   return (
@@ -744,11 +765,7 @@ export function LogEntryForm({
             <AttemptFields note={values.note} onChange={(note) => change(() => ({ note }))} />
           )}
 
-          {error && (
-            <p role="alert" className="rounded-lg bg-danger-bg px-3 py-2 text-sm text-danger">
-              {error}
-            </p>
-          )}
+          <FormAlert error={error} />
 
           <Button type="submit" disabled={saving} className="w-full sm:w-auto">
             {submitLabel(saving, kind)}
