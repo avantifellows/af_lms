@@ -197,6 +197,15 @@ async function saveUser(values: UserFormValues, user: UserPermission | null) {
   }
 }
 
+/**
+ * School search: JNV Schools only, except for Alumni Managers, whose Punjab
+ * schools (RSMS / SoE) aren't JNV.
+ */
+function schoolSearchUrl(search: string, role: string): string {
+  const scope = role === ALUMNI_MANAGER_ROLE ? "&scope=alumni" : "";
+  return `/api/admin/schools?q=${encodeURIComponent(search)}${scope}`;
+}
+
 export default function AddUserModal({ user, regions, schoolCodeToName, onClose, onSave }: AddUserModalProps) {
   const initial = initialUserFormValues(user);
   const [email, setEmail] = useState(initial.email);
@@ -219,9 +228,7 @@ export default function AddUserModal({ user, regions, schoolCodeToName, onClose,
   const isEditing = !!user;
   const scopeLevel = effectiveLevel(role, level);
 
-  // Search schools: JNV Schools only, except for Alumni Managers, whose Punjab
-  // schools (RSMS / SoE) aren't JNV.
-  const schoolScope = role === ALUMNI_MANAGER_ROLE ? "&scope=alumni" : "";
+  const searchUrl = schoolSearchUrl(schoolSearch, role);
   useEffect(() => {
     if (scopeLevel !== 1 || schoolSearch.length < 2) {
       setSearchResults([]);
@@ -229,7 +236,7 @@ export default function AddUserModal({ user, regions, schoolCodeToName, onClose,
     }
 
     const timer = setTimeout(async () => {
-      const response = await fetch(`/api/admin/schools?q=${encodeURIComponent(schoolSearch)}${schoolScope}`);
+      const response = await fetch(searchUrl);
       if (response.ok) {
         const schools = await response.json();
         setSearchResults(schools);
@@ -237,7 +244,7 @@ export default function AddUserModal({ user, regions, schoolCodeToName, onClose,
     }, 300);
 
     return () => clearTimeout(timer);
-  }, [schoolSearch, scopeLevel, schoolScope]);
+  }, [schoolSearch, scopeLevel, searchUrl]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
