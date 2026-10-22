@@ -1,3 +1,5 @@
+import type { ComponentProps } from "react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import AddUserModal from "./AddUserModal";
@@ -15,7 +17,7 @@ const schoolCodeToName: Record<string, string> = {
 };
 
 const defaultProps = {
-  user: null,
+  user: null as ComponentProps<typeof AddUserModal>["user"],
   regions,
   schoolCodeToName,
   onClose: vi.fn(),

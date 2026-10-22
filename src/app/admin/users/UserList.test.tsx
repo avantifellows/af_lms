@@ -1,3 +1,4 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import UserList from "./UserList";
@@ -258,7 +259,15 @@ describe("UserList", () => {
     it("shows 'Not used', not the 'No programs' warning, for an Alumni Manager", () => {
       renderList({
         initialUsers: [
-          { ...users[2], id: 104, email: "alumni@example.com", role: "alumni_manager", program_ids: [] },
+          {
+            ...users[1],
+            id: 104,
+            email: "alumni@example.com",
+            role: "alumni_manager",
+            school_codes: null,
+            regions: null,
+            program_ids: [],
+          },
         ],
       });
       expect(screen.getByText("Alumni Manager")).toHaveClass("bg-teal-100", "text-teal-800");
