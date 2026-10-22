@@ -57,6 +57,7 @@ import { Batch } from "@/components/EditStudentModal";
 import QuizSessionsTab from "@/components/quiz-sessions/QuizSessionsTab";
 import TeacherFeedbackTab from "@/components/teacher-feedback/TeacherFeedbackTab";
 import AlumniTab from "@/components/alumni/AlumniTab";
+import { schoolHasAlumni } from "@/lib/alumni/schools";
 import {
   buildProgramStats,
   studentDroppedFromProgram,
@@ -808,6 +809,14 @@ function studentActionAccess(
 
 // Fetch enrollment data in parallel. THE fork: a centre pulls its own roster
 // from the centre_students view; a school pulls the full school roster.
+// Alumni tab audience: physical centres only (ADR 0008). School pages only, for
+// people with the alumni feature, and only where the school has alumni-program
+// students or alumni — an NVS-only school's tab would always be empty.
+async function showAlumniTab(scope: RosterScope, canView: boolean): Promise<boolean> {
+  if (scope.kind !== "school" || !canView) return false;
+  return schoolHasAlumni(scope.school.id);
+}
+
 async function fetchRosterData(scope: RosterScope) {
   const [roster, grades, batches, supportedProgramIds] = await Promise.all([
     scope.kind === "centre" ? getCentreStudents(scope.centre.id) : getSchoolRoster(scope.school.id),
@@ -1266,9 +1275,10 @@ export default async function RosterPage({
     access.students.canEdit,
   );
 
-  const [{ roster, grades, batches, supportedProgramIds }, switcherOptions] = await Promise.all([
+  const [{ roster, grades, batches, supportedProgramIds }, switcherOptions, alumniTab] = await Promise.all([
     fetchRosterData(scope),
     loadCentreSwitcherOptions(scope, permission.email, permission),
+    showAlumniTab(scope, access.alumni.canView),
   ]);
   const isPmu = isPmuRole(permission.role);
   const { students, dataIssues } = scopeRosterToRole(roster.students, roster.issues, isPmu);
@@ -1388,7 +1398,7 @@ export default async function RosterPage({
       mentorship: mentorshipContent,
       holisticMentorship: holisticContent,
       visits: <VisitsTab schoolCode={school.code} canEdit={access.visits.canEdit} />,
-      alumni: isCentre ? null : <AlumniTab schoolCode={school.code} canEdit={access.alumni.canEdit} />,
+      alumni: alumniTab ? <AlumniTab schoolCode={school.code} canEdit={access.alumni.canEdit} /> : null,
     },
   });
 

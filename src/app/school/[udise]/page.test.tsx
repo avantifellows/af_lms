@@ -240,6 +240,10 @@ vi.mock("@/components/VisitsTab", () => ({
   ),
 }));
 
+// Alumni tab audience check (physical centres only): has alumni by default.
+const { mockSchoolHasAlumni } = vi.hoisted(() => ({ mockSchoolHasAlumni: vi.fn() }));
+vi.mock("@/lib/alumni/schools", () => ({ schoolHasAlumni: mockSchoolHasAlumni }));
+
 // The real Alumni tab fetches on mount; its own tests cover it.
 vi.mock("@/components/alumni/AlumniTab", () => ({
   __esModule: true,
@@ -388,6 +392,7 @@ describe("SchoolPage (server component)", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mockGetLmsSupportedProgramIds.mockResolvedValue([...PROGRAM_IDS_ORDERED]);
+    mockSchoolHasAlumni.mockResolvedValue(true);
     // Re-establish sentinel implementations after reset
     mockRedirect.mockImplementation((url: string) => {
       throw new Error(`REDIRECT:${url}`);
@@ -835,6 +840,17 @@ describe("SchoolPage (server component)", () => {
     expect(screen.getByTestId("tab-quiz_sessions")).toBeInTheDocument();
     expect(screen.getByTestId("tab-mentorship")).toBeInTheDocument();
     expect(screen.getByTestId("tab-visits")).toBeInTheDocument();
+    expect(screen.getByTestId("tab-alumni")).toBeInTheDocument();
+  });
+
+  it("hides the Alumni tab on a school with no alumni-program students or alumni (NVS-only)", async () => {
+    setupAdminDefaults();
+    mockSchoolHasAlumni.mockResolvedValue(false);
+
+    await renderPage();
+
+    expect(screen.queryByTestId("tab-alumni")).not.toBeInTheDocument();
+    expect(screen.getByTestId("tab-visits")).toBeInTheDocument();
   });
 
   it("shows only enrollment tab when other features have no access", async () => {
@@ -853,6 +869,9 @@ describe("SchoolPage (server component)", () => {
     expect(screen.queryByTestId("tab-performance")).not.toBeInTheDocument();
     expect(screen.queryByTestId("tab-mentorship")).not.toBeInTheDocument();
     expect(screen.queryByTestId("tab-visits")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("tab-alumni")).not.toBeInTheDocument();
+    // Without the alumni feature, the audience check isn't even run.
+    expect(mockSchoolHasAlumni).not.toHaveBeenCalled();
   });
 
   it("gives inline student edit to a teacher (matrix students=edit), decoupled from the add gate", async () => {

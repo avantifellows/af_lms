@@ -1,5 +1,6 @@
 import { query } from "@/lib/db";
 import type { UserPermission } from "@/lib/permissions";
+import { ALUMNI_PROGRAM_ORDER } from "./config";
 import { schoolScopeSql } from "./scope";
 import { cohortCte, cohortParams } from "./students";
 
@@ -76,4 +77,27 @@ export async function listAlumniSchools(permission: UserPermission): Promise<Alu
 export async function getSchoolName(code: string): Promise<string | null> {
   const [school] = await query<{ name: string }>(`SELECT name FROM school WHERE code = $1`, [code]);
   return school?.name ?? null;
+}
+
+/**
+ * Does this school belong on the Alumni side? Audience: physical centres
+ * (CoE / Nodal programs), not NVS. True when any of its students was ever in
+ * an alumni program, or it has alumni on record; an NVS-only school has
+ * neither, so its page shows no (always empty) Alumni tab.
+ */
+export async function schoolHasAlumni(schoolId: string | number): Promise<boolean> {
+  const [row] = await query<{ has_alumni: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1 FROM enrollment_record e
+       JOIN enrollment_record eb ON eb.user_id = e.user_id AND eb.group_type = 'batch'
+       JOIN batch b ON b.id = eb.group_id
+       WHERE e.group_type = 'school' AND e.group_id = $1 AND b.program_id = ANY($2::int[])
+     ) OR EXISTS (
+       SELECT 1 FROM alumni a
+       JOIN student s ON s.id = a.student_id
+       JOIN enrollment_record e ON e.user_id = s.user_id AND e.group_type = 'school' AND e.group_id = $1
+     ) AS has_alumni`,
+    [schoolId, ALUMNI_PROGRAM_ORDER],
+  );
+  return Boolean(row?.has_alumni);
 }

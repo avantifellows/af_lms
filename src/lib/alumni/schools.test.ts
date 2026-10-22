@@ -4,7 +4,7 @@ vi.mock("@/lib/db", () => ({ query: vi.fn() }));
 
 import { query } from "@/lib/db";
 import type { UserPermission } from "@/lib/permissions";
-import { getSchoolName, listAlumniSchools } from "./schools";
+import { getSchoolName, listAlumniSchools, schoolHasAlumni } from "./schools";
 
 const mockQuery = vi.mocked(query);
 const perm = (overrides: Partial<UserPermission>): UserPermission =>
@@ -62,5 +62,22 @@ describe("getSchoolName", () => {
     mockQuery.mockResolvedValueOnce([{ name: "RSMS Bathinda" }] as never).mockResolvedValueOnce([] as never);
     expect(await getSchoolName("3140103005")).toBe("RSMS Bathinda");
     expect(await getSchoolName("0")).toBeNull();
+  });
+});
+
+describe("schoolHasAlumni", () => {
+  it("is true when the school has alumni-program students or alumni, false for an NVS-only school", async () => {
+    mockQuery.mockResolvedValueOnce([{ has_alumni: true }] as never).mockResolvedValueOnce([{ has_alumni: false }] as never);
+    expect(await schoolHasAlumni(7)).toBe(true);
+    expect(await schoolHasAlumni(8)).toBe(false);
+    const [sql, params] = mockQuery.mock.calls[0];
+    expect(sql).toContain("b.program_id = ANY($2::int[])");
+    expect(sql).toContain("FROM alumni a");
+    expect(params).toEqual([7, [1, 86, 87, 74, 2, 94]]);
+  });
+
+  it("is false when nothing comes back", async () => {
+    mockQuery.mockResolvedValueOnce([] as never);
+    expect(await schoolHasAlumni(9)).toBe(false);
   });
 });

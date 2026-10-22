@@ -18,4 +18,5 @@ The role is denied by default everywhere else. `getUserPermission` (and so `getR
 - `admin` also gets `alumni` edit; every other role gets none.
 - An alumni manager's only pages are `/alumni` (their schools, plus "Find an alumnus" by AFID or name), `/alumni/[code]` and `/alumni/record/[alumniId]`; `/dashboard` sends them there.
 - An alumnus with no School on record (most of the December 2025 bulk import) is reached only with all-schools (level 3) access, the same rule as a pass-out with no School.
+- Audience: physical centres (CoE / Nodal programs), not NVS (decided 2026-10-22; can be widened later). Existing alumni records have no NVS-only alumni, and NVS has ~32k pass-outs a year, too many to track one by one. A school page shows the Alumni tab only when the school has students who were ever in an alumni program, or alumni on record (`schoolHasAlumni`), so NVS-only schools don't get an always-empty tab.
 - Staging first: the role is tested on staging before it reaches production.
