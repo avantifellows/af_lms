@@ -81,6 +81,25 @@ export function blendedLearningPhotoPrefix(studentId: number): string {
   return `${prefix()}/blended-learning/photos/${studentId}/`;
 }
 
+// Blended Learning Call Recordings: the browser PUTs each straight to S3 under
+// the Student's recordings prefix. A lifecycle rule expires them (ADR 0010).
+export function blendedLearningRecordingPrefix(studentId: number): string {
+  return `${prefix()}/blended-learning/recordings/${studentId}/`;
+}
+
+// Sign a short-lived PUT URL. The browser must send exactly `contentType`.
+export async function presignUpload(opts: {
+  s3Key: string;
+  contentType: string;
+  ttlSeconds: number;
+}): Promise<string> {
+  return getSignedUrl(
+    client(),
+    new PutObjectCommand({ Bucket: bucket(), Key: opts.s3Key, ContentType: opts.contentType }),
+    { expiresIn: opts.ttlSeconds, signableHeaders: new Set(["content-type"]) },
+  );
+}
+
 export async function uploadObject(opts: {
   s3Key: string;
   body: Buffer;

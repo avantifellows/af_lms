@@ -81,6 +81,10 @@ export default defineConfig({
       // notifier trims these to empty and skips.
       BLENDED_LEARNING_SES_ACCESS_KEY_ID: " ",
       BLENDED_LEARNING_WELLBEING_EMAILS: " ",
+      // etl-next is unconfigured too, so a new draft is never woken and stays
+      // transcribing.
+      BLENDED_LEARNING_ETL_URL: " ",
+      BLENDED_LEARNING_ETL_TOKEN: " ",
     },
   },
 });

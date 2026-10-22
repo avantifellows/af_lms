@@ -197,7 +197,7 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   (read), `src/lib/holistic-follow-up-questions.ts` (client-safe question keys, text, and
   normaliser), `src/lib/holistic-mentor-write-scope.ts` (shared scope guard).
 
-## Blended Learning Mentee list (#442), detail (#444), logging (#445), Action Items (#446), Mentor Flags (#447) and photos (#448)
+## Blended Learning Mentee list (#442), detail (#444), logging (#445), Action Items (#446), Mentor Flags (#447), photos (#448) and Call Recording drafts (#449)
 
 - **Tables:** the `blended_learning_*` tables are created by db-service (Mappings:
   `20260921120000` + its ensure migration; the other eight: PR #804,
@@ -303,6 +303,54 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   uploading or failed. Orphaned objects from abandoned forms stay in S3 in v1. E2E has no S3, so
   `blended-learning-photos.spec.ts` answers the upload and save requests itself (it never saves);
   saved photos are covered by inserted rows in the detail spec.
+- **Call Recordings and Conversation Drafts (#449):** `src/lib/blended-learning-drafts.ts`
+  (server-only). The log form's "Call Recording (optional)" section
+  (`students/[id]/log/RecordingUpload.tsx`, Conversation only, replaced by a note while the
+  Mentee has an open draft) runs three steps; see `patterns/presigned-s3-upload.md`.
+  1. `POST /api/blended-learning/students/[id]/recordings/upload-url` → `issueRecordingUpload`
+     (401 / 403 other roles and read-only / 404 out of scope / 422 extension not
+     `mp3|m4a|wav` (case-insensitive; the browser MIME type is ignored, so an empty one is fine)
+     or size not 1 byte–200 MiB / 409 an open draft / 200 `{ uploadUrl, s3Key, contentType }`).
+     The type comes from the extension (`audio/mpeg|audio/mp4|audio/wav`); the URL is a 15-minute
+     presigned `PutObject` with that `ContentType` signed (`presignUpload` in `src/lib/s3.ts`); the
+     key is `{S3_DOCS_PREFIX}/blended-learning/recordings/{studentId}/{uuid}.{ext}`
+     (`blendedLearningRecordingPrefix`).
+  2. The browser PUTs the file straight to S3 with XHR (`Content-Type` = the returned type),
+     showing a progress bar. "Retry upload" restarts from step 1 after a failed PUT, or repeats
+     only step 3 when the PUT finished; 403/404/409 refusals offer no retry.
+  3. `POST /api/blended-learning/students/[id]/drafts` → `createDraft(access, studentId, body,
+     today)` (401 / 403 / 404 as above / 422 `fieldErrors.s3Key` for a key that is not exactly
+     this Student's prefix + UUID + `mp3|m4a|wav`, or when `HeadObject` finds no object or a size
+     other than `byteSize`; 422 for optional session details: `occurredOn` a real date not after
+     today IST, `mode`, `spokeWith`, integer 1–240 `durationMinutes`; blank → `NULL` /
+     201 `{ draftId, delivery }`). One `withTransaction` re-reads the active Mapping `FOR SHARE`
+     and inserts the draft (`transcribing`, the Mapping's Mentor/program/year,
+     `created_by_email`/`created_by_user_id` = actor, content type from the key, byte size from
+     S3) and a `queued` Transcription Request with a server-generated UUID `request_key`; the
+     open-draft unique index (`23505`) → 409. After commit it awaits `wakeTranscription`.
+  - **Waking etl-next:** `wakeTranscription(requestKey)` mirrors Holistic Profile regeneration:
+    `POST {BLENDED_LEARNING_ETL_URL}/api/internal/blended-learning/transcription-requests/{key}/enqueue`,
+    Bearer `BLENDED_LEARNING_ETL_TOKEN`, body `{"environment": APP_ENV}`, 15 s timeout. `skipped`
+    (no fetch) when the URL or token is blank or `APP_ENV` is not staging/production; `sent` on
+    2xx; `ambiguous` on a network error, timeout, 5xx, 408 or 429 (the request stays queued);
+    `rejected` on any other 4xx, when one transaction sets the request `failed` with
+    `etl_run_id = 'rejected-{key}'`, `error_code = 'enqueue_rejected'` (only `WHERE state =
+    'queued' AND etl_run_id IS NULL`) and the draft `failed` only if still `transcribing`.
+    Nothing logs the request key or S3 key.
+  - **Status and polling:** `GET /api/blended-learning/drafts/[id]` → `getDraftStatus` (any
+    Blended Learning user who can see the Student, read-only included; 404 out of scope or
+    missing) returns `{ id, state, retryOffered }`. Retry is offered, to users who may
+    `manage_draft`, for a `failed` draft or a `transcribing` one whose active request is
+    `queued` with `etl_run_id IS NULL` (the wake never reached ETL). The detail page's
+    `students/[id]/DraftStatus.tsx` polls it every 15 s while the draft is `transcribing` and
+    stops on ready/failed or when the page closes; a draft no longer open disappears. The Retry
+    and Discard controls are a later slice (#450).
+  - Drafts never change Last Contact, Talk to First, counts or flags: those read Conversations
+    only. Abandoned uploads (no draft) stay in S3 until the lifecycle rule expires them.
+  - E2E has no S3 or etl-next (both ETL vars are `" "`), so `blended-learning-recordings.spec.ts`
+    checks the control (Mentor yes, read-only and open-draft Mentee no) and polling with
+    `page.clock` over a draft it inserts and deletes for Ira (A1); upload and wake outcomes are
+    route-tested.
 - **Notes sanitiser (#445):** `sanitiseNotesHtml` in `src/lib/blended-learning-notes-sanitiser.ts`
   (server-only, `sanitize-html`) is the only path to `notes_html`: allowlist `p, h3, b, i, ul, ol,
   li, table, tr, th, td, br`, no attributes, no links (an `<a>` keeps its text), `strong→b`,

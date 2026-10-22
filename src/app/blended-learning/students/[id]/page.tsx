@@ -10,16 +10,17 @@ import {
   type HistoryEntry,
   type MenteeDetail,
 } from "@/lib/blended-learning-mentee-detail";
-import type { OpenDraftState } from "@/lib/blended-learning-mentees";
 
 import { BlendedLearningHeader } from "../../BlendedLearningHeader";
 import { ActionItemMeta } from "./ActionItemMeta";
 import { ConversationNotes } from "./ConversationNotes";
 import { ConversationPhotos } from "./ConversationPhotos";
+import { DraftStatus } from "./DraftStatus";
 import { FLAG_RECIPIENT } from "./flagRecipients";
 
-// One Mentee: profile, contact, links, any open Conversation Draft and the
-// newest-first history. Notes and photos load on demand from their API routes.
+// One Mentee: profile, contact, links, any open Conversation Draft (polled
+// while drafting) and the newest-first history. Notes and photos load on
+// demand from their API routes.
 // Users who can log (not read-only) get the entry point to the log page;
 // Open Action Items are listed for everyone, and ticked done only from there.
 
@@ -28,11 +29,6 @@ const SPOKE_WITH: Record<"student" | "parent_or_sibling" | "both", string> = {
   student: "Student",
   parent_or_sibling: "Parent or sibling",
   both: "Student and parent",
-};
-const DRAFT_STATE: Record<OpenDraftState, { label: string; variant: "info" | "accent" | "danger" }> = {
-  transcribing: { label: "Drafting from the Call Recording", variant: "info" },
-  ready: { label: "Draft ready to review", variant: "accent" },
-  failed: { label: "Drafting failed", variant: "danger" },
 };
 
 function formatDate(date: string): string {
@@ -88,18 +84,6 @@ function Profile({ mentee }: { mentee: MenteeDetail }) {
         </div>
       )}
     </Card>
-  );
-}
-
-function OpenDraft({ state }: { state: OpenDraftState }) {
-  const { label, variant } = DRAFT_STATE[state];
-  return (
-    <section aria-label="Conversation Draft">
-      <Card elevation="sm" className="flex flex-wrap items-center gap-2 p-4 sm:px-6">
-        <span className="text-sm font-bold text-text-primary">Conversation Draft</span>
-        <Badge variant={variant}>{label}</Badge>
-      </Card>
-    </section>
   );
 }
 
@@ -226,7 +210,9 @@ export default async function MenteeDetailPage({ params }: { params: Promise<{ i
             Log a Conversation or Attempt
           </Link>
         )}
-        {mentee.openDraft && <OpenDraft state={mentee.openDraft.state} />}
+        {mentee.openDraft && (
+          <DraftStatus key={mentee.openDraft.id} draftId={mentee.openDraft.id} initialState={mentee.openDraft.state} />
+        )}
         {mentee.openActionItems.length > 0 && <OpenActionItems items={mentee.openActionItems} />}
         <History history={mentee.history} />
       </main>

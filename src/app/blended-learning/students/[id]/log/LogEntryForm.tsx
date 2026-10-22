@@ -13,12 +13,15 @@ import { ACTION_ITEM_OWNER, ActionItemMeta } from "../ActionItemMeta";
 import { FLAG_RECIPIENT } from "../flagRecipients";
 import { NotesEditor } from "./NotesEditor";
 import { PhotoPicker, type PickedPhoto } from "./PhotoPicker";
+import { RecordingUpload } from "./RecordingUpload";
 
 // Log a Conversation or an Attempt for one Mentee. One column on mobile with
 // the last-conversation and Open Action Items panels on top; they sit beside
 // the form from 1024 px. Only a Conversation adds Action Items or ticks
-// earlier ones done, attaches photos and raises Mentor Flags. After saving, a
-// confirmation shows what the Mentee list now says.
+// earlier ones done, attaches photos and raises Mentor Flags. Instead of
+// typing the write-up, a Conversation's Call Recording can be uploaded to
+// start a Conversation Draft. After saving, a confirmation shows what the
+// Mentee list now says.
 
 type Kind = "conversation" | "attempt";
 // Keyed by field, e.g. `summary` or `actionItems.0.text`.
@@ -358,6 +361,7 @@ export function LogEntryForm({
   forOwnList,
   lastConversationPanel,
   openActionItems,
+  hasOpenDraft,
 }: {
   studentId: number;
   name: string;
@@ -368,6 +372,8 @@ export function LogEntryForm({
   lastConversationPanel: ReactNode;
   // Open Action Items from earlier Conversations; a Conversation can tick them.
   openActionItems: OpenActionItem[];
+  // A Mentee has at most one open Conversation Draft, so no second upload.
+  hasOpenDraft: boolean;
 }) {
   const ids = useId();
   const [kind, setKind] = useState<Kind>("conversation");
@@ -527,6 +533,21 @@ export function LogEntryForm({
               />
               <FieldError message={fieldErrors.durationMinutes} />
             </div>
+            {hasOpenDraft ? (
+              <p className="rounded-lg border border-border px-3 py-2 text-sm text-text-secondary">
+                {`${firstName} already has a Conversation Draft, so no recording can be uploaded now.`}
+              </p>
+            ) : (
+              <RecordingUpload
+                studentId={studentId}
+                sessionDetails={{
+                  occurredOn: occurredOn || null,
+                  mode,
+                  spokeWith,
+                  durationMinutes: duration.trim() === "" ? null : Number(duration),
+                }}
+              />
+            )}
             <div>
               <FormLabel htmlFor={summaryId}>Summary</FormLabel>
               <textarea
