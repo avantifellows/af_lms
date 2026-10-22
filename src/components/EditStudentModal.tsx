@@ -578,7 +578,6 @@ export default function EditStudentModal({
                   <span className={labelClassName}>Children with Special Needs (CWSN)</span>
                 </label>
                 {textField("phone", "Parents Phone Number", "tel")}
-                {!isPmuProgram && textField("email", "Email")}
                 {/* Father Name and Annual Family Income are not new fields:
                     they stay here for NVS, where the sections below are not
                     rendered, and move into those sections for centres. */}

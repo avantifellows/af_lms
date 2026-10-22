@@ -680,6 +680,14 @@ describe("EditStudentModal", () => {
       expect(getByName("mother_name")).toBeInTheDocument();
       expect(getByName("father_name")).toBeInTheDocument();
     });
+
+    it("shows a centre one Email input, in Contact & Address", () => {
+      renderModal({ programId: 1 });
+
+      expect(document.querySelectorAll('[name="email"]')).toHaveLength(1);
+      expect(document.querySelectorAll("#edit-student-email")).toHaveLength(1);
+      expect(screen.getByLabelText("Email")).toHaveValue("ravi@example.com");
+    });
   });
 
   describe("typing in the new fields", () => {
