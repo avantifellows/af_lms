@@ -15,7 +15,7 @@ edges:
     condition: when the write lives in a new route handler
   - target: context/permissions.md
     condition: when gating the write (requireEdit + ownership)
-last_updated: 2026-06-25
+last_updated: 2026-10-19
 ---
 
 # Write via the DB Service
@@ -61,6 +61,7 @@ Service (Elixir/Phoenix, separate repo). Writes to them must `fetch` the Service
 ## Debug
 - 401/403 from the Service → check `DB_SERVICE_TOKEN` and that `DB_SERVICE_URL` points at the right env.
 - Update "succeeds" but nothing changes → confirm field names match the Service's expected payload; check `warnings`.
+- Hand-rolled `curl` to `/lms/students/:id/update-with-enrollments` returns 409 `registration_mode_mismatch` → the body must carry the handshake the LMS sends (`registration_mode` = `ACTIVE_REGISTRATION_MODE`, currently `phone`, plus `registration_mode_version`). The LMS adds it automatically; a manual call does not.
 - Enrollment not updating → missing `user_id`/`group_id` in the payload.
 
 ## Update Scaffold
