@@ -6,12 +6,16 @@ const {
   mockGetBlendedLearningAccess,
   mockListMentees,
   mockListMentorCards,
+  mockCountNewFlags,
+  mockListFlags,
   mockRedirect,
 } = vi.hoisted(() => ({
   mockGetServerSession: vi.fn(),
   mockGetBlendedLearningAccess: vi.fn(),
   mockListMentees: vi.fn(),
   mockListMentorCards: vi.fn(),
+  mockCountNewFlags: vi.fn(),
+  mockListFlags: vi.fn(),
   mockRedirect: vi.fn((url: string) => {
     throw new Error(`REDIRECT:${url}`);
   }),
@@ -27,6 +31,12 @@ vi.mock("@/lib/blended-learning-access", async (importOriginal) => ({
 vi.mock("@/lib/blended-learning-mentees", () => ({
   listMentees: mockListMentees,
   listMentorCards: mockListMentorCards,
+}));
+vi.mock("@/lib/blended-learning-flags", () => ({
+  FLAG_RECIPIENTS: ["emotional_wellbeing", "physics", "chemistry", "maths"],
+  countNewFlags: mockCountNewFlags,
+  listFlags: mockListFlags,
+  listFlagMentors: async () => [],
 }));
 vi.mock("@/lib/curriculum-date-helpers", () => ({ getTodayIST: () => "2026-10-22" }));
 
@@ -57,6 +67,8 @@ describe("BlendedLearningPage", () => {
     vi.clearAllMocks();
     mockListMentees.mockResolvedValue({ talkToFirst: [], everyoneElse: [] });
     mockListMentorCards.mockResolvedValue([]);
+    mockCountNewFlags.mockResolvedValue(0);
+    mockListFlags.mockResolvedValue({ flags: [], nextCursor: null, newCount: 0 });
   });
 
   it("sends a signed-out visitor to sign-in", async () => {

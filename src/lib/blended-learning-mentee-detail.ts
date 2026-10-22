@@ -95,8 +95,19 @@ function sameNumber(a: string, b: string): boolean {
   return digits(a) === digits(b);
 }
 
-function present(value: string | null): string | null {
+export function present(value: string | null): string | null {
   return value && value.trim() ? value.trim() : null;
+}
+
+// A Student's contact numbers from `user.phone` and `user.whatsapp_phone`,
+// WhatsApp only when it differs. Parent phones are never read.
+export function contactNumbers(
+  phone: string | null,
+  whatsapp: string | null
+): { phone: string | null; whatsappPhone: string | null } {
+  const main = present(phone);
+  const other = present(whatsapp);
+  return { phone: main, whatsappPhone: other && !(main && sameNumber(main, other)) ? other : null };
 }
 
 function groupBy<T extends { conversation_id: number | string }>(rows: T[]): Map<number, T[]> {
@@ -187,16 +198,13 @@ export async function getMenteeDetail(
   });
   const flagsByConversation = groupBy(flags);
 
-  const phone = present(profile.phone);
-  const whatsapp = present(profile.whatsapp_phone);
   return {
     studentId,
     name: [profile.first_name, profile.last_name].filter(Boolean).join(" "),
     gender: profile.gender,
     grade: profile.grade === null ? null : Number(profile.grade),
     programName: profile.program_name,
-    phone,
-    whatsappPhone: whatsapp && !(phone && sameNumber(phone, whatsapp)) ? whatsapp : null,
+    ...contactNumbers(profile.phone, profile.whatsapp_phone),
     profileDocUrl: present(profile.profile_doc_url),
     screenerUrl: present(profile.screener_url),
     openDraft:

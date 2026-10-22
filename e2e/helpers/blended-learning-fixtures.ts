@@ -2,7 +2,8 @@ import type { PoolClient } from "pg";
 import { CURRENT_ACADEMIC_YEAR } from "../../src/lib/constants";
 
 // Blended Learning Mentee-list (#442), Mentee-detail (#444), logging (#445),
-// Action Item (#446), Mentor Flag (#447) and draft review (#451) fixtures.
+// Action Item (#446), Mentor Flag (#447), draft review (#451) and Flags feed
+// (#453) fixtures.
 // Every date is a hand-written offset in IST calendar days from the seed's IST
 // "today", which is the same IST date the app computes while the suite runs.
 // Mentor A is the e2e-blended-mentor persona seeded by seedHolisticFixtures (#441).
@@ -131,6 +132,37 @@ export const IRA_HISTORY = {
     photoCount: 2,
   },
 } as const;
+
+// The admin Flags feed (#453). Both admin personas last saw the feed
+// FLAGS_LAST_SEEN_HOURS_AGO hours ago. Flags are on Conversations older than
+// each Mentee's latest entry, so no list, card or detail fact above changes.
+// Newest first by (inserted_at, id), the fixture feed is:
+//   Ira's Physics, then Emotional Well-being (inserted at seed)   new
+//   Meera's Chemistry (Mentor A)                                  new
+//   Tara's Maths (Mentor B)                                       new
+//   — last seen —
+//   Tara's Emotional Well-being (Mentor B)
+//   Zoya's bulk flags 1–52 (Mentor A)
+export const FLAGS_LAST_SEEN_HOURS_AGO = 72;
+export const FEED_FLAGS = {
+  meeraChemistry: { conversationDaysAgo: 45, insertedHoursAgo: 24, comment: "Synthetic: lost with organic chemistry" },
+  taraMaths: { conversationDaysAgo: 35, insertedHoursAgo: 48, comment: "Synthetic: needs help with calculus" },
+  taraWellbeing: { conversationDaysAgo: 40, insertedHoursAgo: 144, comment: "Synthetic: homesick at the hostel" },
+} as const;
+export const TARA_LINKS = {
+  profileDoc: "https://docs.google.com/document/d/e2e-tara",
+  screener: "https://forms.gle/e2e-tara",
+} as const;
+// Zoya's BULK_FLAG_CONVERSATIONS older Conversations each raised all four
+// flags at once; Conversation c (1 = newest) was saved BULK_FLAGS_DAYS_AGO
+// days and c hours ago. Bulk flag n (1 = newest) carries bulkFlagComment(n):
+// within one Conversation the flags tie on inserted_at, so the order is by id,
+// Maths (4c − 3), Chemistry, Physics, then Emotional Well-being (4c).
+export const BULK_FLAG_CONVERSATIONS = 13;
+export const BULK_FLAGS_DAYS_AGO = 10;
+export function bulkFlagComment(n: number): string {
+  return `Synthetic: bulk flag ${n}.`;
+}
 
 export function fullName(mentee: { firstName: string; lastName: string }): string {
   return `${mentee.firstName} ${mentee.lastName}`;
@@ -393,6 +425,94 @@ async function seedDraft(
   );
 }
 
+async function seedFlag(
+  client: Client,
+  flag: { conversationId: number; studentId: number; recipient: string; comment: string; raisedBy: string },
+  insertedAgo: { days?: number; hours: number }
+) {
+  await client.query(
+    `INSERT INTO blended_learning_mentor_flags (conversation_id, student_id, recipient, comment, raised_by_email, inserted_at)
+     VALUES ($1, $2, $3, $4, $5, now() - make_interval(days => $6, hours => $7))`,
+    [
+      flag.conversationId,
+      flag.studentId,
+      flag.recipient,
+      flag.comment,
+      flag.raisedBy,
+      insertedAgo.days ?? 0,
+      insertedAgo.hours,
+    ]
+  );
+}
+
+// The Flags feed fixture (#453): see FEED_FLAGS and the bulk flags above.
+async function seedFeedFlags(
+  client: Client,
+  ids: Record<string, number>,
+  mentors: { mentorA: number; mentorB: number }
+) {
+  const { thirtyDays: meera, twentyNineDays: zoya } = MENTEES;
+  const tara = OTHER_STUDENTS.mentorB;
+  const flagged = async (
+    mentee: FixtureMentee,
+    mentor: { userId: number; email: string },
+    flag: { conversationDaysAgo: number; insertedHoursAgo: number; comment: string },
+    recipient: string
+  ) => {
+    const studentId = ids[mentee.key];
+    const conversationId = await seedEntry(client, {
+      kind: "conversation",
+      studentId,
+      mentorUserId: mentor.userId,
+      programId: mentee.programId,
+      daysAgo: flag.conversationDaysAgo,
+    });
+    await seedFlag(
+      client,
+      { conversationId, studentId, recipient, comment: flag.comment, raisedBy: mentor.email },
+      { hours: flag.insertedHoursAgo }
+    );
+  };
+  const mentorA = { userId: mentors.mentorA, email: BLENDED_MENTOR_A.email };
+  const mentorB = { userId: mentors.mentorB, email: BLENDED_MENTOR_B.email };
+  await flagged(meera, mentorA, FEED_FLAGS.meeraChemistry, "chemistry");
+  await flagged(tara, mentorB, FEED_FLAGS.taraMaths, "maths");
+  await flagged(tara, mentorB, FEED_FLAGS.taraWellbeing, "emotional_wellbeing");
+
+  const zoyaId = ids[zoya.key];
+  for (let c = 1; c <= BULK_FLAG_CONVERSATIONS; c++) {
+    const conversationId = await seedEntry(client, {
+      kind: "conversation",
+      studentId: zoyaId,
+      mentorUserId: mentors.mentorA,
+      programId: zoya.programId,
+      daysAgo: 40 + c,
+    });
+    // Inserted in this order, so ids ascend and the feed reads Maths first.
+    for (const [recipient, n] of [
+      ["emotional_wellbeing", 4 * c],
+      ["physics", 4 * c - 1],
+      ["chemistry", 4 * c - 2],
+      ["maths", 4 * c - 3],
+    ] as const) {
+      await seedFlag(
+        client,
+        { conversationId, studentId: zoyaId, recipient, comment: bulkFlagComment(n), raisedBy: mentorA.email },
+        { days: BULK_FLAGS_DAYS_AGO, hours: c }
+      );
+    }
+  }
+
+  for (const admin of ["e2e-blended-admin@test.local", "e2e-blended-admin-read-only@test.local"]) {
+    await client.query(
+      `INSERT INTO blended_learning_flag_views (viewer_email, viewer_user_id, last_seen_at)
+       SELECT permission.email, permission.user_id, now() - make_interval(hours => $2)
+       FROM user_permission permission WHERE LOWER(permission.email) = LOWER($1)`,
+      [admin, FLAGS_LAST_SEEN_HOURS_AGO]
+    );
+  }
+}
+
 export async function seedBlendedLearningFixtures(client: Client): Promise<void> {
   const mentorA = await mentorUserId(client, BLENDED_MENTOR_A.email);
   const mentorB = await seedMentor(client, BLENDED_MENTOR_B);
@@ -532,7 +652,18 @@ export async function seedBlendedLearningFixtures(client: Client): Promise<void>
      VALUES
        ($1, 'https://docs.google.com/document/d/e2e-legacy', 'https://forms.gle/e2e-legacy', $4::date),
        ($2, 'https://docs.google.com/document/d/e2e-thirty', NULL, NULL),
-       ($3, 'https://docs.google.com/document/d/e2e-recent', 'https://forms.gle/e2e-recent', NULL)`,
-    [ids[legacy.key], ids[thirtyDays.key], ids[recent.key], LEGACY_MONTH]
+       ($3, 'https://docs.google.com/document/d/e2e-recent', 'https://forms.gle/e2e-recent', NULL),
+       ($5, $6, $7, NULL)`,
+    [
+      ids[legacy.key],
+      ids[thirtyDays.key],
+      ids[recent.key],
+      LEGACY_MONTH,
+      ids[mentorBStudent.key],
+      TARA_LINKS.profileDoc,
+      TARA_LINKS.screener,
+    ]
   );
+
+  await seedFeedFlags(client, ids, { mentorA, mentorB });
 }

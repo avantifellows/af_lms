@@ -12,12 +12,13 @@ import {
 // hand-computed from the fixture facts in blended-learning-fixtures.ts
 // (IST days before today; Attempts and drafts never count as contact):
 //   Mentor A — Ira G12 (Conversation 10, Attempt 2), Kabir G13 (nothing, a
-//   ready draft), Meera G12 (30), Nikhil G13 (legacy June 2026), Zoya G12 (29),
-//   Rohan G12 (3, a failed draft): 6 assigned, 4 + 2, last 7 days = Rohan,
-//   30+ days = Kabir, Meera, Nikhil.
-//   Mentor B — Sana G12, Tara G13, nothing logged: 2 assigned, 1 + 1, last 7
-//   days = 0, 30+ days = both. Sana's ended Mapping to Mentor A and Uday's
-//   previous-year Mapping never count for Mentor A.
+//   ready draft), Meera G12 (30; 45 too), Nikhil G13 (legacy June 2026), Zoya
+//   G12 (29; older bulk-flag Conversations), Rohan G12 (3, a failed draft):
+//   6 assigned, 4 + 2, last 7 days = Rohan, 30+ days = Kabir, Meera, Nikhil.
+//   Mentor B — Sana G12 (nothing), Tara G13 (flagged Conversations 35 and 40
+//   days ago, #453): 2 assigned, 1 + 1, last 7 days = 0, 30+ days = both.
+//   Sana's ended Mapping to Mentor A and Uday's previous-year Mapping never
+//   count for Mentor A.
 // Mentor C's Mentees are mutated by other specs, so no count is asserted.
 const EXPECTED_CARDS = [
   {

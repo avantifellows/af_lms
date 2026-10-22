@@ -197,7 +197,7 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   (read), `src/lib/holistic-follow-up-questions.ts` (client-safe question keys, text, and
   normaliser), `src/lib/holistic-mentor-write-scope.ts` (shared scope guard).
 
-## Blended Learning Mentee list (#442), Mentor cards (#452), detail (#444), logging (#445), Action Items (#446), Mentor Flags (#447), photos (#448) and Call Recording drafts (#449, retry/discard #450, review and save #451)
+## Blended Learning Mentee list (#442), Mentor cards (#452), Flags feed (#453), detail (#444), logging (#445), Action Items (#446), Mentor Flags (#447), photos (#448) and Call Recording drafts (#449, retry/discard #450, review and save #451)
 
 - **Tables:** the `blended_learning_*` tables are created by db-service (Mappings:
   `20260921120000` + its ensure migration; the other eight: PR #804,
@@ -394,6 +394,22 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
     'ready'`, else 409). `draftId` on an Attempt or a non-integer is 422. Hand-logged rows store
     `NULL` in the three draft columns. `blended-learning-draft-review.spec.ts` inserts a full
     `ready` draft for Mentor C's never-contacted F1 (desktop) / F2 (mobile) and saves it.
+- **Flags feed (#453):** `src/lib/blended-learning-flags.ts`, all behind `view_flags` (Blended
+  Learning Admins, read-only included). `listFlags(access, { mentorUserId?, recipient?, cursor })`
+  reads every `blended_learning_mentor_flags` row joined to its Conversation (the Mentor is the
+  Conversation's snapshot `mentor_user_id`, the program its `program_id`), the Student's `user`
+  (contact via `contactNumbers`, shared with the detail page), current grade and links; newest
+  first by `(inserted_at, id)`, 50 per page. The cursor is the last flag's id and the next page
+  is the keyset `(inserted_at, id) < (that flag's)`, so ties on the second-precision
+  `inserted_at` never duplicate or skip. `isNew` and `newCount` (`countNewFlags`, all flags,
+  whatever the filters) compare `inserted_at >` the viewer's **previous**
+  `blended_learning_flag_views.last_seen_at` (no row → everything is new). `listFlagMentors`
+  lists the Mentors on flagged Conversations for the filter. `POST
+  /api/blended-learning/flags/seen` → `recordFlagsSeen` upserts the viewer's row
+  `ON CONFLICT ((lower(viewer_email)))` with `last_seen_at = now()`; the Flags tab's
+  `MarkFlagsSeen` calls it after rendering, so this visit keeps its highlights. Every page load
+  of the tab (a filter change or a full reload included) is a visit. The fixture's feed flags
+  are on Conversations older than each Mentee's latest entry, so no list or card fact changes.
 - **Notes sanitiser (#445):** `sanitiseNotesHtml` in `src/lib/blended-learning-notes-sanitiser.ts`
   (server-only, `sanitize-html`) is the only path to `notes_html`: allowlist `p, h3, b, i, ul, ol,
   li, table, tr, th, td, br`, no attributes, no links (an `<a>` keeps its text), `strong→b`,
@@ -408,5 +424,7 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   `LOGGING_MENTEES` (one set per viewport) exist only for `blended-learning-log-entry.spec.ts`;
   Mentor C's `ACTION_ITEM_MENTEES` (with `EARLIER_ACTION_ITEMS`) exist only for
   `blended-learning-action-items.spec.ts`; Mentor C's `FLAG_MENTEES` exist only for
-  `blended-learning-mentor-flags.spec.ts`. Re-diff it with
+  `blended-learning-mentor-flags.spec.ts`. Those specs' new flags are the newest in the feed, so
+  `blended-learning-flags-feed.spec.ts` compares cards without Mentor C's and counts them into
+  "N new". Re-diff it with
   `patterns/mirror-db-service-schema-in-e2e.md` whenever PR #804 changes.

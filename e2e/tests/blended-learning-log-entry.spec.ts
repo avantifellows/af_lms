@@ -285,12 +285,14 @@ test.describe("Blended Learning logging — access", () => {
   test("a Mentor cannot log for another Mentor's Mentee", async ({ page }) => {
     const mentee = OTHER_STUDENTS.mentorB;
     await signInAs(page, BLENDED_MENTOR_A);
+    // Tara already has the Flags feed's Conversations (#453).
+    const before = (await savedEntries(studentIds[mentee.key])).length;
 
     const response = await page.request.post(entriesUrl(mentee), {
       data: { kind: "attempt", occurredOn: todayIST },
     });
     expect(response.status()).toBe(404);
-    expect(await savedEntries(studentIds[mentee.key])).toHaveLength(0);
+    expect(await savedEntries(studentIds[mentee.key])).toHaveLength(before);
 
     const page404 = await page.goto(logPath(mentee));
     expect(page404?.status()).toBe(404);

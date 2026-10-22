@@ -3,7 +3,8 @@ import { redirect } from "next/navigation";
 
 import { Card } from "@/components/ui";
 import { authOptions } from "@/lib/auth";
-import { canBlendedLearning, getBlendedLearningAccess } from "@/lib/blended-learning-access";
+import { canBlendedLearning, getBlendedLearningAccess, type BlendedLearningAccess } from "@/lib/blended-learning-access";
+import { countNewFlags, FLAG_RECIPIENTS, listFlagMentors, listFlags } from "@/lib/blended-learning-flags";
 import {
   listMentees,
   listMentorCards,
@@ -16,7 +17,12 @@ import { getTodayIST } from "@/lib/curriculum-date-helpers";
 import { AdminTabs, type AdminTab } from "./AdminTabs";
 import { BlendedLearningHeader } from "./BlendedLearningHeader";
 import { FilteredMenteeList } from "./FilteredMenteeList";
+import { FlagsFeed, type FlagsView } from "./FlagsFeed";
+import { MarkFlagsSeen } from "./MarkFlagsSeen";
 import { MentorCards } from "./MentorCards";
+
+type SearchParam = string | string[] | undefined;
+type SearchParams = { tab?: SearchParam; mentor?: SearchParam; recipient?: SearchParam; cursor?: SearchParam };
 
 function MentorMenteeList({ list }: { list: MenteeList }) {
   const total = list.talkToFirst.length + list.everyoneElse.length;
@@ -39,19 +45,50 @@ function MentorMenteeList({ list }: { list: MenteeList }) {
   );
 }
 
-function AdminLanding({ tab, cards }: { tab: AdminTab; cards: MentorCard[] }) {
+function AdminLanding({
+  tab,
+  cards,
+  flags,
+  newFlags,
+}: {
+  tab: AdminTab;
+  cards: MentorCard[];
+  flags: FlagsView | null;
+  newFlags: number;
+}) {
   return (
     <div className="space-y-5">
-      <AdminTabs current={tab} />
-      {tab === "mentors" ? (
-        <MentorCards cards={cards} />
-      ) : (
-        <Card elevation="sm" className="p-4 sm:p-6">
-          <p className="text-sm text-text-secondary">Mentor Flags will appear here.</p>
-        </Card>
+      <AdminTabs current={tab} newFlags={newFlags} />
+      {tab === "mentors" && <MentorCards cards={cards} />}
+      {flags && (
+        <>
+          <FlagsFeed view={flags} />
+          <MarkFlagsSeen />
+        </>
       )}
     </div>
   );
+}
+
+function single(value: SearchParam): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function positiveId(value: string | undefined): number | null {
+  return value && /^\d+$/.test(value) && Number(value) > 0 ? Number(value) : null;
+}
+
+// The Flags tab's page, from the URL's filters and cursor; unknown values are ignored.
+async function readFlags(access: BlendedLearningAccess, params: SearchParams): Promise<FlagsView | null> {
+  const mentorUserId = positiveId(single(params.mentor));
+  const recipientParam = single(params.recipient);
+  const recipient = FLAG_RECIPIENTS.find((value) => value === recipientParam) ?? null;
+  const cursor = positiveId(single(params.cursor));
+  const [page, mentors] = await Promise.all([
+    listFlags(access, { mentorUserId, recipient, cursor }),
+    listFlagMentors(access),
+  ]);
+  return page ? { page, mentors, mentorUserId, recipient, cursor } : null;
 }
 
 // Landing page for the Blended Learning section: a Mentor's own Mentee list,
@@ -59,7 +96,7 @@ function AdminLanding({ tab, cards }: { tab: AdminTab; cards: MentorCard[] }) {
 export default async function BlendedLearningPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ tab?: string | string[] }>;
+  searchParams?: Promise<SearchParams>;
 } = {}) {
   const session = await getServerSession(authOptions);
   const email = session?.user?.email;
@@ -70,17 +107,24 @@ export default async function BlendedLearningPage({
 
   const today = getTodayIST();
   const mentees = access.kind === "mentor" ? await listMentees({ access, today }) : null;
-  const tab: AdminTab = (await searchParams)?.tab === "flags" ? "flags" : "mentors";
+  const params = (await searchParams) ?? {};
+  const tab: AdminTab = single(params.tab) === "flags" ? "flags" : "mentors";
   const cards =
     !mentees && tab === "mentors" && canBlendedLearning(access, "view_mentors")
       ? await listMentorCards(access, today)
       : [];
+  const flags = !mentees && tab === "flags" ? await readFlags(access, params) : null;
+  const newFlags = mentees ? 0 : flags ? flags.page.newCount : await countNewFlags(access);
 
   return (
     <>
       <BlendedLearningHeader access={access} />
       <main className="mx-auto max-w-5xl px-4 py-6 sm:px-6">
-        {mentees ? <MentorMenteeList list={mentees} /> : <AdminLanding tab={tab} cards={cards} />}
+        {mentees ? (
+          <MentorMenteeList list={mentees} />
+        ) : (
+          <AdminLanding tab={tab} cards={cards} flags={flags} newFlags={newFlags} />
+        )}
       </main>
     </>
   );
