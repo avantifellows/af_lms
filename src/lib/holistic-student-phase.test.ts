@@ -619,7 +619,7 @@ describe("Holistic Student Phase derivation", () => {
         notes_id: 101, phase_id: 63, author_user_id: 9, author_name: "Divya Rao",
         state: "submitted", revision: 2, first_submitted_at: "2026-03-01T00:00:00Z",
         last_edited_at: "2026-03-02T00:00:00Z", question_id: 81,
-        question: "What helped?", question_position: 1, answer: "A weekly plan",
+        question: "What helped?", question_position: 1, answer: "A weekly plan", challenge_categories: [],
       }])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([]);
@@ -689,6 +689,84 @@ describe("Holistic Student Phase derivation", () => {
     });
   });
 
+  describe("Challenge Categories on the selected Phase Notes", () => {
+    const notesRow = (overrides: Record<string, unknown>) => ({
+      notes_id: 101, phase_id: 73, author_user_id: 9, author_name: "Divya Rao",
+      state: "submitted", revision: 2, first_submitted_at: "2026-07-05T00:00:00Z",
+      last_edited_at: "2026-07-06T00:00:00Z", question_id: 91,
+      question: "What helped?", question_position: 1, answer: "A weekly plan",
+      challenge_categories: ["non_academic.financial", "academic.other", "academic.subject_concept"],
+      ...overrides,
+    });
+    const readSelectedPhase = (notesRows: unknown[], reader: { actorUserId?: number; role: string }) => {
+      mockQuery
+        .mockResolvedValueOnce([{ student_id: 41, mapping_id: 301, name: "Asha", external_student_id: "S41", grade: 11, entry_grade: 11 }])
+        .mockResolvedValueOnce([{ id: 73, academic_year: "2026-2027", grade: 11, title: "Getting started", position: 1, revision: 5, state: "open", guidance_markdown: "Listen first." }])
+        .mockResolvedValueOnce([{ id: 91, phase_id: 73, text: "What helped?", position: 1 }])
+        .mockResolvedValueOnce([{ phase_id: 73, to_state: "open", occurred_at: "2026-06-01T00:00:00Z" }])
+        .mockResolvedValueOnce([{ academic_year: "2026-2027", started_at: "2026-07-01T00:00:00Z" }])
+        .mockResolvedValueOnce(notesRows)
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([]);
+      return getHolisticStudentPhase({
+        programId: 1, studentId: 41, phaseId: 73, schoolId: 4, academicYear: "2026-2027",
+        canEdit: true, ...reader,
+      }).then((detail) => detail!.selectedPhase as Record<string, unknown>);
+    };
+
+    it.each([
+      ["the current Mentor", { actorUserId: 10, role: "teacher" }],
+      ["a Holistic Mentorship Admin", { role: "holistic_mentorship_admin" }],
+    ])("returns submitted Notes' Categories in catalogue order to %s", async (_reader, reader) => {
+      const selected = await readSelectedPhase([notesRow({})], reader);
+
+      expect(selected.notes).toMatchObject({
+        state: "submitted",
+        challengeCategories: ["academic.subject_concept", "academic.other", "non_academic.financial"],
+      });
+    });
+
+    it("returns an empty Category list for submitted Notes without Category rows", async () => {
+      const selected = await readSelectedPhase([notesRow({ challenge_categories: [] })], { actorUserId: 10, role: "teacher" });
+
+      expect(selected.notes).toMatchObject({ state: "submitted", challengeCategories: [] });
+    });
+
+    it("returns a draft's Categories to its author", async () => {
+      const selected = await readSelectedPhase([notesRow({
+        author_user_id: 10, state: "draft", first_submitted_at: null, question_id: null, question: null, answer: null,
+        challenge_categories: ["academic.no_major_issue"],
+      })], { actorUserId: 10, role: "teacher" });
+
+      expect(selected).toMatchObject({
+        draftSaved: true,
+        canEditNotes: true,
+        notes: { state: "draft", answers: [], challengeCategories: ["academic.no_major_issue"] },
+      });
+    });
+
+    it("keeps another Mentor's Categories-only draft unclaimable and hides its Categories", async () => {
+      const selected = await readSelectedPhase([notesRow({
+        state: "draft", first_submitted_at: null, question_id: null, question: null, answer: null,
+        challenge_categories: ["academic.no_major_issue"],
+      })], { actorUserId: 10, role: "teacher" });
+
+      expect(selected.canEditNotes).toBe(false);
+      expect(selected.notes).toMatchObject({ state: "draft" });
+      expect(selected.notes).not.toHaveProperty("challengeCategories");
+      expect(selected.notes).not.toHaveProperty("answers");
+    });
+
+    it("lets a replacement Mentor claim a draft once answers and Categories are erased", async () => {
+      const selected = await readSelectedPhase([notesRow({
+        state: "draft", first_submitted_at: null, question_id: null, question: null, answer: null,
+        challenge_categories: [],
+      })], { actorUserId: 10, role: "teacher" });
+
+      expect(selected).toMatchObject({ canEditNotes: true, draftSaved: false, notesRevision: 2, notes: null });
+    });
+  });
+
   it("lets the current Mentor read prior-author submitted Notes without editing them", async () => {
     mockQuery
       .mockResolvedValueOnce([{
@@ -706,7 +784,7 @@ describe("Holistic Student Phase derivation", () => {
         notes_id: 101, phase_id: 73, author_user_id: 9, author_name: "Divya Rao",
         state: "submitted", revision: 2, first_submitted_at: "2026-07-05T00:00:00Z",
         last_edited_at: "2026-07-06T00:00:00Z", question_id: 91,
-        question: "What helped?", question_position: 1, answer: "A weekly plan",
+        question: "What helped?", question_position: 1, answer: "A weekly plan", challenge_categories: [],
       }])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([]);
@@ -746,7 +824,7 @@ describe("Holistic Student Phase derivation", () => {
         notes_id: 101, phase_id: 73, author_user_id: 10, author_name: "Nila Sen",
         state: "draft", revision: 2, first_submitted_at: null,
         last_edited_at: "2026-07-06T00:00:00Z", question_id: 91,
-        question: "What helped?", question_position: 1, answer: "A weekly plan",
+        question: "What helped?", question_position: 1, answer: "A weekly plan", challenge_categories: [],
       }])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([]);
@@ -795,7 +873,7 @@ describe("Holistic Student Phase derivation", () => {
       notes_id: 101, phase_id: 72, author_user_id: 9, author_name: "Divya Rao",
       state: "submitted", revision: 1, first_submitted_at: "2026-07-05T00:00:00Z",
       last_edited_at: "2026-07-06T00:00:00Z", question_id: 91,
-      question: "What helped?", question_position: 1, answer: "A weekly plan",
+      question: "What helped?", question_position: 1, answer: "A weekly plan", challenge_categories: [],
     }];
 
     function routeQueries(rows: {

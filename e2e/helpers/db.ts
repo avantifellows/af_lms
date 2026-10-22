@@ -171,6 +171,28 @@ async function seedHolisticE2eEmrsScope(
   );
 }
 
+// Current prod Question wording on one Phase, so the Challenge Category groups
+// render under their matching Questions (#460). Every other Synthetic Phase keeps
+// its single unmatched Question and shows the trailing Challenge Categories block.
+async function seedHolisticE2eChallengeQuestions(
+  client: Pick<PoolClient, "query">
+): Promise<void> {
+  await client.query(
+    `INSERT INTO holistic_mentorship_phase_questions (phase_id, text, position, inserted_at, updated_at)
+     SELECT phase.id, question.text, question.position, NOW(), NOW()
+     FROM holistic_mentorship_phases phase
+     JOIN holistic_mentorship_phase_plans plan ON plan.id = phase.phase_plan_id
+     CROSS JOIN (VALUES
+       ('Describe the academic challenges the student is facing.', 2),
+       ('Describe any non-academic challenges the student mentioned.', 3)
+     ) AS question(text, position)
+     WHERE plan.program_id = 1 AND plan.academic_year = $1
+       AND phase.title = 'Synthetic Grade 12 Active'
+     ON CONFLICT (phase_id, position) DO NOTHING`,
+    [CURRENT_ACADEMIC_YEAR]
+  );
+}
+
 async function seedHolisticE2eRoster(
   client: Pick<PoolClient, "query">,
   roster: HolisticE2eRoster = JNV_HOLISTIC_E2E_ROSTER
@@ -357,6 +379,7 @@ export async function resetDatabase(): Promise<void> {
       await client.query("BEGIN");
       await seedHolisticE2eRoster(client);
       await seedHolisticFixtures(client);
+      await seedHolisticE2eChallengeQuestions(client);
       await seedHolisticE2eEmrsScope(client);
       await client.query("COMMIT");
     } catch (error) {

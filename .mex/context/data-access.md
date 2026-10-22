@@ -232,4 +232,32 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   before the tombstone, and audits `privacy_content_erased` for each; the tombstone's
   `post_session_answers_erased` still counts answers only. Tests:
   `holistic-privacy.integration.test.ts` (real Postgres, opt-in).
-- Notes capture, read surfaces, CSV and the heatmap are later slices of #457.
+- **Notes capture (#460):** the student-phase `PATCH` body requires `challenge_categories: string[]`
+  for every action (`draft`, `submit`, `edit`); missing or non-array is 422 `Invalid Notes`.
+  The route trims and validates codes (`final: false`) before saving, so unknown, duplicate and
+  mixed `No major issue reported` sets are 422 in every mode. `saveHolisticNotes` takes
+  `challengeCategories` and, for Submit / Edit notes, checks both groups (`final: true`) only
+  after the token, state and every-answer checks; any failure rolls back the whole write.
+  - **Has content** = any answer row **or** any Category row. The existing-Notes lock query
+    returns `has_content`; erased-draft claiming and the read model's erased-draft check both use it.
+    A Categories-only first draft creates Notes, freezes the Phase and audits `draft_saved`;
+    the empty-initial-draft no-op needs no non-blank answers **and** no Categories.
+  - **Replace semantics:** after the Notes row `FOR UPDATE` and revision bump, the save deletes
+    the Notes' Category rows and re-inserts the submitted set in catalogue order, next to the
+    answers. Lock order, tokens, author rules and content-free audits are unchanged.
+  - **Read model:** student-phase `notes.challengeCategories` (codes, catalogue order, unknown
+    stored codes dropped) is returned wherever `answers` is: submitted Notes to every authorized
+    reader, drafts only to their author.
+  - **Mentor UI:** `StudentPhaseWorkspace` renders each group as a checkbox `fieldset` under the
+    Question chosen by `placeHolisticChallengeCategories`, or in a trailing "Challenge Categories"
+    block. Categories autosave with the answers. Submit / Save Changes check answers first, then
+    name the empty group(s), linked to the fieldset. The submitted view lists labels by group, or
+    "Categories not recorded". The Admin/PM read-only view and Student Context are not yet changed.
+  - **Release:** because the field is required, a Notes tab left open across the release gets a
+    422 on its next autosave; reloading fixes it. Say so in the PR body (release notes are built
+    from PR bodies).
+  - Tests: route and `holistic-notes.test.ts` (mocked), `holistic-notes.integration.test.ts`
+    (real Postgres, opt-in via `HOLISTIC_NOTES_TEST_DATABASE`), component tests, and the
+    Holistic Playwright spec. The e2e seed adds prod-wording Questions to "Synthetic Grade 12
+    Active" only (`seedHolisticE2eChallengeQuestions` in `e2e/helpers/db.ts`).
+- Admin/PM read surfaces, Student Context, CSV, MCP and the heatmap are later slices of #457.

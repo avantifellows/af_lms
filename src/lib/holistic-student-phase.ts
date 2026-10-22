@@ -4,6 +4,11 @@ import {
 } from "./constants";
 import { query } from "./db";
 import {
+  groupHolisticChallengeCategories,
+  HOLISTIC_CHALLENGE_CATEGORIES,
+  type HolisticChallengeCategoryCode,
+} from "./holistic-challenge-categories";
+import {
   HOLISTIC_FOLLOW_UP_QUESTIONS,
   type HolisticFollowUpNote,
 } from "./holistic-follow-up-questions";
@@ -99,6 +104,7 @@ export type HolisticStudentPhaseDetail = {
       firstSubmittedAt: string | null;
       lastEditedAt: string;
       answers?: Array<{ questionId: number; question: string; answer: string }>;
+      challengeCategories?: HolisticChallengeCategoryCode[];
     };
     followUpNotes: HolisticFollowUpNote[];
   });
@@ -236,6 +242,7 @@ type NotesRow = {
   question: string | null;
   question_position: number | null;
   answer: string | null;
+  challenge_categories: string[];
 };
 
 type HolisticFollowUpNoteRow = {
@@ -315,6 +322,7 @@ type PhaseNotes = {
   firstSubmittedAt: string | null;
   lastEditedAt: string;
   answers: Array<{ questionId: number; question: string; answer: string }>;
+  challengeCategories: HolisticChallengeCategoryCode[];
 };
 
 type NumberedPhase = Omit<PhaseRow, "id" | "grade"> & ApplicablePhase;
@@ -488,7 +496,10 @@ async function loadPhaseRelations(
               notes.state,
               notes.revision, notes.first_submitted_at, notes.last_edited_at,
               question.id AS question_id, question.text AS question,
-              question.position AS question_position, answer.answer
+              question.position AS question_position, answer.answer,
+              ARRAY(SELECT challenge.category_code
+                    FROM holistic_mentorship_post_session_note_challenges challenge
+                    WHERE challenge.notes_id = notes.id) AS challenge_categories
        FROM holistic_mentorship_post_session_notes notes
        LEFT JOIN "user" author ON author.id = notes.author_user_id
        LEFT JOIN holistic_mentorship_post_session_answers answer ON answer.notes_id = notes.id
@@ -567,6 +578,17 @@ function groupQuestions(rows: QuestionRow[]) {
   return grouped;
 }
 
+const CHALLENGE_CATEGORY_CODES: ReadonlySet<string> = new Set(
+  HOLISTIC_CHALLENGE_CATEGORIES.map(({ code }) => code)
+);
+
+// Catalogue order; a stored code the catalogue no longer knows is not shown.
+function notesChallengeCategories(codes: string[]): HolisticChallengeCategoryCode[] {
+  const known = codes.filter((code): code is HolisticChallengeCategoryCode => CHALLENGE_CATEGORY_CODES.has(code));
+  const { academic, nonAcademic } = groupHolisticChallengeCategories(known);
+  return [...academic, ...nonAcademic].map(({ code }) => code);
+}
+
 function groupNotes(rows: NotesRow[]): Map<number, PhaseNotes> {
   const grouped = new Map<number, PhaseNotes>();
   for (const row of rows) {
@@ -580,6 +602,7 @@ function groupNotes(rows: NotesRow[]): Map<number, PhaseNotes> {
       firstSubmittedAt: row.first_submitted_at,
       lastEditedAt: row.last_edited_at,
       answers: [],
+      challengeCategories: notesChallengeCategories(row.challenge_categories),
     };
     if (row.question !== null && row.answer !== null) {
       notes.answers.push({
@@ -726,7 +749,9 @@ function erasedDraftForActor(
   teacher: boolean
 ) {
   if (!teacher || notes?.state !== "draft") return false;
-  return notes.authorUserId !== actorUserId && notes.answers.length === 0;
+  // Same "has content" rule as the Notes write path: answers or Categories.
+  return notes.authorUserId !== actorUserId && notes.answers.length === 0 &&
+    notes.challengeCategories.length === 0;
 }
 
 function visibleNotes(notes: PhaseNotes | undefined, canReadDraft: boolean, erasedDraft: boolean) {
@@ -739,7 +764,7 @@ function visibleNotes(notes: PhaseNotes | undefined, canReadDraft: boolean, eras
     lastEditedAt: notes.lastEditedAt,
   };
   return notes.state === "submitted" || canReadDraft
-    ? { ...detail, answers: notes.answers }
+    ? { ...detail, answers: notes.answers, challengeCategories: notes.challengeCategories }
     : detail;
 }
 
