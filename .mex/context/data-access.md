@@ -312,6 +312,21 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
     first, yellow→dark-red cells with contrast-picked text, `shortLabel` below `sm` (full label in
     `title` / `aria-label` "Group: Label"), a hidden-School note, an empty state and loading /
     error + Retry.
+  - **Grid details (PR #466 QA):** cell colours come from `heatmapCellColours` in
+    `src/lib/holistic-challenge-category-heatmap-colours.ts`, which picks black or white text by real
+    WCAG contrast. Dark text is black (`#000`), not `#1f2937`: with grey text the best cell falls to
+    3.8:1 near 58%, while black keeps every 0.0–100.0% cell at ≥ 4.59:1 (white from 65.2%). The table
+    is `border-separate border-spacing-0` with borders on the cells, not the rows; collapsed row
+    borders painted the scrolled cells' colours through the sticky School column. Phase options
+    belong to the scope whose default resolved them: while a new Program/year/Grade loads, or after
+    its load fails, Phase shows only "All Phases" and is disabled (no stale `phase_id` → 422). A
+    failed request (offline/blocked) shows "Unable to load Challenge Categories. Please try again.",
+    never the browser's "Failed to fetch".
+  - **Tab in the URL:** the Admin workspace keeps the active tab in `?tab=` (`challenge-categories` /
+    `phases`; absent for Students & Progress) beside `program_id`, written with native
+    `history.replaceState` like the Program. A hidden or unknown `tab` falls back to Students &
+    Progress (Teachers never reach the admin page). A click shows its tab/Program at once, ahead of
+    useSearchParams catching up, so the heatmap never first loads the previous Program.
   - **All Programs (#464):** `program_id=all` gates on `program_read` with no Program and uses the
     access helper's `programIds` (the same scoped list as the admin page's Program selector: every
     Holistic Program for Admin / Holistic Mentorship Admin, the PM/PA's Programs with in-scope active
@@ -322,7 +337,9 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
     list (current year first, then newest).
   - **All Programs selector rule:** the shared Program selector gains "All Programs" (`value="all"`)
     **only** while the Challenge Categories tab is active **and** the viewer has ≥2 Programs; a
-    multi-Program viewer lands on it the first time (the tab then remembers All vs single). Choosing
+    multi-Program viewer lands on it on first opening, including a reload and after picking a
+    Program on another tab (issue #457: "the viewer's only Program, otherwise All Programs"); only a
+    Program choice made on the heatmap moves it off All Programs, and the tab remembers it. Choosing
     it never changes the URL's `program_id` or the shared single Program, so Students & Progress and
     Phase Setup get the last single Program back and never see "All Programs". Picking any Program
     (All or single) resets the Academic Year. With All Programs the panel's Phase select is disabled
