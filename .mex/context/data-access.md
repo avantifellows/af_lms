@@ -413,20 +413,26 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   is seeded with both keys; `blended-learning-recording-playback.spec.ts` stubs the two routes,
   since e2e has no S3.
 - **Flags feed (#453):** `src/lib/blended-learning-flags.ts`, all behind `view_flags` (Blended
-  Learning Admins, read-only included). `listFlags(access, { mentorUserId?, recipient?, cursor })`
+  Learning Admins, read-only included). `listFlags(access, { mentorUserId?, recipient?, cursor }, cutoff)`
   reads every `blended_learning_mentor_flags` row joined to its Conversation (the Mentor is the
   Conversation's snapshot `mentor_user_id`, the program its `program_id`), the Student's `user`
   (contact via `contactNumbers`, shared with the detail page), current grade and links; newest
   first by `(inserted_at, id)`, 50 per page. The cursor is the last flag's id and the next page
   is the keyset `(inserted_at, id) < (that flag's)`, so ties on the second-precision
   `inserted_at` never duplicate or skip. `isNew` and `newCount` (`countNewFlags`, all flags,
-  whatever the filters) compare `inserted_at >` the viewer's **previous**
-  `blended_learning_flag_views.last_seen_at` (no row → everything is new). `listFlagMentors`
-  lists the Mentors on flagged Conversations for the filter. `POST
-  /api/blended-learning/flags/seen` → `recordFlagsSeen` upserts the viewer's row
-  `ON CONFLICT ((lower(viewer_email)))` with `last_seen_at = now()`; the Flags tab's
-  `MarkFlagsSeen` calls it after rendering, so this visit keeps its highlights. Every page load
-  of the tab (a filter change or a full reload included) is a visit. The fixture's feed flags
+  whatever the filters) compare `inserted_at >` the **visit's cutoff**: the viewer's previous
+  `blended_learning_flag_views.last_seen_at` (no row → everything is new). A visit starts when
+  the tab is opened without `?since=`: the page reads the cutoff (`readFlagsCutoff`, the
+  timestamp(0) wall-clock value as `YYYY-MM-DDTHH:MM:SS`, never zone-shifted, or `never`) and
+  renders `MarkFlagsSeen`, which POSTs `/api/blended-learning/flags/seen` → `recordFlagsSeen`
+  (upsert `ON CONFLICT ((lower(viewer_email)))`, `last_seen_at = now()`). The filter form and
+  the Older/Newest links carry `since=<cutoff>` (`flagsCutoffParam` / `parseFlagsCutoff`), so
+  filter and page changes keep the same New flags and record nothing (QA-12); a malformed
+  `since` starts a new visit. Opening the tab again (its tab link has no `since`) is the next
+  visit. Each card's `inScope` is an active current-year Mapping for the Student: without
+  one the name is plain text and "Show notes" is hidden, since both would 404 through
+  `canAccessBlendedStudent`. `listFlagMentors` lists the Mentors on flagged Conversations for
+  the filter. The fixture's feed flags
   are on Conversations older than each Mentee's latest entry, so no list or card fact changes.
 - **Notes sanitiser (#445):** `sanitiseNotesHtml` in `src/lib/blended-learning-notes-sanitiser.ts`
   (server-only, `sanitize-html`) is the only path to `notes_html`: allowlist `p, h3, b, i, ul, ol,
