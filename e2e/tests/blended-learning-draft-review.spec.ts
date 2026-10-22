@@ -251,7 +251,7 @@ for (const { label, key, viewport, entryRole } of VIEWPORTS) {
       // Last Contact is now yesterday's Conversation, and the chip is gone.
       await page.goto("/blended-learning");
       const after = listEntry(page, "Everyone else");
-      await expect(after).toContainText("1 day ago");
+      await expect(after).toContainText("Yesterday");
       await expect(after.getByText("Draft ready to review")).toHaveCount(0);
       await expect(listEntry(page, "Talk to first")).toHaveCount(0);
     });

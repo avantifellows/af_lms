@@ -148,7 +148,7 @@ function TableRow({ mentee, canLog, today }: RowProps) {
       <td className={cell}>
         <span className="flex flex-col items-start gap-1.5">
           <WhyNowTags mentee={mentee} today={today} />
-          <DraftChip mentee={mentee} canLog={canLog} />
+          <DraftChip mentee={mentee} canLog={canLog} className="min-h-11 -my-2.5" />
         </span>
       </td>
       <td className={`${cell} whitespace-nowrap`}>{orDash(mentee.grade)}</td>

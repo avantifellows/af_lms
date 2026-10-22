@@ -64,9 +64,12 @@ for (const { label, viewport } of VIEWPORTS) {
       await signInAs(page, BLENDED_MENTOR_A);
       await page.goto(`/blended-learning/students/${studentIds[MENTEES.recent.key]}/log`);
 
-      await expect(
-        page.getByText(`${MENTEES.recent.firstName} already has a Conversation Draft, so no recording can be uploaded now.`)
-      ).toBeVisible();
+      // Rohan's draft failed: the Recording card shows it, with its controls,
+      // in place of the upload.
+      const recording = page.getByRole("region", { name: "Recording" });
+      const draft = recording.getByRole("region", { name: "Conversation Draft" });
+      await expect(draft.getByText("Drafting failed")).toBeVisible();
+      await expect(draft.getByRole("button", { name: "Discard" })).toBeVisible();
       await expect(page.getByLabel("Upload the recording")).toHaveCount(0);
     });
 
