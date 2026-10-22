@@ -1,9 +1,10 @@
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { mockGetServerSession, mockGetBlendedLearningAccess, mockRedirect } = vi.hoisted(() => ({
+const { mockGetServerSession, mockGetBlendedLearningAccess, mockListMentees, mockRedirect } = vi.hoisted(() => ({
   mockGetServerSession: vi.fn(),
   mockGetBlendedLearningAccess: vi.fn(),
+  mockListMentees: vi.fn(),
   mockRedirect: vi.fn((url: string) => {
     throw new Error(`REDIRECT:${url}`);
   }),
@@ -16,6 +17,8 @@ vi.mock("@/lib/blended-learning-access", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/blended-learning-access")>()),
   getBlendedLearningAccess: mockGetBlendedLearningAccess,
 }));
+vi.mock("@/lib/blended-learning-mentees", () => ({ listMentees: mockListMentees }));
+vi.mock("@/lib/curriculum-date-helpers", () => ({ getTodayIST: () => "2026-10-22" }));
 
 import BlendedLearningPage from "./page";
 
@@ -42,6 +45,7 @@ function signedInAs(email: string) {
 describe("BlendedLearningPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockListMentees.mockResolvedValue({ talkToFirst: [], everyoneElse: [] });
   });
 
   it("sends a signed-out visitor to sign-in", async () => {
@@ -66,6 +70,35 @@ describe("BlendedLearningPage", () => {
     expect(screen.getByText("Mentor")).toBeInTheDocument();
     expect(screen.getByText("faizan@avantifellows.org")).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /dashboard/i })).not.toBeInTheDocument();
+  });
+
+  it("shows a Mentor their own Mentee list for today's IST date, grouped", async () => {
+    signedInAs("faizan@avantifellows.org");
+    mockGetBlendedLearningAccess.mockResolvedValue(MENTOR);
+    mockListMentees.mockResolvedValue({
+      talkToFirst: [{
+        studentId: 501, name: "Ira Attempt", gender: "Female", grade: 12, programId: 80,
+        programName: "STP Voucher Delhi", lastContact: "2026-10-12", lastContactSource: "conversation",
+        latestEntryKind: "attempt", openDraftState: null, reasons: ["attempt"], daysSince: 10,
+      }],
+      everyoneElse: [],
+    });
+
+    render(await BlendedLearningPage());
+
+    expect(mockListMentees).toHaveBeenCalledWith({ access: MENTOR, today: "2026-10-22" });
+    expect(screen.getByRole("region", { name: "Talk to First" })).toHaveTextContent("Ira Attempt");
+    expect(screen.getByRole("region", { name: "Everyone else" })).toBeInTheDocument();
+  });
+
+  it("does not read a Mentee list for a Blended Learning Admin", async () => {
+    signedInAs("juned@avantifellows.org");
+    mockGetBlendedLearningAccess.mockResolvedValue(BLENDED_ADMIN);
+
+    render(await BlendedLearningPage());
+
+    expect(mockListMentees).not.toHaveBeenCalled();
+    expect(screen.queryByRole("region", { name: "Talk to First" })).not.toBeInTheDocument();
   });
 
   it("labels a read-only Blended Learning Admin as read only", async () => {

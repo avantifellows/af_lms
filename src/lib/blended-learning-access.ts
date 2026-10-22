@@ -1,11 +1,11 @@
 import { query } from "./db";
-import { BLENDED_MENTOR_ROLE } from "./constants";
+import { BLENDED_MENTOR_ROLE, CURRENT_ACADEMIC_YEAR } from "./constants";
 import { getBlendedLearningPermission, getFeatureAccess } from "./permissions";
 
 // The single gate for /blended-learning (server-only). Every Blended Learning
 // page and API route calls getBlendedLearningAccess before reading or writing,
-// then canBlendedLearning for the action. Student-level scoping
-// (canAccessBlendedStudent) arrives with the Mentee list.
+// then canBlendedLearning for the action, and canAccessBlendedStudent before
+// touching one Student.
 
 export type BlendedLearningAction =
   | "view_list"
@@ -80,4 +80,31 @@ export function canBlendedLearning(
   if (MUTATIONS.has(action) && access.readOnly) return false;
   if (ADMIN_ONLY.has(action) && access.kind !== "admin") return false;
   return true;
+}
+
+// The Mapping source: active Mappings (`ended_at IS NULL`) for
+// CURRENT_ACADEMIC_YEAR. `yearParam` is the placeholder bound to it.
+export function activeBlendedMappingSql(alias: string, yearParam: string): string {
+  return `${alias}.academic_year = ${yearParam} AND ${alias}.ended_at IS NULL`;
+}
+
+// A Student is in scope with an active current-year Mapping; for a Mentor
+// that Mapping must be to them.
+export async function canAccessBlendedStudent(
+  access: BlendedLearningAccess | null,
+  studentId: number
+): Promise<boolean> {
+  if (!access || !Number.isSafeInteger(studentId) || studentId <= 0) return false;
+  if (access.kind === "mentor" && access.mentorUserId == null) return false;
+
+  const rows = await query<{ mentor_user_id: number | string }>(
+    `SELECT mapping.mentor_user_id
+     FROM blended_learning_mentor_mentee_mappings mapping
+     WHERE mapping.student_id = $1 AND ${activeBlendedMappingSql("mapping", "$2")}
+     LIMIT 1`,
+    [studentId, CURRENT_ACADEMIC_YEAR]
+  );
+  const mapping = rows[0];
+  if (!mapping) return false;
+  return access.kind === "admin" || Number(mapping.mentor_user_id) === access.mentorUserId;
 }

@@ -4,6 +4,7 @@ vi.mock("./db", () => ({ query: vi.fn() }));
 
 import { query } from "./db";
 import {
+  canAccessBlendedStudent,
   canBlendedLearning,
   getBlendedLearningAccess,
   type BlendedLearningAccess,
@@ -150,5 +151,54 @@ describe("canBlendedLearning", () => {
 
   it("refuses every action without access", () => {
     expect(canBlendedLearning(null, "view_list")).toBe(false);
+  });
+});
+
+describe("canAccessBlendedStudent", () => {
+  const mentor: BlendedLearningAccess = {
+    kind: "mentor", role: "blended_mentor", readOnly: false,
+    actorEmail: "faizan@avantifellows.org", actorUserId: 9001, mentorUserId: 9001,
+  };
+  const readOnlyAdmin: BlendedLearningAccess = {
+    kind: "admin", role: "blended_admin", readOnly: true,
+    actorEmail: "shalinijha@avantifellows.org", actorUserId: 13,
+  };
+
+  // Fixture: the active current-year Mapping per Student (what the SQL returns).
+  function givenActiveMappings(mappings: { student_id: number; mentor_user_id: number }[]) {
+    mockQuery.mockImplementation(async (sql: string, params?: unknown[]) => {
+      if (!sql.includes("blended_learning_mentor_mentee_mappings")) return [];
+      return mappings.filter((m) => m.student_id === Number(params?.[0]));
+    });
+  }
+
+  it("lets a Mentor reach a Student mapped to them", async () => {
+    givenActiveMappings([{ student_id: 501, mentor_user_id: 9001 }]);
+    expect(await canAccessBlendedStudent(mentor, 501)).toBe(true);
+  });
+
+  it("refuses a Mentor a Student mapped to another Mentor", async () => {
+    givenActiveMappings([{ student_id: 502, mentor_user_id: 9002 }]);
+    expect(await canAccessBlendedStudent(mentor, 502)).toBe(false);
+  });
+
+  it("lets a Blended Learning Admin, even read-only, reach any mapped Student", async () => {
+    givenActiveMappings([{ student_id: 502, mentor_user_id: 9002 }]);
+    expect(await canAccessBlendedStudent(readOnlyAdmin, 502)).toBe(true);
+  });
+
+  it("refuses everyone a Student with no active current-year Mapping", async () => {
+    givenActiveMappings([]);
+    expect(await canAccessBlendedStudent(mentor, 503)).toBe(false);
+    expect(await canAccessBlendedStudent(readOnlyAdmin, 503)).toBe(false);
+  });
+
+  it("refuses a Mentor with no Mentor user id, an invalid Student id and no access, without reading", async () => {
+    givenActiveMappings([{ student_id: 501, mentor_user_id: 9001 }]);
+    expect(await canAccessBlendedStudent({ ...mentor, mentorUserId: null }, 501)).toBe(false);
+    expect(await canAccessBlendedStudent(mentor, Number.NaN)).toBe(false);
+    expect(await canAccessBlendedStudent(mentor, 0)).toBe(false);
+    expect(await canAccessBlendedStudent(null, 501)).toBe(false);
+    expect(mockQuery).not.toHaveBeenCalled();
   });
 });

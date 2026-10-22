@@ -9,6 +9,11 @@ import {
   getBlendedLearningAccess,
   type BlendedLearningAccess,
 } from "@/lib/blended-learning-access";
+import { listMentees, type MenteeList } from "@/lib/blended-learning-mentees";
+import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
+import { getTodayIST } from "@/lib/curriculum-date-helpers";
+
+import { MenteeGroup } from "./MenteeList";
 
 function accessLabel(access: BlendedLearningAccess) {
   if (access.kind === "mentor") return "Mentor";
@@ -55,8 +60,40 @@ function BlendedLearningHeader({ access }: { access: BlendedLearningAccess }) {
   );
 }
 
-// Landing page for the Blended Learning section. The Mentee list (Mentors)
-// and the Mentors and Flags tabs (admins) fill this in later.
+function MentorMenteeList({ list: { talkToFirst, everyoneElse } }: { list: MenteeList }) {
+  const total = talkToFirst.length + everyoneElse.length;
+  if (total === 0) {
+    return (
+      <Card elevation="sm" className="p-4 sm:p-6">
+        <p className="text-sm text-text-secondary">
+          No Mentees are mapped to you for {CURRENT_ACADEMIC_YEAR}.
+        </p>
+      </Card>
+    );
+  }
+  return (
+    <div className="space-y-5">
+      <p className="text-sm text-text-secondary">
+        {total} {total === 1 ? "Mentee" : "Mentees"} · {CURRENT_ACADEMIC_YEAR}
+      </p>
+      <MenteeGroup
+        title="Talk to First"
+        description="Last try didn't connect, never reached, or 30+ days since you last talked."
+        mentees={talkToFirst}
+        emptyText="Everyone has been talked to recently."
+      />
+      <MenteeGroup
+        title="Everyone else"
+        description="Talked to in the last 30 days."
+        mentees={everyoneElse}
+        emptyText="No one here yet."
+      />
+    </div>
+  );
+}
+
+// Landing page for the Blended Learning section: a Mentor's own Mentee list.
+// The Mentors and Flags tabs (admins) fill in the admin view later.
 export default async function BlendedLearningPage() {
   const session = await getServerSession(authOptions);
   const email = session?.user?.email;
@@ -65,17 +102,19 @@ export default async function BlendedLearningPage() {
   const access = await getBlendedLearningAccess(email);
   if (!access || !canBlendedLearning(access, "view_list")) redirect("/dashboard");
 
+  const mentees = access.kind === "mentor" ? await listMentees({ access, today: getTodayIST() }) : null;
+
   return (
     <>
       <BlendedLearningHeader access={access} />
       <main className="mx-auto max-w-5xl px-4 py-6 sm:px-6">
-        <Card elevation="sm" className="p-4 sm:p-6">
-          <p className="text-sm text-text-secondary">
-            {access.kind === "mentor"
-              ? "Your Mentees will appear here."
-              : "Mentors and Mentor Flags will appear here."}
-          </p>
-        </Card>
+        {mentees ? (
+          <MentorMenteeList list={mentees} />
+        ) : (
+          <Card elevation="sm" className="p-4 sm:p-6">
+            <p className="text-sm text-text-secondary">Mentors and Mentor Flags will appear here.</p>
+          </Card>
+        )}
       </main>
     </>
   );

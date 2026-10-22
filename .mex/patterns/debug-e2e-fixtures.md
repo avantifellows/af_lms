@@ -14,7 +14,7 @@ edges:
     condition: when failures are in PM school visit flows
   - target: context/data-access.md
     condition: when fixture rows need to match schema/read-path expectations
-last_updated: 2026-10-14
+last_updated: 2026-10-22
 ---
 
 # Debug E2E Fixtures
@@ -48,6 +48,7 @@ expectations, or fixture rows missing a relationship the app now requires.
 - Curriculum topics need `topic_curriculum` rows in the fixture migration, not just `chapter` and `topic` rows.
 - Responsive visit lists can render hidden duplicate links; target visible links or rows.
 - Program-admin `/visits` redirects to `/school-visit-summary`; go directly to visit detail when asserting read-only access.
+- Blended Learning tables come from `e2e/fixtures/migrations/20261022130000_add_blended_learning_schema.sql` and the seed in `e2e/helpers/blended-learning-fixtures.ts` (run by `resetDatabase()` after `seedHolisticFixtures`, which creates the Mentor persona). Fixture dates are IST-day offsets from the seed's IST today, so a run that crosses IST midnight can shift by a day. If db-service changes those tables, re-diff with `patterns/mirror-db-service-schema-in-e2e.md`.
 - Visit action schemas should match the canonical validator shape; do not revive older legacy payload forms just to make an e2e pass.
 
 ## Verify

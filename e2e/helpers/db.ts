@@ -18,6 +18,7 @@ import {
   applyHolisticDbServiceSchema,
   seedHolisticFixtures,
 } from "../../src/lib/holistic-fixtures";
+import { seedBlendedLearningFixtures } from "./blended-learning-fixtures";
 
 const TEST_DB = "af_lms_test";
 const DUMP_FILE = path.resolve(__dirname, "../fixtures/db-dump.sql");
@@ -358,6 +359,8 @@ export async function resetDatabase(): Promise<void> {
       await seedHolisticE2eRoster(client);
       await seedHolisticFixtures(client);
       await seedHolisticE2eEmrsScope(client);
+      // After seedHolisticFixtures, which seeds the Blended Learning personas.
+      await seedBlendedLearningFixtures(client);
       await client.query("COMMIT");
     } catch (error) {
       await client.query("ROLLBACK");

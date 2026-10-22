@@ -21,7 +21,7 @@ edges:
     condition: when adding a write that must proxy to the DB Service
   - target: patterns/add-api-route.md
     condition: when adding a route that reads or writes
-last_updated: 2026-10-21
+last_updated: 2026-10-22
 ---
 
 # Data Access
@@ -196,3 +196,28 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
 - **Code:** `src/lib/holistic-follow-up-notes.ts` (write), `src/lib/holistic-student-phase.ts`
   (read), `src/lib/holistic-follow-up-questions.ts` (client-safe question keys, text, and
   normaliser), `src/lib/holistic-mentor-write-scope.ts` (shared scope guard).
+
+## Blended Learning Mentee list (#442)
+
+- **Tables:** the `blended_learning_*` tables are created by db-service (Mappings:
+  `20260921120000` + its ensure migration; the other eight: PR #804,
+  `20261022120000`–`20261022120700`). af_lms reads (and, in later slices, writes) them directly
+  over SQL (ADR 0005), never through DB Service HTTP.
+- **Mapping source:** active Mappings for `CURRENT_ACADEMIC_YEAR` with `ended_at IS NULL`,
+  written once as `activeBlendedMappingSql(alias, yearParam)` in
+  `src/lib/blended-learning-access.ts`. `canAccessBlendedStudent` and `listMentees` both use it.
+- **Read model:** `listMentees({ access, mentorUserId?, today })` in
+  `src/lib/blended-learning-mentees.ts`. One query per list: grade from the current grade
+  enrollment (`enrollment_record`, `group_type = 'grade'`, `is_current`), program from the
+  active Mapping, the latest Conversation and latest Attempt (`(occurred_on, id)` DESC, through
+  `LATERAL`), `blended_learning_student_links.legacy_last_contact_month`, and the open draft
+  state (`transcribing|ready|failed`). A Mentor always gets their own Mentees, whatever
+  `mentorUserId` says; a Mentor without a Mentor user id gets an empty list without a query.
+  Rows are grouped (Talk to First = any reason) and sorted in JS by the pure policy.
+- **Talk to First policy:** `src/lib/blended-learning-talk-to-first.ts`, pure and client-safe:
+  `talkToFirst`, `latestEntryKind`, `lastContactOf`, `compareTalkToFirst`,
+  `talkedToInLastWeek`. IST calendar dates as `YYYY-MM-DD`; a legacy month counts as its last
+  day and is ignored once a Conversation exists. Drafts never feed it.
+- **E2E fixture schema:** `e2e/fixtures/migrations/20261022130000_add_blended_learning_schema.sql`
+  mirrors those 10 db-service migrations exactly. Re-diff it with
+  `patterns/mirror-db-service-schema-in-e2e.md` whenever PR #804 changes.
