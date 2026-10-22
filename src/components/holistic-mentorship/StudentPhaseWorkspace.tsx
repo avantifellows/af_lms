@@ -725,14 +725,17 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
       canEdit={canEditSubmittedNotes(props.editable, notesState)} onEdit={beginCorrection} />
     <NotesEditorContent
       showInputs={showInputs}
-      editable={<EditableNotesForm questions={props.questions} value={value} status={status} error={error}
+      editable={<EditableNotesForm questions={props.questions} value={value}
         validationError={validationError} validationErrorId={validationErrorId}
         missingCategories={missingCategories} categoryErrorId={categoryErrorId}
-        canRetry={enabledUnlessDisabled(autosaveEnabled, conflict)} editingSubmitted={editingSubmitted}
         disabled={finalWriting} onAnswerChange={updateAnswer} onCategoryToggle={toggleCategory}
         onTextarea={(questionId, element) => { textareasRef.current[questionId] = element; }}
         onCategoryFieldset={(group, element) => { categoryFieldsetsRef.current[group] = element; }}
-        onRetry={retry} onSaveCorrection={saveCorrection} onCancelCorrection={cancelCorrection} onSubmit={submit} />}
+        actions={<NotesEditorActions status={status} error={error} validationError={validationError}
+          validationErrorId={validationErrorId} categoryError={categoryValidationMessage(missingCategories)}
+          categoryErrorId={categoryErrorId} canRetry={enabledUnlessDisabled(autosaveEnabled, conflict)}
+          editingSubmitted={editingSubmitted} disabled={finalWriting} onRetry={retry}
+          onSaveCorrection={saveCorrection} onCancelCorrection={cancelCorrection} onSubmit={submit} />} />}
       submitted={<><SubmittedNotesView questions={props.questions} value={value}
           submitted={notesState === "submitted"} />
         {success && <p role="status" className="text-sm font-medium text-success">{success}</p>}</>}
@@ -860,62 +863,75 @@ function ChallengeCategoryFieldset({ group, selected, invalid, errorId, disabled
   </fieldset>;
 }
 
-function EditableNotesForm({ questions, value, status, error, validationError, validationErrorId,
-  missingCategories, categoryErrorId, canRetry, editingSubmitted, disabled, onAnswerChange,
-  onCategoryToggle, onTextarea, onCategoryFieldset, onRetry, onSaveCorrection, onCancelCorrection, onSubmit }: {
+// The Category groups shown under `questionId`; `null` gives the unplaced groups.
+function categoryGroupsPlacedUnder(
+  placement: ReturnType<typeof placeHolisticChallengeCategories>,
+  questionId: number | null,
+) {
+  return CATEGORY_GROUPS.filter(({ key }) =>
+    (key === "academic" ? placement.academicQuestionId : placement.nonAcademicQuestionId) === questionId);
+}
+
+function NotesAnswerField({ question, answer, validationError, validationErrorId, disabled, onTextarea,
+  onAnswerChange, children }: {
+  question: NotesEditorProps["questions"][number];
+  answer: string | undefined;
+  validationError: string;
+  validationErrorId: string;
+  disabled: boolean;
+  onTextarea: (questionId: number, element: HTMLTextAreaElement | null) => void;
+  onAnswerChange: (questionId: number, answer: string) => void;
+  children: ReactNode;
+}) {
+  const invalid = Boolean(validationError && !answer?.trim());
+  return <div className="space-y-3">
+    <label className="block space-y-1 text-sm font-semibold text-text-secondary">
+      {question.text} <span aria-hidden="true" className="text-accent">*</span>
+      <span className="sr-only">required</span>
+      <textarea ref={(element) => onTextarea(question.questionId, element)} aria-label={question.text}
+      aria-invalid={invalid} aria-describedby={invalid ? validationErrorId : undefined} rows={4}
+      disabled={disabled}
+      value={answer ?? ""}
+      onChange={(event) => onAnswerChange(question.questionId, event.target.value)}
+      className="w-full resize-y rounded-md border border-border bg-bg-card p-3 font-normal text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20" />
+    </label>
+    {children}
+  </div>;
+}
+
+// `actions` renders below the fields: the Notes errors and Submit/Save controls.
+function EditableNotesForm({ questions, value, validationError, validationErrorId, missingCategories,
+  categoryErrorId, disabled, onAnswerChange, onCategoryToggle, onTextarea, onCategoryFieldset, actions }: {
   questions: NotesEditorProps["questions"];
   value: NotesValue;
-  status: NotesEditorStatus;
-  error: string;
   validationError: string;
   validationErrorId: string;
   missingCategories: CategoryGroupKey[];
   categoryErrorId: string;
-  canRetry: boolean;
-  editingSubmitted: boolean;
   disabled: boolean;
   onAnswerChange: (questionId: number, answer: string) => void;
   onCategoryToggle: (code: HolisticChallengeCategoryCode) => void;
   onTextarea: (questionId: number, element: HTMLTextAreaElement | null) => void;
   onCategoryFieldset: (group: CategoryGroupKey, element: HTMLFieldSetElement | null) => void;
-  onRetry: () => void;
-  onSaveCorrection: () => Promise<void>;
-  onCancelCorrection: () => void;
-  onSubmit: () => Promise<void>;
+  actions: ReactNode;
 }) {
   const placement = placeHolisticChallengeCategories(questions);
-  const placedUnder = (questionId: number | null) => CATEGORY_GROUPS.filter(({ key }) =>
-    (key === "academic" ? placement.academicQuestionId : placement.nonAcademicQuestionId) === questionId);
   const fieldset = (group: (typeof CATEGORY_GROUPS)[number]) => <ChallengeCategoryFieldset key={group.key}
     group={group} selected={value.challengeCategories} invalid={missingCategories.includes(group.key)}
     errorId={categoryErrorId} disabled={disabled} onToggle={onCategoryToggle} onFieldset={onCategoryFieldset} />;
-  const unplaced = placedUnder(null);
+  const unplaced = categoryGroupsPlacedUnder(placement, null);
   return <>
-    {questions.map((question) => {
-      const invalid = Boolean(validationError && !value.answers[question.questionId]?.trim());
-      return <div key={question.questionId} className="space-y-3">
-        <label className="block space-y-1 text-sm font-semibold text-text-secondary">
-          {question.text} <span aria-hidden="true" className="text-accent">*</span>
-          <span className="sr-only">required</span>
-          <textarea ref={(element) => onTextarea(question.questionId, element)} aria-label={question.text}
-          aria-invalid={invalid} aria-describedby={invalid ? validationErrorId : undefined} rows={4}
-          disabled={disabled}
-          value={value.answers[question.questionId] ?? ""}
-          onChange={(event) => onAnswerChange(question.questionId, event.target.value)}
-          className="w-full resize-y rounded-md border border-border bg-bg-card p-3 font-normal text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20" />
-        </label>
-        {placedUnder(question.questionId).map(fieldset)}
-      </div>;
-    })}
+    {questions.map((question) => <NotesAnswerField key={question.questionId} question={question}
+      answer={value.answers[question.questionId]} validationError={validationError}
+      validationErrorId={validationErrorId} disabled={disabled} onTextarea={onTextarea}
+      onAnswerChange={onAnswerChange}>
+      {categoryGroupsPlacedUnder(placement, question.questionId).map(fieldset)}
+    </NotesAnswerField>)}
     {unplaced.length > 0 && <div className="space-y-3">
       <h3 className="text-sm font-semibold text-text-secondary">Challenge Categories</h3>
       {unplaced.map(fieldset)}
     </div>}
-    <NotesEditorActions status={status} error={error} validationError={validationError}
-      validationErrorId={validationErrorId} categoryError={categoryValidationMessage(missingCategories)}
-      categoryErrorId={categoryErrorId} canRetry={canRetry} editingSubmitted={editingSubmitted}
-      disabled={disabled}
-      onRetry={onRetry} onSaveCorrection={onSaveCorrection} onCancelCorrection={onCancelCorrection} onSubmit={onSubmit} />
+    {actions}
   </>;
 }
 
@@ -936,28 +952,44 @@ function NotesEditorActions({ status, error, validationError, validationErrorId,
   onCancelCorrection: () => void;
   onSubmit: () => Promise<void>;
 }) {
+  const busy = disabled || status === "saving";
   return <div className="flex min-h-11 flex-wrap items-center justify-end gap-3" aria-live="polite">
-    {validationError && <span id={validationErrorId} role="alert" className="text-sm text-danger">
-      {validationError}
-    </span>}
-    {categoryError && <span id={categoryErrorId} role="alert" className="text-sm text-danger">
-      {categoryError}
-    </span>}
-    {status === "failed" && <>
-      {editingSubmitted && <span className="text-sm text-danger">{error}</span>}
-      {canRetry && <Button type="button" variant="secondary" className="text-xs" disabled={disabled} onClick={onRetry}>Retry</Button>}
-    </>}
+    <NotesEditorAlert id={validationErrorId} message={validationError} />
+    <NotesEditorAlert id={categoryErrorId} message={categoryError} />
+    {status === "failed" && <NotesSaveFailure error={error} showError={editingSubmitted} canRetry={canRetry}
+      disabled={disabled} onRetry={onRetry} />}
     {editingSubmitted
       ? <><Button type="button" variant="ghost" disabled={disabled} onClick={onCancelCorrection}>Cancel</Button>
-          <Button type="button" onClick={() => void onSaveCorrection()} disabled={disabled || status === "saving"}>
+          <Button type="button" onClick={() => void onSaveCorrection()} disabled={busy}>
             <Save aria-hidden="true" className="h-4 w-4" />
             Save Changes
           </Button></>
-      : <Button type="button" onClick={() => void onSubmit()} disabled={disabled || status === "saving"}>
+      : <Button type="button" onClick={() => void onSubmit()} disabled={busy}>
           <Send aria-hidden="true" className="h-4 w-4" />
           Submit Notes
         </Button>}
   </div>;
+}
+
+function NotesEditorAlert({ id, message }: { id: string; message: string }) {
+  if (!message) return null;
+  return <span id={id} role="alert" className="text-sm text-danger">
+    {message}
+  </span>;
+}
+
+// Correction mode shows the save error inline; draft mode shows it in the save state.
+function NotesSaveFailure({ error, showError, canRetry, disabled, onRetry }: {
+  error: string;
+  showError: boolean;
+  canRetry: boolean;
+  disabled: boolean;
+  onRetry: () => void;
+}) {
+  return <>
+    {showError && <span className="text-sm text-danger">{error}</span>}
+    {canRetry && <Button type="button" variant="secondary" className="text-xs" disabled={disabled} onClick={onRetry}>Retry</Button>}
+  </>;
 }
 
 type PhaseStage = "Completed" | "Open" | "Skipped" | "Locked";

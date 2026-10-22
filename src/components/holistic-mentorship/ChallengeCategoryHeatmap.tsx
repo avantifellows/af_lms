@@ -4,6 +4,7 @@ import { Download } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { Button, Select } from "@/components/ui";
+import { downloadFile } from "@/lib/file-download";
 import {
   HOLISTIC_CHALLENGE_CATEGORIES,
   holisticChallengeCategoryPercent,
@@ -100,6 +101,11 @@ function useHeatmap(programId: number | "all", academicYear: string, grade: 11 |
 }
 
 // The route names the file from the filters (year, Grade, Program, Phase).
+function attachmentFilename(response: Response) {
+  return /filename="([^"]+)"/.exec(response.headers.get("Content-Disposition") ?? "")?.[1]
+    ?? "challenge-categories.csv";
+}
+
 function useHeatmapDownload(search: string) {
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState("");
@@ -107,18 +113,8 @@ function useHeatmapDownload(search: string) {
     setDownloading(true);
     setDownloadError("");
     try {
-      const response = await fetch(`/api/holistic-mentorship/challenge-categories?${search}&format=csv`);
-      if (!response.ok) {
-        const body = await response.json().catch(() => null) as { error?: string } | null;
-        throw new Error(body?.error || `Unable to download Challenge Categories (${response.status})`);
-      }
-      const filename = /filename="([^"]+)"/.exec(response.headers.get("Content-Disposition") ?? "")?.[1];
-      const downloadUrl = URL.createObjectURL(await response.blob());
-      const anchor = document.createElement("a");
-      anchor.href = downloadUrl;
-      anchor.download = filename ?? "challenge-categories.csv";
-      anchor.click();
-      URL.revokeObjectURL(downloadUrl);
+      await downloadFile(`/api/holistic-mentorship/challenge-categories?${search}&format=csv`,
+        "Unable to download Challenge Categories", attachmentFilename);
     } catch (problem) {
       setDownloadError(problem instanceof Error ? problem.message : "Unable to download Challenge Categories");
     } finally {
@@ -232,6 +228,50 @@ function hiddenSchoolsNote(count: number) {
     : `${count} Schools have no categorized Notes yet`;
 }
 
+function HeatmapHeader({ canDownload, downloading, onDownload }: {
+  canDownload: boolean;
+  downloading: boolean;
+  onDownload: () => void;
+}) {
+  return <div className="flex flex-wrap items-start justify-between gap-3">
+    <div className="space-y-1">
+      <h2 id="challenge-category-heatmap-title" className="text-lg font-bold text-text-primary">
+        Challenge Categories
+      </h2>
+      <p className="text-sm text-text-secondary">
+        Share of Students with categorized submitted Post-Session Notes who carry each Challenge Category.
+      </p>
+    </div>
+    {canDownload && <Button type="button" onClick={onDownload} disabled={downloading}>
+      <Download aria-hidden="true" className="h-4 w-4" /> {downloading ? "Downloading..." : "Download CSV"}
+    </Button>}
+  </div>;
+}
+
+function HeatmapLoadError({ error, onRetry }: { error: string; onRetry: () => void }) {
+  if (!error) return null;
+  return <div className="flex flex-wrap items-center gap-3">
+    <p role="alert" className="text-sm text-danger">{error}</p>
+    <Button type="button" variant="secondary" className="text-xs" onClick={onRetry}>Retry</Button>
+  </div>;
+}
+
+function HeatmapResult({ data }: { data: Heatmap }) {
+  return <>
+    {data.total.studentCount === 0
+      ? <p className="rounded-md border border-border bg-bg-card px-4 py-8 text-center text-sm text-text-muted">
+          No submitted Post-Session Notes with Challenge Categories match this selection yet.
+        </p>
+      : <>
+          <Legend />
+          <HeatmapGrid data={data} />
+        </>}
+    {data.hiddenSchoolCount > 0 && <p className="text-xs text-text-muted">
+      {hiddenSchoolsNote(data.hiddenSchoolCount)}
+    </p>}
+  </>;
+}
+
 // `programId="all"`: every Program the viewer can see, with Phase locked to All Phases.
 export default function ChallengeCategoryHeatmap({ programId, academicYear, onAcademicYears }: {
   programId: number | "all";
@@ -254,20 +294,8 @@ export default function ChallengeCategoryHeatmap({ programId, academicYear, onAc
 
   return <section aria-busy={loading} aria-labelledby="challenge-category-heatmap-title"
     className="w-full min-w-0 max-w-full space-y-4">
-    <div className="flex flex-wrap items-start justify-between gap-3">
-      <div className="space-y-1">
-        <h2 id="challenge-category-heatmap-title" className="text-lg font-bold text-text-primary">
-          Challenge Categories
-        </h2>
-        <p className="text-sm text-text-secondary">
-          Share of Students with categorized submitted Post-Session Notes who carry each Challenge Category.
-        </p>
-      </div>
-      {data && data.total.studentCount > 0 && <Button type="button" onClick={() => void download()}
-        disabled={downloading}>
-        <Download aria-hidden="true" className="h-4 w-4" /> {downloading ? "Downloading..." : "Download CSV"}
-      </Button>}
-    </div>
+    <HeatmapHeader canDownload={Boolean(data && data.total.studentCount > 0)} downloading={downloading}
+      onDownload={() => void download()} />
     {downloadError && <p role="alert" className="text-sm text-danger">{downloadError}</p>}
     <HeatmapFilters grade={grade} phaseId={phaseId} phases={allPrograms ? [] : phases}
       disabled={loading || allPrograms}
@@ -275,19 +303,7 @@ export default function ChallengeCategoryHeatmap({ programId, academicYear, onAc
     {loading && <p role="status" className="py-8 text-center text-sm text-text-muted">
       Loading Challenge Categories...
     </p>}
-    {error && <div className="flex flex-wrap items-center gap-3">
-      <p role="alert" className="text-sm text-danger">{error}</p>
-      <Button type="button" variant="secondary" className="text-xs" onClick={reload}>Retry</Button>
-    </div>}
-    {data && data.total.studentCount === 0 && <p className="rounded-md border border-border bg-bg-card px-4 py-8 text-center text-sm text-text-muted">
-      No submitted Post-Session Notes with Challenge Categories match this selection yet.
-    </p>}
-    {data && data.total.studentCount > 0 && <>
-      <Legend />
-      <HeatmapGrid data={data} />
-    </>}
-    {data && data.hiddenSchoolCount > 0 && <p className="text-xs text-text-muted">
-      {hiddenSchoolsNote(data.hiddenSchoolCount)}
-    </p>}
+    <HeatmapLoadError error={error} onRetry={reload} />
+    {data && <HeatmapResult data={data} />}
   </section>;
 }
