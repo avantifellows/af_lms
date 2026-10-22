@@ -220,5 +220,16 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   - `joinHolisticChallengeCategoryLabels` gives the `"; "`-joined CSV cell text.
 - **Phase Setup (#458):** each Question editor shows the placement hint for the current, unsaved
   Question texts. Phase definitions, freezing and the Question schema are unchanged.
-- Notes capture, storage (db-service #806), read surfaces, CSV and the heatmap are later
-  slices of #457.
+- **Storage:** `holistic_mentorship_post_session_note_challenges` (db-service #806), one row per
+  selected code, unique on `(notes_id, category_code)`. Its insert/update trigger shares the
+  post-session privacy guard (per-Student advisory lock, rejects a tombstoned Student); DELETE
+  is allowed. LMS reads and writes it with raw SQL (ADR-0005).
+- **Erasure (#459):** Category rows are Notes content. Every draft-erasure statement deletes them
+  for the same target Notes as the answers: `eraseDraftHolisticNotes` (Mapping end), the
+  Mapping-scoped erasure behind Teacher and Admin removal/reassignment, and reconciliation's
+  ended-Mapping erasure. Revision bumps and `draft_erased_on_mapping_end` audits are unchanged.
+  `deleteHolisticStudentContent` targets Notes with answers **or** Category rows, deletes both
+  before the tombstone, and audits `privacy_content_erased` for each; the tombstone's
+  `post_session_answers_erased` still counts answers only. Tests:
+  `holistic-privacy.integration.test.ts` (real Postgres, opt-in).
+- Notes capture, read surfaces, CSV and the heatmap are later slices of #457.
