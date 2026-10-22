@@ -38,6 +38,7 @@ Then read this file fully before doing anything else in this session.
 ## Current Project State
 
 **Working:**
+- Chapter-test screens for physical centres (feature branch `feat/chapter-test-reports`, task lms-chapter-reports; not merged). The Chapter tests overview shows chapter-test cards, and a chapter test's report is the chapter-test report: overview, topic and difficulty insights, per-question breakdown with question text from the CMS (KaTeX), rankings, gender split and other centres on the same test. Student Results stays. JNV NVS is unchanged. See `context/data-access.md` §3.
 - Edit Student and the roster card cover the same fields for physical centres (issue #431).
   Edit Student gained Contact & Address, Father, Mother, Guardian and Socio-economic
   sections — the twenty contact and household details the card already displayed — and the

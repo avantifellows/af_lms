@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import TestDeepDive from "./TestDeepDive";
 import CombinedReportPanel from "./CombinedReportPanel";
+import ChapterTestReport from "./chapter-report/ChapterTestReport";
 import type { PerformanceScope } from "./PerformanceContent";
 
 interface Props {
@@ -15,6 +16,9 @@ interface Props {
   scope: PerformanceScope;
   /** The Grade control, built by the tab because the overview needs it too. */
   gradeControl: ReactNode;
+  /** A physical centre's chapter test: the chapter-test report replaces the
+   *  general stats and analysis; Student Results stays. */
+  chapterReport?: boolean;
   onBack: () => void;
   onDataLoaded: (testName: string) => void;
 }
@@ -33,9 +37,20 @@ export default function TestDeepDiveView({
   testName,
   scope,
   gradeControl,
+  chapterReport = false,
   onBack,
   onDataLoaded,
 }: Props) {
+  const combinedReports = (
+    <CombinedReportPanel
+      schoolUdise={schoolUdise}
+      sessionId={sessionId}
+      testName={testName}
+      grade={grade}
+      program={scope.program}
+      stream={scope.stream}
+    />
+  );
   return (
     <div className="space-y-5">
       <button
@@ -51,24 +66,48 @@ export default function TestDeepDiveView({
         </h2>
         {gradeControl}
       </div>
-      <TestDeepDive
-        schoolUdise={schoolUdise}
-        grade={grade}
-        sessionId={sessionId}
-        program={scope.program}
-        stream={scope.stream}
-        onDataLoaded={onDataLoaded}
-        afterStats={
-          <CombinedReportPanel
-            schoolUdise={schoolUdise}
-            sessionId={sessionId}
-            testName={testName}
-            grade={grade}
-            program={scope.program}
-            stream={scope.stream}
-          />
-        }
-      />
+      {chapterReport ? (
+        <ChapterTestReport
+          schoolUdise={schoolUdise}
+          grade={grade}
+          sessionId={sessionId}
+          program={scope.program}
+          stream={scope.stream}
+          onDataLoaded={onDataLoaded}
+          afterOverview={combinedReports}
+          fallback={
+            <TestDeepDive
+              schoolUdise={schoolUdise}
+              grade={grade}
+              sessionId={sessionId}
+              program={scope.program}
+              stream={scope.stream}
+              onDataLoaded={onDataLoaded}
+              afterStats={combinedReports}
+            />
+          }
+          studentResults={
+            <TestDeepDive
+              schoolUdise={schoolUdise}
+              grade={grade}
+              sessionId={sessionId}
+              program={scope.program}
+              stream={scope.stream}
+              studentsOnly
+            />
+          }
+        />
+      ) : (
+        <TestDeepDive
+          schoolUdise={schoolUdise}
+          grade={grade}
+          sessionId={sessionId}
+          program={scope.program}
+          stream={scope.stream}
+          onDataLoaded={onDataLoaded}
+          afterStats={combinedReports}
+        />
+      )}
     </div>
   );
 }

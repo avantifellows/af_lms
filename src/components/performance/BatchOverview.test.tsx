@@ -15,6 +15,12 @@ function test(overrides: Partial<TestTrendPoint>): TestTrendPoint {
     test_stream: null,
     test_grade: null,
     subjects: [],
+    avg_attempt_rate: null,
+    avg_accuracy: null,
+    avg_score: null,
+    cms_test_id: null,
+    exam: null,
+    chapter: null,
     ...overrides,
   };
 }
@@ -109,6 +115,55 @@ describe("BatchOverview", () => {
     expect(
       screen.getByText("No full tests targeting grade 11 available for this grade yet.")
     ).toBeInTheDocument();
+  });
+
+  it("physical centres' chapter tests show the chapter-test cards and no attendance", async () => {
+    mockOverview({
+      tests: [
+        test({
+          session_id: "c1", test_name: "12P24 - Wave Optics - JEE Main", test_format: "chapter_test",
+          start_date: "2026-10-14", test_grade: 12, test_stream: "engineering", student_count: 50,
+          stream_student_count: 48, subjects: ["Physics"], avg_attempt_rate: 45.8, avg_accuracy: 63.1,
+          avg_score: 25.2, cms_test_id: "9330", exam: "JEE Mains",
+          chapter: { code: "12P24", name: "Wave Optics", subject: "Physics", priority: "Medium" },
+        }),
+      ],
+      totalEnrolled: 60,
+      enrolledByStream: { engineering: 53 },
+      streams: ["engineering"],
+    });
+    const onTestClick = vi.fn();
+
+    render(
+      <BatchOverview schoolUdise="12345" grade={12} testCategory="chapter" program="EMRS CoE" onTestClick={onTestClick} />
+    );
+
+    expect(await screen.findByText("12P24 – Wave Optics · Physics")).toBeInTheDocument();
+    expect(screen.getByText("Medium priority")).toBeInTheDocument();
+    expect(screen.getByText("JEE Mains")).toBeInTheDocument();
+    expect(screen.getByText("Grade 12 · October 14, 2026 · 48 of 53 students appeared")).toBeInTheDocument();
+    expect(screen.getByText("Attempt").nextElementSibling).toHaveTextContent("45.8%");
+    expect(screen.getByText("Accuracy").nextElementSibling).toHaveTextContent("63.1%");
+    expect(screen.getByText("Score").nextElementSibling).toHaveTextContent("25.2%");
+    expect(screen.queryByText(/Attendance/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Tests Conducted")).not.toBeInTheDocument();
+
+    act(() => screen.getByText("Open report →").click());
+    expect(onTestClick).toHaveBeenCalledWith("c1", "12P24 - Wave Optics - JEE Main");
+  });
+
+  it("an old-CMS chapter test falls back to its name with no priority", async () => {
+    mockOverview({
+      tests: [test({ session_id: "o1", test_name: "CT_Adv_11P1 Units", test_format: "chapter_test", student_count: 44 })],
+      totalEnrolled: 60,
+      enrolledByStream: {},
+      streams: [],
+    });
+    render(<BatchOverview schoolUdise="12345" grade={11} testCategory="chapter" program="JNV CoE" onTestClick={noop} />);
+    expect(await screen.findByText("CT_Adv_11P1 Units")).toBeInTheDocument();
+    expect(screen.getByText(/44 students appeared/)).toBeInTheDocument();
+    expect(screen.queryByText(/priority/)).not.toBeInTheDocument();
+    expect(screen.getByText("Attempt").nextElementSibling).toHaveTextContent("—");
   });
 
   it("non-NVS keeps its no-data copy", async () => {
