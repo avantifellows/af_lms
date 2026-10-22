@@ -7,14 +7,16 @@ import {
   type BlendedLearningAccess,
   type MappingSnapshot,
 } from "./blended-learning-access";
-import { isCalendarDate, MODES, oneOf, SPOKE_WITH } from "./blended-learning-format";
-import { listMentees, type MenteeRow } from "./blended-learning-mentees";
-import { sanitiseNotesHtml } from "./blended-learning-notes-sanitiser";
 import {
-  MAX_CONVERSATION_PHOTOS,
-  photoKeyContentType,
-  uploadedPhotoSizes,
-} from "./blended-learning-photos";
+  validateEntry,
+  type ActionItemInput,
+  type ConversationInput,
+  type EntryInput,
+  type FlagInput,
+  type PhotoInput,
+} from "./blended-learning-log-entry-input";
+import { listMentees, type MenteeRow } from "./blended-learning-mentees";
+import { uploadedPhotoSizes } from "./blended-learning-photos";
 import { notifyWellbeingFlag } from "./blended-learning-wellbeing-notifier";
 
 // Conversation write use case (server-only): logEntry saves one Conversation
@@ -25,32 +27,8 @@ import { notifyWellbeingFlag } from "./blended-learning-wellbeing-notifier";
 // ready draft is locked, its recording and transcript move onto the
 // Conversation, and the draft becomes saved.
 
-type ActionItemOwner = "student" | "mentor" | "parent";
-type ActionItemInput = { owner: ActionItemOwner; text: string; dueOn: string | null };
-type FlagRecipient = "emotional_wellbeing" | "physics" | "chemistry" | "maths";
-type FlagInput = { recipient: FlagRecipient; comment: string | null };
-// An uploaded photo, already under this Student's photo prefix.
-type PhotoInput = { s3Key: string; contentType: string };
+// A photo the request named, with the size S3 holds for it.
 type StoredPhoto = PhotoInput & { byteSize: number };
-
-type ConversationInput = {
-  kind: "conversation";
-  occurredOn: string;
-  mode: "call" | "in_person";
-  spokeWith: "student" | "parent_or_sibling" | "both";
-  durationMinutes: number;
-  summary: string;
-  notesHtml: string | null;
-  actionItems: ActionItemInput[];
-  photos: PhotoInput[];
-  flags: FlagInput[];
-  // Earlier open Action Items this Conversation marks done.
-  completeActionItemIds: number[];
-  // The ready Conversation Draft this Conversation was reviewed from.
-  draftId: number | null;
-};
-type AttemptInput = { kind: "attempt"; occurredOn: string; note: string | null };
-type EntryInput = ConversationInput | AttemptInput;
 
 export type LoggedEntry = { id: number; kind: "conversation" | "attempt"; occurredOn: string };
 
@@ -58,164 +36,6 @@ export type LogEntryResult =
   // `mentee` is the Mentee's row as the Mentee list now reads it.
   | { ok: true; entry: LoggedEntry; mentee: MenteeRow | null }
   | { ok: false; status: 403 | 404 | 409 | 422; error: string; fieldErrors?: Record<string, string> };
-
-const ACTION_ITEM_OWNERS = ["student", "mentor", "parent"] as const;
-const FLAG_RECIPIENTS = ["emotional_wellbeing", "physics", "chemistry", "maths"] as const;
-
-function optionalText(value: unknown): string | null {
-  return typeof value === "string" && value.trim() ? value.trim() : null;
-}
-
-type Validated = { ok: true; input: EntryInput } | { ok: false; fieldErrors: Record<string, string> };
-
-// Field-level validation. `today` is the IST calendar date; an entry can be
-// dated today or earlier.
-function validate(raw: unknown, today: string, studentId: number): Validated {
-  const body = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
-  const errors: Record<string, string> = {};
-  if (body.kind !== "conversation" && body.kind !== "attempt") {
-    return { ok: false, fieldErrors: { kind: "Choose a Conversation or an Attempt." } };
-  }
-
-  if (!isCalendarDate(body.occurredOn)) errors.occurredOn = "Enter the date.";
-  else if (body.occurredOn > today) errors.occurredOn = "The date can't be in the future.";
-
-  if (body.kind === "attempt") {
-    // Only a Conversation carries Action Items or ticks earlier ones done.
-    if (body.actionItems !== undefined) errors.actionItems = "An Attempt can't have Action Items.";
-    if (body.photoKeys !== undefined) errors.photoKeys = "An Attempt can't have photos.";
-    if (body.flags !== undefined) errors.flags = "An Attempt can't have Mentor Flags.";
-    if (body.completeActionItemIds !== undefined) {
-      errors.completeActionItemIds = "Only a Conversation can tick Action Items done.";
-    }
-    if (body.draftId !== undefined && body.draftId !== null) {
-      errors.draftId = "A Conversation Draft can only be saved as a Conversation.";
-    }
-    if (Object.keys(errors).length > 0) return { ok: false, fieldErrors: errors };
-    return {
-      ok: true,
-      input: { kind: "attempt", occurredOn: body.occurredOn as string, note: optionalText(body.note) },
-    };
-  }
-
-  if (!oneOf(MODES, body.mode)) errors.mode = "Choose call or in person.";
-  if (!oneOf(SPOKE_WITH, body.spokeWith)) errors.spokeWith = "Choose who you spoke with.";
-  const duration = body.durationMinutes;
-  if (typeof duration !== "number" || !Number.isInteger(duration) || duration < 1 || duration > 240) {
-    errors.durationMinutes = "Duration must be between 1 and 240 minutes.";
-  }
-  const summary = optionalText(body.summary);
-  if (!summary) errors.summary = "Add a summary.";
-  if (body.notesHtml !== undefined && body.notesHtml !== null && typeof body.notesHtml !== "string") {
-    errors.notesHtml = "Notes must be text.";
-  }
-  const notes = sanitiseNotesHtml(typeof body.notesHtml === "string" ? body.notesHtml : null);
-  if (!notes.ok) errors.notesHtml = notes.error;
-
-  const actionItems = validateActionItems(body.actionItems, errors);
-  const photos = validatePhotoKeys(body.photoKeys, studentId, errors);
-  const flags = validateFlags(body.flags, errors);
-  const completeActionItemIds = validateCompleteActionItemIds(body.completeActionItemIds, errors);
-  const draftId = body.draftId === undefined || body.draftId === null ? null : body.draftId;
-  if (draftId !== null && !(Number.isSafeInteger(draftId) && (draftId as number) > 0)) {
-    errors.draftId = "This Conversation Draft isn't valid. Reload and try again.";
-  }
-
-  if (Object.keys(errors).length > 0 || !notes.ok) return { ok: false, fieldErrors: errors };
-  return {
-    ok: true,
-    input: {
-      kind: "conversation",
-      occurredOn: body.occurredOn as string,
-      mode: body.mode as ConversationInput["mode"],
-      spokeWith: body.spokeWith as ConversationInput["spokeWith"],
-      durationMinutes: duration as number,
-      summary: summary as string,
-      notesHtml: notes.html,
-      actionItems,
-      photos,
-      flags,
-      completeActionItemIds,
-      draftId: draftId as number | null,
-    },
-  };
-}
-
-// Ids of earlier Action Items to tick done, de-duplicated.
-function validateCompleteActionItemIds(raw: unknown, errors: Record<string, string>): number[] {
-  if (raw === undefined || raw === null) return [];
-  if (!Array.isArray(raw) || !raw.every((id) => Number.isSafeInteger(id) && id > 0)) {
-    errors.completeActionItemIds = "Choose Action Items from the list.";
-    return [];
-  }
-  return [...new Set(raw as number[])];
-}
-
-// New Action Items: owner and text are required, the due date is optional.
-// Errors are keyed per item, e.g. `actionItems.1.text`.
-function validateActionItems(raw: unknown, errors: Record<string, string>): ActionItemInput[] {
-  if (raw === undefined || raw === null) return [];
-  if (!Array.isArray(raw)) {
-    errors.actionItems = "Action Items must be a list.";
-    return [];
-  }
-  return raw.map((value, index) => {
-    const item = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
-    const text = optionalText(item.text);
-    if (!oneOf(ACTION_ITEM_OWNERS, item.owner)) errors[`actionItems.${index}.owner`] = "Choose who owns this Action Item.";
-    if (!text) errors[`actionItems.${index}.text`] = "Add the Action Item.";
-    const dueOn = item.dueOn === undefined || item.dueOn === null || item.dueOn === "" ? null : item.dueOn;
-    if (dueOn !== null && !isCalendarDate(dueOn)) errors[`actionItems.${index}.dueOn`] = "Enter a valid due date.";
-    return { owner: item.owner as ActionItemOwner, text: text ?? "", dueOn: dueOn as string | null };
-  });
-}
-
-// Photo keys from the upload route: at most five, each under this Student's
-// photo prefix and attached once. Errors are keyed per key, e.g. `photoKeys.1`.
-function validatePhotoKeys(raw: unknown, studentId: number, errors: Record<string, string>): PhotoInput[] {
-  if (raw === undefined || raw === null) return [];
-  if (!Array.isArray(raw)) {
-    errors.photoKeys = "Photos must be a list.";
-    return [];
-  }
-  if (raw.length > MAX_CONVERSATION_PHOTOS) {
-    errors.photoKeys = "A Conversation can have at most five photos.";
-    return [];
-  }
-  const seen = new Set<string>();
-  return raw.map((key, index) => {
-    const contentType = photoKeyContentType(studentId, key);
-    if (!contentType) errors[`photoKeys.${index}`] = "This photo isn't this Mentee's. Remove it and add it again.";
-    else if (seen.has(key)) errors[`photoKeys.${index}`] = "Each photo can be attached once.";
-    else seen.add(key);
-    return { s3Key: key as string, contentType: contentType ?? "" };
-  });
-}
-
-// Mentor Flags: at most one per Flag Recipient, each with an optional comment.
-// Errors are keyed per flag, e.g. `flags.1.recipient`.
-function validateFlags(raw: unknown, errors: Record<string, string>): FlagInput[] {
-  if (raw === undefined || raw === null) return [];
-  if (!Array.isArray(raw)) {
-    errors.flags = "Mentor Flags must be a list.";
-    return [];
-  }
-  const seen = new Set<string>();
-  return raw.map((value, index) => {
-    const flag = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
-    if (!oneOf(FLAG_RECIPIENTS, flag.recipient)) {
-      errors[`flags.${index}.recipient`] = "Choose who the flag is for.";
-    } else if (seen.has(flag.recipient)) {
-      errors[`flags.${index}.recipient`] = "Each Flag Recipient can be raised once.";
-    } else {
-      seen.add(flag.recipient);
-    }
-    if (flag.comment !== undefined && flag.comment !== null && typeof flag.comment !== "string") {
-      errors[`flags.${index}.comment`] = "The comment must be text.";
-    }
-    return { recipient: flag.recipient as FlagRecipient, comment: optionalText(flag.comment) };
-  });
-}
 
 type ReadyDraft = { id: number; callRecordingS3Key: string; transcriptS3Key: string | null };
 
@@ -377,6 +197,81 @@ function invalid(fieldErrors: Record<string, string>): LogEntryResult {
   return { ok: false, status: 422, error: first, fieldErrors };
 }
 
+const NOT_FOUND: LogEntryResult = { ok: false, status: 404, error: "Not found" };
+
+// Each photo must already sit in S3; its stored size is what the row keeps.
+async function storedPhotos(
+  input: EntryInput
+): Promise<{ ok: true; photos: StoredPhoto[] } | { ok: false; fieldErrors: Record<string, string> }> {
+  if (input.kind !== "conversation" || input.photos.length === 0) return { ok: true, photos: [] };
+  const sizes = await uploadedPhotoSizes(input.photos.map((photo) => photo.s3Key));
+  const missing: Record<string, string> = {};
+  sizes.forEach((size, index) => {
+    if (size === null) missing[`photoKeys.${index}`] = "This photo didn't finish uploading. Remove it and add it again.";
+  });
+  if (Object.keys(missing).length > 0) return { ok: false, fieldErrors: missing };
+  return { ok: true, photos: input.photos.map((photo, index) => ({ ...photo, byteSize: sizes[index] as number })) };
+}
+
+// A Conversation's Action Items, photos, Mentor Flags and ticks, then its
+// draft marked saved. Returns the Emotional Well-being flag ids.
+async function insertConversationParts(
+  client: PoolClient,
+  access: BlendedLearningAccess,
+  studentId: number,
+  conversationId: number,
+  input: ConversationInput,
+  photos: StoredPhoto[],
+  draft: ReadyDraft | null
+): Promise<number[]> {
+  await insertActionItems(client, studentId, conversationId, input.actionItems);
+  await insertPhotos(client, conversationId, photos);
+  const wellbeingFlagIds = await insertFlags(client, access, studentId, conversationId, input.flags);
+  await completeActionItems(client, access, studentId, conversationId, input.completeActionItemIds);
+  if (draft) await markDraftSaved(client, draft.id, conversationId);
+  return wellbeingFlagIds;
+}
+
+type Committed = { saved: LoggedEntry; mentorUserId: number; wellbeingFlagIds: number[] };
+
+// The entry and everything it carries, in one transaction.
+function saveEntry(
+  access: BlendedLearningAccess,
+  studentId: number,
+  input: EntryInput,
+  photos: StoredPhoto[]
+): Promise<Committed> {
+  return withTransaction(async (client) => {
+    const mapping = await lockMappingInScope(client, access, studentId);
+    if (!mapping) throw new OutOfScope();
+    const conversation = input.kind === "conversation" ? input : null;
+    const draft = conversation?.draftId ? await lockReadyDraft(client, studentId, conversation.draftId) : null;
+    const saved = await insertEntry(client, access, studentId, mapping, input, draft);
+    const wellbeingFlagIds = conversation
+      ? await insertConversationParts(client, access, studentId, saved.id, conversation, photos, draft)
+      : [];
+    return { saved, mentorUserId: Number(mapping.mentor_user_id), wellbeingFlagIds };
+  });
+}
+
+// The 409 message for a save that conflicted, or null for any other error.
+function conflictMessage(error: unknown): string | null {
+  if (error instanceof TickConflict) {
+    return "An Action Item you ticked is already done or isn't this Mentee's. Reload and try again.";
+  }
+  if (error instanceof DraftConflict) return "This Conversation Draft is no longer ready to save. Reload and try again.";
+  if (isConflict(error)) return "This entry conflicts with what is already saved. Reload and try again.";
+  return null;
+}
+
+// A failed save as a result; an unexpected error is rethrown.
+function failedSave(error: unknown): LogEntryResult {
+  if (error instanceof OutOfScope) return NOT_FOUND;
+  const message = conflictMessage(error);
+  if (message === null) throw error;
+  return { ok: false, status: 409, error: message };
+}
+
 export async function logEntry(
   access: BlendedLearningAccess,
   studentId: number,
@@ -384,69 +279,18 @@ export async function logEntry(
   today: string
 ): Promise<LogEntryResult> {
   if (!canBlendedLearning(access, "log")) return { ok: false, status: 403, error: "Forbidden" };
-  if (!Number.isSafeInteger(studentId) || studentId <= 0) return { ok: false, status: 404, error: "Not found" };
+  if (!Number.isSafeInteger(studentId) || studentId <= 0) return NOT_FOUND;
 
-  const validated = validate(raw, today, studentId);
+  const validated = validateEntry(raw, today, studentId);
   if (!validated.ok) return invalid(validated.fieldErrors);
+  const photos = await storedPhotos(validated.input);
+  if (!photos.ok) return invalid(photos.fieldErrors);
 
-  // Each photo must already sit in S3; its stored size is what the row keeps.
-  let photos: StoredPhoto[] = [];
-  if (validated.input.kind === "conversation" && validated.input.photos.length > 0) {
-    const input = validated.input;
-    const sizes = await uploadedPhotoSizes(input.photos.map((photo) => photo.s3Key));
-    const missing: Record<string, string> = {};
-    sizes.forEach((size, index) => {
-      if (size === null) missing[`photoKeys.${index}`] = "This photo didn't finish uploading. Remove it and add it again.";
-    });
-    if (Object.keys(missing).length > 0) return invalid(missing);
-    photos = input.photos.map((photo, index) => ({ ...photo, byteSize: sizes[index] as number }));
-  }
-
-  let committed: { saved: LoggedEntry; mentorUserId: number; wellbeingFlagIds: number[] };
+  let committed: Committed;
   try {
-    committed = await withTransaction(async (client) => {
-      const mapping = await lockMappingInScope(client, access, studentId);
-      if (!mapping) throw new OutOfScope();
-      const input = validated.input;
-      const draft =
-        input.kind === "conversation" && input.draftId !== null
-          ? await lockReadyDraft(client, studentId, input.draftId)
-          : null;
-      const saved = await insertEntry(client, access, studentId, mapping, input, draft);
-      let wellbeingFlagIds: number[] = [];
-      if (input.kind === "conversation") {
-        await insertActionItems(client, studentId, saved.id, input.actionItems);
-        await insertPhotos(client, saved.id, photos);
-        wellbeingFlagIds = await insertFlags(client, access, studentId, saved.id, input.flags);
-        await completeActionItems(client, access, studentId, saved.id, input.completeActionItemIds);
-        if (draft) await markDraftSaved(client, draft.id, saved.id);
-      }
-      return { saved, mentorUserId: Number(mapping.mentor_user_id), wellbeingFlagIds };
-    });
+    committed = await saveEntry(access, studentId, validated.input, photos.photos);
   } catch (error) {
-    if (error instanceof OutOfScope) return { ok: false, status: 404, error: "Not found" };
-    if (error instanceof TickConflict) {
-      return {
-        ok: false,
-        status: 409,
-        error: "An Action Item you ticked is already done or isn't this Mentee's. Reload and try again.",
-      };
-    }
-    if (error instanceof DraftConflict) {
-      return {
-        ok: false,
-        status: 409,
-        error: "This Conversation Draft is no longer ready to save. Reload and try again.",
-      };
-    }
-    if (isConflict(error)) {
-      return {
-        ok: false,
-        status: 409,
-        error: "This entry conflicts with what is already saved. Reload and try again.",
-      };
-    }
-    throw error;
+    return failedSave(error);
   }
 
   // After commit, best-effort: the notifier never throws, so the save stands.

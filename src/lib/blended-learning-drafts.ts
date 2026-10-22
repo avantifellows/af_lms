@@ -7,9 +7,9 @@ import {
   lockMappingInScope,
   type BlendedLearningAccess,
 } from "./blended-learning-access";
-import { isCalendarDate, MODES, oneOf, SPOKE_WITH } from "./blended-learning-format";
 import { blendedLearningRecordingPrefix, headObject, presignUpload } from "./s3";
 import type { DraftNote } from "./blended-learning-draft-notes";
+import { validateSessionDetails, type SessionDetails } from "./blended-learning-session-details";
 
 // Call Recording upload and Conversation Draft use cases (server-only). The
 // browser PUTs a recording straight to S3 with a presigned URL, then asks for
@@ -42,6 +42,18 @@ async function openDraftId(studentId: number): Promise<number | null> {
   return rows[0] ? Number(rows[0].id) : null;
 }
 
+// The checks every recording request opens with: the actor can upload, the
+// Student is in scope, and the body is read as an object.
+async function openUpload(
+  access: BlendedLearningAccess,
+  studentId: number,
+  raw: unknown
+): Promise<{ ok: true; body: Record<string, unknown> } | Failure> {
+  if (!canBlendedLearning(access, "upload")) return { ok: false, status: 403, error: "Forbidden" };
+  if (!(await canAccessBlendedStudent(access, studentId))) return { ok: false, status: 404, error: "Not found" };
+  return { ok: true, body: (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown> };
+}
+
 // Issue a presigned PUT for one Call Recording. The type comes from the file
 // extension, because phones often send an empty or odd MIME type.
 export async function issueRecordingUpload(
@@ -49,10 +61,9 @@ export async function issueRecordingUpload(
   studentId: number,
   raw: unknown
 ): Promise<{ ok: true; upload: RecordingUpload } | Failure> {
-  if (!canBlendedLearning(access, "upload")) return { ok: false, status: 403, error: "Forbidden" };
-  if (!(await canAccessBlendedStudent(access, studentId))) return { ok: false, status: 404, error: "Not found" };
-
-  const body = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const opened = await openUpload(access, studentId, raw);
+  if (!opened.ok) return opened;
+  const { body } = opened;
   const extension = recordingExtension(body.fileName);
   if (!extension) return { ok: false, status: 422, error: "Choose an MP3, M4A or WAV recording." };
   const size = body.byteSize;
@@ -74,19 +85,7 @@ export async function issueRecordingUpload(
 // The part of a recording key after the Student's prefix: `{uuid}.{ext}`.
 const RECORDING_FILE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(mp3|m4a|wav)$/;
 
-// Optional session details the Mentor had entered before uploading.
-type SessionDetails = {
-  occurredOn: string | null;
-  mode: (typeof MODES)[number] | null;
-  spokeWith: (typeof SPOKE_WITH)[number] | null;
-  durationMinutes: number | null;
-};
-
 export type WakeDelivery = "sent" | "skipped" | "ambiguous" | "rejected";
-
-function absent(value: unknown): boolean {
-  return value === undefined || value === null || value === "";
-}
 
 // The content type a recording was uploaded with, or null for a key that is
 // not under this Student's recordings prefix.
@@ -95,35 +94,6 @@ function recordingKeyContentType(studentId: number, key: unknown): string | null
   if (typeof key !== "string" || !key.startsWith(prefix)) return null;
   const match = RECORDING_FILE.exec(key.slice(prefix.length));
   return match ? RECORDING_TYPES[match[1]] : null;
-}
-
-// `today` is the IST calendar date; a session can be dated today or earlier.
-function validateSessionDetails(
-  body: Record<string, unknown>,
-  today: string
-): { ok: true; details: SessionDetails } | { ok: false; fieldErrors: Record<string, string> } {
-  const errors: Record<string, string> = {};
-  const { occurredOn, mode, spokeWith, durationMinutes } = body;
-  if (!absent(occurredOn) && !isCalendarDate(occurredOn)) errors.occurredOn = "Enter a valid date.";
-  else if (isCalendarDate(occurredOn) && occurredOn > today) errors.occurredOn = "The date can't be in the future.";
-  if (!absent(mode) && !oneOf(MODES, mode)) errors.mode = "Choose call or in person.";
-  if (!absent(spokeWith) && !oneOf(SPOKE_WITH, spokeWith)) errors.spokeWith = "Choose who you spoke with.";
-  if (
-    !absent(durationMinutes) &&
-    (typeof durationMinutes !== "number" || !Number.isInteger(durationMinutes) || durationMinutes < 1 || durationMinutes > 240)
-  ) {
-    errors.durationMinutes = "Duration must be between 1 and 240 minutes.";
-  }
-  if (Object.keys(errors).length > 0) return { ok: false, fieldErrors: errors };
-  return {
-    ok: true,
-    details: {
-      occurredOn: absent(occurredOn) ? null : (occurredOn as string),
-      mode: absent(mode) ? null : (mode as SessionDetails["mode"]),
-      spokeWith: absent(spokeWith) ? null : (spokeWith as SessionDetails["spokeWith"]),
-      durationMinutes: absent(durationMinutes) ? null : (durationMinutes as number),
-    },
-  };
 }
 
 class OutOfScope extends Error {}
@@ -141,10 +111,9 @@ export async function createDraft(
   raw: unknown,
   today: string
 ): Promise<{ ok: true; draftId: number; delivery: WakeDelivery } | Failure> {
-  if (!canBlendedLearning(access, "upload")) return { ok: false, status: 403, error: "Forbidden" };
-  if (!(await canAccessBlendedStudent(access, studentId))) return { ok: false, status: 404, error: "Not found" };
-
-  const body = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const opened = await openUpload(access, studentId, raw);
+  if (!opened.ok) return opened;
+  const { body } = opened;
   const contentType = recordingKeyContentType(studentId, body.s3Key);
   if (!contentType) return invalid({ s3Key: "This recording isn't this Mentee's. Upload it again." });
   const s3Key = body.s3Key as string;
