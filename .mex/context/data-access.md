@@ -21,7 +21,7 @@ edges:
     condition: when adding a write that must proxy to the DB Service
   - target: patterns/add-api-route.md
     condition: when adding a route that reads or writes
-last_updated: 2026-10-21
+last_updated: 2026-10-22
 ---
 
 # Data Access
@@ -63,6 +63,26 @@ if (!res.ok) { const text = await res.text(); /* surface upstream error */ }
 - **Performance report history (#393):** opening a report pushes `session` (one step, `scroll: false`); `TestDeepDiveView` is keyed by session, so a new report starts fresh and nameless until its own data names it. "Back to overview" calls `router.back()` only when the hook's transient trail (in `usePerformanceUrl`, in memory per mount) proves the current entry was pushed by the tab directly on top of its own overview (same query without `session`). The trail follows Back/Forward by matching exactly one neighbouring entry's URL; an ambiguous or unrelated URL, a replace of the entry, a reload, a direct link or a remount leaves nothing proven, and then the in-page Back replaces away only `session`. No storage. `SchoolTabs` derives the visible tab from `?tab=` (absent/invalid → `defaultTab` if visible, else the first tab), so history to `tab=performance` remounts Performance from its URL. A tab click synchronously uses native `history.replaceState`, preserving every unrelated query parameter and the hash before its content mounts; this prevents a fast automatic Grade replace from erasing `tab=performance`. Performance loading frames keep the previous settled height only while data reloads, then release it to the new content's natural height or the minimum needed to keep the current non-zero scroll valid. Scrolling upward can only shrink that floor, while downward scrolling cannot grow it; stale interactive content is never kept on screen. On report-to-overview transitions, if the shorter natural overview is entirely above the current viewport, the frame releases the report height and scrolls only as far as the last viewport that intersects the overview. Normal filter/history transitions and report exits that already overlap the viewport keep their scroll position.
 - **Deep-dive response ownership (#393):** `TestDeepDive` aborts an obsolete request and also marks its lifecycle inactive, so a fetch implementation that resolves or rejects after abort cannot publish stale report data, errors, loading state, or the report-name callback over the current session.
 - **NVS Time Spent (#357):** `getStudentTimeSpentData()` reads `MAX(total_time_spent)` (INT64 seconds) from `fact_student_test_results_overall`, grouped by `enrollment_user_id` + `LOWER(section)`. Its filters are the same as `getStudentQuestionLevelData` (udise, student grade, session, current year, optional program/stream, `enrollment_user_id IS NOT NULL`). It returns `Map<id, { overall, bySection }>`. The `test-deep-dive` route calls it only when `isNvsProgram(program)`, in parallel with the DynamoDB read, and merges `time_spent_seconds` onto each student (overall) and each subject score (`subject.toLowerCase()`). Unmatched students get null. If the lookup fails, the route logs only the error message and returns the deep dive with null times; DynamoDB failures still return 500/404. `StudentResultsTable` shows a sortable "Time Spent (min)" column after Attempt Rate (`Math.round(s/60)` or "—", nulls last in both directions), a subject-row time cell, and a blank chapter cell. Non-NVS payloads have no time fields.
+
+- **Chapter-test report (physical centres, lms-chapter-reports):** opening a report from the Chapter tests overview (`category=chapter`, not JNV NVS) renders `ChapterTestReport` instead of the general stats and analysis; Student Results and the combined reports are kept.
+  - **Data:** `GET /api/quiz-analytics/[udise]/chapter-test-report` (`getChapterTestReport` in `src/lib/question-analytics.ts`; refuses JNV NVS with 403). It reads:
+    - per-question stats from the question-level fact, **filtered on its partition column** `hashed_session_id = MOD(ABS(FARM_FINGERPRINT(@sessionId)), 4000) + 1` (10 MB instead of 2.4 GB);
+    - topics from `bridge_question_topic` + `dim_topic` (a question with several topics counts under each);
+    - overview and gender split from `fact_student_test_results_overall` (section `overall`, submitted only; class figures are combined from unrounded slices);
+    - enrolled from `dim_student` in the test's stream;
+    - other physical centres on the same `cms_test_id`;
+    - chapter and priority from `dim_test` → `dim_chapter`.
+  - **Aggregation** (by topic and difficulty; rankings) is pure and client-safe in `src/lib/question-aggregates.ts`, meant for reuse by Teacher View v2 (#324).
+  - **Question content** comes from the CMS, never from Postgres: `GET /api/quiz-analytics/[udise]/question-content?cmsTestId&questionId` fetches `/api/service/test` with `CMS_SERVICE_TOKEN` and returns one question. `QuestionContentView` sanitises it with DOMPurify and renders the maths with KaTeX.
+  - **PDFs:** `GET /api/quiz-analytics/[udise]/test-pdf` serves the paper and answer key through `serveCmsTestPdf` (`src/lib/cms-test-pdf.ts`, shared with `/api/cms/test-pdf`).
+  - **Gating:** both content routes are gated on Performance access to the School, not quiz-session access.
+- **Chapter-test cards:** on the Chapter tests overview (not JNV NVS), `BatchOverview` renders `ChapterTestCard`, matching the chapter-test report index exactly:
+  - "code – chapter · subject" title, exam, priority;
+  - "Grade · date · X of Y students appeared";
+  - Attempt / Accuracy / Score;
+  - no attendance block and no summary stat cards.
+  - `getBatchOverviewData` adds per-test `avg_attempt_rate` / `avg_accuracy` / `avg_score` (overall rows, submitted only), `cms_test_id` and `exam` (test_course).
+  - The batch-overview route adds `chapter` for new-CMS chapter tests from `dim_test` → `dim_chapter` (`getCmsTestChapters`). A failed lookup leaves the cards on the test name. Old-CMS tests (none since July 2026) have no chapter.
 
 ## 4. DynamoDB — performance dashboard reads (read-only)
 `src/lib/dynamodb.ts`, lazy singleton via `@aws-sdk/lib-dynamodb` `DynamoDBDocumentClient`. Holds test deep-dive reports keyed by school student identifiers (cross-referenced against Postgres rosters). Read-only.

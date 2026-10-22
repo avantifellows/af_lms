@@ -18,6 +18,9 @@ interface Props {
    *  reports panel lives there so the headline numbers stay first. The title
    *  and the way back are the parent's (PerformanceTab), above this component. */
   afterStats?: ReactNode;
+  /** Only Student Results: the chapter-test report brings its own overview and
+   *  analysis and keeps this table from the general report. */
+  studentsOnly?: boolean;
 }
 
 export default function TestDeepDive({
@@ -28,6 +31,7 @@ export default function TestDeepDive({
   stream,
   onDataLoaded,
   afterStats,
+  studentsOnly = false,
 }: Props) {
   const [data, setData] = useState<TestDeepDiveData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -88,7 +92,7 @@ export default function TestDeepDive({
         </div>
       )}
 
-      {data && !loading && (
+      {data && !loading && !studentsOnly && (
         <>
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 md:gap-4">
             {data.summary.students_submitted < data.summary.students_appeared ? (
@@ -120,19 +124,19 @@ export default function TestDeepDive({
       {/* Outside the data branch on purpose: the combined reports are their own
           job with their own status, and must stay reachable while this summary
           is loading or has failed. */}
-      {afterStats}
+      {!studentsOnly && afterStats}
 
       {data && !loading && (
         <>
-          <SubjectAnalysisSection subjects={data.subjects} />
-          <ChapterAnalysisSection
+          {!studentsOnly && <SubjectAnalysisSection subjects={data.subjects} />}
+          {!studentsOnly && <ChapterAnalysisSection
             chapters={data.chapters}
             schoolUdise={schoolUdise}
             grade={grade}
             sessionId={sessionId}
             program={program}
             stream={stream}
-          />
+          />}
           <StudentResultsTable
             students={data.students}
             schoolUdise={schoolUdise}

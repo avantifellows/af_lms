@@ -15,6 +15,23 @@ export interface TestTrendPoint {
   // Subjects this test covers, derived from non-`overall` `section` values.
   // Empty for tests that have no per-subject breakdown.
   subjects: string[];
+  // Per-student averages (0-100) over submitted attempts; null when none submitted.
+  avg_attempt_rate: number | null;
+  avg_accuracy: number | null;
+  avg_score: number | null;
+  cms_test_id: string | null;
+  // Exam the test was set for (test_course): JEE Mains, NEET, …
+  exam: string | null;
+  // The CMS chapter of a new-CMS chapter test (physical centres); null otherwise.
+  chapter: TestChapterInfo | null;
+}
+
+export interface TestChapterInfo {
+  code: string | null;
+  name: string | null;
+  subject: string | null;
+  // High | Medium | Low for the test's stream; null when untagged.
+  priority: string | null;
 }
 
 export interface BatchSummary {

@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { Card } from "@/components/ui/Card";
 import StatCard from "../StatCard";
+import ChapterTestCard from "./chapter-report/ChapterTestCard";
 import type { BatchOverviewData, TestTrendPoint } from "@/types/quiz";
 import type { TestCategory } from "../PerformanceTab";
 import { RetainedHeightFrame } from "./PerformanceStates";
@@ -94,6 +95,15 @@ interface Props {
   }) => void;
 }
 
+// Students who sat the test, and the enrolment they are counted against: both
+// in the test's stream when it has one.
+function attendanceFor(test: TestTrendPoint, enrolledByStream: Record<string, number>) {
+  return {
+    streamEnrolled: test.test_stream ? (enrolledByStream[test.test_stream] ?? null) : null,
+    attendanceCount: test.test_stream ? test.stream_student_count : test.student_count,
+  };
+}
+
 function TestCard({
   test,
   enrolledByStream,
@@ -103,9 +113,7 @@ function TestCard({
   enrolledByStream: Record<string, number>;
   onClick: () => void;
 }) {
-  // Use stream-matched enrolled count for attendance %
-  const streamEnrolled = test.test_stream ? enrolledByStream[test.test_stream] : null;
-  const attendanceCount = test.test_stream ? test.stream_student_count : test.student_count;
+  const { streamEnrolled, attendanceCount } = attendanceFor(test, enrolledByStream);
   const participationPct =
     streamEnrolled && streamEnrolled > 0
       ? Math.round((attendanceCount / streamEnrolled) * 100)
@@ -260,7 +268,26 @@ export default function BatchOverview({
       const avgAttendance = Math.round(
         tests.reduce((s, t) => s + (t.test_stream ? t.stream_student_count : t.student_count), 0) / tests.length
       );
-      content = (
+      // Physical centres' chapter tests: the chapter-test report index (Poojita's
+      // design) — cards only, carrying exactly what that index shows.
+      const chapterCards = testCategory === "chapter" && !isNvs;
+      content = chapterCards ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 md:gap-4">
+          {[...tests].reverse().map((t) => {
+            const { streamEnrolled, attendanceCount } = attendanceFor(t, enrolledByStream);
+            return (
+              <ChapterTestCard
+                key={t.session_id}
+                test={t}
+                appeared={attendanceCount}
+                enrolled={streamEnrolled}
+                grade={grade}
+                onClick={() => onTestClick(t.session_id, t.test_name)}
+              />
+            );
+          })}
+        </div>
+      ) : (
         <div className="space-y-6">
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
             <StatCard label="Tests Conducted" value={tests.length} color="brand-coral" />

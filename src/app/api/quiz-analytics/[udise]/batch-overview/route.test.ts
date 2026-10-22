@@ -7,9 +7,14 @@ vi.mock("@/lib/api-auth", () => ({
 vi.mock("@/lib/bigquery", () => ({
   getBatchOverviewData: vi.fn(),
 }));
+vi.mock("@/lib/question-analytics", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/question-analytics")>()),
+  getCmsTestChapters: vi.fn(),
+}));
 
 import { authorizeSchoolAccess } from "@/lib/api-auth";
 import { getBatchOverviewData } from "@/lib/bigquery";
+import { getCmsTestChapters } from "@/lib/question-analytics";
 import { GET } from "./route";
 import {
   PMU_GOVT_PERMISSION,
@@ -19,6 +24,7 @@ import {
 
 const mockAuth = vi.mocked(authorizeSchoolAccess);
 const mockGetBatchOverview = vi.mocked(getBatchOverviewData);
+const mockChapters = vi.mocked(getCmsTestChapters);
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -175,5 +181,50 @@ describe.each([
     const res = await GET(makeRequest("11", { program }), routeParams({ udise: "1234" }));
     expect(res.status).toBe(403);
     expect(mockGetBatchOverview).not.toHaveBeenCalled();
+  });
+});
+
+describe("batch-overview chapter details", () => {
+  const chapterTest = {
+    session_id: "s1", test_name: "12P24 - Wave Optics - JEE Main", start_date: "2026-10-14",
+    student_count: 48, stream_student_count: 48, test_format: "chapter_test", test_stream: "medical",
+    test_grade: 12, subjects: ["Physics"], avg_attempt_rate: 45.8, avg_accuracy: 63.1, avg_score: 25.2,
+    cms_test_id: "9330", exam: "NEET", chapter: null,
+  };
+  const fullTest = { ...chapterTest, session_id: "s2", test_format: "major_test", cms_test_id: "14611" };
+  const overview = {
+    tests: [chapterTest, fullTest], totalEnrolled: 53, enrolledByStream: { medical: 53 }, streams: ["medical"],
+  };
+  const wave = {
+    chapter_code: "12P24", chapter_name: "Wave Optics", subject: "Physics",
+    priority_engineering: "High", priority_medical: "Medium", duration_minutes: 60,
+  };
+
+  it("adds the CMS chapter, with the stream's priority, to chapter tests only", async () => {
+    mockAuth.mockResolvedValue({ authorized: true, school: SCHOOL });
+    mockGetBatchOverview.mockResolvedValue(overview);
+    mockChapters.mockResolvedValue(new Map([["9330", wave]]));
+
+    const body = await (await GET(makeRequest("12", { program: "EMRS CoE" }), routeParams({ udise: "1234" }))).json();
+    expect(mockChapters).toHaveBeenCalledWith(["9330"]);
+    expect(body.tests[0].chapter).toEqual({ code: "12P24", name: "Wave Optics", subject: "Physics", priority: "Medium" });
+    expect(body.tests[1].chapter).toBeNull();
+  });
+
+  it("skips the lookup for JNV NVS", async () => {
+    mockAuth.mockResolvedValue({ authorized: true, school: SCHOOL });
+    mockGetBatchOverview.mockResolvedValue(overview);
+    const res = await GET(makeRequest("12", { program: "JNV NVS" }), routeParams({ udise: "1234" }));
+    expect(res.status).toBe(200);
+    expect(mockChapters).not.toHaveBeenCalled();
+  });
+
+  it("keeps the overview when the chapter lookup fails", async () => {
+    mockAuth.mockResolvedValue({ authorized: true, school: SCHOOL });
+    mockGetBatchOverview.mockResolvedValue(overview);
+    mockChapters.mockRejectedValue(new Error("BQ outage"));
+    const res = await GET(makeRequest("12", { program: "EMRS CoE" }), routeParams({ udise: "1234" }));
+    expect(res.status).toBe(200);
+    expect((await res.json()).tests[0].chapter).toBeNull();
   });
 });

@@ -75,6 +75,7 @@ export default function PerformanceTab({ schoolUdise, lockedProgram }: Props) {
           testName={f.deepDiveSession.testName}
           scope={f.scope}
           gradeControl={gradeControl}
+          chapterReport={f.testCategory === "chapter" && !f.isNvs}
           onBack={f.handleBack}
           onDataLoaded={f.handleDeepDiveData}
         />

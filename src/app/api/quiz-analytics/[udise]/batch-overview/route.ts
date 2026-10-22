@@ -2,7 +2,43 @@ import { NextResponse } from "next/server";
 import { authorizeSchoolAccess } from "@/lib/api-auth";
 import { resolvePerformanceProgram } from "@/lib/performance-program";
 import { getBatchOverviewData } from "@/lib/bigquery";
-import type { BatchSummary, BatchOverviewData } from "@/types/quiz";
+import { getCmsTestChapters, priorityForStream } from "@/lib/question-analytics";
+import { isNvsProgram } from "@/lib/constants";
+import type { BatchSummary, BatchOverviewData, TestTrendPoint } from "@/types/quiz";
+
+const CHAPTER_FORMATS = ["chapter_test", "combined_chapter_test", "homework"];
+
+// Physical centres' chapter-test cards show the CMS chapter (code, name, subject,
+// priority). A failed lookup leaves the cards on the test name rather than
+// failing the overview.
+async function withChapters(tests: TestTrendPoint[]): Promise<TestTrendPoint[]> {
+  const ids = tests
+    .filter((t) => t.cms_test_id && CHAPTER_FORMATS.includes((t.test_format ?? "").toLowerCase()))
+    .map((t) => t.cms_test_id!);
+  if (ids.length === 0) return tests;
+  try {
+    const chapters = await getCmsTestChapters(ids);
+    return tests.map((t) => {
+      const c = t.cms_test_id ? chapters.get(t.cms_test_id) : undefined;
+      if (!c) return t;
+      return {
+        ...t,
+        chapter: {
+          code: c.chapter_code,
+          name: c.chapter_name,
+          subject: c.subject,
+          priority: priorityForStream(c, t.test_stream),
+        },
+      };
+    });
+  } catch (error) {
+    console.error(
+      "Chapter lookup failed:",
+      error instanceof Error ? error.message : "unknown error"
+    );
+    return tests;
+  }
+}
 
 export async function GET(
   request: Request,
@@ -32,7 +68,7 @@ export async function GET(
     const stream = url.searchParams.get("stream")?.toLowerCase() || undefined;
     const raw = await getBatchOverviewData(udise, grade, program, stream);
 
-    const tests = raw.tests;
+    const tests = isNvsProgram(program) ? raw.tests : await withChapters(raw.tests);
     const testsCount = tests.length;
     const avgParticipation =
       testsCount > 0
@@ -46,7 +82,7 @@ export async function GET(
 
     const response: BatchOverviewData = {
       summary,
-      tests: raw.tests,
+      tests,
       totalEnrolled: raw.totalEnrolled,
       enrolledByStream: raw.enrolledByStream,
       streams: raw.streams,
