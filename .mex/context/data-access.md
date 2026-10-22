@@ -21,7 +21,7 @@ edges:
     condition: when adding a write that must proxy to the DB Service
   - target: patterns/add-api-route.md
     condition: when adding a route that reads or writes
-last_updated: 2026-10-21
+last_updated: 2026-10-22
 ---
 
 # Data Access
@@ -196,3 +196,29 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
 - **Code:** `src/lib/holistic-follow-up-notes.ts` (write), `src/lib/holistic-student-phase.ts`
   (read), `src/lib/holistic-follow-up-questions.ts` (client-safe question keys, text, and
   normaliser), `src/lib/holistic-mentor-write-scope.ts` (shared scope guard).
+
+## Holistic Challenge Categories (#457)
+
+- **Catalogue:** `src/lib/holistic-challenge-categories.ts` is the client-safe constant
+  module (no server imports, like `holistic-follow-up-questions.ts`). It lists the 16 fixed
+  Challenge Categories as `{ code, group, label, shortLabel }` in display order: 6 Academic
+  and 10 Non-academic, each group ending with `Other` and `No major issue reported`. Codes
+  (`academic.*` / `non_academic.*`) are stable and stored; labels may change (ADR-0004
+  pattern). There is no DB CHECK on codes and no admin editing.
+- **Single-source helpers:** every later consumer must import these rather than restate a rule.
+  - `validateHolisticChallengeCategories(codes, { final })` trims codes, then rejects non-string,
+    unknown or duplicate codes (`Unknown Challenge Category`) and `no_major_issue` mixed with another
+    code in its group (`Choose either No major issue reported or other Challenge Categories`).
+    With `final` (Submit / Edit notes) it also needs ≥1 code per group (`Choose at least one
+    Academic and one Non-academic Challenge Category`, plus `emptyGroup`).
+  - `groupHolisticChallengeCategories` returns `{ academic, nonAcademic }` entries in catalogue order.
+  - `toggleHolisticChallengeCategory` (UI) keeps `No major issue reported` exclusive within its group.
+  - `placeHolisticChallengeCategories` picks the Question for each group. It matches
+    case-insensitively and takes the first Question by position. Non-academic needs
+    `non-academic challenge` (hyphenated only). Academic needs `academic challenge` without
+    `non-academic`. A group with no match is `null`.
+  - `joinHolisticChallengeCategoryLabels` gives the `"; "`-joined CSV cell text.
+- **Phase Setup (#458):** each Question editor shows the placement hint for the current, unsaved
+  Question texts. Phase definitions, freezing and the Question schema are unchanged.
+- Notes capture, storage (db-service #806), read surfaces, CSV and the heatmap are later
+  slices of #457.

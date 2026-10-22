@@ -1,10 +1,11 @@
 "use client";
 
 import { ArrowDown, ArrowUp, Copy, Eye, EyeOff, History, Lock, Milestone, MoreVertical, Plus, Save, Snowflake, Trash2, TriangleAlert } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 
 import { Button, Input } from "@/components/ui";
 import { CURRENT_ACADEMIC_YEAR, PROGRAM_IDS } from "@/lib/constants";
+import { placeHolisticChallengeCategories } from "@/lib/holistic-challenge-categories";
 import GuidanceEditor from "./GuidanceEditor";
 
 type Question = { id?: number; text: string };
@@ -495,6 +496,9 @@ function QuestionsEditor({ draft, readOnly, onChange }: {
   readOnly: boolean;
   onChange: (draft: Draft) => void;
 }) {
+  const placement = placeHolisticChallengeCategories(
+    draft.questions.map((question, index) => ({ questionId: index, text: question.text, position: index }))
+  );
   return <section>
     <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
       <h4 className="text-xs font-extrabold uppercase tracking-wide text-text-secondary">Post-Session Questions</h4>
@@ -506,22 +510,35 @@ function QuestionsEditor({ draft, readOnly, onChange }: {
     <fieldset className="space-y-2" disabled={readOnly}>
       <legend className="sr-only">Questions</legend>
       {draft.questions.map((question, index) => <QuestionEditorRow key={question.id ? `saved-${question.id}` : `new-${index}`}
-        draft={draft} index={index} question={question} onChange={onChange} />)}
+        draft={draft} index={index} question={question} onChange={onChange}
+        hint={challengeCategoryHint(placement, index)} />)}
       {draft.questions.length === 0 && <InlineAlert tone="warning" icon={<TriangleAlert className="h-4 w-4" />}
         title="No Questions yet." copy="Add at least one Question before Opening this Phase." />}
     </fieldset>
   </section>;
 }
 
-function QuestionEditorRow({ draft, question, index, onChange }: {
+function challengeCategoryHint(
+  placement: ReturnType<typeof placeHolisticChallengeCategories<number>>,
+  index: number
+) {
+  if (placement.academicQuestionId === index) return "Academic Challenge Categories appear under this question";
+  if (placement.nonAcademicQuestionId === index) return "Non-academic Challenge Categories appear under this question";
+  return null;
+}
+
+function QuestionEditorRow({ draft, question, index, onChange, hint }: {
   draft: Draft;
   question: Question;
   index: number;
   onChange: (draft: Draft) => void;
+  hint: string | null;
 }) {
-  return <div className="grid grid-cols-[1.5rem_minmax(0,1fr)_repeat(3,2.75rem)] items-center gap-2">
+  const hintId = useId();
+  return <div className="grid grid-cols-[1.5rem_minmax(0,1fr)_repeat(3,2.75rem)] items-center gap-x-2 gap-y-1">
     <span aria-hidden="true" className="text-center text-xs font-extrabold text-text-muted">{index + 1}</span>
     <Input className="min-w-0" aria-label={`Question ${index + 1}`} value={question.text}
+      aria-describedby={hint ? hintId : undefined}
       onChange={(event) => onChange(updateQuestion(draft, index, event.target.value))} />
     <Button type="button" variant="icon" title="Move Question up" aria-label={`Move Question ${index + 1} up`}
       disabled={index === 0} onClick={() => onChange(moveQuestion(draft, index, -1))}>
@@ -535,6 +552,7 @@ function QuestionEditorRow({ draft, question, index, onChange }: {
       disabled={draft.questions.length === 1} onClick={() => onChange(removeQuestion(draft, index))}>
       <Trash2 className="h-4 w-4" />
     </Button>
+    {hint && <p id={hintId} className="col-span-4 col-start-2 text-xs text-text-muted">{hint}</p>}
   </div>;
 }
 

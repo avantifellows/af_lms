@@ -258,4 +258,57 @@ describe("PhasePlanSetup", () => {
     expect(screen.getByLabelText("Guidance Markdown")).toHaveAttribute("readonly");
     expect(screen.queryByRole("button", { name: "Save Phase" })).not.toBeInTheDocument();
   });
+
+  describe("Challenge Category placement hints", () => {
+    const academicHint = "Academic Challenge Categories appear under this question";
+    const nonAcademicHint = "Non-academic Challenge Categories appear under this question";
+    const planWithQuestions = (questions: Array<{ id: number; text: string }>) => ({ plan: {
+      id: 7, academicYear: "2026-2027", editable: true, phases: [{
+        id: 21, number: 1, grade: 11, title: "Hint title", state: "locked",
+        guidanceMarkdown: "Guidance", revision: 2, frozen: false,
+        everOpened: false, used: false, active: false, questions,
+      }],
+    } });
+
+    it("shows each group's hint under the first matching Question only", async () => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => planWithQuestions([
+        { id: 41, text: "How was the week?" },
+        { id: 42, text: "Describe the academic challenges the student is facing." },
+        { id: 43, text: "Describe any non-academic challenges the student mentioned." },
+        { id: 44, text: "Any other academic challenges?" },
+      ]) }));
+      render(<PhasePlanSetup />);
+
+      expect(await screen.findByLabelText("Question 2")).toHaveAccessibleDescription(academicHint);
+      expect(screen.getByLabelText("Question 3")).toHaveAccessibleDescription(nonAcademicHint);
+      expect(screen.getByLabelText("Question 1")).toHaveAccessibleDescription("");
+      expect(screen.getByLabelText("Question 4")).toHaveAccessibleDescription("");
+      expect(screen.getAllByText(academicHint)).toHaveLength(1);
+      expect(screen.getAllByText(nonAcademicHint)).toHaveLength(1);
+    });
+
+    it("moves the hints live as unsaved Question text is edited", async () => {
+      const user = userEvent.setup();
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => planWithQuestions([
+        { id: 41, text: "How was the week?" },
+        { id: 42, text: "Describe the academic challenges the student is facing." },
+      ]) }));
+      render(<PhasePlanSetup />);
+
+      const first = await screen.findByLabelText("Question 1");
+      expect(screen.getByLabelText("Question 2")).toHaveAccessibleDescription(academicHint);
+      expect(screen.queryByText(nonAcademicHint)).not.toBeInTheDocument();
+
+      await user.clear(first);
+      await user.type(first, "Any NON-ACADEMIC CHALLENGES?");
+      expect(first).toHaveAccessibleDescription(nonAcademicHint);
+
+      const second = screen.getByLabelText("Question 2");
+      await user.clear(second);
+      await user.type(second, "What support did you agree on?");
+      expect(second).toHaveAccessibleDescription("");
+      expect(screen.queryByText(academicHint)).not.toBeInTheDocument();
+      expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
+    });
+  });
 });
