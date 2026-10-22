@@ -48,7 +48,9 @@ shared lookup denies them (the ADR 0008 deny-point shape).
    `PROGRAM_SYNC_SKIPPED_ROLES`.
 8. **Dev Login + fixtures:** persona in `DEV_LOGIN_PERSONAS` and `src/app/page.tsx`,
    rows in `seedHolisticFixtures` (also used by the e2e reset), manifest entry.
-9. **Docs:** `context/permissions.md`, `context/setup.md` (personas), ROUTER.
+9. **Docs:** `docs/permissions.md` (role column, Roles table, a section if the
+   role has its own rules), `context/permissions.md`, `context/setup.md`
+   (personas), ROUTER.
 
 ## Gotchas
 - `dashboard/page.test.tsx` mocks `@/lib/permissions` wholesale: a new
@@ -71,5 +73,5 @@ See `patterns/debug-access-denied.md`. Check the stored row first
 
 ## Update Scaffold
 - [ ] Update `.mex/ROUTER.md` "Current Project State"
-- [ ] Update `context/permissions.md` and `context/setup.md`
+- [ ] Update `docs/permissions.md`, `context/permissions.md` and `context/setup.md`
 - [ ] Bump `last_updated` on changed files

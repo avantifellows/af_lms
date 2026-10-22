@@ -1074,6 +1074,11 @@ describe("AddUserModal — Blended Learning roles", () => {
     expect(
       screen.getByText("Blended Learning Mentors can see and log Conversations with only their own Mentees. They have no other LMS access")
     ).toBeInTheDocument();
+    // Mentors never play recordings, read-only or not.
+    expect(
+      screen.getByLabelText("Read-only access (can view their own Mentees, cannot log or change anything)")
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/play recordings/)).not.toBeInTheDocument();
     expect(screen.getByText(/Blended Learning users have no School or Program access/)).toBeInTheDocument();
     expect(screen.queryByText("School Access")).not.toBeInTheDocument();
     expect(screen.queryByText("Assign Programs")).not.toBeInTheDocument();
@@ -1081,9 +1086,11 @@ describe("AddUserModal — Blended Learning roles", () => {
 
     await user.selectOptions(roleSelect, "blended_admin");
     expect(
-      screen.getByText("Blended Learning Admins can see every Mentor's Mentees and Mentor Flags, and log on a Mentor's behalf unless read-only. They have no other LMS access")
+      screen.getByText("Blended Learning Admins can see every Mentor's Mentees and Mentor Flags, play Call Recordings and read their transcripts, and log on a Mentor's behalf unless read-only. They have no other LMS access")
     ).toBeInTheDocument();
-    expect(screen.getByLabelText(/Read-only access/)).toBeInTheDocument();
+    expect(
+      screen.getByLabelText("Read-only access (can view everything and play recordings, cannot log or change anything)")
+    ).toBeInTheDocument();
   });
 
   it("creates a read-only Blended Learning Admin with no School scope and no Programs", async () => {

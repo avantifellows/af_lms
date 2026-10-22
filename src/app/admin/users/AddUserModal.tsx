@@ -90,7 +90,13 @@ const ROLE_DESCRIPTIONS: Record<string, string> = {
   pmu_manager: "PMU Managers can view and manage JNV NVS students and view performance in their assigned JNV Schools",
   pmu_govt_school_user: "PMU Govt School Users can view and manage JNV NVS students and view performance in their one JNV School",
   blended_mentor: "Blended Learning Mentors can see and log Conversations with only their own Mentees. They have no other LMS access",
-  blended_admin: "Blended Learning Admins can see every Mentor's Mentees and Mentor Flags, and log on a Mentor's behalf unless read-only. They have no other LMS access",
+  blended_admin: "Blended Learning Admins can see every Mentor's Mentees and Mentor Flags, play Call Recordings and read their transcripts, and log on a Mentor's behalf unless read-only. They have no other LMS access",
+};
+
+// Only Blended Learning Admins play recordings (play_recording is admin-only).
+const BLENDED_READ_ONLY_LABELS: Record<string, string> = {
+  blended_mentor: "Read-only access (can view their own Mentees, cannot log or change anything)",
+  blended_admin: "Read-only access (can view everything and play recordings, cannot log or change anything)",
 };
 
 type UserFormValues = {
@@ -422,7 +428,7 @@ function AccessFields({ role, ...props }: AccessFieldsProps) {
       <div className="rounded-md bg-gray-50 p-3 text-sm text-gray-600">
         Blended Learning users have no School or Program access. They see only the Blended Learning section.
       </div>
-      <ReadOnlyField value={props.readOnly} onChange={props.onReadOnlyChange} label="Read-only access (can view and play recordings, cannot log or change anything)" />
+      <ReadOnlyField value={props.readOnly} onChange={props.onReadOnlyChange} label={BLENDED_READ_ONLY_LABELS[role]} />
     </>;
   }
   if (role === PMU_GOVT_SCHOOL_USER_ROLE) return <PmuGovtAccessFields {...props} />;
