@@ -28,9 +28,10 @@ export function BlendedLearningHeader({ access, wide = false }: { access: Blende
             </Link>
           )}
           <div className="min-w-0">
-            <h1 className="text-lg font-bold uppercase tracking-tight text-text-primary sm:text-xl">
+            {/* Not a heading: each page has its own H1. */}
+            <p className="text-lg font-bold uppercase tracking-tight text-text-primary sm:text-xl">
               Blended Learning
-            </h1>
+            </p>
             <p className="text-xs text-text-muted">{accessLabel(access)}</p>
           </div>
         </div>

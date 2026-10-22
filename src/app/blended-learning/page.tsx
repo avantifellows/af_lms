@@ -73,6 +73,8 @@ function AdminLanding({
 }) {
   return (
     <div className="space-y-5">
+      {/* The header's name isn't a heading, so the open tab names the page. */}
+      <h1 className="sr-only">{tab === "flags" ? "Flags" : "Mentors"}</h1>
       <AdminTabs current={tab} newFlags={newFlags} />
       {tab === "mentors" && <MentorCards cards={cards} />}
       {flags && (

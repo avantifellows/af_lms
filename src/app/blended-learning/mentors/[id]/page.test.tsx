@@ -104,7 +104,7 @@ describe("MentorPage", () => {
     await renderPage();
 
     expect(mockListMentees).toHaveBeenCalledWith({ access: BLENDED_ADMIN, mentorUserId: 9001, today: "2026-10-22" });
-    expect(screen.getByRole("heading", { name: "Faizan" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Faizan" })).toBeInTheDocument();
     expect(screen.getByText("30 students · 2026-2027")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Mentors/ })).toHaveAttribute("href", "/blended-learning");
     expect(screen.getByRole("rowgroup", { name: "Talk to first" })).toHaveTextContent("Ira Attempt");

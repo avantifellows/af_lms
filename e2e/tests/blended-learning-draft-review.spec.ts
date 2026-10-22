@@ -150,8 +150,9 @@ for (const { label, key, viewport, entryRole } of VIEWPORTS) {
     test.use({ viewport });
     const mentee = DRAFT_REVIEW_MENTEES[key];
 
-    function listEntry(page: Page, group: "Talk to First" | "Everyone else") {
-      const section = page.getByRole("region", { name: group, exact: true });
+    function listEntry(page: Page, group: "Talk to first" | "Everyone else") {
+      // One table's named rowgroups from 1024 px up; regions of cards below.
+      const section = page.getByRole(entryRole === "row" ? "rowgroup" : "region", { name: group, exact: true });
       return section.getByRole(entryRole).filter({ hasText: fullName(mentee) });
     }
 
@@ -162,9 +163,9 @@ for (const { label, key, viewport, entryRole } of VIEWPORTS) {
 
       // Before saving, the draft is not contact: still never reached.
       await page.goto("/blended-learning");
-      const before = listEntry(page, "Talk to First");
-      await expect(before).toContainText("No contact yet");
-      await expect(before).toContainText("Never reached");
+      const before = listEntry(page, "Talk to first");
+      await expect(before).toContainText("Never");
+      await expect(before).toContainText("No conversation yet");
 
       // The detail page offers the review too.
       await page.goto(`/blended-learning/students/${studentId}`);
@@ -177,7 +178,7 @@ for (const { label, key, viewport, entryRole } of VIEWPORTS) {
 
       // Open it from the list's chip.
       await page.goto("/blended-learning");
-      const chip = listEntry(page, "Talk to First").getByRole("link", { name: "Draft ready to review" });
+      const chip = listEntry(page, "Talk to first").getByRole("link", { name: "Draft ready to review" });
       await expectTapTarget(chip);
       await chip.click();
       await expect(page).toHaveURL(new RegExp(`/blended-learning/students/${studentId}/log$`));
@@ -252,7 +253,7 @@ for (const { label, key, viewport, entryRole } of VIEWPORTS) {
       const after = listEntry(page, "Everyone else");
       await expect(after).toContainText("1 day ago");
       await expect(after.getByText("Draft ready to review")).toHaveCount(0);
-      await expect(listEntry(page, "Talk to First")).toHaveCount(0);
+      await expect(listEntry(page, "Talk to first")).toHaveCount(0);
     });
   });
 }

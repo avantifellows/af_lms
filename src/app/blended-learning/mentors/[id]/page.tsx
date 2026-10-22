@@ -34,7 +34,7 @@ export default async function MentorPage({ params }: { params: Promise<{ id: str
           <span aria-hidden="true">←</span> Mentors
         </Link>
         <div>
-          <h2 className="text-xl font-bold text-text-primary">{mentor.name}</h2>
+          <h1 className="text-xl font-bold text-text-primary">{mentor.name}</h1>
           <p className="text-sm text-text-secondary">
             {mentor.assigned} {mentor.assigned === 1 ? "student" : "students"} · {CURRENT_ACADEMIC_YEAR}
           </p>

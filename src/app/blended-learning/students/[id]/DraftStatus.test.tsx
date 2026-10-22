@@ -50,6 +50,16 @@ describe("DraftStatus", () => {
     expect(container.querySelector(".animate-spin")).toBeNull();
   });
 
+  it("frames the draft as a Card by default, and drops the Card when framed is false", () => {
+    const { rerender } = render(<DraftStatus draftId={41} initialState="failed" />);
+    const region = screen.getByRole("region", { name: "Conversation Draft" });
+    expect(region.firstElementChild).toHaveClass("border", "shadow-sm");
+    rerender(<DraftStatus draftId={41} initialState="failed" framed={false} />);
+    expect(region.firstElementChild).not.toHaveClass("border");
+    expect(region.firstElementChild).not.toHaveClass("shadow-sm");
+    expect(screen.getByText("Drafting failed")).toBeInTheDocument();
+  });
+
   it("polls a transcribing draft every 15 seconds and shows the new state once it is ready", async () => {
     vi.useFakeTimers();
     render(<DraftStatus draftId={41} initialState="transcribing" />);

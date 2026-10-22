@@ -7,7 +7,7 @@ import { Badge, Card } from "@/components/ui";
 import { canBlendedLearning } from "@/lib/blended-learning-access";
 import { requireBlendedLearningPage, requireNumericPageId } from "@/lib/blended-learning-guard";
 import { getDraftStatus } from "@/lib/blended-learning-drafts";
-import { formatCalendarDate } from "@/lib/blended-learning-format";
+import { describeSession, formatCalendarDate } from "@/lib/blended-learning-format";
 import {
   getMenteeDetail,
   type ActionItem,
@@ -33,18 +33,6 @@ import { FLAG_HISTORY } from "./flagRecipients";
 // (read-only too) can play a saved Call Recording or read its transcript.
 
 type Conversation = Extract<HistoryEntry, { kind: "conversation" }>;
-
-const MODE: Record<Conversation["mode"], string> = { call: "Call", in_person: "In person" };
-const SPOKE_WITH: Record<Conversation["spokeWith"], string> = {
-  student: "student",
-  parent_or_sibling: "parent or sibling",
-  both: "student and parent",
-};
-
-// "Call · 20 min · Spoke with student", as the mockup's entry header.
-function conversationMeta(entry: Conversation): string {
-  return `${MODE[entry.mode]} · ${entry.durationMinutes} min · Spoke with ${SPOKE_WITH[entry.spokeWith]}`;
-}
 
 function profileMeta(mentee: MenteeDetail): string[] {
   return [mentee.grade === null ? null : `Grade ${mentee.grade}`, mentee.programName, mentee.gender].filter(
@@ -238,7 +226,7 @@ function ConversationMedia({ entry, canPlayRecording }: { entry: Conversation; c
 function ConversationEntry({ entry, canPlayRecording }: { entry: Conversation; canPlayRecording: boolean }) {
   return (
     <>
-      <EntryHeader date={entry.occurredOn} meta={conversationMeta(entry)} chips={<FlagChips flags={entry.flags} />} />
+      <EntryHeader date={entry.occurredOn} meta={describeSession(entry)} chips={<FlagChips flags={entry.flags} />} />
       <div className="mt-4 space-y-4">
         <EntrySection label="Summary">
           <p className="whitespace-pre-line break-words text-sm text-text-primary">{entry.summary}</p>

@@ -32,6 +32,7 @@ function PendingDraftStatus({ pendingDraft, canManageDraft }: { pendingDraft: Pe
       canManage={canManageDraft}
       pollMs={PENDING_DRAFT_POLL_MS}
       onReady={refresh}
+      framed={false}
       drafting="Writing the summary, action items and notes from the recording. They fill in below when ready, usually within a couple of minutes. You can leave this page and come back."
     />
   );

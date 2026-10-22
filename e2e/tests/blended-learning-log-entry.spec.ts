@@ -115,8 +115,9 @@ for (const { label, key, viewport, entryRole } of VIEWPORTS) {
     test.use({ viewport });
     const mentees = LOGGING_MENTEES[key];
 
-    function listEntry(page: Page, group: "Talk to First" | "Everyone else", mentee: { firstName: string; lastName: string }) {
-      const section = page.getByRole("region", { name: group, exact: true });
+    function listEntry(page: Page, group: "Talk to first" | "Everyone else", mentee: { firstName: string; lastName: string }) {
+      // One table's named rowgroups from 1024 px up; regions of cards below.
+      const section = page.getByRole(entryRole === "row" ? "rowgroup" : "region", { name: group, exact: true });
       return section.getByRole(entryRole).filter({ hasText: fullName(mentee) });
     }
 
@@ -125,7 +126,7 @@ for (const { label, key, viewport, entryRole } of VIEWPORTS) {
       const summary = `Synthetic ${key}: talked about the mock test.`;
       await signInAs(page, BLENDED_MENTOR_C);
       await page.goto(detailPath(mentee));
-      await page.getByRole("link", { name: "Log a Conversation or Attempt" }).click();
+      await page.getByRole("link", { name: "Log conversation", exact: true }).click();
       await expect(page).toHaveURL(new RegExp(`${logPath(mentee)}$`));
       await expect(page.getByRole("heading", { level: 1, name: "Log a conversation" })).toBeVisible();
       await expect(page.getByRole("link", { name: `Back to ${fullName(mentee)}` })).toHaveAttribute(
@@ -176,7 +177,7 @@ for (const { label, key, viewport, entryRole } of VIEWPORTS) {
       await expect(saved.getByRole("term").nth(2)).toHaveText("Action items added");
       await expect(saved.getByRole("definition").nth(2)).toHaveText("0");
       await expect(saved.getByText("Today")).toBeVisible();
-      await expect(saved.getByText("Never reached")).toHaveCount(0);
+      await expect(saved.getByText("No conversation yet")).toHaveCount(0);
 
       expect(await savedEntries(studentIds[mentee.key])).toEqual([
         {
@@ -198,10 +199,10 @@ for (const { label, key, viewport, entryRole } of VIEWPORTS) {
 
       await page.goto("/blended-learning");
       await expect(listEntry(page, "Everyone else", mentee)).toContainText("Today");
-      await expect(listEntry(page, "Talk to First", mentee)).toHaveCount(0);
+      await expect(listEntry(page, "Talk to first", mentee)).toHaveCount(0);
     });
 
-    test("an Attempt moves the Mentee into Talk to First and keeps Last Contact", async ({ page }) => {
+    test("an Attempt moves the Student into Talk to first and keeps Last Contact", async ({ page }) => {
       const mentee = mentees.attempt;
       const lastContact = `${LOGGING_LAST_CONVERSATION_DAYS_AGO} days ago`;
       await signInAs(page, BLENDED_MENTOR_C);
@@ -224,8 +225,8 @@ for (const { label, key, viewport, entryRole } of VIEWPORTS) {
 
       const saved = page.getByRole("region", { name: "Saved" });
       await expect(saved.getByRole("heading", { name: "Attempt logged" })).toBeVisible();
-      await expect(saved.getByText(`Your student list now shows ${fullName(mentee)} in Talk to First`)).toBeVisible();
-      await expect(saved.getByText("Last try didn't connect")).toBeVisible();
+      await expect(saved.getByText(`Your student list now shows ${fullName(mentee)} in Talk to first`)).toBeVisible();
+      await expect(saved.getByText(/^Not reachable, /)).toBeVisible();
       await expect(saved.getByText(lastContact)).toBeVisible();
 
       const rows = await savedEntries(studentIds[mentee.key]);
@@ -237,8 +238,8 @@ for (const { label, key, viewport, entryRole } of VIEWPORTS) {
       });
 
       await page.goto("/blended-learning");
-      const row = listEntry(page, "Talk to First", mentee);
-      await expect(row).toContainText("Last try didn't connect");
+      const row = listEntry(page, "Talk to first", mentee);
+      await expect(row).toContainText("Not reachable, ");
       await expect(row).toContainText(lastContact);
     });
 
@@ -273,7 +274,7 @@ for (const { label, key, viewport, entryRole } of VIEWPORTS) {
       const summary = `Synthetic ${key}: admin logged a reported call.`;
       await signInAs(page, BLENDED_ADMIN);
       await page.goto(detailPath(mentee));
-      await page.getByRole("link", { name: "Log a Conversation or Attempt" }).click();
+      await page.getByRole("link", { name: "Log conversation", exact: true }).click();
 
       const form = await fillConversation(page, { duration: "20", summary });
       await form.getByRole("button", { name: "Save conversation" }).click();
@@ -297,7 +298,7 @@ test.describe("Blended Learning logging — access", () => {
     await signInAs(page, BLENDED_ADMIN_READ_ONLY);
     await page.goto(detailPath(mentee));
     await expect(page.getByRole("heading", { name: fullName(mentee) })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Log a Conversation or Attempt" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Log conversation", exact: true })).toHaveCount(0);
 
     await page.goto(logPath(mentee));
     await expect(page).toHaveURL(new RegExp(`${detailPath(mentee)}$`));

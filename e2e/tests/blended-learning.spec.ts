@@ -53,7 +53,8 @@ for (const { label, viewport } of VIEWPORTS) {
 
         await page.goto("/dashboard");
         await expect(page).toHaveURL(/\/blended-learning$/);
-        await expect(page.getByRole("heading", { name: "Blended Learning" })).toBeVisible();
+        await expect(page.getByRole("banner").getByText("Blended Learning", { exact: true })).toBeVisible();
+        await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1);
         await expect(page.getByText(accessLabel, { exact: true })).toBeVisible();
         await expect(page.getByRole("link", { name: "Back to dashboard" })).toHaveCount(0);
 

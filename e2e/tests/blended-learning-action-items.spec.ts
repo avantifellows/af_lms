@@ -305,6 +305,6 @@ test.describe("Blended Learning Action Items — conflicts and access", () => {
     await expect(open).toContainText(stayOpen.text);
     await expect(page.getByRole("checkbox")).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Add an action" })).toHaveCount(0);
-    await expect(page.getByRole("link", { name: "Log a Conversation or Attempt" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Log conversation", exact: true })).toHaveCount(0);
   });
 });

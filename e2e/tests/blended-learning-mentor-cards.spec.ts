@@ -70,8 +70,11 @@ function stat(card: Locator, label: string): Locator {
   return card.locator(`dt:text-is("${label}") + dd`);
 }
 
-function group(page: Page, name: "Talk to First" | "Everyone else"): Locator {
-  return page.getByRole("region", { name, exact: true });
+// The Student list's groups: named rowgroups of one table from 1024 px up,
+// regions of cards below that.
+function group(page: Page, name: "Talk to first" | "Everyone else"): Locator {
+  const desktop = (page.viewportSize()?.width ?? 0) >= 1024;
+  return page.getByRole(desktop ? "rowgroup" : "region", { name, exact: true });
 }
 
 async function noHorizontalScroll(page: Page) {
@@ -123,14 +126,14 @@ for (const { label, viewport, entryRole } of VIEWPORTS) {
       await expect(page).toHaveURL(new RegExp(`/blended-learning/mentors/${mentorAUserId}$`));
       await expect(page.getByRole("heading", { name: BLENDED_MENTOR_A.name, exact: true })).toBeVisible();
 
-      const talkToFirst = entries(group(page, "Talk to First"));
+      const talkToFirst = entries(group(page, "Talk to first"));
       await expect(talkToFirst).toHaveText(
         [attemptLatest, neverContacted, legacy, thirtyDays].map((mentee) => new RegExp(fullName(mentee)))
       );
       await expect(entries(group(page, "Everyone else"))).toHaveText(
         [twentyNineDays, recent].map((mentee) => new RegExp(fullName(mentee)))
       );
-      await expect(talkToFirst.filter({ hasText: fullName(attemptLatest) }).getByText("Last try didn't connect")).toBeVisible();
+      await expect(talkToFirst.filter({ hasText: fullName(attemptLatest) }).getByText(/^Not reachable, \d{1,2} [A-Z][a-z]{2}/)).toBeVisible();
       await expect(talkToFirst.filter({ hasText: fullName(neverContacted) }).getByText("Draft ready to review")).toBeVisible();
       // An admin who can log opens the draft from its chip.
       await expect(
@@ -141,7 +144,7 @@ for (const { label, viewport, entryRole } of VIEWPORTS) {
 
       const own = await mentorOwnView(browser, viewport);
       try {
-        for (const name of ["Talk to First", "Everyone else"] as const) {
+        for (const name of ["Talk to first", "Everyone else"] as const) {
           const mentorSees = await entries(group(own.page, name)).allTextContents();
           expect(mentorSees.length).toBeGreaterThan(0);
           await expect(entries(group(page, name))).toHaveText(mentorSees);
@@ -152,7 +155,7 @@ for (const { label, viewport, entryRole } of VIEWPORTS) {
 
       await talkToFirst.filter({ hasText: fullName(attemptLatest) }).getByRole("link").first().click();
       await expect(page.getByRole("heading", { name: fullName(attemptLatest) })).toBeVisible();
-      await expect(page.getByRole("link", { name: "Log a Conversation or Attempt" })).toBeVisible();
+      await expect(page.getByRole("link", { name: "Log conversation", exact: true })).toBeVisible();
     });
 
     test("a read-only Blended Learning Admin can view cards and a Mentor's page", async ({ page }) => {
@@ -161,12 +164,12 @@ for (const { label, viewport, entryRole } of VIEWPORTS) {
       await expect(stat(mentorCard(page, BLENDED_MENTOR_A), "Assigned")).toHaveText("6");
 
       await page.goto(`/blended-learning/mentors/${mentorAUserId}`);
-      await expect(entries(group(page, "Talk to First"))).toHaveCount(4);
+      await expect(entries(group(page, "Talk to first"))).toHaveCount(4);
       await expect(entries(group(page, "Everyone else"))).toHaveCount(2);
 
       // Kabir's ready draft is shown, but not as a link into a log form a
       // read-only admin can't use (QA-14).
-      const kabir = entries(group(page, "Talk to First")).filter({ hasText: fullName(neverContacted) });
+      const kabir = entries(group(page, "Talk to first")).filter({ hasText: fullName(neverContacted) });
       await expect(kabir.getByText("Draft ready to review")).toBeVisible();
       await expect(page.getByRole("link", { name: "Draft ready to review" })).toHaveCount(0);
     });
@@ -179,7 +182,7 @@ for (const { label, viewport, entryRole } of VIEWPORTS) {
     test("a Mentor cannot reach the Mentors tab or a Mentor's page", async ({ page }) => {
       await signInAs(page, BLENDED_MENTOR_A);
       await page.goto("/blended-learning");
-      await expect(entries(group(page, "Talk to First"))).toHaveCount(4);
+      await expect(entries(group(page, "Talk to first"))).toHaveCount(4);
       await expect(page.getByRole("navigation", { name: "Admin views" })).toHaveCount(0);
       await expect(page.getByRole("list", { name: "Mentors" })).toHaveCount(0);
 
@@ -201,7 +204,7 @@ for (const { label, viewport, entryRole } of VIEWPORTS) {
         await noHorizontalScroll(page);
 
         await page.goto(`/blended-learning/mentors/${mentorAUserId}`);
-        await expect(entries(group(page, "Talk to First"))).toHaveCount(4);
+        await expect(entries(group(page, "Talk to first"))).toHaveCount(4);
         await noHorizontalScroll(page);
       });
     }

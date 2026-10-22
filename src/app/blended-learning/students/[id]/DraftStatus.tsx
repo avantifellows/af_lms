@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 
 import { Badge, Button, Card } from "@/components/ui";
@@ -152,6 +152,17 @@ function DraftHeading({ state, drafting }: { state: DraftState; drafting: string
   );
 }
 
+// The detail page shows the draft as its own Card; the log page sets
+// `framed={false}` because it already sits inside the Recording card.
+function DraftFrame({ framed, children }: { framed: boolean; children: ReactNode }) {
+  if (!framed) return <div className="space-y-3">{children}</div>;
+  return (
+    <Card elevation="sm" className="space-y-3 p-4 sm:px-6">
+      {children}
+    </Card>
+  );
+}
+
 export function DraftStatus({
   draftId,
   initialState,
@@ -161,6 +172,7 @@ export function DraftStatus({
   pollMs = DRAFT_POLL_MS,
   onReady,
   drafting = null,
+  framed = true,
 }: {
   draftId: number;
   initialState: DraftState;
@@ -173,6 +185,8 @@ export function DraftStatus({
   onReady?: () => void;
   // What to say while drafting, under the badge.
   drafting?: string | null;
+  // False to drop the Card, when the caller already frames the draft.
+  framed?: boolean;
 }) {
   const router = useRouter();
   const [status, setStatus] = usePolledDraft(
@@ -217,7 +231,7 @@ export function DraftStatus({
   if (!shown) return null;
   return (
     <section aria-label="Conversation Draft">
-      <Card elevation="sm" className="space-y-3 p-4 sm:px-6">
+      <DraftFrame framed={framed}>
         <DraftHeading state={status.state} drafting={drafting} />
         <DraftActions
           state={status.state}
@@ -238,7 +252,7 @@ export function DraftStatus({
             {error}
           </p>
         )}
-      </Card>
+      </DraftFrame>
     </section>
   );
 }

@@ -139,12 +139,16 @@ for (const { label, key, viewport } of VIEWPORTS) {
       ]);
 
       await page.goto(detailPath(mentee));
-      const chips = historyEntryWith(page, summary).getByRole("list", { name: "Mentor Flags" }).getByRole("listitem");
-      await expect(chips).toHaveText([
-        `Emotional Well-being · ${wellbeingComment}`,
-        "Physics Teacher",
-        `Maths Teacher · ${mathsComment}`,
+      const entry = historyEntryWith(page, summary);
+      const chips = entry.getByRole("list", { name: "Mentor Flags" }).getByRole("listitem");
+      await expect(chips).toHaveText(["Flagged to Shalini", "Flagged to Physics teacher", "Flagged to Maths teacher"]);
+      // Comments sit under "Flag note for …"; a flag without one has no note.
+      await expect(entry.getByRole("heading", { name: /^Flag note for / })).toHaveText([
+        "Flag note for Shalini",
+        "Flag note for the Maths teacher",
       ]);
+      await expect(entry.getByText(wellbeingComment)).toBeVisible();
+      await expect(entry.getByText(mathsComment)).toBeVisible();
       expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
     });
 

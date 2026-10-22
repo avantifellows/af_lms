@@ -272,7 +272,7 @@ describe("LogEntryForm: Conversation", () => {
     const saved = await screen.findByRole("region", { name: "Saved" });
     const heading = within(saved).getByRole("heading", { name: "Conversation saved" });
     expect(heading).toHaveFocus();
-    expect(saved).toHaveTextContent("Your student list now shows Asha Rao in Talk to First.");
+    expect(saved).toHaveTextContent("Your student list now shows Asha Rao in Talk to first.");
     expect(savedRows(saved)).toMatchObject({
       Conversation: "22 Oct 2026 · Call · Student",
       Duration: "30 min",

@@ -98,7 +98,10 @@ describe("BlendedLearningPage", () => {
 
     render(await BlendedLearningPage());
 
-    expect(screen.getByRole("heading", { name: "Blended Learning" })).toBeInTheDocument();
+    // The header names the app as plain text; the page's only H1 is its own.
+    expect(screen.getByRole("banner")).toHaveTextContent("Blended Learning");
+    expect(screen.queryByRole("heading", { name: "Blended Learning" })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
     expect(screen.getByText("Mentor")).toBeInTheDocument();
     expect(screen.getByText("faizan@avantifellows.org")).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /dashboard/i })).not.toBeInTheDocument();
@@ -157,6 +160,7 @@ describe("BlendedLearningPage", () => {
     render(await BlendedLearningPage());
 
     expect(mockListMentorCards).toHaveBeenCalledWith(BLENDED_ADMIN, "2026-10-22");
+    expect(screen.getByRole("heading", { level: 1, name: "Mentors" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Mentors" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("link", { name: /Faizan/ })).toHaveAttribute("href", "/blended-learning/mentors/9001");
   });
@@ -168,6 +172,7 @@ describe("BlendedLearningPage", () => {
     render(await BlendedLearningPage({ searchParams: Promise.resolve({ tab: "flags" }) }));
 
     expect(mockListMentorCards).not.toHaveBeenCalled();
+    expect(screen.getByRole("heading", { level: 1, name: "Flags" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Flags" })).toHaveAttribute("aria-current", "page");
   });
 

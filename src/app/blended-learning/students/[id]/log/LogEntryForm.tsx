@@ -6,7 +6,7 @@ import { useId, useState, type Dispatch, type FormEvent, type ReactNode, type Se
 import { Button, Card } from "@/components/ui";
 import type { OpenActionItem } from "@/lib/blended-learning-mentee-detail";
 
-import { ActionItemMeta } from "../ActionItemMeta";
+import { ActionItemMeta, OwnerPill } from "../ActionItemMeta";
 import {
   buildEntryPayload,
   initialEntryValues,
@@ -40,6 +40,19 @@ import { WriteUpCard } from "./WriteUpCard";
 
 export type { ReviewDraft };
 
+// Owner pill, text and agreed date, as on the detail page.
+function OpenItemText({ item }: { item: OpenActionItem }) {
+  return (
+    <span className="flex min-w-0 items-baseline gap-2.5">
+      <OwnerPill owner={item.owner} />
+      <span className="min-w-0 break-words">
+        {item.text}
+        <ActionItemMeta agreedOn={item.agreedOn} />
+      </span>
+    </span>
+  );
+}
+
 function OpenActionItemsPanel({
   items,
   canTick,
@@ -69,15 +82,11 @@ function OpenActionItemsPanel({
                     onChange={() => onToggle(item.id)}
                     className="mt-0.5 h-5 w-5 shrink-0 accent-accent"
                   />
-                  <span className="min-w-0">
-                    {item.text}
-                    <ActionItemMeta owner={item.owner} dueOn={item.dueOn} agreedOn={item.agreedOn} />
-                  </span>
+                  <OpenItemText item={item} />
                 </label>
               ) : (
                 <div className="py-1">
-                  {item.text}
-                  <ActionItemMeta owner={item.owner} dueOn={item.dueOn} agreedOn={item.agreedOn} />
+                  <OpenItemText item={item} />
                 </div>
               )}
             </li>

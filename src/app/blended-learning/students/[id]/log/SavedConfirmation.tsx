@@ -53,7 +53,7 @@ export function SavedConfirmation({
   // The form is gone; move focus to what replaced it.
   useEffect(() => headingRef.current?.focus(), []);
   const { entry, mentee } = saved;
-  const group = mentee && mentee.reasons.length > 0 ? "Talk to First" : "Everyone else";
+  const group = mentee && mentee.reasons.length > 0 ? "Talk to first" : "Everyone else";
   return (
     <section aria-label="Saved">
       <Card elevation="sm" className="space-y-4 p-4 sm:p-6">

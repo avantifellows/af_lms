@@ -293,7 +293,7 @@ for (const { label, viewport } of VIEWPORTS) {
       // Only Show notes and the filter's Apply; no logging, ticking or drafts.
       const buttons = await page.getByRole("main").getByRole("button").allTextContents();
       expect(new Set(buttons)).toEqual(new Set(["Apply", "Show notes"]));
-      await expect(page.getByRole("link", { name: "Log a Conversation or Attempt" })).toHaveCount(0);
+      await expect(page.getByRole("link", { name: "Log conversation", exact: true })).toHaveCount(0);
 
       await openFlags(page);
       await expect(flagsTab(page)).toHaveText("Flags");
@@ -307,7 +307,7 @@ test.describe("Blended Learning Flags feed — Mentor", () => {
     await signInAs(page, BLENDED_MENTOR_A);
 
     await page.goto("/blended-learning?tab=flags");
-    await expect(page.getByRole("region", { name: "Talk to First" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "Students" })).toBeVisible();
     await expect(page.getByRole("navigation", { name: "Admin views" })).toHaveCount(0);
     await expect(feed(page)).toHaveCount(0);
 

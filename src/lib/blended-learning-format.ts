@@ -12,13 +12,16 @@ const SPOKE_WITH_LABEL: Record<(typeof SPOKE_WITH)[number], string> = {
   both: "Student and parent",
 };
 
-// A Conversation's mode, who was spoken with and its length, as one line.
+// A Conversation's mode, length and who was spoken with, as one line:
+// "Call · 20 min · Spoke with student". The detail page's history entries and
+// the log page's last-Conversation panel both use it.
 export function describeSession(session: {
   mode: (typeof MODES)[number];
   spokeWith: (typeof SPOKE_WITH)[number];
   durationMinutes: number;
 }): string {
-  return [MODE_LABEL[session.mode], SPOKE_WITH_LABEL[session.spokeWith], `${session.durationMinutes} min`].join(" · ");
+  const spokeWith = SPOKE_WITH_LABEL[session.spokeWith].toLowerCase();
+  return `${MODE_LABEL[session.mode]} · ${session.durationMinutes} min · Spoke with ${spokeWith}`;
 }
 
 // A `YYYY-MM-DD` calendar date as "5 Mar 2026", never shifted by time zone.

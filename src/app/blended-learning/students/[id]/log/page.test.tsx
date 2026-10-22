@@ -161,7 +161,7 @@ describe("LogEntryPage", () => {
     // The newest Conversation, skipping the newer Attempt.
     const panel = screen.getByRole("region", { name: "Last Conversation" });
     expect(panel).toHaveTextContent("12 Oct 2026");
-    expect(panel).toHaveTextContent("In person · Parent or sibling · 15 min");
+    expect(panel).toHaveTextContent("In person · 15 min · Spoke with parent or sibling");
     expect(panel).toHaveTextContent("Spoke with her brother.");
     expect(panel).not.toHaveTextContent("Older Conversation.");
   });
