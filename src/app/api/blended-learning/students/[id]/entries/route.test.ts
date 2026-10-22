@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mockClient } from "aws-sdk-client-mock";
 import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
+import { HeadObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { jsonRequest, routeParams } from "@/app/api/__test-utils__/api-test-helpers";
 
 vi.mock("next-auth", () => ({ getServerSession: vi.fn() }));
@@ -16,6 +17,8 @@ const mockQuery = vi.mocked(query);
 const mockWithTransaction = vi.mocked(withTransaction);
 // SES is the notifier's process boundary.
 const ses = mockClient(SESClient);
+// S3 is where uploaded photos already sit; HeadObject reads their stored size.
+const s3 = mockClient(S3Client);
 
 const MENTOR_A = "faizan@avantifellows.org";
 const MENTOR_B = "lokesh@avantifellows.org";
@@ -152,6 +155,15 @@ function givenTables() {
   });
 }
 
+// Uploaded photo objects by key, with their stored size. Any other key has no object.
+function givenS3Objects(sizes: Record<string, number>) {
+  s3.reset();
+  s3.on(HeadObjectCommand).callsFake(async (input: { Key: string }) => {
+    if (input.Key in sizes) return { ContentLength: sizes[input.Key] };
+    throw Object.assign(new Error("NotFound"), { name: "NotFound", $metadata: { httpStatusCode: 404 } });
+  });
+}
+
 function signedInAs(email: string | null) {
   mockSession.mockResolvedValue(email ? { user: { email }, expires: "2099-01-01" } : null);
 }
@@ -176,6 +188,9 @@ beforeEach(() => {
   vi.stubEnv("BLENDED_LEARNING_SES_SECRET_ACCESS_KEY", "test-secret");
   vi.stubEnv("BLENDED_LEARNING_WELLBEING_EMAILS", "shalinijha@avantifellows.org");
   vi.stubEnv("NEXTAUTH_URL", "https://lms.avantifellows.org");
+  vi.stubEnv("S3_DOCS_BUCKET", "test-bucket");
+  vi.stubEnv("S3_DOCS_PREFIX", "lms-documents");
+  givenS3Objects({});
 });
 
 afterEach(() => {
@@ -597,6 +612,131 @@ describe("POST /api/blended-learning/students/[id]/entries", () => {
       expect(res.status).toBe(201);
       expect(ses.calls()).toHaveLength(0);
       expect(committedFlags[701].notification_sent_at).toBeNull();
+    });
+  });
+
+  describe("Photos", () => {
+    const PHOTO_1 = "lms-documents/blended-learning/photos/501/0d6f1d8e-1b2c-4c1a-9f3e-5a6b7c8d9e01.jpg";
+    const PHOTO_2 = "lms-documents/blended-learning/photos/501/7a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c02.png";
+
+    it("stores a Conversation's photos with positions 1..n, type and stored size, in the same save", async () => {
+      signedInAs(MENTOR_A);
+      givenS3Objects({ [PHOTO_1]: 412_345, [PHOTO_2]: 98_765 });
+      const res = await postEntry("501", { ...CONVERSATION, photoKeys: [PHOTO_1, PHOTO_2] });
+
+      expect(res.status).toBe(201);
+      expect(inserted.blended_learning_conversation_photos).toEqual([
+        { conversation_id: 700, s3_key: PHOTO_1, content_type: "image/jpeg", byte_size: 412345, position: 1 },
+        { conversation_id: 700, s3_key: PHOTO_2, content_type: "image/png", byte_size: 98765, position: 2 },
+      ]);
+    });
+
+    // A key from the upload route under Student 601's prefix, and photo keys
+    // shaped wrong for Student 501.
+    const STUDENT_601_PHOTO = "lms-documents/blended-learning/photos/601/1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e05.jpg";
+    function photoKey(n: number) {
+      return `lms-documents/blended-learning/photos/501/00000000-0000-4000-8000-00000000000${n}.jpg`;
+    }
+
+    it.each([
+      ["under another Student's prefix", STUDENT_601_PHOTO],
+      ["under this Student's documents, not photos", "lms-documents/students/501/consent/2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d06/page-1.jpg"],
+      ["under another environment's prefix", "lms-documents-staging/blended-learning/photos/501/0d6f1d8e-1b2c-4c1a-9f3e-5a6b7c8d9e01.jpg"],
+      ["that climbs out of the prefix", "lms-documents/blended-learning/photos/501/../601/0d6f1d8e-1b2c-4c1a-9f3e-5a6b7c8d9e01.jpg"],
+      ["that is not an image", "lms-documents/blended-learning/photos/501/0d6f1d8e-1b2c-4c1a-9f3e-5a6b7c8d9e01.pdf"],
+      ["that is not text", 501],
+    ])("rejects a photo key %s (422) and saves nothing", async (_case, foreignKey) => {
+      signedInAs(MENTOR_A);
+      givenS3Objects({ [PHOTO_1]: 1000, [STUDENT_601_PHOTO]: 1000 });
+      const res = await postEntry("501", { ...CONVERSATION, photoKeys: [PHOTO_1, foreignKey] });
+
+      expect(res.status).toBe(422);
+      expect(res.body.fieldErrors).toEqual({ "photoKeys.1": "This photo isn't this Mentee's. Remove it and add it again." });
+      expect(mockWithTransaction).not.toHaveBeenCalled();
+      expect(inserted).toEqual({});
+    });
+
+    it("rejects six photos (422) and saves nothing", async () => {
+      signedInAs(MENTOR_A);
+      const keys = [1, 2, 3, 4, 5, 6].map(photoKey);
+      givenS3Objects(Object.fromEntries(keys.map((key) => [key, 1000])));
+      const res = await postEntry("501", { ...CONVERSATION, photoKeys: keys });
+
+      expect(res.status).toBe(422);
+      expect(res.body.fieldErrors).toEqual({ photoKeys: "A Conversation can have at most five photos." });
+      expect(mockWithTransaction).not.toHaveBeenCalled();
+      expect(inserted).toEqual({});
+    });
+
+    it("stores five photos at positions 1 to 5", async () => {
+      signedInAs(MENTOR_A);
+      const keys = [1, 2, 3, 4, 5].map(photoKey);
+      givenS3Objects(Object.fromEntries(keys.map((key) => [key, 2048])));
+      const res = await postEntry("501", { ...CONVERSATION, photoKeys: keys });
+
+      expect(res.status).toBe(201);
+      expect(inserted.blended_learning_conversation_photos.map((row) => [row.s3_key, row.position])).toEqual([
+        [photoKey(1), 1],
+        [photoKey(2), 2],
+        [photoKey(3), 3],
+        [photoKey(4), 4],
+        [photoKey(5), 5],
+      ]);
+    });
+
+    it("rejects the same photo twice (422)", async () => {
+      signedInAs(MENTOR_A);
+      givenS3Objects({ [PHOTO_1]: 1000 });
+      const res = await postEntry("501", { ...CONVERSATION, photoKeys: [PHOTO_1, PHOTO_1] });
+
+      expect(res.status).toBe(422);
+      expect(res.body.fieldErrors).toEqual({ "photoKeys.1": "Each photo can be attached once." });
+      expect(mockWithTransaction).not.toHaveBeenCalled();
+    });
+
+    it("rejects a photo whose upload never reached S3 (422) and saves nothing", async () => {
+      signedInAs(MENTOR_A);
+      givenS3Objects({ [PHOTO_1]: 1000 });
+      const res = await postEntry("501", { ...CONVERSATION, photoKeys: [PHOTO_1, PHOTO_2] });
+
+      expect(res.status).toBe(422);
+      expect(res.body.fieldErrors).toEqual({
+        "photoKeys.1": "This photo didn't finish uploading. Remove it and add it again.",
+      });
+      expect(mockWithTransaction).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["not a list", PHOTO_1, { photoKeys: "Photos must be a list." }],
+    ])("rejects photo keys that are %s (422)", async (_case, photoKeys, fieldErrors) => {
+      signedInAs(MENTOR_A);
+      const res = await postEntry("501", { ...CONVERSATION, photoKeys });
+      expect(res.status).toBe(422);
+      expect(res.body.fieldErrors).toEqual(fieldErrors);
+    });
+
+    it("rejects photos on an Attempt (422)", async () => {
+      signedInAs(MENTOR_A);
+      givenS3Objects({ [PHOTO_1]: 1000 });
+      const res = await postEntry("501", { kind: "attempt", occurredOn: "2026-10-22", photoKeys: [PHOTO_1] });
+      expect(res.status).toBe(422);
+      expect(res.body.fieldErrors).toEqual({ photoKeys: "An Attempt can't have photos." });
+    });
+
+    it("returns 404 when a Mentor attaches photos for another Mentor's Mentee, and saves nothing", async () => {
+      signedInAs(MENTOR_A);
+      givenS3Objects({ [STUDENT_601_PHOTO]: 1000 });
+      const res = await postEntry("601", { ...CONVERSATION, photoKeys: [STUDENT_601_PHOTO] });
+      expect(res.status).toBe(404);
+      expect(inserted).toEqual({});
+    });
+
+    it("saves no photo rows when the Conversation rolls back", async () => {
+      signedInAs(MENTOR_A);
+      givenS3Objects({ [PHOTO_1]: 1000 });
+      const res = await postEntry("501", { ...CONVERSATION, photoKeys: [PHOTO_1], completeActionItemIds: [801] });
+      expect(res.status).toBe(409);
+      expect(inserted).toEqual({});
     });
   });
 });

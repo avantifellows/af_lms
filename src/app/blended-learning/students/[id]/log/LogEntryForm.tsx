@@ -12,12 +12,13 @@ import { LastContact, WhyNowTags } from "../../../MenteeList";
 import { ACTION_ITEM_OWNER, ActionItemMeta } from "../ActionItemMeta";
 import { FLAG_RECIPIENT } from "../flagRecipients";
 import { NotesEditor } from "./NotesEditor";
+import { PhotoPicker, type PickedPhoto } from "./PhotoPicker";
 
 // Log a Conversation or an Attempt for one Mentee. One column on mobile with
 // the last-conversation and Open Action Items panels on top; they sit beside
 // the form from 1024 px. Only a Conversation adds Action Items or ticks
-// earlier ones done, and raises Mentor Flags. After saving, a confirmation shows what the Mentee list
-// now says.
+// earlier ones done, attaches photos and raises Mentor Flags. After saving, a
+// confirmation shows what the Mentee list now says.
 
 type Kind = "conversation" | "attempt";
 // Keyed by field, e.g. `summary` or `actionItems.0.text`.
@@ -381,6 +382,7 @@ export function LogEntryForm({
   const [nextItemKey, setNextItemKey] = useState(1);
   const [ticked, setTicked] = useState<Set<number>>(new Set());
   const [flags, setFlags] = useState<DraftFlags>({});
+  const [photos, setPhotos] = useState<PickedPhoto[]>([]);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -394,6 +396,10 @@ export function LogEntryForm({
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (kind === "conversation" && photos.some((photo) => photo.status !== "done")) {
+      setError("Wait for the photos to finish uploading, or remove the ones that failed.");
+      return;
+    }
     setSaving(true);
     setError(null);
     const body =
@@ -408,6 +414,7 @@ export function LogEntryForm({
             summary,
             notesHtml,
             actionItems: actionItems.map((item) => ({ owner: item.owner, text: item.text, dueOn: item.dueOn || null })),
+            photoKeys: photos.map((photo) => photo.s3Key),
             flags: FLAG_RECIPIENTS.filter((recipient) => flags[recipient] !== undefined).map((recipient) => ({
               recipient,
               comment: flags[recipient] || null,
@@ -549,6 +556,18 @@ export function LogEntryForm({
                   Object.fromEntries(Object.entries(errors).filter(([field]) => !field.startsWith("actionItems")))
                 );
               }}
+            />
+            <PhotoPicker
+              studentId={studentId}
+              photos={photos}
+              setPhotos={(next) => {
+                setPhotos(next);
+                // Per-photo errors are keyed by position, which a change shifts.
+                setFieldErrors((errors) =>
+                  Object.fromEntries(Object.entries(errors).filter(([field]) => !field.startsWith("photoKeys")))
+                );
+              }}
+              errors={fieldErrors}
             />
             <MentorFlagsEditor
               flags={flags}

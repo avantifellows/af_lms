@@ -197,7 +197,7 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   (read), `src/lib/holistic-follow-up-questions.ts` (client-safe question keys, text, and
   normaliser), `src/lib/holistic-mentor-write-scope.ts` (shared scope guard).
 
-## Blended Learning Mentee list (#442), detail (#444), logging (#445), Action Items (#446) and Mentor Flags (#447)
+## Blended Learning Mentee list (#442), detail (#444), logging (#445), Action Items (#446), Mentor Flags (#447) and photos (#448)
 
 - **Tables:** the `blended_learning_*` tables are created by db-service (Mappings:
   `20260921120000` + its ensure migration; the other eight: PR #804,
@@ -253,8 +253,8 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   `academic_year`, plus `logged_by_email`/`logged_by_user_id` = the actor (an admin logging on a
   Mentor's behalf keeps the mapped Mentor). `23514` (checks, append-only triggers) and `23505`
   map to 409. After commit, `mentee` is the Student's `listMentees` row (`studentId` filter), so
-  the confirmation shows exactly what the list now says. Later slices add photos and draft save
-  inside the same transaction.
+  the confirmation shows exactly what the list now says. A later slice adds draft save inside
+  the same transaction.
 - **Action Items (#446):** only `kind: "conversation"` accepts `actionItems[]` (`{ owner:
   student|mentor|parent, text, dueOn? }`; a missing owner or blank text, or an impossible
   date, gives a 422 keyed `actionItems.<i>.<field>`) and `completeActionItemIds[]` (positive
@@ -286,6 +286,23 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   Physics, Chemistry and Maths flags notify no one. The log form shows four switches
   (`role="switch"`), each revealing an optional comment; labels come from
   `students/[id]/flagRecipients.ts`, shared with the history chips.
+- **Photos (#448):** the log form's picker (`students/[id]/log/PhotoPicker.tsx`, state held by
+  the form so Attempt ↔ Conversation keeps it) downscales each picked image with
+  `downscaleImage` and POSTs it alone as multipart `photo` to
+  `POST /api/blended-learning/students/[id]/photos` → `uploadConversationPhoto(access, studentId,
+  file)` in `src/lib/blended-learning-photos.ts` (401 / 403 other roles and read-only / 404 out of
+  scope or malformed id / 422 not `image/jpeg|png|webp|heic`, empty or over 10 MiB / 502 S3
+  failure, logging only the error name / 201 `{ s3Key, contentType, byteSize }`). The key is
+  `{S3_DOCS_PREFIX}/blended-learning/photos/{studentId}/{uuid}.{ext}` (`blendedLearningPhotoPrefix`
+  + `uploadObject` in `src/lib/s3.ts`). Only `kind: "conversation"` accepts `photoKeys[]`
+  (strings). Before the transaction: more than five → 422 `photoKeys`; a key not exactly this
+  Student's prefix + UUID + `jpg|png|webp|heic`, or a repeat → 422 `photoKeys.<i>`; then
+  `HeadObject` per key (`headObject`), and a missing object → 422 `photoKeys.<i>`. The row's
+  `content_type` comes from the extension and `byte_size` from S3, never from the client. Rows
+  insert after the Action Items with `position` 1..n. The form refuses to save while a photo is
+  uploading or failed. Orphaned objects from abandoned forms stay in S3 in v1. E2E has no S3, so
+  `blended-learning-photos.spec.ts` answers the upload and save requests itself (it never saves);
+  saved photos are covered by inserted rows in the detail spec.
 - **Notes sanitiser (#445):** `sanitiseNotesHtml` in `src/lib/blended-learning-notes-sanitiser.ts`
   (server-only, `sanitize-html`) is the only path to `notes_html`: allowlist `p, h3, b, i, ul, ol,
   li, table, tr, th, td, br`, no attributes, no links (an `<a>` keeps its text), `strong→b`,

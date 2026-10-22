@@ -9,18 +9,26 @@ import {
 } from "./blended-learning-access";
 import { listMentees, type MenteeRow } from "./blended-learning-mentees";
 import { sanitiseNotesHtml } from "./blended-learning-notes-sanitiser";
+import {
+  MAX_CONVERSATION_PHOTOS,
+  photoKeyContentType,
+  uploadedPhotoSizes,
+} from "./blended-learning-photos";
 import { notifyWellbeingFlag } from "./blended-learning-wellbeing-notifier";
 
 // Conversation write use case (server-only): logEntry saves one Conversation
 // or Attempt for a Mentee in a single transaction, with a Conversation's new
-// Action Items, Mentor Flags and ticks on earlier Action Items. After commit,
-// an Emotional Well-being flag emails the well-being lead. Later slices add
-// photos and draft save to this same transaction.
+// Action Items, photos, Mentor Flags and ticks on earlier Action Items. After
+// commit, an Emotional Well-being flag emails the well-being lead. A later
+// slice adds draft save to this same transaction.
 
 type ActionItemOwner = "student" | "mentor" | "parent";
 type ActionItemInput = { owner: ActionItemOwner; text: string; dueOn: string | null };
 type FlagRecipient = "emotional_wellbeing" | "physics" | "chemistry" | "maths";
 type FlagInput = { recipient: FlagRecipient; comment: string | null };
+// An uploaded photo, already under this Student's photo prefix.
+type PhotoInput = { s3Key: string; contentType: string };
+type StoredPhoto = PhotoInput & { byteSize: number };
 
 type ConversationInput = {
   kind: "conversation";
@@ -31,6 +39,7 @@ type ConversationInput = {
   summary: string;
   notesHtml: string | null;
   actionItems: ActionItemInput[];
+  photos: PhotoInput[];
   flags: FlagInput[];
   // Earlier open Action Items this Conversation marks done.
   completeActionItemIds: number[];
@@ -68,7 +77,7 @@ type Validated = { ok: true; input: EntryInput } | { ok: false; fieldErrors: Rec
 
 // Field-level validation. `today` is the IST calendar date; an entry can be
 // dated today or earlier.
-function validate(raw: unknown, today: string): Validated {
+function validate(raw: unknown, today: string, studentId: number): Validated {
   const body = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const errors: Record<string, string> = {};
   if (body.kind !== "conversation" && body.kind !== "attempt") {
@@ -81,6 +90,7 @@ function validate(raw: unknown, today: string): Validated {
   if (body.kind === "attempt") {
     // Only a Conversation carries Action Items or ticks earlier ones done.
     if (body.actionItems !== undefined) errors.actionItems = "An Attempt can't have Action Items.";
+    if (body.photoKeys !== undefined) errors.photoKeys = "An Attempt can't have photos.";
     if (body.flags !== undefined) errors.flags = "An Attempt can't have Mentor Flags.";
     if (body.completeActionItemIds !== undefined) {
       errors.completeActionItemIds = "Only a Conversation can tick Action Items done.";
@@ -107,6 +117,7 @@ function validate(raw: unknown, today: string): Validated {
   if (!notes.ok) errors.notesHtml = notes.error;
 
   const actionItems = validateActionItems(body.actionItems, errors);
+  const photos = validatePhotoKeys(body.photoKeys, studentId, errors);
   const flags = validateFlags(body.flags, errors);
   const completeActionItemIds = validateCompleteActionItemIds(body.completeActionItemIds, errors);
 
@@ -122,6 +133,7 @@ function validate(raw: unknown, today: string): Validated {
       summary: summary as string,
       notesHtml: notes.html,
       actionItems,
+      photos,
       flags,
       completeActionItemIds,
     },
@@ -154,6 +166,28 @@ function validateActionItems(raw: unknown, errors: Record<string, string>): Acti
     const dueOn = item.dueOn === undefined || item.dueOn === null || item.dueOn === "" ? null : item.dueOn;
     if (dueOn !== null && !isCalendarDate(dueOn)) errors[`actionItems.${index}.dueOn`] = "Enter a valid due date.";
     return { owner: item.owner as ActionItemOwner, text: text ?? "", dueOn: dueOn as string | null };
+  });
+}
+
+// Photo keys from the upload route: at most five, each under this Student's
+// photo prefix and attached once. Errors are keyed per key, e.g. `photoKeys.1`.
+function validatePhotoKeys(raw: unknown, studentId: number, errors: Record<string, string>): PhotoInput[] {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw)) {
+    errors.photoKeys = "Photos must be a list.";
+    return [];
+  }
+  if (raw.length > MAX_CONVERSATION_PHOTOS) {
+    errors.photoKeys = "A Conversation can have at most five photos.";
+    return [];
+  }
+  const seen = new Set<string>();
+  return raw.map((key, index) => {
+    const contentType = photoKeyContentType(studentId, key);
+    if (!contentType) errors[`photoKeys.${index}`] = "This photo isn't this Mentee's. Remove it and add it again.";
+    else if (seen.has(key)) errors[`photoKeys.${index}`] = "Each photo can be attached once.";
+    else seen.add(key);
+    return { s3Key: key as string, contentType: contentType ?? "" };
   });
 }
 
@@ -250,6 +284,17 @@ async function insertActionItems(
   }
 }
 
+// A Conversation's photos, numbered 1..n in the order given.
+async function insertPhotos(client: PoolClient, conversationId: number, photos: StoredPhoto[]): Promise<void> {
+  for (const [index, photo] of photos.entries()) {
+    await client.query(
+      `INSERT INTO blended_learning_conversation_photos (conversation_id, s3_key, content_type, byte_size, position)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [conversationId, photo.s3Key, photo.contentType, photo.byteSize, index + 1]
+    );
+  }
+}
+
 // A Conversation's Mentor Flags, raised by the actor. Returns the ids of the
 // Emotional Well-being flags, which notify after commit.
 async function insertFlags(
@@ -302,6 +347,11 @@ function isConflict(error: unknown): boolean {
   return code === "23514" || code === "23505";
 }
 
+function invalid(fieldErrors: Record<string, string>): LogEntryResult {
+  const [first] = Object.values(fieldErrors);
+  return { ok: false, status: 422, error: first, fieldErrors };
+}
+
 export async function logEntry(
   access: BlendedLearningAccess,
   studentId: number,
@@ -311,10 +361,20 @@ export async function logEntry(
   if (!canBlendedLearning(access, "log")) return { ok: false, status: 403, error: "Forbidden" };
   if (!Number.isSafeInteger(studentId) || studentId <= 0) return { ok: false, status: 404, error: "Not found" };
 
-  const validated = validate(raw, today);
-  if (!validated.ok) {
-    const [first] = Object.values(validated.fieldErrors);
-    return { ok: false, status: 422, error: first, fieldErrors: validated.fieldErrors };
+  const validated = validate(raw, today, studentId);
+  if (!validated.ok) return invalid(validated.fieldErrors);
+
+  // Each photo must already sit in S3; its stored size is what the row keeps.
+  let photos: StoredPhoto[] = [];
+  if (validated.input.kind === "conversation" && validated.input.photos.length > 0) {
+    const input = validated.input;
+    const sizes = await uploadedPhotoSizes(input.photos.map((photo) => photo.s3Key));
+    const missing: Record<string, string> = {};
+    sizes.forEach((size, index) => {
+      if (size === null) missing[`photoKeys.${index}`] = "This photo didn't finish uploading. Remove it and add it again.";
+    });
+    if (Object.keys(missing).length > 0) return invalid(missing);
+    photos = input.photos.map((photo, index) => ({ ...photo, byteSize: sizes[index] as number }));
   }
 
   let committed: { saved: LoggedEntry; mentorUserId: number; wellbeingFlagIds: number[] };
@@ -330,6 +390,7 @@ export async function logEntry(
       let wellbeingFlagIds: number[] = [];
       if (input.kind === "conversation") {
         await insertActionItems(client, studentId, saved.id, input.actionItems);
+        await insertPhotos(client, saved.id, photos);
         wellbeingFlagIds = await insertFlags(client, access, studentId, saved.id, input.flags);
         await completeActionItems(client, access, studentId, saved.id, input.completeActionItemIds);
       }

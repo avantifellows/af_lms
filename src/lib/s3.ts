@@ -3,6 +3,7 @@ import {
   PutObjectCommand,
   DeleteObjectCommand,
   GetObjectCommand,
+  HeadObjectCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
@@ -72,6 +73,38 @@ export function buildKey(opts: {
   extension: string;
 }): string {
   return `${prefix()}/students/${opts.studentId}/${opts.documentType}/${opts.documentUuid}/page-${opts.pageNumber}.${opts.extension}`;
+}
+
+// Blended Learning Conversation photos: one object per photo, under the
+// Student's photo prefix. Rows in blended_learning_conversation_photos point here.
+export function blendedLearningPhotoPrefix(studentId: number): string {
+  return `${prefix()}/blended-learning/photos/${studentId}/`;
+}
+
+export async function uploadObject(opts: {
+  s3Key: string;
+  body: Buffer;
+  contentType: string;
+}): Promise<void> {
+  await client().send(
+    new PutObjectCommand({
+      Bucket: bucket(),
+      Key: opts.s3Key,
+      Body: opts.body,
+      ContentType: opts.contentType,
+    }),
+  );
+}
+
+// An object's stored size, or null when there is no object at the key.
+export async function headObject(s3Key: string): Promise<{ byteSize: number } | null> {
+  try {
+    const head = await client().send(new HeadObjectCommand({ Bucket: bucket(), Key: s3Key }));
+    return { byteSize: head.ContentLength ?? 0 };
+  } catch (err) {
+    if ((err as { name?: string } | null)?.name === "NotFound") return null;
+    throw err;
+  }
 }
 
 // Thrown when uploadDocumentPages fails partway through. `uploaded` holds the
