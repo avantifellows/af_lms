@@ -1,16 +1,33 @@
 "use client";
 
 import Link from "next/link";
-import { useId, useState, type FormEvent, type ReactNode } from "react";
+import { useId, useState, type Dispatch, type FormEvent, type ReactNode, type SetStateAction } from "react";
 
 import { Button, Card, FormLabel, Input, Select } from "@/components/ui";
 import { baseInputClasses } from "@/components/ui/styles";
-import type { ActionItemOwner, FlagRecipient, OpenActionItem } from "@/lib/blended-learning-mentee-detail";
+import type { ActionItemOwner, OpenActionItem } from "@/lib/blended-learning-mentee-detail";
 import type { MenteeRow } from "@/lib/blended-learning-mentees";
 
 import { LastContact, WhyNowTags } from "../../../MenteeList";
 import { ACTION_ITEM_OWNER, ActionItemMeta } from "../ActionItemMeta";
 import { FLAG_RECIPIENT } from "../flagRecipients";
+import {
+  buildEntryPayload,
+  durationMinutes,
+  FLAG_RECIPIENTS,
+  initialEntryValues,
+  photosPending,
+  postEntry,
+  raisedFlags,
+  toggled,
+  withoutFieldErrors,
+  type DraftActionItem,
+  type DraftFlags,
+  type EntryFormValues,
+  type FieldErrors,
+  type Kind,
+  type ReviewDraft,
+} from "./logEntryPayload";
 import { NotesEditor } from "./NotesEditor";
 import { PhotoPicker, type PickedPhoto } from "./PhotoPicker";
 import { RecordingUpload } from "./RecordingUpload";
@@ -25,29 +42,11 @@ import { RecordingUpload } from "./RecordingUpload";
 // and saving turns the draft into this Conversation. After saving, a
 // confirmation shows what the Mentee list now says.
 
-type Kind = "conversation" | "attempt";
-// Keyed by field, e.g. `summary` or `actionItems.0.text`.
-type FieldErrors = Record<string, string>;
-type Saved = { kind: Kind; mentee: MenteeRow | null };
-type DraftActionItem = { key: number; owner: ActionItemOwner | ""; text: string; dueOn: string };
-// A switched-on Flag Recipient maps to its comment; off is absent.
-type DraftFlags = Partial<Record<FlagRecipient, string>>;
-const FLAG_RECIPIENTS = Object.keys(FLAG_RECIPIENT) as FlagRecipient[];
+export type { ReviewDraft };
 
-// A ready Conversation Draft, as the form opens it. Session details are those
-// the Mentor entered before uploading; `notesHtml` is the drafted notes with
-// their text escaped.
-export type ReviewDraft = {
-  id: number;
-  occurredOn: string | null;
-  mode: "call" | "in_person" | null;
-  spokeWith: "student" | "parent_or_sibling" | "both" | null;
-  durationMinutes: number | null;
-  summary: string;
-  actionItems: { owner: ActionItemOwner; text: string; dueOn: string | null }[];
-  notesHtml: string;
-  itemsToVerify: string[];
-};
+type Saved = { kind: Kind; mentee: MenteeRow | null };
+// Updates some of the form's values from their current ones.
+type ChangeValues = (change: (values: EntryFormValues) => Partial<EntryFormValues>) => void;
 
 const KINDS: { value: Kind; label: string }[] = [
   { value: "conversation", label: "Conversation" },
@@ -62,6 +61,7 @@ const SPOKE_WITH = [
   { value: "parent_or_sibling", label: "Parent or sibling" },
   { value: "both", label: "Student and parent" },
 ] as const;
+const TEXTAREA_CLASSES = `w-full ${baseInputClasses}`;
 
 function ChoiceGroup<T extends string>({
   legend,
@@ -156,6 +156,7 @@ function OpenActionItemsPanel({
 // form before saving. The ticks are a reading aid and are not saved.
 function ItemsToVerifyPanel({ items }: { items: string[] }) {
   const [checked, setChecked] = useState<Set<number>>(new Set());
+  if (items.length === 0) return null;
   return (
     <section aria-label="Items to Verify">
       <Card elevation="sm" className="space-y-2 border-l-4 border-l-accent p-4">
@@ -170,14 +171,7 @@ function ItemsToVerifyPanel({ items }: { items: string[] }) {
                 <input
                   type="checkbox"
                   checked={checked.has(index)}
-                  onChange={() =>
-                    setChecked((current) => {
-                      const next = new Set(current);
-                      if (next.has(index)) next.delete(index);
-                      else next.add(index);
-                      return next;
-                    })
-                  }
+                  onChange={() => setChecked((current) => toggled(current, index))}
                   className="mt-0.5 h-5 w-5 shrink-0 accent-accent"
                 />
                 <span className="min-w-0">{item}</span>
@@ -283,7 +277,7 @@ function MentorFlagsEditor({
 }) {
   const ids = useId();
   // Errors are keyed by position among the switched-on flags, as submitted.
-  const raised = FLAG_RECIPIENTS.filter((recipient) => flags[recipient] !== undefined);
+  const raised = raisedFlags(flags);
   const flagErrors = Object.entries(errors).filter(([field]) => field === "flags" || field.startsWith("flags."));
   return (
     <fieldset className="space-y-2">
@@ -345,6 +339,33 @@ function FieldError({ message, id }: { message?: string; id?: string }) {
   );
 }
 
+function SavedListSummary({ mentee, name, forOwnList }: { mentee: MenteeRow; name: string; forOwnList: boolean }) {
+  const group = mentee.reasons.length > 0 ? "Talk to First" : "Everyone else";
+  return (
+    <>
+      <p className="text-sm text-text-secondary">
+        {`${forOwnList ? "Your" : "The"} Mentee list now shows ${name} in ${group}.`}
+      </p>
+      <dl className="space-y-2 rounded-lg border border-border px-4 py-3 text-sm">
+        <div className="flex flex-wrap gap-x-3 gap-y-1">
+          <dt className="font-bold text-text-muted">Last Contact</dt>
+          <dd className="text-text-primary">
+            <LastContact mentee={mentee} />
+          </dd>
+        </div>
+        {mentee.reasons.length > 0 && (
+          <div className="flex flex-wrap gap-x-3 gap-y-1">
+            <dt className="font-bold text-text-muted">Why now</dt>
+            <dd>
+              <WhyNowTags mentee={mentee} />
+            </dd>
+          </div>
+        )}
+      </dl>
+    </>
+  );
+}
+
 function Confirmation({
   saved,
   studentId,
@@ -358,37 +379,13 @@ function Confirmation({
   firstName: string;
   forOwnList: boolean;
 }) {
-  const { mentee } = saved;
-  const group = mentee && mentee.reasons.length > 0 ? "Talk to First" : "Everyone else";
   return (
     <section aria-label="Saved">
       <Card elevation="sm" className="space-y-4 p-4 sm:p-6">
         <h2 className="text-lg font-bold text-text-primary">
           {saved.kind === "conversation" ? "Conversation saved" : "Attempt saved"}
         </h2>
-        {mentee && (
-          <>
-            <p className="text-sm text-text-secondary">
-              {`${forOwnList ? "Your" : "The"} Mentee list now shows ${name} in ${group}.`}
-            </p>
-            <dl className="space-y-2 rounded-lg border border-border px-4 py-3 text-sm">
-              <div className="flex flex-wrap gap-x-3 gap-y-1">
-                <dt className="font-bold text-text-muted">Last Contact</dt>
-                <dd className="text-text-primary">
-                  <LastContact mentee={mentee} />
-                </dd>
-              </div>
-              {mentee.reasons.length > 0 && (
-                <div className="flex flex-wrap gap-x-3 gap-y-1">
-                  <dt className="font-bold text-text-muted">Why now</dt>
-                  <dd>
-                    <WhyNowTags mentee={mentee} />
-                  </dd>
-                </div>
-              )}
-            </dl>
-          </>
-        )}
+        {saved.mentee && <SavedListSummary mentee={saved.mentee} name={name} forOwnList={forOwnList} />}
         <div className="flex flex-col gap-2 sm:flex-row">
           <Link
             href={`/blended-learning/students/${studentId}`}
@@ -406,6 +403,222 @@ function Confirmation({
       </Card>
     </section>
   );
+}
+
+// Where a Conversation's Call Recording can be uploaded: not while reviewing
+// a draft, and not while the Mentee already has one open.
+function RecordingSlot({
+  studentId,
+  firstName,
+  reviewing,
+  hasOpenDraft,
+  values,
+}: {
+  studentId: number;
+  firstName: string;
+  reviewing: boolean;
+  hasOpenDraft: boolean;
+  values: EntryFormValues;
+}) {
+  if (reviewing) return null;
+  if (hasOpenDraft) {
+    return (
+      <p className="rounded-lg border border-border px-3 py-2 text-sm text-text-secondary">
+        {`${firstName} already has a Conversation Draft, so no recording can be uploaded now.`}
+      </p>
+    );
+  }
+  return (
+    <RecordingUpload
+      studentId={studentId}
+      sessionDetails={{
+        occurredOn: values.occurredOn || null,
+        mode: values.mode,
+        spokeWith: values.spokeWith,
+        durationMinutes: durationMinutes(values.duration),
+      }}
+    />
+  );
+}
+
+// The fields only a Conversation has.
+function ConversationFields({
+  studentId,
+  firstName,
+  reviewing,
+  hasOpenDraft,
+  values,
+  change,
+  photos,
+  setPhotos,
+  fieldErrors,
+  setFieldErrors,
+}: {
+  studentId: number;
+  firstName: string;
+  reviewing: boolean;
+  hasOpenDraft: boolean;
+  values: EntryFormValues;
+  change: ChangeValues;
+  photos: PickedPhoto[];
+  setPhotos: Dispatch<SetStateAction<PickedPhoto[]>>;
+  fieldErrors: FieldErrors;
+  setFieldErrors: Dispatch<SetStateAction<FieldErrors>>;
+}) {
+  const ids = useId();
+  const durationId = `${ids}-duration`;
+  const summaryId = `${ids}-summary`;
+  const notesLabelId = `${ids}-notes-label`;
+  // Per-item errors are keyed by position, which a removal or switch shifts.
+  const clearErrors = (prefix: string) => setFieldErrors((errors) => withoutFieldErrors(errors, prefix));
+
+  return (
+    <>
+      <ChoiceGroup
+        legend="Mode"
+        name="mode"
+        options={MODES}
+        value={values.mode}
+        onChange={(mode) => change(() => ({ mode }))}
+        error={fieldErrors.mode}
+      />
+      <ChoiceGroup
+        legend="Spoke with"
+        name="spokeWith"
+        options={SPOKE_WITH}
+        value={values.spokeWith}
+        onChange={(spokeWith) => change(() => ({ spokeWith }))}
+        error={fieldErrors.spokeWith}
+      />
+      <div>
+        <FormLabel htmlFor={durationId}>Duration (minutes)</FormLabel>
+        <Input
+          id={durationId}
+          type="number"
+          inputMode="numeric"
+          min={1}
+          max={240}
+          value={values.duration}
+          onChange={(event) => change(() => ({ duration: event.target.value }))}
+          aria-invalid={Boolean(fieldErrors.durationMinutes)}
+          className="sm:max-w-[10rem]"
+        />
+        <FieldError message={fieldErrors.durationMinutes} />
+      </div>
+      <RecordingSlot
+        studentId={studentId}
+        firstName={firstName}
+        reviewing={reviewing}
+        hasOpenDraft={hasOpenDraft}
+        values={values}
+      />
+      <div>
+        <FormLabel htmlFor={summaryId}>Summary</FormLabel>
+        <textarea
+          id={summaryId}
+          rows={3}
+          value={values.summary}
+          onChange={(event) => change(() => ({ summary: event.target.value }))}
+          aria-invalid={Boolean(fieldErrors.summary)}
+          className={TEXTAREA_CLASSES}
+        />
+        <FieldError message={fieldErrors.summary} />
+      </div>
+      <ActionItemsEditor
+        items={values.actionItems}
+        errors={fieldErrors}
+        onChange={(key, itemChange) =>
+          change(({ actionItems }) => ({
+            actionItems: actionItems.map((item) => (item.key === key ? { ...item, ...itemChange } : item)),
+          }))
+        }
+        onAdd={() =>
+          change(({ actionItems, nextItemKey }) => ({
+            actionItems: [...actionItems, { key: nextItemKey, owner: "", text: "", dueOn: "" }],
+            nextItemKey: nextItemKey + 1,
+          }))
+        }
+        onRemove={(key) => {
+          change(({ actionItems }) => ({ actionItems: actionItems.filter((item) => item.key !== key) }));
+          clearErrors("actionItems");
+        }}
+      />
+      <PhotoPicker
+        studentId={studentId}
+        photos={photos}
+        setPhotos={(next) => {
+          setPhotos(next);
+          clearErrors("photoKeys");
+        }}
+        errors={fieldErrors}
+      />
+      <MentorFlagsEditor
+        flags={values.flags}
+        errors={fieldErrors}
+        onChange={(flags) => {
+          change(() => ({ flags }));
+          clearErrors("flags");
+        }}
+      />
+      <div>
+        <span id={notesLabelId} className="mb-1 block text-xs font-bold uppercase tracking-wide text-text-muted">
+          Notes (optional)
+        </span>
+        {/* Switching to Attempt unmounts the editor; it comes back with
+            the notes it last showed, so what is saved is what is seen. */}
+        <NotesEditor
+          labelId={notesLabelId}
+          initialHtml={values.notesHtml}
+          onChange={(notesHtml) => change(() => ({ notesHtml }))}
+        />
+        <FieldError message={fieldErrors.notesHtml} />
+      </div>
+    </>
+  );
+}
+
+function AttemptFields({ note, onChange }: { note: string; onChange: (note: string) => void }) {
+  const noteId = `${useId()}-note`;
+  return (
+    <div>
+      <FormLabel htmlFor={noteId}>Note (optional)</FormLabel>
+      <textarea
+        id={noteId}
+        rows={3}
+        value={note}
+        onChange={(event) => onChange(event.target.value)}
+        className={TEXTAREA_CLASSES}
+      />
+    </div>
+  );
+}
+
+function SidePanels({
+  lastConversationPanel,
+  openActionItems,
+  canTick,
+  ticked,
+  onToggle,
+}: {
+  lastConversationPanel: ReactNode;
+  openActionItems: OpenActionItem[];
+  canTick: boolean;
+  ticked: Set<number>;
+  onToggle: (id: number) => void;
+}) {
+  return (
+    <div className="min-w-0 space-y-4 lg:order-2">
+      {lastConversationPanel}
+      {openActionItems.length > 0 && (
+        <OpenActionItemsPanel items={openActionItems} canTick={canTick} ticked={ticked} onToggle={onToggle} />
+      )}
+    </div>
+  );
+}
+
+function submitLabel(saving: boolean, kind: Kind): string {
+  if (saving) return "Saving…";
+  return kind === "conversation" ? "Save Conversation" : "Save Attempt";
 }
 
 export function LogEntryForm({
@@ -433,31 +646,15 @@ export function LogEntryForm({
   // A ready Conversation Draft to review and save as this Conversation.
   draft?: ReviewDraft | null;
 }) {
-  const ids = useId();
-  const [kind, setKind] = useState<Kind>("conversation");
-  const [occurredOn, setOccurredOn] = useState(draft?.occurredOn ?? today);
-  const [mode, setMode] = useState<(typeof MODES)[number]["value"] | null>(draft?.mode ?? null);
-  const [spokeWith, setSpokeWith] = useState<(typeof SPOKE_WITH)[number]["value"] | null>(draft?.spokeWith ?? null);
-  const [duration, setDuration] = useState(draft?.durationMinutes ? String(draft.durationMinutes) : "");
-  const [summary, setSummary] = useState(draft?.summary ?? "");
-  const [notesHtml, setNotesHtml] = useState(draft?.notesHtml ?? "");
-  const [note, setNote] = useState("");
-  const [actionItems, setActionItems] = useState<DraftActionItem[]>(
-    (draft?.actionItems ?? []).map((item, index) => ({
-      key: index + 1,
-      owner: item.owner,
-      text: item.text,
-      dueOn: item.dueOn ?? "",
-    }))
-  );
-  const [nextItemKey, setNextItemKey] = useState((draft?.actionItems.length ?? 0) + 1);
-  const [ticked, setTicked] = useState<Set<number>>(new Set());
-  const [flags, setFlags] = useState<DraftFlags>({});
+  const dateId = `${useId()}-date`;
+  const [values, setValues] = useState(() => initialEntryValues(draft, today));
   const [photos, setPhotos] = useState<PickedPhoto[]>([]);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState<Saved | null>(null);
+  const change: ChangeValues = (update) => setValues((current) => ({ ...current, ...update(current) }));
+  const { kind } = values;
 
   if (saved) {
     return (
@@ -467,81 +664,33 @@ export function LogEntryForm({
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (kind === "conversation" && photos.some((photo) => photo.status !== "done")) {
+    if (photosPending(kind, photos)) {
       setError("Wait for the photos to finish uploading, or remove the ones that failed.");
       return;
     }
     setSaving(true);
     setError(null);
-    const body =
-      kind === "attempt"
-        ? { kind, occurredOn, note }
-        : {
-            kind,
-            occurredOn,
-            mode,
-            spokeWith,
-            durationMinutes: duration.trim() === "" ? null : Number(duration),
-            summary,
-            notesHtml,
-            actionItems: actionItems.map((item) => ({ owner: item.owner, text: item.text, dueOn: item.dueOn || null })),
-            photoKeys: photos.map((photo) => photo.s3Key),
-            flags: FLAG_RECIPIENTS.filter((recipient) => flags[recipient] !== undefined).map((recipient) => ({
-              recipient,
-              comment: flags[recipient] || null,
-            })),
-            completeActionItemIds: [...ticked],
-            ...(draft ? { draftId: draft.id } : {}),
-          };
-    try {
-      const res = await fetch(`/api/blended-learning/students/${studentId}/entries`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (res.ok) {
-        setSaved({ kind, mentee: json.mentee ?? null });
-        return;
-      }
-      setFieldErrors(json.fieldErrors ?? {});
-      if (!json.fieldErrors) setError(json.error ?? "Couldn't save. Try again.");
-    } catch {
-      setError("Couldn't save. Check your connection and try again.");
-    } finally {
-      setSaving(false);
+    const outcome = await postEntry(studentId, buildEntryPayload(values, photos, draft?.id ?? null));
+    setSaving(false);
+    if (outcome.ok) {
+      setSaved({ kind, mentee: outcome.mentee });
+      return;
     }
+    if (outcome.fieldErrors) setFieldErrors(outcome.fieldErrors);
+    setError(outcome.error);
   }
-
-  const dateId = `${ids}-date`;
-  const durationId = `${ids}-duration`;
-  const summaryId = `${ids}-summary`;
-  const notesLabelId = `${ids}-notes-label`;
-  const noteId = `${ids}-note`;
-  const textareaClasses = `w-full ${baseInputClasses}`;
 
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start">
-      <div className="min-w-0 space-y-4 lg:order-2">
-        {lastConversationPanel}
-        {openActionItems.length > 0 && (
-          <OpenActionItemsPanel
-            items={openActionItems}
-            canTick={kind === "conversation"}
-            ticked={ticked}
-            onToggle={(id) =>
-              setTicked((current) => {
-                const next = new Set(current);
-                if (next.has(id)) next.delete(id);
-                else next.add(id);
-                return next;
-              })
-            }
-          />
-        )}
-      </div>
+      <SidePanels
+        lastConversationPanel={lastConversationPanel}
+        openActionItems={openActionItems}
+        canTick={kind === "conversation"}
+        ticked={values.ticked}
+        onToggle={(id) => change(({ ticked }) => ({ ticked: toggled(ticked, id) }))}
+      />
       <div className="min-w-0 space-y-4 lg:order-1">
-        {draft && draft.itemsToVerify.length > 0 && <ItemsToVerifyPanel items={draft.itemsToVerify} />}
+        <ItemsToVerifyPanel items={draft?.itemsToVerify ?? []} />
         <form
           aria-label="Log a Conversation or Attempt"
           noValidate
@@ -555,8 +704,8 @@ export function LogEntryForm({
               name="kind"
               options={KINDS}
               value={kind}
-              onChange={(value) => {
-                setKind(value);
+              onChange={(next) => {
+                change(() => ({ kind: next }));
                 setFieldErrors({});
                 setError(null);
               }}
@@ -569,9 +718,9 @@ export function LogEntryForm({
             <Input
               id={dateId}
               type="date"
-              value={occurredOn}
+              value={values.occurredOn}
               max={today}
-              onChange={(event) => setOccurredOn(event.target.value)}
+              onChange={(event) => change(() => ({ occurredOn: event.target.value }))}
               aria-invalid={Boolean(fieldErrors.occurredOn)}
               className="sm:max-w-xs"
             />
@@ -579,120 +728,20 @@ export function LogEntryForm({
           </div>
 
           {kind === "conversation" ? (
-            <>
-              <ChoiceGroup legend="Mode" name="mode" options={MODES} value={mode} onChange={setMode} error={fieldErrors.mode} />
-              <ChoiceGroup
-                legend="Spoke with"
-                name="spokeWith"
-                options={SPOKE_WITH}
-                value={spokeWith}
-                onChange={setSpokeWith}
-                error={fieldErrors.spokeWith}
-              />
-              <div>
-                <FormLabel htmlFor={durationId}>Duration (minutes)</FormLabel>
-                <Input
-                  id={durationId}
-                  type="number"
-                  inputMode="numeric"
-                  min={1}
-                  max={240}
-                  value={duration}
-                  onChange={(event) => setDuration(event.target.value)}
-                  aria-invalid={Boolean(fieldErrors.durationMinutes)}
-                  className="sm:max-w-[10rem]"
-                />
-                <FieldError message={fieldErrors.durationMinutes} />
-              </div>
-              {draft ? null : hasOpenDraft ? (
-                <p className="rounded-lg border border-border px-3 py-2 text-sm text-text-secondary">
-                  {`${firstName} already has a Conversation Draft, so no recording can be uploaded now.`}
-                </p>
-              ) : (
-                <RecordingUpload
-                  studentId={studentId}
-                  sessionDetails={{
-                    occurredOn: occurredOn || null,
-                    mode,
-                    spokeWith,
-                    durationMinutes: duration.trim() === "" ? null : Number(duration),
-                  }}
-                />
-              )}
-              <div>
-                <FormLabel htmlFor={summaryId}>Summary</FormLabel>
-                <textarea
-                  id={summaryId}
-                  rows={3}
-                  value={summary}
-                  onChange={(event) => setSummary(event.target.value)}
-                  aria-invalid={Boolean(fieldErrors.summary)}
-                  className={textareaClasses}
-                />
-                <FieldError message={fieldErrors.summary} />
-              </div>
-              <ActionItemsEditor
-                items={actionItems}
-                errors={fieldErrors}
-                onChange={(key, change) =>
-                  setActionItems((items) => items.map((item) => (item.key === key ? { ...item, ...change } : item)))
-                }
-                onAdd={() => {
-                  setActionItems((items) => [...items, { key: nextItemKey, owner: "", text: "", dueOn: "" }]);
-                  setNextItemKey((key) => key + 1);
-                }}
-                onRemove={(key) => {
-                  setActionItems((items) => items.filter((item) => item.key !== key));
-                  // Per-item errors are keyed by position, which removal shifts.
-                  setFieldErrors((errors) =>
-                    Object.fromEntries(Object.entries(errors).filter(([field]) => !field.startsWith("actionItems")))
-                  );
-                }}
-              />
-              <PhotoPicker
-                studentId={studentId}
-                photos={photos}
-                setPhotos={(next) => {
-                  setPhotos(next);
-                  // Per-photo errors are keyed by position, which a change shifts.
-                  setFieldErrors((errors) =>
-                    Object.fromEntries(Object.entries(errors).filter(([field]) => !field.startsWith("photoKeys")))
-                  );
-                }}
-                errors={fieldErrors}
-              />
-              <MentorFlagsEditor
-                flags={flags}
-                errors={fieldErrors}
-                onChange={(next) => {
-                  setFlags(next);
-                  // Per-flag errors are keyed by position, which a switch shifts.
-                  setFieldErrors((errors) =>
-                    Object.fromEntries(Object.entries(errors).filter(([field]) => !field.startsWith("flags")))
-                  );
-                }}
-              />
-              <div>
-                <span id={notesLabelId} className="mb-1 block text-xs font-bold uppercase tracking-wide text-text-muted">
-                  Notes (optional)
-                </span>
-                {/* Switching to Attempt unmounts the editor; it comes back with
-                    the notes it last showed, so what is saved is what is seen. */}
-                <NotesEditor labelId={notesLabelId} initialHtml={notesHtml} onChange={setNotesHtml} />
-                <FieldError message={fieldErrors.notesHtml} />
-              </div>
-            </>
+            <ConversationFields
+              studentId={studentId}
+              firstName={firstName}
+              reviewing={draft !== null}
+              hasOpenDraft={hasOpenDraft}
+              values={values}
+              change={change}
+              photos={photos}
+              setPhotos={setPhotos}
+              fieldErrors={fieldErrors}
+              setFieldErrors={setFieldErrors}
+            />
           ) : (
-            <div>
-              <FormLabel htmlFor={noteId}>Note (optional)</FormLabel>
-              <textarea
-                id={noteId}
-                rows={3}
-                value={note}
-                onChange={(event) => setNote(event.target.value)}
-                className={textareaClasses}
-              />
-            </div>
+            <AttemptFields note={values.note} onChange={(note) => change(() => ({ note }))} />
           )}
 
           {error && (
@@ -702,7 +751,7 @@ export function LogEntryForm({
           )}
 
           <Button type="submit" disabled={saving} className="w-full sm:w-auto">
-            {saving ? "Saving…" : kind === "conversation" ? "Save Conversation" : "Save Attempt"}
+            {submitLabel(saving, kind)}
           </Button>
         </form>
       </div>

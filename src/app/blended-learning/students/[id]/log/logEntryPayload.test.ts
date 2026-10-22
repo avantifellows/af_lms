@@ -1,0 +1,232 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import {
+  buildEntryPayload,
+  durationMinutes,
+  initialEntryValues,
+  photosPending,
+  postEntry,
+  raisedFlags,
+  toggled,
+  withoutFieldErrors,
+  type EntryFormValues,
+  type ReviewDraft,
+} from "./logEntryPayload";
+import type { PickedPhoto } from "./PhotoPicker";
+
+const TODAY = "2026-10-22";
+
+const DRAFT: ReviewDraft = {
+  id: 44,
+  occurredOn: "2026-10-20",
+  mode: "call",
+  spokeWith: "both",
+  durationMinutes: 35,
+  summary: "Discussed the mock test.",
+  actionItems: [
+    { owner: "student", text: "Revise optics", dueOn: "2026-10-30" },
+    { owner: "mentor", text: "Share notes", dueOn: null },
+  ],
+  notesHtml: "<p>Notes</p>",
+  itemsToVerify: ["The test date"],
+};
+
+function values(change: Partial<EntryFormValues> = {}): EntryFormValues {
+  return { ...initialEntryValues(null, TODAY), ...change };
+}
+
+function photo(id: number, status: PickedPhoto["status"], s3Key?: string): PickedPhoto {
+  return { id, previewUrl: null, status, s3Key };
+}
+
+describe("initialEntryValues", () => {
+  it("starts a blank Conversation dated today", () => {
+    expect(initialEntryValues(null, TODAY)).toEqual({
+      kind: "conversation",
+      occurredOn: TODAY,
+      mode: null,
+      spokeWith: null,
+      duration: "",
+      summary: "",
+      notesHtml: "",
+      note: "",
+      actionItems: [],
+      nextItemKey: 1,
+      ticked: new Set(),
+      flags: {},
+    });
+  });
+
+  it("prefills from a draft, keying its Action Items 1..n", () => {
+    expect(initialEntryValues(DRAFT, TODAY)).toMatchObject({
+      occurredOn: "2026-10-20",
+      mode: "call",
+      spokeWith: "both",
+      duration: "35",
+      summary: "Discussed the mock test.",
+      notesHtml: "<p>Notes</p>",
+      actionItems: [
+        { key: 1, owner: "student", text: "Revise optics", dueOn: "2026-10-30" },
+        { key: 2, owner: "mentor", text: "Share notes", dueOn: "" },
+      ],
+      nextItemKey: 3,
+    });
+  });
+
+  it("falls back to today and blanks for a draft without session details", () => {
+    const draft = { ...DRAFT, occurredOn: null, mode: null, spokeWith: null, durationMinutes: null, actionItems: [] };
+    expect(initialEntryValues(draft, TODAY)).toMatchObject({
+      occurredOn: TODAY,
+      mode: null,
+      spokeWith: null,
+      duration: "",
+      nextItemKey: 1,
+    });
+  });
+});
+
+describe("small helpers", () => {
+  it("reads a blank duration as none and anything else as a number", () => {
+    expect(durationMinutes("  ")).toBeNull();
+    expect(durationMinutes("45")).toBe(45);
+  });
+
+  it("toggles a value in a copy of the set", () => {
+    const set = new Set([1]);
+    expect(toggled(set, 2)).toEqual(new Set([1, 2]));
+    expect(toggled(set, 1)).toEqual(new Set());
+    expect(set).toEqual(new Set([1]));
+  });
+
+  it("drops the errors under a prefix", () => {
+    expect(withoutFieldErrors({ summary: "a", "flags.0.comment": "b", flags: "c" }, "flags")).toEqual({ summary: "a" });
+  });
+
+  it("lists switched-on flags in display order", () => {
+    expect(raisedFlags({ maths: "", emotional_wellbeing: "Upset" })).toEqual(["emotional_wellbeing", "maths"]);
+  });
+
+  it("holds a Conversation back while a photo is uploading or failed, never an Attempt", () => {
+    expect(photosPending("conversation", [photo(1, "done", "k")])).toBe(false);
+    expect(photosPending("conversation", [photo(1, "done", "k"), photo(2, "uploading")])).toBe(true);
+    expect(photosPending("conversation", [photo(1, "failed")])).toBe(true);
+    expect(photosPending("attempt", [photo(1, "failed")])).toBe(false);
+  });
+});
+
+describe("buildEntryPayload", () => {
+  it("sends only the date and note for an Attempt", () => {
+    expect(buildEntryPayload(values({ kind: "attempt", note: "No answer", summary: "x" }), [photo(1, "done", "k")], 44)).toEqual({
+      kind: "attempt",
+      occurredOn: TODAY,
+      note: "No answer",
+    });
+  });
+
+  it("sends a Conversation with its lists and the reviewed draft", () => {
+    const body = buildEntryPayload(
+      values({
+        mode: "in_person",
+        spokeWith: "student",
+        duration: "30",
+        summary: "Talked",
+        notesHtml: "<p>n</p>",
+        actionItems: [
+          { key: 1, owner: "student", text: "Revise", dueOn: "2026-10-30" },
+          { key: 3, owner: "", text: "", dueOn: "" },
+        ],
+        ticked: new Set([7, 9]),
+        flags: { physics: "Optics", emotional_wellbeing: "" },
+      }),
+      [photo(1, "done", "key-a"), photo(2, "done", "key-b")],
+      44
+    );
+    expect(body).toEqual({
+      kind: "conversation",
+      occurredOn: TODAY,
+      mode: "in_person",
+      spokeWith: "student",
+      durationMinutes: 30,
+      summary: "Talked",
+      notesHtml: "<p>n</p>",
+      actionItems: [
+        { owner: "student", text: "Revise", dueOn: "2026-10-30" },
+        { owner: "", text: "", dueOn: null },
+      ],
+      photoKeys: ["key-a", "key-b"],
+      flags: [
+        { recipient: "emotional_wellbeing", comment: null },
+        { recipient: "physics", comment: "Optics" },
+      ],
+      completeActionItemIds: [7, 9],
+      draftId: 44,
+    });
+  });
+
+  it("leaves draftId out without a draft and sends a blank duration as null", () => {
+    const body = buildEntryPayload(values(), [], null);
+    expect(body).not.toHaveProperty("draftId");
+    expect(body.durationMinutes).toBeNull();
+  });
+});
+
+describe("postEntry", () => {
+  const mockFetch = vi.fn();
+
+  beforeEach(() => {
+    mockFetch.mockReset();
+    vi.stubGlobal("fetch", mockFetch);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function answer(body: string, status: number) {
+    mockFetch.mockResolvedValueOnce(new Response(body, { status }));
+  }
+
+  it("posts the body as JSON to the Mentee's entries route", async () => {
+    answer(JSON.stringify({ entry: { id: 1 }, mentee: { studentId: 501 } }), 201);
+    await expect(postEntry(501, { kind: "attempt" })).resolves.toEqual({ ok: true, mentee: { studentId: 501 } });
+    expect(mockFetch).toHaveBeenCalledWith("/api/blended-learning/students/501/entries", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind: "attempt" }),
+    });
+  });
+
+  it("reads a missing mentee as null", async () => {
+    answer(JSON.stringify({ entry: { id: 1 } }), 201);
+    await expect(postEntry(501, {})).resolves.toEqual({ ok: true, mentee: null });
+  });
+
+  it("returns field errors without a message", async () => {
+    answer(JSON.stringify({ error: "Add a summary.", fieldErrors: { summary: "Add a summary." } }), 422);
+    await expect(postEntry(501, {})).resolves.toEqual({
+      ok: false,
+      fieldErrors: { summary: "Add a summary." },
+      error: null,
+    });
+  });
+
+  it("returns the server's message, or a fallback for an unreadable answer, and clears field errors", async () => {
+    answer(JSON.stringify({ error: "Not found" }), 404);
+    await expect(postEntry(501, {})).resolves.toEqual({ ok: false, fieldErrors: {}, error: "Not found" });
+    answer("<html>", 500);
+    await expect(postEntry(501, {})).resolves.toEqual({
+      ok: false,
+      fieldErrors: {},
+      error: "Couldn't save. Try again.",
+    });
+  });
+
+  it("keeps the form's field errors when the request never arrives", async () => {
+    mockFetch.mockRejectedValueOnce(new TypeError("offline"));
+    await expect(postEntry(501, {})).resolves.toEqual({
+      ok: false,
+      fieldErrors: null,
+      error: "Couldn't save. Check your connection and try again.",
+    });
+  });
+});
