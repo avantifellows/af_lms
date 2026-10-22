@@ -179,7 +179,7 @@ _Avoid_: Mentorship Tab, Holistic Mentorship Tab
 ### Holistic Mentorship
 
 **Holistic Mentorship**:
-The LMS domain for phase-based, non-academic mentoring in which assigned staff prepare from Student Context and Phase Guidance, conduct an offline conversation, and submit Post-Session Notes.
+The LMS domain for phase-based holistic mentoring covering a Student's academic and non-academic challenges, in which assigned staff prepare from Student Context and Phase Guidance, conduct an offline conversation, and submit Post-Session Notes.
 _Avoid_: Academic Mentorship, AI Mentorship, generic Mentorship
 
 **Holistic Mentorship Tab**:
@@ -221,6 +221,14 @@ _Avoid_: Session log, multiple interaction entries, Follow-up Note, Academic Men
 **Follow-up Note**:
 An immutable, timestamped answer set recording one extra offline conversation with a Holistic Mentee in a Holistic Phase whose Post-Session Notes are already submitted. A Mentee and Phase may have many.
 _Avoid_: Additional Notes, Check-in Notes, extra Post-Session Notes, session log
+
+**Challenge Category**:
+One fixed, coded Academic or Non-academic classification of a challenge a Holistic Mentor selects for a Holistic Mentee in Post-Session Notes.
+_Avoid_: Tag, challenge tag, issue type
+
+**Challenge Category Heatmap**:
+The School by Challenge Category grid showing, for one Program or all Programs, one academic year, one Grade, and one Phase or all Phases, the share of Students whose submitted Post-Session Notes carry each Challenge Category.
+_Avoid_: Challenge distribution chart, tag report
 
 **Historical Holistic Notes**:
 Prior-year questionnaire answers migrated from the returning-school Sheet for safely matched current Grade 12 Students. They are legacy Student Context, not canonical Post-Session Notes or evidence of a completed Holistic Phase.
@@ -471,6 +479,15 @@ _Avoid_: Unmapped Student, Mapping not done, unassigned Mentee
 - Each Mentee and Phase has one **Post-Session Notes** answer set for the Phase's main conversation; an extra offline conversation after submission is recorded as a separate **Follow-up Note** rather than by editing Post-Session Notes
 - A Mentee's currently assigned **Holistic Mentor** may add **Follow-up Notes** to any applicable Phase, including a prior-year Phase, only after that Phase's Post-Session Notes are submitted, regardless of who authored them; the same Mapping, dropout, and privacy guards as Notes writes apply, and Admins, Holistic Mentorship Admins, Program Managers, and Program Admins are read-only
 - **Follow-up Notes** answer three fixed free-text questions shared by every Program, Grade, and Phase: what challenges the Student talked about, what solutions the Mentor suggested, and whether the Student was able to follow the previously shared action plan; each is optional, but at least one must be answered
+- **Challenge Categories** belong only to **Post-Session Notes**; **Follow-up Notes** do not carry them
+- **Challenge Categories** form two fixed groups shared by every Program, Grade, and Phase. Academic: Subject/concept issues; Backlogs, revision & workload; Exam/Test related issues; Test performance & preparation; Other. Non-academic: Time management & distractions; Low confidence/motivation; Adjustment difficulties; Wellness (health, sleep etc.); Emotional & social stress; Career uncertainty; Financial challenges; Communication & language; Other
+- A Mentor selects any number of **Challenge Categories** in each group without a per-category note; the Phase's free-text Post-Session answers carry the detail
+- Submitting **Post-Session Notes** requires at least one **Challenge Category** in each group; each group also offers `No major issue reported`, which cannot be combined with another Category in that group
+- Post-Session Notes submitted before **Challenge Categories** existed stay without Categories; LMS does not backfill or prompt for them
+- A **Challenge Category Heatmap** cell is the percentage of Students with Category-bearing submitted Post-Session Notes in that School and scope whose Notes carry that Category; each School row shows that Student count as its base, and drafts and Notes without Categories never count
+- Under all Phases, a Student counts toward a Category when any of their Category-bearing submitted Notes in that Grade and academic year carries it
+- A **Challenge Category Heatmap** can combine all Programs only across all Phases; a single-Phase view is limited to one Program because Phases belong to one Program's Phase Plan
+- The **Challenge Category Heatmap** is visible to the same roles and School scope as **Students & Progress**; Teachers do not see it
 - A **Follow-up Note** has no draft and cannot be edited or deleted after it is saved; a correction is recorded as another Follow-up Note
 - A **Follow-up Note** records its author and system save time but no manually entered conversation date; a Mentee and Phase have no limit on Follow-up Notes
 - **Follow-up Notes** are readable by the same audience as submitted Post-Session Notes, appear only on their own Phase, do not feed Student Context, do not change Phase progress, and remain as history when a Mapping ends
