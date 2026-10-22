@@ -36,6 +36,20 @@ vi.mock("./PhotoPicker", () => ({
     </div>
   ),
 }));
+// The draft's progress has its own tests; this stand-in shows the state and
+// lets a test say the draft turned ready.
+vi.mock("../DraftStatus", () => ({
+  DraftStatus: ({ initialState, onReady }: { initialState: string; onReady?: () => void }) => (
+    <div data-testid="draft-status">
+      {initialState}
+      <button type="button" onClick={onReady}>
+        Draft turned ready
+      </button>
+    </div>
+  ),
+}));
+const mockRefresh = vi.fn();
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: mockRefresh }) }));
 vi.mock("./RecordingUpload", () => ({
   RecordingUpload: ({ sessionDetails }: { sessionDetails: unknown }) => (
     <p data-testid="recording-upload">{JSON.stringify(sessionDetails)}</p>
@@ -69,9 +83,8 @@ const DRAFT: ReviewDraft = {
   spokeWith: "both",
   durationMinutes: 35,
   summary: "Discussed the mock test.",
-  actionItems: [{ owner: "student", text: "Revise optics", dueOn: null }],
+  actionItems: [{ owner: "student", text: "Revise optics" }],
   notesHtml: "<p>Drafted</p>",
-  itemsToVerify: ["The mock test date"],
 };
 
 // No delay between keystrokes: these tests type a lot.
@@ -134,7 +147,8 @@ describe("LogEntryForm: Conversation", () => {
     const item = screen.getByRole("group", { name: "Action Item 1" });
     await userEvent.selectOptions(within(item).getByLabelText("Owner"), "mentor");
     await userEvent.type(within(item).getByLabelText("What"), "Share the notes");
-    await userEvent.type(within(item).getByLabelText("Due (optional)"), "2026-10-30");
+    // Action Items take no due date.
+    expect(within(item).queryByLabelText(/Due/)).not.toBeInTheDocument();
 
     answer({ entry: { id: 9 }, mentee: { ...MENTEE, reasons: ["gap_30"] } });
     await userEvent.click(screen.getByRole("button", { name: "Save Conversation" }));
@@ -151,7 +165,7 @@ describe("LogEntryForm: Conversation", () => {
       durationMinutes: 30,
       summary: "Talked about the mock test.",
       notesHtml: "",
-      actionItems: [{ owner: "mentor", text: "Share the notes", dueOn: "2026-10-30" }],
+      actionItems: [{ owner: "mentor", text: "Share the notes", dueOn: null }],
       photoKeys: [],
       flags: [],
       completeActionItemIds: [],
@@ -312,19 +326,14 @@ describe("LogEntryForm: Attempt", () => {
 });
 
 describe("LogEntryForm: reviewing a draft", () => {
-  it("opens prefilled as a Conversation, lists Items to Verify and saves the draft", async () => {
+  it("opens prefilled as a Conversation, without Items to Verify, and saves the draft", async () => {
     renderForm({ draft: DRAFT });
     expect(screen.queryByRole("radio", { name: "Attempt" })).not.toBeInTheDocument();
     expect(screen.queryByTestId("recording-upload")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Date")).toHaveValue("2026-10-20");
     expect(screen.getByLabelText("Summary")).toHaveValue("Discussed the mock test.");
 
-    const verify = screen.getByRole("region", { name: "Items to Verify" });
-    const check = within(verify).getByRole("checkbox", { name: "The mock test date" });
-    await userEvent.click(check);
-    expect(check).toBeChecked();
-    await userEvent.click(check);
-    expect(check).not.toBeChecked();
+    expect(screen.queryByRole("region", { name: "Items to Verify" })).not.toBeInTheDocument();
 
     answer({ entry: { id: 12 }, mentee: MENTEE });
     await userEvent.click(screen.getByRole("button", { name: "Save Conversation" }));
@@ -342,9 +351,49 @@ describe("LogEntryForm: reviewing a draft", () => {
     expect(await screen.findByRole("heading", { name: "Conversation saved" })).toBeInTheDocument();
   });
 
-  it("shows no Items to Verify panel when the draft has none, nor Open Action Items when there are none", () => {
-    renderForm({ draft: { ...DRAFT, itemsToVerify: [] }, openActionItems: [] });
-    expect(screen.queryByRole("region", { name: "Items to Verify" })).not.toBeInTheDocument();
+  it("shows no Open Action Items when there are none", () => {
+    renderForm({ draft: DRAFT, openActionItems: [] });
     expect(screen.queryByRole("region", { name: "Open Action Items" })).not.toBeInTheDocument();
+  });
+});
+
+describe("LogEntryForm: a draft being drafted", () => {
+  it("shows its progress in place of the upload, holds the write-up and refreshes once it is ready", async () => {
+    mockRefresh.mockReset();
+    renderForm({ hasOpenDraft: true, pendingDraft: { id: 44, state: "transcribing", retryOffered: false } });
+    expect(screen.getByTestId("draft-status")).toHaveTextContent("transcribing");
+    expect(screen.queryByTestId("recording-upload")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Summary")).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: /Action Items/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Drafting…" })).toBeDisabled();
+
+    await userEvent.click(screen.getByRole("button", { name: "Draft turned ready" }));
+    expect(mockRefresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("still saves an Attempt while drafting", async () => {
+    renderForm({ hasOpenDraft: true, pendingDraft: { id: 44, state: "transcribing", retryOffered: false } });
+    await userEvent.click(screen.getByRole("radio", { name: "Attempt" }));
+    expect(screen.getByRole("button", { name: "Save Attempt" })).toBeEnabled();
+  });
+
+  it("lets a failed draft be retried or discarded while the write-up can be typed", () => {
+    renderForm({ hasOpenDraft: true, pendingDraft: { id: 44, state: "failed", retryOffered: true } });
+    expect(screen.getByTestId("draft-status")).toHaveTextContent("failed");
+    expect(screen.getByLabelText("Summary")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save Conversation" })).toBeEnabled();
+  });
+});
+
+describe("LogEntryForm: layout", () => {
+  it("puts the write-up first, then photos, then Mentor Flags below the notes", () => {
+    renderForm();
+    const notes = screen.getByLabelText("Notes");
+    const photos = screen.getByRole("button", { name: "Add uploaded photo" });
+    const flags = screen.getByRole("group", { name: "Mentor Flags (optional)" });
+    const summary = screen.getByLabelText("Summary");
+    expect(summary.compareDocumentPosition(notes) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(notes.compareDocumentPosition(photos) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(photos.compareDocumentPosition(flags) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });

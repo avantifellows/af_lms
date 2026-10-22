@@ -155,7 +155,7 @@ for (const { label, key, viewport, entryRole } of VIEWPORTS) {
       return section.getByRole(entryRole).filter({ hasText: fullName(mentee) });
     }
 
-    test("a Mentor reviews a ready draft, checks its Items to Verify and saves it as a Conversation", async ({ page }) => {
+    test("a Mentor reviews a ready draft and saves it as a Conversation", async ({ page }) => {
       const studentId = studentIds[mentee.key];
       const draftId = await giveAReadyDraft(studentId);
       await signInAs(page, BLENDED_MENTOR_C);
@@ -183,15 +183,9 @@ for (const { label, key, viewport, entryRole } of VIEWPORTS) {
       await expect(page).toHaveURL(new RegExp(`/blended-learning/students/${studentId}/log$`));
       await expect(page.getByRole("heading", { name: `Review the draft for ${fullName(mentee)}` })).toBeVisible();
 
-      // Items to Verify sit above the form as a checklist.
-      const verify = page.getByRole("region", { name: "Items to Verify" });
+      // The drafted Items to Verify are not shown.
+      await expect(page.getByRole("region", { name: "Items to Verify" })).toHaveCount(0);
       const form = page.getByRole("form", { name: "Log a Conversation or Attempt" });
-      for (const item of DRAFT.itemsToVerify) {
-        await expect(verify.getByRole("checkbox", { name: item })).not.toBeChecked();
-        // The whole row is the tap target.
-        await expectTapTarget(verify.locator("label").filter({ hasText: item }));
-      }
-      expect((await verify.boundingBox())!.y).toBeLessThan((await form.boundingBox())!.y);
 
       // The form is prefilled from the draft.
       await expect(form.getByLabel("Date")).toHaveValue(yesterdayIST);
@@ -202,11 +196,11 @@ for (const { label, key, viewport, entryRole } of VIEWPORTS) {
       const firstItem = form.getByRole("group", { name: "Action Item 1" });
       await expect(firstItem.getByLabel("Owner")).toHaveValue("student");
       await expect(firstItem.getByLabel("What")).toHaveValue(DRAFT.actionItems[0].text);
-      await expect(firstItem.getByLabel("Due (optional)")).toHaveValue(inAWeekIST);
+      // A drafted due date is not shown, and Action Items take none.
+      await expect(firstItem.getByLabel(/Due/)).toHaveCount(0);
       const secondItem = form.getByRole("group", { name: "Action Item 2" });
       await expect(secondItem.getByLabel("Owner")).toHaveValue("mentor");
       await expect(secondItem.getByLabel("What")).toHaveValue(DRAFT.actionItems[1].text);
-      await expect(secondItem.getByLabel("Due (optional)")).toHaveValue("");
       const notes = form.getByRole("textbox", { name: "Notes" });
       await expect(notes.getByRole("heading", { name: "Mock test" })).toBeVisible();
       // Drafted text is shown as text, never as markup.
@@ -216,8 +210,6 @@ for (const { label, key, viewport, entryRole } of VIEWPORTS) {
       await expect(form.getByText("Call Recording (optional)")).toHaveCount(0);
       expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
 
-      // The Mentor checks what the model was unsure of and saves.
-      for (const item of DRAFT.itemsToVerify) await verify.getByRole("checkbox", { name: item }).check();
       await form.getByRole("button", { name: "Save Conversation" }).click();
 
       const saved = page.getByRole("region", { name: "Saved" });
@@ -241,7 +233,7 @@ for (const { label, key, viewport, entryRole } of VIEWPORTS) {
         },
       ]);
       expect(rows.actionItems).toEqual([
-        { position: 1, owner: "student", text: DRAFT.actionItems[0].text, due_on: inAWeekIST },
+        { position: 1, owner: "student", text: DRAFT.actionItems[0].text, due_on: null },
         { position: 2, owner: "mentor", text: DRAFT.actionItems[1].text, due_on: null },
       ]);
       expect(rows.draft).toEqual({ state: "saved", saved_conversation_id: rows.conversations[0].id });

@@ -5,9 +5,10 @@ import type { MenteeRow } from "@/lib/blended-learning-mentees";
 import type { TalkToFirstReason } from "@/lib/blended-learning-talk-to-first";
 
 // The Mentor's Mentee list: Talk to First, then Everyone else. A table from
-// 640 px up; cards below that, each one a 44 px+ tap target. A ready
-// Conversation Draft's chip opens it for review on the log page, for viewers
-// who can log; for a read-only viewer it is a plain label.
+// 640 px up, where the whole row opens the Mentee; cards below that, each one a
+// 44 px+ tap target. Viewers who can log also get a "Log conversation" button
+// per Mentee, and a ready Conversation Draft's chip opens it for review on the
+// log page; for a read-only viewer the chip is a plain label.
 
 const WHY_NOW: Record<TalkToFirstReason, string> = {
   attempt: "Last try didn't connect",
@@ -67,8 +68,20 @@ function DraftChip({ mentee, canLog, className = "" }: { mentee: MenteeRow; canL
     );
   }
   return (
-    <Link href={`${menteeHref(mentee)}/log`} className={`inline-flex min-h-11 items-center ${className}`}>
+    <Link href={`${menteeHref(mentee)}/log`} className={`relative z-10 inline-flex min-h-11 items-center ${className}`}>
       <Badge variant="accent">Draft ready to review</Badge>
+    </Link>
+  );
+}
+
+function LogLink({ mentee, className = "" }: { mentee: MenteeRow; className?: string }) {
+  return (
+    <Link
+      href={`${menteeHref(mentee)}/log`}
+      aria-label={`Log conversation for ${mentee.name}`}
+      className={`relative z-10 inline-flex min-h-11 items-center justify-center whitespace-nowrap rounded-lg border border-border bg-bg-card px-3 text-sm font-bold text-text-primary shadow-sm hover:bg-hover-bg ${className}`}
+    >
+      Log conversation
     </Link>
   );
 }
@@ -105,15 +118,22 @@ function MenteeTable({ mentees, canLog }: { mentees: MenteeRow[]; canLog: boolea
           <th scope="col" className="px-4 py-2 font-semibold">Program</th>
           <th scope="col" className="px-4 py-2 font-semibold">Last Contact</th>
           <th scope="col" className="px-4 py-2 font-semibold">Why now</th>
+          {canLog && (
+            <th scope="col" className="px-4 py-2 font-semibold">
+              <span className="sr-only">Actions</span>
+            </th>
+          )}
         </tr>
       </thead>
       <tbody className="divide-y divide-border">
         {mentees.map((mentee) => (
-          <tr key={mentee.studentId} className="align-top hover:bg-hover-bg">
+          // The name's link stretches over the row, so a click anywhere opens
+          // the Mentee; the row's own links sit above it.
+          <tr key={mentee.studentId} className="relative cursor-pointer align-top hover:bg-hover-bg">
             <td className="px-4 py-2">
               <Link
                 href={menteeHref(mentee)}
-                className="inline-flex min-h-11 items-center font-semibold text-text-primary hover:text-accent"
+                className="inline-flex min-h-11 items-center font-semibold text-text-primary after:absolute after:inset-0 after:content-[''] hover:text-accent"
               >
                 {mentee.name}
               </Link>
@@ -130,6 +150,11 @@ function MenteeTable({ mentees, canLog }: { mentees: MenteeRow[]; canLog: boolea
             <td className="px-4 py-3">
               <WhyNowTags mentee={mentee} />
             </td>
+            {canLog && (
+              <td className="px-4 py-2 text-right">
+                <LogLink mentee={mentee} />
+              </td>
+            )}
           </tr>
         ))}
       </tbody>
@@ -155,6 +180,11 @@ function MenteeCards({ mentees, canLog }: { mentees: MenteeRow[]; canLog: boolea
           </Link>
           {/* Outside the card's link: links can't nest. */}
           <DraftChip mentee={mentee} canLog={canLog} className="-mt-2 px-4 pb-1" />
+          {canLog && (
+            <div className="px-4 pb-3">
+              <LogLink mentee={mentee} className="w-full" />
+            </div>
+          )}
         </li>
       ))}
     </ul>

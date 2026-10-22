@@ -8,8 +8,9 @@ import { Badge, Button, Card } from "@/components/ui";
 import type { DraftState } from "@/lib/blended-learning-drafts";
 
 // The Mentee's open Conversation Draft. While etl-next is drafting, the page
-// polls the draft's state every 15 seconds; a ready or failed draft does not
-// change by itself, so polling stops there. A draft that is no longer open
+// polls the draft's state (every 15 seconds unless told otherwise) and shows a
+// spinner; a ready or failed draft does not change by itself, so polling stops
+// there. The log page passes `onReady` to open the ready draft in place. A draft that is no longer open
 // (discarded or saved elsewhere) disappears.
 // Those who can manage drafts (not read-only) can retry a failed draft or one
 // whose wake never reached ETL, and discard any open draft. Those who can log
@@ -27,7 +28,7 @@ type DraftStatusBody = { state: DraftState; retryOffered: boolean };
 type DraftAction = "retry" | "discard";
 
 // The draft's state and retry offer, polled while etl-next is drafting.
-function usePolledDraft(draftId: number, initial: DraftStatusBody) {
+function usePolledDraft(draftId: number, initial: DraftStatusBody, pollMs: number) {
   const [status, setStatus] = useState<DraftStatusBody>(initial);
   // Bumped after every poll, so the next one is scheduled even when the state
   // hasn't changed.
@@ -46,12 +47,12 @@ function usePolledDraft(draftId: number, initial: DraftStatusBody) {
         // Keep the last known state and try again on the next poll.
       }
       if (!cancelled) setPolls((count) => count + 1);
-    }, DRAFT_POLL_MS);
+    }, pollMs);
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [draftId, status.state, polls]);
+  }, [draftId, status.state, polls, pollMs]);
 
   return [status, setStatus] as const;
 }
@@ -120,6 +121,9 @@ export function DraftStatus({
   initialRetryOffered = false,
   canManage = false,
   reviewHref = null,
+  pollMs = DRAFT_POLL_MS,
+  onReady,
+  drafting = null,
 }: {
   draftId: number;
   initialState: DraftState;
@@ -127,9 +131,22 @@ export function DraftStatus({
   canManage?: boolean;
   // The log page that reviews a ready draft, for those who can log.
   reviewHref?: string | null;
+  pollMs?: number;
+  // Called once the polled draft turns ready.
+  onReady?: () => void;
+  // What to say while drafting, under the badge.
+  drafting?: string | null;
 }) {
   const router = useRouter();
-  const [status, setStatus] = usePolledDraft(draftId, { state: initialState, retryOffered: initialRetryOffered });
+  const [status, setStatus] = usePolledDraft(
+    draftId,
+    { state: initialState, retryOffered: initialRetryOffered },
+    pollMs
+  );
+
+  useEffect(() => {
+    if (status.state === "ready" && initialState !== "ready") onReady?.();
+  }, [status.state, initialState, onReady]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -168,9 +185,20 @@ export function DraftStatus({
     <section aria-label="Conversation Draft">
       <Card elevation="sm" className="space-y-3 p-4 sm:px-6">
         <div className="flex flex-wrap items-center gap-2">
+          {status.state === "transcribing" && (
+            <span
+              aria-hidden="true"
+              className="h-4 w-4 animate-spin rounded-full border-2 border-accent border-t-transparent"
+            />
+          )}
           <span className="text-sm font-bold text-text-primary">Conversation Draft</span>
           <Badge variant={shown.variant}>{shown.label}</Badge>
         </div>
+        {status.state === "transcribing" && drafting && (
+          <p role="status" className="text-sm text-text-secondary">
+            {drafting}
+          </p>
+        )}
         <DraftActions
           state={status.state}
           reviewHref={status.state === "ready" ? reviewHref : null}

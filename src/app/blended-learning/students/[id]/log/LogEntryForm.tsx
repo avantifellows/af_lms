@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useId, useState, type Dispatch, type FormEvent, type ReactNode, type SetStateAction } from "react";
+import { useRouter } from "next/navigation";
+import { useCallback, useId, useState, type Dispatch, type FormEvent, type ReactNode, type SetStateAction } from "react";
 
 import { Button, Card, FormLabel, Input, Select } from "@/components/ui";
 import { baseInputClasses } from "@/components/ui/styles";
@@ -10,6 +11,7 @@ import type { MenteeRow } from "@/lib/blended-learning-mentees";
 
 import { LastContact, WhyNowTags } from "../../../MenteeList";
 import { ACTION_ITEM_OWNER, ActionItemMeta } from "../ActionItemMeta";
+import { DraftStatus } from "../DraftStatus";
 import { FLAG_RECIPIENT } from "../flagRecipients";
 import {
   buildEntryPayload,
@@ -37,14 +39,17 @@ import { RecordingUpload } from "./RecordingUpload";
 // the form from 1024 px. Only a Conversation adds Action Items or ticks
 // earlier ones done, attaches photos and raises Mentor Flags. Instead of
 // typing the write-up, a Conversation's Call Recording can be uploaded to
-// start a Conversation Draft. A ready draft opens here for review: the form is
-// prefilled from it, its Items to Verify sit above the form as a checklist,
-// and saving turns the draft into this Conversation. After saving, a
-// confirmation shows what the Mentee list now says.
+// start a Conversation Draft. The draft's progress then shows in place of the
+// upload, with the write-up fields held until it is ready; the page refreshes
+// and the form opens prefilled from it, and saving turns the draft into this
+// Conversation. After saving, a confirmation shows what the Mentee list now
+// says.
 
 export type { ReviewDraft };
 
 type Saved = { kind: Kind; mentee: MenteeRow | null };
+// An open Conversation Draft that is not ready yet: being drafted, or failed.
+type PendingDraft = { id: number; state: "transcribing" | "failed"; retryOffered: boolean };
 // Updates some of the form's values from their current ones.
 type ChangeValues = (change: (values: EntryFormValues) => Partial<EntryFormValues>) => void;
 
@@ -62,6 +67,8 @@ const SPOKE_WITH = [
   { value: "both", label: "Student and parent" },
 ] as const;
 const TEXTAREA_CLASSES = `w-full ${baseInputClasses}`;
+// The log page checks a draft being drafted this often.
+const PENDING_DRAFT_POLL_MS = 5_000;
 
 function ChoiceGroup<T extends string>({
   legend,
@@ -152,38 +159,6 @@ function OpenActionItemsPanel({
   );
 }
 
-// What the drafting model was unsure of, for the Mentor to check against the
-// form before saving. The ticks are a reading aid and are not saved.
-function ItemsToVerifyPanel({ items }: { items: string[] }) {
-  const [checked, setChecked] = useState<Set<number>>(new Set());
-  if (items.length === 0) return null;
-  return (
-    <section aria-label="Items to Verify">
-      <Card elevation="sm" className="space-y-2 border-l-4 border-l-accent p-4">
-        <h3 className="text-xs font-bold uppercase tracking-wide text-text-muted">Items to Verify</h3>
-        <p className="text-xs text-text-secondary">
-          The draft wasn&apos;t sure of these. Check each one in the form below.
-        </p>
-        <ul className="space-y-1">
-          {items.map((item, index) => (
-            <li key={index} className="break-words text-sm text-text-primary">
-              <label className="flex min-h-11 cursor-pointer items-start gap-3 py-1">
-                <input
-                  type="checkbox"
-                  checked={checked.has(index)}
-                  onChange={() => setChecked((current) => toggled(current, index))}
-                  className="mt-0.5 h-5 w-5 shrink-0 accent-accent"
-                />
-                <span className="min-w-0">{item}</span>
-              </label>
-            </li>
-          ))}
-        </ul>
-      </Card>
-    </section>
-  );
-}
-
 function ActionItemsEditor({
   items,
   errors,
@@ -215,7 +190,7 @@ function ActionItemsEditor({
                 Remove
               </Button>
             </div>
-            <div className="grid gap-3 sm:grid-cols-[10rem_minmax(0,1fr)_11rem]">
+            <div className="grid gap-3 sm:grid-cols-[10rem_minmax(0,1fr)]">
               <div>
                 <FormLabel htmlFor={`${prefix}-owner`}>Owner</FormLabel>
                 <Select
@@ -235,24 +210,15 @@ function ActionItemsEditor({
               </div>
               <div>
                 <FormLabel htmlFor={`${prefix}-text`}>What</FormLabel>
-                <Input
+                <textarea
                   id={`${prefix}-text`}
+                  rows={2}
                   value={item.text}
                   onChange={(event) => onChange(item.key, { text: event.target.value })}
                   aria-invalid={Boolean(error("text"))}
+                  className={`${TEXTAREA_CLASSES} resize-y`}
                 />
                 <FieldError message={error("text")} />
-              </div>
-              <div>
-                <FormLabel htmlFor={`${prefix}-due`}>Due (optional)</FormLabel>
-                <Input
-                  id={`${prefix}-due`}
-                  type="date"
-                  value={item.dueOn}
-                  onChange={(event) => onChange(item.key, { dueOn: event.target.value })}
-                  aria-invalid={Boolean(error("dueOn"))}
-                />
-                <FieldError message={error("dueOn")} />
               </div>
             </div>
           </div>
@@ -406,21 +372,42 @@ function Confirmation({
 }
 
 // Where a Conversation's Call Recording can be uploaded: not while reviewing
-// a draft, and not while the Mentee already has one open.
+// a draft. A draft being drafted, or one that failed, shows its progress and
+// controls here instead; once it is ready the page refreshes to open it.
 function RecordingSlot({
   studentId,
   firstName,
   reviewing,
   hasOpenDraft,
+  pendingDraft,
+  canManageDraft,
   values,
 }: {
   studentId: number;
   firstName: string;
   reviewing: boolean;
   hasOpenDraft: boolean;
+  pendingDraft: PendingDraft | null;
+  canManageDraft: boolean;
   values: EntryFormValues;
 }) {
+  const router = useRouter();
+  const refresh = useCallback(() => router.refresh(), [router]);
   if (reviewing) return null;
+  if (pendingDraft) {
+    return (
+      <DraftStatus
+        key={pendingDraft.id}
+        draftId={pendingDraft.id}
+        initialState={pendingDraft.state}
+        initialRetryOffered={pendingDraft.retryOffered}
+        canManage={canManageDraft}
+        pollMs={PENDING_DRAFT_POLL_MS}
+        onReady={refresh}
+        drafting="Writing the summary, action items and notes from the recording. They fill in below when ready, usually within a couple of minutes. You can leave this page and come back."
+      />
+    );
+  }
   if (hasOpenDraft) {
     return (
       <p className="rounded-lg border border-border px-3 py-2 text-sm text-text-secondary">
@@ -441,12 +428,28 @@ function RecordingSlot({
   );
 }
 
+// Held in place of the write-up while the draft is being drafted.
+function DraftingPlaceholder() {
+  return (
+    <div aria-hidden="true" className="space-y-3">
+      {["Summary", "Action Items", "Notes"].map((label) => (
+        <div key={label}>
+          <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-text-muted">{label}</span>
+          <div className="h-16 animate-pulse rounded-lg bg-hover-bg" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // The fields only a Conversation has.
 function ConversationFields({
   studentId,
   firstName,
   reviewing,
   hasOpenDraft,
+  pendingDraft,
+  canManageDraft,
   values,
   change,
   photos,
@@ -458,6 +461,8 @@ function ConversationFields({
   firstName: string;
   reviewing: boolean;
   hasOpenDraft: boolean;
+  pendingDraft: PendingDraft | null;
+  canManageDraft: boolean;
   values: EntryFormValues;
   change: ChangeValues;
   photos: PickedPhoto[];
@@ -510,8 +515,61 @@ function ConversationFields({
         firstName={firstName}
         reviewing={reviewing}
         hasOpenDraft={hasOpenDraft}
+        pendingDraft={pendingDraft}
+        canManageDraft={canManageDraft}
         values={values}
       />
+      {pendingDraft?.state === "transcribing" ? (
+        <DraftingPlaceholder />
+      ) : (
+        <WriteUpFields
+          summaryId={summaryId}
+          notesLabelId={notesLabelId}
+          values={values}
+          change={change}
+          fieldErrors={fieldErrors}
+          clearErrors={clearErrors}
+        />
+      )}
+      <PhotoPicker
+        studentId={studentId}
+        photos={photos}
+        setPhotos={(next) => {
+          setPhotos(next);
+          clearErrors("photoKeys");
+        }}
+        errors={fieldErrors}
+      />
+      <MentorFlagsEditor
+        flags={values.flags}
+        errors={fieldErrors}
+        onChange={(flags) => {
+          change(() => ({ flags }));
+          clearErrors("flags");
+        }}
+      />
+    </>
+  );
+}
+
+// The write-up: Summary, Action Items, then Notes.
+function WriteUpFields({
+  summaryId,
+  notesLabelId,
+  values,
+  change,
+  fieldErrors,
+  clearErrors,
+}: {
+  summaryId: string;
+  notesLabelId: string;
+  values: EntryFormValues;
+  change: ChangeValues;
+  fieldErrors: FieldErrors;
+  clearErrors: (prefix: string) => void;
+}) {
+  return (
+    <>
       <div>
         <FormLabel htmlFor={summaryId}>Summary</FormLabel>
         <textarea
@@ -534,30 +592,13 @@ function ConversationFields({
         }
         onAdd={() =>
           change(({ actionItems, nextItemKey }) => ({
-            actionItems: [...actionItems, { key: nextItemKey, owner: "", text: "", dueOn: "" }],
+            actionItems: [...actionItems, { key: nextItemKey, owner: "", text: "" }],
             nextItemKey: nextItemKey + 1,
           }))
         }
         onRemove={(key) => {
           change(({ actionItems }) => ({ actionItems: actionItems.filter((item) => item.key !== key) }));
           clearErrors("actionItems");
-        }}
-      />
-      <PhotoPicker
-        studentId={studentId}
-        photos={photos}
-        setPhotos={(next) => {
-          setPhotos(next);
-          clearErrors("photoKeys");
-        }}
-        errors={fieldErrors}
-      />
-      <MentorFlagsEditor
-        flags={values.flags}
-        errors={fieldErrors}
-        onChange={(flags) => {
-          change(() => ({ flags }));
-          clearErrors("flags");
         }}
       />
       <div>
@@ -663,6 +704,8 @@ export function LogEntryForm({
   openActionItems,
   hasOpenDraft,
   draft = null,
+  pendingDraft = null,
+  canManageDraft = false,
 }: {
   studentId: number;
   name: string;
@@ -677,6 +720,9 @@ export function LogEntryForm({
   hasOpenDraft: boolean;
   // A ready Conversation Draft to review and save as this Conversation.
   draft?: ReviewDraft | null;
+  // An open draft that isn't ready yet; its progress shows in the form.
+  pendingDraft?: PendingDraft | null;
+  canManageDraft?: boolean;
 }) {
   const dateId = `${useId()}-date`;
   const [values, setValues] = useState(() => initialEntryValues(draft, today));
@@ -685,6 +731,8 @@ export function LogEntryForm({
   const { error, setError, saving, saved, save } = useEntrySave(studentId, setFieldErrors);
   const change: ChangeValues = (update) => setValues((current) => ({ ...current, ...update(current) }));
   const { kind } = values;
+  // A Conversation waits for its draft; an Attempt can still be saved.
+  const drafting = kind === "conversation" && pendingDraft?.state === "transcribing";
 
   if (saved) {
     return (
@@ -711,7 +759,6 @@ export function LogEntryForm({
         onToggle={(id) => change(({ ticked }) => ({ ticked: toggled(ticked, id) }))}
       />
       <div className="min-w-0 space-y-4 lg:order-1">
-        <ItemsToVerifyPanel items={draft?.itemsToVerify ?? []} />
         <form
           aria-label="Log a Conversation or Attempt"
           noValidate
@@ -754,6 +801,8 @@ export function LogEntryForm({
               firstName={firstName}
               reviewing={draft !== null}
               hasOpenDraft={hasOpenDraft}
+              pendingDraft={pendingDraft}
+              canManageDraft={canManageDraft}
               values={values}
               change={change}
               photos={photos}
@@ -767,8 +816,8 @@ export function LogEntryForm({
 
           <FormAlert error={error} />
 
-          <Button type="submit" disabled={saving} className="w-full sm:w-auto">
-            {submitLabel(saving, kind)}
+          <Button type="submit" disabled={saving || drafting} className="w-full sm:w-auto">
+            {drafting ? "Drafting…" : submitLabel(saving, kind)}
           </Button>
         </form>
       </div>

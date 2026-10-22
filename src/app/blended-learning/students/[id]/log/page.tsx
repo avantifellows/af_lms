@@ -5,7 +5,7 @@ import { Card } from "@/components/ui";
 import { canBlendedLearning } from "@/lib/blended-learning-access";
 import { requireBlendedLearningPage, requireNumericPageId } from "@/lib/blended-learning-guard";
 import { draftNotesToHtml } from "@/lib/blended-learning-draft-notes";
-import { getDraftForReview, type DraftForReview } from "@/lib/blended-learning-drafts";
+import { getDraftForReview, getDraftStatus, type DraftForReview } from "@/lib/blended-learning-drafts";
 import { describeSession, formatCalendarDate } from "@/lib/blended-learning-format";
 import { getMenteeDetail, type HistoryEntry } from "@/lib/blended-learning-mentee-detail";
 import { getTodayIST } from "@/lib/curriculum-date-helpers";
@@ -17,6 +17,9 @@ import { LogEntryForm, type ReviewDraft } from "./LogEntryForm";
 // own Mentees; a Blended Learning Admin logs on the mapped Mentor's behalf.
 // Read-only users are sent back to the detail page. A Mentee with a ready
 // Conversation Draft gets the same form, prefilled from the draft for review.
+// While a draft is being drafted (or has failed) the form stays, with the
+// draft's progress in place of the recording upload; once it is ready the page
+// refreshes and the form opens again, prefilled.
 
 // The form's prefill: the Summary Tags follow the drafted summary as text,
 // and the drafted notes become editor HTML.
@@ -29,9 +32,8 @@ function toReviewDraft(draft: DraftForReview): ReviewDraft {
     spokeWith: draft.spokeWith,
     durationMinutes: draft.durationMinutes,
     summary: `${draft.summary}${tags}`,
-    actionItems: draft.actionItems,
+    actionItems: draft.actionItems.map(({ owner, text }) => ({ owner, text })),
     notesHtml: draftNotesToHtml(draft.notes),
-    itemsToVerify: draft.itemsToVerify,
   };
 }
 
@@ -67,6 +69,10 @@ export default async function LogEntryPage({ params }: { params: Promise<{ id: s
     null;
   const firstName = mentee.name.split(" ")[0] || mentee.name;
   const draft = mentee.openDraft?.state === "ready" ? await getDraftForReview(access, mentee.studentId) : null;
+  const openDraft = mentee.openDraft;
+  const pendingDraft =
+    openDraft && openDraft.state !== "ready" ? { id: openDraft.id, state: openDraft.state } : null;
+  const pendingStatus = pendingDraft ? await getDraftStatus(access, pendingDraft.id) : null;
 
   return (
     <>
@@ -81,7 +87,9 @@ export default async function LogEntryPage({ params }: { params: Promise<{ id: s
         <h2 className="break-words text-xl font-bold text-text-primary">
           {draft ? `Review the draft for ${mentee.name}` : `Log for ${mentee.name}`}
         </h2>
+        {/* A new key once the draft is ready, so the form opens prefilled. */}
         <LogEntryForm
+          key={draft ? `review-${draft.id}` : "entry"}
           studentId={mentee.studentId}
           name={mentee.name}
           firstName={firstName}
@@ -91,6 +99,12 @@ export default async function LogEntryPage({ params }: { params: Promise<{ id: s
           openActionItems={mentee.openActionItems}
           hasOpenDraft={mentee.openDraft !== null}
           draft={draft ? toReviewDraft(draft) : null}
+          pendingDraft={
+            pendingDraft
+              ? { id: pendingDraft.id, state: pendingDraft.state, retryOffered: pendingStatus?.retryOffered ?? false }
+              : null
+          }
+          canManageDraft={canBlendedLearning(access, "manage_draft")}
         />
       </main>
     </>

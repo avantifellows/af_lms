@@ -12,14 +12,15 @@ type Mode = "call" | "in_person";
 type SpokeWith = "student" | "parent_or_sibling" | "both";
 // Keyed by field, e.g. `summary` or `actionItems.0.text`.
 export type FieldErrors = Record<string, string>;
-export type DraftActionItem = { key: number; owner: ActionItemOwner | ""; text: string; dueOn: string };
+// No due date: the form doesn't take one, and Action Items are saved without it.
+export type DraftActionItem = { key: number; owner: ActionItemOwner | ""; text: string };
 // A switched-on Flag Recipient maps to its comment; off is absent.
 export type DraftFlags = Partial<Record<FlagRecipient, string>>;
 export const FLAG_RECIPIENTS = Object.keys(FLAG_RECIPIENT) as FlagRecipient[];
 
 // A ready Conversation Draft, as the form opens it. Session details are those
 // the Mentor entered before uploading; `notesHtml` is the drafted notes with
-// their text escaped.
+// their text escaped. A drafted due date and Items to Verify are not shown.
 export type ReviewDraft = {
   id: number;
   occurredOn: string | null;
@@ -27,9 +28,8 @@ export type ReviewDraft = {
   spokeWith: SpokeWith | null;
   durationMinutes: number | null;
   summary: string;
-  actionItems: { owner: ActionItemOwner; text: string; dueOn: string | null }[];
+  actionItems: { owner: ActionItemOwner; text: string }[];
   notesHtml: string;
-  itemsToVerify: string[];
 };
 
 // Everything the form holds except photos, which the PhotoPicker updates.
@@ -57,7 +57,6 @@ export function initialEntryValues(draft: ReviewDraft | null, today: string): En
     key: index + 1,
     owner: item.owner,
     text: item.text,
-    dueOn: item.dueOn ?? "",
   }));
   return {
     kind: "conversation",
@@ -120,7 +119,7 @@ export function buildEntryPayload(
     durationMinutes: durationMinutes(values.duration),
     summary: values.summary,
     notesHtml: values.notesHtml,
-    actionItems: values.actionItems.map((item) => ({ owner: item.owner, text: item.text, dueOn: item.dueOn || null })),
+    actionItems: values.actionItems.map((item) => ({ owner: item.owner, text: item.text, dueOn: null })),
     photoKeys: photos.map((photo) => photo.s3Key),
     flags: raisedFlags(values.flags).map((recipient) => ({ recipient, comment: values.flags[recipient] || null })),
     completeActionItemIds: [...values.ticked],

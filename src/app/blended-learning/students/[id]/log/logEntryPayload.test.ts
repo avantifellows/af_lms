@@ -24,11 +24,10 @@ const DRAFT: ReviewDraft = {
   durationMinutes: 35,
   summary: "Discussed the mock test.",
   actionItems: [
-    { owner: "student", text: "Revise optics", dueOn: "2026-10-30" },
-    { owner: "mentor", text: "Share notes", dueOn: null },
+    { owner: "student", text: "Revise optics" },
+    { owner: "mentor", text: "Share notes" },
   ],
   notesHtml: "<p>Notes</p>",
-  itemsToVerify: ["The test date"],
 };
 
 function values(change: Partial<EntryFormValues> = {}): EntryFormValues {
@@ -66,8 +65,8 @@ describe("initialEntryValues", () => {
       summary: "Discussed the mock test.",
       notesHtml: "<p>Notes</p>",
       actionItems: [
-        { key: 1, owner: "student", text: "Revise optics", dueOn: "2026-10-30" },
-        { key: 2, owner: "mentor", text: "Share notes", dueOn: "" },
+        { key: 1, owner: "student", text: "Revise optics" },
+        { key: 2, owner: "mentor", text: "Share notes" },
       ],
       nextItemKey: 3,
     });
@@ -123,7 +122,7 @@ describe("buildEntryPayload", () => {
     });
   });
 
-  it("sends a Conversation with its lists and the reviewed draft", () => {
+  it("sends a Conversation with its lists, no due dates, and the reviewed draft", () => {
     const body = buildEntryPayload(
       values({
         mode: "in_person",
@@ -132,8 +131,8 @@ describe("buildEntryPayload", () => {
         summary: "Talked",
         notesHtml: "<p>n</p>",
         actionItems: [
-          { key: 1, owner: "student", text: "Revise", dueOn: "2026-10-30" },
-          { key: 3, owner: "", text: "", dueOn: "" },
+          { key: 1, owner: "student", text: "Revise" },
+          { key: 3, owner: "", text: "" },
         ],
         ticked: new Set([7, 9]),
         flags: { physics: "Optics", emotional_wellbeing: "" },
@@ -150,7 +149,7 @@ describe("buildEntryPayload", () => {
       summary: "Talked",
       notesHtml: "<p>n</p>",
       actionItems: [
-        { owner: "student", text: "Revise", dueOn: "2026-10-30" },
+        { owner: "student", text: "Revise", dueOn: null },
         { owner: "", text: "", dueOn: null },
       ],
       photoKeys: ["key-a", "key-b"],

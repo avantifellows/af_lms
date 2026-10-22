@@ -9,6 +9,7 @@ const {
   mockGetBlendedLearningAccess,
   mockGetMenteeDetail,
   mockGetDraftForReview,
+  mockGetDraftStatus,
   mockLogEntryForm,
   mockRedirect,
   mockNotFound,
@@ -17,6 +18,7 @@ const {
   mockGetBlendedLearningAccess: vi.fn(),
   mockGetMenteeDetail: vi.fn(),
   mockGetDraftForReview: vi.fn(),
+  mockGetDraftStatus: vi.fn(),
   mockLogEntryForm: vi.fn(),
   mockRedirect: vi.fn((url: string) => {
     throw new Error(`REDIRECT:${url}`);
@@ -34,7 +36,10 @@ vi.mock("@/lib/blended-learning-access", async (importOriginal) => ({
   getBlendedLearningAccess: mockGetBlendedLearningAccess,
 }));
 vi.mock("@/lib/blended-learning-mentee-detail", () => ({ getMenteeDetail: mockGetMenteeDetail }));
-vi.mock("@/lib/blended-learning-drafts", () => ({ getDraftForReview: mockGetDraftForReview }));
+vi.mock("@/lib/blended-learning-drafts", () => ({
+  getDraftForReview: mockGetDraftForReview,
+  getDraftStatus: mockGetDraftStatus,
+}));
 vi.mock("@/lib/curriculum-date-helpers", () => ({ getTodayIST: () => "2026-10-22" }));
 // The form has its own tests; here only what the page hands it matters. The
 // stub renders the Last Conversation panel the page builds for it.
@@ -103,6 +108,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockGetMenteeDetail.mockResolvedValue(MENTEE);
   mockGetDraftForReview.mockResolvedValue(null);
+  mockGetDraftStatus.mockResolvedValue(null);
 });
 
 describe("LogEntryPage", () => {
@@ -166,14 +172,20 @@ describe("LogEntryPage", () => {
     expect(screen.getByRole("region", { name: "Last Conversation" })).toHaveTextContent("No Conversations yet.");
   });
 
-  it("does not read a draft for review while it is still being drafted", async () => {
+  it("passes a draft still being drafted to the form as pending, without reading it for review", async () => {
     signedInAs(MENTOR);
     mockGetMenteeDetail.mockResolvedValue({ ...MENTEE, openDraft: { id: 41, state: "transcribing" } });
 
     await renderPage();
 
     expect(mockGetDraftForReview).not.toHaveBeenCalled();
-    expect(formProps()).toMatchObject({ hasOpenDraft: true, draft: null });
+    expect(mockGetDraftStatus).toHaveBeenCalledWith(MENTOR, 41);
+    expect(formProps()).toMatchObject({
+      hasOpenDraft: true,
+      draft: null,
+      pendingDraft: { id: 41, state: "transcribing", retryOffered: false },
+      canManageDraft: true,
+    });
     expect(screen.getByRole("heading", { name: "Log for Ira Sharma" })).toBeInTheDocument();
   });
 
@@ -207,11 +219,14 @@ describe("LogEntryPage", () => {
         spokeWith: "student",
         durationMinutes: 25,
         summary: "Talked about mock tests.\n\nTags: academics, exam prep",
-        actionItems: [{ text: "Revise optics", owner: "student", dueOn: null }],
+        actionItems: [{ text: "Revise optics", owner: "student" }],
         notesHtml: "<h3>Physics &amp; Maths</h3><ul><li>&lt;b&gt;weak&lt;/b&gt;</li></ul>",
-        itemsToVerify: ["Which mock test?"],
       },
+      pendingDraft: null,
     });
+    // Neither the drafted due date nor the Items to Verify reach the form.
+    expect(formProps().draft.actionItems[0]).not.toHaveProperty("dueOn");
+    expect(formProps().draft).not.toHaveProperty("itemsToVerify");
   });
 
   it("keeps a drafted summary without tags as it is", async () => {
@@ -245,5 +260,15 @@ describe("LogEntryPage", () => {
     await renderPage();
 
     expect(formProps().firstName).toBe(" Sharma");
+  });
+
+  it("passes a failed draft as pending with its retry offer", async () => {
+    signedInAs(MENTOR);
+    mockGetMenteeDetail.mockResolvedValue({ ...MENTEE, openDraft: { id: 41, state: "failed" } });
+    mockGetDraftStatus.mockResolvedValue({ state: "failed", retryOffered: true });
+
+    await renderPage();
+
+    expect(formProps().pendingDraft).toEqual({ id: 41, state: "failed", retryOffered: true });
   });
 });

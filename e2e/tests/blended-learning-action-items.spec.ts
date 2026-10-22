@@ -26,7 +26,6 @@ const VIEWPORTS = [
 
 const studentIds: Record<string, number> = {};
 let todayIST: string;
-let inAWeekIST: string;
 
 async function withPool<T>(fn: (pool: ReturnType<typeof getTestPool>) => Promise<T>): Promise<T> {
   const pool = getTestPool();
@@ -43,12 +42,10 @@ test.beforeAll(async () => {
       `SELECT student_id, id FROM student WHERE student_id LIKE 'E2E-BL-%'`
     );
     for (const row of students.rows) studentIds[row.student_id.replace("E2E-BL-", "")] = Number(row.id);
-    const dates = await pool.query<{ today: string; week: string }>(
-      `SELECT ((now() AT TIME ZONE 'Asia/Kolkata')::date)::text AS today,
-              ((now() AT TIME ZONE 'Asia/Kolkata')::date + 7)::text AS week`
+    const dates = await pool.query<{ today: string }>(
+      `SELECT ((now() AT TIME ZONE 'Asia/Kolkata')::date)::text AS today`
     );
     todayIST = dates.rows[0].today;
-    inAWeekIST = dates.rows[0].week;
   });
 });
 
@@ -147,7 +144,8 @@ for (const { label, key, viewport } of VIEWPORTS) {
       const item1 = form.getByRole("group", { name: "Action Item 1" });
       await item1.getByLabel("Owner").selectOption({ label: "Student" });
       await item1.getByLabel("What").fill(first);
-      await item1.getByLabel("Due (optional)").fill(inAWeekIST);
+      // Action Items take no due date.
+      await expect(item1.getByLabel(/Due/)).toHaveCount(0);
       const item2 = form.getByRole("group", { name: "Action Item 2" });
       await item2.getByLabel("Owner").selectOption({ label: "Parent" });
       await item2.getByLabel("What").fill(second);
@@ -161,7 +159,7 @@ for (const { label, key, viewport } of VIEWPORTS) {
       const savedId = (await conversationIds(studentIds[mentee.key])).at(-1)!;
       const rows = await actionItems(studentIds[mentee.key]);
       expect(rows.filter((row) => row.conversation_id === savedId)).toEqual([
-        expect.objectContaining({ position: 1, owner: "student", text: first, due_on: inAWeekIST, status: "open" }),
+        expect.objectContaining({ position: 1, owner: "student", text: first, due_on: null, status: "open" }),
         expect.objectContaining({ position: 2, owner: "parent", text: second, due_on: null, status: "open" }),
       ]);
       expect(itemByText(rows, toTick.text)).toMatchObject({

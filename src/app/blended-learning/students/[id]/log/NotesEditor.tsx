@@ -6,7 +6,8 @@ import { TableKit } from "@tiptap/extension-table";
 
 // The Conversation notes editor: headings, bold, italic, lists and tables
 // only. Its HTML is untrusted input; the server sanitises it before saving.
-// Table editing is desktop-only, so table controls show from 1024 px up.
+// Table editing is desktop-only, so table controls show from 1024 px up; rows
+// and columns are added after, or removed at, the cursor's cell.
 
 const EXTENSIONS = [
   StarterKit.configure({
@@ -84,7 +85,9 @@ function Toolbar({ editor }: { editor: Editor }) {
         {state.inTable && (
           <>
             <ToolbarButton label="Add row" text="+ Row" onClick={() => run().addRowAfter().run()} />
+            <ToolbarButton label="Remove row" text="− Row" onClick={() => run().deleteRow().run()} />
             <ToolbarButton label="Add column" text="+ Column" onClick={() => run().addColumnAfter().run()} />
+            <ToolbarButton label="Remove column" text="− Column" onClick={() => run().deleteColumn().run()} />
             <ToolbarButton label="Delete table" text="Delete table" onClick={() => run().deleteTable().run()} />
           </>
         )}

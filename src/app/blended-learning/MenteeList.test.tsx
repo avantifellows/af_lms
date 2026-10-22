@@ -38,3 +38,22 @@ describe("MenteeGroup — a ready draft's chip", () => {
     );
   });
 });
+
+describe("MenteeGroup — row actions", () => {
+  it("gives a viewer who can log a Log conversation button per Mentee, and the name opens the Mentee", () => {
+    renderGroup(true);
+
+    const logLinks = screen.getAllByRole("link", { name: "Log conversation for Kabir Never" });
+    expect(logLinks).toHaveLength(2);
+    for (const link of logLinks) expect(link).toHaveAttribute("href", "/blended-learning/students/489985/log");
+    // In the table the name's link covers the whole row.
+    const nameLink = screen.getAllByRole("link", { name: "Kabir Never" })[0];
+    expect(nameLink).toHaveAttribute("href", "/blended-learning/students/489985");
+    expect(nameLink.closest("tr")).toHaveClass("relative");
+  });
+
+  it("offers no Log conversation button to a read-only viewer", () => {
+    renderGroup(false);
+    expect(screen.queryByRole("link", { name: /Log conversation/ })).not.toBeInTheDocument();
+  });
+});

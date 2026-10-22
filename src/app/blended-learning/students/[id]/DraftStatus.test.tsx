@@ -56,6 +56,26 @@ describe("DraftStatus", () => {
     expect(mockFetch).toHaveBeenCalledTimes(2);
   });
 
+  it("polls at the given pace and calls onReady once the draft turns ready", async () => {
+    vi.useFakeTimers();
+    const onReady = vi.fn();
+    render(
+      <DraftStatus draftId={41} initialState="transcribing" pollMs={5_000} onReady={onReady} drafting="Writing it up." />
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("Writing it up.");
+
+    answer({ id: 41, state: "ready", retryOffered: false });
+    await advance(5_000);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(onReady).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not call onReady for a draft that was already ready", () => {
+    const onReady = vi.fn();
+    render(<DraftStatus draftId={41} initialState="ready" onReady={onReady} />);
+    expect(onReady).not.toHaveBeenCalled();
+  });
+
   it("shows Drafting failed when the poll reports a failed draft", async () => {
     vi.useFakeTimers();
     render(<DraftStatus draftId={41} initialState="transcribing" />);

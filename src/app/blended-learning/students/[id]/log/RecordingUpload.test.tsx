@@ -2,8 +2,8 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { mockPush } = vi.hoisted(() => ({ mockPush: vi.fn() }));
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: mockPush }) }));
+const { mockRefresh } = vi.hoisted(() => ({ mockRefresh: vi.fn() }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: mockRefresh }) }));
 
 import { RecordingUpload } from "./RecordingUpload";
 
@@ -82,7 +82,7 @@ async function lastXhr(count: number) {
 
 beforeEach(() => {
   FakeXhr.instances = [];
-  mockPush.mockReset();
+  mockRefresh.mockReset();
   mockFetch.mockReset();
   vi.stubGlobal("fetch", mockFetch);
   vi.stubGlobal("XMLHttpRequest", FakeXhr);
@@ -100,7 +100,7 @@ describe("RecordingUpload", () => {
     expect(screen.getByText("MP3, M4A or WAV, up to 200 MB.")).toBeInTheDocument();
   });
 
-  it("PUTs the recording straight to S3 with progress, creates the draft with the session details and opens the Mentee", async () => {
+  it("PUTs the recording straight to S3 with progress, creates the draft with the session details and refreshes the log page", async () => {
     render(<RecordingUpload studentId={501} sessionDetails={SESSION} />);
     const file = recording();
     pick(file);
@@ -120,7 +120,7 @@ describe("RecordingUpload", () => {
     expect(screen.getByRole("progressbar", { name: "Upload progress" })).toHaveAttribute("value", "40");
 
     xhr.succeed();
-    await waitFor(() => expect(mockPush).toHaveBeenCalledWith("/blended-learning/students/501"));
+    await waitFor(() => expect(mockRefresh).toHaveBeenCalledTimes(1));
     expect(sent[1]).toEqual({
       url: "/api/blended-learning/students/501/drafts",
       body: { s3Key: S3_KEY, contentType: "audio/mpeg", byteSize: 4096, ...SESSION },
@@ -134,14 +134,14 @@ describe("RecordingUpload", () => {
 
     (await lastXhr(1)).fail();
     expect(await screen.findByRole("alert")).toHaveTextContent("The upload didn't finish. Check your connection and retry.");
-    expect(mockPush).not.toHaveBeenCalled();
+    expect(mockRefresh).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole("button", { name: "Retry upload" }));
     const retry = await lastXhr(2);
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     retry.succeed();
 
-    await waitFor(() => expect(mockPush).toHaveBeenCalledWith("/blended-learning/students/501"));
+    await waitFor(() => expect(mockRefresh).toHaveBeenCalledTimes(1));
     // One draft, created only after the successful PUT.
     expect(sent.filter((call) => call.url.endsWith("/drafts"))).toHaveLength(1);
   });
@@ -157,7 +157,7 @@ describe("RecordingUpload", () => {
     givenApi();
     await user.click(screen.getByRole("button", { name: "Retry upload" }));
 
-    await waitFor(() => expect(mockPush).toHaveBeenCalledWith("/blended-learning/students/501"));
+    await waitFor(() => expect(mockRefresh).toHaveBeenCalledTimes(1));
     expect(FakeXhr.instances).toHaveLength(1);
     expect(sent.map((call) => call.url)).toEqual(["/api/blended-learning/students/501/drafts"]);
   });

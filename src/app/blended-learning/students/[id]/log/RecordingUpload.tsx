@@ -8,7 +8,8 @@ import { Button } from "@/components/ui";
 // Upload a Call Recording instead of typing the write-up. The browser asks
 // for a presigned PUT, sends the file straight to S3 (XHR, for progress), then
 // creates the Conversation Draft with any session details already entered and
-// opens the Mentee, whose page shows the draft while etl-next drafts it.
+// refreshes the log page, which then shows the draft's progress in place and
+// opens it prefilled once etl-next has drafted it.
 
 const MAX_RECORDING_BYTES = 200 * 1024 * 1024;
 const RECORDING_EXTENSION = /\.(mp3|m4a|wav)$/i;
@@ -86,7 +87,7 @@ export function RecordingUpload({ studentId, sessionDetails }: { studentId: numb
       return;
     }
     setUpload({ status: "done" });
-    router.push(`/blended-learning/students/${studentId}`);
+    router.refresh();
   }
 
   async function start(file: File) {
