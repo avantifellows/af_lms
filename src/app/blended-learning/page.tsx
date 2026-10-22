@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 
 import { Card } from "@/components/ui";
 import { canBlendedLearning, type BlendedLearningAccess } from "@/lib/blended-learning-access";
@@ -85,10 +86,6 @@ function AdminLanding({
   );
 }
 
-function pageWidth(studentList: boolean): string {
-  return studentList ? "max-w-6xl" : "max-w-5xl";
-}
-
 function single(value: SearchParam): string | undefined {
   return Array.isArray(value) ? value[0] : value;
 }
@@ -121,6 +118,37 @@ async function readFlags(
   };
 }
 
+type AdminView = {
+  tab: AdminTab;
+  cards: MentorCard[];
+  flags: { view: FlagsView; newVisit: boolean } | null;
+  newFlags: number;
+};
+
+// The admin landing's data; only the open tab's reads run.
+async function readAdminLanding(
+  access: BlendedLearningAccess,
+  params: SearchParams,
+  today: string
+): Promise<AdminView> {
+  const tab: AdminTab = single(params.tab) === "flags" ? "flags" : "mentors";
+  const cards =
+    tab === "mentors" && canBlendedLearning(access, "view_mentors") ? await listMentorCards(access, today) : [];
+  const flags = tab === "flags" ? await readFlags(access, params) : null;
+  const newFlags = flags ? flags.view.page.newCount : await countNewFlags(access);
+  return { tab, cards, flags, newFlags };
+}
+
+// `wide`: the Student list is max-w-6xl, to fit its columns.
+function PageShell({ access, wide, children }: { access: BlendedLearningAccess; wide: boolean; children: ReactNode }) {
+  return (
+    <>
+      <BlendedLearningHeader access={access} wide={wide} />
+      <main className={`mx-auto px-4 py-6 sm:px-6 ${wide ? "max-w-6xl" : "max-w-5xl"}`}>{children}</main>
+    </>
+  );
+}
+
 // Landing page for the Blended Learning section: a Mentor's own Student list,
 // or for a Blended Learning Admin the Mentors and Flags tabs.
 export default async function BlendedLearningPage({
@@ -129,29 +157,21 @@ export default async function BlendedLearningPage({
   searchParams?: Promise<SearchParams>;
 } = {}) {
   const access = await requireBlendedLearningPage("view_list");
-
   const today = getTodayIST();
-  const mentees = access.kind === "mentor" ? await listMentees({ access, today }) : null;
-  const params = (await searchParams) ?? {};
-  const tab: AdminTab = single(params.tab) === "flags" ? "flags" : "mentors";
-  const cards =
-    !mentees && tab === "mentors" && canBlendedLearning(access, "view_mentors")
-      ? await listMentorCards(access, today)
-      : [];
-  const flags = !mentees && tab === "flags" ? await readFlags(access, params) : null;
-  const newFlags = mentees ? 0 : flags ? flags.view.page.newCount : await countNewFlags(access);
 
+  if (access.kind === "mentor") {
+    const mentees = await listMentees({ access, today });
+    return (
+      <PageShell access={access} wide>
+        <MentorMenteeList list={mentees} canLog={canBlendedLearning(access, "log")} today={today} />
+      </PageShell>
+    );
+  }
+
+  const admin = await readAdminLanding(access, (await searchParams) ?? {}, today);
   return (
-    <>
-      {/* The Student list is wider, to fit its columns. */}
-      <BlendedLearningHeader access={access} wide={Boolean(mentees)} />
-      <main className={`mx-auto px-4 py-6 sm:px-6 ${pageWidth(Boolean(mentees))}`}>
-        {mentees ? (
-          <MentorMenteeList list={mentees} canLog={canBlendedLearning(access, "log")} today={today} />
-        ) : (
-          <AdminLanding tab={tab} cards={cards} flags={flags} newFlags={newFlags} />
-        )}
-      </main>
-    </>
+    <PageShell access={access} wide={false}>
+      <AdminLanding tab={admin.tab} cards={admin.cards} flags={admin.flags} newFlags={admin.newFlags} />
+    </PageShell>
   );
 }

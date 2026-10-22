@@ -19,6 +19,17 @@ const VIEWPORTS = [
 
 const { attemptLatest, neverContacted, thirtyDays, legacy, twentyNineDays, recent } = MENTEES;
 
+// Visible, inside the 360 px viewport, and at least 44 px tall.
+async function expectTapTargetWithin360(control: Locator) {
+  await expect(control).toBeVisible();
+  const box = await control.boundingBox();
+  expect(box).not.toBeNull();
+  const { x, width, height } = box!;
+  expect(x).toBeGreaterThanOrEqual(0);
+  expect(x + width).toBeLessThanOrEqual(360);
+  expect(height).toBeGreaterThanOrEqual(44);
+}
+
 function names(...mentees: { firstName: string; lastName: string }[]): RegExp[] {
   return mentees.map((mentee) => new RegExp(fullName(mentee)));
 }
@@ -140,13 +151,7 @@ for (const { label, viewport, desktop } of VIEWPORTS) {
           page.getByRole("combobox", { name: "Last contact" }),
           page.getByRole("button", { name: "Clear filters" }),
         ];
-        for (const control of controls) {
-          await expect(control).toBeVisible();
-          const box = await control.boundingBox();
-          expect(box?.x ?? -1).toBeGreaterThanOrEqual(0);
-          expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(360);
-          expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
-        }
+        for (const control of controls) await expectTapTargetWithin360(control);
 
         const overflow = await page.evaluate(
           () => document.documentElement.scrollWidth - document.documentElement.clientWidth
