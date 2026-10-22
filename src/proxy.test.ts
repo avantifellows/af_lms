@@ -64,10 +64,18 @@ describe("proxy (middleware)", () => {
   });
 
   describe("protected routes", () => {
-    it("redirects unauthenticated user to login page", async () => {
+    it("redirects unauthenticated user to login page, returning to the page afterwards", async () => {
       mockGetToken.mockResolvedValue(null);
       const res = await proxy(makeRequest("/dashboard"));
-      expect(res.headers.get("location")).toBe("http://localhost:3000/");
+      expect(res.headers.get("location")).toBe("http://localhost:3000/?callbackUrl=%2Fdashboard");
+    });
+
+    it("keeps a deep link's path and query through sign-in, as the well-being email needs", async () => {
+      mockGetToken.mockResolvedValue(null);
+      const res = await proxy(makeRequest("/blended-learning/students/42?tab=history"));
+      const location = new URL(res.headers.get("location")!);
+      expect(location.pathname).toBe("/");
+      expect(location.searchParams.get("callbackUrl")).toBe("/blended-learning/students/42?tab=history");
     });
 
     it("allows authenticated user to access protected routes", async () => {
@@ -106,19 +114,19 @@ describe("proxy (middleware)", () => {
     it("redirects protected routes to /", async () => {
       mockGetToken.mockResolvedValue(PASSCODE_TOKEN);
       const res = await proxy(makeRequest("/school/70705", ["next-auth.session-token"]));
-      expect(res.headers.get("location")).toBe("http://localhost:3000/");
+      expect(res.headers.get("location")).toBe("http://localhost:3000/?callbackUrl=%2Fschool%2F70705");
     });
 
     it("treats a token with only a schoolCode claim as retired", async () => {
       mockGetToken.mockResolvedValue({ sub: "x", email: "a@gmail.com", schoolCode: "70705" });
       const res = await proxy(makeRequest("/dashboard"));
-      expect(res.headers.get("location")).toBe("http://localhost:3000/");
+      expect(res.headers.get("location")).toBe("http://localhost:3000/?callbackUrl=%2Fdashboard");
     });
 
     it("treats a token with only the isPasscodeUser marker as retired", async () => {
       mockGetToken.mockResolvedValue({ sub: "x", email: "a@gmail.com", isPasscodeUser: true });
       const res = await proxy(makeRequest("/dashboard"));
-      expect(res.headers.get("location")).toBe("http://localhost:3000/");
+      expect(res.headers.get("location")).toBe("http://localhost:3000/?callbackUrl=%2Fdashboard");
     });
 
     it("treats an upper-case passcode pseudo-user email as retired", async () => {
@@ -173,7 +181,7 @@ describe("proxy (middleware)", () => {
       async (path) => {
         mockGetToken.mockResolvedValue(null);
         const res = await proxy(makeRequest(path));
-        expect(res.headers.get("location")).toBe("http://localhost:3000/");
+        expect(res.headers.get("location")).toBe(`http://localhost:3000/?callbackUrl=${encodeURIComponent(path)}`);
       },
     );
   });

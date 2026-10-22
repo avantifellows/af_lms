@@ -1,5 +1,6 @@
 import { test, expect, signInAs } from "../fixtures/auth";
 import { getTestPool } from "../helpers/db";
+import { MENTEES, fullName } from "../helpers/blended-learning-fixtures";
 
 // Blended Learning roles (#441): they land on /blended-learning and every
 // other LMS page and API denies them. Personas come from seedHolisticFixtures
@@ -19,6 +20,8 @@ const VIEWPORTS = [
 
 // Any JNV School in the fixture dump: Blended roles must be denied on it.
 let schoolCode = "";
+// Ira Attempt, the Student a well-being email would link to.
+let iraId = 0;
 
 test.beforeAll(async () => {
   const pool = getTestPool();
@@ -27,6 +30,10 @@ test.beforeAll(async () => {
       `SELECT code FROM school WHERE af_school_category = 'JNV' ORDER BY id LIMIT 1`
     );
     schoolCode = result.rows[0].code;
+    const ira = await pool.query<{ id: string }>(`SELECT id FROM student WHERE student_id = $1`, [
+      `E2E-BL-${MENTEES.attemptLatest.key}`,
+    ]);
+    iraId = Number(ira.rows[0].id);
   } finally {
     await pool.end();
   }
@@ -81,7 +88,17 @@ for (const { label, viewport } of VIEWPORTS) {
 
     test("a signed-out visitor is sent to sign-in", async ({ page }) => {
       await page.goto("/blended-learning");
-      await expect(page).toHaveURL(/\/$/);
+      await expect(page).toHaveURL(/\/\?callbackUrl=%2Fblended-learning$/);
+    });
+
+    test("a signed-out reader of a well-being email's link lands on the Student after sign-in", async ({ page }) => {
+      const studentPath = `/blended-learning/students/${iraId}`;
+      await page.goto(studentPath);
+      await expect(page).toHaveURL(new RegExp(`/\\?callbackUrl=${encodeURIComponent(studentPath)}$`));
+
+      await page.getByRole("button", { name: /^Blended Admin\s*Blended Learning only, all Mentors/ }).click();
+      await expect(page).toHaveURL(new RegExp(`${studentPath}$`));
+      await expect(page.getByRole("heading", { name: fullName(MENTEES.attemptLatest) })).toBeVisible();
     });
   });
 }

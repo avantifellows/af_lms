@@ -17,8 +17,8 @@ test.describe("Smoke tests", () => {
   }) => {
     await page.goto("/dashboard");
 
-    // NextAuth should redirect to the sign-in page
-    await page.waitForURL("/");
+    // The proxy sends them to sign-in, remembering where they were going.
+    await page.waitForURL("/?callbackUrl=%2Fdashboard");
     await expect(page.getByText("Avanti Fellows")).toBeVisible();
   });
 
