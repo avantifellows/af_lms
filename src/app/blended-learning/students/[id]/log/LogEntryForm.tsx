@@ -12,7 +12,7 @@ import type { MenteeRow } from "@/lib/blended-learning-mentees";
 import { LastContact, WhyNowTags } from "../../../MenteeList";
 import { ACTION_ITEM_OWNER, ActionItemMeta } from "../ActionItemMeta";
 import { DraftStatus } from "../DraftStatus";
-import { FLAG_RECIPIENT } from "../flagRecipients";
+import { FLAG_SWITCH } from "../flagRecipients";
 import {
   buildEntryPayload,
   durationMinutes,
@@ -232,6 +232,8 @@ function ActionItemsEditor({
   );
 }
 
+// As in the mockup: below a rule, the switches two to a row (one on mobile),
+// then a comment field for each switched-on flag.
 function MentorFlagsEditor({
   flags,
   errors,
@@ -246,19 +248,14 @@ function MentorFlagsEditor({
   const raised = raisedFlags(flags);
   const flagErrors = Object.entries(errors).filter(([field]) => field === "flags" || field.startsWith("flags."));
   return (
-    <fieldset className="space-y-2">
-      <legend className="mb-1 block text-xs font-bold uppercase tracking-wide text-text-muted">
-        Mentor Flags (optional)
-      </legend>
-      {FLAG_RECIPIENTS.map((recipient) => {
-        const label = FLAG_RECIPIENT[recipient];
-        const on = flags[recipient] !== undefined;
-        const commentId = `${ids}-${recipient}-comment`;
-        const commentError = on ? errors[`flags.${raised.indexOf(recipient)}.comment`] : undefined;
-        return (
-          <div key={recipient} className="rounded-lg border border-border px-3 has-[:checked]:border-accent">
-            <label className="flex min-h-11 cursor-pointer items-center justify-between gap-3">
-              <span className="text-sm font-bold text-text-primary">{label}</span>
+    <fieldset className="space-y-4 border-t border-border pt-5">
+      <legend className="sr-only">Mentor Flags (optional)</legend>
+      <div className="grid gap-x-7 gap-y-1 sm:grid-cols-2">
+        {FLAG_RECIPIENTS.map((recipient) => {
+          const on = flags[recipient] !== undefined;
+          const { label, hint } = FLAG_SWITCH[recipient];
+          return (
+            <label key={recipient} className="flex min-h-11 cursor-pointer items-center gap-3">
               <input
                 type="checkbox"
                 role="switch"
@@ -271,19 +268,30 @@ function MentorFlagsEditor({
                 }}
                 className="relative h-6 w-11 shrink-0 cursor-pointer appearance-none rounded-full bg-border transition-colors before:absolute before:left-0.5 before:top-0.5 before:h-5 before:w-5 before:rounded-full before:bg-bg-card before:shadow-sm before:transition-transform checked:bg-accent checked:before:translate-x-5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
               />
+              <span className="text-sm font-bold text-text-primary">
+                {label}
+                {hint && <span className="font-normal text-text-muted">{` ${hint}`}</span>}
+              </span>
             </label>
-            {on && (
-              <div className="pb-3">
-                <FormLabel htmlFor={commentId}>{`Comment for ${label} (optional)`}</FormLabel>
-                <Input
-                  id={commentId}
-                  value={flags[recipient]}
-                  onChange={(event) => onChange({ ...flags, [recipient]: event.target.value })}
-                  aria-invalid={Boolean(commentError)}
-                />
-                <FieldError message={commentError} />
-              </div>
-            )}
+          );
+        })}
+      </div>
+      {raised.map((recipient, index) => {
+        const { commentFor, placeholder, help } = FLAG_SWITCH[recipient];
+        const commentId = `${ids}-${recipient}-comment`;
+        const commentError = errors[`flags.${index}.comment`];
+        return (
+          <div key={recipient}>
+            <FormLabel htmlFor={commentId}>{`Comment for ${commentFor} (optional)`}</FormLabel>
+            <Input
+              id={commentId}
+              value={flags[recipient]}
+              placeholder={placeholder}
+              onChange={(event) => onChange({ ...flags, [recipient]: event.target.value })}
+              aria-invalid={Boolean(commentError)}
+            />
+            <p className="mt-1 text-xs text-text-secondary">{help}</p>
+            <FieldError message={commentError} />
           </div>
         );
       })}

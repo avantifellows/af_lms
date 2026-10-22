@@ -108,16 +108,16 @@ for (const { label, key, viewport } of VIEWPORTS) {
       await expect(flags.getByRole("switch")).toHaveCount(4);
       await expect(flags.getByRole("textbox")).toHaveCount(0);
 
-      await flags.getByRole("switch", { name: "Emotional Well-being" }).check();
-      await flags.getByLabel("Comment for Emotional Well-being (optional)").fill(wellbeingComment);
-      await flags.getByRole("switch", { name: "Physics Teacher" }).check();
-      await flags.getByRole("switch", { name: "Maths Teacher" }).check();
-      await flags.getByLabel("Comment for Maths Teacher (optional)").fill(mathsComment);
+      await flags.getByRole("switch", { name: "Flag to Shalini (for emotional well-being)" }).check();
+      await flags.getByLabel("Comment for Shalini (optional)").fill(wellbeingComment);
+      await flags.getByRole("switch", { name: "Flag to Physics teacher" }).check();
+      await flags.getByRole("switch", { name: "Flag to Maths teacher" }).check();
+      await flags.getByLabel("Comment for the Maths teacher (optional)").fill(mathsComment);
       // Switched on, then off again: not raised.
-      await flags.getByRole("switch", { name: "Chemistry Teacher" }).check();
-      await flags.getByLabel("Comment for Chemistry Teacher (optional)").fill("Synthetic: changed my mind");
-      await flags.getByRole("switch", { name: "Chemistry Teacher" }).uncheck();
-      await expect(flags.getByLabel("Comment for Chemistry Teacher (optional)")).toHaveCount(0);
+      await flags.getByRole("switch", { name: "Flag to Chemistry teacher" }).check();
+      await flags.getByLabel("Comment for the Chemistry teacher (optional)").fill("Synthetic: changed my mind");
+      await flags.getByRole("switch", { name: "Flag to Chemistry teacher" }).uncheck();
+      await expect(flags.getByLabel("Comment for the Chemistry teacher (optional)")).toHaveCount(0);
       expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
 
       await form.getByRole("button", { name: "Save Conversation" }).click();
@@ -145,7 +145,7 @@ for (const { label, key, viewport } of VIEWPORTS) {
       await signInAs(page, BLENDED_MENTOR_C);
       await page.goto(`${detailPath(mentee)}/log`);
       const form = page.getByRole("form", { name: "Log a Conversation or Attempt" });
-      await expect(form.getByRole("switch", { name: "Emotional Well-being" })).toBeVisible();
+      await expect(form.getByRole("switch", { name: "Flag to Shalini (for emotional well-being)" })).toBeVisible();
 
       await form.getByRole("radio", { name: "Attempt" }).check();
       await expect(form.getByRole("switch")).toHaveCount(0);

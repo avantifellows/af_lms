@@ -185,8 +185,8 @@ describe("LogEntryForm: Conversation", () => {
   it("sends a Conversation's photo, Mentor Flags, ticks and notes", async () => {
     renderForm();
     await userEvent.click(screen.getByRole("button", { name: "Add uploaded photo" }));
-    await userEvent.click(screen.getByRole("switch", { name: "Physics Teacher" }));
-    await userEvent.type(screen.getByLabelText("Comment for Physics Teacher (optional)"), "Optics");
+    await userEvent.click(screen.getByRole("switch", { name: "Flag to Physics teacher" }));
+    await userEvent.type(screen.getByLabelText("Comment for the Physics teacher (optional)"), "Optics");
     await userEvent.click(screen.getByRole("checkbox", { name: /Bring the admit card/ }));
     await userEvent.type(screen.getByLabelText("Notes"), "Fine");
 
@@ -204,10 +204,10 @@ describe("LogEntryForm: Conversation", () => {
 
   it("turns a flag off again and removes an Action Item", async () => {
     renderForm();
-    await userEvent.click(screen.getByRole("switch", { name: "Maths Teacher" }));
-    expect(screen.getByLabelText("Comment for Maths Teacher (optional)")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("switch", { name: "Maths Teacher" }));
-    expect(screen.queryByLabelText("Comment for Maths Teacher (optional)")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("switch", { name: "Flag to Maths teacher" }));
+    expect(screen.getByLabelText("Comment for the Maths teacher (optional)")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("switch", { name: "Flag to Maths teacher" }));
+    expect(screen.queryByLabelText("Comment for the Maths teacher (optional)")).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "Add Action Item" }));
     await userEvent.click(screen.getByRole("button", { name: "Remove" }));
@@ -217,7 +217,7 @@ describe("LogEntryForm: Conversation", () => {
   it("shows the server's field errors by their fields and clears per-item ones when the list changes", async () => {
     renderForm();
     await userEvent.click(screen.getByRole("button", { name: "Add Action Item" }));
-    await userEvent.click(screen.getByRole("switch", { name: "Chemistry Teacher" }));
+    await userEvent.click(screen.getByRole("switch", { name: "Flag to Chemistry teacher" }));
 
     answer(
       {
@@ -244,7 +244,7 @@ describe("LogEntryForm: Conversation", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Remove" }));
     expect(screen.queryByText("Add the Action Item.")).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole("switch", { name: "Chemistry Teacher" }));
+    await userEvent.click(screen.getByRole("switch", { name: "Flag to Chemistry teacher" }));
     expect(screen.queryByText("Mentor Flags must be a list.")).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Add uploaded photo" }));
     expect(screen.queryByText("Photos must be a list.")).not.toBeInTheDocument();
