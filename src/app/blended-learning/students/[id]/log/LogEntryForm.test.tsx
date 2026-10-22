@@ -184,6 +184,7 @@ describe("LogEntryForm: Conversation", () => {
 
   it("sends a Conversation's photo, Mentor Flags, ticks and notes", async () => {
     renderForm();
+    await fillConversation();
     await userEvent.click(screen.getByRole("button", { name: "Add uploaded photo" }));
     await userEvent.click(screen.getByRole("switch", { name: "Flag to Physics teacher" }));
     await userEvent.type(screen.getByLabelText("Comment for the Physics teacher (optional)"), "Optics");
@@ -216,6 +217,7 @@ describe("LogEntryForm: Conversation", () => {
 
   it("shows the server's field errors by their fields and clears per-item ones when the list changes", async () => {
     renderForm();
+    await fillConversation();
     await userEvent.click(screen.getByRole("button", { name: "Add Action Item" }));
     await userEvent.click(screen.getByRole("switch", { name: "Flag to Chemistry teacher" }));
 
@@ -253,6 +255,7 @@ describe("LogEntryForm: Conversation", () => {
 
   it("waits for photos still uploading", async () => {
     renderForm();
+    await fillConversation();
     await userEvent.click(screen.getByRole("button", { name: "Add uploading photo" }));
     await userEvent.click(screen.getByRole("button", { name: "Save Conversation" }));
     expect(screen.getByRole("alert")).toHaveTextContent(
@@ -313,6 +316,7 @@ describe("LogEntryForm: Attempt", () => {
 
   it("clears errors when switching between a Conversation and an Attempt, and changes the date", async () => {
     renderForm();
+    await fillConversation();
     answer({ error: "Bad", fieldErrors: { occurredOn: "Enter the date." } }, 422);
     await userEvent.clear(screen.getByLabelText("Date"));
     await userEvent.type(screen.getByLabelText("Date"), "2026-10-21");
@@ -377,11 +381,42 @@ describe("LogEntryForm: a draft being drafted", () => {
     expect(screen.getByRole("button", { name: "Save Attempt" })).toBeEnabled();
   });
 
-  it("lets a failed draft be retried or discarded while the write-up can be typed", () => {
+  it("lets a failed draft be retried or discarded while the write-up can be typed", async () => {
     renderForm({ hasOpenDraft: true, pendingDraft: { id: 44, state: "failed", retryOffered: true } });
     expect(screen.getByTestId("draft-status")).toHaveTextContent("failed");
-    expect(screen.getByLabelText("Summary")).toBeInTheDocument();
+    await fillConversation();
     expect(screen.getByRole("button", { name: "Save Conversation" })).toBeEnabled();
+  });
+});
+
+describe("LogEntryForm: required fields", () => {
+  it("keeps Save Conversation disabled, saying what is missing, until the required fields are filled", async () => {
+    renderForm();
+    const save = screen.getByRole("button", { name: "Save Conversation" });
+    expect(save).toBeDisabled();
+    expect(save).toHaveAccessibleDescription("To save, fill in: Mode, Spoke with, Duration, Summary.");
+
+    await userEvent.click(screen.getByRole("radio", { name: "Call" }));
+    await userEvent.click(screen.getByRole("radio", { name: "Student" }));
+    await userEvent.type(screen.getByLabelText("Duration (minutes)"), "30");
+    expect(save).toHaveAccessibleDescription("To save, fill in: Summary.");
+    // Spaces alone are not a summary.
+    await userEvent.type(screen.getByLabelText("Summary"), "   ");
+    expect(save).toBeDisabled();
+
+    await userEvent.type(screen.getByLabelText("Summary"), "Talked.");
+    expect(save).toBeEnabled();
+    expect(screen.queryByText(/To save, fill in/)).not.toBeInTheDocument();
+  });
+
+  it("needs only the date for an Attempt", async () => {
+    renderForm();
+    await userEvent.click(screen.getByRole("radio", { name: "Attempt" }));
+    const save = screen.getByRole("button", { name: "Save Attempt" });
+    expect(save).toBeEnabled();
+    await userEvent.clear(screen.getByLabelText("Date"));
+    expect(save).toBeDisabled();
+    expect(save).toHaveAccessibleDescription("To save, fill in: Date.");
   });
 });
 

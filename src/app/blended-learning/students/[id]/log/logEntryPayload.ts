@@ -97,6 +97,22 @@ export function raisedFlags(flags: DraftFlags): FlagRecipient[] {
   return FLAG_RECIPIENTS.filter((recipient) => flags[recipient] !== undefined);
 }
 
+// The required fields still empty, by label: the date for either kind, and a
+// Conversation's mode, who was spoken with, duration and summary. Whether
+// what is filled in is valid stays the server's call.
+export function missingFields(values: EntryFormValues): string[] {
+  const required: [string, boolean][] = [["Date", values.occurredOn !== ""]];
+  if (values.kind === "conversation") {
+    required.push(
+      ["Mode", values.mode !== null],
+      ["Spoke with", values.spokeWith !== null],
+      ["Duration", values.duration.trim() !== ""],
+      ["Summary", values.summary.trim() !== ""]
+    );
+  }
+  return required.filter(([, filled]) => !filled).map(([label]) => label);
+}
+
 // A Conversation can't be saved while a photo is uploading or has failed.
 export function photosPending(kind: Kind, photos: PickedPhoto[]): boolean {
   return kind === "conversation" && photos.some((photo) => photo.status !== "done");

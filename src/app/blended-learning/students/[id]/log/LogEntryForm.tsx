@@ -18,6 +18,7 @@ import {
   durationMinutes,
   FLAG_RECIPIENTS,
   initialEntryValues,
+  missingFields,
   photosPending,
   postEntry,
   raisedFlags,
@@ -703,11 +704,36 @@ function submitLabel(saving: boolean, kind: Kind, drafting: boolean): string {
   return kind === "conversation" ? "Save Conversation" : "Save Attempt";
 }
 
-function SubmitButton({ saving, kind, drafting }: { saving: boolean; kind: Kind; drafting: boolean }) {
+// Disabled until the required fields are filled in, which it lists.
+function SubmitButton({
+  saving,
+  kind,
+  drafting,
+  missing,
+}: {
+  saving: boolean;
+  kind: Kind;
+  drafting: boolean;
+  missing: string[];
+}) {
+  const hintId = useId();
+  const incomplete = missing.length > 0 && !drafting;
   return (
-    <Button type="submit" disabled={saving || drafting} className="w-full sm:w-auto">
-      {submitLabel(saving, kind, drafting)}
-    </Button>
+    <div className="space-y-2">
+      <Button
+        type="submit"
+        disabled={saving || drafting || missing.length > 0}
+        aria-describedby={incomplete ? hintId : undefined}
+        className="w-full sm:w-auto"
+      >
+        {submitLabel(saving, kind, drafting)}
+      </Button>
+      {incomplete && (
+        <p id={hintId} className="text-xs text-text-secondary">
+          {`To save, fill in: ${missing.join(", ")}.`}
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -838,7 +864,7 @@ export function LogEntryForm({
 
           <FormAlert error={error} />
 
-          <SubmitButton saving={saving} kind={kind} drafting={drafting} />
+          <SubmitButton saving={saving} kind={kind} drafting={drafting} missing={missingFields(values)} />
         </form>
       </div>
     </div>
