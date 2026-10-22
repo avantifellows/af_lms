@@ -250,7 +250,9 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
 - **Logging a Conversation or Attempt (#445):** `logEntry(access, studentId, body, today)` in
   `src/lib/blended-learning-log-entry.ts`, behind `POST /api/blended-learning/students/[id]/entries`
   (401 / 403 for other roles and read-only / 404 out of scope or malformed id / 422 validation with
-  `{ error, fieldErrors }` / 201 `{ entry, mentee }`). Validation runs before the transaction:
+  `{ error, fieldErrors }` / 201 `{ entry, mentee }`). Validation runs before the transaction
+  (`validateEntry` in `src/lib/blended-learning-log-entry-input.ts`; the session-detail checks it
+  shares with draft creation live in `src/lib/blended-learning-session-details.ts`):
   `occurredOn` a real `YYYY-MM-DD` not after today IST; a Conversation needs mode
   `call|in_person`, spoke-with `student|parent_or_sibling|both`, an integer 1–240 duration and a
   non-blank summary; an Attempt takes only an optional note (blank → `NULL`). One
