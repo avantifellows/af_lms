@@ -2,8 +2,9 @@ import type { UserPermission } from "@/lib/permissions";
 
 // A person's alumni scope as SQL, so queries narrow to it before any LIMIT or
 // aggregation. Same rule as canAccessSchoolSync: level 3 reaches every school;
-// otherwise the explicit School codes, any seat Schools in the resolved scope,
-// and (level 2) the regions.
+// otherwise any seat Schools in the resolved scope, plus the explicit School
+// codes at level 1 or the regions at level 2. Leftover codes on a level-2 row
+// grant nothing there, so they mustn't here either.
 
 export interface ScopeSql {
   /** A boolean SQL expression ("TRUE" for level 3). */
@@ -27,7 +28,8 @@ export function schoolScopeSql(
 ): ScopeSql {
   if (reachesAllSchools(permission)) return { sql: "TRUE", params: [] };
   const seatSchools = permission.scope?.schools instanceof Set ? [...permission.scope.schools] : [];
-  const codes = [...new Set([...(permission.school_codes ?? []), ...seatSchools])];
+  const explicitCodes = permission.level === 1 ? (permission.school_codes ?? []) : [];
+  const codes = [...new Set([...explicitCodes, ...seatSchools])];
   const regions = permission.level === 2 ? (permission.regions ?? []) : [];
   return {
     sql: `(${codeColumn} = ANY($${first}::text[]) OR ${regionColumn} = ANY($${first + 1}::text[]))`,

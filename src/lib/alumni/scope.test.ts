@@ -24,6 +24,13 @@ describe("schoolScopeSql", () => {
     expect(schoolScopeSql(perm({ level: 1, regions: ["Pune"] }), "c", "r", 1).params).toEqual([[], []]);
   });
 
+  it("ignores School codes at level 2, but still adds seat Schools", () => {
+    const levelTwo = perm({ level: 2, regions: ["Pune"], school_codes: ["99999"] });
+    expect(schoolScopeSql(levelTwo, "c", "r", 1).params).toEqual([[], ["Pune"]]);
+    const seated = { ...levelTwo, scope: { schools: new Set(["2"]), centres: new Set(), programs: new Set() } } as UserPermission;
+    expect(schoolScopeSql(seated, "c", "r", 1).params).toEqual([["2"], ["Pune"]]);
+  });
+
   it("adds seat Schools from a resolved scope, without duplicates", () => {
     const seated = perm({
       school_codes: ["1"],
