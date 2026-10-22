@@ -10,6 +10,7 @@ import {
   PROGRAM_IDS,
   PROGRAM_ID_TO_LABEL,
 } from "@/lib/constants";
+import { resolveVisibleTab } from "@/lib/roster-tabs";
 import ChallengeCategoryHeatmap from "./ChallengeCategoryHeatmap";
 import HolisticTutorialLink from "./HolisticTutorialLink";
 import PhasePlanSetup from "./PhasePlanSetup";
@@ -49,6 +50,47 @@ function nextWorkspaceIndex(key: string, index: number, count: number) {
 function orderedProgramIds(programIds: number[]) {
   const available = new Set(programIds);
   return HOLISTIC_MENTORSHIP_PROGRAM_IDS.filter((programId) => available.has(programId));
+}
+
+// Rewrite one query parameter in place (no history entry), keeping the rest and
+// the hash. Next's patched history API surfaces it through useSearchParams.
+function replaceSearchParam(name: string, value: string | null) {
+  const url = new URL(window.location.href);
+  if (value === null) url.searchParams.delete(name);
+  else url.searchParams.set(name, value);
+  window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+}
+
+type UrlChoice = { search: string; programId?: number; tab?: string };
+
+// The URL holds the Program (`program_id`) and the tab (`tab`, absent for the
+// first tab). A choice shows at once, ahead of its replace reaching
+// useSearchParams; once the URL moves on, the URL wins again. This keeps the
+// heatmap from first loading the old Program.
+function useUrlChoices(availableProgramIds: number[], initialProgramId: number, tabIds: string[]) {
+  const searchParams = useSearchParams();
+  const search = searchParams.toString();
+  const [choice, setChoice] = useState<UrlChoice | null>(null);
+  const pending = choice?.search === search ? choice : null;
+  const programParams = searchParams.getAll("program_id");
+  const requestedProgramId = programParams.length === 1 ? Number(programParams[0]) : NaN;
+  const urlProgramId = availableProgramIds.includes(requestedProgramId) ? requestedProgramId : initialProgramId;
+  // A hidden or unknown `tab` (Phase Setup for a Program Manager) falls back to the first tab.
+  const urlTab = resolveVisibleTab(searchParams.get("tab"), tabIds, tabIds[0]);
+  const choose = (next: Omit<UrlChoice, "search">) =>
+    setChoice((current) => ({ ...(current?.search === search ? current : {}), ...next, search }));
+  return {
+    programId: pending?.programId ?? urlProgramId,
+    activeId: pending?.tab ?? urlTab,
+    chooseProgram: (programId: number) => {
+      choose({ programId });
+      replaceSearchParam("program_id", String(programId));
+    },
+    chooseTab: (tab: string) => {
+      choose({ tab });
+      replaceSearchParam("tab", tab === tabIds[0] ? null : tab);
+    },
+  };
 }
 
 function AdminSelectors({ selectedProgramId, availableProgramIds, offerAllPrograms, academicYear,
@@ -145,22 +187,16 @@ function AdminWorkspace({
   canViewPhaseSetup = canEdit,
 }: Omit<HolisticMentorshipWorkspaceProps, "mode" | "schoolCode" | "programId">) {
   const orderedAvailableProgramIds = orderedProgramIds(availableProgramIds);
-  const searchParams = useSearchParams();
-  const programParams = searchParams.getAll("program_id");
-  const requestedProgramId = programParams.length === 1 ? Number(programParams[0]) : NaN;
-  const selectedProgramId = orderedAvailableProgramIds.some(
-    (programId) => programId === requestedProgramId,
-  )
-    ? requestedProgramId
-    : initialProgramId;
   const workspaces = canViewPhaseSetup
     ? WORKSPACES.admin
     : WORKSPACES.admin.filter((workspace) => workspace.id !== "phases");
-  const [activeId, setActiveId] = useState<string>(workspaces[0].id);
+  const { programId: selectedProgramId, activeId, chooseProgram, chooseTab } = useUrlChoices(
+    orderedAvailableProgramIds, initialProgramId, workspaces.map((workspace) => workspace.id));
   const active = workspaces.find((workspace) => workspace.id === activeId) ?? workspaces[0];
   // "All Programs" exists only on Challenge Categories for a multi-Program
-  // viewer, who lands on it there first. It never replaces the shared single
-  // Program (or the URL), so other tabs get that Program back.
+  // viewer, who lands on it there first, even after picking a Program on
+  // another tab. It never replaces the shared single Program (or the URL), so
+  // other tabs get that Program back.
   const offerAllPrograms = active.id === "challenge-categories" && orderedAvailableProgramIds.length >= 2;
   const [heatmapAllPrograms, setHeatmapAllPrograms] = useState(true);
   const shownProgramId = offerAllPrograms && heatmapAllPrograms ? "all" : selectedProgramId;
@@ -177,26 +213,20 @@ function AdminWorkspace({
     });
   }, []);
 
-  const activateWorkspace = (workspaceId: string) => {
-    setActiveId(workspaceId);
-  };
-
   const handleTabKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
     const nextIndex = nextWorkspaceIndex(event.key, index, workspaces.length);
     if (nextIndex === null) return;
 
     event.preventDefault();
-    activateWorkspace(workspaces[nextIndex].id);
+    chooseTab(workspaces[nextIndex].id);
     tabRefs.current[nextIndex]?.focus();
   };
   const handleProgramChange = (nextProgramId: number | "all") => {
-    setHeatmapAllPrograms(nextProgramId === "all");
+    // Only a choice made on the heatmap moves it off All Programs.
+    if (offerAllPrograms) setHeatmapAllPrograms(nextProgramId === "all");
     setAcademicYear(CURRENT_ACADEMIC_YEAR);
     setAcademicYears([CURRENT_ACADEMIC_YEAR]);
-    if (nextProgramId === "all") return;
-    const url = new URL(window.location.href);
-    url.searchParams.set("program_id", String(nextProgramId));
-    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+    if (nextProgramId !== "all") chooseProgram(nextProgramId);
   };
 
   return (
@@ -208,7 +238,7 @@ function AdminWorkspace({
         offerAllPrograms={offerAllPrograms} academicYear={academicYear} academicYears={academicYears}
         onProgramChange={handleProgramChange} onAcademicYearChange={setAcademicYear} />
       <WorkspaceTabs workspaces={workspaces} active={active} tabSetId={tabSetId}
-        tabRefs={tabRefs} onActivate={activateWorkspace} onKeyDown={handleTabKeyDown} />
+        tabRefs={tabRefs} onActivate={chooseTab} onKeyDown={handleTabKeyDown} />
       <WorkspacePanel active={active} tabSetId={tabSetId} academicYear={academicYear}
         programId={selectedProgramId} heatmapProgramId={shownProgramId} canEdit={canEdit}
         onAcademicYears={updateAcademicYears} />

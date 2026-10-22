@@ -163,6 +163,50 @@ test.describe("Challenge Category Heatmap", () => {
       "/api/holistic-mentorship/challenge-categories?program_id=1&academic_year=2026-2027&grade=11",
     );
     expect(response.status()).toBe(403);
+
+    // The tab's URL doesn't open it for a Teacher either.
+    await holisticTeacherPage.goto("/admin/holistic-mentorship?program_id=1&tab=challenge-categories");
+    await expect(holisticTeacherPage).not.toHaveURL(/\/admin\/holistic-mentorship/);
+    await expect(holisticTeacherPage.getByRole("tab", { name: "Challenge Categories" })).toHaveCount(0);
+    expectBrowserHealth(health);
+  });
+
+  test("a reload on Challenge Categories reopens the heatmap, with the tab kept in the URL", async ({
+    holisticAdminPage: page,
+  }) => {
+    const health = collectBrowserHealth(page);
+    await page.goto("/admin/holistic-mentorship?program_id=1");
+    const categories = page.getByRole("tab", { name: "Challenge Categories" });
+    await categories.click();
+    await expect(page).toHaveURL(/\?program_id=1&tab=challenge-categories$/);
+
+    await page.reload();
+
+    await expect(categories).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("heading", { name: "Challenge Categories" })).toBeVisible();
+    // A reload is a first opening: a multi-Program viewer lands on All Programs.
+    await expect(page.getByLabel("Program", { exact: true })).toHaveValue("all");
+    await page.getByLabel("Grade", { exact: true }).selectOption("12");
+    await expect(page.getByRole("table", { name: "Challenge Category Heatmap" })).toBeVisible();
+
+    await page.getByRole("tab", { name: "Students & Progress" }).click();
+    await expect(page).toHaveURL(/\?program_id=1$/);
+    await expect(page.getByLabel("Program", { exact: true })).toHaveValue("1");
+    expectBrowserHealth(health);
+  });
+
+  test("a single-Program PM reloads onto their heatmap, and a hidden tab in the URL falls back", async ({
+    holisticPmPage: page,
+  }) => {
+    const health = collectBrowserHealth(page);
+    await page.goto("/admin/holistic-mentorship?tab=challenge-categories");
+    await expect(page.getByRole("tab", { name: "Challenge Categories" })).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByLabel("Program", { exact: true })).toHaveValue("1");
+    await expect(page.getByLabel("Phase", { exact: true })).toBeEnabled();
+
+    await page.goto("/admin/holistic-mentorship?tab=phases");
+    await expect(page.getByRole("tab", { name: "Students & Progress" })).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("tab", { name: "Phase Setup" })).toHaveCount(0);
     expectBrowserHealth(health);
   });
 
