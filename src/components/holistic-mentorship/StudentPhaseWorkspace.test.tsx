@@ -195,6 +195,46 @@ describe("StudentPhaseWorkspace", () => {
     expect(screen.getByRole("tab", { name: /Phase 5/ })).toHaveAttribute("aria-selected", "false");
   });
 
+  it("moves between enabled Phase tabs with the arrow, Home, and End keys", () => {
+    const base = adminDetail();
+    render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={{
+      ...base,
+      phases: [
+        ...base.phases,
+        { phaseId: 74, number: 7, title: "Looking ahead", locked: false, active: false, progress: "pending", draftSaved: false, grade: 12, academicYear: "2026-2027" },
+        { phaseId: 75, number: 8, title: "Wrap-up", locked: true },
+      ],
+    }} />);
+    // Swallow the tab Link navigation; record which tab the keyboard activated.
+    const clicked: string[] = [];
+    const swallow = (event: MouseEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      clicked.push((event.target as HTMLElement).closest('[role="tab"]')?.textContent ?? "");
+    };
+    document.addEventListener("click", swallow, true);
+    const tablist = screen.getByRole("tablist", { name: "Holistic Phases" });
+    const tab = (number: number) => screen.getByRole("tab", { name: new RegExp(`Phase ${number}`) });
+
+    try {
+      // No tab focused yet: start from the selected Phase 6.
+      fireEvent.keyDown(tablist, { key: "ArrowRight" });
+      expect(tab(7)).toHaveFocus();
+      fireEvent.keyDown(tab(7), { key: "ArrowRight" });
+      expect(tab(5)).toHaveFocus();
+      fireEvent.keyDown(tab(5), { key: "ArrowLeft" });
+      expect(tab(7)).toHaveFocus();
+      fireEvent.keyDown(tab(7), { key: "Home" });
+      expect(tab(5)).toHaveFocus();
+      fireEvent.keyDown(tab(5), { key: "End" });
+      expect(tab(7)).toHaveFocus();
+      fireEvent.keyDown(tab(7), { key: "Enter" });
+      expect(clicked).toEqual(["Phase 7Open", "Phase 5Completed", "Phase 7Open", "Phase 5Completed", "Phase 7Open"]);
+    } finally {
+      document.removeEventListener("click", swallow, true);
+    }
+  });
+
   it.each(["school", "school-progress"] as const)("preserves %s while an Admin changes Phase", (source) => {
     render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027"
       source={source} backHref="/school/SCH001?tab=holistic_mentorship&program_id=1"

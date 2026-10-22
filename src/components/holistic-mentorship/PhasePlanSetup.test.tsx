@@ -259,6 +259,72 @@ describe("PhasePlanSetup", () => {
     expect(screen.queryByRole("button", { name: "Save Phase" })).not.toBeInTheDocument();
   });
 
+  describe("Phase state changes", () => {
+    const planWith = (state: "locked" | "open") => ({ plan: {
+      id: 7, academicYear: "2026-2027", editable: true, phases: [{
+        id: 21, number: 1, grade: 11, title: "Lifecycle title", state,
+        guidanceMarkdown: "Guidance", revision: 4, frozen: false,
+        everOpened: state === "open", used: false, active: state === "open",
+        questions: [{ id: 41, text: "Question" }],
+      }],
+    } });
+
+    it("opens a Locked Phase after confirmation and keeps it selected after the reload", async () => {
+      const user = userEvent.setup();
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce({ ok: true, json: async () => planWith("locked") })
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true }) })
+        .mockResolvedValueOnce({ ok: true, json: async () => planWith("open") });
+      vi.stubGlobal("fetch", fetchMock);
+      const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+      render(<PhasePlanSetup />);
+
+      await user.click(await screen.findByRole("button", { name: /Lifecycle title/ }));
+      await user.click(screen.getByRole("button", { name: "Open Phase" }));
+
+      expect(confirm).toHaveBeenCalledWith("Open Phase 1?");
+      expect(fetchMock.mock.calls[1][1]).toMatchObject({ method: "PATCH" });
+      expect(JSON.parse(fetchMock.mock.calls[1][1]?.body as string)).toEqual({
+        action: "state", phase_id: 21, expected_revision: 4, state: "open", confirmed: true, program_id: 1,
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expect(await screen.findByRole("button", { name: "Return to Locked" })).toBeInTheDocument();
+      expect(screen.getByLabelText("Title")).toHaveValue("Lifecycle title");
+    });
+
+    it("leaves an Open Phase unchanged when the return to Locked is cancelled", async () => {
+      const user = userEvent.setup();
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => planWith("open") });
+      vi.stubGlobal("fetch", fetchMock);
+      const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+      render(<PhasePlanSetup />);
+
+      await user.click(await screen.findByRole("button", { name: /Lifecycle title/ }));
+      await user.click(screen.getByRole("button", { name: "Return to Locked" }));
+
+      expect(confirm).toHaveBeenCalledWith("Return to Locked Phase 1?");
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps the Phase selected without reloading when the state change fails", async () => {
+      const user = userEvent.setup();
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce({ ok: true, json: async () => planWith("open") })
+        .mockResolvedValueOnce({ ok: false, status: 422, json: async () => ({ error: "Phase has Notes" }) });
+      vi.stubGlobal("fetch", fetchMock);
+      vi.spyOn(window, "confirm").mockReturnValue(true);
+      render(<PhasePlanSetup />);
+
+      await user.click(await screen.findByRole("button", { name: /Lifecycle title/ }));
+      await user.click(screen.getByRole("button", { name: "Return to Locked" }));
+
+      expect(JSON.parse(fetchMock.mock.calls[1][1]?.body as string)).toMatchObject({ state: "locked" });
+      expect(await screen.findByText("Phase has Notes")).toBeInTheDocument();
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(screen.getByLabelText("Title")).toHaveValue("Lifecycle title");
+    });
+  });
+
   describe("Challenge Category placement hints", () => {
     const academicHint = "Academic Challenge Categories appear under this question";
     const nonAcademicHint = "Non-academic Challenge Categories appear under this question";
