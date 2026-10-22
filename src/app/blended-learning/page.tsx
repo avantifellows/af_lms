@@ -13,7 +13,7 @@ import { listMentees, type MenteeList } from "@/lib/blended-learning-mentees";
 import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
 import { getTodayIST } from "@/lib/curriculum-date-helpers";
 
-import { MenteeGroup } from "./MenteeList";
+import { FilteredMenteeList } from "./FilteredMenteeList";
 
 function accessLabel(access: BlendedLearningAccess) {
   if (access.kind === "mentor") return "Mentor";
@@ -60,8 +60,8 @@ function BlendedLearningHeader({ access }: { access: BlendedLearningAccess }) {
   );
 }
 
-function MentorMenteeList({ list: { talkToFirst, everyoneElse } }: { list: MenteeList }) {
-  const total = talkToFirst.length + everyoneElse.length;
+function MentorMenteeList({ list }: { list: MenteeList }) {
+  const total = list.talkToFirst.length + list.everyoneElse.length;
   if (total === 0) {
     return (
       <Card elevation="sm" className="p-4 sm:p-6">
@@ -76,18 +76,7 @@ function MentorMenteeList({ list: { talkToFirst, everyoneElse } }: { list: Mente
       <p className="text-sm text-text-secondary">
         {total} {total === 1 ? "Mentee" : "Mentees"} · {CURRENT_ACADEMIC_YEAR}
       </p>
-      <MenteeGroup
-        title="Talk to First"
-        description="Last try didn't connect, never reached, or 30+ days since you last talked."
-        mentees={talkToFirst}
-        emptyText="Everyone has been talked to recently."
-      />
-      <MenteeGroup
-        title="Everyone else"
-        description="Talked to in the last 30 days."
-        mentees={everyoneElse}
-        emptyText="No one here yet."
-      />
+      <FilteredMenteeList list={list} />
     </div>
   );
 }

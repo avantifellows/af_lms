@@ -85,6 +85,11 @@ export function talkedToInLastWeek(daysSince: number | null): boolean {
   return daysSince !== null && daysSince < 7;
 }
 
+// "30 days or more" means days_since ≥ 30 or no Last Contact at all.
+export function thirtyDaysOrMore(daysSince: number | null): boolean {
+  return daysSince === null || daysSince >= GAP_DAYS;
+}
+
 export type TalkToFirstSortable = {
   name: string;
   latestEntryKind: BlendedEntryKind | null;

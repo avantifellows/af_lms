@@ -5,6 +5,7 @@ import {
   latestEntryKind,
   talkedToInLastWeek,
   talkToFirst,
+  thirtyDaysOrMore,
 } from "./blended-learning-talk-to-first";
 
 // Expected values are hand-counted IST calendar days from the PRD rules
@@ -168,6 +169,22 @@ describe("talkedToInLastWeek", () => {
 
   it("is false without a Last Contact", () => {
     expect(talkedToInLastWeek(null)).toBe(false);
+  });
+});
+
+describe("thirtyDaysOrMore", () => {
+  it.each([
+    // 2026-09-22 → 2026-10-22 is 30 days; 2026-09-23 is 29.
+    ["last talked to 2026-09-22", { lastConversationOn: "2026-09-22", legacyMonth: null }, true],
+    ["last talked to 2026-09-23", { lastConversationOn: "2026-09-23", legacyMonth: null }, false],
+    ["no Last Contact at all", { lastConversationOn: null, legacyMonth: null }, true],
+    // September 2026 counts as 30 Sep (22 days), though 1 Sep is 51 days ago.
+    ["legacy month September 2026", { lastConversationOn: null, legacyMonth: "2026-09-01" }, false],
+    // August 2026 counts as 31 Aug: 52 days.
+    ["legacy month August 2026", { lastConversationOn: null, legacyMonth: "2026-08-01" }, true],
+  ] as const)("today 2026-10-22, %s → %s", (_label, contact, expected) => {
+    const { daysSince } = talkToFirst({ latestEntryKind: null, ...contact, today: "2026-10-22" });
+    expect(thirtyDaysOrMore(daysSince)).toBe(expected);
   });
 });
 

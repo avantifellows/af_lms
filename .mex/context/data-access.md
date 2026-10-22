@@ -216,8 +216,17 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   Rows are grouped (Talk to First = any reason) and sorted in JS by the pure policy.
 - **Talk to First policy:** `src/lib/blended-learning-talk-to-first.ts`, pure and client-safe:
   `talkToFirst`, `latestEntryKind`, `lastContactOf`, `compareTalkToFirst`,
-  `talkedToInLastWeek`. IST calendar dates as `YYYY-MM-DD`; a legacy month counts as its last
+  `talkedToInLastWeek`, `thirtyDaysOrMore` (days_since ≥ 30 or no Last Contact). IST calendar dates as `YYYY-MM-DD`; a legacy month counts as its last
   day and is ignored once a Conversation exists. Drafts never feed it.
+- **Search and filters (#443):** client-side in `src/app/blended-learning/FilteredMenteeList.tsx`
+  over the already grouped and sorted `MenteeList` (about 46 Mentees per Mentor, so no server
+  pagination). Name search is a trimmed, case-insensitive substring match. Gender and Program
+  options come from the list itself; Grade is fixed to 12/13. "30 days or more" uses the
+  policy's `thirtyDaysOrMore(daysSince)`, so no Last Contact counts and a legacy month counts as
+  its last day. Filters combine (AND), keep both groups and their order, and are not in the URL.
+  When nothing matches, one empty-state card replaces both groups. The mockup was not available
+  to this slice; control copy follows the PRD ("Search by name", Gender, Grade, Program,
+  "30 days or more", "Clear filters").
 - **E2E fixture schema:** `e2e/fixtures/migrations/20261022130000_add_blended_learning_schema.sql`
   mirrors those 10 db-service migrations exactly. Re-diff it with
   `patterns/mirror-db-service-schema-in-e2e.md` whenever PR #804 changes.
