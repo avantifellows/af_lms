@@ -1,18 +1,25 @@
 "use client";
 
+import { Search } from "lucide-react";
 import { useState } from "react";
 
-import { Button, Card, FormLabel, Input, Select } from "@/components/ui";
+import { FormLabel, Input, Select } from "@/components/ui";
 import type { MenteeList, MenteeRow } from "@/lib/blended-learning-mentees";
 import { thirtyDaysOrMore } from "@/lib/blended-learning-talk-to-first";
 
-import { MenteeGroup } from "./MenteeList";
+import { MenteeGroups } from "./MenteeList";
 
-// The Mentee list with name search and filters. Filtering keeps the
-// server's Talk to First / Everyone else grouping and sort order.
+// The Student list with name search and filters, in one row above the list.
+// Filtering keeps the server's Talk to first / Everyone else grouping and
+// sort order. The copy names no viewer, so it reads the same to a Mentor and
+// to an admin looking at a Mentor's list.
 
-// Blended Learning Mentees are in Grade 12 or 13.
-const GRADES = [12, 13];
+// Blended Learning Students are in Grade 12 or 13.
+const GRADES = ["12", "13"];
+
+const LAST_CONTACT_OPTIONS = [{ value: "30", label: "30 days or more" }];
+
+const TALK_TO_FIRST_DESCRIPTION = "Not reachable on the last try, or no conversation in 30 days or more.";
 
 // "" means "All" for each select.
 type Filters = {
@@ -20,29 +27,31 @@ type Filters = {
   gender: string;
   grade: string;
   programId: string;
-  thirtyDaysOrMore: boolean;
+  // "30": no Last Contact, or 30 days or more since it.
+  lastContact: string;
 };
 
-const NO_FILTERS: Filters = {
-  search: "",
-  gender: "",
-  grade: "",
-  programId: "",
-  thirtyDaysOrMore: false,
-};
+const NO_FILTERS: Filters = { search: "", gender: "", grade: "", programId: "", lastContact: "" };
+
+// Each check passes when its filter is "All" ("") or the Student matches it.
+const CHECKS: ((mentee: MenteeRow, filters: Filters) => boolean)[] = [
+  (mentee, { search }) => mentee.name.toLowerCase().includes(search.trim().toLowerCase()),
+  (mentee, { gender }) => gender === "" || mentee.gender === gender,
+  (mentee, { grade }) => grade === "" || mentee.grade === Number(grade),
+  (mentee, { programId }) => programId === "" || mentee.programId === Number(programId),
+  (mentee, { lastContact }) => lastContact === "" || thirtyDaysOrMore(mentee.daysSince),
+];
 
 function matches(mentee: MenteeRow, filters: Filters): boolean {
-  const search = filters.search.trim().toLowerCase();
-  if (search !== "" && !mentee.name.toLowerCase().includes(search)) return false;
-  if (filters.gender !== "" && mentee.gender !== filters.gender) return false;
-  if (filters.grade !== "" && mentee.grade !== Number(filters.grade)) return false;
-  if (filters.programId !== "" && mentee.programId !== Number(filters.programId)) return false;
-  if (filters.thirtyDaysOrMore && !thirtyDaysOrMore(mentee.daysSince)) return false;
-  return true;
+  return CHECKS.every((check) => check(mentee, filters));
 }
 
 function distinctSorted(values: (string | null)[]): string[] {
   return [...new Set(values.filter((value): value is string => Boolean(value)))].sort();
+}
+
+function asOptions(values: string[]): { value: string; label: string }[] {
+  return values.map((value) => ({ value, label: value }));
 }
 
 function programOptions(mentees: MenteeRow[]): { value: string; label: string }[] {
@@ -55,26 +64,26 @@ function programOptions(mentees: MenteeRow[]): { value: string; label: string }[
     .sort((a, b) => a.label.localeCompare(b.label));
 }
 
+// Two per row on a phone; sized to their content from 640 px up.
 function FilterSelect({
   id,
   label,
   value,
-  allLabel,
   options,
   onChange,
 }: {
   id: string;
   label: string;
   value: string;
-  allLabel: string;
   options: { value: string; label: string }[];
   onChange: (value: string) => void;
 }) {
+  const active = value === "" ? "" : "border-accent! bg-hover-bg font-semibold";
   return (
-    <div>
+    <div className="min-w-[8rem] flex-1 basis-[calc(50%-0.3125rem)] sm:flex-none sm:basis-auto">
       <FormLabel htmlFor={id}>{label}</FormLabel>
-      <Select id={id} value={value} onChange={(event) => onChange(event.target.value)}>
-        <option value="">{allLabel}</option>
+      <Select id={id} value={value} className={`sm:w-auto ${active}`} onChange={(event) => onChange(event.target.value)}>
+        <option value="">All</option>
         {options.map((option) => (
           <option key={option.value} value={option.value}>
             {option.label}
@@ -85,92 +94,92 @@ function FilterSelect({
   );
 }
 
-// `canLog`: whether the viewer may log for these Mentees, so a ready draft's
-// chip can open the log page; a read-only viewer gets a plain chip.
-export function FilteredMenteeList({ list, canLog }: { list: MenteeList; canLog: boolean }) {
+function SearchBox({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  return (
+    <div className="relative w-full sm:w-60">
+      <Search
+        aria-hidden="true"
+        className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted"
+      />
+      <Input
+        type="search"
+        aria-label="Search by name"
+        placeholder="Search by name"
+        autoComplete="off"
+        className="pl-9"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      />
+    </div>
+  );
+}
+
+// `canLog`: whether the viewer may log for these Students, so a ready draft's
+// chip can open the log page; a read-only viewer gets a plain chip. `today` is
+// the IST date, so this year's dates drop the year.
+export function FilteredMenteeList({ list, canLog, today }: { list: MenteeList; canLog: boolean; today?: string }) {
   const [filters, setFilters] = useState<Filters>(NO_FILTERS);
+  const set = (change: Partial<Filters>) => setFilters({ ...filters, ...change });
   const everyone = [...list.talkToFirst, ...list.everyoneElse];
-  const genders = distinctSorted(everyone.map((mentee) => mentee.gender));
   const talkToFirst = list.talkToFirst.filter((mentee) => matches(mentee, filters));
   const everyoneElse = list.everyoneElse.filter((mentee) => matches(mentee, filters));
   const filtering = JSON.stringify(filters) !== JSON.stringify(NO_FILTERS);
 
   return (
-    <div className="space-y-5">
-      <Card elevation="sm" className="grid grid-cols-2 gap-3 p-4 sm:grid-cols-4">
-        <div className="col-span-2 sm:col-span-4">
-          <Input
-            type="search"
-            aria-label="Search by name"
-            placeholder="Search by name"
-            value={filters.search}
-            onChange={(event) => setFilters({ ...filters, search: event.target.value })}
-          />
-        </div>
+    <div className="space-y-4">
+      <div role="search" aria-label="Filter students" className="flex flex-wrap items-end gap-2.5">
+        <SearchBox value={filters.search} onChange={(search) => set({ search })} />
         <FilterSelect
           id="mentee-filter-gender"
           label="Gender"
           value={filters.gender}
-          allLabel="All"
-          options={genders.map((gender) => ({ value: gender, label: gender }))}
-          onChange={(gender) => setFilters({ ...filters, gender })}
+          options={asOptions(distinctSorted(everyone.map((mentee) => mentee.gender)))}
+          onChange={(gender) => set({ gender })}
         />
         <FilterSelect
           id="mentee-filter-grade"
           label="Grade"
           value={filters.grade}
-          allLabel="All grades"
-          options={GRADES.map((grade) => ({ value: String(grade), label: `Grade ${grade}` }))}
-          onChange={(grade) => setFilters({ ...filters, grade })}
+          options={asOptions(GRADES)}
+          onChange={(grade) => set({ grade })}
         />
-        <div className="col-span-2">
-          <FilterSelect
-            id="mentee-filter-program"
-            label="Program"
-            value={filters.programId}
-            allLabel="All programs"
-            options={programOptions(everyone)}
-            onChange={(programId) => setFilters({ ...filters, programId })}
-          />
-        </div>
-        <div className="col-span-2 flex flex-wrap items-center justify-between gap-2 sm:col-span-4">
-          <label className="flex min-h-11 items-center gap-2 text-sm text-text-primary">
-            <input
-              type="checkbox"
-              className="h-5 w-5 accent-accent"
-              checked={filters.thirtyDaysOrMore}
-              onChange={(event) => setFilters({ ...filters, thirtyDaysOrMore: event.target.checked })}
-            />
-            30 days or more
-          </label>
-          {filtering && (
-            <Button variant="ghost" onClick={() => setFilters(NO_FILTERS)}>
-              Clear filters
-            </Button>
-          )}
-        </div>
-      </Card>
+        <FilterSelect
+          id="mentee-filter-program"
+          label="Program"
+          value={filters.programId}
+          options={programOptions(everyone)}
+          onChange={(programId) => set({ programId })}
+        />
+        <FilterSelect
+          id="mentee-filter-last-contact"
+          label="Last contact"
+          value={filters.lastContact}
+          options={LAST_CONTACT_OPTIONS}
+          onChange={(lastContact) => set({ lastContact })}
+        />
+        {filtering && (
+          <button
+            type="button"
+            className="min-h-11 px-1.5 text-sm text-text-muted underline underline-offset-4 hover:text-text-primary"
+            onClick={() => setFilters(NO_FILTERS)}
+          >
+            Clear filters
+          </button>
+        )}
+      </div>
       {talkToFirst.length + everyoneElse.length === 0 ? (
-        <Card elevation="sm" className="p-4 sm:p-6">
-          <p className="text-sm text-text-secondary">No Mentees match your search and filters.</p>
-        </Card>
+        <p className="rounded-xl border border-dashed border-border bg-bg-card px-4 py-10 text-center text-sm text-text-muted">
+          No students match these filters.
+        </p>
       ) : (
-        <>
-          <MenteeGroup
-            title="Talk to First"
-            description="Last try didn't connect, never reached, or 30+ days since you last talked."
-            mentees={talkToFirst}
-            canLog={canLog}
-            emptyText={filtering ? "No one here matches your filters." : "Everyone has been talked to recently."}
-          />
-          <MenteeGroup
-            title="Everyone else"
-            description="Talked to in the last 30 days."
-            mentees={everyoneElse}
-            canLog={canLog}
-            emptyText={filtering ? "No one here matches your filters." : "No one here yet."}
-          />
-        </>
+        <MenteeGroups
+          canLog={canLog}
+          today={today}
+          groups={[
+            { title: "Talk to first", description: TALK_TO_FIRST_DESCRIPTION, mentees: talkToFirst },
+            { title: "Everyone else", description: "", mentees: everyoneElse },
+          ]}
+        />
       )}
     </div>
   );

@@ -6,32 +6,45 @@ import {
   OTHER_STUDENTS,
   fullName,
 } from "../helpers/blended-learning-fixtures";
+import { shortDate } from "../../src/app/blended-learning/menteeListCopy";
 
-// Mentor A's Mentee list (#442) against the real fixture DDL, so the
+// Mentor A's Student list (#442) against the real fixture DDL, so the
 // ownership, active-Mapping and current-year predicates run for real.
-// Fixture facts (IST days before today): Ira — Conversation 10, Attempt 2;
-// Kabir — nothing logged, a ready draft; Meera — Conversation 30;
+// Fixture facts (IST days before today): Ira — Conversation 10 (25 min),
+// Attempt 2; Kabir — nothing logged, a ready draft; Meera — Conversation 30;
 // Nikhil — legacy month June 2026 only; Zoya — Conversation 29;
 // Rohan — Conversation 3, a failed draft.
+//
+// From 1024 px up the list is one table, each group a named rowgroup with a
+// header row; below that each group is a region of cards.
 const VIEWPORTS = [
-  { label: "desktop", viewport: { width: 1280, height: 800 }, entryRole: "row" },
-  { label: "mobile 360", viewport: { width: 360, height: 740 }, entryRole: "listitem" },
+  { label: "desktop", viewport: { width: 1280, height: 800 }, desktop: true },
+  { label: "mobile 360", viewport: { width: 360, height: 740 }, desktop: false },
 ] as const;
 
 const { attemptLatest, neverContacted, thirtyDays, legacy, twentyNineDays, recent } = MENTEES;
 
-function group(page: Page, name: "Talk to First" | "Everyone else"): Locator {
-  return page.getByRole("region", { name, exact: true });
+type GroupName = "Talk to first" | "Everyone else";
+
+// The IST calendar date `days` before today, as YYYY-MM-DD.
+function istDaysAgo(days: number): string {
+  const istNow = new Date(Date.now() + 330 * 60 * 1000);
+  istNow.setUTCDate(istNow.getUTCDate() - days);
+  return istNow.toISOString().slice(0, 10);
 }
 
-for (const { label, viewport, entryRole } of VIEWPORTS) {
-  test.describe(`Blended Learning Mentee list — ${label}`, () => {
+for (const { label, viewport, desktop } of VIEWPORTS) {
+  test.describe(`Blended Learning Student list — ${label}`, () => {
     test.use({ viewport });
 
+    function group(page: Page, name: GroupName): Locator {
+      return page.getByRole(desktop ? "rowgroup" : "region", { name, exact: true });
+    }
+
     function entries(section: Locator): Locator {
-      // A table row with cells on desktop (not the header row); a card below 640 px.
-      const all = section.getByRole(entryRole);
-      return entryRole === "row" ? all.filter({ has: section.page().getByRole("cell") }) : all;
+      // A table row with cells (not the group's header row), or a card.
+      if (!desktop) return section.getByRole("listitem");
+      return section.getByRole("row").filter({ has: section.page().getByRole("cell") });
     }
 
     function entry(section: Locator, mentee: { firstName: string; lastName: string }): Locator {
@@ -43,8 +56,10 @@ for (const { label, viewport, entryRole } of VIEWPORTS) {
       await page.goto("/blended-learning");
     });
 
-    test("a Mentor sees exactly their own active current-year Mentees", async ({ page }) => {
-      await expect(entries(group(page, "Talk to First"))).toHaveCount(4);
+    test("a Mentor sees exactly their own active current-year Students under a Students heading", async ({ page }) => {
+      await expect(page.getByRole("heading", { level: 1, name: "Students" })).toBeVisible();
+      await expect(page.getByText(/^6 students · \d{4}-\d{4}$/)).toBeVisible();
+      await expect(entries(group(page, "Talk to first"))).toHaveCount(4);
       await expect(entries(group(page, "Everyone else"))).toHaveCount(2);
 
       for (const other of Object.values(OTHER_STUDENTS)) {
@@ -52,8 +67,8 @@ for (const { label, viewport, entryRole } of VIEWPORTS) {
       }
     });
 
-    test("Talk to First is in priority order with Why now tags", async ({ page }) => {
-      const talkToFirst = group(page, "Talk to First");
+    test("Talk to first is in priority order with dated Why now tags", async ({ page }) => {
+      const talkToFirst = group(page, "Talk to first");
 
       await expect(entries(talkToFirst)).toHaveText([
         new RegExp(fullName(attemptLatest)),
@@ -61,60 +76,79 @@ for (const { label, viewport, entryRole } of VIEWPORTS) {
         new RegExp(fullName(legacy)),
         new RegExp(fullName(thirtyDays)),
       ]);
-      await expect(talkToFirst.getByText("4", { exact: true })).toBeVisible();
+      await expect(talkToFirst).toContainText(
+        "Not reachable on the last try, or no conversation in 30 days or more. 4 of 6."
+      );
 
       const ira = entry(talkToFirst, attemptLatest);
-      await expect(ira.getByText("Last try didn't connect")).toBeVisible();
+      const lastTry = istDaysAgo(2);
+      await expect(ira.getByText(`Not reachable, ${shortDate(lastTry, istDaysAgo(0))}`)).toBeVisible();
       // The Attempt 2 days ago never counts as Last Contact.
       await expect(ira.getByText("10 days ago")).toBeVisible();
+      await expect(ira.getByText("25 min")).toBeVisible();
 
       const kabir = entry(talkToFirst, neverContacted);
-      await expect(kabir.getByText("Never reached")).toBeVisible();
-      await expect(kabir.getByText("No contact yet")).toBeVisible();
+      await expect(kabir.getByText("No conversation yet")).toBeVisible();
+      await expect(kabir.getByText("Never", { exact: true })).toBeVisible();
+      await expect(kabir.getByText("None", { exact: true })).toBeVisible();
 
       const nikhil = entry(talkToFirst, legacy);
-      await expect(nikhil.getByText("30+ days")).toBeVisible();
-      await expect(nikhil.getByText("Jun 2026 · before app")).toBeVisible();
+      await expect(nikhil.getByText("Not contacted since Jun 2026")).toBeVisible();
+      await expect(nikhil.getByText("before app")).toBeVisible();
+      await expect(nikhil.getByText("Not recorded")).toBeVisible();
 
       const meera = entry(talkToFirst, thirtyDays);
-      await expect(meera.getByText("30+ days")).toBeVisible();
+      await expect(meera.getByText("Not contacted in 30 days")).toBeVisible();
       await expect(meera.getByText("30 days ago")).toBeVisible();
     });
 
-    test("Everyone else holds the 29-day and this-week Mentees, larger gap first", async ({ page }) => {
+    test("Everyone else holds the 29-day and this-week Students, larger gap first", async ({ page }) => {
       const everyoneElse = group(page, "Everyone else");
 
       await expect(entries(everyoneElse)).toHaveText([
         new RegExp(fullName(twentyNineDays)),
         new RegExp(fullName(recent)),
       ]);
+      await expect(everyoneElse).toContainText("2 of 6.");
       await expect(entry(everyoneElse, twentyNineDays).getByText("29 days ago")).toBeVisible();
       await expect(entry(everyoneElse, recent).getByText("3 days ago")).toBeVisible();
     });
 
     test("a ready draft shows its chip without changing the group or Last Contact", async ({ page }) => {
-      const kabir = entry(group(page, "Talk to First"), neverContacted);
+      const kabir = entry(group(page, "Talk to first"), neverContacted);
       await expect(kabir.getByText("Draft ready to review")).toBeVisible();
-      await expect(kabir.getByText("No contact yet")).toBeVisible();
+      await expect(kabir.getByText("Never", { exact: true })).toBeVisible();
 
       // Rohan's failed draft is not ready, so no chip.
       await expect(entry(group(page, "Everyone else"), recent).getByText("Draft ready to review")).toHaveCount(0);
     });
 
-    test("shows each Mentee's grade, program and gender", async ({ page }) => {
-      const ira = entry(group(page, "Talk to First"), attemptLatest);
-      await expect(ira.getByText("Grade 12")).toBeVisible();
+    test("shows each Student's grade, program and gender", async ({ page }) => {
+      const ira = entry(group(page, "Talk to first"), attemptLatest);
+      await expect(ira.getByText("12", { exact: true })).toBeVisible();
       await expect(ira.getByText("STP Voucher Delhi")).toBeVisible();
-      await expect(ira.getByText("Female")).toBeVisible();
+      await expect(ira.getByText("Female", { exact: true })).toBeVisible();
 
-      const kabir = entry(group(page, "Talk to First"), neverContacted);
-      await expect(kabir.getByText("Grade 13")).toBeVisible();
+      const kabir = entry(group(page, "Talk to first"), neverContacted);
+      await expect(kabir.getByText("13", { exact: true })).toBeVisible();
       await expect(kabir.getByText("STP Dropper Delhi")).toBeVisible();
     });
 
-    if (entryRole === "listitem") {
+    test("each Student has Detailed view and Log conversation", async ({ page }) => {
+      const ira = entry(group(page, "Talk to first"), attemptLatest);
+      await expect(ira.getByRole("link", { name: `Detailed view for ${fullName(attemptLatest)}` })).toHaveAttribute(
+        "href",
+        /\/blended-learning\/students\/\d+$/
+      );
+      await expect(ira.getByRole("link", { name: `Log conversation for ${fullName(attemptLatest)}` })).toHaveAttribute(
+        "href",
+        /\/blended-learning\/students\/\d+\/log$/
+      );
+    });
+
+    if (!desktop) {
       test("renders cards with no horizontal page scroll and 44 px tap targets", async ({ page }) => {
-        await expect(entries(group(page, "Talk to First")).first()).toBeVisible();
+        await expect(entries(group(page, "Talk to first")).first()).toBeVisible();
         await expect(page.getByRole("table")).toHaveCount(0);
 
         const overflow = await page.evaluate(
@@ -122,9 +156,10 @@ for (const { label, viewport, entryRole } of VIEWPORTS) {
         );
         expect(overflow).toBeLessThanOrEqual(0);
 
-        // One link per card, plus Kabir's "Draft ready to review" chip.
+        // Per card: the name, Detailed view and Log conversation; plus Kabir's
+        // "Draft ready to review" chip.
         const links = page.getByRole("main").getByRole("link");
-        await expect(links).toHaveCount(7);
+        await expect(links).toHaveCount(6 * 3 + 1);
         for (const link of await links.all()) {
           const box = await link.boundingBox();
           expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
@@ -132,9 +167,22 @@ for (const { label, viewport, entryRole } of VIEWPORTS) {
         }
       });
     } else {
-      test("renders a table on desktop", async ({ page }) => {
-        await expect(group(page, "Talk to First").getByRole("table")).toBeVisible();
-        await expect(group(page, "Talk to First").getByRole("columnheader", { name: "Last Contact" })).toBeVisible();
+      test("renders one table with the mockup's columns and both groups inside it", async ({ page }) => {
+        const table = page.getByRole("table");
+        await expect(table).toHaveCount(1);
+        await expect(table.getByRole("columnheader")).toHaveText([
+          "Student", "Why now", "Grade", "Program", "Gender", "Last conversation", "Duration", "Actions",
+        ]);
+        await expect(table.getByRole("rowgroup", { name: "Talk to first", exact: true })).toBeVisible();
+        await expect(table.getByRole("rowgroup", { name: "Everyone else", exact: true })).toBeVisible();
+      });
+
+      test("a click anywhere on a row opens the Student", async ({ page }) => {
+        const ira = entry(group(page, "Talk to first"), attemptLatest);
+        // The name's link stretches over the row, so it takes the click.
+        await ira.getByText("STP Voucher Delhi").click({ force: true });
+        await expect(page).toHaveURL(/\/blended-learning\/students\/\d+$/);
+        await expect(page.getByRole("heading", { name: fullName(attemptLatest) })).toBeVisible();
       });
     }
   });

@@ -98,16 +98,16 @@ describe("MentorPage", () => {
     expect(mockListMentees).not.toHaveBeenCalled();
   });
 
-  it("shows a Blended Learning Admin one Mentor's grouped Mentee list, with a ready draft to review", async () => {
+  it("shows a Blended Learning Admin one Mentor's grouped Student list, with a ready draft to review", async () => {
     signedInAs(BLENDED_ADMIN);
 
     await renderPage();
 
     expect(mockListMentees).toHaveBeenCalledWith({ access: BLENDED_ADMIN, mentorUserId: 9001, today: "2026-10-22" });
     expect(screen.getByRole("heading", { name: "Faizan" })).toBeInTheDocument();
-    expect(screen.getByText("30 Mentees · 2026-2027")).toBeInTheDocument();
+    expect(screen.getByText("30 students · 2026-2027")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Mentors/ })).toHaveAttribute("href", "/blended-learning");
-    expect(screen.getByRole("region", { name: "Talk to First" })).toHaveTextContent("Ira Attempt");
+    expect(screen.getByRole("rowgroup", { name: "Talk to first" })).toHaveTextContent("Ira Attempt");
     for (const link of screen.getAllByRole("link", { name: "Draft ready to review" })) {
       expect(link).toHaveAttribute("href", "/blended-learning/students/501/log");
     }
@@ -119,9 +119,19 @@ describe("MentorPage", () => {
     await renderPage("9002");
 
     expect(screen.getByRole("heading", { name: "Lokesh" })).toBeInTheDocument();
-    expect(screen.getByText("1 Mentee · 2026-2027")).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "Talk to First" })).toHaveTextContent("Ira Attempt");
+    expect(screen.getByText("1 student · 2026-2027")).toBeInTheDocument();
+    expect(screen.getByRole("rowgroup", { name: "Talk to first" })).toHaveTextContent("Ira Attempt");
     expect(screen.getAllByText("Draft ready to review").length).toBeGreaterThan(0);
     expect(screen.queryByRole("link", { name: "Draft ready to review" })).not.toBeInTheDocument();
+  });
+
+  it("never tells an admin about \"you\" talking to the Mentor's Students", async () => {
+    signedInAs(BLENDED_ADMIN);
+
+    await renderPage();
+
+    const group = screen.getByRole("rowgroup", { name: "Talk to first" });
+    expect(group).toHaveTextContent("Not reachable on the last try, or no conversation in 30 days or more.");
+    expect(screen.getByRole("main")).not.toHaveTextContent(/\byou\b/i);
   });
 });

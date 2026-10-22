@@ -37,6 +37,10 @@ export type MenteeRow = {
   openDraftState: OpenDraftState | null;
   reasons: TalkToFirstReason[];
   daysSince: number | null;
+  // Date of the latest Attempt, for the "Not reachable, 4 Oct" Why now tag.
+  lastAttemptOn?: string | null;
+  // The latest Conversation's duration; null when there is none.
+  lastDurationMinutes?: number | null;
 };
 
 export type MenteeList = { talkToFirst: MenteeRow[]; everyoneElse: MenteeRow[] };
@@ -53,11 +57,16 @@ type MenteeQueryRow = {
   program_name: string | null;
   last_conversation_on: string | null;
   last_conversation_id: number | string | null;
+  last_conversation_minutes: number | string | null;
   last_attempt_on: string | null;
   last_attempt_id: number | string | null;
   legacy_last_contact_month: string | null;
   open_draft_state: OpenDraftState | null;
 };
+
+function numberOrNull(value: number | string | null | undefined): number | null {
+  return value === null || value === undefined ? null : Number(value);
+}
 
 function loggedEntry(on: string | null, id: number | string | null) {
   return on === null || id === null ? null : { occurredOn: on, id: Number(id) };
@@ -86,6 +95,8 @@ function toMentee(row: MenteeQueryRow, today: string): MenteeRow {
     openDraftState: row.open_draft_state,
     reasons: policy.reasons,
     daysSince: policy.daysSince,
+    lastAttemptOn: row.last_attempt_on ?? null,
+    lastDurationMinutes: numberOrNull(row.last_conversation_minutes),
   };
 }
 
@@ -100,6 +111,7 @@ function menteeRows(mentorUserId: number | null, studentId: number | null) {
             current_grade.number AS grade, mapping.program_id, program.name AS program_name,
             latest_conversation.occurred_on::text AS last_conversation_on,
             latest_conversation.id AS last_conversation_id,
+            latest_conversation.duration_minutes AS last_conversation_minutes,
             latest_attempt.occurred_on::text AS last_attempt_on,
             latest_attempt.id AS last_attempt_id,
             links.legacy_last_contact_month::text AS legacy_last_contact_month,
@@ -118,7 +130,7 @@ function menteeRows(mentorUserId: number | null, studentId: number | null) {
        LIMIT 1
      ) current_grade ON true
      LEFT JOIN LATERAL (
-       SELECT c.occurred_on, c.id
+       SELECT c.occurred_on, c.id, c.duration_minutes
        FROM blended_learning_conversations c
        WHERE c.student_id = st.id AND c.kind = 'conversation'
        ORDER BY c.occurred_on DESC, c.id DESC
