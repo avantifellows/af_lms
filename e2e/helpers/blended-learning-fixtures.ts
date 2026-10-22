@@ -1,7 +1,8 @@
 import type { PoolClient } from "pg";
 import { CURRENT_ACADEMIC_YEAR } from "../../src/lib/constants";
 
-// Blended Learning Mentee-list (#442), Mentee-detail (#444) and logging (#445) fixtures.
+// Blended Learning Mentee-list (#442), Mentee-detail (#444), logging (#445)
+// and Action Item (#446) fixtures.
 // Every date is a hand-written offset in IST calendar days from the seed's IST
 // "today", which is the same IST date the app computes while the suite runs.
 // Mentor A is the e2e-blended-mentor persona seeded by seedHolisticFixtures (#441).
@@ -69,6 +70,25 @@ export const LOGGING_MENTEES = {
   },
 } as const satisfies Record<string, Record<string, FixtureMentee>>;
 export const LOGGING_LAST_CONVERSATION_DAYS_AGO = 5;
+
+// Mentor C's Mentees for the Action Item spec (#446), one per viewport. Each
+// has a Conversation ACTION_ITEMS_AGREED_DAYS_AGO IST days ago that agreed
+// three Action Items: two still open and one ticked done by a Conversation
+// ACTION_ITEMS_DONE_DAYS_AGO days ago.
+export const ACTION_ITEM_MENTEES = {
+  desktop: { key: "D1", firstName: "Devika", lastName: "Desk", gender: "Female", grade: 12, programId: 80 },
+  mobile: { key: "D2", firstName: "Devika", lastName: "Mobile", gender: "Female", grade: 13, programId: 90 },
+} as const satisfies Record<string, FixtureMentee>;
+export const ACTION_ITEMS_AGREED_DAYS_AGO = 14;
+export const ACTION_ITEMS_DONE_DAYS_AGO = 7;
+export const EARLIER_ACTION_ITEMS = {
+  // Open, owned by the Student, due 7 IST days after the seed's today.
+  toTick: { text: "Synthetic: finish the optics DPP", owner: "student", dueInDays: 7 },
+  // Open, owned by the Parent, no due date.
+  stayOpen: { text: "Synthetic: confirm the hostel fee date", owner: "parent" },
+  // Done by the later Conversation.
+  done: { text: "Synthetic: share the mock test schedule", owner: "mentor" },
+} as const;
 export const LOGGING_LAST_CONVERSATION_SUMMARY = "Synthetic: planned the week's revision.";
 
 // Contact numbers on the `user` row (#444). Phones are 98765100 + the
@@ -289,6 +309,49 @@ async function seedIraAttachments(
   }
 }
 
+// A Conversation that agreed EARLIER_ACTION_ITEMS, and the later one that
+// ticked `done`. Rows are inserted in final form (they are append-only).
+async function seedEarlierActionItems(
+  client: Client,
+  mentee: { studentId: number; mentorUserId: number; programId: number }
+) {
+  const agreedId = await seedEntry(client, {
+    ...mentee,
+    kind: "conversation",
+    daysAgo: ACTION_ITEMS_AGREED_DAYS_AGO,
+    summary: "Synthetic: agreed the revision plan.",
+  });
+  const doneById = await seedEntry(client, {
+    ...mentee,
+    kind: "conversation",
+    daysAgo: ACTION_ITEMS_DONE_DAYS_AGO,
+    summary: "Synthetic: checked in on the plan.",
+  });
+  const { toTick, stayOpen, done } = EARLIER_ACTION_ITEMS;
+  await client.query(
+    `INSERT INTO blended_learning_action_items
+       (conversation_id, student_id, position, text, owner, due_on, status,
+        completed_by_conversation_id, completed_at, completed_by_email)
+     VALUES
+       ($1, $2, 1, $3, $4, ${IST_TODAY} + $5::int, 'open', NULL, NULL, NULL),
+       ($1, $2, 2, $6, $7, NULL, 'open', NULL, NULL, NULL),
+       ($1, $2, 3, $8, $9, NULL, 'done', $10, now(), $11)`,
+    [
+      agreedId,
+      mentee.studentId,
+      toTick.text,
+      toTick.owner,
+      toTick.dueInDays,
+      stayOpen.text,
+      stayOpen.owner,
+      done.text,
+      done.owner,
+      doneById,
+      BLENDED_MENTOR_C.email,
+    ]
+  );
+}
+
 async function seedDraft(
   client: Client,
   draft: { studentId: number; mentorUserId: number; programId: number; state: "ready" | "failed" }
@@ -328,7 +391,10 @@ export async function seedBlendedLearningFixtures(client: Client): Promise<void>
     [MENTEES.attemptLatest.key]: CONTACTS.attemptLatest,
     [MENTEES.recent.key]: CONTACTS.recent,
   };
-  const loggingMentees = Object.values(LOGGING_MENTEES).flatMap((set) => Object.values(set));
+  const loggingMentees = [
+    ...Object.values(LOGGING_MENTEES).flatMap((set) => Object.values(set)),
+    ...Object.values(ACTION_ITEM_MENTEES),
+  ];
   for (const [index, mentee] of [
     ...Object.values(MENTEES),
     ...Object.values(OTHER_STUDENTS),
@@ -389,6 +455,14 @@ export async function seedBlendedLearningFixtures(client: Client): Promise<void>
       programId: attempt.programId,
       daysAgo: LOGGING_LAST_CONVERSATION_DAYS_AGO,
       summary: LOGGING_LAST_CONVERSATION_SUMMARY,
+    });
+  }
+
+  for (const mentee of Object.values(ACTION_ITEM_MENTEES)) {
+    await seedEarlierActionItems(client, {
+      studentId: ids[mentee.key],
+      mentorUserId: mentorC,
+      programId: mentee.programId,
     });
   }
 

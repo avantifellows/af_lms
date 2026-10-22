@@ -14,12 +14,14 @@ import {
 import type { OpenDraftState } from "@/lib/blended-learning-mentees";
 
 import { BlendedLearningHeader } from "../../BlendedLearningHeader";
+import { ActionItemMeta } from "./ActionItemMeta";
 import { ConversationNotes } from "./ConversationNotes";
 import { ConversationPhotos } from "./ConversationPhotos";
 
 // One Mentee: profile, contact, links, any open Conversation Draft and the
 // newest-first history. Notes and photos load on demand from their API routes.
-// Users who can log (not read-only) get the entry point to the log page.
+// Users who can log (not read-only) get the entry point to the log page;
+// Open Action Items are listed for everyone, and ticked done only from there.
 
 const MODE: Record<"call" | "in_person", string> = { call: "Call", in_person: "In person" };
 const SPOKE_WITH: Record<"student" | "parent_or_sibling" | "both", string> = {
@@ -118,8 +120,9 @@ function ConversationEntry({ entry }: { entry: Extract<HistoryEntry, { kind: "co
         <ul aria-label="Action Items" className="space-y-1.5">
           {entry.actionItems.map((item) => (
             <li key={item.id} className="flex items-start justify-between gap-3 text-sm">
-              <span className={`min-w-0 break-words ${item.status === "done" ? "text-text-muted line-through" : ""}`}>
-                {item.text}
+              <span className="min-w-0 break-words">
+                <span className={item.status === "done" ? "text-text-muted line-through" : ""}>{item.text}</span>
+                <ActionItemMeta owner={item.owner} dueOn={item.dueOn} />
               </span>
               <Badge variant={item.status === "done" ? "success" : "warning"} className="shrink-0">
                 {item.status === "done" ? "Done" : "Open"}
@@ -144,6 +147,24 @@ function ConversationEntry({ entry }: { entry: Extract<HistoryEntry, { kind: "co
       {entry.photoCount > 0 && <ConversationPhotos conversationId={entry.id} count={entry.photoCount} />}
       {entry.hasNotes && <ConversationNotes conversationId={entry.id} />}
     </>
+  );
+}
+
+function OpenActionItems({ items }: { items: MenteeDetail["openActionItems"] }) {
+  return (
+    <section aria-label="Open Action Items">
+      <Card elevation="sm" className="space-y-2 p-4 sm:px-6">
+        <h3 className="text-sm font-bold uppercase tracking-wide text-text-secondary">Open Action Items</h3>
+        <ul className="space-y-2">
+          {items.map((item) => (
+            <li key={item.id} className="break-words text-sm text-text-primary">
+              {item.text}
+              <ActionItemMeta owner={item.owner} dueOn={item.dueOn} agreedOn={item.agreedOn} />
+            </li>
+          ))}
+        </ul>
+      </Card>
+    </section>
   );
 }
 
@@ -212,6 +233,7 @@ export default async function MenteeDetailPage({ params }: { params: Promise<{ i
           </Link>
         )}
         {mentee.openDraft && <OpenDraft state={mentee.openDraft.state} />}
+        {mentee.openActionItems.length > 0 && <OpenActionItems items={mentee.openActionItems} />}
         <History history={mentee.history} />
       </main>
     </>

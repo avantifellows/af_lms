@@ -90,6 +90,7 @@ export default async function LogEntryPage({ params }: { params: Promise<{ id: s
           today={getTodayIST()}
           forOwnList={access.kind === "mentor"}
           lastConversationPanel={<LastConversationPanel conversation={lastConversation} />}
+          openActionItems={mentee.openActionItems}
         />
       </main>
     </>

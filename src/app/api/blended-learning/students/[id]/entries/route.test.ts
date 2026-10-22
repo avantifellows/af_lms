@@ -54,14 +54,26 @@ const LIST_ROWS = [
   },
 ];
 
-// Rows the transaction inserted, by table, as column → value.
+// Open Action Items by id, as the UPDATE's WHERE (status = 'open' AND
+// student_id) reads them. Item 801 is already done; 811 is Student 601's.
+const ACTION_ITEMS: Record<number, { student_id: number; status: "open" | "done" }> = {
+  801: { student_id: 501, status: "done" },
+  802: { student_id: 501, status: "open" },
+  803: { student_id: 501, status: "open" },
+  811: { student_id: 601, status: "open" },
+};
+
+// Committed rows, by table, as column → value. A transaction's inserts and
+// ticks land here only when its callback resolves; a throw rolls them back.
 let inserted: Record<string, Record<string, unknown>[]>;
+let ticked: { id: number; completed_by_conversation_id: unknown; completed_by_email: unknown }[];
 let nextId: number;
 // When set, the Conversation insert fails with this Postgres error code.
 let insertErrorCode: string | null;
 
 function givenTables() {
   inserted = {};
+  ticked = [];
   nextId = 700;
   insertErrorCode = null;
   mockQuery.mockImplementation(async (sql: string, params?: unknown[]) => {
@@ -77,24 +89,43 @@ function givenTables() {
     }
     return [];
   });
-  const client = {
-    query: vi.fn(async (sql: string, params: unknown[] = []) => {
-      if (sql.includes("FROM blended_learning_mentor_mentee_mappings")) {
-        const mapping = MAPPINGS[Number(params[0])];
-        return { rows: mapping ? [mapping] : [] };
-      }
-      const insert = sql.match(/INSERT INTO (\w+)\s*\(([^)]+)\)/);
-      if (insert) {
-        if (insertErrorCode) throw Object.assign(new Error("violates check constraint"), { code: insertErrorCode });
-        const columns = insert[2].split(",").map((column) => column.trim());
-        const row = Object.fromEntries(columns.map((column, index) => [column, params[index]]));
-        (inserted[insert[1]] ??= []).push(row);
-        return { rows: [{ id: String(nextId++), occurred_on: row.occurred_on }] };
-      }
-      return { rows: [] };
-    }),
-  };
-  mockWithTransaction.mockImplementation(async (fn) => fn(client as never));
+  mockWithTransaction.mockImplementation(async (fn) => {
+    const pending: Record<string, Record<string, unknown>[]> = {};
+    const pendingTicks: typeof ticked = [];
+    const client = {
+      query: vi.fn(async (sql: string, params: unknown[] = []) => {
+        if (sql.includes("FROM blended_learning_mentor_mentee_mappings")) {
+          const mapping = MAPPINGS[Number(params[0])];
+          return { rows: mapping ? [mapping] : [] };
+        }
+        if (sql.includes("UPDATE blended_learning_action_items")) {
+          // SET status = 'done', completed_by_conversation_id = $1, completed_by_email = $2
+          // WHERE id = ANY($3) AND status = 'open' AND student_id = $4
+          const [conversationId, email, ids, studentId] = params as [unknown, unknown, number[], number];
+          const rows = ids
+            .filter((id) => ACTION_ITEMS[id]?.status === "open" && ACTION_ITEMS[id].student_id === studentId)
+            .map((id) => ({ id: String(id) }));
+          for (const row of rows) {
+            pendingTicks.push({ id: Number(row.id), completed_by_conversation_id: conversationId, completed_by_email: email });
+          }
+          return { rows, rowCount: rows.length };
+        }
+        const insert = sql.match(/INSERT INTO (\w+)\s*\(([^)]+)\)/);
+        if (insert) {
+          if (insertErrorCode) throw Object.assign(new Error("violates check constraint"), { code: insertErrorCode });
+          const columns = insert[2].split(",").map((column) => column.trim());
+          const row = Object.fromEntries(columns.map((column, index) => [column, params[index]]));
+          (pending[insert[1]] ??= []).push(row);
+          return { rows: [{ id: String(nextId++), occurred_on: row.occurred_on }] };
+        }
+        return { rows: [] };
+      }),
+    };
+    const result = await fn(client as never);
+    for (const [table, rows] of Object.entries(pending)) (inserted[table] ??= []).push(...rows);
+    ticked.push(...pendingTicks);
+    return result;
+  });
 }
 
 function signedInAs(email: string | null) {
@@ -315,5 +346,101 @@ describe("POST /api/blended-learning/students/[id]/entries", () => {
     const res = await postEntry("501", CONVERSATION);
     expect(res.status).toBe(409);
     expect(res.body).toEqual({ error: "This entry conflicts with what is already saved. Reload and try again." });
+  });
+
+  describe("Action Items", () => {
+    it("stores a Conversation's Action Items with positions 1..n in the same save", async () => {
+      signedInAs(MENTOR_A);
+      const res = await postEntry("501", {
+        ...CONVERSATION,
+        actionItems: [
+          { owner: "student", text: "  Finish the optics DPP  ", dueOn: "2026-10-29" },
+          { owner: "parent", text: "Confirm the hostel fee date" },
+        ],
+      });
+
+      expect(res.status).toBe(201);
+      expect(inserted.blended_learning_action_items).toEqual([
+        { conversation_id: 700, student_id: 501, position: 1, owner: "student", text: "Finish the optics DPP", due_on: "2026-10-29" },
+        { conversation_id: 700, student_id: 501, position: 2, owner: "parent", text: "Confirm the hostel fee date", due_on: null },
+      ]);
+    });
+
+    it.each([
+      ["no owner", { text: "Revise optics" }, "actionItems.0.owner", "Choose who owns this Action Item."],
+      ["an unknown owner", { owner: "teacher", text: "Revise optics" }, "actionItems.0.owner", "Choose who owns this Action Item."],
+      ["blank text", { owner: "mentor", text: "   " }, "actionItems.0.text", "Add the Action Item."],
+      ["an impossible due date", { owner: "mentor", text: "Revise optics", dueOn: "2026-02-30" }, "actionItems.0.dueOn", "Enter a valid due date."],
+    ])("rejects an Action Item with %s (422) and saves nothing", async (_case, item, field, message) => {
+      signedInAs(MENTOR_A);
+      const res = await postEntry("501", { ...CONVERSATION, actionItems: [item] });
+
+      expect(res.status).toBe(422);
+      expect(res.body.fieldErrors).toEqual({ [field]: message });
+      expect(mockWithTransaction).not.toHaveBeenCalled();
+    });
+
+    it("rejects Action Items that are not a list (422)", async () => {
+      signedInAs(MENTOR_A);
+      const res = await postEntry("501", { ...CONVERSATION, actionItems: "call the parent" });
+      expect(res.status).toBe(422);
+      expect(res.body.fieldErrors).toEqual({ actionItems: "Action Items must be a list." });
+    });
+
+    it("ticks earlier open Action Items done by this Conversation", async () => {
+      signedInAs(MENTOR_A);
+      const res = await postEntry("501", { ...CONVERSATION, completeActionItemIds: [802, 803] });
+
+      expect(res.status).toBe(201);
+      expect(ticked).toEqual([
+        { id: 802, completed_by_conversation_id: 700, completed_by_email: MENTOR_A },
+        { id: 803, completed_by_conversation_id: 700, completed_by_email: MENTOR_A },
+      ]);
+    });
+
+    it.each([
+      ["already done", [802, 801]],
+      ["another Student's", [811]],
+      ["unknown", [802, 999]],
+    ])("returns 409 and rolls back the whole save when a ticked item is %s", async (_case, ids) => {
+      signedInAs(MENTOR_A);
+      const res = await postEntry("501", {
+        ...CONVERSATION,
+        actionItems: [{ owner: "mentor", text: "Send the formula sheet" }],
+        completeActionItemIds: ids,
+      });
+
+      expect(res.status).toBe(409);
+      expect(res.body).toEqual({
+        error: "An Action Item you ticked is already done or isn't this Mentee's. Reload and try again.",
+      });
+      expect(inserted).toEqual({});
+      expect(ticked).toEqual([]);
+    });
+
+    it.each([
+      ["not a list", 802],
+      ["not ids", ["802"]],
+      ["a non-positive id", [0]],
+    ])("rejects completeActionItemIds that are %s (422)", async (_case, ids) => {
+      signedInAs(MENTOR_A);
+      const res = await postEntry("501", { ...CONVERSATION, completeActionItemIds: ids });
+      expect(res.status).toBe(422);
+      expect(res.body.fieldErrors).toEqual({ completeActionItemIds: "Choose Action Items from the list." });
+      expect(mockWithTransaction).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["Action Items", { actionItems: [{ owner: "mentor", text: "Call back on Sunday" }] }, "actionItems", "An Attempt can't have Action Items."],
+      ["ticks", { completeActionItemIds: [802] }, "completeActionItemIds", "Only a Conversation can tick Action Items done."],
+    ])("rejects %s on an Attempt (422) and saves nothing", async (_case, change, field, message) => {
+      signedInAs(MENTOR_A);
+      const res = await postEntry("501", { kind: "attempt", occurredOn: "2026-10-22", ...change });
+
+      expect(res.status).toBe(422);
+      expect(res.body.fieldErrors).toEqual({ [field]: message });
+      expect(mockWithTransaction).not.toHaveBeenCalled();
+      expect(ticked).toEqual([]);
+    });
   });
 });

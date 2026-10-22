@@ -197,7 +197,7 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   (read), `src/lib/holistic-follow-up-questions.ts` (client-safe question keys, text, and
   normaliser), `src/lib/holistic-mentor-write-scope.ts` (shared scope guard).
 
-## Blended Learning Mentee list (#442), detail (#444) and logging (#445)
+## Blended Learning Mentee list (#442), detail (#444), logging (#445) and Action Items (#446)
 
 - **Tables:** the `blended_learning_*` tables are created by db-service (Mappings:
   `20260921120000` + its ensure migration; the other eight: PR #804,
@@ -253,8 +253,20 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   `academic_year`, plus `logged_by_email`/`logged_by_user_id` = the actor (an admin logging on a
   Mentor's behalf keeps the mapped Mentor). `23514` (checks, append-only triggers) and `23505`
   map to 409. After commit, `mentee` is the Student's `listMentees` row (`studentId` filter), so
-  the confirmation shows exactly what the list now says. Later slices add Action Items, flags,
-  photos and draft save inside the same transaction.
+  the confirmation shows exactly what the list now says. Later slices add flags, photos and
+  draft save inside the same transaction.
+- **Action Items (#446):** only `kind: "conversation"` accepts `actionItems[]` (`{ owner:
+  student|mentor|parent, text, dueOn? }`; a missing owner or blank text, or an impossible
+  date, gives a 422 keyed `actionItems.<i>.<field>`) and `completeActionItemIds[]` (positive
+  integers, de-duplicated). Either key on an Attempt is a 422. Inside the same transaction the
+  new items are inserted with `position` 1..n after the Conversation. The ticks are one
+  `UPDATE … SET status = 'done', completed_by_conversation_id, completed_by_email, completed_at,
+  updated_at WHERE id = ANY($3::bigint[]) AND status = 'open' AND student_id = $4`. Fewer
+  returned rows than ids (an id already done, unknown or another Student's) throws, so the
+  whole save rolls back and returns 409. The PR #804 trigger allows only that open → done
+  change (it leaves `updated_at` free). `getMenteeDetail` returns each item's `owner`/`dueOn`
+  and `openActionItems` (open items, newest Conversation first, with `agreedOn`). There are no
+  reminders, overdue logic or item editing.
 - **Notes sanitiser (#445):** `sanitiseNotesHtml` in `src/lib/blended-learning-notes-sanitiser.ts`
   (server-only, `sanitize-html`) is the only path to `notes_html`: allowlist `p, h3, b, i, ul, ol,
   li, table, tr, th, td, br`, no attributes, no links (an `<a>` keeps its text), `strong→b`,
@@ -266,5 +278,7 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
 - **E2E fixture schema:** `e2e/fixtures/migrations/20261022130000_add_blended_learning_schema.sql`
   mirrors those 10 db-service migrations exactly. The DB is reset once per run, so specs that
   write must use their own rows: Mentor C (`e2e-blended-mentor-c@test.local`) and
-  `LOGGING_MENTEES` (one set per viewport) exist only for `blended-learning-log-entry.spec.ts`. Re-diff it with
+  `LOGGING_MENTEES` (one set per viewport) exist only for `blended-learning-log-entry.spec.ts`;
+  Mentor C's `ACTION_ITEM_MENTEES` (with `EARLIER_ACTION_ITEMS`) exist only for
+  `blended-learning-action-items.spec.ts`. Re-diff it with
   `patterns/mirror-db-service-schema-in-e2e.md` whenever PR #804 changes.

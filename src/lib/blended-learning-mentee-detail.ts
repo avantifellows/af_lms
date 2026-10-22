@@ -14,7 +14,16 @@ const PHOTO_URL_TTL_SECONDS = 300; // 5 minutes
 // on-demand notes and photos (server-only). Every read checks
 // canAccessBlendedStudent first; out of scope reads as null (a 404).
 
-export type ActionItem = { id: number; text: string; status: "open" | "done" };
+export type ActionItemOwner = "student" | "mentor" | "parent";
+export type ActionItem = {
+  id: number;
+  text: string;
+  owner: ActionItemOwner;
+  dueOn: string | null;
+  status: "open" | "done";
+};
+// An open Action Item with the date of the Conversation that agreed it.
+export type OpenActionItem = Omit<ActionItem, "status"> & { agreedOn: string };
 export type FlagRecipient = "emotional_wellbeing" | "physics" | "chemistry" | "maths";
 export type MentorFlag = { recipient: FlagRecipient; comment: string | null };
 
@@ -48,6 +57,8 @@ export type MenteeDetail = {
   openDraft: { id: number; state: OpenDraftState } | null;
   // Newest first by (occurred_on, id), Conversations and Attempts interleaved.
   history: HistoryEntry[];
+  // Open Action Items from earlier Conversations, newest Conversation first.
+  openActionItems: OpenActionItem[];
 };
 
 type ProfileRow = {
@@ -143,8 +154,15 @@ export async function getMenteeDetail(
        ORDER BY c.occurred_on DESC, c.id DESC`,
       [studentId]
     ),
-    query<{ conversation_id: number | string; id: number | string; text: string; status: "open" | "done" }>(
-      `SELECT conversation_id, id, text, status
+    query<{
+      conversation_id: number | string;
+      id: number | string;
+      text: string;
+      owner: ActionItemOwner;
+      due_on: string | null;
+      status: "open" | "done";
+    }>(
+      `SELECT conversation_id, id, text, owner, due_on::text AS due_on, status
        FROM blended_learning_action_items
        WHERE student_id = $1
        ORDER BY conversation_id, position`,
@@ -160,6 +178,13 @@ export async function getMenteeDetail(
     ),
   ]);
   const itemsByConversation = groupBy(actionItems);
+  const toActionItem = (item: (typeof actionItems)[number]): ActionItem => ({
+    id: Number(item.id),
+    text: item.text,
+    owner: item.owner,
+    dueOn: item.due_on,
+    status: item.status,
+  });
   const flagsByConversation = groupBy(flags);
 
   const phone = present(profile.phone);
@@ -178,6 +203,17 @@ export async function getMenteeDetail(
       profile.open_draft_id === null || profile.open_draft_state === null
         ? null
         : { id: Number(profile.open_draft_id), state: profile.open_draft_state },
+    openActionItems: entries.flatMap((entry) =>
+      (itemsByConversation.get(Number(entry.id)) ?? [])
+        .filter((item) => item.status === "open")
+        .map((item) => ({
+          id: Number(item.id),
+          text: item.text,
+          owner: item.owner,
+          dueOn: item.due_on,
+          agreedOn: entry.occurred_on,
+        }))
+    ),
     history: entries.map((entry): HistoryEntry => {
       const id = Number(entry.id);
       if (entry.kind === "attempt") {
@@ -193,11 +229,7 @@ export async function getMenteeDetail(
         summary: entry.summary ?? "",
         hasNotes: entry.has_notes,
         photoCount: Number(entry.photo_count),
-        actionItems: (itemsByConversation.get(id) ?? []).map((item) => ({
-          id: Number(item.id),
-          text: item.text,
-          status: item.status,
-        })),
+        actionItems: (itemsByConversation.get(id) ?? []).map(toActionItem),
         flags: (flagsByConversation.get(id) ?? []).map((flag) => ({
           recipient: flag.recipient,
           comment: flag.comment,

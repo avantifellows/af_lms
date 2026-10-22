@@ -11,8 +11,12 @@ import { listMentees, type MenteeRow } from "./blended-learning-mentees";
 import { sanitiseNotesHtml } from "./blended-learning-notes-sanitiser";
 
 // Conversation write use case (server-only): logEntry saves one Conversation
-// or Attempt for a Mentee in a single transaction. Later slices add Action
-// Items, Mentor Flags, photos and draft save to this same transaction.
+// or Attempt for a Mentee in a single transaction, with a Conversation's new
+// Action Items and its ticks on earlier ones. Later slices add Mentor Flags,
+// photos and draft save to this same transaction.
+
+type ActionItemOwner = "student" | "mentor" | "parent";
+type ActionItemInput = { owner: ActionItemOwner; text: string; dueOn: string | null };
 
 type ConversationInput = {
   kind: "conversation";
@@ -22,6 +26,9 @@ type ConversationInput = {
   durationMinutes: number;
   summary: string;
   notesHtml: string | null;
+  actionItems: ActionItemInput[];
+  // Earlier open Action Items this Conversation marks done.
+  completeActionItemIds: number[];
 };
 type AttemptInput = { kind: "attempt"; occurredOn: string; note: string | null };
 type EntryInput = ConversationInput | AttemptInput;
@@ -35,6 +42,7 @@ export type LogEntryResult =
 
 const MODES = ["call", "in_person"] as const;
 const SPOKE_WITH = ["student", "parent_or_sibling", "both"] as const;
+const ACTION_ITEM_OWNERS = ["student", "mentor", "parent"] as const;
 
 function isCalendarDate(value: unknown): value is string {
   if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
@@ -65,6 +73,11 @@ function validate(raw: unknown, today: string): Validated {
   else if (body.occurredOn > today) errors.occurredOn = "The date can't be in the future.";
 
   if (body.kind === "attempt") {
+    // Only a Conversation carries Action Items or ticks earlier ones done.
+    if (body.actionItems !== undefined) errors.actionItems = "An Attempt can't have Action Items.";
+    if (body.completeActionItemIds !== undefined) {
+      errors.completeActionItemIds = "Only a Conversation can tick Action Items done.";
+    }
     if (Object.keys(errors).length > 0) return { ok: false, fieldErrors: errors };
     return {
       ok: true,
@@ -86,6 +99,9 @@ function validate(raw: unknown, today: string): Validated {
   const notes = sanitiseNotesHtml(typeof body.notesHtml === "string" ? body.notesHtml : null);
   if (!notes.ok) errors.notesHtml = notes.error;
 
+  const actionItems = validateActionItems(body.actionItems, errors);
+  const completeActionItemIds = validateCompleteActionItemIds(body.completeActionItemIds, errors);
+
   if (Object.keys(errors).length > 0 || !notes.ok) return { ok: false, fieldErrors: errors };
   return {
     ok: true,
@@ -97,8 +113,39 @@ function validate(raw: unknown, today: string): Validated {
       durationMinutes: duration as number,
       summary: summary as string,
       notesHtml: notes.html,
+      actionItems,
+      completeActionItemIds,
     },
   };
+}
+
+// Ids of earlier Action Items to tick done, de-duplicated.
+function validateCompleteActionItemIds(raw: unknown, errors: Record<string, string>): number[] {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw) || !raw.every((id) => Number.isSafeInteger(id) && id > 0)) {
+    errors.completeActionItemIds = "Choose Action Items from the list.";
+    return [];
+  }
+  return [...new Set(raw as number[])];
+}
+
+// New Action Items: owner and text are required, the due date is optional.
+// Errors are keyed per item, e.g. `actionItems.1.text`.
+function validateActionItems(raw: unknown, errors: Record<string, string>): ActionItemInput[] {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw)) {
+    errors.actionItems = "Action Items must be a list.";
+    return [];
+  }
+  return raw.map((value, index) => {
+    const item = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
+    const text = optionalText(item.text);
+    if (!oneOf(ACTION_ITEM_OWNERS, item.owner)) errors[`actionItems.${index}.owner`] = "Choose who owns this Action Item.";
+    if (!text) errors[`actionItems.${index}.text`] = "Add the Action Item.";
+    const dueOn = item.dueOn === undefined || item.dueOn === null || item.dueOn === "" ? null : item.dueOn;
+    if (dueOn !== null && !isCalendarDate(dueOn)) errors[`actionItems.${index}.dueOn`] = "Enter a valid due date.";
+    return { owner: item.owner as ActionItemOwner, text: text ?? "", dueOn: dueOn as string | null };
+  });
 }
 
 type MappingSnapshot = {
@@ -153,7 +200,45 @@ async function insertEntry(
   return { id: Number(row.id), kind: input.kind, occurredOn: row.occurred_on };
 }
 
+// A Conversation's new Action Items, numbered 1..n in the order given.
+async function insertActionItems(
+  client: PoolClient,
+  studentId: number,
+  conversationId: number,
+  items: ActionItemInput[]
+): Promise<void> {
+  for (const [index, item] of items.entries()) {
+    await client.query(
+      `INSERT INTO blended_learning_action_items (conversation_id, student_id, position, owner, text, due_on)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [conversationId, studentId, index + 1, item.owner, item.text, item.dueOn]
+    );
+  }
+}
+
+// Mark this Mentee's earlier open Action Items done by this Conversation. An
+// id that is already done, unknown or another Student's updates no row.
+async function completeActionItems(
+  client: PoolClient,
+  access: BlendedLearningAccess,
+  studentId: number,
+  conversationId: number,
+  ids: number[]
+): Promise<void> {
+  if (ids.length === 0) return;
+  const result = await client.query(
+    `UPDATE blended_learning_action_items
+     SET status = 'done', completed_by_conversation_id = $1, completed_by_email = $2,
+         completed_at = now(), updated_at = now()
+     WHERE id = ANY($3::bigint[]) AND status = 'open' AND student_id = $4
+     RETURNING id`,
+    [conversationId, access.actorEmail, ids, studentId]
+  );
+  if ((result.rowCount ?? result.rows.length) < ids.length) throw new TickConflict();
+}
+
 class OutOfScope extends Error {}
+class TickConflict extends Error {}
 
 // A check constraint or append-only trigger (23514), or a unique index (23505).
 function isConflict(error: unknown): boolean {
@@ -184,11 +269,23 @@ export async function logEntry(
       if (access.kind === "mentor" && Number(mapping.mentor_user_id) !== access.mentorUserId) {
         throw new OutOfScope();
       }
-      const saved = await insertEntry(client, access, studentId, mapping, validated.input);
+      const input = validated.input;
+      const saved = await insertEntry(client, access, studentId, mapping, input);
+      if (input.kind === "conversation") {
+        await insertActionItems(client, studentId, saved.id, input.actionItems);
+        await completeActionItems(client, access, studentId, saved.id, input.completeActionItemIds);
+      }
       return { saved, mentorUserId: Number(mapping.mentor_user_id) };
     });
   } catch (error) {
     if (error instanceof OutOfScope) return { ok: false, status: 404, error: "Not found" };
+    if (error instanceof TickConflict) {
+      return {
+        ok: false,
+        status: 409,
+        error: "An Action Item you ticked is already done or isn't this Mentee's. Reload and try again.",
+      };
+    }
     if (isConflict(error)) {
       return {
         ok: false,
