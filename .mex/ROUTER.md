@@ -26,7 +26,7 @@ edges:
     condition: when working on teacher feedback setup, the feedback form, or its report
   - target: patterns/INDEX.md
     condition: when starting a task — check the pattern index for a matching pattern file
-last_updated: 2026-10-21
+last_updated: 2026-10-22
 ---
 
 # Session Bootstrap
@@ -40,6 +40,17 @@ Then read this file fully before doing anything else in this session.
 **Working:**
 - Alumni Manager role (ADR 0008): `alumni_manager` + feature `alumni` (admin and alumni_manager edit). Alumni are not Students: `canAccessAlumni(session, alumniId)` keys on `alumni.id` and the School they passed out from. `getUserPermission` resolves alumni roles to null, so every other gate denies them by default; alumni code uses `getAlumniPermission`. Alumni pages follow in a later PR. See `context/permissions.md`.
 - Alumni tab (admins and Alumni Managers, ADR 0008; Audience: physical centres only): School pages with alumni-program students or alumni show admins an "Alumni" tab; `/alumni` (with "Find an alumnus" by AFID or name → `/alumni/record/[alumniId]`) and `/alumni/[code]` give the same view to anyone with the `alumni` feature (an Alumni Manager's only pages). The tab listing pass-outs still to add (last Grade 12 year before the current academic year, in an alumni program — JNV CoE, Dakshana CoE, ENF CoE, Punjab CoE, JNV Nodal, Punjab Nodal — with no `alumni` row) and the School's existing alumni. The form checks answers (impossible → blocked; unusual → confirm) and saves through the DB Service (`POST /alumni` new, `PATCH /alumni/:id` existing; only changed, non-blank fields; never delete). Existing alumni are addressed by `alumni.id` (`/api/alumni/[alumniId]`), pass-outs by user id (`/api/alumni/pass-out/[userId]`). Code: `src/lib/alumni/*`, `src/components/alumni/*`, `src/app/api/alumni/*`, `src/app/alumni/*`. See `context/permissions.md`.
+- Edit Student and the roster card cover the same fields for physical centres (issue #431).
+  Edit Student gained Contact & Address, Father, Mother, Guardian and Socio-economic
+  sections — the twenty contact and household details the card already displayed — and the
+  card gained CWSN, G10 board and the uniform sizes. JNV NVS is excluded (PMU did not ask
+  for these, and #296 blocks family income for the Phone-mode cohort): the sections are
+  hidden, the card keeps its `NvsDetailGroups` shape from #433, and both the LMS
+  canonicaliser and the DB Service refuse the fields under program 64. CWSN reads "Children
+  with Special Needs (CWSN)" everywhere, the Locked Identity hint says why its fields are
+  fixed, School Medium left the card (not editable, by the program team's call), G10 board
+  reads CBSE/Others, parent names keep any script and `. ' -`, and a failed save now scrolls
+  and focuses the first error once. Needs DB Service PR #789 deployed first. See `context/student-addition.md`.
 - Issue #412 (feature branch): the dormant Holistic privacy helper erases Follow-up answers after creating the privacy tombstone and records the actual changed-answer count in a separate immutable audit. Existing tombstones are supported without rewriting their original audit. Requires the companion db-service migration first. The endpoint and action policy remain disabled; no historical data repair or external-process rollout is included. See `context/data-access.md` and `patterns/holistic-privacy-erasure.md`.
 - Issue #361 slice #363: PMU Manager (`pmu_manager`) and PMU Govt School User (`pmu_govt_school_user`) exist in the permission layer, pinned to JNV NVS (ADR 0007): matrix `students` edit + `performance` view only, program context always `[64]`/NVS-only, no centre seats or centre access, `ownsRecord` only for 64, and `canAccessStudent` requires a current NVS batch (`hasCurrentNvsBatchSql`). Admin user management, school page, dashboard and other PMU surfaces are later slices. See `context/permissions.md`.
 - Issue #361 slice #364: login is Google-only (ADR 0007); Dev Login stays in non-prod. `isRetiredToken` (`src/lib/retired-session.ts`, no DB imports) flags JWTs from the retired login by their raw token fields. The `jwt` callback throws on them, and `proxy` treats them as no token and clears the plain, `__Secure-` and chunked session cookies.
