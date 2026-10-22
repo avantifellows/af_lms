@@ -122,8 +122,9 @@ for (const { label, viewport, entryRole } of VIEWPORTS) {
         );
         expect(overflow).toBeLessThanOrEqual(0);
 
+        // One link per card, plus Kabir's "Draft ready to review" chip.
         const links = page.getByRole("main").getByRole("link");
-        await expect(links).toHaveCount(6);
+        await expect(links).toHaveCount(7);
         for (const link of await links.all()) {
           const box = await link.boundingBox();
           expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);

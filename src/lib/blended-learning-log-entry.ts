@@ -19,8 +19,10 @@ import { notifyWellbeingFlag } from "./blended-learning-wellbeing-notifier";
 // Conversation write use case (server-only): logEntry saves one Conversation
 // or Attempt for a Mentee in a single transaction, with a Conversation's new
 // Action Items, photos, Mentor Flags and ticks on earlier Action Items. After
-// commit, an Emotional Well-being flag emails the well-being lead. A later
-// slice adds draft save to this same transaction.
+// commit, an Emotional Well-being flag emails the well-being lead. Saving a
+// reviewed Conversation Draft (`draftId`) happens in the same transaction: the
+// ready draft is locked, its recording and transcript move onto the
+// Conversation, and the draft becomes saved.
 
 type ActionItemOwner = "student" | "mentor" | "parent";
 type ActionItemInput = { owner: ActionItemOwner; text: string; dueOn: string | null };
@@ -43,6 +45,8 @@ type ConversationInput = {
   flags: FlagInput[];
   // Earlier open Action Items this Conversation marks done.
   completeActionItemIds: number[];
+  // The ready Conversation Draft this Conversation was reviewed from.
+  draftId: number | null;
 };
 type AttemptInput = { kind: "attempt"; occurredOn: string; note: string | null };
 type EntryInput = ConversationInput | AttemptInput;
@@ -95,6 +99,9 @@ function validate(raw: unknown, today: string, studentId: number): Validated {
     if (body.completeActionItemIds !== undefined) {
       errors.completeActionItemIds = "Only a Conversation can tick Action Items done.";
     }
+    if (body.draftId !== undefined && body.draftId !== null) {
+      errors.draftId = "A Conversation Draft can only be saved as a Conversation.";
+    }
     if (Object.keys(errors).length > 0) return { ok: false, fieldErrors: errors };
     return {
       ok: true,
@@ -120,6 +127,10 @@ function validate(raw: unknown, today: string, studentId: number): Validated {
   const photos = validatePhotoKeys(body.photoKeys, studentId, errors);
   const flags = validateFlags(body.flags, errors);
   const completeActionItemIds = validateCompleteActionItemIds(body.completeActionItemIds, errors);
+  const draftId = body.draftId === undefined || body.draftId === null ? null : body.draftId;
+  if (draftId !== null && !(Number.isSafeInteger(draftId) && (draftId as number) > 0)) {
+    errors.draftId = "This Conversation Draft isn't valid. Reload and try again.";
+  }
 
   if (Object.keys(errors).length > 0 || !notes.ok) return { ok: false, fieldErrors: errors };
   return {
@@ -136,6 +147,7 @@ function validate(raw: unknown, today: string, studentId: number): Validated {
       photos,
       flags,
       completeActionItemIds,
+      draftId: draftId as number | null,
     },
   };
 }
@@ -235,17 +247,56 @@ async function lockActiveMapping(client: PoolClient, studentId: number): Promise
   return result.rows[0] ?? null;
 }
 
+type ReadyDraft = { id: number; callRecordingS3Key: string; transcriptS3Key: string | null };
+
+// Lock this Student's draft for the save. Only a ready draft can be saved;
+// another Student's draft, an unknown id or any other state is a conflict.
+async function lockReadyDraft(client: PoolClient, studentId: number, draftId: number): Promise<ReadyDraft> {
+  const result = await client.query<{
+    id: number | string;
+    state: string;
+    call_recording_s3_key: string;
+    transcript_s3_key: string | null;
+  }>(
+    `SELECT draft.id, draft.state, draft.call_recording_s3_key, draft.transcript_s3_key
+     FROM blended_learning_conversation_drafts draft
+     WHERE draft.id = $1 AND draft.student_id = $2
+     FOR UPDATE`,
+    [draftId, studentId]
+  );
+  const draft = result.rows[0];
+  if (!draft || draft.state !== "ready") throw new DraftConflict();
+  return {
+    id: Number(draft.id),
+    callRecordingS3Key: draft.call_recording_s3_key,
+    transcriptS3Key: draft.transcript_s3_key,
+  };
+}
+
+// The locked draft now has its Conversation.
+async function markDraftSaved(client: PoolClient, draftId: number, conversationId: number): Promise<void> {
+  const result = await client.query(
+    `UPDATE blended_learning_conversation_drafts
+     SET state = 'saved', saved_conversation_id = $1, updated_at = now()
+     WHERE id = $2 AND state = 'ready'
+     RETURNING id`,
+    [conversationId, draftId]
+  );
+  if ((result.rowCount ?? result.rows.length) !== 1) throw new DraftConflict();
+}
+
 async function insertEntry(
   client: PoolClient,
   access: BlendedLearningAccess,
   studentId: number,
   mapping: MappingSnapshot,
-  input: EntryInput
+  input: EntryInput,
+  draft: ReadyDraft | null
 ): Promise<LoggedEntry> {
   const conversation = input.kind === "conversation" ? input : null;
   const result = await client.query<{ id: number | string; occurred_on: string }>(
-    `INSERT INTO blended_learning_conversations (student_id, program_id, academic_year, mentor_user_id, logged_by_user_id, logged_by_email, kind, occurred_on, mode, spoke_with, duration_minutes, summary, notes_html, attempt_note)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+    `INSERT INTO blended_learning_conversations (student_id, program_id, academic_year, mentor_user_id, logged_by_user_id, logged_by_email, kind, occurred_on, mode, spoke_with, duration_minutes, summary, notes_html, attempt_note, call_recording_s3_key, transcript_s3_key, source_draft_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
      RETURNING id, occurred_on::text AS occurred_on`,
     [
       studentId,
@@ -262,6 +313,9 @@ async function insertEntry(
       conversation?.summary ?? null,
       conversation?.notesHtml ?? null,
       input.kind === "attempt" ? input.note : null,
+      draft?.callRecordingS3Key ?? null,
+      draft?.transcriptS3Key ?? null,
+      draft?.id ?? null,
     ]
   );
   const row = result.rows[0];
@@ -340,6 +394,7 @@ async function completeActionItems(
 
 class OutOfScope extends Error {}
 class TickConflict extends Error {}
+class DraftConflict extends Error {}
 
 // A check constraint or append-only trigger (23514), or a unique index (23505).
 function isConflict(error: unknown): boolean {
@@ -386,13 +441,18 @@ export async function logEntry(
         throw new OutOfScope();
       }
       const input = validated.input;
-      const saved = await insertEntry(client, access, studentId, mapping, input);
+      const draft =
+        input.kind === "conversation" && input.draftId !== null
+          ? await lockReadyDraft(client, studentId, input.draftId)
+          : null;
+      const saved = await insertEntry(client, access, studentId, mapping, input, draft);
       let wellbeingFlagIds: number[] = [];
       if (input.kind === "conversation") {
         await insertActionItems(client, studentId, saved.id, input.actionItems);
         await insertPhotos(client, saved.id, photos);
         wellbeingFlagIds = await insertFlags(client, access, studentId, saved.id, input.flags);
         await completeActionItems(client, access, studentId, saved.id, input.completeActionItemIds);
+        if (draft) await markDraftSaved(client, draft.id, saved.id);
       }
       return { saved, mentorUserId: Number(mapping.mentor_user_id), wellbeingFlagIds };
     });
@@ -403,6 +463,13 @@ export async function logEntry(
         ok: false,
         status: 409,
         error: "An Action Item you ticked is already done or isn't this Mentee's. Reload and try again.",
+      };
+    }
+    if (error instanceof DraftConflict) {
+      return {
+        ok: false,
+        status: 409,
+        error: "This Conversation Draft is no longer ready to save. Reload and try again.",
       };
     }
     if (isConflict(error)) {

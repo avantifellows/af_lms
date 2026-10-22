@@ -70,6 +70,28 @@ const ACTION_ITEMS: Record<number, { student_id: number; status: "open" | "done"
   811: { student_id: 601, status: "open" },
 };
 
+// Conversation Drafts by id. 901 is Student 501's ready draft; 902 is still
+// transcribing; 903 was already saved; 911 is Student 601's ready draft.
+type DraftRow = {
+  student_id: number;
+  state: string;
+  call_recording_s3_key: string;
+  transcript_s3_key: string | null;
+  saved_conversation_id: unknown;
+};
+const RECORDING_901 = "lms-documents/blended-learning/recordings/501/2b1f0c3e-7d4a-4e8b-9c1d-5f6a7b8c9d0e.m4a";
+const TRANSCRIPT_901 = "lms-documents/blended-learning/transcripts/501/2b1f0c3e.json";
+function givenDrafts(): Record<number, DraftRow> {
+  return {
+    901: { student_id: 501, state: "ready", call_recording_s3_key: RECORDING_901, transcript_s3_key: TRANSCRIPT_901, saved_conversation_id: null },
+    902: { student_id: 501, state: "transcribing", call_recording_s3_key: "lms-documents/blended-learning/recordings/501/a.mp3", transcript_s3_key: null, saved_conversation_id: null },
+    903: { student_id: 501, state: "saved", call_recording_s3_key: "lms-documents/blended-learning/recordings/501/b.mp3", transcript_s3_key: "lms-documents/blended-learning/transcripts/501/b.json", saved_conversation_id: 650 },
+    911: { student_id: 601, state: "ready", call_recording_s3_key: "lms-documents/blended-learning/recordings/601/c.wav", transcript_s3_key: "lms-documents/blended-learning/transcripts/601/c.json", saved_conversation_id: null },
+  };
+}
+// Committed draft rows, as the save's draft lock and state change see them.
+let drafts: Record<number, DraftRow>;
+
 // Committed rows, by table, as column → value. A transaction's inserts and
 // ticks land here only when its callback resolves; a throw rolls them back.
 let inserted: Record<string, Record<string, unknown>[]>;
@@ -86,6 +108,7 @@ function givenTables() {
   ticked = [];
   nextId = 700;
   insertErrorCode = null;
+  drafts = givenDrafts();
   mockQuery.mockImplementation(async (sql: string, params?: unknown[]) => {
     if (sql.includes("FROM user_permission")) {
       const email = String(params?.[0]).toLowerCase();
@@ -116,8 +139,23 @@ function givenTables() {
     const pending: Record<string, Record<string, unknown>[]> = {};
     const pendingFlags: typeof committedFlags = {};
     const pendingTicks: typeof ticked = [];
+    const pendingDrafts: Record<number, DraftRow> = {};
     const client = {
       query: vi.fn(async (sql: string, params: unknown[] = []) => {
+        if (sql.includes("FROM blended_learning_conversation_drafts")) {
+          // WHERE id = $1 AND student_id = $2 FOR UPDATE
+          const [draftId, studentId] = params as [number, number];
+          const draft = drafts[draftId];
+          return { rows: draft && draft.student_id === studentId ? [{ id: String(draftId), ...draft }] : [] };
+        }
+        if (sql.includes("UPDATE blended_learning_conversation_drafts")) {
+          // SET state = 'saved', saved_conversation_id = $1 WHERE id = $2 AND state = 'ready'
+          const [conversationId, draftId] = params as [number, number];
+          const draft = drafts[draftId];
+          if (!draft || draft.state !== "ready") return { rows: [], rowCount: 0 };
+          pendingDrafts[draftId] = { ...draft, state: "saved", saved_conversation_id: conversationId };
+          return { rows: [{ id: String(draftId) }], rowCount: 1 };
+        }
         if (sql.includes("FROM blended_learning_mentor_mentee_mappings")) {
           const mapping = MAPPINGS[Number(params[0])];
           return { rows: mapping ? [mapping] : [] };
@@ -151,6 +189,7 @@ function givenTables() {
     for (const [table, rows] of Object.entries(pending)) (inserted[table] ??= []).push(...rows);
     Object.assign(committedFlags, pendingFlags);
     ticked.push(...pendingTicks);
+    Object.assign(drafts, pendingDrafts);
     return result;
   });
 }
@@ -233,6 +272,9 @@ describe("POST /api/blended-learning/students/[id]/entries", () => {
         summary: null,
         notes_html: null,
         attempt_note: "No answer twice",
+        call_recording_s3_key: null,
+        transcript_s3_key: null,
+        source_draft_id: null,
       },
     ]);
   });
@@ -287,6 +329,9 @@ describe("POST /api/blended-learning/students/[id]/entries", () => {
         summary: "Talked through the mock test plan.",
         notes_html: "<h3>Plan</h3><p><b>Revise</b> <i>optics</i> here</p>",
         attempt_note: null,
+        call_recording_s3_key: null,
+        transcript_s3_key: null,
+        source_draft_id: null,
       },
     ]);
   });
@@ -737,6 +782,82 @@ describe("POST /api/blended-learning/students/[id]/entries", () => {
       const res = await postEntry("501", { ...CONVERSATION, photoKeys: [PHOTO_1], completeActionItemIds: [801] });
       expect(res.status).toBe(409);
       expect(inserted).toEqual({});
+    });
+  });
+
+  describe("Conversation Drafts", () => {
+    it("saves a ready draft as one Conversation with its recording and transcript, and marks the draft saved", async () => {
+      signedInAs(MENTOR_A);
+      const res = await postEntry("501", { ...CONVERSATION, draftId: 901 });
+
+      expect(res.status).toBe(201);
+      expect(inserted.blended_learning_conversations).toHaveLength(1);
+      expect(inserted.blended_learning_conversations[0]).toMatchObject({
+        kind: "conversation",
+        summary: "Talked through the mock test plan.",
+        call_recording_s3_key: RECORDING_901,
+        transcript_s3_key: TRANSCRIPT_901,
+        source_draft_id: 901,
+      });
+      expect(drafts[901]).toMatchObject({ state: "saved", saved_conversation_id: 700 });
+    });
+
+    it.each([
+      ["still transcribing", 902],
+      ["already saved", 903],
+      ["another Student's", 911],
+      ["unknown", 999],
+    ])("returns 409 for a draft that is %s, and saves nothing", async (_case, draftId) => {
+      signedInAs(MENTOR_A);
+      const before = givenDrafts();
+      const res = await postEntry("501", { ...CONVERSATION, actionItems: [{ owner: "student", text: "Revise optics" }], draftId });
+
+      expect(res.status).toBe(409);
+      expect(res.body).toEqual({ error: "This Conversation Draft is no longer ready to save. Reload and try again." });
+      expect(inserted).toEqual({});
+      expect(drafts).toEqual(before);
+    });
+
+    it("saves a draft once: a second save of the same draft returns 409", async () => {
+      signedInAs(MENTOR_A);
+      expect((await postEntry("501", { ...CONVERSATION, draftId: 901 })).status).toBe(201);
+      expect((await postEntry("501", { ...CONVERSATION, draftId: 901 })).status).toBe(409);
+      expect(inserted.blended_learning_conversations).toHaveLength(1);
+    });
+
+    it("leaves the draft ready when the save rolls back", async () => {
+      signedInAs(MENTOR_A);
+      const res = await postEntry("501", { ...CONVERSATION, draftId: 901, completeActionItemIds: [801] });
+      expect(res.status).toBe(409);
+      expect(inserted).toEqual({});
+      expect(drafts[901].state).toBe("ready");
+    });
+
+    it("rejects a draft id on an Attempt (422)", async () => {
+      signedInAs(MENTOR_A);
+      const res = await postEntry("501", { kind: "attempt", occurredOn: "2026-10-22", draftId: 901 });
+      expect(res.status).toBe(422);
+      expect(res.body.fieldErrors).toEqual({ draftId: "A Conversation Draft can only be saved as a Conversation." });
+      expect(mockWithTransaction).not.toHaveBeenCalled();
+    });
+
+    it("rejects a draft id that is not an id (422)", async () => {
+      signedInAs(MENTOR_A);
+      const res = await postEntry("501", { ...CONVERSATION, draftId: "901" });
+      expect(res.status).toBe(422);
+      expect(mockWithTransaction).not.toHaveBeenCalled();
+    });
+
+    it("sanitises the reviewed draft's notes before saving them", async () => {
+      signedInAs(MENTOR_A);
+      await postEntry("501", {
+        ...CONVERSATION,
+        draftId: 901,
+        notesHtml: "<h3>Plan</h3><ul><li><p>&lt;script&gt;x&lt;/script&gt;</p></li></ul><img src=x onerror=alert(1)>",
+      });
+      expect(inserted.blended_learning_conversations[0].notes_html).toBe(
+        "<h3>Plan</h3><ul><li><p>&lt;script&gt;x&lt;/script&gt;</p></li></ul>"
+      );
     });
   });
 });

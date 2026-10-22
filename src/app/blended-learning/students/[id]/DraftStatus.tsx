@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
@@ -11,7 +12,8 @@ import type { DraftState } from "@/lib/blended-learning-drafts";
 // change by itself, so polling stops there. A draft that is no longer open
 // (discarded or saved elsewhere) disappears.
 // Those who can manage drafts (not read-only) can retry a failed draft or one
-// whose wake never reached ETL, and discard any open draft.
+// whose wake never reached ETL, and discard any open draft. Those who can log
+// open a ready draft for review.
 
 const DRAFT_POLL_MS = 15_000;
 
@@ -28,11 +30,14 @@ export function DraftStatus({
   initialState,
   initialRetryOffered = false,
   canManage = false,
+  reviewHref = null,
 }: {
   draftId: number;
   initialState: DraftState;
   initialRetryOffered?: boolean;
   canManage?: boolean;
+  // The log page that reviews a ready draft, for those who can log.
+  reviewHref?: string | null;
 }) {
   const router = useRouter();
   const [state, setState] = useState<DraftState>(initialState);
@@ -106,6 +111,7 @@ export function DraftStatus({
   const shown = DRAFT_STATE[state];
   if (!shown) return null;
   const showRetry = canManage && retryOffered;
+  const showReview = state === "ready" && reviewHref !== null;
   return (
     <section aria-label="Conversation Draft">
       <Card elevation="sm" className="space-y-3 p-4 sm:px-6">
@@ -113,16 +119,26 @@ export function DraftStatus({
           <span className="text-sm font-bold text-text-primary">Conversation Draft</span>
           <Badge variant={shown.variant}>{shown.label}</Badge>
         </div>
-        {canManage && (
+        {(canManage || showReview) && (
           <div className="flex flex-col gap-2 sm:flex-row">
+            {showReview && (
+              <Link
+                href={reviewHref}
+                className="inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-accent px-4 text-sm font-bold text-text-on-accent shadow-sm hover:bg-accent-hover sm:w-auto"
+              >
+                Review draft
+              </Link>
+            )}
             {showRetry && (
               <Button type="button" onClick={retry} disabled={busy} className="w-full sm:w-auto">
                 {state === "failed" ? "Retry" : "Retry drafting"}
               </Button>
             )}
-            <Button type="button" variant="secondary" onClick={discard} disabled={busy} className="w-full sm:w-auto">
-              Discard
-            </Button>
+            {canManage && (
+              <Button type="button" variant="secondary" onClick={discard} disabled={busy} className="w-full sm:w-auto">
+                Discard
+              </Button>
+            )}
           </div>
         )}
         {message && (

@@ -10,6 +10,7 @@ import {
   type BlendedLearningAccess,
 } from "./blended-learning-access";
 import { blendedLearningRecordingPrefix, headObject, presignUpload } from "./s3";
+import type { DraftNote } from "./blended-learning-draft-notes";
 
 // Call Recording upload and Conversation Draft use cases (server-only). The
 // browser PUTs a recording straight to S3 with a presigned URL, then asks for
@@ -404,4 +405,73 @@ export async function discardDraft(
   );
   if (discarded.length === 0) return { ok: false, status: 409, error: "This draft can't be discarded now." };
   return { ok: true, draft: { id: draftId, state: "discarded" } };
+}
+
+// --- Draft review ------------------------------------------------------------
+
+type DraftActionItem = { text: string; owner: "student" | "mentor" | "parent"; dueOn: string | null };
+
+// A ready draft, as the log form opens it for review. The session details are
+// those the Mentor entered before uploading, if any.
+export type DraftForReview = {
+  id: number;
+  occurredOn: string | null;
+  mode: SessionDetails["mode"];
+  spokeWith: SessionDetails["spokeWith"];
+  durationMinutes: number | null;
+  summary: string;
+  summaryTags: string[];
+  actionItems: DraftActionItem[];
+  notes: DraftNote[];
+  itemsToVerify: string[];
+};
+
+type ReviewRow = {
+  id: number | string;
+  occurred_on: string | null;
+  mode: SessionDetails["mode"];
+  spoke_with: SessionDetails["spokeWith"];
+  duration_minutes: number | null;
+  draft_summary: string;
+  draft_summary_tags: string[] | null;
+  draft_action_items: { text: string; owner: DraftActionItem["owner"]; due_on: string | null }[] | null;
+  draft_notes: DraftNote[] | null;
+  draft_items_to_verify: string[] | null;
+};
+
+// The Mentee's ready draft, for those who can log. Null when there is none,
+// the draft is not ready, or the Student is out of scope.
+export async function getDraftForReview(
+  access: BlendedLearningAccess,
+  studentId: number
+): Promise<DraftForReview | null> {
+  if (!canBlendedLearning(access, "log")) return null;
+  if (!(await canAccessBlendedStudent(access, studentId))) return null;
+  const rows = await query<ReviewRow>(
+    `SELECT draft.id, draft.occurred_on::text AS occurred_on, draft.mode, draft.spoke_with, draft.duration_minutes,
+            draft.draft_summary, draft.draft_summary_tags, draft.draft_action_items, draft.draft_notes,
+            draft.draft_items_to_verify
+     FROM blended_learning_conversation_drafts draft
+     WHERE draft.student_id = $1 AND draft.state = 'ready'
+     LIMIT 1`,
+    [studentId]
+  );
+  const draft = rows[0];
+  if (!draft) return null;
+  return {
+    id: Number(draft.id),
+    occurredOn: draft.occurred_on,
+    mode: draft.mode,
+    spokeWith: draft.spoke_with,
+    durationMinutes: draft.duration_minutes,
+    summary: draft.draft_summary,
+    summaryTags: draft.draft_summary_tags ?? [],
+    actionItems: (draft.draft_action_items ?? []).map((item) => ({
+      text: item.text,
+      owner: item.owner,
+      dueOn: item.due_on,
+    })),
+    notes: draft.draft_notes ?? [],
+    itemsToVerify: draft.draft_items_to_verify ?? [],
+  };
 }

@@ -5,15 +5,18 @@ import { notFound, redirect } from "next/navigation";
 import { Card } from "@/components/ui";
 import { authOptions } from "@/lib/auth";
 import { canBlendedLearning, getBlendedLearningAccess } from "@/lib/blended-learning-access";
+import { draftNotesToHtml } from "@/lib/blended-learning-draft-notes";
+import { getDraftForReview, type DraftForReview } from "@/lib/blended-learning-drafts";
 import { getMenteeDetail, type HistoryEntry } from "@/lib/blended-learning-mentee-detail";
 import { getTodayIST } from "@/lib/curriculum-date-helpers";
 
 import { BlendedLearningHeader } from "../../../BlendedLearningHeader";
-import { LogEntryForm } from "./LogEntryForm";
+import { LogEntryForm, type ReviewDraft } from "./LogEntryForm";
 
 // Log a Conversation or an Attempt for one Mentee. A Mentor logs for their
 // own Mentees; a Blended Learning Admin logs on the mapped Mentor's behalf.
-// Read-only users are sent back to the detail page.
+// Read-only users are sent back to the detail page. A Mentee with a ready
+// Conversation Draft gets the same form, prefilled from the draft for review.
 
 const MODE: Record<"call" | "in_person", string> = { call: "Call", in_person: "In person" };
 const SPOKE_WITH: Record<"student" | "parent_or_sibling" | "both", string> = {
@@ -27,6 +30,23 @@ function formatDate(date: string): string {
   return new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }).format(
     new Date(Date.UTC(year, month - 1, day))
   );
+}
+
+// The form's prefill: the Summary Tags follow the drafted summary as text,
+// and the drafted notes become editor HTML.
+function toReviewDraft(draft: DraftForReview): ReviewDraft {
+  const tags = draft.summaryTags.length > 0 ? `\n\nTags: ${draft.summaryTags.join(", ")}` : "";
+  return {
+    id: draft.id,
+    occurredOn: draft.occurredOn,
+    mode: draft.mode,
+    spokeWith: draft.spokeWith,
+    durationMinutes: draft.durationMinutes,
+    summary: `${draft.summary}${tags}`,
+    actionItems: draft.actionItems,
+    notesHtml: draftNotesToHtml(draft.notes),
+    itemsToVerify: draft.itemsToVerify,
+  };
 }
 
 function LastConversationPanel({ conversation }: { conversation: Extract<HistoryEntry, { kind: "conversation" }> | null }) {
@@ -71,6 +91,7 @@ export default async function LogEntryPage({ params }: { params: Promise<{ id: s
     mentee.history.find((entry): entry is Extract<HistoryEntry, { kind: "conversation" }> => entry.kind === "conversation") ??
     null;
   const firstName = mentee.name.split(" ")[0] || mentee.name;
+  const draft = mentee.openDraft?.state === "ready" ? await getDraftForReview(access, mentee.studentId) : null;
 
   return (
     <>
@@ -82,7 +103,9 @@ export default async function LogEntryPage({ params }: { params: Promise<{ id: s
         >
           <span aria-hidden="true">←</span> {mentee.name}
         </Link>
-        <h2 className="break-words text-xl font-bold text-text-primary">Log for {mentee.name}</h2>
+        <h2 className="break-words text-xl font-bold text-text-primary">
+          {draft ? `Review the draft for ${mentee.name}` : `Log for ${mentee.name}`}
+        </h2>
         <LogEntryForm
           studentId={mentee.studentId}
           name={mentee.name}
@@ -92,6 +115,7 @@ export default async function LogEntryPage({ params }: { params: Promise<{ id: s
           lastConversationPanel={<LastConversationPanel conversation={lastConversation} />}
           openActionItems={mentee.openActionItems}
           hasOpenDraft={mentee.openDraft !== null}
+          draft={draft ? toReviewDraft(draft) : null}
         />
       </main>
     </>

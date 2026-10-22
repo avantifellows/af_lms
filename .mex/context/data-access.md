@@ -197,7 +197,7 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   (read), `src/lib/holistic-follow-up-questions.ts` (client-safe question keys, text, and
   normaliser), `src/lib/holistic-mentor-write-scope.ts` (shared scope guard).
 
-## Blended Learning Mentee list (#442), detail (#444), logging (#445), Action Items (#446), Mentor Flags (#447), photos (#448) and Call Recording drafts (#449, retry/discard #450)
+## Blended Learning Mentee list (#442), detail (#444), logging (#445), Action Items (#446), Mentor Flags (#447), photos (#448) and Call Recording drafts (#449, retry/discard #450, review and save #451)
 
 - **Tables:** the `blended_learning_*` tables are created by db-service (Mappings:
   `20260921120000` + its ensure migration; the other eight: PR #804,
@@ -253,8 +253,8 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   `academic_year`, plus `logged_by_email`/`logged_by_user_id` = the actor (an admin logging on a
   Mentor's behalf keeps the mapped Mentor). `23514` (checks, append-only triggers) and `23505`
   map to 409. After commit, `mentee` is the Student's `listMentees` row (`studentId` filter), so
-  the confirmation shows exactly what the list now says. A later slice adds draft save inside
-  the same transaction.
+  the confirmation shows exactly what the list now says. Draft save (#451) runs inside the same
+  transaction (below).
 - **Action Items (#446):** only `kind: "conversation"` accepts `actionItems[]` (`{ owner:
   student|mentor|parent, text, dueOn? }`; a missing owner or blank text, or an impossible
   date, gives a 422 keyed `actionItems.<i>.<field>`) and `completeActionItemIds[]` (positive
@@ -368,6 +368,26 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
     route-tested. `blended-learning-draft-retry-discard.spec.ts` inserts `failed`/`ready` drafts
     for Ira (deleting her requests and drafts after each test) to cover Retry, Discard and the
     chip, and checks Rohan's fixture failed draft read-only (no buttons, POSTs 403).
+  - **Review and save (#451):** the list's "Draft ready to review" chip (a link; on mobile cards
+    it sits below the card's link, since links can't nest) and the detail panel's "Review draft"
+    (only when the page passes `reviewHref`, i.e. the user can `log`) open
+    `/blended-learning/students/[id]/log`. There `getDraftForReview(access, studentId)` (`log`
+    permission + `canAccessBlendedStudent`) reads the `ready` draft's session details and
+    `draft_summary`, `draft_summary_tags`, `draft_action_items` (`[{text, owner, due_on}]`),
+    `draft_notes` (`[{heading, points[]}]`) and `draft_items_to_verify` (`[string]`). The page
+    prefills `LogEntryForm` (`draft` prop): the summary is the drafted summary then
+    `\n\nTags: a, b` (Conversations have no tags column, so Summary Tags are saved as summary
+    text); notes go through `draftNotesToHtml` (`src/lib/blended-learning-draft-notes.ts`,
+    client-safe: `<h3>` + `<ul><li>`, every `& < > " '` escaped) into the Tiptap editor, which
+    reports its normalised HTML on create. Items to Verify render as an unsaved checklist above
+    the form; the kind choice and the recording upload are hidden. Saving posts `draftId`:
+    `logEntry` locks `… WHERE id = $1 AND student_id = $2 FOR UPDATE` (missing, another
+    Student's, or not `ready` → 409 "no longer ready", whole save rolled back), inserts the
+    Conversation with the draft's `call_recording_s3_key`, `transcript_s3_key` and
+    `source_draft_id`, and last sets the draft `saved` + `saved_conversation_id` (`WHERE state =
+    'ready'`, else 409). `draftId` on an Attempt or a non-integer is 422. Hand-logged rows store
+    `NULL` in the three draft columns. `blended-learning-draft-review.spec.ts` inserts a full
+    `ready` draft for Mentor C's never-contacted F1 (desktop) / F2 (mobile) and saves it.
 - **Notes sanitiser (#445):** `sanitiseNotesHtml` in `src/lib/blended-learning-notes-sanitiser.ts`
   (server-only, `sanitize-html`) is the only path to `notes_html`: allowlist `p, h3, b, i, ul, ol,
   li, table, tr, th, td, br`, no attributes, no links (an `<a>` keeps its text), `strong→b`,

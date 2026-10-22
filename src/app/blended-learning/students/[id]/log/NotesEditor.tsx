@@ -95,14 +95,22 @@ function Toolbar({ editor }: { editor: Editor }) {
 
 export function NotesEditor({
   labelId,
+  initialHtml,
   onChange,
 }: {
   labelId: string;
+  // Notes to start from, such as a Conversation Draft's; text already escaped.
+  initialHtml?: string;
   onChange: (html: string) => void;
 }) {
   const editor = useEditor({
     extensions: EXTENSIONS,
     immediatelyRender: false,
+    content: initialHtml || "",
+    // Report the starting notes as the editor holds them.
+    onCreate: ({ editor: current }) => {
+      if (initialHtml) onChange(current.getHTML());
+    },
     editorProps: {
       attributes: {
         role: "textbox",

@@ -20,8 +20,10 @@ import { RecordingUpload } from "./RecordingUpload";
 // the form from 1024 px. Only a Conversation adds Action Items or ticks
 // earlier ones done, attaches photos and raises Mentor Flags. Instead of
 // typing the write-up, a Conversation's Call Recording can be uploaded to
-// start a Conversation Draft. After saving, a confirmation shows what the
-// Mentee list now says.
+// start a Conversation Draft. A ready draft opens here for review: the form is
+// prefilled from it, its Items to Verify sit above the form as a checklist,
+// and saving turns the draft into this Conversation. After saving, a
+// confirmation shows what the Mentee list now says.
 
 type Kind = "conversation" | "attempt";
 // Keyed by field, e.g. `summary` or `actionItems.0.text`.
@@ -31,6 +33,21 @@ type DraftActionItem = { key: number; owner: ActionItemOwner | ""; text: string;
 // A switched-on Flag Recipient maps to its comment; off is absent.
 type DraftFlags = Partial<Record<FlagRecipient, string>>;
 const FLAG_RECIPIENTS = Object.keys(FLAG_RECIPIENT) as FlagRecipient[];
+
+// A ready Conversation Draft, as the form opens it. Session details are those
+// the Mentor entered before uploading; `notesHtml` is the drafted notes with
+// their text escaped.
+export type ReviewDraft = {
+  id: number;
+  occurredOn: string | null;
+  mode: "call" | "in_person" | null;
+  spokeWith: "student" | "parent_or_sibling" | "both" | null;
+  durationMinutes: number | null;
+  summary: string;
+  actionItems: { owner: ActionItemOwner; text: string; dueOn: string | null }[];
+  notesHtml: string;
+  itemsToVerify: string[];
+};
 
 const KINDS: { value: Kind; label: string }[] = [
   { value: "conversation", label: "Conversation" },
@@ -127,6 +144,44 @@ function OpenActionItemsPanel({
                   <ActionItemMeta owner={item.owner} dueOn={item.dueOn} agreedOn={item.agreedOn} />
                 </div>
               )}
+            </li>
+          ))}
+        </ul>
+      </Card>
+    </section>
+  );
+}
+
+// What the drafting model was unsure of, for the Mentor to check against the
+// form before saving. The ticks are a reading aid and are not saved.
+function ItemsToVerifyPanel({ items }: { items: string[] }) {
+  const [checked, setChecked] = useState<Set<number>>(new Set());
+  return (
+    <section aria-label="Items to Verify">
+      <Card elevation="sm" className="space-y-2 border-l-4 border-l-accent p-4">
+        <h3 className="text-xs font-bold uppercase tracking-wide text-text-muted">Items to Verify</h3>
+        <p className="text-xs text-text-secondary">
+          The draft wasn&apos;t sure of these. Check each one in the form below.
+        </p>
+        <ul className="space-y-1">
+          {items.map((item, index) => (
+            <li key={index} className="break-words text-sm text-text-primary">
+              <label className="flex min-h-11 cursor-pointer items-start gap-3 py-1">
+                <input
+                  type="checkbox"
+                  checked={checked.has(index)}
+                  onChange={() =>
+                    setChecked((current) => {
+                      const next = new Set(current);
+                      if (next.has(index)) next.delete(index);
+                      else next.add(index);
+                      return next;
+                    })
+                  }
+                  className="mt-0.5 h-5 w-5 shrink-0 accent-accent"
+                />
+                <span className="min-w-0">{item}</span>
+              </label>
             </li>
           ))}
         </ul>
@@ -362,6 +417,7 @@ export function LogEntryForm({
   lastConversationPanel,
   openActionItems,
   hasOpenDraft,
+  draft = null,
 }: {
   studentId: number;
   name: string;
@@ -374,18 +430,27 @@ export function LogEntryForm({
   openActionItems: OpenActionItem[];
   // A Mentee has at most one open Conversation Draft, so no second upload.
   hasOpenDraft: boolean;
+  // A ready Conversation Draft to review and save as this Conversation.
+  draft?: ReviewDraft | null;
 }) {
   const ids = useId();
   const [kind, setKind] = useState<Kind>("conversation");
-  const [occurredOn, setOccurredOn] = useState(today);
-  const [mode, setMode] = useState<(typeof MODES)[number]["value"] | null>(null);
-  const [spokeWith, setSpokeWith] = useState<(typeof SPOKE_WITH)[number]["value"] | null>(null);
-  const [duration, setDuration] = useState("");
-  const [summary, setSummary] = useState("");
-  const [notesHtml, setNotesHtml] = useState("");
+  const [occurredOn, setOccurredOn] = useState(draft?.occurredOn ?? today);
+  const [mode, setMode] = useState<(typeof MODES)[number]["value"] | null>(draft?.mode ?? null);
+  const [spokeWith, setSpokeWith] = useState<(typeof SPOKE_WITH)[number]["value"] | null>(draft?.spokeWith ?? null);
+  const [duration, setDuration] = useState(draft?.durationMinutes ? String(draft.durationMinutes) : "");
+  const [summary, setSummary] = useState(draft?.summary ?? "");
+  const [notesHtml, setNotesHtml] = useState(draft?.notesHtml ?? "");
   const [note, setNote] = useState("");
-  const [actionItems, setActionItems] = useState<DraftActionItem[]>([]);
-  const [nextItemKey, setNextItemKey] = useState(1);
+  const [actionItems, setActionItems] = useState<DraftActionItem[]>(
+    (draft?.actionItems ?? []).map((item, index) => ({
+      key: index + 1,
+      owner: item.owner,
+      text: item.text,
+      dueOn: item.dueOn ?? "",
+    }))
+  );
+  const [nextItemKey, setNextItemKey] = useState((draft?.actionItems.length ?? 0) + 1);
   const [ticked, setTicked] = useState<Set<number>>(new Set());
   const [flags, setFlags] = useState<DraftFlags>({});
   const [photos, setPhotos] = useState<PickedPhoto[]>([]);
@@ -426,6 +491,7 @@ export function LogEntryForm({
               comment: flags[recipient] || null,
             })),
             completeActionItemIds: [...ticked],
+            ...(draft ? { draftId: draft.id } : {}),
           };
     try {
       const res = await fetch(`/api/blended-learning/students/${studentId}/entries`, {
@@ -474,164 +540,170 @@ export function LogEntryForm({
           />
         )}
       </div>
-      <form
-        aria-label="Log a Conversation or Attempt"
-        noValidate
-        onSubmit={submit}
-        className="min-w-0 space-y-5 rounded-lg border border-border bg-bg-card p-4 shadow-sm sm:p-6 lg:order-1"
-      >
-        <ChoiceGroup
-          legend="What happened"
-          name="kind"
-          options={KINDS}
-          value={kind}
-          onChange={(value) => {
-            setKind(value);
-            setFieldErrors({});
-            setError(null);
-          }}
-          error={fieldErrors.kind}
-        />
-
-        <div>
-          <FormLabel htmlFor={dateId}>Date</FormLabel>
-          <Input
-            id={dateId}
-            type="date"
-            value={occurredOn}
-            max={today}
-            onChange={(event) => setOccurredOn(event.target.value)}
-            aria-invalid={Boolean(fieldErrors.occurredOn)}
-            className="sm:max-w-xs"
-          />
-          <FieldError message={fieldErrors.occurredOn} />
-        </div>
-
-        {kind === "conversation" ? (
-          <>
-            <ChoiceGroup legend="Mode" name="mode" options={MODES} value={mode} onChange={setMode} error={fieldErrors.mode} />
+      <div className="min-w-0 space-y-4 lg:order-1">
+        {draft && draft.itemsToVerify.length > 0 && <ItemsToVerifyPanel items={draft.itemsToVerify} />}
+        <form
+          aria-label="Log a Conversation or Attempt"
+          noValidate
+          onSubmit={submit}
+          className="min-w-0 space-y-5 rounded-lg border border-border bg-bg-card p-4 shadow-sm sm:p-6"
+        >
+          {/* A draft is saved as a Conversation only. */}
+          {!draft && (
             <ChoiceGroup
-              legend="Spoke with"
-              name="spokeWith"
-              options={SPOKE_WITH}
-              value={spokeWith}
-              onChange={setSpokeWith}
-              error={fieldErrors.spokeWith}
+              legend="What happened"
+              name="kind"
+              options={KINDS}
+              value={kind}
+              onChange={(value) => {
+                setKind(value);
+                setFieldErrors({});
+                setError(null);
+              }}
+              error={fieldErrors.kind}
             />
-            <div>
-              <FormLabel htmlFor={durationId}>Duration (minutes)</FormLabel>
-              <Input
-                id={durationId}
-                type="number"
-                inputMode="numeric"
-                min={1}
-                max={240}
-                value={duration}
-                onChange={(event) => setDuration(event.target.value)}
-                aria-invalid={Boolean(fieldErrors.durationMinutes)}
-                className="sm:max-w-[10rem]"
+          )}
+
+          <div>
+            <FormLabel htmlFor={dateId}>Date</FormLabel>
+            <Input
+              id={dateId}
+              type="date"
+              value={occurredOn}
+              max={today}
+              onChange={(event) => setOccurredOn(event.target.value)}
+              aria-invalid={Boolean(fieldErrors.occurredOn)}
+              className="sm:max-w-xs"
+            />
+            <FieldError message={fieldErrors.occurredOn} />
+          </div>
+
+          {kind === "conversation" ? (
+            <>
+              <ChoiceGroup legend="Mode" name="mode" options={MODES} value={mode} onChange={setMode} error={fieldErrors.mode} />
+              <ChoiceGroup
+                legend="Spoke with"
+                name="spokeWith"
+                options={SPOKE_WITH}
+                value={spokeWith}
+                onChange={setSpokeWith}
+                error={fieldErrors.spokeWith}
               />
-              <FieldError message={fieldErrors.durationMinutes} />
-            </div>
-            {hasOpenDraft ? (
-              <p className="rounded-lg border border-border px-3 py-2 text-sm text-text-secondary">
-                {`${firstName} already has a Conversation Draft, so no recording can be uploaded now.`}
-              </p>
-            ) : (
-              <RecordingUpload
-                studentId={studentId}
-                sessionDetails={{
-                  occurredOn: occurredOn || null,
-                  mode,
-                  spokeWith,
-                  durationMinutes: duration.trim() === "" ? null : Number(duration),
+              <div>
+                <FormLabel htmlFor={durationId}>Duration (minutes)</FormLabel>
+                <Input
+                  id={durationId}
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  max={240}
+                  value={duration}
+                  onChange={(event) => setDuration(event.target.value)}
+                  aria-invalid={Boolean(fieldErrors.durationMinutes)}
+                  className="sm:max-w-[10rem]"
+                />
+                <FieldError message={fieldErrors.durationMinutes} />
+              </div>
+              {draft ? null : hasOpenDraft ? (
+                <p className="rounded-lg border border-border px-3 py-2 text-sm text-text-secondary">
+                  {`${firstName} already has a Conversation Draft, so no recording can be uploaded now.`}
+                </p>
+              ) : (
+                <RecordingUpload
+                  studentId={studentId}
+                  sessionDetails={{
+                    occurredOn: occurredOn || null,
+                    mode,
+                    spokeWith,
+                    durationMinutes: duration.trim() === "" ? null : Number(duration),
+                  }}
+                />
+              )}
+              <div>
+                <FormLabel htmlFor={summaryId}>Summary</FormLabel>
+                <textarea
+                  id={summaryId}
+                  rows={3}
+                  value={summary}
+                  onChange={(event) => setSummary(event.target.value)}
+                  aria-invalid={Boolean(fieldErrors.summary)}
+                  className={textareaClasses}
+                />
+                <FieldError message={fieldErrors.summary} />
+              </div>
+              <ActionItemsEditor
+                items={actionItems}
+                errors={fieldErrors}
+                onChange={(key, change) =>
+                  setActionItems((items) => items.map((item) => (item.key === key ? { ...item, ...change } : item)))
+                }
+                onAdd={() => {
+                  setActionItems((items) => [...items, { key: nextItemKey, owner: "", text: "", dueOn: "" }]);
+                  setNextItemKey((key) => key + 1);
+                }}
+                onRemove={(key) => {
+                  setActionItems((items) => items.filter((item) => item.key !== key));
+                  // Per-item errors are keyed by position, which removal shifts.
+                  setFieldErrors((errors) =>
+                    Object.fromEntries(Object.entries(errors).filter(([field]) => !field.startsWith("actionItems")))
+                  );
                 }}
               />
-            )}
+              <PhotoPicker
+                studentId={studentId}
+                photos={photos}
+                setPhotos={(next) => {
+                  setPhotos(next);
+                  // Per-photo errors are keyed by position, which a change shifts.
+                  setFieldErrors((errors) =>
+                    Object.fromEntries(Object.entries(errors).filter(([field]) => !field.startsWith("photoKeys")))
+                  );
+                }}
+                errors={fieldErrors}
+              />
+              <MentorFlagsEditor
+                flags={flags}
+                errors={fieldErrors}
+                onChange={(next) => {
+                  setFlags(next);
+                  // Per-flag errors are keyed by position, which a switch shifts.
+                  setFieldErrors((errors) =>
+                    Object.fromEntries(Object.entries(errors).filter(([field]) => !field.startsWith("flags")))
+                  );
+                }}
+              />
+              <div>
+                <span id={notesLabelId} className="mb-1 block text-xs font-bold uppercase tracking-wide text-text-muted">
+                  Notes (optional)
+                </span>
+                <NotesEditor labelId={notesLabelId} initialHtml={draft?.notesHtml} onChange={setNotesHtml} />
+                <FieldError message={fieldErrors.notesHtml} />
+              </div>
+            </>
+          ) : (
             <div>
-              <FormLabel htmlFor={summaryId}>Summary</FormLabel>
+              <FormLabel htmlFor={noteId}>Note (optional)</FormLabel>
               <textarea
-                id={summaryId}
+                id={noteId}
                 rows={3}
-                value={summary}
-                onChange={(event) => setSummary(event.target.value)}
-                aria-invalid={Boolean(fieldErrors.summary)}
+                value={note}
+                onChange={(event) => setNote(event.target.value)}
                 className={textareaClasses}
               />
-              <FieldError message={fieldErrors.summary} />
             </div>
-            <ActionItemsEditor
-              items={actionItems}
-              errors={fieldErrors}
-              onChange={(key, change) =>
-                setActionItems((items) => items.map((item) => (item.key === key ? { ...item, ...change } : item)))
-              }
-              onAdd={() => {
-                setActionItems((items) => [...items, { key: nextItemKey, owner: "", text: "", dueOn: "" }]);
-                setNextItemKey((key) => key + 1);
-              }}
-              onRemove={(key) => {
-                setActionItems((items) => items.filter((item) => item.key !== key));
-                // Per-item errors are keyed by position, which removal shifts.
-                setFieldErrors((errors) =>
-                  Object.fromEntries(Object.entries(errors).filter(([field]) => !field.startsWith("actionItems")))
-                );
-              }}
-            />
-            <PhotoPicker
-              studentId={studentId}
-              photos={photos}
-              setPhotos={(next) => {
-                setPhotos(next);
-                // Per-photo errors are keyed by position, which a change shifts.
-                setFieldErrors((errors) =>
-                  Object.fromEntries(Object.entries(errors).filter(([field]) => !field.startsWith("photoKeys")))
-                );
-              }}
-              errors={fieldErrors}
-            />
-            <MentorFlagsEditor
-              flags={flags}
-              errors={fieldErrors}
-              onChange={(next) => {
-                setFlags(next);
-                // Per-flag errors are keyed by position, which a switch shifts.
-                setFieldErrors((errors) =>
-                  Object.fromEntries(Object.entries(errors).filter(([field]) => !field.startsWith("flags")))
-                );
-              }}
-            />
-            <div>
-              <span id={notesLabelId} className="mb-1 block text-xs font-bold uppercase tracking-wide text-text-muted">
-                Notes (optional)
-              </span>
-              <NotesEditor labelId={notesLabelId} onChange={setNotesHtml} />
-              <FieldError message={fieldErrors.notesHtml} />
-            </div>
-          </>
-        ) : (
-          <div>
-            <FormLabel htmlFor={noteId}>Note (optional)</FormLabel>
-            <textarea
-              id={noteId}
-              rows={3}
-              value={note}
-              onChange={(event) => setNote(event.target.value)}
-              className={textareaClasses}
-            />
-          </div>
-        )}
+          )}
 
-        {error && (
-          <p role="alert" className="rounded-lg bg-danger-bg px-3 py-2 text-sm text-danger">
-            {error}
-          </p>
-        )}
+          {error && (
+            <p role="alert" className="rounded-lg bg-danger-bg px-3 py-2 text-sm text-danger">
+              {error}
+            </p>
+          )}
 
-        <Button type="submit" disabled={saving} className="w-full sm:w-auto">
-          {saving ? "Saving…" : kind === "conversation" ? "Save Conversation" : "Save Attempt"}
-        </Button>
-      </form>
+          <Button type="submit" disabled={saving} className="w-full sm:w-auto">
+            {saving ? "Saving…" : kind === "conversation" ? "Save Conversation" : "Save Attempt"}
+          </Button>
+        </form>
+      </div>
     </div>
   );
 }

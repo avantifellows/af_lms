@@ -5,7 +5,8 @@ import type { MenteeRow } from "@/lib/blended-learning-mentees";
 import type { TalkToFirstReason } from "@/lib/blended-learning-talk-to-first";
 
 // The Mentor's Mentee list: Talk to First, then Everyone else. A table from
-// 640 px up; cards below that, each one a 44 px+ tap target.
+// 640 px up; cards below that, each one a 44 px+ tap target. A ready
+// Conversation Draft's chip opens it for review on the log page.
 
 const WHY_NOW: Record<TalkToFirstReason, string> = {
   attempt: "Last try didn't connect",
@@ -55,9 +56,13 @@ export function WhyNowTags({ mentee }: { mentee: MenteeRow }) {
   );
 }
 
-function DraftChip({ mentee }: { mentee: MenteeRow }) {
+function DraftChip({ mentee, className = "" }: { mentee: MenteeRow; className?: string }) {
   if (mentee.openDraftState !== "ready") return null;
-  return <Badge variant="accent">Draft ready to review</Badge>;
+  return (
+    <Link href={`${menteeHref(mentee)}/log`} className={`inline-flex min-h-11 items-center ${className}`}>
+      <Badge variant="accent">Draft ready to review</Badge>
+    </Link>
+  );
 }
 
 function menteeHref(mentee: MenteeRow) {
@@ -133,16 +138,15 @@ function MenteeCards({ mentees }: { mentees: MenteeRow[] }) {
             href={menteeHref(mentee)}
             className="flex min-h-11 flex-col gap-1.5 px-4 py-3 hover:bg-hover-bg active:bg-hover-bg"
           >
-            <span className="flex flex-wrap items-center gap-2">
-              <span className="font-semibold text-text-primary">{mentee.name}</span>
-              <DraftChip mentee={mentee} />
-            </span>
+            <span className="font-semibold text-text-primary">{mentee.name}</span>
             <MenteeMeta mentee={mentee} />
             <span className="text-sm text-text-primary">
               <LastContact mentee={mentee} />
             </span>
             <WhyNowTags mentee={mentee} />
           </Link>
+          {/* Outside the card's link: links can't nest. */}
+          <DraftChip mentee={mentee} className="-mt-2 px-4 pb-1" />
         </li>
       ))}
     </ul>

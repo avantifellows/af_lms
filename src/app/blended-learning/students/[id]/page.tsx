@@ -220,6 +220,7 @@ export default async function MenteeDetailPage({ params }: { params: Promise<{ i
             initialState={mentee.openDraft.state}
             initialRetryOffered={draftStatus?.retryOffered ?? false}
             canManage={canBlendedLearning(access, "manage_draft")}
+            reviewHref={canBlendedLearning(access, "log") ? `/blended-learning/students/${mentee.studentId}/log` : null}
           />
         )}
         {mentee.openActionItems.length > 0 && <OpenActionItems items={mentee.openActionItems} />}
