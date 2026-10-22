@@ -197,7 +197,7 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   (read), `src/lib/holistic-follow-up-questions.ts` (client-safe question keys, text, and
   normaliser), `src/lib/holistic-mentor-write-scope.ts` (shared scope guard).
 
-## Blended Learning Mentee list (#442), Mentor cards (#452), Flags feed (#453), detail (#444), logging (#445), Action Items (#446), Mentor Flags (#447), photos (#448) and Call Recording drafts (#449, retry/discard #450, review and save #451)
+## Blended Learning Mentee list (#442), Mentor cards (#452), Flags feed (#453), detail (#444), logging (#445), Action Items (#446), Mentor Flags (#447), photos (#448), Call Recording drafts (#449, retry/discard #450, review and save #451) and playback (#454)
 
 - **Tables:** the `blended_learning_*` tables are created by db-service (Mappings:
   `20260921120000` + its ensure migration; the other eight: PR #804,
@@ -394,6 +394,24 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
     'ready'`, else 409). `draftId` on an Attempt or a non-integer is 422. Hand-logged rows store
     `NULL` in the three draft columns. `blended-learning-draft-review.spec.ts` inserts a full
     `ready` draft for Mentor C's never-contacted F1 (desktop) / F2 (mobile) and saves it.
+- **Recording playback and transcript (#454, ADR 0010):** admin only, in
+  `src/lib/blended-learning-mentee-detail.ts`. History Conversations carry `hasRecording` /
+  `hasTranscript` (key columns `IS NOT NULL`); the detail page renders
+  `students/[id]/ConversationRecording.tsx` only when `canBlendedLearning(access,
+  "play_recording")`, so Mentors (the uploader included) never see it. Both load on click.
+  `GET /api/blended-learning/conversations/[id]/recording` → `getRecordingPlayback`:
+  `HeadObject` NotFound → `{ expired: true }` ("Recording expired"); anything else, a non-404
+  HEAD failure included (logged by error name only), → `{ expired: false, url }`, a 5-minute
+  presigned GET. `GET …/transcript` → `getTranscript` reads etl-next's raw ElevenLabs Scribe
+  JSON (`getObjectText` in `src/lib/s3.ts`, `NoSuchKey` → `{ expired: true }`) and returns
+  `{ expired: false, turns: [{ speaker, text }] }`: non-spacing `words[]` grouped into
+  consecutive runs by `speaker_id`, labelled "Speaker N" in first-speaking order (as etl-next's
+  `speaker_text` numbers them); no words, or any word without a speaker, → one turn of the
+  trimmed `text` with `speaker: null`. Mentor or other role → 403; a keyless Conversation, an
+  Attempt or out of scope → 404; S3/JSON failure → 502. Neither route logs keys or transcript
+  text. No app code deletes recordings (S3 lifecycle, 180 days). Ira's Conversation 20 days ago
+  is seeded with both keys; `blended-learning-recording-playback.spec.ts` stubs the two routes,
+  since e2e has no S3.
 - **Flags feed (#453):** `src/lib/blended-learning-flags.ts`, all behind `view_flags` (Blended
   Learning Admins, read-only included). `listFlags(access, { mentorUserId?, recipient?, cursor })`
   reads every `blended_learning_mentor_flags` row joined to its Conversation (the Mentor is the

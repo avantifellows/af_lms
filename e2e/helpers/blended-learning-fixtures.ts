@@ -294,14 +294,17 @@ async function seedEntry(
     spokeWith?: "student" | "parent_or_sibling" | "both";
     durationMinutes?: number;
     notesHtml?: string;
+    callRecordingS3Key?: string;
+    transcriptS3Key?: string;
   }
 ): Promise<number> {
   const conversation = entry.kind === "conversation";
   const result = await client.query<{ id: string }>(
     `INSERT INTO blended_learning_conversations
        (student_id, program_id, academic_year, mentor_user_id, logged_by_email, kind, occurred_on,
-        mode, spoke_with, duration_minutes, summary, attempt_note, notes_html)
-     VALUES ($1, $2, $3, $4, $5, $6, ${IST_TODAY} - $7::int, $8, $9, $10, $11, $12, $13)
+        mode, spoke_with, duration_minutes, summary, attempt_note, notes_html,
+        call_recording_s3_key, transcript_s3_key)
+     VALUES ($1, $2, $3, $4, $5, $6, ${IST_TODAY} - $7::int, $8, $9, $10, $11, $12, $13, $14, $15)
      RETURNING id`,
     [
       entry.studentId,
@@ -317,6 +320,8 @@ async function seedEntry(
       conversation ? entry.summary ?? "Synthetic summary only." : null,
       conversation ? null : entry.note ?? "Synthetic: no answer.",
       entry.notesHtml ?? null,
+      entry.callRecordingS3Key ?? null,
+      entry.transcriptS3Key ?? null,
     ]
   );
   return Number(result.rows[0].id);
@@ -615,6 +620,10 @@ export async function seedBlendedLearningFixtures(client: Client): Promise<void>
     spokeWith: "parent_or_sibling",
     durationMinutes: 40,
     notesHtml: `<h3>Study plan</h3><ul><li>${conversation20.notesText}</li></ul>`,
+    // Saved with a Call Recording and its transcript (#454): keys only, no
+    // object exists in S3.
+    callRecordingS3Key: `lms-documents/blended-learning/recordings/${ira.studentId}/00000000-0000-4000-8000-000000000454.mp3`,
+    transcriptS3Key: "lms-documents/blended-learning/transcripts/00000000-0000-4000-8000-000000000454.json",
   });
   const conversation10Id = await seedEntry(client, {
     ...ira,

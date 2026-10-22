@@ -6,9 +6,10 @@ import {
   type BlendedLearningAccess,
 } from "./blended-learning-access";
 import type { OpenDraftState } from "./blended-learning-mentees";
-import { presignDocumentPage } from "./s3";
+import { getObjectText, headObject, presignDocumentPage } from "./s3";
 
 const PHOTO_URL_TTL_SECONDS = 300; // 5 minutes
+const RECORDING_URL_TTL_SECONDS = 300; // 5 minutes
 
 // Blended Learning read model: one Mentee's detail page and a Conversation's
 // on-demand notes and photos (server-only). Every read checks
@@ -38,6 +39,10 @@ export type HistoryEntry =
       durationMinutes: number;
       summary: string;
       hasNotes: boolean;
+      // Saved from a Conversation Draft with these S3 objects. Only admins
+      // may play or read them (ADR 0010).
+      hasRecording: boolean;
+      hasTranscript: boolean;
       photoCount: number;
       actionItems: ActionItem[];
       flags: MentorFlag[];
@@ -85,6 +90,8 @@ type EntryRow = {
   summary: string | null;
   attempt_note: string | null;
   has_notes: boolean;
+  has_recording: boolean;
+  has_transcript: boolean;
   photo_count: number | string;
 };
 
@@ -158,6 +165,8 @@ export async function getMenteeDetail(
     query<EntryRow>(
       `SELECT c.id, c.kind, c.occurred_on::text AS occurred_on, c.mode, c.spoke_with, c.duration_minutes,
               c.summary, c.attempt_note, (c.notes_html IS NOT NULL) AS has_notes,
+              (c.call_recording_s3_key IS NOT NULL) AS has_recording,
+              (c.transcript_s3_key IS NOT NULL) AS has_transcript,
               (SELECT count(*) FROM blended_learning_conversation_photos photo
                WHERE photo.conversation_id = c.id) AS photo_count
        FROM blended_learning_conversations c
@@ -236,6 +245,8 @@ export async function getMenteeDetail(
         durationMinutes: Number(entry.duration_minutes),
         summary: entry.summary ?? "",
         hasNotes: entry.has_notes,
+        hasRecording: entry.has_recording,
+        hasTranscript: entry.has_transcript,
         photoCount: Number(entry.photo_count),
         actionItems: (itemsByConversation.get(id) ?? []).map(toActionItem),
         flags: (flagsByConversation.get(id) ?? []).map((flag) => ({
@@ -250,8 +261,15 @@ export async function getMenteeDetail(
 // A saved Conversation (not an Attempt) and whether the actor may read it.
 async function conversationInScope(access: BlendedLearningAccess, conversationId: number) {
   if (!Number.isSafeInteger(conversationId) || conversationId <= 0) return null;
-  const rows = await query<{ student_id: number | string; kind: string; notes_html: string | null }>(
-    `SELECT student_id, kind, notes_html FROM blended_learning_conversations WHERE id = $1`,
+  const rows = await query<{
+    student_id: number | string;
+    kind: string;
+    notes_html: string | null;
+    call_recording_s3_key: string | null;
+    transcript_s3_key: string | null;
+  }>(
+    `SELECT student_id, kind, notes_html, call_recording_s3_key, transcript_s3_key
+     FROM blended_learning_conversations WHERE id = $1`,
     [conversationId]
   );
   const conversation = rows[0];
@@ -293,4 +311,77 @@ export async function getConversationPhotos(
     }))
   );
   return { photos };
+}
+
+// Only a 404 from HEAD means the lifecycle rule has removed the recording;
+// any other HEAD failure still gets a presigned GET.
+async function recordingStillStored(s3Key: string): Promise<boolean> {
+  try {
+    return (await headObject(s3Key)) !== null;
+  } catch (err) {
+    // Never log the S3 key; the error name is enough to triage.
+    console.error("Blended Learning recording HEAD failed:", err instanceof Error ? err.name : "unknown");
+    return true;
+  }
+}
+
+export type RecordingPlayback = { expired: true } | { expired: false; url: string };
+
+// A saved Conversation's Call Recording (admins only, ADR 0010). Null when
+// out of scope or the Conversation has no recording.
+export async function getRecordingPlayback(
+  access: BlendedLearningAccess,
+  conversationId: number
+): Promise<RecordingPlayback | null> {
+  const conversation = await conversationInScope(access, conversationId);
+  const s3Key = conversation?.call_recording_s3_key;
+  if (!s3Key) return null;
+  if (!(await recordingStillStored(s3Key))) return { expired: true };
+  const url = await presignDocumentPage({ s3Key, ttlSeconds: RECORDING_URL_TTL_SECONDS });
+  return { expired: false, url };
+}
+
+export type TranscriptTurn = { speaker: string | null; text: string };
+export type Transcript = { expired: true } | { expired: false; turns: TranscriptTurn[] };
+
+// A saved Conversation's transcript as speaker turns (admins only, ADR 0010).
+// Null when out of scope or the Conversation has no transcript.
+export async function getTranscript(
+  access: BlendedLearningAccess,
+  conversationId: number
+): Promise<Transcript | null> {
+  const conversation = await conversationInScope(access, conversationId);
+  const s3Key = conversation?.transcript_s3_key;
+  if (!s3Key) return null;
+  const body = await getObjectText(s3Key);
+  if (body === null) return { expired: true };
+  return { expired: false, turns: speakerTurns(JSON.parse(body)) };
+}
+
+type ScribeWord = { text?: unknown; type?: unknown; speaker_id?: unknown };
+
+// etl-next stores the raw ElevenLabs Scribe response. Consecutive words by
+// one `speaker_id` form a turn, and speakers are numbered in the order they
+// first talk (as etl-next's drafting prompt numbers them). Without words, or
+// when any word lacks a speaker, the whole `text` is one unlabelled turn.
+function speakerTurns(scribe: { text?: unknown; words?: unknown }): TranscriptTurn[] {
+  const words = (Array.isArray(scribe.words) ? scribe.words : []).filter(
+    (word): word is ScribeWord => typeof word === "object" && word !== null && word.type !== "spacing"
+  );
+  if (words.length === 0 || !words.every((word) => typeof word.speaker_id === "string" && word.speaker_id)) {
+    const text = String(scribe.text ?? "").trim();
+    return text ? [{ speaker: null, text }] : [];
+  }
+
+  const speakerNumbers = new Map<string, number>();
+  const turns: { speaker: string; texts: string[] }[] = [];
+  for (const word of words) {
+    const id = word.speaker_id as string;
+    if (!speakerNumbers.has(id)) speakerNumbers.set(id, speakerNumbers.size + 1);
+    const speaker = `Speaker ${speakerNumbers.get(id)}`;
+    if (turns.at(-1)?.speaker !== speaker) turns.push({ speaker, texts: [] });
+    const text = String(word.text ?? "").trim();
+    if (text) turns.at(-1)!.texts.push(text);
+  }
+  return turns.map((turn) => ({ speaker: turn.speaker, text: turn.texts.join(" ") }));
 }

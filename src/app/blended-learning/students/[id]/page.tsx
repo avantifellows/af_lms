@@ -16,6 +16,7 @@ import { BlendedLearningHeader } from "../../BlendedLearningHeader";
 import { ActionItemMeta } from "./ActionItemMeta";
 import { ConversationNotes } from "./ConversationNotes";
 import { ConversationPhotos } from "./ConversationPhotos";
+import { ConversationRecording } from "./ConversationRecording";
 import { DraftStatus } from "./DraftStatus";
 import { FLAG_RECIPIENT } from "./flagRecipients";
 
@@ -24,7 +25,8 @@ import { FLAG_RECIPIENT } from "./flagRecipients";
 // demand from their API routes.
 // Users who can log (not read-only) get the entry point to the log page and
 // the draft's Retry and Discard controls; Open Action Items are listed for
-// everyone, and ticked done only from there.
+// everyone, and ticked done only from there. Only Blended Learning Admins
+// (read-only too) can play a saved Call Recording or read its transcript.
 
 const MODE: Record<"call" | "in_person", string> = { call: "Call", in_person: "In person" };
 const SPOKE_WITH: Record<"student" | "parent_or_sibling" | "both", string> = {
@@ -89,7 +91,13 @@ function Profile({ mentee }: { mentee: MenteeDetail }) {
   );
 }
 
-function ConversationEntry({ entry }: { entry: Extract<HistoryEntry, { kind: "conversation" }> }) {
+function ConversationEntry({
+  entry,
+  canPlayRecording,
+}: {
+  entry: Extract<HistoryEntry, { kind: "conversation" }>;
+  canPlayRecording: boolean;
+}) {
   return (
     <>
       <p className="text-xs text-text-secondary">
@@ -126,6 +134,13 @@ function ConversationEntry({ entry }: { entry: Extract<HistoryEntry, { kind: "co
       )}
       {entry.photoCount > 0 && <ConversationPhotos conversationId={entry.id} count={entry.photoCount} />}
       {entry.hasNotes && <ConversationNotes conversationId={entry.id} />}
+      {canPlayRecording && (entry.hasRecording || entry.hasTranscript) && (
+        <ConversationRecording
+          conversationId={entry.id}
+          hasRecording={entry.hasRecording}
+          hasTranscript={entry.hasTranscript}
+        />
+      )}
     </>
   );
 }
@@ -148,7 +163,7 @@ function OpenActionItems({ items }: { items: MenteeDetail["openActionItems"] }) 
   );
 }
 
-function History({ history }: { history: HistoryEntry[] }) {
+function History({ history, canPlayRecording }: { history: HistoryEntry[]; canPlayRecording: boolean }) {
   return (
     <section aria-label="History" className="space-y-3">
       <h3 className="text-sm font-bold uppercase tracking-wide text-text-secondary">History</h3>
@@ -170,7 +185,7 @@ function History({ history }: { history: HistoryEntry[] }) {
                 {entry.kind === "attempt" ? (
                   <p className="break-words text-sm text-text-secondary">{entry.note ?? "No note"}</p>
                 ) : (
-                  <ConversationEntry entry={entry} />
+                  <ConversationEntry entry={entry} canPlayRecording={canPlayRecording} />
                 )}
               </article>
             </li>
@@ -224,7 +239,7 @@ export default async function MenteeDetailPage({ params }: { params: Promise<{ i
           />
         )}
         {mentee.openActionItems.length > 0 && <OpenActionItems items={mentee.openActionItems} />}
-        <History history={mentee.history} />
+        <History history={mentee.history} canPlayRecording={canBlendedLearning(access, "play_recording")} />
       </main>
     </>
   );

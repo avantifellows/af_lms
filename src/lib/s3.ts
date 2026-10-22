@@ -126,6 +126,17 @@ export async function headObject(s3Key: string): Promise<{ byteSize: number } | 
   }
 }
 
+// An object's body as text, or null when there is no object at the key.
+export async function getObjectText(s3Key: string): Promise<string | null> {
+  try {
+    const object = await client().send(new GetObjectCommand({ Bucket: bucket(), Key: s3Key }));
+    return object.Body ? await object.Body.transformToString() : "";
+  } catch (err) {
+    if ((err as { name?: string } | null)?.name === "NoSuchKey") return null;
+    throw err;
+  }
+}
+
 // Thrown when uploadDocumentPages fails partway through. `uploaded` holds the
 // keys that succeeded before the failure so the caller can clean them up.
 export class S3UploadError extends Error {
