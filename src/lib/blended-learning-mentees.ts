@@ -82,10 +82,12 @@ function toMentee(row: MenteeQueryRow, today: string): MenteeRow {
 
 // Mentees from active current-year Mappings, grouped and sorted. A Mentor
 // always gets only their own; an admin gets every Mentor's, or one Mentor's
-// when `mentorUserId` is given. `today` is the IST calendar date.
+// when `mentorUserId` is given. `studentId` narrows it to one Mentee's row.
+// `today` is the IST calendar date.
 export async function listMentees(params: {
   access: BlendedLearningAccess;
   mentorUserId?: number | null;
+  studentId?: number;
   today: string;
 }): Promise<MenteeList> {
   const { access, today } = params;
@@ -131,8 +133,9 @@ export async function listMentees(params: {
      LEFT JOIN blended_learning_conversation_drafts open_draft
        ON open_draft.student_id = st.id AND open_draft.state IN ('transcribing', 'ready', 'failed')
      WHERE ${activeBlendedMappingSql("mapping", "$1")}
-       AND ($2::bigint IS NULL OR mapping.mentor_user_id = $2::bigint)`,
-    [CURRENT_ACADEMIC_YEAR, mentorUserId ?? null]
+       AND ($2::bigint IS NULL OR mapping.mentor_user_id = $2::bigint)
+       AND ($3::bigint IS NULL OR mapping.student_id = $3::bigint)`,
+    [CURRENT_ACADEMIC_YEAR, mentorUserId ?? null, params.studentId ?? null]
   );
 
   const mentees = rows.map((row) => toMentee(row, today)).sort(compareTalkToFirst);

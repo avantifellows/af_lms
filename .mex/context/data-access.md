@@ -197,16 +197,16 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   (read), `src/lib/holistic-follow-up-questions.ts` (client-safe question keys, text, and
   normaliser), `src/lib/holistic-mentor-write-scope.ts` (shared scope guard).
 
-## Blended Learning Mentee list (#442) and detail (#444)
+## Blended Learning Mentee list (#442), detail (#444) and logging (#445)
 
 - **Tables:** the `blended_learning_*` tables are created by db-service (Mappings:
   `20260921120000` + its ensure migration; the other eight: PR #804,
-  `20261022120000`–`20261022120700`). af_lms reads (and, in later slices, writes) them directly
-  over SQL (ADR 0005), never through DB Service HTTP.
+  `20261022120000`–`20261022120700`). af_lms reads and writes them directly over SQL (ADR 0005)
+  through `query()`/`withTransaction`, never through DB Service HTTP.
 - **Mapping source:** active Mappings for `CURRENT_ACADEMIC_YEAR` with `ended_at IS NULL`,
   written once as `activeBlendedMappingSql(alias, yearParam)` in
   `src/lib/blended-learning-access.ts`. `canAccessBlendedStudent` and `listMentees` both use it.
-- **Read model:** `listMentees({ access, mentorUserId?, today })` in
+- **Read model:** `listMentees({ access, mentorUserId?, studentId?, today })` in
   `src/lib/blended-learning-mentees.ts`. One query per list: grade from the current grade
   enrollment (`enrollment_record`, `group_type = 'grade'`, `is_current`), program from the
   active Mapping, the latest Conversation and latest Attempt (`(occurred_on, id)` DESC, through
@@ -239,8 +239,32 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   `getConversationPhotos` resolve the Conversation's Student first, so an Attempt id, a missing
   id or an out-of-scope Student all read as null → 404. Photos are presigned with the existing
   `presignDocumentPage` at a 5-minute TTL; the route logs only the error name on a presign
-  failure (502), never the key. Notes render from stored HTML as-is: the write path (a later
-  slice) must sanitise before insert.
+  failure (502), never the key. Notes render from stored HTML as-is; the write path sanitises
+  before insert (#445).
+- **Logging a Conversation or Attempt (#445):** `logEntry(access, studentId, body, today)` in
+  `src/lib/blended-learning-log-entry.ts`, behind `POST /api/blended-learning/students/[id]/entries`
+  (401 / 403 for other roles and read-only / 404 out of scope or malformed id / 422 validation with
+  `{ error, fieldErrors }` / 201 `{ entry, mentee }`). Validation runs before the transaction:
+  `occurredOn` a real `YYYY-MM-DD` not after today IST; a Conversation needs mode
+  `call|in_person`, spoke-with `student|parent_or_sibling|both`, an integer 1–240 duration and a
+  non-blank summary; an Attempt takes only an optional note (blank → `NULL`). One
+  `withTransaction` re-reads the active Mapping `FOR SHARE` (none, or another Mentor's for a
+  Mentor → 404) and inserts the row with the Mapping's `mentor_user_id`, `program_id` and
+  `academic_year`, plus `logged_by_email`/`logged_by_user_id` = the actor (an admin logging on a
+  Mentor's behalf keeps the mapped Mentor). `23514` (checks, append-only triggers) and `23505`
+  map to 409. After commit, `mentee` is the Student's `listMentees` row (`studentId` filter), so
+  the confirmation shows exactly what the list now says. Later slices add Action Items, flags,
+  photos and draft save inside the same transaction.
+- **Notes sanitiser (#445):** `sanitiseNotesHtml` in `src/lib/blended-learning-notes-sanitiser.ts`
+  (server-only, `sanitize-html`) is the only path to `notes_html`: allowlist `p, h3, b, i, ul, ol,
+  li, table, tr, th, td, br`, no attributes, no links (an `<a>` keeps its text), `strong→b`,
+  `em→i`, script/style bodies dropped, other tags unwrapped (an editor's `tbody`/`colgroup` go),
+  output with no text → `NULL`, input over 100 KB (UTF-8 bytes) → 422. The editor
+  (`students/[id]/log/NotesEditor.tsx`, Tiptap StarterKit + TableKit, heading level 3 only, no
+  link/underline/strike/code/blockquote/rule) sends untrusted HTML; table controls show from
+  1024 px only.
 - **E2E fixture schema:** `e2e/fixtures/migrations/20261022130000_add_blended_learning_schema.sql`
-  mirrors those 10 db-service migrations exactly. Re-diff it with
+  mirrors those 10 db-service migrations exactly. The DB is reset once per run, so specs that
+  write must use their own rows: Mentor C (`e2e-blended-mentor-c@test.local`) and
+  `LOGGING_MENTEES` (one set per viewport) exist only for `blended-learning-log-entry.spec.ts`. Re-diff it with
   `patterns/mirror-db-service-schema-in-e2e.md` whenever PR #804 changes.

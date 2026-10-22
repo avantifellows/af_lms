@@ -19,6 +19,7 @@ import { ConversationPhotos } from "./ConversationPhotos";
 
 // One Mentee: profile, contact, links, any open Conversation Draft and the
 // newest-first history. Notes and photos load on demand from their API routes.
+// Users who can log (not read-only) get the entry point to the log page.
 
 const MODE: Record<"call" | "in_person", string> = { call: "Call", in_person: "In person" };
 const SPOKE_WITH: Record<"student" | "parent_or_sibling" | "both", string> = {
@@ -202,6 +203,14 @@ export default async function MenteeDetailPage({ params }: { params: Promise<{ i
           <span aria-hidden="true">←</span> Mentees
         </Link>
         <Profile mentee={mentee} />
+        {canBlendedLearning(access, "log") && (
+          <Link
+            href={`/blended-learning/students/${mentee.studentId}/log`}
+            className="flex min-h-11 w-full items-center justify-center rounded-lg bg-accent px-4 text-sm font-bold text-text-on-accent shadow-sm hover:bg-accent-hover sm:inline-flex sm:w-auto"
+          >
+            Log a Conversation or Attempt
+          </Link>
+        )}
         {mentee.openDraft && <OpenDraft state={mentee.openDraft.state} />}
         <History history={mentee.history} />
       </main>

@@ -25,7 +25,7 @@ function daysAgo(days: number): string {
   return days === 1 ? "1 day ago" : `${days} days ago`;
 }
 
-function LastContact({ mentee }: { mentee: MenteeRow }) {
+export function LastContact({ mentee }: { mentee: MenteeRow }) {
   if (mentee.lastContact === null) {
     return <span className="text-text-muted">No contact yet</span>;
   }
@@ -42,7 +42,7 @@ function LastContact({ mentee }: { mentee: MenteeRow }) {
   );
 }
 
-function WhyNowTags({ mentee }: { mentee: MenteeRow }) {
+export function WhyNowTags({ mentee }: { mentee: MenteeRow }) {
   if (mentee.reasons.length === 0) return null;
   return (
     <span className="flex flex-wrap gap-1.5">

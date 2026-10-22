@@ -1,7 +1,7 @@
 import type { PoolClient } from "pg";
 import { CURRENT_ACADEMIC_YEAR } from "../../src/lib/constants";
 
-// Blended Learning Mentee-list (#442) and Mentee-detail (#444) fixtures.
+// Blended Learning Mentee-list (#442), Mentee-detail (#444) and logging (#445) fixtures.
 // Every date is a hand-written offset in IST calendar days from the seed's IST
 // "today", which is the same IST date the app computes while the suite runs.
 // Mentor A is the e2e-blended-mentor persona seeded by seedHolisticFixtures (#441).
@@ -13,6 +13,14 @@ export const BLENDED_MENTOR_A = {
 export const BLENDED_MENTOR_B = {
   name: "Synthetic Blended Mentor B",
   email: "e2e-blended-mentor-b@test.local",
+};
+
+// Mentor C's Mentees exist only for the logging spec (#445), which appends
+// Conversations and Attempts to them, one set per viewport. Other specs must
+// not assert on Mentor C or these Mentees.
+export const BLENDED_MENTOR_C = {
+  name: "Synthetic Blended Mentor C",
+  email: "e2e-blended-mentor-c@test.local",
 };
 
 type Grade = 12 | 13;
@@ -43,6 +51,25 @@ export const OTHER_STUDENTS = {
   // Mapped to Mentor A in the previous academic year only.
   previousYear: { key: "P1", firstName: "Uday", lastName: "PastYear", gender: "Male", grade: 12, programId: 80 },
 } as const satisfies Record<string, FixtureMentee>;
+
+// Mentor C's Mentees for the logging spec (#445), per viewport: one never
+// contacted (logs a Conversation), one whose last Conversation was
+// LOGGING_LAST_CONVERSATION_DAYS_AGO IST days ago (logs an Attempt), and one
+// never contacted that an admin logs for on Mentor C's behalf.
+export const LOGGING_MENTEES = {
+  desktop: {
+    conversation: { key: "C1", firstName: "Charu", lastName: "Desk", gender: "Female", grade: 12, programId: 80 },
+    attempt: { key: "C2", firstName: "Arun", lastName: "Desk", gender: "Male", grade: 13, programId: 90 },
+    onBehalf: { key: "C3", firstName: "Bela", lastName: "Desk", gender: "Female", grade: 12, programId: 81 },
+  },
+  mobile: {
+    conversation: { key: "C4", firstName: "Charu", lastName: "Mobile", gender: "Female", grade: 12, programId: 80 },
+    attempt: { key: "C5", firstName: "Arun", lastName: "Mobile", gender: "Male", grade: 13, programId: 90 },
+    onBehalf: { key: "C6", firstName: "Bela", lastName: "Mobile", gender: "Female", grade: 12, programId: 81 },
+  },
+} as const satisfies Record<string, Record<string, FixtureMentee>>;
+export const LOGGING_LAST_CONVERSATION_DAYS_AGO = 5;
+export const LOGGING_LAST_CONVERSATION_SUMMARY = "Synthetic: planned the week's revision.";
 
 // Contact numbers on the `user` row (#444). Phones are 98765100 + the
 // Student's seed index. Ira's WhatsApp differs and her parents' phones are
@@ -102,11 +129,11 @@ async function mentorUserId(client: Client, email: string): Promise<number> {
   return Number(result.rows[0].id);
 }
 
-async function seedMentorB(client: Client): Promise<number> {
+async function seedMentor(client: Client, mentor: { name: string; email: string }): Promise<number> {
   const result = await client.query<{ id: string }>(
     `WITH created AS (
        INSERT INTO "user" (email, first_name, last_name, role, inserted_at, updated_at)
-       VALUES ($1, 'Synthetic', 'Blended Mentor B', 'blended_mentor', now(), now())
+       VALUES ($1, 'Synthetic', $3, 'blended_mentor', now(), now())
        RETURNING id
      ), permission AS (
        INSERT INTO user_permission
@@ -115,7 +142,7 @@ async function seedMentorB(client: Client): Promise<number> {
        FROM created
      )
      SELECT id FROM created`,
-    [BLENDED_MENTOR_B.email, BLENDED_MENTOR_B.name]
+    [mentor.email, mentor.name, mentor.name.replace(/^Synthetic /, "")]
   );
   return Number(result.rows[0].id);
 }
@@ -293,14 +320,20 @@ async function seedDraft(
 
 export async function seedBlendedLearningFixtures(client: Client): Promise<void> {
   const mentorA = await mentorUserId(client, BLENDED_MENTOR_A.email);
-  const mentorB = await seedMentorB(client);
+  const mentorB = await seedMentor(client, BLENDED_MENTOR_B);
+  const mentorC = await seedMentor(client, BLENDED_MENTOR_C);
 
   const ids: Record<string, number> = {};
   const contacts: Record<string, FixtureContact> = {
     [MENTEES.attemptLatest.key]: CONTACTS.attemptLatest,
     [MENTEES.recent.key]: CONTACTS.recent,
   };
-  for (const [index, mentee] of [...Object.values(MENTEES), ...Object.values(OTHER_STUDENTS)].entries()) {
+  const loggingMentees = Object.values(LOGGING_MENTEES).flatMap((set) => Object.values(set));
+  for (const [index, mentee] of [
+    ...Object.values(MENTEES),
+    ...Object.values(OTHER_STUDENTS),
+    ...loggingMentees,
+  ].entries()) {
     ids[mentee.key] = await seedStudent(client, mentee, index, contacts[mentee.key]);
   }
 
@@ -338,6 +371,26 @@ export async function seedBlendedLearningFixtures(client: Client): Promise<void>
     academicYear: previousAcademicYear(CURRENT_ACADEMIC_YEAR),
     startedDaysAgo: 400,
   });
+
+  for (const mentee of loggingMentees) {
+    await seedMapping(client, {
+      studentId: ids[mentee.key],
+      mentorUserId: mentorC,
+      programId: mentee.programId,
+      academicYear: CURRENT_ACADEMIC_YEAR,
+      startedDaysAgo: 90,
+    });
+  }
+  for (const { attempt } of Object.values(LOGGING_MENTEES)) {
+    await seedEntry(client, {
+      kind: "conversation",
+      studentId: ids[attempt.key],
+      mentorUserId: mentorC,
+      programId: attempt.programId,
+      daysAgo: LOGGING_LAST_CONVERSATION_DAYS_AGO,
+      summary: LOGGING_LAST_CONVERSATION_SUMMARY,
+    });
+  }
 
   const entry = (key: string, programId: number, kind: "conversation" | "attempt", daysAgo: number) =>
     seedEntry(client, { kind, studentId: ids[key], mentorUserId: mentorA, programId, daysAgo });
