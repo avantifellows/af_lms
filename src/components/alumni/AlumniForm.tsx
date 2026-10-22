@@ -183,13 +183,17 @@ function useSaveFlow() {
   const [confirming, setConfirming] = useState<Issue[] | null>(null);
   /** Warning ids already confirmed for the save in progress. */
   const [confirmed, setConfirmed] = useState<string[]>([]);
-  /** The version our last save produced, until the reload brings it in. */
-  const [savedVersion, setSavedVersion] = useState<string | null>(null);
+  /**
+   * The version our last save produced, and the loaded record it was saved
+   * over. It counts only until the reload brings a new record in: from then on
+   * that record's version is the one to send (someone may have saved since).
+   */
+  const [lastSave, setLastSave] = useState<{ version: string; over: EntryContext } | null>(null);
 
   return {
     errors, dirty, saving, justSaved, formError, confirming, confirmed, setConfirming,
-    /** The version to send: our own last save's, else the one loaded. */
-    versionFor: (loaded: string) => savedVersion ?? loaded,
+    /** The version to send: our own last save's until the reload lands, else the one loaded. */
+    versionFor: (loaded: EntryContext) => (lastSave?.over === loaded ? lastSave.version : loaded.version),
     /** Close the confirm dialog; its confirmations don't carry over. */
     cancel() {
       setConfirming(null);
@@ -213,8 +217,8 @@ function useSaveFlow() {
       setFormError("");
       setConfirmed(ids);
     },
-    /** Applies the server's answer; returns the saved entry, or null if it wasn't saved. */
-    finish(outcome: SaveOutcome): SavedEntry | null {
+    /** Applies the server's answer to a save over `over`; returns the saved entry, or null if it wasn't saved. */
+    finish(outcome: SaveOutcome, over: EntryContext): SavedEntry | null {
       setSaving(false);
       if (outcome.kind === "confirm") {
         setConfirming(outcome.warnings);
@@ -229,7 +233,7 @@ function useSaveFlow() {
       setConfirmed([]);
       setDirty(false);
       setJustSaved(true);
-      setSavedVersion(outcome.entry.version);
+      setLastSave({ version: outcome.entry.version, over });
       return outcome.entry;
     },
   };
@@ -267,7 +271,7 @@ export default function AlumniForm({ entry, onSaved, canEdit = true }: Props) {
 
   const submit = async (ids: string[]) => {
     flow.start(ids);
-    const saved = flow.finish(await postSave(url, values, ids, flow.versionFor(context.version)));
+    const saved = flow.finish(await postSave(url, values, ids, flow.versionFor(context)), context);
     if (!saved) return;
     // Reload what's now in the database, as the alumnus (a saved pass-out now is one).
     setRef({ kind: "alumnus", id: saved.alumniId });

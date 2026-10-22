@@ -190,6 +190,60 @@ describe("AlumniForm", () => {
     expect(postedBody().version).toBe("v1");
   });
 
+  it("sends the reloaded version after a save, not its own (someone may have saved since)", async () => {
+    const edit = (version: string) =>
+      context({ kind: "edit", ids: { enrollmentUserId: "86655", studentId: "86544", alumniId: "8340" }, version });
+    const loads = [edit("v1"), edit("v3")];
+    const replies = [
+      json({ ok: true, action: "updated", alumniId: "8340", changed: ["UG status"], notCleared: [], version: "v2" }),
+      json({ ok: true, action: "updated", alumniId: "8340", changed: ["UG status"], notCleared: [], version: "v4" }),
+    ];
+    fetchMock.mockImplementation(async (_url: string, init?: RequestInit) =>
+      init?.method === "POST" ? replies.shift() : json(loads.shift()),
+    );
+    render(<AlumniForm entry={ALUMNUS} />);
+    await screen.findByRole("heading", { name: "Ampoli Ram Charan" });
+
+    select("Undergraduate (UG) status", "Studying");
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    // The reload brings someone else's later save (v3).
+    await waitFor(() => expect(loads).toHaveLength(0));
+    await waitFor(() => expect(screen.getByLabelText<HTMLSelectElement>("Undergraduate (UG) status").value).toBe(""));
+
+    select("Undergraduate (UG) status", "Graduated");
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(posts()).toHaveLength(2));
+    expect(postedBody(0).version).toBe("v1");
+    expect(postedBody(1).version).toBe("v3");
+  });
+
+  it("sends the version its save returned when saving again before the reload lands", async () => {
+    const edit = context({ kind: "edit", ids: { enrollmentUserId: "86655", studentId: "86544", alumniId: "8340" }, version: "v1" });
+    let finishReload: (reply: unknown) => void = () => {};
+    let gets = 0;
+    const replies = [
+      json({ ok: true, action: "updated", alumniId: "8340", changed: ["UG status"], notCleared: [], version: "v2" }),
+      json({ ok: true, action: "updated", alumniId: "8340", changed: ["UG status"], notCleared: [], version: "v3" }),
+    ];
+    fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => {
+      if (init?.method === "POST") return replies.shift();
+      // The first load answers at once; the reload after the save hangs.
+      return gets++ === 0 ? json(edit) : new Promise((resolve) => (finishReload = resolve));
+    });
+    render(<AlumniForm entry={ALUMNUS} />);
+    await screen.findByRole("heading", { name: "Ampoli Ram Charan" });
+
+    select("Undergraduate (UG) status", "Studying");
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(gets).toBe(2));
+
+    select("Undergraduate (UG) status", "Graduated");
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(posts()).toHaveLength(2));
+    expect(postedBody(1).version).toBe("v2");
+    await act(async () => finishReload(json(edit)));
+  });
+
   it("has no Save for view-only access", async () => {
     server(context());
     render(<AlumniForm entry={PASS_OUT} canEdit={false} />);
