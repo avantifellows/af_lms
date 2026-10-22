@@ -5,6 +5,7 @@ import { notFound, redirect } from "next/navigation";
 import { Badge, Card } from "@/components/ui";
 import { authOptions } from "@/lib/auth";
 import { canBlendedLearning, getBlendedLearningAccess } from "@/lib/blended-learning-access";
+import { getDraftStatus } from "@/lib/blended-learning-drafts";
 import {
   getMenteeDetail,
   type HistoryEntry,
@@ -21,8 +22,9 @@ import { FLAG_RECIPIENT } from "./flagRecipients";
 // One Mentee: profile, contact, links, any open Conversation Draft (polled
 // while drafting) and the newest-first history. Notes and photos load on
 // demand from their API routes.
-// Users who can log (not read-only) get the entry point to the log page;
-// Open Action Items are listed for everyone, and ticked done only from there.
+// Users who can log (not read-only) get the entry point to the log page and
+// the draft's Retry and Discard controls; Open Action Items are listed for
+// everyone, and ticked done only from there.
 
 const MODE: Record<"call" | "in_person", string> = { call: "Call", in_person: "In person" };
 const SPOKE_WITH: Record<"student" | "parent_or_sibling" | "both", string> = {
@@ -190,6 +192,7 @@ export default async function MenteeDetailPage({ params }: { params: Promise<{ i
   const { id } = await params;
   const mentee = /^\d+$/.test(id) ? await getMenteeDetail(access, Number(id)) : null;
   if (!mentee) notFound();
+  const draftStatus = mentee.openDraft ? await getDraftStatus(access, mentee.openDraft.id) : null;
 
   return (
     <>
@@ -211,7 +214,13 @@ export default async function MenteeDetailPage({ params }: { params: Promise<{ i
           </Link>
         )}
         {mentee.openDraft && (
-          <DraftStatus key={mentee.openDraft.id} draftId={mentee.openDraft.id} initialState={mentee.openDraft.state} />
+          <DraftStatus
+            key={mentee.openDraft.id}
+            draftId={mentee.openDraft.id}
+            initialState={mentee.openDraft.state}
+            initialRetryOffered={draftStatus?.retryOffered ?? false}
+            canManage={canBlendedLearning(access, "manage_draft")}
+          />
         )}
         {mentee.openActionItems.length > 0 && <OpenActionItems items={mentee.openActionItems} />}
         <History history={mentee.history} />

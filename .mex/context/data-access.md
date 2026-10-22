@@ -197,7 +197,7 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   (read), `src/lib/holistic-follow-up-questions.ts` (client-safe question keys, text, and
   normaliser), `src/lib/holistic-mentor-write-scope.ts` (shared scope guard).
 
-## Blended Learning Mentee list (#442), detail (#444), logging (#445), Action Items (#446), Mentor Flags (#447), photos (#448) and Call Recording drafts (#449)
+## Blended Learning Mentee list (#442), detail (#444), logging (#445), Action Items (#446), Mentor Flags (#447), photos (#448) and Call Recording drafts (#449, retry/discard #450)
 
 - **Tables:** the `blended_learning_*` tables are created by db-service (Mappings:
   `20260921120000` + its ensure migration; the other eight: PR #804,
@@ -343,14 +343,31 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
     `manage_draft`, for a `failed` draft or a `transcribing` one whose active request is
     `queued` with `etl_run_id IS NULL` (the wake never reached ETL). The detail page's
     `students/[id]/DraftStatus.tsx` polls it every 15 s while the draft is `transcribing` and
-    stops on ready/failed or when the page closes; a draft no longer open disappears. The Retry
-    and Discard controls are a later slice (#450).
+    stops on ready/failed or when the page closes; a draft no longer open disappears. Each poll
+    also refreshes `retryOffered`, and the page loads its first value via `getDraftStatus`.
+  - **Retry and discard (#450):** `POST /api/blended-learning/drafts/[id]/retry` →
+    `retryDrafting(access, draftId)`: a `transcribing` draft whose active request is `queued` with
+    `etl_run_id IS NULL` is woken again with the **same** `request_key` (no new row); a `failed`
+    draft gets, in one `withTransaction`, `UPDATE … SET state = 'transcribing' WHERE state =
+    'failed'` and a new `queued` request (new UUID key, the actor as `requested_by_*`), then
+    `wakeTranscription`; 200 `{ id, state, retryOffered, delivery }` (a `rejected` wake fails the
+    draft again). Any other state, a lost race or the active-request unique index (`23505`) → 409.
+    `POST …/discard` → `discardDraft`: `UPDATE … SET state = 'discarded', discarded_at = now()
+    WHERE state IN ('transcribing', 'ready', 'failed')`, 200 `{ id, state: "discarded" }`, no
+    rows → 409; the active request is left alone (db-service ignores a discarded draft when ETL
+    finishes). Both need `manage_draft` (read-only → 403) and `canAccessBlendedStudent` (404).
+    `DraftStatus` shows "Retry" on a failed draft, "Retry drafting" on a stuck one and "Discard"
+    (after `window.confirm`, then `router.refresh()`) on every open draft, only when the page
+    passes `canManage`. Discarding removes the panel and the list's "Draft ready to review" chip,
+    and frees the Mentee for a new upload.
   - Drafts never change Last Contact, Talk to First, counts or flags: those read Conversations
     only. Abandoned uploads (no draft) stay in S3 until the lifecycle rule expires them.
   - E2E has no S3 or etl-next (both ETL vars are `" "`), so `blended-learning-recordings.spec.ts`
     checks the control (Mentor yes, read-only and open-draft Mentee no) and polling with
     `page.clock` over a draft it inserts and deletes for Ira (A1); upload and wake outcomes are
-    route-tested.
+    route-tested. `blended-learning-draft-retry-discard.spec.ts` inserts `failed`/`ready` drafts
+    for Ira (deleting her requests and drafts after each test) to cover Retry, Discard and the
+    chip, and checks Rohan's fixture failed draft read-only (no buttons, POSTs 403).
 - **Notes sanitiser (#445):** `sanitiseNotesHtml` in `src/lib/blended-learning-notes-sanitiser.ts`
   (server-only, `sanitize-html`) is the only path to `notes_html`: allowlist `p, h3, b, i, ul, ol,
   li, table, tr, th, td, br`, no attributes, no links (an `<a>` keeps its text), `strong→b`,

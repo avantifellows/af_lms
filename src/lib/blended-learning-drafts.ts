@@ -282,26 +282,27 @@ export async function wakeTranscription(requestKey: string): Promise<WakeDeliver
   return "rejected";
 }
 
-// --- Draft status ------------------------------------------------------------
+// --- Draft status, retry and discard ---------------------------------------
 
 export type DraftState = "transcribing" | "ready" | "failed" | "discarded" | "saved";
 type DraftStatus = { id: number; state: DraftState; retryOffered: boolean };
 
-// One draft's state, for the detail page's polling. "Retry drafting" is
-// offered to those who can manage drafts when the draft failed, or when it is
-// transcribing but its request is still queued with no ETL run (the wake
-// never reached ETL). Null when the draft is out of scope.
-export async function getDraftStatus(access: BlendedLearningAccess, draftId: number): Promise<DraftStatus | null> {
+type DraftRow = {
+  id: number | string;
+  student_id: number | string;
+  state: DraftState;
+  request_key: string | null;
+  request_state: string | null;
+  etl_run_id: string | null;
+};
+
+// One draft with its active (queued or running) Transcription Request, if
+// any. Null when there is no such draft or it is out of scope.
+async function readDraft(access: BlendedLearningAccess, draftId: number): Promise<DraftRow | null> {
   if (!Number.isSafeInteger(draftId) || draftId <= 0) return null;
-  const rows = await query<{
-    id: number | string;
-    student_id: number | string;
-    state: DraftState;
-    request_state: string | null;
-    etl_run_id: string | null;
-  }>(
+  const rows = await query<DraftRow>(
     `SELECT draft.id, draft.student_id, draft.state,
-            request.state AS request_state, request.etl_run_id
+            request.request_key, request.state AS request_state, request.etl_run_id
      FROM blended_learning_conversation_drafts draft
      LEFT JOIN blended_learning_transcription_requests request
        ON request.draft_id = draft.id AND request.state IN ('queued', 'running')
@@ -311,9 +312,96 @@ export async function getDraftStatus(access: BlendedLearningAccess, draftId: num
   );
   const draft = rows[0];
   if (!draft || !(await canAccessBlendedStudent(access, Number(draft.student_id)))) return null;
+  return draft;
+}
 
-  const wakeNeverArrived =
-    draft.state === "transcribing" && draft.request_state === "queued" && draft.etl_run_id === null;
-  const retryable = draft.state === "failed" || wakeNeverArrived;
+// Transcribing, but its request is still queued with no ETL run: the wake
+// never reached ETL.
+function wakeNeverArrived(draft: DraftRow): boolean {
+  return draft.state === "transcribing" && draft.request_state === "queued" && draft.etl_run_id === null;
+}
+
+function draftStatus(access: BlendedLearningAccess, draft: DraftRow): DraftStatus {
+  const retryable = draft.state === "failed" || wakeNeverArrived(draft);
   return { id: Number(draft.id), state: draft.state, retryOffered: retryable && canBlendedLearning(access, "manage_draft") };
+}
+
+// One draft's state, for the detail page's polling. "Retry drafting" is
+// offered to those who can manage drafts when the draft failed, or when the
+// wake never reached ETL. Null when the draft is out of scope.
+export async function getDraftStatus(access: BlendedLearningAccess, draftId: number): Promise<DraftStatus | null> {
+  const draft = await readDraft(access, draftId);
+  return draft ? draftStatus(access, draft) : null;
+}
+
+class Conflict extends Error {}
+
+const NOT_RETRYABLE: Failure = { ok: false, status: 409, error: "This draft can't be retried now." };
+
+// "Retry drafting". A wake that never reached ETL is sent again with the same
+// request key. A failed draft gets a new Transcription Request and moves back
+// to transcribing in one transaction, then ETL is woken. Anything else is 409.
+export async function retryDrafting(
+  access: BlendedLearningAccess,
+  draftId: number
+): Promise<{ ok: true; draft: DraftStatus; delivery: WakeDelivery } | Failure> {
+  if (!canBlendedLearning(access, "manage_draft")) return { ok: false, status: 403, error: "Forbidden" };
+  const draft = await readDraft(access, draftId);
+  if (!draft) return { ok: false, status: 404, error: "Not found" };
+
+  let requestKey: string;
+  if (wakeNeverArrived(draft) && draft.request_key) {
+    requestKey = draft.request_key;
+  } else if (draft.state === "failed") {
+    try {
+      requestKey = await withTransaction(async (client) => {
+        const moved = await client.query(
+          `UPDATE blended_learning_conversation_drafts
+           SET state = $2, updated_at = now()
+           WHERE id = $1 AND state = 'failed'
+           RETURNING id`,
+          [draftId, "transcribing"]
+        );
+        if (moved.rows.length === 0) throw new Conflict();
+        const key = randomUUID();
+        await client.query(
+          `INSERT INTO blended_learning_transcription_requests (request_key, draft_id, student_id, requested_by_user_id, requested_by_email, state)
+           VALUES ($1, $2, $3, $4, $5, $6)`,
+          [key, draftId, Number(draft.student_id), access.actorUserId, access.actorEmail, "queued"]
+        );
+        return key;
+      });
+    } catch (error) {
+      if (error instanceof Conflict || (error as { code?: unknown } | null)?.code === "23505") return NOT_RETRYABLE;
+      throw error;
+    }
+  } else {
+    return NOT_RETRYABLE;
+  }
+
+  const delivery = await wakeTranscription(requestKey);
+  const status = await getDraftStatus(access, draftId);
+  if (!status) return { ok: false, status: 404, error: "Not found" };
+  return { ok: true, draft: status, delivery };
+}
+
+// Discard an open draft (transcribing, ready or failed). That frees the Mentee
+// for a new upload or a hand-logged Conversation. If ETL finishes later,
+// db-service leaves a discarded draft alone. Anything else is 409.
+export async function discardDraft(
+  access: BlendedLearningAccess,
+  draftId: number
+): Promise<{ ok: true; draft: { id: number; state: "discarded" } } | Failure> {
+  if (!canBlendedLearning(access, "manage_draft")) return { ok: false, status: 403, error: "Forbidden" };
+  if (!(await readDraft(access, draftId))) return { ok: false, status: 404, error: "Not found" };
+
+  const discarded = await query<{ id: number | string }>(
+    `UPDATE blended_learning_conversation_drafts
+     SET state = $2, discarded_at = now(), updated_at = now()
+     WHERE id = $1 AND state IN ('transcribing', 'ready', 'failed')
+     RETURNING id`,
+    [draftId, "discarded"]
+  );
+  if (discarded.length === 0) return { ok: false, status: 409, error: "This draft can't be discarded now." };
+  return { ok: true, draft: { id: draftId, state: "discarded" } };
 }
