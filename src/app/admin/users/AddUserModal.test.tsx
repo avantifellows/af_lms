@@ -304,6 +304,23 @@ describe("AddUserModal — school search (debounce)", () => {
     });
   });
 
+  it("searches every school category for an Alumni Manager (Punjab schools aren't JNV)", async () => {
+    mockFetch.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve([]) });
+    renderModal({ user: { ...editUser, role: "alumni_manager", level: 1 } });
+    const input = screen.getByPlaceholderText("Search schools by name or code...");
+
+    await act(async () => {
+      await userEvent.setup({ advanceTimers: vi.advanceTimersByTime }).type(input, "RSMS");
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(400);
+    });
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith("/api/admin/schools?q=RSMS&scope=alumni");
+    });
+  });
+
   it("displays search results and adds school on click", async () => {
     mockFetch.mockResolvedValue({
       ok: true,

@@ -1,5 +1,6 @@
 import { query } from "@/lib/db";
-import { canAccessSchoolSync, type UserPermission } from "@/lib/permissions";
+import type { UserPermission } from "@/lib/permissions";
+import { schoolScopeSql } from "./scope";
 import { cohortCte, cohortParams } from "./students";
 
 // The schools on the Alumni home page: every school in the person's scope with
@@ -22,9 +23,23 @@ interface SchoolCountRow {
   alumni: number;
 }
 
+/**
+ * The person's scope narrows the query up front (not after counting every
+ * school), so a one-school manager's page reads only that school's students.
+ */
 export async function listAlumniSchools(permission: UserPermission): Promise<AlumniSchool[]> {
+  const params = cohortParams();
+  const scope = schoolScopeSql(permission, "sc.code", "sc.region", params.length + 1);
+  const scoped = scope.sql !== "TRUE";
+  const members = scoped
+    ? `scoped_members AS MATERIALIZED (
+         SELECT er.user_id FROM enrollment_record er JOIN school sc ON sc.id = er.group_id
+         WHERE er.group_type = 'school' AND ${scope.sql}
+       ),`
+    : "";
+  const inScope = (column: string) => (scoped ? `AND ${column} IN (SELECT user_id FROM scoped_members)` : "");
   const rows = await query<SchoolCountRow>(
-    `WITH ${cohortCte()},
+    `WITH ${members} ${cohortCte(inScope("er.user_id"))},
      alumni_school AS (
        SELECT sch.code
        FROM alumni a
@@ -36,6 +51,7 @@ export async function listAlumniSchools(permission: UserPermission): Promise<Alu
          ORDER BY er.academic_year DESC NULLS LAST, er.is_current DESC, er.id DESC
          LIMIT 1
        ) sch ON true
+       WHERE TRUE ${inScope("s.user_id")}
      ),
      counts AS (
        SELECT school_code AS code, COUNT(*) AS to_add, 0 AS alumni
@@ -47,11 +63,11 @@ export async function listAlumniSchools(permission: UserPermission): Promise<Alu
      )
      SELECT c.code, sc.name, sc.region, SUM(c.to_add)::int AS to_add, SUM(c.alumni)::int AS alumni
      FROM counts c JOIN school sc ON sc.code = c.code
+     WHERE ${scope.sql}
      GROUP BY c.code, sc.name, sc.region`,
-    cohortParams(),
+    [...params, ...scope.params],
   );
   return rows
-    .filter((r) => canAccessSchoolSync(permission, r.code, r.region ?? undefined))
     .map((r) => ({ code: r.code, name: r.name, toAdd: Number(r.to_add), alumni: Number(r.alumni) }))
     .sort((a, b) => b.toAdd - a.toAdd || a.name.localeCompare(b.name));
 }

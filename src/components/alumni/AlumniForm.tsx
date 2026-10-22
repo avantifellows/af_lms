@@ -38,6 +38,8 @@ interface SavedEntry {
   alumniId: string;
   changed: string[];
   notCleared: string[];
+  /** The record's version after this save. */
+  version: string;
 }
 
 /**
@@ -181,11 +183,21 @@ function useSaveFlow() {
   const [confirming, setConfirming] = useState<Issue[] | null>(null);
   /** Warning ids already confirmed for the save in progress. */
   const [confirmed, setConfirmed] = useState<string[]>([]);
+  /** The version our last save produced, until the reload brings it in. */
+  const [savedVersion, setSavedVersion] = useState<string | null>(null);
 
   return {
     errors, dirty, saving, justSaved, formError, confirming, confirmed, setConfirming,
-    /** A field changed: clear its error, mark the form unsaved. */
+    /** The version to send: our own last save's, else the one loaded. */
+    versionFor: (loaded: string) => savedVersion ?? loaded,
+    /** Close the confirm dialog; its confirmations don't carry over. */
+    cancel() {
+      setConfirming(null);
+      setConfirmed([]);
+    },
+    /** A field changed: clear its error, mark the form unsaved, forget earlier confirmations. */
     edited(column: string) {
+      setConfirmed([]);
       setErrors((prev) => without(prev, column));
       setDirty(true);
       setJustSaved(false);
@@ -217,6 +229,7 @@ function useSaveFlow() {
       setConfirmed([]);
       setDirty(false);
       setJustSaved(true);
+      setSavedVersion(outcome.entry.version);
       return outcome.entry;
     },
   };
@@ -254,7 +267,7 @@ export default function AlumniForm({ entry, onSaved, canEdit = true }: Props) {
 
   const submit = async (ids: string[]) => {
     flow.start(ids);
-    const saved = flow.finish(await postSave(url, values, ids, context.version));
+    const saved = flow.finish(await postSave(url, values, ids, flow.versionFor(context.version)));
     if (!saved) return;
     // Reload what's now in the database, as the alumnus (a saved pass-out now is one).
     setRef({ kind: "alumnus", id: saved.alumniId });
@@ -309,7 +322,7 @@ export default function AlumniForm({ entry, onSaved, canEdit = true }: Props) {
         <ConfirmDialog
           issues={confirming}
           saving={saving}
-          onCancel={() => flow.setConfirming(null)}
+          onCancel={flow.cancel}
           onConfirm={() => submit(withConfirmed(confirmed, confirming))}
         />
       )}
@@ -410,7 +423,7 @@ function SaveStatus({
   if (errorCount > 0) {
     return (
       <span className="flex items-center gap-1 text-sm text-danger">
-        <AlertTriangle className="h-4 w-4" aria-hidden /> {errorCount} field{errorCount === 1 ? "" : "s"} need fixing.
+        <AlertTriangle className="h-4 w-4" aria-hidden /> {errorCount} {errorCount === 1 ? "field needs" : "fields need"} fixing.
       </span>
     );
   }

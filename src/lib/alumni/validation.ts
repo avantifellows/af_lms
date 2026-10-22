@@ -125,12 +125,21 @@ export interface Review {
 
 /**
  * Everything checked before a save — the form and the server run the same
- * review. `values` is what will be sent; the checks run on the record as it
- * will be after the save.
+ * review. What applies is worked out on the record as it will be after the
+ * save (saved values + the new non-blank ones), and only that is checked:
+ * - a saved value that no longer applies (a graduation year once the status
+ *   is Studying) isn't checked, since the person can't change it here;
+ * - a typed value that doesn't apply to the merged record (an organisation
+ *   while the saved Employment is Not Employed) isn't sent.
+ * `values` is what will be sent: the submitted fields that still apply.
  */
 export function reviewSave(submitted: Values, previous: Values, ctx: CheckContext): Review & { values: Values } {
-  const values = visibleValues(submitted);
-  return { values, ...reviewValues(afterSave(values, previous), previous, ctx) };
+  const typed: Values = {};
+  for (const [column, v] of Object.entries(submitted)) typed[column] = (v ?? "").trim();
+  const after = visibleValues(afterSave(typed, previous));
+  const values: Values = {};
+  for (const column of Object.keys(after)) if (column in typed) values[column] = typed[column];
+  return { values, ...reviewValues(after, previous, ctx) };
 }
 
 /** The checks on one set of values (normally the record after the save, see `reviewSave`). */

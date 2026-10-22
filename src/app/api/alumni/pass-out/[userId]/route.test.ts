@@ -38,6 +38,7 @@ function context(overrides: Partial<EntryContext> = {}): EntryContext {
     profile: { student_g12_graduating_year: "2026" },
     alumni: {},
     codeNames: {},
+    version: "",
     ...overrides,
   };
 }

@@ -1,6 +1,7 @@
 import { query } from "@/lib/db";
-import { canAccessSchoolSync, type UserPermission } from "@/lib/permissions";
+import type { UserPermission } from "@/lib/permissions";
 import { ALUMNI_COHORT_GRADE, ALUMNI_PROGRAM_ORDER, currentAcademicYear } from "./config";
+import { schoolScopeSql } from "./scope";
 
 // Reads for the Alumni tab, the same way the roster reads: grade from
 // enrollment_record (group_type 'grade', per academic year), program from the
@@ -50,7 +51,7 @@ export function cohortCte(userFilter = "") {
       SELECT sc.code, sc.name
       FROM enrollment_record er JOIN school sc ON sc.id = er.group_id
       WHERE er.user_id = c.user_id AND er.group_type = 'school'
-      ORDER BY (er.academic_year = c.passout_year) DESC, er.is_current DESC, er.academic_year DESC NULLS LAST, er.id DESC
+      ORDER BY (er.academic_year = c.passout_year) DESC NULLS LAST, er.is_current DESC, er.academic_year DESC NULLS LAST, er.id DESC
       LIMIT 1
     ) sch ON true
   )`;
@@ -183,9 +184,9 @@ export interface FoundAlumnus {
 }
 
 const FIND_LIMIT = 20;
-/** Rows read before the scope filter, so out-of-scope matches don't crowd out the rest. */
-const FIND_SCAN = 100;
 const MAX_NAME_WORDS = 4;
+/** The longest search the API reads (the search box allows the same). */
+export const MAX_FIND_LENGTH = 100;
 
 const likeEscape = (s: string) => s.replace(/[\\%_]/g, (c) => `\\${c}`);
 
@@ -203,26 +204,22 @@ function findFilter(q: string): { where: string; params: string[] } | null {
 
 /**
  * Existing alumni by AFID (digits, prefix) or name (every word), in the
- * person's alumni scope. Alumni with no School on record are found only by
- * all-schools (level 3) access, the same rule as canAccessAlumni.
+ * person's alumni scope. The scope is applied in SQL before the LIMIT, so a
+ * common name can't push the person's own alumni out of the results. Alumni
+ * with no School on record are found only by all-schools (level 3) access,
+ * the same rule as canAccessAlumni.
  */
 export async function findAlumni(permission: UserPermission, q: string): Promise<FoundAlumnus[]> {
   const filter = findFilter(q);
   if (!filter) return [];
+  const scope = schoolScopeSql(permission, "sch.code", "sch.region", filter.params.length + 1);
   const rows = await query<PersonRow & {
-    alumni_id: string; cohort_year: string | null; school_code: string | null; school_name: string | null; school_region: string | null;
+    alumni_id: string; cohort_year: string | null; school_code: string | null; school_name: string | null;
   }>(
-    `${alumniRowsSql(filter.where)} ORDER BY u.first_name, u.last_name, a.id LIMIT ${FIND_SCAN}`,
-    filter.params,
+    `${alumniRowsSql(`${filter.where} AND ${scope.sql}`)} ORDER BY u.first_name, u.last_name, a.id LIMIT ${FIND_LIMIT}`,
+    [...filter.params, ...scope.params],
   );
-  return rows
-    .filter((r) =>
-      r.school_code
-        ? canAccessSchoolSync(permission, r.school_code, r.school_region || undefined)
-        : permission.level === 3,
-    )
-    .slice(0, FIND_LIMIT)
-    .map((r) => ({
+  return rows.map((r) => ({
       alumniId: String(r.alumni_id),
       afid: r.afid || "",
       name: fullName(r.first_name, r.last_name),

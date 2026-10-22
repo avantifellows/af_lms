@@ -39,6 +39,7 @@ function context(overrides: Partial<EntryContext> = {}): EntryContext {
     profile: { student_g12_graduating_year: "2026" },
     alumni: { ug_status: "Studying", which_competitive_exam_did_you_appear_for: "Other" },
     codeNames: {},
+    version: "v1",
     ...overrides,
   };
 }
@@ -49,7 +50,7 @@ beforeEach(() => {
   vi.mocked(getServerSession).mockResolvedValue(session as never);
   vi.mocked(canAccessAlumni).mockResolvedValue(true);
   vi.mocked(getAlumnusContext).mockResolvedValue(context());
-  vi.mocked(lookupCodes).mockResolvedValue(new Map());
+  vi.mocked(lookupCodes).mockResolvedValue({ college: new Map(), branch: new Map() });
   vi.mocked(query).mockResolvedValue([{ id: "8340" }]);
   vi.mocked(getDbServiceConfig).mockReturnValue({
     baseUrl: "https://db.test/api",
@@ -88,7 +89,7 @@ describe("POST /api/alumni/[alumniId]", () => {
   });
 
   it("updates the row (PATCH) with only the changed field", async () => {
-    const res = await post({ values: { ug_status: "Studying", which_competitive_exam_did_you_appear_for: "State CET" } });
+    const res = await post({ values: { ug_status: "Studying", which_competitive_exam_did_you_appear_for: "State CET" }, version: "v1" });
     expect(await res.json()).toMatchObject({ action: "updated" });
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("https://db.test/api/alumni/8340");
@@ -97,8 +98,15 @@ describe("POST /api/alumni/[alumniId]", () => {
   });
 
   it("never erases a saved value: blanking a field alone is refused", async () => {
-    const res = await post({ values: { ug_status: "" } });
+    const res = await post({ values: { ug_status: "" }, version: "v1" });
     expect(res.status).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("passes the version through: a save made on an older version is refused (409)", async () => {
+    const res = await post({ values: { ug_status: "Studying", which_competitive_exam_did_you_appear_for: "State CET" }, version: "v0" });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toMatch(/Someone else saved/);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

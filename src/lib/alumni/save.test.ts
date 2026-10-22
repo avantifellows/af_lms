@@ -141,6 +141,20 @@ describe("saveAlumni", () => {
     expect(await saveAlumni(EDIT, EDIT.alumni, [], EDIT.version)).toMatchObject({ ok: false, status: 400, error: "Nothing changed from the alumni record." });
   });
 
+  it("refuses to add someone another person added since the form opened (409, nothing written)", async () => {
+    mockQuery.mockResolvedValue([{ id: "9001" }]); // their row exists now
+    const result = await saveAlumni(NEW, { current_status: "Studying", ug_status: "Studying", degree_ug: "MBBS" });
+    expect(result).toMatchObject({ ok: false, status: 409 });
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("returns the record's new version, so the next save isn't taken for a clash", async () => {
+    mockQuery.mockImplementation(async (sql: string) =>
+      (sql.includes("updated_at::text") ? [{ version: "2026-10-22 09:00:00" }] : [{ id: "8340" }]) as never);
+    const result = await saveAlumni(EDIT, { ...EDIT.alumni, current_status: "Seeking Work" }, [], EDIT.version);
+    expect(result).toMatchObject({ ok: true, version: "2026-10-22 09:00:00" });
+  });
+
   it("reports a DB Service error as 502", async () => {
     dbServiceAnswers(500, { error: "boom" });
     expect(await saveAlumni(NEW, { current_status: "Studying" })).toMatchObject({ ok: false, status: 502 });

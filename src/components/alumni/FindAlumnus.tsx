@@ -5,6 +5,9 @@ import { useEffect, useState } from "react";
 import { Search } from "lucide-react";
 import type { FoundAlumnus } from "@/lib/alumni/students";
 
+/** Same as the API's MAX_FIND_LENGTH (a type-only import keeps server code out of the bundle). */
+const MAX_LENGTH = 100;
+
 // "Find an alumnus" on the Alumni home: by AFID or name, across every school
 // in the person's scope. Reaches alumni who are in no school's list (many
 // bulk-imported records have no School on record).
@@ -69,6 +72,7 @@ export default function FindAlumnus() {
           onChange={(e) => setQ(e.target.value)}
           placeholder="Name or AFID"
           autoComplete="off"
+          maxLength={MAX_LENGTH}
           className="w-full rounded-md border border-gray-300 py-2 pl-9 pr-3 text-sm focus:border-blue-500 focus:outline-none"
         />
       </div>

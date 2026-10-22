@@ -7,7 +7,7 @@
 // noted (onRecord) and never blocks or asks, so old records can still be saved.
 
 import { describeTypical, durationRule } from "./durations";
-import { isEmployed, type Values } from "./fields";
+import { isEmployed, lower, type Values } from "./fields";
 
 export interface Issue {
   /** Stable id, used to confirm warnings. */
@@ -124,9 +124,6 @@ const checkOrder: Check = (v, ctx, add) => {
       `PG start (${pgStart}) is before UG graduation (${ugEnd}).`);
   }
 };
-
-/** Case-insensitive, so old records' spellings ("NO", "Gap year") are checked too. */
-const lower = (s: string | undefined) => (s ?? "").trim().toLowerCase();
 
 /** Gap year answers agree with each other. */
 const checkGapYear: Check = (v, ctx, add) => {

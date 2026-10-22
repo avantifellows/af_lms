@@ -17,7 +17,15 @@ import { checkContext, reviewSave } from "./validation";
 // blank never erases a saved value. Nothing is ever deleted.
 
 export type SaveResult =
-  | { ok: true; alumniId: string; action: "inserted" | "updated"; changed: string[]; notCleared: string[] }
+  | {
+      ok: true;
+      alumniId: string;
+      action: "inserted" | "updated";
+      changed: string[];
+      notCleared: string[];
+      /** The record's new version, for the form's next save. */
+      version: string;
+    }
   | { ok: false; status: number; error: string; fieldErrors?: Record<string, string>; warnings?: Issue[] };
 
 const FIELD = new Map(ALUMNI_FIELDS.map((f) => [f.column, f]));
@@ -61,16 +69,21 @@ function toDbFields(changed: string[], values: Values, codes: CodeLookup): Recor
 
 /** POST a new alumni row or PATCH the existing one (looked up fresh — it may be new since the form opened). */
 async function sendToDbService(
-  studentId: string,
+  context: EntryContext,
   fields: Record<string, string | number>,
 ): Promise<{ ok: true; alumniId: string; action: "inserted" | "updated" } | Failure> {
   const dbService = getDbServiceConfig();
   if (!dbService) return { ok: false, status: 503, error: "DB Service is not configured." };
 
+  const studentId = context.ids.studentId;
   const [existing] = await query<{ id: string }>(
     `SELECT id FROM alumni WHERE student_id = $1 ORDER BY id DESC LIMIT 1`,
     [studentId],
   );
+  // The form was for adding them, but someone added them since (or the other
+  // way round): writing now would merge these answers, unchecked, into a
+  // record the person never saw.
+  if (Boolean(existing) !== (context.kind === "edit")) return CONFLICT;
   const request = existing
     ? { url: `${dbService.baseUrl}/alumni/${existing.id}`, method: "PATCH", body: fields }
     : { url: `${dbService.baseUrl}/alumni`, method: "POST", body: { student_id: Number(studentId), ...fields } };
@@ -87,6 +100,12 @@ async function sendToDbService(
   }
   const saved = (await response.json()) as { id: number | string };
   return { ok: true, alumniId: String(saved.id), action: existing ? "updated" : "inserted" };
+}
+
+/** The record's version as the form sees it (see EntryContext.version). */
+async function currentVersion(alumniId: string): Promise<string> {
+  const [row] = await query<{ version: string | null }>(`SELECT updated_at::text AS version FROM alumni WHERE id = $1`, [alumniId]);
+  return row?.version ?? "";
 }
 
 /** Someone else saved this alumnus after the form loaded it. */
@@ -126,10 +145,11 @@ export async function saveAlumni(
   const notCleared = Object.keys(values).filter((c) => !values[c] && previous[c]);
   if (!changed.length) return nothingToSave(context, notCleared);
 
-  const sent = await sendToDbService(context.ids.studentId, toDbFields(changed, values, codes));
+  const sent = await sendToDbService(context, toDbFields(changed, values, codes));
   if (!sent.ok) return sent;
   return {
     ...sent,
+    version: await currentVersion(sent.alumniId),
     changed: changed.map((c) => FIELD.get(c)!.label),
     notCleared: notCleared.map((c) => FIELD.get(c)!.label),
   };

@@ -6,6 +6,12 @@
 // row yet. Every past year counts, so nothing changes when a new year starts.
 // JNV NVS is deliberately excluded (govt-scale programme, not tracked one by one).
 
+import { PROGRAM_IDS } from "@/lib/constants";
+
+/** Programs not in PROGRAM_IDS (adding them there would change its other uses). */
+const DAKSHANA_COE = 86;
+const ENF_COE = 87;
+
 export const ALUMNI_COHORT_GRADE = 12;
 
 /** The Indian academic year starts in April. */
@@ -35,4 +41,11 @@ export const academicYearEnd = (academicYear: string) => academicYear.split("-")
  * Punjab pass-outs can be under either Punjab program (production has
  * 2025-26 Grade 12 under Punjab CoE; staging under Punjab Nodal).
  */
-export const ALUMNI_PROGRAM_ORDER = [1, 86, 87, 74, 2, 94];
+export const ALUMNI_PROGRAM_ORDER: number[] = [
+  PROGRAM_IDS.COE,
+  DAKSHANA_COE,
+  ENF_COE,
+  PROGRAM_IDS.PUNJAB_COE,
+  PROGRAM_IDS.NODAL,
+  PROGRAM_IDS.PUNJAB_NODAL,
+];

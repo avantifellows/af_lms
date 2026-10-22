@@ -1,6 +1,9 @@
 // Field definitions shared by the form (browser) and validation (server).
 // No server-only imports here.
 
+/** Case-insensitive answer, so old records' spellings ("YES", "Gap year") count too. */
+export const lower = (s: string | undefined) => (s ?? "").trim().toLowerCase();
+
 /** Dropdown values. Alumni ones are the real values in dim_alumni / dim_degree /
  *  dim_job_sector (BigQuery, 2026-09-21). */
 export const ENUMS: Record<string, readonly string[]> = {
@@ -68,7 +71,8 @@ export const ALUMNI_SECTIONS: SectionDef[] = [
       { column: "did_you_take_a_gap_year", label: "Took a gap year?", type: "enum" },
       {
         column: "why_did_you_take_a_gap_year", label: "Gap year reason", type: "enum",
-        showWhen: (v) => v.did_you_take_a_gap_year === "Yes" || v.ug_status === "Gap Year",
+        // Case-insensitive, like checks.ts, so old records' "YES" / "Gap year" show it too.
+        showWhen: (v) => lower(v.did_you_take_a_gap_year) === "yes" || lower(v.ug_status) === "gap year",
         dependsOn: ["did_you_take_a_gap_year", "ug_status"],
       },
       { column: "which_competitive_exam_did_you_appear_for", label: "Admission through exam", type: "enum" },

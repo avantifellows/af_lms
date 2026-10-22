@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextResponse } from "next/server";
 
 vi.mock("@/lib/alumni/access", () => ({ authorizeAlumni: vi.fn() }));
-vi.mock("@/lib/alumni/students", () => ({ findAlumni: vi.fn() }));
+vi.mock("@/lib/alumni/students", () => ({ findAlumni: vi.fn(), MAX_FIND_LENGTH: 100 }));
 
 import { authorizeAlumni } from "@/lib/alumni/access";
 import { findAlumni } from "@/lib/alumni/students";

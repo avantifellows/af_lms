@@ -28,11 +28,25 @@ describe("listAlumniSchools", () => {
     expect(schools[0]).toEqual({ code: "3140103005", name: "RSMS Bathinda", toAdd: 9, alumni: 7 });
   });
 
-  it("keeps only the schools in scope", async () => {
+  it("narrows to the scope in SQL up front, not after counting every school", async () => {
     const level1 = perm({ role: "alumni_manager", level: 1, school_codes: ["3140103005"] });
-    expect((await listAlumniSchools(level1)).map((s) => s.code)).toEqual(["3140103005"]);
-    const level2 = perm({ role: "alumni_manager", level: 2, regions: ["Pune"] });
-    expect((await listAlumniSchools(level2)).map((s) => s.code)).toEqual(["34092"]);
+    await listAlumniSchools(level1);
+    const [sql, params] = mockQuery.mock.calls[0];
+    expect(sql).toContain("scoped_members AS MATERIALIZED");
+    expect(sql).toContain("AND er.user_id IN (SELECT user_id FROM scoped_members)");
+    expect(sql).toContain("WHERE (sc.code = ANY($4::text[]) OR sc.region = ANY($5::text[]))");
+    expect((params as unknown[]).slice(3)).toEqual([["3140103005"], []]);
+
+    mockQuery.mockClear();
+    await listAlumniSchools(perm({ role: "alumni_manager", level: 2, regions: ["Pune"] }));
+    expect((mockQuery.mock.calls[0][1] as unknown[]).slice(3)).toEqual([[], ["Pune"]]);
+  });
+
+  it("reads every school for all-schools access", async () => {
+    await listAlumniSchools(perm({}));
+    const [sql, params] = mockQuery.mock.calls[0];
+    expect(sql).not.toContain("scoped_members");
+    expect(params).toHaveLength(3);
   });
 
   it("counts pass-outs to add and alumni the way the school lists do", async () => {

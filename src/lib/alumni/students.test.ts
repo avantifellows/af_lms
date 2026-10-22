@@ -74,19 +74,19 @@ describe("findAlumni", () => {
     { alumni_id: "3", afid: "2632401173", first_name: "Asha", last_name: "K", cohort_year: null, school_code: null, school_name: null, school_region: null },
   ];
 
-  it("searches the AFID by prefix when the query is digits", async () => {
+  it("searches the AFID by prefix when the query is digits, within the School codes", async () => {
     mockQuery.mockResolvedValue([] as never);
     await findAlumni(scoped, " 26324 ");
     const [sql, params] = mockQuery.mock.calls[0];
-    expect(sql).toContain("s.student_id LIKE $1");
-    expect(params).toEqual(["26324%"]);
+    expect(sql).toContain("s.student_id LIKE $1 AND (sch.code = ANY($2::text[]) OR sch.region = ANY($3::text[]))");
+    expect(params).toEqual(["26324%", ["59525"], []]);
   });
 
   it("matches every name word, with % and _ taken literally", async () => {
     mockQuery.mockResolvedValue([] as never);
-    await findAlumni(scoped, "asha 50%_x");
+    await findAlumni(everywhere, "asha 50%_x");
     const [sql, params] = mockQuery.mock.calls[0];
-    expect(sql).toMatch(/ILIKE \$1 AND .*ILIKE \$2/s);
+    expect(sql).toMatch(/ILIKE \$1 AND [^]*ILIKE \$2 AND TRUE/);
     expect(params).toEqual(["%asha%", "%50\\%\\_x%"]);
   });
 
@@ -95,9 +95,17 @@ describe("findAlumni", () => {
     expect(mockQuery).not.toHaveBeenCalled();
   });
 
-  it("keeps only alumni in scope; no-School alumni only for level 3", async () => {
+  it("applies the scope in SQL before the LIMIT, so out-of-scope matches can't crowd out the person's own", async () => {
+    mockQuery.mockResolvedValue([ROWS[0]] as never);
+    expect((await findAlumni(scoped, "kumar")).map((a) => a.alumniId)).toEqual(["1"]);
+    const [sql] = mockQuery.mock.calls[0];
+    const where = sql.lastIndexOf("WHERE");
+    expect(sql.indexOf("sch.code = ANY(", where)).toBeGreaterThan(where);
+    expect(sql.indexOf("LIMIT 20", where)).toBeGreaterThan(sql.indexOf("sch.code = ANY(", where));
+  });
+
+  it("maps rows (no-School alumni come back blank) for all-schools access", async () => {
     mockQuery.mockResolvedValue(ROWS as never);
-    expect((await findAlumni(scoped, "asha")).map((a) => a.alumniId)).toEqual(["1"]);
     const all = await findAlumni(everywhere, "asha");
     expect(all.map((a) => a.alumniId)).toEqual(["1", "2", "3"]);
     expect(all[0]).toEqual({

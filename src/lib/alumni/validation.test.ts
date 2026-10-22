@@ -74,3 +74,26 @@ describe("old records' spellings", () => {
     expect(errorsOf({ did_you_take_a_gap_year: "No", ug_status: "Gap year" }, {})).toHaveProperty("did_you_take_a_gap_year");
   });
 });
+
+describe("checks run on what applies after the merge (second review)", () => {
+  it("doesn't block a valid edit on a saved value that no longer applies", () => {
+    const previous = { ug_status: "Graduated", degree_ug: "BTech/BE", start_year_ug: "2019", year_of_graduation_ug: "2023" };
+    for (const grad of ["2024", "2018", ""]) {
+      const review = reviewSave({ ...previous, ug_status: "Studying", degree_ug: "BArch", year_of_graduation_ug: grad }, previous, CTX);
+      expect(review.errors).toEqual({});
+      expect(review.values).not.toHaveProperty("year_of_graduation_ug");
+    }
+  });
+
+  it("doesn't send a typed value that doesn't apply to the saved answers", () => {
+    const previous = { current_status: "Seeking Work", employment_status: "Not Employed - Seeking Work" };
+    const review = reviewSave({ ...previous, employment_status: "", current_org_name: "Infosys" }, previous, CTX);
+    expect(review.errors).toEqual({});
+    expect(review.values).not.toHaveProperty("current_org_name");
+  });
+
+  it("still blocks MBBS on a saved CS branch that was cleared in the form", () => {
+    const previous = { ug_status: "Studying", current_status: "Studying", degree_ug: "BTech/BE", branch_id_ug: "CSIT013" };
+    expect(errorsOf({ ...previous, degree_ug: "MBBS", branch_id_ug: "" }, previous)).toHaveProperty("degree_ug");
+  });
+});

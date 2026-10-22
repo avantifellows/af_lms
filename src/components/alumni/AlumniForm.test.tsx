@@ -105,7 +105,7 @@ describe("AlumniForm", () => {
     fireEvent.change(screen.getByLabelText("Graduation year"), { target: { value: "2028" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
-    expect(await screen.findByText(/field.* need fixing/)).toBeInTheDocument();
+    expect(await screen.findByText(/fields? needs? fixing/)).toBeInTheDocument();
     expect(screen.getByText(/2028 is in the future/)).toBeInTheDocument();
     expect(posts()).toHaveLength(0);
 
@@ -259,8 +259,22 @@ describe("AlumniForm", () => {
     expect(screen.getByText(/never erases what's on record/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save changes" })).toBeInTheDocument();
     expect(screen.getAllByText(/stays on record/).length).toBeGreaterThan(0);
-    expect(screen.getByText(/On record: BTech\/BE takes 4 years/)).toBeInTheDocument();
+    // UG years don't apply to a Gap Year status, so they aren't checked (only noted as staying on record).
+    expect(screen.queryByText(/On record: BTech\/BE takes 4 years/)).not.toBeInTheDocument();
     expect(screen.getByRole("option", { name: "Old status (current value, not in list)" })).toBeInTheDocument();
+  });
+
+  it("notes an impossible pair already on record without blocking the save", async () => {
+    server(
+      context({
+        kind: "edit",
+        ids: { enrollmentUserId: "86655", studentId: "86544", alumniId: "8340" },
+        alumni: { ug_status: "Graduated", degree_ug: "BTech/BE", start_year_ug: "2013", year_of_graduation_ug: "2022" },
+        profile: { student_g12_graduating_year: "2012" },
+      }),
+    );
+    render(<AlumniForm entry={ALUMNUS} />);
+    expect(await screen.findByText(/On record: BTech\/BE takes 4 years/)).toBeInTheDocument();
   });
 
   it("lets a newly typed value that no longer fits be cleared", async () => {
