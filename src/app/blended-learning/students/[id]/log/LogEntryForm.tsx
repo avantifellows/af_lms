@@ -676,7 +676,9 @@ export function LogEntryForm({
                 <span id={notesLabelId} className="mb-1 block text-xs font-bold uppercase tracking-wide text-text-muted">
                   Notes (optional)
                 </span>
-                <NotesEditor labelId={notesLabelId} initialHtml={draft?.notesHtml} onChange={setNotesHtml} />
+                {/* Switching to Attempt unmounts the editor; it comes back with
+                    the notes it last showed, so what is saved is what is seen. */}
+                <NotesEditor labelId={notesLabelId} initialHtml={notesHtml} onChange={setNotesHtml} />
                 <FieldError message={fieldErrors.notesHtml} />
               </div>
             </>

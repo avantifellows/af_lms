@@ -144,6 +144,14 @@ for (const { label, key, viewport, entryRole } of VIEWPORTS) {
       }
       expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
 
+      // Switching to Attempt and back keeps the notes on screen, and what is
+      // saved is what the editor shows (QA-06).
+      await form.getByRole("radio", { name: "Attempt" }).check();
+      await expect(form.getByRole("textbox", { name: "Notes" })).toHaveCount(0);
+      await form.getByRole("radio", { name: "Conversation" }).check();
+      await expect(notes).toHaveText("Revise optics by Friday");
+      await expect(notes.locator("strong, b")).toHaveText("Revise optics");
+
       await form.getByRole("button", { name: "Save Conversation" }).click();
 
       const saved = page.getByRole("region", { name: "Saved" });

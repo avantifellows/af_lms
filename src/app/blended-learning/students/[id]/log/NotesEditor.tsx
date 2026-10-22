@@ -99,7 +99,8 @@ export function NotesEditor({
   onChange,
 }: {
   labelId: string;
-  // Notes to start from, such as a Conversation Draft's; text already escaped.
+  // Notes to start from: a Conversation Draft's (text already escaped), or the
+  // editor's own HTML from before the form unmounted it.
   initialHtml?: string;
   onChange: (html: string) => void;
 }) {
