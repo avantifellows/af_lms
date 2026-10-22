@@ -129,7 +129,8 @@ describe("ChallengeCategoryHeatmap", () => {
     render(<ChallengeCategoryHeatmap programId={1} academicYear="2026-2027" />);
 
     expect(screen.getByLabelText("Grade")).toHaveValue("11");
-    await waitFor(() => expect(screen.getByLabelText("Phase")).toHaveDisplayValue("Phase 2 - Mid-term check"));
+    await waitFor(() => expect(screen.getByLabelText("Phase")).toBeEnabled());
+    expect(screen.getByLabelText("Phase")).toHaveDisplayValue("Phase 2 - Mid-term check");
     expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual([
       "Grade 11", "Grade 12", "All Phases", "Phase 1 - Settling in", "Phase 2 - Mid-term check", "Phase 4 - Year end",
     ]);
@@ -143,6 +144,7 @@ describe("ChallengeCategoryHeatmap", () => {
     expect(requested(fetchMock)[2]).toBe(
       "/api/holistic-mentorship/challenge-categories?program_id=1&academic_year=2026-2027&grade=11",
     );
+    await waitFor(() => expect(screen.getByLabelText("Phase")).toBeEnabled());
     await user.selectOptions(screen.getByLabelText("Grade"), "12");
 
     await waitFor(() => expect(screen.getByLabelText("Phase")).toHaveDisplayValue("Phase 3 - Board prep"));
@@ -161,7 +163,8 @@ describe("ChallengeCategoryHeatmap", () => {
     }));
     const user = userEvent.setup();
     const view = render(<ChallengeCategoryHeatmap programId={1} academicYear="2026-2027" />);
-    await waitFor(() => expect(screen.getByLabelText("Phase")).toHaveDisplayValue("Phase 2 - Mid-term check"));
+    await waitFor(() => expect(screen.getByLabelText("Phase")).toBeEnabled());
+    expect(screen.getByLabelText("Phase")).toHaveDisplayValue("Phase 2 - Mid-term check");
     await user.selectOptions(screen.getByLabelText("Phase"), "Phase 1 - Settling in");
     await waitFor(() => expect(requested(fetchMock)).toHaveLength(3));
 
@@ -317,6 +320,92 @@ describe("ChallengeCategoryHeatmap", () => {
     expect(await screen.findByRole("table", { name: "Challenge Category Heatmap" })).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows the app's own message, not the browser's, when the request itself fails", async () => {
+    vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new TypeError("Failed to fetch"))));
+
+    render(<ChallengeCategoryHeatmap programId={1} academicYear="2026-2027" />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Unable to load Challenge Categories. Please try again.");
+    expect(screen.queryByText("Failed to fetch")).not.toBeInTheDocument();
+  });
+
+  function phaseOptions() {
+    return within(screen.getByLabelText("Phase")).getAllByRole("option").map((option) => option.textContent);
+  }
+
+  it("offers no previous-Grade Phases while the new Grade loads", async () => {
+    let releaseGrade12: () => void = () => {};
+    const fetchMock = vi.fn((url: string) => {
+      const params = new URL(url, "http://localhost").searchParams;
+      if (params.get("grade") !== "12") return respond(heatmap());
+      return new Promise<Response>((resolve) => {
+        releaseGrade12 = () => resolve({ ok: true, json: async () => heatmap({
+          grade: 12, phases: [{ id: 81, number: 3, title: "Board prep", state: "open" }], defaultPhaseId: null,
+        }) } as Response);
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<ChallengeCategoryHeatmap programId={1} academicYear="2026-2027" />);
+    await waitFor(() => expect(screen.getByLabelText("Phase")).toBeEnabled());
+
+    await user.selectOptions(screen.getByLabelText("Grade"), "12");
+
+    expect(screen.getByRole("status")).toHaveTextContent("Loading Challenge Categories...");
+    expect(screen.getByLabelText("Phase")).toBeDisabled();
+    expect(phaseOptions()).toEqual(["All Phases"]);
+    releaseGrade12();
+    await waitFor(() => expect(screen.getByLabelText("Phase")).toBeEnabled());
+    expect(phaseOptions()).toEqual(["All Phases", "Phase 3 - Board prep"]);
+  });
+
+  it("disables Phase with no stale options when a Grade change fails, until Retry loads it", async () => {
+    let failGrade12 = true;
+    const fetchMock = vi.fn((url: string) => {
+      const params = new URL(url, "http://localhost").searchParams;
+      if (params.get("grade") !== "12") return respond(heatmap());
+      return failGrade12
+        ? Promise.reject(new TypeError("Failed to fetch"))
+        : respond(heatmap({ grade: 12, phases: [{ id: 81, number: 3, title: "Board prep", state: "open" }],
+          defaultPhaseId: 81, phaseId: params.get("phase_id") ? 81 : null }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<ChallengeCategoryHeatmap programId={1} academicYear="2026-2027" />);
+    await waitFor(() => expect(screen.getByLabelText("Phase")).toBeEnabled());
+
+    await user.selectOptions(screen.getByLabelText("Grade"), "12");
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Unable to load Challenge Categories. Please try again.");
+    expect(screen.getByLabelText("Phase")).toBeDisabled();
+    expect(phaseOptions()).toEqual(["All Phases"]);
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+
+    failGrade12 = false;
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+
+    await waitFor(() => expect(screen.getByLabelText("Phase")).toBeEnabled());
+    expect(screen.getByLabelText("Phase")).toHaveDisplayValue("Phase 3 - Board prep");
+    expect(requested(fetchMock).every((url) => !/grade=12.*phase_id=7/.test(url))).toBe(true);
+  });
+
+  it("keeps the same Grade's Phases usable when a Phase load fails", async () => {
+    let failPhase = false;
+    vi.stubGlobal("fetch", vi.fn((url: string) => failPhase && url.includes("phase_id=71")
+      ? respond({ error: "Unable to load Challenge Categories. Please try again." }, false)
+      : respond(heatmap())));
+    const user = userEvent.setup();
+    render(<ChallengeCategoryHeatmap programId={1} academicYear="2026-2027" />);
+    await waitFor(() => expect(screen.getByLabelText("Phase")).toBeEnabled());
+
+    failPhase = true;
+    await user.selectOptions(screen.getByLabelText("Phase"), "Phase 1 - Settling in");
+
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(screen.getByLabelText("Phase")).toBeEnabled();
+    expect(phaseOptions()).toEqual(["All Phases", "Phase 1 - Settling in", "Phase 2 - Mid-term check", "Phase 4 - Year end"]);
   });
 
   it("falls back to a generic message when the error response is not JSON", async () => {

@@ -23,15 +23,22 @@ const GROUPS = [
   { group: "non_academic", label: "Non-academic" },
 ] as const;
 
-async function readHeatmapResponse(response: Response): Promise<Heatmap> {
+const LOAD_ERROR = "Unable to load Challenge Categories. Please try again.";
+
+// A failed request (offline, blocked) gets the same message as a failed response,
+// never the browser's own "Failed to fetch".
+async function fetchHeatmap(search: string, signal: AbortSignal): Promise<Heatmap> {
+  const response = await fetch(`/api/holistic-mentorship/challenge-categories?${search}`, { signal })
+    .catch((problem: Error) => {
+      throw signal.aborted ? problem : new Error(LOAD_ERROR);
+    });
   const body = await response.json().catch(() => null);
-  if (!response.ok || !body) {
-    throw new Error(body?.error || "Unable to load Challenge Categories. Please try again.");
-  }
+  if (!response.ok || !body) throw new Error(body?.error || LOAD_ERROR);
   return body;
 }
 
-type PhaseSelection = { scope: string; phaseId: number | null };
+// A scope's Phase options arrive with its default, so they never outlive it.
+type PhaseSelection = { scope: string; phaseId: number | null; phases: Heatmap["phases"] };
 type Loaded = { key: string; data: Heatmap | null; error: string };
 
 // Changing Program, year or Grade (the scope) resets Phase to the new default:
@@ -55,11 +62,10 @@ function useHeatmap(programId: number | "all", academicYear: string, grade: 11 |
     // A default that resolved to All Phases already loaded this exact request.
     if (!pendingDefault && loadedKey.current === key) return;
     const controller = new AbortController();
-    fetch(`/api/holistic-mentorship/challenge-categories?${search}`, { signal: controller.signal })
-      .then(readHeatmapResponse)
+    fetchHeatmap(search, controller.signal)
       .then((data) => {
         if (pendingDefault) {
-          setSelection({ scope, phaseId: data.defaultPhaseId });
+          setSelection({ scope, phaseId: data.defaultPhaseId, phases: data.phases });
           if (data.defaultPhaseId !== null) return;
         }
         loadedKey.current = key;
@@ -81,8 +87,12 @@ function useHeatmap(programId: number | "all", academicYear: string, grade: 11 |
     error,
     loading: !current && !error,
     phaseId,
+    // Until this scope's default resolves (loading, or its load failed), the
+    // previous scope's Phases would be stale, so there are none to pick.
+    phases: pendingDefault ? [] : selection.phases,
+    phasesReady: !pendingDefault,
     search,
-    selectPhase: (next: number | null) => setSelection({ scope, phaseId: next }),
+    selectPhase: (next: number | null) => setSelection({ scope, phaseId: next, phases: selection?.phases ?? [] }),
     reload: () => setRefresh((value) => value + 1),
   };
 }
@@ -270,9 +280,9 @@ export default function ChallengeCategoryHeatmap({ programId, academicYear, onAc
   onAcademicYears?: (years: string[]) => void;
 }) {
   const [grade, setGrade] = useState<11 | 12>(11);
-  const { data, error, loading, phaseId, search, selectPhase, reload } = useHeatmap(programId, academicYear, grade);
+  const { data, error, loading, phaseId, phases, phasesReady, search, selectPhase, reload } =
+    useHeatmap(programId, academicYear, grade);
   const { downloading, downloadError, download } = useHeatmapDownload(search);
-  const [phases, setPhases] = useState<Heatmap["phases"]>([]);
   const academicYears = data?.academicYears;
   const allPrograms = programId === "all";
 
@@ -280,16 +290,13 @@ export default function ChallengeCategoryHeatmap({ programId, academicYear, onAc
     if (academicYears?.length) onAcademicYears?.(academicYears);
   }, [academicYears, onAcademicYears]);
 
-  // Keep the Phase options from the last response for this scope while the next loads.
-  if (data && data.phases !== phases) setPhases(data.phases);
-
   return <section aria-busy={loading} aria-labelledby="challenge-category-heatmap-title"
     className="w-full min-w-0 max-w-full space-y-4">
     <HeatmapHeader canDownload={Boolean(data && data.total.studentCount > 0)} downloading={downloading}
       onDownload={() => void download()} />
     {downloadError && <p role="alert" className="text-sm text-danger">{downloadError}</p>}
     <HeatmapFilters grade={grade} phaseId={phaseId} phases={allPrograms ? [] : phases}
-      disabled={loading || allPrograms}
+      disabled={loading || allPrograms || !phasesReady}
       onGradeChange={setGrade} onPhaseChange={selectPhase} />
     {loading && <p role="status" className="py-8 text-center text-sm text-text-muted">
       Loading Challenge Categories...
