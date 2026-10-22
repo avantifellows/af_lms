@@ -225,6 +225,74 @@ describe("ChallengeCategoryHeatmap", () => {
     expect(screen.getByText("1 School has no categorized Notes yet")).toBeInTheDocument();
   });
 
+  describe("Download CSV", () => {
+    const filename = "challenge-categories-2026-2027-grade-11-program-1-phase-2.csv";
+
+    function stubDownload(csvResponse: () => Response) {
+      const fetchMock = vi.fn((url: string) => {
+        const params = new URL(url, "http://localhost").searchParams;
+        return params.get("format") === "csv" ? Promise.resolve(csvResponse()) : respond(heatmap());
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      const createObjectURL = vi.fn((blob: Blob) => (void blob, "blob:heatmap"));
+      const revokeObjectURL = vi.fn();
+      const NativeURL = URL;
+      vi.stubGlobal("URL", Object.assign(class extends NativeURL {}, { createObjectURL, revokeObjectURL }));
+      const downloads: string[] = [];
+      vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
+        downloads.push(`${this.download} <- ${this.href}`);
+      });
+      return { fetchMock, createObjectURL, revokeObjectURL, downloads };
+    }
+
+    it("downloads the current filters' grid under the server's filename", async () => {
+      const { fetchMock, createObjectURL, revokeObjectURL, downloads } = stubDownload(() => new Response(
+        "School,UDISE Code", {
+          status: 200,
+          headers: { "Content-Type": "text/csv", "Content-Disposition": `attachment; filename="${filename}"` },
+        },
+      ));
+      const user = userEvent.setup();
+      render(<ChallengeCategoryHeatmap programId={1} academicYear="2026-2027" />);
+      await screen.findByRole("table", { name: "Challenge Category Heatmap" });
+
+      await user.click(screen.getByRole("button", { name: "Download CSV" }));
+
+      await waitFor(() => expect(downloads).toEqual([`${filename} <- blob:heatmap`]));
+      expect(requested(fetchMock).at(-1)).toBe(
+        "/api/holistic-mentorship/challenge-categories?program_id=1&academic_year=2026-2027&grade=11&phase_id=72&format=csv",
+      );
+      expect(await createObjectURL.mock.calls[0][0].text()).toBe("School,UDISE Code");
+      expect(revokeObjectURL).toHaveBeenCalledWith("blob:heatmap");
+    });
+
+    it("shows the route's error and keeps the control usable when the download fails", async () => {
+      const { downloads } = stubDownload(() => new Response("upstream unavailable", { status: 502 }));
+      const user = userEvent.setup();
+      render(<ChallengeCategoryHeatmap programId={1} academicYear="2026-2027" />);
+      await screen.findByRole("table", { name: "Challenge Category Heatmap" });
+
+      await user.click(screen.getByRole("button", { name: "Download CSV" }));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent("Unable to download Challenge Categories (502)");
+      expect(screen.getByRole("button", { name: "Download CSV" })).toBeEnabled();
+      expect(downloads).toEqual([]);
+    });
+
+    it("has no Download CSV while loading or in the empty state", async () => {
+      stubHeatmap(() => heatmap({ defaultPhaseId: null, total: { studentCount: 0, counts: ZERO }, schools: [] }));
+
+      render(<ChallengeCategoryHeatmap programId={1} academicYear="2026-2027" />);
+
+      expect(screen.getByRole("status")).toHaveTextContent("Loading Challenge Categories...");
+      expect(screen.queryByRole("button", { name: "Download CSV" })).not.toBeInTheDocument();
+      expect(await screen.findByText(
+        "No submitted Post-Session Notes with Challenge Categories match this selection yet.",
+      )).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Download CSV" })).not.toBeInTheDocument();
+    });
+  });
+
   it("shows loading, then a safe error with Retry that reloads the heatmap", async () => {
     let fail = true;
     const fetchMock = vi.fn(() => fail

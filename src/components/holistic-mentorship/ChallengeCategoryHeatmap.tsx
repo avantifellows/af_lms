@@ -1,5 +1,6 @@
 "use client";
 
+import { Download } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { Button, Select } from "@/components/ui";
@@ -92,9 +93,39 @@ function useHeatmap(programId: number | "all", academicYear: string, grade: 11 |
     error,
     loading: !current && !error,
     phaseId,
+    search,
     selectPhase: (next: number | null) => setSelection({ scope, phaseId: next }),
     reload: () => setRefresh((value) => value + 1),
   };
+}
+
+// The route names the file from the filters (year, Grade, Program, Phase).
+function useHeatmapDownload(search: string) {
+  const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState("");
+  const download = async () => {
+    setDownloading(true);
+    setDownloadError("");
+    try {
+      const response = await fetch(`/api/holistic-mentorship/challenge-categories?${search}&format=csv`);
+      if (!response.ok) {
+        const body = await response.json().catch(() => null) as { error?: string } | null;
+        throw new Error(body?.error || `Unable to download Challenge Categories (${response.status})`);
+      }
+      const filename = /filename="([^"]+)"/.exec(response.headers.get("Content-Disposition") ?? "")?.[1];
+      const downloadUrl = URL.createObjectURL(await response.blob());
+      const anchor = document.createElement("a");
+      anchor.href = downloadUrl;
+      anchor.download = filename ?? "challenge-categories.csv";
+      anchor.click();
+      URL.revokeObjectURL(downloadUrl);
+    } catch (problem) {
+      setDownloadError(problem instanceof Error ? problem.message : "Unable to download Challenge Categories");
+    } finally {
+      setDownloading(false);
+    }
+  };
+  return { downloading, downloadError, download };
 }
 
 function HeatmapFilters({ grade, phaseId, phases, disabled, onGradeChange, onPhaseChange }: {
@@ -208,7 +239,8 @@ export default function ChallengeCategoryHeatmap({ programId, academicYear, onAc
   onAcademicYears?: (years: string[]) => void;
 }) {
   const [grade, setGrade] = useState<11 | 12>(11);
-  const { data, error, loading, phaseId, selectPhase, reload } = useHeatmap(programId, academicYear, grade);
+  const { data, error, loading, phaseId, search, selectPhase, reload } = useHeatmap(programId, academicYear, grade);
+  const { downloading, downloadError, download } = useHeatmapDownload(search);
   const [phases, setPhases] = useState<Heatmap["phases"]>([]);
   const academicYears = data?.academicYears;
   const allPrograms = programId === "all";
@@ -222,14 +254,21 @@ export default function ChallengeCategoryHeatmap({ programId, academicYear, onAc
 
   return <section aria-busy={loading} aria-labelledby="challenge-category-heatmap-title"
     className="w-full min-w-0 max-w-full space-y-4">
-    <div className="space-y-1">
-      <h2 id="challenge-category-heatmap-title" className="text-lg font-bold text-text-primary">
-        Challenge Categories
-      </h2>
-      <p className="text-sm text-text-secondary">
-        Share of Students with categorized submitted Post-Session Notes who carry each Challenge Category.
-      </p>
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="space-y-1">
+        <h2 id="challenge-category-heatmap-title" className="text-lg font-bold text-text-primary">
+          Challenge Categories
+        </h2>
+        <p className="text-sm text-text-secondary">
+          Share of Students with categorized submitted Post-Session Notes who carry each Challenge Category.
+        </p>
+      </div>
+      {data && data.total.studentCount > 0 && <Button type="button" onClick={() => void download()}
+        disabled={downloading}>
+        <Download aria-hidden="true" className="h-4 w-4" /> {downloading ? "Downloading..." : "Download CSV"}
+      </Button>}
     </div>
+    {downloadError && <p role="alert" className="text-sm text-danger">{downloadError}</p>}
     <HeatmapFilters grade={grade} phaseId={phaseId} phases={allPrograms ? [] : phases}
       disabled={loading || allPrograms}
       onGradeChange={setGrade} onPhaseChange={selectPhase} />

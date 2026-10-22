@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+
 import type { Page } from "@playwright/test";
 
 import { expect, test } from "../fixtures/auth";
@@ -8,6 +10,7 @@ import { getTestPool } from "../helpers/db";
 // issues and Time management & distractions. Nothing else on that Phase is tagged.
 type Fixture = {
   centreId: number;
+  schoolCode: string;
   schoolName: string;
   categorizedPhaseId: number;
   mappingSchoolCount: number;
@@ -19,6 +22,34 @@ const EXPECTED_ROW = [
   "0.0%", "0.0%", "100.0%", "0.0%", "0.0%", "0.0%",
   "100.0%", "0.0%", "0.0%", "0.0%", "0.0%", "0.0%", "0.0%", "0.0%", "0.0%", "0.0%",
 ];
+
+const CSV_HEADER = [
+  "School", "UDISE Code", "Students (n)",
+  "Academic - Subject/concept issues (count)", "Academic - Subject/concept issues (%)",
+  "\"Academic - Backlogs, revision & workload (count)\"", "\"Academic - Backlogs, revision & workload (%)\"",
+  "Academic - Exam/Test related issues (count)", "Academic - Exam/Test related issues (%)",
+  "Academic - Test performance & preparation (count)", "Academic - Test performance & preparation (%)",
+  "Academic - Other (count)", "Academic - Other (%)",
+  "Academic - No major issue reported (count)", "Academic - No major issue reported (%)",
+  "Non-academic - Time management & distractions (count)", "Non-academic - Time management & distractions (%)",
+  "Non-academic - Low confidence/motivation (count)", "Non-academic - Low confidence/motivation (%)",
+  "Non-academic - Adjustment difficulties (count)", "Non-academic - Adjustment difficulties (%)",
+  "\"Non-academic - Wellness (health, sleep etc.) (count)\"", "\"Non-academic - Wellness (health, sleep etc.) (%)\"",
+  "Non-academic - Emotional & social stress (count)", "Non-academic - Emotional & social stress (%)",
+  "Non-academic - Career uncertainty (count)", "Non-academic - Career uncertainty (%)",
+  "Non-academic - Financial challenges (count)", "Non-academic - Financial challenges (%)",
+  "Non-academic - Communication & language (count)", "Non-academic - Communication & language (%)",
+  "Non-academic - Other (count)", "Non-academic - Other (%)",
+  "Non-academic - No major issue reported (count)", "Non-academic - No major issue reported (%)",
+].join(",");
+
+// n = 1: Exam/Test related issues and Time management & distractions at 1 of 1.
+const EXPECTED_CSV_CELLS =
+  "1,0,0.0,0,0.0,1,100.0,0,0.0,0,0.0,0,0.0,1,100.0,0,0.0,0,0.0,0,0.0,0,0.0,0,0.0,0,0.0,0,0.0,0,0.0,0,0.0";
+
+function csvText(value: string) {
+  return /[",\r\n]/.test(value) ? `"${value.replaceAll('"', '""')}"` : value;
+}
 
 type BrowserHealth = { consoleErrors: string[]; pageErrors: string[]; networkErrors: string[] };
 
@@ -71,9 +102,10 @@ test.describe("Challenge Category Heatmap", () => {
     const pool = getTestPool();
     try {
       const { rows: [row] } = await pool.query<{
-        centre_id: string; school_name: string; categorized_phase_id: string; mapping_school_count: string;
+        centre_id: string; school_code: string; school_name: string; categorized_phase_id: string;
+        mapping_school_count: string;
       }>(
-        `SELECT centre.id AS centre_id, school.name AS school_name,
+        `SELECT centre.id AS centre_id, school.code AS school_code, school.name AS school_name,
                 (SELECT phase.id FROM holistic_mentorship_phases phase
                  JOIN holistic_mentorship_phase_plans plan ON plan.id = phase.phase_plan_id
                  WHERE plan.program_id = 1 AND plan.academic_year = '2026-2027'
@@ -88,6 +120,7 @@ test.describe("Challenge Category Heatmap", () => {
       );
       fixture = {
         centreId: Number(row.centre_id),
+        schoolCode: row.school_code,
         schoolName: row.school_name,
         categorizedPhaseId: Number(row.categorized_phase_id),
         mappingSchoolCount: Number(row.mapping_school_count),
@@ -163,6 +196,26 @@ test.describe("Challenge Category Heatmap", () => {
       }
       expectBrowserHealth(health);
     }
+  });
+
+  test("Download CSV saves the visible grid with counts and percentages", async ({ holisticPmPage: page }) => {
+    const health = collectBrowserHealth(page);
+    await openHeatmap(page);
+    await expect(await selectCategorizedPhase(page)).toBeVisible();
+
+    const [download] = await Promise.all([
+      page.waitForEvent("download"),
+      page.getByRole("button", { name: "Download CSV" }).click(),
+    ]);
+
+    expect(download.suggestedFilename()).toBe("challenge-categories-2026-2027-grade-12-program-1-phase-4.csv");
+    const csv = await readFile(await download.path(), "utf8");
+    expect(csv.split("\r\n")).toEqual([
+      CSV_HEADER,
+      `All Schools,,${EXPECTED_CSV_CELLS}`,
+      `${csvText(fixture.schoolName)},${fixture.schoolCode},${EXPECTED_CSV_CELLS}`,
+    ]);
+    expectBrowserHealth(health);
   });
 
   test("Grade 11's latest Open Phase has no categorized Notes, so every Mapping School is hidden", async ({

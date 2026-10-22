@@ -699,7 +699,8 @@ export async function getHolisticProgressAcademicYears(
   return rows.map(({ academic_year }) => academic_year);
 }
 
-function csvCell(value: string | number | null): string {
+// Formula-like cells get a leading apostrophe so spreadsheets don't evaluate them.
+export function csvCell(value: string | number | null): string {
   const raw = value === null ? "" : String(value);
   const safe = /^[=+\-@\t\r]/.test(raw) ? `'${raw}` : raw;
   return /[",\r\n]/.test(safe) || safe !== raw

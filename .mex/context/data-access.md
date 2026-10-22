@@ -311,7 +311,7 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
     with Academic (6) / Non-academic (10) group headers, a sticky School + `n` column, "All Schools"
     first, yellow→dark-red cells with contrast-picked text, `shortLabel` below `sm` (full label in
     `title` / `aria-label` "Group: Label"), a hidden-School note, an empty state and loading /
-    error + Retry. CSV is a later #457 slice.
+    error + Retry.
   - **All Programs (#464):** `program_id=all` gates on `program_read` with no Program and uses the
     access helper's `programIds` (the same scoped list as the admin page's Program selector: every
     Holistic Program for Admin / Holistic Mentorship Admin, the PM/PA's Programs with in-scope active
@@ -327,6 +327,17 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
     Phase Setup get the last single Program back and never see "All Programs". Picking any Program
     (All or single) resets the Academic Year. With All Programs the panel's Phase select is disabled
     with only "All Phases".
+  - **CSV (#465):** the same route with `format=csv` (any other `format` value, empty included, is 422
+    before authorization; every JSON 401/403/422 rule applies unchanged). Body from
+    `formatHolisticChallengeCategoryHeatmapCsv` in the heatmap module: header `School`, `UDISE Code`
+    (`school.code`), `Students (n)`, then per catalogue code `<Academic|Non-academic> - <Label> (count)`
+    and `(%)` (32 columns); first row `All Schools` with a blank code, then `schools` in grid order
+    (hidden n = 0 Schools absent). `%` is `holisticChallengeCategoryPercent(...).toFixed(1)` without a
+    `%` sign, so it equals the grid. Cells go through `csvCell` (exported from `holistic-progress.ts`,
+    formula prefix `'`), rows join with `\r\n`. Filename (`Content-Disposition`):
+    `challenge-categories-<year>-grade-<11|12>-<program-<id>|all-programs>-<phase-<Plan number>|all-phases>.csv`.
+    The tab's "Download CSV" button (only when the grid is shown; never while loading, on error or in
+    the empty state) fetches the current filters with `format=csv` and saves under that filename.
   - **Fixture:** `seedHolisticFixtures` adds a second submitted Note (second Grade 12 Student, Phase 4
     "Synthetic Grade 12 Skipped") tagged Exam/Test related issues + Time management & distractions, so
     the heatmap is non-empty; the Phase 1 Note stays the untagged pre-release Note.
@@ -334,4 +345,5 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
     `HOLISTIC_HEATMAP_TEST_DATABASE`), the route test (real access gate, stubbed permission lookup),
     `ChallengeCategoryHeatmap.test.tsx`, `HolisticMentorshipWorkspace.test.tsx`, and
     `e2e/tests/holistic-challenge-categories.spec.ts`. Its `openHeatmap` selects Program 1 explicitly,
-    because multi-Program viewers land on All Programs.
+    because multi-Program viewers land on All Programs. The spec's CSV test asserts the exact file for
+    the seeded Phase 4 Note.

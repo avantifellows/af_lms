@@ -2,9 +2,10 @@ import { CURRENT_ACADEMIC_YEAR } from "./constants";
 import { query } from "./db";
 import {
   HOLISTIC_CHALLENGE_CATEGORIES,
+  holisticChallengeCategoryPercent,
   type HolisticChallengeCategoryCode,
 } from "./holistic-challenge-categories";
-import { getHolisticProgressAcademicYears } from "./holistic-progress";
+import { csvCell, getHolisticProgressAcademicYears } from "./holistic-progress";
 import { buildHolisticSchoolScopePredicate } from "./holistic-scope";
 import type { UserPermission } from "./permissions";
 import type {
@@ -190,4 +191,30 @@ export async function getHolisticChallengeCategoryHeatmap(
     academicYears,
     ...heatmapGrid(rows),
   };
+}
+
+const CSV_GROUP_LABELS = { academic: "Academic", non_academic: "Non-academic" } as const;
+
+// The visible grid as CSV: All Schools, then the n > 0 Schools in grid order.
+// Percentages use the grid's helper, so both show the same one-decimal value.
+export function formatHolisticChallengeCategoryHeatmapCsv(heatmap: ChallengeCategoryHeatmap): string {
+  const header = [
+    "School", "UDISE Code", "Students (n)",
+    ...HOLISTIC_CHALLENGE_CATEGORIES.flatMap(({ group, label }) => [
+      `${CSV_GROUP_LABELS[group]} - ${label} (count)`,
+      `${CSV_GROUP_LABELS[group]} - ${label} (%)`,
+    ]),
+  ];
+  const row = (name: string, code: string, studentCount: number, counts: ChallengeCategoryCounts) => [
+    name, code, studentCount,
+    ...HOLISTIC_CHALLENGE_CATEGORIES.flatMap(({ code: category }) => [
+      counts[category],
+      holisticChallengeCategoryPercent(counts[category], studentCount).toFixed(1),
+    ]),
+  ].map(csvCell).join(",");
+  return [
+    header.map(csvCell).join(","),
+    row("All Schools", "", heatmap.total.studentCount, heatmap.total.counts),
+    ...heatmap.schools.map((school) => row(school.name, school.code, school.studentCount, school.counts)),
+  ].join("\r\n");
 }
