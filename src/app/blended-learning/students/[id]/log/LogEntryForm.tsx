@@ -703,6 +703,14 @@ function submitLabel(saving: boolean, kind: Kind, drafting: boolean): string {
   return kind === "conversation" ? "Save Conversation" : "Save Attempt";
 }
 
+function SubmitButton({ saving, kind, drafting }: { saving: boolean; kind: Kind; drafting: boolean }) {
+  return (
+    <Button type="submit" disabled={saving || drafting} className="w-full sm:w-auto">
+      {submitLabel(saving, kind, drafting)}
+    </Button>
+  );
+}
+
 // A Conversation waits for its draft to be drafted; an Attempt can still be
 // saved.
 function waitsForDraft(kind: Kind, pendingDraft: PendingDraft | null): boolean {
@@ -830,9 +838,7 @@ export function LogEntryForm({
 
           <FormAlert error={error} />
 
-          <Button type="submit" disabled={saving || drafting} className="w-full sm:w-auto">
-            {submitLabel(saving, kind, drafting)}
-          </Button>
+          <SubmitButton saving={saving} kind={kind} drafting={drafting} />
         </form>
       </div>
     </div>
