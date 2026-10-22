@@ -43,7 +43,7 @@ Required (app won't function without them):
 Conditionally required (only if the feature is used):
 - `GOOGLE_SERVICE_ACCOUNT_JSON` (or `GOOGLE_APPLICATION_CREDENTIALS`) — BigQuery quiz analytics.
 - `DYNAMODB_URL`, `DYNAMODB_REGION`, `DYNAMODB_ACCESS_KEY`, `DYNAMODB_SECRET_KEY` — performance dashboard.
-- `S3_DOCS_BUCKET`, `S3_DOCS_PREFIX`, `S3_DOCS_REGION`, `S3_DOCS_ACCESS_KEY_ID`, `S3_DOCS_SECRET_ACCESS_KEY` — document uploads (bucket shared with prod).
+- `S3_DOCS_BUCKET`, `S3_DOCS_PREFIX`, `S3_DOCS_REGION`, `S3_DOCS_ACCESS_KEY_ID`, `S3_DOCS_SECRET_ACCESS_KEY` — document uploads (bucket shared with prod). Blended Learning photo links are presigned with them too. The Playwright web server sets fake values (`e2e-fake-docs`, `lms-documents`), so presigning works locally with no AWS traffic; specs answer `amazonaws.com` requests with `page.route`.
 - `AF_ACCESS_KEY_ID`, `AF_SECRET_ACCESS_KEY`, `AF_TOPIC_ARN`, `APP_ENV` — SNS session creator.
 
 Never commit real values — `.env.local` is gitignored; CI injects prod/preview values via the Amplify workflow.

@@ -69,6 +69,13 @@ export default defineConfig({
       GOOGLE_CLIENT_ID: "fake-client-id",
       GOOGLE_CLIENT_SECRET: "fake-client-secret",
       NEXT_TEST_MODE: "1",
+      // Blended Learning photos are presigned locally against a fake bucket;
+      // specs answer the S3 GETs themselves.
+      S3_DOCS_BUCKET: "e2e-fake-docs",
+      S3_DOCS_PREFIX: "lms-documents",
+      S3_DOCS_REGION: "ap-south-1",
+      S3_DOCS_ACCESS_KEY_ID: "e2e-fake-access-key",
+      S3_DOCS_SECRET_ACCESS_KEY: "e2e-fake-secret-key",
     },
   },
 });

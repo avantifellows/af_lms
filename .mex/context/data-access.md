@@ -197,7 +197,7 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   (read), `src/lib/holistic-follow-up-questions.ts` (client-safe question keys, text, and
   normaliser), `src/lib/holistic-mentor-write-scope.ts` (shared scope guard).
 
-## Blended Learning Mentee list (#442)
+## Blended Learning Mentee list (#442) and detail (#444)
 
 - **Tables:** the `blended_learning_*` tables are created by db-service (Mappings:
   `20260921120000` + its ensure migration; the other eight: PR #804,
@@ -227,6 +227,20 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   When nothing matches, one empty-state card replaces both groups. The mockup was not available
   to this slice; control copy follows the PRD ("Search by name", Gender, Grade, Program,
   "30 days or more", "Clear filters").
+- **Mentee detail (#444):** `src/lib/blended-learning-mentee-detail.ts`. `getMenteeDetail(access,
+  studentId)` checks `canAccessBlendedStudent`, then reads the profile from the active Mapping
+  (program), the current grade enrollment, `user.phone`/`user.whatsapp_phone` (WhatsApp is
+  dropped when its last ten digits match the phone; `student.father_phone`/`mother_phone`/
+  `guardian_phone` are never selected), `blended_learning_student_links` and the open draft.
+  History is every `blended_learning_conversations` row for the Student, `occurred_on DESC, id
+  DESC`, with a photo count and `has_notes` flag (the notes HTML itself is not sent to the
+  page); Action Items (by `position`) and Mentor Flags (Emotional Well-being, Physics,
+  Chemistry, Maths) are fetched per Student and grouped in JS. `getConversationNotes` and
+  `getConversationPhotos` resolve the Conversation's Student first, so an Attempt id, a missing
+  id or an out-of-scope Student all read as null → 404. Photos are presigned with the existing
+  `presignDocumentPage` at a 5-minute TTL; the route logs only the error name on a presign
+  failure (502), never the key. Notes render from stored HTML as-is: the write path (a later
+  slice) must sanitise before insert.
 - **E2E fixture schema:** `e2e/fixtures/migrations/20261022130000_add_blended_learning_schema.sql`
   mirrors those 10 db-service migrations exactly. Re-diff it with
   `patterns/mirror-db-service-schema-in-e2e.md` whenever PR #804 changes.

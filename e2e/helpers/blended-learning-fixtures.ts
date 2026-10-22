@@ -1,10 +1,10 @@
 import type { PoolClient } from "pg";
 import { CURRENT_ACADEMIC_YEAR } from "../../src/lib/constants";
 
-// Blended Learning Mentee-list fixtures (#442). Every date is a hand-written
-// offset in IST calendar days from the seed's IST "today", which is the same
-// IST date the app computes while the suite runs. Mentor A is the
-// e2e-blended-mentor persona seeded by seedHolisticFixtures (#441).
+// Blended Learning Mentee-list (#442) and Mentee-detail (#444) fixtures.
+// Every date is a hand-written offset in IST calendar days from the seed's IST
+// "today", which is the same IST date the app computes while the suite runs.
+// Mentor A is the e2e-blended-mentor persona seeded by seedHolisticFixtures (#441).
 
 export const BLENDED_MENTOR_A = {
   name: "Synthetic Blended Mentor",
@@ -43,6 +43,35 @@ export const OTHER_STUDENTS = {
   // Mapped to Mentor A in the previous academic year only.
   previousYear: { key: "P1", firstName: "Uday", lastName: "PastYear", gender: "Male", grade: 12, programId: 80 },
 } as const satisfies Record<string, FixtureMentee>;
+
+// Contact numbers on the `user` row (#444). Phones are 98765100 + the
+// Student's seed index. Ira's WhatsApp differs and her parents' phones are
+// seeded only to prove they are never shown; Rohan's WhatsApp equals his phone.
+export const CONTACTS = {
+  attemptLatest: { phone: "9876510000", whatsapp: "9123400001", fatherPhone: "9000000001", guardianPhone: "9000000002" },
+  recent: { phone: "9876510005", whatsapp: "9876510005" },
+} as const;
+
+// Ira's history (#444), newest first by (occurred_on, id). The Attempt 10 days
+// ago is inserted after the Conversation that day, so it sorts above it.
+export const IRA_HISTORY = {
+  attempt2: { daysAgo: 2, note: "Synthetic: no answer." },
+  attempt10: { daysAgo: 10, note: "Synthetic: phone switched off." },
+  conversation10: { daysAgo: 10, summary: "Synthetic: followed up on the mock test." },
+  conversation20: {
+    daysAgo: 20,
+    summary: "Synthetic: talked through the JEE study plan.",
+    notesText: "Synthetic: revise optics before Friday",
+    actionItems: {
+      done: "Synthetic: share the mock test schedule",
+      open: "Synthetic: call the parent about hostel fees",
+    },
+    flags: {
+      wellbeing: "Synthetic: seemed anxious before the mock test",
+    },
+    photoCount: 2,
+  },
+} as const;
 
 export function fullName(mentee: { firstName: string; lastName: string }): string {
   return `${mentee.firstName} ${mentee.lastName}`;
@@ -91,11 +120,18 @@ async function seedMentorB(client: Client): Promise<number> {
   return Number(result.rows[0].id);
 }
 
-async function seedStudent(client: Client, mentee: FixtureMentee, index: number): Promise<number> {
+type FixtureContact = { whatsapp?: string; fatherPhone?: string; guardianPhone?: string };
+
+async function seedStudent(
+  client: Client,
+  mentee: FixtureMentee,
+  index: number,
+  contact: FixtureContact = {}
+): Promise<number> {
   const result = await client.query<{ id: string }>(
     `WITH account AS (
-       INSERT INTO "user" (email, first_name, last_name, gender, phone, role, inserted_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, 'student', now(), now())
+       INSERT INTO "user" (email, first_name, last_name, gender, phone, whatsapp_phone, role, inserted_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $9, 'student', now(), now())
        RETURNING id
      ), grade_row AS (
        SELECT id FROM grade WHERE number = $6 ORDER BY id LIMIT 1
@@ -103,8 +139,8 @@ async function seedStudent(client: Client, mentee: FixtureMentee, index: number)
        INSERT INTO enrollment_record (user_id, group_id, group_type, academic_year, is_current, inserted_at, updated_at)
        SELECT account.id, grade_row.id, 'grade', $7, true, now(), now() FROM account, grade_row
      )
-     INSERT INTO student (student_id, user_id, grade_id, status, inserted_at, updated_at)
-     SELECT $8, account.id, grade_row.id, 'active', now(), now() FROM account, grade_row
+     INSERT INTO student (student_id, user_id, grade_id, status, father_phone, guardian_phone, inserted_at, updated_at)
+     SELECT $8, account.id, grade_row.id, 'active', $10, $11, now(), now() FROM account, grade_row
      RETURNING id`,
     [
       `e2e-bl-${mentee.key.toLowerCase()}@test.local`,
@@ -115,6 +151,9 @@ async function seedStudent(client: Client, mentee: FixtureMentee, index: number)
       mentee.grade,
       CURRENT_ACADEMIC_YEAR,
       `E2E-BL-${mentee.key}`,
+      contact.whatsapp ?? null,
+      contact.fatherPhone ?? null,
+      contact.guardianPhone ?? null,
     ]
   );
   return Number(result.rows[0].id);
@@ -158,14 +197,21 @@ async function seedEntry(
     mentorUserId: number;
     programId: number;
     daysAgo: number;
+    summary?: string;
+    note?: string;
+    mode?: "call" | "in_person";
+    spokeWith?: "student" | "parent_or_sibling" | "both";
+    durationMinutes?: number;
+    notesHtml?: string;
   }
-) {
+): Promise<number> {
   const conversation = entry.kind === "conversation";
-  await client.query(
+  const result = await client.query<{ id: string }>(
     `INSERT INTO blended_learning_conversations
        (student_id, program_id, academic_year, mentor_user_id, logged_by_email, kind, occurred_on,
-        mode, spoke_with, duration_minutes, summary, attempt_note)
-     VALUES ($1, $2, $3, $4, $5, $6, ${IST_TODAY} - $7::int, $8, $9, $10, $11, $12)`,
+        mode, spoke_with, duration_minutes, summary, attempt_note, notes_html)
+     VALUES ($1, $2, $3, $4, $5, $6, ${IST_TODAY} - $7::int, $8, $9, $10, $11, $12, $13)
+     RETURNING id`,
     [
       entry.studentId,
       entry.programId,
@@ -174,13 +220,46 @@ async function seedEntry(
       BLENDED_MENTOR_A.email,
       entry.kind,
       entry.daysAgo,
-      conversation ? "call" : null,
-      conversation ? "student" : null,
-      conversation ? 25 : null,
-      conversation ? "Synthetic summary only." : null,
-      conversation ? null : "Synthetic: no answer.",
+      conversation ? entry.mode ?? "call" : null,
+      conversation ? entry.spokeWith ?? "student" : null,
+      conversation ? entry.durationMinutes ?? 25 : null,
+      conversation ? entry.summary ?? "Synthetic summary only." : null,
+      conversation ? null : entry.note ?? "Synthetic: no answer.",
+      entry.notesHtml ?? null,
     ]
   );
+  return Number(result.rows[0].id);
+}
+
+// Ira's older Conversation (#444): Action Items (one ticked done by the
+// Conversation 10 days ago), two Mentor Flags and two photo rows. Photos are
+// rows only; no object exists in S3.
+async function seedIraAttachments(
+  client: Client,
+  ids: { studentId: number; conversation20: number; conversation10: number }
+) {
+  const { actionItems, flags, photoCount } = IRA_HISTORY.conversation20;
+  await client.query(
+    `INSERT INTO blended_learning_action_items
+       (conversation_id, student_id, position, text, owner, status,
+        completed_by_conversation_id, completed_at, completed_by_email)
+     VALUES
+       ($1, $2, 1, $3, 'mentor', 'done', $4, now(), $6),
+       ($1, $2, 2, $5, 'mentor', 'open', NULL, NULL, NULL)`,
+    [ids.conversation20, ids.studentId, actionItems.done, ids.conversation10, actionItems.open, BLENDED_MENTOR_A.email]
+  );
+  await client.query(
+    `INSERT INTO blended_learning_mentor_flags (conversation_id, student_id, recipient, comment, raised_by_email)
+     VALUES ($1, $2, 'emotional_wellbeing', $3, $4), ($1, $2, 'physics', NULL, $4)`,
+    [ids.conversation20, ids.studentId, flags.wellbeing, BLENDED_MENTOR_A.email]
+  );
+  for (let position = 1; position <= photoCount; position++) {
+    await client.query(
+      `INSERT INTO blended_learning_conversation_photos (conversation_id, s3_key, content_type, byte_size, position)
+       VALUES ($1, $2, 'image/jpeg', 1024, $3)`,
+      [ids.conversation20, `lms-documents/blended-learning/photos/${ids.studentId}/fixture-${position}.jpg`, position]
+    );
+  }
 }
 
 async function seedDraft(
@@ -217,8 +296,12 @@ export async function seedBlendedLearningFixtures(client: Client): Promise<void>
   const mentorB = await seedMentorB(client);
 
   const ids: Record<string, number> = {};
+  const contacts: Record<string, FixtureContact> = {
+    [MENTEES.attemptLatest.key]: CONTACTS.attemptLatest,
+    [MENTEES.recent.key]: CONTACTS.recent,
+  };
   for (const [index, mentee] of [...Object.values(MENTEES), ...Object.values(OTHER_STUDENTS)].entries()) {
-    ids[mentee.key] = await seedStudent(client, mentee, index);
+    ids[mentee.key] = await seedStudent(client, mentee, index, contacts[mentee.key]);
   }
 
   for (const mentee of Object.values(MENTEES)) {
@@ -260,8 +343,31 @@ export async function seedBlendedLearningFixtures(client: Client): Promise<void>
     seedEntry(client, { kind, studentId: ids[key], mentorUserId: mentorA, programId, daysAgo });
   const { attemptLatest, neverContacted, thirtyDays, legacy, twentyNineDays, recent } = MENTEES;
   // Last Contact 10 days ago; the Attempt 2 days ago is the latest entry.
-  await entry(attemptLatest.key, attemptLatest.programId, "conversation", 10);
-  await entry(attemptLatest.key, attemptLatest.programId, "attempt", 2);
+  const ira = { studentId: ids[attemptLatest.key], mentorUserId: mentorA, programId: attemptLatest.programId };
+  const { conversation20, conversation10, attempt10, attempt2 } = IRA_HISTORY;
+  const conversation20Id = await seedEntry(client, {
+    ...ira,
+    kind: "conversation",
+    daysAgo: conversation20.daysAgo,
+    summary: conversation20.summary,
+    mode: "in_person",
+    spokeWith: "parent_or_sibling",
+    durationMinutes: 40,
+    notesHtml: `<h3>Study plan</h3><ul><li>${conversation20.notesText}</li></ul>`,
+  });
+  const conversation10Id = await seedEntry(client, {
+    ...ira,
+    kind: "conversation",
+    daysAgo: conversation10.daysAgo,
+    summary: conversation10.summary,
+  });
+  await seedEntry(client, { ...ira, kind: "attempt", daysAgo: attempt10.daysAgo, note: attempt10.note });
+  await seedEntry(client, { ...ira, kind: "attempt", daysAgo: attempt2.daysAgo, note: attempt2.note });
+  await seedIraAttachments(client, {
+    studentId: ira.studentId,
+    conversation20: conversation20Id,
+    conversation10: conversation10Id,
+  });
   await entry(thirtyDays.key, thirtyDays.programId, "conversation", 30);
   await entry(twentyNineDays.key, twentyNineDays.programId, "conversation", 29);
   await entry(recent.key, recent.programId, "conversation", 3);
