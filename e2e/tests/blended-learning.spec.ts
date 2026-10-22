@@ -81,9 +81,20 @@ for (const { label, viewport } of VIEWPORTS) {
       await tab.click();
 
       await expect(adminPage).toHaveURL(/\/blended-learning$/);
-      await expect(adminPage.getByText("Blended Learning Admin", { exact: true })).toBeVisible();
-      await adminPage.getByRole("link", { name: "Back to dashboard" }).click();
-      await expect(adminPage).toHaveURL(/\/dashboard$/);
+      // Still inside the dashboard: its header and tab strip, Blended Learning
+      // selected, and the section below; not the section's own header.
+      await expect(adminPage.getByRole("banner").getByRole("img", { name: "Avanti Fellows" })).toBeVisible();
+      await expect(adminPage.getByRole("banner").getByRole("link", { name: "Admin", exact: true })).toBeVisible();
+      const strip = adminPage.getByRole("link", { name: "Physical Centres" }).locator("..");
+      await expect(strip.getByRole("link")).toHaveText(["Physical Centres", "JNV NVS Schools", "Blended Learning"]);
+      await expect(strip.getByRole("link", { name: "Blended Learning" })).toHaveAttribute("aria-current", "page");
+      await expect(adminPage.getByRole("navigation", { name: "Admin views" })).toBeVisible();
+      await expect(adminPage.getByText("Blended Learning Admin", { exact: true })).toHaveCount(0);
+      await expect(adminPage.getByRole("link", { name: "Back to dashboard" })).toHaveCount(0);
+
+      await strip.getByRole("link", { name: "JNV NVS Schools" }).click();
+      await expect(adminPage).toHaveURL(/\/dashboard\?view=jnv-nvs$/);
+      await expect(adminPage.getByRole("link", { name: "JNV NVS Schools" })).toHaveAttribute("aria-current", "page");
     });
 
     test("other roles get no Blended Learning link and are sent away from the section", async ({ page }) => {

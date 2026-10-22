@@ -6,8 +6,9 @@ import { requireBlendedLearningPage, requireNumericPageId } from "@/lib/blended-
 import { listMentees, listMentorCards } from "@/lib/blended-learning-mentees";
 import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
 import { getTodayIST } from "@/lib/curriculum-date-helpers";
+import { loadDashboardChrome } from "@/lib/dashboard-chrome";
 
-import { BlendedLearningHeader } from "../../BlendedLearningHeader";
+import { BlendedPageShell } from "../../BlendedPageShell";
 import { FilteredMenteeList } from "../../FilteredMenteeList";
 
 // One Mentor's Student list for Blended Learning Admins (view_mentors), the
@@ -21,26 +22,26 @@ export default async function MentorPage({ params }: { params: Promise<{ id: str
   const today = getTodayIST();
   const mentor = (await listMentorCards(access, today)).find((card) => card.mentorUserId === mentorUserId);
   if (!mentor) notFound();
-  const mentees = await listMentees({ access, mentorUserId, today });
+  const [mentees, chrome] = await Promise.all([
+    listMentees({ access, mentorUserId, today }),
+    loadDashboardChrome(access),
+  ]);
 
   return (
-    <>
-      <BlendedLearningHeader access={access} wide />
-      <main className="mx-auto max-w-6xl space-y-4 px-4 py-4 sm:px-6 sm:py-6">
-        <Link
-          href="/blended-learning"
-          className="-ml-1 inline-flex min-h-11 items-center gap-1 rounded text-sm font-bold text-text-secondary hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
-        >
-          <span aria-hidden="true">←</span> Mentors
-        </Link>
-        <div>
-          <h1 className="text-xl font-bold text-text-primary">{mentor.name}</h1>
-          <p className="text-sm text-text-secondary">
-            {mentor.assigned} {mentor.assigned === 1 ? "student" : "students"} · {CURRENT_ACADEMIC_YEAR}
-          </p>
-        </div>
-        <FilteredMenteeList list={mentees} canLog={canBlendedLearning(access, "log")} today={today} />
-      </main>
-    </>
+    <BlendedPageShell access={access} chrome={chrome} width="max-w-6xl" className="space-y-4">
+      <Link
+        href="/blended-learning"
+        className="-ml-1 inline-flex min-h-11 items-center gap-1 rounded text-sm font-bold text-text-secondary hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
+      >
+        <span aria-hidden="true">←</span> Mentors
+      </Link>
+      <div>
+        <h1 className="text-xl font-bold text-text-primary">{mentor.name}</h1>
+        <p className="text-sm text-text-secondary">
+          {mentor.assigned} {mentor.assigned === 1 ? "student" : "students"} · {CURRENT_ACADEMIC_YEAR}
+        </p>
+      </div>
+      <FilteredMenteeList list={mentees} canLog={canBlendedLearning(access, "log")} today={today} />
+    </BlendedPageShell>
   );
 }

@@ -38,6 +38,7 @@ const PROFILE = {
   phone: "+91 98765 43210", whatsapp_phone: "9876543210",
   profile_doc_url: "  https://docs.example/ira  ", screener_url: "   ",
   open_draft_id: null, open_draft_state: null,
+  mentor_user_id: "9001", mentor_first_name: "Faizan",
 };
 
 function entry(overrides: Record<string, unknown>) {
@@ -89,6 +90,7 @@ describe("getMenteeDetail", () => {
       openDraft: null,
       openActionItems: [],
       history: [],
+      mentor: { userId: 9001, firstName: "Faizan" },
     });
   });
 

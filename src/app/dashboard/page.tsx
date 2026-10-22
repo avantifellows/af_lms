@@ -5,16 +5,13 @@ import {
   getAccessibleSchoolCodes,
   getResolvedPermission,
   getProgramContextSync,
-  getFeatureAccess,
   isCentreSeated,
 } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import {
-  CURRENT_ACADEMIC_YEAR,
   isBlendedRole,
   isPmuRole,
   PMU_GOVT_SCHOOL_USER_ROLE,
-  PMU_MANAGER_ROLE,
 } from "@/lib/constants";
 import { requireHolisticMentorshipAccess } from "@/lib/holistic-mentorship";
 import { getBlendedLearningAccess } from "@/lib/blended-learning-access";
@@ -32,8 +29,15 @@ import {
 } from "@/lib/dashboard-groupings";
 import Pagination from "@/components/Pagination";
 import { statusBadgeClass } from "@/lib/visit-actions";
-import { buildOwnOrManagedVisitPredicate, buildVisitsActor, canViewVisitSummary } from "@/lib/visits-policy";
+import { buildOwnOrManagedVisitPredicate, buildVisitsActor } from "@/lib/visits-policy";
 import { Card } from "@/components/ui";
+import {
+  DashboardHeader,
+  DashboardViewTabs,
+  type DashboardPermission,
+  type DashboardView,
+} from "@/components/DashboardChrome";
+import { dashboardFeatures, resolveDashboardView, showsDashboardViewTabs } from "@/lib/dashboard-chrome";
 
 
 const SCHOOLS_PER_PAGE = 20;
@@ -252,23 +256,11 @@ async function getVisibleVisitTotal(email: string, permission: DashboardPermissi
   return parseInt(rows[0].total, 10);
 }
 
-// Dashboard groupings, rendered as tabs. A student belongs to exactly one
-// (partitioned by attributed program), so tab counts never double-count.
-type DashboardView = "jnv-nvs" | "centres";
-
 interface PageProps {
   searchParams: Promise<{ q?: string; page?: string; view?: string }>;
 }
 
-type DashboardPermission = NonNullable<Awaited<ReturnType<typeof getResolvedPermission>>>;
-type DashboardProgramContext = ReturnType<typeof getProgramContextSync>;
 type DashboardSchool = School & { grade_counts: GradeCount[]; student_count: number };
-type DashboardFeatures = {
-  hasPMAccess: boolean;
-  canViewVisitSummary: boolean;
-  showCurriculumSummary: boolean;
-  canViewHolisticAdmin: boolean;
-};
 type DashboardData = {
   schools: DashboardSchool[];
   centres: Centre[];
@@ -277,30 +269,6 @@ type DashboardData = {
   recentVisits: Visit[];
   visitTotal: number;
 };
-
-function canOpenVisitSummary(email: string, permission: DashboardPermission) {
-  return getFeatureAccess(permission, "visits").canView &&
-    canViewVisitSummary(buildVisitsActor(email, permission));
-}
-
-function canViewCurriculumSummary(permission: DashboardPermission, context: DashboardProgramContext) {
-  const supportedRole = ["program_manager", "program_admin", "admin"].includes(permission.role);
-  return supportedRole && context.hasCoEOrNodal && getFeatureAccess(permission, "curriculum").canView;
-}
-
-function dashboardFeatures(
-  email: string,
-  permission: DashboardPermission,
-  context: DashboardProgramContext,
-  canViewHolisticAdmin: boolean,
-): DashboardFeatures {
-  return {
-    hasPMAccess: getFeatureAccess(permission, "pm_dashboard").canView,
-    canViewVisitSummary: canOpenVisitSummary(email, permission),
-    showCurriculumSummary: canViewCurriculumSummary(permission, context),
-    canViewHolisticAdmin,
-  };
-}
 
 function NoDashboardAccess({ email, message }: { email: string; message: string }) {
   return <div className="min-h-screen bg-gray-50">
@@ -334,27 +302,6 @@ async function dashboardRequest(searchParams: PageProps["searchParams"]) {
     viewParam,
     currentPage: Math.max(1, parseInt(pageParam || "1", 10)),
   };
-}
-
-// Hard-pinned roles/scopes first, then an explicit valid ?view=, then the
-// Program-context fallback: Physical Centres for anyone whose resolved Programs
-// include a physical-centre Program, JNV NVS Schools otherwise. A missing and an
-// invalid ?view= fall back alike (they differ only for the seated shortcut).
-function resolveDashboardView(
-  viewParam: string | undefined,
-  seated: boolean,
-  permission: DashboardPermission,
-  programContext: DashboardProgramContext,
-): DashboardView {
-  // PMU Managers are JNV NVS only (ADR 0007): no Physical Centres tab to pick.
-  if (permission.role === PMU_MANAGER_ROLE) return "jnv-nvs";
-  // A confined user has no NVS scope at all, so ?view=jnv-nvs is not an escape
-  // hatch for them — it is the whole-school tab, carrying the school-wide
-  // student search. Pin them to Centres whatever the URL says.
-  if (seated) return "centres";
-  if (viewParam === "centres") return "centres";
-  if (viewParam === "jnv-nvs") return "jnv-nvs";
-  return programContext.hasCoEOrNodal ? "centres" : "jnv-nvs";
 }
 
 // Single-scope shortcuts, both taken only without a search: a single-seat user
@@ -560,114 +507,13 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         managesCentreVisits={(permission.scope?.visitManagedSchools?.size ?? 0) > 0}
         viewerEmail={email}
         hasPMAccess={features.hasPMAccess}
-        showViewTabs={!seated && !isPmuRole(permission.role)}
+        showViewTabs={showsDashboardViewTabs(seated, permission)}
         showBlendedTab={Boolean(blendedAccess)}
         // A PMU Manager has no tab strip, so the heading names their one view.
         showSchoolsHeading={features.hasPMAccess || isPmuRole(permission.role)}
       />
     </div>
   );
-}
-
-function permissionLabel(permission: DashboardPermission, totalCount: number) {
-  if (permission.role === "admin") return "Admin access";
-  if (permission.level === 3) return "All schools";
-  if (permission.level === 2) return `Region: ${permission.regions?.join(", ")}`;
-  return `${totalCount} school(s)`;
-}
-
-function DashboardHeader({ email, permission, totalCount, features }: {
-  email: string;
-  permission: DashboardPermission;
-  totalCount: number;
-  features: DashboardFeatures;
-}) {
-  return <header className="bg-bg-card border-b border-border shadow-sm">
-    <div className="mx-auto max-w-7xl px-4 py-3 sm:px-6 lg:px-8 flex flex-wrap justify-between items-center gap-y-2">
-      <div className="flex items-center gap-3 sm:gap-6 min-w-0">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="https://cdn.avantifellows.org/af_logos/avanti_logo_black_text.webp" alt="Avanti Fellows" className="h-8 sm:h-10 shrink-0" />
-        <div className="hidden sm:block border-l border-border pl-4">
-          <p className="text-xs text-text-muted uppercase tracking-wide">{permissionLabel(permission, totalCount)}</p>
-        </div>
-        <DashboardNavigation features={features} />
-      </div>
-      <DashboardAccountLinks email={email} isAdmin={permission.role === "admin"} canViewHolisticAdmin={features.canViewHolisticAdmin} />
-    </div>
-  </header>;
-}
-
-function DashboardNavigation({ features }: { features: DashboardFeatures }) {
-  if (!features.hasPMAccess && !features.canViewVisitSummary && !features.showCurriculumSummary) return null;
-  return <nav className="flex gap-3 sm:gap-4">
-    <Link href="/dashboard" className="text-sm font-bold text-text-primary uppercase tracking-wide border-b-2 border-accent pb-1">
-      Home
-    </Link>
-    {features.canViewVisitSummary && <Link href="/school-visit-summary"
-      className="text-sm font-medium text-text-muted uppercase tracking-wide hover:text-text-primary pb-1">
-      Visit Summary
-    </Link>}
-    {features.showCurriculumSummary && <Link href="/curriculum-summary"
-      className="text-sm font-medium text-text-muted uppercase tracking-wide hover:text-text-primary pb-1">
-      Curriculum Summary
-    </Link>}
-  </nav>;
-}
-
-function DashboardAccountLinks({ email, isAdmin, canViewHolisticAdmin }: {
-  email: string;
-  isAdmin: boolean;
-  canViewHolisticAdmin: boolean;
-}) {
-  return <div className="flex items-center gap-3 sm:gap-4">
-    {canViewHolisticAdmin && <Link href="/admin/holistic-mentorship" className="text-sm font-bold text-accent hover:text-accent-hover">
-      Holistic Mentorship
-    </Link>}
-    {isAdmin && <Link href="/admin" className="text-sm font-bold text-accent hover:text-accent-hover uppercase">Admin</Link>}
-    <span className="text-sm text-text-muted font-mono hidden sm:inline">{email}</span>
-    <Link href="/api/auth/signout" className="text-sm font-bold text-danger hover:text-danger/80">Sign out</Link>
-  </div>;
-}
-
-const DASHBOARD_VIEWS = [
-  { key: "centres", label: "Physical Centres" },
-  { key: "jnv-nvs", label: "JNV NVS Schools" },
-] as const;
-
-type DashboardTab = { key: string; label: string; href: string; current: boolean };
-
-// The strip's tabs: both grouping views when the user can switch between
-// them, else just the one they're on; then Blended Learning, a separate
-// section, for those with access to it.
-function dashboardTabs(view: DashboardView, showViews: boolean, showBlended: boolean): DashboardTab[] {
-  const tabs: DashboardTab[] = DASHBOARD_VIEWS
-    .filter((tab) => showViews || tab.key === view)
-    .map((tab) => ({ key: tab.key, label: tab.label, href: `/dashboard?view=${tab.key}`, current: view === tab.key }));
-  if (showBlended) tabs.push({ key: "blended-learning", label: "Blended Learning", href: "/blended-learning", current: false });
-  return tabs;
-}
-
-// Grouping tabs — disjoint scopes, so counts never double-count — plus
-// Blended Learning, which opens its own section.
-function DashboardViewTabs({ view, show, showBlended }: { view: DashboardView; show: boolean; showBlended: boolean }) {
-  const tabs = dashboardTabs(view, show, showBlended);
-  // One tab left (a confined user or a PMU Manager without Blended Learning)
-  // — render nothing rather than a lone tab that looks like a choice, or an
-  // empty strip that leaves a stray rule on the page.
-  if (tabs.length < 2) return null;
-  // Wraps rather than scrolls on a phone, where three tabs don't fit a row.
-  return <div className="mb-6 flex flex-wrap gap-x-6 gap-y-2 border-b border-border">
-    {tabs.map((tab) => <Link
-      key={tab.key}
-      href={tab.href}
-      aria-current={tab.current ? "page" : undefined}
-      className={tab.current
-        ? "text-sm font-bold text-text-primary uppercase tracking-wide border-b-2 border-accent pb-2 -mb-px"
-        : "text-sm font-medium text-text-muted uppercase tracking-wide hover:text-text-primary pb-2 -mb-px"}
-    >
-      {tab.label}
-    </Link>)}
-  </div>;
 }
 
 function DashboardMain({ view, searchQuery, currentPage, totalPages, totalCount, schools, centres, recentVisits, visitTotal, managesCentreVisits, viewerEmail, hasPMAccess, showViewTabs, showBlendedTab, showSchoolsHeading }: {

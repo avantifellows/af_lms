@@ -50,7 +50,7 @@ function FlagCardView({ flag }: { flag: FlagCard }) {
           {/* The arrow says the name opens the Student's page; the name alone is the link's name. */}
           {flag.inScope ? (
             <Link
-              href={`/blended-learning/students/${flag.studentId}`}
+              href={`/blended-learning/students/${flag.studentId}?from=flags`}
               className="inline-flex items-center gap-1 hover:text-accent hover:underline"
             >
               {flag.name}

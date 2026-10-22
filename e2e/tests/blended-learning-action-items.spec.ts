@@ -213,7 +213,7 @@ for (const { label, key, viewport } of VIEWPORTS) {
       const panel = page.getByRole("region", { name: "Open Action Items" });
       await expect(panel.getByRole("checkbox").first()).toBeVisible();
       await expect(panel).toContainText(
-        "Tick what's been done. Ticked items are marked done when you save this conversation and won't show here again."
+        "Tick what's done. Ticked items are removed when you save."
       );
 
       await form.getByRole("radio", { name: "Attempt" }).check();

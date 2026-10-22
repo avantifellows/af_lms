@@ -1,5 +1,3 @@
-import type { ReactNode } from "react";
-
 import { Card } from "@/components/ui";
 import { canBlendedLearning, type BlendedLearningAccess } from "@/lib/blended-learning-access";
 import { requireBlendedLearningPage } from "@/lib/blended-learning-guard";
@@ -20,9 +18,10 @@ import {
 } from "@/lib/blended-learning-mentees";
 import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
 import { getTodayIST } from "@/lib/curriculum-date-helpers";
+import { loadDashboardChrome } from "@/lib/dashboard-chrome";
 
 import { AdminTabs, type AdminTab } from "./AdminTabs";
-import { BlendedLearningHeader } from "./BlendedLearningHeader";
+import { BlendedPageShell } from "./BlendedPageShell";
 import { FilteredMenteeList } from "./FilteredMenteeList";
 import { FlagsFeed, type FlagsView } from "./FlagsFeed";
 import { MarkFlagsSeen } from "./MarkFlagsSeen";
@@ -141,16 +140,6 @@ async function readAdminLanding(
   return { tab, cards, flags, newFlags };
 }
 
-// `wide`: the Student list is max-w-6xl, to fit its columns.
-function PageShell({ access, wide, children }: { access: BlendedLearningAccess; wide: boolean; children: ReactNode }) {
-  return (
-    <>
-      <BlendedLearningHeader access={access} wide={wide} />
-      <main className={`mx-auto px-4 py-6 sm:px-6 ${wide ? "max-w-6xl" : "max-w-5xl"}`}>{children}</main>
-    </>
-  );
-}
-
 // Landing page for the Blended Learning section: a Mentor's own Student list,
 // or for a Blended Learning Admin the Mentors and Flags tabs.
 export default async function BlendedLearningPage({
@@ -164,16 +153,19 @@ export default async function BlendedLearningPage({
   if (access.kind === "mentor") {
     const mentees = await listMentees({ access, today });
     return (
-      <PageShell access={access} wide>
+      <BlendedPageShell access={access} chrome={null} width="max-w-6xl" padding="py-6">
         <MentorMenteeList list={mentees} canLog={canBlendedLearning(access, "log")} today={today} />
-      </PageShell>
+      </BlendedPageShell>
     );
   }
 
-  const admin = await readAdminLanding(access, (await searchParams) ?? {}, today);
+  const [admin, chrome] = await Promise.all([
+    readAdminLanding(access, (await searchParams) ?? {}, today),
+    loadDashboardChrome(access),
+  ]);
   return (
-    <PageShell access={access} wide={false}>
+    <BlendedPageShell access={access} chrome={chrome} width="max-w-5xl" padding="py-6">
       <AdminLanding tab={admin.tab} cards={admin.cards} flags={admin.flags} newFlags={admin.newFlags} />
-    </PageShell>
+    </BlendedPageShell>
   );
 }

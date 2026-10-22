@@ -161,6 +161,11 @@ for (const { label, viewport, entryRole } of VIEWPORTS) {
       await talkToFirst.filter({ hasText: fullName(attemptLatest) }).getByRole("link").first().click();
       await expect(page.getByRole("heading", { name: fullName(attemptLatest) })).toBeVisible();
       await expect(page.getByRole("link", { name: "Log conversation", exact: true })).toHaveCount(0);
+
+      // Back to the Mentor's list the admin came from, not the Mentors cards.
+      await page.getByRole("link", { name: "Back to Synthetic's students" }).click();
+      await expect(page).toHaveURL(new RegExp(`/blended-learning/mentors/${mentorAUserId}$`));
+      await expect(page.getByRole("heading", { name: BLENDED_MENTOR_A.name, exact: true })).toBeVisible();
     });
 
     test("a read-only Blended Learning Admin can view cards and a Mentor's page", async ({ page }) => {
@@ -179,9 +184,37 @@ for (const { label, viewport, entryRole } of VIEWPORTS) {
       await expect(page.getByRole("link", { name: "Draft ready to review" })).toHaveCount(0);
     });
 
-    test("an LMS admin sees the Mentors tab", async ({ adminPage }) => {
+    test("an LMS admin sees the Mentors tab inside the dashboard, down to a Student", async ({ adminPage }) => {
       await adminPage.goto("/blended-learning");
       await expect(stat(mentorCard(adminPage, BLENDED_MENTOR_B), "Assigned")).toHaveText("2");
+
+      // Every page keeps the dashboard's header and tabs, Blended Learning selected.
+      const inDashboard = async () => {
+        await expect(adminPage.getByRole("banner").getByRole("img", { name: "Avanti Fellows" })).toBeVisible();
+        await expect(adminPage.getByRole("link", { name: "Blended Learning", exact: true })).toHaveAttribute(
+          "aria-current",
+          "page"
+        );
+        await expect(adminPage.getByText("Blended Learning Admin", { exact: true })).toHaveCount(0);
+      };
+      await inDashboard();
+
+      await mentorCard(adminPage, BLENDED_MENTOR_A).getByRole("link").click();
+      await expect(adminPage).toHaveURL(new RegExp(`/blended-learning/mentors/${mentorAUserId}$`));
+      await inDashboard();
+
+      await entries(group(adminPage, "Talk to first"))
+        .filter({ hasText: fullName(attemptLatest) })
+        .getByRole("link")
+        .first()
+        .click();
+      await expect(adminPage.getByRole("heading", { level: 1, name: fullName(attemptLatest) })).toBeVisible();
+      await inDashboard();
+      await expect(adminPage.getByRole("link", { name: "Back to Synthetic's students" })).toHaveAttribute(
+        "href",
+        `/blended-learning/mentors/${mentorAUserId}`
+      );
+      await noHorizontalScroll(adminPage);
     });
 
     test("a Mentor cannot reach the Mentors tab or a Mentor's page", async ({ page }) => {

@@ -64,6 +64,9 @@ export type MenteeDetail = {
   history: HistoryEntry[];
   // Open Action Items from earlier Conversations, newest Conversation first.
   openActionItems: OpenActionItem[];
+  // The Mentor of the Student's active Mapping, for an admin's way back to
+  // that Mentor's list.
+  mentor: { userId: number; firstName: string };
 };
 
 type ProfileRow = {
@@ -78,6 +81,8 @@ type ProfileRow = {
   screener_url: string | null;
   open_draft_id: number | string | null;
   open_draft_state: OpenDraftState | null;
+  mentor_user_id: number | string;
+  mentor_first_name: string;
 };
 
 type EntryRow = {
@@ -138,9 +143,13 @@ export async function getMenteeDetail(
     `SELECT account.first_name, account.last_name, account.gender, account.phone, account.whatsapp_phone,
             current_grade.number AS grade, program.name AS program_name,
             links.profile_doc_url, links.screener_url,
-            open_draft.id AS open_draft_id, open_draft.state AS open_draft_state
+            open_draft.id AS open_draft_id, open_draft.state AS open_draft_state,
+            mapping.mentor_user_id,
+            COALESCE(NULLIF(TRIM(mentor.first_name), ''), NULLIF(TRIM(mentor.last_name), ''),
+                     mentor.email, CONCAT('Mentor ', mapping.mentor_user_id)) AS mentor_first_name
      FROM blended_learning_mentor_mentee_mappings mapping
      JOIN student st ON st.id = mapping.student_id
+     LEFT JOIN "user" mentor ON mentor.id = mapping.mentor_user_id
      JOIN "user" account ON account.id = st.user_id
      JOIN program ON program.id = mapping.program_id
      LEFT JOIN LATERAL (
@@ -220,6 +229,7 @@ export async function getMenteeDetail(
       profile.open_draft_id === null || profile.open_draft_state === null
         ? null
         : { id: Number(profile.open_draft_id), state: profile.open_draft_state },
+    mentor: { userId: Number(profile.mentor_user_id), firstName: profile.mentor_first_name },
     openActionItems: entries.flatMap((entry) =>
       (itemsByConversation.get(Number(entry.id)) ?? [])
         .filter((item) => item.status === "open")

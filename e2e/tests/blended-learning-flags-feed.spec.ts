@@ -162,7 +162,8 @@ for (const { label, viewport } of VIEWPORTS) {
       await expect(iraWellbeing.getByRole("heading", { name: fullName(ira) })).toBeVisible();
       // The name opens the Student; its arrow is decorative, so the link is named by the name alone.
       const studentLink = iraWellbeing.getByRole("link", { name: fullName(ira), exact: true });
-      await expect(studentLink).toHaveAttribute("href", /\/blended-learning\/students\/\d+$/);
+      // The link says where the admin came from, so the Student's page leads back to the Flags tab.
+      await expect(studentLink).toHaveAttribute("href", /\/blended-learning\/students\/\d+\?from=flags$/);
       await expect(studentLink.locator("svg")).toHaveAttribute("aria-hidden", "true");
       await expect(iraWellbeing.getByText("Emotional Well-being", { exact: true })).toBeVisible();
       await expect(iraWellbeing.getByText("Grade 12 · STP Voucher Delhi · Female")).toBeVisible();
@@ -194,6 +195,12 @@ for (const { label, viewport } of VIEWPORTS) {
       await expect(meeraChemistry.getByRole("link", { name: "Screener Link" })).toHaveCount(0);
 
       await noHorizontalScroll(page);
+
+      await studentLink.click();
+      await expect(page.getByRole("heading", { level: 1, name: fullName(ira) })).toBeVisible();
+      await page.getByRole("link", { name: "Back to flags" }).click();
+      await expect(page).toHaveURL(/\/blended-learning\?tab=flags$/);
+      await expect(flagsTab(page)).toHaveAttribute("aria-current", "page");
     });
 
     test("the Mentor and Flag Recipient filters narrow the feed, alone and combined", async ({ page }) => {

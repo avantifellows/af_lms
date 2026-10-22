@@ -23,8 +23,10 @@ const EXTENSIONS = [
   TableKit.configure({ table: { resizable: false } }),
 ];
 
+// Long notes scroll inside the box (60vh, at most 28rem) rather than
+// stretching the page; the toolbar sits above, outside the scrolling area.
 const CONTENT_CLASSES =
-  "min-h-40 px-3 py-2.5 text-sm text-text-primary focus:outline-none [&_h3]:mt-2 [&_h3]:font-bold [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-1 [&_table]:my-2 [&_table]:border-collapse [&_td]:border [&_td]:border-border [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-border [&_th]:px-2 [&_th]:py-1 [&_th]:text-left [&_ul]:list-disc [&_ul]:pl-5 [&_.tableWrapper]:overflow-x-auto";
+  "min-h-40 max-h-[min(60vh,28rem)] overflow-y-auto px-3 py-2.5 text-sm text-text-primary focus:outline-none [&_h3]:mt-2 [&_h3]:font-bold [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-1 [&_table]:my-2 [&_table]:border-collapse [&_td]:border [&_td]:border-border [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-border [&_th]:px-2 [&_th]:py-1 [&_th]:text-left [&_ul]:list-disc [&_ul]:pl-5 [&_.tableWrapper]:overflow-x-auto";
 
 function ToolbarButton({
   label,

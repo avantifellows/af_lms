@@ -11,7 +11,9 @@ const {
   mockDraftStatus,
   mockRedirect,
   mockNotFound,
+  mockLoadDashboardChrome,
 } = vi.hoisted(() => ({
+  mockLoadDashboardChrome: vi.fn(),
   mockGetServerSession: vi.fn(),
   mockGetBlendedLearningAccess: vi.fn(),
   mockGetMenteeDetail: vi.fn(),
@@ -34,6 +36,7 @@ vi.mock("@/lib/blended-learning-access", async (importOriginal) => ({
 }));
 vi.mock("@/lib/blended-learning-mentee-detail", () => ({ getMenteeDetail: mockGetMenteeDetail }));
 vi.mock("@/lib/blended-learning-drafts", () => ({ getDraftStatus: mockGetDraftStatus }));
+vi.mock("@/lib/dashboard-chrome", () => ({ loadDashboardChrome: mockLoadDashboardChrome }));
 // DraftStatus polls and has its own tests; here only the props it gets matter.
 vi.mock("./DraftStatus", () => ({
   DraftStatus: (props: Record<string, unknown>) => {
@@ -67,6 +70,7 @@ const MENTEE: MenteeDetail = {
   openDraft: null,
   history: [],
   openActionItems: [],
+  mentor: { userId: 9001, firstName: "Faizan" },
 };
 
 type Conversation = Extract<MenteeDetail["history"][number], { kind: "conversation" }>;
@@ -85,14 +89,17 @@ function signedInAs(access: { actorEmail: string }) {
   mockGetBlendedLearningAccess.mockResolvedValue(access);
 }
 
-function renderPage(id = "501") {
-  return MenteeDetailPage({ params: Promise.resolve({ id }) }).then((page) => render(page));
+function renderPage(id = "501", from?: string) {
+  return MenteeDetailPage({ params: Promise.resolve({ id }), searchParams: Promise.resolve({ from }) }).then((page) =>
+    render(page)
+  );
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
   mockGetMenteeDetail.mockResolvedValue(MENTEE);
   mockGetDraftStatus.mockResolvedValue(null);
+  mockLoadDashboardChrome.mockResolvedValue(null);
   // ConversationPhotos loads its photos as it mounts.
   vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ photos: [] }))));
 });
@@ -190,6 +197,61 @@ describe("MenteeDetailPage", () => {
       canManage: true,
       reviewHref: "/blended-learning/students/501/log",
     });
+  });
+
+  it("keeps a Mentor's way back to their own list, whatever the link says they came from", async () => {
+    signedInAs(MENTOR);
+
+    await renderPage("501", "flags");
+
+    expect(screen.getByRole("link", { name: "Back to students" })).toHaveAttribute("href", "/blended-learning");
+    expect(mockLoadDashboardChrome).toHaveBeenCalledWith(MENTOR);
+  });
+
+  it.each([
+    ["no origin", undefined],
+    ["an unknown origin", "elsewhere"],
+  ])("sends an admin with %s back to the Student's Mentor's list", async (_case, from) => {
+    signedInAs(BLENDED_ADMIN);
+
+    await renderPage("501", from);
+
+    expect(screen.getByRole("link", { name: "Back to Faizan's students" })).toHaveAttribute(
+      "href",
+      "/blended-learning/mentors/9001"
+    );
+    expect(screen.queryByRole("link", { name: "Back to students" })).not.toBeInTheDocument();
+  });
+
+  it("sends an admin who came from the Flags tab back to it", async () => {
+    signedInAs(BLENDED_ADMIN);
+
+    await renderPage("501", "flags");
+
+    expect(screen.getByRole("link", { name: "Back to flags" })).toHaveAttribute("href", "/blended-learning?tab=flags");
+  });
+
+  it("shows an LMS admin the Student inside the dashboard, Blended Learning tab selected", async () => {
+    const access = { ...BLENDED_ADMIN, role: "admin", actorEmail: "admin@avantifellows.org" };
+    signedInAs(access);
+    mockLoadDashboardChrome.mockResolvedValue({
+      email: "admin@avantifellows.org",
+      permission: { email: "admin@avantifellows.org", level: 3, role: "admin" },
+      totalCount: 0,
+      features: { hasPMAccess: true, canViewVisitSummary: false, showCurriculumSummary: false, canViewHolisticAdmin: false },
+      view: "centres",
+      showViews: true,
+    });
+
+    await renderPage();
+
+    expect(mockLoadDashboardChrome).toHaveBeenCalledWith(access);
+    expect(screen.getByRole("banner")).toHaveTextContent("Admin access");
+    expect(screen.queryByText("Blended Learning Admin")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Blended Learning" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "Physical Centres" })).toHaveAttribute("href", "/dashboard?view=centres");
+    expect(screen.getByRole("heading", { level: 1, name: "Ira Sharma" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Back to Faizan's students" })).toBeInTheDocument();
   });
 
   // Every Blended Learning Admin is view only, read-only or not.

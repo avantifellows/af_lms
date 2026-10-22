@@ -428,7 +428,7 @@ describe("LogEntryForm: Attempt", () => {
     renderForm();
     expect(
       within(screen.getByRole("region", { name: "Open Action Items" })).getByText(
-        "Tick what's been done. Ticked items are marked done when you save this conversation and won't show here again."
+        "Tick what's done. Ticked items are removed when you save."
       )
     ).toBeInTheDocument();
   });

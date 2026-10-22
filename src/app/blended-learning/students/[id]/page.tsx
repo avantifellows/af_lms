@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { ArrowUpRight, ClipboardList, FileText, type LucideIcon } from "lucide-react";
 
 import { Badge, Card } from "@/components/ui";
-import { canBlendedLearning } from "@/lib/blended-learning-access";
+import { canBlendedLearning, type BlendedLearningAccess } from "@/lib/blended-learning-access";
 import { requireBlendedLearningPage, requireNumericPageId } from "@/lib/blended-learning-guard";
 import { getDraftStatus } from "@/lib/blended-learning-drafts";
 import { describeSession, formatCalendarDate } from "@/lib/blended-learning-format";
@@ -15,8 +15,9 @@ import {
   type MenteeDetail,
   type MentorFlag,
 } from "@/lib/blended-learning-mentee-detail";
+import { loadDashboardChrome } from "@/lib/dashboard-chrome";
 
-import { BlendedLearningHeader } from "../../BlendedLearningHeader";
+import { BlendedPageShell } from "../../BlendedPageShell";
 import { ActionItemMeta, OwnerPill } from "./ActionItemMeta";
 import { ConversationNotes } from "./ConversationNotes";
 import { ConversationPhotos } from "./ConversationPhotos";
@@ -319,41 +320,70 @@ function History({
   );
 }
 
-export default async function MenteeDetailPage({ params }: { params: Promise<{ id: string }> }) {
+// Where an admin came from, passed on the link as `?from=`; only known
+// origins count. Without one, an admin came from the Mentor's list.
+const BACK_ORIGINS = ["flags"] as const;
+type BackOrigin = (typeof BACK_ORIGINS)[number];
+
+function backOrigin(from: string | string[] | undefined): BackOrigin | null {
+  const value = Array.isArray(from) ? from[0] : from;
+  return BACK_ORIGINS.find((origin) => origin === value) ?? null;
+}
+
+// A Mentor goes back to their own list; an admin to the Flags tab when they
+// came from it, else to the Student's Mentor's list.
+function backLink(access: BlendedLearningAccess, mentee: MenteeDetail, from: BackOrigin | null) {
+  if (access.kind === "mentor") return { href: "/blended-learning", label: "Back to students" };
+  if (from === "flags") return { href: "/blended-learning?tab=flags", label: "Back to flags" };
+  return {
+    href: `/blended-learning/mentors/${mentee.mentor.userId}`,
+    label: `Back to ${mentee.mentor.firstName}'s students`,
+  };
+}
+
+export default async function MenteeDetailPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams?: Promise<{ from?: string | string[] }>;
+}) {
   const access = await requireBlendedLearningPage("view_student");
   const mentee = await getMenteeDetail(access, Number(await requireNumericPageId(params)));
   if (!mentee) notFound();
-  const draftStatus = mentee.openDraft ? await getDraftStatus(access, mentee.openDraft.id) : null;
+  const [draftStatus, chrome, query] = await Promise.all([
+    mentee.openDraft ? getDraftStatus(access, mentee.openDraft.id) : null,
+    loadDashboardChrome(access),
+    searchParams,
+  ]);
   const canLog = canBlendedLearning(access, "log");
+  const back = backLink(access, mentee, backOrigin(query?.from));
 
   return (
-    <>
-      <BlendedLearningHeader access={access} />
-      <main className="mx-auto max-w-3xl space-y-6 px-4 py-4 sm:px-6 sm:py-6">
-        <Link
-          href="/blended-learning"
-          className="-ml-1 inline-flex min-h-11 items-center gap-1 rounded text-sm font-bold text-text-secondary hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
-        >
-          <span aria-hidden="true">←</span> Back to students
-        </Link>
-        <Profile mentee={mentee} canLog={canLog} />
-        {mentee.openDraft && (
-          <DraftStatus
-            key={mentee.openDraft.id}
-            draftId={mentee.openDraft.id}
-            initialState={mentee.openDraft.state}
-            initialRetryOffered={draftStatus?.retryOffered ?? false}
-            canManage={canBlendedLearning(access, "manage_draft")}
-            reviewHref={canLog ? `/blended-learning/students/${mentee.studentId}/log` : null}
-          />
-        )}
-        {mentee.openActionItems.length > 0 && <OpenActionItems items={mentee.openActionItems} />}
-        <History
-          history={mentee.history}
-          canPlayRecording={canBlendedLearning(access, "play_recording")}
-          canLog={canLog}
+    <BlendedPageShell access={access} chrome={chrome} width="max-w-3xl" wideHeader={false} className="space-y-6">
+      <Link
+        href={back.href}
+        className="-ml-1 inline-flex min-h-11 items-center gap-1 rounded text-sm font-bold text-text-secondary hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
+      >
+        <span aria-hidden="true">←</span> {back.label}
+      </Link>
+      <Profile mentee={mentee} canLog={canLog} />
+      {mentee.openDraft && (
+        <DraftStatus
+          key={mentee.openDraft.id}
+          draftId={mentee.openDraft.id}
+          initialState={mentee.openDraft.state}
+          initialRetryOffered={draftStatus?.retryOffered ?? false}
+          canManage={canBlendedLearning(access, "manage_draft")}
+          reviewHref={canLog ? `/blended-learning/students/${mentee.studentId}/log` : null}
         />
-      </main>
-    </>
+      )}
+      {mentee.openActionItems.length > 0 && <OpenActionItems items={mentee.openActionItems} />}
+      <History
+        history={mentee.history}
+        canPlayRecording={canBlendedLearning(access, "play_recording")}
+        canLog={canLog}
+      />
+    </BlendedPageShell>
   );
 }

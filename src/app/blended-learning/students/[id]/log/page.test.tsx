@@ -44,6 +44,8 @@ vi.mock("@/lib/blended-learning-drafts", () => ({
 }));
 vi.mock("@/lib/blended-learning-mentees", () => ({ listMentees: mockListMentees }));
 vi.mock("@/lib/curriculum-date-helpers", () => ({ getTodayIST: () => "2026-10-22" }));
+// Only a Mentor reaches the form, and the Blended Learning roles have no dashboard chrome.
+vi.mock("@/lib/dashboard-chrome", () => ({ loadDashboardChrome: async () => null }));
 // The form has its own tests; here only what the page hands it matters. The
 // stub renders the Last Conversation panel the page builds for it.
 vi.mock("./LogEntryForm", () => ({
@@ -94,6 +96,7 @@ const MENTEE: MenteeDetail = {
     },
   ],
   openActionItems: OPEN_ITEMS as MenteeDetail["openActionItems"],
+  mentor: { userId: 9001, firstName: "Faizan" },
 };
 
 function signedInAs(access: { actorEmail: string }) {

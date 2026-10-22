@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -12,7 +12,9 @@ const {
   mockReadFlagsCutoff,
   mockRedirect,
   mockPush,
+  mockLoadDashboardChrome,
 } = vi.hoisted(() => ({
+  mockLoadDashboardChrome: vi.fn(),
   mockPush: vi.fn(),
   mockGetServerSession: vi.fn(),
   mockGetBlendedLearningAccess: vi.fn(),
@@ -49,6 +51,7 @@ vi.mock("@/lib/blended-learning-flags", async (importOriginal) => ({
   readFlagsCutoff: mockReadFlagsCutoff,
 }));
 vi.mock("@/lib/curriculum-date-helpers", () => ({ getTodayIST: () => "2026-10-22" }));
+vi.mock("@/lib/dashboard-chrome", () => ({ loadDashboardChrome: mockLoadDashboardChrome }));
 
 import BlendedLearningPage from "./page";
 
@@ -78,6 +81,7 @@ describe("BlendedLearningPage", () => {
     mockListMentees.mockResolvedValue({ talkToFirst: [], everyoneElse: [] });
     mockListMentorCards.mockResolvedValue([]);
     mockCountNewFlags.mockResolvedValue(0);
+    mockLoadDashboardChrome.mockResolvedValue(null);
     mockListFlags.mockResolvedValue({ flags: [], nextCursor: null, newCount: 0 });
     mockReadFlagsCutoff.mockResolvedValue({ lastSeenAt: "2026-10-21T09:30:00" });
     vi.stubGlobal("fetch", vi.fn(async () => new Response("{}")));
@@ -292,17 +296,47 @@ describe("BlendedLearningPage", () => {
     expect(screen.getByText("Blended Learning Admin · Read only")).toBeInTheDocument();
   });
 
-  it("gives an LMS admin a link back to the dashboard", async () => {
+  it("shows an LMS admin the section inside the dashboard, Blended Learning tab selected", async () => {
+    const access = { ...BLENDED_ADMIN, role: "admin", actorEmail: "admin@avantifellows.org" };
     signedInAs("admin@avantifellows.org");
-    mockGetBlendedLearningAccess.mockResolvedValue({
-      ...BLENDED_ADMIN,
-      role: "admin",
-      actorEmail: "admin@avantifellows.org",
+    mockGetBlendedLearningAccess.mockResolvedValue(access);
+    mockLoadDashboardChrome.mockResolvedValue({
+      email: "admin@avantifellows.org",
+      permission: { email: "admin@avantifellows.org", level: 3, role: "admin" },
+      totalCount: 0,
+      features: { hasPMAccess: true, canViewVisitSummary: true, showCurriculumSummary: false, canViewHolisticAdmin: false },
+      view: "centres",
+      showViews: true,
     });
 
     render(await BlendedLearningPage());
 
+    expect(mockLoadDashboardChrome).toHaveBeenCalledWith(access);
+    // The dashboard's header, not the section's own.
+    const banner = screen.getByRole("banner");
+    expect(banner).toHaveTextContent("Admin access");
+    expect(within(banner).getByRole("link", { name: "Visit Summary" })).toHaveAttribute("href", "/school-visit-summary");
+    expect(screen.queryByText("Blended Learning Admin")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Back to dashboard" })).not.toBeInTheDocument();
+    // The dashboard's tab strip, Blended Learning selected; the others go back to their views.
+    const tab = screen.getByRole("link", { name: "Blended Learning" });
+    expect(tab).toHaveAttribute("aria-current", "page");
+    expect([...tab.parentElement!.querySelectorAll("a")].map((link) => [link.textContent, link.getAttribute("href")])).toEqual([
+      ["Physical Centres", "/dashboard?view=centres"],
+      ["JNV NVS Schools", "/dashboard?view=jnv-nvs"],
+      ["Blended Learning", "/blended-learning"],
+    ]);
+    expect(screen.getByRole("navigation", { name: "Admin views" })).toBeInTheDocument();
+  });
+
+  it("gives the Blended Learning roles the section's own header, with no dashboard", async () => {
+    signedInAs("juned@avantifellows.org");
+    mockGetBlendedLearningAccess.mockResolvedValue(BLENDED_ADMIN);
+
+    render(await BlendedLearningPage());
+
     expect(screen.getByText("Blended Learning Admin")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Back to dashboard" })).toHaveAttribute("href", "/dashboard");
+    expect(screen.queryByRole("link", { name: "Back to dashboard" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Physical Centres" })).not.toBeInTheDocument();
   });
 });

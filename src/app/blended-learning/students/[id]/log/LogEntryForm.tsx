@@ -71,7 +71,7 @@ function OpenActionItemsPanel({
         <h3 className="text-xs font-bold uppercase tracking-wide text-text-muted">Open Action Items</h3>
         <p className="text-xs text-text-secondary">
           {canTick
-            ? "Tick what's been done. Ticked items are marked done when you save this conversation and won't show here again."
+            ? "Tick what's done. Ticked items are removed when you save."
             : "Only a conversation can tick these done."}
         </p>
         <ul className="space-y-1">

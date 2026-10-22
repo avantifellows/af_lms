@@ -12,8 +12,9 @@ import { getMenteeDetail, type HistoryEntry, type MenteeDetail } from "@/lib/ble
 import { listMentees } from "@/lib/blended-learning-mentees";
 import { menteeGroup, type MenteeGroup } from "@/lib/blended-learning-talk-to-first";
 import { getTodayIST } from "@/lib/curriculum-date-helpers";
+import { loadDashboardChrome } from "@/lib/dashboard-chrome";
 
-import { BlendedLearningHeader } from "../../../BlendedLearningHeader";
+import { BlendedPageShell } from "../../../BlendedPageShell";
 import { LogEntryForm, type ReviewDraft } from "./LogEntryForm";
 
 // Log a Conversation or an Attempt for one Mentee. Only a Mentor logs, for
@@ -99,39 +100,37 @@ export default async function LogEntryPage({ params }: { params: Promise<{ id: s
     .filter(Boolean)
     .join(" · ");
   const today = getTodayIST();
-  const [{ draft, pendingDraft }, listGroup] = await Promise.all([
+  const [{ draft, pendingDraft }, listGroup, chrome] = await Promise.all([
     loadOpenDraft(access, mentee),
     currentListGroup(access, mentee.studentId, today),
+    loadDashboardChrome(access),
   ]);
 
   return (
-    <>
-      <BlendedLearningHeader access={access} />
-      <main className="mx-auto max-w-6xl space-y-4 px-4 py-4 sm:px-6 sm:py-6">
-        <Link
-          href={`/blended-learning/students/${mentee.studentId}`}
-          className="-ml-1 inline-flex min-h-11 items-center gap-1.5 rounded text-sm font-bold text-text-secondary hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
-        >
-          <ArrowLeft aria-hidden="true" className="h-4 w-4" />
-          {`Back to ${mentee.name}`}
-        </Link>
-        {/* A new key once the draft is ready, so the form opens prefilled. */}
-        <LogEntryForm
-          key={draft ? `review-${draft.id}` : "entry"}
-          studentId={mentee.studentId}
-          name={mentee.name}
-          firstName={firstName}
-          subtitle={subtitle}
-          today={today}
-          listGroup={listGroup}
-          lastConversationPanel={<LastConversationPanel conversation={lastConversation} />}
-          openActionItems={mentee.openActionItems}
-          hasOpenDraft={mentee.openDraft !== null}
-          draft={draft}
-          pendingDraft={pendingDraft}
-          canManageDraft={canBlendedLearning(access, "manage_draft")}
-        />
-      </main>
-    </>
+    <BlendedPageShell access={access} chrome={chrome} width="max-w-6xl" wideHeader={false} className="space-y-4">
+      <Link
+        href={`/blended-learning/students/${mentee.studentId}`}
+        className="-ml-1 inline-flex min-h-11 items-center gap-1.5 rounded text-sm font-bold text-text-secondary hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
+      >
+        <ArrowLeft aria-hidden="true" className="h-4 w-4" />
+        {`Back to ${mentee.name}`}
+      </Link>
+      {/* A new key once the draft is ready, so the form opens prefilled. */}
+      <LogEntryForm
+        key={draft ? `review-${draft.id}` : "entry"}
+        studentId={mentee.studentId}
+        name={mentee.name}
+        firstName={firstName}
+        subtitle={subtitle}
+        today={today}
+        listGroup={listGroup}
+        lastConversationPanel={<LastConversationPanel conversation={lastConversation} />}
+        openActionItems={mentee.openActionItems}
+        hasOpenDraft={mentee.openDraft !== null}
+        draft={draft}
+        pendingDraft={pendingDraft}
+        canManageDraft={canBlendedLearning(access, "manage_draft")}
+      />
+    </BlendedPageShell>
   );
 }

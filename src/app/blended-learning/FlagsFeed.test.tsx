@@ -44,7 +44,7 @@ describe("FlagsFeed", () => {
 
     const card = screen.getByRole("article");
     const link = within(card).getByRole("link", { name: "Ira Attempt" });
-    expect(link).toHaveAttribute("href", "/blended-learning/students/501");
+    expect(link).toHaveAttribute("href", "/blended-learning/students/501?from=flags");
     expect(link.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
     expect(within(card).getByRole("button", { name: "Show Session Notes" })).toBeInTheDocument();
   });

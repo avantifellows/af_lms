@@ -8,7 +8,9 @@ const {
   mockListMentorCards,
   mockRedirect,
   mockNotFound,
+  mockLoadDashboardChrome,
 } = vi.hoisted(() => ({
+  mockLoadDashboardChrome: vi.fn(),
   mockGetServerSession: vi.fn(),
   mockGetBlendedLearningAccess: vi.fn(),
   mockListMentees: vi.fn(),
@@ -33,6 +35,7 @@ vi.mock("@/lib/blended-learning-mentees", () => ({
   listMentorCards: mockListMentorCards,
 }));
 vi.mock("@/lib/curriculum-date-helpers", () => ({ getTodayIST: () => "2026-10-22" }));
+vi.mock("@/lib/dashboard-chrome", () => ({ loadDashboardChrome: mockLoadDashboardChrome }));
 
 import MentorPage from "./page";
 
@@ -70,6 +73,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockListMentorCards.mockResolvedValue(CARDS);
   mockListMentees.mockResolvedValue({ talkToFirst: [MENTEE], everyoneElse: [] });
+  mockLoadDashboardChrome.mockResolvedValue(null);
 });
 
 describe("MentorPage", () => {
@@ -135,5 +139,26 @@ describe("MentorPage", () => {
     const group = screen.getByRole("rowgroup", { name: "Talk to first" });
     expect(group).toHaveTextContent("Not reachable on the last try, or no conversation in 30 days or more.");
     expect(screen.getByRole("main")).not.toHaveTextContent(/\byou\b/i);
+  });
+
+  it("shows an LMS admin the Mentor's list inside the dashboard, Blended Learning tab selected", async () => {
+    const access = { ...BLENDED_ADMIN, role: "admin", actorEmail: "admin@avantifellows.org" };
+    signedInAs(access);
+    mockLoadDashboardChrome.mockResolvedValue({
+      email: "admin@avantifellows.org",
+      permission: { email: "admin@avantifellows.org", level: 3, role: "admin" },
+      totalCount: 0,
+      features: { hasPMAccess: false, canViewVisitSummary: false, showCurriculumSummary: false, canViewHolisticAdmin: false },
+      view: "centres",
+      showViews: true,
+    });
+
+    await renderPage();
+
+    expect(mockLoadDashboardChrome).toHaveBeenCalledWith(access);
+    expect(screen.getByRole("banner")).toHaveTextContent("Admin access");
+    expect(screen.getByRole("link", { name: "Blended Learning" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("heading", { level: 1, name: "Faizan" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Mentors" })).toHaveAttribute("href", "/blended-learning");
   });
 });
