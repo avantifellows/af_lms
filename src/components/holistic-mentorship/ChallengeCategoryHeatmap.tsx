@@ -9,6 +9,10 @@ import {
   HOLISTIC_CHALLENGE_CATEGORIES,
   holisticChallengeCategoryPercent,
 } from "@/lib/holistic-challenge-categories";
+import {
+  HEATMAP_LEGEND_GRADIENT,
+  heatmapCellColours,
+} from "@/lib/holistic-challenge-category-heatmap-colours";
 import type {
   ChallengeCategoryCounts,
   ChallengeCategoryHeatmap as Heatmap,
@@ -18,23 +22,6 @@ const GROUPS = [
   { group: "academic", label: "Academic" },
   { group: "non_academic", label: "Non-academic" },
 ] as const;
-
-// Linear 0-100 scale: light yellow -> dark red.
-const LOW = [255, 247, 188];
-const HIGH = [153, 0, 13];
-
-function channel(value: number) {
-  const unit = value / 255;
-  return unit <= 0.03928 ? unit / 12.92 : ((unit + 0.055) / 1.055) ** 2.4;
-}
-
-function cellColours(percent: number) {
-  const rgb = LOW.map((low, index) => Math.round(low + (HIGH[index] - low) * (percent / 100)));
-  const luminance = 0.2126 * channel(rgb[0]) + 0.7152 * channel(rgb[1]) + 0.0722 * channel(rgb[2]);
-  // Pick whichever text colour has the higher contrast ratio on this cell.
-  const whiteText = 1.05 / (luminance + 0.05) > (luminance + 0.05) / 0.05;
-  return { backgroundColor: `rgb(${rgb.join(", ")})`, color: whiteText ? "#ffffff" : "#1f2937" };
-}
 
 async function readHeatmapResponse(response: Response): Promise<Heatmap> {
   const body = await response.json().catch(() => null);
@@ -160,7 +147,7 @@ function Legend() {
   return <div className="flex items-center gap-2 text-xs text-text-muted" aria-label="Colour scale from 0% to 100%">
     <span>0%</span>
     <span aria-hidden="true" className="h-3 w-32 rounded-sm"
-      style={{ backgroundImage: `linear-gradient(to right, rgb(${LOW.join(", ")}), rgb(${HIGH.join(", ")}))` }} />
+      style={{ backgroundImage: HEATMAP_LEGEND_GRADIENT }} />
     <span>100%</span>
   </div>;
 }
@@ -171,15 +158,18 @@ function HeatmapRow({ label, studentCount, counts, emphasised }: {
   counts: ChallengeCategoryCounts;
   emphasised?: boolean;
 }) {
-  return <tr className={emphasised ? "border-b-2 border-border font-bold" : "border-b border-border"}>
-    <th scope="row" className="sticky left-0 z-10 min-w-36 max-w-48 bg-bg-card px-3 py-2 text-left text-xs">
+  // Borders sit on the cells: the table's separate borders keep each sticky
+  // School cell's border over its own opaque background while scrolled.
+  const border = emphasised ? "border-b-2 border-border" : "border-b border-border";
+  return <tr className={emphasised ? "font-bold" : undefined}>
+    <th scope="row" className={`sticky left-0 z-10 min-w-36 max-w-48 bg-bg-card px-3 py-2 text-left text-xs ${border}`}>
       <span className="block break-words text-text-primary">{label}</span>
       <span className="block font-mono font-normal text-text-muted">n = {studentCount}</span>
     </th>
     {HOLISTIC_CHALLENGE_CATEGORIES.map(({ code }) => {
       const percent = holisticChallengeCategoryPercent(counts[code] ?? 0, studentCount);
-      return <td key={code} style={cellColours(percent)}
-        className="px-2 py-2 text-center font-mono text-xs tabular-nums">
+      return <td key={code} style={heatmapCellColours(percent)}
+        className={`px-2 py-2 text-center font-mono text-xs tabular-nums ${border}`}>
         {percent.toFixed(1)}%
       </td>;
     })}
@@ -188,25 +178,26 @@ function HeatmapRow({ label, studentCount, counts, emphasised }: {
 
 function HeatmapGrid({ data }: { data: Heatmap }) {
   return <div className="max-w-full overflow-x-auto rounded-md border border-border">
-    <table aria-label="Challenge Category Heatmap" className="min-w-full border-collapse bg-bg-card text-sm">
+    <table aria-label="Challenge Category Heatmap"
+      className="min-w-full border-separate border-spacing-0 bg-bg-card text-sm">
       <thead>
-        <tr className="border-b border-border">
+        <tr>
           <th scope="col" rowSpan={2}
-            className="sticky left-0 z-20 bg-bg-card px-3 py-2 text-left text-[11px] font-extrabold uppercase tracking-wide text-text-muted">
+            className="sticky left-0 z-20 border-b border-border bg-bg-card px-3 py-2 text-left text-[11px] font-extrabold uppercase tracking-wide text-text-muted">
             School
           </th>
           {GROUPS.map(({ group, label }) => <th key={group} scope="colgroup"
             colSpan={HOLISTIC_CHALLENGE_CATEGORIES.filter((category) => category.group === group).length}
-            className="border-l border-border px-2 py-2 text-center text-[11px] font-extrabold uppercase tracking-wide text-text-muted">
+            className="border-b border-l border-border px-2 py-2 text-center text-[11px] font-extrabold uppercase tracking-wide text-text-muted">
             {label}
           </th>)}
         </tr>
-        <tr className="border-b border-border">
+        <tr>
           {HOLISTIC_CHALLENGE_CATEGORIES.map((category) => {
             const groupLabel = GROUPS.find(({ group }) => group === category.group)!.label;
             return <th key={category.code} scope="col" title={category.label}
               aria-label={`${groupLabel}: ${category.label}`}
-              className="min-w-16 px-2 py-2 text-center align-bottom text-[11px] font-bold text-text-secondary">
+              className="min-w-16 border-b border-border px-2 py-2 text-center align-bottom text-[11px] font-bold text-text-secondary">
               <span aria-hidden="true" className="sm:hidden">{category.shortLabel}</span>
               <span aria-hidden="true" className="hidden sm:inline">{category.label}</span>
             </th>;

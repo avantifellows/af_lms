@@ -105,6 +105,10 @@ describe("ChallengeCategoryHeatmap", () => {
       "33.3%", "0.0%", "66.7%", "0.0%", "0.0%", "0.0%",
       "0.0%", "0.0%", "0.0%", "0.0%", "0.0%", "0.0%", "100.0%", "0.0%", "0.0%", "0.0%",
     ]);
+    // Text follows the cell: black on the light 33.3% cell, white on the dark 66.7% one.
+    const allSchoolsCells = within(rows[2]).getAllByRole("cell");
+    expect(allSchoolsCells[0]).toHaveStyle({ backgroundColor: "rgb(221, 165, 130)", color: "rgb(0, 0, 0)" });
+    expect(allSchoolsCells[2]).toHaveStyle({ backgroundColor: "rgb(187, 82, 71)", color: "rgb(255, 255, 255)" });
     expect(within(rows[3]).getByRole("rowheader")).toHaveTextContent("Alpha School");
     expect(within(rows[3]).getByRole("rowheader")).toHaveTextContent("n = 2");
     expect(cells(rows[3])).toEqual([
