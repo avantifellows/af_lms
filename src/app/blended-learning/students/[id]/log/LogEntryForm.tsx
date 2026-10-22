@@ -697,9 +697,16 @@ function FormAlert({ error }: { error: string | null }) {
   );
 }
 
-function submitLabel(saving: boolean, kind: Kind): string {
+function submitLabel(saving: boolean, kind: Kind, drafting: boolean): string {
+  if (drafting) return "Drafting…";
   if (saving) return "Saving…";
   return kind === "conversation" ? "Save Conversation" : "Save Attempt";
+}
+
+// A Conversation waits for its draft to be drafted; an Attempt can still be
+// saved.
+function waitsForDraft(kind: Kind, pendingDraft: PendingDraft | null): boolean {
+  return kind === "conversation" && pendingDraft?.state === "transcribing";
 }
 
 export function LogEntryForm({
@@ -739,8 +746,7 @@ export function LogEntryForm({
   const { error, setError, saving, saved, save } = useEntrySave(studentId, setFieldErrors);
   const change: ChangeValues = (update) => setValues((current) => ({ ...current, ...update(current) }));
   const { kind } = values;
-  // A Conversation waits for its draft; an Attempt can still be saved.
-  const drafting = kind === "conversation" && pendingDraft?.state === "transcribing";
+  const drafting = waitsForDraft(kind, pendingDraft);
 
   if (saved) {
     return (
@@ -825,7 +831,7 @@ export function LogEntryForm({
           <FormAlert error={error} />
 
           <Button type="submit" disabled={saving || drafting} className="w-full sm:w-auto">
-            {drafting ? "Drafting…" : submitLabel(saving, kind)}
+            {submitLabel(saving, kind, drafting)}
           </Button>
         </form>
       </div>

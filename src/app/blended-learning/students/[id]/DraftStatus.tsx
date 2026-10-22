@@ -27,9 +27,15 @@ const DRAFT_STATE: Partial<Record<DraftState, { label: string; variant: "info" |
 type DraftStatusBody = { state: DraftState; retryOffered: boolean };
 type DraftAction = "retry" | "discard";
 
-// The draft's state and retry offer, polled while etl-next is drafting.
-function usePolledDraft(draftId: number, initial: DraftStatusBody, pollMs: number) {
+// The draft's state and retry offer, polled while etl-next is drafting;
+// `onReady` is called once a draft that wasn't ready turns ready.
+function usePolledDraft(draftId: number, initial: DraftStatusBody, pollMs: number, onReady?: () => void) {
   const [status, setStatus] = useState<DraftStatusBody>(initial);
+  const initialState = initial.state;
+
+  useEffect(() => {
+    if (status.state === "ready" && initialState !== "ready") onReady?.();
+  }, [status.state, initialState, onReady]);
   // Bumped after every poll, so the next one is scheduled even when the state
   // hasn't changed.
   const [polls, setPolls] = useState(0);
@@ -115,6 +121,31 @@ function DraftActions({
   );
 }
 
+// The title and state badge; while drafting, a spinner and what is happening.
+function DraftHeading({ state, drafting }: { state: DraftState; drafting: string | null }) {
+  const shown = DRAFT_STATE[state];
+  const inProgress = state === "transcribing";
+  return (
+    <>
+      <div className="flex flex-wrap items-center gap-2">
+        {inProgress && (
+          <span
+            aria-hidden="true"
+            className="h-4 w-4 animate-spin rounded-full border-2 border-accent border-t-transparent"
+          />
+        )}
+        <span className="text-sm font-bold text-text-primary">Conversation Draft</span>
+        {shown && <Badge variant={shown.variant}>{shown.label}</Badge>}
+      </div>
+      {inProgress && drafting && (
+        <p role="status" className="text-sm text-text-secondary">
+          {drafting}
+        </p>
+      )}
+    </>
+  );
+}
+
 export function DraftStatus({
   draftId,
   initialState,
@@ -141,12 +172,9 @@ export function DraftStatus({
   const [status, setStatus] = usePolledDraft(
     draftId,
     { state: initialState, retryOffered: initialRetryOffered },
-    pollMs
+    pollMs,
+    onReady
   );
-
-  useEffect(() => {
-    if (status.state === "ready" && initialState !== "ready") onReady?.();
-  }, [status.state, initialState, onReady]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -184,21 +212,7 @@ export function DraftStatus({
   return (
     <section aria-label="Conversation Draft">
       <Card elevation="sm" className="space-y-3 p-4 sm:px-6">
-        <div className="flex flex-wrap items-center gap-2">
-          {status.state === "transcribing" && (
-            <span
-              aria-hidden="true"
-              className="h-4 w-4 animate-spin rounded-full border-2 border-accent border-t-transparent"
-            />
-          )}
-          <span className="text-sm font-bold text-text-primary">Conversation Draft</span>
-          <Badge variant={shown.variant}>{shown.label}</Badge>
-        </div>
-        {status.state === "transcribing" && drafting && (
-          <p role="status" className="text-sm text-text-secondary">
-            {drafting}
-          </p>
-        )}
+        <DraftHeading state={status.state} drafting={drafting} />
         <DraftActions
           state={status.state}
           reviewHref={status.state === "ready" ? reviewHref : null}
