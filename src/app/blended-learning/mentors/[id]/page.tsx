@@ -10,8 +10,9 @@ import { getTodayIST } from "@/lib/curriculum-date-helpers";
 import { BlendedLearningHeader } from "../../BlendedLearningHeader";
 import { FilteredMenteeList } from "../../FilteredMenteeList";
 
-// One Mentor's Mentee list for Blended Learning Admins (view_mentors), the
-// same grouped list, search and filters the Mentor sees. From here an admin
+// One Mentor's Student list for Blended Learning Admins (view_mentors), the
+// same grouped list, search and filters the Mentor sees. Its copy is neutral,
+// never "you", since the viewer is not the Mentor. From here an admin
 // opens a Mentee and logs on the Mentor's behalf. Mentors are sent back to
 // their own list.
 export default async function MentorPage({ params }: { params: Promise<{ id: string }> }) {
@@ -24,8 +25,8 @@ export default async function MentorPage({ params }: { params: Promise<{ id: str
 
   return (
     <>
-      <BlendedLearningHeader access={access} />
-      <main className="mx-auto max-w-5xl space-y-4 px-4 py-4 sm:px-6 sm:py-6">
+      <BlendedLearningHeader access={access} wide />
+      <main className="mx-auto max-w-6xl space-y-4 px-4 py-4 sm:px-6 sm:py-6">
         <Link
           href="/blended-learning"
           className="-ml-1 inline-flex min-h-11 items-center gap-1 text-sm font-bold text-text-secondary hover:text-text-primary"
@@ -35,10 +36,10 @@ export default async function MentorPage({ params }: { params: Promise<{ id: str
         <div>
           <h2 className="text-xl font-bold text-text-primary">{mentor.name}</h2>
           <p className="text-sm text-text-secondary">
-            {mentor.assigned} {mentor.assigned === 1 ? "Mentee" : "Mentees"} · {CURRENT_ACADEMIC_YEAR}
+            {mentor.assigned} {mentor.assigned === 1 ? "student" : "students"} · {CURRENT_ACADEMIC_YEAR}
           </p>
         </div>
-        <FilteredMenteeList list={mentees} canLog={canBlendedLearning(access, "log")} />
+        <FilteredMenteeList list={mentees} canLog={canBlendedLearning(access, "log")} today={today} />
       </main>
     </>
   );

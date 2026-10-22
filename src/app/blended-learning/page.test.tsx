@@ -104,7 +104,7 @@ describe("BlendedLearningPage", () => {
     expect(screen.queryByRole("link", { name: /dashboard/i })).not.toBeInTheDocument();
   });
 
-  it("shows a Mentor their own Mentee list for today's IST date, grouped", async () => {
+  it("shows a Mentor their own Student list for today's IST date, grouped, under a Students heading", async () => {
     signedInAs("faizan@avantifellows.org");
     mockGetBlendedLearningAccess.mockResolvedValue(MENTOR);
     mockListMentees.mockResolvedValue({
@@ -119,18 +119,32 @@ describe("BlendedLearningPage", () => {
     render(await BlendedLearningPage());
 
     expect(mockListMentees).toHaveBeenCalledWith({ access: MENTOR, today: "2026-10-22" });
-    expect(screen.getByRole("region", { name: "Talk to First" })).toHaveTextContent("Ira Attempt");
-    expect(screen.getByRole("region", { name: "Everyone else" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Students" })).toBeInTheDocument();
+    expect(screen.getByText("1 student · 2026-2027")).toBeInTheDocument();
+    expect(screen.getByRole("rowgroup", { name: "Talk to first" })).toHaveTextContent("Ira Attempt");
+    expect(screen.getByRole("region", { name: "Talk to first" })).toHaveTextContent("Ira Attempt");
+    // A group with no Students is left out.
+    expect(screen.queryByRole("rowgroup", { name: "Everyone else" })).not.toBeInTheDocument();
   });
 
-  it("does not read a Mentee list for a Blended Learning Admin", async () => {
+  it("tells a Mentor with no Students that none are mapped to them", async () => {
+    signedInAs("faizan@avantifellows.org");
+    mockGetBlendedLearningAccess.mockResolvedValue(MENTOR);
+
+    render(await BlendedLearningPage());
+
+    expect(screen.getByRole("heading", { level: 1, name: "Students" })).toBeInTheDocument();
+    expect(screen.getByText("No students are mapped to you for 2026-2027.")).toBeInTheDocument();
+  });
+
+  it("does not read a Student list for a Blended Learning Admin", async () => {
     signedInAs("juned@avantifellows.org");
     mockGetBlendedLearningAccess.mockResolvedValue(BLENDED_ADMIN);
 
     render(await BlendedLearningPage());
 
     expect(mockListMentees).not.toHaveBeenCalled();
-    expect(screen.queryByRole("region", { name: "Talk to First" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Students" })).not.toBeInTheDocument();
   });
 
   it("shows a Blended Learning Admin the Mentors tab with a card per Mentor", async () => {

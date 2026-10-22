@@ -36,23 +36,25 @@ type SearchParams = {
   since?: SearchParam;
 };
 
-function MentorMenteeList({ list, canLog }: { list: MenteeList; canLog: boolean }) {
+function MentorMenteeList({ list, canLog, today }: { list: MenteeList; canLog: boolean; today: string }) {
   const total = list.talkToFirst.length + list.everyoneElse.length;
-  if (total === 0) {
-    return (
-      <Card elevation="sm" className="p-4 sm:p-6">
-        <p className="text-sm text-text-secondary">
-          No Mentees are mapped to you for {CURRENT_ACADEMIC_YEAR}.
-        </p>
-      </Card>
-    );
-  }
   return (
     <div className="space-y-5">
-      <p className="text-sm text-text-secondary">
-        {total} {total === 1 ? "Mentee" : "Mentees"} · {CURRENT_ACADEMIC_YEAR}
-      </p>
-      <FilteredMenteeList list={list} canLog={canLog} />
+      <div>
+        <h1 className="text-2xl font-bold text-text-primary sm:text-3xl">Students</h1>
+        <p className="mt-1 text-sm text-text-secondary">
+          {total} {total === 1 ? "student" : "students"} · {CURRENT_ACADEMIC_YEAR}
+        </p>
+      </div>
+      {total === 0 ? (
+        <Card elevation="sm" className="p-4 sm:p-6">
+          <p className="text-sm text-text-secondary">
+            No students are mapped to you for {CURRENT_ACADEMIC_YEAR}.
+          </p>
+        </Card>
+      ) : (
+        <FilteredMenteeList list={list} canLog={canLog} today={today} />
+      )}
     </div>
   );
 }
@@ -81,6 +83,10 @@ function AdminLanding({
       )}
     </div>
   );
+}
+
+function pageWidth(studentList: boolean): string {
+  return studentList ? "max-w-6xl" : "max-w-5xl";
 }
 
 function single(value: SearchParam): string | undefined {
@@ -115,7 +121,7 @@ async function readFlags(
   };
 }
 
-// Landing page for the Blended Learning section: a Mentor's own Mentee list,
+// Landing page for the Blended Learning section: a Mentor's own Student list,
 // or for a Blended Learning Admin the Mentors and Flags tabs.
 export default async function BlendedLearningPage({
   searchParams,
@@ -137,10 +143,11 @@ export default async function BlendedLearningPage({
 
   return (
     <>
-      <BlendedLearningHeader access={access} />
-      <main className="mx-auto max-w-5xl px-4 py-6 sm:px-6">
+      {/* The Student list is wider, to fit its columns. */}
+      <BlendedLearningHeader access={access} wide={Boolean(mentees)} />
+      <main className={`mx-auto px-4 py-6 sm:px-6 ${pageWidth(Boolean(mentees))}`}>
         {mentees ? (
-          <MentorMenteeList list={mentees} canLog={canBlendedLearning(access, "log")} />
+          <MentorMenteeList list={mentees} canLog={canBlendedLearning(access, "log")} today={today} />
         ) : (
           <AdminLanding tab={tab} cards={cards} flags={flags} newFlags={newFlags} />
         )}
