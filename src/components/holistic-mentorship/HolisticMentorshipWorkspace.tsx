@@ -10,6 +10,7 @@ import {
   PROGRAM_IDS,
   PROGRAM_ID_TO_LABEL,
 } from "@/lib/constants";
+import ChallengeCategoryHeatmap from "./ChallengeCategoryHeatmap";
 import HolisticTutorialLink from "./HolisticTutorialLink";
 import PhasePlanSetup from "./PhasePlanSetup";
 import ProgressWorkspace from "./ProgressWorkspace";
@@ -20,6 +21,7 @@ type WorkspaceMode = "teacher" | "admin";
 const WORKSPACES = {
   admin: [
     { id: "progress", label: "Students & Progress" },
+    { id: "challenge-categories", label: "Challenge Categories" },
     { id: "phases", label: "Phase Setup" },
   ],
 } as const;
@@ -124,8 +126,11 @@ function WorkspacePanel({ active, tabSetId, academicYear, programId, canEdit,
     className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50">
     {active.id === "phases"
       ? <PhasePlanSetup academicYear={academicYear} programId={programId} canEdit={canEdit} />
-      : <ProgressWorkspace academicYear={academicYear} programId={programId}
-          onAcademicYears={onAcademicYears} />}
+      : active.id === "challenge-categories"
+        ? <ChallengeCategoryHeatmap academicYear={academicYear} programId={programId}
+            onAcademicYears={onAcademicYears} />
+        : <ProgressWorkspace academicYear={academicYear} programId={programId}
+            onAcademicYears={onAcademicYears} />}
   </div>;
 }
 
@@ -144,7 +149,9 @@ function AdminWorkspace({
   )
     ? requestedProgramId
     : initialProgramId;
-  const workspaces = canViewPhaseSetup ? WORKSPACES.admin : WORKSPACES.admin.slice(0, 1);
+  const workspaces = canViewPhaseSetup
+    ? WORKSPACES.admin
+    : WORKSPACES.admin.filter((workspace) => workspace.id !== "phases");
   const [activeId, setActiveId] = useState<string>(workspaces[0].id);
   const active = workspaces.find((workspace) => workspace.id === activeId) ?? workspaces[0];
   const tabSetId = useId();

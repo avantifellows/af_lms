@@ -286,4 +286,36 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   - Tests: `holistic-student-phase.test.ts`, `StudentPhaseWorkspace.test.tsx`, and the Holistic
     Playwright spec, which edits the seeded pre-release Phase 1 Note and then strips its Category
     rows again for later specs.
-- The heatmap is a later slice of #457.
+- **Challenge Category Heatmap (#463, single Program):** `GET /api/holistic-mentorship/challenge-categories`
+  (`program_id`, `academic_year`, `grade` 11|12 required, optional `phase_id`; absent = All Phases) gates
+  on `program_read` for that Program (Teachers 403; out-of-scope PM/PA 403). Missing/invalid Grade, a
+  non-Holistic Program, a bad year or `phase_id`, and a Phase outside that Program/year/Grade's Plan are
+  422 `Invalid Challenge Category Heatmap filters`; other failures are a safe 500 that logs only the
+  error code. `getHolisticChallengeCategoryHeatmap` (`src/lib/holistic-challenge-category-heatmap.ts`,
+  type in `src/types/holistic-challenge-category-heatmap.ts`) returns `null` for an off-Plan Phase, else
+  `programIds`, `academicYear`, `grade`, `phaseId`, the Grade's `phases` (Plan order, `number` =
+  position), `defaultPhaseId` (latest Open Phase of the Grade, else `null`), `academicYears` (the
+  Students & Progress year list), `total`, `schools` (n > 0, by name then code) and `hiddenSchoolCount`.
+  - **Counting (one SQL aggregation):** qualifying Notes are `submitted` with ≥1 Category row on that
+    Plan/Grade (and Phase). Each Student counts once per code (union across Notes) under the latest
+    Mapping in the Program/year **after** the School-scope predicate (`started_at DESC, id DESC`, ended
+    Mappings included, dropout ignored). `total` is over the same Students (never an average). Hidden
+    Schools = in-scope Mapping Schools with n = 0. Counts only; no per-Student identity.
+  - **Percent:** `holisticChallengeCategoryPercent(count, n)` in the catalogue module, half-up to one
+    decimal in integer arithmetic (1/3 → 33.3, 2/3 → 66.7, 1/8 → 12.5, 1/16 → 6.3); the CSV slice reuses it.
+  - **Tab:** `ChallengeCategoryHeatmap` sits between Students & Progress and Phase Setup in the Admin
+    workspace for every `program_read` viewer (PM/PA included; never in the Teacher workspace). Program
+    and Academic Year are the shared selectors (years from the response); Grade (default 11) and Phase
+    sit in the tab. A new scope (Program, year or Grade) first loads All Phases, whose
+    `defaultPhaseId` then selects the Phase (one request when it is `null`). The grid is a `<table>`
+    with Academic (6) / Non-academic (10) group headers, a sticky School + `n` column, "All Schools"
+    first, yellow→dark-red cells with contrast-picked text, `shortLabel` below `sm` (full label in
+    `title` / `aria-label` "Group: Label"), a hidden-School note, an empty state and loading /
+    error + Retry. "All Programs" and CSV are later #457 slices.
+  - **Fixture:** `seedHolisticFixtures` adds a second submitted Note (second Grade 12 Student, Phase 4
+    "Synthetic Grade 12 Skipped") tagged Exam/Test related issues + Time management & distractions, so
+    the heatmap is non-empty; the Phase 1 Note stays the untagged pre-release Note.
+  - Tests: `holistic-challenge-category-heatmap.integration.test.ts` (real Postgres, opt-in via
+    `HOLISTIC_HEATMAP_TEST_DATABASE`), the route test (real access gate, stubbed permission lookup),
+    `ChallengeCategoryHeatmap.test.tsx`, `HolisticMentorshipWorkspace.test.tsx`, and
+    `e2e/tests/holistic-challenge-categories.spec.ts`.

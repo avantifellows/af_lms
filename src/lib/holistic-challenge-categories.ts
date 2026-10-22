@@ -124,3 +124,10 @@ export function joinHolisticChallengeCategoryLabels(codes: Iterable<HolisticChal
   const selected = new Set<string>(codes);
   return HOLISTIC_CHALLENGE_CATEGORIES.filter(({ code }) => selected.has(code)).map(({ label }) => label).join("; ");
 }
+
+// Challenge Category Heatmap cell: count / n x 100, rounded half-up to one
+// decimal in integer arithmetic so exact halves (1 / 16 = 6.25) never round down.
+export function holisticChallengeCategoryPercent(count: number, studentCount: number): number {
+  if (studentCount <= 0) return 0;
+  return Math.floor((2000 * count + studentCount) / (2 * studentCount)) / 10;
+}

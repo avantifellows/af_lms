@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   HOLISTIC_CHALLENGE_CATEGORIES,
   groupHolisticChallengeCategories,
+  holisticChallengeCategoryPercent,
   joinHolisticChallengeCategoryLabels,
   placeHolisticChallengeCategories,
   toggleHolisticChallengeCategory,
@@ -198,5 +199,29 @@ describe("joinHolisticChallengeCategoryLabels", () => {
 
   it("is empty when there are no codes", () => {
     expect(joinHolisticChallengeCategoryLabels([])).toBe("");
+  });
+});
+
+describe("holisticChallengeCategoryPercent", () => {
+  it("rounds count / n x 100 half-up to one decimal", () => {
+    expect(holisticChallengeCategoryPercent(1, 3)).toBe(33.3);
+    expect(holisticChallengeCategoryPercent(2, 3)).toBe(66.7);
+    expect(holisticChallengeCategoryPercent(1, 8)).toBe(12.5);
+    expect(holisticChallengeCategoryPercent(3, 4)).toBe(75);
+    expect(holisticChallengeCategoryPercent(5, 5)).toBe(100);
+  });
+
+  it("rounds an exact half-tenth up rather than to even or down", () => {
+    // 1 / 16 = 6.25% and 1 / 80 = 1.25%: both sit exactly on the half.
+    expect(holisticChallengeCategoryPercent(1, 16)).toBe(6.3);
+    expect(holisticChallengeCategoryPercent(1, 80)).toBe(1.3);
+    // 1 / 400 = 0.25%, and 3 / 400 = 0.75%.
+    expect(holisticChallengeCategoryPercent(1, 400)).toBe(0.3);
+    expect(holisticChallengeCategoryPercent(3, 400)).toBe(0.8);
+  });
+
+  it("is 0 for no Students", () => {
+    expect(holisticChallengeCategoryPercent(0, 0)).toBe(0);
+    expect(holisticChallengeCategoryPercent(0, 7)).toBe(0);
   });
 });
