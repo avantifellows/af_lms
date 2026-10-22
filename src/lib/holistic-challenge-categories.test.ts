@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import {
   HOLISTIC_CHALLENGE_CATEGORIES,
+  HOLISTIC_CHALLENGE_CATEGORY_GROUPS,
   groupHolisticChallengeCategories,
+  holisticChallengeCategoryGroupsMessage,
   holisticChallengeCategoryPercent,
-  joinHolisticChallengeCategoryLabels,
+  isHolisticChallengeCategoryCode,
+  knownHolisticChallengeCategories,
   placeHolisticChallengeCategories,
   toggleHolisticChallengeCategory,
   validateHolisticChallengeCategories,
@@ -30,6 +33,43 @@ describe("HOLISTIC_CHALLENGE_CATEGORIES", () => {
       { code: "non_academic.other", group: "non_academic", label: "Other", shortLabel: "Other" },
       { code: "non_academic.no_major_issue", group: "non_academic", label: "No major issue reported", shortLabel: "No issue" },
     ]);
+  });
+});
+
+describe("HOLISTIC_CHALLENGE_CATEGORY_GROUPS", () => {
+  it("lists the two groups with their labels in display order", () => {
+    expect(HOLISTIC_CHALLENGE_CATEGORY_GROUPS).toEqual([
+      { group: "academic", label: "Academic" },
+      { group: "non_academic", label: "Non-academic" },
+    ]);
+  });
+});
+
+describe("isHolisticChallengeCategoryCode", () => {
+  it("accepts catalogue codes only", () => {
+    expect(isHolisticChallengeCategoryCode("academic.exam_related")).toBe(true);
+    expect(isHolisticChallengeCategoryCode("academic.bullying")).toBe(false);
+    expect(isHolisticChallengeCategoryCode("Exam/Test related issues")).toBe(false);
+  });
+});
+
+describe("knownHolisticChallengeCategories", () => {
+  it("keeps known codes in catalogue order and drops unknown ones", () => {
+    expect(knownHolisticChallengeCategories([
+      "non_academic.financial", "academic.retired", "academic.other", "academic.subject_concept",
+    ])).toEqual(["academic.subject_concept", "academic.other", "non_academic.financial"]);
+    expect(knownHolisticChallengeCategories([])).toEqual([]);
+  });
+});
+
+describe("holisticChallengeCategoryGroupsMessage", () => {
+  it("names the empty groups, and is empty when none are", () => {
+    expect(holisticChallengeCategoryGroupsMessage(["non_academic"]))
+      .toBe("Choose at least one Non-academic Challenge Category");
+    expect(holisticChallengeCategoryGroupsMessage(["academic"])).toBe("Choose at least one Academic Challenge Category");
+    expect(holisticChallengeCategoryGroupsMessage(["non_academic", "academic"]))
+      .toBe("Choose at least one Academic and one Non-academic Challenge Category");
+    expect(holisticChallengeCategoryGroupsMessage([])).toBe("");
   });
 });
 
@@ -74,16 +114,16 @@ describe("validateHolisticChallengeCategories", () => {
     });
   });
 
-  it("with final, rejects a set that leaves a group empty and names that group", () => {
+  it("with final, rejects a set that leaves a group empty and names the empty groups", () => {
     const groupMessage = "Choose at least one Academic and one Non-academic Challenge Category";
     expect(validateHolisticChallengeCategories(["academic.subject_concept"], { final: true })).toEqual({
-      ok: false, error: groupMessage, emptyGroup: "non_academic",
+      ok: false, error: groupMessage, emptyGroups: ["non_academic"],
     });
     expect(validateHolisticChallengeCategories(["non_academic.no_major_issue"], { final: true })).toEqual({
-      ok: false, error: groupMessage, emptyGroup: "academic",
+      ok: false, error: groupMessage, emptyGroups: ["academic"],
     });
     expect(validateHolisticChallengeCategories([], { final: true })).toEqual({
-      ok: false, error: groupMessage, emptyGroup: "academic",
+      ok: false, error: groupMessage, emptyGroups: ["academic", "non_academic"],
     });
   });
 
@@ -103,7 +143,7 @@ describe("groupHolisticChallengeCategories", () => {
         { code: "academic.subject_concept", group: "academic", label: "Subject/concept issues", shortLabel: "Subject" },
         { code: "academic.other", group: "academic", label: "Other", shortLabel: "Other" },
       ],
-      nonAcademic: [
+      non_academic: [
         { code: "non_academic.time_management", group: "non_academic", label: "Time management & distractions", shortLabel: "Time" },
         { code: "non_academic.other", group: "non_academic", label: "Other", shortLabel: "Other" },
       ],
@@ -111,7 +151,7 @@ describe("groupHolisticChallengeCategories", () => {
   });
 
   it("returns empty groups for no codes", () => {
-    expect(groupHolisticChallengeCategories([])).toEqual({ academic: [], nonAcademic: [] });
+    expect(groupHolisticChallengeCategories([])).toEqual({ academic: [], non_academic: [] });
   });
 });
 
@@ -143,62 +183,49 @@ describe("toggleHolisticChallengeCategory", () => {
 describe("placeHolisticChallengeCategories", () => {
   it("places each group under the matching current prod Question", () => {
     expect(placeHolisticChallengeCategories([
-      { questionId: 501, position: 1, text: "What did the student share about their week?" },
-      { questionId: 502, position: 2, text: "Describe the academic challenges the student is facing." },
-      { questionId: 503, position: 3, text: "Describe any non-academic challenges the student mentioned." },
-      { questionId: 504, position: 4, text: "What support did you agree on?" },
-    ])).toEqual({ academicQuestionId: 502, nonAcademicQuestionId: 503 });
+      { questionId: 501, text: "What did the student share about their week?" },
+      { questionId: 502, text: "Describe the academic challenges the student is facing." },
+      { questionId: 503, text: "Describe any non-academic challenges the student mentioned." },
+      { questionId: 504, text: "What support did you agree on?" },
+    ])).toEqual({ academic: 502, non_academic: 503 });
   });
 
   it("treats a Question mentioning both phrases as Non-academic only", () => {
     expect(placeHolisticChallengeCategories([
-      { questionId: 11, position: 1, text: "Academic challenges and non-academic challenges discussed" },
-      { questionId: 12, position: 2, text: "Describe the academic challenges in detail" },
-    ])).toEqual({ academicQuestionId: 12, nonAcademicQuestionId: 11 });
+      { questionId: 11, text: "Academic challenges and non-academic challenges discussed" },
+      { questionId: 12, text: "Describe the academic challenges in detail" },
+    ])).toEqual({ academic: 12, non_academic: 11 });
   });
 
   it("matches case variants", () => {
     expect(placeHolisticChallengeCategories([
-      { questionId: 21, position: 1, text: "NON-ACADEMIC CHALLENGES" },
-      { questionId: 22, position: 2, text: "Academic Challenge areas" },
-    ])).toEqual({ academicQuestionId: 22, nonAcademicQuestionId: 21 });
+      { questionId: 21, text: "NON-ACADEMIC CHALLENGES" },
+      { questionId: 22, text: "Academic Challenge areas" },
+    ])).toEqual({ academic: 22, non_academic: 21 });
   });
 
-  it("uses the first match by position, not by array order", () => {
+  it("uses the first match in Question order", () => {
     expect(placeHolisticChallengeCategories([
-      { questionId: 31, position: 4, text: "Describe the academic challenges again" },
-      { questionId: 32, position: 3, text: "Describe any non-academic challenges again" },
-      { questionId: 33, position: 2, text: "Describe the academic challenges" },
-      { questionId: 34, position: 1, text: "Describe any non-academic challenges" },
-    ])).toEqual({ academicQuestionId: 33, nonAcademicQuestionId: 34 });
+      { questionId: 34, text: "Describe any non-academic challenges" },
+      { questionId: 33, text: "Describe the academic challenges" },
+      { questionId: 32, text: "Describe any non-academic challenges again" },
+      { questionId: 31, text: "Describe the academic challenges again" },
+    ])).toEqual({ academic: 33, non_academic: 34 });
   });
 
   it("only counts the hyphenated non-academic as Non-academic", () => {
     expect(placeHolisticChallengeCategories([
-      { questionId: 41, position: 1, text: "Describe any non academic challenges" },
-      { questionId: 42, position: 2, text: "Describe any nonacademic challenges" },
-    ])).toEqual({ academicQuestionId: 41, nonAcademicQuestionId: null });
+      { questionId: 41, text: "Describe any non academic challenges" },
+      { questionId: 42, text: "Describe any nonacademic challenges" },
+    ])).toEqual({ academic: 41, non_academic: null });
   });
 
   it("leaves a group unplaced when no Question matches", () => {
     expect(placeHolisticChallengeCategories([
-      { questionId: 51, position: 1, text: "Academic progress so far" },
-      { questionId: 52, position: 2, text: "Non-academic support offered" },
-    ])).toEqual({ academicQuestionId: null, nonAcademicQuestionId: null });
-    expect(placeHolisticChallengeCategories([])).toEqual({ academicQuestionId: null, nonAcademicQuestionId: null });
-  });
-});
-
-describe("joinHolisticChallengeCategoryLabels", () => {
-  it("joins labels with a semicolon in catalogue order", () => {
-    expect(joinHolisticChallengeCategoryLabels([
-      "academic.other", "academic.subject_concept", "academic.backlogs_workload",
-    ])).toBe("Subject/concept issues; Backlogs, revision & workload; Other");
-    expect(joinHolisticChallengeCategoryLabels(["non_academic.no_major_issue"])).toBe("No major issue reported");
-  });
-
-  it("is empty when there are no codes", () => {
-    expect(joinHolisticChallengeCategoryLabels([])).toBe("");
+      { questionId: 51, text: "Academic progress so far" },
+      { questionId: 52, text: "Non-academic support offered" },
+    ])).toEqual({ academic: null, non_academic: null });
+    expect(placeHolisticChallengeCategories([])).toEqual({ academic: null, non_academic: null });
   });
 });
 

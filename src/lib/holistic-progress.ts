@@ -1,9 +1,8 @@
 import { CURRENT_ACADEMIC_YEAR, PROGRAM_ID_TO_LABEL } from "./constants";
 import { query } from "./db";
 import {
-  HOLISTIC_CHALLENGE_CATEGORIES,
   groupHolisticChallengeCategories,
-  joinHolisticChallengeCategoryLabels,
+  knownHolisticChallengeCategories,
 } from "./holistic-challenge-categories";
 import { reconcileHolisticMappings } from "./holistic-reconciliation";
 import { buildHolisticSchoolScopePredicate } from "./holistic-scope";
@@ -98,12 +97,6 @@ function parsedAnswers(value: unknown): HolisticAssignedProgressRow["answers"] {
       ? [{ position: Number(item.position), question: item.question, answer: item.answer }]
       : [];
   });
-}
-
-// Catalogue order; a stored code the catalogue no longer knows is not shown.
-function parsedChallengeCategories(value: string[] | null): HolisticAssignedProgressRow["challengeCategories"] {
-  const stored = new Set(value ?? []);
-  return HOLISTIC_CHALLENGE_CATEGORIES.filter(({ code }) => stored.has(code)).map(({ code }) => code);
 }
 
 // In-scope Schools with at least one active current-year Mapping in the Program.
@@ -558,7 +551,7 @@ async function listAssignedMentees(
       notesAuthorEmail: row.notes_author_email,
       notesLastEditedAt: row.notes_last_edited_at,
       answers: parsedAnswers(row.answers),
-      challengeCategories: parsedChallengeCategories(row.challenge_categories),
+      challengeCategories: knownHolisticChallengeCategories(row.challenge_categories ?? []),
     })),
     counts: {
       total: Number(first?.total_mapped ?? 0),
@@ -749,8 +742,8 @@ export function formatHolisticProgressCsv(
       row.grade, row.mentorName, row.mentorEmail, row.phaseNumber === null ? "" : `Phase ${row.phaseNumber}`,
       row.phaseTitle, row.phaseState, row.progress, row.completedAt,
       ...answers.flatMap((answer) => [answer?.question ?? "", answer?.answer ?? ""]),
-      joinHolisticChallengeCategoryLabels(categories.academic.map(({ code }) => code)),
-      joinHolisticChallengeCategoryLabels(categories.nonAcademic.map(({ code }) => code)),
+      categories.academic.map(({ label }) => label).join("; "),
+      categories.non_academic.map(({ label }) => label).join("; "),
       row.notesAuthor, row.notesAuthorEmail, row.notesLastEditedAt,
     ].map(csvCell).join(",");
   });

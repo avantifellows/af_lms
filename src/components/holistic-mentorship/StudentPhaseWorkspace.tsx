@@ -11,9 +11,9 @@ import { type ReactNode, useCallback, useEffect, useEffectEvent, useId, useRef, 
 import type { HolisticProfileRegeneration, HolisticStudentPhaseDetail } from "@/lib/holistic-student-phase";
 import { PROGRAM_IDS } from "@/lib/constants";
 import {
-  groupHolisticChallengeCategories, HOLISTIC_CHALLENGE_CATEGORIES, placeHolisticChallengeCategories,
-  toggleHolisticChallengeCategory, validateHolisticChallengeCategories,
-  type HolisticChallengeCategoryCode, type HolisticChallengeCategoryGroups,
+  groupHolisticChallengeCategories, HOLISTIC_CHALLENGE_CATEGORIES, HOLISTIC_CHALLENGE_CATEGORY_GROUPS,
+  holisticChallengeCategoryGroupsMessage, placeHolisticChallengeCategories, toggleHolisticChallengeCategory,
+  validateHolisticChallengeCategories, type HolisticChallengeCategoryCode, type HolisticChallengeCategoryGroup,
 } from "@/lib/holistic-challenge-categories";
 import {
   HOLISTIC_FOLLOW_UP_ANSWER_MAX_LENGTH, HOLISTIC_FOLLOW_UP_QUESTIONS,
@@ -36,7 +36,7 @@ type NotesEditorProps = {
   academicYear: string;
   programId: number;
   editable: boolean;
-  questions: Array<{ questionId: number; text: string; position: number }>;
+  questions: Array<{ questionId: number; text: string }>;
   notes: null | {
     state: "draft" | "submitted";
     revision: number;
@@ -53,7 +53,7 @@ type NotesValue = {
   answers: Record<number, string>;
   challengeCategories: HolisticChallengeCategoryCode[];
 };
-type CategoryGroupKey = keyof HolisticChallengeCategoryGroups;
+type CategoryGroup = (typeof HOLISTIC_CHALLENGE_CATEGORY_GROUPS)[number];
 type OpenSelectedPhase = Extract<HolisticStudentPhaseDetail["selectedPhase"], { guidanceMarkdown: string }>;
 type PhaseNavigationItem = HolisticStudentPhaseDetail["phases"][number];
 type BrowserNavigation = EventTarget & {
@@ -69,10 +69,6 @@ type BeforeNotesNavigation = () => boolean | Promise<boolean>;
 const NOTES_REFRESH_URLS = "holistic-notes-refresh-urls";
 const SUBMIT_BLANK_ANSWER_ERROR = "Answer every Question before submitting";
 const SAVE_BLANK_ANSWER_ERROR = "Answer every Question before saving";
-const CATEGORY_GROUPS = [
-  { key: "academic", group: "academic", label: "Academic" },
-  { key: "nonAcademic", group: "non_academic", label: "Non-academic" },
-] as const;
 const PROFILE_STATUS_POLL_MS = 2_000;
 
 function browserNavigation() {
@@ -168,18 +164,9 @@ function firstBlankQuestion(questions: NotesEditorProps["questions"], answers: R
 }
 
 // Submit / Edit notes need both groups; names the groups still empty.
-function missingCategoryGroups(codes: HolisticChallengeCategoryCode[]): CategoryGroupKey[] {
-  if (validateHolisticChallengeCategories(codes, { final: true }).ok) return [];
-  const grouped = groupHolisticChallengeCategories(codes);
-  return CATEGORY_GROUPS.filter(({ key }) => grouped[key].length === 0).map(({ key }) => key);
-}
-
-function categoryValidationMessage(missing: CategoryGroupKey[]) {
-  if (missing.length === 0) return "";
-  if (missing.length === CATEGORY_GROUPS.length) {
-    return "Choose at least one Academic and one Non-academic Challenge Category";
-  }
-  return `Choose at least one ${CATEGORY_GROUPS.find(({ key }) => key === missing[0])!.label} Challenge Category`;
+function missingCategoryGroups(codes: HolisticChallengeCategoryCode[]): HolisticChallengeCategoryGroup[] {
+  const result = validateHolisticChallengeCategories(codes, { final: true });
+  return result.ok ? [] : result.emptyGroups ?? [];
 }
 
 function selectedOpenPhase(detail: HolisticStudentPhaseDetail): OpenSelectedPhase | null {
@@ -383,7 +370,7 @@ function useNotesEditorState(props: NotesEditorProps) {
   const [status, setStatus] = useState<NotesEditorStatus>(initialEditor.status);
   const [error, setError] = useState("");
   const [validationError, setValidationError] = useState("");
-  const [missingCategories, setMissingCategories] = useState<CategoryGroupKey[]>([]);
+  const [missingCategories, setMissingCategories] = useState<HolisticChallengeCategoryGroup[]>([]);
   const [success, setSuccess] = useState("");
   const [conflict, setConflict] = useState(false);
   const [finalWriting, setFinalWriting] = useState(false);
@@ -409,7 +396,7 @@ function useNotesEditorRefs(
   const inFlightRef = useRef<Promise<boolean> | null>(null);
   const autosaveTimerRef = useRef<number | null>(null);
   const textareasRef = useRef<Record<number, HTMLTextAreaElement | null>>({});
-  const categoryFieldsetsRef = useRef<Partial<Record<CategoryGroupKey, HTMLFieldSetElement | null>>>({});
+  const categoryFieldsetsRef = useRef<Partial<Record<HolisticChallengeCategoryGroup, HTMLFieldSetElement | null>>>({});
   const hydratedServerRevisionRef = useRef(initialNotesRevision(props));
   const mutationRevisionRef = useRef(state.initialRevision);
   return {
@@ -732,7 +719,7 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
         onTextarea={(questionId, element) => { textareasRef.current[questionId] = element; }}
         onCategoryFieldset={(group, element) => { categoryFieldsetsRef.current[group] = element; }}
         actions={<NotesEditorActions status={status} error={error} validationError={validationError}
-          validationErrorId={validationErrorId} categoryError={categoryValidationMessage(missingCategories)}
+          validationErrorId={validationErrorId} categoryError={holisticChallengeCategoryGroupsMessage(missingCategories)}
           categoryErrorId={categoryErrorId} canRetry={enabledUnlessDisabled(autosaveEnabled, conflict)}
           editingSubmitted={editingSubmitted} disabled={finalWriting} onRetry={retry}
           onSaveCorrection={saveCorrection} onCancelCorrection={cancelCorrection} onSubmit={submit} />} />}
@@ -822,12 +809,12 @@ function SubmittedChallengeCategories({ codes, headingLevel = 3 }: {
     {codes.length === 0
       ? <p className="mt-2 text-sm text-text-muted">Categories not recorded</p>
       : <div className="mt-2 grid gap-3 sm:grid-cols-2">
-          {CATEGORY_GROUPS.map(({ key, label }) => <div key={key}>
-            <p id={`${headingId}-${key}`} className="text-xs font-semibold uppercase text-text-muted">{label}</p>
-            <ul aria-labelledby={`${headingId}-${key}`} className="mt-1 flex flex-wrap gap-1.5">
-              {grouped[key].length === 0
+          {HOLISTIC_CHALLENGE_CATEGORY_GROUPS.map(({ group, label }) => <div key={group}>
+            <p id={`${headingId}-${group}`} className="text-xs font-semibold uppercase text-text-muted">{label}</p>
+            <ul aria-labelledby={`${headingId}-${group}`} className="mt-1 flex flex-wrap gap-1.5">
+              {grouped[group].length === 0
                 ? <li className="text-sm text-text-muted">None</li>
-                : grouped[key].map((category) => <li key={category.code}
+                : grouped[group].map((category) => <li key={category.code}
                     className="rounded-md border border-border bg-bg-card-alt px-2 py-0.5 text-sm text-text-primary">
                     {category.label}
                   </li>)}
@@ -838,15 +825,15 @@ function SubmittedChallengeCategories({ codes, headingLevel = 3 }: {
 }
 
 function ChallengeCategoryFieldset({ group, selected, invalid, errorId, disabled, onToggle, onFieldset }: {
-  group: (typeof CATEGORY_GROUPS)[number];
+  group: CategoryGroup;
   selected: HolisticChallengeCategoryCode[];
   invalid: boolean;
   errorId: string;
   disabled: boolean;
   onToggle: (code: HolisticChallengeCategoryCode) => void;
-  onFieldset: (group: CategoryGroupKey, element: HTMLFieldSetElement | null) => void;
+  onFieldset: (group: HolisticChallengeCategoryGroup, element: HTMLFieldSetElement | null) => void;
 }) {
-  return <fieldset ref={(element) => onFieldset(group.key, element)} disabled={disabled}
+  return <fieldset ref={(element) => onFieldset(group.group, element)} disabled={disabled}
     aria-invalid={invalid} aria-describedby={invalid ? errorId : undefined}
     className={`rounded-md border p-3 ${invalid ? "border-danger" : "border-border"}`}>
     <legend className="px-1 text-xs font-semibold uppercase text-text-muted">
@@ -868,8 +855,7 @@ function categoryGroupsPlacedUnder(
   placement: ReturnType<typeof placeHolisticChallengeCategories>,
   questionId: number | null,
 ) {
-  return CATEGORY_GROUPS.filter(({ key }) =>
-    (key === "academic" ? placement.academicQuestionId : placement.nonAcademicQuestionId) === questionId);
+  return HOLISTIC_CHALLENGE_CATEGORY_GROUPS.filter(({ group }) => placement[group] === questionId);
 }
 
 function NotesAnswerField({ question, answer, validationError, validationErrorId, disabled, onTextarea,
@@ -906,18 +892,18 @@ function EditableNotesForm({ questions, value, validationError, validationErrorI
   value: NotesValue;
   validationError: string;
   validationErrorId: string;
-  missingCategories: CategoryGroupKey[];
+  missingCategories: HolisticChallengeCategoryGroup[];
   categoryErrorId: string;
   disabled: boolean;
   onAnswerChange: (questionId: number, answer: string) => void;
   onCategoryToggle: (code: HolisticChallengeCategoryCode) => void;
   onTextarea: (questionId: number, element: HTMLTextAreaElement | null) => void;
-  onCategoryFieldset: (group: CategoryGroupKey, element: HTMLFieldSetElement | null) => void;
+  onCategoryFieldset: (group: HolisticChallengeCategoryGroup, element: HTMLFieldSetElement | null) => void;
   actions: ReactNode;
 }) {
   const placement = placeHolisticChallengeCategories(questions);
-  const fieldset = (group: (typeof CATEGORY_GROUPS)[number]) => <ChallengeCategoryFieldset key={group.key}
-    group={group} selected={value.challengeCategories} invalid={missingCategories.includes(group.key)}
+  const fieldset = (group: CategoryGroup) => <ChallengeCategoryFieldset key={group.group} group={group}
+    selected={value.challengeCategories} invalid={missingCategories.includes(group.group)}
     errorId={categoryErrorId} disabled={disabled} onToggle={onCategoryToggle} onFieldset={onCategoryFieldset} />;
   const unplaced = categoryGroupsPlacedUnder(placement, null);
   return <>

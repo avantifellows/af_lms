@@ -2,8 +2,9 @@ import { CURRENT_ACADEMIC_YEAR } from "./constants";
 import { query } from "./db";
 import {
   HOLISTIC_CHALLENGE_CATEGORIES,
+  HOLISTIC_CHALLENGE_CATEGORY_GROUPS,
   holisticChallengeCategoryPercent,
-  type HolisticChallengeCategoryCode,
+  isHolisticChallengeCategoryCode,
 } from "./holistic-challenge-categories";
 import { csvCell, getHolisticProgressAcademicYears } from "./holistic-progress";
 import { buildHolisticSchoolScopePredicate } from "./holistic-scope";
@@ -31,8 +32,6 @@ type HeatmapDatabaseRow = {
   category_code: string | null;
   students: number | string;
 };
-
-const CATEGORY_CODES = new Set<string>(HOLISTIC_CHALLENGE_CATEGORIES.map(({ code }) => code));
 
 function emptyCounts(): ChallengeCategoryCounts {
   return Object.fromEntries(
@@ -114,7 +113,7 @@ async function heatmapPhases(filters: HolisticChallengeCategoryHeatmapFilters) {
 }
 
 function addCount(counts: ChallengeCategoryCounts, code: string, students: number) {
-  if (CATEGORY_CODES.has(code)) counts[code as HolisticChallengeCategoryCode] = students;
+  if (isHolisticChallengeCategoryCode(code)) counts[code] = students;
 }
 
 function heatmapGrid(rows: HeatmapDatabaseRow[]) {
@@ -193,7 +192,7 @@ export async function getHolisticChallengeCategoryHeatmap(
   };
 }
 
-const CSV_GROUP_LABELS = { academic: "Academic", non_academic: "Non-academic" } as const;
+const GROUP_LABEL = Object.fromEntries(HOLISTIC_CHALLENGE_CATEGORY_GROUPS.map(({ group, label }) => [group, label]));
 
 // The visible grid as CSV: All Schools, then the n > 0 Schools in grid order.
 // Percentages use the grid's helper, so both show the same one-decimal value.
@@ -201,8 +200,8 @@ export function formatHolisticChallengeCategoryHeatmapCsv(heatmap: ChallengeCate
   const header = [
     "School", "UDISE Code", "Students (n)",
     ...HOLISTIC_CHALLENGE_CATEGORIES.flatMap(({ group, label }) => [
-      `${CSV_GROUP_LABELS[group]} - ${label} (count)`,
-      `${CSV_GROUP_LABELS[group]} - ${label} (%)`,
+      `${GROUP_LABEL[group]} - ${label} (count)`,
+      `${GROUP_LABEL[group]} - ${label} (%)`,
     ]),
   ];
   const row = (name: string, code: string, studentCount: number, counts: ChallengeCategoryCounts) => [

@@ -7,6 +7,7 @@ import { Button, Select } from "@/components/ui";
 import { downloadFile } from "@/lib/file-download";
 import {
   HOLISTIC_CHALLENGE_CATEGORIES,
+  HOLISTIC_CHALLENGE_CATEGORY_GROUPS,
   holisticChallengeCategoryPercent,
 } from "@/lib/holistic-challenge-categories";
 import {
@@ -17,11 +18,6 @@ import type {
   ChallengeCategoryCounts,
   ChallengeCategoryHeatmap as Heatmap,
 } from "@/types/holistic-challenge-category-heatmap";
-
-const GROUPS = [
-  { group: "academic", label: "Academic" },
-  { group: "non_academic", label: "Non-academic" },
-] as const;
 
 const LOAD_ERROR = "Unable to load Challenge Categories. Please try again.";
 
@@ -196,7 +192,7 @@ function HeatmapGrid({ data }: { data: Heatmap }) {
             className="sticky left-0 z-20 border-b border-border bg-bg-card px-3 py-2 text-left text-[11px] font-extrabold uppercase tracking-wide text-text-muted">
             School
           </th>
-          {GROUPS.map(({ group, label }) => <th key={group} scope="colgroup"
+          {HOLISTIC_CHALLENGE_CATEGORY_GROUPS.map(({ group, label }) => <th key={group} scope="colgroup"
             colSpan={HOLISTIC_CHALLENGE_CATEGORIES.filter((category) => category.group === group).length}
             className="border-b border-l border-border px-2 py-2 text-center text-[11px] font-extrabold uppercase tracking-wide text-text-muted">
             {label}
@@ -204,7 +200,7 @@ function HeatmapGrid({ data }: { data: Heatmap }) {
         </tr>
         <tr>
           {HOLISTIC_CHALLENGE_CATEGORIES.map((category) => {
-            const groupLabel = GROUPS.find(({ group }) => group === category.group)!.label;
+            const groupLabel = HOLISTIC_CHALLENGE_CATEGORY_GROUPS.find(({ group }) => group === category.group)!.label;
             return <th key={category.code} scope="col" title={category.label}
               aria-label={`${groupLabel}: ${category.label}`}
               className="min-w-16 border-b border-border px-2 py-2 text-center align-bottom text-[11px] font-bold text-text-secondary">

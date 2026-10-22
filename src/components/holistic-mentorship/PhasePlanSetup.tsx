@@ -5,7 +5,9 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 
 import { Button, Input } from "@/components/ui";
 import { CURRENT_ACADEMIC_YEAR, PROGRAM_IDS } from "@/lib/constants";
-import { placeHolisticChallengeCategories } from "@/lib/holistic-challenge-categories";
+import {
+  HOLISTIC_CHALLENGE_CATEGORY_GROUPS, placeHolisticChallengeCategories,
+} from "@/lib/holistic-challenge-categories";
 import GuidanceEditor from "./GuidanceEditor";
 
 type Question = { id?: number; text: string };
@@ -497,7 +499,7 @@ function QuestionsEditor({ draft, readOnly, onChange }: {
   onChange: (draft: Draft) => void;
 }) {
   const placement = placeHolisticChallengeCategories(
-    draft.questions.map((question, index) => ({ questionId: index, text: question.text, position: index }))
+    draft.questions.map((question, index) => ({ questionId: index, text: question.text }))
   );
   return <section>
     <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -518,13 +520,9 @@ function QuestionsEditor({ draft, readOnly, onChange }: {
   </section>;
 }
 
-function challengeCategoryHint(
-  placement: ReturnType<typeof placeHolisticChallengeCategories<number>>,
-  index: number
-) {
-  if (placement.academicQuestionId === index) return "Academic Challenge Categories appear under this question";
-  if (placement.nonAcademicQuestionId === index) return "Non-academic Challenge Categories appear under this question";
-  return null;
+function challengeCategoryHint(placement: ReturnType<typeof placeHolisticChallengeCategories>, index: number) {
+  const placed = HOLISTIC_CHALLENGE_CATEGORY_GROUPS.find(({ group }) => placement[group] === index);
+  return placed ? `${placed.label} Challenge Categories appear under this question` : null;
 }
 
 function QuestionEditorRow({ draft, question, index, onChange, hint }: {

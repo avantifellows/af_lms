@@ -4,8 +4,7 @@ import {
 } from "./constants";
 import { query } from "./db";
 import {
-  groupHolisticChallengeCategories,
-  HOLISTIC_CHALLENGE_CATEGORIES,
+  knownHolisticChallengeCategories,
   type HolisticChallengeCategoryCode,
 } from "./holistic-challenge-categories";
 import {
@@ -582,17 +581,6 @@ function groupQuestions(rows: QuestionRow[]) {
   return grouped;
 }
 
-const CHALLENGE_CATEGORY_CODES: ReadonlySet<string> = new Set(
-  HOLISTIC_CHALLENGE_CATEGORIES.map(({ code }) => code)
-);
-
-// Catalogue order; a stored code the catalogue no longer knows is not shown.
-function notesChallengeCategories(codes: string[]): HolisticChallengeCategoryCode[] {
-  const known = codes.filter((code): code is HolisticChallengeCategoryCode => CHALLENGE_CATEGORY_CODES.has(code));
-  const { academic, nonAcademic } = groupHolisticChallengeCategories(known);
-  return [...academic, ...nonAcademic].map(({ code }) => code);
-}
-
 function groupNotes(rows: NotesRow[]): Map<number, PhaseNotes> {
   const grouped = new Map<number, PhaseNotes>();
   for (const row of rows) {
@@ -606,7 +594,7 @@ function groupNotes(rows: NotesRow[]): Map<number, PhaseNotes> {
       firstSubmittedAt: row.first_submitted_at,
       lastEditedAt: row.last_edited_at,
       answers: [],
-      challengeCategories: notesChallengeCategories(row.challenge_categories),
+      challengeCategories: knownHolisticChallengeCategories(row.challenge_categories),
     };
     if (row.question !== null && row.answer !== null) {
       notes.answers.push({

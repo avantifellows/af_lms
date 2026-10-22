@@ -24,11 +24,15 @@ export type HolisticChallengeCategory = (typeof HOLISTIC_CHALLENGE_CATEGORIES)[n
 export type HolisticChallengeCategoryCode = HolisticChallengeCategory["code"];
 export type HolisticChallengeCategoryGroup = HolisticChallengeCategory["group"];
 
+// The two groups in display order, with the one copy of their labels.
+export const HOLISTIC_CHALLENGE_CATEGORY_GROUPS = [
+  { group: "academic", label: "Academic" },
+  { group: "non_academic", label: "Non-academic" },
+] as const satisfies ReadonlyArray<{ group: HolisticChallengeCategoryGroup; label: string }>;
+
 export type HolisticChallengeCategoriesResult =
   | { ok: true; codes: HolisticChallengeCategoryCode[] }
-  | { ok: false; error: string; emptyGroup?: HolisticChallengeCategoryGroup };
-
-const HOLISTIC_CHALLENGE_CATEGORY_GROUPS = ["academic", "non_academic"] as const;
+  | { ok: false; error: string; emptyGroups?: HolisticChallengeCategoryGroup[] };
 
 function isNoMajorIssue(code: string): boolean {
   return code.endsWith(".no_major_issue");
@@ -38,48 +42,66 @@ const CATEGORY_BY_CODE: ReadonlyMap<string, HolisticChallengeCategory> = new Map
   HOLISTIC_CHALLENGE_CATEGORIES.map((category) => [category.code, category])
 );
 
+export function isHolisticChallengeCategoryCode(code: string): code is HolisticChallengeCategoryCode {
+  return CATEGORY_BY_CODE.has(code);
+}
+
+// Catalogue order, regardless of the order codes were selected or stored in;
+// a code the catalogue does not know is dropped.
+export function knownHolisticChallengeCategories(codes: Iterable<string>): HolisticChallengeCategoryCode[] {
+  const selected = new Set(codes);
+  return HOLISTIC_CHALLENGE_CATEGORIES.filter(({ code }) => selected.has(code)).map(({ code }) => code);
+}
+
+// The Submit / Edit notes message naming the groups that are still empty.
+export function holisticChallengeCategoryGroupsMessage(emptyGroups: readonly HolisticChallengeCategoryGroup[]): string {
+  const labels = HOLISTIC_CHALLENGE_CATEGORY_GROUPS
+    .filter(({ group }) => emptyGroups.includes(group)).map(({ label }) => label);
+  return labels.length ? `Choose at least one ${labels.join(" and one ")} Challenge Category` : "";
+}
+
+const ALL_GROUPS_MESSAGE = holisticChallengeCategoryGroupsMessage(
+  HOLISTIC_CHALLENGE_CATEGORY_GROUPS.map(({ group }) => group)
+);
+
 // The single source of the Challenge Category write rules. Drafts may hold any
-// valid partial set; `final` (Submit / Edit notes) also needs both groups.
+// valid partial set; `final` (Submit / Edit notes) also needs both groups. The
+// error always names both groups; `emptyGroups` says which are missing.
 export function validateHolisticChallengeCategories(
   raw: unknown[],
   { final }: { final: boolean }
 ): HolisticChallengeCategoriesResult {
   const codes = raw.map((code) => (typeof code === "string" ? code.trim() : null));
   // Duplicates share the unknown-code message; the UI toggle never sends them.
-  if (codes.some((code) => code === null || !CATEGORY_BY_CODE.has(code)) || new Set(codes).size !== codes.length) {
+  if (codes.some((code) => code === null || !isHolisticChallengeCategoryCode(code))
+    || new Set(codes).size !== codes.length) {
     return { ok: false, error: "Unknown Challenge Category" };
   }
   const categories = codes.map((code) => CATEGORY_BY_CODE.get(code as string)!);
-  const mixesNoMajorIssue = HOLISTIC_CHALLENGE_CATEGORY_GROUPS.some((group) => {
-    const inGroup = categories.filter((category) => category.group === group);
-    return inGroup.length > 1 && inGroup.some(({ code }) => isNoMajorIssue(code));
+  const inGroup = (group: HolisticChallengeCategoryGroup) => categories.filter((category) => category.group === group);
+  const mixesNoMajorIssue = HOLISTIC_CHALLENGE_CATEGORY_GROUPS.some(({ group }) => {
+    const selected = inGroup(group);
+    return selected.length > 1 && selected.some(({ code }) => isNoMajorIssue(code));
   });
   if (mixesNoMajorIssue) {
     return { ok: false, error: "Choose either No major issue reported or other Challenge Categories" };
   }
-  const emptyGroup = final
-    ? HOLISTIC_CHALLENGE_CATEGORY_GROUPS.find((group) => !categories.some((category) => category.group === group))
-    : undefined;
-  if (emptyGroup) {
-    return { ok: false, error: "Choose at least one Academic and one Non-academic Challenge Category", emptyGroup };
-  }
+  const emptyGroups = final
+    ? HOLISTIC_CHALLENGE_CATEGORY_GROUPS.map(({ group }) => group).filter((group) => inGroup(group).length === 0)
+    : [];
+  if (emptyGroups.length) return { ok: false, error: ALL_GROUPS_MESSAGE, emptyGroups };
   return { ok: true, codes: codes as HolisticChallengeCategoryCode[] };
 }
-
-export type HolisticChallengeCategoryGroups = {
-  academic: HolisticChallengeCategory[];
-  nonAcademic: HolisticChallengeCategory[];
-};
 
 // Catalogue order, regardless of the order codes were selected or stored in.
 export function groupHolisticChallengeCategories(
   codes: Iterable<HolisticChallengeCategoryCode>
-): HolisticChallengeCategoryGroups {
+): Record<HolisticChallengeCategoryGroup, HolisticChallengeCategory[]> {
   const selected = new Set<string>(codes);
   const categories = HOLISTIC_CHALLENGE_CATEGORIES.filter(({ code }) => selected.has(code));
   return {
     academic: categories.filter(({ group }) => group === "academic"),
-    nonAcademic: categories.filter(({ group }) => group === "non_academic"),
+    non_academic: categories.filter(({ group }) => group === "non_academic"),
   };
 }
 
@@ -94,35 +116,20 @@ export function toggleHolisticChallengeCategory(
     if (CATEGORY_BY_CODE.get(selected)!.group !== group) return true;
     return isNoMajorIssue(code) ? false : !isNoMajorIssue(selected);
   });
-  const next = new Set<string>([...kept, code]);
-  return HOLISTIC_CHALLENGE_CATEGORIES.filter((category) => next.has(category.code)).map((category) => category.code);
+  return knownHolisticChallengeCategories([...kept, code]);
 }
 
-export type HolisticChallengeCategoryPlacement<Id> = {
-  academicQuestionId: Id | null;
-  nonAcademicQuestionId: Id | null;
-};
-
-// Case-insensitive Question-text match; a group with no matching Question has
-// no placement. Only the hyphenated "non-academic" counts as Non-academic, and
-// a Question mentioning both phrases is Non-academic only.
-export function placeHolisticChallengeCategories<Id>(
-  questions: ReadonlyArray<{ questionId: Id; text: string; position: number }>
-): HolisticChallengeCategoryPlacement<Id> {
-  const ordered = [...questions].sort((a, b) => a.position - b.position)
-    .map((question) => ({ ...question, text: question.text.toLowerCase() }));
-  const nonAcademic = ordered.find(({ text }) => text.includes("non-academic challenge"));
-  const academic = ordered.find(({ text }) => text.includes("academic challenge") && !text.includes("non-academic"));
-  return {
-    academicQuestionId: academic ? academic.questionId : null,
-    nonAcademicQuestionId: nonAcademic ? nonAcademic.questionId : null,
-  };
-}
-
-// CSV cell text: labels in catalogue order, "" when there are none.
-export function joinHolisticChallengeCategoryLabels(codes: Iterable<HolisticChallengeCategoryCode>): string {
-  const selected = new Set<string>(codes);
-  return HOLISTIC_CHALLENGE_CATEGORIES.filter(({ code }) => selected.has(code)).map(({ label }) => label).join("; ");
+// The Question each group is shown under, from Questions in position order:
+// the first case-insensitive Question-text match; a group with no matching
+// Question has no placement (null). Only the hyphenated "non-academic" counts as
+// Non-academic, and a Question mentioning both phrases is Non-academic only.
+export function placeHolisticChallengeCategories(
+  questions: ReadonlyArray<{ questionId: number; text: string }>
+): Record<HolisticChallengeCategoryGroup, number | null> {
+  const lowered = questions.map((question) => ({ ...question, text: question.text.toLowerCase() }));
+  const nonAcademic = lowered.find(({ text }) => text.includes("non-academic challenge"));
+  const academic = lowered.find(({ text }) => text.includes("academic challenge") && !text.includes("non-academic"));
+  return { academic: academic?.questionId ?? null, non_academic: nonAcademic?.questionId ?? null };
 }
 
 // Challenge Category Heatmap cell: count / n x 100, rounded half-up to one
