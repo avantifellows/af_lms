@@ -19,6 +19,7 @@ import {
   matchesStudentSearch,
 } from "@/lib/stream-rules";
 import { getCategoryColor } from "@/lib/student-utils";
+import { g10BoardChoice } from "@/lib/student-addition-fields";
 
 export interface Student {
   group_user_id: string;
@@ -216,10 +217,11 @@ function formatCwsn(value: boolean | null | undefined): string {
 }
 
 // Edit Student offers CBSE or Others, so the card says the same rather than
-// the long board name the record happens to hold.
+// the long board name the record happens to hold. A blank stays "—" although
+// Edit shows Others for it: Others is stored as null, but so is a board
+// nobody ever entered, and "Others" would claim a board for those Students.
 function formatG10Board(value: string | null | undefined): string | null {
-  if (!value?.trim()) return value ?? null;
-  return value.trim().toUpperCase() === "CBSE" ? "CBSE" : "Others";
+  return value?.trim() ? g10BoardChoice(value) : null;
 }
 
 // The Edit Student fields an NVS card's summary doesn't already show. The

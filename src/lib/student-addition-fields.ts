@@ -10,6 +10,14 @@ import {
 export const CBSE_BOARD = "CBSE";
 export const G10_BOARD_OPTIONS = [CBSE_BOARD, "Others"] as const;
 
+// The choice a stored G10 board reads as. The DB Service stores Others as null
+// and older rows hold a full board name, so anything but an exact "CBSE" is
+// Others. Edit Student and the roster card both read it through this, so the
+// two can't disagree.
+export function g10BoardChoice(value: string | null | undefined) {
+  return value === CBSE_BOARD ? CBSE_BOARD : "Others";
+}
+
 export const STUDENT_ADDITION_GENDER_OPTIONS = ["Female", "Male", "Other"] as const;
 export const CATEGORY_OPTIONS = ["Gen", "Gen-EWS", "OBC", "SC", "ST"] as const;
 export const BOARD_STREAM_OPTIONS = [

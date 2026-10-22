@@ -730,6 +730,38 @@ describe("StudentTable - expand/collapse", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("reads a lower-case cbse as Others, as Edit Student does", async () => {
+    const user = userEvent.setup();
+    render(
+      <StudentTable
+        students={[{ ...makeStudent(), g10_board: "cbse" }]}
+        grades={defaultGrades}
+        selectedProgramId={PROGRAM_IDS.COE}
+      />,
+    );
+
+    await user.click(screen.getByLabelText("Expand"));
+
+    expect(screen.getByText("Others")).toBeInTheDocument();
+    expect(screen.queryByText("CBSE")).not.toBeInTheDocument();
+  });
+
+  it("leaves a G10 board nobody entered blank rather than calling it Others", async () => {
+    const user = userEvent.setup();
+    render(
+      <StudentTable
+        students={[{ ...makeStudent(), g10_board: null }]}
+        grades={defaultGrades}
+        selectedProgramId={PROGRAM_IDS.COE}
+      />,
+    );
+
+    await user.click(screen.getByLabelText("Expand"));
+
+    expect(screen.getByText("G10 board").nextElementSibling).toHaveTextContent("—");
+    expect(screen.queryByText("Others")).not.toBeInTheDocument();
+  });
+
   it("shows the Edit Student fields the card used to leave out (#431)", async () => {
     const user = userEvent.setup();
     const student = {

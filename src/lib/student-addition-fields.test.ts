@@ -5,6 +5,7 @@ import {
   canonicalizeStudentEditPayload,
   formatStudentAdditionExistingMatch,
   getStudentAdditionUploadColumns,
+  g10BoardChoice,
   generateStudentId,
   isValidParentName,
   isValidRegistrationPhone,
@@ -54,6 +55,16 @@ describe("Registration Mode contract", () => {
       "Parents Phone Number",
       "Yearly / Annual Family Income",
     ]);
+  });
+});
+
+describe("g10BoardChoice", () => {
+  it("reads only an exact CBSE as CBSE, and everything else as Others", () => {
+    expect(g10BoardChoice("CBSE")).toBe("CBSE");
+    expect(g10BoardChoice("cbse")).toBe("Others");
+    expect(g10BoardChoice("RAJASTHAN BOARD OF SECONDARY EDUCATION")).toBe("Others");
+    // The DB Service stores Others as null.
+    expect(g10BoardChoice(null)).toBe("Others");
   });
 });
 
