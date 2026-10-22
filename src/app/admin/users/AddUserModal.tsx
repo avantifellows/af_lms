@@ -3,7 +3,10 @@
 import { useState, useEffect } from "react";
 import { Modal, Input, Select, Button } from "@/components/ui";
 import {
+  BLENDED_ADMIN_ROLE,
+  BLENDED_MENTOR_ROLE,
   HOLISTIC_MENTORSHIP_PROGRAM_IDS,
+  isBlendedRole,
   isPmuRole,
   PMU_GOVT_SCHOOL_USER_ROLE,
   PMU_MANAGER_ROLE,
@@ -86,6 +89,8 @@ const ROLE_DESCRIPTIONS: Record<string, string> = {
   admin: "Admins have access to all features, all schools, and all programs — full edit unless marked read-only",
   pmu_manager: "PMU Managers can view and manage JNV NVS students and view performance in their assigned JNV Schools",
   pmu_govt_school_user: "PMU Govt School Users can view and manage JNV NVS students and view performance in their one JNV School",
+  blended_mentor: "Blended Learning Mentors can see and log Conversations with only their own Mentees. They have no other LMS access",
+  blended_admin: "Blended Learning Admins can see every Mentor's Mentees and Mentor Flags, and log on a Mentor's behalf unless read-only. They have no other LMS access",
 };
 
 type UserFormValues = {
@@ -133,13 +138,15 @@ function toggledSelection<T>(selection: T[], value: T) {
 }
 
 // A PMU Govt School User is always School-level; the level picker is hidden.
+// Blended Learning rows hold no School scope and are stored at level 1.
 function effectiveLevel(role: string, level: number) {
-  return role === PMU_GOVT_SCHOOL_USER_ROLE ? 1 : level;
+  return role === PMU_GOVT_SCHOOL_USER_ROLE || isBlendedRole(role) ? 1 : level;
 }
 
 function programIdsFor(role: string, selectedPrograms: number[]) {
   if (role === "admin") return PROGRAMS.map((program) => program.id);
   if (isPmuRole(role)) return [PMU_PROGRAM_ID];
+  if (isBlendedRole(role)) return [];
   if (role === "holistic_mentorship_admin") {
     return [...HOLISTIC_MENTORSHIP_PROGRAM_IDS];
   }
@@ -147,7 +154,7 @@ function programIdsFor(role: string, selectedPrograms: number[]) {
 }
 
 function schoolScopeFor(values: UserFormValues) {
-  if (hasGlobalSchoolAccess(values.role)) return { school_codes: null, regions: null };
+  if (hasGlobalSchoolAccess(values.role) || isBlendedRole(values.role)) return { school_codes: null, regions: null };
   if (values.role === PMU_GOVT_SCHOOL_USER_ROLE) return { school_codes: values.selectedSchools, regions: null };
   if (values.level === 2) return { school_codes: null, regions: values.selectedRegions };
   if (values.level === 1) return { school_codes: values.selectedSchools, regions: null };
@@ -179,7 +186,8 @@ function pmuGovtSchoolError(values: Pick<UserFormValues, "role" | "selectedSchoo
 }
 
 async function saveUser(values: UserFormValues, user: UserPermission | null) {
-  if (!hasGlobalSchoolAccess(values.role) && !isPmuRole(values.role) && values.selectedPrograms.length === 0) {
+  const programsRequired = !hasGlobalSchoolAccess(values.role) && !isPmuRole(values.role) && !isBlendedRole(values.role);
+  if (programsRequired && values.selectedPrograms.length === 0) {
     throw new Error("At least one program must be selected");
   }
   const schoolError = pmuGovtSchoolError(values);
@@ -364,6 +372,8 @@ function RoleField({ role, onChange }: { role: string; onChange: (role: string) 
       <option value="holistic_mentorship_admin">Holistic Mentorship Admin - All supported programs</option>
       <option value={PMU_MANAGER_ROLE}>PMU Manager - JNV NVS students + performance</option>
       <option value={PMU_GOVT_SCHOOL_USER_ROLE}>PMU Govt School User - One JNV NVS School</option>
+      <option value={BLENDED_MENTOR_ROLE}>Blended Learning Mentor - Own Mentees only</option>
+      <option value={BLENDED_ADMIN_ROLE}>Blended Learning Admin - All Mentors + Mentor Flags</option>
       <option value="admin">Admin - Full access + user management</option>
     </Select>
     <p className="mt-1 text-xs text-gray-500">{ROLE_DESCRIPTIONS[role]}</p>
@@ -405,6 +415,14 @@ function AccessFields({ role, ...props }: AccessFieldsProps) {
         Access includes all {HOLISTIC_PROGRAM_LABELS_TEXT} Schools and only Holistic Mentorship.
       </div>
       <ReadOnlyField value={props.readOnly} onChange={props.onReadOnlyChange} label="Read-only access" />
+    </>;
+  }
+  if (isBlendedRole(role)) {
+    return <>
+      <div className="rounded-md bg-gray-50 p-3 text-sm text-gray-600">
+        Blended Learning users have no School or Program access. They see only the Blended Learning section.
+      </div>
+      <ReadOnlyField value={props.readOnly} onChange={props.onReadOnlyChange} label="Read-only access (can view and play recordings, cannot log or change anything)" />
     </>;
   }
   if (role === PMU_GOVT_SCHOOL_USER_ROLE) return <PmuGovtAccessFields {...props} />;

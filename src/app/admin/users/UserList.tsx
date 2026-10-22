@@ -3,7 +3,7 @@
 import { useState } from "react";
 import AddUserModal from "./AddUserModal";
 import { Button } from "@/components/ui";
-import { isPmuRole, PROGRAM_ID_TO_LABEL } from "@/lib/constants";
+import { isBlendedRole, isPmuRole, PROGRAM_ID_TO_LABEL } from "@/lib/constants";
 
 interface CentreAssignment {
   centreName: string;
@@ -49,7 +49,9 @@ const LEVEL_LABELS: Record<number, string> = {
 };
 
 // PMU roles only ever reach JNV Schools, so their level-3 badge says so.
+// Blended Learning roles reach no School at all, whatever level is stored.
 function levelLabel(user: Pick<UserPermission, "level" | "role">) {
+  if (isBlendedRole(user.role)) return "No School access";
   if (user.level === 3 && isPmuRole(user.role)) return "All JNV Schools";
   return LEVEL_LABELS[user.level];
 }
@@ -67,6 +69,8 @@ const ROLE_LABELS: Record<string, string> = {
   holistic_mentorship_admin: "Holistic Mentorship Admin",
   pmu_manager: "PMU Manager",
   pmu_govt_school_user: "PMU Govt School User",
+  blended_mentor: "Blended Learning Mentor",
+  blended_admin: "Blended Learning Admin",
   teacher: "Teacher",
 };
 
@@ -77,6 +81,8 @@ const ROLE_COLORS: Record<string, string> = {
   holistic_mentorship_admin: "bg-emerald-100 text-emerald-800",
   pmu_manager: "bg-amber-100 text-amber-800",
   pmu_govt_school_user: "bg-orange-100 text-orange-800",
+  blended_mentor: "bg-teal-100 text-teal-800",
+  blended_admin: "bg-sky-100 text-sky-800",
   teacher: "bg-gray-100 text-gray-800",
 };
 
@@ -207,7 +213,9 @@ export default function UserList({ initialUsers, regions, schoolCodeToName, curr
                   </span>
                 </td>
                 <td className="px-3 py-4 text-sm">
-                  {user.program_ids && user.program_ids.length > 0 ? (
+                  {isBlendedRole(user.role) ? (
+                    <span className="text-gray-400 text-xs">Blended Learning only</span>
+                  ) : user.program_ids && user.program_ids.length > 0 ? (
                     <div className="flex flex-wrap gap-1">
                       {user.program_ids.map((id) => (
                         <span

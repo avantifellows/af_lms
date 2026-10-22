@@ -6,9 +6,10 @@ import {
   endIneligibleHolisticMappings,
 } from "@/lib/staff-admin";
 import { isUserRole } from "@/lib/permissions";
-import { HOLISTIC_MENTORSHIP_PROGRAM_IDS, isPmuRole, type PmuRole } from "@/lib/constants";
+import { HOLISTIC_MENTORSHIP_PROGRAM_IDS, isBlendedRole, isPmuRole, type PmuRole } from "@/lib/constants";
 import { requireAdminApiAccess } from "../../route-helpers";
 import { isSeatedEmail, PMU_SEATED_ERROR, resolvePmuRow } from "../pmu-rows";
+import { BLENDED_ROW, BLENDED_SEATED_ERROR } from "../blended-rows";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -115,7 +116,7 @@ function invalidRequest(body: UserPatchBody) {
     return NextResponse.json({ error: "Invalid role" }, { status: 400 });
   }
   const isHolisticAdmin = body.role === "holistic_mentorship_admin";
-  return validatePatch(body, isHolisticAdmin || isPmuRole(body.role));
+  return validatePatch(body, isHolisticAdmin || isPmuRole(body.role) || isBlendedRole(body.role));
 }
 
 // Centre seats are the source of truth for a seated user's school scope
@@ -137,7 +138,7 @@ async function seatedUser(id: string): Promise<SeatedUser> {
 
 // The seat check above joins on user_id only; a row Admin created carries just
 // an email, so also look the seat up by the stored email.
-async function pmuSeatTaken(isSeated: boolean, stored: StoredPermission | null) {
+async function seatTakenByEitherLink(isSeated: boolean, stored: StoredPermission | null) {
   if (isSeated) return true;
   return Boolean(stored?.email && (await isSeatedEmail(stored.email)));
 }
@@ -150,22 +151,36 @@ function wantsScopeEdit({ school_codes, regions }: UserPatchBody) {
 }
 
 // A PMU row is validated as the stored row with the body merged over it, so
-// a role-only change can't leave a multi-school Govt School User behind.
-async function storedForPmuCheck(id: string, role: string | undefined) {
-  return role === undefined || isPmuRole(role) ? storedPermission(id) : null;
+// a role-only change can't leave a multi-school Govt School User behind. A
+// Blended Learning row needs the stored role too, so an edit that doesn't name
+// the role still keeps it scope-free.
+async function storedForPinnedRoleCheck(id: string, role: string | undefined) {
+  return role === undefined || isPmuRole(role) || isBlendedRole(role)
+    ? storedPermission(id)
+    : null;
+}
+
+function movingOffPinnedRoleError(role: string) {
+  if (isPmuRole(role)) return "program_ids is required when moving a user off a PMU role";
+  if (isBlendedRole(role)) return "program_ids is required when moving a user off a Blended Learning role";
+  return null;
 }
 
 async function applyPatch(id: string, body: UserPatchBody) {
   const seat = await seatedUser(id);
-  const stored = await storedForPmuCheck(id, body.role);
+  const stored = await storedForPinnedRoleCheck(id, body.role);
   const effectiveRole = body.role ?? stored?.role;
   const isPmu = isPmuRole(effectiveRole);
+  const isBlended = isBlendedRole(effectiveRole);
 
   // The PMU seat rule runs before the seated-scope rule below, so a seated
   // user given a PMU role always gets PMU_SEATED_ERROR, even when the body
   // also carries school_codes/regions.
-  if (isPmu && (await pmuSeatTaken(seat.isSeated, stored))) {
+  if (isPmu && (await seatTakenByEitherLink(seat.isSeated, stored))) {
     return NextResponse.json({ error: PMU_SEATED_ERROR }, { status: 409 });
+  }
+  if (isBlended && (await seatTakenByEitherLink(seat.isSeated, stored))) {
+    return NextResponse.json({ error: BLENDED_SEATED_ERROR }, { status: 409 });
   }
 
   if (seat.isSeated && wantsScopeEdit(body)) {
@@ -173,17 +188,14 @@ async function applyPatch(id: string, body: UserPatchBody) {
   }
 
   if (isPmu) return updatePmuUser(id, body, effectiveRole, stored, seat);
+  if (isBlended) return updateBlendedUser(id, body, seat);
 
-  // Moving off a PMU role must say which programs the user gets; otherwise the
-  // stored [64] would silently carry over.
+  // Moving off a PMU or Blended Learning role must say which programs the user
+  // gets; otherwise the stored [64] or [] would silently carry over.
   if (body.program_ids === undefined && body.role !== "holistic_mentorship_admin") {
     const current = stored ?? (await storedPermission(id));
-    if (current && isPmuRole(current.role)) {
-      return NextResponse.json(
-        { error: "program_ids is required when moving a user off a PMU role" },
-        { status: 400 }
-      );
-    }
+    const error = current && movingOffPinnedRoleError(current.role);
+    if (error) return NextResponse.json({ error }, { status: 400 });
   }
   return updateStandardUser(id, body, seat);
 }
@@ -211,6 +223,20 @@ async function updatePmuUser(
       client,
       [row.level, body.role, row.school_codes, row.regions, row.program_ids,
         body.read_only, body.full_name ?? null, id],
+      body.role,
+      seat.targetUserId
+    )
+  );
+  return NextResponse.json({ success: true });
+}
+
+// Blended Learning rows never carry School scope or Programs.
+async function updateBlendedUser(id: string, body: UserPatchBody, seat: SeatedUser) {
+  await withTransaction((client) =>
+    updatePermission(
+      client,
+      [BLENDED_ROW.level, body.role, BLENDED_ROW.school_codes, BLENDED_ROW.regions,
+        BLENDED_ROW.program_ids, body.read_only, body.full_name ?? null, id],
       body.role,
       seat.targetUserId
     )

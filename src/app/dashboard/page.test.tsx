@@ -13,6 +13,7 @@ const {
   mockQuery,
   mockRedirect,
   mockRequireHolisticAccess,
+  mockGetBlendedLearningAccess,
 } = vi.hoisted(() => ({
   mockGetServerSession: vi.fn(),
   mockGetUserPermission: vi.fn(),
@@ -24,6 +25,7 @@ const {
     throw new Error(`REDIRECT:${url}`);
   }),
   mockRequireHolisticAccess: vi.fn(),
+  mockGetBlendedLearningAccess: vi.fn(),
 }));
 
 vi.mock("next-auth", () => ({ getServerSession: mockGetServerSession }));
@@ -42,6 +44,9 @@ vi.mock("@/lib/permissions", () => ({
 vi.mock("@/lib/db", () => ({ query: mockQuery }));
 vi.mock("@/lib/holistic-mentorship", () => ({
   requireHolisticMentorshipAccess: mockRequireHolisticAccess,
+}));
+vi.mock("@/lib/blended-learning-access", () => ({
+  getBlendedLearningAccess: mockGetBlendedLearningAccess,
 }));
 vi.mock("next/link", () => ({
   __esModule: true,
@@ -694,6 +699,62 @@ describe("DashboardPage (server component)", () => {
       DashboardPage({ searchParams: defaultSearchParams })
     ).rejects.toThrow("REDIRECT:/admin/holistic-mentorship");
     expect(mockQuery).not.toHaveBeenCalled();
+  });
+
+  // --- Blended Learning roles ---
+
+  it.each([
+    ["blended_mentor", "mentor", false],
+    ["blended_admin", "admin", false],
+    ["blended_admin", "admin", true],
+  ] as const)(
+    "sends a %s (%s, read-only %s) to /blended-learning before any program-context check",
+    async (role, kind, readOnly) => {
+      mockGetServerSession.mockResolvedValue({ user: { email: "faizan@avantifellows.org" } });
+      // The shared lookup denies Blended Learning roles (no School, no Programs).
+      mockGetUserPermission.mockResolvedValue(null);
+      mockGetProgramContextSync.mockReturnValue(noProgramContext);
+      mockGetBlendedLearningAccess.mockResolvedValue({
+        kind,
+        role,
+        readOnly,
+        actorEmail: "faizan@avantifellows.org",
+        actorUserId: 9001,
+      });
+
+      await expect(
+        DashboardPage({ searchParams: defaultSearchParams })
+      ).rejects.toThrow("REDIRECT:/blended-learning");
+      expect(mockGetBlendedLearningAccess).toHaveBeenCalledWith("faizan@avantifellows.org");
+      expect(mockGetProgramContextSync).not.toHaveBeenCalled();
+      expect(mockQuery).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps an LMS admin on the dashboard and shows them the Blended Learning link", async () => {
+    setupAdmin([], 0);
+    mockGetBlendedLearningAccess.mockResolvedValue({
+      kind: "admin",
+      role: "admin",
+      readOnly: false,
+      actorEmail: "admin@avantifellows.org",
+      actorUserId: 1,
+    });
+
+    render(await DashboardPage({ searchParams: defaultSearchParams }));
+
+    expect(screen.getByRole("link", { name: "Blended Learning" })).toHaveAttribute(
+      "href",
+      "/blended-learning",
+    );
+  });
+
+  it("shows no Blended Learning link to a Program Manager", async () => {
+    setupPM([], 0);
+
+    render(await DashboardPage({ searchParams: defaultSearchParams }));
+
+    expect(screen.queryByRole("link", { name: "Blended Learning" })).not.toBeInTheDocument();
   });
 
   // --- PM nav links ---

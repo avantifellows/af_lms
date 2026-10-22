@@ -17,6 +17,9 @@ export const HOLISTIC_FIXTURE_MANIFEST = {
     "read_only",
     "pmu_manager",
     "pmu_govt_school_user",
+    "blended_mentor",
+    "blended_admin",
+    "blended_admin_read_only",
   ],
   states: ["locked", "open", "active", "skipped", "pending", "completed"],
   content: ["mapping", "profile", "historical_notes", "draft_notes", "submitted_notes"],
@@ -245,6 +248,37 @@ export async function seedHolisticFixtures(
   }
   await actor("e2e-pmu-manager@test.local", "pmu_manager", 1, false, jnvSchoolCode);
   await actor("e2e-pmu-govt-school-user@test.local", "pmu_govt_school_user", 1, false, jnvSchoolCode);
+
+  // Blended Learning Dev Login personas hold no School scope and no Programs.
+  for (const [email, label, role, readOnly] of [
+    ["e2e-blended-mentor@test.local", "Blended Mentor", "blended_mentor", false],
+    ["e2e-blended-admin@test.local", "Blended Admin", "blended_admin", false],
+    ["e2e-blended-admin-read-only@test.local", "Blended Admin Read Only", "blended_admin", true],
+  ] as const) {
+    await client.query(
+      `/* fixture_blended_actor */
+       WITH existing AS (
+         SELECT id FROM "user" WHERE LOWER(email) = LOWER($1) LIMIT 1
+       ), created AS (
+         INSERT INTO "user" (email, first_name, last_name, role, inserted_at, updated_at)
+         SELECT $1, 'Synthetic', $2, $3, now(), now() WHERE NOT EXISTS (SELECT 1 FROM existing)
+         RETURNING id
+       ), actor AS (
+         SELECT id FROM created UNION ALL SELECT id FROM existing LIMIT 1
+       ), permission AS (
+         INSERT INTO user_permission
+           (email, level, role, program_ids, school_codes, regions, full_name, read_only, user_id, revoked_at)
+         SELECT $1, 1, $3, '{}'::int[], NULL, NULL, CONCAT('Synthetic ', $2), $4, actor.id, NULL
+         FROM actor
+         ON CONFLICT (email) DO UPDATE SET level = EXCLUDED.level, role = EXCLUDED.role,
+           program_ids = EXCLUDED.program_ids, school_codes = EXCLUDED.school_codes,
+           regions = EXCLUDED.regions, read_only = EXCLUDED.read_only,
+           user_id = EXCLUDED.user_id, revoked_at = NULL
+       )
+       SELECT id FROM actor`,
+      [email, label, role, readOnly]
+    );
+  }
 
   for (const [userId, suffix] of [
     [mentorUserId, "ACTIVE"],

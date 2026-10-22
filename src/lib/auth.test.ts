@@ -158,6 +158,15 @@ describe("Dev login provider", () => {
     });
   });
 
+  it.each([
+    ["blended_mentor", "e2e-blended-mentor@test.local", "Dev Blended Mentor"],
+    ["blended_admin", "e2e-blended-admin@test.local", "Dev Blended Admin"],
+    ["blended_admin_read_only", "e2e-blended-admin-read-only@test.local", "Dev Blended Admin (Read-Only)"],
+  ])("returns user for valid %s persona", async (persona, email, name) => {
+    const result = await devAuthorize({ persona });
+    expect(result).toEqual({ id: `dev-${persona}`, email, name });
+  });
+
   it("returns null for unknown persona", async () => {
     const result = await devAuthorize({ persona: "superadmin" });
     expect(result).toBeNull();

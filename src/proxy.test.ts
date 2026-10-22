@@ -164,7 +164,17 @@ describe("proxy (middleware)", () => {
         "/",
         "/dashboard/:path*",
         "/school/:path*",
+        "/blended-learning/:path*",
       ]);
     });
+
+    it.each(["/blended-learning", "/blended-learning/students/42", "/blended-learning/mentors/7"])(
+      "runs on %s, so a signed-out visitor is sent to sign-in",
+      async (path) => {
+        mockGetToken.mockResolvedValue(null);
+        const res = await proxy(makeRequest(path));
+        expect(res.headers.get("location")).toBe("http://localhost:3000/");
+      },
+    );
   });
 });

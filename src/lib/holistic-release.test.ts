@@ -220,6 +220,9 @@ describe("Holistic release preflight", () => {
         "read_only",
         "pmu_manager",
         "pmu_govt_school_user",
+        "blended_mentor",
+        "blended_admin",
+        "blended_admin_read_only",
       ],
       states: ["locked", "open", "active", "skipped", "pending", "completed"],
       content: ["mapping", "profile", "historical_notes", "draft_notes", "submitted_notes"],
@@ -389,6 +392,50 @@ describe("Holistic release preflight", () => {
     ]);
     // Regions are only derived for program_manager / program_admin rows.
     expect(pmuCalls[0].sql).toContain("WHEN $3 IN ('program_manager', 'program_admin')");
+  });
+
+  it("seeds the three Blended Learning Dev Login actors with no School scope and no Programs", async () => {
+    const blendedCalls: { sql: string; params: unknown[] }[] = [];
+    const query = async (sql: string, params: unknown[] = []) => {
+      if (sql.includes("fixture_scope")) {
+        return { rows: [{ centre_id: 9, school_id: 10, school_code: "E2E-P74", grade_11_id: 11, grade_12_id: 12 }] };
+      }
+      if (sql.includes("fixture_students")) {
+        return { rows: [
+          { student_id: 101, user_id: 1001, grade: 11, batch_group_id: 801 },
+          { student_id: 102, user_id: 1002, grade: 11, batch_group_id: 801 },
+          { student_id: 103, user_id: 1003, grade: 11, batch_group_id: 801 },
+          { student_id: 201, user_id: 2001, grade: 12, batch_group_id: 802 },
+          { student_id: 202, user_id: 2002, grade: 12, batch_group_id: 802 },
+          { student_id: 203, user_id: 2003, grade: 12, batch_group_id: 802 },
+        ] };
+      }
+      if (sql.includes("fixture_jnv_school")) return { rows: [{ code: "JNV-70705" }] };
+      if (sql.includes("fixture_blended_actor")) {
+        blendedCalls.push({ sql, params });
+        return { rows: [{ id: 900 + blendedCalls.length }] };
+      }
+      if (sql.includes("fixture_actor")) return { rows: [{ id: 500 }] };
+      if (sql.includes("fixture_plan")) return { rows: [{ id: 30 }] };
+      if (sql.includes("fixture_phases")) {
+        return { rows: Array.from({ length: 6 }, (_, index) => ({ id: 40 + index, position: index + 1 })) };
+      }
+      if (sql.includes("fixture_questions")) {
+        return { rows: Array.from({ length: 6 }, (_, index) => ({ id: 60 + index, phase_id: 40 + index })) };
+      }
+      if (sql.includes("fixture_configuration")) return { rows: [{ id: 70 }] };
+      return { rows: [] };
+    };
+
+    await seedHolisticFixtures({ query } as never, PROGRAM_IDS.PUNJAB_COE);
+
+    expect(blendedCalls.map(({ params }) => params)).toEqual([
+      ["e2e-blended-mentor@test.local", "Blended Mentor", "blended_mentor", false],
+      ["e2e-blended-admin@test.local", "Blended Admin", "blended_admin", false],
+      ["e2e-blended-admin-read-only@test.local", "Blended Admin Read Only", "blended_admin", true],
+    ]);
+    // Level 1, no Programs, no School codes, no regions.
+    expect(blendedCalls[0].sql).toContain("SELECT $1, 1, $3, '{}'::int[], NULL, NULL,");
   });
 
   it("uses the canonical Centre roster before resolving a selected Program batch", async () => {

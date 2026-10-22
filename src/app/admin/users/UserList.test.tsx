@@ -212,6 +212,29 @@ describe("UserList", () => {
       expect(screen.getByText(label)).toHaveClass(...colour.split(" "));
     });
 
+    it.each([
+      ["blended_mentor", "Blended Learning Mentor", "bg-teal-100 text-teal-800"],
+      ["blended_admin", "Blended Learning Admin", "bg-sky-100 text-sky-800"],
+    ])("renders the %s role label and colour", (role, label, colour) => {
+      renderList({
+        initialUsers: [
+          { ...users[2], id: 104, email: "blended@example.com", role, level: 1, school_codes: null, regions: null, program_ids: [] },
+        ],
+      });
+      expect(screen.getByText(label)).toHaveClass(...colour.split(" "));
+    });
+
+    it("shows a Blended Learning row as having no School access and Blended Learning only, not missing Programs", () => {
+      renderList({
+        initialUsers: [
+          { ...users[2], id: 105, email: "blended@example.com", role: "blended_mentor", level: 1, school_codes: null, regions: null, program_ids: [] },
+        ],
+      });
+      expect(screen.getByText("No School access")).toBeInTheDocument();
+      expect(screen.getByText("Blended Learning only")).toBeInTheDocument();
+      expect(screen.queryByText("No programs")).not.toBeInTheDocument();
+    });
+
     it("renders level badges", () => {
       renderList();
       // Level labels from LEVEL_LABELS

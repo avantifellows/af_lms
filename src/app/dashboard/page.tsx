@@ -11,11 +11,13 @@ import {
 import { query } from "@/lib/db";
 import {
   CURRENT_ACADEMIC_YEAR,
+  isBlendedRole,
   isPmuRole,
   PMU_GOVT_SCHOOL_USER_ROLE,
   PMU_MANAGER_ROLE,
 } from "@/lib/constants";
 import { requireHolisticMentorshipAccess } from "@/lib/holistic-mentorship";
+import { getBlendedLearningAccess } from "@/lib/blended-learning-access";
 import Link from "next/link";
 import SchoolSearch from "@/components/SchoolSearch";
 import StudentSearch from "@/components/StudentSearch";
@@ -473,7 +475,17 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     dashboardSession(),
     dashboardRequest(searchParams),
   ]);
-  const permission = await getResolvedPermission(email);
+  const [blendedAccess, permission] = await Promise.all([
+    getBlendedLearningAccess(email),
+    getResolvedPermission(email),
+  ]);
+
+  // Blended Learning roles have no School scope or Programs, so the shared
+  // lookup denies them; send them to their only section before any
+  // no-access or program-context check. LMS admins stay on the dashboard.
+  if (blendedAccess && isBlendedRole(blendedAccess.role)) {
+    redirect("/blended-learning");
+  }
 
   if (!permission) {
     return <NoDashboardAccess
@@ -609,6 +621,9 @@ function DashboardAccountLinks({ email, isAdmin, canViewHolisticAdmin }: {
   return <div className="flex items-center gap-3 sm:gap-4">
     {canViewHolisticAdmin && <Link href="/admin/holistic-mentorship" className="text-sm font-bold text-accent hover:text-accent-hover">
       Holistic Mentorship
+    </Link>}
+    {isAdmin && <Link href="/blended-learning" className="text-sm font-bold text-accent hover:text-accent-hover">
+      Blended Learning
     </Link>}
     {isAdmin && <Link href="/admin" className="text-sm font-bold text-accent hover:text-accent-hover uppercase">Admin</Link>}
     <span className="text-sm text-text-muted font-mono hidden sm:inline">{email}</span>

@@ -17,6 +17,9 @@ const DEV_PERSONAS = [
   { key: "read_only", label: "Read-Only", description: "Teacher view without edits" },
   { key: "pmu_manager", label: "PMU Manager", description: "Level 1, JNV NVS only" },
   { key: "pmu_govt_school_user", label: "PMU Govt School User", description: "Level 1, 1 JNV School" },
+  { key: "blended_mentor", label: "Blended Mentor", description: "Blended Learning only, own Mentees" },
+  { key: "blended_admin", label: "Blended Admin", description: "Blended Learning only, all Mentors" },
+  { key: "blended_admin_read_only", label: "Blended Admin (Read-Only)", description: "Blended Learning only, view + play" },
 ] as const;
 
 // Where to go after sign-in: a same-site path from ?callbackUrl= (e.g. /mcp),

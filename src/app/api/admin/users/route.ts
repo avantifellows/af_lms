@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { CENTRE_ASSIGNMENTS_SUBQUERY } from "@/lib/centres";
 import { query } from "@/lib/db";
 import { isUserRole, type UserRole } from "@/lib/permissions";
-import { HOLISTIC_MENTORSHIP_PROGRAM_IDS, isPmuRole } from "@/lib/constants";
+import { HOLISTIC_MENTORSHIP_PROGRAM_IDS, isBlendedRole, isPmuRole } from "@/lib/constants";
 import { requireAdminApiAccess } from "../route-helpers";
 import { isSeatedEmail, PMU_SEATED_ERROR, resolvePmuRow, type PmuRow } from "./pmu-rows";
+import { BLENDED_ROW, BLENDED_SEATED_ERROR } from "./blended-rows";
 
 // Disable Next.js caching for this route
 export const dynamic = "force-dynamic";
@@ -30,7 +31,7 @@ function validateUserWrite(value: UserWrite): string | null {
   if (![1, 2, 3].includes(value.level)) return "Level must be between 1 and 3";
   if (value.role !== undefined && !isUserRole(value.role)) return "Invalid role";
   const role = userRole(value);
-  if (role === "holistic_mentorship_admin" || isPmuRole(role)) return null;
+  if (role === "holistic_mentorship_admin" || isPmuRole(role) || isBlendedRole(role)) return null;
   if (!Array.isArray(value.program_ids) || value.program_ids.length === 0) {
     return "At least one program must be assigned";
   }
@@ -40,7 +41,14 @@ function validateUserWrite(value: UserWrite): string | null {
 function userWriteParams(value: UserWrite, pmuRow: PmuRow | null) {
   const role = userRole(value);
   const holisticAdmin = role === "holistic_mentorship_admin";
-  const scope = pmuRow
+  const scope = isBlendedRole(role)
+    ? {
+        level: BLENDED_ROW.level,
+        schoolCodes: BLENDED_ROW.school_codes,
+        regions: BLENDED_ROW.regions,
+        programIds: BLENDED_ROW.program_ids,
+      }
+    : pmuRow
     ? {
         level: pmuRow.level,
         schoolCodes: pmuRow.school_codes,
@@ -124,6 +132,9 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: PMU_SEATED_ERROR }, { status: 409 });
       }
       pmuRow = resolved.row;
+    }
+    if (isBlendedRole(role) && (await isSeatedEmail(body.email))) {
+      return NextResponse.json({ error: BLENDED_SEATED_ERROR }, { status: 409 });
     }
 
     const result = await query<{ id: number }>(

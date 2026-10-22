@@ -88,6 +88,20 @@ describe("LoginPage", () => {
     });
   });
 
+  it("signs in as each Blended Learning persona via dev-login", async () => {
+    mockSignIn.mockResolvedValue({ ok: true });
+    const user = userEvent.setup();
+    render(<LoginPage />);
+    for (const [label, persona] of [
+      ["Blended Mentor", "blended_mentor"],
+      ["Blended Admin", "blended_admin"],
+      ["Blended Admin (Read-Only)", "blended_admin_read_only"],
+    ]) {
+      await user.click(screen.getByText(label));
+      expect(mockSignIn).toHaveBeenLastCalledWith("dev-login", { persona, redirect: false });
+    }
+  });
+
   it("describes the Holistic Admin persona for all supported programs", () => {
     render(<LoginPage />);
     expect(screen.getByText("All supported programs, mentorship only")).toBeInTheDocument();

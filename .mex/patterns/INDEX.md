@@ -1,6 +1,6 @@
 ---
 name: pattern-index
-last_updated: 2026-10-16
+last_updated: 2026-10-22
 ---
 
 # Pattern Index
@@ -31,6 +31,7 @@ Lookup table for all pattern files in this directory. Check here before starting
 | [add-api-route.md](add-api-route.md) | Adding any endpoint under `src/app/api/` (gate + read/write) |
 | [add-component.md](add-component.md) | Adding a React component + its colocated Vitest/RTL test |
 | [add-student-enrolment-field.md](add-student-enrolment-field.md) | Adding a Student field — choosing between Edit Student and the enrolment form, and the AF LMS + DB Service pair enrolment needs |
+| [add-user-role.md](add-user-role.md) | Adding a `user_permission` role — matrix column, deny-point or pin, Admin Users, Staff Management, Dev Login |
 | [add-visit-action-type.md](add-visit-action-type.md) | Adding a new PM visit action type (the ~8-file registry change) |
 | [create-ralph-slices.md](create-ralph-slices.md) | Publishing or refreshing Ralph AFK sub-issues and native blocking edges |
 | [db-service-write.md](db-service-write.md) | Writing students/batches/quiz-sessions/documents (proxy to the DB Service) |
