@@ -231,9 +231,11 @@ export default function EditStudentModal({
     const [firstFieldError] = Object.keys(fieldErrors);
     if (!firstFieldError && !error) return;
     focusErrorAfterSubmitRef.current = false;
-    const target = firstFieldError
-      ? document.getElementById(`edit-student-${firstFieldError}`)
-      : errorBannerRef.current;
+    // A field the form doesn't render (or a locked one the server named) has
+    // no input to land on, so the banner speaks for it instead.
+    const target =
+      (firstFieldError && document.getElementById(`edit-student-${firstFieldError}`)) ||
+      errorBannerRef.current;
     target?.scrollIntoView?.({ block: "center" });
     target?.focus?.();
   }, [error, fieldErrors]);
@@ -558,9 +560,12 @@ export default function EditStudentModal({
               <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                 {textField("first_name", "Student Name")}
                 <div>
-                  <label className={labelClassName}>Date of Birth</label>
+                  <label className={labelClassName} htmlFor="edit-student-date_of_birth">
+                    Date of Birth
+                  </label>
                   <input
                     type="date"
+                    id="edit-student-date_of_birth"
                     name="date_of_birth"
                     min={STUDENT_DOB_MIN}
                     max={STUDENT_DOB_MAX}
@@ -717,9 +722,12 @@ export default function EditStudentModal({
                 </p>
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                   <div>
-                    <label className={labelClassName}>PEN</label>
+                    <label className={labelClassName} htmlFor="edit-student-pen_number">
+                      PEN
+                    </label>
                     <input
                       type="text"
+                      id="edit-student-pen_number"
                       name="pen_number"
                       inputMode="numeric"
                       maxLength={11}
@@ -733,9 +741,12 @@ export default function EditStudentModal({
                     )}
                   </div>
                   <div>
-                    <label className={labelClassName}>Grade 10 Roll no</label>
+                    <label className={labelClassName} htmlFor="edit-student-g10_roll_no">
+                      Grade 10 Roll no
+                    </label>
                     <input
                       type="text"
+                      id="edit-student-g10_roll_no"
                       name="g10_roll_no"
                       inputMode={formData.g10_board === CBSE_BOARD ? "numeric" : "text"}
                       maxLength={formData.g10_board === CBSE_BOARD ? 8 : 10}

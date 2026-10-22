@@ -804,6 +804,50 @@ describe("EditStudentModal", () => {
       expect(screen.getByText(message)).toBeInTheDocument();
     });
 
+    it("moves focus to a Date of Birth outside the allowed range", async () => {
+      const user = userEvent.setup();
+      renderModal({ programId: 1 });
+
+      fireEvent.change(screen.getByLabelText("Date of Birth"), {
+        target: { value: "2016-01-01" },
+      });
+      await user.click(screen.getByText("Save Changes"));
+
+      await waitFor(() => expect(screen.getByLabelText("Date of Birth")).toHaveFocus());
+    });
+
+    it("moves focus to the backfill PEN when an identifier is missing", async () => {
+      const user = userEvent.setup();
+      renderModal({
+        student: { ...baseStudent, pen_number: null, g10_roll_no: null },
+        isPhoneRegistrationStudent: true,
+      });
+
+      await user.selectOptions(getByName("annual_family_income"), "Rs. 1,00,000-2,00,000");
+      await user.click(screen.getByText("Save Changes"));
+
+      await waitFor(() => expect(screen.getByLabelText("PEN")).toHaveFocus());
+    });
+
+    it("falls back to the banner when the rejected field has no input here", async () => {
+      const user = userEvent.setup();
+      const message = "PEN can only be filled once and is already set";
+      mockFetch.mockResolvedValue(
+        new Response(JSON.stringify({ error: message, field_errors: { pen_number: message } }), {
+          status: 422,
+        }),
+      );
+      renderModal({ programId: 1 });
+
+      await user.clear(getByName("city"));
+      await user.type(getByName("city"), "Jaipur");
+      await user.click(screen.getByText("Save Changes"));
+
+      const banner = await screen.findByRole("alert");
+      expect(banner).toHaveTextContent(message);
+      await waitFor(() => expect(banner).toHaveFocus());
+    });
+
     it("announces a save error that has no field of its own", async () => {
       const user = userEvent.setup();
       renderModal({ programId: 1 });
