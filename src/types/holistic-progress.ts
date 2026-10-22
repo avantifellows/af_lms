@@ -1,3 +1,5 @@
+import type { HolisticChallengeCategoryCode } from "@/lib/holistic-challenge-categories";
+
 export type HolisticProgress = "pending" | "completed" | "skipped" | "no_active_phase";
 
 // Progress dropdown values: assigned-Mentee progress, or the Unassigned Student list.
@@ -24,6 +26,8 @@ export type HolisticAssignedProgressRow = {
   notesAuthorEmail: string | null;
   notesLastEditedAt: string | null;
   answers: Array<{ position: number; question: string; answer: string }>;
+  // Submitted Notes only, catalogue order; empty for drafts, no Notes or untagged Notes.
+  challengeCategories: HolisticChallengeCategoryCode[];
 };
 
 export type HolisticUnassignedProgressRow = {

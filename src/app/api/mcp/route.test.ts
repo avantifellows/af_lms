@@ -286,6 +286,7 @@ describe("/api/mcp", () => {
       studentName: "A Student",
       progress: "completed",
       answers: [{ position: 1, question: "How is the student doing?", answer: "Confidential note text" }],
+      challengeCategories: ["academic.exam_related", "non_academic.financial"],
     };
     const progress = (query: Record<string, string | number>) =>
       callTool("get_view", { path: "/api/holistic-mentorship/progress", query });
@@ -308,13 +309,17 @@ describe("/api/mcp", () => {
       const body = JSON.parse(result.content[0].text);
       expect(body.counts.completed).toBe(1);
       expect(body.rows[0]).not.toHaveProperty("answers");
+      expect(body.rows[0]).not.toHaveProperty("challengeCategories");
       expect(body.rows[0].answersSubmitted).toBe(1);
       expect(result.content[0].text).not.toContain("Confidential note text");
+      expect(result.content[0].text).not.toContain("non_academic.financial");
     });
 
     it("returns note text only when include_notes=true, without forwarding the flag", async () => {
       const result = await progress({ program_id: 1, academic_year: "2026-2027", include_notes: "true" });
-      expect(JSON.parse(result.content[0].text).rows[0].answers[0].answer).toBe("Confidential note text");
+      const row = JSON.parse(result.content[0].text).rows[0];
+      expect(row.answers[0].answer).toBe("Confidential note text");
+      expect(row.challengeCategories).toEqual(["academic.exam_related", "non_academic.financial"]);
     });
 
     it("refuses parameters the view doesn't declare (e.g. the CSV export)", async () => {

@@ -260,4 +260,18 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
     (real Postgres, opt-in via `HOLISTIC_NOTES_TEST_DATABASE`), component tests, and the
     Holistic Playwright spec. The e2e seed adds prod-wording Questions to "Synthetic Grade 12
     Active" only (`seedHolisticE2eChallengeQuestions` in `e2e/helpers/db.ts`).
-- Admin/PM read surfaces, Student Context, CSV, MCP and the heatmap are later slices of #457.
+- **Students & Progress (#461):** assigned progress rows carry `challengeCategories` (codes,
+  catalogue order, unknown stored codes dropped) from the selected Phase's **submitted** Notes,
+  via a lateral join next to `answers`. Drafts, no Notes and untagged pre-release Notes give `[]`;
+  Unassigned rows have no field. The on-screen list does not show them.
+  - **CSV:** `Academic Challenges`, `Non-Academic Challenges` sit after the Question/Answer columns
+    and before `Notes Author Name`; each cell is `joinHolisticChallengeCategoryLabels` over that
+    group, blank when empty (untagged Notes are blank, not "Categories not recorded") and for
+    Unassigned rows. The usual cell neutralisation applies.
+  - **MCP:** Categories are Notes content. `redactHolisticProgress` (`src/lib/mcp/views.ts`) drops
+    `challengeCategories` with `answers` unless `include_notes=true`; `answersSubmitted` still
+    counts answers only. Any new Notes-content field on progress rows must be added there too.
+  - Tests: `holistic-progress.test.ts`, `src/app/api/mcp/route.test.ts` (the redaction seam),
+    and `holistic-progress.spec.ts`, which tags its own fixture Notes with
+    `seedHolisticNoteChallengeCategories` / `removeHolisticNoteChallengeCategories`.
+- Admin/PM read surfaces, Student Context and the heatmap are later slices of #457.

@@ -1118,3 +1118,28 @@ export async function seedCentreSwitcherFixture(pool: Pool): Promise<CentreSwitc
 
   return { centres };
 }
+
+// Challenge Category rows written straight onto a fixture Note, in the given
+// order, so a spec can prove readers sort them (#461). Pair with
+// removeHolisticNoteChallengeCategories so the Synthetic Notes stay untagged.
+export async function seedHolisticNoteChallengeCategories(
+  pool: Pool,
+  notesId: number,
+  codes: string[]
+): Promise<void> {
+  for (const code of codes) {
+    await pool.query(
+      `INSERT INTO holistic_mentorship_post_session_note_challenges
+         (notes_id, category_code, inserted_at, updated_at)
+       VALUES ($1, $2, NOW(), NOW())`,
+      [notesId, code]
+    );
+  }
+}
+
+export async function removeHolisticNoteChallengeCategories(pool: Pool, notesIds: number[]): Promise<void> {
+  await pool.query(
+    `DELETE FROM holistic_mentorship_post_session_note_challenges WHERE notes_id = ANY($1::bigint[])`,
+    [notesIds]
+  );
+}

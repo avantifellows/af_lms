@@ -1,7 +1,11 @@
 import type { Page } from "@playwright/test";
 
 import { expect, test } from "../fixtures/auth";
-import { getTestPool } from "../helpers/db";
+import {
+  getTestPool,
+  removeHolisticNoteChallengeCategories,
+  seedHolisticNoteChallengeCategories,
+} from "../helpers/db";
 
 const endpoint = "/api/holistic-mentorship/progress";
 const filters = "academic_year=2026-2027&program_id=1&page=1&sort=school&direction=asc";
@@ -20,7 +24,8 @@ const unassignedFilters = `${filters}&progress=unassigned`;
 const csvHeaderPattern = new RegExp(
   "^Academic Year,Program ID,Program Name,School,UDISE Code,Student Name,Student External ID," +
   "Grade,Mentor Name,Mentor Email,Phase,Phase Title,Availability,Progress,Completed At," +
-  "(Question (\\d+),Answer \\2,)*Notes Author Name,Notes Author Email,Notes Last Edited At$",
+  "(Question (\\d+),Answer \\2,)*Academic Challenges,Non-Academic Challenges," +
+  "Notes Author Name,Notes Author Email,Notes Last Edited At$",
 );
 
 async function progress(page: Page, query: string) {
@@ -437,6 +442,7 @@ test("the Unassigned CSV lists Unassigned Students only and the All Assigned CSV
   expect(knownRow![column("Progress")]).toBe("unassigned");
   for (const blank of [
     "Mentor Name", "Mentor Email", "Phase", "Phase Title", "Availability", "Completed At",
+    "Academic Challenges", "Non-Academic Challenges",
     "Notes Author Name", "Notes Author Email", "Notes Last Edited At",
   ]) {
     expect(knownRow![column(blank)], blank).toBe("");
@@ -453,6 +459,71 @@ test("the Unassigned CSV lists Unassigned Students only and the All Assigned CSV
   expect(assignedRows.length).toBe(assigned.counts.total);
   const progressColumn = assignedHeader.indexOf("Progress");
   expect(assignedRows.some((row) => row[progressColumn] === "unassigned")).toBe(false);
+});
+
+test("the CSV carries submitted Notes' Challenge Categories and leaves untagged and draft-only Notes blank", async ({
+  holisticAdminPage,
+}) => {
+  const pool = getTestPool();
+  const seededNotesIds: number[] = [];
+  try {
+    // Untagged fixture Notes of currently mapped Program 1 Students; the spec tags its own.
+    const { rows: notes } = await pool.query<{
+      notes_id: string; phase_id: string; state: "draft" | "submitted"; external_student_id: string;
+    }>(
+      `SELECT notes.id AS notes_id, notes.phase_id, notes.state, st.student_id AS external_student_id
+       FROM holistic_mentorship_post_session_notes notes
+       JOIN holistic_mentorship_phases phase ON phase.id = notes.phase_id
+       JOIN holistic_mentorship_phase_plans plan ON plan.id = phase.phase_plan_id
+       JOIN student st ON st.id = notes.student_id
+       WHERE plan.program_id = 1 AND plan.academic_year = '2026-2027' AND st.student_id IS NOT NULL
+         AND EXISTS (SELECT 1 FROM holistic_mentorship_mentor_mentee_mappings mapping
+                     WHERE mapping.student_id = notes.student_id AND mapping.program_id = 1
+                       AND mapping.academic_year = '2026-2027' AND mapping.ended_at IS NULL)
+         AND NOT EXISTS (SELECT 1 FROM holistic_mentorship_post_session_note_challenges challenge
+                         WHERE challenge.notes_id = notes.id)
+       ORDER BY notes.id`,
+    );
+    const [tagged, untagged] = notes.filter(({ state }) => state === "submitted");
+    const draft = notes.find(({ state }) => state === "draft");
+    expect(tagged && untagged && draft, "the Holistic fixture has two submitted Notes and a draft").toBeTruthy();
+    // Inserted out of catalogue order; a Categories draft must not leak into progress.
+    await seedHolisticNoteChallengeCategories(pool, Number(tagged.notes_id), [
+      "non_academic.financial", "academic.exam_related", "non_academic.wellness", "academic.subject_concept",
+    ]);
+    seededNotesIds.push(Number(tagged.notes_id));
+    await seedHolisticNoteChallengeCategories(pool, Number(draft!.notes_id), ["academic.other", "non_academic.other"]);
+    seededNotesIds.push(Number(draft!.notes_id));
+
+    for (const [note, codes, academic, nonAcademic] of [
+      [
+        tagged,
+        ["academic.subject_concept", "academic.exam_related", "non_academic.wellness", "non_academic.financial"],
+        "Subject/concept issues; Exam/Test related issues",
+        "Wellness (health, sleep etc.); Financial challenges",
+      ],
+      [untagged, [], "", ""],
+      [draft!, [], "", ""],
+    ] as const) {
+      const query = `${filters}&phase_id=${note.phase_id}&search=${encodeURIComponent(note.external_student_id)}`;
+      const row = (await progress(holisticAdminPage, query)).rows
+        .find(({ externalStudentId }: { externalStudentId: string }) => externalStudentId === note.external_student_id);
+      expect(row, note.state).toBeDefined();
+      expect(row.challengeCategories, note.state).toEqual(codes);
+
+      const csv = await holisticAdminPage.request.get(`${endpoint}?${query}&format=csv`);
+      expect(csv.status()).toBe(200);
+      const [header, ...csvRows] = parseCsv(await csv.text());
+      expect(header.join(",")).toMatch(csvHeaderPattern);
+      const csvRow = csvRows.find((cells) => cells[header.indexOf("Student External ID")] === note.external_student_id);
+      expect(csvRow, note.state).toBeDefined();
+      expect(csvRow![header.indexOf("Academic Challenges")], note.state).toBe(academic);
+      expect(csvRow![header.indexOf("Non-Academic Challenges")], note.state).toBe(nonAcademic);
+    }
+  } finally {
+    await removeHolisticNoteChallengeCategories(pool, seededNotesIds);
+    await pool.end();
+  }
 });
 
 test("progress counts, filters, pagination and CSV work with the production Centre membership view", async ({ holisticAdminPage }) => {
