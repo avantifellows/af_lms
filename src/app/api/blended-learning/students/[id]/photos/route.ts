@@ -1,14 +1,10 @@
 import { NextResponse } from "next/server";
-import { requireBlendedLearning } from "@/lib/blended-learning-guard";
+import { withBlendedLearning } from "@/lib/blended-learning-guard";
 import { uploadConversationPhoto } from "@/lib/blended-learning-photos";
 
 // Upload one downscaled photo for a Mentee's next Conversation. The response's
 // s3Key goes into the entries request's photoKeys[].
-export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const guard = await requireBlendedLearning("upload", params);
-  if (guard instanceof NextResponse) return guard;
-  const { access, id } = guard;
-
+export const POST = withBlendedLearning("upload", async (request, { access, id }) => {
   let photo: FormDataEntryValue | null;
   try {
     photo = (await request.formData()).get("photo");
@@ -30,4 +26,4 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   }
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });
   return NextResponse.json(result.photo, { status: 201 });
-}
+});

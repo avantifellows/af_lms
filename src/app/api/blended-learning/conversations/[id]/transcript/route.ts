@@ -1,13 +1,10 @@
 import { NextResponse } from "next/server";
-import { requireBlendedLearning } from "@/lib/blended-learning-guard";
+import { withBlendedLearning } from "@/lib/blended-learning-guard";
 import { getTranscript } from "@/lib/blended-learning-mentee-detail";
 
 // A saved Conversation's Call Recording transcript as speaker turns, for
 // Blended Learning Admins only (ADR 0010). The transcript is never logged.
-export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const guard = await requireBlendedLearning("play_recording", params);
-  if (guard instanceof NextResponse) return guard;
-  const { access, id } = guard;
+export const GET = withBlendedLearning("play_recording", async (_request, { access, id }) => {
   let transcript;
   try {
     transcript = await getTranscript(access, id);
@@ -18,4 +15,4 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   }
   if (!transcript) return NextResponse.json({ error: "Not found" }, { status: 404 });
   return NextResponse.json(transcript, { headers: { "cache-control": "no-store" } });
-}
+});

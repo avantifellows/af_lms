@@ -1,14 +1,11 @@
 import { NextResponse } from "next/server";
-import { requireBlendedLearning } from "@/lib/blended-learning-guard";
+import { withBlendedLearning } from "@/lib/blended-learning-guard";
 import { getRecordingPlayback } from "@/lib/blended-learning-mentee-detail";
 
 // A saved Conversation's Call Recording for Blended Learning Admins only
 // (ADR 0010): a 5-minute presigned GET, or { expired: true } once S3's
 // lifecycle rule has removed it.
-export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const guard = await requireBlendedLearning("play_recording", params);
-  if (guard instanceof NextResponse) return guard;
-  const { access, id } = guard;
+export const GET = withBlendedLearning("play_recording", async (_request, { access, id }) => {
   let playback;
   try {
     playback = await getRecordingPlayback(access, id);
@@ -19,4 +16,4 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   }
   if (!playback) return NextResponse.json({ error: "Not found" }, { status: 404 });
   return NextResponse.json(playback, { headers: { "cache-control": "no-store" } });
-}
+});

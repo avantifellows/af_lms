@@ -1,12 +1,9 @@
 import { NextResponse } from "next/server";
-import { requireBlendedLearning } from "@/lib/blended-learning-guard";
+import { withBlendedLearning } from "@/lib/blended-learning-guard";
 import { getConversationPhotos } from "@/lib/blended-learning-mentee-detail";
 
 // A past Conversation's photos as short-lived presigned GETs.
-export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const guard = await requireBlendedLearning("view_student", params);
-  if (guard instanceof NextResponse) return guard;
-  const { access, id } = guard;
+export const GET = withBlendedLearning("view_student", async (_request, { access, id }) => {
   let photos;
   try {
     photos = await getConversationPhotos(access, id);
@@ -17,4 +14,4 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   }
   if (!photos) return NextResponse.json({ error: "Not found" }, { status: 404 });
   return NextResponse.json(photos, { headers: { "cache-control": "no-store" } });
-}
+});

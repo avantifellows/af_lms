@@ -42,6 +42,20 @@ export async function requireBlendedLearning(
   return { access, id: Number(id) };
 }
 
+// An `[id]` API route handler behind requireBlendedLearning: the handler runs
+// only with access, the action and a numeric id; otherwise the guard's error
+// response is sent.
+export function withBlendedLearning(
+  action: BlendedLearningAction,
+  handler: (request: Request, guard: BlendedLearningGuard) => Promise<NextResponse>
+): (request: Request, context: { params: IdParams }) => Promise<NextResponse> {
+  return async (request, { params }) => {
+    const guard = await requireBlendedLearning(action, params);
+    if (guard instanceof NextResponse) return guard;
+    return handler(request, guard);
+  };
+}
+
 // A JSON request body, or the 422 to send when it isn't JSON.
 export async function readJsonBody(request: Request): Promise<{ body: unknown } | NextResponse> {
   try {
