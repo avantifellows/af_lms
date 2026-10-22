@@ -1,8 +1,11 @@
 "use client";
 
+import { ImagePlus } from "lucide-react";
 import { useId, useRef, type ChangeEvent, type Dispatch, type SetStateAction } from "react";
 
 import { downscaleImage } from "@/lib/image-resize";
+
+import { LABEL_CLASSES, Optional } from "./formParts";
 
 // Up to five photos on a Conversation. Each is downscaled in the browser and
 // uploaded on its own as soon as it is picked; the form then sends the
@@ -88,7 +91,10 @@ export function PhotoPicker({
 
   return (
     <fieldset className="space-y-2">
-      <legend className="mb-1 block text-xs font-bold uppercase tracking-wide text-text-muted">Photos (optional)</legend>
+      <legend className={LABEL_CLASSES}>
+        Attachments <Optional />
+      </legend>
+      <p className="text-sm text-text-secondary">Photos, for example a screenshot of marks.</p>
       <p className="text-xs text-text-secondary">{`${photos.length} of ${MAX_PHOTOS} photos`}</p>
       {photos.length > 0 && (
         <ul aria-label="Attached photos" className="grid grid-cols-2 gap-2 sm:grid-cols-5">
@@ -126,8 +132,9 @@ export function PhotoPicker({
       {photos.length < MAX_PHOTOS ? (
         <label
           htmlFor={inputId}
-          className="inline-flex min-h-11 w-full cursor-pointer items-center justify-center rounded-lg border border-border bg-bg-card px-4 text-sm font-bold text-text-primary shadow-sm hover:bg-hover-bg focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-accent sm:w-auto"
+          className="inline-flex min-h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-border bg-bg-card px-4 text-sm font-bold text-text-primary shadow-sm hover:bg-hover-bg focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-accent sm:w-auto"
         >
+          <ImagePlus aria-hidden="true" className="h-4 w-4" />
           Add photo
           <input
             id={inputId}

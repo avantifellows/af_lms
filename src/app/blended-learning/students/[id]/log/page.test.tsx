@@ -142,13 +142,16 @@ describe("LogEntryPage", () => {
 
     await renderPage();
 
-    expect(screen.getByRole("heading", { name: "Log for Ira Sharma" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Ira Sharma/ })).toHaveAttribute("href", "/blended-learning/students/501");
+    expect(screen.getByRole("link", { name: "Back to Ira Sharma" })).toHaveAttribute(
+      "href",
+      "/blended-learning/students/501"
+    );
     expect(mockGetDraftForReview).not.toHaveBeenCalled();
     expect(formProps()).toMatchObject({
       studentId: 501,
       name: "Ira Sharma",
       firstName: "Ira",
+      subtitle: "Ira Sharma · Grade 12 · STP Voucher Delhi",
       today: "2026-10-22",
       forOwnList: true,
       openActionItems: OPEN_ITEMS,
@@ -169,7 +172,9 @@ describe("LogEntryPage", () => {
 
     await renderPage();
 
-    expect(screen.getByRole("region", { name: "Last Conversation" })).toHaveTextContent("No Conversations yet.");
+    expect(screen.getByRole("region", { name: "Last Conversation" })).toHaveTextContent(
+      "No earlier Conversation. This will be the first one."
+    );
   });
 
   it("passes a draft still being drafted to the form as pending, without reading it for review", async () => {
@@ -186,10 +191,9 @@ describe("LogEntryPage", () => {
       pendingDraft: { id: 41, state: "transcribing", retryOffered: false },
       canManageDraft: true,
     });
-    expect(screen.getByRole("heading", { name: "Log for Ira Sharma" })).toBeInTheDocument();
   });
 
-  it("prefills a Blended Learning Admin's form from a ready draft, with its tags and notes", async () => {
+  it("prefills a Blended Learning Admin's form from a ready draft and its notes, leaving out its tags", async () => {
     signedInAs(BLENDED_ADMIN);
     mockGetMenteeDetail.mockResolvedValue({ ...MENTEE, openDraft: { id: 41, state: "ready" } });
     mockGetDraftForReview.mockResolvedValue({
@@ -208,7 +212,6 @@ describe("LogEntryPage", () => {
     await renderPage();
 
     expect(mockGetDraftForReview).toHaveBeenCalledWith(BLENDED_ADMIN, 501);
-    expect(screen.getByRole("heading", { name: "Review the draft for Ira Sharma" })).toBeInTheDocument();
     expect(formProps()).toMatchObject({
       forOwnList: false,
       hasOpenDraft: true,
@@ -218,13 +221,15 @@ describe("LogEntryPage", () => {
         mode: "call",
         spokeWith: "student",
         durationMinutes: 25,
-        summary: "Talked about mock tests.\n\nTags: academics, exam prep",
+        summary: "Talked about mock tests.",
         actionItems: [{ text: "Revise optics", owner: "student" }],
         notesHtml: "<h3>Physics &amp; Maths</h3><ul><li>&lt;b&gt;weak&lt;/b&gt;</li></ul>",
       },
       pendingDraft: null,
     });
-    // Neither the drafted due date nor the Items to Verify reach the form.
+    // Neither the Summary Tags, the drafted due date nor the Items to Verify reach the form.
+    expect(formProps().draft.summary).not.toContain("Tags:");
+    expect(formProps().draft).not.toHaveProperty("summaryTags");
     expect(formProps().draft.actionItems[0]).not.toHaveProperty("dueOn");
     expect(formProps().draft).not.toHaveProperty("itemsToVerify");
   });
@@ -249,7 +254,6 @@ describe("LogEntryPage", () => {
     await renderPage();
 
     expect(mockGetDraftForReview).toHaveBeenCalledWith(MENTOR, 501);
-    expect(screen.getByRole("heading", { name: "Log for Ira Sharma" })).toBeInTheDocument();
     expect(formProps().draft).toBeNull();
   });
 
@@ -260,6 +264,15 @@ describe("LogEntryPage", () => {
     await renderPage();
 
     expect(formProps().firstName).toBe(" Sharma");
+  });
+
+  it("leaves an unknown grade and program out of the subtitle", async () => {
+    signedInAs(MENTOR);
+    mockGetMenteeDetail.mockResolvedValue({ ...MENTEE, grade: null, programName: null });
+
+    await renderPage();
+
+    expect(formProps().subtitle).toBe("Ira Sharma");
   });
 
   it("passes a failed draft as pending with its retry offer", async () => {

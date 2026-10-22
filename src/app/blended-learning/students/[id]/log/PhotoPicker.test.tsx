@@ -59,6 +59,8 @@ describe("PhotoPicker", () => {
     const user = userEvent.setup();
     answer({ s3Key: "blended-learning/photos/501/a.jpg" });
     render(<Harness />);
+    expect(screen.getByRole("group", { name: "Attachments (optional)" })).toBeInTheDocument();
+    expect(screen.getByText("Photos, for example a screenshot of marks.")).toBeInTheDocument();
     expect(screen.getByText("0 of 5 photos")).toBeInTheDocument();
     expect(screen.queryByRole("list", { name: "Attached photos" })).not.toBeInTheDocument();
 
