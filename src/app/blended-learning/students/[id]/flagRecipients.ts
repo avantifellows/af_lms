@@ -43,3 +43,12 @@ export const FLAG_SWITCH: Record<
     help: "Use this when the student needs the Maths teacher's attention.",
   },
 };
+
+// How the detail page names who a Mentor Flag went to: the history entry's
+// header chip, and the label over the flag's comment. Worded as in the mockup.
+export const FLAG_HISTORY: Record<FlagRecipient, { chip: string; noteLabel: string }> = {
+  emotional_wellbeing: { chip: `Flagged to ${WELLBEING_LEAD}`, noteLabel: `Flag note for ${WELLBEING_LEAD}` },
+  physics: { chip: "Flagged to Physics teacher", noteLabel: "Flag note for the Physics teacher" },
+  chemistry: { chip: "Flagged to Chemistry teacher", noteLabel: "Flag note for the Chemistry teacher" },
+  maths: { chip: "Flagged to Maths teacher", noteLabel: "Flag note for the Maths teacher" },
+};

@@ -38,7 +38,7 @@ export function ConversationNotes({ conversationId }: { conversationId: number }
         {expanded ? "Hide notes" : "Show notes"}
       </button>
       {expanded && (
-        <div id={panelId} className="border-l-2 border-border pl-3">
+        <div id={panelId} className="border-t border-border pt-3">
           {status === "loading" && <p className="text-sm text-text-muted">Loading notes…</p>}
           {status === "error" && <p className="text-sm text-danger">Couldn&apos;t load the notes. Try again.</p>}
           {notesHtml !== null && (
