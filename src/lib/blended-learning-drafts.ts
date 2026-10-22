@@ -182,6 +182,11 @@ export async function createDraft(
   if (!stored || stored.byteSize !== body.byteSize) {
     return invalid({ s3Key: "The recording didn't finish uploading. Upload it again." });
   }
+  // The upload URL only trusted the size the browser declared; this is the
+  // size S3 actually holds. The bucket's lifecycle rule expires the object.
+  if (stored.byteSize < 1 || stored.byteSize > MAX_RECORDING_BYTES) {
+    return invalid({ s3Key: "A recording must be 200 MB or smaller." });
+  }
 
   let created: { draftId: number; requestKey: string };
   try {

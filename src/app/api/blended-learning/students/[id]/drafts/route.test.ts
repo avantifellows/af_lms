@@ -45,7 +45,16 @@ const KEY_501 = "lms-documents/blended-learning/recordings/501/3f2b8c1e-7d4a-4c9
 const KEY_601 = "lms-documents/blended-learning/recordings/601/9a1c2d3e-4f5a-4b6c-8d7e-0f1a2b3c4d5e.m4a";
 const KEY_502 = "lms-documents/blended-learning/recordings/502/11111111-2222-4333-8444-555555555555.wav";
 // Objects in S3 and their stored sizes.
-const OBJECTS: Record<string, number> = { [KEY_501]: 4_200_000, [KEY_601]: 900_000, [KEY_502]: 1000 };
+// An object uploaded past the 200 MB limit through an upload URL issued for a
+// smaller declared size: the presigned PUT does not sign the length.
+const KEY_501_OVERSIZED = "lms-documents/blended-learning/recordings/501/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee.mp3";
+const OVERSIZED_BYTES = 200 * 1024 * 1024 + 1;
+const OBJECTS: Record<string, number> = {
+  [KEY_501]: 4_200_000,
+  [KEY_601]: 900_000,
+  [KEY_502]: 1000,
+  [KEY_501_OVERSIZED]: OVERSIZED_BYTES,
+};
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 type Row = Record<string, unknown>;
@@ -275,6 +284,24 @@ describe("POST /api/blended-learning/students/[id]/drafts", () => {
       fieldErrors: { s3Key: "The recording didn't finish uploading. Upload it again." },
     });
     expect(transactions).toBe(0);
+  });
+
+  it("rejects a recording S3 holds at over 200 MB (422), whatever size the upload declared", async () => {
+    signedInAs(MENTOR_A);
+    // The browser reports the real size, which matches S3, so only the
+    // server-side limit stops it.
+    const res = await createDraft("501", { s3Key: KEY_501_OVERSIZED, contentType: "audio/mpeg", byteSize: OVERSIZED_BYTES });
+
+    expect(res.status).toBe(422);
+    expect(res.body).toEqual({
+      error: "A recording must be 200 MB or smaller.",
+      fieldErrors: { s3Key: "A recording must be 200 MB or smaller." },
+    });
+    expect(s3.commandCalls(HeadObjectCommand)).toHaveLength(1);
+    expect(transactions).toBe(0);
+    expect(tables.drafts).toEqual([]);
+    expect(tables.requests).toEqual([]);
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it.each([

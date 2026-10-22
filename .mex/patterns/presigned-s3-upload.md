@@ -47,8 +47,10 @@ checked the key and the object. Reference: `src/lib/blended-learning-drafts.ts`
    that the key is exactly this owner's prefix + UUID + allowed extension (regex on the suffix
    after the prefix — this is what stops a client pointing a row at someone else's object), and
    that `headObject(key)` exists with the claimed byte size (422 otherwise). Take the content
-   type from the key's extension and the size from S3, never from the client. Then write the
-   row(s) in one `withTransaction`; do external side effects (webhooks, wakes) after commit.
+   type from the key's extension and the size from S3, never from the client. Enforce the size
+   limit again on the size S3 reports: the presigned PUT signs only `content-type`, so the
+   step-1 check saw only what the client declared (a client can upload far more). Then write
+   the row(s) in one `withTransaction`; do external side effects (webhooks, wakes) after commit.
 4. Never log the S3 key; log only the error's name on S3 failures.
 
 ## Testing
