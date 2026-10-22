@@ -7,7 +7,6 @@ import { authOptions } from "@/lib/auth";
 import { canBlendedLearning, getBlendedLearningAccess } from "@/lib/blended-learning-access";
 import {
   getMenteeDetail,
-  type FlagRecipient,
   type HistoryEntry,
   type MenteeDetail,
 } from "@/lib/blended-learning-mentee-detail";
@@ -17,6 +16,7 @@ import { BlendedLearningHeader } from "../../BlendedLearningHeader";
 import { ActionItemMeta } from "./ActionItemMeta";
 import { ConversationNotes } from "./ConversationNotes";
 import { ConversationPhotos } from "./ConversationPhotos";
+import { FLAG_RECIPIENT } from "./flagRecipients";
 
 // One Mentee: profile, contact, links, any open Conversation Draft and the
 // newest-first history. Notes and photos load on demand from their API routes.
@@ -28,12 +28,6 @@ const SPOKE_WITH: Record<"student" | "parent_or_sibling" | "both", string> = {
   student: "Student",
   parent_or_sibling: "Parent or sibling",
   both: "Student and parent",
-};
-const FLAG_RECIPIENT: Record<FlagRecipient, string> = {
-  emotional_wellbeing: "Emotional Well-being",
-  physics: "Physics Teacher",
-  chemistry: "Chemistry Teacher",
-  maths: "Maths Teacher",
 };
 const DRAFT_STATE: Record<OpenDraftState, { label: string; variant: "info" | "accent" | "danger" }> = {
   transcribing: { label: "Drafting from the Call Recording", variant: "info" },

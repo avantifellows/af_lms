@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { mockClient } from "aws-sdk-client-mock";
+import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
 import { jsonRequest, routeParams } from "@/app/api/__test-utils__/api-test-helpers";
 
 vi.mock("next-auth", () => ({ getServerSession: vi.fn() }));
@@ -12,6 +14,8 @@ import { POST } from "./route";
 const mockSession = vi.mocked(getServerSession);
 const mockQuery = vi.mocked(query);
 const mockWithTransaction = vi.mocked(withTransaction);
+// SES is the notifier's process boundary.
+const ses = mockClient(SESClient);
 
 const MENTOR_A = "faizan@avantifellows.org";
 const MENTOR_B = "lokesh@avantifellows.org";
@@ -66,6 +70,8 @@ const ACTION_ITEMS: Record<number, { student_id: number; status: "open" | "done"
 // Committed rows, by table, as column → value. A transaction's inserts and
 // ticks land here only when its callback resolves; a throw rolls them back.
 let inserted: Record<string, Record<string, unknown>[]>;
+// Committed Mentor Flags by id, with notification_sent_at as the notifier sets it.
+let committedFlags: Record<number, Record<string, unknown> & { notification_sent_at: string | null }>;
 let ticked: { id: number; completed_by_conversation_id: unknown; completed_by_email: unknown }[];
 let nextId: number;
 // When set, the Conversation insert fails with this Postgres error code.
@@ -73,6 +79,7 @@ let insertErrorCode: string | null;
 
 function givenTables() {
   inserted = {};
+  committedFlags = {};
   ticked = [];
   nextId = 700;
   insertErrorCode = null;
@@ -87,10 +94,24 @@ function givenTables() {
     if (sql.includes("latest_attempt")) {
       return LIST_ROWS.filter((row) => params?.includes(row.student_id));
     }
+    // The notifier, after commit, reads and marks only committed flags.
+    if (sql.trim().startsWith("UPDATE blended_learning_mentor_flags")) {
+      const flag = committedFlags[Number(params?.[0])];
+      if (!flag || flag.notification_sent_at !== null) return [];
+      flag.notification_sent_at = "2026-10-22 06:00:01";
+      return [{ id: params?.[0] }];
+    }
+    if (sql.includes("FROM blended_learning_mentor_flags")) {
+      const flag = committedFlags[Number(params?.[0])];
+      return flag
+        ? [{ ...flag, student_first_name: "Ira", student_last_name: "Sharma", grade: 12, program_name: "STP Voucher Delhi", mentor_first_name: "Faizan", mentor_last_name: "Ali", mentor_email: MENTOR_A, occurred_on: "2026-10-21" }]
+        : [];
+    }
     return [];
   });
   mockWithTransaction.mockImplementation(async (fn) => {
     const pending: Record<string, Record<string, unknown>[]> = {};
+    const pendingFlags: typeof committedFlags = {};
     const pendingTicks: typeof ticked = [];
     const client = {
       query: vi.fn(async (sql: string, params: unknown[] = []) => {
@@ -116,13 +137,16 @@ function givenTables() {
           const columns = insert[2].split(",").map((column) => column.trim());
           const row = Object.fromEntries(columns.map((column, index) => [column, params[index]]));
           (pending[insert[1]] ??= []).push(row);
-          return { rows: [{ id: String(nextId++), occurred_on: row.occurred_on }] };
+          const id = nextId++;
+          if (insert[1] === "blended_learning_mentor_flags") pendingFlags[id] = { id, ...row, notification_sent_at: null };
+          return { rows: [{ id: String(id), occurred_on: row.occurred_on }] };
         }
         return { rows: [] };
       }),
     };
     const result = await fn(client as never);
     for (const [table, rows] of Object.entries(pending)) (inserted[table] ??= []).push(...rows);
+    Object.assign(committedFlags, pendingFlags);
     ticked.push(...pendingTicks);
     return result;
   });
@@ -146,10 +170,17 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2026-10-22T06:00:00Z"));
   givenTables();
+  ses.reset();
+  ses.on(SendEmailCommand).resolves({ MessageId: "ses-message-1" });
+  vi.stubEnv("BLENDED_LEARNING_SES_ACCESS_KEY_ID", "AKIATEST");
+  vi.stubEnv("BLENDED_LEARNING_SES_SECRET_ACCESS_KEY", "test-secret");
+  vi.stubEnv("BLENDED_LEARNING_WELLBEING_EMAILS", "shalinijha@avantifellows.org");
+  vi.stubEnv("NEXTAUTH_URL", "https://lms.avantifellows.org");
 });
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllEnvs();
 });
 
 describe("POST /api/blended-learning/students/[id]/entries", () => {
@@ -441,6 +472,131 @@ describe("POST /api/blended-learning/students/[id]/entries", () => {
       expect(res.body.fieldErrors).toEqual({ [field]: message });
       expect(mockWithTransaction).not.toHaveBeenCalled();
       expect(ticked).toEqual([]);
+    });
+  });
+
+  describe("Mentor Flags", () => {
+    const WELLBEING_COMMENT = "Synthetic: anxious about the mock test.";
+
+    function emailsSent() {
+      return ses.commandCalls(SendEmailCommand).map((call) => call.args[0].input);
+    }
+
+    it("stores several flags with optional comments, raised by the actor", async () => {
+      signedInAs(ADMIN);
+      const res = await postEntry("601", {
+        ...CONVERSATION,
+        flags: [
+          { recipient: "physics", comment: "  Struggling with rotation  " },
+          { recipient: "maths", comment: "   " },
+          { recipient: "chemistry" },
+        ],
+      });
+
+      expect(res.status).toBe(201);
+      expect(inserted.blended_learning_mentor_flags).toEqual([
+        { conversation_id: 700, student_id: 601, recipient: "physics", comment: "Struggling with rotation", raised_by_email: ADMIN },
+        { conversation_id: 700, student_id: 601, recipient: "maths", comment: null, raised_by_email: ADMIN },
+        { conversation_id: 700, student_id: 601, recipient: "chemistry", comment: null, raised_by_email: ADMIN },
+      ]);
+    });
+
+    it("rejects the same Flag Recipient twice on one Conversation (422) and saves nothing", async () => {
+      signedInAs(MENTOR_A);
+      const res = await postEntry("501", {
+        ...CONVERSATION,
+        flags: [{ recipient: "physics" }, { recipient: "physics", comment: "Again" }],
+      });
+
+      expect(res.status).toBe(422);
+      expect(res.body.fieldErrors).toEqual({ "flags.1.recipient": "Each Flag Recipient can be raised once." });
+      expect(mockWithTransaction).not.toHaveBeenCalled();
+      expect(emailsSent()).toEqual([]);
+    });
+
+    it.each([
+      ["an unknown recipient", [{ recipient: "biology" }], "flags.0.recipient", "Choose who the flag is for."],
+      ["a comment that is not text", [{ recipient: "maths", comment: 7 }], "flags.0.comment", "The comment must be text."],
+      ["flags that are not a list", "physics", "flags", "Mentor Flags must be a list."],
+    ])("rejects %s (422)", async (_case, flags, field, message) => {
+      signedInAs(MENTOR_A);
+      const res = await postEntry("501", { ...CONVERSATION, flags });
+      expect(res.status).toBe(422);
+      expect(res.body.fieldErrors).toEqual({ [field]: message });
+      expect(mockWithTransaction).not.toHaveBeenCalled();
+    });
+
+    it("rejects flags on an Attempt (422)", async () => {
+      signedInAs(MENTOR_A);
+      const res = await postEntry("501", { kind: "attempt", occurredOn: "2026-10-22", flags: [{ recipient: "maths" }] });
+      expect(res.status).toBe(422);
+      expect(res.body.fieldErrors).toEqual({ flags: "An Attempt can't have Mentor Flags." });
+    });
+
+    it("emails the well-being lead once, after commit, for an Emotional Well-being flag", async () => {
+      signedInAs(MENTOR_A);
+      const res = await postEntry("501", {
+        ...CONVERSATION,
+        flags: [
+          { recipient: "emotional_wellbeing", comment: WELLBEING_COMMENT },
+          { recipient: "physics" },
+        ],
+      });
+
+      expect(res.status).toBe(201);
+      const emails = emailsSent();
+      expect(emails).toHaveLength(1);
+      expect(emails[0].Destination?.ToAddresses).toEqual(["shalinijha@avantifellows.org"]);
+      expect(emails[0].Message?.Body?.Text?.Data).toContain("https://lms.avantifellows.org/blended-learning/students/501");
+      expect(JSON.stringify(emails[0])).not.toContain(WELLBEING_COMMENT);
+      // The notifier found the flag committed and marked it sent; the Physics
+      // flag (id 702) notifies no one.
+      expect(committedFlags[701]).toMatchObject({ recipient: "emotional_wellbeing", notification_sent_at: "2026-10-22 06:00:01" });
+      expect(committedFlags[702]).toMatchObject({ recipient: "physics", notification_sent_at: null });
+    });
+
+    it("emails no one for Physics, Chemistry and Maths flags", async () => {
+      signedInAs(MENTOR_A);
+      const res = await postEntry("501", {
+        ...CONVERSATION,
+        flags: [{ recipient: "physics" }, { recipient: "chemistry" }, { recipient: "maths" }],
+      });
+      expect(res.status).toBe(201);
+      expect(ses.calls()).toHaveLength(0);
+    });
+
+    it("emails no one when the save rolls back", async () => {
+      signedInAs(MENTOR_A);
+      const res = await postEntry("501", {
+        ...CONVERSATION,
+        flags: [{ recipient: "emotional_wellbeing" }],
+        completeActionItemIds: [801],
+      });
+      expect(res.status).toBe(409);
+      expect(inserted).toEqual({});
+      expect(ses.calls()).toHaveLength(0);
+    });
+
+    it("keeps the save when the email fails", async () => {
+      const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+      ses.on(SendEmailCommand).rejects(Object.assign(new Error("Throttling"), { name: "Throttling" }));
+      signedInAs(MENTOR_A);
+      const res = await postEntry("501", { ...CONVERSATION, flags: [{ recipient: "emotional_wellbeing" }] });
+
+      expect(res.status).toBe(201);
+      expect(inserted.blended_learning_mentor_flags).toHaveLength(1);
+      expect(committedFlags[701].notification_sent_at).toBeNull();
+      consoleError.mockRestore();
+    });
+
+    it("saves with no SES call when SES is unconfigured", async () => {
+      vi.stubEnv("BLENDED_LEARNING_SES_ACCESS_KEY_ID", "");
+      signedInAs(MENTOR_A);
+      const res = await postEntry("501", { ...CONVERSATION, flags: [{ recipient: "emotional_wellbeing" }] });
+
+      expect(res.status).toBe(201);
+      expect(ses.calls()).toHaveLength(0);
+      expect(committedFlags[701].notification_sent_at).toBeNull();
     });
   });
 });

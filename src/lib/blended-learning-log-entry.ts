@@ -9,14 +9,18 @@ import {
 } from "./blended-learning-access";
 import { listMentees, type MenteeRow } from "./blended-learning-mentees";
 import { sanitiseNotesHtml } from "./blended-learning-notes-sanitiser";
+import { notifyWellbeingFlag } from "./blended-learning-wellbeing-notifier";
 
 // Conversation write use case (server-only): logEntry saves one Conversation
 // or Attempt for a Mentee in a single transaction, with a Conversation's new
-// Action Items and its ticks on earlier ones. Later slices add Mentor Flags,
+// Action Items, Mentor Flags and ticks on earlier Action Items. After commit,
+// an Emotional Well-being flag emails the well-being lead. Later slices add
 // photos and draft save to this same transaction.
 
 type ActionItemOwner = "student" | "mentor" | "parent";
 type ActionItemInput = { owner: ActionItemOwner; text: string; dueOn: string | null };
+type FlagRecipient = "emotional_wellbeing" | "physics" | "chemistry" | "maths";
+type FlagInput = { recipient: FlagRecipient; comment: string | null };
 
 type ConversationInput = {
   kind: "conversation";
@@ -27,6 +31,7 @@ type ConversationInput = {
   summary: string;
   notesHtml: string | null;
   actionItems: ActionItemInput[];
+  flags: FlagInput[];
   // Earlier open Action Items this Conversation marks done.
   completeActionItemIds: number[];
 };
@@ -43,6 +48,7 @@ export type LogEntryResult =
 const MODES = ["call", "in_person"] as const;
 const SPOKE_WITH = ["student", "parent_or_sibling", "both"] as const;
 const ACTION_ITEM_OWNERS = ["student", "mentor", "parent"] as const;
+const FLAG_RECIPIENTS = ["emotional_wellbeing", "physics", "chemistry", "maths"] as const;
 
 function isCalendarDate(value: unknown): value is string {
   if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
@@ -75,6 +81,7 @@ function validate(raw: unknown, today: string): Validated {
   if (body.kind === "attempt") {
     // Only a Conversation carries Action Items or ticks earlier ones done.
     if (body.actionItems !== undefined) errors.actionItems = "An Attempt can't have Action Items.";
+    if (body.flags !== undefined) errors.flags = "An Attempt can't have Mentor Flags.";
     if (body.completeActionItemIds !== undefined) {
       errors.completeActionItemIds = "Only a Conversation can tick Action Items done.";
     }
@@ -100,6 +107,7 @@ function validate(raw: unknown, today: string): Validated {
   if (!notes.ok) errors.notesHtml = notes.error;
 
   const actionItems = validateActionItems(body.actionItems, errors);
+  const flags = validateFlags(body.flags, errors);
   const completeActionItemIds = validateCompleteActionItemIds(body.completeActionItemIds, errors);
 
   if (Object.keys(errors).length > 0 || !notes.ok) return { ok: false, fieldErrors: errors };
@@ -114,6 +122,7 @@ function validate(raw: unknown, today: string): Validated {
       summary: summary as string,
       notesHtml: notes.html,
       actionItems,
+      flags,
       completeActionItemIds,
     },
   };
@@ -145,6 +154,31 @@ function validateActionItems(raw: unknown, errors: Record<string, string>): Acti
     const dueOn = item.dueOn === undefined || item.dueOn === null || item.dueOn === "" ? null : item.dueOn;
     if (dueOn !== null && !isCalendarDate(dueOn)) errors[`actionItems.${index}.dueOn`] = "Enter a valid due date.";
     return { owner: item.owner as ActionItemOwner, text: text ?? "", dueOn: dueOn as string | null };
+  });
+}
+
+// Mentor Flags: at most one per Flag Recipient, each with an optional comment.
+// Errors are keyed per flag, e.g. `flags.1.recipient`.
+function validateFlags(raw: unknown, errors: Record<string, string>): FlagInput[] {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw)) {
+    errors.flags = "Mentor Flags must be a list.";
+    return [];
+  }
+  const seen = new Set<string>();
+  return raw.map((value, index) => {
+    const flag = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
+    if (!oneOf(FLAG_RECIPIENTS, flag.recipient)) {
+      errors[`flags.${index}.recipient`] = "Choose who the flag is for.";
+    } else if (seen.has(flag.recipient)) {
+      errors[`flags.${index}.recipient`] = "Each Flag Recipient can be raised once.";
+    } else {
+      seen.add(flag.recipient);
+    }
+    if (flag.comment !== undefined && flag.comment !== null && typeof flag.comment !== "string") {
+      errors[`flags.${index}.comment`] = "The comment must be text.";
+    }
+    return { recipient: flag.recipient as FlagRecipient, comment: optionalText(flag.comment) };
   });
 }
 
@@ -216,6 +250,28 @@ async function insertActionItems(
   }
 }
 
+// A Conversation's Mentor Flags, raised by the actor. Returns the ids of the
+// Emotional Well-being flags, which notify after commit.
+async function insertFlags(
+  client: PoolClient,
+  access: BlendedLearningAccess,
+  studentId: number,
+  conversationId: number,
+  flags: FlagInput[]
+): Promise<number[]> {
+  const wellbeingFlagIds: number[] = [];
+  for (const flag of flags) {
+    const result = await client.query<{ id: number | string }>(
+      `INSERT INTO blended_learning_mentor_flags (conversation_id, student_id, recipient, comment, raised_by_email)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id`,
+      [conversationId, studentId, flag.recipient, flag.comment, access.actorEmail]
+    );
+    if (flag.recipient === "emotional_wellbeing") wellbeingFlagIds.push(Number(result.rows[0].id));
+  }
+  return wellbeingFlagIds;
+}
+
 // Mark this Mentee's earlier open Action Items done by this Conversation. An
 // id that is already done, unknown or another Student's updates no row.
 async function completeActionItems(
@@ -261,7 +317,7 @@ export async function logEntry(
     return { ok: false, status: 422, error: first, fieldErrors: validated.fieldErrors };
   }
 
-  let committed: { saved: LoggedEntry; mentorUserId: number };
+  let committed: { saved: LoggedEntry; mentorUserId: number; wellbeingFlagIds: number[] };
   try {
     committed = await withTransaction(async (client) => {
       const mapping = await lockActiveMapping(client, studentId);
@@ -271,11 +327,13 @@ export async function logEntry(
       }
       const input = validated.input;
       const saved = await insertEntry(client, access, studentId, mapping, input);
+      let wellbeingFlagIds: number[] = [];
       if (input.kind === "conversation") {
         await insertActionItems(client, studentId, saved.id, input.actionItems);
+        wellbeingFlagIds = await insertFlags(client, access, studentId, saved.id, input.flags);
         await completeActionItems(client, access, studentId, saved.id, input.completeActionItemIds);
       }
-      return { saved, mentorUserId: Number(mapping.mentor_user_id) };
+      return { saved, mentorUserId: Number(mapping.mentor_user_id), wellbeingFlagIds };
     });
   } catch (error) {
     if (error instanceof OutOfScope) return { ok: false, status: 404, error: "Not found" };
@@ -295,6 +353,9 @@ export async function logEntry(
     }
     throw error;
   }
+
+  // After commit, best-effort: the notifier never throws, so the save stands.
+  for (const flagId of committed.wellbeingFlagIds) await notifyWellbeingFlag(flagId);
 
   // After commit: the Mentee's row as the (mapped Mentor's) list now reads it.
   const list = await listMentees({ access, mentorUserId: committed.mentorUserId, studentId, today });

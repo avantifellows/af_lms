@@ -76,6 +76,11 @@ export default defineConfig({
       S3_DOCS_REGION: "ap-south-1",
       S3_DOCS_ACCESS_KEY_ID: "e2e-fake-access-key",
       S3_DOCS_SECRET_ACCESS_KEY: "e2e-fake-secret-key",
+      // The well-being notifier stays unconfigured, so no email is sent. A
+      // blank value would be dropped and refilled from .env.local; the
+      // notifier trims these to empty and skips.
+      BLENDED_LEARNING_SES_ACCESS_KEY_ID: " ",
+      BLENDED_LEARNING_WELLBEING_EMAILS: " ",
     },
   },
 });

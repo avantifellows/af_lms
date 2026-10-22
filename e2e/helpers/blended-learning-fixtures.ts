@@ -1,8 +1,8 @@
 import type { PoolClient } from "pg";
 import { CURRENT_ACADEMIC_YEAR } from "../../src/lib/constants";
 
-// Blended Learning Mentee-list (#442), Mentee-detail (#444), logging (#445)
-// and Action Item (#446) fixtures.
+// Blended Learning Mentee-list (#442), Mentee-detail (#444), logging (#445),
+// Action Item (#446) and Mentor Flag (#447) fixtures.
 // Every date is a hand-written offset in IST calendar days from the seed's IST
 // "today", which is the same IST date the app computes while the suite runs.
 // Mentor A is the e2e-blended-mentor persona seeded by seedHolisticFixtures (#441).
@@ -89,6 +89,12 @@ export const EARLIER_ACTION_ITEMS = {
   // Done by the later Conversation.
   done: { text: "Synthetic: share the mock test schedule", owner: "mentor" },
 } as const;
+// Mentor C's Mentees for the Mentor Flag spec (#447), one per viewport, never
+// contacted. The spec appends flagged Conversations to them.
+export const FLAG_MENTEES = {
+  desktop: { key: "E1", firstName: "Esha", lastName: "Desk", gender: "Female", grade: 12, programId: 80 },
+  mobile: { key: "E2", firstName: "Esha", lastName: "Mobile", gender: "Female", grade: 13, programId: 90 },
+} as const satisfies Record<string, FixtureMentee>;
 export const LOGGING_LAST_CONVERSATION_SUMMARY = "Synthetic: planned the week's revision.";
 
 // Contact numbers on the `user` row (#444). Phones are 98765100 + the
@@ -394,6 +400,7 @@ export async function seedBlendedLearningFixtures(client: Client): Promise<void>
   const loggingMentees = [
     ...Object.values(LOGGING_MENTEES).flatMap((set) => Object.values(set)),
     ...Object.values(ACTION_ITEM_MENTEES),
+    ...Object.values(FLAG_MENTEES),
   ];
   for (const [index, mentee] of [
     ...Object.values(MENTEES),

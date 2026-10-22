@@ -197,7 +197,7 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   (read), `src/lib/holistic-follow-up-questions.ts` (client-safe question keys, text, and
   normaliser), `src/lib/holistic-mentor-write-scope.ts` (shared scope guard).
 
-## Blended Learning Mentee list (#442), detail (#444), logging (#445) and Action Items (#446)
+## Blended Learning Mentee list (#442), detail (#444), logging (#445), Action Items (#446) and Mentor Flags (#447)
 
 - **Tables:** the `blended_learning_*` tables are created by db-service (Mappings:
   `20260921120000` + its ensure migration; the other eight: PR #804,
@@ -253,8 +253,8 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   `academic_year`, plus `logged_by_email`/`logged_by_user_id` = the actor (an admin logging on a
   Mentor's behalf keeps the mapped Mentor). `23514` (checks, append-only triggers) and `23505`
   map to 409. After commit, `mentee` is the Student's `listMentees` row (`studentId` filter), so
-  the confirmation shows exactly what the list now says. Later slices add flags, photos and
-  draft save inside the same transaction.
+  the confirmation shows exactly what the list now says. Later slices add photos and draft save
+  inside the same transaction.
 - **Action Items (#446):** only `kind: "conversation"` accepts `actionItems[]` (`{ owner:
   student|mentor|parent, text, dueOn? }`; a missing owner or blank text, or an impossible
   date, gives a 422 keyed `actionItems.<i>.<field>`) and `completeActionItemIds[]` (positive
@@ -267,6 +267,25 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   change (it leaves `updated_at` free). `getMenteeDetail` returns each item's `owner`/`dueOn`
   and `openActionItems` (open items, newest Conversation first, with `agreedOn`). There are no
   reminders, overdue logic or item editing.
+- **Mentor Flags (#447):** only `kind: "conversation"` accepts `flags[]` (`{ recipient:
+  emotional_wellbeing|physics|chemistry|maths, comment? }`; blank comment → `NULL`). An unknown
+  recipient, a non-text comment or the same recipient twice gives a 422 keyed
+  `flags.<i>.recipient|comment` before the transaction (the `(conversation_id, recipient)`
+  unique index would otherwise give 23505 → 409, never 500); `flags` on an Attempt is a 422.
+  Flags insert after the Action Items with `raised_by_email` = the actor. After commit,
+  `logEntry` awaits `notifyWellbeingFlag(flagId)` (`src/lib/blended-learning-wellbeing-notifier.ts`,
+  server-only, `@aws-sdk/client-ses` `SendEmail`) for each Emotional Well-being flag only; a
+  rollback calls nothing. The notifier never throws: it skips when SES or the recipients are
+  unconfigured (no SES call), or when the flag is not well-being or already has
+  `notification_sent_at`; it reads the Student, grade, program (the Conversation's), mapped
+  Mentor and date by `query()`, never the comment, summary or notes; it sends one text email
+  from `no-reply@avantifellows.org` to `BLENDED_LEARNING_WELLBEING_EMAILS` with an absolute
+  `{NEXTAUTH_URL}/blended-learning/students/{id}` link; then sets `notification_sent_at = now()
+  WHERE notification_sent_at IS NULL` (the only change the PR #804 trigger allows). An SES
+  failure logs only the flag id and the error's name and the save stays 201; no retry in v1.
+  Physics, Chemistry and Maths flags notify no one. The log form shows four switches
+  (`role="switch"`), each revealing an optional comment; labels come from
+  `students/[id]/flagRecipients.ts`, shared with the history chips.
 - **Notes sanitiser (#445):** `sanitiseNotesHtml` in `src/lib/blended-learning-notes-sanitiser.ts`
   (server-only, `sanitize-html`) is the only path to `notes_html`: allowlist `p, h3, b, i, ul, ol,
   li, table, tr, th, td, br`, no attributes, no links (an `<a>` keeps its text), `strong→b`,
@@ -280,5 +299,6 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   write must use their own rows: Mentor C (`e2e-blended-mentor-c@test.local`) and
   `LOGGING_MENTEES` (one set per viewport) exist only for `blended-learning-log-entry.spec.ts`;
   Mentor C's `ACTION_ITEM_MENTEES` (with `EARLIER_ACTION_ITEMS`) exist only for
-  `blended-learning-action-items.spec.ts`. Re-diff it with
+  `blended-learning-action-items.spec.ts`; Mentor C's `FLAG_MENTEES` exist only for
+  `blended-learning-mentor-flags.spec.ts`. Re-diff it with
   `patterns/mirror-db-service-schema-in-e2e.md` whenever PR #804 changes.

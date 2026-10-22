@@ -45,6 +45,7 @@ Conditionally required (only if the feature is used):
 - `DYNAMODB_URL`, `DYNAMODB_REGION`, `DYNAMODB_ACCESS_KEY`, `DYNAMODB_SECRET_KEY` — performance dashboard.
 - `S3_DOCS_BUCKET`, `S3_DOCS_PREFIX`, `S3_DOCS_REGION`, `S3_DOCS_ACCESS_KEY_ID`, `S3_DOCS_SECRET_ACCESS_KEY` — document uploads (bucket shared with prod). Blended Learning photo links are presigned with them too. The Playwright web server sets fake values (`e2e-fake-docs`, `lms-documents`), so presigning works locally with no AWS traffic; specs answer `amazonaws.com` requests with `page.route`.
 - `AF_ACCESS_KEY_ID`, `AF_SECRET_ACCESS_KEY`, `AF_TOPIC_ARN`, `APP_ENV` — SNS session creator.
+- `BLENDED_LEARNING_SES_ACCESS_KEY_ID`, `BLENDED_LEARNING_SES_SECRET_ACCESS_KEY`, `BLENDED_LEARNING_SES_REGION` (default `ap-south-1`), `BLENDED_LEARNING_WELLBEING_EMAILS` (comma-separated; `shalinijha@` in production) — the well-being email sent after a Conversation with an Emotional Well-being Mentor Flag is saved (`src/lib/blended-learning-wellbeing-notifier.ts`, `af-lms-ses` IAM user, from `no-reply@avantifellows.org`). The link uses `NEXTAUTH_URL`. If the key id, secret or recipients are unset, the email is skipped without error. The Playwright web server sets the key id and recipients to `" "` (a blank value would be refilled from `.env.local`), so e2e never sends.
 
 Never commit real values — `.env.local` is gitignored; CI injects prod/preview values via the Amplify workflow.
 

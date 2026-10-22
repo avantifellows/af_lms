@@ -5,17 +5,18 @@ import { useId, useState, type FormEvent, type ReactNode } from "react";
 
 import { Button, Card, FormLabel, Input, Select } from "@/components/ui";
 import { baseInputClasses } from "@/components/ui/styles";
-import type { ActionItemOwner, OpenActionItem } from "@/lib/blended-learning-mentee-detail";
+import type { ActionItemOwner, FlagRecipient, OpenActionItem } from "@/lib/blended-learning-mentee-detail";
 import type { MenteeRow } from "@/lib/blended-learning-mentees";
 
 import { LastContact, WhyNowTags } from "../../../MenteeList";
 import { ACTION_ITEM_OWNER, ActionItemMeta } from "../ActionItemMeta";
+import { FLAG_RECIPIENT } from "../flagRecipients";
 import { NotesEditor } from "./NotesEditor";
 
 // Log a Conversation or an Attempt for one Mentee. One column on mobile with
 // the last-conversation and Open Action Items panels on top; they sit beside
 // the form from 1024 px. Only a Conversation adds Action Items or ticks
-// earlier ones done. After saving, a confirmation shows what the Mentee list
+// earlier ones done, and raises Mentor Flags. After saving, a confirmation shows what the Mentee list
 // now says.
 
 type Kind = "conversation" | "attempt";
@@ -23,6 +24,9 @@ type Kind = "conversation" | "attempt";
 type FieldErrors = Record<string, string>;
 type Saved = { kind: Kind; mentee: MenteeRow | null };
 type DraftActionItem = { key: number; owner: ActionItemOwner | ""; text: string; dueOn: string };
+// A switched-on Flag Recipient maps to its comment; off is absent.
+type DraftFlags = Partial<Record<FlagRecipient, string>>;
+const FLAG_RECIPIENTS = Object.keys(FLAG_RECIPIENT) as FlagRecipient[];
 
 const KINDS: { value: Kind; label: string }[] = [
   { value: "conversation", label: "Conversation" },
@@ -209,6 +213,70 @@ function ActionItemsEditor({
   );
 }
 
+function MentorFlagsEditor({
+  flags,
+  errors,
+  onChange,
+}: {
+  flags: DraftFlags;
+  errors: FieldErrors;
+  onChange: (flags: DraftFlags) => void;
+}) {
+  const ids = useId();
+  // Errors are keyed by position among the switched-on flags, as submitted.
+  const raised = FLAG_RECIPIENTS.filter((recipient) => flags[recipient] !== undefined);
+  const flagErrors = Object.entries(errors).filter(([field]) => field === "flags" || field.startsWith("flags."));
+  return (
+    <fieldset className="space-y-2">
+      <legend className="mb-1 block text-xs font-bold uppercase tracking-wide text-text-muted">
+        Mentor Flags (optional)
+      </legend>
+      {FLAG_RECIPIENTS.map((recipient) => {
+        const label = FLAG_RECIPIENT[recipient];
+        const on = flags[recipient] !== undefined;
+        const commentId = `${ids}-${recipient}-comment`;
+        const commentError = on ? errors[`flags.${raised.indexOf(recipient)}.comment`] : undefined;
+        return (
+          <div key={recipient} className="rounded-lg border border-border px-3 has-[:checked]:border-accent">
+            <label className="flex min-h-11 cursor-pointer items-center justify-between gap-3">
+              <span className="text-sm font-bold text-text-primary">{label}</span>
+              <input
+                type="checkbox"
+                role="switch"
+                checked={on}
+                onChange={() => {
+                  const next = { ...flags };
+                  if (on) delete next[recipient];
+                  else next[recipient] = "";
+                  onChange(next);
+                }}
+                className="relative h-6 w-11 shrink-0 cursor-pointer appearance-none rounded-full bg-border transition-colors before:absolute before:left-0.5 before:top-0.5 before:h-5 before:w-5 before:rounded-full before:bg-bg-card before:shadow-sm before:transition-transform checked:bg-accent checked:before:translate-x-5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+              />
+            </label>
+            {on && (
+              <div className="pb-3">
+                <FormLabel htmlFor={commentId}>{`Comment for ${label} (optional)`}</FormLabel>
+                <Input
+                  id={commentId}
+                  value={flags[recipient]}
+                  onChange={(event) => onChange({ ...flags, [recipient]: event.target.value })}
+                  aria-invalid={Boolean(commentError)}
+                />
+                <FieldError message={commentError} />
+              </div>
+            )}
+          </div>
+        );
+      })}
+      {flagErrors
+        .filter(([field]) => !field.endsWith(".comment"))
+        .map(([field, message]) => (
+          <FieldError key={field} message={message} />
+        ))}
+    </fieldset>
+  );
+}
+
 function FieldError({ message, id }: { message?: string; id?: string }) {
   if (!message) return null;
   return (
@@ -312,6 +380,7 @@ export function LogEntryForm({
   const [actionItems, setActionItems] = useState<DraftActionItem[]>([]);
   const [nextItemKey, setNextItemKey] = useState(1);
   const [ticked, setTicked] = useState<Set<number>>(new Set());
+  const [flags, setFlags] = useState<DraftFlags>({});
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -339,6 +408,10 @@ export function LogEntryForm({
             summary,
             notesHtml,
             actionItems: actionItems.map((item) => ({ owner: item.owner, text: item.text, dueOn: item.dueOn || null })),
+            flags: FLAG_RECIPIENTS.filter((recipient) => flags[recipient] !== undefined).map((recipient) => ({
+              recipient,
+              comment: flags[recipient] || null,
+            })),
             completeActionItemIds: [...ticked],
           };
     try {
@@ -474,6 +547,17 @@ export function LogEntryForm({
                 // Per-item errors are keyed by position, which removal shifts.
                 setFieldErrors((errors) =>
                   Object.fromEntries(Object.entries(errors).filter(([field]) => !field.startsWith("actionItems")))
+                );
+              }}
+            />
+            <MentorFlagsEditor
+              flags={flags}
+              errors={fieldErrors}
+              onChange={(next) => {
+                setFlags(next);
+                // Per-flag errors are keyed by position, which a switch shifts.
+                setFieldErrors((errors) =>
+                  Object.fromEntries(Object.entries(errors).filter(([field]) => !field.startsWith("flags")))
                 );
               }}
             />
