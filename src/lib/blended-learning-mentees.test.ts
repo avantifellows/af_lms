@@ -22,8 +22,8 @@ function row(studentId: number, mentorUserId: number, name: string) {
   return {
     student_id: studentId, mentor_user_id: mentorUserId, first_name, last_name, gender: "Female",
     grade: 12, program_id: 80, program_name: "STP Voucher Delhi",
-    last_conversation_on: "2026-10-20", last_conversation_id: studentId * 10,
-    last_attempt_on: null, last_attempt_id: null, legacy_last_contact_month: null, open_draft_state: null,
+    last_conversation_on: "2026-10-20", last_conversation_id: studentId * 10, last_conversation_minutes: 25,
+    last_attempt_on: null as string | null, last_attempt_id: null as number | null, legacy_last_contact_month: null, open_draft_state: null,
   };
 }
 
@@ -69,5 +69,17 @@ describe("listMentees", () => {
 
     expect(list).toEqual({ talkToFirst: [], everyoneElse: [] });
     expect(mockQuery).not.toHaveBeenCalled();
+  });
+
+  it("carries the latest Attempt's date and the latest Conversation's duration for the list's cells", async () => {
+    givenMappedMentees([{ ...FAIZANS, last_attempt_on: "2026-10-21", last_attempt_id: 5099 }]);
+
+    const list = await listMentees({ access: MENTOR, today: "2026-10-22" });
+
+    expect(list.talkToFirst[0]).toMatchObject({
+      reasons: ["attempt"],
+      lastAttemptOn: "2026-10-21",
+      lastDurationMinutes: 25,
+    });
   });
 });
