@@ -237,6 +237,28 @@ describe("runBlendedLinksImport", () => {
     });
   });
 
+  it("takes a Profile Doc from a hyperlinked name, but never a Screener Link from another column", async () => {
+    givenDatabase([ASHA], [
+      { student_id: 501, profile_doc_url: null, screener_url: ASHA_SCREENER, legacy_last_contact_month: null },
+    ]);
+    const workbook = new ExcelJS.Workbook();
+    addSheet(workbook, "Student Profile Docs", ["Student ID", "Student Name"], [
+      ["2612001", link("Asha Verma", ASHA_DOC)],
+    ]);
+    // No "Screener Form" header: the hyperlinked name is not a Screener Link.
+    addSheet(workbook, "Conversation", ["Student ID", "Name", "Notes"], [
+      ["2612001", link("Asha Verma", "https://docs.google.com/document/d/unrelated"), "called twice"],
+    ]);
+
+    const report = await runBlendedLinksImport({ workbook, mode: "apply" });
+
+    expect(report.issues).toEqual([{ tab: "Conversation", row: 2, studentId: "2612001", reason: "no_link" }]);
+    expect(report.counts).toEqual({ matched: 1, unmatched: 0, skipped: 1 });
+    expect(linksTable.get(501)).toEqual({
+      student_id: 501, profile_doc_url: ASHA_DOC, screener_url: ASHA_SCREENER, legacy_last_contact_month: null,
+    });
+  });
+
   it("reads a HYPERLINK() formula's target, not its text", async () => {
     givenDatabase([ASHA]);
     const workbook = new ExcelJS.Workbook();

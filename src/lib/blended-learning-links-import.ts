@@ -186,8 +186,11 @@ function cellHyperlink(cell: ExcelJS.Cell): string | null {
   return null;
 }
 
-function rowHyperlink(row: ExcelJS.Row, column: number | null): string | null {
+// The link column's hyperlink. Only a tab that allows it falls back to the
+// row's first hyperlinked cell when it has no link column.
+function rowHyperlink(row: ExcelJS.Row, column: number | null, rowFallback: boolean): string | null {
   if (column != null) return cellHyperlink(row.getCell(column));
+  if (!rowFallback) return null;
   let found: string | null = null;
   row.eachCell((cell) => {
     if (found == null) found = cellHyperlink(cell);
@@ -219,6 +222,7 @@ function readLinksTab(
   sheet: ExcelJS.Worksheet,
   tab: SourceTab,
   isLinkHeader: (key: string) => boolean,
+  rowFallback: boolean,
   students: StudentIndex,
   readMonths = false
 ): TabResult {
@@ -269,7 +273,7 @@ function readLinksTab(
     const seen = result.legacyMonths.get(student.id);
     if (called && (seen == null || called > seen)) result.legacyMonths.set(student.id, called);
 
-    const url = rowHyperlink(row, columns.link);
+    const url = rowHyperlink(row, columns.link, rowFallback);
     if (!url) {
       result.counts.skipped++;
       issue(rowNumber, student.studentId, "no_link");
@@ -398,9 +402,12 @@ export async function runBlendedLinksImport(params: {
 }): Promise<BlendedLinksImportReport> {
   const seedLegacy = params.seedLegacy === true;
   const students = await loadActiveMappedStudents();
+  // Only the Profile Docs tab may take a row's first link (e.g. a hyperlinked
+  // name). The Conversation tab's link must come from its Screener Form
+  // column: without one, its rows are no_link, never another cell's link.
   const tabs = [
-    { name: PROFILE_DOCS_TAB, isLinkHeader: (key: string) => /profile doc/.test(key) },
-    { name: CONVERSATION_TAB, isLinkHeader: (key: string) => key === "screener form" },
+    { name: PROFILE_DOCS_TAB, isLinkHeader: (key: string) => /profile doc/.test(key), rowFallback: true },
+    { name: CONVERSATION_TAB, isLinkHeader: (key: string) => key === "screener form", rowFallback: false },
   ] as const;
 
   const report: BlendedLinksImportReport = {
@@ -415,7 +422,8 @@ export async function runBlendedLinksImport(params: {
     const sheet = params.workbook.getWorksheet(tab.name);
     const result = sheet
       ? readLinksTab(
-          sheet, tab.name, tab.isLinkHeader, students, seedLegacy && tab.name === CONVERSATION_TAB
+          sheet, tab.name, tab.isLinkHeader, tab.rowFallback, students,
+          seedLegacy && tab.name === CONVERSATION_TAB
         )
       : null;
     if (!result?.read) {

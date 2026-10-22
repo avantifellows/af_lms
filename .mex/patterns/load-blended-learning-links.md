@@ -29,7 +29,9 @@ Google Sheet, not the app; there is no in-app link editing. `scripts/import-blen
 What it reads (hyperlinks, never cell text — a Ctrl+K link or a `HYPERLINK("url", …)` formula):
 - **`Student Profile Docs` tab** → `profile_doc_url`: the "Profile Doc" column's link, or, with no
   such column, the first hyperlinked cell in the row (e.g. a hyperlinked name).
-- **`Conversation` tab** → `screener_url`: the "Screener Form" column's link.
+- **`Conversation` tab** → `screener_url`: the "Screener Form" column's link only. There is no
+  row fallback here: with no "Screener Form" header every row is `no_link`, so a hyperlinked
+  name or any other link is never written as a Screener Link.
 - **`--seed-legacy`** (placeholder pending Poojita) → `legacy_last_contact_month`: the latest
   month column on the `Conversation` tab with a call count above zero, as that month's first day.
   Month headers are "Sep", "Sep 2026", "Sep'26" or dates; a bare month takes its year from
@@ -74,4 +76,5 @@ Name" column.
 - Everything `no_match`: the export lost the Student ID column header, or you pointed at the
   wrong environment (Mappings differ per DB).
 - Everything `no_link`: the Sheet's links are plain URL text, not hyperlinks — the script does
-  not read text by design.
+  not read text by design. On the `Conversation` tab alone, it also means the export has no
+  "Screener Form" header in its top ten rows.
