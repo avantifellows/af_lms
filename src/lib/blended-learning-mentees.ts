@@ -1,16 +1,23 @@
 import { query } from "./db";
 import { CURRENT_ACADEMIC_YEAR } from "./constants";
-import { activeBlendedMappingSql, type BlendedLearningAccess } from "./blended-learning-access";
+import {
+  activeBlendedMappingSql,
+  canBlendedLearning,
+  type BlendedLearningAccess,
+} from "./blended-learning-access";
 import {
   compareTalkToFirst,
   lastContactOf,
   latestEntryKind,
+  talkedToInLastWeek,
   talkToFirst,
+  thirtyDaysOrMore,
   type BlendedEntryKind,
   type TalkToFirstReason,
 } from "./blended-learning-talk-to-first";
 
-// Blended Learning read model: the Mentee list (server-only). Reads go
+// Blended Learning read model: the Mentee list and the admin Mentor cards
+// (server-only). Reads go
 // through query() with $n placeholders. Drafts are read only for the "Draft
 // ready to review" chip; they never change Last Contact, Talk to First or
 // counts.
@@ -35,6 +42,8 @@ export type MenteeRow = {
 export type MenteeList = { talkToFirst: MenteeRow[]; everyoneElse: MenteeRow[] };
 
 type MenteeQueryRow = {
+  mentor_user_id: number | string;
+  mentor_name: string;
   student_id: number | string;
   first_name: string | null;
   last_name: string | null;
@@ -80,22 +89,14 @@ function toMentee(row: MenteeQueryRow, today: string): MenteeRow {
   };
 }
 
-// Mentees from active current-year Mappings, grouped and sorted. A Mentor
-// always gets only their own; an admin gets every Mentor's, or one Mentor's
-// when `mentorUserId` is given. `studentId` narrows it to one Mentee's row.
-// `today` is the IST calendar date.
-export async function listMentees(params: {
-  access: BlendedLearningAccess;
-  mentorUserId?: number | null;
-  studentId?: number;
-  today: string;
-}): Promise<MenteeList> {
-  const { access, today } = params;
-  const mentorUserId = access.kind === "mentor" ? access.mentorUserId : params.mentorUserId;
-  if (access.kind === "mentor" && mentorUserId == null) return { talkToFirst: [], everyoneElse: [] };
-
-  const rows = await query<MenteeQueryRow>(
-    `SELECT st.id AS student_id, account.first_name, account.last_name, account.gender,
+// Active current-year Mappings with what Last Contact and Talk to First need,
+// optionally narrowed to one Mentor or one Student.
+function menteeRows(mentorUserId: number | null, studentId: number | null) {
+  return query<MenteeQueryRow>(
+    `SELECT mapping.mentor_user_id,
+            COALESCE(NULLIF(TRIM(CONCAT_WS(' ', mentor.first_name, mentor.last_name)), ''),
+                     mentor.email, CONCAT('Mentor ', mapping.mentor_user_id)) AS mentor_name,
+            st.id AS student_id, account.first_name, account.last_name, account.gender,
             current_grade.number AS grade, mapping.program_id, program.name AS program_name,
             latest_conversation.occurred_on::text AS last_conversation_on,
             latest_conversation.id AS last_conversation_id,
@@ -107,6 +108,7 @@ export async function listMentees(params: {
      JOIN student st ON st.id = mapping.student_id
      JOIN "user" account ON account.id = st.user_id
      JOIN program ON program.id = mapping.program_id
+     LEFT JOIN "user" mentor ON mentor.id = mapping.mentor_user_id
      LEFT JOIN LATERAL (
        SELECT grade.number
        FROM enrollment_record er
@@ -135,12 +137,69 @@ export async function listMentees(params: {
      WHERE ${activeBlendedMappingSql("mapping", "$1")}
        AND ($2::bigint IS NULL OR mapping.mentor_user_id = $2::bigint)
        AND ($3::bigint IS NULL OR mapping.student_id = $3::bigint)`,
-    [CURRENT_ACADEMIC_YEAR, mentorUserId ?? null, params.studentId ?? null]
+    [CURRENT_ACADEMIC_YEAR, mentorUserId, studentId]
   );
+}
 
+// Mentees from active current-year Mappings, grouped and sorted. A Mentor
+// always gets only their own; an admin gets every Mentor's, or one Mentor's
+// when `mentorUserId` is given. `studentId` narrows it to one Mentee's row.
+// `today` is the IST calendar date.
+export async function listMentees(params: {
+  access: BlendedLearningAccess;
+  mentorUserId?: number | null;
+  studentId?: number;
+  today: string;
+}): Promise<MenteeList> {
+  const { access, today } = params;
+  const mentorUserId = access.kind === "mentor" ? access.mentorUserId : params.mentorUserId;
+  if (access.kind === "mentor" && mentorUserId == null) return { talkToFirst: [], everyoneElse: [] };
+
+  const rows = await menteeRows(mentorUserId ?? null, params.studentId ?? null);
   const mentees = rows.map((row) => toMentee(row, today)).sort(compareTalkToFirst);
   return {
     talkToFirst: mentees.filter((mentee) => mentee.reasons.length > 0),
     everyoneElse: mentees.filter((mentee) => mentee.reasons.length === 0),
   };
+}
+
+export type MentorCard = {
+  mentorUserId: number;
+  name: string;
+  assigned: number;
+  grade12: number;
+  grade13: number;
+  // Last Contact under 7 IST days ago.
+  talkedLast7: number;
+  // Last Contact 30+ IST days ago, or none at all.
+  notSpoken30Plus: number;
+};
+
+// One card per Mentor with active current-year Mappings, A–Z by name, for
+// Blended Learning Admins (view_mentors). Recency uses the same Last Contact
+// as the Mentee list, so Attempts and drafts never count.
+export async function listMentorCards(access: BlendedLearningAccess, today: string): Promise<MentorCard[]> {
+  if (!canBlendedLearning(access, "view_mentors")) return [];
+
+  const cards = new Map<number, MentorCard>();
+  for (const row of await menteeRows(null, null)) {
+    const mentorUserId = Number(row.mentor_user_id);
+    const card = cards.get(mentorUserId) ?? {
+      mentorUserId,
+      name: row.mentor_name,
+      assigned: 0,
+      grade12: 0,
+      grade13: 0,
+      talkedLast7: 0,
+      notSpoken30Plus: 0,
+    };
+    const { daysSince, grade } = toMentee(row, today);
+    card.assigned += 1;
+    if (grade === 12) card.grade12 += 1;
+    if (grade === 13) card.grade13 += 1;
+    if (talkedToInLastWeek(daysSince)) card.talkedLast7 += 1;
+    if (thirtyDaysOrMore(daysSince)) card.notSpoken30Plus += 1;
+    cards.set(mentorUserId, card);
+  }
+  return [...cards.values()].sort((a, b) => a.name.localeCompare(b.name, "en", { sensitivity: "base" }));
 }

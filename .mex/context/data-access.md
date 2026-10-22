@@ -197,7 +197,7 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   (read), `src/lib/holistic-follow-up-questions.ts` (client-safe question keys, text, and
   normaliser), `src/lib/holistic-mentor-write-scope.ts` (shared scope guard).
 
-## Blended Learning Mentee list (#442), detail (#444), logging (#445), Action Items (#446), Mentor Flags (#447), photos (#448) and Call Recording drafts (#449, retry/discard #450, review and save #451)
+## Blended Learning Mentee list (#442), Mentor cards (#452), detail (#444), logging (#445), Action Items (#446), Mentor Flags (#447), photos (#448) and Call Recording drafts (#449, retry/discard #450, review and save #451)
 
 - **Tables:** the `blended_learning_*` tables are created by db-service (Mappings:
   `20260921120000` + its ensure migration; the other eight: PR #804,
@@ -214,6 +214,12 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   state (`transcribing|ready|failed`). A Mentor always gets their own Mentees, whatever
   `mentorUserId` says; a Mentor without a Mentor user id gets an empty list without a query.
   Rows are grouped (Talk to First = any reason) and sorted in JS by the pure policy.
+- **Mentor cards (#452):** `listMentorCards(access, today)` in the same module, for
+  `view_mentors` only (anyone else gets `[]`). It reuses the list's query unnarrowed (one row
+  per active current-year Mapping, with the Mentor's `user` name, else email) and counts per
+  `mentor_user_id`: `assigned`, `grade12`, `grade13`, `talkedLast7` (`talkedToInLastWeek`) and
+  `notSpoken30Plus` (`thirtyDaysOrMore`, so no Last Contact counts). Same Last Contact as the
+  list, so Attempts and drafts never count. Cards sort A–Z by name.
 - **Talk to First policy:** `src/lib/blended-learning-talk-to-first.ts`, pure and client-safe:
   `talkToFirst`, `latestEntryKind`, `lastContactOf`, `compareTalkToFirst`,
   `talkedToInLastWeek`, `thirtyDaysOrMore` (days_since ≥ 30 or no Last Contact). IST calendar dates as `YYYY-MM-DD`; a legacy month counts as its last
