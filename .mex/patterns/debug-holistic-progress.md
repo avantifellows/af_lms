@@ -1,7 +1,7 @@
 ---
 name: debug-holistic-progress
 description: Trace empty HTTP 500 responses and database timeouts in Holistic Admin progress.
-last_updated: 2026-10-22
+last_updated: 2026-10-23
 ---
 
 # Debug Holistic Admin progress
@@ -54,7 +54,7 @@ The invariants (coverage adds up and matches the Teacher roster, which filters i
 - A School whose active Mappings all end leaves `options.schools` and coverage but stays in `coverageSchools`.
 - `counts.total === coverage.unassigned` under Unassigned only without `phase_id`; a Phase narrows the list, not coverage.
 - Quoted CSV answer cells can contain line breaks. Parse the CSV instead of splitting lines.
-- CSV column order (#461): fixed Student/Mentor/Phase columns, `Completed At`, `Question n,Answer n` pairs up to the highest answer position, `Academic Challenges`, `Non-Academic Challenges`, then the three `Notes Author` columns. Category cells come from submitted Notes only, so an empty cell on a Student with Notes means a draft or untagged pre-release Notes.
+- CSV column order (#461): fixed Student/Mentor/Phase columns, `Completed At`, `Question n,Answer n` pairs up to the highest answer position, `Academic Challenges`, `Non-Academic Challenges`, then the three `Notes Author` columns. Category cells come from submitted Notes only, so an empty cell on a Student with Notes means a draft or pre-release Notes without Challenge Categories.
 - "Clear filters" in the Unassigned empty state keeps Progress = Unassigned; the toolbar "Clear filters" resets to All Assigned.
 - The browser journey asserts the header link "Back to Students and Progress", not native browser Back.
 - Batch `enrollment_record.group_id` holds `batch.id`; see `patterns/debug-e2e-fixtures.md`.

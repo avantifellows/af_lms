@@ -26,7 +26,7 @@ export type HolisticAssignedProgressRow = {
   notesAuthorEmail: string | null;
   notesLastEditedAt: string | null;
   answers: Array<{ position: number; question: string; answer: string }>;
-  // Submitted Notes only, catalogue order; empty for drafts, no Notes or untagged Notes.
+  // Submitted Notes only, catalogue order; empty for drafts, no Notes or Notes without Challenge Categories.
   challengeCategories: HolisticChallengeCategoryCode[];
 };
 

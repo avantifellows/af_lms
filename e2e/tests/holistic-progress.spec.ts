@@ -461,7 +461,7 @@ test("the Unassigned CSV lists Unassigned Students only and the All Assigned CSV
   expect(assignedRows.some((row) => row[progressColumn] === "unassigned")).toBe(false);
 });
 
-test("the CSV carries submitted Notes' Challenge Categories and leaves untagged and draft-only Notes blank", async ({
+test("the CSV carries submitted Notes' Challenge Categories and leaves Notes without Challenge Categories and draft-only Notes blank", async ({
   holisticAdminPage,
 }) => {
   type Note = { notes_id: string; phase_id: string; state: "draft" | "submitted"; external_student_id: string };
@@ -489,7 +489,7 @@ test("the CSV carries submitted Notes' Challenge Categories and leaves untagged 
   const seededNotesIds: number[] = [];
   let seededDraftId: number | undefined;
   try {
-    // The fixture's pre-release Phase 1 Note: submitted, untagged and its Student still mapped.
+    // The fixture's pre-release Phase 1 Note: submitted, without Challenge Categories and its Student still mapped.
     const { rows: [submitted] } = await pool.query<Note>(
       `SELECT notes.id AS notes_id, notes.phase_id, notes.state, st.student_id AS external_student_id
        FROM holistic_mentorship_post_session_notes notes
@@ -505,7 +505,7 @@ test("the CSV carries submitted Notes' Challenge Categories and leaves untagged 
                          WHERE challenge.notes_id = notes.id)
        ORDER BY notes.id LIMIT 1`,
     );
-    expect(submitted, "the Holistic fixture has an untagged submitted Note").toBeDefined();
+    expect(submitted, "the Holistic fixture has a submitted Note without Challenge Categories").toBeDefined();
     // The fixture draft is submitted by the release workflow spec, so seed this spec's own
     // draft for the same Student on a later open Phase of the same Grade.
     const { rows: [draft] } = await pool.query<Note>(
@@ -527,7 +527,7 @@ test("the CSV carries submitted Notes' Challenge Categories and leaves untagged 
     expect(draft, "the submitted Note's Student has a later open Phase without Notes").toBeDefined();
     seededDraftId = Number(draft.notes_id);
 
-    await expectChallengeColumns(submitted, "untagged submitted", [], "", "");
+    await expectChallengeColumns(submitted, "submitted without Categories", [], "", "");
 
     // Inserted out of catalogue order; a Categories draft must not leak into progress.
     await seedHolisticNoteChallengeCategories(pool, Number(submitted.notes_id), [
@@ -539,7 +539,7 @@ test("the CSV carries submitted Notes' Challenge Categories and leaves untagged 
 
     await expectChallengeColumns(
       submitted,
-      "tagged submitted",
+      "Category-bearing submitted",
       ["academic.subject_concept", "academic.exam_related", "non_academic.wellness", "non_academic.financial"],
       "Subject/concept issues; Exam/Test related issues",
       "Wellness (health, sleep etc.); Financial challenges",

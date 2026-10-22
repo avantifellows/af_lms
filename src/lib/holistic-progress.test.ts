@@ -439,7 +439,7 @@ describe("Holistic progress", () => {
       });
     });
 
-    it("returns an empty array when the Phase has no submitted, or only untagged, Notes", async () => {
+    it("returns an empty array when the Phase has no submitted Notes, or only Notes without Challenge Categories", async () => {
       mockQuery.mockResolvedValueOnce([
         { ...databaseRow, student_id: "41", progress: "pending", challenge_categories: null },
         { ...databaseRow, student_id: "42", challenge_categories: [] },
@@ -534,7 +534,7 @@ describe("Holistic progress", () => {
   });
 
   describe("Challenge Category CSV columns", () => {
-    const taggedRow: HolisticProgressRow = {
+    const categoryBearingRow: HolisticProgressRow = {
       studentId: 41, studentName: "Student One", externalStudentId: "AF-41", grade: 11,
       schoolName: "School One", schoolCode: "SCH001", mentorName: "Mentor One", mentorEmail: "mentor@example.com",
       phaseId: 70, phaseNumber: 2, phaseTitle: "Check-in", phaseState: "active", progress: "completed",
@@ -554,7 +554,7 @@ describe("Holistic progress", () => {
     };
 
     it("puts Academic and Non-Academic Challenges after the answers with \"; \"-joined labels", () => {
-      const [header, tagged] = formatHolisticProgressCsv("2026-2027", 1, [taggedRow]).split("\r\n");
+      const [header, categoryBearing] = formatHolisticProgressCsv("2026-2027", 1, [categoryBearingRow]).split("\r\n");
 
       expect(header).toBe(
         "Academic Year,Program ID,Program Name,School,UDISE Code,Student Name,Student External ID," +
@@ -562,7 +562,7 @@ describe("Holistic progress", () => {
           "Question 1,Answer 1,Academic Challenges,Non-Academic Challenges," +
           "Notes Author Name,Notes Author Email,Notes Last Edited At",
       );
-      expect(tagged).toBe(
+      expect(categoryBearing).toBe(
         "2026-2027,1,JNV CoE,School One,SCH001,Student One,AF-41,11,Mentor One,mentor@example.com," +
           "Phase 2,Check-in,active,completed,2026-07-01T10:00:00.000Z,Goal?,On track," +
           "Subject/concept issues; Other,\"Time management & distractions; Wellness (health, sleep etc.)\"," +
@@ -570,18 +570,18 @@ describe("Holistic progress", () => {
       );
     });
 
-    it("leaves both cells blank for untagged pre-release Notes, Pending rows and Unassigned rows", () => {
-      const untagged: HolisticProgressRow = { ...taggedRow, challengeCategories: [] };
+    it("leaves both cells blank for pre-release Notes without Categories, Pending rows and Unassigned rows", () => {
+      const withoutCategories: HolisticProgressRow = { ...categoryBearingRow, challengeCategories: [] };
       const pending: HolisticProgressRow = {
-        ...taggedRow, studentId: 43, progress: "pending", completedAt: null, notesAuthor: null,
+        ...categoryBearingRow, studentId: 43, progress: "pending", completedAt: null, notesAuthor: null,
         notesAuthorEmail: null, notesLastEditedAt: null, answers: [], challengeCategories: [],
       };
 
-      const [, untaggedLine, pendingLine, unassignedLine] = formatHolisticProgressCsv(
-        "2026-2027", 1, [untagged, pending, unassignedRow],
+      const [, withoutCategoriesLine, pendingLine, unassignedLine] = formatHolisticProgressCsv(
+        "2026-2027", 1, [withoutCategories, pending, unassignedRow],
       ).split("\r\n");
 
-      expect(untaggedLine).toBe(
+      expect(withoutCategoriesLine).toBe(
         "2026-2027,1,JNV CoE,School One,SCH001,Student One,AF-41,11,Mentor One,mentor@example.com," +
           "Phase 2,Check-in,active,completed,2026-07-01T10:00:00.000Z,Goal?,On track,,," +
           "Mentor One,mentor@example.com,2026-07-01T11:00:00.000Z",

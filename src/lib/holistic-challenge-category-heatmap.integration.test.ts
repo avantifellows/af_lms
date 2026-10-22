@@ -14,7 +14,7 @@ import type { UserPermission } from "./permissions";
 const database = process.env.HOLISTIC_HEATMAP_TEST_DATABASE;
 const academicYear = "2026-2027";
 const runId = randomUUID();
-const tag = runId.slice(0, 8);
+const suffix = runId.slice(0, 8);
 let db: typeof import("./db");
 let heatmap: typeof import("./holistic-challenge-category-heatmap").getHolisticChallengeCategoryHeatmap;
 let programId: number;
@@ -27,12 +27,12 @@ const phases: Record<"g11p1" | "g11p2" | "g12p1" | "g11p3" | "b11p1" | "c11p1", 
 };
 type SchoolKey = "alpha" | "beta" | "charlie" | "delta" | "echo" | "foxtrot";
 const schools: Record<SchoolKey, { id: number; code: string; name: string }> = {
-  alpha: { id: 0, code: `R463A${tag}`, name: `Issue463 Alpha ${tag}` },
-  beta: { id: 0, code: `R463B${tag}`, name: `Issue463 Beta ${tag}` },
-  charlie: { id: 0, code: `R463C${tag}`, name: `Issue463 Charlie ${tag}` },
-  delta: { id: 0, code: `R463D${tag}`, name: `Issue463 Delta ${tag}` },
-  echo: { id: 0, code: `R464E${tag}`, name: `Issue464 Echo ${tag}` },
-  foxtrot: { id: 0, code: `R464F${tag}`, name: `Issue464 Foxtrot ${tag}` },
+  alpha: { id: 0, code: `R463A${suffix}`, name: `Issue463 Alpha ${suffix}` },
+  beta: { id: 0, code: `R463B${suffix}`, name: `Issue463 Beta ${suffix}` },
+  charlie: { id: 0, code: `R463C${suffix}`, name: `Issue463 Charlie ${suffix}` },
+  delta: { id: 0, code: `R463D${suffix}`, name: `Issue463 Delta ${suffix}` },
+  echo: { id: 0, code: `R464E${suffix}`, name: `Issue464 Echo ${suffix}` },
+  foxtrot: { id: 0, code: `R464F${suffix}`, name: `Issue464 Foxtrot ${suffix}` },
 };
 
 // The first Program alone (not All Programs).
@@ -191,7 +191,7 @@ describe.skipIf(!database)("Challenge Category Heatmap against disposable Postgr
       const s3 = await seedStudent(client);
       await seedMapping(client, s3, schools.alpha.id, "2026-06-01");
       await seedNotes(client, s3, phases.g11p1, "draft", ["academic.exam_related", "non_academic.wellness"]);
-      // S4, Charlie's only Student: submitted but untagged, so Charlie has n = 0.
+      // S4, Charlie's only Student: submitted without Challenge Categories, so Charlie has n = 0.
       const s4 = await seedStudent(client);
       await seedMapping(client, s4, schools.charlie.id, "2026-06-01");
       await seedNotes(client, s4, phases.g11p1, "submitted", [], "Synthetic pre-release answer");
@@ -269,7 +269,7 @@ describe.skipIf(!database)("Challenge Category Heatmap against disposable Postgr
 
     // Alpha: S1, S2 (S3 has only a draft; S5 moved to Beta). n = 2.
     // Beta: S5 (moved in), S6 (ended Mapping). n = 2. Delta: S7. n = 1.
-    // Charlie: S4 is untagged, so n = 0 and the School is hidden.
+    // Charlie: S4 has no Challenge Categories, so n = 0 and the School is hidden.
     expect(result).toMatchObject({
       programIds: [programId],
       academicYear,

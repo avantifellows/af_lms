@@ -1121,7 +1121,7 @@ export async function seedCentreSwitcherFixture(pool: Pool): Promise<CentreSwitc
 
 // Challenge Category rows written straight onto a fixture Note, in the given
 // order, so a spec can prove readers sort them (#461). Pair with
-// removeHolisticNoteChallengeCategories so the Synthetic Notes stay untagged.
+// removeHolisticNoteChallengeCategories so the Synthetic Notes stay without Challenge Categories.
 export async function seedHolisticNoteChallengeCategories(
   pool: Pool,
   notesId: number,

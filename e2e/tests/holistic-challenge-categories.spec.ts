@@ -7,7 +7,7 @@ import { getTestPool } from "../helpers/db";
 
 // The Holistic fixture seeds one categorized submitted Note: the second Grade 12
 // Student on "Synthetic Grade 12 Skipped" (Phase 4) carries Exam/Test related
-// issues and Time management & distractions. Nothing else on that Phase is tagged.
+// issues and Time management & distractions. No other Note on that Phase carries Categories.
 type Fixture = {
   centreId: number;
   schoolCode: string;

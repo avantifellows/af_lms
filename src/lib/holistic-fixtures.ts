@@ -481,7 +481,7 @@ export async function seedHolisticFixtures(
       mentorUserId, questionByPhase.get(completedPhaseId), questionByPhase.get(draftPhaseId),
       grade12[1].student_id, categorizedPhaseId, questionByPhase.get(categorizedPhaseId)]
   );
-  // The Phase 1 Note stays untagged (pre-release); the Grade 12 Phase 4 Note carries
+  // The Phase 1 Note stays without Challenge Categories (pre-release); the Grade 12 Phase 4 Note carries
   // one Challenge Category per group so local, e2e and staging heatmaps are not empty.
   await client.query(
     `INSERT INTO holistic_mentorship_post_session_note_challenges

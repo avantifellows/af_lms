@@ -332,7 +332,7 @@ describe("Holistic release preflight", () => {
     expect(fixtureStudentsQuery).toContain("SELECT batch.id AS batch_group_id");
   });
 
-  it("seeds a categorized submitted Note beside the untagged pre-release one", async () => {
+  it("seeds a Category-bearing submitted Note beside the pre-release one without Categories", async () => {
     const categoryWrites: unknown[][] = [];
     const query = async (sql: string, params: unknown[] = []) => {
       if (sql.includes("fixture_scope")) {
@@ -365,7 +365,7 @@ describe("Holistic release preflight", () => {
     await seedHolisticFixtures({ query } as never, PROGRAM_IDS.PUNJAB_COE);
 
     // A separate submitted Note for the second Grade 12 Student on Phase 4 (id 43); the
-    // first Grade 11 Student's Phase 1 Note stays untagged as the pre-release Note.
+    // first Grade 11 Student's Phase 1 Note stays without Challenge Categories as the pre-release Note.
     expect(categoryWrites).toEqual([
       [202, 43, ["academic.exam_related", "non_academic.time_management"]],
     ]);
