@@ -18,7 +18,7 @@ edges:
     condition: when adding LMS API routes for create or bulk upload
   - target: patterns/db-service-write.md
     condition: when proxying student writes to the DB Service
-last_updated: 2026-10-19
+last_updated: 2026-10-22
 ---
 
 # Student Addition
@@ -119,6 +119,10 @@ School Medium is the one field dropped rather than made editable — the program
 not want it edited (Venu, on the issue) — so it left the card too. `STUDENT_COLUMNS` still
 selects it, so showing it again is a one-line change. G10 board renders as CBSE / Others on
 the card (`formatG10Board`), the way Edit Student offers it, rather than the raw board name.
+Both read the stored value through `g10BoardChoice` in `student-addition-fields.ts`: only an
+exact "CBSE" is CBSE, anything else Others. The one difference is a null board: Edit shows
+Others (the DB Service stores Others as null), but the card shows "—", because null is also
+a board nobody ever entered and "Others" would claim one for those Students.
 
 Validation lives in `canonicalizeStudentEditPayload`: contact phones (WhatsApp, father,
 mother, guardian) are ten digits with no leading zero, pincode is six with no leading zero
@@ -127,12 +131,21 @@ education levels plus Monthly Family Income are dropdowns (`EDUCATION_LEVEL_OPTI
 `MONTHLY_FAMILY_INCOME_OPTIONS`). Blank clears, as the uniform sizes already did. A stored
 value the list no longer offers (e.g. an education level of "10th") still renders, because
 `selectField` prepends the current value. The modal filters as you type — digits for the
-phones and pincode, letters and spaces for the parent names — matching the Student's own
-phone and Father Name.
+phones and pincode (all of them, so an overlong number fails rather than being truncated),
+and for the three parent names letters in any script, combining marks, spaces and `. ' -`
+(`parentNameCharactersOnly`). A narrower A–Z filter stripped stored Hindi names to nothing
+and dropped the dots from names like "K. Geetha" on any edit. The edit canonicaliser accepts
+the same set for Father Name (`isValidParentName`) and keeps it as typed bar the spacing:
+unlike Add Student, an edit no longer strips its dots or re-cases it. Add Student's Father
+Name filter is still `lettersAndSpacesOnly`.
 
 Because the form is now long, a failed save scrolls the first field error (or the banner,
 which carries `role="alert"`) into view and focuses it. Without that, Save looked like it
-did nothing: the error sat about 1650px above the viewport on a laptop.
+did nothing: the error sat about 1650px above the viewport on a laptop. Every input follows
+the `edit-student-<field>` id the lookup uses; an error for a field the form doesn't render
+falls back to the banner. It happens once per Save (`focusErrorAfterSubmitRef`), not on
+every error-state change, because each keystroke clears the banner and would otherwise pull
+focus back to the failed field.
 
 **DB Service dependency:** `PATCH /lms/students/:id/update-with-enrollments` answers 422
 for any field outside its contract, so the db-service branch

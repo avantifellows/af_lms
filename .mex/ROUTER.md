@@ -26,7 +26,7 @@ edges:
     condition: when working on teacher feedback setup, the feedback form, or its report
   - target: patterns/INDEX.md
     condition: when starting a task — check the pattern index for a matching pattern file
-last_updated: 2026-10-19
+last_updated: 2026-10-22
 ---
 
 # Session Bootstrap
@@ -47,8 +47,8 @@ Then read this file fully before doing anything else in this session.
   canonicaliser and the DB Service refuse the fields under program 64. CWSN reads "Children
   with Special Needs (CWSN)" everywhere, the Locked Identity hint says why its fields are
   fixed, School Medium left the card (not editable, by the program team's call), G10 board
-  reads CBSE/Others, and a failed save now scrolls and focuses the first error. Needs DB
-  Service PR #789 deployed first. See `context/student-addition.md`.
+  reads CBSE/Others, parent names keep any script and `. ' -`, and a failed save now scrolls
+  and focuses the first error once. Needs DB Service PR #789 deployed first. See `context/student-addition.md`.
 - Issue #412 (feature branch): the dormant Holistic privacy helper erases Follow-up answers after creating the privacy tombstone and records the actual changed-answer count in a separate immutable audit. Existing tombstones are supported without rewriting their original audit. Requires the companion db-service migration first. The endpoint and action policy remain disabled; no historical data repair or external-process rollout is included. See `context/data-access.md` and `patterns/holistic-privacy-erasure.md`.
 - Issue #361 slice #363: PMU Manager (`pmu_manager`) and PMU Govt School User (`pmu_govt_school_user`) exist in the permission layer, pinned to JNV NVS (ADR 0007): matrix `students` edit + `performance` view only, program context always `[64]`/NVS-only, no centre seats or centre access, `ownsRecord` only for 64, and `canAccessStudent` requires a current NVS batch (`hasCurrentNvsBatchSql`). Admin user management, school page, dashboard and other PMU surfaces are later slices. See `context/permissions.md`.
 - Issue #361 slice #364: login is Google-only (ADR 0007); Dev Login stays in non-prod. `isRetiredToken` (`src/lib/retired-session.ts`, no DB imports) flags JWTs from the retired login by their raw token fields. The `jwt` callback throws on them, and `proxy` treats them as no token and clears the plain, `__Secure-` and chunked session cookies.
