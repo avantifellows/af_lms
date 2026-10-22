@@ -5,6 +5,7 @@ import { Modal, Input, Select, Button } from "@/components/ui";
 import {
   ALUMNI_MANAGER_ROLE,
   HOLISTIC_MENTORSHIP_PROGRAM_IDS,
+  isAlumniRole,
   isPmuRole,
   PMU_GOVT_SCHOOL_USER_ROLE,
   PMU_MANAGER_ROLE,
@@ -142,6 +143,8 @@ function effectiveLevel(role: string, level: number) {
 function programIdsFor(role: string, selectedPrograms: number[]) {
   if (role === "admin") return PROGRAMS.map((program) => program.id);
   if (isPmuRole(role)) return [PMU_PROGRAM_ID];
+  // Alumni Managers reach alumni by School, never by Program (ADR 0008).
+  if (isAlumniRole(role)) return [];
   if (role === "holistic_mentorship_admin") {
     return [...HOLISTIC_MENTORSHIP_PROGRAM_IDS];
   }
@@ -181,7 +184,8 @@ function pmuGovtSchoolError(values: Pick<UserFormValues, "role" | "selectedSchoo
 }
 
 async function saveUser(values: UserFormValues, user: UserPermission | null) {
-  if (!hasGlobalSchoolAccess(values.role) && !isPmuRole(values.role) && values.selectedPrograms.length === 0) {
+  const programsFixed = hasGlobalSchoolAccess(values.role) || isPmuRole(values.role) || isAlumniRole(values.role);
+  if (!programsFixed && values.selectedPrograms.length === 0) {
     throw new Error("At least one program must be selected");
   }
   const schoolError = pmuGovtSchoolError(values);
@@ -412,6 +416,7 @@ function AccessFields({ role, ...props }: AccessFieldsProps) {
   }
   if (role === PMU_GOVT_SCHOOL_USER_ROLE) return <PmuGovtAccessFields {...props} />;
   if (isPmuRole(role)) return <StandardAccessFields {...props} pmu />;
+  if (isAlumniRole(role)) return <StandardAccessFields {...props} alumni />;
   return <StandardAccessFields {...props} />;
 }
 
@@ -444,7 +449,12 @@ function PmuGovtAccessFields(props: Omit<AccessFieldsProps, "role">) {
   </>;
 }
 
-function StandardAccessFields({ pmu = false, ...props }: Omit<AccessFieldsProps, "role"> & { pmu?: boolean }) {
+// Alumni Managers have no Programs and no Students: no program picker, and
+// read-only means they can view alumni but not save them.
+function StandardAccessFields({ pmu = false, alumni = false, ...props }: Omit<AccessFieldsProps, "role"> & {
+  pmu?: boolean;
+  alumni?: boolean;
+}) {
   return <>
     <div>
       <label className={labelClassName}>School Access</label>
@@ -454,10 +464,10 @@ function StandardAccessFields({ pmu = false, ...props }: Omit<AccessFieldsProps,
         <option value={1}>School - Access to specific schools</option>
       </Select>
     </div>
-    <ReadOnlyField value={props.readOnly} onChange={props.onReadOnlyChange} label="Read-only access (cannot edit students)" />
-    {pmu
-      ? <PmuProgramNote />
-      : <ProgramsField selected={props.selectedPrograms} onToggle={props.onToggleProgram} />}
+    <ReadOnlyField value={props.readOnly} onChange={props.onReadOnlyChange}
+      label={alumni ? "Read-only access (can view alumni, cannot edit them)" : "Read-only access (cannot edit students)"} />
+    {pmu && <PmuProgramNote />}
+    {!pmu && !alumni && <ProgramsField selected={props.selectedPrograms} onToggle={props.onToggleProgram} />}
     <ScopePicker
       level={props.level}
       regions={props.regions}

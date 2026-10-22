@@ -255,6 +255,17 @@ describe("UserList", () => {
       expect(screen.getByText("No programs")).toBeInTheDocument();
     });
 
+    it("shows 'Not used', not the 'No programs' warning, for an Alumni Manager", () => {
+      renderList({
+        initialUsers: [
+          { ...users[2], id: 104, email: "alumni@example.com", role: "alumni_manager", program_ids: [] },
+        ],
+      });
+      expect(screen.getByText("Alumni Manager")).toHaveClass("bg-teal-100", "text-teal-800");
+      expect(screen.getByText("Not used")).toBeInTheDocument();
+      expect(screen.queryByText("No programs")).not.toBeInTheDocument();
+    });
+
     it("shows read-only and read/write badges", () => {
       renderList();
       expect(screen.getByText("Read-only")).toBeInTheDocument();

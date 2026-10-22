@@ -568,11 +568,67 @@ describe("PATCH /api/admin/users/[id] — PMU roles", () => {
     expect(await res.json()).toEqual({ error: ALUMNI_SEATED_ERROR });
   });
 
-  it("lets an unseated user become an alumni_manager", async () => {
+  it.each([
+    ["no program_ids", {}],
+    ["empty program_ids", { program_ids: [] }],
+    ["body program_ids", { program_ids: [1] }],
+  ])("lets an unseated user become an alumni_manager with no programs given %s", async (_label, programs) => {
     mockDb();
-    const res = await patch({ role: "alumni_manager", level: 1, school_codes: ["JNV001"], program_ids: [1] });
+    const res = await patch({ role: "alumni_manager", level: 1, school_codes: ["JNV001"], ...programs });
     expect(res.status).toBe(200);
-    expect(updateParams()?.[1]).toBe("alumni_manager");
+    expect(updateParams()).toEqual([1, "alumni_manager", ["JNV001"], null, [], undefined, null, "5"]);
+  });
+
+  it("edits a stored alumni_manager without programs", async () => {
+    mockDb({ stored: { ...MULTI_SCHOOL_PM, role: "alumni_manager", program_ids: [] } });
+    const res = await patch({ role: "alumni_manager", level: 3, program_ids: [], read_only: true });
+    expect(res.status).toBe(200);
+    expect(updateParams()).toEqual([3, "alumni_manager", null, null, [], true, null, "5"]);
+  });
+
+  it("still requires programs for non-alumni roles", async () => {
+    mockDb();
+    const res = await patch({ role: "teacher", level: 1, program_ids: [] });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("At least one program must be assigned");
+    expect(updateParams()).toBeUndefined();
+  });
+
+  it("requires program_ids when moving a user off the alumni_manager role", async () => {
+    const alumni = { ...MULTI_SCHOOL_PM, role: "alumni_manager", program_ids: [] };
+    mockDb({ stored: alumni });
+    const res = await patch({ role: "teacher", level: 1, school_codes: ["JNV001"] });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/Alumni Manager/);
+    expect(updateParams()).toBeUndefined();
+
+    mockDb({ stored: alumni });
+    const ok = await patch({ role: "teacher", level: 1, school_codes: ["JNV001"], program_ids: [1] });
+    expect(ok.status).toBe(200);
+    expect(updateParams()?.[4]).toEqual([1]);
+  });
+
+  it("returns ALUMNI_SEATED_ERROR when the target is seated through an email-only permission link", async () => {
+    // As for PMU roles below: no user_id on the permission row, so only the
+    // stored-email lookup (isSeatedEmail) finds the seat.
+    mockQuery.mockImplementation(async (sql: string, args?: unknown[]) => {
+      if (sql.includes("JOIN user_permission up ON up.user_id = cp.user_id")) return [];
+      if (sql.includes("centre_positions")) {
+        return String(args?.[0]).toLowerCase() === "seated.pm@example.org" ? [{ one: 1 }] : [];
+      }
+      if (/SELECT[\s\S]*FROM user_permission[\s\S]*WHERE id = \$1/.test(sql)) {
+        return [{ ...MULTI_SCHOOL_PM, email: "Seated.PM@Example.org" }];
+      }
+      return [];
+    });
+    const res = await patch({ role: "alumni_manager", level: 3 });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: ALUMNI_SEATED_ERROR });
+    const emailSeatCheck = mockQuery.mock.calls.find(([sql]) =>
+      String(sql).includes("LOWER(u.email) = LOWER($1)")
+    );
+    expect(emailSeatCheck?.[1]).toEqual(["Seated.PM@Example.org"]);
+    expect(updateParams()).toBeUndefined();
   });
 
   it("returns 409 when the target is seated through an email-only permission link", async () => {
