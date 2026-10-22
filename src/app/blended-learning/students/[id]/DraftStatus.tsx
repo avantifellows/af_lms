@@ -18,8 +18,10 @@ import type { DraftState } from "@/lib/blended-learning-drafts";
 
 const DRAFT_POLL_MS = 15_000;
 
-const DRAFT_STATE: Partial<Record<DraftState, { label: string; variant: "info" | "accent" | "danger" }>> = {
-  transcribing: { label: "Drafting from the Call Recording", variant: "info" },
+// The drafting badge uses `warning`: `info`'s light blue text was nearly
+// unreadable on its fill.
+const DRAFT_STATE: Partial<Record<DraftState, { label: string; variant: "warning" | "accent" | "danger" }>> = {
+  transcribing: { label: "Drafting from the Call Recording", variant: "warning" },
   ready: { label: "Draft ready to review", variant: "accent" },
   failed: { label: "Drafting failed", variant: "danger" },
 };
@@ -128,14 +130,18 @@ function DraftHeading({ state, drafting }: { state: DraftState; drafting: string
   return (
     <>
       <div className="flex flex-wrap items-center gap-2">
-        {inProgress && (
-          <span
-            aria-hidden="true"
-            className="h-4 w-4 animate-spin rounded-full border-2 border-accent border-t-transparent"
-          />
-        )}
         <span className="text-sm font-bold text-text-primary">Conversation Draft</span>
-        {shown && <Badge variant={shown.variant}>{shown.label}</Badge>}
+        {shown && (
+          <Badge variant={shown.variant} className="gap-2">
+            {inProgress && (
+              <span
+                aria-hidden="true"
+                className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-warning-text border-t-transparent motion-reduce:animate-none"
+              />
+            )}
+            <span>{shown.label}</span>
+          </Badge>
+        )}
       </div>
       {inProgress && drafting && (
         <p role="status" className="text-sm text-text-secondary">

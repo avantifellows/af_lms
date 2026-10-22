@@ -33,6 +33,23 @@ afterEach(() => {
 });
 
 describe("DraftStatus", () => {
+  it("shows drafting as a readable badge with its spinner inside", () => {
+    render(<DraftStatus draftId={41} initialState="transcribing" />);
+    const badge = screen.getByText("Drafting from the Call Recording").parentElement!;
+    // `warning`, not the pale blue `info` text that was nearly unreadable.
+    expect(badge).toHaveClass("text-warning-text");
+    expect(badge).not.toHaveClass("text-info");
+    expect(badge.querySelector(".animate-spin")).toHaveAttribute("aria-hidden", "true");
+  });
+
+  it("shows no spinner once the draft is ready or failed", () => {
+    const { rerender, container } = render(<DraftStatus draftId={41} initialState="ready" />);
+    expect(container.querySelector(".animate-spin")).toBeNull();
+    rerender(<DraftStatus key="failed" draftId={41} initialState="failed" />);
+    expect(screen.getByText("Drafting failed")).toBeInTheDocument();
+    expect(container.querySelector(".animate-spin")).toBeNull();
+  });
+
   it("polls a transcribing draft every 15 seconds and shows the new state once it is ready", async () => {
     vi.useFakeTimers();
     render(<DraftStatus draftId={41} initialState="transcribing" />);
