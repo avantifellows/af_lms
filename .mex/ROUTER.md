@@ -26,7 +26,7 @@ edges:
     condition: when working on teacher feedback setup, the feedback form, or its report
   - target: patterns/INDEX.md
     condition: when starting a task — check the pattern index for a matching pattern file
-last_updated: 2026-10-21
+last_updated: 2026-10-22
 ---
 
 # Session Bootstrap
@@ -50,6 +50,7 @@ Then read this file fully before doing anything else in this session.
 - Issue #361 slice #370: Student search and School consent status return only Students with a current JNV NVS batch for PMU roles (shared `hasCurrentNvsBatchSql`); consent status now uses `getResolvedPermission`. See `context/permissions.md`.
 - Issue #361 slice #371: every Performance (quiz-analytics) API pins PMU roles to JNV NVS: a missing `program` becomes "JNV NVS", any other gets 403 (`resolvePerformanceProgram`, fed by the `permission` that `authorizeSchoolAccess` now returns). The grades route's program list for PMU roles comes from the program context. Other roles are unchanged. See `context/permissions.md`.
 - Issue #361 slice #372: Dev Login has `pmu_manager` and `pmu_govt_school_user` personas (non-prod only). `seedHolisticFixtures` (run by `scripts/setup-holistic-local.ts`) seeds both at a JNV School (the fixture School when it is JNV, else the first JNV School) with level 1, `program_ids = [64]` and no regions. See `context/setup.md`.
+- PR #415 review: Admin → Users saves an Alumni Manager with no Programs (`program_ids = []`, no program picker, alumni wording on the read-only box, "Not used" in the list). Dev Login has an `alumni_manager` persona; e2e has `TEST_USERS.alumniManager`. Seat-driven `program_ids` sync skips the role. See `context/permissions.md`.
 - Issue #361 slices #373–#375: every guard, route, page and component takes the Google path only. `getFeatureAccess`, `ownsRecord` and `canAccessStudent` take no session-type options, `interventionFlagAccess` has no `opts`, and the `next-auth` type augmentation (`src/types/next-auth.d.ts`) is deleted. Only `isRetiredToken` and its tests still name the retired login's token fields.
 - PR #376 review #1: for PMU roles `RosterPage` narrows the School roster on the server to NVS Students (a current NVS batch, or an NVS dropout not undone) before building the `EnrollmentTabContent` props and the data-issues banner, so a mixed School's CoE, Nodal and unassigned Students never reach a PMU browser. Other roles are unchanged. See `context/permissions.md`.
 - PR #376 review #3: the combined-reports list, create, job-status and retry routes also pin PMU roles to JNV NVS by session. The session (or the job's session) must have JNV NVS rows, and no other program's rows, at that School in the BigQuery fact table (`isSessionOnlyForProgram` via `refuseOutsidePmuSession` in `src/lib/performance-session-pin.ts`). List/create answer 403; job/retry answer 404 like another School's job. A failed lookup is a 502. Other roles skip the lookup. See `context/permissions.md`.
