@@ -1,3 +1,4 @@
+// fallow-ignore-file code-duplication
 /**
  * Last updated: 2026-10-22. Operator-run, re-runnable — if the schema or app
  * has moved on since this date, review/update it before running.
@@ -26,6 +27,7 @@ interface CliOptions {
   help: boolean;
 }
 
+// fallow-ignore-next-line complexity
 function parseArgs(argv: string[]): CliOptions {
   const options: CliOptions = {
     mode: "dry-run",
@@ -79,6 +81,7 @@ Defaults to dry-run. Writes require the explicit --apply flag.
 monthly call counts (placeholder pending Poojita); without it that column is untouched.`);
 }
 
+// fallow-ignore-next-line complexity
 async function main(): Promise<void> {
   const options = parseArgs(process.argv.slice(2));
   if (options.help) {

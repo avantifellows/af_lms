@@ -141,6 +141,7 @@ function givenTables() {
     const pendingTicks: typeof ticked = [];
     const pendingDrafts: Record<number, DraftRow> = {};
     const client = {
+      // fallow-ignore-next-line complexity
       query: vi.fn(async (sql: string, params: unknown[] = []) => {
         if (sql.includes("FROM blended_learning_conversation_drafts")) {
           // WHERE id = $1 AND student_id = $2 FOR UPDATE
