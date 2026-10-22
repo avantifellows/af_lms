@@ -197,7 +197,7 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   (read), `src/lib/holistic-follow-up-questions.ts` (client-safe question keys, text, and
   normaliser), `src/lib/holistic-mentor-write-scope.ts` (shared scope guard).
 
-## Blended Learning Mentee list (#442), Mentor cards (#452), Flags feed (#453), detail (#444), logging (#445), Action Items (#446), Mentor Flags (#447), photos (#448), Call Recording drafts (#449, retry/discard #450, review and save #451) and playback (#454)
+## Blended Learning Mentee list (#442), Mentor cards (#452), Flags feed (#453), detail (#444), logging (#445), Action Items (#446), Mentor Flags (#447), photos (#448), Call Recording drafts (#449, retry/discard #450, review and save #451), playback (#454) and the links load script (#455)
 
 - **Tables:** the `blended_learning_*` tables are created by db-service (Mappings:
   `20260921120000` + its ensure migration; the other eight: PR #804,
@@ -446,3 +446,11 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   `blended-learning-flags-feed.spec.ts` compares cards without Mentor C's and counts them into
   "N new". Re-diff it with
   `patterns/mirror-db-service-schema-in-e2e.md` whenever PR #804 changes.
+- **Links load script (#455):** `blended_learning_student_links` is filled outside the app by the
+  operator script `npm run blended:import-links` (`runBlendedLinksImport` in
+  `src/lib/blended-learning-links-import.ts`); there is no in-app editing. It reads the active Mapping
+  source (`activeBlendedMappingSql`), the existing links (`student_id = ANY($1::bigint[])`), and
+  upserts `ON CONFLICT (student_id)` per changed Student only, so an unchanged re-run writes
+  nothing. Non-`https://` values are skipped before the DB CHECK sees them; a value missing from
+  the workbook keeps the stored one. `legacy_last_contact_month` is selected and written only
+  with `--seed-legacy`. Runbook: `patterns/load-blended-learning-links.md`.

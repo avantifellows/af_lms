@@ -1,0 +1,463 @@
+import type ExcelJS from "exceljs";
+
+import { activeBlendedMappingSql } from "./blended-learning-access";
+import { CURRENT_ACADEMIC_YEAR } from "./constants";
+import { query } from "./db";
+
+// Operator-run load of Blended Learning Student Links (Profile Doc, Screener
+// Link) from the Profile Dashboard workbook. Run by
+// scripts/import-blended-learning-links.ts; dry run unless mode is "apply".
+
+export type BlendedLinksImportMode = "dry-run" | "apply";
+
+const PROFILE_DOCS_TAB = "Student Profile Docs";
+const CONVERSATION_TAB = "Conversation";
+
+type SourceTab = typeof PROFILE_DOCS_TAB | typeof CONVERSATION_TAB;
+
+type BlendedLinksIssueReason =
+  | "no_match"
+  | "ambiguous_name"
+  | "duplicate_row"
+  | "no_link"
+  | "not_https";
+
+// Row numbers and Student IDs only: never names, phones or URLs.
+interface BlendedLinksIssue {
+  tab: SourceTab;
+  row: number;
+  studentId: string | null;
+  reason: BlendedLinksIssueReason;
+}
+
+interface BlendedLinksCounts {
+  matched: number;
+  unmatched: number;
+  skipped: number;
+}
+
+// In a dry run these are the writes an apply run would make.
+interface BlendedLinksWrites {
+  inserted: number;
+  updated: number;
+  unchanged: number;
+}
+
+export interface BlendedLinksImportReport {
+  mode: BlendedLinksImportMode;
+  // Tabs missing from the workbook or without a Student ID / Name header.
+  unreadTabs: SourceTab[];
+  counts: BlendedLinksCounts;
+  writes: BlendedLinksWrites;
+  issues: BlendedLinksIssue[];
+}
+
+interface MappedStudentRow {
+  id: number | string;
+  student_id: string | null;
+  first_name: string | null;
+  last_name: string | null;
+}
+
+interface MappedStudent {
+  id: number;
+  studentId: string | null;
+}
+
+interface StudentIndex {
+  byStudentId: Map<string, MappedStudent>;
+  byName: Map<string, MappedStudent[]>;
+}
+
+function normaliseName(value: string): string {
+  return value
+    .normalize("NFKD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+async function loadActiveMappedStudents(): Promise<StudentIndex> {
+  const rows = await query<MappedStudentRow>(
+    `SELECT DISTINCT st.id, st.student_id, account.first_name, account.last_name
+     FROM blended_learning_mentor_mentee_mappings mapping
+     JOIN student st ON st.id = mapping.student_id
+     JOIN "user" account ON account.id = st.user_id
+     WHERE ${activeBlendedMappingSql("mapping", "$1")}`,
+    [CURRENT_ACADEMIC_YEAR]
+  );
+
+  const index: StudentIndex = { byStudentId: new Map(), byName: new Map() };
+  for (const row of rows) {
+    const student: MappedStudent = {
+      id: Number(row.id),
+      studentId: row.student_id?.trim() || null,
+    };
+    if (student.studentId) index.byStudentId.set(student.studentId, student);
+    const name = normaliseName([row.first_name, row.last_name].filter(Boolean).join(" "));
+    if (name) index.byName.set(name, [...(index.byName.get(name) ?? []), student]);
+  }
+  return index;
+}
+
+function headerKey(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+interface MonthColumn {
+  col: number;
+  month: string;
+}
+
+interface TabColumns {
+  headerRow: number;
+  studentId: number | null;
+  name: number | null;
+  link: number | null;
+  months: MonthColumn[];
+}
+
+const MONTHS: Record<string, number> = {
+  jan: 1, january: 1, feb: 2, february: 2, mar: 3, march: 3, apr: 4, april: 4,
+  may: 5, jun: 6, june: 6, jul: 7, july: 7, aug: 8, august: 8,
+  sep: 9, sept: 9, september: 9, oct: 10, october: 10, nov: 11, november: 11,
+  dec: 12, december: 12,
+};
+
+function monthStart(year: number, month: number): string {
+  return `${year}-${String(month).padStart(2, "0")}-01`;
+}
+
+// A monthly call-count header ("Sep", "Sep 2026", "Sep'26" or a date) as the
+// first day of that month. A bare month takes its year from the academic
+// year: April–December in the first year, January–March in the second.
+function headerMonth(cell: ExcelJS.Cell): string | null {
+  if (cell.value instanceof Date) {
+    return monthStart(cell.value.getUTCFullYear(), cell.value.getUTCMonth() + 1);
+  }
+  const tokens = headerKey(cell.text ?? "").split(" ");
+  const monthIndex = tokens.findIndex((token) => token in MONTHS);
+  if (monthIndex < 0) return null;
+  const month = MONTHS[tokens[monthIndex]];
+  const yearToken = tokens.slice(monthIndex + 1).find((token) => /^(20)?\d{2}$/.test(token));
+  const startYear = Number(CURRENT_ACADEMIC_YEAR.slice(0, 4));
+  const year = yearToken
+    ? Number(yearToken.length === 2 ? `20${yearToken}` : yearToken)
+    : month >= 4 ? startYear : startYear + 1;
+  return monthStart(year, month);
+}
+
+// The header row is the first of the top ten rows naming a Student ID or name column.
+function findColumns(
+  sheet: ExcelJS.Worksheet,
+  isLinkHeader: (key: string) => boolean,
+  readMonths: boolean
+): TabColumns | null {
+  for (let rowNumber = 1; rowNumber <= Math.min(10, sheet.rowCount); rowNumber++) {
+    const columns: TabColumns = {
+      headerRow: rowNumber, studentId: null, name: null, link: null, months: [],
+    };
+    sheet.getRow(rowNumber).eachCell((cell, col) => {
+      const key = headerKey(cell.text ?? "");
+      const month = readMonths ? headerMonth(cell) : null;
+      if (key === "student id" && columns.studentId == null) columns.studentId = col;
+      else if (/^(student )?(full )?name$/.test(key) && columns.name == null) columns.name = col;
+      else if (isLinkHeader(key) && columns.link == null) columns.link = col;
+      else if (month) columns.months.push({ col, month });
+    });
+    if (columns.studentId != null || columns.name != null) return columns;
+  }
+  return null;
+}
+
+// The cell's hyperlink, never its text: a hyperlinked cell or a HYPERLINK() formula.
+function cellHyperlink(cell: ExcelJS.Cell): string | null {
+  const value = cell.value;
+  if (value && typeof value === "object") {
+    if ("hyperlink" in value && typeof value.hyperlink === "string") {
+      return value.hyperlink.trim() || null;
+    }
+    if ("formula" in value && typeof value.formula === "string") {
+      const match = value.formula.match(/^\s*HYPERLINK\(\s*"([^"]*)"/i);
+      if (match) return match[1].trim() || null;
+    }
+  }
+  return null;
+}
+
+function rowHyperlink(row: ExcelJS.Row, column: number | null): string | null {
+  if (column != null) return cellHyperlink(row.getCell(column));
+  let found: string | null = null;
+  row.eachCell((cell) => {
+    if (found == null) found = cellHyperlink(cell);
+  });
+  return found;
+}
+
+// The latest month whose call count is above zero.
+function lastCalledMonth(row: ExcelJS.Row, months: MonthColumn[]): string | null {
+  let latest: string | null = null;
+  for (const { col, month } of months) {
+    const count = Number(row.getCell(col).text.trim());
+    if (Number.isFinite(count) && count > 0 && (latest == null || month > latest)) latest = month;
+  }
+  return latest;
+}
+
+const HTTPS_URL = /^https:\/\/\S+$/;
+
+interface TabResult {
+  read: boolean;
+  links: Map<number, string>;
+  legacyMonths: Map<number, string>;
+  counts: BlendedLinksCounts;
+  issues: BlendedLinksIssue[];
+}
+
+function readLinksTab(
+  sheet: ExcelJS.Worksheet,
+  tab: SourceTab,
+  isLinkHeader: (key: string) => boolean,
+  students: StudentIndex,
+  readMonths = false
+): TabResult {
+  const result: TabResult = {
+    read: false,
+    links: new Map(),
+    legacyMonths: new Map(),
+    counts: { matched: 0, unmatched: 0, skipped: 0 },
+    issues: [],
+  };
+  const columns = findColumns(sheet, isLinkHeader, readMonths);
+  if (!columns) return result;
+  result.read = true;
+
+  const issue = (row: number, studentId: string | null, reason: BlendedLinksIssueReason) =>
+    result.issues.push({ tab, row, studentId, reason });
+
+  // Rows that resolved to a Student with a usable link. Rows giving one Student
+  // different links are ambiguous and none is used.
+  const accepted = new Map<number, { row: number; studentId: string | null; url: string }[]>();
+
+  for (let rowNumber = columns.headerRow + 1; rowNumber <= sheet.rowCount; rowNumber++) {
+    const row = sheet.getRow(rowNumber);
+    const studentId =
+      columns.studentId != null ? row.getCell(columns.studentId).text.trim() || null : null;
+    const name = columns.name != null ? normaliseName(row.getCell(columns.name).text ?? "") : "";
+    if (!studentId && !name) continue;
+
+    let student: MappedStudent | undefined;
+    if (studentId) {
+      student = students.byStudentId.get(studentId);
+      if (!student) {
+        result.counts.unmatched++;
+        issue(rowNumber, studentId, "no_match");
+        continue;
+      }
+    } else {
+      const candidates = students.byName.get(name) ?? [];
+      if (candidates.length !== 1) {
+        result.counts.unmatched++;
+        issue(rowNumber, null, candidates.length > 1 ? "ambiguous_name" : "no_match");
+        continue;
+      }
+      student = candidates[0];
+    }
+
+    const called = lastCalledMonth(row, columns.months);
+    const seen = result.legacyMonths.get(student.id);
+    if (called && (seen == null || called > seen)) result.legacyMonths.set(student.id, called);
+
+    const url = rowHyperlink(row, columns.link);
+    if (!url) {
+      result.counts.skipped++;
+      issue(rowNumber, student.studentId, "no_link");
+      continue;
+    }
+    if (!HTTPS_URL.test(url)) {
+      result.counts.skipped++;
+      issue(rowNumber, student.studentId, "not_https");
+      continue;
+    }
+
+    const rows = accepted.get(student.id) ?? [];
+    accepted.set(student.id, [...rows, { row: rowNumber, studentId: student.studentId, url }]);
+  }
+
+  for (const [id, rows] of accepted) {
+    if (new Set(rows.map((r) => r.url)).size === 1) {
+      result.counts.matched += rows.length;
+      result.links.set(id, rows[0].url);
+      continue;
+    }
+    result.counts.unmatched += rows.length;
+    for (const r of rows) issue(r.row, r.studentId, "duplicate_row");
+  }
+  result.issues.sort((a, b) => a.row - b.row);
+  return result;
+}
+
+interface StudentLinks {
+  profileDocUrl: string | null;
+  screenerUrl: string | null;
+  legacyMonth: string | null;
+}
+
+interface ExistingLinkRow {
+  student_id: number | string;
+  profile_doc_url: string | null;
+  screener_url: string | null;
+  legacy_last_contact_month: string | null;
+}
+
+async function loadExistingLinks(studentIds: number[]): Promise<Map<number, StudentLinks>> {
+  const rows = await query<ExistingLinkRow>(
+    `SELECT links.student_id, links.profile_doc_url, links.screener_url,
+            links.legacy_last_contact_month::text AS legacy_last_contact_month
+     FROM blended_learning_student_links links
+     WHERE links.student_id = ANY($1::bigint[])`,
+    [studentIds]
+  );
+  return new Map(
+    rows.map((row) => [
+      Number(row.student_id),
+      {
+        profileDocUrl: row.profile_doc_url,
+        screenerUrl: row.screener_url,
+        legacyMonth: row.legacy_last_contact_month,
+      },
+    ])
+  );
+}
+
+// A value missing from the workbook keeps the stored one; nothing is cleared.
+// legacy_last_contact_month is read and written only with seedLegacy.
+async function upsertLinks(
+  found: Map<number, Partial<StudentLinks>>,
+  mode: BlendedLinksImportMode,
+  seedLegacy: boolean
+): Promise<BlendedLinksWrites> {
+  const writes: BlendedLinksWrites = { inserted: 0, updated: 0, unchanged: 0 };
+  if (found.size === 0) return writes;
+  const existing = await loadExistingLinks([...found.keys()]);
+
+  for (const [studentId, links] of found) {
+    const stored = existing.get(studentId);
+    const next: StudentLinks = {
+      profileDocUrl: links.profileDocUrl ?? stored?.profileDocUrl ?? null,
+      screenerUrl: links.screenerUrl ?? stored?.screenerUrl ?? null,
+      legacyMonth: links.legacyMonth ?? stored?.legacyMonth ?? null,
+    };
+    if (
+      stored &&
+      stored.profileDocUrl === next.profileDocUrl &&
+      stored.screenerUrl === next.screenerUrl &&
+      (!seedLegacy || stored.legacyMonth === next.legacyMonth)
+    ) {
+      writes.unchanged++;
+      continue;
+    }
+    if (stored) writes.updated++;
+    else writes.inserted++;
+    if (mode !== "apply") continue;
+
+    if (seedLegacy) {
+      await query(
+        `INSERT INTO blended_learning_student_links
+           (student_id, profile_doc_url, screener_url, legacy_last_contact_month)
+         VALUES ($1, $2, $3, $4::date)
+         ON CONFLICT (student_id) DO UPDATE
+         SET profile_doc_url = EXCLUDED.profile_doc_url,
+             screener_url = EXCLUDED.screener_url,
+             legacy_last_contact_month = EXCLUDED.legacy_last_contact_month,
+             updated_at = now()`,
+        [studentId, next.profileDocUrl, next.screenerUrl, next.legacyMonth]
+      );
+    } else {
+      await query(
+        `INSERT INTO blended_learning_student_links (student_id, profile_doc_url, screener_url)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (student_id) DO UPDATE
+         SET profile_doc_url = EXCLUDED.profile_doc_url,
+             screener_url = EXCLUDED.screener_url,
+             updated_at = now()`,
+        [studentId, next.profileDocUrl, next.screenerUrl]
+      );
+    }
+  }
+  return writes;
+}
+
+export async function runBlendedLinksImport(params: {
+  workbook: ExcelJS.Workbook;
+  mode: BlendedLinksImportMode;
+  // Placeholder pending Poojita: seed legacy_last_contact_month from the
+  // Conversation tab's monthly call counts.
+  seedLegacy?: boolean;
+}): Promise<BlendedLinksImportReport> {
+  const seedLegacy = params.seedLegacy === true;
+  const students = await loadActiveMappedStudents();
+  const tabs = [
+    { name: PROFILE_DOCS_TAB, isLinkHeader: (key: string) => /profile doc/.test(key) },
+    { name: CONVERSATION_TAB, isLinkHeader: (key: string) => key === "screener form" },
+  ] as const;
+
+  const report: BlendedLinksImportReport = {
+    mode: params.mode,
+    unreadTabs: [],
+    counts: { matched: 0, unmatched: 0, skipped: 0 },
+    writes: { inserted: 0, updated: 0, unchanged: 0 },
+    issues: [],
+  };
+  const found = new Map<number, Partial<StudentLinks>>();
+  for (const tab of tabs) {
+    const sheet = params.workbook.getWorksheet(tab.name);
+    const result = sheet
+      ? readLinksTab(
+          sheet, tab.name, tab.isLinkHeader, students, seedLegacy && tab.name === CONVERSATION_TAB
+        )
+      : null;
+    if (!result?.read) {
+      report.unreadTabs.push(tab.name);
+      continue;
+    }
+    report.counts.matched += result.counts.matched;
+    report.counts.unmatched += result.counts.unmatched;
+    report.counts.skipped += result.counts.skipped;
+    report.issues.push(...result.issues);
+    const field = tab.name === PROFILE_DOCS_TAB ? "profileDocUrl" : "screenerUrl";
+    for (const [studentId, url] of result.links) {
+      found.set(studentId, { ...found.get(studentId), [field]: url });
+    }
+    for (const [studentId, legacyMonth] of result.legacyMonths) {
+      found.set(studentId, { ...found.get(studentId), legacyMonth });
+    }
+  }
+  report.writes = await upsertLinks(found, params.mode, seedLegacy);
+  return report;
+}
+
+// Operator output: counts, then issues by tab, row and Student ID only.
+export function formatBlendedLinksImportReport(report: BlendedLinksImportReport): string[] {
+  const { counts, writes } = report;
+  const lines = [`Blended Learning links import (${report.mode})`];
+  if (report.unreadTabs.length > 0) {
+    lines.push(
+      `Not read (missing tab or no Student ID / Name header): ${report.unreadTabs.join(", ")}`
+    );
+  }
+  lines.push(
+    `Matched: ${counts.matched}, unmatched: ${counts.unmatched}, skipped: ${counts.skipped}`,
+    `Writes${report.mode === "apply" ? "" : " (would be made)"}: inserted ${writes.inserted}, ` +
+      `updated ${writes.updated}, unchanged ${writes.unchanged}`
+  );
+  if (report.issues.length > 0) {
+    lines.push("Issues");
+    for (const issue of report.issues) {
+      const student = issue.studentId ? ` (Student ID ${issue.studentId})` : "";
+      lines.push(`- ${issue.tab} row ${issue.row}${student}: ${issue.reason}`);
+    }
+  }
+  return lines;
+}
