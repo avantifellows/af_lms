@@ -2,12 +2,12 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
 import { Card } from "@/components/ui";
-import { canBlendedLearning } from "@/lib/blended-learning-access";
+import { canBlendedLearning, type BlendedLearningAccess } from "@/lib/blended-learning-access";
 import { requireBlendedLearningPage, requireNumericPageId } from "@/lib/blended-learning-guard";
 import { draftNotesToHtml } from "@/lib/blended-learning-draft-notes";
 import { getDraftForReview, getDraftStatus, type DraftForReview } from "@/lib/blended-learning-drafts";
 import { describeSession, formatCalendarDate } from "@/lib/blended-learning-format";
-import { getMenteeDetail, type HistoryEntry } from "@/lib/blended-learning-mentee-detail";
+import { getMenteeDetail, type HistoryEntry, type MenteeDetail } from "@/lib/blended-learning-mentee-detail";
 import { getTodayIST } from "@/lib/curriculum-date-helpers";
 
 import { BlendedLearningHeader } from "../../../BlendedLearningHeader";
@@ -35,6 +35,19 @@ function toReviewDraft(draft: DraftForReview): ReviewDraft {
     actionItems: draft.actionItems.map(({ owner, text }) => ({ owner, text })),
     notesHtml: draftNotesToHtml(draft.notes),
   };
+}
+
+// The open draft as the form takes it: a ready one prefilled for review,
+// anything else pending with its retry offer.
+async function loadOpenDraft(access: BlendedLearningAccess, mentee: MenteeDetail) {
+  const open = mentee.openDraft;
+  if (!open) return { draft: null, pendingDraft: null };
+  if (open.state === "ready") {
+    const ready = await getDraftForReview(access, mentee.studentId);
+    return { draft: ready ? toReviewDraft(ready) : null, pendingDraft: null };
+  }
+  const status = await getDraftStatus(access, open.id);
+  return { draft: null, pendingDraft: { id: open.id, state: open.state, retryOffered: status?.retryOffered ?? false } };
 }
 
 function LastConversationPanel({ conversation }: { conversation: Extract<HistoryEntry, { kind: "conversation" }> | null }) {
@@ -68,11 +81,7 @@ export default async function LogEntryPage({ params }: { params: Promise<{ id: s
     mentee.history.find((entry): entry is Extract<HistoryEntry, { kind: "conversation" }> => entry.kind === "conversation") ??
     null;
   const firstName = mentee.name.split(" ")[0] || mentee.name;
-  const draft = mentee.openDraft?.state === "ready" ? await getDraftForReview(access, mentee.studentId) : null;
-  const openDraft = mentee.openDraft;
-  const pendingDraft =
-    openDraft && openDraft.state !== "ready" ? { id: openDraft.id, state: openDraft.state } : null;
-  const pendingStatus = pendingDraft ? await getDraftStatus(access, pendingDraft.id) : null;
+  const { draft, pendingDraft } = await loadOpenDraft(access, mentee);
 
   return (
     <>
@@ -98,12 +107,8 @@ export default async function LogEntryPage({ params }: { params: Promise<{ id: s
           lastConversationPanel={<LastConversationPanel conversation={lastConversation} />}
           openActionItems={mentee.openActionItems}
           hasOpenDraft={mentee.openDraft !== null}
-          draft={draft ? toReviewDraft(draft) : null}
-          pendingDraft={
-            pendingDraft
-              ? { id: pendingDraft.id, state: pendingDraft.state, retryOffered: pendingStatus?.retryOffered ?? false }
-              : null
-          }
+          draft={draft}
+          pendingDraft={pendingDraft}
           canManageDraft={canBlendedLearning(access, "manage_draft")}
         />
       </main>

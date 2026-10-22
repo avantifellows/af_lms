@@ -66,6 +66,13 @@ function putToS3(url: string, file: File, contentType: string, onProgress: (perc
   });
 }
 
+// Why the browser won't upload this file, or null when it can.
+function recordingProblem(file: File): string | null {
+  if (!RECORDING_EXTENSION.test(file.name)) return "Choose an MP3, M4A or WAV recording.";
+  if (file.size < 1 || file.size > MAX_RECORDING_BYTES) return "A recording must be 200 MB or smaller.";
+  return null;
+}
+
 export function RecordingUpload({ studentId, sessionDetails }: { studentId: number; sessionDetails: SessionDetails }) {
   const router = useRouter();
   const inputId = useId();
@@ -91,12 +98,9 @@ export function RecordingUpload({ studentId, sessionDetails }: { studentId: numb
   }
 
   async function start(file: File) {
-    if (!RECORDING_EXTENSION.test(file.name)) {
-      setUpload({ status: "failed", error: "Choose an MP3, M4A or WAV recording.", file: null, uploaded: null });
-      return;
-    }
-    if (file.size < 1 || file.size > MAX_RECORDING_BYTES) {
-      setUpload({ status: "failed", error: "A recording must be 200 MB or smaller.", file: null, uploaded: null });
+    const problem = recordingProblem(file);
+    if (problem) {
+      setUpload({ status: "failed", error: problem, file: null, uploaded: null });
       return;
     }
     setUpload({ status: "uploading", percent: 0 });
