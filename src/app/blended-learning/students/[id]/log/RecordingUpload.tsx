@@ -1,11 +1,15 @@
 "use client";
 
+import { Upload } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useId, useState, type ChangeEvent } from "react";
 
 import { Button } from "@/components/ui";
 
-// Upload a Call Recording instead of typing the write-up. The browser asks
+import { RecordingFileRow } from "./RecordingFileRow";
+
+// Upload a Call Recording instead of typing the write-up: a dashed drop zone
+// as in the mockup, then a file row with the upload's status. The browser asks
 // for a presigned PUT, sends the file straight to S3 (XHR, for progress), then
 // creates the Conversation Draft with any session details already entered and
 // refreshes the log page, which then shows the draft's progress in place and
@@ -73,11 +77,67 @@ function recordingProblem(file: File): string | null {
   return null;
 }
 
+// The dashed area that opens the file picker; the whole area is the target.
+function RecordingDropZone({ retrying, onPick }: { retrying: boolean; onPick: (event: ChangeEvent<HTMLInputElement>) => void }) {
+  const inputId = useId();
+  return (
+    <label
+      htmlFor={inputId}
+      className="flex min-h-11 w-full cursor-pointer items-center gap-4 rounded-xl border-2 border-dashed border-border bg-bg px-4 py-4 transition-colors hover:border-accent focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-accent sm:px-5"
+    >
+      <Upload aria-hidden="true" className="h-7 w-7 shrink-0 text-accent" />
+      <span className="min-w-0">
+        <span className="block text-base font-bold text-text-primary">
+          {retrying ? "Choose another recording" : "Upload the recording"}
+        </span>
+        <span className="block text-sm text-text-secondary">
+          MP3, M4A or WAV, up to 200 MB. We write out the notes and draft the summary and action items for you to edit.
+        </span>
+      </span>
+      <input
+        id={inputId}
+        type="file"
+        accept="audio/*"
+        aria-label="Upload the recording"
+        onChange={onPick}
+        className="sr-only"
+      />
+    </label>
+  );
+}
+
+// The picked file while it uploads and the draft starts.
+function UploadProgress({ fileName, upload }: { fileName: string; upload: UploadState }) {
+  if (upload.status === "uploading") {
+    return (
+      <div className="space-y-2">
+        <RecordingFileRow name={fileName} tone="busy" status={`Uploading… ${upload.percent}%`} />
+        <progress aria-label="Upload progress" value={upload.percent} max={100} className="h-2 w-full accent-accent" />
+      </div>
+    );
+  }
+  return <RecordingFileRow name={fileName} tone="busy" status="Recording uploaded. Starting the draft…" />;
+}
+
+function UploadFailure({ error, canRetry, onRetry }: { error: string; canRetry: boolean; onRetry: () => void }) {
+  return (
+    <div className="space-y-2">
+      <p role="alert" className="rounded-lg bg-danger-bg px-3 py-2 text-sm text-danger">
+        {error}
+      </p>
+      {canRetry && (
+        <Button type="button" onClick={onRetry} className="w-full sm:w-auto">
+          Retry upload
+        </Button>
+      )}
+    </div>
+  );
+}
+
 export function RecordingUpload({ studentId, sessionDetails }: { studentId: number; sessionDetails: SessionDetails }) {
   const router = useRouter();
-  const inputId = useId();
   const [upload, setUpload] = useState<UploadState>({ status: "idle" });
-  const busy = upload.status === "uploading" || upload.status === "drafting" || upload.status === "done";
+  const [fileName, setFileName] = useState("");
 
   async function createDraft(uploaded: Uploaded) {
     setUpload({ status: "drafting" });
@@ -103,6 +163,7 @@ export function RecordingUpload({ studentId, sessionDetails }: { studentId: numb
       setUpload({ status: "failed", error: problem, file: null, uploaded: null });
       return;
     }
+    setFileName(file.name);
     setUpload({ status: "uploading", percent: 0 });
     let uploaded: Uploaded;
     try {
@@ -141,55 +202,17 @@ export function RecordingUpload({ studentId, sessionDetails }: { studentId: numb
     else if (upload.file) void start(upload.file);
   }
 
-  const canRetry = upload.status === "failed" && (upload.uploaded !== null || upload.file !== null);
-
+  if (upload.status !== "idle" && upload.status !== "failed") {
+    return <UploadProgress fileName={fileName} upload={upload} />;
+  }
+  const failed = upload.status === "failed";
   return (
-    <fieldset className="space-y-2">
-      <legend className="mb-1 block text-xs font-bold uppercase tracking-wide text-text-muted">
-        Call Recording (optional)
-      </legend>
-      <p className="text-xs text-text-secondary">
-        Upload the call instead of typing the write-up. The date, mode, who you spoke with and duration above are saved
-        with the draft.
-      </p>
-      <p className="text-xs text-text-secondary">MP3, M4A or WAV, up to 200 MB.</p>
-      {upload.status === "uploading" && (
-        <div className="space-y-1">
-          <progress aria-label="Upload progress" value={upload.percent} max={100} className="h-2 w-full accent-accent" />
-          <p className="text-sm text-text-secondary">{`Uploading… ${upload.percent}%`}</p>
-        </div>
+    <div className="space-y-2">
+      {failed && (
+        <UploadFailure error={upload.error} canRetry={upload.uploaded !== null || upload.file !== null} onRetry={retry} />
       )}
-      {(upload.status === "drafting" || upload.status === "done") && (
-        <p className="text-sm text-text-secondary">Recording uploaded. Starting the draft…</p>
-      )}
-      {upload.status === "failed" && (
-        <p role="alert" className="rounded-lg bg-danger-bg px-3 py-2 text-sm text-danger">
-          {upload.error}
-        </p>
-      )}
-      <div className="flex flex-col gap-2 sm:flex-row">
-        {canRetry && (
-          <Button type="button" onClick={retry} className="w-full sm:w-auto">
-            Retry upload
-          </Button>
-        )}
-        {!busy && (
-          <label
-            htmlFor={inputId}
-            className="inline-flex min-h-11 w-full cursor-pointer items-center justify-center rounded-lg border border-border bg-bg-card px-4 text-sm font-bold text-text-primary shadow-sm hover:bg-hover-bg focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-accent sm:w-auto"
-          >
-            {upload.status === "failed" ? "Choose another recording" : "Upload a Call Recording"}
-            <input
-              id={inputId}
-              type="file"
-              accept="audio/*"
-              aria-label="Upload a Call Recording"
-              onChange={onPick}
-              className="sr-only"
-            />
-          </label>
-        )}
-      </div>
-    </fieldset>
+      <RecordingDropZone retrying={failed} onPick={onPick} />
+      <p className="text-sm text-text-secondary">The session details above are saved with the draft.</p>
+    </div>
   );
 }

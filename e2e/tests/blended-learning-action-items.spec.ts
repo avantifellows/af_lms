@@ -116,7 +116,7 @@ for (const { label, key, viewport } of VIEWPORTS) {
     test.use({ viewport });
     const mentee = ACTION_ITEM_MENTEES[key];
 
-    test("a Conversation adds two Action Items and ticks an earlier one done", async ({ page }) => {
+    test("a Conversation fills the two starter Action Item rows and ticks an earlier one done", async ({ page }) => {
       const summary = `Synthetic ${key}: reviewed last week's follow-ups.`;
       const first = `Synthetic ${key}: revise organic chemistry`;
       const second = `Synthetic ${key}: send the fee receipt`;
@@ -139,22 +139,34 @@ for (const { label, key, viewport } of VIEWPORTS) {
       await form.getByLabel("Duration (minutes)").fill("30");
       await form.getByLabel("Summary").fill(summary);
 
-      await form.getByRole("button", { name: "Add Action Item" }).click();
-      await form.getByRole("button", { name: "Add Action Item" }).click();
-      const item1 = form.getByRole("group", { name: "Action Item 1" });
-      await item1.getByLabel("Owner").selectOption({ label: "Student" });
-      await item1.getByLabel("What").fill(first);
+      // A new log opens with a blank Student row and a blank Mentor row.
+      const items = form.getByRole("group", { name: "Action items" });
+      await expect(items.getByLabel("Who does action item 1", { exact: true })).toHaveValue("student");
+      await expect(items.getByLabel("Who does action item 2", { exact: true })).toHaveValue("mentor");
+      await expect(items.getByLabel("Action item 3", { exact: true })).toHaveCount(0);
+      await items.getByLabel("Action item 1", { exact: true }).fill(first);
       // Action Items take no due date.
-      await expect(item1.getByLabel(/Due/)).toHaveCount(0);
-      const item2 = form.getByRole("group", { name: "Action Item 2" });
-      await item2.getByLabel("Owner").selectOption({ label: "Parent" });
-      await item2.getByLabel("What").fill(second);
+      await expect(items.getByLabel(/Due/)).toHaveCount(0);
+      await items.getByLabel("Who does action item 2", { exact: true }).selectOption({ label: "Parent" });
+      await items.getByLabel("Action item 2", { exact: true }).fill(second);
+      // Each row's controls are tap-sized.
+      for (const control of [
+        items.getByLabel("Who does action item 1", { exact: true }),
+        items.getByLabel("Action item 1", { exact: true }),
+        items.getByRole("button", { name: "Remove action item 1" }),
+        items.getByRole("button", { name: "Add an action" }),
+      ]) {
+        expect((await control.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+      }
 
       await panel.getByRole("checkbox", { name: new RegExp(toTick.text) }).check();
       expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
 
-      await form.getByRole("button", { name: "Save Conversation" }).click();
-      await expect(page.getByRole("region", { name: "Saved" }).getByRole("heading", { name: "Conversation saved" })).toBeVisible();
+      await form.getByRole("button", { name: "Save conversation" }).click();
+      const saved = page.getByRole("region", { name: "Saved" });
+      await expect(saved.getByRole("heading", { name: "Conversation saved" })).toBeVisible();
+      await expect(saved.getByText("Action items added")).toBeVisible();
+      await expect(saved.getByText("Action items closed")).toBeVisible();
 
       const savedId = (await conversationIds(studentIds[mentee.key])).at(-1)!;
       const rows = await actionItems(studentIds[mentee.key]);
@@ -204,26 +216,28 @@ for (const { label, key, viewport } of VIEWPORTS) {
       await expect(panel).toContainText(stayOpen.text);
       await expect(panel).toContainText("Only a Conversation can tick these done.");
       await expect(panel.getByRole("checkbox")).toHaveCount(0);
-      await expect(form.getByRole("button", { name: "Add Action Item" })).toHaveCount(0);
+      await expect(form.getByRole("button", { name: "Add an action" })).toHaveCount(0);
     });
 
-    test("an Action Item needs an owner and text", async ({ page }) => {
+    test("Action Item rows left blank are not saved", async ({ page }) => {
+      const summary = `Synthetic ${key}: quick check-in, nothing new agreed.`;
       await signInAs(page, BLENDED_MENTOR_C);
       await page.goto(`${detailPath(mentee)}/log`);
-      const before = await conversationIds(studentIds[mentee.key]);
+      const before = await actionItems(studentIds[mentee.key]);
 
       const form = page.getByRole("form", { name: "Log a Conversation or Attempt" });
-      await form.getByRole("radio", { name: "Call" }).check();
-      await form.getByRole("radio", { name: "Student", exact: true }).check();
       await form.getByLabel("Duration (minutes)").fill("15");
-      await form.getByLabel("Summary").fill("Synthetic: should not save.");
-      await form.getByRole("button", { name: "Add Action Item" }).click();
-      await form.getByRole("button", { name: "Save Conversation" }).click();
+      await form.getByLabel("Summary").fill(summary);
+      // The two starter rows plus an added one, all blank.
+      await form.getByRole("button", { name: "Add an action" }).click();
+      await expect(form.getByLabel("Who does action item 3", { exact: true })).toHaveValue("student");
+      await form.getByRole("button", { name: "Save conversation" }).click();
+      await expect(page.getByRole("region", { name: "Saved" }).getByRole("heading", { name: "Conversation saved" })).toBeVisible();
 
-      const item = form.getByRole("group", { name: "Action Item 1" });
-      await expect(item.getByText("Choose who owns this Action Item.")).toBeVisible();
-      await expect(item.getByText("Add the Action Item.")).toBeVisible();
-      expect(await conversationIds(studentIds[mentee.key])).toEqual(before);
+      const savedId = (await conversationIds(studentIds[mentee.key])).at(-1)!;
+      const after = await actionItems(studentIds[mentee.key]);
+      expect(after.filter((row) => row.conversation_id === savedId)).toEqual([]);
+      expect(after).toHaveLength(before.length);
     });
   });
 }
@@ -290,7 +304,7 @@ test.describe("Blended Learning Action Items — conflicts and access", () => {
     const open = page.getByRole("region", { name: "Open Action Items" });
     await expect(open).toContainText(stayOpen.text);
     await expect(page.getByRole("checkbox")).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Add Action Item" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Add an action" })).toHaveCount(0);
     await expect(page.getByRole("link", { name: "Log a Conversation or Attempt" })).toHaveCount(0);
   });
 });

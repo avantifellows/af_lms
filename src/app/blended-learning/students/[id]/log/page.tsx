@@ -1,3 +1,4 @@
+import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
@@ -21,17 +22,16 @@ import { LogEntryForm, type ReviewDraft } from "./LogEntryForm";
 // draft's progress in place of the recording upload; once it is ready the page
 // refreshes and the form opens again, prefilled.
 
-// The form's prefill: the Summary Tags follow the drafted summary as text,
-// and the drafted notes become editor HTML.
+// The form's prefill: the drafted notes become editor HTML. The Summary Tags
+// are not used.
 function toReviewDraft(draft: DraftForReview): ReviewDraft {
-  const tags = draft.summaryTags.length > 0 ? `\n\nTags: ${draft.summaryTags.join(", ")}` : "";
   return {
     id: draft.id,
     occurredOn: draft.occurredOn,
     mode: draft.mode,
     spokeWith: draft.spokeWith,
     durationMinutes: draft.durationMinutes,
-    summary: `${draft.summary}${tags}`,
+    summary: draft.summary,
     actionItems: draft.actionItems.map(({ owner, text }) => ({ owner, text })),
     notesHtml: draftNotesToHtml(draft.notes),
   };
@@ -62,7 +62,7 @@ function LastConversationPanel({ conversation }: { conversation: Extract<History
             <p className="whitespace-pre-line break-words text-sm text-text-primary">{conversation.summary}</p>
           </>
         ) : (
-          <p className="text-sm text-text-secondary">No Conversations yet.</p>
+          <p className="text-sm text-text-secondary">No earlier Conversation. This will be the first one.</p>
         )}
       </Card>
     </section>
@@ -81,27 +81,29 @@ export default async function LogEntryPage({ params }: { params: Promise<{ id: s
     mentee.history.find((entry): entry is Extract<HistoryEntry, { kind: "conversation" }> => entry.kind === "conversation") ??
     null;
   const firstName = mentee.name.split(" ")[0] || mentee.name;
+  const subtitle = [mentee.name, mentee.grade !== null ? `Grade ${mentee.grade}` : null, mentee.programName]
+    .filter(Boolean)
+    .join(" · ");
   const { draft, pendingDraft } = await loadOpenDraft(access, mentee);
 
   return (
     <>
       <BlendedLearningHeader access={access} />
-      <main className="mx-auto max-w-5xl space-y-4 px-4 py-4 sm:px-6 sm:py-6">
+      <main className="mx-auto max-w-6xl space-y-4 px-4 py-4 sm:px-6 sm:py-6">
         <Link
           href={`/blended-learning/students/${mentee.studentId}`}
-          className="-ml-1 inline-flex min-h-11 items-center gap-1 text-sm font-bold text-text-secondary hover:text-text-primary"
+          className="-ml-1 inline-flex min-h-11 items-center gap-1.5 text-sm font-bold text-text-secondary underline-offset-4 hover:text-text-primary hover:underline"
         >
-          <span aria-hidden="true">←</span> {mentee.name}
+          <ArrowLeft aria-hidden="true" className="h-4 w-4" />
+          {`Back to ${mentee.name}`}
         </Link>
-        <h2 className="break-words text-xl font-bold text-text-primary">
-          {draft ? `Review the draft for ${mentee.name}` : `Log for ${mentee.name}`}
-        </h2>
         {/* A new key once the draft is ready, so the form opens prefilled. */}
         <LogEntryForm
           key={draft ? `review-${draft.id}` : "entry"}
           studentId={mentee.studentId}
           name={mentee.name}
           firstName={firstName}
+          subtitle={subtitle}
           today={getTodayIST()}
           forOwnList={access.kind === "mentor"}
           lastConversationPanel={<LastConversationPanel conversation={lastConversation} />}

@@ -24,7 +24,7 @@ const EXTENSIONS = [
 ];
 
 const CONTENT_CLASSES =
-  "min-h-32 px-3 py-2.5 text-sm text-text-primary focus:outline-none [&_h3]:mt-2 [&_h3]:font-bold [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-1 [&_table]:my-2 [&_table]:border-collapse [&_td]:border [&_td]:border-border [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-border [&_th]:px-2 [&_th]:py-1 [&_th]:text-left [&_ul]:list-disc [&_ul]:pl-5 [&_.tableWrapper]:overflow-x-auto";
+  "min-h-40 px-3 py-2.5 text-sm text-text-primary focus:outline-none [&_h3]:mt-2 [&_h3]:font-bold [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-1 [&_table]:my-2 [&_table]:border-collapse [&_td]:border [&_td]:border-border [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-border [&_th]:px-2 [&_th]:py-1 [&_th]:text-left [&_ul]:list-disc [&_ul]:pl-5 [&_.tableWrapper]:overflow-x-auto";
 
 function ToolbarButton({
   label,
@@ -100,12 +100,15 @@ export function NotesEditor({
   labelId,
   initialHtml,
   onChange,
+  onEdit,
 }: {
   labelId: string;
   // Notes to start from: a Conversation Draft's (text already escaped), or the
   // editor's own HTML from before the form unmounted it.
   initialHtml?: string;
   onChange: (html: string) => void;
+  // Called on each edit by the Mentor, not for the starting notes.
+  onEdit?: () => void;
 }) {
   const editor = useEditor({
     extensions: EXTENSIONS,
@@ -123,7 +126,10 @@ export function NotesEditor({
         class: CONTENT_CLASSES,
       },
     },
-    onUpdate: ({ editor: current }) => onChange(current.getHTML()),
+    onUpdate: ({ editor: current }) => {
+      onChange(current.getHTML());
+      onEdit?.();
+    },
   });
 
   return (

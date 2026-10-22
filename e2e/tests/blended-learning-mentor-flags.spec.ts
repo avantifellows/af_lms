@@ -120,8 +120,15 @@ for (const { label, key, viewport } of VIEWPORTS) {
       await expect(flags.getByLabel("Comment for the Chemistry teacher (optional)")).toHaveCount(0);
       expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
 
-      await form.getByRole("button", { name: "Save Conversation" }).click();
-      await expect(page.getByRole("region", { name: "Saved" }).getByRole("heading", { name: "Conversation saved" })).toBeVisible();
+      await form.getByRole("button", { name: "Save conversation" }).click();
+      const savedPanel = page.getByRole("region", { name: "Saved" });
+      await expect(savedPanel.getByRole("heading", { name: "Conversation saved" })).toBeVisible();
+      // One row per flag raised.
+      await expect(savedPanel.getByRole("term").filter({ hasText: /^Flagged to / })).toHaveText([
+        "Flagged to Shalini",
+        "Flagged to the Physics teacher",
+        "Flagged to the Maths teacher",
+      ]);
 
       const savedId = (await conversationIds(studentIds[mentee.key])).at(-1)!;
       const saved = (await flagsOf(studentIds[mentee.key])).filter((flag) => flag.conversation_id === savedId);

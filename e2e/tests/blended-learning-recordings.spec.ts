@@ -46,17 +46,18 @@ for (const { label, viewport } of VIEWPORTS) {
       await page.goto(`/blended-learning/students/${studentIds[MENTEES.attemptLatest.key]}/log`);
 
       const form = page.getByRole("form", { name: "Log a Conversation or Attempt" });
-      const upload = form.getByRole("group", { name: "Call Recording (optional)" });
-      await expect(upload.getByText("MP3, M4A or WAV, up to 200 MB.")).toBeVisible();
-      await expect(upload.getByLabel("Upload a Call Recording")).toHaveAttribute("accept", "audio/*");
-      const button = upload.getByText("Upload a Call Recording", { exact: true });
-      await expect(button).toBeVisible();
-      expect((await button.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+      const upload = form.getByRole("region", { name: "Recording" });
+      await expect(upload.getByText(/MP3, M4A or WAV, up to 200 MB\./)).toBeVisible();
+      await expect(upload.getByLabel("Upload the recording")).toHaveAttribute("accept", "audio/*");
+      // The whole dashed drop zone opens the picker.
+      const dropZone = upload.locator("label").filter({ hasText: "Upload the recording" });
+      await expect(dropZone).toBeVisible();
+      expect((await dropZone.boundingBox())?.height).toBeGreaterThanOrEqual(44);
       expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
 
       // Only a Conversation has a recording.
       await form.getByRole("radio", { name: "Attempt" }).check();
-      await expect(form.getByRole("group", { name: "Call Recording (optional)" })).toHaveCount(0);
+      await expect(form.getByRole("region", { name: "Recording" })).toHaveCount(0);
     });
 
     test("a Mentee with an open Conversation Draft offers no second upload", async ({ page }) => {
@@ -66,7 +67,7 @@ for (const { label, viewport } of VIEWPORTS) {
       await expect(
         page.getByText(`${MENTEES.recent.firstName} already has a Conversation Draft, so no recording can be uploaded now.`)
       ).toBeVisible();
-      await expect(page.getByLabel("Upload a Call Recording")).toHaveCount(0);
+      await expect(page.getByLabel("Upload the recording")).toHaveCount(0);
     });
 
     test("a read-only admin has no upload control", async ({ page }) => {
@@ -75,7 +76,7 @@ for (const { label, viewport } of VIEWPORTS) {
       await page.goto(`${detail}/log`);
       await expect(page).toHaveURL(new RegExp(`${detail}$`));
       await expect(page.getByRole("heading", { name: fullName(MENTEES.attemptLatest) })).toBeVisible();
-      await expect(page.getByLabel("Upload a Call Recording")).toHaveCount(0);
+      await expect(page.getByLabel("Upload the recording")).toHaveCount(0);
 
       const response = await page.request.post(`/api/blended-learning/students/${studentIds[MENTEES.attemptLatest.key]}/recordings/upload-url`, {
         data: { fileName: "call.mp3", contentType: "audio/mpeg", byteSize: 1000 },

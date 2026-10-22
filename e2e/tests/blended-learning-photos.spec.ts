@@ -66,7 +66,7 @@ for (const { label, viewport } of VIEWPORTS) {
       await page.goto(`/blended-learning/students/${studentId}/log`);
 
       const form = page.getByRole("form", { name: "Log a Conversation or Attempt" });
-      const picker = form.getByRole("group", { name: "Photos (optional)" });
+      const picker = form.getByRole("group", { name: "Attachments (optional)" });
       await expect(picker.getByText("0 of 5 photos")).toBeVisible();
       const addPhoto = picker.getByText("Add photo");
       await expect(addPhoto).toBeVisible();
@@ -116,7 +116,7 @@ for (const { label, viewport } of VIEWPORTS) {
       await form.getByRole("radio", { name: "Student", exact: true }).check();
       await form.getByLabel("Duration (minutes)").fill("30");
       await form.getByLabel("Summary").fill("Synthetic: met at the centre.");
-      await form.getByRole("button", { name: "Save Conversation" }).click();
+      await form.getByRole("button", { name: "Save conversation" }).click();
       await expect(page.getByRole("heading", { name: "Conversation saved" })).toBeVisible();
 
       const key = (n: number) => `lms-documents/blended-learning/photos/${studentId}/00000000-0000-4000-8000-00000000000${n}.jpg`;
@@ -128,9 +128,9 @@ for (const { label, viewport } of VIEWPORTS) {
       await page.goto(`/blended-learning/students/${studentId}/log`);
 
       const form = page.getByRole("form", { name: "Log a Conversation or Attempt" });
-      await expect(form.getByRole("group", { name: "Photos (optional)" })).toBeVisible();
+      await expect(form.getByRole("group", { name: "Attachments (optional)" })).toBeVisible();
       await form.getByRole("radio", { name: "Attempt" }).check();
-      await expect(form.getByRole("group", { name: "Photos (optional)" })).toHaveCount(0);
+      await expect(form.getByRole("group", { name: "Attachments (optional)" })).toHaveCount(0);
     });
   });
 }

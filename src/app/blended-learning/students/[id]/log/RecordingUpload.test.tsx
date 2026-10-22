@@ -72,7 +72,7 @@ function recording(name = "call with Ira.mp3", type = "audio/mpeg", size = 4096)
 }
 
 function pick(file: File) {
-  fireEvent.change(screen.getByLabelText("Upload a Call Recording"), { target: { files: [file] } });
+  fireEvent.change(screen.getByLabelText("Upload the recording"), { target: { files: [file] } });
 }
 
 async function lastXhr(count: number) {
@@ -94,10 +94,12 @@ afterEach(() => {
 });
 
 describe("RecordingUpload", () => {
-  it("offers any audio file from the phone", () => {
+  it("offers any audio file from the phone in a drop zone", () => {
     render(<RecordingUpload studentId={501} sessionDetails={SESSION} />);
-    expect(screen.getByLabelText("Upload a Call Recording")).toHaveAttribute("accept", "audio/*");
-    expect(screen.getByText("MP3, M4A or WAV, up to 200 MB.")).toBeInTheDocument();
+    expect(screen.getByLabelText("Upload the recording")).toHaveAttribute("accept", "audio/*");
+    expect(screen.getByText("Upload the recording")).toBeInTheDocument();
+    expect(screen.getByText(/^MP3, M4A or WAV, up to 200 MB\. We write out the notes/)).toBeInTheDocument();
+    expect(screen.getByText("The session details above are saved with the draft.")).toBeInTheDocument();
   });
 
   it("PUTs the recording straight to S3 with progress, creates the draft with the session details and refreshes the log page", async () => {
@@ -115,11 +117,15 @@ describe("RecordingUpload", () => {
     expect(xhr.headers).toEqual({ "Content-Type": "audio/mpeg" });
     expect(xhr.body).toBe(file);
 
+    // The picked file's row replaces the drop zone, with its status.
+    expect(screen.getByText("call with Ira.mp3")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Upload the recording")).not.toBeInTheDocument();
     xhr.progress(1638, 4096);
-    expect(screen.getByText("Uploading… 40%")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Uploading… 40%");
     expect(screen.getByRole("progressbar", { name: "Upload progress" })).toHaveAttribute("value", "40");
 
     xhr.succeed();
+    expect(await screen.findByText("Recording uploaded. Starting the draft…")).toBeInTheDocument();
     await waitFor(() => expect(mockRefresh).toHaveBeenCalledTimes(1));
     expect(sent[1]).toEqual({
       url: "/api/blended-learning/students/501/drafts",
@@ -134,6 +140,7 @@ describe("RecordingUpload", () => {
 
     (await lastXhr(1)).fail();
     expect(await screen.findByRole("alert")).toHaveTextContent("The upload didn't finish. Check your connection and retry.");
+    expect(screen.getByText("Choose another recording")).toBeInTheDocument();
     expect(mockRefresh).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole("button", { name: "Retry upload" }));

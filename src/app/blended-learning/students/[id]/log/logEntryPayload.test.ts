@@ -5,8 +5,10 @@ import {
   durationMinutes,
   initialEntryValues,
   photosPending,
+  missingFields,
   postEntry,
   raisedFlags,
+  sentActionItemIndex,
   toggled,
   withoutFieldErrors,
   type EntryFormValues,
@@ -39,18 +41,21 @@ function photo(id: number, status: PickedPhoto["status"], s3Key?: string): Picke
 }
 
 describe("initialEntryValues", () => {
-  it("starts a blank Conversation dated today", () => {
+  it("starts a call with the Student dated today, with a blank Student and a blank Mentor Action Item", () => {
     expect(initialEntryValues(null, TODAY)).toEqual({
       kind: "conversation",
       occurredOn: TODAY,
-      mode: null,
-      spokeWith: null,
+      mode: "call",
+      spokeWith: "student",
       duration: "",
       summary: "",
       notesHtml: "",
       note: "",
-      actionItems: [],
-      nextItemKey: 1,
+      actionItems: [
+        { key: 1, owner: "student", text: "" },
+        { key: 2, owner: "mentor", text: "" },
+      ],
+      nextItemKey: 3,
       ticked: new Set(),
       flags: {},
     });
@@ -72,14 +77,18 @@ describe("initialEntryValues", () => {
     });
   });
 
-  it("falls back to today and blanks for a draft without session details", () => {
+  it("falls back to today and blanks for a draft without session details, and starter rows without Action Items", () => {
     const draft = { ...DRAFT, occurredOn: null, mode: null, spokeWith: null, durationMinutes: null, actionItems: [] };
     expect(initialEntryValues(draft, TODAY)).toMatchObject({
       occurredOn: TODAY,
       mode: null,
       spokeWith: null,
       duration: "",
-      nextItemKey: 1,
+      actionItems: [
+        { key: 1, owner: "student", text: "" },
+        { key: 2, owner: "mentor", text: "" },
+      ],
+      nextItemKey: 3,
     });
   });
 });
@@ -105,6 +114,27 @@ describe("small helpers", () => {
     expect(raisedFlags({ maths: "", emotional_wellbeing: "Upset" })).toEqual(["emotional_wellbeing", "maths"]);
   });
 
+  it("counts each sent Action Item's position among the rows with text", () => {
+    const items = [
+      { key: 1, owner: "student" as const, text: " " },
+      { key: 2, owner: "mentor" as const, text: "Call" },
+      { key: 5, owner: "parent" as const, text: "Pay" },
+    ];
+    expect(sentActionItemIndex(items)).toEqual(new Map([[2, 0], [5, 1]]));
+  });
+
+  it("lists the required fields still empty, by label", () => {
+    expect(missingFields(values())).toEqual(["Duration", "Summary"]);
+    expect(missingFields(values({ mode: null, spokeWith: null, occurredOn: "" }))).toEqual([
+      "Date",
+      "How",
+      "Spoke with",
+      "Duration",
+      "Summary",
+    ]);
+    expect(missingFields(values({ kind: "attempt" }))).toEqual([]);
+  });
+
   it("holds a Conversation back while a photo is uploading or failed, never an Attempt", () => {
     expect(photosPending("conversation", [photo(1, "done", "k")])).toBe(false);
     expect(photosPending("conversation", [photo(1, "done", "k"), photo(2, "uploading")])).toBe(true);
@@ -122,7 +152,7 @@ describe("buildEntryPayload", () => {
     });
   });
 
-  it("sends a Conversation with its lists, no due dates, and the reviewed draft", () => {
+  it("sends a Conversation with its lists, no due dates or blank Action Items, and the reviewed draft", () => {
     const body = buildEntryPayload(
       values({
         mode: "in_person",
@@ -132,7 +162,7 @@ describe("buildEntryPayload", () => {
         notesHtml: "<p>n</p>",
         actionItems: [
           { key: 1, owner: "student", text: "Revise" },
-          { key: 3, owner: "", text: "" },
+          { key: 3, owner: "mentor", text: "  " },
         ],
         ticked: new Set([7, 9]),
         flags: { physics: "Optics", emotional_wellbeing: "" },
@@ -148,10 +178,7 @@ describe("buildEntryPayload", () => {
       durationMinutes: 30,
       summary: "Talked",
       notesHtml: "<p>n</p>",
-      actionItems: [
-        { owner: "student", text: "Revise", dueOn: null },
-        { owner: "", text: "", dueOn: null },
-      ],
+      actionItems: [{ owner: "student", text: "Revise", dueOn: null }],
       photoKeys: ["key-a", "key-b"],
       flags: [
         { recipient: "emotional_wellbeing", comment: null },

@@ -8,19 +8,21 @@ import type { PickedPhoto } from "./PhotoPicker";
 // entries request body built from them, and the request itself.
 
 export type Kind = "conversation" | "attempt";
-type Mode = "call" | "in_person";
-type SpokeWith = "student" | "parent_or_sibling" | "both";
+export type Mode = "call" | "in_person";
+export type SpokeWith = "student" | "parent_or_sibling" | "both";
 // Keyed by field, e.g. `summary` or `actionItems.0.text`.
 export type FieldErrors = Record<string, string>;
 // No due date: the form doesn't take one, and Action Items are saved without it.
-export type DraftActionItem = { key: number; owner: ActionItemOwner | ""; text: string };
+// A row left without text is not sent.
+export type DraftActionItem = { key: number; owner: ActionItemOwner; text: string };
 // A switched-on Flag Recipient maps to its comment; off is absent.
 export type DraftFlags = Partial<Record<FlagRecipient, string>>;
 export const FLAG_RECIPIENTS = Object.keys(FLAG_RECIPIENT) as FlagRecipient[];
 
 // A ready Conversation Draft, as the form opens it. Session details are those
 // the Mentor entered before uploading; `notesHtml` is the drafted notes with
-// their text escaped. A drafted due date and Items to Verify are not shown.
+// their text escaped. The drafted Summary Tags, due dates and Items to Verify
+// are not used.
 export type ReviewDraft = {
   id: number;
   occurredOn: string | null;
@@ -51,9 +53,19 @@ export type EntryFormValues = {
   flags: DraftFlags;
 };
 
-// A new form, prefilled from the draft under review if there is one.
+// A new Conversation starts with two blank Action Item rows, one the
+// Student's and one the Mentor's, so the Mentor sees some can be theirs.
+const STARTER_ACTION_ITEMS: { owner: ActionItemOwner; text: string }[] = [
+  { owner: "student", text: "" },
+  { owner: "mentor", text: "" },
+];
+
+// A new form, prefilled from the draft under review if there is one. A new
+// Conversation starts as a call with the Student; a draft keeps what the
+// Mentor entered before uploading, and its Action Items unless it has none.
 export function initialEntryValues(draft: ReviewDraft | null, today: string): EntryFormValues {
-  const actionItems = (draft?.actionItems ?? []).map((item, index) => ({
+  const drafted = draft?.actionItems ?? [];
+  const actionItems = (drafted.length > 0 ? drafted : STARTER_ACTION_ITEMS).map((item, index) => ({
     key: index + 1,
     owner: item.owner,
     text: item.text,
@@ -61,8 +73,8 @@ export function initialEntryValues(draft: ReviewDraft | null, today: string): En
   return {
     kind: "conversation",
     occurredOn: draft?.occurredOn ?? today,
-    mode: draft?.mode ?? null,
-    spokeWith: draft?.spokeWith ?? null,
+    mode: draft ? draft.mode : "call",
+    spokeWith: draft ? draft.spokeWith : "student",
     duration: draft?.durationMinutes ? String(draft.durationMinutes) : "",
     summary: draft?.summary ?? "",
     notesHtml: draft?.notesHtml ?? "",
@@ -104,7 +116,7 @@ export function missingFields(values: EntryFormValues): string[] {
   const required: [string, boolean][] = [["Date", values.occurredOn !== ""]];
   if (values.kind === "conversation") {
     required.push(
-      ["Mode", values.mode !== null],
+      ["How", values.mode !== null],
       ["Spoke with", values.spokeWith !== null],
       ["Duration", values.duration.trim() !== ""],
       ["Summary", values.summary.trim() !== ""]
@@ -113,13 +125,24 @@ export function missingFields(values: EntryFormValues): string[] {
   return required.filter(([, filled]) => !filled).map(([label]) => label);
 }
 
+// The Action Item rows that are sent: those with text.
+export function sentActionItems(items: DraftActionItem[]): DraftActionItem[] {
+  return items.filter((item) => item.text.trim() !== "");
+}
+
+// Each sent row's position among those sent, by key, as the server's
+// `actionItems.N` errors count them.
+export function sentActionItemIndex(items: DraftActionItem[]): Map<number, number> {
+  return new Map(sentActionItems(items).map((item, index) => [item.key, index]));
+}
+
 // A Conversation can't be saved while a photo is uploading or has failed.
 export function photosPending(kind: Kind, photos: PickedPhoto[]): boolean {
   return kind === "conversation" && photos.some((photo) => photo.status !== "done");
 }
 
-// The entries request body. Only a Conversation carries Action Items, photos,
-// Mentor Flags, ticks and the reviewed draft.
+// The entries request body. Only a Conversation carries Action Items (those
+// with text), photos, Mentor Flags, ticks and the reviewed draft.
 export function buildEntryPayload(
   values: EntryFormValues,
   photos: PickedPhoto[],
@@ -135,7 +158,7 @@ export function buildEntryPayload(
     durationMinutes: durationMinutes(values.duration),
     summary: values.summary,
     notesHtml: values.notesHtml,
-    actionItems: values.actionItems.map((item) => ({ owner: item.owner, text: item.text, dueOn: null })),
+    actionItems: sentActionItems(values.actionItems).map((item) => ({ owner: item.owner, text: item.text, dueOn: null })),
     photoKeys: photos.map((photo) => photo.s3Key),
     flags: raisedFlags(values.flags).map((recipient) => ({ recipient, comment: values.flags[recipient] || null })),
     completeActionItemIds: [...values.ticked],
