@@ -9,7 +9,7 @@ import { downscaleImage } from "@/lib/image-resize";
 // uploaded keys with the Conversation. The form owns the list, so switching
 // to an Attempt and back keeps it.
 
-export const MAX_PHOTOS = 5;
+const MAX_PHOTOS = 5;
 
 export type PickedPhoto = {
   id: number;

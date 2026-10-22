@@ -246,14 +246,7 @@ export async function uploadTransientObject(opts: {
   body: Buffer;
   contentType: string;
 }): Promise<void> {
-  await client().send(
-    new PutObjectCommand({
-      Bucket: bucket(),
-      Key: opts.s3Key,
-      Body: opts.body,
-      ContentType: opts.contentType,
-    }),
-  );
+  await uploadObject(opts);
 }
 
 // Best-effort cleanup. Never throws; logs individual failures so a leaked

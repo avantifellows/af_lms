@@ -12,7 +12,7 @@ import { blendedLearningPhotoPrefix, extensionFor, headObject, uploadObject } fr
 // returned keys. Objects from abandoned forms are left in S3 in v1.
 
 export const MAX_CONVERSATION_PHOTOS = 5;
-export const MAX_PHOTO_BYTES = 10 * 1024 * 1024;
+const MAX_PHOTO_BYTES = 10 * 1024 * 1024;
 const PHOTO_TYPES: ReadonlySet<string> = new Set(["image/jpeg", "image/png", "image/webp", "image/heic"]);
 const EXTENSION_TYPES: Record<string, string> = {
   jpg: "image/jpeg",

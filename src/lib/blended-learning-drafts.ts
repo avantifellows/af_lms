@@ -241,7 +241,7 @@ export async function createDraft(
 
 // Ask etl-next to drain one queued Transcription Request, the way Holistic
 // Profile regeneration does. Never throws on delivery problems.
-export async function wakeTranscription(requestKey: string): Promise<WakeDelivery> {
+async function wakeTranscription(requestKey: string): Promise<WakeDelivery> {
   const base = process.env.BLENDED_LEARNING_ETL_URL?.trim().replace(/\/+$/, "");
   const token = process.env.BLENDED_LEARNING_ETL_TOKEN?.trim();
   const environment = process.env.APP_ENV;

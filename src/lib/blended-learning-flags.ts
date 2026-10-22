@@ -16,7 +16,7 @@ import { contactNumbers, present, type FlagRecipient } from "./blended-learning-
 // filter and page links carry that cutoff (`since`), so the same flags stay
 // New for the whole visit even though "last seen" has moved on.
 
-export const FLAGS_PAGE_SIZE = 50;
+const FLAGS_PAGE_SIZE = 50;
 export const FLAG_RECIPIENTS: readonly FlagRecipient[] = ["emotional_wellbeing", "physics", "chemistry", "maths"];
 
 export type FlagCard = {
