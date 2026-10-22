@@ -48,7 +48,7 @@ export default async function MentorPage({ params }: { params: Promise<{ id: str
             {mentor.assigned} {mentor.assigned === 1 ? "Mentee" : "Mentees"} · {CURRENT_ACADEMIC_YEAR}
           </p>
         </div>
-        <FilteredMenteeList list={mentees} />
+        <FilteredMenteeList list={mentees} canLog={canBlendedLearning(access, "log")} />
       </main>
     </>
   );

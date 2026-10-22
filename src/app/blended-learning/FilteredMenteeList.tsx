@@ -85,7 +85,9 @@ function FilterSelect({
   );
 }
 
-export function FilteredMenteeList({ list }: { list: MenteeList }) {
+// `canLog`: whether the viewer may log for these Mentees, so a ready draft's
+// chip can open the log page; a read-only viewer gets a plain chip.
+export function FilteredMenteeList({ list, canLog }: { list: MenteeList; canLog: boolean }) {
   const [filters, setFilters] = useState<Filters>(NO_FILTERS);
   const everyone = [...list.talkToFirst, ...list.everyoneElse];
   const genders = distinctSorted(everyone.map((mentee) => mentee.gender));
@@ -158,12 +160,14 @@ export function FilteredMenteeList({ list }: { list: MenteeList }) {
             title="Talk to First"
             description="Last try didn't connect, never reached, or 30+ days since you last talked."
             mentees={talkToFirst}
+            canLog={canLog}
             emptyText={filtering ? "No one here matches your filters." : "Everyone has been talked to recently."}
           />
           <MenteeGroup
             title="Everyone else"
             description="Talked to in the last 30 days."
             mentees={everyoneElse}
+            canLog={canLog}
             emptyText={filtering ? "No one here matches your filters." : "No one here yet."}
           />
         </>

@@ -38,7 +38,7 @@ type SearchParams = {
   since?: SearchParam;
 };
 
-function MentorMenteeList({ list }: { list: MenteeList }) {
+function MentorMenteeList({ list, canLog }: { list: MenteeList; canLog: boolean }) {
   const total = list.talkToFirst.length + list.everyoneElse.length;
   if (total === 0) {
     return (
@@ -54,7 +54,7 @@ function MentorMenteeList({ list }: { list: MenteeList }) {
       <p className="text-sm text-text-secondary">
         {total} {total === 1 ? "Mentee" : "Mentees"} · {CURRENT_ACADEMIC_YEAR}
       </p>
-      <FilteredMenteeList list={list} />
+      <FilteredMenteeList list={list} canLog={canLog} />
     </div>
   );
 }
@@ -147,7 +147,7 @@ export default async function BlendedLearningPage({
       <BlendedLearningHeader access={access} />
       <main className="mx-auto max-w-5xl px-4 py-6 sm:px-6">
         {mentees ? (
-          <MentorMenteeList list={mentees} />
+          <MentorMenteeList list={mentees} canLog={canBlendedLearning(access, "log")} />
         ) : (
           <AdminLanding tab={tab} cards={cards} flags={flags} newFlags={newFlags} />
         )}

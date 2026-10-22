@@ -132,6 +132,10 @@ for (const { label, viewport, entryRole } of VIEWPORTS) {
       );
       await expect(talkToFirst.filter({ hasText: fullName(attemptLatest) }).getByText("Last try didn't connect")).toBeVisible();
       await expect(talkToFirst.filter({ hasText: fullName(neverContacted) }).getByText("Draft ready to review")).toBeVisible();
+      // An admin who can log opens the draft from its chip.
+      await expect(
+        talkToFirst.filter({ hasText: fullName(neverContacted) }).getByRole("link", { name: "Draft ready to review" })
+      ).toHaveAttribute("href", /\/blended-learning\/students\/\d+\/log$/);
       // Search and filters come with the shared list component.
       await expect(page.getByRole("searchbox", { name: "Search by name" })).toBeVisible();
 
@@ -159,6 +163,12 @@ for (const { label, viewport, entryRole } of VIEWPORTS) {
       await page.goto(`/blended-learning/mentors/${mentorAUserId}`);
       await expect(entries(group(page, "Talk to First"))).toHaveCount(4);
       await expect(entries(group(page, "Everyone else"))).toHaveCount(2);
+
+      // Kabir's ready draft is shown, but not as a link into a log form a
+      // read-only admin can't use (QA-14).
+      const kabir = entries(group(page, "Talk to First")).filter({ hasText: fullName(neverContacted) });
+      await expect(kabir.getByText("Draft ready to review")).toBeVisible();
+      await expect(page.getByRole("link", { name: "Draft ready to review" })).toHaveCount(0);
     });
 
     test("an LMS admin sees the Mentors tab", async ({ adminPage }) => {

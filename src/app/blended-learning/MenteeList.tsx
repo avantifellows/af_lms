@@ -6,7 +6,8 @@ import type { TalkToFirstReason } from "@/lib/blended-learning-talk-to-first";
 
 // The Mentor's Mentee list: Talk to First, then Everyone else. A table from
 // 640 px up; cards below that, each one a 44 px+ tap target. A ready
-// Conversation Draft's chip opens it for review on the log page.
+// Conversation Draft's chip opens it for review on the log page, for viewers
+// who can log; for a read-only viewer it is a plain label.
 
 const WHY_NOW: Record<TalkToFirstReason, string> = {
   attempt: "Last try didn't connect",
@@ -56,8 +57,15 @@ export function WhyNowTags({ mentee }: { mentee: MenteeRow }) {
   );
 }
 
-function DraftChip({ mentee, className = "" }: { mentee: MenteeRow; className?: string }) {
+function DraftChip({ mentee, canLog, className = "" }: { mentee: MenteeRow; canLog: boolean; className?: string }) {
   if (mentee.openDraftState !== "ready") return null;
+  if (!canLog) {
+    return (
+      <span className={`inline-flex items-center ${className}`}>
+        <Badge variant="accent">Draft ready to review</Badge>
+      </span>
+    );
+  }
   return (
     <Link href={`${menteeHref(mentee)}/log`} className={`inline-flex min-h-11 items-center ${className}`}>
       <Badge variant="accent">Draft ready to review</Badge>
@@ -87,7 +95,7 @@ function MenteeMeta({ mentee }: { mentee: MenteeRow }) {
   );
 }
 
-function MenteeTable({ mentees }: { mentees: MenteeRow[] }) {
+function MenteeTable({ mentees, canLog }: { mentees: MenteeRow[]; canLog: boolean }) {
   return (
     <table className="hidden w-full text-left text-sm sm:table">
       <thead className="border-b border-border text-xs uppercase tracking-wide text-text-muted">
@@ -111,7 +119,7 @@ function MenteeTable({ mentees }: { mentees: MenteeRow[] }) {
               </Link>
               <div className="flex flex-wrap items-center gap-2 pb-1">
                 {mentee.gender && <span className="text-xs text-text-secondary">{mentee.gender}</span>}
-                <DraftChip mentee={mentee} />
+                <DraftChip mentee={mentee} canLog={canLog} />
               </div>
             </td>
             <td className="px-4 py-3">{mentee.grade === null ? "—" : `Grade ${mentee.grade}`}</td>
@@ -129,7 +137,7 @@ function MenteeTable({ mentees }: { mentees: MenteeRow[] }) {
   );
 }
 
-function MenteeCards({ mentees }: { mentees: MenteeRow[] }) {
+function MenteeCards({ mentees, canLog }: { mentees: MenteeRow[]; canLog: boolean }) {
   return (
     <ul className="divide-y divide-border sm:hidden">
       {mentees.map((mentee) => (
@@ -146,7 +154,7 @@ function MenteeCards({ mentees }: { mentees: MenteeRow[] }) {
             <WhyNowTags mentee={mentee} />
           </Link>
           {/* Outside the card's link: links can't nest. */}
-          <DraftChip mentee={mentee} className="-mt-2 px-4 pb-1" />
+          <DraftChip mentee={mentee} canLog={canLog} className="-mt-2 px-4 pb-1" />
         </li>
       ))}
     </ul>
@@ -158,11 +166,13 @@ export function MenteeGroup({
   description,
   mentees,
   emptyText,
+  canLog,
 }: {
   title: string;
   description: string;
   mentees: MenteeRow[];
   emptyText: string;
+  canLog: boolean;
 }) {
   return (
     <section aria-label={title} className="overflow-hidden rounded-lg border border-border bg-bg-card shadow-sm">
@@ -177,8 +187,8 @@ export function MenteeGroup({
         <p className="px-4 py-6 text-sm text-text-muted">{emptyText}</p>
       ) : (
         <>
-          <MenteeTable mentees={mentees} />
-          <MenteeCards mentees={mentees} />
+          <MenteeTable mentees={mentees} canLog={canLog} />
+          <MenteeCards mentees={mentees} canLog={canLog} />
         </>
       )}
     </section>
