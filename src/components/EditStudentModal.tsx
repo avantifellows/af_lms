@@ -222,9 +222,15 @@ export default function EditStudentModal({
   // on a form this long a failed save would otherwise leave the reason
   // thousands of pixels out of view and look like Save doing nothing.
   const errorBannerRef = useRef<HTMLDivElement | null>(null);
+  // Set by Save and spent on the first error it produces. Without it, typing
+  // in another field after a failed save (which clears the banner) re-ran
+  // this and pulled focus back to the field that failed.
+  const focusErrorAfterSubmitRef = useRef(false);
   useEffect(() => {
+    if (!focusErrorAfterSubmitRef.current) return;
     const [firstFieldError] = Object.keys(fieldErrors);
     if (!firstFieldError && !error) return;
+    focusErrorAfterSubmitRef.current = false;
     const target = firstFieldError
       ? document.getElementById(`edit-student-${firstFieldError}`)
       : errorBannerRef.current;
@@ -243,6 +249,7 @@ export default function EditStudentModal({
   // fallow-ignore-next-line complexity
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    focusErrorAfterSubmitRef.current = true;
     setError("");
     setFieldErrors({});
     setLoading(true);

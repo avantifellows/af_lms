@@ -780,6 +780,30 @@ describe("EditStudentModal", () => {
       await waitFor(() => expect(getByName("pincode")).toHaveFocus());
     });
 
+    it("leaves focus where the user is typing after a failed save", async () => {
+      const user = userEvent.setup();
+      const message = "Pincode must be exactly 6 digits and cannot start with zero";
+      mockFetch.mockResolvedValue(
+        new Response(JSON.stringify({ error: message, field_errors: { pincode: message } }), {
+          status: 422,
+        }),
+      );
+      renderModal({ programId: 1 });
+
+      await user.type(getByName("pincode"), "12345");
+      await user.click(screen.getByText("Save Changes"));
+      await waitFor(() => expect(getByName("pincode")).toHaveFocus());
+
+      // The first keystroke clears the banner; that must not send focus back
+      // to Pincode, which still has its own error.
+      await user.click(getByName("city"));
+      await user.type(getByName("city"), "Jaipur");
+
+      expect(getByName("city")).toHaveFocus();
+      expect(getByName("city")).toHaveValue("Jaipur");
+      expect(screen.getByText(message)).toBeInTheDocument();
+    });
+
     it("announces a save error that has no field of its own", async () => {
       const user = userEvent.setup();
       renderModal({ programId: 1 });
