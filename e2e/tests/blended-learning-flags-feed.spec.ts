@@ -240,6 +240,42 @@ for (const { label, viewport } of VIEWPORTS) {
       await expect(newCards).toHaveText([IRA_PHYSICS, IRA_WELLBEING, MEERA_CHEMISTRY, TARA_MATHS]);
       await expect(cards(page).filter({ hasText: FEED_FLAGS.taraWellbeing.comment }).getByText("New", { exact: true })).toHaveCount(0);
 
+      // Filter and page changes are the same visit: the badge and the New
+      // markers stay, and no further visit is recorded (QA-12).
+      const seenPosts: string[] = [];
+      page.on("request", (request) => {
+        if (request.method() === "POST" && request.url().endsWith("/api/blended-learning/flags/seen")) {
+          seenPosts.push(request.url());
+        }
+      });
+      const newMarkers = () => fixtureCards(page).filter({ has: page.getByText("New", { exact: true }) });
+
+      await filterBy(page, { mentor: BLENDED_MENTOR_B.name });
+      await expect(cards(page)).toHaveText([TARA_MATHS, TARA_WELLBEING]);
+      await expect(flagsTab(page)).toHaveText(badge(expectedNew));
+      await expect(newMarkers()).toHaveText([TARA_MATHS]);
+
+      await filterBy(page, { recipient: "Maths Teacher" });
+      await expect(fixtureCards(page)).toHaveText([TARA_MATHS, ...bulk(...range(0, 12).map((c) => 4 * c + 1))]);
+      await expect(newMarkers()).toHaveText([TARA_MATHS]);
+
+      await filterBy(page, { mentor: BLENDED_MENTOR_A.name, recipient: "Chemistry Teacher" });
+      await expect(cards(page)).toHaveText([MEERA_CHEMISTRY, ...bulk(...range(0, 12).map((c) => 4 * c + 2))]);
+      await expect(newMarkers()).toHaveText([MEERA_CHEMISTRY]);
+
+      await filterBy(page, { mentor: BLENDED_MENTOR_A.name });
+      await expect(cards(page)).toHaveText([IRA_PHYSICS, IRA_WELLBEING, MEERA_CHEMISTRY, ...bulk(...range(1, 47))]);
+      await expect(newMarkers()).toHaveText([IRA_PHYSICS, IRA_WELLBEING, MEERA_CHEMISTRY]);
+      await page.getByRole("link", { name: "Older flags" }).click();
+      await expect(cards(page)).toHaveText(bulk(...range(48, 52)));
+      await expect(flagsTab(page)).toHaveText(badge(expectedNew));
+      await page.getByRole("link", { name: "Newest flags" }).click();
+      await expect(cards(page).first()).toHaveText(IRA_PHYSICS);
+      await expect(newMarkers()).toHaveText([IRA_PHYSICS, IRA_WELLBEING, MEERA_CHEMISTRY]);
+      await expect(flagsTab(page)).toHaveText(badge(expectedNew));
+      expect(seenPosts).toEqual([]);
+
+      // Leaving the tab and opening it again is the next visit.
       await openFlags(page);
       await expect(flagsTab(page)).toHaveText("Flags");
       await expect(cards(page).getByText("New", { exact: true })).toHaveCount(0);

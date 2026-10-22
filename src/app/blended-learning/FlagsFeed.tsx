@@ -8,7 +8,8 @@ import { FLAG_RECIPIENT } from "./students/[id]/flagRecipients";
 
 // The admin Flags tab: a read-only feed of every Mentor Flag, newest first,
 // filtered by Mentor and Flag Recipient through the URL. Flags raised since
-// the viewer's previous visit are marked New.
+// the viewer's previous visit are marked New; the filter and page links carry
+// the visit's cutoff (`since`), so they stay New for the whole visit.
 
 export type FlagsView = {
   page: FlagsPage;
@@ -16,6 +17,8 @@ export type FlagsView = {
   mentorUserId: number | null;
   recipient: FlagRecipient | null;
   cursor: number | null;
+  // The visit's cutoff as a URL value (flagsCutoffParam).
+  since: string;
 };
 
 const linkClass =
@@ -31,7 +34,7 @@ function formatDate(date: string): string {
 }
 
 function feedHref(view: FlagsView, cursor: number | null): string {
-  const params = new URLSearchParams({ tab: "flags" });
+  const params = new URLSearchParams({ tab: "flags", since: view.since });
   if (view.mentorUserId !== null) params.set("mentor", String(view.mentorUserId));
   if (view.recipient) params.set("recipient", view.recipient);
   if (cursor !== null) params.set("cursor", String(cursor));
@@ -47,6 +50,7 @@ function Filters({ view }: { view: FlagsView }) {
       className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end"
     >
       <input type="hidden" name="tab" value="flags" />
+      <input type="hidden" name="since" value={view.since} />
       <label className="block space-y-1 text-sm font-bold text-text-secondary">
         <span>Mentor</span>
         <select name="mentor" defaultValue={view.mentorUserId ?? ""} className={selectClass}>
@@ -89,9 +93,14 @@ function FlagCardView({ flag }: { flag: FlagCard }) {
     >
       <div className="flex flex-wrap items-start justify-between gap-2">
         <h3 className="min-w-0 break-words font-bold text-text-primary">
-          <Link href={`/blended-learning/students/${flag.studentId}`} className="hover:text-accent hover:underline">
-            {flag.name}
-          </Link>
+          {/* A Student without an active Mapping has no page to open. */}
+          {flag.inScope ? (
+            <Link href={`/blended-learning/students/${flag.studentId}`} className="hover:text-accent hover:underline">
+              {flag.name}
+            </Link>
+          ) : (
+            flag.name
+          )}
         </h3>
         <div className="flex flex-wrap items-center gap-2">
           {flag.isNew && (
@@ -131,7 +140,7 @@ function FlagCardView({ flag }: { flag: FlagCard }) {
           </a>
         )}
       </div>
-      {flag.hasNotes && <ConversationNotes conversationId={flag.conversationId} />}
+      {flag.hasNotes && flag.inScope && <ConversationNotes conversationId={flag.conversationId} />}
     </article>
   );
 }

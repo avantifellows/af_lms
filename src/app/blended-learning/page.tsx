@@ -4,7 +4,15 @@ import { redirect } from "next/navigation";
 import { Card } from "@/components/ui";
 import { authOptions } from "@/lib/auth";
 import { canBlendedLearning, getBlendedLearningAccess, type BlendedLearningAccess } from "@/lib/blended-learning-access";
-import { countNewFlags, FLAG_RECIPIENTS, listFlagMentors, listFlags } from "@/lib/blended-learning-flags";
+import {
+  countNewFlags,
+  FLAG_RECIPIENTS,
+  flagsCutoffParam,
+  listFlagMentors,
+  listFlags,
+  parseFlagsCutoff,
+  readFlagsCutoff,
+} from "@/lib/blended-learning-flags";
 import {
   listMentees,
   listMentorCards,
@@ -22,7 +30,13 @@ import { MarkFlagsSeen } from "./MarkFlagsSeen";
 import { MentorCards } from "./MentorCards";
 
 type SearchParam = string | string[] | undefined;
-type SearchParams = { tab?: SearchParam; mentor?: SearchParam; recipient?: SearchParam; cursor?: SearchParam };
+type SearchParams = {
+  tab?: SearchParam;
+  mentor?: SearchParam;
+  recipient?: SearchParam;
+  cursor?: SearchParam;
+  since?: SearchParam;
+};
 
 function MentorMenteeList({ list }: { list: MenteeList }) {
   const total = list.talkToFirst.length + list.everyoneElse.length;
@@ -53,7 +67,7 @@ function AdminLanding({
 }: {
   tab: AdminTab;
   cards: MentorCard[];
-  flags: FlagsView | null;
+  flags: { view: FlagsView; newVisit: boolean } | null;
   newFlags: number;
 }) {
   return (
@@ -62,8 +76,9 @@ function AdminLanding({
       {tab === "mentors" && <MentorCards cards={cards} />}
       {flags && (
         <>
-          <FlagsFeed view={flags} />
-          <MarkFlagsSeen />
+          <FlagsFeed view={flags.view} />
+          {/* Only on entering the tab: filter and page changes are the same visit. */}
+          {flags.newVisit && <MarkFlagsSeen />}
         </>
       )}
     </div>
@@ -78,17 +93,28 @@ function positiveId(value: string | undefined): number | null {
   return value && /^\d+$/.test(value) && Number(value) > 0 ? Number(value) : null;
 }
 
-// The Flags tab's page, from the URL's filters and cursor; unknown values are ignored.
-async function readFlags(access: BlendedLearningAccess, params: SearchParams): Promise<FlagsView | null> {
+// The Flags tab's page, from the URL's filters and cursor; unknown values are
+// ignored. Without a visit cutoff (`since`) this is a new visit: the cutoff is
+// the viewer's "last seen" as it stands, and the visit gets recorded.
+async function readFlags(
+  access: BlendedLearningAccess,
+  params: SearchParams
+): Promise<{ view: FlagsView; newVisit: boolean } | null> {
   const mentorUserId = positiveId(single(params.mentor));
   const recipientParam = single(params.recipient);
   const recipient = FLAG_RECIPIENTS.find((value) => value === recipientParam) ?? null;
   const cursor = positiveId(single(params.cursor));
+  const carried = parseFlagsCutoff(single(params.since));
+  const cutoff = carried ?? (await readFlagsCutoff(access));
   const [page, mentors] = await Promise.all([
-    listFlags(access, { mentorUserId, recipient, cursor }),
+    listFlags(access, { mentorUserId, recipient, cursor }, cutoff),
     listFlagMentors(access),
   ]);
-  return page ? { page, mentors, mentorUserId, recipient, cursor } : null;
+  if (!page) return null;
+  return {
+    view: { page, mentors, mentorUserId, recipient, cursor, since: flagsCutoffParam(cutoff) },
+    newVisit: carried === null,
+  };
 }
 
 // Landing page for the Blended Learning section: a Mentor's own Mentee list,
@@ -114,7 +140,7 @@ export default async function BlendedLearningPage({
       ? await listMentorCards(access, today)
       : [];
   const flags = !mentees && tab === "flags" ? await readFlags(access, params) : null;
-  const newFlags = mentees ? 0 : flags ? flags.page.newCount : await countNewFlags(access);
+  const newFlags = mentees ? 0 : flags ? flags.view.page.newCount : await countNewFlags(access);
 
   return (
     <>

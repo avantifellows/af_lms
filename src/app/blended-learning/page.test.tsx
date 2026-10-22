@@ -1,5 +1,5 @@
 import { render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
   mockGetServerSession,
@@ -8,6 +8,7 @@ const {
   mockListMentorCards,
   mockCountNewFlags,
   mockListFlags,
+  mockReadFlagsCutoff,
   mockRedirect,
 } = vi.hoisted(() => ({
   mockGetServerSession: vi.fn(),
@@ -16,6 +17,7 @@ const {
   mockListMentorCards: vi.fn(),
   mockCountNewFlags: vi.fn(),
   mockListFlags: vi.fn(),
+  mockReadFlagsCutoff: vi.fn(),
   mockRedirect: vi.fn((url: string) => {
     throw new Error(`REDIRECT:${url}`);
   }),
@@ -32,11 +34,12 @@ vi.mock("@/lib/blended-learning-mentees", () => ({
   listMentees: mockListMentees,
   listMentorCards: mockListMentorCards,
 }));
-vi.mock("@/lib/blended-learning-flags", () => ({
-  FLAG_RECIPIENTS: ["emotional_wellbeing", "physics", "chemistry", "maths"],
+vi.mock("@/lib/blended-learning-flags", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/blended-learning-flags")>()),
   countNewFlags: mockCountNewFlags,
   listFlags: mockListFlags,
   listFlagMentors: async () => [],
+  readFlagsCutoff: mockReadFlagsCutoff,
 }));
 vi.mock("@/lib/curriculum-date-helpers", () => ({ getTodayIST: () => "2026-10-22" }));
 
@@ -69,6 +72,12 @@ describe("BlendedLearningPage", () => {
     mockListMentorCards.mockResolvedValue([]);
     mockCountNewFlags.mockResolvedValue(0);
     mockListFlags.mockResolvedValue({ flags: [], nextCursor: null, newCount: 0 });
+    mockReadFlagsCutoff.mockResolvedValue({ lastSeenAt: "2026-10-21T09:30:00" });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}")));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it("sends a signed-out visitor to sign-in", async () => {
@@ -146,6 +155,89 @@ describe("BlendedLearningPage", () => {
 
     expect(mockListMentorCards).not.toHaveBeenCalled();
     expect(screen.getByRole("link", { name: "Flags" })).toHaveAttribute("aria-current", "page");
+  });
+
+  describe("a visit to the Flags tab (QA-12)", () => {
+    const FLAG = {
+      id: 7, recipient: "maths", comment: "Needs help with calculus", isNew: true, inScope: true,
+      conversationId: 70, occurredOn: "2026-10-20", hasNotes: false, mentorUserId: 9001, mentorName: "Faizan",
+      studentId: 501, name: "Ira Attempt", grade: 12, programName: "STP Voucher Delhi", gender: "Female",
+      phone: null, whatsappPhone: null, profileDocUrl: null, screenerUrl: null,
+    };
+
+    function seenPosts() {
+      return vi.mocked(fetch).mock.calls.filter(([url]) => url === "/api/blended-learning/flags/seen");
+    }
+
+    it("entering the tab takes the visit's cutoff from the last visit and records the visit", async () => {
+      signedInAs("juned@avantifellows.org");
+      mockGetBlendedLearningAccess.mockResolvedValue(BLENDED_ADMIN);
+      mockListFlags.mockResolvedValue({ flags: [FLAG], nextCursor: 7, newCount: 4 });
+
+      render(await BlendedLearningPage({ searchParams: Promise.resolve({ tab: "flags" }) }));
+
+      expect(mockReadFlagsCutoff).toHaveBeenCalledWith(BLENDED_ADMIN);
+      expect(mockListFlags).toHaveBeenCalledWith(
+        BLENDED_ADMIN,
+        { mentorUserId: null, recipient: null, cursor: null },
+        { lastSeenAt: "2026-10-21T09:30:00" }
+      );
+      expect(screen.getByRole("link", { name: /Flags/ })).toHaveTextContent("4 new");
+      expect(seenPosts()).toHaveLength(1);
+      // Filters and pages carry the visit's cutoff.
+      expect(screen.getByRole("search", { name: "Filter flags" })).toHaveFormValues({ since: "2026-10-21T09:30:00" });
+      expect(screen.getByRole("link", { name: "Older flags" })).toHaveAttribute(
+        "href",
+        "/blended-learning?tab=flags&since=2026-10-21T09%3A30%3A00&cursor=7"
+      );
+    });
+
+    it("a filter or page change in the same visit keeps its cutoff and records nothing", async () => {
+      signedInAs("juned@avantifellows.org");
+      mockGetBlendedLearningAccess.mockResolvedValue(BLENDED_ADMIN);
+      mockListFlags.mockResolvedValue({ flags: [FLAG], nextCursor: null, newCount: 4 });
+
+      render(
+        await BlendedLearningPage({
+          searchParams: Promise.resolve({ tab: "flags", mentor: "9001", cursor: "12", since: "2026-10-21T09:30:00" }),
+        })
+      );
+
+      expect(mockReadFlagsCutoff).not.toHaveBeenCalled();
+      expect(mockListFlags).toHaveBeenCalledWith(
+        BLENDED_ADMIN,
+        { mentorUserId: 9001, recipient: null, cursor: 12 },
+        { lastSeenAt: "2026-10-21T09:30:00" }
+      );
+      expect(screen.getByRole("link", { name: /Flags/ })).toHaveTextContent("4 new");
+      expect(screen.getByText("New", { exact: true })).toBeInTheDocument();
+      expect(seenPosts()).toHaveLength(0);
+      expect(screen.getByRole("link", { name: "Newest flags" })).toHaveAttribute(
+        "href",
+        "/blended-learning?tab=flags&since=2026-10-21T09%3A30%3A00&mentor=9001"
+      );
+    });
+
+    it("a first visit carries \"never\", so every flag stays New", async () => {
+      signedInAs("juned@avantifellows.org");
+      mockGetBlendedLearningAccess.mockResolvedValue(BLENDED_ADMIN);
+
+      render(await BlendedLearningPage({ searchParams: Promise.resolve({ tab: "flags", since: "never" }) }));
+
+      expect(mockReadFlagsCutoff).not.toHaveBeenCalled();
+      expect(mockListFlags).toHaveBeenCalledWith(BLENDED_ADMIN, expect.anything(), { lastSeenAt: null });
+      expect(seenPosts()).toHaveLength(0);
+    });
+
+    it("a malformed cutoff starts a new visit", async () => {
+      signedInAs("juned@avantifellows.org");
+      mockGetBlendedLearningAccess.mockResolvedValue(BLENDED_ADMIN);
+
+      render(await BlendedLearningPage({ searchParams: Promise.resolve({ tab: "flags", since: "2026-02-30T00:00:00" }) }));
+
+      expect(mockReadFlagsCutoff).toHaveBeenCalled();
+      expect(seenPosts()).toHaveLength(1);
+    });
   });
 
   it("never reads Mentor cards for a Mentor", async () => {

@@ -1,10 +1,20 @@
 import { query } from "./db";
-import { canBlendedLearning, type BlendedLearningAccess } from "./blended-learning-access";
+import { CURRENT_ACADEMIC_YEAR } from "./constants";
+import {
+  activeBlendedMappingSql,
+  canBlendedLearning,
+  type BlendedLearningAccess,
+} from "./blended-learning-access";
 import { contactNumbers, present, type FlagRecipient } from "./blended-learning-mentee-detail";
 
 // Blended Learning Admin Flags feed (server-only): every Mentor Flag, newest
 // first by (inserted_at, id), and each viewer's "last seen" time behind the
 // "N new" badge. Flags have no resolution; the feed is read-only.
+//
+// A visit to the Flags tab starts when the admin opens the tab: the page reads
+// their previous "last seen" as the visit's cutoff and records the visit. The
+// filter and page links carry that cutoff (`since`), so the same flags stay
+// New for the whole visit even though "last seen" has moved on.
 
 export const FLAGS_PAGE_SIZE = 50;
 export const FLAG_RECIPIENTS: readonly FlagRecipient[] = ["emotional_wellbeing", "physics", "chemistry", "maths"];
@@ -15,6 +25,9 @@ export type FlagCard = {
   comment: string | null;
   // Raised after the viewer's previous visit.
   isNew: boolean;
+  // The Student still has an active current-year Mapping, so their page and
+  // the Conversation's notes can be opened. A flag outlives its Mapping.
+  inScope: boolean;
   conversationId: number;
   occurredOn: string;
   hasNotes: boolean;
@@ -46,11 +59,38 @@ export type FlagFilters = {
   cursor?: number | null;
 };
 
+// The visit's cutoff: the viewer's "last seen" before this visit, or null
+// before their first visit. Flags inserted after it are New. Both columns are
+// timestamp(0) without time zone, so the cutoff is that same wall-clock value
+// ("YYYY-MM-DDTHH:MM:SS"), never shifted to another zone.
+export type FlagsCutoff = { lastSeenAt: string | null };
+
+// The cutoff as a URL value, and back. "never" is the first visit.
+const NEVER_SEEN = "never";
+const CUTOFF_TIMESTAMP = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})$/;
+
+export function flagsCutoffParam(cutoff: FlagsCutoff): string {
+  return cutoff.lastSeenAt ?? NEVER_SEEN;
+}
+
+// Null for a missing or malformed value: the page then starts a new visit.
+export function parseFlagsCutoff(value: string | undefined): FlagsCutoff | null {
+  if (value === NEVER_SEEN) return { lastSeenAt: null };
+  const match = value ? CUTOFF_TIMESTAMP.exec(value) : null;
+  if (!match) return null;
+  const [year, month, day, hour, minute, second] = match.slice(1).map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+  // Rejects 2026-02-30, 25:00 and the like, which Postgres would refuse.
+  if (date.toISOString().slice(0, 19) !== value) return null;
+  return { lastSeenAt: value };
+}
+
 type FlagRow = {
   id: number | string;
   recipient: FlagRecipient;
   comment: string | null;
   is_new: boolean;
+  in_scope: boolean;
   conversation_id: number | string;
   occurred_on: string;
   has_notes: boolean;
@@ -75,26 +115,53 @@ const MENTOR_NAME_SQL = `COALESCE(NULLIF(TRIM(CONCAT_WS(' ', mentor.first_name, 
 const LAST_SEEN_SQL = `(SELECT views.last_seen_at FROM blended_learning_flag_views views
                         WHERE lower(views.viewer_email) = lower($1))`;
 
-// How many flags were raised since the viewer's previous visit.
-export async function countNewFlags(access: BlendedLearningAccess): Promise<number> {
-  if (!canBlendedLearning(access, "view_flags")) return 0;
-  const rows = await query<{ count: number | string }>(
-    `SELECT count(*) AS count
-     FROM blended_learning_mentor_flags flag
-     WHERE ${LAST_SEEN_SQL} IS NULL OR flag.inserted_at > ${LAST_SEEN_SQL}`,
+// The viewer's "last seen" as it stands, as the cutoff for a visit starting now.
+export async function readFlagsCutoff(access: BlendedLearningAccess): Promise<FlagsCutoff> {
+  if (!canBlendedLearning(access, "view_flags")) return { lastSeenAt: null };
+  const rows = await query<{ last_seen_at: string | null }>(
+    `SELECT to_char(${LAST_SEEN_SQL}, 'YYYY-MM-DD"T"HH24:MI:SS') AS last_seen_at`,
     [access.actorEmail]
   );
+  return { lastSeenAt: rows[0]?.last_seen_at ?? null };
+}
+
+// How many flags were raised after the cutoff: the given visit's, else the
+// viewer's "last seen" as it stands.
+export async function countNewFlags(access: BlendedLearningAccess, cutoff?: FlagsCutoff): Promise<number> {
+  if (!canBlendedLearning(access, "view_flags")) return 0;
+  const rows = cutoff
+    ? await query<{ count: number | string }>(
+        `SELECT count(*) AS count
+         FROM blended_learning_mentor_flags flag
+         WHERE $1::timestamp IS NULL OR flag.inserted_at > $1::timestamp`,
+        [cutoff.lastSeenAt]
+      )
+    : await query<{ count: number | string }>(
+        `SELECT count(*) AS count
+         FROM blended_learning_mentor_flags flag
+         WHERE ${LAST_SEEN_SQL} IS NULL OR flag.inserted_at > ${LAST_SEEN_SQL}`,
+        [access.actorEmail]
+      );
   return Number(rows[0]?.count ?? 0);
 }
 
 // One page of the feed, narrowed by the Conversation's Mentor and the Flag
-// Recipient. Null when the actor may not see flags.
-export async function listFlags(access: BlendedLearningAccess, filters: FlagFilters = {}): Promise<FlagsPage | null> {
+// Recipient, with New marked against the visit's cutoff. Null when the actor
+// may not see flags.
+export async function listFlags(
+  access: BlendedLearningAccess,
+  filters: FlagFilters,
+  cutoff: FlagsCutoff
+): Promise<FlagsPage | null> {
   if (!canBlendedLearning(access, "view_flags")) return null;
   const [rows, newCount] = await Promise.all([
     query<FlagRow>(
       `SELECT flag.id, flag.recipient, flag.comment,
-              (${LAST_SEEN_SQL} IS NULL OR flag.inserted_at > ${LAST_SEEN_SQL}) AS is_new,
+              ($1::timestamp IS NULL OR flag.inserted_at > $1::timestamp) AS is_new,
+              EXISTS (
+                SELECT 1 FROM blended_learning_mentor_mentee_mappings mapping
+                WHERE mapping.student_id = st.id AND ${activeBlendedMappingSql("mapping", "$6")}
+              ) AS in_scope,
               c.id AS conversation_id, c.occurred_on::text AS occurred_on,
               (c.notes_html IS NOT NULL) AS has_notes,
               c.mentor_user_id, ${MENTOR_NAME_SQL} AS mentor_name,
@@ -125,14 +192,15 @@ export async function listFlags(access: BlendedLearningAccess, filters: FlagFilt
        ORDER BY flag.inserted_at DESC, flag.id DESC
        LIMIT $5`,
       [
-        access.actorEmail,
+        cutoff.lastSeenAt,
         filters.mentorUserId ?? null,
         filters.recipient ?? null,
         filters.cursor ?? null,
         FLAGS_PAGE_SIZE + 1,
+        CURRENT_ACADEMIC_YEAR,
       ]
     ),
-    countNewFlags(access),
+    countNewFlags(access, cutoff),
   ]);
 
   const page = rows.slice(0, FLAGS_PAGE_SIZE);
@@ -142,6 +210,7 @@ export async function listFlags(access: BlendedLearningAccess, filters: FlagFilt
       recipient: row.recipient,
       comment: row.comment,
       isNew: row.is_new,
+      inScope: row.in_scope,
       conversationId: Number(row.conversation_id),
       occurredOn: row.occurred_on,
       hasNotes: row.has_notes,
