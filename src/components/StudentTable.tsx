@@ -384,13 +384,11 @@ function StudentCard({
           ) : (
             <>
             <DetailGroup title="Personal">
-              {!isNvs && (
-                <DetailField
-                  label="Stream"
-                  value={student.stream}
-                  className="capitalize"
-                />
-              )}
+              <DetailField
+                label="Stream"
+                value={student.stream}
+                className="capitalize"
+              />
               <DetailField
                 label="Email"
                 value={student.email}
