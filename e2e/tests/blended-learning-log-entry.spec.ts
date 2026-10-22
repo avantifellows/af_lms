@@ -102,8 +102,9 @@ async function horizontalOverflow(page: Page): Promise<number> {
 
 async function fillConversation(page: Page, fields: { duration: string; summary: string }) {
   const form = page.getByRole("form", { name: "Log a Conversation or Attempt" });
-  await form.getByRole("radio", { name: "Call" }).check();
-  await form.getByRole("radio", { name: "Student and parent" }).check();
+  // Call is preselected; Student too, so pick Both.
+  await expect(form.getByRole("radio", { name: "Call" })).toBeChecked();
+  await form.getByRole("radio", { name: "Both" }).check();
   await form.getByLabel("Duration (minutes)").fill(fields.duration);
   await form.getByLabel("Summary").fill(fields.summary);
   return form;
@@ -126,6 +127,14 @@ for (const { label, key, viewport, entryRole } of VIEWPORTS) {
       await page.goto(detailPath(mentee));
       await page.getByRole("link", { name: "Log a Conversation or Attempt" }).click();
       await expect(page).toHaveURL(new RegExp(`${logPath(mentee)}$`));
+      await expect(page.getByRole("heading", { level: 1, name: "Log a conversation" })).toBeVisible();
+      await expect(page.getByRole("link", { name: `Back to ${fullName(mentee)}` })).toHaveAttribute(
+        "href",
+        detailPath(mentee)
+      );
+      for (const card of ["Session details", "Recording", "Write-up"]) {
+        await expect(page.getByRole("region", { name: card })).toBeVisible();
+      }
 
       const form = await fillConversation(page, { duration: "35", summary });
       await expect(form.getByLabel("Date")).toHaveValue(todayIST);
@@ -152,11 +161,20 @@ for (const { label, key, viewport, entryRole } of VIEWPORTS) {
       await expect(notes).toHaveText("Revise optics by Friday");
       await expect(notes.locator("strong, b")).toHaveText("Revise optics");
 
-      await form.getByRole("button", { name: "Save Conversation" }).click();
+      // The save bar stays in view at the bottom while the form scrolls.
+      const save = form.getByRole("button", { name: "Save conversation" });
+      await expect(save).toBeInViewport();
+      await expect(form.getByRole("link", { name: "Cancel" })).toHaveAttribute("href", detailPath(mentee));
+      await save.click();
 
       const saved = page.getByRole("region", { name: "Saved" });
       await expect(saved.getByRole("heading", { name: "Conversation saved" })).toBeVisible();
-      await expect(saved.getByText(`Your Mentee list now shows ${fullName(mentee)} in Everyone else`)).toBeVisible();
+      await expect(saved.getByText(`Your student list now shows ${fullName(mentee)} in Everyone else`)).toBeVisible();
+      await expect(saved.getByText("35 min")).toBeVisible();
+      // Rows: Conversation, Duration, then Action items added: the blank
+      // starter rows were not saved.
+      await expect(saved.getByRole("term").nth(2)).toHaveText("Action items added");
+      await expect(saved.getByRole("definition").nth(2)).toHaveText("0");
       await expect(saved.getByText("Today")).toBeVisible();
       await expect(saved.getByText("Never reached")).toHaveCount(0);
 
@@ -198,13 +216,15 @@ for (const { label, key, viewport, entryRole } of VIEWPORTS) {
       else expect(panelBox!.x).toBeGreaterThan(formBox!.x);
 
       await form.getByRole("radio", { name: "Attempt" }).check();
+      await expect(page.getByRole("heading", { level: 1, name: "Log an attempt" })).toBeVisible();
       await expect(form.getByLabel("Duration (minutes)")).toHaveCount(0);
+      await expect(form.getByRole("region", { name: "Recording" })).toHaveCount(0);
       await form.getByLabel("Note (optional)").fill(`Synthetic ${key}: phone switched off.`);
-      await form.getByRole("button", { name: "Save Attempt" }).click();
+      await form.getByRole("button", { name: "Log attempt" }).click();
 
       const saved = page.getByRole("region", { name: "Saved" });
-      await expect(saved.getByRole("heading", { name: "Attempt saved" })).toBeVisible();
-      await expect(saved.getByText(`Your Mentee list now shows ${fullName(mentee)} in Talk to First`)).toBeVisible();
+      await expect(saved.getByRole("heading", { name: "Attempt logged" })).toBeVisible();
+      await expect(saved.getByText(`Your student list now shows ${fullName(mentee)} in Talk to First`)).toBeVisible();
       await expect(saved.getByText("Last try didn't connect")).toBeVisible();
       await expect(saved.getByText(lastContact)).toBeVisible();
 
@@ -230,19 +250,19 @@ for (const { label, key, viewport, entryRole } of VIEWPORTS) {
 
       const form = await fillConversation(page, { duration: "0", summary: "Synthetic: should not save." });
       await form.getByLabel("Date").fill(tomorrowIST);
-      await form.getByRole("button", { name: "Save Conversation" }).click();
+      await form.getByRole("button", { name: "Save conversation" }).click();
       await expect(form.getByText("The date can't be in the future.")).toBeVisible();
       await expect(form.getByText("Duration must be between 1 and 240 minutes.")).toBeVisible();
 
       await form.getByLabel("Date").fill(todayIST);
       await form.getByLabel("Duration (minutes)").fill("241");
-      await form.getByRole("button", { name: "Save Conversation" }).click();
+      await form.getByRole("button", { name: "Save conversation" }).click();
       await expect(form.getByText("Duration must be between 1 and 240 minutes.")).toBeVisible();
       await expect(form.getByText("The date can't be in the future.")).toHaveCount(0);
 
       await form.getByRole("radio", { name: "Attempt" }).check();
       await form.getByLabel("Date").fill(tomorrowIST);
-      await form.getByRole("button", { name: "Save Attempt" }).click();
+      await form.getByRole("button", { name: "Log attempt" }).click();
       await expect(form.getByText("The date can't be in the future.")).toBeVisible();
 
       expect(await savedEntries(studentIds[mentee.key])).toHaveLength(before);
@@ -256,7 +276,7 @@ for (const { label, key, viewport, entryRole } of VIEWPORTS) {
       await page.getByRole("link", { name: "Log a Conversation or Attempt" }).click();
 
       const form = await fillConversation(page, { duration: "20", summary });
-      await form.getByRole("button", { name: "Save Conversation" }).click();
+      await form.getByRole("button", { name: "Save conversation" }).click();
       await expect(page.getByRole("region", { name: "Saved" }).getByRole("heading", { name: "Conversation saved" })).toBeVisible();
 
       expect(await savedEntries(studentIds[mentee.key])).toEqual([

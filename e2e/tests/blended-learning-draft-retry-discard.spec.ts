@@ -189,7 +189,7 @@ for (const { label, viewport, entryRole } of VIEWPORTS) {
       await expect(listEntry(page, ira).getByText("Draft ready to review")).toHaveCount(0);
 
       await page.goto(`/blended-learning/students/${studentIds[ira.key]}/log`);
-      await expect(page.getByLabel("Upload a Call Recording")).toHaveCount(1);
+      await expect(page.getByLabel("Upload the recording")).toHaveCount(1);
     });
 
     test("a read-only admin sees no retry or discard controls, and direct POSTs are refused", async ({ page }) => {

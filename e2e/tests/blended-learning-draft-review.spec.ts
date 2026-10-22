@@ -26,9 +26,9 @@ const DRAFT = {
   notes: [{ heading: "Mock test", points: ["Scored <60> in physics & maths", "Wants a <script> study timetable"] }],
   itemsToVerify: ["Is the coaching centre Aakash or Allen?", "Rank 1,240 in the mock test"],
 };
-// The summary the form opens with: the drafted summary, then its Summary Tags.
-const PREFILLED_SUMMARY =
-  "Synthetic: talked through the mock test result and the revision plan.\n\nTags: Exam stress, Physics doubts";
+// The summary the form opens with: the drafted summary alone; its Summary
+// Tags are not used.
+const PREFILLED_SUMMARY = DRAFT.summary;
 // The drafted notes as the editor saves them, with the drafted text escaped.
 const SAVED_NOTES_HTML =
   "<h3>Mock test</h3><ul><li><p>Scored &lt;60&gt; in physics &amp; maths</p></li>" +
@@ -193,28 +193,37 @@ for (const { label, key, viewport, entryRole } of VIEWPORTS) {
       await expect(form.getByRole("radio", { name: "Student", exact: true })).toBeChecked();
       await expect(form.getByLabel("Duration (minutes)")).toHaveValue("40");
       await expect(form.getByLabel("Summary")).toHaveValue(PREFILLED_SUMMARY);
-      const firstItem = form.getByRole("group", { name: "Action Item 1" });
-      await expect(firstItem.getByLabel("Owner")).toHaveValue("student");
-      await expect(firstItem.getByLabel("What")).toHaveValue(DRAFT.actionItems[0].text);
+      // The Summary Tags are neither in the summary nor shown.
+      await expect(form.getByLabel("Summary")).not.toHaveValue(/Tags:/);
+      for (const tag of DRAFT.summaryTags) await expect(page.getByText(tag)).toHaveCount(0);
+      // The drafted rows only, with no blank starter rows.
+      const items = form.getByRole("group", { name: "Action items" });
+      await expect(items.getByLabel("Who does action item 1", { exact: true })).toHaveValue("student");
+      await expect(items.getByLabel("Action item 1", { exact: true })).toHaveValue(DRAFT.actionItems[0].text);
       // A drafted due date is not shown, and Action Items take none.
-      await expect(firstItem.getByLabel(/Due/)).toHaveCount(0);
-      const secondItem = form.getByRole("group", { name: "Action Item 2" });
-      await expect(secondItem.getByLabel("Owner")).toHaveValue("mentor");
-      await expect(secondItem.getByLabel("What")).toHaveValue(DRAFT.actionItems[1].text);
+      await expect(items.getByLabel(/Due/)).toHaveCount(0);
+      await expect(items.getByLabel("Who does action item 2", { exact: true })).toHaveValue("mentor");
+      await expect(items.getByLabel("Action item 2", { exact: true })).toHaveValue(DRAFT.actionItems[1].text);
+      await expect(items.getByLabel("Action item 3", { exact: true })).toHaveCount(0);
+      // Summary and Action items are marked as drafted, the notes as written, from the recording.
+      await expect(form.getByText("Drafted from the recording")).toHaveCount(2);
+      await expect(form.getByText("Written from the recording")).toBeVisible();
       const notes = form.getByRole("textbox", { name: "Notes" });
       await expect(notes.getByRole("heading", { name: "Mock test" })).toBeVisible();
       // Drafted text is shown as text, never as markup.
       await expect(notes.getByText("Scored <60> in physics & maths")).toBeVisible();
       await expect(notes.getByText("Wants a <script> study timetable")).toBeVisible();
       // The draft already has a recording, so there is no second upload.
-      await expect(form.getByText("Call Recording (optional)")).toHaveCount(0);
+      const recording = form.getByRole("region", { name: "Recording" });
+      await expect(recording.getByText("Drafted. Check and edit below")).toBeVisible();
+      await expect(form.getByLabel("Upload the recording")).toHaveCount(0);
       expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
 
-      await form.getByRole("button", { name: "Save Conversation" }).click();
+      await form.getByRole("button", { name: "Save conversation" }).click();
 
       const saved = page.getByRole("region", { name: "Saved" });
       await expect(saved.getByRole("heading", { name: "Conversation saved" })).toBeVisible();
-      await expect(saved.getByText(`Your Mentee list now shows ${fullName(mentee)} in Everyone else`)).toBeVisible();
+      await expect(saved.getByText(`Your student list now shows ${fullName(mentee)} in Everyone else`)).toBeVisible();
 
       const rows = await savedRows(studentId, draftId);
       expect(rows.conversations).toEqual([
