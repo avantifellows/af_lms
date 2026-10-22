@@ -14,16 +14,28 @@ import type { QuestionContent } from "@/types/question-analytics";
 // test; only the asked-for question is passed on, so the response stays small
 // even when questions carry inline images.
 
+interface CmsMetaData {
+  text?: string;
+  options?: string[] | null;
+  answer?: string[] | null;
+  solutions?: { type?: string; value?: string }[] | null;
+}
+
 interface CmsProblem {
   id: number;
   subtype?: string;
   paragraph?: { body?: string } | null;
-  meta_data?: {
-    text?: string;
-    options?: string[] | null;
-    answer?: string[] | null;
-    solutions?: { type?: string; value?: string }[] | null;
-  };
+  meta_data?: CmsMetaData;
+  lang_versions?: { lang_code?: string; meta_data?: CmsMetaData | null }[] | null;
+}
+
+// Since the CMS went multilingual (nex-gen-cms #170) a problem's content lives per
+// language in lang_versions; the top-level meta_data is kept but empty. Read the
+// English version, as quiz-backend's cms_ingest does, and fall back to the flat copy
+// only for older payloads.
+function englishMeta(problem: CmsProblem): CmsMetaData {
+  const en = problem.lang_versions?.find((v) => v?.lang_code === "en")?.meta_data;
+  return en && Object.keys(en).length > 0 ? en : (problem.meta_data ?? {});
 }
 
 function isPositiveInt(value: string | null): value is string {
@@ -96,7 +108,7 @@ export async function GET(
     return NextResponse.json({ error: "Question not found in this test" }, { status: 404 });
   }
 
-  const meta = problem.meta_data ?? {};
+  const meta = englishMeta(problem);
   const paragraph = problem.paragraph?.body;
   const content: QuestionContent = {
     id: problem.id,

@@ -25,14 +25,26 @@ const TEST = {
   test: { id: 9330 },
   problems: [
     {
+      // The real shape since the CMS went multilingual: content per language, the
+      // top-level meta_data present but empty.
       id: 9248,
       subtype: "mcq_single_answer",
-      meta_data: {
-        text: "<div>Ratio of \\(I_{max}\\) to \\(I_{min}\\)?</div>",
-        options: ["1/100", "1/10", "10/1", "3/2"],
-        answer: ["4"],
-        solutions: [{ type: "text", value: "<div>121/81</div>" }, { type: "text", value: "" }],
-      },
+      meta_data: { text: "", options: null, answer: null },
+      lang_versions: [
+        {
+          lang_code: "hi",
+          meta_data: { text: "<div>हिंदी</div>", options: ["क", "ख", "ग", "घ"], answer: ["4"], solutions: null },
+        },
+        {
+          lang_code: "en",
+          meta_data: {
+            text: "<div>Ratio of \\(I_{max}\\) to \\(I_{min}\\)?</div>",
+            options: ["1/100", "1/10", "10/1", "3/2"],
+            answer: ["4"],
+            solutions: [{ type: "text", value: "<div>121/81</div>" }, { type: "text", value: "" }],
+          },
+        },
+      ],
     },
     {
       id: 9300,
@@ -131,6 +143,12 @@ describe("GET /api/quiz-analytics/[udise]/question-content", () => {
       answer: ["4"],
       solutions: ["<div>121/81</div>"],
     });
+  });
+
+  it("falls back to the flat meta_data for a payload without lang_versions", async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify(TEST), { status: 200 }));
+    const body = await (await call("questionId=9300")).json();
+    expect(body.answer).toEqual(["2"]);
   });
 
   it("puts a comprehension passage before its question", async () => {
