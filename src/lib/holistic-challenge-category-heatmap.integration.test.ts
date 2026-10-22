@@ -18,15 +18,25 @@ const tag = runId.slice(0, 8);
 let db: typeof import("./db");
 let heatmap: typeof import("./holistic-challenge-category-heatmap").getHolisticChallengeCategoryHeatmap;
 let programId: number;
+// All Programs: two further Programs, apart from `programId`'s fixtures.
+let programB: number;
+let programC: number;
 let mentorId: number;
-const phases: Record<"g11p1" | "g11p2" | "g12p1" | "g11p3", number> = { g11p1: 0, g11p2: 0, g12p1: 0, g11p3: 0 };
-const schools: Record<"alpha" | "beta" | "charlie" | "delta", { id: number; code: string; name: string }> = {
+const phases: Record<"g11p1" | "g11p2" | "g12p1" | "g11p3" | "b11p1" | "c11p1", number> = {
+  g11p1: 0, g11p2: 0, g12p1: 0, g11p3: 0, b11p1: 0, c11p1: 0,
+};
+type SchoolKey = "alpha" | "beta" | "charlie" | "delta" | "echo" | "foxtrot";
+const schools: Record<SchoolKey, { id: number; code: string; name: string }> = {
   alpha: { id: 0, code: `R463A${tag}`, name: `Issue463 Alpha ${tag}` },
   beta: { id: 0, code: `R463B${tag}`, name: `Issue463 Beta ${tag}` },
   charlie: { id: 0, code: `R463C${tag}`, name: `Issue463 Charlie ${tag}` },
   delta: { id: 0, code: `R463D${tag}`, name: `Issue463 Delta ${tag}` },
+  echo: { id: 0, code: `R464E${tag}`, name: `Issue464 Echo ${tag}` },
+  foxtrot: { id: 0, code: `R464F${tag}`, name: `Issue464 Foxtrot ${tag}` },
 };
 
+// The first Program alone (not All Programs).
+const single = () => ({ programIds: [programId], allPrograms: false });
 const admin: UserPermission = { email: `issue463-${runId}@example.test`, level: 3, role: "admin" };
 let programManager: UserPermission;
 
@@ -43,7 +53,8 @@ async function seedStudent(client: PoolClient) {
 }
 
 async function seedMapping(client: PoolClient, studentId: number, schoolId: number,
-  startedAt: string, endedAt: string | null = null) {
+  startedAt: string, endedAt: string | null = null,
+  { program = programId, year = academicYear }: { program?: number; year?: string } = {}) {
   await client.query(
     `INSERT INTO holistic_mentorship_mentor_mentee_mappings
        (student_id, mentor_user_id, school_id, program_id, academic_year, started_at, assignment_source,
@@ -51,7 +62,7 @@ async function seedMapping(client: PoolClient, studentId: number, schoolId: numb
      VALUES ($1, $2, $3, $4, $5, $6::timestamptz, 'af_lms_teacher', $7::timestamptz,
              CASE WHEN $7::timestamptz IS NULL THEN NULL ELSE 'af_lms_admin' END,
              CASE WHEN $7::timestamptz IS NULL THEN NULL ELSE 'Synthetic transfer' END)`,
-    [studentId, mentorId, schoolId, programId, academicYear, startedAt, endedAt]);
+    [studentId, mentorId, schoolId, program, year, startedAt, endedAt]);
 }
 
 async function seedNotes(client: PoolClient, studentId: number, phaseId: number,
@@ -133,6 +144,10 @@ describe.skipIf(!database)("Challenge Category Heatmap against disposable Postgr
         "INSERT INTO product (name, inserted_at, updated_at) VALUES ('Issue463 synthetic', now(), now()) RETURNING id");
       programId = await insertId(client,
         "INSERT INTO program (name, product_id, inserted_at, updated_at) VALUES ('Issue463 synthetic', $1, now(), now()) RETURNING id", [productId]);
+      programB = await insertId(client,
+        "INSERT INTO program (name, product_id, inserted_at, updated_at) VALUES ('Issue464 synthetic B', $1, now(), now()) RETURNING id", [productId]);
+      programC = await insertId(client,
+        "INSERT INTO program (name, product_id, inserted_at, updated_at) VALUES ('Issue464 synthetic C', $1, now(), now()) RETURNING id", [productId]);
       const grade11 = await insertId(client,
         "INSERT INTO grade (number, inserted_at, updated_at) VALUES (11, now(), now()) RETURNING id");
       const grade12 = await insertId(client,
@@ -198,6 +213,41 @@ describe.skipIf(!database)("Challenge Category Heatmap against disposable Postgr
       const s8 = await seedStudent(client);
       await seedMapping(client, s8, schools.alpha.id, "2026-06-01");
       await seedNotes(client, s8, phases.g12p1, "submitted", ["academic.exam_related", "non_academic.wellness"]);
+
+      // All Programs: one Grade 11 Phase in each of Programs B and C.
+      for (const [key, program, title] of [["b11p1", programB, "B start"], ["c11p1", programC, "C start"]] as const) {
+        const otherPlanId = await insertId(client,
+          "INSERT INTO holistic_mentorship_phase_plans (program_id, academic_year) VALUES ($1, $2) RETURNING id",
+          [program, academicYear]);
+        phases[key] = await insertId(client,
+          `INSERT INTO holistic_mentorship_phases
+             (phase_plan_id, grade_id, title, position, state, guidance_markdown, revision)
+           VALUES ($1, $2, $3, 1, 'open', 'Synthetic guidance', 1) RETURNING id`,
+          [otherPlanId, grade11, title]);
+        await client.query(
+          "INSERT INTO holistic_mentorship_phase_questions (phase_id, text, position) VALUES ($1, 'Synthetic question', 1)",
+          [phases[key]]);
+      }
+      // Program C also has a 2025-2026 Plan; Program B a 2024-2025 Mapping.
+      await client.query(
+        "INSERT INTO holistic_mentorship_phase_plans (program_id, academic_year) VALUES ($1, '2025-2026')",
+        [programC]);
+      // S9 moved from Program B (Echo) to Program C (Foxtrot): Foxtrot, both Notes' codes.
+      const s9 = await seedStudent(client);
+      await seedMapping(client, s9, schools.echo.id, "2026-06-01", "2026-08-01", { program: programB });
+      await seedMapping(client, s9, schools.foxtrot.id, "2026-08-01", null, { program: programC });
+      await seedNotes(client, s9, phases.b11p1, "submitted", ["academic.test_preparation", "non_academic.adjustment"]);
+      await seedNotes(client, s9, phases.c11p1, "submitted", ["academic.test_preparation", "non_academic.wellness"]);
+      // S10 at Echo in Program B only.
+      const s10 = await seedStudent(client);
+      await seedMapping(client, s10, schools.echo.id, "2026-06-01", null, { program: programB });
+      await seedMapping(client, s10, schools.echo.id, "2024-06-01", "2025-03-31",
+        { program: programB, year: "2024-2025" });
+      await seedNotes(client, s10, phases.b11p1, "submitted", ["academic.backlogs_workload", "non_academic.adjustment"]);
+      // S11 at Foxtrot in Program C only.
+      const s11 = await seedStudent(client);
+      await seedMapping(client, s11, schools.foxtrot.id, "2026-06-01", null, { program: programC });
+      await seedNotes(client, s11, phases.c11p1, "submitted", ["academic.backlogs_workload", "non_academic.no_major_issue"]);
     });
     programManager = {
       email: `issue463-pm-${runId}@example.test`,
@@ -215,7 +265,7 @@ describe.skipIf(!database)("Challenge Category Heatmap against disposable Postgr
   });
 
   it("counts each Student once per Category across All Phases under their latest School", async () => {
-    const result = await heatmap({ programId, academicYear, grade: 11, phaseId: null }, admin);
+    const result = await heatmap({ ...single(), academicYear, grade: 11, phaseId: null }, admin);
 
     // Alpha: S1, S2 (S3 has only a draft; S5 moved to Beta). n = 2.
     // Beta: S5 (moved in), S6 (ended Mapping). n = 2. Delta: S7. n = 1.
@@ -259,7 +309,7 @@ describe.skipIf(!database)("Challenge Category Heatmap against disposable Postgr
     });
   });
   it("counts only the selected Phase's Notes when one Phase is chosen", async () => {
-    const result = await heatmap({ programId, academicYear, grade: 11, phaseId: phases.g11p2 }, admin);
+    const result = await heatmap({ ...single(), academicYear, grade: 11, phaseId: phases.g11p2 }, admin);
 
     // Phase 2 Notes: S1 (Alpha) and S6 (Beta). Charlie and Delta have Mappings but n = 0.
     expect(result).toMatchObject({
@@ -281,7 +331,7 @@ describe.skipIf(!database)("Challenge Category Heatmap against disposable Postgr
   });
 
   it("attributes a PM's out-of-scope transfer to the in-scope School and omits out-of-scope Schools", async () => {
-    const result = await heatmap({ programId, academicYear, grade: 11, phaseId: null }, programManager);
+    const result = await heatmap({ ...single(), academicYear, grade: 11, phaseId: null }, programManager);
 
     // S7's latest Mapping is Delta, outside the PM's Schools, so Beta keeps S7.
     expect(result).toMatchObject({
@@ -320,8 +370,8 @@ describe.skipIf(!database)("Challenge Category Heatmap against disposable Postgr
     });
   });
   it("lists the Grade's Phases in Plan order and defaults to its latest Open Phase", async () => {
-    const grade11 = await heatmap({ programId, academicYear, grade: 11, phaseId: null }, admin);
-    const grade12 = await heatmap({ programId, academicYear, grade: 12, phaseId: null }, admin);
+    const grade11 = await heatmap({ ...single(), academicYear, grade: 11, phaseId: null }, admin);
+    const grade12 = await heatmap({ ...single(), academicYear, grade: 12, phaseId: null }, admin);
 
     expect(grade11).toMatchObject({
       phases: [
@@ -345,14 +395,51 @@ describe.skipIf(!database)("Challenge Category Heatmap against disposable Postgr
   });
 
   it("defaults to All Phases when the Grade has no Open Phase", async () => {
-    const result = await heatmap({ programId, academicYear: "2025-2026", grade: 11, phaseId: null }, admin);
+    const result = await heatmap({ ...single(), academicYear: "2025-2026", grade: 11, phaseId: null }, admin);
 
     expect(result).toMatchObject({ phases: [], defaultPhaseId: null, total: { studentCount: 0 }, schools: [] });
   });
 
+  it("unions each Student's Notes across All Programs under their latest Mapping in any of them", async () => {
+    const result = await heatmap(
+      { programIds: [programB, programC], allPrograms: true, academicYear, grade: 11, phaseId: null }, admin);
+
+    // Echo: S10. n = 1. Foxtrot: S9 (moved in from Program B), S11. n = 2.
+    // S9's Program B and C Notes share Test preparation, counted once.
+    // The first Program's Alpha-Delta Students are not in these Programs.
+    expect(result).toMatchObject({
+      programIds: [programB, programC],
+      phaseId: null,
+      phases: [],
+      defaultPhaseId: null,
+      academicYears: ["2026-2027", "2025-2026", "2024-2025"],
+      total: {
+        studentCount: 3,
+        counts: counts({
+          "academic.backlogs_workload": 2,
+          "academic.test_preparation": 1,
+          "non_academic.adjustment": 2,
+          "non_academic.wellness": 1,
+          "non_academic.no_major_issue": 1,
+        }),
+      },
+      schools: [
+        school("echo", 1, { "academic.backlogs_workload": 1, "non_academic.adjustment": 1 }),
+        school("foxtrot", 2, {
+          "academic.backlogs_workload": 1,
+          "academic.test_preparation": 1,
+          "non_academic.adjustment": 1,
+          "non_academic.wellness": 1,
+          "non_academic.no_major_issue": 1,
+        }),
+      ],
+      hiddenSchoolCount: 0,
+    });
+  });
+
   it("rejects a Phase outside the Program's Plan for that year and Grade", async () => {
-    expect(await heatmap({ programId, academicYear, grade: 11, phaseId: phases.g12p1 }, admin)).toBeNull();
-    expect(await heatmap({ programId, academicYear: "2025-2026", grade: 11, phaseId: phases.g11p1 }, admin))
+    expect(await heatmap({ ...single(), academicYear, grade: 11, phaseId: phases.g12p1 }, admin)).toBeNull();
+    expect(await heatmap({ ...single(), academicYear: "2025-2026", grade: 11, phaseId: phases.g11p1 }, admin))
       .toBeNull();
   });
 });

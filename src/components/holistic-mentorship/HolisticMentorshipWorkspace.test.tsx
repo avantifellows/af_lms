@@ -118,7 +118,7 @@ describe("HolisticMentorshipWorkspace", () => {
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
     render(<HolisticMentorshipWorkspace mode="admin" canEdit={false} initialProgramId={78}
-      availableProgramIds={[1, 78]} />);
+      availableProgramIds={[78]} />);
 
     await user.click(screen.getByRole("tab", { name: "Challenge Categories" }));
 
@@ -130,6 +130,90 @@ describe("HolisticMentorshipWorkspace", () => {
     await user.selectOptions(screen.getByLabelText("Academic Year"), "2025-2026");
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
       "/api/holistic-mentorship/challenge-categories?program_id=78&academic_year=2025-2026&grade=11",
+      expect.anything(),
+    ));
+  });
+
+  function stubAdminWorkspaceFetch() {
+    const fetchMock = vi.fn().mockImplementation((url: string) => Promise.resolve({
+      ok: true,
+      json: async () => url.includes("/challenge-categories?") ? {
+        programIds: [1, 78], academicYear: "2026-2027", grade: 11, phaseId: null, phases: [],
+        defaultPhaseId: null, academicYears: ["2026-2027"],
+        total: { studentCount: 0, counts: {} }, schools: [], hiddenSchoolCount: 0,
+      } : url.includes("/progress?") ? {
+        rows: [], counts: { total: 0, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 },
+        options: { schools: [], mentors: [], phases: [] }, pageSize: 50,
+        academicYears: ["2026-2027"], refreshedAt: "2026-07-17T10:00:00.000Z",
+      } : { plan: null },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  function programOptions() {
+    return Array.from((screen.getByLabelText("Program") as HTMLSelectElement).options)
+      .map((option) => option.textContent);
+  }
+
+  it("opens Challenge Categories on All Programs for a multi-Program viewer, only on that tab", async () => {
+    const fetchMock = stubAdminWorkspaceFetch();
+    const user = userEvent.setup();
+    render(<HolisticMentorshipWorkspace mode="admin" initialProgramId={78} availableProgramIds={[1, 78]} />);
+    expect(programOptions()).toEqual(["1 - JNV CoE", "78 - EMRS CoE"]);
+
+    await user.click(screen.getByRole("tab", { name: "Challenge Categories" }));
+
+    expect(programOptions()).toEqual(["All Programs", "1 - JNV CoE", "78 - EMRS CoE"]);
+    expect(screen.getByLabelText("Program")).toHaveDisplayValue("All Programs");
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/holistic-mentorship/challenge-categories?program_id=all&academic_year=2026-2027&grade=11",
+      expect.anything(),
+    ));
+    expect(screen.getByLabelText("Phase")).toBeDisabled();
+
+    await user.click(screen.getByRole("tab", { name: "Phase Setup" }));
+    expect(programOptions()).toEqual(["1 - JNV CoE", "78 - EMRS CoE"]);
+    expect(screen.getByLabelText("Program")).toHaveDisplayValue("78 - EMRS CoE");
+  });
+
+  it("restores the last single Program when leaving Challenge Categories on All Programs", async () => {
+    const fetchMock = stubAdminWorkspaceFetch();
+    const user = userEvent.setup();
+    const view = render(<HolisticMentorshipWorkspace mode="admin" availableProgramIds={[1, 78]} />);
+
+    await user.click(screen.getByRole("tab", { name: "Challenge Categories" }));
+    await user.selectOptions(screen.getByLabelText("Program"), "78 - EMRS CoE");
+    view.rerender(<HolisticMentorshipWorkspace mode="admin" availableProgramIds={[1, 78]} />);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/holistic-mentorship/challenge-categories?program_id=78&academic_year=2026-2027&grade=11",
+      expect.anything(),
+    ));
+    await user.selectOptions(screen.getByLabelText("Program"), "All Programs");
+    expect(window.location.search).toBe("?program_id=78");
+    fetchMock.mockClear();
+
+    await user.click(screen.getByRole("tab", { name: "Students & Progress" }));
+
+    expect(programOptions()).toEqual(["1 - JNV CoE", "78 - EMRS CoE"]);
+    expect(screen.getByLabelText("Program")).toHaveDisplayValue("78 - EMRS CoE");
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/progress?"), expect.anything(),
+    ));
+    expect(fetchMock.mock.calls.every(([url]) => String(url).includes("program_id=78"))).toBe(true);
+  });
+
+  it("opens Challenge Categories on the only Program for a single-Program viewer", async () => {
+    const fetchMock = stubAdminWorkspaceFetch();
+    const user = userEvent.setup();
+    render(<HolisticMentorshipWorkspace mode="admin" canEdit={false} canViewPhaseSetup={false}
+      initialProgramId={78} availableProgramIds={[78]} />);
+
+    await user.click(screen.getByRole("tab", { name: "Challenge Categories" }));
+
+    expect(programOptions()).toEqual(["78 - EMRS CoE"]);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/holistic-mentorship/challenge-categories?program_id=78&academic_year=2026-2027&grade=11",
       expect.anything(),
     ));
   });

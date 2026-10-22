@@ -9,27 +9,42 @@ import { holisticProgramId, holisticRouteAccess, positiveIntegerString } from ".
 
 const INVALID_FILTERS = { error: "Invalid Challenge Category Heatmap filters" };
 
-function filtersFrom(request: Request): HolisticChallengeCategoryHeatmapFilters | null {
+type RequestedFilters = Omit<HolisticChallengeCategoryHeatmapFilters, "programIds" | "allPrograms"> & {
+  programId: number | "all";
+};
+
+// `program_id=all` is the viewer's scoped Holistic Programs; it has no Phase.
+function filtersFrom(request: Request): RequestedFilters | null {
   const params = new URL(request.url).searchParams;
-  const programId = holisticProgramId(params.get("program_id"));
+  const rawProgramId = params.get("program_id");
+  const programId = rawProgramId === "all" ? "all" : holisticProgramId(rawProgramId);
   const academicYear = params.get("academic_year") ?? "";
   const rawGrade = params.get("grade");
   const grade = rawGrade === "11" ? 11 : rawGrade === "12" ? 12 : null;
   const rawPhaseId = params.get("phase_id");
   const phaseId = rawPhaseId === null || rawPhaseId === "" ? null : positiveIntegerString(rawPhaseId);
   if (!programId || !validateAcademicYear(academicYear) || grade === null ||
-      (rawPhaseId && phaseId === null)) {
+      (rawPhaseId && phaseId === null) || (programId === "all" && rawPhaseId !== null)) {
     return null;
   }
   return { programId, academicYear, grade, phaseId };
 }
 
 async function heatmapResponse(request: Request) {
-  const filters = filtersFrom(request);
-  if (!filters) return NextResponse.json(INVALID_FILTERS, { status: 422 });
-  const access = await holisticRouteAccess("program_read", { programId: filters.programId });
+  const requested = filtersFrom(request);
+  if (!requested) return NextResponse.json(INVALID_FILTERS, { status: 422 });
+  const { programId, ...filters } = requested;
+  const allPrograms = programId === "all";
+  const access = await holisticRouteAccess(
+    "program_read",
+    allPrograms ? undefined : { programId },
+  );
   if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status });
-  const heatmap = await getHolisticChallengeCategoryHeatmap(filters, access.permission);
+  const heatmap = await getHolisticChallengeCategoryHeatmap({
+    ...filters,
+    programIds: allPrograms ? access.programIds ?? [] : [programId],
+    allPrograms,
+  }, access.permission);
   if (!heatmap) return NextResponse.json(INVALID_FILTERS, { status: 422 });
   return NextResponse.json(heatmap);
 }

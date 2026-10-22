@@ -176,6 +176,27 @@ describe("ChallengeCategoryHeatmap", () => {
     ]);
   });
 
+  it("locks Phase to All Phases for All Programs, even straight after a single Program", async () => {
+    const fetchMock = stubHeatmap((params) => params.get("program_id") === "all"
+      ? heatmap({ programIds: [1, 78], phases: [], defaultPhaseId: null })
+      : heatmap());
+    const view = render(<ChallengeCategoryHeatmap programId={1} academicYear="2026-2027" />);
+    await waitFor(() => expect(screen.getByLabelText("Phase")).toHaveDisplayValue("Phase 2 - Mid-term check"));
+
+    view.rerender(<ChallengeCategoryHeatmap programId="all" academicYear="2026-2027" />);
+
+    const phase = screen.getByLabelText("Phase");
+    expect(phase).toBeDisabled();
+    expect(within(phase).getAllByRole("option").map((option) => option.textContent)).toEqual(["All Phases"]);
+    await screen.findByRole("table", { name: "Challenge Category Heatmap" });
+    expect(phase).toBeDisabled();
+    expect(phase).toHaveDisplayValue("All Phases");
+    expect(within(phase).getAllByRole("option")).toHaveLength(1);
+    expect(requested(fetchMock).slice(2)).toEqual([
+      "/api/holistic-mentorship/challenge-categories?program_id=all&academic_year=2026-2027&grade=11",
+    ]);
+  });
+
   it("uses All Phases with a single request when the Grade has no Open Phase", async () => {
     const fetchMock = stubHeatmap(() => heatmap({ defaultPhaseId: null }));
 

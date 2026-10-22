@@ -55,7 +55,7 @@ describe("Challenge Category Heatmap API", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual(heatmap);
     expect(mockHeatmap).toHaveBeenCalledWith(
-      { programId: 1, academicYear: "2026-2027", grade: 11, phaseId: null },
+      { programIds: [1], allPrograms: false, academicYear: "2026-2027", grade: 11, phaseId: null },
       admin,
     );
   });
@@ -64,7 +64,7 @@ describe("Challenge Category Heatmap API", () => {
     await get("program_id=78&academic_year=2025-2026&grade=12&phase_id=42");
 
     expect(mockHeatmap).toHaveBeenCalledWith(
-      { programId: 78, academicYear: "2025-2026", grade: 12, phaseId: 42 },
+      { programIds: [78], allPrograms: false, academicYear: "2025-2026", grade: 12, phaseId: 42 },
       admin,
     );
   });
@@ -78,12 +78,62 @@ describe("Challenge Category Heatmap API", () => {
     ["a missing Program", "academic_year=2026-2027&grade=11"],
     ["an invalid Academic Year", "program_id=1&academic_year=2026&grade=11"],
     ["an invalid Phase", "program_id=1&academic_year=2026-2027&grade=11&phase_id=0"],
+    ["a Phase with All Programs", "program_id=all&academic_year=2026-2027&grade=11&phase_id=42"],
+    ["an upper-case All Programs", "program_id=ALL&academic_year=2026-2027&grade=11"],
   ])("returns 422 for %s before authorization or any read", async (_, search) => {
     const response = await get(search);
 
     expect(response.status).toBe(422);
     expect(await response.json()).toEqual({ error: "Invalid Challenge Category Heatmap filters" });
     expect(mockPermission).not.toHaveBeenCalled();
+    expect(mockHeatmap).not.toHaveBeenCalled();
+  });
+
+  it("resolves All Programs to every Holistic Program for an Admin", async () => {
+    const response = await get("program_id=all&academic_year=2026-2027&grade=11");
+
+    expect(response.status).toBe(200);
+    expect(mockHeatmap).toHaveBeenCalledWith(
+      { programIds: [1, 74, 94, 78, 88, 99], allPrograms: true, academicYear: "2026-2027", grade: 11, phaseId: null },
+      admin,
+    );
+  });
+
+  it("resolves All Programs to only a Program Manager's scoped Programs with active Centres", async () => {
+    const pm: UserPermission = {
+      email: "pm@example.com", level: 1, role: "program_manager", school_codes: ["SCH001"], program_ids: [1, 74, 78],
+    };
+    mockPermission.mockResolvedValue(pm);
+    mockQuery.mockResolvedValue([{ program_id: "78" }, { program_id: "1" }]);
+
+    const response = await get("program_id=all&academic_year=2026-2027&grade=12");
+
+    expect(response.status).toBe(200);
+    expect(mockHeatmap).toHaveBeenCalledWith(
+      { programIds: [1, 78], allPrograms: true, academicYear: "2026-2027", grade: 12, phaseId: null },
+      pm,
+    );
+  });
+
+  it("denies All Programs to a Program Manager with no Holistic Program", async () => {
+    mockPermission.mockResolvedValue({
+      email: "pm@example.com", level: 1, role: "program_manager", school_codes: ["SCH001"], program_ids: [64],
+    });
+
+    const response = await get("program_id=all&academic_year=2026-2027&grade=11");
+
+    expect(response.status).toBe(403);
+    expect(mockHeatmap).not.toHaveBeenCalled();
+  });
+
+  it("denies All Programs to a Teacher", async () => {
+    mockPermission.mockResolvedValue({
+      email: "teacher@example.com", level: 1, role: "teacher", school_codes: ["SCH001"], program_ids: [1, 78],
+    });
+
+    const response = await get("program_id=all&academic_year=2026-2027&grade=11");
+
+    expect(response.status).toBe(403);
     expect(mockHeatmap).not.toHaveBeenCalled();
   });
 

@@ -1,3 +1,4 @@
+import { CURRENT_ACADEMIC_YEAR } from "./constants";
 import { query } from "./db";
 import {
   HOLISTIC_CHALLENGE_CATEGORIES,
@@ -13,8 +14,10 @@ import type {
 
 export type { ChallengeCategoryHeatmap } from "@/types/holistic-challenge-category-heatmap";
 
+// `allPrograms`: the viewer's scoped Holistic Programs at once (no Phases).
 export type HolisticChallengeCategoryHeatmapFilters = {
-  programId: number;
+  programIds: number[];
+  allPrograms: boolean;
   academicYear: string;
   grade: 11 | 12;
   phaseId: number | null;
@@ -37,9 +40,10 @@ function emptyCounts(): ChallengeCategoryCounts {
 }
 
 // One aggregation. A Student counts once per Category (union of codes across
-// their qualifying Notes) under their latest in-scope Mapping School; scope is
-// applied before "latest wins", the Students & Progress transfer rule.
-// Placeholders: $1 Program, $2 Academic Year, $3 Grade, $4 Phase (null = All).
+// their qualifying Notes) under their latest in-scope Mapping School across the
+// Programs; scope is applied before "latest wins", the Students & Progress
+// transfer rule.
+// Placeholders: $1 Programs, $2 Academic Year, $3 Grade, $4 Phase (null = All).
 // The scope clause must use the `mapping_school` alias.
 function heatmapSql(schoolScopeSql: string) {
   return `WITH heatmap_phases AS (
@@ -47,7 +51,7 @@ function heatmapSql(schoolScopeSql: string) {
        FROM holistic_mentorship_phase_plans plan
        JOIN holistic_mentorship_phases phase ON phase.phase_plan_id = plan.id
        JOIN grade phase_grade ON phase_grade.id = phase.grade_id
-       WHERE plan.program_id = $1 AND plan.academic_year = $2
+       WHERE plan.program_id = ANY($1::bigint[]) AND plan.academic_year = $2
          AND phase_grade.number = $3
          AND ($4::bigint IS NULL OR phase.id = $4)
      ), student_categories AS (
@@ -60,7 +64,7 @@ function heatmapSql(schoolScopeSql: string) {
        SELECT mapping.id, mapping.student_id, mapping.school_id, mapping.started_at
        FROM holistic_mentorship_mentor_mentee_mappings mapping
        JOIN school mapping_school ON mapping_school.id = mapping.school_id
-       WHERE mapping.program_id = $1 AND mapping.academic_year = $2
+       WHERE mapping.program_id = ANY($1::bigint[]) AND mapping.academic_year = $2
          ${schoolScopeSql}
      ), latest_mapping AS (
        SELECT DISTINCT ON (mapping.student_id) mapping.student_id, mapping.school_id
@@ -91,7 +95,9 @@ function heatmapSql(schoolScopeSql: string) {
 }
 
 // The Grade's Phases in Plan order; `number` is the plan-wide Phase N.
+// All Programs has no Phases: each Program has its own Phase Plan.
 async function heatmapPhases(filters: HolisticChallengeCategoryHeatmapFilters) {
+  if (filters.allPrograms) return [];
   const rows = await query<{ id: number | string; position: number; title: string; state: "open" | "locked" }>(
     `SELECT phase.id, phase.position, phase.title, phase.state
      FROM holistic_mentorship_phase_plans plan
@@ -99,7 +105,7 @@ async function heatmapPhases(filters: HolisticChallengeCategoryHeatmapFilters) {
      JOIN grade phase_grade ON phase_grade.id = phase.grade_id
      WHERE plan.program_id = $1 AND plan.academic_year = $2 AND phase_grade.number = $3
      ORDER BY phase.position, phase.id`,
-    [filters.programId, filters.academicYear, filters.grade],
+    [filters.programIds[0], filters.academicYear, filters.grade],
   );
   return rows.map((phase) => ({
     id: Number(phase.id), number: Number(phase.position), title: phase.title, state: phase.state,
@@ -139,7 +145,18 @@ function heatmapGrid(rows: HeatmapDatabaseRow[]) {
   };
 }
 
-// Null when `phaseId` is not a Phase of that Program, year and Grade's Plan.
+// The union of each Program's Academic Years, current year first, then newest.
+async function academicYearsAcross(programIds: number[], permission: UserPermission) {
+  const perProgram = await Promise.all(
+    programIds.map((programId) => getHolisticProgressAcademicYears(programId, permission)),
+  );
+  const years = new Set([CURRENT_ACADEMIC_YEAR, ...perProgram.flat()]);
+  return [...years].sort((a, b) =>
+    Number(b === CURRENT_ACADEMIC_YEAR) - Number(a === CURRENT_ACADEMIC_YEAR) || b.localeCompare(a));
+}
+
+// Null when `phaseId` is not a Phase of that Program, year and Grade's Plan
+// (any Phase is invalid for All Programs).
 export async function getHolisticChallengeCategoryHeatmap(
   filters: HolisticChallengeCategoryHeatmapFilters,
   permission: UserPermission,
@@ -155,16 +172,16 @@ export async function getHolisticChallengeCategoryHeatmap(
   const schoolScopeSql = schoolScope.clause ? `AND ${schoolScope.clause}` : "";
   const [rows, academicYears] = await Promise.all([
     query<HeatmapDatabaseRow>(heatmapSql(schoolScopeSql), [
-      filters.programId,
+      filters.programIds,
       filters.academicYear,
       filters.grade,
       filters.phaseId,
       ...schoolScope.params,
     ]),
-    getHolisticProgressAcademicYears(filters.programId, permission),
+    academicYearsAcross(filters.programIds, permission),
   ]);
   return {
-    programIds: [filters.programId],
+    programIds: filters.programIds,
     academicYear: filters.academicYear,
     grade: filters.grade,
     phaseId: filters.phaseId,

@@ -42,13 +42,19 @@ function expectBrowserHealth(health: BrowserHealth) {
   expect(health.networkErrors, "Holistic Mentorship network errors").toEqual([]);
 }
 
+// Multi-Program viewers land on All Programs; these checks are about Program 1.
 async function openHeatmap(page: Page) {
   await page.goto("/admin/holistic-mentorship?program_id=1");
   await expect(page.getByRole("heading", { name: "Holistic Mentorship" })).toBeVisible();
   const tabs = page.getByRole("tablist", { name: "Holistic Mentorship sections" }).getByRole("tab");
   await page.getByRole("tab", { name: "Challenge Categories" }).click();
   await expect(page.getByRole("heading", { name: "Challenge Categories" })).toBeVisible();
+  await page.getByLabel("Program", { exact: true }).selectOption("1");
   return tabs;
+}
+
+function programOptions(page: Page) {
+  return page.getByLabel("Program", { exact: true }).locator("option");
 }
 
 async function selectCategorizedPhase(page: Page) {
@@ -175,6 +181,53 @@ test.describe("Challenge Category Heatmap", () => {
       ? "1 School has no categorized Notes yet"
       : `${fixture.mappingSchoolCount} Schools have no categorized Notes yet`;
     await expect(holisticAdminPage.getByText(note, { exact: true })).toBeVisible();
+    expectBrowserHealth(health);
+  });
+
+  test("All Programs locks Phase on the heatmap tab only, and other tabs keep the single Program", async ({
+    holisticAdminPage: page,
+  }) => {
+    const health = collectBrowserHealth(page);
+    await page.goto("/admin/holistic-mentorship?program_id=1");
+    const program = page.getByLabel("Program", { exact: true });
+    await expect(program).toHaveValue("1");
+    await expect(programOptions(page).filter({ hasText: "All Programs" })).toHaveCount(0);
+
+    await page.getByRole("tab", { name: "Challenge Categories" }).click();
+    await expect(program).toHaveValue("all");
+    await expect(program.locator("option:checked")).toHaveText("All Programs");
+    const phase = page.getByLabel("Phase", { exact: true });
+    await expect(phase).toBeDisabled();
+    await expect(phase.locator("option")).toHaveText(["All Phases"]);
+    await page.getByLabel("Grade", { exact: true }).selectOption("12");
+    // The seeded Program 1 Grade 12 Note is among every Program's Notes.
+    await expect(page.getByRole("table", { name: "Challenge Category Heatmap" })).toBeVisible();
+    await expect(phase).toBeDisabled();
+    await expect(phase.locator("option")).toHaveText(["All Phases"]);
+
+    for (const tab of ["Phase Setup", "Students & Progress"]) {
+      await page.getByRole("tab", { name: tab }).click();
+      await expect(program).toHaveValue("1");
+      await expect(programOptions(page).filter({ hasText: "All Programs" })).toHaveCount(0);
+    }
+    await expect(page).toHaveURL(/[?&]program_id=1(&|$)/);
+
+    const response = await page.request.get(
+      `/api/holistic-mentorship/challenge-categories?program_id=all&academic_year=2026-2027&grade=12&phase_id=${fixture.categorizedPhaseId}`,
+    );
+    expect(response.status()).toBe(422);
+    expectBrowserHealth(health);
+  });
+
+  test("a single-Program PM opens the heatmap on their Program with no All Programs option", async ({
+    holisticPmPage: page,
+  }) => {
+    const health = collectBrowserHealth(page);
+    await page.goto("/admin/holistic-mentorship");
+    await page.getByRole("tab", { name: "Challenge Categories" }).click();
+    await expect(page.getByLabel("Program", { exact: true })).toHaveValue("1");
+    await expect(programOptions(page)).toHaveCount(1);
+    await expect(page.getByLabel("Phase", { exact: true })).toBeEnabled();
     expectBrowserHealth(health);
   });
 

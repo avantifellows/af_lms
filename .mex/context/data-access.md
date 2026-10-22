@@ -311,11 +311,27 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
     with Academic (6) / Non-academic (10) group headers, a sticky School + `n` column, "All Schools"
     first, yellow→dark-red cells with contrast-picked text, `shortLabel` below `sm` (full label in
     `title` / `aria-label` "Group: Label"), a hidden-School note, an empty state and loading /
-    error + Retry. "All Programs" and CSV are later #457 slices.
+    error + Retry. CSV is a later #457 slice.
+  - **All Programs (#464):** `program_id=all` gates on `program_read` with no Program and uses the
+    access helper's `programIds` (the same scoped list as the admin page's Program selector: every
+    Holistic Program for Admin / Holistic Mentorship Admin, the PM/PA's Programs with in-scope active
+    Centres). `all` with any `phase_id` is 422 before authorization. The lib takes
+    `{ programIds, allPrograms }`: Plans and Mappings match `ANY(programIds)`, so a Student's Notes
+    union across the Programs and they count under the latest in-scope Mapping across all of them;
+    `phases` is `[]`, `defaultPhaseId` `null`, and `academicYears` is the union of each Program's year
+    list (current year first, then newest).
+  - **All Programs selector rule:** the shared Program selector gains "All Programs" (`value="all"`)
+    **only** while the Challenge Categories tab is active **and** the viewer has ≥2 Programs; a
+    multi-Program viewer lands on it the first time (the tab then remembers All vs single). Choosing
+    it never changes the URL's `program_id` or the shared single Program, so Students & Progress and
+    Phase Setup get the last single Program back and never see "All Programs". Picking any Program
+    (All or single) resets the Academic Year. With All Programs the panel's Phase select is disabled
+    with only "All Phases".
   - **Fixture:** `seedHolisticFixtures` adds a second submitted Note (second Grade 12 Student, Phase 4
     "Synthetic Grade 12 Skipped") tagged Exam/Test related issues + Time management & distractions, so
     the heatmap is non-empty; the Phase 1 Note stays the untagged pre-release Note.
   - Tests: `holistic-challenge-category-heatmap.integration.test.ts` (real Postgres, opt-in via
     `HOLISTIC_HEATMAP_TEST_DATABASE`), the route test (real access gate, stubbed permission lookup),
     `ChallengeCategoryHeatmap.test.tsx`, `HolisticMentorshipWorkspace.test.tsx`, and
-    `e2e/tests/holistic-challenge-categories.spec.ts`.
+    `e2e/tests/holistic-challenge-categories.spec.ts`. Its `openHeatmap` selects Program 1 explicitly,
+    because multi-Program viewers land on All Programs.

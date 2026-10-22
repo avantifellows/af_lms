@@ -51,20 +51,23 @@ function orderedProgramIds(programIds: number[]) {
   return HOLISTIC_MENTORSHIP_PROGRAM_IDS.filter((programId) => available.has(programId));
 }
 
-function AdminSelectors({ selectedProgramId, availableProgramIds, academicYear, academicYears,
-  onProgramChange, onAcademicYearChange }: {
-  selectedProgramId: number;
+function AdminSelectors({ selectedProgramId, availableProgramIds, offerAllPrograms, academicYear,
+  academicYears, onProgramChange, onAcademicYearChange }: {
+  selectedProgramId: number | "all";
   availableProgramIds: number[];
+  offerAllPrograms: boolean;
   academicYear: string;
   academicYears: string[];
-  onProgramChange: (programId: number) => void;
+  onProgramChange: (programId: number | "all") => void;
   onAcademicYearChange: (academicYear: string) => void;
 }) {
   return <div className="grid gap-3 rounded-md border border-border bg-bg-card p-4 sm:grid-cols-[minmax(0,1fr)_12rem]">
     <label className="block min-w-0 text-[11px] font-extrabold uppercase tracking-wide text-text-muted">
       Program
       <Select aria-label="Program" className="mt-1 font-normal normal-case tracking-normal"
-        value={selectedProgramId} onChange={(event) => onProgramChange(Number(event.target.value))}>
+        value={selectedProgramId} onChange={(event) => onProgramChange(
+          event.target.value === "all" ? "all" : Number(event.target.value))}>
+        {offerAllPrograms && <option value="all">All Programs</option>}
         {availableProgramIds.map((id) => <option key={id} value={id}>
           {id} - {PROGRAM_ID_TO_LABEL[id]}
         </option>)}
@@ -112,12 +115,13 @@ function WorkspaceTabs({ workspaces, active, tabSetId, tabRefs, onActivate, onKe
   </div>;
 }
 
-function WorkspacePanel({ active, tabSetId, academicYear, programId, canEdit,
+function WorkspacePanel({ active, tabSetId, academicYear, programId, heatmapProgramId, canEdit,
   onAcademicYears }: {
   active: Workspace;
   tabSetId: string;
   academicYear: string;
   programId: number;
+  heatmapProgramId: number | "all";
   canEdit: boolean;
   onAcademicYears: (years: string[]) => void;
 }) {
@@ -127,7 +131,7 @@ function WorkspacePanel({ active, tabSetId, academicYear, programId, canEdit,
     {active.id === "phases"
       ? <PhasePlanSetup academicYear={academicYear} programId={programId} canEdit={canEdit} />
       : active.id === "challenge-categories"
-        ? <ChallengeCategoryHeatmap academicYear={academicYear} programId={programId}
+        ? <ChallengeCategoryHeatmap academicYear={academicYear} programId={heatmapProgramId}
             onAcademicYears={onAcademicYears} />
         : <ProgressWorkspace academicYear={academicYear} programId={programId}
             onAcademicYears={onAcademicYears} />}
@@ -154,6 +158,12 @@ function AdminWorkspace({
     : WORKSPACES.admin.filter((workspace) => workspace.id !== "phases");
   const [activeId, setActiveId] = useState<string>(workspaces[0].id);
   const active = workspaces.find((workspace) => workspace.id === activeId) ?? workspaces[0];
+  // "All Programs" exists only on Challenge Categories for a multi-Program
+  // viewer, who lands on it there first. It never replaces the shared single
+  // Program (or the URL), so other tabs get that Program back.
+  const offerAllPrograms = active.id === "challenge-categories" && orderedAvailableProgramIds.length >= 2;
+  const [heatmapAllPrograms, setHeatmapAllPrograms] = useState(true);
+  const shownProgramId = offerAllPrograms && heatmapAllPrograms ? "all" : selectedProgramId;
   const tabSetId = useId();
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const [academicYear, setAcademicYear] = useState(CURRENT_ACADEMIC_YEAR);
@@ -179,12 +189,14 @@ function AdminWorkspace({
     activateWorkspace(workspaces[nextIndex].id);
     tabRefs.current[nextIndex]?.focus();
   };
-  const handleProgramChange = (nextProgramId: number) => {
+  const handleProgramChange = (nextProgramId: number | "all") => {
+    setHeatmapAllPrograms(nextProgramId === "all");
+    setAcademicYear(CURRENT_ACADEMIC_YEAR);
+    setAcademicYears([CURRENT_ACADEMIC_YEAR]);
+    if (nextProgramId === "all") return;
     const url = new URL(window.location.href);
     url.searchParams.set("program_id", String(nextProgramId));
     window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
-    setAcademicYear(CURRENT_ACADEMIC_YEAR);
-    setAcademicYears([CURRENT_ACADEMIC_YEAR]);
   };
 
   return (
@@ -192,13 +204,14 @@ function AdminWorkspace({
       <div className="flex justify-end">
         <HolisticTutorialLink />
       </div>
-      <AdminSelectors selectedProgramId={selectedProgramId} availableProgramIds={orderedAvailableProgramIds}
-        academicYear={academicYear} academicYears={academicYears}
+      <AdminSelectors selectedProgramId={shownProgramId} availableProgramIds={orderedAvailableProgramIds}
+        offerAllPrograms={offerAllPrograms} academicYear={academicYear} academicYears={academicYears}
         onProgramChange={handleProgramChange} onAcademicYearChange={setAcademicYear} />
       <WorkspaceTabs workspaces={workspaces} active={active} tabSetId={tabSetId}
         tabRefs={tabRefs} onActivate={activateWorkspace} onKeyDown={handleTabKeyDown} />
       <WorkspacePanel active={active} tabSetId={tabSetId} academicYear={academicYear}
-        programId={selectedProgramId} canEdit={canEdit} onAcademicYears={updateAcademicYears} />
+        programId={selectedProgramId} heatmapProgramId={shownProgramId} canEdit={canEdit}
+        onAcademicYears={updateAcademicYears} />
     </section>
   );
 }

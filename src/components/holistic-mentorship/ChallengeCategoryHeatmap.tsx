@@ -47,7 +47,7 @@ type Loaded = { key: string; data: Heatmap | null; error: string };
 
 // Changing Program, year or Grade (the scope) resets Phase to the new default:
 // the first request for a scope is All Phases, whose response names the default.
-function useHeatmap(programId: number, academicYear: string, grade: 11 | 12) {
+function useHeatmap(programId: number | "all", academicYear: string, grade: 11 | 12) {
   const scope = `${programId}|${academicYear}|${grade}`;
   const [selection, setSelection] = useState<PhaseSelection | null>(null);
   const [refresh, setRefresh] = useState(0);
@@ -201,8 +201,9 @@ function hiddenSchoolsNote(count: number) {
     : `${count} Schools have no categorized Notes yet`;
 }
 
+// `programId="all"`: every Program the viewer can see, with Phase locked to All Phases.
 export default function ChallengeCategoryHeatmap({ programId, academicYear, onAcademicYears }: {
-  programId: number;
+  programId: number | "all";
   academicYear: string;
   onAcademicYears?: (years: string[]) => void;
 }) {
@@ -210,6 +211,7 @@ export default function ChallengeCategoryHeatmap({ programId, academicYear, onAc
   const { data, error, loading, phaseId, selectPhase, reload } = useHeatmap(programId, academicYear, grade);
   const [phases, setPhases] = useState<Heatmap["phases"]>([]);
   const academicYears = data?.academicYears;
+  const allPrograms = programId === "all";
 
   useEffect(() => {
     if (academicYears?.length) onAcademicYears?.(academicYears);
@@ -228,7 +230,8 @@ export default function ChallengeCategoryHeatmap({ programId, academicYear, onAc
         Share of Students with categorized submitted Post-Session Notes who carry each Challenge Category.
       </p>
     </div>
-    <HeatmapFilters grade={grade} phaseId={phaseId} phases={phases} disabled={loading}
+    <HeatmapFilters grade={grade} phaseId={phaseId} phases={allPrograms ? [] : phases}
+      disabled={loading || allPrograms}
       onGradeChange={setGrade} onPhaseChange={selectPhase} />
     {loading && <p role="status" className="py-8 text-center text-sm text-text-muted">
       Loading Challenge Categories...
