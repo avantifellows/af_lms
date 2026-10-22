@@ -5,6 +5,7 @@ import { useId, useState, type Dispatch, type FormEvent, type ReactNode, type Se
 
 import { Button, Card } from "@/components/ui";
 import type { OpenActionItem } from "@/lib/blended-learning-mentee-detail";
+import type { MenteeGroup } from "@/lib/blended-learning-talk-to-first";
 
 import { ActionItemMeta, OwnerPill } from "../ActionItemMeta";
 import {
@@ -69,7 +70,9 @@ function OpenActionItemsPanel({
       <Card elevation="sm" className="space-y-2 p-4">
         <h3 className="text-xs font-bold uppercase tracking-wide text-text-muted">Open Action Items</h3>
         <p className="text-xs text-text-secondary">
-          {canTick ? "Tick the ones done in this Conversation." : "Only a Conversation can tick these done."}
+          {canTick
+            ? "Tick what's been done. Ticked items are marked done when you save this conversation and won't show here again."
+            : "Only a conversation can tick these done."}
         </p>
         <ul className="space-y-1">
           {items.map((item) => (
@@ -237,8 +240,9 @@ type LogEntryFormProps = {
   // Under the title: the Mentee's name, grade and program.
   subtitle?: string;
   today: string;
-  // A Mentor logs on their own list; an admin logs on the mapped Mentor's.
-  forOwnList: boolean;
+  // The Mentee's Student list group as the form opened, so the saved
+  // confirmation can say whether the save moved them; null when unknown.
+  listGroup?: MenteeGroup | null;
   lastConversationPanel: ReactNode;
   // Open Action Items from earlier Conversations; a Conversation can tick them.
   openActionItems: OpenActionItem[];
@@ -357,9 +361,8 @@ export function LogEntryForm(props: LogEntryFormProps) {
         <SavedConfirmation
           saved={saved}
           studentId={props.studentId}
-          name={name}
           firstName={props.firstName}
-          forOwnList={props.forOwnList}
+          groupBefore={props.listGroup ?? null}
         />
       ) : (
         <EntryForm props={props} values={values} change={change} setValues={setValues} onSaved={setSaved} />

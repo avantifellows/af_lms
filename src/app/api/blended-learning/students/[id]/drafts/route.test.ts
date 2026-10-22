@@ -229,30 +229,6 @@ describe("POST /api/blended-learning/students/[id]/drafts", () => {
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it("lets a Blended Learning Admin create the draft for the mapped Mentor, with no session details", async () => {
-    signedInAs(ADMIN);
-    const res = await createDraft("601", { s3Key: KEY_601, contentType: "audio/mp4", byteSize: 900_000 });
-
-    expect(res.status).toBe(201);
-    expect(tables.drafts).toEqual([
-      expect.objectContaining({
-        student_id: 601,
-        program_id: 91,
-        mentor_user_id: 9002,
-        created_by_user_id: 11,
-        created_by_email: ADMIN,
-        state: "transcribing",
-        occurred_on: null,
-        mode: null,
-        spoke_with: null,
-        duration_minutes: null,
-        recording_content_type: "audio/mp4",
-        recording_byte_size: 900_000,
-      }),
-    ]);
-    expect(tables.requests).toEqual([expect.objectContaining({ draft_id: 41, requested_by_email: ADMIN, state: "queued" })]);
-  });
-
   it.each([
     ["another Student's recording", KEY_601],
     ["a photo key", "lms-documents/blended-learning/photos/501/3f2b8c1e-7d4a-4c9b-8e21-5a6f0d9c1b2e.jpg"],
@@ -349,7 +325,9 @@ describe("POST /api/blended-learning/students/[id]/drafts", () => {
     expect((await createDraft("501", { s3Key: KEY_501, byteSize: 4_200_000 })).status).toBe(401);
   });
 
+  // Blended Learning Admins are view only: only Mentors upload.
   it.each([
+    ["a Blended Learning Admin", ADMIN],
     ["a read-only Blended Learning Admin", ADMIN_READ_ONLY],
     ["a user without Blended Learning access", TEACHER],
   ])("returns 403 to %s and creates nothing", async (_case, email) => {

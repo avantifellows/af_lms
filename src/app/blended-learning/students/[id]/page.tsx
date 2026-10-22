@@ -27,8 +27,8 @@ import { FLAG_HISTORY } from "./flagRecipients";
 // One Mentee: name, profile line, contact, links, any open Conversation Draft
 // (polled while drafting) and the newest-first history, laid out as in the
 // mockup. Notes and photos load on demand from their API routes.
-// Users who can log (not read-only) get the entry point to the log page and
-// the draft's Retry and Discard controls; Open Action Items are listed for
+// Only a Mentor who can log (not read-only) gets the entry point to the log
+// page and the draft's Retry and Discard controls; admins are view only. Open Action Items are listed for
 // everyone, and ticked done only from there. Only Blended Learning Admins
 // (read-only too) can play a saved Call Recording or read its transcript.
 
@@ -332,7 +332,7 @@ export default async function MenteeDetailPage({ params }: { params: Promise<{ i
       <main className="mx-auto max-w-3xl space-y-6 px-4 py-4 sm:px-6 sm:py-6">
         <Link
           href="/blended-learning"
-          className="-ml-1 inline-flex min-h-11 items-center gap-1 text-sm text-text-secondary underline underline-offset-4 hover:text-text-primary"
+          className="-ml-1 inline-flex min-h-11 items-center gap-1 rounded text-sm font-bold text-text-secondary hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
         >
           <span aria-hidden="true">←</span> Back to students
         </Link>

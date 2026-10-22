@@ -10,26 +10,26 @@ const TODAY = "2026-10-22";
 const KABIR: MenteeRow = {
   studentId: 489985, name: "Kabir Never", gender: "Male", grade: 12, programId: 80,
   programName: "STP Voucher Delhi", lastContact: null, lastContactSource: null, latestEntryKind: null,
-  openDraftState: "ready", reasons: ["no_contact"], daysSince: null, lastAttemptOn: null, lastDurationMinutes: null,
+  openDraftState: "ready", reasons: ["no_contact"], daysSince: null, lastAttemptOn: null,
 };
 const IRA: MenteeRow = {
   studentId: 501, name: "Ira Attempt", gender: "Female", grade: 12, programId: 80,
   programName: "STP Voucher Delhi", lastContact: "2026-10-12", lastContactSource: "conversation",
   latestEntryKind: "attempt", openDraftState: null, reasons: ["attempt"], daysSince: 10,
-  lastAttemptOn: "2026-10-20", lastDurationMinutes: 25,
+  lastAttemptOn: "2026-10-20",
 };
 const MEERA: MenteeRow = {
   ...IRA, studentId: 502, name: "Meera Thirty", latestEntryKind: "conversation", reasons: ["gap_30"],
-  lastContact: "2026-09-22", daysSince: 30, lastAttemptOn: null, lastDurationMinutes: 40,
+  lastContact: "2026-09-22", daysSince: 30, lastAttemptOn: null,
 };
 const NIKHIL: MenteeRow = {
   ...IRA, studentId: 503, name: "Nikhil Legacy", gender: "Male", grade: 13, latestEntryKind: null,
   reasons: ["gap_30"], lastContact: "2026-06-30", lastContactSource: "legacy", daysSince: 114,
-  lastAttemptOn: null, lastDurationMinutes: null,
+  lastAttemptOn: null,
 };
 const ROHAN: MenteeRow = {
   ...IRA, studentId: 504, name: "Rohan Recent", gender: "Male", latestEntryKind: "conversation", reasons: [],
-  lastContact: "2026-10-21", daysSince: 1, lastAttemptOn: null, lastDurationMinutes: 20,
+  lastContact: "2026-10-21", daysSince: 1, lastAttemptOn: null,
 };
 
 function groups(talkToFirst: MenteeRow[], everyoneElse: MenteeRow[] = []): MenteeGroupView[] {
@@ -57,7 +57,7 @@ describe("MenteeGroups — one table with group header rows", () => {
 
     expect(screen.getAllByRole("table")).toHaveLength(1);
     expect(screen.getAllByRole("columnheader").map((header) => header.textContent)).toEqual([
-      "Student", "Why now", "Grade", "Program", "Gender", "Last conversation", "Duration", "Actions",
+      "Student", "Why now", "Grade", "Program", "Gender", "Last conversation", "Actions",
     ]);
     expect(tableGroup("Talk to first")).toHaveTextContent("Talk to firstNot reachable on the last try. 1 of 2.");
     expect(tableGroup("Everyone else")).toHaveTextContent("Everyone else1 of 2.");
@@ -71,12 +71,12 @@ describe("MenteeGroups — one table with group header rows", () => {
     expect(tableGroup("Everyone else")).toHaveTextContent("1 of 1.");
   });
 
-  it("shows Why now second, then grade, program, gender, last conversation and duration in their own cells", () => {
+  it("shows Why now second, then grade, program, gender and last conversation in their own cells, with no duration", () => {
     renderList(true, [IRA]);
 
     const cells = within(tableRow("Ira Attempt")).getAllByRole("cell").map((cell) => cell.textContent);
-    expect(cells.slice(0, 7)).toEqual([
-      "Ira Attempt", "Not reachable, 20 Oct", "12", "STP Voucher Delhi", "Female", "12 Oct10 days ago", "25 min",
+    expect(cells).toEqual([
+      "Ira Attempt", "Not reachable, 20 Oct", "12", "STP Voucher Delhi", "Female", "12 Oct10 days ago", "ViewNew log",
     ]);
   });
 });
@@ -90,13 +90,12 @@ describe("MenteeGroups — Why now and last conversation copy", () => {
     expect(within(tableRow("Meera Thirty")).getByText("Not contacted in 30 days")).toHaveClass("bg-warning-bg");
   });
 
-  it("says when a Student has no conversation yet, with Never and None for the last one", () => {
+  it("says when a Student has no conversation yet, with Never for the last one", () => {
     renderList(true, [KABIR]);
 
     const kabir = within(tableRow("Kabir Never"));
     expect(kabir.getByText("No conversation yet")).toBeInTheDocument();
     expect(kabir.getByText("Never")).toBeInTheDocument();
-    expect(kabir.getByText("None")).toBeInTheDocument();
   });
 
   it("names a pre-app legacy month instead of an exact day count", () => {
@@ -105,7 +104,6 @@ describe("MenteeGroups — Why now and last conversation copy", () => {
     const nikhil = within(tableRow("Nikhil Legacy"));
     expect(nikhil.getByText("Not contacted since Jun 2026")).toBeInTheDocument();
     expect(nikhil.getByText("before app")).toBeInTheDocument();
-    expect(nikhil.getByText("Not recorded")).toBeInTheDocument();
   });
 
   it("says Yesterday for a conversation one day ago", () => {
@@ -137,14 +135,20 @@ describe("MenteeGroups — a ready draft's chip", () => {
 });
 
 describe("MenteeGroups — row actions", () => {
-  it("gives a viewer who can log Detailed view and Log conversation per Student, and the name opens the Student", () => {
+  it("gives a viewer who can log View and New log text buttons per Student, and the name opens the Student", () => {
     renderList(true);
 
-    const logLinks = screen.getAllByRole("link", { name: "Log conversation for Kabir Never" });
+    const logLinks = screen.getAllByRole("link", { name: "New log for Kabir Never" });
     expect(logLinks).toHaveLength(2);
-    for (const link of logLinks) expect(link).toHaveAttribute("href", "/blended-learning/students/489985/log");
-    for (const link of screen.getAllByRole("link", { name: "Detailed view for Kabir Never" })) {
+    for (const link of logLinks) {
+      expect(link).toHaveAttribute("href", "/blended-learning/students/489985/log");
+      expect(link).toHaveTextContent("New log");
+      expect(link).toHaveClass("min-h-11", "bg-accent");
+    }
+    for (const link of screen.getAllByRole("link", { name: "View Kabir Never" })) {
       expect(link).toHaveAttribute("href", "/blended-learning/students/489985");
+      expect(link).toHaveTextContent("View");
+      expect(link).toHaveClass("min-h-11", "border-border");
     }
     // The name's link covers the whole row or card.
     const [rowName, cardName] = screen.getAllByRole("link", { name: "Kabir Never" });
@@ -153,11 +157,11 @@ describe("MenteeGroups — row actions", () => {
     expect(cardName.closest("li")).toHaveClass("relative");
   });
 
-  it("offers a read-only viewer Detailed view but no Log conversation", () => {
+  it("offers a viewer who can't log View but no New log", () => {
     renderList(false);
 
-    expect(screen.queryByRole("link", { name: /Log conversation/ })).not.toBeInTheDocument();
-    expect(screen.getAllByRole("link", { name: "Detailed view for Kabir Never" })).toHaveLength(2);
+    expect(screen.queryByRole("link", { name: /New log/ })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: "View Kabir Never" })).toHaveLength(2);
   });
 });
 
@@ -172,7 +176,8 @@ describe("MenteeGroups — phone cards", () => {
     expect(card).toHaveTextContent("Grade12");
     expect(card).toHaveTextContent("GenderFemale");
     expect(card).toHaveTextContent("Last conversation12 Oct10 days ago");
-    expect(card).toHaveTextContent("Duration25 min");
+    expect(card).not.toHaveTextContent("Duration");
+    expect(card).toHaveTextContent("ViewNew log");
     expect(within(screen.getByRole("region", { name: "Everyone else" })).getAllByRole("listitem")).toHaveLength(1);
   });
 });

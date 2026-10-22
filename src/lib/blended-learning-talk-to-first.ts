@@ -80,6 +80,14 @@ export function talkToFirst(input: TalkToFirstInput): TalkToFirstResult {
   return { inTalkToFirst: reasons.length > 0, reasons, daysSince };
 }
 
+// The Student list's two groups, by their labels: any "Why now" reason puts
+// a Mentee in Talk to first.
+export type MenteeGroup = "Talk to first" | "Everyone else";
+
+export function menteeGroup(reasons: readonly TalkToFirstReason[]): MenteeGroup {
+  return reasons.length > 0 ? "Talk to first" : "Everyone else";
+}
+
 // "Talked to in the last week" means days_since < 7.
 export function talkedToInLastWeek(daysSince: number | null): boolean {
   return daysSince !== null && daysSince < 7;

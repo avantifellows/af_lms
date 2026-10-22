@@ -5,9 +5,10 @@ import { useEffect, useRef, type ReactNode } from "react";
 
 import { Card } from "@/components/ui";
 import type { MenteeRow } from "@/lib/blended-learning-mentees";
+import type { MenteeGroup } from "@/lib/blended-learning-talk-to-first";
 
 import { LastContact, WhyNowTags } from "../../../MenteeList";
-import { savedRows, type Saved } from "./savedSummary";
+import { groupSentence, savedRows, type Saved } from "./savedSummary";
 
 // Shown in place of the form once the entry is saved: what was saved, row by
 // row, then what the Student list now says about this Mentee.
@@ -39,32 +40,26 @@ function ListRows({ mentee }: { mentee: MenteeRow }) {
 export function SavedConfirmation({
   saved,
   studentId,
-  name,
   firstName,
-  forOwnList,
+  groupBefore,
 }: {
   saved: Saved;
   studentId: number;
-  name: string;
   firstName: string;
-  forOwnList: boolean;
+  // The Mentee's Student list group when the form opened; null when unknown.
+  groupBefore: MenteeGroup | null;
 }) {
   const headingRef = useRef<HTMLHeadingElement>(null);
   // The form is gone; move focus to what replaced it.
   useEffect(() => headingRef.current?.focus(), []);
   const { entry, mentee } = saved;
-  const group = mentee && mentee.reasons.length > 0 ? "Talk to first" : "Everyone else";
   return (
     <section aria-label="Saved">
       <Card elevation="sm" className="space-y-4 p-4 sm:p-6">
         <h2 ref={headingRef} tabIndex={-1} className="text-xl font-bold text-text-primary focus:outline-none">
           {entry.kind === "conversation" ? "Conversation saved" : "Attempt logged"}
         </h2>
-        {mentee && (
-          <p className="text-sm text-text-secondary">
-            {`${forOwnList ? "Your" : "The"} student list now shows ${name} in ${group}.`}
-          </p>
-        )}
+        {mentee && <p className="text-sm text-text-secondary">{groupSentence(firstName, groupBefore, mentee)}</p>}
         <dl className="divide-y divide-border border-y border-border text-sm">
           {savedRows(entry).map((row) => (
             <Row key={row.label} label={row.label}>

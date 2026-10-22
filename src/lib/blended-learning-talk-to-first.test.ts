@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   compareTalkToFirst,
   latestEntryKind,
+  menteeGroup,
   talkedToInLastWeek,
   talkToFirst,
   thirtyDaysOrMore,
@@ -223,5 +224,13 @@ describe("compareTalkToFirst", () => {
       "Aditi",
       "rohan",
     ]);
+  });
+});
+
+describe("menteeGroup", () => {
+  it("puts a Mentee with any Why-now reason in Talk to first, and everyone else in Everyone else", () => {
+    expect(menteeGroup(["gap_30"])).toBe("Talk to first");
+    expect(menteeGroup(["attempt", "no_contact"])).toBe("Talk to first");
+    expect(menteeGroup([])).toBe("Everyone else");
   });
 });

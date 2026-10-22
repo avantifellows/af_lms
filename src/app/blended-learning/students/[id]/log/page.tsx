@@ -9,14 +9,16 @@ import { draftNotesToHtml } from "@/lib/blended-learning-draft-notes";
 import { getDraftForReview, getDraftStatus, type DraftForReview } from "@/lib/blended-learning-drafts";
 import { describeSession, formatCalendarDate } from "@/lib/blended-learning-format";
 import { getMenteeDetail, type HistoryEntry, type MenteeDetail } from "@/lib/blended-learning-mentee-detail";
+import { listMentees } from "@/lib/blended-learning-mentees";
+import { menteeGroup, type MenteeGroup } from "@/lib/blended-learning-talk-to-first";
 import { getTodayIST } from "@/lib/curriculum-date-helpers";
 
 import { BlendedLearningHeader } from "../../../BlendedLearningHeader";
 import { LogEntryForm, type ReviewDraft } from "./LogEntryForm";
 
-// Log a Conversation or an Attempt for one Mentee. A Mentor logs for their
-// own Mentees; a Blended Learning Admin logs on the mapped Mentor's behalf.
-// Read-only users are sent back to the detail page. A Mentee with a ready
+// Log a Conversation or an Attempt for one Mentee. Only a Mentor logs, for
+// their own Mentees; Blended Learning Admins (view only) and read-only users
+// are sent back to the detail page. A Mentee with a ready
 // Conversation Draft gets the same form, prefilled from the draft for review.
 // While a draft is being drafted (or has failed) the form stays, with the
 // draft's progress in place of the recording upload; once it is ready the page
@@ -48,6 +50,18 @@ async function loadOpenDraft(access: BlendedLearningAccess, mentee: MenteeDetail
   }
   const status = await getDraftStatus(access, open.id);
   return { draft: null, pendingDraft: { id: open.id, state: open.state, retryOffered: status?.retryOffered ?? false } };
+}
+
+// The Mentee's group on the Mentor's Student list as the form opens, from
+// the list's own read; null when the list has no row for them.
+async function currentListGroup(
+  access: BlendedLearningAccess,
+  studentId: number,
+  today: string
+): Promise<MenteeGroup | null> {
+  const list = await listMentees({ access, studentId, today });
+  const row = [...list.talkToFirst, ...list.everyoneElse][0];
+  return row ? menteeGroup(row.reasons) : null;
 }
 
 function LastConversationPanel({ conversation }: { conversation: Extract<HistoryEntry, { kind: "conversation" }> | null }) {
@@ -84,7 +98,11 @@ export default async function LogEntryPage({ params }: { params: Promise<{ id: s
   const subtitle = [mentee.name, mentee.grade !== null ? `Grade ${mentee.grade}` : null, mentee.programName]
     .filter(Boolean)
     .join(" · ");
-  const { draft, pendingDraft } = await loadOpenDraft(access, mentee);
+  const today = getTodayIST();
+  const [{ draft, pendingDraft }, listGroup] = await Promise.all([
+    loadOpenDraft(access, mentee),
+    currentListGroup(access, mentee.studentId, today),
+  ]);
 
   return (
     <>
@@ -92,7 +110,7 @@ export default async function LogEntryPage({ params }: { params: Promise<{ id: s
       <main className="mx-auto max-w-6xl space-y-4 px-4 py-4 sm:px-6 sm:py-6">
         <Link
           href={`/blended-learning/students/${mentee.studentId}`}
-          className="-ml-1 inline-flex min-h-11 items-center gap-1.5 text-sm font-bold text-text-secondary underline-offset-4 hover:text-text-primary hover:underline"
+          className="-ml-1 inline-flex min-h-11 items-center gap-1.5 rounded text-sm font-bold text-text-secondary hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
         >
           <ArrowLeft aria-hidden="true" className="h-4 w-4" />
           {`Back to ${mentee.name}`}
@@ -104,8 +122,8 @@ export default async function LogEntryPage({ params }: { params: Promise<{ id: s
           name={mentee.name}
           firstName={firstName}
           subtitle={subtitle}
-          today={getTodayIST()}
-          forOwnList={access.kind === "mentor"}
+          today={today}
+          listGroup={listGroup}
           lastConversationPanel={<LastConversationPanel conversation={lastConversation} />}
           openActionItems={mentee.openActionItems}
           hasOpenDraft={mentee.openDraft !== null}

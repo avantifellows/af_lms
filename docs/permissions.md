@@ -124,7 +124,7 @@ The school page query fetches `program_id` per student via a LATERAL join.
 | `pmu_manager` | No (pinned to JNV NVS) | Avanti's internal PMU team, working with JNV NVS Students across Schools |
 | `pmu_govt_school_user` | No (pinned to JNV NVS) | External stakeholder of one JNV NVS School (e.g. its principal), Google sign-in |
 | `blended_mentor` | No (stored as `[]`) | Blended Learning Mentor: sees and logs Conversations with only their own Mentees |
-| `blended_admin` | No (stored as `[]`) | Blended Learning Admin: every Mentor's Mentees, Mentor Flags, Call Recordings and transcripts; logs on a Mentor's behalf unless read-only |
+| `blended_admin` | No (stored as `[]`) | Blended Learning Admin: every Mentor's Mentees, Mentor Flags, Call Recordings and transcripts; view only (never logs) |
 
 ### PMU roles (JNV NVS pinned, ADR 0007)
 
@@ -156,7 +156,8 @@ page and API denies them (`getUserPermission` returns `null` for them).
   be given a Blended role (409).
 - **Policy:** `src/lib/blended-learning-access.ts` (`getBlendedLearningAccess`,
   `canBlendedLearning`, `canAccessBlendedStudent`). An LMS `admin` acts as a
-  Blended Learning Admin. Read-only users never log, upload or manage drafts.
+  Blended Learning Admin. Only a Mentor who is not read-only logs, uploads or
+  manages drafts; every Blended Learning Admin is view only.
   Playing Call Recordings and reading transcripts, the Flags feed and the Mentors
   tab are for Blended Learning Admins only (read-only ones included). A Student is
   in scope only with an active current-year Mapping (for a Mentor, to them).

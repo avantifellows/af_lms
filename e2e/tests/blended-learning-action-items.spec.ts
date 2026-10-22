@@ -212,10 +212,13 @@ for (const { label, key, viewport } of VIEWPORTS) {
       const form = page.getByRole("form", { name: "Log a Conversation or Attempt" });
       const panel = page.getByRole("region", { name: "Open Action Items" });
       await expect(panel.getByRole("checkbox").first()).toBeVisible();
+      await expect(panel).toContainText(
+        "Tick what's been done. Ticked items are marked done when you save this conversation and won't show here again."
+      );
 
       await form.getByRole("radio", { name: "Attempt" }).check();
       await expect(panel).toContainText(stayOpen.text);
-      await expect(panel).toContainText("Only a Conversation can tick these done.");
+      await expect(panel).toContainText("Only a conversation can tick these done.");
       await expect(panel.getByRole("checkbox")).toHaveCount(0);
       await expect(form.getByRole("button", { name: "Add an action" })).toHaveCount(0);
     });

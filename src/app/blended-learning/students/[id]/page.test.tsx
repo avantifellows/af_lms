@@ -192,8 +192,13 @@ describe("MenteeDetailPage", () => {
     });
   });
 
-  it("shows a read-only admin the draft without controls or the way to log", async () => {
-    signedInAs(READ_ONLY_ADMIN);
+  // Every Blended Learning Admin is view only, read-only or not.
+  it.each([
+    ["a Blended Learning Admin", BLENDED_ADMIN],
+    ["an LMS admin", { ...BLENDED_ADMIN, role: "admin" }],
+    ["a read-only Blended Learning Admin", READ_ONLY_ADMIN],
+  ])("shows %s the draft without controls or the way to log", async (_case, access) => {
+    signedInAs(access);
     mockGetMenteeDetail.mockResolvedValue({ ...MENTEE, openDraft: { id: 41, state: "ready" } });
 
     await renderPage();

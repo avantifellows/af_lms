@@ -95,11 +95,6 @@ describe("POST /api/blended-learning/drafts/[id]/discard", () => {
     expect(drafts.find((row) => row.id === Number(draftId))).toMatchObject({ state: "discarded", discarded_at: NOW });
   });
 
-  it("lets a Blended Learning Admin discard a Mentor's draft", async () => {
-    signedInAs(ADMIN);
-    expect(await discard("61")).toEqual({ status: 200, body: { id: 61, state: "discarded" } });
-  });
-
   it.each([
     ["an already discarded draft", "45"],
     ["a saved draft", "46"],
@@ -116,7 +111,9 @@ describe("POST /api/blended-learning/drafts/[id]/discard", () => {
     expect((await discard("43")).status).toBe(401);
   });
 
+  // Blended Learning Admins are view only: only Mentors discard.
   it.each([
+    ["a Blended Learning Admin", ADMIN],
     ["a read-only Blended Learning Admin", ADMIN_READ_ONLY],
     ["a user without Blended Learning access", TEACHER],
   ])("returns 403 to %s and changes nothing", async (_case, email) => {

@@ -20,8 +20,9 @@ export type BlendedLearningAction =
   | "view_mentors";
 
 export type BlendedLearningAccess = {
-  // A Blended Learning Mentor sees their own Mentees; a Blended Learning Admin
-  // (a blended_admin or an LMS admin) sees every Mentor's.
+  // A Blended Learning Mentor sees and logs for their own Mentees; a Blended
+  // Learning Admin (a blended_admin or an LMS admin) sees every Mentor's, view
+  // only.
   kind: "mentor" | "admin";
   role: "blended_mentor" | "blended_admin" | "admin";
   readOnly: boolean;
@@ -72,15 +73,16 @@ export async function getBlendedLearningAccess(
   return { kind: "admin", ...base };
 }
 
-// Read-only users never mutate; recordings, flags and Mentor cards are for
-// Blended Learning Admins (including read-only ones).
+// Only a Mentor who is not read-only mutates (logs, uploads, manages drafts);
+// every Blended Learning Admin is view only. Recordings, flags and Mentor
+// cards are for Blended Learning Admins (including read-only ones).
 export function canBlendedLearning(
   access: BlendedLearningAccess | null,
   action: BlendedLearningAction
 ): boolean {
   if (!access) return false;
-  if (MUTATIONS.has(action) && access.readOnly) return false;
-  if (ADMIN_ONLY.has(action) && access.kind !== "admin") return false;
+  if (MUTATIONS.has(action)) return access.kind === "mentor" && !access.readOnly;
+  if (ADMIN_ONLY.has(action)) return access.kind === "admin";
   return true;
 }
 

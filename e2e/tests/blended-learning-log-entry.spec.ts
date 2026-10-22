@@ -170,7 +170,10 @@ for (const { label, key, viewport, entryRole } of VIEWPORTS) {
 
       const saved = page.getByRole("region", { name: "Saved" });
       await expect(saved.getByRole("heading", { name: "Conversation saved" })).toBeVisible();
-      await expect(saved.getByText(`Your student list now shows ${fullName(mentee)} in Everyone else`)).toBeVisible();
+      // Never contacted before, so the save moved them out of Talk to first.
+      await expect(
+        saved.getByText(`${mentee.firstName} moved from "Talk to first" to "Everyone else" in your student list.`)
+      ).toBeVisible();
       await expect(saved.getByText("35 min")).toBeVisible();
       // Rows: Conversation, Duration, then Action items added: the blank
       // starter rows were not saved.
@@ -225,7 +228,10 @@ for (const { label, key, viewport, entryRole } of VIEWPORTS) {
 
       const saved = page.getByRole("region", { name: "Saved" });
       await expect(saved.getByRole("heading", { name: "Attempt logged" })).toBeVisible();
-      await expect(saved.getByText(`Your student list now shows ${fullName(mentee)} in Talk to first`)).toBeVisible();
+      // A recent Conversation kept them in Everyone else until this Attempt.
+      await expect(
+        saved.getByText(`${mentee.firstName} moved from "Everyone else" to "Talk to first" in your student list.`)
+      ).toBeVisible();
       await expect(saved.getByText(/^Not reachable, /)).toBeVisible();
       await expect(saved.getByText(lastContact)).toBeVisible();
 
@@ -269,25 +275,22 @@ for (const { label, key, viewport, entryRole } of VIEWPORTS) {
       expect(await savedEntries(studentIds[mentee.key])).toHaveLength(before);
     });
 
-    test("an admin logs on the Mentor's behalf", async ({ page }) => {
+    test("an admin can't log on the Mentor's behalf: no entry point, a redirect and a 403", async ({ page }) => {
       const mentee = mentees.onBehalf;
-      const summary = `Synthetic ${key}: admin logged a reported call.`;
       await signInAs(page, BLENDED_ADMIN);
       await page.goto(detailPath(mentee));
-      await page.getByRole("link", { name: "Log conversation", exact: true }).click();
+      await expect(page.getByRole("heading", { name: fullName(mentee) })).toBeVisible();
+      await expect(page.getByRole("link", { name: "Log conversation", exact: true })).toHaveCount(0);
 
-      const form = await fillConversation(page, { duration: "20", summary });
-      await form.getByRole("button", { name: "Save conversation" }).click();
-      await expect(page.getByRole("region", { name: "Saved" }).getByRole("heading", { name: "Conversation saved" })).toBeVisible();
+      await page.goto(logPath(mentee));
+      await expect(page).toHaveURL(new RegExp(`${detailPath(mentee)}$`));
 
-      expect(await savedEntries(studentIds[mentee.key])).toEqual([
-        expect.objectContaining({
-          kind: "conversation",
-          summary,
-          mapped_mentor_email: BLENDED_MENTOR_C.email,
-          logged_by_email: BLENDED_ADMIN.email,
-        }),
-      ]);
+      const response = await page.request.post(entriesUrl(mentee), {
+        data: { kind: "conversation", occurredOn: todayIST, mode: "call", spokeWith: "student", durationMinutes: 20,
+          summary: `Synthetic ${key}: an admin tried to log.` },
+      });
+      expect(response.status()).toBe(403);
+      expect(await savedEntries(studentIds[mentee.key])).toEqual([]);
     });
   });
 }
@@ -305,6 +308,20 @@ test.describe("Blended Learning logging — access", () => {
 
     const before = (await savedEntries(studentIds[mentee.key])).length;
     const response = await page.request.post(entriesUrl(mentee), {
+      data: { kind: "attempt", occurredOn: todayIST },
+    });
+    expect(response.status()).toBe(403);
+    expect(await savedEntries(studentIds[mentee.key])).toHaveLength(before);
+  });
+
+  test("an LMS admin sees no log entry point either, and a direct POST is refused", async ({ adminPage }) => {
+    const mentee = LOGGING_MENTEES.desktop.attempt;
+    await adminPage.goto(detailPath(mentee));
+    await expect(adminPage.getByRole("heading", { name: fullName(mentee) })).toBeVisible();
+    await expect(adminPage.getByRole("link", { name: "Log conversation", exact: true })).toHaveCount(0);
+
+    const before = (await savedEntries(studentIds[mentee.key])).length;
+    const response = await adminPage.request.post(entriesUrl(mentee), {
       data: { kind: "attempt", occurredOn: todayIST },
     });
     expect(response.status()).toBe(403);

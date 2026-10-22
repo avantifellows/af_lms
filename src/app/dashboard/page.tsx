@@ -561,6 +561,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         viewerEmail={email}
         hasPMAccess={features.hasPMAccess}
         showViewTabs={!seated && !isPmuRole(permission.role)}
+        showBlendedTab={Boolean(blendedAccess)}
         // A PMU Manager has no tab strip, so the heading names their one view.
         showSchoolsHeading={features.hasPMAccess || isPmuRole(permission.role)}
       />
@@ -622,9 +623,6 @@ function DashboardAccountLinks({ email, isAdmin, canViewHolisticAdmin }: {
     {canViewHolisticAdmin && <Link href="/admin/holistic-mentorship" className="text-sm font-bold text-accent hover:text-accent-hover">
       Holistic Mentorship
     </Link>}
-    {isAdmin && <Link href="/blended-learning" className="text-sm font-bold text-accent hover:text-accent-hover">
-      Blended Learning
-    </Link>}
     {isAdmin && <Link href="/admin" className="text-sm font-bold text-accent hover:text-accent-hover uppercase">Admin</Link>}
     <span className="text-sm text-text-muted font-mono hidden sm:inline">{email}</span>
     <Link href="/api/auth/signout" className="text-sm font-bold text-danger hover:text-danger/80">Sign out</Link>
@@ -636,17 +634,34 @@ const DASHBOARD_VIEWS = [
   { key: "jnv-nvs", label: "JNV NVS Schools" },
 ] as const;
 
-// Grouping tabs — disjoint scopes, so counts never double-count.
-function DashboardViewTabs({ view, show }: { view: DashboardView; show: boolean }) {
-  // One tab left for a confined user or a PMU Manager — render nothing rather
-  // than a lone tab that looks like a choice, or an empty strip that leaves a
-  // stray rule on the page.
-  if (!show) return null;
-  return <div className="mb-6 flex gap-6 border-b border-border">
-    {DASHBOARD_VIEWS.map((tab) => <Link
+type DashboardTab = { key: string; label: string; href: string; current: boolean };
+
+// The strip's tabs: both grouping views when the user can switch between
+// them, else just the one they're on; then Blended Learning, a separate
+// section, for those with access to it.
+function dashboardTabs(view: DashboardView, showViews: boolean, showBlended: boolean): DashboardTab[] {
+  const tabs: DashboardTab[] = DASHBOARD_VIEWS
+    .filter((tab) => showViews || tab.key === view)
+    .map((tab) => ({ key: tab.key, label: tab.label, href: `/dashboard?view=${tab.key}`, current: view === tab.key }));
+  if (showBlended) tabs.push({ key: "blended-learning", label: "Blended Learning", href: "/blended-learning", current: false });
+  return tabs;
+}
+
+// Grouping tabs — disjoint scopes, so counts never double-count — plus
+// Blended Learning, which opens its own section.
+function DashboardViewTabs({ view, show, showBlended }: { view: DashboardView; show: boolean; showBlended: boolean }) {
+  const tabs = dashboardTabs(view, show, showBlended);
+  // One tab left (a confined user or a PMU Manager without Blended Learning)
+  // — render nothing rather than a lone tab that looks like a choice, or an
+  // empty strip that leaves a stray rule on the page.
+  if (tabs.length < 2) return null;
+  // Wraps rather than scrolls on a phone, where three tabs don't fit a row.
+  return <div className="mb-6 flex flex-wrap gap-x-6 gap-y-2 border-b border-border">
+    {tabs.map((tab) => <Link
       key={tab.key}
-      href={`/dashboard?view=${tab.key}`}
-      className={view === tab.key
+      href={tab.href}
+      aria-current={tab.current ? "page" : undefined}
+      className={tab.current
         ? "text-sm font-bold text-text-primary uppercase tracking-wide border-b-2 border-accent pb-2 -mb-px"
         : "text-sm font-medium text-text-muted uppercase tracking-wide hover:text-text-primary pb-2 -mb-px"}
     >
@@ -655,7 +670,7 @@ function DashboardViewTabs({ view, show }: { view: DashboardView; show: boolean 
   </div>;
 }
 
-function DashboardMain({ view, searchQuery, currentPage, totalPages, totalCount, schools, centres, recentVisits, visitTotal, managesCentreVisits, viewerEmail, hasPMAccess, showViewTabs, showSchoolsHeading }: {
+function DashboardMain({ view, searchQuery, currentPage, totalPages, totalCount, schools, centres, recentVisits, visitTotal, managesCentreVisits, viewerEmail, hasPMAccess, showViewTabs, showBlendedTab, showSchoolsHeading }: {
   view: DashboardView;
   managesCentreVisits: boolean;
   viewerEmail: string;
@@ -669,10 +684,11 @@ function DashboardMain({ view, searchQuery, currentPage, totalPages, totalCount,
   visitTotal: number;
   hasPMAccess: boolean;
   showViewTabs: boolean;
+  showBlendedTab: boolean;
   showSchoolsHeading: boolean;
 }) {
   return <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-    <DashboardViewTabs view={view} show={showViewTabs} />
+    <DashboardViewTabs view={view} show={showViewTabs} showBlended={showBlendedTab} />
     <PMStats enabled={hasPMAccess} totalCount={totalCount} visitTotal={visitTotal} managesCentreVisits={managesCentreVisits} />
     {view === "centres" ? (
       <>

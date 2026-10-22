@@ -2,12 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import type { MenteeRow } from "@/lib/blended-learning-mentees";
 
-import { daysAgo, durationText, shortDate, whyNowTags } from "./menteeListCopy";
+import { daysAgo, shortDate, whyNowTags } from "./menteeListCopy";
 
 const BASE: MenteeRow = {
   studentId: 1, name: "Asha Rao", gender: null, grade: 12, programId: 80, programName: null,
   lastContact: "2026-10-12", lastContactSource: "conversation", latestEntryKind: "attempt",
-  openDraftState: null, reasons: [], daysSince: 10, lastAttemptOn: null, lastDurationMinutes: null,
+  openDraftState: null, reasons: [], daysSince: 10, lastAttemptOn: null,
 };
 
 describe("shortDate", () => {
@@ -48,13 +48,5 @@ describe("whyNowTags", () => {
     expect(
       whyNowTags({ ...BASE, reasons: ["gap_30"], lastContact: "2026-06-30", lastContactSource: "legacy" })[0].text
     ).toBe("Not contacted since Jun 2026");
-  });
-});
-
-describe("durationText", () => {
-  it("gives minutes, None without a Conversation, and Not recorded for a legacy month", () => {
-    expect(durationText({ ...BASE, lastDurationMinutes: 30 })).toBe("30 min");
-    expect(durationText({ ...BASE, lastContact: null, lastContactSource: null })).toBe("None");
-    expect(durationText({ ...BASE, lastContactSource: "legacy" })).toBe("Not recorded");
   });
 });

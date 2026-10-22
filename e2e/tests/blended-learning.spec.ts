@@ -69,13 +69,21 @@ for (const { label, viewport } of VIEWPORTS) {
       });
     }
 
-    test("an LMS admin sees the Blended Learning link and can open the section", async ({ adminPage }) => {
+    test("an LMS admin opens the section from the dashboard's Blended Learning tab, and comes back", async ({ adminPage }) => {
       await adminPage.goto("/dashboard");
-      await adminPage.getByRole("link", { name: "Blended Learning" }).click();
+      // A third tab beside the two dashboard views, styled like them; not a header link.
+      const views = adminPage.getByRole("link", { name: "Physical Centres" }).locator("..");
+      await expect(views.getByRole("link")).toHaveText(["Physical Centres", "JNV NVS Schools", "Blended Learning"]);
+      const tab = views.getByRole("link", { name: "Blended Learning" });
+      const inactive = views.getByRole("link", { name: "JNV NVS Schools" });
+      expect(await tab.getAttribute("class")).toBe(await inactive.getAttribute("class"));
+      await expect(adminPage.getByRole("banner").getByRole("link", { name: "Blended Learning" })).toHaveCount(0);
+      await tab.click();
 
       await expect(adminPage).toHaveURL(/\/blended-learning$/);
       await expect(adminPage.getByText("Blended Learning Admin", { exact: true })).toBeVisible();
-      await expect(adminPage.getByRole("link", { name: "Back to dashboard" })).toBeVisible();
+      await adminPage.getByRole("link", { name: "Back to dashboard" }).click();
+      await expect(adminPage).toHaveURL(/\/dashboard$/);
     });
 
     test("other roles get no Blended Learning link and are sent away from the section", async ({ page }) => {

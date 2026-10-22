@@ -5,15 +5,15 @@ import type { ReactNode } from "react";
 import { Badge } from "@/components/ui";
 import type { MenteeRow } from "@/lib/blended-learning-mentees";
 
-import { daysAgo, durationText, monthYear, shortDate, whyNowTags } from "./menteeListCopy";
+import { daysAgo, monthYear, shortDate, whyNowTags } from "./menteeListCopy";
 
 // The Student list: one table from 1024 px up, with "Talk to first" and
 // "Everyone else" as group header rows; a card per Student below that. A
 // click anywhere on a row or card opens the Student (the name's link
-// stretches over it); the row's own links sit above that link. Viewers who
-// can log also get "Log conversation" per Student, and a ready Conversation
-// Draft's chip opens it on the log page; for a read-only viewer the chip is a
-// plain label. `today` is the IST date, so this year's dates drop the year.
+// stretches over it); the row's own links sit above that link. Each Student
+// has a "View" button; Mentors who can log also get "New log", and a ready
+// Conversation Draft's chip opens it on the log page. For anyone else
+// (admins, read-only users) the chip is a plain label. `today` is the IST date, so this year's dates drop the year.
 
 export type MenteeGroupView = { title: string; description: string; mentees: MenteeRow[] };
 
@@ -79,32 +79,26 @@ const actionBase =
 const outlined = `${actionBase} border-border bg-bg-card text-text-primary hover:border-accent hover:bg-hover-bg`;
 const primary = `${actionBase} border-accent bg-accent text-text-on-accent hover:bg-accent-hover`;
 
-// `compact`: 38 px icon buttons in the table; labelled half-width buttons on
-// a card, whose icons drop out below 400 px so both labels fit at 360 px.
-function RowActions({ mentee, canLog, compact }: { mentee: MenteeRow; canLog: boolean; compact: boolean }) {
-  const size = compact ? "h-[38px] w-[38px] text-sm" : "min-h-11 flex-1 px-2 text-[13px]";
-  const iconClass = `h-[18px] w-[18px] shrink-0 ${compact ? "" : "hidden min-[400px]:block"}`;
-  const label = (text: string) => <span className={compact ? "sr-only" : "whitespace-nowrap"}>{text}</span>;
+// Small text buttons, 44 px tall; on a card each takes half the row and the
+// icons drop out below 400 px so both labels fit at 360 px. The accessible
+// names say which Student.
+function RowActions({ mentee, canLog, card }: { mentee: MenteeRow; canLog: boolean; card: boolean }) {
+  const size = card ? "min-h-11 flex-1 px-2 text-[13px]" : "min-h-11 px-3 text-sm";
+  const iconClass = `h-4 w-4 shrink-0 ${card ? "hidden min-[400px]:block" : ""}`;
   return (
     <>
-      <Link
-        href={menteeHref(mentee)}
-        aria-label={`Detailed view for ${mentee.name}`}
-        title="Detailed view"
-        className={`${outlined} ${size}`}
-      >
+      <Link href={menteeHref(mentee)} aria-label={`View ${mentee.name}`} className={`${outlined} ${size}`}>
         <ArrowUpRight aria-hidden="true" className={iconClass} />
-        {label("Detailed view")}
+        <span className="whitespace-nowrap">View</span>
       </Link>
       {canLog && (
         <Link
           href={`${menteeHref(mentee)}/log`}
-          aria-label={`Log conversation for ${mentee.name}`}
-          title="Log conversation"
+          aria-label={`New log for ${mentee.name}`}
           className={`${primary} ${size}`}
         >
           <MessageCirclePlus aria-hidden="true" className={iconClass} />
-          {label("Log conversation")}
+          <span className="whitespace-nowrap">New log</span>
         </Link>
       )}
     </>
@@ -120,7 +114,7 @@ function groupSummary(group: MenteeGroupView, total: number): string {
   return `${group.description} ${group.mentees.length} of ${total}.`.trim();
 }
 
-const COLUMNS = ["Student", "Why now", "Grade", "Program", "Gender", "Last conversation", "Duration"];
+const COLUMNS = ["Student", "Why now", "Grade", "Program", "Gender", "Last conversation"];
 
 function GroupHeader({ group, total }: { group: MenteeGroupView; total: number }) {
   return (
@@ -157,21 +151,13 @@ function TableRow({ mentee, canLog, today }: RowProps) {
       <td className={cell}>
         <LastContact mentee={mentee} today={today} />
       </td>
-      <td className={`${cell} whitespace-nowrap`}>
-        <DurationValue mentee={mentee} />
-      </td>
       <td className={`${cell} w-px whitespace-nowrap pr-4`}>
         <span className="flex gap-2">
-          <RowActions mentee={mentee} canLog={canLog} compact />
+          <RowActions mentee={mentee} canLog={canLog} card={false} />
         </span>
       </td>
     </tr>
   );
-}
-
-function DurationValue({ mentee }: { mentee: MenteeRow }) {
-  const text = durationText(mentee);
-  return <span className={mentee.lastDurationMinutes == null ? muted : undefined}>{text}</span>;
 }
 
 type ListProps = { groups: MenteeGroupView[]; total: number; canLog: boolean; today?: string };
@@ -233,11 +219,8 @@ function MenteeCard({ mentee, canLog, today }: RowProps) {
       <CardField label="Last conversation">
         <LastContact mentee={mentee} today={today} />
       </CardField>
-      <CardField label="Duration">
-        <DurationValue mentee={mentee} />
-      </CardField>
       <div className="col-span-3 flex gap-2 pt-1">
-        <RowActions mentee={mentee} canLog={canLog} compact={false} />
+        <RowActions mentee={mentee} canLog={canLog} card />
       </div>
     </li>
   );

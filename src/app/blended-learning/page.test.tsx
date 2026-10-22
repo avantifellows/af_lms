@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
@@ -10,7 +11,9 @@ const {
   mockListFlags,
   mockReadFlagsCutoff,
   mockRedirect,
+  mockPush,
 } = vi.hoisted(() => ({
+  mockPush: vi.fn(),
   mockGetServerSession: vi.fn(),
   mockGetBlendedLearningAccess: vi.fn(),
   mockListMentees: vi.fn(),
@@ -25,7 +28,11 @@ const {
 
 vi.mock("next-auth", () => ({ getServerSession: mockGetServerSession }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
-vi.mock("next/navigation", () => ({ redirect: mockRedirect }));
+vi.mock("next/navigation", () => ({
+  redirect: mockRedirect,
+  useRouter: () => ({ push: mockPush }),
+  usePathname: () => "/blended-learning",
+}));
 vi.mock("@/lib/blended-learning-access", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/blended-learning-access")>()),
   getBlendedLearningAccess: mockGetBlendedLearningAccess,
@@ -204,7 +211,10 @@ describe("BlendedLearningPage", () => {
       expect(screen.getByRole("link", { name: /Flags/ })).toHaveTextContent("4 new");
       expect(seenPosts()).toHaveLength(1);
       // Filters and pages carry the visit's cutoff.
-      expect(screen.getByRole("search", { name: "Filter flags" })).toHaveFormValues({ since: "2026-10-21T09:30:00" });
+      await userEvent.selectOptions(screen.getByLabelText("Flag Recipient"), "maths");
+      expect(mockPush).toHaveBeenCalledWith("/blended-learning?tab=flags&since=2026-10-21T09%3A30%3A00&recipient=maths", {
+        scroll: false,
+      });
       expect(screen.getByRole("link", { name: "Older flags" })).toHaveAttribute(
         "href",
         "/blended-learning?tab=flags&since=2026-10-21T09%3A30%3A00&cursor=7"

@@ -125,11 +125,11 @@ describe("POST /api/blended-learning/students/[id]/photos", () => {
   });
 
   it("keeps a PNG's type and extension", async () => {
-    signedInAs(ADMIN);
-    const res = await upload("601", { mimeType: "image/png", bytes: new Uint8Array([0x89, 0x50, 0x4e, 0x47]) });
+    signedInAs(MENTOR_A);
+    const res = await upload("501", { mimeType: "image/png", bytes: new Uint8Array([0x89, 0x50, 0x4e, 0x47]) });
 
     expect(res.status).toBe(201);
-    expect(res.body.s3Key).toMatch(new RegExp(`^lms-documents/blended-learning/photos/601/${UUID}\\.png$`));
+    expect(res.body.s3Key).toMatch(new RegExp(`^lms-documents/blended-learning/photos/501/${UUID}\\.png$`));
     expect(res.body.contentType).toBe("image/png");
     expect(puts()[0].ContentType).toBe("image/png");
   });
@@ -161,7 +161,9 @@ describe("POST /api/blended-learning/students/[id]/photos", () => {
     expect(puts()).toEqual([]);
   });
 
+  // Blended Learning Admins are view only: only Mentors upload.
   it.each([
+    ["a Blended Learning Admin", ADMIN],
     ["a read-only Blended Learning Admin", ADMIN_READ_ONLY],
     ["a user without Blended Learning access", TEACHER],
   ])("returns 403 to %s and stores nothing", async (_case, email) => {

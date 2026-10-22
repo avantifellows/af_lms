@@ -10,14 +10,14 @@ function mentee(studentId: number, name: string, overrides: Partial<MenteeRow> =
   return {
     studentId, name, gender: "Female", grade: 12, programId: 80, programName: "STP Voucher Delhi",
     lastContact: "2026-10-12", lastContactSource: "conversation", latestEntryKind: "conversation",
-    openDraftState: null, reasons: [], daysSince: 10, lastAttemptOn: null, lastDurationMinutes: 25,
+    openDraftState: null, reasons: [], daysSince: 10, lastAttemptOn: null,
     ...overrides,
   };
 }
 
 const KABIR = mentee(1, "Kabir Never", {
   gender: "Male", grade: 13, lastContact: null, lastContactSource: null, latestEntryKind: null,
-  reasons: ["no_contact"], daysSince: null, lastDurationMinutes: null,
+  reasons: ["no_contact"], daysSince: null,
 });
 const ZOYA = mentee(2, "Zoya TwentyNine", { daysSince: 29 });
 const ROHAN = mentee(3, "Rohan Recent", { gender: "Male", daysSince: 3 });

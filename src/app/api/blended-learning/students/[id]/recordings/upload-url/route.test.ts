@@ -107,12 +107,12 @@ describe("POST /api/blended-learning/students/[id]/recordings/upload-url", () =>
     ["an upper-case .WAV", "CALL.WAV", "audio/x-wav", "audio/wav", "wav"],
     ["an MP3 labelled with an odd MIME type", "call.mp3", "audio/mp3", "audio/mpeg", "mp3"],
   ])("normalises %s from its extension", async (_case, fileName, contentType, expectedType, extension) => {
-    signedInAs(ADMIN);
-    const res = await issue("601", { fileName, contentType, byteSize: 1000 });
+    signedInAs(MENTOR_A);
+    const res = await issue("501", { fileName, contentType, byteSize: 1000 });
 
     expect(res.status).toBe(200);
     expect(res.body.contentType).toBe(expectedType);
-    expect(res.body.s3Key).toMatch(new RegExp(`^lms-documents/blended-learning/recordings/601/${UUID}\\.${extension}$`));
+    expect(res.body.s3Key).toMatch(new RegExp(`^lms-documents/blended-learning/recordings/501/${UUID}\\.${extension}$`));
   });
 
   it("accepts a recording of exactly 200 MB", async () => {
@@ -147,7 +147,9 @@ describe("POST /api/blended-learning/students/[id]/recordings/upload-url", () =>
     expect((await issue("501", { fileName: "call.mp3", byteSize: 1000 })).status).toBe(401);
   });
 
+  // Blended Learning Admins are view only: only Mentors upload.
   it.each([
+    ["a Blended Learning Admin", ADMIN],
     ["a read-only Blended Learning Admin", ADMIN_READ_ONLY],
     ["a user without Blended Learning access", TEACHER],
   ])("returns 403 to %s", async (_case, email) => {

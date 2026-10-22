@@ -731,7 +731,7 @@ describe("DashboardPage (server component)", () => {
     },
   );
 
-  it("keeps an LMS admin on the dashboard and shows them the Blended Learning link", async () => {
+  it("keeps an LMS admin on the dashboard and gives them Blended Learning as a third tab", async () => {
     setupAdmin([], 0);
     mockGetBlendedLearningAccess.mockResolvedValue({
       kind: "admin",
@@ -743,18 +743,50 @@ describe("DashboardPage (server component)", () => {
 
     render(await DashboardPage({ searchParams: defaultSearchParams }));
 
-    expect(screen.getByRole("link", { name: "Blended Learning" })).toHaveAttribute(
-      "href",
-      "/blended-learning",
-    );
+    // One link only: the tab, after the two grouping tabs and in the same strip;
+    // the header no longer carries it.
+    const blended = screen.getByRole("link", { name: "Blended Learning" });
+    expect(blended).toHaveAttribute("href", "/blended-learning");
+    const strip = blended.parentElement!;
+    expect([...strip.querySelectorAll("a")].map((link) => link.textContent)).toEqual([
+      "Physical Centres",
+      "JNV NVS Schools",
+      "Blended Learning",
+    ]);
+    expect(screen.getByRole("banner")).not.toHaveTextContent("Blended Learning");
   });
 
-  it("shows no Blended Learning link to a Program Manager", async () => {
+  it("shows no Blended Learning tab to a Program Manager", async () => {
     setupPM([], 0);
 
     render(await DashboardPage({ searchParams: defaultSearchParams }));
 
     expect(screen.queryByRole("link", { name: "Blended Learning" })).not.toBeInTheDocument();
+  });
+
+  it("gives a centre-confined user with Blended Learning their one view and the Blended Learning tab", async () => {
+    mockGetServerSession.mockResolvedValue(adminSession);
+    mockGetUserPermission.mockResolvedValue({ ...seatedPermission, email: "admin@avantifellows.org", role: "admin" });
+    mockGetProgramContextSync.mockReturnValue(defaultProgramContext);
+    mockGetFeatureAccess.mockReturnValue({ canView: false, canEdit: false });
+    mockGetAccessibleSchoolCodes.mockResolvedValue(["SC001", "SC002"]);
+    mockQuery.mockResolvedValue([]);
+    mockGetBlendedLearningAccess.mockResolvedValue({
+      kind: "admin",
+      role: "admin",
+      readOnly: false,
+      actorEmail: "admin@avantifellows.org",
+      actorUserId: 1,
+    });
+
+    render(await DashboardPage({ searchParams: Promise.resolve({ view: "centres" }) }));
+
+    const strip = screen.getByRole("link", { name: "Blended Learning" }).parentElement!;
+    expect([...strip.querySelectorAll("a")].map((link) => link.textContent)).toEqual([
+      "Physical Centres",
+      "Blended Learning",
+    ]);
+    expect(screen.queryByText("JNV NVS Schools")).not.toBeInTheDocument();
   });
 
   // --- PM nav links ---

@@ -10,6 +10,7 @@ const {
   mockGetMenteeDetail,
   mockGetDraftForReview,
   mockGetDraftStatus,
+  mockListMentees,
   mockLogEntryForm,
   mockRedirect,
   mockNotFound,
@@ -19,6 +20,7 @@ const {
   mockGetMenteeDetail: vi.fn(),
   mockGetDraftForReview: vi.fn(),
   mockGetDraftStatus: vi.fn(),
+  mockListMentees: vi.fn(),
   mockLogEntryForm: vi.fn(),
   mockRedirect: vi.fn((url: string) => {
     throw new Error(`REDIRECT:${url}`);
@@ -40,6 +42,7 @@ vi.mock("@/lib/blended-learning-drafts", () => ({
   getDraftForReview: mockGetDraftForReview,
   getDraftStatus: mockGetDraftStatus,
 }));
+vi.mock("@/lib/blended-learning-mentees", () => ({ listMentees: mockListMentees }));
 vi.mock("@/lib/curriculum-date-helpers", () => ({ getTodayIST: () => "2026-10-22" }));
 // The form has its own tests; here only what the page hands it matters. The
 // stub renders the Last Conversation panel the page builds for it.
@@ -61,6 +64,8 @@ const BLENDED_ADMIN = {
   actorEmail: "juned@avantifellows.org", actorUserId: 12,
 };
 const READ_ONLY_ADMIN = { ...BLENDED_ADMIN, readOnly: true, actorEmail: "viewer@avantifellows.org" };
+const LMS_ADMIN = { ...BLENDED_ADMIN, role: "admin", actorEmail: "panchali@avantifellows.org", actorUserId: 13 };
+const READ_ONLY_MENTOR = { ...MENTOR, readOnly: true, actorEmail: "mentor-viewer@avantifellows.org" };
 
 const OPEN_ITEMS = [{ id: 120, text: "Revise optics", owner: "student", dueOn: null, agreedOn: "2026-10-12" }];
 
@@ -109,6 +114,8 @@ beforeEach(() => {
   mockGetMenteeDetail.mockResolvedValue(MENTEE);
   mockGetDraftForReview.mockResolvedValue(null);
   mockGetDraftStatus.mockResolvedValue(null);
+  // Her latest entry is an Attempt, so she is in Talk to first.
+  mockListMentees.mockResolvedValue({ talkToFirst: [{ studentId: 501, reasons: ["attempt"] }], everyoneElse: [] });
 });
 
 describe("LogEntryPage", () => {
@@ -123,8 +130,14 @@ describe("LogEntryPage", () => {
     expect(mockGetMenteeDetail).not.toHaveBeenCalled();
   });
 
-  it("sends a read-only user back to the Mentee's detail page without reading", async () => {
-    signedInAs(READ_ONLY_ADMIN);
+  // Only a Mentor logs: every Blended Learning Admin is view only.
+  it.each([
+    ["a Blended Learning Admin", BLENDED_ADMIN],
+    ["an LMS admin", LMS_ADMIN],
+    ["a read-only Blended Learning Admin", READ_ONLY_ADMIN],
+    ["a read-only Mentor", READ_ONLY_MENTOR],
+  ])("sends %s back to the Mentee's detail page without reading", async (_case, access) => {
+    signedInAs(access);
     await expect(renderPage()).rejects.toThrow("REDIRECT:/blended-learning/students/501");
     expect(mockGetMenteeDetail).not.toHaveBeenCalled();
   });
@@ -153,7 +166,7 @@ describe("LogEntryPage", () => {
       firstName: "Ira",
       subtitle: "Ira Sharma · Grade 12 · STP Voucher Delhi",
       today: "2026-10-22",
-      forOwnList: true,
+      listGroup: "Talk to first",
       openActionItems: OPEN_ITEMS,
       hasOpenDraft: false,
       draft: null,
@@ -193,8 +206,20 @@ describe("LogEntryPage", () => {
     });
   });
 
-  it("prefills a Blended Learning Admin's form from a ready draft and its notes, leaving out its tags", async () => {
-    signedInAs(BLENDED_ADMIN);
+  it("passes the Mentee's current list group, or none when the list has no row for them", async () => {
+    signedInAs(MENTOR);
+    mockListMentees.mockResolvedValueOnce({ talkToFirst: [], everyoneElse: [{ studentId: 501, reasons: [] }] });
+    await renderPage();
+    expect(mockListMentees).toHaveBeenCalledWith({ access: MENTOR, studentId: 501, today: "2026-10-22" });
+    expect(formProps()).toMatchObject({ listGroup: "Everyone else" });
+
+    mockListMentees.mockResolvedValueOnce({ talkToFirst: [], everyoneElse: [] });
+    await renderPage();
+    expect(formProps()).toMatchObject({ listGroup: null });
+  });
+
+  it("prefills a Mentor's form from a ready draft and its notes, leaving out its tags", async () => {
+    signedInAs(MENTOR);
     mockGetMenteeDetail.mockResolvedValue({ ...MENTEE, openDraft: { id: 41, state: "ready" } });
     mockGetDraftForReview.mockResolvedValue({
       id: 41,
@@ -211,9 +236,8 @@ describe("LogEntryPage", () => {
 
     await renderPage();
 
-    expect(mockGetDraftForReview).toHaveBeenCalledWith(BLENDED_ADMIN, 501);
+    expect(mockGetDraftForReview).toHaveBeenCalledWith(MENTOR, 501);
     expect(formProps()).toMatchObject({
-      forOwnList: false,
       hasOpenDraft: true,
       draft: {
         id: 41,

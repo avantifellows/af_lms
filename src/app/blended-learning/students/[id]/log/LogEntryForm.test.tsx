@@ -124,7 +124,7 @@ function renderForm(props: Partial<Parameters<typeof LogEntryForm>[0]> = {}) {
       name="Asha Rao"
       firstName="Asha"
       today={TODAY}
-      forOwnList
+      listGroup="Talk to first"
       subtitle="Asha Rao · Grade 11"
       lastConversationPanel={<p>Last conversation panel</p>}
       openActionItems={OPEN_ITEMS}
@@ -272,7 +272,7 @@ describe("LogEntryForm: Conversation", () => {
     const saved = await screen.findByRole("region", { name: "Saved" });
     const heading = within(saved).getByRole("heading", { name: "Conversation saved" });
     expect(heading).toHaveFocus();
-    expect(saved).toHaveTextContent("Your student list now shows Asha Rao in Talk to first.");
+    expect(saved).toHaveTextContent('Asha is still in "Talk to first" in your student list.');
     expect(savedRows(saved)).toMatchObject({
       Conversation: "22 Oct 2026 · Call · Student",
       Duration: "30 min",
@@ -325,7 +325,21 @@ describe("LogEntryForm: Conversation", () => {
       "Flagged to Shalini": "No comment",
       "Flagged to the Physics teacher": "With your comment",
     });
-    expect(saved).toHaveTextContent("Your student list now shows Asha Rao in Everyone else.");
+    expect(saved).toHaveTextContent('Asha moved from "Talk to first" to "Everyone else" in your student list.');
+  });
+
+  it("explains only the well-being flag under its comment, not the subject flags", async () => {
+    renderForm();
+    await userEvent.click(screen.getByRole("switch", { name: /Flag to Shalini/ }));
+    for (const subject of ["Physics", "Chemistry", "Maths"]) {
+      await userEvent.click(screen.getByRole("switch", { name: `Flag to ${subject} teacher` }));
+    }
+
+    expect(
+      screen.getByText("Use this when something about the student's emotional well-being needs her attention. Shalini is emailed when you save.")
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Comment for the Maths teacher (optional)")).toBeInTheDocument();
+    expect(screen.queryByText(/teacher's attention/)).not.toBeInTheDocument();
   });
 
   it("turns a flag off again", async () => {
@@ -410,8 +424,17 @@ describe("LogEntryForm: Conversation", () => {
 });
 
 describe("LogEntryForm: Attempt", () => {
-  it("saves an Attempt with only its date and note, then confirms on the mapped Mentor's list", async () => {
-    renderForm({ forOwnList: false });
+  it("tells a Conversation's Mentor what ticking an Open Action Item does", () => {
+    renderForm();
+    expect(
+      within(screen.getByRole("region", { name: "Open Action Items" })).getByText(
+        "Tick what's been done. Ticked items are marked done when you save this conversation and won't show here again."
+      )
+    ).toBeInTheDocument();
+  });
+
+  it("saves an Attempt with only its date and note, then names the list group neutrally when the earlier one is unknown", async () => {
+    renderForm({ listGroup: null });
     await userEvent.click(screen.getByRole("radio", { name: "Attempt" }));
     expect(screen.getByRole("heading", { level: 1, name: "Log an attempt" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Attempt details" })).toBeInTheDocument();
@@ -419,7 +442,7 @@ describe("LogEntryForm: Attempt", () => {
     expect(screen.queryByRole("region", { name: "Write-up" })).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Summary")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Duration (minutes)")).not.toBeInTheDocument();
-    expect(screen.getByText("Only a Conversation can tick these done.")).toBeInTheDocument();
+    expect(screen.getByText("Only a conversation can tick these done.")).toBeInTheDocument();
     expect(screen.queryByRole("checkbox", { name: /Bring the admit card/ })).not.toBeInTheDocument();
     await userEvent.type(screen.getByLabelText("Note (optional)"), "No answer");
 
@@ -429,7 +452,7 @@ describe("LogEntryForm: Attempt", () => {
     expect(sentBody()).toEqual({ kind: "attempt", occurredOn: TODAY, note: "No answer" });
     const saved = await screen.findByRole("region", { name: "Saved" });
     expect(within(saved).getByRole("heading", { name: "Attempt logged" })).toBeInTheDocument();
-    expect(saved).toHaveTextContent("The student list now shows Asha Rao in Everyone else.");
+    expect(saved).toHaveTextContent('Asha is in "Everyone else" in the student list.');
     expect(savedRows(saved)).toMatchObject({ Attempt: "22 Oct 2026" });
     expect(within(saved).queryByText("Duration")).not.toBeInTheDocument();
     expect(within(saved).queryByText("Why now")).not.toBeInTheDocument();
@@ -442,7 +465,7 @@ describe("LogEntryForm: Attempt", () => {
     await save("Log attempt");
 
     const saved = await screen.findByRole("region", { name: "Saved" });
-    expect(saved).not.toHaveTextContent("student list now shows");
+    expect(saved).not.toHaveTextContent("student list");
     expect(within(saved).queryByText("Last contact")).not.toBeInTheDocument();
   });
 

@@ -98,7 +98,7 @@ describe("MentorPage", () => {
     expect(mockListMentees).not.toHaveBeenCalled();
   });
 
-  it("shows a Blended Learning Admin one Mentor's grouped Student list, with a ready draft to review", async () => {
+  it("shows a Blended Learning Admin one Mentor's grouped Student list, view only", async () => {
     signedInAs(BLENDED_ADMIN);
 
     await renderPage();
@@ -108,9 +108,11 @@ describe("MentorPage", () => {
     expect(screen.getByText("30 students · 2026-2027")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Mentors/ })).toHaveAttribute("href", "/blended-learning");
     expect(screen.getByRole("rowgroup", { name: "Talk to first" })).toHaveTextContent("Ira Attempt");
-    for (const link of screen.getAllByRole("link", { name: "Draft ready to review" })) {
-      expect(link).toHaveAttribute("href", "/blended-learning/students/501/log");
-    }
+    // Admins are view only: the draft chip is a label, and no row offers logging.
+    expect(screen.getAllByText("Draft ready to review").length).toBeGreaterThan(0);
+    expect(screen.queryByRole("link", { name: "Draft ready to review" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /^New log/ })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: "View Ira Attempt" }).length).toBeGreaterThan(0);
   });
 
   it("counts one Mentee in the singular and gives a read-only admin no way to review the draft", async () => {

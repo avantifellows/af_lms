@@ -108,12 +108,21 @@ async function openFlags(page: Page, query = "") {
   expect((await seen).status()).toBe(200);
 }
 
+// Each filter applies as soon as it changes (no Apply button): the URL is
+// pushed without a full reload. Only a changed select navigates.
 async function filterBy(page: Page, filters: { mentor?: string; recipient?: string }) {
   const form = page.getByRole("search", { name: "Filter flags" });
-  await form.getByLabel("Mentor").selectOption({ label: filters.mentor ?? "All Mentors" });
-  await form.getByLabel("Flag Recipient").selectOption({ label: filters.recipient ?? "All recipients" });
-  await form.getByRole("button", { name: "Apply" }).click();
-  await page.waitForURL(/tab=flags/);
+  for (const [label, option] of [
+    ["Mentor", filters.mentor ?? "All Mentors"],
+    ["Flag Recipient", filters.recipient ?? "All recipients"],
+  ] as const) {
+    const select = form.getByLabel(label);
+    const wanted = await select.locator("option", { hasText: new RegExp(`^${option}$`) }).getAttribute("value");
+    if ((await select.inputValue()) === wanted) continue;
+    await select.selectOption({ label: option });
+    await page.waitForURL((url) => (url.searchParams.get(label === "Mentor" ? "mentor" : "recipient") ?? "") === wanted);
+  }
+  await expect(form).not.toHaveAttribute("aria-busy", "true");
 }
 
 async function noHorizontalScroll(page: Page) {
@@ -151,6 +160,10 @@ for (const { label, viewport } of VIEWPORTS) {
       });
       const iraWellbeing = cards(page).filter({ hasText: IRA_HISTORY.conversation20.flags.wellbeing });
       await expect(iraWellbeing.getByRole("heading", { name: fullName(ira) })).toBeVisible();
+      // The name opens the Student; its arrow is decorative, so the link is named by the name alone.
+      const studentLink = iraWellbeing.getByRole("link", { name: fullName(ira), exact: true });
+      await expect(studentLink).toHaveAttribute("href", /\/blended-learning\/students\/\d+$/);
+      await expect(studentLink.locator("svg")).toHaveAttribute("aria-hidden", "true");
       await expect(iraWellbeing.getByText("Emotional Well-being", { exact: true })).toBeVisible();
       await expect(iraWellbeing.getByText("Grade 12 · STP Voucher Delhi · Female")).toBeVisible();
       // Postgres writes "Sep"; en-GB dates write "Sept".
@@ -165,7 +178,8 @@ for (const { label, viewport } of VIEWPORTS) {
 
       // Full notes only on request, through the notes route.
       await expect(page.getByText(IRA_HISTORY.conversation20.notesText)).toHaveCount(0);
-      await iraWellbeing.getByRole("button", { name: "Show notes" }).click();
+      await iraWellbeing.getByRole("button", { name: "Show Session Notes" }).click();
+      await expect(iraWellbeing.getByRole("button", { name: "Hide Session Notes" })).toBeVisible();
       await expect(iraWellbeing.getByText(IRA_HISTORY.conversation20.notesText)).toBeVisible();
 
       const taraMaths = cards(page).filter({ hasText: FEED_FLAGS.taraMaths.comment });
@@ -173,7 +187,7 @@ for (const { label, viewport } of VIEWPORTS) {
       await expect(taraMaths.getByRole("link", { name: "Profile Doc" })).toHaveAttribute("href", TARA_LINKS.profileDoc);
       await expect(taraMaths.getByRole("link", { name: "Screener Link" })).toHaveAttribute("href", TARA_LINKS.screener);
       // Saved without notes: nothing to show.
-      await expect(taraMaths.getByRole("button", { name: "Show notes" })).toHaveCount(0);
+      await expect(taraMaths.getByRole("button", { name: "Show Session Notes" })).toHaveCount(0);
 
       const meeraChemistry = cards(page).filter({ hasText: FEED_FLAGS.meeraChemistry.comment });
       await expect(meeraChemistry.getByRole("link", { name: "Profile Doc" })).toBeVisible();
@@ -185,6 +199,8 @@ for (const { label, viewport } of VIEWPORTS) {
     test("the Mentor and Flag Recipient filters narrow the feed, alone and combined", async ({ page }) => {
       await signInAs(page, BLENDED_ADMIN);
       await openFlags(page);
+      // Marks this document: a full reload would drop it.
+      await page.evaluate(() => Object.assign(window, { __sameDocument: true }));
 
       await filterBy(page, { mentor: BLENDED_MENTOR_B.name });
       await expect(cards(page)).toHaveText([TARA_MATHS, TARA_WELLBEING]);
@@ -202,6 +218,15 @@ for (const { label, viewport } of VIEWPORTS) {
       await filterBy(page, { mentor: BLENDED_MENTOR_B.name, recipient: "Physics Teacher" });
       await expect(cards(page)).toHaveCount(0);
       await expect(feed(page).getByText("No Mentor Flags match these filters.")).toBeVisible();
+
+      // The URL holds the filters, so Back steps to the previous ones, and
+      // none of it reloaded the page.
+      await page.goBack();
+      await expect(cards(page)).toHaveText([TARA_WELLBEING]);
+      await expect(page.getByRole("search", { name: "Filter flags" }).getByLabel("Flag Recipient")).toHaveValue(
+        "emotional_wellbeing"
+      );
+      expect(await page.evaluate(() => (window as { __sameDocument?: boolean }).__sameDocument)).toBe(true);
 
       await noHorizontalScroll(page);
     });
@@ -290,9 +315,9 @@ for (const { label, viewport } of VIEWPORTS) {
       await expect(page.getByText("Blended Learning Admin · Read only")).toBeVisible();
       await expect(flagsTab(page)).toHaveText(badge(expectedNew));
       await expect(fixtureCards(page).first()).toBeVisible();
-      // Only Show notes and the filter's Apply; no logging, ticking or drafts.
+      // Only Show Session Notes; no Apply (filters apply on change), logging, ticking or drafts.
       const buttons = await page.getByRole("main").getByRole("button").allTextContents();
-      expect(new Set(buttons)).toEqual(new Set(["Apply", "Show notes"]));
+      expect(new Set(buttons)).toEqual(new Set(["Show Session Notes"]));
       await expect(page.getByRole("link", { name: "Log conversation", exact: true })).toHaveCount(0);
 
       await openFlags(page);

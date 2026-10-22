@@ -85,17 +85,17 @@ for (const { label, viewport, desktop } of VIEWPORTS) {
       await expect(ira.getByText(`Not reachable, ${shortDate(lastTry, istDaysAgo(0))}`)).toBeVisible();
       // The Attempt 2 days ago never counts as Last Contact.
       await expect(ira.getByText("10 days ago")).toBeVisible();
-      await expect(ira.getByText("25 min")).toBeVisible();
+      // The list shows no duration.
+      await expect(ira.getByText("25 min")).toHaveCount(0);
 
       const kabir = entry(talkToFirst, neverContacted);
       await expect(kabir.getByText("No conversation yet")).toBeVisible();
       await expect(kabir.getByText("Never", { exact: true })).toBeVisible();
-      await expect(kabir.getByText("None", { exact: true })).toBeVisible();
 
       const nikhil = entry(talkToFirst, legacy);
       await expect(nikhil.getByText("Not contacted since Jun 2026")).toBeVisible();
       await expect(nikhil.getByText("before app")).toBeVisible();
-      await expect(nikhil.getByText("Not recorded")).toBeVisible();
+      await expect(nikhil.getByText("Not recorded")).toHaveCount(0);
 
       const meera = entry(talkToFirst, thirtyDays);
       await expect(meera.getByText("Not contacted in 30 days")).toBeVisible();
@@ -134,16 +134,15 @@ for (const { label, viewport, desktop } of VIEWPORTS) {
       await expect(kabir.getByText("STP Dropper Delhi")).toBeVisible();
     });
 
-    test("each Student has Detailed view and Log conversation", async ({ page }) => {
+    test("each Student has View and New log text buttons", async ({ page }) => {
       const ira = entry(group(page, "Talk to first"), attemptLatest);
-      await expect(ira.getByRole("link", { name: `Detailed view for ${fullName(attemptLatest)}` })).toHaveAttribute(
-        "href",
-        /\/blended-learning\/students\/\d+$/
-      );
-      await expect(ira.getByRole("link", { name: `Log conversation for ${fullName(attemptLatest)}` })).toHaveAttribute(
-        "href",
-        /\/blended-learning\/students\/\d+\/log$/
-      );
+      const view = ira.getByRole("link", { name: `View ${fullName(attemptLatest)}` });
+      await expect(view).toHaveAttribute("href", /\/blended-learning\/students\/\d+$/);
+      await expect(view).toHaveText("View");
+      const newLog = ira.getByRole("link", { name: `New log for ${fullName(attemptLatest)}` });
+      await expect(newLog).toHaveAttribute("href", /\/blended-learning\/students\/\d+\/log$/);
+      await expect(newLog).toHaveText("New log");
+      for (const link of [view, newLog]) expect((await link.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
     });
 
     if (!desktop) {
@@ -156,7 +155,7 @@ for (const { label, viewport, desktop } of VIEWPORTS) {
         );
         expect(overflow).toBeLessThanOrEqual(0);
 
-        // Per card: the name, Detailed view and Log conversation; plus Kabir's
+        // Per card: the name, View and New log; plus Kabir's
         // "Draft ready to review" chip.
         const links = page.getByRole("main").getByRole("link");
         await expect(links).toHaveCount(6 * 3 + 1);
@@ -171,8 +170,11 @@ for (const { label, viewport, desktop } of VIEWPORTS) {
         const table = page.getByRole("table");
         await expect(table).toHaveCount(1);
         await expect(table.getByRole("columnheader")).toHaveText([
-          "Student", "Why now", "Grade", "Program", "Gender", "Last conversation", "Duration", "Actions",
+          "Student", "Why now", "Grade", "Program", "Gender", "Last conversation", "Actions",
         ]);
+        // The table fits its card at 1280 px, so nothing is clipped or scrolls.
+        const clipped = await table.evaluate((element) => element.scrollWidth - element.parentElement!.clientWidth);
+        expect(clipped).toBeLessThanOrEqual(0);
         await expect(table.getByRole("rowgroup", { name: "Talk to first", exact: true })).toBeVisible();
         await expect(table.getByRole("rowgroup", { name: "Everyone else", exact: true })).toBeVisible();
       });

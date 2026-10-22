@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
+import type { MenteeRow } from "@/lib/blended-learning-mentees";
+
 import { initialEntryValues, type EntryFormValues } from "./logEntryPayload";
 import type { PickedPhoto } from "./PhotoPicker";
-import { savedEntry, savedRows } from "./savedSummary";
+import { groupSentence, savedEntry, savedRows } from "./savedSummary";
 
 const TODAY = "2026-10-22";
 
@@ -75,5 +77,28 @@ describe("savedRows", () => {
     expect(savedRows(savedEntry(values({ kind: "attempt", duration: "20" }), PHOTOS))).toEqual([
       { label: "Attempt", value: "22 Oct 2026" },
     ]);
+  });
+});
+
+describe("groupSentence", () => {
+  const inTalkToFirst = { reasons: ["attempt"] } as unknown as MenteeRow;
+  const inEveryoneElse = { reasons: [] } as unknown as MenteeRow;
+
+  it("says the Mentee moved when the save changed their group, either way", () => {
+    expect(groupSentence("Ira", "Talk to first", inEveryoneElse)).toBe(
+      'Ira moved from "Talk to first" to "Everyone else" in your student list.'
+    );
+    expect(groupSentence("Ira", "Everyone else", inTalkToFirst)).toBe(
+      'Ira moved from "Everyone else" to "Talk to first" in your student list.'
+    );
+  });
+
+  it("says the Mentee is still in their group when the save didn't change it", () => {
+    expect(groupSentence("Ira", "Talk to first", inTalkToFirst)).toBe('Ira is still in "Talk to first" in your student list.');
+    expect(groupSentence("Ira", "Everyone else", inEveryoneElse)).toBe('Ira is still in "Everyone else" in your student list.');
+  });
+
+  it("names only the group, neutrally, when the earlier group is unknown", () => {
+    expect(groupSentence("Ira", null, inTalkToFirst)).toBe('Ira is in "Talk to first" in the student list.');
   });
 });

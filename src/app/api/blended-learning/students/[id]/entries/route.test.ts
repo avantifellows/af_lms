@@ -343,28 +343,17 @@ describe("POST /api/blended-learning/students/[id]/entries", () => {
     expect(inserted.blended_learning_conversations[0].notes_html).toBeNull();
   });
 
+  // Blended Learning Admins are view only: only the mapped Mentor logs.
   it.each([
-    [ADMIN, 11],
-    [LMS_ADMIN, 13],
-  ])("lets admin %s log on the mapped Mentor's behalf", async (email, actorUserId) => {
+    ["a Blended Learning Admin", ADMIN],
+    ["an LMS admin", LMS_ADMIN],
+    ["a read-only Blended Learning Admin", ADMIN_READ_ONLY],
+  ])("returns 403 to %s and writes nothing", async (_case, email) => {
     signedInAs(email);
     const res = await postEntry("601", CONVERSATION);
-
-    expect(res.status).toBe(201);
-    expect(inserted.blended_learning_conversations[0]).toMatchObject({
-      student_id: 601,
-      program_id: 91,
-      mentor_user_id: 9002,
-      logged_by_user_id: actorUserId,
-      logged_by_email: email,
-    });
-  });
-
-  it("returns 403 to a read-only Blended Learning Admin and writes nothing", async () => {
-    signedInAs(ADMIN_READ_ONLY);
-    const res = await postEntry("501", CONVERSATION);
     expect(res.status).toBe(403);
     expect(mockWithTransaction).not.toHaveBeenCalled();
+    expect(inserted.blended_learning_conversations).toBeUndefined();
   });
 
   it("returns 404 when a Mentor posts for another Mentor's Mentee", async () => {
@@ -375,7 +364,7 @@ describe("POST /api/blended-learning/students/[id]/entries", () => {
   });
 
   it("returns 404 for an unmapped Student and a malformed id", async () => {
-    signedInAs(ADMIN);
+    signedInAs(MENTOR_A);
     expect((await postEntry("503", CONVERSATION)).status).toBe(404);
     expect((await postEntry("50x", CONVERSATION)).status).toBe(404);
     expect(inserted.blended_learning_conversations).toBeUndefined();
@@ -544,7 +533,7 @@ describe("POST /api/blended-learning/students/[id]/entries", () => {
     }
 
     it("stores several flags with optional comments, raised by the actor", async () => {
-      signedInAs(ADMIN);
+      signedInAs(MENTOR_B);
       const res = await postEntry("601", {
         ...CONVERSATION,
         flags: [
@@ -556,9 +545,9 @@ describe("POST /api/blended-learning/students/[id]/entries", () => {
 
       expect(res.status).toBe(201);
       expect(inserted.blended_learning_mentor_flags).toEqual([
-        { conversation_id: 700, student_id: 601, recipient: "physics", comment: "Struggling with rotation", raised_by_email: ADMIN },
-        { conversation_id: 700, student_id: 601, recipient: "maths", comment: null, raised_by_email: ADMIN },
-        { conversation_id: 700, student_id: 601, recipient: "chemistry", comment: null, raised_by_email: ADMIN },
+        { conversation_id: 700, student_id: 601, recipient: "physics", comment: "Struggling with rotation", raised_by_email: MENTOR_B },
+        { conversation_id: 700, student_id: 601, recipient: "maths", comment: null, raised_by_email: MENTOR_B },
+        { conversation_id: 700, student_id: 601, recipient: "chemistry", comment: null, raised_by_email: MENTOR_B },
       ]);
     });
 

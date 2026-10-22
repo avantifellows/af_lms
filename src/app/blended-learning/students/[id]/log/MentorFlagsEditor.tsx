@@ -53,7 +53,7 @@ function FlagComment({
         onChange={(event) => onChange(event.target.value)}
         aria-invalid={Boolean(error)}
       />
-      <p className="mt-1 text-sm text-text-secondary">{help}</p>
+      {help && <p className="mt-1 text-sm text-text-secondary">{help}</p>}
       <FieldError message={error} />
     </div>
   );

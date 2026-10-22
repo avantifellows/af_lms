@@ -3,8 +3,9 @@
 import { useState } from "react";
 
 // A past Conversation's full notes, fetched only on first expand. The HTML
-// is the stored notes, sanitised on the server before it was saved.
-export function ConversationNotes({ conversationId }: { conversationId: number }) {
+// is the stored notes, sanitised on the server before it was saved. `label`
+// names them on the toggle ("Show notes" / "Hide notes" by default).
+export function ConversationNotes({ conversationId, label = "notes" }: { conversationId: number; label?: string }) {
   const [expanded, setExpanded] = useState(false);
   const [notesHtml, setNotesHtml] = useState<string | null>(null);
   const [status, setStatus] = useState<"idle" | "loading" | "error">("idle");
@@ -35,7 +36,7 @@ export function ConversationNotes({ conversationId }: { conversationId: number }
         aria-controls={panelId}
         className="flex min-h-11 items-center text-sm font-bold text-accent hover:text-accent-hover"
       >
-        {expanded ? "Hide notes" : "Show notes"}
+        {expanded ? `Hide ${label}` : `Show ${label}`}
       </button>
       {expanded && (
         <div id={panelId} className="border-t border-border pt-3">

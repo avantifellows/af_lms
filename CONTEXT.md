@@ -253,7 +253,7 @@ A staff User with the dedicated Blended Learning Mentor LMS role who is responsi
 _Avoid_: Holistic Mentor, Academic Mentor, counsellor, POC
 
 **Blended Learning Admin**:
-A staff User who can see every Blended Learning Mentor's Students and every Mentor Flag, and can log on any Mentor's behalf: either an LMS Admin or a User with the dedicated Blended Learning Admin role. A read-only Blended Learning Admin can view but not log.
+A staff User who can see every Blended Learning Mentor's Students and every Mentor Flag, view only: either an LMS Admin or a User with the dedicated Blended Learning Admin role. Only Mentors log, upload or manage drafts; an admin never does.
 _Avoid_: Program lead, mentor manager
 
 **Blended Learning Mentee**:

@@ -1,6 +1,6 @@
 "use client";
 
-import { Search } from "lucide-react";
+import { ChevronDown, Search } from "lucide-react";
 import { useState } from "react";
 
 import { FormLabel, Input, Select } from "@/components/ui";
@@ -64,7 +64,9 @@ function programOptions(mentees: MenteeRow[]): { value: string; label: string }[
     .sort((a, b) => a.label.localeCompare(b.label));
 }
 
-// Two per row on a phone; sized to their content from 640 px up.
+// Two per row on a phone; one width each from 640 px up, so the row is even
+// and the labels line up. The native arrow is replaced by one chevron at the
+// same inset in every select, with right padding so text never runs under it.
 function FilterSelect({
   id,
   label,
@@ -80,16 +82,27 @@ function FilterSelect({
 }) {
   const active = value === "" ? "" : "border-accent! bg-hover-bg font-semibold";
   return (
-    <div className="min-w-[8rem] flex-1 basis-[calc(50%-0.3125rem)] sm:flex-none sm:basis-auto">
+    <div className="min-w-[8rem] flex-1 basis-[calc(50%-0.3125rem)] sm:w-40 sm:flex-none sm:basis-auto">
       <FormLabel htmlFor={id}>{label}</FormLabel>
-      <Select id={id} value={value} className={`sm:w-auto ${active}`} onChange={(event) => onChange(event.target.value)}>
-        <option value="">All</option>
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </Select>
+      <div className="relative">
+        <Select
+          id={id}
+          value={value}
+          className={`h-11 appearance-none truncate py-0 pl-3 pr-9 ${active}`}
+          onChange={(event) => onChange(event.target.value)}
+        >
+          <option value="">All</option>
+          {options.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </Select>
+        <ChevronDown
+          aria-hidden="true"
+          className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted"
+        />
+      </div>
     </div>
   );
 }

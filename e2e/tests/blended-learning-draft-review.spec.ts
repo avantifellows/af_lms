@@ -224,7 +224,9 @@ for (const { label, key, viewport, entryRole } of VIEWPORTS) {
 
       const saved = page.getByRole("region", { name: "Saved" });
       await expect(saved.getByRole("heading", { name: "Conversation saved" })).toBeVisible();
-      await expect(saved.getByText(`Your student list now shows ${fullName(mentee)} in Everyone else`)).toBeVisible();
+      await expect(
+        saved.getByText(`${mentee.firstName} moved from "Talk to first" to "Everyone else" in your student list.`)
+      ).toBeVisible();
 
       const rows = await savedRows(studentId, draftId);
       expect(rows.conversations).toEqual([

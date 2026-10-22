@@ -1,6 +1,7 @@
 import { formatCalendarDate } from "@/lib/blended-learning-format";
 import type { FlagRecipient } from "@/lib/blended-learning-mentee-detail";
 import type { MenteeRow } from "@/lib/blended-learning-mentees";
+import { menteeGroup, type MenteeGroup } from "@/lib/blended-learning-talk-to-first";
 
 import { FLAG_SWITCH } from "../flagRecipients";
 import {
@@ -89,4 +90,13 @@ export function savedRows(entry: SavedEntry): SavedRow[] {
     });
   }
   return rows;
+}
+
+// Where the save left the Mentee in the Mentor's Student list, against the
+// group they were in when the form opened (`before`; null when unknown).
+export function groupSentence(firstName: string, before: MenteeGroup | null, mentee: MenteeRow): string {
+  const after = menteeGroup(mentee.reasons);
+  if (before === null) return `${firstName} is in "${after}" in the student list.`;
+  if (before === after) return `${firstName} is still in "${after}" in your student list.`;
+  return `${firstName} moved from "${before}" to "${after}" in your student list.`;
 }

@@ -51,10 +51,3 @@ export function whyNowTags(mentee: MenteeRow, today?: string): WhyNowTag[] {
     return { reason, text: notContacted(mentee), tone: "warning" };
   });
 }
-
-// The latest Conversation's duration. A legacy last contact predates the app,
-// so its duration was never recorded.
-export function durationText(mentee: MenteeRow): string {
-  if (mentee.lastDurationMinutes != null) return `${mentee.lastDurationMinutes} min`;
-  return mentee.lastContactSource === "legacy" ? "Not recorded" : "None";
-}

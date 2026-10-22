@@ -13,9 +13,10 @@ export const FLAG_RECIPIENT: Record<FlagRecipient, string> = {
 const WELLBEING_LEAD = "Shalini";
 
 // The log form's Mentor Flag switches and comments, worded as in the mockup.
+// Only the well-being flag has a help line under its comment.
 export const FLAG_SWITCH: Record<
   FlagRecipient,
-  { label: string; hint?: string; commentFor: string; placeholder: string; help: string }
+  { label: string; hint?: string; commentFor: string; placeholder: string; help?: string }
 > = {
   emotional_wellbeing: {
     label: `Flag to ${WELLBEING_LEAD}`,
@@ -28,19 +29,16 @@ export const FLAG_SWITCH: Record<
     label: "Flag to Physics teacher",
     commentFor: "the Physics teacher",
     placeholder: "What should the teacher look at?",
-    help: "Use this when the student needs the Physics teacher's attention.",
   },
   chemistry: {
     label: "Flag to Chemistry teacher",
     commentFor: "the Chemistry teacher",
     placeholder: "What should the teacher look at?",
-    help: "Use this when the student needs the Chemistry teacher's attention.",
   },
   maths: {
     label: "Flag to Maths teacher",
     commentFor: "the Maths teacher",
     placeholder: "What should the teacher look at?",
-    help: "Use this when the student needs the Maths teacher's attention.",
   },
 };
 

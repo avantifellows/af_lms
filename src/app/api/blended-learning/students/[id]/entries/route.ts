@@ -3,8 +3,8 @@ import { failureResponse, readJsonBody, withBlendedLearning } from "@/lib/blende
 import { logEntry } from "@/lib/blended-learning-log-entry";
 import { getTodayIST } from "@/lib/curriculum-date-helpers";
 
-// Log a Conversation or an Attempt for one Mentee. A Mentor logs for their
-// own Mentees; a Blended Learning Admin logs on the mapped Mentor's behalf.
+// Log a Conversation or an Attempt for one Mentee. Only a Mentor logs, for
+// their own Mentees; Blended Learning Admins are view only (403).
 export const POST = withBlendedLearning("log", async (request, { access, id }) => {
   const parsed = await readJsonBody(request);
   if (parsed instanceof NextResponse) return parsed;

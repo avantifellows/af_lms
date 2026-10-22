@@ -230,22 +230,6 @@ describe("POST /api/blended-learning/drafts/[id]/retry", () => {
     expect(mockFetch).toHaveBeenCalledWith(enqueueUrl(newKey), expect.objectContaining({ method: "POST" }));
   });
 
-  it("lets a Blended Learning Admin retry a Mentor's failed draft as themselves", async () => {
-    signedInAs(ADMIN);
-
-    const res = await retry("61");
-
-    // Unconfigured ETL: the new request waits, queued, and the retry stays offered.
-    expect(res).toEqual({
-      status: 200,
-      body: { id: 61, state: "transcribing", retryOffered: true, delivery: "skipped" },
-    });
-    expect(mockFetch).not.toHaveBeenCalled();
-    expect(tables.requests.filter((row) => row.draft_id === 61 && row.state === "queued")).toEqual([
-      expect.objectContaining({ student_id: 601, requested_by_user_id: 11, requested_by_email: ADMIN }),
-    ]);
-  });
-
   it("fails the draft again when ETL rejects the new request", async () => {
     configureEtl();
     mockFetch.mockResolvedValueOnce(new Response(JSON.stringify({ error: "bad request" }), { status: 400 }));
@@ -281,7 +265,9 @@ describe("POST /api/blended-learning/drafts/[id]/retry", () => {
     expect((await retry("43")).status).toBe(401);
   });
 
+  // Blended Learning Admins are view only: only Mentors retry.
   it.each([
+    ["a Blended Learning Admin", ADMIN],
     ["a read-only Blended Learning Admin", ADMIN_READ_ONLY],
     ["a user without Blended Learning access", TEACHER],
   ])("returns 403 to %s and changes nothing", async (_case, email) => {

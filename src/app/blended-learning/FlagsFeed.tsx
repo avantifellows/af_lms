@@ -1,16 +1,19 @@
+import { ArrowUpRight } from "lucide-react";
 import Link from "next/link";
 
 import type { FlagCard, FlagsPage } from "@/lib/blended-learning-flags";
 import { formatCalendarDate } from "@/lib/blended-learning-format";
 import type { FlagRecipient } from "@/lib/blended-learning-mentee-detail";
 
+import { FlagsFilters } from "./FlagsFilters";
 import { ConversationNotes } from "./students/[id]/ConversationNotes";
 import { FLAG_RECIPIENT } from "./students/[id]/flagRecipients";
 
 // The admin Flags tab: a read-only feed of every Mentor Flag, newest first,
-// filtered by Mentor and Flag Recipient through the URL. Flags raised since
-// the viewer's previous visit are marked New; the filter and page links carry
-// the visit's cutoff (`since`), so they stay New for the whole visit.
+// filtered by Mentor and Flag Recipient through the URL, applied as soon as
+// either filter changes. Flags raised since the viewer's previous visit are
+// marked New; the filters and page links carry the visit's cutoff (`since`),
+// so they stay New for the whole visit.
 
 export type FlagsView = {
   page: FlagsPage;
@@ -24,8 +27,6 @@ export type FlagsView = {
 
 const linkClass =
   "inline-flex min-h-11 items-center text-sm font-bold text-accent underline-offset-2 hover:text-accent-hover hover:underline";
-const selectClass =
-  "min-h-11 w-full rounded-lg border border-border bg-bg-input px-3 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30";
 
 function feedHref(view: FlagsView, cursor: number | null): string {
   const params = new URLSearchParams({ tab: "flags", since: view.since });
@@ -33,48 +34,6 @@ function feedHref(view: FlagsView, cursor: number | null): string {
   if (view.recipient) params.set("recipient", view.recipient);
   if (cursor !== null) params.set("cursor", String(cursor));
   return `/blended-learning?${params}`;
-}
-
-function Filters({ view }: { view: FlagsView }) {
-  return (
-    <form
-      role="search"
-      aria-label="Filter flags"
-      action="/blended-learning"
-      className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end"
-    >
-      <input type="hidden" name="tab" value="flags" />
-      <input type="hidden" name="since" value={view.since} />
-      <label className="block space-y-1 text-sm font-bold text-text-secondary">
-        <span>Mentor</span>
-        <select name="mentor" defaultValue={view.mentorUserId ?? ""} className={selectClass}>
-          <option value="">All Mentors</option>
-          {view.mentors.map((mentor) => (
-            <option key={mentor.mentorUserId} value={mentor.mentorUserId}>
-              {mentor.name}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label className="block space-y-1 text-sm font-bold text-text-secondary">
-        <span>Flag Recipient</span>
-        <select name="recipient" defaultValue={view.recipient ?? ""} className={selectClass}>
-          <option value="">All recipients</option>
-          {(Object.keys(FLAG_RECIPIENT) as FlagRecipient[]).map((recipient) => (
-            <option key={recipient} value={recipient}>
-              {FLAG_RECIPIENT[recipient]}
-            </option>
-          ))}
-        </select>
-      </label>
-      <button
-        type="submit"
-        className="min-h-11 rounded-lg border border-border bg-bg-card px-4 text-sm font-bold text-text-primary shadow-sm hover:border-accent"
-      >
-        Apply
-      </button>
-    </form>
-  );
 }
 
 function FlagCardView({ flag }: { flag: FlagCard }) {
@@ -88,9 +47,14 @@ function FlagCardView({ flag }: { flag: FlagCard }) {
       <div className="flex flex-wrap items-start justify-between gap-2">
         <h3 className="min-w-0 break-words font-bold text-text-primary">
           {/* A Student without an active Mapping has no page to open. */}
+          {/* The arrow says the name opens the Student's page; the name alone is the link's name. */}
           {flag.inScope ? (
-            <Link href={`/blended-learning/students/${flag.studentId}`} className="hover:text-accent hover:underline">
+            <Link
+              href={`/blended-learning/students/${flag.studentId}`}
+              className="inline-flex items-center gap-1 hover:text-accent hover:underline"
+            >
               {flag.name}
+              <ArrowUpRight aria-hidden="true" className="h-4 w-4 shrink-0" />
             </Link>
           ) : (
             flag.name
@@ -134,7 +98,7 @@ function FlagCardView({ flag }: { flag: FlagCard }) {
           </a>
         )}
       </div>
-      {flag.hasNotes && flag.inScope && <ConversationNotes conversationId={flag.conversationId} />}
+      {flag.hasNotes && flag.inScope && <ConversationNotes conversationId={flag.conversationId} label="Session Notes" />}
     </article>
   );
 }
@@ -144,9 +108,15 @@ export function FlagsFeed({ view }: { view: FlagsView }) {
   const filtered = view.mentorUserId !== null || view.recipient !== null;
   return (
     <section aria-label="Mentor Flags" className="space-y-4">
-      <Filters view={view} />
+      <FlagsFilters
+        filters={{ mentors: view.mentors, mentorUserId: view.mentorUserId, recipient: view.recipient, since: view.since }}
+      />
+      {/* Filters apply without a page load, so announce what the feed now holds. */}
+      <p role="status" className="sr-only">
+        {flags.length === 0 ? "" : `Showing ${flags.length} Mentor ${flags.length === 1 ? "Flag" : "Flags"}`}
+      </p>
       {flags.length === 0 ? (
-        <p className="rounded-lg border border-border bg-bg-card p-4 text-sm text-text-secondary shadow-sm sm:p-6">
+        <p role="status" className="rounded-lg border border-border bg-bg-card p-4 text-sm text-text-secondary shadow-sm sm:p-6">
           {filtered ? "No Mentor Flags match these filters." : "No Mentor Flags yet."}
         </p>
       ) : (

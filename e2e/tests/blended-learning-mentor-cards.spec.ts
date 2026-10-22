@@ -135,17 +135,22 @@ for (const { label, viewport, entryRole } of VIEWPORTS) {
       );
       await expect(talkToFirst.filter({ hasText: fullName(attemptLatest) }).getByText(/^Not reachable, \d{1,2} [A-Z][a-z]{2}/)).toBeVisible();
       await expect(talkToFirst.filter({ hasText: fullName(neverContacted) }).getByText("Draft ready to review")).toBeVisible();
-      // An admin who can log opens the draft from its chip.
+      // Admins are view only: the chip is a plain label and no row offers a new log.
       await expect(
         talkToFirst.filter({ hasText: fullName(neverContacted) }).getByRole("link", { name: "Draft ready to review" })
-      ).toHaveAttribute("href", /\/blended-learning\/students\/\d+\/log$/);
+      ).toHaveCount(0);
+      await expect(page.getByRole("link", { name: /^New log for / })).toHaveCount(0);
+      await expect(page.getByRole("link", { name: /^View / })).toHaveCount(6);
       // Search and filters come with the shared list component.
       await expect(page.getByRole("searchbox", { name: "Search by name" })).toBeVisible();
 
       const own = await mentorOwnView(browser, viewport);
       try {
         for (const name of ["Talk to first", "Everyone else"] as const) {
-          const mentorSees = await entries(group(own.page, name)).allTextContents();
+          // The same rows, less the Mentor's own "New log" button.
+          const mentorSees = (await entries(group(own.page, name)).allTextContents()).map((text) =>
+            text.replace(/\s*New log\s*$/, "")
+          );
           expect(mentorSees.length).toBeGreaterThan(0);
           await expect(entries(group(page, name))).toHaveText(mentorSees);
         }
@@ -155,7 +160,7 @@ for (const { label, viewport, entryRole } of VIEWPORTS) {
 
       await talkToFirst.filter({ hasText: fullName(attemptLatest) }).getByRole("link").first().click();
       await expect(page.getByRole("heading", { name: fullName(attemptLatest) })).toBeVisible();
-      await expect(page.getByRole("link", { name: "Log conversation", exact: true })).toBeVisible();
+      await expect(page.getByRole("link", { name: "Log conversation", exact: true })).toHaveCount(0);
     });
 
     test("a read-only Blended Learning Admin can view cards and a Mentor's page", async ({ page }) => {
