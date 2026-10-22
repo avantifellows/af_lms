@@ -1,12 +1,13 @@
 import type { PoolClient } from "pg";
 
 import { withTransaction } from "./db";
-import { CURRENT_ACADEMIC_YEAR } from "./constants";
 import {
-  activeBlendedMappingSql,
   canBlendedLearning,
+  lockMappingInScope,
   type BlendedLearningAccess,
+  type MappingSnapshot,
 } from "./blended-learning-access";
+import { isCalendarDate, MODES, oneOf, SPOKE_WITH } from "./blended-learning-format";
 import { listMentees, type MenteeRow } from "./blended-learning-mentees";
 import { sanitiseNotesHtml } from "./blended-learning-notes-sanitiser";
 import {
@@ -58,23 +59,11 @@ export type LogEntryResult =
   | { ok: true; entry: LoggedEntry; mentee: MenteeRow | null }
   | { ok: false; status: 403 | 404 | 409 | 422; error: string; fieldErrors?: Record<string, string> };
 
-const MODES = ["call", "in_person"] as const;
-const SPOKE_WITH = ["student", "parent_or_sibling", "both"] as const;
 const ACTION_ITEM_OWNERS = ["student", "mentor", "parent"] as const;
 const FLAG_RECIPIENTS = ["emotional_wellbeing", "physics", "chemistry", "maths"] as const;
 
-function isCalendarDate(value: unknown): value is string {
-  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-  const [year, month, day] = value.split("-").map(Number);
-  return new Date(Date.UTC(year, month - 1, day)).toISOString().slice(0, 10) === value;
-}
-
 function optionalText(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
-}
-
-function oneOf<T extends string>(values: readonly T[], value: unknown): value is T {
-  return typeof value === "string" && (values as readonly string[]).includes(value);
 }
 
 type Validated = { ok: true; input: EntryInput } | { ok: false; fieldErrors: Record<string, string> };
@@ -226,25 +215,6 @@ function validateFlags(raw: unknown, errors: Record<string, string>): FlagInput[
     }
     return { recipient: flag.recipient as FlagRecipient, comment: optionalText(flag.comment) };
   });
-}
-
-type MappingSnapshot = {
-  mentor_user_id: number | string;
-  program_id: number | string;
-  academic_year: string;
-};
-
-// The active current-year Mapping, re-read and locked inside the transaction.
-async function lockActiveMapping(client: PoolClient, studentId: number): Promise<MappingSnapshot | null> {
-  const result = await client.query<MappingSnapshot>(
-    `SELECT mapping.mentor_user_id, mapping.program_id, mapping.academic_year
-     FROM blended_learning_mentor_mentee_mappings mapping
-     WHERE mapping.student_id = $1 AND ${activeBlendedMappingSql("mapping", "$2")}
-     LIMIT 1
-     FOR SHARE`,
-    [studentId, CURRENT_ACADEMIC_YEAR]
-  );
-  return result.rows[0] ?? null;
 }
 
 type ReadyDraft = { id: number; callRecordingS3Key: string; transcriptS3Key: string | null };
@@ -435,11 +405,8 @@ export async function logEntry(
   let committed: { saved: LoggedEntry; mentorUserId: number; wellbeingFlagIds: number[] };
   try {
     committed = await withTransaction(async (client) => {
-      const mapping = await lockActiveMapping(client, studentId);
+      const mapping = await lockMappingInScope(client, access, studentId);
       if (!mapping) throw new OutOfScope();
-      if (access.kind === "mentor" && Number(mapping.mentor_user_id) !== access.mentorUserId) {
-        throw new OutOfScope();
-      }
       const input = validated.input;
       const draft =
         input.kind === "conversation" && input.draftId !== null

@@ -1,3 +1,4 @@
+import { formatCalendarDate } from "@/lib/blended-learning-format";
 import type { ActionItemOwner } from "@/lib/blended-learning-mentee-detail";
 
 // Who owns an Action Item and when it is due, as one muted line. Used by the
@@ -8,13 +9,6 @@ export const ACTION_ITEM_OWNER: Record<ActionItemOwner, string> = {
   mentor: "Mentor",
   parent: "Parent",
 };
-
-function formatDate(date: string): string {
-  const [year, month, day] = date.split("-").map(Number);
-  return new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }).format(
-    new Date(Date.UTC(year, month - 1, day))
-  );
-}
 
 export function ActionItemMeta({
   owner,
@@ -27,8 +21,8 @@ export function ActionItemMeta({
 }) {
   const parts = [
     ACTION_ITEM_OWNER[owner],
-    dueOn ? `Due ${formatDate(dueOn)}` : null,
-    agreedOn ? `From ${formatDate(agreedOn)}` : null,
+    dueOn ? `Due ${formatCalendarDate(dueOn)}` : null,
+    agreedOn ? `From ${formatCalendarDate(agreedOn)}` : null,
   ].filter((part): part is string => Boolean(part));
   return <span className="block text-xs text-text-muted">{parts.join(" · ")}</span>;
 }

@@ -5,6 +5,7 @@ import { Badge, Card } from "@/components/ui";
 import { canBlendedLearning } from "@/lib/blended-learning-access";
 import { requireBlendedLearningPage, requireNumericPageId } from "@/lib/blended-learning-guard";
 import { getDraftStatus } from "@/lib/blended-learning-drafts";
+import { describeSession, formatCalendarDate } from "@/lib/blended-learning-format";
 import {
   getMenteeDetail,
   type HistoryEntry,
@@ -26,20 +27,6 @@ import { FLAG_RECIPIENT } from "./flagRecipients";
 // the draft's Retry and Discard controls; Open Action Items are listed for
 // everyone, and ticked done only from there. Only Blended Learning Admins
 // (read-only too) can play a saved Call Recording or read its transcript.
-
-const MODE: Record<"call" | "in_person", string> = { call: "Call", in_person: "In person" };
-const SPOKE_WITH: Record<"student" | "parent_or_sibling" | "both", string> = {
-  student: "Student",
-  parent_or_sibling: "Parent or sibling",
-  both: "Student and parent",
-};
-
-function formatDate(date: string): string {
-  const [year, month, day] = date.split("-").map(Number);
-  return new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }).format(
-    new Date(Date.UTC(year, month - 1, day))
-  );
-}
 
 function Profile({ mentee }: { mentee: MenteeDetail }) {
   const meta = [mentee.grade === null ? null : `Grade ${mentee.grade}`, mentee.programName, mentee.gender].filter(
@@ -100,7 +87,7 @@ function ConversationEntry({
   return (
     <>
       <p className="text-xs text-text-secondary">
-        {[MODE[entry.mode], SPOKE_WITH[entry.spokeWith], `${entry.durationMinutes} min`].join(" · ")}
+        {describeSession(entry)}
       </p>
       <p className="whitespace-pre-line break-words text-sm text-text-primary">{entry.summary}</p>
       {entry.actionItems.length > 0 && (
@@ -176,7 +163,7 @@ function History({ history, canPlayRecording }: { history: HistoryEntry[]; canPl
             <li key={entry.id}>
               <article className="space-y-2 rounded-lg border border-border bg-bg-card p-4 shadow-sm sm:px-6">
                 <header className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm font-bold text-text-primary">{formatDate(entry.occurredOn)}</span>
+                  <span className="text-sm font-bold text-text-primary">{formatCalendarDate(entry.occurredOn)}</span>
                   <Badge variant={entry.kind === "attempt" ? "warning" : "default"}>
                     {entry.kind === "attempt" ? "Attempt" : "Conversation"}
                   </Badge>

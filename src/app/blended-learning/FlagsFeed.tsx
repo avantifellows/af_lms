@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import type { FlagCard, FlagsPage } from "@/lib/blended-learning-flags";
+import { formatCalendarDate } from "@/lib/blended-learning-format";
 import type { FlagRecipient } from "@/lib/blended-learning-mentee-detail";
 
 import { ConversationNotes } from "./students/[id]/ConversationNotes";
@@ -25,13 +26,6 @@ const linkClass =
   "inline-flex min-h-11 items-center text-sm font-bold text-accent underline-offset-2 hover:text-accent-hover hover:underline";
 const selectClass =
   "min-h-11 w-full rounded-lg border border-border bg-bg-input px-3 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30";
-
-function formatDate(date: string): string {
-  const [year, month, day] = date.split("-").map(Number);
-  return new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }).format(
-    new Date(Date.UTC(year, month - 1, day))
-  );
-}
 
 function feedHref(view: FlagsView, cursor: number | null): string {
   const params = new URLSearchParams({ tab: "flags", since: view.since });
@@ -113,7 +107,7 @@ function FlagCardView({ flag }: { flag: FlagCard }) {
       </div>
       {meta.length > 0 && <p className="text-sm text-text-secondary">{meta.join(" · ")}</p>}
       <p className="text-sm text-text-secondary">
-        {formatDate(flag.occurredOn)} · {flag.mentorName}
+        {formatCalendarDate(flag.occurredOn)} · {flag.mentorName}
       </p>
       {flag.comment && (
         <p className="whitespace-pre-line break-words border-l-2 border-danger pl-3 text-sm text-text-primary">

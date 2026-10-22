@@ -6,6 +6,7 @@ import { canBlendedLearning } from "@/lib/blended-learning-access";
 import { requireBlendedLearningPage, requireNumericPageId } from "@/lib/blended-learning-guard";
 import { draftNotesToHtml } from "@/lib/blended-learning-draft-notes";
 import { getDraftForReview, type DraftForReview } from "@/lib/blended-learning-drafts";
+import { describeSession, formatCalendarDate } from "@/lib/blended-learning-format";
 import { getMenteeDetail, type HistoryEntry } from "@/lib/blended-learning-mentee-detail";
 import { getTodayIST } from "@/lib/curriculum-date-helpers";
 
@@ -16,20 +17,6 @@ import { LogEntryForm, type ReviewDraft } from "./LogEntryForm";
 // own Mentees; a Blended Learning Admin logs on the mapped Mentor's behalf.
 // Read-only users are sent back to the detail page. A Mentee with a ready
 // Conversation Draft gets the same form, prefilled from the draft for review.
-
-const MODE: Record<"call" | "in_person", string> = { call: "Call", in_person: "In person" };
-const SPOKE_WITH: Record<"student" | "parent_or_sibling" | "both", string> = {
-  student: "Student",
-  parent_or_sibling: "Parent or sibling",
-  both: "Student and parent",
-};
-
-function formatDate(date: string): string {
-  const [year, month, day] = date.split("-").map(Number);
-  return new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }).format(
-    new Date(Date.UTC(year, month - 1, day))
-  );
-}
 
 // The form's prefill: the Summary Tags follow the drafted summary as text,
 // and the drafted notes become editor HTML.
@@ -55,12 +42,8 @@ function LastConversationPanel({ conversation }: { conversation: Extract<History
         <h3 className="text-xs font-bold uppercase tracking-wide text-text-muted">Last Conversation</h3>
         {conversation ? (
           <>
-            <p className="text-sm font-bold text-text-primary">{formatDate(conversation.occurredOn)}</p>
-            <p className="text-xs text-text-secondary">
-              {[MODE[conversation.mode], SPOKE_WITH[conversation.spokeWith], `${conversation.durationMinutes} min`].join(
-                " · "
-              )}
-            </p>
+            <p className="text-sm font-bold text-text-primary">{formatCalendarDate(conversation.occurredOn)}</p>
+            <p className="text-xs text-text-secondary">{describeSession(conversation)}</p>
             <p className="whitespace-pre-line break-words text-sm text-text-primary">{conversation.summary}</p>
           </>
         ) : (

@@ -1,6 +1,7 @@
 import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
 
 import { query } from "./db";
+import { formatCalendarDate } from "./blended-learning-format";
 
 // Well-being notifier (server-only). After a Conversation with an Emotional
 // Well-being Mentor Flag commits, notifyWellbeingFlag emails the well-being
@@ -73,13 +74,6 @@ function fullName(first: string | null, last: string | null): string {
   return [first, last].filter(Boolean).join(" ");
 }
 
-function formatDate(date: string): string {
-  const [year, month, day] = date.split("-").map(Number);
-  return new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }).format(
-    new Date(Date.UTC(year, month - 1, day))
-  );
-}
-
 function composeEmail(flag: FlagEmailRow): { subject: string; body: string } {
   const student = fullName(flag.student_first_name, flag.student_last_name) || `Student ${flag.student_id}`;
   const mentor = fullName(flag.mentor_first_name, flag.mentor_last_name) || flag.mentor_email || "Unknown";
@@ -94,7 +88,7 @@ function composeEmail(flag: FlagEmailRow): { subject: string; body: string } {
       `Grade: ${flag.grade ?? "Not recorded"}`,
       `Program: ${flag.program_name ?? "Not recorded"}`,
       `Mentor: ${mentor}`,
-      `Date: ${formatDate(flag.occurred_on)}`,
+      `Date: ${formatCalendarDate(flag.occurred_on)}`,
       "",
       `Open the Student's page in the LMS: ${link}`,
     ].join("\n"),

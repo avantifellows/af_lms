@@ -1,3 +1,5 @@
+import type { PoolClient } from "pg";
+
 import { query } from "./db";
 import { BLENDED_MENTOR_ROLE, CURRENT_ACADEMIC_YEAR } from "./constants";
 import { getBlendedLearningPermission, getFeatureAccess } from "./permissions";
@@ -107,4 +109,32 @@ export async function canAccessBlendedStudent(
   const mapping = rows[0];
   if (!mapping) return false;
   return access.kind === "admin" || Number(mapping.mentor_user_id) === access.mentorUserId;
+}
+
+export type MappingSnapshot = {
+  mentor_user_id: number | string;
+  program_id: number | string;
+  academic_year: string;
+};
+
+// Inside a write's transaction: the Student's active current-year Mapping,
+// re-read and locked FOR SHARE, or null when there is none or (for a Mentor)
+// it is to someone else.
+export async function lockMappingInScope(
+  client: PoolClient,
+  access: BlendedLearningAccess,
+  studentId: number
+): Promise<MappingSnapshot | null> {
+  const result = await client.query<MappingSnapshot>(
+    `SELECT mapping.mentor_user_id, mapping.program_id, mapping.academic_year
+     FROM blended_learning_mentor_mentee_mappings mapping
+     WHERE mapping.student_id = $1 AND ${activeBlendedMappingSql("mapping", "$2")}
+     LIMIT 1
+     FOR SHARE`,
+    [studentId, CURRENT_ACADEMIC_YEAR]
+  );
+  const mapping = result.rows[0];
+  if (!mapping) return null;
+  if (access.kind === "mentor" && Number(mapping.mentor_user_id) !== access.mentorUserId) return null;
+  return mapping;
 }

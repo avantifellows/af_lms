@@ -1,14 +1,13 @@
 import { randomUUID } from "node:crypto";
-import type { PoolClient } from "pg";
 
 import { query, withTransaction } from "./db";
-import { CURRENT_ACADEMIC_YEAR } from "./constants";
 import {
-  activeBlendedMappingSql,
   canAccessBlendedStudent,
   canBlendedLearning,
+  lockMappingInScope,
   type BlendedLearningAccess,
 } from "./blended-learning-access";
+import { isCalendarDate, MODES, oneOf, SPOKE_WITH } from "./blended-learning-format";
 import { blendedLearningRecordingPrefix, headObject, presignUpload } from "./s3";
 import type { DraftNote } from "./blended-learning-draft-notes";
 
@@ -74,8 +73,6 @@ export async function issueRecordingUpload(
 
 // The part of a recording key after the Student's prefix: `{uuid}.{ext}`.
 const RECORDING_FILE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(mp3|m4a|wav)$/;
-const MODES = ["call", "in_person"] as const;
-const SPOKE_WITH = ["student", "parent_or_sibling", "both"] as const;
 
 // Optional session details the Mentor had entered before uploading.
 type SessionDetails = {
@@ -89,16 +86,6 @@ export type WakeDelivery = "sent" | "skipped" | "ambiguous" | "rejected";
 
 function absent(value: unknown): boolean {
   return value === undefined || value === null || value === "";
-}
-
-function isCalendarDate(value: unknown): value is string {
-  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-  const [year, month, day] = value.split("-").map(Number);
-  return new Date(Date.UTC(year, month - 1, day)).toISOString().slice(0, 10) === value;
-}
-
-function oneOf<T extends string>(values: readonly T[], value: unknown): value is T {
-  return typeof value === "string" && (values as readonly string[]).includes(value);
 }
 
 // The content type a recording was uploaded with, or null for a key that is
@@ -139,21 +126,6 @@ function validateSessionDetails(
   };
 }
 
-type MappingSnapshot = { mentor_user_id: number | string; program_id: number | string; academic_year: string };
-
-// The active current-year Mapping, re-read and locked inside the transaction.
-async function lockActiveMapping(client: PoolClient, studentId: number): Promise<MappingSnapshot | null> {
-  const result = await client.query<MappingSnapshot>(
-    `SELECT mapping.mentor_user_id, mapping.program_id, mapping.academic_year
-     FROM blended_learning_mentor_mentee_mappings mapping
-     WHERE mapping.student_id = $1 AND ${activeBlendedMappingSql("mapping", "$2")}
-     LIMIT 1
-     FOR SHARE`,
-    [studentId, CURRENT_ACADEMIC_YEAR]
-  );
-  return result.rows[0] ?? null;
-}
-
 class OutOfScope extends Error {}
 
 function invalid(fieldErrors: Record<string, string>): Failure {
@@ -191,9 +163,8 @@ export async function createDraft(
   let created: { draftId: number; requestKey: string };
   try {
     created = await withTransaction(async (client) => {
-      const mapping = await lockActiveMapping(client, studentId);
+      const mapping = await lockMappingInScope(client, access, studentId);
       if (!mapping) throw new OutOfScope();
-      if (access.kind === "mentor" && Number(mapping.mentor_user_id) !== access.mentorUserId) throw new OutOfScope();
       const { details } = session;
       const draft = await client.query<{ id: number | string }>(
         `INSERT INTO blended_learning_conversation_drafts (student_id, program_id, academic_year, mentor_user_id, created_by_user_id, created_by_email, state, occurred_on, mode, spoke_with, duration_minutes, call_recording_s3_key, recording_content_type, recording_byte_size)
