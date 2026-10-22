@@ -562,6 +562,73 @@ test.describe("Holistic Mentorship release workflows", () => {
     expectBrowserHealth(health);
   });
 
+  test("Student Context and the read-only drill-down show earlier Notes' Challenge Categories", async ({
+    holisticTeacherPage: mentor,
+    holisticAdminPage,
+    holisticPmPage,
+  }) => {
+    const pages = [mentor, holisticAdminPage, holisticPmPage];
+    const health = pages.map(collectBrowserHealth);
+    const earlierNotesUrl = studentPhaseUrl(fixture.profileGrade11StudentId, fixture.firstGrade11PhaseId);
+    const laterPhaseUrl = studentPhaseUrl(fixture.profileGrade11StudentId, fixture.activeGrade11PhaseId);
+    const mentorContextCategories = mentor.getByRole("region", { name: "Student Context", exact: true })
+      .getByRole("region", { name: "Challenge Categories", exact: true });
+
+    // The seeded Phase 1 Note predates Challenge Categories.
+    await mentor.goto(laterPhaseUrl);
+    await expect(mentor.getByText("From Phase 1 - Synthetic Grade 11 Completed", { exact: true })).toBeVisible();
+    await expect(mentorContextCategories).toContainText("Categories not recorded");
+    for (const page of [holisticAdminPage, holisticPmPage]) {
+      await page.goto(earlierNotesUrl);
+      await expect(page.getByText(/^Submitted (by .+ )?on /)).toBeVisible();
+      await expect(page.getByRole("region", { name: "Challenge Categories", exact: true }))
+        .toContainText("Categories not recorded");
+    }
+
+    await mentor.goto(earlierNotesUrl);
+    await mentor.getByRole("button", { name: "Edit Notes" }).click();
+    await challengeGroup(mentor, "Academic").getByRole("checkbox", { name: "Backlogs, revision & workload" }).check();
+    await challengeGroup(mentor, "Non-academic").getByRole("checkbox", { name: "Financial challenges" }).check();
+    await challengeGroup(mentor, "Non-academic").getByRole("checkbox", { name: "Career uncertainty" }).check();
+    const correction = mentor.waitForResponse((response) =>
+      response.request().method() === "PATCH" && response.request().postData()?.includes('"action":"edit"') === true
+    );
+    mentor.once("dialog", (dialog) => dialog.accept());
+    await mentor.getByRole("button", { name: "Save Changes" }).click();
+    expect((await correction).status()).toBe(200);
+    await expect(mentor.getByText("Submitted Notes updated.")).toBeVisible();
+
+    const academic = ["Backlogs, revision & workload"];
+    const nonAcademic = ["Career uncertainty", "Financial challenges"];
+    await mentor.goto(laterPhaseUrl);
+    await expect(mentorContextCategories.getByRole("list", { name: "Academic", exact: true }).getByRole("listitem"))
+      .toHaveText(academic);
+    await expect(mentorContextCategories.getByRole("list", { name: "Non-academic", exact: true }).getByRole("listitem"))
+      .toHaveText(nonAcademic);
+    for (const page of [holisticAdminPage, holisticPmPage]) {
+      await page.goto(earlierNotesUrl);
+      await expectSubmittedCategories(page, academic, nonAcademic);
+      // The later Phase has no submitted Notes, so its only Categories are the context's.
+      await page.goto(laterPhaseUrl);
+      await expect(page.getByText("From Phase 1 - Synthetic Grade 11 Completed", { exact: true })).toBeVisible();
+      await expectSubmittedCategories(page, academic, nonAcademic);
+    }
+
+    // Restore the pre-release fixture for later specs.
+    const pool = getTestPool();
+    try {
+      await pool.query(
+        `DELETE FROM holistic_mentorship_post_session_note_challenges
+         WHERE notes_id IN (SELECT id FROM holistic_mentorship_post_session_notes
+                            WHERE student_id = $1 AND phase_id = $2)`,
+        [fixture.profileGrade11StudentId, fixture.firstGrade11PhaseId],
+      );
+    } finally {
+      await pool.end();
+    }
+    health.forEach(expectBrowserHealth);
+  });
+
   test("Holistic Admin verifies progress, CSV, read-only drill-down, Phase setup, and regeneration", async ({
     holisticAdminPage,
   }) => {

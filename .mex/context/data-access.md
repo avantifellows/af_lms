@@ -252,7 +252,7 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
     Question chosen by `placeHolisticChallengeCategories`, or in a trailing "Challenge Categories"
     block. Categories autosave with the answers. Submit / Save Changes check answers first, then
     name the empty group(s), linked to the fieldset. The submitted view lists labels by group, or
-    "Categories not recorded". The Admin/PM read-only view and Student Context are not yet changed.
+    "Categories not recorded". Read surfaces (#462) reuse the same grouped display.
   - **Release:** because the field is required, a Notes tab left open across the release gets a
     422 on its next autosave; reloading fixes it. Say so in the PR body (release notes are built
     from PR bodies).
@@ -274,4 +274,16 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   - Tests: `holistic-progress.test.ts`, `src/app/api/mcp/route.test.ts` (the redaction seam),
     and `holistic-progress.spec.ts`, which tags its own fixture Notes with
     `seedHolisticNoteChallengeCategories` / `removeHolisticNoteChallengeCategories`.
-- Admin/PM read surfaces, Student Context and the heatmap are later slices of #457.
+- **Read surfaces (#462):** one grouped display, `SubmittedChallengeCategories` in
+  `StudentPhaseWorkspace`, serves the Mentor submitted view, the Admin/PM read-only Notes panel
+  (Admin, Holistic Mentorship Admin, PM, PA) and Student Context. A submitted Note with `[]` shows
+  "Categories not recorded"; Pending (no submitted Notes) shows nothing.
+  - **Student Context:** `HolisticStudentContext.challengeCategories?` is set only on Notes-based
+    context (`From Phase N - …`), from the same source Notes as its items (`[]` for untagged
+    Notes). Profile and Historical-notes contexts never carry it, and the UI renders the section
+    only when the field is present. Resolution order and liveness are unchanged, so an Edit notes
+    on earlier Notes shows in later Phases on the next load.
+  - Tests: `holistic-student-phase.test.ts`, `StudentPhaseWorkspace.test.tsx`, and the Holistic
+    Playwright spec, which edits the seeded pre-release Phase 1 Note and then strips its Category
+    rows again for later specs.
+- The heatmap is a later slice of #457.

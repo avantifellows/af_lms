@@ -805,11 +805,17 @@ function SubmittedNotesView({ questions, value, submitted }: {
   </>;
 }
 
-function SubmittedChallengeCategories({ codes }: { codes: HolisticChallengeCategoryCode[] }) {
+// The one grouped display for every read surface: the Mentor submitted view,
+// the Admin/PM read-only view, and Notes-based Student Context.
+function SubmittedChallengeCategories({ codes, headingLevel = 3 }: {
+  codes: HolisticChallengeCategoryCode[];
+  headingLevel?: 3 | 4;
+}) {
   const headingId = useId();
   const grouped = groupHolisticChallengeCategories(codes);
+  const Heading = headingLevel === 4 ? "h4" : "h3";
   return <section aria-labelledby={headingId}>
-    <h3 id={headingId} className="text-sm font-semibold text-text-primary">Challenge Categories</h3>
+    <Heading id={headingId} className="text-sm font-semibold text-text-primary">Challenge Categories</Heading>
     {codes.length === 0
       ? <p className="mt-2 text-sm text-text-muted">Categories not recorded</p>
       : <div className="mt-2 grid gap-3 sm:grid-cols-2">
@@ -1594,6 +1600,8 @@ function AdminContextBlocks({ context }: { context: OpenSelectedPhase["context"]
       <h4 className="text-sm font-semibold text-success">{item.label}</h4>
       <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-text-primary">{item.content}</p>
     </div>)}
+    {context.challengeCategories &&
+      <SubmittedChallengeCategories codes={context.challengeCategories} headingLevel={4} />}
   </div>;
 }
 
@@ -1781,6 +1789,7 @@ function AdminSubmittedNotes({ notes, questions }: {
           {answer.answer}
         </blockquote>
       </div>)}
+      <SubmittedChallengeCategories codes={notes.challengeCategories ?? []} headingLevel={4} />
     </div>
     <AdminInfoAlert icon={Lock} title="Read-only for Admins">
       Only the author while currently assigned can edit submitted Notes.
@@ -1847,6 +1856,7 @@ function StudentContextBody({ context }: { context: OpenSelectedPhase["context"]
         <dd className="mt-1 whitespace-pre-wrap text-sm leading-6 text-text-primary">{item.content}</dd>
       </div>)}
     </dl>
+    {context.challengeCategories && <SubmittedChallengeCategories codes={context.challengeCategories} />}
     {context.lastUpdatedAt && <p className="font-mono text-xs text-text-muted">
       Last updated {formatDate(context.lastUpdatedAt)}
     </p>}

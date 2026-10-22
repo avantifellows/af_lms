@@ -1175,6 +1175,110 @@ describe("StudentPhaseWorkspace", () => {
     });
   });
 
+  describe("Challenge Categories on read-only surfaces", () => {
+    type Codes = NonNullable<OpenPhase["notes"]>["challengeCategories"];
+    const listLabels = (section: HTMLElement, group: "Academic" | "Non-academic") =>
+      within(within(section).getByRole("list", { name: group })).getAllByRole("listitem")
+        .map((item) => item.textContent);
+    const adminSubmittedNotes = (challengeCategories: string[]): OpenPhase["notes"] => ({
+      state: "submitted",
+      revision: 3,
+      authorName: "Divya Menon",
+      firstSubmittedAt: "2026-07-14T09:48:00Z",
+      lastEditedAt: "2026-07-14T09:48:00Z",
+      answers: [{ questionId: 91, question: "Which decision is the student working through?", answer: "Comparing pathways" }],
+      challengeCategories: challengeCategories as Codes,
+    });
+    const notesContext = (challengeCategories: string[]): OpenPhase["context"] => ({
+      label: "From Phase 5 - Reconnecting",
+      items: [{ label: "What changed?", content: "More settled" }],
+      lastUpdatedAt: "2026-07-13T00:00:00Z",
+      challengeCategories: challengeCategories as Codes,
+    });
+    const mentorDetail = (context: OpenPhase["context"]) => {
+      const detail = teacherDetail();
+      Object.assign(detail.selectedPhase, { context });
+      return detail;
+    };
+
+    it.each(["holistic_mentorship_admin", "program_manager"])(
+      "lists submitted Notes' Categories by group in the read-only view for %s",
+      (viewerRole) => {
+        render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" viewerRole={viewerRole}
+          detail={adminDetail({
+            notes: adminSubmittedNotes(["non_academic.financial", "academic.test_preparation", "non_academic.wellness"]),
+          })} />);
+
+        const section = screen.getByRole("region", { name: "Challenge Categories" });
+        expect(listLabels(section, "Academic")).toEqual(["Test performance & preparation"]);
+        expect(listLabels(section, "Non-academic")).toEqual(["Wellness (health, sleep etc.)", "Financial challenges"]);
+        expect(follows(screen.getByText("Comparing pathways"), section)).toBe(true);
+      },
+    );
+
+    it("shows Categories not recorded for a pre-release submitted Note in the read-only view", () => {
+      render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027"
+        detail={adminDetail({ notes: adminSubmittedNotes([]) })} />);
+
+      const section = screen.getByRole("region", { name: "Challenge Categories" });
+      expect(section).toHaveTextContent("Categories not recorded");
+      expect(within(section).queryByRole("list")).not.toBeInTheDocument();
+    });
+
+    it("shows no Categories while the read-only view is Pending", () => {
+      render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={adminDetail()} />);
+
+      expect(screen.queryByRole("region", { name: "Challenge Categories" })).not.toBeInTheDocument();
+    });
+
+    it("shows the earlier Notes' Categories in the Mentor's Student Context", () => {
+      render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027"
+        detail={mentorDetail(notesContext(["academic.backlogs_workload", "non_academic.no_major_issue"]))} />);
+
+      const context = screen.getByRole("region", { name: "Student Context" });
+      const section = within(context).getByRole("region", { name: "Challenge Categories" });
+      expect(listLabels(section, "Academic")).toEqual(["Backlogs, revision & workload"]);
+      expect(listLabels(section, "Non-academic")).toEqual(["No major issue reported"]);
+      expect(follows(within(context).getByText("More settled"), section)).toBe(true);
+    });
+
+    it("shows Categories not recorded when the Mentor's context Notes have no Category rows", () => {
+      render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027"
+        detail={mentorDetail(notesContext([]))} />);
+
+      const context = screen.getByRole("region", { name: "Student Context" });
+      expect(within(context).getByRole("region", { name: "Challenge Categories" }))
+        .toHaveTextContent("Categories not recorded");
+    });
+
+    it("shows the earlier Notes' Categories in the read-only Student Context", () => {
+      render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" viewerRole="program_manager"
+        detail={adminDetail({ context: notesContext(["academic.exam_related"]) })} />);
+
+      const section = screen.getByRole("region", { name: "Challenge Categories" });
+      expect(listLabels(section, "Academic")).toEqual(["Exam/Test related issues"]);
+      expect(listLabels(section, "Non-academic")).toEqual(["None"]);
+      expect(follows(screen.getByText("More settled"), section)).toBe(true);
+    });
+
+    it.each([
+      ["Student Profile", { label: "Student Profile" as const, items: [{ label: "Journey", content: "Summary" }] }],
+      ["Historical notes", { label: "Historical notes" as const, items: [{ label: "What worked?", content: "Peer study" }] }],
+    ])("shows no Categories section on a %s context", (_source, context) => {
+      const { unmount } = render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027"
+        detail={mentorDetail(context)} />);
+      expect(within(screen.getByRole("region", { name: "Student Context" })).getByText(context.items[0].content))
+        .toBeInTheDocument();
+      expect(screen.queryByRole("region", { name: "Challenge Categories" })).not.toBeInTheDocument();
+      unmount();
+
+      render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" canRegenerateProfile={false}
+        detail={adminDetail({ context })} />);
+      expect(screen.getByText(context.items[0].content)).toBeInTheDocument();
+      expect(screen.queryByRole("region", { name: "Challenge Categories" })).not.toBeInTheDocument();
+    });
+  });
+
   describe("Follow-up Notes", () => {
     afterEach(() => vi.restoreAllMocks());
 

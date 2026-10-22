@@ -57,6 +57,8 @@ export type HolisticStudentContext = {
   label: "Student Profile" | "Historical notes" | `From Phase ${number} - ${string}`;
   items: Array<{ label: string; content: string }>;
   lastUpdatedAt?: string;
+  // Notes-based context only, from the same source Notes as the items.
+  challengeCategories?: HolisticChallengeCategoryCode[];
   regeneration?: HolisticProfileRegeneration | null;
 } | {
   label: null;
@@ -118,6 +120,7 @@ export function resolveHolisticStudentContext(input: {
     phaseId: number;
     lastEditedAt: string;
     answers: Array<{ question: string; answer: string }>;
+    challengeCategories: HolisticChallengeCategoryCode[];
   }>;
   profile: Array<{ title: string; summary: string }> | null;
   historicalAnswers: Array<{ question: string; answer: string | null }> | null;
@@ -135,6 +138,7 @@ export function resolveHolisticStudentContext(input: {
         label: `From Phase ${sourcePhase.number} - ${sourcePhase.title}`,
         items: notes.answers.map(({ question, answer }) => ({ label: question, content: answer })),
         lastUpdatedAt: notes.lastEditedAt,
+        challengeCategories: notes.challengeCategories,
       };
     }
   }
@@ -704,7 +708,12 @@ function submittedPhaseNotes(
   return phases.flatMap((phase) => {
     const notes = notesByPhase.get(phase.id);
     return notes?.state === "submitted"
-      ? [{ phaseId: phase.id, lastEditedAt: notes.lastEditedAt, answers: notes.answers }]
+      ? [{
+          phaseId: phase.id,
+          lastEditedAt: notes.lastEditedAt,
+          answers: notes.answers,
+          challengeCategories: notes.challengeCategories,
+        }]
       : [];
   });
 }

@@ -68,6 +68,7 @@ describe("Holistic Student Phase derivation", () => {
           { question: "What helped?", answer: "A weekly study plan" },
           { question: "What is next?", answer: "Ask for feedback" },
         ],
+        challengeCategories: ["academic.exam_related", "non_academic.no_major_issue"],
       }],
       profile: null,
       historicalAnswers: null,
@@ -82,6 +83,7 @@ describe("Holistic Student Phase derivation", () => {
         { label: "What is next?", content: "Ask for feedback" },
       ],
       lastUpdatedAt: "2026-05-03T00:00:00Z",
+      challengeCategories: ["academic.exam_related", "non_academic.no_major_issue"],
     });
   });
 
@@ -230,11 +232,13 @@ describe("Holistic Student Phase derivation", () => {
         phaseId: 25,
         lastEditedAt: "2026-08-01T00:00:00Z",
         answers: [{ question: "What helped?", answer: "A weekly plan" }],
+        challengeCategories: [],
       }],
     })).toEqual({
       label: "From Phase 5 - Grade 12 start",
       items: [{ label: "What helped?", content: "A weekly plan" }],
       lastUpdatedAt: "2026-08-01T00:00:00Z",
+      challengeCategories: [],
     });
   });
 
@@ -764,6 +768,81 @@ describe("Holistic Student Phase derivation", () => {
       })], { actorUserId: 10, role: "teacher" });
 
       expect(selected).toMatchObject({ canEditNotes: true, draftSaved: false, notesRevision: 2, notes: null });
+    });
+  });
+
+  describe("Challenge Categories in Notes-based Student Context", () => {
+    const phaseRows = [
+      { id: 72, academic_year: "2026-2027", grade: 11, title: "Getting started", position: 1, revision: 1, state: "open", guidance_markdown: "Listen first." },
+      { id: 73, academic_year: "2026-2027", grade: 11, title: "Building confidence", position: 2, revision: 1, state: "open", guidance_markdown: "Reflect together." },
+    ];
+    const phase72Notes = (challengeCategories: string[]) => [{
+      notes_id: 101, phase_id: 72, author_user_id: 9, author_name: "Divya Rao",
+      state: "submitted", revision: 1, first_submitted_at: "2026-07-05T00:00:00Z",
+      last_edited_at: "2026-07-06T00:00:00Z", question_id: 91,
+      question: "What helped?", question_position: 1, answer: "A weekly plan",
+      challenge_categories: challengeCategories,
+    }];
+
+    function readPhase(phaseId: number, rows: {
+      notes: unknown[];
+      profile?: unknown[];
+    }, reader: { actorUserId?: number; role: string }) {
+      // First matching SQL fragment wins; the Student read is the fallback.
+      const routes: Array<[string, unknown[]]> = [
+        ["FROM holistic_mentorship_follow_up_notes", []],
+        ["FROM holistic_mentorship_phase_questions", []],
+        ["FROM holistic_mentorship_phase_state_transitions",
+          [{ phase_id: 72, to_state: "open", occurred_at: "2026-06-01T00:00:00Z" }]],
+        ["GROUP BY academic_year", [{ academic_year: "2026-2027", started_at: "2026-07-01T00:00:00Z" }]],
+        ["FROM holistic_mentorship_post_session_notes notes", rows.notes],
+        ["FROM holistic_mentorship_prompt_configurations", rows.profile ?? []],
+        ["FROM holistic_mentorship_phases phase", phaseRows],
+      ];
+      mockQuery.mockImplementation(async (sql: string) =>
+        routes.find(([fragment]) => sql.includes(fragment))?.[1] ??
+          [{ student_id: 41, mapping_id: 301, name: "Asha", external_student_id: "S41", grade: 11, entry_grade: 11 }]
+      );
+      return getHolisticStudentPhase({
+        programId: PROGRAM_IDS.MAHARASHTRA_COACHING_TESTPREP, studentId: 41, phaseId,
+        schoolId: 4, academicYear: "2026-2027", canEdit: true, ...reader,
+      }).then((detail) => (detail!.selectedPhase as { context: Record<string, unknown> }).context);
+    }
+
+    it.each([
+      ["the current Mentor", { actorUserId: 10, role: "teacher" }],
+      ["a Holistic Mentorship Admin", { role: "holistic_mentorship_admin" }],
+      ["a Program Manager", { role: "program_manager" }],
+    ])("carries the source Notes' Categories in catalogue order to %s", async (_reader, reader) => {
+      const context = await readPhase(73, {
+        notes: phase72Notes(["non_academic.financial", "academic.other", "academic.subject_concept"]),
+      }, reader);
+
+      expect(context).toEqual({
+        label: "From Phase 1 - Getting started",
+        items: [{ label: "What helped?", content: "A weekly plan" }],
+        lastUpdatedAt: "2026-07-06T00:00:00Z",
+        challengeCategories: ["academic.subject_concept", "academic.other", "non_academic.financial"],
+      });
+    });
+
+    it("carries an empty Category list when the source Notes were submitted without Category rows", async () => {
+      const context = await readPhase(73, { notes: phase72Notes([]) }, { actorUserId: 10, role: "teacher" });
+
+      expect(context).toMatchObject({ label: "From Phase 1 - Getting started", challengeCategories: [] });
+    });
+
+    it("never carries Categories on a Student Profile context", async () => {
+      const context = await readPhase(72, {
+        notes: [],
+        profile: [{ title: "Strengths", summary: "Patient problem solver", position: 1 }],
+      }, { actorUserId: 10, role: "teacher" });
+
+      expect(context).toEqual({
+        label: "Student Profile",
+        items: [{ label: "Strengths", content: "Patient problem solver" }],
+        regeneration: null,
+      });
     });
   });
 
