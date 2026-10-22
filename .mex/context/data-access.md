@@ -21,7 +21,7 @@ edges:
     condition: when adding a write that must proxy to the DB Service
   - target: patterns/add-api-route.md
     condition: when adding a route that reads or writes
-last_updated: 2026-10-22
+last_updated: 2026-10-23
 ---
 
 # Data Access
@@ -206,18 +206,27 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   (`academic.*` / `non_academic.*`) are stable and stored; labels may change (ADR-0004
   pattern). There is no DB CHECK on codes and no admin editing.
 - **Single-source helpers:** every later consumer must import these rather than restate a rule.
+  - `HOLISTIC_CHALLENGE_CATEGORY_GROUPS` is the `{ group, label }` list (`academic` → "Academic",
+    `non_academic` → "Non-academic") in display order: the one copy of the group labels, used by
+    the Notes form, read surfaces, Phase Setup hints, the heatmap header and its CSV.
+  - `isHolisticChallengeCategoryCode` is the type guard; `knownHolisticChallengeCategories(codes)`
+    returns the known codes in catalogue order and drops unknown stored codes (every read model
+    and the toggle use it).
   - `validateHolisticChallengeCategories(codes, { final })` trims codes, then rejects non-string,
     unknown or duplicate codes (`Unknown Challenge Category`) and `no_major_issue` mixed with another
     code in its group (`Choose either No major issue reported or other Challenge Categories`).
     With `final` (Submit / Edit notes) it also needs ≥1 code per group (`Choose at least one
-    Academic and one Non-academic Challenge Category`, plus `emptyGroup`).
-  - `groupHolisticChallengeCategories` returns `{ academic, nonAcademic }` entries in catalogue order.
+    Academic and one Non-academic Challenge Category`, plus `emptyGroups[]`).
+  - `holisticChallengeCategoryGroupsMessage(emptyGroups)` builds the message naming only the empty
+    groups; the Mentor form shows it, while the API error always names both groups.
+  - `groupHolisticChallengeCategories` returns `{ academic, non_academic }` entries in catalogue
+    order (keyed like the stored group, one spelling everywhere).
   - `toggleHolisticChallengeCategory` (UI) keeps `No major issue reported` exclusive within its group.
-  - `placeHolisticChallengeCategories` picks the Question for each group. It matches
-    case-insensitively and takes the first Question by position. Non-academic needs
+  - `placeHolisticChallengeCategories(questions)` returns `{ academic, non_academic }` Question
+    ids. Callers pass Questions already in position order (the read model's `ORDER BY position`;
+    Phase Setup's array order); it takes the first case-insensitive match. Non-academic needs
     `non-academic challenge` (hyphenated only). Academic needs `academic challenge` without
     `non-academic`. A group with no match is `null`.
-  - `joinHolisticChallengeCategoryLabels` gives the `"; "`-joined CSV cell text.
 - **Phase Setup (#458):** each Question editor shows the placement hint for the current, unsaved
   Question texts. Phase definitions, freezing and the Question schema are unchanged.
 - **Storage:** `holistic_mentorship_post_session_note_challenges` (db-service #806), one row per
@@ -243,8 +252,9 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
     A Categories-only first draft creates Notes, freezes the Phase and audits `draft_saved`;
     the empty-initial-draft no-op needs no non-blank answers **and** no Categories.
   - **Replace semantics:** after the Notes row `FOR UPDATE` and revision bump, the save deletes
-    the Notes' Category rows and re-inserts the submitted set in catalogue order, next to the
-    answers. Lock order, tokens, author rules and content-free audits are unchanged.
+    the Notes' Category rows and re-inserts the validated set with one
+    `INSERT … SELECT $1, unnest($2::text[])`, in the same transaction as the answers (row order is
+    irrelevant; readers sort by catalogue). Lock order, tokens, author rules and content-free audits are unchanged.
   - **Read model:** student-phase `notes.challengeCategories` (codes, catalogue order, unknown
     stored codes dropped) is returned wherever `answers` is: submitted Notes to every authorized
     reader, drafts only to their author.
@@ -262,25 +272,25 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
     Active" only (`seedHolisticE2eChallengeQuestions` in `e2e/helpers/db.ts`).
 - **Students & Progress (#461):** assigned progress rows carry `challengeCategories` (codes,
   catalogue order, unknown stored codes dropped) from the selected Phase's **submitted** Notes,
-  via a lateral join next to `answers`. Drafts, no Notes and untagged pre-release Notes give `[]`;
-  Unassigned rows have no field. The on-screen list does not show them.
+  via a lateral join next to `answers`. Drafts, no Notes and pre-release Notes without Challenge
+  Categories give `[]`; Unassigned rows have no field. The on-screen list does not show them.
   - **CSV:** `Academic Challenges`, `Non-Academic Challenges` sit after the Question/Answer columns
-    and before `Notes Author Name`; each cell is `joinHolisticChallengeCategoryLabels` over that
-    group, blank when empty (untagged Notes are blank, not "Categories not recorded") and for
-    Unassigned rows. The usual cell neutralisation applies.
+    and before `Notes Author Name`; each cell is that group's labels joined with `"; "`, blank
+    when empty (Notes without Challenge Categories are blank, not "Categories not recorded") and
+    for Unassigned rows. The usual cell neutralisation applies.
   - **MCP:** Categories are Notes content. `redactHolisticProgress` (`src/lib/mcp/views.ts`) drops
     `challengeCategories` with `answers` unless `include_notes=true`; `answersSubmitted` still
     counts answers only. Any new Notes-content field on progress rows must be added there too.
   - Tests: `holistic-progress.test.ts`, `src/app/api/mcp/route.test.ts` (the redaction seam),
-    and `holistic-progress.spec.ts`, which tags its own fixture Notes with
+    and `holistic-progress.spec.ts`, which adds Challenge Categories to its own fixture Notes with
     `seedHolisticNoteChallengeCategories` / `removeHolisticNoteChallengeCategories`.
 - **Read surfaces (#462):** one grouped display, `SubmittedChallengeCategories` in
   `StudentPhaseWorkspace`, serves the Mentor submitted view, the Admin/PM read-only Notes panel
   (Admin, Holistic Mentorship Admin, PM, PA) and Student Context. A submitted Note with `[]` shows
   "Categories not recorded"; Pending (no submitted Notes) shows nothing.
   - **Student Context:** `HolisticStudentContext.challengeCategories?` is set only on Notes-based
-    context (`From Phase N - …`), from the same source Notes as its items (`[]` for untagged
-    Notes). Profile and Historical-notes contexts never carry it, and the UI renders the section
+    context (`From Phase N - …`), from the same source Notes as its items (`[]` for Notes without
+    Challenge Categories). Profile and Historical-notes contexts never carry it, and the UI renders the section
     only when the field is present. Resolution order and liveness are unchanged, so an Edit notes
     on earlier Notes shows in later Phases on the next load.
   - Tests: `holistic-student-phase.test.ts`, `StudentPhaseWorkspace.test.tsx`, and the Holistic
@@ -356,8 +366,8 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
     The tab's "Download CSV" button (only when the grid is shown; never while loading, on error or in
     the empty state) fetches the current filters with `format=csv` and saves under that filename.
   - **Fixture:** `seedHolisticFixtures` adds a second submitted Note (second Grade 12 Student, Phase 4
-    "Synthetic Grade 12 Skipped") tagged Exam/Test related issues + Time management & distractions, so
-    the heatmap is non-empty; the Phase 1 Note stays the untagged pre-release Note.
+    "Synthetic Grade 12 Skipped") carrying Exam/Test related issues + Time management & distractions, so
+    the heatmap is non-empty; the Phase 1 Note stays the pre-release Note without Challenge Categories.
   - Tests: `holistic-challenge-category-heatmap.integration.test.ts` (real Postgres, opt-in via
     `HOLISTIC_HEATMAP_TEST_DATABASE`), the route test (real access gate, stubbed permission lookup),
     `ChallengeCategoryHeatmap.test.tsx`, `HolisticMentorshipWorkspace.test.tsx`, and

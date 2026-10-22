@@ -144,6 +144,7 @@ These retain distinct Tailwind colors since each color conveys a different categ
 - **Program badges**: CoE = purple, Nodal = accent, NVS = green
 - **Role badges**: admin = purple, program_admin = cyan, program_manager = indigo, teacher = gray
 - **Student category badges**: Gen = green, OBC = accent, SC = purple, ST = orange
+- **Challenge Category Heatmap cells**: a linear 0–100% scale from light yellow `rgb(255, 247, 188)` to dark red `rgb(153, 0, 13)`, with black or white cell text, whichever contrasts more (≥ 4.5:1). The values are raw RGB in `src/lib/holistic-challenge-category-heatmap-colours.ts`, because Tailwind tokens cannot express an interpolated scale; keep the legend gradient and cells on that module
 
 ---
 
