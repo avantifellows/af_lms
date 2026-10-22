@@ -201,7 +201,7 @@ describe("MenteeDetailPage", () => {
     expect(screen.queryByRole("link", { name: "Log a Conversation or Attempt" })).not.toBeInTheDocument();
   });
 
-  it("lists Open Action Items with their owner, due date and when they were agreed", async () => {
+  it("lists Open Action Items with their owner and when they were agreed, never a due date", async () => {
     signedInAs(MENTOR);
     mockGetMenteeDetail.mockResolvedValue({
       ...MENTEE,
@@ -214,7 +214,8 @@ describe("MenteeDetailPage", () => {
 
     const section = screen.getByRole("region", { name: "Open Action Items" });
     expect(within(section).getByText("Revise optics")).toBeInTheDocument();
-    expect(within(section).getByText("Student · Due 27 Oct 2026 · From 20 Oct 2026")).toBeInTheDocument();
+    expect(within(section).getByText("Student · From 20 Oct 2026")).toBeInTheDocument();
+    expect(within(section).queryByText(/Due/)).not.toBeInTheDocument();
   });
 
   it("shows the history newest first: Attempts with their note, Conversations with items, flags and media", async () => {
