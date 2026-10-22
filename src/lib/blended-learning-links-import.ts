@@ -218,6 +218,98 @@ interface TabResult {
   issues: BlendedLinksIssue[];
 }
 
+type RowOutcome =
+  | { status: "unmatched"; studentId: string | null; reason: BlendedLinksIssueReason }
+  | { status: "skipped"; student: MappedStudent; called: string | null; reason: BlendedLinksIssueReason }
+  | { status: "accepted"; student: MappedStudent; called: string | null; url: string };
+
+// The Student a row names by Student ID, else by an exact normalised name
+// that only one Student has; otherwise why it is unmatched.
+function matchStudent(
+  studentId: string | null,
+  name: string,
+  students: StudentIndex
+): MappedStudent | BlendedLinksIssueReason {
+  if (studentId) return students.byStudentId.get(studentId) ?? "no_match";
+  const candidates = students.byName.get(name) ?? [];
+  if (candidates.length === 1) return candidates[0];
+  return candidates.length > 1 ? "ambiguous_name" : "no_match";
+}
+
+function cellText(row: ExcelJS.Row, column: number | null): string {
+  return column != null ? (row.getCell(column).text ?? "") : "";
+}
+
+// One data row: null for a row with neither a Student ID nor a name.
+function readLinkRow(
+  row: ExcelJS.Row,
+  columns: TabColumns,
+  rowFallback: boolean,
+  students: StudentIndex
+): RowOutcome | null {
+  const studentId = cellText(row, columns.studentId).trim() || null;
+  const name = normaliseName(cellText(row, columns.name));
+  if (!studentId && !name) return null;
+
+  const student = matchStudent(studentId, name, students);
+  if (typeof student === "string") return { status: "unmatched", studentId, reason: student };
+
+  const called = lastCalledMonth(row, columns.months);
+  const url = rowHyperlink(row, columns.link, rowFallback);
+  if (!url) return { status: "skipped", student, called, reason: "no_link" };
+  if (!HTTPS_URL.test(url)) return { status: "skipped", student, called, reason: "not_https" };
+  return { status: "accepted", student, called, url };
+}
+
+type AcceptedRow = { row: number; studentId: string | null; url: string };
+
+// Reads one tab's rows into `result`. Rows that resolve to a Student with a
+// usable link wait in `accepted` until every row is read.
+class TabReader {
+  readonly accepted = new Map<number, AcceptedRow[]>();
+
+  constructor(
+    private readonly result: TabResult,
+    private readonly tab: SourceTab
+  ) {}
+
+  issue(row: number, studentId: string | null, reason: BlendedLinksIssueReason): void {
+    this.result.issues.push({ tab: this.tab, row, studentId, reason });
+  }
+
+  record(rowNumber: number, outcome: RowOutcome): void {
+    if (outcome.status === "unmatched") {
+      this.result.counts.unmatched++;
+      this.issue(rowNumber, outcome.studentId, outcome.reason);
+      return;
+    }
+    const { student, called } = outcome;
+    const seen = this.result.legacyMonths.get(student.id);
+    if (called && (seen == null || called > seen)) this.result.legacyMonths.set(student.id, called);
+    if (outcome.status === "skipped") {
+      this.result.counts.skipped++;
+      this.issue(rowNumber, student.studentId, outcome.reason);
+      return;
+    }
+    const rows = this.accepted.get(student.id) ?? [];
+    this.accepted.set(student.id, [...rows, { row: rowNumber, studentId: student.studentId, url: outcome.url }]);
+  }
+
+  // Rows giving one Student different links are ambiguous and none is used.
+  settle(): void {
+    for (const [id, rows] of this.accepted) {
+      if (new Set(rows.map((r) => r.url)).size === 1) {
+        this.result.counts.matched += rows.length;
+        this.result.links.set(id, rows[0].url);
+        continue;
+      }
+      this.result.counts.unmatched += rows.length;
+      for (const r of rows) this.issue(r.row, r.studentId, "duplicate_row");
+    }
+    this.result.issues.sort((a, b) => a.row - b.row);
+  }
+}
+
 function readLinksTab(
   sheet: ExcelJS.Worksheet,
   tab: SourceTab,
@@ -237,68 +329,12 @@ function readLinksTab(
   if (!columns) return result;
   result.read = true;
 
-  const issue = (row: number, studentId: string | null, reason: BlendedLinksIssueReason) =>
-    result.issues.push({ tab, row, studentId, reason });
-
-  // Rows that resolved to a Student with a usable link. Rows giving one Student
-  // different links are ambiguous and none is used.
-  const accepted = new Map<number, { row: number; studentId: string | null; url: string }[]>();
-
+  const reader = new TabReader(result, tab);
   for (let rowNumber = columns.headerRow + 1; rowNumber <= sheet.rowCount; rowNumber++) {
-    const row = sheet.getRow(rowNumber);
-    const studentId =
-      columns.studentId != null ? row.getCell(columns.studentId).text.trim() || null : null;
-    const name = columns.name != null ? normaliseName(row.getCell(columns.name).text ?? "") : "";
-    if (!studentId && !name) continue;
-
-    let student: MappedStudent | undefined;
-    if (studentId) {
-      student = students.byStudentId.get(studentId);
-      if (!student) {
-        result.counts.unmatched++;
-        issue(rowNumber, studentId, "no_match");
-        continue;
-      }
-    } else {
-      const candidates = students.byName.get(name) ?? [];
-      if (candidates.length !== 1) {
-        result.counts.unmatched++;
-        issue(rowNumber, null, candidates.length > 1 ? "ambiguous_name" : "no_match");
-        continue;
-      }
-      student = candidates[0];
-    }
-
-    const called = lastCalledMonth(row, columns.months);
-    const seen = result.legacyMonths.get(student.id);
-    if (called && (seen == null || called > seen)) result.legacyMonths.set(student.id, called);
-
-    const url = rowHyperlink(row, columns.link, rowFallback);
-    if (!url) {
-      result.counts.skipped++;
-      issue(rowNumber, student.studentId, "no_link");
-      continue;
-    }
-    if (!HTTPS_URL.test(url)) {
-      result.counts.skipped++;
-      issue(rowNumber, student.studentId, "not_https");
-      continue;
-    }
-
-    const rows = accepted.get(student.id) ?? [];
-    accepted.set(student.id, [...rows, { row: rowNumber, studentId: student.studentId, url }]);
+    const outcome = readLinkRow(sheet.getRow(rowNumber), columns, rowFallback, students);
+    if (outcome) reader.record(rowNumber, outcome);
   }
-
-  for (const [id, rows] of accepted) {
-    if (new Set(rows.map((r) => r.url)).size === 1) {
-      result.counts.matched += rows.length;
-      result.links.set(id, rows[0].url);
-      continue;
-    }
-    result.counts.unmatched += rows.length;
-    for (const r of rows) issue(r.row, r.studentId, "duplicate_row");
-  }
-  result.issues.sort((a, b) => a.row - b.row);
+  reader.settle();
   return result;
 }
 
@@ -336,6 +372,48 @@ async function loadExistingLinks(studentIds: number[]): Promise<Map<number, Stud
 }
 
 // A value missing from the workbook keeps the stored one; nothing is cleared.
+function mergeLinks(links: Partial<StudentLinks>, stored: StudentLinks | undefined): StudentLinks {
+  return {
+    profileDocUrl: links.profileDocUrl ?? stored?.profileDocUrl ?? null,
+    screenerUrl: links.screenerUrl ?? stored?.screenerUrl ?? null,
+    legacyMonth: links.legacyMonth ?? stored?.legacyMonth ?? null,
+  };
+}
+
+function sameLinks(stored: StudentLinks, next: StudentLinks, seedLegacy: boolean): boolean {
+  return (
+    stored.profileDocUrl === next.profileDocUrl &&
+    stored.screenerUrl === next.screenerUrl &&
+    (!seedLegacy || stored.legacyMonth === next.legacyMonth)
+  );
+}
+
+async function writeLinks(studentId: number, next: StudentLinks, seedLegacy: boolean): Promise<void> {
+  if (seedLegacy) {
+    await query(
+      `INSERT INTO blended_learning_student_links
+         (student_id, profile_doc_url, screener_url, legacy_last_contact_month)
+       VALUES ($1, $2, $3, $4::date)
+       ON CONFLICT (student_id) DO UPDATE
+       SET profile_doc_url = EXCLUDED.profile_doc_url,
+           screener_url = EXCLUDED.screener_url,
+           legacy_last_contact_month = EXCLUDED.legacy_last_contact_month,
+           updated_at = now()`,
+      [studentId, next.profileDocUrl, next.screenerUrl, next.legacyMonth]
+    );
+    return;
+  }
+  await query(
+    `INSERT INTO blended_learning_student_links (student_id, profile_doc_url, screener_url)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (student_id) DO UPDATE
+     SET profile_doc_url = EXCLUDED.profile_doc_url,
+         screener_url = EXCLUDED.screener_url,
+         updated_at = now()`,
+    [studentId, next.profileDocUrl, next.screenerUrl]
+  );
+}
+
 // legacy_last_contact_month is read and written only with seedLegacy.
 async function upsertLinks(
   found: Map<number, Partial<StudentLinks>>,
@@ -348,47 +426,13 @@ async function upsertLinks(
 
   for (const [studentId, links] of found) {
     const stored = existing.get(studentId);
-    const next: StudentLinks = {
-      profileDocUrl: links.profileDocUrl ?? stored?.profileDocUrl ?? null,
-      screenerUrl: links.screenerUrl ?? stored?.screenerUrl ?? null,
-      legacyMonth: links.legacyMonth ?? stored?.legacyMonth ?? null,
-    };
-    if (
-      stored &&
-      stored.profileDocUrl === next.profileDocUrl &&
-      stored.screenerUrl === next.screenerUrl &&
-      (!seedLegacy || stored.legacyMonth === next.legacyMonth)
-    ) {
+    const next = mergeLinks(links, stored);
+    if (stored && sameLinks(stored, next, seedLegacy)) {
       writes.unchanged++;
       continue;
     }
-    if (stored) writes.updated++;
-    else writes.inserted++;
-    if (mode !== "apply") continue;
-
-    if (seedLegacy) {
-      await query(
-        `INSERT INTO blended_learning_student_links
-           (student_id, profile_doc_url, screener_url, legacy_last_contact_month)
-         VALUES ($1, $2, $3, $4::date)
-         ON CONFLICT (student_id) DO UPDATE
-         SET profile_doc_url = EXCLUDED.profile_doc_url,
-             screener_url = EXCLUDED.screener_url,
-             legacy_last_contact_month = EXCLUDED.legacy_last_contact_month,
-             updated_at = now()`,
-        [studentId, next.profileDocUrl, next.screenerUrl, next.legacyMonth]
-      );
-    } else {
-      await query(
-        `INSERT INTO blended_learning_student_links (student_id, profile_doc_url, screener_url)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (student_id) DO UPDATE
-         SET profile_doc_url = EXCLUDED.profile_doc_url,
-             screener_url = EXCLUDED.screener_url,
-             updated_at = now()`,
-        [studentId, next.profileDocUrl, next.screenerUrl]
-      );
-    }
+    writes[stored ? "updated" : "inserted"]++;
+    if (mode === "apply") await writeLinks(studentId, next, seedLegacy);
   }
   return writes;
 }
