@@ -1,5 +1,5 @@
 import { render, screen, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import userEventLib from "@testing-library/user-event";
 import type { Dispatch, SetStateAction } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -74,6 +74,9 @@ const DRAFT: ReviewDraft = {
   itemsToVerify: ["The mock test date"],
 };
 
+// No delay between keystrokes: these tests type a lot.
+let userEvent: ReturnType<typeof userEventLib.setup>;
+
 // The entries route is the form's network boundary.
 const mockFetch = vi.fn();
 
@@ -110,6 +113,7 @@ async function fillConversation() {
 }
 
 beforeEach(() => {
+  userEvent = userEventLib.setup({ delay: null });
   mockFetch.mockReset();
   vi.stubGlobal("fetch", mockFetch);
 });
@@ -119,24 +123,18 @@ afterEach(() => {
 });
 
 describe("LogEntryForm: Conversation", () => {
-  it("saves a Conversation with its Action Items, photo, flags and ticks, then confirms", async () => {
+  it("saves a Conversation's session details and Action Items, then confirms on the Mentor's own list", async () => {
     renderForm();
     expect(screen.getByText("Last conversation panel")).toBeInTheDocument();
     await fillConversation();
     expect(screen.getByTestId("recording-upload")).toHaveTextContent(
       JSON.stringify({ occurredOn: TODAY, mode: "call", spokeWith: "student", durationMinutes: 30 })
     );
-
     await userEvent.click(screen.getByRole("button", { name: "Add Action Item" }));
     const item = screen.getByRole("group", { name: "Action Item 1" });
     await userEvent.selectOptions(within(item).getByLabelText("Owner"), "mentor");
     await userEvent.type(within(item).getByLabelText("What"), "Share the notes");
     await userEvent.type(within(item).getByLabelText("Due (optional)"), "2026-10-30");
-    await userEvent.click(screen.getByRole("button", { name: "Add uploaded photo" }));
-    await userEvent.click(screen.getByRole("switch", { name: "Physics Teacher" }));
-    await userEvent.type(screen.getByLabelText("Comment for Physics Teacher (optional)"), "Optics");
-    await userEvent.click(screen.getByRole("checkbox", { name: /Bring the admit card/ }));
-    await userEvent.type(screen.getByLabelText("Notes"), "<p>Fine</p>");
 
     answer({ entry: { id: 9 }, mentee: { ...MENTEE, reasons: ["gap_30"] } });
     await userEvent.click(screen.getByRole("button", { name: "Save Conversation" }));
@@ -152,11 +150,11 @@ describe("LogEntryForm: Conversation", () => {
       spokeWith: "student",
       durationMinutes: 30,
       summary: "Talked about the mock test.",
-      notesHtml: "<p>Fine</p>",
+      notesHtml: "",
       actionItems: [{ owner: "mentor", text: "Share the notes", dueOn: "2026-10-30" }],
-      photoKeys: ["photo-key"],
-      flags: [{ recipient: "physics", comment: "Optics" }],
-      completeActionItemIds: [7],
+      photoKeys: [],
+      flags: [],
+      completeActionItemIds: [],
     });
 
     const saved = await screen.findByRole("region", { name: "Saved" });
@@ -168,6 +166,26 @@ describe("LogEntryForm: Conversation", () => {
       "/blended-learning/students/501"
     );
     expect(within(saved).getByRole("link", { name: "Back to Mentees" })).toHaveAttribute("href", "/blended-learning");
+  });
+
+  it("sends a Conversation's photo, Mentor Flags, ticks and notes", async () => {
+    renderForm();
+    await userEvent.click(screen.getByRole("button", { name: "Add uploaded photo" }));
+    await userEvent.click(screen.getByRole("switch", { name: "Physics Teacher" }));
+    await userEvent.type(screen.getByLabelText("Comment for Physics Teacher (optional)"), "Optics");
+    await userEvent.click(screen.getByRole("checkbox", { name: /Bring the admit card/ }));
+    await userEvent.type(screen.getByLabelText("Notes"), "Fine");
+
+    answer({ entry: { id: 9 }, mentee: MENTEE });
+    await userEvent.click(screen.getByRole("button", { name: "Save Conversation" }));
+
+    expect(sentBody()).toMatchObject({
+      notesHtml: "Fine",
+      photoKeys: ["photo-key"],
+      flags: [{ recipient: "physics", comment: "Optics" }],
+      completeActionItemIds: [7],
+    });
+    expect(await screen.findByRole("heading", { name: "Conversation saved" })).toBeInTheDocument();
   });
 
   it("turns a flag off again and removes an Action Item", async () => {
