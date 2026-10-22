@@ -1,10 +1,9 @@
-import { getServerSession } from "next-auth";
 import Link from "next/link";
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 
 import { Badge, Card } from "@/components/ui";
-import { authOptions } from "@/lib/auth";
-import { canBlendedLearning, getBlendedLearningAccess } from "@/lib/blended-learning-access";
+import { canBlendedLearning } from "@/lib/blended-learning-access";
+import { requireBlendedLearningPage, requireNumericPageId } from "@/lib/blended-learning-guard";
 import { getDraftStatus } from "@/lib/blended-learning-drafts";
 import {
   getMenteeDetail,
@@ -197,15 +196,8 @@ function History({ history, canPlayRecording }: { history: HistoryEntry[]; canPl
 }
 
 export default async function MenteeDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const session = await getServerSession(authOptions);
-  const email = session?.user?.email;
-  if (!email) redirect("/");
-
-  const access = await getBlendedLearningAccess(email);
-  if (!access || !canBlendedLearning(access, "view_student")) redirect("/dashboard");
-
-  const { id } = await params;
-  const mentee = /^\d+$/.test(id) ? await getMenteeDetail(access, Number(id)) : null;
+  const access = await requireBlendedLearningPage("view_student");
+  const mentee = await getMenteeDetail(access, Number(await requireNumericPageId(params)));
   if (!mentee) notFound();
   const draftStatus = mentee.openDraft ? await getDraftStatus(access, mentee.openDraft.id) : null;
 

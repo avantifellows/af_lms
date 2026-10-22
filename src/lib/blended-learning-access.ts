@@ -4,8 +4,8 @@ import { getBlendedLearningPermission, getFeatureAccess } from "./permissions";
 
 // The single gate for /blended-learning (server-only). Every Blended Learning
 // page and API route calls getBlendedLearningAccess before reading or writing,
-// then canBlendedLearning for the action, and canAccessBlendedStudent before
-// touching one Student.
+// then canBlendedLearning for the action (both through blended-learning-guard),
+// and canAccessBlendedStudent before touching one Student.
 
 export type BlendedLearningAction =
   | "view_list"

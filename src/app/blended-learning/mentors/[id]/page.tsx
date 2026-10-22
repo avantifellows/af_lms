@@ -1,9 +1,8 @@
-import { getServerSession } from "next-auth";
 import Link from "next/link";
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 
-import { authOptions } from "@/lib/auth";
-import { canBlendedLearning, getBlendedLearningAccess } from "@/lib/blended-learning-access";
+import { canBlendedLearning } from "@/lib/blended-learning-access";
+import { requireBlendedLearningPage, requireNumericPageId } from "@/lib/blended-learning-guard";
 import { listMentees, listMentorCards } from "@/lib/blended-learning-mentees";
 import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
 import { getTodayIST } from "@/lib/curriculum-date-helpers";
@@ -16,17 +15,8 @@ import { FilteredMenteeList } from "../../FilteredMenteeList";
 // opens a Mentee and logs on the Mentor's behalf. Mentors are sent back to
 // their own list.
 export default async function MentorPage({ params }: { params: Promise<{ id: string }> }) {
-  const session = await getServerSession(authOptions);
-  const email = session?.user?.email;
-  if (!email) redirect("/");
-
-  const access = await getBlendedLearningAccess(email);
-  if (!access) redirect("/dashboard");
-  if (!canBlendedLearning(access, "view_mentors")) redirect("/blended-learning");
-
-  const { id } = await params;
-  if (!/^\d+$/.test(id)) notFound();
-  const mentorUserId = Number(id);
+  const access = await requireBlendedLearningPage("view_mentors", "/blended-learning");
+  const mentorUserId = Number(await requireNumericPageId(params));
   const today = getTodayIST();
   const mentor = (await listMentorCards(access, today)).find((card) => card.mentorUserId === mentorUserId);
   if (!mentor) notFound();

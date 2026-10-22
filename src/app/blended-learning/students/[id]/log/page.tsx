@@ -1,10 +1,9 @@
-import { getServerSession } from "next-auth";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
 import { Card } from "@/components/ui";
-import { authOptions } from "@/lib/auth";
-import { canBlendedLearning, getBlendedLearningAccess } from "@/lib/blended-learning-access";
+import { canBlendedLearning } from "@/lib/blended-learning-access";
+import { requireBlendedLearningPage, requireNumericPageId } from "@/lib/blended-learning-guard";
 import { draftNotesToHtml } from "@/lib/blended-learning-draft-notes";
 import { getDraftForReview, type DraftForReview } from "@/lib/blended-learning-drafts";
 import { getMenteeDetail, type HistoryEntry } from "@/lib/blended-learning-mentee-detail";
@@ -73,15 +72,8 @@ function LastConversationPanel({ conversation }: { conversation: Extract<History
 }
 
 export default async function LogEntryPage({ params }: { params: Promise<{ id: string }> }) {
-  const session = await getServerSession(authOptions);
-  const email = session?.user?.email;
-  if (!email) redirect("/");
-
-  const access = await getBlendedLearningAccess(email);
-  if (!access || !canBlendedLearning(access, "view_student")) redirect("/dashboard");
-
-  const { id } = await params;
-  if (!/^\d+$/.test(id)) notFound();
+  const access = await requireBlendedLearningPage("view_student");
+  const id = await requireNumericPageId(params);
   if (!canBlendedLearning(access, "log")) redirect(`/blended-learning/students/${id}`);
 
   const mentee = await getMenteeDetail(access, Number(id));

@@ -1,9 +1,7 @@
-import { getServerSession } from "next-auth";
-import { redirect } from "next/navigation";
 
 import { Card } from "@/components/ui";
-import { authOptions } from "@/lib/auth";
-import { canBlendedLearning, getBlendedLearningAccess, type BlendedLearningAccess } from "@/lib/blended-learning-access";
+import { canBlendedLearning, type BlendedLearningAccess } from "@/lib/blended-learning-access";
+import { requireBlendedLearningPage } from "@/lib/blended-learning-guard";
 import {
   countNewFlags,
   FLAG_RECIPIENTS,
@@ -124,12 +122,7 @@ export default async function BlendedLearningPage({
 }: {
   searchParams?: Promise<SearchParams>;
 } = {}) {
-  const session = await getServerSession(authOptions);
-  const email = session?.user?.email;
-  if (!email) redirect("/");
-
-  const access = await getBlendedLearningAccess(email);
-  if (!access || !canBlendedLearning(access, "view_list")) redirect("/dashboard");
+  const access = await requireBlendedLearningPage("view_list");
 
   const today = getTodayIST();
   const mentees = access.kind === "mentor" ? await listMentees({ access, today }) : null;
