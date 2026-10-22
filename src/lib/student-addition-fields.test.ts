@@ -6,7 +6,9 @@ import {
   formatStudentAdditionExistingMatch,
   getStudentAdditionUploadColumns,
   generateStudentId,
+  isValidParentName,
   isValidRegistrationPhone,
+  parentNameCharactersOnly,
   validateStudentAdditionInput,
 } from "./student-addition-fields";
 import {
@@ -55,6 +57,21 @@ describe("Registration Mode contract", () => {
   });
 });
 
+describe("parent name characters", () => {
+  it("keeps letters in any script, combining marks, spaces and . ' -", () => {
+    expect(parentNameCharactersOnly("सीता देवी")).toBe("सीता देवी");
+    expect(parentNameCharactersOnly("K. Geetha")).toBe("K. Geetha");
+    expect(parentNameCharactersOnly("D'Souza Ram-Prasad")).toBe("D'Souza Ram-Prasad");
+    expect(parentNameCharactersOnly("Sita2 (Mrs), 9")).toBe("Sita Mrs ");
+  });
+
+  it("accepts only what the filter keeps", () => {
+    expect(isValidParentName("सीता देवी")).toBe(true);
+    expect(isValidParentName("Smt.Mamta Devi")).toBe(true);
+    expect(isValidParentName("Sita 2")).toBe(false);
+  });
+});
+
 describe("canonicalizeStudentEditPayload", () => {
   it("uses the Phone-mode 6–9 predicate when explicitly requested", () => {
     expect(isValidRegistrationPhone("6876543210", PHONE_REGISTRATION_MODE)).toBe(true);
@@ -78,7 +95,7 @@ describe("canonicalizeStudentEditPayload", () => {
   it("normalizes partial edit fields with the canonical student contract", () => {
     expect(canonicalizeStudentEditPayload({
       first_name: "  ravi  KUMAR ",
-      father_name: " suresh. KUMAR ",
+      father_name: "  K.  Suresh Kumar ",
       gender: "Others",
       category: "Gen-EWS",
       physically_handicapped: true,
@@ -87,7 +104,7 @@ describe("canonicalizeStudentEditPayload", () => {
       ok: true,
       fields: {
         first_name: "Ravi Kumar",
-        father_name: "Suresh Kumar",
+        father_name: "K. Suresh Kumar",
         gender: "Other",
         category: "PWD-EWS",
         physically_handicapped: true,
@@ -220,7 +237,7 @@ describe("canonicalizeStudentEditPayload", () => {
 
   it("still takes the fields NVS always had", () => {
     expect(canonicalizeStudentEditPayload(
-      { father_name: " suresh kumar ", annual_family_income: "Less than Rs. 1,00,000" },
+      { father_name: " Suresh  Kumar ", annual_family_income: "Less than Rs. 1,00,000" },
       { programId: 64 },
     )).toEqual({
       ok: true,
@@ -228,6 +245,36 @@ describe("canonicalizeStudentEditPayload", () => {
         father_name: "Suresh Kumar",
         annual_family_income: "Less than Rs. 1,00,000",
       },
+    });
+  });
+
+  it("takes a parent name in any script, with the punctuation names carry", () => {
+    expect(canonicalizeStudentEditPayload({
+      father_name: "रमेश कुमार",
+      mother_name: "Smt.Mamta Devi",
+      guardian_name: "D'Souza Ram-Prasad",
+    })).toEqual({
+      ok: true,
+      fields: {
+        father_name: "रमेश कुमार",
+        mother_name: "Smt.Mamta Devi",
+        guardian_name: "D'Souza Ram-Prasad",
+      },
+    });
+    // A dot is part of the name, not noise to strip.
+    expect(canonicalizeStudentEditPayload({ father_name: " K. Geetha " })).toEqual({
+      ok: true,
+      fields: { father_name: "K. Geetha" },
+    });
+  });
+
+  it("still refuses digits and symbols in Father Name", () => {
+    const message =
+      "Father Name must contain only letters, spaces, dots, apostrophes and hyphens";
+    expect(canonicalizeStudentEditPayload({ father_name: "Suresh 2" })).toEqual({
+      ok: false,
+      error: message,
+      field_errors: { father_name: message },
     });
   });
 

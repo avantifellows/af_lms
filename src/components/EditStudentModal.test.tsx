@@ -703,13 +703,53 @@ describe("EditStudentModal", () => {
       expect(getByName("pincode")).toHaveValue("302001");
     });
 
-    it("keeps letters and spaces in the parent names, like Father Name", async () => {
+    it("drops digits and symbols from the parent names", async () => {
       const user = userEvent.setup();
       renderModal({ programId: 1 });
 
-      await user.type(getByName("mother_name"), "Sita 2.");
+      await user.type(getByName("mother_name"), "Sita2 (Mrs)");
 
-      expect(getByName("mother_name")).toHaveValue("Sita ");
+      expect(getByName("mother_name")).toHaveValue("Sita Mrs");
+    });
+
+    it("takes a parent name typed in Hindi", async () => {
+      const user = userEvent.setup();
+      renderModal({ programId: 1 });
+
+      await user.type(getByName("mother_name"), "सीता देवी");
+
+      expect(getByName("mother_name")).toHaveValue("सीता देवी");
+    });
+
+    it("keeps the dots, apostrophes and hyphens in a parent name", async () => {
+      const user = userEvent.setup();
+      renderModal({ programId: 1 });
+
+      await user.clear(getByName("father_name"));
+      await user.type(getByName("father_name"), "K. Ram-Prasad D'Souza");
+
+      expect(getByName("father_name")).toHaveValue("K. Ram-Prasad D'Souza");
+    });
+
+    it("keeps the dots of a stored name when it is edited", async () => {
+      const user = userEvent.setup();
+      mockFetch.mockResolvedValue(
+        new Response(JSON.stringify({ ok: true }), { status: 200 }),
+      );
+      renderModal({
+        programId: 1,
+        student: { ...baseStudent, mother_name: "Smt.Mamta Devi", guardian_name: "सीता" },
+      });
+
+      await user.type(getByName("mother_name"), " Rao");
+      await user.type(getByName("guardian_name"), " देवी");
+      await user.click(screen.getByText("Save Changes"));
+
+      await waitFor(() => expect(mockFetch).toHaveBeenCalled());
+      expect(JSON.parse(mockFetch.mock.calls[0][1].body)).toMatchObject({
+        mother_name: "Smt.Mamta Devi Rao",
+        guardian_name: "सीता देवी",
+      });
     });
   });
 

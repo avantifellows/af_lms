@@ -342,6 +342,21 @@ export function lettersAndSpacesOnly(value: string) {
   return value.replace(/[^A-Za-z ]+/g, "");
 }
 
+// Parent names come in any script and carry the punctuation real names do:
+// "सीता देवी", "K. Geetha", "D'Souza", "Ram-Prasad". Hundreds of stored names
+// already hold these, so a narrower filter would rewrite them on any edit.
+// \p{M} keeps the vowel signs Devanagari and other Indic scripts combine with.
+const PARENT_NAME_DISALLOWED = /[^\p{L}\p{M} .'-]+/gu;
+const PARENT_NAME = /^[\p{L}\p{M} .'-]+$/u;
+
+export function parentNameCharactersOnly(value: string) {
+  return value.replace(PARENT_NAME_DISALLOWED, "");
+}
+
+export function isValidParentName(value: string) {
+  return PARENT_NAME.test(value);
+}
+
 export function rollCharactersOnly(value: string) {
   return value.replace(/[^A-Za-z0-9]+/g, "").toUpperCase();
 }
@@ -929,9 +944,15 @@ export function canonicalizeStudentEditPayload(
   }
   if (fields.last_name !== undefined) fields.last_name = normalizeName(fields.last_name);
   if (fields.father_name !== undefined) {
-    fields.father_name = normalizeName(fields.father_name);
-    if (fields.father_name && !/^[A-Za-z ]+$/.test(fields.father_name)) {
-      return editError("father_name", "Father Name must contain only letters");
+    // Kept as typed bar the spacing, like Mother and Guardian Name: dropping
+    // dots or re-casing words would rewrite a stored "K. Geetha" or "D'Souza"
+    // whenever the name is edited.
+    fields.father_name = fields.father_name.trim().replace(/\s+/g, " ");
+    if (fields.father_name && !isValidParentName(fields.father_name)) {
+      return editError(
+        "father_name",
+        "Father Name must contain only letters, spaces, dots, apostrophes and hyphens",
+      );
     }
   }
   if (fields.physically_handicapped && fields.category) {

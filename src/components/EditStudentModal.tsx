@@ -15,7 +15,7 @@ import {
   G10_BOARD_OPTIONS,
   digitsOnly,
   isValidRegistrationPhone,
-  lettersAndSpacesOnly,
+  parentNameCharactersOnly,
   rollCharactersOnly,
   STUDENT_ADDITION_GENDER_OPTIONS,
   STUDENT_DOB_MAX,
@@ -161,6 +161,8 @@ const CONTACT_PHONE_FIELDS = new Set([
   "mother_phone",
   "guardian_phone",
 ]);
+// Any script and the dots, apostrophes and hyphens real names carry, so
+// editing a stored "सीता" or "K. Geetha" never strips it.
 const NAME_FIELDS = new Set(["father_name", "mother_name", "guardian_name"]);
 
 const inputClassName =
@@ -187,7 +189,7 @@ function normalizeTypedValue(name: string, value: string, g10Board: string): str
   // save a different, perfectly valid-looking number instead of failing.
   if (CONTACT_PHONE_FIELDS.has(name)) return digitsOnly(value);
   if (name === "pincode") return digitsOnly(value);
-  if (NAME_FIELDS.has(name)) return lettersAndSpacesOnly(value);
+  if (NAME_FIELDS.has(name)) return parentNameCharactersOnly(value);
   return value;
 }
 
