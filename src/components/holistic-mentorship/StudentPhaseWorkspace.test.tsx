@@ -115,7 +115,7 @@ function tickBothCategoryGroups() {
   fireEvent.click(categoryBox("Non-academic", "No major issue reported"));
 }
 
-// Current prod wording: each group sits under its matching Question.
+// Current prod wording: each group sits above its matching Question.
 const prodWordingDetail = (notes: OpenPhase["notes"] = null): HolisticStudentPhaseDetail => {
   const detail = teacherDetail(notes);
   Object.assign(detail.selectedPhase, {
@@ -1007,16 +1007,20 @@ describe("StudentPhaseWorkspace", () => {
       challengeCategories: challengeCategories as NonNullable<OpenPhase["notes"]>["challengeCategories"],
     });
 
-    it("places each group directly under its matching Question", () => {
+    it("places each group directly above its matching Question", () => {
       render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={prodWordingDetail()} />);
 
       const academicQuestion = screen.getByRole("textbox", { name: /Describe the academic challenges/ });
       const nonAcademicQuestion = screen.getByRole("textbox", { name: /Describe any non-academic challenges/ });
       const lastQuestion = screen.getByRole("textbox", { name: "What will you try next?" });
-      expect(follows(academicQuestion, categoryGroup("Academic"))).toBe(true);
-      expect(follows(categoryGroup("Academic"), nonAcademicQuestion)).toBe(true);
-      expect(follows(nonAcademicQuestion, categoryGroup("Non-academic"))).toBe(true);
-      expect(follows(categoryGroup("Non-academic"), lastQuestion)).toBe(true);
+      expect(follows(categoryGroup("Academic"), academicQuestion)).toBe(true);
+      expect(follows(academicQuestion, categoryGroup("Non-academic"))).toBe(true);
+      expect(follows(categoryGroup("Non-academic"), nonAcademicQuestion)).toBe(true);
+      expect(follows(nonAcademicQuestion, lastQuestion)).toBe(true);
+      const controls = screen.getAllByRole("group").concat(screen.getAllByRole("textbox"))
+        .sort((a, b) => (follows(a, b) ? -1 : 1));
+      expect(controls.indexOf(categoryGroup("Academic"))).toBe(controls.indexOf(academicQuestion) - 1);
+      expect(controls.indexOf(categoryGroup("Non-academic"))).toBe(controls.indexOf(nonAcademicQuestion) - 1);
       expect(screen.queryByRole("heading", { name: "Challenge Categories" })).not.toBeInTheDocument();
       expect(within(categoryGroup("Academic")).getAllByRole("checkbox").map((box) => box.closest("label")?.textContent))
         .toEqual([

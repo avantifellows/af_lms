@@ -467,7 +467,7 @@ test.describe("Holistic Mentorship release workflows", () => {
     await expect(cards.nth(1).locator("h4")).toHaveText(["What challenges did the student talk about?"]);
   });
 
-  test("Mentor captures Challenge Categories beside matching Questions and on Edit notes", async ({
+  test("Mentor captures Challenge Categories above matching Questions and on Edit notes", async ({
     holisticTeacherPage: page,
   }) => {
     const health = collectBrowserHealth(page);
@@ -483,9 +483,9 @@ test.describe("Holistic Mentorship release workflows", () => {
     await expect(academic).toBeVisible();
     await expect(page.getByRole("heading", { name: "Challenge Categories", exact: true })).toHaveCount(0);
     const top = async (locator: ReturnType<Page["getByRole"]>) => (await locator.boundingBox())!.y;
-    expect(await top(academicQuestion)).toBeLessThan(await top(academic));
-    expect(await top(academic)).toBeLessThan(await top(nonAcademicQuestion));
-    expect(await top(nonAcademicQuestion)).toBeLessThan(await top(nonAcademic));
+    expect(await top(academic)).toBeLessThan(await top(academicQuestion));
+    expect(await top(academicQuestion)).toBeLessThan(await top(nonAcademic));
+    expect(await top(nonAcademic)).toBeLessThan(await top(nonAcademicQuestion));
 
     await academic.getByRole("checkbox", { name: "Subject/concept issues" }).check();
     await academic.getByRole("checkbox", { name: "No major issue reported" }).check();
@@ -629,15 +629,15 @@ test.describe("Holistic Mentorship release workflows", () => {
     health.forEach(expectBrowserHealth);
   });
 
-  test("Phase Setup shows which Question each Challenge Category group appears under", async ({
+  test("Phase Setup shows which Question each Challenge Category group appears above", async ({
     holisticAdminPage: page,
   }) => {
     await page.goto("/admin/holistic-mentorship");
     await page.getByRole("tab", { name: "Phase Setup" }).click();
     const phaseSetup = page.getByRole("region", { name: "Phase Setup" });
     const phasePlan = phaseSetup.getByRole("navigation", { name: "Ordered Phase Plan" });
-    const academicHint = "Academic Challenge Categories appear under this question";
-    const nonAcademicHint = "Non-academic Challenge Categories appear under this question";
+    const academicHint = "Academic Challenge Categories appear above this question";
+    const nonAcademicHint = "Non-academic Challenge Categories appear above this question";
     const question = (position: number) => phaseSetup.getByRole("textbox", { name: `Question ${position}`, exact: true });
 
     await phasePlan.getByRole("button", { name: /Synthetic Grade 12 Active/ }).click();
@@ -651,7 +651,7 @@ test.describe("Holistic Mentorship release workflows", () => {
     await phasePlan.getByRole("button", { name: /Synthetic Grade 11 Active/ }).click();
     await expect(question(1)).toHaveValue("Synthetic: What support will help next?");
     await expect(question(1)).toHaveAccessibleDescription("");
-    await expect(phaseSetup.getByText(/Challenge Categories appear under this question/)).toHaveCount(0);
+    await expect(phaseSetup.getByText(/Challenge Categories appear above this question/)).toHaveCount(0);
   });
 
   test("Holistic Admin verifies progress, CSV, read-only drill-down, Phase setup, and regeneration", async ({

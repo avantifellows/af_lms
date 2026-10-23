@@ -181,7 +181,7 @@ describe("toggleHolisticChallengeCategory", () => {
 });
 
 describe("placeHolisticChallengeCategories", () => {
-  it("places each group under the matching current prod Question", () => {
+  it("places each group at the matching current prod Question", () => {
     expect(placeHolisticChallengeCategories([
       { questionId: 501, text: "What did the student share about their week?" },
       { questionId: 502, text: "Describe the academic challenges the student is facing." },

@@ -522,7 +522,7 @@ function QuestionsEditor({ draft, readOnly, onChange }: {
 
 function challengeCategoryHint(placement: ReturnType<typeof placeHolisticChallengeCategories>, index: number) {
   const placed = HOLISTIC_CHALLENGE_CATEGORY_GROUPS.find(({ group }) => placement[group] === index);
-  return placed ? `${placed.label} Challenge Categories appear under this question` : null;
+  return placed ? `${placed.label} Challenge Categories appear above this question` : null;
 }
 
 function QuestionEditorRow({ draft, question, index, onChange, hint }: {

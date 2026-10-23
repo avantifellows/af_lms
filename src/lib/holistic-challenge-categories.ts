@@ -119,7 +119,7 @@ export function toggleHolisticChallengeCategory(
   return knownHolisticChallengeCategories([...kept, code]);
 }
 
-// The Question each group is shown under, from Questions in position order:
+// The Question each group is shown above, from Questions in position order:
 // the first case-insensitive Question-text match; a group with no matching
 // Question has no placement (null). Only the hyphenated "non-academic" counts as
 // Non-academic, and a Question mentioning both phrases is Non-academic only.

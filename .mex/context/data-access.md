@@ -227,8 +227,8 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
     Phase Setup's array order); it takes the first case-insensitive match. Non-academic needs
     `non-academic challenge` (hyphenated only). Academic needs `academic challenge` without
     `non-academic`. A group with no match is `null`.
-- **Phase Setup (#458):** each Question editor shows the placement hint for the current, unsaved
-  Question texts. Phase definitions, freezing and the Question schema are unchanged.
+- **Phase Setup (#458):** each Question editor shows the placement hint ("… Challenge Categories
+  appear above this question", the input's description) for the current, unsaved Question texts. Phase definitions, freezing and the Question schema are unchanged.
 - **Storage:** `holistic_mentorship_post_session_note_challenges` (db-service #806), one row per
   selected code, unique on `(notes_id, category_code)`. Its insert/update trigger shares the
   post-session privacy guard (per-Student advisory lock, rejects a tombstoned Student); DELETE
@@ -258,9 +258,9 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   - **Read model:** student-phase `notes.challengeCategories` (codes, catalogue order, unknown
     stored codes dropped) is returned wherever `answers` is: submitted Notes to every authorized
     reader, drafts only to their author.
-  - **Mentor UI:** `StudentPhaseWorkspace` renders each group as a checkbox `fieldset` under the
-    Question chosen by `placeHolisticChallengeCategories`, or in a trailing "Challenge Categories"
-    block. Categories autosave with the answers. Submit / Save Changes check answers first, then
+  - **Mentor UI:** `StudentPhaseWorkspace` renders each group as a checkbox `fieldset` above the
+    Question chosen by `placeHolisticChallengeCategories` (Mentors tick Categories, then write the
+    detail), or in a trailing "Challenge Categories" block after the last Question. Categories autosave with the answers. Submit / Save Changes check answers first, then
     name the empty group(s), linked to the fieldset. The submitted view lists labels by group, or
     "Categories not recorded". Read surfaces (#462) reuse the same grouped display.
   - **Release:** because the field is required, a Notes tab left open across the release gets a

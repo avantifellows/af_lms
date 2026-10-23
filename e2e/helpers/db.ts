@@ -172,7 +172,7 @@ async function seedHolisticE2eEmrsScope(
 }
 
 // Current prod Question wording on one Phase, so the Challenge Category groups
-// render under their matching Questions (#460). Every other Synthetic Phase keeps
+// render above their matching Questions (#460). Every other Synthetic Phase keeps
 // its single unmatched Question and shows the trailing Challenge Categories block.
 async function seedHolisticE2eChallengeQuestions(
   client: Pick<PoolClient, "query">

@@ -850,14 +850,15 @@ function ChallengeCategoryFieldset({ group, selected, invalid, errorId, disabled
   </fieldset>;
 }
 
-// The Category groups shown under `questionId`; `null` gives the unplaced groups.
-function categoryGroupsPlacedUnder(
+// The Category groups shown above `questionId`; `null` gives the unplaced groups.
+function categoryGroupsPlacedAt(
   placement: ReturnType<typeof placeHolisticChallengeCategories>,
   questionId: number | null,
 ) {
   return HOLISTIC_CHALLENGE_CATEGORY_GROUPS.filter(({ group }) => placement[group] === questionId);
 }
 
+// `children` (the placed Category groups) render above the Question, so they are ticked first.
 function NotesAnswerField({ question, answer, validationError, validationErrorId, disabled, onTextarea,
   onAnswerChange, children }: {
   question: NotesEditorProps["questions"][number];
@@ -871,6 +872,7 @@ function NotesAnswerField({ question, answer, validationError, validationErrorId
 }) {
   const invalid = Boolean(validationError && !answer?.trim());
   return <div className="space-y-3">
+    {children}
     <label className="block space-y-1 text-sm font-semibold text-text-secondary">
       {question.text} <span aria-hidden="true" className="text-accent">*</span>
       <span className="sr-only">required</span>
@@ -881,7 +883,6 @@ function NotesAnswerField({ question, answer, validationError, validationErrorId
       onChange={(event) => onAnswerChange(question.questionId, event.target.value)}
       className="w-full resize-y rounded-md border border-border bg-bg-card p-3 font-normal text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20" />
     </label>
-    {children}
   </div>;
 }
 
@@ -905,13 +906,13 @@ function EditableNotesForm({ questions, value, validationError, validationErrorI
   const fieldset = (group: CategoryGroup) => <ChallengeCategoryFieldset key={group.group} group={group}
     selected={value.challengeCategories} invalid={missingCategories.includes(group.group)}
     errorId={categoryErrorId} disabled={disabled} onToggle={onCategoryToggle} onFieldset={onCategoryFieldset} />;
-  const unplaced = categoryGroupsPlacedUnder(placement, null);
+  const unplaced = categoryGroupsPlacedAt(placement, null);
   return <>
     {questions.map((question) => <NotesAnswerField key={question.questionId} question={question}
       answer={value.answers[question.questionId]} validationError={validationError}
       validationErrorId={validationErrorId} disabled={disabled} onTextarea={onTextarea}
       onAnswerChange={onAnswerChange}>
-      {categoryGroupsPlacedUnder(placement, question.questionId).map(fieldset)}
+      {categoryGroupsPlacedAt(placement, question.questionId).map(fieldset)}
     </NotesAnswerField>)}
     {unplaced.length > 0 && <div className="space-y-3">
       <h3 className="text-sm font-semibold text-text-secondary">Challenge Categories</h3>
