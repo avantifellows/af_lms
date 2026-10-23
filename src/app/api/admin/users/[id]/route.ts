@@ -158,49 +158,66 @@ async function storedForPmuCheck(id: string, role: string | undefined) {
     : null;
 }
 
+/**
+ * The 409s for a seated target. The PMU seat rule runs before the
+ * seated-scope rule, so a seated user given a PMU role always gets
+ * PMU_SEATED_ERROR, even when the body also carries school_codes/regions.
+ * Alumni Managers ignore seats (ADR 0008), so a seated one would reach nothing.
+ */
+async function seatConflict(
+  body: UserPatchBody,
+  effectiveRole: string | undefined,
+  seat: SeatedUser,
+  stored: StoredPermission | null,
+) {
+  if (isPmuRole(effectiveRole) && (await pmuSeatTaken(seat.isSeated, stored))) {
+    return NextResponse.json({ error: PMU_SEATED_ERROR }, { status: 409 });
+  }
+  if (isAlumniRole(effectiveRole) && (await pmuSeatTaken(seat.isSeated, stored))) {
+    return NextResponse.json({ error: ALUMNI_SEATED_ERROR }, { status: 409 });
+  }
+  if (seat.isSeated && wantsScopeEdit(body)) {
+    return NextResponse.json({ error: SEATED_SCOPE_ERROR }, { status: 409 });
+  }
+  return null;
+}
+
+/**
+ * Moving off a PMU or Alumni Manager role must say which programs the user
+ * gets; otherwise the stored [64] (or an Alumni Manager's none) would
+ * silently carry over.
+ */
+async function missingProgramsError(id: string, body: UserPatchBody, stored: StoredPermission | null, isAlumni: boolean) {
+  if (body.program_ids !== undefined || body.role === "holistic_mentorship_admin" || isAlumni) return null;
+  const current = stored ?? (await storedPermission(id));
+  if (current && isPmuRole(current.role)) {
+    return NextResponse.json(
+      { error: "program_ids is required when moving a user off a PMU role" },
+      { status: 400 }
+    );
+  }
+  if (current && isAlumniRole(current.role)) {
+    return NextResponse.json(
+      { error: "program_ids is required when moving a user off the Alumni Manager role" },
+      { status: 400 }
+    );
+  }
+  return null;
+}
+
 async function applyPatch(id: string, body: UserPatchBody) {
   const seat = await seatedUser(id);
   const stored = await storedForPmuCheck(id, body.role);
   const effectiveRole = body.role ?? stored?.role;
-  const isPmu = isPmuRole(effectiveRole);
 
-  // The PMU seat rule runs before the seated-scope rule below, so a seated
-  // user given a PMU role always gets PMU_SEATED_ERROR, even when the body
-  // also carries school_codes/regions.
-  if (isPmu && (await pmuSeatTaken(seat.isSeated, stored))) {
-    return NextResponse.json({ error: PMU_SEATED_ERROR }, { status: 409 });
-  }
+  const conflict = await seatConflict(body, effectiveRole, seat, stored);
+  if (conflict) return conflict;
 
-  // Alumni Managers ignore seats (ADR 0008), so a seated one would reach nothing.
-  if (isAlumniRole(effectiveRole) && (await pmuSeatTaken(seat.isSeated, stored))) {
-    return NextResponse.json({ error: ALUMNI_SEATED_ERROR }, { status: 409 });
-  }
+  if (isPmuRole(effectiveRole)) return updatePmuUser(id, body, effectiveRole, stored, seat);
 
-  if (seat.isSeated && wantsScopeEdit(body)) {
-    return NextResponse.json({ error: SEATED_SCOPE_ERROR }, { status: 409 });
-  }
-
-  if (isPmu) return updatePmuUser(id, body, effectiveRole, stored, seat);
-
-  // Moving off a PMU or Alumni Manager role must say which programs the user
-  // gets; otherwise the stored [64] (or an Alumni Manager's none) would
-  // silently carry over.
   const isAlumni = isAlumniRole(effectiveRole);
-  if (body.program_ids === undefined && body.role !== "holistic_mentorship_admin" && !isAlumni) {
-    const current = stored ?? (await storedPermission(id));
-    if (current && isPmuRole(current.role)) {
-      return NextResponse.json(
-        { error: "program_ids is required when moving a user off a PMU role" },
-        { status: 400 }
-      );
-    }
-    if (current && isAlumniRole(current.role)) {
-      return NextResponse.json(
-        { error: "program_ids is required when moving a user off the Alumni Manager role" },
-        { status: 400 }
-      );
-    }
-  }
+  const missing = await missingProgramsError(id, body, stored, isAlumni);
+  if (missing) return missing;
   return updateStandardUser(id, body, seat, isAlumni);
 }
 
