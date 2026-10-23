@@ -220,6 +220,7 @@ describe("Holistic release preflight", () => {
         "read_only",
         "pmu_manager",
         "pmu_govt_school_user",
+        "alumni_manager",
       ],
       states: ["locked", "open", "active", "skipped", "pending", "completed"],
       content: ["mapping", "profile", "historical_notes", "draft_notes", "submitted_notes"],
@@ -429,6 +430,12 @@ describe("Holistic release preflight", () => {
     ]);
     // Regions are only derived for program_manager / program_admin rows.
     expect(pmuCalls[0].sql).toContain("WHEN $3 IN ('program_manager', 'program_admin')");
+
+    // The Alumni Manager persona has no Programs and sits at the fixture School.
+    const alumniCall = actorCalls.find(({ params }) => params[2] === "alumni_manager");
+    expect(alumniCall?.params.slice(0, 6)).toEqual([
+      "e2e-dev-alumni-manager@test.local", "alumni manager", "alumni_manager", 1, [], "E2E-P74",
+    ]);
   });
 
   it("uses the canonical Centre roster before resolving a selected Program batch", async () => {

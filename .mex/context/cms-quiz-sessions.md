@@ -21,7 +21,7 @@ edges:
     condition: when tracing the request flow across af_lms / quiz-backend / db-service
   - target: patterns/db-service-write.md
     condition: when adding a session or occurrence write
-last_updated: 2026-10-01
+last_updated: 2026-10-19
 ---
 
 # CMS-sourced quiz sessions
@@ -166,3 +166,18 @@ session in that batch's list. The session list sorts by `end_time DESC` (not `up
 result sync bumps long after a session ends), so an extended session rises to the top. The **Live only** toggle (`?status=live`) keeps enabled sessions and compares
 against `now() AT TIME ZONE 'Asia/Kolkata'` because session times are IST wall-clock. The lookup fails open, so creation is
 never blocked by it.
+
+## Read by Curriculum Summary
+
+Curriculum Summary v2 reads chapter-test sessions straight from Postgres
+(`src/lib/curriculum-chapter-tests.ts`, #428) to derive Chapter Test Status. It relies on
+`meta_data.cms_source`, `test_format` (`chapter_test`, not `combined_chapter_test`), `status`,
+`grade`, the comma-separated `batch_id` list, `cms_test_id` / `cms_source_id`, the IST
+wall-clock `start_time` / `end_time`, and `inserted_at` (UTC). Renaming or reshaping any of
+those on the create path silently drops sessions from the Summary.
+
+A session counts only when its `start_time` falls within the as-of date's academic year
+(1 Apr–31 Mar), and only for an as-of date by whose end it had been created (`inserted_at`
+converted to IST) or had started. Sessions keep no history, so this is how a past as-of
+replays: a session created later never makes a Chapter Scheduled or Conducted for an earlier
+as-of, and next year's cohort never counts for this year.

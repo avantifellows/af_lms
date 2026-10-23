@@ -3,6 +3,7 @@ import { authOptions } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import {
   getAccessibleSchoolCodes,
+  getAlumniPermission,
   getResolvedPermission,
   getProgramContextSync,
   getFeatureAccess,
@@ -11,6 +12,7 @@ import {
 import { query } from "@/lib/db";
 import {
   CURRENT_ACADEMIC_YEAR,
+  isAlumniRole,
   isPmuRole,
   PMU_GOVT_SCHOOL_USER_ROLE,
   PMU_MANAGER_ROLE,
@@ -476,6 +478,8 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   const permission = await getResolvedPermission(email);
 
   if (!permission) {
+    // Alumni roles have no dashboard (ADR 0008); their home is /alumni.
+    if (isAlumniRole((await getAlumniPermission(email))?.role)) redirect("/alumni");
     return <NoDashboardAccess
       email={email}
       message={`Your account (${email}) does not have access to any schools. Please contact an administrator.`}

@@ -772,6 +772,24 @@ describe("positions", () => {
     }
   );
 
+  it("createPosition refuses to seat an alumni_manager (409, no seat written)", async () => {
+    mockSchemaReady();
+    mockQuery.mockResolvedValueOnce([{ id: 8 }]); // centre
+    mockQuery.mockResolvedValueOnce([{ id: 70 }]); // user
+    mockQuery.mockResolvedValueOnce([{ level: 1, role: "alumni_manager" }]); // live permission row
+    mockQuery.mockResolvedValueOnce([]); // duplicate check (none)
+    const result = await createPosition({
+      body: { centre_id: 8, role: "physics", user_id: 70 },
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      status: 409,
+      error: "Alumni Managers can't hold centre seats — their access is set in Admin → Users.",
+    });
+    expect(mockWithTransaction).not.toHaveBeenCalled();
+    expect(mockClientQuery).not.toHaveBeenCalled();
+  });
+
   it.each(["pmu_manager", "pmu_govt_school_user"])(
     "updatePosition refuses to fill a seat with a %s user (409, no seat written)",
     async (pmuRole) => {
@@ -788,6 +806,24 @@ describe("positions", () => {
       expect(mockClientQuery).not.toHaveBeenCalled();
     }
   );
+
+  it("updatePosition refuses to fill a vacant seat with an alumni_manager (409, no seat written)", async () => {
+    mockSchemaReady();
+    mockQuery.mockResolvedValueOnce([
+      { id: 44, centre_id: 8, role: "pm", user_id: null },
+    ]); // vacant position
+    mockQuery.mockResolvedValueOnce([{ id: 70 }]); // user
+    mockQuery.mockResolvedValueOnce([{ level: 1, role: "alumni_manager" }]); // live permission row
+    mockQuery.mockResolvedValueOnce([]); // duplicate check (none)
+    const result = await updatePosition({ id: 44, body: { user_id: 70 } });
+    expect(result).toMatchObject({
+      ok: false,
+      status: 409,
+      error: "Alumni Managers can't hold centre seats — their access is set in Admin → Users.",
+    });
+    expect(mockWithTransaction).not.toHaveBeenCalled();
+    expect(mockClientQuery).not.toHaveBeenCalled();
+  });
 
   describe("seat guard matches permission rows by user_id or email", () => {
     type PermissionRow = {
@@ -1179,7 +1215,7 @@ describe("positions", () => {
     expect(String(upd[0])).toContain("revoked_at IS NULL");
   });
 
-  it("program_ids sync skips PMU rows so their NVS pinning survives", async () => {
+  it("program_ids sync skips PMU and Alumni Manager rows so their fixed programs survive", async () => {
     mockSchemaReady();
     mockQuery.mockResolvedValueOnce([{ id: 44, user_id: 70 }]); // position
     mockQuery.mockResolvedValueOnce([{ id: 99 }]); // isLastActiveSeat → not last
@@ -1192,6 +1228,7 @@ describe("positions", () => {
       "holistic_mentorship_admin",
       "pmu_manager",
       "pmu_govt_school_user",
+      "alumni_manager",
     ]);
   });
 

@@ -1392,3 +1392,21 @@ describe("PMU roles (JNV NVS pinned)", () => {
     }
   });
 });
+
+describe("alumni feature (admin-only first release)", () => {
+  it("gives admins edit and read-only admins view", () => {
+    expect(getFeatureAccess(makePermission({ role: "admin", level: 3 }), "alumni")).toEqual({
+      access: "edit",
+      canView: true,
+      canEdit: true,
+    });
+    expect(getFeatureAccess(makePermission({ role: "admin", level: 3, read_only: true }), "alumni").access).toBe("view");
+  });
+
+  it.each(["teacher", "program_manager", "program_admin", "holistic_mentorship_admin", "pmu_manager", "pmu_govt_school_user"] as const)(
+    "gives %s no alumni access, even at level 3",
+    (role) => {
+      expect(getFeatureAccess(makePermission({ role, level: 3 }), "alumni").access).toBe("none");
+    },
+  );
+});

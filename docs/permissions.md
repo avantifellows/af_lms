@@ -28,7 +28,7 @@ Separating scope, capabilities, and ownership keeps each concern simple. A singl
 | Column | Type | Purpose |
 |--------|------|---------|
 | `email` | varchar(255) | User identifier |
-| `role` | varchar(50) | `teacher`, `program_manager`, `program_admin`, `holistic_mentorship_admin`, `admin`, `pmu_manager`, or `pmu_govt_school_user` |
+| `role` | varchar(50) | `teacher`, `program_manager`, `program_admin`, `holistic_mentorship_admin`, `admin`, `pmu_manager`, `pmu_govt_school_user`, or `alumni_manager` |
 | `level` | integer | 1=specific schools, 2=region, 3=all schools |
 | `school_codes` | text[] | Specific school codes (level 1) |
 | `regions` | text[] | Region names (level 2) |
@@ -123,6 +123,7 @@ The school page query fetches `program_id` per student via a LATERAL join.
 | `teacher` | Yes | School-level users who edit curriculum/mentorship |
 | `pmu_manager` | No (pinned to JNV NVS) | Avanti's internal PMU team, working with JNV NVS Students across Schools |
 | `pmu_govt_school_user` | No (pinned to JNV NVS) | External stakeholder of one JNV NVS School (e.g. its principal), Google sign-in |
+| `alumni_manager` | No (stored as `{}`; alumni are reached by School) | Alumni team: views and updates alumni of their Schools, nothing else |
 
 ### PMU roles (JNV NVS pinned, ADR 0007)
 
@@ -140,6 +141,16 @@ client-safe `src/lib/constants.ts`.
   - `pmu_manager` — level 1: at least one code, all JNV Schools; level 2: at least one region, each with a JNV School; level 3: null codes and regions.
   - Any other shape returns 400 `{ error }`. A target with an active centre seat returns 409 — remove their centre assignments in Staff Management first.
   - The Admin modal replaces the Programs checkboxes with a read-only "JNV NVS" note; Govt School Users get a single-School picker and no level selector.
+
+### Alumni Manager (alumni only, ADR 0008)
+
+`alumni_manager` reaches alumni records and nothing else. `ALUMNI_MANAGER_ROLE` and
+`isAlumniRole(role)` live in `src/lib/constants.ts`.
+
+- **Matrix:** feature `alumni` is `edit` for `admin` and `alumni_manager`, `none` for every other role; `alumni_manager` is `none` on every other feature. `read_only` downgrades `alumni` to view.
+- **Denied by default:** `getUserPermission` returns null for this role, so `getResolvedPermission`, `canAccessSchool`, `canAccessStudent`, `isAdmin` and every guard built on them deny it. Alumni code reads the row through `getAlumniPermission` and gates single alumni with `canAccessAlumni`.
+- **Scope:** level 1/2/3 with School codes or regions, like other roles. Centre seats never widen it, and seating one is refused (409) in Staff Management and Admin → Users.
+- **Programs:** none. Admin Users `POST`/`PATCH` don't require `program_ids` for this role and always store `{}`; moving a user off the role needs `program_ids` again. The Admin modal hides the Programs checkboxes, and its read-only box reads "can view alumni, cannot edit them".
 
 ---
 

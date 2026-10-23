@@ -1,0 +1,519 @@
+// One-time seed of the 2026-27 Curriculum Plans (issue #417, slice #425) from the
+// "JNV Academic and Testing Calendar AY 2026-27" workbook. Pure workbook → plan-draft logic:
+// the operator script (`scripts/seed-curriculum-plans.ts`) supplies each Grade's effective
+// Chapter list and writes the drafts through the Curriculum Plans module.
+
+import type ExcelJS from "exceljs";
+
+import { CONTENT_EXAM_TRACKS } from "./curriculum-plan-rules";
+import type { ExamTrack } from "./exam-tracks";
+
+const SEED_ACADEMIC_YEAR = "2026-2027";
+
+const SEED_TABS = [
+  { tab: "G12", title: "G12 2026-27", grade: 12 },
+  { tab: "G11 (Others)", title: "G11 2026-27 (Others)", grade: 11 },
+  { tab: "G11 (HYD)", title: "G11 2026-27 (HYD)", grade: 11 },
+] as const;
+
+export interface SeedChapter {
+  chapterId: number;
+  chapterCode: string;
+  chapterName: string;
+  subjectName: string;
+}
+
+export interface PlanDraftChapter {
+  chapterId: number;
+  dueDate: string;
+  testDate: string | null;
+}
+
+export interface PlanDraft {
+  tab: string;
+  title: string;
+  academicYear: string;
+  grade: number;
+  examTracks: ExamTrack[];
+  closureDate: string;
+  chapters: PlanDraftChapter[];
+}
+
+interface DayEntry {
+  date: string;
+  subject: string;
+  label: string;
+}
+
+function cellText(value: ExcelJS.CellValue): string {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (!value || value instanceof Date) return "";
+  return objectCellText(value);
+}
+
+// Rich text, hyperlink ({ text }) and formula ({ result }) cells.
+function objectCellText(value: object): string {
+  if ("richText" in value) {
+    return (value as ExcelJS.CellRichTextValue).richText.map((part) => part.text).join("");
+  }
+  if ("text" in value && typeof value.text === "string") return value.text;
+  if ("result" in value && value.result !== undefined) return cellText(value.result as ExcelJS.CellValue);
+  return "";
+}
+
+// Excel dates load as UTC midnight; formula cells carry the date as their result.
+function cellDate(value: ExcelJS.CellValue): string | null {
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  if (value && typeof value === "object" && "result" in value && value.result instanceof Date) {
+    return value.result.toISOString().slice(0, 10);
+  }
+  return null;
+}
+
+function cleanLabel(label: string): string {
+  return label.replace(/\s+/g, " ").trim();
+}
+
+const ROMAN_NUMERALS: Record<string, string> = {
+  i: "1", ii: "2", iii: "3", iv: "4", v: "5", vi: "6", vii: "7", viii: "8", ix: "9", x: "10",
+};
+
+// Case, punctuation and whitespace fold away; Roman numerals become Arabic; "1 D" → "1d".
+function normalizeName(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/['’]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .map((token) => ROMAN_NUMERALS[token] ?? token)
+    .join(" ")
+    .replace(/\b(\d+) ([a-z])\b/g, "$1$2");
+}
+
+// Sheet spellings (normalised) → LMS Chapter names (normalised), from the 2026-27 workbook.
+// Matching still happens within the Grade + subject, so an alias only resolves when the
+// target Chapter is in that subject's effective list.
+const CHAPTER_ALIASES: Record<string, string> = {
+  emi: "electromagnetic induction",
+  ac: "alternating current",
+  emw: "electromagnetic waves",
+  "nuclear physcs": "nuclear physics",
+  semiconductors: "semiconductor",
+  "motion in 1d": "motion in one dimension",
+  "motion in 2d": "motion in two dimension",
+  "center of mass": "centre of mass",
+  "work power energy": "work power and energy",
+  "cell unit of life": "cell the unit of life",
+  "complex numbers": "complex number",
+  "redox reaction": "redox reactions",
+  "human health and disease": "human health and diseases",
+  "biotechnology principle and processes": "biotechnology principles and processes",
+  "biodiversity and conservation": "biodiversity and its conservation",
+  "aldehydes ketones carboxylic acids": "aldehydes ketones and carboxylic acids",
+  "application of derivative": "application of derivatives",
+  "indefinite integeration": "indefinite integration",
+};
+
+interface ReadTab {
+  dates: string[];
+  entries: DayEntry[];
+}
+
+// Holidays, AIAT, Unit Test, Mid Term and Bootcamp days are written once and merged across
+// every subject column (sometimes down several days), so they are no subject's teaching day.
+function isWholeDayRow(row: ExcelJS.Row, columns: number[]): boolean {
+  const masters = columns.map((column) => row.getCell(column).master.address);
+  return masters.length > 1 && new Set(masters).size === 1;
+}
+
+// Non-teaching entries written in a single subject column.
+const NON_TEACHING_PATTERN =
+  /\b(practice|revision|buffer|weekly off|holidays?|aiat|unit test|mid term|bootcamp|baseline|pre board)\b/;
+
+function readTab(sheet: ExcelJS.Worksheet): ReadTab {
+  let headerRow: ExcelJS.Row | null = null;
+  sheet.eachRow((row) => {
+    if (headerRow) return;
+    const texts = (row.values as ExcelJS.CellValue[]).map((value) => cleanLabel(cellText(value)));
+    if (texts.includes("Date")) headerRow = row;
+  });
+  if (!headerRow) throw new Error(`Tab "${sheet.name}" has no Date header row`);
+  const header = headerRow as ExcelJS.Row;
+
+  let dateColumn = 0;
+  const subjectColumns: Array<{ column: number; subject: string }> = [];
+  header.eachCell((cell, column) => {
+    const text = cleanLabel(cellText(cell.value));
+    if (text === "Date") dateColumn = column;
+    else if (column > 1 && text && !["Week", "Day"].includes(text)) {
+      subjectColumns.push({ column, subject: text });
+    }
+  });
+
+  const dates: string[] = [];
+  const entries: DayEntry[] = [];
+  for (let rowNumber = header.number + 1; rowNumber <= sheet.rowCount; rowNumber += 1) {
+    const row = sheet.getRow(rowNumber);
+    const date = cellDate(row.getCell(dateColumn).value);
+    if (!date) continue;
+    dates.push(date);
+    if (isWholeDayRow(row, subjectColumns.map(({ column }) => column))) continue;
+    for (const { column, subject } of subjectColumns) {
+      const label = cleanLabel(cellText(row.getCell(column).value));
+      if (label) entries.push({ date, subject, label });
+    }
+  }
+  return { dates, entries };
+}
+
+type EntryKind = "teaching" | "test";
+
+// Teaching days read `Chapter - N`; test days read `Chapter Test - X` / `Chapter Test: X` or
+// `X Test` / `X - Test`. `sheetName` is the label as shown in the report.
+function classifyEntry(label: string): { kind: EntryKind; sheetName: string; name: string } {
+  const normalized = normalizeName(label);
+  if (/\btest\b/.test(normalized)) {
+    const name = normalized
+      .replace(/^chapter test\b/, "")
+      .replace(/\b(chapter )?test$/, "")
+      .trim();
+    return { kind: "test", sheetName: label, name };
+  }
+  const sheetName = label.replace(/\s*-\s*\d+\s*$/, "");
+  return { kind: "teaching", sheetName, name: normalizeName(sheetName) };
+}
+
+const SUBJECT_ALIASES: Record<string, string> = { mathematics: "maths" };
+
+function subjectKey(subject: string): string {
+  const normalized = normalizeName(subject);
+  return SUBJECT_ALIASES[normalized] ?? normalized;
+}
+
+type Resolution =
+  | { ok: true; chapter: SeedChapter }
+  | { ok: false; reason: "no_match" | "ambiguous"; candidates: SeedChapter[] };
+
+// Exact match on the normalised (or aliased) name within the Grade + subject. Never guesses:
+// zero or several candidates leave the Sheet name unresolved.
+function resolveChapter(subject: string, name: string, chapters: SeedChapter[]): Resolution {
+  const target = CHAPTER_ALIASES[name] ?? name;
+  const candidates = chapters.filter(
+    (chapter) =>
+      subjectKey(chapter.subjectName) === subjectKey(subject) &&
+      normalizeName(chapter.chapterName) === target
+  );
+  if (candidates.length === 1) return { ok: true, chapter: candidates[0] };
+  return { ok: false, reason: candidates.length === 0 ? "no_match" : "ambiguous", candidates };
+}
+
+export interface UnmatchedSheetRow {
+  subject: string;
+  sheetName: string;
+  kind: EntryKind;
+  dates: string[];
+  // A test day whose Chapter has no teaching day in the tab stays undated: a Chapter Test
+  // Date needs a Chapter Due Date.
+  reason: "no_match" | "ambiguous" | "test_without_teaching";
+  candidates: string[];
+}
+
+export interface MatchedChapter {
+  subject: string;
+  chapter: string;
+  sheetNames: string[];
+  dueDate: string;
+  testDate: string | null;
+}
+
+export interface UncoveredChapter {
+  subject: string;
+  chapter: string;
+}
+
+// A Chapter taught in separate runs (another Chapter taught in between) or with several test
+// days. The plan takes the last teaching day and the last test day.
+export interface DuplicateChapter {
+  subject: string;
+  chapter: string;
+  kind: EntryKind;
+  dates: string[];
+}
+
+export interface SeedTabReport {
+  tab: string;
+  title: string;
+  grade: number;
+  closureDate: string;
+  matched: MatchedChapter[];
+  unmatchedRows: UnmatchedSheetRow[];
+  uncoveredChapters: UncoveredChapter[];
+  duplicates: DuplicateChapter[];
+}
+
+function chapterLabel(chapter: SeedChapter): string {
+  return `${chapter.chapterCode} ${chapter.chapterName}`;
+}
+
+interface ChapterDays {
+  sheetNames: string[];
+  runs: Array<{ from: string; to: string }>;
+  tests: string[];
+}
+
+function addDistinct(values: string[], value: string): void {
+  if (!values.includes(value)) values.push(value);
+}
+
+type Unmatched = Map<string, UnmatchedSheetRow>;
+
+// Per subject, what was last taught: a resolved Chapter (`id:…`) or an unresolved name, so a
+// Chapter taught again after another one starts a new run.
+interface TabScan {
+  chapters: SeedChapter[];
+  days: Map<number, ChapterDays>;
+  lastTaught: Map<string, string>;
+  unmatched: Unmatched;
+}
+
+function recordUnmatched(
+  scan: TabScan,
+  entry: DayEntry,
+  classified: { kind: EntryKind; sheetName: string; name: string },
+  resolution: Extract<Resolution, { ok: false }>
+): void {
+  const { kind, sheetName, name } = classified;
+  if (kind === "teaching") scan.lastTaught.set(entry.subject, `name:${name}`);
+  const key = `${kind}|${entry.subject}|${name}`;
+  const row = scan.unmatched.get(key) ?? {
+    subject: entry.subject,
+    sheetName,
+    kind,
+    dates: [],
+    reason: resolution.reason,
+    candidates: resolution.candidates.map(chapterLabel),
+  };
+  row.dates.push(entry.date);
+  scan.unmatched.set(key, row);
+}
+
+function recordMatched(
+  scan: TabScan,
+  entry: DayEntry,
+  classified: { kind: EntryKind; sheetName: string },
+  chapterId: number
+): void {
+  const chapterDays = scan.days.get(chapterId) ?? { sheetNames: [], runs: [], tests: [] };
+  scan.days.set(chapterId, chapterDays);
+  addDistinct(chapterDays.sheetNames, classified.sheetName);
+  if (classified.kind === "test") {
+    addDistinct(chapterDays.tests, entry.date);
+    return;
+  }
+  const runKey = `id:${chapterId}`;
+  const currentRun = chapterDays.runs[chapterDays.runs.length - 1];
+  if (currentRun && scan.lastTaught.get(entry.subject) === runKey) currentRun.to = entry.date;
+  else chapterDays.runs.push({ from: entry.date, to: entry.date });
+  scan.lastTaught.set(entry.subject, runKey);
+}
+
+function scanEntries(entries: DayEntry[], chapters: SeedChapter[]): TabScan {
+  const scan: TabScan = { chapters, days: new Map(), lastTaught: new Map(), unmatched: new Map() };
+  for (const entry of entries) {
+    if (NON_TEACHING_PATTERN.test(normalizeName(entry.label))) continue;
+    const classified = classifyEntry(entry.label);
+    const resolution = resolveChapter(entry.subject, classified.name, chapters);
+    if (resolution.ok) recordMatched(scan, entry, classified, resolution.chapter.chapterId);
+    else recordUnmatched(scan, entry, classified, resolution);
+  }
+  return scan;
+}
+
+function latest(dates: string[]): string {
+  return dates.reduce((last, date) => (date > last ? date : last), "");
+}
+
+interface TabChapters {
+  matched: MatchedChapter[];
+  uncoveredChapters: UncoveredChapter[];
+  duplicates: DuplicateChapter[];
+  draftChapters: PlanDraftChapter[];
+}
+
+// A Chapter with no teaching day is uncovered; its test days (if any) become an unmatched
+// "test without teaching" row, since a test date needs a due date.
+function addUncovered(scan: TabScan, result: TabChapters, chapter: SeedChapter): void {
+  const chapterDays = scan.days.get(chapter.chapterId);
+  const label = chapterLabel(chapter);
+  result.uncoveredChapters.push({ subject: chapter.subjectName, chapter: label });
+  if (!chapterDays) return;
+  scan.unmatched.set(`untaught|${chapter.chapterId}`, {
+    subject: chapter.subjectName,
+    sheetName: chapterDays.sheetNames[0],
+    kind: "test",
+    dates: chapterDays.tests,
+    reason: "test_without_teaching",
+    candidates: [label],
+  });
+}
+
+// Due date = last teaching day; test date = last test day. Several runs or test days are
+// reported as duplicates.
+function addTaught(result: TabChapters, chapter: SeedChapter, chapterDays: ChapterDays): void {
+  const subject = chapter.subjectName;
+  const label = chapterLabel(chapter);
+  const dueDate = latest(chapterDays.runs.map((run) => run.to));
+  const testDate = chapterDays.tests.length > 0 ? latest(chapterDays.tests) : null;
+  result.matched.push({ subject, chapter: label, sheetNames: chapterDays.sheetNames, dueDate, testDate });
+  result.draftChapters.push({ chapterId: chapter.chapterId, dueDate, testDate });
+  if (chapterDays.runs.length > 1) {
+    result.duplicates.push({
+      subject,
+      chapter: label,
+      kind: "teaching",
+      dates: chapterDays.runs.map((run) => `${run.from} to ${run.to}`),
+    });
+  }
+  if (chapterDays.tests.length > 1) {
+    result.duplicates.push({ subject, chapter: label, kind: "test", dates: chapterDays.tests });
+  }
+}
+
+function summarizeChapters(scan: TabScan): TabChapters {
+  const result: TabChapters = { matched: [], uncoveredChapters: [], duplicates: [], draftChapters: [] };
+  for (const chapter of scan.chapters) {
+    const chapterDays = scan.days.get(chapter.chapterId);
+    if (chapterDays && chapterDays.runs.length > 0) addTaught(result, chapter, chapterDays);
+    else addUncovered(scan, result, chapter);
+  }
+  return result;
+}
+
+function buildTab(
+  workbook: ExcelJS.Workbook,
+  { tab, title, grade }: (typeof SEED_TABS)[number],
+  chapters: SeedChapter[]
+): { draft: PlanDraft; report: SeedTabReport } {
+  const sheet = workbook.getWorksheet(tab);
+  if (!sheet) throw new Error(`Workbook has no "${tab}" tab`);
+  const { dates, entries } = readTab(sheet);
+  const closureDate = latest(dates);
+  const scan = scanEntries(entries, chapters);
+  const { draftChapters, ...summary } = summarizeChapters(scan);
+  return {
+    draft: {
+      tab,
+      title,
+      academicYear: SEED_ACADEMIC_YEAR,
+      grade,
+      examTracks: [...CONTENT_EXAM_TRACKS],
+      closureDate,
+      chapters: draftChapters,
+    },
+    report: {
+      tab,
+      title,
+      grade,
+      closureDate,
+      matched: summary.matched,
+      unmatchedRows: [...scan.unmatched.values()],
+      uncoveredChapters: summary.uncoveredChapters,
+      duplicates: summary.duplicates,
+    },
+  };
+}
+
+export function buildCurriculumPlanSeed(
+  workbook: ExcelJS.Workbook,
+  chaptersByGrade: Record<number, SeedChapter[]>
+): { drafts: PlanDraft[]; report: SeedTabReport[] } {
+  const tabs = SEED_TABS.map((spec) => buildTab(workbook, spec, chaptersByGrade[spec.grade] ?? []));
+  return { drafts: tabs.map((built) => built.draft), report: tabs.map((built) => built.report) };
+}
+
+export type CurriculumPlanSeedMode = "dry-run" | "apply";
+
+// The Curriculum Plans tables, behind the module's create + Chapter date paths.
+export interface CurriculumPlanSeedStore {
+  loadChapters(grade: number): Promise<SeedChapter[]>;
+  existingPlanTitles(academicYear: string, grade: number): Promise<string[]>;
+  // Creates every draft, in order, in one transaction: all of them or none. Returns their ids
+  // in the same order; throws when any draft is rejected.
+  createDraftPlans(drafts: PlanDraft[]): Promise<Array<{ id: number }>>;
+}
+
+export interface CurriculumPlanSeedResult {
+  ok: boolean;
+  mode: CurriculumPlanSeedMode;
+  error?: string;
+  report: SeedTabReport[];
+  reportText: string;
+  created: Array<{ title: string; id: number }>;
+}
+
+function section<T>(lines: string[], heading: string, items: T[], format: (item: T) => string): void {
+  lines.push(`${heading} (${items.length})`);
+  for (const item of items) lines.push(`- ${format(item)}`);
+}
+
+function formatCurriculumPlanSeedReport(report: SeedTabReport[]): string {
+  const lines: string[] = [];
+  for (const tab of report) {
+    lines.push(`== ${tab.tab} → "${tab.title}" (Grade ${tab.grade}, closes ${tab.closureDate}) ==`);
+    section(lines, "Matched Chapters", tab.matched, (item) =>
+      `${item.subject}: ${item.chapter} — due ${item.dueDate}, test ${item.testDate ?? "none"} [${item.sheetNames.join(" | ")}]`
+    );
+    section(lines, "Unmatched Sheet rows", tab.unmatchedRows, (item) => {
+      const reason = item.reason.replace(/_/g, " ");
+      const candidates = item.candidates.length > 0 ? ` (${item.candidates.join("; ")})` : "";
+      return `${item.subject}: "${item.sheetName}" (${item.kind}; ${item.dates.join(", ")}) — ${reason}${candidates}`;
+    });
+    section(lines, "Uncovered LMS Chapters", tab.uncoveredChapters, (item) => `${item.subject}: ${item.chapter}`);
+    section(lines, "Duplicates", tab.duplicates, (item) =>
+      `${item.subject}: ${item.chapter} — ${item.kind}: ${item.dates.join(", ")}`
+    );
+    lines.push("");
+  }
+  return lines.join("\n");
+}
+
+export async function runCurriculumPlanSeed(params: {
+  workbook: ExcelJS.Workbook;
+  mode: CurriculumPlanSeedMode;
+  store: CurriculumPlanSeedStore;
+}): Promise<CurriculumPlanSeedResult> {
+  const grades = [...new Set(SEED_TABS.map(({ grade }) => grade))];
+  const chaptersByGrade: Record<number, SeedChapter[]> = {};
+  for (const grade of grades) chaptersByGrade[grade] = await params.store.loadChapters(grade);
+
+  const { drafts, report } = buildCurriculumPlanSeed(params.workbook, chaptersByGrade);
+  const result: CurriculumPlanSeedResult = {
+    ok: true,
+    mode: params.mode,
+    report,
+    reportText: formatCurriculumPlanSeedReport(report),
+    created: [],
+  };
+  if (params.mode === "dry-run") return result;
+
+  // Checked for all three plans before writing any, so a re-run never half-applies.
+  const existing: string[] = [];
+  for (const draft of drafts) {
+    const titles = await params.store.existingPlanTitles(draft.academicYear, draft.grade);
+    if (titles.includes(draft.title)) existing.push(`${draft.title} (Grade ${draft.grade})`);
+  }
+  if (existing.length > 0) {
+    return {
+      ...result,
+      ok: false,
+      error: `Refusing to apply: plans already exist for ${SEED_ACADEMIC_YEAR}: ${existing.join(", ")}`,
+    };
+  }
+
+  const created = await params.store.createDraftPlans(drafts);
+  result.created = drafts.map((draft, index) => ({ title: draft.title, id: created[index].id }));
+  return result;
+}
