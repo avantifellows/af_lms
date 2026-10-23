@@ -242,6 +242,42 @@ describe("HolisticMentorshipWorkspace", () => {
     expect(window.location.search).toBe("?tab=challenge-categories&program_id=78");
   });
 
+  it("moves off an All Programs Academic Year the single Program lacks when leaving Challenge Categories", async () => {
+    const fetchMock = vi.fn().mockImplementation((url: string) => Promise.resolve({
+      ok: true,
+      json: async () => url.includes("/challenge-categories?") ? {
+        programIds: [1, 78], academicYear: "2026-2027", grade: 11, phaseId: null, phases: [],
+        defaultPhaseId: null, academicYears: ["2026-2027", "2024-2025"],
+        total: { studentCount: 0, counts: {} }, schools: [], hiddenSchoolCount: 0,
+      } : {
+        rows: [], counts: { total: 0, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 },
+        options: { schools: [], mentors: [], phases: [] }, pageSize: 50,
+        academicYears: ["2026-2027"], refreshedAt: "2026-07-17T10:00:00.000Z",
+      },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<HolisticMentorshipWorkspace mode="admin" initialProgramId={1} availableProgramIds={[1, 78]} />);
+    await user.click(screen.getByRole("tab", { name: "Challenge Categories" }));
+    await user.selectOptions(await screen.findByRole("combobox", { name: "Academic Year" }),
+      await screen.findByRole("option", { name: "2024-2025" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/holistic-mentorship/challenge-categories?program_id=all&academic_year=2024-2025&grade=11",
+      expect.anything(),
+    ));
+
+    await user.click(screen.getByRole("tab", { name: "Students & Progress" }));
+
+    const yearSelect = screen.getByLabelText("Academic Year") as HTMLSelectElement;
+    await waitFor(() => expect(Array.from(yearSelect.options).map((option) => option.value))
+      .toEqual(["2026-2027"]));
+    await waitFor(() => expect(yearSelect.value).toBe("2026-2027"));
+    const progressRequests = fetchMock.mock.calls.map(([url]) => String(url))
+      .filter((url) => url.includes("/progress?"));
+    expect(new URL(progressRequests.at(-1)!, "http://localhost").searchParams.get("academic_year"))
+      .toBe(yearSelect.value);
+  });
+
   describe("the active tab in the URL", () => {
     it("writes ?tab= for later tabs, drops it for Students & Progress, and keeps other parameters", async () => {
       window.history.replaceState(null, "", "/admin/holistic-mentorship?program_id=78#coverage");

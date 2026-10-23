@@ -52,6 +52,14 @@ function orderedProgramIds(programIds: number[]) {
   return HOLISTIC_MENTORSHIP_PROGRAM_IDS.filter((programId) => available.has(programId));
 }
 
+// Keep the chosen Academic Year while the new list offers it (All Programs offers
+// every Program's years, one Program only its own); otherwise fall back to the
+// current year, which the lists put first, or else the newest year.
+function yearOffered(year: string, years: string[]) {
+  if (years.includes(year)) return year;
+  return years.includes(CURRENT_ACADEMIC_YEAR) ? CURRENT_ACADEMIC_YEAR : years[0];
+}
+
 // Rewrite one query parameter in place (no history entry), keeping the rest and
 // the hash. Next's patched history API surfaces it through useSearchParams.
 function replaceSearchParam(name: string, value: string | null) {
@@ -211,6 +219,7 @@ function AdminWorkspace({
         ? current
         : years;
     });
+    setAcademicYear((current) => yearOffered(current, years));
   }, []);
 
   const handleTabKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
