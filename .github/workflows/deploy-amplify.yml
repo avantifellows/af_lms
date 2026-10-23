@@ -80,6 +80,12 @@ jobs:
           DB_SERVICE_TOKEN: ${{ secrets.DB_SERVICE_TOKEN }}
           HOLISTIC_PROFILE_ETL_URL: ${{ secrets.HOLISTIC_PROFILE_ETL_URL }}
           HOLISTIC_PROFILE_ETL_TOKEN: ${{ secrets.HOLISTIC_PROFILE_ETL_TOKEN }}
+          BLENDED_LEARNING_ETL_URL: ${{ secrets.BLENDED_LEARNING_ETL_URL }}
+          BLENDED_LEARNING_ETL_TOKEN: ${{ secrets.BLENDED_LEARNING_ETL_TOKEN }}
+          BLENDED_LEARNING_SES_ACCESS_KEY_ID: ${{ secrets.BLENDED_LEARNING_SES_ACCESS_KEY_ID }}
+          BLENDED_LEARNING_SES_SECRET_ACCESS_KEY: ${{ secrets.BLENDED_LEARNING_SES_SECRET_ACCESS_KEY }}
+          BLENDED_LEARNING_SES_REGION: ${{ secrets.BLENDED_LEARNING_SES_REGION }}
+          BLENDED_LEARNING_WELLBEING_EMAILS: ${{ secrets.BLENDED_LEARNING_WELLBEING_EMAILS }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           DYNAMODB_URL: ${{ secrets.DYNAMODB_URL }}
           DYNAMODB_REGION: ${{ secrets.DYNAMODB_REGION }}
@@ -118,6 +124,12 @@ jobs:
             --arg k "$DB_SERVICE_TOKEN" \
             --arg holistic_etl_url "$HOLISTIC_PROFILE_ETL_URL" \
             --arg holistic_etl_token "$HOLISTIC_PROFILE_ETL_TOKEN" \
+            --arg blended_etl_url "$BLENDED_LEARNING_ETL_URL" \
+            --arg blended_etl_token "$BLENDED_LEARNING_ETL_TOKEN" \
+            --arg blended_ses_key_id "$BLENDED_LEARNING_SES_ACCESS_KEY_ID" \
+            --arg blended_ses_secret "$BLENDED_LEARNING_SES_SECRET_ACCESS_KEY" \
+            --arg blended_ses_region "$BLENDED_LEARNING_SES_REGION" \
+            --arg blended_wellbeing_emails "$BLENDED_LEARNING_WELLBEING_EMAILS" \
             --arg l "$GOOGLE_SERVICE_ACCOUNT_JSON" \
             --arg m "$DYNAMODB_URL" \
             --arg n "$DYNAMODB_REGION" \
@@ -154,6 +166,12 @@ jobs:
               DB_SERVICE_TOKEN: $k,
               HOLISTIC_PROFILE_ETL_URL: $holistic_etl_url,
               HOLISTIC_PROFILE_ETL_TOKEN: $holistic_etl_token,
+              BLENDED_LEARNING_ETL_URL: $blended_etl_url,
+              BLENDED_LEARNING_ETL_TOKEN: $blended_etl_token,
+              BLENDED_LEARNING_SES_ACCESS_KEY_ID: $blended_ses_key_id,
+              BLENDED_LEARNING_SES_SECRET_ACCESS_KEY: $blended_ses_secret,
+              BLENDED_LEARNING_SES_REGION: $blended_ses_region,
+              BLENDED_LEARNING_WELLBEING_EMAILS: $blended_wellbeing_emails,
               GOOGLE_SERVICE_ACCOUNT_JSON: $l,
               DYNAMODB_URL: $m,
               DYNAMODB_REGION: $n,
@@ -257,6 +275,12 @@ jobs:
           DB_SERVICE_TOKEN: ${{ secrets.DB_SERVICE_TOKEN }}
           HOLISTIC_PROFILE_ETL_URL: ${{ secrets.HOLISTIC_PROFILE_ETL_URL }}
           HOLISTIC_PROFILE_ETL_TOKEN: ${{ secrets.HOLISTIC_PROFILE_ETL_TOKEN }}
+          BLENDED_LEARNING_ETL_URL: ${{ secrets.BLENDED_LEARNING_ETL_URL }}
+          BLENDED_LEARNING_ETL_TOKEN: ${{ secrets.BLENDED_LEARNING_ETL_TOKEN }}
+          BLENDED_LEARNING_SES_ACCESS_KEY_ID: ${{ secrets.BLENDED_LEARNING_SES_ACCESS_KEY_ID }}
+          BLENDED_LEARNING_SES_SECRET_ACCESS_KEY: ${{ secrets.BLENDED_LEARNING_SES_SECRET_ACCESS_KEY }}
+          BLENDED_LEARNING_SES_REGION: ${{ secrets.BLENDED_LEARNING_SES_REGION }}
+          BLENDED_LEARNING_WELLBEING_EMAILS: ${{ secrets.BLENDED_LEARNING_WELLBEING_EMAILS }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           DYNAMODB_URL: ${{ secrets.DYNAMODB_URL }}
           DYNAMODB_REGION: ${{ secrets.DYNAMODB_REGION }}
@@ -295,6 +319,12 @@ jobs:
             --arg k "$DB_SERVICE_TOKEN" \
             --arg holistic_etl_url "$HOLISTIC_PROFILE_ETL_URL" \
             --arg holistic_etl_token "$HOLISTIC_PROFILE_ETL_TOKEN" \
+            --arg blended_etl_url "$BLENDED_LEARNING_ETL_URL" \
+            --arg blended_etl_token "$BLENDED_LEARNING_ETL_TOKEN" \
+            --arg blended_ses_key_id "$BLENDED_LEARNING_SES_ACCESS_KEY_ID" \
+            --arg blended_ses_secret "$BLENDED_LEARNING_SES_SECRET_ACCESS_KEY" \
+            --arg blended_ses_region "$BLENDED_LEARNING_SES_REGION" \
+            --arg blended_wellbeing_emails "$BLENDED_LEARNING_WELLBEING_EMAILS" \
             --arg l "$GOOGLE_SERVICE_ACCOUNT_JSON" \
             --arg m "$DYNAMODB_URL" \
             --arg n "$DYNAMODB_REGION" \
@@ -331,6 +361,12 @@ jobs:
               DB_SERVICE_TOKEN: $k,
               HOLISTIC_PROFILE_ETL_URL: $holistic_etl_url,
               HOLISTIC_PROFILE_ETL_TOKEN: $holistic_etl_token,
+              BLENDED_LEARNING_ETL_URL: $blended_etl_url,
+              BLENDED_LEARNING_ETL_TOKEN: $blended_etl_token,
+              BLENDED_LEARNING_SES_ACCESS_KEY_ID: $blended_ses_key_id,
+              BLENDED_LEARNING_SES_SECRET_ACCESS_KEY: $blended_ses_secret,
+              BLENDED_LEARNING_SES_REGION: $blended_ses_region,
+              BLENDED_LEARNING_WELLBEING_EMAILS: $blended_wellbeing_emails,
               GOOGLE_SERVICE_ACCOUNT_JSON: $l,
               DYNAMODB_URL: $m,
               DYNAMODB_REGION: $n,
@@ -445,6 +481,12 @@ jobs:
           DB_SERVICE_TOKEN: ${{ secrets.DB_SERVICE_TOKEN }}
           HOLISTIC_PROFILE_ETL_URL: ${{ secrets.HOLISTIC_PROFILE_ETL_URL }}
           HOLISTIC_PROFILE_ETL_TOKEN: ${{ secrets.HOLISTIC_PROFILE_ETL_TOKEN }}
+          BLENDED_LEARNING_ETL_URL: ${{ secrets.BLENDED_LEARNING_ETL_URL }}
+          BLENDED_LEARNING_ETL_TOKEN: ${{ secrets.BLENDED_LEARNING_ETL_TOKEN }}
+          BLENDED_LEARNING_SES_ACCESS_KEY_ID: ${{ secrets.BLENDED_LEARNING_SES_ACCESS_KEY_ID }}
+          BLENDED_LEARNING_SES_SECRET_ACCESS_KEY: ${{ secrets.BLENDED_LEARNING_SES_SECRET_ACCESS_KEY }}
+          BLENDED_LEARNING_SES_REGION: ${{ secrets.BLENDED_LEARNING_SES_REGION }}
+          BLENDED_LEARNING_WELLBEING_EMAILS: ${{ secrets.BLENDED_LEARNING_WELLBEING_EMAILS }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           DYNAMODB_URL: ${{ secrets.DYNAMODB_URL }}
           DYNAMODB_REGION: ${{ secrets.DYNAMODB_REGION }}
@@ -482,6 +524,12 @@ jobs:
             --arg k "$DB_SERVICE_TOKEN" \
             --arg holistic_etl_url "$HOLISTIC_PROFILE_ETL_URL" \
             --arg holistic_etl_token "$HOLISTIC_PROFILE_ETL_TOKEN" \
+            --arg blended_etl_url "$BLENDED_LEARNING_ETL_URL" \
+            --arg blended_etl_token "$BLENDED_LEARNING_ETL_TOKEN" \
+            --arg blended_ses_key_id "$BLENDED_LEARNING_SES_ACCESS_KEY_ID" \
+            --arg blended_ses_secret "$BLENDED_LEARNING_SES_SECRET_ACCESS_KEY" \
+            --arg blended_ses_region "$BLENDED_LEARNING_SES_REGION" \
+            --arg blended_wellbeing_emails "$BLENDED_LEARNING_WELLBEING_EMAILS" \
             --arg l "$GOOGLE_SERVICE_ACCOUNT_JSON" \
             --arg m "$DYNAMODB_URL" \
             --arg n "$DYNAMODB_REGION" \
@@ -518,6 +566,12 @@ jobs:
               DB_SERVICE_TOKEN: $k,
               HOLISTIC_PROFILE_ETL_URL: $holistic_etl_url,
               HOLISTIC_PROFILE_ETL_TOKEN: $holistic_etl_token,
+              BLENDED_LEARNING_ETL_URL: $blended_etl_url,
+              BLENDED_LEARNING_ETL_TOKEN: $blended_etl_token,
+              BLENDED_LEARNING_SES_ACCESS_KEY_ID: $blended_ses_key_id,
+              BLENDED_LEARNING_SES_SECRET_ACCESS_KEY: $blended_ses_secret,
+              BLENDED_LEARNING_SES_REGION: $blended_ses_region,
+              BLENDED_LEARNING_WELLBEING_EMAILS: $blended_wellbeing_emails,
               GOOGLE_SERVICE_ACCOUNT_JSON: $l,
               DYNAMODB_URL: $m,
               DYNAMODB_REGION: $n,

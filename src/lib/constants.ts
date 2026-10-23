@@ -36,6 +36,19 @@ export function isPmuRole(role: unknown): role is PmuRole {
 
 export const PMU_PROGRAM_ID = PROGRAM_IDS.NVS;
 
+// Blended Learning Mentoring roles. Client-safe like the PMU roles. They hold
+// no School scope and no Programs: the shared permission lookup resolves them
+// to no permission (deny by default), and only the Blended Learning access
+// policy reads them.
+export const BLENDED_MENTOR_ROLE = "blended_mentor";
+export const BLENDED_ADMIN_ROLE = "blended_admin";
+export const BLENDED_ROLES = [BLENDED_MENTOR_ROLE, BLENDED_ADMIN_ROLE] as const;
+export type BlendedRole = (typeof BLENDED_ROLES)[number];
+
+export function isBlendedRole(role: unknown): role is BlendedRole {
+  return typeof role === "string" && BLENDED_ROLES.includes(role as BlendedRole);
+}
+
 // Alumni Manager role (ADR 0008). Alumni are not Students: this role reaches
 // alumni records only, through canAccessAlumni. Every Student, School, centre
 // and admin gate treats it as having no permission at all.

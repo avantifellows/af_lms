@@ -352,3 +352,64 @@ describe("POST /api/admin/users — PMU roles", () => {
     expect(insertParams()).toBeUndefined();
   });
 });
+
+describe("POST /api/admin/users — Blended Learning roles", () => {
+  function mockDb({ seats = [] as unknown[] } = {}) {
+    mockQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes("centre_positions")) return seats;
+      if (sql.includes("INSERT INTO user_permission")) return [{ id: 31 }];
+      return [];
+    });
+  }
+
+  function insertParams() {
+    const call = mockQuery.mock.calls.find(([sql]) =>
+      String(sql).includes("INSERT INTO user_permission")
+    );
+    return call?.[1];
+  }
+
+  async function post(body: Record<string, unknown>) {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockGetUserPermission.mockResolvedValue(ADMIN_PERMISSION);
+    const req = jsonRequest("http://localhost/api/admin/users", {
+      method: "POST",
+      body: { email: "faizan@avantifellows.org", ...body },
+    });
+    return POST(req as never);
+  }
+
+  it("stores a Blended Learning Mentor with no School scope and no Programs, whatever the body says", async () => {
+    mockDb();
+    const res = await post({
+      role: "blended_mentor",
+      level: 3,
+      school_codes: ["70705"],
+      regions: ["North"],
+      program_ids: [1, 64],
+      full_name: "Faizan",
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ id: 31, success: true });
+    expect(insertParams()).toEqual([
+      "faizan@avantifellows.org", 1, "blended_mentor", null, null, [], false, "Faizan",
+    ]);
+  });
+
+  it("stores a read-only Blended Learning Admin without program_ids in the body", async () => {
+    mockDb();
+    const res = await post({ role: "blended_admin", level: 1, read_only: true });
+    expect(res.status).toBe(200);
+    expect(insertParams()).toEqual([
+      "faizan@avantifellows.org", 1, "blended_admin", null, null, [], true, null,
+    ]);
+  });
+
+  it("returns 409 when the target already holds a centre seat", async () => {
+    mockDb({ seats: [{ one: 1 }] });
+    const res = await post({ role: "blended_mentor", level: 1 });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toMatch(/centre assignments/i);
+    expect(insertParams()).toBeUndefined();
+  });
+});
