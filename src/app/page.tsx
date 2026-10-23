@@ -17,6 +17,7 @@ const DEV_PERSONAS = [
   { key: "read_only", label: "Read-Only", description: "Teacher view without edits" },
   { key: "pmu_manager", label: "PMU Manager", description: "Level 1, JNV NVS only" },
   { key: "pmu_govt_school_user", label: "PMU Govt School User", description: "Level 1, 1 JNV School" },
+  { key: "alumni_manager", label: "Alumni Manager", description: "Level 1, alumni only" },
 ] as const;
 
 // Where to go after sign-in: a same-site path from ?callbackUrl= (e.g. /mcp),

@@ -21,6 +21,7 @@ Admin interface for managing JNV (Jawahar Navodaya Vidyalaya) student enrollment
   - `holistic_mentorship_admin` (Holistic Mentorship Admin): manages Holistic Mentorship only
   - `pmu_manager` (PMU Manager): Avanti's internal PMU team; JNV NVS only, in one or more JNV Schools (or all of them), with the JNV NVS Schools dashboard
   - `pmu_govt_school_user` (PMU Govt School User): an external stakeholder of exactly one JNV NVS School (e.g. its principal); JNV NVS only, and lands straight on that School
+  - `alumni_manager` (Alumni Manager): views and updates alumni of their assigned Schools only; no Students, programs or other features
 - **Read-only Mode**: Optional view-only access for any permission level
 
 ## Tech Stack

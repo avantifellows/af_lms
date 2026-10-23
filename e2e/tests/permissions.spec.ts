@@ -20,6 +20,12 @@ test.describe("Permission matrix — /admin", () => {
 
     await expect(teacherPage.getByRole("heading", { name: "Admin" })).not.toBeVisible();
   });
+
+  test("Alumni Manager cannot access /admin", async ({ alumniManagerPage }) => {
+    await alumniManagerPage.goto("/admin");
+
+    await expect(alumniManagerPage.getByRole("heading", { name: "Admin" })).not.toBeVisible();
+  });
 });
 
 test.describe("Permission matrix — /visits", () => {
@@ -34,6 +40,12 @@ test.describe("Permission matrix — /visits", () => {
 
     // Teacher should not see the visits page content
     await expect(teacherPage.getByRole("heading", { name: "All Visits" })).not.toBeVisible();
+  });
+
+  test("Alumni Manager cannot access /visits", async ({ alumniManagerPage }) => {
+    await alumniManagerPage.goto("/visits");
+
+    await expect(alumniManagerPage.getByRole("heading", { name: "All Visits" })).not.toBeVisible();
   });
 });
 

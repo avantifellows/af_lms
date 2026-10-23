@@ -14,6 +14,7 @@ export const ROSTER_TAB_IDS = [
   "mentorship",
   "holistic_mentorship",
   "visits",
+  "alumni",
 ] as const;
 
 export type RosterTabId = (typeof ROSTER_TAB_IDS)[number];
