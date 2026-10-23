@@ -224,7 +224,7 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   `talkToFirst`, `latestEntryKind`, `lastContactOf`, `compareTalkToFirst`,
   `talkedToInLastWeek`, `thirtyDaysOrMore` (days_since ≥ 30 or no Last Contact). IST calendar dates as `YYYY-MM-DD`. Last Contact is the latest
   Conversation, else the exact `legacy_last_contact_on` (the Profile Doc's latest dated
-  conversation), else none (`no_contact`); `legacy_last_contact_month` never counts. Drafts never feed it.
+  conversation), else none (`no_contact`). Drafts never feed it.
 - **Search and filters (#443):** client-side in `src/app/blended-learning/FilteredMenteeList.tsx`
   over the already grouped and sorted `MenteeList` (about 46 Mentees per Mentor, so no server
   pagination). Name search is a trimmed, case-insensitive substring match. Gender and Program
@@ -259,22 +259,22 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   non-blank summary; an Attempt takes only an optional note (blank → `NULL`). One
   `withTransaction` re-reads the active Mapping `FOR SHARE` (none, or another Mentor's for a
   Mentor → 404) and inserts the row with the Mapping's `mentor_user_id`, `program_id` and
-  `academic_year`, plus `logged_by_email`/`logged_by_user_id` = the actor (an admin logging on a
-  Mentor's behalf keeps the mapped Mentor). `23514` (checks, append-only triggers) and `23505`
+  `academic_year`, plus `logged_by_email` = the actor (an admin logging on a Mentor's behalf
+  keeps the mapped Mentor). `23514` (checks, the Conversation append-only trigger) and `23505`
   map to 409. After commit, `mentee` is the Student's `listMentees` row (`studentId` filter), so
   the confirmation shows exactly what the list now says. Draft save (#451) runs inside the same
   transaction (below).
 - **Action Items (#446):** only `kind: "conversation"` accepts `actionItems[]` (`{ owner:
-  student|mentor|parent, text, dueOn? }`; a missing owner or blank text, or an impossible
-  date, gives a 422 keyed `actionItems.<i>.<field>`) and `completeActionItemIds[]` (positive
+  student|mentor|parent, text }`; a missing owner or blank text gives a 422 keyed
+  `actionItems.<i>.<field>`) and `completeActionItemIds[]` (positive
   integers, de-duplicated). Either key on an Attempt is a 422. Inside the same transaction the
   new items are inserted with `position` 1..n after the Conversation. The ticks are one
   `UPDATE … SET status = 'done', completed_by_conversation_id, completed_by_email, completed_at,
   updated_at WHERE id = ANY($3::bigint[]) AND status = 'open' AND student_id = $4`. Fewer
   returned rows than ids (an id already done, unknown or another Student's) throws, so the
-  whole save rolls back and returns 409. The PR #804 trigger allows only that open → done
-  change (it leaves `updated_at` free). `getMenteeDetail` returns each item's `owner`/`dueOn`
-  and `openActionItems` (open items, newest Conversation first, with `agreedOn`). There are no
+  whole save rolls back and returns 409. af_lms makes only that open → done change, and
+  `bl_action_items_completion_check` keeps the completion columns consistent. `getMenteeDetail`
+  returns each item's `owner` and `openActionItems` (open items, newest Conversation first, with `agreedOn`). There are no
   reminders, overdue logic or item editing.
 - **Mentor Flags (#447):** only `kind: "conversation"` accepts `flags[]` (`{ recipient:
   emotional_wellbeing|physics|chemistry|maths, comment? }`; blank comment → `NULL`). An unknown
@@ -285,13 +285,11 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   `logEntry` awaits `notifyWellbeingFlag(flagId)` (`src/lib/blended-learning-wellbeing-notifier.ts`,
   server-only, `@aws-sdk/client-ses` `SendEmail`) for each Emotional Well-being flag only; a
   rollback calls nothing. The notifier never throws: it skips when SES or the recipients are
-  unconfigured (no SES call), or when the flag is not well-being or already has
-  `notification_sent_at`; it reads the Student, grade, program (the Conversation's), mapped
+  unconfigured (no SES call), or when the flag is not well-being; it reads the Student, grade, program (the Conversation's), mapped
   Mentor and date by `query()`, never the comment, summary or notes; it sends one text email
   from `no-reply@avantifellows.org` to `BLENDED_LEARNING_WELLBEING_EMAILS` with an absolute
-  `{NEXTAUTH_URL}/blended-learning/students/{id}` link; then sets `notification_sent_at = now()
-  WHERE notification_sent_at IS NULL` (the only change the PR #804 trigger allows). An SES
-  failure logs only the flag id and the error's name and the save stays 201; no retry in v1.
+  `{NEXTAUTH_URL}/blended-learning/students/{id}` link, once, after commit. It writes nothing
+  back: there is no resend path. An SES failure logs only the flag id and the error's name and the save stays 201; no retry in v1.
   Physics, Chemistry and Maths flags notify no one. The log form shows four switches
   (`role="switch"`), each revealing an optional comment; labels come from
   `students/[id]/flagRecipients.ts`, shared with the history chips.
@@ -332,35 +330,35 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
      this Student's prefix + UUID + `mp3|m4a|wav`, or when `HeadObject` finds no object or a size
      other than `byteSize`; 422 for optional session details: `occurredOn` a real date not after
      today IST, `mode`, `spokeWith`, integer 1–240 `durationMinutes`; blank → `NULL` /
-     201 `{ draftId, delivery }`). One `withTransaction` re-reads the active Mapping `FOR SHARE`
+     201 `{ draftId }`). One `withTransaction` re-reads the active Mapping `FOR SHARE`
      and inserts the draft (`transcribing`, the Mapping's Mentor/program/year,
-     `created_by_email`/`created_by_user_id` = actor, content type from the key, byte size from
-     S3) and a `queued` Transcription Request with a server-generated UUID `request_key`; the
+     `created_by_email` = actor, content type from the key; S3's size is checked, not stored)
+     and a `queued` Transcription Request with a server-generated UUID `request_key`; the
      open-draft unique index (`23505`) → 409. After commit it awaits `wakeTranscription`.
   - **Waking etl-next:** `wakeTranscription(requestKey)` mirrors Holistic Profile regeneration:
     `POST {BLENDED_LEARNING_ETL_URL}/api/internal/blended-learning/transcription-requests/{key}/enqueue`,
-    Bearer `BLENDED_LEARNING_ETL_TOKEN`, body `{"environment": APP_ENV}`, 15 s timeout. `skipped`
-    (no fetch) when the URL or token is blank or `APP_ENV` is not staging/production; `sent` on
-    2xx; `ambiguous` on a network error, timeout, 5xx, 408 or 429 (the request stays queued);
-    `rejected` on any other 4xx, when one transaction sets the request `failed` with
-    `etl_run_id = 'rejected-{key}'`, `error_code = 'enqueue_rejected'` (only `WHERE state =
-    'queued' AND etl_run_id IS NULL`) and the draft `failed` only if still `transcribing`.
-    Nothing logs the request key or S3 key.
+    Bearer `BLENDED_LEARNING_ETL_TOKEN`, body `{"environment": APP_ENV}`, 15 s timeout. No fetch
+    when the URL or token is blank or `APP_ENV` is not staging/production. It returns nothing and
+    never writes: on a network error or timeout the request stays queued; a non-2xx response is
+    logged with its status only. etl-next runs each request under
+    `blended-learning-{env}-{request_key}`, so a repeated wake is a no-op. Nothing logs the
+    request key or S3 key.
   - **Status and polling:** `GET /api/blended-learning/drafts/[id]` → `getDraftStatus` (any
     Blended Learning user who can see the Student, read-only included; 404 out of scope or
     missing) returns `{ id, state, retryOffered }`. Retry is offered, to users who may
-    `manage_draft`, for a `failed` draft or a `transcribing` one whose active request is
-    `queued` with `etl_run_id IS NULL` (the wake never reached ETL). The detail page's
+    `manage_draft`, for a `failed` draft or a `transcribing` one whose active request is still
+    `queued` more than 10 minutes after it was created (`request_stale`; a younger one is waiting
+    its turn in etl-next's sequential queue). The detail page's
     `students/[id]/DraftStatus.tsx` polls it every 15 s while the draft is `transcribing` and
     stops on ready/failed or when the page closes; a draft no longer open disappears. Each poll
     also refreshes `retryOffered`, and the page loads its first value via `getDraftStatus`.
   - **Retry and discard (#450):** `POST /api/blended-learning/drafts/[id]/retry` →
-    `retryDrafting(access, draftId)`: a `transcribing` draft whose active request is `queued` with
-    `etl_run_id IS NULL` is woken again with the **same** `request_key` (no new row); a `failed`
-    draft gets, in one `withTransaction`, `UPDATE … SET state = 'transcribing' WHERE state =
-    'failed'` and a new `queued` request (new UUID key, the actor as `requested_by_*`), then
-    `wakeTranscription`; 200 `{ id, state, retryOffered, delivery }` (a `rejected` wake fails the
-    draft again). Any other state, a lost race or the active-request unique index (`23505`) → 409.
+    `retryDrafting(access, draftId)`: a `transcribing` draft whose active request is still
+    `queued` after 10 minutes is woken again with the **same** `request_key` (no new row); a
+    `failed` draft gets, in one `withTransaction`, `UPDATE … SET state = 'transcribing' WHERE
+    state = 'failed'` and a new `queued` request (new UUID key, the actor as
+    `requested_by_email`), then `wakeTranscription`; 200 `{ id, state, retryOffered }`. Any other
+    state (a queued request under 10 minutes old included), a lost race or the active-request unique index (`23505`) → 409.
     `POST …/discard` → `discardDraft`: `UPDATE … SET state = 'discarded', discarded_at = now()
     WHERE state IN ('transcribing', 'ready', 'failed')`, 200 `{ id, state: "discarded" }`, no
     rows → 409; the active request is left alone (db-service ignores a discarded draft when ETL
@@ -382,21 +380,19 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
     (only when the page passes `reviewHref`, i.e. the user can `log`) open
     `/blended-learning/students/[id]/log`. There `getDraftForReview(access, studentId)` (`log`
     permission + `canAccessBlendedStudent`) reads the `ready` draft's session details and
-    `draft_summary`, `draft_summary_tags`, `draft_action_items` (`[{text, owner, due_on}]`),
-    `draft_notes` (`[{heading, points[]}]`) and `draft_items_to_verify` (`[string]`). The page
-    prefills `LogEntryForm` (`draft` prop): the summary is the drafted summary then
-    `\n\nTags: a, b` (Conversations have no tags column, so Summary Tags are saved as summary
-    text); notes go through `draftNotesToHtml` (`src/lib/blended-learning-draft-notes.ts`,
+    `draft_summary`, `draft_action_items` (`[{text, owner}]`) and `draft_notes`
+    (`[{heading, points[]}]`). The page prefills `LogEntryForm` (`draft` prop) with the drafted
+    summary and Action Items; notes go through `draftNotesToHtml` (`src/lib/blended-learning-draft-notes.ts`,
     client-safe: `<h3>` + `<ul><li>`, every `& < > " '` escaped) into the Tiptap editor, which
-    reports its normalised HTML on create. Items to Verify render as an unsaved checklist above
-    the form; the kind choice and the recording upload are hidden. Saving posts `draftId`:
+    reports its normalised HTML on create. The kind choice and the recording upload are hidden. Saving posts `draftId`:
     `logEntry` locks `… WHERE id = $1 AND student_id = $2 FOR UPDATE` (missing, another
     Student's, or not `ready` → 409 "no longer ready", whole save rolled back), inserts the
     Conversation with the draft's `call_recording_s3_key`, `transcript_s3_key` and
-    `source_draft_id`, and last sets the draft `saved` + `saved_conversation_id` (`WHERE state =
-    'ready'`, else 409). `draftId` on an Attempt or a non-integer is 422. Hand-logged rows store
+    `source_draft_id` (the only link between the two), and last sets the draft `saved` (`WHERE
+    state = 'ready'`, else 409). `draftId` on an Attempt or a non-integer is 422. Hand-logged rows store
     `NULL` in the three draft columns. `blended-learning-draft-review.spec.ts` inserts a full
-    `ready` draft for Mentor C's never-contacted F1 (desktop) / F2 (mobile) and saves it.
+    `ready` draft for Mentor C's never-contacted F1 (desktop) / F2 (mobile), saves it, and
+    checks that a second save of the same draft is 409.
 - **Recording playback and transcript (#454, ADR 0010):** admin only, in
   `src/lib/blended-learning-mentee-detail.ts`. History Conversations carry `hasRecording` /
   `hasTranscript` (key columns `IS NOT NULL`); the detail page renders
@@ -463,6 +459,7 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   nothing. Non-`https://` values are skipped before the DB CHECK sees them; a value missing from
   the workbook keeps the stored one. `legacy_last_contact_on` is selected and written only
   with `--legacy-docs-dir` (Profile Doc HTML exports; date extraction in
-  `src/lib/blended-learning-profile-doc-dates.ts`, the rule in
-  `src/lib/blended-learning-legacy-last-contact.ts`); `legacy_last_contact_month` is no longer
-  written. Runbook: `patterns/load-blended-learning-links.md`.
+  `src/lib/blended-learning-profile-doc-dates.ts`: the doc's latest dated conversation only).
+  With docs, every matched Student is considered, so a stored Profile Doc link still gives a
+  date when the workbook row has none; a Student with no link and no stored row gets no row.
+  Runbook: `patterns/load-blended-learning-links.md`.

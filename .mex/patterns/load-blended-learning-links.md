@@ -35,18 +35,18 @@ What it reads (hyperlinks, never cell text — a Ctrl+K link or a `HYPERLINK("ur
   name or any other link is never written as a Screener Link.
 - **`--legacy-docs-dir=<dir>`** → `legacy_last_contact_on`: the latest dated conversation in each
   Student's Profile Doc, read from `<dir>/<Drive file id>.html` (the doc's HTML export). Product
-  owner rule (2026-10-23), kept in `src/lib/blended-learning-legacy-last-contact.ts`: the doc only,
-  never the Sheet's monthly counts. Extraction (`src/lib/blended-learning-profile-doc-dates.ts`,
+  owner rule (2026-10-23): the doc only, never the Sheet's monthly counts. With docs, every
+  matched Student is considered, so one whose workbook rows had no usable link still gets a date
+  from a stored Profile Doc link; a Student with no link anywhere and no stored row gets no row.
+  Extraction (`src/lib/blended-learning-profile-doc-dates.ts`,
   deterministic, no LLM) skips the intake/profile and Student Story tabs, dates in tables,
   mid-sentence dates, date lines with nothing under them, and dates outside 1 April of the
-  academic year to `--as-of` (default today, IST; a later date is a typo or a plan). A year-less
+  academic year to today, IST (a later date is a typo or a plan). A year-less
   date ("17 October", "17/10") is read in the academic year's first year (product owner,
   2026-10-23), except in a tab whose dated entries all carry an earlier year (a G13 doc's
   previous-year history). Outcomes per Student:
   `dated`, `no_dates` (doc read, nothing dated → NULL), `unreadable` (no export → stored value
-  kept, NULL until a re-run has the doc), `no_doc_link`. Counts only are printed. The old
-  `--seed-legacy` month seed is removed: month precision put a whole month's Students into Talk
-  to first on one day; `legacy_last_contact_month` is no longer written or read by Talk to first.
+  kept, NULL until a re-run has the doc), `no_doc_link`. Counts only are printed.
 
 Each tab's header row is the first of the top ten rows with a "Student ID" or "Name"/"Student
 Name" column.

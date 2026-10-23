@@ -144,7 +144,6 @@ for (const { label, key, viewport } of VIEWPORTS) {
       await expect(items.getByLabel("Who does action item 2", { exact: true })).toHaveValue("mentor");
       await expect(items.getByLabel("Action item 3", { exact: true })).toHaveCount(0);
       await items.getByLabel("Action item 1", { exact: true }).fill(first);
-      // Action Items take no due date.
       await expect(items.getByLabel(/Due/)).toHaveCount(0);
       await items.getByLabel("Who does action item 2", { exact: true }).selectOption({ label: "Parent" });
       await items.getByLabel("Action item 2", { exact: true }).fill(second);
@@ -184,7 +183,7 @@ for (const { label, key, viewport } of VIEWPORTS) {
       // Detail: the new items are open; the earlier one is done.
       await page.goto(detailPath(mentee));
       const newItems = historyEntryWith(page, summary).getByRole("list", { name: "Action Items" }).getByRole("listitem");
-      // Owner pill, then the text, then its status; Action Items show no due date.
+      // Owner pill, then the text, then its status.
       await expect(newItems).toHaveText([new RegExp(`^Student\\s*${first}\\s*Open$`), new RegExp(`^Parent\\s*${second}\\s*Open$`)]);
       const earlierItems = historyEntryWith(page, "Synthetic: agreed the revision plan.")
         .getByRole("list", { name: "Action Items" })

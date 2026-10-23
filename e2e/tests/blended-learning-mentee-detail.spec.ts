@@ -18,7 +18,7 @@ import {
 // two Mentor Flags and two photo rows; WhatsApp differs from her phone; no
 // links. Meera — Profile Doc only. Rohan — both links, WhatsApp equal to his
 // phone, a failed draft. Kabir — nothing logged, a ready draft. Devika (D1,
-// Mentor C) — an open Action Item stored with a due date, which never shows.
+// Mentor C) — an open Action Item from an earlier Conversation.
 const BLENDED_ADMIN = { name: "Synthetic Blended Admin", email: "e2e-blended-admin@test.local" };
 
 const VIEWPORTS = [
