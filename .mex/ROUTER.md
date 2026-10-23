@@ -51,6 +51,17 @@ Then read this file fully before doing anything else in this session.
   and the API refuses them outright via `isPmuOnlyStudent`. Needs DB Service
   `sessions_applied` (db-service PR #788, still open) deployed first. See
   `context/student-addition.md` and `context/data-access.md` §2.
+- Edit Student and the roster card cover the same fields for physical centres (issue #431).
+  Edit Student gained Contact & Address, Father, Mother, Guardian and Socio-economic
+  sections — the twenty contact and household details the card already displayed — and the
+  card gained CWSN, G10 board and the uniform sizes. JNV NVS is excluded (PMU did not ask
+  for these, and #296 blocks family income for the Phone-mode cohort): the sections are
+  hidden, the card keeps its `NvsDetailGroups` shape from #433, and both the LMS
+  canonicaliser and the DB Service refuse the fields under program 64. CWSN reads "Children
+  with Special Needs (CWSN)" everywhere, the Locked Identity hint says why its fields are
+  fixed, School Medium left the card (not editable, by the program team's call), G10 board
+  reads CBSE/Others, parent names keep any script and `. ' -`, and a failed save now scrolls
+  and focuses the first error once. Needs DB Service PR #789 deployed first. See `context/student-addition.md`.
 - Issue #412 (feature branch): the dormant Holistic privacy helper erases Follow-up answers after creating the privacy tombstone and records the actual changed-answer count in a separate immutable audit. Existing tombstones are supported without rewriting their original audit. Requires the companion db-service migration first. The endpoint and action policy remain disabled; no historical data repair or external-process rollout is included. See `context/data-access.md` and `patterns/holistic-privacy-erasure.md`.
 - Issue #361 slice #363: PMU Manager (`pmu_manager`) and PMU Govt School User (`pmu_govt_school_user`) exist in the permission layer, pinned to JNV NVS (ADR 0007): matrix `students` edit + `performance` view only, program context always `[64]`/NVS-only, no centre seats or centre access, `ownsRecord` only for 64, and `canAccessStudent` requires a current NVS batch (`hasCurrentNvsBatchSql`). Admin user management, school page, dashboard and other PMU surfaces are later slices. See `context/permissions.md`.
 - Issue #361 slice #364: login is Google-only (ADR 0007); Dev Login stays in non-prod. `isRetiredToken` (`src/lib/retired-session.ts`, no DB imports) flags JWTs from the retired login by their raw token fields. The `jwt` callback throws on them, and `proxy` treats them as no token and clears the plain, `__Secure-` and chunked session cookies.
@@ -84,6 +95,7 @@ Then read this file fully before doing anything else in this session.
 - Issue #351 slice #356: with JNV NVS selected, the Performance filter bar shows only Grade and Stream (no Test grade, Test type, Subject, or View), and the content is always the per-test full-test overview. `effectiveSelection()` in `usePerformanceFilters.ts` overrides only the effective values (`category=full`, `view=per_test`, no subject/testGrade); raw state and the URL are untouched, so old links are ignored (not rewritten) and another program tab gets its own selections back. See `context/data-access.md` §3.
 - Issue #351 slice #357: the JNV NVS test deep dive's Student Results table has a sortable "Time Spent (min)" column after Attempt Rate, on student and subject rows (chapter rows are blank). Times come from BigQuery `total_time_spent` via `getStudentTimeSpentData()`, merged server-side in the `test-deep-dive` route only for NVS. A BigQuery failure still returns the deep dive with null times ("—", sorted last). See `context/data-access.md` §3.
 - APAAR-only Students (14 Oct 2026): the Performance batch overview and the Cumulative AL table count and key Students on `enrollment_user_id`, not `fk_student_id` / `pk_student_id`, which are NULL for a Student who has only an APAAR ID. Before this, af_lms never counted those Students (JNV Barabanki Grade 12: 8 enrolled shown, 75 real). See `context/data-access.md` §3 "Student key".
+- Student Results row identity (21 Oct 2026): the test deep dive's `StudentResultsTable` identifies a row by `enrollment_user_id` (`studentKey()`), not by `student_name`. The row `key`, the expanded row (`expandedKey`) and the rank map (`rankByKey`) use it. Before this, two Students with the same name in one test had one React key, expanded together and showed the same rank. See `context/data-access.md` §3.
 
 - Issue #340 complete (slices #342–#345, PR #346): Students & Progress says "Assigned" (`counts.total` replaces `counts.totalMapped`). It shows current-year Coverage cards (Eligible / Assigned / Unassigned; `coverage` is `null` under a Mentor filter or for a past year). Progress = Unassigned lists, opens (read-only) and exports eligible Students without a Mentor. The API returns 422 for `progress=unassigned` with a past year or `mentor_user_id`, and the client resets such view states to All Assigned. `holistic-mentorship.spec.ts` passes again (see `patterns/debug-e2e-fixtures.md`). Local e2e needs a sibling `../db-service_holistic_mentorship` (symlink to `../db-service`). See `context/data-access.md` and `patterns/debug-holistic-progress.md`.
 - September 23 scaffold reconciliation: recovered useful September 7–18 local notes onto current main, preserving already-merged behavior and condensing superseded investigation stages. Context now records #304 rollout, #321 production smoke, #323 QA, and #332/#334/#335 staging/merge outcomes. New runbooks cover shared staging, local enrollment repair and cleanup of old-branch scaffold edits. Original local files are backed up privately under sibling `release-records/mex-cleanup-20260923-125614/`.
@@ -157,7 +169,6 @@ Then read this file fully before doing anything else in this session.
 
 **Known issues:**
 
-- The test deep dive's `StudentResultsTable` uses `student_name` as the Student identity: the row `key`, the expanded-row state (`expandedName`) and the rank map (`rankByName`). Two Students with the same name in one test share a row key, expand together and share a rank. Each row has `enrollment_user_id`; key on that (fall back to the name only when it is null). Not fixed yet.
 - DB Service #736 retains the explicitly deferred future-date dropout/undo defect: undo before the recorded dropout date can create overlapping status periods and end a period before it starts. A resolved review thread does not establish a fix. See `context/student-addition.md` for the finding and deferral evidence.
 
 - Two write paths exist — sending a student/batch/quiz-session write to Postgres instead of the DB Service is a real bug (see `context/data-access.md`).

@@ -97,9 +97,9 @@ describe("StudentResultsTable", () => {
       <StudentResultsTable
         {...props}
         students={[
-          { ...STUDENTS[0], student_name: "Top Scorer", percentage: 90, has_quiz_ended: true },
-          { ...STUDENTS[0], student_name: "Walked Out", percentage: 4, has_quiz_ended: false },
-          { ...STUDENTS[0], student_name: "Second", percentage: 50, has_quiz_ended: true },
+          { ...STUDENTS[0], student_name: "Top Scorer", enrollment_user_id: "1", percentage: 90, has_quiz_ended: true },
+          { ...STUDENTS[0], student_name: "Walked Out", enrollment_user_id: "2", percentage: 4, has_quiz_ended: false },
+          { ...STUDENTS[0], student_name: "Second", enrollment_user_id: "3", percentage: 50, has_quiz_ended: true },
         ]}
       />
     );
@@ -118,8 +118,8 @@ describe("StudentResultsTable", () => {
       <StudentResultsTable
         {...props}
         students={[
-          { ...STUDENTS[0], student_name: "Walked Out", percentage: 0, has_quiz_ended: false },
-          { ...STUDENTS[0], student_name: "Scored Zero", percentage: 0, has_quiz_ended: true },
+          { ...STUDENTS[0], student_name: "Walked Out", enrollment_user_id: "1", percentage: 0, has_quiz_ended: false },
+          { ...STUDENTS[0], student_name: "Scored Zero", enrollment_user_id: "2", percentage: 0, has_quiz_ended: true },
         ]}
       />
     );
@@ -127,6 +127,40 @@ describe("StudentResultsTable", () => {
     const iZero = names.findIndex((t) => t.includes("Scored Zero"));
     const iOut = names.findIndex((t) => t.includes("Walked Out"));
     expect(iZero).toBeLessThan(iOut);
+  });
+
+  it("gives two Students with the same name their own rank", () => {
+    render(
+      <StudentResultsTable
+        {...props}
+        students={[
+          { ...STUDENTS[0], student_name: "Priya Kumari", enrollment_user_id: "1001", percentage: 80 },
+          { ...STUDENTS[0], student_name: "Priya Kumari", enrollment_user_id: "1002", percentage: 30 },
+          // No id: the row falls back to the name and still gets a rank.
+          { ...STUDENTS[0], student_name: "No Id", enrollment_user_id: null, percentage: 50 },
+        ]}
+      />
+    );
+    const ranks = screen
+      .getAllByRole("row")
+      .slice(1)
+      .map((r) => r.querySelector("td")?.textContent);
+    expect(ranks).toEqual(["01", "02", "03"]);
+  });
+
+  it("expands only the clicked Student when two Students share a name", async () => {
+    render(
+      <StudentResultsTable
+        {...props}
+        students={[
+          { ...STUDENTS[0], student_name: "Priya Kumari", enrollment_user_id: "1001", percentage: 80 },
+          { ...STUDENTS[0], student_name: "Priya Kumari", enrollment_user_id: "1002", percentage: 30 },
+        ]}
+      />
+    );
+    fireEvent.click(screen.getAllByText("Priya Kumari")[0]);
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+    expect(screen.getAllByText("Physics")).toHaveLength(1);
   });
 
   it("shows no badge when submission status is unknown", () => {
@@ -352,6 +386,8 @@ describe("StudentResultsTable", () => {
     ): StudentDeepDiveRow => ({
       ...STUDENTS[0],
       student_name: name,
+      // Each row is a different Student, so each gets its own id.
+      enrollment_user_id: `id-${name}`,
       time_spent_seconds: seconds,
       ...extra,
     });
@@ -423,9 +459,11 @@ describe("StudentResultsTable", () => {
     });
 
     it("widens question rows by one column so they stay aligned", async () => {
-      render(
-        <StudentResultsTable {...props} program="JNV NVS" students={[nvsStudent("Asha Rao", 1530)]} />
-      );
+      // The mocked QUESTIONS belong to STUDENTS[0], so keep its id.
+      const student = nvsStudent("Asha Rao", 1530, {
+        enrollment_user_id: STUDENTS[0].enrollment_user_id,
+      });
+      render(<StudentResultsTable {...props} program="JNV NVS" students={[student]} />);
       fireEvent.click(screen.getByText("Asha Rao"));
       fireEvent.click(screen.getByText("Physics"));
       fireEvent.click(await screen.findByText("Kinematics"));

@@ -639,7 +639,7 @@ describe("StudentTable - expand/collapse", () => {
     expect(screen.getByText("Maharashtra")).toBeInTheDocument();
     expect(screen.getByText("411001")).toBeInTheDocument();
     expect(screen.getByText("PCM")).toBeInTheDocument();
-    expect(screen.getByText("English")).toBeInTheDocument();
+    expect(screen.queryByText("School Medium")).not.toBeInTheDocument();
     expect(screen.getByText("Suresh Kumar")).toBeInTheDocument();
     expect(screen.getByText("Sunita Kumar")).toBeInTheDocument();
     expect(screen.getByText("Ramesh Kumar")).toBeInTheDocument();
@@ -651,7 +651,7 @@ describe("StudentTable - expand/collapse", () => {
     expect(screen.getByText("Guardian")).toBeInTheDocument();
   });
 
-  it("limits an NVS card's expanded details to the Edit Student fields", async () => {
+  it("keeps an NVS card trimmed to the fields Edit Student offers there", async () => {
     const user = userEvent.setup();
     const student = {
       ...makeStudent(),
@@ -662,11 +662,11 @@ describe("StudentTable - expand/collapse", () => {
       g10_board: "CBSE",
       g10_roll_no: "12345678",
       email: "nvs@example.com",
-      school_medium: "English",
       city: "Pune",
       mother_name: "Sunita Kumar",
       guardian_name: "Ramesh Kumar",
       monthly_family_income: "16000",
+      tshirt_size: "L",
     };
     render(
       <StudentTable
@@ -678,19 +678,119 @@ describe("StudentTable - expand/collapse", () => {
 
     await user.click(screen.getByLabelText("Expand"));
 
-    for (const label of ["CWSN", "Father Name", "Annual Family Income", "Board Stream", "G10 board", "Grade 10 Roll no"]) {
+    for (const label of [
+      "Children with Special Needs (CWSN)",
+      "Father Name",
+      "Annual Family Income",
+      "Board Stream",
+      "G10 board",
+      "Grade 10 Roll no",
+    ]) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
     expect(screen.getByText("Yes")).toBeInTheDocument();
-    expect(screen.getByText("Suresh Kumar")).toBeInTheDocument();
     expect(screen.getByText("CBSE")).toBeInTheDocument();
-    expect(screen.getByText("12345678")).toBeInTheDocument();
 
-    for (const value of ["nvs@example.com", "English", "Pune", "Sunita Kumar", "Ramesh Kumar", "16000"]) {
+    // The contact and household details are collected for centres only, so
+    // they are neither editable nor shown here (#431 review).
+    for (const value of [
+      "nvs@example.com",
+      "Pune",
+      "Sunita Kumar",
+      "Ramesh Kumar",
+      "16000",
+    ]) {
       expect(screen.queryByText(value)).not.toBeInTheDocument();
     }
     expect(screen.queryByText("Mother")).not.toBeInTheDocument();
     expect(screen.queryByText("Contact & Address")).not.toBeInTheDocument();
+    expect(screen.queryByText("Uniform")).not.toBeInTheDocument();
+  });
+
+  it("reads G10 board as CBSE or Others, the way Edit Student offers it", async () => {
+    const user = userEvent.setup();
+    render(
+      <StudentTable
+        students={[
+          {
+            ...makeStudent(),
+            g10_board: "RAJASTHAN BOARD OF SECONDARY EDUCATION",
+          },
+        ]}
+        grades={defaultGrades}
+        selectedProgramId={PROGRAM_IDS.COE}
+      />,
+    );
+
+    await user.click(screen.getByLabelText("Expand"));
+
+    expect(screen.getByText("Others")).toBeInTheDocument();
+    expect(
+      screen.queryByText("RAJASTHAN BOARD OF SECONDARY EDUCATION"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("reads a lower-case cbse as Others, as Edit Student does", async () => {
+    const user = userEvent.setup();
+    render(
+      <StudentTable
+        students={[{ ...makeStudent(), g10_board: "cbse" }]}
+        grades={defaultGrades}
+        selectedProgramId={PROGRAM_IDS.COE}
+      />,
+    );
+
+    await user.click(screen.getByLabelText("Expand"));
+
+    expect(screen.getByText("Others")).toBeInTheDocument();
+    expect(screen.queryByText("CBSE")).not.toBeInTheDocument();
+  });
+
+  it("leaves a G10 board nobody entered blank rather than calling it Others", async () => {
+    const user = userEvent.setup();
+    render(
+      <StudentTable
+        students={[{ ...makeStudent(), g10_board: null }]}
+        grades={defaultGrades}
+        selectedProgramId={PROGRAM_IDS.COE}
+      />,
+    );
+
+    await user.click(screen.getByLabelText("Expand"));
+
+    expect(screen.getByText("G10 board").nextElementSibling).toHaveTextContent("—");
+    expect(screen.queryByText("Others")).not.toBeInTheDocument();
+  });
+
+  it("shows the Edit Student fields the card used to leave out (#431)", async () => {
+    const user = userEvent.setup();
+    const student = {
+      ...makeStudent(),
+      physically_handicapped: true,
+      g10_board: "CBSE",
+      tshirt_size: "L",
+      track_pant_size: "M",
+    };
+    render(
+      <StudentTable
+        students={[student]}
+        grades={defaultGrades}
+        selectedProgramId={PROGRAM_IDS.COE}
+      />,
+    );
+
+    await user.click(screen.getByLabelText("Expand"));
+
+    expect(
+      screen.getByText("Children with Special Needs (CWSN)"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Yes")).toBeInTheDocument();
+    expect(screen.getByText("G10 board")).toBeInTheDocument();
+    expect(screen.getByText("CBSE")).toBeInTheDocument();
+    expect(screen.getByText("T-shirt Size")).toBeInTheDocument();
+    expect(screen.getByText("L")).toBeInTheDocument();
+    expect(screen.getByText("Track Pant Size")).toBeInTheDocument();
+    expect(screen.getByText("M")).toBeInTheDocument();
   });
 
   it("hides details after collapsing", async () => {

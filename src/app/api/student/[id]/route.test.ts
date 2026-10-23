@@ -131,7 +131,7 @@ describe("PATCH /api/student/[id]", () => {
         program_id: 64,
         first_name: "  ravi  KUMAR ",
         last_name: "",
-        father_name: " suresh. KUMAR ",
+        father_name: "  K.  Suresh Kumar ",
         gender: "Others",
         category: "Gen-EWS",
         physically_handicapped: true,
@@ -178,7 +178,7 @@ describe("PATCH /api/student/[id]", () => {
       registration_mode_version: "1",
       first_name: "Ravi Kumar",
       last_name: "",
-      father_name: "Suresh Kumar",
+      father_name: "K. Suresh Kumar",
       gender: "Other",
       category: "PWD-EWS",
       physically_handicapped: true,
@@ -186,6 +186,132 @@ describe("PATCH /api/student/[id]", () => {
       stream: "nda",
       g10_board: "Others",
     });
+  });
+
+  /** Re-authorize the next PATCH under a physical-centre program. */
+  function authorizeCentreProgram() {
+    mockRequireStudentEditAccess.mockResolvedValue({
+      ok: true,
+      programId: 1,
+      permission: {} as never,
+      actor: {
+        user_id: 501,
+        email: "pm@example.org",
+        login_type: "google",
+        role: "program_manager",
+      },
+      school: { code: "JNV001", udise_code: "12345678901" },
+    });
+  }
+
+  it("proxies the contact and household details the card shows (#431)", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    authorizeCentreProgram();
+    mockFetch.mockResolvedValue(
+      new Response(JSON.stringify({ status: "updated" }), { status: 200 }),
+    );
+
+    const req = jsonRequest("http://localhost/api/student/100", {
+      method: "PATCH",
+      body: {
+        program_id: 1,
+        email: " ravi@example.com ",
+        whatsapp_phone: "9876543210",
+        address: " 12 Main Road ",
+        city: "Jaipur",
+        district: "Jaipur",
+        state: "Rajasthan",
+        pincode: "302001",
+        father_phone: "9876543211",
+        father_education_level: "grades 6-10",
+        mother_name: " Sunita Devi ",
+        guardian_relation: "Uncle",
+        guardian_phone: "",
+        monthly_family_income: "Rs. 10,000-20,000",
+      },
+    });
+
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(200);
+    const payload = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(payload).toMatchObject({
+      email: "ravi@example.com",
+      whatsapp_phone: "9876543210",
+      address: "12 Main Road",
+      pincode: "302001",
+      father_phone: "9876543211",
+      father_education_level: "Grades 6-10",
+      mother_name: "Sunita Devi",
+      guardian_relation: "Uncle",
+      // A blank clears the stored number.
+      guardian_phone: "",
+      monthly_family_income: "Rs. 10,000-20,000",
+    });
+  });
+
+  it("rejects a malformed household phone or pincode before proxying (#431)", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    authorizeCentreProgram();
+
+    for (const [field, value, message] of [
+      [
+        "father_phone",
+        "98765",
+        "Father Phone must be exactly 10 digits and cannot start with zero",
+      ],
+      [
+        "mother_phone",
+        "0123456789",
+        "Mother Phone must be exactly 10 digits and cannot start with zero",
+      ],
+      [
+        "pincode",
+        "30200",
+        "Pincode must be exactly 6 digits and cannot start with zero",
+      ],
+      [
+        "pincode",
+        "012345",
+        "Pincode must be exactly 6 digits and cannot start with zero",
+      ],
+    ] as const) {
+      mockFetch.mockClear();
+      const req = jsonRequest("http://localhost/api/student/100", {
+        method: "PATCH",
+        body: { program_id: 1, [field]: value },
+      });
+
+      const res = await PATCH(req as never, params);
+
+      // Same 422 the other canonicalisation failures answer with.
+      expect(res.status).toBe(422);
+      expect(await res.json()).toMatchObject({
+        error: message,
+        field_errors: { [field]: message },
+      });
+      expect(mockFetch).not.toHaveBeenCalled();
+    }
+  });
+
+  it("refuses the contact and household details for a JNV NVS edit (#431)", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+
+    const req = jsonRequest("http://localhost/api/student/100", {
+      method: "PATCH",
+      body: { program_id: 64, mother_name: "Sunita Devi", city: "Jaipur" },
+    });
+
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(422);
+    const body = await res.json();
+    expect(body.error).toBe("These details are not collected for JNV NVS Students");
+    expect(body.field_errors).toEqual({
+      mother_name: "These details are not collected for JNV NVS Students",
+      city: "These details are not collected for JNV NVS Students",
+    });
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it("canonicalizes case-insensitive choice labels in an Approved-mode edit payload", async () => {

@@ -1,4 +1,4 @@
-import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
+import { CURRENT_ACADEMIC_YEAR, PMU_PROGRAM_ID } from "@/lib/constants";
 import { UNIFORM_SIZES } from "@/lib/uniform-sizes";
 
 import {
@@ -9,6 +9,14 @@ import {
 
 export const CBSE_BOARD = "CBSE";
 export const G10_BOARD_OPTIONS = [CBSE_BOARD, "Others"] as const;
+
+// The choice a stored G10 board reads as. The DB Service stores Others as null
+// and older rows hold a full board name, so anything but an exact "CBSE" is
+// Others. Edit Student and the roster card both read it through this, so the
+// two can't disagree.
+export function g10BoardChoice(value: string | null | undefined) {
+  return value === CBSE_BOARD ? CBSE_BOARD : "Others";
+}
 
 export const STUDENT_ADDITION_GENDER_OPTIONS = ["Female", "Male", "Other"] as const;
 export const CATEGORY_OPTIONS = ["Gen", "Gen-EWS", "OBC", "SC", "ST"] as const;
@@ -35,6 +43,37 @@ export const ANNUAL_FAMILY_INCOME_OPTIONS = [
   "Rs. 6,00,000-7,00,000",
   "Rs. 7,00,000-8,00,000",
   "More than Rs. 8,00,000",
+] as const;
+
+// Education levels as the Student records already spell them. A handful of
+// older rows hold values outside this list ("10th", "12th"); those stay stored
+// and the Edit select keeps showing them, but they are not offered.
+export const EDUCATION_LEVEL_OPTIONS = [
+  "No formal education",
+  "Grades 1-5",
+  "Grades 6-10",
+  "Grades 11-12",
+  "Certificate course",
+  "Diploma course",
+  "Vocational training",
+  "Graduation (Bachelors)",
+  "Post Graduation (Masters)",
+  "PhD or equivalent degree",
+] as const;
+
+// Monthly bands, the counterpart to ANNUAL_FAMILY_INCOME_OPTIONS above.
+export const MONTHLY_FAMILY_INCOME_OPTIONS = [
+  "Less than Rs. 10,000",
+  "Rs. 10,000-20,000",
+  "Rs. 20,000-30,000",
+  "Rs. 30,000-40,000",
+  "Rs. 40,000-50,000",
+  "Rs. 50,000-60,000",
+  "Rs. 60,000-70,000",
+  "Rs. 70,000-80,000",
+  "Rs. 80,000-90,000",
+  "Rs. 90,000-100,000",
+  "More than Rs. 100,000",
 ] as const;
 
 const STREAM_MAP: Record<string, LmsStudentStream> = {
@@ -83,7 +122,90 @@ interface LmsStudentEditPayload {
   grade?: 11 | 12;
   tshirt_size?: string;
   track_pant_size?: string;
+  // Contact and household details the roster card shows (#431). All optional,
+  // all cleared by sending a blank.
+  email?: string;
+  whatsapp_phone?: string;
+  address?: string;
+  city?: string;
+  district?: string;
+  state?: string;
+  pincode?: string;
+  father_phone?: string;
+  father_profession?: string;
+  father_education_level?: string;
+  mother_name?: string;
+  mother_phone?: string;
+  mother_profession?: string;
+  mother_education_level?: string;
+  guardian_name?: string;
+  guardian_relation?: string;
+  guardian_phone?: string;
+  guardian_profession?: string;
+  guardian_education_level?: string;
+  monthly_family_income?: string;
 }
+
+// Free text, with the column width as the cap so a value can't be rejected by
+// the database after passing here. `address` is a TEXT column; the limit is a
+// sanity bound, not a schema one.
+const CONTACT_TEXT_EDIT_FIELDS = [
+  ["address", "Address", 500],
+  ["city", "City", 255],
+  ["district", "District", 255],
+  ["state", "State", 255],
+  ["father_profession", "Father Profession", 255],
+  ["mother_name", "Mother Name", 255],
+  ["mother_profession", "Mother Profession", 255],
+  ["guardian_name", "Guardian Name", 255],
+  ["guardian_relation", "Guardian Relation", 255],
+  ["guardian_profession", "Guardian Profession", 255],
+] as const;
+
+// Ten digits with no leading zero, the same shape as the Student's own
+// number. Not narrowed to 6-9: a parent's number may still be a landline.
+const CONTACT_PHONE_EDIT_FIELDS = [
+  ["whatsapp_phone", "WhatsApp Number"],
+  ["father_phone", "Father Phone"],
+  ["mother_phone", "Mother Phone"],
+  ["guardian_phone", "Guardian Phone"],
+] as const;
+
+// The contact and household details are collected for physical centres only:
+// JNV NVS PMU did not ask for them, and HQ has not approved collecting family
+// income for the Phone-mode cohort (#296), every member of which is an NVS
+// Student. The Edit form hides them under that program and this refuses them,
+// so a direct PATCH cannot write them either.
+const CENTRE_ONLY_EDIT_FIELDS = [
+  "email",
+  "whatsapp_phone",
+  "address",
+  "city",
+  "district",
+  "state",
+  "pincode",
+  "father_phone",
+  "father_profession",
+  "father_education_level",
+  "mother_name",
+  "mother_phone",
+  "mother_profession",
+  "mother_education_level",
+  "guardian_name",
+  "guardian_relation",
+  "guardian_phone",
+  "guardian_profession",
+  "guardian_education_level",
+  "monthly_family_income",
+] as const satisfies ReadonlyArray<keyof LmsStudentEditPayload>;
+
+// Dropdowns: a blank clears, anything else must be one of the offered values.
+const CHOICE_EDIT_FIELDS = [
+  ["father_education_level", "Father Education Level", EDUCATION_LEVEL_OPTIONS],
+  ["mother_education_level", "Mother Education Level", EDUCATION_LEVEL_OPTIONS],
+  ["guardian_education_level", "Guardian Education Level", EDUCATION_LEVEL_OPTIONS],
+  ["monthly_family_income", "Monthly Family Income", MONTHLY_FAMILY_INCOME_OPTIONS],
+] as const;
 
 const UNIFORM_SIZE_EDIT_FIELDS = [
   ["tshirt_size", "T-shirt Size"],
@@ -106,6 +228,28 @@ const STUDENT_EDITABLE_FIELDS: ReadonlyArray<keyof LmsStudentEditPayload> = [
   "grade",
   "tshirt_size",
   "track_pant_size",
+  // Contact and household details, added with #431 so Edit Student covers
+  // every field the roster card shows.
+  "email",
+  "whatsapp_phone",
+  "address",
+  "city",
+  "district",
+  "state",
+  "pincode",
+  "father_phone",
+  "father_profession",
+  "father_education_level",
+  "mother_name",
+  "mother_phone",
+  "mother_profession",
+  "mother_education_level",
+  "guardian_name",
+  "guardian_relation",
+  "guardian_phone",
+  "guardian_profession",
+  "guardian_education_level",
+  "monthly_family_income",
 ];
 
 export type StudentAdditionUploadColumn = {
@@ -204,6 +348,21 @@ export function digitsOnly(value: string) {
 
 export function lettersAndSpacesOnly(value: string) {
   return value.replace(/[^A-Za-z ]+/g, "");
+}
+
+// Parent names come in any script and carry the punctuation real names do:
+// "सीता देवी", "K. Geetha", "D'Souza", "Ram-Prasad". Hundreds of stored names
+// already hold these, so a narrower filter would rewrite them on any edit.
+// \p{M} keeps the vowel signs Devanagari and other Indic scripts combine with.
+const PARENT_NAME_DISALLOWED = /[^\p{L}\p{M} .'-]+/gu;
+const PARENT_NAME = /^[\p{L}\p{M} .'-]+$/u;
+
+export function parentNameCharactersOnly(value: string) {
+  return value.replace(PARENT_NAME_DISALLOWED, "");
+}
+
+export function isValidParentName(value: string) {
+  return PARENT_NAME.test(value);
 }
 
 export function rollCharactersOnly(value: string) {
@@ -444,6 +603,46 @@ function canonicalUniformSize(
     : editError(field, `${label} is not valid`);
 }
 
+// A contact detail is optional and clearable: "" passes through so the DB
+// Service stores NULL.
+function canonicalOptionalText(
+  value: unknown,
+  field: string,
+  label: string,
+  maxLength: number,
+) {
+  if (typeof value !== "string") return editError(field, `${label} is not valid`);
+  const trimmed = value.trim();
+  if (trimmed.length > maxLength) {
+    return editError(field, `${label} must be ${maxLength} characters or fewer`);
+  }
+  return { ok: true as const, value: trimmed };
+}
+
+function canonicalContactPhone(value: unknown, field: string, label: string) {
+  if (typeof value !== "string") return editError(field, `${label} is not valid`);
+  const trimmed = value.trim();
+  if (!trimmed) return { ok: true as const, value: "" };
+  return /^[1-9]\d{9}$/.test(trimmed)
+    ? { ok: true as const, value: trimmed }
+    : editError(field, `${label} must be exactly 10 digits and cannot start with zero`);
+}
+
+function canonicalOptionalChoice(
+  value: unknown,
+  field: string,
+  label: string,
+  options: readonly string[],
+) {
+  if (typeof value !== "string") return editError(field, `${label} is not valid`);
+  const trimmed = value.trim();
+  if (!trimmed) return { ok: true as const, value: "" };
+  const canonical = canonicalOptionValue(trimmed, options);
+  return canonical
+    ? { ok: true as const, value: canonical }
+    : editError(field, `${label} is not valid`);
+}
+
 function canonicalGenderValue(value: string): string | null {
   return canonicalOptionValue(value, STUDENT_ADDITION_GENDER_OPTIONS) ??
     (value.toLowerCase() === "others" ? "Other" : null);
@@ -561,9 +760,27 @@ function editError(field: string, message: string, otherField?: string) {
 // fallow-ignore-next-line complexity
 export function canonicalizeStudentEditPayload(
   input: Record<string, unknown>,
-  options: { mode?: RegistrationMode; allowPhoneBackfill?: boolean } = {},
+  options: {
+    mode?: RegistrationMode;
+    allowPhoneBackfill?: boolean;
+    /** The program the edit is being made under; NVS gets no centre-only fields. */
+    programId?: number | null;
+  } = {},
 ) {
   const mode = options.mode ?? ACTIVE_REGISTRATION_MODE;
+  if (options.programId != null && Number(options.programId) === PMU_PROGRAM_ID) {
+    const refused = CENTRE_ONLY_EDIT_FIELDS.filter((field) =>
+      Object.prototype.hasOwnProperty.call(input, field),
+    );
+    if (refused.length > 0) {
+      const message = "These details are not collected for JNV NVS Students";
+      return {
+        ok: false as const,
+        error: message,
+        field_errors: Object.fromEntries(refused.map((field) => [field, message])),
+      };
+    }
+  }
   const editableFields = options.allowPhoneBackfill
     ? [...STUDENT_EDITABLE_FIELDS, "pen_number", "g10_roll_no"]
     : STUDENT_EDITABLE_FIELDS;
@@ -686,6 +903,45 @@ export function canonicalizeStudentEditPayload(
     if (!size.ok) return size;
     fields[field] = size.value;
   }
+  for (const [field, label, maxLength] of CONTACT_TEXT_EDIT_FIELDS) {
+    if (fields[field] === undefined) continue;
+    const text = canonicalOptionalText(fields[field], field, label, maxLength);
+    if (!text.ok) return text;
+    fields[field] = text.value;
+  }
+  for (const [field, label] of CONTACT_PHONE_EDIT_FIELDS) {
+    if (fields[field] === undefined) continue;
+    const phone = canonicalContactPhone(fields[field], field, label);
+    if (!phone.ok) return phone;
+    fields[field] = phone.value;
+  }
+  for (const [field, label, options] of CHOICE_EDIT_FIELDS) {
+    if (fields[field] === undefined) continue;
+    const choice = canonicalOptionalChoice(fields[field], field, label, options);
+    if (!choice.ok) return choice;
+    fields[field] = choice.value;
+  }
+  if (fields.email !== undefined) {
+    const email = canonicalOptionalText(fields.email, "email", "Email", 255);
+    if (!email.ok) return email;
+    // Deliberately loose: the only thing worth rejecting is a value that could
+    // not reach a mailbox.
+    if (email.value && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.value)) {
+      return editError("email", "Email is not valid");
+    }
+    fields.email = email.value;
+  }
+  if (fields.pincode !== undefined) {
+    // The digits rule speaks first: a seven-digit pincode is a wrong pincode,
+    // not a string that is one character too long.
+    const pincode = canonicalOptionalText(fields.pincode, "pincode", "Pincode", 255);
+    if (!pincode.ok) return pincode;
+    // No Indian pincode starts with a zero, so one is a typo rather than a place.
+    if (pincode.value && !/^[1-9]\d{5}$/.test(pincode.value)) {
+      return editError("pincode", "Pincode must be exactly 6 digits and cannot start with zero");
+    }
+    fields.pincode = pincode.value;
+  }
 
   if (fields.first_name !== undefined) {
     if (typeof fields.first_name === "string" && fields.first_name.includes(".")) {
@@ -696,9 +952,15 @@ export function canonicalizeStudentEditPayload(
   }
   if (fields.last_name !== undefined) fields.last_name = normalizeName(fields.last_name);
   if (fields.father_name !== undefined) {
-    fields.father_name = normalizeName(fields.father_name);
-    if (fields.father_name && !/^[A-Za-z ]+$/.test(fields.father_name)) {
-      return editError("father_name", "Father Name must contain only letters");
+    // Kept as typed bar the spacing, like Mother and Guardian Name: dropping
+    // dots or re-casing words would rewrite a stored "K. Geetha" or "D'Souza"
+    // whenever the name is edited.
+    fields.father_name = fields.father_name.trim().replace(/\s+/g, " ");
+    if (fields.father_name && !isValidParentName(fields.father_name)) {
+      return editError(
+        "father_name",
+        "Father Name must contain only letters, spaces, dots, apostrophes and hyphens",
+      );
     }
   }
   if (fields.physically_handicapped && fields.category) {
