@@ -28,7 +28,9 @@ export default function PageHeader({
   return (
     <header className="relative bg-bg-card border-b border-border shadow-sm">
       <div className={containerClassName}>
-        <div className="flex items-center justify-between gap-4">
+        {/* On a phone, actions that don't fit beside the title wrap below it instead of
+            squeezing the title and subtitle until they break mid-word. */}
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 sm:flex-nowrap">
           <div className="flex items-center gap-3 min-w-0">
             {backHref && (
               <Link href={backHref} className="text-text-muted hover:text-text-primary shrink-0 p-1 -m-1">

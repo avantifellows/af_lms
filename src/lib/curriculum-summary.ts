@@ -1,1443 +1,1300 @@
-import { checkCurriculumSchema, type CurriculumSchemaUnavailable } from "./curriculum-schema";
-import { EXAM_TRACKS, isExamTrack } from "./exam-tracks";
-import { query } from "./db";
-import { PHYSICAL_CENTRE_PROGRAM_IDS, getProgramContextSync, type UserPermission } from "./permissions";
+// Curriculum Summary v2 (#417): one row per Summary Class (Centre + Grade) measured against its
+// Curriculum Plan, and the chapter timeline for one of those classes. One set-based SQL pass
+// loads the whole bounded row set for the user's scope (or one Centre of it); classification,
+// Due / Done / Behind, Tests overdue, sort and pagination are computed here with
+// the shared rules in `curriculum-plan-rules`. Chapter Test sessions come from
+// `curriculum-chapter-tests`.
+
 import {
-  BIOLOGY_INCOMPATIBLE_EXAM_TRACKS,
-  MATHS_INCOMPATIBLE_EXAM_TRACKS,
-} from "./curriculum-subject-track";
-import type { ExamTrack } from "@/types/curriculum";
+  checkCurriculumPlansSchema,
+  checkCurriculumSchema,
+  type CurriculumSchemaUnavailable,
+} from "./curriculum-schema";
+import { loadChapterTestSessions } from "./curriculum-chapter-tests";
+import { chapterSharesCodeSql } from "./chapter-siblings";
+import { ELIGIBLE_CENTRE_SQL, ELIGIBLE_CENTRE_TRACKS_FROM_SQL } from "./curriculum-eligible-centres";
+import {
+  academicYearForDate,
+  academicYearStartDate,
+  behindPill,
+  chapterProgress,
+  chapterStatus,
+  chapterTestStatus,
+  classifySummaryClass,
+  CONTENT_EXAM_TRACKS,
+  hoursWindowStart,
+  isAcademicYearDate,
+  planStatusAsOf,
+  primaryExamTrackForChapter,
+  subjectGroupProgress,
+  subjectGroupsForClass,
+  subjectGroupsForSubject,
+  SUBJECT_GROUPS,
+  type BehindPillTone,
+  type ChapterStatus,
+  type ChapterTestStatus,
+  type HoursWindow,
+  type SubjectGroup,
+} from "./curriculum-plan-rules";
+import { query } from "./db";
+import { EXAM_TRACKS, formatExamTrack, type ExamTrack } from "./exam-tracks";
+import {
+  PHYSICAL_CENTRE_PROGRAM_IDS,
+  getProgramContextSync,
+  type UserPermission,
+} from "./permissions";
+
+export const CURRICULUM_SUMMARY_GRADES = [11, 12] as const;
+export type CurriculumSummaryGrade = (typeof CURRICULUM_SUMMARY_GRADES)[number];
+
+// Fixed pill columns; "Mathematics" Chapters count under Maths.
+export const CURRICULUM_SUMMARY_SUBJECTS = ["Physics", "Chemistry", "Maths", "Biology"] as const;
+export type CurriculumSummarySubject = (typeof CURRICULUM_SUMMARY_SUBJECTS)[number];
+
+const PAGE_SIZES = [10, 20, 50, 100];
+const DEFAULT_PAGE_SIZE = 20;
 
 export type CurriculumSummarySortKey =
-  | "school"
+  | "centre"
   | "program"
-  | "grade"
-  | "subject"
-  | "exam_track"
-  | "completed"
-  | "prescribed"
-  | "delta"
-  | "actual"
-  | "flagged";
-export type CurriculumSummarySortDirection = "asc" | "desc";
-export type CurriculumSummaryDatePreset =
-  | "today"
-  | "last_7_days"
-  | "last_30_days"
-  | "current_academic_year"
-  | "all"
-  | "custom";
+  | "tracks"
+  | "region"
+  | Lowercase<CurriculumSummarySubject>
+  | Lowercase<SubjectGroup>
+  | "plan";
 
-export interface CurriculumSummaryFilters {
-  schools: string[];
-  programs: number[];
-  grades: number[];
-  subjects: number[];
-  examTracks: ExamTrack[];
-  regions: string[];
-  preset: CurriculumSummaryDatePreset;
-  from?: string;
-  to?: string;
-  flagged: boolean;
-  forceEmpty: boolean;
+export type CurriculumSummarySortDirection = "asc" | "desc";
+
+// A sortable table's `?sort=&dir=`: the column and its direction.
+export interface ColumnSort<K extends string> {
+  key: K;
+  dir: CurriculumSummarySortDirection;
 }
 
-export interface CurriculumSummaryParams {
-  actorEmail: string;
-  permission: UserPermission;
-  filters: CurriculumSummaryFilters;
-  sort: CurriculumSummarySortKey;
-  dir: CurriculumSummarySortDirection;
+export type CurriculumSummarySort = ColumnSort<CurriculumSummarySortKey>;
+
+export interface CurriculumSummaryQuery {
+  // Program ids to list; [] = every Program. Ids that aren't Program options are ignored.
+  programIds: number[];
+  // Narrows the user's scoped rows; it never widens scope.
+  regions: string[];
+  // Centre ids to list; [] = every Centre. Ids that aren't Centre options are ignored.
+  centreIds: number[];
+  grade: CurriculumSummaryGrade;
+  asOf: string;
+  // Keeps rows with PCM or PCB Behind ≥ 1.
+  onlyBehind: boolean;
+  // A column header's sort; null = the default worst-first order.
+  sort: CurriculumSummarySort | null;
   page: number;
   pageSize: number;
-  todayIstDate: string;
 }
 
-export interface CurriculumSummarySchoolOption {
-  code: string;
-  name: string;
-  region: string | null;
-  state: string | null;
-  district: string | null;
+type SearchParamValue = string | string[] | undefined;
+
+function firstValue(value: SearchParamValue): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
 }
 
-export interface CurriculumSummaryProgramOption {
-  id: number;
-  name: string;
+// `programs`, `regions` and `centres` accept repeated keys (the filter form) and comma-separated
+// values.
+function parseList(value: SearchParamValue): string[] {
+  const values = Array.isArray(value) ? value : value ? [value] : [];
+  return [...new Set(values.flatMap((item) => item.split(",")).map((item) => item.trim()))].filter(
+    Boolean
+  );
 }
 
-export interface CurriculumSummarySubjectOption {
-  id: number;
-  name: string;
+// Unknown or removed params (subjects, tracks, date range, flags) are ignored, and so
+// is an unknown sort column; an unknown direction falls back to the column's first-click one.
+export function normalizeCurriculumSummarySearchParams(
+  searchParams: Record<string, SearchParamValue>,
+  todayIstDate: string
+): CurriculumSummaryQuery {
+  const page = Number.parseInt(firstValue(searchParams.page) ?? "1", 10);
+  const pageSize = Number.parseInt(firstValue(searchParams.limit) ?? String(DEFAULT_PAGE_SIZE), 10);
+  const asOf = firstValue(searchParams.as_of);
+  return {
+    programIds: parseIds(searchParams.programs),
+    regions: parseList(searchParams.regions),
+    centreIds: parseIds(searchParams.centres),
+    grade: firstValue(searchParams.grade) === "12" ? 12 : 11,
+    // Invalid dates, and years too far out to name an academic year (0999, 9999), mean today.
+    asOf: asOf && isAcademicYearDate(asOf) ? asOf : todayIstDate,
+    onlyBehind: ["1", "true"].includes(firstValue(searchParams.only_behind) ?? ""),
+    sort: parseSort(firstValue(searchParams.sort), firstValue(searchParams.dir)),
+    page: Number.isFinite(page) && page > 0 ? page : 1,
+    pageSize: PAGE_SIZES.includes(pageSize) ? pageSize : DEFAULT_PAGE_SIZE,
+  };
 }
 
-export interface CurriculumSummaryFilterAvailability {
-  schoolCode: string;
-  programId: number;
-  programName: string;
-  grade: number;
-  subjectId: number | null;
-  subjectName: string | null;
-  examTrack: ExamTrack;
+// Positive whole ids only.
+function parseIds(value: SearchParamValue): number[] {
+  return parseList(value).filter((id) => /^[1-9]\d*$/.test(id)).map(Number);
 }
 
-export interface CurriculumSummaryFilterOptions {
-  schools: CurriculumSummarySchoolOption[];
-  programs: CurriculumSummaryProgramOption[];
-  grades: number[];
-  subjects: CurriculumSummarySubjectOption[];
-  examTracks: ExamTrack[];
-  regions: string[];
-  availability?: CurriculumSummaryFilterAvailability[];
+function parseSort(key: string | undefined, dir: string | undefined): CurriculumSummarySort | null {
+  return parseColumnSort(SORT_VALUES, defaultSortDirection, key, dir);
 }
 
-export interface CurriculumSummaryStats {
-  totalRows: number;
-  flaggedRows: number;
-  avgCompletionPercent: number | null;
-  avgPrescribedPercent: number | null;
-  actualMinutes: number;
-  prescribedMinutes: number;
+// An unknown column is no sort; an unknown direction is the column's first-click one.
+function parseColumnSort<K extends string>(
+  columns: Record<K, unknown>,
+  firstDirection: (key: K) => CurriculumSummarySortDirection,
+  key: string | undefined,
+  dir: string | undefined
+): ColumnSort<K> | null {
+  if (key === undefined || !Object.prototype.hasOwnProperty.call(columns, key)) return null;
+  const column = key as K;
+  return { key: column, dir: dir === "asc" || dir === "desc" ? dir : firstDirection(column) };
+}
+
+export type CurriculumSummaryRowKind =
+  | "plan"
+  | "no_plan"
+  | "setup_error"
+  | "no_content"
+  | "configuration_error";
+
+export interface CurriculumSummarySubjectProgress {
+  due: number;
+  done: number;
+  behind: number;
+  tone: BehindPillTone;
+  label: string;
 }
 
 export interface CurriculumSummaryRow {
-  rowKind: "normal" | "unavailable" | "configuration_error";
-  rowKey: string;
+  centreId: number;
+  centreName: string;
   schoolCode: string;
   schoolName: string;
   region: string | null;
-  state: string | null;
-  district: string | null;
   programId: number;
   programName: string;
-  grade: number | null;
-  subjectId: number | null;
-  subjectName: string | null;
-  examTrack: ExamTrack | null;
+  tracksLabel: string;
+  kind: CurriculumSummaryRowKind;
   explanation: string | null;
-  completedChapters: number;
-  totalConfiguredChapters: number;
-  prescribedChapters: number;
-  actualMinutes: number;
-  prescribedMinutes: number;
-  deltaPercent: number | null;
-  flagged: boolean;
-  flagReasons: string[];
+  // Set only for rows measured against an Active (or Closed) plan.
+  plan: { id: number; title: string; closed: boolean } | null;
+  // null = "—": no in-syllabus Chapter of that subject for the class's tracks.
+  subjects: Record<CurriculumSummarySubject, CurriculumSummarySubjectProgress | null> | null;
+  // PCM Behind and PCB Behind for plan rows, with done/due like the subject pills; null = "—":
+  // the group doesn't apply to the class.
+  subjectGroups: Record<SubjectGroup, CurriculumSummarySubjectProgress | null> | null;
+  // Plan Chapters whose Chapter Test Status is Overdue; 0 for rows without a plan. No longer a
+  // column, but it still breaks ties in the default worst-first order.
+  testsOverdue: number;
+  // Tests overdue per pill subject, shown under its pill; plan rows only. They add up to
+  // `testsOverdue` when every Chapter is in a pill subject.
+  testsOverdueBySubject: Record<CurriculumSummarySubject, number> | null;
+  // Set only for No plan rows: Chapters with a Conducted Chapter Test.
+  testsConducted: number | null;
 }
 
-export interface CurriculumSummaryChapterRow {
-  parentRowKey: string;
-  chapterId: number;
-  chapterCode: string;
-  chapterName: string;
-  coverageSequence: number;
-  completedCount: 0 | 1;
-  prescribedCount: 0 | 1;
-  actualMinutes: number;
-  prescribedMinutes: number;
-  classCancellationCount: number;
-  doubtSolvingMinutes: number;
-  deltaPercent: number | null;
-  flagged: boolean;
-  flagReasons: string[];
+export interface CurriculumSummaryFilterOption {
+  id: number;
+  name: string;
 }
 
 export type CurriculumSummaryResult =
   | {
       ok: true;
-      rowCountGuardTripped?: false;
-      estimatedRowCount?: number;
-      activeFilters: CurriculumSummaryFilters;
-      filterOptions: CurriculumSummaryFilterOptions;
-      stats: CurriculumSummaryStats;
+      // Each filter's options follow the filters before it (Program, Region, Centre), never Only
+      // behind: Programs of every scoped row for the Grade, A–Z; Regions of the rows in the chosen
+      // Programs; Centres of the rows in the chosen Programs and Regions, A–Z.
+      programOptions: CurriculumSummaryFilterOption[];
+      regionOptions: string[];
+      centreOptions: CurriculumSummaryFilterOption[];
+      // The requested Program and Centre ids that are options, in option order.
+      selectedProgramIds: number[];
+      selectedCentreIds: number[];
       rows: CurriculumSummaryRow[];
-      chapterRowsByParentKey: Record<string, CurriculumSummaryChapterRow[]>;
-      totalRowCount: number;
-      currentPage: number;
-      totalPages: number;
-      sort: CurriculumSummarySortKey;
-      dir: CurriculumSummarySortDirection;
-    }
-  | {
-      ok: true;
-      rowCountGuardTripped: true;
-      estimatedRowCount: number;
-      activeFilters: CurriculumSummaryFilters;
-      filterOptions: CurriculumSummaryFilterOptions;
-      stats: CurriculumSummaryStats;
-      rows: [];
-      chapterRowsByParentKey: Record<string, CurriculumSummaryChapterRow[]>;
-      totalRowCount: 0;
-      currentPage: number;
-      totalPages: 0;
-      sort: CurriculumSummarySortKey;
-      dir: CurriculumSummarySortDirection;
+      pagination: { page: number; pageSize: number; totalRows: number; totalPages: number };
     }
   | CurriculumSchemaUnavailable;
 
-interface OptionsQueryRow {
-  schools: unknown;
-  programs: unknown;
-  grades: unknown;
-  subjects: unknown;
-  exam_tracks: unknown;
-  regions: unknown;
-  availability: unknown;
+interface SummaryChapter {
+  chapterId: number;
+  code: string;
+  name: string;
+  subject: string;
+  // Lowest coverage sequence across the class's tracks: syllabus order within a subject.
+  sequence: number;
+  tracks: string[];
+  // Exam Track → prescribed lecture minutes, for the tracks whose syllabus has the Chapter.
+  prescribedMinutes: Record<string, number>;
+  dueDate: string | null;
+  testDate: string | null;
+  completedOn: string | null;
 }
 
 interface SummaryQueryRow {
-  row_kind?: "normal" | "unavailable" | "configuration_error";
-  configuration_error?: string | null;
-  total_count: string | number | null;
+  centre_id: string | number;
+  centre_name: string;
   school_code: string;
   school_name: string | null;
   region: string | null;
-  state: string | null;
-  district: string | null;
   program_id: string | number;
   program_name: string;
-  grade: string | number | null;
-  subject_id: string | number | null;
-  subject_name: unknown;
-  exam_track: ExamTrack | null;
-  completed_chapters: string | number | null;
-  total_configured_chapters: string | number | null;
-  prescribed_chapters: string | number | null;
-  actual_minutes: string | number | null;
-  prescribed_minutes: string | number | null;
-  delta_percent: string | number | null;
-  flagged: boolean | string | null;
-  flag_reasons: unknown;
-}
-
-interface ChapterQueryRow {
-  parent_row_key: string;
-  chapter_id: string | number;
-  chapter_code: string | null;
-  chapter_name: unknown;
-  coverage_sequence: string | number | null;
-  completed_count: string | number | null;
-  prescribed_count: string | number | null;
-  actual_minutes: string | number | null;
-  prescribed_minutes: string | number | null;
-  class_cancellation_count: string | number | null;
-  doubt_solving_minutes: string | number | null;
-  delta_percent: string | number | null;
-  flagged: boolean | string | null;
-  flag_reasons: unknown;
-}
-
-interface StatsQueryRow {
-  total_rows: string | number | null;
-  flagged_rows: string | number | null;
-  completed_chapters: string | number | null;
-  total_configured_chapters: string | number | null;
-  prescribed_chapters: string | number | null;
-  actual_minutes: string | number | null;
-  prescribed_minutes: string | number | null;
-}
-
-interface GuardQueryRow {
-  estimated_rows: string | number | null;
-}
-
-// The summary spans every physical-centre program (all non-NVS programs), so
-// Punjab/EMRS/RGNV curriculum rows appear rather than being restricted to JNV 1/2.
-const CURRICULUM_PROGRAM_IDS = PHYSICAL_CENTRE_PROGRAM_IDS;
-const SORT_SQL: Record<CurriculumSummarySortKey, string> = {
-  school: "school_name",
-  program: "program_order",
-  grade: "grade",
-  subject: "subject_name",
-  exam_track: "exam_track",
-  completed: "completed_percent",
-  prescribed: "prescribed_percent",
-  delta: "delta_percent",
-  actual: "actual_minutes",
-  flagged: "flagged",
-};
-
-export function normalizeCurriculumSummarySearchParams(
-  searchParams: Record<string, string | undefined>,
-  todayIstDate: string
-): CurriculumSummaryFilters {
-  const manualFrom = isDateString(searchParams.from) ? searchParams.from : undefined;
-  const manualTo = isDateString(searchParams.to) ? searchParams.to : undefined;
-  const requestedPreset = normalizePreset(searchParams.preset);
-  const preset =
-    requestedPreset ?? (manualFrom || manualTo ? "custom" : "current_academic_year");
-  const presetRange = resolvePresetDateRange(preset, todayIstDate);
-  const from = preset === "all" ? undefined : presetRange?.from ?? manualFrom;
-  const to = preset === "all" ? undefined : presetRange?.to ?? manualTo;
-
-  return {
-    schools: parseStringList(searchParams.schools, isSchoolCode),
-    programs: parseNumberList(searchParams.programs),
-    grades: parseNumberList(searchParams.grades),
-    subjects: parseNumberList(searchParams.subjects),
-    examTracks: parseStringList(searchParams.exam_tracks, isExamTrack),
-    regions: parseStringList(searchParams.regions),
-    preset,
-    from,
-    to,
-    flagged: searchParams.flagged === "true" || searchParams.flagged === "1",
-    forceEmpty: Boolean(from && to && from > to),
-  };
-}
-
-export function normalizeCurriculumSummarySort(
-  sort?: string,
-  dir?: string
-): { sort: CurriculumSummarySortKey; dir: CurriculumSummarySortDirection } {
-  const normalizedSort = isSortKey(sort) ? sort : "flagged";
-  return {
-    sort: normalizedSort,
-    dir: dir === "asc" ? "asc" : "desc",
-  };
-}
-
-export function normalizeCurriculumSummaryPage(page?: string): number {
-  const parsed = Number.parseInt(page ?? "1", 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
-}
-
-export function normalizeCurriculumSummaryPageSize(limit?: string): number {
-  const parsed = Number.parseInt(limit ?? "20", 10);
-  return [10, 20, 50, 100].includes(parsed) ? parsed : 20;
+  centre_count: string | number;
+  mapped_tracks: string[];
+  plan_id: string | number | null;
+  plan_title: string | null;
+  plan_status: "draft" | "active" | null;
+  plan_closure_date: string | null;
+  chapters: unknown;
 }
 
 export async function getCurriculumSummary(
-  params: CurriculumSummaryParams
+  permission: UserPermission,
+  params: CurriculumSummaryQuery
 ): Promise<CurriculumSummaryResult> {
-  void params.actorEmail;
-  void params.todayIstDate;
+  const schema = await checkSummarySchemas();
+  if (!schema.ok) return schema;
 
-  const schemaStatus = await checkCurriculumSchema();
-  if (!schemaStatus.ok) {
-    return schemaStatus;
-  }
-
-  const page = Math.max(1, params.page);
-  const pageSize = Math.max(1, params.pageSize);
-  const commonParams = buildCommonQueryParams(params.permission, params.filters);
-  const optionsRows = await query<OptionsQueryRow>(buildOptionsSql(), commonParams);
-  const filterOptions = mapFilterOptions(optionsRows[0]);
-
-  if (params.filters.forceEmpty) {
-    return {
-      ok: true,
-      activeFilters: params.filters,
-      filterOptions,
-      stats: emptyStats(),
-      rows: [],
-      chapterRowsByParentKey: {},
-      totalRowCount: 0,
-      currentPage: page,
-      totalPages: 0,
-      sort: params.sort,
-      dir: params.dir,
-    };
-  }
-
-  const guardRows = await query<GuardQueryRow>(buildRowCountGuardSql(), commonParams);
-  const estimatedRowCount = numberFromDb(guardRows[0]?.estimated_rows);
-  if (estimatedRowCount > 10000) {
-    return {
-      ok: true,
-      rowCountGuardTripped: true,
-      estimatedRowCount,
-      activeFilters: params.filters,
-      filterOptions,
-      stats: emptyStats(),
-      rows: [],
-      chapterRowsByParentKey: {},
-      totalRowCount: 0,
-      currentPage: page,
-      totalPages: 0,
-      sort: params.sort,
-      dir: params.dir,
-    };
-  }
-
-  const metricParams = buildMetricQueryParams(commonParams, params.filters);
-  const statsRows = await query<StatsQueryRow>(buildStatsSql(), metricParams);
-  const stats = mapStats(statsRows[0]);
-  const totalRowCount = stats.totalRows;
-  const totalPages = totalRowCount === 0 ? 0 : Math.ceil(totalRowCount / pageSize);
-  const currentPage = totalPages === 0 ? page : Math.min(page, totalPages);
-  const offset = (currentPage - 1) * pageSize;
-  const rowRows = await query<SummaryQueryRow>(
-    buildRowsSql(params.sort, params.dir),
-    [...metricParams, pageSize, offset]
-  );
-  const chapterRows = rowRows.length
-    ? await query<ChapterQueryRow>(
-        buildChapterRowsSql(params.sort, params.dir),
-        [...metricParams, pageSize, offset]
-      )
-    : [];
+  const scopedRows = (await loadSummaryClasses(permission, params)).map(buildSummaryRow);
+  const { rows: filteredRows, ...filters } = applySummaryFilters(scopedRows, params);
+  const rows = sortSummaryRows(filteredRows, params.sort);
+  const listedRows = params.onlyBehind ? rows.filter((row) => worstGroupBehind(row) >= 1) : rows;
+  const { page, totalPages, pageRows } = paginate(listedRows, params.page, params.pageSize);
 
   return {
     ok: true,
-    activeFilters: params.filters,
-    filterOptions,
-    stats,
-    rows: rowRows.map(mapSummaryRow),
-    chapterRowsByParentKey: mapChapterRowsByParentKey(chapterRows),
-    totalRowCount,
-    currentPage,
-    totalPages,
-    sort: params.sort,
-    dir: params.dir,
+    ...filters,
+    rows: pageRows,
+    pagination: { page, pageSize: params.pageSize, totalRows: listedRows.length, totalPages },
   };
 }
 
-export function buildCommonQueryParams(
+// Both the Summary and the timeline need the curriculum and Curriculum Plan schemas.
+async function checkSummarySchemas(): Promise<{ ok: true } | CurriculumSchemaUnavailable> {
+  const curriculum = await checkCurriculumSchema();
+  if (!curriculum.ok) return curriculum;
+  return checkCurriculumPlansSchema();
+}
+
+// Program, Region and Centre narrow the user's scoped rows in that order; they never widen scope.
+// Each filter's options come from the rows the filters before it leave. A Program or Centre id
+// that isn't an option (out of scope, another Grade, Program or Region, or gone) is ignored, and
+// with none left that filter lists every option's rows.
+function applySummaryFilters(scopedRows: CurriculumSummaryRow[], params: CurriculumSummaryQuery) {
+  const programs = filterByOption(
+    scopedRows,
+    (row) => ({ id: row.programId, name: row.programName }),
+    params.programIds
+  );
+  const regionOptions = [
+    ...new Set(programs.rows.flatMap((row) => (row.region ? [row.region] : []))),
+  ].sort();
+  const regionRows = programs.rows.filter(
+    (row) => params.regions.length === 0 || params.regions.includes(row.region ?? "")
+  );
+  const centres = filterByOption(
+    regionRows,
+    (row) => ({ id: row.centreId, name: row.centreName }),
+    params.centreIds
+  );
+  return {
+    rows: centres.rows,
+    programOptions: programs.options,
+    regionOptions,
+    centreOptions: centres.options,
+    selectedProgramIds: programs.selected,
+    selectedCentreIds: centres.selected,
+  };
+}
+
+// The rows' distinct options A–Z, the requested ids among them, and the rows they pick (every row
+// when none is picked).
+function filterByOption(
+  rows: CurriculumSummaryRow[],
+  optionOf: (row: CurriculumSummaryRow) => CurriculumSummaryFilterOption,
+  requested: number[]
+) {
+  const options = [...new Map(rows.map((row) => [optionOf(row).id, optionOf(row)])).values()].sort(
+    (a, b) => a.name.localeCompare(b.name) || a.id - b.id
+  );
+  const selected = options.filter((option) => requested.includes(option.id)).map((option) => option.id);
+  return {
+    options,
+    selected,
+    rows: selected.length > 0 ? rows.filter((row) => selected.includes(optionOf(row).id)) : rows,
+  };
+}
+
+// A page past the end shows the last page; no rows is page 1 of 0.
+function paginate<T>(rows: T[], requestedPage: number, pageSize: number) {
+  const totalPages = Math.ceil(rows.length / pageSize);
+  const page = totalPages === 0 ? 1 : Math.min(requestedPage, totalPages);
+  const offset = (page - 1) * pageSize;
+  return { page, totalPages, pageRows: rows.slice(offset, offset + pageSize) };
+}
+
+interface SummaryClassData {
+  raw: SummaryQueryRow;
+  chapters: SummaryChapter[];
+  // Chapter id → Chapter Test session end times for this Centre's class.
+  chapterTestSessions: Map<number, (string | null)[]>;
+  asOf: string;
+}
+
+// Every Summary Class in the user's scope for the Grade, or only `centreId`'s when given (none
+// when that Centre is out of scope or maps no Exam Track for the Grade).
+async function loadSummaryClasses(
   permission: UserPermission,
-  filters: CurriculumSummaryFilters
-): unknown[] {
-  // Scoped-universe SQL ($2) ORs a school-code match with the ($3) region match.
-  // Feed the resolved scope set into $2 so seat-derived schools are included:
-  // for level 1 it already unions explicit school_codes with seats; for level 2
-  // it carries seats (regions still flow through $3). Falls back to raw
-  // school_codes when scope isn't resolved, preserving pre-seat behaviour. This
-  // is what keeps seated staff in the summary once strict-exclusivity clears
-  // their explicit school_codes.
-  const scopeSchools =
-    permission.scope && permission.scope.schools !== "all"
-      ? [...permission.scope.schools]
-      : permission.level === 1
-        ? permission.school_codes ?? []
-        : null;
+  params: { grade: CurriculumSummaryGrade; asOf: string; centreId?: number }
+): Promise<SummaryClassData[]> {
+  const academicYear = academicYearForDate(params.asOf);
+  const rawRows = await query<SummaryQueryRow>(SUMMARY_SQL, [
+    ...scopeParams(permission),
+    params.grade,
+    academicYear,
+    academicYearStartDate(academicYear),
+    params.asOf,
+    params.centreId ?? null,
+    CONTENT_EXAM_TRACKS,
+  ]);
+  const chapterTests = await loadChapterTestSessions({
+    centreIds: rawRows.map((row) => Number(row.centre_id)),
+    grade: params.grade,
+    academicYear,
+    asOf: params.asOf,
+  });
+  return rawRows.map((raw) => ({
+    raw,
+    chapters: parseChapters(raw.chapters),
+    chapterTestSessions: chapterTests.get(Number(raw.centre_id)) ?? new Map(),
+    asOf: params.asOf,
+  }));
+}
+
+// $1 all schools, $2 school codes (explicit ∪ seat scope), $3 regions, $4 physical-centre
+// Programs, $5 Admin (all Programs), $6 the user's Programs.
+function scopeParams(permission: UserPermission): unknown[] {
+  const schools = scopedSchoolCodes(permission);
   return [
     permission.level === 3,
-    scopeSchools && scopeSchools.length > 0 ? scopeSchools : null,
+    schools.length > 0 ? schools : null,
     permission.level === 2 ? permission.regions ?? [] : null,
-    CURRICULUM_PROGRAM_IDS,
+    PHYSICAL_CENTRE_PROGRAM_IDS,
     permission.role === "admin",
     getProgramContextSync(permission).programIds,
-    filters.schools.length ? filters.schools : null,
-    filters.programs.length ? filters.programs : null,
-    filters.grades.length ? filters.grades : null,
-    filters.subjects.length ? filters.subjects : null,
-    filters.examTracks.length ? filters.examTracks : null,
-    filters.regions.length ? filters.regions : null,
-    [...BIOLOGY_INCOMPATIBLE_EXAM_TRACKS],
-    [...MATHS_INCOMPATIBLE_EXAM_TRACKS],
   ];
 }
 
-function buildMetricQueryParams(
-  commonParams: unknown[],
-  filters: CurriculumSummaryFilters
-): unknown[] {
-  return [
-    ...commonParams,
-    filters.from ?? null,
-    filters.to ?? null,
-    filters.flagged,
-  ];
-}
-
-function buildScopedUniverseSql(): string {
-  return `
-    WITH scoped_schools AS (
-      SELECT s.id, s.code, s.name, s.region, s.state, s.district
-      FROM school s
-      WHERE s.af_school_category = 'JNV'
-        AND (
-          $1::boolean
-          OR ($2::text[] IS NOT NULL AND s.code = ANY($2::text[]))
-          OR ($3::text[] IS NOT NULL AND s.region = ANY($3::text[]))
-        )
-    ),
-    scoped_school_programs AS (
-      SELECT
-        ss.code AS school_code,
-        ss.id AS school_id,
-        ss.name AS school_name,
-        ss.region,
-        ss.state,
-        ss.district,
-        p.id AS program_id,
-        p.name AS program_name,
-        array_position($4::int[], p.id) AS program_order
-      FROM scoped_schools ss
-      JOIN program p ON p.id = ANY($4::int[])
-      WHERE ($5::boolean OR p.id = ANY($6::int[]))
-    ),
-    centre_resolution AS (
-      SELECT
-        ssp.*,
-        COUNT(centres.id)::int AS centre_count,
-        MIN(centres.id)::int AS resolved_centre_id
-      FROM scoped_school_programs ssp
-      LEFT JOIN centres
-        ON centres.school_id = ssp.school_id
-       AND centres.program_id = ssp.program_id
-       AND centres.is_active = true
-       AND centres.is_physical = true
-      GROUP BY
-        ssp.school_code,
-        ssp.school_id,
-        ssp.school_name,
-        ssp.region,
-        ssp.state,
-        ssp.district,
-        ssp.program_id,
-        ssp.program_name,
-        ssp.program_order
-    ),
-    configured_rows AS (
-      SELECT *
-      FROM (
-        SELECT DISTINCT
-          g.id AS grade_id,
-          g.number AS grade,
-          s.id AS subject_id,
-          COALESCE(
-            (
-              SELECT item->>'subject'
-              FROM jsonb_array_elements(s.name::jsonb) item
-              WHERE item->>'lang_code' = 'en'
-              LIMIT 1
-            ),
-            'Unknown subject'
-          ) AS subject_name,
-          cfg.exam_track
-        FROM lms_chapter_exam_configs cfg
-        JOIN chapter ch ON ch.id = cfg.chapter_id
-        JOIN grade g ON g.id = ch.grade_id
-        JOIN subject s ON s.id = ch.subject_id
-        WHERE cfg.is_in_syllabus = true
-      ) configured
-      WHERE NOT (
-        (LOWER(configured.subject_name) = 'biology' AND configured.exam_track = ANY($13::text[]))
-        OR (
-          LOWER(configured.subject_name) IN ('maths', 'mathematics')
-          AND configured.exam_track = ANY($14::text[])
-        )
-      )
-    ),
-    mapped_rows AS (
-      SELECT
-        cr.school_code,
-        cr.school_name,
-        cr.region,
-        cr.state,
-        cr.district,
-        cr.program_id,
-        cr.program_name,
-        cr.program_order,
-        CASE WHEN configured.grade_id IS NULL THEN 'unavailable' ELSE 'normal' END AS row_kind,
-        NULL::text AS configuration_error,
-        grade.id AS grade_id,
-        grade.number AS grade,
-        configured.subject_id,
-        configured.subject_name,
-        mapping.exam_track_code AS exam_track
-      FROM centre_resolution cr
-      JOIN centre_exam_tracks mapping
-        ON mapping.centre_id = cr.resolved_centre_id
-       AND cr.centre_count = 1
-      JOIN grade ON grade.id = mapping.grade_id
-      LEFT JOIN configured_rows configured
-        ON configured.grade_id = mapping.grade_id
-       AND configured.exam_track = mapping.exam_track_code
-    ),
-    configuration_error_rows AS (
-      SELECT
-        cr.school_code,
-        cr.school_name,
-        cr.region,
-        cr.state,
-        cr.district,
-        cr.program_id,
-        cr.program_name,
-        cr.program_order,
-        'configuration_error'::text AS row_kind,
-        CASE
-          WHEN cr.centre_count = 0
-            THEN 'No active physical Centre is configured for this School and Program'
-          ELSE 'Multiple active physical Centres are configured for this School and Program'
-        END AS configuration_error,
-        NULL::int AS grade_id,
-        NULL::int AS grade,
-        NULL::int AS subject_id,
-        NULL::text AS subject_name,
-        NULL::text AS exam_track
-      FROM centre_resolution cr
-      WHERE cr.centre_count <> 1
-    ),
-    expected_rows AS (
-      SELECT * FROM mapped_rows
-      UNION ALL
-      SELECT * FROM configuration_error_rows
-    ),
-    filtered_rows AS (
-      SELECT *
-      FROM expected_rows
-      WHERE ($7::text[] IS NULL OR school_code = ANY($7::text[]))
-        AND ($8::int[] IS NULL OR program_id = ANY($8::int[]))
-        AND ($12::text[] IS NULL OR region = ANY($12::text[]))
-        AND (
-          row_kind = 'configuration_error'
-          OR (
-            ($9::int[] IS NULL OR grade = ANY($9::int[]))
-            AND ($11::text[] IS NULL OR exam_track = ANY($11::text[]))
-            AND (row_kind = 'unavailable' OR $10::int[] IS NULL OR subject_id = ANY($10::int[]))
-          )
-        )
-    )`;
-}
-
-function buildComputedRowsSql(): string {
-  return `${buildScopedUniverseSql()},
-    configured_metrics AS (
-      SELECT
-        g.id AS grade_id,
-        g.number AS grade,
-        ch.subject_id,
-        cfg.exam_track,
-        COUNT(*)::int AS total_configured_chapters,
-        COUNT(*) FILTER (WHERE cfg.prescribed_minutes > 0)::int AS prescribed_chapters,
-        COALESCE(SUM(cfg.prescribed_minutes), 0)::int AS prescribed_minutes
-      FROM lms_chapter_exam_configs cfg
-      JOIN chapter ch ON ch.id = cfg.chapter_id
-      JOIN grade g ON g.id = ch.grade_id
-      WHERE cfg.is_in_syllabus = true
-      GROUP BY g.id, g.number, ch.subject_id, cfg.exam_track
-    ),
-    actual_minutes AS (
-      SELECT
-        fr.school_code,
-        fr.program_id,
-        fr.grade_id,
-        fr.subject_id,
-        fr.exam_track,
-        COALESCE(SUM(l.duration_minutes), 0)::int AS actual_minutes
-      FROM filtered_rows fr
-      LEFT JOIN lms_curriculum_logs l
-        ON l.school_code = fr.school_code
-       AND l.program_id = fr.program_id
-       AND l.grade_id = fr.grade_id
-       AND l.subject_id = fr.subject_id
-       AND l.exam_track = fr.exam_track
-       AND l.log_type = 'regular'
-       AND l.deleted_at IS NULL
-       AND ($15::date IS NULL OR l.log_date >= $15::date)
-       AND ($16::date IS NULL OR l.log_date <= $16::date)
-      GROUP BY fr.school_code, fr.program_id, fr.grade_id, fr.subject_id, fr.exam_track
-    ),
-    completion_counts AS (
-      SELECT
-        fr.school_code,
-        fr.program_id,
-        fr.grade_id,
-        fr.subject_id,
-        fr.exam_track,
-        COUNT(DISTINCT cc.chapter_id)::int AS completed_chapters
-      FROM filtered_rows fr
-      JOIN lms_curriculum_chapter_completions cc
-        ON cc.school_code = fr.school_code
-       AND cc.program_id = fr.program_id
-       AND cc.exam_track = fr.exam_track
-       AND cc.deleted_at IS NULL
-      JOIN chapter ch
-        ON ch.id = cc.chapter_id
-       AND ch.grade_id = fr.grade_id
-       AND ch.subject_id = fr.subject_id
-      JOIN lms_chapter_exam_configs cfg
-        ON cfg.chapter_id = cc.chapter_id
-       AND cfg.exam_track = fr.exam_track
-       AND cfg.is_in_syllabus = true
-      GROUP BY fr.school_code, fr.program_id, fr.grade_id, fr.subject_id, fr.exam_track
-    ),
-    metric_rows AS (
-      SELECT
-        fr.*,
-        COALESCE(cc.completed_chapters, 0)::int AS completed_chapters,
-        COALESCE(cm.total_configured_chapters, 0)::int AS total_configured_chapters,
-        COALESCE(cm.prescribed_chapters, 0)::int AS prescribed_chapters,
-        COALESCE(am.actual_minutes, 0)::int AS actual_minutes,
-        COALESCE(cm.prescribed_minutes, 0)::int AS prescribed_minutes,
-        CASE
-          WHEN COALESCE(cm.total_configured_chapters, 0) > 0
-            THEN (COALESCE(cc.completed_chapters, 0)::numeric / cm.total_configured_chapters::numeric) * 100
-          ELSE NULL
-        END AS completed_percent,
-        CASE
-          WHEN COALESCE(cm.total_configured_chapters, 0) > 0
-            THEN (COALESCE(cm.prescribed_chapters, 0)::numeric / cm.total_configured_chapters::numeric) * 100
-          ELSE NULL
-        END AS prescribed_percent,
-        CASE
-          WHEN COALESCE(cm.prescribed_minutes, 0) > 0
-            THEN ((COALESCE(am.actual_minutes, 0) - cm.prescribed_minutes)::numeric / cm.prescribed_minutes::numeric) * 100
-          ELSE NULL
-        END AS delta_percent
-      FROM filtered_rows fr
-      LEFT JOIN configured_metrics cm
-        ON cm.grade_id = fr.grade_id
-       AND cm.subject_id = fr.subject_id
-       AND cm.exam_track = fr.exam_track
-      LEFT JOIN actual_minutes am
-        ON am.school_code = fr.school_code
-       AND am.program_id = fr.program_id
-       AND am.grade_id = fr.grade_id
-       AND am.subject_id = fr.subject_id
-       AND am.exam_track = fr.exam_track
-      LEFT JOIN completion_counts cc
-        ON cc.school_code = fr.school_code
-       AND cc.program_id = fr.program_id
-       AND cc.grade_id = fr.grade_id
-       AND cc.subject_id = fr.subject_id
-       AND cc.exam_track = fr.exam_track
-    ),
-    computed_rows AS (
-      SELECT
-        mr.*,
-        ARRAY_REMOVE(ARRAY[
-          CASE
-            WHEN mr.prescribed_minutes = 0 AND mr.actual_minutes > 0
-              THEN 'actual_time_on_zero_prescribed_minutes'
-            ELSE NULL
-          END,
-          CASE
-            WHEN mr.prescribed_minutes > 0 AND mr.delta_percent < -10
-              THEN 'under_prescribed_hours'
-            ELSE NULL
-          END,
-          CASE
-            WHEN mr.prescribed_minutes > 0 AND mr.delta_percent > 10
-              THEN 'over_prescribed_hours'
-            ELSE NULL
-          END,
-          CASE
-            WHEN mr.total_configured_chapters > 0
-             AND (mr.completed_chapters::numeric / mr.total_configured_chapters::numeric)
-               < (mr.prescribed_chapters::numeric / mr.total_configured_chapters::numeric)
-              THEN 'completion_below_prescribed_coverage'
-            ELSE NULL
-          END
-        ], NULL) AS flag_reasons
-      FROM metric_rows mr
-    ),
-    computed_filtered_rows AS (
-      SELECT
-        cr.*,
-        CARDINALITY(cr.flag_reasons) > 0 AS flagged,
-        CASE
-          WHEN 'actual_time_on_zero_prescribed_minutes' = ANY(cr.flag_reasons) THEN 0
-          WHEN CARDINALITY(cr.flag_reasons) > 0 THEN 1
-          ELSE 2
-        END AS flag_priority
-      FROM computed_rows cr
-      WHERE ($17::boolean = false OR CARDINALITY(cr.flag_reasons) > 0)
-    )`;
-}
-
-function buildStatsSql(): string {
-  return `${buildComputedRowsSql()}
-    SELECT
-      COUNT(*)::int AS total_rows,
-      COUNT(*) FILTER (WHERE flagged)::int AS flagged_rows,
-      COALESCE(SUM(completed_chapters), 0)::int AS completed_chapters,
-      COALESCE(SUM(total_configured_chapters), 0)::int AS total_configured_chapters,
-      COALESCE(SUM(prescribed_chapters), 0)::int AS prescribed_chapters,
-      COALESCE(SUM(actual_minutes), 0)::int AS actual_minutes,
-      COALESCE(SUM(prescribed_minutes), 0)::int AS prescribed_minutes
-    FROM computed_filtered_rows`;
-}
-
-function buildOptionsSql(): string {
-  return `${buildScopedUniverseSql()},
-    school_options AS (
-      SELECT DISTINCT school_code, school_name, region, state, district
-      FROM scoped_school_programs
-    ),
-    option_rows AS (
-      SELECT *
-      FROM mapped_rows
-      WHERE ($7::text[] IS NULL OR school_code = ANY($7::text[]))
-        AND ($12::text[] IS NULL OR region = ANY($12::text[]))
-    ),
-    program_options AS (
-      SELECT DISTINCT program_id, program_name, program_order
-      FROM option_rows
-    ),
-    grade_options AS (
-      SELECT DISTINCT grade
-      FROM option_rows
-      WHERE grade IS NOT NULL
-    ),
-    subject_options AS (
-      SELECT DISTINCT subject_id, subject_name
-      FROM option_rows
-      WHERE subject_id IS NOT NULL
-    ),
-    exam_track_options AS (
-      SELECT DISTINCT exam_track
-      FROM option_rows
-      WHERE exam_track IS NOT NULL
-    ),
-    geo_options AS (
-      SELECT
-        COALESCE(jsonb_agg(DISTINCT region) FILTER (WHERE region IS NOT NULL), '[]'::jsonb) AS regions
-      FROM scoped_schools
-    )
-    SELECT
-      (
-        SELECT COALESCE(jsonb_agg(jsonb_build_object(
-          'code', school_code,
-          'name', school_name,
-          'region', region,
-          'state', state,
-          'district', district
-        ) ORDER BY school_name, school_code), '[]'::jsonb)
-        FROM school_options
-      ) AS schools,
-      (
-        SELECT COALESCE(jsonb_agg(jsonb_build_object(
-          'id', program_id,
-          'name', program_name
-        ) ORDER BY program_order, program_id), '[]'::jsonb)
-        FROM program_options
-      ) AS programs,
-      (
-        SELECT COALESCE(jsonb_agg(grade ORDER BY grade), '[]'::jsonb)
-        FROM grade_options
-      ) AS grades,
-      (
-        SELECT COALESCE(jsonb_agg(jsonb_build_object(
-          'id', subject_id,
-          'name', subject_name
-        ) ORDER BY subject_id), '[]'::jsonb)
-        FROM subject_options
-      ) AS subjects,
-      (
-        SELECT COALESCE(jsonb_agg(exam_track ORDER BY exam_track), '[]'::jsonb)
-        FROM exam_track_options
-      ) AS exam_tracks,
-      (
-        SELECT COALESCE(jsonb_agg(jsonb_build_object(
-          'schoolCode', school_code,
-          'programId', program_id,
-          'programName', program_name,
-          'grade', grade,
-          'subjectId', subject_id,
-          'subjectName', subject_name,
-          'examTrack', exam_track
-        ) ORDER BY school_code, program_order, grade, subject_id, exam_track), '[]'::jsonb)
-        FROM mapped_rows
-      ) AS availability,
-      geo_options.regions
-    FROM geo_options`;
-}
-
-function buildRowCountGuardSql(): string {
-  return `${buildScopedUniverseSql()}
-    SELECT COUNT(*)::int AS estimated_rows
-    FROM (
-      SELECT 1
-      FROM filtered_rows
-      LIMIT 10001
-    ) capped_rows`;
-}
-
-function buildRowsSql(
-  sort: CurriculumSummarySortKey,
-  dir: CurriculumSummarySortDirection
-): string {
-  return `${buildComputedRowsSql()}
-    SELECT
-      COUNT(*) OVER() AS total_count,
-      school_code,
-      school_name,
-      region,
-      state,
-      district,
-      program_id,
-      program_name,
-      row_kind,
-      configuration_error,
-      grade,
-      subject_id,
-      subject_name,
-      exam_track,
-      completed_chapters,
-      total_configured_chapters,
-      prescribed_chapters,
-      actual_minutes,
-      prescribed_minutes,
-      delta_percent,
-      flagged,
-      flag_reasons
-    FROM computed_filtered_rows
-    ORDER BY ${buildOrderClause(sort, dir)}
-    LIMIT $18 OFFSET $19`;
-}
-
-function buildChapterRowsSql(
-  sort: CurriculumSummarySortKey,
-  dir: CurriculumSummarySortDirection
-): string {
-  return `${buildComputedRowsSql()},
-    current_page_rows AS (
-      SELECT
-        *,
-        ROW_NUMBER() OVER (ORDER BY ${buildOrderClause(sort, dir)}) AS page_row_order
-      FROM computed_filtered_rows
-      ORDER BY ${buildOrderClause(sort, dir)}
-      LIMIT $18 OFFSET $19
-    ),
-    scoped_log_topics AS (
-      SELECT
-        cpr.school_code,
-        cpr.program_id,
-        cpr.grade_id,
-        cpr.subject_id,
-        cpr.exam_track,
-        l.id AS log_id,
-        l.duration_minutes,
-        lt.topic_id,
-        COUNT(*) OVER (
-          PARTITION BY
-            cpr.school_code,
-            cpr.program_id,
-            cpr.grade_id,
-            cpr.subject_id,
-            cpr.exam_track,
-            l.id
-        ) AS total_topics_in_log
-      FROM current_page_rows cpr
-      JOIN lms_curriculum_logs l
-        ON l.school_code = cpr.school_code
-       AND l.program_id = cpr.program_id
-       AND l.grade_id = cpr.grade_id
-       AND l.subject_id = cpr.subject_id
-       AND l.exam_track = cpr.exam_track
-       AND l.log_type = 'regular'
-       AND l.deleted_at IS NULL
-       AND ($15::date IS NULL OR l.log_date >= $15::date)
-       AND ($16::date IS NULL OR l.log_date <= $16::date)
-      JOIN lms_curriculum_log_topics lt ON lt.curriculum_log_id = l.id
-    ),
-    chapter_log_allocations AS (
-      SELECT
-        slt.school_code,
-        slt.program_id,
-        slt.grade_id,
-        slt.subject_id,
-        slt.exam_track,
-        ch.id AS chapter_id,
-        slt.log_id,
-        MAX(slt.duration_minutes)::int AS duration_minutes,
-        MAX(slt.total_topics_in_log)::int AS total_topics_in_log,
-        COUNT(DISTINCT slt.topic_id)::int AS topics_in_chapter_for_log
-      FROM scoped_log_topics slt
-      JOIN topic t ON t.id = slt.topic_id
-      JOIN chapter ch
-        ON ch.id = t.chapter_id
-       AND ch.grade_id = slt.grade_id
-       AND ch.subject_id = slt.subject_id
-      JOIN lms_chapter_exam_configs cfg
-        ON cfg.chapter_id = ch.id
-       AND cfg.exam_track = slt.exam_track
-       AND cfg.is_in_syllabus = true
-      GROUP BY
-        slt.school_code,
-        slt.program_id,
-        slt.grade_id,
-        slt.subject_id,
-        slt.exam_track,
-        ch.id,
-        slt.log_id
-    ),
-    chapter_actual_minutes AS (
-      SELECT
-        school_code,
-        program_id,
-        grade_id,
-        subject_id,
-        exam_track,
-        chapter_id,
-        COALESCE(
-          SUM(
-            ROUND(
-              duration_minutes::numeric
-              * (topics_in_chapter_for_log::numeric / NULLIF(total_topics_in_log, 0)::numeric)
-            )
-          ),
-          0
-        )::int AS actual_minutes
-      FROM chapter_log_allocations
-      GROUP BY school_code, program_id, grade_id, subject_id, exam_track, chapter_id
-    ),
-    chapter_activity_metrics AS (
-      SELECT
-        cpr.school_code,
-        cpr.program_id,
-        cpr.grade_id,
-        cpr.subject_id,
-        cpr.exam_track,
-        ch.id AS chapter_id,
-        COUNT(*) FILTER (WHERE l.log_type = 'class_cancelled')::int AS class_cancellation_count,
-        COALESCE(SUM(l.duration_minutes) FILTER (WHERE l.log_type = 'doubt_solving'), 0)::int AS doubt_solving_minutes
-      FROM current_page_rows cpr
-      JOIN lms_curriculum_logs l
-        ON l.school_code = cpr.school_code
-       AND l.program_id = cpr.program_id
-       AND l.grade_id = cpr.grade_id
-       AND l.subject_id = cpr.subject_id
-       AND l.exam_track = cpr.exam_track
-       AND l.log_type IN ('class_cancelled', 'doubt_solving')
-       AND l.deleted_at IS NULL
-       AND ($15::date IS NULL OR l.log_date >= $15::date)
-       AND ($16::date IS NULL OR l.log_date <= $16::date)
-      JOIN chapter ch ON l.chapter_id = ch.id
-      GROUP BY cpr.school_code, cpr.program_id, cpr.grade_id, cpr.subject_id, cpr.exam_track, ch.id
-    ),
-    chapter_metric_rows AS (
-      SELECT
-        CONCAT(
-          cpr.school_code,
-          ':',
-          cpr.program_id,
-          ':',
-          cpr.grade,
-          ':',
-          cpr.subject_id,
-          ':',
-          cpr.exam_track
-        ) AS parent_row_key,
-        cpr.page_row_order,
-        ch.id AS chapter_id,
-        ch.code AS chapter_code,
-        ch.name AS chapter_name,
-        COALESCE(
-          (
-            SELECT item->>'chapter'
-            FROM jsonb_array_elements(ch.name::jsonb) item
-            WHERE item->>'lang_code' = 'en'
-            LIMIT 1
-          ),
-          ch.code,
-          'Unknown chapter'
-        ) AS chapter_sort_name,
-        cfg.coverage_sequence,
-        CASE WHEN cc.chapter_id IS NULL THEN 0 ELSE 1 END AS completed_count,
-        CASE WHEN cfg.prescribed_minutes > 0 THEN 1 ELSE 0 END AS prescribed_count,
-        COALESCE(cam.actual_minutes, 0)::int AS actual_minutes,
-        COALESCE(cfg.prescribed_minutes, 0)::int AS prescribed_minutes,
-        COALESCE(activity.class_cancellation_count, 0)::int AS class_cancellation_count,
-        COALESCE(activity.doubt_solving_minutes, 0)::int AS doubt_solving_minutes,
-        CASE
-          WHEN COALESCE(cfg.prescribed_minutes, 0) > 0
-            THEN ((COALESCE(cam.actual_minutes, 0) - cfg.prescribed_minutes)::numeric / cfg.prescribed_minutes::numeric) * 100
-          ELSE NULL
-        END AS delta_percent
-      FROM current_page_rows cpr
-      JOIN lms_chapter_exam_configs cfg
-        ON cfg.exam_track = cpr.exam_track
-       AND cfg.is_in_syllabus = true
-      JOIN chapter ch
-        ON ch.id = cfg.chapter_id
-       AND ch.grade_id = cpr.grade_id
-       AND ch.subject_id = cpr.subject_id
-      LEFT JOIN lms_curriculum_chapter_completions cc
-        ON cc.school_code = cpr.school_code
-       AND cc.program_id = cpr.program_id
-       AND cc.exam_track = cpr.exam_track
-       AND cc.chapter_id = ch.id
-       AND cc.deleted_at IS NULL
-      LEFT JOIN chapter_actual_minutes cam
-        ON cam.school_code = cpr.school_code
-       AND cam.program_id = cpr.program_id
-       AND cam.grade_id = cpr.grade_id
-       AND cam.subject_id = cpr.subject_id
-       AND cam.exam_track = cpr.exam_track
-       AND cam.chapter_id = ch.id
-      LEFT JOIN chapter_activity_metrics activity
-        ON activity.school_code = cpr.school_code
-       AND activity.program_id = cpr.program_id
-       AND activity.grade_id = cpr.grade_id
-       AND activity.subject_id = cpr.subject_id
-       AND activity.exam_track = cpr.exam_track
-       AND activity.chapter_id = ch.id
-    ),
-    chapter_computed_rows AS (
-      SELECT
-        cmr.*,
-        ARRAY_REMOVE(ARRAY[
-          CASE
-            WHEN cmr.prescribed_minutes = 0 AND cmr.actual_minutes > 0
-              THEN 'actual_time_on_zero_prescribed_minutes'
-            ELSE NULL
-          END,
-          CASE
-            WHEN cmr.prescribed_minutes > 0 AND cmr.delta_percent < -10
-              THEN 'under_prescribed_hours'
-            ELSE NULL
-          END,
-          CASE
-            WHEN cmr.prescribed_minutes > 0 AND cmr.delta_percent > 10
-              THEN 'over_prescribed_hours'
-            ELSE NULL
-          END,
-          CASE
-            WHEN cmr.prescribed_minutes > 0 AND cmr.completed_count = 0
-              THEN 'incomplete_prescribed_chapter'
-            ELSE NULL
-          END
-        ], NULL) AS flag_reasons
-      FROM chapter_metric_rows cmr
-    )
-    SELECT
-      parent_row_key,
-      chapter_id,
-      chapter_code,
-      chapter_name,
-      coverage_sequence,
-      completed_count,
-      prescribed_count,
-      actual_minutes,
-      prescribed_minutes,
-      class_cancellation_count,
-      doubt_solving_minutes,
-      delta_percent,
-      CARDINALITY(flag_reasons) > 0 AS flagged,
-      flag_reasons
-    FROM chapter_computed_rows
-    ORDER BY
-      page_row_order ASC,
-      coverage_sequence ASC NULLS LAST,
-      chapter_code ASC,
-      chapter_sort_name ASC,
-      chapter_id ASC`;
-}
-
-function buildOrderClause(
-  sort: CurriculumSummarySortKey,
-  dir: CurriculumSummarySortDirection
-): string {
-  const direction = dir === "desc" ? "DESC" : "ASC";
-  const tieBreakers =
-    "school_name ASC, program_order ASC, grade ASC, subject_name ASC, exam_track ASC, school_code ASC";
-
-  if (sort === "flagged" && dir === "desc") {
-    return `flagged DESC, flag_priority ASC, delta_percent ASC NULLS LAST, ${tieBreakers}`;
-  }
-
-  const sortColumn = SORT_SQL[sort];
-  const nullsClause = sort === "delta" ? " NULLS LAST" : "";
-  return `${sortColumn} ${direction}${nullsClause}, ${tieBreakers}`;
-}
-
-function mapFilterOptions(row: OptionsQueryRow | undefined): CurriculumSummaryFilterOptions {
-  const schools = parseJsonArray<CurriculumSummarySchoolOption>(row?.schools)
-    .map((school) => ({
-      code: String(school.code),
-      name: String(school.name ?? school.code),
-      region: school.region ?? null,
-      state: school.state ?? null,
-      district: school.district ?? null,
-    }))
-    .sort((a, b) => a.name.localeCompare(b.name) || a.code.localeCompare(b.code));
-  const programs = parseJsonArray<CurriculumSummaryProgramOption>(row?.programs)
-    .map((program) => ({ id: Number(program.id), name: String(program.name) }))
-    .sort((a, b) => a.id - b.id);
-  const subjects = parseJsonArray<CurriculumSummarySubjectOption>(row?.subjects)
-    .map((subject) => ({
-      id: Number(subject.id),
-      name: normalizeSubjectName(subject.name),
-    }))
-    .sort((a, b) => a.id - b.id);
-  const availability = parseJsonArray<CurriculumSummaryFilterAvailability>(row?.availability)
-    .filter((item) => isExamTrack(item.examTrack))
-    .map((item) => ({
-      schoolCode: String(item.schoolCode),
-      programId: Number(item.programId),
-      programName: String(item.programName),
-      grade: Number(item.grade),
-      subjectId: item.subjectId === null ? null : Number(item.subjectId),
-      subjectName: item.subjectName === null ? null : normalizeSubjectName(item.subjectName),
-      examTrack: item.examTrack,
-    }));
-
-  return {
-    schools,
-    programs,
-    grades: parseJsonArray<number>(row?.grades).map(Number).sort((a, b) => a - b),
-    subjects,
-    examTracks: EXAM_TRACKS.filter((track) =>
-      parseJsonArray<string>(row?.exam_tracks).includes(track)
-    ),
-    regions: parseJsonArray<string>(row?.regions).map(String).sort(),
-    availability,
-  };
-}
-
-// fallow-ignore-next-line complexity
-function mapSummaryRow(row: SummaryQueryRow): CurriculumSummaryRow {
-  const schoolCode = String(row.school_code);
-  const programId = Number(row.program_id);
-  const rowKind = row.row_kind ?? "normal";
-  const grade = row.grade === null ? null : Number(row.grade);
-  const subjectId = row.subject_id === null ? null : Number(row.subject_id);
-  const examTrack = row.exam_track;
-  const rowKey =
-    rowKind === "configuration_error"
-      ? `${schoolCode}:${programId}:configuration_error`
-      : rowKind === "unavailable"
-        ? `${schoolCode}:${programId}:${grade}:${examTrack}:unavailable`
-        : `${schoolCode}:${programId}:${grade}:${subjectId}:${examTrack}`;
-
-  return {
-    rowKind,
-    rowKey,
-    schoolCode,
-    schoolName: row.school_name ?? schoolCode,
-    region: row.region,
-    state: row.state,
-    district: row.district,
-    programId,
-    programName: row.program_name,
-    grade,
-    subjectId,
-    subjectName: subjectId === null ? null : normalizeSubjectName(row.subject_name),
-    examTrack,
-    explanation:
-      rowKind === "unavailable"
-        ? "Curriculum configuration is unavailable"
-        : row.configuration_error ?? null,
-    completedChapters: numberFromDb(row.completed_chapters),
-    totalConfiguredChapters: numberFromDb(row.total_configured_chapters),
-    prescribedChapters: numberFromDb(row.prescribed_chapters),
-    actualMinutes: numberFromDb(row.actual_minutes),
-    prescribedMinutes: numberFromDb(row.prescribed_minutes),
-    ...mapFlagFields(row),
-  };
-}
-
-function mapChapterRowsByParentKey(
-  rows: ChapterQueryRow[]
-): Record<string, CurriculumSummaryChapterRow[]> {
-  const grouped: Record<string, CurriculumSummaryChapterRow[]> = {};
-
-  for (const row of rows) {
-    const mapped = mapChapterRow(row);
-    grouped[mapped.parentRowKey] = grouped[mapped.parentRowKey] ?? [];
-    grouped[mapped.parentRowKey].push(mapped);
-  }
-
-  return grouped;
-}
-
-function mapChapterRow(row: ChapterQueryRow): CurriculumSummaryChapterRow {
-  const prescribedCount = numberFromDb(row.prescribed_count) > 0 ? 1 : 0;
-  const completedCount = numberFromDb(row.completed_count) > 0 ? 1 : 0;
-
-  return {
-    parentRowKey: String(row.parent_row_key),
-    chapterId: numberFromDb(row.chapter_id),
-    chapterCode: String(row.chapter_code ?? ""),
-    chapterName: normalizeChapterName(row.chapter_name),
-    coverageSequence: numberFromDb(row.coverage_sequence),
-    completedCount,
-    prescribedCount,
-    actualMinutes: numberFromDb(row.actual_minutes),
-    prescribedMinutes: numberFromDb(row.prescribed_minutes),
-    classCancellationCount: numberFromDb(row.class_cancellation_count),
-    doubtSolvingMinutes: numberFromDb(row.doubt_solving_minutes),
-    ...mapFlagFields(row),
-  };
-}
-
-function mapFlagFields(
-  row: Pick<SummaryQueryRow, "delta_percent" | "flagged" | "flag_reasons">
-) {
-  return {
-    deltaPercent: row.delta_percent == null ? null : Number(row.delta_percent),
-    flagged: row.flagged === true || row.flagged === "true",
-    flagReasons: parseJsonArray<string>(row.flag_reasons).map(String),
-  };
-}
-
-function mapStats(row: StatsQueryRow | undefined): CurriculumSummaryStats {
-  if (!row) {
-    return emptyStats();
-  }
-
-  const totalConfiguredChapters = numberFromDb(row.total_configured_chapters);
-  const completedChapters = numberFromDb(row.completed_chapters);
-  const prescribedChapters = numberFromDb(row.prescribed_chapters);
-
-  return {
-    totalRows: numberFromDb(row.total_rows),
-    flaggedRows: numberFromDb(row.flagged_rows),
-    avgCompletionPercent:
-      totalConfiguredChapters > 0
-        ? (completedChapters / totalConfiguredChapters) * 100
-        : null,
-    avgPrescribedPercent:
-      totalConfiguredChapters > 0
-        ? (prescribedChapters / totalConfiguredChapters) * 100
-        : null,
-    actualMinutes: numberFromDb(row.actual_minutes),
-    prescribedMinutes: numberFromDb(row.prescribed_minutes),
-  };
-}
-
-function emptyStats(): CurriculumSummaryStats {
-  return {
-    totalRows: 0,
-    flaggedRows: 0,
-    avgCompletionPercent: null,
-    avgPrescribedPercent: null,
-    actualMinutes: 0,
-    prescribedMinutes: 0,
-  };
-}
-
-function numberFromDb(value: string | number | null | undefined): number {
-  const number = Number(value ?? 0);
-  return Number.isFinite(number) ? number : 0;
-}
-
-function parseJsonArray<T>(value: unknown): T[] {
-  if (Array.isArray(value)) {
-    return value as T[];
-  }
-  if (typeof value === "string") {
-    try {
-      const parsed = JSON.parse(value);
-      return Array.isArray(parsed) ? (parsed as T[]) : [];
-    } catch {
-      return [];
-    }
-  }
+// The resolved scope's School codes (explicit codes ∪ seat Schools), else a level-1 user's
+// explicit codes; empty means no School-code scope.
+function scopedSchoolCodes(permission: UserPermission): string[] {
+  if (permission.scope && permission.scope.schools !== "all") return [...permission.scope.schools];
+  if (permission.level === 1) return permission.school_codes ?? [];
   return [];
 }
 
-function normalizeSubjectName(value: unknown): string {
-  const name = extractEnglishName(value, "subject");
-  return name === "Mathematics" ? "Maths" : name;
+// $7 Grade number, $8 academic year of as-of, $9 its 1 Apr, $10 as-of, $11 one Centre id (null
+// = all), $12 the content tracks the Summary measures. Every in-scope active physical JNV Centre
+// with a Centre Exam Track for the Grade is one row; its Chapters are the Grade's in-syllabus
+// Chapters for any mapped track, each with its plan due and test dates (only for an Active plan
+// serving one of the Chapter's content tracks: a plan's CET track never dates a Chapter here)
+// and its earliest Chapter Completion IST date within [1 Apr, as-of] under any mapped track.
+// `scoped_centres` holds one row per in-scope eligible Centre + mapped track for the Grade;
+// `mapped` folds them into one row per Centre.
+const SUMMARY_SQL = `
+  WITH scoped_centres AS (
+    SELECT
+      c.id AS centre_id,
+      c.name AS centre_name,
+      c.school_id,
+      c.program_id,
+      s.code AS school_code,
+      s.name AS school_name,
+      s.region,
+      p.name AS program_name,
+      cet.exam_track_code
+    FROM ${ELIGIBLE_CENTRE_TRACKS_FROM_SQL}
+    JOIN grade g ON g.id = cet.grade_id AND g.number = $7
+    JOIN program p ON p.id = c.program_id
+    WHERE ${ELIGIBLE_CENTRE_SQL}
+      AND (
+        $1::boolean
+        OR ($2::text[] IS NOT NULL AND s.code = ANY($2::text[]))
+        OR ($3::text[] IS NOT NULL AND s.region = ANY($3::text[]))
+      )
+      AND c.program_id = ANY($4::int[])
+      AND ($5::boolean OR c.program_id = ANY($6::int[]))
+      AND ($11::int IS NULL OR c.id = $11::int)
+  ),
+  mapped AS (
+    SELECT
+      sc.centre_id,
+      sc.centre_name,
+      sc.school_id,
+      sc.program_id,
+      sc.school_code,
+      sc.school_name,
+      sc.region,
+      sc.program_name,
+      ARRAY_AGG(DISTINCT sc.exam_track_code::text) AS mapped_tracks,
+      (
+        SELECT COUNT(*)
+        FROM centres other
+        WHERE other.school_id = sc.school_id
+          AND other.program_id = sc.program_id
+          AND other.is_active = true
+          AND other.is_physical = true
+      )::int AS centre_count
+    FROM scoped_centres sc
+    GROUP BY
+      sc.centre_id, sc.centre_name, sc.school_id, sc.program_id,
+      sc.school_code, sc.school_name, sc.region, sc.program_name
+  ),
+  grade_chapters AS (
+    SELECT
+      ch.id AS chapter_id,
+      ch.code AS chapter_code,
+      COALESCE(
+        (
+          SELECT item->>'chapter'
+          FROM jsonb_array_elements(ch.name::jsonb) item
+          WHERE item->>'lang_code' = 'en'
+          LIMIT 1
+        ),
+        ch.code,
+        'Unknown chapter'
+      ) AS chapter_name,
+      COALESCE(
+        (
+          SELECT item->>'subject'
+          FROM jsonb_array_elements(s.name::jsonb) item
+          WHERE item->>'lang_code' = 'en'
+          LIMIT 1
+        ),
+        'Unknown subject'
+      ) AS subject_name,
+      ARRAY_AGG(DISTINCT cfg.exam_track::text) AS tracks,
+      JSONB_OBJECT_AGG(cfg.exam_track::text, cfg.coverage_sequence) AS sequences,
+      JSONB_OBJECT_AGG(cfg.exam_track::text, cfg.prescribed_minutes) AS prescribed_minutes
+    FROM lms_chapter_exam_configs cfg
+    JOIN chapter ch ON ch.id = cfg.chapter_id
+    JOIN grade g ON g.id = ch.grade_id AND g.number = $7
+    JOIN subject s ON s.id = ch.subject_id
+    WHERE cfg.is_in_syllabus = true
+    GROUP BY ch.id, ch.code, ch.name, s.name
+  ),
+  assigned_plans AS (
+    SELECT
+      a.centre_id,
+      p.id AS plan_id,
+      p.title,
+      p.status,
+      p.closure_date,
+      ARRAY(
+        SELECT track FROM unnest(p.exam_tracks) AS track WHERE track = ANY($12::text[])
+      ) AS exam_tracks
+    FROM lms_curriculum_plan_assignments a
+    JOIN lms_curriculum_plans p ON p.id = a.plan_id
+    JOIN grade g ON g.id = a.grade_id AND g.number = $7
+    WHERE a.academic_year = $8
+  ),
+  centre_chapters AS (
+    SELECT
+      m.centre_id,
+      gc.chapter_id,
+      gc.chapter_code,
+      gc.chapter_name,
+      gc.subject_name,
+      gc.tracks,
+      gc.prescribed_minutes,
+      (
+        SELECT MIN((gc.sequences->>track)::int)
+        FROM unnest(m.mapped_tracks) AS track
+      ) AS sequence,
+      CASE
+        WHEN ap.status = 'active' AND ap.exam_tracks && gc.tracks THEN pc.due_date
+      END AS due_date,
+      CASE
+        WHEN ap.status = 'active' AND ap.exam_tracks && gc.tracks THEN pc.test_date
+      END AS test_date,
+      (
+        SELECT MIN((cc.completed_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date)
+        FROM lms_curriculum_chapter_completions cc
+        WHERE cc.school_code = m.school_code
+          AND cc.program_id = m.program_id
+          AND cc.chapter_id = gc.chapter_id
+          AND cc.exam_track = ANY(m.mapped_tracks)
+          AND cc.deleted_at IS NULL
+          AND (cc.completed_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date
+            BETWEEN $9::date AND $10::date
+      ) AS completed_on
+    FROM mapped m
+    JOIN grade_chapters gc ON gc.tracks && m.mapped_tracks
+    LEFT JOIN assigned_plans ap ON ap.centre_id = m.centre_id
+    LEFT JOIN lms_curriculum_plan_chapters pc
+      ON pc.plan_id = ap.plan_id
+     AND pc.chapter_id = gc.chapter_id
+  )
+  SELECT
+    m.centre_id,
+    m.centre_name,
+    m.school_code,
+    m.school_name,
+    m.region,
+    m.program_id,
+    m.program_name,
+    m.centre_count,
+    m.mapped_tracks,
+    ap.plan_id,
+    ap.title AS plan_title,
+    ap.status AS plan_status,
+    ap.closure_date::text AS plan_closure_date,
+    COALESCE(
+      (
+        SELECT jsonb_agg(jsonb_build_object(
+          'chapterId', cch.chapter_id,
+          'code', cch.chapter_code,
+          'name', cch.chapter_name,
+          'subject', cch.subject_name,
+          'sequence', cch.sequence,
+          'tracks', cch.tracks,
+          'prescribedMinutes', cch.prescribed_minutes,
+          'dueDate', cch.due_date::text,
+          'testDate', cch.test_date::text,
+          'completedOn', cch.completed_on::text
+        ))
+        FROM centre_chapters cch
+        WHERE cch.centre_id = m.centre_id
+      ),
+      '[]'::jsonb
+    ) AS chapters
+  FROM mapped m
+  LEFT JOIN assigned_plans ap ON ap.centre_id = m.centre_id`;
+
+function chapterTestStatusFor(
+  { chapterTestSessions, asOf }: SummaryClassData,
+  chapter: SummaryChapter
+): ChapterTestStatus {
+  return chapterTestStatus({
+    dueDate: chapter.dueDate,
+    testDate: chapter.testDate,
+    sessionEndTimes: chapterTestSessions.get(chapter.chapterId) ?? [],
+    asOf,
+  });
 }
 
-function normalizeChapterName(value: unknown): string {
-  return extractEnglishName(value, "chapter");
-}
-
-function extractEnglishName(value: unknown, field: string): string {
-  if (typeof value === "string" && !value.trim().startsWith("[") && !value.trim().startsWith("{")) {
-    return value;
+function buildSummaryRow(data: SummaryClassData): CurriculumSummaryRow {
+  const { raw, chapters, asOf } = data;
+  const base = summaryRowBase(raw);
+  const problem = summaryClassProblem(raw, chapters);
+  if (problem) return { ...base, ...problem };
+  if (raw.plan_id === null || raw.plan_status !== "active" || !raw.plan_title) {
+    // Without plan dates no Chapter Test can be Overdue; show what was held instead.
+    return { ...base, kind: "no_plan", explanation: null, testsConducted: testStatusCount(data, "conducted") };
   }
 
-  try {
-    const parsed = typeof value === "string" ? JSON.parse(value) : value;
-    if (!Array.isArray(parsed)) {
-      return `Unknown ${field}`;
-    }
-    const english = parsed.find((item: Record<string, string>) => item.lang_code === "en");
-    return english?.[field] || `Unknown ${field}`;
-  } catch {
-    return `Unknown ${field}`;
+  const subjects = Object.fromEntries(
+    CURRICULUM_SUMMARY_SUBJECTS.map((subject) => [subject, subjectProgress(chapters, subject, asOf)])
+  ) as Record<CurriculumSummarySubject, CurriculumSummarySubjectProgress | null>;
+  const closureDate = raw.plan_closure_date ?? asOf;
+
+  return {
+    ...base,
+    kind: "plan",
+    explanation: null,
+    plan: {
+      id: Number(raw.plan_id),
+      title: raw.plan_title,
+      closed: planStatusAsOf({ status: "active", closureDate }, asOf) === "closed",
+    },
+    subjects,
+    subjectGroups: subjectGroupsBehind(raw, chapters, asOf),
+    testsOverdue: testStatusCount(data, "overdue"),
+    testsOverdueBySubject: Object.fromEntries(
+      CURRICULUM_SUMMARY_SUBJECTS.map((subject) => [
+        subject,
+        testStatusCount(data, "overdue", (chapter) => chapter.subject === subject),
+      ])
+    ) as Record<CurriculumSummarySubject, number>,
+  };
+}
+
+// The class's Chapters (optionally only those `include` keeps) with that Chapter Test Status.
+function testStatusCount(
+  data: SummaryClassData,
+  kind: ChapterTestStatus["kind"],
+  include: (chapter: SummaryChapter) => boolean = () => true
+): number {
+  return data.chapters.filter((chapter) => include(chapter) && chapterTestStatusFor(data, chapter).kind === kind)
+    .length;
+}
+
+function summaryRowBase(raw: SummaryQueryRow) {
+  const mappedTracks = EXAM_TRACKS.filter((track) => raw.mapped_tracks.includes(track));
+  return {
+    centreId: Number(raw.centre_id),
+    centreName: raw.centre_name,
+    schoolCode: raw.school_code,
+    schoolName: raw.school_name ?? raw.school_code,
+    region: raw.region,
+    programId: Number(raw.program_id),
+    programName: raw.program_name,
+    tracksLabel: mappedTracks.map(formatExamTrack).join(" + "),
+    plan: null,
+    subjects: null,
+    subjectGroups: null,
+    testsOverdue: 0,
+    testsOverdueBySubject: null,
+    testsConducted: null,
+  };
+}
+
+// Classes the Summary can't measure: an ambiguous Centre, a track setup error, or no content.
+function summaryClassProblem(
+  raw: SummaryQueryRow,
+  chapters: SummaryChapter[]
+): { kind: CurriculumSummaryRowKind; explanation: string } | null {
+  // Logs and completions are keyed by School + Program, so a second active physical Centre
+  // there makes this Centre's progress ambiguous.
+  if (Number(raw.centre_count) > 1) {
+    return {
+      kind: "configuration_error",
+      explanation: "Multiple active physical Centres are configured for this School and Program",
+    };
   }
-}
-
-function parseStringList<T extends string = string>(
-  value: string | undefined,
-  predicate: (item: string) => item is T = ((item: string): item is T => item.length > 0)
-): T[] {
-  const seen = new Set<T>();
-  for (const item of (value ?? "").split(",")) {
-    const trimmed = item.trim();
-    if (!trimmed || !predicate(trimmed)) {
-      continue;
-    }
-    seen.add(trimmed);
+  const summaryClass = classifySummaryClass(
+    raw.mapped_tracks,
+    chapters.flatMap((chapter) => chapter.tracks)
+  );
+  if (summaryClass.kind === "setup_error") {
+    return { kind: "setup_error", explanation: "Fix tracks in Centre Management" };
   }
-  return [...seen];
-}
-
-function parseNumberList(value: string | undefined): number[] {
-  const seen = new Set<number>();
-  for (const item of (value ?? "").split(",")) {
-    const trimmed = item.trim();
-    if (!/^\d+$/.test(trimmed)) {
-      continue;
-    }
-    seen.add(Number(trimmed));
-  }
-  return [...seen];
-}
-
-function isSchoolCode(value: string): value is string {
-  return /^[A-Za-z0-9_-]+$/.test(value);
-}
-
-function isSortKey(value: string | undefined): value is CurriculumSummarySortKey {
-  return Boolean(value && Object.prototype.hasOwnProperty.call(SORT_SQL, value));
-}
-
-function normalizePreset(value: string | undefined): CurriculumSummaryDatePreset | null {
-  if (
-    value === "today" ||
-    value === "last_7_days" ||
-    value === "last_30_days" ||
-    value === "current_academic_year" ||
-    value === "all" ||
-    value === "custom"
-  ) {
-    return value;
+  if (summaryClass.kind === "no_content") {
+    return { kind: "no_content", explanation: "Curriculum configuration is unavailable" };
   }
   return null;
 }
 
-function isDateString(value: string | undefined): value is string {
-  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    return false;
-  }
-  const [year, month, day] = value.split("-").map(Number);
-  const date = new Date(Date.UTC(year, month - 1, day));
-  return (
-    date.getUTCFullYear() === year &&
-    date.getUTCMonth() === month - 1 &&
-    date.getUTCDate() === day
+// null when the class has no Chapter of the subject.
+function subjectProgress(
+  chapters: SummaryChapter[],
+  subject: string,
+  asOf: string
+): CurriculumSummarySubjectProgress | null {
+  const subjectChapters = chapters.filter((chapter) => chapter.subject === subject);
+  if (subjectChapters.length === 0) return null;
+  const progress = chapterProgress(subjectChapters, asOf);
+  return { ...progress, ...behindPill(progress.behind) };
+}
+
+// PCM Behind and PCB Behind with done/due; a group the Summary Class's tracks don't take is null.
+function subjectGroupsBehind(
+  raw: SummaryQueryRow,
+  chapters: SummaryChapter[],
+  asOf: string
+): Record<SubjectGroup, CurriculumSummarySubjectProgress | null> {
+  const classGroups = subjectGroupsForClass(summaryClassTracks(raw.mapped_tracks, chapters));
+  return Object.fromEntries(
+    SUBJECT_GROUPS.map((group) => {
+      if (!classGroups.includes(group)) return [group, null];
+      const progress = subjectGroupProgress(chapters, group, asOf);
+      return [group, { ...progress, ...behindPill(progress.behind) }];
+    })
+  ) as Record<SubjectGroup, CurriculumSummarySubjectProgress | null>;
+}
+
+function groupBehind(row: CurriculumSummaryRow, group: SubjectGroup): number {
+  return row.subjectGroups?.[group]?.behind ?? 0;
+}
+
+// The larger of PCM and PCB Behind; a group that doesn't apply counts as 0.
+function worstGroupBehind(row: CurriculumSummaryRow): number {
+  return Math.max(...SUBJECT_GROUPS.map((group) => groupBehind(row, group)));
+}
+
+function parseChapters(value: unknown): SummaryChapter[] {
+  const parsed = typeof value === "string" ? JSON.parse(value) : value;
+  if (!Array.isArray(parsed)) return [];
+  return parsed.map(parseChapter);
+}
+
+function stringOrNull(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+function parseChapter(chapter: Record<string, unknown>): SummaryChapter {
+  return {
+    chapterId: Number(chapter.chapterId),
+    code: stringOrNull(chapter.code) ?? "",
+    name: String(chapter.name),
+    sequence: typeof chapter.sequence === "number" ? chapter.sequence : Number.MAX_SAFE_INTEGER,
+    subject: chapter.subject === "Mathematics" ? "Maths" : String(chapter.subject),
+    tracks: Array.isArray(chapter.tracks) ? chapter.tracks.map(String) : [],
+    prescribedMinutes: parsePrescribedMinutes(chapter.prescribedMinutes),
+    dueDate: stringOrNull(chapter.dueDate),
+    testDate: stringOrNull(chapter.testDate),
+    completedOn: stringOrNull(chapter.completedOn),
+  };
+}
+
+function parsePrescribedMinutes(value: unknown): Record<string, number> {
+  if (!value || typeof value !== "object") return {};
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([track, minutes]) => [track, Number(minutes) || 0])
   );
 }
 
-function resolvePresetDateRange(
-  preset: CurriculumSummaryDatePreset,
-  todayIstDate: string
-): { from?: string; to?: string } {
-  if (preset === "all") {
-    return {};
-  }
-  if (preset === "today") {
-    return { from: todayIstDate, to: todayIstDate };
-  }
-  if (preset === "last_7_days") {
-    return { from: addDays(todayIstDate, -6), to: todayIstDate };
-  }
-  if (preset === "last_30_days") {
-    return { from: addDays(todayIstDate, -29), to: todayIstDate };
-  }
-  if (preset === "current_academic_year") {
-    return { from: academicYearStart(todayIstDate), to: todayIstDate };
-  }
-  return {};
+const KIND_ORDER: Record<CurriculumSummaryRowKind, number> = {
+  plan: 0,
+  no_plan: 1,
+  setup_error: 2,
+  no_content: 3,
+  configuration_error: 4,
+};
+
+// Worst first: plan rows by the larger of PCM and PCB Behind desc then Tests overdue desc, then
+// No-plan rows, then setup-error, no-content and configuration-error rows; Centre name breaks
+// ties.
+function compareWorstFirst(a: CurriculumSummaryRow, b: CurriculumSummaryRow): number {
+  return (
+    KIND_ORDER[a.kind] - KIND_ORDER[b.kind] ||
+    worstGroupBehind(b) - worstGroupBehind(a) ||
+    b.testsOverdue - a.testsOverdue ||
+    compareCentreNames(a, b)
+  );
 }
 
-function academicYearStart(todayIstDate: string): string {
-  const [year, month] = todayIstDate.split("-").map(Number);
-  const startYear = month >= 4 ? year : year - 1;
-  return `${startYear}-04-01`;
+function compareCentreNames(a: CurriculumSummaryRow, b: CurriculumSummaryRow): number {
+  return a.centreName.localeCompare(b.centreName) || a.centreId - b.centreId;
 }
 
-function addDays(yyyyMmDd: string, days: number): string {
-  const [year, month, day] = yyyyMmDd.split("-").map(Number);
-  const date = new Date(Date.UTC(year, month - 1, day + days));
-  return date.toISOString().slice(0, 10);
+// A row's value in a sorted column: text, or numbers compared in order; null = the cell has no
+// value there ("—", "Not measured without an Active plan", No plan, an explanation, a blank).
+type SortValue = string | number[] | null;
+
+function textSortValue(value: string | null): SortValue {
+  return value?.trim() ? value : null;
+}
+
+// A pill sorts by chapters behind ("On track" is 0), then by due count.
+function pillSortValue(progress: CurriculumSummarySubjectProgress | null | undefined): SortValue {
+  return progress ? [progress.behind, progress.due] : null;
+}
+
+const SORT_VALUES: Record<CurriculumSummarySortKey, (row: CurriculumSummaryRow) => SortValue> = {
+  centre: (row) => textSortValue(row.centreName),
+  program: (row) => textSortValue(row.programName),
+  tracks: (row) => textSortValue(row.tracksLabel),
+  region: (row) => textSortValue(row.region),
+  physics: (row) => pillSortValue(row.subjects?.Physics),
+  chemistry: (row) => pillSortValue(row.subjects?.Chemistry),
+  maths: (row) => pillSortValue(row.subjects?.Maths),
+  biology: (row) => pillSortValue(row.subjects?.Biology),
+  pcm: (row) => pillSortValue(row.subjectGroups?.PCM),
+  pcb: (row) => pillSortValue(row.subjectGroups?.PCB),
+  plan: (row) => textSortValue(row.plan?.title ?? null),
+};
+
+const TEXT_SORT_KEYS: CurriculumSummarySortKey[] = ["centre", "program", "tracks", "region", "plan"];
+
+// A header's first click: A–Z for the text columns, most behind first for the rest.
+export function defaultSortDirection(key: CurriculumSummarySortKey): CurriculumSummarySortDirection {
+  return TEXT_SORT_KEYS.includes(key) ? "asc" : "desc";
+}
+
+// Text case-insensitively; numbers in order (behind, then due for a pill).
+function compareSortValues(a: string | number[], b: string | number[]): number {
+  if (Array.isArray(a) && Array.isArray(b)) {
+    const index = a.findIndex((value, i) => value !== b[i]);
+    return index === -1 ? 0 : a[index] - b[index];
+  }
+  return String(a).localeCompare(String(b), "en", { sensitivity: "base" });
+}
+
+interface SortEntry<T> {
+  item: T;
+  value: SortValue;
+}
+
+// Sorts by one column. Items without a value go last in both directions, ordered among
+// themselves by `compareBlanks`; `tieBreak` orders equal values (and blanks `compareBlanks`
+// leaves tied). The sort is stable, so items still tied keep their input order.
+function sortByColumn<T>(
+  items: T[],
+  valueOf: (item: T) => SortValue,
+  dir: CurriculumSummarySortDirection,
+  order: { compareBlanks?: (a: T, b: T) => number; tieBreak?: (a: T, b: T) => number } = {}
+): T[] {
+  const sign = dir === "asc" ? 1 : -1;
+  const compareEntries = (a: SortEntry<T>, b: SortEntry<T>): number => {
+    if (a.value === null || b.value === null) {
+      if (a.value !== null) return -1;
+      if (b.value !== null) return 1;
+      return order.compareBlanks?.(a.item, b.item) ?? 0;
+    }
+    return sign * compareSortValues(a.value, b.value);
+  };
+  return items
+    .map((item): SortEntry<T> => ({ item, value: valueOf(item) }))
+    .sort((a, b) => compareEntries(a, b) || (order.tieBreak?.(a.item, b.item) ?? 0))
+    .map((entry) => entry.item);
+}
+
+// The default worst-first order, or a column header's sort with Centre name (A–Z) breaking ties
+// and rows without a value in the default order's row-kind order. Runs over every listed row
+// before pagination; each row is one Summary Class.
+export function sortSummaryRows(
+  rows: CurriculumSummaryRow[],
+  sort: CurriculumSummarySort | null
+): CurriculumSummaryRow[] {
+  if (!sort) return [...rows].sort(compareWorstFirst);
+  return sortByColumn(rows, SORT_VALUES[sort.key], sort.dir, {
+    compareBlanks: (a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind],
+    tieBreak: compareCentreNames,
+  });
+}
+
+export interface ChapterTimelineChapter {
+  chapterId: number;
+  code: string;
+  name: string;
+  subject: string;
+  dueDate: string | null;
+  // Earliest Chapter Completion IST date within [1 Apr of the academic year, as-of].
+  completedOn: string | null;
+  status: ChapterStatus;
+  testStatus: ChapterTestStatus;
+  // Regular-log minutes in the hours window, split to the Chapter by topic share.
+  taughtMinutes: number;
+  // The Primary Exam Track's prescribed minutes, falling back through the class's other tracks.
+  prescribedMinutes: number;
+  // Class Cancellation Logs and Doubt Solving Log minutes for the Chapter in the hours window.
+  cancellations: number;
+  doubtSolvingMinutes: number;
+}
+
+export interface ChapterTimeline {
+  grade: CurriculumSummaryGrade;
+  // Grades with a Summary Class at this Centre (a Centre Exam Track mapped); the timeline's
+  // Grade switch links only these, since any other Grade's timeline does not exist.
+  grades: CurriculumSummaryGrade[];
+  asOf: string;
+  hoursWindow: HoursWindow;
+  // The class as the Summary shows it: Centre, kind, explanation, plan and Behind.
+  row: CurriculumSummaryRow;
+  // Subjects with Chapters for the class, in pill-column order; `progress` is null without a plan.
+  subjects: { subject: string; progress: CurriculumSummarySubjectProgress | null }[];
+  // By Chapter Due Date; undated Chapters last in syllabus order. Empty for setup-error,
+  // no-content and configuration-error classes.
+  chapters: ChapterTimelineChapter[];
+  header: {
+    // PCM / PCB syllabus status for the groups the class's tracks take, in SUBJECT_GROUPS order.
+    subjectGroups: ChapterTimelineGroupStatus[];
+    testsOverdue: number;
+    // Σ over the class's Chapters: hours taught in the window and prescribed time.
+    taughtMinutes: number;
+    prescribedMinutes: number;
+    cancellations: number;
+    doubtSolvingMinutes: number;
+  };
+}
+
+// One subject group's syllabus status on the timeline header (curriculum owner decision Q24).
+export interface ChapterTimelineGroupStatus {
+  group: SubjectGroup;
+  // The Summary row's PCM / PCB Behind cell (due, done, behind, tone, label); null without an
+  // Active plan, since nothing is due.
+  progress: CurriculumSummarySubjectProgress | null;
+  // The group's Chapters for the class completed within [1 Apr, as-of], out of all of them.
+  syllabusDone: number;
+  syllabusTotal: number;
+}
+
+export type ChapterTimelineResult =
+  | { ok: true; timeline: ChapterTimeline }
+  | { ok: false; status: 404 }
+  | CurriculumSchemaUnavailable;
+
+// The chapter timeline for the Summary Class of `centreId` + Grade. A Centre outside the user's
+// Summary row universe for that Grade is not found, so nothing about it leaks.
+export async function getChapterTimeline(
+  permission: UserPermission,
+  centreId: number,
+  params: { grade: CurriculumSummaryGrade; asOf: string; hoursWindow: HoursWindow }
+): Promise<ChapterTimelineResult> {
+  const schema = await checkSummarySchemas();
+  if (!schema.ok) return schema;
+  if (!Number.isInteger(centreId) || centreId <= 0) return { ok: false, status: 404 };
+
+  const [data] = await loadSummaryClasses(permission, { ...params, centreId });
+  if (!data) return { ok: false, status: 404 };
+
+  const row = buildSummaryRow(data);
+  const grades = await loadCentreGrades(centreId);
+  // Setup-error, no-content and configuration-error classes list no Chapters.
+  const chapters = row.kind === "plan" || row.kind === "no_plan" ? data.chapters : [];
+  const classTracks = summaryClassTracks(data.raw.mapped_tracks, chapters);
+  const activity = await loadTimelineActivity({
+    schoolCode: data.raw.school_code,
+    programId: Number(data.raw.program_id),
+    grade: params.grade,
+    tracks: classTracks,
+    from: hoursWindowStart(params.hoursWindow, params.asOf),
+    to: params.asOf,
+    chapterIds: chapters.map((chapter) => chapter.chapterId),
+  });
+  const timelineChapters = [...chapters]
+    .sort(compareTimelineChapters)
+    .map((chapter) => timelineChapter(data, chapter, { classTracks, activity, asOf: params.asOf }));
+
+  return {
+    ok: true,
+    timeline: {
+      grade: params.grade,
+      grades,
+      asOf: params.asOf,
+      hoursWindow: params.hoursWindow,
+      row,
+      subjects: timelineSubjects(row, chapters, params.asOf),
+      chapters: timelineChapters,
+      header: timelineHeader(row, chapters, timelineChapters, classTracks),
+    },
+  };
+}
+
+function summaryClassTracks(mappedTracks: string[], chapters: SummaryChapter[]): ExamTrack[] {
+  const summaryClass = classifySummaryClass(
+    mappedTracks,
+    chapters.flatMap((chapter) => chapter.tracks)
+  );
+  return summaryClass.kind === "single" || summaryClass.kind === "shared" ? summaryClass.tracks : [];
+}
+
+const NO_ACTIVITY: TimelineActivity = { taughtMinutes: 0, cancellations: 0, doubtSolvingMinutes: 0 };
+
+function timelineChapter(
+  data: SummaryClassData,
+  chapter: SummaryChapter,
+  context: { classTracks: ExamTrack[]; activity: Map<number, TimelineActivity>; asOf: string }
+): ChapterTimelineChapter {
+  const track = primaryExamTrackForChapter(context.classTracks, chapter.tracks);
+  return {
+    chapterId: chapter.chapterId,
+    code: chapter.code,
+    name: chapter.name,
+    subject: chapter.subject,
+    dueDate: chapter.dueDate,
+    completedOn: chapter.completedOn,
+    status: chapterStatus({ dueDate: chapter.dueDate, completedOn: chapter.completedOn, asOf: context.asOf }),
+    testStatus: chapterTestStatusFor(data, chapter),
+    ...(context.activity.get(chapter.chapterId) ?? NO_ACTIVITY),
+    prescribedMinutes: track ? chapter.prescribedMinutes[track] ?? 0 : 0,
+  };
+}
+
+// Subjects with Chapters for the class in pill-column order; progress only with a plan.
+function timelineSubjects(
+  row: CurriculumSummaryRow,
+  chapters: SummaryChapter[],
+  asOf: string
+): ChapterTimeline["subjects"] {
+  return [...new Set(chapters.map((chapter) => chapter.subject))]
+    .sort((a, b) => subjectRank(a) - subjectRank(b) || a.localeCompare(b))
+    .map((subject) => ({
+      subject,
+      progress: row.kind === "plan" ? subjectProgress(chapters, subject, asOf) : null,
+    }));
+}
+
+function timelineHeader(
+  row: CurriculumSummaryRow,
+  chapters: SummaryChapter[],
+  timelineChapters: ChapterTimelineChapter[],
+  classTracks: ExamTrack[]
+): ChapterTimeline["header"] {
+  const total = (value: (chapter: ChapterTimelineChapter) => number) =>
+    timelineChapters.reduce((sum, chapter) => sum + value(chapter), 0);
+  return {
+    subjectGroups: subjectGroupsForClass(classTracks).map((group) => {
+      const groupChapters = chapters.filter((chapter) => subjectGroupsForSubject(chapter.subject).includes(group));
+      return {
+        group,
+        // The Summary row's own cell, so the timeline and the Summary always agree.
+        progress: row.kind === "plan" ? (row.subjectGroups?.[group] ?? null) : null,
+        syllabusDone: groupChapters.filter((chapter) => chapter.completedOn !== null).length,
+        syllabusTotal: groupChapters.length,
+      };
+    }),
+    testsOverdue: row.testsOverdue,
+    taughtMinutes: total((chapter) => chapter.taughtMinutes),
+    prescribedMinutes: total((chapter) => chapter.prescribedMinutes),
+    cancellations: total((chapter) => chapter.cancellations),
+    doubtSolvingMinutes: total((chapter) => chapter.doubtSolvingMinutes),
+  };
+}
+
+// The Centre is already known to be in the user's scope; a Grade has a Summary Class there when
+// the Centre maps an Exam Track for it (the Summary's own row rule).
+async function loadCentreGrades(centreId: number): Promise<CurriculumSummaryGrade[]> {
+  const rows = await query<{ grade: string | number }>(
+    `SELECT DISTINCT g.number AS grade
+     FROM centre_exam_tracks cet
+     JOIN grade g ON g.id = cet.grade_id
+     WHERE cet.centre_id = $1
+       AND g.number = ANY($2::int[])
+     ORDER BY g.number`,
+    [centreId, CURRICULUM_SUMMARY_GRADES]
+  );
+  return CURRICULUM_SUMMARY_GRADES.filter((grade) => rows.some((row) => Number(row.grade) === grade));
+}
+
+interface TimelineActivityRow {
+  chapter_id: string | number;
+  taught_minutes: string | number;
+  cancellations: string | number;
+  doubt_solving_minutes: string | number;
+}
+
+interface TimelineActivity {
+  taughtMinutes: number;
+  cancellations: number;
+  doubtSolvingMinutes: number;
+}
+
+// Per Chapter of the class, from LMS Curriculum Logs at the Centre's School + Program + Grade
+// under any class track within [from, to]: regular minutes, each log split to Chapters by topic
+// share (its minutes × the Chapter's topics / the log's topics, rounded per log); Class
+// Cancellation Logs and Doubt Solving minutes by their `chapter_id`. A shared class's logs under
+// both tracks are summed without de-duplication (ADR 0008).
+async function loadTimelineActivity(params: {
+  schoolCode: string;
+  programId: number;
+  grade: CurriculumSummaryGrade;
+  tracks: string[];
+  from: string;
+  to: string;
+  chapterIds: number[];
+}): Promise<Map<number, TimelineActivity>> {
+  if (params.tracks.length === 0 || params.chapterIds.length === 0) return new Map();
+  const rows = await query<TimelineActivityRow>(TIMELINE_ACTIVITY_SQL, [
+    params.schoolCode,
+    params.programId,
+    params.grade,
+    params.tracks,
+    params.from,
+    params.to,
+    params.chapterIds,
+  ]);
+  return new Map(
+    rows.map((row) => [
+      Number(row.chapter_id),
+      {
+        taughtMinutes: Number(row.taught_minutes),
+        cancellations: Number(row.cancellations),
+        doubtSolvingMinutes: Number(row.doubt_solving_minutes),
+      },
+    ])
+  );
+}
+
+// $1 School code, $2 Program id, $3 Grade number, $4 class tracks, $5 window start, $6 as-of,
+// $7 the class's Chapter ids.
+const TIMELINE_ACTIVITY_SQL = `
+  WITH window_logs AS (
+    SELECT l.id, l.log_type, l.duration_minutes, l.chapter_id
+    FROM lms_curriculum_logs l
+    JOIN grade g ON g.id = l.grade_id AND g.number = $3
+    WHERE l.school_code = $1
+      AND l.program_id = $2
+      AND l.exam_track = ANY($4::text[])
+      AND l.deleted_at IS NULL
+      AND l.log_date BETWEEN $5::date AND $6::date
+  ),
+  log_topics AS (
+    SELECT
+      wl.id AS log_id,
+      wl.duration_minutes,
+      t.chapter_id,
+      COUNT(*) OVER (PARTITION BY wl.id) AS total_topics_in_log
+    FROM window_logs wl
+    JOIN lms_curriculum_log_topics lt ON lt.curriculum_log_id = wl.id
+    JOIN topic t ON t.id = lt.topic_id
+    WHERE wl.log_type = 'regular'
+  ),
+  chapter_log_minutes AS (
+    SELECT
+      chapter_id,
+      ROUND(
+        MAX(duration_minutes)::numeric * COUNT(*)::numeric / MAX(total_topics_in_log)::numeric
+      ) AS minutes
+    FROM log_topics
+    GROUP BY log_id, chapter_id
+  ),
+  chapter_activity AS (
+    SELECT chapter_id, minutes AS taught_minutes, 0 AS cancellations, 0 AS doubt_solving_minutes
+    FROM chapter_log_minutes
+    UNION ALL
+    SELECT
+      chapter_id,
+      0,
+      CASE WHEN log_type = 'class_cancelled' THEN 1 ELSE 0 END,
+      CASE WHEN log_type = 'doubt_solving' THEN duration_minutes ELSE 0 END
+    FROM window_logs
+    WHERE log_type IN ('class_cancelled', 'doubt_solving')
+  )
+  -- Activity under a duplicate Chapter row (same code + subject + Grade) counts toward the
+  -- class's row for that Chapter: the logged row itself when listed, else its lowest listed
+  -- sibling, so nothing is counted twice.
+  SELECT
+    target.chapter_id,
+    SUM(ca.taught_minutes)::int AS taught_minutes,
+    SUM(ca.cancellations)::int AS cancellations,
+    SUM(ca.doubt_solving_minutes)::int AS doubt_solving_minutes
+  FROM chapter_activity ca
+  JOIN chapter logged ON logged.id = ca.chapter_id
+  CROSS JOIN LATERAL (
+    SELECT listed.id AS chapter_id
+    FROM chapter listed
+    WHERE listed.id = ANY($7::bigint[])
+      AND (listed.id = logged.id OR (${chapterSharesCodeSql("logged", "listed")}))
+    ORDER BY listed.id = logged.id DESC, listed.id
+    LIMIT 1
+  ) target
+  GROUP BY target.chapter_id`;
+
+function subjectRank(subject: string): number {
+  const index = (CURRICULUM_SUMMARY_SUBJECTS as readonly string[]).indexOf(subject);
+  return index === -1 ? CURRICULUM_SUMMARY_SUBJECTS.length : index;
+}
+
+// Syllabus order: pill-column subject order, then coverage sequence, then Chapter code.
+function compareSyllabusOrder(a: SummaryChapter, b: SummaryChapter): number {
+  return (
+    subjectRank(a.subject) - subjectRank(b.subject) ||
+    a.subject.localeCompare(b.subject) ||
+    a.sequence - b.sequence ||
+    a.code.localeCompare(b.code) ||
+    a.chapterId - b.chapterId
+  );
+}
+
+function compareTimelineChapters(a: SummaryChapter, b: SummaryChapter): number {
+  if (a.dueDate !== b.dueDate) {
+    if (a.dueDate === null) return 1;
+    if (b.dueDate === null) return -1;
+    return a.dueDate < b.dueDate ? -1 : 1;
+  }
+  return compareSyllabusOrder(a, b);
+}
+
+export type ChapterTimelineSortKey =
+  | "chapter"
+  | "subject"
+  | "due"
+  | "completed"
+  | "status"
+  | "test"
+  | "hours"
+  | "prescribed"
+  | "cancelled"
+  | "doubt_solving";
+
+export type ChapterTimelineSort = ColumnSort<ChapterTimelineSortKey>;
+
+// `YYYY-MM-DD` → one comparable number; no date is a blank.
+function dateSortValue(date: string | null): SortValue {
+  return date ? [Number(date.replaceAll("-", ""))] : null;
+}
+
+// Status, worst first on the first click (desc): Overdue (most days first), Done late (most
+// days first), Done on time, Not due. Not in plan has no Chapter Due Date, so like a blank it
+// stays last in both directions.
+function chapterStatusSortValue(status: ChapterStatus): SortValue {
+  switch (status.kind) {
+    case "overdue":
+      return [4, status.days];
+    case "done_late":
+      return [3, status.days];
+    case "done":
+      return [2, 0];
+    case "not_due":
+      return [1, 0];
+    case "not_in_plan":
+      return null;
+  }
+}
+
+// Chapter Test Status, worst first on the first click (desc): Overdue, Scheduled, Not due,
+// Conducted. Every Chapter has one of the four, so there are no blanks.
+const CHAPTER_TEST_STATUS_RANK: Record<ChapterTestStatus["kind"], number> = {
+  overdue: 4,
+  scheduled: 3,
+  not_due: 2,
+  conducted: 1,
+};
+
+const TIMELINE_SORT_VALUES: Record<ChapterTimelineSortKey, (chapter: ChapterTimelineChapter) => SortValue> = {
+  chapter: (chapter) => textSortValue(chapter.name),
+  subject: (chapter) => textSortValue(chapter.subject),
+  due: (chapter) => dateSortValue(chapter.dueDate),
+  completed: (chapter) => dateSortValue(chapter.completedOn),
+  status: (chapter) => chapterStatusSortValue(chapter.status),
+  test: (chapter) => [CHAPTER_TEST_STATUS_RANK[chapter.testStatus.kind]],
+  hours: (chapter) => [chapter.taughtMinutes],
+  prescribed: (chapter) => [chapter.prescribedMinutes],
+  cancelled: (chapter) => [chapter.cancellations],
+  doubt_solving: (chapter) => [chapter.doubtSolvingMinutes],
+};
+
+const TIMELINE_ASC_SORT_KEYS: ChapterTimelineSortKey[] = ["chapter", "subject", "due", "completed"];
+
+// A timeline header's first click: A–Z for Chapter and Subject, earliest first for the dates,
+// worst first for Status and Chapter Test, highest first for the numbers.
+export function defaultChapterTimelineSortDirection(key: ChapterTimelineSortKey): CurriculumSummarySortDirection {
+  return TIMELINE_ASC_SORT_KEYS.includes(key) ? "asc" : "desc";
+}
+
+// The timeline's `sort` / `dir` params; an unknown column is the default order.
+export function parseChapterTimelineSort(
+  key: string | undefined,
+  dir: string | undefined
+): ChapterTimelineSort | null {
+  return parseColumnSort(TIMELINE_SORT_VALUES, defaultChapterTimelineSortDirection, key, dir);
+}
+
+// A column header's sort of the timeline's Chapters (already in the default order: Chapter Due
+// Date, then syllabus order). Blanks (no date, Not in plan) go last in both directions; ties and
+// blanks keep the default order. No sort leaves the default order.
+export function sortTimelineChapters(
+  chapters: ChapterTimelineChapter[],
+  sort: ChapterTimelineSort | null
+): ChapterTimelineChapter[] {
+  if (!sort) return chapters;
+  return sortByColumn(chapters, TIMELINE_SORT_VALUES[sort.key], sort.dir);
+}
+
+export interface ChapterTimelineHalves {
+  // Chapters due on or before as-of, above the As of line.
+  dueByAsOf: ChapterTimelineChapter[];
+  // Chapters due after as-of, then undated ones, below it.
+  upcoming: ChapterTimelineChapter[];
+  // No Chapter has a plan date (No plan), so there is nothing to divide.
+  showAsOfMarker: boolean;
+}
+
+// The timeline table's rows on either side of the As of line, each half sorted by the column
+// sort (curriculum owner feedback: the line stays when sorted). Chapters arrive in the default
+// due-date order, so without a sort the halves are that order split at the line.
+export function splitTimelineAtAsOf(
+  chapters: ChapterTimelineChapter[],
+  sort: ChapterTimelineSort | null,
+  asOf: string
+): ChapterTimelineHalves {
+  const isDue = (chapter: ChapterTimelineChapter) => chapter.dueDate !== null && chapter.dueDate <= asOf;
+  return {
+    dueByAsOf: sortTimelineChapters(chapters.filter(isDue), sort),
+    upcoming: sortTimelineChapters(
+      chapters.filter((chapter) => !isDue(chapter)),
+      sort
+    ),
+    showAsOfMarker: chapters.some((chapter) => chapter.dueDate !== null),
+  };
 }

@@ -54,6 +54,14 @@ describe("PageHeader", () => {
     expect(screen.queryByText(/@/)).not.toBeInTheDocument();
   });
 
+  // At phone width the actions wrap below the title rather than squeezing the subtitle until it
+  // breaks mid-word; from sm up they stay on one row.
+  it("lets the actions wrap below the title on a phone", () => {
+    render(<PageHeader title="Curriculum Summary" subtitle="Each class's progress" actions={<a href="/x">Plans</a>} />);
+    const row = screen.getByRole("heading", { name: "Curriculum Summary" }).closest(".justify-between");
+    expect(row).toHaveClass("flex-wrap", "sm:flex-nowrap");
+  });
+
   it("always shows sign out link", () => {
     render(<PageHeader title="Dashboard" />);
     const signOut = screen.getByText("Sign out");

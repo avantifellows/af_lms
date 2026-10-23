@@ -85,7 +85,7 @@ const ROLE_DESCRIPTIONS: Record<string, string> = {
   program_admin: "Program Admins can oversee scoped schools, manage their own school visits, and monitor scoped Holistic Mentorship progress",
   teacher: "Teachers can view and manage students in their assigned schools",
   holistic_mentorship_admin: `Holistic Mentorship Admins can manage ${HOLISTIC_PROGRAM_LABELS_TEXT} mentorship`,
-  admin: "Admins have access to all features, all schools, and all programs — full edit unless marked read-only",
+  admin: "Admins have access to all features, all schools, and all programs, including authoring Curriculum Plans — full edit unless marked read-only",
   pmu_manager: "PMU Managers can view and manage JNV NVS students and view performance in their assigned JNV Schools",
   pmu_govt_school_user: "PMU Govt School Users can view and manage JNV NVS students and view performance in their one JNV School",
   alumni_manager: "Alumni Managers can view and update alumni of their assigned schools only — no access to students or any other feature",

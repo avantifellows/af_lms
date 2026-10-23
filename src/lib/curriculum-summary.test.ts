@@ -1,1269 +1,1406 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, it, expect, vi } from "vitest";
 
-import { PHYSICAL_CENTRE_PROGRAM_IDS } from "./constants";
-import type { UserPermission } from "./permissions";
-
-const { mockQuery, mockCheckCurriculumSchema } = vi.hoisted(() => ({
+const { mockQuery, mockCheckSchema, mockCheckPlansSchema, mockLoadSessions } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
-  mockCheckCurriculumSchema: vi.fn(),
+  mockCheckSchema: vi.fn(),
+  mockCheckPlansSchema: vi.fn(),
+  mockLoadSessions: vi.fn(),
 }));
 
-vi.mock("./db", () => ({ query: mockQuery }));
+vi.mock("./db", () => ({ query: mockQuery, withTransaction: vi.fn() }));
 vi.mock("./curriculum-schema", () => ({
-  checkCurriculumSchema: mockCheckCurriculumSchema,
+  checkCurriculumSchema: mockCheckSchema,
+  checkCurriculumPlansSchema: mockCheckPlansSchema,
 }));
+vi.mock("./curriculum-chapter-tests", () => ({ loadChapterTestSessions: mockLoadSessions }));
 
 import {
-  buildCommonQueryParams,
+  defaultChapterTimelineSortDirection,
+  getChapterTimeline,
   getCurriculumSummary,
-  normalizeCurriculumSummaryPageSize,
   normalizeCurriculumSummarySearchParams,
-  normalizeCurriculumSummarySort,
+  parseChapterTimelineSort,
+  sortSummaryRows,
+  sortTimelineChapters,
+  splitTimelineAtAsOf,
+  type ChapterTimelineChapter,
+  type ChapterTimelineSortKey,
+  type CurriculumSummaryQuery,
+  type CurriculumSummaryRow,
+  type CurriculumSummarySortKey,
+  type CurriculumSummarySubjectProgress,
 } from "./curriculum-summary";
+import { PHYSICAL_CENTRE_PROGRAM_IDS as P, type UserPermission } from "./permissions";
 
-const pmPermission: UserPermission = {
-  email: "pm@avantifellows.org",
-  level: 3,
-  role: "program_manager",
-  school_codes: null,
-  regions: null,
-  program_ids: [1, 2],
-};
+const TODAY = "2026-10-19";
 
-function guardRows(estimatedRows = 1) {
-  return [{ estimated_rows: estimatedRows }];
-}
-
-describe("curriculum summary", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockCheckCurriculumSchema.mockResolvedValue({ ok: true });
-  });
-
-  it("normalizes page size to supported values and defaults to 20", () => {
-    expect(normalizeCurriculumSummaryPageSize()).toBe(20);
-    expect(normalizeCurriculumSummaryPageSize("20")).toBe(20);
-    expect(normalizeCurriculumSummaryPageSize("50")).toBe(50);
-    expect(normalizeCurriculumSummaryPageSize("999")).toBe(20);
-    expect(normalizeCurriculumSummaryPageSize("abc")).toBe(20);
-  });
-
-  it("returns scoped expected rows and filter options with zero placeholder metrics", async () => {
-    mockQuery
-      .mockResolvedValueOnce([
-        {
-          schools: [
-            {
-              code: "70705",
-              name: "JNV Bhavnagar",
-              region: "West",
-              state: "Gujarat",
-              district: "Bhavnagar",
-            },
-          ],
-          programs: [{ id: 1, name: "JNV CoE" }],
-          grades: [11],
-          subjects: [{ id: 4, name: "Physics" }],
-          exam_tracks: ["jee_main"],
-          regions: ["West"],
-        },
-      ])
-      .mockResolvedValueOnce(guardRows())
-      .mockResolvedValueOnce([
-        {
-          total_rows: 1,
-          flagged_rows: 0,
-          completed_chapters: 0,
-          total_configured_chapters: 0,
-          prescribed_chapters: 0,
-          actual_minutes: 0,
-          prescribed_minutes: 0,
-        },
-      ])
-      .mockResolvedValueOnce([
-        {
-          total_count: 1,
-          school_code: "70705",
-          school_name: "JNV Bhavnagar",
-          region: "West",
-          state: "Gujarat",
-          district: "Bhavnagar",
-          program_id: 1,
-          program_name: "JNV CoE",
-          grade: 11,
-          subject_id: 4,
-          subject_name: "Physics",
-          exam_track: "jee_main",
-          completed_chapters: 0,
-          total_configured_chapters: 0,
-          prescribed_chapters: 0,
-          actual_minutes: 0,
-          prescribed_minutes: 0,
-          delta_percent: null,
-          flagged: false,
-          flag_reasons: [],
-        },
-      ])
-      .mockResolvedValueOnce([]);
-
-    const result = await getCurriculumSummary({
-      actorEmail: "pm@avantifellows.org",
-      permission: pmPermission,
-      filters: normalizeCurriculumSummarySearchParams({}, "2026-05-30"),
-      sort: "school",
-      dir: "asc",
+describe("normalizeCurriculumSummarySearchParams", () => {
+  it("defaults to Grade 11, today, page 1 and 20 rows", () => {
+    expect(normalizeCurriculumSummarySearchParams({}, TODAY)).toEqual({
+      programIds: [],
+      regions: [],
+      centreIds: [],
+      grade: 11,
+      asOf: "2026-10-19",
+      onlyBehind: false,
+      sort: null,
       page: 1,
-      pageSize: 10,
-      todayIstDate: "2026-05-30",
-    });
-
-    expect(result).toMatchObject({
-      ok: true,
-      totalRowCount: 1,
-      currentPage: 1,
-      totalPages: 1,
-      stats: {
-        totalRows: 1,
-        flaggedRows: 0,
-        avgCompletionPercent: null,
-        avgPrescribedPercent: null,
-        actualMinutes: 0,
-        prescribedMinutes: 0,
-      },
-      filterOptions: {
-        schools: [{ code: "70705", name: "JNV Bhavnagar" }],
-        programs: [{ id: 1, name: "JNV CoE" }],
-        grades: [11],
-        subjects: [{ id: 4, name: "Physics" }],
-        examTracks: ["jee_main"],
-        regions: ["West"],
-      },
-      rows: [
-        {
-          rowKey: "70705:1:11:4:jee_main",
-          schoolCode: "70705",
-          schoolName: "JNV Bhavnagar",
-          programId: 1,
-          programName: "JNV CoE",
-          grade: 11,
-          subjectId: 4,
-          subjectName: "Physics",
-          examTrack: "jee_main",
-          completedChapters: 0,
-          totalConfiguredChapters: 0,
-          prescribedChapters: 0,
-          actualMinutes: 0,
-          prescribedMinutes: 0,
-          deltaPercent: null,
-          flagged: false,
-          flagReasons: [],
-        },
-      ],
-    });
-    expect(mockQuery).toHaveBeenCalledTimes(5);
-  });
-
-  it("maps unavailable and Centre configuration-error rows without inventing subjects or metrics", async () => {
-    mockQuery
-      .mockResolvedValueOnce([{
-        schools: [], programs: [], grades: [11], subjects: [],
-        exam_tracks: ["cet"], regions: [],
-      }])
-      .mockResolvedValueOnce(guardRows(2))
-      .mockResolvedValueOnce([{
-        total_rows: 2, flagged_rows: 0, completed_chapters: 0,
-        total_configured_chapters: 0, prescribed_chapters: 0,
-        actual_minutes: 0, prescribed_minutes: 0,
-      }])
-      .mockResolvedValueOnce([
-        {
-          row_kind: "unavailable",
-          configuration_error: null,
-          school_code: "70705",
-          school_name: "JNV Bhavnagar",
-          region: "West",
-          state: "Gujarat",
-          district: "Bhavnagar",
-          program_id: 1,
-          program_name: "JNV CoE",
-          grade: 11,
-          subject_id: null,
-          subject_name: null,
-          exam_track: "cet",
-          completed_chapters: 0,
-          total_configured_chapters: 0,
-          prescribed_chapters: 0,
-          actual_minutes: 0,
-          prescribed_minutes: 0,
-          delta_percent: null,
-          flagged: false,
-          flag_reasons: [],
-        },
-        {
-          row_kind: "configuration_error",
-          configuration_error: "No active physical Centre is configured for this School and Program",
-          school_code: "99999",
-          school_name: "JNV Missing",
-          region: "West",
-          state: "Gujarat",
-          district: "Nowhere",
-          program_id: 1,
-          program_name: "JNV CoE",
-          grade: null,
-          subject_id: null,
-          subject_name: null,
-          exam_track: null,
-          completed_chapters: 0,
-          total_configured_chapters: 0,
-          prescribed_chapters: 0,
-          actual_minutes: 0,
-          prescribed_minutes: 0,
-          delta_percent: null,
-          flagged: false,
-          flag_reasons: [],
-        },
-      ])
-      .mockResolvedValueOnce([]);
-
-    const result = await getCurriculumSummary({
-      actorEmail: "pm@avantifellows.org",
-      permission: pmPermission,
-      filters: normalizeCurriculumSummarySearchParams({}, "2026-05-30"),
-      sort: "school",
-      dir: "asc",
-      page: 1,
-      pageSize: 10,
-      todayIstDate: "2026-05-30",
-    });
-
-    expect(result).toMatchObject({
-      ok: true,
-      rows: [
-        {
-          rowKind: "unavailable",
-          rowKey: "70705:1:11:cet:unavailable",
-          grade: 11,
-          subjectId: null,
-          subjectName: null,
-          examTrack: "cet",
-          explanation: "Curriculum configuration is unavailable",
-        },
-        {
-          rowKind: "configuration_error",
-          rowKey: "99999:1:configuration_error",
-          grade: null,
-          subjectId: null,
-          subjectName: null,
-          examTrack: null,
-          explanation: "No active physical Centre is configured for this School and Program",
-        },
-      ],
+      pageSize: 20,
     });
   });
 
-  it("returns computed metrics and weighted stats for the full filtered set before pagination", async () => {
-    mockQuery
-      .mockResolvedValueOnce([
-        {
-          schools: [],
-          programs: [],
-          grades: [],
-          subjects: [],
-          exam_tracks: [],
-          regions: [],
-        },
-      ])
-      .mockResolvedValueOnce(guardRows(2))
-      .mockResolvedValueOnce([
-        {
-          total_rows: 2,
-          flagged_rows: 1,
-          completed_chapters: 2,
-          total_configured_chapters: 6,
-          prescribed_chapters: 5,
-          actual_minutes: 90,
-          prescribed_minutes: 360,
-        },
-      ])
-      .mockResolvedValueOnce([
-        {
-          total_count: 2,
-          school_code: "70705",
-          school_name: "JNV Bhavnagar",
-          region: "West",
-          state: "Gujarat",
-          district: "Bhavnagar",
-          program_id: 1,
-          program_name: "JNV CoE",
-          grade: 11,
-          subject_id: 4,
-          subject_name: "Physics",
-          exam_track: "jee_main",
-          completed_chapters: 2,
-          total_configured_chapters: 2,
-          prescribed_chapters: 2,
-          actual_minutes: 90,
-          prescribed_minutes: 180,
-          delta_percent: -50,
-          flagged: true,
-          flag_reasons: ["under_prescribed_hours"],
-        },
-      ])
-      .mockResolvedValueOnce([]);
-
-    const result = await getCurriculumSummary({
-      actorEmail: "pm@avantifellows.org",
-      permission: pmPermission,
-      filters: normalizeCurriculumSummarySearchParams({}, "2026-05-30"),
-      sort: "school",
-      dir: "asc",
-      page: 1,
-      pageSize: 1,
-      todayIstDate: "2026-05-30",
-    });
-
-    expect(result).toMatchObject({
-      ok: true,
-      totalRowCount: 2,
-      totalPages: 2,
-      stats: {
-        totalRows: 2,
-        flaggedRows: 1,
-        avgCompletionPercent: 33.33333333333333,
-        avgPrescribedPercent: 83.33333333333334,
-        actualMinutes: 90,
-        prescribedMinutes: 360,
-      },
-      rows: [
-        {
-          completedChapters: 2,
-          totalConfiguredChapters: 2,
-          prescribedChapters: 2,
-          actualMinutes: 90,
-          prescribedMinutes: 180,
-          deltaPercent: -50,
-          flagged: true,
-          flagReasons: ["under_prescribed_hours"],
-        },
-      ],
-    });
-  });
-
-  it("counts only Regular Class logs toward Actual Hours and chapter coverage", async () => {
-    mockQuery
-      .mockResolvedValueOnce([
-        {
-          schools: [],
-          programs: [],
-          grades: [],
-          subjects: [],
-          exam_tracks: [],
-          regions: [],
-        },
-      ])
-      .mockResolvedValueOnce(guardRows(1))
-      .mockResolvedValueOnce([
-        {
-          total_rows: 1,
-          flagged_rows: 0,
-          completed_chapters: 0,
-          total_configured_chapters: 1,
-          prescribed_chapters: 1,
-          actual_minutes: 0,
-          prescribed_minutes: 60,
-        },
-      ])
-      .mockResolvedValueOnce([]);
-
-    await getCurriculumSummary({
-      actorEmail: "pm@avantifellows.org",
-      permission: pmPermission,
-      filters: normalizeCurriculumSummarySearchParams({}, "2026-05-30"),
-      sort: "school",
-      dir: "asc",
-      page: 1,
-      pageSize: 10,
-      todayIstDate: "2026-05-30",
-    });
-
-    const rowsSql = String(mockQuery.mock.calls[3][0]).replace(/\s+/g, " ");
-    expect(rowsSql).toContain("l.log_type = 'regular'");
-    const statsSql = String(mockQuery.mock.calls[2][0]).replace(/\s+/g, " ");
-    expect(statsSql).toContain("l.log_type = 'regular'");
-  });
-
-  it("keeps zero-prescribed delta blank while surfacing actual-time flag reasons", async () => {
-    mockQuery
-      .mockResolvedValueOnce([
-        {
-          schools: [],
-          programs: [],
-          grades: [],
-          subjects: [],
-          exam_tracks: [],
-          regions: [],
-        },
-      ])
-      .mockResolvedValueOnce(guardRows(0))
-      .mockResolvedValueOnce([
-        {
-          total_rows: 1,
-          flagged_rows: 1,
-          completed_chapters: 0,
-          total_configured_chapters: 1,
-          prescribed_chapters: 0,
-          actual_minutes: 45,
-          prescribed_minutes: 0,
-        },
-      ])
-      .mockResolvedValueOnce([
-        {
-          total_count: 1,
-          school_code: "70705",
-          school_name: "JNV Bhavnagar",
-          region: "West",
-          state: "Gujarat",
-          district: "Bhavnagar",
-          program_id: 1,
-          program_name: "JNV CoE",
-          grade: 11,
-          subject_id: 4,
-          subject_name: "Physics",
-          exam_track: "jee_main",
-          completed_chapters: 0,
-          total_configured_chapters: 1,
-          prescribed_chapters: 0,
-          actual_minutes: 45,
-          prescribed_minutes: 0,
-          delta_percent: null,
-          flagged: true,
-          flag_reasons: ["actual_time_on_zero_prescribed_minutes"],
-        },
-      ])
-      .mockResolvedValueOnce([]);
-
-    const result = await getCurriculumSummary({
-      actorEmail: "pm@avantifellows.org",
-      permission: pmPermission,
-      filters: normalizeCurriculumSummarySearchParams({}, "2026-05-30"),
-      sort: "school",
-      dir: "asc",
-      page: 1,
-      pageSize: 10,
-      todayIstDate: "2026-05-30",
-    });
-
-    expect(result).toMatchObject({
-      ok: true,
-      rows: [
-        {
-          actualMinutes: 45,
-          prescribedMinutes: 0,
-          deltaPercent: null,
-          flagged: true,
-          flagReasons: ["actual_time_on_zero_prescribed_minutes"],
-        },
-      ],
-    });
-  });
-
-  it("ignores malformed list and date filters while preserving well-formed values", () => {
-    const filters = normalizeCurriculumSummarySearchParams(
-      {
-        schools: "70705,bad code",
-        programs: "1,abc,999",
-        grades: "11,nope",
-        subjects: "4,-1",
-        exam_tracks: "jee_main,cet,math_foundation,stream",
-        from: "2026-02-31",
-        to: "2026-05-15",
-        flagged: "true",
-      },
-      "2026-05-30"
-    );
-
-    expect(filters).toMatchObject({
-      schools: ["70705"],
-      programs: [1, 999],
-      grades: [11],
-      subjects: [4],
-      examTracks: ["jee_main", "cet", "math_foundation"],
-      preset: "custom",
-      from: undefined,
-      to: "2026-05-15",
-      flagged: true,
-      forceEmpty: false,
-    });
-  });
-
-  it("treats all-date preset as unbounded even when stale date inputs are submitted", () => {
-    const filters = normalizeCurriculumSummarySearchParams(
-      {
-        preset: "all",
-        from: "2026-05-01",
-        to: "2026-05-30",
-      },
-      "2026-05-30"
-    );
-
-    expect(filters).toMatchObject({
-      preset: "all",
-      from: undefined,
-      to: undefined,
-      forceEmpty: false,
-    });
-  });
-
-  it("ignores retired State and District URL parameters", () => {
-    const filters = normalizeCurriculumSummarySearchParams(
-      { regions: "West", states: "Gujarat", districts: "Bhavnagar" },
-      "2026-05-30"
-    );
-
-    expect(filters.regions).toEqual(["West"]);
-    expect(filters).not.toHaveProperty("states");
-    expect(filters).not.toHaveProperty("districts");
-    expect(buildCommonQueryParams(pmPermission, filters)).toEqual([
-      true,
-      null,
-      null,
-      PHYSICAL_CENTRE_PROGRAM_IDS,
-      false,
-      [1, 2],
-      null,
-      null,
-      null,
-      null,
-      null,
-      ["West"],
-      ["jee_main", "jee_advanced"],
-      ["neet"],
-    ]);
-  });
-
-  it("normalizes supported sort keys with a safe deterministic default", () => {
-    expect(normalizeCurriculumSummarySort(undefined, undefined)).toEqual({
-      sort: "flagged",
-      dir: "desc",
-    });
-    expect(normalizeCurriculumSummarySort("completed", "asc")).toEqual({
-      sort: "completed",
-      dir: "asc",
-    });
-    expect(normalizeCurriculumSummarySort("prescribed", "desc")).toEqual({
-      sort: "prescribed",
-      dir: "desc",
-    });
-    expect(normalizeCurriculumSummarySort("delta", "desc")).toEqual({
-      sort: "delta",
-      dir: "desc",
-    });
-    expect(normalizeCurriculumSummarySort("actual", "asc")).toEqual({
-      sort: "actual",
-      dir: "asc",
-    });
-    expect(normalizeCurriculumSummarySort("flagged", "asc")).toEqual({
-      sort: "flagged",
-      dir: "asc",
-    });
+  it("keeps a valid Grade 12, as-of date, page and page size", () => {
     expect(
-      normalizeCurriculumSummarySort("delta; DROP TABLE school", "asc; DROP")
+      normalizeCurriculumSummarySearchParams(
+        { grade: "12", as_of: "2026-08-15", page: "3", limit: "50" },
+        TODAY
+      )
     ).toEqual({
-      sort: "flagged",
-      dir: "desc",
-    });
-    expect(normalizeCurriculumSummarySort("toString", "asc")).toEqual({
-      sort: "flagged",
-      dir: "asc",
+      programIds: [],
+      regions: [],
+      centreIds: [],
+      grade: 12,
+      asOf: "2026-08-15",
+      onlyBehind: false,
+      sort: null,
+      page: 3,
+      pageSize: 50,
     });
   });
 
-  it("keeps mapped option unions independent from downstream active filters", async () => {
-    mockQuery
-      .mockResolvedValueOnce([
-        {
-          schools: [],
-          programs: [],
-          grades: [],
-          subjects: [],
-          exam_tracks: [],
-          regions: ["West"],
-        },
-      ])
-      .mockResolvedValueOnce(guardRows(0))
-      .mockResolvedValueOnce([
-        {
-          total_rows: 0,
-          flagged_rows: 0,
-          completed_chapters: 0,
-          total_configured_chapters: 0,
-          prescribed_chapters: 0,
-          actual_minutes: 0,
-          prescribed_minutes: 0,
-        },
-      ])
-      .mockResolvedValueOnce([]);
-
-    await getCurriculumSummary({
-      actorEmail: "pm@avantifellows.org",
-      permission: pmPermission,
-      filters: {
-        ...normalizeCurriculumSummarySearchParams(
-          { schools: "OUT_OF_SCOPE" },
-          "2026-05-30"
-        ),
-      },
-      sort: "school",
-      dir: "asc",
-      page: 1,
-      pageSize: 10,
-      todayIstDate: "2026-05-30",
-    });
-
-    const optionsSql = String(mockQuery.mock.calls[0][0]).toLowerCase();
-    expect(optionsSql).toContain("from school_options");
-    expect(optionsSql).toContain("from program_options");
-    expect(optionsSql).toContain("from grade_options");
-    expect(optionsSql).toContain("from subject_options");
-    expect(optionsSql).toContain("from exam_track_options");
-    expect(optionsSql).toContain("from geo_options");
-    const optionSql = optionsSql.slice(optionsSql.indexOf("option_rows as"));
-    expect(optionSql).not.toContain("$8::int[] is null or program_id");
-    expect(optionSql).not.toContain("$9::int[] is null or grade");
-    expect(optionSql).not.toContain("$10::int[] is null or subject_id");
-    expect(optionSql).not.toContain("$11::text[] is null or exam_track");
-    expect(optionsSql).not.toContain("left join filtered_rows on true");
-  });
-
-  it("limits downstream options to the union of mapped rows for the selected Schools", async () => {
-    mockQuery
-      .mockResolvedValueOnce([
-        {
-          schools: [],
-          programs: [{ id: 1, name: "JNV CoE" }],
-          grades: [11],
-          subjects: [{ id: 4, name: "Physics" }],
-          exam_tracks: ["jee_main"],
-          regions: [],
-          availability: [
-            {
-              schoolCode: "70705",
-              programId: 1,
-              programName: "JNV CoE",
-              grade: 11,
-              subjectId: 4,
-              subjectName: "Physics",
-              examTrack: "jee_main",
-            },
-            {
-              schoolCode: "64037",
-              programId: 2,
-              programName: "JNV Nodal",
-              grade: 12,
-              subjectId: 7,
-              subjectName: "Biology",
-              examTrack: "neet",
-            },
-          ],
-        },
-      ])
-      .mockResolvedValueOnce(guardRows(0))
-      .mockResolvedValueOnce([{
-        total_rows: 0,
-        flagged_rows: 0,
-        completed_chapters: 0,
-        total_configured_chapters: 0,
-        prescribed_chapters: 0,
-        actual_minutes: 0,
-        prescribed_minutes: 0,
-      }])
-      .mockResolvedValueOnce([]);
-
-    const result = await getCurriculumSummary({
-      actorEmail: "pm@avantifellows.org",
-      permission: pmPermission,
-      filters: normalizeCurriculumSummarySearchParams(
-        { schools: "70705", programs: "2", grades: "12", subjects: "7" },
-        "2026-05-30"
-      ),
-      sort: "school",
-      dir: "asc",
-      page: 1,
-      pageSize: 10,
-      todayIstDate: "2026-05-30",
-    });
-
-    expect(result).toMatchObject({
-      ok: true,
-      filterOptions: {
-        programs: [{ id: 1, name: "JNV CoE" }],
-        grades: [11],
-        subjects: [{ id: 4, name: "Physics" }],
-        examTracks: ["jee_main"],
-        availability: [
-          { schoolCode: "70705", programId: 1, grade: 11, subjectId: 4, examTrack: "jee_main" },
-          { schoolCode: "64037", programId: 2, grade: 12, subjectId: 7, examTrack: "neet" },
-        ],
-      },
-    });
-
-    const optionsSql = String(mockQuery.mock.calls[0][0]).toLowerCase();
-    expect(optionsSql).toContain("option_rows as");
-    expect(optionsSql).toContain("from mapped_rows");
-    expect(optionsSql).toContain("school_code = any($7::text[])");
-    const optionSql = optionsSql.slice(optionsSql.indexOf("option_rows as"));
-    expect(optionSql).not.toContain("$8::int[] is null or program_id");
-    expect(optionSql).not.toContain("$9::int[] is null or grade");
-    expect(optionSql).not.toContain("$10::int[] is null or subject_id");
-  });
-
-  it("defaults to the current academic year using the injected IST date", () => {
+  it("falls back for an unknown Grade, an impossible date, a bad page and an unsupported page size", () => {
     expect(
-      normalizeCurriculumSummarySearchParams({}, "2026-05-30")
-    ).toMatchObject({
-      preset: "current_academic_year",
-      from: "2026-04-01",
-      to: "2026-05-30",
+      normalizeCurriculumSummarySearchParams(
+        { grade: "10", as_of: "2026-02-30", page: "-2", limit: "15" },
+        TODAY
+      )
+    ).toEqual({
+      programIds: [],
+      regions: [],
+      centreIds: [],
+      grade: 11,
+      asOf: "2026-10-19",
+      onlyBehind: false,
+      sort: null,
+      page: 1,
+      pageSize: 20,
     });
+  });
 
+  it("ignores removed filters", () => {
     expect(
-      normalizeCurriculumSummarySearchParams({}, "2026-02-15")
-    ).toMatchObject({
-      preset: "current_academic_year",
-      from: "2025-04-01",
-      to: "2026-02-15",
-    });
-  });
-
-  it("preserves an invalid custom range and skips the expected-row query", async () => {
-    mockQuery.mockResolvedValueOnce([
-      {
-        schools: [],
-        programs: [],
-        grades: [],
-        subjects: [],
-        exam_tracks: [],
-        regions: [],
-      },
-    ]);
-
-    const result = await getCurriculumSummary({
-      actorEmail: "pm@avantifellows.org",
-      permission: pmPermission,
-      filters: normalizeCurriculumSummarySearchParams(
-        { from: "2026-05-30", to: "2026-04-01" },
-        "2026-05-30"
-      ),
-      sort: "school",
-      dir: "asc",
+      normalizeCurriculumSummarySearchParams(
+        { subjects: "4", exam_tracks: "neet", preset: "all", flagged: "true", sort: "school" },
+        TODAY
+      )
+    ).toEqual({
+      programIds: [],
+      regions: [],
+      centreIds: [],
+      grade: 11,
+      asOf: "2026-10-19",
+      onlyBehind: false,
+      sort: null,
       page: 1,
-      pageSize: 10,
-      todayIstDate: "2026-05-30",
+      pageSize: 20,
     });
-
-    expect(result).toMatchObject({
-      ok: true,
-      activeFilters: {
-        preset: "custom",
-        from: "2026-05-30",
-        to: "2026-04-01",
-        forceEmpty: true,
-      },
-      rows: [],
-      totalRowCount: 0,
-    });
-    expect(result).toMatchObject({
-      ok: true,
-      stats: {
-        totalRows: 0,
-        flaggedRows: 0,
-        avgCompletionPercent: null,
-        avgPrescribedPercent: null,
-        actualMinutes: 0,
-        prescribedMinutes: 0,
-      },
-    });
-    expect(mockQuery).toHaveBeenCalledTimes(1);
   });
 
-  it("grounds the Summary universe in the one resolved Centre's current Exam Track mappings", async () => {
-    mockQuery.mockResolvedValueOnce([
-      {
-        schools: [],
-        programs: [],
-        grades: [],
-        subjects: [],
-        exam_tracks: [],
-        regions: [],
-      },
-    ]).mockResolvedValueOnce(guardRows(0)).mockResolvedValueOnce([
-      {
-        total_rows: 0,
-        flagged_rows: 0,
-        completed_chapters: 0,
-        total_configured_chapters: 0,
-        prescribed_chapters: 0,
-        actual_minutes: 0,
-        prescribed_minutes: 0,
-      },
-    ]).mockResolvedValueOnce([]);
-
-    await getCurriculumSummary({
-      actorEmail: "pm@avantifellows.org",
-      permission: pmPermission,
-      filters: normalizeCurriculumSummarySearchParams(
-        { from: "2026-05-01", to: "2026-05-30" },
-        "2026-05-30"
-      ),
-      sort: "school",
-      dir: "asc",
+  it("reads Program ids, Regions and Centre ids from repeated or comma-separated values, and Only behind", () => {
+    expect(
+      normalizeCurriculumSummarySearchParams(
+        {
+          programs: ["2", "1, x, 2"],
+          regions: ["NORTH", "SOUTH, NORTH", " "],
+          // Only positive whole ids count; the removed School search `q` is ignored.
+          centres: ["9000812", "12, x, 0, -3, 1.5, 012", "12"],
+          q: "Bhuj",
+          only_behind: "1",
+        },
+        TODAY
+      )
+    ).toEqual({
+      programIds: [2, 1],
+      regions: ["NORTH", "SOUTH"],
+      centreIds: [9000812, 12],
+      grade: 11,
+      asOf: "2026-10-19",
+      onlyBehind: true,
+      sort: null,
       page: 1,
-      pageSize: 10,
-      todayIstDate: "2026-05-30",
+      pageSize: 20,
     });
-
-    const combinedSql = mockQuery.mock.calls
-      .map(([sql]) => String(sql).toLowerCase())
-      .join("\n")
-      .replace(/\s+/g, " ");
-    expect(combinedSql).toContain("left join centres");
-    expect(combinedSql).toContain("centres.is_active = true");
-    expect(combinedSql).toContain("centres.is_physical = true");
-    expect(combinedSql).toContain("count(centres.id)::int as centre_count");
-    expect(combinedSql).toContain("join centre_exam_tracks mapping");
-    expect(combinedSql).toContain("centre_count = 1");
-    expect(combinedSql).not.toContain("cross join configured_rows");
-    expect(combinedSql.indexOf("lower(configured.subject_name) = 'biology'")).toBeLessThan(
-      combinedSql.indexOf("mapped_rows as")
-    );
-    expect(combinedSql).toContain(
-      "lower(configured.subject_name) in ('maths', 'mathematics')"
-    );
-    expect(combinedSql).toContain("row_kind = 'configuration_error' or");
-    expect(combinedSql).toContain("row_kind = 'unavailable' or");
-    expect(combinedSql).toContain("join program p on p.id = any($4::int[])");
-    expect(combinedSql).toContain("from school_options");
-    expect(combinedSql).toContain("from program_options");
-    expect(combinedSql).not.toContain("ss.program_ids");
-    expect(combinedSql).toContain("lms_curriculum_logs");
-    expect(combinedSql).toContain("l.log_date");
-    expect(combinedSql).toContain("l.deleted_at is null");
-    expect(combinedSql).toContain("lms_curriculum_chapter_completions");
-    expect(combinedSql).toContain("cc.deleted_at is null");
-    expect(combinedSql).toContain("mr.delta_percent < -10");
-    expect(combinedSql).toContain("mr.delta_percent > 10");
-    expect(combinedSql).not.toContain("group_user");
-    expect(combinedSql).not.toContain("student");
   });
 
-  it("passes the shared incompatible Subject and Exam Track pairs into the Summary universe query", () => {
-    const params = buildCommonQueryParams(
-      pmPermission,
-      normalizeCurriculumSummarySearchParams({}, "2026-05-30")
-    );
-
-    expect(params.slice(-2)).toEqual([
-      ["jee_main", "jee_advanced"],
-      ["neet"],
-    ]);
+  it.each([
+    [{ sort: "pcb", dir: "asc" }, { key: "pcb", dir: "asc" }],
+    [{ sort: ["centre", "plan"], dir: ["desc", "asc"] }, { key: "centre", dir: "desc" }],
+    // Without a valid direction a column starts in its first-click direction.
+    [{ sort: "pcm" }, { key: "pcm", dir: "desc" }],
+    [{ sort: "physics", dir: "up" }, { key: "physics", dir: "desc" }],
+    [{ sort: "region", dir: "DESC" }, { key: "region", dir: "asc" }],
+    // Unknown columns mean the default order, whatever the direction.
+    [{ sort: "school", dir: "asc" }, null],
+    [{ sort: "Centre", dir: "asc" }, null],
+    [{ sort: "toString" }, null],
+    // Tests overdue is no longer a column.
+    [{ sort: "tests_overdue", dir: "desc" }, null],
+    [{ sort: "", dir: "desc" }, null],
+    [{ dir: "asc" }, null],
+  ])("reads the sort from %j", (searchParams, sort) => {
+    expect(normalizeCurriculumSummarySearchParams(searchParams, TODAY).sort).toEqual(sort);
   });
 
-  it("passes date filters and Only flagged into the computed summary queries", async () => {
-    mockQuery.mockResolvedValueOnce([
-      {
-        schools: [],
-        programs: [],
-        grades: [],
-        subjects: [],
-        exam_tracks: [],
-        regions: [],
-      },
-    ]).mockResolvedValueOnce(guardRows(0)).mockResolvedValueOnce([
-      {
-        total_rows: 0,
-        flagged_rows: 0,
-        completed_chapters: 0,
-        total_configured_chapters: 0,
-        prescribed_chapters: 0,
-        actual_minutes: 0,
-        prescribed_minutes: 0,
-      },
-    ]).mockResolvedValueOnce([]);
-
-    await getCurriculumSummary({
-      actorEmail: "pm@avantifellows.org",
-      permission: pmPermission,
-      filters: normalizeCurriculumSummarySearchParams(
-        { from: "2026-05-01", to: "2026-05-30", flagged: "true" },
-        "2026-05-30"
-      ),
-      sort: "school",
-      dir: "asc",
-      page: 1,
-      pageSize: 10,
-      todayIstDate: "2026-05-30",
-    });
-
-    const statsCall = mockQuery.mock.calls[2];
-    const rowsCall = mockQuery.mock.calls[3];
-    expect(statsCall[1].slice(14)).toEqual(["2026-05-01", "2026-05-30", true]);
-    expect(rowsCall[1].slice(14, 17)).toEqual([
-      "2026-05-01",
-      "2026-05-30",
-      true,
-    ]);
-    expect(String(rowsCall[0])).toContain(
-      "WHERE ($17::boolean = false OR CARDINALITY(cr.flag_reasons) > 0)"
+  it("falls back to today for an as-of year too far out to name an academic year", () => {
+    for (const asOf of ["0999-06-01", "9999-06-01", "1000-02-01"]) {
+      expect(normalizeCurriculumSummarySearchParams({ as_of: asOf }, TODAY).asOf).toBe(TODAY);
+    }
+    expect(normalizeCurriculumSummarySearchParams({ as_of: "9998-06-01" }, TODAY).asOf).toBe(
+      "9998-06-01"
     );
-  });
-
-  it("uses deterministic default sorting before the page slice", async () => {
-    mockQuery.mockResolvedValueOnce([
-      {
-        schools: [],
-        programs: [],
-        grades: [],
-        subjects: [],
-        exam_tracks: [],
-        regions: [],
-      },
-    ]).mockResolvedValueOnce(guardRows(20)).mockResolvedValueOnce([
-      {
-        total_rows: 20,
-        flagged_rows: 2,
-        completed_chapters: 0,
-        total_configured_chapters: 0,
-        prescribed_chapters: 0,
-        actual_minutes: 0,
-        prescribed_minutes: 0,
-      },
-    ]).mockResolvedValueOnce([]);
-
-    await getCurriculumSummary({
-      actorEmail: "pm@avantifellows.org",
-      permission: pmPermission,
-      filters: normalizeCurriculumSummarySearchParams({}, "2026-05-30"),
-      sort: "flagged",
-      dir: "desc",
-      page: 2,
-      pageSize: 10,
-      todayIstDate: "2026-05-30",
-    });
-
-    const rowsSql = String(mockQuery.mock.calls[3][0]).replace(/\s+/g, " ");
-    expect(rowsSql).toContain(
-      "ORDER BY flagged DESC, flag_priority ASC, delta_percent ASC NULLS LAST, school_name ASC, program_order ASC, grade ASC, subject_name ASC, exam_track ASC, school_code ASC"
-    );
-    expect(rowsSql.indexOf("ORDER BY")).toBeLessThan(rowsSql.indexOf("LIMIT $18 OFFSET $19"));
-    expect(mockQuery.mock.calls[3][1].slice(-2)).toEqual([10, 10]);
-  });
-
-  it("orders manual delta sorts with null delta values last", async () => {
-    mockQuery.mockResolvedValueOnce([
-      {
-        schools: [],
-        programs: [],
-        grades: [],
-        subjects: [],
-        exam_tracks: [],
-        regions: [],
-      },
-    ]).mockResolvedValueOnce(guardRows(2)).mockResolvedValueOnce([
-      {
-        total_rows: 2,
-        flagged_rows: 0,
-        completed_chapters: 0,
-        total_configured_chapters: 0,
-        prescribed_chapters: 0,
-        actual_minutes: 0,
-        prescribed_minutes: 0,
-      },
-    ]).mockResolvedValueOnce([]);
-
-    await getCurriculumSummary({
-      actorEmail: "pm@avantifellows.org",
-      permission: pmPermission,
-      filters: normalizeCurriculumSummarySearchParams({}, "2026-05-30"),
-      sort: "delta",
-      dir: "desc",
-      page: 1,
-      pageSize: 10,
-      todayIstDate: "2026-05-30",
-    });
-
-    expect(String(mockQuery.mock.calls[3][0]).replace(/\s+/g, " ")).toContain(
-      "ORDER BY delta_percent DESC NULLS LAST, school_name ASC"
-    );
-  });
-
-  it("stops before detailed summary queries when the expected row guard trips", async () => {
-    mockQuery
-      .mockResolvedValueOnce([
-        {
-          schools: [],
-          programs: [],
-          grades: [],
-          subjects: [],
-          exam_tracks: [],
-          regions: [],
-        },
-      ])
-      .mockResolvedValueOnce(guardRows(10001));
-
-    const result = await getCurriculumSummary({
-      actorEmail: "pm@avantifellows.org",
-      permission: pmPermission,
-      filters: normalizeCurriculumSummarySearchParams({}, "2026-05-30"),
-      sort: "flagged",
-      dir: "desc",
-      page: 1,
-      pageSize: 10,
-      todayIstDate: "2026-05-30",
-    });
-
-    expect(result).toMatchObject({
-      ok: true,
-      rowCountGuardTripped: true,
-      estimatedRowCount: 10001,
-      rows: [],
-      totalRowCount: 0,
-    });
-    expect(mockQuery).toHaveBeenCalledTimes(2);
-    expect(String(mockQuery.mock.calls[1][0])).toContain("LIMIT 10001");
-  });
-
-  it("clamps requested pages before querying the paginated rows", async () => {
-    mockQuery
-      .mockResolvedValueOnce([
-        {
-          schools: [],
-          programs: [],
-          grades: [],
-          subjects: [],
-          exam_tracks: [],
-          regions: [],
-        },
-      ])
-      .mockResolvedValueOnce(guardRows(11))
-      .mockResolvedValueOnce([
-        {
-          total_rows: 11,
-          flagged_rows: 0,
-          completed_chapters: 0,
-          total_configured_chapters: 0,
-          prescribed_chapters: 0,
-          actual_minutes: 0,
-          prescribed_minutes: 0,
-        },
-      ])
-      .mockResolvedValueOnce([]);
-
-    const result = await getCurriculumSummary({
-      actorEmail: "pm@avantifellows.org",
-      permission: pmPermission,
-      filters: normalizeCurriculumSummarySearchParams({}, "2026-05-30"),
-      sort: "school",
-      dir: "asc",
-      page: 99,
-      pageSize: 10,
-      todayIstDate: "2026-05-30",
-    });
-
-    expect(result).toMatchObject({
-      ok: true,
-      currentPage: 2,
-      totalPages: 2,
-    });
-    expect(mockQuery.mock.calls[3][1].slice(-2)).toEqual([10, 10]);
-  });
-
-  it("loads chapter rows only for the current page top-level rows", async () => {
-    mockQuery
-      .mockResolvedValueOnce([
-        {
-          schools: [],
-          programs: [],
-          grades: [],
-          subjects: [],
-          exam_tracks: [],
-          regions: [],
-        },
-      ])
-      .mockResolvedValueOnce(guardRows(12))
-      .mockResolvedValueOnce([
-        {
-          total_rows: 12,
-          flagged_rows: 0,
-          completed_chapters: 0,
-          total_configured_chapters: 0,
-          prescribed_chapters: 0,
-          actual_minutes: 0,
-          prescribed_minutes: 0,
-        },
-      ])
-      .mockResolvedValueOnce([
-        {
-          total_count: 12,
-          school_code: "70705",
-          school_name: "JNV Bhavnagar",
-          region: "West",
-          state: "Gujarat",
-          district: "Bhavnagar",
-          program_id: 1,
-          program_name: "JNV CoE",
-          grade: 11,
-          subject_id: 4,
-          subject_name: "Physics",
-          exam_track: "jee_main",
-          completed_chapters: 0,
-          total_configured_chapters: 2,
-          prescribed_chapters: 1,
-          actual_minutes: 95,
-          prescribed_minutes: 90,
-          delta_percent: 5.5555555556,
-          flagged: false,
-          flag_reasons: [],
-        },
-      ])
-      .mockResolvedValueOnce([
-        {
-          parent_row_key: "70705:1:11:4:jee_main",
-          chapter_id: 44,
-          chapter_code: "11P1",
-          chapter_name: [{ lang_code: "en", chapter: "Kinematics" }],
-          coverage_sequence: 2,
-          completed_count: 1,
-          prescribed_count: 1,
-          actual_minutes: 95,
-          prescribed_minutes: 90,
-          class_cancellation_count: 2,
-          doubt_solving_minutes: 135,
-          delta_percent: 5.5555555556,
-          flagged: false,
-          flag_reasons: [],
-        },
-      ]);
-
-    const result = await getCurriculumSummary({
-      actorEmail: "pm@avantifellows.org",
-      permission: pmPermission,
-      filters: normalizeCurriculumSummarySearchParams({}, "2026-05-30"),
-      sort: "school",
-      dir: "asc",
-      page: 2,
-      pageSize: 10,
-      todayIstDate: "2026-05-30",
-    });
-
-    expect(result).toMatchObject({
-      ok: true,
-      chapterRowsByParentKey: {
-        "70705:1:11:4:jee_main": [
-          {
-            parentRowKey: "70705:1:11:4:jee_main",
-            chapterId: 44,
-            chapterCode: "11P1",
-            chapterName: "Kinematics",
-            coverageSequence: 2,
-            completedCount: 1,
-            prescribedCount: 1,
-            actualMinutes: 95,
-            prescribedMinutes: 90,
-            classCancellationCount: 2,
-            doubtSolvingMinutes: 135,
-            deltaPercent: 5.5555555556,
-            flagged: false,
-            flagReasons: [],
-          },
-        ],
-      },
-    });
-    expect(mockQuery).toHaveBeenCalledTimes(5);
-    const chapterSql = String(mockQuery.mock.calls[4][0]).replace(/\s+/g, " ");
-    expect(chapterSql).toContain("current_page_rows AS");
-    expect(chapterSql.indexOf("LIMIT $18 OFFSET $19")).toBeLessThan(
-      chapterSql.lastIndexOf("JOIN lms_chapter_exam_configs cfg")
-    );
-    expect(chapterSql).toContain("cfg.is_in_syllabus = true");
-    expect(chapterSql).toContain(
-      "ROUND( duration_minutes::numeric * (topics_in_chapter_for_log::numeric / NULLIF(total_topics_in_log, 0)::numeric) )"
-    );
-    expect(chapterSql).toContain("cc.deleted_at IS NULL");
-    expect(chapterSql).toContain("l.log_type = 'class_cancelled'");
-    expect(chapterSql).toContain("l.log_type = 'doubt_solving'");
-    expect(chapterSql).toContain("l.chapter_id = ch.id");
-    expect(chapterSql).toContain("l.deleted_at IS NULL");
-    expect(chapterSql).toContain("cmr.delta_percent < -10");
-    expect(chapterSql).toContain("cmr.delta_percent > 10");
-    expect(chapterSql).toContain("cmr.prescribed_minutes > 0 AND cmr.completed_count = 0");
-    expect(chapterSql).toContain("cmr.prescribed_minutes = 0 AND cmr.actual_minutes > 0");
-    expect(chapterSql).toContain(
-      "ORDER BY page_row_order ASC, coverage_sequence ASC NULLS LAST, chapter_code ASC, chapter_sort_name ASC, chapter_id ASC"
-    );
-    expect(mockQuery.mock.calls[4][1].slice(14, 16)).toEqual(["2026-04-01", "2026-05-30"]);
-    expect(mockQuery.mock.calls[4][1].slice(-2)).toEqual([10, 10]);
   });
 });
 
-describe("buildCommonQueryParams (seat-aware scope)", () => {
-  const emptyFilters = normalizeCurriculumSummarySearchParams({}, "2026-06-13");
+const AS_OF = "2026-08-15";
 
-  it("passes the resolved scope set (explicit ∪ seats) as the level-1 school param ($2)", () => {
-    const params = buildCommonQueryParams(
-      {
-        ...pmPermission,
-        level: 1,
-        role: "teacher",
-        school_codes: ["70705"],
-        scope: { schools: new Set(["70705", "99999"]), centres: new Set([5]), programs: new Set([1]) },
-      },
-      emptyFilters
-    );
-    expect(params[0]).toBe(false); // $1: level === 3
-    expect(new Set(params[1] as string[])).toEqual(new Set(["70705", "99999"])); // $2
-    expect(params[2]).toBeNull(); // $3: regions
+const ADMIN: UserPermission = {
+  email: "admin@avantifellows.org",
+  level: 3,
+  role: "admin",
+  program_ids: [1, 2],
+};
+
+const SCHEMA_UNAVAILABLE = {
+  ok: false,
+  status: 503,
+  error: "LMS curriculum schema unavailable",
+  details: ["lms_curriculum_plans.id"],
+};
+
+type RawChapter = Record<string, unknown>;
+
+function chapter(id: number, overrides: RawChapter = {}): RawChapter {
+  return {
+    chapterId: id,
+    code: `C${id}`,
+    name: `Chapter ${id}`,
+    subject: "Physics",
+    sequence: id,
+    tracks: ["jee_main", "neet"],
+    prescribedMinutes: { jee_main: 90, neet: 60 },
+    dueDate: null,
+    testDate: null,
+    completedOn: null,
+    ...overrides,
+  };
+}
+
+// Shared JEE Main + NEET class on an Active plan, as of 15 Aug:
+// Physics: 1 done on time, 2 due 31 Jul and open (test overdue); Chemistry: 3 done late;
+// Biology: 4 due 10 Aug and open (test not yet overdue), 5 undated; no Maths content.
+const PLAN_CHAPTERS = [
+  chapter(1, { dueDate: "2026-06-30", completedOn: "2026-06-28" }),
+  chapter(2, { dueDate: "2026-07-31", tracks: ["jee_main"], prescribedMinutes: { jee_main: 120 } }),
+  chapter(3, { subject: "Chemistry", dueDate: "2026-07-15", completedOn: "2026-07-20", tracks: ["neet"] }),
+  chapter(4, { subject: "Biology", dueDate: "2026-08-10", tracks: ["neet"], prescribedMinutes: { neet: 60 } }),
+  chapter(5, { subject: "Biology", tracks: ["neet"], sequence: 9, prescribedMinutes: { neet: 30 } }),
+];
+
+function raw(id: number, overrides: Record<string, unknown> = {}) {
+  return {
+    centre_id: id,
+    centre_name: `Centre ${id}`,
+    school_code: `SC${id}`,
+    school_name: `School ${id}`,
+    region: "NORTH",
+    program_id: 2,
+    program_name: "JNV Nodal",
+    centre_count: 1,
+    mapped_tracks: ["neet", "jee_main"],
+    plan_id: 900,
+    plan_title: "G11 Plan",
+    plan_status: "active",
+    plan_closure_date: "2027-03-08",
+    chapters: PLAN_CHAPTERS,
+    ...overrides,
+  };
+}
+
+// JEE Main and JEE Advanced both mapped and both with content.
+const SETUP_ERROR = {
+  mapped_tracks: ["jee_main", "jee_advanced"],
+  chapters: [chapter(1, { tracks: ["jee_main", "jee_advanced"] })],
+};
+
+function query(overrides: Partial<CurriculumSummaryQuery> = {}): CurriculumSummaryQuery {
+  return {
+    programIds: [],
+    regions: [],
+    centreIds: [],
+    grade: 11,
+    asOf: AS_OF,
+    onlyBehind: false,
+    sort: null,
+    page: 1,
+    pageSize: 20,
+    ...overrides,
+  };
+}
+
+function routeQueries(routes: {
+  summary?: unknown[];
+  grades?: unknown[];
+  activity?: unknown[];
+}) {
+  // Routed by the table each read is about; the summary read also joins centre_exam_tracks.
+  mockQuery.mockImplementation(async (sql: string) => {
+    if (sql.includes("lms_curriculum_plan_assignments")) return routes.summary ?? [];
+    if (sql.includes(ACTIVITY_TABLE)) return routes.activity ?? [];
+    if (sql.includes("centre_exam_tracks")) return routes.grades ?? [];
+    return [];
+  });
+}
+
+const ACTIVITY_TABLE = "lms_curriculum_logs";
+
+beforeEach(() => {
+  mockQuery.mockReset();
+  mockCheckSchema.mockReset().mockResolvedValue({ ok: true });
+  mockCheckPlansSchema.mockReset().mockResolvedValue({ ok: true });
+  mockLoadSessions.mockReset().mockResolvedValue(
+    new Map([[1, new Map([[1, ["2026-07-02 11:00:00"]], [4, [null]]])]])
+  );
+});
+
+describe("getCurriculumSummary", () => {
+  it.each([
+    ["curriculum", mockCheckSchema],
+    ["Curriculum Plan", mockCheckPlansSchema],
+  ])("returns the %s schema error without reading rows", async (_name, check) => {
+    check.mockResolvedValue(SCHEMA_UNAVAILABLE);
+
+    await expect(getCurriculumSummary(ADMIN, query())).resolves.toEqual(SCHEMA_UNAVAILABLE);
+    expect(mockQuery).not.toHaveBeenCalled();
   });
 
-  it("passes explicit plus seat-derived program ids as the program scope ($6)", () => {
-    const params = buildCommonQueryParams(
+  it("measures a plan row: pills, PCM / PCB Behind, Tests overdue and the plan", async () => {
+    routeQueries({ summary: [raw(1)] });
+
+    const result = await getCurriculumSummary(ADMIN, query());
+
+    if (!result.ok) throw new Error("expected rows");
+    expect(result.rows).toEqual([
       {
-        ...pmPermission,
+        centreId: 1,
+        centreName: "Centre 1",
+        schoolCode: "SC1",
+        schoolName: "School 1",
+        region: "NORTH",
+        programId: 2,
+        programName: "JNV Nodal",
+        tracksLabel: "JEE Main + NEET",
+        kind: "plan",
+        explanation: null,
+        plan: { id: 900, title: "G11 Plan", closed: false },
+        subjects: {
+          Physics: { due: 2, done: 1, behind: 1, tone: "amber", label: "1 behind" },
+          Chemistry: { due: 1, done: 1, behind: 0, tone: "green", label: "On track" },
+          Maths: null,
+          Biology: { due: 1, done: 0, behind: 1, tone: "amber", label: "1 behind" },
+        },
+        // PCM = Physics + Chemistry (2/3 done); PCB = Physics + Chemistry + Biology (2/4 done).
+        subjectGroups: {
+          PCM: { due: 3, done: 2, behind: 1, tone: "amber", label: "1 behind" },
+          PCB: { due: 4, done: 2, behind: 2, tone: "amber", label: "2 behind" },
+        },
+        // Chapter 2 (Physics, test date 1 Aug) and Chapter 3 (Chemistry, 16 Jul) have no session.
+        testsOverdue: 2,
+        testsOverdueBySubject: { Physics: 1, Chemistry: 1, Maths: 0, Biology: 0 },
+        testsConducted: null,
+      },
+    ]);
+    expect(mockLoadSessions).toHaveBeenCalledWith({
+      centreIds: [1],
+      grade: 11,
+      academicYear: "2026-2027",
+      asOf: AS_OF,
+    });
+  });
+
+  it("splits Tests overdue by pill subject, adding up to the class's count", async () => {
+    // As of 15 Aug, no sessions: a Chapter Test is overdue more than 7 days after its test date
+    // (due + 1 when unset). Overdue: 1 (Physics, test 1 Jul), 2 (Physics, due 31 Jul), 3
+    // (Chemistry, due 15 Jul), 4 (Mathematics → Maths, test 2 Aug), 6 (Biology, due 1 Jul).
+    // Not overdue: 5 (Maths, test 10 Aug, inside the grace), 7 (Biology, undated).
+    mockLoadSessions.mockResolvedValue(new Map());
+    const chapters = [
+      chapter(1, { dueDate: "2026-06-30", testDate: "2026-07-01", completedOn: "2026-06-28" }),
+      chapter(2, { dueDate: "2026-07-31" }),
+      chapter(3, { subject: "Chemistry", dueDate: "2026-07-15" }),
+      chapter(4, { subject: "Mathematics", dueDate: "2026-07-31", testDate: "2026-08-02", tracks: ["jee_main"] }),
+      chapter(5, { subject: "Maths", dueDate: "2026-08-01", testDate: "2026-08-10", tracks: ["jee_main"] }),
+      chapter(6, { subject: "Biology", dueDate: "2026-07-01", tracks: ["neet"] }),
+      chapter(7, { subject: "Biology", tracks: ["neet"] }),
+    ];
+    routeQueries({ summary: [raw(1, { chapters }), raw(2, { chapters: chapters.slice(5) })] });
+
+    const result = await getCurriculumSummary(ADMIN, query());
+
+    if (!result.ok) throw new Error("expected rows");
+    const byId = new Map(result.rows.map((row) => [row.centreId, row]));
+    expect(byId.get(1)?.testsOverdueBySubject).toEqual({ Physics: 2, Chemistry: 1, Maths: 1, Biology: 1 });
+    expect(byId.get(1)?.testsOverdue).toBe(5);
+    expect(byId.get(2)?.testsOverdueBySubject).toEqual({ Physics: 0, Chemistry: 0, Maths: 0, Biology: 1 });
+    for (const row of result.rows) {
+      const perSubject = Object.values(row.testsOverdueBySubject ?? {}).reduce((sum, count) => sum + count, 0);
+      expect(perSubject).toBe(row.testsOverdue);
+    }
+  });
+
+  it("marks a plan Closed after its closure date", async () => {
+    routeQueries({ summary: [raw(1, { plan_closure_date: "2026-08-01" })] });
+
+    const result = await getCurriculumSummary(ADMIN, query());
+
+    expect(result.ok && result.rows[0].plan).toEqual({ id: 900, title: "G11 Plan", closed: true });
+  });
+
+  it.each([
+    ["a Draft plan", { plan_status: "draft" }],
+    ["no assignment", { plan_id: null, plan_title: null, plan_status: null, plan_closure_date: null }],
+  ])("shows conducted tests instead of metrics for %s", async (_name, overrides) => {
+    routeQueries({ summary: [raw(1, overrides)] });
+
+    const result = await getCurriculumSummary(ADMIN, query());
+
+    expect(result.ok && result.rows[0]).toMatchObject({
+      kind: "no_plan",
+      plan: null,
+      subjects: null,
+      subjectGroups: null,
+      testsOverdue: 0,
+      testsOverdueBySubject: null,
+      testsConducted: 1,
+    });
+  });
+
+  it.each([
+    [
+      "another active physical Centre at the School + Program",
+      { centre_count: 2 },
+      "configuration_error",
+      "Multiple active physical Centres are configured for this School and Program",
+    ],
+    ["JEE Main + JEE Advanced", SETUP_ERROR, "setup_error", "Fix tracks in Centre Management"],
+    [
+      "JEE Main + JEE Advanced + NEET",
+      {
+        mapped_tracks: ["jee_main", "jee_advanced", "neet"],
+        chapters: [chapter(1, { tracks: ["jee_main", "jee_advanced", "neet"] })],
+      },
+      "setup_error",
+      "Fix tracks in Centre Management",
+    ],
+    ["only tracks without content", { mapped_tracks: ["cet"] }, "no_content", "Curriculum configuration is unavailable"],
+  ])("explains %s instead of measuring", async (_name, overrides, kind, explanation) => {
+    routeQueries({ summary: [raw(1, overrides)] });
+
+    const result = await getCurriculumSummary(ADMIN, query());
+
+    expect(result.ok && result.rows[0]).toMatchObject({
+      kind,
+      explanation,
+      plan: null,
+      subjects: null,
+      subjectGroups: null,
+    });
+  });
+
+  it("sorts worst first and pages the list", async () => {
+    routeQueries({
+      summary: [
+        raw(1, { centre_name: "Zeta" }),
+        raw(2, { centre_name: "Alpha", chapters: [chapter(1, { dueDate: "2026-06-30", completedOn: "2026-06-28" })] }),
+        raw(3, { centre_name: "Beta", plan_status: "draft" }),
+        raw(4, { centre_name: "Gamma", mapped_tracks: ["cet"] }),
+        raw(5, { centre_name: "Delta", centre_count: 2 }),
+        raw(6, { centre_name: "Epsilon", ...SETUP_ERROR }),
+        raw(7, { centre_name: "Beta", chapters: [chapter(1, { dueDate: "2026-06-30", completedOn: "2026-06-28" })] }),
+      ],
+    });
+
+    const first = await getCurriculumSummary(ADMIN, query({ pageSize: 10 }));
+    if (!first.ok) throw new Error("expected rows");
+    expect(first.rows.map((row) => row.centreId)).toEqual([1, 2, 7, 3, 6, 4, 5]);
+    expect(first.pagination).toEqual({ page: 1, pageSize: 10, totalRows: 7, totalPages: 1 });
+
+    const paged = await getCurriculumSummary(ADMIN, query({ pageSize: 2, page: 9 }));
+    if (!paged.ok) throw new Error("expected rows");
+    expect(paged.pagination).toEqual({ page: 4, pageSize: 2, totalRows: 7, totalPages: 4 });
+    expect(paged.rows.map((row) => row.centreId)).toEqual([5]);
+  });
+
+  it("filters by Region and Centre without changing the Region options", async () => {
+    routeQueries({
+      summary: [
+        raw(1, { centre_name: "Bhuj", region: "NORTH" }),
+        raw(2, { centre_name: "anand", region: "SOUTH" }),
+        raw(3, { centre_name: "Vapi", region: null }),
+        raw(4, { centre_name: "Chhapi", region: "SOUTH", chapters: [chapter(1, { dueDate: "2026-06-30", completedOn: "2026-06-28" })] }),
+      ],
+    });
+
+    const byRegion = await getCurriculumSummary(ADMIN, query({ regions: ["SOUTH"] }));
+    if (!byRegion.ok) throw new Error("expected rows");
+    expect(byRegion.rows.map((row) => row.centreId)).toEqual([2, 4]);
+    expect(byRegion.regionOptions).toEqual(["NORTH", "SOUTH"]);
+    // Centre options are the chosen Regions' Centres, A–Z.
+    expect(byRegion.centreOptions).toEqual([
+      { id: 2, name: "anand" },
+      { id: 4, name: "Chhapi" },
+    ]);
+
+    // Without a Region every scoped Centre is an option; the Centres narrow the rows.
+    const byCentre = await getCurriculumSummary(ADMIN, query({ centreIds: [3, 1] }));
+    if (!byCentre.ok) throw new Error("expected rows");
+    // Worst first: Centre 1's Alpha test was held (the default sessions), so Vapi has more overdue.
+    expect(byCentre.rows.map((row) => row.centreId)).toEqual([3, 1]);
+    expect(byCentre.selectedCentreIds).toEqual([1, 3]);
+    expect(byCentre.centreOptions.map((option) => option.name)).toEqual(["anand", "Bhuj", "Chhapi", "Vapi"]);
+  });
+
+  it("narrows to the chosen Centres, like Region, and keeps Only-behind rows as options", async () => {
+    routeQueries({
+      summary: [
+        raw(1),
+        raw(2, { chapters: [chapter(1, { dueDate: "2026-06-30", completedOn: "2026-06-28" })] }),
+        raw(3),
+      ],
+    });
+
+    const result = await getCurriculumSummary(ADMIN, query({ centreIds: [1, 2], onlyBehind: true }));
+
+    if (!result.ok) throw new Error("expected rows");
+    // Centre 2 is on track, so Only behind lists Centre 1 alone, but it stays a chosen option.
+    expect(result.rows.map((row) => row.centreId)).toEqual([1]);
+    expect(result.selectedCentreIds).toEqual([1, 2]);
+    expect(result.centreOptions.map((option) => option.id)).toEqual([1, 2, 3]);
+  });
+
+  it.each([
+    ["an id outside the user's rows", [99]],
+    ["an id outside the chosen Region", [2]],
+  ])("ignores %s and lists every Centre when none is left", async (_name, centreIds) => {
+    routeQueries({ summary: [raw(1, { region: "NORTH" }), raw(2, { region: "SOUTH" }), raw(3, { region: "NORTH" })] });
+
+    const result = await getCurriculumSummary(ADMIN, query({ regions: ["NORTH"], centreIds: [...centreIds] }));
+
+    if (!result.ok) throw new Error("expected rows");
+    expect(result.selectedCentreIds).toEqual([]);
+    // Centre 1 has one test overdue fewer (its Alpha session), so Centre 3 is worse.
+    expect(result.rows.map((row) => row.centreId)).toEqual([3, 1]);
+  });
+
+  describe("Program filter", () => {
+    // Program 1 "JNV CoE": Centres 1 (NORTH) and 3 (WEST); Program 2 "JNV Nodal": Centre 2 (SOUTH)
+    // and Centre 4 (NORTH, on track).
+    const PROGRAM_ROWS = [
+      raw(1, { centre_name: "Anand CoE", program_id: 1, program_name: "JNV CoE", region: "NORTH" }),
+      raw(2, { centre_name: "Bhuj Nodal", program_id: 2, program_name: "JNV Nodal", region: "SOUTH" }),
+      raw(3, { centre_name: "Chhapi CoE", program_id: 1, program_name: "JNV CoE", region: "WEST", plan_status: "draft" }),
+      raw(4, {
+        centre_name: "Dahod Nodal",
+        program_id: 2,
+        program_name: "JNV Nodal",
+        region: "NORTH",
+        chapters: [chapter(1, { dueDate: "2026-06-30", completedOn: "2026-06-28" })],
+      }),
+    ];
+
+    it("lists the chosen Programs' rows and narrows Region and Centre options", async () => {
+      routeQueries({ summary: PROGRAM_ROWS });
+
+      const result = await getCurriculumSummary(ADMIN, query({ programIds: [2] }));
+
+      if (!result.ok) throw new Error("expected rows");
+      // Programs come from every scoped row, A–Z.
+      expect(result.programOptions).toEqual([
+        { id: 1, name: "JNV CoE" },
+        { id: 2, name: "JNV Nodal" },
+      ]);
+      expect(result.selectedProgramIds).toEqual([2]);
+      // Bhuj (PCM 1, PCB 2) before Dahod (on track).
+      expect(result.rows.map((row) => row.centreName)).toEqual(["Bhuj Nodal", "Dahod Nodal"]);
+      expect(result.regionOptions).toEqual(["NORTH", "SOUTH"]);
+      expect(result.centreOptions.map((option) => option.name)).toEqual(["Bhuj Nodal", "Dahod Nodal"]);
+    });
+
+    it("applies Program, then Region, then Centre", async () => {
+      routeQueries({ summary: PROGRAM_ROWS });
+
+      // NORTH within JNV CoE is Centre 1 only; Centre 4 (NORTH, Nodal) is not a Centre option, so
+      // its id is ignored, as is the unknown Program 9.
+      const result = await getCurriculumSummary(
+        ADMIN,
+        query({ programIds: [9, 1], regions: ["NORTH"], centreIds: [4] })
+      );
+
+      if (!result.ok) throw new Error("expected rows");
+      expect(result.selectedProgramIds).toEqual([1]);
+      expect(result.regionOptions).toEqual(["NORTH", "WEST"]);
+      expect(result.centreOptions).toEqual([{ id: 1, name: "Anand CoE" }]);
+      expect(result.selectedCentreIds).toEqual([]);
+      expect(result.rows.map((row) => row.centreId)).toEqual([1]);
+    });
+
+    it("ignores Program ids that aren't options and lists every Program", async () => {
+      routeQueries({ summary: PROGRAM_ROWS });
+
+      const result = await getCurriculumSummary(ADMIN, query({ programIds: [64] }));
+
+      if (!result.ok) throw new Error("expected rows");
+      expect(result.selectedProgramIds).toEqual([]);
+      expect(result.rows).toHaveLength(4);
+      expect(result.regionOptions).toEqual(["NORTH", "SOUTH", "WEST"]);
+    });
+  });
+
+  it("keeps a valid Centre id beside a stale one", async () => {
+    routeQueries({ summary: [raw(1), raw(2)] });
+
+    const result = await getCurriculumSummary(ADMIN, query({ centreIds: [99, 2] }));
+
+    expect(result.ok && result.rows.map((row) => row.centreId)).toEqual([2]);
+    expect(result.ok && result.selectedCentreIds).toEqual([2]);
+  });
+
+  it("Only behind narrows the listed rows", async () => {
+    routeQueries({
+      summary: [raw(1), raw(2, { chapters: [chapter(1, { dueDate: "2026-06-30", completedOn: "2026-06-28" })] })],
+    });
+
+    const result = await getCurriculumSummary(ADMIN, query({ onlyBehind: true }));
+
+    if (!result.ok) throw new Error("expected rows");
+    expect(result.rows.map((row) => row.centreId)).toEqual([1]);
+    expect(result.pagination).toEqual({ page: 1, pageSize: 20, totalRows: 1, totalPages: 1 });
+  });
+
+  it("reads chapters sent as a JSON string and tolerates missing fields", async () => {
+    routeQueries({
+      summary: [
+        raw(1, {
+          chapters: JSON.stringify([
+            { chapterId: 8, name: "Sets", subject: "Mathematics", tracks: ["jee_main"], dueDate: "2026-07-01" },
+          ]),
+          mapped_tracks: ["jee_main"],
+        }),
+        raw(2, { chapters: null, mapped_tracks: ["jee_main"] }),
+      ],
+    });
+
+    const result = await getCurriculumSummary(ADMIN, query());
+
+    if (!result.ok) throw new Error("expected rows");
+    const rows = Object.fromEntries(result.rows.map((row) => [row.centreId, row]));
+    expect(rows[1].subjects?.Maths).toEqual({ due: 1, done: 0, behind: 1, tone: "amber", label: "1 behind" });
+    expect(rows[2].kind).toBe("no_content");
+  });
+
+  it.each([
+    [
+      "a level-3 Admin",
+      ADMIN,
+      [true, null, null, P, true, [1, 2]],
+    ],
+    [
+      "a level-2 PM by region",
+      { email: "pm@x.org", level: 2, role: "program_manager", regions: ["NORTH"], program_ids: [2] },
+      [false, null, ["NORTH"], P, false, [2]],
+    ],
+    [
+      "a level-1 user by School code",
+      { email: "pm@x.org", level: 1, role: "program_manager", school_codes: ["SC1"], program_ids: [1] },
+      [false, ["SC1"], null, P, false, [1]],
+    ],
+    [
+      "a seated user by resolved School scope",
+      {
+        email: "pm@x.org",
         level: 1,
         role: "program_manager",
-        school_codes: [],
-        program_ids: [2],
-        scope: {
-          schools: new Set(["49045"]),
-          centres: new Set([21]),
-          programs: new Set([1]),
+        program_ids: [1],
+        scope: { schools: new Set(["SC9"]), centres: new Set([9]), programs: new Set([1]) },
+      },
+      [false, ["SC9"], null, P, false, [1]],
+    ],
+    [
+      "a level-2 user with no regions",
+      { email: "pm@x.org", level: 2, role: "program_admin", program_ids: [1] },
+      [false, null, [], P, false, [1]],
+    ],
+  ])("scopes the SQL for %s", async (_name, permission, scope) => {
+    routeQueries({ summary: [] });
+
+    await getCurriculumSummary(permission as UserPermission, query({ grade: 12 }));
+
+    const [, params] = mockQuery.mock.calls[0] as [string, unknown[]];
+    // $12: only content tracks date a plan's Chapters, so a plan's CET track never counts.
+    expect(params).toEqual([
+      ...scope,
+      12,
+      "2026-2027",
+      "2026-04-01",
+      AS_OF,
+      null,
+      ["jee_main", "jee_advanced", "neet"],
+    ]);
+  });
+});
+
+describe("PCM Behind and PCB Behind", () => {
+  const ALL_TRACKS = ["jee_main", "jee_advanced", "neet"];
+
+  // A due, uncompleted Chapter; due 14 Aug its test is not yet overdue on 15 Aug, due 1 Jul it is.
+  function open(id: number, subject: string, dueDate = "2026-08-14"): RawChapter {
+    return chapter(id, { subject, dueDate, tracks: ALL_TRACKS });
+  }
+
+  // Physics 1, Maths 1 ("Mathematics" label), Biology 2, English 1 (in neither group).
+  const MIXED = [
+    open(1, "Physics"),
+    open(2, "Mathematics"),
+    open(3, "Biology"),
+    open(4, "Biology"),
+    open(5, "English"),
+    chapter(6, { subject: "Chemistry", dueDate: "2026-07-01", completedOn: "2026-07-01", tracks: ALL_TRACKS }),
+  ];
+
+  beforeEach(() => mockLoadSessions.mockResolvedValue(new Map()));
+
+  it.each([
+    ["a JEE Main row", { mapped_tracks: ["jee_main"] }, { PCM: 2, PCB: null }],
+    ["a JEE Advanced row", { mapped_tracks: ["jee_advanced"] }, { PCM: 2, PCB: null }],
+    ["a NEET row", { mapped_tracks: ["neet"] }, { PCM: null, PCB: 3 }],
+    ["a shared JEE Main + NEET row", { mapped_tracks: ["jee_main", "neet"] }, { PCM: 2, PCB: 3 }],
+    ["a shared JEE Advanced + NEET row", { mapped_tracks: ["neet", "jee_advanced", "cet"] }, { PCM: 2, PCB: 3 }],
+    ["a No plan row", { plan_status: "draft" }, null],
+    ["a setup-error row", { mapped_tracks: ["jee_main", "jee_advanced"] }, null],
+    ["a no-content row", { mapped_tracks: ["cet"] }, null],
+    ["a configuration-error row", { centre_count: 2 }, null],
+  ])("totals %s by subject group", async (_name, overrides, expected) => {
+    routeQueries({ summary: [raw(11, { chapters: MIXED, ...overrides })] });
+
+    const result = await getCurriculumSummary(ADMIN, query());
+
+    if (!result.ok) throw new Error("expected rows");
+    const groups = result.rows[0].subjectGroups;
+    expect(groups && { PCM: groups.PCM?.behind ?? null, PCB: groups.PCB?.behind ?? null }).toEqual(expected);
+  });
+
+  it("uses the Behind pill tones and labels with done/due", async () => {
+    routeQueries({ summary: [raw(11, { chapters: MIXED, mapped_tracks: ["jee_main", "neet"] })] });
+
+    const result = await getCurriculumSummary(ADMIN, query());
+
+    // PCM: Physics, Mathematics, Chemistry (done) due; PCB: Physics, Biology ×2, Chemistry.
+    expect(result.ok && result.rows[0].subjectGroups).toEqual({
+      PCM: { due: 3, done: 1, behind: 2, tone: "amber", label: "2 behind" },
+      PCB: { due: 4, done: 1, behind: 3, tone: "red", label: "3 behind" },
+    });
+  });
+
+  // Shared: PCM 2 (Maths ×2), PCB 2 (Biology ×2): larger 2, 0 tests overdue.
+  // NEET: PCB 3: larger 3. JEE Main: PCM 2 with 1 test overdue (Physics due 1 Jul).
+  // Done: everything due completed, so neither group is behind.
+  const SORT_ROWS = [
+    raw(11, {
+      centre_name: "Shared",
+      mapped_tracks: ["jee_main", "neet"],
+      chapters: [open(1, "Maths"), open(2, "Maths"), open(3, "Biology"), open(4, "Biology")],
+    }),
+    raw(12, {
+      centre_name: "Neet",
+      mapped_tracks: ["neet"],
+      chapters: [open(1, "Biology"), open(2, "Biology"), open(3, "Biology")],
+    }),
+    raw(13, {
+      centre_name: "Main",
+      mapped_tracks: ["jee_main"],
+      chapters: [open(1, "Physics", "2026-07-01"), open(2, "Maths")],
+    }),
+    raw(14, {
+      centre_name: "Done",
+      mapped_tracks: ["jee_main", "neet"],
+      chapters: [chapter(1, { dueDate: "2026-08-14", completedOn: "2026-08-14", tracks: ALL_TRACKS })],
+    }),
+    raw(15, { centre_name: "Draft", plan_status: "draft" }),
+  ];
+
+  it("sorts plan rows by the larger group total, then Tests overdue", async () => {
+    routeQueries({ summary: SORT_ROWS });
+
+    const result = await getCurriculumSummary(ADMIN, query());
+
+    expect(result.ok && result.rows.map((row) => row.centreName)).toEqual(["Neet", "Main", "Shared", "Done", "Draft"]);
+  });
+
+  it("Only behind keeps a row behind in either group", async () => {
+    routeQueries({ summary: SORT_ROWS });
+
+    const result = await getCurriculumSummary(ADMIN, query({ onlyBehind: true }));
+
+    if (!result.ok) throw new Error("expected rows");
+    // A row behind in either group stays; Done (0 / 0) and the No plan row go.
+    expect(result.rows.map((row) => row.centreName)).toEqual(["Neet", "Main", "Shared"]);
+  });
+
+  it("Only behind keeps a row behind in one group only", async () => {
+    routeQueries({
+      summary: [
+        raw(11, { mapped_tracks: ["jee_main"], chapters: [open(1, "Maths")] }),
+        raw(12, { mapped_tracks: ["neet"], chapters: [open(1, "Biology")] }),
+        raw(13, { mapped_tracks: ["jee_main", "neet"], chapters: [open(1, "Biology")] }),
+        raw(14, { mapped_tracks: ["jee_main", "neet"], chapters: [open(1, "English")] }),
+      ],
+    });
+
+    const result = await getCurriculumSummary(ADMIN, query({ onlyBehind: true }));
+
+    expect(result.ok && result.rows.map((row) => row.centreId)).toEqual([11, 12, 13]);
+  });
+});
+
+describe("sortSummaryRows", () => {
+  function progress(behind: number, due: number): CurriculumSummarySubjectProgress {
+    return { due, done: due - behind, behind, tone: behind === 0 ? "green" : "amber", label: "" };
+  }
+
+  function summaryRow(id: number, centreName: string, overrides: Partial<CurriculumSummaryRow> = {}): CurriculumSummaryRow {
+    return {
+      centreId: id,
+      centreName,
+      schoolCode: `SC${id}`,
+      schoolName: `School ${id}`,
+      region: "NORTH",
+      programId: 2,
+      programName: "JNV Nodal",
+      tracksLabel: "JEE Main + NEET",
+      kind: "plan",
+      explanation: null,
+      plan: { id: 900, title: "G11 Plan", closed: false },
+      subjects: { Physics: null, Chemistry: null, Maths: null, Biology: null },
+      subjectGroups: { PCM: null, PCB: null },
+      testsOverdue: 0,
+      testsOverdueBySubject: { Physics: 0, Chemistry: 0, Maths: 0, Biology: 0 },
+      testsConducted: null,
+      ...overrides,
+    };
+  }
+
+  const NO_PLAN = { kind: "no_plan", plan: null, subjects: null, subjectGroups: null, testsConducted: 1 } as const;
+  const SETUP_ERROR_ROW = {
+    kind: "setup_error",
+    explanation: "Fix tracks in Centre Management",
+    plan: null,
+    subjects: null,
+    subjectGroups: null,
+  } as const;
+
+  const names = (rows: CurriculumSummaryRow[]) => rows.map((row) => row.centreName);
+
+  // Each pill column gets its progress (or "—") from the same place in the row.
+  function withPill(key: CurriculumSummarySortKey, value: CurriculumSummarySubjectProgress | null) {
+    const subjects = { Physics: null, Chemistry: null, Maths: null, Biology: null };
+    const subjectGroups = { PCM: null, PCB: null };
+    const subject = { physics: "Physics", chemistry: "Chemistry", maths: "Maths", biology: "Biology" }[key as string];
+    if (subject) return { subjects: { ...subjects, [subject]: value }, subjectGroups };
+    return { subjects, subjectGroups: { ...subjectGroups, [key.toUpperCase()]: value } };
+  }
+
+  it.each(["physics", "chemistry", "maths", "biology", "pcm", "pcb"] as CurriculumSummarySortKey[])(
+    "sorts the %s column by behind, then due, then Centre name, with unmeasured rows last",
+    (key) => {
+      const rows = [
+        summaryRow(1, "Vapi", SETUP_ERROR_ROW),
+        summaryRow(2, "Surat", NO_PLAN),
+        summaryRow(3, "Dahod", withPill(key, null)),
+        summaryRow(4, "Chhapi", withPill(key, progress(0, 4))),
+        summaryRow(5, "Bhuj", withPill(key, progress(2, 3))),
+        summaryRow(6, "Anand", withPill(key, progress(2, 5))),
+        summaryRow(7, "Amreli", withPill(key, progress(2, 5))),
+      ];
+
+      // On track counts as 0 behind; Amreli and Anand tie on behind and due, so the Centre name
+      // decides. "—", No plan and the setup error stay at the bottom in row-kind order.
+      expect(names(sortSummaryRows(rows, { key, dir: "desc" }))).toEqual([
+        "Amreli",
+        "Anand",
+        "Bhuj",
+        "Chhapi",
+        "Dahod",
+        "Surat",
+        "Vapi",
+      ]);
+      expect(names(sortSummaryRows(rows, { key, dir: "asc" }))).toEqual([
+        "Chhapi",
+        "Bhuj",
+        "Amreli",
+        "Anand",
+        "Dahod",
+        "Surat",
+        "Vapi",
+      ]);
+    }
+  );
+
+  it("keeps every bottom row in row-kind order, then Centre name, in both directions", () => {
+    const rows = [
+      summaryRow(1, "Navsari", { ...SETUP_ERROR_ROW, kind: "configuration_error" }),
+      summaryRow(2, "Valsad", { ...SETUP_ERROR_ROW, kind: "no_content" }),
+      summaryRow(3, "Bhuj", SETUP_ERROR_ROW),
+      summaryRow(4, "Surat", NO_PLAN),
+      summaryRow(5, "Anand", NO_PLAN),
+      summaryRow(6, "Dahod"),
+      summaryRow(7, "Chhapi", withPill("pcm", progress(1, 1))),
+    ];
+    const expected = ["Chhapi", "Dahod", "Anand", "Surat", "Bhuj", "Valsad", "Navsari"];
+
+    expect(names(sortSummaryRows(rows, { key: "pcm", dir: "desc" }))).toEqual(expected);
+    expect(names(sortSummaryRows(rows, { key: "pcm", dir: "asc" }))).toEqual(expected);
+  });
+
+  it.each([
+    ["centre", (name: string) => ({ centreName: name })],
+    ["program", (name: string) => ({ programName: name })],
+    ["tracks", (name: string) => ({ tracksLabel: name })],
+    ["region", (name: string) => ({ region: name })],
+    ["plan", (name: string) => ({ plan: { id: 1, title: name, closed: false } })],
+  ] as const)("sorts the %s column case-insensitively", (key, value) => {
+    const rows = [
+      summaryRow(1, "Row 1", value("bravo")),
+      summaryRow(2, "Row 2", value("Charlie")),
+      summaryRow(3, "Row 3", value("alpha")),
+    ];
+    const values = (sorted: CurriculumSummaryRow[]) => sorted.map((row) => row.centreId);
+
+    expect(values(sortSummaryRows(rows, { key, dir: "asc" }))).toEqual([3, 1, 2]);
+    expect(values(sortSummaryRows(rows, { key, dir: "desc" }))).toEqual([2, 1, 3]);
+  });
+
+  it("puts blank Regions and rows without a plan last in both directions", () => {
+    const regions = [
+      summaryRow(1, "Anand", { region: null }),
+      summaryRow(2, "Bhuj", { region: "SOUTH" }),
+      summaryRow(3, "Chhapi", { region: "  " }),
+      summaryRow(4, "Dahod", { region: "north" }),
+    ];
+    expect(names(sortSummaryRows(regions, { key: "region", dir: "asc" }))).toEqual(["Dahod", "Bhuj", "Anand", "Chhapi"]);
+    expect(names(sortSummaryRows(regions, { key: "region", dir: "desc" }))).toEqual(["Bhuj", "Dahod", "Anand", "Chhapi"]);
+
+    const plans = [
+      summaryRow(1, "Surat", NO_PLAN),
+      summaryRow(2, "Vapi", SETUP_ERROR_ROW),
+      summaryRow(3, "Bhuj", { plan: { id: 2, title: "Old Plan", closed: true } }),
+      summaryRow(4, "Anand", { plan: { id: 1, title: "G11 Plan", closed: false } }),
+    ];
+    expect(names(sortSummaryRows(plans, { key: "plan", dir: "asc" }))).toEqual(["Anand", "Bhuj", "Surat", "Vapi"]);
+    expect(names(sortSummaryRows(plans, { key: "plan", dir: "desc" }))).toEqual(["Bhuj", "Anand", "Surat", "Vapi"]);
+  });
+
+  it("keeps the worst-first order without a sort and never mutates its input", () => {
+    const rows = [
+      summaryRow(1, "Surat", NO_PLAN),
+      summaryRow(2, "Anand", withPill("pcm", progress(1, 2))),
+      summaryRow(3, "Bhuj", { ...withPill("pcb", progress(3, 4)), testsOverdue: 1 }),
+    ];
+
+    expect(names(sortSummaryRows(rows, null))).toEqual(["Bhuj", "Anand", "Surat"]);
+    expect(names(rows)).toEqual(["Surat", "Anand", "Bhuj"]);
+  });
+
+  it("sorts every listed row before paging and keeps a shared class as one row", async () => {
+    routeQueries({
+      summary: [
+        raw(1, { centre_name: "Delta" }),
+        raw(2, { centre_name: "alpha", mapped_tracks: ["neet"] }),
+        raw(3, { centre_name: "Charlie", plan_status: "draft" }),
+        raw(4, { centre_name: "Bravo", mapped_tracks: ["jee_main"] }),
+      ],
+    });
+
+    const first = await getCurriculumSummary(ADMIN, query({ sort: { key: "centre", dir: "asc" }, pageSize: 2 }));
+    const second = await getCurriculumSummary(
+      ADMIN,
+      query({ sort: { key: "centre", dir: "asc" }, pageSize: 2, page: 2 })
+    );
+
+    expect(first.ok && first.rows.map((row) => row.centreName)).toEqual(["alpha", "Bravo"]);
+    expect(second.ok && second.rows.map((row) => [row.centreName, row.tracksLabel])).toEqual([
+      ["Charlie", "JEE Main + NEET"],
+      ["Delta", "JEE Main + NEET"],
+    ]);
+    expect(second.ok && second.pagination.totalRows).toBe(4);
+  });
+});
+
+describe("getChapterTimeline", () => {
+  const params = { grade: 11 as const, asOf: AS_OF, hoursWindow: "ay" as const };
+
+  it("returns the schema error before anything else", async () => {
+    mockCheckPlansSchema.mockResolvedValue(SCHEMA_UNAVAILABLE);
+
+    await expect(getChapterTimeline(ADMIN, 1, params)).resolves.toEqual(SCHEMA_UNAVAILABLE);
+    expect(mockQuery).not.toHaveBeenCalled();
+  });
+
+  it.each([[0], [-1], [Number.NaN], [1.5]])("is not found for Centre id %s", async (centreId) => {
+    await expect(getChapterTimeline(ADMIN, centreId, params)).resolves.toEqual({ ok: false, status: 404 });
+    expect(mockQuery).not.toHaveBeenCalled();
+  });
+
+  it("is not found for a Centre outside the user's rows", async () => {
+    routeQueries({ summary: [] });
+
+    await expect(getChapterTimeline(ADMIN, 1, params)).resolves.toEqual({ ok: false, status: 404 });
+    const [, sqlParams] = mockQuery.mock.calls[0] as [string, unknown[]];
+    expect(sqlParams[10]).toBe(1);
+  });
+
+  it("lists the class's Chapters by due date with statuses, tests, hours and header totals", async () => {
+    routeQueries({
+      summary: [raw(1)],
+      grades: [{ grade: "11" }],
+      activity: [
+        { chapter_id: "1", taught_minutes: "100", cancellations: "1", doubt_solving_minutes: "30" },
+        { chapter_id: 4, taught_minutes: 20, cancellations: 0, doubt_solving_minutes: 0 },
+      ],
+    });
+
+    const result = await getChapterTimeline(ADMIN, 1, { ...params, hoursWindow: "7d" });
+
+    if (!result.ok) throw new Error("expected a timeline");
+    const { timeline } = result;
+    expect(timeline.grades).toEqual([11]);
+    expect(timeline.hoursWindow).toBe("7d");
+    expect(timeline.chapters.map((c) => [c.chapterId, c.status.kind, c.testStatus.kind])).toEqual([
+      [1, "done", "conducted"],
+      [3, "done_late", "overdue"],
+      [2, "overdue", "overdue"],
+      [4, "overdue", "scheduled"],
+      [5, "not_in_plan", "not_due"],
+    ]);
+    // Prescribed follows the Primary Exam Track: JEE Main, else NEET (Biology).
+    expect(timeline.chapters.map((c) => [c.chapterId, c.prescribedMinutes])).toEqual([
+      [1, 90],
+      [3, 60],
+      [2, 120],
+      [4, 60],
+      [5, 30],
+    ]);
+    expect(timeline.chapters[0]).toMatchObject({ taughtMinutes: 100, cancellations: 1, doubtSolvingMinutes: 30 });
+    expect(timeline.chapters[1]).toMatchObject({ taughtMinutes: 0, cancellations: 0, doubtSolvingMinutes: 0 });
+    expect(timeline.subjects).toEqual([
+      { subject: "Physics", progress: { due: 2, done: 1, behind: 1, tone: "amber", label: "1 behind" } },
+      { subject: "Chemistry", progress: { due: 1, done: 1, behind: 0, tone: "green", label: "On track" } },
+      { subject: "Biology", progress: { due: 1, done: 0, behind: 1, tone: "amber", label: "1 behind" } },
+    ]);
+    // PCM (Physics, Chemistry): 1, 2, 3 due, 1 and 3 done; PCB adds Biology 4 (due) and 5.
+    expect(timeline.header).toEqual({
+      subjectGroups: [
+        {
+          group: "PCM",
+          progress: { due: 3, done: 2, behind: 1, tone: "amber", label: "1 behind" },
+          syllabusDone: 2,
+          syllabusTotal: 3,
         },
-      },
-      emptyFilters
-    );
-    expect(new Set(params[5] as number[])).toEqual(new Set([1, 2]));
+        {
+          group: "PCB",
+          progress: { due: 4, done: 2, behind: 2, tone: "amber", label: "2 behind" },
+          syllabusDone: 2,
+          syllabusTotal: 5,
+        },
+      ],
+      testsOverdue: 2,
+      taughtMinutes: 120,
+      prescribedMinutes: 360,
+      cancellations: 1,
+      doubtSolvingMinutes: 30,
+    });
+    // Last 7 days to 15 Aug, for the class's tracks and Chapters.
+    const activityCall = mockQuery.mock.calls.find(([sql]) => String(sql).includes(ACTIVITY_TABLE));
+    expect(activityCall?.[1]).toEqual(["SC1", 2, 11, ["jee_main", "neet"], "2026-08-09", AS_OF, [1, 2, 3, 4, 5]]);
   });
 
-  it("falls back to raw school_codes for level 1 when scope is unresolved", () => {
-    const params = buildCommonQueryParams(
-      { ...pmPermission, level: 1, role: "teacher", school_codes: ["70705"], regions: null },
-      emptyFilters
-    );
-    expect(params[1]).toEqual(["70705"]);
+  it("gives each header syllabus status the same PCM / PCB numbers as the class's Summary row", async () => {
+    // Maths counts only in PCM; another subject in neither group.
+    const chapters = [
+      ...PLAN_CHAPTERS,
+      chapter(6, { subject: "Mathematics", dueDate: "2026-07-01", tracks: ["jee_main"] }),
+      chapter(7, { subject: "Maths", dueDate: "2026-09-01", completedOn: "2026-08-01", tracks: ["jee_main"] }),
+      chapter(8, { subject: "English", dueDate: "2026-07-01", tracks: ["jee_main", "neet"] }),
+    ];
+    routeQueries({ summary: [raw(1, { chapters })], grades: [{ grade: 11 }] });
+
+    const summary = await getCurriculumSummary(ADMIN, query());
+    const result = await getChapterTimeline(ADMIN, 1, params);
+
+    if (!summary.ok || !result.ok) throw new Error("expected a Summary and a timeline");
+    const [row] = summary.rows;
+    const groups = result.timeline.header.subjectGroups;
+    expect(groups.map((status) => status.group)).toEqual(["PCM", "PCB"]);
+    expect(groups[0].progress).toEqual(row.subjectGroups?.PCM);
+    expect(groups[1].progress).toEqual(row.subjectGroups?.PCB);
+    expect(groups[0].progress).toEqual({ due: 4, done: 2, behind: 2, tone: "amber", label: "2 behind" });
+    // PCM: Chapters 1, 2, 3, 6, 7 with 1, 3 and 7 completed (7 early). PCB: 1–5, with 1 and 3.
+    expect(groups.map(({ syllabusDone, syllabusTotal }) => [syllabusDone, syllabusTotal])).toEqual([
+      [3, 5],
+      [2, 5],
+    ]);
   });
 
-  it("includes level-2 seat schools in $2 while regions flow through $3", () => {
-    const params = buildCommonQueryParams(
-      {
-        ...pmPermission,
-        level: 2,
-        role: "admin",
-        school_codes: null,
-        regions: ["West"],
-        scope: { schools: new Set(["55555"]), centres: new Set([9]), programs: new Set([1]) },
-      },
-      emptyFilters
-    );
-    expect(params[1]).toEqual(["55555"]); // $2 seat schools
-    expect(params[2]).toEqual(["West"]); // $3 regions
+  it.each([
+    [["jee_main"], ["PCM"]],
+    [["jee_advanced"], ["PCM"]],
+    [["neet"], ["PCB"]],
+    [["neet", "jee_main"], ["PCM", "PCB"]],
+  ])("shows the syllabus status of the groups a %j class takes", async (mappedTracks, expected) => {
+    const chapters = PLAN_CHAPTERS.map((raw) => ({ ...raw, tracks: mappedTracks }));
+    routeQueries({ summary: [raw(1, { mapped_tracks: mappedTracks, chapters })], grades: [{ grade: 11 }] });
+
+    const result = await getChapterTimeline(ADMIN, 1, params);
+
+    if (!result.ok) throw new Error("expected a timeline");
+    expect(result.timeline.header.subjectGroups.map((status) => status.group)).toEqual(expected);
   });
+
+  it("has no due progress without an Active plan, but still counts the syllabus", async () => {
+    routeQueries({ summary: [raw(1, { plan_status: "draft" })], grades: [{ grade: 11 }] });
+
+    const result = await getChapterTimeline(ADMIN, 1, params);
+
+    if (!result.ok) throw new Error("expected a timeline");
+    expect(result.timeline.row.kind).toBe("no_plan");
+    expect(result.timeline.header.subjectGroups).toEqual([
+      { group: "PCM", progress: null, syllabusDone: 2, syllabusTotal: 3 },
+      { group: "PCB", progress: null, syllabusDone: 2, syllabusTotal: 5 },
+    ]);
+  });
+
+  it("has no syllabus status for a class it can't measure", async () => {
+    routeQueries({ summary: [raw(1, SETUP_ERROR)], grades: [{ grade: 11 }] });
+
+    const result = await getChapterTimeline(ADMIN, 1, params);
+
+    if (!result.ok) throw new Error("expected a timeline");
+    expect(result.timeline.header.subjectGroups).toEqual([]);
+  });
+
+  it("measures a shared JEE Advanced + NEET class once, with JEE Advanced's prescribed time", async () => {
+    routeQueries({
+      summary: [
+        raw(1, {
+          mapped_tracks: ["neet", "jee_advanced"],
+          chapters: [
+            chapter(1, {
+              dueDate: "2026-06-30",
+              completedOn: "2026-06-28",
+              tracks: ["jee_advanced", "neet"],
+              prescribedMinutes: { jee_advanced: 150, neet: 60 },
+            }),
+            chapter(2, { subject: "Biology", dueDate: "2026-07-31", tracks: ["neet"], prescribedMinutes: { neet: 45 } }),
+          ],
+        }),
+      ],
+      grades: [{ grade: 11 }],
+    });
+
+    const result = await getChapterTimeline(ADMIN, 1, params);
+
+    if (!result.ok) throw new Error("expected a timeline");
+    const { timeline } = result;
+    expect(timeline.row).toMatchObject({ kind: "plan", tracksLabel: "JEE Advanced + NEET", explanation: null });
+    expect(timeline.row.subjectGroups).toMatchObject({ PCM: { behind: 0 }, PCB: { behind: 1 } });
+    // JEE Advanced's 150 min, not NEET's 60; Biology falls back to NEET.
+    expect(timeline.chapters.map((c) => [c.chapterId, c.prescribedMinutes])).toEqual([
+      [1, 150],
+      [2, 45],
+    ]);
+    // Logs under either track of the class count.
+    const activityCall = mockQuery.mock.calls.find(([sql]) => String(sql).includes(ACTIVITY_TABLE));
+    expect(activityCall?.[1]?.[3]).toEqual(["jee_advanced", "neet"]);
+  });
+
+  it("orders undated Chapters in syllabus order: subject column, sequence, then code", async () => {
+    routeQueries({
+      summary: [
+        raw(1, {
+          mapped_tracks: ["neet"],
+          chapters: [
+            chapter(21, { subject: "Zoology", tracks: ["neet"] }),
+            chapter(22, { subject: "Biology", tracks: ["neet"], sequence: 2, code: "B2" }),
+            chapter(23, { subject: "Biology", tracks: ["neet"], sequence: 2, code: "B1" }),
+            chapter(24, { subject: "Biology", tracks: ["neet"], sequence: 1 }),
+            chapter(25, { subject: "Anatomy", tracks: ["neet"] }),
+            chapter(26, { subject: "Biology", tracks: ["neet"], dueDate: "2026-09-01" }),
+            chapter(27, { subject: "Biology", tracks: ["neet"], dueDate: "2026-07-01" }),
+            chapter(28, { subject: "Biology", tracks: ["neet"], sequence: 2, code: "B1" }),
+          ],
+        }),
+      ],
+      grades: [{ grade: 11 }, { grade: 12 }],
+    });
+
+    const result = await getChapterTimeline(ADMIN, 1, params);
+
+    if (!result.ok) throw new Error("expected a timeline");
+    expect(result.timeline.chapters.map((c) => c.chapterId)).toEqual([27, 26, 24, 23, 28, 22, 25, 21]);
+    expect(result.timeline.subjects.map((tab) => tab.subject)).toEqual(["Biology", "Anatomy", "Zoology"]);
+    expect(result.timeline.grades).toEqual([11, 12]);
+  });
+
+  it("shows no plan progress for a No plan class", async () => {
+    routeQueries({ summary: [raw(1, { plan_status: "draft" })], grades: [{ grade: 11 }] });
+
+    const result = await getChapterTimeline(ADMIN, 1, params);
+
+    if (!result.ok) throw new Error("expected a timeline");
+    expect(result.timeline.row.kind).toBe("no_plan");
+    expect(result.timeline.subjects.every((tab) => tab.progress === null)).toBe(true);
+    expect(result.timeline.chapters).toHaveLength(5);
+  });
+
+  it("lists no Chapters and reads no activity for a class it can't measure", async () => {
+    routeQueries({ summary: [raw(1, SETUP_ERROR)], grades: [{ grade: 11 }] });
+
+    const result = await getChapterTimeline(ADMIN, 1, params);
+
+    if (!result.ok) throw new Error("expected a timeline");
+    expect(result.timeline.row.explanation).toBe("Fix tracks in Centre Management");
+    expect(result.timeline.chapters).toEqual([]);
+    expect(result.timeline.subjects).toEqual([]);
+    expect(mockQuery.mock.calls.some(([sql]) => String(sql).includes(ACTIVITY_TABLE))).toBe(false);
+  });
+});
+
+describe("sortTimelineChapters", () => {
+  // `id` doubles as the Chapter's place in the default order (due date, then syllabus order).
+  function timelineChapter(id: number, overrides: Partial<ChapterTimelineChapter> = {}): ChapterTimelineChapter {
+    return {
+      chapterId: id,
+      code: `C${id}`,
+      name: `Chapter ${id}`,
+      subject: "Physics",
+      dueDate: null,
+      completedOn: null,
+      status: { kind: "not_in_plan" },
+      testStatus: { kind: "not_due" },
+      taughtMinutes: 0,
+      prescribedMinutes: 0,
+      cancellations: 0,
+      doubtSolvingMinutes: 0,
+      ...overrides,
+    };
+  }
+  const ids = (chapters: ChapterTimelineChapter[]) => chapters.map((chapter) => chapter.chapterId);
+
+  it("keeps the default order without a sort", () => {
+    const chapters = [timelineChapter(2), timelineChapter(1)];
+    expect(sortTimelineChapters(chapters, null)).toBe(chapters);
+  });
+
+  it("sorts Chapter and Subject A–Z case-insensitively, reversing on desc, with ties in default order", () => {
+    const chapters = [
+      timelineChapter(1, { name: "motion", subject: "Physics" }),
+      timelineChapter(2, { name: "Atoms", subject: "Chemistry" }),
+      timelineChapter(3, { name: "Cells", subject: "Biology" }),
+      timelineChapter(4, { name: "Bonding", subject: "Chemistry" }),
+    ];
+    expect(ids(sortTimelineChapters(chapters, { key: "chapter", dir: "asc" }))).toEqual([2, 4, 3, 1]);
+    expect(ids(sortTimelineChapters(chapters, { key: "chapter", dir: "desc" }))).toEqual([1, 3, 4, 2]);
+    expect(ids(sortTimelineChapters(chapters, { key: "subject", dir: "asc" }))).toEqual([3, 2, 4, 1]);
+    expect(ids(sortTimelineChapters(chapters, { key: "subject", dir: "desc" }))).toEqual([1, 2, 4, 3]);
+  });
+
+  it.each<[ChapterTimelineSortKey, keyof ChapterTimelineChapter]>([
+    ["due", "dueDate"],
+    ["completed", "completedOn"],
+  ])("sorts %s earliest first with blanks last in both directions", (key, field) => {
+    const chapters = [
+      timelineChapter(1, { [field]: null }),
+      timelineChapter(2, { [field]: "2026-07-15" }),
+      timelineChapter(3, { [field]: "2026-06-30" }),
+      timelineChapter(4, { [field]: null }),
+      timelineChapter(5, { [field]: "2026-12-01" }),
+    ];
+    expect(ids(sortTimelineChapters(chapters, { key, dir: "asc" }))).toEqual([3, 2, 5, 1, 4]);
+    expect(ids(sortTimelineChapters(chapters, { key, dir: "desc" }))).toEqual([5, 2, 3, 1, 4]);
+  });
+
+  it.each<[ChapterTimelineSortKey, keyof ChapterTimelineChapter]>([
+    ["hours", "taughtMinutes"],
+    ["prescribed", "prescribedMinutes"],
+    ["cancelled", "cancellations"],
+    ["doubt_solving", "doubtSolvingMinutes"],
+  ])("sorts %s highest first on desc, zero being a value", (key, field) => {
+    const chapters = [
+      timelineChapter(1, { [field]: 0 }),
+      timelineChapter(2, { [field]: 90 }),
+      timelineChapter(3, { [field]: 120 }),
+      timelineChapter(4, { [field]: 90 }),
+    ];
+    expect(ids(sortTimelineChapters(chapters, { key, dir: "desc" }))).toEqual([3, 2, 4, 1]);
+    expect(ids(sortTimelineChapters(chapters, { key, dir: "asc" }))).toEqual([1, 2, 4, 3]);
+  });
+
+  it("sorts Status worst first: Overdue then Done late by most days, Done, Not due, Not in plan last", () => {
+    const chapters = [
+      timelineChapter(1, { status: { kind: "done" } }),
+      timelineChapter(2, { status: { kind: "overdue", days: 3 } }),
+      timelineChapter(3, { status: { kind: "not_in_plan" } }),
+      timelineChapter(4, { status: { kind: "done_late", days: 2 } }),
+      timelineChapter(5, { status: { kind: "not_due" } }),
+      timelineChapter(6, { status: { kind: "overdue", days: 36 } }),
+      timelineChapter(7, { status: { kind: "done_late", days: 40 } }),
+      timelineChapter(8, { status: { kind: "done" } }),
+      timelineChapter(9, { status: { kind: "not_in_plan" } }),
+    ];
+    expect(ids(sortTimelineChapters(chapters, { key: "status", dir: "desc" }))).toEqual([
+      6, 2, 7, 4, 1, 8, 5, 3, 9,
+    ]);
+    // Reversed, except that Not in plan stays last and ties keep the default order.
+    expect(ids(sortTimelineChapters(chapters, { key: "status", dir: "asc" }))).toEqual([
+      5, 1, 8, 4, 7, 2, 6, 3, 9,
+    ]);
+  });
+
+  it("sorts Chapter Test worst first: Overdue, Scheduled, Not due, Conducted", () => {
+    const chapters = [
+      timelineChapter(1, { testStatus: { kind: "conducted", conductedOn: "2026-07-02" } }),
+      timelineChapter(2, { testStatus: { kind: "not_due" } }),
+      timelineChapter(3, { testStatus: { kind: "overdue" } }),
+      timelineChapter(4, { testStatus: { kind: "scheduled" } }),
+      timelineChapter(5, { testStatus: { kind: "overdue" } }),
+    ];
+    expect(ids(sortTimelineChapters(chapters, { key: "test", dir: "desc" }))).toEqual([3, 5, 4, 2, 1]);
+    expect(ids(sortTimelineChapters(chapters, { key: "test", dir: "asc" }))).toEqual([1, 2, 4, 3, 5]);
+  });
+
+  it("does not change its input", () => {
+    const chapters = [timelineChapter(1, { taughtMinutes: 0 }), timelineChapter(2, { taughtMinutes: 60 })];
+    sortTimelineChapters(chapters, { key: "hours", dir: "desc" });
+    expect(ids(chapters)).toEqual([1, 2]);
+  });
+});
+
+describe("splitTimelineAtAsOf", () => {
+  function dated(id: number, dueDate: string | null, overrides: Partial<ChapterTimelineChapter> = {}) {
+    return {
+      chapterId: id,
+      code: `C${id}`,
+      name: `Chapter ${id}`,
+      subject: "Physics",
+      dueDate,
+      completedOn: null,
+      status: dueDate === null ? { kind: "not_in_plan" } : { kind: "not_due" },
+      testStatus: { kind: "not_due" },
+      taughtMinutes: 0,
+      prescribedMinutes: 0,
+      cancellations: 0,
+      doubtSolvingMinutes: 0,
+      ...overrides,
+    } as ChapterTimelineChapter;
+  }
+  const ids = (chapters: ChapterTimelineChapter[]) => chapters.map((chapter) => chapter.chapterId);
+  // Default order: by due date, undated last.
+  const CHAPTERS = [
+    dated(1, "2026-06-30", { taughtMinutes: 30 }),
+    dated(2, "2026-08-15", { taughtMinutes: 90 }),
+    dated(3, "2026-08-16", { taughtMinutes: 120 }),
+    dated(4, "2026-09-01", { taughtMinutes: 0 }),
+    dated(5, null, { taughtMinutes: 60 }),
+  ];
+
+  it("splits the default order at as-of, a Chapter due on as-of being above the line", () => {
+    const halves = splitTimelineAtAsOf(CHAPTERS, null, "2026-08-15");
+    expect(ids(halves.dueByAsOf)).toEqual([1, 2]);
+    expect(ids(halves.upcoming)).toEqual([3, 4, 5]);
+    expect(halves.showAsOfMarker).toBe(true);
+  });
+
+  it("sorts each half by the column sort, keeping the line between them", () => {
+    const desc = splitTimelineAtAsOf(CHAPTERS, { key: "hours", dir: "desc" }, "2026-08-15");
+    expect([ids(desc.dueByAsOf), ids(desc.upcoming)]).toEqual([
+      [2, 1],
+      [3, 5, 4],
+    ]);
+    const asc = splitTimelineAtAsOf(CHAPTERS, { key: "hours", dir: "asc" }, "2026-08-15");
+    expect([ids(asc.dueByAsOf), ids(asc.upcoming)]).toEqual([
+      [1, 2],
+      [4, 5, 3],
+    ]);
+    // Reversing Due keeps undated Chapters last below the line.
+    const due = splitTimelineAtAsOf(CHAPTERS, { key: "due", dir: "desc" }, "2026-08-15");
+    expect([ids(due.dueByAsOf), ids(due.upcoming)]).toEqual([
+      [2, 1],
+      [4, 3, 5],
+    ]);
+  });
+
+  it("puts everything above the line when all is due, and below it when nothing is", () => {
+    expect(ids(splitTimelineAtAsOf(CHAPTERS.slice(0, 4), null, "2026-12-31").upcoming)).toEqual([]);
+    expect(ids(splitTimelineAtAsOf(CHAPTERS, null, "2026-06-01").dueByAsOf)).toEqual([]);
+  });
+
+  it("has no line without plan dates", () => {
+    const halves = splitTimelineAtAsOf([dated(5, null), dated(6, null)], { key: "chapter", dir: "asc" }, "2026-08-15");
+    expect(halves).toMatchObject({ dueByAsOf: [], showAsOfMarker: false });
+    expect(ids(halves.upcoming)).toEqual([5, 6]);
+  });
+});
+
+describe("parseChapterTimelineSort", () => {
+  it("first clicks: A–Z text, earliest dates, worst Status and Chapter Test, highest numbers", () => {
+    const keys: ChapterTimelineSortKey[] = [
+      "chapter",
+      "subject",
+      "due",
+      "completed",
+      "status",
+      "test",
+      "hours",
+      "prescribed",
+      "cancelled",
+      "doubt_solving",
+    ];
+    expect(keys.map(defaultChapterTimelineSortDirection)).toEqual([
+      "asc",
+      "asc",
+      "asc",
+      "asc",
+      "desc",
+      "desc",
+      "desc",
+      "desc",
+      "desc",
+      "desc",
+    ]);
+  });
+
+  it("keeps a known column and direction", () => {
+    expect(parseChapterTimelineSort("status", "asc")).toEqual({ key: "status", dir: "asc" });
+    expect(parseChapterTimelineSort("due", "desc")).toEqual({ key: "due", dir: "desc" });
+  });
+
+  it("falls back to the column's first click for an unknown or missing direction", () => {
+    expect(parseChapterTimelineSort("status", "sideways")).toEqual({ key: "status", dir: "desc" });
+    expect(parseChapterTimelineSort("chapter", undefined)).toEqual({ key: "chapter", dir: "asc" });
+  });
+
+  it.each([[undefined], [""], ["centre"], ["toString"], ["__proto__"]])(
+    "ignores the unknown column %s",
+    (key) => {
+      expect(parseChapterTimelineSort(key, "asc")).toBeNull();
+    }
+  );
 });
