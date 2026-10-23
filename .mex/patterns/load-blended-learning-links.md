@@ -38,8 +38,11 @@ What it reads (hyperlinks, never cell text — a Ctrl+K link or a `HYPERLINK("ur
   owner rule (2026-10-23), kept in `src/lib/blended-learning-legacy-last-contact.ts`: the doc only,
   never the Sheet's monthly counts. Extraction (`src/lib/blended-learning-profile-doc-dates.ts`,
   deterministic, no LLM) skips the intake/profile and Student Story tabs, dates in tables,
-  mid-sentence dates, year-less dates, date lines with nothing under them, and dates outside
-  1 April of the academic year to `--as-of` (default today, IST). Outcomes per Student:
+  mid-sentence dates, date lines with nothing under them, and dates outside 1 April of the
+  academic year to `--as-of` (default today, IST; a later date is a typo or a plan). A year-less
+  date ("17 October", "17/10") is read in the academic year's first year (product owner,
+  2026-10-23), except in a tab whose dated entries all carry an earlier year (a G13 doc's
+  previous-year history). Outcomes per Student:
   `dated`, `no_dates` (doc read, nothing dated → NULL), `unreadable` (no export → stored value
   kept, NULL until a re-run has the doc), `no_doc_link`. Counts only are printed. The old
   `--seed-legacy` month seed is removed: month precision put a whole month's Students into Talk

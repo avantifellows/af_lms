@@ -79,16 +79,39 @@ describe("latestProfileDocConversationOn", () => {
     expect(latest(tab("Log"), "<p>Sep 3, 2026</p><p>Sep 3, 2026</p><p>Notes</p>")).toBe("2026-09-03");
   });
 
-  it("ignores dates outside the window, year-less dates and impossible dates", () => {
+  it("ignores dates outside the window and impossible dates", () => {
     expect(
       latest(
         tab("Log"),
         "<p>Oct 30, 2026: planned call</p>",
         "<p>Mar 3, 2026: last year</p>",
-        "<p>17 October</p><p>Notes</p>",
-        "<p>31/09/2026 call</p>"
+        "<p>31/09/2026 call</p>",
+        "<p>31/09 call</p>"
       )
     ).toBeNull();
+  });
+
+  it.each([
+    ["day month", "<p>17 October</p><p>Notes</p>", "2026-10-17"],
+    ["an ordinal and a short month", "<p>Date: 5th Sept</p><p>Notes</p>", "2026-09-05"],
+    ["month day", "<p>Oct 7: called the parent</p>", "2026-10-07"],
+    ["day-first numbers", "<p>17/10 - discussed the timetable</p>", "2026-10-17"],
+  ])("reads a date without a year (%s) as the academic year's", (_label, entries, expected) => {
+    expect(latest(tab("Log"), entries)).toBe(expected);
+  });
+
+  it("drops a year-less date after the as-of date, and never reads a decimal or a two-digit year as one", () => {
+    expect(latest(tab("Log"), "<p>Jul 2, 2026</p><p>Notes</p>", "<p>30 October</p><p>Planned call</p>")).toBe("2026-07-02");
+    expect(latest(tab("Log"), "<p>3.5 hours of revision</p>", "<p>17/10/26 call</p>", "<p>Oct 17 25 call</p>")).toBeNull();
+  });
+
+  it("skips the year-less dates in a tab of last year's history", () => {
+    expect(
+      latest(
+        tab("Grade 12 log"), "<p>Aug 4, 2025: first call</p>", "<p>17 September</p><p>Notes</p>",
+        tab("Grade 13 log"), "<p>6 July</p><p>Notes</p>"
+      )
+    ).toBe("2026-07-06");
   });
 
   it("counts an image under a date as content and decodes entities", () => {
