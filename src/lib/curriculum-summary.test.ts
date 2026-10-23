@@ -645,7 +645,16 @@ describe("getCurriculumSummary", () => {
     await getCurriculumSummary(permission as UserPermission, query({ grade: 12 }));
 
     const [, params] = mockQuery.mock.calls[0] as [string, unknown[]];
-    expect(params).toEqual([...scope, 12, "2026-2027", "2026-04-01", AS_OF, null]);
+    // $12: only content tracks date a plan's Chapters, so a plan's CET track never counts.
+    expect(params).toEqual([
+      ...scope,
+      12,
+      "2026-2027",
+      "2026-04-01",
+      AS_OF,
+      null,
+      ["jee_main", "jee_advanced", "neet"],
+    ]);
   });
 });
 
@@ -955,7 +964,7 @@ describe("getChapterTimeline", () => {
 
     await expect(getChapterTimeline(ADMIN, 1, params)).resolves.toEqual({ ok: false, status: 404 });
     const [, sqlParams] = mockQuery.mock.calls[0] as [string, unknown[]];
-    expect(sqlParams.at(-1)).toBe(1);
+    expect(sqlParams[10]).toBe(1);
   });
 
   it("lists the class's Chapters by due date with statuses, tests, hours and header totals", async () => {

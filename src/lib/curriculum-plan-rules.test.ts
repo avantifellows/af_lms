@@ -149,6 +149,16 @@ describe("Summary Class classification", () => {
     expect(classifySummaryClass(["cet"], tracksWithContent)).toEqual({ kind: "no_content" });
   });
 
+  // Plans may serve CET, but the Summary still ignores it, even once CET has content.
+  it.each([
+    { mapped: ["cet"], expected: { kind: "no_content" } },
+    { mapped: ["cet", "neet"], expected: { kind: "single", tracks: ["neet"] } },
+    { mapped: ["cet", "jee_main"], expected: { kind: "single", tracks: ["jee_main"] } },
+    { mapped: ["cet", "jee_main", "neet"], expected: { kind: "shared", tracks: ["jee_main", "neet"] } },
+  ])("ignores CET with CET content for $mapped", ({ mapped, expected }) => {
+    expect(classifySummaryClass(mapped, [...tracksWithContent, "cet"])).toEqual(expected);
+  });
+
   it("drops a mapped track that has no in-syllabus content for the Grade", () => {
     expect(classifySummaryClass(["jee_main", "neet"], ["jee_main", "jee_advanced"])).toEqual({
       kind: "single",
@@ -394,5 +404,15 @@ describe("uncovered tracks", () => {
 
   it("flags a served track that has no in-syllabus content for the Grade", () => {
     expect(uncoveredExamTracks(["neet"], ["neet"], ["jee_main"])).toEqual(["neet"]);
+  });
+
+  // The Summary ignores CET for progress, so a plan serving CET still can't measure it, even
+  // once CET has in-syllabus content.
+  it.each([
+    { mapped: ["cet", "neet"], planTracks: ["neet", "cet"], expected: ["cet"] },
+    { mapped: ["jee_main", "neet", "cet"], planTracks: ["jee_main", "neet", "cet"], expected: ["cet"] },
+    { mapped: ["jee_main", "cet"], planTracks: ["cet"], expected: ["jee_main", "cet"] },
+  ])("keeps CET uncovered for mapped $mapped against a plan serving $planTracks", ({ mapped, planTracks, expected }) => {
+    expect(uncoveredExamTracks(mapped, planTracks, [...tracksWithContent, "cet"])).toEqual(expected);
   });
 });

@@ -502,6 +502,27 @@ describe("getCurriculumPlan", () => {
     expect(chapters.params).toEqual([7, 11, ["jee_main"]]);
   });
 
+  it("keeps a stored CET track and reads its Chapters", async () => {
+    db.current.on("FROM lms_curriculum_plans p", [{ ...PLAN_ROW, exam_tracks: ["cet", "neet"] }]);
+    db.current.on("FROM lms_chapter_exam_configs cfg", PHYSICS_ROWS);
+
+    const result = await getCurriculumPlan(7);
+
+    expect(result).toMatchObject({ ok: true, plan: { examTracks: ["neet", "cet"] } });
+    const [chapters] = db.current.sqlCalls("FROM lms_chapter_exam_configs cfg");
+    expect(chapters.params).toEqual([7, 11, ["neet", "cet"]]);
+  });
+
+  it("returns a CET-only plan with no Chapters while CET has no in-syllabus configs", async () => {
+    db.current.on("FROM lms_curriculum_plans p", [{ ...PLAN_ROW, exam_tracks: ["cet"] }]);
+    db.current.on("FROM lms_chapter_exam_configs cfg", []);
+
+    await expect(getCurriculumPlan(7)).resolves.toMatchObject({
+      ok: true,
+      plan: { examTracks: ["cet"], chapters: [] },
+    });
+  });
+
   it.each([[0], [-1], [1.5]])("is not found for id %s without reading", async (id) => {
     await expect(getCurriculumPlan(id)).resolves.toEqual({
       ok: false,
@@ -573,11 +594,28 @@ describe("createCurriculumPlan", () => {
 
   it.each([
     [{ title: "x".repeat(201) }, "title", "Title must be at most 200 characters"],
-    [{ exam_tracks: ["jee_main", "cet"] }, "exam_tracks", "Served Exam Tracks must be JEE Main, JEE Advanced or NEET"],
+    [
+      { exam_tracks: ["jee_main", "math_foundation"] },
+      "exam_tracks",
+      "Served Exam Tracks must be JEE Main, JEE Advanced, NEET or CET",
+    ],
     [{ closure_date: "2027-04-01" }, "closure_date", "Plan Closure Date must fall within academic year 2026-2027"],
   ])("rejects %j", async (overrides, field, message) => {
     const result = await createCurriculumPlan({ adminEmail: ADMIN_EMAIL, body: metadataBody(overrides) });
     expect(result).toMatchObject({ ok: false, status: 400, errors: [{ field, message }] });
+  });
+
+  it("accepts CET, storing served tracks in curriculum order", async () => {
+    db.current.on("INSERT INTO lms_curriculum_plans", [{ id: 7 }]);
+
+    const result = await createCurriculumPlan({
+      adminEmail: ADMIN_EMAIL,
+      body: metadataBody({ exam_tracks: ["cet", "neet", "jee_main"] }),
+    });
+
+    expect(result).toMatchObject({ ok: true });
+    const [insert] = db.current.sqlCalls("INSERT INTO lms_curriculum_plans");
+    expect(insert.params[3]).toEqual(["jee_main", "neet", "cet"]);
   });
 
   it("treats a missing body as empty", async () => {
@@ -760,6 +798,15 @@ describe("copyCurriculumPlan", () => {
     expect(insertPlan.params.slice(1, 5)).toEqual(["2028-2029", 11, ["jee_main", "jee_advanced"], "2029-02-28"]);
     const [insertChapters] = db.current.sqlCalls("INSERT INTO lms_curriculum_plan_chapters");
     expect(insertChapters.params.slice(1, 4)).toEqual([[501], ["2029-02-28"], ["2029-03-01"]]);
+  });
+
+  it("copies a plan serving CET with its served tracks", async () => {
+    db.current.on("FOR UPDATE", [{ ...LOCKED_PLAN, exam_tracks: ["neet", "cet"] }]);
+
+    await copyCurriculumPlan({ id: 7, adminEmail: ADMIN_EMAIL, body: { mode: "same_year" } });
+
+    const [insertPlan] = db.current.sqlCalls("INSERT INTO lms_curriculum_plans");
+    expect(insertPlan.params[3]).toEqual(["neet", "cet"]);
   });
 
   it("writes no Chapter rows for a plan without stored dates", async () => {

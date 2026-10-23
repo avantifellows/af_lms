@@ -394,7 +394,10 @@ test.describe("Curriculum Plans", () => {
     };
     const cases: Array<[Record<string, unknown>, string]> = [
       [{ exam_tracks: [] }, "Choose at least one served Exam Track"],
-      [{ exam_tracks: ["jee_main", "cet"] }, "Served Exam Tracks must be JEE Main, JEE Advanced or NEET"],
+      [
+        { exam_tracks: ["jee_main", "math_foundation"] },
+        "Served Exam Tracks must be JEE Main, JEE Advanced, NEET or CET",
+      ],
       [{ academic_year: "2026-2028" }, "Academic year must look like 2026-2027"],
       [{ grade: 10 }, "Grade must be 11 or 12"],
       [{ closure_date: "2027-04-01" }, "Plan Closure Date must fall within academic year 2026-2027"],

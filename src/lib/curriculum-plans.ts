@@ -8,7 +8,7 @@ import type { PoolClient } from "pg";
 import { requireAdmin, type AdminSession } from "./admin-guard";
 import { getTodayIST, isDateString } from "./curriculum-date-helpers";
 import {
-  CONTENT_EXAM_TRACKS,
+  PLAN_EXAM_TRACKS,
   academicYearEndDate,
   academicYearStartDate,
   currentAcademicYearIST,
@@ -145,15 +145,15 @@ function checkTitle(input: Record<string, unknown>): FieldCheck<string> {
 
 function checkExamTracks(input: Record<string, unknown>): FieldCheck<ExamTrack[]> {
   const rawTracks: unknown[] = Array.isArray(input.exam_tracks) ? input.exam_tracks : [];
-  const value = CONTENT_EXAM_TRACKS.filter((track) => rawTracks.includes(track));
+  const value = PLAN_EXAM_TRACKS.filter((track) => rawTracks.includes(track));
   if (rawTracks.length === 0) {
     return { value, error: { field: "exam_tracks", message: "Choose at least one served Exam Track" } };
   }
-  const unknownTrack = rawTracks.some((track) => !CONTENT_EXAM_TRACKS.includes(track as ExamTrack));
+  const unknownTrack = rawTracks.some((track) => !PLAN_EXAM_TRACKS.includes(track as ExamTrack));
   return {
     value,
     error: unknownTrack
-      ? { field: "exam_tracks", message: "Served Exam Tracks must be JEE Main, JEE Advanced or NEET" }
+      ? { field: "exam_tracks", message: "Served Exam Tracks must be JEE Main, JEE Advanced, NEET or CET" }
       : null,
   };
 }
@@ -261,7 +261,7 @@ function mapPlanRow(row: PlanRow): CurriculumPlanSummary {
     title: row.title,
     academicYear: row.academic_year,
     grade: Number(row.grade),
-    examTracks: CONTENT_EXAM_TRACKS.filter((track) => row.exam_tracks.includes(track)),
+    examTracks: PLAN_EXAM_TRACKS.filter((track) => row.exam_tracks.includes(track)),
     status: row.status,
     displayStatus: planStatusAsOf({ status: row.status, closureDate }, getTodayIST()),
     closureDate,

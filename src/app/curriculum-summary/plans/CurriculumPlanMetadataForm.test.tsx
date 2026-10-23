@@ -59,6 +59,22 @@ describe("CurriculumPlanMetadataForm", () => {
     });
   });
 
+  it("offers CET but not Math Foundation, keeping served tracks in curriculum order", async () => {
+    const fetchMock = respond({ plan: { id: 7 } });
+    render(<CurriculumPlanMetadataForm planId={7} initialValues={VALUES} readOnly={false} />);
+
+    const boxes = screen.getAllByRole("checkbox").map((box) => box.closest("label")?.textContent);
+    expect(boxes).toEqual(["JEE Main", "JEE Advanced", "NEET", "CET"]);
+    expect(screen.queryByLabelText("Math Foundation")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText("CET"));
+    fireEvent.click(screen.getByLabelText("JEE Main"));
+    fireEvent.click(screen.getByRole("button", { name: "Save plan details" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent("Plan details saved.");
+    expect(sentBody(fetchMock).exam_tracks).toEqual(["jee_main", "neet", "cet"]);
+  });
+
   it("saves an existing plan's details, including an unticked track, and refreshes", async () => {
     const fetchMock = respond({ plan: { id: 7 } });
     render(<CurriculumPlanMetadataForm planId={7} initialValues={VALUES} readOnly={false} />);

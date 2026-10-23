@@ -5,7 +5,7 @@ import type { FormEvent } from "react";
 import { useRouter } from "next/navigation";
 
 import { Button, Card } from "@/components/ui";
-import { CONTENT_EXAM_TRACKS } from "@/lib/curriculum-plan-rules";
+import { PLAN_EXAM_TRACKS } from "@/lib/curriculum-plan-rules";
 import { formatExamTrack, type ExamTrack } from "@/lib/exam-tracks";
 import type { CurriculumPlanError } from "@/lib/curriculum-plans";
 import PlanErrorItems from "./PlanErrorItems";
@@ -243,7 +243,7 @@ function PlanDetailsFields({
   );
 }
 
-// Served tracks stay in CONTENT_EXAM_TRACKS order whatever order they are ticked in.
+// Served tracks stay in PLAN_EXAM_TRACKS order whatever order they are ticked in.
 function TrackChoices({
   examTracks,
   onChange,
@@ -256,7 +256,7 @@ function TrackChoices({
   function toggle(track: ExamTrack, checked: boolean) {
     onChange(
       checked
-        ? CONTENT_EXAM_TRACKS.filter((t) => t === track || examTracks.includes(t))
+        ? PLAN_EXAM_TRACKS.filter((t) => t === track || examTracks.includes(t))
         : examTracks.filter((t) => t !== track)
     );
   }
@@ -265,7 +265,7 @@ function TrackChoices({
     <fieldset className="flex flex-col gap-1 md:col-span-2" disabled={readOnly}>
       <legend className="text-sm font-bold text-text-primary">Served Exam Tracks</legend>
       <div className="flex flex-wrap gap-4">
-        {CONTENT_EXAM_TRACKS.map((track) => (
+        {PLAN_EXAM_TRACKS.map((track) => (
           <label key={track} className="flex items-center gap-2 text-sm text-text-primary">
             <input
               type="checkbox"

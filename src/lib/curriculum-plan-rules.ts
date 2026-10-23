@@ -78,9 +78,14 @@ export function planStatusAsOf(
   return plan.status;
 }
 
-// Exam Tracks with LMS curriculum content. CET and Math Foundation have none and are
-// ignored for progress.
+// Exam Tracks the Curriculum Summary measures progress for. CET and Math Foundation are
+// ignored for progress (CET has no LMS curriculum content yet; Math Foundation has none).
 export const CONTENT_EXAM_TRACKS: readonly ExamTrack[] = ["jee_main", "jee_advanced", "neet"];
+
+// Exam Tracks a Curriculum Plan may serve, in `EXAM_TRACKS` order: the content tracks plus
+// CET, whose in-syllabus Chapters join the plan as soon as they are configured. The Summary
+// still ignores CET for progress. Math Foundation is never served.
+export const PLAN_EXAM_TRACKS: readonly ExamTrack[] = ["jee_main", "jee_advanced", "neet", "cet"];
 
 export type SummaryClass =
   | { kind: "single"; tracks: ExamTrack[] }
@@ -273,8 +278,9 @@ export function subjectGroupProgress(
 }
 
 // A Centre + Grade's mapped tracks that a plan cannot measure: tracks the plan doesn't serve,
-// and tracks without in-syllabus content for the Grade (such as CET). Shown as "⚠ not
-// covered" in the assignment preview.
+// tracks without in-syllabus content for the Grade, and tracks the Summary ignores for
+// progress (CET even when the plan serves it, and Math Foundation). Shown as "⚠ not covered"
+// in the assignment preview.
 export function uncoveredExamTracks(
   mappedTracks: readonly string[],
   planTracks: readonly string[],

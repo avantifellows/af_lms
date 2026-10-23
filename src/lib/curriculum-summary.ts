@@ -21,6 +21,7 @@ import {
   chapterStatus,
   chapterTestStatus,
   classifySummaryClass,
+  CONTENT_EXAM_TRACKS,
   hoursWindowStart,
   isAcademicYearDate,
   planStatusAsOf,
@@ -352,6 +353,7 @@ async function loadSummaryClasses(
     academicYearStartDate(academicYear),
     params.asOf,
     params.centreId ?? null,
+    CONTENT_EXAM_TRACKS,
   ]);
   const chapterTests = await loadChapterTestSessions({
     centreIds: rawRows.map((row) => Number(row.centre_id)),
@@ -390,10 +392,11 @@ function scopedSchoolCodes(permission: UserPermission): string[] {
 }
 
 // $7 Grade number, $8 academic year of as-of, $9 its 1 Apr, $10 as-of, $11 one Centre id (null
-// = all). Every in-scope active physical JNV Centre with a Centre Exam Track for the Grade is
-// one row; its Chapters are the Grade's in-syllabus Chapters for any mapped track, each with its
-// plan due and test dates (only for an Active plan serving one of the Chapter's tracks) and its
-// earliest Chapter Completion IST date within [1 Apr, as-of] under any mapped track.
+// = all), $12 the content tracks the Summary measures. Every in-scope active physical JNV Centre
+// with a Centre Exam Track for the Grade is one row; its Chapters are the Grade's in-syllabus
+// Chapters for any mapped track, each with its plan due and test dates (only for an Active plan
+// serving one of the Chapter's content tracks: a plan's CET track never dates a Chapter here)
+// and its earliest Chapter Completion IST date within [1 Apr, as-of] under any mapped track.
 // `scoped_centres` holds one row per in-scope eligible Centre + mapped track for the Grade;
 // `mapped` folds them into one row per Centre.
 const SUMMARY_SQL = `
@@ -485,7 +488,9 @@ const SUMMARY_SQL = `
       p.title,
       p.status,
       p.closure_date,
-      p.exam_tracks
+      ARRAY(
+        SELECT track FROM unnest(p.exam_tracks) AS track WHERE track = ANY($12::text[])
+      ) AS exam_tracks
     FROM lms_curriculum_plan_assignments a
     JOIN lms_curriculum_plans p ON p.id = a.plan_id
     JOIN grade g ON g.id = a.grade_id AND g.number = $7

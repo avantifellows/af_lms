@@ -370,6 +370,7 @@ _Avoid_: Unmapped Student, Mapping not done, unassigned Mentee
 - A **Summary Class** counts **LMS Curriculum Logs** and **Chapter Completion** from every Exam Track in the class; teachers still log and complete Chapters under one Exam Track (ADR 0008)
 - JEE Main and JEE Advanced are never one **Summary Class**; a Centre and Grade mapped to both, with or without NEET, is a Centre Management setup problem
 - One **Curriculum Plan** applies to a Centre and Grade for an academic year, whatever Exam Tracks it runs; G11 and G12 at one Centre have separate plans
+- A **Curriculum Plan** may serve JEE Main, JEE Advanced, NEET and CET, never Math Foundation; CET's in-syllabus Chapters join the plan once configured, but the **Curriculum Summary** and chapter timeline still ignore CET for progress and show it as not covered (CET with other Exam Tracks is a later curriculum-owner decision)
 - A Chapter is due when its **Chapter Due Date** is on or before the as-of date, and done when it has **Chapter Completion** under any Exam Track of the **Summary Class** dated in the plan's academic year on or before the as-of date
 - A **Curriculum Plan** is Draft, Active, or Closed; only Active and Closed plans drive the **Curriculum Summary**, and a plan is Closed once the as-of date passes its **Plan Closure Date**
 - **Chapter Test Status** comes from existing chapter-test quiz sessions; teachers do not record it
