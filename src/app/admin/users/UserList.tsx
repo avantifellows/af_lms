@@ -3,7 +3,7 @@
 import { useState } from "react";
 import AddUserModal from "./AddUserModal";
 import { Button } from "@/components/ui";
-import { isPmuRole, PROGRAM_ID_TO_LABEL } from "@/lib/constants";
+import { isAlumniRole, isPmuRole, PROGRAM_ID_TO_LABEL } from "@/lib/constants";
 
 interface CentreAssignment {
   centreName: string;
@@ -220,6 +220,9 @@ export default function UserList({ initialUsers, regions, schoolCodeToName, curr
                         </span>
                       ))}
                     </div>
+                  ) : isAlumniRole(user.role) ? (
+                    // Alumni Managers have no Programs (ADR 0008); that's not an error.
+                    <span className="text-gray-500 text-xs">Not used</span>
                   ) : (
                     <span className="text-red-500 text-xs">No programs</span>
                   )}

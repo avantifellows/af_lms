@@ -56,6 +56,17 @@ export const TEST_USERS = {
     regions: null,
     read_only: false,
   },
+  alumniManager: {
+    email: "e2e-alumni-manager@test.local",
+    level: 1,
+    role: "alumni_manager",
+    // Alumni Managers have no Programs (ADR 0008). Not the Dev Login
+    // persona's email, which the Holistic fixtures re-seed after this.
+    program_ids: [],
+    school_codes: ["70705"],
+    regions: null,
+    read_only: false,
+  },
 } as const satisfies Record<string, TestUser>;
 
 export type TestUserRole = keyof typeof TEST_USERS;

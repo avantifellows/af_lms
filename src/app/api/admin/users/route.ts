@@ -30,7 +30,7 @@ function validateUserWrite(value: UserWrite): string | null {
   if (![1, 2, 3].includes(value.level)) return "Level must be between 1 and 3";
   if (value.role !== undefined && !isUserRole(value.role)) return "Invalid role";
   const role = userRole(value);
-  if (role === "holistic_mentorship_admin" || isPmuRole(role)) return null;
+  if (role === "holistic_mentorship_admin" || isPmuRole(role) || isAlumniRole(role)) return null;
   if (!Array.isArray(value.program_ids) || value.program_ids.length === 0) {
     return "At least one program must be assigned";
   }
@@ -58,7 +58,8 @@ function userWriteParams(value: UserWrite, pmuRow: PmuRow | null) {
         level: value.level,
         schoolCodes: value.school_codes || null,
         regions: value.regions || null,
-        programIds: value.program_ids,
+        // Alumni Managers reach alumni by School, never by Program (ADR 0008).
+        programIds: isAlumniRole(role) ? [] : value.program_ids,
       };
   return [
     value.email,

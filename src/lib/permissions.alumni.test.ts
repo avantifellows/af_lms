@@ -1,8 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("./db", () => ({ query: vi.fn() }));
+vi.mock("next-auth", () => ({ getServerSession: vi.fn() }));
+vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 
+import { getServerSession } from "next-auth";
 import { query } from "./db";
+import { authorizeSchoolAccess } from "./api-auth";
+import {
+  ALUMNI_MANAGER_PERMISSION,
+  ALUMNI_MANAGER_SESSION,
+} from "@/app/api/__test-utils__/api-test-helpers";
 import { ALUMNI_MANAGER_ROLE, isAlumniRole } from "./constants";
 import {
   canAccessAlumni,
@@ -90,6 +98,33 @@ describe("alumni_manager role (ADR 0008)", () => {
         sql.includes("FROM user_permission") ? [row()] : [{ code: "70705", region: null, program_id: 1 }],
       );
       expect(await canAccessStudent(session, 42)).toBe(false);
+    });
+
+    // The level-3 case above can't tell "denied" from "no School matched"; an
+    // explicit-School row must be refused at its own School too.
+    it.each([
+      ["level 1, its own School", ALUMNI_MANAGER_PERMISSION],
+      ["level 2, its own region", { ...ALUMNI_MANAGER_PERMISSION, level: 2, school_codes: null, regions: ["West"] }],
+    ])("resolves to no permission at %s", async (_label, permissionRow) => {
+      mockQuery.mockResolvedValue([permissionRow]);
+      const email = ALUMNI_MANAGER_PERMISSION.email;
+      expect(await getResolvedPermission(email)).toBeNull();
+      expect(await isAdmin(email)).toBe(false);
+      expect(await canAccessSchool(email, "70705", "West")).toBe(false);
+    });
+
+    it("is refused by authorizeSchoolAccess at its own School", async () => {
+      vi.mocked(getServerSession).mockResolvedValue(ALUMNI_MANAGER_SESSION);
+      mockQuery.mockImplementation(async (sql: string) => {
+        if (sql.includes("FROM user_permission")) return [ALUMNI_MANAGER_PERMISSION];
+        if (sql.includes("FROM school")) {
+          return [{ id: "101", code: "70705", name: "JNV Bhavnagar", region: "West", af_school_category: "JNV" }];
+        }
+        return [];
+      });
+      const result = await authorizeSchoolAccess("70705");
+      expect(result.authorized).toBe(false);
+      if (!result.authorized) expect(result.response.status).toBe(403);
     });
 
     it("leaves other roles unchanged", async () => {
