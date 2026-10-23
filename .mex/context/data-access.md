@@ -207,12 +207,14 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
 - **Storage:** `holistic_mentorship_post_session_note_challenges` (db-service #806), one row per
   code, unique `(notes_id, category_code)`, no DB CHECK on codes. Its insert/update trigger shares
   the post-session privacy guard (Student advisory lock, rejects tombstoned Students). Raw SQL (ADR-0005).
-  **Deploy db-service #806 first**: without the table every Notes write fails.
+  **Deploy db-service #806 first**: without the table every Notes read, write and erasure fails.
 - **Validation order:** the student-phase PATCH requires `challenge_categories: string[]` in every
   mode (else 422 `Invalid Notes`). `validateHolisticChallengeCategories(codes, { final: false })` runs
   in the route and again in `saveHolisticNotes` for every mode (trimmed; unknown/duplicate → `Unknown
   Challenge Category`; No major issue mixed in its group → 422). Submit / Edit notes then check
   tokens, state, every answer, and only last ≥1 Category per group (`final: true`).
+  A Notes tab left open across the release sends the old payload and gets 422 on its next
+  autosave until reloaded; say so in release notes.
 - **Writes:** Categories are replaced (delete + insert the validated set) in the same transaction as
   the answers. **Has content** = any answer row **or** any Category row: it drives erased-draft
   claiming on write and read, and a Categories-only first draft creates Notes and freezes the Phase.

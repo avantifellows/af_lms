@@ -164,6 +164,7 @@ test.describe("Challenge Category Heatmap", () => {
     await page.goto("/admin/holistic-mentorship?tab=challenge-categories");
     await expect(page.getByRole("tab", { name: "Challenge Categories" })).toHaveAttribute("aria-selected", "true");
     await expect(page.getByLabel("Program", { exact: true })).toHaveValue("1");
+    await expect(programOptions(page)).toHaveCount(1);
     await expect(page.getByLabel("Phase", { exact: true })).toBeEnabled();
 
     await page.goto("/admin/holistic-mentorship?tab=phases");
@@ -277,18 +278,6 @@ test.describe("Challenge Category Heatmap", () => {
       `/api/holistic-mentorship/challenge-categories?program_id=all&academic_year=2026-2027&grade=12&phase_id=${fixture.categorizedPhaseId}`,
     );
     expect(response.status()).toBe(422);
-    expectBrowserHealth(health);
-  });
-
-  test("a single-Program PM opens the heatmap on their Program with no All Programs option", async ({
-    holisticPmPage: page,
-  }) => {
-    const health = collectBrowserHealth(page);
-    await page.goto("/admin/holistic-mentorship");
-    await page.getByRole("tab", { name: "Challenge Categories" }).click();
-    await expect(page.getByLabel("Program", { exact: true })).toHaveValue("1");
-    await expect(programOptions(page)).toHaveCount(1);
-    await expect(page.getByLabel("Phase", { exact: true })).toBeEnabled();
     expectBrowserHealth(health);
   });
 
