@@ -76,10 +76,7 @@ describe("POST /api/blended-learning/flags/seen", () => {
     expect(views).toEqual(before);
   });
 
-  it.each([
-    ["a Blended Learning Mentor", MENTOR_A],
-    ["a role without Blended Learning access", TEACHER],
-  ])("returns 403 for %s and records nothing", async (_case, email) => {
+  it.each([["a role without Blended Learning access", TEACHER]])("returns 403 for %s and records nothing", async (_case, email) => {
     signedInAs(email);
     const before = structuredClone(views);
 
@@ -99,6 +96,8 @@ describe("POST /api/blended-learning/flags/seen", () => {
   it.each([
     ["a Blended Learning Admin", ADMIN, 11],
     ["an LMS admin", LMS_ADMIN, 1],
+    // A Mentor's Flags tab is their own Students' flags; the visit is theirs.
+    ["a Blended Learning Mentor", MENTOR_A, 9001],
   ])("records a first visit for %s", async (_case, email, userId) => {
     signedInAs(email);
 

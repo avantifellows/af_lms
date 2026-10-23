@@ -142,7 +142,8 @@ describe("canBlendedLearning", () => {
     ["upload", true, false, false],
     ["manage_draft", true, false, false],
     ["play_recording", false, true, true],
-    ["view_flags", false, true, true],
+    // A Mentor's flags are scoped to their own Students (blended-learning-flags).
+    ["view_flags", true, true, true],
     ["view_mentors", false, true, true],
   ];
 

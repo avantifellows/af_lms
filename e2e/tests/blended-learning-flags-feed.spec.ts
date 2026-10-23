@@ -10,6 +10,7 @@ import {
   FLAGS_LAST_SEEN_HOURS_AGO,
   IRA_HISTORY,
   MENTEES,
+  OTHER_STUDENTS,
   TARA_LINKS,
   bulkFlagComment,
   fullName,
@@ -334,17 +335,64 @@ for (const { label, viewport } of VIEWPORTS) {
   });
 }
 
+async function mentorUserId(email: string): Promise<number> {
+  return withPool(async (pool) => {
+    const result = await pool.query<{ id: string }>(
+      `SELECT user_id AS id FROM user_permission WHERE LOWER(email) = LOWER($1)`,
+      [email]
+    );
+    return Number(result.rows[0].id);
+  });
+}
+
+// Tara (Mentor B's) flagged Conversation, for a Mentor A request.
+async function taraConversationId(): Promise<number> {
+  return withPool(async (pool) => {
+    const result = await pool.query<{ id: string }>(
+      `SELECT conversation_id AS id FROM blended_learning_mentor_flags WHERE comment = $1`,
+      [FEED_FLAGS.taraMaths.comment]
+    );
+    return Number(result.rows[0].id);
+  });
+}
+
 test.describe("Blended Learning Flags feed — Mentor", () => {
-  test("a Mentor cannot reach the Flags tab or record a visit", async ({ page }) => {
+  test("a Mentor's Flags tab holds only their own Students' flags, by recipient, never another Mentor's", async ({ page }) => {
     await signInAs(page, BLENDED_MENTOR_A);
 
-    await page.goto("/blended-learning?tab=flags");
-    await expect(page.getByRole("heading", { level: 1, name: "Students" })).toBeVisible();
+    const seen = page.waitForResponse(
+      (response) => response.url().endsWith("/api/blended-learning/flags/seen") && response.request().method() === "POST"
+    );
+    await page.goto("/blended-learning");
+    await page.getByRole("navigation", { name: "Mentor views" }).getByRole("link", { name: /Flags/ }).click();
+    expect((await seen).status()).toBe(200);
     await expect(page.getByRole("navigation", { name: "Admin views" })).toHaveCount(0);
-    await expect(feed(page)).toHaveCount(0);
 
-    const response = await page.request.post("/api/blended-learning/flags/seen");
-    expect(response.status()).toBe(403);
-    expect(await response.json()).toEqual({ error: "Forbidden" });
+    // Ira's and Meera's flags (Mentor A's Students); Tara is Mentor B's.
+    await expect(cards(page).first()).toBeVisible();
+    await expect(cards(page).filter({ hasText: IRA_PHYSICS })).toHaveCount(1);
+    await expect(cards(page).filter({ hasText: MEERA_CHEMISTRY })).toHaveCount(1);
+    await expect(cards(page).filter({ hasText: fullName(OTHER_STUDENTS.mentorB) })).toHaveCount(0);
+    await expect(feed(page).getByText(TARA_MATHS)).toHaveCount(0);
+    await expect(feed(page).getByText(TARA_WELLBEING)).toHaveCount(0);
+    // No Mentor filter or Mentor names: every flag is on their own Students.
+    const filters = page.getByRole("search", { name: "Filter flags" });
+    await expect(filters.getByLabel("Mentor", { exact: true })).toHaveCount(0);
+    await expect(feed(page).getByText(BLENDED_MENTOR_A.name)).toHaveCount(0);
+
+    // Not by asking for Mentor B in the URL, or the older pages, either.
+    await page.goto(`/blended-learning?tab=flags&mentor=${await mentorUserId(BLENDED_MENTOR_B.email)}`);
+    await expect(cards(page).first()).toBeVisible();
+    await expect(feed(page).getByText(TARA_MATHS)).toHaveCount(0);
+    // Mentor A's 50+ flags make two pages; the older one holds none of Tara's either.
+    await page.getByRole("link", { name: "Older flags" }).click();
+    await expect(page.getByRole("link", { name: "Newest flags" })).toBeVisible();
+    await expect(cards(page).first()).toBeVisible();
+    await expect(feed(page).getByText(TARA_MATHS)).toHaveCount(0);
+    await expect(feed(page).getByText(TARA_WELLBEING)).toHaveCount(0);
+
+    // Nor through the API: Tara's flagged Conversation's notes are not found.
+    const notes = await page.request.get(`/api/blended-learning/conversations/${await taraConversationId()}/notes`);
+    expect(notes.status()).toBe(404);
   });
 });

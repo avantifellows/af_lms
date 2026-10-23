@@ -9,15 +9,18 @@ import { FlagsFilters } from "./FlagsFilters";
 import { ConversationNotes } from "./students/[id]/ConversationNotes";
 import { FLAG_RECIPIENT } from "./students/[id]/flagRecipients";
 
-// The admin Flags tab: a read-only feed of every Mentor Flag, newest first,
-// filtered by Mentor and Flag Recipient through the URL, applied as soon as
-// either filter changes. Flags raised since the viewer's previous visit are
+// The Flags tab: a read-only feed of Mentor Flags, newest first, filtered
+// through the URL and applied as soon as a filter changes. An admin sees every
+// flag, filtered by Mentor and Flag Recipient; a Mentor only their own
+// Students' flags (`ownStudents`), by Flag Recipient, without Mentor names. Flags raised since the viewer's previous visit are
 // marked New; the filters and page links carry the visit's cutoff (`since`),
 // so they stay New for the whole visit.
 
 export type FlagsView = {
   page: FlagsPage;
   mentors: { mentorUserId: number; name: string }[];
+  // A Mentor's own feed: no Mentor filter or names.
+  ownStudents: boolean;
   mentorUserId: number | null;
   recipient: FlagRecipient | null;
   cursor: number | null;
@@ -36,7 +39,7 @@ function feedHref(view: FlagsView, cursor: number | null): string {
   return `/blended-learning?${params}`;
 }
 
-function FlagCardView({ flag }: { flag: FlagCard }) {
+function FlagCardView({ flag, ownStudents }: { flag: FlagCard; ownStudents: boolean }) {
   const meta = [flag.grade === null ? null : `Grade ${flag.grade}`, flag.programName, flag.gender].filter(Boolean);
   return (
     <article
@@ -71,7 +74,8 @@ function FlagCardView({ flag }: { flag: FlagCard }) {
       </div>
       {meta.length > 0 && <p className="text-sm text-text-secondary">{meta.join(" · ")}</p>}
       <p className="text-sm text-text-secondary">
-        {formatCalendarDate(flag.occurredOn)} · {flag.mentorName}
+        {formatCalendarDate(flag.occurredOn)}
+        {!ownStudents && ` · ${flag.mentorName}`}
       </p>
       {flag.comment && (
         <p className="whitespace-pre-line break-words border-l-2 border-danger pl-3 text-sm text-text-primary">
@@ -109,7 +113,12 @@ export function FlagsFeed({ view }: { view: FlagsView }) {
   return (
     <section aria-label="Mentor Flags" className="space-y-4">
       <FlagsFilters
-        filters={{ mentors: view.mentors, mentorUserId: view.mentorUserId, recipient: view.recipient, since: view.since }}
+        filters={{
+          mentors: view.ownStudents ? null : view.mentors,
+          mentorUserId: view.mentorUserId,
+          recipient: view.recipient,
+          since: view.since,
+        }}
       />
       {/* Filters apply without a page load, so announce what the feed now holds. */}
       <p role="status" className="sr-only">
@@ -123,7 +132,7 @@ export function FlagsFeed({ view }: { view: FlagsView }) {
         <ol className="space-y-3">
           {flags.map((flag) => (
             <li key={flag.id}>
-              <FlagCardView flag={flag} />
+              <FlagCardView flag={flag} ownStudents={view.ownStudents} />
             </li>
           ))}
         </ol>

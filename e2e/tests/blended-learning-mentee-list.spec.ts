@@ -57,8 +57,8 @@ for (const { label, viewport, desktop } of VIEWPORTS) {
       await page.goto("/blended-learning");
     });
 
-    test("a Mentor sees exactly their own active current-year Students under a Students heading", async ({ page }) => {
-      await expect(page.getByRole("heading", { level: 1, name: "Students" })).toBeVisible();
+    test("a Mentor sees exactly their own active current-year Students under the My Students tab", async ({ page }) => {
+      await expect(page.getByRole("heading", { level: 1, name: "My Students" })).toBeAttached();
       await expect(page.getByText(/^6 students · \d{4}-\d{4}$/)).toBeVisible();
       await expect(entries(group(page, "Talk to first"))).toHaveCount(4);
       await expect(entries(group(page, "Everyone else"))).toHaveCount(2);
@@ -124,6 +124,19 @@ for (const { label, viewport, desktop } of VIEWPORTS) {
       await expect(entry(group(page, "Everyone else"), recent).getByText("Draft ready to review")).toHaveCount(0);
     });
 
+    test("the Resources tab opens the Mentor's resources, and My Students comes back", async ({ page }) => {
+      const tabs = page.getByRole("navigation", { name: "Mentor views" });
+      await expect(tabs.getByRole("link", { name: "My Students" })).toHaveAttribute("aria-current", "page");
+      await tabs.getByRole("link", { name: "Resources" }).click();
+      await expect(page).toHaveURL(/\/blended-learning\/resources$/);
+      await expect(page.getByRole("heading", { level: 1, name: "Resources" })).toBeAttached();
+      await expect(
+        page.getByRole("link", { name: /^Mentor Toolkit: Supporting Students Through Non-Academic Stress/ })
+      ).toHaveAttribute("target", "_blank");
+      await page.getByRole("navigation", { name: "Mentor views" }).getByRole("link", { name: "My Students" }).click();
+      await expect(page.getByRole("heading", { level: 1, name: "My Students" })).toBeAttached();
+    });
+
     test("shows each Student's grade, program and gender", async ({ page }) => {
       const ira = entry(group(page, "Talk to first"), attemptLatest);
       await expect(ira.getByText("12", { exact: true })).toBeVisible();
@@ -157,9 +170,9 @@ for (const { label, viewport, desktop } of VIEWPORTS) {
         expect(overflow).toBeLessThanOrEqual(0);
 
         // Per card: the name, View and New log; plus Kabir's
-        // "Draft ready to review" chip and the one Resources link.
+        // "Draft ready to review" chip and the three tabs.
         const links = page.getByRole("main").getByRole("link");
-        await expect(links).toHaveCount(6 * 3 + 1 + 1);
+        await expect(links).toHaveCount(6 * 3 + 1 + 3);
         for (const link of await links.all()) {
           const box = await link.boundingBox();
           expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);

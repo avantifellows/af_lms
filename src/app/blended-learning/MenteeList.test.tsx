@@ -158,18 +158,12 @@ describe("MenteeGroups — row actions", () => {
     expect(cardName.closest("li")).toHaveClass("relative");
   });
 
-  it("shows a viewer who can't log the same View and New log buttons, New log disabled", () => {
+  it("offers a viewer who can't log View alone, with no New log at all", () => {
     renderList(false);
 
     expect(screen.queryByRole("link", { name: /New log/ })).not.toBeInTheDocument();
-    const disabled = screen.getAllByRole("button", { name: "New log for Kabir Never" });
-    expect(disabled).toHaveLength(2);
-    for (const button of disabled) {
-      expect(button).toBeDisabled();
-      expect(button).toHaveAttribute("title", "View only");
-    }
+    expect(screen.queryByRole("button", { name: /New log/ })).not.toBeInTheDocument();
     expect(screen.getAllByRole("link", { name: "View Kabir Never" })).toHaveLength(2);
-    expect(screen.getByRole("row", { name: /Kabir Never/ })).toHaveTextContent("ViewNew log");
   });
 });
 

@@ -7,9 +7,12 @@ import {
 } from "./blended-learning-access";
 import { contactNumbers, present, type FlagRecipient } from "./blended-learning-mentee-detail";
 
-// Blended Learning Admin Flags feed (server-only): every Mentor Flag, newest
-// first by (inserted_at, id), and each viewer's "last seen" time behind the
-// "N new" badge. Flags have no resolution; the feed is read-only.
+// The Flags feed (server-only): for a Blended Learning Admin every Mentor
+// Flag, for a Mentor only the flags on their own Students (an active
+// current-year Mapping to them), newest first by (inserted_at, id), and each
+// viewer's "last seen" time behind the "N new" badge. A Mentor's scope is in
+// every query here, so another Mentor's flags are never read. Flags have no
+// resolution; the feed is read-only.
 //
 // A visit to the Flags tab starts when the admin opens the tab: the page reads
 // their previous "last seen" as the visit's cutoff and records the visit. The
@@ -111,6 +114,21 @@ type FlagRow = {
 const MENTOR_NAME_SQL = `COALESCE(NULLIF(TRIM(CONCAT_WS(' ', mentor.first_name, mentor.last_name)), ''),
                      mentor.email, CONCAT('Mentor ', c.mentor_user_id))`;
 
+// The viewer's scope as query parameters: whether to narrow to one Mentor's
+// own Students, and that Mentor. A Mentor with no `user` id matches nothing.
+function flagScope(access: BlendedLearningAccess): [boolean, number | null] {
+  return access.kind === "mentor" ? [true, access.mentorUserId ?? null] : [false, null];
+}
+
+// The flag is in the viewer's scope (flagScope's parameters at `scoped` and
+// `mentor`; the academic year at `year`).
+function inViewerScopeSql(scoped: string, mentor: string, year: string): string {
+  return `(NOT ${scoped}::boolean OR EXISTS (
+            SELECT 1 FROM blended_learning_mentor_mentee_mappings own
+            WHERE own.student_id = flag.student_id AND own.mentor_user_id = ${mentor}::bigint
+              AND ${activeBlendedMappingSql("own", year)}))`;
+}
+
 // The viewer's previous visit, or NULL before their first.
 const LAST_SEEN_SQL = `(SELECT views.last_seen_at FROM blended_learning_flag_views views
                         WHERE lower(views.viewer_email) = lower($1))`;
@@ -129,25 +147,28 @@ export async function readFlagsCutoff(access: BlendedLearningAccess): Promise<Fl
 // viewer's "last seen" as it stands.
 export async function countNewFlags(access: BlendedLearningAccess, cutoff?: FlagsCutoff): Promise<number> {
   if (!canBlendedLearning(access, "view_flags")) return 0;
+  const scope = [...flagScope(access), CURRENT_ACADEMIC_YEAR];
   const rows = cutoff
     ? await query<{ count: number | string }>(
         `SELECT count(*) AS count
          FROM blended_learning_mentor_flags flag
-         WHERE $1::timestamp IS NULL OR flag.inserted_at > $1::timestamp`,
-        [cutoff.lastSeenAt]
+         WHERE ($1::timestamp IS NULL OR flag.inserted_at > $1::timestamp)
+           AND ${inViewerScopeSql("$2", "$3", "$4")}`,
+        [cutoff.lastSeenAt, ...scope]
       )
     : await query<{ count: number | string }>(
         `SELECT count(*) AS count
          FROM blended_learning_mentor_flags flag
-         WHERE ${LAST_SEEN_SQL} IS NULL OR flag.inserted_at > ${LAST_SEEN_SQL}`,
-        [access.actorEmail]
+         WHERE (${LAST_SEEN_SQL} IS NULL OR flag.inserted_at > ${LAST_SEEN_SQL})
+           AND ${inViewerScopeSql("$2", "$3", "$4")}`,
+        [access.actorEmail, ...scope]
       );
   return Number(rows[0]?.count ?? 0);
 }
 
-// One page of the feed, narrowed by the Conversation's Mentor and the Flag
-// Recipient, with New marked against the visit's cutoff. Null when the actor
-// may not see flags.
+// One page of the viewer's feed, narrowed by the Conversation's Mentor (for
+// admins; a Mentor's feed is theirs already) and the Flag Recipient, with New
+// marked against the visit's cutoff. Null when the actor may not see flags.
 export async function listFlags(
   access: BlendedLearningAccess,
   filters: FlagFilters,
@@ -184,7 +205,8 @@ export async function listFlags(
          LIMIT 1
        ) current_grade ON true
        LEFT JOIN blended_learning_student_links links ON links.student_id = st.id
-       WHERE ($2::bigint IS NULL OR c.mentor_user_id = $2::bigint)
+       WHERE ${inViewerScopeSql("$7", "$8", "$6")}
+         AND ($2::bigint IS NULL OR c.mentor_user_id = $2::bigint)
          AND ($3::varchar IS NULL OR flag.recipient = $3::varchar)
          AND ($4::bigint IS NULL OR (flag.inserted_at, flag.id) <
               (SELECT cursor_flag.inserted_at, cursor_flag.id FROM blended_learning_mentor_flags cursor_flag
@@ -193,11 +215,12 @@ export async function listFlags(
        LIMIT $5`,
       [
         cutoff.lastSeenAt,
-        filters.mentorUserId ?? null,
+        access.kind === "admin" ? (filters.mentorUserId ?? null) : null,
         filters.recipient ?? null,
         filters.cursor ?? null,
         FLAGS_PAGE_SIZE + 1,
         CURRENT_ACADEMIC_YEAR,
+        ...flagScope(access),
       ]
     ),
     countNewFlags(access, cutoff),
@@ -230,11 +253,12 @@ export async function listFlags(
   };
 }
 
-// The Mentors who have Conversations with flags, A–Z, for the Mentor filter.
+// The Mentors who have Conversations with flags, A–Z, for the admins' Mentor
+// filter. A Mentor has no such filter.
 export async function listFlagMentors(
   access: BlendedLearningAccess
 ): Promise<{ mentorUserId: number; name: string }[]> {
-  if (!canBlendedLearning(access, "view_flags")) return [];
+  if (access.kind !== "admin" || !canBlendedLearning(access, "view_flags")) return [];
   const rows = await query<{ mentor_user_id: number | string; mentor_name: string }>(
     `SELECT DISTINCT c.mentor_user_id, ${MENTOR_NAME_SQL} AS mentor_name
      FROM blended_learning_mentor_flags flag

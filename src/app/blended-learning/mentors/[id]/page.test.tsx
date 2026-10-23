@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
@@ -116,14 +116,8 @@ describe("MentorPage", () => {
     expect(screen.getAllByText("Draft ready to review").length).toBeGreaterThan(0);
     expect(screen.queryByRole("link", { name: "Draft ready to review" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /^New log/ })).not.toBeInTheDocument();
-    for (const button of screen.getAllByRole("button", { name: "New log for Ira Attempt" })) expect(button).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /^New log/ })).not.toBeInTheDocument();
     expect(screen.getAllByRole("link", { name: "View Ira Attempt" }).length).toBeGreaterThan(0);
-    // The Mentor's Resources, as under their own list.
-    expect(
-      within(screen.getByRole("region", { name: "Resources" })).getByRole("link", {
-        name: "Mentor Toolkit: Supporting Students Through Non-Academic Stress (opens in a new tab)",
-      })
-    ).toHaveAttribute("target", "_blank");
   });
 
   it("counts one Mentee in the singular and gives a read-only admin no way to review the draft", async () => {

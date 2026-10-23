@@ -10,7 +10,6 @@ import { loadDashboardChrome } from "@/lib/dashboard-chrome";
 
 import { BlendedPageShell } from "../../BlendedPageShell";
 import { FilteredMenteeList } from "../../FilteredMenteeList";
-import { MentorResources } from "../../MentorResources";
 
 // One Mentor's Student list for Blended Learning Admins (view_mentors), the
 // same grouped list, search and filters the Mentor sees. Its copy is neutral,
@@ -44,7 +43,6 @@ export default async function MentorPage({ params }: { params: Promise<{ id: str
         </p>
       </div>
       <FilteredMenteeList list={mentees} canLog={canBlendedLearning(access, "log")} today={today} />
-      <MentorResources />
     </BlendedPageShell>
   );
 }

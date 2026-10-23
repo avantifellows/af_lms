@@ -33,11 +33,7 @@ export type BlendedLearningAccess = {
 };
 
 const MUTATIONS: ReadonlySet<BlendedLearningAction> = new Set(["log", "upload", "manage_draft"]);
-const ADMIN_ONLY: ReadonlySet<BlendedLearningAction> = new Set([
-  "play_recording",
-  "view_flags",
-  "view_mentors",
-]);
+const ADMIN_ONLY: ReadonlySet<BlendedLearningAction> = new Set(["play_recording", "view_mentors"]);
 
 // The person's `user` id: user_permission.user_id, else the `user` row whose
 // email matches case-insensitively (as Holistic does).
@@ -74,8 +70,10 @@ export async function getBlendedLearningAccess(
 }
 
 // Only a Mentor who is not read-only mutates (logs, uploads, manages drafts);
-// every Blended Learning Admin is view only. Recordings, flags and Mentor
-// cards are for Blended Learning Admins (including read-only ones).
+// every Blended Learning Admin is view only. Recordings and Mentor cards are
+// for Blended Learning Admins (including read-only ones). Everyone sees flags:
+// an admin every flag, a Mentor only those on their own Students
+// (blended-learning-flags).
 export function canBlendedLearning(
   access: BlendedLearningAccess | null,
   action: BlendedLearningAction

@@ -11,9 +11,9 @@ import { daysAgo, shortDate, whyNowTags } from "./menteeListCopy";
 // "Everyone else" as group header rows; a card per Student below that. A
 // click anywhere on a row or card opens the Student (the name's link
 // stretches over it); the row's own links sit above that link. Each Student
-// has a "View" button and a "New log" button, and a ready Conversation
-// Draft's chip opens it on the log page. For anyone who can't log (admins,
-// read-only users) "New log" stays in place, disabled, and the chip is a
+// has a "View" button; Mentors who can log also get "New log", and a ready
+// Conversation Draft's chip opens it on the log page. For anyone else
+// (admins, read-only users) View is the row's only button and the chip is a
 // plain label. `today` is the IST date, so this year's dates drop the year.
 
 export type MenteeGroupView = { title: string; description: string; mentees: MenteeRow[] };
@@ -79,7 +79,6 @@ const actionBase =
   "relative z-10 inline-flex items-center justify-center gap-2 rounded-lg border font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50";
 const outlined = `${actionBase} border-border bg-bg-card text-text-primary hover:border-accent hover:bg-hover-bg`;
 const primary = `${actionBase} border-accent bg-accent text-text-on-accent hover:bg-accent-hover`;
-const primaryDisabled = `${actionBase} cursor-not-allowed border-accent bg-accent text-text-on-accent opacity-50`;
 
 // Small text buttons, 44 px tall; on a card each takes half the row and the
 // icons drop out below 400 px so both labels fit at 360 px. The accessible
@@ -93,7 +92,7 @@ function RowActions({ mentee, canLog, card }: { mentee: MenteeRow; canLog: boole
         <ArrowUpRight aria-hidden="true" className={iconClass} />
         <span className="whitespace-nowrap">View</span>
       </Link>
-      {canLog ? (
+      {canLog && (
         <Link
           href={`${menteeHref(mentee)}/log`}
           aria-label={`New log for ${mentee.name}`}
@@ -102,17 +101,6 @@ function RowActions({ mentee, canLog, card }: { mentee: MenteeRow; canLog: boole
           <MessageCirclePlus aria-hidden="true" className={iconClass} />
           <span className="whitespace-nowrap">New log</span>
         </Link>
-      ) : (
-        <button
-          type="button"
-          disabled
-          title="View only"
-          aria-label={`New log for ${mentee.name}`}
-          className={`${primaryDisabled} ${size}`}
-        >
-          <MessageCirclePlus aria-hidden="true" className={iconClass} />
-          <span className="whitespace-nowrap">New log</span>
-        </button>
       )}
     </>
   );

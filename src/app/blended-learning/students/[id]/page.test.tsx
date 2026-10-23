@@ -199,13 +199,15 @@ describe("MenteeDetailPage", () => {
     });
   });
 
-  it("keeps a Mentor's way back to their own list, whatever the link says they came from", async () => {
+  it("sends a Mentor back to their own list, or to their Flags tab when they came from it", async () => {
     signedInAs(MENTOR);
 
-    await renderPage("501", "flags");
-
+    await renderPage("501", "elsewhere");
     expect(screen.getByRole("link", { name: "Back to students" })).toHaveAttribute("href", "/blended-learning");
     expect(mockLoadDashboardChrome).toHaveBeenCalledWith(MENTOR);
+
+    await renderPage("501", "flags");
+    expect(screen.getByRole("link", { name: "Back to flags" })).toHaveAttribute("href", "/blended-learning?tab=flags");
   });
 
   it.each([
@@ -278,6 +280,26 @@ describe("MenteeDetailPage", () => {
     expect(screen.getByRole("button", { name: "Log conversation" })).toBeDisabled();
     expect(screen.getByText("No conversations yet")).toBeInTheDocument();
     expect(screen.queryByText(/Log the first one/)).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["a Mentor", MENTOR],
+    ["a Blended Learning Admin", BLENDED_ADMIN],
+  ])("shows %s the Open Action Items above the Conversations, after any draft", async (_case, access) => {
+    signedInAs(access);
+    mockGetMenteeDetail.mockResolvedValue({
+      ...MENTEE,
+      openDraft: { id: 41, state: "ready" },
+      openActionItems: [{ id: 120, text: "Revise optics", owner: "student", dueOn: null, agreedOn: "2026-10-20" }],
+    });
+
+    await renderPage();
+
+    const draft = screen.getByTestId("draft-status");
+    const items = screen.getByRole("region", { name: "Open Action Items" });
+    const history = screen.getByRole("region", { name: "History" });
+    expect(draft.compareDocumentPosition(items) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(items.compareDocumentPosition(history) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("lists Open Action Items with their owner and when they were agreed, never a due date", async () => {

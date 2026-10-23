@@ -7,7 +7,7 @@ import type { FlagRecipient } from "@/lib/blended-learning-mentee-detail";
 
 import { FLAG_RECIPIENT } from "./students/[id]/flagRecipients";
 
-// The Flags feed's filters (Mentor, Flag Recipient). Changing either one
+// The Flags feed's filters: Mentor (admins only) and Flag Recipient. Changing either one
 // applies it straight away: the URL is pushed with the new filters, so the
 // view stays shareable and Back/Forward step through filter changes. The
 // visit's cutoff (`since`) is carried, so flags stay New all visit, and the
@@ -16,7 +16,8 @@ import { FLAG_RECIPIENT } from "./students/[id]/flagRecipients";
 // or on Back/Forward, they show the URL's filters again.
 
 export type FlagsFilterValues = {
-  mentors: { mentorUserId: number; name: string }[];
+  // Null for a Mentor's own feed: no Mentor filter.
+  mentors: { mentorUserId: number; name: string }[] | null;
   mentorUserId: number | null;
   recipient: FlagRecipient | null;
   since: string;
@@ -64,17 +65,19 @@ export function FlagsFilters({ filters }: { filters: FlagsFilterValues }) {
       onSubmit={(event) => event.preventDefault()}
       className="grid gap-3 sm:grid-cols-2"
     >
-      <label className="block space-y-1 text-sm font-bold text-text-secondary">
-        <span>Mentor</span>
-        <select name="mentor" value={current.mentor} onChange={apply("mentor")} className={selectClass}>
-          <option value="">All Mentors</option>
-          {filters.mentors.map((mentor) => (
-            <option key={mentor.mentorUserId} value={mentor.mentorUserId}>
-              {mentor.name}
-            </option>
-          ))}
-        </select>
-      </label>
+      {filters.mentors && (
+        <label className="block space-y-1 text-sm font-bold text-text-secondary">
+          <span>Mentor</span>
+          <select name="mentor" value={current.mentor} onChange={apply("mentor")} className={selectClass}>
+            <option value="">All Mentors</option>
+            {filters.mentors.map((mentor) => (
+              <option key={mentor.mentorUserId} value={mentor.mentorUserId}>
+                {mentor.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       <label className="block space-y-1 text-sm font-bold text-text-secondary">
         <span>Flag Recipient</span>
         <select name="recipient" value={current.recipient} onChange={apply("recipient")} className={selectClass}>

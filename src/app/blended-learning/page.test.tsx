@@ -118,7 +118,7 @@ describe("BlendedLearningPage", () => {
     expect(screen.queryByRole("link", { name: /dashboard/i })).not.toBeInTheDocument();
   });
 
-  it("shows a Mentor their own Student list for today's IST date, grouped, under a Students heading", async () => {
+  it("shows a Mentor their own Student list for today's IST date, grouped, under the My Students tab", async () => {
     signedInAs("faizan@avantifellows.org");
     mockGetBlendedLearningAccess.mockResolvedValue(MENTOR);
     mockListMentees.mockResolvedValue({
@@ -133,21 +133,39 @@ describe("BlendedLearningPage", () => {
     render(await BlendedLearningPage());
 
     expect(mockListMentees).toHaveBeenCalledWith({ access: MENTOR, today: "2026-10-22" });
-    expect(screen.getByRole("heading", { level: 1, name: "Students" })).toBeInTheDocument();
-    expect(screen.getByText("1 student · 2026-2027")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "My Students" })).toBeInTheDocument();
+    expect(screen.getByText(/student · 2026-2027/)).toHaveTextContent("1 student · 2026-2027");
     expect(screen.getByRole("rowgroup", { name: "Talk to first" })).toHaveTextContent("Ira Attempt");
     expect(screen.getByRole("region", { name: "Talk to first" })).toHaveTextContent("Ira Attempt");
     // A group with no Students is left out.
     expect(screen.queryByRole("rowgroup", { name: "Everyone else" })).not.toBeInTheDocument();
-    // Resources sit under the list, each opening in a new tab.
-    const resource = within(screen.getByRole("region", { name: "Resources" })).getByRole("link", {
-      name: "Mentor Toolkit: Supporting Students Through Non-Academic Stress (opens in a new tab)",
-    });
-    expect(resource).toHaveAttribute(
-      "href",
-      "https://docs.google.com/document/d/1kST-wRFTWgczw7SqBAxW97KNyJ0fzuBoOBsIelTQ8W0/edit?usp=sharing"
-    );
-    expect(resource).toHaveAttribute("target", "_blank");
+    // The admins' tab bar with My Students first, open; no Resources on the list itself.
+    const tabs = screen.getByRole("navigation", { name: "Mentor views" });
+    expect(within(tabs).getAllByRole("link").map((link) => link.textContent)).toEqual(["My Students", "Flags", "Resources"]);
+    expect(within(tabs).getByRole("link", { name: "My Students" })).toHaveAttribute("aria-current", "page");
+    expect(within(tabs).getByRole("link", { name: "Flags" })).toHaveAttribute("href", "/blended-learning?tab=flags");
+    expect(within(tabs).getByRole("link", { name: "Resources" })).toHaveAttribute("href", "/blended-learning/resources");
+    expect(screen.queryByRole("list", { name: "Resources" })).not.toBeInTheDocument();
+    // The badge counts the Mentor's own flags (the scope is in countNewFlags).
+    expect(mockCountNewFlags).toHaveBeenCalledWith(MENTOR);
+  });
+
+  it("shows a Mentor the Flags tab scoped to their own Students, by recipient only", async () => {
+    signedInAs("faizan@avantifellows.org");
+    mockGetBlendedLearningAccess.mockResolvedValue(MENTOR);
+    mockReadFlagsCutoff.mockResolvedValue({ lastSeenAt: null });
+
+    // A Mentor filter in the URL (another Mentor's id) is ignored.
+    render(await BlendedLearningPage({ searchParams: Promise.resolve({ tab: "flags", mentor: "9002", recipient: "maths" }) }));
+
+    expect(mockListMentees).not.toHaveBeenCalled();
+    expect(mockListFlags).toHaveBeenCalledWith(MENTOR, { mentorUserId: null, recipient: "maths", cursor: null }, { lastSeenAt: null });
+    expect(screen.getByRole("heading", { level: 1, name: "Flags" })).toBeInTheDocument();
+    const tabs = screen.getByRole("navigation", { name: "Mentor views" });
+    expect(within(tabs).getByRole("link", { name: "Flags" })).toHaveAttribute("aria-current", "page");
+    const filters = screen.getByRole("search", { name: "Filter flags" });
+    expect(within(filters).queryByLabelText("Mentor")).not.toBeInTheDocument();
+    expect(within(filters).getByLabelText("Flag Recipient")).toHaveValue("maths");
   });
 
   it("tells a Mentor with no Students that none are mapped to them", async () => {
@@ -156,7 +174,7 @@ describe("BlendedLearningPage", () => {
 
     render(await BlendedLearningPage());
 
-    expect(screen.getByRole("heading", { level: 1, name: "Students" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "My Students" })).toBeInTheDocument();
     expect(screen.getByText("No students are mapped to you for 2026-2027.")).toBeInTheDocument();
   });
 

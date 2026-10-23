@@ -26,10 +26,10 @@ import { ConversationRecording } from "./ConversationRecording";
 import { DraftStatus } from "./DraftStatus";
 import { FLAG_HISTORY } from "./flagRecipients";
 
-// One Mentee: name, profile line, contact and links across the top, then the
-// newest-first history beside a side column with any open Conversation Draft
-// (polled while drafting) and the Open Action Items, in the log page's
-// columns. Notes and photos load on demand from their API routes.
+// One Mentee, in one column as wide as the log page's: name, profile line,
+// contact and links, any open Conversation Draft (polled while drafting), the
+// Open Action Items, then the newest-first history. Notes and photos load on
+// demand from their API routes.
 // Admins and read-only Mentors see the same page, view only: the log button
 // and the draft's controls stay in place, disabled. Open Action Items are
 // ticked done from the log page. Only Blended Learning Admins (read-only too)
@@ -246,7 +246,7 @@ function AttemptEntry({ entry }: { entry: Extract<HistoryEntry, { kind: "attempt
   );
 }
 
-// As the log page's Open Action Items panel, in the same place.
+// Styled as the log page's Open Action Items panel.
 function OpenActionItems({ items }: { items: MenteeDetail["openActionItems"] }) {
   return (
     <section aria-label="Open Action Items">
@@ -321,11 +321,11 @@ function backOrigin(from: string | string[] | undefined): BackOrigin | null {
   return BACK_ORIGINS.find((origin) => origin === value) ?? null;
 }
 
-// A Mentor goes back to their own list; an admin to the Flags tab when they
-// came from it, else to the Student's Mentor's list.
+// Back to the Flags tab when they came from it; otherwise a Mentor goes back
+// to their own list, an admin to the Student's Mentor's list.
 function backLink(access: BlendedLearningAccess, mentee: MenteeDetail, from: BackOrigin | null) {
-  if (access.kind === "mentor") return { href: "/blended-learning", label: "Back to students" };
   if (from === "flags") return { href: "/blended-learning?tab=flags", label: "Back to flags" };
+  if (access.kind === "mentor") return { href: "/blended-learning", label: "Back to students" };
   return {
     href: `/blended-learning/mentors/${mentee.mentor.userId}`,
     label: `Back to ${mentee.mentor.firstName}'s students`,
@@ -359,29 +359,22 @@ export default async function MenteeDetailPage({
         <span aria-hidden="true">←</span> {back.label}
       </Link>
       <Profile mentee={mentee} canLog={canLog} />
-      {/* The log page's columns: the side column first on a phone, beside the history from 1024 px. */}
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start lg:gap-8">
-        <div className="min-w-0 space-y-4 lg:sticky lg:top-4 lg:order-2">
-          {mentee.openDraft && (
-            <DraftStatus
-              key={mentee.openDraft.id}
-              draftId={mentee.openDraft.id}
-              initialState={mentee.openDraft.state}
-              initialRetryOffered={draftStatus?.retryOffered ?? false}
-              canManage={canBlendedLearning(access, "manage_draft")}
-              reviewHref={canLog ? `/blended-learning/students/${mentee.studentId}/log` : null}
-            />
-          )}
-          {mentee.openActionItems.length > 0 && <OpenActionItems items={mentee.openActionItems} />}
-        </div>
-        <div className="min-w-0 lg:order-1">
-          <History
-            history={mentee.history}
-            canPlayRecording={canBlendedLearning(access, "play_recording")}
-            canLog={canLog}
-          />
-        </div>
-      </div>
+      {mentee.openDraft && (
+        <DraftStatus
+          key={mentee.openDraft.id}
+          draftId={mentee.openDraft.id}
+          initialState={mentee.openDraft.state}
+          initialRetryOffered={draftStatus?.retryOffered ?? false}
+          canManage={canBlendedLearning(access, "manage_draft")}
+          reviewHref={canLog ? `/blended-learning/students/${mentee.studentId}/log` : null}
+        />
+      )}
+      {mentee.openActionItems.length > 0 && <OpenActionItems items={mentee.openActionItems} />}
+      <History
+        history={mentee.history}
+        canPlayRecording={canBlendedLearning(access, "play_recording")}
+        canLog={canLog}
+      />
     </BlendedPageShell>
   );
 }
