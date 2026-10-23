@@ -19,7 +19,7 @@ import {
   eraseDraftHolisticNotes,
   lockHolisticMentorMappingMutation,
 } from "./holistic-mappings";
-import { isPmuRole, PMU_ROLES } from "./constants";
+import { ALUMNI_MANAGER_ROLE, isAlumniRole, isPmuRole, PMU_ROLES } from "./constants";
 import {
   type AdminGuardResult,
   type AdminSession,
@@ -752,6 +752,15 @@ async function rejectIneligibleSeatUser(
       ok: false,
       status: 409,
       error: "PMU users can't hold centre seats — their access is pinned to JNV NVS.",
+    };
+  }
+  // Alumni Managers ignore seats (ADR 0008); seating one would clear their
+  // school_codes and leave them with no schools at all.
+  if (rows.some((r) => isAlumniRole(r.role))) {
+    return {
+      ok: false,
+      status: 409,
+      error: "Alumni Managers can't hold centre seats — their access is set in Admin → Users.",
     };
   }
   if (rows.some((r) => !r.email_only && r.level === 2)) {
@@ -1732,8 +1741,9 @@ async function syncAppRoleFromSeats(
 //
 // Only touches the live (revoked_at IS NULL) row, and skips manually elevated
 // Admin and Holistic Mentorship Admin roles whose Program scope is not seat-derived,
-// plus the PMU roles, which are pinned to JNV NVS (ADR 0007).
-const PROGRAM_SYNC_SKIPPED_ROLES = ["admin", "holistic_mentorship_admin", ...PMU_ROLES];
+// plus the PMU roles, which are pinned to JNV NVS (ADR 0007), and Alumni
+// Managers, who have no Programs (ADR 0008). A stale seat must not rewrite either.
+const PROGRAM_SYNC_SKIPPED_ROLES = ["admin", "holistic_mentorship_admin", ...PMU_ROLES, ALUMNI_MANAGER_ROLE];
 
 async function syncProgramIdsFromSeats(
   client: PoolClient,

@@ -19,6 +19,7 @@ export const DEV_LOGIN_PERSONAS = {
     email: "e2e-pmu-govt-school-user@test.local",
     name: "Dev PMU Govt School User",
   },
+  alumni_manager: { email: "e2e-dev-alumni-manager@test.local", name: "Dev Alumni Manager" },
 } as const;
 
 type DevPersonaKey = keyof typeof DEV_LOGIN_PERSONAS;

@@ -7,6 +7,7 @@ import { PROGRAM_IDS } from "@/lib/constants";
 const {
   mockGetServerSession,
   mockGetUserPermission,
+  mockGetAlumniPermission,
   mockGetProgramContextSync,
   mockGetFeatureAccess,
   mockGetAccessibleSchoolCodes,
@@ -16,6 +17,7 @@ const {
 } = vi.hoisted(() => ({
   mockGetServerSession: vi.fn(),
   mockGetUserPermission: vi.fn(),
+  mockGetAlumniPermission: vi.fn(),
   mockGetProgramContextSync: vi.fn(),
   mockGetFeatureAccess: vi.fn(),
   mockGetAccessibleSchoolCodes: vi.fn(),
@@ -32,6 +34,7 @@ vi.mock("next/navigation", () => ({ redirect: mockRedirect }));
 vi.mock("@/lib/permissions", () => ({
   getUserPermission: mockGetUserPermission,
   getResolvedPermission: mockGetUserPermission,
+  getAlumniPermission: mockGetAlumniPermission,
   getProgramContextSync: mockGetProgramContextSync,
   getFeatureAccess: mockGetFeatureAccess,
   getAccessibleSchoolCodes: mockGetAccessibleSchoolCodes,
@@ -346,6 +349,14 @@ describe("DashboardPage (server component)", () => {
   });
 
   // --- No permission ---
+
+  it("sends an Alumni Manager to /alumni (no dashboard for alumni roles)", async () => {
+    mockGetServerSession.mockResolvedValue(pmSession);
+    mockGetUserPermission.mockResolvedValue(null);
+    mockGetAlumniPermission.mockResolvedValue({ role: "alumni_manager" });
+
+    await expect(DashboardPage({ searchParams: defaultSearchParams })).rejects.toThrow("REDIRECT:/alumni");
+  });
 
   it("renders 'no access' message when user has no permission", async () => {
     mockGetServerSession.mockResolvedValue(pmSession);
