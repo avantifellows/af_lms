@@ -412,6 +412,13 @@ function applyLegacy(next: StudentLinks, docs: LegacyProfileDocs, counts: Legacy
   if (resolution.legacyOn !== undefined) next.legacyOn = resolution.legacyOn;
 }
 
+// What the upsert does for one Student: null for one with no stored row and
+// no link, who gets no row.
+function writeKind(stored: StudentLinks | undefined, next: StudentLinks, withLegacy: boolean): keyof BlendedLinksWrites | null {
+  if (!stored) return next.profileDocUrl || next.screenerUrl ? "inserted" : null;
+  return sameLinks(stored, next, withLegacy) ? "unchanged" : "updated";
+}
+
 function emptyLegacyCounts(): LegacyDocCounts {
   return { dated: 0, no_dates: 0, unreadable: 0, no_doc_link: 0 };
 }
@@ -433,16 +440,25 @@ async function upsertLinks(
     const stored = existing.get(studentId);
     const next = mergeLinks(links, stored);
     if (docs && legacy) applyLegacy(next, docs, legacy);
-    // A Student matched without any link and with no stored row gets none.
-    if (!stored && !next.profileDocUrl && !next.screenerUrl) continue;
-    if (stored && sameLinks(stored, next, docs !== null)) {
-      writes.unchanged++;
-      continue;
-    }
-    writes[stored ? "updated" : "inserted"]++;
-    if (mode === "apply") await writeLinks(studentId, next, docs !== null);
+    const kind = writeKind(stored, next, docs !== null);
+    if (!kind) continue;
+    writes[kind]++;
+    if (kind !== "unchanged" && mode === "apply") await writeLinks(studentId, next, docs !== null);
   }
   return { writes, legacy };
+}
+
+// Adds one tab's links to `found`. With Profile Docs every matched Student is
+// kept, so one whose rows had no usable link still gets a legacy date from a
+// stored Profile Doc link.
+function collectLinks(
+  found: Map<number, FoundLinks>,
+  result: TabResult,
+  field: "profileDocUrl" | "screenerUrl",
+  keepMatched: boolean
+): void {
+  for (const [studentId, url] of result.links) found.set(studentId, { ...found.get(studentId), [field]: url });
+  if (keepMatched) for (const studentId of result.matched) found.set(studentId, found.get(studentId) ?? {});
 }
 
 export async function runBlendedLinksImport(params: {
@@ -481,13 +497,7 @@ export async function runBlendedLinksImport(params: {
     report.counts.unmatched += result.counts.unmatched;
     report.counts.skipped += result.counts.skipped;
     report.issues.push(...result.issues);
-    const field = tab.name === PROFILE_DOCS_TAB ? "profileDocUrl" : "screenerUrl";
-    for (const [studentId, url] of result.links) {
-      found.set(studentId, { ...found.get(studentId), [field]: url });
-    }
-    // With Profile Docs, a Student whose rows had no usable link still gets
-    // a legacy date from a stored Profile Doc link.
-    if (docs) for (const studentId of result.matched) found.set(studentId, found.get(studentId) ?? {});
+    collectLinks(found, result, tab.name === PROFILE_DOCS_TAB ? "profileDocUrl" : "screenerUrl", docs !== null);
   }
   Object.assign(report, await upsertLinks(found, params.mode, docs));
   return report;

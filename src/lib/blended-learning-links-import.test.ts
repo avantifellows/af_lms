@@ -305,6 +305,19 @@ describe("runBlendedLinksImport", () => {
     expect(writes).toEqual([]);
   });
 
+  it("with legacy Profile Docs, writes no row for a matched Student with no link anywhere", async () => {
+    givenDatabase([ASHA]);
+    const workbook = new ExcelJS.Workbook();
+    addSheet(workbook, "Student Profile Docs", ["Student ID", "Student Name", "Profile Doc"], [["2612001", "Asha Verma", null]]);
+    addSheet(workbook, "Conversation", ["Student ID", "Name", "Screener Form"], [["2612001", "Asha Verma", null]]);
+
+    const report = await runBlendedLinksImport({ workbook, mode: "apply", legacyProfileDocs: legacyDocs({}) });
+
+    expect(report.legacy).toEqual({ dated: 0, no_dates: 0, unreadable: 0, no_doc_link: 1 });
+    expect(report.writes).toEqual({ inserted: 0, updated: 0, unchanged: 0 });
+    expect(writes).toEqual([]);
+  });
+
   it("takes a Profile Doc from a hyperlinked name, but never a Screener Link from another column", async () => {
     givenDatabase([ASHA], [
       { student_id: 501, profile_doc_url: null, screener_url: ASHA_SCREENER, legacy_last_contact_on: null },
