@@ -12,7 +12,8 @@ import { shortDate } from "../../src/app/blended-learning/menteeListCopy";
 // ownership, active-Mapping and current-year predicates run for real.
 // Fixture facts (IST days before today): Ira — Conversation 10 (25 min),
 // Attempt 2; Kabir — nothing logged, a ready draft; Meera — Conversation 30;
-// Nikhil — legacy month June 2026 only; Zoya — Conversation 29;
+// Nikhil — legacy last-contact date 14 Jun 2026 only (a recent legacy month is
+// ignored); Zoya — Conversation 29;
 // Rohan — Conversation 3, a failed draft.
 //
 // From 1024 px up the list is one table, each group a named rowgroup with a
@@ -93,7 +94,7 @@ for (const { label, viewport, desktop } of VIEWPORTS) {
       await expect(kabir.getByText("Never", { exact: true })).toBeVisible();
 
       const nikhil = entry(talkToFirst, legacy);
-      await expect(nikhil.getByText("Not contacted since Jun 2026")).toBeVisible();
+      await expect(nikhil.getByText(/^Not contacted in \d+ days$/)).toBeVisible();
       await expect(nikhil.getByText("before app")).toBeVisible();
       await expect(nikhil.getByText("Not recorded")).toHaveCount(0);
 

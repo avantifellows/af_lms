@@ -1,19 +1,20 @@
 ---
 name: load-blended-learning-links
-description: Load or refresh Blended Learning Student Links (Profile Doc, Screener Link, optional legacy last-contact month) from the Profile Dashboard workbook with the operator script. Use at rollout and whenever the Sheet's links change.
+description: Load or refresh Blended Learning Student Links (Profile Doc, Screener Link, optional legacy last-contact date from the Profile Docs) from the Profile Dashboard workbook with the operator script. Use at rollout and whenever the Sheet's links change.
 triggers:
   - "profile doc links"
   - "screener links"
   - "load links"
   - "profile dashboard"
-  - "legacy_last_contact_month"
+  - "legacy_last_contact_on"
+  - "legacy last contact"
   - "blended_learning_student_links"
 edges:
   - target: context/data-access.md
     condition: for the Blended Learning tables and the Mapping source the script matches against
   - target: context/setup.md
     condition: for the .env files the script reads database credentials from
-last_updated: 2026-10-22
+last_updated: 2026-10-23
 ---
 
 # Load Blended Learning Student Links
@@ -32,11 +33,17 @@ What it reads (hyperlinks, never cell text — a Ctrl+K link or a `HYPERLINK("ur
 - **`Conversation` tab** → `screener_url`: the "Screener Form" column's link only. There is no
   row fallback here: with no "Screener Form" header every row is `no_link`, so a hyperlinked
   name or any other link is never written as a Screener Link.
-- **`--seed-legacy`** (placeholder pending Poojita) → `legacy_last_contact_month`: the latest
-  month column on the `Conversation` tab with a call count above zero, as that month's first day.
-  Month headers are "Sep", "Sep 2026", "Sep'26" or dates; a bare month takes its year from
-  `CURRENT_ACADEMIC_YEAR` (Apr–Dec first year, Jan–Mar second). Without the flag that column is
-  never read or written.
+- **`--legacy-docs-dir=<dir>`** → `legacy_last_contact_on`: the latest dated conversation in each
+  Student's Profile Doc, read from `<dir>/<Drive file id>.html` (the doc's HTML export). Product
+  owner rule (2026-10-23), kept in `src/lib/blended-learning-legacy-last-contact.ts`: the doc only,
+  never the Sheet's monthly counts. Extraction (`src/lib/blended-learning-profile-doc-dates.ts`,
+  deterministic, no LLM) skips the intake/profile and Student Story tabs, dates in tables,
+  mid-sentence dates, year-less dates, date lines with nothing under them, and dates outside
+  1 April of the academic year to `--as-of` (default today, IST). Outcomes per Student:
+  `dated`, `no_dates` (doc read, nothing dated → NULL), `unreadable` (no export → stored value
+  kept, NULL until a re-run has the doc), `no_doc_link`. Counts only are printed. The old
+  `--seed-legacy` month seed is removed: month precision put a whole month's Students into Talk
+  to first on one day; `legacy_last_contact_month` is no longer written or read by Talk to first.
 
 Each tab's header row is the first of the top ten rows with a "Student ID" or "Name"/"Student
 Name" column.
@@ -49,7 +56,10 @@ Name" column.
 3. Read the counts and issues. Expect roughly 174 Profile Docs and 127 Screener Links for the
    176 Mentees (Oct 2026 Sheet). Fix the Sheet for any `no_match` / `ambiguous_name` /
    `duplicate_row` you care about, re-download, dry run again.
-4. Apply: same command plus `--apply` (add `--seed-legacy` only if Poojita has said to).
+4. Apply: same command plus `--apply`. For legacy dates, export each readable Profile Doc as
+   HTML into a private directory outside the repo named `<Drive file id>.html` (it holds minors'
+   PII: delete it afterwards), add `--legacy-docs-dir=<dir>`, dry run, then apply. Re-run the
+   same way when more docs are shared; unchanged Students are not rewritten.
 5. Re-run the dry run: it should report `inserted 0, updated 0`, i.e. everything `unchanged`.
 
 ## Matching and reporting

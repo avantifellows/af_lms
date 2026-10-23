@@ -24,7 +24,7 @@ const READ_ONLY_ADMIN: BlendedLearningAccess = {
 function mapping(
   studentId: number,
   mentor: { id: number | string; name: string },
-  overrides: { grade?: number | string | null; lastConversationOn?: string | null; legacyMonth?: string | null } = {}
+  overrides: { grade?: number | string | null; lastConversationOn?: string | null; legacyLastContactOn?: string | null } = {}
 ) {
   const lastConversationOn = overrides.lastConversationOn === undefined ? "2026-10-20" : overrides.lastConversationOn;
   return {
@@ -34,7 +34,7 @@ function mapping(
     program_id: "80", program_name: "STP Voucher Delhi",
     last_conversation_on: lastConversationOn, last_conversation_id: lastConversationOn ? studentId * 10 : null,
     last_attempt_on: null, last_attempt_id: null,
-    legacy_last_contact_month: overrides.legacyMonth ?? null, open_draft_state: null,
+    legacy_last_contact_on: overrides.legacyLastContactOn ?? null, open_draft_state: null,
   };
 }
 
@@ -75,8 +75,8 @@ describe("listMentorCards", () => {
       mapping(503, FAIZAN, { grade: null, lastConversationOn: null }),
       // Lokesh: a Grade 13 Mentee talked to 10 days ago (neither recent nor 30+).
       mapping(601, LOKESH, { grade: "13", lastConversationOn: "2026-10-12" }),
-      // Anita: only a legacy Last Contact month, long ago.
-      mapping(701, ANITA, { lastConversationOn: null, legacyMonth: "2026-06-01" }),
+      // Anita: only a legacy last-contact date from the Profile Doc, long ago.
+      mapping(701, ANITA, { lastConversationOn: null, legacyLastContactOn: "2026-06-14" }),
     ]);
 
     const cards = await listMentorCards(READ_ONLY_ADMIN, TODAY);

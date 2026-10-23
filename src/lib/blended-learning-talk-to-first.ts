@@ -10,8 +10,9 @@ export type TalkToFirstInput = {
   // Conversations and Attempts. null when nothing is logged.
   latestEntryKind: BlendedEntryKind | null;
   lastConversationOn: string | null;
-  // First day of the optional pre-app legacy last-contact month.
-  legacyMonth: string | null;
+  // Optional pre-app legacy last-contact date (the latest dated conversation
+  // in the Profile Doc).
+  legacyLastContactOn: string | null;
   today: string;
 };
 
@@ -50,27 +51,23 @@ export function latestEntryKind(
   return latestAttempt.id > latestConversation.id ? "attempt" : "conversation";
 }
 
-function lastDayOfMonth(monthStart: string): string {
-  const [year, month] = monthStart.split("-").map(Number);
-  // Day 0 of the next month is the last day of this one.
-  return new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
-}
-
 export type LastContact = { on: string; source: "conversation" | "legacy" };
 
-// Last Contact is the latest Conversation's date, or the legacy month's last
-// day when the Mentee has no Conversation. Attempts never count.
+// Last Contact is the latest Conversation's date, else the exact legacy
+// last-contact date, else none ("no_contact"). The Sheet's legacy month never
+// counts: month precision moved a whole month's Mentees into Talk to first on
+// one day. Attempts never count.
 export function lastContactOf(
   lastConversationOn: string | null,
-  legacyMonth: string | null
+  legacyLastContactOn: string | null
 ): LastContact | null {
   if (lastConversationOn !== null) return { on: lastConversationOn, source: "conversation" };
-  if (legacyMonth !== null) return { on: lastDayOfMonth(legacyMonth), source: "legacy" };
+  if (legacyLastContactOn !== null) return { on: legacyLastContactOn, source: "legacy" };
   return null;
 }
 
 export function talkToFirst(input: TalkToFirstInput): TalkToFirstResult {
-  const lastContact = lastContactOf(input.lastConversationOn, input.legacyMonth);
+  const lastContact = lastContactOf(input.lastConversationOn, input.legacyLastContactOn);
   const daysSince =
     lastContact === null ? null : dayNumber(input.today) - dayNumber(lastContact.on);
   const reasons: TalkToFirstReason[] = [];

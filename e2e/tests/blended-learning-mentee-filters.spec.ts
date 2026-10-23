@@ -7,7 +7,7 @@ import { BLENDED_MENTOR_A, MENTEES, fullName } from "../helpers/blended-learning
 //   Ira Attempt       Female  Grade 12  STP Voucher Delhi             Talk to first (Last Contact 10 days)
 //   Kabir Never       Male    Grade 13  STP Dropper Delhi             Talk to first (no Last Contact)
 //   Meera Thirty      Female  Grade 12  STP Voucher Punjab            Talk to first (30 days)
-//   Nikhil Legacy     Male    Grade 13  STP Dropper Punjab            Talk to first (legacy June 2026)
+//   Nikhil Legacy     Male    Grade 13  STP Dropper Punjab            Talk to first (legacy date 14 Jun 2026)
 //   Zoya TwentyNine   Female  Grade 12  STP Voucher Himachal Pradesh  Everyone else (29 days)
 //   Rohan Recent      Male    Grade 12  STP Voucher Uttarakhand       Everyone else (3 days)
 // From 1024 px up each group is a named rowgroup of one table; below that, a
@@ -94,7 +94,7 @@ for (const { label, viewport, desktop } of VIEWPORTS) {
       await expect(entries(group(page, "Everyone else"))).toHaveCount(0);
     });
 
-    test("Last contact: 30 days or more includes no Last Contact and legacy months, but not 29 days", async ({ page }) => {
+    test("Last contact: 30 days or more includes no Last Contact and old legacy dates, but not 29 days", async ({ page }) => {
       const lastContact = page.getByRole("combobox", { name: "Last contact" });
       await expect(lastContact).toHaveValue("");
       await lastContact.selectOption("30 days or more");

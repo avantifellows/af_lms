@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 import { Badge } from "@/components/ui";
 import type { MenteeRow } from "@/lib/blended-learning-mentees";
 
-import { daysAgo, monthYear, shortDate, whyNowTags } from "./menteeListCopy";
+import { daysAgo, shortDate, whyNowTags } from "./menteeListCopy";
 
 // The Student list: one table from 1024 px up, with "Talk to first" and
 // "Everyone else" as group header rows; a card per Student below that. A
@@ -30,7 +30,7 @@ export function LastContact({ mentee, today }: { mentee: MenteeRow; today?: stri
   const legacy = mentee.lastContactSource === "legacy";
   return (
     <span className="block whitespace-nowrap font-semibold text-text-primary">
-      {legacy ? monthYear(mentee.lastContact) : shortDate(mentee.lastContact, today)}
+      {shortDate(mentee.lastContact, today)}
       <span className={`block text-xs ${muted}`}>
         {legacy || mentee.daysSince === null ? "before app" : daysAgo(mentee.daysSince)}
       </span>

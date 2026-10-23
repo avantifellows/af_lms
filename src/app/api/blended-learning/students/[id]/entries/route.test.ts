@@ -56,7 +56,7 @@ const LIST_ROWS = [
     last_conversation_id: 650,
     last_attempt_on: "2026-10-22",
     last_attempt_id: 700,
-    legacy_last_contact_month: null,
+    legacy_last_contact_on: null,
     open_draft_state: null,
   },
 ];

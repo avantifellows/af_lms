@@ -23,7 +23,7 @@ function row(studentId: number, mentorUserId: number, name: string) {
     student_id: studentId, mentor_user_id: mentorUserId, first_name, last_name, gender: "Female",
     grade: 12, program_id: 80, program_name: "STP Voucher Delhi",
     last_conversation_on: "2026-10-20", last_conversation_id: studentId * 10,
-    last_attempt_on: null as string | null, last_attempt_id: null as number | null, legacy_last_contact_month: null, open_draft_state: null,
+    last_attempt_on: null as string | null, last_attempt_id: null as number | null, legacy_last_contact_on: null, open_draft_state: null,
   };
 }
 

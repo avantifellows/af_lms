@@ -58,7 +58,7 @@ type MenteeQueryRow = {
   last_conversation_id: number | string | null;
   last_attempt_on: string | null;
   last_attempt_id: number | string | null;
-  legacy_last_contact_month: string | null;
+  legacy_last_contact_on: string | null;
   open_draft_state: OpenDraftState | null;
 };
 
@@ -69,11 +69,11 @@ function loggedEntry(on: string | null, id: number | string | null) {
 function toMentee(row: MenteeQueryRow, today: string): MenteeRow {
   const latestConversation = loggedEntry(row.last_conversation_on, row.last_conversation_id);
   const kind = latestEntryKind(latestConversation, loggedEntry(row.last_attempt_on, row.last_attempt_id));
-  const lastContact = lastContactOf(row.last_conversation_on, row.legacy_last_contact_month);
+  const lastContact = lastContactOf(row.last_conversation_on, row.legacy_last_contact_on);
   const policy = talkToFirst({
     latestEntryKind: kind,
     lastConversationOn: row.last_conversation_on,
-    legacyMonth: row.legacy_last_contact_month,
+    legacyLastContactOn: row.legacy_last_contact_on,
     today,
   });
   return {
@@ -106,7 +106,7 @@ function menteeRows(mentorUserId: number | null, studentId: number | null) {
             latest_conversation.id AS last_conversation_id,
             latest_attempt.occurred_on::text AS last_attempt_on,
             latest_attempt.id AS last_attempt_id,
-            links.legacy_last_contact_month::text AS legacy_last_contact_month,
+            links.legacy_last_contact_on::text AS legacy_last_contact_on,
             open_draft.state AS open_draft_state
      FROM blended_learning_mentor_mentee_mappings mapping
      JOIN student st ON st.id = mapping.student_id

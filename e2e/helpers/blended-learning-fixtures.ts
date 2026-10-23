@@ -168,8 +168,10 @@ export function fullName(mentee: { firstName: string; lastName: string }): strin
   return `${mentee.firstName} ${mentee.lastName}`;
 }
 
-// The legacy month is a fixed past month, so it is always 30+ days ago.
-export const LEGACY_MONTH = "2026-06-01";
+// The legacy last-contact date is a fixed past day, so it is always 30+ days
+// ago. A recent legacy month is stored too: Talk to first must ignore it.
+export const LEGACY_LAST_CONTACT_ON = "2026-06-14";
+const IGNORED_LEGACY_MONTH = "2026-10-01";
 
 function previousAcademicYear(year: string): string {
   const [start, end] = year.split("-").map(Number);
@@ -657,20 +659,22 @@ export async function seedBlendedLearningFixtures(client: Client): Promise<void>
   });
 
   await client.query(
-    `INSERT INTO blended_learning_student_links (student_id, profile_doc_url, screener_url, legacy_last_contact_month)
+    `INSERT INTO blended_learning_student_links
+       (student_id, profile_doc_url, screener_url, legacy_last_contact_on, legacy_last_contact_month)
      VALUES
-       ($1, 'https://docs.google.com/document/d/e2e-legacy', 'https://forms.gle/e2e-legacy', $4::date),
-       ($2, 'https://docs.google.com/document/d/e2e-thirty', NULL, NULL),
-       ($3, 'https://docs.google.com/document/d/e2e-recent', 'https://forms.gle/e2e-recent', NULL),
-       ($5, $6, $7, NULL)`,
+       ($1, 'https://docs.google.com/document/d/e2e-legacy', 'https://forms.gle/e2e-legacy', $4::date, $8::date),
+       ($2, 'https://docs.google.com/document/d/e2e-thirty', NULL, NULL, NULL),
+       ($3, 'https://docs.google.com/document/d/e2e-recent', 'https://forms.gle/e2e-recent', NULL, NULL),
+       ($5, $6, $7, NULL, NULL)`,
     [
       ids[legacy.key],
       ids[thirtyDays.key],
       ids[recent.key],
-      LEGACY_MONTH,
+      LEGACY_LAST_CONTACT_ON,
       ids[mentorBStudent.key],
       TARA_LINKS.profileDoc,
       TARA_LINKS.screener,
+      IGNORED_LEGACY_MONTH,
     ]
   );
 

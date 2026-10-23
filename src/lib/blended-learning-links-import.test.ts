@@ -6,6 +6,8 @@ vi.mock("./db", () => ({ query: vi.fn() }));
 import { query } from "./db";
 import {
   formatBlendedLinksImportReport,
+  legacyDateWindow,
+  profileDocId,
   runBlendedLinksImport,
 } from "./blended-learning-links-import";
 
@@ -24,7 +26,7 @@ interface LinkRow {
   student_id: number;
   profile_doc_url: string | null;
   screener_url: string | null;
-  legacy_last_contact_month: string | null;
+  legacy_last_contact_on: string | null;
 }
 
 let linksTable: Map<number, LinkRow>;
@@ -45,7 +47,7 @@ function givenDatabase(mapped: MappedStudent[], links: LinkRow[] = []) {
     }
     if (/INSERT INTO blended_learning_student_links/.test(sql)) {
       writes.push(params ?? []);
-      const [studentId, profileDocUrl, screenerUrl, legacyMonth] = params as [
+      const [studentId, profileDocUrl, screenerUrl, legacyOn] = params as [
         number, string | null, string | null, string | null | undefined,
       ];
       const existing = linksTable.get(studentId);
@@ -53,9 +55,9 @@ function givenDatabase(mapped: MappedStudent[], links: LinkRow[] = []) {
         student_id: studentId,
         profile_doc_url: profileDocUrl,
         screener_url: screenerUrl,
-        legacy_last_contact_month: /legacy_last_contact_month/.test(sql)
-          ? (legacyMonth ?? null)
-          : (existing?.legacy_last_contact_month ?? null),
+        legacy_last_contact_on: /legacy_last_contact_on/.test(sql)
+          ? (legacyOn ?? null)
+          : (existing?.legacy_last_contact_on ?? null),
       });
       return [];
     }
@@ -126,11 +128,11 @@ describe("runBlendedLinksImport", () => {
     expect(first.writes).toEqual({ inserted: 2, updated: 0, unchanged: 0 });
     expect(linksTable.get(501)).toEqual({
       student_id: 501, profile_doc_url: ASHA_DOC, screener_url: ASHA_SCREENER,
-      legacy_last_contact_month: null,
+      legacy_last_contact_on: null,
     });
     expect(linksTable.get(502)).toEqual({
       student_id: 502, profile_doc_url: "https://docs.google.com/document/d/ravi-doc",
-      screener_url: null, legacy_last_contact_month: null,
+      screener_url: null, legacy_last_contact_on: null,
     });
 
     writes = [];
@@ -206,40 +208,109 @@ describe("runBlendedLinksImport", () => {
     return workbook;
   }
 
-  it("leaves legacy_last_contact_month untouched without the legacy flag", async () => {
+  it("leaves legacy_last_contact_on untouched without legacy Profile Docs", async () => {
     givenDatabase([ASHA, RAVI], [
-      { student_id: 501, profile_doc_url: ASHA_DOC, screener_url: ASHA_SCREENER, legacy_last_contact_month: "2026-06-01" },
+      { student_id: 501, profile_doc_url: ASHA_DOC, screener_url: ASHA_SCREENER, legacy_last_contact_on: "2026-06-14" },
     ]);
 
     const report = await runBlendedLinksImport({ workbook: conversationWithCallCounts(), mode: "apply" });
 
     expect(report.writes).toEqual({ inserted: 0, updated: 1, unchanged: 0 });
+    expect(report.legacy).toBeNull();
     expect(linksTable.get(501)).toEqual({
       student_id: 501, profile_doc_url: ASHA_DOC, screener_url: "https://forms.gle/asha-screener-v2",
-      legacy_last_contact_month: "2026-06-01",
+      legacy_last_contact_on: "2026-06-14",
     });
     expect(linksTable.has(502)).toBe(false);
   });
 
-  it("with the legacy flag, seeds the latest month with a call as legacy_last_contact_month", async () => {
-    givenDatabase([ASHA, RAVI], [
-      { student_id: 501, profile_doc_url: ASHA_DOC, screener_url: ASHA_SCREENER, legacy_last_contact_month: "2026-06-01" },
+  // Synthetic Profile Doc exports: an intake tab, then a month tab.
+  function profileDocHtml(...entries: string[]) {
+    const tab = (title: string) => `<p class="title"><span>${title}</span></p>`;
+    return `<html><body>${tab("Student Interview")}<p>Date of interview: 01/05/2026</p>${tab("September")}${entries.join("")}</body></html>`;
+  }
+  const NEHA = { id: 503, studentId: "2612003", firstName: "Neha", lastName: "Rao" };
+  const RAVI_DOC = "https://drive.google.com/open?id=ravi-doc";
+
+  function legacyWorkbook() {
+    const workbook = new ExcelJS.Workbook();
+    addSheet(workbook, "Student Profile Docs", ["Student ID", "Student Name", "Profile Doc"], [
+      ["2612001", "Asha Verma", link("Profile", ASHA_DOC)],
+      ["2612002", "Ravi Kumar", link("Profile", RAVI_DOC)],
+      ["2612003", "Neha Rao", link("Profile", "https://docs.google.com/document/d/neha-doc/edit")],
     ]);
+    // The Sheet's call counts are gathered but never used by the rule.
+    addSheet(workbook, "Conversation", ["Student ID", "Name", "Screener Form", "Sep", "Oct"], [
+      ["2612001", "Asha Verma", null, 1, 2],
+      ["2612002", "Ravi Kumar", null, 0, 1],
+      ["2612003", "Neha Rao", null, 1, 0],
+    ]);
+    return workbook;
+  }
 
-    const report = await runBlendedLinksImport({
-      workbook: conversationWithCallCounts(), mode: "apply", seedLegacy: true,
+  function legacyDocs(docs: Record<string, string>) {
+    return {
+      readProfileDocHtml: (docId: string) => docs[docId] ?? null,
+      window: { from: "2026-04-01", to: "2026-10-23" },
+    };
+  }
+
+  it("with legacy Profile Docs, stores the doc's latest dated conversation only, NULL when it has none", async () => {
+    givenDatabase([ASHA, RAVI, NEHA]);
+    const docs = legacyDocs({
+      // A placeholder date line and a date after as-of do not count.
+      "asha-doc": profileDocHtml("<p>Date: Sep 17, 2026</p><p>Talked about mock tests.</p>", "<p>Oct 5, 2026</p>", "<p>Oct 30, 2026: plan</p>"),
+      "ravi-doc": profileDocHtml("<p>Spoke about the timetable, no date written.</p>"),
     });
 
-    expect(report.writes).toEqual({ inserted: 1, updated: 1, unchanged: 0 });
-    expect(linksTable.get(501)?.legacy_last_contact_month).toBe("2026-08-01");
-    expect(linksTable.get(502)).toEqual({
-      student_id: 502, profile_doc_url: null, screener_url: null, legacy_last_contact_month: "2027-01-01",
+    const report = await runBlendedLinksImport({ workbook: legacyWorkbook(), mode: "apply", legacyProfileDocs: docs });
+
+    expect(report.legacy).toEqual({ dated: 1, no_dates: 1, unreadable: 1, no_doc_link: 0 });
+    expect(linksTable.get(501)?.legacy_last_contact_on).toBe("2026-09-17");
+    expect(linksTable.get(502)?.legacy_last_contact_on).toBeNull();
+    expect(linksTable.get(503)?.legacy_last_contact_on).toBeNull();
+    expect(writes.every((params) => params.length === 4)).toBe(true);
+  });
+
+  it("is re-runnable: unchanged on a second run, fills a doc once it is shared, keeps a stored date for an unreadable doc", async () => {
+    givenDatabase([ASHA, RAVI, NEHA]);
+    const asha = profileDocHtml("<p>Sep 17, 2026: called, discussed mocks</p>");
+    await runBlendedLinksImport({ workbook: legacyWorkbook(), mode: "apply", legacyProfileDocs: legacyDocs({ "asha-doc": asha }) });
+
+    writes = [];
+    const again = await runBlendedLinksImport({
+      workbook: legacyWorkbook(), mode: "apply", legacyProfileDocs: legacyDocs({ "asha-doc": asha }),
     });
+    expect(again.writes).toEqual({ inserted: 0, updated: 0, unchanged: 3 });
+    expect(writes).toEqual([]);
+
+    const shared = await runBlendedLinksImport({
+      workbook: legacyWorkbook(), mode: "apply",
+      legacyProfileDocs: legacyDocs({ "neha-doc": profileDocHtml("<h2>2 October 2026</h2><p>Parent joined the call.</p>") }),
+    });
+    expect(shared.legacy).toEqual({ dated: 1, no_dates: 0, unreadable: 2, no_doc_link: 0 });
+    expect(shared.writes).toEqual({ inserted: 0, updated: 1, unchanged: 2 });
+    expect(linksTable.get(501)?.legacy_last_contact_on).toBe("2026-09-17");
+    expect(linksTable.get(503)?.legacy_last_contact_on).toBe("2026-10-02");
+  });
+
+  it("dry run with legacy Profile Docs counts outcomes but writes nothing", async () => {
+    givenDatabase([ASHA], [
+      { student_id: 501, profile_doc_url: null, screener_url: null, legacy_last_contact_on: null },
+    ]);
+    const workbook = new ExcelJS.Workbook();
+    addSheet(workbook, "Student Profile Docs", ["Student ID", "Student Name", "Profile Doc"], [["2612001", "Asha Verma", null]]);
+    addSheet(workbook, "Conversation", ["Student ID", "Name", "Screener Form", "Oct"], [["2612001", "Asha Verma", null, 1]]);
+
+    const report = await runBlendedLinksImport({ workbook, mode: "dry-run", legacyProfileDocs: legacyDocs({}) });
+
+    expect(report.legacy).toEqual({ dated: 0, no_dates: 0, unreadable: 0, no_doc_link: 1 });
+    expect(writes).toEqual([]);
   });
 
   it("takes a Profile Doc from a hyperlinked name, but never a Screener Link from another column", async () => {
     givenDatabase([ASHA], [
-      { student_id: 501, profile_doc_url: null, screener_url: ASHA_SCREENER, legacy_last_contact_month: null },
+      { student_id: 501, profile_doc_url: null, screener_url: ASHA_SCREENER, legacy_last_contact_on: null },
     ]);
     const workbook = new ExcelJS.Workbook();
     addSheet(workbook, "Student Profile Docs", ["Student ID", "Student Name"], [
@@ -255,7 +326,7 @@ describe("runBlendedLinksImport", () => {
     expect(report.issues).toEqual([{ tab: "Conversation", row: 2, studentId: "2612001", reason: "no_link" }]);
     expect(report.counts).toEqual({ matched: 1, unmatched: 0, skipped: 1 });
     expect(linksTable.get(501)).toEqual({
-      student_id: 501, profile_doc_url: ASHA_DOC, screener_url: ASHA_SCREENER, legacy_last_contact_month: null,
+      student_id: 501, profile_doc_url: ASHA_DOC, screener_url: ASHA_SCREENER, legacy_last_contact_on: null,
     });
   });
 
@@ -295,5 +366,39 @@ describe("formatBlendedLinksImportReport", () => {
       "- Student Profile Docs row 4: no_match",
     ]);
     expect(lines.join("\n")).not.toMatch(/Asha|Ravi|Nobody|docs\.google/);
+  });
+});
+
+describe("profileDocId", () => {
+  it.each([
+    ["https://docs.google.com/document/d/1AbC-d_9/edit?usp=sharing", "1AbC-d_9"],
+    ["https://drive.google.com/open?id=1AbC-d_9", "1AbC-d_9"],
+    ["https://forms.gle/xyz", null],
+    [null, null],
+  ])("reads the Drive file id from %s", (url, expected) => {
+    expect(profileDocId(url)).toBe(expected);
+  });
+});
+
+describe("legacyDateWindow", () => {
+  it("runs from the academic year's first day to as-of", () => {
+    expect(legacyDateWindow("2026-10-23")).toEqual({ from: "2026-04-01", to: "2026-10-23" });
+  });
+});
+
+describe("formatBlendedLinksImportReport with legacy Profile Docs", () => {
+  it("adds one line of legacy outcome counts", () => {
+    const lines = formatBlendedLinksImportReport({
+      mode: "apply",
+      legacy: { dated: 5, no_dates: 2, unreadable: 3, no_doc_link: 1 },
+      unreadTabs: [],
+      counts: { matched: 11, unmatched: 0, skipped: 0 },
+      writes: { inserted: 0, updated: 5, unchanged: 6 },
+      issues: [],
+    });
+    expect(lines).toContain(
+      "Legacy last contact (Profile Docs only): dated 5, NULL with no dated conversation 2, " +
+        "unreadable (no export; stored value kept) 3, no Profile Doc link 1"
+    );
   });
 });

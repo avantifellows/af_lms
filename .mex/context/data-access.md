@@ -210,7 +210,7 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   `src/lib/blended-learning-mentees.ts`. One query per list: grade from the current grade
   enrollment (`enrollment_record`, `group_type = 'grade'`, `is_current`), program from the
   active Mapping, the latest Conversation and latest Attempt (`(occurred_on, id)` DESC, through
-  `LATERAL`), `blended_learning_student_links.legacy_last_contact_month`, and the open draft
+  `LATERAL`), `blended_learning_student_links.legacy_last_contact_on`, and the open draft
   state (`transcribing|ready|failed`). A Mentor always gets their own Mentees, whatever
   `mentorUserId` says; a Mentor without a Mentor user id gets an empty list without a query.
   Rows are grouped (Talk to First = any reason) and sorted in JS by the pure policy.
@@ -222,14 +222,15 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   list, so Attempts and drafts never count. Cards sort A–Z by name.
 - **Talk to First policy:** `src/lib/blended-learning-talk-to-first.ts`, pure and client-safe:
   `talkToFirst`, `latestEntryKind`, `lastContactOf`, `compareTalkToFirst`,
-  `talkedToInLastWeek`, `thirtyDaysOrMore` (days_since ≥ 30 or no Last Contact). IST calendar dates as `YYYY-MM-DD`; a legacy month counts as its last
-  day and is ignored once a Conversation exists. Drafts never feed it.
+  `talkedToInLastWeek`, `thirtyDaysOrMore` (days_since ≥ 30 or no Last Contact). IST calendar dates as `YYYY-MM-DD`. Last Contact is the latest
+  Conversation, else the exact `legacy_last_contact_on` (the Profile Doc's latest dated
+  conversation), else none (`no_contact`); `legacy_last_contact_month` never counts. Drafts never feed it.
 - **Search and filters (#443):** client-side in `src/app/blended-learning/FilteredMenteeList.tsx`
   over the already grouped and sorted `MenteeList` (about 46 Mentees per Mentor, so no server
   pagination). Name search is a trimmed, case-insensitive substring match. Gender and Program
   options come from the list itself; Grade is fixed to 12/13. "30 days or more" uses the
-  policy's `thirtyDaysOrMore(daysSince)`, so no Last Contact counts and a legacy month counts as
-  its last day. Filters combine (AND), keep both groups and their order, and are not in the URL.
+  policy's `thirtyDaysOrMore(daysSince)`, so no Last Contact counts and a legacy date counts from
+  its day. Filters combine (AND), keep both groups and their order, and are not in the URL.
   When nothing matches, one empty-state card replaces both groups. The mockup was not available
   to this slice; control copy follows the PRD ("Search by name", Gender, Grade, Program,
   "30 days or more", "Clear filters").
@@ -460,5 +461,8 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   source (`activeBlendedMappingSql`), the existing links (`student_id = ANY($1::bigint[])`), and
   upserts `ON CONFLICT (student_id)` per changed Student only, so an unchanged re-run writes
   nothing. Non-`https://` values are skipped before the DB CHECK sees them; a value missing from
-  the workbook keeps the stored one. `legacy_last_contact_month` is selected and written only
-  with `--seed-legacy`. Runbook: `patterns/load-blended-learning-links.md`.
+  the workbook keeps the stored one. `legacy_last_contact_on` is selected and written only
+  with `--legacy-docs-dir` (Profile Doc HTML exports; date extraction in
+  `src/lib/blended-learning-profile-doc-dates.ts`, the rule in
+  `src/lib/blended-learning-legacy-last-contact.ts`); `legacy_last_contact_month` is no longer
+  written. Runbook: `patterns/load-blended-learning-links.md`.

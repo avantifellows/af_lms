@@ -22,11 +22,6 @@ export function shortDate(date: string, today?: string): string {
   return format(date, sameYear ? { day: "numeric", month: "short" } : { day: "numeric", month: "short", year: "numeric" });
 }
 
-// "Jun 2026", for a pre-app legacy last-contact month.
-export function monthYear(date: string): string {
-  return format(date, { month: "short", year: "numeric" });
-}
-
 export function daysAgo(days: number): string {
   if (days === 0) return "Today";
   return days === 1 ? "Yesterday" : `${days} days ago`;
@@ -37,10 +32,6 @@ function notReachable(mentee: MenteeRow, today?: string): string {
 }
 
 function notContacted(mentee: MenteeRow): string {
-  // A legacy month has no exact day, so name the month rather than a count.
-  if (mentee.lastContactSource === "legacy" && mentee.lastContact) {
-    return `Not contacted since ${monthYear(mentee.lastContact)}`;
-  }
   return `Not contacted in ${mentee.daysSince} days`;
 }
 

@@ -1,6 +1,6 @@
 // fallow-ignore-file code-duplication
 /**
- * Last updated: 2026-10-22. Operator-run, re-runnable — if the schema or app
+ * Last updated: 2026-10-23. Operator-run, re-runnable — if the schema or app
  * has moved on since this date, review/update it before running.
  *
  * Loads Blended Learning Student Links (Profile Doc, Screener Link) from the
@@ -10,19 +10,22 @@
  * Usage:
  *   npm run blended:import-links -- --file=/path/to/profile-dashboard.xlsx
  *   npm run blended:import-links -- --file=/path/to/profile-dashboard.xlsx --apply
- *   npm run blended:import-links -- --file=... --seed-legacy
+ *   npm run blended:import-links -- --file=... --legacy-docs-dir=/path/to/profile-doc-html
  *   npm run blended:import-links -- --file=... --env=staging
  *   npm run blended:import-links -- --file=... --env-file=.env.local
  */
 
 import * as dotenv from "dotenv";
 import ExcelJS from "exceljs";
-import type { BlendedLinksImportMode } from "../src/lib/blended-learning-links-import";
+import * as fs from "fs";
+import * as path from "path";
+import type { BlendedLinksImportMode, LegacyProfileDocs } from "../src/lib/blended-learning-links-import";
 
 interface CliOptions {
   mode: BlendedLinksImportMode;
   file: string | null;
-  seedLegacy: boolean;
+  legacyDocsDir: string | null;
+  asOf: string | null;
   envFile: string;
   help: boolean;
 }
@@ -32,7 +35,8 @@ function parseArgs(argv: string[]): CliOptions {
   const options: CliOptions = {
     mode: "dry-run",
     file: null,
-    seedLegacy: false,
+    legacyDocsDir: null,
+    asOf: null,
     envFile: ".env.local",
     help: false,
   };
@@ -49,7 +53,13 @@ function parseArgs(argv: string[]): CliOptions {
       options.mode = "dry-run";
       sawDryRun = true;
     } else if (arg === "--seed-legacy") {
-      options.seedLegacy = true;
+      // The month-based seed put a whole month's Students into Talk to first
+      // on one day; the legacy date now comes from the Profile Docs only.
+      throw new Error("--seed-legacy was replaced by --legacy-docs-dir=<dir>.");
+    } else if (arg.startsWith("--legacy-docs-dir=")) {
+      options.legacyDocsDir = arg.slice("--legacy-docs-dir=".length);
+    } else if (arg.startsWith("--as-of=")) {
+      options.asOf = arg.slice("--as-of=".length);
     } else if (arg.startsWith("--file=")) {
       options.file = arg.slice("--file=".length);
     } else if (arg.startsWith("--env=")) {
@@ -64,6 +74,9 @@ function parseArgs(argv: string[]): CliOptions {
   if (sawApply && sawDryRun) {
     throw new Error("Use either --apply or --dry-run, not both.");
   }
+  if (options.asOf !== null && !/^\d{4}-\d{2}-\d{2}$/.test(options.asOf)) {
+    throw new Error("--as-of must be YYYY-MM-DD.");
+  }
 
   return options;
 }
@@ -72,13 +85,28 @@ function printUsage(): void {
   console.log(`Usage:
   npm run blended:import-links -- --file=/path/to/profile-dashboard.xlsx
   npm run blended:import-links -- --file=... --apply
-  npm run blended:import-links -- --file=... --seed-legacy
+  npm run blended:import-links -- --file=... --legacy-docs-dir=/path/to/profile-doc-html [--as-of=YYYY-MM-DD]
   npm run blended:import-links -- --file=... --env=staging
   npm run blended:import-links -- --file=... --env-file=.env.local
 
 Defaults to dry-run. Writes require the explicit --apply flag.
---seed-legacy also sets legacy_last_contact_month from the Conversation tab's
-monthly call counts (placeholder pending Poojita); without it that column is untouched.`);
+--legacy-docs-dir also sets legacy_last_contact_on: the latest dated conversation
+in each Student's Profile Doc, read from <dir>/<Drive file id>.html (the doc's
+HTML export). A doc read with no dated conversation gives NULL; a doc with no
+export keeps the stored value, so re-run once more docs are shared. Dates after
+--as-of (default: today, IST) are ignored. Without the flag that column is untouched.`);
+}
+
+// Profile Doc HTML exports in a directory, named <Drive file id>.html.
+function profileDocsFrom(dir: string, asOf: string, window: (asOf: string) => LegacyProfileDocs["window"]): LegacyProfileDocs {
+  if (!fs.statSync(dir).isDirectory()) throw new Error(`Not a directory: ${dir}`);
+  return {
+    readProfileDocHtml: (docId) => {
+      const file = path.join(dir, `${docId}.html`);
+      return fs.existsSync(file) ? fs.readFileSync(file, "utf8") : null;
+    },
+    window: window(asOf),
+  };
 }
 
 // fallow-ignore-next-line complexity
@@ -98,17 +126,21 @@ async function main(): Promise<void> {
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.readFile(options.file);
 
-  const [{ runBlendedLinksImport, formatBlendedLinksImportReport }, dbModule] =
+  const [{ runBlendedLinksImport, formatBlendedLinksImportReport, legacyDateWindow }, dbModule, { getTodayIST }] =
     await Promise.all([
       import("../src/lib/blended-learning-links-import"),
       import("../src/lib/db"),
+      import("../src/lib/curriculum-date-helpers"),
     ]);
 
   try {
+    const legacyProfileDocs = options.legacyDocsDir
+      ? profileDocsFrom(options.legacyDocsDir, options.asOf ?? getTodayIST(), legacyDateWindow)
+      : null;
     const report = await runBlendedLinksImport({
       workbook,
       mode: options.mode,
-      seedLegacy: options.seedLegacy,
+      legacyProfileDocs,
     });
     for (const line of formatBlendedLinksImportReport(report)) {
       console.log(line);

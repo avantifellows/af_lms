@@ -43,10 +43,10 @@ describe("whyNowTags", () => {
     expect(whyNowTags({ ...BASE, reasons: ["attempt"] })[0].text).toBe("Not reachable on the last try");
   });
 
-  it("counts days since a Conversation, but names a legacy month", () => {
+  it("counts days since the Last Contact, a Conversation or an exact legacy date alike", () => {
     expect(whyNowTags({ ...BASE, reasons: ["gap_30"], daysSince: 46 })[0].text).toBe("Not contacted in 46 days");
     expect(
-      whyNowTags({ ...BASE, reasons: ["gap_30"], lastContact: "2026-06-30", lastContactSource: "legacy" })[0].text
-    ).toBe("Not contacted since Jun 2026");
+      whyNowTags({ ...BASE, reasons: ["gap_30"], lastContact: "2026-06-14", lastContactSource: "legacy", daysSince: 130 })[0].text
+    ).toBe("Not contacted in 130 days");
   });
 });

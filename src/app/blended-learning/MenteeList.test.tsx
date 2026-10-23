@@ -24,7 +24,7 @@ const MEERA: MenteeRow = {
 };
 const NIKHIL: MenteeRow = {
   ...IRA, studentId: 503, name: "Nikhil Legacy", gender: "Male", grade: 13, latestEntryKind: null,
-  reasons: ["gap_30"], lastContact: "2026-06-30", lastContactSource: "legacy", daysSince: 114,
+  reasons: ["gap_30"], lastContact: "2026-06-14", lastContactSource: "legacy", daysSince: 130,
   lastAttemptOn: null,
 };
 const ROHAN: MenteeRow = {
@@ -98,11 +98,12 @@ describe("MenteeGroups — Why now and last conversation copy", () => {
     expect(kabir.getByText("Never")).toBeInTheDocument();
   });
 
-  it("names a pre-app legacy month instead of an exact day count", () => {
+  it("shows a pre-app legacy date as its day, marked before app, and counts days from it", () => {
     renderList(true, [NIKHIL]);
 
     const nikhil = within(tableRow("Nikhil Legacy"));
-    expect(nikhil.getByText("Not contacted since Jun 2026")).toBeInTheDocument();
+    expect(nikhil.getByText("Not contacted in 130 days")).toBeInTheDocument();
+    expect(nikhil.getByText(/^14 Jun/)).toBeInTheDocument();
     expect(nikhil.getByText("before app")).toBeInTheDocument();
   });
 
