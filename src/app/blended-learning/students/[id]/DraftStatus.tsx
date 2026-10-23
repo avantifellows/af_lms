@@ -14,7 +14,7 @@ import type { DraftState } from "@/lib/blended-learning-drafts";
 // (discarded or saved elsewhere) disappears.
 // Those who can manage drafts (not read-only) can retry a failed draft or one
 // whose wake never reached ETL, and discard any open draft. Those who can log
-// open a ready draft for review.
+// open a ready draft for review. Everyone else sees those buttons disabled.
 
 const DRAFT_POLL_MS = 15_000;
 
@@ -80,46 +80,65 @@ async function postDraftAction(
   }
 }
 
+// A ready draft's Review button, a Retry when one is offered, and Discard.
+// For a viewer who can't act on the draft (an admin, a read-only Mentor) the
+// same buttons show, disabled, so the view only version looks the same.
 function DraftActions({
   state,
   reviewHref,
-  showRetry,
+  retryOffered,
   canManage,
   busy,
   onRetry,
   onDiscard,
 }: {
   state: DraftState;
-  // Set only when a ready draft can be opened for review.
+  // The log page for a ready draft, for those who can log; null otherwise.
   reviewHref: string | null;
-  showRetry: boolean;
+  retryOffered: boolean;
   canManage: boolean;
   busy: boolean;
   onRetry: () => void;
   onDiscard: () => void;
 }) {
-  if (!canManage && reviewHref === null) return null;
+  const viewOnly = canManage ? undefined : "View only";
   return (
     <div className="flex flex-col gap-2 sm:flex-row">
-      {reviewHref !== null && (
-        <Link
-          href={reviewHref}
-          className="inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-accent px-4 text-sm font-bold text-text-on-accent shadow-sm hover:bg-accent-hover sm:w-auto"
-        >
-          Review draft
-        </Link>
-      )}
-      {showRetry && (
-        <Button type="button" onClick={onRetry} disabled={busy} className="w-full sm:w-auto">
+      {state === "ready" && <ReviewDraftLink href={reviewHref} />}
+      {retryOffered && (
+        <Button type="button" onClick={onRetry} disabled={busy || !canManage} title={viewOnly} className="w-full sm:w-auto">
           {state === "failed" ? "Retry" : "Retry drafting"}
         </Button>
       )}
-      {canManage && (
-        <Button type="button" variant="secondary" onClick={onDiscard} disabled={busy} className="w-full sm:w-auto">
-          Discard
-        </Button>
-      )}
+      <Button
+        type="button"
+        variant="secondary"
+        onClick={onDiscard}
+        disabled={busy || !canManage}
+        title={viewOnly}
+        className="w-full sm:w-auto"
+      >
+        Discard
+      </Button>
     </div>
+  );
+}
+
+function ReviewDraftLink({ href }: { href: string | null }) {
+  if (href === null) {
+    return (
+      <Button type="button" disabled title="View only" className="w-full sm:w-auto">
+        Review draft
+      </Button>
+    );
+  }
+  return (
+    <Link
+      href={href}
+      className="inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-accent px-4 text-sm font-bold text-text-on-accent shadow-sm hover:bg-accent-hover sm:w-auto"
+    >
+      Review draft
+    </Link>
   );
 }
 
@@ -235,8 +254,8 @@ export function DraftStatus({
         <DraftHeading state={status.state} drafting={drafting} />
         <DraftActions
           state={status.state}
-          reviewHref={status.state === "ready" ? reviewHref : null}
-          showRetry={canManage && status.retryOffered}
+          reviewHref={reviewHref}
+          retryOffered={status.retryOffered}
           canManage={canManage}
           busy={busy}
           onRetry={retry}

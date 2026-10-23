@@ -107,7 +107,7 @@ export default async function LogEntryPage({ params }: { params: Promise<{ id: s
   ]);
 
   return (
-    <BlendedPageShell access={access} chrome={chrome} width="max-w-6xl" wideHeader={false} className="space-y-4">
+    <BlendedPageShell access={access} chrome={chrome} className="space-y-4">
       <Link
         href={`/blended-learning/students/${mentee.studentId}`}
         className="-ml-1 inline-flex min-h-11 items-center gap-1.5 rounded text-sm font-bold text-text-secondary hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"

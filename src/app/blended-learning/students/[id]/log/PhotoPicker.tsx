@@ -135,7 +135,7 @@ export function PhotoPicker({
           className="inline-flex min-h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-border bg-bg-card px-4 text-sm font-bold text-text-primary shadow-sm hover:bg-hover-bg focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-accent sm:w-auto"
         >
           <ImagePlus aria-hidden="true" className="h-4 w-4" />
-          Add photo
+          Add images
           <input
             id={inputId}
             type="file"

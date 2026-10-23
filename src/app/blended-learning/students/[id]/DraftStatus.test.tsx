@@ -223,10 +223,12 @@ describe("DraftStatus retry and discard", () => {
     expect(mockRefresh).not.toHaveBeenCalled();
   });
 
-  it("shows no controls to someone who can't manage drafts", () => {
-    render(<DraftStatus draftId={43} initialState="failed" initialRetryOffered={false} canManage={false} />);
+  it("shows the same controls, disabled, to someone who can't manage drafts", () => {
+    render(<DraftStatus draftId={43} initialState="failed" initialRetryOffered canManage={false} />);
     expect(screen.getByText("Drafting failed")).toBeInTheDocument();
-    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Discard" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Discard" })).toHaveAttribute("title", "View only");
   });
 
   it("shows the server's unreadable refusal and a lost connection as errors", async () => {
@@ -249,7 +251,13 @@ describe("DraftStatus review link", () => {
       "href",
       "/blended-learning/students/501/log?draft=44"
     );
-    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Discard" })).toBeDisabled();
+  });
+
+  it("shows a ready draft's Review draft disabled to someone who can't log", () => {
+    render(<DraftStatus draftId={44} initialState="ready" reviewHref={null} />);
+    expect(screen.queryByRole("link", { name: "Review draft" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Review draft" })).toBeDisabled();
   });
 
   it("offers no review link until the draft is ready", () => {

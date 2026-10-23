@@ -26,6 +26,7 @@ import { FilteredMenteeList } from "./FilteredMenteeList";
 import { FlagsFeed, type FlagsView } from "./FlagsFeed";
 import { MarkFlagsSeen } from "./MarkFlagsSeen";
 import { MentorCards } from "./MentorCards";
+import { MentorResources } from "./MentorResources";
 
 type SearchParam = string | string[] | undefined;
 type SearchParams = {
@@ -55,6 +56,7 @@ function MentorMenteeList({ list, canLog, today }: { list: MenteeList; canLog: b
       ) : (
         <FilteredMenteeList list={list} canLog={canLog} today={today} />
       )}
+      <MentorResources />
     </div>
   );
 }
@@ -153,7 +155,7 @@ export default async function BlendedLearningPage({
   if (access.kind === "mentor") {
     const mentees = await listMentees({ access, today });
     return (
-      <BlendedPageShell access={access} chrome={null} width="max-w-6xl" padding="py-6">
+      <BlendedPageShell access={access} chrome={null}>
         <MentorMenteeList list={mentees} canLog={canBlendedLearning(access, "log")} today={today} />
       </BlendedPageShell>
     );
@@ -164,7 +166,7 @@ export default async function BlendedLearningPage({
     loadDashboardChrome(access),
   ]);
   return (
-    <BlendedPageShell access={access} chrome={chrome} width="max-w-5xl" padding="py-6">
+    <BlendedPageShell access={access} chrome={chrome}>
       <AdminLanding tab={admin.tab} cards={admin.cards} flags={admin.flags} newFlags={admin.newFlags} />
     </BlendedPageShell>
   );

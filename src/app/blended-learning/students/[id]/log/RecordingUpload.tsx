@@ -2,18 +2,21 @@
 
 import { Upload } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useId, useState, type ChangeEvent } from "react";
+import { useId, useRef, useState, type ChangeEvent } from "react";
 
 import { Button } from "@/components/ui";
 
 import { RecordingFileRow } from "./RecordingFileRow";
+import { readRecordingMinutes } from "./recordingDuration";
 
 // Upload a Call Recording instead of typing the write-up: a dashed drop zone
 // as in the mockup, then a file row with the upload's status. The browser asks
 // for a presigned PUT, sends the file straight to S3 (XHR, for progress), then
 // creates the Conversation Draft with any session details already entered and
 // refreshes the log page, which then shows the draft's progress in place and
-// opens it prefilled once etl-next has drafted it.
+// opens it prefilled once etl-next has drafted it. While it uploads, the
+// browser reads the recording's length: `onDuration` gets it in minutes, and
+// the draft takes it when no Duration was entered.
 
 const MAX_RECORDING_BYTES = 200 * 1024 * 1024;
 const RECORDING_EXTENSION = /\.(mp3|m4a|wav)$/i;
@@ -134,15 +137,40 @@ function UploadFailure({ error, canRetry, onRetry }: { error: string; canRetry: 
   );
 }
 
-export function RecordingUpload({ studentId, sessionDetails }: { studentId: number; sessionDetails: SessionDetails }) {
+export function RecordingUpload({
+  studentId,
+  sessionDetails,
+  onDuration,
+}: {
+  studentId: number;
+  sessionDetails: SessionDetails;
+  // The picked recording's length in whole minutes, when the browser can read it.
+  onDuration?: (minutes: number) => void;
+}) {
   const router = useRouter();
   const [upload, setUpload] = useState<UploadState>({ status: "idle" });
   const [fileName, setFileName] = useState("");
+  // The picked recording's length, once read.
+  const recordedMinutes = useRef<number | null>(null);
+
+  // Reads the recording's length alongside the upload; never fails.
+  function readDuration(file: File): Promise<void> {
+    recordedMinutes.current = null;
+    return readRecordingMinutes(file).then((minutes) => {
+      recordedMinutes.current = minutes;
+      if (minutes !== null) onDuration?.(minutes);
+    });
+  }
 
   async function createDraft(uploaded: Uploaded) {
     setUpload({ status: "drafting" });
+    const durationMinutes = sessionDetails.durationMinutes ?? recordedMinutes.current;
     try {
-      await postJson(`/api/blended-learning/students/${studentId}/drafts`, { ...uploaded, ...sessionDetails });
+      await postJson(`/api/blended-learning/students/${studentId}/drafts`, {
+        ...uploaded,
+        ...sessionDetails,
+        durationMinutes,
+      });
     } catch (error) {
       const refused = error instanceof RefusedError ? error : null;
       setUpload({
@@ -165,6 +193,7 @@ export function RecordingUpload({ studentId, sessionDetails }: { studentId: numb
     }
     setFileName(file.name);
     setUpload({ status: "uploading", percent: 0 });
+    const duration = readDuration(file);
     let uploaded: Uploaded;
     try {
       const issued = await postJson(`/api/blended-learning/students/${studentId}/recordings/upload-url`, {
@@ -187,6 +216,7 @@ export function RecordingUpload({ studentId, sessionDetails }: { studentId: numb
       });
       return;
     }
+    await duration;
     await createDraft(uploaded);
   }
 

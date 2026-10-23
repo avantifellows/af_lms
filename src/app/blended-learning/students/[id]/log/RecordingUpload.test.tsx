@@ -2,8 +2,10 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { mockRefresh } = vi.hoisted(() => ({ mockRefresh: vi.fn() }));
+const { mockRefresh, mockReadMinutes } = vi.hoisted(() => ({ mockRefresh: vi.fn(), mockReadMinutes: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: mockRefresh }) }));
+// jsdom can't read audio metadata; each test says what the browser read.
+vi.mock("./recordingDuration", () => ({ readRecordingMinutes: mockReadMinutes }));
 
 import { RecordingUpload } from "./RecordingUpload";
 
@@ -84,6 +86,8 @@ beforeEach(() => {
   FakeXhr.instances = [];
   mockRefresh.mockReset();
   mockFetch.mockReset();
+  mockReadMinutes.mockReset();
+  mockReadMinutes.mockResolvedValue(null);
   vi.stubGlobal("fetch", mockFetch);
   vi.stubGlobal("XMLHttpRequest", FakeXhr);
   givenApi();
@@ -185,5 +189,42 @@ describe("RecordingUpload", () => {
     pick(recording("notes.pdf", "application/pdf"));
     expect(await screen.findByRole("alert")).toHaveTextContent("Choose an MP3, M4A or WAV recording.");
     expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("reads the recording's length for Duration, and the draft takes it when none was entered", async () => {
+    mockReadMinutes.mockResolvedValue(42);
+    const onDuration = vi.fn();
+    render(
+      <RecordingUpload studentId={501} sessionDetails={{ ...SESSION, durationMinutes: null }} onDuration={onDuration} />
+    );
+    const file = recording();
+    pick(file);
+
+    expect(mockReadMinutes).toHaveBeenCalledWith(file);
+    await waitFor(() => expect(onDuration).toHaveBeenCalledWith(42));
+    (await lastXhr(1)).succeed();
+    await waitFor(() => expect(mockRefresh).toHaveBeenCalledTimes(1));
+    expect(sent[1].body).toMatchObject({ durationMinutes: 42 });
+  });
+
+  it("keeps an entered Duration for the draft over the recording's length", async () => {
+    mockReadMinutes.mockResolvedValue(42);
+    render(<RecordingUpload studentId={501} sessionDetails={SESSION} onDuration={vi.fn()} />);
+    pick(recording());
+    (await lastXhr(1)).succeed();
+    await waitFor(() => expect(mockRefresh).toHaveBeenCalledTimes(1));
+    expect(sent[1].body).toMatchObject({ durationMinutes: 35 });
+  });
+
+  it("uploads as usual when the browser can't read the recording's length", async () => {
+    const onDuration = vi.fn();
+    render(
+      <RecordingUpload studentId={501} sessionDetails={{ ...SESSION, durationMinutes: null }} onDuration={onDuration} />
+    );
+    pick(recording());
+    (await lastXhr(1)).succeed();
+    await waitFor(() => expect(mockRefresh).toHaveBeenCalledTimes(1));
+    expect(onDuration).not.toHaveBeenCalled();
+    expect(sent[1].body).toMatchObject({ durationMinutes: null });
   });
 });

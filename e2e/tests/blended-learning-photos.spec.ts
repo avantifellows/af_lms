@@ -68,7 +68,7 @@ for (const { label, viewport } of VIEWPORTS) {
       const form = page.getByRole("form", { name: "Log a Conversation or Attempt" });
       const picker = form.getByRole("group", { name: "Attachments (optional)" });
       await expect(picker.getByText("0 of 5 photos")).toBeVisible();
-      const addPhoto = picker.getByText("Add photo");
+      const addPhoto = picker.getByText("Add images");
       await expect(addPhoto).toBeVisible();
       expect(await minHeight(addPhoto)).toBeGreaterThanOrEqual(44);
 
@@ -83,7 +83,7 @@ for (const { label, viewport } of VIEWPORTS) {
       await expect(picker.getByText("Uploading…")).toHaveCount(0);
       await expect(picker.getByText("5 of 5 photos")).toBeVisible();
       await expect(picker.getByText("Five photos is the most a Conversation can have.")).toBeVisible();
-      await expect(picker.getByText("Add photo")).toHaveCount(0);
+      await expect(picker.getByText("Add images")).toHaveCount(0);
       await expect(picker.locator('input[type="file"]')).toHaveCount(0);
 
       // Each upload is one downscaled JPEG.
@@ -103,7 +103,7 @@ for (const { label, viewport } of VIEWPORTS) {
       await attached.getByRole("button", { name: "Remove photo 2" }).click();
       await expect(attached.getByRole("img")).toHaveCount(4);
       await expect(picker.getByText("4 of 5 photos")).toBeVisible();
-      await expect(picker.getByText("Add photo")).toBeVisible();
+      await expect(picker.getByText("Add images")).toBeVisible();
 
       // Saving sends the four remaining keys in order. Answer the save here,
       // since S3 can't confirm the stubbed keys.

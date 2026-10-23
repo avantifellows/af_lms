@@ -6,27 +6,24 @@ import type { DashboardChrome } from "@/lib/dashboard-chrome";
 
 import { BlendedLearningHeader } from "./BlendedLearningHeader";
 
+// Every Blended Learning page's content column: the log page's, centred at
+// max-w-6xl. Every page uses it, for Mentors and admins alike, so going from
+// the list to a Student to the log never moves the left edge or the width.
+const PAGE_COLUMN = "mx-auto w-full max-w-6xl px-4 py-4 sm:px-6 sm:py-6";
+
 // A Blended Learning page's frame. For an LMS user (`chrome` set) it sits
-// inside the dashboard: the dashboard's header and tab strip, Blended
-// Learning selected, the page below. The Blended Learning roles have no
-// dashboard and get the section's own header. `width` is the page's own
-// max width; inside the dashboard it caps the content under the tab strip.
-// `padding` and `wideHeader` shape the section's own frame only.
+// inside the dashboard: the dashboard's header, then the tab strip with
+// Blended Learning selected at the top of the page's column. The Blended
+// Learning roles have no dashboard and get the section's own header.
 export function BlendedPageShell({
   access,
   chrome,
-  width,
   className = "",
-  padding = "py-4 sm:py-6",
-  wideHeader = width === "max-w-6xl",
   children,
 }: {
   access: BlendedLearningAccess;
   chrome: DashboardChrome | null;
-  width: "max-w-3xl" | "max-w-5xl" | "max-w-6xl";
   className?: string;
-  padding?: string;
-  wideHeader?: boolean;
   children: ReactNode;
 }) {
   if (chrome) {
@@ -38,17 +35,17 @@ export function BlendedPageShell({
           totalCount={chrome.totalCount}
           features={chrome.features}
         />
-        <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+        <main className={PAGE_COLUMN}>
           <DashboardViewTabs view={chrome.view} current="blended-learning" show={chrome.showViews} showBlended />
-          <div className={`${width} ${className}`}>{children}</div>
+          <div className={className}>{children}</div>
         </main>
       </>
     );
   }
   return (
     <>
-      <BlendedLearningHeader access={access} wide={wideHeader} />
-      <main className={`mx-auto px-4 sm:px-6 ${padding} ${width} ${className}`}>{children}</main>
+      <BlendedLearningHeader access={access} />
+      <main className={`${PAGE_COLUMN} ${className}`}>{children}</main>
     </>
   );
 }

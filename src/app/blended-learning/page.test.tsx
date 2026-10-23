@@ -139,6 +139,15 @@ describe("BlendedLearningPage", () => {
     expect(screen.getByRole("region", { name: "Talk to first" })).toHaveTextContent("Ira Attempt");
     // A group with no Students is left out.
     expect(screen.queryByRole("rowgroup", { name: "Everyone else" })).not.toBeInTheDocument();
+    // Resources sit under the list, each opening in a new tab.
+    const resource = within(screen.getByRole("region", { name: "Resources" })).getByRole("link", {
+      name: "Mentor Toolkit: Supporting Students Through Non-Academic Stress (opens in a new tab)",
+    });
+    expect(resource).toHaveAttribute(
+      "href",
+      "https://docs.google.com/document/d/1kST-wRFTWgczw7SqBAxW97KNyJ0fzuBoOBsIelTQ8W0/edit?usp=sharing"
+    );
+    expect(resource).toHaveAttribute("target", "_blank");
   });
 
   it("tells a Mentor with no Students that none are mapped to them", async () => {

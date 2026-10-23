@@ -6,13 +6,15 @@ import { useCallback } from "react";
 import { DraftStatus } from "../DraftStatus";
 import { FormCard } from "./formParts";
 import { durationMinutes, type EntryFormValues } from "./logEntryPayload";
+import type { ChangeValues } from "./SessionDetailsCard";
 import { RecordingFileRow } from "./RecordingFileRow";
 import { RecordingUpload } from "./RecordingUpload";
 
 // The Recording card. A Conversation's Call Recording is uploaded here; a
 // draft being drafted, or one that failed, shows its progress and controls
 // instead, and once it is ready the page refreshes to open it. While a ready
-// draft is reviewed, its recording shows as drafted.
+// draft is reviewed, its recording shows as drafted. A picked recording's
+// length fills in Duration when the Mentor hasn't typed one.
 
 // An open Conversation Draft that is not ready yet: being drafted, or failed.
 export type PendingDraft = { id: number; state: "transcribing" | "failed"; retryOffered: boolean };
@@ -46,6 +48,7 @@ function RecordingSlot({
   pendingDraft,
   canManageDraft,
   values,
+  change,
 }: {
   studentId: number;
   firstName: string;
@@ -54,6 +57,7 @@ function RecordingSlot({
   pendingDraft: PendingDraft | null;
   canManageDraft: boolean;
   values: EntryFormValues;
+  change: ChangeValues;
 }) {
   if (reviewing) return <RecordingFileRow name="Call recording" tone="done" status="Drafted. Check and edit below" />;
   if (pendingDraft) return <PendingDraftStatus pendingDraft={pendingDraft} canManageDraft={canManageDraft} />;
@@ -73,6 +77,7 @@ function RecordingSlot({
         spokeWith: values.spokeWith,
         durationMinutes: durationMinutes(values.duration),
       }}
+      onDuration={(minutes) => change(({ duration }) => (duration.trim() === "" ? { duration: String(minutes) } : {}))}
     />
   );
 }

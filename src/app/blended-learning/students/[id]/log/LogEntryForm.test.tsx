@@ -65,9 +65,15 @@ vi.mock("../DraftStatus", () => ({
 }));
 const mockRefresh = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: mockRefresh }) }));
+// A test can say the picked recording's length was read.
 vi.mock("./RecordingUpload", () => ({
-  RecordingUpload: ({ sessionDetails }: { sessionDetails: unknown }) => (
-    <p data-testid="recording-upload">{JSON.stringify(sessionDetails)}</p>
+  RecordingUpload: ({ sessionDetails, onDuration }: { sessionDetails: unknown; onDuration?: (minutes: number) => void }) => (
+    <>
+      <p data-testid="recording-upload">{JSON.stringify(sessionDetails)}</p>
+      <button type="button" onClick={() => onDuration?.(42)}>
+        Recording read as 42 minutes
+      </button>
+    </>
   ),
 }));
 
@@ -420,6 +426,26 @@ describe("LogEntryForm: Conversation", () => {
     renderForm({ hasOpenDraft: true });
     expect(screen.getByText("Asha already has a Conversation Draft, so no recording can be uploaded now.")).toBeInTheDocument();
     expect(screen.queryByTestId("recording-upload")).not.toBeInTheDocument();
+  });
+});
+
+describe("LogEntryForm: Duration from the recording", () => {
+  it("fills a blank Duration from the recording's length, and it stays editable", async () => {
+    renderForm();
+    const duration = screen.getByLabelText("Duration (minutes)");
+    await userEvent.click(screen.getByRole("button", { name: "Recording read as 42 minutes" }));
+    expect(duration).toHaveValue(42);
+    await userEvent.clear(duration);
+    await userEvent.type(duration, "40");
+    expect(duration).toHaveValue(40);
+  });
+
+  it("keeps a Duration the Mentor already typed", async () => {
+    renderForm();
+    const duration = screen.getByLabelText("Duration (minutes)");
+    await userEvent.type(duration, "30");
+    await userEvent.click(screen.getByRole("button", { name: "Recording read as 42 minutes" }));
+    expect(duration).toHaveValue(30);
   });
 });
 

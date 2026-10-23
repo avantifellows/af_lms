@@ -321,6 +321,7 @@ function EntryForm({
               pendingDraft={pendingDraft}
               canManageDraft={props.canManageDraft ?? false}
               values={values}
+              change={change}
             />
             <WriteUpCard
               studentId={studentId}

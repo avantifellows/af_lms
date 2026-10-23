@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
-import { ArrowUpRight, ClipboardList, FileText, type LucideIcon } from "lucide-react";
+import { ClipboardList, FileText } from "lucide-react";
 
-import { Badge, Card } from "@/components/ui";
+import { Badge, Button, Card } from "@/components/ui";
 import { canBlendedLearning, type BlendedLearningAccess } from "@/lib/blended-learning-access";
 import { requireBlendedLearningPage, requireNumericPageId } from "@/lib/blended-learning-guard";
 import { getDraftStatus } from "@/lib/blended-learning-drafts";
@@ -18,6 +18,7 @@ import {
 import { loadDashboardChrome } from "@/lib/dashboard-chrome";
 
 import { BlendedPageShell } from "../../BlendedPageShell";
+import { ExternalLink } from "../../ExternalLink";
 import { ActionItemMeta, OwnerPill } from "./ActionItemMeta";
 import { ConversationNotes } from "./ConversationNotes";
 import { ConversationPhotos } from "./ConversationPhotos";
@@ -25,13 +26,14 @@ import { ConversationRecording } from "./ConversationRecording";
 import { DraftStatus } from "./DraftStatus";
 import { FLAG_HISTORY } from "./flagRecipients";
 
-// One Mentee: name, profile line, contact, links, any open Conversation Draft
-// (polled while drafting) and the newest-first history, laid out as in the
-// mockup. Notes and photos load on demand from their API routes.
-// Only a Mentor who can log (not read-only) gets the entry point to the log
-// page and the draft's Retry and Discard controls; admins are view only. Open Action Items are listed for
-// everyone, and ticked done only from there. Only Blended Learning Admins
-// (read-only too) can play a saved Call Recording or read its transcript.
+// One Mentee: name, profile line, contact and links across the top, then the
+// newest-first history beside a side column with any open Conversation Draft
+// (polled while drafting) and the Open Action Items, in the log page's
+// columns. Notes and photos load on demand from their API routes.
+// Admins and read-only Mentors see the same page, view only: the log button
+// and the draft's controls stay in place, disabled. Open Action Items are
+// ticked done from the log page. Only Blended Learning Admins (read-only too)
+// can play a saved Call Recording or read its transcript.
 
 type Conversation = Extract<HistoryEntry, { kind: "conversation" }>;
 
@@ -74,22 +76,6 @@ function ContactLine({ phone, whatsappPhone }: { phone: string | null; whatsappP
   );
 }
 
-function ExternalLink({ href, icon: Icon, children }: { href: string; icon: LucideIcon; children: string }) {
-  return (
-    <a
-      href={href}
-      target="_blank"
-      rel="noopener noreferrer"
-      aria-label={`${children} (opens in a new tab)`}
-      className="inline-flex min-h-11 items-center gap-1.5 text-sm font-semibold text-text-primary underline underline-offset-4 hover:text-accent"
-    >
-      <Icon aria-hidden="true" className="h-4 w-4 shrink-0" />
-      {children}
-      <ArrowUpRight aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
-    </a>
-  );
-}
-
 function ProfileLinks({ mentee }: { mentee: MenteeDetail }) {
   if (!mentee.profileDocUrl && !mentee.screenerUrl) return null;
   return (
@@ -109,7 +95,7 @@ function ProfileLinks({ mentee }: { mentee: MenteeDetail }) {
 }
 
 // The page heading: name, profile line, contact and links, with the way to
-// log beside it (below it on a phone).
+// log beside it (below it on a phone); disabled for a view-only viewer.
 function Profile({ mentee, canLog }: { mentee: MenteeDetail; canLog: boolean }) {
   return (
     <div className="flex flex-wrap items-end justify-between gap-4">
@@ -119,13 +105,17 @@ function Profile({ mentee, canLog }: { mentee: MenteeDetail; canLog: boolean }) 
         <ContactLine phone={mentee.phone} whatsappPhone={mentee.whatsappPhone} />
         <ProfileLinks mentee={mentee} />
       </div>
-      {canLog && (
+      {canLog ? (
         <Link
           href={`/blended-learning/students/${mentee.studentId}/log`}
           className="inline-flex min-h-11 items-center justify-center rounded-lg bg-accent px-5 text-sm font-bold text-text-on-accent shadow-sm hover:bg-accent-hover"
         >
           Log conversation
         </Link>
+      ) : (
+        <Button type="button" disabled title="View only" className="px-5">
+          Log conversation
+        </Button>
       )}
     </div>
   );
@@ -256,11 +246,12 @@ function AttemptEntry({ entry }: { entry: Extract<HistoryEntry, { kind: "attempt
   );
 }
 
+// As the log page's Open Action Items panel, in the same place.
 function OpenActionItems({ items }: { items: MenteeDetail["openActionItems"] }) {
   return (
     <section aria-label="Open Action Items">
-      <Card elevation="sm" className="space-y-3 p-4 sm:px-6">
-        <h2 className="text-xs font-bold uppercase tracking-wide text-text-secondary">Open action items</h2>
+      <Card elevation="sm" className="space-y-2 p-4">
+        <h2 className="text-xs font-bold uppercase tracking-wide text-text-muted">Open Action Items</h2>
         <ul className="space-y-2">
           {items.map((item) => (
             <li key={item.id} className="flex items-baseline gap-2.5 text-sm text-text-primary">
@@ -360,7 +351,7 @@ export default async function MenteeDetailPage({
   const back = backLink(access, mentee, backOrigin(query?.from));
 
   return (
-    <BlendedPageShell access={access} chrome={chrome} width="max-w-3xl" wideHeader={false} className="space-y-6">
+    <BlendedPageShell access={access} chrome={chrome} className="space-y-6">
       <Link
         href={back.href}
         className="-ml-1 inline-flex min-h-11 items-center gap-1 rounded text-sm font-bold text-text-secondary hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
@@ -368,22 +359,29 @@ export default async function MenteeDetailPage({
         <span aria-hidden="true">←</span> {back.label}
       </Link>
       <Profile mentee={mentee} canLog={canLog} />
-      {mentee.openDraft && (
-        <DraftStatus
-          key={mentee.openDraft.id}
-          draftId={mentee.openDraft.id}
-          initialState={mentee.openDraft.state}
-          initialRetryOffered={draftStatus?.retryOffered ?? false}
-          canManage={canBlendedLearning(access, "manage_draft")}
-          reviewHref={canLog ? `/blended-learning/students/${mentee.studentId}/log` : null}
-        />
-      )}
-      {mentee.openActionItems.length > 0 && <OpenActionItems items={mentee.openActionItems} />}
-      <History
-        history={mentee.history}
-        canPlayRecording={canBlendedLearning(access, "play_recording")}
-        canLog={canLog}
-      />
+      {/* The log page's columns: the side column first on a phone, beside the history from 1024 px. */}
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start lg:gap-8">
+        <div className="min-w-0 space-y-4 lg:sticky lg:top-4 lg:order-2">
+          {mentee.openDraft && (
+            <DraftStatus
+              key={mentee.openDraft.id}
+              draftId={mentee.openDraft.id}
+              initialState={mentee.openDraft.state}
+              initialRetryOffered={draftStatus?.retryOffered ?? false}
+              canManage={canBlendedLearning(access, "manage_draft")}
+              reviewHref={canLog ? `/blended-learning/students/${mentee.studentId}/log` : null}
+            />
+          )}
+          {mentee.openActionItems.length > 0 && <OpenActionItems items={mentee.openActionItems} />}
+        </div>
+        <div className="min-w-0 lg:order-1">
+          <History
+            history={mentee.history}
+            canPlayRecording={canBlendedLearning(access, "play_recording")}
+            canLog={canLog}
+          />
+        </div>
+      </div>
     </BlendedPageShell>
   );
 }

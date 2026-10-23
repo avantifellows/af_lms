@@ -10,6 +10,7 @@ import { loadDashboardChrome } from "@/lib/dashboard-chrome";
 
 import { BlendedPageShell } from "../../BlendedPageShell";
 import { FilteredMenteeList } from "../../FilteredMenteeList";
+import { MentorResources } from "../../MentorResources";
 
 // One Mentor's Student list for Blended Learning Admins (view_mentors), the
 // same grouped list, search and filters the Mentor sees. Its copy is neutral,
@@ -28,20 +29,22 @@ export default async function MentorPage({ params }: { params: Promise<{ id: str
   ]);
 
   return (
-    <BlendedPageShell access={access} chrome={chrome} width="max-w-6xl" className="space-y-4">
+    <BlendedPageShell access={access} chrome={chrome} className="space-y-5">
       <Link
         href="/blended-learning"
         className="-ml-1 inline-flex min-h-11 items-center gap-1 rounded text-sm font-bold text-text-secondary hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
       >
         <span aria-hidden="true">←</span> Mentors
       </Link>
+      {/* Headed and laid out as the Mentor's own list. */}
       <div>
-        <h1 className="text-xl font-bold text-text-primary">{mentor.name}</h1>
-        <p className="text-sm text-text-secondary">
+        <h1 className="text-2xl font-bold text-text-primary sm:text-3xl">{mentor.name}</h1>
+        <p className="mt-1 text-sm text-text-secondary">
           {mentor.assigned} {mentor.assigned === 1 ? "student" : "students"} · {CURRENT_ACADEMIC_YEAR}
         </p>
       </div>
       <FilteredMenteeList list={mentees} canLog={canBlendedLearning(access, "log")} today={today} />
+      <MentorResources />
     </BlendedPageShell>
   );
 }

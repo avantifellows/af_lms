@@ -30,7 +30,7 @@ function jpeg(name = "photo.jpg", type = "image/jpeg") {
 }
 
 function picker() {
-  return screen.getByLabelText("Add photo") as HTMLInputElement;
+  return screen.getByLabelText("Add images") as HTMLInputElement;
 }
 
 function answer(body: unknown, status = 200) {
@@ -145,7 +145,7 @@ describe("PhotoPicker", () => {
 
     expect(screen.getByText("5 of 5 photos")).toBeInTheDocument();
     expect(screen.getByText("Five photos is the most a Conversation can have.")).toBeInTheDocument();
-    expect(screen.queryByLabelText("Add photo")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Add images")).not.toBeInTheDocument();
     await vi.waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(4));
   });
 

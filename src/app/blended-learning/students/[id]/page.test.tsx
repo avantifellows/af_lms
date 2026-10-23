@@ -273,7 +273,9 @@ describe("MenteeDetailPage", () => {
       canManage: false,
       reviewHref: null,
     });
+    // The Mentor's layout, view only: Log conversation stays in place, disabled.
     expect(screen.queryByRole("link", { name: "Log conversation" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Log conversation" })).toBeDisabled();
     expect(screen.getByText("No conversations yet")).toBeInTheDocument();
     expect(screen.queryByText(/Log the first one/)).not.toBeInTheDocument();
   });

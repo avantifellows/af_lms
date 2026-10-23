@@ -135,11 +135,13 @@ for (const { label, viewport, entryRole } of VIEWPORTS) {
       );
       await expect(talkToFirst.filter({ hasText: fullName(attemptLatest) }).getByText(/^Not reachable, \d{1,2} [A-Z][a-z]{2}/)).toBeVisible();
       await expect(talkToFirst.filter({ hasText: fullName(neverContacted) }).getByText("Draft ready to review")).toBeVisible();
-      // Admins are view only: the chip is a plain label and no row offers a new log.
+      // Admins are view only: the chip is a plain label and each row's New log
+      // stays in place, disabled.
       await expect(
         talkToFirst.filter({ hasText: fullName(neverContacted) }).getByRole("link", { name: "Draft ready to review" })
       ).toHaveCount(0);
       await expect(page.getByRole("link", { name: /^New log for / })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: /^New log for / }).first()).toBeDisabled();
       await expect(page.getByRole("link", { name: /^View / })).toHaveCount(6);
       // Search and filters come with the shared list component.
       await expect(page.getByRole("searchbox", { name: "Search by name" })).toBeVisible();
@@ -147,10 +149,8 @@ for (const { label, viewport, entryRole } of VIEWPORTS) {
       const own = await mentorOwnView(browser, viewport);
       try {
         for (const name of ["Talk to first", "Everyone else"] as const) {
-          // The same rows, less the Mentor's own "New log" button.
-          const mentorSees = (await entries(group(own.page, name)).allTextContents()).map((text) =>
-            text.replace(/\s*New log\s*$/, "")
-          );
+          // The same rows, New log included (disabled for the admin).
+          const mentorSees = await entries(group(own.page, name)).allTextContents();
           expect(mentorSees.length).toBeGreaterThan(0);
           await expect(entries(group(page, name))).toHaveText(mentorSees);
         }
@@ -161,6 +161,7 @@ for (const { label, viewport, entryRole } of VIEWPORTS) {
       await talkToFirst.filter({ hasText: fullName(attemptLatest) }).getByRole("link").first().click();
       await expect(page.getByRole("heading", { name: fullName(attemptLatest) })).toBeVisible();
       await expect(page.getByRole("link", { name: "Log conversation", exact: true })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "Log conversation", exact: true })).toBeDisabled();
 
       // Back to the Mentor's list the admin came from, not the Mentors cards.
       await page.getByRole("link", { name: "Back to Synthetic's students" }).click();
