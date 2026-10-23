@@ -5,6 +5,7 @@ import { useOptimistic, useTransition, type ChangeEvent } from "react";
 
 import type { FlagRecipient } from "@/lib/blended-learning-mentee-detail";
 
+import { BlendedSelect } from "./BlendedSelect";
 import { FLAG_RECIPIENT } from "./students/[id]/flagRecipients";
 
 // The Flags feed's filters: Mentor (admins only) and Flag Recipient. Changing either one
@@ -22,9 +23,6 @@ export type FlagsFilterValues = {
   recipient: FlagRecipient | null;
   since: string;
 };
-
-const selectClass =
-  "min-h-11 w-full rounded-lg border border-border bg-bg-input px-3 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30";
 
 function flagsFilterHref(
   pathname: string,
@@ -68,26 +66,31 @@ export function FlagsFilters({ filters }: { filters: FlagsFilterValues }) {
       {filters.mentors && (
         <label className="block space-y-1 text-sm font-bold text-text-secondary">
           <span>Mentor</span>
-          <select name="mentor" value={current.mentor} onChange={apply("mentor")} className={selectClass}>
+          <BlendedSelect name="mentor" value={current.mentor} onChange={apply("mentor")} className="bg-bg-input text-text-primary">
             <option value="">All Mentors</option>
             {filters.mentors.map((mentor) => (
               <option key={mentor.mentorUserId} value={mentor.mentorUserId}>
                 {mentor.name}
               </option>
             ))}
-          </select>
+          </BlendedSelect>
         </label>
       )}
       <label className="block space-y-1 text-sm font-bold text-text-secondary">
         <span>Flag Recipient</span>
-        <select name="recipient" value={current.recipient} onChange={apply("recipient")} className={selectClass}>
+        <BlendedSelect
+          name="recipient"
+          value={current.recipient}
+          onChange={apply("recipient")}
+          className="bg-bg-input text-text-primary"
+        >
           <option value="">All recipients</option>
           {(Object.keys(FLAG_RECIPIENT) as FlagRecipient[]).map((recipient) => (
             <option key={recipient} value={recipient}>
               {FLAG_RECIPIENT[recipient]}
             </option>
           ))}
-        </select>
+        </BlendedSelect>
       </label>
     </form>
   );

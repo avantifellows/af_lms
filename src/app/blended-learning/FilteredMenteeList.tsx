@@ -1,12 +1,13 @@
 "use client";
 
-import { ChevronDown, Search } from "lucide-react";
+import { Search } from "lucide-react";
 import { useState } from "react";
 
-import { FormLabel, Input, Select } from "@/components/ui";
+import { FormLabel, Input } from "@/components/ui";
 import type { MenteeList, MenteeRow } from "@/lib/blended-learning-mentees";
 import { thirtyDaysOrMore } from "@/lib/blended-learning-talk-to-first";
 
+import { BlendedSelect } from "./BlendedSelect";
 import { MenteeGroups } from "./MenteeList";
 
 // The Student list with name search and filters, in one row above the list.
@@ -65,8 +66,7 @@ function programOptions(mentees: MenteeRow[]): { value: string; label: string }[
 }
 
 // Two per row on a phone; one width each from 640 px up, so the row is even
-// and the labels line up. The native arrow is replaced by one chevron at the
-// same inset in every select, with right padding so text never runs under it.
+// and the labels line up. BlendedSelect insets the arrow as in every select.
 function FilterSelect({
   id,
   label,
@@ -84,25 +84,14 @@ function FilterSelect({
   return (
     <div className="min-w-[8rem] flex-1 basis-[calc(50%-0.3125rem)] sm:w-40 sm:flex-none sm:basis-auto">
       <FormLabel htmlFor={id}>{label}</FormLabel>
-      <div className="relative">
-        <Select
-          id={id}
-          value={value}
-          className={`h-11 appearance-none truncate py-0 pl-3 pr-9 ${active}`}
-          onChange={(event) => onChange(event.target.value)}
-        >
-          <option value="">All</option>
-          {options.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </Select>
-        <ChevronDown
-          aria-hidden="true"
-          className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted"
-        />
-      </div>
+      <BlendedSelect id={id} value={value} className={active} onChange={(event) => onChange(event.target.value)}>
+        <option value="">All</option>
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </BlendedSelect>
     </div>
   );
 }

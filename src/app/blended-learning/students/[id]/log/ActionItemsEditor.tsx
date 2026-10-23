@@ -3,9 +3,10 @@
 import { X } from "lucide-react";
 import { useId } from "react";
 
-import { Button, Select } from "@/components/ui";
+import { Button } from "@/components/ui";
 import type { ActionItemOwner } from "@/lib/blended-learning-mentee-detail";
 
+import { BlendedSelect } from "../../../BlendedSelect";
 import { ACTION_ITEM_OWNER } from "../ActionItemMeta";
 import { FieldError, GrowingTextarea, LABEL_CLASSES, LabelRow } from "./formParts";
 import { sentActionItemIndex, type DraftActionItem, type FieldErrors } from "./logEntryPayload";
@@ -31,19 +32,19 @@ function ActionItemRow({
 }) {
   return (
     <div className="grid grid-cols-[minmax(0,1fr)_2.75rem] gap-2 sm:grid-cols-[8rem_minmax(0,1fr)_2.75rem] sm:items-start">
-      <Select
+      <BlendedSelect
         aria-label={`Who does action item ${number}`}
         value={item.owner}
         onChange={(event) => onChange({ owner: event.target.value as ActionItemOwner })}
         aria-invalid={Boolean(error("owner"))}
-        className="col-span-2 sm:col-span-1"
+        wrapperClassName="col-span-2 sm:col-span-1"
       >
         {OWNERS.map((owner) => (
           <option key={owner} value={owner}>
             {ACTION_ITEM_OWNER[owner]}
           </option>
         ))}
-      </Select>
+      </BlendedSelect>
       <GrowingTextarea
         aria-label={`Action item ${number}`}
         placeholder="What will be done"
