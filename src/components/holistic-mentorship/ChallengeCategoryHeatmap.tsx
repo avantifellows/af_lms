@@ -212,7 +212,7 @@ function HeatmapGrid({ data }: { data: Heatmap }) {
       </thead>
       <tbody>
         <HeatmapRow label="All Schools" studentCount={data.total.studentCount} counts={data.total.counts} emphasised />
-        {data.schools.map((school) => <HeatmapRow key={school.code} label={school.name}
+        {data.schools.map((school) => <HeatmapRow key={school.id} label={school.name}
           studentCount={school.studentCount} counts={school.counts} />)}
       </tbody>
     </table>
@@ -221,8 +221,8 @@ function HeatmapGrid({ data }: { data: Heatmap }) {
 
 function hiddenSchoolsNote(count: number) {
   return count === 1
-    ? "1 School has no categorized Notes yet"
-    : `${count} Schools have no categorized Notes yet`;
+    ? "1 School has no categorized Notes for this selection"
+    : `${count} Schools have no categorized Notes for this selection`;
 }
 
 function HeatmapHeader({ canDownload, downloading, onDownload }: {

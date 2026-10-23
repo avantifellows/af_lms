@@ -314,6 +314,59 @@ describe("Holistic Post-Session Notes", () => {
     })).resolves.toEqual({ ok: true, changed: true, revision: 1 });
   });
 
+  it("rejects an invalid draft Category set before opening a transaction", async () => {
+    const draft = (challengeCategories: string[]) => saveHolisticNotes({
+      programId: 1,
+      mode: "draft",
+      studentId: 41,
+      phaseId: 73,
+      schoolId: 4,
+      academicYear: "2026-2027",
+      actorUserId: 9,
+      expectedRevision: 0,
+      answers: [],
+      challengeCategories,
+    });
+
+    await expect(draft(["academic.retired"])).resolves.toEqual({
+      ok: false, status: 422, error: "Unknown Challenge Category",
+    });
+    await expect(draft(["academic.other", "academic.other"])).resolves.toEqual({
+      ok: false, status: 422, error: "Unknown Challenge Category",
+    });
+    await expect(draft(["academic.no_major_issue", "academic.other"])).resolves.toEqual({
+      ok: false, status: 422, error: "Choose either No major issue reported or other Challenge Categories",
+    });
+    expect(mockWithTransaction).not.toHaveBeenCalled();
+  });
+
+  it("stores the trimmed draft Category codes", async () => {
+    const client = { query: vi.fn()
+      .mockResolvedValueOnce({ rows: [{ mapping_id: "300", mentor_user_id: "9", phase_revision: 5, phase_state: "open" }] })
+      .mockResolvedValueOnce({ rows: [{ id: "91" }] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ id: "501", revision: 1 }] })
+      .mockResolvedValue({ rows: [] }) };
+    mockWithTransaction.mockImplementation(async (work) => work(client as never));
+
+    await saveHolisticNotes({
+      programId: 1,
+      mode: "draft",
+      studentId: 41,
+      phaseId: 73,
+      schoolId: 4,
+      academicYear: "2026-2027",
+      actorUserId: 9,
+      expectedRevision: 0,
+      answers: [],
+      challengeCategories: [" non_academic.financial "],
+    });
+
+    const insert = client.query.mock.calls.find(([sql]) =>
+      String(sql).includes("INSERT INTO holistic_mentorship_post_session_note_challenges"));
+    expect(insert?.[1]).toEqual([501, ["non_academic.financial"]]);
+  });
+
   it("does not let a replacement Mentor claim a draft that still holds Categories", async () => {
     const client = { query: vi.fn()
       .mockResolvedValueOnce({ rows: [{ mapping_id: "301", mentor_user_id: "10", phase_revision: 5, phase_state: "open" }] })

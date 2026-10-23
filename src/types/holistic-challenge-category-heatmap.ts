@@ -13,6 +13,7 @@ export type ChallengeCategoryHeatmap = {
   defaultPhaseId: number | null; // latest Open Phase of that Grade, else null
   academicYears: string[];
   total: { studentCount: number; counts: ChallengeCategoryCounts }; // "All Schools"
-  schools: Array<{ code: string; name: string; studentCount: number; counts: ChallengeCategoryCounts }>; // n > 0, by name then code
+  // n > 0, by name then code. Keyed by School id: `code` may be empty or shared.
+  schools: Array<{ id: number; code: string; name: string; studentCount: number; counts: ChallengeCategoryCounts }>;
   hiddenSchoolCount: number; // in-scope Mapping Schools with n = 0
 };

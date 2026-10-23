@@ -233,10 +233,10 @@ test.describe("Challenge Category Heatmap", () => {
       if (page === holisticAdminPage) {
         const hidden = fixture.mappingSchoolCount - 1;
         const note = hidden === 1
-          ? "1 School has no categorized Notes yet"
-          : `${hidden} Schools have no categorized Notes yet`;
+          ? "1 School has no categorized Notes for this selection"
+          : `${hidden} Schools have no categorized Notes for this selection`;
         if (hidden > 0) await expect(page.getByText(note, { exact: true })).toBeVisible();
-        else await expect(page.getByText(/no categorized Notes yet$/)).toHaveCount(0);
+        else await expect(page.getByText(/no categorized Notes for this selection$/)).toHaveCount(0);
       }
       expectBrowserHealth(health);
     }
@@ -275,8 +275,8 @@ test.describe("Challenge Category Heatmap", () => {
     )).toBeVisible();
     await expect(holisticAdminPage.getByRole("table", { name: "Challenge Category Heatmap" })).toHaveCount(0);
     const note = fixture.mappingSchoolCount === 1
-      ? "1 School has no categorized Notes yet"
-      : `${fixture.mappingSchoolCount} Schools have no categorized Notes yet`;
+      ? "1 School has no categorized Notes for this selection"
+      : `${fixture.mappingSchoolCount} Schools have no categorized Notes for this selection`;
     await expect(holisticAdminPage.getByText(note, { exact: true })).toBeVisible();
     expectBrowserHealth(health);
   });

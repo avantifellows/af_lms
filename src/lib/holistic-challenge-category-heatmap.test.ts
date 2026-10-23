@@ -28,16 +28,16 @@ const phaseRows = [
 
 // Total rows (no School), School rows, and a hidden School, in database order.
 const gridRows = [
-  { row_kind: "total", school_code: null, school_name: null, category_code: null, students: "5" },
-  { row_kind: "total", school_code: null, school_name: null, category_code: "academic.exam_related", students: "3" },
-  { row_kind: "total", school_code: null, school_name: null, category_code: "retired.category", students: "9" },
-  { row_kind: "school", school_code: "SCH002", school_name: "Beta School", category_code: null, students: 2 },
-  { row_kind: "school", school_code: "SCH002", school_name: "Beta School", category_code: "non_academic.financial", students: 1 },
-  { row_kind: "school", school_code: "SCH003", school_name: "Alpha School", category_code: null, students: "2" },
-  { row_kind: "school", school_code: "SCH001", school_name: "Alpha School", category_code: "academic.exam_related", students: "1" },
-  { row_kind: "school", school_code: "SCH009", school_name: null, category_code: null, students: "1" },
-  { row_kind: "hidden", school_code: "SCH004", school_name: "Delta School", category_code: null, students: 0 },
-  { row_kind: "hidden", school_code: "SCH005", school_name: "Echo School", category_code: null, students: 0 },
+  { row_kind: "total", school_id: null, school_code: null, school_name: null, category_code: null, students: "5" },
+  { row_kind: "total", school_id: null, school_code: null, school_name: null, category_code: "academic.exam_related", students: "3" },
+  { row_kind: "total", school_id: null, school_code: null, school_name: null, category_code: "retired.category", students: "9" },
+  { row_kind: "school", school_id: "2", school_code: "SCH002", school_name: "Beta School", category_code: null, students: 2 },
+  { row_kind: "school", school_id: "2", school_code: "SCH002", school_name: "Beta School", category_code: "non_academic.financial", students: 1 },
+  { row_kind: "school", school_id: "3", school_code: "SCH003", school_name: "Alpha School", category_code: null, students: "2" },
+  { row_kind: "school", school_id: "1", school_code: "SCH001", school_name: "Alpha School", category_code: "academic.exam_related", students: "1" },
+  { row_kind: "school", school_id: "9", school_code: "SCH009", school_name: null, category_code: null, students: "1" },
+  { row_kind: "hidden", school_id: "4", school_code: "SCH004", school_name: "Delta School", category_code: null, students: 0 },
+  { row_kind: "hidden", school_id: "5", school_code: "SCH005", school_name: "Echo School", category_code: null, students: 0 },
 ];
 
 const filters = (overrides: Partial<Parameters<typeof getHolisticChallengeCategoryHeatmap>[0]> = {}) => ({
@@ -67,15 +67,36 @@ describe("getHolisticChallengeCategoryHeatmap", () => {
     expect(heatmap?.total.counts["academic.exam_related"]).toBe(3);
     expect(heatmap?.total.counts["academic.subject_concept"]).toBe(0);
     expect(heatmap?.total.counts).not.toHaveProperty("retired.category");
-    expect(heatmap?.schools.map(({ code, name, studentCount }) => [code, name, studentCount])).toEqual([
-      ["SCH001", "Alpha School", 0],
-      ["SCH003", "Alpha School", 2],
-      ["SCH002", "Beta School", 2],
-      ["SCH009", "SCH009", 1],
+    expect(heatmap?.schools.map(({ id, code, name, studentCount }) => [id, code, name, studentCount])).toEqual([
+      [1, "SCH001", "Alpha School", 0],
+      [3, "SCH003", "Alpha School", 2],
+      [2, "SCH002", "Beta School", 2],
+      [9, "SCH009", "SCH009", 1],
     ]);
     expect(heatmap?.schools[0].counts["academic.exam_related"]).toBe(1);
     expect(heatmap?.schools[2].counts["non_academic.financial"]).toBe(1);
     expect(heatmap?.hiddenSchoolCount).toBe(2);
+  });
+
+  it("keeps Schools that share a code, or have none, as separate rows", async () => {
+    mockQuery.mockImplementation(async (sql: string) => (sql.includes("WITH heatmap_phases") ? [
+      { row_kind: "school", school_id: "11", school_code: "SHARED", school_name: "Kilo School", category_code: null, students: "2" },
+      { row_kind: "school", school_id: "12", school_code: "SHARED", school_name: "Kilo School", category_code: null, students: "1" },
+      { row_kind: "school", school_id: "12", school_code: "SHARED", school_name: "Kilo School", category_code: "academic.other", students: "1" },
+      { row_kind: "school", school_id: "13", school_code: null, school_name: "Lima School", category_code: null, students: "3" },
+      { row_kind: "school", school_id: "14", school_code: null, school_name: "Lima School", category_code: null, students: "4" },
+    ] : phaseRows) as never);
+
+    const heatmap = await getHolisticChallengeCategoryHeatmap(filters(), admin);
+
+    expect(heatmap?.schools.map(({ id, code, studentCount }) => [id, code, studentCount])).toEqual([
+      [11, "SHARED", 2],
+      [12, "SHARED", 1],
+      [13, "", 3],
+      [14, "", 4],
+    ]);
+    expect(heatmap?.schools[0].counts["academic.other"]).toBe(0);
+    expect(heatmap?.schools[1].counts["academic.other"]).toBe(1);
   });
 
   it("lists the Grade's Phases in Plan order and defaults to the latest Open Phase", async () => {

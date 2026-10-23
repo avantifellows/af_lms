@@ -44,11 +44,11 @@ function heatmap(overrides: Record<string, unknown> = {}) {
     },
     schools: [
       {
-        code: "SCH001", name: "Alpha School", studentCount: 2,
+        id: 1, code: "SCH001", name: "Alpha School", studentCount: 2,
         counts: { ...ZERO, "academic.exam_related": 2, "non_academic.financial": 2 },
       },
       {
-        code: "SCH002", name: "Beta School", studentCount: 1,
+        id: 2, code: "SCH002", name: "Beta School", studentCount: 1,
         counts: { ...ZERO, "academic.subject_concept": 1, "non_academic.financial": 1 },
       },
     ],
@@ -117,7 +117,7 @@ describe("ChallengeCategoryHeatmap", () => {
     ]);
     expect(within(rows[4]).getByRole("rowheader")).toHaveTextContent("Beta School");
     expect(within(rows[4]).getByRole("rowheader")).toHaveTextContent("n = 1");
-    expect(screen.getByText("2 Schools have no categorized Notes yet")).toBeInTheDocument();
+    expect(screen.getByText("2 Schools have no categorized Notes for this selection")).toBeInTheDocument();
   });
   it("opens on Grade 11 and the latest Open Phase, and resets Phase when the Grade changes", async () => {
     const fetchMock = stubHeatmap((params) => params.get("grade") === "12"
@@ -229,7 +229,7 @@ describe("ChallengeCategoryHeatmap", () => {
       "No submitted Post-Session Notes with Challenge Categories match this selection yet.",
     )).toBeInTheDocument();
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
-    expect(screen.getByText("1 School has no categorized Notes yet")).toBeInTheDocument();
+    expect(screen.getByText("1 School has no categorized Notes for this selection")).toBeInTheDocument();
   });
 
   describe("Download CSV", () => {

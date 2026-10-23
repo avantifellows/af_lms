@@ -238,7 +238,7 @@ async function replaceChallengeCategories(client: PoolClient, notesId: number, i
       `DELETE FROM holistic_mentorship_post_session_note_challenges WHERE notes_id = $1`,
       [notesId]
   );
-  // The route has already validated the codes (known, no duplicates).
+  // saveHolisticNotes has already validated and trimmed the codes (known, no duplicates).
   await client.query(
       `INSERT INTO holistic_mentorship_post_session_note_challenges
          (notes_id, category_code, inserted_at, updated_at)
@@ -299,8 +299,13 @@ async function saveNotesTransaction(
 }
 
 export async function saveHolisticNotes(input: NotesInput): Promise<HolisticNotesResult> {
+  // Every mode, drafts too: the stored set is always known codes, no duplicates,
+  // and No major issue reported alone in its group. Final mode adds both groups later.
+  const categories = validateHolisticChallengeCategories(input.challengeCategories, { final: false });
+  if (!categories.ok) return { ok: false, status: 422, error: categories.error };
+  const validInput = { ...input, challengeCategories: categories.codes };
   try {
-    return await withTransaction((client) => saveNotesTransaction(client, input));
+    return await withTransaction((client) => saveNotesTransaction(client, validInput));
   } catch (error) {
     if ((error as { code?: unknown } | null)?.code !== "23505") throw error;
     const current = await query<{ revision: number }>(

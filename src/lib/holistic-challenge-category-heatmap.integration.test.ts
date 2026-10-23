@@ -111,7 +111,7 @@ function counts(present: Record<string, number>) {
 }
 
 function school(key: keyof typeof schools, studentCount: number, present: Record<string, number>) {
-  return { code: schools[key].code, name: schools[key].name, studentCount, counts: counts(present) };
+  return { id: schools[key].id, code: schools[key].code, name: schools[key].name, studentCount, counts: counts(present) };
 }
 
 // Skipping does not import db.ts, construct a pool, or load application DB env.

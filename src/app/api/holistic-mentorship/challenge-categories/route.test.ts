@@ -201,11 +201,11 @@ describe("Challenge Category Heatmap API", () => {
       },
       schools: [
         {
-          code: "SCH001", name: "=HYPERLINK(\"x\")", studentCount: 2,
+          id: 1, code: "SCH001", name: "=HYPERLINK(\"x\")", studentCount: 2,
           counts: { ...zero, "academic.exam_related": 2, "non_academic.wellness": 2 },
         },
         {
-          code: "SCH002", name: "Beta School", studentCount: 1,
+          id: 2, code: "SCH002", name: "Beta School", studentCount: 1,
           counts: { ...zero, "academic.backlogs_workload": 1, "non_academic.wellness": 1 },
         },
       ],

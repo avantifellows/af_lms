@@ -27,6 +27,7 @@ export type HolisticChallengeCategoryHeatmapFilters = {
 
 type HeatmapDatabaseRow = {
   row_kind: "total" | "school" | "hidden";
+  school_id: number | string | null;
   school_code: string | null;
   school_name: string | null;
   category_code: string | null;
@@ -43,6 +44,7 @@ function emptyCounts(): ChallengeCategoryCounts {
 // their qualifying Notes) under their latest in-scope Mapping School across the
 // Programs; scope is applied before "latest wins", the Students & Progress
 // transfer rule.
+// Schools are keyed by id: a School's code can be null or shared.
 // Placeholders: $1 Programs, $2 Academic Year, $3 Grade, $4 Phase (null = All).
 // The scope clause must use the `mapping_school` alias.
 function heatmapSql(schoolScopeSql: string) {
@@ -83,12 +85,12 @@ function heatmapSql(schoolScopeSql: string) {
                                (counted.category_code), ())
      )
      SELECT CASE WHEN aggregated.all_schools = 1 THEN 'total' ELSE 'school' END AS row_kind,
-            school.code AS school_code, school.name AS school_name,
+            aggregated.school_id, school.code AS school_code, school.name AS school_name,
             aggregated.category_code, aggregated.students
      FROM aggregated
      LEFT JOIN school ON school.id = aggregated.school_id
      UNION ALL
-     SELECT 'hidden', school.code, school.name, NULL, 0
+     SELECT 'hidden', school.id, school.code, school.name, NULL, 0
      FROM (SELECT DISTINCT school_id FROM scoped_mappings) mapping_school_ids
      JOIN school ON school.id = mapping_school_ids.school_id
      WHERE NOT EXISTS (SELECT 1 FROM counted WHERE counted.school_id = mapping_school_ids.school_id)`;
@@ -118,7 +120,7 @@ function addCount(counts: ChallengeCategoryCounts, code: string, students: numbe
 
 function heatmapGrid(rows: HeatmapDatabaseRow[]) {
   const total = { studentCount: 0, counts: emptyCounts() };
-  const schools = new Map<string, ChallengeCategoryHeatmap["schools"][number]>();
+  const schools = new Map<number, ChallengeCategoryHeatmap["schools"][number]>();
   let hiddenSchoolCount = 0;
   for (const row of rows) {
     const students = Number(row.students);
@@ -128,11 +130,12 @@ function heatmapGrid(rows: HeatmapDatabaseRow[]) {
     }
     let target: { studentCount: number; counts: ChallengeCategoryCounts } = total;
     if (row.row_kind === "school") {
+      const id = Number(row.school_id);
       const code = row.school_code ?? "";
-      if (!schools.has(code)) {
-        schools.set(code, { code, name: row.school_name ?? code, studentCount: 0, counts: emptyCounts() });
+      if (!schools.has(id)) {
+        schools.set(id, { id, code, name: row.school_name ?? code, studentCount: 0, counts: emptyCounts() });
       }
-      target = schools.get(code)!;
+      target = schools.get(id)!;
     }
     if (row.category_code === null) target.studentCount = students;
     else addCount(target.counts, row.category_code, students);
@@ -140,7 +143,7 @@ function heatmapGrid(rows: HeatmapDatabaseRow[]) {
   return {
     total,
     schools: [...schools.values()].sort((a, b) =>
-      a.name.localeCompare(b.name) || a.code.localeCompare(b.code)),
+      a.name.localeCompare(b.name) || a.code.localeCompare(b.code) || a.id - b.id),
     hiddenSchoolCount,
   };
 }
