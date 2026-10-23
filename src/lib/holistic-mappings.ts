@@ -131,6 +131,10 @@ export async function eraseDraftHolisticNotes(
        DELETE FROM holistic_mentorship_post_session_answers answers
        USING updated_notes
        WHERE answers.notes_id = updated_notes.id
+     ), erased_challenges AS (
+       DELETE FROM holistic_mentorship_post_session_note_challenges challenges
+       USING updated_notes
+       WHERE challenges.notes_id = updated_notes.id
      )
      INSERT INTO holistic_mentorship_post_session_note_audits
        (notes_id, actor_user_id, actor_email, action, occurred_at, reason, inserted_at, updated_at)
@@ -174,6 +178,10 @@ async function eraseDraftHolisticNotesForMapping(
        DELETE FROM holistic_mentorship_post_session_answers answers
        USING updated_notes
        WHERE answers.notes_id = updated_notes.id
+     ), erased_challenges AS (
+       DELETE FROM holistic_mentorship_post_session_note_challenges challenges
+       USING updated_notes
+       WHERE challenges.notes_id = updated_notes.id
      )
      INSERT INTO holistic_mentorship_post_session_note_audits
        (notes_id, actor_user_id, actor_email, action, occurred_at, reason, inserted_at, updated_at)

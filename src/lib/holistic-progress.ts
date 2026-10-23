@@ -1,5 +1,9 @@
 import { CURRENT_ACADEMIC_YEAR, PROGRAM_ID_TO_LABEL } from "./constants";
 import { query } from "./db";
+import {
+  groupHolisticChallengeCategories,
+  knownHolisticChallengeCategories,
+} from "./holistic-challenge-categories";
 import { reconcileHolisticMappings } from "./holistic-reconciliation";
 import { buildHolisticSchoolScopePredicate } from "./holistic-scope";
 import type { UserPermission } from "./permissions";
@@ -56,6 +60,7 @@ type ProgressDatabaseRow = {
   notes_author_email: string | null;
   notes_last_edited_at: string | null;
   answers: unknown;
+  challenge_categories: string[] | null;
   total_mapped: number | string;
   pending_count: number | string;
   completed_count: number | string;
@@ -478,7 +483,8 @@ async function listAssignedMentees(
               CASE WHEN notes.state = 'submitted' THEN notes.last_edited_at END AS notes_last_edited_at,
               NULLIF(TRIM(COALESCE(author.first_name, '') || ' ' || COALESCE(author.last_name, '')), '') AS notes_author,
               CASE WHEN notes.state = 'submitted' THEN author.email END AS notes_author_email,
-              COALESCE(note_answers.answers, '[]'::jsonb) AS answers
+              COALESCE(note_answers.answers, '[]'::jsonb) AS answers,
+              COALESCE(note_challenges.challenge_categories, '{}'::text[]) AS challenge_categories
        FROM base
        LEFT JOIN holistic_mentorship_post_session_notes notes
          ON notes.student_id = base.student_id AND notes.phase_id = base.phase_id
@@ -491,6 +497,11 @@ async function listAssignedMentees(
          JOIN holistic_mentorship_phase_questions question ON question.id = answer.question_id
          WHERE answer.notes_id = notes.id AND notes.state = 'submitted'
        ) note_answers ON true
+       LEFT JOIN LATERAL (
+         SELECT array_agg(challenge.category_code::text) AS challenge_categories
+         FROM holistic_mentorship_post_session_note_challenges challenge
+         WHERE challenge.notes_id = notes.id AND notes.state = 'submitted'
+       ) note_challenges ON true
      ), filtered AS (
        SELECT * FROM derived WHERE ($7::text IS NULL OR progress = $7)
      ), counts AS (
@@ -540,6 +551,7 @@ async function listAssignedMentees(
       notesAuthorEmail: row.notes_author_email,
       notesLastEditedAt: row.notes_last_edited_at,
       answers: parsedAnswers(row.answers),
+      challengeCategories: knownHolisticChallengeCategories(row.challenge_categories ?? []),
     })),
     counts: {
       total: Number(first?.total_mapped ?? 0),
@@ -680,7 +692,8 @@ export async function getHolisticProgressAcademicYears(
   return rows.map(({ academic_year }) => academic_year);
 }
 
-function csvCell(value: string | number | null): string {
+// Formula-like cells get a leading apostrophe so spreadsheets don't evaluate them.
+export function csvCell(value: string | number | null): string {
   const raw = value === null ? "" : String(value);
   const safe = /^[=+\-@\t\r]/.test(raw) ? `'${raw}` : raw;
   return /[",\r\n]/.test(safe) || safe !== raw
@@ -704,15 +717,17 @@ export function formatHolisticProgressCsv(
     "Grade", "Mentor Name", "Mentor Email", "Phase", "Phase Title", "Availability", "Progress",
     "Completed At",
     ...Array.from({ length: questionCount }, (_, index) => [`Question ${index + 1}`, `Answer ${index + 1}`]).flat(),
+    "Academic Challenges", "Non-Academic Challenges",
     "Notes Author Name", "Notes Author Email", "Notes Last Edited At",
   ];
   const body = rows.map((row) => {
     if (row.progress === "unassigned") {
-      // Only Student and School cells; Mentor, Phase, answers and Notes stay blank.
+      // Only Student and School cells; Mentor, Phase, answers, Categories and Notes stay blank.
       return [
         academicYear, programId, PROGRAM_ID_TO_LABEL[programId], row.schoolName, row.schoolCode,
         row.studentName, row.externalStudentId, row.grade, null, null, null, null, null, row.progress, null,
         ...Array.from({ length: questionCount * 2 }, () => null),
+        null, null,
         null, null, null,
       ].map(csvCell).join(",");
     }
@@ -720,12 +735,15 @@ export function formatHolisticProgressCsv(
       { length: questionCount },
       (_, index) => row.answers.find(({ position }) => position === index + 1)
     );
+    const categories = groupHolisticChallengeCategories(row.challengeCategories);
     return [
       academicYear, programId, PROGRAM_ID_TO_LABEL[programId], row.schoolName, row.schoolCode,
       row.studentName, row.externalStudentId,
       row.grade, row.mentorName, row.mentorEmail, row.phaseNumber === null ? "" : `Phase ${row.phaseNumber}`,
       row.phaseTitle, row.phaseState, row.progress, row.completedAt,
       ...answers.flatMap((answer) => [answer?.question ?? "", answer?.answer ?? ""]),
+      categories.academic.map(({ label }) => label).join("; "),
+      categories.non_academic.map(({ label }) => label).join("; "),
       row.notesAuthor, row.notesAuthorEmail, row.notesLastEditedAt,
     ].map(csvCell).join(",");
   });

@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 // Explicitly opt in with a migrated, disposable local DB. Synthetic immutable
 // audit rows intentionally remain; drop the disposable DB to remove fixtures.
+// The DB must include db-service #806 (post-session Challenge Category rows).
 // HOLISTIC_PRIVACY_TEST_DATABASE=dbservice_test_lms412 DATABASE_HOST=localhost \
 // DATABASE_USER=postgres DATABASE_PASSWORD=postgres npx vitest run src/lib/holistic-privacy.integration.test.ts
 const database = process.env.HOLISTIC_PRIVACY_TEST_DATABASE;
@@ -12,7 +13,11 @@ const marker = "Content erased under approved privacy request";
 const runId = randomUUID();
 let db: typeof import("./db");
 let erase: typeof import("./holistic-privacy").deleteHolisticStudentContent;
+let mappings: typeof import("./holistic-mappings");
+let reconcile: typeof import("./holistic-reconciliation").reconcileHolisticMappings;
 let actorUserId: number;
+let programId: number;
+let schoolId: number;
 let phases: { id: number; questionId: number }[];
 let promptConfigurationId: number;
 let triggerInstalled = false;
@@ -132,6 +137,53 @@ async function otherContent(studentId: number) {
   return result;
 }
 
+async function seedNotes(studentId: number, phaseIndex: number, state: "draft" | "submitted",
+  content: { answer?: string; categories?: string[] } = {}, authorUserId = actorUserId) {
+  return db.withTransaction(async (client) => {
+    const notesId = await insertId(client,
+      `INSERT INTO holistic_mentorship_post_session_notes
+         (student_id, phase_id, author_user_id, state, revision,
+          first_drafted_at, first_submitted_at, last_edited_at)
+       VALUES ($1, $2, $3, $4::text, 1, now(), CASE WHEN $4::text = 'submitted' THEN now() END, now())
+       RETURNING id`,
+      [studentId, phases[phaseIndex].id, authorUserId, state]);
+    if (content.answer) {
+      await client.query(
+        `INSERT INTO holistic_mentorship_post_session_answers (notes_id, question_id, answer)
+         VALUES ($1, $2, $3)`, [notesId, phases[phaseIndex].questionId, content.answer]);
+    }
+    for (const code of content.categories ?? []) {
+      await client.query(
+        `INSERT INTO holistic_mentorship_post_session_note_challenges (notes_id, category_code)
+         VALUES ($1, $2)`, [notesId, code]);
+    }
+    return notesId;
+  });
+}
+
+async function seedBareStudent() {
+  return db.withTransaction(async (client) => {
+    const userId = await insertId(client,
+      'INSERT INTO "user" (inserted_at, updated_at) VALUES (now(), now()) RETURNING id');
+    return insertId(client,
+      "INSERT INTO student (user_id, inserted_at, updated_at) VALUES ($1, now(), now()) RETURNING id", [userId]);
+  });
+}
+
+async function notesContent(notesId: number) {
+  const [result] = await db.query<{
+    categories: string[]; answers: string[]; revision: number; audits: string[];
+  }>(`SELECT
+    ARRAY(SELECT category_code FROM holistic_mentorship_post_session_note_challenges
+      WHERE notes_id = $1 ORDER BY category_code) AS categories,
+    ARRAY(SELECT answer FROM holistic_mentorship_post_session_answers
+      WHERE notes_id = $1 ORDER BY id) AS answers,
+    (SELECT revision FROM holistic_mentorship_post_session_notes WHERE id = $1) AS revision,
+    ARRAY(SELECT action FROM holistic_mentorship_post_session_note_audits
+      WHERE notes_id = $1 ORDER BY id) AS audits`, [notesId]);
+  return result;
+}
+
 // Observe actual blocked database statements, rather than assuming a sleep
 // means the second transaction has reached its advisory lock.
 async function waitForLockWaiters(key: number, subkey: number, count = 1) {
@@ -168,6 +220,8 @@ describe.skipIf(!database)("Holistic privacy erasure against disposable Postgres
     process.env.DATABASE_POOL_MAX = "10";
     db = await import("./db");
     erase = (await import("./holistic-privacy")).deleteHolisticStudentContent;
+    mappings = await import("./holistic-mappings");
+    reconcile = (await import("./holistic-reconciliation")).reconcileHolisticMappings;
     const [connection] = await db.query<{ name: string; address: string }>(
       "SELECT current_database() AS name, host(inet_server_addr()) AS address");
     expect(connection.name).toBe(database);
@@ -182,10 +236,12 @@ describe.skipIf(!database)("Holistic privacy erasure against disposable Postgres
          VALUES ($1, 3, 'admin', $2, false)`, [`issue412-${runId}@example.test`, actorUserId]);
       const productId = await insertId(client,
         "INSERT INTO product (name, inserted_at, updated_at) VALUES ('Issue412 synthetic', now(), now()) RETURNING id");
-      const programId = await insertId(client,
+      programId = await insertId(client,
         "INSERT INTO program (name, product_id, inserted_at, updated_at) VALUES ('Issue412 synthetic', $1, now(), now()) RETURNING id", [productId]);
       const gradeId = await insertId(client,
         "INSERT INTO grade (number, inserted_at, updated_at) VALUES (11, now(), now()) RETURNING id");
+      schoolId = await insertId(client,
+        "INSERT INTO school (name, inserted_at, updated_at) VALUES ('Issue412 synthetic', now(), now()) RETURNING id");
       const planId = await insertId(client,
         "INSERT INTO holistic_mentorship_phase_plans (program_id, academic_year) VALUES ($1, '2026-2027') RETURNING id", [programId]);
       phases = [];
@@ -277,6 +333,87 @@ describe.skipIf(!database)("Holistic privacy erasure against disposable Postgres
     expect(await tombstones(studentId)).toEqual(originalTombstone);
     expect(await audits(studentId)).toEqual(originalAudit);
     expect((await otherContent(studentId)).audit_count).toBe(2);
+  });
+
+  it("erases Challenge Category rows, including Categories-only Notes, before the tombstone", async () => {
+    const studentId = await seedBareStudent();
+    const unrelatedId = await seedBareStudent();
+    const answered = await seedNotes(studentId, 0, "submitted", {
+      answer: "Synthetic post-session answer",
+      categories: ["academic.subject_concept", "non_academic.financial"],
+    });
+    const categoriesOnly = await seedNotes(studentId, 1, "draft", {
+      categories: ["academic.no_major_issue"],
+    });
+    const unrelated = await seedNotes(unrelatedId, 0, "submitted", {
+      answer: "Unrelated answer", categories: ["non_academic.wellness"],
+    });
+
+    expect(await request(studentId)).toMatchObject({ ok: true, postSessionAnswersErased: 1 });
+    expect(await notesContent(answered)).toEqual({
+      categories: [], answers: [], revision: 2, audits: ["privacy_content_erased"] });
+    expect(await notesContent(categoriesOnly)).toEqual({
+      categories: [], answers: [], revision: 2, audits: ["privacy_content_erased"] });
+    expect(await notesContent(unrelated)).toEqual({
+      categories: ["non_academic.wellness"], answers: ["Unrelated answer"], revision: 1, audits: [] });
+    expect((await tombstones(studentId))[0].row).toMatchObject({ post_session_answers_erased: 1 });
+  });
+
+  it("rejects a Challenge Category insert for a tombstoned Student", async () => {
+    const studentId = await seedBareStudent();
+    const notesId = await seedNotes(studentId, 0, "draft", { categories: ["academic.other"] });
+    expect(await request(studentId)).toMatchObject({ ok: true });
+    await expect(db.query(
+      `INSERT INTO holistic_mentorship_post_session_note_challenges (notes_id, category_code)
+       VALUES ($1, 'academic.exam_related')`, [notesId],
+    )).rejects.toMatchObject({ code: "23514" });
+    expect((await notesContent(notesId)).categories).toEqual([]);
+  });
+
+  async function seedMapping(studentId: number) {
+    return db.withTransaction((client) => insertId(client,
+      `INSERT INTO holistic_mentorship_mentor_mentee_mappings
+         (student_id, mentor_user_id, school_id, program_id, academic_year, started_at, assignment_source)
+       VALUES ($1, $2, $3, $4, '2026-2027', now(), 'af_lms_teacher') RETURNING id`,
+      [studentId, actorUserId, schoolId, programId]));
+  }
+
+  const draftErasurePaths: [string, (studentId: number) => Promise<unknown>][] = [
+    ["Mapping end", (studentId) => db.withTransaction((client) =>
+      mappings.eraseDraftHolisticNotes(client, [studentId], actorUserId, "teacher_removal"))],
+    ["Mapping-scoped Mentor removal", async (studentId) => {
+      const expectedMappingId = await seedMapping(studentId);
+      expect(await mappings.removeHolisticMenteeAsAdmin({
+        actorEmail: `issue412-${runId}@example.test`, auditActorUserId: actorUserId,
+        schoolId, programId, academicYear: "2026-2027", studentId, expectedMappingId,
+        confirmed: true, reason: "Synthetic admin removal",
+      })).toEqual({ ok: true, changed: 1 });
+    }],
+    ["reconciliation of an ended Mapping", async (studentId) => {
+      await seedMapping(studentId);
+      expect(await reconcile({ programId, studentIds: [studentId] })).toBe(1);
+    }],
+  ];
+
+  it.each(draftErasurePaths)("erases draft Challenge Category rows on %s", async (_path, endMapping) => {
+    const studentId = await seedBareStudent();
+    const otherId = await seedBareStudent();
+    const draft = await seedNotes(studentId, 0, "draft", {
+      answer: "Synthetic draft answer", categories: ["academic.exam_related", "non_academic.adjustment"],
+    });
+    const submitted = await seedNotes(studentId, 1, "submitted", {
+      answer: "Synthetic submitted answer", categories: ["academic.other"],
+    });
+    const otherDraft = await seedNotes(otherId, 0, "draft", { categories: ["non_academic.other"] });
+
+    await endMapping(studentId);
+
+    expect(await notesContent(draft)).toEqual({
+      categories: [], answers: [], revision: 2, audits: ["draft_erased_on_mapping_end"] });
+    expect(await notesContent(submitted)).toEqual({
+      categories: ["academic.other"], answers: ["Synthetic submitted answer"], revision: 1, audits: [] });
+    expect(await notesContent(otherDraft)).toEqual({
+      categories: ["non_academic.other"], answers: [], revision: 1, audits: [] });
   });
 
   it("records a repair under an existing tombstone without rewriting original audit history", async () => {

@@ -460,10 +460,12 @@ export async function seedHolisticFixtures(
 
   const completedPhaseId = phaseByPosition.get(1)!;
   const draftPhaseId = phaseByPosition.get(2)!;
+  const categorizedPhaseId = phaseByPosition.get(4)!;
   await client.query(
     `WITH source(student_id, phase_id, state, submitted_at, edited_at) AS (
        VALUES ($1::bigint, $2::bigint, 'submitted', '2026-06-05T00:05:00Z'::timestamptz, '2026-06-05T00:05:00Z'::timestamptz),
-              ($3::bigint, $4::bigint, 'draft', NULL::timestamptz, '2026-07-01T00:05:00Z'::timestamptz)
+              ($3::bigint, $4::bigint, 'draft', NULL::timestamptz, '2026-07-01T00:05:00Z'::timestamptz),
+              ($8::bigint, $9::bigint, 'submitted', '2026-07-02T00:05:00Z'::timestamptz, '2026-07-02T00:05:00Z'::timestamptz)
      ), notes AS (
        INSERT INTO holistic_mentorship_post_session_notes
          (student_id, phase_id, author_user_id, state, revision, first_drafted_at,
@@ -477,17 +479,30 @@ export async function seedHolisticFixtures(
      )
      INSERT INTO holistic_mentorship_post_session_answers
        (notes_id, question_id, answer, inserted_at, updated_at)
-     SELECT notes.id, CASE notes.phase_id WHEN $2 THEN $6::bigint ELSE $7::bigint END,
+     SELECT notes.id, CASE notes.phase_id WHEN $2 THEN $6::bigint WHEN $4 THEN $7::bigint ELSE $10::bigint END,
             'Synthetic mentoring note.', now(), now()
      FROM all_notes notes ON CONFLICT (notes_id, question_id) DO NOTHING`,
     [grade11[0].student_id, completedPhaseId, grade11[1].student_id, draftPhaseId,
-      mentorUserId, questionByPhase.get(completedPhaseId), questionByPhase.get(draftPhaseId)]
+      mentorUserId, questionByPhase.get(completedPhaseId), questionByPhase.get(draftPhaseId),
+      grade12[1].student_id, categorizedPhaseId, questionByPhase.get(categorizedPhaseId)]
+  );
+  // The Phase 1 Note stays without Challenge Categories (pre-release); the Grade 12 Phase 4 Note carries
+  // one Challenge Category per group so local, e2e and staging heatmaps are not empty.
+  await client.query(
+    `INSERT INTO holistic_mentorship_post_session_note_challenges
+       (notes_id, category_code, inserted_at, updated_at)
+     SELECT notes.id, code, now(), now()
+     FROM holistic_mentorship_post_session_notes notes
+     CROSS JOIN unnest($3::text[]) code
+     WHERE notes.student_id = $1 AND notes.phase_id = $2 AND notes.state = 'submitted'
+     ON CONFLICT (notes_id, category_code) DO NOTHING`,
+    [grade12[1].student_id, categorizedPhaseId, ["academic.exam_related", "non_academic.time_management"]]
   );
   await client.query(
     `UPDATE holistic_mentorship_phases SET frozen_at = COALESCE(frozen_at, '2026-06-05T00:00:00Z'),
        frozen_by_user_id = COALESCE(frozen_by_user_id, $2), updated_at = now()
      WHERE id = ANY($1::bigint[])`,
-    [[completedPhaseId, draftPhaseId], mentorUserId]
+    [[completedPhaseId, draftPhaseId, categorizedPhaseId], mentorUserId]
   );
 
   return {
@@ -499,7 +514,8 @@ export async function seedHolisticFixtures(
     profiles: 2,
     historicalNotes: programId === PROGRAM_IDS.COE ? 1 : 0,
     draftNotes: 1,
-    submittedNotes: 1,
+    submittedNotes: 2,
+    categorizedNotes: 1,
     phases: 6,
   };
 }

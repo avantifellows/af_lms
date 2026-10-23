@@ -109,13 +109,19 @@ export async function deleteHolisticStudentContent(params: {
       `WITH target_notes AS MATERIALIZED (
          SELECT notes.id FROM holistic_mentorship_post_session_notes notes
          WHERE notes.student_id = $1
-           AND EXISTS (SELECT 1 FROM holistic_mentorship_post_session_answers answer
-                       WHERE answer.notes_id = notes.id)
+           AND (EXISTS (SELECT 1 FROM holistic_mentorship_post_session_answers answer
+                        WHERE answer.notes_id = notes.id)
+             OR EXISTS (SELECT 1 FROM holistic_mentorship_post_session_note_challenges challenge
+                        WHERE challenge.notes_id = notes.id))
          FOR UPDATE OF notes
        ), erased_answers AS (
          DELETE FROM holistic_mentorship_post_session_answers answer
          USING target_notes WHERE answer.notes_id = target_notes.id
          RETURNING answer.notes_id
+       ), erased_challenges AS (
+         -- Challenge Categories are Notes content too; the tombstone counts answers only.
+         DELETE FROM holistic_mentorship_post_session_note_challenges challenge
+         USING target_notes WHERE challenge.notes_id = target_notes.id
        ), updated_notes AS (
          UPDATE holistic_mentorship_post_session_notes notes
          SET revision = revision + 1, last_edited_at = now(), updated_at = now()

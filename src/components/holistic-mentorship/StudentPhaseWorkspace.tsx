@@ -11,6 +11,11 @@ import { type ReactNode, useCallback, useEffect, useEffectEvent, useId, useRef, 
 import type { HolisticProfileRegeneration, HolisticStudentPhaseDetail } from "@/lib/holistic-student-phase";
 import { PROGRAM_IDS } from "@/lib/constants";
 import {
+  groupHolisticChallengeCategories, HOLISTIC_CHALLENGE_CATEGORIES, HOLISTIC_CHALLENGE_CATEGORY_GROUPS,
+  holisticChallengeCategoryGroupsMessage, placeHolisticChallengeCategories, toggleHolisticChallengeCategory,
+  validateHolisticChallengeCategories, type HolisticChallengeCategoryCode, type HolisticChallengeCategoryGroup,
+} from "@/lib/holistic-challenge-categories";
+import {
   HOLISTIC_FOLLOW_UP_ANSWER_MAX_LENGTH, HOLISTIC_FOLLOW_UP_QUESTIONS,
   type HolisticFollowUpQuestionKey,
 } from "@/lib/holistic-follow-up-questions";
@@ -37,11 +42,18 @@ type NotesEditorProps = {
     revision: number;
     authorName?: string | null;
     answers?: Array<{ questionId: number; answer: string }>;
+    challengeCategories?: HolisticChallengeCategoryCode[];
   };
   timestampNotes: OpenSelectedPhase["notes"];
   onNotesSaved: (submitted: boolean) => void;
 };
 type NotesEditorStatus = "idle" | "saving" | "saved" | "failed";
+// Answers and Challenge Categories autosave, hydrate and submit together.
+type NotesValue = {
+  answers: Record<number, string>;
+  challengeCategories: HolisticChallengeCategoryCode[];
+};
+type CategoryGroup = (typeof HOLISTIC_CHALLENGE_CATEGORY_GROUPS)[number];
 type OpenSelectedPhase = Extract<HolisticStudentPhaseDetail["selectedPhase"], { guidanceMarkdown: string }>;
 type PhaseNavigationItem = HolisticStudentPhaseDetail["phases"][number];
 type BrowserNavigation = EventTarget & {
@@ -96,12 +108,6 @@ function clearCurrentNotesRefresh() {
   }
 }
 
-function initialNotesAnswers(props: NotesEditorProps) {
-  return Object.fromEntries(props.questions.map(({ questionId }) => [
-    questionId,
-    props.notes?.answers?.find((answer) => answer.questionId === questionId)?.answer ?? "",
-  ]));
-}
 
 function initialEditorState(props: NotesEditorProps) {
   if (!props.notes) {
@@ -130,19 +136,19 @@ function initialNotesRevision(props: NotesEditorProps) {
   return props.notes ? props.notes.revision : props.notesRevision;
 }
 
-function hasLocalNotesWork(answersChanged: boolean, status: NotesEditorStatus) {
-  return answersChanged || ["saving", "failed"].includes(status);
+function hasLocalNotesWork(valueChanged: boolean, status: NotesEditorStatus) {
+  return valueChanged || ["saving", "failed"].includes(status);
 }
 
-function needsDraftNavigationGuard({ finalWriting, canAutosave, answersChanged, status }: {
+function needsDraftNavigationGuard({ finalWriting, canAutosave, valueChanged, status }: {
   finalWriting: boolean;
   canAutosave: boolean;
-  answersChanged: boolean;
+  valueChanged: boolean;
   status: NotesEditorStatus;
 }) {
   if (finalWriting) return true;
   if (!canAutosave) return false;
-  return hasLocalNotesWork(answersChanged, status);
+  return hasLocalNotesWork(valueChanged, status);
 }
 
 function shouldShowNotesInputs(canAutosave: boolean, editingSubmitted: boolean) {
@@ -155,6 +161,12 @@ function hasBlankAnswer(questions: NotesEditorProps["questions"], answers: Recor
 
 function firstBlankQuestion(questions: NotesEditorProps["questions"], answers: Record<number, string>) {
   return questions.find(({ questionId }) => !answers[questionId]?.trim())?.questionId ?? null;
+}
+
+// Submit / Edit notes need both groups; names the groups still empty.
+function missingCategoryGroups(codes: HolisticChallengeCategoryCode[]): HolisticChallengeCategoryGroup[] {
+  const result = validateHolisticChallengeCategories(codes, { final: true });
+  return result.ok ? [] : result.emptyGroups ?? [];
 }
 
 function selectedOpenPhase(detail: HolisticStudentPhaseDetail): OpenSelectedPhase | null {
@@ -193,7 +205,7 @@ function useNotesMutation(props: NotesEditorProps, revisionRef: React.MutableRef
   const apiUrl = notesApiUrl(props);
   return useCallback(async (
     action: "draft" | "submit" | "edit",
-    value: Record<number, string>,
+    value: NotesValue,
     confirmed = false
   ) => {
     const response = await fetch(apiUrl, {
@@ -207,8 +219,9 @@ function useNotesMutation(props: NotesEditorProps, revisionRef: React.MutableRef
         confirmed,
         answers: props.questions.map(({ questionId }) => ({
           question_id: questionId,
-          answer: value[questionId] ?? "",
+          answer: value.answers[questionId] ?? "",
         })),
+        challenge_categories: value.challengeCategories,
       }),
     });
     const result = await response.json().catch(() => ({})) as { revision?: number; error?: string };
@@ -217,11 +230,14 @@ function useNotesMutation(props: NotesEditorProps, revisionRef: React.MutableRef
   }, [apiUrl, props.mappingId, props.phaseRevision, props.questions, revisionRef]);
 }
 
-function snapshotAnswers(questions: NotesEditorProps["questions"], snapshot: NotesSnapshot) {
-  return Object.fromEntries(questions.map(({ questionId }) => [
-    questionId,
-    snapshot.notes?.answers?.find((answer) => answer.questionId === questionId)?.answer ?? "",
-  ]));
+function snapshotValue(questions: NotesEditorProps["questions"], snapshot: Pick<NotesSnapshot, "notes">): NotesValue {
+  return {
+    answers: Object.fromEntries(questions.map(({ questionId }) => [
+      questionId,
+      snapshot.notes?.answers?.find((answer) => answer.questionId === questionId)?.answer ?? "",
+    ])),
+    challengeCategories: snapshot.notes?.challengeCategories ?? [],
+  };
 }
 
 function snapshotEditorState(snapshot: NotesSnapshot) {
@@ -345,26 +361,27 @@ function useNotesNavigationGuard({ beforeNavigation, guardNeeded, draftEditor, r
 }
 
 function useNotesEditorState(props: NotesEditorProps) {
-  const initialAnswers = initialNotesAnswers(props);
+  const initialValue = snapshotValue(props.questions, props);
   const initialEditor = initialEditorState(props);
-  const [answers, setAnswers] = useState<Record<number, string>>(initialAnswers);
-  const [savedAnswers, setSavedAnswers] = useState<Record<number, string>>(initialAnswers);
+  const [value, setValue] = useState<NotesValue>(initialValue);
+  const [savedValue, setSavedValue] = useState<NotesValue>(initialValue);
   const [notesState, setNotesState] = useState(initialEditor.notesState);
   const [editingSubmitted, setEditingSubmitted] = useState(false);
   const [status, setStatus] = useState<NotesEditorStatus>(initialEditor.status);
   const [error, setError] = useState("");
   const [validationError, setValidationError] = useState("");
+  const [missingCategories, setMissingCategories] = useState<HolisticChallengeCategoryGroup[]>([]);
   const [success, setSuccess] = useState("");
   const [conflict, setConflict] = useState(false);
   const [finalWriting, setFinalWriting] = useState(false);
 
   return {
-    initialAnswers,
+    initialValue,
     initialRevision: initialEditor.revision,
-    answers, setAnswers, savedAnswers, setSavedAnswers, notesState, setNotesState,
+    value, setValue, savedValue, setSavedValue, notesState, setNotesState,
     editingSubmitted, setEditingSubmitted, status, setStatus, error, setError,
-    validationError, setValidationError, success, setSuccess, conflict, setConflict,
-    finalWriting, setFinalWriting,
+    validationError, setValidationError, missingCategories, setMissingCategories,
+    success, setSuccess, conflict, setConflict, finalWriting, setFinalWriting,
   };
 }
 
@@ -372,18 +389,19 @@ type NotesEditorState = ReturnType<typeof useNotesEditorState>;
 
 function useNotesEditorRefs(
   props: NotesEditorProps,
-  state: Pick<NotesEditorState, "initialAnswers" | "initialRevision">
+  state: Pick<NotesEditorState, "initialValue" | "initialRevision">
 ) {
-  const savedRef = useRef(JSON.stringify(state.initialAnswers));
-  const queuedRef = useRef<Record<number, string> | null>(null);
+  const savedRef = useRef(JSON.stringify(state.initialValue));
+  const queuedRef = useRef<NotesValue | null>(null);
   const inFlightRef = useRef<Promise<boolean> | null>(null);
   const autosaveTimerRef = useRef<number | null>(null);
   const textareasRef = useRef<Record<number, HTMLTextAreaElement | null>>({});
+  const categoryFieldsetsRef = useRef<Partial<Record<HolisticChallengeCategoryGroup, HTMLFieldSetElement | null>>>({});
   const hydratedServerRevisionRef = useRef(initialNotesRevision(props));
   const mutationRevisionRef = useRef(state.initialRevision);
   return {
-    savedRef, queuedRef, inFlightRef, autosaveTimerRef, textareasRef, hydratedServerRevisionRef,
-    mutationRevisionRef,
+    savedRef, queuedRef, inFlightRef, autosaveTimerRef, textareasRef, categoryFieldsetsRef,
+    hydratedServerRevisionRef, mutationRevisionRef,
   };
 }
 
@@ -397,8 +415,8 @@ function useNotesHydration({ props, apiUrl, state, refs, localDirty }: {
   localDirty: boolean;
 }) {
   const {
-    setAnswers, setSavedAnswers, setNotesState, setStatus, setEditingSubmitted,
-    setError, setValidationError, setConflict, finalWriting, notesState, status,
+    setValue, setSavedValue, setNotesState, setStatus, setEditingSubmitted,
+    setError, setValidationError, setMissingCategories, setConflict, finalWriting, notesState, status,
   } = state;
   const {
     hydratedServerRevisionRef, mutationRevisionRef, savedRef, queuedRef,
@@ -413,19 +431,20 @@ function useNotesHydration({ props, apiUrl, state, refs, localDirty }: {
       busy: localDirty || finalWriting,
     });
     if (decision !== true) return decision === null;
-    const nextAnswers = snapshotAnswers(props.questions, snapshot);
+    const nextValue = snapshotValue(props.questions, snapshot);
     const nextEditor = snapshotEditorState(snapshot);
     hydratedServerRevisionRef.current = serverRevision;
     mutationRevisionRef.current = serverRevision;
-    savedRef.current = JSON.stringify(nextAnswers);
+    savedRef.current = JSON.stringify(nextValue);
     queuedRef.current = null;
-    setAnswers(nextAnswers);
-    setSavedAnswers(nextAnswers);
+    setValue(nextValue);
+    setSavedValue(nextValue);
     setNotesState(nextEditor.notesState);
     setStatus(nextEditor.status);
     setEditingSubmitted(false);
     setError("");
     setValidationError("");
+    setMissingCategories([]);
     setConflict(false);
     return true;
   });
@@ -472,7 +491,7 @@ function useNotesDraftAutosave({ state, refs, mutate, canAutosave, autosaveEnabl
   canAutosave: boolean;
   autosaveEnabled: boolean;
 }) {
-  const { answers, status, setStatus, setError, setConflict, setSavedAnswers } = state;
+  const { value: notesValue, status, setStatus, setError, setConflict, setSavedValue } = state;
   const { queuedRef, inFlightRef, autosaveTimerRef, savedRef } = refs;
   const pump = useCallback(() => {
     if (inFlightRef.current) return inFlightRef.current;
@@ -487,7 +506,7 @@ function useNotesDraftAutosave({ state, refs, mutate, canAutosave, autosaveEnabl
           await mutate("draft", value);
           markCurrentNotesForRefresh();
           savedRef.current = JSON.stringify(value);
-          setSavedAnswers(value);
+          setSavedValue(value);
         } catch (caught) {
           setStatus("failed");
           setError(caught instanceof NotesRequestError ? caught.message : "Could not save Notes");
@@ -500,7 +519,7 @@ function useNotesDraftAutosave({ state, refs, mutate, canAutosave, autosaveEnabl
     })().finally(() => { inFlightRef.current = null; });
     inFlightRef.current = work;
     return work;
-  }, [inFlightRef, mutate, queuedRef, savedRef, setConflict, setError, setSavedAnswers, setStatus]);
+  }, [inFlightRef, mutate, queuedRef, savedRef, setConflict, setError, setSavedValue, setStatus]);
 
   const cancelAutosaveTimer = useCallback(() => {
     if (autosaveTimerRef.current === null) return;
@@ -511,22 +530,22 @@ function useNotesDraftAutosave({ state, refs, mutate, canAutosave, autosaveEnabl
   const flushDraft = useCallback(async () => {
     cancelAutosaveTimer();
     if (!canAutosave) return true;
-    if (JSON.stringify(answers) !== savedRef.current || status === "failed") queuedRef.current = answers;
+    if (JSON.stringify(notesValue) !== savedRef.current || status === "failed") queuedRef.current = notesValue;
     while (queuedRef.current || inFlightRef.current) {
       if (!(await pump())) return false;
     }
     return true;
-  }, [answers, canAutosave, cancelAutosaveTimer, inFlightRef, pump, queuedRef, savedRef, status]);
+  }, [notesValue, canAutosave, cancelAutosaveTimer, inFlightRef, pump, queuedRef, savedRef, status]);
 
   useEffect(() => {
-    if (!autosaveEnabled || JSON.stringify(answers) === savedRef.current) return;
+    if (!autosaveEnabled || JSON.stringify(notesValue) === savedRef.current) return;
     autosaveTimerRef.current = window.setTimeout(() => {
       autosaveTimerRef.current = null;
-      queuedRef.current = answers;
+      queuedRef.current = notesValue;
       void pump();
     }, 750);
     return cancelAutosaveTimer;
-  }, [answers, autosaveEnabled, autosaveTimerRef, cancelAutosaveTimer, pump, queuedRef, savedRef]);
+  }, [notesValue, autosaveEnabled, autosaveTimerRef, cancelAutosaveTimer, pump, queuedRef, savedRef]);
 
   return flushDraft;
 }
@@ -535,16 +554,17 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
   const router = useRouter();
   const state = useNotesEditorState(props);
   const {
-    answers, setAnswers, savedAnswers, setSavedAnswers, notesState, setNotesState,
+    value, setValue, savedValue, setSavedValue, notesState, setNotesState,
     editingSubmitted, setEditingSubmitted, status, setStatus, error, setError,
-    validationError, setValidationError, success, setSuccess, conflict, setConflict,
-    finalWriting, setFinalWriting,
+    validationError, setValidationError, missingCategories, setMissingCategories,
+    success, setSuccess, conflict, setConflict, finalWriting, setFinalWriting,
   } = state;
-  const answersChanged = JSON.stringify(answers) !== JSON.stringify(savedAnswers);
-  const localDirty = hasLocalNotesWork(answersChanged, status);
+  const valueChanged = JSON.stringify(value) !== JSON.stringify(savedValue);
+  const localDirty = hasLocalNotesWork(valueChanged, status);
   const refs = useNotesEditorRefs(props, state);
-  const { savedRef, textareasRef, mutationRevisionRef } = refs;
+  const { savedRef, textareasRef, categoryFieldsetsRef, mutationRevisionRef } = refs;
   const validationErrorId = useId();
+  const categoryErrorId = useId();
   const mutate = useNotesMutation(props, mutationRevisionRef);
   const apiUrl = notesApiUrl(props);
   const canAutosave = canAutosaveNotes(props.editable, notesState);
@@ -552,24 +572,25 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
   useNotesHydration({ props, apiUrl, state, refs, localDirty });
   const flushDraft = useNotesDraftAutosave({ state, refs, mutate, canAutosave, autosaveEnabled });
 
-  const submittedEditDirty = editingSubmitted && answersChanged;
+  const submittedEditDirty = editingSubmitted && valueChanged;
   const draftNeedsGuard = needsDraftNavigationGuard({
     finalWriting,
     canAutosave,
-    answersChanged,
+    valueChanged,
     status,
   });
   const discardSubmittedChanges = useCallback(() => {
     if (!window.confirm("Discard unsaved Notes changes?")) return false;
-    setAnswers(savedAnswers);
+    setValue(savedValue);
     setEditingSubmitted(false);
     setStatus("idle");
     setError("");
     setValidationError("");
+    setMissingCategories([]);
     setSuccess("");
     setConflict(false);
     return true;
-  }, [savedAnswers, setAnswers, setConflict, setEditingSubmitted, setError, setStatus,
+  }, [savedValue, setValue, setConflict, setEditingSubmitted, setError, setMissingCategories, setStatus,
     setSuccess, setValidationError]);
   const beforeNavigation = useCallback((): boolean | Promise<boolean> => {
     if (finalWriting) return false;
@@ -584,16 +605,25 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
     void flushDraft();
   };
   const focusFirstBlank = () => {
-    const questionId = firstBlankQuestion(props.questions, answers);
+    const questionId = firstBlankQuestion(props.questions, value.answers);
     if (questionId !== null) textareasRef.current[questionId]?.focus();
   };
-  const submit = async () => {
-    if (hasBlankAnswer(props.questions, answers)) {
-      setValidationError(SUBMIT_BLANK_ANSWER_ERROR);
+  // Answers first, then Challenge Categories: the same order as the server.
+  const validateFinalWrite = (blankAnswerError: string) => {
+    if (hasBlankAnswer(props.questions, value.answers)) {
+      setValidationError(blankAnswerError);
       focusFirstBlank();
-      return;
+      return false;
     }
     setValidationError("");
+    const missing = missingCategoryGroups(value.challengeCategories);
+    setMissingCategories(missing);
+    if (missing.length === 0) return true;
+    categoryFieldsetsRef.current[missing[0]]?.querySelector("input")?.focus();
+    return false;
+  };
+  const submit = async () => {
+    if (!validateFinalWrite(SUBMIT_BLANK_ANSWER_ERROR)) return;
     setFinalWriting(true);
     if (!(await flushDraft()) || !window.confirm("Submit these Post-Session Notes?")) {
       setFinalWriting(false);
@@ -602,9 +632,9 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
     setStatus("saving");
     setSuccess("");
     try {
-      await mutate("submit", answers, true);
-      savedRef.current = JSON.stringify(answers);
-      setSavedAnswers(answers);
+      await mutate("submit", value, true);
+      savedRef.current = JSON.stringify(value);
+      setSavedValue(value);
       setNotesState("submitted");
       setStatus("saved");
       setSuccess("Notes submitted. Phase completed.");
@@ -619,12 +649,7 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
     }
   };
   const saveCorrection = async () => {
-    if (hasBlankAnswer(props.questions, answers)) {
-      setValidationError(SAVE_BLANK_ANSWER_ERROR);
-      focusFirstBlank();
-      return;
-    }
-    setValidationError("");
+    if (!validateFinalWrite(SAVE_BLANK_ANSWER_ERROR)) return;
     setFinalWriting(true);
     if (!window.confirm("Save changes to submitted Notes?")) {
       setFinalWriting(false);
@@ -633,9 +658,9 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
     setStatus("saving");
     setSuccess("");
     try {
-      await mutate("edit", answers, true);
-      savedRef.current = JSON.stringify(answers);
-      setSavedAnswers(answers);
+      await mutate("edit", value, true);
+      savedRef.current = JSON.stringify(value);
+      setSavedValue(value);
       setEditingSubmitted(false);
       setStatus("saved");
       setSuccess("Submitted Notes updated.");
@@ -653,21 +678,30 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
     setEditingSubmitted(true);
     setStatus("idle");
     setValidationError("");
+    setMissingCategories([]);
     setSuccess("");
   };
   const cancelCorrection = () => {
-    if (JSON.stringify(answers) !== JSON.stringify(savedAnswers)) {
+    if (JSON.stringify(value) !== JSON.stringify(savedValue)) {
       void discardSubmittedChanges();
       return;
     }
     setEditingSubmitted(false);
     setStatus("idle");
+    setMissingCategories([]);
   };
   const updateAnswer = (questionId: number, answer: string) => {
-    const nextAnswers = { ...answers, [questionId]: answer };
-    setAnswers(nextAnswers);
+    const nextAnswers = { ...value.answers, [questionId]: answer };
+    setValue({ ...value, answers: nextAnswers });
     setError("");
     if (validationError && !hasBlankAnswer(props.questions, nextAnswers)) setValidationError("");
+    setSuccess("");
+  };
+  const toggleCategory = (code: HolisticChallengeCategoryCode) => {
+    const challengeCategories = toggleHolisticChallengeCategory(value.challengeCategories, code);
+    setValue({ ...value, challengeCategories });
+    setError("");
+    if (missingCategories.length) setMissingCategories(missingCategoryGroups(challengeCategories));
     setSuccess("");
   };
 
@@ -678,13 +712,19 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
       canEdit={canEditSubmittedNotes(props.editable, notesState)} onEdit={beginCorrection} />
     <NotesEditorContent
       showInputs={showInputs}
-      editable={<EditableNotesForm questions={props.questions} answers={answers} status={status} error={error}
+      editable={<EditableNotesForm questions={props.questions} value={value}
         validationError={validationError} validationErrorId={validationErrorId}
-        canRetry={enabledUnlessDisabled(autosaveEnabled, conflict)} editingSubmitted={editingSubmitted}
-        disabled={finalWriting} onAnswerChange={updateAnswer}
+        missingCategories={missingCategories} categoryErrorId={categoryErrorId}
+        disabled={finalWriting} onAnswerChange={updateAnswer} onCategoryToggle={toggleCategory}
         onTextarea={(questionId, element) => { textareasRef.current[questionId] = element; }}
-        onRetry={retry} onSaveCorrection={saveCorrection} onCancelCorrection={cancelCorrection} onSubmit={submit} />}
-      submitted={<><SubmittedNotesView questions={props.questions} answers={answers} />
+        onCategoryFieldset={(group, element) => { categoryFieldsetsRef.current[group] = element; }}
+        actions={<NotesEditorActions status={status} error={error} validationError={validationError}
+          validationErrorId={validationErrorId} categoryError={holisticChallengeCategoryGroupsMessage(missingCategories)}
+          categoryErrorId={categoryErrorId} canRetry={enabledUnlessDisabled(autosaveEnabled, conflict)}
+          editingSubmitted={editingSubmitted} disabled={finalWriting} onRetry={retry}
+          onSaveCorrection={saveCorrection} onCancelCorrection={cancelCorrection} onSubmit={submit} />} />}
+      submitted={<><SubmittedNotesView questions={props.questions} value={value}
+          submitted={notesState === "submitted"} />
         {success && <p role="status" className="text-sm font-medium text-success">{success}</p>}</>}
     />
   </>;
@@ -707,7 +747,9 @@ function NotesHead({ showInputs, completed, draftMode, status, error, timestampN
         {completed && <Badge variant="success">Completed</Badge>}
       </div>
       {showInputs
-        ? <p className="mt-1 text-sm text-text-muted">All answers are required before submission.</p>
+        ? <p className="mt-1 text-sm text-text-muted">
+            All answers and a Challenge Category in each group are required before submission.
+          </p>
         : timestampNotes && <NotesTimestamp notes={timestampNotes} />}
     </div>
     {draftMode && <NotesSaveState status={status} error={error} />}
@@ -736,67 +778,159 @@ function NotesEditorContent({ showInputs, editable, submitted }: {
   return showInputs ? editable : submitted;
 }
 
-function SubmittedNotesView({ questions, answers }: {
+function SubmittedNotesView({ questions, value, submitted }: {
   questions: NotesEditorProps["questions"];
-  answers: Record<number, string>;
+  value: NotesValue;
+  submitted: boolean;
 }) {
   return <>
     {questions.map((question) => <div key={question.questionId}>
       <h3 className="text-sm font-semibold text-text-primary">{question.text}</h3>
       <blockquote className="mt-2 whitespace-pre-wrap border-l-2 border-info bg-bg-card-alt p-3 text-sm text-text-primary">
-        {answers[question.questionId] || "Not submitted"}
+        {value.answers[question.questionId] || "Not submitted"}
       </blockquote>
     </div>)}
+    {(submitted || value.challengeCategories.length > 0) &&
+      <SubmittedChallengeCategories codes={value.challengeCategories} />}
   </>;
 }
 
-function EditableNotesForm({ questions, answers, status, error, validationError, validationErrorId,
-  canRetry, editingSubmitted,
-  disabled, onAnswerChange, onTextarea, onRetry, onSaveCorrection, onCancelCorrection, onSubmit }: {
-  questions: NotesEditorProps["questions"];
-  answers: Record<number, string>;
-  status: NotesEditorStatus;
-  error: string;
+// The one grouped display for every read surface: the Mentor submitted view,
+// the Admin/PM read-only view, and Notes-based Student Context.
+function SubmittedChallengeCategories({ codes, headingLevel = 3 }: {
+  codes: HolisticChallengeCategoryCode[];
+  headingLevel?: 3 | 4;
+}) {
+  const headingId = useId();
+  const grouped = groupHolisticChallengeCategories(codes);
+  const Heading = headingLevel === 4 ? "h4" : "h3";
+  return <section aria-labelledby={headingId}>
+    <Heading id={headingId} className="text-sm font-semibold text-text-primary">Challenge Categories</Heading>
+    {codes.length === 0
+      ? <p className="mt-2 text-sm text-text-muted">Categories not recorded</p>
+      : <div className="mt-2 grid gap-3 sm:grid-cols-2">
+          {HOLISTIC_CHALLENGE_CATEGORY_GROUPS.map(({ group, label }) => <div key={group}>
+            <p id={`${headingId}-${group}`} className="text-xs font-semibold uppercase text-text-muted">{label}</p>
+            <ul aria-labelledby={`${headingId}-${group}`} className="mt-1 flex flex-wrap gap-1.5">
+              {grouped[group].length === 0
+                ? <li className="text-sm text-text-muted">None</li>
+                : grouped[group].map((category) => <li key={category.code}
+                    className="rounded-md border border-border bg-bg-card-alt px-2 py-0.5 text-sm text-text-primary">
+                    {category.label}
+                  </li>)}
+            </ul>
+          </div>)}
+        </div>}
+  </section>;
+}
+
+function ChallengeCategoryFieldset({ group, selected, invalid, errorId, disabled, onToggle, onFieldset }: {
+  group: CategoryGroup;
+  selected: HolisticChallengeCategoryCode[];
+  invalid: boolean;
+  errorId: string;
+  disabled: boolean;
+  onToggle: (code: HolisticChallengeCategoryCode) => void;
+  onFieldset: (group: HolisticChallengeCategoryGroup, element: HTMLFieldSetElement | null) => void;
+}) {
+  return <fieldset ref={(element) => onFieldset(group.group, element)} disabled={disabled}
+    aria-invalid={invalid} aria-describedby={invalid ? errorId : undefined}
+    className={`rounded-md border p-3 ${invalid ? "border-danger" : "border-border"}`}>
+    <legend className="px-1 text-xs font-semibold uppercase text-text-muted">
+      {group.label} Challenge Categories <span aria-hidden="true" className="text-accent">*</span>
+    </legend>
+    <div className="grid gap-1 sm:grid-cols-2">
+      {HOLISTIC_CHALLENGE_CATEGORIES.filter((category) => category.group === group.group).map((category) =>
+        <label key={category.code} className="flex min-h-9 items-center gap-2 text-sm text-text-primary">
+          <input type="checkbox" checked={selected.includes(category.code)}
+            onChange={() => onToggle(category.code)} className="h-4 w-4 accent-[var(--color-accent)]" />
+          {category.label}
+        </label>)}
+    </div>
+  </fieldset>;
+}
+
+// The Category groups shown above `questionId`; `null` gives the unplaced groups.
+function categoryGroupsPlacedAt(
+  placement: ReturnType<typeof placeHolisticChallengeCategories>,
+  questionId: number | null,
+) {
+  return HOLISTIC_CHALLENGE_CATEGORY_GROUPS.filter(({ group }) => placement[group] === questionId);
+}
+
+// `children` (the placed Category groups) render above the Question, so they are ticked first.
+function NotesAnswerField({ question, answer, validationError, validationErrorId, disabled, onTextarea,
+  onAnswerChange, children }: {
+  question: NotesEditorProps["questions"][number];
+  answer: string | undefined;
   validationError: string;
   validationErrorId: string;
-  canRetry: boolean;
-  editingSubmitted: boolean;
+  disabled: boolean;
+  onTextarea: (questionId: number, element: HTMLTextAreaElement | null) => void;
+  onAnswerChange: (questionId: number, answer: string) => void;
+  children: ReactNode;
+}) {
+  const invalid = Boolean(validationError && !answer?.trim());
+  return <div className="space-y-3">
+    {children}
+    <label className="block space-y-1 text-sm font-semibold text-text-secondary">
+      {question.text} <span aria-hidden="true" className="text-accent">*</span>
+      <span className="sr-only">required</span>
+      <textarea ref={(element) => onTextarea(question.questionId, element)} aria-label={question.text}
+      aria-invalid={invalid} aria-describedby={invalid ? validationErrorId : undefined} rows={4}
+      disabled={disabled}
+      value={answer ?? ""}
+      onChange={(event) => onAnswerChange(question.questionId, event.target.value)}
+      className="w-full resize-y rounded-md border border-border bg-bg-card p-3 font-normal text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20" />
+    </label>
+  </div>;
+}
+
+// `actions` renders below the fields: the Notes errors and Submit/Save controls.
+function EditableNotesForm({ questions, value, validationError, validationErrorId, missingCategories,
+  categoryErrorId, disabled, onAnswerChange, onCategoryToggle, onTextarea, onCategoryFieldset, actions }: {
+  questions: NotesEditorProps["questions"];
+  value: NotesValue;
+  validationError: string;
+  validationErrorId: string;
+  missingCategories: HolisticChallengeCategoryGroup[];
+  categoryErrorId: string;
   disabled: boolean;
   onAnswerChange: (questionId: number, answer: string) => void;
+  onCategoryToggle: (code: HolisticChallengeCategoryCode) => void;
   onTextarea: (questionId: number, element: HTMLTextAreaElement | null) => void;
-  onRetry: () => void;
-  onSaveCorrection: () => Promise<void>;
-  onCancelCorrection: () => void;
-  onSubmit: () => Promise<void>;
+  onCategoryFieldset: (group: HolisticChallengeCategoryGroup, element: HTMLFieldSetElement | null) => void;
+  actions: ReactNode;
 }) {
+  const placement = placeHolisticChallengeCategories(questions);
+  const fieldset = (group: CategoryGroup) => <ChallengeCategoryFieldset key={group.group} group={group}
+    selected={value.challengeCategories} invalid={missingCategories.includes(group.group)}
+    errorId={categoryErrorId} disabled={disabled} onToggle={onCategoryToggle} onFieldset={onCategoryFieldset} />;
+  const unplaced = categoryGroupsPlacedAt(placement, null);
   return <>
-    {questions.map((question) => {
-      const invalid = Boolean(validationError && !answers[question.questionId]?.trim());
-      return <label key={question.questionId} className="block space-y-1 text-sm font-semibold text-text-secondary">
-        {question.text} <span aria-hidden="true" className="text-accent">*</span>
-        <span className="sr-only">required</span>
-        <textarea ref={(element) => onTextarea(question.questionId, element)} aria-label={question.text}
-        aria-invalid={invalid} aria-describedby={invalid ? validationErrorId : undefined} rows={4}
-        disabled={disabled}
-        value={answers[question.questionId] ?? ""}
-        onChange={(event) => onAnswerChange(question.questionId, event.target.value)}
-        className="w-full resize-y rounded-md border border-border bg-bg-card p-3 font-normal text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20" />
-      </label>;
-    })}
-    <NotesEditorActions status={status} error={error} validationError={validationError}
-      validationErrorId={validationErrorId} canRetry={canRetry} editingSubmitted={editingSubmitted}
-      disabled={disabled}
-      onRetry={onRetry} onSaveCorrection={onSaveCorrection} onCancelCorrection={onCancelCorrection} onSubmit={onSubmit} />
+    {questions.map((question) => <NotesAnswerField key={question.questionId} question={question}
+      answer={value.answers[question.questionId]} validationError={validationError}
+      validationErrorId={validationErrorId} disabled={disabled} onTextarea={onTextarea}
+      onAnswerChange={onAnswerChange}>
+      {categoryGroupsPlacedAt(placement, question.questionId).map(fieldset)}
+    </NotesAnswerField>)}
+    {unplaced.length > 0 && <div className="space-y-3">
+      <h3 className="text-sm font-semibold text-text-secondary">Challenge Categories</h3>
+      {unplaced.map(fieldset)}
+    </div>}
+    {actions}
   </>;
 }
 
-function NotesEditorActions({ status, error, validationError, validationErrorId, canRetry,
-  editingSubmitted, onRetry, onSaveCorrection,
+function NotesEditorActions({ status, error, validationError, validationErrorId, categoryError,
+  categoryErrorId, canRetry, editingSubmitted, onRetry, onSaveCorrection,
   disabled, onCancelCorrection, onSubmit }: {
   status: NotesEditorStatus;
   error: string;
   validationError: string;
   validationErrorId: string;
+  categoryError: string;
+  categoryErrorId: string;
   canRetry: boolean;
   editingSubmitted: boolean;
   disabled: boolean;
@@ -805,25 +939,44 @@ function NotesEditorActions({ status, error, validationError, validationErrorId,
   onCancelCorrection: () => void;
   onSubmit: () => Promise<void>;
 }) {
+  const busy = disabled || status === "saving";
   return <div className="flex min-h-11 flex-wrap items-center justify-end gap-3" aria-live="polite">
-    {validationError && <span id={validationErrorId} role="alert" className="text-sm text-danger">
-      {validationError}
-    </span>}
-    {status === "failed" && <>
-      {editingSubmitted && <span className="text-sm text-danger">{error}</span>}
-      {canRetry && <Button type="button" variant="secondary" className="text-xs" disabled={disabled} onClick={onRetry}>Retry</Button>}
-    </>}
+    <NotesEditorAlert id={validationErrorId} message={validationError} />
+    <NotesEditorAlert id={categoryErrorId} message={categoryError} />
+    {status === "failed" && <NotesSaveFailure error={error} showError={editingSubmitted} canRetry={canRetry}
+      disabled={disabled} onRetry={onRetry} />}
     {editingSubmitted
       ? <><Button type="button" variant="ghost" disabled={disabled} onClick={onCancelCorrection}>Cancel</Button>
-          <Button type="button" onClick={() => void onSaveCorrection()} disabled={disabled || status === "saving"}>
+          <Button type="button" onClick={() => void onSaveCorrection()} disabled={busy}>
             <Save aria-hidden="true" className="h-4 w-4" />
             Save Changes
           </Button></>
-      : <Button type="button" onClick={() => void onSubmit()} disabled={disabled || status === "saving"}>
+      : <Button type="button" onClick={() => void onSubmit()} disabled={busy}>
           <Send aria-hidden="true" className="h-4 w-4" />
           Submit Notes
         </Button>}
   </div>;
+}
+
+function NotesEditorAlert({ id, message }: { id: string; message: string }) {
+  if (!message) return null;
+  return <span id={id} role="alert" className="text-sm text-danger">
+    {message}
+  </span>;
+}
+
+// Correction mode shows the save error inline; draft mode shows it in the save state.
+function NotesSaveFailure({ error, showError, canRetry, disabled, onRetry }: {
+  error: string;
+  showError: boolean;
+  canRetry: boolean;
+  disabled: boolean;
+  onRetry: () => void;
+}) {
+  return <>
+    {showError && <span className="text-sm text-danger">{error}</span>}
+    {canRetry && <Button type="button" variant="secondary" className="text-xs" disabled={disabled} onClick={onRetry}>Retry</Button>}
+  </>;
 }
 
 type PhaseStage = "Completed" | "Open" | "Skipped" | "Locked";
@@ -1466,6 +1619,8 @@ function AdminContextBlocks({ context }: { context: OpenSelectedPhase["context"]
       <h4 className="text-sm font-semibold text-success">{item.label}</h4>
       <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-text-primary">{item.content}</p>
     </div>)}
+    {context.challengeCategories &&
+      <SubmittedChallengeCategories codes={context.challengeCategories} headingLevel={4} />}
   </div>;
 }
 
@@ -1653,6 +1808,7 @@ function AdminSubmittedNotes({ notes, questions }: {
           {answer.answer}
         </blockquote>
       </div>)}
+      <SubmittedChallengeCategories codes={notes.challengeCategories ?? []} headingLevel={4} />
     </div>
     <AdminInfoAlert icon={Lock} title="Read-only for Admins">
       Only the author while currently assigned can edit submitted Notes.
@@ -1719,6 +1875,7 @@ function StudentContextBody({ context }: { context: OpenSelectedPhase["context"]
         <dd className="mt-1 whitespace-pre-wrap text-sm leading-6 text-text-primary">{item.content}</dd>
       </div>)}
     </dl>
+    {context.challengeCategories && <SubmittedChallengeCategories codes={context.challengeCategories} />}
     {context.lastUpdatedAt && <p className="font-mono text-xs text-text-muted">
       Last updated {formatDate(context.lastUpdatedAt)}
     </p>}

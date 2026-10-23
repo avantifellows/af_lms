@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { validateHolisticChallengeCategories } from "@/lib/holistic-challenge-categories";
 import { saveHolisticNotes } from "@/lib/holistic-notes";
 import { getHolisticStudentPhase } from "@/lib/holistic-student-phase";
 import { requireHolisticMentorshipAccess } from "@/lib/holistic-mentorship";
@@ -105,8 +106,14 @@ export async function PATCH(
 
   const expectedRevision = nonNegativeInteger(value.expected_revision);
   const answers = parseAnswers(value.answers);
-  if (expectedRevision === null || !answers) {
+  if (expectedRevision === null || !answers || !Array.isArray(value.challenge_categories)) {
     return NextResponse.json({ error: "Invalid Notes" }, { status: 422 });
+  }
+  // Submit / Edit notes check both groups in the save, after its token, state
+  // and every-answer checks; here every mode rejects unknown or mixed codes.
+  const challengeCategories = validateHolisticChallengeCategories(value.challenge_categories, { final: false });
+  if (!challengeCategories.ok) {
+    return NextResponse.json({ error: challengeCategories.error }, { status: 422 });
   }
   const currentTokens = currentRevisionTokens(value, mode);
   if (!currentTokens) {
@@ -123,6 +130,7 @@ export async function PATCH(
     actorUserId: access.actorUserId!,
     expectedRevision,
     answers,
+    challengeCategories: challengeCategories.codes,
     ...currentTokens,
   });
   return result.ok
