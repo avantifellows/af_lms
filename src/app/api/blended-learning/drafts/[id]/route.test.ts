@@ -23,18 +23,21 @@ const PERMISSIONS: Record<string, { role: string; read_only: boolean; user_id: n
   [TEACHER]: { role: "teacher", read_only: false, user_id: 40 },
 };
 // Active current-year Mappings: student → Mentor user id.
-const MAPPINGS: Record<number, number> = { 501: 9001, 502: 9001, 503: 9001, 504: 9001, 505: 9001, 601: 9002 };
+const MAPPINGS: Record<number, number> = { 501: 9001, 502: 9001, 503: 9001, 504: 9001, 505: 9001, 506: 9001, 601: 9002 };
 // Drafts, each with its active (queued or running) Transcription Request, if any.
-const DRAFTS: Record<number, { student_id: number; state: string; request_state: string | null; etl_run_id: string | null }> = {
-  // Queued, and the wake never reached ETL.
-  41: { student_id: 501, state: "transcribing", request_state: "queued", etl_run_id: null },
+// `request_stale`: the request was created more than 10 minutes ago.
+const DRAFTS: Record<number, { student_id: number; state: string; request_state: string | null; request_stale: boolean | null }> = {
+  // Still queued after 10 minutes.
+  41: { student_id: 501, state: "transcribing", request_state: "queued", request_stale: true },
   // ETL has picked it up.
-  42: { student_id: 502, state: "transcribing", request_state: "running", etl_run_id: "run-77" },
-  43: { student_id: 503, state: "failed", request_state: null, etl_run_id: null },
-  44: { student_id: 504, state: "ready", request_state: null, etl_run_id: null },
-  45: { student_id: 505, state: "discarded", request_state: null, etl_run_id: null },
+  42: { student_id: 502, state: "transcribing", request_state: "running", request_stale: true },
+  43: { student_id: 503, state: "failed", request_state: null, request_stale: null },
+  44: { student_id: 504, state: "ready", request_state: null, request_stale: null },
+  45: { student_id: 505, state: "discarded", request_state: null, request_stale: null },
+  // Queued under 10 minutes ago: waiting its turn.
+  46: { student_id: 506, state: "transcribing", request_state: "queued", request_stale: false },
   // Another Mentor's Mentee.
-  61: { student_id: 601, state: "transcribing", request_state: "queued", etl_run_id: null },
+  61: { student_id: 601, state: "transcribing", request_state: "queued", request_stale: true },
 };
 
 beforeEach(() => {
@@ -72,7 +75,8 @@ async function status(draftId: string) {
 
 describe("GET /api/blended-learning/drafts/[id]", () => {
   it.each([
-    ["a transcribing draft whose wake never reached ETL offers Retry drafting", "41", "transcribing", true],
+    ["a transcribing draft queued over 10 minutes ago offers Retry drafting", "41", "transcribing", true],
+    ["a transcribing draft queued under 10 minutes ago offers no retry", "46", "transcribing", false],
     ["a transcribing draft ETL has picked up offers no retry", "42", "transcribing", false],
     ["a failed draft offers Retry drafting", "43", "failed", true],
     ["a ready draft offers no retry", "44", "ready", false],

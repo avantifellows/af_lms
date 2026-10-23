@@ -56,7 +56,7 @@ class FakeXhr {
 const mockFetch = vi.fn();
 let sent: { url: string; body: unknown }[];
 
-function givenApi(draftStatus = 201, draftBody: unknown = { draftId: 41, delivery: "skipped" }) {
+function givenApi(draftStatus = 201, draftBody: unknown = { draftId: 41 }) {
   sent = [];
   mockFetch.mockImplementation(async (url: string, init?: RequestInit) => {
     const body = init?.body ? JSON.parse(String(init.body)) : null;

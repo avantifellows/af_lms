@@ -11,5 +11,5 @@ export const POST = withBlendedLearning("upload", async (request, { access, id }
 
   const result = await createDraft(access, id, parsed.body, getTodayIST());
   if (!result.ok) return failureResponse(result);
-  return NextResponse.json({ draftId: result.draftId, delivery: result.delivery }, { status: 201 });
+  return NextResponse.json({ draftId: result.draftId }, { status: 201 });
 });

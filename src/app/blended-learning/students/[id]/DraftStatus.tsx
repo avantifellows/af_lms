@@ -13,7 +13,7 @@ import type { DraftState } from "@/lib/blended-learning-drafts";
 // there. The log page passes `onReady` to open the ready draft in place. A draft that is no longer open
 // (discarded or saved elsewhere) disappears.
 // Those who can manage drafts (not read-only) can retry a failed draft or one
-// whose wake never reached ETL, and discard any open draft. Those who can log
+// still queued after 10 minutes, and discard any open draft. Those who can log
 // open a ready draft for review. Everyone else sees those buttons disabled.
 
 const DRAFT_POLL_MS = 15_000;

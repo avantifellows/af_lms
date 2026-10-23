@@ -148,7 +148,7 @@ describe("DraftStatus retry and discard", () => {
     expect(screen.getByText("Drafting failed")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Discard" })).toBeInTheDocument();
 
-    answer({ id: 43, state: "transcribing", retryOffered: false, delivery: "sent" });
+    answer({ id: 43, state: "transcribing", retryOffered: false });
     await userEvent.click(screen.getByRole("button", { name: "Retry" }));
 
     expect(mockFetch).toHaveBeenCalledWith("/api/blended-learning/drafts/43/retry", { method: "POST" });
@@ -156,10 +156,10 @@ describe("DraftStatus retry and discard", () => {
     expect(screen.queryByRole("button", { name: /Retry/ })).not.toBeInTheDocument();
   });
 
-  it("offers Retry drafting on a transcribing draft whose wake never reached ETL", async () => {
+  it("offers Retry drafting on a transcribing draft still queued after 10 minutes", async () => {
     render(<DraftStatus draftId={41} initialState="transcribing" initialRetryOffered canManage />);
 
-    answer({ id: 41, state: "transcribing", retryOffered: true, delivery: "skipped" });
+    answer({ id: 41, state: "transcribing", retryOffered: true });
     await userEvent.click(screen.getByRole("button", { name: "Retry drafting" }));
 
     expect(mockFetch).toHaveBeenCalledWith("/api/blended-learning/drafts/41/retry", { method: "POST" });
@@ -167,7 +167,7 @@ describe("DraftStatus retry and discard", () => {
     expect(screen.getByRole("button", { name: "Retry drafting" })).toBeInTheDocument();
   });
 
-  it("offers only Discard on a ready draft, and on a transcribing draft ETL has picked up", () => {
+  it("offers only Discard on a ready draft, and on a transcribing draft that is not stuck", () => {
     const { unmount } = render(<DraftStatus draftId={44} initialState="ready" canManage />);
     expect(screen.getByRole("button", { name: "Discard" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Retry/ })).not.toBeInTheDocument();

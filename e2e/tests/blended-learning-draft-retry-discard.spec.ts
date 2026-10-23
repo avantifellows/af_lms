@@ -6,7 +6,7 @@ import { BLENDED_MENTOR_A, MENTEES, fullName } from "../helpers/blended-learning
 
 // Retry or discard a stuck or failed Conversation Draft (#450). etl-next is
 // absent in e2e, so the wake is skipped and a retried request stays queued;
-// the wake outcomes and the same-key re-wake are covered by the route tests.
+// the wake call itself is covered by the route tests.
 // Each test gives Ira (A1, no draft) a draft and removes it afterwards; Rohan
 // (A6) keeps the fixture's failed draft for the read-only checks.
 const BLENDED_ADMIN_READ_ONLY = {
@@ -67,6 +67,21 @@ async function giveIraADraft(state: "ready" | "failed"): Promise<number> {
       ]
     );
     return Number(inserted.rows[0].id);
+  } finally {
+    await pool.end();
+  }
+}
+
+// Age a draft's queued request past the 10 minutes after which "Retry
+// drafting" is offered.
+async function ageQueuedRequest(draftId: number) {
+  const pool = getTestPool();
+  try {
+    await pool.query(
+      `UPDATE blended_learning_transcription_requests SET inserted_at = now() - interval '11 minutes'
+       WHERE draft_id = $1 AND state = 'queued'`,
+      [draftId]
+    );
   } finally {
     await pool.end();
   }
@@ -135,20 +150,22 @@ for (const { label, viewport, entryRole } of VIEWPORTS) {
 
       await panel.getByRole("button", { name: "Retry", exact: true }).click();
       await expect(panel.getByText("Drafting from the Call Recording")).toBeVisible();
-      // ETL is unconfigured here, so the new request waits, queued with no run.
-      await expect(panel.getByRole("button", { name: "Retry drafting" })).toBeVisible();
+      // ETL is unconfigured here, so the new request waits, queued. A request
+      // waiting its turn offers no retry.
+      await expect(panel.getByRole("button", { name: /Retry/ })).toHaveCount(0);
       const retried = await draftRow(draftId);
       expect(retried.state).toBe("transcribing");
       expect(retried.requests.map((request) => request.state)).toEqual(["queued"]);
 
-      // Retrying a wake that never arrived reuses that request.
-      await panel.getByRole("button", { name: "Retry drafting" }).click();
-      await expect(panel.getByText("Asked to draft it again.")).toBeVisible();
-      expect((await draftRow(draftId)).requests).toEqual(retried.requests);
-
-      // The page loads the offer too, not only the polls.
+      // Still queued after 10 minutes: the page offers Retry drafting, which
+      // wakes the same request again.
+      await ageQueuedRequest(draftId);
       await page.reload();
-      await expect(draftPanel(page).getByRole("button", { name: "Retry drafting" })).toBeVisible();
+      const stuck = draftPanel(page);
+      await expectTapTarget(stuck.getByRole("button", { name: "Retry drafting" }));
+      await stuck.getByRole("button", { name: "Retry drafting" }).click();
+      await expect(stuck.getByText("Asked to draft it again.")).toBeVisible();
+      expect((await draftRow(draftId)).requests).toEqual(retried.requests);
     });
 
     test("discarding a failed draft removes the draft panel", async ({ page }) => {

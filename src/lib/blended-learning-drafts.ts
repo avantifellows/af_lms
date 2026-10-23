@@ -85,8 +85,6 @@ export async function issueRecordingUpload(
 // The part of a recording key after the Student's prefix: `{uuid}.{ext}`.
 const RECORDING_FILE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(mp3|m4a|wav)$/;
 
-export type WakeDelivery = "sent" | "skipped" | "ambiguous" | "rejected";
-
 // The content type a recording was uploaded with, or null for a key that is
 // not under this Student's recordings prefix.
 function recordingKeyContentType(studentId: number, key: unknown): string | null {
@@ -110,7 +108,7 @@ export async function createDraft(
   studentId: number,
   raw: unknown,
   today: string
-): Promise<{ ok: true; draftId: number; delivery: WakeDelivery } | Failure> {
+): Promise<{ ok: true; draftId: number } | Failure> {
   const opened = await openUpload(access, studentId, raw);
   if (!opened.ok) return opened;
   const { body } = opened;
@@ -171,19 +169,21 @@ export async function createDraft(
     throw error;
   }
 
-  const delivery = await wakeTranscription(created.requestKey);
-  return { ok: true, draftId: created.draftId, delivery };
+  await wakeTranscription(created.requestKey);
+  return { ok: true, draftId: created.draftId };
 }
 
 // --- Waking etl-next ---------------------------------------------------------
 
 // Ask etl-next to drain one queued Transcription Request, the way Holistic
-// Profile regeneration does. Never throws on delivery problems.
-async function wakeTranscription(requestKey: string): Promise<WakeDelivery> {
+// Profile regeneration does. Never throws: if the wake fails the request
+// stays queued, and "Retry drafting" wakes it again. etl-next derives the run
+// id from the request key, so a repeated wake is a no-op.
+async function wakeTranscription(requestKey: string): Promise<void> {
   const base = process.env.BLENDED_LEARNING_ETL_URL?.trim().replace(/\/+$/, "");
   const token = process.env.BLENDED_LEARNING_ETL_TOKEN?.trim();
   const environment = process.env.APP_ENV;
-  if (!base || !token || (environment !== "staging" && environment !== "production")) return "skipped";
+  if (!base || !token || (environment !== "staging" && environment !== "production")) return;
 
   let response: Response;
   try {
@@ -197,33 +197,9 @@ async function wakeTranscription(requestKey: string): Promise<WakeDelivery> {
       }
     );
   } catch {
-    // It may or may not have arrived; the request stays queued for a retry.
-    return "ambiguous";
+    return;
   }
-  if (response.ok) return "sent";
-  const permanentRejection = response.status >= 400 && response.status < 500 && response.status !== 408 && response.status !== 429;
-  if (!permanentRejection) return "ambiguous";
-
-  // ETL refused it for good: fail the request, and the draft if nothing has
-  // moved it on, so the Mentor sees "Drafting failed" and can retry.
-  await withTransaction(async (client) => {
-    const failed = await client.query<{ draft_id: number | string }>(
-      `UPDATE blended_learning_transcription_requests
-       SET state = $2, etl_run_id = $3, error_code = $4, error_message = $5, updated_at = now()
-       WHERE request_key = $1 AND state = 'queued' AND etl_run_id IS NULL
-       RETURNING draft_id`,
-      [requestKey, "failed", `rejected-${requestKey}`, "enqueue_rejected", "ETL rejected the transcription request"]
-    );
-    for (const row of failed.rows) {
-      await client.query(
-        `UPDATE blended_learning_conversation_drafts
-         SET state = $2, updated_at = now()
-         WHERE id = $1 AND state = 'transcribing'`,
-        [Number(row.draft_id), "failed"]
-      );
-    }
-  });
-  return "rejected";
+  if (!response.ok) console.error("[blended-learning] etl-next wake failed", { status: response.status });
 }
 
 // --- Draft status, retry and discard ---------------------------------------
@@ -237,7 +213,8 @@ type DraftRow = {
   state: DraftState;
   request_key: string | null;
   request_state: string | null;
-  etl_run_id: string | null;
+  // The active request was created more than 10 minutes ago.
+  request_stale: boolean | null;
 };
 
 // One draft with its active (queued or running) Transcription Request, if
@@ -246,7 +223,8 @@ async function readDraft(access: BlendedLearningAccess, draftId: number): Promis
   if (!Number.isSafeInteger(draftId) || draftId <= 0) return null;
   const rows = await query<DraftRow>(
     `SELECT draft.id, draft.student_id, draft.state,
-            request.request_key, request.state AS request_state, request.etl_run_id
+            request.request_key, request.state AS request_state,
+            (request.inserted_at < now() - interval '10 minutes') AS request_stale
      FROM blended_learning_conversation_drafts draft
      LEFT JOIN blended_learning_transcription_requests request
        ON request.draft_id = draft.id AND request.state IN ('queued', 'running')
@@ -259,20 +237,20 @@ async function readDraft(access: BlendedLearningAccess, draftId: number): Promis
   return draft;
 }
 
-// Transcribing, but its request is still queued with no ETL run: the wake
-// never reached ETL.
-function wakeNeverArrived(draft: DraftRow): boolean {
-  return draft.state === "transcribing" && draft.request_state === "queued" && draft.etl_run_id === null;
+// Transcribing, but its request has waited in the queue for over 10 minutes
+// without etl-next starting it. A younger one is still waiting its turn.
+function queuedForEtl(draft: DraftRow): boolean {
+  return draft.state === "transcribing" && draft.request_state === "queued" && draft.request_stale === true;
 }
 
 function draftStatus(access: BlendedLearningAccess, draft: DraftRow): DraftStatus {
-  const retryable = draft.state === "failed" || wakeNeverArrived(draft);
+  const retryable = draft.state === "failed" || queuedForEtl(draft);
   return { id: Number(draft.id), state: draft.state, retryOffered: retryable && canBlendedLearning(access, "manage_draft") };
 }
 
 // One draft's state, for the detail page's polling. "Retry drafting" is
-// offered to those who can manage drafts when the draft failed, or when the
-// wake never reached ETL. Null when the draft is out of scope.
+// offered to those who can manage drafts when the draft failed, or when its
+// request is still queued after 10 minutes. Null when the draft is out of scope.
 export async function getDraftStatus(access: BlendedLearningAccess, draftId: number): Promise<DraftStatus | null> {
   const draft = await readDraft(access, draftId);
   return draft ? draftStatus(access, draft) : null;
@@ -282,19 +260,20 @@ class Conflict extends Error {}
 
 const NOT_RETRYABLE: Failure = { ok: false, status: 409, error: "This draft can't be retried now." };
 
-// "Retry drafting". A wake that never reached ETL is sent again with the same
-// request key. A failed draft gets a new Transcription Request and moves back
-// to transcribing in one transaction, then ETL is woken. Anything else is 409.
+// "Retry drafting". A request still queued after 10 minutes is woken again
+// with the same request key. A failed draft gets a new Transcription Request
+// and moves back to transcribing in one transaction, then ETL is woken.
+// Anything else is 409.
 export async function retryDrafting(
   access: BlendedLearningAccess,
   draftId: number
-): Promise<{ ok: true; draft: DraftStatus; delivery: WakeDelivery } | Failure> {
+): Promise<{ ok: true; draft: DraftStatus } | Failure> {
   if (!canBlendedLearning(access, "manage_draft")) return { ok: false, status: 403, error: "Forbidden" };
   const draft = await readDraft(access, draftId);
   if (!draft) return { ok: false, status: 404, error: "Not found" };
 
   let requestKey: string;
-  if (wakeNeverArrived(draft) && draft.request_key) {
+  if (queuedForEtl(draft) && draft.request_key) {
     requestKey = draft.request_key;
   } else if (draft.state === "failed") {
     try {
@@ -323,10 +302,10 @@ export async function retryDrafting(
     return NOT_RETRYABLE;
   }
 
-  const delivery = await wakeTranscription(requestKey);
+  await wakeTranscription(requestKey);
   const status = await getDraftStatus(access, draftId);
   if (!status) return { ok: false, status: 404, error: "Not found" };
-  return { ok: true, draft: status, delivery };
+  return { ok: true, draft: status };
 }
 
 // Discard an open draft (transcribing, ready or failed). That frees the Mentee
