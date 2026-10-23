@@ -629,6 +629,31 @@ test.describe("Holistic Mentorship release workflows", () => {
     health.forEach(expectBrowserHealth);
   });
 
+  test("Phase Setup shows which Question each Challenge Category group appears under", async ({
+    holisticAdminPage: page,
+  }) => {
+    await page.goto("/admin/holistic-mentorship");
+    await page.getByRole("tab", { name: "Phase Setup" }).click();
+    const phaseSetup = page.getByRole("region", { name: "Phase Setup" });
+    const phasePlan = phaseSetup.getByRole("navigation", { name: "Ordered Phase Plan" });
+    const academicHint = "Academic Challenge Categories appear under this question";
+    const nonAcademicHint = "Non-academic Challenge Categories appear under this question";
+    const question = (position: number) => phaseSetup.getByRole("textbox", { name: `Question ${position}`, exact: true });
+
+    await phasePlan.getByRole("button", { name: /Synthetic Grade 12 Active/ }).click();
+    await expect(question(2)).toHaveValue("Describe the academic challenges the student is facing.");
+    await expect(question(2)).toHaveAccessibleDescription(academicHint);
+    await expect(question(3)).toHaveValue("Describe any non-academic challenges the student mentioned.");
+    await expect(question(3)).toHaveAccessibleDescription(nonAcademicHint);
+    await expect(question(1)).toHaveAccessibleDescription("");
+
+    // No Question matches, so no hint shows; Mentors get the trailing Challenge Categories block.
+    await phasePlan.getByRole("button", { name: /Synthetic Grade 11 Active/ }).click();
+    await expect(question(1)).toHaveValue("Synthetic: What support will help next?");
+    await expect(question(1)).toHaveAccessibleDescription("");
+    await expect(phaseSetup.getByText(/Challenge Categories appear under this question/)).toHaveCount(0);
+  });
+
   test("Holistic Admin verifies progress, CSV, read-only drill-down, Phase setup, and regeneration", async ({
     holisticAdminPage,
   }) => {
