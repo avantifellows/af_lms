@@ -5,6 +5,7 @@ import { type Grade, type Student } from "./StudentTable";
 import { Modal, Button, FormSection } from "@/components/ui";
 import { UploadDocumentForm } from "@/components/documents/UploadDocumentForm";
 import { DocumentsList } from "@/components/documents/DocumentsList";
+import { ExamsTab } from "@/components/exams/ExamsTab";
 import {
   ANNUAL_FAMILY_INCOME_OPTIONS,
   BOARD_STREAM_OPTIONS,
@@ -209,14 +210,17 @@ export default function EditStudentModal({
   const phoneMode = registrationMode === PHONE_REGISTRATION_MODE;
   const approvedPhoneBackfill =
     isPhoneRegistrationStudent && registrationMode === APPROVED_REGISTRATION_MODE;
-  // Uniform sizes and documents are collected for physical-centre programs only; PMU
-  // (JNV NVS) Students get neither, so both are hidden under that program.
+  // Uniform sizes, documents and exam registrations are collected for
+  // physical-centre programs only; PMU (JNV NVS) Students get none of them,
+  // so all three are hidden under that program.
   const isPmuProgram = programId != null && Number(programId) === PMU_PROGRAM_ID;
   const [formData, setFormData] = useState(initialData);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
-  const [activeTab, setActiveTab] = useState<"details" | "documents">("details");
+  const [activeTab, setActiveTab] = useState<"details" | "exams" | "documents">(
+    "details",
+  );
   const [documentsRefresh, setDocumentsRefresh] = useState(0);
 
   // Save sits in a fixed footer while the errors sit in the scrolling body, so
@@ -489,6 +493,10 @@ export default function EditStudentModal({
         </Button>
       </div>
 
+      {/* Exams, Documents and uniform sizes are all collected for physical
+          centres only (#433, #434 — confirmed with the Programs team), so PMU
+          (JNV NVS) Students get no tab strip at all: Details is the whole
+          form. */}
       {!isPmuProgram && (
         <div role="tablist" aria-label="Edit student sections" className="flex border-b border-border px-6">
           <button
@@ -518,9 +526,25 @@ export default function EditStudentModal({
           >
             Documents
           </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "exams"}
+            onClick={() => setActiveTab("exams")}
+            disabled={studentPkId === null}
+            className={`min-h-[48px] px-4 py-3 text-sm font-bold uppercase tracking-wide transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+              activeTab === "exams"
+                ? "border-b-2 border-accent text-text-primary"
+                : "text-text-muted hover:text-text-primary"
+            }`}
+          >
+            Exams
+          </button>
         </div>
       )}
 
+      {/* A Student with no record id has nothing to hang exams or documents
+          on; both tabs are disabled in that case, so the form is what shows. */}
       {activeTab === "documents" && studentPkId !== null && !isPmuProgram ? (
         <div className="flex-1 space-y-6 overflow-y-auto px-6 py-5">
           <UploadDocumentForm
@@ -542,6 +566,12 @@ export default function EditStudentModal({
             />
           </div>
         </div>
+      ) : activeTab === "exams" && studentPkId !== null && !isPmuProgram ? (
+        <ExamsTab
+          studentId={studentPkId}
+          boardStream={student.board_stream}
+          onSaved={onSave}
+        />
       ) : (
         <form noValidate onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
           <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">

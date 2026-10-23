@@ -26,7 +26,7 @@ edges:
     condition: when working on teacher feedback setup, the feedback form, or its report
   - target: patterns/INDEX.md
     condition: when starting a task — check the pattern index for a matching pattern file
-last_updated: 2026-10-22
+last_updated: 2026-10-23
 ---
 
 # Session Bootstrap
@@ -40,6 +40,19 @@ Then read this file fully before doing anything else in this session.
 **Working:**
 - Alumni Manager role (ADR 0008): `alumni_manager` + feature `alumni` (admin and alumni_manager edit). Alumni are not Students: `canAccessAlumni(session, alumniId)` keys on `alumni.id` and the School they passed out from. `getUserPermission` resolves alumni roles to null, so every other gate denies them by default; alumni code uses `getAlumniPermission`. Alumni pages follow in a later PR. See `context/permissions.md`.
 - Alumni tab (admins and Alumni Managers, ADR 0008; Audience: physical centres only): School pages with alumni-program students or alumni show admins an "Alumni" tab; `/alumni` (with "Find an alumnus" by AFID or name → `/alumni/record/[alumniId]`) and `/alumni/[code]` give the same view to anyone with the `alumni` feature (an Alumni Manager's only pages). The tab listing pass-outs still to add (last Grade 12 year before the current academic year, in an alumni program — JNV CoE, Dakshana CoE, ENF CoE, Punjab CoE, JNV Nodal, Punjab Nodal — with no `alumni` row) and the School's existing alumni. The form checks answers (impossible → blocked; unusual → confirm) and saves through the DB Service (`POST /alumni` new, `PATCH /alumni/:id` existing; only changed, non-blank fields; never delete). Existing alumni are addressed by `alumni.id` (`/api/alumni/[alumniId]`), pass-outs by user id (`/api/alumni/pass-out/[userId]`). Code: `src/lib/alumni/*`, `src/components/alumni/*`, `src/app/api/alumni/*`, `src/app/alumni/*`. See `context/permissions.md`.
+- Edit Student has an Exams tab (after Documents) that records competitive-exam registrations per Student
+  (issue #434). Required exams open by Board Stream (PCM → JEE Mains, PCB → NEET, PCMB →
+  both) as removable suggestions; any other exam comes from a curated picker over the `exam`
+  table. Each row holds an application number, a password (hidden, with a Show toggle) and,
+  for JEE Mains only, the sittings applied for. The roster card tags every exam applied for
+  and lists them in an Exam Registrations table whose password column is always a mask — the
+  stored password reaches a browser only through the edit-gated Exams tab. Reads come from
+  Postgres; writes proxy to the DB Service's `/student-exam-record`. **Physical centres
+  only** (confirmed with the Programs team, 2026-10-23): PMU (JNV NVS) Students get no tab
+  strip at all, no exam tags or table on the roster card, no exam rows in the roster read,
+  and the API refuses them outright via `isPmuOnlyStudent`. Needs DB Service
+  `sessions_applied` (db-service PR #788, still open) deployed first. See
+  `context/student-addition.md` and `context/data-access.md` §2.
 - Edit Student and the roster card cover the same fields for physical centres (issue #431).
   Edit Student gained Contact & Address, Father, Mother, Guardian and Socio-economic
   sections — the twenty contact and household details the card already displayed — and the
