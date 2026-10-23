@@ -17,7 +17,7 @@ const mockQuery = vi.mocked(query);
 
 const MENTOR: BlendedLearningAccess = {
   kind: "mentor", role: "blended_mentor", readOnly: false,
-  actorEmail: "faizan@avantifellows.org", actorUserId: 9001, mentorUserId: 9001,
+  actorEmail: "faizan@avantifellows.org", mentorUserId: 9001,
 };
 
 type Rows = { profile: unknown[]; entries?: unknown[]; actionItems?: unknown[]; flags?: unknown[] };
@@ -136,9 +136,9 @@ describe("getMenteeDetail", () => {
         }),
       ],
       actionItems: [
-        { conversation_id: "10", id: "100", text: "Old open item", owner: "parent", due_on: null, status: "open" },
-        { conversation_id: "12", id: "120", text: "Revise optics", owner: "student", due_on: "2026-10-27", status: "open" },
-        { conversation_id: 12, id: 121, text: "Share notes", owner: "mentor", due_on: null, status: "done" },
+        { conversation_id: "10", id: "100", text: "Old open item", owner: "parent", status: "open" },
+        { conversation_id: "12", id: "120", text: "Revise optics", owner: "student", status: "open" },
+        { conversation_id: 12, id: 121, text: "Share notes", owner: "mentor", status: "done" },
       ],
       flags: [
         { conversation_id: "12", recipient: "emotional_wellbeing", comment: "Seemed anxious" },
@@ -162,8 +162,8 @@ describe("getMenteeDetail", () => {
         hasTranscript: true,
         photoCount: 2,
         actionItems: [
-          { id: 120, text: "Revise optics", owner: "student", dueOn: "2026-10-27", status: "open" },
-          { id: 121, text: "Share notes", owner: "mentor", dueOn: null, status: "done" },
+          { id: 120, text: "Revise optics", owner: "student", status: "open" },
+          { id: 121, text: "Share notes", owner: "mentor", status: "done" },
         ],
         flags: [
           { recipient: "emotional_wellbeing", comment: "Seemed anxious" },
@@ -184,14 +184,14 @@ describe("getMenteeDetail", () => {
         hasRecording: false,
         hasTranscript: false,
         photoCount: 0,
-        actionItems: [{ id: 100, text: "Old open item", owner: "parent", dueOn: null, status: "open" }],
+        actionItems: [{ id: 100, text: "Old open item", owner: "parent", status: "open" }],
         flags: [],
       },
     ]);
     // Only open items, newest Conversation first, dated by the Conversation.
     expect(detail?.openActionItems).toEqual([
-      { id: 120, text: "Revise optics", owner: "student", dueOn: "2026-10-27", agreedOn: "2026-10-20" },
-      { id: 100, text: "Old open item", owner: "parent", dueOn: null, agreedOn: "2026-10-12" },
+      { id: 120, text: "Revise optics", owner: "student", agreedOn: "2026-10-20" },
+      { id: 100, text: "Old open item", owner: "parent", agreedOn: "2026-10-12" },
     ]);
   });
 });

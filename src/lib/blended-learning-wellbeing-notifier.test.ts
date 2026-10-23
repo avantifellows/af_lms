@@ -16,8 +16,7 @@ const COMMENT = "Synthetic comment: please call her this week.";
 
 // The flag table, by id, with every column the notifier could read, including
 // the Conversation's summary and notes, which must never reach the email.
-type FlagRow = Record<string, unknown> & { notification_sent_at: string | null };
-let flags: Record<number, FlagRow>;
+let flags: Record<number, Record<string, unknown>>;
 
 function givenFlags() {
   flags = {
@@ -26,7 +25,6 @@ function givenFlags() {
       recipient: "emotional_wellbeing",
       comment: COMMENT,
       raised_by_email: "faizan@avantifellows.org",
-      notification_sent_at: null,
       student_id: 501,
       student_first_name: "Ira",
       student_last_name: "Sharma",
@@ -44,7 +42,6 @@ function givenFlags() {
       recipient: "physics",
       comment: "Synthetic: struggling with rotation.",
       raised_by_email: "faizan@avantifellows.org",
-      notification_sent_at: null,
       student_id: 501,
       student_first_name: "Ira",
       student_last_name: "Sharma",
@@ -60,13 +57,6 @@ function givenFlags() {
   };
   mockQuery.mockImplementation(async (sql: string, params?: unknown[]) => {
     const id = Number(params?.[0]);
-    if (sql.trim().startsWith("UPDATE blended_learning_mentor_flags")) {
-      // SET notification_sent_at = now() WHERE id = $1 AND notification_sent_at IS NULL
-      const flag = flags[id];
-      if (!flag || flag.notification_sent_at !== null) return [];
-      flag.notification_sent_at = "2026-10-22 06:00:01";
-      return [{ id }];
-    }
     if (sql.includes("FROM blended_learning_mentor_flags")) {
       return flags[id] ? [{ ...flags[id] }] : [];
     }
@@ -130,24 +120,19 @@ describe("notifyWellbeingFlag", () => {
     expect(everything).not.toContain(COMMENT);
   });
 
-  it("sets notification_sent_at on success, so a second call sends nothing", async () => {
-    expect(flags[41].notification_sent_at).toBeNull();
+  it("only reads the flag: it writes nothing back", async () => {
     expect(await notifyWellbeingFlag(41)).toBe("sent");
-    expect(flags[41].notification_sent_at).toBe("2026-10-22 06:00:01");
-
-    expect(await notifyWellbeingFlag(41)).toBe("skipped");
-    expect(sentEmails()).toHaveLength(1);
-    expect(flags[41].notification_sent_at).toBe("2026-10-22 06:00:01");
+    expect(mockQuery).toHaveBeenCalledTimes(1);
+    expect(mockQuery.mock.calls[0][0]).toMatch(/^\s*SELECT/);
   });
 
   it("sends nothing for a Physics, Chemistry or Maths flag or an unknown id", async () => {
     expect(await notifyWellbeingFlag(42)).toBe("skipped");
     expect(await notifyWellbeingFlag(999)).toBe("skipped");
     expect(sentEmails()).toEqual([]);
-    expect(flags[42].notification_sent_at).toBeNull();
   });
 
-  it("logs an SES failure without PII, does not throw and leaves the flag unsent", async () => {
+  it("logs an SES failure without PII and does not throw", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
     ses.on(SendEmailCommand).rejects(
       Object.assign(new Error("Email address is not verified: shalinijha@avantifellows.org, Ira Sharma"), {
@@ -156,7 +141,6 @@ describe("notifyWellbeingFlag", () => {
     );
 
     expect(await notifyWellbeingFlag(41)).toBe("failed");
-    expect(flags[41].notification_sent_at).toBeNull();
 
     expect(consoleError).toHaveBeenCalledTimes(1);
     const logged = JSON.stringify(consoleError.mock.calls);
@@ -178,14 +162,12 @@ describe("notifyWellbeingFlag", () => {
     vi.stubEnv(name, value);
     expect(await notifyWellbeingFlag(41)).toBe("skipped");
     expect(ses.calls()).toHaveLength(0);
-    expect(flags[41].notification_sent_at).toBeNull();
   });
 
   it("sends through ap-south-1 unless BLENDED_LEARNING_SES_REGION says otherwise", async () => {
     await notifyWellbeingFlag(41);
     expect(await ses.call(0).thisValue.config.region()).toBe("ap-south-1");
 
-    flags[41].notification_sent_at = null;
     vi.stubEnv("BLENDED_LEARNING_SES_REGION", "us-east-1");
     await notifyWellbeingFlag(41);
     expect(await ses.call(1).thisValue.config.region()).toBe("us-east-1");

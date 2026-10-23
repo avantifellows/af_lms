@@ -60,7 +60,7 @@ const MENTOR = {
   role: "blended_mentor",
   readOnly: false,
   actorEmail: "faizan@avantifellows.org",
-  actorUserId: 9001,
+ 
   mentorUserId: 9001,
 };
 const BLENDED_ADMIN = {
@@ -68,7 +68,7 @@ const BLENDED_ADMIN = {
   role: "blended_admin",
   readOnly: false,
   actorEmail: "juned@avantifellows.org",
-  actorUserId: 12,
+ 
 };
 
 function signedInAs(email: string) {

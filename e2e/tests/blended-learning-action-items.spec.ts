@@ -55,7 +55,6 @@ type ActionItemRow = {
   position: number;
   text: string;
   owner: string;
-  due_on: string | null;
   status: string;
   completed_by_conversation_id: number | null;
   completed_by_email: string | null;
@@ -66,7 +65,7 @@ async function actionItems(studentId: number): Promise<ActionItemRow[]> {
   return withPool(async (pool) => {
     const result = await pool.query<ActionItemRow>(
       `SELECT id::int AS id, conversation_id::int AS conversation_id, position, text, owner,
-              due_on::text AS due_on, status, completed_by_conversation_id::int AS completed_by_conversation_id,
+              status, completed_by_conversation_id::int AS completed_by_conversation_id,
               completed_by_email, (completed_at IS NOT NULL) AS completed
        FROM blended_learning_action_items
        WHERE student_id = $1
@@ -171,8 +170,8 @@ for (const { label, key, viewport } of VIEWPORTS) {
       const savedId = (await conversationIds(studentIds[mentee.key])).at(-1)!;
       const rows = await actionItems(studentIds[mentee.key]);
       expect(rows.filter((row) => row.conversation_id === savedId)).toEqual([
-        expect.objectContaining({ position: 1, owner: "student", text: first, due_on: null, status: "open" }),
-        expect.objectContaining({ position: 2, owner: "parent", text: second, due_on: null, status: "open" }),
+        expect.objectContaining({ position: 1, owner: "student", text: first, status: "open" }),
+        expect.objectContaining({ position: 2, owner: "parent", text: second, status: "open" }),
       ]);
       expect(itemByText(rows, toTick.text)).toMatchObject({
         status: "done",

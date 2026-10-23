@@ -81,7 +81,7 @@ import { LogEntryForm, type ReviewDraft } from "./LogEntryForm";
 
 const TODAY = "2026-10-22";
 const OPEN_ITEMS = [
-  { id: 7, text: "Bring the admit card", owner: "student" as const, dueOn: null, agreedOn: "2026-10-01" },
+  { id: 7, text: "Bring the admit card", owner: "student" as const, agreedOn: "2026-10-01" },
 ];
 const MENTEE: MenteeRow = {
   studentId: 501,
@@ -218,7 +218,6 @@ describe("LogEntryForm: Action items", () => {
     expect(screen.getByLabelText("Action item 2")).toHaveValue("");
     const owners = within(screen.getByLabelText("Who does action item 1")).getAllByRole("option");
     expect(owners.map((option) => option.textContent)).toEqual(["Student", "Mentor", "Parent"]);
-    // Action Items take no due date.
     expect(screen.queryByLabelText(/Due/)).not.toBeInTheDocument();
   });
 
@@ -239,7 +238,7 @@ describe("LogEntryForm: Action items", () => {
 
     answer({ entry: { id: 9 }, mentee: MENTEE });
     await save();
-    expect(sentBody().actionItems).toEqual([{ owner: "mentor", text: "Share the notes", dueOn: null }]);
+    expect(sentBody().actionItems).toEqual([{ owner: "mentor", text: "Share the notes" }]);
   });
 });
 
@@ -269,7 +268,7 @@ describe("LogEntryForm: Conversation", () => {
       durationMinutes: 30,
       summary: "Talked about the mock test.",
       notesHtml: "",
-      actionItems: [{ owner: "mentor", text: "Share the notes", dueOn: null }],
+      actionItems: [{ owner: "mentor", text: "Share the notes" }],
       photoKeys: [],
       flags: [],
       completeActionItemIds: [],
@@ -511,7 +510,7 @@ describe("LogEntryForm: Attempt", () => {
 });
 
 describe("LogEntryForm: reviewing a draft", () => {
-  it("opens prefilled as a Conversation, without Items to Verify, and saves the draft", async () => {
+  it("opens prefilled as a Conversation and saves the draft", async () => {
     renderForm({ draft: DRAFT });
     expect(screen.getByRole("heading", { level: 1, name: "Review the draft for Asha Rao" })).toBeInTheDocument();
     expect(screen.queryByRole("radio", { name: "Attempt" })).not.toBeInTheDocument();
@@ -526,8 +525,6 @@ describe("LogEntryForm: reviewing a draft", () => {
     expect(screen.getByLabelText("Action item 1")).toHaveValue("Revise optics");
     expect(screen.queryByLabelText("Action item 2")).not.toBeInTheDocument();
 
-    expect(screen.queryByRole("region", { name: "Items to Verify" })).not.toBeInTheDocument();
-
     answer({ entry: { id: 12 }, mentee: MENTEE });
     await save();
 
@@ -538,7 +535,7 @@ describe("LogEntryForm: reviewing a draft", () => {
       spokeWith: "both",
       durationMinutes: 35,
       notesHtml: "<p>Drafted</p>",
-      actionItems: [{ owner: "student", text: "Revise optics", dueOn: null }],
+      actionItems: [{ owner: "student", text: "Revise optics" }],
       draftId: 44,
     });
     expect(await screen.findByRole("heading", { name: "Conversation saved" })).toBeInTheDocument();

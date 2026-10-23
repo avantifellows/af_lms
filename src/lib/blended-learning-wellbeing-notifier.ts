@@ -31,7 +31,6 @@ function sesConfig(): SesConfig | null {
 // Only what the email may say about the flag: no comment, summary or notes.
 type FlagEmailRow = {
   recipient: string;
-  notification_sent_at: string | null;
   student_id: number | string;
   student_first_name: string | null;
   student_last_name: string | null;
@@ -45,7 +44,7 @@ type FlagEmailRow = {
 
 async function readFlag(flagId: number): Promise<FlagEmailRow | null> {
   const rows = await query<FlagEmailRow>(
-    `SELECT flag.recipient, flag.notification_sent_at, flag.student_id,
+    `SELECT flag.recipient, flag.student_id,
             account.first_name AS student_first_name, account.last_name AS student_last_name,
             current_grade.number AS grade, program.name AS program_name,
             mentor.first_name AS mentor_first_name, mentor.last_name AS mentor_last_name,
@@ -100,7 +99,7 @@ export async function notifyWellbeingFlag(flagId: number): Promise<WellbeingNoti
   if (!config) return "skipped";
   try {
     const flag = await readFlag(flagId);
-    if (!flag || flag.recipient !== "emotional_wellbeing" || flag.notification_sent_at !== null) return "skipped";
+    if (!flag || flag.recipient !== "emotional_wellbeing") return "skipped";
 
     const { subject, body } = composeEmail(flag);
     const ses = new SESClient({
@@ -116,13 +115,6 @@ export async function notifyWellbeingFlag(flagId: number): Promise<WellbeingNoti
           Body: { Text: { Data: body, Charset: "UTF-8" } },
         },
       })
-    );
-    await query(
-      `UPDATE blended_learning_mentor_flags
-       SET notification_sent_at = now()
-       WHERE id = $1 AND notification_sent_at IS NULL
-       RETURNING id`,
-      [flagId]
     );
     return "sent";
   } catch (error) {

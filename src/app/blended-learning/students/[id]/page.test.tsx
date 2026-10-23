@@ -49,11 +49,11 @@ import MenteeDetailPage from "./page";
 
 const MENTOR = {
   kind: "mentor", role: "blended_mentor", readOnly: false,
-  actorEmail: "faizan@avantifellows.org", actorUserId: 9001, mentorUserId: 9001,
+  actorEmail: "faizan@avantifellows.org", mentorUserId: 9001,
 };
 const BLENDED_ADMIN = {
   kind: "admin", role: "blended_admin", readOnly: false,
-  actorEmail: "juned@avantifellows.org", actorUserId: 12,
+  actorEmail: "juned@avantifellows.org",
 };
 const READ_ONLY_ADMIN = { ...BLENDED_ADMIN, readOnly: true, actorEmail: "viewer@avantifellows.org" };
 
@@ -290,7 +290,7 @@ describe("MenteeDetailPage", () => {
     mockGetMenteeDetail.mockResolvedValue({
       ...MENTEE,
       openDraft: { id: 41, state: "ready" },
-      openActionItems: [{ id: 120, text: "Revise optics", owner: "student", dueOn: null, agreedOn: "2026-10-20" }],
+      openActionItems: [{ id: 120, text: "Revise optics", owner: "student", agreedOn: "2026-10-20" }],
     });
 
     await renderPage();
@@ -302,12 +302,12 @@ describe("MenteeDetailPage", () => {
     expect(items.compareDocumentPosition(history) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("lists Open Action Items with their owner and when they were agreed, never a due date", async () => {
+  it("lists Open Action Items with their owner and when they were agreed", async () => {
     signedInAs(MENTOR);
     mockGetMenteeDetail.mockResolvedValue({
       ...MENTEE,
       openActionItems: [
-        { id: 120, text: "Revise optics", owner: "student", dueOn: "2026-10-27", agreedOn: "2026-10-20" },
+        { id: 120, text: "Revise optics", owner: "student", agreedOn: "2026-10-20" },
       ],
     });
 
@@ -335,8 +335,8 @@ describe("MenteeDetailPage", () => {
           hasTranscript: true,
           photoCount: 2,
           actionItems: [
-            { id: 120, text: "Revise optics", owner: "student", dueOn: "2026-10-27", status: "open" },
-            { id: 121, text: "Share notes", owner: "mentor", dueOn: null, status: "done" },
+            { id: 120, text: "Revise optics", owner: "student", status: "open" },
+            { id: 121, text: "Share notes", owner: "mentor", status: "done" },
           ],
           flags: [
             { recipient: "emotional_wellbeing", comment: "Seemed anxious" },

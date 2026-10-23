@@ -12,7 +12,6 @@ export type Mode = "call" | "in_person";
 export type SpokeWith = "student" | "parent_or_sibling" | "both";
 // Keyed by field, e.g. `summary` or `actionItems.0.text`.
 export type FieldErrors = Record<string, string>;
-// No due date: the form doesn't take one, and Action Items are saved without it.
 // A row left without text is not sent.
 export type DraftActionItem = { key: number; owner: ActionItemOwner; text: string };
 // A switched-on Flag Recipient maps to its comment; off is absent.
@@ -21,8 +20,7 @@ export const FLAG_RECIPIENTS = Object.keys(FLAG_RECIPIENT) as FlagRecipient[];
 
 // A ready Conversation Draft, as the form opens it. Session details are those
 // the Mentor entered before uploading; `notesHtml` is the drafted notes with
-// their text escaped. The drafted Summary Tags, due dates and Items to Verify
-// are not used.
+// their text escaped.
 export type ReviewDraft = {
   id: number;
   occurredOn: string | null;
@@ -158,7 +156,7 @@ export function buildEntryPayload(
     durationMinutes: durationMinutes(values.duration),
     summary: values.summary,
     notesHtml: values.notesHtml,
-    actionItems: sentActionItems(values.actionItems).map((item) => ({ owner: item.owner, text: item.text, dueOn: null })),
+    actionItems: sentActionItems(values.actionItems).map((item) => ({ owner: item.owner, text: item.text })),
     photoKeys: photos.map((photo) => photo.s3Key),
     flags: raisedFlags(values.flags).map((recipient) => ({ recipient, comment: values.flags[recipient] || null })),
     completeActionItemIds: [...values.ticked],

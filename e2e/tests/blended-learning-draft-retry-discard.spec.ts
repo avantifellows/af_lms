@@ -48,10 +48,9 @@ async function giveIraADraft(state: "ready" | "failed"): Promise<number> {
     const inserted = await pool.query<{ id: string }>(
       `INSERT INTO blended_learning_conversation_drafts
          (student_id, program_id, academic_year, mentor_user_id, created_by_email, state,
-          call_recording_s3_key, recording_content_type, recording_byte_size,
-          transcript_s3_key, draft_summary, prompt_version, model_id, ready_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'audio/mpeg', 2048, $8, $9, $10, $11,
-         CASE WHEN $12 THEN now() ELSE NULL END)
+          call_recording_s3_key, recording_content_type,
+          transcript_s3_key, draft_summary, prompt_version, model_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'audio/mpeg', $8, $9, $10, $11)
        RETURNING id`,
       [
         studentId,
@@ -65,7 +64,6 @@ async function giveIraADraft(state: "ready" | "failed"): Promise<number> {
         ready ? "Synthetic drafted summary." : null,
         ready ? "fixture-v1" : null,
         ready ? "fixture-model" : null,
-        ready,
       ]
     );
     return Number(inserted.rows[0].id);

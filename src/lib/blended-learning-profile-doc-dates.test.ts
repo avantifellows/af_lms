@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 
-import { legacyLastContactOn } from "./blended-learning-legacy-last-contact";
 import { latestProfileDocConversationOn } from "./blended-learning-profile-doc-dates";
 
 // Synthetic Google Docs HTML exports: each Docs tab title is a class="title"
@@ -121,12 +120,5 @@ describe("latestProfileDocConversationOn", () => {
   it("reads a doc with no tabs at all", () => {
     expect(latestProfileDocConversationOn("<p>Sep 1, 2026</p><p>First call</p>", WINDOW)).toBe("2026-09-01");
     expect(latestProfileDocConversationOn("", WINDOW)).toBeNull();
-  });
-});
-
-describe("legacyLastContactOn", () => {
-  it("is the Profile Doc's latest dated conversation only; the Sheet month never counts", () => {
-    expect(legacyLastContactOn({ profileDocConversationOn: "2026-09-03", sheetMonth: "2026-10-01" })).toBe("2026-09-03");
-    expect(legacyLastContactOn({ profileDocConversationOn: null, sheetMonth: "2026-10-01" })).toBeNull();
   });
 });

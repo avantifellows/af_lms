@@ -86,7 +86,7 @@ CREATE TABLE blended_learning_student_links (
   student_id bigint NOT NULL CONSTRAINT blended_learning_student_links_student_id_fkey REFERENCES student(id),
   profile_doc_url text,
   screener_url text,
-  legacy_last_contact_month date,
+  legacy_last_contact_on date,
   inserted_at timestamp(0) NOT NULL DEFAULT now(),
   updated_at timestamp(0) NOT NULL DEFAULT now()
 );
@@ -99,9 +99,6 @@ ALTER TABLE blended_learning_student_links ADD CONSTRAINT bl_student_links_profi
 ALTER TABLE blended_learning_student_links ADD CONSTRAINT bl_student_links_screener_url_check
   CHECK (screener_url IS NULL OR screener_url ~ '^https://[^[:space:]]+$');
 
-ALTER TABLE blended_learning_student_links ADD CONSTRAINT bl_student_links_legacy_last_contact_month_check
-  CHECK (date_trunc('month', legacy_last_contact_month)::date = legacy_last_contact_month);
-
 -- 2 of 8: Blended Learning Conversation Drafts (20261022120100).
 CREATE TABLE blended_learning_conversation_drafts (
   id bigserial PRIMARY KEY,
@@ -109,7 +106,6 @@ CREATE TABLE blended_learning_conversation_drafts (
   program_id bigint NOT NULL CONSTRAINT blended_learning_conversation_drafts_program_id_fkey REFERENCES program(id),
   academic_year varchar(255) NOT NULL,
   mentor_user_id bigint NOT NULL CONSTRAINT blended_learning_conversation_drafts_mentor_user_id_fkey REFERENCES "user"(id),
-  created_by_user_id bigint CONSTRAINT blended_learning_conversation_drafts_created_by_user_id_fkey REFERENCES "user"(id),
   created_by_email varchar(255) NOT NULL,
   state varchar(255) NOT NULL,
   occurred_on date,
@@ -118,17 +114,12 @@ CREATE TABLE blended_learning_conversation_drafts (
   duration_minutes integer,
   call_recording_s3_key text NOT NULL,
   recording_content_type varchar(255) NOT NULL,
-  recording_byte_size bigint NOT NULL,
   transcript_s3_key text,
   draft_summary text,
-  draft_summary_tags text[],
   draft_action_items jsonb,
   draft_notes jsonb,
-  draft_items_to_verify jsonb,
-  detected_language varchar(255),
   prompt_version varchar(255),
   model_id varchar(255),
-  ready_at timestamp(0),
   discarded_at timestamp(0),
   inserted_at timestamp(0) NOT NULL DEFAULT now(),
   updated_at timestamp(0) NOT NULL DEFAULT now()
@@ -162,20 +153,11 @@ ALTER TABLE blended_learning_conversation_drafts ADD CONSTRAINT bl_conversation_
 ALTER TABLE blended_learning_conversation_drafts ADD CONSTRAINT bl_conversation_drafts_recording_content_type_check
   CHECK (recording_content_type ~ '^audio/');
 
-ALTER TABLE blended_learning_conversation_drafts ADD CONSTRAINT bl_conversation_drafts_recording_byte_size_check
-  CHECK (recording_byte_size > 0);
-
-ALTER TABLE blended_learning_conversation_drafts ADD CONSTRAINT bl_conversation_drafts_draft_summary_tags_check
-  CHECK (draft_summary_tags IS NULL OR cardinality(draft_summary_tags) <= 4);
-
 ALTER TABLE blended_learning_conversation_drafts ADD CONSTRAINT bl_conversation_drafts_draft_action_items_check
   CHECK (draft_action_items IS NULL OR jsonb_typeof(draft_action_items) = 'array');
 
 ALTER TABLE blended_learning_conversation_drafts ADD CONSTRAINT bl_conversation_drafts_draft_notes_check
   CHECK (draft_notes IS NULL OR jsonb_typeof(draft_notes) = 'array');
-
-ALTER TABLE blended_learning_conversation_drafts ADD CONSTRAINT bl_conversation_drafts_draft_items_to_verify_check
-  CHECK (draft_items_to_verify IS NULL OR jsonb_typeof(draft_items_to_verify) = 'array');
 
 ALTER TABLE blended_learning_conversation_drafts ADD CONSTRAINT bl_conversation_drafts_state_check
   CHECK (state IN ('transcribing', 'ready', 'failed', 'discarded', 'saved'));
@@ -189,7 +171,6 @@ ALTER TABLE blended_learning_conversation_drafts ADD CONSTRAINT bl_conversation_
       AND transcript_s3_key IS NOT NULL
       AND prompt_version IS NOT NULL
       AND model_id IS NOT NULL
-      AND ready_at IS NOT NULL
     )
   );
 
@@ -203,7 +184,6 @@ CREATE TABLE blended_learning_conversations (
   program_id bigint NOT NULL CONSTRAINT blended_learning_conversations_program_id_fkey REFERENCES program(id),
   academic_year varchar(255) NOT NULL,
   mentor_user_id bigint NOT NULL CONSTRAINT blended_learning_conversations_mentor_user_id_fkey REFERENCES "user"(id),
-  logged_by_user_id bigint CONSTRAINT blended_learning_conversations_logged_by_user_id_fkey REFERENCES "user"(id),
   logged_by_email varchar(255) NOT NULL,
   kind varchar(255) NOT NULL,
   occurred_on date NOT NULL,
@@ -299,47 +279,6 @@ CREATE TRIGGER bl_conversations_immutable
 BEFORE UPDATE OR DELETE ON blended_learning_conversations
 FOR EACH ROW EXECUTE FUNCTION blended_learning_protect_conversation();
 
-ALTER TABLE blended_learning_conversation_drafts
-  ADD COLUMN saved_conversation_id bigint,
-  ADD CONSTRAINT blended_learning_conversation_drafts_saved_conversation_id_fkey
-    FOREIGN KEY (saved_conversation_id, student_id) REFERENCES blended_learning_conversations(id, student_id);
-
-ALTER TABLE blended_learning_conversation_drafts ADD CONSTRAINT bl_conversation_drafts_saved_check
-  CHECK (state <> 'saved' OR saved_conversation_id IS NOT NULL);
-
--- Shared kind rule for records attached to a Conversation (Action Items,
--- Photos and Mentor Flags): they may reference only kind `conversation`.
-CREATE FUNCTION blended_learning_reject_attempt_reference()
-RETURNS trigger
-LANGUAGE plpgsql
-AS $$
-DECLARE
-  reference_column text;
-  referenced_id bigint;
-BEGIN
-  IF TG_NARGS = 0 THEN
-    RAISE EXCEPTION 'blended_learning_reject_attempt_reference needs at least one column name';
-  END IF;
-
-  FOR argument_index IN 0 .. TG_NARGS - 1 LOOP
-    reference_column := TG_ARGV[argument_index];
-    EXECUTE format('SELECT ($1).%I::bigint', reference_column) INTO referenced_id USING NEW;
-
-    IF referenced_id IS NOT NULL AND EXISTS (
-      SELECT 1
-      FROM blended_learning_conversations
-      WHERE id = referenced_id AND kind = 'attempt'
-    ) THEN
-      RAISE EXCEPTION '% must reference a Blended Learning Conversation, not an Attempt',
-        reference_column
-        USING ERRCODE = '23514';
-    END IF;
-  END LOOP;
-
-  RETURN NEW;
-END;
-$$;
-
 -- 4 of 8: Blended Learning Action Items (20261022120300).
 CREATE TABLE blended_learning_action_items (
   id bigserial PRIMARY KEY,
@@ -348,7 +287,6 @@ CREATE TABLE blended_learning_action_items (
   position integer NOT NULL,
   text text NOT NULL,
   owner varchar(255) NOT NULL,
-  due_on date,
   status varchar(255) NOT NULL DEFAULT 'open',
   completed_by_conversation_id bigint,
   completed_at timestamp(0),
@@ -396,51 +334,6 @@ ALTER TABLE blended_learning_action_items ADD CONSTRAINT bl_action_items_complet
     )
   );
 
-CREATE FUNCTION blended_learning_protect_action_item()
-RETURNS trigger
-LANGUAGE plpgsql
-AS $$
-BEGIN
-  IF TG_OP = 'UPDATE'
-    AND OLD.status = 'open'
-    AND NEW.status = 'done'
-    AND (
-      NEW.id,
-      NEW.conversation_id,
-      NEW.student_id,
-      NEW.position,
-      NEW.text,
-      NEW.owner,
-      NEW.due_on,
-      NEW.inserted_at
-    ) IS NOT DISTINCT FROM (
-      OLD.id,
-      OLD.conversation_id,
-      OLD.student_id,
-      OLD.position,
-      OLD.text,
-      OLD.owner,
-      OLD.due_on,
-      OLD.inserted_at
-    )
-  THEN
-    RETURN NEW;
-  END IF;
-
-  RAISE EXCEPTION 'Blended Learning Action Items may change only from open to done'
-    USING ERRCODE = '23514';
-END;
-$$;
-
-CREATE TRIGGER bl_action_items_immutable
-BEFORE UPDATE OR DELETE ON blended_learning_action_items
-FOR EACH ROW EXECUTE FUNCTION blended_learning_protect_action_item();
-
-CREATE TRIGGER bl_action_items_conversation_kind
-BEFORE INSERT OR UPDATE ON blended_learning_action_items
-FOR EACH ROW EXECUTE FUNCTION
-  blended_learning_reject_attempt_reference('conversation_id', 'completed_by_conversation_id');
-
 -- 5 of 8: Blended Learning Conversation Photos (20261022120400).
 CREATE TABLE blended_learning_conversation_photos (
   id bigserial PRIMARY KEY,
@@ -467,24 +360,6 @@ ALTER TABLE blended_learning_conversation_photos ADD CONSTRAINT bl_conversation_
 ALTER TABLE blended_learning_conversation_photos ADD CONSTRAINT bl_conversation_photos_byte_size_check
   CHECK (byte_size BETWEEN 1 AND 10485760);
 
-CREATE FUNCTION blended_learning_protect_conversation_photo()
-RETURNS trigger
-LANGUAGE plpgsql
-AS $$
-BEGIN
-  RAISE EXCEPTION 'Blended Learning Conversation Photos are append-only'
-    USING ERRCODE = '23514';
-END;
-$$;
-
-CREATE TRIGGER bl_conversation_photos_immutable
-BEFORE UPDATE OR DELETE ON blended_learning_conversation_photos
-FOR EACH ROW EXECUTE FUNCTION blended_learning_protect_conversation_photo();
-
-CREATE TRIGGER bl_conversation_photos_conversation_kind
-BEFORE INSERT OR UPDATE ON blended_learning_conversation_photos
-FOR EACH ROW EXECUTE FUNCTION blended_learning_reject_attempt_reference('conversation_id');
-
 -- 6 of 8: Blended Learning Mentor Flags (20261022120500).
 CREATE TABLE blended_learning_mentor_flags (
   id bigserial PRIMARY KEY,
@@ -493,7 +368,6 @@ CREATE TABLE blended_learning_mentor_flags (
   recipient varchar(255) NOT NULL,
   comment text,
   raised_by_email varchar(255) NOT NULL,
-  notification_sent_at timestamp(0),
   inserted_at timestamp(0) NOT NULL DEFAULT now(),
   CONSTRAINT blended_learning_mentor_flags_conversation_id_fkey FOREIGN KEY (conversation_id, student_id)
     REFERENCES blended_learning_conversations(id, student_id)
@@ -513,53 +387,10 @@ ALTER TABLE blended_learning_mentor_flags ADD CONSTRAINT bl_mentor_flags_comment
 ALTER TABLE blended_learning_mentor_flags ADD CONSTRAINT bl_mentor_flags_raised_by_email_check
   CHECK (raised_by_email ~ '[^[:space:]]');
 
-CREATE FUNCTION blended_learning_protect_mentor_flag()
-RETURNS trigger
-LANGUAGE plpgsql
-AS $$
-BEGIN
-  IF TG_OP = 'UPDATE'
-    AND OLD.notification_sent_at IS NULL
-    AND NEW.notification_sent_at IS NOT NULL
-    AND (
-      NEW.id,
-      NEW.conversation_id,
-      NEW.student_id,
-      NEW.recipient,
-      NEW.comment,
-      NEW.raised_by_email,
-      NEW.inserted_at
-    ) IS NOT DISTINCT FROM (
-      OLD.id,
-      OLD.conversation_id,
-      OLD.student_id,
-      OLD.recipient,
-      OLD.comment,
-      OLD.raised_by_email,
-      OLD.inserted_at
-    )
-  THEN
-    RETURN NEW;
-  END IF;
-
-  RAISE EXCEPTION 'Blended Learning Mentor Flags may change only by setting notification_sent_at once'
-    USING ERRCODE = '23514';
-END;
-$$;
-
-CREATE TRIGGER bl_mentor_flags_immutable
-BEFORE UPDATE OR DELETE ON blended_learning_mentor_flags
-FOR EACH ROW EXECUTE FUNCTION blended_learning_protect_mentor_flag();
-
-CREATE TRIGGER bl_mentor_flags_conversation_kind
-BEFORE INSERT OR UPDATE ON blended_learning_mentor_flags
-FOR EACH ROW EXECUTE FUNCTION blended_learning_reject_attempt_reference('conversation_id');
-
 -- 7 of 8: Blended Learning Flag Views (20261022120600).
 CREATE TABLE blended_learning_flag_views (
   id bigserial PRIMARY KEY,
   viewer_email varchar(255) NOT NULL,
-  viewer_user_id bigint CONSTRAINT blended_learning_flag_views_viewer_user_id_fkey REFERENCES "user"(id),
   last_seen_at timestamp(0) NOT NULL,
   inserted_at timestamp(0) NOT NULL DEFAULT now(),
   updated_at timestamp(0) NOT NULL DEFAULT now()
@@ -576,12 +407,10 @@ CREATE TABLE blended_learning_transcription_requests (
   request_key varchar(255) NOT NULL,
   draft_id bigint NOT NULL,
   student_id bigint NOT NULL CONSTRAINT blended_learning_transcription_requests_student_id_fkey REFERENCES student(id),
-  requested_by_user_id bigint CONSTRAINT bl_transcription_requests_requested_by_user_id_fkey REFERENCES "user"(id),
   requested_by_email varchar(255) NOT NULL,
   state varchar(255) NOT NULL DEFAULT 'queued',
   etl_run_id varchar(255),
   error_code varchar(255),
-  error_message text,
   inserted_at timestamp(0) NOT NULL DEFAULT now(),
   updated_at timestamp(0) NOT NULL DEFAULT now(),
   CONSTRAINT blended_learning_transcription_requests_draft_id_fkey FOREIGN KEY (draft_id, student_id)
@@ -600,42 +429,13 @@ ALTER TABLE blended_learning_transcription_requests ADD CONSTRAINT bl_transcript
 
 ALTER TABLE blended_learning_transcription_requests ADD CONSTRAINT bl_transcription_requests_state_metadata_check
   CHECK (
-    (state = 'queued' AND error_code IS NULL AND error_message IS NULL)
-    OR (state = 'running' AND etl_run_id IS NOT NULL
-        AND error_code IS NULL AND error_message IS NULL)
-    OR (state = 'completed' AND etl_run_id IS NOT NULL
-        AND error_code IS NULL AND error_message IS NULL)
+    (state = 'queued' AND etl_run_id IS NULL AND error_code IS NULL)
+    OR (state IN ('running', 'completed') AND etl_run_id IS NOT NULL AND error_code IS NULL)
     OR (state = 'failed' AND etl_run_id IS NOT NULL)
   );
 
 ALTER TABLE blended_learning_transcription_requests ADD CONSTRAINT bl_transcription_requests_safe_error_check
-  CHECK (
-    (error_code IS NULL OR char_length(error_code) BETWEEN 1 AND 64)
-    AND (error_message IS NULL OR char_length(error_message) BETWEEN 1 AND 500)
-  );
+  CHECK (error_code IS NULL OR char_length(error_code) BETWEEN 1 AND 64);
 
 ALTER TABLE blended_learning_transcription_requests ADD CONSTRAINT bl_transcription_requests_requested_by_email_check
   CHECK (requested_by_email ~ '[^[:space:]]');
-
-CREATE FUNCTION blended_learning_protect_transcription_request_identity()
-RETURNS trigger
-LANGUAGE plpgsql
-AS $$
-BEGIN
-  IF NEW.request_key IS DISTINCT FROM OLD.request_key
-    OR NEW.draft_id IS DISTINCT FROM OLD.draft_id
-    OR NEW.student_id IS DISTINCT FROM OLD.student_id
-    OR NEW.requested_by_user_id IS DISTINCT FROM OLD.requested_by_user_id
-    OR NEW.requested_by_email IS DISTINCT FROM OLD.requested_by_email
-    OR (OLD.etl_run_id IS NOT NULL AND NEW.etl_run_id IS DISTINCT FROM OLD.etl_run_id)
-  THEN
-    RAISE EXCEPTION 'Transcription Request identity is immutable' USING ERRCODE = '23514';
-  END IF;
-
-  RETURN NEW;
-END;
-$$;
-
-CREATE TRIGGER bl_transcription_requests_identity_immutable
-BEFORE UPDATE ON blended_learning_transcription_requests
-FOR EACH ROW EXECUTE FUNCTION blended_learning_protect_transcription_request_identity();

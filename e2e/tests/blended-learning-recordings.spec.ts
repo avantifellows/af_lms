@@ -102,8 +102,8 @@ test.describe("Blended Learning drafting state", () => {
       const inserted = await pool.query<{ id: string }>(
         `INSERT INTO blended_learning_conversation_drafts
            (student_id, program_id, academic_year, mentor_user_id, created_by_email, state,
-            call_recording_s3_key, recording_content_type, recording_byte_size)
-         VALUES ($1, $2, $3, $4, $5, 'transcribing', $6, 'audio/mpeg', 2048)
+            call_recording_s3_key, recording_content_type)
+         VALUES ($1, $2, $3, $4, $5, 'transcribing', $6, 'audio/mpeg')
          RETURNING id`,
         [
           studentId,
@@ -121,6 +121,12 @@ test.describe("Blended Learning drafting state", () => {
       await page.goto(`/blended-learning/students/${studentId}`);
       const draft = page.getByRole("region", { name: "Conversation Draft" });
       await expect(draft.getByText("Drafting from the Call Recording")).toBeVisible();
+
+      // An open draft blocks a second upload.
+      const second = await page.request.post(`/api/blended-learning/students/${studentId}/recordings/upload-url`, {
+        data: { fileName: "a.mp3", byteSize: 1 },
+      });
+      expect(second.status()).toBe(409);
 
       // etl-next gives up on it; the next poll picks that up without a reload.
       await pool.query(`UPDATE blended_learning_conversation_drafts SET state = 'failed' WHERE id = $1`, [draftId]);

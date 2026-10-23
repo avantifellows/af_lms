@@ -59,17 +59,17 @@ import LogEntryPage from "./page";
 
 const MENTOR = {
   kind: "mentor", role: "blended_mentor", readOnly: false,
-  actorEmail: "faizan@avantifellows.org", actorUserId: 9001, mentorUserId: 9001,
+  actorEmail: "faizan@avantifellows.org", mentorUserId: 9001,
 };
 const BLENDED_ADMIN = {
   kind: "admin", role: "blended_admin", readOnly: false,
-  actorEmail: "juned@avantifellows.org", actorUserId: 12,
+  actorEmail: "juned@avantifellows.org",
 };
 const READ_ONLY_ADMIN = { ...BLENDED_ADMIN, readOnly: true, actorEmail: "viewer@avantifellows.org" };
-const LMS_ADMIN = { ...BLENDED_ADMIN, role: "admin", actorEmail: "panchali@avantifellows.org", actorUserId: 13 };
+const LMS_ADMIN = { ...BLENDED_ADMIN, role: "admin", actorEmail: "panchali@avantifellows.org" };
 const READ_ONLY_MENTOR = { ...MENTOR, readOnly: true, actorEmail: "mentor-viewer@avantifellows.org" };
 
-const OPEN_ITEMS = [{ id: 120, text: "Revise optics", owner: "student", dueOn: null, agreedOn: "2026-10-12" }];
+const OPEN_ITEMS = [{ id: 120, text: "Revise optics", owner: "student", agreedOn: "2026-10-12" }];
 
 const MENTEE: MenteeDetail = {
   studentId: 501,
@@ -231,10 +231,8 @@ describe("LogEntryPage", () => {
       spokeWith: "student",
       durationMinutes: 25,
       summary: "Talked about mock tests.",
-      summaryTags: ["academics", "exam prep"],
-      actionItems: [{ text: "Revise optics", owner: "student", dueOn: null }],
+      actionItems: [{ text: "Revise optics", owner: "student" }],
       notes: [{ heading: "Physics & Maths", points: ["<b>weak</b>"] }],
-      itemsToVerify: ["Which mock test?"],
     });
 
     await renderPage();
@@ -254,19 +252,14 @@ describe("LogEntryPage", () => {
       },
       pendingDraft: null,
     });
-    // Neither the Summary Tags, the drafted due date nor the Items to Verify reach the form.
-    expect(formProps().draft.summary).not.toContain("Tags:");
-    expect(formProps().draft).not.toHaveProperty("summaryTags");
-    expect(formProps().draft.actionItems[0]).not.toHaveProperty("dueOn");
-    expect(formProps().draft).not.toHaveProperty("itemsToVerify");
   });
 
-  it("keeps a drafted summary without tags as it is", async () => {
+  it("opens a draft with no session details or notes", async () => {
     signedInAs(MENTOR);
     mockGetMenteeDetail.mockResolvedValue({ ...MENTEE, openDraft: { id: 41, state: "ready" } });
     mockGetDraftForReview.mockResolvedValue({
       id: 41, occurredOn: null, mode: null, spokeWith: null, durationMinutes: null,
-      summary: "Short call.", summaryTags: [], actionItems: [], notes: [], itemsToVerify: [],
+      summary: "Short call.", actionItems: [], notes: [],
     });
 
     await renderPage();

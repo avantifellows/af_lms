@@ -136,15 +136,14 @@ export async function createDraft(
       if (!mapping) throw new OutOfScope();
       const { details } = session;
       const draft = await client.query<{ id: number | string }>(
-        `INSERT INTO blended_learning_conversation_drafts (student_id, program_id, academic_year, mentor_user_id, created_by_user_id, created_by_email, state, occurred_on, mode, spoke_with, duration_minutes, call_recording_s3_key, recording_content_type, recording_byte_size)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+        `INSERT INTO blended_learning_conversation_drafts (student_id, program_id, academic_year, mentor_user_id, created_by_email, state, occurred_on, mode, spoke_with, duration_minutes, call_recording_s3_key, recording_content_type)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
          RETURNING id`,
         [
           studentId,
           Number(mapping.program_id),
           mapping.academic_year,
           Number(mapping.mentor_user_id),
-          access.actorUserId,
           access.actorEmail,
           "transcribing",
           details.occurredOn,
@@ -153,15 +152,14 @@ export async function createDraft(
           details.durationMinutes,
           s3Key,
           contentType,
-          stored.byteSize,
         ]
       );
       const draftId = Number(draft.rows[0].id);
       const requestKey = randomUUID();
       await client.query(
-        `INSERT INTO blended_learning_transcription_requests (request_key, draft_id, student_id, requested_by_user_id, requested_by_email, state)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
-        [requestKey, draftId, studentId, access.actorUserId, access.actorEmail, "queued"]
+        `INSERT INTO blended_learning_transcription_requests (request_key, draft_id, student_id, requested_by_email, state)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [requestKey, draftId, studentId, access.actorEmail, "queued"]
       );
       return { draftId, requestKey };
     });
@@ -311,9 +309,9 @@ export async function retryDrafting(
         if (moved.rows.length === 0) throw new Conflict();
         const key = randomUUID();
         await client.query(
-          `INSERT INTO blended_learning_transcription_requests (request_key, draft_id, student_id, requested_by_user_id, requested_by_email, state)
-           VALUES ($1, $2, $3, $4, $5, $6)`,
-          [key, draftId, Number(draft.student_id), access.actorUserId, access.actorEmail, "queued"]
+          `INSERT INTO blended_learning_transcription_requests (request_key, draft_id, student_id, requested_by_email, state)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [key, draftId, Number(draft.student_id), access.actorEmail, "queued"]
         );
         return key;
       });
@@ -354,7 +352,7 @@ export async function discardDraft(
 
 // --- Draft review ------------------------------------------------------------
 
-type DraftActionItem = { text: string; owner: "student" | "mentor" | "parent"; dueOn: string | null };
+type DraftActionItem = { text: string; owner: "student" | "mentor" | "parent" };
 
 // A ready draft, as the log form opens it for review. The session details are
 // those the Mentor entered before uploading, if any.
@@ -365,10 +363,8 @@ export type DraftForReview = {
   spokeWith: SessionDetails["spokeWith"];
   durationMinutes: number | null;
   summary: string;
-  summaryTags: string[];
   actionItems: DraftActionItem[];
   notes: DraftNote[];
-  itemsToVerify: string[];
 };
 
 type ReviewRow = {
@@ -378,10 +374,8 @@ type ReviewRow = {
   spoke_with: SessionDetails["spokeWith"];
   duration_minutes: number | null;
   draft_summary: string;
-  draft_summary_tags: string[] | null;
-  draft_action_items: { text: string; owner: DraftActionItem["owner"]; due_on: string | null }[] | null;
+  draft_action_items: DraftActionItem[] | null;
   draft_notes: DraftNote[] | null;
-  draft_items_to_verify: string[] | null;
 };
 
 // The Mentee's ready draft, for those who can log. Null when there is none,
@@ -394,8 +388,7 @@ export async function getDraftForReview(
   if (!(await canAccessBlendedStudent(access, studentId))) return null;
   const rows = await query<ReviewRow>(
     `SELECT draft.id, draft.occurred_on::text AS occurred_on, draft.mode, draft.spoke_with, draft.duration_minutes,
-            draft.draft_summary, draft.draft_summary_tags, draft.draft_action_items, draft.draft_notes,
-            draft.draft_items_to_verify
+            draft.draft_summary, draft.draft_action_items, draft.draft_notes
      FROM blended_learning_conversation_drafts draft
      WHERE draft.student_id = $1 AND draft.state = 'ready'
      LIMIT 1`,
@@ -410,13 +403,7 @@ export async function getDraftForReview(
     spokeWith: draft.spoke_with,
     durationMinutes: draft.duration_minutes,
     summary: draft.draft_summary,
-    summaryTags: draft.draft_summary_tags ?? [],
-    actionItems: (draft.draft_action_items ?? []).map((item) => ({
-      text: item.text,
-      owner: item.owner,
-      dueOn: item.due_on,
-    })),
+    actionItems: (draft.draft_action_items ?? []).map((item) => ({ text: item.text, owner: item.owner })),
     notes: draft.draft_notes ?? [],
-    itemsToVerify: draft.draft_items_to_verify ?? [],
   };
 }

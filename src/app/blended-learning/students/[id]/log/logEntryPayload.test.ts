@@ -152,7 +152,7 @@ describe("buildEntryPayload", () => {
     });
   });
 
-  it("sends a Conversation with its lists, no due dates or blank Action Items, and the reviewed draft", () => {
+  it("sends a Conversation with its lists, no blank Action Items, and the reviewed draft", () => {
     const body = buildEntryPayload(
       values({
         mode: "in_person",
@@ -178,7 +178,7 @@ describe("buildEntryPayload", () => {
       durationMinutes: 30,
       summary: "Talked",
       notesHtml: "<p>n</p>",
-      actionItems: [{ owner: "student", text: "Revise", dueOn: null }],
+      actionItems: [{ owner: "student", text: "Revise" }],
       photoKeys: ["key-a", "key-b"],
       flags: [
         { recipient: "emotional_wellbeing", comment: null },

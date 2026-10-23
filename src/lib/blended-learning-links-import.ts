@@ -1,7 +1,6 @@
 import type ExcelJS from "exceljs";
 
 import { activeBlendedMappingSql } from "./blended-learning-access";
-import { legacyLastContactOn } from "./blended-learning-legacy-last-contact";
 import { latestProfileDocConversationOn, type DateWindow } from "./blended-learning-profile-doc-dates";
 import { CURRENT_ACADEMIC_YEAR } from "./constants";
 import { query } from "./db";
@@ -118,66 +117,22 @@ function headerKey(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
-interface MonthColumn {
-  col: number;
-  month: string;
-}
-
 interface TabColumns {
   headerRow: number;
   studentId: number | null;
   name: number | null;
   link: number | null;
-  months: MonthColumn[];
-}
-
-const MONTHS: Record<string, number> = {
-  jan: 1, january: 1, feb: 2, february: 2, mar: 3, march: 3, apr: 4, april: 4,
-  may: 5, jun: 6, june: 6, jul: 7, july: 7, aug: 8, august: 8,
-  sep: 9, sept: 9, september: 9, oct: 10, october: 10, nov: 11, november: 11,
-  dec: 12, december: 12,
-};
-
-function monthStart(year: number, month: number): string {
-  return `${year}-${String(month).padStart(2, "0")}-01`;
-}
-
-// A monthly call-count header ("Sep", "Sep 2026", "Sep'26" or a date) as the
-// first day of that month. A bare month takes its year from the academic
-// year: April–December in the first year, January–March in the second.
-function headerMonth(cell: ExcelJS.Cell): string | null {
-  if (cell.value instanceof Date) {
-    return monthStart(cell.value.getUTCFullYear(), cell.value.getUTCMonth() + 1);
-  }
-  const tokens = headerKey(cell.text ?? "").split(" ");
-  const monthIndex = tokens.findIndex((token) => token in MONTHS);
-  if (monthIndex < 0) return null;
-  const month = MONTHS[tokens[monthIndex]];
-  const yearToken = tokens.slice(monthIndex + 1).find((token) => /^(20)?\d{2}$/.test(token));
-  const startYear = Number(CURRENT_ACADEMIC_YEAR.slice(0, 4));
-  const year = yearToken
-    ? Number(yearToken.length === 2 ? `20${yearToken}` : yearToken)
-    : month >= 4 ? startYear : startYear + 1;
-  return monthStart(year, month);
 }
 
 // The header row is the first of the top ten rows naming a Student ID or name column.
-function findColumns(
-  sheet: ExcelJS.Worksheet,
-  isLinkHeader: (key: string) => boolean,
-  readMonths: boolean
-): TabColumns | null {
+function findColumns(sheet: ExcelJS.Worksheet, isLinkHeader: (key: string) => boolean): TabColumns | null {
   for (let rowNumber = 1; rowNumber <= Math.min(10, sheet.rowCount); rowNumber++) {
-    const columns: TabColumns = {
-      headerRow: rowNumber, studentId: null, name: null, link: null, months: [],
-    };
+    const columns: TabColumns = { headerRow: rowNumber, studentId: null, name: null, link: null };
     sheet.getRow(rowNumber).eachCell((cell, col) => {
       const key = headerKey(cell.text ?? "");
-      const month = readMonths ? headerMonth(cell) : null;
       if (key === "student id" && columns.studentId == null) columns.studentId = col;
       else if (/^(student )?(full )?name$/.test(key) && columns.name == null) columns.name = col;
       else if (isLinkHeader(key) && columns.link == null) columns.link = col;
-      else if (month) columns.months.push({ col, month });
     });
     if (columns.studentId != null || columns.name != null) return columns;
   }
@@ -211,30 +166,21 @@ function rowHyperlink(row: ExcelJS.Row, column: number | null, rowFallback: bool
   return found;
 }
 
-// The latest month whose call count is above zero.
-function lastCalledMonth(row: ExcelJS.Row, months: MonthColumn[]): string | null {
-  let latest: string | null = null;
-  for (const { col, month } of months) {
-    const count = Number(row.getCell(col).text.trim());
-    if (Number.isFinite(count) && count > 0 && (latest == null || month > latest)) latest = month;
-  }
-  return latest;
-}
-
 const HTTPS_URL = /^https:\/\/\S+$/;
 
 interface TabResult {
   read: boolean;
   links: Map<number, string>;
-  legacyMonths: Map<number, string>;
+  // Every Student a row matched, with or without a usable link.
+  matched: Set<number>;
   counts: BlendedLinksCounts;
   issues: BlendedLinksIssue[];
 }
 
 type RowOutcome =
   | { status: "unmatched"; studentId: string | null; reason: BlendedLinksIssueReason }
-  | { status: "skipped"; student: MappedStudent; called: string | null; reason: BlendedLinksIssueReason }
-  | { status: "accepted"; student: MappedStudent; called: string | null; url: string };
+  | { status: "skipped"; student: MappedStudent; reason: BlendedLinksIssueReason }
+  | { status: "accepted"; student: MappedStudent; url: string };
 
 // The Student a row names by Student ID, else by an exact normalised name
 // that only one Student has; otherwise why it is unmatched.
@@ -267,11 +213,10 @@ function readLinkRow(
   const student = matchStudent(studentId, name, students);
   if (typeof student === "string") return { status: "unmatched", studentId, reason: student };
 
-  const called = lastCalledMonth(row, columns.months);
   const url = rowHyperlink(row, columns.link, rowFallback);
-  if (!url) return { status: "skipped", student, called, reason: "no_link" };
-  if (!HTTPS_URL.test(url)) return { status: "skipped", student, called, reason: "not_https" };
-  return { status: "accepted", student, called, url };
+  if (!url) return { status: "skipped", student, reason: "no_link" };
+  if (!HTTPS_URL.test(url)) return { status: "skipped", student, reason: "not_https" };
+  return { status: "accepted", student, url };
 }
 
 type AcceptedRow = { row: number; studentId: string | null; url: string };
@@ -296,9 +241,8 @@ class TabReader {
       this.issue(rowNumber, outcome.studentId, outcome.reason);
       return;
     }
-    const { student, called } = outcome;
-    const seen = this.result.legacyMonths.get(student.id);
-    if (called && (seen == null || called > seen)) this.result.legacyMonths.set(student.id, called);
+    const { student } = outcome;
+    this.result.matched.add(student.id);
     if (outcome.status === "skipped") {
       this.result.counts.skipped++;
       this.issue(rowNumber, student.studentId, outcome.reason);
@@ -328,17 +272,16 @@ function readLinksTab(
   tab: SourceTab,
   isLinkHeader: (key: string) => boolean,
   rowFallback: boolean,
-  students: StudentIndex,
-  readMonths = false
+  students: StudentIndex
 ): TabResult {
   const result: TabResult = {
     read: false,
     links: new Map(),
-    legacyMonths: new Map(),
+    matched: new Set(),
     counts: { matched: 0, unmatched: 0, skipped: 0 },
     issues: [],
   };
-  const columns = findColumns(sheet, isLinkHeader, readMonths);
+  const columns = findColumns(sheet, isLinkHeader);
   if (!columns) return result;
   result.read = true;
 
@@ -357,9 +300,8 @@ interface StudentLinks {
   legacyOn: string | null;
 }
 
-// What the workbook gave for one Student. sheetMonth is the Conversation
-// tab's latest month with a call, evidence for the legacy rule only.
-type FoundLinks = { profileDocUrl?: string; screenerUrl?: string; sheetMonth?: string };
+// What the workbook gave for one Student.
+type FoundLinks = { profileDocUrl?: string; screenerUrl?: string };
 
 interface ExistingLinkRow {
   student_id: number | string;
@@ -452,19 +394,20 @@ export function profileDocId(url: string | null): string | null {
 
 type LegacyResolution = { outcome: LegacyDocOutcome; legacyOn?: string | null };
 
-function resolveLegacy(next: StudentLinks, sheetMonth: string | null, docs: LegacyProfileDocs): LegacyResolution {
+// The rule (product owner, 2026-10-23): the latest dated conversation in the
+// Profile Doc only; a readable doc with no dated conversation gives NULL.
+function resolveLegacy(next: StudentLinks, docs: LegacyProfileDocs): LegacyResolution {
   const docId = profileDocId(next.profileDocUrl);
   if (!docId) return { outcome: "no_doc_link" };
   const html = docs.readProfileDocHtml(docId);
   if (html === null) return { outcome: "unreadable" };
-  const profileDocConversationOn = latestProfileDocConversationOn(html, docs.window);
-  const legacyOn = legacyLastContactOn({ profileDocConversationOn, sheetMonth });
+  const legacyOn = latestProfileDocConversationOn(html, docs.window);
   return { outcome: legacyOn === null ? "no_dates" : "dated", legacyOn };
 }
 
 // Sets next.legacyOn when the Student's doc was read, and counts the outcome.
-function applyLegacy(next: StudentLinks, links: FoundLinks, docs: LegacyProfileDocs, counts: LegacyDocCounts): void {
-  const resolution = resolveLegacy(next, links.sheetMonth ?? null, docs);
+function applyLegacy(next: StudentLinks, docs: LegacyProfileDocs, counts: LegacyDocCounts): void {
+  const resolution = resolveLegacy(next, docs);
   counts[resolution.outcome]++;
   if (resolution.legacyOn !== undefined) next.legacyOn = resolution.legacyOn;
 }
@@ -489,7 +432,9 @@ async function upsertLinks(
   for (const [studentId, links] of found) {
     const stored = existing.get(studentId);
     const next = mergeLinks(links, stored);
-    if (docs && legacy) applyLegacy(next, links, docs, legacy);
+    if (docs && legacy) applyLegacy(next, docs, legacy);
+    // A Student matched without any link and with no stored row gets none.
+    if (!stored && !next.profileDocUrl && !next.screenerUrl) continue;
     if (stored && sameLinks(stored, next, docs !== null)) {
       writes.unchanged++;
       continue;
@@ -527,12 +472,7 @@ export async function runBlendedLinksImport(params: {
   const found = new Map<number, FoundLinks>();
   for (const tab of tabs) {
     const sheet = params.workbook.getWorksheet(tab.name);
-    const result = sheet
-      ? readLinksTab(
-          sheet, tab.name, tab.isLinkHeader, tab.rowFallback, students,
-          docs !== null && tab.name === CONVERSATION_TAB
-        )
-      : null;
+    const result = sheet ? readLinksTab(sheet, tab.name, tab.isLinkHeader, tab.rowFallback, students) : null;
     if (!result?.read) {
       report.unreadTabs.push(tab.name);
       continue;
@@ -545,9 +485,9 @@ export async function runBlendedLinksImport(params: {
     for (const [studentId, url] of result.links) {
       found.set(studentId, { ...found.get(studentId), [field]: url });
     }
-    for (const [studentId, sheetMonth] of result.legacyMonths) {
-      found.set(studentId, { ...found.get(studentId), sheetMonth });
-    }
+    // With Profile Docs, a Student whose rows had no usable link still gets
+    // a legacy date from a stored Profile Doc link.
+    if (docs) for (const studentId of result.matched) found.set(studentId, found.get(studentId) ?? {});
   }
   Object.assign(report, await upsertLinks(found, params.mode, docs));
   return report;

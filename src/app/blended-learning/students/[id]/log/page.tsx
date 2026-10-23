@@ -25,8 +25,7 @@ import { LogEntryForm, type ReviewDraft } from "./LogEntryForm";
 // draft's progress in place of the recording upload; once it is ready the page
 // refreshes and the form opens again, prefilled.
 
-// The form's prefill: the drafted notes become editor HTML. The Summary Tags
-// are not used.
+// The form's prefill: the drafted notes become editor HTML.
 function toReviewDraft(draft: DraftForReview): ReviewDraft {
   return {
     id: draft.id,
@@ -35,7 +34,7 @@ function toReviewDraft(draft: DraftForReview): ReviewDraft {
     spokeWith: draft.spokeWith,
     durationMinutes: draft.durationMinutes,
     summary: draft.summary,
-    actionItems: draft.actionItems.map(({ owner, text }) => ({ owner, text })),
+    actionItems: draft.actionItems,
     notesHtml: draftNotesToHtml(draft.notes),
   };
 }

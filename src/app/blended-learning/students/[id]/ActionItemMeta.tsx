@@ -1,9 +1,8 @@
 import { formatCalendarDate } from "@/lib/blended-learning-format";
 import type { ActionItemOwner } from "@/lib/blended-learning-mentee-detail";
 
-// Who owns an Action Item and when it was agreed. Action Items have no due
-// date in the product, so a stored `due_on` is never shown. Used by the
-// detail page's history and Open Action Items, and by the log form.
+// Who owns an Action Item and when it was agreed. Used by the detail page's
+// history and Open Action Items, and by the log form.
 
 export const ACTION_ITEM_OWNER: Record<ActionItemOwner, string> = {
   student: "Student",
@@ -21,13 +20,11 @@ export function OwnerPill({ owner }: { owner: ActionItemOwner }) {
 }
 
 // The owner and the agreeing Conversation's date, as one muted line.
-// `dueOn` is accepted for callers that still pass it, and ignored.
 export function ActionItemMeta({
   owner,
   agreedOn,
 }: {
   owner?: ActionItemOwner;
-  dueOn?: string | null;
   agreedOn?: string;
 }) {
   const parts = [owner ? ACTION_ITEM_OWNER[owner] : null, agreedOn ? `From ${formatCalendarDate(agreedOn)}` : null].filter(

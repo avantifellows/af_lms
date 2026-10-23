@@ -109,8 +109,8 @@ describe("validateEntry: Conversation", () => {
         ...CONVERSATION,
         notesHtml: "<p>Doing well</p>",
         actionItems: [
-          { owner: "student", text: " Revise optics ", dueOn: "2026-10-30" },
-          { owner: "parent", text: "Call back", dueOn: "" },
+          { owner: "student", text: " Revise optics " },
+          { owner: "parent", text: "Call back" },
         ],
         photoKeys: [PHOTO_A, PHOTO_B],
         flags: [{ recipient: "physics", comment: " Weak on optics " }, { recipient: "emotional_wellbeing" }],
@@ -125,8 +125,8 @@ describe("validateEntry: Conversation", () => {
       input: expect.objectContaining({
         notesHtml: "<p>Doing well</p>",
         actionItems: [
-          { owner: "student", text: "Revise optics", dueOn: "2026-10-30" },
-          { owner: "parent", text: "Call back", dueOn: null },
+          { owner: "student", text: "Revise optics" },
+          { owner: "parent", text: "Call back" },
         ],
         photos: [
           { s3Key: PHOTO_A, contentType: "image/jpeg" },
@@ -181,7 +181,7 @@ describe("validateEntry: Conversation", () => {
 
   it("keys Action Item errors per item", () => {
     const result = validateEntry(
-      { ...CONVERSATION, actionItems: [null, { owner: "student", text: "Ok", dueOn: "2026-02-31" }] },
+      { ...CONVERSATION, actionItems: [null, { owner: "teacher", text: "Ok" }] },
       TODAY,
       STUDENT
     );
@@ -190,7 +190,7 @@ describe("validateEntry: Conversation", () => {
       fieldErrors: {
         "actionItems.0.owner": "Choose who owns this Action Item.",
         "actionItems.0.text": "Add the Action Item.",
-        "actionItems.1.dueOn": "Enter a valid due date.",
+        "actionItems.1.owner": "Choose who owns this Action Item.",
       },
     });
   });

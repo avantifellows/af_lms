@@ -83,9 +83,9 @@ export const ACTION_ITEM_MENTEES = {
 export const ACTION_ITEMS_AGREED_DAYS_AGO = 14;
 export const ACTION_ITEMS_DONE_DAYS_AGO = 7;
 export const EARLIER_ACTION_ITEMS = {
-  // Open, owned by the Student, due 7 IST days after the seed's today.
-  toTick: { text: "Synthetic: finish the optics DPP", owner: "student", dueInDays: 7 },
-  // Open, owned by the Parent, no due date.
+  // Open, owned by the Student.
+  toTick: { text: "Synthetic: finish the optics DPP", owner: "student" },
+  // Open, owned by the Parent.
   stayOpen: { text: "Synthetic: confirm the hostel fee date", owner: "parent" },
   // Done by the later Conversation.
   done: { text: "Synthetic: share the mock test schedule", owner: "mentor" },
@@ -169,9 +169,8 @@ export function fullName(mentee: { firstName: string; lastName: string }): strin
 }
 
 // The legacy last-contact date is a fixed past day, so it is always 30+ days
-// ago. A recent legacy month is stored too: Talk to first must ignore it.
+// ago.
 export const LEGACY_LAST_CONTACT_ON = "2026-06-14";
-const IGNORED_LEGACY_MONTH = "2026-10-01";
 
 function previousAcademicYear(year: string): string {
   const [start, end] = year.split("-").map(Number);
@@ -381,18 +380,17 @@ async function seedEarlierActionItems(
   const { toTick, stayOpen, done } = EARLIER_ACTION_ITEMS;
   await client.query(
     `INSERT INTO blended_learning_action_items
-       (conversation_id, student_id, position, text, owner, due_on, status,
+       (conversation_id, student_id, position, text, owner, status,
         completed_by_conversation_id, completed_at, completed_by_email)
      VALUES
-       ($1, $2, 1, $3, $4, ${IST_TODAY} + $5::int, 'open', NULL, NULL, NULL),
-       ($1, $2, 2, $6, $7, NULL, 'open', NULL, NULL, NULL),
-       ($1, $2, 3, $8, $9, NULL, 'done', $10, now(), $11)`,
+       ($1, $2, 1, $3, $4, 'open', NULL, NULL, NULL),
+       ($1, $2, 2, $5, $6, 'open', NULL, NULL, NULL),
+       ($1, $2, 3, $7, $8, 'done', $9, now(), $10)`,
     [
       agreedId,
       mentee.studentId,
       toTick.text,
       toTick.owner,
-      toTick.dueInDays,
       stayOpen.text,
       stayOpen.owner,
       done.text,
@@ -411,10 +409,9 @@ async function seedDraft(
   await client.query(
     `INSERT INTO blended_learning_conversation_drafts
        (student_id, program_id, academic_year, mentor_user_id, created_by_email, state,
-        call_recording_s3_key, recording_content_type, recording_byte_size,
-        transcript_s3_key, draft_summary, prompt_version, model_id, ready_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, 'audio/mpeg', 1024, $8, $9, $10, $11,
-       CASE WHEN $12 THEN now() ELSE NULL END)`,
+        call_recording_s3_key, recording_content_type,
+        transcript_s3_key, draft_summary, prompt_version, model_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, 'audio/mpeg', $8, $9, $10, $11)`,
     [
       draft.studentId,
       draft.programId,
@@ -427,7 +424,6 @@ async function seedDraft(
       ready ? "Synthetic drafted summary." : null,
       ready ? "fixture-v1" : null,
       ready ? "fixture-model" : null,
-      ready,
     ]
   );
 }
@@ -512,8 +508,8 @@ async function seedFeedFlags(
 
   for (const admin of ["e2e-blended-admin@test.local", "e2e-blended-admin-read-only@test.local"]) {
     await client.query(
-      `INSERT INTO blended_learning_flag_views (viewer_email, viewer_user_id, last_seen_at)
-       SELECT permission.email, permission.user_id, now() - make_interval(hours => $2)
+      `INSERT INTO blended_learning_flag_views (viewer_email, last_seen_at)
+       SELECT permission.email, now() - make_interval(hours => $2)
        FROM user_permission permission WHERE LOWER(permission.email) = LOWER($1)`,
       [admin, FLAGS_LAST_SEEN_HOURS_AGO]
     );
@@ -660,12 +656,12 @@ export async function seedBlendedLearningFixtures(client: Client): Promise<void>
 
   await client.query(
     `INSERT INTO blended_learning_student_links
-       (student_id, profile_doc_url, screener_url, legacy_last_contact_on, legacy_last_contact_month)
+       (student_id, profile_doc_url, screener_url, legacy_last_contact_on)
      VALUES
-       ($1, 'https://docs.google.com/document/d/e2e-legacy', 'https://forms.gle/e2e-legacy', $4::date, $8::date),
-       ($2, 'https://docs.google.com/document/d/e2e-thirty', NULL, NULL, NULL),
-       ($3, 'https://docs.google.com/document/d/e2e-recent', 'https://forms.gle/e2e-recent', NULL, NULL),
-       ($5, $6, $7, NULL, NULL)`,
+       ($1, 'https://docs.google.com/document/d/e2e-legacy', 'https://forms.gle/e2e-legacy', $4::date),
+       ($2, 'https://docs.google.com/document/d/e2e-thirty', NULL, NULL),
+       ($3, 'https://docs.google.com/document/d/e2e-recent', 'https://forms.gle/e2e-recent', NULL),
+       ($5, $6, $7, NULL)`,
     [
       ids[legacy.key],
       ids[thirtyDays.key],
@@ -674,7 +670,6 @@ export async function seedBlendedLearningFixtures(client: Client): Promise<void>
       ids[mentorBStudent.key],
       TARA_LINKS.profileDoc,
       TARA_LINKS.screener,
-      IGNORED_LEGACY_MONTH,
     ]
   );
 

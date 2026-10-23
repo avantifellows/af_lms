@@ -27,7 +27,6 @@ export type BlendedLearningAccess = {
   role: "blended_mentor" | "blended_admin" | "admin";
   readOnly: boolean;
   actorEmail: string;
-  actorUserId: number | null;
   // Mentors only: the `user` id their Mappings point at.
   mentorUserId?: number | null;
 };
@@ -35,9 +34,9 @@ export type BlendedLearningAccess = {
 const MUTATIONS: ReadonlySet<BlendedLearningAction> = new Set(["log", "upload", "manage_draft"]);
 const ADMIN_ONLY: ReadonlySet<BlendedLearningAction> = new Set(["play_recording", "view_mentors"]);
 
-// The person's `user` id: user_permission.user_id, else the `user` row whose
+// A Mentor's `user` id: user_permission.user_id, else the `user` row whose
 // email matches case-insensitively (as Holistic does).
-async function actorUserId(email: string, linkedUserId: number | null | undefined) {
+async function linkedUserId(email: string, linkedUserId: number | null | undefined) {
   if (linkedUserId != null) return linkedUserId;
   const rows = await query<{ id: number | string }>(
     `SELECT id FROM "user" WHERE LOWER(email) = LOWER($1) ORDER BY id LIMIT 1`,
@@ -56,15 +55,9 @@ export async function getBlendedLearningAccess(
   if (!feature.canView) return null;
 
   const role = permission.role as BlendedLearningAccess["role"];
-  const userId = await actorUserId(email, permission.user_id);
-  const base = {
-    role,
-    readOnly: !feature.canEdit,
-    actorEmail: email,
-    actorUserId: userId,
-  };
+  const base = { role, readOnly: !feature.canEdit, actorEmail: email };
   if (role === BLENDED_MENTOR_ROLE) {
-    return { kind: "mentor", ...base, mentorUserId: userId };
+    return { kind: "mentor", ...base, mentorUserId: await linkedUserId(email, permission.user_id) };
   }
   return { kind: "admin", ...base };
 }

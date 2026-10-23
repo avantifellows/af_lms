@@ -25,7 +25,7 @@ const PERMISSIONS: Record<string, { role: string; read_only: boolean; user_id: n
   [TEACHER]: { role: "teacher", read_only: false, user_id: 40 },
 };
 
-type FlagView = { viewer_email: string; viewer_user_id: number | null; last_seen_at: string };
+type FlagView = { viewer_email: string; last_seen_at: string };
 // The flag views table with its unique index on lower(viewer_email): an
 // insert whose ON CONFLICT does not target that index violates it, as in
 // Postgres. Every write stamps last_seen_at with NOW.
@@ -34,7 +34,7 @@ const NOW = "2026-10-22 06:00:00";
 
 beforeEach(() => {
   vi.clearAllMocks();
-  views = [{ viewer_email: "ShaliniJha@avantifellows.org", viewer_user_id: 12, last_seen_at: "2026-10-19 09:30:00" }];
+  views = [{ viewer_email: "ShaliniJha@avantifellows.org", last_seen_at: "2026-10-19 09:30:00" }];
   mockQuery.mockImplementation(async (sql: string, params?: unknown[]) => {
     if (sql.includes("FROM user_permission")) {
       const email = String(params?.[0]).toLowerCase();
@@ -42,7 +42,7 @@ beforeEach(() => {
       return row ? [{ email, level: 1, school_codes: null, regions: null, program_ids: [], ...row }] : [];
     }
     if (sql.includes("INSERT INTO blended_learning_flag_views")) {
-      const [email, userId] = params ?? [];
+      const [email] = params ?? [];
       const existing = views.find((row) => row.viewer_email.toLowerCase() === String(email).toLowerCase());
       if (existing && !/ON CONFLICT \(\(lower\(viewer_email\)\)\) DO UPDATE/i.test(sql)) {
         throw Object.assign(new Error("duplicate key value violates unique constraint"), { code: "23505" });
@@ -51,7 +51,7 @@ beforeEach(() => {
         existing.last_seen_at = NOW;
         return [{ last_seen_at: NOW }];
       }
-      views.push({ viewer_email: String(email), viewer_user_id: userId == null ? null : Number(userId), last_seen_at: NOW });
+      views.push({ viewer_email: String(email), last_seen_at: NOW });
       return [{ last_seen_at: NOW }];
     }
     throw new Error(`Unexpected SQL: ${sql}`);
@@ -89,20 +89,20 @@ describe("POST /api/blended-learning/flags/seen", () => {
 
     expect(await markSeen()).toEqual({ status: 200, body: { lastSeenAt: NOW } });
     expect(views).toEqual([
-      { viewer_email: "ShaliniJha@avantifellows.org", viewer_user_id: 12, last_seen_at: NOW },
+      { viewer_email: "ShaliniJha@avantifellows.org", last_seen_at: NOW },
     ]);
   });
 
   it.each([
-    ["a Blended Learning Admin", ADMIN, 11],
-    ["an LMS admin", LMS_ADMIN, 1],
+    ["a Blended Learning Admin", ADMIN],
+    ["an LMS admin", LMS_ADMIN],
     // A Mentor's Flags tab is their own Students' flags; the visit is theirs.
-    ["a Blended Learning Mentor", MENTOR_A, 9001],
-  ])("records a first visit for %s", async (_case, email, userId) => {
+    ["a Blended Learning Mentor", MENTOR_A],
+  ])("records a first visit for %s", async (_case, email) => {
     signedInAs(email);
 
     expect(await markSeen()).toEqual({ status: 200, body: { lastSeenAt: NOW } });
-    expect(views).toContainEqual({ viewer_email: email, viewer_user_id: userId, last_seen_at: NOW });
+    expect(views).toContainEqual({ viewer_email: email, last_seen_at: NOW });
     expect(views).toHaveLength(2);
   });
 

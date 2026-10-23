@@ -274,12 +274,12 @@ export async function listFlagMentors(
 export async function recordFlagsSeen(access: BlendedLearningAccess): Promise<{ lastSeenAt: string } | null> {
   if (!canBlendedLearning(access, "view_flags")) return null;
   const rows = await query<{ last_seen_at: string }>(
-    `INSERT INTO blended_learning_flag_views (viewer_email, viewer_user_id, last_seen_at, inserted_at, updated_at)
-     VALUES ($1, $2, now(), now(), now())
+    `INSERT INTO blended_learning_flag_views (viewer_email, last_seen_at, inserted_at, updated_at)
+     VALUES ($1, now(), now(), now())
      ON CONFLICT ((lower(viewer_email))) DO UPDATE
        SET last_seen_at = EXCLUDED.last_seen_at, updated_at = EXCLUDED.updated_at
      RETURNING last_seen_at::text AS last_seen_at`,
-    [access.actorEmail, access.actorUserId]
+    [access.actorEmail]
   );
   return { lastSeenAt: rows[0].last_seen_at };
 }

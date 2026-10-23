@@ -12,11 +12,11 @@ const TODAY = "2026-10-22";
 
 const MENTOR: BlendedLearningAccess = {
   kind: "mentor", role: "blended_mentor", readOnly: false,
-  actorEmail: "faizan@avantifellows.org", actorUserId: 9001, mentorUserId: 9001,
+  actorEmail: "faizan@avantifellows.org", mentorUserId: 9001,
 };
 const READ_ONLY_ADMIN: BlendedLearningAccess = {
   kind: "admin", role: "blended_admin", readOnly: true,
-  actorEmail: "viewer@avantifellows.org", actorUserId: 13,
+  actorEmail: "viewer@avantifellows.org",
 };
 
 // One active Mapping row as the shared Mentee query returns it (ids and

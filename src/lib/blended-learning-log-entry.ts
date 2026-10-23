@@ -63,14 +63,14 @@ async function lockReadyDraft(client: PoolClient, studentId: number, draftId: nu
   };
 }
 
-// The locked draft now has its Conversation.
-async function markDraftSaved(client: PoolClient, draftId: number, conversationId: number): Promise<void> {
+// The locked draft now has its Conversation (linked by its source_draft_id).
+async function markDraftSaved(client: PoolClient, draftId: number): Promise<void> {
   const result = await client.query(
     `UPDATE blended_learning_conversation_drafts
-     SET state = 'saved', saved_conversation_id = $1, updated_at = now()
-     WHERE id = $2 AND state = 'ready'
+     SET state = 'saved', updated_at = now()
+     WHERE id = $1 AND state = 'ready'
      RETURNING id`,
-    [conversationId, draftId]
+    [draftId]
   );
   if ((result.rowCount ?? result.rows.length) !== 1) throw new DraftConflict();
 }
@@ -85,15 +85,14 @@ async function insertEntry(
 ): Promise<LoggedEntry> {
   const conversation = input.kind === "conversation" ? input : null;
   const result = await client.query<{ id: number | string; occurred_on: string }>(
-    `INSERT INTO blended_learning_conversations (student_id, program_id, academic_year, mentor_user_id, logged_by_user_id, logged_by_email, kind, occurred_on, mode, spoke_with, duration_minutes, summary, notes_html, attempt_note, call_recording_s3_key, transcript_s3_key, source_draft_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+    `INSERT INTO blended_learning_conversations (student_id, program_id, academic_year, mentor_user_id, logged_by_email, kind, occurred_on, mode, spoke_with, duration_minutes, summary, notes_html, attempt_note, call_recording_s3_key, transcript_s3_key, source_draft_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
      RETURNING id, occurred_on::text AS occurred_on`,
     [
       studentId,
       Number(mapping.program_id),
       mapping.academic_year,
       Number(mapping.mentor_user_id),
-      access.actorUserId,
       access.actorEmail,
       input.kind,
       input.occurredOn,
@@ -121,9 +120,9 @@ async function insertActionItems(
 ): Promise<void> {
   for (const [index, item] of items.entries()) {
     await client.query(
-      `INSERT INTO blended_learning_action_items (conversation_id, student_id, position, owner, text, due_on)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [conversationId, studentId, index + 1, item.owner, item.text, item.dueOn]
+      `INSERT INTO blended_learning_action_items (conversation_id, student_id, position, owner, text)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [conversationId, studentId, index + 1, item.owner, item.text]
     );
   }
 }
@@ -228,7 +227,7 @@ async function insertConversationParts(
   await insertPhotos(client, conversationId, photos);
   const wellbeingFlagIds = await insertFlags(client, access, studentId, conversationId, input.flags);
   await completeActionItems(client, access, studentId, conversationId, input.completeActionItemIds);
-  if (draft) await markDraftSaved(client, draft.id, conversationId);
+  if (draft) await markDraftSaved(client, draft.id);
   return wellbeingFlagIds;
 }
 

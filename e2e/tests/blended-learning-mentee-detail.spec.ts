@@ -243,13 +243,12 @@ test.describe("Blended Learning Mentee detail — admin", () => {
     expect(previousYear?.status()).toBe(404);
   });
 
-  test("an Action Item stored with a due date shows its owner but never the due date", async ({ page }) => {
+  test("an earlier Action Item is listed with its owner", async ({ page }) => {
     await signInAs(page, BLENDED_ADMIN);
     await page.goto(detailPath(ACTION_ITEM_MENTEES.desktop));
     // The Action Item spec may tick it done meanwhile; either way it is listed.
     const item = page.getByRole("listitem").filter({ hasText: EARLIER_ACTION_ITEMS.toTick.text }).first();
     await expect(item).toBeVisible();
     await expect(item.getByText("Student", { exact: true })).toBeVisible();
-    await expect(page.getByText(/Due \d/)).toHaveCount(0);
   });
 });

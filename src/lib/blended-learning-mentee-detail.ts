@@ -20,7 +20,6 @@ export type ActionItem = {
   id: number;
   text: string;
   owner: ActionItemOwner;
-  dueOn: string | null;
   status: "open" | "done";
 };
 // An open Action Item with the date of the Conversation that agreed it.
@@ -188,10 +187,9 @@ export async function getMenteeDetail(
       id: number | string;
       text: string;
       owner: ActionItemOwner;
-      due_on: string | null;
       status: "open" | "done";
     }>(
-      `SELECT conversation_id, id, text, owner, due_on::text AS due_on, status
+      `SELECT conversation_id, id, text, owner, status
        FROM blended_learning_action_items
        WHERE student_id = $1
        ORDER BY conversation_id, position`,
@@ -211,7 +209,6 @@ export async function getMenteeDetail(
     id: Number(item.id),
     text: item.text,
     owner: item.owner,
-    dueOn: item.due_on,
     status: item.status,
   });
   const flagsByConversation = groupBy(flags);
@@ -237,7 +234,6 @@ export async function getMenteeDetail(
           id: Number(item.id),
           text: item.text,
           owner: item.owner,
-          dueOn: item.due_on,
           agreedOn: entry.occurred_on,
         }))
     ),

@@ -21,7 +21,7 @@ const LMS_ADMIN: BlendedLearningAccess = {
   role: "admin",
   readOnly: false,
   actorEmail: "admin@test.local",
-  actorUserId: 1,
+ 
 };
 
 function permission(overrides: Record<string, unknown> = {}) {

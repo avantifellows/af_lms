@@ -5,9 +5,8 @@ import { BLENDED_MENTOR_C, FLAG_MENTEES } from "../helpers/blended-learning-fixt
 
 // Mentor Flags on a Conversation (#447) against the real fixture DDL, with
 // its one-flag-per-recipient unique index. SES is unconfigured in e2e, so an
-// Emotional Well-being flag saves with no email and notification_sent_at
-// stays null. Mentor C's FLAG_MENTEES exist only for this spec, one per
-// viewport.
+// Emotional Well-being flag saves with no email. Mentor C's FLAG_MENTEES
+// exist only for this spec, one per viewport.
 const VIEWPORTS = [
   { label: "desktop", key: "desktop", viewport: { width: 1280, height: 800 } },
   { label: "mobile 360", key: "mobile", viewport: { width: 360, height: 740 } },
@@ -43,14 +42,12 @@ type FlagRow = {
   recipient: string;
   comment: string | null;
   raised_by_email: string;
-  notified: boolean;
 };
 
 async function flagsOf(studentId: number): Promise<FlagRow[]> {
   return withPool(async (pool) => {
     const result = await pool.query<FlagRow>(
-      `SELECT conversation_id::int AS conversation_id, recipient, comment, raised_by_email,
-              (notification_sent_at IS NOT NULL) AS notified
+      `SELECT conversation_id::int AS conversation_id, recipient, comment, raised_by_email
        FROM blended_learning_mentor_flags
        WHERE student_id = $1
        ORDER BY id`,
@@ -133,9 +130,9 @@ for (const { label, key, viewport } of VIEWPORTS) {
       const savedId = (await conversationIds(studentIds[mentee.key])).at(-1)!;
       const saved = (await flagsOf(studentIds[mentee.key])).filter((flag) => flag.conversation_id === savedId);
       expect(saved).toEqual([
-        { conversation_id: savedId, recipient: "emotional_wellbeing", comment: wellbeingComment, raised_by_email: BLENDED_MENTOR_C.email, notified: false },
-        { conversation_id: savedId, recipient: "physics", comment: null, raised_by_email: BLENDED_MENTOR_C.email, notified: false },
-        { conversation_id: savedId, recipient: "maths", comment: mathsComment, raised_by_email: BLENDED_MENTOR_C.email, notified: false },
+        { conversation_id: savedId, recipient: "emotional_wellbeing", comment: wellbeingComment, raised_by_email: BLENDED_MENTOR_C.email },
+        { conversation_id: savedId, recipient: "physics", comment: null, raised_by_email: BLENDED_MENTOR_C.email },
+        { conversation_id: savedId, recipient: "maths", comment: mathsComment, raised_by_email: BLENDED_MENTOR_C.email },
       ]);
 
       await page.goto(detailPath(mentee));

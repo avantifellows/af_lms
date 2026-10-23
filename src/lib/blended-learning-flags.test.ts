@@ -10,12 +10,12 @@ const mockQuery = vi.mocked(query);
 
 const ADMIN: BlendedLearningAccess = {
   kind: "admin", role: "blended_admin", readOnly: true,
-  actorEmail: "juned@avantifellows.org", actorUserId: 12,
+  actorEmail: "juned@avantifellows.org",
 };
 
 const MENTOR: BlendedLearningAccess = {
   kind: "mentor", role: "blended_mentor", readOnly: false,
-  actorEmail: "faizan@avantifellows.org", actorUserId: 9001, mentorUserId: 9001,
+  actorEmail: "faizan@avantifellows.org", mentorUserId: 9001,
 };
 
 const FLAG_ROW = {

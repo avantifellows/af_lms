@@ -51,7 +51,6 @@ describe("getBlendedLearningAccess", () => {
       role: "blended_mentor",
       readOnly: false,
       actorEmail: "faizan@avantifellows.org",
-      actorUserId: 9001,
       mentorUserId: 9001,
     });
   });
@@ -63,26 +62,26 @@ describe("getBlendedLearningAccess", () => {
     );
 
     const access = await getBlendedLearningAccess("NEHA.kashyap@avantifellows.org");
-    expect(access).toMatchObject({ kind: "mentor", actorUserId: 77, mentorUserId: 77 });
+    expect(access).toMatchObject({ kind: "mentor", mentorUserId: 77 });
   });
 
   it("still resolves a Mentor with no user row, with no Mentor user id", async () => {
     givenTables({ email: "new.mentor@avantifellows.org", level: 1, role: "blended_mentor", read_only: false, user_id: null });
 
     const access = await getBlendedLearningAccess("new.mentor@avantifellows.org");
-    expect(access).toMatchObject({ kind: "mentor", actorUserId: null, mentorUserId: null });
+    expect(access).toMatchObject({ kind: "mentor", mentorUserId: null });
   });
 
-  it("resolves a blended_admin as a Blended Learning Admin", async () => {
-    givenTables({ email: "juned@avantifellows.org", level: 1, role: "blended_admin", read_only: false, user_id: 12 });
+  it("resolves a blended_admin as a Blended Learning Admin, with no user lookup", async () => {
+    givenTables({ email: "juned@avantifellows.org", level: 1, role: "blended_admin", read_only: false, user_id: null });
 
     expect(await getBlendedLearningAccess("juned@avantifellows.org")).toEqual({
       kind: "admin",
       role: "blended_admin",
       readOnly: false,
       actorEmail: "juned@avantifellows.org",
-      actorUserId: 12,
     });
+    expect(mockQuery.mock.calls.some(([sql]) => sql.includes('FROM "user"'))).toBe(false);
   });
 
   it("resolves a read-only blended_admin as a read-only Blended Learning Admin", async () => {
@@ -123,11 +122,11 @@ describe("getBlendedLearningAccess", () => {
 describe("canBlendedLearning", () => {
   const mentor: BlendedLearningAccess = {
     kind: "mentor", role: "blended_mentor", readOnly: false,
-    actorEmail: "m@avantifellows.org", actorUserId: 1, mentorUserId: 1,
+    actorEmail: "m@avantifellows.org", mentorUserId: 1,
   };
   const admin: BlendedLearningAccess = {
     kind: "admin", role: "blended_admin", readOnly: false,
-    actorEmail: "a@avantifellows.org", actorUserId: 2,
+    actorEmail: "a@avantifellows.org",
   };
   const readOnlyAdmin: BlendedLearningAccess = { ...admin, readOnly: true };
   const lmsAdmin: BlendedLearningAccess = { ...admin, role: "admin" };
@@ -167,11 +166,11 @@ describe("canBlendedLearning", () => {
 describe("canAccessBlendedStudent", () => {
   const mentor: BlendedLearningAccess = {
     kind: "mentor", role: "blended_mentor", readOnly: false,
-    actorEmail: "faizan@avantifellows.org", actorUserId: 9001, mentorUserId: 9001,
+    actorEmail: "faizan@avantifellows.org", mentorUserId: 9001,
   };
   const readOnlyAdmin: BlendedLearningAccess = {
     kind: "admin", role: "blended_admin", readOnly: true,
-    actorEmail: "shalinijha@avantifellows.org", actorUserId: 13,
+    actorEmail: "shalinijha@avantifellows.org",
   };
 
   // Fixture: the active current-year Mapping per Student (what the SQL returns).

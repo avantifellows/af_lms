@@ -197,13 +197,11 @@ describe("runBlendedLinksImport", () => {
     expect([...linksTable.keys()]).toEqual([501]);
   });
 
-  // Monthly call counts sit beside the Screener Form column; Jan–Mar fall in
-  // the second calendar year of 2026-2027.
-  function conversationWithCallCounts() {
+  function conversationTab() {
     const workbook = new ExcelJS.Workbook();
-    addSheet(workbook, "Conversation", ["Student ID", "Name", "Screener Form", "Jul", "Aug", "Sep 2026", "Jan"], [
-      ["2612001", "Asha Verma", link("Form", "https://forms.gle/asha-screener-v2"), 2, 1, 0, null],
-      ["2612002", "Ravi Kumar", null, 1, 0, 0, 3],
+    addSheet(workbook, "Conversation", ["Student ID", "Name", "Screener Form"], [
+      ["2612001", "Asha Verma", link("Form", "https://forms.gle/asha-screener-v2")],
+      ["2612002", "Ravi Kumar", null],
     ]);
     return workbook;
   }
@@ -213,7 +211,7 @@ describe("runBlendedLinksImport", () => {
       { student_id: 501, profile_doc_url: ASHA_DOC, screener_url: ASHA_SCREENER, legacy_last_contact_on: "2026-06-14" },
     ]);
 
-    const report = await runBlendedLinksImport({ workbook: conversationWithCallCounts(), mode: "apply" });
+    const report = await runBlendedLinksImport({ workbook: conversationTab(), mode: "apply" });
 
     expect(report.writes).toEqual({ inserted: 0, updated: 1, unchanged: 0 });
     expect(report.legacy).toBeNull();
@@ -239,11 +237,10 @@ describe("runBlendedLinksImport", () => {
       ["2612002", "Ravi Kumar", link("Profile", RAVI_DOC)],
       ["2612003", "Neha Rao", link("Profile", "https://docs.google.com/document/d/neha-doc/edit")],
     ]);
-    // The Sheet's call counts are gathered but never used by the rule.
-    addSheet(workbook, "Conversation", ["Student ID", "Name", "Screener Form", "Sep", "Oct"], [
-      ["2612001", "Asha Verma", null, 1, 2],
-      ["2612002", "Ravi Kumar", null, 0, 1],
-      ["2612003", "Neha Rao", null, 1, 0],
+    addSheet(workbook, "Conversation", ["Student ID", "Name", "Screener Form"], [
+      ["2612001", "Asha Verma", null],
+      ["2612002", "Ravi Kumar", null],
+      ["2612003", "Neha Rao", null],
     ]);
     return workbook;
   }
@@ -300,7 +297,7 @@ describe("runBlendedLinksImport", () => {
     ]);
     const workbook = new ExcelJS.Workbook();
     addSheet(workbook, "Student Profile Docs", ["Student ID", "Student Name", "Profile Doc"], [["2612001", "Asha Verma", null]]);
-    addSheet(workbook, "Conversation", ["Student ID", "Name", "Screener Form", "Oct"], [["2612001", "Asha Verma", null, 1]]);
+    addSheet(workbook, "Conversation", ["Student ID", "Name", "Screener Form"], [["2612001", "Asha Verma", null]]);
 
     const report = await runBlendedLinksImport({ workbook, mode: "dry-run", legacyProfileDocs: legacyDocs({}) });
 

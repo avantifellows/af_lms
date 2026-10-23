@@ -1,4 +1,4 @@
-import { isCalendarDate, oneOf } from "./blended-learning-format";
+import { oneOf } from "./blended-learning-format";
 import { sanitiseNotesHtml } from "./blended-learning-notes-sanitiser";
 import { MAX_CONVERSATION_PHOTOS, photoKeyContentType } from "./blended-learning-photos";
 import {
@@ -13,7 +13,7 @@ import {
 // item for lists (e.g. `actionItems.1.text`), and reported in field order.
 
 type ActionItemOwner = "student" | "mentor" | "parent";
-export type ActionItemInput = { owner: ActionItemOwner; text: string; dueOn: string | null };
+export type ActionItemInput = { owner: ActionItemOwner; text: string };
 type FlagRecipient = "emotional_wellbeing" | "physics" | "chemistry" | "maths";
 export type FlagInput = { recipient: FlagRecipient; comment: string | null };
 // An uploaded photo, already under this Student's photo prefix.
@@ -146,21 +146,14 @@ function listOf(raw: unknown, field: string, notListMessage: string, errors: Fie
   return [];
 }
 
-function validateDueOn(raw: unknown, key: string, errors: FieldErrors): string | null {
-  if (isNullish(raw) || raw === "") return null;
-  if (!isCalendarDate(raw)) errors[key] = "Enter a valid due date.";
-  return raw as string;
-}
-
-// New Action Items: owner and text are required, the due date is optional.
+// New Action Items: owner and text are both required.
 function validateActionItems(raw: unknown, errors: FieldErrors): ActionItemInput[] {
   return listOf(raw, "actionItems", "Action Items must be a list.", errors).map((value, index) => {
     const item = asRecord(value);
     const text = optionalText(item.text);
     if (!oneOf(ACTION_ITEM_OWNERS, item.owner)) errors[`actionItems.${index}.owner`] = "Choose who owns this Action Item.";
     if (!text) errors[`actionItems.${index}.text`] = "Add the Action Item.";
-    const dueOn = validateDueOn(item.dueOn, `actionItems.${index}.dueOn`, errors);
-    return { owner: item.owner as ActionItemOwner, text: text ?? "", dueOn };
+    return { owner: item.owner as ActionItemOwner, text: text ?? "" };
   });
 }
 

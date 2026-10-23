@@ -25,7 +25,6 @@ interface CliOptions {
   mode: BlendedLinksImportMode;
   file: string | null;
   legacyDocsDir: string | null;
-  asOf: string | null;
   envFile: string;
   help: boolean;
 }
@@ -36,7 +35,6 @@ function parseArgs(argv: string[]): CliOptions {
     mode: "dry-run",
     file: null,
     legacyDocsDir: null,
-    asOf: null,
     envFile: ".env.local",
     help: false,
   };
@@ -52,14 +50,8 @@ function parseArgs(argv: string[]): CliOptions {
     } else if (arg === "--dry-run") {
       options.mode = "dry-run";
       sawDryRun = true;
-    } else if (arg === "--seed-legacy") {
-      // The month-based seed put a whole month's Students into Talk to first
-      // on one day; the legacy date now comes from the Profile Docs only.
-      throw new Error("--seed-legacy was replaced by --legacy-docs-dir=<dir>.");
     } else if (arg.startsWith("--legacy-docs-dir=")) {
       options.legacyDocsDir = arg.slice("--legacy-docs-dir=".length);
-    } else if (arg.startsWith("--as-of=")) {
-      options.asOf = arg.slice("--as-of=".length);
     } else if (arg.startsWith("--file=")) {
       options.file = arg.slice("--file=".length);
     } else if (arg.startsWith("--env=")) {
@@ -74,9 +66,6 @@ function parseArgs(argv: string[]): CliOptions {
   if (sawApply && sawDryRun) {
     throw new Error("Use either --apply or --dry-run, not both.");
   }
-  if (options.asOf !== null && !/^\d{4}-\d{2}-\d{2}$/.test(options.asOf)) {
-    throw new Error("--as-of must be YYYY-MM-DD.");
-  }
 
   return options;
 }
@@ -85,7 +74,7 @@ function printUsage(): void {
   console.log(`Usage:
   npm run blended:import-links -- --file=/path/to/profile-dashboard.xlsx
   npm run blended:import-links -- --file=... --apply
-  npm run blended:import-links -- --file=... --legacy-docs-dir=/path/to/profile-doc-html [--as-of=YYYY-MM-DD]
+  npm run blended:import-links -- --file=... --legacy-docs-dir=/path/to/profile-doc-html
   npm run blended:import-links -- --file=... --env=staging
   npm run blended:import-links -- --file=... --env-file=.env.local
 
@@ -94,18 +83,18 @@ Defaults to dry-run. Writes require the explicit --apply flag.
 in each Student's Profile Doc, read from <dir>/<Drive file id>.html (the doc's
 HTML export). A doc read with no dated conversation gives NULL; a doc with no
 export keeps the stored value, so re-run once more docs are shared. Dates after
---as-of (default: today, IST) are ignored. Without the flag that column is untouched.`);
+today (IST) are ignored. Without the flag that column is untouched.`);
 }
 
 // Profile Doc HTML exports in a directory, named <Drive file id>.html.
-function profileDocsFrom(dir: string, asOf: string, window: (asOf: string) => LegacyProfileDocs["window"]): LegacyProfileDocs {
+function profileDocsFrom(dir: string, window: LegacyProfileDocs["window"]): LegacyProfileDocs {
   if (!fs.statSync(dir).isDirectory()) throw new Error(`Not a directory: ${dir}`);
   return {
     readProfileDocHtml: (docId) => {
       const file = path.join(dir, `${docId}.html`);
       return fs.existsSync(file) ? fs.readFileSync(file, "utf8") : null;
     },
-    window: window(asOf),
+    window,
   };
 }
 
@@ -135,7 +124,7 @@ async function main(): Promise<void> {
 
   try {
     const legacyProfileDocs = options.legacyDocsDir
-      ? profileDocsFrom(options.legacyDocsDir, options.asOf ?? getTodayIST(), legacyDateWindow)
+      ? profileDocsFrom(options.legacyDocsDir, legacyDateWindow(getTodayIST()))
       : null;
     const report = await runBlendedLinksImport({
       workbook,

@@ -21,11 +21,11 @@ const mockQuery = vi.mocked(query);
 
 const MENTOR: BlendedLearningAccess = {
   kind: "mentor", role: "blended_mentor", readOnly: false,
-  actorEmail: "faizan@avantifellows.org", actorUserId: 9001, mentorUserId: 9001,
+  actorEmail: "faizan@avantifellows.org", mentorUserId: 9001,
 };
 const READ_ONLY_ADMIN: BlendedLearningAccess = {
   kind: "admin", role: "blended_admin", readOnly: true,
-  actorEmail: "viewer@avantifellows.org", actorUserId: 13,
+  actorEmail: "viewer@avantifellows.org",
 };
 
 beforeEach(() => {
@@ -56,17 +56,15 @@ describe("getDraftForReview", () => {
     expect(mockQuery).toHaveBeenCalledWith(expect.stringContaining("draft.state = 'ready'"), [501]);
   });
 
-  it("maps a ready draft with session details, action items, notes and items to verify", async () => {
+  it("maps a ready draft with session details, action items and notes", async () => {
     mockQuery.mockResolvedValue([{
       id: "41", occurred_on: "2026-10-20", mode: "call", spoke_with: "both", duration_minutes: 25,
       draft_summary: "Talked about mock test scores.",
-      draft_summary_tags: ["academics", "exam prep"],
       draft_action_items: [
-        { text: "Revise rotational motion", owner: "student", due_on: "2026-10-27" },
-        { text: "Call the parent", owner: "mentor", due_on: null },
+        { text: "Revise rotational motion", owner: "student" },
+        { text: "Call the parent", owner: "mentor" },
       ],
       draft_notes: [{ heading: "Academics", points: ["Physics is weak"] }],
-      draft_items_to_verify: ["Which mock test?"],
     }]);
 
     expect(await getDraftForReview(MENTOR, 501)).toEqual({
@@ -76,13 +74,11 @@ describe("getDraftForReview", () => {
       spokeWith: "both",
       durationMinutes: 25,
       summary: "Talked about mock test scores.",
-      summaryTags: ["academics", "exam prep"],
       actionItems: [
-        { text: "Revise rotational motion", owner: "student", dueOn: "2026-10-27" },
-        { text: "Call the parent", owner: "mentor", dueOn: null },
+        { text: "Revise rotational motion", owner: "student" },
+        { text: "Call the parent", owner: "mentor" },
       ],
       notes: [{ heading: "Academics", points: ["Physics is weak"] }],
-      itemsToVerify: ["Which mock test?"],
     });
   });
 
@@ -90,7 +86,7 @@ describe("getDraftForReview", () => {
     mockQuery.mockResolvedValue([{
       id: 42, occurred_on: null, mode: null, spoke_with: null, duration_minutes: null,
       draft_summary: "Short call.",
-      draft_summary_tags: null, draft_action_items: null, draft_notes: null, draft_items_to_verify: null,
+      draft_action_items: null, draft_notes: null,
     }]);
 
     expect(await getDraftForReview(MENTOR, 501)).toEqual({
@@ -100,10 +96,8 @@ describe("getDraftForReview", () => {
       spokeWith: null,
       durationMinutes: null,
       summary: "Short call.",
-      summaryTags: [],
       actionItems: [],
       notes: [],
-      itemsToVerify: [],
     });
   });
 });
