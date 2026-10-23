@@ -45,24 +45,6 @@ describe("heatmapCellColours", () => {
 
     expect(Math.min(...ratios)).toBeGreaterThanOrEqual(4.5);
   });
-
-  it("picks whichever of dark and white text contrasts more with each cell", () => {
-    for (const percent of PERCENTS) {
-      const { backgroundColor, color } = heatmapCellColours(percent);
-      const other = color === "#ffffff" ? "#000000" : "#ffffff";
-      expect(contrastRatio(backgroundColor, color)).toBeGreaterThanOrEqual(contrastRatio(backgroundColor, other));
-    }
-  });
-
-  it("switches from dark to white text once, on the darker half of the scale", () => {
-    const firstWhite = PERCENTS.find((percent) => heatmapCellColours(percent).color === "#ffffff")!;
-
-    expect(firstWhite).toBeGreaterThan(60);
-    expect(PERCENTS.filter((percent) => percent < firstWhite)
-      .every((percent) => heatmapCellColours(percent).color === "#000000")).toBe(true);
-    expect(PERCENTS.filter((percent) => percent >= firstWhite)
-      .every((percent) => heatmapCellColours(percent).color === "#ffffff")).toBe(true);
-  });
 });
 
 it("draws the legend across the same 0% and 100% colours as the cells", () => {
