@@ -131,12 +131,29 @@ const STUDENT_COLUMNS = `
  * can never drift apart.
  */
 /**
+ * Exam registrations are collected at physical centres only (#434), so a
+ * Student whose every Program is JNV NVS is left out of the read entirely —
+ * the card hides the section for them, and the roster shouldn't carry rows no
+ * surface may show. A Student with no Program at all stays in: unknown is not
+ * NVS.
+ */
+function collectsExamRecords(student: Student): boolean {
+  const programIds = (student.student_program_ids ?? []).map(Number);
+  if (programIds.length === 0 && student.program_id != null) {
+    programIds.push(Number(student.program_id));
+  }
+  if (programIds.length === 0) return true;
+  return programIds.some((id) => id !== PROGRAM_IDS.NVS);
+}
+
+/**
  * Hang each Student's exam registrations off the roster, in one query for the
  * whole page. Passwords are never part of this shape — the card only says
  * whether one is stored.
  */
 async function withExamRecords(roster: SchoolRoster): Promise<SchoolRoster> {
   const studentIds = roster.students
+    .filter(collectsExamRecords)
     .map((student) => Number(student.student_pk_id))
     .filter((id) => Number.isFinite(id) && id > 0);
   const byStudent = await listExamSummariesForStudents(studentIds);

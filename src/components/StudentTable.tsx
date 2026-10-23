@@ -297,9 +297,11 @@ function StudentCard({
   const [expanded, setExpanded] = useState(false);
   const isDropout = isDropoutView || student.status === "dropout";
   const studentPkId = parseStudentPkId(student.student_pk_id);
-  // "Exams applied" tags, and the table behind them. The roster never carries
-  // the portal password, only whether one is stored.
-  const examRecords = student.exam_records ?? [];
+  // "Exams applied" tags, and the table behind them. Exam registrations are
+  // collected at physical centres only (#434), like uniform sizes and
+  // documents (#433), so the JNV NVS card carries none. The roster never
+  // carries the portal password either — only whether one is stored.
+  const examRecords = isNvs ? [] : (student.exam_records ?? []);
 
   return (
     <Card elevation="md" className="overflow-hidden">

@@ -524,9 +524,9 @@ describe("EditStudentModal", () => {
     it("hides the Documents tab for PMU (JNV NVS) Students", () => {
       renderModal();
 
-      // #433 left NVS with no tab strip, Details being the only tab then. Exams
-      // is offered under every program, so the strip is back — without Documents.
-      expect(screen.getByRole("tablist")).toBeInTheDocument();
+      // Documents and Exams are both physical-centre only (#433, #434), so NVS
+      // has nothing to switch between — no tab strip at all.
+      expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
       expect(screen.queryByRole("tab", { name: "Documents" })).not.toBeInTheDocument();
     });
 
@@ -641,11 +641,12 @@ describe("EditStudentModal", () => {
       expect(tabs).toEqual(["Details", "Documents", "Exams"]);
     });
 
-    it("is offered under the PMU program too, where Documents is not", () => {
+    it("is not offered for PMU (JNV NVS) Students", () => {
       renderModal();
 
-      const tabs = screen.getAllByRole("tab").map((tab) => tab.textContent);
-      expect(tabs).toEqual(["Details", "Exams"]);
+      // Exam registrations are collected at physical centres only (#434).
+      expect(screen.queryByRole("tab", { name: "Exams" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
     });
 
     it("loads the student's exam registrations when opened", async () => {
@@ -653,7 +654,7 @@ describe("EditStudentModal", () => {
       mockFetch.mockResolvedValue(
         new Response(JSON.stringify({ exams: [], records: [] }), { status: 200 }),
       );
-      renderModal();
+      renderModal({ programId: 1 });
 
       await user.click(screen.getByRole("tab", { name: "Exams" }));
 
@@ -666,7 +667,7 @@ describe("EditStudentModal", () => {
     });
 
     it("is unreachable for a student with no record id", () => {
-      renderModal({ student: { ...baseStudent, student_pk_id: null } });
+      renderModal({ programId: 1, student: { ...baseStudent, student_pk_id: null } });
 
       expect(screen.getByRole("tab", { name: "Exams" })).toBeDisabled();
     });

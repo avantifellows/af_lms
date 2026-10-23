@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession, type Session } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { canAccessStudent } from "@/lib/permissions";
+import { canAccessStudent, isPmuOnlyStudent } from "@/lib/permissions";
 import {
   listExamOptions,
   listStudentExamRecords,
@@ -21,6 +21,11 @@ import type { StudentExamRecord } from "@/lib/competitive-exams";
 // The Exams tab of Edit Student. Both verbs require edit rights on the
 // Student, not just view: the response carries exam-portal passwords, which no
 // other surface exposes.
+//
+// Exam registrations are a physical-centre feature (#434, confirmed with the
+// Programs team), so both verbs also refuse a PMU (JNV NVS) Student outright
+// — the UI hides the tab for them, and the endpoint can't be used to put one
+// on an NVS Student behind its back.
 
 function parseStudentId(raw: string): number | null {
   // Exact integer only — `Number.parseInt` would turn "5abc" into another
@@ -51,6 +56,15 @@ async function gate(
     return {
       ok: false,
       response: NextResponse.json({ error: "Forbidden" }, { status: 403 }),
+    };
+  }
+  if (await isPmuOnlyStudent(studentId)) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: "Exam registrations are not collected for JNV NVS Students" },
+        { status: 403 },
+      ),
     };
   }
   return { ok: true, studentId };

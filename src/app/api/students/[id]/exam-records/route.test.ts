@@ -41,12 +41,20 @@ const NEET = { id: 2, name: "NEET" };
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // clearAllMocks leaves queued `mockResolvedValueOnce` values in place; a gate
+  // that short-circuits (read-only, PMU) leaves its unused rows behind and
+  // shifts the next test's queue, so the query queue is reset outright.
+  mockQuery.mockReset();
   mockListExams.mockResolvedValue([JEE, NEET]);
   mockListRecords.mockResolvedValue([]);
 });
 
-/** The two queries `canAccessStudent` runs: the Student's school, then the permission. */
-function authorize({ readOnly = false } = {}) {
+/**
+ * The three queries the gate runs: the Student's school, the permission, then
+ * `isPmuOnlyStudent` — which the Student fails by default, being a
+ * physical-centre Student with a current non-NVS batch.
+ */
+function authorize({ readOnly = false, pmuOnly = false } = {}) {
   mockSession.mockResolvedValue(ADMIN_SESSION);
   mockQuery.mockResolvedValueOnce([{ code: "12345", region: "West", program_id: 1 }]);
   mockQuery.mockResolvedValueOnce([
@@ -59,6 +67,9 @@ function authorize({ readOnly = false } = {}) {
       program_ids: readOnly ? [1] : null,
       read_only: readOnly,
     },
+  ]);
+  mockQuery.mockResolvedValueOnce([
+    pmuOnly ? { nvs: true, other: false } : { nvs: false, other: true },
   ]);
 }
 
@@ -94,6 +105,18 @@ describe("GET /api/students/[id]/exam-records", () => {
     expect(mockListRecords).not.toHaveBeenCalled();
   });
 
+  it("refuses a PMU (JNV NVS) Student — exams are physical-centre only", async () => {
+    authorize({ pmuOnly: true });
+
+    const res = await GET(new Request("http://test"), routeParams({ id: "7" }));
+
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({
+      error: "Exam registrations are not collected for JNV NVS Students",
+    });
+    expect(mockListRecords).not.toHaveBeenCalled();
+  });
+
   it("returns the picker options and the stored registrations", async () => {
     authorize();
     mockListRecords.mockResolvedValue([
@@ -121,6 +144,20 @@ describe("GET /api/students/[id]/exam-records", () => {
 });
 
 describe("PUT /api/students/[id]/exam-records", () => {
+  it("refuses a PMU (JNV NVS) Student, so the UI gate can't be walked around", async () => {
+    authorize({ pmuOnly: true });
+
+    const res = await PUT(
+      putRequest({ exams: [{ exam_id: 1, application_number: "JEE123" }] }),
+      routeParams({ id: "7" }),
+    );
+
+    expect(res.status).toBe(403);
+    expect(mockCreate).not.toHaveBeenCalled();
+    expect(mockUpdate).not.toHaveBeenCalled();
+    expect(mockDelete).not.toHaveBeenCalled();
+  });
+
   it("refuses a read-only user before touching the DB Service", async () => {
     authorize({ readOnly: true });
 

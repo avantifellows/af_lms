@@ -18,7 +18,7 @@ edges:
     condition: when adding LMS API routes for create or bulk upload
   - target: patterns/db-service-write.md
     condition: when proxying student writes to the DB Service
-last_updated: 2026-10-19
+last_updated: 2026-10-23
 ---
 
 # Student Addition
@@ -87,21 +87,33 @@ fields, and the modal never sends them for NVS because they are never rendered.
 
 Student documents follow the same rule (PR #433): under the NVS program the Edit Student
 Documents tab is not rendered and the roster card's expanded Documents list is hidden via
-`StudentCard`'s `isNvs`. The `/api/students/[id]/documents` routes are unchanged. #433 left
-NVS with no tab strip at all, since Details was then the only tab; the Exams tab (#434) is
-offered under every program, so the strip is back for NVS with Details and Exams on it. The
-NVS roster card's expanded view is also limited to the Edit Student fields its summary
-doesn't already show (`NvsDetailGroups` in `StudentTable.tsx`: CWSN, Father Name, Annual
-Family Income, Board Stream, G10 board, Grade 10 Roll no), so the card never shows fields the
-Edit form can't change — the Exam Registrations table sits outside that split and shows for
-every program. Keep the two in sync when an Edit Student field is added or removed for NVS.
+`StudentCard`'s `isNvs`. The `/api/students/[id]/documents` routes are unchanged. Exam
+registrations (#434) are physical-centre only for the same reason, so NVS still has **no tab
+strip at all** — Details is the whole form, and the roster card carries neither the exam tags
+nor the Exam Registrations table. The NVS roster card's expanded view is also limited to the
+Edit Student fields its summary doesn't already show (`NvsDetailGroups` in
+`StudentTable.tsx`: CWSN, Father Name, Annual Family Income, Board Stream, G10 board, Grade
+10 Roll no), so the card never shows fields the Edit form can't change. Keep the two in sync
+when an Edit Student field is added or removed for NVS.
+
+**Before building anything onto Edit Student or the roster card, ask which programs it is
+for.** Uniform sizes (#395), the Edit Student field parity work (#431) and exam registrations
+(#434) were each raised by the physical-centre team and each shipped to NVS first, then had
+to be gated afterwards. "The issue doesn't say" means ask, not "every program".
 
 ## Exam Registrations (Exams tab)
 
 GitHub issue https://github.com/avantifellows/af_lms/issues/434 asked for the competitive
 exams a Student applies for to be captured in the LMS instead of an ops sheet. Edit Student
-has an **Exams** tab after Documents, one block per exam. It is offered under
-every program, NVS included — the issue draws no program distinction.
+has an **Exams** tab after Documents, one block per exam. It is a **physical-centre
+feature**: the issue drew no program distinction, and the Programs team confirmed on
+2026-10-23 that it is for physical schools only, as #395 and #431 were. PMU (JNV NVS)
+Students are gated out in four places — the Edit Student tab strip (`isPmuProgram`), the
+roster card (`StudentCard`'s `isNvs`), the roster read (`collectsExamRecords` in
+`school-students.ts`, which keeps a mixed-program Student in), and the API, where both verbs
+refuse a Student whose every current batch is NVS (`isPmuOnlyStudent` in `permissions.ts`,
+403). The API gate is the one that matters: hiding the tab alone would leave the endpoint
+open.
 
 The exams on offer are a curated list of `exam.name` values in `src/lib/competitive-exams.ts`
 — client-safe, so the picker and the server validation cannot drift. The `exam` table also
@@ -120,7 +132,7 @@ year, the sittings applied for. Only JEE Mains has sittings today (`EXAM_SESSION
 Reads go through Postgres (`src/lib/student-exam-records.ts`), writes through
 `PUT /api/students/[id]/exam-records`, which both verbs gate with
 `canAccessStudent(..., { requireEdit: true })` — not just view, because the response carries
-exam-portal passwords. The route reconciles against what is stored: removals first (an
+exam-portal passwords — and then with `isPmuOnlyStudent`, which 403s a JNV NVS Student. The route reconciles against what is stored: removals first (an
 application number moved between exams would otherwise collide with the DB Service's
 upsert), then a PATCH per changed registration and a POST per new one, skipping no-ops.
 Per-call failures come back as `warnings`; everything failing is a 502.

@@ -26,7 +26,7 @@ edges:
     condition: when working on teacher feedback setup, the feedback form, or its report
   - target: patterns/INDEX.md
     condition: when starting a task — check the pattern index for a matching pattern file
-last_updated: 2026-10-19
+last_updated: 2026-10-23
 ---
 
 # Session Bootstrap
@@ -45,11 +45,12 @@ Then read this file fully before doing anything else in this session.
   for JEE Mains only, the sittings applied for. The roster card tags every exam applied for
   and lists them in an Exam Registrations table whose password column is always a mask — the
   stored password reaches a browser only through the edit-gated Exams tab. Reads come from
-  Postgres; writes proxy to the DB Service's `/student-exam-record`. Offered under every
-  program, NVS included, so the tab strip #433 removed for NVS is back with Details and
-  Exams on it (still no Documents tab there). Needs DB Service `sessions_applied`
-  (db-service PR #788) deployed first. See `context/student-addition.md` and
-  `context/data-access.md` §2.
+  Postgres; writes proxy to the DB Service's `/student-exam-record`. **Physical centres
+  only** (confirmed with the Programs team, 2026-10-23): PMU (JNV NVS) Students get no tab
+  strip at all, no exam tags or table on the roster card, no exam rows in the roster read,
+  and the API refuses them outright via `isPmuOnlyStudent`. Needs DB Service
+  `sessions_applied` (db-service PR #788, still open) deployed first. See
+  `context/student-addition.md` and `context/data-access.md` §2.
 - Issue #412 (feature branch): the dormant Holistic privacy helper erases Follow-up answers after creating the privacy tombstone and records the actual changed-answer count in a separate immutable audit. Existing tombstones are supported without rewriting their original audit. Requires the companion db-service migration first. The endpoint and action policy remain disabled; no historical data repair or external-process rollout is included. See `context/data-access.md` and `patterns/holistic-privacy-erasure.md`.
 - Issue #361 slice #363: PMU Manager (`pmu_manager`) and PMU Govt School User (`pmu_govt_school_user`) exist in the permission layer, pinned to JNV NVS (ADR 0007): matrix `students` edit + `performance` view only, program context always `[64]`/NVS-only, no centre seats or centre access, `ownsRecord` only for 64, and `canAccessStudent` requires a current NVS batch (`hasCurrentNvsBatchSql`). Admin user management, school page, dashboard and other PMU surfaces are later slices. See `context/permissions.md`.
 - Issue #361 slice #364: login is Google-only (ADR 0007); Dev Login stays in non-prod. `isRetiredToken` (`src/lib/retired-session.ts`, no DB imports) flags JWTs from the retired login by their raw token fields. The `jwt` callback throws on them, and `proxy` treats them as no token and clears the plain, `__Secure-` and chunked session cookies.

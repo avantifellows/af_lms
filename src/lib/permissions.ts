@@ -588,6 +588,36 @@ export async function studentHasCurrentNvsBatch(studentPkId: number | string): P
   return rows[0]?.has_current_nvs_batch === true;
 }
 
+/**
+ * "Every current batch this Student has is a JNV NVS one." Features built for
+ * physical centres — uniform sizes, documents, exam registrations (#433, #434)
+ * — are refused for these Students at the API, not merely hidden in the UI.
+ *
+ * A Student with no current batch at all is not PMU, and a mixed Student who
+ * also sits in a physical-centre Program keeps the feature: the UI gates those
+ * on the Program the roster is acting under, and the API must not be stricter
+ * than the surface that calls it.
+ */
+export async function isPmuOnlyStudent(studentPkId: number | string): Promise<boolean> {
+  const rows = await query<{ nvs: boolean; other: boolean }>(
+    `SELECT ${hasCurrentNvsBatchSql("s.user_id")} AS nvs,
+            EXISTS (
+              SELECT 1
+              FROM enrollment_record er_other
+              JOIN batch b_other ON b_other.id = er_other.group_id
+              WHERE er_other.user_id = s.user_id
+                AND er_other.group_type = 'batch'
+                AND er_other.is_current = true
+                AND b_other.program_id IS DISTINCT FROM ${PMU_PROGRAM_ID}
+            ) AS other
+     FROM student s
+     WHERE s.id = $1`,
+    [studentPkId],
+  );
+  const row = rows[0];
+  return row?.nvs === true && row.other !== true;
+}
+
 // Permission gate for routes scoped to a single student, checked via
 // canAccessSchool against the user's user_permission row.
 //
