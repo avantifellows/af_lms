@@ -22,6 +22,9 @@ export type PmuRow = {
 export const PMU_SEATED_ERROR =
   "This user is assigned to a centre. Remove their centre assignments in Staff Management before giving them a PMU role.";
 
+export const ALUMNI_SEATED_ERROR =
+  "This user is assigned to a centre. Remove their centre assignments in Staff Management before making them an Alumni Manager.";
+
 // Whether the person behind `email` holds an active centre seat. The seat's
 // User is matched by email (case-insensitive) or through any user_permission
 // row with that email, so a permission linked only by email still counts.

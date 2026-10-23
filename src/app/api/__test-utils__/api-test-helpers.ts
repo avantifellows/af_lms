@@ -46,6 +46,11 @@ export const PMU_GOVT_SESSION = {
   expires: "2099-01-01",
 };
 
+export const ALUMNI_MANAGER_SESSION = {
+  user: { email: "alumni.manager@avantifellows.org", name: "Alumni Manager" },
+  expires: "2099-01-01",
+};
+
 export const NO_SESSION = null;
 
 /**
@@ -69,5 +74,19 @@ export const PMU_GOVT_PERMISSION = {
   school_codes: ["70705"],
   regions: null,
   program_ids: [64],
+  read_only: false,
+};
+
+/**
+ * The stored row behind ALUMNI_MANAGER_SESSION (ADR 0008). Alumni Managers
+ * have no Programs; `getUserPermission` resolves this row to null.
+ */
+export const ALUMNI_MANAGER_PERMISSION = {
+  email: "alumni.manager@avantifellows.org",
+  level: 1 as const,
+  role: "alumni_manager" as const,
+  school_codes: ["70705"],
+  regions: null,
+  program_ids: [],
   read_only: false,
 };
