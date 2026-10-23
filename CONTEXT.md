@@ -146,6 +146,10 @@ _Avoid_: NVS PM, Program Manager (for NVS)
 An external stakeholder of exactly one JNV NVS School, such as its principal, who signs in with their own Google account. Determined by `role = "pmu_govt_school_user"`.
 _Avoid_: Government School (as a role), school login, Passcode user
 
+**Alumni Manager**:
+Views and updates the alumni of their assigned Schools, and nothing else: no Students, programs or other features. Alumni are not Students (ADR 0008). Determined by `role = "alumni_manager"`.
+_Avoid_: Alumni admin, alumni teacher
+
 **Permission Level**:
 Numeric access scope: Level 3 = all schools, Level 2 = region, Level 1 = specific school codes.
 _Avoid_: Access tier, role level

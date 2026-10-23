@@ -78,6 +78,7 @@ export const test = base.extend<{
   programAdminPage: Page;
   teacherPage: Page;
   holisticAdminPage: Page;
+  alumniManagerPage: Page;
   holisticPmPage: Page;
   holisticProgramAdminPage: Page;
   holisticTeacherPage: Page;
@@ -128,6 +129,15 @@ export const test = base.extend<{
     const context = await browser.newContext();
     const page = await context.newPage();
     await authenticatedPage(page, googleUserPayload("holisticAdmin"));
+    await startCoverage(page, testInfo);
+    await use(page);
+    await stopCoverage(page, testInfo);
+    await context.close();
+  },
+  alumniManagerPage: async ({ browser }, use, testInfo) => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await authenticatedPage(page, googleUserPayload("alumniManager"));
     await startCoverage(page, testInfo);
     await use(page);
     await stopCoverage(page, testInfo);

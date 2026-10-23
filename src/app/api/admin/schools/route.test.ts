@@ -108,6 +108,17 @@ describe("GET /api/admin/schools", () => {
     expect(mockQuery).toHaveBeenCalledWith(expect.stringContaining("ILIKE"), ["%EMRS%"]);
   });
 
+  it("searches all school categories for Alumni Managers when scope=alumni", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockGetUserPermission.mockResolvedValue(ADMIN_PERMISSION);
+    mockQuery.mockResolvedValue([]);
+
+    const res = await GET(new Request("http://localhost/api/admin/schools?scope=alumni&q=RSMS") as never);
+    expect(res.status).toBe(200);
+    expect(String(mockQuery.mock.calls[0][0])).not.toContain("af_school_category = 'JNV'");
+    expect(mockQuery.mock.calls[0][1]).toEqual(["%RSMS%"]);
+  });
+
   it("defaults to empty search when no q param", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
     mockGetUserPermission.mockResolvedValue(ADMIN_PERMISSION);

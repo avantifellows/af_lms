@@ -49,6 +49,15 @@ export function isBlendedRole(role: unknown): role is BlendedRole {
   return typeof role === "string" && BLENDED_ROLES.includes(role as BlendedRole);
 }
 
+// Alumni Manager role (ADR 0008). Alumni are not Students: this role reaches
+// alumni records only, through canAccessAlumni. Every Student, School, centre
+// and admin gate treats it as having no permission at all.
+export const ALUMNI_MANAGER_ROLE = "alumni_manager";
+
+export function isAlumniRole(role: unknown): role is typeof ALUMNI_MANAGER_ROLE {
+  return role === ALUMNI_MANAGER_ROLE;
+}
+
 // Google Form the program team uses to collect School issues, feedback and
 // requests. The School page header links to it for PMU roles only.
 export const PMU_FEEDBACK_FORM_URL = "https://forms.gle/Xisa7AjkDp6fMhew6";

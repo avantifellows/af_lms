@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import type { PoolClient } from "pg";
 
-import { HOLISTIC_MENTORSHIP_PROGRAM_IDS, isPmuRole, PMU_PROGRAM_ID, PROGRAM_IDS } from "./constants";
+import { HOLISTIC_MENTORSHIP_PROGRAM_IDS, isAlumniRole, isPmuRole, PMU_PROGRAM_ID, PROGRAM_IDS } from "./constants";
 
 export const HOLISTIC_FIXTURE_MANIFEST = {
   academicYear: "2026-2027",
@@ -20,6 +20,7 @@ export const HOLISTIC_FIXTURE_MANIFEST = {
     "blended_mentor",
     "blended_admin",
     "blended_admin_read_only",
+    "alumni_manager",
   ],
   states: ["locked", "open", "active", "skipped", "pending", "completed"],
   content: ["mapping", "profile", "historical_notes", "draft_notes", "submitted_notes"],
@@ -217,7 +218,9 @@ export async function seedHolisticFixtures(
           ? [...HOLISTIC_MENTORSHIP_PROGRAM_IDS]
           : isPmuRole(role)
             ? [PMU_PROGRAM_ID]
-            : [programId],
+            : isAlumniRole(role)
+              ? []
+              : [programId],
         schoolCode,
         readOnly,
       ]
@@ -248,6 +251,8 @@ export async function seedHolisticFixtures(
   }
   await actor("e2e-pmu-manager@test.local", "pmu_manager", 1, false, jnvSchoolCode);
   await actor("e2e-pmu-govt-school-user@test.local", "pmu_govt_school_user", 1, false, jnvSchoolCode);
+  // The Alumni Manager persona has no Programs; it reaches the fixture School's alumni.
+  await actor("e2e-dev-alumni-manager@test.local", "alumni_manager", 1);
 
   // Blended Learning Dev Login personas hold no School scope and no Programs.
   for (const [email, label, role, readOnly] of [

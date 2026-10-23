@@ -31,7 +31,7 @@ last_updated: 2026-10-22
 2. `npm install`
 3. `cp .env.example .env.local` and fill in values (see below; ask team lead for secrets)
 4. `npm run dev` → http://localhost:3000
-5. In dev, log in via the **Dev Login** personas (admin / program_manager / program_admin / teacher / former_mentor / holistic_admin / read_only / pmu_manager / pmu_govt_school_user / blended_mentor / blended_admin / blended_admin_read_only) — no Google needed (`src/lib/auth.ts`, only when `NODE_ENV !== "production"`). The two PMU personas are seeded by the local fixture setup at a JNV School (level 1, `program_ids = [64]`, no regions). The three Blended Learning personas (`e2e-blended-*@test.local`) are seeded by the same setup with level 1, no School codes, no regions and `program_ids = []`; they land on `/blended-learning`.
+5. In dev, log in via the **Dev Login** personas (admin / program_manager / program_admin / teacher / former_mentor / holistic_admin / read_only / pmu_manager / pmu_govt_school_user / blended_mentor / blended_admin / blended_admin_read_only / alumni_manager) — no Google needed (`src/lib/auth.ts`, only when `NODE_ENV !== "production"`). The two PMU personas are seeded by the local fixture setup at a JNV School (level 1, `program_ids = [64]`, no regions); the Alumni Manager persona at the fixture School (level 1, `program_ids = []`). The three Blended Learning personas (`e2e-blended-*@test.local`) are seeded by the same setup with level 1, no School codes, no regions and `program_ids = []`; they land on `/blended-learning`.
 
 ## Environment Variables
 Required (app won't function without them):

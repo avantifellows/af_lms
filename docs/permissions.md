@@ -28,7 +28,7 @@ Separating scope, capabilities, and ownership keeps each concern simple. A singl
 | Column | Type | Purpose |
 |--------|------|---------|
 | `email` | varchar(255) | User identifier |
-| `role` | varchar(50) | `teacher`, `program_manager`, `program_admin`, `holistic_mentorship_admin`, `admin`, `pmu_manager`, `pmu_govt_school_user`, `blended_mentor`, or `blended_admin` |
+| `role` | varchar(50) | `teacher`, `program_manager`, `program_admin`, `holistic_mentorship_admin`, `admin`, `pmu_manager`, `pmu_govt_school_user`, `blended_mentor`, `blended_admin`, or `alumni_manager` |
 | `level` | integer | 1=specific schools, 2=region, 3=all schools |
 | `school_codes` | text[] | Specific school codes (level 1) |
 | `regions` | text[] | Region names (level 2) |
@@ -125,6 +125,7 @@ The school page query fetches `program_id` per student via a LATERAL join.
 | `pmu_govt_school_user` | No (pinned to JNV NVS) | External stakeholder of one JNV NVS School (e.g. its principal), Google sign-in |
 | `blended_mentor` | No (stored as `[]`) | Blended Learning Mentor: sees and logs Conversations with only their own Mentees |
 | `blended_admin` | No (stored as `[]`) | Blended Learning Admin: every Mentor's Mentees, Mentor Flags, Call Recordings and transcripts; view only (never logs) |
+| `alumni_manager` | No (stored as `{}`; alumni are reached by School) | Alumni team: views and updates alumni of their Schools, nothing else |
 
 ### PMU roles (JNV NVS pinned, ADR 0007)
 
@@ -158,10 +159,21 @@ page and API denies them (`getUserPermission` returns `null` for them).
   `canBlendedLearning`, `canAccessBlendedStudent`). An LMS `admin` acts as a
   Blended Learning Admin. Only a Mentor who is not read-only logs, uploads or
   manages drafts; every Blended Learning Admin is view only.
-  Playing Call Recordings and reading transcripts, the Flags feed and the Mentors
-  tab are for Blended Learning Admins only (read-only ones included). A Student is
+  Playing Call Recordings and reading transcripts and the Mentors tab are for
+  Blended Learning Admins only (read-only ones included). The Flags feed shows an
+  admin every flag and a Mentor only the flags on their own Students. A Student is
   in scope only with an active current-year Mapping (for a Mentor, to them).
 - Full detail: `.mex/context/permissions.md` ("Blended Learning roles").
+
+### Alumni Manager (alumni only, ADR 0008)
+
+`alumni_manager` reaches alumni records and nothing else. `ALUMNI_MANAGER_ROLE` and
+`isAlumniRole(role)` live in `src/lib/constants.ts`.
+
+- **Matrix:** feature `alumni` is `edit` for `admin` and `alumni_manager`, `none` for every other role; `alumni_manager` is `none` on every other feature. `read_only` downgrades `alumni` to view.
+- **Denied by default:** `getUserPermission` returns null for this role, so `getResolvedPermission`, `canAccessSchool`, `canAccessStudent`, `isAdmin` and every guard built on them deny it. Alumni code reads the row through `getAlumniPermission` and gates single alumni with `canAccessAlumni`.
+- **Scope:** level 1/2/3 with School codes or regions, like other roles. Centre seats never widen it, and seating one is refused (409) in Staff Management and Admin → Users.
+- **Programs:** none. Admin Users `POST`/`PATCH` don't require `program_ids` for this role and always store `{}`; moving a user off the role needs `program_ids` again. The Admin modal hides the Programs checkboxes, and its read-only box reads "can view alumni, cannot edit them".
 
 ---
 

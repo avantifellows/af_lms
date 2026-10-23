@@ -20,6 +20,7 @@ const DEV_PERSONAS = [
   { key: "blended_mentor", label: "Blended Mentor", description: "Blended Learning only, own Mentees" },
   { key: "blended_admin", label: "Blended Admin", description: "Blended Learning only, all Mentors" },
   { key: "blended_admin_read_only", label: "Blended Admin (Read-Only)", description: "Blended Learning only, view + play" },
+  { key: "alumni_manager", label: "Alumni Manager", description: "Level 1, alumni only" },
 ] as const;
 
 // Where to go after sign-in: a same-site path from ?callbackUrl= (e.g. /mcp),

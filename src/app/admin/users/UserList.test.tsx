@@ -1,3 +1,4 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import UserList from "./UserList";
@@ -213,7 +214,7 @@ describe("UserList", () => {
     });
 
     it.each([
-      ["blended_mentor", "Blended Learning Mentor", "bg-teal-100 text-teal-800"],
+      ["blended_mentor", "Blended Learning Mentor", "bg-emerald-100 text-emerald-800"],
       ["blended_admin", "Blended Learning Admin", "bg-sky-100 text-sky-800"],
     ])("renders the %s role label and colour", (role, label, colour) => {
       renderList({
@@ -276,6 +277,25 @@ describe("UserList", () => {
     it("shows 'No programs' for users with null program_ids", () => {
       renderList();
       expect(screen.getByText("No programs")).toBeInTheDocument();
+    });
+
+    it("shows 'Not used', not the 'No programs' warning, for an Alumni Manager", () => {
+      renderList({
+        initialUsers: [
+          {
+            ...users[1],
+            id: 104,
+            email: "alumni@example.com",
+            role: "alumni_manager",
+            school_codes: null,
+            regions: null,
+            program_ids: [],
+          },
+        ],
+      });
+      expect(screen.getByText("Alumni Manager")).toHaveClass("bg-teal-100", "text-teal-800");
+      expect(screen.getByText("Not used")).toBeInTheDocument();
+      expect(screen.queryByText("No programs")).not.toBeInTheDocument();
     });
 
     it("shows read-only and read/write badges", () => {

@@ -75,6 +75,18 @@ describe("LoginPage", () => {
     expect(screen.getByText("Read-Only")).toBeInTheDocument();
     expect(screen.getByText("PMU Manager")).toBeInTheDocument();
     expect(screen.getByText("PMU Govt School User")).toBeInTheDocument();
+    expect(screen.getByText("Alumni Manager")).toBeInTheDocument();
+  });
+
+  it("signs in as an Alumni Manager persona via dev-login", async () => {
+    mockSignIn.mockResolvedValue({ ok: true });
+    const user = userEvent.setup();
+    render(<LoginPage />);
+    await user.click(screen.getByText("Alumni Manager"));
+    expect(mockSignIn).toHaveBeenCalledWith("dev-login", {
+      persona: "alumni_manager",
+      redirect: false,
+    });
   });
 
   it("signs in as a PMU Govt School User persona via dev-login", async () => {

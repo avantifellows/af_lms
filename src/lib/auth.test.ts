@@ -167,6 +167,15 @@ describe("Dev login provider", () => {
     expect(result).toEqual({ id: `dev-${persona}`, email, name });
   });
 
+  it("returns user for valid alumni_manager persona", async () => {
+    const result = await devAuthorize({ persona: "alumni_manager" });
+    expect(result).toEqual({
+      id: "dev-alumni_manager",
+      email: "e2e-dev-alumni-manager@test.local",
+      name: "Dev Alumni Manager",
+    });
+  });
+
   it("returns null for unknown persona", async () => {
     const result = await devAuthorize({ persona: "superadmin" });
     expect(result).toBeNull();

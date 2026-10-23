@@ -25,6 +25,7 @@ export const DEV_LOGIN_PERSONAS = {
     email: "e2e-blended-admin-read-only@test.local",
     name: "Dev Blended Admin (Read-Only)",
   },
+  alumni_manager: { email: "e2e-dev-alumni-manager@test.local", name: "Dev Alumni Manager" },
 } as const;
 
 type DevPersonaKey = keyof typeof DEV_LOGIN_PERSONAS;
