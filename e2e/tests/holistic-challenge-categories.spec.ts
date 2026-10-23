@@ -1,8 +1,10 @@
 import { readFile } from "node:fs/promises";
 
 import type { Page } from "@playwright/test";
+import { parse } from "csv-parse/sync";
 
 import { expect, test } from "../fixtures/auth";
+import { collectBrowserHealth, expectBrowserHealth } from "../helpers/browser-health";
 import { getTestPool } from "../helpers/db";
 
 // The Holistic fixture seeds one categorized submitted Note: the second Grade 12
@@ -23,55 +25,15 @@ const EXPECTED_ROW = [
   "100.0%", "0.0%", "0.0%", "0.0%", "0.0%", "0.0%", "0.0%", "0.0%", "0.0%", "0.0%",
 ];
 
-const CSV_HEADER = [
-  "School", "UDISE Code", "Students (n)",
-  "Academic - Subject/concept issues (count)", "Academic - Subject/concept issues (%)",
-  "\"Academic - Backlogs, revision & workload (count)\"", "\"Academic - Backlogs, revision & workload (%)\"",
+// The route test asserts every column; this checks the School and a few cells.
+const CSV_CATEGORY_COLUMNS = [
   "Academic - Exam/Test related issues (count)", "Academic - Exam/Test related issues (%)",
-  "Academic - Test performance & preparation (count)", "Academic - Test performance & preparation (%)",
-  "Academic - Other (count)", "Academic - Other (%)",
-  "Academic - No major issue reported (count)", "Academic - No major issue reported (%)",
   "Non-academic - Time management & distractions (count)", "Non-academic - Time management & distractions (%)",
-  "Non-academic - Low confidence/motivation (count)", "Non-academic - Low confidence/motivation (%)",
-  "Non-academic - Adjustment difficulties (count)", "Non-academic - Adjustment difficulties (%)",
-  "\"Non-academic - Wellness (health, sleep etc.) (count)\"", "\"Non-academic - Wellness (health, sleep etc.) (%)\"",
-  "Non-academic - Emotional & social stress (count)", "Non-academic - Emotional & social stress (%)",
-  "Non-academic - Career uncertainty (count)", "Non-academic - Career uncertainty (%)",
-  "Non-academic - Financial challenges (count)", "Non-academic - Financial challenges (%)",
-  "Non-academic - Communication & language (count)", "Non-academic - Communication & language (%)",
-  "Non-academic - Other (count)", "Non-academic - Other (%)",
-  "Non-academic - No major issue reported (count)", "Non-academic - No major issue reported (%)",
-].join(",");
+  "Non-academic - Financial challenges (%)",
+];
 
 // n = 1: Exam/Test related issues and Time management & distractions at 1 of 1.
-const EXPECTED_CSV_CELLS =
-  "1,0,0.0,0,0.0,1,100.0,0,0.0,0,0.0,0,0.0,1,100.0,0,0.0,0,0.0,0,0.0,0,0.0,0,0.0,0,0.0,0,0.0,0,0.0,0,0.0";
-
-function csvText(value: string) {
-  return /[",\r\n]/.test(value) ? `"${value.replaceAll('"', '""')}"` : value;
-}
-
-type BrowserHealth = { consoleErrors: string[]; pageErrors: string[]; networkErrors: string[] };
-
-function collectBrowserHealth(page: Page): BrowserHealth {
-  const health: BrowserHealth = { consoleErrors: [], pageErrors: [], networkErrors: [] };
-  page.on("console", (message) => {
-    if (message.type() === "error") health.consoleErrors.push(message.text());
-  });
-  page.on("pageerror", (error) => health.pageErrors.push(error.message));
-  page.on("response", (response) => {
-    if (response.url().includes("/api/holistic-mentorship/") && response.status() >= 500) {
-      health.networkErrors.push(`${response.request().method()} ${response.url()} - HTTP ${response.status()}`);
-    }
-  });
-  return health;
-}
-
-function expectBrowserHealth(health: BrowserHealth) {
-  expect(health.consoleErrors, "browser console errors").toEqual([]);
-  expect(health.pageErrors, "uncaught browser errors").toEqual([]);
-  expect(health.networkErrors, "Holistic Mentorship network errors").toEqual([]);
-}
+const EXPECTED_CSV_VALUES = ["1", "100.0", "1", "100.0", "0.0"];
 
 // Multi-Program viewers land on All Programs; these checks are about Program 1.
 async function openHeatmap(page: Page) {
@@ -253,12 +215,14 @@ test.describe("Challenge Category Heatmap", () => {
     ]);
 
     expect(download.suggestedFilename()).toBe("challenge-categories-2026-2027-grade-12-program-1-phase-4.csv");
-    const csv = await readFile(await download.path(), "utf8");
-    expect(csv.split("\r\n")).toEqual([
-      CSV_HEADER,
-      `All Schools,,${EXPECTED_CSV_CELLS}`,
-      `${csvText(fixture.schoolName)},${fixture.schoolCode},${EXPECTED_CSV_CELLS}`,
+    const [header, ...rows]: string[][] = parse(await readFile(await download.path(), "utf8"));
+    expect(header.slice(0, 3)).toEqual(["School", "UDISE Code", "Students (n)"]);
+    const pick = (row: string[]) => CSV_CATEGORY_COLUMNS.map((column) => row[header.indexOf(column)]);
+    expect(rows.map((row) => row.slice(0, 3))).toEqual([
+      ["All Schools", "", "1"],
+      [fixture.schoolName, fixture.schoolCode, "1"],
     ]);
+    for (const row of rows) expect(pick(row)).toEqual(EXPECTED_CSV_VALUES);
     expectBrowserHealth(health);
   });
 

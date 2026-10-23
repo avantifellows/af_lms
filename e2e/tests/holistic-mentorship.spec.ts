@@ -1,6 +1,7 @@
 import type { Page, TestInfo } from "@playwright/test";
 
 import { expect, test } from "../fixtures/auth";
+import { collectBrowserHealth, expectBrowserHealth } from "../helpers/browser-health";
 import { getTestPool } from "../helpers/db";
 
 type Fixture = {
@@ -1058,34 +1059,3 @@ async function captureResponsiveScreenshot(page: Page, testInfo: TestInfo, name:
   await testInfo.attach(name, { path, contentType: "image/png" });
 }
 
-type BrowserHealth = {
-  consoleErrors: string[];
-  pageErrors: string[];
-  networkErrors: string[];
-};
-
-function collectBrowserHealth(page: Page): BrowserHealth {
-  const health: BrowserHealth = { consoleErrors: [], pageErrors: [], networkErrors: [] };
-  page.on("console", (message) => {
-    if (message.type() === "error") health.consoleErrors.push(message.text());
-  });
-  page.on("pageerror", (error) => health.pageErrors.push(error.message));
-  page.on("requestfailed", (request) => {
-    if (!request.url().includes("/api/holistic-mentorship/")) return;
-    const failure = request.failure()?.errorText ?? "request failed";
-    if (failure.includes("ERR_ABORTED")) return;
-    health.networkErrors.push(`${request.method()} ${request.url()} - ${failure}`);
-  });
-  page.on("response", (response) => {
-    if (response.url().includes("/api/holistic-mentorship/") && response.status() >= 500) {
-      health.networkErrors.push(`${response.request().method()} ${response.url()} - HTTP ${response.status()}`);
-    }
-  });
-  return health;
-}
-
-function expectBrowserHealth(health: BrowserHealth) {
-  expect(health.consoleErrors, "browser console errors").toEqual([]);
-  expect(health.pageErrors, "uncaught browser errors").toEqual([]);
-  expect(health.networkErrors, "Holistic Mentorship network errors").toEqual([]);
-}
