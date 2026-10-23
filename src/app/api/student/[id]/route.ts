@@ -110,6 +110,7 @@ export async function PATCH(
       facts,
       isPhoneStudent,
       allowPhoneBackfill,
+      programId: writeAccess.programId,
     });
     if (!preparation.ok) {
       return NextResponse.json(preparation.body, { status: preparation.status });

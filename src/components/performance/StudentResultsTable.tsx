@@ -67,6 +67,14 @@ function compareNullsLast(
   return mul * (a - b);
 }
 
+// The identity of a Student row: enrollment_user_id, not student_name. Two
+// Students in one test can have the same name, and a shared name gave them one
+// React key, one expanded state and one rank. Use the name only when the row
+// has no id. The prefixes keep an id and a name from ever being equal.
+function studentKey(s: StudentDeepDiveRow): string {
+  return s.enrollment_user_id ? `id:${s.enrollment_user_id}` : `name:${s.student_name}`;
+}
+
 // The on-track / off-track flag asked for in #28, read off the report doc's
 // qualification_status. etl-next already decides this (it drives the student's
 // recommendation message), so this surfaces that call rather than re-deriving
@@ -276,7 +284,7 @@ export default function StudentResultsTable({
   const showTimeColumn = isNvs;
   const [sortKey, setSortKey] = useState<SortKey>("percentage");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
-  const [expandedName, setExpandedName] = useState<string | null>(null);
+  const [expandedKey, setExpandedKey] = useState<string | null>(null);
 
   // Per-student question rows for the whole test, fetched once on first
   // drill-in (the table is clustered such that one all-students query is far
@@ -349,11 +357,11 @@ export default function StudentResultsTable({
 
   // Rank is over submitted attempts only, so a student who never submitted does
   // not consume a position (and does not inflate the "of N" a teacher reads).
-  const rankByName = new Map<string, string>();
+  const rankByKey = new Map<string, string>();
   [...students]
     .filter((s) => s.has_quiz_ended !== false)
     .sort((a, b) => b.percentage - a.percentage)
-    .forEach((s, i) => rankByName.set(s.student_name, String(i + 1).padStart(2, "0")));
+    .forEach((s, i) => rankByKey.set(studentKey(s), String(i + 1).padStart(2, "0")));
 
   const sortIcon = (key: SortKey) => {
     if (sortKey !== key) return "";
@@ -400,9 +408,9 @@ export default function StudentResultsTable({
       : []),
   ];
 
-  const toggleStudent = (name: string) => {
-    const next = expandedName === name ? null : name;
-    setExpandedName(next);
+  const toggleStudent = (key: string) => {
+    const next = expandedKey === key ? null : key;
+    setExpandedKey(next);
     // First drill-in triggers the one-time question fetch.
     if (next) fetchQuestions();
   };
@@ -431,15 +439,16 @@ export default function StudentResultsTable({
           </thead>
           <tbody>
             {sorted.map((s) => {
-              const isExpanded = expandedName === s.student_name;
+              const key = studentKey(s);
+              const isExpanded = expandedKey === key;
               return (
-                <Fragment key={s.student_name}>
+                <Fragment key={key}>
                   <tr
                     className="border-b border-border/25 cursor-pointer transition-colors hover:bg-hover-bg"
-                    onClick={() => toggleStudent(s.student_name)}
+                    onClick={() => toggleStudent(key)}
                   >
                     <td className="px-4 py-3 whitespace-nowrap text-sm font-bold text-accent">
-                      {rankByName.get(s.student_name) ?? "—"}
+                      {rankByKey.get(key) ?? "—"}
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap text-sm font-semibold text-text-primary">
                       {s.student_name}

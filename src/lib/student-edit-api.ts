@@ -171,12 +171,14 @@ function canonicalizePreparedStudentEdit(
   facts: PhoneRegistrationStudentFacts,
   isPhoneStudent: boolean,
   allowPhoneBackfill: boolean,
+  programId?: number | null,
 ) {
   return canonicalizeStudentEditPayload(
     prepareCanonicalStudentEditInput(body, facts, allowPhoneBackfill),
     {
       mode: isPhoneStudent ? PHONE_REGISTRATION_MODE : APPROVED_REGISTRATION_MODE,
       allowPhoneBackfill,
+      programId,
     },
   );
 }
@@ -219,12 +221,15 @@ export function prepareStudentEditFields({
   isPhoneStudent,
   allowPhoneBackfill,
   mode = ACTIVE_REGISTRATION_MODE,
+  programId,
 }: {
   body: Record<string, unknown>;
   facts: PhoneRegistrationStudentFacts;
   isPhoneStudent: boolean;
   allowPhoneBackfill: boolean;
   mode?: RegistrationMode;
+  /** The program the edit is authorized under; gates the centre-only fields. */
+  programId?: number | null;
 }): StudentEditPreparation {
   const restrictedError = restrictedPhoneModePreparationError(body, mode, isPhoneStudent);
   if (restrictedError) return restrictedError;
@@ -232,7 +237,13 @@ export function prepareStudentEditFields({
   const backfillError = phoneBackfillPreparationError(facts, body, allowPhoneBackfill);
   if (backfillError) return backfillError;
 
-  const canonical = canonicalizePreparedStudentEdit(body, facts, isPhoneStudent, allowPhoneBackfill);
+  const canonical = canonicalizePreparedStudentEdit(
+    body,
+    facts,
+    isPhoneStudent,
+    allowPhoneBackfill,
+    programId,
+  );
   return finishPreparedStudentEdit(canonical, body, allowPhoneBackfill);
 }
 
