@@ -157,9 +157,9 @@ for (const { label, viewport, desktop } of VIEWPORTS) {
         expect(overflow).toBeLessThanOrEqual(0);
 
         // Per card: the name, View and New log; plus Kabir's
-        // "Draft ready to review" chip.
+        // "Draft ready to review" chip and the one Resources link.
         const links = page.getByRole("main").getByRole("link");
-        await expect(links).toHaveCount(6 * 3 + 1);
+        await expect(links).toHaveCount(6 * 3 + 1 + 1);
         for (const link of await links.all()) {
           const box = await link.boundingBox();
           expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);

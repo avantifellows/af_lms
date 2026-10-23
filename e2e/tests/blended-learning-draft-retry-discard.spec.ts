@@ -192,7 +192,7 @@ for (const { label, viewport, entryRole } of VIEWPORTS) {
       await expect(page.getByLabel("Upload the recording")).toHaveCount(1);
     });
 
-    test("a read-only admin sees no retry or discard controls, and direct POSTs are refused", async ({ page }) => {
+    test("a read-only admin sees the draft's controls disabled, and direct POSTs are refused", async ({ page }) => {
       const pool = getTestPool();
       let draftId: number;
       try {
@@ -209,7 +209,9 @@ for (const { label, viewport, entryRole } of VIEWPORTS) {
       await page.goto(`/blended-learning/students/${studentIds[rohan.key]}`);
       const panel = draftPanel(page);
       await expect(panel.getByText("Drafting failed")).toBeVisible();
-      await expect(panel.getByRole("button")).toHaveCount(0);
+      // The Mentor's view, view only: Discard stays in place, disabled.
+      await expect(panel.getByRole("button", { name: "Discard" })).toBeDisabled();
+      for (const button of await panel.getByRole("button").all()) await expect(button).toBeDisabled();
 
       for (const action of ["retry", "discard"]) {
         const response = await page.request.post(`/api/blended-learning/drafts/${draftId}/${action}`);
