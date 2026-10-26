@@ -40,14 +40,17 @@ export async function proxy(request: NextRequest) {
     return respond(NextResponse.next());
   }
 
-  // Protected routes - require authentication
+  // Protected routes - require authentication. Sign-in returns to the page
+  // asked for (e.g. a well-being email's Student link) through ?callbackUrl=.
   if (!token) {
-    return respond(NextResponse.redirect(new URL("/", request.url)));
+    const signIn = new URL("/", request.url);
+    signIn.searchParams.set("callbackUrl", pathname + request.nextUrl.search);
+    return respond(NextResponse.redirect(signIn));
   }
 
   return NextResponse.next();
 }
 
 export const config = {
-  matcher: ["/", "/dashboard/:path*", "/school/:path*"],
+  matcher: ["/", "/dashboard/:path*", "/school/:path*", "/blended-learning/:path*"],
 };

@@ -1077,6 +1077,88 @@ describe("AddUserModal — PMU roles", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Blended Learning roles (no School scope, no Programs)
+// ---------------------------------------------------------------------------
+
+describe("AddUserModal — Blended Learning roles", () => {
+  function submittedBody() {
+    const call = mockFetch.mock.calls.find(([url]) => String(url).startsWith("/api/admin/users"));
+    return call ? JSON.parse(call[1].body) : undefined;
+  }
+
+  it("offers both Blended Learning roles with descriptions, and no School or Program pickers", async () => {
+    const user = userEvent.setup();
+    renderModal();
+    const roleSelect = screen.getAllByRole("combobox")[0];
+
+    await user.selectOptions(roleSelect, "blended_mentor");
+    expect(
+      screen.getByText("Blended Learning Mentors can see and log Conversations with only their own Mentees. They have no other LMS access")
+    ).toBeInTheDocument();
+    // Mentors never play recordings, read-only or not.
+    expect(
+      screen.getByLabelText("Read-only access (can view their own Mentees, cannot log or change anything)")
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/play recordings/)).not.toBeInTheDocument();
+    expect(screen.getByText(/Blended Learning users have no School or Program access/)).toBeInTheDocument();
+    expect(screen.queryByText("School Access")).not.toBeInTheDocument();
+    expect(screen.queryByText("Assign Programs")).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("Search schools by name or code...")).not.toBeInTheDocument();
+
+    await user.selectOptions(roleSelect, "blended_admin");
+    expect(
+      screen.getByText("Blended Learning Admins can see every Mentor's Mentees and Mentor Flags, and play Call Recordings and read their transcripts. They view only: only Mentors log. They have no other LMS access")
+    ).toBeInTheDocument();
+    expect(
+      screen.getByLabelText("Read-only access (Blended Learning Admins are always view only)")
+    ).toBeInTheDocument();
+  });
+
+  it("creates a read-only Blended Learning Admin with no School scope and no Programs", async () => {
+    const user = userEvent.setup();
+    mockFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve({}) });
+    const { props } = renderModal();
+
+    await user.type(document.querySelector('input[type="email"]') as HTMLInputElement, "shalinijha@avantifellows.org");
+    await user.selectOptions(screen.getAllByRole("combobox")[0], "blended_admin");
+    await user.click(screen.getByLabelText(/Read-only access/));
+    await user.click(screen.getByRole("button", { name: "Add User" }));
+
+    await waitFor(() => expect(props.onSave).toHaveBeenCalled());
+    expect(submittedBody()).toEqual({
+      email: "shalinijha@avantifellows.org",
+      level: 1,
+      role: "blended_admin",
+      read_only: true,
+      program_ids: [],
+      school_codes: null,
+      regions: null,
+      full_name: null,
+    });
+  });
+
+  it("edits a Blended Learning Mentor without asking for Programs", async () => {
+    const user = userEvent.setup();
+    mockFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve({}) });
+    const { props } = renderModal({
+      user: { ...editUser, role: "blended_mentor", level: 1, regions: null, program_ids: [] },
+    });
+
+    expect(screen.getAllByRole("combobox")[0]).toHaveValue("blended_mentor");
+    await user.click(screen.getByRole("button", { name: "Save Changes" }));
+
+    await waitFor(() => expect(props.onSave).toHaveBeenCalled());
+    expect(submittedBody()).toMatchObject({
+      role: "blended_mentor",
+      level: 1,
+      program_ids: [],
+      school_codes: null,
+      regions: null,
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Alumni Manager (no Programs, alumni only)
 // ---------------------------------------------------------------------------
 

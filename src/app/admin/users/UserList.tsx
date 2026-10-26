@@ -3,7 +3,7 @@
 import { useState } from "react";
 import AddUserModal from "./AddUserModal";
 import { Button } from "@/components/ui";
-import { isAlumniRole, isPmuRole, PROGRAM_ID_TO_LABEL } from "@/lib/constants";
+import { isAlumniRole, isBlendedRole, isPmuRole, PROGRAM_ID_TO_LABEL } from "@/lib/constants";
 
 interface CentreAssignment {
   centreName: string;
@@ -49,7 +49,9 @@ const LEVEL_LABELS: Record<number, string> = {
 };
 
 // PMU roles only ever reach JNV Schools, so their level-3 badge says so.
+// Blended Learning roles reach no School at all, whatever level is stored.
 function levelLabel(user: Pick<UserPermission, "level" | "role">) {
+  if (isBlendedRole(user.role)) return "No School access";
   if (user.level === 3 && isPmuRole(user.role)) return "All JNV Schools";
   return LEVEL_LABELS[user.level];
 }
@@ -67,6 +69,8 @@ const ROLE_LABELS: Record<string, string> = {
   holistic_mentorship_admin: "Holistic Mentorship Admin",
   pmu_manager: "PMU Manager",
   pmu_govt_school_user: "PMU Govt School User",
+  blended_mentor: "Blended Learning Mentor",
+  blended_admin: "Blended Learning Admin",
   alumni_manager: "Alumni Manager",
   teacher: "Teacher",
 };
@@ -78,6 +82,9 @@ const ROLE_COLORS: Record<string, string> = {
   holistic_mentorship_admin: "bg-emerald-100 text-emerald-800",
   pmu_manager: "bg-amber-100 text-amber-800",
   pmu_govt_school_user: "bg-orange-100 text-orange-800",
+  // Distinct hues, so Blended Learning and Alumni rows stay apart.
+  blended_mentor: "bg-emerald-100 text-emerald-800",
+  blended_admin: "bg-sky-100 text-sky-800",
   alumni_manager: "bg-teal-100 text-teal-800",
   teacher: "bg-gray-100 text-gray-800",
 };
@@ -251,6 +258,7 @@ export default function UserList({ initialUsers, regions, schoolCodeToName, curr
 
 /** A user's Programs as chips; Alumni Managers have none by design (ADR 0008), which isn't an error. */
 function ProgramsCell({ role, programIds }: { role: string; programIds: number[] | null }) {
+  if (isBlendedRole(role)) return <span className="text-gray-400 text-xs">Blended Learning only</span>;
   if (programIds && programIds.length > 0) {
     return (
       <div className="flex flex-wrap gap-1">

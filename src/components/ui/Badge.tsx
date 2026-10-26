@@ -4,7 +4,8 @@ import { HTMLAttributes, forwardRef } from "react";
 
 const variantClasses = {
   default: "bg-gray-100 text-gray-700",
-  accent: "bg-success-bg text-accent-hover",
+  // Brand red text on the soft brand-red tint, so the text stays readable.
+  accent: "bg-hover-bg text-accent",
   info: "bg-info-bg text-info",
   success: "bg-green-100 text-green-800",
   warning: "bg-warning-bg text-warning-text",

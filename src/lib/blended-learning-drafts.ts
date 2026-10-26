@@ -1,0 +1,388 @@
+import { randomUUID } from "node:crypto";
+
+import { query, withTransaction } from "./db";
+import {
+  canAccessBlendedStudent,
+  canBlendedLearning,
+  lockMappingInScope,
+  type BlendedLearningAccess,
+} from "./blended-learning-access";
+import { blendedLearningRecordingPrefix, headObject, presignUpload } from "./s3";
+import type { DraftNote } from "./blended-learning-draft-notes";
+import { validateSessionDetails, type SessionDetails } from "./blended-learning-session-details";
+
+// Call Recording upload and Conversation Draft use cases (server-only). The
+// browser PUTs a recording straight to S3 with a presigned URL, then asks for
+// a draft; etl-next transcribes and drafts it (ADR 0009). Drafts never touch
+// Last Contact, Talk to First, counts or flags: those read Conversations only.
+
+const MAX_RECORDING_BYTES = 200 * 1024 * 1024;
+const UPLOAD_URL_TTL_SECONDS = 15 * 60;
+const RECORDING_TYPES: Record<string, string> = { mp3: "audio/mpeg", m4a: "audio/mp4", wav: "audio/wav" };
+
+type Failure = { ok: false; status: 403 | 404 | 409 | 422; error: string; fieldErrors?: Record<string, string> };
+
+type RecordingUpload = { uploadUrl: string; s3Key: string; contentType: string };
+
+function recordingExtension(fileName: unknown): string | null {
+  if (typeof fileName !== "string") return null;
+  const match = /\.([a-z0-9]+)$/i.exec(fileName.trim());
+  const extension = match?.[1].toLowerCase();
+  return extension && RECORDING_TYPES[extension] ? extension : null;
+}
+
+async function openDraftId(studentId: number): Promise<number | null> {
+  const rows = await query<{ id: number | string }>(
+    `SELECT draft.id
+     FROM blended_learning_conversation_drafts draft
+     WHERE draft.student_id = $1 AND draft.state IN ('transcribing', 'ready', 'failed')
+     LIMIT 1`,
+    [studentId]
+  );
+  return rows[0] ? Number(rows[0].id) : null;
+}
+
+// The checks every recording request opens with: the actor can upload, the
+// Student is in scope, and the body is read as an object.
+async function openUpload(
+  access: BlendedLearningAccess,
+  studentId: number,
+  raw: unknown
+): Promise<{ ok: true; body: Record<string, unknown> } | Failure> {
+  if (!canBlendedLearning(access, "upload")) return { ok: false, status: 403, error: "Forbidden" };
+  if (!(await canAccessBlendedStudent(access, studentId))) return { ok: false, status: 404, error: "Not found" };
+  return { ok: true, body: (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown> };
+}
+
+// Issue a presigned PUT for one Call Recording. The type comes from the file
+// extension, because phones often send an empty or odd MIME type.
+export async function issueRecordingUpload(
+  access: BlendedLearningAccess,
+  studentId: number,
+  raw: unknown
+): Promise<{ ok: true; upload: RecordingUpload } | Failure> {
+  const opened = await openUpload(access, studentId, raw);
+  if (!opened.ok) return opened;
+  const { body } = opened;
+  const extension = recordingExtension(body.fileName);
+  if (!extension) return { ok: false, status: 422, error: "Choose an MP3, M4A or WAV recording." };
+  const size = body.byteSize;
+  if (typeof size !== "number" || !Number.isInteger(size) || size < 1 || size > MAX_RECORDING_BYTES) {
+    return { ok: false, status: 422, error: "A recording must be 200 MB or smaller." };
+  }
+  if ((await openDraftId(studentId)) !== null) {
+    return { ok: false, status: 409, error: "This Mentee already has a Conversation Draft." };
+  }
+
+  const contentType = RECORDING_TYPES[extension];
+  const s3Key = `${blendedLearningRecordingPrefix(studentId)}${randomUUID()}.${extension}`;
+  const uploadUrl = await presignUpload({ s3Key, contentType, ttlSeconds: UPLOAD_URL_TTL_SECONDS });
+  return { ok: true, upload: { uploadUrl, s3Key, contentType } };
+}
+
+// --- Draft creation ----------------------------------------------------------
+
+// The part of a recording key after the Student's prefix: `{uuid}.{ext}`.
+const RECORDING_FILE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(mp3|m4a|wav)$/;
+
+// The content type a recording was uploaded with, or null for a key that is
+// not under this Student's recordings prefix.
+function recordingKeyContentType(studentId: number, key: unknown): string | null {
+  const prefix = blendedLearningRecordingPrefix(studentId);
+  if (typeof key !== "string" || !key.startsWith(prefix)) return null;
+  const match = RECORDING_FILE.exec(key.slice(prefix.length));
+  return match ? RECORDING_TYPES[match[1]] : null;
+}
+
+class OutOfScope extends Error {}
+
+function invalid(fieldErrors: Record<string, string>): Failure {
+  const [first] = Object.values(fieldErrors);
+  return { ok: false, status: 422, error: first, fieldErrors };
+}
+
+// Create the Conversation Draft for an uploaded Call Recording, with its
+// queued Transcription Request, then wake etl-next.
+export async function createDraft(
+  access: BlendedLearningAccess,
+  studentId: number,
+  raw: unknown,
+  today: string
+): Promise<{ ok: true; draftId: number } | Failure> {
+  const opened = await openUpload(access, studentId, raw);
+  if (!opened.ok) return opened;
+  const { body } = opened;
+  const contentType = recordingKeyContentType(studentId, body.s3Key);
+  if (!contentType) return invalid({ s3Key: "This recording isn't this Mentee's. Upload it again." });
+  const s3Key = body.s3Key as string;
+  const session = validateSessionDetails(body, today);
+  if (!session.ok) return invalid(session.fieldErrors);
+  const stored = await headObject(s3Key);
+  if (!stored || stored.byteSize !== body.byteSize) {
+    return invalid({ s3Key: "The recording didn't finish uploading. Upload it again." });
+  }
+  // The upload URL only trusted the size the browser declared; this is the
+  // size S3 actually holds. The bucket's lifecycle rule expires the object.
+  if (stored.byteSize < 1 || stored.byteSize > MAX_RECORDING_BYTES) {
+    return invalid({ s3Key: "A recording must be 200 MB or smaller." });
+  }
+
+  let created: { draftId: number; requestKey: string };
+  try {
+    created = await withTransaction(async (client) => {
+      const mapping = await lockMappingInScope(client, access, studentId);
+      if (!mapping) throw new OutOfScope();
+      const { details } = session;
+      const draft = await client.query<{ id: number | string }>(
+        `INSERT INTO blended_learning_conversation_drafts (student_id, program_id, academic_year, mentor_user_id, created_by_email, state, occurred_on, mode, spoke_with, duration_minutes, call_recording_s3_key, recording_content_type)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+         RETURNING id`,
+        [
+          studentId,
+          Number(mapping.program_id),
+          mapping.academic_year,
+          Number(mapping.mentor_user_id),
+          access.actorEmail,
+          "transcribing",
+          details.occurredOn,
+          details.mode,
+          details.spokeWith,
+          details.durationMinutes,
+          s3Key,
+          contentType,
+        ]
+      );
+      const draftId = Number(draft.rows[0].id);
+      const requestKey = randomUUID();
+      await client.query(
+        `INSERT INTO blended_learning_transcription_requests (request_key, draft_id, student_id, requested_by_email, state)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [requestKey, draftId, studentId, access.actorEmail, "queued"]
+      );
+      return { draftId, requestKey };
+    });
+  } catch (error) {
+    if (error instanceof OutOfScope) return { ok: false, status: 404, error: "Not found" };
+    if ((error as { code?: unknown } | null)?.code === "23505") {
+      return { ok: false, status: 409, error: "This Mentee already has a Conversation Draft." };
+    }
+    throw error;
+  }
+
+  await wakeTranscription(created.requestKey);
+  return { ok: true, draftId: created.draftId };
+}
+
+// --- Waking etl-next ---------------------------------------------------------
+
+// Ask etl-next to drain one queued Transcription Request, the way Holistic
+// Profile regeneration does. Never throws: if the wake fails the request
+// stays queued, and "Retry drafting" wakes it again. etl-next derives the run
+// id from the request key, so a repeated wake is a no-op.
+async function wakeTranscription(requestKey: string): Promise<void> {
+  const base = process.env.BLENDED_LEARNING_ETL_URL?.trim().replace(/\/+$/, "");
+  const token = process.env.BLENDED_LEARNING_ETL_TOKEN?.trim();
+  const environment = process.env.APP_ENV;
+  if (!base || !token || (environment !== "staging" && environment !== "production")) return;
+
+  let response: Response;
+  try {
+    response = await fetch(
+      `${base}/api/internal/blended-learning/transcription-requests/${encodeURIComponent(requestKey)}/enqueue`,
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ environment }),
+        signal: AbortSignal.timeout(15_000),
+      }
+    );
+  } catch {
+    return;
+  }
+  if (!response.ok) console.error("[blended-learning] etl-next wake failed", { status: response.status });
+}
+
+// --- Draft status, retry and discard ---------------------------------------
+
+export type DraftState = "transcribing" | "ready" | "failed" | "discarded" | "saved";
+type DraftStatus = { id: number; state: DraftState; retryOffered: boolean };
+
+type DraftRow = {
+  id: number | string;
+  student_id: number | string;
+  state: DraftState;
+  request_key: string | null;
+  request_state: string | null;
+  // The active request was created more than 10 minutes ago.
+  request_stale: boolean | null;
+};
+
+// One draft with its active (queued or running) Transcription Request, if
+// any. Null when there is no such draft or it is out of scope.
+async function readDraft(access: BlendedLearningAccess, draftId: number): Promise<DraftRow | null> {
+  if (!Number.isSafeInteger(draftId) || draftId <= 0) return null;
+  const rows = await query<DraftRow>(
+    `SELECT draft.id, draft.student_id, draft.state,
+            request.request_key, request.state AS request_state,
+            (request.inserted_at < now() - interval '10 minutes') AS request_stale
+     FROM blended_learning_conversation_drafts draft
+     LEFT JOIN blended_learning_transcription_requests request
+       ON request.draft_id = draft.id AND request.state IN ('queued', 'running')
+     WHERE draft.id = $1
+     LIMIT 1`,
+    [draftId]
+  );
+  const draft = rows[0];
+  if (!draft || !(await canAccessBlendedStudent(access, Number(draft.student_id)))) return null;
+  return draft;
+}
+
+// Transcribing, but its request has waited in the queue for over 10 minutes
+// without etl-next starting it. A younger one is still waiting its turn.
+function queuedForEtl(draft: DraftRow): boolean {
+  return draft.state === "transcribing" && draft.request_state === "queued" && draft.request_stale === true;
+}
+
+function draftStatus(access: BlendedLearningAccess, draft: DraftRow): DraftStatus {
+  const retryable = draft.state === "failed" || queuedForEtl(draft);
+  return { id: Number(draft.id), state: draft.state, retryOffered: retryable && canBlendedLearning(access, "manage_draft") };
+}
+
+// One draft's state, for the detail page's polling. "Retry drafting" is
+// offered to those who can manage drafts when the draft failed, or when its
+// request is still queued after 10 minutes. Null when the draft is out of scope.
+export async function getDraftStatus(access: BlendedLearningAccess, draftId: number): Promise<DraftStatus | null> {
+  const draft = await readDraft(access, draftId);
+  return draft ? draftStatus(access, draft) : null;
+}
+
+class Conflict extends Error {}
+
+const NOT_RETRYABLE: Failure = { ok: false, status: 409, error: "This draft can't be retried now." };
+
+// "Retry drafting". A request still queued after 10 minutes is woken again
+// with the same request key. A failed draft gets a new Transcription Request
+// and moves back to transcribing in one transaction, then ETL is woken.
+// Anything else is 409.
+export async function retryDrafting(
+  access: BlendedLearningAccess,
+  draftId: number
+): Promise<{ ok: true; draft: DraftStatus } | Failure> {
+  if (!canBlendedLearning(access, "manage_draft")) return { ok: false, status: 403, error: "Forbidden" };
+  const draft = await readDraft(access, draftId);
+  if (!draft) return { ok: false, status: 404, error: "Not found" };
+
+  let requestKey: string;
+  if (queuedForEtl(draft) && draft.request_key) {
+    requestKey = draft.request_key;
+  } else if (draft.state === "failed") {
+    try {
+      requestKey = await withTransaction(async (client) => {
+        const moved = await client.query(
+          `UPDATE blended_learning_conversation_drafts
+           SET state = $2, updated_at = now()
+           WHERE id = $1 AND state = 'failed'
+           RETURNING id`,
+          [draftId, "transcribing"]
+        );
+        if (moved.rows.length === 0) throw new Conflict();
+        const key = randomUUID();
+        await client.query(
+          `INSERT INTO blended_learning_transcription_requests (request_key, draft_id, student_id, requested_by_email, state)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [key, draftId, Number(draft.student_id), access.actorEmail, "queued"]
+        );
+        return key;
+      });
+    } catch (error) {
+      if (error instanceof Conflict || (error as { code?: unknown } | null)?.code === "23505") return NOT_RETRYABLE;
+      throw error;
+    }
+  } else {
+    return NOT_RETRYABLE;
+  }
+
+  await wakeTranscription(requestKey);
+  const status = await getDraftStatus(access, draftId);
+  if (!status) return { ok: false, status: 404, error: "Not found" };
+  return { ok: true, draft: status };
+}
+
+// Discard an open draft (transcribing, ready or failed). That frees the Mentee
+// for a new upload or a hand-logged Conversation. If ETL finishes later,
+// db-service leaves a discarded draft alone. Anything else is 409.
+export async function discardDraft(
+  access: BlendedLearningAccess,
+  draftId: number
+): Promise<{ ok: true; draft: { id: number; state: "discarded" } } | Failure> {
+  if (!canBlendedLearning(access, "manage_draft")) return { ok: false, status: 403, error: "Forbidden" };
+  if (!(await readDraft(access, draftId))) return { ok: false, status: 404, error: "Not found" };
+
+  const discarded = await query<{ id: number | string }>(
+    `UPDATE blended_learning_conversation_drafts
+     SET state = $2, discarded_at = now(), updated_at = now()
+     WHERE id = $1 AND state IN ('transcribing', 'ready', 'failed')
+     RETURNING id`,
+    [draftId, "discarded"]
+  );
+  if (discarded.length === 0) return { ok: false, status: 409, error: "This draft can't be discarded now." };
+  return { ok: true, draft: { id: draftId, state: "discarded" } };
+}
+
+// --- Draft review ------------------------------------------------------------
+
+type DraftActionItem = { text: string; owner: "student" | "mentor" | "parent" };
+
+// A ready draft, as the log form opens it for review. The session details are
+// those the Mentor entered before uploading, if any.
+export type DraftForReview = {
+  id: number;
+  occurredOn: string | null;
+  mode: SessionDetails["mode"];
+  spokeWith: SessionDetails["spokeWith"];
+  durationMinutes: number | null;
+  summary: string;
+  actionItems: DraftActionItem[];
+  notes: DraftNote[];
+};
+
+type ReviewRow = {
+  id: number | string;
+  occurred_on: string | null;
+  mode: SessionDetails["mode"];
+  spoke_with: SessionDetails["spokeWith"];
+  duration_minutes: number | null;
+  draft_summary: string;
+  draft_action_items: DraftActionItem[] | null;
+  draft_notes: DraftNote[] | null;
+};
+
+// The Mentee's ready draft, for those who can log. Null when there is none,
+// the draft is not ready, or the Student is out of scope.
+export async function getDraftForReview(
+  access: BlendedLearningAccess,
+  studentId: number
+): Promise<DraftForReview | null> {
+  if (!canBlendedLearning(access, "log")) return null;
+  if (!(await canAccessBlendedStudent(access, studentId))) return null;
+  const rows = await query<ReviewRow>(
+    `SELECT draft.id, draft.occurred_on::text AS occurred_on, draft.mode, draft.spoke_with, draft.duration_minutes,
+            draft.draft_summary, draft.draft_action_items, draft.draft_notes
+     FROM blended_learning_conversation_drafts draft
+     WHERE draft.student_id = $1 AND draft.state = 'ready'
+     LIMIT 1`,
+    [studentId]
+  );
+  const draft = rows[0];
+  if (!draft) return null;
+  return {
+    id: Number(draft.id),
+    occurredOn: draft.occurred_on,
+    mode: draft.mode,
+    spokeWith: draft.spoke_with,
+    durationMinutes: draft.duration_minutes,
+    summary: draft.draft_summary,
+    actionItems: (draft.draft_action_items ?? []).map((item) => ({ text: item.text, owner: item.owner })),
+    notes: draft.draft_notes ?? [],
+  };
+}

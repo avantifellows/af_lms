@@ -85,6 +85,13 @@
   --color-brand-blue-bg: var(--color-brand-blue-bg);
 }
 
+/* Always keep room for the scrollbar, so a centred header or page sits at
+   the same x whether or not the page is long enough to scroll (the dashboard
+   tabs vs the Blended Learning tab, say). */
+html {
+  scrollbar-gutter: stable;
+}
+
 body {
   background: var(--background);
   color: var(--foreground);

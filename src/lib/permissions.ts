@@ -1,5 +1,7 @@
 import { query } from "./db";
 import {
+  BLENDED_ROLES,
+  isBlendedRole,
   ALUMNI_MANAGER_ROLE,
   isAlumniRole,
   PHYSICAL_CENTRE_PROGRAM_IDS,
@@ -29,6 +31,7 @@ const USER_ROLES = [
   "holistic_mentorship_admin",
   "admin",
   ...PMU_ROLES,
+  ...BLENDED_ROLES,
   ALUMNI_MANAGER_ROLE,
 ] as const;
 export type UserRole = (typeof USER_ROLES)[number];
@@ -49,6 +52,7 @@ export type Feature =
   | "pm_dashboard"
   | "quiz_sessions"
   | "teacher_feedback"
+  | "blended_learning"
   | "alumni";
 
 // Feature access levels
@@ -57,23 +61,26 @@ export type FeatureAccess = "none" | "view" | "edit";
 // Feature permission matrix: feature → role → access level
 // PMU roles (ADR 0007) get students + performance only; every other feature
 // is "none" at every level, whatever their program context says.
+// Blended Learning roles get blended_learning only; every other feature is
+// "none" (and the shared permission lookup denies them anyway).
 // alumni_manager (ADR 0008) gets alumni only — never students.
 const FEATURE_PERMISSIONS: Record<Feature, Record<UserRole, FeatureAccess>> = {
-  students: { teacher: "edit", program_manager: "edit", program_admin: "edit", holistic_mentorship_admin: "none", admin: "edit", pmu_manager: "edit", pmu_govt_school_user: "edit", alumni_manager: "none" },
-  visits: { teacher: "none", program_manager: "edit", program_admin: "edit", holistic_mentorship_admin: "none", admin: "edit", pmu_manager: "none", pmu_govt_school_user: "none", alumni_manager: "none" },
-  curriculum: { teacher: "edit", program_manager: "view", program_admin: "edit", holistic_mentorship_admin: "none", admin: "edit", pmu_manager: "none", pmu_govt_school_user: "none", alumni_manager: "none" },
-  academic_mentorship: { teacher: "none", program_manager: "none", program_admin: "none", holistic_mentorship_admin: "none", admin: "none", pmu_manager: "none", pmu_govt_school_user: "none", alumni_manager: "none" },
-  holistic_mentorship: { teacher: "edit", program_manager: "view", program_admin: "view", holistic_mentorship_admin: "edit", admin: "edit", pmu_manager: "none", pmu_govt_school_user: "none", alumni_manager: "none" },
-  performance: { teacher: "view", program_manager: "view", program_admin: "view", holistic_mentorship_admin: "none", admin: "view", pmu_manager: "view", pmu_govt_school_user: "view", alumni_manager: "none" },
-  summary_stats: { teacher: "none", program_manager: "view", program_admin: "view", holistic_mentorship_admin: "none", admin: "view", pmu_manager: "none", pmu_govt_school_user: "none", alumni_manager: "none" },
-  pm_dashboard: { teacher: "none", program_manager: "view", program_admin: "view", holistic_mentorship_admin: "none", admin: "view", pmu_manager: "none", pmu_govt_school_user: "none", alumni_manager: "none" },
-  quiz_sessions: { teacher: "edit", program_manager: "view", program_admin: "view", holistic_mentorship_admin: "none", admin: "view", pmu_manager: "none", pmu_govt_school_user: "none", alumni_manager: "none" },
+  students: { teacher: "edit", program_manager: "edit", program_admin: "edit", holistic_mentorship_admin: "none", admin: "edit", pmu_manager: "edit", pmu_govt_school_user: "edit", blended_mentor: "none", blended_admin: "none", alumni_manager: "none" },
+  visits: { teacher: "none", program_manager: "edit", program_admin: "edit", holistic_mentorship_admin: "none", admin: "edit", pmu_manager: "none", pmu_govt_school_user: "none", blended_mentor: "none", blended_admin: "none", alumni_manager: "none" },
+  curriculum: { teacher: "edit", program_manager: "view", program_admin: "edit", holistic_mentorship_admin: "none", admin: "edit", pmu_manager: "none", pmu_govt_school_user: "none", blended_mentor: "none", blended_admin: "none", alumni_manager: "none" },
+  academic_mentorship: { teacher: "none", program_manager: "none", program_admin: "none", holistic_mentorship_admin: "none", admin: "none", pmu_manager: "none", pmu_govt_school_user: "none", blended_mentor: "none", blended_admin: "none", alumni_manager: "none" },
+  holistic_mentorship: { teacher: "edit", program_manager: "view", program_admin: "view", holistic_mentorship_admin: "edit", admin: "edit", pmu_manager: "none", pmu_govt_school_user: "none", blended_mentor: "none", blended_admin: "none", alumni_manager: "none" },
+  performance: { teacher: "view", program_manager: "view", program_admin: "view", holistic_mentorship_admin: "none", admin: "view", pmu_manager: "view", pmu_govt_school_user: "view", blended_mentor: "none", blended_admin: "none", alumni_manager: "none" },
+  summary_stats: { teacher: "none", program_manager: "view", program_admin: "view", holistic_mentorship_admin: "none", admin: "view", pmu_manager: "none", pmu_govt_school_user: "none", blended_mentor: "none", blended_admin: "none", alumni_manager: "none" },
+  pm_dashboard: { teacher: "none", program_manager: "view", program_admin: "view", holistic_mentorship_admin: "none", admin: "view", pmu_manager: "none", pmu_govt_school_user: "none", blended_mentor: "none", blended_admin: "none", alumni_manager: "none" },
+  quiz_sessions: { teacher: "edit", program_manager: "view", program_admin: "view", holistic_mentorship_admin: "none", admin: "view", pmu_manager: "none", pmu_govt_school_user: "none", blended_mentor: "none", blended_admin: "none", alumni_manager: "none" },
   // PM-driven: a PM/admin sets up student feedback ABOUT teachers, so teachers
   // must not have edit (or view) here. Mirrors `visits`, which main widened to
   // program_admin: "edit" — feedback setup is the same class of PM fieldwork.
   // `holistic_mentorship_admin` is scoped to its own feature only.
-  teacher_feedback: { teacher: "none", program_manager: "edit", program_admin: "edit", holistic_mentorship_admin: "none", admin: "edit", pmu_manager: "none", pmu_govt_school_user: "none", alumni_manager: "none" },
-  alumni: { teacher: "none", program_manager: "none", program_admin: "none", holistic_mentorship_admin: "none", admin: "edit", pmu_manager: "none", pmu_govt_school_user: "none", alumni_manager: "edit" },
+  teacher_feedback: { teacher: "none", program_manager: "edit", program_admin: "edit", holistic_mentorship_admin: "none", admin: "edit", pmu_manager: "none", pmu_govt_school_user: "none", blended_mentor: "none", blended_admin: "none", alumni_manager: "none" },
+  blended_learning: { teacher: "none", program_manager: "none", program_admin: "none", holistic_mentorship_admin: "none", admin: "edit", pmu_manager: "none", pmu_govt_school_user: "none", blended_mentor: "edit", blended_admin: "edit", alumni_manager: "none" },
+  alumni: { teacher: "none", program_manager: "none", program_admin: "none", holistic_mentorship_admin: "none", admin: "edit", pmu_manager: "none", pmu_govt_school_user: "none", blended_mentor: "none", blended_admin: "none", alumni_manager: "edit" },
 };
 
 // Features gated to CoE/Nodal programs only (NVS-only users get "none")
@@ -193,14 +200,28 @@ export interface ProgramPermissionContext {
   hasCoEOrNodal: boolean;
 }
 
-// The permission every Student, School, centre and admin gate reads. Alumni
-// roles resolve to null here, so they are refused everywhere by default; only
-// alumni code reads them, through getAlumniPermission.
+// The permission every Student, School, centre and admin gate reads. This is
+// the single deny-point (ADR 0008 shape): Blended Learning and alumni roles
+// resolve to null here, so getResolvedPermission, canAccessSchool,
+// canAccessStudent, isAdmin and every existing guard refuse them by default.
+// Only Blended Learning code reads the Blended Learning roles, through
+// getBlendedLearningPermission, and only alumni code reads the alumni roles,
+// through getAlumniPermission.
 export async function getUserPermission(
   email: string
 ): Promise<UserPermission | null> {
   const permission = await readPermissionRow(email);
-  return permission && isAlumniRole(permission.role) ? null : permission;
+  if (!permission) return null;
+  return isBlendedRole(permission.role) || isAlumniRole(permission.role) ? null : permission;
+}
+
+// The permission row for the Blended Learning access policy: any role, no
+// resolved scope (Blended Learning has no School scope). Callers still check
+// the "blended_learning" feature through getFeatureAccess.
+export async function getBlendedLearningPermission(
+  email: string
+): Promise<UserPermission | null> {
+  return readPermissionRow(email);
 }
 
 // The permission for alumni surfaces: any role, with resolved scope. Callers
@@ -612,6 +633,36 @@ export async function studentHasCurrentNvsBatch(studentPkId: number | string): P
     [studentPkId],
   );
   return rows[0]?.has_current_nvs_batch === true;
+}
+
+/**
+ * "Every current batch this Student has is a JNV NVS one." Features built for
+ * physical centres — uniform sizes, documents, exam registrations (#433, #434)
+ * — are refused for these Students at the API, not merely hidden in the UI.
+ *
+ * A Student with no current batch at all is not PMU, and a mixed Student who
+ * also sits in a physical-centre Program keeps the feature: the UI gates those
+ * on the Program the roster is acting under, and the API must not be stricter
+ * than the surface that calls it.
+ */
+export async function isPmuOnlyStudent(studentPkId: number | string): Promise<boolean> {
+  const rows = await query<{ nvs: boolean; other: boolean }>(
+    `SELECT ${hasCurrentNvsBatchSql("s.user_id")} AS nvs,
+            EXISTS (
+              SELECT 1
+              FROM enrollment_record er_other
+              JOIN batch b_other ON b_other.id = er_other.group_id
+              WHERE er_other.user_id = s.user_id
+                AND er_other.group_type = 'batch'
+                AND er_other.is_current = true
+                AND b_other.program_id IS DISTINCT FROM ${PMU_PROGRAM_ID}
+            ) AS other
+     FROM student s
+     WHERE s.id = $1`,
+    [studentPkId],
+  );
+  const row = rows[0];
+  return row?.nvs === true && row.other !== true;
 }
 
 // Permission gate for routes scoped to a single student, checked via

@@ -1,0 +1,52 @@
+import type { FlagRecipient } from "@/lib/blended-learning-mentee-detail";
+
+// Flag Recipient labels, in display order, for the history chips; the log
+// form's switches use FLAG_SWITCH.
+export const FLAG_RECIPIENT: Record<FlagRecipient, string> = {
+  emotional_wellbeing: "Emotional Well-being",
+  physics: "Physics Teacher",
+  chemistry: "Chemistry Teacher",
+  maths: "Maths Teacher",
+};
+
+// The well-being lead, named on the log form as in the PRD.
+const WELLBEING_LEAD = "Shalini";
+
+// The log form's Mentor Flag switches and comments, worded as in the mockup.
+// Only the well-being flag has a help line under its comment.
+export const FLAG_SWITCH: Record<
+  FlagRecipient,
+  { label: string; hint?: string; commentFor: string; placeholder: string; help?: string }
+> = {
+  emotional_wellbeing: {
+    label: `Flag to ${WELLBEING_LEAD}`,
+    hint: "(for emotional well-being)",
+    commentFor: WELLBEING_LEAD,
+    placeholder: "What should she look at?",
+    help: `Use this when something about the student's emotional well-being needs her attention. ${WELLBEING_LEAD} is emailed when you save.`,
+  },
+  physics: {
+    label: "Flag to Physics teacher",
+    commentFor: "the Physics teacher",
+    placeholder: "What should the teacher look at?",
+  },
+  chemistry: {
+    label: "Flag to Chemistry teacher",
+    commentFor: "the Chemistry teacher",
+    placeholder: "What should the teacher look at?",
+  },
+  maths: {
+    label: "Flag to Maths teacher",
+    commentFor: "the Maths teacher",
+    placeholder: "What should the teacher look at?",
+  },
+};
+
+// How the detail page names who a Mentor Flag went to: the history entry's
+// header chip, and the label over the flag's comment. Worded as in the mockup.
+export const FLAG_HISTORY: Record<FlagRecipient, { chip: string; noteLabel: string }> = {
+  emotional_wellbeing: { chip: `Flagged to ${WELLBEING_LEAD}`, noteLabel: `Flag note for ${WELLBEING_LEAD}` },
+  physics: { chip: "Flagged to Physics teacher", noteLabel: "Flag note for the Physics teacher" },
+  chemistry: { chip: "Flagged to Chemistry teacher", noteLabel: "Flag note for the Chemistry teacher" },
+  maths: { chip: "Flagged to Maths teacher", noteLabel: "Flag note for the Maths teacher" },
+};
