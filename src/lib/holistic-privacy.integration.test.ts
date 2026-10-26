@@ -5,7 +5,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 // Explicitly opt in with a migrated, disposable local DB. Synthetic immutable
 // audit rows intentionally remain; drop the disposable DB to remove fixtures.
-// The DB must include db-service #806 (post-session Challenge Category rows).
+// The DB must include db-service #806 (post-session Challenge Category rows) and
+// migration 20261026101410 (the tombstone's post_session_challenges_erased).
 // HOLISTIC_PRIVACY_TEST_DATABASE=dbservice_test_lms412 DATABASE_HOST=localhost \
 // DATABASE_USER=postgres DATABASE_PASSWORD=postgres npx vitest run src/lib/holistic-privacy.integration.test.ts
 const database = process.env.HOLISTIC_PRIVACY_TEST_DATABASE;
@@ -310,7 +311,8 @@ describe.skipIf(!database)("Holistic privacy erasure against disposable Postgres
     const unrelatedBefore = { followUps: await followUps(unrelatedId), content: await otherContent(unrelatedId) };
 
     expect(await request(studentId)).toEqual({ ok: true, profileSummariesErased: 5,
-      historicalAnswersErased: 3, postSessionAnswersErased: 2, followUpAnswersErased: 6 });
+      historicalAnswersErased: 3, postSessionAnswersErased: 2, postSessionChallengesErased: 0,
+      followUpAnswersErased: 6 });
     expect(await followUps(studentId)).toEqual(before.map(({ row }) => ({ row: {
       ...row,
       challenges_answer: row.challenges_answer === null ? null : marker,
@@ -324,12 +326,14 @@ describe.skipIf(!database)("Holistic privacy erasure against disposable Postgres
     const originalAudit = await audits(studentId);
     expect(originalTombstone).toHaveLength(1);
     expect(originalTombstone[0].row).toMatchObject({ student_id: studentId,
-      profile_summaries_erased: 5, historical_answers_erased: 3, post_session_answers_erased: 2 });
+      profile_summaries_erased: 5, historical_answers_erased: 3, post_session_answers_erased: 2,
+      post_session_challenges_erased: 0 });
     expect(originalAudit).toHaveLength(1);
     expect(originalAudit[0].row).toMatchObject({ actor_user_id: actorUserId, answers_erased: 6,
       privacy_deletion_id: originalTombstone[0].row.id, reason: "Synthetic approved issue412 request" });
     expect(await request(studentId)).toEqual({ ok: true, profileSummariesErased: 0,
-      historicalAnswersErased: 0, postSessionAnswersErased: 0, followUpAnswersErased: 0 });
+      historicalAnswersErased: 0, postSessionAnswersErased: 0, postSessionChallengesErased: 0,
+      followUpAnswersErased: 0 });
     expect(await tombstones(studentId)).toEqual(originalTombstone);
     expect(await audits(studentId)).toEqual(originalAudit);
     expect((await otherContent(studentId)).audit_count).toBe(2);
@@ -349,14 +353,34 @@ describe.skipIf(!database)("Holistic privacy erasure against disposable Postgres
       answer: "Unrelated answer", categories: ["non_academic.wellness"],
     });
 
-    expect(await request(studentId)).toMatchObject({ ok: true, postSessionAnswersErased: 1 });
+    expect(await request(studentId)).toMatchObject({
+      ok: true, postSessionAnswersErased: 1, postSessionChallengesErased: 3 });
     expect(await notesContent(answered)).toEqual({
       categories: [], answers: [], revision: 2, audits: ["privacy_content_erased"] });
     expect(await notesContent(categoriesOnly)).toEqual({
       categories: [], answers: [], revision: 2, audits: ["privacy_content_erased"] });
     expect(await notesContent(unrelated)).toEqual({
       categories: ["non_academic.wellness"], answers: ["Unrelated answer"], revision: 1, audits: [] });
-    expect((await tombstones(studentId))[0].row).toMatchObject({ post_session_answers_erased: 1 });
+    expect((await tombstones(studentId))[0].row).toMatchObject({
+      post_session_answers_erased: 1, post_session_challenges_erased: 3 });
+  });
+
+  it("records a Categories-only Student's erasure on the tombstone as Category rows, not answers", async () => {
+    const studentId = await seedBareStudent();
+    const notesId = await seedNotes(studentId, 0, "submitted", {
+      categories: ["academic.exam_related", "non_academic.financial"],
+    });
+
+    expect(await request(studentId)).toEqual({ ok: true, profileSummariesErased: 0,
+      historicalAnswersErased: 0, postSessionAnswersErased: 0, postSessionChallengesErased: 2,
+      followUpAnswersErased: 0 });
+    expect(await notesContent(notesId)).toEqual({
+      categories: [], answers: [], revision: 2, audits: ["privacy_content_erased"] });
+    const [tombstone] = await tombstones(studentId);
+    expect(tombstone.row).toMatchObject({ profile_summaries_erased: 0, historical_answers_erased: 0,
+      post_session_answers_erased: 0, post_session_challenges_erased: 2 });
+    expect(await request(studentId)).toMatchObject({ ok: true, postSessionChallengesErased: 0 });
+    expect(await tombstones(studentId)).toEqual([tombstone]);
   });
 
   it("rejects a Challenge Category insert for a tombstoned Student", async () => {

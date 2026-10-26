@@ -9,7 +9,7 @@ edges:
     condition: when changing the erasure transaction or schema contract
   - target: ../context/permissions.md
     condition: when reasoning about the disabled privacy endpoint
-last_updated: 2026-10-22
+last_updated: 2026-10-26
 ---
 
 # Holistic privacy erasure
@@ -31,10 +31,12 @@ adopt the contract below. Do not infer permission to erase live data from a code
    inserting the tombstone: their update guards reject writes after a tombstone.
    Post-session target Notes are those with answer rows **or** Challenge Category rows
    (`holistic_mentorship_post_session_note_challenges`); delete both in the same statement,
-   and audit `privacy_content_erased` for every target Notes. The tombstone's
-   `post_session_answers_erased` counts answer rows only; there is no Category count column.
+   and audit `privacy_content_erased` for every target Notes. Return both counts from that
+   statement: the tombstone's `post_session_answers_erased` counts answer rows only and
+   `post_session_challenges_erased` counts Category rows (db-service migration `20261026101410`),
+   so a Categories-only Note is never recorded as nothing erased.
    Category inserts after the tombstone are rejected by the shared privacy trigger.
-4. Insert the immutable tombstone with the original counts, or keep the existing
+4. Insert the immutable tombstone with the four content counts, or keep the existing
    one. Finish this statement before updating Follow-up answers so its trigger
    sees the tombstone.
 5. For pending Follow-up rows, replace every non-null answer with the exact erased
@@ -71,7 +73,8 @@ adopt the contract below. Do not infer permission to erase live data from a code
   for multi-phase content, Challenge Category rows (including Categories-only Notes and
   the post-tombstone insert rejection), the three draft-erasure paths, old tombstones,
   replay, rollback and both insertion-race orders. The database must include db-service
-  #806 (`holistic_mentorship_post_session_note_challenges`). Never point these synthetic-fixture tests at production or staging.
+  #806 (`holistic_mentorship_post_session_note_challenges`) and migration `20261026101410`
+  (`post_session_challenges_erased`). Never point these synthetic-fixture tests at production or staging.
 - After db-service has migrated `dbservice_test_lms412`, run from LMS:
 
   ```sh
@@ -83,7 +86,8 @@ adopt the contract below. Do not infer permission to erase live data from a code
   Without the explicit opt-in, the suite skips without importing the database.
   Its immutable synthetic fixtures remain in the disposable database; temporary
   test triggers are removed. Recreate that database when fixtures are no longer needed.
-- Deploy the schema before LMS. For code rollback, revert LMS first and keep the
+- Deploy the schema before LMS: db-service migration `20261026101410` must be live before
+  this LMS release, or every erasure fails on the missing tombstone column. For code rollback, revert LMS first and keep the
   additive schema. Test migration down/reapply only on disposable databases: down
   drops the new audit history and cannot recover erased text. Use forward fixes
   once real audit records exist.

@@ -219,7 +219,9 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
 - **Storage:** `holistic_mentorship_post_session_note_challenges` (db-service #806), one row per
   code, unique `(notes_id, category_code)`, no DB CHECK on codes. Its insert/update trigger shares
   the post-session privacy guard (Student advisory lock, rejects tombstoned Students). Raw SQL (ADR-0005).
-  **Deploy db-service #806 first**: without the table every Notes read, write and erasure fails.
+  **Deploy db-service #806 first**, including migration `20261026101410` (the tombstone's
+  `post_session_challenges_erased` column): without the table every Notes read, write and erasure
+  fails, and without the column every privacy erasure fails.
 - **Validation order:** the student-phase PATCH requires `challenge_categories: string[]` in every
   mode (else 422 `Invalid Notes`). `validateHolisticChallengeCategories(codes, { final: false })` runs
   in the route and again in `saveHolisticNotes` for every mode (trimmed; unknown/duplicate → `Unknown
@@ -232,7 +234,8 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   claiming on write and read, and a Categories-only first draft creates Notes and freezes the Phase.
 - **Erasure:** Category rows are Notes content, deleted with the draft answers on Mapping end,
   Mapping-scoped removal/reassignment and reconciliation, and by `deleteHolisticStudentContent`
-  (before the tombstone; the tombstone still counts answers only).
+  (before the tombstone). The tombstone records `post_session_challenges_erased` (Category rows)
+  next to `post_session_answers_erased` (answer rows only), so a Categories-only Note still counts.
   See `patterns/holistic-privacy-erasure.md`.
 - **Reads:** codes are returned in catalogue order with unknown stored codes dropped, wherever
   `answers` is (drafts to their author only). Students & Progress rows and CSV
