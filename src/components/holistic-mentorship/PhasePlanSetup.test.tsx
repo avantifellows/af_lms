@@ -258,4 +258,123 @@ describe("PhasePlanSetup", () => {
     expect(screen.getByLabelText("Guidance Markdown")).toHaveAttribute("readonly");
     expect(screen.queryByRole("button", { name: "Save Phase" })).not.toBeInTheDocument();
   });
+
+  describe("Phase state changes", () => {
+    const planWith = (state: "locked" | "open") => ({ plan: {
+      id: 7, academicYear: "2026-2027", editable: true, phases: [{
+        id: 21, number: 1, grade: 11, title: "Lifecycle title", state,
+        guidanceMarkdown: "Guidance", revision: 4, frozen: false,
+        everOpened: state === "open", used: false, active: state === "open",
+        questions: [{ id: 41, text: "Question" }],
+      }],
+    } });
+
+    it("opens a Locked Phase after confirmation and keeps it selected after the reload", async () => {
+      const user = userEvent.setup();
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce({ ok: true, json: async () => planWith("locked") })
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true }) })
+        .mockResolvedValueOnce({ ok: true, json: async () => planWith("open") });
+      vi.stubGlobal("fetch", fetchMock);
+      const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+      render(<PhasePlanSetup />);
+
+      await user.click(await screen.findByRole("button", { name: /Lifecycle title/ }));
+      await user.click(screen.getByRole("button", { name: "Open Phase" }));
+
+      expect(confirm).toHaveBeenCalledWith("Open Phase 1?");
+      expect(fetchMock.mock.calls[1][1]).toMatchObject({ method: "PATCH" });
+      expect(JSON.parse(fetchMock.mock.calls[1][1]?.body as string)).toEqual({
+        action: "state", phase_id: 21, expected_revision: 4, state: "open", confirmed: true, program_id: 1,
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expect(await screen.findByRole("button", { name: "Return to Locked" })).toBeInTheDocument();
+      expect(screen.getByLabelText("Title")).toHaveValue("Lifecycle title");
+    });
+
+    it("leaves an Open Phase unchanged when the return to Locked is cancelled", async () => {
+      const user = userEvent.setup();
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => planWith("open") });
+      vi.stubGlobal("fetch", fetchMock);
+      const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+      render(<PhasePlanSetup />);
+
+      await user.click(await screen.findByRole("button", { name: /Lifecycle title/ }));
+      await user.click(screen.getByRole("button", { name: "Return to Locked" }));
+
+      expect(confirm).toHaveBeenCalledWith("Return to Locked Phase 1?");
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps the Phase selected without reloading when the state change fails", async () => {
+      const user = userEvent.setup();
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce({ ok: true, json: async () => planWith("open") })
+        .mockResolvedValueOnce({ ok: false, status: 422, json: async () => ({ error: "Phase has Notes" }) });
+      vi.stubGlobal("fetch", fetchMock);
+      vi.spyOn(window, "confirm").mockReturnValue(true);
+      render(<PhasePlanSetup />);
+
+      await user.click(await screen.findByRole("button", { name: /Lifecycle title/ }));
+      await user.click(screen.getByRole("button", { name: "Return to Locked" }));
+
+      expect(JSON.parse(fetchMock.mock.calls[1][1]?.body as string)).toMatchObject({ state: "locked" });
+      expect(await screen.findByText("Phase has Notes")).toBeInTheDocument();
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(screen.getByLabelText("Title")).toHaveValue("Lifecycle title");
+    });
+  });
+
+  describe("Challenge Category placement hints", () => {
+    const academicHint = "Academic Challenge Categories appear above this question";
+    const nonAcademicHint = "Non-academic Challenge Categories appear above this question";
+    const planWithQuestions = (questions: Array<{ id: number; text: string }>) => ({ plan: {
+      id: 7, academicYear: "2026-2027", editable: true, phases: [{
+        id: 21, number: 1, grade: 11, title: "Hint title", state: "locked",
+        guidanceMarkdown: "Guidance", revision: 2, frozen: false,
+        everOpened: false, used: false, active: false, questions,
+      }],
+    } });
+
+    it("shows each group's hint on the first matching Question only", async () => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => planWithQuestions([
+        { id: 41, text: "How was the week?" },
+        { id: 42, text: "Describe the academic challenges the student is facing." },
+        { id: 43, text: "Describe any non-academic challenges the student mentioned." },
+        { id: 44, text: "Any other academic challenges?" },
+      ]) }));
+      render(<PhasePlanSetup />);
+
+      expect(await screen.findByLabelText("Question 2")).toHaveAccessibleDescription(academicHint);
+      expect(screen.getByLabelText("Question 3")).toHaveAccessibleDescription(nonAcademicHint);
+      expect(screen.getByLabelText("Question 1")).toHaveAccessibleDescription("");
+      expect(screen.getByLabelText("Question 4")).toHaveAccessibleDescription("");
+      expect(screen.getAllByText(academicHint)).toHaveLength(1);
+      expect(screen.getAllByText(nonAcademicHint)).toHaveLength(1);
+    });
+
+    it("moves the hints live as unsaved Question text is edited", async () => {
+      const user = userEvent.setup();
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => planWithQuestions([
+        { id: 41, text: "How was the week?" },
+        { id: 42, text: "Describe the academic challenges the student is facing." },
+      ]) }));
+      render(<PhasePlanSetup />);
+
+      const first = await screen.findByLabelText("Question 1");
+      expect(screen.getByLabelText("Question 2")).toHaveAccessibleDescription(academicHint);
+      expect(screen.queryByText(nonAcademicHint)).not.toBeInTheDocument();
+
+      await user.clear(first);
+      await user.type(first, "Any NON-ACADEMIC CHALLENGES?");
+      expect(first).toHaveAccessibleDescription(nonAcademicHint);
+
+      const second = screen.getByLabelText("Question 2");
+      await user.clear(second);
+      await user.type(second, "What support did you agree on?");
+      expect(second).toHaveAccessibleDescription("");
+      expect(screen.queryByText(academicHint)).not.toBeInTheDocument();
+      expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
+    });
+  });
 });

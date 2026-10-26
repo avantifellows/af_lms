@@ -21,7 +21,7 @@ edges:
     condition: when adding a write that must proxy to the DB Service
   - target: patterns/add-api-route.md
     condition: when adding a route that reads or writes
-last_updated: 2026-10-23
+last_updated: 2026-10-26
 ---
 
 # Data Access
@@ -205,6 +205,58 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
 - **Code:** `src/lib/holistic-follow-up-notes.ts` (write), `src/lib/holistic-student-phase.ts`
   (read), `src/lib/holistic-follow-up-questions.ts` (client-safe question keys, text, and
   normaliser), `src/lib/holistic-mentor-write-scope.ts` (shared scope guard).
+
+## Holistic Challenge Categories (#457)
+
+- **Catalogue:** `src/lib/holistic-challenge-categories.ts` (client-safe) is the single source of
+  the 16 fixed Categories (6 Academic, 10 Non-academic; codes `academic.*` / `non_academic.*` are
+  stored and stable, labels may change, ADR-0004), the group labels, validation, grouping, toggling,
+  Question placement and the heatmap percent. Import its helpers; never restate a rule.
+  Placement (Notes form and the Phase Setup hint): each group sits above the first Question by
+  position whose text says "academic challenge" / "non-academic challenge", any case. "non
+  academic" and "nonacademic" count as Non-academic too, and never as Academic; a Question naming
+  both is Non-academic only.
+- **Storage:** `holistic_mentorship_post_session_note_challenges` (db-service #806), one row per
+  code, unique `(notes_id, category_code)`, no DB CHECK on codes. Its insert/update trigger shares
+  the post-session privacy guard (Student advisory lock, rejects tombstoned Students). Raw SQL (ADR-0005).
+  **Deploy db-service #806 first**, including migration `20261026101410` (the tombstone's
+  `post_session_challenges_erased` column): without the table every Notes read, write and erasure
+  fails, and without the column every privacy erasure fails.
+- **Validation order:** the student-phase PATCH requires `challenge_categories: string[]` in every
+  mode (else 422 `Invalid Notes`). `validateHolisticChallengeCategories(codes, { final: false })` runs
+  in the route and again in `saveHolisticNotes` for every mode (trimmed; unknown/duplicate → `Unknown
+  Challenge Category`; No major issue mixed in its group → 422). Submit / Edit notes then check
+  tokens, state, every answer, and only last ≥1 Category per group (`final: true`).
+  A Notes tab left open across the release sends the old payload and gets 422 on its next
+  autosave until reloaded; say so in release notes.
+- **Writes:** Categories are replaced (delete + insert the validated set) in the same transaction as
+  the answers. **Has content** = any answer row **or** any Category row: it drives erased-draft
+  claiming on write and read, and a Categories-only first draft creates Notes and freezes the Phase.
+- **Erasure:** Category rows are Notes content, deleted with the draft answers on Mapping end,
+  Mapping-scoped removal/reassignment and reconciliation, and by `deleteHolisticStudentContent`
+  (before the tombstone). The tombstone records `post_session_challenges_erased` (Category rows)
+  next to `post_session_answers_erased` (answer rows only), so a Categories-only Note still counts.
+  See `patterns/holistic-privacy-erasure.md`.
+- **Reads:** codes are returned in catalogue order with unknown stored codes dropped, wherever
+  `answers` is (drafts to their author only). Students & Progress rows and CSV
+  (`Academic Challenges` / `Non-Academic Challenges` before `Notes Author Name`) use submitted Notes
+  only. MCP's `redactHolisticProgress` hides `challengeCategories` with `answers` unless
+  `include_notes=true`: add any new Notes-content field there too. Submitted Notes without
+  Categories read "Categories not recorded"; Student Context carries them only when Notes-based.
+- **Heatmap:** `GET /api/holistic-mentorship/challenge-categories` (`program_id` number or `all`,
+  `academic_year`, `grade` 11|12, optional `phase_id`, optional `format=csv`) gates on `program_read`
+  (Teachers 403); bad filters, an off-Plan Phase, or `all` with a Phase are 422. One SQL aggregation
+  counts each Student once per code over `submitted` Notes with ≥1 Category, under the latest
+  Mapping **after** the School-scope predicate (`started_at DESC, id DESC`), across all requested
+  Programs. Schools are keyed by id (`school.code` may be null or shared). `total` is over the same
+  Students; hidden Schools = in-scope Mapping Schools with n = 0. Counts only, no Student identity.
+  The CSV reuses the grid's percent and `csvCell`; its filename encodes year, Grade, Program, Phase.
+- **Tests:** `holistic-challenge-categories.test.ts`, `holistic-notes.test.ts` and
+  `holistic-notes.integration.test.ts` (opt-in `HOLISTIC_NOTES_TEST_DATABASE`),
+  `holistic-privacy.integration.test.ts`, `holistic-progress.test.ts`, the MCP route test,
+  `holistic-challenge-category-heatmap{,.integration}.test.ts` (opt-in
+  `HOLISTIC_HEATMAP_TEST_DATABASE`), the heatmap route test, and the Holistic Playwright specs. The
+  e2e fixture seeds one categorized Grade 12 Phase 4 Note; see `patterns/debug-e2e-fixtures.md`.
 
 ## Blended Learning Mentee list (#442), Mentor cards (#452), Flags feed (#453), detail (#444), logging (#445), Action Items (#446), Mentor Flags (#447), photos (#448), Call Recording drafts (#449, retry/discard #450, review and save #451), playback (#454) and the links load script (#455)
 

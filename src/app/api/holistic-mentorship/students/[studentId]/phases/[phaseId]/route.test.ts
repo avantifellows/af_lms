@@ -245,6 +245,7 @@ describe("Holistic Student Phase API", () => {
           action: "draft",
           expected_revision: 2,
           answers,
+          challenge_categories: ["academic.subject_concept"],
         }),
       }
     ) as never, context);
@@ -265,9 +266,78 @@ describe("Holistic Student Phase API", () => {
       actorUserId: 9,
       expectedRevision: 2,
       answers: answers.map(({ question_id, answer }) => ({ questionId: question_id, answer })),
+      challengeCategories: ["academic.subject_concept"],
       expectedMappingId: undefined,
       expectedPhaseRevision: undefined,
       confirmed: false,
+    });
+  });
+
+  describe("Challenge Categories", () => {
+    const url = "http://localhost/api/holistic-mentorship/students/41/phases/73?school_code=SCH001&academic_year=2026-2027&program_id=1";
+    const finalTokens = { expected_mapping_id: 300, expected_phase_revision: 5, confirmed: true };
+    const patch = (body: Record<string, unknown>) => PATCH(new Request(url, {
+      method: "PATCH",
+      body: JSON.stringify({ expected_revision: 2, answers: [], ...finalTokens, ...body }),
+    }) as never, context);
+
+    beforeEach(() => {
+      mockAccess.mockResolvedValue({ ok: true, actorUserId: 9, permission: { role: "teacher" }, school: { id: 4 } });
+      mockSave.mockResolvedValue({ ok: true, changed: true, revision: 3 });
+    });
+
+    it.each([
+      ["missing", undefined, "Invalid Notes"],
+      ["not an array", "academic.other", "Invalid Notes"],
+      ["unknown", ["academic.other", "academic.made_up"], "Unknown Challenge Category"],
+      ["non-string", [7], "Unknown Challenge Category"],
+      ["duplicate", ["academic.other", " academic.other "], "Unknown Challenge Category"],
+      ["mixed", ["non_academic.no_major_issue", "non_academic.financial"],
+        "Choose either No major issue reported or other Challenge Categories"],
+    ])("rejects %s Challenge Categories in every mode", async (_case, challengeCategories, error) => {
+      for (const action of ["draft", "submit", "edit"]) {
+        const response = await patch({ action, challenge_categories: challengeCategories });
+
+        expect(response.status).toBe(422);
+        await expect(response.json()).resolves.toEqual({ error });
+      }
+      expect(mockSave).not.toHaveBeenCalled();
+    });
+
+    it("saves a partial draft with trimmed Challenge Categories", async () => {
+      const response = await patch({ action: "draft", challenge_categories: [" non_academic.financial "] });
+
+      expect(response.status).toBe(200);
+      expect(mockSave).toHaveBeenCalledWith(expect.objectContaining({
+        mode: "draft",
+        challengeCategories: ["non_academic.financial"],
+      }));
+    });
+
+    it("saves an empty draft Category set", async () => {
+      const response = await patch({ action: "draft", challenge_categories: [] });
+
+      expect(response.status).toBe(200);
+      expect(mockSave).toHaveBeenCalledWith(expect.objectContaining({ challengeCategories: [] }));
+    });
+
+    it.each(["submit", "edit"])("returns the group message when %s is missing a group", async (action) => {
+      mockSave.mockResolvedValue({
+        ok: false,
+        status: 422,
+        error: "Choose at least one Academic and one Non-academic Challenge Category",
+      });
+
+      const response = await patch({ action, challenge_categories: ["academic.exam_related"] });
+
+      expect(response.status).toBe(422);
+      await expect(response.json()).resolves.toEqual({
+        error: "Choose at least one Academic and one Non-academic Challenge Category",
+      });
+      expect(mockSave).toHaveBeenCalledWith(expect.objectContaining({
+        mode: action,
+        challengeCategories: ["academic.exam_related"],
+      }));
     });
   });
 
@@ -307,7 +377,7 @@ describe("Holistic Student Phase API", () => {
 
     const response = await PATCH(new Request(
       "http://localhost/api/holistic-mentorship/students/41/phases/73?school_code=SCH001&academic_year=2026-2027&program_id=1",
-      { method: "PATCH", body: JSON.stringify({ action: "draft", expected_revision: 2, answers: [] }) }
+      { method: "PATCH", body: JSON.stringify({ action: "draft", expected_revision: 2, answers: [], challenge_categories: [] }) }
     ) as never, context);
 
     expect(response.status).toBe(409);

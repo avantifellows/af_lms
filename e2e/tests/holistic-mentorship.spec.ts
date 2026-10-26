@@ -1,6 +1,7 @@
 import type { Page, TestInfo } from "@playwright/test";
 
 import { expect, test } from "../fixtures/auth";
+import { collectBrowserHealth, expectBrowserHealth } from "../helpers/browser-health";
 import { getTestPool } from "../helpers/db";
 
 type Fixture = {
@@ -419,6 +420,13 @@ test.describe("Holistic Mentorship release workflows", () => {
     await expect(addFollowUp).toBeDisabled();
     await expect(addFollowUp).toHaveAccessibleDescription("Submit Post-Session Notes first");
 
+    // The seeded Question matches neither group, so both sit in the trailing block.
+    await expect(holisticTeacherPage.getByRole("heading", { name: "Challenge Categories", exact: true })).toBeVisible();
+    await challengeGroup(holisticTeacherPage, "Academic")
+      .getByRole("checkbox", { name: "Exam/Test related issues" }).check();
+    await challengeGroup(holisticTeacherPage, "Non-academic")
+      .getByRole("checkbox", { name: "No major issue reported" }).check();
+
     holisticTeacherPage.once("dialog", (dialog) => dialog.accept());
     const submit = holisticTeacherPage.waitForResponse((response) =>
       response.request().method() === "PATCH" && response.request().postData()?.includes('"action":"submit"') === true
@@ -428,6 +436,7 @@ test.describe("Holistic Mentorship release workflows", () => {
     await expect(holisticTeacherPage.getByText("Notes submitted. Phase completed.")).toBeVisible();
     await expect(holisticTeacherPage.getByRole("tab", { name: / - Completed$/ })).toBeVisible();
     await expect(holisticTeacherPage.getByText(/Submitted by Synthetic teacher on/)).toBeVisible();
+    await expectSubmittedCategories(holisticTeacherPage, ["Exam/Test related issues"], ["No major issue reported"]);
 
     await holisticTeacherPage.getByRole("button", { name: "Edit Notes" }).click();
     await notes.fill("Synthetic corrected official answer.");
@@ -457,6 +466,193 @@ test.describe("Holistic Mentorship release workflows", () => {
     ]);
     await expect(cards.nth(1)).toContainText(`Synthetic follow-up challenge ${token}`);
     await expect(cards.nth(1).locator("h4")).toHaveText(["What challenges did the student talk about?"]);
+  });
+
+  test("Mentor captures Challenge Categories above matching Questions and on Edit notes", async ({
+    holisticTeacherPage: page,
+  }) => {
+    const health = collectBrowserHealth(page);
+    await page.goto(studentPhaseUrl(fixture.historicalGrade12StudentId, fixture.activeGrade12PhaseId));
+    const academicQuestion = page.getByRole("textbox", {
+      name: "Describe the academic challenges the student is facing.",
+    });
+    const nonAcademicQuestion = page.getByRole("textbox", {
+      name: "Describe any non-academic challenges the student mentioned.",
+    });
+    const academic = challengeGroup(page, "Academic");
+    const nonAcademic = challengeGroup(page, "Non-academic");
+    await expect(academic).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Challenge Categories", exact: true })).toHaveCount(0);
+    const top = async (locator: ReturnType<Page["getByRole"]>) => (await locator.boundingBox())!.y;
+    expect(await top(academic)).toBeLessThan(await top(academicQuestion));
+    expect(await top(academicQuestion)).toBeLessThan(await top(nonAcademic));
+    expect(await top(nonAcademic)).toBeLessThan(await top(nonAcademicQuestion));
+
+    await academic.getByRole("checkbox", { name: "Subject/concept issues" }).check();
+    await academic.getByRole("checkbox", { name: "No major issue reported" }).check();
+    await expect(academic.getByRole("checkbox", { name: "Subject/concept issues" })).not.toBeChecked();
+    await nonAcademic.getByRole("checkbox", { name: "No major issue reported" }).check();
+    const categoriesOnlyDraft = page.waitForResponse((response) =>
+      response.request().method() === "PATCH" && response.request().postData()?.includes(
+        '"challenge_categories":["academic.no_major_issue","non_academic.career_uncertainty"]'
+      ) === true
+    );
+    await nonAcademic.getByRole("checkbox", { name: "Career uncertainty" }).check();
+    await expect(nonAcademic.getByRole("checkbox", { name: "No major issue reported" })).not.toBeChecked();
+    expect((await categoriesOnlyDraft).status()).toBe(200);
+
+    await page.reload();
+    await expect(academic.getByRole("checkbox", { name: "No major issue reported" })).toBeChecked();
+    await expect(nonAcademic.getByRole("checkbox", { name: "Career uncertainty" })).toBeChecked();
+    await expect(academicQuestion).toHaveValue("");
+
+    await page.getByRole("textbox", { name: "Synthetic: What support will help next?" })
+      .fill("Synthetic support plan.");
+    await academicQuestion.fill("Synthetic academic challenge.");
+    await nonAcademicQuestion.fill("Synthetic non-academic challenge.");
+    await nonAcademic.getByRole("checkbox", { name: "Career uncertainty" }).uncheck();
+    await page.getByRole("button", { name: "Submit Notes" }).click();
+    const nonAcademicMissing = page.getByText("Choose at least one Non-academic Challenge Category", { exact: true });
+    await expect(nonAcademicMissing).toBeVisible();
+    await expect(nonAcademic).toHaveAttribute("aria-invalid", "true");
+    await expect(nonAcademic).toHaveAttribute("aria-describedby", await nonAcademicMissing.getAttribute("id") ?? "");
+
+    await nonAcademic.getByRole("checkbox", { name: "Adjustment difficulties" }).check();
+    await expect(nonAcademicMissing).toHaveCount(0);
+    page.once("dialog", (dialog) => dialog.accept());
+    const submit = page.waitForResponse((response) =>
+      response.request().method() === "PATCH" && response.request().postData()?.includes('"action":"submit"') === true
+    );
+    await page.getByRole("button", { name: "Submit Notes" }).click();
+    expect((await submit).status()).toBe(200);
+    await expect(page.getByText("Notes submitted. Phase completed.")).toBeVisible();
+    await expectSubmittedCategories(page, ["No major issue reported"], ["Adjustment difficulties"]);
+
+    // The seeded submitted Note predates Challenge Categories.
+    await page.goto(studentPhaseUrl(fixture.profileGrade11StudentId, fixture.firstGrade11PhaseId));
+    await expect(page.getByRole("region", { name: "Challenge Categories", exact: true }))
+      .toContainText("Categories not recorded");
+    await page.getByRole("button", { name: "Edit Notes" }).click();
+    await page.getByRole("button", { name: "Save Changes" }).click();
+    await expect(page.getByText("Choose at least one Academic and one Non-academic Challenge Category", { exact: true }))
+      .toBeVisible();
+    await challengeGroup(page, "Academic").getByRole("checkbox", { name: "Exam/Test related issues" }).check();
+    await challengeGroup(page, "Non-academic")
+      .getByRole("checkbox", { name: "Wellness (health, sleep etc.)" }).check();
+    const correction = page.waitForResponse((response) =>
+      response.request().method() === "PATCH" && response.request().postData()?.includes('"action":"edit"') === true
+    );
+    page.once("dialog", (dialog) => dialog.accept());
+    await page.getByRole("button", { name: "Save Changes" }).click();
+    expect((await correction).status()).toBe(200);
+    await expect(page.getByText("Submitted Notes updated.")).toBeVisible();
+    await expectSubmittedCategories(page, ["Exam/Test related issues"], ["Wellness (health, sleep etc.)"]);
+
+    // Restore the pre-release fixture for later specs.
+    const pool = getTestPool();
+    try {
+      await pool.query(
+        `DELETE FROM holistic_mentorship_post_session_note_challenges
+         WHERE notes_id IN (SELECT id FROM holistic_mentorship_post_session_notes
+                            WHERE student_id = $1 AND phase_id = $2)`,
+        [fixture.profileGrade11StudentId, fixture.firstGrade11PhaseId],
+      );
+    } finally {
+      await pool.end();
+    }
+    expectBrowserHealth(health);
+  });
+
+  test("Student Context and the read-only drill-down show earlier Notes' Challenge Categories", async ({
+    holisticTeacherPage: mentor,
+    holisticAdminPage,
+    holisticPmPage,
+  }) => {
+    const pages = [mentor, holisticAdminPage, holisticPmPage];
+    const health = pages.map(collectBrowserHealth);
+    const earlierNotesUrl = studentPhaseUrl(fixture.profileGrade11StudentId, fixture.firstGrade11PhaseId);
+    const laterPhaseUrl = studentPhaseUrl(fixture.profileGrade11StudentId, fixture.activeGrade11PhaseId);
+    const mentorContextCategories = mentor.getByRole("region", { name: "Student Context", exact: true })
+      .getByRole("region", { name: "Challenge Categories", exact: true });
+
+    // The seeded Phase 1 Note predates Challenge Categories.
+    await mentor.goto(laterPhaseUrl);
+    await expect(mentor.getByText("From Phase 1 - Synthetic Grade 11 Completed", { exact: true })).toBeVisible();
+    await expect(mentorContextCategories).toContainText("Categories not recorded");
+    for (const page of [holisticAdminPage, holisticPmPage]) {
+      await page.goto(earlierNotesUrl);
+      await expect(page.getByText(/^Submitted (by .+ )?on /)).toBeVisible();
+      await expect(page.getByRole("region", { name: "Challenge Categories", exact: true }))
+        .toContainText("Categories not recorded");
+    }
+
+    await mentor.goto(earlierNotesUrl);
+    await mentor.getByRole("button", { name: "Edit Notes" }).click();
+    await challengeGroup(mentor, "Academic").getByRole("checkbox", { name: "Backlogs, revision & workload" }).check();
+    await challengeGroup(mentor, "Non-academic").getByRole("checkbox", { name: "Financial challenges" }).check();
+    await challengeGroup(mentor, "Non-academic").getByRole("checkbox", { name: "Career uncertainty" }).check();
+    const correction = mentor.waitForResponse((response) =>
+      response.request().method() === "PATCH" && response.request().postData()?.includes('"action":"edit"') === true
+    );
+    mentor.once("dialog", (dialog) => dialog.accept());
+    await mentor.getByRole("button", { name: "Save Changes" }).click();
+    expect((await correction).status()).toBe(200);
+    await expect(mentor.getByText("Submitted Notes updated.")).toBeVisible();
+
+    const academic = ["Backlogs, revision & workload"];
+    const nonAcademic = ["Career uncertainty", "Financial challenges"];
+    await mentor.goto(laterPhaseUrl);
+    await expect(mentorContextCategories.getByRole("list", { name: "Academic", exact: true }).getByRole("listitem"))
+      .toHaveText(academic);
+    await expect(mentorContextCategories.getByRole("list", { name: "Non-academic", exact: true }).getByRole("listitem"))
+      .toHaveText(nonAcademic);
+    for (const page of [holisticAdminPage, holisticPmPage]) {
+      await page.goto(earlierNotesUrl);
+      await expectSubmittedCategories(page, academic, nonAcademic);
+      // The later Phase has no submitted Notes, so its only Categories are the context's.
+      await page.goto(laterPhaseUrl);
+      await expect(page.getByText("From Phase 1 - Synthetic Grade 11 Completed", { exact: true })).toBeVisible();
+      await expectSubmittedCategories(page, academic, nonAcademic);
+    }
+
+    // Restore the pre-release fixture for later specs.
+    const pool = getTestPool();
+    try {
+      await pool.query(
+        `DELETE FROM holistic_mentorship_post_session_note_challenges
+         WHERE notes_id IN (SELECT id FROM holistic_mentorship_post_session_notes
+                            WHERE student_id = $1 AND phase_id = $2)`,
+        [fixture.profileGrade11StudentId, fixture.firstGrade11PhaseId],
+      );
+    } finally {
+      await pool.end();
+    }
+    health.forEach(expectBrowserHealth);
+  });
+
+  test("Phase Setup shows which Question each Challenge Category group appears above", async ({
+    holisticAdminPage: page,
+  }) => {
+    await page.goto("/admin/holistic-mentorship");
+    await page.getByRole("tab", { name: "Phase Setup" }).click();
+    const phaseSetup = page.getByRole("region", { name: "Phase Setup" });
+    const phasePlan = phaseSetup.getByRole("navigation", { name: "Ordered Phase Plan" });
+    const academicHint = "Academic Challenge Categories appear above this question";
+    const nonAcademicHint = "Non-academic Challenge Categories appear above this question";
+    const question = (position: number) => phaseSetup.getByRole("textbox", { name: `Question ${position}`, exact: true });
+
+    await phasePlan.getByRole("button", { name: /Synthetic Grade 12 Active/ }).click();
+    await expect(question(2)).toHaveValue("Describe the academic challenges the student is facing.");
+    await expect(question(2)).toHaveAccessibleDescription(academicHint);
+    await expect(question(3)).toHaveValue("Describe any non-academic challenges the student mentioned.");
+    await expect(question(3)).toHaveAccessibleDescription(nonAcademicHint);
+    await expect(question(1)).toHaveAccessibleDescription("");
+
+    // No Question matches, so no hint shows; Mentors get the trailing Challenge Categories block.
+    await phasePlan.getByRole("button", { name: /Synthetic Grade 11 Active/ }).click();
+    await expect(question(1)).toHaveValue("Synthetic: What support will help next?");
+    await expect(question(1)).toHaveAccessibleDescription("");
+    await expect(phaseSetup.getByText(/Challenge Categories appear above this question/)).toHaveCount(0);
   });
 
   test("Holistic Admin verifies progress, CSV, read-only drill-down, Phase setup, and regeneration", async ({
@@ -776,6 +972,19 @@ async function addFollowUpNote(page: Page, answers: Record<string, string>) {
   await expect(dialog).toBeHidden();
 }
 
+function challengeGroup(page: Page, group: "Academic" | "Non-academic") {
+  // Names match as case-insensitive substrings unless exact: "Academic" is inside "Non-academic".
+  return page.getByRole("group", { name: `${group} Challenge Categories`, exact: true });
+}
+
+async function expectSubmittedCategories(page: Page, academic: string[], nonAcademic: string[]) {
+  const section = page.getByRole("region", { name: "Challenge Categories", exact: true });
+  await expect(section.getByRole("list", { name: "Academic", exact: true }).getByRole("listitem"))
+    .toHaveText(academic);
+  await expect(section.getByRole("list", { name: "Non-academic", exact: true }).getByRole("listitem"))
+    .toHaveText(nonAcademic);
+}
+
 function studentPhaseUrl(studentId: number, phaseId: number) {
   return `/holistic-mentorship/students/${studentId}/phases/${phaseId}` +
     `?school_code=${fixture.schoolCode}&program_id=1&academic_year=2026-2027`;
@@ -850,34 +1059,3 @@ async function captureResponsiveScreenshot(page: Page, testInfo: TestInfo, name:
   await testInfo.attach(name, { path, contentType: "image/png" });
 }
 
-type BrowserHealth = {
-  consoleErrors: string[];
-  pageErrors: string[];
-  networkErrors: string[];
-};
-
-function collectBrowserHealth(page: Page): BrowserHealth {
-  const health: BrowserHealth = { consoleErrors: [], pageErrors: [], networkErrors: [] };
-  page.on("console", (message) => {
-    if (message.type() === "error") health.consoleErrors.push(message.text());
-  });
-  page.on("pageerror", (error) => health.pageErrors.push(error.message));
-  page.on("requestfailed", (request) => {
-    if (!request.url().includes("/api/holistic-mentorship/")) return;
-    const failure = request.failure()?.errorText ?? "request failed";
-    if (failure.includes("ERR_ABORTED")) return;
-    health.networkErrors.push(`${request.method()} ${request.url()} - ${failure}`);
-  });
-  page.on("response", (response) => {
-    if (response.url().includes("/api/holistic-mentorship/") && response.status() >= 500) {
-      health.networkErrors.push(`${response.request().method()} ${response.url()} - HTTP ${response.status()}`);
-    }
-  });
-  return health;
-}
-
-function expectBrowserHealth(health: BrowserHealth) {
-  expect(health.consoleErrors, "browser console errors").toEqual([]);
-  expect(health.pageErrors, "uncaught browser errors").toEqual([]);
-  expect(health.networkErrors, "Holistic Mentorship network errors").toEqual([]);
-}

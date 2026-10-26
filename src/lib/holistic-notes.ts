@@ -1,5 +1,6 @@
 import { query, withTransaction } from "./db";
 import type { PoolClient } from "pg";
+import { validateHolisticChallengeCategories } from "./holistic-challenge-categories";
 import {
   checkHolisticMentorWriteScope,
   loadHolisticMentorWriteScope,
@@ -16,6 +17,7 @@ type NotesInput = {
   actorUserId: number;
   expectedRevision: number;
   answers: Array<{ questionId: number; answer: string }>;
+  challengeCategories: string[];
   expectedMappingId?: number;
   expectedPhaseRevision?: number;
   confirmed?: boolean;
@@ -30,7 +32,7 @@ type ExistingNotes = {
   author_user_id: number | string;
   state: "draft" | "submitted";
   revision: number;
-  has_answers: boolean;
+  has_content: boolean;
 };
 
 function notesConflict(revision: number): HolisticNotesResult {
@@ -65,7 +67,7 @@ function validateAnswers(
 
 function isEmptyInitialDraft(input: NotesInput): boolean {
   return input.mode === "draft" && input.expectedRevision === 0 &&
-    !input.answers.some(({ answer }) => answer.trim());
+    !input.answers.some(({ answer }) => answer.trim()) && input.challengeCategories.length === 0;
 }
 
 async function loadExistingNotes(
@@ -75,8 +77,10 @@ async function loadExistingNotes(
 ): Promise<ExistingNotes | null> {
   const found = await client.query<ExistingNotes>(
       `SELECT notes.id, notes.author_user_id, notes.state, notes.revision,
-              EXISTS (SELECT 1 FROM holistic_mentorship_post_session_answers answer
-                      WHERE answer.notes_id = notes.id) AS has_answers
+              (EXISTS (SELECT 1 FROM holistic_mentorship_post_session_answers answer
+                       WHERE answer.notes_id = notes.id)
+               OR EXISTS (SELECT 1 FROM holistic_mentorship_post_session_note_challenges challenge
+                          WHERE challenge.notes_id = notes.id)) AS has_content
        FROM holistic_mentorship_post_session_notes notes
        WHERE notes.student_id = $1 AND notes.phase_id = $2 FOR UPDATE`,
     [studentId, phaseId]
@@ -85,7 +89,7 @@ async function loadExistingNotes(
 }
 
 function claimsErasedDraft(existing: ExistingNotes | null, input: NotesInput): boolean {
-  return !!existing && existing.state === "draft" && existing.has_answers === false &&
+  return !!existing && existing.state === "draft" && existing.has_content === false &&
     input.mode === "draft" && Number(existing.author_user_id) !== input.actorUserId;
 }
 
@@ -151,9 +155,11 @@ function validateFinalWrite(
   if (tokenError) return tokenError;
   const stateError = validateFinalState(existing, input);
   if (stateError) return stateError;
-  return hasEveryAnswer(questionIds, input)
-    ? null
-    : { ok: false, status: 422, error: "Answer every Question before submitting" };
+  if (!hasEveryAnswer(questionIds, input)) {
+    return { ok: false, status: 422, error: "Answer every Question before submitting" };
+  }
+  const categories = validateHolisticChallengeCategories(input.challengeCategories, { final: true });
+  return categories.ok ? null : { ok: false, status: 422, error: categories.error };
 }
 
 function existingRevision(existing: ExistingNotes | null): number {
@@ -227,6 +233,20 @@ async function replaceAnswers(client: PoolClient, notesId: number, input: NotesI
   }
 }
 
+async function replaceChallengeCategories(client: PoolClient, notesId: number, input: NotesInput) {
+  await client.query(
+      `DELETE FROM holistic_mentorship_post_session_note_challenges WHERE notes_id = $1`,
+      [notesId]
+  );
+  // saveHolisticNotes has already validated and trimmed the codes (known, no duplicates).
+  await client.query(
+      `INSERT INTO holistic_mentorship_post_session_note_challenges
+         (notes_id, category_code, inserted_at, updated_at)
+       SELECT $1, unnest($2::text[]), now(), now()`,
+    [notesId, input.challengeCategories]
+  );
+}
+
 async function freezeNewNotesPhase(client: PoolClient, existing: ExistingNotes | null, input: NotesInput) {
   if (existing) return;
   await client.query(
@@ -272,14 +292,20 @@ async function saveNotesTransaction(
     return notesConflict(existing?.revision ?? 0);
   }
   await replaceAnswers(client, saved.notesId, input);
+  await replaceChallengeCategories(client, saved.notesId, input);
   await freezeNewNotesPhase(client, existing, input);
   await recordNotesAudit(client, saved.notesId, input);
   return { ok: true, changed: true, revision: saved.revision };
 }
 
 export async function saveHolisticNotes(input: NotesInput): Promise<HolisticNotesResult> {
+  // Every mode, drafts too: the stored set is always known codes, no duplicates,
+  // and No major issue reported alone in its group. Final mode adds both groups later.
+  const categories = validateHolisticChallengeCategories(input.challengeCategories, { final: false });
+  if (!categories.ok) return { ok: false, status: 422, error: categories.error };
+  const validInput = { ...input, challengeCategories: categories.codes };
   try {
-    return await withTransaction((client) => saveNotesTransaction(client, input));
+    return await withTransaction((client) => saveNotesTransaction(client, validInput));
   } catch (error) {
     if ((error as { code?: unknown } | null)?.code !== "23505") throw error;
     const current = await query<{ revision: number }>(
