@@ -19,6 +19,12 @@ export const DEV_LOGIN_PERSONAS = {
     email: "e2e-pmu-govt-school-user@test.local",
     name: "Dev PMU Govt School User",
   },
+  blended_mentor: { email: "e2e-blended-mentor@test.local", name: "Dev Blended Mentor" },
+  blended_admin: { email: "e2e-blended-admin@test.local", name: "Dev Blended Admin" },
+  blended_admin_read_only: {
+    email: "e2e-blended-admin-read-only@test.local",
+    name: "Dev Blended Admin (Read-Only)",
+  },
   alumni_manager: { email: "e2e-dev-alumni-manager@test.local", name: "Dev Alumni Manager" },
 } as const;
 

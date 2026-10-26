@@ -675,3 +675,87 @@ describe("PATCH /api/admin/users/[id] — PMU roles", () => {
     expect(updateParams()).toEqual([3, "pmu_manager", null, null, [64], undefined, null, "5"]);
   });
 });
+
+describe("PATCH /api/admin/users/[id] — Blended Learning roles", () => {
+  const params = routeParams({ id: "5" });
+  const SCHOOL_TEACHER = {
+    email: "teacher@avantifellows.org",
+    level: 1,
+    role: "teacher",
+    school_codes: ["70705"],
+    regions: null,
+    program_ids: [1],
+  };
+  const BLENDED_ADMIN = {
+    email: "juned@avantifellows.org",
+    level: 1,
+    role: "blended_admin",
+    school_codes: null,
+    regions: null,
+    program_ids: [],
+  };
+
+  function mockDb({ seats = [] as unknown[], stored = SCHOOL_TEACHER as unknown } = {}) {
+    mockQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes("centre_positions")) return seats;
+      if (/SELECT[\s\S]*FROM user_permission[\s\S]*WHERE id = \$1/.test(sql)) {
+        return stored ? [stored] : [];
+      }
+      return [];
+    });
+  }
+
+  function updateParams() {
+    const call = mockQuery.mock.calls.find(([sql]) =>
+      String(sql).includes("UPDATE user_permission")
+    );
+    return call?.[1];
+  }
+
+  async function patch(body: Record<string, unknown>) {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockGetUserPermission.mockResolvedValue(ADMIN_PERMISSION);
+    const req = jsonRequest("http://localhost/api/admin/users/5", { method: "PATCH", body });
+    return PATCH(req as never, params);
+  }
+
+  it("clears School scope and Programs when a user becomes a Blended Learning Mentor", async () => {
+    mockDb();
+    const res = await patch({
+      role: "blended_mentor",
+      level: 3,
+      school_codes: ["70705"],
+      regions: ["North"],
+      program_ids: [1, 64],
+      full_name: "Faizan",
+    });
+    expect(res.status).toBe(200);
+    expect(updateParams()).toEqual([1, "blended_mentor", null, null, [], undefined, "Faizan", "5"]);
+  });
+
+  it("makes a stored Blended Learning Admin read-only and keeps no scope", async () => {
+    mockDb({ stored: BLENDED_ADMIN });
+    const res = await patch({ read_only: true, full_name: "Shalini" });
+    expect(res.status).toBe(200);
+    expect(updateParams()).toEqual([1, undefined, null, null, [], true, "Shalini", "5"]);
+  });
+
+  it("returns 409 when the target holds a centre seat", async () => {
+    mockDb({ seats: [{ one: 1, user_id: 70 }] });
+    const res = await patch({ role: "blended_admin" });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toMatch(/centre assignments/i);
+    expect(updateParams()).toBeUndefined();
+  });
+
+  it("requires program_ids when moving a user off a Blended Learning role", async () => {
+    mockDb({ stored: BLENDED_ADMIN });
+    const res = await patch({ role: "teacher", level: 1, school_codes: ["70705"] });
+    expect(res.status).toBe(400);
+    expect(updateParams()).toBeUndefined();
+
+    mockDb({ stored: BLENDED_ADMIN });
+    const ok = await patch({ role: "teacher", level: 1, school_codes: ["70705"], program_ids: [1] });
+    expect(ok.status).toBe(200);
+  });
+});
