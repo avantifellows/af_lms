@@ -51,6 +51,14 @@ if (!res.ok) { const text = await res.text(); /* surface upstream error */ }
 - Pattern lives in routes like `src/app/api/student/[id]/route.ts`, `src/app/api/batches/[id]/route.ts`.
 - Multi-entity updates (e.g. student fields + grade + batch enrollment) issue **separate** DB Service calls and accumulate per-call `errors`/`warnings` — partial success returns `{ ...results, warnings }`.
 - The Service owns the canonical write validations for the shared schema; the repo is separate (`/Users/deepanshmathur/Documents/AF/db-service`), including its migrations.
+- **`/student-exam-record` (exam registrations, #434):** `POST` doubles as an upsert keyed on
+  (`student_id`, `application_number`) — *not* on the exam — so posting a number the Student
+  already has on another exam would move that row. The LMS therefore tracks record ids,
+  `PATCH`es by id, deletes removals before writing, and refuses a number already stored
+  against another of that Student's exams. `application_number` is required by the Service's
+  changeset. `sessions_applied` (integer array, stored sorted and deduped, `[]` → NULL) comes
+  from the db-service `feat/student-exam-record-sessions-applied` branch and must be deployed
+  before the LMS Exams tab.
 
 ## 3. BigQuery — quiz analytics reads (read-only)
 `src/lib/bigquery.ts`, lazy singleton `getBigQueryClient()`. Credentials via `GOOGLE_SERVICE_ACCOUNT_JSON` (string) or `GOOGLE_APPLICATION_CREDENTIALS` (file). Used by `/api/quiz-analytics/*`. Read-only; uses `CURRENT_ACADEMIC_YEAR` from constants.

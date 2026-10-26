@@ -1903,3 +1903,100 @@ describe("StudentTable - intervention flags", () => {
     expect(screen.queryByRole("button", { name: "Flag" })).not.toBeInTheDocument();
   });
 });
+
+// ─── Exam registrations on the card ─────────────────────────────────────────
+
+describe("StudentTable - exam registrations", () => {
+  // Exam registrations belong to physical centres, so these cards render on a
+  // physical-centre roster; the default fixture Student is JNV NVS.
+  const CENTRE_PROGRAM_ID = PROGRAM_IDS.MAHARASHTRA_COACHING_TESTPREP;
+  const withExams = () => ({
+    ...makeStudent({ program_id: CENTRE_PROGRAM_ID, program_name: "Maharashtra Coaching" }),
+    exam_records: [
+      {
+        id: 10,
+        exam_id: 1,
+        exam_name: "JEE Mains",
+        application_number: "JEE123",
+        has_password: true,
+        sessions_applied: [1, 2],
+      },
+      {
+        id: 11,
+        exam_id: 2,
+        exam_name: "NEET",
+        application_number: null,
+        has_password: false,
+        sessions_applied: null,
+      },
+    ],
+  });
+
+  it("tags the card with every exam applied for", () => {
+    render(
+      <StudentTable
+        students={[withExams()]}
+        grades={defaultGrades}
+        selectedProgramId={CENTRE_PROGRAM_ID}
+      />,
+    );
+
+    expect(screen.getByText("JEE Mains")).toBeInTheDocument();
+    expect(screen.getByText("NEET")).toBeInTheDocument();
+  });
+
+  it("lists the registrations with the password masked, never in plain text", async () => {
+    const user = userEvent.setup();
+    render(
+      <StudentTable
+        students={[withExams()]}
+        grades={defaultGrades}
+        selectedProgramId={CENTRE_PROGRAM_ID}
+      />,
+    );
+
+    await user.click(screen.getByLabelText("Expand"));
+
+    const table = screen.getByRole("table");
+    expect(within(table).getByText("JEE123")).toBeInTheDocument();
+    expect(within(table).getByText("••••••••")).toBeInTheDocument();
+    expect(within(table).getByText("Session 1, Session 2")).toBeInTheDocument();
+    // The NEET row has neither an application number nor a password.
+    expect(within(table).getAllByText("—")).toHaveLength(3);
+  });
+
+  it("leaves the section out for a Student with no registrations", async () => {
+    const user = userEvent.setup();
+    render(
+      <StudentTable
+        students={[makeStudent({ program_id: CENTRE_PROGRAM_ID })]}
+        grades={defaultGrades}
+        selectedProgramId={CENTRE_PROGRAM_ID}
+      />,
+    );
+
+    await user.click(screen.getByLabelText("Expand"));
+
+    expect(screen.queryByText("Exam Registrations")).not.toBeInTheDocument();
+  });
+
+  it("shows neither the tags nor the table on a JNV NVS roster", async () => {
+    // Exam registrations are collected at physical centres only (#434), like
+    // uniform sizes and documents before them (#433).
+    const user = userEvent.setup();
+    render(
+      <StudentTable
+        students={[withExams()]}
+        grades={defaultGrades}
+        selectedProgramId={PROGRAM_IDS.NVS}
+      />,
+    );
+
+    expect(screen.queryByText("JEE Mains")).not.toBeInTheDocument();
+
+    await user.click(screen.getByLabelText("Expand"));
+
+    expect(screen.queryByText("Exam Registrations")).not.toBeInTheDocument();
+    expect(screen.queryByText("JEE123")).not.toBeInTheDocument();
+  });
+});
