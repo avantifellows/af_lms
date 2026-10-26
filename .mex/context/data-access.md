@@ -21,7 +21,7 @@ edges:
     condition: when adding a write that must proxy to the DB Service
   - target: patterns/add-api-route.md
     condition: when adding a route that reads or writes
-last_updated: 2026-10-24
+last_updated: 2026-10-26
 ---
 
 # Data Access
@@ -212,6 +212,10 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   the 16 fixed Categories (6 Academic, 10 Non-academic; codes `academic.*` / `non_academic.*` are
   stored and stable, labels may change, ADR-0004), the group labels, validation, grouping, toggling,
   Question placement and the heatmap percent. Import its helpers; never restate a rule.
+  Placement (Notes form and the Phase Setup hint): each group sits above the first Question by
+  position whose text says "academic challenge" / "non-academic challenge", any case. "non
+  academic" and "nonacademic" count as Non-academic too, and never as Academic; a Question naming
+  both is Non-academic only.
 - **Storage:** `holistic_mentorship_post_session_note_challenges` (db-service #806), one row per
   code, unique `(notes_id, category_code)`, no DB CHECK on codes. Its insert/update trigger shares
   the post-session privacy guard (Student advisory lock, rejects tombstoned Students). Raw SQL (ADR-0005).

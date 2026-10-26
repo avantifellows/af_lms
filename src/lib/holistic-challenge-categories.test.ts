@@ -213,11 +213,27 @@ describe("placeHolisticChallengeCategories", () => {
     ])).toEqual({ academic: 33, non_academic: 34 });
   });
 
-  it("only counts the hyphenated non-academic as Non-academic", () => {
+  it.each([
+    "Describe any non-academic challenges",
+    "Describe any non academic challenges",
+    "Describe any nonacademic challenges",
+    "Describe any NON ACADEMIC challenges",
+    "Describe any NonAcademic challenges",
+  ])("treats %j as Non-academic, never Academic", (text) => {
     expect(placeHolisticChallengeCategories([
-      { questionId: 41, text: "Describe any non academic challenges" },
-      { questionId: 42, text: "Describe any nonacademic challenges" },
-    ])).toEqual({ academic: 41, non_academic: null });
+      { questionId: 41, text },
+    ])).toEqual({ academic: null, non_academic: 41 });
+  });
+
+  it("places Academic below an unhyphenated non-academic Question", () => {
+    expect(placeHolisticChallengeCategories([
+      { questionId: 42, text: "Describe any non academic challenges" },
+      { questionId: 43, text: "Describe the academic challenges" },
+    ])).toEqual({ academic: 43, non_academic: 42 });
+    expect(placeHolisticChallengeCategories([
+      { questionId: 44, text: "Academic and nonacademic challenges discussed" },
+      { questionId: 45, text: "Academic challenges in detail" },
+    ])).toEqual({ academic: 45, non_academic: 44 });
   });
 
   it("leaves a group unplaced when no Question matches", () => {

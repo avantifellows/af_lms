@@ -119,16 +119,20 @@ export function toggleHolisticChallengeCategory(
   return knownHolisticChallengeCategories([...kept, code]);
 }
 
+// "non-academic", "non academic" and "nonacademic", any case.
+const NON_ACADEMIC = /non[\s-]?academic/i;
+const NON_ACADEMIC_CHALLENGE = /non[\s-]?academic challenge/i;
+const ACADEMIC_CHALLENGE = /academic challenge/i;
+
 // The Question each group is shown above, from Questions in position order:
 // the first case-insensitive Question-text match; a group with no matching
-// Question has no placement (null). Only the hyphenated "non-academic" counts as
-// Non-academic, and a Question mentioning both phrases is Non-academic only.
+// Question has no placement (null). Every spelling of "non-academic" counts as
+// Non-academic, never Academic, and a Question mentioning both is Non-academic only.
 export function placeHolisticChallengeCategories(
   questions: ReadonlyArray<{ questionId: number; text: string }>
 ): Record<HolisticChallengeCategoryGroup, number | null> {
-  const lowered = questions.map((question) => ({ ...question, text: question.text.toLowerCase() }));
-  const nonAcademic = lowered.find(({ text }) => text.includes("non-academic challenge"));
-  const academic = lowered.find(({ text }) => text.includes("academic challenge") && !text.includes("non-academic"));
+  const nonAcademic = questions.find(({ text }) => NON_ACADEMIC_CHALLENGE.test(text));
+  const academic = questions.find(({ text }) => ACADEMIC_CHALLENGE.test(text) && !NON_ACADEMIC.test(text));
   return { academic: academic?.questionId ?? null, non_academic: nonAcademic?.questionId ?? null };
 }
 
