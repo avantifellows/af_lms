@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { getUserPermission, getResolvedPermission, getFeatureAccess } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import {
+  buildOwnOrManagedVisitPredicate,
   buildVisitScopePredicate,
   buildVisitsActor,
   isScopedVisitsRole,
@@ -16,6 +17,7 @@ interface Visit {
   id: number;
   school_code: string;
   pm_email: string;
+  pm_name: string | null;
   school_name?: string;
   visit_date: string;
   status: string;
@@ -66,9 +68,15 @@ async function getVisits(
   let paramIndex = 1;
 
   if (actor.role === "program_manager") {
-    whereClauses.push(`LOWER(v.pm_email) = LOWER($${paramIndex})`);
-    params.push(actor.email);
-    paramIndex += 1;
+    // Own Visits plus every Visit at their visit-manager Centres' Schools (#291).
+    const scope = buildOwnOrManagedVisitPredicate(actor, {
+      startIndex: paramIndex,
+      pmEmailColumn: "v.pm_email",
+      schoolCodeColumn: "v.school_code",
+    });
+    whereClauses.push(scope.clause);
+    params.push(...scope.params);
+    paramIndex += scope.params.length;
   } else if (filters.pmEmail) {
     whereClauses.push(`LOWER(v.pm_email) = LOWER($${paramIndex})`);
     params.push(filters.pmEmail);
@@ -102,7 +110,13 @@ async function getVisits(
   return query<Visit>(
     `SELECT v.id, v.school_code, v.pm_email, v.visit_date, v.status,
             v.inserted_at, v.completed_at,
-            s.name as school_name
+            s.name as school_name,
+            (SELECT up.full_name
+               FROM user_permission up
+              WHERE LOWER(up.email) = LOWER(v.pm_email)
+                AND up.full_name IS NOT NULL
+              ORDER BY (up.revoked_at IS NULL) DESC
+              LIMIT 1) AS pm_name
      FROM lms_pm_school_visits v
      LEFT JOIN school s ON s.code = v.school_code
      ${whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : ""}
@@ -117,13 +131,6 @@ export default async function VisitsListPage({ searchParams }: PageProps) {
 
   if (!session) {
     redirect("/");
-  }
-
-  if (session.isPasscodeUser) {
-    if (session.schoolCode) {
-      redirect(`/school/${session.schoolCode}`);
-    }
-    redirect("/dashboard");
   }
 
   if (!session.user?.email) {
@@ -152,7 +159,11 @@ export default async function VisitsListPage({ searchParams }: PageProps) {
 
   const inProgress = visits.filter((v) => v.status === "in_progress");
   const completed = visits.filter((v) => v.status === "completed");
-  const canDeleteVisits = permission.role === "program_manager";
+  // A Program Manager also sees their Centres' Visits made by others (#291);
+  // those are read-only, so Continue and Delete stay on their own Visits.
+  const actorEmail = session.user.email.trim().toLowerCase();
+  const isOwn = (visit: Visit) => visit.pm_email.trim().toLowerCase() === actorEmail;
+  const canDeleteVisit = (visit: Visit) => permission.role === "program_manager" && isOwn(visit);
 
   return (
     <div className="min-h-screen bg-bg">
@@ -207,6 +218,7 @@ export default async function VisitsListPage({ searchParams }: PageProps) {
                         {visit.school_name || visit.school_code}
                       </div>
                       <div className="text-xs text-text-muted">Code: {visit.school_code}</div>
+                    <VisitedBy visit={visit} own={isOwn(visit)} />
                     </div>
                   </div>
                   <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-text-muted font-mono mb-3">
@@ -217,9 +229,9 @@ export default async function VisitsListPage({ searchParams }: PageProps) {
                     href={`/visits/${visit.id}`}
                     className="inline-flex items-center justify-center w-full rounded-lg bg-accent px-4 text-sm font-bold text-text-on-accent shadow-sm hover:bg-accent-hover active:bg-accent-hover/90 min-h-[44px] py-2.5 uppercase tracking-wide"
                   >
-                    Continue
+                    {isOwn(visit) ? "Continue" : "View"}
                   </Link>
-                  {canDeleteVisits && (
+                  {canDeleteVisit(visit) && (
                     <div className="mt-3">
                       <DeleteVisitButton visitId={visit.id} mode="list" />
                     </div>
@@ -257,6 +269,7 @@ export default async function VisitsListPage({ searchParams }: PageProps) {
                         <div className="text-xs text-text-muted">
                           Code: {visit.school_code}
                         </div>
+                        <VisitedBy visit={visit} own={isOwn(visit)} />
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-text-secondary font-mono">
                         {new Date(visit.visit_date).toLocaleDateString("en-IN", {
@@ -280,9 +293,9 @@ export default async function VisitsListPage({ searchParams }: PageProps) {
                             href={`/visits/${visit.id}`}
                             className="inline-flex items-center rounded-lg bg-accent px-3 py-1 text-sm font-bold uppercase tracking-wide text-text-on-accent shadow-sm hover:bg-accent-hover"
                           >
-                            Continue
+                            {isOwn(visit) ? "Continue" : "View"}
                           </Link>
-                          {canDeleteVisits && (
+                          {canDeleteVisit(visit) && (
                             <DeleteVisitButton visitId={visit.id} mode="list" />
                           )}
                         </div>
@@ -309,6 +322,7 @@ export default async function VisitsListPage({ searchParams }: PageProps) {
                       {visit.school_name || visit.school_code}
                     </div>
                     <div className="text-xs text-text-muted">Code: {visit.school_code}</div>
+                    <VisitedBy visit={visit} own={isOwn(visit)} />
                   </div>
                   <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-text-muted font-mono mb-3">
                     <span>Visit: {new Date(visit.visit_date).toLocaleDateString("en-IN", { year: "numeric", month: "short", day: "numeric", timeZone: "Asia/Kolkata" })}</span>
@@ -353,6 +367,7 @@ export default async function VisitsListPage({ searchParams }: PageProps) {
                         <div className="text-xs text-text-muted">
                           Code: {visit.school_code}
                         </div>
+                        <VisitedBy visit={visit} own={isOwn(visit)} />
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-text-secondary font-mono">
                         {new Date(visit.visit_date).toLocaleDateString("en-IN", {
@@ -398,6 +413,16 @@ export default async function VisitsListPage({ searchParams }: PageProps) {
           </div>
         )}
       </main>
+    </div>
+  );
+}
+
+// Names the visitor on a Visit someone else made (a Centre Visit a manager can see).
+function VisitedBy({ visit, own }: { visit: Visit; own: boolean }) {
+  if (own) return null;
+  return (
+    <div className="text-xs text-text-muted" title={visit.pm_email}>
+      Visited by {visit.pm_name || visit.pm_email}
     </div>
   );
 }

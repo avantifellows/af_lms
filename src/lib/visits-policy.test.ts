@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import type { UserPermission } from "@/lib/permissions";
 import {
+  buildOwnOrManagedVisitPredicate,
+  buildVisitSummaryScopePredicate,
+  canViewVisitSummary,
   buildVisitScopePredicate,
   buildVisitsActor,
   canAccessVisitSchoolScope,
@@ -11,6 +14,7 @@ import {
   canViewVisit,
   enforceVisitWriteLock,
   isScopedVisitsRole,
+  managesVisitSchool,
 } from "./visits-policy";
 
 function makePermission(overrides: Partial<UserPermission> = {}): UserPermission {
@@ -213,5 +217,81 @@ describe("buildVisitScopePredicate (seat-aware list filter)", () => {
       makePermission({ level: 1, school_codes: [], scope: { schools: new Set(), centres: new Set(), programs: new Set() } })
     );
     expect(buildVisitScopePredicate(actor)).toEqual({ clause: "1 = 0", params: [] });
+  });
+});
+
+// #291: PM/SPM/PH Centre seats let a Program Manager read every Visit at those
+// Centres' Schools, whoever made it — never edit it.
+describe("visit-manager Centre seats", () => {
+  const manager = buildVisitsActor(
+    "pm@avantifellows.org",
+    makePermission({
+      email: "pm@avantifellows.org",
+      scope: {
+        schools: new Set(["70705", "80808"]),
+        centres: new Set([1, 2]),
+        programs: new Set([1]),
+        visitManagedSchools: new Set(["80808"]),
+      },
+    })
+  );
+  const reporteeVisit = { pmEmail: "apm@avantifellows.org", schoolCode: "80808" };
+
+  it("reads another person's Visit at a managed School, but cannot edit it", () => {
+    expect(managesVisitSchool(manager, "80808")).toBe(true);
+    expect(canViewVisit(manager, reporteeVisit)).toBe(true);
+    expect(canEditVisit(manager, reporteeVisit)).toBe(false);
+  });
+
+  it("does not read another person's Visit at a School it only has seat access to", () => {
+    expect(managesVisitSchool(manager, "70705")).toBe(false);
+    expect(canViewVisit(manager, { ...reporteeVisit, schoolCode: "70705" })).toBe(false);
+  });
+
+  it("manages nothing without a resolved scope", () => {
+    const bare = buildVisitsActor("pm@avantifellows.org", makePermission());
+    expect(managesVisitSchool(bare, "80808")).toBe(false);
+    expect(canViewVisit(bare, reporteeVisit)).toBe(false);
+  });
+
+  it("opens the Visit Summary to a manager, scoped to managed Schools only", () => {
+    expect(canViewVisitSummary(manager)).toBe(true);
+    expect(buildVisitSummaryScopePredicate(manager, {
+      startIndex: 4,
+      schoolCodeColumn: "v.school_code",
+    })).toEqual({ clause: "v.school_code = ANY($4)", params: [["80808"]] });
+  });
+
+  it("keeps the Visit Summary closed to a PM with no visit-manager seat", () => {
+    const apm = buildVisitsActor("apm@avantifellows.org", makePermission({
+      scope: {
+        schools: new Set(["70705"]),
+        centres: new Set([1]),
+        programs: new Set([1]),
+        visitManagedSchools: new Set(),
+      },
+    }));
+    expect(canViewVisitSummary(apm)).toBe(false);
+    expect(buildVisitSummaryScopePredicate(apm)).toEqual({ clause: "1 = 0", params: [] });
+    expect(canViewVisitSummary(buildVisitsActor("pm@avantifellows.org", makePermission()))).toBe(false);
+  });
+
+  it("builds an own-or-managed list predicate", () => {
+    expect(buildOwnOrManagedVisitPredicate(manager, {
+      startIndex: 3,
+      pmEmailColumn: "v.pm_email",
+      schoolCodeColumn: "v.school_code",
+    })).toEqual({
+      clause: "(LOWER(TRIM(v.pm_email)) = $3 OR v.school_code = ANY($4))",
+      params: ["pm@avantifellows.org", ["80808"]],
+    });
+  });
+
+  it("falls back to own Visits only, with a normalized email, when nothing is managed", () => {
+    const bare = buildVisitsActor(" PM@AvantiFellows.org ", makePermission());
+    expect(buildOwnOrManagedVisitPredicate(bare)).toEqual({
+      clause: "LOWER(TRIM(pm_email)) = $1",
+      params: ["pm@avantifellows.org"],
+    });
   });
 });

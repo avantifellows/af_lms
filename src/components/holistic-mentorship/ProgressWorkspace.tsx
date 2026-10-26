@@ -6,7 +6,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Badge, Button } from "@/components/ui";
 import { CURRENT_ACADEMIC_YEAR, PROGRAM_IDS } from "@/lib/constants";
-import type { HolisticProgressRow } from "@/types/holistic-progress";
+import type {
+  HolisticAssignedProgressRow,
+  HolisticProgressCoverage,
+  HolisticProgressRow,
+  HolisticUnassignedProgressRow,
+} from "@/types/holistic-progress";
 
 type Row = HolisticProgressRow;
 type Options = {
@@ -16,7 +21,8 @@ type Options = {
 };
 type Payload = {
   rows: Row[];
-  counts: { totalMapped: number; pending: number; completed: number; skipped: number; noActivePhase: number };
+  counts: { total: number; pending: number; completed: number; skipped: number; noActivePhase: number };
+  coverage: HolisticProgressCoverage | null;
   options: Options;
   coverageSchools: Array<{ code: string; name: string }>;
   academicYears: string[];
@@ -42,7 +48,7 @@ type StoredProgressView = {
 };
 
 const EMPTY: Payload = {
-  rows: [], counts: { totalMapped: 0, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 },
+  rows: [], counts: { total: 0, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 }, coverage: null,
   options: { schools: [], mentors: [], phases: [] }, coverageSchools: [], academicYears: [CURRENT_ACADEMIC_YEAR],
   refreshedAt: "", pageSize: 50,
 };
@@ -58,6 +64,13 @@ const INITIAL_FILTERS: ProgressFilters = {
 };
 const VIEW_STATE_KEY = "holistic-progress-view";
 const SCROLL_KEY = "holistic-progress-scroll";
+
+// Unassigned is only valid for the current year without a Mentor filter (the API returns 422 otherwise).
+function withValidProgress(filters: ProgressFilters, academicYear: string) {
+  if (filters.progress !== "unassigned") return filters;
+  if (!filters.mentor && academicYear === CURRENT_ACADEMIC_YEAR) return filters;
+  return { ...filters, progress: "" };
+}
 
 function readStoredView(): StoredProgressView | null {
   try {
@@ -81,9 +94,12 @@ function restoredPage(stored: StoredProgressView | null, scope: string) {
   return stored.page! > 0 ? stored.page! : 1;
 }
 
-function storedView(scope: string) {
+function storedView(scope: string, academicYear: string) {
   const stored = readStoredView();
-  return { filters: restoredFilters(stored, scope), page: restoredPage(stored, scope) };
+  const filters = restoredFilters(stored, scope);
+  const validFilters = withValidProgress(filters, academicYear);
+  const page = validFilters === filters ? restoredPage(stored, scope) : 1;
+  return { filters: validFilters, page };
 }
 
 async function readProgressResponse(response: Response): Promise<Payload> {
@@ -160,7 +176,7 @@ function useProgressView(academicYear: string, programId: number) {
   const [seenScope, setSeenScope] = useState(scope);
   if (seenScope !== scope) {
     setSeenScope(scope);
-    setFilters((current) => ({ ...current, school: "", mentor: "", phase: "" }));
+    setFilters((current) => withValidProgress({ ...current, school: "", mentor: "", phase: "" }, academicYear));
     setPage(1);
   }
   return { filters, setFilters, page, setPage, scope };
@@ -210,7 +226,7 @@ export default function ProgressWorkspace({
     programId,
   );
   const [ready, setReady] = useState(false);
-  const initialScope = useRef(scope);
+  const initialView = useRef({ scope, academicYear });
   const savedScroll = useRef(0);
   const scrollRestored = useRef(false);
   const params = useMemo(
@@ -231,7 +247,7 @@ export default function ProgressWorkspace({
 
 
   useEffect(() => {
-    const stored = storedView(initialScope.current);
+    const stored = storedView(initialView.current.scope, initialView.current.academicYear);
     savedScroll.current = Number(sessionStorage.getItem(SCROLL_KEY)) || 0;
     queueMicrotask(() => {
       setFilters(stored.filters);
@@ -255,13 +271,14 @@ export default function ProgressWorkspace({
   }, [loading, ready]);
 
   const update = (name: ProgressFilterName): FilterChangeHandler => (event) => {
-    setFilters((current) => ({ ...current, [name]: event.target.value }));
+    setFilters((current) => withValidProgress({ ...current, [name]: event.target.value }, academicYear));
     setPage(1);
   };
-  const clearFilters = () => {
-    setFilters((current) => ({ ...INITIAL_FILTERS, sort: current.sort, direction: current.direction }));
+  const resetFilters = (progress: string) => {
+    setFilters((current) => ({ ...INITIAL_FILTERS, progress, sort: current.sort, direction: current.direction }));
     setPage(1);
   };
+  const clearFilters = () => resetFilters("");
   const changeSort = (key: string) => {
     setFilters((current) => ({
       ...current,
@@ -271,14 +288,17 @@ export default function ProgressWorkspace({
     setPage(1);
   };
   const filtered = progressIsFiltered(filters);
-  const totalPages = Math.max(1, Math.ceil(data.counts.totalMapped / 50));
+  const unassigned = filters.progress === "unassigned";
+  const currentYear = academicYear === CURRENT_ACADEMIC_YEAR;
+  const totalPages = Math.max(1, Math.ceil(data.counts.total / 50));
   return (
     <div aria-busy={loading} className="w-full min-w-0 max-w-full space-y-5">
       <ProgressIntro academicYear={academicYear} exporting={exporting} exportError={exportError}
         onExport={exportProgress} />
       <AssignmentCoverageSchools schools={data.coverageSchools ?? []} programId={programId} />
-      <ProgressFilterPanel filters={filters} options={data.options} onChange={update} />
-      <ProgressCounts counts={data.counts} />
+      <ProgressFilterPanel filters={filters} options={data.options} onChange={update} currentYear={currentYear} />
+      <ProgressCounts counts={data.counts} coverage={data.coverage} mentorSelected={filters.mentor !== ""}
+        currentYear={currentYear} />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2 text-xs text-text-muted">
           <Clock aria-hidden="true" className="h-4 w-4" />
@@ -305,11 +325,12 @@ export default function ProgressWorkspace({
         sort={filters.sort}
         direction={filters.direction}
         onSort={changeSort}
-        onClearFilters={clearFilters}
+        onClearFilters={resetFilters}
         showStudentLinks={showStudentLinks}
+        unassigned={unassigned}
       />
       <ProgressPagination page={page} totalPages={totalPages} rowCount={data.rows.length}
-        totalMapped={data.counts.totalMapped} onPageChange={setPage} />
+        total={data.counts.total} unassigned={unassigned} onPageChange={setPage} />
     </div>
   );
 }
@@ -352,7 +373,9 @@ function ProgressIntro({ academicYear, exporting, exportError, onExport }: {
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div>
         <h2 className="text-lg font-semibold text-text-primary">Students &amp; Progress</h2>
-        <p className="text-sm text-text-muted">Mapped Mentees only. Mapping and Notes are read-only for Admins.</p>
+        <p className="text-sm text-text-muted">Shows assigned Mentees by default. Choose Unassigned in the Progress
+          filter to list eligible Students without a Mentor (current year only). Mapping and Notes are read-only
+          for Admins.</p>
       </div>
       <Button type="button" onClick={() => void onExport()} disabled={exporting}>
         <Download aria-hidden="true" className="h-4 w-4" /> {exporting ? "Exporting..." : "Export CSV"}
@@ -362,7 +385,9 @@ function ProgressIntro({ academicYear, exporting, exportError, onExport }: {
       className="flex items-start gap-3 rounded-md bg-info-bg p-3 text-sm text-text-secondary">
       <History aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-text-muted" />
       <p><strong className="text-text-primary">Viewing {academicYear}.</strong> This view shows Students
-        who had a Mapping during that Academic Year. Earlier academic years are read-only.</p>
+        who had a Mapping during that Academic Year. Earlier academic years are read-only. Eligible and
+        Unassigned counts aren&apos;t available for earlier years because LMS keeps no trustworthy record of
+        historical eligibility.</p>
     </div>}
     {exportError && <p role="alert" className="text-sm text-danger">{exportError}</p>}
   </>;
@@ -373,29 +398,58 @@ function refreshedLabel(refreshedAt: string) {
   return <>Last refreshed <span className="font-mono">{new Date(refreshedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}</span></>;
 }
 
-function ProgressCounts({ counts }: { counts: Payload["counts"] }) {
-  const items: Array<[string, number, string]> = [
-    ["Total mapped Mentees", counts.totalMapped, ""],
+type CountCard = [label: string, value: number | string, accent: string];
+
+const SM_COUNT_COLUMNS: Record<number, string> = { 3: "sm:grid-cols-3", 4: "sm:grid-cols-4", 5: "sm:grid-cols-5" };
+
+function ProgressCounts({ counts, coverage, mentorSelected, currentYear }: {
+  counts: Payload["counts"];
+  coverage: HolisticProgressCoverage | null;
+  mentorSelected: boolean;
+  currentYear: boolean;
+}) {
+  // Blank at once on a Mentor change instead of showing the previous coverage while loading.
+  const shown = mentorSelected ? null : coverage;
+  const progress: CountCard[] = [
     ["Pending", counts.pending, "border-t-[3px] border-t-warning-border"],
     ["Completed", counts.completed, "border-t-[3px] border-t-success"],
     ["Skipped", counts.skipped, "border-t-[3px] border-t-info"],
   ];
-  if (counts.noActivePhase > 0) items.push(["No active phase", counts.noActivePhase, ""]);
-  return <div className={`grid grid-cols-2 gap-px overflow-hidden rounded-md border border-border bg-border ${items.length === 5 ? "sm:grid-cols-5" : "sm:grid-cols-4"}`}>
-    {items.map(([label, value, accent]) => <div key={label} className={`bg-bg-card px-4 py-3 last:col-span-2 sm:last:col-span-1 ${accent}`}>
-      <p className="text-[10px] font-extrabold uppercase tracking-wide text-text-muted">{label}</p>
-      <p className="mt-1 font-mono text-2xl font-extrabold text-text-primary">{value}</p>
-    </div>)}
+  if (counts.noActivePhase > 0) progress.push(["No active phase", counts.noActivePhase, ""]);
+  if (!currentYear) return <CountGroup label="Progress" cards={[["Assigned", counts.total, ""], ...progress]} />;
+  const coverageCards: CountCard[] = [
+    ["Eligible Students", shown?.eligible ?? "—", ""],
+    ["Assigned", shown?.assigned ?? "—", ""],
+    ["Unassigned", shown?.unassigned ?? "—", ""],
+  ];
+  return <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,3fr)_minmax(0,4fr)]">
+    <CountGroup label="Coverage" cards={coverageCards} />
+    <CountGroup label="Progress" cards={progress} />
   </div>;
+}
+
+function CountGroup({ label, cards }: { label: string; cards: CountCard[] }) {
+  const id = `holistic-progress-${label.toLowerCase()}-counts`;
+  const oddLast = cards.length % 2 === 1 ? "last:col-span-2 sm:last:col-span-1" : "";
+  return <section aria-labelledby={id} className="min-w-0 space-y-2">
+    <h3 id={id} className="text-xs font-semibold text-text-secondary">{label}</h3>
+    <ul className={`grid grid-cols-2 gap-px overflow-hidden rounded-md border border-border bg-border ${SM_COUNT_COLUMNS[cards.length]}`}>
+      {cards.map(([cardLabel, value, accent]) => <li key={cardLabel} className={`bg-bg-card px-4 py-3 ${oddLast} ${accent}`}>
+        <p className="text-[10px] font-extrabold uppercase tracking-wide text-text-muted">{cardLabel}</p>
+        <p className="mt-1 font-mono text-2xl font-extrabold text-text-primary">{value}</p>
+      </li>)}
+    </ul>
+  </section>;
 }
 
 const FILTER_LABEL = "block min-w-0 text-[11px] font-extrabold uppercase tracking-wide text-text-muted";
 const FILTER_CONTROL = "mt-1 min-h-11 w-full rounded-md border border-border bg-bg px-3 text-sm font-normal normal-case tracking-normal text-text-primary";
 
-function ProgressFilterPanel({ filters, options, onChange }: {
+function ProgressFilterPanel({ filters, options, onChange, currentYear }: {
   filters: ProgressFilters;
   options: Options;
   onChange: (name: ProgressFilterName) => FilterChangeHandler;
+  currentYear: boolean;
 }) {
   return <div className="grid grid-cols-[minmax(0,1fr)] gap-3 border-y border-border py-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
     <label className={FILTER_LABEL}>
@@ -428,8 +482,9 @@ function ProgressFilterPanel({ filters, options, onChange }: {
     <label className={FILTER_LABEL}>
       Progress
       <select aria-label="Filter by Progress" className={FILTER_CONTROL} value={filters.progress} onChange={onChange("progress")}>
-        <option value="">All Progress</option><option value="pending">Pending</option><option value="completed">Completed</option>
+        <option value="">All Assigned</option><option value="pending">Pending</option><option value="completed">Completed</option>
         <option value="skipped">Skipped</option><option value="no_active_phase">No active phase</option>
+        {currentYear && <option value="unassigned" disabled={filters.mentor !== ""}>Unassigned</option>}
       </select>
     </label>
     <label className={FILTER_LABEL}>
@@ -454,6 +509,7 @@ function ProgressResults({
   onSort,
   onClearFilters,
   showStudentLinks,
+  unassigned,
 }: {
   rows: Row[];
   loading: boolean;
@@ -464,11 +520,13 @@ function ProgressResults({
   sort: string;
   direction: string;
   onSort: (key: string) => void;
-  onClearFilters: () => void;
+  onClearFilters: (progress: string) => void;
   showStudentLinks: boolean;
+  unassigned: boolean;
 }) {
   if (!loading && rows.length === 0) {
-    return <ProgressEmptyState hasMappings={hasMappings} filtered={filtered} onClearFilters={onClearFilters} />;
+    return <ProgressEmptyState hasMappings={hasMappings} filtered={filtered} unassigned={unassigned}
+      onClearFilters={onClearFilters} />;
   }
   return <div role="region" aria-label="Student progress table" tabIndex={0}
     className="w-full min-w-0 max-w-full overflow-x-auto border-y border-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset">
@@ -495,64 +553,123 @@ function ProgressResults({
           academicYear={academicYear}
           programId={programId}
           showStudentLinks={showStudentLinks}
+          unassigned={unassigned}
         />
       </tbody>
     </table>
   </div>;
 }
 
-function ProgressEmptyState({ hasMappings, filtered, onClearFilters }: {
+function ProgressEmptyState({ hasMappings, filtered, unassigned, onClearFilters }: {
   hasMappings: boolean;
   filtered: boolean;
-  onClearFilters: () => void;
+  unassigned: boolean;
+  onClearFilters: (progress: string) => void;
 }) {
   const noMappings = !hasMappings && !filtered;
   const Icon = noMappings ? Users : SearchX;
+  if (unassigned) {
+    return <div className="flex min-h-64 flex-col items-center justify-center gap-3 border-y border-border p-8 text-center">
+      <SearchX aria-hidden="true" className="h-8 w-8 text-text-muted" />
+      <p className="text-base font-semibold text-text-primary">No Unassigned Students match these filters.</p>
+      <p className="text-sm text-text-muted">Change or clear a filter to see more Unassigned Students.</p>
+      <Button type="button" variant="secondary" onClick={() => onClearFilters("unassigned")}>Clear filters</Button>
+    </div>;
+  }
   return <div className="flex min-h-64 flex-col items-center justify-center gap-3 border-y border-border p-8 text-center">
     <Icon aria-hidden="true" className="h-8 w-8 text-text-muted" />
     <p className="text-base font-semibold text-text-primary">
-      {noMappings ? "No mapped Students exist for this Academic Year." : "No mapped Students match these filters."}
+      {noMappings ? "No assigned Students exist for this Academic Year." : "No assigned Students match these filters."}
     </p>
     <p className="text-sm text-text-muted">
       {noMappings
         ? "Students appear here after Teachers assign them from their School workspace."
-        : "Change or clear a filter to see more mapped Mentees."}
+        : "Change or clear a filter to see more assigned Mentees."}
     </p>
-    {!noMappings && <Button type="button" variant="secondary" onClick={onClearFilters}>Clear filters</Button>}
+    {!noMappings && <Button type="button" variant="secondary" onClick={() => onClearFilters("")}>Clear filters</Button>}
   </div>;
 }
 
-function ProgressRows({ rows, loading, academicYear, programId, showStudentLinks }: {
+function ProgressRows({ rows, loading, academicYear, programId, showStudentLinks, unassigned }: {
   rows: Row[];
   loading: boolean;
   academicYear: string;
   programId: number;
   showStudentLinks: boolean;
+  unassigned: boolean;
 }) {
   if (loading && rows.length === 0) {
-    return <tr><td colSpan={8} className="px-3 py-12 text-center text-text-muted"><span role="status">Loading mapped Students...</span></td></tr>;
+    return <tr><td colSpan={8} className="px-3 py-12 text-center text-text-muted"><span role="status">
+      {unassigned ? "Loading Unassigned Students..." : "Loading assigned Students..."}
+    </span></td></tr>;
   }
-  return rows.map((row) => (
-    <ProgressRow
-      key={row.studentId}
+  // One Student can be Unassigned at two Schools, so keys include the School.
+  return rows.map((row) => row.progress === "unassigned"
+    ? <UnassignedProgressRow
+      key={`${row.schoolCode}:${row.studentId}`}
       row={row}
       academicYear={academicYear}
       programId={programId}
       showStudentLinks={showStudentLinks}
     />
-  ));
+    : <ProgressRow
+      key={`${row.schoolCode}:${row.studentId}`}
+      row={row}
+      academicYear={academicYear}
+      programId={programId}
+      showStudentLinks={showStudentLinks}
+    />);
 }
 
-function ProgressRow({ row, academicYear, programId, showStudentLinks }: {
-  row: Row;
+const OPEN_STUDENT_LINK = "inline-flex min-h-11 shrink-0 items-center justify-center whitespace-nowrap rounded-lg border border-border bg-bg-card px-3 py-1.5 text-xs font-medium text-text-primary shadow-sm hover:bg-hover-bg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50";
+
+function studentPhaseHref(row: Row, phaseId: number, academicYear: string, programId: number) {
+  return `/holistic-mentorship/students/${row.studentId}/phases/${phaseId}?${new URLSearchParams({
+    school_code: row.schoolCode,
+    academic_year: academicYear,
+    program_id: String(programId),
+    source: "progress",
+  })}`;
+}
+
+function StudentCells({ row }: { row: Row }) {
+  return <>
+    <td className="px-3 py-3"><p className="font-semibold text-text-primary">{row.studentName}</p><p className="font-mono text-xs text-text-muted">{row.externalStudentId || "No external ID"}</p></td>
+    <td className="px-3 py-3"><p className="font-semibold text-text-primary">{row.schoolName}</p><p className="font-mono text-xs text-text-muted">{row.schoolCode}</p></td>
+    <td className="px-3 py-3 font-mono">{row.grade}</td>
+  </>;
+}
+
+// Read-only: no assign or edit controls on Students & Progress.
+function UnassignedProgressRow({ row, academicYear, programId, showStudentLinks }: {
+  row: HolisticUnassignedProgressRow;
   academicYear: string;
   programId: number;
   showStudentLinks: boolean;
 }) {
   return <tr className="hover:bg-hover-bg/50">
-    <td className="px-3 py-3"><p className="font-semibold text-text-primary">{row.studentName}</p><p className="font-mono text-xs text-text-muted">{row.externalStudentId || "No external ID"}</p></td>
-    <td className="px-3 py-3"><p className="font-semibold text-text-primary">{row.schoolName}</p><p className="font-mono text-xs text-text-muted">{row.schoolCode}</p></td>
-    <td className="px-3 py-3 font-mono">{row.grade}</td>
+    <StudentCells row={row} />
+    <td className="px-3 py-3 text-text-muted">—</td>
+    <td className="px-3 py-3 text-text-muted">—</td>
+    <td className="px-3 py-3"><ProgressBadge progress={row.progress} /></td>
+    <td className="px-3 py-3 text-text-muted">—</td>
+    <td className="px-3 py-3">{showStudentLinks && <div className="flex items-center justify-end">
+      {row.activePhaseId ? <Link aria-label={`Open ${row.studentName}`} className={OPEN_STUDENT_LINK}
+        href={studentPhaseHref(row, row.activePhaseId, academicYear, programId)}>
+        Open Student
+      </Link> : <Button type="button" variant="secondary" className="text-xs" disabled title="No active Phase">Open Student</Button>}
+    </div>}</td>
+  </tr>;
+}
+
+function ProgressRow({ row, academicYear, programId, showStudentLinks }: {
+  row: HolisticAssignedProgressRow;
+  academicYear: string;
+  programId: number;
+  showStudentLinks: boolean;
+}) {
+  return <tr className="hover:bg-hover-bg/50">
+    <StudentCells row={row} />
     <td className="px-3 py-3"><p className="font-semibold text-text-primary">{row.mentorName}</p><p className="text-xs text-text-muted">{row.mentorEmail || "No email"}</p></td>
     <td className="px-3 py-3"><PhaseCell row={row} /></td>
     <td className="px-3 py-3"><ProgressBadge progress={row.progress} /></td>
@@ -565,7 +682,7 @@ function ProgressRow({ row, academicYear, programId, showStudentLinks }: {
   </tr>;
 }
 
-function PhaseCell({ row }: { row: Row }) {
+function PhaseCell({ row }: { row: HolisticAssignedProgressRow }) {
   if (row.phaseNumber === null) return <p className="font-semibold text-text-primary">No active phase</p>;
   return <>
     <p className="font-semibold text-text-primary">Phase {row.phaseNumber}: {row.phaseTitle}</p>
@@ -577,6 +694,7 @@ function PhaseCell({ row }: { row: Row }) {
 
 const PROGRESS_LABELS: Record<string, string> = {
   completed: "Completed", pending: "Pending", skipped: "Skipped", no_active_phase: "No active phase",
+  unassigned: "Unassigned",
 };
 
 function ProgressBadge({ progress }: { progress: Row["progress"] }) {
@@ -592,37 +710,32 @@ function CompletionTime({ value }: { value: string | null }) {
 }
 
 function ProgressActions({ row, academicYear, programId }: {
-  row: Row;
+  row: HolisticAssignedProgressRow;
   academicYear: string;
   programId: number;
 }) {
   const openable = row.phaseId && row.phaseState !== "locked";
   return <div className="flex items-center justify-end">
-    {openable ? <Link aria-label={`Open ${row.studentName}`}
-      className="inline-flex min-h-11 shrink-0 items-center justify-center whitespace-nowrap rounded-lg border border-border bg-bg-card px-3 py-1.5 text-xs font-medium text-text-primary shadow-sm hover:bg-hover-bg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
-      href={`/holistic-mentorship/students/${row.studentId}/phases/${row.phaseId}?${new URLSearchParams({
-        school_code: row.schoolCode,
-        academic_year: academicYear,
-        program_id: String(programId),
-        source: "progress",
-      })}`}>
+    {openable ? <Link aria-label={`Open ${row.studentName}`} className={OPEN_STUDENT_LINK}
+      href={studentPhaseHref(row, row.phaseId!, academicYear, programId)}>
       Open Student
     </Link> : <Button type="button" variant="secondary" className="text-xs" disabled title="Phase is locked">Open Student</Button>}
   </div>;
 }
 
-function ProgressPagination({ page, totalPages, rowCount, totalMapped, onPageChange }: {
+function ProgressPagination({ page, totalPages, rowCount, total, unassigned, onPageChange }: {
   page: number;
   totalPages: number;
   rowCount: number;
-  totalMapped: number;
+  total: number;
+  unassigned: boolean;
   onPageChange: React.Dispatch<React.SetStateAction<number>>;
 }) {
   const start = rowCount > 0 ? (page - 1) * 50 + 1 : 0;
   const end = rowCount > 0 ? start + rowCount - 1 : 0;
   return <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
     <span className="text-text-muted">
-      Showing <span className="font-mono">{start}-{end}</span> of <span className="font-mono">{totalMapped}</span> mapped Mentees
+      Showing <span className="font-mono">{start}–{end}</span> of <span className="font-mono">{total}</span> {unassigned ? "Unassigned Students" : "assigned Mentees"}
     </span>
     <div className="flex items-center gap-2">
       <Button className="min-w-11" variant="icon" aria-label="Previous page" disabled={page <= 1}

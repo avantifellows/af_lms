@@ -57,6 +57,27 @@ describe("GET /api/cms/test-pdf", () => {
     expect(mocks.uploadTransientObject).not.toHaveBeenCalled();
   });
 
+  it("asks the CMS for a regional-language PDF via lang_code", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(cmsOk());
+    vi.stubGlobal("fetch", fetchMock);
+
+    await GET(req("testId=7&type=answers&lang=hi"));
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "https://cms.test/api/service/test-pdf?id=7&type=answers&lang_code=hi"
+    );
+  });
+
+  it("treats lang=en as English only and rejects malformed lang", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(cmsOk());
+    vi.stubGlobal("fetch", fetchMock);
+
+    await GET(req("testId=7&type=questions&lang=en"));
+    expect(fetchMock.mock.calls[0][0]).toBe("https://cms.test/api/service/test-pdf?id=7&type=questions");
+
+    expect((await GET(req("testId=7&lang=hi%26x%3D1"))).status).toBe(400);
+  });
+
   it("400s without a testId", async () => {
     const res = await GET(req("type=questions"));
     expect(res.status).toBe(400);

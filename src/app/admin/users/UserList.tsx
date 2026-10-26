@@ -3,7 +3,7 @@
 import { useState } from "react";
 import AddUserModal from "./AddUserModal";
 import { Button } from "@/components/ui";
-import { PROGRAM_ID_TO_LABEL } from "@/lib/constants";
+import { isAlumniRole, isPmuRole, PROGRAM_ID_TO_LABEL } from "@/lib/constants";
 
 interface CentreAssignment {
   centreName: string;
@@ -48,6 +48,12 @@ const LEVEL_LABELS: Record<number, string> = {
   1: "School",
 };
 
+// PMU roles only ever reach JNV Schools, so their level-3 badge says so.
+function levelLabel(user: Pick<UserPermission, "level" | "role">) {
+  if (user.level === 3 && isPmuRole(user.role)) return "All JNV Schools";
+  return LEVEL_LABELS[user.level];
+}
+
 const LEVEL_COLORS: Record<number, string> = {
   3: "bg-hover-bg text-accent-hover",
   2: "bg-green-100 text-green-800",
@@ -59,6 +65,9 @@ const ROLE_LABELS: Record<string, string> = {
   program_admin: "Program Admin",
   program_manager: "Program Manager",
   holistic_mentorship_admin: "Holistic Mentorship Admin",
+  pmu_manager: "PMU Manager",
+  pmu_govt_school_user: "PMU Govt School User",
+  alumni_manager: "Alumni Manager",
   teacher: "Teacher",
 };
 
@@ -67,6 +76,9 @@ const ROLE_COLORS: Record<string, string> = {
   program_admin: "bg-cyan-100 text-cyan-800",
   program_manager: "bg-indigo-100 text-indigo-800",
   holistic_mentorship_admin: "bg-emerald-100 text-emerald-800",
+  pmu_manager: "bg-amber-100 text-amber-800",
+  pmu_govt_school_user: "bg-orange-100 text-orange-800",
+  alumni_manager: "bg-teal-100 text-teal-800",
   teacher: "bg-gray-100 text-gray-800",
 };
 
@@ -186,7 +198,7 @@ export default function UserList({ initialUsers, regions, schoolCodeToName, curr
                 </td>
                 <td className="whitespace-nowrap px-3 py-4 text-sm">
                   <span className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${LEVEL_COLORS[user.level]}`}>
-                    {LEVEL_LABELS[user.level]}
+                    {levelLabel(user)}
                   </span>
                   <span className={`ml-2 inline-flex rounded-full px-2 py-1 text-xs font-semibold ${
                     user.read_only
@@ -197,94 +209,22 @@ export default function UserList({ initialUsers, regions, schoolCodeToName, curr
                   </span>
                 </td>
                 <td className="px-3 py-4 text-sm">
-                  {user.program_ids && user.program_ids.length > 0 ? (
-                    <div className="flex flex-wrap gap-1">
-                      {user.program_ids.map((id) => (
-                        <span
-                          key={id}
-                          className="inline-flex px-2 py-0.5 text-xs rounded-full bg-hover-bg text-accent-hover"
-                        >
-                          {PROGRAM_LABELS[id] || `Program ${id}`}
-                        </span>
-                      ))}
-                    </div>
-                  ) : (
-                    <span className="text-red-500 text-xs">No programs</span>
-                  )}
+                  <ProgramsCell role={user.role} programIds={user.program_ids} />
                 </td>
                 <td className="px-3 py-4 text-sm text-gray-500">
-                  <div className="flex flex-col gap-1">
-                    {user.centres && user.centres.length > 0 && (
-                      <div className="flex flex-wrap gap-1">
-                        {user.centres.map((centre, i) => (
-                          <span
-                            key={`${centre.centreName}-${centre.role}-${i}`}
-                            className="inline-flex px-2 py-0.5 text-xs rounded-full bg-hover-bg text-accent-hover"
-                            title="Centre assignment — manage in Staff"
-                          >
-                            {centre.centreName} &middot; {centre.role}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                    {user.level === 3 ? (
-                      <span className="text-gray-400">All JNV schools</span>
-                    ) : user.level === 2 && user.regions && user.regions.length > 0 ? (
-                      <span>{user.regions.join(", ")}</span>
-                    ) : user.level === 1 && user.school_codes && user.school_codes.length > 0 ? (
-                      <div className="flex flex-col gap-0.5">
-                        {user.school_codes.map((code) => (
-                          <span key={code}>{labelForSchool(code)}</span>
-                        ))}
-                      </div>
-                    ) : user.centres && user.centres.length > 0 ? null : (
-                      <span>{user.level === 2 ? "No regions assigned" : "No schools assigned"}</span>
-                    )}
-                  </div>
+                  <AccessCell user={user} labelForSchool={labelForSchool} />
                 </td>
                 <td className="px-3 py-4 text-sm">
                   {viewerReadOnly ? (
                     <span className="text-xs text-gray-400">Read-only</span>
                   ) : (
-                  <>
-                  <div className="flex items-center whitespace-nowrap">
-                    {(user.centres?.length ?? 0) > 0 ? (
-                      // Seated users' scope is derived from their centre, so it
-                      // can't be edited here (the API rejects it too) — point ops
-                      // at Staff Management instead.
-                      <span
-                        className="mr-2"
-                        title="This user is assigned to a centre. Edit their access in Staff Management."
-                      >
-                        <Button variant="ghost" size="sm" disabled>
-                          Edit
-                        </Button>
-                      </span>
-                    ) : (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setEditingUser(user)}
-                        className="mr-2"
-                      >
-                        Edit
-                      </Button>
-                    )}
-                    <Button
-                      variant="danger-ghost"
-                      size="sm"
-                      onClick={() => handleDelete(user.id, user.email)}
-                      disabled={deleting === user.id || user.email.toLowerCase() === currentUserEmail.toLowerCase()}
-                    >
-                      {deleting === user.id ? "Deleting..." : "Delete"}
-                    </Button>
-                  </div>
-                  {(user.centres?.length ?? 0) > 0 && (
-                    <p className="mt-1 text-xs text-gray-400">
-                      Edit in Staff Management only
-                    </p>
-                  )}
-                  </>
+                    <ActionsCell
+                      seated={(user.centres?.length ?? 0) > 0}
+                      deleting={deleting === user.id}
+                      isSelf={user.email.toLowerCase() === currentUserEmail.toLowerCase()}
+                      onEdit={() => setEditingUser(user)}
+                      onDelete={() => handleDelete(user.id, user.email)}
+                    />
                   )}
                 </td>
               </tr>
@@ -305,6 +245,103 @@ export default function UserList({ initialUsers, regions, schoolCodeToName, curr
           onSave={handleSave}
         />
       )}
+    </>
+  );
+}
+
+/** A user's Programs as chips; Alumni Managers have none by design (ADR 0008), which isn't an error. */
+function ProgramsCell({ role, programIds }: { role: string; programIds: number[] | null }) {
+  if (programIds && programIds.length > 0) {
+    return (
+      <div className="flex flex-wrap gap-1">
+        {programIds.map((id) => (
+          <span
+            key={id}
+            className="inline-flex px-2 py-0.5 text-xs rounded-full bg-hover-bg text-accent-hover"
+          >
+            {PROGRAM_LABELS[id] || `Program ${id}`}
+          </span>
+        ))}
+      </div>
+    );
+  }
+  if (isAlumniRole(role)) return <span className="text-gray-500 text-xs">Not used</span>;
+  return <span className="text-red-500 text-xs">No programs</span>;
+}
+
+/** Where the user's access comes from: centre seats, then their level's schools or regions. */
+function AccessCell({ user, labelForSchool }: { user: UserPermission; labelForSchool: (code: string) => string }) {
+  const seated = (user.centres?.length ?? 0) > 0;
+  return (
+    <div className="flex flex-col gap-1">
+      {seated && (
+        <div className="flex flex-wrap gap-1">
+          {user.centres!.map((centre, i) => (
+            <span
+              key={`${centre.centreName}-${centre.role}-${i}`}
+              className="inline-flex px-2 py-0.5 text-xs rounded-full bg-hover-bg text-accent-hover"
+              title="Centre assignment — manage in Staff"
+            >
+              {centre.centreName} &middot; {centre.role}
+            </span>
+          ))}
+        </div>
+      )}
+      <ExplicitScope user={user} seated={seated} labelForSchool={labelForSchool} />
+    </div>
+  );
+}
+
+function ExplicitScope({ user, seated, labelForSchool }: {
+  user: UserPermission;
+  seated: boolean;
+  labelForSchool: (code: string) => string;
+}) {
+  if (user.level === 3) return <span className="text-gray-400">All JNV schools</span>;
+  if (user.level === 2 && user.regions?.length) return <span>{user.regions.join(", ")}</span>;
+  if (user.level === 1 && user.school_codes?.length) {
+    return (
+      <div className="flex flex-col gap-0.5">
+        {user.school_codes.map((code) => (
+          <span key={code}>{labelForSchool(code)}</span>
+        ))}
+      </div>
+    );
+  }
+  if (seated) return null;
+  return <span>{user.level === 2 ? "No regions assigned" : "No schools assigned"}</span>;
+}
+
+/** Edit / Delete. Seated users' scope comes from their centre, so it's edited in Staff Management (the API refuses it too). */
+function ActionsCell({ seated, deleting, isSelf, onEdit, onDelete }: {
+  seated: boolean;
+  deleting: boolean;
+  isSelf: boolean;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <>
+      <div className="flex items-center whitespace-nowrap">
+        {seated ? (
+          <span
+            className="mr-2"
+            title="This user is assigned to a centre. Edit their access in Staff Management."
+          >
+            <Button variant="ghost" size="sm" disabled>
+              Edit
+            </Button>
+          </span>
+        ) : (
+          <Button variant="ghost" size="sm" onClick={onEdit} className="mr-2">
+            Edit
+          </Button>
+        )}
+        <Button variant="danger-ghost" size="sm" onClick={onDelete} disabled={deleting || isSelf}>
+          {deleting ? "Deleting..." : "Delete"}
+        </Button>
+      </div>
+      {seated && <p className="mt-1 text-xs text-gray-400">Edit in Staff Management only</p>}
     </>
   );
 }

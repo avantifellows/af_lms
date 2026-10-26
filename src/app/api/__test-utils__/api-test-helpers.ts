@@ -36,11 +36,57 @@ export const TEACHER_SESSION = {
   expires: "2099-01-01",
 };
 
-export const PASSCODE_SESSION = {
-  user: { email: "passcode_70705@avantifellows.org", name: "Passcode User" },
-  isPasscodeUser: true,
-  schoolCode: "70705",
+export const PMU_MANAGER_SESSION = {
+  user: { email: "pmu.manager@avantifellows.org", name: "PMU Manager" },
+  expires: "2099-01-01",
+};
+
+export const PMU_GOVT_SESSION = {
+  user: { email: "principal@jnv.example.org", name: "PMU Govt School User" },
+  expires: "2099-01-01",
+};
+
+export const ALUMNI_MANAGER_SESSION = {
+  user: { email: "alumni.manager@avantifellows.org", name: "Alumni Manager" },
   expires: "2099-01-01",
 };
 
 export const NO_SESSION = null;
+
+/**
+ * Resolved permission rows for the PMU sessions above, as
+ * `authorizeSchoolAccess` returns them. Both roles are pinned to JNV NVS.
+ */
+export const PMU_MANAGER_PERMISSION = {
+  email: "pmu.manager@avantifellows.org",
+  level: 3 as const,
+  role: "pmu_manager" as const,
+  school_codes: null,
+  regions: null,
+  program_ids: [64],
+  read_only: false,
+};
+
+export const PMU_GOVT_PERMISSION = {
+  email: "principal@jnv.example.org",
+  level: 1 as const,
+  role: "pmu_govt_school_user" as const,
+  school_codes: ["70705"],
+  regions: null,
+  program_ids: [64],
+  read_only: false,
+};
+
+/**
+ * The stored row behind ALUMNI_MANAGER_SESSION (ADR 0008). Alumni Managers
+ * have no Programs; `getUserPermission` resolves this row to null.
+ */
+export const ALUMNI_MANAGER_PERMISSION = {
+  email: "alumni.manager@avantifellows.org",
+  level: 1 as const,
+  role: "alumni_manager" as const,
+  school_codes: ["70705"],
+  regions: null,
+  program_ids: [],
+  read_only: false,
+};

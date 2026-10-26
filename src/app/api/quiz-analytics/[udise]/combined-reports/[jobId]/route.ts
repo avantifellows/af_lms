@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { authorizeSchoolAccess } from "@/lib/api-auth";
+import { refuseOutsidePmuSession } from "@/lib/performance-session-pin";
 import {
   getCombinedReportJob,
   ReportingServiceError,
@@ -12,7 +13,7 @@ export async function GET(
   { params }: { params: Promise<{ udise: string; jobId: string }> },
 ) {
   const { udise, jobId } = await params;
-  const auth = await authorizeSchoolAccess(udise);
+  const auth = await authorizeSchoolAccess(udise, { feature: "performance" });
   if (!auth.authorized) return auth.response;
 
   try {
@@ -22,6 +23,15 @@ export async function GET(
     if (job.school_code !== auth.school.code) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
+    // A PMU caller only sees jobs for JNV NVS tests; any other job is out of
+    // scope, so it 404s like another School's job.
+    const outside = await refuseOutsidePmuSession(
+      auth.permission,
+      udise,
+      job.session_id,
+      404,
+    );
+    if (outside) return outside;
     return NextResponse.json(job);
   } catch (error) {
     if (error instanceof ReportingServiceError && error.status === 404) {

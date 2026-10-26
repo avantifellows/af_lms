@@ -18,7 +18,7 @@ edges:
     condition: when adding LMS API routes for create or bulk upload
   - target: patterns/db-service-write.md
     condition: when proxying student writes to the DB Service
-last_updated: 2026-09-17
+last_updated: 2026-10-23
 ---
 
 # Student Addition
@@ -29,9 +29,9 @@ School and centre roster reads materialize the `student_program_dropout` audit s
 
 Source context: GitHub issue https://github.com/avantifellows/af_lms/issues/197 is the current revised implementation PRD. Issue #155 describes the prior implementation and issue #144 remains reference context only.
 
-## Current Behavior: Phone Registration Mode (AF LMS Active; Coordinated Release)
+## Current Behavior: Phone Registration Mode (Production Deployed 2026-09-07)
 
-GitHub issue https://github.com/avantifellows/af_lms/issues/296 is the build-ready decision issue. AF LMS slices #297–#303 have implemented the foundation plus the Add Student and Bulk Upload paths, mode-aware template download, scoped existing-Student phone correction, the Approved-mode phone-cohort backfill contract, and activation/regression coverage: a typed code registry with Phone and Approved modes, mode-resolved canonical fields, shared mode-aware validation, an explicit mode/version handshake on NVS DB Service writes, mode-aware Add/Bulk UI and API behavior, the exact HQ Phone workbook, strict Phone bulk schema detection, example-row removal before limits and writes, x14-safe workbook compaction, directly retryable 11-column Phone rejected CSVs, duplicate/conflict result presentation, server-side three-fact phone-cohort inference with current PEN/G10 state, strict NVS correction/backfill authorization, atomic correction/backfill payload and error handling, fill-once identifier locks, and Edit guidance. AF LMS now selects Phone mode; the matching DB Service constant must be flipped and deployed in the coordinated release. The Approved Add/Bulk/Edit behavior and workbooks remain covered by explicit Approved-mode regression injection for the future post-approval flip. The existing JNV NVS Add Student and Bulk Upload flow uses Phone Registration Mode when the coordinated release is deployed:
+GitHub issue https://github.com/avantifellows/af_lms/issues/296 is the build-ready decision issue. AF LMS slices #297–#303 have implemented the foundation plus the Add Student and Bulk Upload paths, mode-aware template download, scoped existing-Student phone correction, the Approved-mode phone-cohort backfill contract, and activation/regression coverage: a typed code registry with Phone and Approved modes, mode-resolved canonical fields, shared mode-aware validation, an explicit mode/version handshake on NVS DB Service writes, mode-aware Add/Bulk UI and API behavior, the exact HQ Phone workbook, strict Phone bulk schema detection, example-row removal before limits and writes, x14-safe workbook compaction, directly retryable 11-column Phone rejected CSVs, duplicate/conflict result presentation, server-side three-fact phone-cohort inference with current PEN/G10 state, strict NVS correction/backfill authorization, atomic correction/backfill payload and error handling, fill-once identifier locks, and Edit guidance. AF LMS and DB Service now both select Phone mode; their coordinated production deployment completed on September 7. The Approved Add/Bulk/Edit behavior and workbooks remain covered by explicit Approved-mode regression injection for the future post-approval flip. The existing JNV NVS Add Student and Bulk Upload flow uses Phone Registration Mode:
 
 - Phone mode accepts the existing fields except PEN, Grade 10 Roll Number, and Annual Family Income. G10 board remains required.
 - The exact HQ workbook `NVS_Lakshya_Data_Template_updated_19th_August_2026.xlsx` is the approved static asset (SHA-256 `657f236c35bda1d01375126394091a68ff7a4e3753c8036a030835762739c6e7`). Its dropdowns use Excel `x14:dataValidations`; copy and serve the bytes without regenerating the workbook through ExcelJS/openpyxl.
@@ -44,16 +44,172 @@ GitHub issue https://github.com/avantifellows/af_lms/issues/296 is the build-rea
 - Bulk schema mismatches return structured `templateMismatch` / `template_mismatch` missing, unexpected, and duplicate header details through the LMS API; the upload modal shows only populated groups and links the current mode template. Approved mode still tolerates genuinely extra columns, and the structured `legacy_apaar` marker/message is reserved for files that actually include an APAAR ID header.
 - The active mode is a code constant changed by coordinated AF LMS and DB Service PRs/deployments. No database mode configuration or School selector is added.
 - Every Add/Bulk write carries `registration_mode` and `registration_mode_version`; the expected DB Service mismatch response is `{ error: { code: "registration_mode_mismatch", message: string } }`, which AF LMS surfaces as a fail-closed temporary-unavailability response without row results.
-- Existing phone-mode Students keep their phone Student ID after approval. Scoped Admins, Program Managers, and Program Admins can atomically correct phone plus Student ID with audit, and later fill a blank PEN or G10 Roll Number once. Annual Family Income remains optional.
+- Existing phone-mode Students keep their phone Student ID after approval. Scoped Admins, Program Managers, Program Admins, PMU Managers, and PMU Govt School Users can atomically correct phone plus Student ID with audit, and later fill a blank PEN or G10 Roll Number once. Annual Family Income remains optional.
 - Mode provenance is inferred from current JNV NVS membership, current `EnableStudents` membership, and equality of Student ID and normalized phone; no mode column is added. The existing-Student Edit route uses that same server-side inference: Phone-mode phone changes require the scoped NVS actor gate, send the mode/version correction contract to DB Service, and map same-school/other-school duplicate responses plus coordinated-mode failures without writing in LMS. The roster forwards the inferred flag to EditStudentModal, which explains that changing the phone changes Student ID and immediate Portal login; restricted PEN, Grade 10 Roll Number, and Annual Family Income submissions are refused at the LMS boundary while Phone mode is active.
 - DB Service lookup checks provide duplicate safety, while the small concurrent-create race without a cross-table database constraint is accepted. `avantifellows/db-service#648` is not a blocker.
 - Non-LMS phone correction for this cohort is unsupported until the generic import lookup is fixed in `avantifellows/db-service#703`; that follow-up is separate and assigned to Aman.
 
-The planning branch is `grill/nvs-phone-registration-mode`; ADR 0006 records the permanent phone-identity trade-off. AF LMS now has Phone Registration Mode active in code. Production rollout requires the matching DB Service mode/version deployment, a paused-registration mismatch check, and the manual Portal login smoke gate documented in `docs/nvs-phone-registration-release.md`. The accepted concurrent-create race without a cross-table database constraint remains documented, not fixed.
+The planning branch is `grill/nvs-phone-registration-mode`; ADR 0006 records the permanent phone-identity trade-off. AF LMS now has Phone Registration Mode active in code. The coordinated production deployment and no-write mode-mismatch probe completed on September 7. The separate EnableStudents manual Portal login smoke gate in `docs/nvs-phone-registration-release.md` remains to be recorded; the non-EnableStudents regression below does not substitute for it. The accepted concurrent-create race without a cross-table database constraint remains documented, not fixed.
+
+## Uniform Sizes on Edit Student
+
+GitHub issue https://github.com/avantifellows/af_lms/issues/395 asked for optional
+`tshirt_size` and `track_pant_size` so vendor orders can be placed from roster data. PR #401
+first put them on the Add Student form; PR #407 moved them to **Edit Student**, because
+physical centres never open Add Student — all their Student information is captured and
+edited through the Enrollment tab, so collecting the sizes at enrolment reached only the
+online-centre cohort.
+
+Both are dropdowns over the vendor chart XS–XXXL, labelled with their chest or waist
+measurement; only the bare size code is stored. The codes, the offered subset and the labels
+live in `src/lib/uniform-sizes.ts` — a dependency-free client-safe module, so the dropdown
+and the server validation cannot drift. `UNIFORM_SIZES` is the full set the DB Service
+`student_tshirt_size_check` / `student_track_pant_size_check` constraints accept;
+`OFFERED_UNIFORM_SIZES` is the narrower list the form offers, which is why XXS is storable,
+and editable on a row that already has it, but never offered.
+
+Both fields are optional and clearable. They ride the ordinary `PATCH /api/student/[id]`
+path: `STUDENT_EDITABLE_FIELDS` names them, `canonicalizeStudentEditPayload` canonicalizes
+the case and accepts `""`, and the DB Service `trim_to_nil` turns that blank into NULL. The
+Edit modal sends only changed fields, so an untouched size is never in the payload.
+`STUDENT_COLUMNS` in `src/lib/school-students.ts` selects both, which covers the school and
+centre rosters at once.
+
+Not collected at enrolment, and deliberately so: neither Add Student nor the bulk templates
+ask for a size, so `getStudentAdditionUploadColumns`, both static workbooks and the
+rejected-row CSV contract stay unchanged. The DB Service ingestion allowlist from #763 is
+left in place but is now unused by the LMS; removing it is a separate decision.
+
+Hidden for PMU (JNV NVS) Students: uniforms are ordered only for physical-centre programs, so
+`EditStudentModal` renders the Uniform Size section only when its `programId` (the roster's
+selected program) is not `PMU_PROGRAM_ID`. UI-only gate; the PATCH path still accepts the
+fields, and the modal never sends them for NVS because they are never rendered.
+
+Student documents follow the same rule (PR #433): under the NVS program the Edit Student
+Documents tab is not rendered and the roster card's expanded Documents list is hidden via
+`StudentCard`'s `isNvs`. The `/api/students/[id]/documents` routes are unchanged. Exam
+registrations (#434) are physical-centre only for the same reason, so NVS has **no tab strip
+at all** — Details is the whole form, and the card carries neither the exam tags nor the
+Exam Registrations table. The NVS roster card's expanded view is limited to the Edit Student
+fields its summary doesn't already show (`NvsDetailGroups` in `StudentTable.tsx`: CWSN,
+Father Name, Annual Family Income, Board Stream, G10 board, Grade 10 Roll no), so the card
+never shows fields the Edit form can't change. Keep the two in sync when an Edit Student
+field is added or removed for NVS.
+
+Uniform sizes (#395), the Edit Student field parity work (#431) and exam registrations
+(#434) were each raised by the physical-centre team and each shipped to NVS first, then had
+to be gated afterwards — which is why `AGENTS.md` now asks for the audience before anything
+is built. "The issue doesn't say" means ask, not "every program".
+
+## Edit Student and the card show the same fields, for centres (#431)
+
+GitHub issue https://github.com/avantifellows/af_lms/issues/431 found the roster card
+showing 21 profile fields Edit Student could not change, and 4 editable fields the card
+never showed. Teachers do most of these edits, so they could see data they had no way to
+correct and save data they could not see afterwards.
+
+**Physical centres only.** JNV NVS PMU did not ask for the contact and household details
+(checked with Dhyanesh on PR #437), #431 was raised for the centres, and HQ has not
+approved collecting family income for the Phone-mode cohort (#296) — every member of which
+is an NVS Student. So under `PMU_PROGRAM_ID` the Edit form hides the new sections, the card
+keeps the `NvsDetailGroups` shape #433 gave it, and both services refuse the fields:
+`canonicalizeStudentEditPayload` takes the authorized `programId` from the route and answers
+a field error for `CENTRE_ONLY_EDIT_FIELDS`, and the DB Service answers 422
+`unsupported_for_nvs` for the same set. Father Name and Annual Family Income are *not* new,
+so they stay on the NVS form, where they sit in Student Details rather than the new sections.
+
+For centres, Edit Student gained Contact & Address, Father, Mother, Guardian and
+Socio-economic sections mirroring the card's groups, and the card gained CWSN, G10 board and
+the uniform sizes. CWSN is spelled "Children with Special Needs (CWSN)" in both places for
+every program, as is the Locked Identity hint.
+
+School Medium is the one field dropped rather than made editable — the program team does
+not want it edited (Venu, on the issue) — so it left the card too. `STUDENT_COLUMNS` still
+selects it, so showing it again is a one-line change. G10 board renders as CBSE / Others on
+the card (`formatG10Board`), the way Edit Student offers it, rather than the raw board name.
+Both read the stored value through `g10BoardChoice` in `student-addition-fields.ts`: only an
+exact "CBSE" is CBSE, anything else Others. The one difference is a null board: Edit shows
+Others (the DB Service stores Others as null), but the card shows "—", because null is also
+a board nobody ever entered and "Others" would claim one for those Students.
+
+Validation lives in `canonicalizeStudentEditPayload`: contact phones (WhatsApp, father,
+mother, guardian) are ten digits with no leading zero, pincode is six with no leading zero
+(no Indian pincode starts with one), email must be able to reach a mailbox, and the three
+education levels plus Monthly Family Income are dropdowns (`EDUCATION_LEVEL_OPTIONS`,
+`MONTHLY_FAMILY_INCOME_OPTIONS`). Blank clears, as the uniform sizes already did. A stored
+value the list no longer offers (e.g. an education level of "10th") still renders, because
+`selectField` prepends the current value. The modal filters as you type — digits for the
+phones and pincode (all of them, so an overlong number fails rather than being truncated),
+and for the three parent names letters in any script, combining marks, spaces and `. ' -`
+(`parentNameCharactersOnly`). A narrower A–Z filter stripped stored Hindi names to nothing
+and dropped the dots from names like "K. Geetha" on any edit. The edit canonicaliser accepts
+the same set for Father Name (`isValidParentName`) and keeps it as typed bar the spacing:
+unlike Add Student, an edit no longer strips its dots or re-cases it. Add Student's Father
+Name filter is still `lettersAndSpacesOnly`.
+
+Because the form is now long, a failed save scrolls the first field error (or the banner,
+which carries `role="alert"`) into view and focuses it. Without that, Save looked like it
+did nothing: the error sat about 1650px above the viewport on a laptop. Every input follows
+the `edit-student-<field>` id the lookup uses; an error for a field the form doesn't render
+falls back to the banner. It happens once per Save (`focusErrorAfterSubmitRef`), not on
+every error-state change, because each keystroke clears the banner and would otherwise pull
+focus back to the failed field.
+
+**DB Service dependency:** `PATCH /lms/students/:id/update-with-enrollments` answers 422
+for any field outside its contract, so the db-service branch
+`feat/lms-student-contact-family-fields` (seven `user` fields, thirteen `student` fields,
+blank-to-NULL, the NVS refusal, and guards for length, phone, pincode and email) must be
+deployed before this ships. Its rules and these are deliberately identical — change them
+together, or the form will accept what the Service refuses.
+
+## Exam Registrations (Exams tab)
+
+GitHub issue https://github.com/avantifellows/af_lms/issues/434 asked for the competitive
+exams a Student applies for to be captured in the LMS instead of an ops sheet. Edit Student
+has an **Exams** tab after Documents, one block per exam. It is a **physical-centre
+feature**: the issue drew no program distinction, and the Programs team confirmed on
+2026-10-23 that it is for physical schools only, as #395 and #431 were. PMU (JNV NVS)
+Students are gated out in four places — the Edit Student tab strip (`isPmuProgram`), the
+roster card (`StudentCard`'s `isNvs`), the roster read (`collectsExamRecords` in
+`school-students.ts`, which keeps a mixed-program Student in), and the API, where both verbs
+refuse a Student whose every current batch is NVS (`isPmuOnlyStudent` in `permissions.ts`,
+403). The API gate is the one that matters: hiding the tab alone would leave the endpoint
+open.
+
+The exams on offer are a curated list of `exam.name` values in `src/lib/competitive-exams.ts`
+— client-safe, so the picker and the server validation cannot drift. The `exam` table also
+holds internal rows (Baseline, Selection, Hiring Test, TET, Board Exam, Miscellaneous) and a
+generic "State CET" row that are never offered (the state CETs worth recording are named
+individually), and the API refuses an exam outside the list, so the endpoint can't be
+used to attach one to a Student. BITSAT has no `exam` row and so is not offered. The same
+module holds the Board Stream rules (PCM → JEE Mains, PCB → NEET, PCMB → both), which only
+decide which blocks *open* — nothing is stored until a teacher fills one in, and any block
+can be removed.
+
+Per exam: application number (required — see the DB Service note below), application
+password (type=password with a Show toggle) and, for an exam that runs more than once a
+year, the sittings applied for. Only JEE Mains has sittings today (`EXAM_SESSIONS`).
+
+Reads go through Postgres (`src/lib/student-exam-records.ts`), writes through
+`PUT /api/students/[id]/exam-records`, which both verbs gate with
+`canAccessStudent(..., { requireEdit: true })` — not just view, because the response carries
+exam-portal passwords — and then with `isPmuOnlyStudent`, which 403s a JNV NVS Student. The route reconciles against what is stored: removals first (an
+application number moved between exams would otherwise collide with the DB Service's
+upsert), then a PATCH per changed registration and a POST per new one, skipping no-ops.
+Per-call failures come back as `warnings`; everything failing is a 502.
+
+The roster never carries a password — `listExamSummariesForStudents` selects
+`application_password IS NOT NULL` as `has_password`, and the card renders a fixed mask. That
+read is wrapped in a try/catch: the roster is the point of the page, so a database without
+the DB Service migration loses the exam tags rather than the roster.
+
+Deferred, per the issue: exam results (date, score, percentile, ranks), bulk upload of exam
+details, and the ops sheet's email / contact number / roll number — db-service PR #776 adds
+those columns but the tab does not collect them yet.
 
 ## Settled Product Shape
 - v1 is JNV PMU / JNV NVS only. In current LMS code this is `PROGRAM_IDS.NVS` (`64`, label `JNV NVS`) from `src/lib/constants.ts`.
-- Rollout plan is staff/PMs first, then schools after real upload feedback. In the #155 implementation build, student writes are allowed only for `admin`, `program_manager`, and `program_admin`; teachers/staff roles, school-login/passcode users, and `read_only` users cannot create, bulk upload, edit, or dropout students.
+- Rollout plan is staff/PMs first, then schools after real upload feedback. In the #155 implementation build, student writes are allowed only for `admin`, `program_manager`, and `program_admin`; teachers/staff roles and `read_only` users cannot create, bulk upload, edit, or dropout students. Issue #361 slice #367 adds `pmu_manager` and `pmu_govt_school_user` to `ALLOWED_STUDENT_ADDITION_ROLES` (ADR 0007, ADR 0006 as amended): Add Student, Bulk Upload, NVS dropout and undo, Download List, and phone correction/backfill still require a JNV School, the pinned NVS context, School scope and `students` edit (so `read_only` PMU users are refused) — except Download List, which for PMU roles only needs `students` view (`requireStudentExportAccess`, PR #376 QA), so a `read_only` PMU user can still export NVS Students. Other roles' `read_only` accounts still get no Download List. The roster's `canDropoutStudent` allowlist (`RosterPage.tsx`) includes both roles. Their general profile edits deny non-NVS programs via the pinned context, and centre-program dropout is unreachable. Audit `actor.role` carries the PMU role string (free text in DB Service). Covered through the real permission layer in `src/lib/student-addition-access.pmu.test.ts` and `src/app/api/school/[udise]/students/route.pmu.test.ts`.
 - Both one-by-one add and bulk upload live inside `/school/[udise]`; there is no school selector.
 - School is resolved from the page route context server-side. Never read school from the form or uploaded file. Ignore any school column if present.
 - Bulk v1 uses an approved two-step `.xlsx`/`.csv` flow: selecting a file is inert; `Check spreadsheet` performs LMS-only local parsing/validation and writes nothing; Phone-mode duplicate phones are rejected on every matching row during Check, including when a matching row has other validation errors; Add repeats the same check and excludes those rows. Named example rows do not participate in duplicate detection; `Check & add students` re-runs the authoritative LMS checks and calls the existing DB Service create contract only for rows that remain ready. The final result is shown when returned; an unreadable or ambiguous response is an unknown outcome, so the roster is refreshed and no automatic retry is made. `Reset`/`Upload another` clears the selected file, check summary, result, and errors and allows the same file to be selected again. The check summary is read-only and explicitly shows total rows checked, passed spreadsheet checks, and rows needing correction. The second-step explanation names only the passed count and says existing students will be skipped. The final action is labelled Check & add students, without promising a created count. Excel workbooks using the built-in automatic encryption password are decrypted in memory before normal XLSX parsing; user-password and unsupported encryption return a clear error. Ordinary XLSX/CSV behavior is unchanged. No DB Service contract or database schema change is part of this flow; Check & add students writes only through the existing contract.
@@ -110,11 +266,11 @@ Enrollment date handling is decided: LMS supplies DB Service `start_date` and `a
 
 ## LMS Code Context
 - School page gate and enrollment tab live in `src/app/school/[udise]/page.tsx`.
-- The page already resolves school by UDISE/code and checks passcode user scope or `canAccessSchoolSync`.
-- `students` feature access currently grants edit to all roles, passcode users get students edit, and `read_only` downgrades edit to view in `getFeatureAccess`.
+- The page already resolves school by UDISE/code and checks `canAccessSchoolSync`.
+- `students` feature access currently grants edit to all roles, and `read_only` downgrades edit to view in `getFeatureAccess`.
 - Existing `NVS_GATED_FEATURES` does not include `students`, so Student Addition needs its own explicit `PROGRAM_IDS.NVS` allowlist check.
 - `canAccessStudent(session, id, { requireEdit: true })` is the right pattern for generic existing-student writes. Student Addition existing-student writes use `requireStudentAdditionStudentAccess(session, studentPkId)`, which starts from the opaque Student PK, gates before route-level row lookup, requires `school.af_school_category = 'JNV'`, and checks school scope, `students` edit, actor NVS access, and current NVS Batch enrollment without querying or requiring a Centre.
-- For create/bulk there is no existing student to resolve, so gate by resolved school: Google session -> resolved permission -> JNV school category -> allowed role -> `students` `canEdit` -> School/region scope -> actor NVS scope. The create gate does not query or require a Centre and ignores `school.program_ids`; passcode users and non-JNV schools remain blocked.
+- For create/bulk there is no existing student to resolve, so gate by resolved school: Google session -> resolved permission -> JNV school category -> allowed role -> `students` `canEdit` -> School/region scope -> actor NVS scope. The create gate does not query or require a Centre and ignores `school.program_ids`; non-JNV schools remain blocked.
 - Slice #157 adds the shared LMS create gate in `src/lib/student-addition-access.ts`, client-safe field/identity helpers in `src/lib/student-addition-fields.ts`, and the IST enrollment date helper in `src/lib/lms-enrollment-date.ts`.
 - One-by-one creation now uses `POST /api/school/[udise]/students`, which validates one canonical row, derives actor/school/program/start-date/academic-year server-side, and proxies DB Service `POST /api/lms/students/bulk-create-with-enrollments` with a single-row payload.
 - Bulk creation uses `POST /api/school/[udise]/students` with a multipart `.xlsx`/`.csv` file and an explicit `action`: `validate` for the read-only LMS check summary, or `upload` for the authoritative re-check and create. LMS parses only the `Template` sheet, normalises real Excel date cells, validates mixed Grade 11/12 files with up to 200 nonblank rows locally, sends ready rows to the same existing DB Service endpoint only during `upload`, and merges local rejects with DB Service statuses.
@@ -127,17 +283,47 @@ Enrollment date handling is decided: LMS supplies DB Service `start_date` and `a
 - `AddStudentModal` reuses the canonical validator and exposes PEN, CWSN, CBSE/Others, `Other`, and NDA. It shows local and safe upstream field errors inline, scrolls the form to the top when a submission error appears, previews the generated Student ID, and refreshes the roster after creation. Grade 10 Roll Number stays disabled until a board is chosen; changing the board preserves the entered value and blocks submit if the value is invalid for the new board.
 - The post-create modal states whether a Student ID was generated and whether the student can log in with Student ID, PEN, or either identifier plus DoB.
 - Admin Batch Management accepts `nda` as batch metadata stream so operators can configure the NDA batches required by student addition.
-- Existing-Student Edit is program-general (restored 2026-07 after #162 had narrowed it to NVS-only): `PATCH /api/student/[id]` gates with `requireStudentEditAccess(session, studentPkId, programId)` — permission-matrix `students=edit` roles including teacher, program ownership of the body-supplied `program_id` with admin bypass, passcode excluded, no JNV/NVS restriction — then proxies canonical changed fields plus the authorized `program_id` to DB Service `PATCH /api/lms/students/:student_id/update-with-enrollments` (whose NVS-only guard was removed in db-service #643; db-service prod must deploy before this path ships to prod). The shared field helper filters locked and ownership fields and applies the canonical name, contact, DOB, gender, CWSN/category, board, Grade 11/12, and NDA rules. Slice #300 adds server-inferred Phone Registration cohort handling: phone corrections use the existing strict NVS Admin/Program Manager/Program Admin gate and phone-mode canonical validation, carry the mode/version handshake for DB Service's atomic phone + Student ID contract, and render duplicate/mismatch failures clearly; active Phone mode rejects the three restricted fields before proxying. Slice #302 adds Approved-mode phone-cohort backfill: the same strict gate permits a blank PEN and/or G10 Roll once, keeps Annual Family Income editable after an identifier exists, validates the existing formats, carries the Approved mode/version handshake, refuses already-filled identifiers before proxying, and never includes Student ID in the payload. The roster shows Edit per row via `canEditStudentInSelectedProgram` (selected-program membership + `userCanManageProgram`), forwards the inferred flag, and EditStudentModal sends the roster's *selected* program — never `student.program_id`, which is a tiebreak pick that can differ on mixed-program students. The modal keeps Student ID and historical APAAR locked; non-cohort PEN/G10 remain locked, while Approved-mode phone-cohort backfill inputs are shown only when eligible and lock once filled. It hides restricted backfill inputs in Phone mode, explains phone-based login changes for the inferred cohort, and refreshes the roster after success.
+- Existing-Student Edit is program-general (restored 2026-07 after #162 had narrowed it to NVS-only): `PATCH /api/student/[id]` gates with `requireStudentEditAccess(session, studentPkId, programId)` — permission-matrix `students=edit` roles including teacher, program ownership of the body-supplied `program_id` with admin bypass, no JNV/NVS restriction — then proxies canonical changed fields plus the authorized `program_id` to DB Service `PATCH /api/lms/students/:student_id/update-with-enrollments` (whose NVS-only guard was removed in db-service #643; db-service prod must deploy before this path ships to prod). The shared field helper filters locked and ownership fields and applies the canonical name, contact, DOB, gender, CWSN/category, board, Grade 11/12, and NDA rules. Slice #300 adds server-inferred Phone Registration cohort handling: phone corrections use the existing strict NVS Admin/Program Manager/Program Admin gate and phone-mode canonical validation, carry the mode/version handshake for DB Service's atomic phone + Student ID contract, and render duplicate/mismatch failures clearly; active Phone mode rejects the three restricted fields before proxying. Slice #302 adds Approved-mode phone-cohort backfill: the same strict gate permits a blank PEN and/or G10 Roll once, keeps Annual Family Income editable after an identifier exists, validates the existing formats, carries the Approved mode/version handshake, refuses already-filled identifiers before proxying, and never includes Student ID in the payload. The roster shows Edit per row via `canEditStudentInSelectedProgram` (selected-program membership + `userCanManageProgram`), forwards the inferred flag, and EditStudentModal sends the roster's *selected* program — never `student.program_id`, which is a tiebreak pick that can differ on mixed-program students. The modal keeps Student ID and historical APAAR locked; non-cohort PEN/G10 remain locked, while Approved-mode phone-cohort backfill inputs are shown only when eligible and lock once filled. It hides restricted backfill inputs in Phone mode, explains phone-based login changes for the inferred cohort, and refreshes the roster after success.
 - The enrollment tab uses all current batch program IDs, so a student enrolled in CoE and NVS appears in both program views and counts. Program-dropout audits provide `dropout_program_ids`, allowing the same student to appear as CoE Dropout and NVS Active at the same time.
 - The enrollment tab applies Grade and Stream filters together. For NVS, allowed write actors can export an Excel workbook with `Active` and `Dropout` sheets: Active follows both filters, while Dropout always contains every NVS dropout. The export mirrors the upload fields and appends historical APAAR ID and generated Student ID as the final columns.
+- Issue #351 slice #354: every program's Enrollment Stream filter, program-card counts, flagged count / "Showing X of Y", StudentTable filter, and the export's `?stream=` share one pure, client-safe rule in `src/lib/stream-rules.ts`. Streams match after trim + lower-case and group into one option per normalised key, labelled with the first-seen trimmed value. A "No stream (N)" option (sentinel `__none__`) appears when N > 0 and selects null, empty, or whitespace-only streams, including in Download List (`?stream=__none__`). The export's "Primary Exam preparing for" formatter now lives there as `formatExamPreparingFor`.
+- Issue #351 slice #358: for the NVS card (`selectedProgramId === PROGRAM_IDS.NVS`; StudentTable uses its `effectiveProgramId`), StudentCard shows the key field "Exam Preparing For" instead of "Program" and hides the expanded "Stream" detail. The Enrollment filter label becomes "Filter by Exam Preparing For:" and option labels are `formatExamPreparingFor(key)`, re-sorted by label; "No stream (N)" is unchanged. Non-NVS keeps "Program", "Stream", and first-seen trimmed raw labels.
+- Enrollment toolbar (PR #376): Bulk Upload, Download List and Add Student are one `EnrollmentActions` group, always in that order, pushed right and wrapping as a unit. "Showing X of Y students" has its own line below, always rendered (`data-testid="enrollment-filtered-count"`, empty when no filter or search is active), so typing a search or picking a filter never moves the controls or the table.
+- Issue #351 slice #359: the NVS-only Enrollment roster search (`searchQuery` state in `EnrollmentTabContent`, passed as StudentTable `searchQuery`) uses `matchesStudentSearch(student, query)` in `src/lib/stream-rules.ts`. It is a trimmed, case-insensitive substring match over `first_name + " " + last_name`, `student_id`, `pen_number`, `apaar_id`, and `phone`; an empty query matches everyone. It applies to the Active and Dropout lists together with grade, stream, and flagged-only, and it counts toward "Showing X of Y". Program-card counts and the Download List URL ignore it. The query resets on program-card change and is forced to "" for non-NVS cards. The `/dashboard` `StudentSearch` is not reused.
 - Dropout accepts the opaque `student_pk_id` plus an explicit `program_id`. NVS reuses the Centre-free JNV-only existing-Student gate and derives Student ID or PEN server-side; other Programs retain their existing Centre-based Program dropout gate and Student ID or historical APAAR fallback. Non-admin actors need the target Program in their resolved scope, while the existing global-admin exception remains for newer centre Programs that are not in the hand-maintained JNV Program constants. Both paths proxy LMS `POST /api/student/dropout` to the DB Service program-dropout contract at `PATCH /api/dropout`.
-- Actor role gate differs by path (2026-07): NVS dropout stays admin/PM/PA-only (`requireStudentWriteActor`), but **Centre-program dropout follows the general `students=edit` matrix gate — teachers included** (`requireStudentProgramDropoutAccess` now uses `requireStudentEditActor`, mirroring the restored per-student Edit). Teachers had lost centre dropout in the July program-specific rework (`3386c35`) when it inherited the student-addition allow-list; per-program ownership (`actorHasProgramAccess`, admin bypass) still scopes a teacher to centres they manage. UI mirrors this: `StudentTable.canDropoutFromSelectedProgram` uses `canDropoutStudent` (admin/PM/PA) for NVS and `canEditStudent` (teacher-inclusive) for centre programs; NVS undo is unchanged.
+- Actor role gate differs by path (2026-07): NVS dropout stays admin/PM/PA/PMU-only (`requireStudentWriteActor`), but **Centre-program dropout follows the general `students=edit` matrix gate — teachers included** (`requireStudentProgramDropoutAccess` now uses `requireStudentEditActor`, mirroring the restored per-student Edit). Teachers had lost centre dropout in the July program-specific rework (`3386c35`) when it inherited the student-addition allow-list; per-program ownership (`actorHasProgramAccess`, admin bypass) still scopes a teacher to centres they manage. UI mirrors this: `StudentTable.canDropoutFromSelectedProgram` uses `canDropoutStudent` (admin/PM/PA/PMU) for NVS and `canEditStudent` (teacher-inclusive) for centre programs; NVS undo is unchanged.
 - LMS-audited DB Service dropout closes only the selected program batch and its group membership. It preserves other program batches, grade, school, and global status; when no current batch remains it applies the existing global dropout flow. Generic non-LMS `/api/dropout` callers retain the existing global behavior.
 - New LMS-audited NVS dropouts can be undone only in the same school and only when the exact prior NVS batch still exists, is open, and no other NVS batch is current. Undo restores that exact batch and membership; if NVS was the final active program, it also restores the exact school/grade records ended by global dropout and clears the generated dropout status. Legacy dropouts without the new audit metadata cannot be undone, and every undo writes a separate audit record.
 - When the selected Program has no dropout rows, the enrollment tab falls back to Active and removes the stale `students=dropout` query parameter. Undoing the final visible dropout does the same immediately.
 - `csv-parse`, `exceljs`, and `jszip` are installed in af_lms for upload parsing and blank-formatting compaction. Do not add runtime template generation or reintroduce the direct `xlsx` dependency. Rejected-row retry is CSV and includes every row that was not created.
 
 ## DB Service Context
+
+### Measuring bulk-upload adoption
+
+Source inspection on September 8 confirmed that `lms_student_write_audits`
+records successful creations with action `student_bulk_create`, School
+code/UDISE, upload ID/filename, actor, and timestamp. Both forms share this
+action: file uploads use the LMS-generated `student-bulk-` upload ID prefix;
+one-by-one adds use `single-student-` and filename `one-by-one`.
+Count distinct `school_code` for file-upload creation audits in the chosen date
+range to measure Schools with at least one Student successfully bulk-added.
+Check-only requests and uploads creating zero Students leave no creation audit,
+so these records cannot measure all attempted uploads.
+
+Authorized production inspection at 2026-09-08 22:38 IST verified session and
+transaction read-only settings, used the existing `query()` helper with one
+connection and a 10-second statement timeout, and rolled back before closing.
+All retained file-upload creation audits covered 337 Schools, 19,937 Students,
+and 365 successful uploads. From September 7 00:00 IST, the counts were 333
+Schools, 19,897 Students, and 358 successful uploads. These are dated snapshots,
+not a live metric. Grouped School codes were unique and all matched School rows.
+For future operator reads, configure `PGOPTIONS` with
+`default_transaction_read_only=on` before importing `src/lib/db.ts`, set
+`DATABASE_POOL_MAX=1`, verify read-only settings, use parameterized SELECTs,
+and close the pool. Format UTC audit timestamps to IST in SQL to avoid the
+local Node timezone interpretation of PostgreSQL timestamp-without-time-zone.
+
 Repo: `/Users/deepanshmathur/Documents/AF/db-service`.
 
 Existing endpoint: `POST /api/student/create-with-enrollments` in `lib/dbservice_web/controllers/student_controller.ex`.
@@ -208,3 +394,131 @@ Manual Brave QA found repeated field labels in correction CSVs and awkward perio
 Verification after the presentation fixes: 3,820 unit tests passed (3 skipped); lint passed with the same 15 existing warnings; production build passed. Regression coverage asserts exact decoded CSV messages for every choice field in both modes, including multiline submitted values, and line separation in preview/final UI cells.
 
 A further presentation pass replaces the dense preview/final issue text with separate list items and subtle dividers. Unsupported choices show a bold field name, the rejected value, and smaller muted allowed values below. Other error messages remain intact in their own sections. The scrollable results area is taller (24rem). Local Brave desktop/390px checks preserved all seven synthetic errors; the 3,820-test suite, lint (existing warnings only), and build passed again. CSV formatting is unchanged.
+
+## September release and QA record
+
+On 2026-09-07, the user authorized both merges and DB Service main → release
+promotion. LMS #304 merged as `a34364c940de218c95c2560a3d7e16bf46c454a2`;
+Amplify production job 147 completed BUILD, DEPLOY, and VERIFY successfully.
+DB Service #713 merged to main as `306909d802fccde51890d7c1e9ea7d64dab5440a`,
+then release-promotion PR #723 merged as `4462d37950b1bdee16ac23ca9b57a850a58df08d`.
+The EC2 production workflow 34119216236 succeeded; its logs confirm the checkout
+advanced from `9abb3a3` to `4462d37`. At that deployment, production used the push-to-release EC2 workflow; the
+separate production ECS workflow was manual-only.
+Both `https://lms.avantifellows.org` and DB Service `/api/health` returned HTTP 200.
+Authenticated probes against non-existent Student 0 confirmed missing mode
+returns 409 `registration_mode_mismatch`, while phone/version 1 passes the mode
+check and returns 404 `not_found`, without modifying any production Student.
+
+The September 7 staging regression for LMS #304 / DB Service #713 exercised
+non-EnableStudents name edits through the real LMS API and Centre Edit controls,
+plus Portal login with unchanged Student ID/DOB. Synthetic records were restored;
+expected update timestamps and audit history remained. This did not complete the
+separate EnableStudents phone-login gate.
+
+LMS #323 merged on September 16 as `dc0923aa68b036ba41e0a83fa755807a33e1d9b7`.
+Local validation included 3,822 passing unit tests (3 skipped), lint with no errors,
+and staging QA. Duplicate CSV labels and period-semicolon separators found during
+QA were fixed before merge; main's validation behavior above is authoritative.
+Production rollout completion for #323 was not verified in these retained notes.
+
+## DB Service status history and repair handoff
+
+GitHub status rechecked September 23: combined #731 is closed as superseded by
+#735 (timestamp fix, merged September 17), #736 (status history, merged September 23
+as `2df0e522`), and #737 (guarded historical repair utilities, merged September 23
+as `2bea0794`). Both September 23 merges were explicitly requested, had successful
+head CI and no conflicts, and used merge commits in stack order. After #736 merged,
+#737 automatically retargeted to main and was checked again before merging.
+These are DB Service PR numbers.
+Their implementation and utility READMEs belong in that repository; this section
+records the LMS integration and historical QA. Merge does not establish deployment
+or authorize historical repair.
+
+The initial read-only deployment check on September 23 found the last production
+deploy at `release` SHA `3f82649b`, before #736/#737 merged. On the user's
+instruction, main was merged into release as `1f70b41a` with no conflicts. The
+release diff consisted of #736/#737's status history and repair utilities;
+formatting, 71 repair integration tests, and 126 related service tests passed.
+[The EC2 production deploy](https://github.com/avantifellows/db-service/actions/runs/35871098883)
+completed successfully at that SHA. Its SSH log shows a fast-forward from
+`3f82649b` to `1f70b41a`; the live health and database-readiness endpoints
+both returned 200 afterward. This deployed code only; no historical data repair
+or downstream reporting refresh was run.
+
+The #736 change creates current status enrollment history on LMS Add/Bulk and a
+new period on full-dropout undo; program-only dropout/undo preserves status history.
+Local and staging lifecycle checks covered Add/Bulk, cancellation, repeated full
+cycles and program isolation. Review fixes use the captured UTC operation time and
+reject duplicate status titles. These changes are merged into main; production
+deployment was not verified during the merge task, and no historical repair ran.
+
+Known unresolved limitation: DB Service #736 accepts a future dropout `start_date`.
+Undoing before that date can end the dropout period before its own start and
+create overlapping status periods. The owner acknowledged this issue and explicitly
+deferred its fix; resolving the review discussion did not mean the defect was fixed.
+The earlier lifecycle QA does not establish correctness for this sequence. Retain
+it in future merge/deployment decisions; a follow-up could reject future dropout
+dates or reject undo before the recorded dropout date. This documentation change
+does not implement either fix or alter the decision to defer it.
+See the [original finding](https://github.com/avantifellows/db-service/pull/736#discussion_r4024481795)
+and [recorded deferral](https://github.com/avantifellows/db-service/pull/736#discussion_r4024620027).
+
+September 17 local rehearsal of #737 covered the 37,255 LMS-created Students in
+academic year 2026–2027, with five separate evidence-validated groups:
+
+- 36,817 enrolled Students missing status history: insert their original enrolled period.
+- 152 confirmed accidental dropout/undo cases: retain continuous enrollment by
+  correcting the existing erroneous status row with an explicit before/after audit.
+- 284 single-dropout cases: add only the missing ended pre-dropout enrolled period.
+- One repeated dropout/undo/dropout case: reconstruct the two missing ended periods
+  while preserving both dropout rows; reject a second dropout row predating undo.
+- One individually approved missing-audit exception: pin its exact source records
+  and document the DB-evidence fallback; this is not a general audit bypass.
+
+School-ID differences were separated from status repair, not silently repaired or
+used as a blanket exclusion. Combined local verification found one matching current
+status for every cohort Student (36,969 enrolled / 286 dropout). All groups had zero
+remaining targets and reruns were idempotent. Subsequent timestamp apply/replay covered
+1,605 proposals while preserving the 152 actual correction times and all non-target
+columns. Final utility checks passed 71 tests; the service suite had one known,
+unchanged fetch-data fixture assertion failure (827/828 passed). No production
+historical repair was performed by this work.
+
+The September 17 attendance investigation traced 96 Grade 11 Students across
+Paschim Champaran and Kalaburagi 2 to ended dropout history overriding their enrolled
+Student status in reporting. All 96 belonged to the 152 accidental cases and became
+enrolled in the combined local rehearsal. Timestamp repair alone cannot fix this;
+production status repair and downstream Airbyte/models/attendance/cache refresh were
+still outstanding in that investigation. No dashboard filter change was proposed.
+
+September 23 fresh read-only production dump and separate local QA clone recounted
+37,892 LMS-created 2026–27 Students, split into 37,394 with no status history,
+243 dropout/undo cases, 253 single-dropout cases, and the same two singleton
+cases. The 91 added undo cases were not covered by the earlier decision that the
+152 dropouts were accidental: 33 were previously single dropouts undone on
+September 22; 58 had dropout and undo on September 20. Each has one current
+School: 58 at JNV Mainpuri (Lucknow region), 33 at JNV Warangal (Hyderabad
+region). School attribution uses current School enrollment. The first local
+rehearsal held those 91 out and found 1,705 proposed timestamp fixes. The user
+then confirmed all 91 dropouts were mistakes. On a fresh clone, all 243
+accidental cases were corrected to continuous enrollment alongside 37,394
+missing-status backfills, 253 pre-dropout periods and both singleton repairs.
+Every status group has zero remaining targets and all 37,892 cohort Students
+have one matching current status. Full-table comparisons and replay checks passed.
+
+After the complete status cleanup, the fresh timestamp report had 1,647
+proposed cohort targets, 243 corrected status rows to preserve and 342 already
+equal/later. All 1,647 applied and replayed locally; the final cohort report
+has no proposed or unresolved targets. The initial 1,705 count was provisional
+and is superseded by 1,647. One global timestamp coverage issue and 20
+unresolved targets are outside this cohort. The 71 utility integration tests
+passed. No production repair, deployment confirmation, warehouse sync, or
+dashboard refresh occurred. Private QA evidence:
+`../release-records/repair-retest-confirmed-20260923/QA.md`.
+
+Evidence is kept privately in the sibling `release-records/` directory, especially
+`lms-status-combined-20260917/QA.md`, `nvs-attendance-root-cause-20260917/report.md`
+and `lms-pr323-manual-qa-20260912/`. Read the DB Service utility README and
+[local rehearsal runbook](../patterns/local-enrollment-repair.md) before repeating
+any repair. Local testing does not authorize production apply.

@@ -42,6 +42,24 @@ export function studentDroppedFromProgram(
   );
 }
 
+/**
+ * On a Program's roster: a current batch in the Program, or a dropout from it
+ * that hasn't been undone — the Students the Program's enrollment card (and
+ * its export) lists. PMU roles see exactly this set for JNV NVS.
+ */
+export function studentInProgram(
+  student: Pick<
+    StudentForStats,
+    "program_id" | "student_program_ids" | "dropout_program_ids" | "status"
+  >,
+  programId: number,
+): boolean {
+  return (
+    studentHasCurrentProgram(student, programId) ||
+    studentDroppedFromProgram(student, programId)
+  );
+}
+
 export function buildProgramStats(
   students: StudentForStats[],
   programId: number,

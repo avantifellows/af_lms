@@ -2,11 +2,16 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("next-auth", () => ({ getServerSession: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
-vi.mock("@/lib/permissions", () => ({
-  getAccessibleSchoolCodes: vi.fn(),
-  getResolvedPermission: vi.fn(),
-  getCentreConfinement: vi.fn(),
-}));
+vi.mock("@/lib/permissions", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/permissions")>();
+  return {
+    getAccessibleSchoolCodes: vi.fn(),
+    getResolvedPermission: vi.fn(),
+    getCentreConfinement: vi.fn(),
+    // The real shared fragment, so the assertions see the SQL PMU search runs.
+    hasCurrentNvsBatchSql: actual.hasCurrentNvsBatchSql,
+  };
+});
 vi.mock("@/lib/db", () => ({ query: vi.fn() }));
 
 import { getServerSession } from "next-auth";
@@ -18,7 +23,12 @@ import {
 import { query } from "@/lib/db";
 import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
 import { GET } from "./route";
-import { NO_SESSION, ADMIN_SESSION } from "../../__test-utils__/api-test-helpers";
+import {
+  NO_SESSION,
+  ADMIN_SESSION,
+  PMU_MANAGER_SESSION,
+  PMU_GOVT_SESSION,
+} from "../../__test-utils__/api-test-helpers";
 
 const mockSession = vi.mocked(getServerSession);
 const mockGetCodes = vi.mocked(getAccessibleSchoolCodes);
@@ -148,5 +158,80 @@ describe("GET /api/students/search", () => {
     expect(sql).toContain("cs.centre_id = ANY($3::int[])");
     expect(sql).toContain("JOIN scoped ON scoped.user_id = u.id");
     expect(params).toEqual(["%test%", CURRENT_ACADEMIC_YEAR, [8]]);
+  });
+
+  // PMU roles are pinned to JNV NVS: at a mixed School they must not see the
+  // CoE / Nodal Students, nor Students with no batch at all.
+  it("narrows a region-scoped PMU user's search to Students with a current NVS batch", async () => {
+    mockSession.mockResolvedValue(PMU_GOVT_SESSION);
+    mockGetPermission.mockResolvedValue({
+      email: PMU_GOVT_SESSION.user.email,
+      level: 2,
+      role: "pmu_govt_school_user",
+      regions: ["north"],
+      school_codes: null,
+      program_ids: [64],
+      read_only: false,
+    } as never);
+    mockGetCodes.mockResolvedValue(["70705"] as never);
+    const results = [{ user_id: "7", first_name: "Nia", last_name: "V" }];
+    mockQuery.mockResolvedValue(results);
+
+    const req = new Request("http://localhost/api/students/search?q=nia");
+    const res = await GET(req as never);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual(results);
+
+    const [sql, params] = mockQuery.mock.calls[0] as [string, unknown[]];
+    expect(sql).toContain("sch.code = ANY($3)");
+    expect(sql).toMatch(/AND EXISTS \(\s*SELECT 1\s*FROM enrollment_record er_nvs/);
+    expect(sql).toContain("er_nvs.user_id = u.id");
+    expect(sql).toContain("er_nvs.is_current = true");
+    expect(sql).toContain("b_nvs.program_id = 64");
+    expect(params).toEqual(["%nia%", CURRENT_ACADEMIC_YEAR, ["70705"]]);
+  });
+
+  it("narrows a level-3 PMU Manager's all-school search to NVS Students", async () => {
+    mockSession.mockResolvedValue(PMU_MANAGER_SESSION);
+    mockGetPermission.mockResolvedValue({
+      email: PMU_MANAGER_SESSION.user.email,
+      level: 3,
+      role: "pmu_manager",
+      regions: null,
+      school_codes: null,
+      program_ids: [64],
+      read_only: false,
+    } as never);
+    mockGetCodes.mockResolvedValue("all" as never);
+    mockQuery.mockResolvedValue([]);
+
+    const req = new Request("http://localhost/api/students/search?q=nia");
+    await GET(req as never);
+
+    const [sql, params] = mockQuery.mock.calls[0] as [string, unknown[]];
+    expect(sql).toContain("er_nvs.user_id = u.id");
+    expect(sql).toContain("b_nvs.program_id = 64");
+    expect(params).toEqual(["%nia%", CURRENT_ACADEMIC_YEAR]);
+  });
+
+  it("does not add the NVS predicate for non-PMU roles", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockGetPermission.mockResolvedValue({
+      email: ADMIN_SESSION.user.email,
+      level: 3,
+      role: "admin",
+      regions: null,
+      school_codes: null,
+      program_ids: [1, 2, 64],
+      read_only: false,
+    } as never);
+    mockGetCodes.mockResolvedValue("all" as never);
+    mockQuery.mockResolvedValue([]);
+
+    const req = new Request("http://localhost/api/students/search?q=nia");
+    await GET(req as never);
+
+    const sql = mockQuery.mock.calls[0][0] as string;
+    expect(sql).not.toContain("er_nvs");
   });
 });

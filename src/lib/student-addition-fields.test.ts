@@ -5,8 +5,11 @@ import {
   canonicalizeStudentEditPayload,
   formatStudentAdditionExistingMatch,
   getStudentAdditionUploadColumns,
+  g10BoardChoice,
   generateStudentId,
+  isValidParentName,
   isValidRegistrationPhone,
+  parentNameCharactersOnly,
   validateStudentAdditionInput,
 } from "./student-addition-fields";
 import {
@@ -55,6 +58,31 @@ describe("Registration Mode contract", () => {
   });
 });
 
+describe("g10BoardChoice", () => {
+  it("reads only an exact CBSE as CBSE, and everything else as Others", () => {
+    expect(g10BoardChoice("CBSE")).toBe("CBSE");
+    expect(g10BoardChoice("cbse")).toBe("Others");
+    expect(g10BoardChoice("RAJASTHAN BOARD OF SECONDARY EDUCATION")).toBe("Others");
+    // The DB Service stores Others as null.
+    expect(g10BoardChoice(null)).toBe("Others");
+  });
+});
+
+describe("parent name characters", () => {
+  it("keeps letters in any script, combining marks, spaces and . ' -", () => {
+    expect(parentNameCharactersOnly("सीता देवी")).toBe("सीता देवी");
+    expect(parentNameCharactersOnly("K. Geetha")).toBe("K. Geetha");
+    expect(parentNameCharactersOnly("D'Souza Ram-Prasad")).toBe("D'Souza Ram-Prasad");
+    expect(parentNameCharactersOnly("Sita2 (Mrs), 9")).toBe("Sita Mrs ");
+  });
+
+  it("accepts only what the filter keeps", () => {
+    expect(isValidParentName("सीता देवी")).toBe(true);
+    expect(isValidParentName("Smt.Mamta Devi")).toBe(true);
+    expect(isValidParentName("Sita 2")).toBe(false);
+  });
+});
+
 describe("canonicalizeStudentEditPayload", () => {
   it("uses the Phone-mode 6–9 predicate when explicitly requested", () => {
     expect(isValidRegistrationPhone("6876543210", PHONE_REGISTRATION_MODE)).toBe(true);
@@ -78,7 +106,7 @@ describe("canonicalizeStudentEditPayload", () => {
   it("normalizes partial edit fields with the canonical student contract", () => {
     expect(canonicalizeStudentEditPayload({
       first_name: "  ravi  KUMAR ",
-      father_name: " suresh. KUMAR ",
+      father_name: "  K.  Suresh Kumar ",
       gender: "Others",
       category: "Gen-EWS",
       physically_handicapped: true,
@@ -87,12 +115,194 @@ describe("canonicalizeStudentEditPayload", () => {
       ok: true,
       fields: {
         first_name: "Ravi Kumar",
-        father_name: "Suresh Kumar",
+        father_name: "K. Suresh Kumar",
         gender: "Other",
         category: "PWD-EWS",
         physically_handicapped: true,
         g10_board: "Others",
       },
+    });
+  });
+
+  it("accepts the contact and household details the card shows", () => {
+    expect(canonicalizeStudentEditPayload({
+      email: " ravi@example.com ",
+      whatsapp_phone: " 9876543210 ",
+      address: " 12 Main Road ",
+      city: " Jaipur ",
+      district: "Jaipur",
+      state: "Rajasthan",
+      pincode: " 302001 ",
+      father_phone: "9876543211",
+      father_profession: " Farmer ",
+      father_education_level: "grades 6-10",
+      mother_name: " Sunita Devi ",
+      mother_phone: "9876543212",
+      mother_profession: "Homemaker",
+      mother_education_level: "Grades 1-5",
+      guardian_name: "Ramesh",
+      guardian_relation: " Uncle ",
+      guardian_phone: "9876543213",
+      guardian_profession: "Shopkeeper",
+      guardian_education_level: "Grades 11-12",
+      monthly_family_income: "rs. 10,000-20,000",
+    })).toEqual({
+      ok: true,
+      fields: {
+        email: "ravi@example.com",
+        whatsapp_phone: "9876543210",
+        address: "12 Main Road",
+        city: "Jaipur",
+        district: "Jaipur",
+        state: "Rajasthan",
+        pincode: "302001",
+        father_phone: "9876543211",
+        father_profession: "Farmer",
+        // Canonicalised to the stored spelling, as the other choices are.
+        father_education_level: "Grades 6-10",
+        mother_name: "Sunita Devi",
+        mother_phone: "9876543212",
+        mother_profession: "Homemaker",
+        mother_education_level: "Grades 1-5",
+        guardian_name: "Ramesh",
+        guardian_relation: "Uncle",
+        guardian_phone: "9876543213",
+        guardian_profession: "Shopkeeper",
+        guardian_education_level: "Grades 11-12",
+        monthly_family_income: "Rs. 10,000-20,000",
+      },
+    });
+  });
+
+  it("passes a blank through so the stored detail is cleared", () => {
+    expect(canonicalizeStudentEditPayload({
+      guardian_phone: "   ",
+      mother_name: "",
+      monthly_family_income: " ",
+      pincode: "",
+    })).toEqual({
+      ok: true,
+      fields: {
+        guardian_phone: "",
+        mother_name: "",
+        monthly_family_income: "",
+        pincode: "",
+      },
+    });
+  });
+
+  it("rejects a household phone that is not ten digits or starts with zero", () => {
+    const message = "Father Phone must be exactly 10 digits and cannot start with zero";
+    for (const father_phone of ["98765", "0123456789"]) {
+      expect(canonicalizeStudentEditPayload({ father_phone })).toEqual({
+        ok: false,
+        error: message,
+        field_errors: { father_phone: message },
+      });
+    }
+  });
+
+  it("rejects a pincode that is not six digits or starts with zero", () => {
+    const message = "Pincode must be exactly 6 digits and cannot start with zero";
+    for (const pincode of ["30200", "012345"]) {
+      expect(canonicalizeStudentEditPayload({ pincode })).toEqual({
+        ok: false,
+        error: message,
+        field_errors: { pincode: message },
+      });
+    }
+  });
+
+  it("rejects an address that could not reach the column", () => {
+    const result = canonicalizeStudentEditPayload({ address: "x".repeat(501) });
+    expect(result.ok).toBe(false);
+  });
+
+  it("rejects an email that could not reach a mailbox", () => {
+    expect(canonicalizeStudentEditPayload({ email: "ravi.example.com" })).toEqual({
+      ok: false,
+      error: "Email is not valid",
+      field_errors: { email: "Email is not valid" },
+    });
+  });
+
+  it("rejects an education level outside the offered list", () => {
+    expect(canonicalizeStudentEditPayload({ mother_education_level: "B.Tech" })).toEqual({
+      ok: false,
+      error: "Mother Education Level is not valid",
+      field_errors: { mother_education_level: "Mother Education Level is not valid" },
+    });
+  });
+
+  it("refuses the centre-only details for a JNV NVS edit", () => {
+    const message = "These details are not collected for JNV NVS Students";
+    expect(canonicalizeStudentEditPayload(
+      { mother_name: "Sunita Devi", city: "Jaipur", father_name: "Suresh Kumar" },
+      { programId: 64 },
+    )).toEqual({
+      ok: false,
+      error: message,
+      field_errors: { mother_name: message, city: message },
+    });
+  });
+
+  it("still takes the fields NVS always had", () => {
+    expect(canonicalizeStudentEditPayload(
+      { father_name: " Suresh  Kumar ", annual_family_income: "Less than Rs. 1,00,000" },
+      { programId: 64 },
+    )).toEqual({
+      ok: true,
+      fields: {
+        father_name: "Suresh Kumar",
+        annual_family_income: "Less than Rs. 1,00,000",
+      },
+    });
+  });
+
+  it("takes a parent name in any script, with the punctuation names carry", () => {
+    expect(canonicalizeStudentEditPayload({
+      father_name: "रमेश कुमार",
+      mother_name: "Smt.Mamta Devi",
+      guardian_name: "D'Souza Ram-Prasad",
+    })).toEqual({
+      ok: true,
+      fields: {
+        father_name: "रमेश कुमार",
+        mother_name: "Smt.Mamta Devi",
+        guardian_name: "D'Souza Ram-Prasad",
+      },
+    });
+    // A dot is part of the name, not noise to strip.
+    expect(canonicalizeStudentEditPayload({ father_name: " K. Geetha " })).toEqual({
+      ok: true,
+      fields: { father_name: "K. Geetha" },
+    });
+  });
+
+  it("still refuses digits and symbols in Father Name", () => {
+    const message =
+      "Father Name must contain only letters, spaces, dots, apostrophes and hyphens";
+    expect(canonicalizeStudentEditPayload({ father_name: "Suresh 2" })).toEqual({
+      ok: false,
+      error: message,
+      field_errors: { father_name: message },
+    });
+  });
+
+  it("reports a seven-digit pincode as a pincode problem, not a length one", () => {
+    expect(canonicalizeStudentEditPayload({ pincode: "3020011" })).toEqual({
+      ok: false,
+      error: "Pincode must be exactly 6 digits and cannot start with zero",
+      field_errors: { pincode: "Pincode must be exactly 6 digits and cannot start with zero" },
+    });
+  });
+
+  it("still drops a field outside the editable contract", () => {
+    // School medium is on neither side any more: the program team does not
+    // want it edited, so it is not in the allowlist.
+    expect(canonicalizeStudentEditPayload({ school_medium: "English" })).toEqual({
+      ok: true,
+      fields: {},
     });
   });
 
@@ -153,8 +363,31 @@ describe("canonicalizeStudentEditPayload", () => {
     });
   });
 
+  it("canonicalizes a uniform size and accepts a blank as a clear", () => {
+    expect(
+      canonicalizeStudentEditPayload({ tshirt_size: "xl", track_pant_size: " l " }),
+    ).toEqual({
+      ok: true,
+      fields: { tshirt_size: "XL", track_pant_size: "L" },
+    });
+    expect(canonicalizeStudentEditPayload({ tshirt_size: "" })).toEqual({
+      ok: true,
+      fields: { tshirt_size: "" },
+    });
+  });
+
+  // The form offers XS upwards, but a row already holding XXS must stay saveable.
+  it("accepts every size the DB Service stores, including the unoffered XXS", () => {
+    expect(canonicalizeStudentEditPayload({ track_pant_size: "XXS" })).toEqual({
+      ok: true,
+      fields: { track_pant_size: "XXS" },
+    });
+  });
+
   it.each([
     ["gender", "Femalee", "Gender must be Female, Male, or Other"],
+    ["tshirt_size", "XXXXL", "T-shirt Size is not valid"],
+    ["track_pant_size", "Medium", "Track Pant Size is not valid"],
     ["category", "Gen EWS", "Category is not valid"],
     ["g10_board", "CBSE?", "G10 board must be CBSE or Others"],
     ["board_stream", "PC-M", "Board Stream is not valid"],

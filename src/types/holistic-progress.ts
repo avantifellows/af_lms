@@ -1,6 +1,11 @@
 export type HolisticProgress = "pending" | "completed" | "skipped" | "no_active_phase";
 
-export type HolisticProgressRow = {
+// Progress dropdown values: assigned-Mentee progress, or the Unassigned Student list.
+export type HolisticProgressFilter = HolisticProgress | "unassigned";
+
+export type HolisticProgressCoverage = { eligible: number; assigned: number; unassigned: number };
+
+export type HolisticAssignedProgressRow = {
   studentId: number;
   studentName: string;
   externalStudentId: string | null;
@@ -20,3 +25,16 @@ export type HolisticProgressRow = {
   notesLastEditedAt: string | null;
   answers: Array<{ position: number; question: string; answer: string }>;
 };
+
+export type HolisticUnassignedProgressRow = {
+  progress: "unassigned";
+  studentId: number;
+  studentName: string;
+  externalStudentId: string | null;
+  grade: 11 | 12;
+  schoolName: string;
+  schoolCode: string;
+  activePhaseId: number | null;
+};
+
+export type HolisticProgressRow = HolisticAssignedProgressRow | HolisticUnassignedProgressRow;

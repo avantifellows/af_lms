@@ -30,7 +30,6 @@ import {
   getUserPermission,
 } from "@/lib/permissions";
 import {
-  PASSCODE_SESSION,
   TEACHER_SESSION,
   routeParams,
 } from "../../../../__test-utils__/api-test-helpers";
@@ -232,26 +231,6 @@ describe("PUT /api/curriculum/chapters/[chapterId]/completion", () => {
     await expect(res.json()).resolves.toEqual({
       error: "Chapter does not belong to the selected Grade and Subject",
     });
-    expect(mockWithTransaction).not.toHaveBeenCalled();
-  });
-
-  it("rejects passcode users before mutating Chapter Completion", async () => {
-    mockSession.mockResolvedValue(PASSCODE_SESSION);
-
-    const res = await PUT(
-      jsonReq({
-        school_code: "70705",
-        program_id: 1,
-        exam_track: "jee_main",
-        grade: 11,
-        subject: "Physics",
-        completed: true,
-      }),
-      routeParams({ chapterId: "44" })
-    );
-
-    expect(res.status).toBe(403);
-    expect(mockGetUserPermission).not.toHaveBeenCalled();
     expect(mockWithTransaction).not.toHaveBeenCalled();
   });
 

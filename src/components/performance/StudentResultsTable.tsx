@@ -10,6 +10,7 @@ import type {
 } from "@/types/quiz";
 import { getCategoryColor } from "@/lib/student-utils";
 import { alChipColor, alShortLabel, isAdvancedTest } from "@/lib/academic-level";
+import { isNvsProgram } from "@/lib/constants";
 
 interface Props {
   students: StudentDeepDiveRow[];
@@ -25,7 +26,13 @@ interface Props {
   testName?: string | null;
 }
 
-type SortKey = "percentage" | "accuracy" | "attempt_rate" | "student_name" | "marks_scored";
+type SortKey =
+  | "percentage"
+  | "accuracy"
+  | "attempt_rate"
+  | "student_name"
+  | "marks_scored"
+  | "time_spent_seconds";
 type SortDir = "asc" | "desc";
 type QStatus = "idle" | "loading" | "loaded" | "error";
 
@@ -41,6 +48,32 @@ const STATUS_CLASS: Record<StudentQuestionRow["status"], string> = {
   wrong: "text-danger",
   skipped: "text-text-muted",
 };
+
+// Whole minutes ("<1" under half a minute), or an em-dash when unknown (never a fake 0).
+function formatMinutes(seconds: number | null | undefined): string {
+  if (seconds == null) return "—";
+  if (seconds > 0 && seconds < 30) return "<1";
+  return String(Math.round(seconds / 60));
+}
+
+// Unknown times sort after every known time in both directions, so missing
+// data never reads as the fastest (or slowest) attempt.
+function compareNullsLast(
+  a: number | null | undefined,
+  b: number | null | undefined,
+  mul: number
+): number {
+  if (a == null || b == null) return (a == null ? 1 : 0) - (b == null ? 1 : 0);
+  return mul * (a - b);
+}
+
+// The identity of a Student row: enrollment_user_id, not student_name. Two
+// Students in one test can have the same name, and a shared name gave them one
+// React key, one expanded state and one rank. Use the name only when the row
+// has no id. The prefixes keep an id and a name from ever being equal.
+function studentKey(s: StudentDeepDiveRow): string {
+  return s.enrollment_user_id ? `id:${s.enrollment_user_id}` : `name:${s.student_name}`;
+}
 
 // The on-track / off-track flag asked for in #28, read off the report doc's
 // qualification_status. etl-next already decides this (it drives the student's
@@ -88,10 +121,12 @@ function ChapterRow({
   ch,
   studentQuestions,
   qStatus,
+  showTimeColumn,
 }: {
   ch: StudentChapterScore;
   studentQuestions: StudentQuestionRow[] | undefined;
   qStatus: QStatus;
+  showTimeColumn: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   // Drill-down to questions is only meaningful once the fetch has data.
@@ -139,6 +174,8 @@ function ChapterRow({
         <td className="px-3 py-1 text-[11px] font-mono text-text-secondary">
           {Math.round(ch.attempt_rate * 10) / 10}%
         </td>
+        {/* No chapter-level time; the blank cell keeps the columns aligned. */}
+        {showTimeColumn && <td className="px-3 py-1" />}
       </tr>
       {expanded &&
         questions.map((q) => (
@@ -148,7 +185,7 @@ function ChapterRow({
             </td>
             <td
               className={`px-3 py-1 text-[11px] font-semibold ${STATUS_CLASS[q.status]}`}
-              colSpan={4}
+              colSpan={showTimeColumn ? 5 : 4}
             >
               {STATUS_LABEL[q.status]}
             </td>
@@ -162,10 +199,12 @@ function SubjectWithChapters({
   ss,
   studentQuestions,
   qStatus,
+  showTimeColumn,
 }: {
   ss: StudentSubjectScore;
   studentQuestions: StudentQuestionRow[] | undefined;
   qStatus: QStatus;
+  showTimeColumn: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   const hasChapters = ss.chapters && ss.chapters.length > 0;
@@ -196,6 +235,11 @@ function SubjectWithChapters({
         <td className="px-3 py-1.5 text-xs font-mono text-text-primary">
           {Math.round(ss.attempt_rate * 10) / 10}%
         </td>
+        {showTimeColumn && (
+          <td className="px-3 py-1.5 text-xs font-mono text-text-primary">
+            {formatMinutes(ss.time_spent_seconds)}
+          </td>
+        )}
       </tr>
       {expanded &&
         ss.chapters!.map((ch) => (
@@ -204,6 +248,7 @@ function SubjectWithChapters({
             ch={ch}
             studentQuestions={studentQuestions}
             qStatus={qStatus}
+            showTimeColumn={showTimeColumn}
           />
         ))}
     </>
@@ -231,10 +276,15 @@ export default function StudentResultsTable({
   // Qualified" -> "Not Qualified", M1/M2 -> "Qualified"). Hiding the chip while
   // printing "Off track" beside it would republish the very verdict the
   // warehouse refuses to count, under another name.
-  const showALColumns = !isAdvancedTest(testName);
+  //
+  // JNV NVS does not use Academic Level or On Track, so both are hidden there too.
+  const isNvs = isNvsProgram(program);
+  const showALColumns = !isAdvancedTest(testName) && !isNvs;
+  // NVS time spent comes from BigQuery via the deep-dive route.
+  const showTimeColumn = isNvs;
   const [sortKey, setSortKey] = useState<SortKey>("percentage");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
-  const [expandedName, setExpandedName] = useState<string | null>(null);
+  const [expandedKey, setExpandedKey] = useState<string | null>(null);
 
   // Per-student question rows for the whole test, fetched once on first
   // drill-in (the table is clustered such that one all-students query is far
@@ -299,25 +349,68 @@ export default function StudentResultsTable({
     if (sortKey === "student_name") {
       return mul * a.student_name.localeCompare(b.student_name);
     }
+    if (sortKey === "time_spent_seconds") {
+      return compareNullsLast(a.time_spent_seconds, b.time_spent_seconds, mul);
+    }
     return mul * ((a[sortKey] ?? 0) - (b[sortKey] ?? 0));
   });
 
   // Rank is over submitted attempts only, so a student who never submitted does
   // not consume a position (and does not inflate the "of N" a teacher reads).
-  const rankByName = new Map<string, string>();
+  const rankByKey = new Map<string, string>();
   [...students]
     .filter((s) => s.has_quiz_ended !== false)
     .sort((a, b) => b.percentage - a.percentage)
-    .forEach((s, i) => rankByName.set(s.student_name, String(i + 1).padStart(2, "0")));
+    .forEach((s, i) => rankByKey.set(studentKey(s), String(i + 1).padStart(2, "0")));
 
   const sortIcon = (key: SortKey) => {
     if (sortKey !== key) return "";
     return sortDir === "asc" ? " ↑" : " ↓";
   };
 
-  const toggleStudent = (name: string) => {
-    const next = expandedName === name ? null : name;
-    setExpandedName(next);
+  // The expanded row spans exactly the rendered columns, so adding or gating a
+  // column never needs a hand-kept colSpan.
+  const headerCells = [
+    <th key="rank" className={TH}>Rank</th>,
+    <th key="name" className={SORTABLE_TH} onClick={() => handleSort("student_name")}>
+      Name{sortIcon("student_name")}
+    </th>,
+    <th key="gender" className={TH}>Gender</th>,
+    <th key="category" className={TH}>Category</th>,
+    ...(showALColumns
+      ? [
+          <th key="al" className={TH}>AL</th>,
+          <th key="on-track" className={TH}>On Track</th>,
+        ]
+      : []),
+    <th key="marks" className={SORTABLE_TH} onClick={() => handleSort("marks_scored")}>
+      Marks{sortIcon("marks_scored")}
+    </th>,
+    <th key="percentage" className={SORTABLE_TH} onClick={() => handleSort("percentage")}>
+      Percentage{sortIcon("percentage")}
+    </th>,
+    <th key="accuracy" className={SORTABLE_TH} onClick={() => handleSort("accuracy")}>
+      Accuracy{sortIcon("accuracy")}
+    </th>,
+    <th key="attempt-rate" className={SORTABLE_TH} onClick={() => handleSort("attempt_rate")}>
+      Attempt Rate{sortIcon("attempt_rate")}
+    </th>,
+    ...(showTimeColumn
+      ? [
+          <th
+            key="time-spent"
+            className={SORTABLE_TH}
+            onClick={() => handleSort("time_spent_seconds")}
+          >
+            Time Spent (min){sortIcon("time_spent_seconds")}
+          </th>,
+        ]
+      : []),
+  ];
+
+  const toggleStudent = (key: string) => {
+    const next = expandedKey === key ? null : key;
+    setExpandedKey(next);
     // First drill-in triggers the one-time question fetch.
     if (next) fetchQuestions();
   };
@@ -342,44 +435,20 @@ export default function StudentResultsTable({
       <div className="overflow-x-auto">
         <table className="w-full">
           <thead>
-            <tr className="border-b-2 border-border-accent">
-              <th className={TH}>Rank</th>
-              <th className={SORTABLE_TH} onClick={() => handleSort("student_name")}>
-                Name{sortIcon("student_name")}
-              </th>
-              <th className={TH}>Gender</th>
-              <th className={TH}>Category</th>
-              {showALColumns && (
-                <>
-                  <th className={TH}>AL</th>
-                  <th className={TH}>On Track</th>
-                </>
-              )}
-              <th className={SORTABLE_TH} onClick={() => handleSort("marks_scored")}>
-                Marks{sortIcon("marks_scored")}
-              </th>
-              <th className={SORTABLE_TH} onClick={() => handleSort("percentage")}>
-                Percentage{sortIcon("percentage")}
-              </th>
-              <th className={SORTABLE_TH} onClick={() => handleSort("accuracy")}>
-                Accuracy{sortIcon("accuracy")}
-              </th>
-              <th className={SORTABLE_TH} onClick={() => handleSort("attempt_rate")}>
-                Attempt Rate{sortIcon("attempt_rate")}
-              </th>
-            </tr>
+            <tr className="border-b-2 border-border-accent">{headerCells}</tr>
           </thead>
           <tbody>
             {sorted.map((s) => {
-              const isExpanded = expandedName === s.student_name;
+              const key = studentKey(s);
+              const isExpanded = expandedKey === key;
               return (
-                <Fragment key={s.student_name}>
+                <Fragment key={key}>
                   <tr
                     className="border-b border-border/25 cursor-pointer transition-colors hover:bg-hover-bg"
-                    onClick={() => toggleStudent(s.student_name)}
+                    onClick={() => toggleStudent(key)}
                   >
                     <td className="px-4 py-3 whitespace-nowrap text-sm font-bold text-accent">
-                      {rankByName.get(s.student_name) ?? "—"}
+                      {rankByKey.get(key) ?? "—"}
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap text-sm font-semibold text-text-primary">
                       {s.student_name}
@@ -437,10 +506,15 @@ export default function StudentResultsTable({
                     <td className="px-4 py-3 whitespace-nowrap text-sm font-mono text-text-primary">
                       {Math.round(s.attempt_rate * 10) / 10}%
                     </td>
+                    {showTimeColumn && (
+                      <td className="px-4 py-3 whitespace-nowrap text-sm font-mono text-text-primary">
+                        {formatMinutes(s.time_spent_seconds)}
+                      </td>
+                    )}
                   </tr>
                   {isExpanded && s.subject_scores.length > 0 && (
                     <tr>
-                      <td colSpan={showALColumns ? 10 : 8} className="px-4 py-2 bg-bg">
+                      <td colSpan={headerCells.length} className="px-4 py-2 bg-bg">
                         <div className="overflow-x-auto">
                           <table className="w-full">
                             <thead>
@@ -460,6 +534,11 @@ export default function StudentResultsTable({
                                 <th className="px-3 py-1 text-left text-xs font-bold uppercase tracking-wider text-accent">
                                   Attempt Rate
                                 </th>
+                                {showTimeColumn && (
+                                  <th className="px-3 py-1 text-left text-xs font-bold uppercase tracking-wider text-accent">
+                                    Time Spent (min)
+                                  </th>
+                                )}
                               </tr>
                             </thead>
                             <tbody>
@@ -473,6 +552,7 @@ export default function StudentResultsTable({
                                       : undefined
                                   }
                                   qStatus={qStatus}
+                                  showTimeColumn={showTimeColumn}
                                 />
                               ))}
                             </tbody>

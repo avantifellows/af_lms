@@ -57,16 +57,6 @@ describe("requireHolisticMentorshipAccess", () => {
     expect(mockQuery).not.toHaveBeenCalled();
   });
 
-  it("rejects passcode access before data access", async () => {
-    await expect(
-      requireHolisticMentorshipAccess(
-        { user: { email: "passcode@school.local" }, isPasscodeUser: true },
-        "program_read"
-      )
-    ).resolves.toMatchObject({ ok: false, status: 403 });
-    expect(mockQuery).not.toHaveBeenCalled();
-  });
-
   it.each([
     ["admin", true],
     ["holistic_mentorship_admin", true],
@@ -324,15 +314,6 @@ describe("requireHolisticMentorshipAccess", () => {
     },
   );
 
-  it("denies passcode users the Admin Mapping mutation action before data access", async () => {
-    await expect(requireHolisticMentorshipAccess(
-      { user: { email: "passcode@school.local" }, isPasscodeUser: true },
-      "admin_mapping_mutation",
-      { programId: 1 },
-    )).resolves.toMatchObject({ ok: false, status: 403 });
-    expect(mockQuery).not.toHaveBeenCalled();
-  });
-
   it("allows an active Teacher seat at a Program 1 School", async () => {
     mockTeacherScope();
     mockQuery
@@ -466,6 +447,46 @@ describe("requireHolisticMentorshipAccess", () => {
       "HAVING COUNT(DISTINCT roster_student.grade) = 1"
     );
   });
+
+  function addFollowUpNoteAs(email: string) {
+    return requireHolisticMentorshipAccess(
+      { user: { email } },
+      "follow_up_note_add",
+      { schoolCode: "SCH001", studentId: 41, programId: 1, academicYear: "2026-2027" }
+    );
+  }
+
+  it.each([
+    ["allows the current Mentor", [{ id: 73 }], { ok: true, actorUserId: 10 }],
+    ["denies a Teacher without a current Mapping", [], { ok: false, status: 404 }],
+  ])("%s to add a Follow-up Note", async (_label, mappingRows, expected) => {
+    mockTeacherScope();
+    mockQuery
+      .mockResolvedValueOnce([
+        { id: 20, code: "SCH001", name: "School One", region: "North", program_id: 1 },
+      ])
+      .mockResolvedValueOnce([{ user_id: 10 }])
+      .mockResolvedValueOnce(mappingRows);
+
+    await expect(addFollowUpNoteAs("teacher@example.com")).resolves.toMatchObject(expected);
+  });
+
+  it("denies a read-only Teacher adding a Follow-up Note", async () => {
+    mockTeacherScope({ read_only: true });
+
+    await expect(addFollowUpNoteAs("teacher@example.com"))
+      .resolves.toMatchObject({ ok: false, status: 403 });
+  });
+
+  it.each(["admin", "holistic_mentorship_admin", "program_manager", "program_admin"] as const)(
+    "denies %s adding a Follow-up Note",
+    async (role) => {
+      mockQuery.mockResolvedValueOnce([permissionRow(role)]);
+
+      await expect(addFollowUpNoteAs(`${role}@example.com`))
+        .resolves.toMatchObject({ ok: false, status: 403 });
+    }
+  );
 
   it.each(["admin", "holistic_mentorship_admin"] as const)(
     "allows scoped %s read-only Student drill-down",

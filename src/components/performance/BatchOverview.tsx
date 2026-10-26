@@ -5,11 +5,75 @@ import { Card } from "@/components/ui/Card";
 import StatCard from "../StatCard";
 import type { BatchOverviewData, TestTrendPoint } from "@/types/quiz";
 import type { TestCategory } from "../PerformanceTab";
+import { RetainedHeightFrame } from "./PerformanceStates";
 
 const CHAPTER_FORMATS = ["chapter_test", "combined_chapter_test", "homework"];
 
 function isChapterTest(format: string | null): boolean {
   return format != null && CHAPTER_FORMATS.includes(format.toLowerCase());
+}
+
+/**
+ * The tests the overview lists. NVS lists every returned test — the server has
+ * already narrowed them to System-wide Mandated Tests, which cut across the
+ * chapter/full split and test grades. Everyone else gets the category split
+ * plus the subject (chapter only) and test-grade filters.
+ */
+function listedTests(
+  tests: TestTrendPoint[],
+  {
+    isNvs,
+    testCategory,
+    subject,
+    testGrade,
+  }: { isNvs?: boolean; testCategory: TestCategory; subject?: string; testGrade?: number }
+): TestTrendPoint[] {
+  if (isNvs) return tests;
+  return tests.filter((t) => {
+    const isChapter = isChapterTest(t.test_format);
+    if (testCategory === "chapter" ? !isChapter : isChapter) return false;
+    if (testCategory === "chapter" && subject) {
+      if (!(t.subjects || []).includes(subject)) return false;
+    }
+    if (testGrade != null && t.test_grade !== testGrade) return false;
+    return true;
+  });
+}
+
+/** Copy for an overview with nothing to list — either no tests came back at
+ *  all, or the filters left none. NVS reads the same either way. */
+function emptyStateCopy({
+  isNvs,
+  hasData,
+  testCategory,
+  subject,
+  stream,
+  testGrade,
+}: {
+  isNvs?: boolean;
+  hasData: boolean;
+  testCategory: TestCategory;
+  subject?: string;
+  stream?: string;
+  testGrade?: number;
+}): string {
+  if (isNvs) return "No system-wide mandated tests yet for this grade/stream";
+  if (!hasData) return "No quiz data available for this grade yet.";
+  return [
+    `No ${testCategory === "chapter" ? "chapter" : "full"} tests`,
+    subject ? ` for ${subject}` : "",
+    stream ? ` for the selected stream` : "",
+    testGrade != null ? ` targeting grade ${testGrade}` : "",
+    " available for this grade yet.",
+  ].join("");
+}
+
+function EmptyOverview({ children }: { children: string }) {
+  return (
+    <div className="p-8 text-center bg-bg-card-alt border border-border rounded-lg shadow-sm">
+      <p className="text-sm text-text-muted">{children}</p>
+    </div>
+  );
 }
 
 interface Props {
@@ -20,6 +84,8 @@ interface Props {
   stream?: string;
   subject?: string;
   testGrade?: number;
+  /** JNV NVS: list every (mandated) test, with no format split or filters. */
+  isNvs?: boolean;
   onTestClick: (sessionId: string, testName: string) => void;
   onFilterOptions?: (opts: {
     streams: string[];
@@ -86,18 +152,29 @@ export default function BatchOverview({
   stream,
   subject,
   testGrade,
+  isNvs,
   onTestClick,
   onFilterOptions,
 }: Props) {
-  const [data, setData] = useState<BatchOverviewData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  // Each answer is tagged with the request it belongs to. Once the filters move
+  // on, a late success or failure for the old request is never shown, and the
+  // new request starts loading with no stale data or error — even when history
+  // returns to filters that already answered (A → B → A).
+  const requestKey = [schoolUdise, grade, program ?? "", stream ?? ""].join("|");
+  const [result, setResult] = useState<{
+    key: string;
+    data?: BatchOverviewData;
+    error?: string;
+  } | null>(null);
+  const [resultRequest, setResultRequest] = useState(requestKey);
+  if (resultRequest !== requestKey) {
+    setResultRequest(requestKey);
+    setResult(null);
+  }
 
   useEffect(() => {
+    let current = true;
     const controller = new AbortController();
-    setLoading(true);
-    setError(null);
-    setData(null);
 
     const programParam = program ? `&program=${encodeURIComponent(program)}` : "";
     const streamParam = stream ? `&stream=${encodeURIComponent(stream)}` : "";
@@ -111,14 +188,23 @@ export default function BatchOverview({
         if (!res.ok) throw new Error("Failed to fetch batch overview");
         return res.json();
       })
-      .then((d: BatchOverviewData) => setData(d))
-      .catch((err) => {
-        if (err.name !== "AbortError") setError(err.message);
+      .then((d: BatchOverviewData) => {
+        if (current) setResult({ key: requestKey, data: d });
       })
-      .finally(() => setLoading(false));
+      .catch((err) => {
+        if (current && err.name !== "AbortError") setResult({ key: requestKey, error: err.message });
+      });
 
-    return () => controller.abort();
-  }, [schoolUdise, grade, program, stream]);
+    return () => {
+      current = false;
+      controller.abort();
+    };
+  }, [requestKey]); // eslint-disable-line react-hooks/exhaustive-deps -- requestKey encodes every input
+
+  const settled = result?.key === requestKey ? result : null;
+  const loading = settled === null;
+  const error = settled?.error ?? null;
+  const data = settled?.data ?? null;
 
   // Compute available subjects from the loaded test set, scoped to the current
   // test category (chapter vs full). Streams come straight from the API.
@@ -146,81 +232,62 @@ export default function BatchOverview({
     onFilterOptions?.(filterOptions);
   }, [filterOptions, onFilterOptions]);
 
+  let content: React.ReactNode;
   if (loading) {
-    return (
+    content = (
       <div className="flex justify-center items-center h-[30vh]">
         <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-accent" />
         <span className="ml-3 text-sm text-text-secondary">Loading batch overview...</span>
       </div>
     );
-  }
-
-  if (error) {
-    return (
+  } else if (error) {
+    content = (
       <div className="p-4 bg-danger-bg border border-danger text-danger rounded-lg">
         {error}
       </div>
     );
-  }
+  } else {
+    const allTests = data?.tests ?? [];
+    const tests = listedTests(allTests, { isNvs, testCategory, subject, testGrade });
+    if (!data || tests.length === 0) {
+      content = (
+      <EmptyOverview>
+        {emptyStateCopy({ isNvs, hasData: allTests.length > 0, testCategory, subject, stream, testGrade })}
+      </EmptyOverview>
+      );
+    } else {
+      const { totalEnrolled, enrolledByStream } = data;
+      const avgAttendance = Math.round(
+        tests.reduce((s, t) => s + (t.test_stream ? t.stream_student_count : t.student_count), 0) / tests.length
+      );
+      content = (
+        <div className="space-y-6">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
+            <StatCard label="Tests Conducted" value={tests.length} color="brand-coral" />
+            <StatCard label="Avg Attendance" value={avgAttendance} color="brand-amber" />
+            {totalEnrolled != null && (
+              <StatCard label="Total Enrolled" value={totalEnrolled} color="brand-gold" />
+            )}
+          </div>
 
-  if (!data || data.tests.length === 0) {
-    return (
-      <div className="p-8 text-center bg-bg-card-alt border border-border rounded-lg shadow-sm">
-        <p className="text-sm text-text-muted">No quiz data available for this grade yet.</p>
-      </div>
-    );
-  }
-
-  const { totalEnrolled, enrolledByStream } = data;
-
-  const tests = data.tests.filter((t) => {
-    const isChapter = isChapterTest(t.test_format);
-    if (testCategory === "chapter" ? !isChapter : isChapter) return false;
-    if (testCategory === "chapter" && subject) {
-      if (!(t.subjects || []).includes(subject)) return false;
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 md:gap-4">
+            {[...tests].reverse().map((t) => (
+              <TestCard
+                key={t.session_id}
+                test={t}
+                enrolledByStream={enrolledByStream}
+                onClick={() => onTestClick(t.session_id, t.test_name)}
+              />
+            ))}
+          </div>
+        </div>
+      );
     }
-    if (testGrade != null && t.test_grade !== testGrade) return false;
-    return true;
-  });
-
-  if (tests.length === 0) {
-    return (
-      <div className="p-8 text-center bg-bg-card-alt border border-border rounded-lg shadow-sm">
-        <p className="text-sm text-text-muted">
-          No {testCategory === "chapter" ? "chapter" : "full"} tests
-          {subject ? ` for ${subject}` : ""}
-          {stream ? ` for the selected stream` : ""}
-          {testGrade != null ? ` targeting grade ${testGrade}` : ""}
-          {" "}available for this grade yet.
-        </p>
-      </div>
-    );
   }
-
-  const avgAttendance = Math.round(
-    tests.reduce((s, t) => s + (t.test_stream ? t.stream_student_count : t.student_count), 0) / tests.length
-  );
 
   return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
-        <StatCard label="Tests Conducted" value={tests.length} color="brand-coral" />
-        <StatCard label="Avg Attendance" value={avgAttendance} color="brand-amber" />
-        {totalEnrolled != null && (
-          <StatCard label="Total Enrolled" value={totalEnrolled} color="brand-gold" />
-        )}
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 md:gap-4">
-        {[...tests].reverse().map((t) => (
-          <TestCard
-            key={t.session_id}
-            test={t}
-            enrolledByStream={enrolledByStream}
-            onClick={() => onTestClick(t.session_id, t.test_name)}
-          />
-        ))}
-      </div>
-    </div>
+    <RetainedHeightFrame loading={loading} testId="batch-overview-frame">
+      {content}
+    </RetainedHeightFrame>
   );
 }

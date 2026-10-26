@@ -9,7 +9,7 @@ test.describe("Smoke tests", () => {
       page.getByText("Student Enrollment Management")
     ).toBeVisible();
     await expect(page.getByText("Sign in with Google")).toBeVisible();
-    await expect(page.getByText("Enter School Passcode")).toBeVisible();
+    await expect(page.getByText("Enter School Passcode")).toHaveCount(0);
   });
 
   test("unauthenticated user accessing /dashboard redirects to login", async ({

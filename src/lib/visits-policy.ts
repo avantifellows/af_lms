@@ -117,13 +117,6 @@ export async function requireVisitsAccess(
     return { ok: false, response: apiError(401, "Unauthorized") };
   }
 
-  if (session.isPasscodeUser) {
-    return {
-      ok: false,
-      response: apiError(403, "Passcode users cannot access visit routes"),
-    };
-  }
-
   const permission = await getResolvedPermission(email);
   if (!permission) {
     return { ok: false, response: apiError(403, "Forbidden") };
@@ -230,8 +223,77 @@ export function buildVisitScopePredicate(
   };
 }
 
+/**
+ * Whether the actor oversees Visits at this School through a visit-manager
+ * Centre seat (PM, SPM or PH; #291). Needs a resolved permission — a bare
+ * getUserPermission carries no seats and manages nothing.
+ */
+export function managesVisitSchool(actor: VisitsActor, schoolCode: string): boolean {
+  return actor.permission.scope?.visitManagedSchools?.has(schoolCode) ?? false;
+}
+
+/**
+ * The Program Manager list scope: their own Visits, plus every Visit at the
+ * Schools of their visit-manager Centre seats (#291). Ownership matches the
+ * trimmed, case-folded email, the same rule as canViewVisit.
+ */
+export function buildOwnOrManagedVisitPredicate(
+  actor: VisitsActor,
+  options?: { startIndex?: number; pmEmailColumn?: string; schoolCodeColumn?: string }
+): VisitScopePredicate {
+  const startIndex = options?.startIndex ?? 1;
+  const pmEmailColumn = options?.pmEmailColumn ?? "pm_email";
+  const schoolCodeColumn = options?.schoolCodeColumn ?? "school_code";
+  const own = `LOWER(TRIM(${pmEmailColumn})) = $${startIndex}`;
+  const managed = [...(actor.permission.scope?.visitManagedSchools ?? [])];
+  if (managed.length === 0) {
+    return { clause: own, params: [normalizeEmail(actor.email)] };
+  }
+  return {
+    clause: `(${own} OR ${schoolCodeColumn} = ANY($${startIndex + 1}))`,
+    params: [normalizeEmail(actor.email), managed],
+  };
+}
+
 export function isScopedVisitsRole(actor: VisitsActor): boolean {
   return actor.role === "admin" || actor.role === "program_admin";
+}
+
+/**
+ * Visit Summary access: admins and program admins, plus Program Managers who
+ * hold a visit-manager Centre seat (#291). A manager's summary covers only the
+ * Schools of those centres.
+ */
+export function canViewVisitSummary(actor: VisitsActor): boolean {
+  if (isScopedVisitsRole(actor)) return true;
+  return actor.role === "program_manager" &&
+    (actor.permission.scope?.visitManagedSchools?.size ?? 0) > 0;
+}
+
+/**
+ * The Visit Summary's row scope. Admins and program admins keep their school
+ * and region scope; a Program Manager sees every Visit at the Schools of their
+ * visit-manager Centre seats, and nothing elsewhere.
+ */
+export function buildVisitSummaryScopePredicate(
+  actor: VisitsActor,
+  options?: {
+    startIndex?: number;
+    schoolCodeColumn?: string;
+    schoolRegionColumn?: string;
+  }
+): VisitScopePredicate {
+  if (actor.role !== "program_manager") {
+    return buildVisitScopePredicate(actor, options);
+  }
+  const managed = [...(actor.permission.scope?.visitManagedSchools ?? [])];
+  if (managed.length === 0) {
+    return { clause: "1 = 0", params: [] };
+  }
+  return {
+    clause: `${options?.schoolCodeColumn ?? "school_code"} = ANY($${options?.startIndex ?? 1})`,
+    params: [managed],
+  };
 }
 
 export function requiresVisitActionsForCompletion(actor: VisitsActor): boolean {
@@ -256,7 +318,8 @@ export function canViewVisit(actor: VisitsActor, target: VisitAccessTarget): boo
   }
 
   if (actor.role === "program_manager") {
-    return normalizeEmail(target.pmEmail) === normalizeEmail(actor.email);
+    return normalizeEmail(target.pmEmail) === normalizeEmail(actor.email) ||
+      managesVisitSchool(actor, target.schoolCode);
   }
 
   return false;

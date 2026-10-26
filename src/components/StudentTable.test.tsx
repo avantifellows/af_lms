@@ -253,6 +253,95 @@ describe("StudentTable - grade filter", () => {
   });
 });
 
+describe("StudentTable - stream filter", () => {
+  const students = [
+    makeStudent({ group_user_id: "g1", first_name: "Proper", stream: "Engineering" }),
+    makeStudent({ group_user_id: "g2", first_name: "Padded", stream: " engineering " }),
+    makeStudent({ group_user_id: "g3", first_name: "Shouty", stream: "ENGINEERING" }),
+    makeStudent({ group_user_id: "g4", first_name: "Medic", stream: "medical" }),
+    makeStudent({ group_user_id: "g5", first_name: "Nullish", stream: null }),
+    makeStudent({ group_user_id: "g6", first_name: "Empty", stream: "" }),
+    makeStudent({ group_user_id: "g7", first_name: "Blank", stream: "   " }),
+  ];
+  const shown = () =>
+    ["Proper", "Padded", "Shouty", "Medic", "Nullish", "Empty", "Blank"].filter((name) =>
+      screen.queryByText(`${name} Sharma`),
+    );
+
+  it("lists exactly the students with no stream when No stream is selected", () => {
+    render(<StudentTable students={students} grades={defaultGrades} selectedStream="__none__" />);
+    expect(shown()).toEqual(["Nullish", "Empty", "Blank"]);
+  });
+
+  it("matches a stream ignoring case and surrounding whitespace", () => {
+    render(<StudentTable students={students} grades={defaultGrades} selectedStream="engineering" />);
+    expect(shown()).toEqual(["Proper", "Padded", "Shouty"]);
+  });
+});
+
+describe("StudentTable - roster search", () => {
+  const students = [
+    makeStudent({ group_user_id: "g1", first_name: "Riya", last_name: "Verma", student_id: "2028001", pen_number: "11111111111", apaar_id: "APA-ONE", phone: "9000000001", grade: 11, stream: "engineering" }),
+    makeStudent({ group_user_id: "g2", first_name: "Kabir", last_name: "Rao", student_id: "2028002", pen_number: "22222222222", apaar_id: "APA-TWO", phone: "9000000002", grade: 12, stream: "medical" }),
+    makeStudent({ group_user_id: "g3", first_name: "Meera", last_name: "Iyer", student_id: "2028003", pen_number: null, apaar_id: null, phone: null, grade: 11, stream: null }),
+  ];
+  const shown = () =>
+    ["Riya Verma", "Kabir Rao", "Meera Iyer"].filter((name) => screen.queryByText(name));
+  const search = (searchQuery: string) =>
+    render(<StudentTable students={students} grades={defaultGrades} searchQuery={searchQuery} />);
+
+  it("finds a student by a full first-last name substring, ignoring case and whitespace", () => {
+    search("  ya VER ");
+    expect(shown()).toEqual(["Riya Verma"]);
+  });
+
+  it.each([
+    ["Student ID", "2028002"],
+    ["PEN", "22222222"],
+    ["APAAR ID", "apa-two"],
+    ["phone", " 9000000002 "],
+  ])("finds a student by %s", (_field: string, query: string) => {
+    search(query);
+    expect(shown()).toEqual(["Kabir Rao"]);
+  });
+
+  it("shows everyone for a blank query", () => {
+    search("   ");
+    expect(shown()).toEqual(["Riya Verma", "Kabir Rao", "Meera Iyer"]);
+  });
+
+  it("narrows the Dropout list too", async () => {
+    const user = userEvent.setup();
+    render(
+      <StudentTable
+        students={[students[0]]}
+        dropoutStudents={[
+          makeStudent({ group_user_id: "d1", first_name: "Kabir", last_name: "Rao", student_id: "2028002", status: "dropout" }),
+          makeStudent({ group_user_id: "d2", first_name: "Meera", last_name: "Iyer", student_id: "2028003", status: "dropout" }),
+        ]}
+        grades={defaultGrades}
+        searchQuery="kabir"
+      />,
+    );
+
+    await user.click(screen.getByText("Dropout (2)"));
+    expect(shown()).toEqual(["Kabir Rao"]);
+  });
+
+  it("combines with the grade and stream filters, including No stream", () => {
+    const { unmount } = render(
+      <StudentTable students={students} grades={defaultGrades} searchQuery="2028" selectedGrade="11" selectedStream="engineering" />,
+    );
+    expect(shown()).toEqual(["Riya Verma"]);
+    unmount();
+
+    render(
+      <StudentTable students={students} grades={defaultGrades} searchQuery="2028" selectedGrade="11" selectedStream="__none__" />,
+    );
+    expect(shown()).toEqual(["Meera Iyer"]);
+  });
+});
+
 // ─── 3. Tabs shown when dropout students exist ──────────────────────────────
 
 describe("StudentTable - tabs", () => {
@@ -373,6 +462,100 @@ describe("StudentTable - tab switching", () => {
   });
 });
 
+describe("StudentTable - NVS Exam Preparing For", () => {
+  it("shows Exam Preparing For instead of Program and Stream on an NVS card", async () => {
+    const user = userEvent.setup();
+    const student = makeStudent({ stream: "engineering", program_name: "JNV NVS" });
+    render(
+      <StudentTable
+        students={[student]}
+        grades={defaultGrades}
+        selectedProgramId={PROGRAM_IDS.NVS}
+      />,
+    );
+
+    expect(screen.getByText("Exam Preparing For")).toBeInTheDocument();
+    expect(screen.getByText("Engineering")).toBeInTheDocument();
+    expect(screen.queryByText("Program")).not.toBeInTheDocument();
+    expect(screen.queryByText("JNV NVS")).not.toBeInTheDocument();
+
+    await user.click(screen.getByLabelText("Expand"));
+    expect(screen.queryByText("Stream")).not.toBeInTheDocument();
+    expect(screen.queryByText("engineering")).not.toBeInTheDocument();
+  });
+
+  it("shows an em-dash for a blank stream on an NVS card", () => {
+    const student = makeStudent({
+      student_id: "S1",
+      pen_number: "P1",
+      apaar_id: "A1",
+      phone: "9999999999",
+      gender: "Female",
+      category: "Gen",
+      date_of_birth: "2011-03-20",
+      stream: "  ",
+    });
+    render(
+      <StudentTable
+        students={[student]}
+        grades={defaultGrades}
+        selectedProgramId={PROGRAM_IDS.NVS}
+      />,
+    );
+
+    const label = screen.getByText("Exam Preparing For");
+    expect(label.nextElementSibling).toHaveTextContent(/^—$/);
+  });
+
+  it("keeps the Program key field and expanded Stream on a non-NVS card", async () => {
+    const user = userEvent.setup();
+    const student = makeStudent({ stream: "engineering", program_name: "CoE" });
+    render(
+      <StudentTable
+        students={[student]}
+        grades={defaultGrades}
+        selectedProgramId={PROGRAM_IDS.COE}
+      />,
+    );
+
+    expect(screen.getByText("Program")).toBeInTheDocument();
+    expect(screen.getByText("CoE")).toBeInTheDocument();
+    expect(screen.queryByText("Exam Preparing For")).not.toBeInTheDocument();
+
+    await user.click(screen.getByLabelText("Expand"));
+    expect(screen.getByText("Stream")).toBeInTheDocument();
+    expect(screen.getByText("engineering")).toBeInTheDocument();
+  });
+});
+
+describe("StudentTable - Documents on the card", () => {
+  const renderExpanded = async (selectedProgramId: number) => {
+    const user = userEvent.setup();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: true, json: async () => [] }),
+    );
+    render(
+      <StudentTable
+        students={[makeStudent({ student_pk_id: "101" })]}
+        grades={defaultGrades}
+        selectedProgramId={selectedProgramId}
+      />,
+    );
+    await user.click(screen.getByLabelText("Expand"));
+  };
+
+  it("hides the Documents list on a JNV NVS card", async () => {
+    await renderExpanded(PROGRAM_IDS.NVS);
+    expect(screen.queryByRole("heading", { name: "Documents" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the Documents list on a physical-centre card", async () => {
+    await renderExpanded(PROGRAM_IDS.COE);
+    expect(screen.getByRole("heading", { name: "Documents" })).toBeInTheDocument();
+  });
+});
+
 // ─── 5. Expand / collapse card details ──────────────────────────────────────
 
 describe("StudentTable - expand/collapse", () => {
@@ -383,6 +566,7 @@ describe("StudentTable - expand/collapse", () => {
       category: "OBC",
       stream: "commerce",
       program_name: "Nodal",
+      program_id: PROGRAM_IDS.COE,
       email: "test@example.com",
     });
     render(<StudentTable students={[student]} grades={defaultGrades} />);
@@ -404,6 +588,7 @@ describe("StudentTable - expand/collapse", () => {
       category: "SC",
       stream: "arts",
       program_name: "CoE",
+      program_id: PROGRAM_IDS.COE,
       email: "expanded@test.com",
     });
     render(<StudentTable students={[student]} grades={defaultGrades} />);
@@ -438,7 +623,13 @@ describe("StudentTable - expand/collapse", () => {
       annual_family_income: "200000",
       monthly_family_income: "16000",
     };
-    render(<StudentTable students={[student]} grades={defaultGrades} />);
+    render(
+      <StudentTable
+        students={[student]}
+        grades={defaultGrades}
+        selectedProgramId={PROGRAM_IDS.COE}
+      />,
+    );
 
     await user.click(screen.getByLabelText("Expand"));
 
@@ -448,7 +639,7 @@ describe("StudentTable - expand/collapse", () => {
     expect(screen.getByText("Maharashtra")).toBeInTheDocument();
     expect(screen.getByText("411001")).toBeInTheDocument();
     expect(screen.getByText("PCM")).toBeInTheDocument();
-    expect(screen.getByText("English")).toBeInTheDocument();
+    expect(screen.queryByText("School Medium")).not.toBeInTheDocument();
     expect(screen.getByText("Suresh Kumar")).toBeInTheDocument();
     expect(screen.getByText("Sunita Kumar")).toBeInTheDocument();
     expect(screen.getByText("Ramesh Kumar")).toBeInTheDocument();
@@ -460,12 +651,160 @@ describe("StudentTable - expand/collapse", () => {
     expect(screen.getByText("Guardian")).toBeInTheDocument();
   });
 
+  it("keeps an NVS card trimmed to the fields Edit Student offers there", async () => {
+    const user = userEvent.setup();
+    const student = {
+      ...makeStudent(),
+      physically_handicapped: true,
+      father_name: "Suresh Kumar",
+      annual_family_income: "1 - 3 Lakhs",
+      board_stream: "PCM",
+      g10_board: "CBSE",
+      g10_roll_no: "12345678",
+      email: "nvs@example.com",
+      city: "Pune",
+      mother_name: "Sunita Kumar",
+      guardian_name: "Ramesh Kumar",
+      monthly_family_income: "16000",
+      tshirt_size: "L",
+    };
+    render(
+      <StudentTable
+        students={[student]}
+        grades={defaultGrades}
+        selectedProgramId={PROGRAM_IDS.NVS}
+      />,
+    );
+
+    await user.click(screen.getByLabelText("Expand"));
+
+    for (const label of [
+      "Children with Special Needs (CWSN)",
+      "Father Name",
+      "Annual Family Income",
+      "Board Stream",
+      "G10 board",
+      "Grade 10 Roll no",
+    ]) {
+      expect(screen.getByText(label)).toBeInTheDocument();
+    }
+    expect(screen.getByText("Yes")).toBeInTheDocument();
+    expect(screen.getByText("CBSE")).toBeInTheDocument();
+
+    // The contact and household details are collected for centres only, so
+    // they are neither editable nor shown here (#431 review).
+    for (const value of [
+      "nvs@example.com",
+      "Pune",
+      "Sunita Kumar",
+      "Ramesh Kumar",
+      "16000",
+    ]) {
+      expect(screen.queryByText(value)).not.toBeInTheDocument();
+    }
+    expect(screen.queryByText("Mother")).not.toBeInTheDocument();
+    expect(screen.queryByText("Contact & Address")).not.toBeInTheDocument();
+    expect(screen.queryByText("Uniform")).not.toBeInTheDocument();
+  });
+
+  it("reads G10 board as CBSE or Others, the way Edit Student offers it", async () => {
+    const user = userEvent.setup();
+    render(
+      <StudentTable
+        students={[
+          {
+            ...makeStudent(),
+            g10_board: "RAJASTHAN BOARD OF SECONDARY EDUCATION",
+          },
+        ]}
+        grades={defaultGrades}
+        selectedProgramId={PROGRAM_IDS.COE}
+      />,
+    );
+
+    await user.click(screen.getByLabelText("Expand"));
+
+    expect(screen.getByText("Others")).toBeInTheDocument();
+    expect(
+      screen.queryByText("RAJASTHAN BOARD OF SECONDARY EDUCATION"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("reads a lower-case cbse as Others, as Edit Student does", async () => {
+    const user = userEvent.setup();
+    render(
+      <StudentTable
+        students={[{ ...makeStudent(), g10_board: "cbse" }]}
+        grades={defaultGrades}
+        selectedProgramId={PROGRAM_IDS.COE}
+      />,
+    );
+
+    await user.click(screen.getByLabelText("Expand"));
+
+    expect(screen.getByText("Others")).toBeInTheDocument();
+    expect(screen.queryByText("CBSE")).not.toBeInTheDocument();
+  });
+
+  it("leaves a G10 board nobody entered blank rather than calling it Others", async () => {
+    const user = userEvent.setup();
+    render(
+      <StudentTable
+        students={[{ ...makeStudent(), g10_board: null }]}
+        grades={defaultGrades}
+        selectedProgramId={PROGRAM_IDS.COE}
+      />,
+    );
+
+    await user.click(screen.getByLabelText("Expand"));
+
+    expect(screen.getByText("G10 board").nextElementSibling).toHaveTextContent("—");
+    expect(screen.queryByText("Others")).not.toBeInTheDocument();
+  });
+
+  it("shows the Edit Student fields the card used to leave out (#431)", async () => {
+    const user = userEvent.setup();
+    const student = {
+      ...makeStudent(),
+      physically_handicapped: true,
+      g10_board: "CBSE",
+      tshirt_size: "L",
+      track_pant_size: "M",
+    };
+    render(
+      <StudentTable
+        students={[student]}
+        grades={defaultGrades}
+        selectedProgramId={PROGRAM_IDS.COE}
+      />,
+    );
+
+    await user.click(screen.getByLabelText("Expand"));
+
+    expect(
+      screen.getByText("Children with Special Needs (CWSN)"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Yes")).toBeInTheDocument();
+    expect(screen.getByText("G10 board")).toBeInTheDocument();
+    expect(screen.getByText("CBSE")).toBeInTheDocument();
+    expect(screen.getByText("T-shirt Size")).toBeInTheDocument();
+    expect(screen.getByText("L")).toBeInTheDocument();
+    expect(screen.getByText("Track Pant Size")).toBeInTheDocument();
+    expect(screen.getByText("M")).toBeInTheDocument();
+  });
+
   it("hides details after collapsing", async () => {
     const user = userEvent.setup();
     // Use an expanded-only field (email) as the sentinel — phone now shows in
     // the always-visible summary.
     const student = makeStudent({ email: "collapse-test@example.com" });
-    render(<StudentTable students={[student]} grades={defaultGrades} />);
+    render(
+      <StudentTable
+        students={[student]}
+        grades={defaultGrades}
+        selectedProgramId={PROGRAM_IDS.COE}
+      />,
+    );
 
     await user.click(screen.getByLabelText("Expand"));
     expect(screen.getByText("collapse-test@example.com")).toBeInTheDocument();
@@ -509,17 +848,6 @@ describe("StudentTable - Edit button visibility", () => {
       />,
     );
     expect(screen.getByText("Edit")).toBeInTheDocument();
-  });
-
-  it("hides Edit button for passcode users", () => {
-    render(
-      <StudentTable
-        students={[makeStudent()]}
-        grades={defaultGrades}
-        isPasscodeUser={true}
-      />,
-    );
-    expect(screen.queryByText("Edit")).not.toBeInTheDocument();
   });
 });
 
@@ -689,19 +1017,6 @@ describe("StudentTable - Dropout button", () => {
 // ─── 9. canEditStudent logic ────────────────────────────────────────────────
 
 describe("StudentTable - canEditStudent logic", () => {
-  it("passcode user cannot edit through the Student Addition gate", () => {
-    const student = makeStudent({ program_id: PROGRAM_IDS.NVS });
-    render(
-      <StudentTable
-        students={[student]}
-        grades={defaultGrades}
-        isPasscodeUser={true}
-        userProgramIds={[PROGRAM_IDS.NVS]}
-      />,
-    );
-    expect(screen.queryByText("Edit")).not.toBeInTheDocument();
-  });
-
   it("admin can edit an NVS student even without explicit NVS scope", () => {
     const student = makeStudent({ program_id: PROGRAM_IDS.NVS });
     render(
@@ -753,7 +1068,6 @@ describe("StudentTable - canEditStudent logic", () => {
         grades={defaultGrades}
         canEdit={true}
         isAdmin={false}
-        isPasscodeUser={false}
         userProgramIds={[PROGRAM_IDS.NVS]}
       />,
     );
@@ -768,7 +1082,6 @@ describe("StudentTable - canEditStudent logic", () => {
         grades={defaultGrades}
         canEdit={true}
         isAdmin={false}
-        isPasscodeUser={false}
         userProgramIds={[PROGRAM_IDS.NVS]}
       />,
     );
@@ -788,7 +1101,6 @@ describe("StudentTable - canEditStudent logic", () => {
         grades={defaultGrades}
         canEdit={true}
         isAdmin={false}
-        isPasscodeUser={false}
         selectedProgramId={PROGRAM_IDS.NVS}
         userProgramIds={[PROGRAM_IDS.NVS]}
       />,
@@ -808,7 +1120,6 @@ describe("StudentTable - canEditStudent logic", () => {
         grades={defaultGrades}
         canEdit={true}
         isAdmin={false}
-        isPasscodeUser={false}
         selectedProgramId={PROGRAM_IDS.COE}
         userProgramIds={[PROGRAM_IDS.NVS]}
       />,
@@ -824,7 +1135,6 @@ describe("StudentTable - canEditStudent logic", () => {
         grades={defaultGrades}
         canEdit={true}
         isAdmin={false}
-        isPasscodeUser={false}
         userProgramIds={[PROGRAM_IDS.COE, PROGRAM_IDS.NODAL]}
       />,
     );
@@ -839,7 +1149,6 @@ describe("StudentTable - canEditStudent logic", () => {
         grades={defaultGrades}
         canEdit={true}
         isAdmin={false}
-        isPasscodeUser={false}
         userProgramIds={[]}
       />,
     );
@@ -854,7 +1163,6 @@ describe("StudentTable - canEditStudent logic", () => {
         grades={defaultGrades}
         canEdit={true}
         isAdmin={false}
-        isPasscodeUser={false}
         userProgramIds={null}
       />,
     );
@@ -878,7 +1186,6 @@ describe("StudentTable - canEditStudent logic", () => {
         grades={defaultGrades}
         canEdit={true}
         isAdmin={false}
-        isPasscodeUser={false}
         userProgramIds={[PROGRAM_IDS.NVS]}
       />,
     );
@@ -1515,5 +1822,181 @@ describe("StudentTable - Dropout modal error edge cases", () => {
         screen.getByText("Failed to mark student as dropout"),
       ).toBeInTheDocument();
     });
+  });
+});
+
+describe("StudentTable - intervention flags", () => {
+  const students = [
+    makeStudent({ group_user_id: "g1", student_pk_id: "1", first_name: "Flagged" }),
+    makeStudent({ group_user_id: "g2", student_pk_id: "2", first_name: "Other" }),
+  ];
+
+  it("marks flagged students and opens the flag dialog from the card", async () => {
+    const onOpen = vi.fn();
+    render(
+      <StudentTable
+        students={students}
+        grades={defaultGrades}
+        canEditStudent={false}
+        canDropoutStudent={false}
+        openFlagStudentIds={new Set(["1"])}
+        onOpenInterventionFlag={onOpen}
+      />,
+    );
+
+    expect(screen.getAllByText("Needs intervention")).toHaveLength(1);
+    await userEvent.click(screen.getByRole("button", { name: "View flag" }));
+    expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ student_pk_id: "1" }));
+    expect(screen.getByRole("button", { name: "Flag" })).toBeInTheDocument();
+  });
+
+  it("shows no flag controls when the viewer cannot use flags", () => {
+    render(<StudentTable students={students} grades={defaultGrades} canEditStudent={false} canDropoutStudent={false} />);
+    expect(screen.queryByRole("button", { name: /flag/i })).not.toBeInTheDocument();
+    expect(screen.queryByText("Needs intervention")).not.toBeInTheDocument();
+  });
+
+  it("narrows to flagged students when flaggedOnly is set", () => {
+    render(
+      <StudentTable
+        students={students}
+        grades={defaultGrades}
+        openFlagStudentIds={new Set(["1"])}
+        flaggedOnly
+      />,
+    );
+    expect(screen.getByText("Flagged Sharma")).toBeInTheDocument();
+    expect(screen.queryByText("Other Sharma")).not.toBeInTheDocument();
+  });
+
+  it("keeps the flag reachable for dropout students", async () => {
+    const onOpen = vi.fn();
+    const dropout = makeStudent({ group_user_id: "g3", student_pk_id: "3", first_name: "Left", status: "dropout" });
+    render(
+      <StudentTable
+        students={[]}
+        dropoutStudents={[dropout]}
+        grades={defaultGrades}
+        openFlagStudentIds={new Set(["3"])}
+        onOpenInterventionFlag={onOpen}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: /Dropout/ }));
+    await userEvent.click(screen.getByRole("button", { name: "View flag" }));
+    expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ student_pk_id: "3" }));
+  });
+
+  it("gives read-only viewers View flag only, never Flag", () => {
+    render(
+      <StudentTable
+        students={students}
+        grades={defaultGrades}
+        canEditStudent={false}
+        canDropoutStudent={false}
+        openFlagStudentIds={new Set(["1"])}
+        onOpenInterventionFlag={vi.fn()}
+        canRaiseInterventionFlag={false}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "View flag" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Flag" })).not.toBeInTheDocument();
+  });
+});
+
+// ─── Exam registrations on the card ─────────────────────────────────────────
+
+describe("StudentTable - exam registrations", () => {
+  // Exam registrations belong to physical centres, so these cards render on a
+  // physical-centre roster; the default fixture Student is JNV NVS.
+  const CENTRE_PROGRAM_ID = PROGRAM_IDS.MAHARASHTRA_COACHING_TESTPREP;
+  const withExams = () => ({
+    ...makeStudent({ program_id: CENTRE_PROGRAM_ID, program_name: "Maharashtra Coaching" }),
+    exam_records: [
+      {
+        id: 10,
+        exam_id: 1,
+        exam_name: "JEE Mains",
+        application_number: "JEE123",
+        has_password: true,
+        sessions_applied: [1, 2],
+      },
+      {
+        id: 11,
+        exam_id: 2,
+        exam_name: "NEET",
+        application_number: null,
+        has_password: false,
+        sessions_applied: null,
+      },
+    ],
+  });
+
+  it("tags the card with every exam applied for", () => {
+    render(
+      <StudentTable
+        students={[withExams()]}
+        grades={defaultGrades}
+        selectedProgramId={CENTRE_PROGRAM_ID}
+      />,
+    );
+
+    expect(screen.getByText("JEE Mains")).toBeInTheDocument();
+    expect(screen.getByText("NEET")).toBeInTheDocument();
+  });
+
+  it("lists the registrations with the password masked, never in plain text", async () => {
+    const user = userEvent.setup();
+    render(
+      <StudentTable
+        students={[withExams()]}
+        grades={defaultGrades}
+        selectedProgramId={CENTRE_PROGRAM_ID}
+      />,
+    );
+
+    await user.click(screen.getByLabelText("Expand"));
+
+    const table = screen.getByRole("table");
+    expect(within(table).getByText("JEE123")).toBeInTheDocument();
+    expect(within(table).getByText("••••••••")).toBeInTheDocument();
+    expect(within(table).getByText("Session 1, Session 2")).toBeInTheDocument();
+    // The NEET row has neither an application number nor a password.
+    expect(within(table).getAllByText("—")).toHaveLength(3);
+  });
+
+  it("leaves the section out for a Student with no registrations", async () => {
+    const user = userEvent.setup();
+    render(
+      <StudentTable
+        students={[makeStudent({ program_id: CENTRE_PROGRAM_ID })]}
+        grades={defaultGrades}
+        selectedProgramId={CENTRE_PROGRAM_ID}
+      />,
+    );
+
+    await user.click(screen.getByLabelText("Expand"));
+
+    expect(screen.queryByText("Exam Registrations")).not.toBeInTheDocument();
+  });
+
+  it("shows neither the tags nor the table on a JNV NVS roster", async () => {
+    // Exam registrations are collected at physical centres only (#434), like
+    // uniform sizes and documents before them (#433).
+    const user = userEvent.setup();
+    render(
+      <StudentTable
+        students={[withExams()]}
+        grades={defaultGrades}
+        selectedProgramId={PROGRAM_IDS.NVS}
+      />,
+    );
+
+    expect(screen.queryByText("JEE Mains")).not.toBeInTheDocument();
+
+    await user.click(screen.getByLabelText("Expand"));
+
+    expect(screen.queryByText("Exam Registrations")).not.toBeInTheDocument();
+    expect(screen.queryByText("JEE123")).not.toBeInTheDocument();
   });
 });

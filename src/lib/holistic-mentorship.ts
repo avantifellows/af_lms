@@ -24,6 +24,7 @@ export type HolisticMentorshipAction =
   | "notes_draft"
   | "notes_submit"
   | "notes_edit"
+  | "follow_up_note_add"
   | "program_read"
   | "phase_configuration_read"
   | "phase_configure"
@@ -32,7 +33,6 @@ export type HolisticMentorshipAction =
 
 export type HolisticMentorshipSession = {
   user?: { email?: string | null } | null;
-  isPasscodeUser?: boolean;
 } | null;
 
 export type HolisticMentorshipAccessResult =
@@ -83,12 +83,14 @@ const TEACHER_ACTIONS = new Set<HolisticMentorshipAction>([
   "notes_draft",
   "notes_submit",
   "notes_edit",
+  "follow_up_note_add",
 ]);
 const MAPPING_REQUIRED_ACTIONS = new Set<HolisticMentorshipAction>([
   "mapped_student_read",
   "notes_draft",
   "notes_submit",
   "notes_edit",
+  "follow_up_note_add",
 ]);
 const READ_ONLY_ACTIONS = new Set<HolisticMentorshipAction>([
   "program_read",
@@ -372,7 +374,6 @@ async function resolveAuthenticatedActor(
 ): Promise<HolisticMentorshipAccessDenied | AuthenticatedHolisticActor> {
   const email = session?.user?.email;
   if (!email) return denied(401, "Unauthorized");
-  if (session.isPasscodeUser) return denied(403, "Forbidden");
   const permission = await getResolvedPermission(email);
   const access = getFeatureAccess(permission, "holistic_mentorship");
   if (!permission || !access.canView) return denied(403, "Forbidden");

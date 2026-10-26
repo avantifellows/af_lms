@@ -3,13 +3,20 @@ import { authOptions } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import {
   getAccessibleSchoolCodes,
+  getAlumniPermission,
   getResolvedPermission,
   getProgramContextSync,
   getFeatureAccess,
   isCentreSeated,
 } from "@/lib/permissions";
 import { query } from "@/lib/db";
-import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
+import {
+  CURRENT_ACADEMIC_YEAR,
+  isAlumniRole,
+  isPmuRole,
+  PMU_GOVT_SCHOOL_USER_ROLE,
+  PMU_MANAGER_ROLE,
+} from "@/lib/constants";
 import { requireHolisticMentorshipAccess } from "@/lib/holistic-mentorship";
 import Link from "next/link";
 import SchoolSearch from "@/components/SchoolSearch";
@@ -25,12 +32,14 @@ import {
 } from "@/lib/dashboard-groupings";
 import Pagination from "@/components/Pagination";
 import { statusBadgeClass } from "@/lib/visit-actions";
+import { buildOwnOrManagedVisitPredicate, buildVisitsActor, canViewVisitSummary } from "@/lib/visits-policy";
 import { Card } from "@/components/ui";
 
 
 const SCHOOLS_PER_PAGE = 20;
 const RECENT_VISIT_COLUMNS = [
   { label: "School", className: "px-6 py-3 text-left text-xs font-bold text-text-muted uppercase tracking-wider" },
+  { label: "Visited by", className: "px-6 py-3 text-left text-xs font-bold text-text-muted uppercase tracking-wider" },
   { label: "Date", className: "px-6 py-3 text-left text-xs font-bold text-text-muted uppercase tracking-wider" },
   { label: "Status", className: "px-6 py-3 text-left text-xs font-bold text-text-muted uppercase tracking-wider" },
   { label: "Action", className: "px-6 py-3 text-right text-xs font-bold text-text-muted uppercase tracking-wider" },
@@ -45,6 +54,8 @@ interface Visit {
   id: number;
   school_code: string;
   school_name?: string;
+  pm_email: string;
+  pm_name: string | null;
   visit_date: string;
   status: string;
   inserted_at: string;
@@ -186,18 +197,59 @@ async function getSchools(
   return { schools, totalCount: parseInt(countResult[0]?.total || "0", 10) };
 }
 
-async function getRecentVisits(pmEmail: string, limit: number = 5): Promise<Visit[]> {
+// The Visits a user sees on the dashboard: their own, plus every Visit at the
+// Schools of their visit-manager Centre seats (PM/SPM/PH, #291). Recent Visits
+// and Total Visits share this predicate so the list can never disagree with the
+// total. Ownership is the trimmed, case-folded email (visits-policy's rule).
+function visibleVisitPredicate(email: string, permission: DashboardPermission) {
+  const scope = buildOwnOrManagedVisitPredicate(buildVisitsActor(email, permission), {
+    pmEmailColumn: "v.pm_email",
+    schoolCodeColumn: "v.school_code",
+  });
+  return { clause: `${scope.clause} AND v.deleted_at IS NULL`, params: scope.params };
+}
+
+// The user's own in-progress Visits first (only they can resume them), then
+// everyone else's in-progress, then the newest completed. $1 is the user's
+// normalized email in both predicate shapes.
+async function getRecentVisits(
+  email: string,
+  permission: DashboardPermission,
+  limit: number = 10,
+): Promise<Visit[]> {
+  const { clause, params } = visibleVisitPredicate(email, permission);
   return query<Visit>(
-    `SELECT v.id, v.school_code, v.visit_date, v.status, v.inserted_at,
+    `SELECT v.id, v.school_code, v.visit_date, v.status, v.inserted_at, v.pm_email,
+            (SELECT up.full_name
+               FROM user_permission up
+              WHERE LOWER(up.email) = LOWER(v.pm_email)
+                AND up.full_name IS NOT NULL
+              ORDER BY (up.revoked_at IS NULL) DESC
+              LIMIT 1) AS pm_name,
             s.name as school_name
      FROM lms_pm_school_visits v
      LEFT JOIN school s ON s.code = v.school_code
-     WHERE v.pm_email = $1
-       AND v.deleted_at IS NULL
-     ORDER BY v.visit_date DESC, v.inserted_at DESC
-     LIMIT $2`,
-    [pmEmail, limit]
+     WHERE ${clause}
+     ORDER BY (v.status = 'in_progress' AND LOWER(TRIM(v.pm_email)) = $1) DESC,
+              (v.status = 'in_progress') DESC,
+              v.visit_date DESC, v.inserted_at DESC
+     LIMIT $${params.length + 1}`,
+    [...params, limit]
   );
+}
+
+// Exact count of every visible Visit (any status), independent of dashboard
+// search, pagination and the Recent Visits cap. A failed read throws rather
+// than rendering a false zero.
+async function getVisibleVisitTotal(email: string, permission: DashboardPermission): Promise<number> {
+  const { clause, params } = visibleVisitPredicate(email, permission);
+  const rows = await query<{ total: string }>(
+    `SELECT COUNT(*) AS total
+     FROM lms_pm_school_visits v
+     WHERE ${clause}`,
+    params
+  );
+  return parseInt(rows[0].total, 10);
 }
 
 // Dashboard groupings, rendered as tabs. A student belongs to exactly one
@@ -223,11 +275,12 @@ type DashboardData = {
   totalCount: number;
   totalPages: number;
   recentVisits: Visit[];
+  visitTotal: number;
 };
 
-function canViewVisitSummary(permission: DashboardPermission) {
-  const supportedRole = permission.role === "admin" || permission.role === "program_admin";
-  return supportedRole && getFeatureAccess(permission, "visits").canView;
+function canOpenVisitSummary(email: string, permission: DashboardPermission) {
+  return getFeatureAccess(permission, "visits").canView &&
+    canViewVisitSummary(buildVisitsActor(email, permission));
 }
 
 function canViewCurriculumSummary(permission: DashboardPermission, context: DashboardProgramContext) {
@@ -236,13 +289,14 @@ function canViewCurriculumSummary(permission: DashboardPermission, context: Dash
 }
 
 function dashboardFeatures(
+  email: string,
   permission: DashboardPermission,
   context: DashboardProgramContext,
   canViewHolisticAdmin: boolean,
 ): DashboardFeatures {
   return {
     hasPMAccess: getFeatureAccess(permission, "pm_dashboard").canView,
-    canViewVisitSummary: canViewVisitSummary(permission),
+    canViewVisitSummary: canOpenVisitSummary(email, permission),
     showCurriculumSummary: canViewCurriculumSummary(permission, context),
     canViewHolisticAdmin,
   };
@@ -270,7 +324,6 @@ function NoDashboardAccess({ email, message }: { email: string; message: string 
 async function dashboardSession() {
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) redirect("/");
-  if (session.isPasscodeUser && session.schoolCode) redirect(`/school/${session.schoolCode}`);
   return session.user.email;
 }
 
@@ -283,23 +336,32 @@ async function dashboardRequest(searchParams: PageProps["searchParams"]) {
   };
 }
 
-// Centre-seated staff are centre-scoped: their home is their centre, not the
-// whole-school roster. Default them to the Centres tab so the single-school
-// shortcut never bounces them to the school page — an explicit ?view= wins.
-function resolveDashboardView(viewParam: string | undefined, seated: boolean): DashboardView {
+// Hard-pinned roles/scopes first, then an explicit valid ?view=, then the
+// Program-context fallback: Physical Centres for anyone whose resolved Programs
+// include a physical-centre Program, JNV NVS Schools otherwise. A missing and an
+// invalid ?view= fall back alike (they differ only for the seated shortcut).
+function resolveDashboardView(
+  viewParam: string | undefined,
+  seated: boolean,
+  permission: DashboardPermission,
+  programContext: DashboardProgramContext,
+): DashboardView {
+  // PMU Managers are JNV NVS only (ADR 0007): no Physical Centres tab to pick.
+  if (permission.role === PMU_MANAGER_ROLE) return "jnv-nvs";
   // A confined user has no NVS scope at all, so ?view=jnv-nvs is not an escape
   // hatch for them — it is the whole-school tab, carrying the school-wide
   // student search. Pin them to Centres whatever the URL says.
   if (seated) return "centres";
   if (viewParam === "centres") return "centres";
   if (viewParam === "jnv-nvs") return "jnv-nvs";
-  return "jnv-nvs";
+  return programContext.hasCoEOrNodal ? "centres" : "jnv-nvs";
 }
 
-// Single-scope shortcuts, both taken only on the plain landing (no tab chosen,
-// no search): a single-seat user goes straight to their centre, and school
-// staff with exactly one school straight to it. Seated users are excluded from
-// the school shortcut — their home is the centre, resolved just above.
+// Single-scope shortcuts, both taken only without a search: a single-seat user
+// goes straight to their centre on the plain landing (any supplied ?view=, even
+// an invalid one, suppresses it), and non-seated staff with exactly one school
+// go straight to it when the resolved view is JNV NVS Schools. Seated users are
+// excluded from the school shortcut — their home is the centre.
 async function redirectSingleScope({
   seated,
   permission,
@@ -360,9 +422,10 @@ async function loadDashboardData({
   view: DashboardView;
 }): Promise<DashboardData> {
   if (view === "centres") {
-    // Centre list + the header's school count, in parallel. No visits query and
-    // no school grid on this tab.
-    const [centres, { totalCount }] = await Promise.all([
+    // Centre list + the header's school count + the Visits, in parallel. No
+    // school grid on this tab. Seated staff are pinned here, so Recent Visits
+    // must be too, or they lose every route to their Visits (#291).
+    const [centres, { totalCount }, recentVisits, visitTotal] = await Promise.all([
       getAccessibleCentresWithCounts(
         resolveCentreAccess(permission, schoolCodes),
         searchQuery,
@@ -370,19 +433,23 @@ async function loadDashboardData({
       // No searchQuery: on this tab the term filters CENTRES, while this count is
       // the header's "your scope" figure and drives no pagination here.
       getSchools(schoolCodes, undefined, currentPage, "centre-linked"),
+      hasPMAccess ? getRecentVisits(email, permission) : Promise.resolve([] as Visit[]),
+      hasPMAccess ? getVisibleVisitTotal(email, permission) : Promise.resolve(0),
     ]);
     return {
       schools: [],
       centres,
       totalCount,
       totalPages: Math.ceil(totalCount / SCHOOLS_PER_PAGE),
-      recentVisits: [],
+      recentVisits,
+      visitTotal,
     };
   }
 
-  const [{ schools, totalCount }, recentVisits] = await Promise.all([
+  const [{ schools, totalCount }, recentVisits, visitTotal] = await Promise.all([
     getSchools(schoolCodes, searchQuery, currentPage, "jnv"),
-    hasPMAccess ? getRecentVisits(email) : Promise.resolve([] as Visit[]),
+    hasPMAccess ? getRecentVisits(email, permission) : Promise.resolve([] as Visit[]),
+    hasPMAccess ? getVisibleVisitTotal(email, permission) : Promise.resolve(0),
   ]);
   // NVS-attributed counts, not whole-school — keeps this tab disjoint from Centres.
   const nvsCounts = await getNvsGradeCounts(schools.map((school) => school.id));
@@ -399,6 +466,7 @@ async function loadDashboardData({
     totalCount,
     totalPages: Math.ceil(totalCount / SCHOOLS_PER_PAGE),
     recentVisits,
+    visitTotal,
   };
 }
 
@@ -410,10 +478,27 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   const permission = await getResolvedPermission(email);
 
   if (!permission) {
+    // Alumni roles have no dashboard (ADR 0008); their home is /alumni.
+    if (isAlumniRole((await getAlumniPermission(email))?.role)) redirect("/alumni");
     return <NoDashboardAccess
       email={email}
       message={`Your account (${email}) does not have access to any schools. Please contact an administrator.`}
     />;
+  }
+
+  // A PMU Govt School User's only surface is their one School — send them
+  // there before any view, search or holistic logic, whatever the URL says.
+  // A stored scope that isn't exactly one code gets the no-access panel rather
+  // than a redirect loop.
+  if (permission.role === PMU_GOVT_SCHOOL_USER_ROLE) {
+    const codes = permission.school_codes ?? [];
+    if (codes.length !== 1) {
+      return <NoDashboardAccess
+        email={email}
+        message={`Your account (${email}) does not have access to any schools. Please contact an administrator.`}
+      />;
+    }
+    redirect(`/school/${codes[0]}`);
   }
 
   // Derive everything from the single permission object — no extra DB calls
@@ -435,9 +520,9 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     { user: { email } },
     "program_read",
   );
-  const features = dashboardFeatures(permission, programContext, holisticAccess.ok);
+  const features = dashboardFeatures(email, permission, programContext, holisticAccess.ok);
   const seated = isCentreSeated(permission);
-  const view = resolveDashboardView(viewParam, seated);
+  const view = resolveDashboardView(viewParam, seated, permission, programContext);
   const schoolCodes = await getAccessibleSchoolCodes(email, permission);
   await redirectSingleScope({ seated, permission, schoolCodes, searchQuery, viewParam, view });
 
@@ -463,8 +548,13 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         schools={data.schools}
         centres={data.centres}
         recentVisits={data.recentVisits}
+        visitTotal={data.visitTotal}
+        managesCentreVisits={(permission.scope?.visitManagedSchools?.size ?? 0) > 0}
+        viewerEmail={email}
         hasPMAccess={features.hasPMAccess}
-        seated={seated}
+        showViewTabs={!seated && !isPmuRole(permission.role)}
+        // A PMU Manager has no tab strip, so the heading names their one view.
+        showSchoolsHeading={features.hasPMAccess || isPmuRole(permission.role)}
       />
     </div>
   );
@@ -536,10 +626,11 @@ const DASHBOARD_VIEWS = [
 ] as const;
 
 // Grouping tabs — disjoint scopes, so counts never double-count.
-function DashboardViewTabs({ view, seated }: { view: DashboardView; seated: boolean }) {
-  // One tab left for a confined user — render nothing rather than a lone tab that
-  // looks like a choice, or an empty strip that leaves a stray rule on the page.
-  if (seated) return null;
+function DashboardViewTabs({ view, show }: { view: DashboardView; show: boolean }) {
+  // One tab left for a confined user or a PMU Manager — render nothing rather
+  // than a lone tab that looks like a choice, or an empty strip that leaves a
+  // stray rule on the page.
+  if (!show) return null;
   return <div className="mb-6 flex gap-6 border-b border-border">
     {DASHBOARD_VIEWS.map((tab) => <Link
       key={tab.key}
@@ -553,8 +644,10 @@ function DashboardViewTabs({ view, seated }: { view: DashboardView; seated: bool
   </div>;
 }
 
-function DashboardMain({ view, searchQuery, currentPage, totalPages, totalCount, schools, centres, recentVisits, hasPMAccess, seated }: {
+function DashboardMain({ view, searchQuery, currentPage, totalPages, totalCount, schools, centres, recentVisits, visitTotal, managesCentreVisits, viewerEmail, hasPMAccess, showViewTabs, showSchoolsHeading }: {
   view: DashboardView;
+  managesCentreVisits: boolean;
+  viewerEmail: string;
   searchQuery?: string;
   currentPage: number;
   totalPages: number;
@@ -562,23 +655,29 @@ function DashboardMain({ view, searchQuery, currentPage, totalPages, totalCount,
   schools: DashboardSchool[];
   centres: Centre[];
   recentVisits: Visit[];
+  visitTotal: number;
   hasPMAccess: boolean;
-  seated: boolean;
+  showViewTabs: boolean;
+  showSchoolsHeading: boolean;
 }) {
   return <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-    <DashboardViewTabs view={view} seated={seated} />
-    <PMStats enabled={hasPMAccess} totalCount={totalCount} recentVisitCount={recentVisits.length} />
+    <DashboardViewTabs view={view} show={showViewTabs} />
+    <PMStats enabled={hasPMAccess} totalCount={totalCount} visitTotal={visitTotal} managesCentreVisits={managesCentreVisits} />
     {view === "centres" ? (
-      <CentresSection centres={centres} hasPMAccess={hasPMAccess} searchQuery={searchQuery} />
+      <>
+        <RecentVisits enabled={hasPMAccess} visits={recentVisits} viewerEmail={viewerEmail} />
+        <CentresSection centres={centres} hasPMAccess={hasPMAccess} searchQuery={searchQuery} />
+      </>
     ) : (
       <>
         {/* Student search is schools-tab only: it spans the whole school, which
             is exactly the scope a centre-confined user must not get. */}
         <DashboardSearch searchQuery={searchQuery} />
-        <RecentVisits enabled={hasPMAccess} visits={recentVisits} />
+        <RecentVisits enabled={hasPMAccess} visits={recentVisits} viewerEmail={viewerEmail} />
         <SchoolsSection
           schools={schools}
           hasPMAccess={hasPMAccess}
+          showHeading={showSchoolsHeading}
           searchQuery={searchQuery}
           currentPage={currentPage}
           totalPages={totalPages}
@@ -614,19 +713,16 @@ function CentresSection({ centres, hasPMAccess, searchQuery }: {
   </div>;
 }
 
+// Cards only open their Centre; Visits start from the destination page (#391).
 function DashboardCentreCard({ centre, hasPMAccess }: { centre: Centre; hasPMAccess: boolean }) {
-  // Visits are school-linked, so Start Visit needs the centre's parent school.
-  const actions = hasPMAccess && centre.school_code ? <Link href={`/school/${centre.school_code}/visit/new`}
-    className="inline-flex items-center rounded-lg px-3 py-2 text-sm font-bold text-text-on-accent bg-accent shadow-sm hover:bg-accent-hover active:bg-accent-hover/90 transition-colors">
-    Start Visit
-  </Link> : undefined;
-  return <CentreCard centre={centre} showRegion={hasPMAccess} actions={actions} />;
+  return <CentreCard centre={centre} showRegion={hasPMAccess} />;
 }
 
-function PMStats({ enabled, totalCount, recentVisitCount }: {
+function PMStats({ enabled, totalCount, visitTotal, managesCentreVisits }: {
   enabled: boolean;
   totalCount: number;
-  recentVisitCount: number;
+  visitTotal: number;
+  managesCentreVisits: boolean;
 }) {
   if (!enabled) return null;
   return <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 mb-8">
@@ -636,7 +732,10 @@ function PMStats({ enabled, totalCount, recentVisitCount }: {
     </Card>
     <Card className="p-6 border-l-4 border-l-brand-amber">
       <div className="text-xs font-bold text-brand-amber uppercase tracking-wide">Total Visits</div>
-      <div className="mt-1 text-3xl font-bold text-text-primary font-mono">{recentVisitCount}</div>
+      <div className="mt-1 text-3xl font-bold text-text-primary font-mono">{visitTotal}</div>
+      <div className="mt-1 text-xs text-text-muted">
+        {managesCentreVisits ? "Yours and your centres'" : "Yours"}
+      </div>
     </Card>
   </div>;
 }
@@ -654,7 +753,7 @@ function DashboardSearch({ searchQuery }: { searchQuery?: string }) {
   </div>;
 }
 
-function RecentVisits({ enabled, visits }: { enabled: boolean; visits: Visit[] }) {
+function RecentVisits({ enabled, visits, viewerEmail }: { enabled: boolean; visits: Visit[]; viewerEmail: string }) {
   if (!enabled || visits.length === 0) return null;
   return <div className="mb-8">
     <div className="flex justify-between items-center mb-4 border-b-2 border-brand-amber pb-3">
@@ -666,16 +765,21 @@ function RecentVisits({ enabled, visits }: { enabled: boolean; visits: Visit[] }
         <thead className="bg-bg-card-alt border-b-2 border-border-accent"><tr>
           {RECENT_VISIT_COLUMNS.map((column) => <th key={column.label} className={column.className}>{column.label}</th>)}
         </tr></thead>
-        <tbody className="bg-bg-card">{visits.map((visit) => <VisitRow key={visit.id} visit={visit} />)}</tbody>
+        <tbody className="bg-bg-card">{visits.map((visit) => <VisitRow key={visit.id} visit={visit} viewerEmail={viewerEmail} />)}</tbody>
       </table>
     </div>
   </div>;
 }
 
-function VisitRow({ visit }: { visit: Visit }) {
+function VisitRow({ visit, viewerEmail }: { visit: Visit; viewerEmail: string }) {
   const completed = visit.status === "completed";
+  // Another person's Visit is read-only here, so it never offers Continue.
+  const own = visit.pm_email.trim().toLowerCase() === viewerEmail.trim().toLowerCase();
   return <tr className="border-b border-border/40 hover:bg-hover-bg">
     <td className="px-6 py-4 whitespace-nowrap text-sm text-text-primary">{visit.school_name || visit.school_code}</td>
+    <td className="px-6 py-4 whitespace-nowrap text-sm text-text-secondary" title={visit.pm_email}>
+      {own ? "You" : visit.pm_name || visit.pm_email}
+    </td>
     <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-text-secondary">
       {new Date(visit.visit_date).toLocaleDateString("en-IN", {
         year: "numeric", month: "short", day: "numeric", timeZone: "Asia/Kolkata",
@@ -685,20 +789,21 @@ function VisitRow({ visit }: { visit: Visit }) {
       <span className={`inline-flex ${statusBadgeClass(visit.status)}`}>{completed ? "Completed" : "In Progress"}</span>
     </td>
     <td className="px-6 py-4 whitespace-nowrap text-right text-sm">
-      <Link href={`/visits/${visit.id}`} className="text-accent hover:text-accent-hover font-bold">{completed ? "View" : "Continue"}</Link>
+      <Link href={`/visits/${visit.id}`} className="text-accent hover:text-accent-hover font-bold">{completed || !own ? "View" : "Continue"}</Link>
     </td>
   </tr>;
 }
 
-function SchoolsSection({ schools, hasPMAccess, searchQuery, currentPage, totalPages }: {
+function SchoolsSection({ schools, hasPMAccess, showHeading, searchQuery, currentPage, totalPages }: {
   schools: DashboardSchool[];
   hasPMAccess: boolean;
+  showHeading: boolean;
   searchQuery?: string;
   currentPage: number;
   totalPages: number;
 }) {
   return <div>
-    {hasPMAccess && <div className="flex justify-between items-center mb-4 border-b-2 border-brand-gold pb-3">
+    {showHeading && <div className="flex justify-between items-center mb-4 border-b-2 border-brand-gold pb-3">
       <h2 className="text-lg font-bold text-text-primary uppercase tracking-wide">JNV NVS Schools</h2>
     </div>}
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -707,16 +812,15 @@ function SchoolsSection({ schools, hasPMAccess, searchQuery, currentPage, totalP
     {schools.length === 0 && <div className="text-center py-12 text-text-muted">
       {searchQuery ? `No schools found matching "${searchQuery}"` : "No schools found"}
     </div>}
+    {/* Name the view explicitly: a bare /dashboard?page=2 would fall back to
+        Physical Centres for a physical-Program user. */}
     <Pagination currentPage={currentPage} totalPages={totalPages} basePath="/dashboard"
-      searchParams={searchQuery ? { q: searchQuery } : {}} />
+      searchParams={searchQuery ? { q: searchQuery, view: "jnv-nvs" } : { view: "jnv-nvs" }} />
   </div>;
 }
 
+// Cards only open their School; Visits start from the destination page (#391).
 function DashboardSchoolCard({ school, hasPMAccess }: { school: DashboardSchool; hasPMAccess: boolean }) {
-  const actions = hasPMAccess ? <Link href={`/school/${school.code}/visit/new`}
-    className="inline-flex items-center rounded-lg px-3 py-2 text-sm font-bold text-text-on-accent bg-accent shadow-sm hover:bg-accent-hover active:bg-accent-hover/90 transition-colors">
-    Start Visit
-  </Link> : undefined;
   return <SchoolCard school={school} href={`/school/${school.code}`} showStudentCount showGradeBreakdown
-    showRegion={hasPMAccess} actions={actions} />;
+    showRegion={hasPMAccess} />;
 }

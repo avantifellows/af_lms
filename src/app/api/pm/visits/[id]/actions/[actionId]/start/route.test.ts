@@ -20,7 +20,6 @@ import { query } from "@/lib/db";
 import { getFeatureAccess, getUserPermission } from "@/lib/permissions";
 import {
   NO_SESSION,
-  PASSCODE_SESSION,
   PM_SESSION,
   routeParams,
 } from "../../../../../../__test-utils__/api-test-helpers";
@@ -111,22 +110,6 @@ describe("POST /api/pm/visits/[id]/actions/[actionId]/start", () => {
 
     expect(res.status).toBe(401);
     await expect(res.json()).resolves.toEqual({ error: "Unauthorized" });
-  });
-
-  it("returns 403 for passcode users", async () => {
-    mockSession.mockResolvedValue(PASSCODE_SESSION as never);
-
-    const req = new Request("http://localhost/api/pm/visits/10/actions/101/start", {
-      method: "POST",
-      body: JSON.stringify({ start_lat: 28.6, start_lng: 77.2, start_accuracy: 10 }),
-      headers: { "Content-Type": "application/json" },
-    });
-    const res = await POST(req as never, params);
-
-    expect(res.status).toBe(403);
-    await expect(res.json()).resolves.toEqual({
-      error: "Passcode users cannot access visit routes",
-    });
   });
 
   it("allows a program admin to start an action on their own visit", async () => {

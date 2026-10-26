@@ -6,15 +6,22 @@ vi.mock("@/lib/api-auth", () => ({
 }));
 vi.mock("@/lib/bigquery", () => ({
   getStudentQuestionLevelData: vi.fn(),
+  isSessionOnlyForProgram: vi.fn(),
 }));
 
 import { authorizeSchoolAccess } from "@/lib/api-auth";
-import { getStudentQuestionLevelData } from "@/lib/bigquery";
+import { getStudentQuestionLevelData, isSessionOnlyForProgram } from "@/lib/bigquery";
 import { GET } from "./route";
-import { routeParams } from "../../../__test-utils__/api-test-helpers";
+import {
+  PMU_GOVT_PERMISSION,
+  PMU_MANAGER_PERMISSION,
+  routeParams,
+} from "../../../__test-utils__/api-test-helpers";
+import { describePmuSessionPin } from "../../../__test-utils__/pmu-session-pin-cases";
 
 const mockAuth = vi.mocked(authorizeSchoolAccess);
 const mockGet = vi.mocked(getStudentQuestionLevelData);
+const mockSessionPin = vi.mocked(isSessionOnlyForProgram);
 
 const SCHOOL = { id: "1", code: "70705", name: "Test School", region: "North" };
 
@@ -102,4 +109,55 @@ describe("GET /api/quiz-analytics/[udise]/student-questions", () => {
     );
     expect(res.status).toBe(500);
   });
+});
+
+// PMU roles are pinned to JNV NVS (ADR 0007): a missing program becomes
+// "JNV NVS", any other program is refused before any data is read.
+describe.each([
+  ["PMU Manager", PMU_MANAGER_PERMISSION],
+  ["PMU Govt School User", PMU_GOVT_PERMISSION],
+])("GET student-questions as %s", (_label, permission) => {
+  function pmuRequest(program?: string) {
+    const url = new URL("http://localhost/api/quiz-analytics/1234/student-questions");
+    url.searchParams.set("grade", "11");
+    url.searchParams.set("sessionId", "s1");
+    if (program !== undefined) url.searchParams.set("program", program);
+    return new Request(url.toString());
+  }
+
+  beforeEach(() => {
+    mockAuth.mockResolvedValue({ authorized: true, school: SCHOOL, readOnly: false, permission });
+    mockGet.mockResolvedValue([]);
+    mockSessionPin.mockResolvedValue(true);
+  });
+
+  it("serves JNV NVS data when no program is given", async () => {
+    const res = await GET(pmuRequest(), routeParams({ udise: "1234" }));
+    expect(res.status).toBe(200);
+    expect(mockGet).toHaveBeenCalledWith("1234", 11, "s1", "JNV NVS", undefined);
+  });
+
+  it("serves program=JNV NVS", async () => {
+    const res = await GET(pmuRequest("JNV NVS"), routeParams({ udise: "1234" }));
+    expect(res.status).toBe(200);
+    expect(mockGet).toHaveBeenCalledWith("1234", 11, "s1", "JNV NVS", undefined);
+  });
+
+  it.each(["JNV CoE", "JNV Nodal", "Punjab CoE"])("403s program=%s", async (program) => {
+    const res = await GET(pmuRequest(program), routeParams({ udise: "1234" }));
+    expect(res.status).toBe(403);
+    expect(mockGet).not.toHaveBeenCalled();
+  });
+});
+
+describePmuSessionPin({
+  route: "student-questions",
+  GET,
+  auth: mockAuth,
+  school: SCHOOL,
+  arrangeData: () => {
+    mockGet.mockResolvedValue([]);
+  },
+  sessionPin: mockSessionPin,
+  dataReads: [mockGet],
 });

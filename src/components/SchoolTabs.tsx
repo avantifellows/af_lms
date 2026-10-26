@@ -1,8 +1,9 @@
 "use client";
 
 import { type KeyboardEvent, useId, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { resolveVisibleTab } from "@/lib/roster-tabs";
 import { statusBadgeClass } from "@/lib/visit-actions";
 import { Card } from "@/components/ui";
 
@@ -18,23 +19,35 @@ interface Props {
 }
 
 export default function SchoolTabs({ tabs, defaultTab }: Props) {
-  const router = useRouter();
   const searchParams = useSearchParams();
 
-  const fallback = defaultTab || tabs[0]?.id || "";
+  const tabIds = tabs.map((t) => t.id);
+  const fallback = resolveVisibleTab(null, tabIds, defaultTab);
   const urlTab = searchParams.get("tab");
-  // Seed the initial tab from ?tab= if it points to a visible tab; otherwise fall back.
-  const initial = urlTab && tabs.some((t) => t.id === urlTab) ? urlTab : fallback;
-  const [activeTab, setActiveTabState] = useState(initial);
+  // The URL decides the tab: a ?tab= naming a visible tab, otherwise the
+  // fallback. A click shows its tab at once, ahead of its replace landing; any
+  // later change to ?tab= (Back/Forward) wins over that click.
+  const fromUrl = resolveVisibleTab(urlTab, tabIds, defaultTab);
+  const [clicked, setClicked] = useState<{ tab: string; urlTab: string | null } | null>(null);
+  // Once ?tab= moves on, the click is spent — even if history later returns
+  // to the ?tab= it was made from.
+  if (clicked && clicked.urlTab !== urlTab) setClicked(null);
+  const activeTab = clicked && clicked.urlTab === urlTab ? clicked.tab : fromUrl;
   const tabGroupId = useId();
 
   const setActiveTab = (id: string) => {
-    setActiveTabState(id);
+    setClicked({ tab: id, urlTab });
     const params = new URLSearchParams(searchParams.toString());
     if (id === fallback) params.delete("tab");
     else params.set("tab", id);
     const qs = params.toString();
-    router.replace(qs ? `?${qs}` : "?", { scroll: false });
+    const href = `${window.location.pathname}${qs ? `?${qs}` : ""}${window.location.hash}`;
+    // Write the new tab synchronously before its content mounts. Performance
+    // can finish its first grades request before an App Router replace lands;
+    // without this, its automatic Grade replace can be built from the old URL
+    // and erase `tab=performance`. Next's patched history API updates
+    // useSearchParams and preserves replace (rather than push) semantics.
+    window.history.replaceState(null, "", href);
   };
 
   const activeContent = tabs.find((t) => t.id === activeTab)?.content;
@@ -93,6 +106,9 @@ interface VisitHistoryProps {
     pm_name?: string | null;
     inserted_at?: string | null;
     completed_at?: string | null;
+    // False for a Visit this user can only read (e.g. a manager viewing someone
+    // else's Visit at their Centre, #291): offer View, never Continue.
+    can_edit?: boolean;
   }[];
   schoolCode: string;
   canEdit?: boolean;
@@ -187,7 +203,7 @@ export function VisitHistorySection({ visits, schoolCode, canEdit = false }: Vis
               href={`/visits/${visit.id}`}
               className="self-start sm:self-center px-5 py-2.5 text-sm font-bold uppercase tracking-wide border-2 border-accent text-accent hover:bg-accent hover:text-text-on-accent transition-colors shrink-0"
             >
-              {visit.status === "completed" ? "View" : "Continue"}
+              {visit.status === "completed" || visit.can_edit === false ? "View" : "Continue"}
             </Link>
           </div>
         ))}

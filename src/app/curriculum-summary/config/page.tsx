@@ -2,6 +2,7 @@ import Link from "next/link";
 import { getServerSession } from "next-auth";
 import { redirect } from "next/navigation";
 
+import { SchemaUnavailableCard } from "@/app/curriculum-summary/summary-ui";
 import PageHeader from "@/components/PageHeader";
 import { Card } from "@/components/ui";
 import { authOptions } from "@/lib/auth";
@@ -53,7 +54,12 @@ export default async function CurriculumConfigPage({ searchParams }: PageProps) 
       />
       <main className="w-full px-4 py-6 sm:px-6 lg:px-8">
         {!result.ok ? (
-          <SchemaUnavailable result={result} />
+          <SchemaUnavailableCard error={result.error} details={result.details}>
+            <p className="text-sm text-text-secondary">
+              Curriculum Config cannot load until the LMS Chapter Exam Config management columns
+              are available.
+            </p>
+          </SchemaUnavailableCard>
         ) : (
           <div className="space-y-5">
             <ConfigFilters result={result} />
@@ -86,32 +92,6 @@ export default async function CurriculumConfigPage({ searchParams }: PageProps) 
         )}
       </main>
     </div>
-  );
-}
-
-function SchemaUnavailable({
-  result,
-}: {
-  result: Extract<CurriculumConfigListResult, { ok: false }>;
-}) {
-  return (
-    <Card className="border-l-4 border-l-warning-border p-6">
-      <div className="flex flex-col gap-3">
-        <p className="text-xs font-bold uppercase tracking-wide text-warning-text">
-          Schema unavailable
-        </p>
-        <h2 className="text-lg font-bold text-text-primary">{result.error}</h2>
-        <p className="text-sm text-text-secondary">
-          Curriculum Config cannot load until the LMS Chapter Exam Config
-          management columns are available.
-        </p>
-        <ul className="list-disc space-y-1 pl-5 text-sm font-mono text-text-secondary">
-          {result.details.map((detail) => (
-            <li key={detail}>{detail}</li>
-          ))}
-        </ul>
-      </div>
-    </Card>
   );
 }
 

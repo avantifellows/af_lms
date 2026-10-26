@@ -5,6 +5,7 @@ import {
   type DataIssue,
 } from "@/lib/school-student-list-data-issues";
 import type { Student } from "@/components/StudentTable";
+import { listExamSummariesForStudents } from "@/lib/student-exam-records";
 
 export interface SchoolRoster {
   students: Student[];
@@ -65,6 +66,8 @@ const STUDENT_COLUMNS = `
       s.guardian_profession,
       s.annual_family_income,
       s.monthly_family_income,
+      s.tshirt_size,
+      s.track_pant_size,
       s.status,
       er_grade.group_id as grade_id,
       gr.number as grade,
@@ -127,6 +130,43 @@ const STUDENT_COLUMNS = `
  * must consume this function instead of writing its own query, so the lists
  * can never drift apart.
  */
+/**
+ * Exam registrations are collected at physical centres only (#434), so a
+ * Student whose every Program is JNV NVS is left out of the read entirely —
+ * the card hides the section for them, and the roster shouldn't carry rows no
+ * surface may show. A Student with no Program at all stays in: unknown is not
+ * NVS.
+ */
+function collectsExamRecords(student: Student): boolean {
+  const programIds = (student.student_program_ids ?? []).map(Number);
+  if (programIds.length === 0 && student.program_id != null) {
+    programIds.push(Number(student.program_id));
+  }
+  if (programIds.length === 0) return true;
+  return programIds.some((id) => id !== PROGRAM_IDS.NVS);
+}
+
+/**
+ * Hang each Student's exam registrations off the roster, in one query for the
+ * whole page. Passwords are never part of this shape — the card only says
+ * whether one is stored.
+ */
+async function withExamRecords(roster: SchoolRoster): Promise<SchoolRoster> {
+  const studentIds = roster.students
+    .filter(collectsExamRecords)
+    .map((student) => Number(student.student_pk_id))
+    .filter((id) => Number.isFinite(id) && id > 0);
+  const byStudent = await listExamSummariesForStudents(studentIds);
+  if (byStudent.size === 0) return roster;
+  return {
+    ...roster,
+    students: roster.students.map((student) => {
+      const records = byStudent.get(Number(student.student_pk_id));
+      return records ? { ...student, exam_records: records } : student;
+    }),
+  };
+}
+
 export async function getSchoolRoster(
   schoolId: string | number,
 ): Promise<SchoolRoster> {
@@ -210,7 +250,7 @@ export async function getSchoolRoster(
     ORDER BY gr.number, u.first_name, u.last_name`,
     [schoolId, CURRENT_ACADEMIC_YEAR, PROGRAM_IDS.NVS, PROGRAM_ATTRIBUTION_ORDER],
   );
-  return processStudents(rows);
+  return withExamRecords(await processStudents(rows));
 }
 
 /**
@@ -285,7 +325,7 @@ export async function getCentreStudents(
     ORDER BY gr.number, u.first_name, u.last_name`,
     [centreId, CURRENT_ACADEMIC_YEAR, PROGRAM_IDS.NVS],
   );
-  return processStudents(rows);
+  return withExamRecords(await processStudents(rows));
 }
 
 export interface RosterFilters {

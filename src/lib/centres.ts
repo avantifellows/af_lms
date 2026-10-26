@@ -111,7 +111,6 @@ export interface CentreListRow {
 
 export type CentreAdminSession = {
   user?: { email?: string | null } | null;
-  isPasscodeUser?: boolean;
 } | null;
 
 export type CentreAdminResult =

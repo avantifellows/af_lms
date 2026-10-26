@@ -1,41 +1,80 @@
 import { NextResponse } from "next/server";
-import { authorizeSchoolAccess } from "@/lib/api-auth";
+import { authorizeSessionRead } from "@/lib/performance-session-request";
 import { getTestDeepDiveFromDynamo } from "@/lib/dynamodb";
+import { getStudentTimeSpentData, type StudentTimeSpent } from "@/lib/bigquery";
+import { isNvsProgram } from "@/lib/constants";
+import type { TestDeepDiveData } from "@/types/quiz";
+
+// JNV NVS only: time spent comes from BigQuery, not the DynamoDB report doc.
+// A failed lookup must not block the scores, so it degrades to "no times".
+// Time spent is optional detail; a slow BigQuery must not hold back the scores.
+const TIME_SPENT_TIMEOUT_MS = 5000;
+
+async function lookupTimeSpent(
+  ...args: Parameters<typeof getStudentTimeSpentData>
+): Promise<Map<string, StudentTimeSpent>> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      getStudentTimeSpentData(...args),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("timed out")), TIME_SPENT_TIMEOUT_MS);
+      }),
+    ]);
+  } catch (error) {
+    // Message only — never the student rows or ids.
+    console.error(
+      "Test deep dive time-spent lookup failed:",
+      error instanceof Error ? error.message : "unknown error"
+    );
+    return new Map();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function withTimeSpent(
+  data: TestDeepDiveData,
+  times: Map<string, StudentTimeSpent>
+): TestDeepDiveData {
+  return {
+    ...data,
+    students: data.students.map((s) => {
+      const t = s.enrollment_user_id ? times.get(s.enrollment_user_id) : undefined;
+      return {
+        ...s,
+        time_spent_seconds: t?.overall ?? null,
+        subject_scores: s.subject_scores.map((ss) => ({
+          ...ss,
+          time_spent_seconds: t?.bySection.get(ss.subject.toLowerCase()) ?? null,
+        })),
+      };
+    }),
+  };
+}
 
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ udise: string }> }
 ) {
   const { udise } = await params;
-  const auth = await authorizeSchoolAccess(udise);
-  if (!auth.authorized) return auth.response;
-
-  const url = new URL(request.url);
-  const gradeParam = url.searchParams.get("grade");
-  const sessionId = url.searchParams.get("sessionId");
-
-  if (!gradeParam || !sessionId) {
-    return NextResponse.json(
-      { error: "grade and sessionId are required" },
-      { status: 400 }
-    );
-  }
-  const grade = Number(gradeParam);
-  if (!Number.isInteger(grade)) {
-    return NextResponse.json({ error: "grade must be an integer" }, { status: 400 });
-  }
+  const read = await authorizeSessionRead(request, udise);
+  if (!read.ok) return read.response;
+  const { auth, program, grade, sessionId, stream } = read;
 
   try {
-    const program = url.searchParams.get("program") || undefined;
-    const stream = url.searchParams.get("stream")?.toLowerCase() || undefined;
-    const data = await getTestDeepDiveFromDynamo(
-      auth.school.id,
-      auth.school.name,
-      grade,
-      sessionId,
-      program,
-      stream
-    );
+    const nvs = isNvsProgram(program);
+    const [data, times] = await Promise.all([
+      getTestDeepDiveFromDynamo(
+        auth.school.id,
+        auth.school.name,
+        grade,
+        sessionId,
+        program,
+        stream
+      ),
+      nvs ? lookupTimeSpent(udise, grade, sessionId, program, stream) : null,
+    ]);
 
     if (!data) {
       return NextResponse.json(
@@ -44,7 +83,7 @@ export async function GET(
       );
     }
 
-    return NextResponse.json(data);
+    return NextResponse.json(times ? withTimeSpent(data, times) : data);
   } catch (error) {
     console.error("Test deep dive error:", error);
     return NextResponse.json(

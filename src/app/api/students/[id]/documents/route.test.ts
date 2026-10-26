@@ -7,7 +7,6 @@ import {
 } from "@aws-sdk/client-s3";
 import {
   ADMIN_SESSION,
-  PASSCODE_SESSION,
   routeParams,
 } from "@/app/api/__test-utils__/api-test-helpers";
 
@@ -443,43 +442,6 @@ describe("POST /api/students/[id]/documents", () => {
 
     expect(res.status).toBe(502);
     expect(s3Mock.commandCalls(DeleteObjectCommand)).toHaveLength(2);
-  });
-
-  it("passcode user in matching school can upload (201)", async () => {
-    mockSession.mockResolvedValue(PASSCODE_SESSION);
-    // getStudentSchool → matches passcode school
-    mockQuery.mockResolvedValueOnce([{ code: "70705", region: null, program_id: null }]);
-    s3Mock.on(PutObjectCommand).resolves({});
-    mockDbServiceFetch([{ ok: true, status: 201, body: { id: 1 } }]);
-
-    const { POST } = await import("./route");
-    const res = await POST(
-      multipartRequest(
-        buildFormData({
-          documentType: "income_certificate",
-          files: [{ field: "page_1", mimeType: "image/jpeg", bytes: new Uint8Array([1, 2]) }],
-        }),
-      ),
-      routeParams({ id: "1" }),
-    );
-    expect(res.status).toBe(201);
-  });
-
-  it("passcode user in a different school is blocked (403)", async () => {
-    mockSession.mockResolvedValue(PASSCODE_SESSION);
-    mockQuery.mockResolvedValueOnce([{ code: "99999", region: null, program_id: null }]);
-
-    const { POST } = await import("./route");
-    const res = await POST(
-      multipartRequest(
-        buildFormData({
-          documentType: "income_certificate",
-          files: [{ field: "page_1", mimeType: "image/jpeg", bytes: new Uint8Array([1]) }],
-        }),
-      ),
-      routeParams({ id: "1" }),
-    );
-    expect(res.status).toBe(403);
   });
 });
 

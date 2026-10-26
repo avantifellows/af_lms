@@ -21,7 +21,7 @@ import { getUserPermission, getFeatureAccess } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import { validateGpsReading } from "@/lib/geo-validation";
 import { GET, POST } from "./route";
-import { ADMIN_SESSION, NO_SESSION, PASSCODE_SESSION, PM_SESSION } from "../../__test-utils__/api-test-helpers";
+import { ADMIN_SESSION, NO_SESSION, PM_SESSION } from "../../__test-utils__/api-test-helpers";
 
 const mockSession = vi.mocked(getServerSession);
 const mockGetPermission = vi.mocked(getUserPermission);
@@ -89,16 +89,6 @@ describe("GET /api/pm/visits", () => {
     expect(res.status).toBe(403);
   });
 
-  it("returns 403 for passcode users", async () => {
-    mockSession.mockResolvedValue(PASSCODE_SESSION as never);
-
-    const res = await GET(nextReq("/api/pm/visits"));
-    expect(res.status).toBe(403);
-    await expect(res.json()).resolves.toEqual({
-      error: "Passcode users cannot access visit routes",
-    });
-  });
-
   it("returns own visits for PM and only selected columns", async () => {
     mockSession.mockResolvedValue(PM_SESSION);
     mockGetPermission.mockResolvedValue(PM_PERM as never);
@@ -120,7 +110,7 @@ describe("GET /api/pm/visits", () => {
     const res = await GET(nextReq("/api/pm/visits"));
     expect(res.status).toBe(200);
     const json = await res.json();
-    expect(json.visits).toEqual(visits);
+    expect(json.visits).toEqual(visits.map((visit) => ({ ...visit, can_edit: true })));
     expect(json.visits[0].completed_at).toBe("2026-02-15T12:00:00.000Z");
     expect(json.visits[0].pm_name).toBe("Priya Sharma");
     expect(json.visits[0].ended_at).toBeUndefined();
@@ -137,8 +127,7 @@ describe("GET /api/pm/visits", () => {
     expect(queryText).toContain("LOWER(up.email) = LOWER(v.pm_email)");
     expect(queryText).toContain("ORDER BY (up.revoked_at IS NULL) DESC");
     expect(queryText).not.toContain("JOIN user_permission");
-    expect(queryText).toContain("WHERE v.deleted_at IS NULL AND LOWER(v.pm_email) = LOWER($1)");
-    expect(queryText).toContain("LOWER(v.pm_email) = LOWER($1)");
+    expect(queryText).toContain("WHERE v.deleted_at IS NULL AND LOWER(TRIM(v.pm_email)) = $1");
     expect(queryText).not.toContain("v.school_code = ANY(");
     expect(queryText).not.toContain("COALESCE(s.region, '') = ANY(");
     expect(params).toEqual(["pm@avantifellows.org", 50]);
@@ -159,8 +148,59 @@ describe("GET /api/pm/visits", () => {
     expect(res.status).toBe(200);
     const [queryText] = mockQuery.mock.calls[0] as [string, unknown[]];
     expect(queryText).toContain("v.deleted_at IS NULL");
-    expect(queryText).toContain("LOWER(v.pm_email) = LOWER($1)");
+    expect(queryText).toContain("LOWER(TRIM(v.pm_email)) = $1");
     expect(queryText).not.toContain("COALESCE(s.region, '') = ANY(");
+  });
+
+  // #291: a PM/SPM/PH Centre seat makes every Visit at that Centre's School
+  // readable, whoever made it.
+  it("adds every Visit at a PM's visit-manager Centre Schools", async () => {
+    mockSession.mockResolvedValue(PM_SESSION);
+    mockGetPermission.mockResolvedValue({
+      ...PM_PERM,
+      scope: {
+        schools: new Set(["70705", "70706"]),
+        centres: new Set([1, 2]),
+        programs: new Set([1]),
+        visitManagedSchools: new Set(["70705", "70706"]),
+      },
+    } as never);
+    mockFeatureAccess.mockReturnValue({ access: "edit", canView: true, canEdit: true });
+    mockQuery.mockResolvedValue([]);
+
+    const res = await GET(nextReq("/api/pm/visits?school_code=70705"));
+    expect(res.status).toBe(200);
+    const [queryText, params] = mockQuery.mock.calls[0] as [string, unknown[]];
+    expect(queryText).toContain(
+      "(LOWER(TRIM(v.pm_email)) = $1 OR v.school_code = ANY($2)) AND v.school_code = $3"
+    );
+    expect(params).toEqual(["pm@avantifellows.org", ["70705", "70706"], "70705", 50]);
+  });
+
+  it("marks another person's Visit at a managed School as not editable", async () => {
+    mockSession.mockResolvedValue(PM_SESSION);
+    mockGetPermission.mockResolvedValue({
+      ...PM_PERM,
+      scope: {
+        schools: new Set(["70705"]),
+        centres: new Set([1]),
+        programs: new Set([1]),
+        visitManagedSchools: new Set(["70705"]),
+      },
+    } as never);
+    mockFeatureAccess.mockReturnValue({ access: "edit", canView: true, canEdit: true });
+    mockQuery.mockResolvedValue([
+      { id: 1, school_code: "70705", school_region: null, pm_email: "pm@avantifellows.org", status: "in_progress" },
+      { id: 2, school_code: "70705", school_region: null, pm_email: "apm@avantifellows.org", status: "in_progress" },
+    ]);
+
+    const res = await GET(nextReq("/api/pm/visits?school_code=70705"));
+    const json = await res.json();
+    expect(json.visits.map((v: { id: number; can_edit: boolean }) => [v.id, v.can_edit])).toEqual([
+      [1, true],
+      [2, false],
+    ]);
+    expect(json.visits[0].school_region).toBeUndefined();
   });
 
   it("returns 403 when PM passes pm_email filter", async () => {
@@ -313,15 +353,6 @@ describe("POST /api/pm/visits", () => {
 
     expect(res.status).toBe(403);
     expect(mockQuery).not.toHaveBeenCalled();
-  });
-
-  it("returns 403 for passcode users", async () => {
-    mockSession.mockResolvedValue(PASSCODE_SESSION as never);
-    const res = await POST(nextReq("/api/pm/visits", {
-      method: "POST",
-      body: JSON.stringify(visitBody),
-    }));
-    expect(res.status).toBe(403);
   });
 
   it("returns 400 when school_code is missing", async () => {

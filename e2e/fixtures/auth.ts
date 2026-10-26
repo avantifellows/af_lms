@@ -10,8 +10,6 @@ interface TokenPayload {
   name: string;
   email: string;
   sub: string;
-  schoolCode?: string;
-  isPasscodeUser?: boolean;
   [key: string]: unknown;
 }
 
@@ -41,6 +39,11 @@ async function authenticatedPage(
   ]);
 
   return page;
+}
+
+/** Sign a page in as any seeded user, e.g. a spec's synthetic fixture user. */
+export async function signInAs(page: Page, user: { name: string; email: string }): Promise<Page> {
+  return authenticatedPage(page, { name: user.name, email: user.email, sub: `e2e-${user.email}` });
 }
 
 function googleUserPayload(role: TestUserRole): TokenPayload {
@@ -75,11 +78,11 @@ export const test = base.extend<{
   programAdminPage: Page;
   teacherPage: Page;
   holisticAdminPage: Page;
+  alumniManagerPage: Page;
   holisticPmPage: Page;
   holisticProgramAdminPage: Page;
   holisticTeacherPage: Page;
   formerMentorPage: Page;
-  passcodePage: Page;
 }>({
   // Auto-fixture: collects V8 JS coverage for default page (Chromium only)
   autoTestFixture: [
@@ -131,6 +134,15 @@ export const test = base.extend<{
     await stopCoverage(page, testInfo);
     await context.close();
   },
+  alumniManagerPage: async ({ browser }, use, testInfo) => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await authenticatedPage(page, googleUserPayload("alumniManager"));
+    await startCoverage(page, testInfo);
+    await use(page);
+    await stopCoverage(page, testInfo);
+    await context.close();
+  },
   holisticPmPage: async ({ browser }, use, testInfo) => {
     const context = await browser.newContext();
     const page = await context.newPage();
@@ -177,21 +189,6 @@ export const test = base.extend<{
       name: "Synthetic Former Mentor",
       email: "e2e-former-holistic-mentor@test.local",
       sub: "e2e-former-holistic-mentor-sub",
-    });
-    await startCoverage(page, testInfo);
-    await use(page);
-    await stopCoverage(page, testInfo);
-    await context.close();
-  },
-  passcodePage: async ({ browser }, use, testInfo) => {
-    const context = await browser.newContext();
-    const page = await context.newPage();
-    await authenticatedPage(page, {
-      name: "School 70705",
-      email: "passcode-70705@school.local",
-      sub: "passcode-70705",
-      schoolCode: "70705",
-      isPasscodeUser: true,
     });
     await startCoverage(page, testInfo);
     await use(page);

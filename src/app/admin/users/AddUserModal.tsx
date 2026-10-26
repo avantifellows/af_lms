@@ -3,7 +3,13 @@
 import { useState, useEffect } from "react";
 import { Modal, Input, Select, Button } from "@/components/ui";
 import {
+  ALUMNI_MANAGER_ROLE,
   HOLISTIC_MENTORSHIP_PROGRAM_IDS,
+  isAlumniRole,
+  isPmuRole,
+  PMU_GOVT_SCHOOL_USER_ROLE,
+  PMU_MANAGER_ROLE,
+  PMU_PROGRAM_ID,
   PROGRAM_ID_TO_LABEL,
   PROGRAM_IDS,
   USER_MANAGEMENT_PROGRAM_IDS,
@@ -75,11 +81,14 @@ interface School {
 
 const labelClassName = "block text-sm font-medium text-gray-700";
 const ROLE_DESCRIPTIONS: Record<string, string> = {
-  program_manager: "Program Managers can conduct school visits, view assigned schools, and monitor scoped Holistic Mentorship progress",
+  program_manager: "Program Managers can conduct school visits, view all visits and the Visit Summary for centres where they hold a PM/SPM/PH seat, view assigned schools, and monitor scoped Holistic Mentorship progress",
   program_admin: "Program Admins can oversee scoped schools, manage their own school visits, and monitor scoped Holistic Mentorship progress",
   teacher: "Teachers can view and manage students in their assigned schools",
   holistic_mentorship_admin: `Holistic Mentorship Admins can manage ${HOLISTIC_PROGRAM_LABELS_TEXT} mentorship`,
-  admin: "Admins have access to all features, all schools, and all programs — full edit unless marked read-only",
+  admin: "Admins have access to all features, all schools, and all programs, including authoring Curriculum Plans — full edit unless marked read-only",
+  pmu_manager: "PMU Managers can view and manage JNV NVS students and view performance in their assigned JNV Schools",
+  pmu_govt_school_user: "PMU Govt School Users can view and manage JNV NVS students and view performance in their one JNV School",
+  alumni_manager: "Alumni Managers can view and update alumni of their assigned schools only — no access to students or any other feature",
 };
 
 type UserFormValues = {
@@ -126,8 +135,16 @@ function toggledSelection<T>(selection: T[], value: T) {
   return selection.includes(value) ? selection.filter((item) => item !== value) : [...selection, value];
 }
 
+// A PMU Govt School User is always School-level; the level picker is hidden.
+function effectiveLevel(role: string, level: number) {
+  return role === PMU_GOVT_SCHOOL_USER_ROLE ? 1 : level;
+}
+
 function programIdsFor(role: string, selectedPrograms: number[]) {
   if (role === "admin") return PROGRAMS.map((program) => program.id);
+  if (isPmuRole(role)) return [PMU_PROGRAM_ID];
+  // Alumni Managers reach alumni by School, never by Program (ADR 0008).
+  if (isAlumniRole(role)) return [];
   if (role === "holistic_mentorship_admin") {
     return [...HOLISTIC_MENTORSHIP_PROGRAM_IDS];
   }
@@ -136,6 +153,7 @@ function programIdsFor(role: string, selectedPrograms: number[]) {
 
 function schoolScopeFor(values: UserFormValues) {
   if (hasGlobalSchoolAccess(values.role)) return { school_codes: null, regions: null };
+  if (values.role === PMU_GOVT_SCHOOL_USER_ROLE) return { school_codes: values.selectedSchools, regions: null };
   if (values.level === 2) return { school_codes: null, regions: values.selectedRegions };
   if (values.level === 1) return { school_codes: values.selectedSchools, regions: null };
   return { school_codes: null, regions: null };
@@ -143,7 +161,7 @@ function schoolScopeFor(values: UserFormValues) {
 
 function buildUserBody(values: UserFormValues, user: UserPermission | null) {
   const body: Record<string, unknown> = {
-    level: hasGlobalSchoolAccess(values.role) ? 3 : values.level,
+    level: hasGlobalSchoolAccess(values.role) ? 3 : effectiveLevel(values.role, values.level),
     role: values.role,
     read_only: values.readOnly,
     program_ids: programIdsFor(values.role, values.selectedPrograms),
@@ -154,10 +172,24 @@ function buildUserBody(values: UserFormValues, user: UserPermission | null) {
   return body;
 }
 
+const PMU_GOVT_EXTRA_SCHOOLS_ERROR = "A PMU Govt School User must have exactly one School — remove the others";
+const PMU_GOVT_NO_SCHOOL_ERROR = "A PMU Govt School User must have exactly one School — pick one";
+
+// Never trim a PMU Govt School User's Schools for the Admin: Save is blocked until exactly one remains.
+function pmuGovtSchoolError(values: Pick<UserFormValues, "role" | "selectedSchools">) {
+  if (values.role !== PMU_GOVT_SCHOOL_USER_ROLE) return null;
+  if (values.selectedSchools.length > 1) return PMU_GOVT_EXTRA_SCHOOLS_ERROR;
+  if (values.selectedSchools.length === 0) return PMU_GOVT_NO_SCHOOL_ERROR;
+  return null;
+}
+
 async function saveUser(values: UserFormValues, user: UserPermission | null) {
-  if (!hasGlobalSchoolAccess(values.role) && values.selectedPrograms.length === 0) {
+  const programsFixed = hasGlobalSchoolAccess(values.role) || isPmuRole(values.role) || isAlumniRole(values.role);
+  if (!programsFixed && values.selectedPrograms.length === 0) {
     throw new Error("At least one program must be selected");
   }
+  const schoolError = pmuGovtSchoolError(values);
+  if (schoolError) throw new Error(schoolError);
   const response = await fetch(user ? `/api/admin/users/${user.id}` : "/api/admin/users", {
     method: user ? "PATCH" : "POST",
     headers: { "Content-Type": "application/json" },
@@ -167,6 +199,15 @@ async function saveUser(values: UserFormValues, user: UserPermission | null) {
     const data = await response.json();
     throw new Error(data.error || "Failed to save user");
   }
+}
+
+/**
+ * School search: JNV Schools only, except for Alumni Managers, whose Punjab
+ * schools (RSMS / SoE) aren't JNV.
+ */
+function schoolSearchUrl(search: string, role: string): string {
+  const scope = role === ALUMNI_MANAGER_ROLE ? "&scope=alumni" : "";
+  return `/api/admin/schools?q=${encodeURIComponent(search)}${scope}`;
 }
 
 export default function AddUserModal({ user, regions, schoolCodeToName, onClose, onSave }: AddUserModalProps) {
@@ -189,16 +230,17 @@ export default function AddUserModal({ user, regions, schoolCodeToName, onClose,
   };
 
   const isEditing = !!user;
+  const scopeLevel = effectiveLevel(role, level);
 
-  // Search schools
+  const searchUrl = schoolSearchUrl(schoolSearch, role);
   useEffect(() => {
-    if (level !== 1 || schoolSearch.length < 2) {
+    if (scopeLevel !== 1 || schoolSearch.length < 2) {
       setSearchResults([]);
       return;
     }
 
     const timer = setTimeout(async () => {
-      const response = await fetch(`/api/admin/schools?q=${encodeURIComponent(schoolSearch)}`);
+      const response = await fetch(searchUrl);
       if (response.ok) {
         const schools = await response.json();
         setSearchResults(schools);
@@ -206,7 +248,7 @@ export default function AddUserModal({ user, regions, schoolCodeToName, onClose,
     }, 300);
 
     return () => clearTimeout(timer);
-  }, [schoolSearch, level]);
+  }, [schoolSearch, scopeLevel, searchUrl]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -237,7 +279,9 @@ export default function AddUserModal({ user, regions, schoolCodeToName, onClose,
   };
 
   const addSchool = (code: string) => {
-    if (!selectedSchools.includes(code)) {
+    if (role === PMU_GOVT_SCHOOL_USER_ROLE) {
+      setSelectedSchools([code]);
+    } else if (!selectedSchools.includes(code)) {
       setSelectedSchools([...selectedSchools, code]);
     }
     setSchoolSearch("");
@@ -333,6 +377,9 @@ function RoleField({ role, onChange }: { role: string; onChange: (role: string) 
       <option value="program_manager">Program Manager - School visits + student management</option>
       <option value="program_admin">Program Admin - Scoped oversight + own school visits</option>
       <option value="holistic_mentorship_admin">Holistic Mentorship Admin - All supported programs</option>
+      <option value={PMU_MANAGER_ROLE}>PMU Manager - JNV NVS students + performance</option>
+      <option value={PMU_GOVT_SCHOOL_USER_ROLE}>PMU Govt School User - One JNV NVS School</option>
+      <option value={ALUMNI_MANAGER_ROLE}>Alumni Manager - Alumni only</option>
       <option value="admin">Admin - Full access + user management</option>
     </Select>
     <p className="mt-1 text-xs text-gray-500">{ROLE_DESCRIPTIONS[role]}</p>
@@ -376,21 +423,60 @@ function AccessFields({ role, ...props }: AccessFieldsProps) {
       <ReadOnlyField value={props.readOnly} onChange={props.onReadOnlyChange} label="Read-only access" />
     </>;
   }
+  if (role === PMU_GOVT_SCHOOL_USER_ROLE) return <PmuGovtAccessFields {...props} />;
+  if (isPmuRole(role)) return <StandardAccessFields {...props} pmu />;
+  if (isAlumniRole(role)) return <StandardAccessFields {...props} alumni />;
   return <StandardAccessFields {...props} />;
 }
 
-function StandardAccessFields(props: Omit<AccessFieldsProps, "role">) {
+function PmuProgramNote() {
+  return <div>
+    <label className={labelClassName}>Program</label>
+    <div className="mt-1 rounded-md bg-gray-50 p-3 text-sm text-gray-600">
+      <span className="font-medium text-gray-900">{PROGRAM_ID_TO_LABEL[PMU_PROGRAM_ID]}</span>
+      <p className="text-xs text-gray-500">PMU roles are pinned to the JNV NVS program.</p>
+    </div>
+  </div>;
+}
+
+function PmuGovtAccessFields(props: Omit<AccessFieldsProps, "role">) {
+  return <>
+    <ReadOnlyField value={props.readOnly} onChange={props.onReadOnlyChange} label="Read-only access (cannot edit students)" />
+    <PmuProgramNote />
+    <SchoolPicker
+      search={props.schoolSearch}
+      results={props.searchResults}
+      selected={props.selectedSchools}
+      schoolCodeToName={props.schoolCodeToName}
+      onSearchChange={props.onSchoolSearchChange}
+      onAdd={props.onAddSchool}
+      onRemove={props.onRemoveSchool}
+    />
+    {props.selectedSchools.length > 1 && <p className="mt-2 text-xs text-red-600">
+      {PMU_GOVT_EXTRA_SCHOOLS_ERROR}.
+    </p>}
+  </>;
+}
+
+// Alumni Managers have no Programs and no Students: no program picker, and
+// read-only means they can view alumni but not save them.
+function StandardAccessFields({ pmu = false, alumni = false, ...props }: Omit<AccessFieldsProps, "role"> & {
+  pmu?: boolean;
+  alumni?: boolean;
+}) {
   return <>
     <div>
       <label className={labelClassName}>School Access</label>
       <Select value={props.level} onChange={(event) => props.onLevelChange(Number(event.target.value))} className="mt-1 w-full">
-        <option value={3}>All Schools - Access to all JNV schools</option>
+        <option value={3}>{pmu ? "All JNV Schools - Access to every JNV School" : "All Schools - Access to all JNV schools"}</option>
         <option value={2}>Region - Access to schools in specific regions</option>
         <option value={1}>School - Access to specific schools</option>
       </Select>
     </div>
-    <ReadOnlyField value={props.readOnly} onChange={props.onReadOnlyChange} label="Read-only access (cannot edit students)" />
-    <ProgramsField selected={props.selectedPrograms} onToggle={props.onToggleProgram} />
+    <ReadOnlyField value={props.readOnly} onChange={props.onReadOnlyChange}
+      label={alumni ? "Read-only access (can view alumni, cannot edit them)" : "Read-only access (cannot edit students)"} />
+    {pmu && <PmuProgramNote />}
+    {!pmu && !alumni && <ProgramsField selected={props.selectedPrograms} onToggle={props.onToggleProgram} />}
     <ScopePicker
       level={props.level}
       regions={props.regions}

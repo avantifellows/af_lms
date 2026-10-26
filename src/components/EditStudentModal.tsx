@@ -1,19 +1,23 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { type Grade, type Student } from "./StudentTable";
 import { Modal, Button, FormSection } from "@/components/ui";
 import { UploadDocumentForm } from "@/components/documents/UploadDocumentForm";
 import { DocumentsList } from "@/components/documents/DocumentsList";
+import { ExamsTab } from "@/components/exams/ExamsTab";
 import {
   ANNUAL_FAMILY_INCOME_OPTIONS,
   BOARD_STREAM_OPTIONS,
+  EDUCATION_LEVEL_OPTIONS,
+  MONTHLY_FAMILY_INCOME_OPTIONS,
   CBSE_BOARD,
   CATEGORY_OPTIONS,
   G10_BOARD_OPTIONS,
   digitsOnly,
+  g10BoardChoice,
   isValidRegistrationPhone,
-  lettersAndSpacesOnly,
+  parentNameCharactersOnly,
   rollCharactersOnly,
   STUDENT_ADDITION_GENDER_OPTIONS,
   STUDENT_DOB_MAX,
@@ -25,6 +29,8 @@ import {
   PHONE_REGISTRATION_MODE,
   type RegistrationMode,
 } from "@/lib/registration-mode";
+import { trackPantSizeOptions, tshirtSizeOptions } from "@/lib/uniform-sizes";
+import { PMU_PROGRAM_ID } from "@/lib/constants";
 
 export interface Batch {
   id: number;
@@ -120,18 +126,74 @@ function initialFormData(student: Student) {
     board_stream: textValue(student.board_stream),
     father_name: textValue(student.father_name),
     annual_family_income: textValue(student.annual_family_income),
-    g10_board: student.g10_board === CBSE_BOARD ? CBSE_BOARD : "Others",
+    g10_board: g10BoardChoice(student.g10_board),
     pen_number: textValue(student.pen_number),
     g10_roll_no: textValue(student.g10_roll_no),
     grade: textValue(student.grade?.toString()),
+    tshirt_size: textValue(student.tshirt_size),
+    track_pant_size: textValue(student.track_pant_size),
+    email: textValue(student.email),
+    whatsapp_phone: textValue(student.whatsapp_phone),
+    address: textValue(student.address),
+    city: textValue(student.city),
+    district: textValue(student.district),
+    state: textValue(student.state),
+    pincode: textValue(student.pincode),
+    father_phone: textValue(student.father_phone),
+    father_profession: textValue(student.father_profession),
+    father_education_level: textValue(student.father_education_level),
+    mother_name: textValue(student.mother_name),
+    mother_phone: textValue(student.mother_phone),
+    mother_profession: textValue(student.mother_profession),
+    mother_education_level: textValue(student.mother_education_level),
+    guardian_name: textValue(student.guardian_name),
+    guardian_relation: textValue(student.guardian_relation),
+    guardian_phone: textValue(student.guardian_phone),
+    guardian_profession: textValue(student.guardian_profession),
+    guardian_education_level: textValue(student.guardian_education_level),
+    monthly_family_income: textValue(student.monthly_family_income),
   };
 }
+
+// Typed the same way as the Student's own phone and Father Name, which have
+// filtered as you type since before these fields existed.
+const CONTACT_PHONE_FIELDS = new Set([
+  "whatsapp_phone",
+  "father_phone",
+  "mother_phone",
+  "guardian_phone",
+]);
+// Any script and the dots, apostrophes and hyphens real names carry, so
+// editing a stored "सीता" or "K. Geetha" never strips it.
+const NAME_FIELDS = new Set(["father_name", "mother_name", "guardian_name"]);
 
 const inputClassName =
   "mt-1 block w-full rounded-lg border-2 border-border bg-bg-input px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 disabled:cursor-not-allowed disabled:bg-bg-card-alt disabled:text-text-muted transition-colors";
 const labelClassName = "block text-sm font-medium text-text-secondary";
 const sectionHeadingClassName = "mb-4 text-sm font-semibold text-text-primary";
 const errorClassName = "mt-1 text-xs text-danger";
+
+// What each field accepts as it is typed, so a stray space or a +91 never
+// reaches Save. The rules match what the server would refuse anyway.
+function normalizeTypedValue(name: string, value: string, g10Board: string): string {
+  // The Student's own phone keeps its whole digit sequence, so validation can
+  // reject a leading-zero or overlong number instead of silently turning it
+  // into a different one.
+  if (name === "phone") return digitsOnly(value);
+  if (name === "pen_number") return digitsOnly(value).slice(0, 11);
+  if (name === "g10_roll_no") {
+    return g10Board === CBSE_BOARD
+      ? digitsOnly(value).replace(/^0+/, "").slice(0, 8)
+      : rollCharactersOnly(value).slice(0, 10);
+  }
+  // Same reasoning as the Student's own phone: keep every digit typed. A
+  // pasted "+91 98765 43210" is twelve digits, and truncating it to ten would
+  // save a different, perfectly valid-looking number instead of failing.
+  if (CONTACT_PHONE_FIELDS.has(name)) return digitsOnly(value);
+  if (name === "pincode") return digitsOnly(value);
+  if (NAME_FIELDS.has(name)) return parentNameCharactersOnly(value);
+  return value;
+}
 
 // fallow-ignore-next-line complexity
 export default function EditStudentModal({
@@ -148,12 +210,40 @@ export default function EditStudentModal({
   const phoneMode = registrationMode === PHONE_REGISTRATION_MODE;
   const approvedPhoneBackfill =
     isPhoneRegistrationStudent && registrationMode === APPROVED_REGISTRATION_MODE;
+  // Uniform sizes, documents and exam registrations are collected for
+  // physical-centre programs only; PMU (JNV NVS) Students get none of them,
+  // so all three are hidden under that program.
+  const isPmuProgram = programId != null && Number(programId) === PMU_PROGRAM_ID;
   const [formData, setFormData] = useState(initialData);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
-  const [activeTab, setActiveTab] = useState<"details" | "documents">("details");
+  const [activeTab, setActiveTab] = useState<"details" | "exams" | "documents">(
+    "details",
+  );
   const [documentsRefresh, setDocumentsRefresh] = useState(0);
+
+  // Save sits in a fixed footer while the errors sit in the scrolling body, so
+  // on a form this long a failed save would otherwise leave the reason
+  // thousands of pixels out of view and look like Save doing nothing.
+  const errorBannerRef = useRef<HTMLDivElement | null>(null);
+  // Set by Save and spent on the first error it produces. Without it, typing
+  // in another field after a failed save (which clears the banner) re-ran
+  // this and pulled focus back to the field that failed.
+  const focusErrorAfterSubmitRef = useRef(false);
+  useEffect(() => {
+    if (!focusErrorAfterSubmitRef.current) return;
+    const [firstFieldError] = Object.keys(fieldErrors);
+    if (!firstFieldError && !error) return;
+    focusErrorAfterSubmitRef.current = false;
+    // A field the form doesn't render (or a locked one the server named) has
+    // no input to land on, so the banner speaks for it instead.
+    const target =
+      (firstFieldError && document.getElementById(`edit-student-${firstFieldError}`)) ||
+      errorBannerRef.current;
+    target?.scrollIntoView?.({ block: "center" });
+    target?.focus?.();
+  }, [error, fieldErrors]);
 
   const studentName = fullName(student);
   const studentPkId = (() => {
@@ -166,6 +256,7 @@ export default function EditStudentModal({
   // fallow-ignore-next-line complexity
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    focusErrorAfterSubmitRef.current = true;
     setError("");
     setFieldErrors({});
     setLoading(true);
@@ -304,21 +395,7 @@ export default function EditStudentModal({
     }
     setFormData((prev) => ({
       ...prev,
-      [name]:
-        name === "phone"
-          // Keep the complete digit sequence so validation can reject
-          // leading-zero and overlength values instead of silently changing
-          // them into a different phone number.
-          ? digitsOnly(value)
-          : name === "pen_number"
-            ? digitsOnly(value).slice(0, 11)
-            : name === "g10_roll_no"
-              ? (formData.g10_board === CBSE_BOARD
-                ? digitsOnly(value).replace(/^0+/, "").slice(0, 8)
-                : rollCharactersOnly(value).slice(0, 10))
-          : name === "father_name"
-            ? lettersAndSpacesOnly(value)
-            : value,
+      [name]: normalizeTypedValue(name, value, formData.g10_board),
     }));
     setError("");
     setFieldErrors((prev) => {
@@ -335,9 +412,12 @@ export default function EditStudentModal({
     inputMode?: "text" | "numeric" | "tel",
   ) => (
     <div>
-      <label className={labelClassName}>{label}</label>
+      <label className={labelClassName} htmlFor={`edit-student-${name}`}>
+        {label}
+      </label>
       <input
         type="text"
+        id={`edit-student-${name}`}
         name={name}
         inputMode={inputMode}
         value={String(formData[name] ?? "")}
@@ -369,8 +449,11 @@ export default function EditStudentModal({
 
     return (
       <div>
-        <label className={labelClassName}>{label}</label>
+        <label className={labelClassName} htmlFor={`edit-student-${name}`}>
+          {label}
+        </label>
         <select
+          id={`edit-student-${name}`}
           name={name}
           value={current}
           onChange={handleChange}
@@ -410,37 +493,59 @@ export default function EditStudentModal({
         </Button>
       </div>
 
-      <div role="tablist" aria-label="Edit student sections" className="flex border-b border-border px-6">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeTab === "details"}
-          onClick={() => setActiveTab("details")}
-          className={`min-h-[48px] px-4 py-3 text-sm font-bold uppercase tracking-wide transition-colors ${
-            activeTab === "details"
-              ? "border-b-2 border-accent text-text-primary"
-              : "text-text-muted hover:text-text-primary"
-          }`}
-        >
-          Details
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeTab === "documents"}
-          onClick={() => setActiveTab("documents")}
-          disabled={studentPkId === null}
-          className={`min-h-[48px] px-4 py-3 text-sm font-bold uppercase tracking-wide transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-            activeTab === "documents"
-              ? "border-b-2 border-accent text-text-primary"
-              : "text-text-muted hover:text-text-primary"
-          }`}
-        >
-          Documents
-        </button>
-      </div>
+      {/* Exams, Documents and uniform sizes are all collected for physical
+          centres only (#433, #434 — confirmed with the Programs team), so PMU
+          (JNV NVS) Students get no tab strip at all: Details is the whole
+          form. */}
+      {!isPmuProgram && (
+        <div role="tablist" aria-label="Edit student sections" className="flex border-b border-border px-6">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "details"}
+            onClick={() => setActiveTab("details")}
+            className={`min-h-[48px] px-4 py-3 text-sm font-bold uppercase tracking-wide transition-colors ${
+              activeTab === "details"
+                ? "border-b-2 border-accent text-text-primary"
+                : "text-text-muted hover:text-text-primary"
+            }`}
+          >
+            Details
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "documents"}
+            onClick={() => setActiveTab("documents")}
+            disabled={studentPkId === null}
+            className={`min-h-[48px] px-4 py-3 text-sm font-bold uppercase tracking-wide transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+              activeTab === "documents"
+                ? "border-b-2 border-accent text-text-primary"
+                : "text-text-muted hover:text-text-primary"
+            }`}
+          >
+            Documents
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "exams"}
+            onClick={() => setActiveTab("exams")}
+            disabled={studentPkId === null}
+            className={`min-h-[48px] px-4 py-3 text-sm font-bold uppercase tracking-wide transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+              activeTab === "exams"
+                ? "border-b-2 border-accent text-text-primary"
+                : "text-text-muted hover:text-text-primary"
+            }`}
+          >
+            Exams
+          </button>
+        </div>
+      )}
 
-      {activeTab === "documents" && studentPkId !== null ? (
+      {/* A Student with no record id has nothing to hang exams or documents
+          on; both tabs are disabled in that case, so the form is what shows. */}
+      {activeTab === "documents" && studentPkId !== null && !isPmuProgram ? (
         <div className="flex-1 space-y-6 overflow-y-auto px-6 py-5">
           <UploadDocumentForm
             studentId={studentPkId}
@@ -461,11 +566,22 @@ export default function EditStudentModal({
             />
           </div>
         </div>
+      ) : activeTab === "exams" && studentPkId !== null && !isPmuProgram ? (
+        <ExamsTab
+          studentId={studentPkId}
+          boardStream={student.board_stream}
+          onSaved={onSave}
+        />
       ) : (
         <form noValidate onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
           <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
             {error && (
-              <div className="rounded-lg border border-danger/30 bg-danger-bg p-3 text-sm text-danger">
+              <div
+                ref={errorBannerRef}
+                role="alert"
+                tabIndex={-1}
+                className="rounded-lg border border-danger/30 bg-danger-bg p-3 text-sm text-danger"
+              >
                 {error}
               </div>
             )}
@@ -475,9 +591,12 @@ export default function EditStudentModal({
               <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                 {textField("first_name", "Student Name")}
                 <div>
-                  <label className={labelClassName}>Date of Birth</label>
+                  <label className={labelClassName} htmlFor="edit-student-date_of_birth">
+                    Date of Birth
+                  </label>
                   <input
                     type="date"
+                    id="edit-student-date_of_birth"
                     name="date_of_birth"
                     min={STUDENT_DOB_MIN}
                     max={STUDENT_DOB_MAX}
@@ -499,11 +618,14 @@ export default function EditStudentModal({
                     onChange={handleChange}
                     className="h-4 w-4 rounded border-2 border-border text-accent focus:ring-accent/20"
                   />
-                  <span className={labelClassName}>CWSN</span>
+                  <span className={labelClassName}>Children with Special Needs (CWSN)</span>
                 </label>
                 {textField("phone", "Parents Phone Number", "tel")}
-                {textField("father_name", "Father Name")}
-                {(!phoneMode || !isPhoneRegistrationStudent) && selectField(
+                {/* Father Name and Annual Family Income are not new fields:
+                    they stay here for NVS, where the sections below are not
+                    rendered, and move into those sections for centres. */}
+                {isPmuProgram && textField("father_name", "Father Name")}
+                {isPmuProgram && (!phoneMode || !isPhoneRegistrationStudent) && selectField(
                   "annual_family_income",
                   "Yearly / Annual Family Income",
                   ANNUAL_FAMILY_INCOME_OPTIONS,
@@ -530,6 +652,99 @@ export default function EditStudentModal({
               </div>
             </FormSection>
 
+            {/* Contact and household details are collected for physical
+                centres only (#431); JNV NVS PMU did not ask for them, and the
+                API refuses them under that program. */}
+            {!isPmuProgram && (
+              <>
+              <FormSection>
+                <h3 className={sectionHeadingClassName}>Contact &amp; Address</h3>
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                  {textField("email", "Email")}
+                  {textField("whatsapp_phone", "WhatsApp Number", "tel")}
+                  {textField("address", "Address")}
+                  {textField("city", "City")}
+                  {textField("district", "District")}
+                  {textField("state", "State")}
+                  {textField("pincode", "Pincode", "numeric")}
+                </div>
+              </FormSection>
+
+              <FormSection>
+                <h3 className={sectionHeadingClassName}>Father</h3>
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  {textField("father_name", "Father Name")}
+                  {textField("father_phone", "Father Phone", "tel")}
+                  {textField("father_profession", "Father Profession")}
+                  {selectField(
+                    "father_education_level",
+                    "Father Education Level",
+                    EDUCATION_LEVEL_OPTIONS,
+                  )}
+                </div>
+              </FormSection>
+
+              <FormSection>
+                <h3 className={sectionHeadingClassName}>Mother</h3>
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  {textField("mother_name", "Mother Name")}
+                  {textField("mother_phone", "Mother Phone", "tel")}
+                  {textField("mother_profession", "Mother Profession")}
+                  {selectField(
+                    "mother_education_level",
+                    "Mother Education Level",
+                    EDUCATION_LEVEL_OPTIONS,
+                  )}
+                </div>
+              </FormSection>
+
+              <FormSection>
+                <h3 className={sectionHeadingClassName}>Guardian</h3>
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  {textField("guardian_name", "Guardian Name")}
+                  {textField("guardian_relation", "Guardian Relation")}
+                  {textField("guardian_phone", "Guardian Phone", "tel")}
+                  {textField("guardian_profession", "Guardian Profession")}
+                  {selectField(
+                    "guardian_education_level",
+                    "Guardian Education Level",
+                    EDUCATION_LEVEL_OPTIONS,
+                  )}
+                </div>
+              </FormSection>
+
+              <FormSection>
+                <h3 className={sectionHeadingClassName}>Socio-economic</h3>
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  {(!phoneMode || !isPhoneRegistrationStudent) && selectField(
+                    "annual_family_income",
+                    "Yearly / Annual Family Income",
+                    ANNUAL_FAMILY_INCOME_OPTIONS,
+                  )}
+                  {selectField(
+                    "monthly_family_income",
+                    "Monthly Family Income",
+                    MONTHLY_FAMILY_INCOME_OPTIONS,
+                  )}
+                </div>
+              </FormSection>
+              </>
+            )}
+
+            {!isPmuProgram && (
+              <FormSection>
+                <h3 className={sectionHeadingClassName}>Uniform Size</h3>
+                <p className="mb-4 text-xs text-text-muted">
+                  Collected for vendor orders. Leave blank until the size is known; clearing a
+                  size removes it.
+                </p>
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  {selectField("tshirt_size", "T-shirt Size", tshirtSizeOptions())}
+                  {selectField("track_pant_size", "Track Pant Size", trackPantSizeOptions())}
+                </div>
+              </FormSection>
+            )}
+
             {approvedPhoneBackfill && (
               <FormSection>
                 <h3 className={sectionHeadingClassName}>Post-approval identifier backfill</h3>
@@ -538,9 +753,12 @@ export default function EditStudentModal({
                 </p>
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                   <div>
-                    <label className={labelClassName}>PEN</label>
+                    <label className={labelClassName} htmlFor="edit-student-pen_number">
+                      PEN
+                    </label>
                     <input
                       type="text"
+                      id="edit-student-pen_number"
                       name="pen_number"
                       inputMode="numeric"
                       maxLength={11}
@@ -554,9 +772,12 @@ export default function EditStudentModal({
                     )}
                   </div>
                   <div>
-                    <label className={labelClassName}>Grade 10 Roll no</label>
+                    <label className={labelClassName} htmlFor="edit-student-g10_roll_no">
+                      Grade 10 Roll no
+                    </label>
                     <input
                       type="text"
+                      id="edit-student-g10_roll_no"
                       name="g10_roll_no"
                       inputMode={formData.g10_board === CBSE_BOARD ? "numeric" : "text"}
                       maxLength={formData.g10_board === CBSE_BOARD ? 8 : 10}
@@ -575,6 +796,10 @@ export default function EditStudentModal({
 
             <FormSection>
               <h3 className={sectionHeadingClassName}>Locked Identity</h3>
+              <p className="mb-4 text-xs text-text-muted">
+                These are fixed identifiers and can&apos;t be edited here. Ask the program
+                team if one is wrong.
+              </p>
               <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
                 <div>
                   <label className={labelClassName}>Student ID</label>

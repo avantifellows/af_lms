@@ -217,3 +217,49 @@ export async function deactivateFeedbackSession(sessionPk: number): Promise<void
     console.error(`Failed to deactivate session ${sessionPk}:`, error);
   }
 }
+
+/**
+ * Move one feedback session's end to `endTimeUtc`: the db-service session row
+ * and its single occurrence (portal gates on the occurrence, so a row-only edit
+ * would leave the old window in force). Throws on any failure.
+ */
+export async function extendFeedbackSession(
+  sessionPk: number,
+  sessionId: string | null,
+  endTimeUtc: string
+): Promise<void> {
+  const base = dbBaseUrl();
+  const endIst = utcToISTDate(endTimeUtc);
+
+  // Find the occurrence before writing anything, so a missing one can't leave
+  // the session extended but the portal (which gates on the occurrence) not.
+  if (!sessionId) {
+    throw new Error(`session ${sessionPk}: no session_id yet, so its schedule can't be found`);
+  }
+  const occResp = await fetch(
+    `${base}/session-occurrence?session_id=${encodeURIComponent(sessionId)}`,
+    { headers: authHeaders() }
+  );
+  const occurrences = occResp.ok ? ((await occResp.json()) as Array<{ id: number }>) : [];
+  const occurrence = Array.isArray(occurrences) ? occurrences[0] : undefined;
+  if (!occurrence?.id) {
+    throw new Error(`session ${sessionPk}: no schedule (occurrence) found`);
+  }
+
+  const sessionResp = await fetch(`${base}/session/${sessionPk}`, {
+    method: "PATCH",
+    headers: authHeaders(),
+    body: JSON.stringify({ end_time: endIst }),
+  });
+  if (!sessionResp.ok) {
+    throw new Error(`session ${sessionPk}: PATCH failed (${sessionResp.status})`);
+  }
+  const occPatch = await fetch(`${base}/session-occurrence/${occurrence.id}`, {
+    method: "PATCH",
+    headers: authHeaders(),
+    body: JSON.stringify({ end_time: endIst }),
+  });
+  if (!occPatch.ok) {
+    throw new Error(`session ${sessionPk}: schedule PATCH failed (${occPatch.status})`);
+  }
+}

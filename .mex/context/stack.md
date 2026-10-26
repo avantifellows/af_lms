@@ -16,7 +16,7 @@ edges:
     condition: when choosing which data backend a library talks to
   - target: context/setup.md
     condition: when installing or configuring these tools locally
-last_updated: 2026-07-15
+last_updated: 2026-09-29
 ---
 
 # Stack
@@ -31,7 +31,7 @@ last_updated: 2026-07-15
 
 ## Key Libraries
 - **`pg`** (not an ORM) — direct Postgres. All access goes through `query<T>()` in `src/lib/db.ts`.
-- **`next-auth` v4** (not v5/Auth.js) — Google OAuth + a passcode `CredentialsProvider`. Config in `src/lib/auth.ts`; routes call `getServerSession(authOptions)`.
+- **`next-auth` v4** (not v5/Auth.js) — Google OAuth only (passcode login removed, ADR 0007) + a non-prod dev-login `CredentialsProvider`. Config in `src/lib/auth.ts`; routes call `getServerSession(authOptions)`.
 - **`@google-cloud/bigquery`** — quiz analytics reads only (`src/lib/bigquery.ts`).
 - **`@aws-sdk/client-dynamodb` + `lib-dynamodb`** — performance-dashboard reads (`src/lib/dynamodb.ts`).
 - **`@aws-sdk/client-s3` + `s3-request-presigner`** — document uploads + presigned URLs (`src/lib/s3.ts`).

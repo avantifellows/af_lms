@@ -7,12 +7,13 @@ import {
 } from "@/lib/quiz-session-access";
 import { query } from "@/lib/db";
 import { publishMessage } from "@/lib/sns";
-import { CMS_SOURCE } from "@/lib/cms-tests";
+import { CMS_SOURCE, getCmsTestId } from "@/lib/cms-tests";
 import {
   dbIstTimestampToUtcIso,
   istWallClockWindowEnd,
   utcToISTDate,
 } from "@/lib/quiz-session-time";
+import { quizDurationSeconds } from "@/lib/quiz-duration";
 
 const DB_SERVICE_URL = process.env.DB_SERVICE_URL;
 const DB_SERVICE_TOKEN = process.env.DB_SERVICE_TOKEN;
@@ -168,7 +169,7 @@ async function regenerateFromCms(
   }
 
   const quizId = currentSession.platform_id;
-  const cmsTestId = metaString(metaData, "cms_test_id");
+  const cmsTestId = getCmsTestId(metaData);
 
   // Test id only: requiring curriculum/grade would 422 every session created after we
   // stopped persisting them (nex-gen-cms#177).
@@ -187,6 +188,7 @@ async function regenerateFromCms(
   // duration (a corrected test may change time_limit). Omitted if unparseable — quiz-backend
   // then preserves the existing value rather than dropping the gate.
   const sessionEndTime = storedEndTimeToIstWallClock(currentSession.end_time);
+  const langCode = metaString(metaData, "lang_code");
 
   let response: Response;
   try {
@@ -197,6 +199,8 @@ async function regenerateFromCms(
         test_id: Number(cmsTestId),
         quiz_type: "assessment",
         ...(sessionEndTime ? { session_end_time: sessionEndTime } : {}),
+        // Keep the session's quiz language; omitted, quiz-backend keeps the quiz's own.
+        ...(langCode ? { lang_code: langCode } : {}),
       }),
     });
   } catch (err) {
@@ -242,7 +246,9 @@ async function regenerateFromCms(
     );
   }
 
-  const result = (await response.json()) as { warnings?: string[] };
+  const result = (await response.json()) as { warnings?: string[]; time_limit?: unknown };
+  // A corrected test may change its duration; keep the session's copy in step.
+  const quizDuration = quizDurationSeconds(result);
   const warnings = result.warnings ?? [];
 
   // Record who regenerated, for the same audit trail legacy kept in meta_data. Best-effort:
@@ -258,6 +264,7 @@ async function regenerateFromCms(
       meta_data: {
         ...metaData,
         status: "success",
+        ...(quizDuration !== undefined ? { quiz_duration_seconds: quizDuration } : {}),
         last_regenerated_by: actorEmail,
         last_regenerated_at: utcToISTDate(new Date().toISOString()),
       },

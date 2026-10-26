@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Download, Plus, Upload } from "lucide-react";
 import StudentTable, {
@@ -16,6 +16,13 @@ import {
   studentHasCurrentProgram,
 } from "@/lib/enrollment-stats";
 import {
+  formatExamPreparingFor,
+  matchesStreamFilter,
+  matchesStudentSearch,
+  NO_STREAM,
+  streamFilterOptions,
+} from "@/lib/stream-rules";
+import {
   buildAdmissionSummary,
   isAdmissionGrade,
   type ConsentByStudentId,
@@ -28,8 +35,75 @@ import {
   type RegistrationMode,
 } from "@/lib/registration-mode";
 import { Button, Modal } from "@/components/ui";
+import type { InterventionFlag } from "@/lib/intervention-flag-types";
 import AddStudentModal from "./AddStudentModal";
+import InterventionFlagModal from "./InterventionFlagModal";
 import BulkStudentUploadModal from "./BulkStudentUploadModal";
+
+async function fetchJson<T>(url: string): Promise<T> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`${url} ${res.status}`);
+  return (await res.json()) as T;
+}
+
+function groupFlagsByStudent(flags: InterventionFlag[]) {
+  const byStudent = new Map<string, InterventionFlag[]>();
+  for (const flag of flags) {
+    const list = byStudent.get(flag.student_pk_id) ?? [];
+    list.push(flag);
+    byStudent.set(flag.student_pk_id, list);
+  }
+  return byStudent;
+}
+
+interface EnrollmentActionsProps {
+  showAddStudent: boolean;
+  showDownloadList: boolean;
+  onBulkUpload: () => void;
+  onDownloadList: () => void;
+  onAddStudent: () => void;
+}
+
+/**
+ * The roster action buttons, always as one group in one order (Bulk Upload,
+ * Download List, Add Student) so filters, search text and the count line
+ * can't reflow them.
+ */
+function EnrollmentActions({
+  showAddStudent,
+  showDownloadList,
+  onBulkUpload,
+  onDownloadList,
+  onAddStudent,
+}: EnrollmentActionsProps) {
+  if (!showAddStudent && !showDownloadList) return null;
+  return (
+    <div
+      role="group"
+      aria-label="Student actions"
+      className="ml-auto flex flex-wrap items-center gap-3 sm:gap-4"
+    >
+      {showAddStudent && (
+        <Button type="button" size="sm" variant="secondary" onClick={onBulkUpload}>
+          <Upload className="h-4 w-4" aria-hidden="true" />
+          Bulk Upload
+        </Button>
+      )}
+      {showDownloadList && (
+        <Button type="button" size="sm" variant="secondary" onClick={onDownloadList}>
+          <Download className="h-4 w-4" aria-hidden="true" />
+          Download List
+        </Button>
+      )}
+      {showAddStudent && (
+        <Button type="button" size="sm" onClick={onAddStudent}>
+          <Plus className="h-4 w-4" aria-hidden="true" />
+          Add Student
+        </Button>
+      )}
+    </div>
+  );
+}
 
 interface Props {
   programs: ProgramStats[];
@@ -40,8 +114,9 @@ interface Props {
   canDropoutStudent?: boolean;
   dropoutProgramIds?: number[];
   canAddStudent: boolean;
+  /** NVS Download List; defaults to canAddStudent (PMU roles keep it when read_only). */
+  canDownloadList?: boolean;
   userProgramIds: number[] | null;
-  isPasscodeUser: boolean;
   isAdmin: boolean;
   grades: Grade[];
   batches: Batch[];
@@ -64,8 +139,8 @@ export default function EnrollmentTabContent({
   canDropoutStudent = false,
   dropoutProgramIds,
   canAddStudent,
+  canDownloadList = canAddStudent,
   userProgramIds,
-  isPasscodeUser,
   isAdmin,
   grades,
   batches,
@@ -81,6 +156,7 @@ export default function EnrollmentTabContent({
   );
   const [selectedGrade, setSelectedGrade] = useState<string>("all");
   const [selectedStream, setSelectedStream] = useState<string>("all");
+  const [searchQuery, setSearchQuery] = useState("");
   const [addOpen, setAddOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [createdStudentId, setCreatedStudentId] = useState<string | null>(null);
@@ -91,6 +167,13 @@ export default function EnrollmentTabContent({
   )
     ? selectedId
     : (programs[0]?.id ?? null);
+
+  // Intervention flags mirror students access (lib/intervention-flags): anyone
+  // on this tab can see students, so they see flags; changing them needs
+  // students edit. The API enforces the same rule.
+  // The JNV NVS card hides flags entirely (UI only; the API is unchanged).
+  const canUseInterventionFlags = selectedProgramId !== PROGRAM_IDS.NVS;
+  const canEditInterventionFlags = canUseInterventionFlags && canEdit;
 
   // Consent status for the school's grade 11/12 students, keyed by
   // student_pk_id. Fetched client-side so the (default) enrollment tab isn't
@@ -107,12 +190,10 @@ export default function EnrollmentTabContent({
   // cascading renders.
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/schools/${encodeURIComponent(schoolCode)}/consent-status`)
-      .then((res) => {
-        if (!res.ok) throw new Error(`consent-status ${res.status}`);
-        return res.json();
-      })
-      .then((data: { consent: ConsentByStudentId }) => {
+    fetchJson<{ consent: ConsentByStudentId }>(
+      `/api/schools/${encodeURIComponent(schoolCode)}/consent-status`,
+    )
+      .then((data) => {
         if (cancelled) return;
         setConsent(data.consent ?? {});
         setConsentError(false);
@@ -127,6 +208,47 @@ export default function EnrollmentTabContent({
       cancelled = true;
     };
   }, [schoolCode, consentReloadKey]);
+
+  // Intervention flags for the school, keyed by student_pk_id (newest first).
+  const [flagsByStudent, setFlagsByStudent] = useState<
+    Map<string, InterventionFlag[]>
+  >(new Map());
+  const [flaggedOnly, setFlaggedOnly] = useState(false);
+  const [flagStudent, setFlagStudent] = useState<Student | null>(null);
+  const flagsUrl = `/api/schools/${encodeURIComponent(schoolCode)}/intervention-flags`;
+
+  useEffect(() => {
+    if (!canUseInterventionFlags) return;
+    let cancelled = false;
+    fetchJson<{ flags: InterventionFlag[] }>(flagsUrl)
+      .then((data) => {
+        if (!cancelled) setFlagsByStudent(groupFlagsByStudent(data.flags ?? []));
+      })
+      // A failed fetch leaves the roster usable, just without flag markers.
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [canUseInterventionFlags, flagsUrl]);
+
+  // Called by the flag dialog after a write (or a 409) and awaited, so the
+  // dialog only leaves its saving state once it shows the refreshed flag.
+  const reloadFlags = useCallback(async () => {
+    try {
+      const data = await fetchJson<{ flags: InterventionFlag[] }>(flagsUrl);
+      setFlagsByStudent(groupFlagsByStudent(data.flags ?? []));
+    } catch {
+      // Keep the current flags; the next page load refetches.
+    }
+  }, [flagsUrl]);
+
+  const openFlagStudentIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const [id, flags] of flagsByStudent) {
+      if (flags.some((flag) => flag.status === "open")) ids.add(id);
+    }
+    return ids;
+  }, [flagsByStudent]);
 
   const filteredActive = useMemo(() => {
     if (selectedProgramId == null) return [];
@@ -154,14 +276,19 @@ export default function EnrollmentTabContent({
       .sort((a, b) => a.grade - b.grade);
   }, [filteredActive]);
 
+  // NVS speaks "Exam Preparing For": the same stream filter, formatted labels.
+  const isNvsSelected = selectedProgramId === PROGRAM_IDS.NVS;
+  // Roster search is NVS-only; it narrows the table and "Showing X of Y" but
+  // not the program-card counts or Download List.
+  const rosterSearch = isNvsSelected ? searchQuery : "";
   const streamOptions = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const student of filteredActive) {
-      const stream = student.stream?.trim();
-      if (stream) counts.set(stream, (counts.get(stream) ?? 0) + 1);
-    }
-    return [...counts.entries()].sort(([a], [b]) => a.localeCompare(b));
-  }, [filteredActive]);
+    const built = streamFilterOptions(filteredActive);
+    if (!isNvsSelected) return built;
+    const options = built.options
+      .map((option) => ({ ...option, label: formatExamPreparingFor(option.value) }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+    return { ...built, options };
+  }, [filteredActive, isNvsSelected]);
 
   // Recompute the program pills scoped to the selected grade so every number
   // (total, gender, category) corresponds to the applied program + grade.
@@ -169,27 +296,46 @@ export default function EnrollmentTabContent({
     const scopedActive = activeStudents.filter(
       (student) =>
         (selectedGrade === "all" || student.grade === Number(selectedGrade)) &&
-        (selectedStream === "all" ||
-          student.stream?.toLowerCase() === selectedStream.toLowerCase()),
+        matchesStreamFilter(student.stream, selectedStream),
     );
     return programs.map((p) => buildProgramStats(scopedActive, p.id));
   }, [programs, activeStudents, selectedGrade, selectedStream]);
 
-  // Active students of the selected program after the grade filter — drives
-  // the "Showing X of Y" hint next to the dropdown.
-  const activeFilteredCount = useMemo(
+  // Active students of the selected program after the grade, stream, and
+  // roster search filters. Drives the flag count and the "Showing X of Y" hint.
+  const gradeStreamActive = useMemo(
     () =>
       filteredActive.filter(
         (student) =>
           (selectedGrade === "all" ||
             student.grade === Number(selectedGrade)) &&
-          (selectedStream === "all" ||
-            student.stream?.toLowerCase() === selectedStream.toLowerCase()),
-      ).length,
-    [filteredActive, selectedGrade, selectedStream],
+          matchesStreamFilter(student.stream, selectedStream) &&
+          matchesStudentSearch(student, rosterSearch),
+      ),
+    [filteredActive, selectedGrade, selectedStream, rosterSearch],
   );
+  const flaggedCount = gradeStreamActive.filter(
+    (s) => s.student_pk_id && openFlagStudentIds.has(s.student_pk_id),
+  ).length;
+  const flagFilterOn = canUseInterventionFlags && flaggedOnly;
+  const activeFilteredCount = flagFilterOn ? flaggedCount : gradeStreamActive.length;
 
   const showAddStudent = canAddStudent && selectedProgramId === PROGRAM_IDS.NVS;
+  const showDownloadList = canDownloadList && selectedProgramId === PROGRAM_IDS.NVS;
+  const showFilteredCount =
+    selectedGrade !== "all" ||
+    selectedStream !== "all" ||
+    rosterSearch.trim() !== "" ||
+    flagFilterOn;
+
+  const downloadList = () => {
+    const params = new URLSearchParams();
+    if (selectedGrade !== "all") params.set("grade", selectedGrade);
+    if (selectedStream !== "all") params.set("stream", selectedStream);
+    window.location.assign(
+      `/api/school/${encodeURIComponent(schoolUdise)}/students/export${params.size ? `?${params}` : ""}`,
+    );
+  };
 
   const closeCreatedModal = () => {
     setCreatedOpen(false);
@@ -257,88 +403,95 @@ export default function EnrollmentTabContent({
           </Button>
         </div>
       </Modal>
-      {/* Grade filter — placed above the summary so it's clear the pills react
-          to it. */}
-      <div className="mb-4 flex flex-wrap items-center gap-3 sm:gap-4">
-        <label
-          htmlFor="gradeFilter"
-          className="text-sm font-medium text-gray-700"
-        >
-          Filter by Grade:
-        </label>
-        <select
-          id="gradeFilter"
-          value={selectedGrade}
-          onChange={(e) => setSelectedGrade(e.target.value)}
-          className="rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 bg-white focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/20"
-        >
-          <option value="all">All Grades ({filteredActive.length})</option>
-          {gradeOptions.map(({ grade, count }) => (
-            <option key={grade} value={grade}>
-              Grade {grade} ({count})
-            </option>
-          ))}
-        </select>
-        <label
-          htmlFor="streamFilter"
-          className="text-sm font-medium text-gray-700"
-        >
-          Filter by Stream:
-        </label>
-        <select
-          id="streamFilter"
-          value={selectedStream}
-          onChange={(event) => setSelectedStream(event.target.value)}
-          className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/20"
-        >
-          <option value="all">All Streams ({filteredActive.length})</option>
-          {streamOptions.map(([stream, count]) => (
-            <option key={stream} value={stream}>
-              {stream} ({count})
-            </option>
-          ))}
-        </select>
-        {(selectedGrade !== "all" || selectedStream !== "all") && (
-          <span className="text-sm text-gray-500">
-            Showing {activeFilteredCount} of {filteredActive.length} students
-          </span>
-        )}
-        {showAddStudent && (
-          <>
-            <Button
-              type="button"
-              size="sm"
-              variant="secondary"
-              onClick={() => setBulkOpen(true)}
-              className="ml-auto"
-            >
-              <Upload className="h-4 w-4" aria-hidden="true" />
-              Bulk Upload
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="secondary"
-              onClick={() => {
-                const params = new URLSearchParams();
-                if (selectedGrade !== "all") params.set("grade", selectedGrade);
-                if (selectedStream !== "all")
-                  params.set("stream", selectedStream);
-                window.location.assign(
-                  `/api/school/${encodeURIComponent(schoolUdise)}/students/export${params.size ? `?${params}` : ""}`,
-                );
-              }}
-            >
-              <Download className="h-4 w-4" aria-hidden="true" />
-              Download List
-            </Button>
-            <Button type="button" size="sm" onClick={() => setAddOpen(true)}>
-              <Plus className="h-4 w-4" aria-hidden="true" />
-              Add Student
-            </Button>
-          </>
-        )}
+      {/* Filters, then the actions group pushed right (wrapping to its own
+          line when both don't fit) — placed above the summary so it's clear the
+          pills react to them. The count has its own reserved line below, so
+          neither filters nor search text can reflow the actions. */}
+      <div className="flex flex-wrap items-center gap-3 sm:gap-4">
+        <div className="flex min-w-0 flex-wrap items-center gap-3 sm:gap-4">
+          <label
+            htmlFor="gradeFilter"
+            className="text-sm font-medium text-gray-700"
+          >
+            Filter by Grade:
+          </label>
+          <select
+            id="gradeFilter"
+            value={selectedGrade}
+            onChange={(e) => setSelectedGrade(e.target.value)}
+            className="rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 bg-white focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/20"
+          >
+            <option value="all">All Grades ({filteredActive.length})</option>
+            {gradeOptions.map(({ grade, count }) => (
+              <option key={grade} value={grade}>
+                Grade {grade} ({count})
+              </option>
+            ))}
+          </select>
+          <label
+            htmlFor="streamFilter"
+            className="text-sm font-medium text-gray-700"
+          >
+            {isNvsSelected ? "Filter by Exam Preparing For:" : "Filter by Stream:"}
+          </label>
+          <select
+            id="streamFilter"
+            value={selectedStream}
+            onChange={(event) => setSelectedStream(event.target.value)}
+            className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/20"
+          >
+            <option value="all">All Streams ({filteredActive.length})</option>
+            {streamOptions.options.map(({ value, label, count }) => (
+              <option key={value} value={value}>
+                {label} ({count})
+              </option>
+            ))}
+            {streamOptions.noStreamCount > 0 && (
+              <option value={NO_STREAM}>
+                {isNvsSelected ? "Not set" : "No stream"} ({streamOptions.noStreamCount})
+              </option>
+            )}
+          </select>
+          {isNvsSelected && (
+            <input
+              type="search"
+              aria-label="Search students"
+              placeholder="Search name, Student ID, PEN, APAAR ID, phone"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/20 sm:w-80"
+            />
+          )}
+          {canUseInterventionFlags && (
+            <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+              <input
+                type="checkbox"
+                checked={flaggedOnly}
+                onChange={(event) => setFlaggedOnly(event.target.checked)}
+                className="h-4 w-4 rounded border-gray-300 text-accent focus:ring-accent/20"
+              />
+              Needs intervention only ({flaggedCount})
+            </label>
+          )}
+        </div>
+        <EnrollmentActions
+          showAddStudent={showAddStudent}
+          showDownloadList={showDownloadList}
+          onBulkUpload={() => setBulkOpen(true)}
+          onDownloadList={downloadList}
+          onAddStudent={() => setAddOpen(true)}
+        />
       </div>
+      {/* Always rendered at one line's height so the cards and table below
+          don't shift when a filter or search starts or clears. */}
+      <p
+        data-testid="enrollment-filtered-count"
+        aria-live="polite"
+        className="mb-4 mt-2 min-h-5 text-sm text-gray-500"
+      >
+        {showFilteredCount &&
+          `Showing ${activeFilteredCount} of ${filteredActive.length} students`}
+      </p>
 
       {selectedProgramId != null && (
         <EnrollmentStatsCards
@@ -348,6 +501,7 @@ export default function EnrollmentTabContent({
             setSelectedId(id);
             setSelectedGrade("all");
             setSelectedStream("all");
+            setSearchQuery("");
           }}
           admission={admissionSummary}
           consentLoading={consentLoading}
@@ -364,7 +518,6 @@ export default function EnrollmentTabContent({
         selectedProgramId={selectedProgramId}
         dropoutProgramIds={dropoutProgramIds}
         userProgramIds={userProgramIds}
-        isPasscodeUser={isPasscodeUser}
         isAdmin={isAdmin}
         grades={grades}
         batches={batches}
@@ -372,9 +525,31 @@ export default function EnrollmentTabContent({
         selectedGrade={selectedGrade}
         onGradeChange={setSelectedGrade}
         selectedStream={selectedStream}
+        searchQuery={rosterSearch}
         hideGradeFilterUI
         onDataChanged={() => setConsentReloadKey((k) => k + 1)}
+        openFlagStudentIds={canUseInterventionFlags ? openFlagStudentIds : undefined}
+        onOpenInterventionFlag={canUseInterventionFlags ? setFlagStudent : undefined}
+        canRaiseInterventionFlag={canEditInterventionFlags}
+        flaggedOnly={flagFilterOn}
       />
+
+      {flagStudent?.student_pk_id && (
+        <InterventionFlagModal
+          open
+          onClose={() => setFlagStudent(null)}
+          onChanged={reloadFlags}
+          canEdit={canEditInterventionFlags}
+          schoolCode={schoolCode}
+          studentPkId={flagStudent.student_pk_id}
+          studentName={
+            [flagStudent.first_name, flagStudent.last_name]
+              .filter(Boolean)
+              .join(" ") || "Student"
+          }
+          flags={flagsByStudent.get(flagStudent.student_pk_id) ?? []}
+        />
+      )}
 
       <AddStudentModal
         open={addOpen}

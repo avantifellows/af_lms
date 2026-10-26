@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
 import {
   DEFAULT_HOLISTIC_PROGRESS_SORT,
   formatHolisticProgressCsv,
@@ -7,8 +8,8 @@ import {
   getHolisticProgressAcademicYears,
   getHolisticProgressOptions,
   listHolisticProgress,
-  type HolisticProgress,
   type HolisticProgressDirection,
+  type HolisticProgressFilter,
   type HolisticProgressFilters,
   type HolisticProgressSort,
 } from "@/lib/holistic-progress";
@@ -16,7 +17,7 @@ import { validateAcademicYear } from "@/lib/holistic-phase-plans";
 import { holisticProgramId, holisticRouteAccess } from "../route-helpers";
 
 const SORTS = new Set<HolisticProgressSort>(["student_name", "school", "grade", "mentor", "phase", "progress"]);
-const PROGRESS = new Set<HolisticProgress>(["pending", "completed", "skipped", "no_active_phase"]);
+const PROGRESS = new Set<HolisticProgressFilter>(["pending", "completed", "skipped", "no_active_phase", "unassigned"]);
 
 type Parsed<T> = { valid: true; value: T } | { valid: false; value: null };
 
@@ -84,6 +85,11 @@ function filtersFrom(request: Request): { filters: HolisticProgressFilters; csv:
   const values = [page, phaseId, mentorUserId, grade, progress, sort, direction, format, schoolCode];
   if (!programId || !validateAcademicYear(academicYear) ||
       search.length > 100 || values.some(({ valid }) => !valid)) {
+    return null;
+  }
+  // The Unassigned list exists only for the current year and has no Mentor.
+  if (progress.value === "unassigned" &&
+      (academicYear !== CURRENT_ACADEMIC_YEAR || mentorUserId.value !== null)) {
     return null;
   }
   return {

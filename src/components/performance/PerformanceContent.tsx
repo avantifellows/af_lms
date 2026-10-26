@@ -23,6 +23,8 @@ interface Props {
   testCategory: TestCategory;
   fullTestView: FullTestView;
   scope: PerformanceScope;
+  /** JNV NVS: the overview lists only System-wide Mandated Tests. */
+  isNvs?: boolean;
   onTestClick: (sessionId: string, testName: string) => void;
   onFilterOptions: (opts: {
     streams: string[];
@@ -43,6 +45,7 @@ export default function PerformanceContent({
   testCategory,
   fullTestView,
   scope,
+  isNvs,
   onTestClick,
   onFilterOptions,
 }: Props) {
@@ -75,6 +78,7 @@ export default function PerformanceContent({
       stream={scope.stream}
       subject={scope.subject}
       testGrade={scope.testGrade}
+      isNvs={isNvs}
       onTestClick={onTestClick}
       onFilterOptions={onFilterOptions}
     />

@@ -1,14 +1,16 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import { canAccessSchool, getResolvedPermission } from "@/lib/permissions";
+import { getSession } from "@/lib/session";
+import { canAccessSchool, getFeatureAccess, getResolvedPermission } from "@/lib/permissions";
+import type { Feature, UserPermission } from "@/lib/permissions";
 import { query } from "@/lib/db";
+import { isPmuRole } from "@/lib/constants";
 
 interface SchoolInfo {
   id: string;
   code: string;
   name: string;
   region: string | null;
+  af_school_category?: string | null;
 }
 
 type AuthResult =
@@ -23,17 +25,24 @@ type AuthResult =
        * render the same verdict.
        */
       readOnly: boolean;
+      /**
+       * The caller's resolved permission row, so
+       * routes can apply role rules — e.g. the PMU Performance pin — without
+       * resolving it again.
+       */
+      permission?: UserPermission | null;
     }
   | { authorized: false; response: NextResponse };
 
-// `requireEdit`: additionally refuse read-only callers with 403. Passcode
-// users have no user_permission row and so cannot be read-only; the flag only
-// bites for email users.
+// `requireEdit`: additionally refuse read-only callers with 403.
+// `feature`: additionally refuse callers whose role can't view that feature
+// (e.g. performance for holistic_mentorship_admin), so the API enforces what
+// the page would otherwise only hide.
 export async function authorizeSchoolAccess(
   udise: string,
-  options?: { requireEdit?: boolean },
+  options?: { requireEdit?: boolean; feature?: Feature },
 ): Promise<AuthResult> {
-  const session = await getServerSession(authOptions);
+  const session = await getSession();
   if (!session) {
     return {
       authorized: false,
@@ -42,7 +51,7 @@ export async function authorizeSchoolAccess(
   }
 
   const schools = await query<SchoolInfo>(
-    `SELECT id, code, name, region FROM school WHERE udise_code = $1 OR code = $1`,
+    `SELECT id, code, name, region, af_school_category FROM school WHERE udise_code = $1 OR code = $1`,
     [udise]
   );
   const school = schools[0];
@@ -51,16 +60,6 @@ export async function authorizeSchoolAccess(
       authorized: false,
       response: NextResponse.json({ error: "School not found" }, { status: 404 }),
     };
-  }
-
-  if (session.isPasscodeUser) {
-    if (session.schoolCode !== school.code) {
-      return {
-        authorized: false,
-        response: NextResponse.json({ error: "Access denied" }, { status: 403 }),
-      };
-    }
-    return { authorized: true, school, readOnly: false };
   }
 
   const email = session.user?.email || null;
@@ -77,6 +76,19 @@ export async function authorizeSchoolAccess(
   }
 
   const permission = email ? await getResolvedPermission(email) : null;
+  // PMU roles are NVS-only, so non-JNV schools are out of scope (as on the School page).
+  if (isPmuRole(permission?.role) && school.af_school_category !== "JNV") {
+    return {
+      authorized: false,
+      response: NextResponse.json({ error: "Access denied" }, { status: 403 }),
+    };
+  }
+  if (options?.feature && !getFeatureAccess(permission ?? null, options.feature).canView) {
+    return {
+      authorized: false,
+      response: NextResponse.json({ error: "Access denied" }, { status: 403 }),
+    };
+  }
   const readOnly = permission?.read_only === true;
   if (options?.requireEdit && readOnly) {
     return {
@@ -88,5 +100,5 @@ export async function authorizeSchoolAccess(
     };
   }
 
-  return { authorized: true, school, readOnly };
+  return { authorized: true, school, readOnly, permission };
 }

@@ -25,7 +25,6 @@ import { getFeatureAccess, getUserPermission } from "@/lib/permissions";
 import {
   ADMIN_SESSION,
   NO_SESSION,
-  PASSCODE_SESSION,
   PM_SESSION,
   routeParams,
 } from "../../../../__test-utils__/api-test-helpers";
@@ -163,17 +162,6 @@ describe("POST /api/pm/visits/[id]/complete", () => {
 
     expect(res.status).toBe(401);
     await expect(res.json()).resolves.toEqual({ error: "Unauthorized" });
-  });
-
-  it("returns 403 for passcode users", async () => {
-    mockSession.mockResolvedValue(PASSCODE_SESSION as never);
-
-    const res = await POST(completionRequest() as never, params);
-
-    expect(res.status).toBe(403);
-    await expect(res.json()).resolves.toEqual({
-      error: "Passcode users cannot access visit routes",
-    });
   });
 
   it("returns 403 for read-only program admin write attempt", async () => {

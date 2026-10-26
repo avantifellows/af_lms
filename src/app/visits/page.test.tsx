@@ -51,15 +51,6 @@ const defaultSearchParams = Promise.resolve({});
 const pmSession = {
   user: { email: "pm@avantifellows.org" },
 };
-const passcodeSession = {
-  user: {},
-  isPasscodeUser: true,
-  schoolCode: "70705",
-};
-const passcodeSessionWithoutSchool = {
-  user: {},
-  isPasscodeUser: true,
-};
 const teacherSession = {
   user: { email: "teacher@avantifellows.org" },
 };
@@ -157,24 +148,6 @@ describe("VisitsListPage (server component)", () => {
 
     await expect(VisitsListPage({ searchParams: defaultSearchParams })).rejects.toThrow("REDIRECT:/");
     expect(mockRedirect).toHaveBeenCalledWith("/");
-  });
-
-  it("redirects passcode users to their school page", async () => {
-    mockGetServerSession.mockResolvedValue(passcodeSession);
-
-    await expect(VisitsListPage({ searchParams: defaultSearchParams })).rejects.toThrow("REDIRECT:/school/70705");
-    expect(mockRedirect).toHaveBeenCalledWith("/school/70705");
-    expect(mockGetUserPermission).not.toHaveBeenCalled();
-    expect(mockQuery).not.toHaveBeenCalled();
-  });
-
-  it("redirects passcode users without a school code to the dashboard", async () => {
-    mockGetServerSession.mockResolvedValue(passcodeSessionWithoutSchool);
-
-    await expect(VisitsListPage({ searchParams: defaultSearchParams })).rejects.toThrow("REDIRECT:/dashboard");
-    expect(mockRedirect).toHaveBeenCalledWith("/dashboard");
-    expect(mockGetUserPermission).not.toHaveBeenCalled();
-    expect(mockQuery).not.toHaveBeenCalled();
   });
 
   it("redirects to /dashboard when permission is missing", async () => {
@@ -358,9 +331,47 @@ describe("VisitsListPage (server component)", () => {
 
     expect(mockQuery).toHaveBeenCalledTimes(1);
     const [sql, params] = mockQuery.mock.calls[0];
-    expect(sql).toContain("WHERE v.deleted_at IS NULL AND LOWER(v.pm_email) = LOWER($1)");
-    expect(sql).toContain("LOWER(v.pm_email) = LOWER($1)");
+    expect(sql).toContain("WHERE v.deleted_at IS NULL AND LOWER(TRIM(v.pm_email)) = $1");
     expect(params).toEqual(["pm@avantifellows.org"]);
+  });
+
+  // #291: PM/SPM/PH Centre seats add every Visit at those Centres' Schools,
+  // read-only — the actor can open them but not continue or delete them.
+  describe("visit-manager Centre seats", () => {
+    const managerPermission = {
+      ...programManagerPermission,
+      scope: {
+        schools: new Set(["SC001"]),
+        centres: new Set([1]),
+        programs: new Set([1]),
+        visitManagedSchools: new Set(["SC001"]),
+      },
+    };
+
+    it("queries own Visits plus the managed Centres' Schools", async () => {
+      setupAuth(managerPermission as typeof programManagerPermission);
+      mockQuery.mockResolvedValue([]);
+
+      await VisitsListPage({ searchParams: defaultSearchParams });
+
+      const [sql, params] = mockQuery.mock.calls[0];
+      expect(sql).toContain("(LOWER(TRIM(v.pm_email)) = $1 OR v.school_code = ANY($2))");
+      expect(params).toEqual(["pm@avantifellows.org", ["SC001"]]);
+    });
+
+    it("names the visitor and offers View without Delete on someone else's Visit", async () => {
+      setupAuth(managerPermission as typeof programManagerPermission);
+      mockQuery.mockResolvedValue([
+        { ...inProgressVisit, id: 7, pm_email: "apm@avantifellows.org", pm_name: "Asha APM" },
+      ]);
+
+      render(await VisitsListPage({ searchParams: defaultSearchParams }));
+
+      expect(screen.getAllByText("Visited by Asha APM").length).toBeGreaterThanOrEqual(1);
+      expect(screen.queryByText("Continue")).not.toBeInTheDocument();
+      expect(screen.getAllByText("View")[0].closest("a")).toHaveAttribute("href", "/visits/7");
+      expect(screen.queryByTestId("delete-visit-button")).not.toBeInTheDocument();
+    });
   });
 
 });

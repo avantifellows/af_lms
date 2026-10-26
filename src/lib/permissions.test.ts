@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
-  getSchoolByPasscode,
   getFeatureAccess,
   ownsRecord,
   getProgramContextSync,
@@ -8,11 +7,18 @@ import {
   getResolvedPermission,
   canAccessSchoolSync,
   canAccessCentreSync,
+  canViewCentre,
+  getCentreConfinement,
+  isCentreSeated,
   hasMultipleSchools,
   getAccessibleSchoolCodes,
   PROGRAM_IDS,
+  isUserRole,
+  type Feature,
+  type FeatureAccess,
   type UserPermission,
 } from "./permissions";
+import { PMU_PROGRAM_ID, PMU_ROLES, isPmuRole } from "./constants";
 
 // Mock the DB module for async function tests
 vi.mock("./db", () => ({
@@ -38,20 +44,6 @@ function makePermission(overrides: Partial<UserPermission> = {}): UserPermission
 
 beforeEach(() => {
   mockQuery.mockReset();
-});
-
-describe("getSchoolByPasscode", () => {
-  it("returns school code for a valid passcode", () => {
-    expect(getSchoolByPasscode("70705123")).toBe("70705");
-  });
-
-  it("returns null for an invalid passcode", () => {
-    expect(getSchoolByPasscode("00000000")).toBeNull();
-  });
-
-  it("returns null for empty string", () => {
-    expect(getSchoolByPasscode("")).toBeNull();
-  });
 });
 
 describe("getProgramContextSync", () => {
@@ -179,26 +171,6 @@ describe("getProgramContextSync", () => {
 });
 
 describe("getFeatureAccess", () => {
-  describe("passcode users", () => {
-    it("gives edit access to students", () => {
-      const result = getFeatureAccess(null, "students", { isPasscodeUser: true });
-      expect(result.access).toBe("edit");
-      expect(result.canView).toBe(true);
-      expect(result.canEdit).toBe(true);
-    });
-
-    it("gives no access to visits", () => {
-      const result = getFeatureAccess(null, "visits", { isPasscodeUser: true });
-      expect(result.access).toBe("none");
-      expect(result.canView).toBe(false);
-    });
-
-    it("gives no access to curriculum", () => {
-      const result = getFeatureAccess(null, "curriculum", { isPasscodeUser: true });
-      expect(result.access).toBe("none");
-    });
-  });
-
   describe("null permission", () => {
     it("returns none for any feature", () => {
       expect(getFeatureAccess(null, "students").access).toBe("none");
@@ -428,11 +400,7 @@ describe("getFeatureAccess", () => {
 });
 
 describe("ownsRecord", () => {
-  it("passcode users own all records", () => {
-    expect(ownsRecord(null, 64, { isPasscodeUser: true })).toBe(true);
-  });
-
-  it("returns false for null permission (non-passcode)", () => {
+  it("returns false for null permission", () => {
     expect(ownsRecord(null, 64)).toBe(false);
   });
 
@@ -584,6 +552,38 @@ describe("resolveScope", () => {
     expect(scope.schools).toEqual(new Set(["70705", "99999"]));
     expect(scope.centres).toEqual(new Set([5, 6]));
     expect(scope.programs).toEqual(new Set([2]));
+  });
+
+  // #291: PM/SPM/PH seats make their centres' Schools visit-managed; APM and
+  // teaching seats only give school access.
+  it("collects the Schools of active visit-manager seats into visitManagedSchools", async () => {
+    mockQuery
+      .mockResolvedValueOnce([
+        { centre_id: 5, role: "spm", centre_active: true },
+        { centre_id: 6, role: "apm", centre_active: true },
+        { centre_id: 7, role: "physics", centre_active: true },
+        { centre_id: 8, role: "pm", centre_active: false },
+      ]) // seatsForUser
+      .mockResolvedValueOnce([{ code: "11111" }, { code: "22222" }, { code: "33333" }, { code: "44444" }]) // seat schools
+      .mockResolvedValueOnce([{ program_id: 1 }]) // seat programs
+      .mockResolvedValueOnce([{ code: "11111" }]); // visit-manager seat schools
+    const scope = await resolveScope(makePermission({ level: 1, school_codes: [], user_id: 42 }));
+    expect(scope.centres).toEqual(new Set([5, 6, 7, 8]));
+    // The PM seat at inactive centre 8 manages nothing.
+    expect(scope.visitManagedSchools).toEqual(new Set(["11111"]));
+    const [managedSql, managedParams] = mockQuery.mock.calls[3] as [string, unknown[]];
+    expect(managedSql).toContain("FROM centres c");
+    expect(managedParams).toEqual([[5]]);
+  });
+
+  it("manages no Schools when the user holds no visit-manager seat", async () => {
+    mockQuery
+      .mockResolvedValueOnce([{ centre_id: 6, role: "apm", centre_active: true }])
+      .mockResolvedValueOnce([{ code: "22222" }])
+      .mockResolvedValueOnce([{ program_id: 1 }]);
+    const scope = await resolveScope(makePermission({ level: 1, school_codes: [], user_id: 42 }));
+    expect(scope.visitManagedSchools).toEqual(new Set());
+    expect(mockQuery).toHaveBeenCalledTimes(3);
   });
 
   it("skips the seat lookup entirely when user_id is null", async () => {
@@ -1000,6 +1000,48 @@ describe("getStudentSchool", () => {
   });
 });
 
+describe("isPmuOnlyStudent", () => {
+  let isPmuOnlyStudent: typeof import("./permissions").isPmuOnlyStudent;
+
+  beforeEach(async () => {
+    const mod = await import("./permissions");
+    isPmuOnlyStudent = mod.isPmuOnlyStudent;
+  });
+
+  it("is true for a Student whose only current batch is JNV NVS", async () => {
+    mockQuery.mockResolvedValueOnce([{ nvs: true, other: false }]);
+    expect(await isPmuOnlyStudent(42)).toBe(true);
+  });
+
+  it("is false for a Student who also sits in a physical-centre Program", async () => {
+    mockQuery.mockResolvedValueOnce([{ nvs: true, other: true }]);
+    expect(await isPmuOnlyStudent(42)).toBe(false);
+  });
+
+  it("is false for a physical-centre Student, and for one with no batch at all", async () => {
+    mockQuery.mockResolvedValueOnce([{ nvs: false, other: true }]);
+    expect(await isPmuOnlyStudent(42)).toBe(false);
+
+    mockQuery.mockResolvedValueOnce([{ nvs: false, other: false }]);
+    expect(await isPmuOnlyStudent(42)).toBe(false);
+  });
+
+  it("is false for a Student id that matches no row", async () => {
+    mockQuery.mockResolvedValueOnce([]);
+    expect(await isPmuOnlyStudent(999)).toBe(false);
+  });
+
+  it("asks for current batches in the trusted PMU program id, never input", async () => {
+    mockQuery.mockResolvedValueOnce([]);
+    await isPmuOnlyStudent(42);
+    const [sql, params] = mockQuery.mock.calls[0];
+    expect(sql).toContain(`b_nvs.program_id = ${PMU_PROGRAM_ID}`);
+    expect(sql).toContain(`b_other.program_id IS DISTINCT FROM ${PMU_PROGRAM_ID}`);
+    expect(sql).toContain("er_other.is_current = true");
+    expect(params).toEqual([42]);
+  });
+});
+
 describe("canAccessStudent", () => {
   let canAccessStudent: typeof import("./permissions").canAccessStudent;
 
@@ -1019,24 +1061,6 @@ describe("canAccessStudent", () => {
     const result = await canAccessStudent(
       { user: { email: "t@af.org" } },
       1,
-    );
-    expect(result).toBe(false);
-  });
-
-  it("passcode user can access student in their school", async () => {
-    mockQuery.mockResolvedValueOnce([{ code: "70705", region: null, program_id: null }]);
-    const result = await canAccessStudent(
-      { isPasscodeUser: true, schoolCode: "70705" },
-      42,
-    );
-    expect(result).toBe(true);
-  });
-
-  it("passcode user cannot access student in a different school", async () => {
-    mockQuery.mockResolvedValueOnce([{ code: "99999", region: null, program_id: null }]);
-    const result = await canAccessStudent(
-      { isPasscodeUser: true, schoolCode: "70705" },
-      42,
     );
     expect(result).toBe(false);
   });
@@ -1137,15 +1161,294 @@ describe("canAccessStudent", () => {
       );
       expect(result).toBe(true);
     });
+  });
+});
 
-    it("passcode user bypasses program check (school match is sufficient)", async () => {
-      mockQuery.mockResolvedValueOnce([{ code: "70705", region: null, program_id: 64 }]);
-      const result = await canAccessStudent(
-        { isPasscodeUser: true, schoolCode: "70705" },
-        42,
-        { requireEdit: true },
-      );
-      expect(result).toBe(true);
+describe("PMU roles (JNV NVS pinned)", () => {
+  describe("role constants", () => {
+    it("isUserRole accepts both PMU roles", () => {
+      expect(isUserRole("pmu_manager")).toBe(true);
+      expect(isUserRole("pmu_govt_school_user")).toBe(true);
+    });
+
+    it("isPmuRole / PMU_ROLES come from the client-safe constants module", () => {
+      expect([...PMU_ROLES]).toEqual(["pmu_manager", "pmu_govt_school_user"]);
+      expect(isPmuRole("pmu_manager")).toBe(true);
+      expect(isPmuRole("pmu_govt_school_user")).toBe(true);
+      expect(isPmuRole("program_manager")).toBe(false);
+      expect(isPmuRole("admin")).toBe(false);
+      expect(isPmuRole(null)).toBe(false);
+      expect(PMU_PROGRAM_ID).toBe(64);
     });
   });
+
+  describe("getProgramContextSync pinning", () => {
+    const PINNED = { hasAccess: true, programIds: [64], isNVSOnly: true, hasCoEOrNodal: false };
+
+    for (const role of ["pmu_manager", "pmu_govt_school_user"] as const) {
+      it(`${role} with CoE/Nodal program_ids is pinned to NVS`, () => {
+        expect(
+          getProgramContextSync(makePermission({ role, program_ids: [1, 2] }))
+        ).toEqual(PINNED);
+      });
+
+      it(`${role} with empty program_ids is pinned to NVS`, () => {
+        expect(
+          getProgramContextSync(makePermission({ role, program_ids: null }))
+        ).toEqual(PINNED);
+      });
+
+      it(`${role} at level 3 with "all" scope is pinned to NVS`, () => {
+        expect(
+          getProgramContextSync(
+            makePermission({
+              role,
+              level: 3,
+              program_ids: [1],
+              scope: { schools: "all", centres: "all", programs: "all" },
+            })
+          )
+        ).toEqual(PINNED);
+      });
+
+      it(`${role} whose seats imply other programs is pinned to NVS`, () => {
+        expect(
+          getProgramContextSync(
+            makePermission({
+              role,
+              program_ids: [64],
+              scope: { schools: new Set(["70705"]), centres: new Set([5]), programs: new Set([1, 74]) },
+            })
+          )
+        ).toEqual(PINNED);
+      });
+    }
+  });
+
+  describe("scope resolution and centres", () => {
+    // A stale centre_positions row: seat → centre 5 at School 99999, program 1.
+    function mockStaleSeat() {
+      mockQuery.mockImplementation(async (sql: string) => {
+        if (sql.includes("FROM centre_positions")) return [{ centre_id: 5 }];
+        if (sql.includes("JOIN school s ON")) return [{ code: "99999" }];
+        if (sql.includes("FROM centres")) return [{ program_id: 1 }];
+        return [];
+      });
+    }
+
+    for (const role of ["pmu_manager", "pmu_govt_school_user"] as const) {
+      it(`${role} level 3 resolves to all Schools with no centres or programs`, async () => {
+        mockStaleSeat();
+        const permission = makePermission({ role, level: 3, school_codes: null, user_id: 42 });
+        const scope = await resolveScope(permission);
+        expect(scope).toEqual({ schools: "all", centres: new Set(), programs: new Set() });
+
+        const resolved = { ...permission, scope };
+        expect(isCentreSeated(resolved)).toBe(false);
+        expect(canAccessCentreSync(resolved, 5)).toBe(false);
+        expect(getCentreConfinement(resolved)).toEqual({ confined: false, centreIds: [] });
+        expect(canViewCentre(resolved, { centreId: 5, schoolCode: "99999" })).toBe(false);
+        expect(canAccessSchoolSync(resolved, "99999")).toBe(true);
+      });
+
+      it(`${role} level 1 with a stale seat gains no seat School, centre or program`, async () => {
+        mockStaleSeat();
+        const permission = makePermission({ role, level: 1, school_codes: ["70705"], user_id: 42 });
+        const scope = await resolveScope(permission);
+        expect(scope).toEqual({ schools: new Set(["70705"]), centres: new Set(), programs: new Set() });
+
+        const resolved = { ...permission, scope };
+        expect(canAccessSchoolSync(resolved, "70705")).toBe(true);
+        expect(canAccessSchoolSync(resolved, "99999")).toBe(false);
+        expect(isCentreSeated(resolved)).toBe(false);
+        expect(canAccessCentreSync(resolved, 5)).toBe(false);
+        expect(getCentreConfinement(resolved)).toEqual({ confined: false, centreIds: [] });
+        expect(canViewCentre(resolved, { centreId: 5, schoolCode: "70705" })).toBe(false);
+      });
+
+      it(`${role} level 2 keeps lazy regions and gains no seat scope`, async () => {
+        mockStaleSeat();
+        const permission = makePermission({
+          role, level: 2, school_codes: null, regions: ["West"], user_id: 42,
+        });
+        const scope = await resolveScope(permission);
+        expect(scope).toEqual({ schools: new Set(), centres: new Set(), programs: new Set() });
+
+        const resolved = { ...permission, scope };
+        expect(canAccessSchoolSync(resolved, "70705", "West")).toBe(true);
+        expect(canAccessSchoolSync(resolved, "99999", "East")).toBe(false);
+        expect(canViewCentre(resolved, { centreId: 5, schoolCode: "70705", schoolRegion: "West" })).toBe(false);
+      });
+    }
+  });
+
+  describe("ownsRecord", () => {
+    for (const role of ["pmu_manager", "pmu_govt_school_user"] as const) {
+      it(`${role} owns only JNV NVS records`, () => {
+        const permission = makePermission({ role, program_ids: [1, 64] });
+        expect(ownsRecord(permission, null)).toBe(false);
+        expect(ownsRecord(permission, 1)).toBe(false);
+        expect(ownsRecord(permission, "1")).toBe(false);
+        expect(ownsRecord(permission, 64)).toBe(true);
+        expect(ownsRecord(permission, "64")).toBe(true);
+      });
+    }
+  });
+
+  describe("canAccessStudent NVS narrowing", () => {
+    let canAccessStudent: typeof import("./permissions").canAccessStudent;
+
+    beforeEach(async () => {
+      canAccessStudent = (await import("./permissions")).canAccessStudent;
+    });
+
+    // Routes each permission-layer query to a fixture: a PMU row scoped to
+    // School 70705 (with a stale seat elsewhere), and a Student at `schoolCode`
+    // whose single LIMIT-1 batch program is `programId` and who does or doesn't
+    // hold any current JNV NVS batch.
+    function mockWorld(opts: {
+      role: "pmu_manager" | "pmu_govt_school_user";
+      readOnly?: boolean;
+      schoolCode?: string;
+      programId: number | null;
+      hasCurrentNvsBatch: boolean;
+    }) {
+      mockQuery.mockImplementation(async (sql: string) => {
+        if (sql.includes("FROM user_permission")) {
+          return [{
+            email: "pmu@af.org", level: 1, role: opts.role, school_codes: ["70705"],
+            regions: null, program_ids: [64], read_only: opts.readOnly ?? false, user_id: 42,
+          }];
+        }
+        if (sql.includes("has_current_nvs_batch")) {
+          return [{ has_current_nvs_batch: opts.hasCurrentNvsBatch }];
+        }
+        if (sql.includes("FROM student s")) {
+          return [{ code: opts.schoolCode ?? "70705", region: "West", program_id: opts.programId }];
+        }
+        if (sql.includes("FROM centre_positions")) return [{ centre_id: 5 }];
+        if (sql.includes("JOIN school s ON")) return [{ code: "99999" }];
+        if (sql.includes("FROM centres")) return [{ program_id: 1 }];
+        return [];
+      });
+    }
+
+    const session = { user: { email: "pmu@af.org" } };
+
+    for (const role of ["pmu_manager", "pmu_govt_school_user"] as const) {
+      it(`${role}: denies a CoE Student at an in-scope mixed School (view and edit)`, async () => {
+        mockWorld({ role, programId: 1, hasCurrentNvsBatch: false });
+        expect(await canAccessStudent(session, 7)).toBe(false);
+        expect(await canAccessStudent(session, 7, { requireEdit: true })).toBe(false);
+      });
+
+      it(`${role}: denies an unassigned Student at an in-scope School (view and edit)`, async () => {
+        mockWorld({ role, programId: null, hasCurrentNvsBatch: false });
+        expect(await canAccessStudent(session, 7)).toBe(false);
+        expect(await canAccessStudent(session, 7, { requireEdit: true })).toBe(false);
+      });
+
+      it(`${role}: denies a Student whose only current batch is Nodal`, async () => {
+        mockWorld({ role, programId: 2, hasCurrentNvsBatch: false });
+        expect(await canAccessStudent(session, 7)).toBe(false);
+        expect(await canAccessStudent(session, 7, { requireEdit: true })).toBe(false);
+      });
+
+      it(`${role}: allows a Student with a current NVS batch at an in-scope School`, async () => {
+        mockWorld({ role, programId: 64, hasCurrentNvsBatch: true });
+        expect(await canAccessStudent(session, 7)).toBe(true);
+        expect(await canAccessStudent(session, 7, { requireEdit: true })).toBe(true);
+      });
+
+      it(`${role}: allows an NVS Student even when the LIMIT-1 batch program is another`, async () => {
+        mockWorld({ role, programId: 1, hasCurrentNvsBatch: true });
+        expect(await canAccessStudent(session, 7)).toBe(true);
+        expect(await canAccessStudent(session, 7, { requireEdit: true })).toBe(true);
+      });
+
+      it(`${role}: denies an NVS Student at an out-of-scope School`, async () => {
+        mockWorld({ role, schoolCode: "99999", programId: 64, hasCurrentNvsBatch: true });
+        expect(await canAccessStudent(session, 7)).toBe(false);
+        expect(await canAccessStudent(session, 7, { requireEdit: true })).toBe(false);
+      });
+
+      it(`${role} read_only: may view but not edit an NVS Student`, async () => {
+        mockWorld({ role, readOnly: true, programId: 64, hasCurrentNvsBatch: true });
+        expect(await canAccessStudent(session, 7)).toBe(true);
+        expect(await canAccessStudent(session, 7, { requireEdit: true })).toBe(false);
+      });
+    }
+  });
+
+  describe("getFeatureAccess matrix", () => {
+    // Literal expectations from the PRD matrix — never derived from the code.
+    const EXPECTED: Record<string, FeatureAccess> = {
+      students: "edit",
+      visits: "none",
+      curriculum: "none",
+      academic_mentorship: "none",
+      holistic_mentorship: "none",
+      performance: "view",
+      summary_stats: "none",
+      pm_dashboard: "none",
+      quiz_sessions: "none",
+      teacher_feedback: "none",
+    };
+    const EXPECTED_READ_ONLY: Record<string, FeatureAccess> = {
+      ...EXPECTED,
+      students: "view",
+    };
+
+    // Every role × level × read_only × feature combination, flattened.
+    const cases = (["pmu_manager", "pmu_govt_school_user"] as const).flatMap((role) =>
+      ([1, 2, 3] as const).flatMap((level) =>
+        [false, true].flatMap((readOnly) =>
+          Object.entries(readOnly ? EXPECTED_READ_ONLY : EXPECTED).map(([feature, access]) => ({
+            role,
+            level,
+            readOnly,
+            feature: feature as Feature,
+            access,
+          }))
+        )
+      )
+    );
+
+    for (const { role, level, readOnly, feature, access } of cases) {
+      it(`${role} level ${level}${readOnly ? " read_only" : ""}: ${feature} → ${access}`, () => {
+        // CoE/Nodal program_ids must not unlock anything for PMU roles.
+        const permission = makePermission({
+          role,
+          level,
+          read_only: readOnly,
+          program_ids: [PROGRAM_IDS.COE, PROGRAM_IDS.NODAL, PROGRAM_IDS.NVS],
+          school_codes: level === 1 ? ["70705"] : null,
+          regions: level === 2 ? ["West"] : null,
+        });
+        expect(getFeatureAccess(permission, feature)).toEqual({
+          access,
+          canView: access !== "none",
+          canEdit: access === "edit",
+        });
+      });
+    }
+  });
+});
+
+describe("alumni feature (admin-only first release)", () => {
+  it("gives admins edit and read-only admins view", () => {
+    expect(getFeatureAccess(makePermission({ role: "admin", level: 3 }), "alumni")).toEqual({
+      access: "edit",
+      canView: true,
+      canEdit: true,
+    });
+    expect(getFeatureAccess(makePermission({ role: "admin", level: 3, read_only: true }), "alumni").access).toBe("view");
+  });
+
+  it.each(["teacher", "program_manager", "program_admin", "holistic_mentorship_admin", "pmu_manager", "pmu_govt_school_user"] as const)(
+    "gives %s no alumni access, even at level 3",
+    (role) => {
+      expect(getFeatureAccess(makePermission({ role, level: 3 }), "alumni").access).toBe("none");
+    },
+  );
 });

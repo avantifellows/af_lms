@@ -17,7 +17,6 @@ import { GET, POST } from "./route";
 import {
   ADMIN_SESSION,
   jsonRequest,
-  PASSCODE_SESSION,
   PM_SESSION,
 } from "../../../__test-utils__/api-test-helpers";
 import { resetCentreSchemaCheckForTests } from "@/lib/centres";
@@ -51,10 +50,7 @@ describe("GET /api/admin/centres/options", () => {
     expect(mockQuery).not.toHaveBeenCalled();
   });
 
-  it("returns 403 for passcode and non-admin Google users", async () => {
-    mockGetServerSession.mockResolvedValueOnce(PASSCODE_SESSION);
-    expect((await GET()).status).toBe(403);
-
+  it("returns 403 for non-admin Google users", async () => {
     mockGetServerSession.mockResolvedValueOnce(PM_SESSION);
     mockGetUserPermission.mockResolvedValueOnce({
       ...adminPermission,

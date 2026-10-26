@@ -5,6 +5,7 @@ import { getTestPool } from "../helpers/db";
 
 type Fixture = {
   schoolCode: string;
+  centreId: number;
   draftStudentId: number;
   unassignedStudentId: number;
   unassignedStudentExternalId: string;
@@ -33,6 +34,7 @@ test.describe("Holistic Mentorship release workflows", () => {
     try {
       const result = await pool.query<{
         school_code: string;
+        centre_id: string;
         draft_student_id: string;
         unassigned_student_id: string;
         former_student_id: string;
@@ -43,7 +45,7 @@ test.describe("Holistic Mentorship release workflows", () => {
         grade_11_phase_id: string;
         grade_12_phase_id: string;
       }>(
-        `SELECT school.code AS school_code,
+        `SELECT school.code AS school_code, centre.id AS centre_id,
                 (SELECT notes.student_id FROM holistic_mentorship_post_session_notes notes
                  WHERE notes.state = 'draft' LIMIT 1) AS draft_student_id,
                 (SELECT student.id FROM "group" school_group
@@ -55,8 +57,7 @@ test.describe("Holistic Mentorship release workflows", () => {
                  JOIN grade ON grade.id = grade_enrollment.group_id AND grade.number = 11
                  JOIN LATERAL (
                    SELECT batch.program_id FROM enrollment_record batch_enrollment
-                   JOIN "group" batch_group ON batch_group.id = batch_enrollment.group_id AND batch_group.type = 'batch'
-                   JOIN batch ON batch.id = batch_group.child_id
+                   JOIN batch ON batch.id = batch_enrollment.group_id
                    WHERE batch_enrollment.user_id = student.user_id
                      AND batch_enrollment.group_type = 'batch' AND batch_enrollment.is_current IS TRUE
                    ORDER BY array_position(ARRAY[1, 2, 64]::int[], batch.program_id), batch_enrollment.id LIMIT 1
@@ -112,6 +113,7 @@ test.describe("Holistic Mentorship release workflows", () => {
       );
       fixture = {
         schoolCode: row.school_code,
+        centreId: Number(row.centre_id),
         draftStudentId: Number(row.draft_student_id),
         unassignedStudentId: Number(row.unassigned_student_id),
         unassignedStudentExternalId: unassignedStudent.rows[0].student_id,
@@ -412,6 +414,10 @@ test.describe("Holistic Mentorship release workflows", () => {
     await expect((await autosave).status()).toBe(200);
     await holisticTeacherPage.reload();
     await expect(notes).toHaveValue("Synthetic submitted answer from the release workflow.");
+    const followUpSection = holisticTeacherPage.getByRole("region", { name: "Follow-up Notes" });
+    const addFollowUp = followUpSection.getByRole("button", { name: "Add notes" });
+    await expect(addFollowUp).toBeDisabled();
+    await expect(addFollowUp).toHaveAccessibleDescription("Submit Post-Session Notes first");
 
     holisticTeacherPage.once("dialog", (dialog) => dialog.accept());
     const submit = holisticTeacherPage.waitForResponse((response) =>
@@ -432,6 +438,25 @@ test.describe("Holistic Mentorship release workflows", () => {
     await holisticTeacherPage.getByRole("button", { name: "Save Changes" }).click();
     await expect((await correction).status()).toBe(200);
     await expect(holisticTeacherPage.getByText("Submitted Notes updated.")).toBeVisible();
+
+    // Follow-up Notes can't be deleted, so each attempt tags its own answers.
+    const token = String(Date.now());
+    await expect(addFollowUp).toBeEnabled();
+    await addFollowUpNote(holisticTeacherPage, {
+      "What challenges did the student talk about?": `Synthetic follow-up challenge ${token}`,
+    });
+    await addFollowUpNote(holisticTeacherPage, {
+      "What solutions did you suggest?": `Synthetic follow-up solution ${token}`,
+      "Was the student able to follow the action plan shared previously?": `Synthetic follow-up plan ${token}`,
+    });
+    const cards = followUpSection.locator("article");
+    await expect(cards.nth(0)).toContainText(`Synthetic follow-up solution ${token}`);
+    await expect(cards.nth(0).locator("h4")).toHaveText([
+      "What solutions did you suggest?",
+      "Was the student able to follow the action plan shared previously?",
+    ]);
+    await expect(cards.nth(1)).toContainText(`Synthetic follow-up challenge ${token}`);
+    await expect(cards.nth(1).locator("h4")).toHaveText(["What challenges did the student talk about?"]);
   });
 
   test("Holistic Admin verifies progress, CSV, read-only drill-down, Phase setup, and regeneration", async ({
@@ -620,10 +645,9 @@ test.describe("Holistic Mentorship release workflows", () => {
     holisticTeacherPage,
     pmPage,
     programAdminPage,
-    passcodePage,
   }) => {
     for (const page of [adminPage, holisticAdminPage, holisticTeacherPage,
-      pmPage, programAdminPage, passcodePage]) {
+      pmPage, programAdminPage]) {
       const deletion = await apiStatus(page,
         `/api/holistic-mentorship/privacy-deletions/${fixture.draftStudentId}`, "POST", {});
       expect(deletion).toBe(403);
@@ -634,15 +658,14 @@ test.describe("Holistic Mentorship release workflows", () => {
     expect(scopedRole).toBe(403);
   });
 
-  test("former Mentor and passcode users stay denied while scoped roles enter read-only progress", async ({
+  test("former Mentor stays denied while scoped roles enter read-only progress", async ({
     formerMentorPage,
     holisticPmPage,
     holisticProgramAdminPage,
-    passcodePage,
   }) => {
     const stale = await formerMentorPage.request.get(
       `/api/holistic-mentorship/students/${fixture.formerStudentId}/phases/${fixture.activeGrade12PhaseId}` +
-      `?school_code=${fixture.schoolCode}&academic_year=2026-2027`
+      `?school_code=${fixture.schoolCode}&program_id=1&academic_year=2026-2027`
     );
     expect(stale.status()).toBe(404);
 
@@ -709,16 +732,6 @@ test.describe("Holistic Mentorship release workflows", () => {
       await expect(page.getByRole("heading", { name: "Students & Progress" })).toBeVisible();
       await expectNoPageOverflow(page);
     }
-
-    for (const viewport of [{ width: 1280, height: 800 }, { width: 375, height: 800 }]) {
-      await passcodePage.setViewportSize(viewport);
-      const response = await passcodePage.request.get(
-        "/api/holistic-mentorship/progress?academic_year=2026-2027&program_id=1"
-      );
-      expect(response.status()).toBe(403);
-      await passcodePage.goto("/admin/holistic-mentorship");
-      await expect(passcodePage.getByRole("heading", { name: "Holistic Mentorship" })).not.toBeVisible();
-    }
   });
 });
 
@@ -727,7 +740,8 @@ function assignmentSummary(page: Page) {
 }
 
 async function openTeacherWorkspace(page: Page) {
-  await page.goto(`/school/${fixture.schoolCode}`);
+  // Centre-seated Teachers are confined to their Centre page, which hosts the Holistic tab.
+  await page.goto(`/centre/${fixture.centreId}`);
   const tab = page.getByRole("tab", { name: "Holistic Mentorship", exact: true });
   await expect(tab).toBeVisible();
   await tab.click();
@@ -745,6 +759,21 @@ async function openAdminProgress(page: Page) {
   await expect(progressTab).toBeVisible();
   if (await progressTab.getAttribute("aria-selected") !== "true") await progressTab.click();
   await expect(page.getByRole("table", { name: "Student progress results" })).toBeVisible();
+}
+
+async function addFollowUpNote(page: Page, answers: Record<string, string>) {
+  await page.getByRole("region", { name: "Follow-up Notes" }).getByRole("button", { name: "Add notes" }).click();
+  const dialog = page.getByRole("dialog", { name: "Add follow-up notes" });
+  await expect(dialog).toContainText("Follow-up notes can't be edited after saving.");
+  for (const [question, answer] of Object.entries(answers)) {
+    await dialog.getByRole("textbox", { name: question }).fill(answer);
+  }
+  const saved = page.waitForResponse((response) =>
+    response.url().includes("/follow-up-notes?") && response.request().method() === "POST"
+  );
+  await dialog.getByRole("button", { name: "Save" }).click();
+  await expect((await saved).status()).toBe(201);
+  await expect(dialog).toBeHidden();
 }
 
 function studentPhaseUrl(studentId: number, phaseId: number) {

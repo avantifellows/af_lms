@@ -1,7 +1,7 @@
 ---
 name: debug-holistic-progress
 description: Trace empty HTTP 500 responses and database timeouts in Holistic Admin progress.
-last_updated: 2026-09-17
+last_updated: 2026-09-25
 ---
 
 # Debug Holistic Admin progress
@@ -25,3 +25,35 @@ last_updated: 2026-09-17
 - For a fix, test permissions, current/historical year semantics, conflicting Grades, filters, pagination/counts/CSV, and empty/non-JSON server failures, plus representative query performance.
 - For roster performance changes, compare complete same-snapshot row digests for school and centre queries and run positive SQL fixtures for duplicate/nonempty dropout Programs, current membership, null/missing identifiers, casts, and undo behavior. Keep the read-only transaction, 15-second timeout, and no-row-output guardrails.
 - Record findings in ROUTER.md and data-access context; bump changed scaffold dates and run mex log.
+
+## Additional diagnosis and QA checks
+
+- For phase-label reports, compare real phase ID, stored position, Grade, title and
+  state across Setup, Progress and Student detail. The old synthetic Grade 12
+  placeholders were removed in #332; use the current implementation as the baseline.
+  Missing profiles do not establish that a source form was never submitted.
+- Browser error assertions should target the progress error text within an alert;
+  Next.js also renders an unrelated route announcer with that role.
+- Use `REPEATABLE READ READ ONLY` for same-snapshot SQL comparisons. `READ ONLY`
+  alone at the default READ COMMITTED isolation does not share a snapshot across
+  successive SELECTs. Compare complete rows in memory, retaining counts/digests only.
+- Measure Program selection, School response completion, and visible-list readiness
+  separately. Streamed 200 headers are not response completion. Keep all samples
+  and disclose readiness outliers without inventing a cause.
+- Verify header Back and native browser Back independently. After an in-app
+  Student-to-School return, native Back visits the Student; the School header is
+  the explicit return to Program progress. If staging lacks incident-Program phases,
+  disclose that limit and test the shared nested route with configured data.
+
+## Coverage and Unassigned list (#340)
+
+The invariants (coverage adds up and matches the Teacher roster, which filters it follows, the Unassigned list = roster unowned IDs, 422 rules, CSV shape, PM/PA scope, view-state resets and the header-Back journey) are asserted in `e2e/tests/holistic-progress.spec.ts`, `ProgressWorkspace.test.tsx` and `holistic-progress.test.ts`. Read those for the expected behaviour. Things that aren't obvious:
+
+- The Teacher roster (`GET /api/holistic-mentorship/mappings`) needs a Teacher session. Admin roles get 403 there, so parity checks use two sessions.
+- To seed exclusions locally, mutate only the **Unassigned** fixture Student (dropout, or an extra current Grade 12 `enrollment_record` for conflicting Grades) so reconciliation cannot end fixture Mappings. End Mappings directly in SQL and restore the exact rows. Do not deactivate the fixture Centre: reconciliation would end every fixture Mapping and erase draft answers.
+- A School whose active Mappings all end leaves `options.schools` and coverage but stays in `coverageSchools`.
+- `counts.total === coverage.unassigned` under Unassigned only without `phase_id`; a Phase narrows the list, not coverage.
+- Quoted CSV answer cells can contain line breaks. Parse the CSV instead of splitting lines.
+- "Clear filters" in the Unassigned empty state keeps Progress = Unassigned; the toolbar "Clear filters" resets to All Assigned.
+- The browser journey asserts the header link "Back to Students and Progress", not native browser Back.
+- Batch `enrollment_record.group_id` holds `batch.id`; see `patterns/debug-e2e-fixtures.md`.

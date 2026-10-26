@@ -40,16 +40,6 @@ describe("requireAcademicMentorshipAccess", () => {
     mockQuery.mockReset();
   });
 
-  it("denies passcode users before database access", async () => {
-    const result = await requireAcademicMentorshipAccess(
-      { user: { email: "70705@passcode.local" }, isPasscodeUser: true },
-      "view"
-    );
-
-    expect(result).toEqual({ ok: false, status: 403, error: "Forbidden" });
-    expect(mockQuery).not.toHaveBeenCalled();
-  });
-
   it("allows NVS-only program_admin edit access through the Academic Mentorship wildcard allowlist", async () => {
     mockQuery.mockResolvedValueOnce([
       {

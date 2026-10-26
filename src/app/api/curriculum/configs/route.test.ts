@@ -28,7 +28,6 @@ vi.mock("@/lib/curriculum-schema", () => ({
 import { GET, POST } from "./route";
 import {
   ADMIN_SESSION,
-  PASSCODE_SESSION,
   PM_SESSION,
 } from "../../__test-utils__/api-test-helpers";
 
@@ -64,10 +63,7 @@ describe("GET /api/curriculum/configs", () => {
     expect(mockQuery).not.toHaveBeenCalled();
   });
 
-  it("returns 403 for passcode and non-admin Google users", async () => {
-    mockGetServerSession.mockResolvedValueOnce(PASSCODE_SESSION);
-    expect((await GET(nextReq("/api/curriculum/configs"))).status).toBe(403);
-
+  it("returns 403 for non-admin Google users", async () => {
     mockGetServerSession.mockResolvedValueOnce(PM_SESSION);
     mockGetUserPermission.mockResolvedValueOnce({
       ...adminPermission,
@@ -188,17 +184,6 @@ describe("POST /api/curriculum/configs", () => {
         )
       ).status
     ).toBe(401);
-
-    mockGetServerSession.mockResolvedValueOnce(PASSCODE_SESSION);
-    expect(
-      (
-        await POST(
-          new NextRequest("http://localhost/api/curriculum/configs", {
-            method: "POST",
-          })
-        )
-      ).status
-    ).toBe(403);
 
     mockGetServerSession.mockResolvedValueOnce(PM_SESSION);
     mockGetUserPermission.mockResolvedValueOnce({

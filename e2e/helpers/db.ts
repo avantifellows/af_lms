@@ -92,15 +92,95 @@ async function applyE2eMigrations(pool: Pool): Promise<void> {
   }
 }
 
-async function seedHolisticE2eRoster(
+type HolisticE2eRoster = {
+  schoolCode: string;
+  programId: number;
+  centreName: string;
+  batchId: string;
+  batchName: string;
+  students: ReadonlyArray<{ suffix: string; firstName: string; lastName: string; grade: 11 | 12 }>;
+};
+
+const JNV_HOLISTIC_E2E_ROSTER: HolisticE2eRoster = {
+  schoolCode: "LMS75",
+  programId: 1,
+  centreName: "LMS75 Holistic E2E Centre",
+  batchId: "E2E-HOLISTIC-COE",
+  batchName: "Holistic E2E CoE Batch",
+  students: [
+    { suffix: "11-A", firstName: "Holistic", lastName: "Eleven A", grade: 11 },
+    { suffix: "11-B", firstName: "Holistic", lastName: "Eleven B", grade: 11 },
+    { suffix: "11-C", firstName: "Holistic", lastName: "Eleven C", grade: 11 },
+    { suffix: "12-A", firstName: "Holistic", lastName: "Twelve A", grade: 12 },
+    { suffix: "12-B", firstName: "Holistic", lastName: "Twelve B", grade: 12 },
+    { suffix: "12-C", firstName: "Holistic", lastName: "Twelve C", grade: 12 },
+  ],
+};
+
+// The shared Holistic fixtures cover JNV CoE only. The Admin Program-switch
+// journey also needs an EMRS CoE School whose Assignment Coverage has an
+// openable Student, which the local dump does not provide.
+const EMRS_HOLISTIC_E2E_ROSTER: HolisticE2eRoster = {
+  schoolCode: "LMS78",
+  programId: 78,
+  centreName: "LMS78 Holistic E2E EMRS Centre",
+  batchId: "E2E-HOLISTIC-EMRS",
+  batchName: "Holistic E2E EMRS Batch",
+  students: [
+    { suffix: "78-11-A", firstName: "Holistic EMRS", lastName: "Eleven A", grade: 11 },
+  ],
+};
+
+async function seedHolisticE2eEmrsScope(
   client: Pick<PoolClient, "query">
+): Promise<void> {
+  await client.query(
+    `INSERT INTO school
+       (id, code, name, inserted_at, updated_at, udise_code, af_school_category, region, state, district, program_ids)
+     VALUES
+       (900078, 'LMS78', 'LMS EMRS Fixture School', NOW(), NOW(), '75000000078', 'EMRS',
+        'LMS_FIXTURE', 'Gujarat', 'Ahmedabad', ARRAY[78]::integer[])
+     ON CONFLICT (id) DO NOTHING`
+  );
+  await seedHolisticE2eRoster(client, EMRS_HOLISTIC_E2E_ROSTER);
+
+  const planResult = await client.query<{ id: number }>(
+    `WITH created AS (
+       INSERT INTO holistic_mentorship_phase_plans (program_id, academic_year, inserted_at, updated_at)
+       VALUES ($1, $2, NOW(), NOW()) ON CONFLICT (program_id, academic_year) DO NOTHING RETURNING id
+     )
+     SELECT id FROM created UNION ALL
+     SELECT id FROM holistic_mentorship_phase_plans WHERE program_id = $1 AND academic_year = $2 LIMIT 1`,
+    [EMRS_HOLISTIC_E2E_ROSTER.programId, CURRENT_ACADEMIC_YEAR]
+  );
+  await client.query(
+    `INSERT INTO holistic_mentorship_phases
+       (phase_plan_id, grade_id, title, position, state, guidance_markdown, revision, inserted_at, updated_at)
+     SELECT $1, grade.id, 'Synthetic EMRS Grade 11 Active', 1, 'open', 'Synthetic guidance only.', 1, NOW(), NOW()
+     FROM grade WHERE grade.number = 11 ORDER BY grade.id LIMIT 1
+     ON CONFLICT (phase_plan_id, position) DO NOTHING`,
+    [Number(planResult.rows[0].id)]
+  );
+  await client.query(
+    `INSERT INTO holistic_mentorship_phase_questions (phase_id, text, position, inserted_at, updated_at)
+     SELECT phase.id, 'Synthetic: What support will help next?', 1, NOW(), NOW()
+     FROM holistic_mentorship_phases phase
+     WHERE phase.phase_plan_id = $1 AND phase.position = 1
+     ON CONFLICT (phase_id, position) DO NOTHING`,
+    [Number(planResult.rows[0].id)]
+  );
+}
+
+async function seedHolisticE2eRoster(
+  client: Pick<PoolClient, "query">,
+  roster: HolisticE2eRoster = JNV_HOLISTIC_E2E_ROSTER
 ): Promise<void> {
   const schoolResult = await client.query<{ id: number }>(
     `SELECT id FROM school WHERE code = $1 LIMIT 1`,
-    ["LMS75"]
+    [roster.schoolCode]
   );
   if (schoolResult.rows.length === 0) {
-    throw new Error("Holistic E2E fixture School LMS75 is missing");
+    throw new Error(`Holistic E2E fixture School ${roster.schoolCode} is missing`);
   }
   const schoolId = Number(schoolResult.rows[0].id);
 
@@ -109,12 +189,12 @@ async function seedHolisticE2eRoster(
        name, school_id, program_id, is_physical, is_active,
        inserted_at, updated_at
      )
-     SELECT $1, $2, 1, true, true,
+     SELECT $1, $2, $3, true, true,
             (NOW() AT TIME ZONE 'UTC'), (NOW() AT TIME ZONE 'UTC')
      WHERE NOT EXISTS (
-       SELECT 1 FROM centres WHERE school_id = $2 AND program_id = 1 AND is_active IS TRUE
+       SELECT 1 FROM centres WHERE school_id = $2 AND program_id = $3 AND is_active IS TRUE
      )`,
-    ["LMS75 Holistic E2E Centre", schoolId]
+    [roster.centreName, schoolId, roster.programId]
   );
 
   const schoolGroupResult = await client.query<{ id: number }>(
@@ -136,7 +216,7 @@ async function seedHolisticE2eRoster(
        SELECT id FROM batch WHERE batch_id = $1 LIMIT 1
      ), inserted_batch AS (
        INSERT INTO batch (name, batch_id, program_id, inserted_at, updated_at)
-       SELECT $2, $1, 1, (NOW() AT TIME ZONE 'UTC'), (NOW() AT TIME ZONE 'UTC')
+       SELECT $2, $1, $3, (NOW() AT TIME ZONE 'UTC'), (NOW() AT TIME ZONE 'UTC')
        WHERE NOT EXISTS (SELECT 1 FROM existing_batch)
        RETURNING id
      ), fixture_batch AS (
@@ -155,7 +235,7 @@ async function seedHolisticE2eRoster(
        RETURNING id
      )
      SELECT id FROM inserted_group UNION ALL SELECT id FROM existing_group LIMIT 1`,
-    ["E2E-HOLISTIC-COE", "Holistic E2E CoE Batch"]
+    [roster.batchId, roster.batchName, roster.programId]
   );
   const batchGroupId = Number(batchGroupResult.rows[0].id);
 
@@ -165,16 +245,7 @@ async function seedHolisticE2eRoster(
      WHERE student_id LIKE 'E2E-HM-%'`
   );
 
-  const students = [
-    { suffix: "11-A", firstName: "Holistic", lastName: "Eleven A", grade: 11 },
-    { suffix: "11-B", firstName: "Holistic", lastName: "Eleven B", grade: 11 },
-    { suffix: "11-C", firstName: "Holistic", lastName: "Eleven C", grade: 11 },
-    { suffix: "12-A", firstName: "Holistic", lastName: "Twelve A", grade: 12 },
-    { suffix: "12-B", firstName: "Holistic", lastName: "Twelve B", grade: 12 },
-    { suffix: "12-C", firstName: "Holistic", lastName: "Twelve C", grade: 12 },
-  ] as const;
-
-  for (const studentFixture of students) {
+  for (const studentFixture of roster.students) {
     const email = `e2e-hm-student-${studentFixture.suffix.toLowerCase()}@test.local`;
     const studentId = `E2E-HM-${studentFixture.suffix}`;
     const userResult = await client.query<{ id: number }>(
@@ -286,6 +357,7 @@ export async function resetDatabase(): Promise<void> {
       await client.query("BEGIN");
       await seedHolisticE2eRoster(client);
       await seedHolisticFixtures(client);
+      await seedHolisticE2eEmrsScope(client);
       await client.query("COMMIT");
     } catch (error) {
       await client.query("ROLLBACK");
@@ -887,4 +959,139 @@ export async function seedVisitAction(
   );
 
   return { actionId: result.rows[0].id };
+}
+
+/**
+ * Centre switcher fixture (#388), reusable by its sibling specs.
+ *
+ * Centres, all named "Switcher E2E …" so they sort after the other fixtures'
+ * Centres on the dashboard:
+ *  - alpha (A): JNV Surguja (19269), JNV CoE   — eligible
+ *  - alphaNodal (B): JNV Surguja, JNV Nodal    — eligible; same name and School
+ *    as A (the real JNV Adilabad CoE/Nodal shape)
+ *  - charlie (C): JNV Durg (19006), no Program — eligible
+ *  - delta (D): JNV Durg, JNV CoE              — eligible; at the seated user's
+ *    accessible School but not one of their seats
+ *  - inactive: JNV Surguja, is_active = false  — never listed
+ *  - schoolLess: no School                     — never listed
+ *  - outside (E): JNV Gariaband (19260)        — outside both users' scope
+ *
+ * Users (sign in with `signInAs` from e2e/fixtures/auth):
+ *  - seated: seats at A and C only → lists A, C
+ *  - schoolScoped: seatless level 1 at 19269 + 19006 → lists A, B, C, D
+ *
+ * Seed in beforeAll and remove in afterAll so other specs' Centre lists are
+ * unaffected. Seeding is idempotent (it removes any previous copy first).
+ */
+export const CENTRE_SWITCHER_USERS = {
+  seated: { name: "Switcher Seated Teacher", email: "e2e-switcher-seated@test.local" },
+  schoolScoped: { name: "Switcher School PM", email: "e2e-switcher-school@test.local" },
+} as const;
+
+export interface CentreSwitcherFixture {
+  centres: {
+    alpha: number;
+    alphaNodal: number;
+    charlie: number;
+    delta: number;
+    inactive: number;
+    schoolLess: number;
+    outside: number;
+  };
+}
+
+const CENTRE_SWITCHER_NAME_PREFIX = "Switcher E2E ";
+
+async function switcherSchoolId(pool: Pool, code: string): Promise<number> {
+  const result = await pool.query<{ id: number }>(`SELECT id FROM school WHERE code = $1`, [code]);
+  if (result.rows.length === 0) throw new Error(`Centre switcher fixture School ${code} is missing`);
+  return Number(result.rows[0].id);
+}
+
+async function insertSwitcherCentre(
+  pool: Pool,
+  name: string,
+  schoolId: number | null,
+  programId: number | null,
+  isActive = true
+): Promise<number> {
+  const result = await pool.query<{ id: number }>(
+    `INSERT INTO centres (name, school_id, program_id, is_physical, is_active, inserted_at, updated_at)
+     VALUES ($1, $2, $3, true, $4, (NOW() AT TIME ZONE 'UTC'), (NOW() AT TIME ZONE 'UTC'))
+     RETURNING id`,
+    [`${CENTRE_SWITCHER_NAME_PREFIX}${name}`, schoolId, programId, isActive]
+  );
+  return Number(result.rows[0].id);
+}
+
+async function upsertSwitcherUser(
+  pool: Pool,
+  user: { name: string; email: string },
+  schoolCodes: string[] | null
+): Promise<number> {
+  const userRows = await pool.query<{ id: number }>(
+    `WITH existing AS (
+       SELECT id FROM "user" WHERE LOWER(email) = LOWER($1) LIMIT 1
+     ), inserted AS (
+       INSERT INTO "user" (email, role, inserted_at, updated_at)
+       SELECT $1, 'teacher', (NOW() AT TIME ZONE 'UTC'), (NOW() AT TIME ZONE 'UTC')
+       WHERE NOT EXISTS (SELECT 1 FROM existing)
+       RETURNING id
+     )
+     SELECT id FROM inserted UNION ALL SELECT id FROM existing LIMIT 1`,
+    [user.email]
+  );
+  const userId = Number(userRows.rows[0].id);
+  await pool.query(
+    `INSERT INTO user_permission (
+       email, level, role, program_ids, school_codes, regions, full_name, read_only, user_id, revoked_at
+     )
+     VALUES ($1, 1, 'teacher', ARRAY[1, 2], $2, NULL, $3, false, $4, NULL)
+     ON CONFLICT (email) DO UPDATE SET
+       level = 1, role = 'teacher', program_ids = ARRAY[1, 2], school_codes = $2,
+       regions = NULL, full_name = $3, read_only = false, user_id = $4, revoked_at = NULL`,
+    [user.email, schoolCodes, user.name, userId]
+  );
+  return userId;
+}
+
+export async function removeCentreSwitcherFixture(pool: Pool): Promise<void> {
+  const emails = Object.values(CENTRE_SWITCHER_USERS).map((user) => user.email);
+  await pool.query(
+    `DELETE FROM centre_positions
+     WHERE centre_id IN (SELECT id FROM centres WHERE name LIKE $1)
+        OR user_id IN (SELECT id FROM "user" WHERE email = ANY($2))`,
+    [`${CENTRE_SWITCHER_NAME_PREFIX}%`, emails]
+  );
+  await pool.query(`DELETE FROM centres WHERE name LIKE $1`, [`${CENTRE_SWITCHER_NAME_PREFIX}%`]);
+  await pool.query(`DELETE FROM user_permission WHERE email = ANY($1)`, [emails]);
+}
+
+export async function seedCentreSwitcherFixture(pool: Pool): Promise<CentreSwitcherFixture> {
+  await removeCentreSwitcherFixture(pool);
+  const surguja = await switcherSchoolId(pool, "19269");
+  const durg = await switcherSchoolId(pool, "19006");
+  const gariaband = await switcherSchoolId(pool, "19260");
+
+  const centres = {
+    alpha: await insertSwitcherCentre(pool, "Alpha", surguja, 1),
+    alphaNodal: await insertSwitcherCentre(pool, "Alpha", surguja, 2),
+    charlie: await insertSwitcherCentre(pool, "Charlie", durg, null),
+    delta: await insertSwitcherCentre(pool, "Delta", durg, 1),
+    inactive: await insertSwitcherCentre(pool, "Inactive", surguja, 1, false),
+    schoolLess: await insertSwitcherCentre(pool, "Schoolless", null, 1),
+    outside: await insertSwitcherCentre(pool, "Outside", gariaband, 1),
+  };
+
+  const seatedUserId = await upsertSwitcherUser(pool, CENTRE_SWITCHER_USERS.seated, null);
+  for (const centreId of [centres.alpha, centres.charlie]) {
+    await pool.query(
+      `INSERT INTO centre_positions (centre_id, role, user_id, inserted_at, updated_at)
+       VALUES ($1, 'physics', $2, (NOW() AT TIME ZONE 'UTC'), (NOW() AT TIME ZONE 'UTC'))`,
+      [centreId, seatedUserId]
+    );
+  }
+  await upsertSwitcherUser(pool, CENTRE_SWITCHER_USERS.schoolScoped, ["19269", "19006"]);
+
+  return { centres };
 }

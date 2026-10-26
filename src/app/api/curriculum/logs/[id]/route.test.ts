@@ -27,7 +27,6 @@ import {
   getUserPermission,
 } from "@/lib/permissions";
 import {
-  PASSCODE_SESSION,
   TEACHER_SESSION,
   routeParams,
 } from "../../../__test-utils__/api-test-helpers";
@@ -580,24 +579,6 @@ describe("PATCH /api/curriculum/logs/[id]", () => {
     expect(mockWithTransaction).not.toHaveBeenCalled();
   });
 
-  it("rejects passcode users before loading the log", async () => {
-    mockSession.mockResolvedValue(PASSCODE_SESSION);
-
-    const res = await PATCH(
-      jsonReq({
-        log_date: "2026-02-16",
-        duration_minutes: 120,
-        topic_ids: [102],
-      }),
-      routeParams({ id: "12" })
-    );
-
-    expect(res.status).toBe(403);
-    expect(mockGetUserPermission).not.toHaveBeenCalled();
-    expect(mockQuery).not.toHaveBeenCalled();
-    expect(mockWithTransaction).not.toHaveBeenCalled();
-  });
-
   it("rejects cross-school log ID edits by the stored row scope", async () => {
     mockCanAccessSchoolSync.mockReturnValue(false);
     mockQuery
@@ -928,17 +909,6 @@ describe("DELETE /api/curriculum/logs/[id]", () => {
     const res = await DELETE(deleteReq(), routeParams({ id: "12" }));
 
     expect(res.status).toBe(403);
-    expect(mockQuery).not.toHaveBeenCalled();
-    expect(mockWithTransaction).not.toHaveBeenCalled();
-  });
-
-  it("rejects passcode users before loading the log", async () => {
-    mockSession.mockResolvedValue(PASSCODE_SESSION);
-
-    const res = await DELETE(deleteReq(), routeParams({ id: "12" }));
-
-    expect(res.status).toBe(403);
-    expect(mockGetUserPermission).not.toHaveBeenCalled();
     expect(mockQuery).not.toHaveBeenCalled();
     expect(mockWithTransaction).not.toHaveBeenCalled();
   });

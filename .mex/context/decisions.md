@@ -16,7 +16,7 @@ edges:
     condition: when a decision relates to the reads-vs-writes split
   - target: context/permissions.md
     condition: when a decision relates to access control
-last_updated: 2026-06-25
+last_updated: 2026-09-29
 ---
 
 # Decisions
@@ -50,13 +50,13 @@ last_updated: 2026-06-25
 **Alternatives considered:** Per-route boolean flags (rejected — unauditable, drifts); RBAC library (rejected — the program/scope/seat axes don't map cleanly).
 **Consequences:** All gating funnels through `src/lib/permissions.ts` (+ `src/lib/visits-policy.ts` for visits). See `context/permissions.md`. Adding a feature means adding a matrix row.
 
-### Dual auth: Google OAuth + school passcode (NextAuth v4)
-**Date:** 2025-11-27
+### Google-only auth (NextAuth v4)
+**Date:** 2025-11-27 (Google-only since Issue #361, ADR 0007)
 **Status:** Active
-**Decision:** NextAuth v4 with a Google provider for staff and a passcode `CredentialsProvider` for school users without Google; dev-login personas added only when `NODE_ENV !== "production"`.
-**Reasoning:** Field schools often lack Google accounts but need student access; staff need SSO. Passcode users are deliberately restricted to the `students` feature only.
-**Alternatives considered:** Google-only (rejected — locks out passcode schools); custom session layer (rejected — NextAuth already handles JWT/session).
-**Consequences:** Routes must handle `session.isPasscodeUser` explicitly — passcode users are blocked from visits and most features. Tests reach the passcode `authorize` at `provider.options.authorize`.
+**Decision:** NextAuth v4 with a single Google provider; dev-login personas added only when `NODE_ENV !== "production"`.
+**Reasoning:** Staff and School users sign in with Google; School users get the dedicated PMU roles (ADR 0007) instead of a shared school login.
+**Alternatives considered:** A separate credentials login for Schools (rejected — ADR 0007); custom session layer (rejected — NextAuth already handles JWT/session).
+**Consequences:** The session carries only the Google user; access always comes from the `user_permission` row. Old JWTs from the retired login are rejected by `isRetiredToken` (`src/lib/retired-session.ts`).
 
 ### Visit action types as a per-type registry (config + validator + form)
 **Date:** 2026-03-06

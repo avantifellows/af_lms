@@ -36,6 +36,9 @@ export async function GET(request: NextRequest) {
   const testId = (searchParams.get("testId") || "").trim();
   const type = (searchParams.get("type") || "questions").trim();
   const download = (searchParams.get("download") || "").trim() === "1";
+  // Regional language code (e.g. "hi"): the CMS prints each question in English with that
+  // language underneath. Omitted = English only.
+  const lang = (searchParams.get("lang") || "").trim();
 
   if (!testId) {
     return NextResponse.json({ error: "testId is required" }, { status: 400 });
@@ -43,12 +46,16 @@ export async function GET(request: NextRequest) {
   if (!PDF_TYPES.includes(type)) {
     return NextResponse.json({ error: "Invalid type" }, { status: 400 });
   }
+  if (lang && !/^[a-z]{2}$/.test(lang)) {
+    return NextResponse.json({ error: "Invalid lang" }, { status: 400 });
+  }
 
   // The CMS resolves a test by id alone (nex-gen-cms#177).
   const cmsUrl =
     `${cms.url}/api/service/test-pdf` +
     `?id=${encodeURIComponent(testId)}` +
-    `&type=${encodeURIComponent(type)}`;
+    `&type=${encodeURIComponent(type)}` +
+    (lang && lang !== "en" ? `&lang_code=${encodeURIComponent(lang)}` : "");
 
   let response: Response;
   try {

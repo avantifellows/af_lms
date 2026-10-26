@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { CURRENT_ACADEMIC_YEAR, PROGRAM_ATTRIBUTION_ORDER } from "@/lib/constants";
+import { CURRENT_ACADEMIC_YEAR, PROGRAM_ATTRIBUTION_ORDER, PROGRAM_IDS } from "@/lib/constants";
 import type { Student } from "@/components/StudentTable";
 
 const mocks = vi.hoisted(() => ({
@@ -108,6 +108,57 @@ describe("getSchoolRoster", () => {
     expect(students[0].grade).toBe(12); // keeps the highest grade
     expect(issues).toHaveLength(1);
     expect(issues[0].type).toBe("duplicate_grade");
+  });
+
+  it("reads exam registrations for physical-centre Students", async () => {
+    mocks.mockQuery.mockResolvedValueOnce([
+      makeStudent({
+        student_pk_id: "5",
+        program_id: PROGRAM_IDS.MAHARASHTRA_COACHING_TESTPREP,
+        student_program_ids: [PROGRAM_IDS.MAHARASHTRA_COACHING_TESTPREP],
+      }),
+    ]);
+
+    await getSchoolRoster("school-1");
+
+    const examCall = mocks.mockQuery.mock.calls.find(([sql]) =>
+      sql.includes("FROM student_exam_record ser"),
+    );
+    expect(examCall).toBeDefined();
+    expect(examCall![1]).toEqual([[5]]);
+  });
+
+  it("leaves JNV NVS Students out of the exam read — a physical-centre feature", async () => {
+    mocks.mockQuery.mockResolvedValueOnce([
+      makeStudent({
+        student_pk_id: "5",
+        program_id: PROGRAM_IDS.NVS,
+        student_program_ids: [PROGRAM_IDS.NVS],
+      }),
+    ]);
+
+    const { students } = await getSchoolRoster("school-1");
+
+    expect(
+      mocks.mockQuery.mock.calls.some(([sql]) => sql.includes("FROM student_exam_record ser")),
+    ).toBe(false);
+    expect(students[0].exam_records).toBeUndefined();
+  });
+
+  it("keeps a Student who sits in a physical-centre Program as well as JNV NVS", async () => {
+    mocks.mockQuery.mockResolvedValueOnce([
+      makeStudent({
+        student_pk_id: "5",
+        program_id: PROGRAM_IDS.NVS,
+        student_program_ids: [PROGRAM_IDS.NVS, PROGRAM_IDS.MAHARASHTRA_COACHING_TESTPREP],
+      }),
+    ]);
+
+    await getSchoolRoster("school-1");
+
+    expect(
+      mocks.mockQuery.mock.calls.some(([sql]) => sql.includes("FROM student_exam_record ser")),
+    ).toBe(true);
   });
 });
 

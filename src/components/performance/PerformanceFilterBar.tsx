@@ -40,12 +40,14 @@ interface Props {
   onStreamChange: (stream: string | null) => void;
   onSubjectChange: (subject: string | null) => void;
   onFullViewChange: (view: FullTestView) => void;
+  /** JNV NVS: per-test full tests only, so just Grade and Stream. */
+  isNvs?: boolean;
 }
 
 /**
  * The Performance tab's filters as one bordered row of uniform button groups:
  * Grade · Test grade · Test type · Stream, then Subject (chapter tests) or
- * View (full tests). Teachers missed the <select>s that used to sit between
+ * View (full tests); JNV NVS gets only Grade · Stream. Teachers missed the <select>s that used to sit between
  * pill rows (#326), so every filter now has the same shape. Purely
  * presentational — state and URL handling stay in PerformanceTab.
  */
@@ -65,7 +67,10 @@ export default function PerformanceFilterBar({
   onStreamChange,
   onSubjectChange,
   onFullViewChange,
+  isNvs = false,
 }: Props) {
+  // The controls NVS drops. Decided once so each group below keeps one check.
+  const showExtras = selectedGrade != null && !isNvs;
   return (
     <div className="rounded-xl border border-border bg-bg-card-alt/50 p-3 md:p-4 flex flex-wrap items-center gap-x-6 gap-y-3">
       {gradeControl}
@@ -73,7 +78,7 @@ export default function PerformanceFilterBar({
       {/* Test Grade — the grade the test targets, which can differ from the
           students' grade (e.g. a grade-12 batch sitting an 11th-grade test).
           Options come from the loaded test set. */}
-      {selectedGrade != null && availableTestGrades.length > 0 && (
+      {showExtras && availableTestGrades.length > 0 && (
         <SegmentedControl
           label="Test grade"
           options={[
@@ -85,7 +90,7 @@ export default function PerformanceFilterBar({
         />
       )}
 
-      {selectedGrade != null && (
+      {showExtras && (
         <SegmentedControl<TestCategory>
           label="Test type"
           options={[
@@ -110,7 +115,7 @@ export default function PerformanceFilterBar({
       )}
 
       {/* Subject — Chapter Tests only */}
-      {selectedGrade != null && testCategory === "chapter" && availableSubjects.length > 0 && (
+      {showExtras && testCategory === "chapter" && availableSubjects.length > 0 && (
         <SegmentedControl
           label="Subject"
           options={[
@@ -123,7 +128,7 @@ export default function PerformanceFilterBar({
       )}
 
       {/* Per Test / Cumulative — Full Tests only */}
-      {selectedGrade != null && testCategory === "full" && (
+      {showExtras && testCategory === "full" && (
         <SegmentedControl<FullTestView>
           label="View"
           options={[

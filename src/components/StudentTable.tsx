@@ -4,6 +4,11 @@ import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import EditStudentModal, { Batch } from "./EditStudentModal";
 import {
+  formatSessionsApplied,
+  MASKED_PASSWORD,
+  type StudentExamSummary,
+} from "@/lib/competitive-exams";
+import {
   Card,
   Badge,
   Button,
@@ -13,7 +18,13 @@ import {
 } from "@/components/ui";
 import { DocumentsList } from "@/components/documents/DocumentsList";
 import { PROGRAM_IDS, PROGRAM_ID_TO_LABEL } from "@/lib/constants";
+import {
+  formatExamPreparingFor,
+  matchesStreamFilter,
+  matchesStudentSearch,
+} from "@/lib/stream-rules";
 import { getCategoryColor } from "@/lib/student-utils";
+import { g10BoardChoice } from "@/lib/student-addition-fields";
 
 export interface Student {
   group_user_id: string;
@@ -58,6 +69,10 @@ export interface Student {
   guardian_profession?: string | null;
   annual_family_income?: string | null;
   monthly_family_income?: string | null;
+  tshirt_size?: string | null;
+  track_pant_size?: string | null;
+  /** Exam registrations for this Student; never carries the portal password. */
+  exam_records?: StudentExamSummary[];
   program_name: string | null;
   program_id: number | null;
   student_program_ids?: Array<number | string> | null;
@@ -84,8 +99,7 @@ interface StudentTableProps {
   canDropoutStudent?: boolean;
   selectedProgramId?: number | null;
   dropoutProgramIds?: number[] | null;
-  userProgramIds?: number[] | null; // null = owns all (admin/passcode)
-  isPasscodeUser?: boolean;
+  userProgramIds?: number[] | null; // null = owns all (admin)
   isAdmin?: boolean;
   grades: Grade[];
   batches?: Batch[];
@@ -97,11 +111,21 @@ interface StudentTableProps {
   selectedGrade?: string;
   onGradeChange?: (grade: string) => void;
   selectedStream?: string;
+  /** Parent-owned roster search; narrows both the Active and Dropout lists. */
+  searchQuery?: string;
   hideGradeFilterUI?: boolean;
   // Called after a save/upload (in addition to the internal router.refresh) so
   // the parent can refetch data it owns — e.g. the consent map behind the
   // admission summary.
   onDataChanged?: () => void;
+  // Intervention flags (parent-owned). `onOpenInterventionFlag` is passed only
+  // when the viewer may use flags; `flaggedOnly` narrows active students to
+  // those with an open flag.
+  openFlagStudentIds?: Set<string>;
+  onOpenInterventionFlag?: (student: Student) => void;
+  /** False for read-only viewers: they get "View flag" only, never "Flag". */
+  canRaiseInterventionFlag?: boolean;
+  flaggedOnly?: boolean;
 }
 
 function studentBelongsToProgram(student: Student, programId: number) {
@@ -148,12 +172,22 @@ interface StudentCardProps {
   onDropout: () => void;
   onUndoDropout: () => void;
   isDropoutView?: boolean;
+  /** Student has an open intervention flag (shows the marker). */
+  hasOpenFlag?: boolean;
+  /** Present when the viewer may use intervention flags; opens the flag dialog. */
+  onOpenFlag?: () => void;
   /**
    * Bumped by the parent when something outside this card may have changed
    * the student's documents (e.g. an upload via EditStudentModal). Forwarded
    * to the inline DocumentsList so it refetches.
    */
   documentsRefreshNonce?: number;
+  /**
+   * JNV NVS card: shows "Exam Preparing For" in place of Program and Stream,
+   * limits the expanded details to the Edit Student fields, and hides the
+   * Documents list.
+   */
+  isNvs?: boolean;
 }
 
 // Coerce a `string | null` PK into a safe positive integer; rejects NaN +
@@ -164,6 +198,44 @@ function parseStudentPkId(raw: string | null): number | null {
   if (!/^\d+$/.test(raw)) return null;
   const n = Number.parseInt(raw, 10);
   return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+// The expanded card's exam table. The password column is a mask: the stored
+// value never leaves the Exams tab of Edit Student, so the roster can only say
+// whether one is on file. The Sessions column appears only for exams that run
+// more than once a year, so it isn't an empty column for everyone else.
+function ExamRegistrationsTable({ records }: { records: StudentExamSummary[] }) {
+  const showSessions = records.some((record) => record.sessions_applied?.length);
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-left text-sm">
+        <thead>
+          <tr className="text-xs uppercase tracking-wide text-text-muted">
+            <th className="pb-2 pr-4 font-semibold">Exam</th>
+            <th className="pb-2 pr-4 font-semibold">Application no.</th>
+            <th className="pb-2 pr-4 font-semibold">Password</th>
+            {showSessions && <th className="pb-2 font-semibold">Sessions</th>}
+          </tr>
+        </thead>
+        <tbody>
+          {records.map((record) => (
+            <tr key={record.id} className="border-t border-border">
+              <td className="py-2 pr-4 font-medium text-gray-700">{record.exam_name}</td>
+              <td className="py-2 pr-4 text-gray-700">{record.application_number || "—"}</td>
+              <td className="py-2 pr-4 text-gray-700">
+                {record.has_password ? MASKED_PASSWORD : "—"}
+              </td>
+              {showSessions && (
+                <td className="py-2 text-gray-700">
+                  {formatSessionsApplied(record.sessions_applied) || "—"}
+                </td>
+              )}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 // A compact labeled field for the collapsed card summary grid.
@@ -184,6 +256,43 @@ function KeyField({
   );
 }
 
+function formatCwsn(value: boolean | null | undefined): string {
+  if (value == null) return "—";
+  return value ? "Yes" : "No";
+}
+
+// Edit Student offers CBSE or Others, so the card says the same rather than
+// the long board name the record happens to hold. A blank stays "—" although
+// Edit shows Others for it: Others is stored as null, but so is a board
+// nobody ever entered, and "Others" would claim a board for those Students.
+function formatG10Board(value: string | null | undefined): string | null {
+  return value?.trim() ? g10BoardChoice(value) : null;
+}
+
+// The Edit Student fields an NVS card's summary doesn't already show. The
+// contact and household details are not among them: they are collected for
+// physical centres only (#431), so Edit Student doesn't offer them here.
+function NvsDetailGroups({ student }: { student: Student }) {
+  return (
+    <>
+      <DetailGroup title="Personal">
+        <DetailField
+          label="Children with Special Needs (CWSN)"
+          value={formatCwsn(student.physically_handicapped)}
+        />
+        <DetailField label="Father Name" value={student.father_name} />
+        <DetailField label="Annual Family Income" value={student.annual_family_income} />
+      </DetailGroup>
+
+      <DetailGroup title="Academic">
+        <DetailField label="Board Stream" value={student.board_stream} />
+        <DetailField label="G10 board" value={formatG10Board(student.g10_board)} />
+        <DetailField label="Grade 10 Roll no" value={student.g10_roll_no} />
+      </DetailGroup>
+    </>
+  );
+}
+
 // fallow-ignore-next-line complexity
 function StudentCard({
   student,
@@ -194,11 +303,19 @@ function StudentCard({
   onDropout,
   onUndoDropout,
   isDropoutView = false,
+  hasOpenFlag = false,
+  onOpenFlag,
   documentsRefreshNonce,
+  isNvs = false,
 }: StudentCardProps) {
   const [expanded, setExpanded] = useState(false);
   const isDropout = isDropoutView || student.status === "dropout";
   const studentPkId = parseStudentPkId(student.student_pk_id);
+  // "Exams applied" tags, and the table behind them. Exam registrations are
+  // collected at physical centres only (#434), like uniform sizes and
+  // documents (#433), so the JNV NVS card carries none. The roster never
+  // carries the portal password either — only whether one is stored.
+  const examRecords = isNvs ? [] : (student.exam_records ?? []);
 
   return (
     <Card elevation="md" className="overflow-hidden">
@@ -216,6 +333,12 @@ function StudentCard({
               <Badge variant="info">Grade {student.grade}</Badge>
             )}
             {isDropout && <Badge variant="danger">Dropout</Badge>}
+            {hasOpenFlag && <Badge variant="warning">Needs intervention</Badge>}
+            {examRecords.map((record) => (
+              <Badge key={record.id} variant="accent">
+                {record.exam_name}
+              </Badge>
+            ))}
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <Button
@@ -254,13 +377,26 @@ function StudentCard({
               {student.category || "—"}
             </span>
           </KeyField>
-          <KeyField label="Program">{student.program_name || "—"}</KeyField>
+          {isNvs ? (
+            <KeyField label="Exam Preparing For">
+              {student.stream?.trim()
+                ? formatExamPreparingFor(student.stream)
+                : "—"}
+            </KeyField>
+          ) : (
+            <KeyField label="Program">{student.program_name || "—"}</KeyField>
+          )}
           <KeyField label="DOB">{formatDate(student.date_of_birth)}</KeyField>
         </div>
 
         {/* Action buttons */}
-        {(canEditStudent || canDropout) && !isDropout && (
+        {(canEditStudent || canDropout || onOpenFlag) && !isDropout && (
           <div className="mt-3 flex items-center justify-end gap-2">
+            {onOpenFlag && (
+              <Button variant="ghost" size="sm" onClick={onOpenFlag}>
+                {hasOpenFlag ? "View flag" : "Flag"}
+              </Button>
+            )}
             {canEditStudent && (
               <Button variant="ghost" size="sm" onClick={onEdit}>
                 Edit
@@ -273,11 +409,19 @@ function StudentCard({
             )}
           </div>
         )}
-        {canUndoDropout && isDropout && (
-          <div className="mt-3 flex justify-end">
-            <Button variant="ghost" size="sm" onClick={onUndoDropout}>
-              Undo Dropout
-            </Button>
+        {isDropout && (canUndoDropout || onOpenFlag) && (
+          <div className="mt-3 flex justify-end gap-2">
+            {/* Flags stay reachable after dropout so they can be resolved. */}
+            {onOpenFlag && (
+              <Button variant="ghost" size="sm" onClick={onOpenFlag}>
+                {hasOpenFlag ? "View flag" : "Flag"}
+              </Button>
+            )}
+            {canUndoDropout && (
+              <Button variant="ghost" size="sm" onClick={onUndoDropout}>
+                Undo Dropout
+              </Button>
+            )}
           </div>
         )}
       </div>
@@ -286,80 +430,111 @@ function StudentCard({
       {expanded && (
         <div className="space-y-3 border-t border-border bg-bg-card-alt px-4 pb-4 pt-4">
           {/* Phone / Gender / Category / Program now live in the always-visible
-              card summary above, so the expanded view covers the rest. */}
-          <DetailGroup title="Personal">
-            <DetailField
-              label="Stream"
-              value={student.stream}
-              className="capitalize"
-            />
-            <DetailField
-              label="Email"
-              value={student.email}
-              className="truncate"
-            />
-          </DetailGroup>
+              card summary above, so the expanded view covers the rest. Every
+              field here is one Edit Student can change, bar the locked
+              identifiers it shows read-only. A JNV NVS card stays trimmed to
+              the fields Edit Student offers under that program (#433, #431). */}
+          {isNvs ? (
+            <NvsDetailGroups student={student} />
+          ) : (
+            <>
+            <DetailGroup title="Personal">
+              <DetailField
+                label="Stream"
+                value={student.stream}
+                className="capitalize"
+              />
+              <DetailField
+                label="Email"
+                value={student.email}
+                className="truncate"
+              />
+              <DetailField
+                label="Children with Special Needs (CWSN)"
+                value={formatCwsn(student.physically_handicapped)}
+              />
+            </DetailGroup>
 
-          <DetailGroup title="Academic">
-            <DetailField label="Board Stream" value={student.board_stream} />
-            <DetailField label="School Medium" value={student.school_medium} />
-          </DetailGroup>
+            <DetailGroup title="Academic">
+              <DetailField label="Board Stream" value={student.board_stream} />
+              <DetailField label="G10 board" value={formatG10Board(student.g10_board)} />
+              <DetailField label="Grade 10 Roll no" value={student.g10_roll_no} />
+            </DetailGroup>
 
-          <DetailGroup title="Contact & Address">
-            <DetailField label="WhatsApp" value={student.whatsapp_phone} />
-            <DetailField label="Address" value={student.address} />
-            <DetailField label="City" value={student.city} />
-            <DetailField label="District" value={student.district} />
-            <DetailField label="State" value={student.state} />
-            <DetailField label="Pincode" value={student.pincode} />
-          </DetailGroup>
+            <DetailGroup title="Contact & Address">
+              <DetailField label="WhatsApp" value={student.whatsapp_phone} />
+              <DetailField label="Address" value={student.address} />
+              <DetailField label="City" value={student.city} />
+              <DetailField label="District" value={student.district} />
+              <DetailField label="State" value={student.state} />
+              <DetailField label="Pincode" value={student.pincode} />
+            </DetailGroup>
 
-          <DetailGroup title="Father">
-            <DetailField label="Name" value={student.father_name} />
-            <DetailField label="Phone" value={student.father_phone} />
-            <DetailField label="Profession" value={student.father_profession} />
-            <DetailField
-              label="Education Level"
-              value={student.father_education_level}
-            />
-          </DetailGroup>
+            <DetailGroup title="Father">
+              <DetailField label="Name" value={student.father_name} />
+              <DetailField label="Phone" value={student.father_phone} />
+              <DetailField label="Profession" value={student.father_profession} />
+              <DetailField
+                label="Education Level"
+                value={student.father_education_level}
+              />
+            </DetailGroup>
 
-          <DetailGroup title="Mother">
-            <DetailField label="Name" value={student.mother_name} />
-            <DetailField label="Phone" value={student.mother_phone} />
-            <DetailField label="Profession" value={student.mother_profession} />
-            <DetailField
-              label="Education Level"
-              value={student.mother_education_level}
-            />
-          </DetailGroup>
+            <DetailGroup title="Mother">
+              <DetailField label="Name" value={student.mother_name} />
+              <DetailField label="Phone" value={student.mother_phone} />
+              <DetailField label="Profession" value={student.mother_profession} />
+              <DetailField
+                label="Education Level"
+                value={student.mother_education_level}
+              />
+            </DetailGroup>
 
-          <DetailGroup title="Guardian">
-            <DetailField label="Name" value={student.guardian_name} />
-            <DetailField label="Relation" value={student.guardian_relation} />
-            <DetailField label="Phone" value={student.guardian_phone} />
-            <DetailField
-              label="Profession"
-              value={student.guardian_profession}
-            />
-            <DetailField
-              label="Education Level"
-              value={student.guardian_education_level}
-            />
-          </DetailGroup>
+            <DetailGroup title="Guardian">
+              <DetailField label="Name" value={student.guardian_name} />
+              <DetailField label="Relation" value={student.guardian_relation} />
+              <DetailField label="Phone" value={student.guardian_phone} />
+              <DetailField
+                label="Profession"
+                value={student.guardian_profession}
+              />
+              <DetailField
+                label="Education Level"
+                value={student.guardian_education_level}
+              />
+            </DetailGroup>
 
-          <DetailGroup title="Socio-economic">
-            <DetailField
-              label="Annual Family Income"
-              value={student.annual_family_income}
-            />
-            <DetailField
-              label="Monthly Family Income"
-              value={student.monthly_family_income}
-            />
-          </DetailGroup>
+            <DetailGroup title="Socio-economic">
+              <DetailField
+                label="Annual Family Income"
+                value={student.annual_family_income}
+              />
+              <DetailField
+                label="Monthly Family Income"
+                value={student.monthly_family_income}
+              />
+            </DetailGroup>
 
-          {studentPkId !== null && (
+            {/* Uniforms are ordered for physical centres only, as in Edit
+                Student (#433) — this branch is already centres-only. */}
+            <DetailGroup title="Uniform">
+              <DetailField label="T-shirt Size" value={student.tshirt_size} />
+              <DetailField label="Track Pant Size" value={student.track_pant_size} />
+            </DetailGroup>
+            </>
+          )}
+
+          {examRecords.length > 0 && (
+            <section className="rounded-lg border border-border bg-bg-card p-4 shadow-sm">
+              <h4 className="mb-3 border-b border-border pb-2 text-xs font-bold uppercase tracking-wide text-text-muted">
+                Exam Registrations
+              </h4>
+              <ExamRegistrationsTable records={examRecords} />
+            </section>
+          )}
+
+          {/* Document collection is for physical-centre programs; JNV NVS Students have none. */}
+          {studentPkId !== null && !isNvs && (
             <section className="rounded-lg border border-border bg-bg-card p-4 shadow-sm">
               <h4 className="mb-3 border-b border-border pb-2 text-xs font-bold uppercase tracking-wide text-text-muted">
                 Documents
@@ -531,15 +706,19 @@ export default function StudentTable({
   dropoutProgramIds = null,
   userProgramIds = null,
   isAdmin = false,
-  isPasscodeUser = false,
   grades,
   batches = [],
   nvsStreams = [],
   selectedGrade: controlledGrade,
   onGradeChange,
   selectedStream = "all",
+  searchQuery = "",
   hideGradeFilterUI = false,
   onDataChanged,
+  openFlagStudentIds,
+  onOpenInterventionFlag,
+  canRaiseInterventionFlag = true,
+  flaggedOnly = false,
 }: StudentTableProps) {
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [dropoutStudent, setDropoutStudent] = useState<Student | null>(null);
@@ -578,7 +757,7 @@ export default function StudentTable({
   // incorrectly) limited to NVS students only.
   const canEditStudentInSelectedProgram = (student: Student): boolean => {
     if (!canEditStudentEntry || effectiveProgramId == null) return false;
-    if (isPasscodeUser || !student.student_pk_id) return false;
+    if (!student.student_pk_id) return false;
     if (!studentBelongsToProgram(student, effectiveProgramId)) return false;
     return userCanManageProgram(isAdmin, userProgramIds, effectiveProgramId);
   };
@@ -597,7 +776,7 @@ export default function StudentTable({
     if (!allowed) return false;
     if (dropoutProgramIds && !dropoutProgramIds.includes(effectiveProgramId))
       return false;
-    if (isPasscodeUser || !student.student_pk_id) return false;
+    if (!student.student_pk_id) return false;
     if (!studentBelongsToProgram(student, effectiveProgramId)) return false;
     return userCanManageProgram(isAdmin, userProgramIds, effectiveProgramId);
   };
@@ -606,7 +785,6 @@ export default function StudentTable({
     Boolean(
       canDropoutStudent &&
       effectiveProgramId === PROGRAM_IDS.NVS &&
-      !isPasscodeUser &&
       student.student_pk_id &&
       student.can_undo_nvs_dropout &&
       (isAdmin || userProgramIds?.includes(PROGRAM_IDS.NVS)) &&
@@ -626,11 +804,15 @@ export default function StudentTable({
   ].sort((a, b) => a - b);
 
   // Filter students by selected grade
+  const hasOpenFlag = (student: Student) =>
+    student.student_pk_id != null &&
+    Boolean(openFlagStudentIds?.has(student.student_pk_id));
   const filteredStudents = currentStudents.filter(
     (student) =>
       (selectedGrade === "all" || student.grade === parseInt(selectedGrade)) &&
-      (selectedStream === "all" ||
-        student.stream?.toLowerCase() === selectedStream.toLowerCase()),
+      matchesStreamFilter(student.stream, selectedStream) &&
+      matchesStudentSearch(student, searchQuery) &&
+      (!flaggedOnly || activeTab !== "active" || hasOpenFlag(student)),
   );
 
   // Reset grade filter when switching tabs if the selected grade doesn't exist in new tab
@@ -751,6 +933,7 @@ export default function StudentTable({
             <StudentCard
               key={student.group_user_id}
               student={student}
+              isNvs={effectiveProgramId === PROGRAM_IDS.NVS}
               canEditStudent={
                 activeTab === "active" &&
                 canEditStudentInSelectedProgram(student)
@@ -765,6 +948,14 @@ export default function StudentTable({
               onDropout={() => setDropoutStudent(student)}
               onUndoDropout={() => setUndoStudent(student)}
               isDropoutView={activeTab === "dropout"}
+              hasOpenFlag={hasOpenFlag(student)}
+              onOpenFlag={
+                onOpenInterventionFlag &&
+                student.student_pk_id &&
+                (canRaiseInterventionFlag || hasOpenFlag(student))
+                  ? () => onOpenInterventionFlag(student)
+                  : undefined
+              }
               documentsRefreshNonce={documentsRefresh}
             />
           ))

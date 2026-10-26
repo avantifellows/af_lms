@@ -122,13 +122,6 @@ export default async function VisitActionDetailPage({ params, searchParams }: Pa
     redirect("/");
   }
 
-  if (session.isPasscodeUser) {
-    if (session.schoolCode) {
-      redirect(`/school/${session.schoolCode}`);
-    }
-    redirect("/dashboard");
-  }
-
   if (!session.user?.email) {
     redirect("/");
   }

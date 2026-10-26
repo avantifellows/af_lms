@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ADMIN_SESSION, NO_SESSION, PASSCODE_SESSION, PM_SESSION } from "@/app/api/__test-utils__/api-test-helpers";
+import { ADMIN_SESSION, NO_SESSION, PM_SESSION } from "@/app/api/__test-utils__/api-test-helpers";
 
 vi.mock("next-auth");
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
@@ -48,12 +48,6 @@ describe("GET /api/pm/teachers", () => {
     mockGetServerSession.mockResolvedValueOnce(NO_SESSION);
     const response = await GET(teachersRequest("SCH001"));
     expect(response.status).toBe(401);
-  });
-
-  it("returns 403 for passcode users", async () => {
-    mockGetServerSession.mockResolvedValueOnce(PASSCODE_SESSION);
-    const response = await GET(teachersRequest("SCH001"));
-    expect(response.status).toBe(403);
   });
 
   it("returns 403 for users without PM feature access", async () => {

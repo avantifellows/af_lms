@@ -21,7 +21,7 @@ edges:
     condition: when tracing the request flow across af_lms / quiz-backend / db-service
   - target: patterns/db-service-write.md
     condition: when adding a session or occurrence write
-last_updated: 2026-07-28
+last_updated: 2026-10-19
 ---
 
 # CMS-sourced quiz sessions
@@ -129,3 +129,55 @@ falls back to defaults. `QUIZ_BACKEND_URL` must be set (Amplify staging + prod).
   a mid-loop infra failure leaves refreshed questions with a stale embedded grading subset.
 - **Non-atomic edit** — session row / occurrence / quiz doc are three stores. Every write is an
   idempotent `$set`/PATCH, so a retry converges.
+
+## Question / answer PDFs
+
+Read the CMS test id with `getCmsTestId` (`src/lib/cms-tests.ts`), never `cms_test_id` raw:
+Session Manager and sheet-script sessions store the CMS page URL there and the id in
+`cms_source_id`. PDF links, regenerate and the duplicate check all depend on it.
+
+Regional-language PDFs: `getCmsTestLanguages` (`src/lib/cms-test-languages.ts`) lists the
+non-English languages on a test's problems (`problem_lang` → `language`); the picker gets them
+from `/api/cms/tests`, session details from `/api/cms/test-languages`. `/api/cms/test-pdf?lang=hi`
+forwards `lang_code` to the CMS, which prints English with that language underneath. The
+CMS "(Bilingual)" tests are duplicates of the originals (same problems); they aren't needed.
+
+Quiz language: the create form offers "English + <language>" when the selected CMS test has
+one; af_lms sends `lang_code` to `POST /quiz/from-cms` and stores `meta_data.lang_code`;
+regenerate re-sends it. quiz-backend (#187) shows the language under the English and grades on
+the English answer key. **quiz-backend must deploy first**: older builds ignore `lang_code`,
+which would leave a "Hindi" session with an English quiz. The sessionCreator Lambda (Session
+Manager / sheet / scripts) reads the same `meta_data.lang_code`.
+
+CMS tests have no stored PDF URLs. Both the create-form test picker and session details link to
+`/api/cms/test-pdf?testId=…&type=questions|answers`, which fetches the CMS service PDF and
+redirects to a short-lived presigned S3 copy. Build hrefs with `cmsTestPdfHrefs` in
+`QuizSessionsTab.tsx`. The CMS caches rendered PDFs (nex-gen-cms#202), so repeat opens skip headless Chrome.
+
+## Duplicate-session nudge
+
+Sessions are batch-level, so the nudge is too. Selecting a paper in the create form looks up
+earlier sessions of it in the school (`GET /api/quiz-sessions?cmsTestId=` for CMS, `?resourceId=`
+for legacy templates) and keeps only those sharing a selected class batch. If any remain,
+"When And How" and Create fold behind "Create a new session anyway". Disabled sessions are not
+listed. **Extend** edits only the end time inline (`PATCH` with `endTime` alone; start, the
+occurrence and the quiz doc follow the normal edit path), then closes the form and highlights the
+session in that batch's list. The session list sorts by `end_time DESC` (not `updated_at`, which
+result sync bumps long after a session ends), so an extended session rises to the top. The **Live only** toggle (`?status=live`) keeps enabled sessions and compares
+against `now() AT TIME ZONE 'Asia/Kolkata'` because session times are IST wall-clock. The lookup fails open, so creation is
+never blocked by it.
+
+## Read by Curriculum Summary
+
+Curriculum Summary v2 reads chapter-test sessions straight from Postgres
+(`src/lib/curriculum-chapter-tests.ts`, #428) to derive Chapter Test Status. It relies on
+`meta_data.cms_source`, `test_format` (`chapter_test`, not `combined_chapter_test`), `status`,
+`grade`, the comma-separated `batch_id` list, `cms_test_id` / `cms_source_id`, the IST
+wall-clock `start_time` / `end_time`, and `inserted_at` (UTC). Renaming or reshaping any of
+those on the create path silently drops sessions from the Summary.
+
+A session counts only when its `start_time` falls within the as-of date's academic year
+(1 Apr–31 Mar), and only for an as-of date by whose end it had been created (`inserted_at`
+converted to IST) or had started. Sessions keep no history, so this is how a past as-of
+replays: a session created later never makes a Chapter Scheduled or Conducted for an earlier
+as-of, and next year's cohort never counts for this year.

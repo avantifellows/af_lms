@@ -40,6 +40,24 @@ async function fillValidForm() {
   return user;
 }
 
+// The Phone-mode form drops PEN, Grade 10 Roll no and Annual Family Income, and takes the
+// parent phone as the Student ID.
+async function fillValidPhoneForm() {
+  const user = userEvent.setup();
+  await user.selectOptions(screen.getByLabelText("Grade"), "12");
+  await user.type(screen.getByLabelText("Student Name"), "asha k kumar");
+  await user.type(screen.getByLabelText("Date of Birth"), "2010-01-02");
+  await user.selectOptions(screen.getByLabelText("Gender"), "Female");
+  await user.selectOptions(screen.getByLabelText("Category"), "Gen");
+  await user.selectOptions(screen.getByLabelText("CWSN"), "No");
+  await user.selectOptions(screen.getByLabelText("G10 board"), "Others");
+  await user.selectOptions(screen.getByLabelText("Board Stream"), "PCM");
+  await user.selectOptions(screen.getByLabelText("Primary Exam preparing for"), "Engineering");
+  await user.type(screen.getByLabelText("Father Name"), "ravi kumar");
+  await user.type(screen.getByLabelText("Parents Phone Number"), "6876543210");
+  return user;
+}
+
 describe("AddStudentModal", () => {
   beforeEach(() => {
     vi.resetAllMocks();
@@ -77,19 +95,7 @@ describe("AddStudentModal", () => {
       ),
     );
     render(<AddStudentModal {...baseProps} registrationMode={PHONE_REGISTRATION_MODE} />);
-    const user = userEvent.setup();
-
-    await user.selectOptions(screen.getByLabelText("Grade"), "12");
-    await user.type(screen.getByLabelText("Student Name"), "asha k kumar");
-    await user.type(screen.getByLabelText("Date of Birth"), "2010-01-02");
-    await user.selectOptions(screen.getByLabelText("Gender"), "Female");
-    await user.selectOptions(screen.getByLabelText("Category"), "Gen");
-    await user.selectOptions(screen.getByLabelText("CWSN"), "No");
-    await user.selectOptions(screen.getByLabelText("G10 board"), "Others");
-    await user.selectOptions(screen.getByLabelText("Board Stream"), "PCM");
-    await user.selectOptions(screen.getByLabelText("Primary Exam preparing for"), "Engineering");
-    await user.type(screen.getByLabelText("Father Name"), "ravi kumar");
-    await user.type(screen.getByLabelText("Parents Phone Number"), "6876543210");
+    const user = await fillValidPhoneForm();
 
     expect(screen.getByText("Parent phone number will be the Student ID: 6876543210")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add Student" })).toBeEnabled();
@@ -426,5 +432,20 @@ describe("AddStudentModal", () => {
         /This identifier already belongs to Asha Kumar at JNV Other \(JNV999, UDISE 99999999999\), Jaipur, Rajasthan/,
       ),
     ).toBeInTheDocument();
+  });
+
+  // Sizes moved to Edit Student: physical centres never open this form, so collecting
+  // them here reached only the online-centre cohort.
+  it("does not collect uniform sizes in either registration mode", () => {
+    const { unmount } = render(<AddStudentModal {...baseProps} />);
+
+    expect(screen.queryByLabelText("T-shirt Size")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Track Pant Size")).not.toBeInTheDocument();
+
+    unmount();
+    render(<AddStudentModal {...baseProps} registrationMode={PHONE_REGISTRATION_MODE} />);
+
+    expect(screen.queryByLabelText("T-shirt Size")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Track Pant Size")).not.toBeInTheDocument();
   });
 });

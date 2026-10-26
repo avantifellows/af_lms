@@ -25,7 +25,6 @@ import {
 } from "@/lib/permissions";
 import { GET } from "./route";
 import {
-  PASSCODE_SESSION,
   TEACHER_SESSION,
 } from "../../__test-utils__/api-test-helpers";
 import { resetCurriculumSchemaCheckForTests } from "@/lib/curriculum-schema";
@@ -222,18 +221,5 @@ describe("GET /api/curriculum/progress", () => {
     expect(totalSql).toContain("log_type = 'doubt_solving'");
     const coverageSql = String(mockQuery.mock.calls[4][0]).replace(/\s+/g, " ");
     expect(coverageSql).toContain("l.log_type = 'regular'");
-  });
-
-  it("returns 403 for passcode users", async () => {
-    mockSession.mockResolvedValue(PASSCODE_SESSION);
-
-    const res = await GET(
-      nextReq(
-        "/api/curriculum/progress?school_code=70705&program_id=1&exam_track=jee_main&grade=11&subject=Physics"
-      )
-    );
-
-    expect(res.status).toBe(403);
-    expect(mockQuery).not.toHaveBeenCalled();
   });
 });

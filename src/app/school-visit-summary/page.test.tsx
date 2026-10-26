@@ -203,19 +203,6 @@ describe("SchoolVisitSummaryPage", () => {
       expect(mockQuery).not.toHaveBeenCalled();
     });
 
-    it("redirects passcode users to their school page or dashboard", async () => {
-      mockGetServerSession.mockResolvedValue({ user: {}, isPasscodeUser: true, schoolCode: "70705" });
-
-      await expect(SchoolVisitSummaryPage({ searchParams: Promise.resolve({}) })).rejects.toThrow("REDIRECT:/school/70705");
-      expect(mockRedirect).toHaveBeenCalledWith("/school/70705");
-
-      vi.clearAllMocks();
-      mockGetServerSession.mockResolvedValue({ user: {}, isPasscodeUser: true });
-
-      await expect(SchoolVisitSummaryPage({ searchParams: Promise.resolve({}) })).rejects.toThrow("REDIRECT:/dashboard");
-      expect(mockRedirect).toHaveBeenCalledWith("/dashboard");
-    });
-
     it("redirects PM users to /visits and teachers to /dashboard", async () => {
       setupAuth(programManagerPermission, { user: { email: "pm@avantifellows.org" } });
 
@@ -240,6 +227,32 @@ describe("SchoolVisitSummaryPage", () => {
   });
 
   describe("scope", () => {
+    it("lets a PM with visit-manager seats in, scoped to only those Centres' Schools", async () => {
+      setupAuth(
+        {
+          ...programManagerPermission,
+          scope: {
+            schools: new Set(["SC001", "SC002", "SC003"]),
+            centres: new Set([1, 2, 3]),
+            programs: new Set([1]),
+            visitManagedSchools: new Set(["SC001", "SC002"]),
+          },
+        },
+        { user: { email: "pm@avantifellows.org" } }
+      );
+      setupSummaryQueries({ stats: emptyAggregateStats, visits: [], actions: [] });
+
+      await SchoolVisitSummaryPage({ searchParams: Promise.resolve({}) });
+
+      expect(mockRedirect).not.toHaveBeenCalled();
+      for (const [sql, params] of mockQuery.mock.calls as [string, unknown[]][]) {
+        if (!sql.includes("lms_pm_school_visits v")) continue;
+        expect(sql).toContain("v.school_code = ANY(");
+        expect(sql).not.toContain("pm_email) = $");
+        expect(params).toContainEqual(["SC001", "SC002"]);
+      }
+    });
+
     it("applies level 2 program_admin region scope with explicit visit columns", async () => {
       setupAuth(programAdminPermission, { user: { email: "program-admin@avantifellows.org" } });
       setupSummaryQueries({ stats: emptyAggregateStats, visits: [], actions: [] });

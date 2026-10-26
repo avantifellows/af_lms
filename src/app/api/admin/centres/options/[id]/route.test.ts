@@ -17,7 +17,6 @@ import { PATCH } from "./route";
 import {
   ADMIN_SESSION,
   jsonRequest,
-  PASSCODE_SESSION,
   PM_SESSION,
   routeParams,
 } from "../../../../__test-utils__/api-test-helpers";
@@ -55,19 +54,6 @@ describe("PATCH /api/admin/centres/options/[id]", () => {
         )
       ).status
     ).toBe(401);
-
-    mockGetServerSession.mockResolvedValueOnce(PASSCODE_SESSION);
-    expect(
-      (
-        await PATCH(
-          jsonRequest("http://localhost/api/admin/centres/options/31", {
-            method: "PATCH",
-            body: {},
-          }) as never,
-          routeParams({ id: "31" })
-        )
-      ).status
-    ).toBe(403);
 
     mockGetServerSession.mockResolvedValueOnce(PM_SESSION);
     mockGetUserPermission.mockResolvedValueOnce({

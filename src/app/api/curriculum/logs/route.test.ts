@@ -31,7 +31,6 @@ import {
 } from "@/lib/permissions";
 import { GET, POST } from "./route";
 import {
-  PASSCODE_SESSION,
   TEACHER_SESSION,
 } from "../../__test-utils__/api-test-helpers";
 import { resetCurriculumSchemaCheckForTests } from "@/lib/curriculum-schema";
@@ -1123,19 +1122,6 @@ describe("/api/curriculum/logs", () => {
     expect(res.status).toBe(422);
     await expect(res.json()).resolves.toEqual({ error: "Nothing to save" });
     expect(mockWithTransaction).not.toHaveBeenCalled();
-  });
-
-  it("rejects passcode users before querying", async () => {
-    mockSession.mockResolvedValue(PASSCODE_SESSION);
-
-    const res = await GET(
-      nextReq(
-        "/api/curriculum/logs?school_code=70705&program_id=1&exam_track=jee_main&grade=11&subject=Physics"
-      )
-    );
-
-    expect(res.status).toBe(403);
-    expect(mockQuery).not.toHaveBeenCalled();
   });
 
   it("rejects read-only users before validation", async () => {

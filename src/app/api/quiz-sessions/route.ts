@@ -10,6 +10,7 @@ import {
   resolveQuizSessionProgramIds,
 } from "@/lib/quiz-session-access";
 import { query } from "@/lib/db";
+import type { UserPermission } from "@/lib/permissions";
 import {
   dbIstTimestampToUtcIso,
   istToUTCDate,
@@ -124,6 +125,38 @@ async function fetchQuizTemplateResource(
   return parsed.type === "quiz_template" ? parsed : null;
 }
 
+function parseSessionListFilters(searchParams: URLSearchParams) {
+  return {
+    // Optional paper filter: the create form uses it to find earlier sessions of the same test.
+    paper: {
+      cmsTestId: searchParams.get("cmsTestId")?.trim() || null,
+      resourceId: searchParams.get("resourceId")?.trim() || null,
+    },
+    liveOnly: searchParams.get("status") === "live",
+    page: Number(searchParams.get("page") || "0"),
+    perPage: Number(searchParams.get("per_page") || "50"),
+  };
+}
+
+async function getSchoolClassBatchIds(
+  permission: UserPermission,
+  schoolId: number,
+  programIdParam: string | null
+): Promise<string[]> {
+  // Optional narrowing (centre pages pass their program). Intersected with the
+  // viewer's own programs — it can only restrict, never widen, their access.
+  const requestedProgramId = programIdParam ? Number(programIdParam) : null;
+  const allProgramIds = await resolveQuizSessionProgramIds(permission);
+  const programIds =
+    requestedProgramId !== null && !Number.isNaN(requestedProgramId)
+      ? allProgramIds.filter((id) => id === requestedProgramId)
+      : allProgramIds;
+  const batches = await getBatchesForSchool(schoolId, programIds);
+  return batches
+    .filter((b) => b.parent_id !== null)
+    .map((b) => b.batch_id);
+}
+
 export async function GET(request: NextRequest) {
   const session = await getServerSession(authOptions);
 
@@ -135,8 +168,7 @@ export async function GET(request: NextRequest) {
   const schoolIdParam = searchParams.get("schoolId");
   const classBatchId = searchParams.get("classBatchId");
   const programIdParam = searchParams.get("programId");
-  const page = Number(searchParams.get("page") || "0");
-  const perPage = Number(searchParams.get("per_page") || "50");
+  const { paper, liveOnly, page, perPage } = parseSessionListFilters(searchParams);
 
   if (!schoolIdParam) {
     return NextResponse.json({ error: "schoolId is required" }, { status: 400 });
@@ -157,18 +189,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  // Optional narrowing (centre pages pass their program). Intersected with the
-  // viewer's own programs — it can only restrict, never widen, their access.
-  const requestedProgramId = programIdParam ? Number(programIdParam) : null;
-  const allProgramIds = await resolveQuizSessionProgramIds(permission);
-  const programIds =
-    requestedProgramId !== null && !Number.isNaN(requestedProgramId)
-      ? allProgramIds.filter((id) => id === requestedProgramId)
-      : allProgramIds;
-  const batches = await getBatchesForSchool(schoolId, programIds);
-  const classBatchIds = batches
-    .filter((b) => b.parent_id !== null)
-    .map((b) => b.batch_id);
+  const classBatchIds = await getSchoolClassBatchIds(permission, schoolId, programIdParam);
 
   if (classBatchIds.length === 0) {
     return NextResponse.json({ sessions: [], hasMore: false });
@@ -187,7 +208,9 @@ export async function GET(request: NextRequest) {
   const { sessions, hasMore } = await listQuizSessions(
     filteredClassIds,
     page,
-    perPage
+    perPage,
+    paper,
+    liveOnly
   );
   return NextResponse.json({ sessions, hasMore });
 }
@@ -217,7 +240,9 @@ function normalizeSessionTimes(s: SessionRow) {
 async function listQuizSessions(
   filteredClassIds: string[],
   page: number,
-  perPage: number
+  perPage: number,
+  paper: { cmsTestId: string | null; resourceId: string | null },
+  liveOnly: boolean
 ): Promise<{ sessions: ReturnType<typeof normalizeSessionTimes>[]; hasMore: boolean }> {
   const limit = perPage + 1;
   const offset = page * perPage;
@@ -244,10 +269,19 @@ async function listQuizSessions(
       AND string_to_array(s.meta_data->>'batch_id', ',') && $2::text[]
       -- Teacher Feedback forms are managed in their own tab, not here.
       AND COALESCE(s.meta_data->>'cms_test_id', '') NOT LIKE 'teacher-feedback:%'
-    ORDER BY s.id DESC
+      AND ($5::text IS NULL OR (s.meta_data ? 'cms_source' AND $5 IN (s.meta_data->>'cms_test_id', s.meta_data->>'cms_source_id')))
+      AND ($6::text IS NULL OR s.meta_data->>'resource_id' = $6)
+      -- Live = enabled and inside its window. Times are IST wall-clock, so compare against IST now.
+      AND (NOT $7::boolean OR (
+        COALESCE(s.is_active, true)
+        AND s.start_time <= (now() AT TIME ZONE 'Asia/Kolkata')
+        AND s.end_time > (now() AT TIME ZONE 'Asia/Kolkata')
+      ))
+    -- Latest window end first, so an extended session rises to the top.
+    ORDER BY s.end_time DESC NULLS LAST, s.id DESC
     LIMIT $3 OFFSET $4
     `,
-    [groups, filteredClassIds, limit, offset]
+    [groups, filteredClassIds, limit, offset, paper.cmsTestId, paper.resourceId, liveOnly]
   );
 
   const hasMore = rows.length > perPage;

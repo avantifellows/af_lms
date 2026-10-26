@@ -18,7 +18,7 @@ edges:
     condition: when adding a new visit action type
   - target: context/data-access.md
     condition: when writing visit rows (direct Postgres, not the DB Service)
-last_updated: 2026-09-16
+last_updated: 2026-10-14
 ---
 
 # PM School Visits
@@ -40,8 +40,10 @@ stored completion state without changing its GPS or timestamp.
 
 ## Access layer — `src/lib/visits-policy.ts` (NOT raw permissions)
 Visit routes do **not** call `canAccessSchool` directly. They use:
-- `requireVisitsAccess(session, "view"|"edit")` → `{ ok, actor }` or `{ ok:false, response }`. Blocks passcode users, resolves the permission, checks the `visits` feature.
-- `enforceVisitReadAccess` / `enforceVisitWriteAccess(actor, target)` — per-visit ownership: a **program_manager** sees/edits only their own visits (`pm_email` match); **admin** has scoped read/write; **program_admin** has scoped read access and edits only their own in-progress visits.
+- `requireVisitsAccess(session, "view"|"edit")` → `{ ok, actor }` or `{ ok:false, response }`. Resolves the permission, checks the `visits` feature.
+- `enforceVisitReadAccess` / `enforceVisitWriteAccess(actor, target)` — per-visit ownership: a **program_manager** edits only their own visits (`pm_email` match) and reads their own plus every visit at a **visit-managed School** (below); **admin** has scoped read/write; **program_admin** has scoped read access and edits only their own in-progress visits.
+- **Visit-managed Schools (#291):** a Centre seat in `VISIT_MANAGER_SEAT_ROLES` (`pm`, `spm`, `ph`; `src/lib/staff-shared.ts`) at an **active** Centre (`centres.is_active`) makes that Centre's School visit-managed. Visits carry a School, not a Centre, so at a School with both a CoE and a Nodal centre a manager of either sees all its visits — intentional (Pritam, 14 Oct 2026): a PM's trip covers both centres' people. `resolveScope` collects them into `scope.visitManagedSchools`; `managesVisitSchool(actor, code)` reads it. The holder reads **every** visit there, whoever made it — read-only, never edit/complete/delete. APM and teaching seats give no visit visibility beyond their own. No reporting hierarchy is stored; Centre seats are the whole rule. A bare `getUserPermission` has no scope and manages nothing. They also get the Visit Summary (`/school-visit-summary` and `[id]`; `canViewVisitSummary`), scoped by `buildVisitSummaryScopePredicate` to the managed Schools **only** — not their own visits elsewhere. A `program_manager` with no managed School is still redirected to `/visits`.
+- `buildOwnOrManagedVisitPredicate(actor, opts)` — the program_manager list scope (`LOWER(TRIM(pm_email)) = $n` OR `school_code = ANY(managed)`), used by `/visits`, `GET /api/pm/visits` (School Visit History tab) and the dashboard. Those lists name the visitor and offer only View (no Continue/Delete) on someone else's visit; `GET /api/pm/visits` returns `can_edit` per row (feature edit AND `canEditVisit`) for the School Visit History tab. Dashboard Recent Visits sorts the user's own in-progress visits first, so other people's stale ones can't push them out.
 - `enforceVisitWriteLock(status)` — returns 409 if the visit is `completed` (completed visits are read-only; only `admin` may edit completed action *data*, via `canEditCompletedActionData`).
 - `buildVisitScopePredicate(actor, opts)` — SQL `WHERE` fragment to scope list queries (handles level 1/2/3 + seat schools).
 - `apiError(status, error, details?)` — the standard structured error response for these routes.
@@ -50,7 +52,7 @@ Visit pages that gate entry before calling an API must also use `getResolvedPerm
 `getUserPermission` omits Centre-seat-derived schools and programs. In particular, the new-Visit
 page uses the resolved permission for its Visits feature check before rendering the form.
 
-Role semantics: **PM owner** = read/write own; **admin** = scoped read/write; **program_admin** = scoped read plus write on owned in-progress Visits; **passcode** = blocked. `read_only` downgrades every role to view-only, and Visit/Action pages combine feature-level `canEdit` with the ownership policy before rendering mutation controls.
+Role semantics: **PM owner** = read/write own, plus read-only on every visit at their visit-managed Schools; **admin** = scoped read/write; **program_admin** = scoped read plus write on owned in-progress Visits. `read_only` downgrades every role to view-only, and Visit/Action pages combine feature-level `canEdit` with the ownership policy before rendering mutation controls.
 
 ## GPS — `src/lib/geo-validation.ts`
 `validateGpsReading(body, "start"|"end")` reads `${prefix}_lat/_lng/_accuracy`. Rejects (422) accuracy > 500m or out-of-range lat/lng; warns (still accepts) between 100–500m. **Never log lat/lng.** Routes that need GPS: create visit, action start, action end, complete visit.
@@ -84,6 +86,8 @@ the same address can exist as a second row and a case-insensitive join would dup
 `.../[id]/complete/route.ts` · `.../[id]/actions/route.ts` (add) ·
 `.../[id]/actions/[actionId]/route.ts` (get/patch) · `.../start` · `.../end`.
 Pages: `src/app/visits/[id]/...` and `src/app/school/[udise]/visit/...`; read-only summary under `src/app/school-visit-summary/[id]`.
+
+**Dashboard visits (#389, #291):** both dashboard views show Recent Visits (in-progress first, then newest; 10 rows; "View all" → `/visits`) and Total Visits, behind the `pm_dashboard` gate. Both use `visibleVisitPredicate` = `buildOwnOrManagedVisitPredicate` + `deleted_at IS NULL`, so the list never disagrees with the total. The total card is captioned "Yours" or "Yours and your centres'". Recent Visits must stay on Physical Centres: seated staff are pinned to that view (`resolveDashboardView`), and from 3 Sep to 14 Oct 2026 (PR #227 → #291) they had no route to their visits because Recent Visits was JNV-only. A failed count read throws rather than rendering 0. E2E: `e2e/tests/dashboard-visit-totals.spec.ts`.
 
 ## Gotchas
 - Use **`visits-policy` helpers**, not `permissions.ts` directly, in visit routes — they encode PM and Program Admin ownership plus Admin scope semantics.

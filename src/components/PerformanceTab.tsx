@@ -5,7 +5,7 @@ import PerformanceFilterBar from "./performance/PerformanceFilterBar";
 import PerformanceContent from "./performance/PerformanceContent";
 import TestDeepDiveView from "./performance/TestDeepDiveView";
 import ProgramTabs from "./performance/ProgramTabs";
-import { performanceLoadState } from "./performance/PerformanceStates";
+import { performanceLoadState, RetainedHeightFrame } from "./performance/PerformanceStates";
 import { usePerformanceFilters } from "./performance/usePerformanceFilters";
 import type { TestCategory, FullTestView } from "@/lib/performance-url-params";
 
@@ -32,7 +32,14 @@ export default function PerformanceTab({ schoolUdise, lockedProgram }: Props) {
     programs: f.programs,
     grades: f.grades,
   });
-  if (loadState.status === "pending") return loadState.element;
+  const loadingGrades = f.programs === null || f.grades === null;
+  if (loadState.status === "pending") {
+    return (
+      <RetainedHeightFrame loading={loadingGrades}>
+        {loadState.element}
+      </RetainedHeightFrame>
+    );
+  }
   const { programs, grades } = loadState;
 
   const showProgramTabs = !lockedProgram && programs.length > 1;
@@ -55,23 +62,32 @@ export default function PerformanceTab({ schoolUdise, lockedProgram }: Props) {
 
   // Deep dive: one test, full width, no filter bar. A session is grade-specific,
   // so changing grade returns to the overview rather than re-filtering here.
+  // Keyed by session: another report is a fresh view, never one frame of the
+  // previous report's data under the new one's heading.
   if (f.deepDiveSession && f.selectedGrade != null && !needsProgram) {
     return (
-      <TestDeepDiveView
-        schoolUdise={schoolUdise}
-        grade={f.selectedGrade}
-        sessionId={f.deepDiveSession.sessionId}
-        testName={f.deepDiveSession.testName}
-        scope={f.scope}
-        gradeControl={gradeControl}
-        onBack={f.handleBack}
-        onDataLoaded={f.handleDeepDiveData}
-      />
+      <RetainedHeightFrame loading={false}>
+        <TestDeepDiveView
+          key={f.deepDiveSession.sessionId}
+          schoolUdise={schoolUdise}
+          grade={f.selectedGrade}
+          sessionId={f.deepDiveSession.sessionId}
+          testName={f.deepDiveSession.testName}
+          scope={f.scope}
+          gradeControl={gradeControl}
+          onBack={f.handleBack}
+          onDataLoaded={f.handleDeepDiveData}
+        />
+      </RetainedHeightFrame>
     );
   }
 
   return (
-    <div className="space-y-6">
+    <RetainedHeightFrame
+      loading={false}
+      className="space-y-6"
+      recoverViewportOnEnter
+    >
       {showProgramTabs && (
         <ProgramTabs
           programs={programs}
@@ -96,6 +112,7 @@ export default function PerformanceTab({ schoolUdise, lockedProgram }: Props) {
         onStreamChange={f.handleStreamChange}
         onSubjectChange={f.handleSubjectChange}
         onFullViewChange={f.handleFullViewChange}
+        isNvs={f.isNvs}
       />
 
       <PerformanceContent
@@ -105,9 +122,10 @@ export default function PerformanceTab({ schoolUdise, lockedProgram }: Props) {
         testCategory={f.testCategory}
         fullTestView={f.fullTestView}
         scope={f.scope}
+        isNvs={f.isNvs}
         onTestClick={f.handleTestClick}
         onFilterOptions={f.handleFilterOptions}
       />
-    </div>
+    </RetainedHeightFrame>
   );
 }

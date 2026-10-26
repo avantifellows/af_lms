@@ -190,16 +190,6 @@ describe("requireStudentAdditionAccess", () => {
     expect(result).toEqual({ ok: false, status: 403, error: "Forbidden" });
   });
 
-  it("blocks passcode school-login users even though they can view students", async () => {
-    const result = await requireStudentAdditionAccess(
-      { user: {}, isPasscodeUser: true },
-      school,
-    );
-
-    expect(result).toEqual({ ok: false, status: 403, error: "Forbidden" });
-    expect(mockGetResolvedPermission).not.toHaveBeenCalled();
-  });
-
   it.each([
     ["wrong school", () => mockCanAccessSchoolSync.mockReturnValue(false)],
     [
@@ -249,16 +239,6 @@ describe("requireStudentAdditionStudentAccess", () => {
         role: "program_manager",
       },
     });
-  });
-
-  it("blocks passcode users before resolving the student", async () => {
-    const result = await requireStudentAdditionStudentAccess(
-      { user: {}, isPasscodeUser: true },
-      "100",
-    );
-
-    expect(result).toEqual({ ok: false, status: 403, error: "Forbidden" });
-    expect(mockQuery).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -514,17 +494,6 @@ describe("requireStudentEditAccess", () => {
     const result = await requireStudentEditAccess(session, "100", PROGRAM_IDS.EMRS_COE);
 
     expect(result.ok).toBe(true);
-  });
-
-  it("blocks passcode users before touching the database", async () => {
-    const result = await requireStudentEditAccess(
-      { user: {}, isPasscodeUser: true },
-      "100",
-      PROGRAM_IDS.COE,
-    );
-
-    expect(result).toEqual({ ok: false, status: 403, error: "Forbidden" });
-    expect(mockQuery).not.toHaveBeenCalled();
   });
 
   it("returns 400 when no program is supplied", async () => {

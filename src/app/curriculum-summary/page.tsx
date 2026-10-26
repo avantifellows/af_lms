@@ -1,516 +1,577 @@
 import Link from "next/link";
-import { getServerSession } from "next-auth";
-import { redirect } from "next/navigation";
-import { type ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 
 import PageHeader from "@/components/PageHeader";
-import StatCard from "@/components/StatCard";
-import { Card } from "@/components/ui";
-import { authOptions } from "@/lib/auth";
+import { Badge, Card } from "@/components/ui";
 import { getTodayIST } from "@/lib/curriculum-date-helpers";
-import CurriculumSummaryFiltersForm from "./CurriculumSummaryFiltersForm";
+import { SUBJECT_GROUPS } from "@/lib/curriculum-plan-rules";
+import CentreFilterOptions from "./CentreFilterOptions";
 import CurriculumSummaryPageSizeSelect from "./CurriculumSummaryPageSizeSelect";
-import CurriculumSummaryTableRows from "./CurriculumSummaryTableRows";
+import UrlFilterForm from "./UrlFilterForm";
 import {
+  CURRICULUM_SUMMARY_GRADES,
+  CURRICULUM_SUMMARY_SUBJECTS,
+  defaultSortDirection,
   getCurriculumSummary,
-  normalizeCurriculumSummaryPage,
-  normalizeCurriculumSummaryPageSize,
   normalizeCurriculumSummarySearchParams,
-  normalizeCurriculumSummarySort,
-  type CurriculumSummaryDatePreset,
-  type CurriculumSummaryChapterRow,
-  type CurriculumSummaryFilterOptions,
-  type CurriculumSummaryFilters,
+  type CurriculumSummaryFilterOption,
+  type CurriculumSummaryQuery,
+  type CurriculumSummaryResult,
   type CurriculumSummaryRow,
-  type CurriculumSummarySortDirection,
+  type CurriculumSummarySort,
   type CurriculumSummarySortKey,
+  type CurriculumSummarySubjectProgress,
 } from "@/lib/curriculum-summary";
+import { requireCurriculumSummaryViewer } from "./summary-access";
 import {
-  getFeatureAccess,
-  getProgramContextSync,
-  getResolvedPermission,
-} from "@/lib/permissions";
+  ApplyButton,
+  AsOfField,
+  HiddenField,
+  PAGE_CONTAINER_CLASS_NAME,
+  SchemaUnavailableCard,
+  SegmentLinks,
+  SortableTableHead,
+  TONE_BADGE_VARIANTS,
+  CELL_CLASS_NAME,
+  COMPACT_CELL_CLASS_NAME,
+  COMPACT_COLUMN_CLASS_NAME,
+  sortableHeaders,
+  TitleWithGuide,
+  type SortableColumn,
+} from "./summary-ui";
 
 interface PageProps {
-  searchParams: Promise<Record<string, string | undefined>>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }
 
-const SORT_COLUMNS: Record<
-  CurriculumSummarySortKey,
-  { label: string; defaultDir: CurriculumSummarySortDirection }
-> = {
-  school: { label: "School", defaultDir: "asc" },
-  program: { label: "Program", defaultDir: "asc" },
-  grade: { label: "Grade", defaultDir: "asc" },
-  subject: { label: "Subject", defaultDir: "asc" },
-  exam_track: { label: "Exam Track", defaultDir: "asc" },
-  completed: { label: "Completed", defaultDir: "asc" },
-  prescribed: { label: "Prescribed", defaultDir: "asc" },
-  delta: { label: "Delta %", defaultDir: "asc" },
-  actual: { label: "Actual Hours", defaultDir: "asc" },
-  flagged: { label: "Flagged", defaultDir: "desc" },
-};
+type SummaryData = Extract<CurriculumSummaryResult, { ok: true }>;
+
+const DEFAULT_PAGE_SIZE = 20;
+
+// The ⓘ guide beside the title (approved by the curriculum owner): one string per bullet, with
+// **bold** terms.
+const SUMMARY_GUIDE: readonly string[] = [
+  "Each row is **one class** (Centre + Grade), checked against its **Active Curriculum Plan** on the **As of** date.",
+  "**“2 behind” over “4/6 done”**: 6 chapters were due by the As of date. 4 are completed and 2 are not. Green = on track, amber = 1–2 behind, red = 3 or more behind.",
+  "**PCM / PCB Behind**: chapters behind across Physics + Chemistry + Maths (PCM) or Physics + Chemistry + Biology (PCB). JEE classes show PCM, NEET classes show PCB, JEE + NEET classes show both.",
+  "**Tests overdue**: a chapter’s test is overdue if no test was conducted within 7 days after its test date.",
+  "**“Not measured”**: the class has no Active plan yet.",
+  "Click a column name to sort. Click a Centre to see its chapters.",
+];
+const ACTION_LINK_CLASS_NAME =
+  "rounded-md border border-border px-3 py-1.5 text-sm font-bold text-accent hover:text-accent-hover";
+// Column layout (curriculum owner feedback): the subject and PCM / PCB Behind columns are the
+// wide, centred ones; the others are compact (see the shared classes in summary-ui).
+const KEY_COLUMN_CLASS_NAME = "w-[7.5rem] px-2 text-center";
 
 export default async function CurriculumSummaryPage({ searchParams }: PageProps) {
   const resolvedSearchParams = await searchParams;
-  const session = await getServerSession(authOptions);
-
-  if (session?.isPasscodeUser) {
-    redirect(session.schoolCode ? `/school/${session.schoolCode}` : "/dashboard");
-  }
-
-  if (!session?.user?.email) {
-    redirect("/");
-  }
-
-  const email = session.user.email;
-  const permission = await getResolvedPermission(email);
-
-  if (!permission) {
-    redirect("/dashboard");
-  }
-
-  if (
-    permission.role !== "program_manager" &&
-    permission.role !== "program_admin" &&
-    permission.role !== "admin"
-  ) {
-    redirect("/dashboard");
-  }
-
-  if (!getFeatureAccess(permission, "curriculum").canView) {
-    redirect("/dashboard");
-  }
-
-  const programContext = getProgramContextSync(permission);
-  if (!programContext.hasCoEOrNodal) {
-    redirect("/dashboard");
-  }
-
-  const todayIstDate = getTodayIST();
-  const filters = normalizeCurriculumSummarySearchParams(
-    resolvedSearchParams,
-    todayIstDate
-  );
-  const { sort, dir } = normalizeCurriculumSummarySort(
-    resolvedSearchParams.sort,
-    resolvedSearchParams.dir
-  );
-  const page = normalizeCurriculumSummaryPage(resolvedSearchParams.page);
-  const pageSize = normalizeCurriculumSummaryPageSize(resolvedSearchParams.limit);
-  const summary = await getCurriculumSummary({
-    actorEmail: email,
-    permission,
-    filters,
-    sort,
-    dir,
-    page,
-    pageSize,
-    todayIstDate,
-  });
+  const { email, permission } = await requireCurriculumSummaryViewer();
+  const params = normalizeCurriculumSummarySearchParams(resolvedSearchParams, getTodayIST());
+  const summary = await getCurriculumSummary(permission, params);
 
   return (
     <div className="min-h-screen bg-bg">
       <PageHeader
         title="Curriculum Summary"
-        subtitle="Read-only cross-school Curriculum Progress"
+        titleBlock={<TitleWithGuide title="Curriculum Summary" guide={SUMMARY_GUIDE} />}
+        subtitle="Each class's progress against its Curriculum Plan"
         backHref="/dashboard"
         userEmail={email}
-        actions={
-          permission.role === "admin" ? (
-            <Link
-              href="/curriculum-summary/config"
-              className="rounded-md border border-border px-3 py-1.5 text-sm font-bold text-accent hover:text-accent-hover"
-            >
-              Manage config
-            </Link>
-          ) : undefined
-        }
-        containerClassName="w-full px-4 py-3 sm:px-6 lg:px-8"
+        actions={permission.role === "admin" ? <AdminLinks /> : undefined}
+        containerClassName={PAGE_CONTAINER_CLASS_NAME}
       />
       <main className="w-full px-4 py-6 sm:px-6 lg:px-8">
-        {!summary.ok ? (
-          <Card className="border-l-4 border-l-warning-border p-6">
-            <div className="flex flex-col gap-3">
-              <p className="text-xs font-bold uppercase tracking-wide text-warning-text">
-                Schema unavailable
-              </p>
-              <h2 className="text-lg font-bold text-text-primary">
-                {summary.error}
-              </h2>
-              <p className="text-sm text-text-secondary">
-                Curriculum Summary is read-only and cannot load until the LMS
-                Curriculum schema is available.
-              </p>
-              <ul className="list-disc space-y-1 pl-5 text-sm font-mono text-text-secondary">
-                {summary.details.map((detail) => (
-                  <li key={detail}>{detail}</li>
-                ))}
-              </ul>
-            </div>
-          </Card>
-        ) : summary.rowCountGuardTripped ? (
-          <div className="space-y-5">
-            <CurriculumSummaryFiltersCard
-              filters={summary.activeFilters}
-              options={summary.filterOptions}
-            />
-            <Card className="border-l-4 border-l-warning-border p-6">
-              <div className="flex flex-col gap-2">
-                <p className="text-xs font-bold uppercase tracking-wide text-warning-text">
-                  Too many rows
-                </p>
-                <h2 className="text-lg font-bold text-text-primary">
-                  Narrow filters to load Curriculum Summary
-                </h2>
-                <p className="text-sm text-text-secondary">
-                  More than 10,000 expected Curriculum Summary rows match the
-                  current School, Program, Grade, Subject, Exam Track, and
-                  geography filters. Narrow at least one filter to run the
-                  detailed summary query.
-                </p>
-              </div>
-            </Card>
-          </div>
+        {summary.ok ? (
+          <SummaryView summary={summary} params={params} />
         ) : (
-          <div className="space-y-5">
-            <div className="grid grid-cols-2 gap-3 lg:grid-cols-6">
-              <StatCard label="Total Rows" value={summary.stats.totalRows} size="sm" />
-              <StatCard label="Flagged Rows" value={summary.stats.flaggedRows} size="sm" />
-              <StatCard
-                label="Avg Completion"
-                value={formatPercent(summary.stats.avgCompletionPercent)}
-                size="sm"
-              />
-              <StatCard
-                label="Avg Prescribed"
-                value={formatPercent(summary.stats.avgPrescribedPercent)}
-                size="sm"
-              />
-              <StatCard
-                label="Actual Hours"
-                value={formatHours(summary.stats.actualMinutes)}
-                size="sm"
-              />
-              <StatCard
-                label="Prescribed Hours"
-                value={formatHours(summary.stats.prescribedMinutes)}
-                size="sm"
-              />
-            </div>
-
-            <CurriculumSummaryFiltersCard
-              filters={summary.activeFilters}
-              options={summary.filterOptions}
-            />
-
-            <Card className="overflow-hidden">
-              <div className="flex flex-col gap-2 border-b border-border px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="text-xs font-bold uppercase tracking-wide text-text-muted">
-                    Read only
-                  </p>
-                  <h2 className="text-lg font-bold text-text-primary">
-                    Expected Curriculum Summary rows
-                  </h2>
-                  <p className="text-sm text-text-secondary">
-                    {formatDateRange(summary.activeFilters)}
-                  </p>
-                  <p className="mt-1 max-w-3xl text-xs text-text-muted">
-                    Top-level Actual Hours use raw LMS Curriculum Log duration
-                    for the selected date range and may include time that is
-                    not visible in current in-syllabus chapter expansion.
-                  </p>
-                </div>
-                <Link
-                  href="/dashboard"
-                  className="inline-flex w-fit text-sm font-bold text-accent hover:text-accent-hover"
-                >
-                  Back to schools
-                </Link>
-              </div>
-
-              {summary.rows.length === 0 ? (
-                <div className="px-4 py-10 text-sm text-text-secondary">
-                  No Curriculum Summary rows match the selected filters.
-                </div>
-              ) : (
-                <CurriculumSummaryTable
-                  rows={summary.rows}
-                  chapterRowsByParentKey={summary.chapterRowsByParentKey}
-                  sort={summary.sort}
-                  dir={summary.dir}
-                  currentParams={resolvedSearchParams}
-                />
-              )}
-
-              <CurriculumSummaryPagination
-                currentPage={summary.currentPage}
-                totalPages={summary.totalPages}
-                pageSize={pageSize}
-                currentParams={resolvedSearchParams}
-              />
-            </Card>
-          </div>
+          <SchemaUnavailableCard error={summary.error} details={summary.details}>
+            <p className="text-sm text-text-secondary">
+              Curriculum Summary is read-only and cannot load until the LMS Curriculum and
+              Curriculum Plan schema is available.
+            </p>
+          </SchemaUnavailableCard>
         )}
       </main>
     </div>
   );
 }
 
-function CurriculumSummaryFiltersCard({
-  filters,
+function AdminLinks() {
+  return (
+    <div className="flex items-center gap-2">
+      <Link href="/curriculum-summary/plans" className={ACTION_LINK_CLASS_NAME}>
+        Plans
+      </Link>
+      <Link href="/curriculum-summary/config" className={ACTION_LINK_CLASS_NAME}>
+        Manage config
+      </Link>
+    </div>
+  );
+}
+
+function SummaryView({ summary, params: requested }: { summary: SummaryData; params: CurriculumSummaryQuery }) {
+  // Links and the filter bar carry only the Programs and Centres the Summary applied.
+  const params = {
+    ...requested,
+    programIds: summary.selectedProgramIds,
+    centreIds: summary.selectedCentreIds,
+  };
+  return (
+    <div className="space-y-5">
+      <SummaryFilters params={params} options={summary} />
+
+      <Card className="overflow-hidden">
+        {summary.rows.length === 0 ? (
+          <div className="px-4 py-10 text-sm text-text-secondary">{emptyMessage(params)}</div>
+        ) : (
+          <SummaryTable rows={summary.rows} params={params} />
+        )}
+        <SummaryPagination
+          page={summary.pagination.page}
+          totalPages={summary.pagination.totalPages}
+          params={params}
+        />
+      </Card>
+    </div>
+  );
+}
+
+function emptyMessage(params: CurriculumSummaryQuery): string {
+  const filtered =
+    params.programIds.length > 0 ||
+    params.regions.length > 0 ||
+    params.centreIds.length > 0 ||
+    params.onlyBehind;
+  return filtered
+    ? "No classes match these filters."
+    : `No Centres with Exam Tracks for Grade ${params.grade} are in your scope.`;
+}
+
+interface SummaryHrefOverrides {
+  grade?: number;
+  page?: number;
+  sort?: CurriculumSummarySort;
+}
+
+// Filters and sort carried by every Summary link; page and limit are added per link.
+function filterSearchParams(
+  params: CurriculumSummaryQuery,
+  overrides: SummaryHrefOverrides = {}
+): URLSearchParams {
+  const search = new URLSearchParams();
+  for (const programId of params.programIds) search.append("programs", String(programId));
+  for (const region of params.regions) search.append("regions", region);
+  for (const centreId of params.centreIds) search.append("centres", String(centreId));
+  search.set("grade", String(overrides.grade ?? params.grade));
+  search.set("as_of", params.asOf);
+  if (params.onlyBehind) search.set("only_behind", "1");
+  const sort = overrides.sort ?? params.sort;
+  if (sort) {
+    search.set("sort", sort.key);
+    search.set("dir", sort.dir);
+  }
+  return search;
+}
+
+function summaryHref(params: CurriculumSummaryQuery, overrides: SummaryHrefOverrides = {}): string {
+  const search = filterSearchParams(params, overrides);
+  if (params.pageSize !== DEFAULT_PAGE_SIZE) search.set("limit", String(params.pageSize));
+  if (overrides.page && overrides.page > 1) search.set("page", String(overrides.page));
+  return `/curriculum-summary?${search.toString()}`;
+}
+
+function SummaryFilters({
+  params,
   options,
 }: {
-  filters: CurriculumSummaryFilters;
-  options: CurriculumSummaryFilterOptions;
+  params: CurriculumSummaryQuery;
+  options: Pick<SummaryData, "programOptions" | "regionOptions" | "centreOptions">;
 }) {
   return (
-    <Card className="p-4">
-      <details open>
-        <summary className="cursor-pointer text-sm font-bold text-text-primary">
-          Filters
-        </summary>
-        <CurriculumSummaryFiltersForm
-          key={JSON.stringify(filters)}
-          filters={filters}
-          options={options}
-        />
-      </details>
+    <Card className="flex flex-col gap-4 p-4 sm:flex-row sm:items-end">
+      <SegmentLinks
+        label="Grade"
+        navLabel="Grade"
+        links={CURRICULUM_SUMMARY_GRADES.map((grade) => ({
+          key: String(grade),
+          label: `Grade ${grade}`,
+          href: summaryHref(params, { grade }),
+          active: params.grade === grade,
+        }))}
+      />
+      {/* Submitting drops `page`, so changed filters start again at page 1. Keyed on the
+          filters so a client-side navigation re-renders the controls from the new URL. */}
+      <UrlFilterForm
+        key={summaryHref(params)}
+        action="/curriculum-summary"
+        className="flex flex-wrap items-end gap-2"
+      >
+        <input type="hidden" name="grade" value={params.grade} />
+        <HiddenField name="limit" value={params.pageSize !== DEFAULT_PAGE_SIZE ? params.pageSize : null} />
+        <HiddenField name="sort" value={params.sort?.key ?? null} />
+        <HiddenField name="dir" value={params.sort?.dir ?? null} />
+        <ProgramFilter programOptions={options.programOptions} selected={params.programIds} />
+        <RegionFilter regionOptions={options.regionOptions} selected={params.regions} />
+        <CentreFilter centreOptions={options.centreOptions} selected={params.centreIds} />
+        <AsOfField asOf={params.asOf} />
+        <label className="flex min-h-[44px] items-center gap-2 text-sm font-bold text-text-primary">
+          <input type="checkbox" name="only_behind" value="1" defaultChecked={params.onlyBehind} />
+          Only behind
+        </label>
+        <ApplyButton />
+      </UrlFilterForm>
     </Card>
   );
 }
 
-function CurriculumSummaryTable({
+// A checkbox list behind a summary button showing the selection, like a multi-select.
+function FilterDisclosure({ label, value, children }: { label: string; value: string; children: ReactNode }) {
+  return (
+    <details className="relative">
+      <summary className="flex min-h-[44px] cursor-pointer list-none flex-col justify-end gap-1 text-xs font-bold uppercase tracking-wide text-text-muted">
+        {label}
+        <span className="max-w-xs truncate rounded-md border border-border bg-bg-card px-3 py-2 text-sm font-normal normal-case text-text-primary">
+          {value}
+        </span>
+      </summary>
+      <fieldset className="absolute z-10 mt-1 flex max-h-80 min-w-64 flex-col gap-1 overflow-y-auto rounded-md border border-border bg-bg-card p-3 shadow-md">
+        <legend className="sr-only">{label}</legend>
+        {children}
+      </fieldset>
+    </details>
+  );
+}
+
+function OptionCheckbox({
+  name,
+  value,
+  label,
+  checked,
+}: {
+  name: string;
+  value: string | number;
+  label: string;
+  checked: boolean;
+}) {
+  return (
+    <label className="flex items-center gap-2 text-sm text-text-primary">
+      <input type="checkbox" name={name} value={value} defaultChecked={checked} />
+      {label}
+    </label>
+  );
+}
+
+function NoOptions({ children }: { children: ReactNode }) {
+  return <span className="text-sm text-text-muted">{children}</span>;
+}
+
+// The summary button: "All …" or the chosen options' names, A–Z.
+function selectionLabel(options: CurriculumSummaryFilterOption[], selected: number[], all: string): string {
+  const names = options.filter((option) => selected.includes(option.id)).map((option) => option.name);
+  return names.length === 0 ? all : names.join(", ");
+}
+
+// The Programs in scope for the Grade, by id.
+function ProgramFilter({
+  programOptions,
+  selected,
+}: {
+  programOptions: CurriculumSummaryFilterOption[];
+  selected: number[];
+}) {
+  return (
+    <FilterDisclosure label="Program" value={selectionLabel(programOptions, selected, "All programs")}>
+      {programOptions.length === 0 ? (
+        <NoOptions>No programs in scope</NoOptions>
+      ) : (
+        programOptions.map((option) => (
+          <OptionCheckbox
+            key={option.id}
+            name="programs"
+            value={option.id}
+            label={option.name}
+            checked={selected.includes(option.id)}
+          />
+        ))
+      )}
+    </FilterDisclosure>
+  );
+}
+
+// The Regions in scope for the Grade and chosen Programs.
+function RegionFilter({ regionOptions, selected }: { regionOptions: string[]; selected: string[] }) {
+  return (
+    <FilterDisclosure label="Region" value={selected.length === 0 ? "All regions" : selected.join(", ")}>
+      {regionOptions.length === 0 ? (
+        <NoOptions>No regions in scope</NoOptions>
+      ) : (
+        regionOptions.map((region) => (
+          <OptionCheckbox
+            key={region}
+            name="regions"
+            value={region}
+            label={region}
+            checked={selected.includes(region)}
+          />
+        ))
+      )}
+    </FilterDisclosure>
+  );
+}
+
+// The Centres in scope for the Grade and chosen Programs and Regions, by id; the search box is
+// client-side.
+function CentreFilter({
+  centreOptions,
+  selected,
+}: {
+  centreOptions: CurriculumSummaryFilterOption[];
+  selected: number[];
+}) {
+  return (
+    <FilterDisclosure label="Centre" value={selectionLabel(centreOptions, selected, "All centres")}>
+      {centreOptions.length === 0 ? (
+        <NoOptions>No centres in scope</NoOptions>
+      ) : (
+        <CentreFilterOptions options={centreOptions} selected={selected} />
+      )}
+    </FilterDisclosure>
+  );
+}
+
+// Subject pills, then PCM Behind and PCB Behind.
+const MEASURE_COLUMNS = CURRICULUM_SUMMARY_SUBJECTS.length + SUBJECT_GROUPS.length;
+
+const lowercase = <T extends string>(label: T) => label.toLowerCase() as Lowercase<T>;
+
+const SUMMARY_COLUMNS: SortableColumn<CurriculumSummarySortKey>[] = [
+  { label: "Centre", sortKey: "centre" },
+  { label: "Program", sortKey: "program", className: COMPACT_COLUMN_CLASS_NAME },
+  { label: "Tracks", sortKey: "tracks", className: COMPACT_COLUMN_CLASS_NAME },
+  { label: "Region", sortKey: "region", className: COMPACT_COLUMN_CLASS_NAME },
+  ...CURRICULUM_SUMMARY_SUBJECTS.map((subject) => ({
+    label: subject,
+    sortKey: lowercase(subject),
+    className: KEY_COLUMN_CLASS_NAME,
+  })),
+  ...SUBJECT_GROUPS.map((group) => ({
+    label: `${group} Behind`,
+    sortKey: lowercase(group),
+    className: KEY_COLUMN_CLASS_NAME,
+  })),
+  { label: "Plan", sortKey: "plan", className: COMPACT_COLUMN_CLASS_NAME },
+];
+
+// Every header links to its sort from page 1, keeping the filters.
+function summarySortHeaders(params: CurriculumSummaryQuery) {
+  return sortableHeaders(SUMMARY_COLUMNS, params.sort, defaultSortDirection, (sort) =>
+    summaryHref(params, { sort })
+  );
+}
+
+function SummaryTable({
   rows,
-  chapterRowsByParentKey,
-  sort,
-  dir,
-  currentParams,
+  params,
 }: {
   rows: CurriculumSummaryRow[];
-  chapterRowsByParentKey: Record<string, CurriculumSummaryChapterRow[]>;
-  sort: CurriculumSummarySortKey;
-  dir: CurriculumSummarySortDirection;
-  currentParams: Record<string, string | undefined>;
+  params: CurriculumSummaryQuery;
 }) {
-  const headers: Array<
-    | { label: string; sortKey: CurriculumSummarySortKey }
-    | { label: string; sortKey?: undefined }
-  > = [
-    { label: "School", sortKey: "school" },
-    { label: "Program", sortKey: "program" },
-    { label: "Grade", sortKey: "grade" },
-    { label: "Subject", sortKey: "subject" },
-    { label: "Exam Track", sortKey: "exam_track" },
-    { label: "Completed", sortKey: "completed" },
-    { label: "Prescribed", sortKey: "prescribed" },
-    { label: "Delta %", sortKey: "delta" },
-    { label: "Lecture vs prescribed", sortKey: "actual" },
-    { label: "Flagged", sortKey: "flagged" },
-  ];
-
   return (
     <div className="overflow-x-auto">
       <table className="min-w-full divide-y divide-border text-sm">
-        <thead className="bg-bg-muted">
-          <tr>
-            {headers.map((header) => (
-              <th
-                key={header.label}
-                scope="col"
-                className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-text-muted"
-              >
-                {header.sortKey ? (
-                  <SortHeader
-                    column={header.sortKey}
-                    currentSort={sort}
-                    currentDir={dir}
-                    currentParams={currentParams}
-                  >
-                    {header.label}
-                  </SortHeader>
-                ) : (
-                  header.label
-                )}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <CurriculumSummaryTableRows
-          rows={rows}
-          chapterRowsByParentKey={chapterRowsByParentKey}
-        />
+        <SortableTableHead headers={summarySortHeaders(params)} />
+        <tbody className="divide-y divide-border">
+          {rows.map((row) => (
+            <SummaryTableRow key={row.centreId} row={row} params={params} />
+          ))}
+        </tbody>
       </table>
     </div>
   );
 }
 
-function SortHeader({
-  column,
-  currentSort,
-  currentDir,
-  currentParams,
-  children,
-}: {
-  column: CurriculumSummarySortKey;
-  currentSort: CurriculumSummarySortKey;
-  currentDir: CurriculumSummarySortDirection;
-  currentParams: Record<string, string | undefined>;
-  children: ReactNode;
-}) {
-  const active = currentSort === column;
-  const nextDir: CurriculumSummarySortDirection = active
-    ? currentDir === "asc"
-      ? "desc"
-      : "asc"
-    : SORT_COLUMNS[column].defaultDir;
-  const indicator = active ? (currentDir === "asc" ? "↑" : "↓") : "";
+function SummaryTableRow({ row, params }: { row: CurriculumSummaryRow; params: CurriculumSummaryQuery }) {
+  const timelineHref = `/curriculum-summary/centres/${row.centreId}?${new URLSearchParams({
+    grade: String(params.grade),
+    as_of: params.asOf,
+  }).toString()}`;
 
   return (
-    <Link
-      href={sortHref(column, nextDir, currentParams)}
-      className="inline-flex items-center gap-1 text-text-muted hover:text-text-primary"
-    >
-      <span>
-        {children}
-        {indicator ? ` ${indicator}` : ""}
-      </span>
-    </Link>
+    <tr data-summary-row data-centre={row.centreName} data-kind={row.kind}>
+      <td className={`${CELL_CLASS_NAME} px-4`}>
+        {/* Between 10 and 11rem: a long Centre name takes at most two lines. */}
+        <Link
+          href={timelineHref}
+          className="block min-w-[10rem] max-w-[11rem] font-bold text-accent hover:text-accent-hover"
+        >
+          {row.centreName}
+        </Link>
+      </td>
+      <td className={`${COMPACT_CELL_CLASS_NAME} whitespace-nowrap`}>{row.programName}</td>
+      <td className={COMPACT_CELL_CLASS_NAME}>
+        <span className="block max-w-[7rem]">
+          <TracksLabel label={row.tracksLabel} />
+        </span>
+      </td>
+      <td className={COMPACT_CELL_CLASS_NAME}>
+        <span className="block max-w-[8rem] break-words">{row.region ?? "—"}</span>
+      </td>
+      <RowMetrics row={row} />
+    </tr>
   );
 }
 
-function sortHref(
-  column: CurriculumSummarySortKey,
-  dir: CurriculumSummarySortDirection,
-  currentParams: Record<string, string | undefined>
-): string {
-  const params = new URLSearchParams();
-  for (const [key, value] of Object.entries(currentParams)) {
-    if (value && key !== "sort" && key !== "dir" && key !== "page") {
-      params.set(key, value);
-    }
-  }
-  params.set("sort", column);
-  params.set("dir", dir);
-  return `/curriculum-summary?${params.toString()}`;
+// "JEE Main + JEE Advanced" breaks only between tracks, never inside a track name.
+function TracksLabel({ label }: { label: string }) {
+  return label.split(" + ").map((track, index) => (
+    <Fragment key={track}>
+      {index > 0 ? " + " : null}
+      <span className="whitespace-nowrap">{track}</span>
+    </Fragment>
+  ));
 }
 
-function CurriculumSummaryPagination({
-  currentPage,
-  totalPages,
-  pageSize,
-  currentParams,
-}: {
-  currentPage: number;
-  totalPages: number;
-  pageSize: number;
-  currentParams: Record<string, string | undefined>;
-}) {
-  const displayTotalPages = totalPages || 1;
-  const hasPrevious = currentPage > 1;
-  const hasNext = totalPages > 0 && currentPage < totalPages;
+function RowMetrics({ row }: { row: CurriculumSummaryRow }) {
+  if (row.kind === "plan" && row.subjects && row.subjectGroups) {
+    return <PlanCells row={row} subjects={row.subjects} subjectGroups={row.subjectGroups} />;
+  }
+  if (row.kind === "no_plan") return <NoPlanCells testsConducted={row.testsConducted ?? 0} />;
+  return (
+    <td
+      colSpan={MEASURE_COLUMNS + 1}
+      data-explanation
+      className={`${CELL_CLASS_NAME} px-2 font-bold text-warning-text`}
+    >
+      {row.explanation}
+    </td>
+  );
+}
 
+function PlanCells({
+  row,
+  subjects,
+  subjectGroups,
+}: {
+  row: CurriculumSummaryRow;
+  subjects: NonNullable<CurriculumSummaryRow["subjects"]>;
+  subjectGroups: NonNullable<CurriculumSummaryRow["subjectGroups"]>;
+}) {
+  return (
+    <>
+      {CURRICULUM_SUMMARY_SUBJECTS.map((subject) => (
+        <td key={subject} data-subject={subject} className={`${CELL_CLASS_NAME} px-2 text-center`}>
+          <ProgressPill progress={subjects[subject]} />
+          <TestsOverdueNote count={row.testsOverdueBySubject?.[subject] ?? 0} />
+        </td>
+      ))}
+      {SUBJECT_GROUPS.map((group) => (
+        <td key={group} data-subject-group={group} className={`${CELL_CLASS_NAME} px-2 text-center`}>
+          <ProgressPill progress={subjectGroups[group]} />
+        </td>
+      ))}
+      <td data-plan className={COMPACT_CELL_CLASS_NAME}>
+        <span className="block min-w-[9.5rem] max-w-[11rem]">
+          {row.plan?.title}
+          {row.plan?.closed ? (
+            <Badge className="ml-1" data-plan-closed>
+              Closed
+            </Badge>
+          ) : null}
+        </span>
+      </td>
+    </>
+  );
+}
+
+// A subject pill or a PCM / PCB Behind cell: one tag in the tone's colour holding "N behind" or
+// "On track" over "done/due done" (curriculum owner feedback). Screen readers get one phrase
+// instead of the two fragments.
+function ProgressPill({ progress }: { progress: CurriculumSummarySubjectProgress | null }) {
+  if (!progress) return <span className="text-text-muted">—</span>;
+  const chapters = progress.due === 1 ? "chapter" : "chapters";
+  return (
+    <>
+      <span data-progress-text className="sr-only">
+        {`${progress.label}, ${progress.done} of ${progress.due} due ${chapters} done`}
+      </span>
+      <Badge
+        aria-hidden="true"
+        variant={TONE_BADGE_VARIANTS[progress.tone]}
+        data-tone={progress.tone}
+        className="flex-col whitespace-nowrap leading-tight"
+      >
+        <span data-label className="font-bold">
+          {progress.label}
+        </span>
+        <span data-done>
+          {progress.done}/{progress.due} done
+        </span>
+      </Badge>
+    </>
+  );
+}
+
+// "N tests overdue" under a subject pill; nothing when none is.
+function TestsOverdueNote({ count }: { count: number }) {
+  if (count === 0) return null;
+  return (
+    <span data-tests-overdue className="mt-1 block whitespace-nowrap text-xs text-danger">
+      {count} {count === 1 ? "test" : "tests"} overdue
+    </span>
+  );
+}
+
+// A No plan row's Conducted Chapter Tests close its "Not measured" message.
+function NoPlanCells({ testsConducted }: { testsConducted: number }) {
+  return (
+    <>
+      <td colSpan={MEASURE_COLUMNS} data-not-measured className={`${CELL_CLASS_NAME} px-2 text-text-muted`}>
+        Not measured without an Active plan ·{" "}
+        <span data-tests-conducted>
+          {testsConducted} {testsConducted === 1 ? "test" : "tests"} conducted
+        </span>
+      </td>
+      <td data-plan className={`${COMPACT_CELL_CLASS_NAME} text-text-muted`}>
+        No plan
+      </td>
+    </>
+  );
+}
+
+function SummaryPagination({
+  page,
+  totalPages,
+  params,
+}: {
+  page: number;
+  totalPages: number;
+  params: CurriculumSummaryQuery;
+}) {
   return (
     <div className="flex flex-col gap-3 border-t border-border px-4 py-3 text-sm text-text-secondary sm:flex-row sm:items-center sm:justify-between">
       <span>
-        Page {currentPage} of {displayTotalPages}
+        Page {page} of {totalPages || 1}
       </span>
       <div className="flex flex-wrap items-center justify-end gap-2">
         <CurriculumSummaryPageSizeSelect
-          currentParams={currentParams}
-          pageSize={pageSize}
+          filterQuery={filterSearchParams(params).toString()}
+          pageSize={params.pageSize}
         />
-        {hasPrevious ? (
-          <Link
-            href={pageHref(currentPage - 1, currentParams)}
-            className="rounded-md border border-border px-3 py-1.5 font-bold text-accent hover:text-accent-hover"
-          >
-            Previous
-          </Link>
-        ) : (
-          <span className="rounded-md border border-border px-3 py-1.5 font-bold text-text-muted">
-            Previous
-          </span>
-        )}
-        {hasNext ? (
-          <Link
-            href={pageHref(currentPage + 1, currentParams)}
-            className="rounded-md border border-border px-3 py-1.5 font-bold text-accent hover:text-accent-hover"
-          >
-            Next
-          </Link>
-        ) : (
-          <span className="rounded-md border border-border px-3 py-1.5 font-bold text-text-muted">
-            Next
-          </span>
-        )}
+        <PageLink label="Previous" href={page > 1 ? summaryHref(params, { page: page - 1 }) : null} />
+        <PageLink label="Next" href={page < totalPages ? summaryHref(params, { page: page + 1 }) : null} />
       </div>
     </div>
   );
 }
 
-function pageHref(
-  page: number,
-  currentParams: Record<string, string | undefined>
-): string {
-  const params = new URLSearchParams();
-  for (const [key, value] of Object.entries(currentParams)) {
-    if (value && key !== "page") {
-      params.set(key, value);
-    }
+function PageLink({ label, href }: { label: string; href: string | null }) {
+  if (!href) {
+    return <span className="rounded-md border border-border px-3 py-1.5 font-bold text-text-muted">{label}</span>;
   }
-  params.set("page", String(page));
-  return `/curriculum-summary?${params.toString()}`;
-}
-
-function formatDateRange(filters: CurriculumSummaryFilters): string {
-  const label = formatPreset(filters.preset);
-  if (!filters.from && !filters.to) {
-    return `${label}: all dates`;
-  }
-  return `${label}: ${filters.from ?? "—"} to ${filters.to ?? "—"}`;
-}
-
-function formatPreset(preset: CurriculumSummaryDatePreset): string {
-  switch (preset) {
-    case "today":
-      return "Today";
-    case "last_7_days":
-      return "Last 7 days";
-    case "last_30_days":
-      return "Last 30 days";
-    case "all":
-      return "All dates";
-    case "custom":
-      return "Custom";
-    default:
-      return "Current academic year";
-  }
-}
-
-function formatPercent(value: number | null): string {
-  if (value === null || !Number.isFinite(value)) {
-    return "—";
-  }
-
-  const rounded = Math.round(value * 10) / 10;
-  return `${Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(1)}%`;
-}
-
-function formatHours(minutes: number): string {
-  if (minutes <= 0) {
-    return "0h";
-  }
-
-  const hours = Math.floor(minutes / 60);
-  const remainingMinutes = minutes % 60;
-
-  if (hours === 0) {
-    return `${remainingMinutes}m`;
-  }
-  if (remainingMinutes === 0) {
-    return `${hours}h`;
-  }
-  return `${hours}h ${remainingMinutes}m`;
+  return (
+    <Link href={href} className="rounded-md border border-border px-3 py-1.5 font-bold text-accent hover:text-accent-hover">
+      {label}
+    </Link>
+  );
 }
