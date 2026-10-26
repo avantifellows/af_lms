@@ -27,6 +27,14 @@ import {
   isAdmissionGrade,
   type ConsentByStudentId,
 } from "@/lib/enrollment-readiness";
+import {
+  buildDataCompleteness,
+  filterLabelFor,
+  studentMatchesCompletenessFilter,
+  type CompletenessFilterKey,
+  type DocumentTypesByStudentId,
+} from "@/lib/data-completeness";
+import DataCompletenessTable from "./DataCompletenessTable";
 import type { Batch } from "@/components/EditStudentModal";
 import { PROGRAM_IDS } from "@/lib/constants";
 import {
@@ -175,9 +183,19 @@ export default function EnrollmentTabContent({
   const canUseInterventionFlags = selectedProgramId !== PROGRAM_IDS.NVS;
   const canEditInterventionFlags = canUseInterventionFlags && canEdit;
 
+  // Which readiness view this Program gets. Physical centres get the Data
+  // completeness table (#468); JNV NVS keeps the Admission row it has today,
+  // because PMU did not ask for the table and its Students collect neither
+  // documents nor exam registrations (#433, #434).
+  const isNvsSelected = selectedProgramId === PROGRAM_IDS.NVS;
+  const showAdmissionRow = isNvsSelected;
+  const showCompleteness = selectedProgramId != null && !isNvsSelected;
+
   // Consent status for the school's grade 11/12 students, keyed by
   // student_pk_id. Fetched client-side so the (default) enrollment tab isn't
-  // blocked on the per-student document lookups.
+  // blocked on the per-student document lookups. JNV NVS only: physical
+  // centres get the Data completeness table below instead of the Admission
+  // row, and read their documents in one go (#468).
   const [consent, setConsent] = useState<ConsentByStudentId>({});
   const [consentLoading, setConsentLoading] = useState(true);
   const [consentError, setConsentError] = useState(false);
@@ -189,6 +207,7 @@ export default function EnrollmentTabContent({
   // inside async callbacks (not synchronously in the effect body) to avoid
   // cascading renders.
   useEffect(() => {
+    if (!showAdmissionRow) return;
     let cancelled = false;
     fetchJson<{ consent: ConsentByStudentId }>(
       `/api/schools/${encodeURIComponent(schoolCode)}/consent-status`,
@@ -207,7 +226,39 @@ export default function EnrollmentTabContent({
     return () => {
       cancelled = true;
     };
-  }, [schoolCode, consentReloadKey]);
+  }, [schoolCode, consentReloadKey, showAdmissionRow]);
+
+  // Document types on file for the whole School, in one read (#468) — the
+  // consent summary's per-Student fan-out can't answer "who is missing what"
+  // across seven types. null until it lands, so the Documents row says it is
+  // loading rather than reporting every Student as missing everything.
+  const [documents, setDocuments] = useState<DocumentTypesByStudentId | null>(
+    null,
+  );
+  const [documentsError, setDocumentsError] = useState(false);
+
+  useEffect(() => {
+    if (!showCompleteness) return;
+    let cancelled = false;
+    fetchJson<{ documents: DocumentTypesByStudentId }>(
+      `/api/schools/${encodeURIComponent(schoolCode)}/document-status`,
+    )
+      .then((data) => {
+        if (cancelled) return;
+        setDocuments(data.documents ?? {});
+        setDocumentsError(false);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        // Keep whatever we had: a failed refetch after an upload shouldn't
+        // blank a table the PM is reading.
+        setDocuments((current) => current ?? {});
+        setDocumentsError(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [schoolCode, consentReloadKey, showCompleteness]);
 
   // Intervention flags for the school, keyed by student_pk_id (newest first).
   const [flagsByStudent, setFlagsByStudent] = useState<
@@ -277,7 +328,6 @@ export default function EnrollmentTabContent({
   }, [filteredActive]);
 
   // NVS speaks "Exam Preparing For": the same stream filter, formatted labels.
-  const isNvsSelected = selectedProgramId === PROGRAM_IDS.NVS;
   // Roster search is NVS-only; it narrows the table and "Showing X of Y" but
   // not the program-card counts or Download List.
   const rosterSearch = isNvsSelected ? searchQuery : "";
@@ -318,7 +368,76 @@ export default function EnrollmentTabContent({
     (s) => s.student_pk_id && openFlagStudentIds.has(s.student_pk_id),
   ).length;
   const flagFilterOn = canUseInterventionFlags && flaggedOnly;
-  const activeFilteredCount = flagFilterOn ? flaggedCount : gradeStreamActive.length;
+
+  // The Data completeness table counts `gradeStreamActive` — the Students the
+  // grade and stream filters leave — so tapping a chip narrows the roster
+  // without rewriting the numbers above it.
+  const completeness = useMemo(
+    () => buildDataCompleteness(gradeStreamActive, documents),
+    [gradeStreamActive, documents],
+  );
+
+  const [completenessFilter, setCompletenessFilter] =
+    useState<CompletenessFilterKey | null>(null);
+
+  const completenessMatchIds = useMemo(() => {
+    if (!completenessFilter) return null;
+    const ids = new Set<string>();
+    for (const student of gradeStreamActive) {
+      if (
+        student.student_pk_id &&
+        studentMatchesCompletenessFilter(student, completenessFilter, documents)
+      ) {
+        ids.add(student.student_pk_id);
+      }
+    }
+    return ids;
+  }, [completenessFilter, gradeStreamActive, documents]);
+
+  const completenessCount = completenessMatchIds?.size ?? 0;
+
+  // A filter is kept across a grade or stream change only while it still
+  // matches someone; otherwise it clears itself, rather than leaving an empty
+  // roster under a chip that is no longer on the table.
+  const filterSurviving = (
+    filter: CompletenessFilterKey | null,
+    grade: string,
+    stream: string,
+  ): CompletenessFilterKey | null => {
+    if (!filter) return null;
+    const stillMatches = filteredActive.some(
+      (student) =>
+        (grade === "all" || student.grade === Number(grade)) &&
+        matchesStreamFilter(student.stream, stream) &&
+        studentMatchesCompletenessFilter(student, filter, documents),
+    );
+    return stillMatches ? filter : null;
+  };
+
+  const changeGrade = (grade: string) => {
+    setSelectedGrade(grade);
+    setCompletenessFilter((filter) =>
+      filterSurviving(filter, grade, selectedStream),
+    );
+  };
+
+  const changeStream = (stream: string) => {
+    setSelectedStream(stream);
+    setCompletenessFilter((filter) =>
+      filterSurviving(filter, selectedGrade, stream),
+    );
+  };
+
+  const visibleActiveCount = gradeStreamActive.filter(
+    (student) =>
+      (!flagFilterOn ||
+        (student.student_pk_id != null &&
+          openFlagStudentIds.has(student.student_pk_id))) &&
+      (completenessMatchIds == null ||
+        (student.student_pk_id != null &&
+          completenessMatchIds.has(student.student_pk_id))),
+  ).length;
+  const activeFilteredCount = visibleActiveCount;
 
   const showAddStudent = canAddStudent && selectedProgramId === PROGRAM_IDS.NVS;
   const showDownloadList = canDownloadList && selectedProgramId === PROGRAM_IDS.NVS;
@@ -326,7 +445,8 @@ export default function EnrollmentTabContent({
     selectedGrade !== "all" ||
     selectedStream !== "all" ||
     rosterSearch.trim() !== "" ||
-    flagFilterOn;
+    flagFilterOn ||
+    completenessFilter != null;
 
   const downloadList = () => {
     const params = new URLSearchParams();
@@ -418,7 +538,7 @@ export default function EnrollmentTabContent({
           <select
             id="gradeFilter"
             value={selectedGrade}
-            onChange={(e) => setSelectedGrade(e.target.value)}
+            onChange={(e) => changeGrade(e.target.value)}
             className="rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 bg-white focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/20"
           >
             <option value="all">All Grades ({filteredActive.length})</option>
@@ -437,7 +557,7 @@ export default function EnrollmentTabContent({
           <select
             id="streamFilter"
             value={selectedStream}
-            onChange={(event) => setSelectedStream(event.target.value)}
+            onChange={(event) => changeStream(event.target.value)}
             className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/20"
           >
             <option value="all">All Streams ({filteredActive.length})</option>
@@ -502,10 +622,27 @@ export default function EnrollmentTabContent({
             setSelectedGrade("all");
             setSelectedStream("all");
             setSearchQuery("");
+            setCompletenessFilter(null);
           }}
-          admission={admissionSummary}
+          admission={showAdmissionRow ? admissionSummary : null}
           consentLoading={consentLoading}
           consentError={consentError}
+        />
+      )}
+
+      {showCompleteness && (
+        <DataCompletenessTable
+          completeness={completeness}
+          activeFilter={completenessFilter}
+          onFilterChange={setCompletenessFilter}
+          activeFilterLabel={filterLabelFor(completeness, completenessFilter)}
+          filteredCount={completenessCount}
+          scopeNoun={
+            selectedGrade === "all"
+              ? "students"
+              : `Grade ${selectedGrade} students`
+          }
+          documentsError={documentsError}
         />
       )}
 
@@ -532,6 +669,7 @@ export default function EnrollmentTabContent({
         onOpenInterventionFlag={canUseInterventionFlags ? setFlagStudent : undefined}
         canRaiseInterventionFlag={canEditInterventionFlags}
         flaggedOnly={flagFilterOn}
+        restrictToStudentIds={completenessMatchIds}
       />
 
       {flagStudent?.student_pk_id && (

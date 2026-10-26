@@ -2000,3 +2000,56 @@ describe("StudentTable - exam registrations", () => {
     expect(screen.queryByText("JEE123")).not.toBeInTheDocument();
   });
 });
+
+// ─── Data completeness filter (#468) ────────────────────────────────────────
+
+describe("StudentTable - restrictToStudentIds", () => {
+  const aarav = makeStudent({ student_pk_id: "1", first_name: "Aarav" });
+  const bela = makeStudent({
+    group_user_id: "gu-2",
+    student_pk_id: "2",
+    first_name: "Bela",
+  });
+
+  it("shows only the Students the completeness chip counted", () => {
+    render(
+      <StudentTable
+        students={[aarav, bela]}
+        grades={defaultGrades}
+        restrictToStudentIds={new Set(["1"])}
+      />,
+    );
+
+    expect(screen.getByText(/Aarav/)).toBeInTheDocument();
+    expect(screen.queryByText(/Bela/)).not.toBeInTheDocument();
+  });
+
+  it("shows everyone when no chip is active", () => {
+    render(
+      <StudentTable
+        students={[aarav, bela]}
+        grades={defaultGrades}
+        restrictToStudentIds={null}
+      />,
+    );
+
+    expect(screen.getByText(/Aarav/)).toBeInTheDocument();
+    expect(screen.getByText(/Bela/)).toBeInTheDocument();
+  });
+
+  it("leaves the Dropout tab alone — the table counts the active roster", async () => {
+    const user = userEvent.setup();
+    render(
+      <StudentTable
+        students={[aarav]}
+        dropoutStudents={[bela]}
+        grades={defaultGrades}
+        restrictToStudentIds={new Set(["1"])}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /Dropout/ }));
+
+    expect(screen.getByText(/Bela/)).toBeInTheDocument();
+  });
+});

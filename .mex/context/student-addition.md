@@ -18,7 +18,7 @@ edges:
     condition: when adding LMS API routes for create or bulk upload
   - target: patterns/db-service-write.md
     condition: when proxying student writes to the DB Service
-last_updated: 2026-10-23
+last_updated: 2026-10-26
 ---
 
 # Student Addition
@@ -206,6 +206,44 @@ the DB Service migration loses the exam tags rather than the roster.
 Deferred, per the issue: exam results (date, score, percentile, ranks), bulk upload of exam
 details, and the ops sheet's email / contact number / roll number — db-service PR #776 adds
 those columns but the tab does not collect them yet.
+
+## Data completeness table (Enrollment tab, #468)
+
+GitHub issue https://github.com/avantifellows/af_lms/issues/468 replaced the Admission row's two
+percentages with a table that says **who is missing what**. Physical centres only (the issue says so
+outright, and #395/#431/#434 each had to be gated afterwards); JNV NVS keeps the Admission row and
+sees no table, `EnrollmentTabContent` picking between them on `showAdmissionRow` / `showCompleteness`.
+
+Three rows, built by `src/lib/data-completeness.ts`:
+
+- **Info** — ten fields the Programs team tracks (Date of Birth, Gender, Category, Parents Phone
+  Number, Annual Family Income, Father Name, Mother Name, Address, APAAR ID, PEN / Grade 10 Roll no).
+  Confirmed with the issue author over the alternatives on 2026-10-26. APAAR ID and PEN / Grade 10
+  Roll no carry a lock, Edit Student being unable to change them; PEN and the roll number are **one**
+  chip, since either identifies the Student to the board. This list is deliberately *not*
+  `INFO_REQUIRED_FIELDS` from `enrollment-readiness.ts`: that one answers "one honest percentage per
+  School" and was cut to five in #338, while this one can afford the rarely-filled fields because each
+  shows as its own chip.
+- **Documents** — all seven types in `document-types.ts`, the two consents starred as required. The
+  product call the old `% Docs` was waiting on.
+- **Exams** — one chip per exam the Student's Board Stream calls for (`STREAM_EXPECTED_EXAM_NAMES`),
+  counting Students with no registration for it. An exam no Student in scope is expected to sit gets
+  a note ("NEET not expected — no Student on PCB or PCMB") rather than silently missing.
+
+Every percentage is **slot-based** (filled ÷ Students × items), not all-or-nothing, so it moves as
+gaps close. Chips sort worst first and anything nobody is missing folds into "✓ N complete" with the
+names on hover. Severity on the count pill: red from 50% of the Students, amber from 20%.
+
+`missingKeysForStudent` answers both the counts and "is this Student in the filter", so a chip's
+number and the roster it opens cannot disagree. Tapping a chip sets `restrictToStudentIds` on
+`StudentTable` (active tab only — the table counts the active roster); a group label filters on
+"missing any item in this group". Filters compose with Filter by Grade and Filter by Stream, and
+`filterSurviving` drops a filter a grade or stream change leaves matching nobody.
+
+Documents arrive from **one bulk read** for the School, `GET /api/schools/[code]/document-status`
+(see `data-access.md` §1) — the consent summary's per-Student fan-out can't answer seven types across
+a roster. Until it lands the Documents row says it is loading rather than reporting every Student as
+missing everything; a failed read says so instead of counting zeros as gaps.
 
 ## Settled Product Shape
 - v1 is JNV PMU / JNV NVS only. In current LMS code this is `PROGRAM_IDS.NVS` (`64`, label `JNV NVS`) from `src/lib/constants.ts`.
