@@ -69,8 +69,16 @@ A summary of covered topics, teaching time, and chapter completion for a school-
 _Avoid_: Progress record, saved progress
 
 **Curriculum Summary**:
-A top-level read-only dashboard for reviewing curriculum progress across schools, grades, subjects, and exam tracks.
+A top-level read-only dashboard for reviewing each Summary Class's progress against its Curriculum Plan, including Chapter Test Status.
 _Avoid_: Curriculum tab, curriculum report, curriculum overview
+
+**Summary Class**:
+The group of students a Centre teaches together in one Grade: a single Exam Track, or JEE Main or JEE Advanced taught with NEET as one shared class.
+_Avoid_: Merged stream, combined batch, School row
+
+**Primary Exam Track**:
+The Exam Track whose prescribed lecture time a Summary Class uses: the JEE track (JEE Main or JEE Advanced) for a shared class with NEET, falling back to NEET for a Chapter the JEE track doesn't cover, otherwise its only Exam Track.
+_Avoid_: Main stream, default track
 
 **Exam Track**:
 The exam-specific curriculum lens used by a Centre, such as JEE Main, JEE Advanced, NEET, CET, or Math Foundation.
@@ -83,6 +91,42 @@ _Avoid_: Timemap, chapter requirement
 **Curriculum Config Management**:
 An admin-only workflow for changing LMS Chapter Exam Config values that affect all schools using the configured chapter and exam track.
 _Avoid_: Curriculum logging, school curriculum setup
+
+**Curriculum Plan**:
+An Admin-authored plan for one academic year and Grade that gives Chapters of its served Exam Tracks a Chapter Due Date and ends on its Plan Closure Date.
+_Avoid_: Timeline, schedule, pacing plan, Timemap
+
+**Chapter Due Date**:
+The date by which a Curriculum Plan expects a Chapter to be taught and marked complete.
+_Avoid_: Deadline, target date, test date
+
+**Chapter Test Date**:
+The optional date on which a Curriculum Plan expects a Chapter's Chapter Test to be held, normally the day after its Chapter Due Date.
+_Avoid_: Test due date, exam date
+
+**Plan Closure Date**:
+The date after which a Curriculum Plan is Closed and the next academic year's plan can take over.
+_Avoid_: End date, expiry, plan completion
+
+**Plan Assignment**:
+The link that makes one Curriculum Plan the plan for one Centre and Grade.
+_Avoid_: Plan mapping, plan allocation
+
+**Chapters Behind**:
+The count of a Centre and Grade's Chapters whose Chapter Due Date has passed without Chapter Completion.
+_Avoid_: Delay, lag, overdue chapters
+
+**PCM Behind** / **PCB Behind**:
+A Summary Class's Chapters Behind in Physics, Chemistry and Maths (PCM) or in Physics, Chemistry and Biology (PCB); Chapters of any other subject count in neither.
+_Avoid_: Stream behind, Behind total
+
+**Chapter Test**:
+A quiz session of a CMS chapter test, attributed to one Chapter and to the Centre and Grade whose batches it was created for.
+_Avoid_: Unit test, chapter quiz, combined chapter test
+
+**Chapter Test Status**:
+Whether a Chapter's Chapter Test is Conducted (a session has ended), Scheduled (a session exists but has not ended), Overdue (no session seven days after the Chapter Test Date), or Not due.
+_Avoid_: Test completion, test done
 
 ### Assessments
 
@@ -392,24 +436,25 @@ _Avoid_: Screener Form (as a Quiz Form), Holistic Student Profile Questionnaire
 - All three LMS Curriculum Log types reuse the existing Curriculum permission: Teacher, Program Admin, and Admin can edit, while Program Manager can view
 - **Chapter Completion** is stored independently from **LMS Curriculum Logs**
 - **Curriculum Progress** combines covered topics and teaching time from **LMS Curriculum Logs** with stored **Chapter Completion**
-- **Curriculum Summary** aggregates **Curriculum Progress** across multiple **Schools** for PM/admin monitoring
-- Each **Curriculum Summary** top-level row represents one School-Program-Grade-Subject-Exam Track combination
-- **Curriculum Summary** shows a mapped **Centre Exam Track** without LMS Chapter Exam Config as unavailable rather than hiding the operational track or creating empty chapter rows
-- An unavailable **Centre Exam Track** appears as one non-expandable top-level row with School, Program, Grade, and Exam Track; Subject and metrics are blank and the row explains that Curriculum configuration is unavailable
-- When School and Program resolve to zero or multiple active physical Centres, **Curriculum Summary** shows a configuration-error row for that combination while continuing to load valid combinations
-- Selecting Schools in **Curriculum Summary** limits the available values in the other multi-select filters but does not select values automatically
-- Issue #252 keeps the Region filter in **Curriculum Summary** and removes the State and District filters
-- **Curriculum Summary** multi-select filters keep selections inside their open checkbox lists rather than showing removable selection chips; users clear one filter by unchecking values or clear all filters with Clear filters
-- A **Curriculum Summary** multi-select updates its form selection immediately and stays open while users check or uncheck values; clicking outside or Done keeps the selections and closes the list, while Clear unchecks that filter and leaves the list open
-- Apply filters is the only action that reloads **Curriculum Summary** with the selected filter values
-- A closed **Curriculum Summary** multi-select shows All when empty and a selected-value count when one or more values are checked
-- An empty Program, Grade, Subject, or Exam Track filter in **Curriculum Summary** means all available values for the selected Schools
-- With multiple Schools selected, **Curriculum Summary** filter options use the union of values available to any selected School, while result rows still include only valid School combinations
-- Changing selected Schools automatically removes selected filter values that are no longer valid for any selected School
-- Issue #252 does not add Chapter Test Completion Status or connect **Curriculum Summary** to Quiz Sessions or BigQuery; that work is deferred to a separate change
-- **Curriculum Summary** shows Class Cancellation Count and Doubt Solving Hours only on expanded Chapter rows, not on the parent School-Program-Grade-Subject-Exam Track row
+- Issue #417 replaces the School-Program-Grade-Subject-Exam Track table with one **Curriculum Summary** row per **Summary Class**, showing per-subject **Chapters Behind**, **PCM Behind** and **PCB Behind** against the assigned **Curriculum Plan**, and overdue **Chapter Tests** under each subject (decision Q25: under the subjects only, not under **PCM Behind** / **PCB Behind**)
+- A JEE Main or JEE Advanced **Summary Class** shows **PCM Behind** only, a NEET class **PCB Behind** only, and a shared JEE Main or JEE Advanced and NEET class both
+- **PCM Behind** and **PCB Behind** show done/due like the subject pills: how many of the group's Chapters due by the as-of date are done
+- **Curriculum Summary** lists the classes worst first by the larger of **PCM Behind** and **PCB Behind**, then by overdue **Chapter Tests**; it has no header totals
+- **Curriculum Summary** filters by Program, Region and Centre, in that order: each offers only what is in scope for the Grade and the filters before it, and Centres are picked by name rather than by School name; Only behind then keeps only classes behind in **PCM Behind** or **PCB Behind**
+- A **Summary Class** counts **LMS Curriculum Logs** and **Chapter Completion** from every Exam Track in the class; teachers still log and complete Chapters under one Exam Track (ADR 0008)
+- JEE Main and JEE Advanced are never one **Summary Class**; a Centre and Grade mapped to both, with or without NEET, is a Centre Management setup problem
+- One **Curriculum Plan** applies to a Centre and Grade for an academic year, whatever Exam Tracks it runs; G11 and G12 at one Centre have separate plans
+- A **Curriculum Plan** may serve JEE Main, JEE Advanced, NEET and CET, never Math Foundation; CET's in-syllabus Chapters join the plan once configured, but the **Curriculum Summary** and chapter timeline still ignore CET for progress and show it as not covered (CET with other Exam Tracks is a later curriculum-owner decision)
+- A Chapter is due when its **Chapter Due Date** is on or before the as-of date, and done when it has **Chapter Completion** under any Exam Track of the **Summary Class** dated in the plan's academic year on or before the as-of date
+- A **Curriculum Plan** is Draft, Active, or Closed; only Active and Closed plans drive the **Curriculum Summary**, and a plan is Closed once the as-of date passes its **Plan Closure Date**
+- **Chapter Test Status** comes from existing chapter-test quiz sessions; teachers do not record it
+- At a past as-of date, a **Chapter Test** session created after that date does not count
+- Clearing clashing Chapter dates on a **Curriculum Plan** may, with the Admin's explicit consent, clear dates on Chapters hidden from the plan (out of the syllabus or its served Exam Tracks); such a Chapter returns undated if re-added
+- Clicking a **Curriculum Summary** row opens the Centre's chapter timeline, which carries teaching hours against the **Primary Exam Track**'s prescribed time, Class Cancellation Count, and Doubt Solving Hours per Chapter
+- The chapter timeline's header shows a syllabus status per subject group the class takes (decision Q24): the same **PCM Behind** / **PCB Behind** as the class's **Curriculum Summary** row with its done/due, plus how many of the group's Chapters in the syllabus are done; without an Active **Curriculum Plan** only the syllabus count shows
 - Class Cancellation Count includes active Class Cancellation Logs, while Doubt Solving Hours sum active Doubt Solving Log duration without changing Actual Hours or Curriculum Progress
 - **Curriculum Summary** uses **Chapter Completion** as its source for chapter completion state
+- Only **Admins** create, edit, and assign **Curriculum Plans**; the curriculum team works through Admin accounts
 - **Curriculum Summary** is the entry point to **Curriculum Config Management** for eligible **Admins**
 - In v1, **Curriculum Config Management** is exposed at `/curriculum-summary/config` with the page title `Curriculum Config`
 - A chapter has one **LMS Chapter Exam Config** per configured exam track

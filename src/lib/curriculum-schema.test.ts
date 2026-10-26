@@ -5,6 +5,7 @@ vi.mock("./db", () => ({ query: vi.fn() }));
 import { query } from "./db";
 import {
   checkCurriculumConfigManagementSchema,
+  checkCurriculumPlansSchema,
   checkCurriculumSchema,
   resetCurriculumSchemaCheckForTests,
 } from "./curriculum-schema";
@@ -186,5 +187,38 @@ describe("curriculum schema preflight", () => {
     await expect(checkCurriculumSchema()).resolves.toEqual({ ok: true });
 
     expect(mockQuery).toHaveBeenCalledTimes(2);
+  });
+
+  it("checks every Curriculum Plan column the plan writes use, including activated_at and inserted_at", async () => {
+    mockQuery.mockResolvedValue([]);
+
+    await expect(checkCurriculumPlansSchema()).resolves.toEqual({ ok: true });
+
+    const [, params] = mockQuery.mock.calls[0] as [string, string[]];
+    const columns = new Set<string>();
+    for (let index = 0; index < params.length; index += 2) {
+      columns.add(`${params[index]}.${params[index + 1]}`);
+    }
+    for (const column of [
+      "lms_curriculum_plans.activated_at",
+      "lms_curriculum_plans.inserted_at",
+      "lms_curriculum_plan_chapters.inserted_at",
+      "lms_curriculum_plan_assignments.inserted_by_email",
+      "lms_curriculum_plan_assignments.inserted_at",
+      "lms_curriculum_plan_assignments.updated_at",
+    ]) {
+      expect(columns).toContain(column);
+    }
+  });
+
+  it("reports a partially applied plan migration as unavailable", async () => {
+    mockQuery.mockResolvedValue([{ table_name: "lms_curriculum_plans", column_name: "activated_at" }]);
+
+    await expect(checkCurriculumPlansSchema()).resolves.toEqual({
+      ok: false,
+      status: 503,
+      error: "LMS curriculum schema unavailable",
+      details: ["lms_curriculum_plans.activated_at"],
+    });
   });
 });

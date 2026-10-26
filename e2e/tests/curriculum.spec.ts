@@ -33,37 +33,6 @@ test.describe("Curriculum read path", () => {
     ).toBeHidden();
   });
 
-  test("admin sees Curriculum Summary metrics for logged and zero-progress expected rows", async ({
-    adminPage,
-  }) => {
-    await adminPage.goto(
-      "/curriculum-summary?schools=LMS75&programs=2&grades=11&subjects=4&exam_tracks=jee_main,jee_advanced"
-    );
-
-    await expect(
-      adminPage.getByRole("heading", { name: "Curriculum Summary", exact: true })
-    ).toBeVisible();
-    await expect(adminPage.getByText("Top-level Actual Hours use raw LMS Curriculum Log duration")).toBeVisible();
-
-    const loggedRow = adminPage
-      .getByRole("row")
-      .filter({ hasText: "JNV Nodal" })
-      .filter({ hasText: "JEE Main" });
-    await expect(loggedRow).toContainText("1/2 (50%)");
-    await expect(loggedRow).toContainText("2/2 (100%)");
-    await expect(loggedRow).toContainText("-57.1%");
-    await expect(loggedRow).toContainText("1h 30m / 3h 30m");
-    await expect(loggedRow).toContainText("Under prescribed hours");
-
-    const zeroProgressRow = adminPage
-      .getByRole("row")
-      .filter({ hasText: "JNV Nodal" })
-      .filter({ hasText: "JEE Advanced" });
-    await expect(zeroProgressRow).toContainText("0/1 (0%)");
-    await expect(zeroProgressRow).toContainText("1/1 (100%)");
-    await expect(zeroProgressRow).toContainText("0h / 2h 30m");
-  });
-
   test("admin can select Program, Exam Track, Biology, and sees configured chapter ordering", async ({
     adminPage,
   }) => {
@@ -260,17 +229,6 @@ test.describe("Curriculum read path", () => {
 
     await adminPage.getByRole("button", { name: "Chapters" }).click();
     await expect(totalTime).toHaveText(String(timeBefore));
-
-    await adminPage.goto(
-      "/curriculum-summary?schools=LMS75&programs=2&grades=11&subjects=4&exam_tracks=jee_main"
-    );
-    await adminPage.getByRole("button", { name: /Show chapters for.*JNV Nodal.*JEE Main/ }).click();
-    const alphaSummaryRow = adminPage
-      .getByRole("table")
-      .last()
-      .getByRole("row")
-      .filter({ hasText: "Fixture Alpha Physics" });
-    await expect(alphaSummaryRow.locator("td").nth(6)).toHaveText("1");
   });
 
   test("admin can create, edit, and delete a Doubt Solving log without moving Curriculum Progress", async ({
@@ -320,18 +278,7 @@ test.describe("Curriculum read path", () => {
       .locator("..");
     await expect(doubtSolvingMetric).toContainText("1h 30m");
 
-    await adminPage.goto(
-      "/curriculum-summary?schools=LMS75&programs=2&grades=11&subjects=4&exam_tracks=jee_main"
-    );
-    await adminPage.getByRole("button", { name: /Show chapters for.*JNV Nodal.*JEE Main/ }).click();
-    let alphaSummaryRow = adminPage
-      .getByRole("table")
-      .last()
-      .getByRole("row")
-      .filter({ hasText: "Fixture Alpha Physics" });
-    await expect(alphaSummaryRow.locator("td").nth(7)).toHaveText("1h 30m");
-
-    await adminPage.goto("/school/75000000075?tab=curriculum");
+    await adminPage.reload();
     await adminPage.getByLabel("Program").selectOption("2");
     await adminPage.getByRole("button", { name: "Logs" }).click();
     const persistedDoubtLog = adminPage
@@ -340,17 +287,6 @@ test.describe("Curriculum read path", () => {
     adminPage.once("dialog", (dialog) => dialog.accept());
     await persistedDoubtLog.getByRole("button", { name: "Delete log" }).click();
     await expect(persistedDoubtLog).toBeHidden();
-
-    await adminPage.goto(
-      "/curriculum-summary?schools=LMS75&programs=2&grades=11&subjects=4&exam_tracks=jee_main"
-    );
-    await adminPage.getByRole("button", { name: /Show chapters for.*JNV Nodal.*JEE Main/ }).click();
-    alphaSummaryRow = adminPage
-      .getByRole("table")
-      .last()
-      .getByRole("row")
-      .filter({ hasText: "Fixture Alpha Physics" });
-    await expect(alphaSummaryRow.locator("td").nth(7)).toHaveText("0h");
   });
 
   test("admin can delete a log and it stays excluded after reload", async ({
