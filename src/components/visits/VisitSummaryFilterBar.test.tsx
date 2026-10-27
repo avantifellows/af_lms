@@ -156,13 +156,13 @@ describe("VisitSummaryFilterBar", () => {
     );
   });
 
-  it("renders the CSV placeholder and clears filter params while preserving sort", () => {
+  it("renders the CSV placeholder and clears filter params while preserving the tab and sort", () => {
     render(
       <VisitSummaryFilterBar
         regionOptions={[]}
         schoolOptions={[]}
         pmOptions={[]}
-        currentParams={{ schools: "SC001", status: "completed", page: "4", sort: "school_name", dir: "asc" }}
+        currentParams={{ tab: "visits", schools: "SC001", status: "completed", page: "4", sort: "school_name", dir: "asc" }}
       />
     );
 
@@ -172,7 +172,7 @@ describe("VisitSummaryFilterBar", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
     expect(mockReplace).toHaveBeenCalledWith(
-      "/school-visit-summary?sort=school_name&dir=asc",
+      "/school-visit-summary?tab=visits&sort=school_name&dir=asc",
       { scroll: false }
     );
   });

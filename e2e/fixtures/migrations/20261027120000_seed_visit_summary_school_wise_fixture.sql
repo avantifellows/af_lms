@@ -9,8 +9,14 @@
 --   VSWOFF   only physical Centre is inactive                                  → out of view
 --   VSWNOREG non-JNV School with no region (region IS NULL): one active CoE Centre → in view,
 --            under the "No region (non-JNV)" Region option (#476)
+--   VSWOLD   physical-only School last visited in 2025 → a stale Last visit on the School-wise tab (#477)
 --
--- Each School has one completed Visit by e2e-vsw-pm@test.local. The region VSW_E2E (and
+-- Each School except VSWOLD has one completed Visit by e2e-vsw-pm@test.local. A second PM,
+-- e2e-vsw-pm2@test.local, has four more (#477), so School-wise counts differ per School:
+--   VSWPHYS  completed two days before today (IST) and in progress on 2026-09-01
+--   VSWOLD   completed on 2025-08-01 and 2025-07-15
+-- e2e-vsw-seated-pm@test.local (program_manager, no Visits) holds a `pm` seat at VSWPHYS's CoE and
+-- at VSWNVS's NVS Centre, so the Visit Summary shows them VSWPHYS only. The region VSW_E2E (and
 -- VSWNOREG's NULL region) is outside every fixture user's region scope, and no Centre maps a Centre Exam Track, so Curriculum
 -- Summary rows and the region-scoped PM / Program Admin lists are unchanged.
 
@@ -21,7 +27,8 @@ VALUES
   (900472, 'VSWMIXED', 'VSW Mixed JNV', NOW(), NOW(), '47000000472', 'JNV', 'VSW_E2E', 'Gujarat', 'Kutch', ARRAY[2, 64]::integer[]),
   (900473, 'VSWNVS', 'VSW NVS-only JNV', NOW(), NOW(), '47000000473', 'JNV', 'VSW_E2E', 'Gujarat', 'Surat', ARRAY[64]::integer[]),
   (900474, 'VSWOFF', 'VSW Inactive Centre School', NOW(), NOW(), '47000000474', 'JNV', 'VSW_E2E', 'Gujarat', 'Valsad', ARRAY[1]::integer[]),
-  (900475, 'VSWNOREG', 'VSW No Region School', NOW(), NOW(), '47000000475', 'GSSS', NULL, 'Gujarat', 'Rajkot', ARRAY[1]::integer[])
+  (900475, 'VSWNOREG', 'VSW No Region School', NOW(), NOW(), '47000000475', 'GSSS', NULL, 'Gujarat', 'Rajkot', ARRAY[1]::integer[]),
+  (900476, 'VSWOLD', 'VSW Old Visit School', NOW(), NOW(), '47000000476', 'JNV', 'VSW_E2E', 'Gujarat', 'Bharuch', ARRAY[1]::integer[])
 ON CONFLICT (id) DO UPDATE SET
   code = EXCLUDED.code,
   name = EXCLUDED.name,
@@ -42,7 +49,8 @@ VALUES
   (9004722, 'VSW E2E Mixed NVS', 900472, false, true, 64),
   (9004731, 'VSW E2E NVS Only', 900473, false, true, 64),
   (9004741, 'VSW E2E Closed CoE', 900474, true, false, 1),
-  (9004751, 'VSW E2E No Region CoE', 900475, true, true, 1)
+  (9004751, 'VSW E2E No Region CoE', 900475, true, true, 1),
+  (9004761, 'VSW E2E Old Visit CoE', 900476, true, true, 1)
 ON CONFLICT (id) DO UPDATE SET
   name = EXCLUDED.name,
   school_id = EXCLUDED.school_id,
@@ -58,5 +66,36 @@ VALUES
   (9004702, 'VSWMIXED', 'e2e-vsw-pm@test.local', '2026-10-06', 'completed', '2026-10-06 04:00:00', '2026-10-06 07:00:00', '2026-10-06 07:00:00'),
   (9004703, 'VSWNVS', 'e2e-vsw-pm@test.local', '2026-10-07', 'completed', '2026-10-07 04:00:00', '2026-10-07 07:00:00', '2026-10-07 07:00:00'),
   (9004704, 'VSWOFF', 'e2e-vsw-pm@test.local', '2026-10-08', 'completed', '2026-10-08 04:00:00', '2026-10-08 07:00:00', '2026-10-08 07:00:00'),
-  (9004705, 'VSWNOREG', 'e2e-vsw-pm@test.local', '2026-10-09', 'completed', '2026-10-09 04:00:00', '2026-10-09 07:00:00', '2026-10-09 07:00:00')
+  (9004705, 'VSWNOREG', 'e2e-vsw-pm@test.local', '2026-10-09', 'completed', '2026-10-09 04:00:00', '2026-10-09 07:00:00', '2026-10-09 07:00:00'),
+  (9004706, 'VSWPHYS', 'e2e-vsw-pm2@test.local', (NOW() AT TIME ZONE 'Asia/Kolkata')::date - 2, 'completed', NOW() AT TIME ZONE 'UTC', NOW() AT TIME ZONE 'UTC', NOW() AT TIME ZONE 'UTC'),
+  (9004707, 'VSWPHYS', 'e2e-vsw-pm2@test.local', '2026-09-01', 'in_progress', '2026-09-01 04:00:00', '2026-09-01 04:00:00', NULL),
+  (9004708, 'VSWOLD', 'e2e-vsw-pm2@test.local', '2025-08-01', 'completed', '2025-08-01 04:00:00', '2025-08-01 07:00:00', '2025-08-01 07:00:00'),
+  (9004709, 'VSWOLD', 'e2e-vsw-pm2@test.local', '2025-07-15', 'completed', '2025-07-15 04:00:00', '2025-07-15 07:00:00', '2025-07-15 07:00:00')
+ON CONFLICT (id) DO NOTHING;
+
+-- A seated PM: their `pm` seats make VSWPHYS and VSWNVS visit-managed; the physical-only rule
+-- then hides VSWNVS.
+INSERT INTO public."user" (id, email, role, inserted_at, updated_at)
+VALUES (9004791, 'e2e-vsw-seated-pm@test.local', 'teacher', NOW(), NOW())
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO public.user_permission
+  (email, level, role, program_ids, school_codes, regions, full_name, read_only, user_id, revoked_at)
+VALUES
+  ('e2e-vsw-seated-pm@test.local', 1, 'program_manager', ARRAY[1, 2], NULL, NULL, 'VSW Seated PM', false, 9004791, NULL)
+ON CONFLICT (email) DO UPDATE SET
+  level = EXCLUDED.level,
+  role = EXCLUDED.role,
+  program_ids = EXCLUDED.program_ids,
+  school_codes = EXCLUDED.school_codes,
+  regions = EXCLUDED.regions,
+  full_name = EXCLUDED.full_name,
+  read_only = EXCLUDED.read_only,
+  user_id = EXCLUDED.user_id,
+  revoked_at = EXCLUDED.revoked_at;
+
+INSERT INTO public.centre_positions (id, centre_id, role, user_id)
+VALUES
+  (9004791, 9004711, 'pm', 9004791),
+  (9004792, 9004731, 'pm', 9004791)
 ON CONFLICT (id) DO NOTHING;

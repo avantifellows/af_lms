@@ -201,7 +201,7 @@ describe("SchoolVisitSummaryPage", () => {
     it("redirects unauthenticated users to /", async () => {
       mockGetServerSession.mockResolvedValue(null);
 
-      await expect(SchoolVisitSummaryPage({ searchParams: Promise.resolve({}) })).rejects.toThrow("REDIRECT:/");
+      await expect(SchoolVisitSummaryPage({ searchParams: Promise.resolve({ tab: "visits" }) })).rejects.toThrow("REDIRECT:/");
       expect(mockRedirect).toHaveBeenCalledWith("/");
       expect(mockQuery).not.toHaveBeenCalled();
     });
@@ -209,13 +209,13 @@ describe("SchoolVisitSummaryPage", () => {
     it("redirects PM users to /visits and teachers to /dashboard", async () => {
       setupAuth(programManagerPermission, { user: { email: "pm@avantifellows.org" } });
 
-      await expect(SchoolVisitSummaryPage({ searchParams: Promise.resolve({}) })).rejects.toThrow("REDIRECT:/visits");
+      await expect(SchoolVisitSummaryPage({ searchParams: Promise.resolve({ tab: "visits" }) })).rejects.toThrow("REDIRECT:/visits");
       expect(mockRedirect).toHaveBeenCalledWith("/visits");
 
       vi.clearAllMocks();
       setupAuth(teacherPermission, { user: { email: "teacher@avantifellows.org" } });
 
-      await expect(SchoolVisitSummaryPage({ searchParams: Promise.resolve({}) })).rejects.toThrow("REDIRECT:/dashboard");
+      await expect(SchoolVisitSummaryPage({ searchParams: Promise.resolve({ tab: "visits" }) })).rejects.toThrow("REDIRECT:/dashboard");
       expect(mockRedirect).toHaveBeenCalledWith("/dashboard");
     });
 
@@ -223,7 +223,7 @@ describe("SchoolVisitSummaryPage", () => {
       setupAuth(programAdminPermission, { user: { email: "program-admin@avantifellows.org" } });
       mockGetFeatureAccess.mockReturnValue({ access: "none", canView: false, canEdit: false });
 
-      await expect(SchoolVisitSummaryPage({ searchParams: Promise.resolve({}) })).rejects.toThrow("REDIRECT:/dashboard");
+      await expect(SchoolVisitSummaryPage({ searchParams: Promise.resolve({ tab: "visits" }) })).rejects.toThrow("REDIRECT:/dashboard");
       expect(mockRedirect).toHaveBeenCalledWith("/dashboard");
       expect(mockQuery).not.toHaveBeenCalled();
     });
@@ -245,7 +245,7 @@ describe("SchoolVisitSummaryPage", () => {
       );
       setupSummaryQueries({ stats: emptyAggregateStats, visits: [], actions: [] });
 
-      await SchoolVisitSummaryPage({ searchParams: Promise.resolve({}) });
+      await SchoolVisitSummaryPage({ searchParams: Promise.resolve({ tab: "visits" }) });
 
       expect(mockRedirect).not.toHaveBeenCalled();
       for (const [sql, params] of mockQuery.mock.calls as [string, unknown[]][]) {
@@ -261,7 +261,7 @@ describe("SchoolVisitSummaryPage", () => {
       setupSummaryQueries();
 
       await SchoolVisitSummaryPage({
-        searchParams: Promise.resolve({ schools: "SC001", pms: "pm@example.org" }),
+        searchParams: Promise.resolve({ tab: "visits", schools: "SC001", pms: "pm@example.org" }),
       });
 
       const visitQueries = (mockQuery.mock.calls as [string, unknown[]][])
@@ -278,7 +278,7 @@ describe("SchoolVisitSummaryPage", () => {
       setupAuth(programAdminPermission, { user: { email: "program-admin@avantifellows.org" } });
       setupSummaryQueries({ stats: emptyAggregateStats, visits: [], actions: [] });
 
-      await SchoolVisitSummaryPage({ searchParams: Promise.resolve({}) });
+      await SchoolVisitSummaryPage({ searchParams: Promise.resolve({ tab: "visits" }) });
 
       const [sql, params] = mockQuery.mock.calls[0];
       expect(sql).toContain("LEFT JOIN school s ON s.code = v.school_code");
@@ -295,7 +295,7 @@ describe("SchoolVisitSummaryPage", () => {
       setupAuth(schoolScopedProgramAdminPermission, { user: { email: "program-admin@avantifellows.org" } });
       setupSummaryQueries({ stats: emptyAggregateStats, visits: [], actions: [] });
 
-      await SchoolVisitSummaryPage({ searchParams: Promise.resolve({}) });
+      await SchoolVisitSummaryPage({ searchParams: Promise.resolve({ tab: "visits" }) });
 
       const [sql, params] = mockQuery.mock.calls[0];
       expect(sql).toContain("v.school_code = ANY($3)");
@@ -332,7 +332,7 @@ describe("SchoolVisitSummaryPage", () => {
         return Promise.resolve(summaryActionRows);
       });
 
-      const pagePromise = SchoolVisitSummaryPage({ searchParams: Promise.resolve({}) });
+      const pagePromise = SchoolVisitSummaryPage({ searchParams: Promise.resolve({ tab: "visits" }) });
 
       await waitFor(() => expect(mockQuery).toHaveBeenCalledTimes(5));
       expect(mockQuery.mock.calls[0][0]).toContain("WITH action_completion");
@@ -350,7 +350,7 @@ describe("SchoolVisitSummaryPage", () => {
       setupAuth();
       setupSummaryQueries();
 
-      await SchoolVisitSummaryPage({ searchParams: Promise.resolve({}) });
+      await SchoolVisitSummaryPage({ searchParams: Promise.resolve({ tab: "visits" }) });
 
       const [sql, params] = mockQuery.mock.calls[0];
       expect(sql).toContain("COUNT(DISTINCT LOWER(v.pm_email))");
@@ -372,7 +372,7 @@ describe("SchoolVisitSummaryPage", () => {
       setupSummaryQueries();
 
       await SchoolVisitSummaryPage({
-        searchParams: Promise.resolve({ status: "completed" }),
+        searchParams: Promise.resolve({ tab: "visits", status: "completed" }),
       });
 
       const [statsSql, statsParams] = mockQuery.mock.calls[0];
@@ -393,6 +393,7 @@ describe("SchoolVisitSummaryPage", () => {
 
       await SchoolVisitSummaryPage({
         searchParams: Promise.resolve({
+          tab: "visits",
           schools: "SC001,,SC002",
           pms: "PM@Example.org, other@example.org",
           from: "2026-05-01",
@@ -423,6 +424,7 @@ describe("SchoolVisitSummaryPage", () => {
 
       await SchoolVisitSummaryPage({
         searchParams: Promise.resolve({
+          tab: "visits",
           preset: "7d",
           from: "2026-01-01",
           to: "2026-01-31",
@@ -440,7 +442,7 @@ describe("SchoolVisitSummaryPage", () => {
       setupSummaryQueries({ stats: emptyAggregateStats, visits: [], actions: [] });
 
       const jsx = await SchoolVisitSummaryPage({
-        searchParams: Promise.resolve({ from: "2026-06-01", to: "2026-05-01" }),
+        searchParams: Promise.resolve({ tab: "visits", from: "2026-06-01", to: "2026-05-01" }),
       });
       render(jsx);
 
@@ -455,6 +457,7 @@ describe("SchoolVisitSummaryPage", () => {
 
       await SchoolVisitSummaryPage({
         searchParams: Promise.resolve({
+          tab: "visits",
           schools: "SC001",
           pms: "pm@example.org",
           status: "completed",
@@ -482,7 +485,7 @@ describe("SchoolVisitSummaryPage", () => {
       setupSummaryQueries();
 
       await SchoolVisitSummaryPage({
-        searchParams: Promise.resolve({ bucket: "none" }),
+        searchParams: Promise.resolve({ tab: "visits", bucket: "none" }),
       });
 
       const [visitsSql, visitsParams] = mockQuery.mock.calls[1];
@@ -504,7 +507,7 @@ describe("SchoolVisitSummaryPage", () => {
       setupAuth();
       setupSummaryQueries();
 
-      await SchoolVisitSummaryPage({ searchParams: Promise.resolve({}) });
+      await SchoolVisitSummaryPage({ searchParams: Promise.resolve({ tab: "visits" }) });
 
       const [sql] = mockQuery.mock.calls[1];
       expect(sql).toContain("ORDER BY v.visit_date DESC, v.id DESC");
@@ -515,7 +518,7 @@ describe("SchoolVisitSummaryPage", () => {
       setupSummaryQueries();
 
       await SchoolVisitSummaryPage({
-        searchParams: Promise.resolve({ sort: "completed_at", dir: "asc" }),
+        searchParams: Promise.resolve({ tab: "visits", sort: "completed_at", dir: "asc" }),
       });
 
       const [sql] = mockQuery.mock.calls[1];
@@ -527,7 +530,7 @@ describe("SchoolVisitSummaryPage", () => {
       setupSummaryQueries();
 
       const jsx = await SchoolVisitSummaryPage({
-        searchParams: Promise.resolve({ sort: "school_name", dir: "asc" }),
+        searchParams: Promise.resolve({ tab: "visits", sort: "school_name", dir: "asc" }),
       });
       render(jsx);
 
@@ -537,7 +540,7 @@ describe("SchoolVisitSummaryPage", () => {
 
       expect(schoolSortLink).toHaveAttribute(
         "href",
-        "/school-visit-summary?sort=school_name&dir=desc"
+        "/school-visit-summary?tab=visits&sort=school_name&dir=desc"
       );
     });
 
@@ -546,7 +549,7 @@ describe("SchoolVisitSummaryPage", () => {
       setupSummaryQueries({ stats: { ...aggregateStats, total_visits: "25" } });
 
       const jsx = await SchoolVisitSummaryPage({
-        searchParams: Promise.resolve({ status: "completed", schools: "SC001", sort: "school_name", dir: "asc", page: "2" }),
+        searchParams: Promise.resolve({ tab: "visits", status: "completed", schools: "SC001", sort: "school_name", dir: "asc", page: "2" }),
       });
       render(jsx);
 
@@ -556,7 +559,7 @@ describe("SchoolVisitSummaryPage", () => {
 
       expect(schoolSortLink).toHaveAttribute(
         "href",
-        "/school-visit-summary?status=completed&schools=SC001&sort=school_name&dir=desc"
+        "/school-visit-summary?tab=visits&status=completed&schools=SC001&sort=school_name&dir=desc"
       );
     });
 
@@ -565,7 +568,7 @@ describe("SchoolVisitSummaryPage", () => {
       setupSummaryQueries();
 
       await SchoolVisitSummaryPage({
-        searchParams: Promise.resolve({ sort: "visit_date; DROP TABLE school", dir: "asc; DROP" }),
+        searchParams: Promise.resolve({ tab: "visits", sort: "visit_date; DROP TABLE school", dir: "asc; DROP" }),
       });
 
       const [sql] = mockQuery.mock.calls[1];
@@ -586,7 +589,7 @@ describe("SchoolVisitSummaryPage", () => {
         .mockResolvedValueOnce([summaryVisit])
         .mockResolvedValueOnce(summaryActionRows);
 
-      const jsx = await SchoolVisitSummaryPage({ searchParams: Promise.resolve({ page: "999" }) });
+      const jsx = await SchoolVisitSummaryPage({ searchParams: Promise.resolve({ tab: "visits", page: "999" }) });
       render(jsx);
 
       expect(screen.getByText("Page 2 of 2")).toBeInTheDocument();
@@ -600,7 +603,7 @@ describe("SchoolVisitSummaryPage", () => {
       setupAuth();
       setupSummaryQueries();
 
-      const jsx = await SchoolVisitSummaryPage({ searchParams: Promise.resolve({}) });
+      const jsx = await SchoolVisitSummaryPage({ searchParams: Promise.resolve({ tab: "visits" }) });
       render(jsx);
 
       expect(screen.getByRole("heading", { name: "School Visit Summary" })).toBeInTheDocument();
@@ -627,7 +630,7 @@ describe("SchoolVisitSummaryPage", () => {
       setupAuth();
       setupSummaryQueries({ regionOptions: [{ region: "Bhopal" }, { region: null }] });
 
-      const jsx = await SchoolVisitSummaryPage({ searchParams: Promise.resolve({ regions: "__none__" }) });
+      const jsx = await SchoolVisitSummaryPage({ searchParams: Promise.resolve({ tab: "visits", regions: "__none__" }) });
       render(jsx);
 
       const region = screen.getByRole("group", { name: "Region" });
@@ -642,7 +645,7 @@ describe("SchoolVisitSummaryPage", () => {
       setupAuth();
       setupSummaryQueries({ stats: emptyAggregateStats, visits: [], actions: [] });
 
-      const jsx = await SchoolVisitSummaryPage({ searchParams: Promise.resolve({}) });
+      const jsx = await SchoolVisitSummaryPage({ searchParams: Promise.resolve({ tab: "visits" }) });
       render(jsx);
 
       expect(screen.getByText("No visits match your filters")).toBeInTheDocument();
@@ -657,7 +660,7 @@ describe("SchoolVisitSummaryPage", () => {
       setupAuth();
       setupSummaryQueries({ visits: [inProgressVisit], actions: [] });
 
-      const jsx = await SchoolVisitSummaryPage({ searchParams: Promise.resolve({}) });
+      const jsx = await SchoolVisitSummaryPage({ searchParams: Promise.resolve({ tab: "visits" }) });
       render(jsx);
 
       expect(screen.getAllByText("fallback@avantifellows.org").length).toBeGreaterThanOrEqual(1);
@@ -668,13 +671,177 @@ describe("SchoolVisitSummaryPage", () => {
       setupAuth();
       setupSummaryQueries();
 
-      const jsx = await SchoolVisitSummaryPage({ searchParams: Promise.resolve({}) });
+      const jsx = await SchoolVisitSummaryPage({ searchParams: Promise.resolve({ tab: "visits" }) });
       render(jsx);
 
       expect(screen.queryByText("Delete")).not.toBeInTheDocument();
       expect(screen.queryByText("Start")).not.toBeInTheDocument();
       expect(screen.queryByText("End")).not.toBeInTheDocument();
       expect(screen.queryByText("Continue")).not.toBeInTheDocument();
+    });
+  });
+  describe("School-wise tab", () => {
+    const schoolRows = [
+      { school_code: "SC001", school_name: "Test School", region: "Bhopal", visits: "3", last_visit_date: "2026-10-20" },
+      { school_code: "SC002", school_name: "Other School", region: null, visits: "1", last_visit_date: "2026-08-01" },
+    ];
+
+    function setupSchoolWiseQueries(rows: Array<Record<string, unknown>> = schoolRows) {
+      mockQuery.mockImplementation((sql: string) => Promise.resolve(sql.includes("SELECT DISTINCT") ? [] : rows));
+    }
+
+    function tabLink(name: string) {
+      return within(screen.getByRole("navigation", { name: "Visit Summary views" })).getByRole("link", { name });
+    }
+
+    function schoolWiseTable() {
+      return screen.getByRole("table", { name: "Schools with visits" });
+    }
+
+    it("is the default tab: one row per School with its Visits and Last visit", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-10-27T06:00:00Z"));
+      setupAuth();
+      setupSchoolWiseQueries();
+
+      render(await SchoolVisitSummaryPage({ searchParams: Promise.resolve({}) }));
+
+      expect(tabLink("School-wise")).toHaveAttribute("aria-current", "page");
+      expect(tabLink("Visits")).not.toHaveAttribute("aria-current");
+      const rows = within(schoolWiseTable()).getAllByRole("row").slice(1);
+      expect(rows).toHaveLength(2);
+      expect(rows[0]).toHaveTextContent("Test School");
+      expect(rows[0]).toHaveTextContent("(Bhopal)");
+      expect(rows[0]).toHaveTextContent("3");
+      expect(rows[0]).toHaveTextContent("20 Oct 2026");
+      expect(rows[1]).toHaveTextContent("Other School");
+      expect(rows[1]).toHaveTextContent("01 Aug 2026");
+      expect(screen.queryByText("Total Visits")).not.toBeInTheDocument();
+      expect(screen.queryByText("Avg Completion")).not.toBeInTheDocument();
+    });
+
+    it("flags a last visit only when it is more than 45 days before today in IST", async () => {
+      // 26 Oct 2026 20:00 UTC is already 27 Oct in IST, so 45 days back is 12 Sep 2026.
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-10-26T20:00:00Z"));
+      setupAuth();
+      setupSchoolWiseQueries([
+        { school_code: "SC001", school_name: "Exactly 45 Days", region: null, visits: "1", last_visit_date: "2026-09-12" },
+        { school_code: "SC002", school_name: "Exactly 46 Days", region: null, visits: "1", last_visit_date: "2026-09-11" },
+      ]);
+
+      render(await SchoolVisitSummaryPage({ searchParams: Promise.resolve({}) }));
+
+      const [fortyFive, fortySix] = within(schoolWiseTable()).getAllByRole("row").slice(1);
+      expect(within(fortyFive).queryByText("Stale")).not.toBeInTheDocument();
+      expect(within(fortySix).getByText("Stale")).toBeInTheDocument();
+    });
+
+    it("counts Schools and their Visits in the stat cards", async () => {
+      setupAuth();
+      setupSchoolWiseQueries();
+
+      render(await SchoolVisitSummaryPage({ searchParams: Promise.resolve({}) }));
+
+      expect(screen.getByText("Schools", { selector: "span" }).nextElementSibling).toHaveTextContent("2");
+      expect(screen.getByText("Visits", { selector: "span" }).nextElementSibling).toHaveTextContent("4");
+      expect(screen.getByText("2 schools found")).toBeInTheDocument();
+    });
+
+    it("switches tabs keeping every filter and dropping sort, dir and page", async () => {
+      setupAuth();
+      setupSchoolWiseQueries();
+
+      render(await SchoolVisitSummaryPage({
+        searchParams: Promise.resolve({
+          regions: "Bhopal",
+          schools: "SC001",
+          pms: "pm@example.org",
+          status: "completed",
+          bucket: "partial",
+          preset: "30d",
+          from: "2026-09-01",
+          to: "2026-09-30",
+          sort: "visits",
+          dir: "asc",
+          page: "2",
+        }),
+      }));
+
+      const filters = "regions=Bhopal&schools=SC001&pms=pm%40example.org&status=completed&bucket=partial&preset=30d&from=2026-09-01&to=2026-09-30";
+      expect(tabLink("Visits")).toHaveAttribute("href", `/school-visit-summary?tab=visits&${filters}`);
+      expect(tabLink("School-wise")).toHaveAttribute("href", `/school-visit-summary?tab=schools&${filters}`);
+    });
+
+    it("shows the Visits tab, its stat cards and pagination for tab=visits", async () => {
+      setupAuth();
+      setupSummaryQueries({ stats: { ...aggregateStats, total_visits: "25" } });
+
+      render(await SchoolVisitSummaryPage({ searchParams: Promise.resolve({ tab: "visits", status: "completed" }) }));
+
+      expect(tabLink("Visits")).toHaveAttribute("aria-current", "page");
+      expect(tabLink("School-wise")).toHaveAttribute("href", "/school-visit-summary?tab=schools&status=completed");
+      expect(screen.getByText("Total Visits")).toBeInTheDocument();
+      expect(screen.getByText("Page 1 of 2")).toBeInTheDocument();
+      expect(screen.queryByRole("table", { name: "Schools with visits" })).not.toBeInTheDocument();
+    });
+
+    it("sorts by school name ascending by default and toggles header sort direction", async () => {
+      setupAuth();
+      setupSchoolWiseQueries();
+
+      render(await SchoolVisitSummaryPage({ searchParams: Promise.resolve({ status: "completed" }) }));
+
+      const [rowsSql] = mockQuery.mock.calls.find(([sql]) => String(sql).includes("GROUP BY v.school_code"))!;
+      expect(rowsSql).toContain("ORDER BY school_name ASC, school_code ASC");
+      const header = within(schoolWiseTable());
+      expect(header.getByRole("link", { name: /School \(region\)/ })).toHaveAttribute(
+        "href",
+        "/school-visit-summary?status=completed&sort=school_name&dir=desc"
+      );
+      expect(header.getByRole("link", { name: "Visits" })).toHaveAttribute(
+        "href",
+        "/school-visit-summary?status=completed&sort=visits&dir=desc"
+      );
+      expect(header.getByRole("link", { name: "Last visit" })).toHaveAttribute(
+        "href",
+        "/school-visit-summary?status=completed&sort=last_visit&dir=desc"
+      );
+    });
+
+    it("sorts by last visit ascending, breaking ties by school name, and links back to descending", async () => {
+      setupAuth();
+      setupSchoolWiseQueries();
+
+      render(await SchoolVisitSummaryPage({ searchParams: Promise.resolve({ tab: "schools", sort: "last_visit", dir: "asc" }) }));
+
+      const [rowsSql] = mockQuery.mock.calls.find(([sql]) => String(sql).includes("GROUP BY v.school_code"))!;
+      expect(rowsSql).toContain("ORDER BY last_visit_date ASC, school_name ASC, school_code ASC");
+      expect(within(schoolWiseTable()).getByRole("link", { name: /Last visit/ })).toHaveAttribute(
+        "href",
+        "/school-visit-summary?tab=schools&sort=last_visit&dir=desc"
+      );
+    });
+
+    it("ignores a Visits-tab sort on the School-wise tab", async () => {
+      setupAuth();
+      setupSchoolWiseQueries();
+
+      await SchoolVisitSummaryPage({ searchParams: Promise.resolve({ sort: "completed_at", dir: "sideways" }) });
+
+      const [rowsSql] = mockQuery.mock.calls.find(([sql]) => String(sql).includes("GROUP BY v.school_code"))!;
+      expect(rowsSql).toContain("ORDER BY school_name ASC, school_code ASC");
+      expect(rowsSql).not.toContain("completed_at");
+    });
+
+    it("ignores a School-wise sort on the Visits tab", async () => {
+      setupAuth();
+      setupSummaryQueries();
+
+      await SchoolVisitSummaryPage({ searchParams: Promise.resolve({ tab: "visits", sort: "last_visit", dir: "asc" }) });
+
+      const [visitsSql] = mockQuery.mock.calls[1];
+      expect(visitsSql).toContain("ORDER BY v.visit_date ASC, v.id DESC");
     });
   });
 });

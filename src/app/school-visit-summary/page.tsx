@@ -18,6 +18,8 @@ import {
   type ActionType,
 } from "@/lib/visit-actions";
 import {
+  STALE_LAST_VISIT_DAYS,
+  isStaleLastVisit,
   rollupActionTypes,
   type ActionTypeRollupStatus,
 } from "@/lib/visit-summary";
@@ -32,6 +34,13 @@ import {
   type SchoolFilterOption,
   type VisitSummaryFilters,
 } from "@/lib/visit-summary-scope";
+import {
+  SCHOOL_WISE_SORT_COLUMNS,
+  getSchoolWiseView,
+  normalizeSchoolWiseSort,
+  type SchoolWiseSort,
+  type SchoolWiseView,
+} from "@/lib/visit-summary-school-wise";
 import {
   buildVisitsActor,
   canViewVisitSummary,
@@ -106,8 +115,17 @@ interface SummaryResult {
   dir: SortDirection;
 }
 
+interface SchoolWiseResult {
+  view: SchoolWiseView;
+  regionOptions: RegionFilterOption[];
+  schoolOptions: SchoolFilterOption[];
+  pmOptions: PmFilterOption[];
+  sort: SchoolWiseSort;
+}
+
 interface PageProps {
   searchParams: Promise<{
+    tab?: string;
     sort?: string;
     dir?: string;
     page?: string;
@@ -125,6 +143,12 @@ interface PageProps {
 type SortKey = "visit_date" | "school_name" | "pm_email" | "status" | "inserted_at" | "completed_at";
 type SortDirection = "asc" | "desc";
 type SummarySearchParams = Record<string, string | undefined>;
+type SummaryTab = "schools" | "visits";
+
+// School-wise is the default; any `tab` other than `visits` shows it.
+function normalizeTab(tabParam?: string): SummaryTab {
+  return tabParam === "visits" ? "visits" : "schools";
+}
 
 const SORT_COLUMNS: Record<SortKey, { sql: string; defaultDir: SortDirection }> = {
   visit_date: { sql: "v.visit_date", defaultDir: "desc" },
@@ -407,15 +431,69 @@ async function getSummaryVisits(
   };
 }
 
+async function getSchoolWiseSummary(
+  actor: VisitsActor,
+  searchParams: SummarySearchParams
+): Promise<SchoolWiseResult> {
+  const sort = normalizeSchoolWiseSort(searchParams.sort, searchParams.dir);
+  const filters = normalizeVisitSummaryFilters(searchParams);
+  const [view, schoolOptions, pmOptions, regionOptions] = await Promise.all([
+    getSchoolWiseView(actor, filters, sort),
+    getVisitSummarySchoolOptions(actor, filters),
+    getVisitSummaryPmOptions(actor, filters),
+    getVisitSummaryRegionOptions(actor, filters),
+  ]);
+
+  return { view, regionOptions, schoolOptions, pmOptions, sort };
+}
+
+// Switching tabs keeps every filter and drops `sort`, `dir` and `page`, which belong to one tab.
+function tabHref(tab: SummaryTab, currentParams: SummarySearchParams): string {
+  const params = new URLSearchParams({ tab });
+  for (const [key, value] of Object.entries(currentParams)) {
+    if (value && key !== "tab" && key !== "sort" && key !== "dir" && key !== "page") {
+      params.set(key, value);
+    }
+  }
+  return `/school-visit-summary?${params.toString()}`;
+}
+
+function SummaryTabs({ tab, currentParams }: { tab: SummaryTab; currentParams: SummarySearchParams }) {
+  const tabs: Array<{ value: SummaryTab; label: string }> = [
+    { value: "schools", label: "School-wise" },
+    { value: "visits", label: "Visits" },
+  ];
+
+  return (
+    <nav aria-label="Visit Summary views" className="mb-6 flex gap-4 border-b border-border">
+      {tabs.map(({ value, label }) => (
+        <Link
+          key={value}
+          href={tabHref(value, currentParams)}
+          aria-current={value === tab ? "page" : undefined}
+          className={value === tab
+            ? "-mb-px border-b-2 border-accent pb-2 text-sm font-bold uppercase tracking-wide text-text-primary"
+            : "-mb-px pb-2 text-sm font-medium uppercase tracking-wide text-text-muted hover:text-text-primary"}
+        >
+          {label}
+        </Link>
+      ))}
+    </nav>
+  );
+}
+
+type SortColumns = Record<string, { defaultDir: SortDirection }>;
+
 function sortHref(
-  column: SortKey,
-  currentSort: SortKey,
+  column: string,
+  currentSort: string,
   currentDir: SortDirection,
-  currentParams: SummarySearchParams
+  currentParams: SummarySearchParams,
+  columns: SortColumns
 ): string {
   const dir = column === currentSort
     ? currentDir === "asc" ? "desc" : "asc"
-    : SORT_COLUMNS[column].defaultDir;
+    : columns[column].defaultDir;
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(currentParams)) {
     if (value && key !== "sort" && key !== "dir" && key !== "page") {
@@ -432,19 +510,21 @@ function SortHeader({
   currentSort,
   currentDir,
   currentParams,
+  columns = SORT_COLUMNS,
   children,
 }: {
-  column: SortKey;
-  currentSort: SortKey;
+  column: string;
+  currentSort: string;
   currentDir: SortDirection;
   currentParams: SummarySearchParams;
+  columns?: SortColumns;
   children: React.ReactNode;
 }) {
   const active = column === currentSort;
 
   return (
     <Link
-      href={sortHref(column, currentSort, currentDir, currentParams)}
+      href={sortHref(column, currentSort, currentDir, currentParams, columns)}
       className="inline-flex items-center gap-1 hover:text-text-primary"
     >
       {children}
@@ -562,6 +642,77 @@ function StatCards({ stats }: { stats: SummaryStats }) {
       <StatCard label="Unique PMs" value={stats.uniquePms} size="sm" />
       <StatCard label="Avg Completion" value={formatPercent(stats.avgActionCompletion)} size="sm" />
     </div>
+  );
+}
+
+function SchoolWiseStatCards({ stats }: { stats: SchoolWiseView["stats"] }) {
+  return (
+    <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-6">
+      <StatCard label="Schools" value={stats.schools} size="sm" />
+      <StatCard label="Visits" value={stats.visits} size="sm" />
+    </div>
+  );
+}
+
+function SchoolWiseTable({
+  rows,
+  sort,
+  currentParams,
+}: {
+  rows: SchoolWiseView["rows"];
+  sort: SchoolWiseSort;
+  currentParams: SummarySearchParams;
+}) {
+  const header = (column: keyof typeof SCHOOL_WISE_SORT_COLUMNS, label: string) => (
+    <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-text-muted">
+      <SortHeader
+        column={column}
+        currentSort={sort.sort}
+        currentDir={sort.dir}
+        currentParams={currentParams}
+        columns={SCHOOL_WISE_SORT_COLUMNS}
+      >
+        {label}
+      </SortHeader>
+    </th>
+  );
+
+  const now = new Date();
+
+  return (
+    <Card elevation="sm" className="overflow-x-auto">
+      <table aria-label="Schools with visits" className="min-w-full">
+        <thead className="border-b-2 border-border-accent bg-bg-card-alt">
+          <tr>
+            {header("school_name", "School (region)")}
+            {header("visits", "Visits")}
+            {header("last_visit", "Last visit")}
+          </tr>
+        </thead>
+        <tbody className="bg-bg-card">
+          {rows.map((row) => (
+            <tr key={row.schoolCode} className="border-b border-border/40 hover:bg-hover-bg">
+              <td className="px-4 py-4 text-sm font-medium text-text-primary">
+                {row.schoolName}
+                {row.region && <span className="font-normal text-text-muted"> ({row.region})</span>}
+              </td>
+              <td className="whitespace-nowrap px-4 py-4 text-sm font-mono text-text-secondary">{row.visits}</td>
+              <td className="whitespace-nowrap px-4 py-4 text-sm font-mono text-text-secondary">
+                {formatDate(row.lastVisitDate)}
+                {isStaleLastVisit(row.lastVisitDate, now) && (
+                  <span
+                    title={`Last visit more than ${STALE_LAST_VISIT_DAYS} days ago`}
+                    className="ml-2 inline-flex border border-danger/20 bg-danger-bg px-1.5 py-0.5 font-sans text-xs font-bold uppercase text-danger"
+                  >
+                    Stale
+                  </span>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </Card>
   );
 }
 
@@ -716,6 +867,70 @@ function VisitDesktopTable({
   );
 }
 
+function VisitsTab({
+  summary: { visits, actionSummaries, currentPage, totalPages, sort, dir },
+  currentParams,
+}: {
+  summary: SummaryResult;
+  currentParams: SummarySearchParams;
+}) {
+  if (visits.length === 0) {
+    return (
+      <div className="py-12 text-center">
+        <div className="text-text-muted uppercase tracking-wide">No visits match your filters</div>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="space-y-3 sm:hidden">
+        {visits.map((visit) => (
+          <VisitMobileCard
+            key={visit.id}
+            visit={visit}
+            actionSummary={actionSummaries.get(visit.id) || summarizeActions([])}
+          />
+        ))}
+      </div>
+
+      <VisitDesktopTable
+        visits={visits}
+        actionSummaries={actionSummaries}
+        sort={sort}
+        dir={dir}
+        currentParams={currentParams}
+      />
+
+      <PaginationControls
+        currentPage={currentPage}
+        totalPages={totalPages}
+        sort={sort}
+        dir={dir}
+        currentParams={currentParams}
+      />
+    </>
+  );
+}
+
+function SchoolWiseTab({
+  summary: { view, sort },
+  currentParams,
+}: {
+  summary: SchoolWiseResult;
+  currentParams: SummarySearchParams;
+}) {
+  if (view.rows.length === 0) {
+    return (
+      <div className="py-12 text-center">
+        <div className="text-text-muted uppercase tracking-wide">No schools match your filters</div>
+      </div>
+    );
+  }
+
+  return <SchoolWiseTable rows={view.rows} sort={sort} currentParams={currentParams} />;
+}
+
 export default async function SchoolVisitSummaryPage({ searchParams }: PageProps) {
   const session = await getServerSession(authOptions);
   const rawSearchParams = await searchParams;
@@ -745,19 +960,12 @@ export default async function SchoolVisitSummaryPage({ searchParams }: PageProps
     redirect("/dashboard");
   }
 
-  const {
-    visits,
-    stats,
-    actionSummaries,
-    regionOptions,
-    schoolOptions,
-    pmOptions,
-    totalCount,
-    currentPage,
-    totalPages,
-    sort,
-    dir,
-  } = await getSummaryVisits(actor, rawSearchParams);
+  const tab = normalizeTab(rawSearchParams.tab);
+  const summary = tab === "visits"
+    ? { tab: "visits" as const, ...(await getSummaryVisits(actor, rawSearchParams)) }
+    : { tab: "schools" as const, ...(await getSchoolWiseSummary(actor, rawSearchParams)) };
+  const foundCount = summary.tab === "visits" ? summary.totalCount : summary.view.stats.schools;
+  const foundNoun = summary.tab === "visits" ? "visit" : "school";
 
   return (
     <div className="min-h-screen bg-bg">
@@ -806,53 +1014,27 @@ export default async function SchoolVisitSummaryPage({ searchParams }: PageProps
               School Visit Summary
             </h1>
             <p className="mt-1 text-sm text-text-secondary">
-              {totalCount} visit{totalCount === 1 ? "" : "s"} found
+              {foundCount} {foundNoun}{foundCount === 1 ? "" : "s"} found
             </p>
           </div>
         </div>
 
-        <StatCards stats={stats} />
+        <SummaryTabs tab={summary.tab} currentParams={rawSearchParams} />
+
+        {summary.tab === "visits"
+          ? <StatCards stats={summary.stats} />
+          : <SchoolWiseStatCards stats={summary.view.stats} />}
 
         <VisitSummaryFilterBar
-          regionOptions={regionOptions}
-          schoolOptions={schoolOptions}
-          pmOptions={pmOptions}
+          regionOptions={summary.regionOptions}
+          schoolOptions={summary.schoolOptions}
+          pmOptions={summary.pmOptions}
           currentParams={rawSearchParams}
         />
 
-        {visits.length === 0 ? (
-          <div className="py-12 text-center">
-            <div className="text-text-muted uppercase tracking-wide">No visits match your filters</div>
-          </div>
-        ) : (
-          <>
-            <div className="space-y-3 sm:hidden">
-              {visits.map((visit) => (
-                <VisitMobileCard
-                  key={visit.id}
-                  visit={visit}
-                  actionSummary={actionSummaries.get(visit.id) || summarizeActions([])}
-                />
-              ))}
-            </div>
-
-            <VisitDesktopTable
-              visits={visits}
-              actionSummaries={actionSummaries}
-              sort={sort}
-              dir={dir}
-              currentParams={rawSearchParams}
-            />
-
-            <PaginationControls
-              currentPage={currentPage}
-              totalPages={totalPages}
-              sort={sort}
-              dir={dir}
-              currentParams={rawSearchParams}
-            />
-          </>
-        )}
+        {summary.tab === "visits"
+          ? <VisitsTab summary={summary} currentParams={rawSearchParams} />
+          : <SchoolWiseTab summary={summary} currentParams={rawSearchParams} />}
       </main>
     </div>
   );

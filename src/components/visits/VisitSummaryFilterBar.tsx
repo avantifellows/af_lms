@@ -104,7 +104,7 @@ export default function VisitSummaryFilterBar({
 
   function clearFilters() {
     const params = new URLSearchParams();
-    for (const key of ["sort", "dir"]) {
+    for (const key of ["tab", "sort", "dir"]) {
       if (currentParams[key]) {
         params.set(key, currentParams[key]);
       }

@@ -1,6 +1,6 @@
 // The Visits in view on the School Visit Summary (server-only: reads through `@/lib/db`).
-// Every Visit Summary query — the Visits list, its stat cards and the Region/School/PM filter
-// options — builds its WHERE clause here, so they all agree on which Visits are in view.
+// Every Visit Summary query — the Visits list, the School-wise rows, both tabs' stat cards and the
+// Region/School/PM filter options — builds its WHERE clause here, so they all agree on which Visits are in view.
 import { query } from "@/lib/db";
 import { REQUIRED_ACTION_TYPE_VALUES } from "@/lib/visit-actions";
 import { resolvePresetDateRange } from "@/lib/visit-summary";

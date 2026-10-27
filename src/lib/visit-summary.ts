@@ -129,6 +129,13 @@ export function resolvePresetDateRange(
   return { from, to };
 }
 
+// A School's last visit is stale when it is more than this many days before today in IST.
+export const STALE_LAST_VISIT_DAYS = 45;
+
+export function isStaleLastVisit(lastVisitDate: string, today: Date | string): boolean {
+  return lastVisitDate < addDays(toIstDateString(today), -STALE_LAST_VISIT_DAYS);
+}
+
 export function dispatchExtractRemarks(actionType: string, data: unknown): RemarkEntry[] {
   const additionalNotes = readActionAdditionalNotes(data).trim();
   const actionNotes = additionalNotes
