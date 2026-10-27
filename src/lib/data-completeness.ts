@@ -233,6 +233,18 @@ function registeredExamNames(student: Student): ReadonlySet<string> {
   return new Set((student.exam_records ?? []).map((record) => record.exam_name));
 }
 
+/** Which documents this Student could have on file but doesn't. */
+function missingDocumentKeys(
+  student: Student,
+  documents: DocumentTypesByStudentId,
+): CompletenessFilterKey[] {
+  const present = documentTypesFor(student, documents);
+  return DOCUMENT_TYPES.filter(({ value }) => {
+    const appliesTo = DOCUMENT_APPLIES_TO[value];
+    return (!appliesTo || appliesTo(student)) && !present.has(value);
+  }).map(({ value }) => documentFilterKey(value));
+}
+
 /**
  * Every item key this Student is missing, across all three groups. One pass
  * per Student answers both the counts and "is this Student in the filter", so
@@ -252,12 +264,7 @@ export function missingKeysForStudent(
   }
 
   if (documents) {
-    const present = documentTypesFor(student, documents);
-    for (const { value } of DOCUMENT_TYPES) {
-      const appliesTo = DOCUMENT_APPLIES_TO[value];
-      if (appliesTo && !appliesTo(student)) continue;
-      if (!present.has(value)) keys.add(documentFilterKey(value));
-    }
+    for (const key of missingDocumentKeys(student, documents)) keys.add(key);
   }
 
   const registered = registeredExamNames(student);
