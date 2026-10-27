@@ -8,12 +8,14 @@ import type { ActionItemOwner } from "@/lib/blended-learning-mentee-detail";
 
 import { BlendedSelect } from "../../../BlendedSelect";
 import { ACTION_ITEM_OWNER } from "../ActionItemMeta";
+import { CarriedItemsNotice, CarriedMarker } from "./CarriedActionItems";
 import { FieldError, GrowingTextarea, LABEL_CLASSES, LabelRow } from "./formParts";
 import { sentActionItemIndex, type DraftActionItem, type FieldErrors } from "./logEntryPayload";
 
 // The new Conversation's Action Items, one compact row each as in the mockup:
 // who, what, and a remove button. On a phone the owner takes its own line.
 // A row left without text is not saved, so the starter rows never block.
+// Rows carried over from the Profile Doc are marked, under a notice.
 
 const OWNERS = Object.keys(ACTION_ITEM_OWNER) as ActionItemOwner[];
 
@@ -30,6 +32,7 @@ function ActionItemRow({
   onChange: (change: Partial<DraftActionItem>) => void;
   onRemove: () => void;
 }) {
+  const tipId = `${useId()}-carried`;
   return (
     <div className="grid grid-cols-[minmax(0,1fr)_2.75rem] gap-2 sm:grid-cols-[8rem_minmax(0,1fr)_2.75rem] sm:items-start">
       <BlendedSelect
@@ -51,6 +54,7 @@ function ActionItemRow({
         value={item.text}
         onChange={(event) => onChange({ text: event.target.value })}
         aria-invalid={Boolean(error("text"))}
+        aria-describedby={item.carried ? tipId : undefined}
       />
       <Button
         type="button"
@@ -62,6 +66,7 @@ function ActionItemRow({
         <X aria-hidden="true" className="h-5 w-5" />
       </Button>
       <div className="col-span-full empty:hidden">
+        {item.carried && <CarriedMarker tipId={tipId} />}
         <FieldError message={error("owner")} />
         <FieldError message={error("text")} />
       </div>
@@ -98,6 +103,7 @@ export function ActionItemsEditor({
         }
         marker={marker}
       />
+      {items.some((item) => item.carried) && <CarriedItemsNotice />}
       {items.map((item, index) => (
         <ActionItemRow
           key={item.key}

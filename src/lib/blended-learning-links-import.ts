@@ -1,13 +1,24 @@
 import type ExcelJS from "exceljs";
 
 import { activeBlendedMappingSql } from "./blended-learning-access";
-import { latestProfileDocConversationOn, type DateWindow } from "./blended-learning-profile-doc-dates";
+import type {
+  LegacyActionItem,
+  LegacyConversationInvalidReason,
+  LegacyConversations,
+} from "./blended-learning-legacy-conversations";
+import {
+  latestProfileDocConversationOn,
+  legacyDateWindow,
+  type DateWindow,
+} from "./blended-learning-profile-doc-dates";
 import { CURRENT_ACADEMIC_YEAR } from "./constants";
 import { query } from "./db";
 
 // Operator-run load of Blended Learning Student Links (Profile Doc, Screener
 // Link) from the Profile Dashboard workbook, and optionally the legacy
-// last-contact date from the Profile Docs' HTML exports. Run by
+// last-contact date from the Profile Docs' HTML exports, with that latest
+// conversation's summary and action items from an externally summarised file
+// (--legacy-conversations). Run by
 // scripts/import-blended-learning-links.ts; dry run unless mode is "apply".
 
 export type BlendedLinksImportMode = "dry-run" | "apply";
@@ -53,10 +64,26 @@ type LegacyDocOutcome = "dated" | "no_dates" | "unreadable" | "no_doc_link";
 
 type LegacyDocCounts = Record<LegacyDocOutcome, number>;
 
+// How each Student with a "dated" Profile Doc got its legacy conversation:
+// "loaded" from the file's entry for that doc on that date; NULL when the
+// file has no entry for the doc, one for another date, or an invalid one.
+// "unused" counts file entries no dated doc in this run took.
+type LegacyConversationOutcome = "loaded" | "summary_missing" | "summary_stale" | "summary_invalid";
+type LegacyConversationCounts = Record<LegacyConversationOutcome | "unused", number>;
+
+// By Student ID only, never the doc or its content.
+interface LegacyConversationIssue {
+  studentId: string | null;
+  reason: LegacyConversationInvalidReason;
+}
+
 export interface BlendedLinksImportReport {
   mode: BlendedLinksImportMode;
   // Only when legacy last-contact dates were loaded.
   legacy: LegacyDocCounts | null;
+  // Only when legacy conversations were loaded too.
+  legacyConversations: LegacyConversationCounts | null;
+  legacyConversationIssues: LegacyConversationIssue[];
   // Tabs missing from the workbook or without a Student ID / Name header.
   unreadTabs: SourceTab[];
   counts: BlendedLinksCounts;
@@ -298,6 +325,8 @@ interface StudentLinks {
   profileDocUrl: string | null;
   screenerUrl: string | null;
   legacyOn: string | null;
+  legacySummary: string | null;
+  legacyActionItems: LegacyActionItem[] | null;
 }
 
 // What the workbook gave for one Student.
@@ -308,12 +337,15 @@ interface ExistingLinkRow {
   profile_doc_url: string | null;
   screener_url: string | null;
   legacy_last_contact_on: string | null;
+  legacy_conversation_summary: string | null;
+  legacy_action_items: LegacyActionItem[] | null;
 }
 
 async function loadExistingLinks(studentIds: number[]): Promise<Map<number, StudentLinks>> {
   const rows = await query<ExistingLinkRow>(
     `SELECT links.student_id, links.profile_doc_url, links.screener_url,
-            links.legacy_last_contact_on::text AS legacy_last_contact_on
+            links.legacy_last_contact_on::text AS legacy_last_contact_on,
+            links.legacy_conversation_summary, links.legacy_action_items
      FROM blended_learning_student_links links
      WHERE links.student_id = ANY($1::bigint[])`,
     [studentIds]
@@ -325,6 +357,8 @@ async function loadExistingLinks(studentIds: number[]): Promise<Map<number, Stud
         profileDocUrl: row.profile_doc_url,
         screenerUrl: row.screener_url,
         legacyOn: row.legacy_last_contact_on,
+        legacySummary: row.legacy_conversation_summary,
+        legacyActionItems: row.legacy_action_items,
       },
     ])
   );
@@ -336,40 +370,58 @@ function mergeLinks(links: FoundLinks, stored: StudentLinks | undefined): Studen
     profileDocUrl: links.profileDocUrl ?? stored?.profileDocUrl ?? null,
     screenerUrl: links.screenerUrl ?? stored?.screenerUrl ?? null,
     legacyOn: stored?.legacyOn ?? null,
+    legacySummary: stored?.legacySummary ?? null,
+    legacyActionItems: stored?.legacyActionItems ?? null,
   };
 }
 
-function sameLinks(stored: StudentLinks, next: StudentLinks, withLegacy: boolean): boolean {
+// Which optional columns this run reads and writes: legacy_last_contact_on
+// with Profile Docs, the legacy conversation with its file too.
+type ColumnSet = { legacy: boolean; conversations: boolean };
+
+// jsonb comes back with its keys reordered, so items compare by value.
+function itemsKey(items: LegacyActionItem[] | null): string {
+  return JSON.stringify(items?.map(({ text, owner }) => [text, owner]) ?? null);
+}
+
+function sameLinks(stored: StudentLinks, next: StudentLinks, columns: ColumnSet): boolean {
   return (
     stored.profileDocUrl === next.profileDocUrl &&
     stored.screenerUrl === next.screenerUrl &&
-    (!withLegacy || stored.legacyOn === next.legacyOn)
+    (!columns.legacy || stored.legacyOn === next.legacyOn) &&
+    (!columns.conversations ||
+      (stored.legacySummary === next.legacySummary &&
+        itemsKey(stored.legacyActionItems) === itemsKey(next.legacyActionItems)))
   );
 }
 
-async function writeLinks(studentId: number, next: StudentLinks, withLegacy: boolean): Promise<void> {
-  if (withLegacy) {
-    await query(
-      `INSERT INTO blended_learning_student_links
-         (student_id, profile_doc_url, screener_url, legacy_last_contact_on)
-       VALUES ($1, $2, $3, $4::date)
-       ON CONFLICT (student_id) DO UPDATE
-       SET profile_doc_url = EXCLUDED.profile_doc_url,
-           screener_url = EXCLUDED.screener_url,
-           legacy_last_contact_on = EXCLUDED.legacy_last_contact_on,
-           updated_at = now()`,
-      [studentId, next.profileDocUrl, next.screenerUrl, next.legacyOn]
+// [column, placeholder cast, value] for each column this run writes. Column
+// names are these fixed literals; every value is a bound parameter.
+function writtenColumns(next: StudentLinks, columns: ColumnSet): [string, string, unknown][] {
+  const written: [string, string, unknown][] = [
+    ["profile_doc_url", "", next.profileDocUrl],
+    ["screener_url", "", next.screenerUrl],
+  ];
+  if (columns.legacy) written.push(["legacy_last_contact_on", "::date", next.legacyOn]);
+  if (columns.conversations) {
+    written.push(
+      ["legacy_conversation_summary", "", next.legacySummary],
+      ["legacy_action_items", "::jsonb", next.legacyActionItems && JSON.stringify(next.legacyActionItems)]
     );
-    return;
   }
+  return written;
+}
+
+async function writeLinks(studentId: number, next: StudentLinks, columns: ColumnSet): Promise<void> {
+  const written = writtenColumns(next, columns);
+  const names = written.map(([name]) => name);
   await query(
-    `INSERT INTO blended_learning_student_links (student_id, profile_doc_url, screener_url)
-     VALUES ($1, $2, $3)
+    `INSERT INTO blended_learning_student_links (student_id, ${names.join(", ")})
+     VALUES ($1, ${written.map(([, cast], index) => `$${index + 2}${cast}`).join(", ")})
      ON CONFLICT (student_id) DO UPDATE
-     SET profile_doc_url = EXCLUDED.profile_doc_url,
-         screener_url = EXCLUDED.screener_url,
+     SET ${names.map((name) => `${name} = EXCLUDED.${name}`).join(", ")},
          updated_at = now()`,
-    [studentId, next.profileDocUrl, next.screenerUrl]
+    [studentId, ...written.map(([, , value]) => value)]
   );
 }
 
@@ -379,12 +431,11 @@ export interface LegacyProfileDocs {
   readProfileDocHtml: (docId: string) => string | null;
   // Conversation dates outside this window are ignored.
   window: DateWindow;
+  // Also load each dated doc's latest conversation from this file.
+  conversations?: LegacyConversations | null;
 }
 
-// The academic year's first day to asOf (an IST YYYY-MM-DD).
-export function legacyDateWindow(asOf: string): DateWindow {
-  return { from: `${CURRENT_ACADEMIC_YEAR.slice(0, 4)}-04-01`, to: asOf };
-}
+export { legacyDateWindow };
 
 // The Drive file id in a Profile Doc link: /document/d/<id>/… or ?id=<id>.
 export function profileDocId(url: string | null): string | null {
@@ -392,7 +443,7 @@ export function profileDocId(url: string | null): string | null {
   return match ? match[1] : null;
 }
 
-type LegacyResolution = { outcome: LegacyDocOutcome; legacyOn?: string | null };
+type LegacyResolution = { outcome: LegacyDocOutcome; docId?: string; legacyOn?: string | null };
 
 // The rule (product owner, 2026-10-23): the latest dated conversation in the
 // Profile Doc only; a readable doc with no dated conversation gives NULL.
@@ -402,50 +453,125 @@ function resolveLegacy(next: StudentLinks, docs: LegacyProfileDocs): LegacyResol
   const html = docs.readProfileDocHtml(docId);
   if (html === null) return { outcome: "unreadable" };
   const legacyOn = latestProfileDocConversationOn(html, docs.window);
-  return { outcome: legacyOn === null ? "no_dates" : "dated", legacyOn };
+  return { outcome: legacyOn === null ? "no_dates" : "dated", docId, legacyOn };
 }
 
-// Sets next.legacyOn when the Student's doc was read, and counts the outcome.
-function applyLegacy(next: StudentLinks, docs: LegacyProfileDocs, counts: LegacyDocCounts): void {
-  const resolution = resolveLegacy(next, docs);
-  counts[resolution.outcome]++;
-  if (resolution.legacyOn !== undefined) next.legacyOn = resolution.legacyOn;
+// The file's entry for a dated doc, only when it is for that same date.
+function resolveConversation(
+  conversations: LegacyConversations,
+  docId: string,
+  legacyOn: string
+): { outcome: LegacyConversationOutcome; summary: string | null; items: LegacyActionItem[] | null } {
+  const entry = conversations.entries.get(docId);
+  if (conversations.invalid.has(docId)) return { outcome: "summary_invalid", summary: null, items: null };
+  if (!entry) return { outcome: "summary_missing", summary: null, items: null };
+  if (entry.occurredOn !== legacyOn) return { outcome: "summary_stale", summary: null, items: null };
+  return { outcome: "loaded", summary: entry.summary, items: entry.actionItems };
+}
+
+// The legacy columns for one Student's doc, with each outcome counted.
+class LegacyRun {
+  readonly counts: LegacyDocCounts = { dated: 0, no_dates: 0, unreadable: 0, no_doc_link: 0 };
+  readonly conversationCounts: LegacyConversationCounts = {
+    loaded: 0, summary_missing: 0, summary_stale: 0, summary_invalid: 0, unused: 0,
+  };
+  readonly issues: LegacyConversationIssue[] = [];
+  private readonly usedDocs = new Set<string>();
+
+  constructor(
+    readonly docs: LegacyProfileDocs,
+    private readonly studentIds: Map<number, string | null>
+  ) {}
+
+  get conversations(): LegacyConversations | null {
+    return this.docs.conversations ?? null;
+  }
+
+  // Sets next.legacyOn when the Student's doc was read, and with a
+  // conversations file its summary and items: those of the file's entry for
+  // a dated doc, NULL for a doc read without one. An unreadable doc or no
+  // link keeps every stored value.
+  apply(studentId: number, next: StudentLinks): void {
+    const resolution = resolveLegacy(next, this.docs);
+    this.counts[resolution.outcome]++;
+    if (resolution.legacyOn === undefined) return;
+    next.legacyOn = resolution.legacyOn;
+    const conversations = this.conversations;
+    if (conversations) this.applyConversation(studentId, next, conversations, resolution.docId, resolution.legacyOn);
+  }
+
+  // A read doc: its dated entry's summary from the file, else NULL.
+  private applyConversation(
+    studentId: number,
+    next: StudentLinks,
+    conversations: LegacyConversations,
+    docId: string | undefined,
+    legacyOn: string | null
+  ): void {
+    next.legacySummary = null;
+    next.legacyActionItems = null;
+    if (!docId || legacyOn === null) return;
+    this.usedDocs.add(docId);
+    const found = resolveConversation(conversations, docId, legacyOn);
+    this.conversationCounts[found.outcome]++;
+    next.legacySummary = found.summary;
+    next.legacyActionItems = found.items;
+    const reason = conversations.invalid.get(docId);
+    if (reason) this.issues.push({ studentId: this.studentIds.get(studentId) ?? null, reason });
+  }
+
+  report(): Pick<BlendedLinksImportReport, "legacy" | "legacyConversations" | "legacyConversationIssues"> {
+    const conversations = this.conversations;
+    if (conversations) {
+      const fileDocs = [...conversations.entries.keys(), ...conversations.invalid.keys()];
+      this.conversationCounts.unused = fileDocs.filter((docId) => !this.usedDocs.has(docId)).length;
+    }
+    return {
+      legacy: this.counts,
+      legacyConversations: conversations ? this.conversationCounts : null,
+      legacyConversationIssues: this.issues,
+    };
+  }
 }
 
 // What the upsert does for one Student: null for one with no stored row and
 // no link, who gets no row.
-function writeKind(stored: StudentLinks | undefined, next: StudentLinks, withLegacy: boolean): keyof BlendedLinksWrites | null {
+function writeKind(stored: StudentLinks | undefined, next: StudentLinks, columns: ColumnSet): keyof BlendedLinksWrites | null {
   if (!stored) return next.profileDocUrl || next.screenerUrl ? "inserted" : null;
-  return sameLinks(stored, next, withLegacy) ? "unchanged" : "updated";
+  return sameLinks(stored, next, columns) ? "unchanged" : "updated";
 }
 
-function emptyLegacyCounts(): LegacyDocCounts {
-  return { dated: 0, no_dates: 0, unreadable: 0, no_doc_link: 0 };
-}
-
-// legacy_last_contact_on is read and written only with legacy Profile Docs.
-// Re-runnable: a doc read again rewrites its date; a doc with no export
-// keeps whatever is stored.
+// legacy_last_contact_on is read and written only with legacy Profile Docs,
+// the legacy conversation only with its file too. Re-runnable: a doc read
+// again rewrites them; a doc with no export keeps whatever is stored.
 async function upsertLinks(
   found: Map<number, FoundLinks>,
   mode: BlendedLinksImportMode,
-  docs: LegacyProfileDocs | null
-): Promise<Pick<BlendedLinksImportReport, "writes" | "legacy">> {
+  legacy: LegacyRun | null
+): Promise<BlendedLinksWrites> {
   const writes: BlendedLinksWrites = { inserted: 0, updated: 0, unchanged: 0 };
-  const legacy = docs ? emptyLegacyCounts() : null;
-  if (found.size === 0) return { writes, legacy };
+  if (found.size === 0) return writes;
+  const columns: ColumnSet = { legacy: legacy !== null, conversations: Boolean(legacy?.conversations) };
   const existing = await loadExistingLinks([...found.keys()]);
 
   for (const [studentId, links] of found) {
     const stored = existing.get(studentId);
     const next = mergeLinks(links, stored);
-    if (docs && legacy) applyLegacy(next, docs, legacy);
-    const kind = writeKind(stored, next, docs !== null);
+    legacy?.apply(studentId, next);
+    const kind = writeKind(stored, next, columns);
     if (!kind) continue;
     writes[kind]++;
-    if (kind !== "unchanged" && mode === "apply") await writeLinks(studentId, next, docs !== null);
+    if (kind !== "unchanged" && mode === "apply") await writeLinks(studentId, next, columns);
   }
-  return { writes, legacy };
+  return writes;
+}
+
+// Each matched Student's Student ID, for the report.
+function studentIdsOf(students: StudentIndex): Map<number, string | null> {
+  const ids = new Map<number, string | null>();
+  for (const candidates of students.byName.values()) for (const student of candidates) ids.set(student.id, student.studentId);
+  for (const student of students.byStudentId.values()) ids.set(student.id, student.studentId);
+  return ids;
 }
 
 // Adds one tab's links to `found`. With Profile Docs every matched Student is
@@ -464,11 +590,13 @@ function collectLinks(
 export async function runBlendedLinksImport(params: {
   workbook: ExcelJS.Workbook;
   mode: BlendedLinksImportMode;
-  // Also load legacy_last_contact_on from these Profile Doc exports.
+  // Also load legacy_last_contact_on from these Profile Doc exports (and,
+  // with their conversations file, the latest conversation).
   legacyProfileDocs?: LegacyProfileDocs | null;
 }): Promise<BlendedLinksImportReport> {
   const docs = params.legacyProfileDocs ?? null;
   const students = await loadActiveMappedStudents();
+  const legacy = docs ? new LegacyRun(docs, studentIdsOf(students)) : null;
   // Only the Profile Docs tab may take a row's first link (e.g. a hyperlinked
   // name). The Conversation tab's link must come from its Screener Form
   // column: without one, its rows are no_link, never another cell's link.
@@ -480,6 +608,8 @@ export async function runBlendedLinksImport(params: {
   const report: BlendedLinksImportReport = {
     mode: params.mode,
     legacy: null,
+    legacyConversations: null,
+    legacyConversationIssues: [],
     unreadTabs: [],
     counts: { matched: 0, unmatched: 0, skipped: 0 },
     writes: { inserted: 0, updated: 0, unchanged: 0 },
@@ -499,7 +629,8 @@ export async function runBlendedLinksImport(params: {
     report.issues.push(...result.issues);
     collectLinks(found, result, tab.name === PROFILE_DOCS_TAB ? "profileDocUrl" : "screenerUrl", docs !== null);
   }
-  Object.assign(report, await upsertLinks(found, params.mode, docs));
+  report.writes = await upsertLinks(found, params.mode, legacy);
+  if (legacy) Object.assign(report, legacy.report());
   return report;
 }
 
@@ -510,6 +641,24 @@ function formatLegacyCounts(legacy: LegacyDocCounts): string {
     `unreadable (no export; stored value kept) ${legacy.unreadable}, ` +
     `no Profile Doc link ${legacy.no_doc_link}`
   );
+}
+
+function formatLegacyConversationCounts(counts: LegacyConversationCounts): string {
+  return (
+    `Legacy conversation (dated Profile Docs): loaded ${counts.loaded}, ` +
+    `NULL with no summary for the doc ${counts.summary_missing}, ` +
+    `NULL with a summary of another date ${counts.summary_stale}, ` +
+    `NULL with an invalid summary ${counts.summary_invalid}; ` +
+    `file entries no dated doc used ${counts.unused}`
+  );
+}
+
+function formatLegacyConversationIssues(issues: LegacyConversationIssue[]): string[] {
+  if (issues.length === 0) return [];
+  return [
+    "Invalid legacy conversations (left NULL)",
+    ...issues.map((issue) => `- ${issue.studentId ? `Student ID ${issue.studentId}` : "Student without a Student ID"}: ${issue.reason}`),
+  ];
 }
 
 // Operator output: counts, then issues by tab, row and Student ID only.
@@ -527,6 +676,7 @@ export function formatBlendedLinksImportReport(report: BlendedLinksImportReport)
       `updated ${writes.updated}, unchanged ${writes.unchanged}`
   );
   if (report.legacy) lines.push(formatLegacyCounts(report.legacy));
+  if (report.legacyConversations) lines.push(formatLegacyConversationCounts(report.legacyConversations));
   if (report.issues.length > 0) {
     lines.push("Issues");
     for (const issue of report.issues) {
@@ -534,5 +684,6 @@ export function formatBlendedLinksImportReport(report: BlendedLinksImportReport)
       lines.push(`- ${issue.tab} row ${issue.row}${student}: ${issue.reason}`);
     }
   }
+  lines.push(...formatLegacyConversationIssues(report.legacyConversationIssues));
   return lines;
 }

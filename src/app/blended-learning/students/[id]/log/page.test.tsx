@@ -96,6 +96,7 @@ const MENTEE: MenteeDetail = {
     },
   ],
   openActionItems: OPEN_ITEMS as MenteeDetail["openActionItems"],
+  legacyConversation: null,
   mentor: { userId: 9001, firstName: "Faizan" },
 };
 
@@ -180,6 +181,31 @@ describe("LogEntryPage", () => {
     expect(panel).toHaveTextContent("In person · 15 min · Spoke with parent or sibling");
     expect(panel).toHaveTextContent("Spoke with her brother.");
     expect(panel).not.toHaveTextContent("Older Conversation.");
+  });
+
+  it("shows the Profile Doc's last conversation and carries its Action Items before the first Conversation", async () => {
+    signedInAs(MENTOR);
+    const legacy = {
+      occurredOn: "2026-09-17",
+      summary: "Synthetic: planned the mocks.",
+      actionItems: [{ text: "Synthetic: revise optics", owner: "student" as const }],
+      profileDocUrl: "https://docs.example/ira",
+    };
+    mockGetMenteeDetail.mockResolvedValue({ ...MENTEE, history: [MENTEE.history[0]], openActionItems: [], legacyConversation: legacy });
+
+    await renderPage();
+
+    const card = screen.getByRole("region", { name: "Last Conversation from Profile Doc" });
+    expect(card).toHaveTextContent("Synthetic: planned the mocks.");
+    expect(screen.getByRole("heading", { level: 3, name: "Last Conversation · from Profile Doc" })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Last Conversation" })).not.toBeInTheDocument();
+    expect(formProps()).toMatchObject({ carriedActionItems: legacy.actionItems });
+  });
+
+  it("carries nothing without a Profile Doc snapshot", async () => {
+    signedInAs(MENTOR);
+    await renderPage();
+    expect(formProps()).toMatchObject({ carriedActionItems: [] });
   });
 
   it("says there is no Conversation yet when the history has only Attempts", async () => {

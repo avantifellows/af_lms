@@ -14,6 +14,7 @@
     "db:setup-permissions": "npx ts-node scripts/setup-permissions.ts",
     "centres:import": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/import-centres.ts",
     "blended:import-links": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/import-blended-learning-links.ts",
+    "blended:export-latest-entries": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/export-latest-profile-doc-entries.ts",
     "holistic:prepare-history": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/prepare-holistic-historical-notes.ts",
     "holistic:import-history": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/import-holistic-historical-notes.ts",
     "holistic:rollover": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/rollover-holistic-mappings.ts",

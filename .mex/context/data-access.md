@@ -21,7 +21,7 @@ edges:
     condition: when adding a write that must proxy to the DB Service
   - target: patterns/add-api-route.md
     condition: when adding a route that reads or writes
-last_updated: 2026-10-26
+last_updated: 2026-10-27
 ---
 
 # Data Access
@@ -523,4 +523,18 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   `src/lib/blended-learning-profile-doc-dates.ts`: the doc's latest dated conversation only).
   With docs, every matched Student is considered, so a stored Profile Doc link still gives a
   date when the workbook row has none; a Student with no link and no stored row gets no row.
+  `legacy_conversation_summary` and `legacy_action_items` (jsonb `[{text, owner}]`, 1–10;
+  db-service migration `20261027100000`, mirrored in e2e fixture
+  `20261027100000_add_blended_learning_legacy_conversation.sql`) are selected and written only
+  with `--legacy-conversations` too (validation in
+  `src/lib/blended-learning-legacy-conversations.ts`): the file's entry for a `dated` doc on
+  that same date, NULL otherwise; an unreadable doc keeps them. The upsert names only the
+  columns the run owns (fixed literals; values bound).
   Runbook: `patterns/load-blended-learning-links.md`.
+- **Profile Doc snapshot on the Mentee pages:** `getMenteeDetail` returns
+  `legacyConversation` (`legacy_last_contact_on`, summary, valid items, Profile Doc URL) only
+  while the Student has no `kind = 'conversation'` row (Attempts don't count). The detail page
+  shows it near the top (Open Action Items' slot, admins too); the log page shows it in the
+  side panel and pre-fills its items after any draft's (`initialEntryValues(draft, today,
+  carried)`, marked `carried`; saved as ordinary Action Items). Nothing is written until the
+  Mentor saves.

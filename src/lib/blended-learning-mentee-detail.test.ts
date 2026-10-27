@@ -89,8 +89,45 @@ describe("getMenteeDetail", () => {
       screenerUrl: null,
       openDraft: null,
       openActionItems: [],
+      legacyConversation: null,
       history: [],
       mentor: { userId: 9001, firstName: "Faizan" },
+    });
+  });
+
+  describe("the Profile Doc's latest conversation", () => {
+    const LEGACY = {
+      legacy_last_contact_on: "2026-09-17",
+      legacy_conversation_summary: "  Synthetic: planned the mocks.  ",
+      legacy_action_items: [
+        { text: "Synthetic: revise optics", owner: "student" },
+        { text: "Synthetic: bad owner", owner: "teacher" },
+      ],
+    };
+
+    it("is given until the first Conversation in the app, with valid items only and the Profile Doc link", async () => {
+      // An Attempt is not a Conversation.
+      givenRows({ profile: [{ ...PROFILE, ...LEGACY }], entries: [entry({ id: "11", kind: "attempt", mode: null })] });
+
+      expect((await getMenteeDetail(MENTOR, 501))?.legacyConversation).toEqual({
+        occurredOn: "2026-09-17",
+        summary: "Synthetic: planned the mocks.",
+        actionItems: [{ text: "Synthetic: revise optics", owner: "student" }],
+        profileDocUrl: "https://docs.example/ira",
+      });
+    });
+
+    it("is gone once a Conversation is logged, and absent without a summary", async () => {
+      givenRows({ profile: [{ ...PROFILE, ...LEGACY }], entries: [entry({ id: "12" })] });
+      expect((await getMenteeDetail(MENTOR, 501))?.legacyConversation).toBeNull();
+
+      givenRows({ profile: [{ ...PROFILE, ...LEGACY, legacy_conversation_summary: null }] });
+      expect((await getMenteeDetail(MENTOR, 501))?.legacyConversation).toBeNull();
+    });
+
+    it("gives no items for NULL legacy_action_items", async () => {
+      givenRows({ profile: [{ ...PROFILE, ...LEGACY, legacy_action_items: null, profile_doc_url: null }] });
+      expect((await getMenteeDetail(MENTOR, 501))?.legacyConversation).toMatchObject({ actionItems: [], profileDocUrl: null });
     });
   });
 

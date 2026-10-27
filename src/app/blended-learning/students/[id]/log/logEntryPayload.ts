@@ -12,8 +12,9 @@ export type Mode = "call" | "in_person";
 export type SpokeWith = "student" | "parent_or_sibling" | "both";
 // Keyed by field, e.g. `summary` or `actionItems.0.text`.
 export type FieldErrors = Record<string, string>;
-// A row left without text is not sent.
-export type DraftActionItem = { key: number; owner: ActionItemOwner; text: string };
+// A row left without text is not sent. `carried`: pre-filled from the Profile
+// Doc's latest conversation; it saves as an ordinary Action Item.
+export type DraftActionItem = { key: number; owner: ActionItemOwner; text: string; carried?: true };
 // A switched-on Flag Recipient maps to its comment; off is absent.
 export type DraftFlags = Partial<Record<FlagRecipient, string>>;
 export const FLAG_RECIPIENTS = Object.keys(FLAG_RECIPIENT) as FlagRecipient[];
@@ -60,13 +61,22 @@ const STARTER_ACTION_ITEMS: { owner: ActionItemOwner; text: string }[] = [
 
 // A new form, prefilled from the draft under review if there is one. A new
 // Conversation starts as a call with the Student; a draft keeps what the
-// Mentor entered before uploading, and its Action Items unless it has none.
-export function initialEntryValues(draft: ReviewDraft | null, today: string): EntryFormValues {
-  const drafted = draft?.actionItems ?? [];
-  const actionItems = (drafted.length > 0 ? drafted : STARTER_ACTION_ITEMS).map((item, index) => ({
+// Mentor entered before uploading. The Action Items are the draft's, then
+// those carried over from the Profile Doc (before the first Conversation in
+// the app), or the starter rows when there are neither. Only the initial
+// values: the form computes them once per mount.
+export function initialEntryValues(
+  draft: ReviewDraft | null,
+  today: string,
+  carried: { owner: ActionItemOwner; text: string }[] = []
+): EntryFormValues {
+  const prefilled: { owner: ActionItemOwner; text: string; carried?: true }[] = [
+    ...(draft?.actionItems ?? []),
+    ...carried.map((item) => ({ owner: item.owner, text: item.text, carried: true as const })),
+  ];
+  const actionItems = (prefilled.length > 0 ? prefilled : STARTER_ACTION_ITEMS).map((item, index) => ({
+    ...item,
     key: index + 1,
-    owner: item.owner,
-    text: item.text,
   }));
   return {
     kind: "conversation",

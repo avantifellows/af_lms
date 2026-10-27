@@ -15,6 +15,7 @@ import { getTodayIST } from "@/lib/curriculum-date-helpers";
 import { loadDashboardChrome } from "@/lib/dashboard-chrome";
 
 import { BlendedPageShell } from "../../../BlendedPageShell";
+import { LegacyConversationCard } from "../LegacyConversationCard";
 import { LogEntryForm, type ReviewDraft } from "./LogEntryForm";
 
 // Log a Conversation or an Attempt for one Mentee. Only a Mentor logs, for
@@ -64,7 +65,16 @@ async function currentListGroup(
   return row ? menteeGroup(row.reasons) : null;
 }
 
-function LastConversationPanel({ conversation }: { conversation: Extract<HistoryEntry, { kind: "conversation" }> | null }) {
+// The last Conversation in the app; before the first one, the Profile Doc's
+// latest conversation when there is one.
+function LastConversationPanel({
+  conversation,
+  legacy,
+}: {
+  conversation: Extract<HistoryEntry, { kind: "conversation" }> | null;
+  legacy: MenteeDetail["legacyConversation"];
+}) {
+  if (!conversation && legacy) return <LegacyConversationCard legacy={legacy} headingLevel="h3" />;
   return (
     <section aria-label="Last Conversation">
       <Card elevation="sm" className="space-y-2 p-4">
@@ -123,8 +133,9 @@ export default async function LogEntryPage({ params }: { params: Promise<{ id: s
         subtitle={subtitle}
         today={today}
         listGroup={listGroup}
-        lastConversationPanel={<LastConversationPanel conversation={lastConversation} />}
+        lastConversationPanel={<LastConversationPanel conversation={lastConversation} legacy={mentee.legacyConversation} />}
         openActionItems={mentee.openActionItems}
+        carriedActionItems={mentee.legacyConversation?.actionItems ?? []}
         hasOpenDraft={mentee.openDraft !== null}
         draft={draft}
         pendingDraft={pendingDraft}

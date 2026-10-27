@@ -70,6 +70,7 @@ const MENTEE: MenteeDetail = {
   openDraft: null,
   history: [],
   openActionItems: [],
+  legacyConversation: null,
   mentor: { userId: 9001, firstName: "Faizan" },
 };
 
@@ -300,6 +301,67 @@ describe("MenteeDetailPage", () => {
     const history = screen.getByRole("region", { name: "History" });
     expect(draft.compareDocumentPosition(items) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(items.compareDocumentPosition(history) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  describe("before the first Conversation in the app", () => {
+    const LEGACY = {
+      occurredOn: "2026-09-17",
+      summary: "Synthetic: planned the mocks.",
+      actionItems: [
+        { text: "Synthetic: revise optics", owner: "student" as const },
+        { text: "Synthetic: pay the hostel fee", owner: "parent" as const },
+      ],
+      profileDocUrl: "https://docs.example/ira",
+    };
+
+    it.each([
+      ["a Mentor", MENTOR],
+      ["a read-only Blended Learning Admin", READ_ONLY_ADMIN],
+    ])("shows %s the Profile Doc's last conversation near the top, above the history", async (_label, access) => {
+      signedInAs(access);
+      mockGetMenteeDetail.mockResolvedValue({ ...MENTEE, openDraft: { id: 41, state: "transcribing" }, legacyConversation: LEGACY });
+
+      await renderPage();
+
+      const card = screen.getByRole("region", { name: "Last Conversation from Profile Doc" });
+      expect(within(card).getByRole("heading", { level: 2, name: "Last Conversation · from Profile Doc" })).toBeInTheDocument();
+      expect(card).toHaveTextContent("17 Sept 2026");
+      expect(card).toHaveTextContent("Synthetic: planned the mocks.");
+      const items = within(card).getAllByRole("listitem");
+      expect(items.map((item) => item.textContent)).toEqual([
+        "StudentSynthetic: revise optics",
+        "ParentSynthetic: pay the hostel fee",
+      ]);
+      expect(within(card).getByRole("link", { name: "Open Profile Doc (opens in a new tab)" })).toHaveAttribute(
+        "href",
+        "https://docs.example/ira"
+      );
+      const draft = screen.getByTestId("draft-status");
+      const history = screen.getByRole("region", { name: "History" });
+      expect(draft.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(card.compareDocumentPosition(history) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it("leaves out the date, items and link when the snapshot has none", async () => {
+      signedInAs(MENTOR);
+      mockGetMenteeDetail.mockResolvedValue({
+        ...MENTEE,
+        legacyConversation: { ...LEGACY, occurredOn: null, actionItems: [], profileDocUrl: null },
+      });
+
+      await renderPage();
+
+      const card = screen.getByRole("region", { name: "Last Conversation from Profile Doc" });
+      expect(within(card).queryByRole("list")).not.toBeInTheDocument();
+      expect(within(card).queryByRole("link")).not.toBeInTheDocument();
+      expect(card).not.toHaveTextContent("2026");
+    });
+
+    it("shows no Profile Doc card without a snapshot", async () => {
+      signedInAs(MENTOR);
+      await renderPage();
+      expect(screen.queryByRole("region", { name: "Last Conversation from Profile Doc" })).not.toBeInTheDocument();
+    });
   });
 
   it("lists Open Action Items with their owner and when they were agreed", async () => {

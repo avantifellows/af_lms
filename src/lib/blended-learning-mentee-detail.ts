@@ -5,6 +5,7 @@ import {
   canAccessBlendedStudent,
   type BlendedLearningAccess,
 } from "./blended-learning-access";
+import { storedLegacyActionItems, type LegacyActionItem } from "./blended-learning-legacy-conversations";
 import type { OpenDraftState } from "./blended-learning-mentees";
 import { getObjectText, headObject, presignDocumentPage } from "./s3";
 
@@ -47,6 +48,17 @@ export type HistoryEntry =
       flags: MentorFlag[];
     };
 
+// The latest conversation in the Student's legacy Google Profile Doc, from
+// the links importer's snapshot. Shown only until the first Conversation is
+// logged in the app.
+export type LegacyConversation = {
+  // legacy_last_contact_on: the date of that Profile Doc entry.
+  occurredOn: string | null;
+  summary: string;
+  actionItems: LegacyActionItem[];
+  profileDocUrl: string | null;
+};
+
 export type MenteeDetail = {
   studentId: number;
   name: string;
@@ -63,6 +75,8 @@ export type MenteeDetail = {
   history: HistoryEntry[];
   // Open Action Items from earlier Conversations, newest Conversation first.
   openActionItems: OpenActionItem[];
+  // Only while the Student has no Conversation in the app (Attempts don't count).
+  legacyConversation: LegacyConversation | null;
   // The Mentor of the Student's active Mapping, for an admin's way back to
   // that Mentor's list.
   mentor: { userId: number; firstName: string };
@@ -78,6 +92,9 @@ type ProfileRow = {
   whatsapp_phone: string | null;
   profile_doc_url: string | null;
   screener_url: string | null;
+  legacy_last_contact_on: string | null;
+  legacy_conversation_summary: string | null;
+  legacy_action_items: unknown;
   open_draft_id: number | string | null;
   open_draft_state: OpenDraftState | null;
   mentor_user_id: number | string;
@@ -130,6 +147,19 @@ function groupBy<T extends { conversation_id: number | string }>(rows: T[]): Map
   return groups;
 }
 
+// The Profile Doc snapshot, unless a Conversation in the app supersedes it
+// or there is none.
+function legacyConversation(profile: ProfileRow, entries: EntryRow[]): LegacyConversation | null {
+  const summary = present(profile.legacy_conversation_summary);
+  if (!summary || entries.some((entry) => entry.kind === "conversation")) return null;
+  return {
+    occurredOn: profile.legacy_last_contact_on,
+    summary,
+    actionItems: storedLegacyActionItems(profile.legacy_action_items),
+    profileDocUrl: present(profile.profile_doc_url),
+  };
+}
+
 // One Mentee's profile, contact, links, open draft and history. Null when
 // the Student is out of the actor's scope or has no active Mapping.
 export async function getMenteeDetail(
@@ -142,6 +172,8 @@ export async function getMenteeDetail(
     `SELECT account.first_name, account.last_name, account.gender, account.phone, account.whatsapp_phone,
             current_grade.number AS grade, program.name AS program_name,
             links.profile_doc_url, links.screener_url,
+            links.legacy_last_contact_on::text AS legacy_last_contact_on,
+            links.legacy_conversation_summary, links.legacy_action_items,
             open_draft.id AS open_draft_id, open_draft.state AS open_draft_state,
             mapping.mentor_user_id,
             COALESCE(NULLIF(TRIM(mentor.first_name), ''), NULLIF(TRIM(mentor.last_name), ''),
@@ -227,6 +259,7 @@ export async function getMenteeDetail(
         ? null
         : { id: Number(profile.open_draft_id), state: profile.open_draft_state },
     mentor: { userId: Number(profile.mentor_user_id), firstName: profile.mentor_first_name },
+    legacyConversation: legacyConversation(profile, entries),
     openActionItems: entries.flatMap((entry) =>
       (itemsByConversation.get(Number(entry.id)) ?? [])
         .filter((item) => item.status === "open")

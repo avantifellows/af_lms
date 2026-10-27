@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useId, useState, type Dispatch, type FormEvent, type ReactNode, type SetStateAction } from "react";
 
 import { Button, Card } from "@/components/ui";
+import type { LegacyActionItem } from "@/lib/blended-learning-legacy-conversations";
 import type { OpenActionItem } from "@/lib/blended-learning-mentee-detail";
 import type { MenteeGroup } from "@/lib/blended-learning-talk-to-first";
 
@@ -36,8 +37,10 @@ import { WriteUpCard } from "./WriteUpCard";
 // start a Conversation Draft. The draft's progress then shows in the Recording
 // card, with the write-up held until it is ready; the page refreshes and the
 // form opens prefilled from it, and saving turns the draft into this
-// Conversation. After saving, a confirmation shows what was saved and what
-// the Student list now says.
+// Conversation. Before the Student's first Conversation in the app, the
+// Profile Doc's latest conversation's Action Items are pre-filled (after a
+// draft's), marked as carried over. After saving, a confirmation shows what
+// was saved and what the Student list now says.
 
 export type { ReviewDraft };
 
@@ -246,6 +249,9 @@ type LogEntryFormProps = {
   lastConversationPanel: ReactNode;
   // Open Action Items from earlier Conversations; a Conversation can tick them.
   openActionItems: OpenActionItem[];
+  // Before the first Conversation in the app: the Profile Doc's latest
+  // conversation's Action Items, pre-filled into this one's.
+  carriedActionItems?: LegacyActionItem[];
   // A Mentee has at most one open Conversation Draft, so no second upload.
   hasOpenDraft: boolean;
   // A ready Conversation Draft to review and save as this Conversation.
@@ -351,7 +357,7 @@ function EntryForm({
 
 export function LogEntryForm(props: LogEntryFormProps) {
   const { name, draft = null } = props;
-  const [values, setValues] = useState(() => initialEntryValues(draft, props.today));
+  const [values, setValues] = useState(() => initialEntryValues(draft, props.today, props.carriedActionItems));
   const [saved, setSaved] = useState<Saved | null>(null);
   const change: ChangeValues = (update) => setValues((current) => ({ ...current, ...update(current) }));
 

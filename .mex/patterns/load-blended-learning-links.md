@@ -9,12 +9,15 @@ triggers:
   - "legacy_last_contact_on"
   - "legacy last contact"
   - "blended_learning_student_links"
+  - "legacy conversation"
+  - "legacy_conversation_summary"
+  - "blended:export-latest-entries"
 edges:
   - target: context/data-access.md
     condition: for the Blended Learning tables and the Mapping source the script matches against
   - target: context/setup.md
     condition: for the .env files the script reads database credentials from
-last_updated: 2026-10-23
+last_updated: 2026-10-27
 ---
 
 # Load Blended Learning Student Links
@@ -47,6 +50,23 @@ What it reads (hyperlinks, never cell text — a Ctrl+K link or a `HYPERLINK("ur
   previous-year history). Outcomes per Student:
   `dated`, `no_dates` (doc read, nothing dated → NULL), `unreadable` (no export → stored value
   kept, NULL until a re-run has the doc), `no_doc_link`. Counts only are printed.
+- **`--legacy-conversations=<file.json>`** (needs `--legacy-docs-dir`) →
+  `legacy_conversation_summary`, `legacy_action_items`: the summary and action items of that
+  same latest entry, shown to Mentors until they log the Student's first Conversation in the
+  app (product owner, 2026-10-27). File shape:
+  `{ "<Drive file id>": { "occurredOn": "YYYY-MM-DD", "summary": "...", "actionItems": [{ "text": "...", "owner": "student|mentor|parent" }] } }`.
+  Strict: summary non-blank ≤ 2000, ≤ 10 items, item text non-blank ≤ 500, owner one of the
+  three; `[]` stores NULL items; anything else makes the entry invalid (stored NULL, listed by
+  Student ID with a reason). Per `dated` doc: `loaded` when the entry's `occurredOn` equals the
+  doc's date, else NULL as `summary_missing` / `summary_stale` / `summary_invalid`; `no_dates`
+  → NULL; `unreadable` / `no_doc_link` keep the stored values. `unused` counts file entries no
+  dated doc took. The summaries come from an external step (not in this repo) fed by
+  `npm run blended:export-latest-entries -- --legacy-docs-dir=<dir> --out=<file.json>`
+  (`scripts/export-latest-profile-doc-entries.ts`, logic in
+  `src/lib/blended-learning-profile-doc-export.ts`): `{ "<Drive file id>": { "occurredOn",
+  "text" } }` for each dated doc, the entry's plain text from its date line to the next date
+  line or the end of its tab (tables included, images and link targets dropped, 20,000
+  characters at most; `latestProfileDocEntry`), written with mode 0600; counts only printed.
 
 Each tab's header row is the first of the top ten rows with a "Student ID" or "Name"/"Student
 Name" column.
@@ -63,6 +83,12 @@ Name" column.
    HTML into a private directory outside the repo named `<Drive file id>.html` (it holds minors'
    PII: delete it afterwards), add `--legacy-docs-dir=<dir>`, dry run, then apply. Re-run the
    same way when more docs are shared; unchanged Students are not rewritten.
+4b. Latest conversations (needs db-service `20261027100000` deployed): run
+   `npm run blended:export-latest-entries -- --legacy-docs-dir=<dir> --out=<private>/entries.json`,
+   have the external step write the summaries file, then dry run the import with
+   `--legacy-docs-dir=<dir> --legacy-conversations=<private>/summaries.json`, check the
+   counts (expect `summary_stale` 0 unless docs changed since the export), then apply. Delete
+   both JSON files afterwards: they hold minors' records.
 5. Re-run the dry run: it should report `inserted 0, updated 0`, i.e. everything `unchanged`.
 
 ## Matching and reporting
@@ -82,7 +108,7 @@ Name" column.
   script exits 1.
 
 ## Verify
-- `npx vitest run src/lib/blended-learning-links-import.test.ts`
+- `npx vitest run src/lib/blended-learning-links-import.test.ts src/lib/blended-learning-legacy-conversations.test.ts src/lib/blended-learning-profile-doc-export.test.ts src/lib/blended-learning-profile-doc-dates.test.ts`
 - After apply, a Mentee's detail page shows the Profile Doc / Screener links.
 
 ## Debug

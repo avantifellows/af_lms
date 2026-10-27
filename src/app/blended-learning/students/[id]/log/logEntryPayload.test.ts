@@ -77,6 +77,34 @@ describe("initialEntryValues", () => {
     });
   });
 
+  it("carries the Profile Doc's Action Items after the draft's, marked, with no starter rows", () => {
+    const carried = [
+      { owner: "parent" as const, text: "Synthetic: pay the hostel fee" },
+      { owner: "student" as const, text: "Synthetic: finish the DPP" },
+    ];
+    expect(initialEntryValues(null, TODAY, carried)).toMatchObject({
+      actionItems: [
+        { key: 1, owner: "parent", text: "Synthetic: pay the hostel fee", carried: true },
+        { key: 2, owner: "student", text: "Synthetic: finish the DPP", carried: true },
+      ],
+      nextItemKey: 3,
+    });
+    const reviewed = initialEntryValues(DRAFT, TODAY, carried);
+    expect(reviewed.actionItems).toEqual([
+      { key: 1, owner: "student", text: "Revise optics" },
+      { key: 2, owner: "mentor", text: "Share notes" },
+      { key: 3, owner: "parent", text: "Synthetic: pay the hostel fee", carried: true },
+      { key: 4, owner: "student", text: "Synthetic: finish the DPP", carried: true },
+    ]);
+    // Carried rows save as ordinary Action Items.
+    expect(buildEntryPayload(reviewed, [], DRAFT.id).actionItems).toEqual([
+      { owner: "student", text: "Revise optics" },
+      { owner: "mentor", text: "Share notes" },
+      { owner: "parent", text: "Synthetic: pay the hostel fee" },
+      { owner: "student", text: "Synthetic: finish the DPP" },
+    ]);
+  });
+
   it("falls back to today and blanks for a draft without session details, and starter rows without Action Items", () => {
     const draft = { ...DRAFT, occurredOn: null, mode: null, spokeWith: null, durationMinutes: null, actionItems: [] };
     expect(initialEntryValues(draft, TODAY)).toMatchObject({
