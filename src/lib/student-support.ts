@@ -23,6 +23,8 @@ import {
 } from "./student-support-rules";
 import type {
   ChapterRow,
+  JourneyTest,
+  TestResult,
   ExamChapters,
   ScoreJourneyData,
   ScoreJourneyRow,
@@ -126,7 +128,11 @@ const cutoffKey = (stream: string, category: string, level: string) =>
 
 type Progression = { marks: number; pct: number | null; level: string; test: string }[];
 
-function journeyRow(s: StudentRaw, progression: Progression, cutoffs: Map<string, number>): ScoreJourneyRow {
+function journeyRow(
+  s: StudentRaw,
+  progression: Progression,
+  cutoffs: Map<string, number>
+): Omit<ScoreJourneyRow, "results"> {
   const stream = examStream(s.stream);
   const recent = progression.slice(-3);
   const latest = recent[recent.length - 1];
@@ -150,24 +156,28 @@ function journeyRow(s: StudentRaw, progression: Progression, cutoffs: Map<string
 }
 
 /**
- * Per student: the latest levelled tests (Advanced excluded, the same tests
- * that decide dim_student.academic_level), as marks + level, oldest first.
- * The cumulative AL read already returns exactly these, in order.
+ * Per student: the levelled full tests (Advanced excluded, the same tests that
+ * decide dim_student.academic_level), oldest first, as marks + level, plus every
+ * test's raw result for the "All tests" columns. The cumulative AL read already
+ * returns exactly these, in order, and applies the test-grade filter.
  */
 async function getProgressions(
   udise: string,
   grade: number,
   program: string,
-  stream?: string
-): Promise<Map<string, Progression>> {
-  const data = await getCumulativeALData(udise, grade, program, stream);
+  stream?: string,
+  testGrade?: number
+): Promise<{ tests: JourneyTest[]; byStudent: Map<string, { progression: Progression; results: Record<string, TestResult> }> }> {
+  const data = await getCumulativeALData(udise, grade, program, stream, testGrade);
   const names = new Map(data.tests.map((t) => [t.session_id, t.test_name]));
-  const out = new Map<string, Progression>();
+  const byStudent = new Map<string, { progression: Progression; results: Record<string, TestResult> }>();
   for (const s of data.students) {
-    const stream = examStream(s.stream);
+    const exam = examStream(s.stream);
     const progression: Progression = [];
+    const results: Record<string, TestResult> = {};
     for (const p of s.progression) {
-      const level = levelForTest(p.academic_level, stream);
+      results[p.session_id] = { level: p.academic_level, marks: p.marks_scored, max: p.max_marks_possible };
+      const level = levelForTest(p.academic_level, exam);
       if (!level || p.marks_scored === null) continue;
       progression.push({
         marks: p.marks_scored,
@@ -176,23 +186,31 @@ async function getProgressions(
         test: names.get(p.session_id) ?? p.session_id,
       });
     }
-    out.set(s.student_id, progression);
+    byStudent.set(s.student_id, { progression, results });
   }
-  return out;
+  const tests = data.tests.map((t) => ({ sessionId: t.session_id, name: t.test_name, date: t.start_date, stream: t.stream }));
+  return { tests, byStudent };
 }
 
 export async function getScoreJourney(
   udise: string,
   grade: number,
   program: string,
-  stream?: string
+  stream?: string,
+  testGrade?: number
 ): Promise<ScoreJourneyData> {
   const [students, progressions, cutoffs] = await Promise.all([
     getStudents(udise, grade, program, { stream }),
-    getProgressions(udise, grade, program, stream),
+    getProgressions(udise, grade, program, stream, testGrade),
     getCutoffs(),
   ]);
-  return { students: students.map((s) => journeyRow(s, progressions.get(s.uid) ?? [], cutoffs)) };
+  return {
+    tests: progressions.tests,
+    students: students.map((s) => {
+      const p = progressions.byStudent.get(s.uid);
+      return { ...journeyRow(s, p?.progression ?? [], cutoffs), results: p?.results ?? {} };
+    }),
+  };
 }
 
 interface ChapterRaw {
@@ -513,7 +531,7 @@ export async function getStudentReport(
   const codes = [...new Set(chapterRows.map((r) => r.chapter_code).filter((c): c is string => !!c))];
   const pyq = await getPyqLinks(codes);
   return {
-    student: journeyRow(student, progressionFromTests(testRows, stream), cutoffs),
+    student: { ...journeyRow(student, progressionFromTests(testRows, stream), cutoffs), results: {} },
     chapters: shapeChapters(chapterRows, pyq),
     tests: shapeTests(testRows),
   };

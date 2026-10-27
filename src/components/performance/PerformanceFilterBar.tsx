@@ -78,7 +78,7 @@ export default function PerformanceFilterBar({
       {/* Test Grade — the grade the test targets, which can differ from the
           students' grade (e.g. a grade-12 batch sitting an 11th-grade test).
           Options come from the loaded test set. */}
-      {showExtras && testCategory !== "support" && availableTestGrades.length > 0 && (
+      {showExtras && availableTestGrades.length > 0 && (
         <SegmentedControl
           label="Test grade"
           options={[
@@ -96,8 +96,6 @@ export default function PerformanceFilterBar({
           options={[
             { value: "chapter", label: "Chapter tests" },
             { value: "full", label: "Full tests" },
-            // Physical centres only: the whole extras group is hidden for NVS.
-            { value: "support", label: "Student support" },
           ]}
           value={testCategory}
           onChange={onCategoryChange}

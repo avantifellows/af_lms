@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { groupRows, matchesGender, sortRows, statusCounts } from "./score-journey-view";
+import { groupRows, matchesGender, modeDistribution, sortRows, statusCounts, streamSections } from "./score-journey-view";
 import { focusChapters, sortChapters } from "./report-view";
 import type { ChapterRow, ScoreJourneyRow } from "@/types/student-support";
 
@@ -18,6 +18,7 @@ function row(over: Partial<ScoreJourneyRow>): ScoreJourneyRow {
     last3: [],
     latestPct: null,
     toNext: { kind: "none" },
+    results: {},
     ...over,
   };
 }
@@ -100,5 +101,35 @@ describe("Student report chapters", () => {
     expect(sortChapters(rows, "priority").map((c) => c.key)).toEqual(["high", "low", "none"]);
     expect(sortChapters(rows, "weakest").map((c) => c.key)).toEqual(["none", "low", "high"]);
     expect(sortChapters(rows, "order").map((c) => c.key)).toEqual(["none", "high", "low"]);
+  });
+});
+
+describe("Cumulative report sections", () => {
+  const tests = [
+    { sessionId: "j", name: "JEE", date: "2026-08-01", stream: "engineering" },
+    { sessionId: "n", name: "NEET", date: "2026-08-02", stream: "medical" },
+    { sessionId: "x", name: "Common", date: "2026-08-03", stream: null },
+  ];
+
+  it("splits students by exam stream, JEE first, each with its own and stream-less tests", () => {
+    const sections = streamSections(
+      [row({ uid: "m", examStream: "medical" }), row({ uid: "e", examStream: "engineering" }), row({ uid: "f", examStream: null })],
+      tests
+    );
+    expect(sections.map((s) => [s.key, s.rows.map((r) => r.uid), s.tests.map((t) => t.sessionId)])).toEqual([
+      ["engineering", ["e"], ["j", "x"]],
+      ["medical", ["m"], ["n", "x"]],
+      ["other", ["f"], ["j", "n", "x"]],
+    ]);
+  });
+
+  it("leaves out empty sections", () => {
+    expect(streamSections([row({ examStream: "engineering" })], tests).map((s) => s.key)).toEqual(["engineering"]);
+  });
+
+  it("counts Mode ALs best first, with students not levelled last", () => {
+    expect(
+      modeDistribution([row({ mode: "M3" }), row({ mode: null }), row({ mode: "M1" }), row({ mode: "M3" })])
+    ).toBe("M1:1 · M3:2 · No AL:1");
   });
 });

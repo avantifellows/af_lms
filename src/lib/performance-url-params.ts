@@ -10,7 +10,7 @@
 // Pure and framework-free on purpose — no router, no hooks — so the rules are
 // unit-testable without rendering anything.
 
-export type TestCategory = "chapter" | "full" | "support";
+export type TestCategory = "chapter" | "full";
 export type FullTestView = "per_test" | "cumulative";
 
 /** A partial update. A key that is absent is left alone; a key present with a
@@ -50,12 +50,6 @@ function readNumber(raw: string | null): number | null {
   return Number.isNaN(n) ? null : n;
 }
 
-/** "support" (Student support) and "chapter" are spelled out; anything else
- *  is the default, Full tests. */
-function readCategory(raw: string | null): TestCategory {
-  return raw === "chapter" || raw === "support" ? raw : "full";
-}
-
 /**
  * Read the tab's initial filter state out of the URL.
  *
@@ -74,7 +68,7 @@ export function readPerformanceParams(searchParams: {
     subject: searchParams.get("subject") || null,
     testGrade: readNumber(searchParams.get("testGrade")),
     view: searchParams.get("view") === "cumulative" ? "cumulative" : "per_test",
-    category: readCategory(searchParams.get("category")),
+    category: searchParams.get("category") === "chapter" ? "chapter" : "full",
   };
 }
 

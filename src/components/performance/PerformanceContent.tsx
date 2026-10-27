@@ -1,7 +1,6 @@
 "use client";
 
 import BatchOverview from "./BatchOverview";
-import CumulativeALTable from "./CumulativeALTable";
 import StudentSupport from "./student-support/StudentSupport";
 import { PerformanceNotice } from "./PerformanceStates";
 import type { TestCategory, FullTestView } from "@/lib/performance-url-params";
@@ -58,22 +57,14 @@ export default function PerformanceContent({
     return <PerformanceNotice>Select a grade to view performance data.</PerformanceNotice>;
   }
 
-  // Student support is a physical-centre view; NVS never reaches it, since the
-  // filters hook forces NVS back to Full tests.
-  if (testCategory === "support" && scope.program && !isNvs) {
+  // The cumulative report is the Score journey + Student report. JNV NVS never
+  // reaches it: the filters hook forces NVS to Full tests → Per test.
+  if (testCategory === "full" && fullTestView === "cumulative") {
+    if (!scope.program || isNvs) {
+      return <PerformanceNotice>Select a program to view the cumulative report.</PerformanceNotice>;
+    }
     return (
       <StudentSupport
-        schoolUdise={schoolUdise}
-        grade={grade}
-        program={scope.program}
-        stream={scope.stream}
-      />
-    );
-  }
-
-  if (testCategory === "full" && fullTestView === "cumulative") {
-    return (
-      <CumulativeALTable
         schoolUdise={schoolUdise}
         grade={grade}
         program={scope.program}

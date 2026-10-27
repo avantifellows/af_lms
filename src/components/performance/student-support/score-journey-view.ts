@@ -1,6 +1,6 @@
 // Grouping, filtering and sorting for the Score journey table. Pure, so the
 // ordering rules are tested without rendering.
-import type { AlStatus, ScoreJourneyRow, ToNextLevel } from "@/types/student-support";
+import type { AlStatus, JourneyTest, ScoreJourneyRow, ToNextLevel } from "@/types/student-support";
 
 export type GenderFilter = "all" | "female" | "male";
 export type SortKey = "default" | "name" | "predicted" | "toNext" | "latest" | "status";
@@ -81,4 +81,39 @@ export function groupRows(rows: ScoreJourneyRow[], key: SortKey, ascending: bool
   const rest = rows.filter((r) => !r.mode || !GROUP_ORDER.includes(r.mode));
   if (rest.length) groups.push({ level: null, rows: sortRows(rest, key, ascending) });
   return groups;
+}
+
+export interface StreamSection {
+  /** "engineering" | "medical" | "other". */
+  key: string;
+  label: string;
+  rows: ScoreJourneyRow[];
+  /** The tests shown as "All tests" columns: the section's stream, or stream-less tests. */
+  tests: JourneyTest[];
+}
+
+const SECTION_LABEL: Record<string, string> = { engineering: "JEE (Engineering)", medical: "NEET (Medical)", other: "Other streams" };
+
+/** One section per exam stream, JEE first, each with its own test columns, as
+ *  the old cumulative report split its matrix. Empty sections are left out. */
+export function streamSections(rows: ScoreJourneyRow[], tests: JourneyTest[]): StreamSection[] {
+  return ["engineering", "medical", "other"]
+    .map((key) => ({
+      key,
+      label: SECTION_LABEL[key],
+      rows: rows.filter((r) => (r.examStream ?? "other") === key),
+      tests: tests.filter((t) => key === "other" || !t.stream || t.stream === key),
+    }))
+    .filter((s) => s.rows.length > 0);
+}
+
+/** Mode AL counts, best level first, e.g. "M1:12 · M2:20 · No AL:3". */
+export function modeDistribution(rows: ScoreJourneyRow[]): string {
+  const counts = new Map<string, number>();
+  for (const r of rows) counts.set(r.mode ?? "No AL", (counts.get(r.mode ?? "No AL") ?? 0) + 1);
+  const order = [...GROUP_ORDER, "Not Eligible for Academic Level", "No AL"];
+  return [...counts.entries()]
+    .sort((a, b) => order.indexOf(a[0]) - order.indexOf(b[0]))
+    .map(([level, n]) => `${level === "Not Eligible for Academic Level" ? "NE" : level}:${n}`)
+    .join(" · ");
 }

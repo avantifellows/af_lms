@@ -9,7 +9,7 @@ const BASE = "inline-flex items-center rounded border px-1.5 py-0.5 text-[11px] 
 function levelClass(level: string): string {
   if (level === "M1" || level === "B1") return "bg-success-bg text-success border-success/30";
   if (level === "M2" || level === "B2") return "bg-success-bg/50 text-success border-success/20";
-  if (level === "M3" || level === "B3") return "bg-warning-bg text-warning-text border-warning-border";
+  if (level === "M3" || level === "B3" || level === "NQ") return "bg-warning-bg text-warning-text border-warning-border";
   return "bg-bg-card-alt text-text-muted border-border";
 }
 

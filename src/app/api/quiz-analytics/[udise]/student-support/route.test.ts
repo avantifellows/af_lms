@@ -66,13 +66,13 @@ describe("GET /api/quiz-analytics/[udise]/student-support", () => {
   });
 
   it("returns the journey for a physical program, with the stream lowercased", async () => {
-    mockJourney.mockResolvedValue({ students: [] });
+    mockJourney.mockResolvedValue({ tests: [], students: [] });
     const res = await GET(
       request("student-support", { grade: "12", program: "JNV CoE", stream: "Engineering" }),
       routeParams({ udise: "1234" })
     );
     expect(res.status).toBe(200);
-    expect(mockJourney).toHaveBeenCalledWith("1234", 12, "JNV CoE", "engineering");
+    expect(mockJourney).toHaveBeenCalledWith("1234", 12, "JNV CoE", "engineering", undefined);
   });
 
   it("answers 500 when the read fails", async () => {

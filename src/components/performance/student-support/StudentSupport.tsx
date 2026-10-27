@@ -10,14 +10,16 @@ interface Props {
   grade: number;
   program: string;
   stream?: string;
+  testGrade?: number;
 }
 
 /**
- * Student support (Teacher View v2, #324): the Score journey for the grade, and
- * a student's report one click away. Physical centres only — the caller never
- * renders it for JNV NVS, and the API refuses NVS too.
+ * The cumulative report (Teacher View v2, #324): the Score journey for the grade,
+ * and a student's report one click away. It replaced the per-test AL matrix,
+ * which survives as its "All tests" columns. Physical centres only — the filters
+ * never offer Cumulative to JNV NVS, and the API refuses NVS too.
  */
-export default function StudentSupport({ schoolUdise, grade, program, stream }: Props) {
+export default function StudentSupport({ schoolUdise, grade, program, stream, testGrade }: Props) {
   const [student, setStudent] = useState<string | null>(null);
   const [help, setHelp] = useState(false);
   const scope = { schoolUdise, grade, program };
@@ -42,13 +44,14 @@ export default function StudentSupport({ schoolUdise, grade, program, stream }: 
         // Keyed so a new student starts with a fresh report state.
         <StudentReport key={student} {...scope} uid={student} onBack={() => setStudent(null)} />
       ) : (
-        <ScoreJourney {...scope} stream={stream} onOpenStudent={setStudent} />
+        <ScoreJourney {...scope} stream={stream} testGrade={testGrade} onOpenStudent={setStudent} />
       )}
 
       <Modal open={help} onClose={() => setHelp(false)}>
         <div className="max-w-lg space-y-3 rounded-xl bg-bg-card p-5 text-sm">
           <h4 className="text-base font-bold">How these are worked out</h4>
           <ul className="list-disc space-y-1.5 pl-5">
+            <li><b>Test grade</b> filters the test columns (last 3 tests, latest score, questions to next AL, all tests). Mode AL, Predicted and AL status are the student&apos;s overall values.</li>
             <li><b>Mode AL</b>: the most frequent level in the student&apos;s last 3 full tests (JEE Advanced papers excluded; a tie goes to the lower level). Retests count as tests.</li>
             <li><b>Predicted</b>: from grade-10 Maths and Science marks (65+ in both). JEE Main only; JEE Advanced and NEET predictions will come later.</li>
             <li><b>AL status</b>: Mode better than Predicted is <i>Improving</i>, worse is <i>Sliding</i>, equal is <i>Same</i>.</li>

@@ -40,9 +40,30 @@ export interface ScoreJourneyRow {
   /** Score % on the latest levelled test. */
   latestPct: number | null;
   toNext: ToNextLevel;
+  /** Per session_id: the student's result on each test in `tests` they sat. */
+  results: Record<string, TestResult>;
+}
+
+/** One major test in the Score journey's "All tests" columns. */
+export interface JourneyTest {
+  sessionId: string;
+  name: string;
+  date: string;
+  /** Canonical test stream ("engineering", "medical"), if any. */
+  stream: string | null;
+}
+
+/** A student's result on one test: the warehouse's per-test AL (M1 … Not
+ *  Qualified) and marks. */
+export interface TestResult {
+  level: string;
+  marks: number | null;
+  max: number | null;
 }
 
 export interface ScoreJourneyData {
+  /** Levelled major tests in date order, after the test-grade filter. */
+  tests: JourneyTest[];
   students: ScoreJourneyRow[];
 }
 
