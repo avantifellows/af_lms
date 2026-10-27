@@ -16,9 +16,9 @@ export type LegacyConversationEntry = {
   actionItems: LegacyActionItem[] | null;
 };
 
-export const LEGACY_SUMMARY_MAX_LENGTH = 2000;
-export const LEGACY_ACTION_ITEMS_MAX = 10;
-export const LEGACY_ACTION_ITEM_TEXT_MAX_LENGTH = 500;
+const LEGACY_SUMMARY_MAX_LENGTH = 2000;
+const LEGACY_ACTION_ITEMS_MAX = 10;
+const LEGACY_ACTION_ITEM_TEXT_MAX_LENGTH = 500;
 
 const OWNERS = ["student", "mentor", "parent"] as const satisfies readonly ActionItemOwner[];
 
