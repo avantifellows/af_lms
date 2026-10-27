@@ -15,6 +15,9 @@
 -- e2e-vsw-pm2@test.local, has four more (#477), so School-wise counts differ per School:
 --   VSWPHYS  completed two days before today (IST) and in progress on 2026-09-01
 --   VSWOLD   completed on 2025-08-01 and 2025-07-15
+-- #478 adds VSWCONA–VSWCOND (900477–900480, Centres 9004771/9004781/9004791/9004801), visited only by
+-- e2e-vsw-pm3@test.local (Visits 9004720–9004731; one by e2e-vsw-pm4@test.local, one soft-deleted).
+-- Their Visit Concerns are in 20261027140100_seed_visit_concerns_fixture.sql.
 -- e2e-vsw-seated-pm@test.local (program_manager, no Visits) holds a `pm` seat at VSWPHYS's CoE and
 -- at VSWNVS's NVS Centre, so the Visit Summary shows them VSWPHYS only. The region VSW_E2E (and
 -- VSWNOREG's NULL region) is outside every fixture user's region scope, and no Centre maps a Centre Exam Track, so Curriculum
@@ -71,6 +74,57 @@ VALUES
   (9004707, 'VSWPHYS', 'e2e-vsw-pm2@test.local', '2026-09-01', 'in_progress', '2026-09-01 04:00:00', '2026-09-01 04:00:00', NULL),
   (9004708, 'VSWOLD', 'e2e-vsw-pm2@test.local', '2025-08-01', 'completed', '2025-08-01 04:00:00', '2025-08-01 07:00:00', '2025-08-01 07:00:00'),
   (9004709, 'VSWOLD', 'e2e-vsw-pm2@test.local', '2025-07-15', 'completed', '2025-07-15 04:00:00', '2025-07-15 07:00:00', '2025-07-15 07:00:00')
+ON CONFLICT (id) DO NOTHING;
+
+-- Visit Concerns Schools (#478).
+INSERT INTO public.school
+  (id, code, name, inserted_at, updated_at, udise_code, af_school_category, region, state, district, program_ids)
+VALUES
+  (900477, 'VSWCONA', 'VSW Concern Alpha', NOW(), NOW(), '47000000477', 'JNV', 'VSW_E2E', 'Gujarat', 'Anand', ARRAY[1]::integer[]),
+  (900478, 'VSWCONB', 'VSW Concern Bravo', NOW(), NOW(), '47000000478', 'JNV', 'VSW_E2E', 'Gujarat', 'Kheda', ARRAY[1]::integer[]),
+  (900479, 'VSWCONC', 'VSW Concern Charlie', NOW(), NOW(), '47000000479', 'JNV', 'VSW_E2E', 'Gujarat', 'Patan', ARRAY[1]::integer[]),
+  (900480, 'VSWCOND', 'VSW Concern Delta', NOW(), NOW(), '47000000480', 'JNV', 'VSW_E2E', 'Gujarat', 'Dahod', ARRAY[1]::integer[])
+ON CONFLICT (id) DO UPDATE SET
+  code = EXCLUDED.code,
+  name = EXCLUDED.name,
+  udise_code = EXCLUDED.udise_code,
+  af_school_category = EXCLUDED.af_school_category,
+  region = EXCLUDED.region,
+  state = EXCLUDED.state,
+  district = EXCLUDED.district,
+  program_ids = EXCLUDED.program_ids,
+  updated_at = NOW();
+
+INSERT INTO public.centres
+  (id, name, school_id, is_physical, is_active, program_id)
+VALUES
+  (9004771, 'VSW E2E Concern Alpha CoE', 900477, true, true, 1),
+  (9004781, 'VSW E2E Concern Bravo CoE', 900478, true, true, 1),
+  (9004791, 'VSW E2E Concern Charlie CoE', 900479, true, true, 1),
+  (9004801, 'VSW E2E Concern Delta CoE', 900480, true, true, 1)
+ON CONFLICT (id) DO UPDATE SET
+  name = EXCLUDED.name,
+  school_id = EXCLUDED.school_id,
+  is_physical = EXCLUDED.is_physical,
+  is_active = EXCLUDED.is_active,
+  program_id = EXCLUDED.program_id,
+  updated_at = NOW();
+
+INSERT INTO public.lms_pm_school_visits
+  (id, school_code, pm_email, visit_date, status, inserted_at, updated_at, completed_at, deleted_at)
+VALUES
+  (9004720, 'VSWCONA', 'e2e-vsw-pm3@test.local', '2026-06-10', 'completed', '2026-06-10 04:00:00', '2026-06-10 07:00:00', '2026-06-10 07:00:00', NULL),
+  (9004721, 'VSWCONA', 'e2e-vsw-pm3@test.local', '2026-08-06', 'completed', '2026-08-06 04:00:00', '2026-08-06 06:00:00', '2026-08-06 06:00:00', NULL),
+  (9004722, 'VSWCONA', 'e2e-vsw-pm3@test.local', '2026-08-06', 'completed', '2026-08-06 08:00:00', '2026-08-06 10:00:00', '2026-08-06 10:00:00', NULL),
+  (9004723, 'VSWCONA', 'e2e-vsw-pm3@test.local', '2026-09-15', 'completed', '2026-09-15 04:00:00', '2026-09-15 07:00:00', '2026-09-15 07:00:00', NULL),
+  (9004724, 'VSWCONA', 'e2e-vsw-pm3@test.local', '2026-09-20', 'completed', '2026-09-20 04:00:00', '2026-09-22 07:00:00', '2026-09-20 07:00:00', '2026-09-22 07:00:00'),
+  (9004725, 'VSWCONA', 'e2e-vsw-pm3@test.local', '2026-09-25', 'completed', '2026-09-25 04:00:00', '2026-09-25 07:00:00', '2026-09-25 07:00:00', NULL),
+  (9004726, 'VSWCONB', 'e2e-vsw-pm3@test.local', '2026-07-01', 'completed', '2026-07-01 04:00:00', '2026-07-01 07:00:00', '2026-07-01 07:00:00', NULL),
+  (9004727, 'VSWCONB', 'e2e-vsw-pm3@test.local', '2026-08-01', 'completed', '2026-08-01 04:00:00', '2026-08-01 07:00:00', '2026-08-01 07:00:00', NULL),
+  (9004728, 'VSWCONB', 'e2e-vsw-pm3@test.local', '2026-09-01', 'completed', '2026-09-01 04:00:00', '2026-09-01 07:00:00', '2026-09-01 07:00:00', NULL),
+  (9004729, 'VSWCONB', 'e2e-vsw-pm4@test.local', '2026-10-02', 'completed', '2026-10-02 04:00:00', '2026-10-02 07:00:00', '2026-10-02 07:00:00', NULL),
+  (9004730, 'VSWCONC', 'e2e-vsw-pm3@test.local', '2026-09-10', 'completed', '2026-09-10 04:00:00', '2026-09-10 07:00:00', '2026-09-10 07:00:00', NULL),
+  (9004731, 'VSWCOND', 'e2e-vsw-pm3@test.local', '2026-09-12', 'completed', '2026-09-12 04:00:00', '2026-09-12 07:00:00', '2026-09-12 07:00:00', NULL)
 ON CONFLICT (id) DO NOTHING;
 
 -- A seated PM: their `pm` seats make VSWPHYS and VSWNVS visit-managed; the physical-only rule

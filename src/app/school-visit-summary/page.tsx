@@ -19,9 +19,11 @@ import {
 } from "@/lib/visit-actions";
 import {
   STALE_LAST_VISIT_DAYS,
+  concernSeverity,
   isStaleLastVisit,
   rollupActionTypes,
   type ActionTypeRollupStatus,
+  type ConcernSeverity,
 } from "@/lib/visit-summary";
 import {
   buildVisitSummaryWhere,
@@ -40,7 +42,8 @@ import {
   normalizeSchoolWiseSort,
   type SchoolWiseSort,
   type SchoolWiseView,
-} from "@/lib/visit-summary-school-wise";
+  type SchoolWiseRow,
+} from "@/lib/visit-concerns";
 import {
   buildVisitsActor,
   canViewVisitSummary,
@@ -137,6 +140,7 @@ interface PageProps {
     to?: string;
     preset?: string;
     bucket?: string;
+    recurring?: string;
   }>;
 }
 
@@ -186,7 +190,7 @@ function formatDate(value: string): string {
   });
 }
 
-function formatTimestamp(value: string | null): string {
+function formatTimestamp(value: string | Date | null): string {
   if (!value) {
     return "-";
   }
@@ -647,10 +651,46 @@ function StatCards({ stats }: { stats: SummaryStats }) {
 
 function SchoolWiseStatCards({ stats }: { stats: SchoolWiseView["stats"] }) {
   return (
-    <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-6">
+    <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
       <StatCard label="Schools" value={stats.schools} size="sm" />
       <StatCard label="Visits" value={stats.visits} size="sm" />
+      <StatCard label="Schools with recurring concerns" value={stats.schoolsWithRecurring} size="sm" />
+      <StatCard label="Open concerns" value={stats.openConcerns} size="sm" />
     </div>
+  );
+}
+
+const SEVERITY_MARKERS: Record<ConcernSeverity, { label: string; className: string }> = {
+  high: { label: "3 or more recurring concerns", className: "bg-danger" },
+  medium: { label: "1–2 recurring concerns", className: "bg-brand-amber" },
+  low: { label: "Open concerns, none recurring", className: "border-2 border-brand-amber bg-bg-card" },
+  none: { label: "No open concerns", className: "bg-gray-200" },
+};
+
+function SeverityMarker({ row }: { row: SchoolWiseRow }) {
+  const { label, className } = SEVERITY_MARKERS[concernSeverity(row)];
+
+  return (
+    <span
+      role="img"
+      aria-label={label}
+      title={label}
+      className={`mr-2 inline-block h-2.5 w-2.5 shrink-0 rounded-full align-middle ${className}`}
+    />
+  );
+}
+
+function formatVisitCount(count: number): string {
+  return `${count} visit${count === 1 ? "" : "s"}`;
+}
+
+function ConcernFreshnessLine({ freshness }: { freshness: SchoolWiseView["freshness"] }) {
+  return (
+    <p className="mb-4 text-xs text-text-muted">
+      {freshness.summarisedUpTo
+        ? `Visit notes summarised up to ${formatTimestamp(freshness.summarisedUpTo)} · ${formatVisitCount(freshness.waitingVisits)} waiting`
+        : "Visit notes haven't been summarised yet"}
+    </p>
   );
 }
 
@@ -687,12 +727,17 @@ function SchoolWiseTable({
             {header("school_name", "School (region)")}
             {header("visits", "Visits")}
             {header("last_visit", "Last visit")}
+            {header("recurring", "Recurring issues")}
+            <th className="w-full px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-text-muted">
+              Top recurring concern
+            </th>
           </tr>
         </thead>
         <tbody className="bg-bg-card">
           {rows.map((row) => (
             <tr key={row.schoolCode} className="border-b border-border/40 hover:bg-hover-bg">
-              <td className="px-4 py-4 text-sm font-medium text-text-primary">
+              <td className="whitespace-nowrap px-4 py-4 text-sm font-medium text-text-primary">
+                <SeverityMarker row={row} />
                 {row.schoolName}
                 {row.region && <span className="font-normal text-text-muted"> ({row.region})</span>}
               </td>
@@ -706,6 +751,17 @@ function SchoolWiseTable({
                   >
                     Stale
                   </span>
+                )}
+              </td>
+              <td className="whitespace-nowrap px-4 py-4 text-sm font-mono text-text-secondary">{row.recurringCount}</td>
+              <td className="px-4 py-4 text-sm text-text-primary">
+                {row.topRecurring ? (
+                  <>
+                    <div title={row.topRecurring.text} className="line-clamp-2">{row.topRecurring.text}</div>
+                    <div className="mt-1 text-xs font-mono text-text-muted">{formatVisitCount(row.topRecurring.visitCount)}</div>
+                  </>
+                ) : (
+                  <span className="text-text-muted">—</span>
                 )}
               </td>
             </tr>
@@ -1023,13 +1079,19 @@ export default async function SchoolVisitSummaryPage({ searchParams }: PageProps
 
         {summary.tab === "visits"
           ? <StatCards stats={summary.stats} />
-          : <SchoolWiseStatCards stats={summary.view.stats} />}
+          : (
+            <>
+              <SchoolWiseStatCards stats={summary.view.stats} />
+              <ConcernFreshnessLine freshness={summary.view.freshness} />
+            </>
+          )}
 
         <VisitSummaryFilterBar
           regionOptions={summary.regionOptions}
           schoolOptions={summary.schoolOptions}
           pmOptions={summary.pmOptions}
           currentParams={rawSearchParams}
+          showRecurringToggle={summary.tab === "schools"}
         />
 
         {summary.tab === "visits"

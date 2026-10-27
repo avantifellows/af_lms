@@ -1,5 +1,6 @@
 import type { Page } from "@playwright/test";
 import { test, expect, signInAs } from "../fixtures/auth";
+import { getTestPool } from "../helpers/db";
 
 // Fixture: e2e/fixtures/migrations/20261027120000_seed_visit_summary_school_wise_fixture.sql.
 // One completed Visit by FIXTURE_PM at each of five Schools; only VSWPHYS (physical-only),
@@ -29,8 +30,9 @@ function schoolRows(page: Page) {
   return page.getByRole("table", { name: "Schools with visits" }).locator("tbody tr");
 }
 
-// The School, Visits and Last visit cells of each School-wise row, top to bottom.
-function schoolColumn(page: Page, column: 0 | 1 | 2) {
+// The School, Visits, Last visit, Recurring issues and Top recurring concern cells of each
+// School-wise row, top to bottom.
+function schoolColumn(page: Page, column: 0 | 1 | 2 | 3 | 4) {
   return schoolRows(page).locator(`td:nth-child(${column + 1})`);
 }
 
@@ -61,6 +63,15 @@ async function openOptions(page: Page, label: string) {
 async function optionNames(page: Page, label: string) {
   await openOptions(page, label);
   return filter(page, label).locator("label");
+}
+
+async function withPool<T>(fn: (pool: ReturnType<typeof getTestPool>) => Promise<T>): Promise<T> {
+  const pool = getTestPool();
+  try {
+    return await fn(pool);
+  } finally {
+    await pool.end();
+  }
 }
 
 test.describe("School Visit Summary — physical centres only", () => {
@@ -314,5 +325,164 @@ test.describe("School Visit Summary — School-wise tab", () => {
     await expect(schoolColumn(page, 1)).toHaveText(["3"]);
     await expect(statValue(page, "Schools")).toHaveText("1");
     await expect(statValue(page, "Visits")).toHaveText("3");
+  });
+});
+
+// Visit Concerns fixture: e2e/fixtures/migrations/20261027140100_seed_visit_concerns_fixture.sql
+// (its header lists every record and the hand-worked answers asserted below).
+const CONCERN_PM = "e2e-vsw-pm3@test.local";
+const CONCERN_PM_2 = "e2e-vsw-pm4@test.local";
+const ALPHA = "VSW Concern Alpha";
+const BRAVO = "VSW Concern Bravo";
+const CHARLIE = "VSW Concern Charlie";
+const DELTA = "VSW Concern Delta";
+const HTML_CONCERN = "Students lack <b>practice</b> tests <img src=x onerror=alert(1)>";
+
+test.describe("School Visit Summary — Recurring Concerns on the School-wise tab", () => {
+  test("counts Recurring and open Concerns per School, most recurring first", async ({ adminPage }) => {
+    await adminPage.goto(`/school-visit-summary?pms=${CONCERN_PM}`);
+
+    await expect(schoolColumn(adminPage, 0)).toHaveText([
+      `${ALPHA} (VSW_E2E)`, `${BRAVO} (VSW_E2E)`, `${CHARLIE} (VSW_E2E)`, `${DELTA} (VSW_E2E)`,
+    ]);
+    await expect(schoolColumn(adminPage, 1)).toHaveText(["5", "3", "1", "1"]);
+    await expect(schoolColumn(adminPage, 3)).toHaveText(["3", "1", "0", "0"]);
+
+    await expect(statValue(adminPage, "Schools")).toHaveText("4");
+    await expect(statValue(adminPage, "Visits")).toHaveText("10");
+    await expect(statValue(adminPage, "Schools with recurring concerns")).toHaveText("2");
+    await expect(statValue(adminPage, "Open concerns")).toHaveText("7");
+
+    // Alpha's three 2-visit concerns tie; the 15 Sep ones beat the 06 Aug one, then the lower id wins.
+    await expect(schoolColumn(adminPage, 4).nth(0)).toHaveText(`${HTML_CONCERN}2 visits`);
+    await expect(schoolColumn(adminPage, 4).nth(1)).toHaveText("Smartboard not working3 visits");
+    await expect(schoolColumn(adminPage, 4).nth(2)).toHaveText("—");
+    await expect(schoolColumn(adminPage, 4).nth(3)).toHaveText("—");
+
+    await expect(schoolRow(adminPage, ALPHA).getByRole("img", { name: "3 or more recurring concerns" })).toBeVisible();
+    await expect(schoolRow(adminPage, BRAVO).getByRole("img", { name: "1–2 recurring concerns" })).toBeVisible();
+    await expect(schoolRow(adminPage, CHARLIE).getByRole("img", { name: "Open concerns, none recurring" })).toBeVisible();
+    await expect(schoolRow(adminPage, DELTA).getByRole("img", { name: "No open concerns" })).toBeVisible();
+  });
+
+  test("counts only Visits in view: dates and PMs change Recurring counts", async ({ adminPage }) => {
+    // August only: Alpha's two same-day Visits are two mentions of "Lab equipment missing".
+    await adminPage.goto(`/school-visit-summary?pms=${CONCERN_PM}&from=2026-08-01&to=2026-08-31`);
+    await expect(schoolColumn(adminPage, 0)).toHaveText([`${ALPHA} (VSW_E2E)`, `${BRAVO} (VSW_E2E)`]);
+    await expect(schoolColumn(adminPage, 1)).toHaveText(["2", "1"]);
+    await expect(schoolColumn(adminPage, 3)).toHaveText(["1", "0"]);
+    await expect(schoolColumn(adminPage, 4).nth(0)).toHaveText("Lab equipment missing2 visits");
+    await expect(statValue(adminPage, "Schools with recurring concerns")).toHaveText("1");
+    await expect(statValue(adminPage, "Open concerns")).toHaveText("2");
+
+    // Alpha over every Visit: the resolved concern, the highlight and the concern mentioned only
+    // in the soft-deleted Visit don't count.
+    await adminPage.goto(`/school-visit-summary?pms=${CONCERN_PM}&schools=VSWCONA`);
+    await expect(schoolColumn(adminPage, 3)).toHaveText(["3"]);
+    await expect(statValue(adminPage, "Open concerns")).toHaveText("4");
+
+    // From September: the soft-deleted Visit's mention doesn't make "Timetable clashes" recur.
+    await adminPage.goto(`/school-visit-summary?pms=${CONCERN_PM}&schools=VSWCONA&from=2026-09-01`);
+    await expect(schoolColumn(adminPage, 3)).toHaveText(["0"]);
+    await expect(statValue(adminPage, "Open concerns")).toHaveText("3");
+    await expect(schoolRow(adminPage, ALPHA).getByRole("img", { name: "Open concerns, none recurring" })).toBeVisible();
+
+    // Adding the second PM's Visit makes "Library closed" recur at Bravo; the 3-visit concern stays top.
+    await adminPage.goto(`/school-visit-summary?pms=${CONCERN_PM},${CONCERN_PM_2}&schools=VSWCONB`);
+    await expect(schoolColumn(adminPage, 1)).toHaveText(["4"]);
+    await expect(schoolColumn(adminPage, 3)).toHaveText(["2"]);
+    await expect(schoolColumn(adminPage, 4)).toHaveText(["Smartboard not working3 visits"]);
+  });
+
+  test("sorts by Recurring issues both ways, ties by School name; Top recurring concern isn't sortable", async ({ adminPage }) => {
+    await adminPage.goto(`/school-visit-summary?pms=${CONCERN_PM}`);
+    await expect(sortHeader(adminPage, /Top recurring concern/)).toHaveCount(0);
+
+    await sortHeader(adminPage, /Recurring issues/).click();
+    await expect(adminPage).toHaveURL(/[?&]sort=recurring&dir=asc(&|$)/);
+    await expect(schoolColumn(adminPage, 0)).toHaveText([
+      `${CHARLIE} (VSW_E2E)`, `${DELTA} (VSW_E2E)`, `${BRAVO} (VSW_E2E)`, `${ALPHA} (VSW_E2E)`,
+    ]);
+
+    await sortHeader(adminPage, /Recurring issues/).click();
+    await expect(adminPage).toHaveURL(/[?&]sort=recurring&dir=desc(&|$)/);
+    await expect(schoolColumn(adminPage, 0)).toHaveText([
+      `${ALPHA} (VSW_E2E)`, `${BRAVO} (VSW_E2E)`, `${CHARLIE} (VSW_E2E)`, `${DELTA} (VSW_E2E)`,
+    ]);
+  });
+
+  test("Recurring concerns only keeps Schools with a Recurring Concern, and the Visits tab link keeps it", async ({ adminPage }) => {
+    await adminPage.goto(`/school-visit-summary?pms=${CONCERN_PM}`);
+
+    await adminPage.getByRole("checkbox", { name: "Recurring concerns only" }).check();
+    await expect(adminPage).toHaveURL(/[?&]recurring=1(&|$)/);
+    await expect(schoolColumn(adminPage, 0)).toHaveText([`${ALPHA} (VSW_E2E)`, `${BRAVO} (VSW_E2E)`]);
+    await expect(statValue(adminPage, "Schools")).toHaveText("2");
+    await expect(statValue(adminPage, "Visits")).toHaveText("8");
+    await expect(statValue(adminPage, "Schools with recurring concerns")).toHaveText("2");
+    await expect(statValue(adminPage, "Open concerns")).toHaveText("6");
+    await expect(tab(adminPage, "Visits")).toHaveAttribute("href", /[?&]recurring=1(&|$)/);
+
+    await adminPage.getByRole("checkbox", { name: "Recurring concerns only" }).uncheck();
+    await expect(adminPage).not.toHaveURL(/[?&]recurring=/);
+    await expect(schoolRows(adminPage)).toHaveCount(4);
+  });
+
+  test("says up to when Visit notes were summarised and how many Visits in view are waiting", async ({ adminPage }) => {
+    await adminPage.goto(`/school-visit-summary?pms=${CONCERN_PM}`);
+    await expect(adminPage.getByText("Visit notes summarised up to 20 Oct 2026, 14:00 · 1 visit waiting")).toBeVisible();
+
+    await adminPage.goto(`/school-visit-summary?pms=${CONCERN_PM}&from=2026-08-01&to=2026-08-31`);
+    await expect(adminPage.getByText("Visit notes summarised up to 20 Oct 2026, 14:00 · 0 visits waiting")).toBeVisible();
+  });
+
+  test("before the first summary run, says so and still lists the Schools", async ({ adminPage }) => {
+    await withPool(async (pool) => {
+      const { rows: saved } = await pool.query(
+        "SELECT visit_id, fingerprint, prompt_version, summarised_at::text AS summarised_at FROM lms_visit_note_summaries"
+      );
+      await pool.query("DELETE FROM lms_visit_note_summaries");
+      try {
+        await adminPage.goto(`/school-visit-summary?pms=${FIXTURE_PM}`);
+        await expect(adminPage.getByText("Visit notes haven't been summarised yet")).toBeVisible();
+        await expect(adminPage.getByText(/summarised up to/)).toHaveCount(0);
+        await expect(schoolColumn(adminPage, 0)).toHaveText([`${MIXED} (VSW_E2E)`, NO_REGION_NAME, `${PHYSICAL} (VSW_E2E)`]);
+        await expect(schoolColumn(adminPage, 3)).toHaveText(["0", "0", "0"]);
+      } finally {
+        for (const row of saved) {
+          await pool.query(
+            `INSERT INTO lms_visit_note_summaries (visit_id, fingerprint, prompt_version, summarised_at)
+             VALUES ($1, $2, $3, $4)`,
+            [row.visit_id, row.fingerprint, row.prompt_version, row.summarised_at]
+          );
+        }
+      }
+    });
+  });
+
+  test("renders concern text as text, never as HTML", async ({ adminPage }) => {
+    await adminPage.goto(`/school-visit-summary?pms=${CONCERN_PM}&schools=VSWCONA`);
+
+    await expect(schoolRow(adminPage, ALPHA)).toContainText(HTML_CONCERN);
+    await expect(schoolRow(adminPage, ALPHA).locator("b, img")).toHaveCount(0);
+  });
+});
+
+test.describe("Visit Concern storage", () => {
+  test("concern history is append-only: a direct UPDATE or DELETE of an event fails", async () => {
+    await withPool(async (pool) => {
+      const { rows } = await pool.query<{ id: string }>(
+        "SELECT id FROM lms_visit_concern_events ORDER BY id LIMIT 1"
+      );
+      expect(rows).toHaveLength(1);
+      const eventId = rows[0].id;
+
+      await expect(
+        pool.query("UPDATE lms_visit_concern_events SET body = 'edited' WHERE id = $1", [eventId])
+      ).rejects.toThrow(/append-only/);
+      await expect(
+        pool.query("DELETE FROM lms_visit_concern_events WHERE id = $1", [eventId])
+      ).rejects.toThrow(/append-only/);
+    });
   });
 });

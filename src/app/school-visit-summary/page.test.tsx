@@ -681,13 +681,33 @@ describe("SchoolVisitSummaryPage", () => {
     });
   });
   describe("School-wise tab", () => {
+    const noConcerns = {
+      recurring_count: "0",
+      open_count: "0",
+      top_recurring_id: null,
+      top_recurring_text: null,
+      top_recurring_visit_count: null,
+    };
     const schoolRows = [
-      { school_code: "SC001", school_name: "Test School", region: "Bhopal", visits: "3", last_visit_date: "2026-10-20" },
-      { school_code: "SC002", school_name: "Other School", region: null, visits: "1", last_visit_date: "2026-08-01" },
+      {
+        school_code: "SC001", school_name: "Test School", region: "Bhopal", visits: "3", last_visit_date: "2026-10-20",
+        recurring_count: "2", open_count: "3",
+        top_recurring_id: "41", top_recurring_text: "Lab equipment missing", top_recurring_visit_count: "3",
+      },
+      { school_code: "SC002", school_name: "Other School", region: null, visits: "1", last_visit_date: "2026-08-01", ...noConcerns },
     ];
 
-    function setupSchoolWiseQueries(rows: Array<Record<string, unknown>> = schoolRows) {
-      mockQuery.mockImplementation((sql: string) => Promise.resolve(sql.includes("SELECT DISTINCT") ? [] : rows));
+    const summarised = { summarised_up_to: new Date("2026-10-20T08:30:00Z"), waiting_visits: "1" };
+
+    function setupSchoolWiseQueries(
+      rows: Array<Record<string, unknown>> = schoolRows,
+      freshness: Record<string, unknown> = summarised
+    ) {
+      mockQuery.mockImplementation((sql: string) => {
+        if (sql.includes("lms_visit_concerns")) return Promise.resolve(rows);
+        if (sql.includes("lms_visit_note_summaries")) return Promise.resolve([freshness]);
+        return Promise.resolve([]);
+      });
     }
 
     function tabLink(name: string) {
@@ -696,6 +716,11 @@ describe("SchoolVisitSummaryPage", () => {
 
     function schoolWiseTable() {
       return screen.getByRole("table", { name: "Schools with visits" });
+    }
+
+    function schoolWiseSql(): string {
+      const call = mockQuery.mock.calls.find(([sql]) => String(sql).includes("lms_visit_concerns"));
+      return String(call?.[0]);
     }
 
     it("is the default tab: one row per School with its Visits and Last visit", async () => {
@@ -726,8 +751,8 @@ describe("SchoolVisitSummaryPage", () => {
       vi.setSystemTime(new Date("2026-10-26T20:00:00Z"));
       setupAuth();
       setupSchoolWiseQueries([
-        { school_code: "SC001", school_name: "Exactly 45 Days", region: null, visits: "1", last_visit_date: "2026-09-12" },
-        { school_code: "SC002", school_name: "Exactly 46 Days", region: null, visits: "1", last_visit_date: "2026-09-11" },
+        { school_code: "SC001", school_name: "Exactly 45 Days", region: null, visits: "1", last_visit_date: "2026-09-12", ...noConcerns },
+        { school_code: "SC002", school_name: "Exactly 46 Days", region: null, visits: "1", last_visit_date: "2026-09-11", ...noConcerns },
       ]);
 
       render(await SchoolVisitSummaryPage({ searchParams: Promise.resolve({}) }));
@@ -737,7 +762,7 @@ describe("SchoolVisitSummaryPage", () => {
       expect(within(fortySix).getByText("Stale")).toBeInTheDocument();
     });
 
-    it("counts Schools and their Visits in the stat cards", async () => {
+    it("counts Schools, their Visits, Schools with recurring concerns and open concerns in the stat cards", async () => {
       setupAuth();
       setupSchoolWiseQueries();
 
@@ -745,7 +770,68 @@ describe("SchoolVisitSummaryPage", () => {
 
       expect(screen.getByText("Schools", { selector: "span" }).nextElementSibling).toHaveTextContent("2");
       expect(screen.getByText("Visits", { selector: "span" }).nextElementSibling).toHaveTextContent("4");
+      expect(screen.getByText("Schools with recurring concerns", { selector: "span" }).nextElementSibling).toHaveTextContent("1");
+      expect(screen.getByText("Open concerns", { selector: "span" }).nextElementSibling).toHaveTextContent("3");
       expect(screen.getByText("2 schools found")).toBeInTheDocument();
+    });
+
+    it("keeps only Schools with Recurring Concerns for recurring=1", async () => {
+      setupAuth();
+      setupSchoolWiseQueries();
+
+      render(await SchoolVisitSummaryPage({ searchParams: Promise.resolve({ recurring: "1" }) }));
+
+      const rows = within(schoolWiseTable()).getAllByRole("row").slice(1);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toHaveTextContent("Test School");
+      expect(screen.getByText("Schools", { selector: "span" }).nextElementSibling).toHaveTextContent("1");
+      expect(screen.getByText("Visits", { selector: "span" }).nextElementSibling).toHaveTextContent("3");
+      expect(screen.getByText("1 school found")).toBeInTheDocument();
+      expect(screen.getByRole("checkbox", { name: "Recurring concerns only" })).toBeChecked();
+      expect(tabLink("Visits")).toHaveAttribute("href", "/school-visit-summary?tab=visits&recurring=1");
+    });
+
+    it("offers Recurring concerns only on the School-wise tab", async () => {
+      setupAuth();
+      setupSchoolWiseQueries();
+      render(await SchoolVisitSummaryPage({ searchParams: Promise.resolve({}) }));
+      expect(screen.getByRole("checkbox", { name: "Recurring concerns only" })).not.toBeChecked();
+    });
+
+    it("hides Recurring concerns only on the Visits tab", async () => {
+      setupAuth();
+      setupSummaryQueries();
+      render(await SchoolVisitSummaryPage({ searchParams: Promise.resolve({ tab: "visits", recurring: "1" }) }));
+      expect(screen.queryByRole("checkbox", { name: "Recurring concerns only" })).not.toBeInTheDocument();
+    });
+
+    it("says up to when Visit notes were summarised and how many Visits in view are waiting", async () => {
+      setupAuth();
+      setupSchoolWiseQueries(schoolRows, { summarised_up_to: new Date("2026-10-20T08:30:00Z"), waiting_visits: "2" });
+
+      render(await SchoolVisitSummaryPage({ searchParams: Promise.resolve({}) }));
+
+      expect(screen.getByText("Visit notes summarised up to 20 Oct 2026, 14:00 · 2 visits waiting")).toBeInTheDocument();
+    });
+
+    it("says one Visit waiting in the singular", async () => {
+      setupAuth();
+      setupSchoolWiseQueries();
+
+      render(await SchoolVisitSummaryPage({ searchParams: Promise.resolve({}) }));
+
+      expect(screen.getByText("Visit notes summarised up to 20 Oct 2026, 14:00 · 1 visit waiting")).toBeInTheDocument();
+    });
+
+    it("says Visit notes haven't been summarised yet when there are no summaries, still listing the Schools", async () => {
+      setupAuth();
+      setupSchoolWiseQueries(schoolRows, { summarised_up_to: null, waiting_visits: "4" });
+
+      render(await SchoolVisitSummaryPage({ searchParams: Promise.resolve({}) }));
+
+      expect(screen.getByText("Visit notes haven't been summarised yet")).toBeInTheDocument();
+      expect(screen.queryByText(/summarised up to/)).not.toBeInTheDocument();
+      expect(within(schoolWiseTable()).getAllByRole("row").slice(1)).toHaveLength(2);
     });
 
     it("switches tabs keeping every filter and dropping sort, dir and page", async () => {
@@ -786,18 +872,24 @@ describe("SchoolVisitSummaryPage", () => {
       expect(screen.queryByRole("table", { name: "Schools with visits" })).not.toBeInTheDocument();
     });
 
-    it("sorts by school name ascending by default and toggles header sort direction", async () => {
+    it("sorts by Recurring issues descending by default and toggles header sort direction", async () => {
       setupAuth();
       setupSchoolWiseQueries();
 
       render(await SchoolVisitSummaryPage({ searchParams: Promise.resolve({ status: "completed" }) }));
 
-      const [rowsSql] = mockQuery.mock.calls.find(([sql]) => String(sql).includes("GROUP BY v.school_code"))!;
-      expect(rowsSql).toContain("ORDER BY school_name ASC, school_code ASC");
+      expect(schoolWiseSql()).toContain("ORDER BY recurring_count DESC, school_name ASC, school_code ASC");
       const header = within(schoolWiseTable());
+      expect(header.getByRole("link", { name: /Recurring issues/ })).toHaveAttribute(
+        "href",
+        "/school-visit-summary?status=completed&sort=recurring&dir=asc"
+      );
       expect(header.getByRole("link", { name: /School \(region\)/ })).toHaveAttribute(
         "href",
-        "/school-visit-summary?status=completed&sort=school_name&dir=desc"
+        "/school-visit-summary?status=completed&sort=school_name&dir=asc"
+      );
+      expect(header.getByRole("columnheader", { name: "Top recurring concern" })).not.toContainElement(
+        header.queryByRole("link", { name: "Top recurring concern" })
       );
       expect(header.getByRole("link", { name: "Visits" })).toHaveAttribute(
         "href",
@@ -815,8 +907,7 @@ describe("SchoolVisitSummaryPage", () => {
 
       render(await SchoolVisitSummaryPage({ searchParams: Promise.resolve({ tab: "schools", sort: "last_visit", dir: "asc" }) }));
 
-      const [rowsSql] = mockQuery.mock.calls.find(([sql]) => String(sql).includes("GROUP BY v.school_code"))!;
-      expect(rowsSql).toContain("ORDER BY last_visit_date ASC, school_name ASC, school_code ASC");
+      expect(schoolWiseSql()).toContain("ORDER BY last_visit_date ASC, school_name ASC, school_code ASC");
       expect(within(schoolWiseTable()).getByRole("link", { name: /Last visit/ })).toHaveAttribute(
         "href",
         "/school-visit-summary?tab=schools&sort=last_visit&dir=desc"
@@ -829,9 +920,8 @@ describe("SchoolVisitSummaryPage", () => {
 
       await SchoolVisitSummaryPage({ searchParams: Promise.resolve({ sort: "completed_at", dir: "sideways" }) });
 
-      const [rowsSql] = mockQuery.mock.calls.find(([sql]) => String(sql).includes("GROUP BY v.school_code"))!;
-      expect(rowsSql).toContain("ORDER BY school_name ASC, school_code ASC");
-      expect(rowsSql).not.toContain("completed_at");
+      expect(schoolWiseSql()).toContain("ORDER BY recurring_count DESC, school_name ASC, school_code ASC");
+      expect(schoolWiseSql()).not.toContain("completed_at");
     });
 
     it("ignores a School-wise sort on the Visits tab", async () => {

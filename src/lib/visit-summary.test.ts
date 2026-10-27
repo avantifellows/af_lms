@@ -4,6 +4,7 @@ import { ACTION_TYPE_VALUES, type ActionType } from "./visit-actions";
 import {
   classifyActionCompletion,
   computeAverageCompletion,
+  concernSeverity,
   dispatchComputeInlineStats,
   dispatchExtractRemarks,
   resolvePresetDateRange,
@@ -221,5 +222,16 @@ describe("summary action dispatch", () => {
     expect(dispatchComputeInlineStats("school_staff_interaction", {
       questions: { gc_staff_concern: { answer: true } },
     })).toEqual({ answeredCount: 1, totalQuestions: 2 });
+  });
+});
+
+describe("concernSeverity", () => {
+  it("grades a School by its Recurring and open Visit Concerns", () => {
+    expect(concernSeverity({ recurringCount: 4, openCount: 6 })).toBe("high");
+    expect(concernSeverity({ recurringCount: 3, openCount: 3 })).toBe("high");
+    expect(concernSeverity({ recurringCount: 2, openCount: 5 })).toBe("medium");
+    expect(concernSeverity({ recurringCount: 1, openCount: 1 })).toBe("medium");
+    expect(concernSeverity({ recurringCount: 0, openCount: 1 })).toBe("low");
+    expect(concernSeverity({ recurringCount: 0, openCount: 0 })).toBe("none");
   });
 });

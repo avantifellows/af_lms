@@ -136,6 +136,20 @@ export function isStaleLastVisit(lastVisitDate: string, today: Date | string): b
   return lastVisitDate < addDays(toIstDateString(today), -STALE_LAST_VISIT_DAYS);
 }
 
+// The severity marker beside a School on the School-wise tab: 3+ Recurring Concerns, 1–2,
+// open Concerns but none recurring, or nothing open (counts over the Visits in view).
+export type ConcernSeverity = "high" | "medium" | "low" | "none";
+
+export function concernSeverity({ recurringCount, openCount }: { recurringCount: number; openCount: number }): ConcernSeverity {
+  if (recurringCount >= 3) {
+    return "high";
+  }
+  if (recurringCount > 0) {
+    return "medium";
+  }
+  return openCount > 0 ? "low" : "none";
+}
+
 export function dispatchExtractRemarks(actionType: string, data: unknown): RemarkEntry[] {
   const additionalNotes = readActionAdditionalNotes(data).trim();
   const actionNotes = additionalNotes

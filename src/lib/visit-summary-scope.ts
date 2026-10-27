@@ -25,6 +25,9 @@ export interface VisitSummaryFilters {
   preset?: string;
   bucket?: ActionCompletionBucketFilter;
   forceEmpty: boolean;
+  // `recurring=1`: the School-wise tab keeps only Schools with a Recurring Concern. It is a shared
+  // filter param (tab links keep it) but not a Visit filter, so buildVisitSummaryWhere ignores it.
+  recurringOnly?: boolean;
 }
 
 export interface VisitSummaryFilterParams {
@@ -36,6 +39,7 @@ export interface VisitSummaryFilterParams {
   to?: string;
   preset?: string;
   bucket?: string;
+  recurring?: string;
 }
 
 export interface VisitSummaryWhere {
@@ -93,6 +97,7 @@ export function normalizeVisitSummaryFilters(searchParams: VisitSummaryFilterPar
     preset: presetRange || searchParams.preset === "all" ? searchParams.preset : undefined,
     bucket: isActionCompletionBucket(searchParams.bucket) ? searchParams.bucket : undefined,
     forceEmpty: Boolean(from && to && from > to),
+    recurringOnly: searchParams.recurring === "1",
   };
 }
 

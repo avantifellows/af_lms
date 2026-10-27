@@ -23,6 +23,8 @@ interface FilterBarProps {
   schoolOptions: SchoolOption[];
   pmOptions: PmOption[];
   currentParams: Record<string, string | undefined>;
+  // The School-wise tab's "Recurring concerns only" toggle (`recurring=1`).
+  showRecurringToggle?: boolean;
 }
 
 function parseListParam(value: string | undefined): string[] {
@@ -57,6 +59,7 @@ export default function VisitSummaryFilterBar({
   schoolOptions,
   pmOptions,
   currentParams,
+  showRecurringToggle = false,
 }: FilterBarProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -70,6 +73,7 @@ export default function VisitSummaryFilterBar({
   const [from, setFrom] = useState(currentParams.from || "");
   const [to, setTo] = useState(currentParams.to || "");
   const [bucket, setBucket] = useState(currentParams.bucket || "");
+  const [recurringOnly, setRecurringOnly] = useState(currentParams.recurring === "1");
 
   function replaceWith(updates: Record<string, string | undefined>) {
     Object.assign(pendingUpdatesRef.current, updates);
@@ -117,7 +121,21 @@ export default function VisitSummaryFilterBar({
     <section className="mb-6 border border-border bg-bg-card p-4 shadow-sm">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-sm font-bold uppercase tracking-wide text-text-primary">Filters</h2>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {showRecurringToggle && (
+            <label className="mr-2 inline-flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-text-primary">
+              <input
+                type="checkbox"
+                checked={recurringOnly}
+                onChange={(event) => {
+                  setRecurringOnly(event.target.checked);
+                  replaceWith({ recurring: event.target.checked ? "1" : undefined });
+                }}
+                className="h-4 w-4 accent-accent"
+              />
+              Recurring concerns only
+            </label>
+          )}
           <span className="group relative">
             <button
               type="button"
