@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Download, Plus, Upload } from "lucide-react";
 import StudentTable, {
   type Grade,
@@ -14,6 +14,7 @@ import {
   buildProgramStats,
   studentDroppedFromProgram,
   studentHasCurrentProgram,
+  studentInProgram,
 } from "@/lib/enrollment-stats";
 import {
   formatExamPreparingFor,
@@ -54,6 +55,36 @@ function groupFlagsByStudent(flags: InterventionFlag[]) {
     byStudent.set(flag.student_pk_id, list);
   }
   return byStudent;
+}
+
+/** `?flag=<id>` as a flag id, or null when absent or not a positive integer. */
+function parseFlagParam(raw: string | null): number | null {
+  if (!raw || !/^\d+$/.test(raw)) return null;
+  const id = Number(raw);
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
+
+/**
+ * The Student and programme card a `?flag=<id>` deep link opens: the flag must
+ * be in the loaded flags and its Student on a non-NVS card (the JNV NVS card
+ * hides flags), otherwise null.
+ */
+function findFlagDeepLinkTarget(
+  flagId: number,
+  flagsByStudent: Map<string, InterventionFlag[]>,
+  programs: ProgramStats[],
+  students: Student[],
+): { programId: number; student: Student } | null {
+  const flag = [...flagsByStudent.values()].flat().find((f) => f.id === flagId);
+  if (!flag) return null;
+  for (const student of students) {
+    if (student.student_pk_id !== flag.student_pk_id) continue;
+    const program = programs.find(
+      (p) => p.id !== PROGRAM_IDS.NVS && studentInProgram(student, p.id),
+    );
+    if (program) return { programId: program.id, student };
+  }
+  return null;
 }
 
 interface EnrollmentActionsProps {
@@ -215,14 +246,36 @@ export default function EnrollmentTabContent({
   >(new Map());
   const [flaggedOnly, setFlaggedOnly] = useState(false);
   const [flagStudent, setFlagStudent] = useState<Student | null>(null);
+  const [flagsLoaded, setFlagsLoaded] = useState(false);
   const flagsUrl = `/api/schools/${encodeURIComponent(schoolCode)}/intervention-flags`;
+
+  // `?flag=<id>` (the Visit Summary School page links here) opens that flag's
+  // Student once the flags load. Consumed once, so closing the dialog or a
+  // later reload never reopens it; an id not in the loaded flags is ignored.
+  const searchParams = useSearchParams();
+  const [deepLinkFlagId, setDeepLinkFlagId] = useState(() =>
+    parseFlagParam(searchParams.get("flag")),
+  );
+  if (deepLinkFlagId != null && flagsLoaded) {
+    setDeepLinkFlagId(null);
+    const target = findFlagDeepLinkTarget(deepLinkFlagId, flagsByStudent, programs, [
+      ...activeStudents,
+      ...dropoutStudents,
+    ]);
+    if (target) {
+      setSelectedId(target.programId);
+      setFlagStudent(target.student);
+    }
+  }
 
   useEffect(() => {
     if (!canUseInterventionFlags) return;
     let cancelled = false;
     fetchJson<{ flags: InterventionFlag[] }>(flagsUrl)
       .then((data) => {
-        if (!cancelled) setFlagsByStudent(groupFlagsByStudent(data.flags ?? []));
+        if (cancelled) return;
+        setFlagsByStudent(groupFlagsByStudent(data.flags ?? []));
+        setFlagsLoaded(true);
       })
       // A failed fetch leaves the roster usable, just without flag markers.
       .catch(() => {});
