@@ -26,6 +26,7 @@ describe("Holistic Post-Session Notes", () => {
       actorUserId: 9,
       expectedRevision: 0,
       answers: [{ questionId: 91, answer: "   " }],
+      challengeCategories: [],
     })).resolves.toEqual({ ok: false, status: 422, error: "Phase is not Open" });
 
     expect(client.query).toHaveBeenCalledTimes(1);
@@ -47,6 +48,7 @@ describe("Holistic Post-Session Notes", () => {
       actorUserId: 9,
       expectedRevision: 0,
       answers: [{ questionId: 91, answer: "   " }],
+      challengeCategories: [],
     })).resolves.toEqual({ ok: true, changed: false, revision: 0 });
 
     expect(client.query).toHaveBeenCalledTimes(2);
@@ -66,6 +68,7 @@ describe("Holistic Post-Session Notes", () => {
       actorUserId: 9,
       expectedRevision: 0,
       answers: [{ questionId: 91, answer: "Do not restore this content" }],
+      challengeCategories: [],
     })).resolves.toEqual({ ok: false, status: 404, error: "Not found" });
 
     expect(client.query).toHaveBeenCalledOnce();
@@ -93,6 +96,7 @@ describe("Holistic Post-Session Notes", () => {
       actorUserId: 9,
       expectedRevision: 0,
       answers: [{ questionId: 91, answer: "Finish earlier work" }],
+      challengeCategories: [],
     });
 
     expect(client.query.mock.calls[0][1]).toEqual([70, 41, 4, 1, "2026-2027", "2025-2026"]);
@@ -123,6 +127,7 @@ describe("Holistic Post-Session Notes", () => {
       actorUserId: 9,
       expectedRevision: 0,
       answers: [{ questionId: 91, answer: "A weekly plan" }],
+      challengeCategories: [],
     })).resolves.toEqual({ ok: true, changed: true, revision: 1 });
   });
 
@@ -149,6 +154,7 @@ describe("Holistic Post-Session Notes", () => {
         { questionId: 91, answer: "A weekly plan" },
         { questionId: 92, answer: "  " },
       ],
+      challengeCategories: ["academic.exam_related", "non_academic.no_major_issue"],
     })).resolves.toEqual({ ok: false, status: 422, error: "Answer every Question before submitting" });
   });
 
@@ -177,6 +183,7 @@ describe("Holistic Post-Session Notes", () => {
         { questionId: 91, answer: "A weekly plan" },
         { questionId: 92, answer: "Ask for feedback" },
       ],
+      challengeCategories: ["academic.exam_related", "non_academic.no_major_issue"],
     })).resolves.toEqual({ ok: true, changed: true, revision: 3 });
   });
 
@@ -200,6 +207,7 @@ describe("Holistic Post-Session Notes", () => {
       expectedPhaseRevision: 5,
       confirmed: true,
       answers: [{ questionId: 91, answer: "Changed" }],
+      challengeCategories: ["academic.exam_related", "non_academic.no_major_issue"],
     })).resolves.toEqual({ ok: false, status: 403, error: "Forbidden" });
   });
 
@@ -207,7 +215,7 @@ describe("Holistic Post-Session Notes", () => {
     const client = { query: vi.fn()
       .mockResolvedValueOnce({ rows: [{ mapping_id: "301", mentor_user_id: "10", phase_revision: 5, phase_state: "open" }] })
       .mockResolvedValueOnce({ rows: [{ id: "91" }] })
-      .mockResolvedValueOnce({ rows: [{ id: "501", author_user_id: "9", state: "draft", revision: 4, has_answers: false }] })
+      .mockResolvedValueOnce({ rows: [{ id: "501", author_user_id: "9", state: "draft", revision: 4, has_content: false }] })
       .mockResolvedValueOnce({ rows: [{ revision: 5 }] })
       .mockResolvedValue({ rows: [] }) };
     mockWithTransaction.mockImplementation(async (work) => work(client as never));
@@ -222,6 +230,7 @@ describe("Holistic Post-Session Notes", () => {
       actorUserId: 10,
       expectedRevision: 0,
       answers: [{ questionId: 91, answer: "A fresh start" }],
+      challengeCategories: [],
     })).resolves.toEqual({ ok: true, changed: true, revision: 5 });
     const update = client.query.mock.calls.find(([sql]) =>
       String(sql).includes("UPDATE holistic_mentorship_post_session_notes")
@@ -233,7 +242,7 @@ describe("Holistic Post-Session Notes", () => {
     const client = { query: vi.fn()
       .mockResolvedValueOnce({ rows: [{ mapping_id: "300", mentor_user_id: "9", phase_revision: 5, phase_state: "open" }] })
       .mockResolvedValueOnce({ rows: [{ id: "91" }] })
-      .mockResolvedValueOnce({ rows: [{ id: "501", author_user_id: "9", state: "draft", revision: 2, has_answers: false }] })
+      .mockResolvedValueOnce({ rows: [{ id: "501", author_user_id: "9", state: "draft", revision: 2, has_content: false }] })
       .mockResolvedValueOnce({ rows: [{ revision: 3 }] })
       .mockResolvedValue({ rows: [] }) };
     mockWithTransaction.mockImplementation(async (work) => work(client as never));
@@ -248,6 +257,7 @@ describe("Holistic Post-Session Notes", () => {
       actorUserId: 9,
       expectedRevision: 2,
       answers: [{ questionId: 91, answer: "A weekly plan" }],
+      challengeCategories: [],
     })).resolves.toEqual({ ok: true, changed: true, revision: 3 });
     const update = client.query.mock.calls.find(([sql]) =>
       String(sql).includes("UPDATE holistic_mentorship_post_session_notes")
@@ -277,7 +287,165 @@ describe("Holistic Post-Session Notes", () => {
       expectedPhaseRevision: 5,
       confirmed: true,
       answers: [{ questionId: 91, answer: "Corrected answer" }],
+      challengeCategories: ["academic.exam_related", "non_academic.no_major_issue"],
     })).resolves.toEqual({ ok: true, changed: true, revision: 4 });
+  });
+
+  it("creates and freezes a Categories-only first draft", async () => {
+    const client = { query: vi.fn()
+      .mockResolvedValueOnce({ rows: [{ mapping_id: "300", mentor_user_id: "9", phase_revision: 5, phase_state: "open" }] })
+      .mockResolvedValueOnce({ rows: [{ id: "91" }] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ id: "501", revision: 1 }] })
+      .mockResolvedValue({ rows: [] }) };
+    mockWithTransaction.mockImplementation(async (work) => work(client as never));
+
+    await expect(saveHolisticNotes({
+      programId: 1,
+      mode: "draft",
+      studentId: 41,
+      phaseId: 73,
+      schoolId: 4,
+      academicYear: "2026-2027",
+      actorUserId: 9,
+      expectedRevision: 0,
+      answers: [{ questionId: 91, answer: "  " }],
+      challengeCategories: ["non_academic.financial"],
+    })).resolves.toEqual({ ok: true, changed: true, revision: 1 });
+  });
+
+  it("rejects an invalid draft Category set before opening a transaction", async () => {
+    const draft = (challengeCategories: string[]) => saveHolisticNotes({
+      programId: 1,
+      mode: "draft",
+      studentId: 41,
+      phaseId: 73,
+      schoolId: 4,
+      academicYear: "2026-2027",
+      actorUserId: 9,
+      expectedRevision: 0,
+      answers: [],
+      challengeCategories,
+    });
+
+    await expect(draft(["academic.retired"])).resolves.toEqual({
+      ok: false, status: 422, error: "Unknown Challenge Category",
+    });
+    await expect(draft(["academic.other", "academic.other"])).resolves.toEqual({
+      ok: false, status: 422, error: "Unknown Challenge Category",
+    });
+    await expect(draft(["academic.no_major_issue", "academic.other"])).resolves.toEqual({
+      ok: false, status: 422, error: "Choose either No major issue reported or other Challenge Categories",
+    });
+    expect(mockWithTransaction).not.toHaveBeenCalled();
+  });
+
+  it("stores the trimmed draft Category codes", async () => {
+    const client = { query: vi.fn()
+      .mockResolvedValueOnce({ rows: [{ mapping_id: "300", mentor_user_id: "9", phase_revision: 5, phase_state: "open" }] })
+      .mockResolvedValueOnce({ rows: [{ id: "91" }] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ id: "501", revision: 1 }] })
+      .mockResolvedValue({ rows: [] }) };
+    mockWithTransaction.mockImplementation(async (work) => work(client as never));
+
+    await saveHolisticNotes({
+      programId: 1,
+      mode: "draft",
+      studentId: 41,
+      phaseId: 73,
+      schoolId: 4,
+      academicYear: "2026-2027",
+      actorUserId: 9,
+      expectedRevision: 0,
+      answers: [],
+      challengeCategories: [" non_academic.financial "],
+    });
+
+    const insert = client.query.mock.calls.find(([sql]) =>
+      String(sql).includes("INSERT INTO holistic_mentorship_post_session_note_challenges"));
+    expect(insert?.[1]).toEqual([501, ["non_academic.financial"]]);
+  });
+
+  it("does not let a replacement Mentor claim a draft that still holds Categories", async () => {
+    const client = { query: vi.fn()
+      .mockResolvedValueOnce({ rows: [{ mapping_id: "301", mentor_user_id: "10", phase_revision: 5, phase_state: "open" }] })
+      .mockResolvedValueOnce({ rows: [{ id: "91" }] })
+      .mockResolvedValueOnce({ rows: [{ id: "501", author_user_id: "9", state: "draft", revision: 4, has_content: true }] }) };
+    mockWithTransaction.mockImplementation(async (work) => work(client as never));
+
+    await expect(saveHolisticNotes({
+      programId: 1,
+      mode: "draft",
+      studentId: 41,
+      phaseId: 73,
+      schoolId: 4,
+      academicYear: "2026-2027",
+      actorUserId: 10,
+      expectedRevision: 0,
+      answers: [{ questionId: 91, answer: "A fresh start" }],
+      challengeCategories: [],
+    })).resolves.toEqual({
+      ok: false,
+      status: 409,
+      error: "Notes changed; reload the latest version",
+      currentRevision: 4,
+    });
+  });
+
+  describe("final Challenge Category checks", () => {
+    const finalWrite = (
+      overrides: Partial<Parameters<typeof saveHolisticNotes>[0]>,
+      existingState = overrides.mode === "edit" ? "submitted" : "draft",
+    ) => {
+      const client = { query: vi.fn()
+        .mockResolvedValueOnce({ rows: [{ mapping_id: "300", mentor_user_id: "9", phase_revision: 5, phase_state: "open" }] })
+        .mockResolvedValueOnce({ rows: [{ id: "91" }] })
+        .mockResolvedValueOnce({ rows: [{ id: "501", author_user_id: "9", state: existingState, revision: 2, has_content: true }] }) };
+      mockWithTransaction.mockImplementation(async (work) => work(client as never));
+      return saveHolisticNotes({
+        programId: 1,
+        mode: "submit",
+        studentId: 41,
+        phaseId: 73,
+        schoolId: 4,
+        academicYear: "2026-2027",
+        actorUserId: 9,
+        expectedRevision: 2,
+        expectedMappingId: 300,
+        expectedPhaseRevision: 5,
+        confirmed: true,
+        answers: [{ questionId: 91, answer: "A weekly plan" }],
+        challengeCategories: ["academic.exam_related"],
+        ...overrides,
+      });
+    };
+
+    it.each(["submit", "edit"] as const)("rejects %s without a Category in each group", async (mode) => {
+      await expect(finalWrite({ mode })).resolves.toEqual({
+        ok: false,
+        status: 422,
+        error: "Choose at least one Academic and one Non-academic Challenge Category",
+      });
+    });
+
+    it("rejects a blank answer before a missing Category group", async () => {
+      await expect(finalWrite({ answers: [{ questionId: 91, answer: " " }] })).resolves.toEqual({
+        ok: false, status: 422, error: "Answer every Question before submitting",
+      });
+    });
+
+    it("rejects a stale Mapping before a missing Category group", async () => {
+      await expect(finalWrite({ expectedMappingId: 299 })).resolves.toMatchObject({
+        ok: false, status: 409, error: "Mapping or Phase changed; reload before saving",
+      });
+    });
+
+    it("rejects Submit of already submitted Notes before a missing Category group", async () => {
+      await expect(finalWrite({ challengeCategories: [] }, "submitted")).resolves.toEqual({
+        ok: false, status: 422, error: "Save a draft before submitting",
+      });
+    });
   });
 
   it("returns the safe current revision without replacing a stale draft", async () => {
@@ -297,6 +465,7 @@ describe("Holistic Post-Session Notes", () => {
       actorUserId: 9,
       expectedRevision: 2,
       answers: [{ questionId: 91, answer: "Stale answer" }],
+      challengeCategories: [],
     })).resolves.toEqual({
       ok: false,
       status: 409,
@@ -320,6 +489,7 @@ describe("Holistic Post-Session Notes", () => {
       actorUserId: 9,
       expectedRevision: 0,
       answers: [{ questionId: 91, answer: "First writer" }],
+      challengeCategories: [],
     })).resolves.toEqual({
       ok: false,
       status: 409,

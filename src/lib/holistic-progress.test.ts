@@ -401,6 +401,67 @@ describe("Holistic progress", () => {
     });
   });
 
+  describe("Challenge Categories on assigned rows", () => {
+    const filters = {
+      programId: 1,
+      academicYear: "2026-2027",
+      phaseId: null,
+      schoolCode: null,
+      grade: null,
+      mentorUserId: null,
+      progress: null,
+      search: "",
+      sort: DEFAULT_HOLISTIC_PROGRESS_SORT,
+      direction: "asc" as const,
+      page: 1,
+    };
+
+    it("returns the submitted Notes' Category codes in catalogue order", async () => {
+      mockQuery.mockResolvedValueOnce([{
+        ...databaseRow,
+        challenge_categories: [
+          "non_academic.financial",
+          "academic.other",
+          "non_academic.time_management",
+          "academic.subject_concept",
+        ],
+      }]);
+
+      const result = await listHolisticProgress(filters, adminPermission);
+
+      expect(result.rows[0]).toMatchObject({
+        challengeCategories: [
+          "academic.subject_concept",
+          "academic.other",
+          "non_academic.time_management",
+          "non_academic.financial",
+        ],
+      });
+    });
+
+    it("returns an empty array when the Phase has no submitted Notes, or only Notes without Challenge Categories", async () => {
+      mockQuery.mockResolvedValueOnce([
+        { ...databaseRow, student_id: "41", progress: "pending", challenge_categories: null },
+        { ...databaseRow, student_id: "42", challenge_categories: [] },
+      ]);
+
+      const result = await listHolisticProgress(filters, adminPermission);
+
+      expect(result.rows.map((row) => "challengeCategories" in row && row.challengeCategories)).toEqual([[], []]);
+    });
+
+    it("leaves Unassigned rows without Challenge Categories", async () => {
+      mockQuery.mockResolvedValueOnce([{
+        student_id: "52", student_name: "Asha Rao", external_student_id: "AF-52", grade: "11",
+        school_name: "School One", school_code: "SCH001", active_phase_id: "70", total_unassigned: "1",
+      }]);
+
+      const result = await listHolisticProgress({ ...filters, progress: "unassigned" }, adminPermission);
+
+      expect(result.rows[0]).not.toHaveProperty("challengeCategories");
+    });
+  });
+
   it("makes an orphaned draft indistinguishable from no Notes when deriving a skipped Phase", async () => {
     mockQuery.mockResolvedValueOnce([]);
 
@@ -450,6 +511,7 @@ describe("Holistic progress", () => {
         { position: 4, question: "Support?", answer: "@external" },
         { position: 5, question: "Anything else?", answer: "Keep going" },
       ],
+      challengeCategories: [],
     };
 
     const csv = formatHolisticProgressCsv("2026-2027", 1, [row]);
@@ -471,6 +533,67 @@ describe("Holistic progress", () => {
     expect(csv).not.toContain("Student Profile");
   });
 
+  describe("Challenge Category CSV columns", () => {
+    const categoryBearingRow: HolisticProgressRow = {
+      studentId: 41, studentName: "Student One", externalStudentId: "AF-41", grade: 11,
+      schoolName: "School One", schoolCode: "SCH001", mentorName: "Mentor One", mentorEmail: "mentor@example.com",
+      phaseId: 70, phaseNumber: 2, phaseTitle: "Check-in", phaseState: "active", progress: "completed",
+      completedAt: "2026-07-01T10:00:00.000Z", notesAuthor: "Mentor One", notesAuthorEmail: "mentor@example.com",
+      notesLastEditedAt: "2026-07-01T11:00:00.000Z",
+      answers: [{ position: 1, question: "Goal?", answer: "On track" }],
+      challengeCategories: [
+        "academic.subject_concept",
+        "academic.other",
+        "non_academic.time_management",
+        "non_academic.wellness",
+      ],
+    };
+    const unassignedRow: HolisticProgressRow = {
+      progress: "unassigned", studentId: 52, studentName: "Asha Rao", externalStudentId: "AF-52", grade: 11,
+      schoolName: "School One", schoolCode: "SCH001", activePhaseId: 70,
+    };
+
+    it("puts Academic and Non-Academic Challenges after the answers with \"; \"-joined labels", () => {
+      const [header, categoryBearing] = formatHolisticProgressCsv("2026-2027", 1, [categoryBearingRow]).split("\r\n");
+
+      expect(header).toBe(
+        "Academic Year,Program ID,Program Name,School,UDISE Code,Student Name,Student External ID," +
+          "Grade,Mentor Name,Mentor Email,Phase,Phase Title,Availability,Progress,Completed At," +
+          "Question 1,Answer 1,Academic Challenges,Non-Academic Challenges," +
+          "Notes Author Name,Notes Author Email,Notes Last Edited At",
+      );
+      expect(categoryBearing).toBe(
+        "2026-2027,1,JNV CoE,School One,SCH001,Student One,AF-41,11,Mentor One,mentor@example.com," +
+          "Phase 2,Check-in,active,completed,2026-07-01T10:00:00.000Z,Goal?,On track," +
+          "Subject/concept issues; Other,\"Time management & distractions; Wellness (health, sleep etc.)\"," +
+          "Mentor One,mentor@example.com,2026-07-01T11:00:00.000Z",
+      );
+    });
+
+    it("leaves both cells blank for pre-release Notes without Categories, Pending rows and Unassigned rows", () => {
+      const withoutCategories: HolisticProgressRow = { ...categoryBearingRow, challengeCategories: [] };
+      const pending: HolisticProgressRow = {
+        ...categoryBearingRow, studentId: 43, progress: "pending", completedAt: null, notesAuthor: null,
+        notesAuthorEmail: null, notesLastEditedAt: null, answers: [], challengeCategories: [],
+      };
+
+      const [, withoutCategoriesLine, pendingLine, unassignedLine] = formatHolisticProgressCsv(
+        "2026-2027", 1, [withoutCategories, pending, unassignedRow],
+      ).split("\r\n");
+
+      expect(withoutCategoriesLine).toBe(
+        "2026-2027,1,JNV CoE,School One,SCH001,Student One,AF-41,11,Mentor One,mentor@example.com," +
+          "Phase 2,Check-in,active,completed,2026-07-01T10:00:00.000Z,Goal?,On track,,," +
+          "Mentor One,mentor@example.com,2026-07-01T11:00:00.000Z",
+      );
+      expect(pendingLine).toBe(
+        "2026-2027,1,JNV CoE,School One,SCH001,Student One,AF-41,11,Mentor One,mentor@example.com," +
+          "Phase 2,Check-in,active,pending,,,,,,,,",
+      );
+      expect(unassignedLine).toBe("2026-2027,1,JNV CoE,School One,SCH001,Asha Rao,AF-52,11,,,,,,unassigned,,,,,,,,");
+    });
+  });
+
   describe("Unassigned CSV rows", () => {
     const unassignedRow: HolisticProgressRow = {
       progress: "unassigned",
@@ -487,8 +610,8 @@ describe("Holistic progress", () => {
       expect(formatHolisticProgressCsv("2026-2027", 1, [unassignedRow]).split("\r\n")).toEqual([
         "Academic Year,Program ID,Program Name,School,UDISE Code,Student Name,Student External ID," +
           "Grade,Mentor Name,Mentor Email,Phase,Phase Title,Availability,Progress,Completed At," +
-          "Notes Author Name,Notes Author Email,Notes Last Edited At",
-        "2026-2027,1,JNV CoE,School One,SCH001,Asha Rao,AF-52,11,,,,,,unassigned,,,,",
+          "Academic Challenges,Non-Academic Challenges,Notes Author Name,Notes Author Email,Notes Last Edited At",
+        "2026-2027,1,JNV CoE,School One,SCH001,Asha Rao,AF-52,11,,,,,,unassigned,,,,,,",
       ]);
     });
 
@@ -503,26 +626,29 @@ describe("Holistic progress", () => {
           { position: 1, question: "Goal?", answer: "On track" },
           { position: 2, question: "Next?", answer: "Practice" },
         ],
+        challengeCategories: [],
       };
 
       const [header, assigned, unassigned] = formatHolisticProgressCsv("2026-2027", 1, [assignedRow, unassignedRow])
         .split("\r\n");
 
-      expect(header).toContain("Completed At,Question 1,Answer 1,Question 2,Answer 2,Notes Author Name");
+      expect(header).toContain(
+        "Completed At,Question 1,Answer 1,Question 2,Answer 2,Academic Challenges,Non-Academic Challenges,Notes Author Name",
+      );
       expect(header).not.toContain("Question 3");
       expect(assigned).toBe(
         "2026-2027,1,JNV CoE,School One,SCH001,Student One,AF-41,11,Mentor One,mentor@example.com," +
-        "Phase 2,Check-in,active,completed,2026-07-01T10:00:00.000Z,Goal?,On track,Next?,Practice," +
+        "Phase 2,Check-in,active,completed,2026-07-01T10:00:00.000Z,Goal?,On track,Next?,Practice,,," +
         "Mentor One,mentor@example.com,2026-07-01T11:00:00.000Z",
       );
-      expect(unassigned).toBe("2026-2027,1,JNV CoE,School One,SCH001,Asha Rao,AF-52,11,,,,,,unassigned,,,,,,,,");
+      expect(unassigned).toBe("2026-2027,1,JNV CoE,School One,SCH001,Asha Rao,AF-52,11,,,,,,unassigned,,,,,,,,,,");
     });
 
     it("neutralizes a formula-leading Unassigned Student name", () => {
       const csv = formatHolisticProgressCsv("2026-2027", 1, [{ ...unassignedRow, studentName: "=HYPERLINK(\"x\")" }]);
 
       expect(csv.split("\r\n")[1]).toBe(
-        "2026-2027,1,JNV CoE,School One,SCH001,\"'=HYPERLINK(\"\"x\"\")\",AF-52,11,,,,,,unassigned,,,,",
+        "2026-2027,1,JNV CoE,School One,SCH001,\"'=HYPERLINK(\"\"x\"\")\",AF-52,11,,,,,,unassigned,,,,,,",
       );
     });
   });

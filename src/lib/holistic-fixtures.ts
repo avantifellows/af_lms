@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import type { PoolClient } from "pg";
 
-import { HOLISTIC_MENTORSHIP_PROGRAM_IDS, isPmuRole, PMU_PROGRAM_ID, PROGRAM_IDS } from "./constants";
+import { HOLISTIC_MENTORSHIP_PROGRAM_IDS, isAlumniRole, isPmuRole, PMU_PROGRAM_ID, PROGRAM_IDS } from "./constants";
 
 export const HOLISTIC_FIXTURE_MANIFEST = {
   academicYear: "2026-2027",
@@ -17,6 +17,10 @@ export const HOLISTIC_FIXTURE_MANIFEST = {
     "read_only",
     "pmu_manager",
     "pmu_govt_school_user",
+    "blended_mentor",
+    "blended_admin",
+    "blended_admin_read_only",
+    "alumni_manager",
   ],
   states: ["locked", "open", "active", "skipped", "pending", "completed"],
   content: ["mapping", "profile", "historical_notes", "draft_notes", "submitted_notes"],
@@ -214,7 +218,9 @@ export async function seedHolisticFixtures(
           ? [...HOLISTIC_MENTORSHIP_PROGRAM_IDS]
           : isPmuRole(role)
             ? [PMU_PROGRAM_ID]
-            : [programId],
+            : isAlumniRole(role)
+              ? []
+              : [programId],
         schoolCode,
         readOnly,
       ]
@@ -245,6 +251,39 @@ export async function seedHolisticFixtures(
   }
   await actor("e2e-pmu-manager@test.local", "pmu_manager", 1, false, jnvSchoolCode);
   await actor("e2e-pmu-govt-school-user@test.local", "pmu_govt_school_user", 1, false, jnvSchoolCode);
+  // The Alumni Manager persona has no Programs; it reaches the fixture School's alumni.
+  await actor("e2e-dev-alumni-manager@test.local", "alumni_manager", 1);
+
+  // Blended Learning Dev Login personas hold no School scope and no Programs.
+  for (const [email, label, role, readOnly] of [
+    ["e2e-blended-mentor@test.local", "Blended Mentor", "blended_mentor", false],
+    ["e2e-blended-admin@test.local", "Blended Admin", "blended_admin", false],
+    ["e2e-blended-admin-read-only@test.local", "Blended Admin Read Only", "blended_admin", true],
+  ] as const) {
+    await client.query(
+      `/* fixture_blended_actor */
+       WITH existing AS (
+         SELECT id FROM "user" WHERE LOWER(email) = LOWER($1) LIMIT 1
+       ), created AS (
+         INSERT INTO "user" (email, first_name, last_name, role, inserted_at, updated_at)
+         SELECT $1, 'Synthetic', $2, $3, now(), now() WHERE NOT EXISTS (SELECT 1 FROM existing)
+         RETURNING id
+       ), actor AS (
+         SELECT id FROM created UNION ALL SELECT id FROM existing LIMIT 1
+       ), permission AS (
+         INSERT INTO user_permission
+           (email, level, role, program_ids, school_codes, regions, full_name, read_only, user_id, revoked_at)
+         SELECT $1, 1, $3, '{}'::int[], NULL, NULL, CONCAT('Synthetic ', $2), $4, actor.id, NULL
+         FROM actor
+         ON CONFLICT (email) DO UPDATE SET level = EXCLUDED.level, role = EXCLUDED.role,
+           program_ids = EXCLUDED.program_ids, school_codes = EXCLUDED.school_codes,
+           regions = EXCLUDED.regions, read_only = EXCLUDED.read_only,
+           user_id = EXCLUDED.user_id, revoked_at = NULL
+       )
+       SELECT id FROM actor`,
+      [email, label, role, readOnly]
+    );
+  }
 
   for (const [userId, suffix] of [
     [mentorUserId, "ACTIVE"],
@@ -455,10 +494,12 @@ export async function seedHolisticFixtures(
 
   const completedPhaseId = phaseByPosition.get(1)!;
   const draftPhaseId = phaseByPosition.get(2)!;
+  const categorizedPhaseId = phaseByPosition.get(4)!;
   await client.query(
     `WITH source(student_id, phase_id, state, submitted_at, edited_at) AS (
        VALUES ($1::bigint, $2::bigint, 'submitted', '2026-06-05T00:05:00Z'::timestamptz, '2026-06-05T00:05:00Z'::timestamptz),
-              ($3::bigint, $4::bigint, 'draft', NULL::timestamptz, '2026-07-01T00:05:00Z'::timestamptz)
+              ($3::bigint, $4::bigint, 'draft', NULL::timestamptz, '2026-07-01T00:05:00Z'::timestamptz),
+              ($8::bigint, $9::bigint, 'submitted', '2026-07-02T00:05:00Z'::timestamptz, '2026-07-02T00:05:00Z'::timestamptz)
      ), notes AS (
        INSERT INTO holistic_mentorship_post_session_notes
          (student_id, phase_id, author_user_id, state, revision, first_drafted_at,
@@ -472,17 +513,30 @@ export async function seedHolisticFixtures(
      )
      INSERT INTO holistic_mentorship_post_session_answers
        (notes_id, question_id, answer, inserted_at, updated_at)
-     SELECT notes.id, CASE notes.phase_id WHEN $2 THEN $6::bigint ELSE $7::bigint END,
+     SELECT notes.id, CASE notes.phase_id WHEN $2 THEN $6::bigint WHEN $4 THEN $7::bigint ELSE $10::bigint END,
             'Synthetic mentoring note.', now(), now()
      FROM all_notes notes ON CONFLICT (notes_id, question_id) DO NOTHING`,
     [grade11[0].student_id, completedPhaseId, grade11[1].student_id, draftPhaseId,
-      mentorUserId, questionByPhase.get(completedPhaseId), questionByPhase.get(draftPhaseId)]
+      mentorUserId, questionByPhase.get(completedPhaseId), questionByPhase.get(draftPhaseId),
+      grade12[1].student_id, categorizedPhaseId, questionByPhase.get(categorizedPhaseId)]
+  );
+  // The Phase 1 Note stays without Challenge Categories (pre-release); the Grade 12 Phase 4 Note carries
+  // one Challenge Category per group so local, e2e and staging heatmaps are not empty.
+  await client.query(
+    `INSERT INTO holistic_mentorship_post_session_note_challenges
+       (notes_id, category_code, inserted_at, updated_at)
+     SELECT notes.id, code, now(), now()
+     FROM holistic_mentorship_post_session_notes notes
+     CROSS JOIN unnest($3::text[]) code
+     WHERE notes.student_id = $1 AND notes.phase_id = $2 AND notes.state = 'submitted'
+     ON CONFLICT (notes_id, category_code) DO NOTHING`,
+    [grade12[1].student_id, categorizedPhaseId, ["academic.exam_related", "non_academic.time_management"]]
   );
   await client.query(
     `UPDATE holistic_mentorship_phases SET frozen_at = COALESCE(frozen_at, '2026-06-05T00:00:00Z'),
        frozen_by_user_id = COALESCE(frozen_by_user_id, $2), updated_at = now()
      WHERE id = ANY($1::bigint[])`,
-    [[completedPhaseId, draftPhaseId], mentorUserId]
+    [[completedPhaseId, draftPhaseId, categorizedPhaseId], mentorUserId]
   );
 
   return {
@@ -494,7 +548,8 @@ export async function seedHolisticFixtures(
     profiles: 2,
     historicalNotes: programId === PROGRAM_IDS.COE ? 1 : 0,
     draftNotes: 1,
-    submittedNotes: 1,
+    submittedNotes: 2,
+    categorizedNotes: 1,
     phases: 6,
   };
 }

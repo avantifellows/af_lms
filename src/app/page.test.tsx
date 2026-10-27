@@ -75,6 +75,18 @@ describe("LoginPage", () => {
     expect(screen.getByText("Read-Only")).toBeInTheDocument();
     expect(screen.getByText("PMU Manager")).toBeInTheDocument();
     expect(screen.getByText("PMU Govt School User")).toBeInTheDocument();
+    expect(screen.getByText("Alumni Manager")).toBeInTheDocument();
+  });
+
+  it("signs in as an Alumni Manager persona via dev-login", async () => {
+    mockSignIn.mockResolvedValue({ ok: true });
+    const user = userEvent.setup();
+    render(<LoginPage />);
+    await user.click(screen.getByText("Alumni Manager"));
+    expect(mockSignIn).toHaveBeenCalledWith("dev-login", {
+      persona: "alumni_manager",
+      redirect: false,
+    });
   });
 
   it("signs in as a PMU Govt School User persona via dev-login", async () => {
@@ -86,6 +98,20 @@ describe("LoginPage", () => {
       persona: "pmu_govt_school_user",
       redirect: false,
     });
+  });
+
+  it("signs in as each Blended Learning persona via dev-login", async () => {
+    mockSignIn.mockResolvedValue({ ok: true });
+    const user = userEvent.setup();
+    render(<LoginPage />);
+    for (const [label, persona] of [
+      ["Blended Mentor", "blended_mentor"],
+      ["Blended Admin", "blended_admin"],
+      ["Blended Admin (Read-Only)", "blended_admin_read_only"],
+    ]) {
+      await user.click(screen.getByText(label));
+      expect(mockSignIn).toHaveBeenLastCalledWith("dev-login", { persona, redirect: false });
+    }
   });
 
   it("describes the Holistic Admin persona for all supported programs", () => {

@@ -57,6 +57,7 @@ export async function deleteHolisticStudentContent(params: {
     ok: true;
     profileSummariesErased: number;
     postSessionAnswersErased: number;
+    postSessionChallengesErased: number;
     historicalAnswersErased: number;
     followUpAnswersErased: number;
   }
@@ -105,17 +106,25 @@ export async function deleteHolisticStudentContent(params: {
        ) SELECT COUNT(*) AS count FROM erased`,
       [params.studentId]
     );
-    const notes = await client.query<{ count: number | string }>(
+    const notes = await client.query<{ answers: number | string; challenges: number | string }>(
       `WITH target_notes AS MATERIALIZED (
          SELECT notes.id FROM holistic_mentorship_post_session_notes notes
          WHERE notes.student_id = $1
-           AND EXISTS (SELECT 1 FROM holistic_mentorship_post_session_answers answer
-                       WHERE answer.notes_id = notes.id)
+           AND (EXISTS (SELECT 1 FROM holistic_mentorship_post_session_answers answer
+                        WHERE answer.notes_id = notes.id)
+             OR EXISTS (SELECT 1 FROM holistic_mentorship_post_session_note_challenges challenge
+                        WHERE challenge.notes_id = notes.id))
          FOR UPDATE OF notes
        ), erased_answers AS (
          DELETE FROM holistic_mentorship_post_session_answers answer
          USING target_notes WHERE answer.notes_id = target_notes.id
          RETURNING answer.notes_id
+       ), erased_challenges AS (
+         -- Challenge Categories are Notes content too; the tombstone counts them
+         -- separately so a Categories-only Note never reads as nothing erased.
+         DELETE FROM holistic_mentorship_post_session_note_challenges challenge
+         USING target_notes WHERE challenge.notes_id = target_notes.id
+         RETURNING challenge.notes_id
        ), updated_notes AS (
          UPDATE holistic_mentorship_post_session_notes notes
          SET revision = revision + 1, last_edited_at = now(), updated_at = now()
@@ -126,27 +135,30 @@ export async function deleteHolisticStudentContent(params: {
            (notes_id, actor_user_id, action, occurred_at, reason, inserted_at, updated_at)
          SELECT id, $2, 'privacy_content_erased', now(), $3, now(), now()
          FROM updated_notes RETURNING notes_id
-       ) SELECT COUNT(*) AS count FROM erased_answers`,
+       ) SELECT (SELECT COUNT(*) FROM erased_answers) AS answers,
+                (SELECT COUNT(*) FROM erased_challenges) AS challenges`,
       [params.studentId, actorUserId, params.reason]
     );
     const profileSummariesErased = Number(profiles.rows[0]?.count ?? 0);
-    const postSessionAnswersErased = Number(notes.rows[0]?.count ?? 0);
+    const postSessionAnswersErased = Number(notes.rows[0]?.answers ?? 0);
+    const postSessionChallengesErased = Number(notes.rows[0]?.challenges ?? 0);
     const historicalAnswersErased = Number(historicalNotes.rows[0]?.count ?? 0);
     await client.query(
       `INSERT INTO holistic_mentorship_privacy_deletions
          (student_id, actor_user_id, reason, profile_summaries_erased,
-          post_session_answers_erased, historical_answers_erased,
+          post_session_answers_erased, post_session_challenges_erased, historical_answers_erased,
           occurred_at, inserted_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, now(), now(), now())
+       VALUES ($1, $2, $3, $4, $5, $6, $7, now(), now(), now())
        ON CONFLICT (student_id) DO NOTHING`,
       [params.studentId, actorUserId, params.reason, profileSummariesErased,
-        postSessionAnswersErased, historicalAnswersErased]
+        postSessionAnswersErased, postSessionChallengesErased, historicalAnswersErased]
     );
     const followUpAnswersErased = await eraseFollowUpAnswers(client, { ...params, actorUserId });
     return {
       ok: true,
       profileSummariesErased,
       postSessionAnswersErased,
+      postSessionChallengesErased,
       historicalAnswersErased,
       followUpAnswersErased,
     };

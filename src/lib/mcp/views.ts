@@ -131,7 +131,7 @@ export const LMS_VIEWS: LmsView[] = [
       search: "optional — student name",
       page: "optional — 50 rows per page",
       include_notes:
-        "optional — 'true' returns the mentors' submitted note answers. Set it ONLY when the user explicitly asks to read note content; counts and progress never need it.",
+        "optional — 'true' returns the mentors' submitted note answers and Challenge Categories. Set it ONLY when the user explicitly asks to read note content; counts and progress never need it.",
     },
     feature: "holistic_mentorship",
     handler: handler(holisticProgress.GET),
@@ -143,9 +143,9 @@ export const LMS_VIEWS: LmsView[] = [
 export const NOTES_PARAM = "include_notes";
 
 // Mentor-authored session notes are sensitive: by default keep only how many
-// answers exist. The LMS route has already applied its own visibility rules
-// (draft privacy, program/school scope), so opting in shows only what the
-// user could read in the LMS.
+// answers exist; Challenge Categories are Notes content too. The LMS route has
+// already applied its own visibility rules (draft privacy, program/school
+// scope), so opting in shows only what the user could read in the LMS.
 function redactHolisticProgress(body: unknown, { includeNotes }: { includeNotes: boolean }): unknown {
   if (includeNotes) return body;
   if (!body || typeof body !== "object" || !("rows" in body) || !Array.isArray(body.rows)) return body;
@@ -154,6 +154,7 @@ function redactHolisticProgress(body: unknown, { includeNotes }: { includeNotes:
     rows: body.rows.map((row: Record<string, unknown>) => {
       if (!("answers" in row)) return row;
       const { answers, ...rest } = row;
+      delete rest.challengeCategories;
       return { ...rest, answersSubmitted: Array.isArray(answers) ? answers.length : 0 };
     }),
   };

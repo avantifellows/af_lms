@@ -7,15 +7,18 @@ import { PROGRAM_IDS } from "@/lib/constants";
 const {
   mockGetServerSession,
   mockGetUserPermission,
+  mockGetAlumniPermission,
   mockGetProgramContextSync,
   mockGetFeatureAccess,
   mockGetAccessibleSchoolCodes,
   mockQuery,
   mockRedirect,
   mockRequireHolisticAccess,
+  mockGetBlendedLearningAccess,
 } = vi.hoisted(() => ({
   mockGetServerSession: vi.fn(),
   mockGetUserPermission: vi.fn(),
+  mockGetAlumniPermission: vi.fn(),
   mockGetProgramContextSync: vi.fn(),
   mockGetFeatureAccess: vi.fn(),
   mockGetAccessibleSchoolCodes: vi.fn(),
@@ -24,6 +27,7 @@ const {
     throw new Error(`REDIRECT:${url}`);
   }),
   mockRequireHolisticAccess: vi.fn(),
+  mockGetBlendedLearningAccess: vi.fn(),
 }));
 
 vi.mock("next-auth", () => ({ getServerSession: mockGetServerSession }));
@@ -32,6 +36,7 @@ vi.mock("next/navigation", () => ({ redirect: mockRedirect }));
 vi.mock("@/lib/permissions", () => ({
   getUserPermission: mockGetUserPermission,
   getResolvedPermission: mockGetUserPermission,
+  getAlumniPermission: mockGetAlumniPermission,
   getProgramContextSync: mockGetProgramContextSync,
   getFeatureAccess: mockGetFeatureAccess,
   getAccessibleSchoolCodes: mockGetAccessibleSchoolCodes,
@@ -42,6 +47,9 @@ vi.mock("@/lib/permissions", () => ({
 vi.mock("@/lib/db", () => ({ query: mockQuery }));
 vi.mock("@/lib/holistic-mentorship", () => ({
   requireHolisticMentorshipAccess: mockRequireHolisticAccess,
+}));
+vi.mock("@/lib/blended-learning-access", () => ({
+  getBlendedLearningAccess: mockGetBlendedLearningAccess,
 }));
 vi.mock("next/link", () => ({
   __esModule: true,
@@ -346,6 +354,14 @@ describe("DashboardPage (server component)", () => {
   });
 
   // --- No permission ---
+
+  it("sends an Alumni Manager to /alumni (no dashboard for alumni roles)", async () => {
+    mockGetServerSession.mockResolvedValue(pmSession);
+    mockGetUserPermission.mockResolvedValue(null);
+    mockGetAlumniPermission.mockResolvedValue({ role: "alumni_manager" });
+
+    await expect(DashboardPage({ searchParams: defaultSearchParams })).rejects.toThrow("REDIRECT:/alumni");
+  });
 
   it("renders 'no access' message when user has no permission", async () => {
     mockGetServerSession.mockResolvedValue(pmSession);
@@ -694,6 +710,94 @@ describe("DashboardPage (server component)", () => {
       DashboardPage({ searchParams: defaultSearchParams })
     ).rejects.toThrow("REDIRECT:/admin/holistic-mentorship");
     expect(mockQuery).not.toHaveBeenCalled();
+  });
+
+  // --- Blended Learning roles ---
+
+  it.each([
+    ["blended_mentor", "mentor", false],
+    ["blended_admin", "admin", false],
+    ["blended_admin", "admin", true],
+  ] as const)(
+    "sends a %s (%s, read-only %s) to /blended-learning before any program-context check",
+    async (role, kind, readOnly) => {
+      mockGetServerSession.mockResolvedValue({ user: { email: "faizan@avantifellows.org" } });
+      // The shared lookup denies Blended Learning roles (no School, no Programs).
+      mockGetUserPermission.mockResolvedValue(null);
+      mockGetProgramContextSync.mockReturnValue(noProgramContext);
+      mockGetBlendedLearningAccess.mockResolvedValue({
+        kind,
+        role,
+        readOnly,
+        actorEmail: "faizan@avantifellows.org",
+        actorUserId: 9001,
+      });
+
+      await expect(
+        DashboardPage({ searchParams: defaultSearchParams })
+      ).rejects.toThrow("REDIRECT:/blended-learning");
+      expect(mockGetBlendedLearningAccess).toHaveBeenCalledWith("faizan@avantifellows.org");
+      expect(mockGetProgramContextSync).not.toHaveBeenCalled();
+      expect(mockQuery).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps an LMS admin on the dashboard and gives them Blended Learning as a third tab", async () => {
+    setupAdmin([], 0);
+    mockGetBlendedLearningAccess.mockResolvedValue({
+      kind: "admin",
+      role: "admin",
+      readOnly: false,
+      actorEmail: "admin@avantifellows.org",
+      actorUserId: 1,
+    });
+
+    render(await DashboardPage({ searchParams: defaultSearchParams }));
+
+    // One link only: the tab, after the two grouping tabs and in the same strip;
+    // the header no longer carries it.
+    const blended = screen.getByRole("link", { name: "Blended Learning" });
+    expect(blended).toHaveAttribute("href", "/blended-learning");
+    const strip = blended.parentElement!;
+    expect([...strip.querySelectorAll("a")].map((link) => link.textContent)).toEqual([
+      "Physical Centres",
+      "JNV NVS Schools",
+      "Blended Learning",
+    ]);
+    expect(screen.getByRole("banner")).not.toHaveTextContent("Blended Learning");
+  });
+
+  it("shows no Blended Learning tab to a Program Manager", async () => {
+    setupPM([], 0);
+
+    render(await DashboardPage({ searchParams: defaultSearchParams }));
+
+    expect(screen.queryByRole("link", { name: "Blended Learning" })).not.toBeInTheDocument();
+  });
+
+  it("gives a centre-confined user with Blended Learning their one view and the Blended Learning tab", async () => {
+    mockGetServerSession.mockResolvedValue(adminSession);
+    mockGetUserPermission.mockResolvedValue({ ...seatedPermission, email: "admin@avantifellows.org", role: "admin" });
+    mockGetProgramContextSync.mockReturnValue(defaultProgramContext);
+    mockGetFeatureAccess.mockReturnValue({ canView: false, canEdit: false });
+    mockGetAccessibleSchoolCodes.mockResolvedValue(["SC001", "SC002"]);
+    mockQuery.mockResolvedValue([]);
+    mockGetBlendedLearningAccess.mockResolvedValue({
+      kind: "admin",
+      role: "admin",
+      readOnly: false,
+      actorEmail: "admin@avantifellows.org",
+      actorUserId: 1,
+    });
+
+    render(await DashboardPage({ searchParams: Promise.resolve({ view: "centres" }) }));
+
+    const strip = screen.getByRole("link", { name: "Blended Learning" }).parentElement!;
+    expect([...strip.querySelectorAll("a")].map((link) => link.textContent)).toEqual([
+      "Physical Centres",
+      "Blended Learning",
+    ]);
+    expect(screen.queryByText("JNV NVS Schools")).not.toBeInTheDocument();
   });
 
   // --- PM nav links ---

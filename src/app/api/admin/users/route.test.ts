@@ -312,9 +312,102 @@ describe("POST /api/admin/users — PMU roles", () => {
     ]);
   });
 
+  it.each([
+    ["no program_ids", {}],
+    ["empty program_ids", { program_ids: [] }],
+    ["body program_ids", { program_ids: [1, 2] }],
+  ])("stores an alumni_manager with no programs given %s", async (_label, programs) => {
+    mockDb();
+    const res = await post({ role: "alumni_manager", level: 1, school_codes: ["JNV001"], ...programs });
+    expect(res.status).toBe(200);
+    expect(insertParams()).toEqual([
+      "pmu@example.com", 1, "alumni_manager", ["JNV001"], null, [], false, null,
+    ]);
+  });
+
+  it.each(["teacher", "program_manager", "program_admin", "admin"])(
+    "still requires programs for a %s",
+    async (role) => {
+      mockDb();
+      const res = await post({ role, level: 1, school_codes: ["JNV001"], program_ids: [] });
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toBe("At least one program must be assigned");
+      expect(insertParams()).toBeUndefined();
+    }
+  );
+
+  it("returns 409 when a seated person is added as an alumni_manager", async () => {
+    mockDb({ seats: [{ one: 1 }] });
+    const res = await post({ role: "alumni_manager", level: 1, school_codes: ["JNV001"], program_ids: [1] });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toMatch(/Alumni Manager/);
+    expect(insertParams()).toBeUndefined();
+  });
+
   it("returns 409 when the target already holds a centre seat", async () => {
     mockDb({ seats: [{ one: 1 }] });
     const res = await post({ role: "pmu_manager", level: 3 });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toMatch(/centre assignments/i);
+    expect(insertParams()).toBeUndefined();
+  });
+});
+
+describe("POST /api/admin/users — Blended Learning roles", () => {
+  function mockDb({ seats = [] as unknown[] } = {}) {
+    mockQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes("centre_positions")) return seats;
+      if (sql.includes("INSERT INTO user_permission")) return [{ id: 31 }];
+      return [];
+    });
+  }
+
+  function insertParams() {
+    const call = mockQuery.mock.calls.find(([sql]) =>
+      String(sql).includes("INSERT INTO user_permission")
+    );
+    return call?.[1];
+  }
+
+  async function post(body: Record<string, unknown>) {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockGetUserPermission.mockResolvedValue(ADMIN_PERMISSION);
+    const req = jsonRequest("http://localhost/api/admin/users", {
+      method: "POST",
+      body: { email: "faizan@avantifellows.org", ...body },
+    });
+    return POST(req as never);
+  }
+
+  it("stores a Blended Learning Mentor with no School scope and no Programs, whatever the body says", async () => {
+    mockDb();
+    const res = await post({
+      role: "blended_mentor",
+      level: 3,
+      school_codes: ["70705"],
+      regions: ["North"],
+      program_ids: [1, 64],
+      full_name: "Faizan",
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ id: 31, success: true });
+    expect(insertParams()).toEqual([
+      "faizan@avantifellows.org", 1, "blended_mentor", null, null, [], false, "Faizan",
+    ]);
+  });
+
+  it("stores a read-only Blended Learning Admin without program_ids in the body", async () => {
+    mockDb();
+    const res = await post({ role: "blended_admin", level: 1, read_only: true });
+    expect(res.status).toBe(200);
+    expect(insertParams()).toEqual([
+      "faizan@avantifellows.org", 1, "blended_admin", null, null, [], true, null,
+    ]);
+  });
+
+  it("returns 409 when the target already holds a centre seat", async () => {
+    mockDb({ seats: [{ one: 1 }] });
+    const res = await post({ role: "blended_mentor", level: 1 });
     expect(res.status).toBe(409);
     expect((await res.json()).error).toMatch(/centre assignments/i);
     expect(insertParams()).toBeUndefined();

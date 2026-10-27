@@ -103,6 +103,15 @@ export function getCmsTestId(meta: Record<string, unknown> | null | undefined): 
   return null;
 }
 
+// getCmsTestId as a SQL expression (bigint, or NULL) over a session meta_data column, for
+// set-based reads. Keep the two in step.
+export function cmsTestIdSql(metaData: string): string {
+  return `CASE
+    WHEN btrim(${metaData}->>'cms_test_id') ~ '^[0-9]+$' THEN btrim(${metaData}->>'cms_test_id')::bigint
+    WHEN btrim(${metaData}->>'cms_source_id') ~ '^[0-9]+$' THEN btrim(${metaData}->>'cms_source_id')::bigint
+  END`;
+}
+
 // Display label for a CMS quiz's language (session meta_data.lang_code). Unknown codes show as-is.
 const REGIONAL_LANGUAGE_NAMES: Record<string, string> = { hi: "Hindi", gu: "Gujarati", ta: "Tamil" };
 export function cmsQuizLanguageLabel(langCode: string | null | undefined): string {

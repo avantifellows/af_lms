@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Badge, Button } from "@/components/ui";
 import { CURRENT_ACADEMIC_YEAR, PROGRAM_IDS } from "@/lib/constants";
+import { downloadFile } from "@/lib/file-download";
 import type {
   HolisticAssignedProgressRow,
   HolisticProgressCoverage,
@@ -149,17 +150,8 @@ function useProgressExport(params: URLSearchParams, academicYear: string, progra
     setExporting(true);
     setExportError("");
     try {
-      const response = await fetch(`/api/holistic-mentorship/progress?${exportParams}`);
-      if (!response.ok) {
-        const body = await response.json().catch(() => null) as { error?: string } | null;
-        throw new Error(body?.error || `Unable to export progress (${response.status})`);
-      }
-      const downloadUrl = URL.createObjectURL(await response.blob());
-      const anchor = document.createElement("a");
-      anchor.href = downloadUrl;
-      anchor.download = `holistic-progress-${programId}-${academicYear}.csv`;
-      anchor.click();
-      URL.revokeObjectURL(downloadUrl);
+      await downloadFile(`/api/holistic-mentorship/progress?${exportParams}`, "Unable to export progress",
+        () => `holistic-progress-${programId}-${academicYear}.csv`);
     } catch (problem) {
       setExportError(problem instanceof Error ? problem.message : "Unable to export progress");
     } finally {

@@ -1000,6 +1000,48 @@ describe("getStudentSchool", () => {
   });
 });
 
+describe("isPmuOnlyStudent", () => {
+  let isPmuOnlyStudent: typeof import("./permissions").isPmuOnlyStudent;
+
+  beforeEach(async () => {
+    const mod = await import("./permissions");
+    isPmuOnlyStudent = mod.isPmuOnlyStudent;
+  });
+
+  it("is true for a Student whose only current batch is JNV NVS", async () => {
+    mockQuery.mockResolvedValueOnce([{ nvs: true, other: false }]);
+    expect(await isPmuOnlyStudent(42)).toBe(true);
+  });
+
+  it("is false for a Student who also sits in a physical-centre Program", async () => {
+    mockQuery.mockResolvedValueOnce([{ nvs: true, other: true }]);
+    expect(await isPmuOnlyStudent(42)).toBe(false);
+  });
+
+  it("is false for a physical-centre Student, and for one with no batch at all", async () => {
+    mockQuery.mockResolvedValueOnce([{ nvs: false, other: true }]);
+    expect(await isPmuOnlyStudent(42)).toBe(false);
+
+    mockQuery.mockResolvedValueOnce([{ nvs: false, other: false }]);
+    expect(await isPmuOnlyStudent(42)).toBe(false);
+  });
+
+  it("is false for a Student id that matches no row", async () => {
+    mockQuery.mockResolvedValueOnce([]);
+    expect(await isPmuOnlyStudent(999)).toBe(false);
+  });
+
+  it("asks for current batches in the trusted PMU program id, never input", async () => {
+    mockQuery.mockResolvedValueOnce([]);
+    await isPmuOnlyStudent(42);
+    const [sql, params] = mockQuery.mock.calls[0];
+    expect(sql).toContain(`b_nvs.program_id = ${PMU_PROGRAM_ID}`);
+    expect(sql).toContain(`b_other.program_id IS DISTINCT FROM ${PMU_PROGRAM_ID}`);
+    expect(sql).toContain("er_other.is_current = true");
+    expect(params).toEqual([42]);
+  });
+});
+
 describe("canAccessStudent", () => {
   let canAccessStudent: typeof import("./permissions").canAccessStudent;
 
@@ -1391,4 +1433,22 @@ describe("PMU roles (JNV NVS pinned)", () => {
       });
     }
   });
+});
+
+describe("alumni feature (admin-only first release)", () => {
+  it("gives admins edit and read-only admins view", () => {
+    expect(getFeatureAccess(makePermission({ role: "admin", level: 3 }), "alumni")).toEqual({
+      access: "edit",
+      canView: true,
+      canEdit: true,
+    });
+    expect(getFeatureAccess(makePermission({ role: "admin", level: 3, read_only: true }), "alumni").access).toBe("view");
+  });
+
+  it.each(["teacher", "program_manager", "program_admin", "holistic_mentorship_admin", "pmu_manager", "pmu_govt_school_user"] as const)(
+    "gives %s no alumni access, even at level 3",
+    (role) => {
+      expect(getFeatureAccess(makePermission({ role, level: 3 }), "alumni").access).toBe("none");
+    },
+  );
 });

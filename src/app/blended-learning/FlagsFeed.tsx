@@ -1,0 +1,152 @@
+import { ArrowUpRight } from "lucide-react";
+import Link from "next/link";
+
+import type { FlagCard, FlagsPage } from "@/lib/blended-learning-flags";
+import { formatCalendarDate } from "@/lib/blended-learning-format";
+import type { FlagRecipient } from "@/lib/blended-learning-mentee-detail";
+
+import { FlagsFilters } from "./FlagsFilters";
+import { ConversationNotes } from "./students/[id]/ConversationNotes";
+import { FLAG_RECIPIENT } from "./students/[id]/flagRecipients";
+
+// The Flags tab: a read-only feed of Mentor Flags, newest first, filtered
+// through the URL and applied as soon as a filter changes. An admin sees every
+// flag, filtered by Mentor and Flag Recipient; a Mentor only their own
+// Students' flags (`ownStudents`), by Flag Recipient, without Mentor names. Flags raised since the viewer's previous visit are
+// marked New; the filters and page links carry the visit's cutoff (`since`),
+// so they stay New for the whole visit.
+
+export type FlagsView = {
+  page: FlagsPage;
+  mentors: { mentorUserId: number; name: string }[];
+  // A Mentor's own feed: no Mentor filter or names.
+  ownStudents: boolean;
+  mentorUserId: number | null;
+  recipient: FlagRecipient | null;
+  cursor: number | null;
+  // The visit's cutoff as a URL value (flagsCutoffParam).
+  since: string;
+};
+
+const linkClass =
+  "inline-flex min-h-11 items-center text-sm font-bold text-accent underline-offset-2 hover:text-accent-hover hover:underline";
+
+function feedHref(view: FlagsView, cursor: number | null): string {
+  const params = new URLSearchParams({ tab: "flags", since: view.since });
+  if (view.mentorUserId !== null) params.set("mentor", String(view.mentorUserId));
+  if (view.recipient) params.set("recipient", view.recipient);
+  if (cursor !== null) params.set("cursor", String(cursor));
+  return `/blended-learning?${params}`;
+}
+
+function FlagCardView({ flag, ownStudents }: { flag: FlagCard; ownStudents: boolean }) {
+  const meta = [flag.grade === null ? null : `Grade ${flag.grade}`, flag.programName, flag.gender].filter(Boolean);
+  return (
+    <article
+      className={`space-y-2 rounded-lg border bg-bg-card p-4 shadow-sm ${
+        flag.isNew ? "border-l-4 border-accent" : "border-border"
+      }`}
+    >
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <h3 className="min-w-0 break-words font-bold text-text-primary">
+          {/* A Student without an active Mapping has no page to open. */}
+          {/* The arrow says the name opens the Student's page; the name alone is the link's name. */}
+          {flag.inScope ? (
+            <Link
+              href={`/blended-learning/students/${flag.studentId}?from=flags`}
+              className="inline-flex items-center gap-1 hover:text-accent hover:underline"
+            >
+              {flag.name}
+              <ArrowUpRight aria-hidden="true" className="h-4 w-4 shrink-0" />
+            </Link>
+          ) : (
+            flag.name
+          )}
+        </h3>
+        <div className="flex flex-wrap items-center gap-2">
+          {flag.isNew && (
+            <span className="rounded-full bg-accent px-2 py-0.5 text-xs font-bold text-text-on-accent">New</span>
+          )}
+          <span className="rounded-lg bg-danger-bg px-2.5 py-1 text-xs font-bold text-danger">
+            {FLAG_RECIPIENT[flag.recipient]}
+          </span>
+        </div>
+      </div>
+      {meta.length > 0 && <p className="text-sm text-text-secondary">{meta.join(" · ")}</p>}
+      <p className="text-sm text-text-secondary">
+        {formatCalendarDate(flag.occurredOn)}
+        {!ownStudents && ` · ${flag.mentorName}`}
+      </p>
+      {flag.comment && (
+        <p className="whitespace-pre-line break-words border-l-2 border-danger pl-3 text-sm text-text-primary">
+          {flag.comment}
+        </p>
+      )}
+      <div className="flex flex-wrap items-center gap-x-6">
+        {flag.phone ? (
+          <a href={`tel:${flag.phone}`} className={`${linkClass} font-mono`}>
+            {flag.phone}
+          </a>
+        ) : (
+          <span className="text-sm text-text-muted">No contact number</span>
+        )}
+        {flag.whatsappPhone && <span className="font-mono text-sm text-text-secondary">WhatsApp {flag.whatsappPhone}</span>}
+        {flag.profileDocUrl && (
+          <a href={flag.profileDocUrl} target="_blank" rel="noopener noreferrer" className={linkClass}>
+            Profile Doc
+          </a>
+        )}
+        {flag.screenerUrl && (
+          <a href={flag.screenerUrl} target="_blank" rel="noopener noreferrer" className={linkClass}>
+            Screener Link
+          </a>
+        )}
+      </div>
+      {flag.hasNotes && flag.inScope && <ConversationNotes conversationId={flag.conversationId} label="Session Notes" />}
+    </article>
+  );
+}
+
+export function FlagsFeed({ view }: { view: FlagsView }) {
+  const { flags, nextCursor } = view.page;
+  const filtered = view.mentorUserId !== null || view.recipient !== null;
+  return (
+    <section aria-label="Mentor Flags" className="space-y-4">
+      <FlagsFilters
+        filters={{
+          mentors: view.ownStudents ? null : view.mentors,
+          mentorUserId: view.mentorUserId,
+          recipient: view.recipient,
+          since: view.since,
+        }}
+      />
+      {/* Filters apply without a page load, so announce what the feed now holds. */}
+      <p role="status" className="sr-only">
+        {flags.length === 0 ? "" : `Showing ${flags.length} Mentor ${flags.length === 1 ? "Flag" : "Flags"}`}
+      </p>
+      {flags.length === 0 ? (
+        <p role="status" className="rounded-lg border border-border bg-bg-card p-4 text-sm text-text-secondary shadow-sm sm:p-6">
+          {filtered ? "No Mentor Flags match these filters." : "No Mentor Flags yet."}
+        </p>
+      ) : (
+        <ol className="space-y-3">
+          {flags.map((flag) => (
+            <li key={flag.id}>
+              <FlagCardView flag={flag} ownStudents={view.ownStudents} />
+            </li>
+          ))}
+        </ol>
+      )}
+      {(view.cursor !== null || nextCursor !== null) && (
+        <nav aria-label="Flag pages" className="flex flex-wrap justify-between gap-3">
+          {view.cursor !== null ? <Link href={feedHref(view, null)} className={linkClass}>Newest flags</Link> : <span />}
+          {nextCursor !== null && (
+            <Link href={feedHref(view, nextCursor)} className={linkClass}>
+              Older flags
+            </Link>
+          )}
+        </nav>
+      )}
+    </section>
+  );
+}

@@ -105,6 +105,32 @@ const followUpNotes: OpenPhase["followUpNotes"] = [
   },
 ];
 
+const categoryGroup = (name: "Academic" | "Non-academic") =>
+  screen.getByRole("group", { name: `${name} Challenge Categories` });
+const categoryBox = (group: "Academic" | "Non-academic", label: string) =>
+  within(categoryGroup(group)).getByRole("checkbox", { name: label });
+
+function tickBothCategoryGroups() {
+  fireEvent.click(categoryBox("Academic", "Exam/Test related issues"));
+  fireEvent.click(categoryBox("Non-academic", "No major issue reported"));
+}
+
+// Current prod wording: each group sits above its matching Question.
+const prodWordingDetail = (notes: OpenPhase["notes"] = null): HolisticStudentPhaseDetail => {
+  const detail = teacherDetail(notes);
+  Object.assign(detail.selectedPhase, {
+    questions: [
+      { questionId: 91, text: "Describe the academic challenges the student shared", position: 1 },
+      { questionId: 92, text: "Describe any non-academic challenges the student shared", position: 2 },
+      { questionId: 93, text: "What will you try next?", position: 3 },
+    ],
+  });
+  return detail;
+};
+
+const follows = (earlier: Element, later: Element) =>
+  Boolean(earlier.compareDocumentPosition(later) & Node.DOCUMENT_POSITION_FOLLOWING);
+
 describe("StudentPhaseWorkspace", () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -167,6 +193,46 @@ describe("StudentPhaseWorkspace", () => {
     expect(selectedTab).toHaveAttribute("aria-selected", "true");
     expect(selectedTab.className).toContain("border-accent");
     expect(screen.getByRole("tab", { name: /Phase 5/ })).toHaveAttribute("aria-selected", "false");
+  });
+
+  it("moves between enabled Phase tabs with the arrow, Home, and End keys", () => {
+    const base = adminDetail();
+    render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={{
+      ...base,
+      phases: [
+        ...base.phases,
+        { phaseId: 74, number: 7, title: "Looking ahead", locked: false, active: false, progress: "pending", draftSaved: false, grade: 12, academicYear: "2026-2027" },
+        { phaseId: 75, number: 8, title: "Wrap-up", locked: true },
+      ],
+    }} />);
+    // Swallow the tab Link navigation; record which tab the keyboard activated.
+    const clicked: string[] = [];
+    const swallow = (event: MouseEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      clicked.push((event.target as HTMLElement).closest('[role="tab"]')?.textContent ?? "");
+    };
+    document.addEventListener("click", swallow, true);
+    const tablist = screen.getByRole("tablist", { name: "Holistic Phases" });
+    const tab = (number: number) => screen.getByRole("tab", { name: new RegExp(`Phase ${number}`) });
+
+    try {
+      // No tab focused yet: start from the selected Phase 6.
+      fireEvent.keyDown(tablist, { key: "ArrowRight" });
+      expect(tab(7)).toHaveFocus();
+      fireEvent.keyDown(tab(7), { key: "ArrowRight" });
+      expect(tab(5)).toHaveFocus();
+      fireEvent.keyDown(tab(5), { key: "ArrowLeft" });
+      expect(tab(7)).toHaveFocus();
+      fireEvent.keyDown(tab(7), { key: "Home" });
+      expect(tab(5)).toHaveFocus();
+      fireEvent.keyDown(tab(5), { key: "End" });
+      expect(tab(7)).toHaveFocus();
+      fireEvent.keyDown(tab(7), { key: "Enter" });
+      expect(clicked).toEqual(["Phase 7Open", "Phase 5Completed", "Phase 7Open", "Phase 5Completed", "Phase 7Open"]);
+    } finally {
+      document.removeEventListener("click", swallow, true);
+    }
   });
 
   it.each(["school", "school-progress"] as const)("preserves %s while an Admin changes Phase", (source) => {
@@ -389,8 +455,10 @@ describe("StudentPhaseWorkspace", () => {
     expect(screen.getByRole("textbox", { name: "What helped?" })).toHaveValue("Saved draft answer");
     expect(screen.getByText("Prep material stays read-only. Complete Notes after the offline conversation."))
       .toBeInTheDocument();
-    expect(screen.getByText("All answers are required before submission.")).toBeInTheDocument();
-    expect(screen.getAllByText("*")).toHaveLength(1);
+    expect(screen.getByText("All answers and a Challenge Category in each group are required before submission."))
+      .toBeInTheDocument();
+    // One Question plus the two Challenge Category groups.
+    expect(screen.getAllByText("*")).toHaveLength(3);
     expect(screen.getByText("Saved")).toBeInTheDocument();
   });
 
@@ -575,6 +643,7 @@ describe("StudentPhaseWorkspace", () => {
       firstSubmittedAt: "2026-07-02T00:00:00Z",
       lastEditedAt: "2026-07-02T00:00:00Z",
       answers: [{ questionId: 91, question: "What helped?", answer: "First answer" }],
+      challengeCategories: ["academic.other", "non_academic.other"],
     });
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ revision: 4 }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
@@ -611,6 +680,7 @@ describe("StudentPhaseWorkspace", () => {
       firstSubmittedAt: "2026-07-02T00:00:00Z",
       lastEditedAt: "2026-07-02T00:00:00Z",
       answers: [{ questionId: 91, question: "What helped?", answer: "First answer" }],
+      challengeCategories: ["academic.other", "non_academic.other"],
     });
     let finishEdit!: (response: Response) => void;
     const editResponse = new Promise<Response>((resolve) => { finishEdit = resolve; });
@@ -741,6 +811,7 @@ describe("StudentPhaseWorkspace", () => {
       firstSubmittedAt: "2026-07-02T00:00:00Z",
       lastEditedAt: "2026-07-02T00:00:00Z",
       answers: [{ questionId: 91, question: "What helped?", answer: "First answer" }],
+      challengeCategories: ["academic.other", "non_academic.other"],
     });
     const navigation = stubBrowserNavigation();
     vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
@@ -804,6 +875,7 @@ describe("StudentPhaseWorkspace", () => {
 
     fireEvent.change(screen.getByRole("textbox", { name: "What helped?" }), { target: { value: "A plan" } });
     fireEvent.change(screen.getByRole("textbox", { name: "What happens next?" }), { target: { value: "Review it" } });
+    tickBothCategoryGroups();
     fireEvent.click(screen.getByRole("button", { name: "Submit Notes" }));
 
     await screen.findByText("Notes submitted. Phase completed.");
@@ -825,6 +897,7 @@ describe("StudentPhaseWorkspace", () => {
 
     const textbox = screen.getByRole("textbox", { name: "What helped?" });
     fireEvent.change(textbox, { target: { value: "Stable final answer" } });
+    tickBothCategoryGroups();
     fireEvent.click(screen.getByRole("button", { name: "Submit Notes" }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
@@ -920,6 +993,334 @@ describe("StudentPhaseWorkspace", () => {
 
     expect(screen.getByText("Could not save Notes")).toBeInTheDocument();
     expect(textbox).toHaveValue("Keep this answer");
+  });
+
+  describe("Challenge Categories", () => {
+    const okResponse = (revision: number) => new Response(JSON.stringify({ revision }), { status: 200 });
+    const submittedNotes = (challengeCategories: string[]): OpenPhase["notes"] => ({
+      state: "submitted",
+      revision: 3,
+      authorName: "Anita Sharma",
+      firstSubmittedAt: "2026-07-02T00:00:00Z",
+      lastEditedAt: "2026-07-02T00:00:00Z",
+      answers: [{ questionId: 91, question: "What helped?", answer: "A plan" }],
+      challengeCategories: challengeCategories as NonNullable<OpenPhase["notes"]>["challengeCategories"],
+    });
+
+    it("places each group directly above its matching Question", () => {
+      render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={prodWordingDetail()} />);
+
+      const academicQuestion = screen.getByRole("textbox", { name: /Describe the academic challenges/ });
+      const nonAcademicQuestion = screen.getByRole("textbox", { name: /Describe any non-academic challenges/ });
+      const lastQuestion = screen.getByRole("textbox", { name: "What will you try next?" });
+      expect(follows(categoryGroup("Academic"), academicQuestion)).toBe(true);
+      expect(follows(academicQuestion, categoryGroup("Non-academic"))).toBe(true);
+      expect(follows(categoryGroup("Non-academic"), nonAcademicQuestion)).toBe(true);
+      expect(follows(nonAcademicQuestion, lastQuestion)).toBe(true);
+      const controls = screen.getAllByRole("group").concat(screen.getAllByRole("textbox"))
+        .sort((a, b) => (follows(a, b) ? -1 : 1));
+      expect(controls.indexOf(categoryGroup("Academic"))).toBe(controls.indexOf(academicQuestion) - 1);
+      expect(controls.indexOf(categoryGroup("Non-academic"))).toBe(controls.indexOf(nonAcademicQuestion) - 1);
+      expect(screen.queryByRole("heading", { name: "Challenge Categories" })).not.toBeInTheDocument();
+      expect(within(categoryGroup("Academic")).getAllByRole("checkbox").map((box) => box.closest("label")?.textContent))
+        .toEqual([
+          "Subject/concept issues", "Backlogs, revision & workload", "Exam/Test related issues",
+          "Test performance & preparation", "Other", "No major issue reported",
+        ]);
+      expect(within(categoryGroup("Non-academic")).getAllByRole("checkbox")).toHaveLength(10);
+    });
+
+    it("shows unmatched groups in a trailing Challenge Categories block after the last Question", () => {
+      render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={teacherDetail()} />);
+
+      const heading = screen.getByRole("heading", { name: "Challenge Categories" });
+      expect(follows(screen.getByRole("textbox", { name: "What helped?" }), heading)).toBe(true);
+      expect(follows(heading, categoryGroup("Academic"))).toBe(true);
+      expect(follows(categoryGroup("Academic"), categoryGroup("Non-academic"))).toBe(true);
+    });
+
+    it("keeps No major issue reported exclusive within each group", () => {
+      render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={prodWordingDetail()} />);
+
+      fireEvent.click(categoryBox("Academic", "Subject/concept issues"));
+      fireEvent.click(categoryBox("Non-academic", "Financial challenges"));
+      fireEvent.click(categoryBox("Academic", "No major issue reported"));
+      expect(categoryBox("Academic", "Subject/concept issues")).not.toBeChecked();
+      expect(categoryBox("Academic", "No major issue reported")).toBeChecked();
+      expect(categoryBox("Non-academic", "Financial challenges")).toBeChecked();
+
+      fireEvent.click(categoryBox("Non-academic", "No major issue reported"));
+      expect(categoryBox("Non-academic", "Financial challenges")).not.toBeChecked();
+      fireEvent.click(categoryBox("Non-academic", "Career uncertainty"));
+      expect(categoryBox("Non-academic", "No major issue reported")).not.toBeChecked();
+      expect(categoryBox("Non-academic", "Career uncertainty")).toBeChecked();
+      expect(categoryBox("Academic", "No major issue reported")).toBeChecked();
+    });
+
+    it("autosaves a Categories-only draft with the answers", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(okResponse(1));
+      vi.stubGlobal("fetch", fetchMock);
+      render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={prodWordingDetail()} />);
+      vi.useFakeTimers();
+
+      fireEvent.click(categoryBox("Non-academic", "Financial challenges"));
+      fireEvent.click(categoryBox("Academic", "Other"));
+      await act(async () => vi.advanceTimersByTimeAsync(750));
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({
+        action: "draft",
+        answers: [
+          { question_id: 91, answer: "" },
+          { question_id: 92, answer: "" },
+          { question_id: 93, answer: "" },
+        ],
+        challenge_categories: ["academic.other", "non_academic.financial"],
+      });
+      expect(screen.getByText("Saved")).toBeInTheDocument();
+    });
+
+    it("sends the current Categories with every answer autosave", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(okResponse(1));
+      vi.stubGlobal("fetch", fetchMock);
+      render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={teacherDetail()} />);
+      vi.useFakeTimers();
+
+      fireEvent.change(screen.getByRole("textbox", { name: "What helped?" }), { target: { value: "A plan" } });
+      await act(async () => vi.advanceTimersByTimeAsync(750));
+
+      expect(JSON.parse(fetchMock.mock.calls[0][1].body).challenge_categories).toEqual([]);
+    });
+
+    it("restores saved draft Categories after the page reloads", () => {
+      render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={prodWordingDetail({
+        state: "draft", revision: 2, authorName: null, firstSubmittedAt: null,
+        lastEditedAt: "2026-07-02T00:00:00Z", answers: [],
+        challengeCategories: ["academic.backlogs_workload", "non_academic.wellness"],
+      })} />);
+
+      expect(categoryBox("Academic", "Backlogs, revision & workload")).toBeChecked();
+      expect(categoryBox("Non-academic", "Wellness (health, sleep etc.)")).toBeChecked();
+      expect(categoryBox("Academic", "Other")).not.toBeChecked();
+    });
+
+    it("blocks Submit with a message naming the empty group, then submits both groups", async () => {
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(okResponse(1))
+        .mockResolvedValueOnce(okResponse(2))
+        .mockResolvedValue(new Response("{}", { status: 404 }));
+      vi.stubGlobal("fetch", fetchMock);
+      vi.spyOn(window, "confirm").mockReturnValue(true);
+      render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={teacherDetail()} />);
+
+      fireEvent.change(screen.getByRole("textbox", { name: "What helped?" }), { target: { value: "A plan" } });
+      fireEvent.click(categoryBox("Academic", "Exam/Test related issues"));
+      fireEvent.click(screen.getByRole("button", { name: "Submit Notes" }));
+
+      const message = screen.getByText("Choose at least one Non-academic Challenge Category");
+      expect(categoryGroup("Non-academic")).toHaveAttribute("aria-invalid", "true");
+      expect(categoryGroup("Non-academic")).toHaveAttribute("aria-describedby", message.id);
+      expect(categoryGroup("Academic")).not.toHaveAttribute("aria-describedby");
+      expect(within(categoryGroup("Non-academic")).getAllByRole("checkbox")[0]).toHaveFocus();
+      expect(fetchMock).not.toHaveBeenCalled();
+
+      fireEvent.click(categoryBox("Non-academic", "Adjustment difficulties"));
+      expect(screen.queryByText("Choose at least one Non-academic Challenge Category")).not.toBeInTheDocument();
+      expect(categoryGroup("Non-academic")).not.toHaveAttribute("aria-invalid", "true");
+      fireEvent.click(screen.getByRole("button", { name: "Submit Notes" }));
+
+      await screen.findByText("Notes submitted. Phase completed.");
+      expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toMatchObject({
+        action: "submit",
+        challenge_categories: ["academic.exam_related", "non_academic.adjustment"],
+      });
+      const section = screen.getByRole("region", { name: "Challenge Categories" });
+      expect(within(section).getByRole("list", { name: "Academic" })).toHaveTextContent("Exam/Test related issues");
+      expect(within(section).getByRole("list", { name: "Non-academic" })).toHaveTextContent("Adjustment difficulties");
+    });
+
+    it("names both groups when neither has a Category", () => {
+      vi.stubGlobal("fetch", vi.fn());
+      render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={teacherDetail()} />);
+
+      fireEvent.change(screen.getByRole("textbox", { name: "What helped?" }), { target: { value: "A plan" } });
+      fireEvent.click(screen.getByRole("button", { name: "Submit Notes" }));
+
+      const message = screen.getByText("Choose at least one Academic and one Non-academic Challenge Category");
+      expect(categoryGroup("Academic")).toHaveAttribute("aria-describedby", message.id);
+      expect(categoryGroup("Non-academic")).toHaveAttribute("aria-describedby", message.id);
+    });
+
+    it("shows the server's Category message when Submit reaches it", async () => {
+      vi.stubGlobal("fetch", vi.fn()
+        .mockResolvedValueOnce(okResponse(1))
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          error: "Choose at least one Academic and one Non-academic Challenge Category",
+        }), { status: 422 })));
+      vi.spyOn(window, "confirm").mockReturnValue(true);
+      render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={teacherDetail()} />);
+
+      fireEvent.change(screen.getByRole("textbox", { name: "What helped?" }), { target: { value: "A plan" } });
+      tickBothCategoryGroups();
+      fireEvent.click(screen.getByRole("button", { name: "Submit Notes" }));
+
+      expect(await screen.findByText("Choose at least one Academic and one Non-academic Challenge Category"))
+        .toBeInTheDocument();
+    });
+
+    it("lists submitted Categories by group on the Mentor's submitted view", () => {
+      render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={teacherDetail(
+        submittedNotes(["academic.subject_concept", "academic.other", "non_academic.no_major_issue"])
+      )} />);
+
+      const section = screen.getByRole("region", { name: "Challenge Categories" });
+      expect(within(within(section).getByRole("list", { name: "Academic" })).getAllByRole("listitem")
+        .map((item) => item.textContent)).toEqual(["Subject/concept issues", "Other"]);
+      expect(within(within(section).getByRole("list", { name: "Non-academic" })).getAllByRole("listitem")
+        .map((item) => item.textContent)).toEqual(["No major issue reported"]);
+      expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    });
+
+    it("shows Categories not recorded for a submitted Note without Category rows", () => {
+      render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027"
+        detail={teacherDetail(submittedNotes([]))} />);
+
+      const section = screen.getByRole("region", { name: "Challenge Categories" });
+      expect(section).toHaveTextContent("Categories not recorded");
+      expect(within(section).queryByRole("list")).not.toBeInTheDocument();
+    });
+
+    it("requires both groups before saving an edit to a pre-release submitted Note", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(okResponse(4));
+      vi.stubGlobal("fetch", fetchMock);
+      vi.spyOn(window, "confirm").mockReturnValue(true);
+      render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027"
+        detail={teacherDetail(submittedNotes([]))} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Edit Notes" }));
+      fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+      expect(screen.getByText("Choose at least one Academic and one Non-academic Challenge Category"))
+        .toBeInTheDocument();
+      fireEvent.click(categoryBox("Academic", "Backlogs, revision & workload"));
+      fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+      expect(screen.getByText("Choose at least one Non-academic Challenge Category")).toBeInTheDocument();
+      expect(fetchMock).not.toHaveBeenCalled();
+
+      fireEvent.click(categoryBox("Non-academic", "Career uncertainty"));
+      await act(async () => fireEvent.click(screen.getByRole("button", { name: "Save Changes" })));
+
+      expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({
+        action: "edit",
+        challenge_categories: ["academic.backlogs_workload", "non_academic.career_uncertainty"],
+      });
+      expect(await screen.findByText("Submitted Notes updated.")).toBeInTheDocument();
+      expect(within(screen.getByRole("region", { name: "Challenge Categories" }))
+        .getByRole("list", { name: "Non-academic" })).toHaveTextContent("Career uncertainty");
+    });
+  });
+
+  describe("Challenge Categories on read-only surfaces", () => {
+    type Codes = NonNullable<OpenPhase["notes"]>["challengeCategories"];
+    const listLabels = (section: HTMLElement, group: "Academic" | "Non-academic") =>
+      within(within(section).getByRole("list", { name: group })).getAllByRole("listitem")
+        .map((item) => item.textContent);
+    const adminSubmittedNotes = (challengeCategories: string[]): OpenPhase["notes"] => ({
+      state: "submitted",
+      revision: 3,
+      authorName: "Divya Menon",
+      firstSubmittedAt: "2026-07-14T09:48:00Z",
+      lastEditedAt: "2026-07-14T09:48:00Z",
+      answers: [{ questionId: 91, question: "Which decision is the student working through?", answer: "Comparing pathways" }],
+      challengeCategories: challengeCategories as Codes,
+    });
+    const notesContext = (challengeCategories: string[]): OpenPhase["context"] => ({
+      label: "From Phase 5 - Reconnecting",
+      items: [{ label: "What changed?", content: "More settled" }],
+      lastUpdatedAt: "2026-07-13T00:00:00Z",
+      challengeCategories: challengeCategories as Codes,
+    });
+    const mentorDetail = (context: OpenPhase["context"]) => {
+      const detail = teacherDetail();
+      Object.assign(detail.selectedPhase, { context });
+      return detail;
+    };
+
+    it.each(["holistic_mentorship_admin", "program_manager"])(
+      "lists submitted Notes' Categories by group in the read-only view for %s",
+      (viewerRole) => {
+        render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" viewerRole={viewerRole}
+          detail={adminDetail({
+            notes: adminSubmittedNotes(["non_academic.financial", "academic.test_preparation", "non_academic.wellness"]),
+          })} />);
+
+        const section = screen.getByRole("region", { name: "Challenge Categories" });
+        expect(listLabels(section, "Academic")).toEqual(["Test performance & preparation"]);
+        expect(listLabels(section, "Non-academic")).toEqual(["Wellness (health, sleep etc.)", "Financial challenges"]);
+        expect(follows(screen.getByText("Comparing pathways"), section)).toBe(true);
+      },
+    );
+
+    it("shows Categories not recorded for a pre-release submitted Note in the read-only view", () => {
+      render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027"
+        detail={adminDetail({ notes: adminSubmittedNotes([]) })} />);
+
+      const section = screen.getByRole("region", { name: "Challenge Categories" });
+      expect(section).toHaveTextContent("Categories not recorded");
+      expect(within(section).queryByRole("list")).not.toBeInTheDocument();
+    });
+
+    it("shows no Categories while the read-only view is Pending", () => {
+      render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={adminDetail()} />);
+
+      expect(screen.queryByRole("region", { name: "Challenge Categories" })).not.toBeInTheDocument();
+    });
+
+    it("shows the earlier Notes' Categories in the Mentor's Student Context", () => {
+      render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027"
+        detail={mentorDetail(notesContext(["academic.backlogs_workload", "non_academic.no_major_issue"]))} />);
+
+      const context = screen.getByRole("region", { name: "Student Context" });
+      const section = within(context).getByRole("region", { name: "Challenge Categories" });
+      expect(listLabels(section, "Academic")).toEqual(["Backlogs, revision & workload"]);
+      expect(listLabels(section, "Non-academic")).toEqual(["No major issue reported"]);
+      expect(follows(within(context).getByText("More settled"), section)).toBe(true);
+    });
+
+    it("shows Categories not recorded when the Mentor's context Notes have no Category rows", () => {
+      render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027"
+        detail={mentorDetail(notesContext([]))} />);
+
+      const context = screen.getByRole("region", { name: "Student Context" });
+      expect(within(context).getByRole("region", { name: "Challenge Categories" }))
+        .toHaveTextContent("Categories not recorded");
+    });
+
+    it("shows the earlier Notes' Categories in the read-only Student Context", () => {
+      render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" viewerRole="program_manager"
+        detail={adminDetail({ context: notesContext(["academic.exam_related"]) })} />);
+
+      const section = screen.getByRole("region", { name: "Challenge Categories" });
+      expect(listLabels(section, "Academic")).toEqual(["Exam/Test related issues"]);
+      expect(listLabels(section, "Non-academic")).toEqual(["None"]);
+      expect(follows(screen.getByText("More settled"), section)).toBe(true);
+    });
+
+    it.each([
+      ["Student Profile", { label: "Student Profile" as const, items: [{ label: "Journey", content: "Summary" }] }],
+      ["Historical notes", { label: "Historical notes" as const, items: [{ label: "What worked?", content: "Peer study" }] }],
+    ])("shows no Categories section on a %s context", (_source, context) => {
+      const { unmount } = render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027"
+        detail={mentorDetail(context)} />);
+      expect(within(screen.getByRole("region", { name: "Student Context" })).getByText(context.items[0].content))
+        .toBeInTheDocument();
+      expect(screen.queryByRole("region", { name: "Challenge Categories" })).not.toBeInTheDocument();
+      unmount();
+
+      render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" canRegenerateProfile={false}
+        detail={adminDetail({ context })} />);
+      expect(screen.getByText(context.items[0].content)).toBeInTheDocument();
+      expect(screen.queryByRole("region", { name: "Challenge Categories" })).not.toBeInTheDocument();
+    });
   });
 
   describe("Follow-up Notes", () => {
@@ -1019,6 +1420,7 @@ describe("StudentPhaseWorkspace", () => {
       expect(within(followUpSection()).getByRole("button", { name: "Add notes" })).toBeDisabled();
 
       fireEvent.change(screen.getByRole("textbox", { name: "What helped?" }), { target: { value: "A plan" } });
+      tickBothCategoryGroups();
       fireEvent.click(screen.getByRole("button", { name: "Submit Notes" }));
 
       await screen.findByText("Notes submitted. Phase completed.");

@@ -69,8 +69,16 @@ A summary of covered topics, teaching time, and chapter completion for a school-
 _Avoid_: Progress record, saved progress
 
 **Curriculum Summary**:
-A top-level read-only dashboard for reviewing curriculum progress across schools, grades, subjects, and exam tracks.
+A top-level read-only dashboard for reviewing each Summary Class's progress against its Curriculum Plan, including Chapter Test Status.
 _Avoid_: Curriculum tab, curriculum report, curriculum overview
+
+**Summary Class**:
+The group of students a Centre teaches together in one Grade: a single Exam Track, or JEE Main or JEE Advanced taught with NEET as one shared class.
+_Avoid_: Merged stream, combined batch, School row
+
+**Primary Exam Track**:
+The Exam Track whose prescribed lecture time a Summary Class uses: the JEE track (JEE Main or JEE Advanced) for a shared class with NEET, falling back to NEET for a Chapter the JEE track doesn't cover, otherwise its only Exam Track.
+_Avoid_: Main stream, default track
 
 **Exam Track**:
 The exam-specific curriculum lens used by a Centre, such as JEE Main, JEE Advanced, NEET, CET, or Math Foundation.
@@ -83,6 +91,42 @@ _Avoid_: Timemap, chapter requirement
 **Curriculum Config Management**:
 An admin-only workflow for changing LMS Chapter Exam Config values that affect all schools using the configured chapter and exam track.
 _Avoid_: Curriculum logging, school curriculum setup
+
+**Curriculum Plan**:
+An Admin-authored plan for one academic year and Grade that gives Chapters of its served Exam Tracks a Chapter Due Date and ends on its Plan Closure Date.
+_Avoid_: Timeline, schedule, pacing plan, Timemap
+
+**Chapter Due Date**:
+The date by which a Curriculum Plan expects a Chapter to be taught and marked complete.
+_Avoid_: Deadline, target date, test date
+
+**Chapter Test Date**:
+The optional date on which a Curriculum Plan expects a Chapter's Chapter Test to be held, normally the day after its Chapter Due Date.
+_Avoid_: Test due date, exam date
+
+**Plan Closure Date**:
+The date after which a Curriculum Plan is Closed and the next academic year's plan can take over.
+_Avoid_: End date, expiry, plan completion
+
+**Plan Assignment**:
+The link that makes one Curriculum Plan the plan for one Centre and Grade.
+_Avoid_: Plan mapping, plan allocation
+
+**Chapters Behind**:
+The count of a Centre and Grade's Chapters whose Chapter Due Date has passed without Chapter Completion.
+_Avoid_: Delay, lag, overdue chapters
+
+**PCM Behind** / **PCB Behind**:
+A Summary Class's Chapters Behind in Physics, Chemistry and Maths (PCM) or in Physics, Chemistry and Biology (PCB); Chapters of any other subject count in neither.
+_Avoid_: Stream behind, Behind total
+
+**Chapter Test**:
+A quiz session of a CMS chapter test, attributed to one Chapter and to the Centre and Grade whose batches it was created for.
+_Avoid_: Unit test, chapter quiz, combined chapter test
+
+**Chapter Test Status**:
+Whether a Chapter's Chapter Test is Conducted (a session has ended), Scheduled (a session exists but has not ended), Overdue (no session seven days after the Chapter Test Date), or Not due.
+_Avoid_: Test completion, test done
 
 ### Assessments
 
@@ -146,6 +190,10 @@ _Avoid_: NVS PM, Program Manager (for NVS)
 An external stakeholder of exactly one JNV NVS School, such as its principal, who signs in with their own Google account. Determined by `role = "pmu_govt_school_user"`.
 _Avoid_: Government School (as a role), school login, Passcode user
 
+**Alumni Manager**:
+Views and updates the alumni of their assigned Schools, and nothing else: no Students, programs or other features. Alumni are not Students (ADR 0008). Determined by `role = "alumni_manager"`.
+_Avoid_: Alumni admin, alumni teacher
+
 **Permission Level**:
 Numeric access scope: Level 3 = all schools, Level 2 = region, Level 1 = specific school codes.
 _Avoid_: Access tier, role level
@@ -179,7 +227,7 @@ _Avoid_: Mentorship Tab, Holistic Mentorship Tab
 ### Holistic Mentorship
 
 **Holistic Mentorship**:
-The LMS domain for phase-based, non-academic mentoring in which assigned staff prepare from Student Context and Phase Guidance, conduct an offline conversation, and submit Post-Session Notes.
+The LMS domain for phase-based holistic mentoring covering a Student's academic and non-academic challenges, in which assigned staff prepare from Student Context and Phase Guidance, conduct an offline conversation, and submit Post-Session Notes.
 _Avoid_: Academic Mentorship, AI Mentorship, generic Mentorship
 
 **Holistic Mentorship Tab**:
@@ -222,6 +270,14 @@ _Avoid_: Session log, multiple interaction entries, Follow-up Note, Academic Men
 An immutable, timestamped answer set recording one extra offline conversation with a Holistic Mentee in a Holistic Phase whose Post-Session Notes are already submitted. A Mentee and Phase may have many.
 _Avoid_: Additional Notes, Check-in Notes, extra Post-Session Notes, session log
 
+**Challenge Category**:
+One fixed, coded Academic or Non-academic classification of a challenge a Holistic Mentor selects for a Holistic Mentee in Post-Session Notes.
+_Avoid_: Tag, challenge tag, issue type
+
+**Challenge Category Heatmap**:
+The School by Challenge Category grid showing, for one Program or all Programs, one academic year, one Grade, and one Phase or all Phases, the share of Students whose submitted Post-Session Notes carry each Challenge Category.
+_Avoid_: Challenge distribution chart, tag report
+
 **Historical Holistic Notes**:
 Prior-year questionnaire answers migrated from the returning-school Sheet for safely matched current Grade 12 Students. They are legacy Student Context, not canonical Post-Session Notes or evidence of a completed Holistic Phase.
 _Avoid_: Migrated Post-Session Notes, Phase 4 Notes
@@ -241,6 +297,76 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 **Unassigned Student**:
 A current-year Student who is eligible to be a Holistic Mentee but has no active Holistic Mentor-Mentee Mapping.
 _Avoid_: Unmapped Student, Mapping not done, unassigned Mentee
+
+### Blended Learning Mentoring
+
+**Blended Learning Mentoring**:
+The LMS domain in which Blended Learning Mentors keep in touch with their assigned STP Voucher and STP Dropper Students, log each contact, and raise concerns to the right person.
+_Avoid_: Holistic Mentorship, Academic Mentorship, BLP app, mentor app
+
+**Blended Learning Mentor**:
+A staff User with the dedicated Blended Learning Mentor LMS role who is responsible for one or more Blended Learning Mentees.
+_Avoid_: Holistic Mentor, Academic Mentor, counsellor, POC
+
+**Blended Learning Admin**:
+A staff User who can see every Blended Learning Mentor's Students and every Mentor Flag, view only: either an LMS Admin or a User with the dedicated Blended Learning Admin role. Only Mentors log, upload or manage drafts; an admin never does.
+_Avoid_: Program lead, mentor manager
+
+**Blended Learning Mentee**:
+A Student with an active Blended Learning Mentor-Mentee Mapping.
+_Avoid_: Holistic Mentee, Academic Mentee, caseload student
+
+**Blended Learning Mentor-Mentee Mapping**:
+An academic-year assignment connecting one Blended Learning Mentor to one Student in one Program, maintained through the DB Service import, with ended assignments retained as history.
+_Avoid_: Holistic Mentor-Mentee Mapping, POC column, assignment sheet row
+
+**Conversation**:
+A saved record of one contact between a Blended Learning Mentor and a Blended Learning Mentee, the parent or sibling, or both, by call or in person, with a summary, Action Items, and notes.
+_Avoid_: Session, check-in, call log, Post-Session Notes, Follow-up Note
+
+**Attempt**:
+A logged contact that did not connect, with a date and an optional note. It is not a Conversation.
+_Avoid_: Missed call, failed Conversation, not-reachable Conversation
+
+**Conversation Draft**:
+An unsaved write-up for one Blended Learning Mentee, created when a Mentor uploads a call recording, that becomes a Conversation only when the Mentor reviews and saves it.
+_Avoid_: Pending Conversation, auto-saved Conversation
+
+**Call Recording**:
+An audio file of a Conversation, uploaded by the Mentor and used to draft the write-up; retained for a limited period and playable only by Blended Learning Admins.
+_Avoid_: Voice note, audio attachment
+
+**Transcription Request**:
+The queued, running, completed, or failed record the LMS creates after a Call Recording upload, asking etl-next to transcribe it and fill the Conversation Draft. etl-next runs it under a run id derived from the request key, so waking it twice queues one run.
+_Avoid_: Regeneration Request, transcription job
+
+**Action Item**:
+A follow-up agreed in a Conversation, owned by the Student, the Mentor, or the Parent, that stays open until a later Conversation marks it done.
+_Avoid_: Action (that is a School Visit term), task, to-do
+
+**Mentor Flag**:
+A concern raised on one Conversation for one Flag Recipient, with an optional comment. A Conversation can carry several.
+_Avoid_: Intervention Flag, escalation, needs-intervention
+
+**Flag Recipient**:
+The area a Mentor Flag is raised to: Emotional Well-being, Physics Teacher, Chemistry Teacher, or Maths Teacher. It names an area, not a person.
+_Avoid_: Assignee, named teacher
+
+**Last Contact**:
+The date of a Blended Learning Mentee's most recent Conversation. Attempts do not count.
+_Avoid_: Last call, last attempt
+
+**Talk to First**:
+The group of Blended Learning Mentees whose most recent logged entry is an Attempt, who have no Conversation, or whose Last Contact was 30 or more days ago.
+_Avoid_: Priority list, overdue students, at-risk students
+
+**Profile Doc**:
+The Google Doc kept for each Blended Learning Mentee before the app, holding their intake interview, parent notes, documents, and past check-ins. The app links to it and does not copy it.
+_Avoid_: Student Profile, Holistic Student Profile
+
+**Screener Link**:
+The per-Student link from the Profile Dashboard Sheet's Screener Form column, shown to whoever handles a Mentor Flag.
+_Avoid_: Screener Form (as a Quiz Form), Holistic Student Profile Questionnaire
 
 ## Relationships
 
@@ -318,24 +444,25 @@ _Avoid_: Unmapped Student, Mapping not done, unassigned Mentee
 - All three LMS Curriculum Log types reuse the existing Curriculum permission: Teacher, Program Admin, and Admin can edit, while Program Manager can view
 - **Chapter Completion** is stored independently from **LMS Curriculum Logs**
 - **Curriculum Progress** combines covered topics and teaching time from **LMS Curriculum Logs** with stored **Chapter Completion**
-- **Curriculum Summary** aggregates **Curriculum Progress** across multiple **Schools** for PM/admin monitoring
-- Each **Curriculum Summary** top-level row represents one School-Program-Grade-Subject-Exam Track combination
-- **Curriculum Summary** shows a mapped **Centre Exam Track** without LMS Chapter Exam Config as unavailable rather than hiding the operational track or creating empty chapter rows
-- An unavailable **Centre Exam Track** appears as one non-expandable top-level row with School, Program, Grade, and Exam Track; Subject and metrics are blank and the row explains that Curriculum configuration is unavailable
-- When School and Program resolve to zero or multiple active physical Centres, **Curriculum Summary** shows a configuration-error row for that combination while continuing to load valid combinations
-- Selecting Schools in **Curriculum Summary** limits the available values in the other multi-select filters but does not select values automatically
-- Issue #252 keeps the Region filter in **Curriculum Summary** and removes the State and District filters
-- **Curriculum Summary** multi-select filters keep selections inside their open checkbox lists rather than showing removable selection chips; users clear one filter by unchecking values or clear all filters with Clear filters
-- A **Curriculum Summary** multi-select updates its form selection immediately and stays open while users check or uncheck values; clicking outside or Done keeps the selections and closes the list, while Clear unchecks that filter and leaves the list open
-- Apply filters is the only action that reloads **Curriculum Summary** with the selected filter values
-- A closed **Curriculum Summary** multi-select shows All when empty and a selected-value count when one or more values are checked
-- An empty Program, Grade, Subject, or Exam Track filter in **Curriculum Summary** means all available values for the selected Schools
-- With multiple Schools selected, **Curriculum Summary** filter options use the union of values available to any selected School, while result rows still include only valid School combinations
-- Changing selected Schools automatically removes selected filter values that are no longer valid for any selected School
-- Issue #252 does not add Chapter Test Completion Status or connect **Curriculum Summary** to Quiz Sessions or BigQuery; that work is deferred to a separate change
-- **Curriculum Summary** shows Class Cancellation Count and Doubt Solving Hours only on expanded Chapter rows, not on the parent School-Program-Grade-Subject-Exam Track row
+- Issue #417 replaces the School-Program-Grade-Subject-Exam Track table with one **Curriculum Summary** row per **Summary Class**, showing per-subject **Chapters Behind**, **PCM Behind** and **PCB Behind** against the assigned **Curriculum Plan**, and overdue **Chapter Tests** under each subject (decision Q25: under the subjects only, not under **PCM Behind** / **PCB Behind**)
+- A JEE Main or JEE Advanced **Summary Class** shows **PCM Behind** only, a NEET class **PCB Behind** only, and a shared JEE Main or JEE Advanced and NEET class both
+- **PCM Behind** and **PCB Behind** show done/due like the subject pills: how many of the group's Chapters due by the as-of date are done
+- **Curriculum Summary** lists the classes worst first by the larger of **PCM Behind** and **PCB Behind**, then by overdue **Chapter Tests**; it has no header totals
+- **Curriculum Summary** filters by Program, Region and Centre, in that order: each offers only what is in scope for the Grade and the filters before it, and Centres are picked by name rather than by School name; Only behind then keeps only classes behind in **PCM Behind** or **PCB Behind**
+- A **Summary Class** counts **LMS Curriculum Logs** and **Chapter Completion** from every Exam Track in the class; teachers still log and complete Chapters under one Exam Track (ADR 0008)
+- JEE Main and JEE Advanced are never one **Summary Class**; a Centre and Grade mapped to both, with or without NEET, is a Centre Management setup problem
+- One **Curriculum Plan** applies to a Centre and Grade for an academic year, whatever Exam Tracks it runs; G11 and G12 at one Centre have separate plans
+- A **Curriculum Plan** may serve JEE Main, JEE Advanced, NEET and CET, never Math Foundation; CET's in-syllabus Chapters join the plan once configured, but the **Curriculum Summary** and chapter timeline still ignore CET for progress and show it as not covered (CET with other Exam Tracks is a later curriculum-owner decision)
+- A Chapter is due when its **Chapter Due Date** is on or before the as-of date, and done when it has **Chapter Completion** under any Exam Track of the **Summary Class** dated in the plan's academic year on or before the as-of date
+- A **Curriculum Plan** is Draft, Active, or Closed; only Active and Closed plans drive the **Curriculum Summary**, and a plan is Closed once the as-of date passes its **Plan Closure Date**
+- **Chapter Test Status** comes from existing chapter-test quiz sessions; teachers do not record it
+- At a past as-of date, a **Chapter Test** session created after that date does not count
+- Clearing clashing Chapter dates on a **Curriculum Plan** may, with the Admin's explicit consent, clear dates on Chapters hidden from the plan (out of the syllabus or its served Exam Tracks); such a Chapter returns undated if re-added
+- Clicking a **Curriculum Summary** row opens the Centre's chapter timeline, which carries teaching hours against the **Primary Exam Track**'s prescribed time, Class Cancellation Count, and Doubt Solving Hours per Chapter
+- The chapter timeline's header shows a syllabus status per subject group the class takes (decision Q24): the same **PCM Behind** / **PCB Behind** as the class's **Curriculum Summary** row with its done/due, plus how many of the group's Chapters in the syllabus are done; without an Active **Curriculum Plan** only the syllabus count shows
 - Class Cancellation Count includes active Class Cancellation Logs, while Doubt Solving Hours sum active Doubt Solving Log duration without changing Actual Hours or Curriculum Progress
 - **Curriculum Summary** uses **Chapter Completion** as its source for chapter completion state
+- Only **Admins** create, edit, and assign **Curriculum Plans**; the curriculum team works through Admin accounts
 - **Curriculum Summary** is the entry point to **Curriculum Config Management** for eligible **Admins**
 - In v1, **Curriculum Config Management** is exposed at `/curriculum-summary/config` with the page title `Curriculum Config`
 - A chapter has one **LMS Chapter Exam Config** per configured exam track
@@ -471,6 +598,15 @@ _Avoid_: Unmapped Student, Mapping not done, unassigned Mentee
 - Each Mentee and Phase has one **Post-Session Notes** answer set for the Phase's main conversation; an extra offline conversation after submission is recorded as a separate **Follow-up Note** rather than by editing Post-Session Notes
 - A Mentee's currently assigned **Holistic Mentor** may add **Follow-up Notes** to any applicable Phase, including a prior-year Phase, only after that Phase's Post-Session Notes are submitted, regardless of who authored them; the same Mapping, dropout, and privacy guards as Notes writes apply, and Admins, Holistic Mentorship Admins, Program Managers, and Program Admins are read-only
 - **Follow-up Notes** answer three fixed free-text questions shared by every Program, Grade, and Phase: what challenges the Student talked about, what solutions the Mentor suggested, and whether the Student was able to follow the previously shared action plan; each is optional, but at least one must be answered
+- **Challenge Categories** belong only to **Post-Session Notes**; **Follow-up Notes** do not carry them
+- **Challenge Categories** form two fixed groups shared by every Program, Grade, and Phase. Academic: Subject/concept issues; Backlogs, revision & workload; Exam/Test related issues; Test performance & preparation; Other. Non-academic: Time management & distractions; Low confidence/motivation; Adjustment difficulties; Wellness (health, sleep etc.); Emotional & social stress; Career uncertainty; Financial challenges; Communication & language; Other
+- A Mentor selects any number of **Challenge Categories** in each group without a per-category note; the Phase's free-text Post-Session answers carry the detail
+- Submitting **Post-Session Notes** requires at least one **Challenge Category** in each group; each group also offers `No major issue reported`, which cannot be combined with another Category in that group
+- Post-Session Notes submitted before **Challenge Categories** existed stay without Categories; LMS does not backfill or prompt for them
+- A **Challenge Category Heatmap** cell is the percentage of Students with Category-bearing submitted Post-Session Notes in that School and scope whose Notes carry that Category; each School row shows that Student count as its base, and drafts and Notes without Categories never count
+- Under all Phases, a Student counts toward a Category when any of their Category-bearing submitted Notes in that Grade and academic year carries it
+- A **Challenge Category Heatmap** can combine all Programs only across all Phases; a single-Phase view is limited to one Program because Phases belong to one Program's Phase Plan
+- The **Challenge Category Heatmap** is visible to the same roles and School scope as **Students & Progress**; Teachers do not see it
 - A **Follow-up Note** has no draft and cannot be edited or deleted after it is saved; a correction is recorded as another Follow-up Note
 - A **Follow-up Note** records its author and system save time but no manually entered conversation date; a Mentee and Phase have no limit on Follow-up Notes
 - **Follow-up Notes** are readable by the same audience as submitted Post-Session Notes, appear only on their own Phase, do not feed Student Context, do not change Phase progress, and remain as history when a Mapping ends
@@ -607,6 +743,12 @@ _Avoid_: Unmapped Student, Mapping not done, unassigned Mentee
 - `/api/pm/teachers` is the shared School Visit **Visit Teacher** source; Classroom Observation does not get a separate teacher API
 - School Visit permissions gate access to **Visit Teacher** pickers; Staff Management admin permission is not required to select a teacher during a Visit
 - The **Visit Teacher** source change is limited to shared School Visit teacher lookup and Individual AF Teacher Interaction completion validation; it does not change Staff Management, Visit payload shape, picker UI, or completed Visit summaries
+- A **Blended Learning Mentee** has at most one active **Blended Learning Mentor-Mentee Mapping** per academic year; reassignment ends the old Mapping, and the Student's **Conversations**, **Attempts**, and **Action Items** stay with the Student
+- A **Blended Learning Mentor** sees only their own **Blended Learning Mentees**; a **Blended Learning Admin** sees every Mentor's Mentees and every **Mentor Flag**
+- A **Conversation** has zero or more **Action Items**, zero or more photo attachments, and zero or more **Mentor Flags**, at most one per **Flag Recipient**
+- A **Conversation Draft** becomes a **Conversation** only when the Mentor saves it; a draft does not change **Last Contact**, **Talk to First**, counts, or **Mentor Flags**; a Mentee has at most one open draft
+- A saved **Conversation** is not edited; a later Conversation can mark earlier **Action Items** done
+- A **Mentor Flag** to **Emotional Well-being** notifies its recipient by email without the notes or comment; Physics, Chemistry, and Maths Teacher flags notify no one until those people are named
 
 ## Example dialogue
 
@@ -630,3 +772,6 @@ _Avoid_: Unmapped Student, Mapping not done, unassigned Mentee
 - "deleted" for actions vs visits: Actions already support soft delete (`deleted_at` on `lms_pm_school_visit_actions`). Issue #35 extends this to visits (`lms_pm_school_visits`).
 - "mentorship" as a UI label vs domain terms: the School page has separate **Academic Mentorship Tab** and **Holistic Mentorship Tab** surfaces; do not use a generic Mentorship Tab as their umbrella.
 - "teacher" in School Visit forms means **Visit Teacher**, not every `user_permission.role = "teacher"` account.
+- "flag": a **Mentor Flag** belongs to one Conversation and names a Flag Recipient; it is unrelated to the School roster's needs-intervention flag.
+- "action": an **Action** is part of a School Visit; an **Action Item** is a follow-up agreed in a Blended Learning **Conversation**.
+- "mentor" alone is ambiguous across Academic, Holistic, and Blended Learning Mentoring; always use the full term.

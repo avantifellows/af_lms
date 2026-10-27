@@ -7,7 +7,7 @@ import {
   type CmsTestType,
 } from "@/lib/cms-tests";
 import { requireCmsServiceAccess } from "@/lib/cms-service";
-import { query } from "@/lib/db";
+import { chapterIdsSharingCode } from "@/lib/chapter-siblings";
 import { getCmsTestLanguages, type CmsTestLanguage } from "@/lib/cms-test-languages";
 
 // New CMS (nex-gen-cms) service API. af_lms consumes the list route to let the session
@@ -24,7 +24,7 @@ interface RawCmsTest {
   type_params?: { chapter_id?: number; marks?: number; duration?: string };
 }
 
-export interface CmsTestOption {
+interface CmsTestOption {
   id: number;
   code: string;
   name: string;
@@ -39,25 +39,6 @@ function resourceName(test: RawCmsTest): string {
   return (
     names.find((n) => n.lang_code === "en")?.resource ?? names[0]?.resource ?? ""
   );
-}
-
-// Staging + prod have duplicate chapter rows for the same chapter code (e.g. 12P17
-// "Electric Charges and Fields" = ids 22 AND 27), and a test's type_params.chapter_id
-// points at just one of them while the picker may hand us either. Resolve the selected
-// chapter to every sibling id sharing its (code, subject, grade) so the match is robust to
-// which duplicate was picked. See task lms-cms-tests.
-async function chapterIdsSharingCode(chapterId: number): Promise<number[]> {
-  const rows = await query<{ id: number }>(
-    `SELECT sib.id
-       FROM chapter sel
-       JOIN chapter sib
-         ON sib.code = sel.code
-        AND sib.subject_id IS NOT DISTINCT FROM sel.subject_id
-        AND sib.grade_id IS NOT DISTINCT FROM sel.grade_id
-      WHERE sel.id = $1`,
-    [chapterId]
-  );
-  return rows.map((r) => Number(r.id));
 }
 
 // fallow-ignore-next-line complexity code-duplication
