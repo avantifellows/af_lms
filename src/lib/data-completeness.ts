@@ -24,6 +24,31 @@ const REQUIRED_DOCUMENT_TYPES: readonly DocumentType[] = [
   "wise_research_consent",
 ];
 
+// A Student in the general category — including the EWS and PWD spellings the
+// `category` column carries (Gen, Gen-EWS, PWD-Gen, PWD-EWS, General, and the
+// case variants). Most states issue no caste certificate to them, so counting
+// them as missing one would be chasing a document they cannot obtain.
+const GENERAL_CATEGORY = /^(pwd-)?(gen|general)(-ews)?$|^(pwd-)?ews$/i;
+
+/**
+ * Whether this Student could produce a caste certificate at all. A blank
+ * category stays counted: nothing rules it out, and the Category chip is where
+ * that gap shows.
+ */
+function expectsCasteCertificate(student: Student): boolean {
+  const category = student.category?.trim();
+  if (!category) return true;
+  return !GENERAL_CATEGORY.test(category);
+}
+
+// Who each document applies to. Everything but the caste certificate applies
+// to every Student in scope.
+const DOCUMENT_APPLIES_TO: Partial<
+  Record<DocumentType, (student: Student) => boolean>
+> = {
+  caste_certificate: expectsCasteCertificate,
+};
+
 /** `student_pk_id` → the document types on file for that Student. */
 export type DocumentTypesByStudentId = Record<string, DocumentType[]>;
 
@@ -76,6 +101,14 @@ export const INFO_ITEMS: readonly InfoItemDefinition[] = [
     isFilled: (s) => filled(s.mother_name),
   },
   { field: "address", label: "Address", isFilled: (s) => filled(s.address) },
+  {
+    // One chip for both sizes: Edit Student collects them in a single Uniform
+    // Size section, so a Student with one of the two is still a Student whose
+    // uniform can't be ordered.
+    field: "uniform_size",
+    label: "Uniform Size",
+    isFilled: (s) => filled(s.tshirt_size) && filled(s.track_pant_size),
+  },
   {
     field: "apaar_id",
     label: "APAAR ID",
@@ -221,6 +254,8 @@ export function missingKeysForStudent(
   if (documents) {
     const present = documentTypesFor(student, documents);
     for (const { value } of DOCUMENT_TYPES) {
+      const appliesTo = DOCUMENT_APPLIES_TO[value];
+      if (appliesTo && !appliesTo(student)) continue;
       if (!present.has(value)) keys.add(documentFilterKey(value));
     }
   }
@@ -326,13 +361,25 @@ function buildDocumentsGroup(
   );
   const items: CompletenessItem[] = [];
   const complete: string[] = [];
+  const notes: string[] = [];
   let filledSlots = 0;
+  let totalSlots = 0;
 
   for (const { value, label } of DOCUMENT_TYPES) {
-    const missing = students.filter(
+    const appliesTo = DOCUMENT_APPLIES_TO[value];
+    const expecting = appliesTo ? students.filter(appliesTo) : students;
+    if (expecting.length === 0) {
+      // Nobody here could produce it, so it is neither a gap nor "complete".
+      if (students.length > 0 && appliesTo) {
+        notes.push(`${label} not expected — no Student in a reserved category`);
+      }
+      continue;
+    }
+    const missing = expecting.filter(
       (student) => !present.get(student)?.has(value),
     ).length;
-    filledSlots += students.length - missing;
+    filledSlots += expecting.length - missing;
+    totalSlots += expecting.length;
     if (missing === 0) {
       complete.push(label);
       continue;
@@ -341,7 +388,7 @@ function buildDocumentsGroup(
       key: documentFilterKey(value),
       label,
       missing,
-      expected: students.length,
+      expected: expecting.length,
       filterLabel: `Missing ${label}`,
       locked: false,
       required: REQUIRED_DOCUMENT_TYPES.includes(value),
@@ -351,10 +398,10 @@ function buildDocumentsGroup(
   return {
     key: "documents",
     title: GROUP_TITLES.documents,
-    pct: pct(filledSlots, students.length * DOCUMENT_TYPES.length),
+    pct: pct(filledSlots, totalSlots),
     items: sortByMissing(items),
     complete,
-    notes: [],
+    notes,
     pending: false,
   };
 }

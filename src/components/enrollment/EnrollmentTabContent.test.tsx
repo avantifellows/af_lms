@@ -584,9 +584,13 @@ describe("EnrollmentTabContent - data completeness", () => {
       student_id: "STU001",
       pen_number: "12345678901",
       apaar_id: "APAAR001",
-      category: "Gen",
+      // A reserved category and both uniform sizes, so these fixtures are
+      // complete bar what each test blanks out.
+      category: "OBC",
       stream: "science",
       gender: "Male",
+      tshirt_size: "M",
+      track_pant_size: "M",
       board_stream: "PCM",
       address: "12 Main Road",
       father_name: "Suresh",

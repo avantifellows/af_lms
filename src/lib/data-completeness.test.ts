@@ -32,8 +32,10 @@ function student(overrides: Partial<Student> = {}): Student {
     student_id: "STU001",
     pen_number: "12345678901",
     apaar_id: "APAAR001",
-    category: "Gen",
+    category: "OBC",
     stream: "science",
+    tshirt_size: "M",
+    track_pant_size: "M",
     gender: "Male",
     board_stream: "PCM",
     address: "12 Main Road",
@@ -66,7 +68,7 @@ function groupOf(
 }
 
 describe("the tracked Info fields", () => {
-  it("is the ten the Programs team asked for, locked identifiers last", () => {
+  it("is the fields the Programs team asked for, locked identifiers last", () => {
     expect(INFO_ITEMS.map((item) => item.label)).toEqual([
       "Date of Birth",
       "Gender",
@@ -76,9 +78,29 @@ describe("the tracked Info fields", () => {
       "Father Name",
       "Mother Name",
       "Address",
+      "Uniform Size",
       "APAAR ID",
       "PEN / Grade 10 Roll no",
     ]);
+  });
+
+  // Edit Student collects both sizes in one section, so one chip covers them:
+  // a Student with only a T-shirt size still can't have a uniform ordered.
+  it("counts a uniform as missing unless both sizes are there", () => {
+    const bothSizes = student({ tshirt_size: "M", track_pant_size: "L" });
+    expect(missingKeysForStudent(bothSizes, null)).not.toContain(
+      infoFilterKey("uniform_size"),
+    );
+
+    for (const partial of [
+      { tshirt_size: "M", track_pant_size: null },
+      { tshirt_size: null, track_pant_size: "L" },
+      { tshirt_size: null, track_pant_size: null },
+    ]) {
+      expect([...missingKeysForStudent(student(partial), null)]).toContain(
+        infoFilterKey("uniform_size"),
+      );
+    }
   });
 
   it("locks only the two Edit Student cannot change", () => {
@@ -130,13 +152,13 @@ describe("the Info row", () => {
   });
 
   it("is a slot percentage, so one blank field does not sink it", () => {
-    // 2 Students × 10 fields = 20 slots, 3 of them blank → 85%.
+    // 2 Students × 11 fields = 22 slots, 3 of them blank → 86%.
     const students = [
       student({ student_pk_id: "1", address: null, apaar_id: null }),
       student({ student_pk_id: "2", address: null }),
     ];
 
-    expect(groupOf(buildDataCompleteness(students, null), "info").pct).toBe(85);
+    expect(groupOf(buildDataCompleteness(students, null), "info").pct).toBe(86);
   });
 
   it("counts a field against every Student in scope", () => {
@@ -206,6 +228,107 @@ describe("the Documents row", () => {
     expect(documents.items).toEqual([]);
     expect(documents.complete).toHaveLength(DOCUMENT_TYPES.length);
     expect(documents.pct).toBe(100);
+  });
+
+  // Asked for after the table reached staging: most states issue no caste
+  // certificate to a general-category Student, so counting them as missing one
+  // chases a document they cannot obtain.
+  describe("the caste certificate", () => {
+    const reserved = (id: string, category: string) =>
+      student({ student_pk_id: id, category });
+
+    it("leaves general-category Students out of the count, however spelled", () => {
+      const students = [
+        reserved("1", "OBC"),
+        reserved("2", "Gen"),
+        reserved("3", "Gen-EWS"),
+        reserved("4", "PWD-Gen"),
+        reserved("5", "PWD-EWS"),
+        reserved("6", "GEN"),
+        reserved("7", "PWD-General"),
+      ];
+
+      const caste = groupOf(
+        buildDataCompleteness(students, {}),
+        "documents",
+      ).items.find((item) => item.key === documentFilterKey("caste_certificate"))!;
+
+      expect(caste.missing).toBe(1);
+      expect(caste.expected).toBe(1);
+    });
+
+    it("keeps SC, ST, OBC and their PWD spellings in", () => {
+      const students = ["SC", "ST", "OBC", "PWD-SC", "PWD-ST", "PWD-OBC"].map(
+        (category, i) => reserved(String(i + 1), category),
+      );
+
+      const caste = groupOf(
+        buildDataCompleteness(students, {}),
+        "documents",
+      ).items.find((item) => item.key === documentFilterKey("caste_certificate"))!;
+
+      expect(caste.expected).toBe(6);
+    });
+
+    it("keeps a Student whose category nobody has recorded", () => {
+      const students = [reserved("1", "Gen"), student({ student_pk_id: "2", category: null })];
+
+      const caste = groupOf(
+        buildDataCompleteness(students, {}),
+        "documents",
+      ).items.find((item) => item.key === documentFilterKey("caste_certificate"))!;
+
+      expect(caste.expected).toBe(1);
+    });
+
+    it("never puts a general-category Student behind the chip or its group", () => {
+      const gen = reserved("1", "Gen");
+      const obc = reserved("2", "OBC");
+      const documents = { "1": [], "2": [] };
+      const casteKey = documentFilterKey("caste_certificate");
+
+      expect(studentMatchesCompletenessFilter(gen, casteKey, documents)).toBe(false);
+      expect(studentMatchesCompletenessFilter(obc, casteKey, documents)).toBe(true);
+      // The other six still apply, so they stay in the group filter.
+      expect(
+        studentMatchesCompletenessFilter(gen, groupFilterKey("documents"), documents),
+      ).toBe(true);
+    });
+
+    it("says so when no Student in scope could produce one", () => {
+      const documents = groupOf(
+        buildDataCompleteness([reserved("1", "Gen")], { "1": [] }),
+        "documents",
+      );
+
+      expect(
+        documents.items.some((item) => item.label === "Caste Certificate"),
+      ).toBe(false);
+      expect(documents.complete).not.toContain("Caste Certificate");
+      expect(documents.notes).toEqual([
+        "Caste Certificate not expected — no Student in a reserved category",
+      ]);
+    });
+
+    it("leaves the slots it doesn't apply to out of the percentage", () => {
+      // One general-category Student with every other document on file: six of
+      // six slots, not six of seven.
+      const documents = groupOf(
+        buildDataCompleteness([reserved("1", "Gen")], {
+          "1": [
+            "parent_undertaking",
+            "wise_research_consent",
+            "student_undertaking",
+            "media_consent_form",
+            "student_photograph",
+            "income_certificate",
+          ],
+        }),
+        "documents",
+      );
+
+      expect(documents.pct).toBe(100);
+    });
   });
 
   it("treats a Student with no record id as having nothing on file", () => {

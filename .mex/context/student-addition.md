@@ -216,16 +216,25 @@ sees no table, `EnrollmentTabContent` picking between them on `showAdmissionRow`
 
 Three rows, built by `src/lib/data-completeness.ts`:
 
-- **Info** — ten fields the Programs team tracks (Date of Birth, Gender, Category, Parents Phone
-  Number, Annual Family Income, Father Name, Mother Name, Address, APAAR ID, PEN / Grade 10 Roll no).
-  Confirmed with the issue author over the alternatives on 2026-10-26. APAAR ID and PEN / Grade 10
+- **Info** — the fields the Programs team tracks: Date of Birth, Gender, Category, Parents Phone
+  Number, Annual Family Income, Father Name, Mother Name, Address, Uniform Size, APAAR ID and
+  PEN / Grade 10 Roll no. Confirmed with the issue author over the alternatives on 2026-10-26;
+  Uniform Size was asked for on 2026-10-27, after the table reached staging. It is **one** chip for
+  both sizes, not two: Edit Student collects them in a single Uniform Size section, and a Student
+  with only a T-shirt size still can't have a uniform ordered. APAAR ID and PEN / Grade 10
   Roll no carry a lock, Edit Student being unable to change them; PEN and the roll number are **one**
   chip, since either identifies the Student to the board. This list is deliberately *not*
   `INFO_REQUIRED_FIELDS` from `enrollment-readiness.ts`: that one answers "one honest percentage per
   School" and was cut to five in #338, while this one can afford the rarely-filled fields because each
   shows as its own chip.
 - **Documents** — all seven types in `document-types.ts`, the two consents starred as required. The
-  product call the old `% Docs` was waiting on.
+  product call the old `% Docs` was waiting on. The **caste certificate is counted only for Students
+  in a reserved category**: most states issue none to a general-category Student, so Gen, Gen-EWS,
+  PWD-Gen, PWD-EWS and their case and "General" spellings are left out of its count, its denominator
+  and its filter (`DOCUMENT_APPLIES_TO`, asked for on 2026-10-27). A Student whose category nobody
+  has recorded stays counted — nothing rules it out, and the Category chip is where that gap shows.
+  Where no Student in scope could produce one, the row says so rather than calling it complete, and
+  those slots leave the percentage.
 - **Exams** — one chip per exam the Student's Board Stream calls for (`STREAM_EXPECTED_EXAM_NAMES`),
   counting Students with no registration for it. An exam no Student in scope is expected to sit gets
   a note ("NEET not expected — no Student on PCB or PCMB") rather than silently missing.
