@@ -18,7 +18,7 @@ edges:
     condition: when adding a new visit action type
   - target: context/data-access.md
     condition: when writing visit rows (direct Postgres, not the DB Service)
-last_updated: 2026-10-14
+last_updated: 2026-10-27
 ---
 
 # PM School Visits
@@ -94,3 +94,8 @@ Pages: `src/app/visits/[id]/...` and `src/app/school/[udise]/visit/...`; read-on
 - **Save vs complete** validation are different functions — a draft can save with gaps; complete demands full data.
 - Completed visits are write-locked (`enforceVisitWriteLock`); only `admin` edits completed action data.
 - Adding a type means touching ~8 files in lockstep — follow `patterns/add-visit-action-type.md`, and note `school_staff_interaction` is optional so completeness/aggregate code must tolerate its absence.
+
+## Planned: School-wise Visit Summary (issue #470, decided 27 Oct 2026, not built)
+- The Visit Summary becomes **physical-centre schools only on both tabs** (Visits and a new default School-wise tab), with no JNV NVS student data anywhere on it.
+- Visit Concerns and Visit Highlights are permanent records produced by an etl-next LLM flow (3× daily) from completed visits' free text, matched visit by visit. A resolved concern auto-reopens when a later visit mentions it (ADR 0011). The LMS only reads them and writes the resolve/comment/reopen history.
+- The full decisions and acceptance criteria are in the #470 issue body. Glossary terms are in `CONTEXT.md`. The base branch is `grill/issue-470-visit-summary-school-wise`.
