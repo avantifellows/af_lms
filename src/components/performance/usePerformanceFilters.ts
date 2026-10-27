@@ -423,7 +423,9 @@ function useFilterOptions(intentKey: string) {
  * was given for.
  */
 function useReportName(session: string | null) {
-  const [named, setNamed] = useState<{ session: string; name: string } | null>(null);
+  const [named, setNamed] = useState<{ session: string; name: string; format?: string | null } | null>(
+    null
+  );
 
   const handleDeepDiveData = useCallback(
     (testName: string) => {
@@ -436,7 +438,12 @@ function useReportName(session: string | null) {
   );
 
   const deepDiveSession = session
-    ? { sessionId: session, testName: named?.session === session ? named.name : "" }
+    ? {
+        sessionId: session,
+        testName: named?.session === session ? named.name : "",
+        // Known when the report was opened from the overview; null when reached by URL.
+        testFormat: named?.session === session ? (named.format ?? null) : null,
+      }
     : null;
   return { deepDiveSession, setNamed, handleDeepDiveData };
 }
@@ -449,7 +456,7 @@ interface HandlerContext {
   effective: OverridableSelection;
   navigate: (patch: PerformanceUrlPatch, mode: NavigateMode) => void;
   closeReport: () => void;
-  nameReport: (v: { session: string; name: string }) => void;
+  nameReport: (v: { session: string; name: string; format?: string | null }) => void;
 }
 
 /**
@@ -491,8 +498,8 @@ function createPerformanceHandlers({
 
   // Opening a report is a step of its own, so Back closes it and Forward
   // reopens it with the overview's filters intact.
-  const handleTestClick = (sessionId: string, testName: string) => {
-    nameReport({ session: sessionId, name: testName });
+  const handleTestClick = (sessionId: string, testName: string, testFormat?: string | null) => {
+    nameReport({ session: sessionId, name: testName, format: testFormat });
     push({ session: sessionId });
   };
 

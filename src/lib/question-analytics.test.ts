@@ -10,6 +10,7 @@ vi.mock("@/lib/bigquery", () => ({
 }));
 
 import {
+  comparisonPrograms,
   getSessionCmsTest,
   getChapterTestReport,
   getCmsTestChapters,
@@ -53,6 +54,7 @@ const QUESTION_ROWS = [
 const SUMMARY_ROWS = [
   {
     gender: "female", students: 19, avg_attempt_rate: 43.62, avg_accuracy: 73.15, avg_score: 29.43,
+    accuracy_students: 19, stream_students: 18, program: "EMRS CoE",
     total_time_seconds: 19 * 3452, timed_students: 19,
     cms_test_id: "9330", test_name: "12P24 - Wave Optics - JEE Main", test_format: "chapter_test",
     start_date: "2026-10-14", test_grade: 12, test_stream: "engineering", test_course: "JEE Mains",
@@ -60,6 +62,7 @@ const SUMMARY_ROWS = [
   },
   {
     gender: "male", students: 29, avg_attempt_rate: 47.31, avg_accuracy: 56.55, avg_score: 22.48,
+    accuracy_students: 29, stream_students: 29, program: "EMRS CoE",
     total_time_seconds: 29 * 3495, timed_students: 29,
     cms_test_id: "9330", test_name: "12P24 - Wave Optics - JEE Main", test_format: "chapter_test",
     start_date: "2026-10-14", test_grade: 12, test_stream: "engineering", test_course: "JEE Mains",
@@ -137,7 +140,8 @@ describe("getChapterTestReport", () => {
     });
     expect(r.overview).toEqual({
       students: 48, avg_attempt_rate: 45.8, avg_accuracy: 63.1, avg_score: 25.2,
-      enrolled: 53, avg_time_minutes: 58,
+      // Students in the test's stream who submitted: one is from another stream.
+      appeared: 47, enrolled: 53, avg_time_minutes: 58,
     });
     expect(r.gender.map((g) => [g.gender, g.avg_accuracy])).toEqual([["female", 73.2], ["male", 56.6]]);
     // This School's row is the report's own cohort, matching the overview.
@@ -145,6 +149,26 @@ describe("getChapterTestReport", () => {
       school: "EMRS Bhopal", students: 48, avg_attempt_rate: 45.8, avg_accuracy: 63.1, avg_score: 25.2,
     });
     expect(r.questions).toHaveLength(2);
+  });
+
+  it("compares with Schools of the same model, grade and stream", async () => {
+    answerByTable();
+    await getChapterTestReport(SCOPE);
+    const call = query.mock.calls.find(([c]) => c.query.includes("cms_test_id = @cmsTestId"))!;
+    const { query: sql, params } = call[0];
+    expect(sql).toContain("student_program IN UNNEST(@programs)");
+    expect(sql).toContain("student_grade = @grade");
+    expect(sql).toContain("LOWER(student_stream) = @stream");
+    expect(params).toMatchObject({ cmsTestId: "9330", grade: 12, stream: "engineering" });
+    expect(params.programs).toContain("JNV CoE");
+    expect(params.programs).not.toContain("JNV Nodal");
+  });
+
+  it("shows no comparison for a program that is neither CoE nor Nodal", async () => {
+    answerByTable();
+    const report = await getChapterTestReport({ ...SCOPE, program: "Maharashtra Coaching Test Prep" });
+    expect(report!.comparison).toEqual([]);
+    expect(query.mock.calls.some(([c]) => c.query.includes("cms_test_id = @cmsTestId"))).toBe(false);
   });
 
   it("returns null when the session has no submitted results", async () => {
@@ -200,5 +224,19 @@ describe("getSessionCmsTest", () => {
     query.mockResolvedValue([[{ cms_test_id: "64abcdef" }]]);
     expect(await getSessionCmsTest(SCOPE)).toBeNull();
     expect(query.mock.calls[0][0].query).not.toContain("@questionId");
+  });
+});
+
+describe("comparisonPrograms", () => {
+  it("groups CoEs with CoEs and Nodals with Nodals", () => {
+    expect(comparisonPrograms("EMRS CoE")).toEqual(expect.arrayContaining(["JNV CoE", "Punjab CoE", "EMRS CoE"]));
+    expect(comparisonPrograms("JNV CoE")).not.toContain("JNV Nodal");
+    expect(comparisonPrograms("JNV Nodal")).toEqual(["JNV Nodal", "Punjab Nodal"]);
+  });
+
+  it("is empty for any other program", () => {
+    expect(comparisonPrograms("JNV NVS")).toEqual([]);
+    expect(comparisonPrograms("Maharashtra Coaching Test Prep")).toEqual([]);
+    expect(comparisonPrograms(null)).toEqual([]);
   });
 });

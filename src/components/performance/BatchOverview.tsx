@@ -87,7 +87,7 @@ interface Props {
   testGrade?: number;
   /** JNV NVS: list every (mandated) test, with no format split or filters. */
   isNvs?: boolean;
-  onTestClick: (sessionId: string, testName: string) => void;
+  onTestClick: (sessionId: string, testName: string, testFormat?: string | null) => void;
   onFilterOptions?: (opts: {
     streams: string[];
     subjects: string[];
@@ -274,15 +274,15 @@ export default function BatchOverview({
       content = chapterCards ? (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 md:gap-4">
           {[...tests].reverse().map((t) => {
-            const { streamEnrolled, attendanceCount } = attendanceFor(t, enrolledByStream);
+            const { streamEnrolled } = attendanceFor(t, enrolledByStream);
             return (
               <ChapterTestCard
                 key={t.session_id}
                 test={t}
-                appeared={attendanceCount}
+                appeared={t.appeared_count}
                 enrolled={streamEnrolled}
                 grade={grade}
-                onClick={() => onTestClick(t.session_id, t.test_name)}
+                onClick={() => onTestClick(t.session_id, t.test_name, t.test_format)}
               />
             );
           })}
@@ -303,7 +303,7 @@ export default function BatchOverview({
                 key={t.session_id}
                 test={t}
                 enrolledByStream={enrolledByStream}
-                onClick={() => onTestClick(t.session_id, t.test_name)}
+                onClick={() => onTestClick(t.session_id, t.test_name, t.test_format)}
               />
             ))}
           </div>

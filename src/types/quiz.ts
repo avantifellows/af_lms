@@ -6,6 +6,9 @@ export interface TestTrendPoint {
   start_date: string;
   student_count: number;
   stream_student_count: number;
+  // Students who submitted, in the test's stream when it has one (the
+  // chapter-test card's and report's "appeared").
+  appeared_count: number;
   test_format: string | null;
   test_stream: string | null;
   // Grade the test targets (test_grade in BQ), which can differ from the

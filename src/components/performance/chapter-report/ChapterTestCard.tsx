@@ -9,7 +9,7 @@ interface Props {
   test: TestTrendPoint;
   /** Students in the test's stream at this School and grade; null when unknown. */
   enrolled: number | null;
-  /** Students who sat it (in the test's stream when it has one). */
+  /** Students who submitted it (in the test's stream when it has one). */
   appeared: number;
   /** The grade the overview is showing; used when the test has no target grade. */
   grade: number;

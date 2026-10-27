@@ -105,6 +105,15 @@ describe("combineCohorts", () => {
     expect(all).toEqual({ students: 4, avg_attempt_rate: 55, avg_accuracy: 60, avg_score: 15 });
   });
 
+  it("weights accuracy by the students who have one", () => {
+    // Girls: 100% and one who attempted nothing; boys: 0%. The class is 50%, not 66.7%.
+    const all = combineCohorts([
+      { students: 2, avg_attempt_rate: 50, avg_accuracy: 100, avg_score: 40, accuracy_students: 1 },
+      { students: 1, avg_attempt_rate: 50, avg_accuracy: 0, avg_score: 0, accuracy_students: 1 },
+    ]);
+    expect(all.avg_accuracy).toBe(50);
+  });
+
   it("is all zeros for no students", () => {
     expect(combineCohorts([])).toEqual({ students: 0, avg_attempt_rate: 0, avg_accuracy: 0, avg_score: 0 });
   });

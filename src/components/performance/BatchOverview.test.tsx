@@ -11,6 +11,7 @@ function test(overrides: Partial<TestTrendPoint>): TestTrendPoint {
     start_date: "2026-07-01",
     student_count: 0,
     stream_student_count: 0,
+    appeared_count: 0,
     test_format: null,
     test_stream: null,
     test_grade: null,
@@ -123,7 +124,7 @@ describe("BatchOverview", () => {
         test({
           session_id: "c1", test_name: "12P24 - Wave Optics - JEE Main", test_format: "chapter_test",
           start_date: "2026-10-14", test_grade: 12, test_stream: "engineering", student_count: 50,
-          stream_student_count: 48, subjects: ["Physics"], avg_attempt_rate: 45.8, avg_accuracy: 63.1,
+          stream_student_count: 49, appeared_count: 48, subjects: ["Physics"], avg_attempt_rate: 45.8, avg_accuracy: 63.1,
           avg_score: 25.2, cms_test_id: "9330", exam: "JEE Mains",
           chapter: { code: "12P24", name: "Wave Optics", subject: "Physics", priority: "Medium" },
         }),
@@ -149,12 +150,12 @@ describe("BatchOverview", () => {
     expect(screen.queryByText("Tests Conducted")).not.toBeInTheDocument();
 
     act(() => screen.getByText("Open report →").click());
-    expect(onTestClick).toHaveBeenCalledWith("c1", "12P24 - Wave Optics - JEE Main");
+    expect(onTestClick).toHaveBeenCalledWith("c1", "12P24 - Wave Optics - JEE Main", "chapter_test");
   });
 
   it("an old-CMS chapter test falls back to its name with no priority", async () => {
     mockOverview({
-      tests: [test({ session_id: "o1", test_name: "CT_Adv_11P1 Units", test_format: "chapter_test", student_count: 44 })],
+      tests: [test({ session_id: "o1", test_name: "CT_Adv_11P1 Units", test_format: "chapter_test", student_count: 45, appeared_count: 44 })],
       totalEnrolled: 60,
       enrolledByStream: {},
       streams: [],

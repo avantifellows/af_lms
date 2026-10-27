@@ -1,6 +1,6 @@
 // BigQuery reads for question-level analytics: the chapter-test report today,
 // Teacher View v2 (#324) next. Server-only (BigQuery client).
-import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
+import { CURRENT_ACADEMIC_YEAR, PROGRAM_ID_TO_LABEL } from "@/lib/constants";
 import {
   DIM_STUDENT_TABLE,
   FACT_QUESTION_LEVEL_TABLE,
@@ -127,6 +127,10 @@ export async function getSessionQuestionStats(scope: SessionScope): Promise<Ques
 interface SessionSummary {
   meta: Omit<ChapterTestMeta, "chapter_code" | "chapter_name" | "priority" | "duration_minutes">;
   testStream: string | null;
+  /** The School's program for this session (the one picked, or the only one). */
+  program: string | null;
+  /** Students in the test's stream (all students when it has none). */
+  appeared: number;
   /** Unrounded, so the whole-class figures are combined before any rounding. */
   gender: GenderStat[];
   avgTimeSeconds: number | null;
@@ -148,7 +152,11 @@ async function getSessionSummary(scope: SessionScope): Promise<SessionSummary | 
       COUNT(DISTINCT enrollment_user_id) AS students,
       AVG(attempt_rate) AS avg_attempt_rate,
       AVG(accuracy) AS avg_accuracy,
+      COUNT(accuracy) AS accuracy_students,
       AVG(percentage) AS avg_score,
+      -- The overview card's rule: student_stream = test_stream.
+      COUNT(DISTINCT IF(student_stream = test_stream, enrollment_user_id, NULL)) AS stream_students,
+      ANY_VALUE(student_program) AS program,
       SUM(total_time_spent) AS total_time_seconds,
       COUNT(total_time_spent) AS timed_students,
       ANY_VALUE(cms_test_id) AS cms_test_id,
@@ -170,6 +178,8 @@ async function getSessionSummary(scope: SessionScope): Promise<SessionSummary | 
   const first = list[0];
   const timed = list.reduce((n, r) => n + toNum(r.timed_students), 0);
   const totalTime = list.reduce((n, r) => n + toNum(r.total_time_seconds), 0);
+  const testStream = (first.test_stream as string | null) ?? null;
+  const appeared = list.reduce((n, r) => n + toNum(testStream ? r.stream_students : r.students), 0);
   return {
     meta: {
       session_id: scope.sessionId,
@@ -183,12 +193,15 @@ async function getSessionSummary(scope: SessionScope): Promise<SessionSummary | 
       total_questions: toNumOrNull(first.total_questions),
       max_marks: toNumOrNull(first.max_marks),
     },
-    testStream: (first.test_stream as string | null) ?? null,
+    testStream,
+    program: scope.program ?? (first.program as string | null) ?? null,
+    appeared,
     gender: list.map((r) => ({
       gender: String(r.gender),
       students: toNum(r.students),
       avg_attempt_rate: toNum(r.avg_attempt_rate),
       avg_accuracy: toNum(r.avg_accuracy),
+      accuracy_students: toNum(r.accuracy_students),
       avg_score: toNum(r.avg_score),
     })),
     avgTimeSeconds: timed > 0 ? totalTime / timed : null,
@@ -220,14 +233,29 @@ async function getEnrolledInStream(
   return toNum((rows as Record<string, unknown>[])[0]?.total);
 }
 
+const PROGRAM_MODELS = [" CoE", " Nodal"];
+
+/** The programs a School is compared within: CoEs with CoEs, Nodals with Nodals.
+ *  Empty for any other program, which gets no comparison. */
+export function comparisonPrograms(program: string | null): string[] {
+  const model = PROGRAM_MODELS.find((suffix) => program?.endsWith(suffix));
+  return model ? Object.values(PROGRAM_ID_TO_LABEL).filter((label) => label.endsWith(model)) : [];
+}
+
 /**
- * Every physical-centre School that sat the same CMS test this year (JNV NVS is
- * excluded: these screens are for physical centres only).
+ * Schools that sat the same CMS test this year, counted the way this School's
+ * row is: same grade, same stream filter, and programs of the same model (CoE or
+ * Nodal) as this School's.
  */
 async function getSchoolComparison(
   cmsTestId: string,
-  udise: string,
+  scope: SessionScope,
+  program: string | null,
 ): Promise<SchoolComparisonRow[]> {
+  const programs = comparisonPrograms(program);
+  if (programs.length === 0) return [];
+  const params: Record<string, string | number | string[]> = { cmsTestId, programs, grade: scope.grade };
+  if (scope.stream) params.stream = scope.stream;
   const query = `
     SELECT
       student_school AS school,
@@ -242,11 +270,13 @@ async function getSchoolComparison(
       AND academic_year = '${CURRENT_ACADEMIC_YEAR}'
       AND section = 'overall'
       ${SUBMITTED_ONLY}
-      AND student_program != 'JNV NVS'
+      AND student_program IN UNNEST(@programs)
+      AND student_grade = @grade
+      ${scope.stream ? "AND LOWER(student_stream) = @stream" : ""}
     GROUP BY school, udise
     ORDER BY avg_score DESC
   `;
-  const [rows] = await getBigQueryClient().query({ query, params: { cmsTestId } });
+  const [rows] = await getBigQueryClient().query({ query, params });
   return (rows as Record<string, unknown>[]).map((r) => ({
     school: String(r.school ?? ""),
     udise: String(r.udise ?? ""),
@@ -255,7 +285,7 @@ async function getSchoolComparison(
     avg_attempt_rate: round1(r.avg_attempt_rate),
     avg_accuracy: round1(r.avg_accuracy),
     avg_score: round1(r.avg_score),
-    is_this_school: r.udise === udise,
+    is_this_school: r.udise === scope.udise,
   }));
 }
 
@@ -351,7 +381,7 @@ export async function getChapterTestReport(scope: SessionScope): Promise<Chapter
   const cmsTestId = summary.meta.cms_test_id;
   const [enrolled, comparison, chapters] = await Promise.all([
     getEnrolledInStream(scope, summary.testStream),
-    cmsTestId ? getSchoolComparison(cmsTestId, scope.udise) : Promise.resolve([]),
+    cmsTestId ? getSchoolComparison(cmsTestId, scope, summary.program) : Promise.resolve([]),
     cmsTestId ? getCmsTestChapters([cmsTestId]) : Promise.resolve(new Map<string, CmsTestChapter>()),
   ]);
   const chapter = cmsTestId ? chapters.get(cmsTestId) : undefined;
@@ -375,6 +405,7 @@ export async function getChapterTestReport(scope: SessionScope): Promise<Chapter
     },
     overview: {
       ...overview,
+      appeared: summary.appeared,
       enrolled,
       avg_time_minutes:
         summary.avgTimeSeconds == null ? null : Math.round(summary.avgTimeSeconds / 6) / 10,

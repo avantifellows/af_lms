@@ -75,7 +75,14 @@ export default function PerformanceTab({ schoolUdise, lockedProgram }: Props) {
           testName={f.deepDiveSession.testName}
           scope={f.scope}
           gradeControl={gradeControl}
-          chapterReport={f.testCategory === "chapter" && !f.isNvs}
+          chapterReport={
+            f.testCategory === "chapter" &&
+            !f.isNvs &&
+            // Combined chapter tests and homework keep the general report. Unknown
+            // (reached by URL): the chapter report decides from its data.
+            (f.deepDiveSession.testFormat == null ||
+              f.deepDiveSession.testFormat.toLowerCase() === "chapter_test")
+          }
           onBack={f.handleBack}
           onDataLoaded={f.handleDeepDiveData}
         />

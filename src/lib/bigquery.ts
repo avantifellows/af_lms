@@ -222,6 +222,12 @@ export async function getBatchOverviewData(
       MIN(start_date) AS start_date,
       COUNT(DISTINCT enrollment_user_id) AS student_count,
       COUNT(DISTINCT CASE WHEN student_stream = test_stream THEN enrollment_user_id END) AS stream_student_count,
+      -- The chapter-test card's "appeared" (and the report's): submitted, in the
+      -- test's stream when it has one.
+      COUNT(DISTINCT IF(
+        section = 'overall' AND has_quiz_ended IS NOT FALSE
+          AND (test_stream IS NULL OR student_stream = test_stream),
+        enrollment_user_id, NULL)) AS appeared_count,
       MAX(test_format) AS test_format,
       MAX(test_stream) AS test_stream,
       MAX(test_grade) AS test_grade,
@@ -271,6 +277,7 @@ export async function getBatchOverviewData(
     start_date: string;
     student_count: number;
     stream_student_count: number;
+    appeared_count: number;
     test_format: string | null;
     test_stream: string | null;
     test_grade: number | null;
@@ -294,6 +301,7 @@ export async function getBatchOverviewData(
       start_date: r.start_date,
       student_count: r.student_count,
       stream_student_count: r.stream_student_count,
+      appeared_count: r.appeared_count,
       test_format: r.test_format,
       test_stream: r.test_stream,
       test_grade: r.test_grade != null ? Number(r.test_grade) : null,

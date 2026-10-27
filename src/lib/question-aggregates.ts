@@ -107,18 +107,24 @@ export function rankQuestions(questions: QuestionStat[], kind: InsightKind): Que
   );
 }
 
-/** Combines slices (e.g. genders) into one cohort, weighting each by its students. */
+/**
+ * Combines slices (e.g. genders) into one cohort, weighting each by its students;
+ * accuracy is weighted by the students who have one, since those who attempted
+ * nothing are left out of each slice's accuracy.
+ */
 export function combineCohorts(slices: CohortStat[]): CohortStat {
-  const students = slices.reduce((n, s) => n + s.students, 0);
-  const weighted = (pick: (s: CohortStat) => number) =>
-    students > 0
-      ? Math.round((slices.reduce((t, s) => t + pick(s) * s.students, 0) / students) * 10) / 10
+  const weighted = (pick: (s: CohortStat) => number, weight: (s: CohortStat) => number) => {
+    const total = slices.reduce((n, s) => n + weight(s), 0);
+    return total > 0
+      ? Math.round((slices.reduce((t, s) => t + pick(s) * weight(s), 0) / total) * 10) / 10
       : 0;
+  };
+  const byStudents = (s: CohortStat) => s.students;
   return {
-    students,
-    avg_attempt_rate: weighted((s) => s.avg_attempt_rate),
-    avg_accuracy: weighted((s) => s.avg_accuracy),
-    avg_score: weighted((s) => s.avg_score),
+    students: slices.reduce((n, s) => n + s.students, 0),
+    avg_attempt_rate: weighted((s) => s.avg_attempt_rate, byStudents),
+    avg_accuracy: weighted((s) => s.avg_accuracy, (s) => s.accuracy_students ?? s.students),
+    avg_score: weighted((s) => s.avg_score, byStudents),
   };
 }
 

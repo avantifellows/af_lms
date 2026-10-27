@@ -25,7 +25,7 @@ const REPORT: ChapterTestReportData = {
     chapter_code: "12P24", chapter_name: "Wave Optics", priority: "Medium", duration_minutes: 60,
     total_questions: 25, max_marks: 100,
   },
-  overview: { students: 48, avg_attempt_rate: 45.8, avg_accuracy: 63.1, avg_score: 25.2, enrolled: 53, avg_time_minutes: 58 },
+  overview: { students: 48, avg_attempt_rate: 45.8, avg_accuracy: 63.1, avg_score: 25.2, appeared: 48, enrolled: 53, avg_time_minutes: 58 },
   gender: [
     { gender: "male", students: 29, avg_attempt_rate: 47.3, avg_accuracy: 56.6, avg_score: 22.5 },
     { gender: "female", students: 19, avg_attempt_rate: 43.6, avg_accuracy: 73.2, avg_score: 29.4 },
@@ -148,7 +148,23 @@ describe("ChapterTestReport", () => {
     expect(within(breakdown).getByText(/available for new-CMS tests only/)).toBeInTheDocument();
   });
 
-  it("shows the error and still the student results when the report fails", async () => {
+  it("shows the general report instead when the report fails", async () => {
+    mockFetch({ ok: false, body: { error: "No results available for this test yet." } });
+    render(
+      <ChapterTestReport
+        schoolUdise="2332"
+        grade={12}
+        sessionId="s1"
+        fallback={<div>general report</div>}
+        studentResults={<div>student results</div>}
+      />
+    );
+    expect(await screen.findByText("general report")).toBeInTheDocument();
+    expect(screen.queryByText("No results available for this test yet.")).not.toBeInTheDocument();
+    expect(screen.queryByText("student results")).not.toBeInTheDocument();
+  });
+
+  it("with no general report, shows the error and still the student results when the report fails", async () => {
     mockFetch({ ok: false, body: { error: "No results available for this test yet." } });
     render(<ChapterTestReport schoolUdise="2332" grade={12} sessionId="s1" studentResults={<div>student results</div>} />);
     expect(await screen.findByText("No results available for this test yet.")).toBeInTheDocument();

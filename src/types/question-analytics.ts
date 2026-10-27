@@ -44,8 +44,13 @@ export interface QuestionGroupStat {
 export interface CohortStat {
   students: number;
   avg_attempt_rate: number;
+  /** Over students who attempted something: a student who attempted nothing has
+   *  no accuracy, not 0%. */
   avg_accuracy: number;
   avg_score: number;
+  /** Students with an accuracy (who attempted something); defaults to `students`.
+   *  Weights avg_accuracy when slices are combined. */
+  accuracy_students?: number;
 }
 
 export interface GenderStat extends CohortStat {
@@ -82,6 +87,9 @@ export interface ChapterTestMeta {
 }
 
 export interface ChapterTestOverview extends CohortStat {
+  /** Students in the test's stream who submitted (every student when the test has
+   *  no stream): the same rule as the overview card. */
+  appeared: number;
   /** Students enrolled in the test's stream at this School and grade; null when unknown. */
   enrolled: number | null;
   avg_time_minutes: number | null;

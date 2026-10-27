@@ -19,8 +19,9 @@ interface Props {
   afterOverview?: ReactNode;
   /** Student Results, kept from the general test report, shown last. */
   studentResults?: ReactNode;
-  /** Shown instead for a session that is not a single-chapter test (combined
-   *  chapter tests, homework): they keep the general report's chapter analysis. */
+  /** The general report, shown instead when this one fails to load or the session
+   *  is not a single-chapter test (combined chapter tests, homework keep the
+   *  general report's chapter analysis). */
   fallback?: ReactNode;
 }
 
@@ -104,6 +105,7 @@ export default function ChapterTestReport({
     );
   }
   if (state.status === "error") {
+    if (fallback) return <>{fallback}</>;
     return (
       <div className="space-y-6">
         <div className="p-4 bg-danger-bg border border-danger text-danger rounded-lg">{state.message}</div>
@@ -117,13 +119,13 @@ export default function ChapterTestReport({
   const totalQuestions = test.total_questions ?? questions.length;
   const appearedPct =
     overview.enrolled && overview.enrolled > 0
-      ? ` (${Math.round((overview.students / overview.enrolled) * 100)}%)`
+      ? ` (${Math.round((overview.appeared / overview.enrolled) * 100)}%)`
       : "";
   const meta = [
     "Chapter Test",
     test.subject,
     formatLongDate(test.start_date),
-    `${appearedLine(overview.students, overview.enrolled)}${appearedPct}`,
+    `${appearedLine(overview.appeared, overview.enrolled)}${appearedPct}`,
   ].filter(Boolean);
   const attemptedQuestions = Math.round((overview.avg_attempt_rate / 100) * totalQuestions);
   // The server resolves the CMS test from the session; only new-CMS tests have one.
