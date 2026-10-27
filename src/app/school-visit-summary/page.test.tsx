@@ -24,7 +24,9 @@ vi.mock("next/navigation", () => ({
   usePathname: () => "/school-visit-summary",
   useRouter: () => ({ replace: vi.fn() }),
 }));
-vi.mock("@/lib/permissions", () => ({
+// The real School-access rules (canAccessSchoolSync) decide per-School flag access.
+vi.mock("@/lib/permissions", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/permissions")>()),
   getUserPermission: mockGetUserPermission,
   getResolvedPermission: mockGetUserPermission,
   getFeatureAccess: mockGetFeatureAccess,
@@ -922,6 +924,98 @@ describe("SchoolVisitSummaryPage", () => {
 
       expect(schoolWiseSql()).toContain("ORDER BY recurring_count DESC, school_name ASC, school_code ASC");
       expect(schoolWiseSql()).not.toContain("completed_at");
+    });
+
+    describe("Flags column", () => {
+      const flagRows = [
+        { ...schoolRows[0], af_school_category: "JNV", open_flags: "2" },
+        { ...schoolRows[1], af_school_category: "GSSS", open_flags: "0" },
+      ];
+
+      const twoSchoolProgramAdmin = { ...schoolScopedProgramAdminPermission, school_codes: ["SC001", "SC003"] };
+
+      function flagsColumn(): string[] {
+        return within(schoolWiseTable()).getAllByRole("row").slice(1)
+          .map((row) => within(row).getAllByRole("cell")[4].textContent ?? "");
+      }
+
+      it("shows each School's open flag count where the viewer may see its flags", async () => {
+        setupAuth();
+        setupSchoolWiseQueries(flagRows);
+
+        render(await SchoolVisitSummaryPage({ searchParams: Promise.resolve({}) }));
+
+        expect(within(schoolWiseTable()).getByRole("link", { name: "Flags" })).toBeInTheDocument();
+        expect(flagsColumn()).toEqual(["2", "0"]);
+      });
+
+      it("shows — for a School outside the viewer's flag access, and counts for the others", async () => {
+        setupAuth(schoolScopedProgramAdminPermission);
+        setupSchoolWiseQueries(flagRows);
+
+        render(await SchoolVisitSummaryPage({ searchParams: Promise.resolve({}) }));
+
+        expect(flagsColumn()).toEqual(["2", "—"]);
+      });
+
+      it("shows — everywhere for a viewer without students view", async () => {
+        setupAuth();
+        mockGetFeatureAccess.mockImplementation((_permission: unknown, feature: string) => (
+          feature === "students"
+            ? { access: "none", canView: false, canEdit: false }
+            : { access: "edit", canView: true, canEdit: true }
+        ));
+        setupSchoolWiseQueries(flagRows);
+
+        render(await SchoolVisitSummaryPage({ searchParams: Promise.resolve({}) }));
+
+        expect(flagsColumn()).toEqual(["—", "—"]);
+      });
+
+      it("sorts by Flags with — rows last in both directions", async () => {
+        // SQL orders by the raw count; Schools whose flags the viewer can't see move to the end.
+        const rows = [
+          { ...schoolRows[1], school_code: "SC002", school_name: "Hidden School", af_school_category: "JNV", open_flags: "5" },
+          { ...schoolRows[0], school_code: "SC001", school_name: "Test School", af_school_category: "JNV", open_flags: "2" },
+          { ...schoolRows[1], school_code: "SC003", school_name: "Third School", af_school_category: "JNV", open_flags: "0" },
+        ];
+        setupAuth(twoSchoolProgramAdmin);
+        setupSchoolWiseQueries(rows);
+
+        render(await SchoolVisitSummaryPage({ searchParams: Promise.resolve({ sort: "flags", dir: "desc" }) }));
+
+        expect(schoolWiseSql()).toContain("ORDER BY open_flags DESC, school_name ASC, school_code ASC");
+        expect(flagsColumn()).toEqual(["2", "0", "—"]);
+        expect(within(schoolWiseTable()).getByRole("link", { name: /Flags/ })).toHaveAttribute(
+          "href",
+          "/school-visit-summary?sort=flags&dir=asc"
+        );
+      });
+
+      it("sorts by Flags ascending, still with — rows last", async () => {
+        const rows = [
+          { ...schoolRows[1], school_code: "SC003", school_name: "Third School", af_school_category: "JNV", open_flags: "0" },
+          { ...schoolRows[0], school_code: "SC001", school_name: "Test School", af_school_category: "JNV", open_flags: "2" },
+          { ...schoolRows[1], school_code: "SC002", school_name: "Hidden School", af_school_category: "JNV", open_flags: "5" },
+        ];
+        setupAuth(twoSchoolProgramAdmin);
+        setupSchoolWiseQueries(rows);
+
+        render(await SchoolVisitSummaryPage({ searchParams: Promise.resolve({ sort: "flags", dir: "asc" }) }));
+
+        expect(schoolWiseSql()).toContain("ORDER BY open_flags ASC, school_name ASC, school_code ASC");
+        expect(flagsColumn()).toEqual(["0", "2", "—"]);
+      });
+
+      it("counts flags in the School-wise query itself, not one query per School", async () => {
+        setupAuth();
+        setupSchoolWiseQueries(flagRows);
+
+        await SchoolVisitSummaryPage({ searchParams: Promise.resolve({}) });
+
+        const flagQueries = mockQuery.mock.calls.filter(([sql]) => String(sql).includes("lms_student_intervention_flags"));
+        expect(flagQueries).toHaveLength(1);
+      });
     });
 
     it("ignores a School-wise sort on the Visits tab", async () => {

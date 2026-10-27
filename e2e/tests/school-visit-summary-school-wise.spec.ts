@@ -30,9 +30,9 @@ function schoolRows(page: Page) {
   return page.getByRole("table", { name: "Schools with visits" }).locator("tbody tr");
 }
 
-// The School, Visits, Last visit, Recurring issues and Top recurring concern cells of each
+// The School, Visits, Last visit, Recurring issues, Flags and Top recurring concern cells of each
 // School-wise row, top to bottom.
-function schoolColumn(page: Page, column: 0 | 1 | 2 | 3 | 4) {
+function schoolColumn(page: Page, column: 0 | 1 | 2 | 3 | 4 | 5) {
   return schoolRows(page).locator(`td:nth-child(${column + 1})`);
 }
 
@@ -354,10 +354,10 @@ test.describe("School Visit Summary — Recurring Concerns on the School-wise ta
     await expect(statValue(adminPage, "Open concerns")).toHaveText("7");
 
     // Alpha's three 2-visit concerns tie; the 15 Sep ones beat the 06 Aug one, then the lower id wins.
-    await expect(schoolColumn(adminPage, 4).nth(0)).toHaveText(`${HTML_CONCERN}2 visits`);
-    await expect(schoolColumn(adminPage, 4).nth(1)).toHaveText("Smartboard not working3 visits");
-    await expect(schoolColumn(adminPage, 4).nth(2)).toHaveText("—");
-    await expect(schoolColumn(adminPage, 4).nth(3)).toHaveText("—");
+    await expect(schoolColumn(adminPage, 5).nth(0)).toHaveText(`${HTML_CONCERN}2 visits`);
+    await expect(schoolColumn(adminPage, 5).nth(1)).toHaveText("Smartboard not working3 visits");
+    await expect(schoolColumn(adminPage, 5).nth(2)).toHaveText("—");
+    await expect(schoolColumn(adminPage, 5).nth(3)).toHaveText("—");
 
     await expect(schoolRow(adminPage, ALPHA).getByRole("img", { name: "3 or more recurring concerns" })).toBeVisible();
     await expect(schoolRow(adminPage, BRAVO).getByRole("img", { name: "1–2 recurring concerns" })).toBeVisible();
@@ -371,7 +371,7 @@ test.describe("School Visit Summary — Recurring Concerns on the School-wise ta
     await expect(schoolColumn(adminPage, 0)).toHaveText([`${ALPHA} (VSW_E2E)`, `${BRAVO} (VSW_E2E)`]);
     await expect(schoolColumn(adminPage, 1)).toHaveText(["2", "1"]);
     await expect(schoolColumn(adminPage, 3)).toHaveText(["1", "0"]);
-    await expect(schoolColumn(adminPage, 4).nth(0)).toHaveText("Lab equipment missing2 visits");
+    await expect(schoolColumn(adminPage, 5).nth(0)).toHaveText("Lab equipment missing2 visits");
     await expect(statValue(adminPage, "Schools with recurring concerns")).toHaveText("1");
     await expect(statValue(adminPage, "Open concerns")).toHaveText("2");
 
@@ -391,7 +391,7 @@ test.describe("School Visit Summary — Recurring Concerns on the School-wise ta
     await adminPage.goto(`/school-visit-summary?pms=${CONCERN_PM},${CONCERN_PM_2}&schools=VSWCONB`);
     await expect(schoolColumn(adminPage, 1)).toHaveText(["4"]);
     await expect(schoolColumn(adminPage, 3)).toHaveText(["2"]);
-    await expect(schoolColumn(adminPage, 4)).toHaveText(["Smartboard not working3 visits"]);
+    await expect(schoolColumn(adminPage, 5)).toHaveText(["Smartboard not working3 visits"]);
   });
 
   test("sorts by Recurring issues both ways, ties by School name; Top recurring concern isn't sortable", async ({ adminPage }) => {
@@ -465,6 +465,47 @@ test.describe("School Visit Summary — Recurring Concerns on the School-wise ta
 
     await expect(schoolRow(adminPage, ALPHA)).toContainText(HTML_CONCERN);
     await expect(schoolRow(adminPage, ALPHA).locator("b, img")).toHaveCount(0);
+  });
+});
+
+// Flags fixture: e2e/fixtures/migrations/20261027140200_seed_visit_summary_flags_fixture.sql.
+// VSWPHYS has two open flags and a resolved one (→ 2); VSWMIXED has an open Nodal flag and an
+// open JNV NVS flag (→ 1). Every role that can see the Visit Summary also has `students` view and
+// reaches each School in its summary scope, so "—" (no flag access) can't be reached here; the
+// page test in src/app/school-visit-summary/page.test.tsx covers it.
+test.describe("School Visit Summary — Flags on the School-wise tab", () => {
+  test("counts open, non-NVS intervention flags per School", async ({ adminPage }) => {
+    await adminPage.goto(`/school-visit-summary?pms=${BOTH_PMS}`);
+
+    await expect(schoolColumn(adminPage, 0)).toHaveText([
+      `${MIXED} (VSW_E2E)`, NO_REGION_NAME, `${OLD} (VSW_E2E)`, `${PHYSICAL} (VSW_E2E)`,
+    ]);
+    await expect(schoolColumn(adminPage, 4)).toHaveText(["1", "0", "0", "2"]);
+  });
+
+  test("sorts by Flags both ways, ties by School name", async ({ adminPage }) => {
+    await adminPage.goto(`/school-visit-summary?pms=${BOTH_PMS}`);
+
+    await sortHeader(adminPage, "Flags").click();
+    await expect(adminPage).toHaveURL(/[?&]sort=flags&dir=desc(&|$)/);
+    await expect(schoolColumn(adminPage, 4)).toHaveText(["2", "1", "0", "0"]);
+    await expect(schoolColumn(adminPage, 0)).toHaveText([
+      `${PHYSICAL} (VSW_E2E)`, `${MIXED} (VSW_E2E)`, NO_REGION_NAME, `${OLD} (VSW_E2E)`,
+    ]);
+
+    await sortHeader(adminPage, /Flags/).click();
+    await expect(adminPage).toHaveURL(/[?&]sort=flags&dir=asc(&|$)/);
+    await expect(schoolColumn(adminPage, 0)).toHaveText([
+      NO_REGION_NAME, `${OLD} (VSW_E2E)`, `${MIXED} (VSW_E2E)`, `${PHYSICAL} (VSW_E2E)`,
+    ]);
+  });
+
+  test("a seated PM sees the flag count at their visit-managed School", async ({ page }) => {
+    await signInAs(page, SEATED_PM);
+    await page.goto("/school-visit-summary");
+
+    await expect(schoolColumn(page, 0)).toHaveText([`${PHYSICAL} (VSW_E2E)`]);
+    await expect(schoolColumn(page, 4)).toHaveText(["2"]);
   });
 });
 

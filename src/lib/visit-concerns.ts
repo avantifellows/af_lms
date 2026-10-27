@@ -3,14 +3,17 @@
 // Visits in view come from the shared scope module, so everything follows every filter, the
 // actor's scope and the physical-only rule. A mention is **live** when its Visit is completed and
 // not soft-deleted (deleted Visits are never in view), so a record counts only through Visits in view.
+import { PROGRAM_IDS } from "@/lib/constants";
 import { query } from "@/lib/db";
+import { canViewSchoolInterventionFlags } from "@/lib/intervention-flags";
 import { buildVisitSummaryWhere, type VisitSummaryFilters } from "@/lib/visit-summary-scope";
 import type { VisitsActor } from "@/lib/visits-policy";
 
-export type SchoolWiseSortKey = "school_name" | "visits" | "last_visit" | "recurring";
+export type SchoolWiseSortKey = "school_name" | "visits" | "last_visit" | "recurring" | "flags";
 export type SchoolWiseSortDirection = "asc" | "desc";
 
-// The header-sortable columns. Every sort breaks ties by school name.
+// The header-sortable columns. Every sort breaks ties by school name. Flags sorts on the raw count;
+// Schools whose flags the viewer may not see then move to the end (see `getSchoolWiseView`).
 export const SCHOOL_WISE_SORT_COLUMNS: Record<
   SchoolWiseSortKey,
   { sql: string; defaultDir: SchoolWiseSortDirection }
@@ -19,6 +22,7 @@ export const SCHOOL_WISE_SORT_COLUMNS: Record<
   visits: { sql: "visits", defaultDir: "desc" },
   last_visit: { sql: "last_visit_date", defaultDir: "desc" },
   recurring: { sql: "recurring_count", defaultDir: "desc" },
+  flags: { sql: "open_flags", defaultDir: "desc" },
 };
 
 const DEFAULT_SCHOOL_WISE_SORT: SchoolWiseSortKey = "recurring";
@@ -42,6 +46,9 @@ export interface SchoolWiseRow {
   lastVisitDate: string;
   recurringCount: number;
   openCount: number;
+  // Open intervention flags at the School, excluding JNV NVS ones; null when the viewer may not
+  // see the School's flags.
+  flagsOpen: number | null;
   topRecurring: TopRecurringConcern | null;
 }
 
@@ -62,6 +69,7 @@ interface SchoolWiseQueryRow {
   school_code: string;
   school_name: string;
   region: string | null;
+  af_school_category: string | null;
   visits: string | number;
   last_visit_date: string;
   recurring_count: string | number;
@@ -69,6 +77,7 @@ interface SchoolWiseQueryRow {
   top_recurring_id: string | number | null;
   top_recurring_text: string | null;
   top_recurring_visit_count: string | number | null;
+  open_flags: string | number;
 }
 
 interface FreshnessQueryRow {
@@ -99,17 +108,20 @@ function buildOrderClause({ sort, dir }: SchoolWiseSort): string {
 // Concerns (open, 1+ live mention in view) and its top Recurring Concern (most Visits, then the
 // most recent mention's visit_date, then the lowest id). Resolved Concerns and Highlights never count.
 // `filters.recurringOnly` keeps only Schools with a Recurring Concern; the stats follow the rows kept.
+// Open intervention flags are counted per School in the same query (JNV NVS flags never count) and
+// shown only where the viewer passes the intervention-flag view rule for that School.
 export async function getSchoolWiseView(
   actor: VisitsActor,
   filters: VisitSummaryFilters,
   sort: SchoolWiseSort
 ): Promise<SchoolWiseView> {
   const { whereSql, joinSql, params } = buildVisitSummaryWhere(actor, filters);
+  const nvsProgramIndex = params.length + 1;
 
   const rowsQuery = query<SchoolWiseQueryRow>(
     `WITH visits_in_view AS (
        SELECT v.id, v.school_code, v.visit_date, v.status,
-              COALESCE(s.name, v.school_code) AS school_name, s.region
+              COALESCE(s.name, v.school_code) AS school_name, s.region, s.af_school_category
        FROM lms_pm_school_visits v
        LEFT JOIN school s ON s.code = v.school_code
        ${joinSql}
@@ -141,27 +153,39 @@ export async function getSchoolWiseView(
        ORDER BY school_code, visit_count DESC, last_mentioned_on DESC, id ASC
      ),
      school_visits AS (
-       SELECT school_code, school_name, region,
+       SELECT school_code, school_name, region, af_school_category,
               COUNT(*) AS visits,
               MAX(visit_date) AS last_visited_on
        FROM visits_in_view
-       GROUP BY school_code, school_name, region
+       GROUP BY school_code, school_name, region, af_school_category
+     ),
+     school_flags AS (
+       SELECT sch.code AS school_code, COUNT(*) AS open_flags
+       FROM lms_student_intervention_flags f
+       JOIN school sch ON sch.id = f.school_id
+       WHERE f.status = 'open'
+         AND f.program_id IS DISTINCT FROM $${nvsProgramIndex}
+         AND sch.code IN (SELECT school_code FROM visits_in_view)
+       GROUP BY sch.code
      )
      SELECT sv.school_code,
             sv.school_name,
             sv.region,
+            sv.af_school_category,
             sv.visits,
             TO_CHAR(sv.last_visited_on, 'YYYY-MM-DD') AS last_visit_date,
             COALESCE(sc.recurring_count, 0) AS recurring_count,
             COALESCE(sc.open_count, 0) AS open_count,
             tr.id AS top_recurring_id,
             tr.text AS top_recurring_text,
-            tr.visit_count AS top_recurring_visit_count
+            tr.visit_count AS top_recurring_visit_count,
+            COALESCE(sf.open_flags, 0) AS open_flags
      FROM school_visits sv
      LEFT JOIN school_concerns sc ON sc.school_code = sv.school_code
      LEFT JOIN top_recurring tr ON tr.school_code = sv.school_code
+     LEFT JOIN school_flags sf ON sf.school_code = sv.school_code
      ORDER BY ${buildOrderClause(sort)}`,
-    params
+    [...params, PROGRAM_IDS.NVS]
   );
   // summarised_at holds UTC in a timestamp without time zone.
   const freshnessQuery = query<FreshnessQueryRow>(
@@ -184,6 +208,13 @@ export async function getSchoolWiseView(
     lastVisitDate: row.last_visit_date,
     recurringCount: Number(row.recurring_count),
     openCount: Number(row.open_count),
+    flagsOpen: canViewSchoolInterventionFlags(actor.permission, {
+      code: row.school_code,
+      region: row.region,
+      af_school_category: row.af_school_category,
+    })
+      ? Number(row.open_flags)
+      : null,
     topRecurring: row.top_recurring_id === null || row.top_recurring_text === null
       ? null
       : {
@@ -192,7 +223,11 @@ export async function getSchoolWiseView(
           visitCount: Number(row.top_recurring_visit_count),
         },
   }));
-  const schoolRows = filters.recurringOnly ? allRows.filter((row) => row.recurringCount > 0) : allRows;
+  const keptRows = filters.recurringOnly ? allRows.filter((row) => row.recurringCount > 0) : allRows;
+  // The SQL sorted by the raw flag count; "—" rows go last in either direction, keeping that order.
+  const schoolRows = sort.sort === "flags"
+    ? [...keptRows.filter((row) => row.flagsOpen !== null), ...keptRows.filter((row) => row.flagsOpen === null)]
+    : keptRows;
 
   return {
     stats: {

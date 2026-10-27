@@ -728,6 +728,7 @@ function SchoolWiseTable({
             {header("visits", "Visits")}
             {header("last_visit", "Last visit")}
             {header("recurring", "Recurring issues")}
+            {header("flags", "Flags")}
             <th className="w-full px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-text-muted">
               Top recurring concern
             </th>
@@ -754,6 +755,9 @@ function SchoolWiseTable({
                 )}
               </td>
               <td className="whitespace-nowrap px-4 py-4 text-sm font-mono text-text-secondary">{row.recurringCount}</td>
+              <td className="whitespace-nowrap px-4 py-4 text-sm font-mono text-text-secondary">
+                {row.flagsOpen ?? <span className="text-text-muted">—</span>}
+              </td>
               <td className="px-4 py-4 text-sm text-text-primary">
                 {row.topRecurring ? (
                   <>
