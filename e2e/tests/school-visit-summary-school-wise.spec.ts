@@ -552,6 +552,15 @@ test.describe("School Visit Summary — School page", () => {
     await expect(adminPage.getByText("VSW Page PM")).toHaveCount(0);
   });
 
+  test("still renders when BigQuery is unavailable, with the academic levels marked unavailable", async ({ adminPage }) => {
+    // The e2e web server has no BigQuery credentials (playwright.config.ts).
+    await adminPage.goto("/school-visit-summary/schools/VSWMIXED");
+
+    await expect(adminPage.getByText("Academic levels unavailable")).toBeVisible();
+    await expect(teacherLines(adminPage)).toHaveCount(2);
+    await expect(adminPage.getByRole("link", { name: /Back to School-wise/ })).toBeVisible();
+  });
+
   test("is not found for an NVS-only School, a School whose only physical Centre is inactive, and an unknown code", async ({ adminPage }) => {
     for (const code of ["VSWNVS", "VSWOFF", "VSWNOSUCH"]) {
       const response = await adminPage.goto(`/school-visit-summary/schools/${code}`);

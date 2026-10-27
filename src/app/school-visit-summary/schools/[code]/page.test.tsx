@@ -10,7 +10,9 @@ const {
   mockRedirect,
   mockNotFound,
   mockRefresh,
+  mockGetStudentAcademicLevelCounts,
 } = vi.hoisted(() => ({
+  mockGetStudentAcademicLevelCounts: vi.fn(),
   mockGetServerSession: vi.fn(),
   mockGetResolvedPermission: vi.fn(),
   mockGetFeatureAccess: vi.fn(),
@@ -38,6 +40,11 @@ vi.mock("@/lib/permissions", async (importOriginal) => ({
   getFeatureAccess: mockGetFeatureAccess,
 }));
 vi.mock("@/lib/db", () => ({ query: mockQuery, withTransaction: mockWithTransaction }));
+// BigQuery is the external boundary; only its query function is replaced.
+vi.mock("@/lib/bigquery", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/bigquery")>()),
+  getStudentAcademicLevelCounts: mockGetStudentAcademicLevelCounts,
+}));
 vi.mock("next/link", () => ({
   __esModule: true,
   default: ({ href, children, ...props }: { href: string; children: React.ReactNode }) => (
@@ -92,6 +99,8 @@ describe("SchoolVisitSummarySchoolPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockQuery.mockReset();
+    mockGetStudentAcademicLevelCounts.mockReset();
+    mockGetStudentAcademicLevelCounts.mockResolvedValue([]);
   });
 
   describe("gate", () => {
@@ -158,6 +167,157 @@ describe("SchoolVisitSummarySchoolPage", () => {
         sort: "visits",
         dir: "asc",
       });
+    });
+  });
+
+  describe("academic-level cards", () => {
+    const coeCentre = { id: "101", name: "JNV Bhopal CoE", type_code: "coe", program_id: 1 };
+
+    function setupSchool(centres: Array<Record<string, unknown>> = [coeCentre]) {
+      mockQuery.mockImplementation((sql: string) => {
+        if (sql.includes("centre_positions")) return Promise.resolve([]);
+        if (sql.includes("lms_pm_school_visits")) return Promise.resolve([]);
+        if (sql.includes("c.program_id")) return Promise.resolve(centres);
+        return Promise.resolve([{ code: "SC001", name: "Test School", region: "Bhopal", udise_code: "23010100101" }]);
+      });
+    }
+
+    it("shows one card per Centre, grade and stream with Now counts and NA adding up to the total", async () => {
+      setupAuth();
+      setupSchool();
+      // Grade 11 at the CoE: engineering + pcm → JEE, medical + pcb → NEET; CA has no card.
+      mockGetStudentAcademicLevelCounts.mockResolvedValue([
+        { grade: 11, stream: "engineering", academicLevel: "M1", students: 12 },
+        { grade: 11, stream: "Engineering", academicLevel: "M2", students: 5 },
+        { grade: 11, stream: "PCM", academicLevel: "M3", students: 3 },
+        { grade: 11, stream: "engineering", academicLevel: null, students: 4 },
+        { grade: 11, stream: "medical", academicLevel: "B1", students: 6 },
+        { grade: 11, stream: "pcb", academicLevel: null, students: 2 },
+        { grade: 11, stream: "ca", academicLevel: "M1", students: 1 },
+      ]);
+
+      render(await renderPage());
+
+      const cards = within(screen.getByRole("list", { name: "Academic levels" })).getAllByRole("listitem");
+      expect(cards).toHaveLength(2);
+
+      const jee = within(screen.getByRole("link", { name: /CoE · Grade 11 · JEE/ }));
+      expect(jee.getByText("24 students")).toBeInTheDocument();
+      expect(jee.getByText("M1 12")).toBeInTheDocument();
+      expect(jee.getByText("M2 5")).toBeInTheDocument();
+      expect(jee.getByText("M3 3")).toBeInTheDocument();
+      expect(jee.getByText("NA 4")).toHaveAttribute("title", "No AL-bearing test yet");
+
+      const neet = within(screen.getByRole("link", { name: /CoE · Grade 11 · NEET/ }));
+      expect(neet.getByText("8 students")).toBeInTheDocument();
+      expect(neet.getByText("B1 6")).toBeInTheDocument();
+      expect(neet.getByText("NA 2")).toBeInTheDocument();
+      expect(mockGetStudentAcademicLevelCounts).toHaveBeenCalledWith("23010100101", "JNV CoE", [11, 12]);
+    });
+
+    it("opens the Centre's cumulative report for the grade in the same tab, without a stream", async () => {
+      setupAuth();
+      setupSchool();
+      mockGetStudentAcademicLevelCounts.mockResolvedValue([
+        { grade: 12, stream: "medical", academicLevel: "B2", students: 7 },
+      ]);
+
+      render(await renderPage());
+
+      const card = screen.getByRole("link", { name: /CoE · Grade 12 · NEET/ });
+      expect(card).toHaveAttribute("href", "/centre/101?tab=performance&grade=12&view=cumulative");
+      expect(card).not.toHaveAttribute("target");
+    });
+
+    it("counts PCMB students under JEE", async () => {
+      setupAuth();
+      setupSchool();
+      mockGetStudentAcademicLevelCounts.mockResolvedValue([
+        { grade: 11, stream: "PCMB", academicLevel: "M3", students: 2 },
+        { grade: 11, stream: "engineering", academicLevel: "M3", students: 1 },
+      ]);
+
+      render(await renderPage());
+
+      const jee = within(screen.getByRole("link", { name: /CoE · Grade 11 · JEE/ }));
+      expect(jee.getByText("3 students")).toBeInTheDocument();
+      expect(jee.getByText("M3 3")).toBeInTheDocument();
+    });
+
+    it("never queries an NVS Centre, and keeps CoE and Nodal cards apart", async () => {
+      setupAuth();
+      setupSchool([
+        coeCentre,
+        { id: "102", name: "JNV Bhopal Nodal", type_code: "nodal", program_id: 2 },
+        { id: "103", name: "JNV Bhopal NVS", type_code: "coe", program_id: 64 },
+      ]);
+      mockGetStudentAcademicLevelCounts.mockImplementation(async (_udise: string, program: string) =>
+        program === "JNV CoE"
+          ? [{ grade: 11, stream: "engineering", academicLevel: "M1", students: 10 }]
+          : [{ grade: 11, stream: "engineering", academicLevel: "M2", students: 4 }]
+      );
+
+      render(await renderPage());
+
+      expect(mockGetStudentAcademicLevelCounts.mock.calls.map((call) => call[1])).toEqual(["JNV CoE", "JNV Nodal"]);
+      const cards = within(screen.getByRole("list", { name: "Academic levels" })).getAllByRole("link");
+      expect(cards.map((card) => card.getAttribute("href"))).toEqual([
+        "/centre/101?tab=performance&grade=11&view=cumulative",
+        "/centre/102?tab=performance&grade=11&view=cumulative",
+      ]);
+      expect(within(cards[0]).getByText("M1 10")).toBeInTheDocument();
+      expect(within(cards[1]).getByText("Nodal · Grade 11 · JEE")).toBeInTheDocument();
+      expect(within(cards[1]).getByText("M2 4")).toBeInTheDocument();
+    });
+
+    it("omits the cards, without querying BigQuery, for a viewer who can't see the School's Performance", async () => {
+      setupAuth();
+      setupSchool();
+      mockGetFeatureAccess.mockImplementation((_permission: unknown, feature: string) =>
+        feature === "performance"
+          ? { access: "none", canView: false, canEdit: false }
+          : { access: "edit", canView: true, canEdit: true }
+      );
+
+      render(await renderPage());
+
+      expect(screen.getByRole("heading", { level: 1, name: "Test School (Bhopal)" })).toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: "Academic levels" })).not.toBeInTheDocument();
+      expect(mockGetStudentAcademicLevelCounts).not.toHaveBeenCalled();
+    });
+
+    it("omits the cards for a viewer outside the School's access scope", async () => {
+      // Sees the School on the Visit Summary through a PM seat that isn't in its School scope.
+      setupAuth({
+        email: "pm@avantifellows.org",
+        level: 1,
+        role: "program_manager",
+        school_codes: [],
+        read_only: false,
+        program_ids: [1],
+        scope: { schools: new Set<string>(), centres: new Set<number>(), programs: new Set<number>(), visitManagedSchools: new Set(["SC001"]) },
+      });
+      setupSchool();
+
+      render(await renderPage());
+
+      expect(screen.getByRole("heading", { level: 1, name: "Test School (Bhopal)" })).toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: "Academic levels" })).not.toBeInTheDocument();
+      expect(mockGetStudentAcademicLevelCounts).not.toHaveBeenCalled();
+    });
+
+    it("shows \"Academic levels unavailable\" when BigQuery fails, and the rest of the page still renders", async () => {
+      setupAuth();
+      setupSchool();
+      mockGetStudentAcademicLevelCounts.mockRejectedValue(new Error("BigQuery down"));
+      vi.spyOn(console, "error").mockImplementation(() => {});
+
+      render(await renderPage());
+
+      expect(screen.getByText("Academic levels unavailable")).toBeInTheDocument();
+      expect(screen.queryByRole("list", { name: "Academic levels" })).not.toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Teachers" })).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: /Back to School-wise/ })).toBeInTheDocument();
     });
   });
 

@@ -3,12 +3,14 @@ import { getServerSession } from "next-auth";
 import { notFound, redirect } from "next/navigation";
 
 import { Card } from "@/components/ui";
+import { AcademicLevelCards } from "@/components/visits/AcademicLevelCards";
 import { SchoolConcernSections } from "@/components/visits/SchoolConcernSections";
 import { authOptions } from "@/lib/auth";
-import { getFeatureAccess, getResolvedPermission } from "@/lib/permissions";
+import { canAccessSchoolSync, getFeatureAccess, getResolvedPermission } from "@/lib/permissions";
 import { getSchoolConcernPage } from "@/lib/visit-concerns";
 import { normalizeVisitSummaryFilters } from "@/lib/visit-summary-scope";
 import {
+  getVisitSummaryAcademicLevelCards,
   getVisitSummarySchool,
   getVisitSummarySchoolTeachers,
   type TeacherGroup,
@@ -90,9 +92,16 @@ export default async function SchoolVisitSummarySchoolPage({ params, searchParam
     notFound();
   }
 
-  const [teacherGroups, concernPage] = await Promise.all([
+  // Academic levels follow the Performance gate the cumulative-ALs API uses: School access plus
+  // `performance` view. Without it the strip has no cards and BigQuery is never queried.
+  const canViewPerformance =
+    canAccessSchoolSync(permission, school.code, school.region ?? undefined) &&
+    getFeatureAccess(permission, "performance").canView;
+
+  const [teacherGroups, concernPage, academicLevels] = await Promise.all([
     getVisitSummarySchoolTeachers(school.code),
     getSchoolConcernPage(actor, school.code, normalizeVisitSummaryFilters(currentParams)),
+    canViewPerformance ? getVisitSummaryAcademicLevelCards(school) : null,
   ]);
 
   return (
@@ -112,8 +121,9 @@ export default async function SchoolVisitSummarySchoolPage({ params, searchParam
           <p className="mt-1 text-sm text-text-secondary">School Visit Summary</p>
         </div>
 
-        <Card elevation="sm" className="p-4">
+        <Card elevation="sm" className="space-y-4 p-4">
           <TeachersLine groups={teacherGroups} />
+          {academicLevels && <AcademicLevelCards data={academicLevels} />}
         </Card>
 
         {/* Resolve / Comment / Reopen follow the rule the events API enforces: visits edit. */}
