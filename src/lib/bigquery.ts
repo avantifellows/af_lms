@@ -58,6 +58,11 @@ export const FACT_QUESTION_LEVEL_TABLE =
 // = TRUE: null means unknown (no test-level row upstream), not unsubmitted.
 export const SUBMITTED_ONLY = "AND has_quiz_ended IS NOT FALSE";
 
+// The students a chapter-test card counts: overall rows, submitted, and in the
+// test's own stream when it has one. The chapter-test report uses the same rule.
+const CHAPTER_CARD_COHORT =
+  "section = 'overall' AND has_quiz_ended IS NOT FALSE AND (test_stream IS NULL OR student_stream = test_stream)";
+
 // Test formats that count as "major" (i.e. the Full Tests tab) — these also have
 // real Academic Level (AL) values populated on the section='overall' row.
 export const MAJOR_TEST_FORMATS = [
@@ -222,20 +227,16 @@ export async function getBatchOverviewData(
       MIN(start_date) AS start_date,
       COUNT(DISTINCT enrollment_user_id) AS student_count,
       COUNT(DISTINCT CASE WHEN student_stream = test_stream THEN enrollment_user_id END) AS stream_student_count,
-      -- The chapter-test card's "appeared" (and the report's): submitted, in the
-      -- test's stream when it has one.
-      COUNT(DISTINCT IF(
-        section = 'overall' AND has_quiz_ended IS NOT FALSE
-          AND (test_stream IS NULL OR student_stream = test_stream),
-        enrollment_user_id, NULL)) AS appeared_count,
+      -- The chapter-test card's "appeared" and averages (and the report's):
+      -- submitted, in the test's stream when it has one.
+      COUNT(DISTINCT IF(${CHAPTER_CARD_COHORT}, enrollment_user_id, NULL)) AS appeared_count,
       MAX(test_format) AS test_format,
       MAX(test_stream) AS test_stream,
       MAX(test_grade) AS test_grade,
       ARRAY_AGG(DISTINCT section IGNORE NULLS) AS sections,
-      -- Per-student averages over submitted attempts, for the chapter-test cards.
-      AVG(IF(section = 'overall' AND has_quiz_ended IS NOT FALSE, attempt_rate, NULL)) AS avg_attempt_rate,
-      AVG(IF(section = 'overall' AND has_quiz_ended IS NOT FALSE, accuracy, NULL)) AS avg_accuracy,
-      AVG(IF(section = 'overall' AND has_quiz_ended IS NOT FALSE, percentage, NULL)) AS avg_score,
+      AVG(IF(${CHAPTER_CARD_COHORT}, attempt_rate, NULL)) AS avg_attempt_rate,
+      AVG(IF(${CHAPTER_CARD_COHORT}, accuracy, NULL)) AS avg_accuracy,
+      AVG(IF(${CHAPTER_CARD_COHORT}, percentage, NULL)) AS avg_score,
       MAX(cms_test_id) AS cms_test_id,
       MAX(test_course) AS test_course
     FROM ${FACT_TABLE}

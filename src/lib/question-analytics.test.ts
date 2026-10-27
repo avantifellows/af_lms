@@ -54,7 +54,7 @@ const QUESTION_ROWS = [
 const SUMMARY_ROWS = [
   {
     gender: "female", students: 19, avg_attempt_rate: 43.62, avg_accuracy: 73.15, avg_score: 29.43,
-    accuracy_students: 19, stream_students: 18, programs: ["EMRS CoE"],
+    accuracy_students: 19, programs: ["EMRS CoE"],
     total_time_seconds: 19 * 3452, timed_students: 19,
     cms_test_id: "9330", test_name: "12P24 - Wave Optics - JEE Main", test_format: "chapter_test",
     start_date: "2026-10-14", test_grade: 12, test_stream: "engineering", test_course: "JEE Mains",
@@ -62,7 +62,7 @@ const SUMMARY_ROWS = [
   },
   {
     gender: "male", students: 29, avg_attempt_rate: 47.31, avg_accuracy: 56.55, avg_score: 22.48,
-    accuracy_students: 29, stream_students: 29, programs: ["EMRS CoE"],
+    accuracy_students: 29, programs: ["EMRS CoE"],
     total_time_seconds: 29 * 3495, timed_students: 29,
     cms_test_id: "9330", test_name: "12P24 - Wave Optics - JEE Main", test_format: "chapter_test",
     start_date: "2026-10-14", test_grade: 12, test_stream: "engineering", test_course: "JEE Mains",
@@ -104,6 +104,8 @@ describe("getSessionQuestionStats", () => {
     const { query: sql, params } = query.mock.calls[0][0];
     expect(sql).toContain("hashed_session_id = MOD(ABS(FARM_FINGERPRINT(@sessionId)), 4000) + 1");
     expect(sql).toContain("AND student_program = @program");
+    // Only students in the test's own stream count.
+    expect(sql).toContain("AND (test_stream IS NULL OR student_stream = test_stream)");
     expect(sql).toContain("AND LOWER(student_stream) = @stream");
     expect(params).toEqual({ udise: "2332", grade: 12, sessionId: "EMRS_1", program: "EMRS CoE", stream: "engineering" });
 
@@ -140,8 +142,7 @@ describe("getChapterTestReport", () => {
     });
     expect(r.overview).toEqual({
       students: 48, avg_attempt_rate: 45.8, avg_accuracy: 63.1, avg_score: 25.2,
-      // Students in the test's stream who submitted: one is from another stream.
-      appeared: 47, enrolled: 53, avg_time_minutes: 58,
+      appeared: 48, enrolled: 53, avg_time_minutes: 58,
     });
     expect(r.gender.map((g) => [g.gender, g.avg_accuracy])).toEqual([["female", 73.2], ["male", 56.6]]);
     // This School's row is the report's own cohort, matching the overview.
@@ -157,11 +158,19 @@ describe("getChapterTestReport", () => {
     const call = query.mock.calls.find(([c]) => c.query.includes("cms_test_id = @cmsTestId"))!;
     const { query: sql, params } = call[0];
     expect(sql).toContain("student_program IN UNNEST(@programs)");
+    expect(sql).toContain("AND (test_stream IS NULL OR student_stream = test_stream)");
     expect(sql).toContain("student_grade = @grade");
     expect(sql).toContain("LOWER(student_stream) = @stream");
     expect(params).toMatchObject({ cmsTestId: "9330", grade: 12, stream: "engineering" });
     expect(params.programs).toContain("JNV CoE");
     expect(params.programs).not.toContain("JNV Nodal");
+  });
+
+  it("counts only students in the test's stream, for every number in the report", async () => {
+    answerByTable();
+    await getChapterTestReport(SCOPE);
+    const summary = query.mock.calls.find(([c]) => c.query.includes("GROUP BY gender"))![0].query;
+    expect(summary).toContain("AND (test_stream IS NULL OR student_stream = test_stream)");
   });
 
   it("takes the model from the session's only program when none is picked", async () => {

@@ -79,7 +79,7 @@ if (!res.ok) { const text = await res.text(); /* surface upstream error */ }
     - per-question stats from the question-level fact, **filtered on its partition column** `hashed_session_id = MOD(ABS(FARM_FINGERPRINT(@sessionId)), 4000) + 1` (10 MB instead of 2.4 GB);
     - topics from `bridge_question_topic` + `dim_topic` (a question with several topics counts under each);
     - overview and gender split from `fact_student_test_results_overall` (section `overall`, submitted only; class figures are combined from unrounded slices, accuracy weighted by `COUNT(accuracy)` since a student who attempted nothing has none);
-    - "X of Y appeared": X = students in the test's stream (`student_stream = test_stream`) who submitted, the same rule as the card's `appeared_count`; Y = enrolled in that stream;
+    - **one cohort for every number:** when the test has a stream, only students in it count (`IN_TEST_STREAM`: `test_stream IS NULL OR student_stream = test_stream`), in the overview, gender split, per-question stats and comparison rows alike. "X of Y appeared": X = those students who submitted; Y = enrolled in that stream. The card uses the same rule (`CHAPTER_CARD_COHORT` in `bigquery.ts` for `appeared_count` and its averages);
     - enrolled from `dim_student` in the test's stream;
     - other Schools on the same `cms_test_id` (`getSchoolComparison`): same grade, same stream filter, and programs of the same model as this School's (CoEs with CoEs, Nodals with Nodals, `comparisonPrograms`); any other program gets no comparison. This School's row is replaced by the overview cohort;
     - chapter and priority from `dim_test` → `dim_chapter`.
@@ -89,7 +89,7 @@ if (!res.ok) { const text = await res.text(); /* surface upstream error */ }
   - **Gating:** both content routes are gated on Performance access to the School, not quiz-session access.
 - **Chapter-test cards:** on the Chapter tests overview (not JNV NVS), `BatchOverview` renders `ChapterTestCard`, matching the chapter-test report index exactly:
   - "code – chapter · subject" title, exam, priority;
-  - "Grade · date · X of Y students appeared" (X = `appeared_count`: submitted, in the test's stream);
+  - "Grade · date · X of Y students appeared" (X = `appeared_count`: submitted, in the test's stream; the card's averages use the same students);
   - Attempt / Accuracy / Score;
   - no attendance block and no summary stat cards.
   - `getBatchOverviewData` adds per-test `avg_attempt_rate` / `avg_accuracy` / `avg_score` (overall rows, submitted only), `cms_test_id` and `exam` (test_course).

@@ -27,6 +27,12 @@ const BRIDGE_QUESTION_TOPIC_TABLE = "`avantifellows.production_dbt_final.bridge_
 // the whole table (~2.4 GB) — clustering on session_id alone does not prune.
 const SESSION_PARTITION = "hashed_session_id = MOD(ABS(FARM_FINGERPRINT(@sessionId)), 4000) + 1";
 
+// The report counts only students in the test's own stream (a JEE test's
+// engineering students) whenever the test has one, so "X appeared", the averages,
+// the gender split and the per-question numbers all describe one group. Same rule
+// as the chapter-test card (getBatchOverviewData).
+const IN_TEST_STREAM = "AND (test_stream IS NULL OR student_stream = test_stream)";
+
 /** One test session at one School, narrowed like every Performance read. */
 export interface SessionScope {
   udise: string;
@@ -50,6 +56,7 @@ function scopeFilters(scope: SessionScope) {
       AND session_id = @sessionId
       AND academic_year = '${CURRENT_ACADEMIC_YEAR}'
       ${SUBMITTED_ONLY}
+      ${IN_TEST_STREAM}
       ${scope.program ? "AND student_program = @program" : ""}
       ${scope.stream ? "AND LOWER(student_stream) = @stream" : ""}`;
   return { sql, params };
@@ -129,8 +136,6 @@ interface SessionSummary {
   testStream: string | null;
   /** The School's program for this session (the one picked, or the only one). */
   program: string | null;
-  /** Students in the test's stream (all students when it has none). */
-  appeared: number;
   /** Unrounded, so the whole-class figures are combined before any rounding. */
   gender: GenderStat[];
   avgTimeSeconds: number | null;
@@ -178,8 +183,6 @@ async function getSessionSummary(scope: SessionScope): Promise<SessionSummary | 
       AVG(accuracy) AS avg_accuracy,
       COUNT(accuracy) AS accuracy_students,
       AVG(percentage) AS avg_score,
-      -- The overview card's rule: student_stream = test_stream.
-      COUNT(DISTINCT IF(student_stream = test_stream, enrollment_user_id, NULL)) AS stream_students,
       ARRAY_AGG(DISTINCT student_program IGNORE NULLS) AS programs,
       SUM(total_time_spent) AS total_time_seconds,
       COUNT(total_time_spent) AS timed_students,
@@ -203,12 +206,10 @@ async function getSessionSummary(scope: SessionScope): Promise<SessionSummary | 
   const timed = list.reduce((n, r) => n + toNum(r.timed_students), 0);
   const totalTime = list.reduce((n, r) => n + toNum(r.total_time_seconds), 0);
   const testStream = (first.test_stream as string | null) ?? null;
-  const appeared = list.reduce((n, r) => n + toNum(testStream ? r.stream_students : r.students), 0);
   return {
     meta: summaryMeta(first, scope.sessionId),
     testStream,
     program: scope.program ?? onlyProgram(list),
-    appeared,
     gender: list.map((r) => ({
       gender: String(r.gender),
       students: toNum(r.students),
@@ -283,6 +284,7 @@ async function getSchoolComparison(
       AND academic_year = '${CURRENT_ACADEMIC_YEAR}'
       AND section = 'overall'
       ${SUBMITTED_ONLY}
+      ${IN_TEST_STREAM}
       AND student_program IN UNNEST(@programs)
       AND student_grade = @grade
       ${scope.stream ? "AND LOWER(student_stream) = @stream" : ""}
@@ -418,7 +420,7 @@ export async function getChapterTestReport(scope: SessionScope): Promise<Chapter
     },
     overview: {
       ...overview,
-      appeared: summary.appeared,
+      appeared: overview.students,
       enrolled,
       avg_time_minutes:
         summary.avgTimeSeconds == null ? null : Math.round(summary.avgTimeSeconds / 6) / 10,

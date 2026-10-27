@@ -87,8 +87,8 @@ export interface ChapterTestMeta {
 }
 
 export interface ChapterTestOverview extends CohortStat {
-  /** Students in the test's stream who submitted (every student when the test has
-   *  no stream): the same rule as the overview card. */
+  /** Students who submitted: like every number in the report, only those in the
+   *  test's stream when it has one (the overview card's rule). Equals `students`. */
   appeared: number;
   /** Students enrolled in the test's stream at this School and grade; null when unknown. */
   enrolled: number | null;

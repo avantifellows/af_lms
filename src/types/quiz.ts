@@ -18,7 +18,8 @@ export interface TestTrendPoint {
   // Subjects this test covers, derived from non-`overall` `section` values.
   // Empty for tests that have no per-subject breakdown.
   subjects: string[];
-  // Per-student averages (0-100) over submitted attempts; null when none submitted.
+  // Per-student averages (0-100) over submitted attempts in the test's stream (the
+  // chapter-test card's cohort, see appeared_count); null when none submitted.
   avg_attempt_rate: number | null;
   avg_accuracy: number | null;
   avg_score: number | null;
