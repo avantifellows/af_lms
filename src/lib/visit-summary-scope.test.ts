@@ -8,6 +8,7 @@ import type { UserPermission } from "@/lib/permissions";
 import { buildVisitsActor } from "@/lib/visits-policy";
 import {
   getVisitSummaryPmOptions,
+  getVisitSummaryRegionOptions,
   getVisitSummarySchoolOptions,
   normalizeVisitSummaryFilters,
 } from "./visit-summary-scope";
@@ -68,6 +69,36 @@ describe("Visit Summary scope", () => {
         { email: "pm@example.org", name: "Program Manager" },
       ]);
       expect(mockQuery.mock.calls[0][1]).toEqual([["SC001", "SC002"], "2026-05-01", "2026-05-31"]);
+    });
+  });
+
+  describe("Region options", () => {
+    it("label Schools with no region as 'No region (non-JNV)' and ignore the Region filter", async () => {
+      mockQuery.mockResolvedValueOnce([{ region: "Bhopal" }, { region: "Hyderabad" }, { region: null }]);
+      const filters = normalizeVisitSummaryFilters({
+        regions: "Bhopal",
+        pms: "pm@example.org",
+      });
+
+      const options = await getVisitSummaryRegionOptions(adminActor, filters);
+
+      expect(options).toEqual([
+        { value: "Bhopal", label: "Bhopal" },
+        { value: "Hyderabad", label: "Hyderabad" },
+        { value: "__none__", label: "No region (non-JNV)" },
+      ]);
+      expect(mockQuery.mock.calls[0][1]).toEqual([["pm@example.org"]]);
+    });
+  });
+
+  describe("Region filter", () => {
+    it("narrows the School options to the picked named regions", async () => {
+      mockQuery.mockResolvedValueOnce([]);
+      const filters = normalizeVisitSummaryFilters({ regions: "Bhopal, Hyderabad" });
+
+      await getVisitSummarySchoolOptions(adminActor, filters);
+
+      expect(mockQuery.mock.calls[0][1]).toEqual([["Bhopal", "Hyderabad"]]);
     });
   });
 });

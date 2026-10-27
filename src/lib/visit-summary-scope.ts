@@ -1,5 +1,5 @@
 // The Visits in view on the School Visit Summary (server-only: reads through `@/lib/db`).
-// Every Visit Summary query — the Visits list, its stat cards and the School/PM filter
+// Every Visit Summary query — the Visits list, its stat cards and the Region/School/PM filter
 // options — builds its WHERE clause here, so they all agree on which Visits are in view.
 import { query } from "@/lib/db";
 import { REQUIRED_ACTION_TYPE_VALUES } from "@/lib/visit-actions";
@@ -9,9 +9,14 @@ import { buildVisitSummaryScopePredicate, type VisitsActor } from "@/lib/visits-
 export type VisitSummaryStatusFilter = "in_progress" | "completed";
 export type ActionCompletionBucketFilter = "none" | "partial" | "all_present" | "all_complete";
 // The filter an option list leaves out, so picking a School never hides the other Schools.
-export type VisitSummaryFilterExclusion = "schools" | "pms";
+export type VisitSummaryFilterExclusion = "regions" | "schools" | "pms";
+
+// The `regions` value that matches Schools with no region (`school.region IS NULL`): non-JNV Schools.
+const NO_REGION_FILTER_VALUE = "__none__";
+const NO_REGION_FILTER_LABEL = "No region (non-JNV)";
 
 export interface VisitSummaryFilters {
+  regions: string[];
   schools: string[];
   pms: string[];
   status?: VisitSummaryStatusFilter;
@@ -23,6 +28,7 @@ export interface VisitSummaryFilters {
 }
 
 export interface VisitSummaryFilterParams {
+  regions?: string;
   schools?: string;
   pms?: string;
   status?: string;
@@ -36,6 +42,11 @@ export interface VisitSummaryWhere {
   whereSql: string;
   joinSql: string;
   params: unknown[];
+}
+
+export interface RegionFilterOption {
+  value: string;
+  label: string;
 }
 
 export interface SchoolFilterOption {
@@ -71,6 +82,7 @@ export function normalizeVisitSummaryFilters(searchParams: VisitSummaryFilterPar
   const to = presetRange?.to ?? manualTo;
 
   return {
+    regions: parseListFilter(searchParams.regions),
     schools: parseListFilter(searchParams.schools),
     pms: parseListFilter(searchParams.pms, (item) => item.toLowerCase()),
     status: searchParams.status === "in_progress" || searchParams.status === "completed"
@@ -99,7 +111,7 @@ const PHYSICAL_SCHOOL_PREDICATE = `EXISTS (
 // v.school_code` (the region scope reads `s.region`). Placeholders start at `startIndex`.
 export function buildVisitSummaryWhere(
   actor: VisitsActor,
-  filters: VisitSummaryFilters = { schools: [], pms: [], forceEmpty: false },
+  filters: VisitSummaryFilters = { regions: [], schools: [], pms: [], forceEmpty: false },
   options: { startIndex?: number; exclude?: VisitSummaryFilterExclusion } = {}
 ): VisitSummaryWhere {
   const { startIndex = 1, exclude } = options;
@@ -110,6 +122,20 @@ export function buildVisitSummaryWhere(
 
   if (filters.forceEmpty) {
     predicates.push("1 = 0");
+  }
+
+  if (exclude !== "regions" && filters.regions.length > 0) {
+    const namedRegions = filters.regions.filter((region) => region !== NO_REGION_FILTER_VALUE);
+    const regionMatches: string[] = [];
+    if (namedRegions.length > 0) {
+      regionMatches.push(`s.region = ANY($${nextIndex})`);
+      params.push(namedRegions);
+      nextIndex += 1;
+    }
+    if (filters.regions.includes(NO_REGION_FILTER_VALUE)) {
+      regionMatches.push("s.region IS NULL");
+    }
+    predicates.push(`(${regionMatches.join(" OR ")})`);
   }
 
   if (exclude !== "schools" && filters.schools.length > 0) {
@@ -184,6 +210,27 @@ export function buildVisitSummaryWhere(
     joinSql: joins.join("\n"),
     params,
   };
+}
+
+export async function getVisitSummaryRegionOptions(
+  actor: VisitsActor,
+  filters: VisitSummaryFilters
+): Promise<RegionFilterOption[]> {
+  const { whereSql, joinSql, params } = buildVisitSummaryWhere(actor, filters, { exclude: "regions" });
+
+  const rows = await query<{ region: string | null }>(
+    `SELECT DISTINCT s.region
+     FROM lms_pm_school_visits v
+     LEFT JOIN school s ON s.code = v.school_code
+     ${joinSql}
+     WHERE ${whereSql}
+     ORDER BY s.region ASC NULLS LAST`,
+    params
+  );
+
+  return rows.map(({ region }) => region === null
+    ? { value: NO_REGION_FILTER_VALUE, label: NO_REGION_FILTER_LABEL }
+    : { value: region, label: region });
 }
 
 export async function getVisitSummarySchoolOptions(

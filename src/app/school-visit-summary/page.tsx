@@ -24,9 +24,11 @@ import {
 import {
   buildVisitSummaryWhere,
   getVisitSummaryPmOptions,
+  getVisitSummaryRegionOptions,
   getVisitSummarySchoolOptions,
   normalizeVisitSummaryFilters,
   type PmFilterOption,
+  type RegionFilterOption,
   type SchoolFilterOption,
   type VisitSummaryFilters,
 } from "@/lib/visit-summary-scope";
@@ -94,6 +96,7 @@ interface SummaryResult {
   visits: SummaryVisit[];
   stats: SummaryStats;
   actionSummaries: Map<number, VisitActionSummary>;
+  regionOptions: RegionFilterOption[];
   schoolOptions: SchoolFilterOption[];
   pmOptions: PmFilterOption[];
   totalCount: number;
@@ -108,6 +111,7 @@ interface PageProps {
     sort?: string;
     dir?: string;
     page?: string;
+    regions?: string;
     schools?: string;
     pms?: string;
     status?: string;
@@ -359,6 +363,7 @@ async function getSummaryVisits(
     sort?: string;
     dir?: string;
     page?: string;
+    regions?: string;
     schools?: string;
     pms?: string;
     status?: string;
@@ -371,11 +376,12 @@ async function getSummaryVisits(
   const { sort, dir } = normalizeSort(searchParams.sort, searchParams.dir);
   const filters = normalizeVisitSummaryFilters(searchParams);
   const requestedPage = normalizePage(searchParams.page);
-  const [stats, initialVisits, schoolOptions, pmOptions] = await Promise.all([
+  const [stats, initialVisits, schoolOptions, pmOptions, regionOptions] = await Promise.all([
     getSummaryStats(actor, filters),
     getPaginatedVisits(actor, filters, sort, dir, requestedPage),
     getVisitSummarySchoolOptions(actor, filters),
     getVisitSummaryPmOptions(actor, filters),
+    getVisitSummaryRegionOptions(actor, filters),
   ]);
   const totalCount = stats.totalVisits;
   const totalPages = Math.max(1, Math.ceil(totalCount / VISITS_PER_PAGE));
@@ -390,6 +396,7 @@ async function getSummaryVisits(
     visits,
     stats,
     actionSummaries,
+    regionOptions,
     schoolOptions,
     pmOptions,
     totalCount,
@@ -742,6 +749,7 @@ export default async function SchoolVisitSummaryPage({ searchParams }: PageProps
     visits,
     stats,
     actionSummaries,
+    regionOptions,
     schoolOptions,
     pmOptions,
     totalCount,
@@ -806,6 +814,7 @@ export default async function SchoolVisitSummaryPage({ searchParams }: PageProps
         <StatCards stats={stats} />
 
         <VisitSummaryFilterBar
+          regionOptions={regionOptions}
           schoolOptions={schoolOptions}
           pmOptions={pmOptions}
           currentParams={rawSearchParams}

@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
@@ -172,18 +172,21 @@ function setupSummaryQueries({
   actions = summaryActionRows,
   schoolOptions = [{ code: "SC001", name: "Test School" }],
   pmOptions = [{ email: "pm@avantifellows.org", name: "Program Manager" }],
+  regionOptions = [{ region: "Bhopal" }],
 }: {
   stats?: typeof aggregateStats | typeof emptyAggregateStats;
   visits?: Array<typeof summaryVisit>;
   actions?: Array<{ visit_id: number; action_type: string; status: string }>;
   schoolOptions?: Array<{ code: string; name: string }>;
   pmOptions?: Array<{ email: string; name: string | null }>;
+  regionOptions?: Array<{ region: string | null }>;
 } = {}) {
   mockQuery
     .mockResolvedValueOnce([stats])
     .mockResolvedValueOnce(visits)
     .mockResolvedValueOnce(schoolOptions)
     .mockResolvedValueOnce(pmOptions)
+    .mockResolvedValueOnce(regionOptions)
     .mockResolvedValueOnce(actions);
 }
 
@@ -264,7 +267,7 @@ describe("SchoolVisitSummaryPage", () => {
       const visitQueries = (mockQuery.mock.calls as [string, unknown[]][])
         .map(([sql]) => sql)
         .filter((sql) => sql.includes("FROM lms_pm_school_visits v"));
-      expect(visitQueries).toHaveLength(4);
+      expect(visitQueries).toHaveLength(5);
       for (const sql of visitQueries) {
         expect(sql).toMatch(/EXISTS \(\s*SELECT 1\s+FROM school \w+\s+JOIN centres \w+/);
         expect(sql).toMatch(/\w+\.is_physical AND \w+\.is_active/);
@@ -331,7 +334,7 @@ describe("SchoolVisitSummaryPage", () => {
 
       const pagePromise = SchoolVisitSummaryPage({ searchParams: Promise.resolve({}) });
 
-      await waitFor(() => expect(mockQuery).toHaveBeenCalledTimes(4));
+      await waitFor(() => expect(mockQuery).toHaveBeenCalledTimes(5));
       expect(mockQuery.mock.calls[0][0]).toContain("WITH action_completion");
       expect(mockQuery.mock.calls[1][0]).toContain("LIMIT");
 
@@ -339,8 +342,8 @@ describe("SchoolVisitSummaryPage", () => {
       resolveVisits([summaryVisit]);
       await pagePromise;
 
-      expect(mockQuery.mock.calls[4][0]).toContain("WHERE visit_id = ANY($1)");
-      expect(mockQuery.mock.calls[4][0]).toContain("deleted_at IS NULL");
+      expect(mockQuery.mock.calls[5][0]).toContain("WHERE visit_id = ANY($1)");
+      expect(mockQuery.mock.calls[5][0]).toContain("deleted_at IS NULL");
     });
 
     it("uses known action types and numeric division in the aggregate stats query", async () => {
@@ -579,6 +582,7 @@ describe("SchoolVisitSummaryPage", () => {
         .mockResolvedValueOnce([])
         .mockResolvedValueOnce([])
         .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
         .mockResolvedValueOnce([summaryVisit])
         .mockResolvedValueOnce(summaryActionRows);
 
@@ -587,7 +591,7 @@ describe("SchoolVisitSummaryPage", () => {
 
       expect(screen.getByText("Page 2 of 2")).toBeInTheDocument();
       expect(mockQuery.mock.calls[1][1]).toEqual([20, 19960]);
-      expect(mockQuery.mock.calls[4][1]).toEqual([20, 20]);
+      expect(mockQuery.mock.calls[5][1]).toEqual([20, 20]);
     });
   });
 
@@ -617,6 +621,21 @@ describe("SchoolVisitSummaryPage", () => {
         "href",
         "/school-visit-summary/101"
       );
+    });
+
+    it("offers the Regions in view, including Schools with no region", async () => {
+      setupAuth();
+      setupSummaryQueries({ regionOptions: [{ region: "Bhopal" }, { region: null }] });
+
+      const jsx = await SchoolVisitSummaryPage({ searchParams: Promise.resolve({ regions: "__none__" }) });
+      render(jsx);
+
+      const region = screen.getByRole("group", { name: "Region" });
+      expect(within(region).getByRole("button")).toHaveTextContent("No region (non-JNV)");
+
+      fireEvent.click(within(region).getByRole("button"));
+      expect(within(region).getByRole("checkbox", { name: "No region (non-JNV)" })).toBeChecked();
+      expect(within(region).getByRole("checkbox", { name: "Bhopal" })).not.toBeChecked();
     });
 
     it("renders empty state when no visits match", async () => {

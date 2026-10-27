@@ -1,7 +1,12 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
+
+import {
+  SearchableMultiSelect,
+  type SearchableMultiSelectOption,
+} from "@/components/ui/SearchableMultiSelect";
 
 interface SchoolOption {
   code: string;
@@ -14,6 +19,7 @@ interface PmOption {
 }
 
 interface FilterBarProps {
+  regionOptions: SearchableMultiSelectOption[];
   schoolOptions: SchoolOption[];
   pmOptions: PmOption[];
   currentParams: Record<string, string | undefined>;
@@ -26,17 +32,28 @@ function parseListParam(value: string | undefined): string[] {
     .filter(Boolean);
 }
 
-function toggleValue(values: string[], value: string): string[] {
-  return values.includes(value)
-    ? values.filter((item) => item !== value)
-    : [...values, value];
-}
-
 function optionLabel(label: string, value: string): string {
   return label === value ? value : `${label} (${value})`;
 }
 
+// A value picked earlier (or typed into the URL) that no longer has Visits in view stays listed,
+// ticked, so it can be unticked.
+function withMissingSelected(
+  options: SearchableMultiSelectOption[],
+  selected: string[]
+): SearchableMultiSelectOption[] {
+  const known = new Set(options.map((option) => option.value));
+  const missing = selected
+    .filter((value) => !known.has(value))
+    .map((value) => ({ value, label: `${value} (not in results)` }));
+  return [...missing, ...options];
+}
+
+const FIELD_LABEL_CLASS = "text-xs font-bold uppercase tracking-wide text-text-muted";
+const FIELD_INPUT_CLASS = "mt-2 w-full border border-border bg-bg-card px-3 py-2 text-sm text-text-primary";
+
 export default function VisitSummaryFilterBar({
+  regionOptions,
   schoolOptions,
   pmOptions,
   currentParams,
@@ -45,6 +62,7 @@ export default function VisitSummaryFilterBar({
   const pathname = usePathname();
   const debounceRef = useRef<number | null>(null);
   const pendingUpdatesRef = useRef<Record<string, string | undefined>>({});
+  const [selectedRegions, setSelectedRegions] = useState(() => parseListParam(currentParams.regions));
   const [selectedSchools, setSelectedSchools] = useState(() => parseListParam(currentParams.schools));
   const [selectedPms, setSelectedPms] = useState(() => parseListParam(currentParams.pms));
   const [status, setStatus] = useState(currentParams.status || "");
@@ -52,16 +70,6 @@ export default function VisitSummaryFilterBar({
   const [from, setFrom] = useState(currentParams.from || "");
   const [to, setTo] = useState(currentParams.to || "");
   const [bucket, setBucket] = useState(currentParams.bucket || "");
-  const schoolOptionCodes = useMemo(
-    () => new Set(schoolOptions.map((school) => school.code)),
-    [schoolOptions]
-  );
-  const pmOptionEmails = useMemo(
-    () => new Set(pmOptions.map((pm) => pm.email)),
-    [pmOptions]
-  );
-  const missingSchools = selectedSchools.filter((code) => !schoolOptionCodes.has(code));
-  const missingPms = selectedPms.filter((email) => !pmOptionEmails.has(email));
 
   function replaceWith(updates: Record<string, string | undefined>) {
     Object.assign(pendingUpdatesRef.current, updates);
@@ -132,79 +140,51 @@ export default function VisitSummaryFilterBar({
         </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-5">
-        <fieldset>
-          <legend className="text-xs font-bold uppercase tracking-wide text-text-muted">School</legend>
-          <div className="mt-2 space-y-2">
-            {missingSchools.map((code) => (
-              <button
-                key={code}
-                type="button"
-                onClick={() => {
-                  const next = selectedSchools.filter((schoolCode) => schoolCode !== code);
-                  setSelectedSchools(next);
-                  replaceWith({ schools: next.join(",") || undefined });
-                }}
-                className="block text-left text-sm text-text-muted"
-              >
-                {code} (not in results)
-              </button>
-            ))}
-            {schoolOptions.map((school) => (
-              <label key={school.code} className="flex items-center gap-2 text-sm text-text-secondary">
-                <input
-                  type="checkbox"
-                  checked={selectedSchools.includes(school.code)}
-                  onChange={() => {
-                    const next = toggleValue(selectedSchools, school.code);
-                    setSelectedSchools(next);
-                    replaceWith({ schools: next.join(",") || undefined });
-                  }}
-                />
-                <span>{school.name} ({school.code})</span>
-              </label>
-            ))}
-          </div>
-        </fieldset>
+      <div className="grid items-start gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
+        <SearchableMultiSelect
+          label="Region"
+          options={withMissingSelected(regionOptions, selectedRegions)}
+          selected={selectedRegions}
+          allLabel="All regions"
+          pluralNoun="regions"
+          onChange={(next) => {
+            setSelectedRegions(next);
+            replaceWith({ regions: next.join(",") || undefined });
+          }}
+        />
 
-        <fieldset>
-          <legend className="text-xs font-bold uppercase tracking-wide text-text-muted">PM</legend>
-          <div className="mt-2 space-y-2">
-            {missingPms.map((email) => (
-              <button
-                key={email}
-                type="button"
-                onClick={() => {
-                  const next = selectedPms.filter((pmEmail) => pmEmail !== email);
-                  setSelectedPms(next);
-                  replaceWith({ pms: next.join(",") || undefined });
-                }}
-                className="block text-left text-sm text-text-muted"
-              >
-                {email} (not in results)
-              </button>
-            ))}
-            {pmOptions.length === 0 && missingPms.length === 0 ? (
-              <div className="text-sm text-text-muted">All PMs</div>
-            ) : pmOptions.map((pm) => (
-              <label key={pm.email} className="flex items-center gap-2 text-sm text-text-secondary">
-                <input
-                  type="checkbox"
-                  checked={selectedPms.includes(pm.email)}
-                  onChange={() => {
-                    const next = toggleValue(selectedPms, pm.email);
-                    setSelectedPms(next);
-                    replaceWith({ pms: next.join(",") || undefined });
-                  }}
-                />
-                <span>{optionLabel(pm.name || pm.email, pm.email)}</span>
-              </label>
-            ))}
-          </div>
-        </fieldset>
+        <SearchableMultiSelect
+          label="School"
+          options={withMissingSelected(
+            schoolOptions.map((school) => ({ value: school.code, label: `${school.name} (${school.code})` })),
+            selectedSchools
+          )}
+          selected={selectedSchools}
+          allLabel="All schools"
+          pluralNoun="schools"
+          onChange={(next) => {
+            setSelectedSchools(next);
+            replaceWith({ schools: next.join(",") || undefined });
+          }}
+        />
+
+        <SearchableMultiSelect
+          label="PM"
+          options={withMissingSelected(
+            pmOptions.map((pm) => ({ value: pm.email, label: optionLabel(pm.name || pm.email, pm.email) })),
+            selectedPms
+          )}
+          selected={selectedPms}
+          allLabel="All PMs"
+          pluralNoun="PMs"
+          onChange={(next) => {
+            setSelectedPms(next);
+            replaceWith({ pms: next.join(",") || undefined });
+          }}
+        />
 
         <div>
-          <label htmlFor="visit-summary-status" className="text-xs font-bold uppercase tracking-wide text-text-muted">
+          <label htmlFor="visit-summary-status" className={FIELD_LABEL_CLASS}>
             Status
           </label>
           <select
@@ -214,7 +194,7 @@ export default function VisitSummaryFilterBar({
               setStatus(event.target.value);
               replaceWith({ status: event.target.value || undefined });
             }}
-            className="mt-2 w-full border border-border bg-bg-card px-3 py-2 text-sm text-text-primary"
+            className={FIELD_INPUT_CLASS}
           >
             <option value="">Any status</option>
             <option value="in_progress">In Progress</option>
@@ -223,7 +203,7 @@ export default function VisitSummaryFilterBar({
         </div>
 
         <div>
-          <label htmlFor="visit-summary-bucket" className="text-xs font-bold uppercase tracking-wide text-text-muted">
+          <label htmlFor="visit-summary-bucket" className={FIELD_LABEL_CLASS}>
             Required Completion
           </label>
           <select
@@ -233,7 +213,7 @@ export default function VisitSummaryFilterBar({
               setBucket(event.target.value);
               replaceWith({ bucket: event.target.value || undefined });
             }}
-            className="mt-2 w-full border border-border bg-bg-card px-3 py-2 text-sm text-text-primary"
+            className={FIELD_INPUT_CLASS}
           >
             <option value="">Any required completion</option>
             <option value="none">No required actions</option>
@@ -243,64 +223,63 @@ export default function VisitSummaryFilterBar({
           </select>
         </div>
 
-        <div className="space-y-3">
-          <div>
-            <label htmlFor="visit-summary-preset" className="text-xs font-bold uppercase tracking-wide text-text-muted">
-              Date Preset
-            </label>
-            <select
-              id="visit-summary-preset"
-              value={preset}
-              onChange={(event) => {
-                setPreset(event.target.value);
-                setFrom("");
-                setTo("");
-                replaceWith({
-                  preset: event.target.value || undefined,
-                  from: undefined,
-                  to: undefined,
-                });
-              }}
-              className="mt-2 w-full border border-border bg-bg-card px-3 py-2 text-sm text-text-primary"
-            >
-              <option value="">Manual range</option>
-              <option value="1d">Today</option>
-              <option value="7d">Last 7 days</option>
-              <option value="30d">Last 30 days</option>
-              <option value="90d">Last 90 days</option>
-              <option value="1y">Last year</option>
-              <option value="all">All dates</option>
-            </select>
-          </div>
-          {!preset && (
-            <div className="grid grid-cols-2 gap-2">
-              <label className="text-xs font-bold uppercase tracking-wide text-text-muted">
-                From
-                <input
-                  type="date"
-                  value={from}
-                  onChange={(event) => {
-                    setFrom(event.target.value);
-                    replaceWith({ from: event.target.value || undefined, preset: undefined });
-                  }}
-                  className="mt-2 w-full border border-border bg-bg-card px-3 py-2 text-sm text-text-primary"
-                />
-              </label>
-              <label className="text-xs font-bold uppercase tracking-wide text-text-muted">
-                To
-                <input
-                  type="date"
-                  value={to}
-                  onChange={(event) => {
-                    setTo(event.target.value);
-                    replaceWith({ to: event.target.value || undefined, preset: undefined });
-                  }}
-                  className="mt-2 w-full border border-border bg-bg-card px-3 py-2 text-sm text-text-primary"
-                />
-              </label>
-            </div>
-          )}
+        <div>
+          <label htmlFor="visit-summary-preset" className={FIELD_LABEL_CLASS}>
+            Date Preset
+          </label>
+          <select
+            id="visit-summary-preset"
+            value={preset}
+            onChange={(event) => {
+              setPreset(event.target.value);
+              setFrom("");
+              setTo("");
+              replaceWith({
+                preset: event.target.value || undefined,
+                from: undefined,
+                to: undefined,
+              });
+            }}
+            className={FIELD_INPUT_CLASS}
+          >
+            <option value="">Manual range</option>
+            <option value="1d">Today</option>
+            <option value="7d">Last 7 days</option>
+            <option value="30d">Last 30 days</option>
+            <option value="90d">Last 90 days</option>
+            <option value="1y">Last year</option>
+            <option value="all">All dates</option>
+          </select>
         </div>
+
+        {!preset && (
+          <>
+            <label className={FIELD_LABEL_CLASS}>
+              From
+              <input
+                type="date"
+                value={from}
+                onChange={(event) => {
+                  setFrom(event.target.value);
+                  replaceWith({ from: event.target.value || undefined, preset: undefined });
+                }}
+                className={FIELD_INPUT_CLASS}
+              />
+            </label>
+            <label className={FIELD_LABEL_CLASS}>
+              To
+              <input
+                type="date"
+                value={to}
+                onChange={(event) => {
+                  setTo(event.target.value);
+                  replaceWith({ to: event.target.value || undefined, preset: undefined });
+                }}
+                className={FIELD_INPUT_CLASS}
+              />
+            </label>
+          </>
+        )}
       </div>
     </section>
   );
