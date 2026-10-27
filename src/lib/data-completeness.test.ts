@@ -139,6 +139,19 @@ describe("the Info row", () => {
     expect(groupOf(buildDataCompleteness(students, null), "info").pct).toBe(85);
   });
 
+  it("counts a field against every Student in scope", () => {
+    const students = [
+      student({ student_pk_id: "1", address: null }),
+      student({ student_pk_id: "2" }),
+      student({ student_pk_id: "3" }),
+    ];
+
+    const address = groupOf(buildDataCompleteness(students, null), "info").items[0];
+
+    expect(address.missing).toBe(1);
+    expect(address.expected).toBe(3);
+  });
+
   it("folds the fields nobody is missing into the complete list", () => {
     const info = groupOf(
       buildDataCompleteness([student({ address: null })], null),
@@ -267,6 +280,30 @@ describe("the Exams row", () => {
 
     expect(exams.items).toEqual([]);
     expect(exams.pct).toBe(100);
+  });
+
+  // The chip's colour and its spoken count both read against this, so an exam
+  // ten of eleven PCB Students have not registered for is a red chip, not the
+  // pale "10 of 77" it would be against the whole roster.
+  it("counts against the Students the exam applies to, not the whole roster", () => {
+    const students = [
+      ...Array.from({ length: 10 }, (_, i) =>
+        student({ student_pk_id: String(i + 1), board_stream: "PCB" }),
+      ),
+      ...Array.from({ length: 67 }, (_, i) =>
+        student({ student_pk_id: String(i + 11), board_stream: "PCM" }),
+      ),
+    ];
+
+    const neet = groupOf(buildDataCompleteness(students, null), "exams").items.find(
+      (item) => item.label === "NEET",
+    )!;
+
+    expect(neet.missing).toBe(10);
+    expect(neet.expected).toBe(10);
+    expect(severityFor(neet.missing, neet.expected)).toBe("high");
+    // What it would have been against the roster, and why that was wrong.
+    expect(severityFor(neet.missing, students.length)).toBe("low");
   });
 
   it("says 'Not registered for', not 'Missing', on the filter line", () => {

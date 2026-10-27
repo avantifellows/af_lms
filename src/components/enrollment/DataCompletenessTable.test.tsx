@@ -16,6 +16,7 @@ const completeness: DataCompleteness = {
           key: "info:pen_or_roll",
           label: "PEN / Grade 10 Roll no",
           missing: 10,
+          expected: 10,
           filterLabel: "Missing PEN / Grade 10 Roll no",
           locked: true,
           required: false,
@@ -24,6 +25,7 @@ const completeness: DataCompleteness = {
           key: "info:address",
           label: "Address",
           missing: 3,
+          expected: 10,
           filterLabel: "Missing Address",
           locked: false,
           required: false,
@@ -32,6 +34,7 @@ const completeness: DataCompleteness = {
           key: "info:phone",
           label: "Parents Phone Number",
           missing: 1,
+          expected: 10,
           filterLabel: "Missing Parents Phone Number",
           locked: false,
           required: false,
@@ -50,6 +53,7 @@ const completeness: DataCompleteness = {
           key: "doc:parent_undertaking",
           label: "Signed undertaking - Parent",
           missing: 6,
+          expected: 10,
           filterLabel: "Missing Signed undertaking - Parent",
           locked: false,
           required: true,
@@ -68,6 +72,7 @@ const completeness: DataCompleteness = {
           key: "exam:JEE Mains",
           label: "JEE Mains",
           missing: 10,
+          expected: 10,
           filterLabel: "Not registered for JEE Mains",
           locked: false,
           required: true,
@@ -125,6 +130,26 @@ describe("DataCompletenessTable", () => {
 
     expect(
       screen.getByText("NEET not expected — no Student on PCB or PCMB"),
+    ).toBeInTheDocument();
+  });
+
+  it("speaks an exam's count against the Students expected to sit it", () => {
+    renderTable({
+      completeness: {
+        ...completeness,
+        groups: completeness.groups.map((group) =>
+          group.key === "exams"
+            ? {
+                ...group,
+                items: [{ ...group.items[0], label: "NEET", key: "exam:NEET", missing: 3, expected: 3 }],
+              }
+            : group,
+        ),
+      },
+    });
+
+    expect(
+      screen.getByRole("button", { name: "3 of 3 students missing NEET" }),
     ).toBeInTheDocument();
   });
 
@@ -228,11 +253,66 @@ describe("DataCompletenessTable", () => {
     expect(screen.queryByText("45%")).not.toBeInTheDocument();
   });
 
-  it("says so when the documents read failed", () => {
-    renderTable({ documentsError: true });
+  it("says so when the first documents read failed", () => {
+    renderTable({
+      documentsError: true,
+      completeness: {
+        ...completeness,
+        groups: completeness.groups.map((group) =>
+          group.key === "documents"
+            ? { ...group, pending: true, items: [], complete: [] }
+            : group,
+        ),
+      },
+    });
 
     expect(
       screen.getByText("Documents couldn't be loaded. Reload to try again."),
     ).toBeInTheDocument();
+  });
+
+  // A refetch after an upload can fail while the row still holds the
+  // documents it read a moment ago; blanking it would lose real counts.
+  it("keeps the counts when a refetch failed, saying they may be stale", () => {
+    renderTable({ documentsError: true });
+
+    expect(
+      screen.getByRole("button", {
+        name: "6 of 10 students missing Signed undertaking - Parent",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Couldn't refresh — a recent upload may be missing here."),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("Documents couldn't be loaded. Reload to try again."),
+    ).not.toBeInTheDocument();
+  });
+
+  // Before the row has an answer, "missing any document" matches nobody,
+  // which would read as "nobody is missing one".
+  it("won't filter on a group that is still being read", () => {
+    renderTable({
+      completeness: {
+        ...completeness,
+        groups: completeness.groups.map((group) =>
+          group.key === "documents"
+            ? { ...group, pending: true, items: [], complete: [] }
+            : group,
+        ),
+      },
+    });
+
+    expect(screen.getByRole("button", { name: /^Documents/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /^Info/ })).toBeEnabled();
+  });
+
+  it("says a scope with no Students has nothing to measure", () => {
+    renderTable({ completeness: { total: 0, groups: completeness.groups } });
+
+    expect(
+      screen.getByText("No students in this view — nothing to measure."),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId("completeness-row-info")).not.toBeInTheDocument();
   });
 });

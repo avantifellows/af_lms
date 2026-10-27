@@ -125,6 +125,14 @@ export interface CompletenessItem {
   label: string;
   /** Students in scope missing this item. */
   missing: number;
+  /**
+   * Students this item applies to — the denominator behind `missing`. Every
+   * Student in scope for a profile field or a document, but only the Students
+   * whose Board Stream calls for an exam: ten of eleven PCB Students with no
+   * NEET registration is a red chip, not the pale 10-of-77 it would read as
+   * against the whole roster.
+   */
+  expected: number;
   /** The filter line's wording: "Missing Address", "Not registered for NEET". */
   filterLabel: string;
   locked: boolean;
@@ -279,6 +287,7 @@ function buildInfoGroup(students: Student[]): CompletenessGroup {
       key: infoFilterKey(item.field),
       label: item.label,
       missing,
+      expected: students.length,
       filterLabel: `Missing ${item.label}`,
       locked: item.locked === true,
       required: false,
@@ -332,6 +341,7 @@ function buildDocumentsGroup(
       key: documentFilterKey(value),
       label,
       missing,
+      expected: students.length,
       filterLabel: `Missing ${label}`,
       locked: false,
       required: REQUIRED_DOCUMENT_TYPES.includes(value),
@@ -388,6 +398,7 @@ function buildExamsGroup(students: Student[]): CompletenessGroup {
       key: examFilterKey(examName),
       label: examName,
       missing,
+      expected: expecting.length,
       filterLabel: `Not registered for ${examName}`,
       locked: false,
       required: true,

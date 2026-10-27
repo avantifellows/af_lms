@@ -250,9 +250,10 @@ export default function EnrollmentTabContent({
       })
       .catch(() => {
         if (cancelled) return;
-        // Keep whatever we had: a failed refetch after an upload shouldn't
-        // blank a table the PM is reading.
-        setDocuments((current) => current ?? {});
+        // `documents` is left alone deliberately. Null (nothing read yet)
+        // keeps the Documents row pending rather than counting every Student
+        // as missing all seven, and a populated map survives a failed refetch
+        // after an upload instead of blanking a table the PM is reading.
         setDocumentsError(true);
       });
     return () => {
@@ -380,15 +381,16 @@ export default function EnrollmentTabContent({
   const [completenessFilter, setCompletenessFilter] =
     useState<CompletenessFilterKey | null>(null);
 
+  // Keyed on `group_user_id`, the roster's own row key, not `student_pk_id`:
+  // the roster LEFT JOINs `student`, so a row without a Student record still
+  // shows on a card and is still counted by the chips. Keying on the record id
+  // would count such a Student and then fail to list them.
   const completenessMatchIds = useMemo(() => {
     if (!completenessFilter) return null;
     const ids = new Set<string>();
     for (const student of gradeStreamActive) {
-      if (
-        student.student_pk_id &&
-        studentMatchesCompletenessFilter(student, completenessFilter, documents)
-      ) {
-        ids.add(student.student_pk_id);
+      if (studentMatchesCompletenessFilter(student, completenessFilter, documents)) {
+        ids.add(student.group_user_id);
       }
     }
     return ids;
@@ -434,8 +436,7 @@ export default function EnrollmentTabContent({
         (student.student_pk_id != null &&
           openFlagStudentIds.has(student.student_pk_id))) &&
       (completenessMatchIds == null ||
-        (student.student_pk_id != null &&
-          completenessMatchIds.has(student.student_pk_id))),
+        completenessMatchIds.has(student.group_user_id)),
   ).length;
   const activeFilteredCount = visibleActiveCount;
 
@@ -669,7 +670,7 @@ export default function EnrollmentTabContent({
         onOpenInterventionFlag={canUseInterventionFlags ? setFlagStudent : undefined}
         canRaiseInterventionFlag={canEditInterventionFlags}
         flaggedOnly={flagFilterOn}
-        restrictToStudentIds={completenessMatchIds}
+        restrictToGroupUserIds={completenessMatchIds}
       />
 
       {flagStudent?.student_pk_id && (

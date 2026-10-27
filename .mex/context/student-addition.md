@@ -232,18 +232,26 @@ Three rows, built by `src/lib/data-completeness.ts`:
 
 Every percentage is **slot-based** (filled ÷ Students × items), not all-or-nothing, so it moves as
 gaps close. Chips sort worst first and anything nobody is missing folds into "✓ N complete" with the
-names on hover. Severity on the count pill: red from 50% of the Students, amber from 20%.
+names on hover. Severity on the count pill is red from 50% and amber from 20% **of that item's own
+denominator** (`CompletenessItem.expected`) — every Student in scope for a field or document, but
+only the Students whose Board Stream calls for an exam. Ten of eleven PCB Students with no NEET
+registration is a red chip; against the whole roster it would have read as a pale 10 of 77.
 
 `missingKeysForStudent` answers both the counts and "is this Student in the filter", so a chip's
-number and the roster it opens cannot disagree. Tapping a chip sets `restrictToStudentIds` on
-`StudentTable` (active tab only — the table counts the active roster); a group label filters on
-"missing any item in this group". Filters compose with Filter by Grade and Filter by Stream, and
-`filterSurviving` drops a filter a grade or stream change leaves matching nobody.
+number and the roster it opens cannot disagree. Tapping a chip sets `restrictToGroupUserIds` on
+`StudentTable` (active tab only — the table counts the active roster). That key is `group_user_id`,
+not `student_pk_id`: the roster `LEFT JOIN`s `student`, so a row with no Student record still shows
+a card and is still counted, and keying on the record id would count such a Student and then fail to
+list them. A group label filters on "missing any item in this group". Filters compose with Filter by
+Grade and Filter by Stream, and `filterSurviving` drops a filter a grade or stream change leaves
+matching nobody. A scope with no Students says so rather than reporting 100% complete.
 
 Documents arrive from **one bulk read** for the School, `GET /api/schools/[code]/document-status`
 (see `data-access.md` §1) — the consent summary's per-Student fan-out can't answer seven types across
-a roster. Until it lands the Documents row says it is loading rather than reporting every Student as
-missing everything; a failed read says so instead of counting zeros as gaps.
+a roster. A failure never writes to `documents`: null (nothing read yet) keeps the row pending and
+its group label disabled, because "missing any document" would otherwise match nobody and read as
+"nobody is missing one"; a failed *re*fetch after an upload keeps the counts it already had and adds
+a "couldn't refresh" note rather than blanking a table the PM is reading.
 
 ## Settled Product Shape
 - v1 is JNV PMU / JNV NVS only. In current LMS code this is `PROGRAM_IDS.NVS` (`64`, label `JNV NVS`) from `src/lib/constants.ts`.

@@ -2003,7 +2003,7 @@ describe("StudentTable - exam registrations", () => {
 
 // ─── Data completeness filter (#468) ────────────────────────────────────────
 
-describe("StudentTable - restrictToStudentIds", () => {
+describe("StudentTable - restrictToGroupUserIds", () => {
   const aarav = makeStudent({ student_pk_id: "1", first_name: "Aarav" });
   const bela = makeStudent({
     group_user_id: "gu-2",
@@ -2016,7 +2016,7 @@ describe("StudentTable - restrictToStudentIds", () => {
       <StudentTable
         students={[aarav, bela]}
         grades={defaultGrades}
-        restrictToStudentIds={new Set(["1"])}
+        restrictToGroupUserIds={new Set(["gu-1"])}
       />,
     );
 
@@ -2029,7 +2029,7 @@ describe("StudentTable - restrictToStudentIds", () => {
       <StudentTable
         students={[aarav, bela]}
         grades={defaultGrades}
-        restrictToStudentIds={null}
+        restrictToGroupUserIds={null}
       />,
     );
 
@@ -2044,12 +2044,32 @@ describe("StudentTable - restrictToStudentIds", () => {
         students={[aarav]}
         dropoutStudents={[bela]}
         grades={defaultGrades}
-        restrictToStudentIds={new Set(["1"])}
+        restrictToGroupUserIds={new Set(["gu-1"])}
       />,
     );
 
     await user.click(screen.getByRole("button", { name: /Dropout/ }));
 
     expect(screen.getByText(/Bela/)).toBeInTheDocument();
+  });
+
+  // The roster LEFT JOINs `student`, so a card can exist with no record id.
+  // The table counts such a Student, so the filter has to be able to show them.
+  it("can still show a Student with no record id", () => {
+    const noRecord = makeStudent({
+      group_user_id: "gu-3",
+      student_pk_id: null,
+      first_name: "Chandra",
+    });
+    render(
+      <StudentTable
+        students={[aarav, noRecord]}
+        grades={defaultGrades}
+        restrictToGroupUserIds={new Set(["gu-3"])}
+      />,
+    );
+
+    expect(screen.getByText(/Chandra/)).toBeInTheDocument();
+    expect(screen.queryByText(/Aarav/)).not.toBeInTheDocument();
   });
 });

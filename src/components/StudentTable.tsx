@@ -127,11 +127,13 @@ interface StudentTableProps {
   canRaiseInterventionFlag?: boolean;
   flaggedOnly?: boolean;
   /**
-   * Active Students to keep, by `student_pk_id` — the Data completeness
-   * table's tap-to-filter (#468). null or absent means no such filter. The
+   * Active Students to keep, by `group_user_id` — the Data completeness
+   * table's tap-to-filter (#468). The roster's row key, not `student_pk_id`,
+   * because a row whose `student` join missed still shows a card and is still
+   * counted by the table's chips. null or absent means no such filter. The
    * Dropout tab is left alone: the table counts the active roster.
    */
-  restrictToStudentIds?: ReadonlySet<string> | null;
+  restrictToGroupUserIds?: ReadonlySet<string> | null;
 }
 
 function studentBelongsToProgram(student: Student, programId: number) {
@@ -725,7 +727,7 @@ export default function StudentTable({
   onOpenInterventionFlag,
   canRaiseInterventionFlag = true,
   flaggedOnly = false,
-  restrictToStudentIds = null,
+  restrictToGroupUserIds = null,
 }: StudentTableProps) {
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [dropoutStudent, setDropoutStudent] = useState<Student | null>(null);
@@ -815,10 +817,9 @@ export default function StudentTable({
     student.student_pk_id != null &&
     Boolean(openFlagStudentIds?.has(student.student_pk_id));
   const keptByCompleteness = (student: Student) =>
-    restrictToStudentIds == null ||
+    restrictToGroupUserIds == null ||
     activeTab !== "active" ||
-    (student.student_pk_id != null &&
-      restrictToStudentIds.has(student.student_pk_id));
+    restrictToGroupUserIds.has(student.group_user_id);
   const filteredStudents = currentStudents.filter(
     (student) =>
       (selectedGrade === "all" || student.grade === parseInt(selectedGrade)) &&

@@ -30,7 +30,7 @@ vi.mock("@/components/StudentTable", () => ({
     searchQuery?: string;
     openFlagStudentIds?: Set<string>;
     onOpenInterventionFlag?: unknown;
-    restrictToStudentIds?: ReadonlySet<string> | null;
+    restrictToGroupUserIds?: ReadonlySet<string> | null;
   }) => (
     <div
       data-testid="student-table"
@@ -41,8 +41,8 @@ vi.mock("@/components/StudentTable", () => ({
       data-stream={props.selectedStream}
       data-search={props.searchQuery ?? ""}
       data-restrict={
-        props.restrictToStudentIds
-          ? [...props.restrictToStudentIds].sort().join(",")
+        props.restrictToGroupUserIds
+          ? [...props.restrictToGroupUserIds].sort().join(",")
           : "none"
       }
     />
@@ -705,7 +705,7 @@ describe("EnrollmentTabContent - data completeness", () => {
       screen.getByRole("button", { name: "1 of 2 students missing Address" }),
     );
 
-    expect(screen.getByTestId("student-table")).toHaveAttribute("data-restrict", "1");
+    expect(screen.getByTestId("student-table")).toHaveAttribute("data-restrict", "gu-1");
     expect(screen.getByTestId("enrollment-filtered-count")).toHaveTextContent(
       "Showing 1 of 2 students",
     );
@@ -725,7 +725,7 @@ describe("EnrollmentTabContent - data completeness", () => {
     await user.click(screen.getByRole("button", { name: /^Info/ }));
 
     // Only the Student with no Address is missing any Info field.
-    expect(screen.getByTestId("student-table")).toHaveAttribute("data-restrict", "1");
+    expect(screen.getByTestId("student-table")).toHaveAttribute("data-restrict", "gu-1");
     expect(
       within(screen.getByTestId("completeness-filter-bar")).getByText(
         "Any info missing",
@@ -742,7 +742,7 @@ describe("EnrollmentTabContent - data completeness", () => {
     await user.click(
       screen.getByRole("button", { name: "1 of 2 students missing Address" }),
     );
-    expect(screen.getByTestId("student-table")).toHaveAttribute("data-restrict", "1");
+    expect(screen.getByTestId("student-table")).toHaveAttribute("data-restrict", "gu-1");
 
     // Grade 12 holds only the Student whose Address is filled in.
     await user.selectOptions(screen.getByLabelText("Filter by Grade:"), "12");
@@ -767,7 +767,7 @@ describe("EnrollmentTabContent - data completeness", () => {
     );
     await user.selectOptions(screen.getByLabelText("Filter by Grade:"), "12");
 
-    expect(screen.getByTestId("student-table")).toHaveAttribute("data-restrict", "2");
+    expect(screen.getByTestId("student-table")).toHaveAttribute("data-restrict", "gu-2");
     expect(
       within(screen.getByTestId("completeness-filter-bar")).getByText(
         "1 of 1 Grade 12 students",

@@ -48,19 +48,17 @@ function percentToneClass(pct: number): string {
 
 function MissingChip({
   item,
-  total,
   pressed,
   onToggle,
 }: {
   item: CompletenessItem;
-  total: number;
   pressed: boolean;
   onToggle: () => void;
 }) {
-  const severity = severityFor(item.missing, total);
+  const severity = severityFor(item.missing, item.expected);
   // The lock and the star are decoration, and the count sits in its own span,
   // so the name is spelled out rather than left to read as "Address3".
-  const description = `${item.missing} of ${total} students missing ${item.label}`;
+  const description = `${item.missing} of ${item.expected} students missing ${item.label}`;
   return (
     <button
       type="button"
@@ -99,14 +97,12 @@ function MissingChip({
 
 function GroupRow({
   group,
-  total,
   activeFilter,
   onFilterChange,
   documentsError,
   withRule,
 }: {
   group: CompletenessGroup;
-  total: number;
   activeFilter: CompletenessFilterKey | null;
   onFilterChange: (key: CompletenessFilterKey | null) => void;
   documentsError?: boolean;
@@ -116,7 +112,17 @@ function GroupRow({
   const groupPressed = activeFilter === groupKey;
   const toggle = (key: CompletenessFilterKey) =>
     onFilterChange(activeFilter === key ? null : key);
-  const failed = group.key === "documents" && documentsError === true;
+  const errored = group.key === "documents" && documentsError === true;
+  // Nothing to show: the first read failed, or none has landed yet. A failed
+  // *re*fetch keeps the Students' documents it already had, so that row still
+  // counts — it only says the numbers may be a save behind.
+  const unanswered = group.pending;
+  const failed = errored && unanswered;
+  const stale = errored && !unanswered;
+  // Until the row has an answer, "missing any document" would match nobody,
+  // which reads as "nobody is missing one"; and an empty first read would
+  // match everybody. Neither is true, so the label doesn't invite the tap.
+  const groupDisabled = unanswered;
 
   return (
     <div
@@ -129,10 +135,15 @@ function GroupRow({
         type="button"
         aria-pressed={groupPressed}
         onClick={() => toggle(groupKey)}
-        title={`Show students missing any ${group.title.toLowerCase()}`}
-        className={`inline-flex min-h-[32px] w-full items-center gap-2 rounded-md px-1.5 py-1 text-left transition-colors sm:w-44 ${
+        disabled={groupDisabled}
+        title={
+          groupDisabled
+            ? `${group.title} are still being read`
+            : `Show students missing any ${group.title.toLowerCase()}`
+        }
+        className={`inline-flex min-h-[32px] w-full items-center gap-2 rounded-md px-1.5 py-1 text-left transition-colors disabled:cursor-not-allowed sm:w-44 ${
           groupPressed ? "bg-danger-bg ring-1 ring-danger" : "hover:bg-bg-card-alt"
-        }`}
+        } ${groupDisabled ? "hover:bg-transparent" : ""}`}
       >
         <span className="text-xs font-bold uppercase tracking-wide text-text-muted">
           {group.title}
@@ -170,7 +181,6 @@ function GroupRow({
               <MissingChip
                 key={item.key}
                 item={item}
-                total={total}
                 pressed={activeFilter === item.key}
                 onToggle={() => toggle(item.key)}
               />
@@ -191,6 +201,11 @@ function GroupRow({
                 {note}
               </span>
             ))}
+            {stale && (
+              <span className="text-xs italic text-text-muted">
+                Couldn&apos;t refresh — a recent upload may be missing here.
+              </span>
+            )}
           </>
         )}
       </div>
@@ -251,13 +266,18 @@ export default function DataCompletenessTable({
         </button>
       </div>
 
-      {!collapsed && (
+      {!collapsed && total === 0 && (
+        <p className="mt-3 text-sm text-text-muted">
+          No students in this view — nothing to measure.
+        </p>
+      )}
+
+      {!collapsed && total > 0 && (
         <div className="mt-1">
           {groups.map((group, index) => (
             <GroupRow
               key={group.key}
               group={group}
-              total={total}
               activeFilter={activeFilter}
               onFilterChange={onFilterChange}
               documentsError={documentsError}
