@@ -431,7 +431,9 @@ function useReportName(session: string | null) {
     (testName: string) => {
       if (!session) return;
       setNamed((prev) =>
-        prev?.session === session && prev.name ? prev : { session, name: testName }
+        prev?.session === session && prev.name
+          ? prev
+          : { session, name: testName, format: prev?.session === session ? prev.format : undefined }
       );
     },
     [session]

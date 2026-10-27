@@ -54,7 +54,7 @@ const QUESTION_ROWS = [
 const SUMMARY_ROWS = [
   {
     gender: "female", students: 19, avg_attempt_rate: 43.62, avg_accuracy: 73.15, avg_score: 29.43,
-    accuracy_students: 19, stream_students: 18, program: "EMRS CoE",
+    accuracy_students: 19, stream_students: 18, programs: ["EMRS CoE"],
     total_time_seconds: 19 * 3452, timed_students: 19,
     cms_test_id: "9330", test_name: "12P24 - Wave Optics - JEE Main", test_format: "chapter_test",
     start_date: "2026-10-14", test_grade: 12, test_stream: "engineering", test_course: "JEE Mains",
@@ -62,7 +62,7 @@ const SUMMARY_ROWS = [
   },
   {
     gender: "male", students: 29, avg_attempt_rate: 47.31, avg_accuracy: 56.55, avg_score: 22.48,
-    accuracy_students: 29, stream_students: 29, program: "EMRS CoE",
+    accuracy_students: 29, stream_students: 29, programs: ["EMRS CoE"],
     total_time_seconds: 29 * 3495, timed_students: 29,
     cms_test_id: "9330", test_name: "12P24 - Wave Optics - JEE Main", test_format: "chapter_test",
     start_date: "2026-10-14", test_grade: 12, test_stream: "engineering", test_course: "JEE Mains",
@@ -162,6 +162,12 @@ describe("getChapterTestReport", () => {
     expect(params).toMatchObject({ cmsTestId: "9330", grade: 12, stream: "engineering" });
     expect(params.programs).toContain("JNV CoE");
     expect(params.programs).not.toContain("JNV Nodal");
+  });
+
+  it("takes the model from the session's only program when none is picked", async () => {
+    answerByTable();
+    await getChapterTestReport({ ...SCOPE, program: undefined });
+    expect(query.mock.calls.some(([c]) => c.query.includes("cms_test_id = @cmsTestId"))).toBe(true);
   });
 
   it("shows no comparison for a program that is neither CoE nor Nodal", async () => {

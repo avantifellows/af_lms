@@ -145,6 +145,12 @@ const roundCohort = (g: GenderStat): GenderStat => ({
 
 const strOrNull = (v: unknown): string | null => (v as string | null) ?? null;
 
+/** The session's one program, or null when its students span several. */
+function onlyProgram(rows: Record<string, unknown>[]): string | null {
+  const programs = new Set(rows.flatMap((r) => (r.programs as string[] | null) ?? []));
+  return programs.size === 1 ? [...programs][0] : null;
+}
+
 /** The test's own fields, from any of the session's summary rows. */
 function summaryMeta(row: Record<string, unknown>, sessionId: string): SessionSummary["meta"] {
   return {
@@ -174,7 +180,7 @@ async function getSessionSummary(scope: SessionScope): Promise<SessionSummary | 
       AVG(percentage) AS avg_score,
       -- The overview card's rule: student_stream = test_stream.
       COUNT(DISTINCT IF(student_stream = test_stream, enrollment_user_id, NULL)) AS stream_students,
-      ANY_VALUE(student_program) AS program,
+      ARRAY_AGG(DISTINCT student_program IGNORE NULLS) AS programs,
       SUM(total_time_spent) AS total_time_seconds,
       COUNT(total_time_spent) AS timed_students,
       ANY_VALUE(cms_test_id) AS cms_test_id,
@@ -201,7 +207,7 @@ async function getSessionSummary(scope: SessionScope): Promise<SessionSummary | 
   return {
     meta: summaryMeta(first, scope.sessionId),
     testStream,
-    program: scope.program ?? (first.program as string | null) ?? null,
+    program: scope.program ?? onlyProgram(list),
     appeared,
     gender: list.map((r) => ({
       gender: String(r.gender),
@@ -267,7 +273,7 @@ async function getSchoolComparison(
     SELECT
       student_school AS school,
       student_school_udise_code AS udise,
-      ANY_VALUE(student_program) AS program,
+      ARRAY_AGG(DISTINCT student_program IGNORE NULLS) AS programs,
       COUNT(DISTINCT enrollment_user_id) AS students,
       AVG(attempt_rate) AS avg_attempt_rate,
       AVG(accuracy) AS avg_accuracy,
