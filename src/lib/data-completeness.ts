@@ -19,7 +19,7 @@ import {
 } from "@/lib/competitive-exams";
 
 /** Document types a Student is expected to have, marked `*` in the table. */
-export const REQUIRED_DOCUMENT_TYPES: readonly DocumentType[] = [
+const REQUIRED_DOCUMENT_TYPES: readonly DocumentType[] = [
   "parent_undertaking",
   "wise_research_consent",
 ];
@@ -94,7 +94,7 @@ export const INFO_ITEMS: readonly InfoItemDefinition[] = [
 
 export type CompletenessGroupKey = "info" | "documents" | "exams";
 
-export const GROUP_TITLES: Record<CompletenessGroupKey, string> = {
+const GROUP_TITLES: Record<CompletenessGroupKey, string> = {
   info: "Info",
   documents: "Documents",
   exams: "Exams",
@@ -192,7 +192,7 @@ function documentTypesFor(
 }
 
 /** Exam names this Student's Board Stream calls for, registered or not. */
-export function expectedExamNames(student: Student): readonly string[] {
+function expectedExamNames(student: Student): readonly string[] {
   return requiredExamNamesForBoardStream(student.board_stream);
 }
 
