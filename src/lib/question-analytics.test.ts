@@ -146,6 +146,7 @@ describe("getChapterTestReport", () => {
     });
     expect(r.gender.map((g) => [g.gender, g.avg_accuracy])).toEqual([["female", 73.2], ["male", 56.6]]);
     // This School's row is the report's own cohort, matching the overview.
+    expect(r.comparison.find((c) => !c.is_this_school)).toMatchObject({ school: "JNV Kohima", program: "JNV CoE" });
     expect(r.comparison.find((c) => c.is_this_school)).toMatchObject({
       school: "EMRS Bhopal", students: 48, avg_attempt_rate: 45.8, avg_accuracy: 63.1, avg_score: 25.2,
     });
@@ -157,6 +158,7 @@ describe("getChapterTestReport", () => {
     await getChapterTestReport(SCOPE);
     const call = query.mock.calls.find(([c]) => c.query.includes("cms_test_id = @cmsTestId"))!;
     const { query: sql, params } = call[0];
+    expect(sql).toContain("ANY_VALUE(student_program) AS program,");
     expect(sql).toContain("student_program IN UNNEST(@programs)");
     expect(sql).toContain("AND (test_stream IS NULL OR student_stream = test_stream)");
     expect(sql).toContain("student_grade = @grade");

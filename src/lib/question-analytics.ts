@@ -274,7 +274,7 @@ async function getSchoolComparison(
     SELECT
       student_school AS school,
       student_school_udise_code AS udise,
-      ARRAY_AGG(DISTINCT student_program IGNORE NULLS) AS programs,
+      ANY_VALUE(student_program) AS program,
       COUNT(DISTINCT enrollment_user_id) AS students,
       AVG(attempt_rate) AS avg_attempt_rate,
       AVG(accuracy) AS avg_accuracy,
