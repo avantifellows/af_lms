@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { redirect } from "next/navigation";
 
 import StatCard from "@/components/StatCard";
+import ClickableTableRow from "@/components/visits/ClickableTableRow";
 import GpsMapLink from "@/components/visits/GpsMapLink";
 import VisitSummaryFilterBar from "@/components/visits/VisitSummaryFilterBar";
 import { Card } from "@/components/ui";
@@ -694,6 +695,19 @@ function ConcernFreshnessLine({ freshness }: { freshness: SchoolWiseView["freshn
   );
 }
 
+// A School-wise row opens its School page carrying every filter (and the table's sort), so the
+// page's Back link can return to this same table.
+function schoolPageHref(schoolCode: string, currentParams: SummarySearchParams): string {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(currentParams)) {
+    if (value && key !== "tab") {
+      params.set(key, value);
+    }
+  }
+  const query = params.toString();
+  return `/school-visit-summary/schools/${encodeURIComponent(schoolCode)}${query ? `?${query}` : ""}`;
+}
+
 function SchoolWiseTable({
   rows,
   sort,
@@ -736,10 +750,16 @@ function SchoolWiseTable({
         </thead>
         <tbody className="bg-bg-card">
           {rows.map((row) => (
-            <tr key={row.schoolCode} className="border-b border-border/40 hover:bg-hover-bg">
+            <ClickableTableRow
+              key={row.schoolCode}
+              href={schoolPageHref(row.schoolCode, currentParams)}
+              className="border-b border-border/40 hover:bg-hover-bg"
+            >
               <td className="whitespace-nowrap px-4 py-4 text-sm font-medium text-text-primary">
                 <SeverityMarker row={row} />
-                {row.schoolName}
+                <Link href={schoolPageHref(row.schoolCode, currentParams)} className="hover:text-accent">
+                  {row.schoolName}
+                </Link>
                 {row.region && <span className="font-normal text-text-muted"> ({row.region})</span>}
               </td>
               <td className="whitespace-nowrap px-4 py-4 text-sm font-mono text-text-secondary">{row.visits}</td>
@@ -768,7 +788,7 @@ function SchoolWiseTable({
                   <span className="text-text-muted">—</span>
                 )}
               </td>
-            </tr>
+            </ClickableTableRow>
           ))}
         </tbody>
       </table>

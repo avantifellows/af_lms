@@ -509,6 +509,70 @@ test.describe("School Visit Summary — Flags on the School-wise tab", () => {
   });
 });
 
+// School page fixture: e2e/fixtures/migrations/20261027140300_seed_visit_summary_school_page_fixture.sql
+// (its header works out the Teachers line asserted below).
+function teacherLines(page: Page) {
+  return page.getByRole("list", { name: "Teachers" }).getByRole("listitem");
+}
+
+test.describe("School Visit Summary — School page", () => {
+  test("a School-wise row opens the School page with the filters, and Back returns to the same table", async ({ adminPage }) => {
+    const filters = {
+      regions: "VSW_E2E",
+      pms: FIXTURE_PM,
+      status: "completed",
+      sort: "school_name",
+      dir: "asc",
+    };
+    await adminPage.goto(`/school-visit-summary?${new URLSearchParams(filters)}`);
+    await expect(schoolColumn(adminPage, 0)).toHaveText([`${MIXED} (VSW_E2E)`, `${PHYSICAL} (VSW_E2E)`]);
+
+    // Anywhere on the row opens it, not only the School name.
+    await schoolRow(adminPage, MIXED).locator("td:nth-child(2)").click();
+    await expect(adminPage).toHaveURL(/\/school-visit-summary\/schools\/VSWMIXED\?/);
+    expect(Object.fromEntries(new URL(adminPage.url()).searchParams)).toEqual(filters);
+    await expect(adminPage.getByRole("heading", { level: 1 })).toHaveText(`${MIXED} (VSW_E2E)`);
+
+    await adminPage.getByRole("link", { name: /Back to School-wise/ }).click();
+    await expect(adminPage).toHaveURL(/\/school-visit-summary\?/);
+    expect(Object.fromEntries(new URL(adminPage.url()).searchParams)).toEqual({ tab: "schools", ...filters });
+    await expect(schoolColumn(adminPage, 0)).toHaveText([`${MIXED} (VSW_E2E)`, `${PHYSICAL} (VSW_E2E)`]);
+  });
+
+  test("lists teaching seats at the active physical Centres, CoE and Nodal apart", async ({ adminPage }) => {
+    await adminPage.goto("/school-visit-summary/schools/VSWMIXED");
+
+    await expect(teacherLines(adminPage)).toHaveText([
+      "CoE BIOLOGY - Ravi Kumar · CHEMISTRY - Vacant · PHYSICS - Asha Rao",
+      "Nodal APC - Vacant · MATHS - Kiran Patel · SUBJECT TBD - Meena Shah",
+    ]);
+    await expect(adminPage.getByText("Deleted Seat Teacher")).toHaveCount(0);
+    await expect(adminPage.getByText("Closed Centre Teacher")).toHaveCount(0);
+    await expect(adminPage.getByText("NVS Teacher")).toHaveCount(0);
+    await expect(adminPage.getByText("VSW Page PM")).toHaveCount(0);
+  });
+
+  test("is not found for an NVS-only School, a School whose only physical Centre is inactive, and an unknown code", async ({ adminPage }) => {
+    for (const code of ["VSWNVS", "VSWOFF", "VSWNOSUCH"]) {
+      const response = await adminPage.goto(`/school-visit-summary/schools/${code}`);
+      expect(response?.status(), code).toBe(404);
+    }
+  });
+
+  test("a seated PM opens their visit-managed physical-centre School and gets not found for others", async ({ page }) => {
+    await signInAs(page, SEATED_PM);
+
+    await page.goto("/school-visit-summary/schools/VSWPHYS");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(`${PHYSICAL} (VSW_E2E)`);
+
+    // VSWMIXED is outside their seats; VSWNVS is seated but has no physical Centre.
+    for (const code of ["VSWMIXED", "VSWNVS"]) {
+      const response = await page.goto(`/school-visit-summary/schools/${code}`);
+      expect(response?.status(), code).toBe(404);
+    }
+  });
+});
+
 test.describe("Visit Concern storage", () => {
   test("concern history is append-only: a direct UPDATE or DELETE of an event fails", async () => {
     await withPool(async (pool) => {
