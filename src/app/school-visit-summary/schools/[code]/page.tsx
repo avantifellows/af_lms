@@ -3,8 +3,11 @@ import { getServerSession } from "next-auth";
 import { notFound, redirect } from "next/navigation";
 
 import { Card } from "@/components/ui";
+import { SchoolConcernSections } from "@/components/visits/SchoolConcernSections";
 import { authOptions } from "@/lib/auth";
 import { getFeatureAccess, getResolvedPermission } from "@/lib/permissions";
+import { getSchoolConcernPage } from "@/lib/visit-concerns";
+import { normalizeVisitSummaryFilters } from "@/lib/visit-summary-scope";
 import {
   getVisitSummarySchool,
   getVisitSummarySchoolTeachers,
@@ -86,7 +89,10 @@ export default async function SchoolVisitSummarySchoolPage({ params, searchParam
     notFound();
   }
 
-  const teacherGroups = await getVisitSummarySchoolTeachers(school.code);
+  const [teacherGroups, concernPage] = await Promise.all([
+    getVisitSummarySchoolTeachers(school.code),
+    getSchoolConcernPage(actor, school.code, normalizeVisitSummaryFilters(currentParams)),
+  ]);
 
   return (
     <div className="min-h-screen bg-bg">
@@ -108,6 +114,8 @@ export default async function SchoolVisitSummarySchoolPage({ params, searchParam
         <Card elevation="sm" className="p-4">
           <TeachersLine groups={teacherGroups} />
         </Card>
+
+        <SchoolConcernSections page={concernPage} today={new Date()} />
       </main>
     </div>
   );

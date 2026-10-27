@@ -573,6 +573,163 @@ test.describe("School Visit Summary — School page", () => {
   });
 });
 
+// School page concern fixture: e2e/fixtures/migrations/20261027140400_seed_visit_summary_school_page_concerns_fixture.sql
+// (its header works out every section for VSWCONA). Compact Visit dates drop the year only in the
+// current IST year, so each literal is given both ways.
+const IN_FIXTURE_YEAR = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric" })
+  .format(new Date()) === "2026";
+function compactDates(inFixtureYear: string, otherYear: string) {
+  return IN_FIXTURE_YEAR ? inFixtureYear : otherYear;
+}
+
+function concernSection(page: Page, name: string) {
+  return page.getByRole("region", { name, exact: true });
+}
+
+function cards(page: Page, section: string) {
+  return concernSection(page, section).getByRole("article");
+}
+
+const ALPHA_PAGE = "/school-visit-summary/schools/VSWCONA";
+
+async function expandResolved(page: Page) {
+  await concernSection(page, "Resolved concerns").getByText("Resolved concerns", { exact: true }).click();
+}
+
+test.describe("School Visit Summary — School page concerns", () => {
+  test("Needs attention lists the open concerns in view with their Visits, dates and reopened marker", async ({ adminPage }) => {
+    await adminPage.goto(ALPHA_PAGE);
+
+    const needs = cards(adminPage, "Needs attention");
+    await expect(needs).toHaveCount(4);
+    await expect(needs.nth(0)).toContainText(HTML_CONCERN);
+    await expect(needs.nth(1)).toContainText("Physics teacher absent on Saturdays");
+    await expect(needs.nth(2)).toContainText("Lab equipment missing");
+    await expect(needs.nth(3)).toContainText("Timetable clashes with board exam preparation");
+
+    await expect(needs.nth(0).getByText("Recurring · 2 visits", { exact: true })).toBeVisible();
+    await expect(needs.nth(0).getByText(compactDates("15 Sep · 10 Jun", "15 Sep 2026 · 10 Jun 2026"), { exact: true })).toBeVisible();
+    await expect(needs.nth(2).getByText(compactDates("06 Aug ×2", "06 Aug 2026 ×2"), { exact: true })).toBeVisible();
+    // The in-progress Visit's and the soft-deleted Visit's mentions don't count.
+    await expect(needs.nth(3).getByText("1 visit", { exact: true })).toBeVisible();
+    await expect(needs.nth(3).getByText(compactDates("15 Sep", "15 Sep 2026"), { exact: true })).toBeVisible();
+
+    await expect(needs.nth(0).getByText("reopened", { exact: true })).toBeVisible();
+    await expect(needs.nth(1).getByText("reopened", { exact: true })).toBeVisible();
+    await expect(needs.nth(2).getByText("reopened", { exact: true })).toHaveCount(0);
+    await expect(needs.nth(3).getByText("reopened", { exact: true })).toHaveCount(0);
+
+    // Concern text is stored text, rendered as text; the hidden concern never shows.
+    await expect(needs.nth(0).locator("b, img")).toHaveCount(0);
+    await expect(adminPage.getByText("Broken benches in the hostel")).toHaveCount(0);
+  });
+
+  test("a concern's history expands, with author names, the reopen and the automatic reopen", async ({ adminPage }) => {
+    await adminPage.goto(ALPHA_PAGE);
+    const needs = cards(adminPage, "Needs attention");
+
+    const autoReopened = needs.nth(0).getByRole("listitem");
+    await expect(autoReopened.first()).toBeHidden();
+    await needs.nth(0).getByText("History (2)").click();
+    await expect(autoReopened).toHaveCount(2);
+    await expect(autoReopened.nth(0)).toContainText("Resolved · e2e-vsw-pm3@test.local · 12 Jun 2026, 11:30");
+    await expect(autoReopened.nth(0)).toContainText("Practice tests scheduled weekly");
+    await expect(autoReopened.nth(1)).toContainText("Reopened automatically: raised again in visit of 15 Sept 2026");
+
+    await needs.nth(1).getByText("History (2)").click();
+    const reopened = needs.nth(1).getByRole("listitem");
+    await expect(reopened.nth(0)).toContainText("Substitute teacher arranged");
+    await expect(reopened.nth(1)).toContainText("Reopened · e2e-vsw-pm3@test.local · 17 Sept 2026, 10:30");
+    await expect(reopened.nth(1)).toContainText("Substitute left after a month");
+  });
+
+  test("Going well lists the highlights in view", async ({ adminPage }) => {
+    await adminPage.goto(ALPHA_PAGE);
+
+    const going = cards(adminPage, "Going well");
+    await expect(going).toHaveCount(1);
+    await expect(going.nth(0)).toContainText("Strong peer learning culture");
+    await expect(going.nth(0).getByText("4 visits", { exact: true })).toBeVisible();
+    await expect(going.nth(0).getByText(
+      compactDates("15 Sep · 06 Aug ×2 · 10 Jun", "15 Sep 2026 · 06 Aug 2026 ×2 · 10 Jun 2026"),
+      { exact: true }
+    )).toBeVisible();
+  });
+
+  test("Resolved concerns is collapsed by default and shows who resolved each one, when, and the history", async ({ adminPage }) => {
+    await adminPage.goto(ALPHA_PAGE);
+
+    const resolved = cards(adminPage, "Resolved concerns");
+    await expect(concernSection(adminPage, "Resolved concerns").getByText("Water cooler broken")).toBeHidden();
+
+    await expandResolved(adminPage);
+    await expect(resolved).toHaveCount(1);
+    await expect(resolved.first()).toContainText("Water cooler broken");
+    await expect(resolved.first()).toContainText("Resolved by e2e-vsw-pm3@test.local on 16 Sept 2026, 10:30");
+    await expect(resolved.first().getByText("3 visits", { exact: true })).toBeVisible();
+    await expect(resolved.first().getByText(compactDates("15 Sep · 06 Aug · 10 Jun", "15 Sep 2026 · 06 Aug 2026 · 10 Jun 2026"), { exact: true })).toBeVisible();
+
+    const history = resolved.first().getByRole("listitem");
+    await expect(history).toHaveCount(2);
+    await expect(history.nth(0)).toContainText("School replaced the cooler");
+    // The author has a case-variant duplicate permission row: one entry, the first row's name.
+    await expect(history.nth(1)).toContainText("Comment · VSW Resolver · 20 Sept 2026, 10:30");
+    await expect(history.nth(1)).toContainText("Cooler checked again and working");
+    await expect(adminPage.getByText("VSW Resolver Duplicate")).toHaveCount(0);
+  });
+
+  test("Visit-wise notes lists every Visit in view with its concerns and highlights, linking to the Visit", async ({ adminPage }) => {
+    await adminPage.goto(ALPHA_PAGE);
+
+    const notes = concernSection(adminPage, "Visit-wise notes");
+    const visitLinks = notes.getByRole("link");
+    await expect(visitLinks).toHaveCount(6);
+    const hrefs = await visitLinks.evaluateAll((links) => links.map((link) => link.getAttribute("href")));
+    expect(hrefs).toEqual([
+      "/school-visit-summary/9004732",
+      "/school-visit-summary/9004725",
+      "/school-visit-summary/9004723",
+      "/school-visit-summary/9004722",
+      "/school-visit-summary/9004721",
+      "/school-visit-summary/9004720",
+    ]);
+    await expect(visitLinks.nth(0)).toHaveText("01 Oct 2026 · e2e-vsw-pm4@test.local");
+
+    const visits = notes.getByRole("article");
+    await expect(visits.nth(0)).toContainText("In progress");
+    await expect(visits.nth(0)).toContainText("No concerns or highlights");
+    await expect(visits.nth(0)).not.toContainText("Timetable clashes");
+    await expect(visits.nth(2)).toContainText("Timetable clashes with board exam preparation");
+    await expect(visits.nth(2)).toContainText("Water cooler broken");
+    await expect(visits.nth(2)).toContainText("Strong peer learning culture");
+    await expect(visits.nth(3)).not.toContainText("Water cooler broken");
+
+    // Collapsible.
+    await notes.getByText("Visit-wise notes").click();
+    await expect(visitLinks.first()).toBeHidden();
+  });
+
+  test("follows the date and PM filters carried in the URL", async ({ adminPage }) => {
+    await adminPage.goto(`${ALPHA_PAGE}?from=2026-08-01&to=2026-08-31`);
+
+    await expect(cards(adminPage, "Needs attention")).toHaveCount(1);
+    await expect(cards(adminPage, "Needs attention").first()).toContainText("Lab equipment missing");
+    await expect(cards(adminPage, "Needs attention").first().getByText("Recurring · 2 visits", { exact: true })).toBeVisible();
+    await expect(cards(adminPage, "Going well").first().getByText("2 visits", { exact: true })).toBeVisible();
+    await expandResolved(adminPage);
+    await expect(cards(adminPage, "Resolved concerns").first().getByText("1 visit", { exact: true })).toBeVisible();
+    await expect(concernSection(adminPage, "Visit-wise notes").getByRole("link")).toHaveCount(2);
+
+    // Only the in-progress Visit is in view: nothing counts, and each section says so.
+    await adminPage.goto(`${ALPHA_PAGE}?pms=${CONCERN_PM_2}`);
+    await expect(concernSection(adminPage, "Needs attention")).toContainText("No open concerns in view");
+    await expect(concernSection(adminPage, "Going well")).toContainText("No highlights in view");
+    await expandResolved(adminPage);
+    await expect(concernSection(adminPage, "Resolved concerns")).toContainText("No resolved concerns in view");
+    await expect(concernSection(adminPage, "Visit-wise notes").getByRole("link")).toHaveCount(1);
+  });
+});
+
 test.describe("Visit Concern storage", () => {
   test("concern history is append-only: a direct UPDATE or DELETE of an event fails", async () => {
     await withPool(async (pool) => {

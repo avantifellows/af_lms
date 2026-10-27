@@ -114,6 +114,7 @@ describe("SchoolVisitSummarySchoolPage", () => {
     function setupSchool(teachers: Array<Record<string, unknown>> = []) {
       mockQuery.mockImplementation((sql: string) => {
         if (sql.includes("centre_positions")) return Promise.resolve(teachers);
+        if (sql.includes("lms_pm_school_visits")) return Promise.resolve([]);
         return Promise.resolve([{ code: "SC001", name: "Test School", region: "Bhopal" }]);
       });
     }

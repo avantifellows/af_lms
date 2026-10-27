@@ -136,6 +136,27 @@ export function isStaleLastVisit(lastVisitDate: string, today: Date | string): b
   return lastVisitDate < addDays(toIstDateString(today), -STALE_LAST_VISIT_DAYS);
 }
 
+const SHORT_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+// The Visit dates of a concern card, newest first: `15 Sep · 06 Aug ×2 · 10 Jun`. Same-day Visits
+// collapse into one date with ×n; the year shows only when it isn't the current IST year.
+export function formatCompactVisitDates(visitDates: string[], today: Date | string): string {
+  const currentYear = toIstDateString(today).slice(0, 4);
+  const counts = new Map<string, number>();
+  for (const date of visitDates) {
+    counts.set(date, (counts.get(date) ?? 0) + 1);
+  }
+
+  return [...counts.entries()]
+    .sort(([a], [b]) => b.localeCompare(a))
+    .map(([date, count]) => {
+      const [year, month, day] = date.split("-");
+      const label = `${day} ${SHORT_MONTHS[Number(month) - 1]}${year === currentYear ? "" : ` ${year}`}`;
+      return count > 1 ? `${label} ×${count}` : label;
+    })
+    .join(" · ");
+}
+
 // The severity marker beside a School on the School-wise tab: 3+ Recurring Concerns, 1–2,
 // open Concerns but none recurring, or nothing open (counts over the Visits in view).
 export type ConcernSeverity = "high" | "medium" | "low" | "none";

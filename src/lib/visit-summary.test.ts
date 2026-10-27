@@ -7,6 +7,7 @@ import {
   concernSeverity,
   dispatchComputeInlineStats,
   dispatchExtractRemarks,
+  formatCompactVisitDates,
   resolvePresetDateRange,
   rollupActionTypes,
   type ActionTypeRollupStatus,
@@ -233,5 +234,28 @@ describe("concernSeverity", () => {
     expect(concernSeverity({ recurringCount: 1, openCount: 1 })).toBe("medium");
     expect(concernSeverity({ recurringCount: 0, openCount: 1 })).toBe("low");
     expect(concernSeverity({ recurringCount: 0, openCount: 0 })).toBe("none");
+  });
+});
+
+describe("formatCompactVisitDates", () => {
+  // 27 Oct 2026, 10:00 IST.
+  const today = new Date("2026-10-27T04:30:00Z");
+
+  it("lists Visit dates newest first and groups same-day Visits as ×n, without the current IST year", () => {
+    expect(formatCompactVisitDates(["2026-06-10", "2026-08-06", "2026-09-15", "2026-08-06"], today)).toBe(
+      "15 Sep · 06 Aug ×2 · 10 Jun"
+    );
+  });
+
+  it("shows the year on dates outside the current IST year", () => {
+    expect(formatCompactVisitDates(["2025-12-20", "2026-01-05", "2025-12-20"], today)).toBe(
+      "05 Jan · 20 Dec 2025 ×2"
+    );
+  });
+
+  it("takes the current year from the IST date: 31 Dec 2025 20:00 UTC is already 2026 in IST", () => {
+    expect(formatCompactVisitDates(["2026-01-01", "2025-12-31"], new Date("2025-12-31T20:00:00Z"))).toBe(
+      "01 Jan · 31 Dec 2025"
+    );
   });
 });

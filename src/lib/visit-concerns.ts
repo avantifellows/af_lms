@@ -243,3 +243,218 @@ export async function getSchoolWiseView(
     rows: schoolRows,
   };
 }
+
+export type ConcernEventKind = "resolved" | "reopened" | "comment" | "auto_reopened";
+
+// One entry of a concern's history, oldest first. `authorName` comes from the author's
+// user_permission row (null when they have none); `auto_reopened` entries have no author, but name
+// the Visit that raised the concern again.
+export interface ConcernHistoryEntry {
+  kind: ConcernEventKind;
+  body: string | null;
+  authorEmail: string | null;
+  authorName: string | null;
+  visitId: number | null;
+  visitDate: string | null;
+  at: Date;
+}
+
+// A Visit Concern or Visit Highlight on the School page. `visitDates` holds one `YYYY-MM-DD` per
+// live-mention Visit in view (same-day Visits repeat), newest first. Highlights have no status,
+// history or reopened marker.
+export interface ConcernCard {
+  id: number;
+  kind: "concern" | "highlight";
+  text: string;
+  status: "open" | "resolved" | null;
+  visitCount: number;
+  visitDates: string[];
+  reopened: boolean;
+  history: ConcernHistoryEntry[];
+}
+
+export interface VisitNoteItem {
+  id: number;
+  kind: "concern" | "highlight";
+  text: string;
+  status: "open" | "resolved" | null;
+}
+
+export interface VisitNotes {
+  visitId: number;
+  visitDate: string;
+  status: string;
+  pmEmail: string;
+  pmName: string | null;
+  concerns: VisitNoteItem[];
+  highlights: VisitNoteItem[];
+}
+
+export interface SchoolConcernPage {
+  needsAttention: ConcernCard[];
+  goingWell: ConcernCard[];
+  resolved: ConcernCard[];
+  visitNotes: VisitNotes[];
+}
+
+interface SchoolVisitRow {
+  id: string | number;
+  visit_date: string;
+  status: string;
+  pm_email: string;
+  pm_name: string | null;
+}
+
+interface MentionRow {
+  id: string | number;
+  kind: "concern" | "highlight";
+  text: string;
+  status: "open" | "resolved" | null;
+  visit_id: string | number;
+}
+
+interface EventRow {
+  concern_id: string | number;
+  kind: ConcernEventKind;
+  body: string | null;
+  author_email: string | null;
+  author_name: string | null;
+  visit_id: string | number | null;
+  visit_date: string | null;
+  at: Date | string;
+}
+
+// Name lookup by email in a scalar subquery: an email with case-variant duplicate permission rows
+// still yields one row (the first permission row's name).
+function permissionNameSql(emailColumn: string): string {
+  return `(SELECT NULLIF(TRIM(up.full_name), '') FROM user_permission up
+           WHERE LOWER(up.email) = LOWER(${emailColumn})
+           ORDER BY up.id LIMIT 1)`;
+}
+
+// Most Visits first, then the most recent mention, then the lowest id (the School-wise tab's
+// top-recurring order).
+function compareCards(a: ConcernCard, b: ConcernCard): number {
+  return b.visitCount - a.visitCount
+    || (b.visitDates[0] ?? "").localeCompare(a.visitDates[0] ?? "")
+    || a.id - b.id;
+}
+
+// The School page's concern sections, from the Visits in view at one School (every filter, the
+// actor's scope and the physical-only rule apply). Only live mentions (completed Visits in view)
+// count, so a record with none in view — including one mentioned only by soft-deleted or
+// in-progress Visits — doesn't show. Visit-wise notes list every Visit in view, newest first.
+// The caller has already checked the School is one the actor may see.
+export async function getSchoolConcernPage(
+  actor: VisitsActor,
+  schoolCode: string,
+  filters: VisitSummaryFilters
+): Promise<SchoolConcernPage> {
+  const { whereSql, joinSql, params } = buildVisitSummaryWhere(actor, filters);
+  const schoolIndex = params.length + 1;
+
+  const visits = await query<SchoolVisitRow>(
+    `SELECT v.id, TO_CHAR(v.visit_date, 'YYYY-MM-DD') AS visit_date, v.status, v.pm_email,
+            ${permissionNameSql("v.pm_email")} AS pm_name
+     FROM lms_pm_school_visits v
+     LEFT JOIN school s ON s.code = v.school_code
+     ${joinSql}
+     WHERE ${whereSql} AND v.school_code = $${schoolIndex}
+     ORDER BY v.visit_date DESC, v.id DESC`,
+    [...params, schoolCode]
+  );
+
+  const liveVisitIds = visits.filter((visit) => visit.status === "completed").map((visit) => Number(visit.id));
+  const mentions = liveVisitIds.length === 0
+    ? []
+    : await query<MentionRow>(
+      `SELECT c.id, c.kind, c.text, c.status, m.visit_id
+       FROM lms_visit_concerns c
+       JOIN lms_visit_concern_mentions m ON m.concern_id = c.id
+       WHERE c.school_code = $1 AND m.visit_id = ANY($2::bigint[])`,
+      [schoolCode, liveVisitIds]
+    );
+
+  const concernIds = [...new Set(mentions.filter((row) => row.kind === "concern").map((row) => Number(row.id)))];
+  // inserted_at holds UTC in a timestamp without time zone.
+  const events = concernIds.length === 0
+    ? []
+    : await query<EventRow>(
+      `SELECT e.concern_id, e.kind, e.body, e.author_email,
+              ${permissionNameSql("e.author_email")} AS author_name,
+              e.visit_id, TO_CHAR(ev.visit_date, 'YYYY-MM-DD') AS visit_date,
+              e.inserted_at AT TIME ZONE 'UTC' AS at
+       FROM lms_visit_concern_events e
+       LEFT JOIN lms_pm_school_visits ev ON ev.id = e.visit_id
+       WHERE e.concern_id = ANY($1::bigint[])
+       ORDER BY e.inserted_at ASC, e.id ASC`,
+      [concernIds]
+    );
+
+  const visitDateById = new Map(visits.map((visit) => [Number(visit.id), visit.visit_date]));
+  const historyById = new Map<number, ConcernHistoryEntry[]>();
+  for (const event of events) {
+    const id = Number(event.concern_id);
+    const history = historyById.get(id) ?? [];
+    history.push({
+      kind: event.kind,
+      body: event.body,
+      authorEmail: event.author_email,
+      authorName: event.author_name,
+      visitId: event.visit_id === null ? null : Number(event.visit_id),
+      visitDate: event.visit_date,
+      at: new Date(event.at),
+    });
+    historyById.set(id, history);
+  }
+
+  const cardsById = new Map<number, ConcernCard>();
+  const itemsByVisit = new Map<number, VisitNoteItem[]>();
+  for (const mention of mentions) {
+    const id = Number(mention.id);
+    const visitId = Number(mention.visit_id);
+    const history = historyById.get(id) ?? [];
+    const card = cardsById.get(id) ?? {
+      id,
+      kind: mention.kind,
+      text: mention.text,
+      status: mention.status,
+      visitCount: 0,
+      visitDates: [],
+      reopened: history.some((entry) => entry.kind === "reopened" || entry.kind === "auto_reopened"),
+      history,
+    };
+    card.visitCount += 1;
+    card.visitDates.push(visitDateById.get(visitId) ?? "");
+    cardsById.set(id, card);
+
+    const items = itemsByVisit.get(visitId) ?? [];
+    items.push({ id, kind: mention.kind, text: mention.text, status: mention.status });
+    itemsByVisit.set(visitId, items);
+  }
+
+  const cards = [...cardsById.values()];
+  for (const card of cards) {
+    card.visitDates.sort((a, b) => b.localeCompare(a));
+  }
+  cards.sort(compareCards);
+  const byId = (a: VisitNoteItem, b: VisitNoteItem) => a.id - b.id;
+
+  return {
+    needsAttention: cards.filter((card) => card.kind === "concern" && card.status === "open"),
+    goingWell: cards.filter((card) => card.kind === "highlight"),
+    resolved: cards.filter((card) => card.kind === "concern" && card.status === "resolved"),
+    visitNotes: visits.map((visit) => {
+      const items = itemsByVisit.get(Number(visit.id)) ?? [];
+      return {
+        visitId: Number(visit.id),
+        visitDate: visit.visit_date,
+        status: visit.status,
+        pmEmail: visit.pm_email,
+        pmName: visit.pm_name,
+        concerns: items.filter((item) => item.kind === "concern").sort(byId),
+        highlights: items.filter((item) => item.kind === "highlight").sort(byId),
+      };
+    }),
+  };
+}
