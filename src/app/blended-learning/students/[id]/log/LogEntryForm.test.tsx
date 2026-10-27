@@ -677,7 +677,8 @@ describe("LogEntryForm: Action items carried over from the Profile Doc", () => {
     expect(markers[0]).toHaveAttribute("aria-expanded", "false");
     await userEvent.click(markers[0]);
     expect(markers[0]).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getAllByRole("tooltip")[0]).toHaveClass("visible");
+    expect(screen.getAllByRole("tooltip")[0]).toHaveClass("block");
+    expect(screen.getAllByRole("tooltip")[0]).not.toHaveClass("hidden");
     await userEvent.keyboard("{Escape}");
     expect(markers[0]).toHaveAttribute("aria-expanded", "false");
     await userEvent.click(markers[0]);

@@ -34,6 +34,10 @@ export function CarriedItemsNotice() {
 
 // "From Profile Doc" under a carried row. The explanation is the row's
 // description too (`tipId`), so a screen reader hears it on the text field.
+// It shows at once, fully opaque (no fade), above the rows after it: no
+// ancestor below the Action items list sets a z-index, so z-20 wins over the
+// next row's select. The marker itself gets no z-index, so it scrolls under
+// the sticky save bar.
 export function CarriedMarker({ tipId }: { tipId: string }) {
   const [open, setOpen] = useState(false);
   return (
@@ -55,7 +59,7 @@ export function CarriedMarker({ tipId }: { tipId: string }) {
       <span
         id={tipId}
         role="tooltip"
-        className={`absolute left-0 top-full z-20 w-60 max-w-[calc(100vw-3rem)] rounded-md bg-text-primary px-2.5 py-1.5 text-xs font-normal text-bg-card shadow-md transition-opacity group-hover:visible group-hover:opacity-100 ${open ? "visible opacity-100" : "invisible opacity-0"}`}
+        className={`absolute left-0 top-full z-20 w-60 max-w-[calc(100vw-3rem)] rounded-md bg-text-primary px-2.5 py-1.5 text-xs font-normal text-bg-card shadow-md group-hover:block ${open ? "block" : "hidden"}`}
       >
         {CARRIED_EXPLANATION}
       </span>

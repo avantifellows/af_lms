@@ -132,6 +132,18 @@ for (const { label, key, viewport } of VIEWPORTS) {
       await markers.first().click();
       await expect(items.getByRole("tooltip").first()).toBeVisible();
       await expect(items.getByRole("tooltip").first()).toHaveText(EXPLANATION);
+      // Opaque, inside the viewport, and drawn above the next row's controls.
+      const tooltip = items.getByRole("tooltip").first();
+      await expect(tooltip).toHaveCSS("opacity", "1");
+      await tooltip.scrollIntoViewIfNeeded();
+      const onTop = await tooltip.evaluate((element) => {
+        const box = element.getBoundingClientRect();
+        const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+        return { hit: element.contains(hit), left: box.left, right: box.right, width: window.innerWidth };
+      });
+      expect(onTop.hit).toBe(true);
+      expect(onTop.left).toBeGreaterThanOrEqual(0);
+      expect(onTop.right).toBeLessThanOrEqual(onTop.width);
       expect((await markers.first().boundingBox())!.height).toBeGreaterThanOrEqual(key === "mobile" ? 44 : 32);
       expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
 
