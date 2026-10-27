@@ -5,13 +5,16 @@ import { notFound, redirect } from "next/navigation";
 import { Card } from "@/components/ui";
 import { AcademicLevelCards } from "@/components/visits/AcademicLevelCards";
 import { SchoolConcernSections } from "@/components/visits/SchoolConcernSections";
+import { SchoolInterventionFlags } from "@/components/visits/SchoolInterventionFlags";
 import { authOptions } from "@/lib/auth";
+import { canViewSchoolInterventionFlags } from "@/lib/intervention-flags";
 import { canAccessSchoolSync, getFeatureAccess, getResolvedPermission } from "@/lib/permissions";
 import { getSchoolConcernPage } from "@/lib/visit-concerns";
 import { normalizeVisitSummaryFilters } from "@/lib/visit-summary-scope";
 import {
   getVisitSummaryAcademicLevelCards,
   getVisitSummarySchool,
+  getVisitSummarySchoolFlags,
   getVisitSummarySchoolTeachers,
   type TeacherGroup,
 } from "@/lib/visit-summary-school";
@@ -98,10 +101,15 @@ export default async function SchoolVisitSummarySchoolPage({ params, searchParam
     canAccessSchoolSync(permission, school.code, school.region ?? undefined) &&
     getFeatureAccess(permission, "performance").canView;
 
-  const [teacherGroups, concernPage, academicLevels] = await Promise.all([
+  // Flags follow the rule behind `authorizeInterventionFlags(…, "view")`; without it the section is
+  // omitted and flags are never read.
+  const canViewFlags = canViewSchoolInterventionFlags(permission, school);
+
+  const [teacherGroups, concernPage, academicLevels, flags] = await Promise.all([
     getVisitSummarySchoolTeachers(school.code),
     getSchoolConcernPage(actor, school.code, normalizeVisitSummaryFilters(currentParams)),
     canViewPerformance ? getVisitSummaryAcademicLevelCards(school) : null,
+    canViewFlags ? getVisitSummarySchoolFlags(school.code) : null,
   ]);
 
   return (
@@ -127,7 +135,12 @@ export default async function SchoolVisitSummarySchoolPage({ params, searchParam
         </Card>
 
         {/* Resolve / Comment / Reopen follow the rule the events API enforces: visits edit. */}
-        <SchoolConcernSections page={concernPage} today={new Date()} canAct={visitsAccess.canEdit} />
+        <SchoolConcernSections
+          page={concernPage}
+          today={new Date()}
+          canAct={visitsAccess.canEdit}
+          flags={flags && <SchoolInterventionFlags schoolCode={school.code} flags={flags} />}
+        />
       </main>
     </div>
   );

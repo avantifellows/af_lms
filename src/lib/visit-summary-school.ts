@@ -11,6 +11,7 @@ export interface VisitSummarySchool {
   name: string;
   region: string | null;
   udise_code: string | null;
+  af_school_category: string | null;
 }
 
 // The School, when the actor may see it on the Visit Summary: inside their summary scope and with
@@ -25,7 +26,7 @@ export async function getVisitSummarySchool(
     schoolRegionColumn: "s.region",
   });
   const rows = await query<VisitSummarySchool>(
-    `SELECT s.code, s.name, s.region, s.udise_code
+    `SELECT s.code, s.name, s.region, s.udise_code, s.af_school_category
      FROM school s
      WHERE s.code = $1
        AND EXISTS (
@@ -250,4 +251,96 @@ export async function getVisitSummaryAcademicLevelCards(
       EXAM_ORDER.indexOf(a.exam) - EXAM_ORDER.indexOf(b.exam)
   );
   return { available: true, cards };
+}
+
+export interface VisitSummaryFlagRow {
+  id: number;
+  studentName: string;
+  grade: number | null;
+  // The tag of the active physical Centre at the School running the flag's programme; null when
+  // there is none.
+  centreTag: string | null;
+  raisedBy: string;
+  raisedAt: string;
+  updateCount: number;
+}
+
+export interface VisitSummaryFlags {
+  open: VisitSummaryFlagRow[];
+  resolvedCount: number;
+}
+
+interface FlagQueryRow {
+  id: number;
+  status: "open" | "resolved";
+  student_name: string;
+  grade: number | null;
+  centre_id: string | null;
+  centre_type_code: string | null;
+  raised_by_email: string;
+  raised_by_name: string | null;
+  inserted_at: string;
+  update_count: number;
+}
+
+// The School's intervention flags for the School page (#470), JNV NVS ones excluded: its open flags,
+// newest first, and how many are resolved. The caller checks `canViewSchoolInterventionFlags`.
+// The raiser's name comes from `user_permission` like other author names, falling back to the email.
+export async function getVisitSummarySchoolFlags(schoolCode: string): Promise<VisitSummaryFlags> {
+  const rows = await query<FlagQueryRow>(
+    `SELECT f.id::int AS id,
+            f.status,
+            TRIM(CONCAT_WS(' ', u.first_name, u.last_name)) AS student_name,
+            grade.number AS grade,
+            centre.id::text AS centre_id,
+            centre.type_code AS centre_type_code,
+            f.raised_by_email,
+            NULLIF(TRIM(up.full_name), '') AS raised_by_name,
+            f.inserted_at AT TIME ZONE 'UTC' AS inserted_at,
+            (SELECT COUNT(*) FROM lms_student_intervention_flag_updates upd WHERE upd.flag_id = f.id)::int
+              AS update_count
+     FROM lms_student_intervention_flags f
+     JOIN school s ON s.id = f.school_id
+     JOIN student st ON st.id = f.student_id
+     JOIN "user" u ON u.id = st.user_id
+     LEFT JOIN LATERAL (
+       SELECT gr.number
+       FROM enrollment_record er
+       JOIN grade gr ON gr.id = er.group_id
+       WHERE er.user_id = st.user_id AND er.group_type = 'grade'
+       ORDER BY er.is_current DESC, er.academic_year DESC, er.id DESC
+       LIMIT 1
+     ) grade ON true
+     LEFT JOIN LATERAL (
+       SELECT c.id, c.type_code
+       FROM centres c
+       WHERE c.school_id = f.school_id AND c.program_id = f.program_id AND c.is_physical AND c.is_active
+       ORDER BY c.id
+       LIMIT 1
+     ) centre ON true
+     LEFT JOIN LATERAL (
+       SELECT full_name FROM user_permission
+       WHERE LOWER(email) = LOWER(f.raised_by_email)
+       ORDER BY id LIMIT 1
+     ) up ON true
+     WHERE s.code = $1
+       AND f.program_id IS DISTINCT FROM $2
+     ORDER BY f.inserted_at DESC, f.id DESC`,
+    [schoolCode, PROGRAM_IDS.NVS]
+  );
+
+  return {
+    open: rows
+      .filter((row) => row.status === "open")
+      .map((row) => ({
+        id: Number(row.id),
+        studentName: row.student_name,
+        grade: row.grade === null ? null : Number(row.grade),
+        centreTag: row.centre_id === null ? null : centreTag(row.centre_type_code),
+        raisedBy: row.raised_by_name ?? row.raised_by_email,
+        raisedAt: row.inserted_at,
+        updateCount: Number(row.update_count),
+      })),
+    resolvedCount: rows.filter((row) => row.status === "resolved").length,
+  };
 }

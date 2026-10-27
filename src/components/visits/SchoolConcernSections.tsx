@@ -15,7 +15,8 @@ import { formatCompactVisitDates } from "@/lib/visit-summary";
 // The School page's concern sections (#470): Needs attention, Going well, Resolved concerns
 // (collapsed) and Visit-wise notes (collapsible). Every text is stored text and renders as text.
 // `today` decides the compact dates' year rule. `canAct` (visits edit, the rule the events API
-// enforces) adds Resolve on open concerns and Comment / Reopen on resolved ones.
+// enforces) adds Resolve on open concerns and Comment / Reopen on resolved ones. `flags` (the
+// Intervention flags section, when the viewer may see it) sits between Needs attention and Going well.
 
 function formatDate(value: string | Date): string {
   return new Date(value).toLocaleDateString("en-IN", {
@@ -275,15 +276,17 @@ export function SchoolConcernSections({
   page,
   today,
   canAct,
+  flags,
 }: {
   page: SchoolConcernPage;
   today: Date;
   canAct: boolean;
+  flags?: ReactNode;
 }) {
   return (
     <>
       <NeedsAttention cards={page.needsAttention} today={today} canAct={canAct} />
-      {/* The Intervention flags section goes here (#470 flags-section slice). */}
+      {flags}
       <GoingWell cards={page.goingWell} today={today} />
       <ResolvedConcerns cards={page.resolved} today={today} canAct={canAct} />
       <VisitWiseNotes visits={page.visitNotes} />

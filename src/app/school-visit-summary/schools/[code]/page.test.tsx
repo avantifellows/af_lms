@@ -321,6 +321,86 @@ describe("SchoolVisitSummarySchoolPage", () => {
     });
   });
 
+  describe("intervention flags", () => {
+    // One open Nodal flag with a follow-up; the School's resolved and NVS flags never become rows.
+    const openFlag = {
+      id: 9004755,
+      status: "open",
+      student_name: "Asha Verma",
+      grade: 11,
+      centre_id: "102",
+      centre_type_code: "nodal",
+      raised_by_email: "pm@avantifellows.org",
+      raised_by_name: "Priya PM",
+      inserted_at: "2026-10-06T06:00:00.000Z",
+      update_count: 2,
+    };
+
+    function setupSchool() {
+      mockQuery.mockImplementation((sql: string) => {
+        if (sql.includes("lms_student_intervention_flags")) return Promise.resolve([openFlag]);
+        if (sql.includes("centre_positions")) return Promise.resolve([]);
+        if (sql.includes("lms_pm_school_visits")) return Promise.resolve([]);
+        if (sql.includes("c.program_id")) return Promise.resolve([]);
+        return Promise.resolve([{ code: "SC001", name: "Test School", region: "Bhopal", af_school_category: "JNV" }]);
+      });
+    }
+
+    function flagQueries() {
+      return mockQuery.mock.calls.filter(([sql]) => String(sql).includes("lms_student_intervention_flags"));
+    }
+
+    it("shows the open flags to a viewer who may see the School's flags", async () => {
+      setupAuth();
+      setupSchool();
+
+      render(await renderPage());
+
+      const section = screen.getByRole("region", { name: /Intervention flags/ });
+      expect(within(section).getByRole("link", { name: /Asha Verma/ })).toHaveAttribute(
+        "href",
+        "/school/SC001?tab=enrollment&flag=9004755"
+      );
+    });
+
+    it("omits the section, without reading flags, for a viewer without Student view access", async () => {
+      setupAuth();
+      setupSchool();
+      mockGetFeatureAccess.mockImplementation((_permission: unknown, feature: string) =>
+        feature === "students"
+          ? { access: "none", canView: false, canEdit: false }
+          : { access: "edit", canView: true, canEdit: true }
+      );
+
+      render(await renderPage());
+
+      expect(screen.getByRole("heading", { level: 1, name: "Test School (Bhopal)" })).toBeInTheDocument();
+      expect(screen.getByRole("region", { name: /Needs attention/ })).toBeInTheDocument();
+      expect(screen.queryByRole("region", { name: /Intervention flags/ })).not.toBeInTheDocument();
+      expect(flagQueries()).toHaveLength(0);
+    });
+
+    it("omits the section for a viewer outside the School's access scope", async () => {
+      // Sees the School on the Visit Summary through a PM seat that isn't in its School scope.
+      setupAuth({
+        email: "pm@avantifellows.org",
+        level: 1,
+        role: "program_manager",
+        school_codes: [],
+        read_only: false,
+        program_ids: [1],
+        scope: { schools: new Set<string>(), centres: new Set<number>(), programs: new Set<number>(), visitManagedSchools: new Set(["SC001"]) },
+      });
+      setupSchool();
+
+      render(await renderPage());
+
+      expect(screen.getByRole("heading", { level: 1, name: "Test School (Bhopal)" })).toBeInTheDocument();
+      expect(screen.queryByRole("region", { name: /Intervention flags/ })).not.toBeInTheDocument();
+      expect(flagQueries()).toHaveLength(0);
+    });
+  });
+
   describe("with the real permission matrix", () => {
     // Visits access comes from the real matrix, so flipping a role's `visits` access (or its
     // read_only downgrade) changes the page and the events API together.

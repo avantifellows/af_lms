@@ -845,6 +845,64 @@ test.describe.serial("School Visit Summary — School page concern actions", () 
   });
 });
 
+// School page flags fixture: e2e/fixtures/migrations/20261027140600_seed_visit_summary_school_page_flags_fixture.sql
+// (its header works out both Schools' sections). Flag 9004751 is the deep-link fixture's open flag on
+// Aaditya Raj Dhawan, a roster Student at JNV Bundi (14061).
+function flagSection(page: Page) {
+  return page.getByRole("region", { name: "Intervention flags" });
+}
+
+function flagRows(page: Page) {
+  return flagSection(page).getByRole("link");
+}
+
+test.describe("School Visit Summary — School page intervention flags", () => {
+  test("lists the open flags directly below Needs attention, with the open and resolved counts", async ({ adminPage }) => {
+    await adminPage.goto("/school-visit-summary/schools/VSWPHYS");
+
+    const sections = await adminPage.getByRole("region").evaluateAll((regions) =>
+      regions.map((region) => document.getElementById(region.getAttribute("aria-labelledby") ?? "")?.textContent)
+    );
+    expect(sections.slice(sections.indexOf("Needs attention"), sections.indexOf("Needs attention") + 3)).toEqual([
+      "Needs attention",
+      "Intervention flags",
+      "Going well",
+    ]);
+
+    await expect(flagSection(adminPage).getByText("2 open · 1 resolved", { exact: true })).toBeVisible();
+    await expect(flagRows(adminPage)).toHaveCount(2);
+    await expect(flagRows(adminPage).nth(0)).toHaveText(
+      "OpenVSW Flag Student TwoGrade 12CoERaised by VSW Seated PM on 05 Oct 2026"
+    );
+    await expect(flagRows(adminPage).nth(1)).toHaveText(
+      "OpenVSW Flag Student OneGrade 11CoERaised by e2e-vsw-pm@test.local on 05 Oct 2026"
+    );
+    await expect(flagSection(adminPage).getByText("VSW Flag Student Three")).toHaveCount(0);
+  });
+
+  test("never shows a JNV NVS flag at a mixed JNV, and counts a flag's updates when there are more than one", async ({ adminPage }) => {
+    await adminPage.goto("/school-visit-summary/schools/VSWMIXED");
+
+    await expect(flagSection(adminPage).getByText("1 open", { exact: true })).toBeVisible();
+    await expect(flagRows(adminPage)).toHaveText([
+      "OpenVSW Flag Student ThreeGrade 11NodalRaised by e2e-vsw-pm@test.local on 06 Oct 2026" + "2 updates",
+    ]);
+    await expect(flagRows(adminPage).nth(0)).toHaveAttribute("href", "/school/VSWMIXED?tab=enrollment&flag=9004755");
+    await expect(adminPage.getByText("VSW Flag Student Four")).toHaveCount(0);
+  });
+
+  test("a flag row opens the Student's flag on the School's Enrollment tab", async ({ adminPage }) => {
+    await adminPage.goto("/school-visit-summary/schools/14061");
+
+    await flagRows(adminPage).filter({ hasText: "Aaditya Raj Dhawan" }).click();
+
+    await expect(adminPage).toHaveURL(/\/school\/14061\?tab=enrollment&flag=9004751$/);
+    const dialog = adminPage.getByRole("dialog");
+    await expect(dialog.getByRole("heading", { name: "Aaditya Raj Dhawan" })).toBeVisible();
+    await expect(dialog.getByText("Missed two weeks after a family bereavement.")).toBeVisible();
+  });
+});
+
 test.describe("Visit Concern storage", () => {
   test("concern history is append-only: a direct UPDATE or DELETE of an event fails", async () => {
     await withPool(async (pool) => {
