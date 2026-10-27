@@ -143,6 +143,24 @@ const roundCohort = (g: GenderStat): GenderStat => ({
   avg_score: round1(g.avg_score),
 });
 
+const strOrNull = (v: unknown): string | null => (v as string | null) ?? null;
+
+/** The test's own fields, from any of the session's summary rows. */
+function summaryMeta(row: Record<string, unknown>, sessionId: string): SessionSummary["meta"] {
+  return {
+    session_id: sessionId,
+    test_name: String(row.test_name ?? ""),
+    test_format: strOrNull(row.test_format),
+    start_date: strOrNull(row.start_date),
+    test_grade: toNumOrNull(row.test_grade),
+    exam: strOrNull(row.test_course),
+    subject: null,
+    cms_test_id: strOrNull(row.cms_test_id),
+    total_questions: toNumOrNull(row.total_questions),
+    max_marks: toNumOrNull(row.max_marks),
+  };
+}
+
 /** Overall results for one session, split by gender, plus the test's own fields. */
 async function getSessionSummary(scope: SessionScope): Promise<SessionSummary | null> {
   const { sql: where, params } = scopeFilters(scope);
@@ -181,18 +199,7 @@ async function getSessionSummary(scope: SessionScope): Promise<SessionSummary | 
   const testStream = (first.test_stream as string | null) ?? null;
   const appeared = list.reduce((n, r) => n + toNum(testStream ? r.stream_students : r.students), 0);
   return {
-    meta: {
-      session_id: scope.sessionId,
-      test_name: String(first.test_name ?? ""),
-      test_format: (first.test_format as string | null) ?? null,
-      start_date: (first.start_date as string | null) ?? null,
-      test_grade: toNumOrNull(first.test_grade),
-      exam: (first.test_course as string | null) ?? null,
-      subject: null,
-      cms_test_id: (first.cms_test_id as string | null) ?? null,
-      total_questions: toNumOrNull(first.total_questions),
-      max_marks: toNumOrNull(first.max_marks),
-    },
+    meta: summaryMeta(first, scope.sessionId),
     testStream,
     program: scope.program ?? (first.program as string | null) ?? null,
     appeared,

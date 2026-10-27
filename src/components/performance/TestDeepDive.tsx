@@ -23,6 +23,7 @@ interface Props {
   studentsOnly?: boolean;
 }
 
+// fallow-ignore-next-line complexity
 export default function TestDeepDive({
   schoolUdise,
   grade,

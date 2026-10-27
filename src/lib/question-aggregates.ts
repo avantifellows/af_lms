@@ -39,7 +39,7 @@ function finish(group: QuestionGroupStat): QuestionGroupStat {
  * once in each, so a topic breakdown matches a per-topic query over the bridge.
  * Questions with no key are left out.
  */
-export function groupQuestions(
+function groupQuestions(
   questions: QuestionStat[],
   keysOf: (q: QuestionStat) => string[],
 ): QuestionGroupStat[] {

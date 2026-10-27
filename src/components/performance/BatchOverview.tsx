@@ -152,6 +152,113 @@ function TestCard({
   );
 }
 
+/** The streams the API reports, and the subjects and test grades of the current
+ *  test category's tests (chapter vs full). */
+function filterOptionsFor(data: BatchOverviewData | null, testCategory: TestCategory) {
+  if (!data) return { streams: [], subjects: [], testGrades: [] };
+  const subjectSet = new Set<string>();
+  const testGradeSet = new Set<number>();
+  for (const t of data.tests) {
+    const isChapter = isChapterTest(t.test_format);
+    if (testCategory === "chapter" ? !isChapter : isChapter) continue;
+    for (const s of t.subjects || []) subjectSet.add(s);
+    if (t.test_grade != null) testGradeSet.add(t.test_grade);
+  }
+  return {
+    streams: data.streams || [],
+    subjects: [...subjectSet].sort(),
+    testGrades: [...testGradeSet].sort((a, b) => a - b),
+  };
+}
+
+interface OverviewProps {
+  tests: TestTrendPoint[];
+  data: BatchOverviewData;
+  grade: number;
+  onTestClick: Props["onTestClick"];
+}
+
+/** The loaded overview: the empty state, the chapter-test cards, or the general test cards. */
+function OverviewBody({
+  data,
+  grade,
+  isNvs,
+  testCategory,
+  stream,
+  subject,
+  testGrade,
+  onTestClick,
+}: {
+  data: BatchOverviewData | null;
+  grade: number;
+  isNvs?: boolean;
+  testCategory: TestCategory;
+  stream?: string;
+  subject?: string;
+  testGrade?: number;
+  onTestClick: Props["onTestClick"];
+}) {
+  const allTests = data?.tests ?? [];
+  const tests = listedTests(allTests, { isNvs, testCategory, subject, testGrade });
+  if (!data || tests.length === 0) {
+    return (
+      <EmptyOverview>
+        {emptyStateCopy({ isNvs, hasData: allTests.length > 0, testCategory, subject, stream, testGrade })}
+      </EmptyOverview>
+    );
+  }
+  // Physical centres' chapter tests: the chapter-test report index (Poojita's
+  // design) — cards only, carrying exactly what that index shows.
+  const Overview = testCategory === "chapter" && !isNvs ? ChapterCardsGrid : TestsOverview;
+  return <Overview tests={tests} data={data} grade={grade} onTestClick={onTestClick} />;
+}
+
+function ChapterCardsGrid({ tests, data, grade, onTestClick }: OverviewProps) {
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 md:gap-4">
+      {[...tests].reverse().map((t) => (
+        <ChapterTestCard
+          key={t.session_id}
+          test={t}
+          appeared={t.appeared_count}
+          enrolled={attendanceFor(t, data.enrolledByStream).streamEnrolled}
+          grade={grade}
+          onClick={() => onTestClick(t.session_id, t.test_name, t.test_format)}
+        />
+      ))}
+    </div>
+  );
+}
+
+function TestsOverview({ tests, data, onTestClick }: OverviewProps) {
+  const { totalEnrolled, enrolledByStream } = data;
+  const avgAttendance = Math.round(
+    tests.reduce((s, t) => s + (t.test_stream ? t.stream_student_count : t.student_count), 0) / tests.length
+  );
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
+        <StatCard label="Tests Conducted" value={tests.length} color="brand-coral" />
+        <StatCard label="Avg Attendance" value={avgAttendance} color="brand-amber" />
+        {totalEnrolled != null && (
+          <StatCard label="Total Enrolled" value={totalEnrolled} color="brand-gold" />
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 md:gap-4">
+        {[...tests].reverse().map((t) => (
+          <TestCard
+            key={t.session_id}
+            test={t}
+            enrolledByStream={enrolledByStream}
+            onClick={() => onTestClick(t.session_id, t.test_name, t.test_format)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function BatchOverview({
   schoolUdise,
   grade,
@@ -216,22 +323,7 @@ export default function BatchOverview({
 
   // Compute available subjects from the loaded test set, scoped to the current
   // test category (chapter vs full). Streams come straight from the API.
-  const filterOptions = useMemo(() => {
-    if (!data) return { streams: [], subjects: [], testGrades: [] };
-    const subjectSet = new Set<string>();
-    const testGradeSet = new Set<number>();
-    for (const t of data.tests) {
-      const isChapter = isChapterTest(t.test_format);
-      if (testCategory === "chapter" ? !isChapter : isChapter) continue;
-      for (const s of t.subjects || []) subjectSet.add(s);
-      if (t.test_grade != null) testGradeSet.add(t.test_grade);
-    }
-    return {
-      streams: data.streams || [],
-      subjects: [...subjectSet].sort(),
-      testGrades: [...testGradeSet].sort((a, b) => a - b),
-    };
-  }, [data, testCategory]);
+  const filterOptions = useMemo(() => filterOptionsFor(data, testCategory), [data, testCategory]);
 
   // Notify parent of available filter values so it can render the filter pills.
   // PerformanceTab wraps `onFilterOptions` in useCallback so this effect only
@@ -240,81 +332,29 @@ export default function BatchOverview({
     onFilterOptions?.(filterOptions);
   }, [filterOptions, onFilterOptions]);
 
-  let content: React.ReactNode;
-  if (loading) {
-    content = (
-      <div className="flex justify-center items-center h-[30vh]">
-        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-accent" />
-        <span className="ml-3 text-sm text-text-secondary">Loading batch overview...</span>
-      </div>
-    );
-  } else if (error) {
-    content = (
-      <div className="p-4 bg-danger-bg border border-danger text-danger rounded-lg">
-        {error}
-      </div>
-    );
-  } else {
-    const allTests = data?.tests ?? [];
-    const tests = listedTests(allTests, { isNvs, testCategory, subject, testGrade });
-    if (!data || tests.length === 0) {
-      content = (
-      <EmptyOverview>
-        {emptyStateCopy({ isNvs, hasData: allTests.length > 0, testCategory, subject, stream, testGrade })}
-      </EmptyOverview>
-      );
-    } else {
-      const { totalEnrolled, enrolledByStream } = data;
-      const avgAttendance = Math.round(
-        tests.reduce((s, t) => s + (t.test_stream ? t.stream_student_count : t.student_count), 0) / tests.length
-      );
-      // Physical centres' chapter tests: the chapter-test report index (Poojita's
-      // design) — cards only, carrying exactly what that index shows.
-      const chapterCards = testCategory === "chapter" && !isNvs;
-      content = chapterCards ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 md:gap-4">
-          {[...tests].reverse().map((t) => {
-            const { streamEnrolled } = attendanceFor(t, enrolledByStream);
-            return (
-              <ChapterTestCard
-                key={t.session_id}
-                test={t}
-                appeared={t.appeared_count}
-                enrolled={streamEnrolled}
-                grade={grade}
-                onClick={() => onTestClick(t.session_id, t.test_name, t.test_format)}
-              />
-            );
-          })}
-        </div>
-      ) : (
-        <div className="space-y-6">
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
-            <StatCard label="Tests Conducted" value={tests.length} color="brand-coral" />
-            <StatCard label="Avg Attendance" value={avgAttendance} color="brand-amber" />
-            {totalEnrolled != null && (
-              <StatCard label="Total Enrolled" value={totalEnrolled} color="brand-gold" />
-            )}
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 md:gap-4">
-            {[...tests].reverse().map((t) => (
-              <TestCard
-                key={t.session_id}
-                test={t}
-                enrolledByStream={enrolledByStream}
-                onClick={() => onTestClick(t.session_id, t.test_name, t.test_format)}
-              />
-            ))}
-          </div>
-        </div>
-      );
-    }
-  }
-
   return (
     <RetainedHeightFrame loading={loading} testId="batch-overview-frame">
-      {content}
+      {loading ? (
+        <div className="flex justify-center items-center h-[30vh]">
+          <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-accent" />
+          <span className="ml-3 text-sm text-text-secondary">Loading batch overview...</span>
+        </div>
+      ) : error ? (
+        <div className="p-4 bg-danger-bg border border-danger text-danger rounded-lg">
+          {error}
+        </div>
+      ) : (
+        <OverviewBody
+          data={data}
+          grade={grade}
+          isNvs={isNvs}
+          testCategory={testCategory}
+          stream={stream}
+          subject={subject}
+          testGrade={testGrade}
+          onTestClick={onTestClick}
+        />
+      )}
     </RetainedHeightFrame>
   );
 }

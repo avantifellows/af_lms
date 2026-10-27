@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { SectionCard } from "@/components/ui/SectionCard";
 import type { GenderStat, SchoolComparisonRow } from "@/types/question-analytics";
 import { TD, TH } from "./QuestionTable";
@@ -7,39 +8,55 @@ import { TD, TH } from "./QuestionTable";
 const GENDER_LABEL: Record<string, string> = { female: "Girls", male: "Boys", other: "Other" };
 const GENDER_ORDER = ["female", "male", "other", ""];
 
+interface CohortRow {
+  key: string;
+  label: ReactNode;
+  students: number;
+  metrics: ReactNode[];
+  className?: string;
+}
+
+/** Students, then attempt rate, accuracy and score, one row per cohort. */
+function CohortTable({ first, rows }: { first: string; rows: CohortRow[] }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full">
+        <thead>
+          <tr className="border-b-2 border-border-accent">
+            {[first, "Students", "Attempt Rate", "Accuracy", "Score"].map((h) => (
+              <th key={h} className={TH}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.key} className={`border-b border-border/25 ${r.className ?? ""}`}>
+              <td className="px-3 py-2 text-sm text-text-primary">{r.label}</td>
+              <td className={TD}>{r.students}</td>
+              {r.metrics.map((m, i) => (
+                <td key={i} className={TD}>{m}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 /** Attempt rate, accuracy and score for girls and boys. */
 export function GenderSplitSection({ gender }: { gender: GenderStat[] }) {
-  const rows = [...gender].sort(
-    (a, b) => GENDER_ORDER.indexOf(a.gender) - GENDER_ORDER.indexOf(b.gender),
-  );
+  const rows = [...gender]
+    .sort((a, b) => GENDER_ORDER.indexOf(a.gender) - GENDER_ORDER.indexOf(b.gender))
+    .map((g) => ({
+      key: g.gender,
+      label: GENDER_LABEL[g.gender] ?? "Not recorded",
+      students: g.students,
+      metrics: [g.avg_attempt_rate, g.avg_accuracy, g.avg_score].map((v) => `${v}%`),
+    }));
   return (
     <SectionCard title="Gender Split">
-      <div className="overflow-x-auto">
-        <table className="w-full">
-          <thead>
-            <tr className="border-b-2 border-border-accent">
-              <th className={TH}>Gender</th>
-              <th className={TH}>Students</th>
-              <th className={TH}>Attempt Rate</th>
-              <th className={TH}>Accuracy</th>
-              <th className={TH}>Score</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((g) => (
-              <tr key={g.gender} className="border-b border-border/25">
-                <td className="px-3 py-2 text-sm text-text-primary">
-                  {GENDER_LABEL[g.gender] ?? "Not recorded"}
-                </td>
-                <td className={TD}>{g.students}</td>
-                <td className={TD}>{g.avg_attempt_rate}%</td>
-                <td className={TD}>{g.avg_accuracy}%</td>
-                <td className={TD}>{g.avg_score}%</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <CohortTable first="Gender" rows={rows} />
     </SectionCard>
   );
 }
@@ -59,52 +76,35 @@ function Bar({ value, highlight }: { value: number; highlight: boolean }) {
   );
 }
 
-/** Every physical centre that sat the same test, best score first. */
+/** Centres of the same kind (CoE or Nodal) that sat the same test, best score first. */
 export function SchoolComparisonSection({ rows }: { rows: SchoolComparisonRow[] }) {
   const others = rows.filter((r) => !r.is_this_school).length;
+  const cohortRows = rows.map((r) => ({
+    key: r.udise,
+    label: (
+      <>
+        {r.school}
+        {r.is_this_school && (
+          <span className="ml-2 text-xs font-bold uppercase tracking-wide text-accent">This centre</span>
+        )}
+      </>
+    ),
+    students: r.students,
+    metrics: [r.avg_attempt_rate, r.avg_accuracy, r.avg_score].map((v, i) => (
+      <Bar key={i} value={v} highlight={r.is_this_school} />
+    )),
+    className: r.is_this_school ? "bg-hover-bg" : "",
+  }));
   return (
     <SectionCard
       title="Comparison with Other Centres"
       subtitle={
         others === 0
-          ? "No other centre has taken this test yet."
-          : "Centres that have taken the same test, best score first. Small groups can swing a lot on one or two students."
+          ? "No other centre to compare with on this test yet."
+          : "CoEs compare with CoEs and Nodals with Nodals: same test, grade and stream, best score first. Small groups can swing a lot on one or two students."
       }
     >
-      {others > 0 && (
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b-2 border-border-accent">
-                <th className={TH}>Centre</th>
-                <th className={TH}>Students</th>
-                <th className={TH}>Attempt Rate</th>
-                <th className={TH}>Accuracy</th>
-                <th className={TH}>Score</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr
-                  key={r.udise}
-                  className={`border-b border-border/25 ${r.is_this_school ? "bg-hover-bg" : ""}`}
-                >
-                  <td className="px-3 py-2 text-sm text-text-primary">
-                    {r.school}
-                    {r.is_this_school && (
-                      <span className="ml-2 text-xs font-bold uppercase tracking-wide text-accent">This centre</span>
-                    )}
-                  </td>
-                  <td className={TD}>{r.students}</td>
-                  <td className="px-3 py-2"><Bar value={r.avg_attempt_rate} highlight={r.is_this_school} /></td>
-                  <td className="px-3 py-2"><Bar value={r.avg_accuracy} highlight={r.is_this_school} /></td>
-                  <td className="px-3 py-2"><Bar value={r.avg_score} highlight={r.is_this_school} /></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      {others > 0 && <CohortTable first="Centre" rows={cohortRows} />}
     </SectionCard>
   );
 }

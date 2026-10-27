@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import StatCard from "../../StatCard";
 import PriorityBadge from "../PriorityBadge";
 import type { ChapterTestReportData } from "@/types/question-analytics";
 import { appearedLine, formatLongDate } from "./format";
 import { InsightsSection, QuestionBreakdownSection, QuestionRankingsSection } from "./QuestionSections";
 import { GenderSplitSection, SchoolComparisonSection } from "./CohortSections";
+import { useJsonFetch } from "./useJsonFetch";
 
 interface Props {
   schoolUdise: string;
@@ -24,11 +25,6 @@ interface Props {
    *  general report's chapter analysis). */
   fallback?: ReactNode;
 }
-
-type State =
-  | { status: "loading" }
-  | { status: "error"; message: string }
-  | { status: "ready"; data: ChapterTestReportData };
 
 function sessionParams(grade: number, sessionId: string, program?: string, stream?: string): string {
   const query = new URLSearchParams({ grade: String(grade), sessionId });
@@ -50,6 +46,88 @@ function PdfLink({ href, children }: { href: string; children: ReactNode }) {
   );
 }
 
+const isSingleChapterTest = (format: string | null) => (format ?? "").toLowerCase() === "chapter_test";
+const isNewCmsTest = (cmsTestId: string | null) => cmsTestId != null && /^\d+$/.test(cmsTestId);
+
+function ReportLoading() {
+  return (
+    <div className="flex justify-center items-center h-[30vh]">
+      <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-accent" />
+      <span className="ml-3 text-sm text-text-secondary">Loading chapter test report...</span>
+    </div>
+  );
+}
+
+function ReportHeader({ data, pdfBase }: { data: ChapterTestReportData; pdfBase: string | null }) {
+  const { test, overview } = data;
+  const appearedPct =
+    overview.enrolled && overview.enrolled > 0
+      ? ` (${Math.round((overview.appeared / overview.enrolled) * 100)}%)`
+      : "";
+  const meta = [
+    "Chapter Test",
+    test.subject,
+    formatLongDate(test.start_date),
+    `${appearedLine(overview.appeared, overview.enrolled)}${appearedPct}`,
+  ].filter(Boolean);
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2">
+        {test.exam && (
+          <span className="text-xs font-bold uppercase tracking-wide text-text-secondary">{test.exam}</span>
+        )}
+        {test.priority && <PriorityBadge priority={test.priority} suffix=" priority" />}
+      </div>
+      <p className="text-sm text-text-secondary">{meta.join(" · ")}</p>
+      {pdfBase && (
+        <div className="flex flex-wrap gap-4">
+          <PdfLink href={`${pdfBase}&type=questions`}>Question Paper (PDF)</PdfLink>
+          <PdfLink href={`${pdfBase}&type=answers`}>Solution Key (PDF)</PdfLink>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function scoreValue(score: number, maxMarks: number | null): string {
+  if (!maxMarks) return `${score}%`;
+  return `${score}% (${Math.round((score / 100) * maxMarks * 10) / 10} of ${maxMarks})`;
+}
+
+function timeValue(minutes: number | null, duration: number | null): string {
+  if (minutes == null) return "—";
+  return duration ? `${minutes} of ${duration} min` : `${minutes} min`;
+}
+
+function OverviewCards({ data }: { data: ChapterTestReportData }) {
+  const { test, overview, questions } = data;
+  const totalQuestions = test.total_questions ?? questions.length;
+  const attemptedQuestions = Math.round((overview.avg_attempt_rate / 100) * totalQuestions);
+  return (
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
+      <StatCard
+        label="Avg Attempt Rate"
+        value={`${overview.avg_attempt_rate}% (~${attemptedQuestions} of ${totalQuestions} Qs)`}
+        size="sm"
+        color="brand-coral"
+      />
+      <StatCard label="Avg Accuracy" value={`${overview.avg_accuracy}% of attempted`} size="sm" color="brand-gold" />
+      <StatCard
+        label="Avg Score"
+        value={scoreValue(overview.avg_score, test.max_marks)}
+        size="sm"
+        color="brand-amber"
+      />
+      <StatCard
+        label="Avg Time Taken"
+        value={timeValue(overview.avg_time_minutes, test.duration_minutes)}
+        size="sm"
+        color="brand-gold"
+      />
+    </div>
+  );
+}
+
 /**
  * The chapter-test report for physical centres (Poojita's design, in LMS style):
  * overview, insights by topic and difficulty, the per-question breakdown and
@@ -67,43 +145,15 @@ export default function ChapterTestReport({
   studentResults,
   fallback,
 }: Props) {
-  const [state, setState] = useState<State>({ status: "loading" });
+  const state = useJsonFetch<ChapterTestReportData>(
+    `/api/quiz-analytics/${schoolUdise}/chapter-test-report?${sessionParams(grade, sessionId, program, stream)}`,
+    "Failed to fetch the chapter test report",
+    (data) => {
+      if (onDataLoaded && data.test.test_name) onDataLoaded(data.test.test_name);
+    }
+  );
 
-  useEffect(() => {
-    const controller = new AbortController();
-    let current = true;
-    setState({ status: "loading" });
-    const query = sessionParams(grade, sessionId, program, stream);
-    fetch(`/api/quiz-analytics/${schoolUdise}/chapter-test-report?${query}`, { signal: controller.signal })
-      .then(async (res) => {
-        if (!res.ok) {
-          const body = await res.json().catch(() => null);
-          throw new Error(body?.error || "Failed to fetch the chapter test report");
-        }
-        return res.json() as Promise<ChapterTestReportData>;
-      })
-      .then((data) => {
-        if (!current) return;
-        setState({ status: "ready", data });
-        if (onDataLoaded && data.test.test_name) onDataLoaded(data.test.test_name);
-      })
-      .catch((err) => {
-        if (current && err.name !== "AbortError") setState({ status: "error", message: err.message });
-      });
-    return () => {
-      current = false;
-      controller.abort();
-    };
-  }, [schoolUdise, grade, sessionId, program, stream]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  if (state.status === "loading") {
-    return (
-      <div className="flex justify-center items-center h-[30vh]">
-        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-accent" />
-        <span className="ml-3 text-sm text-text-secondary">Loading chapter test report...</span>
-      </div>
-    );
-  }
+  if (state.status === "loading") return <ReportLoading />;
   if (state.status === "error") {
     if (fallback) return <>{fallback}</>;
     return (
@@ -114,79 +164,18 @@ export default function ChapterTestReport({
     );
   }
 
-  const { test, overview, gender, questions, comparison } = state.data;
-  if (fallback && (test.test_format ?? "").toLowerCase() !== "chapter_test") return <>{fallback}</>;
-  const totalQuestions = test.total_questions ?? questions.length;
-  const appearedPct =
-    overview.enrolled && overview.enrolled > 0
-      ? ` (${Math.round((overview.appeared / overview.enrolled) * 100)}%)`
-      : "";
-  const meta = [
-    "Chapter Test",
-    test.subject,
-    formatLongDate(test.start_date),
-    `${appearedLine(overview.appeared, overview.enrolled)}${appearedPct}`,
-  ].filter(Boolean);
-  const attemptedQuestions = Math.round((overview.avg_attempt_rate / 100) * totalQuestions);
+  const { test, gender, questions, comparison } = state.data;
+  if (fallback && !isSingleChapterTest(test.test_format)) return <>{fallback}</>;
   // The server resolves the CMS test from the session; only new-CMS tests have one.
-  const isNewCms = test.cms_test_id != null && /^\d+$/.test(test.cms_test_id);
-  const sessionQuery = isNewCms ? sessionParams(grade, sessionId, program, stream) : null;
-  const pdfBase = sessionQuery ? `/api/quiz-analytics/${schoolUdise}/test-pdf?${sessionQuery}` : null;
+  const sessionQuery = isNewCmsTest(test.cms_test_id) ? sessionParams(grade, sessionId, program, stream) : null;
 
   return (
     <div className="space-y-6">
-      <div className="space-y-2">
-        <div className="flex flex-wrap items-center gap-2">
-          {test.exam && (
-            <span className="text-xs font-bold uppercase tracking-wide text-text-secondary">{test.exam}</span>
-          )}
-          {test.priority && <PriorityBadge priority={test.priority} suffix=" priority" />}
-        </div>
-        <p className="text-sm text-text-secondary">{meta.join(" · ")}</p>
-        {pdfBase && (
-          <div className="flex flex-wrap gap-4">
-            <PdfLink href={`${pdfBase}&type=questions`}>Question Paper (PDF)</PdfLink>
-            <PdfLink href={`${pdfBase}&type=answers`}>Solution Key (PDF)</PdfLink>
-          </div>
-        )}
-      </div>
-
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
-        <StatCard
-          label="Avg Attempt Rate"
-          value={`${overview.avg_attempt_rate}% (~${attemptedQuestions} of ${totalQuestions} Qs)`}
-          size="sm"
-          color="brand-coral"
-        />
-        <StatCard
-          label="Avg Accuracy"
-          value={`${overview.avg_accuracy}% of attempted`}
-          size="sm"
-          color="brand-gold"
-        />
-        <StatCard
-          label="Avg Score"
-          value={
-            test.max_marks
-              ? `${overview.avg_score}% (${Math.round((overview.avg_score / 100) * test.max_marks * 10) / 10} of ${test.max_marks})`
-              : `${overview.avg_score}%`
-          }
-          size="sm"
-          color="brand-amber"
-        />
-        <StatCard
-          label="Avg Time Taken"
-          value={
-            overview.avg_time_minutes == null
-              ? "—"
-              : test.duration_minutes
-                ? `${overview.avg_time_minutes} of ${test.duration_minutes} min`
-                : `${overview.avg_time_minutes} min`
-          }
-          size="sm"
-          color="brand-gold"
-        />
-      </div>
+      <ReportHeader
+        data={state.data}
+        pdfBase={sessionQuery ? `/api/quiz-analytics/${schoolUdise}/test-pdf?${sessionQuery}` : null}
+      />
+      <OverviewCards data={state.data} />
 
       {afterOverview}
 

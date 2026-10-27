@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useJsonFetch } from "./useJsonFetch";
 import DOMPurify from "dompurify";
 import renderMathInElement from "katex/contrib/auto-render";
 import "katex/dist/katex.min.css";
@@ -48,42 +49,13 @@ interface Props {
   cmsQuestionId: number;
 }
 
-type State =
-  | { status: "loading" }
-  | { status: "error"; message: string }
-  | { status: "ready"; content: QuestionContent };
-
 /** Fetches one question from the CMS (via the LMS) and shows it with options, answer and solution. */
 export default function QuestionContentView({ schoolUdise, sessionQuery, cmsQuestionId }: Props) {
-  const [state, setState] = useState<State>({ status: "loading" });
+  const state = useJsonFetch<QuestionContent>(
+    `/api/quiz-analytics/${schoolUdise}/question-content?${sessionQuery}&questionId=${cmsQuestionId}`,
+    "Failed to load the question"
+  );
   const [showSolution, setShowSolution] = useState(false);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    let current = true;
-    setState({ status: "loading" });
-    fetch(
-      `/api/quiz-analytics/${schoolUdise}/question-content?${sessionQuery}&questionId=${cmsQuestionId}`,
-      { signal: controller.signal }
-    )
-      .then(async (res) => {
-        if (!res.ok) {
-          const body = await res.json().catch(() => null);
-          throw new Error(body?.error || "Failed to load the question");
-        }
-        return res.json() as Promise<QuestionContent>;
-      })
-      .then((content) => {
-        if (current) setState({ status: "ready", content });
-      })
-      .catch((err) => {
-        if (current && err.name !== "AbortError") setState({ status: "error", message: err.message });
-      });
-    return () => {
-      current = false;
-      controller.abort();
-    };
-  }, [schoolUdise, sessionQuery, cmsQuestionId]);
 
   if (state.status === "loading") {
     return <p className="text-xs text-text-muted">Loading question…</p>;
@@ -92,7 +64,7 @@ export default function QuestionContentView({ schoolUdise, sessionQuery, cmsQues
     return <p className="text-xs text-danger">{state.message}</p>;
   }
 
-  const { content } = state;
+  const content = state.data;
   return (
     <div className="space-y-3">
       <RichText html={content.text} />
