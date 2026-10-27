@@ -19,17 +19,34 @@ export function OwnerPill({ owner }: { owner: ActionItemOwner }) {
   );
 }
 
-// The owner and the agreeing Conversation's date, as one muted line.
+// Marks an Action Item a Blended Learning Admin pushed to many Students (a
+// Common Action Item) rather than one agreed in a Conversation.
+function CommonTag() {
+  return (
+    <span className="mr-1.5 inline-block rounded-md bg-hover-bg px-1.5 text-xs font-bold leading-5 text-accent">
+      Common
+    </span>
+  );
+}
+
+// The owner and the agreeing Conversation's date, as one muted line. A
+// Common Action Item gets its tag and the date it was added instead.
 export function ActionItemMeta({
   owner,
   agreedOn,
+  common = false,
 }: {
   owner?: ActionItemOwner;
   agreedOn?: string;
+  common?: boolean;
 }) {
-  const parts = [owner ? ACTION_ITEM_OWNER[owner] : null, agreedOn ? `From ${formatCalendarDate(agreedOn)}` : null].filter(
-    (part): part is string => Boolean(part)
+  const date = agreedOn ? `${common ? "Added" : "From"} ${formatCalendarDate(agreedOn)}` : null;
+  const parts = [owner ? ACTION_ITEM_OWNER[owner] : null, date].filter((part): part is string => Boolean(part));
+  if (parts.length === 0 && !common) return null;
+  return (
+    <span className="block text-xs text-text-muted">
+      {common && <CommonTag />}
+      {parts.join(" · ")}
+    </span>
   );
-  if (parts.length === 0) return null;
-  return <span className="block text-xs text-text-muted">{parts.join(" · ")}</span>;
 }

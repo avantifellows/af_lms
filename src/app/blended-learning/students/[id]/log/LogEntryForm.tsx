@@ -48,7 +48,7 @@ function OpenItemText({ item }: { item: OpenActionItem }) {
       <OwnerPill owner={item.owner} />
       <span className="min-w-0 break-words">
         {item.text}
-        <ActionItemMeta agreedOn={item.agreedOn} />
+        <ActionItemMeta agreedOn={item.agreedOn} common={item.common} />
       </span>
     </span>
   );

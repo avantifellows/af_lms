@@ -190,8 +190,42 @@ describe("getMenteeDetail", () => {
     ]);
     // Only open items, newest Conversation first, dated by the Conversation.
     expect(detail?.openActionItems).toEqual([
-      { id: 120, text: "Revise optics", owner: "student", agreedOn: "2026-10-20" },
-      { id: 100, text: "Old open item", owner: "parent", agreedOn: "2026-10-12" },
+      { id: 120, text: "Revise optics", owner: "student", agreedOn: "2026-10-20", common: false },
+      { id: 100, text: "Old open item", owner: "parent", agreedOn: "2026-10-12", common: false },
     ]);
+  });
+
+  it("lists open Action Items pushed from Common Action Items, tagged and dated when added, but not in the history", async () => {
+    givenRows({
+      profile: [PROFILE],
+      entries: [
+        entry({ id: "12", occurred_on: "2026-10-20" }),
+        entry({ id: "10", occurred_on: "2026-10-12" }),
+      ],
+      actionItems: [
+        { conversation_id: "10", id: "100", text: "Old open item", owner: "parent", status: "open", added_on: "2026-10-12" },
+        { conversation_id: "12", id: "120", text: "Revise optics", owner: "student", status: "open", added_on: "2026-10-20" },
+        // Pushed: no Conversation. A done one is history only (not shown).
+        { conversation_id: null, id: "130", text: "Fill in the form", owner: "student", status: "open", added_on: "2026-10-25" },
+        { conversation_id: null, id: "131", text: "Same day push", owner: "mentor", status: "open", added_on: "2026-10-20" },
+        { conversation_id: null, id: "132", text: "Already done", owner: "parent", status: "done", added_on: "2026-10-01" },
+      ],
+    });
+
+    const detail = await getMenteeDetail(MENTOR, 501);
+
+    // Newest first by date; on the same day a Conversation's items come first.
+    expect(detail?.openActionItems).toEqual([
+      { id: 130, text: "Fill in the form", owner: "student", agreedOn: "2026-10-25", common: true },
+      { id: 120, text: "Revise optics", owner: "student", agreedOn: "2026-10-20", common: false },
+      { id: 131, text: "Same day push", owner: "mentor", agreedOn: "2026-10-20", common: true },
+      { id: 100, text: "Old open item", owner: "parent", agreedOn: "2026-10-12", common: false },
+    ]);
+    const historyItems = detail?.history.flatMap((item) => (item.kind === "conversation" ? item.actionItems : []));
+    expect(historyItems?.map((item) => item.id)).toEqual([120, 100]);
+    // Every Action Item of the Student is read, a pushed one included.
+    const actionItemsSql = mockQuery.mock.calls.map(([sql]) => sql).find((sql) => sql.includes("FROM blended_learning_action_items"));
+    expect(actionItemsSql).toMatch(/WHERE student_id = \$1\s+ORDER BY/);
+    expect(actionItemsSql).not.toMatch(/JOIN/);
   });
 });

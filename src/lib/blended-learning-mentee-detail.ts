@@ -22,8 +22,9 @@ export type ActionItem = {
   owner: ActionItemOwner;
   status: "open" | "done";
 };
-// An open Action Item with the date of the Conversation that agreed it.
-export type OpenActionItem = Omit<ActionItem, "status"> & { agreedOn: string };
+// An open Action Item with the date of the Conversation that agreed it, or,
+// for one pushed from a Common Action Item (`common`), the date it was pushed.
+export type OpenActionItem = Omit<ActionItem, "status"> & { agreedOn: string; common?: boolean };
 export type FlagRecipient = "emotional_wellbeing" | "physics" | "chemistry" | "maths";
 export type MentorFlag = { recipient: FlagRecipient; comment: string | null };
 
@@ -61,7 +62,8 @@ export type MenteeDetail = {
   openDraft: { id: number; state: OpenDraftState } | null;
   // Newest first by (occurred_on, id), Conversations and Attempts interleaved.
   history: HistoryEntry[];
-  // Open Action Items from earlier Conversations, newest Conversation first.
+  // Open Action Items from earlier Conversations and Common Action Items,
+  // newest first by agreed (or pushed) date.
   openActionItems: OpenActionItem[];
   // The Mentor of the Student's active Mapping, for an admin's way back to
   // that Mentor's list.
@@ -121,13 +123,55 @@ export function contactNumbers(
   return { phone: main, whatsappPhone: other && !(main && sameNumber(main, other)) ? other : null };
 }
 
-function groupBy<T extends { conversation_id: number | string }>(rows: T[]): Map<number, T[]> {
+type ActionItemRow = {
+  conversation_id: number | string | null;
+  id: number | string;
+  text: string;
+  owner: ActionItemOwner;
+  status: "open" | "done";
+  // IST date it was added: when a Common Action Item was pushed.
+  added_on: string;
+};
+
+// Rows by Conversation; Action Items pushed from a Common Action Item have no
+// Conversation and are left out.
+function groupBy<T extends { conversation_id: number | string | null }>(rows: T[]): Map<number, T[]> {
   const groups = new Map<number, T[]>();
   for (const row of rows) {
+    if (row.conversation_id === null) continue;
     const key = Number(row.conversation_id);
     groups.set(key, [...(groups.get(key) ?? []), row]);
   }
   return groups;
+}
+
+function openItem(item: ActionItemRow, agreedOn: string): OpenActionItem {
+  return {
+    id: Number(item.id),
+    text: item.text,
+    owner: item.owner,
+    agreedOn,
+    common: item.conversation_id === null,
+  };
+}
+
+// Open items from each Conversation (newest Conversation first) and from
+// Common Action Items, ordered newest first by date; on the same date the
+// Conversations' order holds and pushed items follow.
+function openActionItems(
+  entries: EntryRow[],
+  itemsByConversation: Map<number, ActionItemRow[]>,
+  items: ActionItemRow[]
+): OpenActionItem[] {
+  const fromConversations = entries.flatMap((entry) =>
+    (itemsByConversation.get(Number(entry.id)) ?? [])
+      .filter((item) => item.status === "open")
+      .map((item) => openItem(item, entry.occurred_on))
+  );
+  const pushed = items
+    .filter((item) => item.conversation_id === null && item.status === "open")
+    .map((item) => openItem(item, item.added_on));
+  return [...fromConversations, ...pushed].sort((a, b) => b.agreedOn.localeCompare(a.agreedOn));
 }
 
 // One Mentee's profile, contact, links, open draft and history. Null when
@@ -182,17 +226,12 @@ export async function getMenteeDetail(
        ORDER BY c.occurred_on DESC, c.id DESC`,
       [studentId]
     ),
-    query<{
-      conversation_id: number | string;
-      id: number | string;
-      text: string;
-      owner: ActionItemOwner;
-      status: "open" | "done";
-    }>(
-      `SELECT conversation_id, id, text, owner, status
+    query<ActionItemRow>(
+      `SELECT conversation_id, id, text, owner, status,
+              ((inserted_at AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Kolkata')::date::text AS added_on
        FROM blended_learning_action_items
        WHERE student_id = $1
-       ORDER BY conversation_id, position`,
+       ORDER BY conversation_id, position, id`,
       [studentId]
     ),
     query<{ conversation_id: number | string; recipient: FlagRecipient; comment: string | null }>(
@@ -227,16 +266,7 @@ export async function getMenteeDetail(
         ? null
         : { id: Number(profile.open_draft_id), state: profile.open_draft_state },
     mentor: { userId: Number(profile.mentor_user_id), firstName: profile.mentor_first_name },
-    openActionItems: entries.flatMap((entry) =>
-      (itemsByConversation.get(Number(entry.id)) ?? [])
-        .filter((item) => item.status === "open")
-        .map((item) => ({
-          id: Number(item.id),
-          text: item.text,
-          owner: item.owner,
-          agreedOn: entry.occurred_on,
-        }))
-    ),
+    openActionItems: openActionItems(entries, itemsByConversation, actionItems),
     history: entries.map((entry): HistoryEntry => {
       const id = Number(entry.id);
       if (entry.kind === "attempt") {

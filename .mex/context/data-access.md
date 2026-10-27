@@ -21,7 +21,7 @@ edges:
     condition: when adding a write that must proxy to the DB Service
   - target: patterns/add-api-route.md
     condition: when adding a route that reads or writes
-last_updated: 2026-10-26
+last_updated: 2026-10-27
 ---
 
 # Data Access
@@ -524,3 +524,55 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   With docs, every matched Student is considered, so a stored Profile Doc link still gives a
   date when the workbook row has none; a Student with no link and no stored row gets no row.
   Runbook: `patterns/load-blended-learning-links.md`.
+
+## Blended Learning Manage: Resources and Common Action Items (2026-10-27)
+
+- **Tables:** db-service `20261027120000_create_blended_learning_resources_and_common_action_items`
+  (branch `feat/bl-admin-manage`; deploy it before this code). `blended_learning_resources`
+  (title ≤ 200, `^https://[^[:space:]]+$` url, `position` ≥ 1, `created_by_email` /
+  `updated_by_email`, NULL only on the seeded Mentor Toolkit row; hard delete) and
+  `blended_learning_common_action_items` (text ≤ 500, owner, `target_kind` `all|grade|mentor` with
+  `target_grade` 12/13 or `target_mentor_user_id`, `created_by_email`, soft removal
+  `removed_at` + `removed_by_email`). `blended_learning_action_items.conversation_id` is now
+  nullable, `common_action_item_id` is new, `bl_action_items_source_check` requires exactly one,
+  and `bl_action_items_common_student_unique` is the partial unique index
+  `(common_action_item_id, student_id) WHERE common_action_item_id IS NOT NULL`. Pushed rows use
+  `position` 1. All reads and writes are direct SQL (`query()` / `withTransaction`), gated by
+  `manage` (see `context/permissions.md`).
+- **Resources:** `src/lib/blended-learning-resources.ts`. `listResources()` (`ORDER BY position,
+  id`) feeds the Resources tab (`MentorResources`, no longer hard-coded) and the Manage page.
+  Create appends at `MAX(position) + 1`; move locks every row `FOR UPDATE` and renumbers 1..n in
+  the new order through `unnest(...) WITH ORDINALITY` (`movedOrder`); edit and delete are 404 for
+  an unknown id. Validation (`validateResource` in the client-safe
+  `src/lib/blended-learning-manage-input.ts`) → 422 `fieldErrors`.
+- **Common Action Items:** `src/lib/blended-learning-common-action-items.ts`. A target reaches the
+  Students of active current-year Mappings (`activeBlendedMappingSql`) filtered by the Mentee
+  list's grade (`currentGradeLateralSql`, now exported from `blended-learning-mentees.ts` and used
+  by `listMentees`) or the Mapping's `mentor_user_id` (`targetedStudentsSql`). `previewCommonTarget`
+  counts them (the form's "Will be added to N students"). `createCommonActionItem` inserts the item
+  and materialises it in one transaction (`INSERT … SELECT … ON CONFLICT (common_action_item_id,
+  student_id) WHERE common_action_item_id IS NOT NULL DO NOTHING`); a target with no Students (or
+  an unknown Mentor, 23503) rolls back as a 422. `pushCommonActionItem` locks the item `FOR UPDATE`
+  (removed → 404) and runs the same insert, so it adds only targeted Students who don't have it
+  (done included) and a repeat adds 0. `updateCommonActionItem` updates the item and its rows
+  `WHERE status = 'open'`; `removeCommonActionItem` soft-removes it and deletes its rows `WHERE
+  status = 'open'`, keeping done ones. `listCommonActionItems` (items in force, newest first) adds
+  open / done counts and `notYetAdded` (targeted Students without a row: what Push again adds).
+- **Action-item queries audited for NULL `conversation_id`:** `getMenteeDetail` reads every row
+  by `student_id` (no join) and now builds `openActionItems` from Conversation rows (as before)
+  plus pushed rows (`common: true`, `agreedOn` = the IST date the row was inserted), newest date
+  first; `groupBy` skips NULL `conversation_id`, so pushed rows never appear in a Conversation's
+  history. `logEntry`'s tick `UPDATE … WHERE id = ANY($3) AND status = 'open' AND student_id = $4`
+  needs no change: a pushed row is ticked like any other (a removal racing the tick → 409).
+  `insertActionItems`, the e2e seeds and the draft review read paths only touch Conversation rows.
+  Nothing else in `src/`, `scripts/` or `e2e/` reads the table (no list counts, flags or exports).
+- **UI:** `/blended-learning/manage` (`src/app/blended-learning/manage/`): `ResourcesManager`
+  (add / inline edit / ↑ ↓ / remove after `ConfirmDialog`) and `CommonActionItemsManager` with
+  `NewCommonItemForm` (text, owner, target radio + Grade/Mentor select, live preview, confirm
+  before push; 422 field errors go back inline). Every change calls `router.refresh()`. The open
+  items on the detail page and the log form show a "Common" tag and "Added <date>"
+  (`ActionItemMeta` `common`).
+- **E2E:** `e2e/fixtures/migrations/20261027120000_add_blended_learning_manage.sql` mirrors the
+  migration (pg_dump-identical, seed row included). `blended-learning-manage.spec.ts` uses Mentor D
+  (`BLENDED_MENTOR_D`) and `MANAGE_MENTEES` (G1, G2 mapped; G3 mapped by the spec to test Push
+  again) and removes the Resources it adds, so later specs see only the Mentor Toolkit.
