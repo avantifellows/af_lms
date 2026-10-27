@@ -202,8 +202,10 @@ Then read this file fully before doing anything else in this session.
 
 - Holistic progress roster cleanup keeps Program/year/Grade filters in its per-query snapshot and removes duplicate consumer checks; eligibility and historical behavior are unchanged. See `context/data-access.md`.
 
-**On staging:** PR #471 (#468, Data completeness) — staging branch `cc504696`, a merge of head
-`6ea78501` into main `6d76e572`, deployed by its own green `deploy-preview` run on 2026-10-27.
+**On staging:** PR #471 (#468, Data completeness) — staging branch `10c7c7ec`, a merge of head
+`202fb96b` into main `6d76e572`, deployed by its own green `deploy-preview` run on 2026-10-27.
+It carries the Programs team's two staging asks: Uniform Size in the Info row, and the caste
+certificate counted only for reserved-category Students.
 `https://staging.dr1eqhpsk9y2d.amplifyapp.com` answers 200. The Amplify job itself was not
 inspected (no AWS credentials in that session), and staging shares one URL, so the next PR
 deployment replaces this one.
