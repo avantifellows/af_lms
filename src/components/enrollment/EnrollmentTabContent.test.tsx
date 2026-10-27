@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { PROGRAM_IDS } from "@/lib/constants";
@@ -604,6 +604,7 @@ describe("EnrollmentTabContent", () => {
 
     function renderWithFlags(search: string) {
       urlState.search = search;
+      window.history.replaceState(null, "", `/school/14061?${search}`);
       const fetchMock = vi.fn(async (url: string) => ({
         ok: true,
         json: async () =>
@@ -629,6 +630,7 @@ describe("EnrollmentTabContent", () => {
 
     afterEach(() => {
       vi.unstubAllGlobals();
+      window.history.replaceState(null, "", "/");
     });
 
     it("opens the flagged Student's modal on their programme card once flags load", async () => {
@@ -642,15 +644,56 @@ describe("EnrollmentTabContent", () => {
       );
     });
 
+    it("drops `flag` from the URL once consumed, keeping the other params", async () => {
+      renderWithFlags("tab=enrollment&grade=12&flag=502");
+
+      await screen.findByRole("dialog");
+      expect(window.location.pathname).toBe("/school/14061");
+      expect(window.location.search).toBe("?tab=enrollment&grade=12");
+    });
+
+    it("does not reopen when the tab remounts after the dialog is closed", async () => {
+      // SchoolTabs unmounts the Enrollment tab when another tab is shown and
+      // mounts it afresh on the way back, reading the URL as it then stands.
+      const user = userEvent.setup();
+      const fetchMock = renderWithFlags("tab=enrollment&flag=502");
+      const flagsCalls = () =>
+        fetchMock.mock.calls.filter(([url]) => url.includes("intervention-flags"));
+
+      const dialog = await screen.findByRole("dialog");
+      await user.click(within(dialog).getByRole("button", { name: "Close" }));
+      cleanup();
+
+      urlState.search = window.location.search.slice(1);
+      expect(urlState.search).toBe("tab=enrollment");
+      render(
+        <EnrollmentTabContent
+          {...baseProps}
+          programs={[
+            program(PROGRAM_IDS.COE, "JNV CoE"),
+            program(PROGRAM_IDS.NODAL, "JNV Nodal"),
+            program(PROGRAM_IDS.NVS, "JNV NVS"),
+          ]}
+          userProgramIds={[PROGRAM_IDS.COE, PROGRAM_IDS.NODAL, PROGRAM_IDS.NVS]}
+          activeStudents={[coeStudent, nodalStudent, nvsStudent]}
+        />,
+      );
+
+      await vi.waitFor(() => expect(flagsCalls()).toHaveLength(2));
+      expect(await screen.findByLabelText("Needs intervention only (1)")).toBeInTheDocument();
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+
     it.each([
       ["an unknown id (e.g. another School's flag)", "999"],
       ["a non-numeric id", "abc"],
       ["a partly numeric id", "502x"],
       ["the id of a flag on the hidden JNV NVS card", "503"],
-    ])("ignores %s: no dialog, the tab renders normally", async (_label, id) => {
+    ])("ignores %s: no dialog, the tab renders normally, `flag` is dropped", async (_label, id) => {
       const fetchMock = renderWithFlags(`tab=enrollment&flag=${id}`);
 
       expect(await screen.findByLabelText("Needs intervention only (1)")).toBeInTheDocument();
+      await vi.waitFor(() => expect(window.location.search).toBe("?tab=enrollment"));
       expect(
         fetchMock.mock.calls.filter(([url]) => url.includes("intervention-flags")),
       ).toHaveLength(1);

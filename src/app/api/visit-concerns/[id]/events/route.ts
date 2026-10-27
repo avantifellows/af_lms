@@ -9,7 +9,7 @@ import {
   reopenConcern,
   resolveConcern,
 } from "@/lib/visit-concern-events";
-import { findVisitSummaryConcern, getConcernCardState } from "@/lib/visit-concerns";
+import { findVisitSummaryConcern } from "@/lib/visit-concerns";
 import { isVisitConcernAction, validateConcernEventBody, type VisitConcernAction } from "@/lib/visit-concern-event-types";
 import { apiError, canViewVisitSummary, parseJsonBody, requireVisitsAccess } from "@/lib/visits-policy";
 
@@ -56,5 +56,6 @@ export async function POST(
     throw error;
   }
 
-  return NextResponse.json(await getConcernCardState(concern.id), { status: 201 });
+  // The School page re-renders on success (router.refresh), so the body is only an acknowledgement.
+  return NextResponse.json({ ok: true }, { status: 201 });
 }

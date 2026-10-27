@@ -14,9 +14,25 @@ test.describe("Intervention flag deep link (?flag=<id>)", () => {
     await expect(dialog.getByRole("heading", { name: "Aaditya Raj Dhawan" })).toBeVisible();
     await expect(dialog.getByText("Missed two weeks after a family bereavement.")).toBeVisible();
 
+    // The link is consumed: `flag` leaves the URL, every other param stays.
+    await expect(adminPage).not.toHaveURL(/[?&]flag=/);
+    await expect(adminPage).toHaveURL(/[?&]tab=enrollment(&|$)/);
+
     await dialog.getByRole("button", { name: "Close" }).click();
     await expect(adminPage.getByRole("dialog")).toHaveCount(0);
     await expect(adminPage.getByRole("tab", { name: "Enrollment" })).toHaveAttribute("aria-selected", "true");
+
+    // A round trip through another School tab remounts the Enrollment tab; the dialog stays closed.
+    await adminPage.getByRole("tab", { name: "Curriculum" }).click();
+    await expect(adminPage.getByRole("tab", { name: "Curriculum" })).toHaveAttribute("aria-selected", "true");
+    const flagsReloaded = adminPage.waitForResponse(
+      (response) => response.url().endsWith(`/api/schools/${SCHOOL_CODE}/intervention-flags`) && response.ok(),
+    );
+    await adminPage.getByRole("tab", { name: "Enrollment" }).click();
+    await flagsReloaded;
+    await expect(adminPage.getByLabel(/Needs intervention only/)).toBeVisible();
+    await expect(adminPage.getByRole("dialog")).toHaveCount(0);
+    await expect(adminPage).not.toHaveURL(/[?&]flag=/);
   });
 
   test("ignores an unknown flag id", async ({ adminPage }) => {
@@ -29,5 +45,6 @@ test.describe("Intervention flag deep link (?flag=<id>)", () => {
     await expect(adminPage.getByRole("tab", { name: "Enrollment" })).toHaveAttribute("aria-selected", "true");
     await expect(adminPage.getByLabel(/Needs intervention only/)).toBeVisible();
     await expect(adminPage.getByRole("dialog")).toHaveCount(0);
+    await expect(adminPage).not.toHaveURL(/[?&]flag=/);
   });
 });

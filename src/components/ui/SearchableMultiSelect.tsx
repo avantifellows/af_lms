@@ -108,7 +108,7 @@ export function SearchableMultiSelect({
       aria-labelledby={labelId}
       onBlur={handleBlur}
       onKeyDown={handleKeyDown}
-      className="relative"
+      className="relative min-w-0"
     >
       <span id={labelId} className="text-xs font-bold uppercase tracking-wide text-text-muted">
         {label}

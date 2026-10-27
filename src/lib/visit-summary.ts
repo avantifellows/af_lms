@@ -157,6 +157,68 @@ export function formatCompactVisitDates(visitDates: string[], today: Date | stri
     .join(" · ");
 }
 
+// `15 Oct 2026`, the IST date of a `YYYY-MM-DD` Visit date or a timestamp.
+export function formatIstDate(value: string | Date): string {
+  return new Date(value).toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    timeZone: "Asia/Kolkata",
+  });
+}
+
+// `15 Oct 2026, 14:00` in IST (24-hour); `-` when there is no timestamp.
+export function formatIstTimestamp(value: string | Date | null): string {
+  if (!value) {
+    return "-";
+  }
+
+  return new Date(value).toLocaleString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "Asia/Kolkata",
+  });
+}
+
+export function formatVisitCount(count: number): string {
+  return `${count} visit${count === 1 ? "" : "s"}`;
+}
+
+// A Visit Concern is Recurring when it has live mentions in at least this many distinct Visits in
+// view. The School-wise counts (SQL) and the School page's "Recurring ·" label both read it.
+export const RECURRING_CONCERN_MIN_VISITS = 2;
+
+// The current search params as URLSearchParams, starting from `initial` and leaving out empty
+// values and every key in `omit` (the Visit Summary's tab, sort and page links).
+export function searchParamsWithout(
+  current: Record<string, string | undefined>,
+  omit: readonly string[],
+  initial: Record<string, string> = {}
+): URLSearchParams {
+  const params = new URLSearchParams(initial);
+  for (const [key, value] of Object.entries(current)) {
+    if (value && !omit.includes(key)) {
+      params.set(key, value);
+    }
+  }
+  return params;
+}
+
+export const VISIT_SUMMARY_VISITS_TAB_HREF = "/school-visit-summary?tab=visits";
+
+// The Visit Summary list or one of its School pages, with an optional query; nothing else.
+const VISIT_SUMMARY_BACK_HREF = /^\/school-visit-summary(?:\/schools\/[^/?#\\]+)?(?:\?[^#\\]*)?$/;
+
+// Where a Visit's detail page goes Back to: `back` when it is a Visit Summary list or School page
+// (so it can't send the viewer off-site or elsewhere in the app), else the Visits tab.
+export function visitSummaryBackHref(back: unknown): string {
+  return typeof back === "string" && VISIT_SUMMARY_BACK_HREF.test(back) ? back : VISIT_SUMMARY_VISITS_TAB_HREF;
+}
+
 // The severity marker beside a School on the School-wise tab: 3+ Recurring Concerns, 1–2,
 // open Concerns but none recurring, or nothing open (counts over the Visits in view).
 export type ConcernSeverity = "high" | "medium" | "low" | "none";

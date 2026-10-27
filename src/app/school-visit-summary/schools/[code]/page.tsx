@@ -1,15 +1,15 @@
 import Link from "next/link";
-import { getServerSession } from "next-auth";
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 
 import { Card } from "@/components/ui";
 import { AcademicLevelCards } from "@/components/visits/AcademicLevelCards";
 import { SchoolConcernSections } from "@/components/visits/SchoolConcernSections";
 import { SchoolInterventionFlags } from "@/components/visits/SchoolInterventionFlags";
-import { authOptions } from "@/lib/auth";
 import { canViewSchoolInterventionFlags } from "@/lib/intervention-flags";
-import { canAccessSchoolSync, getFeatureAccess, getResolvedPermission } from "@/lib/permissions";
+import { canAccessSchoolSync, getFeatureAccess } from "@/lib/permissions";
 import { getSchoolConcernPage } from "@/lib/visit-concerns";
+import { searchParamsWithout } from "@/lib/visit-summary";
+import { requireVisitSummaryPage } from "@/lib/visit-summary-page";
 import { normalizeVisitSummaryFilters } from "@/lib/visit-summary-scope";
 import {
   getVisitSummaryAcademicLevelCards,
@@ -18,7 +18,6 @@ import {
   getVisitSummarySchoolTeachers,
   type TeacherGroup,
 } from "@/lib/visit-summary-school";
-import { buildVisitsActor, canViewVisitSummary } from "@/lib/visits-policy";
 
 type SummarySearchParams = Record<string, string | undefined>;
 
@@ -29,13 +28,13 @@ interface PageProps {
 
 // Back to the School-wise tab with every filter (and its sort) the row link carried here.
 function backHref(currentParams: SummarySearchParams): string {
-  const params = new URLSearchParams({ tab: "schools" });
-  for (const [key, value] of Object.entries(currentParams)) {
-    if (value && key !== "tab") {
-      params.set(key, value);
-    }
-  }
-  return `/school-visit-summary?${params.toString()}`;
+  return `/school-visit-summary?${searchParamsWithout(currentParams, ["tab"], { tab: "schools" }).toString()}`;
+}
+
+// This page with the same filters, for a Visit's detail page to come Back to.
+function selfHref(schoolCode: string, currentParams: SummarySearchParams): string {
+  const query = searchParamsWithout(currentParams, []).toString();
+  return `/school-visit-summary/schools/${encodeURIComponent(schoolCode)}${query ? `?${query}` : ""}`;
 }
 
 function TeachersLine({ groups }: { groups: TeacherGroup[] }) {
@@ -66,29 +65,8 @@ function TeachersLine({ groups }: { groups: TeacherGroup[] }) {
 
 export default async function SchoolVisitSummarySchoolPage({ params, searchParams }: PageProps) {
   const [{ code }, currentParams] = await Promise.all([params, searchParams]);
-  const session = await getServerSession(authOptions);
-
-  if (!session?.user?.email) {
-    redirect("/");
-  }
-
-  const permission = await getResolvedPermission(session.user.email);
-  if (!permission) {
-    redirect("/dashboard");
-  }
-
-  const visitsAccess = getFeatureAccess(permission, "visits");
-  if (!visitsAccess.canView) {
-    redirect("/dashboard");
-  }
-
-  const actor = buildVisitsActor(session.user.email, permission);
-  if (!canViewVisitSummary(actor)) {
-    if (actor.role === "program_manager") {
-      redirect("/visits");
-    }
-    redirect("/dashboard");
-  }
+  const { actor, visitsAccess } = await requireVisitSummaryPage();
+  const { permission } = actor;
 
   const school = await getVisitSummarySchool(actor, code);
   if (!school) {
@@ -139,6 +117,7 @@ export default async function SchoolVisitSummarySchoolPage({ params, searchParam
           page={concernPage}
           today={new Date()}
           canAct={visitsAccess.canEdit}
+          visitBackHref={selfHref(school.code, currentParams)}
           flags={flags && <SchoolInterventionFlags schoolCode={school.code} flags={flags} />}
         />
       </main>

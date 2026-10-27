@@ -7,6 +7,8 @@ vi.mock("@/lib/db", () => ({ query: mockQuery }));
 import type { UserPermission } from "@/lib/permissions";
 import { buildVisitsActor } from "@/lib/visits-policy";
 import {
+  buildVisitSummarySchoolPredicate,
+  buildVisitSummaryWhere,
   getVisitSummaryPmOptions,
   getVisitSummaryRegionOptions,
   getVisitSummarySchoolOptions,
@@ -99,6 +101,42 @@ describe("Visit Summary scope", () => {
       await getVisitSummarySchoolOptions(adminActor, filters);
 
       expect(mockQuery.mock.calls[0][1]).toEqual([["Bhopal", "Hyderabad"]]);
+    });
+  });
+
+  describe("School on the Visit Summary", () => {
+    const columns = { startIndex: 2, schoolCodeColumn: "s.code", schoolRegionColumn: "s.region" };
+    const physical = /^EXISTS \(\s*SELECT 1\s+FROM school physical_school\s+JOIN centres physical_centre ON physical_centre\.school_id = physical_school\.id\s+WHERE physical_school\.code = s\.code\s+AND physical_centre\.is_physical AND physical_centre\.is_active\s*\)/;
+
+    it("needs an active physical Centre, with no scope clause for an unscoped admin", () => {
+      const { clause, params } = buildVisitSummarySchoolPredicate(adminActor, columns);
+
+      expect(clause).toMatch(physical);
+      expect(clause).not.toContain(" AND s.");
+      expect(params).toEqual([]);
+    });
+
+    it("adds a seated PM's visit-managed Schools as a placeholder from startIndex", () => {
+      const pm = buildVisitsActor("pm@avantifellows.org", {
+        email: "pm@avantifellows.org",
+        level: 3,
+        role: "program_manager",
+        read_only: false,
+        program_ids: [1],
+        scope: { visitManagedSchools: new Set(["SC001", "SC002"]) },
+      } as unknown as UserPermission);
+
+      const { clause, params } = buildVisitSummarySchoolPredicate(pm, columns);
+
+      expect(clause).toMatch(physical);
+      expect(clause).toMatch(/\) AND s\.code = ANY\(\$2\)$/);
+      expect(params).toEqual([["SC001", "SC002"]]);
+    });
+
+    it("is the rule the Visits in view use, on the Visit's School code", () => {
+      const { whereSql } = buildVisitSummaryWhere(adminActor);
+
+      expect(whereSql).toContain("WHERE physical_school.code = v.school_code");
     });
   });
 });

@@ -1,15 +1,11 @@
 import Link from "next/link";
-import { getServerSession } from "next-auth";
-import { redirect } from "next/navigation";
 
 import StatCard from "@/components/StatCard";
 import ClickableTableRow from "@/components/visits/ClickableTableRow";
 import GpsMapLink from "@/components/visits/GpsMapLink";
 import VisitSummaryFilterBar from "@/components/visits/VisitSummaryFilterBar";
 import { Card } from "@/components/ui";
-import { authOptions } from "@/lib/auth";
 import { query } from "@/lib/db";
-import { getFeatureAccess, getResolvedPermission } from "@/lib/permissions";
 import {
   ACTION_TYPES,
   ACTION_TYPE_VALUES,
@@ -21,8 +17,12 @@ import {
 import {
   STALE_LAST_VISIT_DAYS,
   concernSeverity,
+  formatIstDate,
+  formatIstTimestamp,
+  formatVisitCount,
   isStaleLastVisit,
   rollupActionTypes,
+  searchParamsWithout,
   type ActionTypeRollupStatus,
   type ConcernSeverity,
 } from "@/lib/visit-summary";
@@ -45,11 +45,8 @@ import {
   type SchoolWiseView,
   type SchoolWiseRow,
 } from "@/lib/visit-concerns";
-import {
-  buildVisitsActor,
-  canViewVisitSummary,
-  type VisitsActor,
-} from "@/lib/visits-policy";
+import { requireVisitSummaryPage } from "@/lib/visit-summary-page";
+import type { VisitsActor } from "@/lib/visits-policy";
 
 const VISITS_PER_PAGE = 20;
 
@@ -180,31 +177,6 @@ function normalizeSort(sortParam?: string, dirParam?: string): { sort: SortKey; 
 function normalizePage(pageParam?: string): number {
   const parsed = Number.parseInt(pageParam || "1", 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
-}
-
-function formatDate(value: string): string {
-  return new Date(value).toLocaleDateString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    timeZone: "Asia/Kolkata",
-  });
-}
-
-function formatTimestamp(value: string | Date | null): string {
-  if (!value) {
-    return "-";
-  }
-
-  return new Date(value).toLocaleString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-    timeZone: "Asia/Kolkata",
-  });
 }
 
 function formatStatus(status: string): string {
@@ -454,12 +426,7 @@ async function getSchoolWiseSummary(
 
 // Switching tabs keeps every filter and drops `sort`, `dir` and `page`, which belong to one tab.
 function tabHref(tab: SummaryTab, currentParams: SummarySearchParams): string {
-  const params = new URLSearchParams({ tab });
-  for (const [key, value] of Object.entries(currentParams)) {
-    if (value && key !== "tab" && key !== "sort" && key !== "dir" && key !== "page") {
-      params.set(key, value);
-    }
-  }
+  const params = searchParamsWithout(currentParams, ["tab", "sort", "dir", "page"], { tab });
   return `/school-visit-summary?${params.toString()}`;
 }
 
@@ -499,12 +466,7 @@ function sortHref(
   const dir = column === currentSort
     ? currentDir === "asc" ? "desc" : "asc"
     : columns[column].defaultDir;
-  const params = new URLSearchParams();
-  for (const [key, value] of Object.entries(currentParams)) {
-    if (value && key !== "sort" && key !== "dir" && key !== "page") {
-      params.set(key, value);
-    }
-  }
+  const params = searchParamsWithout(currentParams, ["sort", "dir", "page"]);
   params.set("sort", column);
   params.set("dir", dir);
   return `/school-visit-summary?${params.toString()}`;
@@ -556,12 +518,7 @@ function PaginationControls({
   }
 
   const hrefFor = (page: number) => {
-    const params = new URLSearchParams();
-    for (const [key, value] of Object.entries(currentParams)) {
-      if (value && key !== "page") {
-        params.set(key, value);
-      }
-    }
+    const params = searchParamsWithout(currentParams, ["page"]);
     params.set("sort", sort);
     params.set("dir", dir);
     if (page > 1) {
@@ -681,15 +638,11 @@ function SeverityMarker({ row }: { row: SchoolWiseRow }) {
   );
 }
 
-function formatVisitCount(count: number): string {
-  return `${count} visit${count === 1 ? "" : "s"}`;
-}
-
 function ConcernFreshnessLine({ freshness }: { freshness: SchoolWiseView["freshness"] }) {
   return (
     <p className="mb-4 text-xs text-text-muted">
       {freshness.summarisedUpTo
-        ? `Visit notes summarised up to ${formatTimestamp(freshness.summarisedUpTo)} · ${formatVisitCount(freshness.waitingVisits)} waiting`
+        ? `Visit notes summarised up to ${formatIstTimestamp(freshness.summarisedUpTo)} · ${formatVisitCount(freshness.waitingVisits)} waiting`
         : "Visit notes haven't been summarised yet"}
     </p>
   );
@@ -698,13 +651,7 @@ function ConcernFreshnessLine({ freshness }: { freshness: SchoolWiseView["freshn
 // A School-wise row opens its School page carrying every filter (and the table's sort), so the
 // page's Back link can return to this same table.
 function schoolPageHref(schoolCode: string, currentParams: SummarySearchParams): string {
-  const params = new URLSearchParams();
-  for (const [key, value] of Object.entries(currentParams)) {
-    if (value && key !== "tab") {
-      params.set(key, value);
-    }
-  }
-  const query = params.toString();
+  const query = searchParamsWithout(currentParams, ["tab"]).toString();
   return `/school-visit-summary/schools/${encodeURIComponent(schoolCode)}${query ? `?${query}` : ""}`;
 }
 
@@ -764,7 +711,7 @@ function SchoolWiseTable({
               </td>
               <td className="whitespace-nowrap px-4 py-4 text-sm font-mono text-text-secondary">{row.visits}</td>
               <td className="whitespace-nowrap px-4 py-4 text-sm font-mono text-text-secondary">
-                {formatDate(row.lastVisitDate)}
+                {formatIstDate(row.lastVisitDate)}
                 {isStaleLastVisit(row.lastVisitDate, now) && (
                   <span
                     title={`Last visit more than ${STALE_LAST_VISIT_DAYS} days ago`}
@@ -816,7 +763,7 @@ function VisitMobileCard({
           </span>
         </div>
         <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs font-mono text-text-muted">
-          <span>{formatDate(visit.visit_date)}</span>
+          <span>{formatIstDate(visit.visit_date)}</span>
           <span>{formatDuration(visit)}</span>
           <span>{formatMobileActionSummary(actionSummary)}</span>
         </div>
@@ -898,7 +845,7 @@ function VisitDesktopTable({
                   {visit.pm_name && <div className="text-xs text-text-muted">{visit.pm_email}</div>}
                 </td>
                 <td className="whitespace-nowrap px-4 py-4 text-sm font-mono text-text-secondary">
-                  {formatDate(visit.visit_date)}
+                  {formatIstDate(visit.visit_date)}
                 </td>
                 <td className="whitespace-nowrap px-4 py-4">
                   <span className={`inline-flex ${statusBadgeClass(visit.status)}`}>
@@ -906,10 +853,10 @@ function VisitDesktopTable({
                   </span>
                 </td>
                 <td className="whitespace-nowrap px-4 py-4 text-sm font-mono text-text-secondary">
-                  {formatTimestamp(visit.inserted_at)}
+                  {formatIstTimestamp(visit.inserted_at)}
                 </td>
                 <td className="whitespace-nowrap px-4 py-4 text-sm font-mono text-text-secondary">
-                  {formatTimestamp(visit.completed_at)}
+                  {formatIstTimestamp(visit.completed_at)}
                 </td>
                 <td className="whitespace-nowrap px-4 py-4 text-sm font-mono text-text-secondary">
                   {formatDuration(visit)}
@@ -1012,33 +959,8 @@ function SchoolWiseTab({
 }
 
 export default async function SchoolVisitSummaryPage({ searchParams }: PageProps) {
-  const session = await getServerSession(authOptions);
+  const { actor } = await requireVisitSummaryPage();
   const rawSearchParams = await searchParams;
-
-  if (!session) {
-    redirect("/");
-  }
-
-  if (!session.user?.email) {
-    redirect("/");
-  }
-
-  const permission = await getResolvedPermission(session.user.email);
-  if (!permission) {
-    redirect("/dashboard");
-  }
-
-  if (!getFeatureAccess(permission, "visits").canView) {
-    redirect("/dashboard");
-  }
-
-  const actor = buildVisitsActor(session.user.email, permission);
-  if (!canViewVisitSummary(actor)) {
-    if (actor.role === "program_manager") {
-      redirect("/visits");
-    }
-    redirect("/dashboard");
-  }
 
   const tab = normalizeTab(rawSearchParams.tab);
   const summary = tab === "visits"
@@ -1074,12 +996,12 @@ export default async function SchoolVisitSummaryPage({ searchParams }: PageProps
             </nav>
           </div>
           <div className="flex items-center gap-3 sm:gap-4">
-            {permission.role === "admin" && (
+            {actor.role === "admin" && (
               <Link href="/admin" className="text-sm font-bold uppercase text-accent hover:text-accent-hover">
                 Admin
               </Link>
             )}
-            <span className="hidden font-mono text-sm text-text-muted sm:inline">{session.user.email}</span>
+            <span className="hidden font-mono text-sm text-text-muted sm:inline">{actor.email}</span>
             <Link href="/api/auth/signout" className="text-sm font-bold text-danger hover:text-danger/80">
               Sign out
             </Link>

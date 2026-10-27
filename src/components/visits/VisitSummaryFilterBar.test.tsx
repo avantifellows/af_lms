@@ -22,7 +22,7 @@ describe("VisitSummaryFilterBar", () => {
     vi.useFakeTimers();
   });
 
-  it("debounces school filter URL updates, resets page, and preserves sorting", () => {
+  it("debounces school filter URL updates, drops page, and preserves sorting", () => {
     render(
       <VisitSummaryFilterBar
         regionOptions={[]}
@@ -42,7 +42,7 @@ describe("VisitSummaryFilterBar", () => {
 
     vi.advanceTimersByTime(1);
     expect(mockReplace).toHaveBeenCalledWith(
-      "/school-visit-summary?sort=pm_email&dir=asc&page=1&schools=SC001",
+      "/school-visit-summary?sort=pm_email&dir=asc&schools=SC001",
       { scroll: false }
     );
   });
@@ -79,7 +79,7 @@ describe("VisitSummaryFilterBar", () => {
     vi.advanceTimersByTime(300);
 
     expect(mockReplace).toHaveBeenCalledWith(
-      "/school-visit-summary?sort=visit_date&dir=desc&page=1&from=2026-05-01",
+      "/school-visit-summary?sort=visit_date&dir=desc&from=2026-05-01",
       { scroll: false }
     );
   });
@@ -112,21 +112,21 @@ describe("VisitSummaryFilterBar", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "Program Manager (pm@example.org)" }));
     vi.advanceTimersByTime(300);
     expect(mockReplace).toHaveBeenLastCalledWith(
-      "/school-visit-summary?page=1&pms=pm%40example.org",
+      "/school-visit-summary?pms=pm%40example.org",
       { scroll: false }
     );
 
     fireEvent.change(screen.getByLabelText("Status"), { target: { value: "completed" } });
     vi.advanceTimersByTime(300);
     expect(mockReplace).toHaveBeenLastCalledWith(
-      "/school-visit-summary?page=1&status=completed",
+      "/school-visit-summary?status=completed",
       { scroll: false }
     );
 
     fireEvent.change(screen.getByLabelText("Required Completion"), { target: { value: "partial" } });
     vi.advanceTimersByTime(300);
     expect(mockReplace).toHaveBeenLastCalledWith(
-      "/school-visit-summary?page=1&bucket=partial",
+      "/school-visit-summary?bucket=partial",
       { scroll: false }
     );
   });
@@ -151,7 +151,7 @@ describe("VisitSummaryFilterBar", () => {
     vi.advanceTimersByTime(1);
     expect(mockReplace).toHaveBeenCalledTimes(1);
     expect(mockReplace).toHaveBeenCalledWith(
-      "/school-visit-summary?page=1&status=completed",
+      "/school-visit-summary?status=completed",
       { scroll: false }
     );
   });
@@ -177,7 +177,7 @@ describe("VisitSummaryFilterBar", () => {
     );
   });
 
-  it("writes the Region selection as a comma list, resets page and keeps the other filters", () => {
+  it("writes the Region selection as a comma list, drops page and keeps the other filters", () => {
     render(
       <VisitSummaryFilterBar
         regionOptions={[
@@ -197,7 +197,7 @@ describe("VisitSummaryFilterBar", () => {
 
     expect(mockReplace).toHaveBeenCalledTimes(1);
     expect(mockReplace).toHaveBeenCalledWith(
-      "/school-visit-summary?schools=SC001&page=1&regions=Bhopal%2C__none__",
+      "/school-visit-summary?schools=SC001&regions=Bhopal%2C__none__",
       { scroll: false }
     );
     expect(within(region).getByRole("button", { name: "2 regions" })).toBeInTheDocument();
@@ -220,7 +220,7 @@ describe("VisitSummaryFilterBar", () => {
     fireEvent.click(within(region).getByRole("checkbox", { name: "Bhopal" }));
     vi.advanceTimersByTime(300);
 
-    expect(mockReplace).toHaveBeenCalledWith("/school-visit-summary?page=1", { scroll: false });
+    expect(mockReplace).toHaveBeenCalledWith("/school-visit-summary", { scroll: false });
     expect(within(region).getByRole("button", { name: "All regions" })).toBeInTheDocument();
   });
 
@@ -267,7 +267,7 @@ describe("VisitSummaryFilterBar", () => {
     vi.advanceTimersByTime(300);
 
     expect(mockReplace).toHaveBeenCalledWith(
-      "/school-visit-summary?tab=schools&pms=pm%40example.org&sort=visits&dir=asc&page=1&recurring=1",
+      "/school-visit-summary?tab=schools&pms=pm%40example.org&sort=visits&dir=asc&recurring=1",
       { scroll: false }
     );
   });
@@ -288,7 +288,7 @@ describe("VisitSummaryFilterBar", () => {
     fireEvent.click(toggle);
     vi.advanceTimersByTime(300);
 
-    expect(mockReplace).toHaveBeenCalledWith("/school-visit-summary?tab=schools&page=1", { scroll: false });
+    expect(mockReplace).toHaveBeenCalledWith("/school-visit-summary?tab=schools", { scroll: false });
   });
 
   it("offers Recurring concerns only only when asked to", () => {

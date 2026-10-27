@@ -689,17 +689,20 @@ describe("SchoolVisitSummaryPage", () => {
       top_recurring_id: null,
       top_recurring_text: null,
       top_recurring_visit_count: null,
+      waiting_visits: "0",
     };
     const schoolRows = [
       {
         school_code: "SC001", school_name: "Test School", region: "Bhopal", visits: "3", last_visit_date: "2026-10-20",
         recurring_count: "2", open_count: "3",
         top_recurring_id: "41", top_recurring_text: "Lab equipment missing", top_recurring_visit_count: "3",
+        waiting_visits: "1",
       },
       { school_code: "SC002", school_name: "Other School", region: null, visits: "1", last_visit_date: "2026-08-01", ...noConcerns },
     ];
 
-    const summarised = { summarised_up_to: new Date("2026-10-20T08:30:00Z"), waiting_visits: "1" };
+    // Waiting Visits come per School with the rows; the freshness query reads only the latest run.
+    const summarised = { summarised_up_to: new Date("2026-10-20T08:30:00Z") };
 
     function setupSchoolWiseQueries(
       rows: Array<Record<string, unknown>> = schoolRows,
@@ -809,11 +812,42 @@ describe("SchoolVisitSummaryPage", () => {
 
     it("says up to when Visit notes were summarised and how many Visits in view are waiting", async () => {
       setupAuth();
-      setupSchoolWiseQueries(schoolRows, { summarised_up_to: new Date("2026-10-20T08:30:00Z"), waiting_visits: "2" });
+      setupSchoolWiseQueries([schoolRows[0], { ...schoolRows[1], waiting_visits: "1" }]);
 
       render(await SchoolVisitSummaryPage({ searchParams: Promise.resolve({}) }));
 
       expect(screen.getByText("Visit notes summarised up to 20 Oct 2026, 14:00 · 2 visits waiting")).toBeInTheDocument();
+    });
+
+    it("counts waiting Visits only at the Schools kept by recurring=1, like the stat cards", async () => {
+      // SC001 (recurring) has 1 waiting Visit, SC002 (none recurring) has 3: 4 in all, 1 with the toggle.
+      const rows = [schoolRows[0], { ...schoolRows[1], waiting_visits: "3" }];
+      setupAuth();
+      setupSchoolWiseQueries(rows);
+
+      const { unmount } = render(await SchoolVisitSummaryPage({ searchParams: Promise.resolve({}) }));
+      expect(screen.getByText("Visit notes summarised up to 20 Oct 2026, 14:00 · 4 visits waiting")).toBeInTheDocument();
+      unmount();
+
+      render(await SchoolVisitSummaryPage({ searchParams: Promise.resolve({ recurring: "1" }) }));
+      expect(screen.getByText("Visit notes summarised up to 20 Oct 2026, 14:00 · 1 visit waiting")).toBeInTheDocument();
+    });
+
+    it("counts a School's waiting Visits (completed, unsummarised, in view) and Recurring Concerns in the rows query", async () => {
+      setupAuth();
+      setupSchoolWiseQueries();
+
+      await SchoolVisitSummaryPage({ searchParams: Promise.resolve({}) });
+
+      const sql = schoolWiseSql();
+      expect(sql).toContain("COUNT(*) FILTER (WHERE status = 'completed' AND NOT summarised) AS waiting_visits");
+      expect(sql).toMatch(/EXISTS \(SELECT 1 FROM lms_visit_note_summaries ns WHERE ns\.visit_id = v\.id\) AS summarised/);
+      // The Recurring threshold is a bound parameter, the last one (after the NVS programme id).
+      const [, params] = mockQuery.mock.calls.find(([query]) => String(query).includes("lms_visit_concerns"))!;
+      const recurringIndex = (params as unknown[]).length;
+      expect((params as unknown[])[recurringIndex - 1]).toBe(2);
+      expect(sql).toContain(`COUNT(*) FILTER (WHERE visit_count >= $${recurringIndex}) AS recurring_count`);
+      expect(sql).toContain(`WHERE visit_count >= $${recurringIndex}`);
     });
 
     it("says one Visit waiting in the singular", async () => {
@@ -827,7 +861,7 @@ describe("SchoolVisitSummaryPage", () => {
 
     it("says Visit notes haven't been summarised yet when there are no summaries, still listing the Schools", async () => {
       setupAuth();
-      setupSchoolWiseQueries(schoolRows, { summarised_up_to: null, waiting_visits: "4" });
+      setupSchoolWiseQueries(schoolRows, { summarised_up_to: null });
 
       render(await SchoolVisitSummaryPage({ searchParams: Promise.resolve({}) }));
 

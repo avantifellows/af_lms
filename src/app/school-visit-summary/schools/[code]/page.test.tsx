@@ -460,6 +460,18 @@ describe("SchoolVisitSummarySchoolPage", () => {
       expect((await resolveViaApi()).status).toBe(201);
     });
 
+    it("links each Visit-wise note to its Visit, which comes Back to this School page and its filters", async () => {
+      await withRealMatrix(adminPermission);
+      setupConcerns();
+
+      render(await renderPage("SC001", { preset: "30d", sort: "visits" }));
+
+      const link = screen.getAllByRole("link").find((a) => a.getAttribute("href")?.startsWith("/school-visit-summary/1?"));
+      const href = new URL(link!.getAttribute("href")!, "http://localhost");
+      expect(href.pathname).toBe("/school-visit-summary/1");
+      expect(href.searchParams.get("back")).toBe("/school-visit-summary/schools/SC001?preset=30d&sort=visits");
+    });
+
     it("visits view only (read_only): the page shows the concerns and history but no controls, and the API refuses", async () => {
       await withRealMatrix({ ...adminPermission, read_only: true });
       setupConcerns();

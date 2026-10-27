@@ -1,19 +1,11 @@
 import Link from "next/link";
 
 import { Badge, Card } from "@/components/ui";
+import { formatIstDate } from "@/lib/visit-summary";
 import type { VisitSummaryFlagRow, VisitSummaryFlags } from "@/lib/visit-summary-school";
 
 // The School page's Intervention flags section (#470): the School's open flags (JNV NVS ones never
 // reach it), each opening that Student's flag on the School's Enrollment tab.
-
-function formatDate(value: string | Date): string {
-  return new Date(value).toLocaleDateString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    timeZone: "Asia/Kolkata",
-  });
-}
 
 function FlagRow({ schoolCode, flag }: { schoolCode: string; flag: VisitSummaryFlagRow }) {
   const params = new URLSearchParams({ tab: "enrollment", flag: String(flag.id) });
@@ -32,7 +24,7 @@ function FlagRow({ schoolCode, flag }: { schoolCode: string; flag: VisitSummaryF
           </span>
         )}
         <span className="text-xs text-text-muted">
-          Raised by {flag.raisedBy} on {formatDate(flag.raisedAt)}
+          Raised by {flag.raisedBy} on {formatIstDate(flag.raisedAt)}
         </span>
         {flag.updateCount > 1 && <span className="text-xs font-bold text-text-secondary">{flag.updateCount} updates</span>}
       </Link>

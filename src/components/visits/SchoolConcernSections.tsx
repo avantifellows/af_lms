@@ -10,38 +10,19 @@ import type {
   VisitNoteItem,
   VisitNotes,
 } from "@/lib/visit-concerns";
-import { formatCompactVisitDates } from "@/lib/visit-summary";
+import {
+  RECURRING_CONCERN_MIN_VISITS,
+  formatCompactVisitDates,
+  formatIstDate,
+  formatIstTimestamp,
+  formatVisitCount,
+} from "@/lib/visit-summary";
 
 // The School page's concern sections (#470): Needs attention, Going well, Resolved concerns
 // (collapsed) and Visit-wise notes (collapsible). Every text is stored text and renders as text.
 // `today` decides the compact dates' year rule. `canAct` (visits edit, the rule the events API
 // enforces) adds Resolve on open concerns and Comment / Reopen on resolved ones. `flags` (the
 // Intervention flags section, when the viewer may see it) sits between Needs attention and Going well.
-
-function formatDate(value: string | Date): string {
-  return new Date(value).toLocaleDateString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    timeZone: "Asia/Kolkata",
-  });
-}
-
-function formatTimestamp(value: string | Date): string {
-  return new Date(value).toLocaleString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-    timeZone: "Asia/Kolkata",
-  });
-}
-
-function formatVisitCount(count: number): string {
-  return `${count} ${count === 1 ? "visit" : "visits"}`;
-}
 
 const EVENT_LABELS: Record<Exclude<ConcernHistoryEntry["kind"], "auto_reopened">, string> = {
   resolved: "Resolved",
@@ -62,15 +43,15 @@ function HistoryList({ history }: { history: ConcernHistoryEntry[] }) {
             {entry.kind === "auto_reopened" ? (
               <>
                 <span className="font-bold text-text-secondary">
-                  Reopened automatically: raised again in visit of {entry.visitDate ? formatDate(entry.visitDate) : "an unknown date"}
+                  Reopened automatically: raised again in visit of {entry.visitDate ? formatIstDate(entry.visitDate) : "an unknown date"}
                 </span>
                 {" · "}
-                {formatTimestamp(entry.at)}
+                {formatIstTimestamp(entry.at)}
               </>
             ) : (
               <>
                 <span className="font-bold text-text-secondary">{EVENT_LABELS[entry.kind]}</span>
-                {` · ${authorOf(entry)} · ${formatTimestamp(entry.at)}`}
+                {` · ${authorOf(entry)} · ${formatIstTimestamp(entry.at)}`}
               </>
             )}
           </p>
@@ -133,7 +114,7 @@ function NeedsAttention({ cards, today, canAct }: { cards: ConcernCard[]; today:
               key={card.id}
               card={card}
               today={today}
-              countLabel={card.visitCount >= 2 ? `Recurring · ${formatVisitCount(card.visitCount)}` : formatVisitCount(card.visitCount)}
+              countLabel={card.visitCount >= RECURRING_CONCERN_MIN_VISITS ? `Recurring · ${formatVisitCount(card.visitCount)}` : formatVisitCount(card.visitCount)}
             >
               {card.history.length > 0 && (
                 <details className="mt-2">
@@ -191,7 +172,7 @@ function ResolvedConcerns({ cards, today, canAct }: { cards: ConcernCard[]; toda
                   <ConcernCardView key={card.id} card={card} today={today} countLabel={formatVisitCount(card.visitCount)}>
                     {resolution && (
                       <p className="mt-1 text-xs text-text-secondary">
-                        Resolved by {authorOf(resolution)} on {formatTimestamp(resolution.at)}
+                        Resolved by {authorOf(resolution)} on {formatIstTimestamp(resolution.at)}
                       </p>
                     )}
                     <HistoryList history={card.history} />
@@ -224,16 +205,16 @@ function NoteItems({ title, items }: { title: string; items: VisitNoteItem[] }) 
   );
 }
 
-function VisitNotesEntry({ visit }: { visit: VisitNotes }) {
+function VisitNotesEntry({ visit, backHref }: { visit: VisitNotes; backHref?: string }) {
   const empty = visit.concerns.length === 0 && visit.highlights.length === 0;
   return (
     <article className="border border-border bg-bg-card p-3">
       <div className="flex flex-wrap items-center gap-2">
         <Link
-          href={`/school-visit-summary/${visit.visitId}`}
+          href={`/school-visit-summary/${visit.visitId}${backHref ? `?${new URLSearchParams({ back: backHref })}` : ""}`}
           className="text-sm font-bold text-accent hover:text-accent-hover"
         >
-          {formatDate(visit.visitDate)} · {visit.pmName ?? visit.pmEmail}
+          {formatIstDate(visit.visitDate)} · {visit.pmName ?? visit.pmEmail}
         </Link>
         {visit.status !== "completed" && <Badge variant="info">In progress</Badge>}
       </div>
@@ -251,7 +232,7 @@ function VisitNotesEntry({ visit }: { visit: VisitNotes }) {
   );
 }
 
-function VisitWiseNotes({ visits }: { visits: VisitNotes[] }) {
+function VisitWiseNotes({ visits, backHref }: { visits: VisitNotes[]; backHref?: string }) {
   return (
     <Card elevation="sm" className="p-4">
       <section aria-labelledby="visit-notes-heading">
@@ -263,7 +244,7 @@ function VisitWiseNotes({ visits }: { visits: VisitNotes[] }) {
             {visits.length === 0 ? (
               <EmptyState>No visits in view</EmptyState>
             ) : (
-              visits.map((visit) => <VisitNotesEntry key={visit.visitId} visit={visit} />)
+              visits.map((visit) => <VisitNotesEntry key={visit.visitId} visit={visit} backHref={backHref} />)
             )}
           </div>
         </details>
@@ -277,11 +258,14 @@ export function SchoolConcernSections({
   today,
   canAct,
   flags,
+  visitBackHref,
 }: {
   page: SchoolConcernPage;
   today: Date;
   canAct: boolean;
   flags?: ReactNode;
+  // Where a Visit-wise note's detail page goes Back to (this School page with its filters).
+  visitBackHref?: string;
 }) {
   return (
     <>
@@ -289,7 +273,7 @@ export function SchoolConcernSections({
       {flags}
       <GoingWell cards={page.goingWell} today={today} />
       <ResolvedConcerns cards={page.resolved} today={today} canAct={canAct} />
-      <VisitWiseNotes visits={page.visitNotes} />
+      <VisitWiseNotes visits={page.visitNotes} backHref={visitBackHref} />
     </>
   );
 }

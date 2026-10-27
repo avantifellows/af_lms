@@ -253,9 +253,27 @@ export default function EnrollmentTabContent({
   // Student once the flags load. Consumed once, so closing the dialog or a
   // later reload never reopens it; an id not in the loaded flags is ignored.
   const searchParams = useSearchParams();
+  const hasFlagParam = searchParams.has("flag");
   const [deepLinkFlagId, setDeepLinkFlagId] = useState(() =>
     parseFlagParam(searchParams.get("flag")),
   );
+  // Once consumed (or when the id isn't a valid flag id), drop `flag` from the
+  // URL. SchoolTabs remounts this tab on every return to it, and a `flag` left
+  // in the URL would reopen the dialog each time. Written with the history API,
+  // like SchoolTabs' tab switch: no server round trip, no scroll jump, and
+  // every other param (tab, grade, …) is kept as it stands now.
+  useEffect(() => {
+    if (deepLinkFlagId != null || !hasFlagParam) return;
+    const params = new URLSearchParams(window.location.search);
+    if (!params.has("flag")) return;
+    params.delete("flag");
+    const qs = params.toString();
+    window.history.replaceState(
+      null,
+      "",
+      `${window.location.pathname}${qs ? `?${qs}` : ""}${window.location.hash}`,
+    );
+  }, [deepLinkFlagId, hasFlagParam]);
   if (deepLinkFlagId != null && flagsLoaded) {
     setDeepLinkFlagId(null);
     const target = findFlagDeepLinkTarget(deepLinkFlagId, flagsByStudent, programs, [

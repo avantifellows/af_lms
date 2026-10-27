@@ -130,7 +130,7 @@ test.describe("School Visit Summary — Region, School and PM filters", () => {
 
     await filter(adminPage, "Region").getByRole("checkbox", { name: NO_REGION }).check();
     await expect(adminPage).toHaveURL(/[?&]regions=__none__(&|$)/);
-    await expect(adminPage).toHaveURL(/[?&]page=1(&|$)/);
+    await expect(adminPage).not.toHaveURL(/[?&]page=/);
 
     await expect(visitRows(adminPage)).toHaveCount(1);
     await expect(visitRows(adminPage).filter({ hasText: NO_REGION_SCHOOL })).toHaveCount(1);
@@ -694,13 +694,14 @@ test.describe("School Visit Summary — School page concerns", () => {
     const visitLinks = notes.getByRole("link");
     await expect(visitLinks).toHaveCount(6);
     const hrefs = await visitLinks.evaluateAll((links) => links.map((link) => link.getAttribute("href")));
+    const back = `?${new URLSearchParams({ back: ALPHA_PAGE })}`;
     expect(hrefs).toEqual([
-      "/school-visit-summary/9004732",
-      "/school-visit-summary/9004725",
-      "/school-visit-summary/9004723",
-      "/school-visit-summary/9004722",
-      "/school-visit-summary/9004721",
-      "/school-visit-summary/9004720",
+      `/school-visit-summary/9004732${back}`,
+      `/school-visit-summary/9004725${back}`,
+      `/school-visit-summary/9004723${back}`,
+      `/school-visit-summary/9004722${back}`,
+      `/school-visit-summary/9004721${back}`,
+      `/school-visit-summary/9004720${back}`,
     ]);
     await expect(visitLinks.nth(0)).toHaveText("01 Oct 2026 · e2e-vsw-pm4@test.local");
 
@@ -716,6 +717,17 @@ test.describe("School Visit Summary — School page concerns", () => {
     // Collapsible.
     await notes.getByText("Visit-wise notes").click();
     await expect(visitLinks.first()).toBeHidden();
+  });
+
+  test("a Visit opened from the School page goes Back to that School page", async ({ adminPage }) => {
+    const schoolPage = `${ALPHA_PAGE}?from=2026-08-01&to=2026-10-31`;
+    await adminPage.goto(schoolPage);
+
+    await concernSection(adminPage, "Visit-wise notes").getByRole("link").first().click();
+    await expect(adminPage).toHaveURL(/\/school-visit-summary\/9004732\?back=/);
+
+    await adminPage.getByRole("link", { name: /Back to Visit Summary/ }).click();
+    await expect(adminPage).toHaveURL(schoolPage);
   });
 
   test("follows the date and PM filters carried in the URL", async ({ adminPage }) => {

@@ -4,7 +4,11 @@
 import { query } from "@/lib/db";
 import { REQUIRED_ACTION_TYPE_VALUES } from "@/lib/visit-actions";
 import { resolvePresetDateRange } from "@/lib/visit-summary";
-import { buildVisitSummaryScopePredicate, type VisitsActor } from "@/lib/visits-policy";
+import {
+  buildVisitSummaryScopePredicate,
+  type VisitScopePredicate,
+  type VisitsActor,
+} from "@/lib/visits-policy";
 
 export type VisitSummaryStatusFilter = "in_progress" | "completed";
 export type ActionCompletionBucketFilter = "none" | "partial" | "all_present" | "all_complete";
@@ -101,16 +105,33 @@ export function normalizeVisitSummaryFilters(searchParams: VisitSummaryFilterPar
   };
 }
 
-// The Visit Summary covers physical centres only (#470): a Visit is in view only when its
-// School has an active physical Centre, so a School with only a JNV NVS Centre drops out
-// while a mixed JNV (physical + NVS Centres) stays. Self-contained, so it reads only `v`.
-const PHYSICAL_SCHOOL_PREDICATE = `EXISTS (
+// The Visit Summary covers physical centres only (#470): a School is on it only when it has an
+// active physical Centre, so a School with only a JNV NVS Centre drops out while a mixed JNV
+// (physical + NVS Centres) stays. Self-contained, so it reads only `schoolCodeColumn`.
+function physicalSchoolPredicate(schoolCodeColumn: string): string {
+  return `EXISTS (
     SELECT 1
     FROM school physical_school
     JOIN centres physical_centre ON physical_centre.school_id = physical_school.id
-    WHERE physical_school.code = v.school_code
+    WHERE physical_school.code = ${schoolCodeColumn}
       AND physical_centre.is_physical AND physical_centre.is_active
   )`;
+}
+
+// A School is on the actor's Visit Summary when it is inside their summary scope and has an active
+// physical Centre. The Visits in view, the School page and the concern-events API all gate on this
+// one rule, so a School the list hides can't be opened or written to. Placeholders start at `startIndex`.
+export function buildVisitSummarySchoolPredicate(
+  actor: VisitsActor,
+  options: { startIndex: number; schoolCodeColumn: string; schoolRegionColumn: string }
+): VisitScopePredicate {
+  const physical = physicalSchoolPredicate(options.schoolCodeColumn);
+  const scope = buildVisitSummaryScopePredicate(actor, options);
+  return {
+    clause: scope.clause ? `${physical} AND ${scope.clause}` : physical,
+    params: scope.params,
+  };
+}
 
 // Expects the caller's query to alias the Visit as `v` and LEFT JOIN `school s ON s.code =
 // v.school_code` (the region scope reads `s.region`). Placeholders start at `startIndex`.
@@ -120,7 +141,7 @@ export function buildVisitSummaryWhere(
   options: { startIndex?: number; exclude?: VisitSummaryFilterExclusion } = {}
 ): VisitSummaryWhere {
   const { startIndex = 1, exclude } = options;
-  const predicates = ["v.deleted_at IS NULL", PHYSICAL_SCHOOL_PREDICATE];
+  const predicates = ["v.deleted_at IS NULL"];
   const joins: string[] = [];
   const params: unknown[] = [];
   let nextIndex = startIndex;
@@ -199,16 +220,13 @@ export function buildVisitSummaryWhere(
     }
   }
 
-  const scope = buildVisitSummaryScopePredicate(actor, {
+  const school = buildVisitSummarySchoolPredicate(actor, {
     startIndex: nextIndex,
     schoolCodeColumn: "v.school_code",
     schoolRegionColumn: "s.region",
   });
-
-  if (scope.clause) {
-    predicates.push(scope.clause);
-    params.push(...scope.params);
-  }
+  predicates.push(school.clause);
+  params.push(...school.params);
 
   return {
     whereSql: predicates.join(" AND "),

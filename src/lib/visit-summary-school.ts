@@ -4,7 +4,8 @@ import { AL_DISPLAY_ORDER } from "@/lib/academic-level";
 import { canonicalStream, getStudentAcademicLevelCounts } from "@/lib/bigquery";
 import { PROGRAM_ID_TO_LABEL, PROGRAM_IDS } from "@/lib/constants";
 import { query } from "@/lib/db";
-import { buildVisitSummaryScopePredicate, type VisitsActor } from "@/lib/visits-policy";
+import { buildVisitSummarySchoolPredicate } from "@/lib/visit-summary-scope";
+import type { VisitsActor } from "@/lib/visits-policy";
 
 export interface VisitSummarySchool {
   code: string;
@@ -14,13 +15,13 @@ export interface VisitSummarySchool {
   af_school_category: string | null;
 }
 
-// The School, when the actor may see it on the Visit Summary: inside their summary scope and with
-// an active physical Centre (#470). Null otherwise, so the page can't reveal that it exists.
+// The School, when the actor may see it on the Visit Summary (`buildVisitSummarySchoolPredicate`:
+// inside their summary scope and with an active physical Centre, #470). Null otherwise, so the page can't reveal that it exists.
 export async function getVisitSummarySchool(
   actor: VisitsActor,
   schoolCode: string
 ): Promise<VisitSummarySchool | null> {
-  const scope = buildVisitSummaryScopePredicate(actor, {
+  const onSummary = buildVisitSummarySchoolPredicate(actor, {
     startIndex: 2,
     schoolCodeColumn: "s.code",
     schoolRegionColumn: "s.region",
@@ -29,13 +30,9 @@ export async function getVisitSummarySchool(
     `SELECT s.code, s.name, s.region, s.udise_code, s.af_school_category
      FROM school s
      WHERE s.code = $1
-       AND EXISTS (
-         SELECT 1 FROM centres c
-         WHERE c.school_id = s.id AND c.is_physical AND c.is_active
-       )
-       ${scope.clause ? `AND ${scope.clause}` : ""}
+       AND ${onSummary.clause}
      LIMIT 1`,
-    [schoolCode, ...scope.params]
+    [schoolCode, ...onSummary.params]
   );
   return rows[0] ?? null;
 }

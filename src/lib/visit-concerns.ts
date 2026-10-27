@@ -6,8 +6,13 @@
 import { PROGRAM_IDS } from "@/lib/constants";
 import { query } from "@/lib/db";
 import { canViewSchoolInterventionFlags } from "@/lib/intervention-flags";
-import { buildVisitSummaryWhere, type VisitSummaryFilters } from "@/lib/visit-summary-scope";
-import { buildVisitSummaryScopePredicate, type VisitsActor } from "@/lib/visits-policy";
+import {
+  buildVisitSummarySchoolPredicate,
+  buildVisitSummaryWhere,
+  type VisitSummaryFilters,
+} from "@/lib/visit-summary-scope";
+import { RECURRING_CONCERN_MIN_VISITS } from "@/lib/visit-summary";
+import type { VisitsActor } from "@/lib/visits-policy";
 
 export type SchoolWiseSortKey = "school_name" | "visits" | "last_visit" | "recurring" | "flags";
 export type SchoolWiseSortDirection = "asc" | "desc";
@@ -50,10 +55,13 @@ export interface SchoolWiseRow {
   // see the School's flags.
   flagsOpen: number | null;
   topRecurring: TopRecurringConcern | null;
+  // Completed Visits in view at the School with no note summary yet.
+  waitingVisits: number;
 }
 
 // `summarisedUpTo` is the latest summary run over all Visits (null: never summarised);
-// `waitingVisits` counts the completed Visits in view with no summary yet.
+// `waitingVisits` counts the completed Visits in view with no summary yet, at the Schools kept
+// (so it follows `recurringOnly` like the stats).
 export interface ConcernFreshness {
   summarisedUpTo: Date | null;
   waitingVisits: number;
@@ -78,11 +86,11 @@ interface SchoolWiseQueryRow {
   top_recurring_text: string | null;
   top_recurring_visit_count: string | number | null;
   open_flags: string | number;
+  waiting_visits: string | number;
 }
 
 interface FreshnessQueryRow {
   summarised_up_to: Date | string | null;
-  waiting_visits: string | number;
 }
 
 function isSchoolWiseSortKey(value: string | undefined): value is SchoolWiseSortKey {
@@ -104,10 +112,12 @@ function buildOrderClause({ sort, dir }: SchoolWiseSort): string {
 }
 
 // One row per School with at least one Visit in view (any status), with its Recurring Concerns
-// (open, live mentions in 2+ distinct Visits in view; same-day Visits count separately), its open
+// (open, live mentions in RECURRING_CONCERN_MIN_VISITS+ distinct Visits in view; same-day Visits
+// count separately), its open
 // Concerns (open, 1+ live mention in view) and its top Recurring Concern (most Visits, then the
 // most recent mention's visit_date, then the lowest id). Resolved Concerns and Highlights never count.
-// `filters.recurringOnly` keeps only Schools with a Recurring Concern; the stats follow the rows kept.
+// `filters.recurringOnly` keeps only Schools with a Recurring Concern; the stats and the waiting
+// count follow the rows kept.
 // Open intervention flags are counted per School in the same query (JNV NVS flags never count) and
 // shown only where the viewer passes the intervention-flag view rule for that School.
 export async function getSchoolWiseView(
@@ -117,11 +127,13 @@ export async function getSchoolWiseView(
 ): Promise<SchoolWiseView> {
   const { whereSql, joinSql, params } = buildVisitSummaryWhere(actor, filters);
   const nvsProgramIndex = params.length + 1;
+  const recurringIndex = params.length + 2;
 
   const rowsQuery = query<SchoolWiseQueryRow>(
     `WITH visits_in_view AS (
        SELECT v.id, v.school_code, v.visit_date, v.status,
-              COALESCE(s.name, v.school_code) AS school_name, s.region, s.af_school_category
+              COALESCE(s.name, v.school_code) AS school_name, s.region, s.af_school_category,
+              EXISTS (SELECT 1 FROM lms_visit_note_summaries ns WHERE ns.visit_id = v.id) AS summarised
        FROM lms_pm_school_visits v
        LEFT JOIN school s ON s.code = v.school_code
        ${joinSql}
@@ -141,7 +153,7 @@ export async function getSchoolWiseView(
      ),
      school_concerns AS (
        SELECT school_code,
-              COUNT(*) FILTER (WHERE visit_count >= 2) AS recurring_count,
+              COUNT(*) FILTER (WHERE visit_count >= $${recurringIndex}) AS recurring_count,
               COUNT(*) AS open_count
        FROM open_concerns
        GROUP BY school_code
@@ -149,13 +161,14 @@ export async function getSchoolWiseView(
      top_recurring AS (
        SELECT DISTINCT ON (school_code) school_code, id, text, visit_count
        FROM open_concerns
-       WHERE visit_count >= 2
+       WHERE visit_count >= $${recurringIndex}
        ORDER BY school_code, visit_count DESC, last_mentioned_on DESC, id ASC
      ),
      school_visits AS (
        SELECT school_code, school_name, region, af_school_category,
               COUNT(*) AS visits,
-              MAX(visit_date) AS last_visited_on
+              MAX(visit_date) AS last_visited_on,
+              COUNT(*) FILTER (WHERE status = 'completed' AND NOT summarised) AS waiting_visits
        FROM visits_in_view
        GROUP BY school_code, school_name, region, af_school_category
      ),
@@ -179,24 +192,18 @@ export async function getSchoolWiseView(
             tr.id AS top_recurring_id,
             tr.text AS top_recurring_text,
             tr.visit_count AS top_recurring_visit_count,
-            COALESCE(sf.open_flags, 0) AS open_flags
+            COALESCE(sf.open_flags, 0) AS open_flags,
+            sv.waiting_visits
      FROM school_visits sv
      LEFT JOIN school_concerns sc ON sc.school_code = sv.school_code
      LEFT JOIN top_recurring tr ON tr.school_code = sv.school_code
      LEFT JOIN school_flags sf ON sf.school_code = sv.school_code
      ORDER BY ${buildOrderClause(sort)}`,
-    [...params, PROGRAM_IDS.NVS]
+    [...params, PROGRAM_IDS.NVS, RECURRING_CONCERN_MIN_VISITS]
   );
-  // summarised_at holds UTC in a timestamp without time zone.
+  // The latest summary run over all Visits. summarised_at holds UTC in a timestamp without time zone.
   const freshnessQuery = query<FreshnessQueryRow>(
-    `SELECT (SELECT MAX(summarised_at) FROM lms_visit_note_summaries) AT TIME ZONE 'UTC' AS summarised_up_to,
-            COUNT(*) FILTER (WHERE v.status = 'completed' AND ns.visit_id IS NULL) AS waiting_visits
-     FROM lms_pm_school_visits v
-     LEFT JOIN school s ON s.code = v.school_code
-     LEFT JOIN lms_visit_note_summaries ns ON ns.visit_id = v.id
-     ${joinSql}
-     WHERE ${whereSql}`,
-    params
+    `SELECT MAX(summarised_at) AT TIME ZONE 'UTC' AS summarised_up_to FROM lms_visit_note_summaries`
   );
   const [rows, [freshness]] = await Promise.all([rowsQuery, freshnessQuery]);
 
@@ -222,6 +229,7 @@ export async function getSchoolWiseView(
           text: row.top_recurring_text,
           visitCount: Number(row.top_recurring_visit_count),
         },
+    waitingVisits: Number(row.waiting_visits),
   }));
   const keptRows = filters.recurringOnly ? allRows.filter((row) => row.recurringCount > 0) : allRows;
   // The SQL sorted by the raw flag count; "—" rows go last in either direction, keeping that order.
@@ -238,7 +246,7 @@ export async function getSchoolWiseView(
     },
     freshness: {
       summarisedUpTo: freshness?.summarised_up_to ? new Date(freshness.summarised_up_to) : null,
-      waitingVisits: Number(freshness?.waiting_visits ?? 0),
+      waitingVisits: schoolRows.reduce((total, row) => total + row.waitingVisits, 0),
     },
     rows: schoolRows,
   };
@@ -468,13 +476,13 @@ export async function getSchoolConcernPage(
 }
 
 // The concern behind a Resolve / Comment / Reopen, when the actor can see it on the Visit Summary:
-// its School is inside the actor's summary scope and has an active physical Centre, and it has at
+// its School is on the actor's Visit Summary (`buildVisitSummarySchoolPredicate`), and it has at
 // least one live mention. Null otherwise (also for a missing id), so a caller can't tell them apart.
 export async function findVisitSummaryConcern(
   actor: VisitsActor,
   concernId: number
 ): Promise<{ id: number; schoolCode: string } | null> {
-  const scope = buildVisitSummaryScopePredicate(actor, {
+  const onSummary = buildVisitSummarySchoolPredicate(actor, {
     startIndex: 2,
     schoolCodeColumn: "s.code",
     schoolRegionColumn: "s.region",
@@ -484,37 +492,15 @@ export async function findVisitSummaryConcern(
      FROM lms_visit_concerns c
      JOIN school s ON s.code = c.school_code
      WHERE c.id = $1
-       AND EXISTS (
-         SELECT 1 FROM centres ce
-         WHERE ce.school_id = s.id AND ce.is_physical AND ce.is_active
-       )
+       AND ${onSummary.clause}
        AND EXISTS (
          SELECT 1 FROM lms_visit_concern_mentions m
          JOIN lms_pm_school_visits v ON v.id = m.visit_id
          WHERE m.concern_id = c.id AND v.status = 'completed' AND v.deleted_at IS NULL
        )
-       ${scope.clause ? `AND ${scope.clause}` : ""}
      LIMIT 1`,
-    [concernId, ...scope.params]
+    [concernId, ...onSummary.params]
   );
   const row = rows[0];
   return row ? { id: Number(row.id), schoolCode: row.school_code } : null;
-}
-
-export interface ConcernCardState {
-  id: number;
-  status: "open" | "resolved" | null;
-  reopened: boolean;
-  history: ConcernHistoryEntry[];
-}
-
-// A concern's current status and history, as the events API returns it after a write.
-export async function getConcernCardState(concernId: number): Promise<ConcernCardState | null> {
-  const [concern] = await query<{ id: string | number; status: "open" | "resolved" | null }>(
-    `SELECT id, status FROM lms_visit_concerns WHERE id = $1`,
-    [concernId]
-  );
-  if (!concern) return null;
-  const history = (await getConcernHistories([concernId])).get(concernId) ?? [];
-  return { id: Number(concern.id), status: concern.status, reopened: isReopened(history), history };
 }

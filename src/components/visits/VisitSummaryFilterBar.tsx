@@ -92,7 +92,8 @@ export default function VisitSummaryFilterBar({
           params.set(key, value);
         }
       }
-      params.set("page", "1");
+      // A filter change goes back to the first page: drop `page` rather than pin `page=1`.
+      params.delete("page");
       for (const [key, value] of Object.entries(merged)) {
         if (value) {
           params.set(key, value);
@@ -158,7 +159,9 @@ export default function VisitSummaryFilterBar({
         </div>
       </div>
 
-      <div className="grid items-start gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
+      {/* grid-cols-1 (minmax(0, 1fr)) and min-w-0 on each field keep a long selected label truncated
+          in its button on a narrow screen instead of widening the column. */}
+      <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
         <SearchableMultiSelect
           label="Region"
           options={withMissingSelected(regionOptions, selectedRegions)}
@@ -201,7 +204,7 @@ export default function VisitSummaryFilterBar({
           }}
         />
 
-        <div>
+        <div className="min-w-0">
           <label htmlFor="visit-summary-status" className={FIELD_LABEL_CLASS}>
             Status
           </label>
@@ -220,7 +223,7 @@ export default function VisitSummaryFilterBar({
           </select>
         </div>
 
-        <div>
+        <div className="min-w-0">
           <label htmlFor="visit-summary-bucket" className={FIELD_LABEL_CLASS}>
             Required Completion
           </label>
@@ -241,7 +244,7 @@ export default function VisitSummaryFilterBar({
           </select>
         </div>
 
-        <div>
+        <div className="min-w-0">
           <label htmlFor="visit-summary-preset" className={FIELD_LABEL_CLASS}>
             Date Preset
           </label>
@@ -272,7 +275,7 @@ export default function VisitSummaryFilterBar({
 
         {!preset && (
           <>
-            <label className={FIELD_LABEL_CLASS}>
+            <label className={`min-w-0 ${FIELD_LABEL_CLASS}`}>
               From
               <input
                 type="date"
@@ -284,7 +287,7 @@ export default function VisitSummaryFilterBar({
                 className={FIELD_INPUT_CLASS}
               />
             </label>
-            <label className={FIELD_LABEL_CLASS}>
+            <label className={`min-w-0 ${FIELD_LABEL_CLASS}`}>
               To
               <input
                 type="date"

@@ -161,47 +161,13 @@ describe("POST /api/visit-concerns/[id]/events", () => {
       expect(writesIn(mockQuery.mock.calls)).toEqual([]);
     });
 
-    // After commit, the route reads the concern's status and history back for the response.
-    function afterCommit(status: "open" | "resolved", events: Array<Record<string, unknown>>) {
-      mockQuery.mockImplementation(async (sql: string) => {
-        if (sql.includes("lms_visit_concern_events")) return events;
-        if (sql.includes("centres")) return [{ id: "9004801", school_code: "VSWCONA" }];
-        return [{ id: "9004801", status }];
-      });
-    }
-
-    const RESOLVED_EVENT = {
-      concern_id: "9004801",
-      kind: "resolved",
-      body: "Lab kits delivered",
-      author_email: "admin@avantifellows.org",
-      author_name: "Admin User",
-      visit_id: null,
-      visit_date: null,
-      at: new Date("2026-10-27T10:00:00Z"),
-    };
-
     it("resolves an open concern: locks it, sets it resolved and appends the explanation, in one transaction", async () => {
       lockedConcern({ kind: "concern", status: "open" });
-      afterCommit("resolved", [RESOLVED_EVENT]);
 
       const res = await post("9004801", { action: "resolve", body: "  Lab kits delivered \n" });
 
       expect(res.status).toBe(201);
-      expect(await res.json()).toEqual({
-        id: 9004801,
-        status: "resolved",
-        reopened: false,
-        history: [{
-          kind: "resolved",
-          body: "Lab kits delivered",
-          authorEmail: "admin@avantifellows.org",
-          authorName: "Admin User",
-          visitId: null,
-          visitDate: null,
-          at: "2026-10-27T10:00:00.000Z",
-        }],
-      });
+      expect(await res.json()).toEqual({ ok: true });
 
       expect(mockWithTransaction).toHaveBeenCalledTimes(1);
       const [lock, ...rest] = client.query.mock.calls;
@@ -210,22 +176,18 @@ describe("POST /api/visit-concerns/[id]/events", () => {
         [expect.stringMatching(/^\s*UPDATE lms_visit_concerns/), [9004801, "resolved"]],
         [expect.stringMatching(/^\s*INSERT INTO lms_visit_concern_events/), [9004801, "resolved", "Lab kits delivered", "admin@avantifellows.org"]],
       ]);
-      // Nothing is written outside the transaction.
+      // Nothing is written outside the transaction, and nothing is read back after it: the only
+      // query outside it is the concern lookup.
       expect(writesIn(mockQuery.mock.calls)).toEqual([]);
+      expect(mockQuery).toHaveBeenCalledTimes(1);
     });
 
     it("comments on a resolved concern without changing its status", async () => {
       lockedConcern({ kind: "concern", status: "resolved" });
-      afterCommit("resolved", [RESOLVED_EVENT, {
-        ...RESOLVED_EVENT, kind: "comment", body: "Checked again", at: new Date("2026-10-27T11:00:00Z"),
-      }]);
 
       const res = await post("9004801", { action: "comment", body: "Checked again" });
 
       expect(res.status).toBe(201);
-      const card = await res.json();
-      expect(card.status).toBe("resolved");
-      expect(card.history.map((entry: { kind: string }) => entry.kind)).toEqual(["resolved", "comment"]);
       expect(writesIn(client.query.mock.calls)).toEqual([expect.stringMatching(/^\s*INSERT INTO lms_visit_concern_events/)]);
       expect(client.query).toHaveBeenLastCalledWith(
         expect.any(String),
@@ -235,14 +197,10 @@ describe("POST /api/visit-concerns/[id]/events", () => {
 
     it("reopens a resolved concern with the reason, marking it reopened", async () => {
       lockedConcern({ kind: "concern", status: "resolved" });
-      afterCommit("open", [RESOLVED_EVENT, {
-        ...RESOLVED_EVENT, kind: "reopened", body: "Kits went missing again", at: new Date("2026-10-27T11:00:00Z"),
-      }]);
 
       const res = await post("9004801", { action: "reopen", body: "Kits went missing again" });
 
       expect(res.status).toBe(201);
-      expect(await res.json()).toMatchObject({ id: 9004801, status: "open", reopened: true });
       expect(client.query.mock.calls.slice(1)).toEqual([
         [expect.stringMatching(/^\s*UPDATE lms_visit_concerns/), [9004801, "open"]],
         [expect.stringMatching(/^\s*INSERT INTO lms_visit_concern_events/), [9004801, "reopened", "Kits went missing again", "admin@avantifellows.org"]],
@@ -252,7 +210,6 @@ describe("POST /api/visit-concerns/[id]/events", () => {
     it("accepts a 2000-character body (the limit) and stores the author's email in lower case", async () => {
       signIn(ADMIN, "Admin@AvantiFellows.org");
       lockedConcern({ kind: "concern", status: "open" });
-      afterCommit("resolved", [RESOLVED_EVENT]);
       const body = "b".repeat(2000);
 
       const res = await post("9004801", { action: "resolve", body: `  ${body}  ` });
