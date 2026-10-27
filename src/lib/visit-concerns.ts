@@ -7,7 +7,7 @@ import { PROGRAM_IDS } from "@/lib/constants";
 import { query } from "@/lib/db";
 import { canViewSchoolInterventionFlags } from "@/lib/intervention-flags";
 import { buildVisitSummaryWhere, type VisitSummaryFilters } from "@/lib/visit-summary-scope";
-import type { VisitsActor } from "@/lib/visits-policy";
+import { buildVisitSummaryScopePredicate, type VisitsActor } from "@/lib/visits-policy";
 
 export type SchoolWiseSortKey = "school_name" | "visits" | "last_visit" | "recurring" | "flags";
 export type SchoolWiseSortDirection = "asc" | "desc";
@@ -332,6 +332,43 @@ function permissionNameSql(emailColumn: string): string {
            ORDER BY up.id LIMIT 1)`;
 }
 
+// Each concern's history, oldest first, keyed by concern id.
+async function getConcernHistories(concernIds: number[]): Promise<Map<number, ConcernHistoryEntry[]>> {
+  const historyById = new Map<number, ConcernHistoryEntry[]>();
+  if (concernIds.length === 0) return historyById;
+  // inserted_at holds UTC in a timestamp without time zone.
+  const events = await query<EventRow>(
+    `SELECT e.concern_id, e.kind, e.body, e.author_email,
+            ${permissionNameSql("e.author_email")} AS author_name,
+            e.visit_id, TO_CHAR(ev.visit_date, 'YYYY-MM-DD') AS visit_date,
+            e.inserted_at AT TIME ZONE 'UTC' AS at
+     FROM lms_visit_concern_events e
+     LEFT JOIN lms_pm_school_visits ev ON ev.id = e.visit_id
+     WHERE e.concern_id = ANY($1::bigint[])
+     ORDER BY e.inserted_at ASC, e.id ASC`,
+    [concernIds]
+  );
+  for (const event of events) {
+    const id = Number(event.concern_id);
+    const history = historyById.get(id) ?? [];
+    history.push({
+      kind: event.kind,
+      body: event.body,
+      authorEmail: event.author_email,
+      authorName: event.author_name,
+      visitId: event.visit_id === null ? null : Number(event.visit_id),
+      visitDate: event.visit_date,
+      at: new Date(event.at),
+    });
+    historyById.set(id, history);
+  }
+  return historyById;
+}
+
+function isReopened(history: ConcernHistoryEntry[]): boolean {
+  return history.some((entry) => entry.kind === "reopened" || entry.kind === "auto_reopened");
+}
+
 // Most Visits first, then the most recent mention, then the lowest id (the School-wise tab's
 // top-recurring order).
 function compareCards(a: ConcernCard, b: ConcernCard): number {
@@ -376,37 +413,8 @@ export async function getSchoolConcernPage(
     );
 
   const concernIds = [...new Set(mentions.filter((row) => row.kind === "concern").map((row) => Number(row.id)))];
-  // inserted_at holds UTC in a timestamp without time zone.
-  const events = concernIds.length === 0
-    ? []
-    : await query<EventRow>(
-      `SELECT e.concern_id, e.kind, e.body, e.author_email,
-              ${permissionNameSql("e.author_email")} AS author_name,
-              e.visit_id, TO_CHAR(ev.visit_date, 'YYYY-MM-DD') AS visit_date,
-              e.inserted_at AT TIME ZONE 'UTC' AS at
-       FROM lms_visit_concern_events e
-       LEFT JOIN lms_pm_school_visits ev ON ev.id = e.visit_id
-       WHERE e.concern_id = ANY($1::bigint[])
-       ORDER BY e.inserted_at ASC, e.id ASC`,
-      [concernIds]
-    );
-
+  const historyById = await getConcernHistories(concernIds);
   const visitDateById = new Map(visits.map((visit) => [Number(visit.id), visit.visit_date]));
-  const historyById = new Map<number, ConcernHistoryEntry[]>();
-  for (const event of events) {
-    const id = Number(event.concern_id);
-    const history = historyById.get(id) ?? [];
-    history.push({
-      kind: event.kind,
-      body: event.body,
-      authorEmail: event.author_email,
-      authorName: event.author_name,
-      visitId: event.visit_id === null ? null : Number(event.visit_id),
-      visitDate: event.visit_date,
-      at: new Date(event.at),
-    });
-    historyById.set(id, history);
-  }
 
   const cardsById = new Map<number, ConcernCard>();
   const itemsByVisit = new Map<number, VisitNoteItem[]>();
@@ -421,7 +429,7 @@ export async function getSchoolConcernPage(
       status: mention.status,
       visitCount: 0,
       visitDates: [],
-      reopened: history.some((entry) => entry.kind === "reopened" || entry.kind === "auto_reopened"),
+      reopened: isReopened(history),
       history,
     };
     card.visitCount += 1;
@@ -457,4 +465,56 @@ export async function getSchoolConcernPage(
       };
     }),
   };
+}
+
+// The concern behind a Resolve / Comment / Reopen, when the actor can see it on the Visit Summary:
+// its School is inside the actor's summary scope and has an active physical Centre, and it has at
+// least one live mention. Null otherwise (also for a missing id), so a caller can't tell them apart.
+export async function findVisitSummaryConcern(
+  actor: VisitsActor,
+  concernId: number
+): Promise<{ id: number; schoolCode: string } | null> {
+  const scope = buildVisitSummaryScopePredicate(actor, {
+    startIndex: 2,
+    schoolCodeColumn: "s.code",
+    schoolRegionColumn: "s.region",
+  });
+  const rows = await query<{ id: string | number; school_code: string }>(
+    `SELECT c.id, c.school_code
+     FROM lms_visit_concerns c
+     JOIN school s ON s.code = c.school_code
+     WHERE c.id = $1
+       AND EXISTS (
+         SELECT 1 FROM centres ce
+         WHERE ce.school_id = s.id AND ce.is_physical AND ce.is_active
+       )
+       AND EXISTS (
+         SELECT 1 FROM lms_visit_concern_mentions m
+         JOIN lms_pm_school_visits v ON v.id = m.visit_id
+         WHERE m.concern_id = c.id AND v.status = 'completed' AND v.deleted_at IS NULL
+       )
+       ${scope.clause ? `AND ${scope.clause}` : ""}
+     LIMIT 1`,
+    [concernId, ...scope.params]
+  );
+  const row = rows[0];
+  return row ? { id: Number(row.id), schoolCode: row.school_code } : null;
+}
+
+export interface ConcernCardState {
+  id: number;
+  status: "open" | "resolved" | null;
+  reopened: boolean;
+  history: ConcernHistoryEntry[];
+}
+
+// A concern's current status and history, as the events API returns it after a write.
+export async function getConcernCardState(concernId: number): Promise<ConcernCardState | null> {
+  const [concern] = await query<{ id: string | number; status: "open" | "resolved" | null }>(
+    `SELECT id, status FROM lms_visit_concerns WHERE id = $1`,
+    [concernId]
+  );
+  if (!concern) return null;
+  const history = (await getConcernHistories([concernId])).get(concernId) ?? [];
+  return { id: Number(concern.id), status: concern.status, reopened: isReopened(history), history };
 }

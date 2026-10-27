@@ -730,6 +730,112 @@ test.describe("School Visit Summary — School page concerns", () => {
   });
 });
 
+// Concern Resolution fixture: e2e/fixtures/migrations/20261027140500_seed_visit_concern_resolution_fixture.sql.
+// These tests write history at VSWCONE only, and run in order (Comment needs the concern resolved
+// before Reopen opens it).
+const ECHO_PAGE = "/school-visit-summary/schools/VSWCONE";
+const READ_ONLY_USER = { name: "VSW Read Only", email: "e2e-vsw-readonly@test.local" };
+
+function concernCard(page: Page, section: string, text: string) {
+  return cards(page, section).filter({ hasText: text });
+}
+
+test.describe.serial("School Visit Summary — School page concern actions", () => {
+  test("Resolve moves an open concern to Resolved with the explanation in its history", async ({ adminPage }) => {
+    await adminPage.goto(ECHO_PAGE);
+    const card = concernCard(adminPage, "Needs attention", "Drinking water tank leaking");
+
+    await card.getByRole("button", { name: "Resolve" }).click();
+    await card.getByRole("textbox", { name: "How was this resolved?" }).fill("  Plumber fixed the tank  ");
+    await card.getByRole("button", { name: "Save resolution" }).click();
+
+    await expect(concernCard(adminPage, "Needs attention", "Drinking water tank leaking")).toHaveCount(0);
+    await expandResolved(adminPage);
+    const resolved = concernCard(adminPage, "Resolved concerns", "Drinking water tank leaking");
+    await expect(resolved).toContainText("Resolved by e2e-admin@test.local on");
+    const history = resolved.getByRole("listitem");
+    await expect(history).toHaveCount(1);
+    await expect(history.first()).toContainText("Resolved · e2e-admin@test.local");
+    await expect(history.first()).toContainText("Plumber fixed the tank");
+  });
+
+  test("Comment adds to a resolved concern's history without changing its status", async ({ adminPage }) => {
+    await adminPage.goto(ECHO_PAGE);
+    await expandResolved(adminPage);
+    const card = concernCard(adminPage, "Resolved concerns", "Hostel lights not working");
+
+    await card.getByRole("button", { name: "Comment" }).click();
+    await card.getByRole("textbox", { name: "Comment" }).fill("Lights checked on the next visit");
+    await card.getByRole("button", { name: "Add comment" }).click();
+
+    const history = card.getByRole("listitem");
+    await expect(history).toHaveCount(2);
+    await expect(history.nth(1)).toContainText("Comment · e2e-admin@test.local");
+    await expect(history.nth(1)).toContainText("Lights checked on the next visit");
+    await expect(concernCard(adminPage, "Needs attention", "Hostel lights not working")).toHaveCount(0);
+  });
+
+  test("Reopen moves a resolved concern back to Needs attention, marked reopened, with the reason", async ({ adminPage }) => {
+    await adminPage.goto(ECHO_PAGE);
+    await expandResolved(adminPage);
+    const resolvedCard = concernCard(adminPage, "Resolved concerns", "Hostel lights not working");
+
+    await resolvedCard.getByRole("button", { name: "Reopen" }).click();
+    await resolvedCard.getByRole("textbox", { name: "Why reopen this concern?" }).fill("Lights failed again");
+    await resolvedCard.getByRole("button", { name: "Reopen concern" }).click();
+
+    const card = concernCard(adminPage, "Needs attention", "Hostel lights not working");
+    await expect(card).toHaveCount(1);
+    await expect(card.getByText("reopened", { exact: true })).toBeVisible();
+    await expect(concernCard(adminPage, "Resolved concerns", "Hostel lights not working")).toHaveCount(0);
+    await card.getByText("History (3)").click();
+    const history = card.getByRole("listitem");
+    await expect(history.nth(2)).toContainText("Reopened · e2e-admin@test.local");
+    await expect(history.nth(2)).toContainText("Lights failed again");
+  });
+
+  test("a failed save shows the error and keeps the typed text", async ({ adminPage }) => {
+    await adminPage.goto(ECHO_PAGE);
+    const card = concernCard(adminPage, "Needs attention", "Exam timetable not shared");
+    await card.getByRole("button", { name: "Resolve" }).click();
+    const note = card.getByRole("textbox", { name: "How was this resolved?" });
+
+    // Too long: refused before saving.
+    const tooLong = "x".repeat(2001);
+    await note.fill(tooLong);
+    await card.getByRole("button", { name: "Save resolution" }).click();
+    await expect(card.getByRole("alert")).toHaveText("Note must be at most 2000 characters");
+    await expect(note).toHaveValue(tooLong);
+
+    // Someone else resolved it after the page loaded: the API's 409 shows, and the text stays.
+    await withPool((pool) =>
+      pool.query("UPDATE lms_visit_concerns SET status = 'resolved' WHERE id = 9004815")
+    );
+    await note.fill("Timetable shared on the notice board");
+    await card.getByRole("button", { name: "Save resolution" }).click();
+    await expect(card.getByRole("alert")).toHaveText("This concern is already resolved");
+    await expect(note).toHaveValue("Timetable shared on the notice board");
+    await expect(card.getByRole("button", { name: "Save resolution" })).toBeEnabled();
+  });
+
+  test("a read_only user sees concerns and history but no controls, and a direct POST is refused", async ({ page }) => {
+    await signInAs(page, READ_ONLY_USER);
+    await page.goto(ECHO_PAGE);
+
+    await expect(concernCard(page, "Needs attention", "Hostel lights not working")).toHaveCount(1);
+    await expandResolved(page);
+    await expect(concernCard(page, "Resolved concerns", "Drinking water tank leaking")).toContainText("Plumber fixed the tank");
+    for (const name of ["Resolve", "Comment", "Reopen"]) {
+      await expect(page.getByRole("button", { name, exact: true })).toHaveCount(0);
+    }
+
+    const res = await page.request.post("/api/visit-concerns/9004814/events", {
+      data: { action: "resolve", body: "Trying anyway" },
+    });
+    expect(res.status()).toBe(403);
+  });
+});
+
 test.describe("Visit Concern storage", () => {
   test("concern history is append-only: a direct UPDATE or DELETE of an event fails", async () => {
     await withPool(async (pool) => {

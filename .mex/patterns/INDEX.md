@@ -1,6 +1,6 @@
 ---
 name: pattern-index
-last_updated: 2026-10-22
+last_updated: 2026-10-27
 ---
 
 # Pattern Index
@@ -43,6 +43,7 @@ Lookup table for all pattern files in this directory. Check here before starting
 | [deploy-staging-pr.md](deploy-staging-pr.md) | Setting up a reviewed LMS PR on shared staging for QA |
 | [holistic-privacy-erasure.md](holistic-privacy-erasure.md) | Extending Holistic privacy erasure across immutable content and audit tables |
 | [load-blended-learning-links.md](load-blended-learning-links.md) | Loading or refreshing Blended Learning Profile Doc / Screener Links (and the optional legacy last-contact date from Profile Docs) from the Profile Dashboard workbook |
+| [lms-owned-history-write.md](lms-owned-history-write.md) | Writing to an LMS-owned append-only history table (flag updates, Visit Concern events): lock, check, change status, append, in one transaction |
 | [local-browser-qa.md](local-browser-qa.md) | Running a PR branch from a worktree on a spare port and QA-ing it in headless Chromium |
 | [local-enrollment-repair.md](local-enrollment-repair.md) | Rehearsing audit-derived enrollment repairs on a dedicated local snapshot |
 | [mirror-db-service-schema-in-e2e.md](mirror-db-service-schema-in-e2e.md) | Mirroring db-service tables missing from `db-dump.sql` into an e2e fixture migration, proven identical by `pg_dump` diff |

@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 import { Badge, Card } from "@/components/ui";
+import { ConcernActions } from "@/components/visits/ConcernActions";
 import type {
   ConcernCard,
   ConcernHistoryEntry,
@@ -12,8 +13,9 @@ import type {
 import { formatCompactVisitDates } from "@/lib/visit-summary";
 
 // The School page's concern sections (#470): Needs attention, Going well, Resolved concerns
-// (collapsed) and Visit-wise notes (collapsible). Read-only. Every text is stored text and renders
-// as text. `today` decides the compact dates' year rule.
+// (collapsed) and Visit-wise notes (collapsible). Every text is stored text and renders as text.
+// `today` decides the compact dates' year rule. `canAct` (visits edit, the rule the events API
+// enforces) adds Resolve on open concerns and Comment / Reopen on resolved ones.
 
 function formatDate(value: string | Date): string {
   return new Date(value).toLocaleDateString("en-IN", {
@@ -117,7 +119,7 @@ function EmptyState({ children }: { children: ReactNode }) {
   return <p className="text-sm text-text-muted">{children}</p>;
 }
 
-function NeedsAttention({ cards, today }: { cards: ConcernCard[]; today: Date }) {
+function NeedsAttention({ cards, today, canAct }: { cards: ConcernCard[]; today: Date; canAct: boolean }) {
   return (
     <Card elevation="sm" className="p-4">
       <section aria-labelledby="needs-attention-heading" className="space-y-3">
@@ -140,6 +142,7 @@ function NeedsAttention({ cards, today }: { cards: ConcernCard[]; today: Date })
                   <HistoryList history={card.history} />
                 </details>
               )}
+              {canAct && <ConcernActions concernId={card.id} status="open" />}
             </ConcernCardView>
           ))
         )}
@@ -169,7 +172,7 @@ function latestResolution(card: ConcernCard): ConcernHistoryEntry | undefined {
   return card.history.filter((entry) => entry.kind === "resolved").at(-1);
 }
 
-function ResolvedConcerns({ cards, today }: { cards: ConcernCard[]; today: Date }) {
+function ResolvedConcerns({ cards, today, canAct }: { cards: ConcernCard[]; today: Date; canAct: boolean }) {
   return (
     <Card elevation="sm" className="p-4">
       <section aria-labelledby="resolved-heading">
@@ -191,6 +194,7 @@ function ResolvedConcerns({ cards, today }: { cards: ConcernCard[]; today: Date 
                       </p>
                     )}
                     <HistoryList history={card.history} />
+                    {canAct && <ConcernActions concernId={card.id} status="resolved" />}
                   </ConcernCardView>
                 );
               })
@@ -267,13 +271,21 @@ function VisitWiseNotes({ visits }: { visits: VisitNotes[] }) {
   );
 }
 
-export function SchoolConcernSections({ page, today }: { page: SchoolConcernPage; today: Date }) {
+export function SchoolConcernSections({
+  page,
+  today,
+  canAct,
+}: {
+  page: SchoolConcernPage;
+  today: Date;
+  canAct: boolean;
+}) {
   return (
     <>
-      <NeedsAttention cards={page.needsAttention} today={today} />
+      <NeedsAttention cards={page.needsAttention} today={today} canAct={canAct} />
       {/* The Intervention flags section goes here (#470 flags-section slice). */}
       <GoingWell cards={page.goingWell} today={today} />
-      <ResolvedConcerns cards={page.resolved} today={today} />
+      <ResolvedConcerns cards={page.resolved} today={today} canAct={canAct} />
       <VisitWiseNotes visits={page.visitNotes} />
     </>
   );

@@ -72,7 +72,8 @@ export default async function SchoolVisitSummarySchoolPage({ params, searchParam
     redirect("/dashboard");
   }
 
-  if (!getFeatureAccess(permission, "visits").canView) {
+  const visitsAccess = getFeatureAccess(permission, "visits");
+  if (!visitsAccess.canView) {
     redirect("/dashboard");
   }
 
@@ -115,7 +116,8 @@ export default async function SchoolVisitSummarySchoolPage({ params, searchParam
           <TeachersLine groups={teacherGroups} />
         </Card>
 
-        <SchoolConcernSections page={concernPage} today={new Date()} />
+        {/* Resolve / Comment / Reopen follow the rule the events API enforces: visits edit. */}
+        <SchoolConcernSections page={concernPage} today={new Date()} canAct={visitsAccess.canEdit} />
       </main>
     </div>
   );
