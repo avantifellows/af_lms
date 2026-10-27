@@ -48,15 +48,20 @@ export function getBigQueryClient(): BigQuery {
 
 // --- Performance tab functions ---
 
-const FACT_TABLE = "`avantifellows.production_dbt_final.fact_student_test_results_overall`";
-const DIM_STUDENT_TABLE = "`avantifellows.production_dbt_final.dim_student`";
-const FACT_QUESTION_LEVEL_TABLE =
+export const FACT_TABLE = "`avantifellows.production_dbt_final.fact_student_test_results_overall`";
+export const DIM_STUDENT_TABLE = "`avantifellows.production_dbt_final.dim_student`";
+export const FACT_QUESTION_LEVEL_TABLE =
   "`avantifellows.production_dbt_final.fact_student_test_results_question_level`";
 
 // An abandoned attempt still carries an academic_level, which would credit the
 // student with a level for a test they never submitted. NOT FALSE rather than
 // = TRUE: null means unknown (no test-level row upstream), not unsubmitted.
-const SUBMITTED_ONLY = "AND has_quiz_ended IS NOT FALSE";
+export const SUBMITTED_ONLY = "AND has_quiz_ended IS NOT FALSE";
+
+// The students a chapter-test card counts: overall rows, submitted, and in the
+// test's own stream when it has one. The chapter-test report uses the same rule.
+const CHAPTER_CARD_COHORT =
+  "section = 'overall' AND has_quiz_ended IS NOT FALSE AND (test_stream IS NULL OR student_stream = test_stream)";
 
 // Test formats that count as "major" (i.e. the Full Tests tab) — these also have
 // real Academic Level (AL) values populated on the section='overall' row.
@@ -222,10 +227,18 @@ export async function getBatchOverviewData(
       MIN(start_date) AS start_date,
       COUNT(DISTINCT enrollment_user_id) AS student_count,
       COUNT(DISTINCT CASE WHEN student_stream = test_stream THEN enrollment_user_id END) AS stream_student_count,
+      -- The chapter-test card's "appeared" and averages (and the report's):
+      -- submitted, in the test's stream when it has one.
+      COUNT(DISTINCT IF(${CHAPTER_CARD_COHORT}, enrollment_user_id, NULL)) AS appeared_count,
       MAX(test_format) AS test_format,
       MAX(test_stream) AS test_stream,
       MAX(test_grade) AS test_grade,
-      ARRAY_AGG(DISTINCT section IGNORE NULLS) AS sections
+      ARRAY_AGG(DISTINCT section IGNORE NULLS) AS sections,
+      AVG(IF(${CHAPTER_CARD_COHORT}, attempt_rate, NULL)) AS avg_attempt_rate,
+      AVG(IF(${CHAPTER_CARD_COHORT}, accuracy, NULL)) AS avg_accuracy,
+      AVG(IF(${CHAPTER_CARD_COHORT}, percentage, NULL)) AS avg_score,
+      MAX(cms_test_id) AS cms_test_id,
+      MAX(test_course) AS test_course
     FROM ${FACT_TABLE}
     WHERE student_school_udise_code = @udise
       AND student_grade = @grade
@@ -265,11 +278,19 @@ export async function getBatchOverviewData(
     start_date: string;
     student_count: number;
     stream_student_count: number;
+    appeared_count: number;
     test_format: string | null;
     test_stream: string | null;
     test_grade: number | null;
     sections: string[] | null;
+    avg_attempt_rate: number | null;
+    avg_accuracy: number | null;
+    avg_score: number | null;
+    cms_test_id: string | null;
+    test_course: string | null;
   }
+
+  const round1 = (v: number | null) => (v == null ? null : Math.round(Number(v) * 10) / 10);
 
   const tests: TestTrendPoint[] = (testRows[0] as RawTestRow[]).map((r) => {
     const subjectSections = (r.sections || []).filter(
@@ -281,10 +302,17 @@ export async function getBatchOverviewData(
       start_date: r.start_date,
       student_count: r.student_count,
       stream_student_count: r.stream_student_count,
+      appeared_count: r.appeared_count,
       test_format: r.test_format,
       test_stream: r.test_stream,
       test_grade: r.test_grade != null ? Number(r.test_grade) : null,
       subjects: subjectSections,
+      avg_attempt_rate: round1(r.avg_attempt_rate),
+      avg_accuracy: round1(r.avg_accuracy),
+      avg_score: round1(r.avg_score),
+      cms_test_id: r.cms_test_id,
+      exam: r.test_course,
+      chapter: null,
     };
   });
 

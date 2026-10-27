@@ -47,7 +47,7 @@ interface BatchOverviewProps {
     subjects: string[];
     testGrades: number[];
   }) => void;
-  onTestClick?: (sessionId: string, testName: string) => void;
+  onTestClick?: (sessionId: string, testName: string, testFormat?: string | null) => void;
 }
 
 let lastBatchOverviewProps: BatchOverviewProps | null = null;
@@ -71,6 +71,7 @@ vi.mock("./performance/BatchOverview", () => ({
         BatchOverview: udise={props.schoolUdise}, grade={props.grade}, category={props.testCategory}, program={props.program ?? "none"}, stream={props.stream ?? "none"}, subject={props.subject ?? "none"}, testGrade={props.testGrade ?? "none"}
         <button onClick={() => props.onTestClick?.("sess-a", "Test A")}>Open Test A</button>
         <button onClick={() => props.onTestClick?.("sess-b", "Test B")}>Open Test B</button>
+        <button onClick={() => props.onTestClick?.("sess-h", "Homework H", "homework")}>Open Homework H</button>
       </div>
     );
   },
@@ -481,6 +482,19 @@ describe("PerformanceTab", () => {
       // Switching to full (the default) should drop the category param
       expect(mockPush).toHaveBeenLastCalledWith("?grade=11", { scroll: false });
     });
+  });
+
+  it("opens homework from the chapter overview in the general report, without loading the chapter report", async () => {
+    mockSearchParams = new URLSearchParams("category=chapter");
+    const fetchMock = mockGradesResponse([11], ["JNV CoE"]);
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<PerformanceTab schoolUdise="12345" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Open Homework H" }));
+
+    expect(await screen.findByTestId("test-deep-dive")).toBeInTheDocument();
+    const urls = fetchMock.mock.calls.map((c: unknown[]) => String(c[0]));
+    expect(urls.some((url: string) => url.includes("chapter-test-report"))).toBe(false);
   });
 
   it("renders Per Test/Cumulative sub-tab on Full Tests, and switches to CumulativeALTable", async () => {
