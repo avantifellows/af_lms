@@ -5,6 +5,7 @@ import {
   DIM_STUDENT_TABLE,
   FACT_QUESTION_LEVEL_TABLE,
   FACT_TABLE,
+  SESSION_PARTITION,
   SUBMITTED_ONLY,
   getBigQueryClient,
 } from "@/lib/bigquery";
@@ -21,11 +22,6 @@ const DIM_TEST_TABLE = "`avantifellows.production_dbt_final.dim_test`";
 const DIM_CHAPTER_TABLE = "`avantifellows.production_dbt_final.dim_chapter`";
 const DIM_TOPIC_TABLE = "`avantifellows.production_dbt_final.dim_topic`";
 const BRIDGE_QUESTION_TOPIC_TABLE = "`avantifellows.production_dbt_final.bridge_question_topic`";
-
-// The question-level fact is range-partitioned on hashed_session_id, computed by
-// the quiz ETL as below. Filtering on it reads one partition (~10 MB) instead of
-// the whole table (~2.4 GB) — clustering on session_id alone does not prune.
-const SESSION_PARTITION = "hashed_session_id = MOD(ABS(FARM_FINGERPRINT(@sessionId)), 4000) + 1";
 
 // The report counts only students in the test's own stream (a JEE test's
 // engineering students) whenever the test has one, so "X appeared", the averages,
@@ -54,6 +50,7 @@ function scopeFilters(scope: SessionScope) {
       student_school_udise_code = @udise
       AND student_grade = @grade
       AND session_id = @sessionId
+      AND ${SESSION_PARTITION}
       AND academic_year = '${CURRENT_ACADEMIC_YEAR}'
       ${SUBMITTED_ONLY}
       ${IN_TEST_STREAM}
@@ -87,8 +84,7 @@ export async function getSessionQuestionStats(scope: SessionScope): Promise<Ques
         COUNTIF(is_answered = FALSE) AS skipped,
         AVG(SAFE_CAST(time_spent AS FLOAT64)) AS avg_time_seconds
       FROM ${FACT_QUESTION_LEVEL_TABLE}
-      WHERE ${SESSION_PARTITION}
-        AND question_id IS NOT NULL
+      WHERE question_id IS NOT NULL
         AND ${where}
       GROUP BY question_id
     ),

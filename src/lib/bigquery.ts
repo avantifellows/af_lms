@@ -58,6 +58,16 @@ export const FACT_QUESTION_LEVEL_TABLE =
 // = TRUE: null means unknown (no test-level row upstream), not unsubmitted.
 export const SUBMITTED_ONLY = "AND has_quiz_ended IS NOT FALSE";
 
+// The results facts are partitioned on hashed_session_id, which the quiz ETL
+// derives from session_id alone: abs(farmhash fingerprint64) % 4000 + 1, the
+// same hash as BigQuery's FARM_FINGERPRINT. A filter on session_id alone reads
+// every partition (clustering on session_id alone does not prune); adding
+// this one reads only the session's. Measured on a question-level read:
+// 945 MB -> 10 MB billed, same rows. Use it wherever a query has @sessionId
+// and reads a results fact.
+export const SESSION_PARTITION =
+  "hashed_session_id = MOD(ABS(FARM_FINGERPRINT(@sessionId)), 4000) + 1";
+
 // The students a chapter-test card counts: overall rows, submitted, and in the
 // test's own stream when it has one. The chapter-test report uses the same rule.
 const CHAPTER_CARD_COHORT =
@@ -546,6 +556,7 @@ export async function getTestQuestionLevelData(
     WHERE student_school_udise_code = @udise
       AND student_grade = @grade
       AND session_id = @sessionId
+      AND ${SESSION_PARTITION}
       AND academic_year = '${CURRENT_ACADEMIC_YEAR}'
       AND question_id IS NOT NULL
       ${SUBMITTED_ONLY}
@@ -636,6 +647,7 @@ export async function getStudentQuestionLevelData(
     WHERE student_school_udise_code = @udise
       AND student_grade = @grade
       AND session_id = @sessionId
+      AND ${SESSION_PARTITION}
       AND academic_year = '${CURRENT_ACADEMIC_YEAR}'
       AND question_id IS NOT NULL
       AND enrollment_user_id IS NOT NULL
@@ -726,6 +738,7 @@ export async function getStudentTimeSpentData(
     WHERE student_school_udise_code = @udise
       AND student_grade = @grade
       AND session_id = @sessionId
+      AND ${SESSION_PARTITION}
       AND academic_year = '${CURRENT_ACADEMIC_YEAR}'
       AND enrollment_user_id IS NOT NULL
       ${programFilter}
@@ -784,6 +797,7 @@ export async function isSessionOnlyForProgram(
     FROM ${FACT_TABLE}
     WHERE student_school_udise_code = @udise
       AND session_id = @sessionId
+      AND ${SESSION_PARTITION}
   `;
   const [rows] = await client.query({
     query: sql,
