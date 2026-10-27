@@ -38,6 +38,7 @@ Then read this file fully before doing anything else in this session.
 ## Current Project State
 
 **Working:**
+- Chapter-test screens for physical centres (feature branch `feat/chapter-test-reports`, task lms-chapter-reports; not merged). The Chapter tests overview shows chapter-test cards, and a chapter test's report is the chapter-test report: overview, topic and difficulty insights, per-question breakdown with question text from the CMS (KaTeX), rankings, gender split and other centres on the same test. Student Results stays. JNV NVS is unchanged. See `context/data-access.md` §3.
 - The Enrollment tab has a **Data completeness** table for physical centres (issue #468), in place of
   the Admission row. Three rows — Info (ten profile fields), Documents (all seven types) and Exams
   (one chip per exam the Board Stream calls for) — each with a slot-based percentage, a thin meter

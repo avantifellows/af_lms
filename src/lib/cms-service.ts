@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireQuizSessionRequestAccess } from "@/lib/quiz-session-access";
 
-function getCmsServiceConfig() {
+export function getCmsServiceConfig() {
   const url = process.env.CMS_SERVICE_URL?.trim();
   const token = process.env.CMS_SERVICE_TOKEN?.trim();
   return url && token ? { url: url.replace(/\/$/, ""), token } : null;

@@ -87,6 +87,28 @@ if (!res.ok) { const text = await res.text(); /* surface upstream error */ }
 - **Deep-dive response ownership (#393):** `TestDeepDive` aborts an obsolete request and also marks its lifecycle inactive, so a fetch implementation that resolves or rejects after abort cannot publish stale report data, errors, loading state, or the report-name callback over the current session.
 - **NVS Time Spent (#357):** `getStudentTimeSpentData()` reads `MAX(total_time_spent)` (INT64 seconds) from `fact_student_test_results_overall`, grouped by `enrollment_user_id` + `LOWER(section)`. Its filters are the same as `getStudentQuestionLevelData` (udise, student grade, session, current year, optional program/stream, `enrollment_user_id IS NOT NULL`). It returns `Map<id, { overall, bySection }>`. The `test-deep-dive` route calls it only when `isNvsProgram(program)`, in parallel with the DynamoDB read, and merges `time_spent_seconds` onto each student (overall) and each subject score (`subject.toLowerCase()`). Unmatched students get null. If the lookup fails, the route logs only the error message and returns the deep dive with null times; DynamoDB failures still return 500/404. `StudentResultsTable` shows a sortable "Time Spent (min)" column after Attempt Rate (`Math.round(s/60)` or "—", nulls last in both directions), a subject-row time cell, and a blank chapter cell. Non-NVS payloads have no time fields.
 
+- **Chapter-test report (physical centres, lms-chapter-reports):** opening a single-chapter test (`test_format = chapter_test`) from the Chapter tests overview (`category=chapter`, not JNV NVS) renders `ChapterTestReport` instead of the general stats and analysis; Student Results and the combined reports are kept.
+  - **Which report:** the card passes its `test_format` through `onTestClick`, so combined chapter tests and homework open the general report directly. A report reached by URL has no format yet: the chapter report loads and shows its `fallback` (the general report) when the session is not a `chapter_test`. Any load error (including 404 "no results") also shows the fallback, never a bare error.
+  - **Data:** `GET /api/quiz-analytics/[udise]/chapter-test-report` (`getChapterTestReport` in `src/lib/question-analytics.ts`; 403 when the `program` sent is JNV NVS). It reads:
+    - per-question stats from the question-level fact, **filtered on its partition column** `hashed_session_id = MOD(ABS(FARM_FINGERPRINT(@sessionId)), 4000) + 1` (10 MB instead of 2.4 GB);
+    - topics from `bridge_question_topic` + `dim_topic` (a question with several topics counts under each);
+    - overview and gender split from `fact_student_test_results_overall` (section `overall`, submitted only; class figures are combined from unrounded slices, accuracy weighted by `COUNT(accuracy)` since a student who attempted nothing has none);
+    - **one cohort for every number:** when the test has a stream, only students in it count (`IN_TEST_STREAM`: `test_stream IS NULL OR student_stream = test_stream`), in the overview, gender split, per-question stats and comparison rows alike. "X of Y appeared": X = those students who submitted; Y = enrolled in that stream. The card uses the same rule (`CHAPTER_CARD_COHORT` in `bigquery.ts` for `appeared_count` and its averages);
+    - enrolled from `dim_student` in the test's stream;
+    - other Schools on the same `cms_test_id` (`getSchoolComparison`): same grade, same stream filter, and programs of the same model as this School's (CoEs with CoEs, Nodals with Nodals, `comparisonPrograms`); any other program gets no comparison. This School's row is replaced by the overview cohort;
+    - chapter and priority from `dim_test` → `dim_chapter`.
+  - **Aggregation** (by topic and difficulty; rankings) is pure and client-safe in `src/lib/question-aggregates.ts`, meant for reuse by Teacher View v2 (#324).
+  - **Question content** comes from the CMS, never from Postgres: `GET /api/quiz-analytics/[udise]/question-content?grade&sessionId&program&stream&questionId` looks the CMS test up from the session server-side (`getSessionCmsTest`), then fetches `/api/service/test` with `CMS_SERVICE_TOKEN` and returns one question. `QuestionContentView` sanitises it with DOMPurify and renders the maths with KaTeX.
+  - **PDFs:** `GET /api/quiz-analytics/[udise]/test-pdf` serves the paper and answer key through `serveCmsTestPdf` (`src/lib/cms-test-pdf.ts`, shared with `/api/cms/test-pdf`).
+  - **Gating:** both content routes are gated on Performance access to the School, not quiz-session access.
+- **Chapter-test cards:** on the Chapter tests overview (not JNV NVS), `BatchOverview` renders `ChapterTestCard`, matching the chapter-test report index exactly:
+  - "code – chapter · subject" title, exam, priority;
+  - "Grade · date · X of Y students appeared" (X = `appeared_count`: submitted, in the test's stream; the card's averages use the same students);
+  - Attempt / Accuracy / Score;
+  - no attendance block and no summary stat cards.
+  - `getBatchOverviewData` adds per-test `avg_attempt_rate` / `avg_accuracy` / `avg_score` (overall rows, submitted only), `cms_test_id` and `exam` (test_course).
+  - The batch-overview route adds `chapter` for new-CMS chapter tests from `dim_test` → `dim_chapter` (`getCmsTestChapters`). A failed lookup leaves the cards on the test name. Old-CMS tests (combined chapter tests still are, e.g. 2026-10-18) have no chapter.
+
 ## 4. DynamoDB — performance dashboard reads (read-only)
 `src/lib/dynamodb.ts`, lazy singleton via `@aws-sdk/lib-dynamodb` `DynamoDBDocumentClient`. Holds test deep-dive reports keyed by school student identifiers (cross-referenced against Postgres rosters). Read-only.
 

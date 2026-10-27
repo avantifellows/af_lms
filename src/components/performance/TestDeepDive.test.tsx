@@ -132,3 +132,28 @@ describe("TestDeepDive request lifecycle", () => {
     await waitFor(() => expect(screen.getByText("Report B")).toBeInTheDocument());
   });
 });
+
+describe("TestDeepDive studentsOnly", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("shows only Student Results: no stat cards and no afterStats slot", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.resolve({ ok: true, json: async () => deepDive("Chapter test") }))
+    );
+    render(
+      <TestDeepDive
+        schoolUdise="2332"
+        grade={12}
+        sessionId="s1"
+        studentsOnly
+        afterStats={<div>combined reports</div>}
+      />
+    );
+    expect(await screen.findByText("Chapter test")).toBeInTheDocument();
+    expect(screen.queryByText("Avg Score")).not.toBeInTheDocument();
+    expect(screen.queryByText("combined reports")).not.toBeInTheDocument();
+  });
+});
