@@ -8,7 +8,7 @@ import VisitSummaryFilterBar from "@/components/visits/VisitSummaryFilterBar";
 import { Card } from "@/components/ui";
 import { authOptions } from "@/lib/auth";
 import { query } from "@/lib/db";
-import { getFeatureAccess, getResolvedPermission, type UserPermission } from "@/lib/permissions";
+import { getFeatureAccess, getResolvedPermission } from "@/lib/permissions";
 import {
   ACTION_TYPES,
   ACTION_TYPE_VALUES,
@@ -18,14 +18,22 @@ import {
   type ActionType,
 } from "@/lib/visit-actions";
 import {
-  resolvePresetDateRange,
   rollupActionTypes,
   type ActionTypeRollupStatus,
 } from "@/lib/visit-summary";
 import {
-  buildVisitSummaryScopePredicate,
+  buildVisitSummaryWhere,
+  getVisitSummaryPmOptions,
+  getVisitSummarySchoolOptions,
+  normalizeVisitSummaryFilters,
+  type PmFilterOption,
+  type SchoolFilterOption,
+  type VisitSummaryFilters,
+} from "@/lib/visit-summary-scope";
+import {
   buildVisitsActor,
   canViewVisitSummary,
+  type VisitsActor,
 } from "@/lib/visits-policy";
 
 const VISITS_PER_PAGE = 20;
@@ -82,16 +90,6 @@ interface VisitActionSummary {
   rollup: Record<ActionType, ActionTypeRollupStatus>;
 }
 
-interface SchoolFilterOption {
-  code: string;
-  name: string;
-}
-
-interface PmFilterOption {
-  email: string;
-  name: string | null;
-}
-
 interface SummaryResult {
   visits: SummaryVisit[];
   stats: SummaryStats;
@@ -122,21 +120,7 @@ interface PageProps {
 
 type SortKey = "visit_date" | "school_name" | "pm_email" | "status" | "inserted_at" | "completed_at";
 type SortDirection = "asc" | "desc";
-type VisitSummaryStatusFilter = "in_progress" | "completed";
-type FilterExclusion = "schools" | "pms";
-type ActionCompletionBucketFilter = "none" | "partial" | "all_present" | "all_complete";
 type SummarySearchParams = Record<string, string | undefined>;
-
-interface VisitSummaryFilters {
-  schools: string[];
-  pms: string[];
-  status?: VisitSummaryStatusFilter;
-  from?: string;
-  to?: string;
-  preset?: string;
-  bucket?: ActionCompletionBucketFilter;
-  forceEmpty: boolean;
-}
 
 const SORT_COLUMNS: Record<SortKey, { sql: string; defaultDir: SortDirection }> = {
   visit_date: { sql: "v.visit_date", defaultDir: "desc" },
@@ -163,50 +147,6 @@ function normalizeSort(sortParam?: string, dirParam?: string): { sort: SortKey; 
 function normalizePage(pageParam?: string): number {
   const parsed = Number.parseInt(pageParam || "1", 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
-}
-
-function parseListFilter(value: string | undefined, transform: (item: string) => string = (item) => item): string[] {
-  return (value || "")
-    .split(",")
-    .map((item) => transform(item.trim()))
-    .filter(Boolean);
-}
-
-function isDateString(value: string | undefined): value is string {
-  return Boolean(value && /^\d{4}-\d{2}-\d{2}$/.test(value));
-}
-
-function normalizeFilters(searchParams: {
-  schools?: string;
-  pms?: string;
-  status?: string;
-  from?: string;
-  to?: string;
-  preset?: string;
-  bucket?: string;
-}): VisitSummaryFilters {
-  const presetRange = resolvePresetDateRange(searchParams.preset, new Date());
-  const manualFrom = isDateString(searchParams.from) ? searchParams.from : undefined;
-  const manualTo = isDateString(searchParams.to) ? searchParams.to : undefined;
-  const from = presetRange?.from ?? manualFrom;
-  const to = presetRange?.to ?? manualTo;
-
-  return {
-    schools: parseListFilter(searchParams.schools),
-    pms: parseListFilter(searchParams.pms, (item) => item.toLowerCase()),
-    status: searchParams.status === "in_progress" || searchParams.status === "completed"
-      ? searchParams.status
-      : undefined,
-    from,
-    to,
-    preset: presetRange || searchParams.preset === "all" ? searchParams.preset : undefined,
-    bucket: isActionCompletionBucket(searchParams.bucket) ? searchParams.bucket : undefined,
-    forceEmpty: Boolean(from && to && from > to),
-  };
-}
-
-function isActionCompletionBucket(value: string | undefined): value is ActionCompletionBucketFilter {
-  return value === "none" || value === "partial" || value === "all_present" || value === "all_complete";
 }
 
 function formatDate(value: string): string {
@@ -273,97 +213,6 @@ function formatDuration(visit: SummaryVisit, now = new Date()): string {
   return `${hours}h ${minutes}m`;
 }
 
-function buildWhereClause(
-  permission: UserPermission,
-  actorEmail: string,
-  filters: VisitSummaryFilters = { schools: [], pms: [], forceEmpty: false },
-  startIndex = 1,
-  exclude?: FilterExclusion
-): { whereSql: string; joinSql: string; params: unknown[] } {
-  const actor = buildVisitsActor(actorEmail, permission);
-  const predicates = ["v.deleted_at IS NULL"];
-  const joins: string[] = [];
-  const params: unknown[] = [];
-  let nextIndex = startIndex;
-
-  if (filters.forceEmpty) {
-    predicates.push("1 = 0");
-  }
-
-  if (exclude !== "schools" && filters.schools.length > 0) {
-    predicates.push(`v.school_code = ANY($${nextIndex})`);
-    params.push(filters.schools);
-    nextIndex += 1;
-  }
-
-  if (exclude !== "pms" && filters.pms.length > 0) {
-    predicates.push(`LOWER(v.pm_email) = ANY($${nextIndex})`);
-    params.push(filters.pms);
-    nextIndex += 1;
-  }
-
-  if (filters.status) {
-    predicates.push(`v.status = $${nextIndex}`);
-    params.push(filters.status);
-    nextIndex += 1;
-  }
-
-  if (filters.from) {
-    predicates.push(`v.visit_date >= $${nextIndex}`);
-    params.push(filters.from);
-    nextIndex += 1;
-  }
-
-  if (filters.to) {
-    predicates.push(`v.visit_date <= $${nextIndex}`);
-    params.push(filters.to);
-    nextIndex += 1;
-  }
-
-  if (filters.bucket) {
-    const knownTypesIndex = nextIndex;
-    joins.push(
-      `LEFT JOIN (
-        SELECT visit_id,
-               COUNT(DISTINCT action_type) FILTER (WHERE action_type = ANY($${knownTypesIndex}::text[])) AS touched_types,
-               COUNT(DISTINCT CASE WHEN status = 'completed' AND action_type = ANY($${knownTypesIndex}::text[]) THEN action_type END) AS completed_types
-        FROM lms_pm_school_visit_actions
-        WHERE deleted_at IS NULL
-        GROUP BY visit_id
-      ) AS action_agg ON action_agg.visit_id = v.id`
-    );
-    params.push(REQUIRED_ACTION_TYPE_VALUES);
-    nextIndex += 1;
-
-    if (filters.bucket === "none") {
-      predicates.push("COALESCE(action_agg.touched_types, 0) = 0");
-    } else if (filters.bucket === "partial") {
-      predicates.push(`COALESCE(action_agg.touched_types, 0) > 0 AND COALESCE(action_agg.touched_types, 0) < ${REQUIRED_ACTION_TYPE_VALUES.length}`);
-    } else if (filters.bucket === "all_present") {
-      predicates.push(`COALESCE(action_agg.touched_types, 0) = ${REQUIRED_ACTION_TYPE_VALUES.length} AND COALESCE(action_agg.completed_types, 0) < ${REQUIRED_ACTION_TYPE_VALUES.length}`);
-    } else {
-      predicates.push(`COALESCE(action_agg.completed_types, 0) = ${REQUIRED_ACTION_TYPE_VALUES.length}`);
-    }
-  }
-
-  const scope = buildVisitSummaryScopePredicate(actor, {
-    startIndex: nextIndex,
-    schoolCodeColumn: "v.school_code",
-    schoolRegionColumn: "s.region",
-  });
-
-  if (scope.clause) {
-    predicates.push(scope.clause);
-    params.push(...scope.params);
-  }
-
-  return {
-    whereSql: predicates.join(" AND "),
-    joinSql: joins.join("\n"),
-    params,
-  };
-}
-
 function buildOrderClause(sort: SortKey, dir: SortDirection): string {
   const sortColumn = SORT_COLUMNS[sort].sql;
   const nullsClause = sort === "completed_at" && dir === "asc" ? " NULLS LAST" : "";
@@ -387,11 +236,10 @@ function parseNullableNumber(value: string | number | null | undefined): number 
 }
 
 async function getSummaryStats(
-  actorEmail: string,
-  permission: UserPermission,
+  actor: VisitsActor,
   filters: VisitSummaryFilters
 ): Promise<SummaryStats> {
-  const { whereSql, joinSql, params } = buildWhereClause(permission, actorEmail, filters, 3);
+  const { whereSql, joinSql, params } = buildVisitSummaryWhere(actor, filters, { startIndex: 3 });
   const rows = await query<SummaryStatsRow>(
     `WITH action_completion AS (
        SELECT a.visit_id,
@@ -430,14 +278,13 @@ async function getSummaryStats(
 }
 
 async function getPaginatedVisits(
-  actorEmail: string,
-  permission: UserPermission,
+  actor: VisitsActor,
   filters: VisitSummaryFilters,
   sort: SortKey,
   dir: SortDirection,
   page: number
 ): Promise<SummaryVisit[]> {
-  const { whereSql, joinSql, params } = buildWhereClause(permission, actorEmail, filters);
+  const { whereSql, joinSql, params } = buildVisitSummaryWhere(actor, filters);
   const offset = (page - 1) * VISITS_PER_PAGE;
   const limitIndex = params.length + 1;
   const offsetIndex = params.length + 2;
@@ -455,43 +302,6 @@ async function getPaginatedVisits(
      ORDER BY ${buildOrderClause(sort, dir)}
      LIMIT $${limitIndex} OFFSET $${offsetIndex}`,
     [...params, VISITS_PER_PAGE, offset]
-  );
-}
-
-async function getSchoolFilterOptions(
-  actorEmail: string,
-  permission: UserPermission,
-  filters: VisitSummaryFilters
-): Promise<SchoolFilterOption[]> {
-  const { whereSql, joinSql, params } = buildWhereClause(permission, actorEmail, filters, 1, "schools");
-
-  return query<SchoolFilterOption>(
-    `SELECT DISTINCT v.school_code AS code, COALESCE(s.name, v.school_code) AS name
-     FROM lms_pm_school_visits v
-     LEFT JOIN school s ON s.code = v.school_code
-     ${joinSql}
-     WHERE ${whereSql}
-     ORDER BY name ASC, code ASC`,
-    params
-  );
-}
-
-async function getPmFilterOptions(
-  actorEmail: string,
-  permission: UserPermission,
-  filters: VisitSummaryFilters
-): Promise<PmFilterOption[]> {
-  const { whereSql, joinSql, params } = buildWhereClause(permission, actorEmail, filters, 1, "pms");
-
-  return query<PmFilterOption>(
-    `SELECT DISTINCT LOWER(v.pm_email) AS email, up.full_name AS name
-     FROM lms_pm_school_visits v
-     LEFT JOIN school s ON s.code = v.school_code
-     LEFT JOIN user_permission up ON LOWER(up.email) = LOWER(v.pm_email)
-     ${joinSql}
-     WHERE ${whereSql}
-     ORDER BY name ASC NULLS LAST, email ASC`,
-    params
   );
 }
 
@@ -544,8 +354,7 @@ function buildActionSummaryMap(visits: SummaryVisit[], actions: VisitActionRow[]
 }
 
 async function getSummaryVisits(
-  actorEmail: string,
-  permission: UserPermission,
+  actor: VisitsActor,
   searchParams: {
     sort?: string;
     dir?: string;
@@ -560,19 +369,19 @@ async function getSummaryVisits(
   }
 ): Promise<SummaryResult> {
   const { sort, dir } = normalizeSort(searchParams.sort, searchParams.dir);
-  const filters = normalizeFilters(searchParams);
+  const filters = normalizeVisitSummaryFilters(searchParams);
   const requestedPage = normalizePage(searchParams.page);
   const [stats, initialVisits, schoolOptions, pmOptions] = await Promise.all([
-    getSummaryStats(actorEmail, permission, filters),
-    getPaginatedVisits(actorEmail, permission, filters, sort, dir, requestedPage),
-    getSchoolFilterOptions(actorEmail, permission, filters),
-    getPmFilterOptions(actorEmail, permission, filters),
+    getSummaryStats(actor, filters),
+    getPaginatedVisits(actor, filters, sort, dir, requestedPage),
+    getVisitSummarySchoolOptions(actor, filters),
+    getVisitSummaryPmOptions(actor, filters),
   ]);
   const totalCount = stats.totalVisits;
   const totalPages = Math.max(1, Math.ceil(totalCount / VISITS_PER_PAGE));
   const currentPage = Math.min(requestedPage, totalPages);
   const visits = totalCount > 0 && currentPage !== requestedPage
-    ? await getPaginatedVisits(actorEmail, permission, filters, sort, dir, currentPage)
+    ? await getPaginatedVisits(actor, filters, sort, dir, currentPage)
     : initialVisits;
   const actionRows = await getActionRowsForVisits(visits.map((visit) => visit.id));
   const actionSummaries = buildActionSummaryMap(visits, actionRows);
@@ -940,11 +749,7 @@ export default async function SchoolVisitSummaryPage({ searchParams }: PageProps
     totalPages,
     sort,
     dir,
-  } = await getSummaryVisits(
-    session.user.email,
-    permission,
-    rawSearchParams
-  );
+  } = await getSummaryVisits(actor, rawSearchParams);
 
   return (
     <div className="min-h-screen bg-bg">

@@ -253,6 +253,24 @@ describe("SchoolVisitSummaryPage", () => {
       }
     });
 
+    it("shows only Visits at Schools with an active physical Centre in the list, stats and options", async () => {
+      setupAuth();
+      setupSummaryQueries();
+
+      await SchoolVisitSummaryPage({
+        searchParams: Promise.resolve({ schools: "SC001", pms: "pm@example.org" }),
+      });
+
+      const visitQueries = (mockQuery.mock.calls as [string, unknown[]][])
+        .map(([sql]) => sql)
+        .filter((sql) => sql.includes("FROM lms_pm_school_visits v"));
+      expect(visitQueries).toHaveLength(4);
+      for (const sql of visitQueries) {
+        expect(sql).toMatch(/EXISTS \(\s*SELECT 1\s+FROM school \w+\s+JOIN centres \w+/);
+        expect(sql).toMatch(/\w+\.is_physical AND \w+\.is_active/);
+      }
+    });
+
     it("applies level 2 program_admin region scope with explicit visit columns", async () => {
       setupAuth(programAdminPermission, { user: { email: "program-admin@avantifellows.org" } });
       setupSummaryQueries({ stats: emptyAggregateStats, visits: [], actions: [] });
