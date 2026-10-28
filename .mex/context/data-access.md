@@ -299,9 +299,11 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   Rows are grouped (Talk to First = any reason) and sorted in JS by the pure policy.
   Each row also carries `programStudentId` (`student.student_id`, kept as text so leading zeros
   survive) and `category` (`student.category`), both nullable; `studentId` stays `student.id`
-  for links. Both go on a muted line under the name, in the table's Student cell and on a
-  card alike ("ID <font-mono id>  Category <value>", "—" for NULL): two more columns would
-  clip the table at 1024 px.
+  for links. The table gives each its own column right after Student ("Student ID" in
+  `font-mono`, "Category"; "—" for NULL); a card shows both on the muted line under the name
+  ("ID <id>  Category <value>"). To fit at 1024 px the table uses tight paddings, lets names,
+  headers and Program wrap, and shows View / New log as 44 px icon buttons (aria-labelled)
+  below `xl` (1280 px).
 - **Mentor cards (#452):** `listMentorCards(access, today)` in the same module, for
   `view_mentors` only (anyone else gets `[]`). It reuses the list's query unnarrowed (one row
   per active current-year Mapping, with the Mentor's `user` name, else email) and counts per

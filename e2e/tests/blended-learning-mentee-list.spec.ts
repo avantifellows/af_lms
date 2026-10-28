@@ -15,7 +15,8 @@ import { shortDate } from "../../src/app/blended-learning/menteeListCopy";
 // Attempt 2; Kabir — nothing logged, a ready draft; Meera — Conversation 30;
 // Nikhil — legacy last-contact date 14 Jun 2026 only; Zoya — Conversation 29;
 // Rohan — Conversation 3, a failed draft. Each Student ID is E2E-BL-<key>;
-// only Ira has a category (Gen-EWS).
+// only Ira has a category (Gen-EWS). The table gives each its own column; a
+// card shows both on the line under the name.
 //
 // From 1024 px up the list is one table, each group a named rowgroup with a
 // header row; below that each group is a region of cards.
@@ -154,22 +155,26 @@ for (const { label, viewport, desktop } of VIEWPORTS) {
       const iraId = ira.getByText(programStudentId(attemptLatest), { exact: true });
       await expect(iraId).toBeVisible();
       await expect(iraId).toHaveClass(/font-mono/);
-      await expect(ira.getByText("Category Gen-EWS", { exact: true })).toBeVisible();
-
       const kabir = entry(group(page, "Talk to first"), neverContacted);
       await expect(kabir.getByText(programStudentId(neverContacted), { exact: true })).toBeVisible();
-      await expect(kabir.getByText("Category —", { exact: true })).toBeVisible();
 
-      // Both sit on the line under the name: in the Student cell, or above
-      // the Program field on a card.
+      if (desktop) {
+        // Their own columns, right after Student.
+        const cells = ira.getByRole("cell");
+        await expect(cells.nth(1)).toHaveText(programStudentId(attemptLatest));
+        await expect(cells.nth(2)).toHaveText("Gen-EWS");
+        await expect(kabir.getByRole("cell").nth(2)).toHaveText("—");
+        return;
+      }
+
+      // On a card both sit on the line under the name, above Program.
+      await expect(ira.getByText("Category Gen-EWS", { exact: true })).toBeVisible();
+      await expect(kabir.getByText("Category —", { exact: true })).toBeVisible();
       const name = await ira.getByRole("link", { name: fullName(attemptLatest), exact: true }).boundingBox();
       const id = await iraId.boundingBox();
+      const program = await ira.getByText("STP Voucher Delhi").boundingBox();
       expect(id!.y).toBeGreaterThan(name!.y);
-      expect(id!.y).toBeLessThan(name!.y + name!.height + 8);
-      if (!desktop) {
-        const program = await ira.getByText("STP Voucher Delhi").boundingBox();
-        expect(id!.y + id!.height).toBeLessThan(program!.y);
-      }
+      expect(id!.y + id!.height).toBeLessThan(program!.y);
     });
 
     test("finds a Student by Student ID in the search box", async ({ page }) => {
@@ -216,11 +221,18 @@ for (const { label, viewport, desktop } of VIEWPORTS) {
         const table = page.getByRole("table");
         await expect(table).toHaveCount(1);
         await expect(table.getByRole("columnheader")).toHaveText([
-          "Student", "Why now", "Grade", "Program", "Gender", "Last conversation", "Actions",
+          "Student", "Student ID", "Category", "Why now", "Grade", "Program", "Gender", "Last conversation",
+          "Actions",
         ]);
-        // The table fits its card at 1280 px, so nothing is clipped or scrolls.
-        const clipped = await table.evaluate((element) => element.scrollWidth - element.parentElement!.clientWidth);
-        expect(clipped).toBeLessThanOrEqual(0);
+        // The table fits its card at 1280 px, and at 1024 px with icon-only
+        // row buttons, so nothing is clipped or scrolls.
+        const clipped = () => table.evaluate((element) => element.scrollWidth - element.parentElement!.clientWidth);
+        expect(await clipped()).toBeLessThanOrEqual(0);
+        await page.setViewportSize({ width: 1024, height: 800 });
+        const view = page.getByRole("link", { name: `View ${fullName(attemptLatest)}` });
+        await expect(view.getByText("View")).toBeHidden();
+        expect((await view.boundingBox())?.width ?? 0).toBeGreaterThanOrEqual(44);
+        expect(await clipped()).toBeLessThanOrEqual(0);
         await expect(table.getByRole("rowgroup", { name: "Talk to first", exact: true })).toBeVisible();
         await expect(table.getByRole("rowgroup", { name: "Everyone else", exact: true })).toBeVisible();
       });

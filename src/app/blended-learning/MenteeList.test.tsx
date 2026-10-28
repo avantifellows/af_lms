@@ -57,7 +57,8 @@ describe("MenteeGroups — one table with group header rows", () => {
 
     expect(screen.getAllByRole("table")).toHaveLength(1);
     expect(screen.getAllByRole("columnheader").map((header) => header.textContent)).toEqual([
-      "Student", "Why now", "Grade", "Program", "Gender", "Last conversation", "Actions",
+      "Student", "Student ID", "Category", "Why now", "Grade", "Program", "Gender", "Last conversation",
+      "Actions",
     ]);
     expect(tableGroup("Talk to first")).toHaveTextContent("Talk to firstNot reachable on the last try. 1 of 2.");
     expect(tableGroup("Everyone else")).toHaveTextContent("Everyone else1 of 2.");
@@ -71,12 +72,12 @@ describe("MenteeGroups — one table with group header rows", () => {
     expect(tableGroup("Everyone else")).toHaveTextContent("1 of 1.");
   });
 
-  it("shows Student ID and category under the name, Why now second, then grade, program, gender and last conversation, with no duration", () => {
+  it("shows Student ID and category columns after the name, then Why now, grade, program, gender and last conversation, with no duration", () => {
     renderList(true, [IRA]);
 
     const cells = within(tableRow("Ira Attempt")).getAllByRole("cell").map((cell) => cell.textContent);
     expect(cells).toEqual([
-      "Ira AttemptID 00123456Category Gen-EWS", "Not reachable, 20 Oct", "12", "STP Voucher Delhi",
+      "Ira Attempt", "00123456", "Gen-EWS", "Not reachable, 20 Oct", "12", "STP Voucher Delhi",
       "Female", "12 Oct10 days ago", "ViewNew log",
     ]);
     expect(within(tableRow("Ira Attempt")).getByText("00123456")).toHaveClass("font-mono");
@@ -85,9 +86,8 @@ describe("MenteeGroups — one table with group header rows", () => {
   it("shows a dash for a missing Student ID or category", () => {
     renderList(true, [KABIR]);
 
-    expect(within(tableRow("Kabir Never")).getAllByRole("cell")[0]).toHaveTextContent(
-      "Kabir NeverID —Category —"
-    );
+    const cells = within(tableRow("Kabir Never")).getAllByRole("cell").map((cell) => cell.textContent);
+    expect(cells.slice(0, 3)).toEqual(["Kabir Never", "—", "—"]);
   });
 });
 
@@ -155,12 +155,18 @@ describe("MenteeGroups — row actions", () => {
       expect(link).toHaveAttribute("href", "/blended-learning/students/489985/log");
       expect(link).toHaveTextContent("New log");
       expect(link).toHaveClass("min-h-11", "bg-accent");
+      expect(link.querySelector("svg")).not.toBeNull();
     }
     for (const link of screen.getAllByRole("link", { name: "View Kabir Never" })) {
       expect(link).toHaveAttribute("href", "/blended-learning/students/489985");
       expect(link).toHaveTextContent("View");
       expect(link).toHaveClass("min-h-11", "border-border");
     }
+    // In the table the labels show from 1280 px; below that each is a 44 px
+    // icon button named by its aria-label.
+    const [tableView] = screen.getAllByRole("link", { name: "View Kabir Never" });
+    expect(tableView).toHaveClass("min-w-11");
+    expect(within(tableView).getByText("View")).toHaveClass("hidden", "xl:inline");
     // The name's link covers the whole row or card.
     const [rowName, cardName] = screen.getAllByRole("link", { name: "Kabir Never" });
     expect(rowName).toHaveAttribute("href", "/blended-learning/students/489985");
