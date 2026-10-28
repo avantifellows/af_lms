@@ -23,8 +23,6 @@ interface FilterBarProps {
   schoolOptions: SchoolOption[];
   pmOptions: PmOption[];
   currentParams: Record<string, string | undefined>;
-  // The School-wise tab's "Recurring concerns only" toggle (`recurring=1`).
-  showRecurringToggle?: boolean;
 }
 
 function parseListParam(value: string | undefined): string[] {
@@ -59,7 +57,6 @@ export default function VisitSummaryFilterBar({
   schoolOptions,
   pmOptions,
   currentParams,
-  showRecurringToggle = false,
 }: FilterBarProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -73,7 +70,6 @@ export default function VisitSummaryFilterBar({
   const [from, setFrom] = useState(currentParams.from || "");
   const [to, setTo] = useState(currentParams.to || "");
   const [bucket, setBucket] = useState(currentParams.bucket || "");
-  const [recurringOnly, setRecurringOnly] = useState(currentParams.recurring === "1");
 
   function replaceWith(updates: Record<string, string | undefined>) {
     Object.assign(pendingUpdatesRef.current, updates);
@@ -119,24 +115,12 @@ export default function VisitSummaryFilterBar({
   }
 
   return (
-    <section className="mb-6 border border-border bg-bg-card p-4 shadow-sm">
+    <section aria-labelledby="visit-summary-filters-heading" className="mb-6 rounded-lg border border-border bg-bg-card p-4 shadow-sm sm:p-5">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-sm font-bold uppercase tracking-wide text-text-primary">Filters</h2>
+        <h2 id="visit-summary-filters-heading" className="text-sm font-bold uppercase tracking-wider text-text-primary">
+          Filters
+        </h2>
         <div className="flex flex-wrap items-center gap-2">
-          {showRecurringToggle && (
-            <label className="mr-2 inline-flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-text-primary">
-              <input
-                type="checkbox"
-                checked={recurringOnly}
-                onChange={(event) => {
-                  setRecurringOnly(event.target.checked);
-                  replaceWith({ recurring: event.target.checked ? "1" : undefined });
-                }}
-                className="h-4 w-4 accent-accent"
-              />
-              Recurring concerns only
-            </label>
-          )}
           <span className="group relative">
             <button
               type="button"
@@ -161,7 +145,7 @@ export default function VisitSummaryFilterBar({
 
       {/* grid-cols-1 (minmax(0, 1fr)) and min-w-0 on each field keep a long selected label truncated
           in its button on a narrow screen instead of widening the column. */}
-      <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
+      <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-[repeat(4,minmax(0,1fr))_minmax(0,1.5fr)_minmax(0,1.2fr)_repeat(2,minmax(0,1fr))]">
         <SearchableMultiSelect
           label="Region"
           options={withMissingSelected(regionOptions, selectedRegions)}
@@ -225,7 +209,7 @@ export default function VisitSummaryFilterBar({
 
         <div className="min-w-0">
           <label htmlFor="visit-summary-bucket" className={FIELD_LABEL_CLASS}>
-            Required Completion
+            Required actions
           </label>
           <select
             id="visit-summary-bucket"
@@ -246,7 +230,7 @@ export default function VisitSummaryFilterBar({
 
         <div className="min-w-0">
           <label htmlFor="visit-summary-preset" className={FIELD_LABEL_CLASS}>
-            Date Preset
+            Date preset
           </label>
           <select
             id="visit-summary-preset"
@@ -275,9 +259,12 @@ export default function VisitSummaryFilterBar({
 
         {!preset && (
           <>
-            <label className={`min-w-0 ${FIELD_LABEL_CLASS}`}>
-              From
+            <div className="min-w-0">
+              <label htmlFor="visit-summary-from" className={FIELD_LABEL_CLASS}>
+                From
+              </label>
               <input
+                id="visit-summary-from"
                 type="date"
                 value={from}
                 onChange={(event) => {
@@ -286,10 +273,13 @@ export default function VisitSummaryFilterBar({
                 }}
                 className={FIELD_INPUT_CLASS}
               />
-            </label>
-            <label className={`min-w-0 ${FIELD_LABEL_CLASS}`}>
-              To
+            </div>
+            <div className="min-w-0">
+              <label htmlFor="visit-summary-to" className={FIELD_LABEL_CLASS}>
+                To
+              </label>
               <input
+                id="visit-summary-to"
                 type="date"
                 value={to}
                 onChange={(event) => {
@@ -298,7 +288,7 @@ export default function VisitSummaryFilterBar({
                 }}
                 className={FIELD_INPUT_CLASS}
               />
-            </label>
+            </div>
           </>
         )}
       </div>

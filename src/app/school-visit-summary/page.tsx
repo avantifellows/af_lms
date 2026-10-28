@@ -3,6 +3,7 @@ import Link from "next/link";
 import StatCard from "@/components/StatCard";
 import ClickableTableRow from "@/components/visits/ClickableTableRow";
 import GpsMapLink from "@/components/visits/GpsMapLink";
+import RecurringOnlyToggle from "@/components/visits/RecurringOnlyToggle";
 import VisitSummaryFilterBar from "@/components/visits/VisitSummaryFilterBar";
 import { Card } from "@/components/ui";
 import { query } from "@/lib/db";
@@ -17,6 +18,7 @@ import {
 import {
   STALE_LAST_VISIT_DAYS,
   concernSeverity,
+  formatCompactVisitDates,
   formatIstDate,
   formatIstTimestamp,
   formatVisitCount,
@@ -102,9 +104,20 @@ interface VisitActionSummary {
   rollup: Record<ActionType, ActionTypeRollupStatus>;
 }
 
+// The stat cards both tabs show. The first four count the Visits in view (`getSummaryStats`);
+// the last is the School-wise read model's count of Schools with a Recurring Concern.
+interface HeaderStats {
+  totalVisits: number;
+  completedCount: number;
+  uniqueSchools: number;
+  uniquePms: number;
+  schoolsWithRecurring: number;
+}
+
 interface SummaryResult {
   visits: SummaryVisit[];
   stats: SummaryStats;
+  headerStats: HeaderStats;
   actionSummaries: Map<number, VisitActionSummary>;
   regionOptions: RegionFilterOption[];
   schoolOptions: SchoolFilterOption[];
@@ -118,6 +131,7 @@ interface SummaryResult {
 
 interface SchoolWiseResult {
   view: SchoolWiseView;
+  headerStats: HeaderStats;
   regionOptions: RegionFilterOption[];
   schoolOptions: SchoolFilterOption[];
   pmOptions: PmFilterOption[];
@@ -377,12 +391,15 @@ async function getSummaryVisits(
   const { sort, dir } = normalizeSort(searchParams.sort, searchParams.dir);
   const filters = normalizeVisitSummaryFilters(searchParams);
   const requestedPage = normalizePage(searchParams.page);
-  const [stats, initialVisits, schoolOptions, pmOptions, regionOptions] = await Promise.all([
+  const [stats, initialVisits, schoolOptions, pmOptions, regionOptions, schoolWiseView] = await Promise.all([
     getSummaryStats(actor, filters),
     getPaginatedVisits(actor, filters, sort, dir, requestedPage),
     getVisitSummarySchoolOptions(actor, filters),
     getVisitSummaryPmOptions(actor, filters),
     getVisitSummaryRegionOptions(actor, filters),
+    // The "Schools with recurring concerns" card: the same School-wise read model over the same
+    // Visits in view. `recurring=1` is a School-wise row filter, so the Visits tab ignores it.
+    getSchoolWiseView(actor, { ...filters, recurringOnly: false }, normalizeSchoolWiseSort()),
   ]);
   const totalCount = stats.totalVisits;
   const totalPages = Math.max(1, Math.ceil(totalCount / VISITS_PER_PAGE));
@@ -396,6 +413,7 @@ async function getSummaryVisits(
   return {
     visits,
     stats,
+    headerStats: toHeaderStats(stats, schoolWiseView.stats.schoolsWithRecurring),
     actionSummaries,
     regionOptions,
     schoolOptions,
@@ -414,14 +432,55 @@ async function getSchoolWiseSummary(
 ): Promise<SchoolWiseResult> {
   const sort = normalizeSchoolWiseSort(searchParams.sort, searchParams.dir);
   const filters = normalizeVisitSummaryFilters(searchParams);
-  const [view, schoolOptions, pmOptions, regionOptions] = await Promise.all([
+  const [view, allSchoolsStats, schoolOptions, pmOptions, regionOptions] = await Promise.all([
     getSchoolWiseView(actor, filters, sort),
+    filters.recurringOnly ? null : getSummaryStats(actor, filters),
     getVisitSummarySchoolOptions(actor, filters),
     getVisitSummaryPmOptions(actor, filters),
     getVisitSummaryRegionOptions(actor, filters),
   ]);
+  const stats = allSchoolsStats ?? await getKeptSchoolsStats(actor, filters, view.rows);
 
-  return { view, regionOptions, schoolOptions, pmOptions, sort };
+  return {
+    view,
+    headerStats: toHeaderStats(stats, view.stats.schoolsWithRecurring),
+    regionOptions,
+    schoolOptions,
+    pmOptions,
+    sort,
+  };
+}
+
+const EMPTY_SUMMARY_STATS: SummaryStats = {
+  totalVisits: 0,
+  inProgressCount: 0,
+  completedCount: 0,
+  uniqueSchools: 0,
+  uniquePms: 0,
+  avgActionCompletion: null,
+};
+
+// With `recurring=1` the stat cards follow the Schools kept, like the table: the Visits in view at
+// those Schools only. No Schools kept means no Visits (an empty `schools` filter would mean all).
+async function getKeptSchoolsStats(
+  actor: VisitsActor,
+  filters: VisitSummaryFilters,
+  rows: SchoolWiseRow[]
+): Promise<SummaryStats> {
+  if (rows.length === 0) {
+    return EMPTY_SUMMARY_STATS;
+  }
+  return getSummaryStats(actor, { ...filters, schools: rows.map((row) => row.schoolCode) });
+}
+
+function toHeaderStats(stats: SummaryStats, schoolsWithRecurring: number): HeaderStats {
+  return {
+    totalVisits: stats.totalVisits,
+    completedCount: stats.completedCount,
+    uniqueSchools: stats.uniqueSchools,
+    uniquePms: stats.uniquePms,
+    schoolsWithRecurring,
+  };
 }
 
 // Switching tabs keeps every filter and drops `sort`, `dir` and `page`, which belong to one tab.
@@ -437,15 +496,15 @@ function SummaryTabs({ tab, currentParams }: { tab: SummaryTab; currentParams: S
   ];
 
   return (
-    <nav aria-label="Visit Summary views" className="mb-6 flex gap-4 border-b border-border">
+    <nav aria-label="Visit Summary views" className="mb-4 flex border-b-2 border-accent">
       {tabs.map(({ value, label }) => (
         <Link
           key={value}
           href={tabHref(value, currentParams)}
           aria-current={value === tab ? "page" : undefined}
-          className={value === tab
-            ? "-mb-px border-b-2 border-accent pb-2 text-sm font-bold uppercase tracking-wide text-text-primary"
-            : "-mb-px pb-2 text-sm font-medium uppercase tracking-wide text-text-muted hover:text-text-primary"}
+          className={`border px-4 py-2.5 text-sm font-bold uppercase tracking-wider sm:px-6 ${value === tab
+            ? "border-accent bg-accent text-text-on-accent"
+            : "border-b-0 border-border bg-bg-card-alt text-text-secondary hover:bg-hover-bg hover:text-text-primary"}`}
         >
           {label}
         </Link>
@@ -594,53 +653,62 @@ function formatMobileActionSummary(summary: VisitActionSummary): string {
   return `${summary.completedTypes}/${REQUIRED_ACTION_TYPE_VALUES.length} required complete`;
 }
 
-function StatCards({ stats }: { stats: SummaryStats }) {
+function StatCards({ stats }: { stats: HeaderStats }) {
   return (
-    <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-6">
-      <StatCard label="Total Visits" value={stats.totalVisits} size="sm" />
-      <StatCard label="In Progress" value={stats.inProgressCount} size="sm" />
-      <StatCard label="Completed" value={stats.completedCount} size="sm" />
-      <StatCard label="Unique Schools" value={stats.uniqueSchools} size="sm" />
-      <StatCard label="Unique PMs" value={stats.uniquePms} size="sm" />
-      <StatCard label="Avg Completion" value={formatPercent(stats.avgActionCompletion)} size="sm" />
+    <div role="group" aria-label="Visit totals" className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+      <StatCard label="Total visits" value={stats.totalVisits} />
+      <StatCard label="Completed" value={stats.completedCount} />
+      <StatCard label="Schools" value={stats.uniqueSchools} />
+      <StatCard label="PMs" value={stats.uniquePms} />
+      <StatCard label="Schools with recurring concerns" value={stats.schoolsWithRecurring} />
     </div>
   );
 }
 
-function SchoolWiseStatCards({ stats }: { stats: SchoolWiseView["stats"] }) {
-  return (
-    <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
-      <StatCard label="Schools" value={stats.schools} size="sm" />
-      <StatCard label="Visits" value={stats.visits} size="sm" />
-      <StatCard label="Schools with recurring concerns" value={stats.schoolsWithRecurring} size="sm" />
-      <StatCard label="Open concerns" value={stats.openConcerns} size="sm" />
-    </div>
-  );
-}
-
-const SEVERITY_MARKERS: Record<ConcernSeverity, { label: string; className: string }> = {
+// A bar down the left edge of a School-wise row, coloured by `concernSeverity`; the label is its
+// text alternative.
+const SEVERITY_BARS: Record<ConcernSeverity, { label: string; className: string }> = {
   high: { label: "3 or more recurring concerns", className: "bg-danger" },
   medium: { label: "1–2 recurring concerns", className: "bg-brand-amber" },
-  low: { label: "Open concerns, none recurring", className: "border-2 border-brand-amber bg-bg-card" },
-  none: { label: "No open concerns", className: "bg-gray-200" },
+  low: { label: "Open concerns, none recurring", className: "bg-brand-amber/40" },
+  none: { label: "No open concerns", className: "bg-transparent" },
 };
 
-function SeverityMarker({ row }: { row: SchoolWiseRow }) {
-  const { label, className } = SEVERITY_MARKERS[concernSeverity(row)];
+function SeverityBar({ row }: { row: SchoolWiseRow }) {
+  const { label, className } = SEVERITY_BARS[concernSeverity(row)];
 
   return (
     <span
       role="img"
       aria-label={label}
       title={label}
-      className={`mr-2 inline-block h-2.5 w-2.5 shrink-0 rounded-full align-middle ${className}`}
+      className={`absolute inset-y-3 left-2 w-1 rounded-full ${className}`}
     />
+  );
+}
+
+const STALE_LAST_VISIT_LABEL = `Stale: last visit over ${STALE_LAST_VISIT_DAYS} days ago`;
+
+// `19 Aug` (the year only outside the current one) in a pill; a stale date gets the amber tint.
+function LastVisitPill({ date, now }: { date: string; now: Date }) {
+  const stale = isStaleLastVisit(date, now);
+
+  return (
+    <span
+      title={stale ? `${formatIstDate(date)} · ${STALE_LAST_VISIT_LABEL}` : formatIstDate(date)}
+      className={`relative inline-flex rounded-full px-2.5 py-0.5 font-mono text-xs ${stale
+        ? "bg-brand-amber/25 font-bold text-warning-text"
+        : "bg-bg-card-alt text-text-secondary"}`}
+    >
+      <time dateTime={date}>{formatCompactVisitDates([date], now)}</time>
+      {stale && <>{" "}<span className="sr-only">{STALE_LAST_VISIT_LABEL}</span></>}
+    </span>
   );
 }
 
 function ConcernFreshnessLine({ freshness }: { freshness: SchoolWiseView["freshness"] }) {
   return (
-    <p className="mb-4 text-xs text-text-muted">
+    <p className="text-xs text-text-muted">
       {freshness.summarisedUpTo
         ? `Visit notes summarised up to ${formatIstTimestamp(freshness.summarisedUpTo)} · ${formatVisitCount(freshness.waitingVisits)} waiting`
         : "Visit notes haven't been summarised yet"}
@@ -655,6 +723,8 @@ function schoolPageHref(schoolCode: string, currentParams: SummarySearchParams):
   return `/school-visit-summary/schools/${encodeURIComponent(schoolCode)}${query ? `?${query}` : ""}`;
 }
 
+const SCHOOL_WISE_HEADER_CLASS = "px-4 py-3 text-xs font-bold uppercase tracking-wider text-text-muted";
+
 function SchoolWiseTable({
   rows,
   sort,
@@ -664,8 +734,8 @@ function SchoolWiseTable({
   sort: SchoolWiseSort;
   currentParams: SummarySearchParams;
 }) {
-  const header = (column: keyof typeof SCHOOL_WISE_SORT_COLUMNS, label: string) => (
-    <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-text-muted">
+  const header = (column: keyof typeof SCHOOL_WISE_SORT_COLUMNS, label: string, align: "left" | "center" = "center") => (
+    <th className={`${SCHOOL_WISE_HEADER_CLASS} whitespace-nowrap ${align === "left" ? "pl-6 text-left" : "text-center"}`}>
       <SortHeader
         column={column}
         currentSort={sort.sort}
@@ -681,59 +751,70 @@ function SchoolWiseTable({
   const now = new Date();
 
   return (
-    <Card elevation="sm" className="overflow-x-auto">
+    // `relative` makes the scroll box the containing block of the absolutely positioned severity
+    // bars and sr-only labels, so they scroll with the table instead of widening the page.
+    <Card elevation="sm" className="relative overflow-x-auto">
       <table aria-label="Schools with visits" className="min-w-full">
-        <thead className="border-b-2 border-border-accent bg-bg-card-alt">
+        <thead className="border-b border-border">
           <tr>
-            {header("school_name", "School (region)")}
+            {header("school_name", "School", "left")}
             {header("visits", "Visits")}
             {header("last_visit", "Last visit")}
             {header("recurring", "Recurring issues")}
             {header("flags", "Flags")}
-            <th className="w-full px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-text-muted">
-              Top recurring concern
+            <th className={`${SCHOOL_WISE_HEADER_CLASS} w-full text-left`}>Top recurring concern</th>
+            <th className="w-10 px-2">
+              <span className="sr-only">Open School page</span>
             </th>
           </tr>
         </thead>
-        <tbody className="bg-bg-card">
+        <tbody>
           {rows.map((row) => (
             <ClickableTableRow
               key={row.schoolCode}
               href={schoolPageHref(row.schoolCode, currentParams)}
-              className="border-b border-border/40 hover:bg-hover-bg"
+              className="border-b border-border/40 last:border-b-0 hover:bg-hover-bg"
             >
-              <td className="whitespace-nowrap px-4 py-4 text-sm font-medium text-text-primary">
-                <SeverityMarker row={row} />
-                <Link href={schoolPageHref(row.schoolCode, currentParams)} className="hover:text-accent">
+              <td className="relative whitespace-nowrap py-3 pl-6 pr-4">
+                <SeverityBar row={row} />
+                <Link
+                  href={schoolPageHref(row.schoolCode, currentParams)}
+                  className="block text-sm font-bold text-text-primary hover:text-accent"
+                >
                   {row.schoolName}
                 </Link>
-                {row.region && <span className="font-normal text-text-muted"> ({row.region})</span>}
+                {row.region && <>{" "}<span className="block text-xs text-text-muted">{row.region}</span></>}
               </td>
-              <td className="whitespace-nowrap px-4 py-4 text-sm font-mono text-text-secondary">{row.visits}</td>
-              <td className="whitespace-nowrap px-4 py-4 text-sm font-mono text-text-secondary">
-                {formatIstDate(row.lastVisitDate)}
-                {isStaleLastVisit(row.lastVisitDate, now) && (
-                  <span
-                    title={`Last visit more than ${STALE_LAST_VISIT_DAYS} days ago`}
-                    className="ml-2 inline-flex border border-danger/20 bg-danger-bg px-1.5 py-0.5 font-sans text-xs font-bold uppercase text-danger"
-                  >
-                    Stale
+              <td className="whitespace-nowrap px-4 py-3 text-center text-sm text-text-primary">{row.visits}</td>
+              <td className="whitespace-nowrap px-4 py-3 text-center">
+                <LastVisitPill date={row.lastVisitDate} now={now} />
+              </td>
+              <td className="whitespace-nowrap px-4 py-3 text-center">
+                {row.recurringCount > 0 ? (
+                  <span className="inline-flex h-7 min-w-7 items-center justify-center rounded-full bg-accent px-2 text-xs font-bold text-text-on-accent">
+                    {row.recurringCount}
                   </span>
+                ) : (
+                  <span className="font-mono text-sm text-text-muted">0</span>
                 )}
               </td>
-              <td className="whitespace-nowrap px-4 py-4 text-sm font-mono text-text-secondary">{row.recurringCount}</td>
-              <td className="whitespace-nowrap px-4 py-4 text-sm font-mono text-text-secondary">
-                {row.flagsOpen ?? <span className="text-text-muted">—</span>}
+              <td className="whitespace-nowrap px-4 py-3 text-center font-mono text-sm">
+                {row.flagsOpen === null
+                  ? <span className="text-text-muted">—</span>
+                  : <span className={row.flagsOpen > 0 ? "font-bold text-text-primary" : "text-text-muted"}>{row.flagsOpen}</span>}
               </td>
-              <td className="px-4 py-4 text-sm text-text-primary">
+              <td className="min-w-64 px-4 py-3 text-sm text-text-primary">
                 {row.topRecurring ? (
                   <>
                     <div title={row.topRecurring.text} className="line-clamp-2">{row.topRecurring.text}</div>
-                    <div className="mt-1 text-xs font-mono text-text-muted">{formatVisitCount(row.topRecurring.visitCount)}</div>
+                    <div className="mt-0.5 text-xs font-bold text-accent">{formatVisitCount(row.topRecurring.visitCount)}</div>
                   </>
                 ) : (
                   <span className="text-text-muted">—</span>
                 )}
+              </td>
+              <td className="px-2 py-3 text-center text-xl leading-none text-text-muted">
+                <span aria-hidden="true">›</span>
               </td>
             </ClickableTableRow>
           ))}
@@ -947,15 +1028,30 @@ function SchoolWiseTab({
   summary: SchoolWiseResult;
   currentParams: SummarySearchParams;
 }) {
-  if (view.rows.length === 0) {
-    return (
-      <div className="py-12 text-center">
-        <div className="text-text-muted uppercase tracking-wide">No schools match your filters</div>
-      </div>
-    );
-  }
+  const schools = view.stats.schools;
 
-  return <SchoolWiseTable rows={view.rows} sort={sort} currentParams={currentParams} />;
+  return (
+    <>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
+        <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+          <p className="text-sm font-bold text-text-primary">
+            {schools} school{schools === 1 ? "" : "s"}
+          </p>
+          <ConcernFreshnessLine freshness={view.freshness} />
+        </div>
+        {/* Remounts when the param changes (e.g. Clear filters), so the box follows the URL. */}
+        <RecurringOnlyToggle key={currentParams.recurring ?? ""} currentParams={currentParams} />
+      </div>
+
+      {view.rows.length === 0 ? (
+        <div className="py-12 text-center">
+          <div className="text-text-muted uppercase tracking-wide">No schools match your filters</div>
+        </div>
+      ) : (
+        <SchoolWiseTable rows={view.rows} sort={sort} currentParams={currentParams} />
+      )}
+    </>
+  );
 }
 
 export default async function SchoolVisitSummaryPage({ searchParams }: PageProps) {
@@ -966,8 +1062,7 @@ export default async function SchoolVisitSummaryPage({ searchParams }: PageProps
   const summary = tab === "visits"
     ? { tab: "visits" as const, ...(await getSummaryVisits(actor, rawSearchParams)) }
     : { tab: "schools" as const, ...(await getSchoolWiseSummary(actor, rawSearchParams)) };
-  const foundCount = summary.tab === "visits" ? summary.totalCount : summary.view.stats.schools;
-  const foundNoun = summary.tab === "visits" ? "visit" : "school";
+  const { headerStats } = summary;
 
   return (
     <div className="min-h-screen bg-bg">
@@ -1016,29 +1111,21 @@ export default async function SchoolVisitSummaryPage({ searchParams }: PageProps
               School Visit Summary
             </h1>
             <p className="mt-1 text-sm text-text-secondary">
-              {foundCount} {foundNoun}{foundCount === 1 ? "" : "s"} found
+              {formatVisitCount(headerStats.totalVisits)} found
             </p>
           </div>
         </div>
-
-        <SummaryTabs tab={summary.tab} currentParams={rawSearchParams} />
-
-        {summary.tab === "visits"
-          ? <StatCards stats={summary.stats} />
-          : (
-            <>
-              <SchoolWiseStatCards stats={summary.view.stats} />
-              <ConcernFreshnessLine freshness={summary.view.freshness} />
-            </>
-          )}
 
         <VisitSummaryFilterBar
           regionOptions={summary.regionOptions}
           schoolOptions={summary.schoolOptions}
           pmOptions={summary.pmOptions}
           currentParams={rawSearchParams}
-          showRecurringToggle={summary.tab === "schools"}
         />
+
+        <StatCards stats={headerStats} />
+
+        <SummaryTabs tab={summary.tab} currentParams={rawSearchParams} />
 
         {summary.tab === "visits"
           ? <VisitsTab summary={summary} currentParams={rawSearchParams} />

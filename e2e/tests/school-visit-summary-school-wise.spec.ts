@@ -18,8 +18,22 @@ const INACTIVE_CENTRE_SCHOOL = "VSW Inactive Centre School (VSWOFF)";
 const NO_REGION_SCHOOL = "VSW No Region School (VSWNOREG)";
 const NO_REGION = "No region (non-JNV)";
 
+// Compact Visit dates (the School-wise Last visit pill, the School page cards) drop the year only
+// in the current IST year, so each literal is given both ways.
+const IN_FIXTURE_YEAR = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric" })
+  .format(new Date()) === "2026";
+function compactDates(inFixtureYear: string, otherYear: string) {
+  return IN_FIXTURE_YEAR ? inFixtureYear : otherYear;
+}
+
+const STALE_LABEL = "Stale: last visit over 45 days ago";
+
+// The stat cards both tabs share: Total visits, Completed, Schools, PMs, Schools with recurring concerns.
 function statValue(page: Page, label: string) {
-  return page.getByText(label, { exact: true }).locator("xpath=following-sibling::div[1]");
+  return page
+    .getByRole("group", { name: "Visit totals" })
+    .getByText(label, { exact: true })
+    .locator("xpath=following-sibling::div[1]");
 }
 
 function visitRows(page: Page) {
@@ -30,8 +44,8 @@ function schoolRows(page: Page) {
   return page.getByRole("table", { name: "Schools with visits" }).locator("tbody tr");
 }
 
-// The School, Visits, Last visit, Recurring issues, Flags and Top recurring concern cells of each
-// School-wise row, top to bottom.
+// The School (name, then region), Visits, Last visit, Recurring issues, Flags and Top recurring
+// concern cells of each School-wise row, top to bottom.
 function schoolColumn(page: Page, column: 0 | 1 | 2 | 3 | 4 | 5) {
   return schoolRows(page).locator(`td:nth-child(${column + 1})`);
 }
@@ -85,12 +99,11 @@ test.describe("School Visit Summary — physical centres only", () => {
     await expect(visitRows(adminPage).filter({ hasText: NVS_ONLY_SCHOOL })).toHaveCount(0);
     await expect(visitRows(adminPage).filter({ hasText: INACTIVE_CENTRE_SCHOOL })).toHaveCount(0);
 
-    await expect(statValue(adminPage, "Total Visits")).toHaveText("3");
-    await expect(statValue(adminPage, "In Progress")).toHaveText("0");
+    await expect(statValue(adminPage, "Total visits")).toHaveText("3");
     await expect(statValue(adminPage, "Completed")).toHaveText("3");
-    await expect(statValue(adminPage, "Unique Schools")).toHaveText("3");
-    await expect(statValue(adminPage, "Unique PMs")).toHaveText("1");
-    await expect(statValue(adminPage, "Avg Completion")).toHaveText("0%");
+    await expect(statValue(adminPage, "Schools")).toHaveText("3");
+    await expect(statValue(adminPage, "PMs")).toHaveText("1");
+    await expect(adminPage.getByText("3 visits found", { exact: true })).toBeVisible();
 
     // The School options keep the PM filter, so they are exactly the fixture PM's Schools in view.
     await expect(await optionNames(adminPage, "School")).toHaveText([MIXED_SCHOOL, NO_REGION_SCHOOL, PHYSICAL_SCHOOL]);
@@ -100,8 +113,8 @@ test.describe("School Visit Summary — physical centres only", () => {
     await adminPage.goto("/school-visit-summary?tab=visits&schools=VSWNVS,VSWOFF");
 
     await expect(adminPage.getByText("No visits match your filters")).toBeVisible();
-    await expect(statValue(adminPage, "Total Visits")).toHaveText("0");
-    await expect(statValue(adminPage, "Unique Schools")).toHaveText("0");
+    await expect(statValue(adminPage, "Total visits")).toHaveText("0");
+    await expect(statValue(adminPage, "Schools")).toHaveText("0");
 
     // Unfiltered by School, the options never include them, and the fixture PM is still offered
     // only through their in-view Visits.
@@ -134,7 +147,7 @@ test.describe("School Visit Summary — Region, School and PM filters", () => {
 
     await expect(visitRows(adminPage)).toHaveCount(1);
     await expect(visitRows(adminPage).filter({ hasText: NO_REGION_SCHOOL })).toHaveCount(1);
-    await expect(statValue(adminPage, "Total Visits")).toHaveText("1");
+    await expect(statValue(adminPage, "Total visits")).toHaveText("1");
     await expect(filter(adminPage, "Region").getByRole("button")).toHaveText(NO_REGION);
     // Picking a Region never hides the other Regions.
     await expect(filter(adminPage, "Region").getByRole("checkbox", { name: "VSW_E2E" })).not.toBeChecked();
@@ -171,7 +184,7 @@ test.describe("School Visit Summary — Region, School and PM filters", () => {
     await adminPage.goto("/school-visit-summary?tab=visits&regions=NOT_A_REGION");
 
     await expect(adminPage.getByText("No visits match your filters")).toBeVisible();
-    await expect(statValue(adminPage, "Total Visits")).toHaveText("0");
+    await expect(statValue(adminPage, "Total visits")).toHaveText("0");
     await expect(filter(adminPage, "Region").getByRole("button")).toHaveText("NOT_A_REGION (not in results)");
   });
 });
@@ -192,44 +205,56 @@ test.describe("School Visit Summary — School-wise tab", () => {
 
     await expect(tab(adminPage, "School-wise")).toHaveAttribute("aria-current", "page");
     await expect(schoolColumn(adminPage, 0)).toHaveText([
-      `${MIXED} (VSW_E2E)`,
+      `${MIXED} VSW_E2E`,
       NO_REGION_NAME,
-      `${OLD} (VSW_E2E)`,
-      `${PHYSICAL} (VSW_E2E)`,
+      `${OLD} VSW_E2E`,
+      `${PHYSICAL} VSW_E2E`,
     ]);
     await expect(schoolColumn(adminPage, 1)).toHaveText(["1", "1", "2", "3"]);
-    await expect(schoolRow(adminPage, MIXED)).toContainText("06 Oct 2026");
-    await expect(schoolRow(adminPage, NO_REGION_NAME)).toContainText("09 Oct 2026");
-    await expect(schoolRow(adminPage, OLD)).toContainText("01 Aug 2025");
+    await expect(schoolColumn(adminPage, 2).nth(0)).toHaveText(compactDates("06 Oct", "06 Oct 2026"));
+    await expect(schoolColumn(adminPage, 2).nth(1)).toHaveText(compactDates("09 Oct", "09 Oct 2026"));
+    await expect(schoolColumn(adminPage, 2).nth(2)).toHaveText(new RegExp(`^01 Aug 2025 ?${STALE_LABEL}$`));
+    await expect(schoolRow(adminPage, MIXED).locator("time")).toHaveAttribute("datetime", "2026-10-06");
+    await expect(schoolRow(adminPage, MIXED).locator("span[title]", { has: adminPage.locator("time") })).toHaveAttribute(
+      "title",
+      "06 Oct 2026"
+    );
 
+    await expect(statValue(adminPage, "Total visits")).toHaveText("7");
     await expect(statValue(adminPage, "Schools")).toHaveText("4");
-    await expect(statValue(adminPage, "Visits")).toHaveText("7");
-    await expect(adminPage.getByText("Total Visits", { exact: true })).toHaveCount(0);
+    await expect(statValue(adminPage, "PMs")).toHaveText("2");
+    await expect(adminPage.getByText("7 visits found", { exact: true })).toBeVisible();
+    await expect(adminPage.getByText("4 schools", { exact: true })).toBeVisible();
   });
 
   test("flags a Last visit more than 45 days ago as stale", async ({ adminPage }) => {
     await adminPage.goto(`/school-visit-summary?pms=${BOTH_PMS}`);
 
-    await expect(schoolRow(adminPage, OLD).getByText("Stale", { exact: true })).toBeVisible();
-    await expect(schoolRow(adminPage, PHYSICAL).getByText("Stale", { exact: true })).toHaveCount(0);
+    // The pill keeps the meaning of the old "Stale" tag in its title and a screen-reader label.
+    await expect(schoolRow(adminPage, OLD).getByText(STALE_LABEL, { exact: true })).toHaveCount(1);
+    await expect(schoolRow(adminPage, OLD).locator("[title]").filter({ hasText: "01 Aug" })).toHaveAttribute(
+      "title",
+      `01 Aug 2025 · ${STALE_LABEL}`
+    );
+    await expect(schoolRow(adminPage, PHYSICAL).getByText(STALE_LABEL, { exact: true })).toHaveCount(0);
   });
 
   test("Visits and Last visit follow the PM, status, date and required-actions filters", async ({ adminPage }) => {
     await adminPage.goto(`/school-visit-summary?pms=${FIXTURE_PM}`);
-    await expect(schoolColumn(adminPage, 0)).toHaveText([`${MIXED} (VSW_E2E)`, NO_REGION_NAME, `${PHYSICAL} (VSW_E2E)`]);
+    await expect(schoolColumn(adminPage, 0)).toHaveText([`${MIXED} VSW_E2E`, NO_REGION_NAME, `${PHYSICAL} VSW_E2E`]);
     await expect(schoolColumn(adminPage, 1)).toHaveText(["1", "1", "1"]);
-    await expect(schoolRow(adminPage, PHYSICAL)).toContainText("05 Oct 2026");
+    await expect(schoolRow(adminPage, PHYSICAL)).toContainText(compactDates("05 Oct", "05 Oct 2026"));
 
     await adminPage.goto(`/school-visit-summary?pms=${SECOND_PM}&status=completed`);
-    await expect(schoolColumn(adminPage, 0)).toHaveText([`${OLD} (VSW_E2E)`, `${PHYSICAL} (VSW_E2E)`]);
+    await expect(schoolColumn(adminPage, 0)).toHaveText([`${OLD} VSW_E2E`, `${PHYSICAL} VSW_E2E`]);
     await expect(schoolColumn(adminPage, 1)).toHaveText(["2", "1"]);
 
     await adminPage.goto(`/school-visit-summary?pms=${SECOND_PM}&status=in_progress`);
-    await expect(schoolColumn(adminPage, 0)).toHaveText([`${PHYSICAL} (VSW_E2E)`]);
-    await expect(schoolRow(adminPage, PHYSICAL)).toContainText("01 Sep 2026");
+    await expect(schoolColumn(adminPage, 0)).toHaveText([`${PHYSICAL} VSW_E2E`]);
+    await expect(schoolRow(adminPage, PHYSICAL)).toContainText(compactDates("01 Sep", "01 Sep 2026"));
 
     await adminPage.goto(`/school-visit-summary?pms=${SECOND_PM}&from=2025-07-20&to=2025-12-31`);
-    await expect(schoolColumn(adminPage, 0)).toHaveText([`${OLD} (VSW_E2E)`]);
+    await expect(schoolColumn(adminPage, 0)).toHaveText([`${OLD} VSW_E2E`]);
     await expect(schoolColumn(adminPage, 1)).toHaveText(["1"]);
     await expect(schoolRow(adminPage, OLD)).toContainText("01 Aug 2025");
 
@@ -246,40 +271,40 @@ test.describe("School Visit Summary — School-wise tab", () => {
     await expect(adminPage).toHaveURL(/[?&]sort=visits&dir=desc(&|$)/);
     await expect(schoolColumn(adminPage, 1)).toHaveText(["3", "2", "1", "1"]);
     await expect(schoolColumn(adminPage, 0)).toHaveText([
-      `${PHYSICAL} (VSW_E2E)`, `${OLD} (VSW_E2E)`, `${MIXED} (VSW_E2E)`, NO_REGION_NAME,
+      `${PHYSICAL} VSW_E2E`, `${OLD} VSW_E2E`, `${MIXED} VSW_E2E`, NO_REGION_NAME,
     ]);
 
     await sortHeader(adminPage, "Visits").click();
     await expect(adminPage).toHaveURL(/[?&]sort=visits&dir=asc(&|$)/);
     await expect(schoolColumn(adminPage, 0)).toHaveText([
-      `${MIXED} (VSW_E2E)`, NO_REGION_NAME, `${OLD} (VSW_E2E)`, `${PHYSICAL} (VSW_E2E)`,
+      `${MIXED} VSW_E2E`, NO_REGION_NAME, `${OLD} VSW_E2E`, `${PHYSICAL} VSW_E2E`,
     ]);
 
     await sortHeader(adminPage, "Last visit").click();
     await expect(adminPage).toHaveURL(/[?&]sort=last_visit&dir=desc(&|$)/);
     await expect(schoolColumn(adminPage, 0)).toHaveText([
-      `${PHYSICAL} (VSW_E2E)`, NO_REGION_NAME, `${MIXED} (VSW_E2E)`, `${OLD} (VSW_E2E)`,
+      `${PHYSICAL} VSW_E2E`, NO_REGION_NAME, `${MIXED} VSW_E2E`, `${OLD} VSW_E2E`,
     ]);
 
     await sortHeader(adminPage, "Last visit").click();
     await expect(adminPage).toHaveURL(/[?&]sort=last_visit&dir=asc(&|$)/);
     await expect(schoolColumn(adminPage, 0)).toHaveText([
-      `${OLD} (VSW_E2E)`, `${MIXED} (VSW_E2E)`, NO_REGION_NAME, `${PHYSICAL} (VSW_E2E)`,
+      `${OLD} VSW_E2E`, `${MIXED} VSW_E2E`, NO_REGION_NAME, `${PHYSICAL} VSW_E2E`,
     ]);
 
-    await sortHeader(adminPage, /School \(region\)/).click();
+    await sortHeader(adminPage, /^School/).click();
     await expect(adminPage).toHaveURL(/[?&]sort=school_name&dir=asc(&|$)/);
-    await sortHeader(adminPage, /School \(region\)/).click();
+    await sortHeader(adminPage, /^School/).click();
     await expect(adminPage).toHaveURL(/[?&]sort=school_name&dir=desc(&|$)/);
     await expect(schoolColumn(adminPage, 0)).toHaveText([
-      `${PHYSICAL} (VSW_E2E)`, `${OLD} (VSW_E2E)`, NO_REGION_NAME, `${MIXED} (VSW_E2E)`,
+      `${PHYSICAL} VSW_E2E`, `${OLD} VSW_E2E`, NO_REGION_NAME, `${MIXED} VSW_E2E`,
     ]);
   });
 
   test("ignores the other tab's sort key", async ({ adminPage }) => {
     await adminPage.goto(`/school-visit-summary?pms=${BOTH_PMS}&sort=completed_at&dir=asc`);
     await expect(schoolColumn(adminPage, 0)).toHaveText([
-      `${MIXED} (VSW_E2E)`, NO_REGION_NAME, `${OLD} (VSW_E2E)`, `${PHYSICAL} (VSW_E2E)`,
+      `${MIXED} VSW_E2E`, NO_REGION_NAME, `${OLD} VSW_E2E`, `${PHYSICAL} VSW_E2E`,
     ]);
 
     await adminPage.goto(`/school-visit-summary?tab=visits&pms=${FIXTURE_PM}&sort=last_visit&dir=desc`);
@@ -302,7 +327,7 @@ test.describe("School Visit Summary — School-wise tab", () => {
       status: "completed",
     });
     await expect(visitRows(adminPage)).toHaveCount(2);
-    await expect(statValue(adminPage, "Total Visits")).toHaveText("2");
+    await expect(statValue(adminPage, "Total visits")).toHaveText("2");
 
     await adminPage.goto(`${visitsUrl.pathname}${visitsUrl.search}&sort=school_name&dir=desc&page=1`);
     await tab(adminPage, "School-wise").click();
@@ -313,7 +338,7 @@ test.describe("School Visit Summary — School-wise tab", () => {
       pms: FIXTURE_PM,
       status: "completed",
     });
-    await expect(schoolColumn(adminPage, 0)).toHaveText([`${MIXED} (VSW_E2E)`, `${PHYSICAL} (VSW_E2E)`]);
+    await expect(schoolColumn(adminPage, 0)).toHaveText([`${MIXED} VSW_E2E`, `${PHYSICAL} VSW_E2E`]);
   });
 
   test("a PM with a pm seat sees only their visit-managed physical-centre Schools", async ({ page }) => {
@@ -321,10 +346,10 @@ test.describe("School Visit Summary — School-wise tab", () => {
     await page.goto("/school-visit-summary");
 
     // Seated at VSWPHYS and at NVS-only VSWNVS: only VSWPHYS shows, with every PM's Visits there.
-    await expect(schoolColumn(page, 0)).toHaveText([`${PHYSICAL} (VSW_E2E)`]);
+    await expect(schoolColumn(page, 0)).toHaveText([`${PHYSICAL} VSW_E2E`]);
     await expect(schoolColumn(page, 1)).toHaveText(["3"]);
     await expect(statValue(page, "Schools")).toHaveText("1");
-    await expect(statValue(page, "Visits")).toHaveText("3");
+    await expect(statValue(page, "Total visits")).toHaveText("3");
   });
 });
 
@@ -343,15 +368,15 @@ test.describe("School Visit Summary — Recurring Concerns on the School-wise ta
     await adminPage.goto(`/school-visit-summary?pms=${CONCERN_PM}`);
 
     await expect(schoolColumn(adminPage, 0)).toHaveText([
-      `${ALPHA} (VSW_E2E)`, `${BRAVO} (VSW_E2E)`, `${CHARLIE} (VSW_E2E)`, `${DELTA} (VSW_E2E)`,
+      `${ALPHA} VSW_E2E`, `${BRAVO} VSW_E2E`, `${CHARLIE} VSW_E2E`, `${DELTA} VSW_E2E`,
     ]);
     await expect(schoolColumn(adminPage, 1)).toHaveText(["5", "3", "1", "1"]);
     await expect(schoolColumn(adminPage, 3)).toHaveText(["3", "1", "0", "0"]);
 
     await expect(statValue(adminPage, "Schools")).toHaveText("4");
-    await expect(statValue(adminPage, "Visits")).toHaveText("10");
+    await expect(statValue(adminPage, "Total visits")).toHaveText("10");
+    await expect(statValue(adminPage, "PMs")).toHaveText("1");
     await expect(statValue(adminPage, "Schools with recurring concerns")).toHaveText("2");
-    await expect(statValue(adminPage, "Open concerns")).toHaveText("7");
 
     // Alpha's three 2-visit concerns tie; the 15 Sep ones beat the 06 Aug one, then the lower id wins.
     await expect(schoolColumn(adminPage, 5).nth(0)).toHaveText(`${HTML_CONCERN}2 visits`);
@@ -368,23 +393,22 @@ test.describe("School Visit Summary — Recurring Concerns on the School-wise ta
   test("counts only Visits in view: dates and PMs change Recurring counts", async ({ adminPage }) => {
     // August only: Alpha's two same-day Visits are two mentions of "Lab equipment missing".
     await adminPage.goto(`/school-visit-summary?pms=${CONCERN_PM}&from=2026-08-01&to=2026-08-31`);
-    await expect(schoolColumn(adminPage, 0)).toHaveText([`${ALPHA} (VSW_E2E)`, `${BRAVO} (VSW_E2E)`]);
+    await expect(schoolColumn(adminPage, 0)).toHaveText([`${ALPHA} VSW_E2E`, `${BRAVO} VSW_E2E`]);
     await expect(schoolColumn(adminPage, 1)).toHaveText(["2", "1"]);
     await expect(schoolColumn(adminPage, 3)).toHaveText(["1", "0"]);
     await expect(schoolColumn(adminPage, 5).nth(0)).toHaveText("Lab equipment missing2 visits");
     await expect(statValue(adminPage, "Schools with recurring concerns")).toHaveText("1");
-    await expect(statValue(adminPage, "Open concerns")).toHaveText("2");
+    await expect(schoolRow(adminPage, ALPHA).getByRole("img", { name: "1–2 recurring concerns" })).toBeVisible();
 
     // Alpha over every Visit: the resolved concern, the highlight and the concern mentioned only
     // in the soft-deleted Visit don't count.
     await adminPage.goto(`/school-visit-summary?pms=${CONCERN_PM}&schools=VSWCONA`);
     await expect(schoolColumn(adminPage, 3)).toHaveText(["3"]);
-    await expect(statValue(adminPage, "Open concerns")).toHaveText("4");
+    await expect(schoolRow(adminPage, ALPHA).getByRole("img", { name: "3 or more recurring concerns" })).toBeVisible();
 
     // From September: the soft-deleted Visit's mention doesn't make "Timetable clashes" recur.
     await adminPage.goto(`/school-visit-summary?pms=${CONCERN_PM}&schools=VSWCONA&from=2026-09-01`);
     await expect(schoolColumn(adminPage, 3)).toHaveText(["0"]);
-    await expect(statValue(adminPage, "Open concerns")).toHaveText("3");
     await expect(schoolRow(adminPage, ALPHA).getByRole("img", { name: "Open concerns, none recurring" })).toBeVisible();
 
     // Adding the second PM's Visit makes "Library closed" recur at Bravo; the 3-visit concern stays top.
@@ -401,13 +425,13 @@ test.describe("School Visit Summary — Recurring Concerns on the School-wise ta
     await sortHeader(adminPage, /Recurring issues/).click();
     await expect(adminPage).toHaveURL(/[?&]sort=recurring&dir=asc(&|$)/);
     await expect(schoolColumn(adminPage, 0)).toHaveText([
-      `${CHARLIE} (VSW_E2E)`, `${DELTA} (VSW_E2E)`, `${BRAVO} (VSW_E2E)`, `${ALPHA} (VSW_E2E)`,
+      `${CHARLIE} VSW_E2E`, `${DELTA} VSW_E2E`, `${BRAVO} VSW_E2E`, `${ALPHA} VSW_E2E`,
     ]);
 
     await sortHeader(adminPage, /Recurring issues/).click();
     await expect(adminPage).toHaveURL(/[?&]sort=recurring&dir=desc(&|$)/);
     await expect(schoolColumn(adminPage, 0)).toHaveText([
-      `${ALPHA} (VSW_E2E)`, `${BRAVO} (VSW_E2E)`, `${CHARLIE} (VSW_E2E)`, `${DELTA} (VSW_E2E)`,
+      `${ALPHA} VSW_E2E`, `${BRAVO} VSW_E2E`, `${CHARLIE} VSW_E2E`, `${DELTA} VSW_E2E`,
     ]);
   });
 
@@ -416,11 +440,12 @@ test.describe("School Visit Summary — Recurring Concerns on the School-wise ta
 
     await adminPage.getByRole("checkbox", { name: "Recurring concerns only" }).check();
     await expect(adminPage).toHaveURL(/[?&]recurring=1(&|$)/);
-    await expect(schoolColumn(adminPage, 0)).toHaveText([`${ALPHA} (VSW_E2E)`, `${BRAVO} (VSW_E2E)`]);
+    await expect(schoolColumn(adminPage, 0)).toHaveText([`${ALPHA} VSW_E2E`, `${BRAVO} VSW_E2E`]);
     await expect(statValue(adminPage, "Schools")).toHaveText("2");
-    await expect(statValue(adminPage, "Visits")).toHaveText("8");
+    await expect(statValue(adminPage, "Total visits")).toHaveText("8");
     await expect(statValue(adminPage, "Schools with recurring concerns")).toHaveText("2");
-    await expect(statValue(adminPage, "Open concerns")).toHaveText("6");
+    await expect(adminPage.getByText("8 visits found", { exact: true })).toBeVisible();
+    await expect(adminPage.getByText("2 schools", { exact: true })).toBeVisible();
     await expect(tab(adminPage, "Visits")).toHaveAttribute("href", /[?&]recurring=1(&|$)/);
 
     await adminPage.getByRole("checkbox", { name: "Recurring concerns only" }).uncheck();
@@ -446,7 +471,7 @@ test.describe("School Visit Summary — Recurring Concerns on the School-wise ta
         await adminPage.goto(`/school-visit-summary?pms=${FIXTURE_PM}`);
         await expect(adminPage.getByText("Visit notes haven't been summarised yet")).toBeVisible();
         await expect(adminPage.getByText(/summarised up to/)).toHaveCount(0);
-        await expect(schoolColumn(adminPage, 0)).toHaveText([`${MIXED} (VSW_E2E)`, NO_REGION_NAME, `${PHYSICAL} (VSW_E2E)`]);
+        await expect(schoolColumn(adminPage, 0)).toHaveText([`${MIXED} VSW_E2E`, NO_REGION_NAME, `${PHYSICAL} VSW_E2E`]);
         await expect(schoolColumn(adminPage, 3)).toHaveText(["0", "0", "0"]);
       } finally {
         for (const row of saved) {
@@ -478,7 +503,7 @@ test.describe("School Visit Summary — Flags on the School-wise tab", () => {
     await adminPage.goto(`/school-visit-summary?pms=${BOTH_PMS}`);
 
     await expect(schoolColumn(adminPage, 0)).toHaveText([
-      `${MIXED} (VSW_E2E)`, NO_REGION_NAME, `${OLD} (VSW_E2E)`, `${PHYSICAL} (VSW_E2E)`,
+      `${MIXED} VSW_E2E`, NO_REGION_NAME, `${OLD} VSW_E2E`, `${PHYSICAL} VSW_E2E`,
     ]);
     await expect(schoolColumn(adminPage, 4)).toHaveText(["1", "0", "0", "2"]);
   });
@@ -490,13 +515,13 @@ test.describe("School Visit Summary — Flags on the School-wise tab", () => {
     await expect(adminPage).toHaveURL(/[?&]sort=flags&dir=desc(&|$)/);
     await expect(schoolColumn(adminPage, 4)).toHaveText(["2", "1", "0", "0"]);
     await expect(schoolColumn(adminPage, 0)).toHaveText([
-      `${PHYSICAL} (VSW_E2E)`, `${MIXED} (VSW_E2E)`, NO_REGION_NAME, `${OLD} (VSW_E2E)`,
+      `${PHYSICAL} VSW_E2E`, `${MIXED} VSW_E2E`, NO_REGION_NAME, `${OLD} VSW_E2E`,
     ]);
 
     await sortHeader(adminPage, /Flags/).click();
     await expect(adminPage).toHaveURL(/[?&]sort=flags&dir=asc(&|$)/);
     await expect(schoolColumn(adminPage, 0)).toHaveText([
-      NO_REGION_NAME, `${OLD} (VSW_E2E)`, `${MIXED} (VSW_E2E)`, `${PHYSICAL} (VSW_E2E)`,
+      NO_REGION_NAME, `${OLD} VSW_E2E`, `${MIXED} VSW_E2E`, `${PHYSICAL} VSW_E2E`,
     ]);
   });
 
@@ -504,7 +529,7 @@ test.describe("School Visit Summary — Flags on the School-wise tab", () => {
     await signInAs(page, SEATED_PM);
     await page.goto("/school-visit-summary");
 
-    await expect(schoolColumn(page, 0)).toHaveText([`${PHYSICAL} (VSW_E2E)`]);
+    await expect(schoolColumn(page, 0)).toHaveText([`${PHYSICAL} VSW_E2E`]);
     await expect(schoolColumn(page, 4)).toHaveText(["2"]);
   });
 });
@@ -529,7 +554,7 @@ test.describe("School Visit Summary — School page", () => {
       dir: "asc",
     };
     await adminPage.goto(`/school-visit-summary?${new URLSearchParams(filters)}`);
-    await expect(schoolColumn(adminPage, 0)).toHaveText([`${MIXED} (VSW_E2E)`, `${PHYSICAL} (VSW_E2E)`]);
+    await expect(schoolColumn(adminPage, 0)).toHaveText([`${MIXED} VSW_E2E`, `${PHYSICAL} VSW_E2E`]);
 
     // Anywhere on the row opens it, not only the School name.
     await schoolRow(adminPage, MIXED).locator("td:nth-child(2)").click();
@@ -540,7 +565,7 @@ test.describe("School Visit Summary — School page", () => {
     await adminPage.getByRole("link", { name: /Back to School-wise/ }).click();
     await expect(adminPage).toHaveURL(/\/school-visit-summary\?/);
     expect(Object.fromEntries(new URL(adminPage.url()).searchParams)).toEqual({ tab: "schools", ...filters });
-    await expect(schoolColumn(adminPage, 0)).toHaveText([`${MIXED} (VSW_E2E)`, `${PHYSICAL} (VSW_E2E)`]);
+    await expect(schoolColumn(adminPage, 0)).toHaveText([`${MIXED} VSW_E2E`, `${PHYSICAL} VSW_E2E`]);
   });
 
   test("lists teaching seats at the active physical Centres, CoE and Nodal apart", async ({ adminPage }) => {
@@ -596,13 +621,7 @@ test.describe("School Visit Summary — School page", () => {
 });
 
 // School page concern fixture: e2e/fixtures/migrations/20261027140400_seed_visit_summary_school_page_concerns_fixture.sql
-// (its header works out every section for VSWCONA). Compact Visit dates drop the year only in the
-// current IST year, so each literal is given both ways.
-const IN_FIXTURE_YEAR = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric" })
-  .format(new Date()) === "2026";
-function compactDates(inFixtureYear: string, otherYear: string) {
-  return IN_FIXTURE_YEAR ? inFixtureYear : otherYear;
-}
+// (its header works out every section for VSWCONA).
 
 function concernSection(page: Page, name: string) {
   return page.getByRole("region", { name, exact: true });

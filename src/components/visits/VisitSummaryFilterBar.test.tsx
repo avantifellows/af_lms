@@ -123,7 +123,7 @@ describe("VisitSummaryFilterBar", () => {
       { scroll: false }
     );
 
-    fireEvent.change(screen.getByLabelText("Required Completion"), { target: { value: "partial" } });
+    fireEvent.change(screen.getByLabelText("Required actions"), { target: { value: "partial" } });
     vi.advanceTimersByTime(300);
     expect(mockReplace).toHaveBeenLastCalledWith(
       "/school-visit-summary?bucket=partial",
@@ -235,7 +235,7 @@ describe("VisitSummaryFilterBar", () => {
     );
 
     const labels = screen
-      .getAllByText(/^(Region|School|PM|Status|Required Completion|Date Preset|From|To)$/)
+      .getAllByText(/^(Region|School|PM|Status|Required actions|Date preset|From|To)$/)
       .map((element) => element.textContent);
 
     expect(labels).toEqual([
@@ -243,61 +243,20 @@ describe("VisitSummaryFilterBar", () => {
       "School",
       "PM",
       "Status",
-      "Required Completion",
-      "Date Preset",
+      "Required actions",
+      "Date preset",
       "From",
       "To",
     ]);
   });
 
-  it("writes recurring=1 when Recurring concerns only is ticked, keeping the other params", () => {
-    render(
-      <VisitSummaryFilterBar
-        regionOptions={[]}
-        schoolOptions={[]}
-        pmOptions={[]}
-        currentParams={{ tab: "schools", pms: "pm@example.org", sort: "visits", dir: "asc" }}
-        showRecurringToggle
-      />
-    );
-
-    const toggle = screen.getByRole("checkbox", { name: "Recurring concerns only" });
-    expect(toggle).not.toBeChecked();
-    fireEvent.click(toggle);
-    vi.advanceTimersByTime(300);
-
-    expect(mockReplace).toHaveBeenCalledWith(
-      "/school-visit-summary?tab=schools&pms=pm%40example.org&sort=visits&dir=asc&recurring=1",
-      { scroll: false }
-    );
-  });
-
-  it("drops the recurring param when Recurring concerns only is unticked", () => {
+  it("no longer carries Recurring concerns only (it sits by the School-wise table)", () => {
     render(
       <VisitSummaryFilterBar
         regionOptions={[]}
         schoolOptions={[]}
         pmOptions={[]}
         currentParams={{ tab: "schools", recurring: "1" }}
-        showRecurringToggle
-      />
-    );
-
-    const toggle = screen.getByRole("checkbox", { name: "Recurring concerns only" });
-    expect(toggle).toBeChecked();
-    fireEvent.click(toggle);
-    vi.advanceTimersByTime(300);
-
-    expect(mockReplace).toHaveBeenCalledWith("/school-visit-summary?tab=schools", { scroll: false });
-  });
-
-  it("offers Recurring concerns only only when asked to", () => {
-    render(
-      <VisitSummaryFilterBar
-        regionOptions={[]}
-        schoolOptions={[]}
-        pmOptions={[]}
-        currentParams={{ tab: "visits", recurring: "1" }}
       />
     );
 
