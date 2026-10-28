@@ -771,7 +771,7 @@ function SchoolWiseTable({
             {header("last_visit", "Last visit")}
             {header("open", "Open concerns")}
             {header("recurring", "Recurring issues")}
-            {header("flags", "Flags")}
+            {header("flags", "Student flags")}
             <th className={`${SCHOOL_WISE_HEADER_CLASS} w-full text-left`}>Top recurring concern</th>
             <th className="w-10 px-2">
               <span className="sr-only">Open School page</span>

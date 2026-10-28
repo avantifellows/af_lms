@@ -837,7 +837,7 @@ describe("SchoolVisitSummaryPage", () => {
       const table = within(schoolWiseTable());
       // The sort arrow on the active column is decorative.
       expect(table.getAllByRole("columnheader").map((header) => header.textContent?.replace(/[↑↓]/g, ""))).toEqual([
-        "School", "Visits", "Last visit", "Open concerns", "Recurring issues", "Flags", "Top recurring concern", "Open School page",
+        "School", "Visits", "Last visit", "Open concerns", "Recurring issues", "Student flags", "Top recurring concern", "Open School page",
       ]);
       const [first, second] = table.getAllByRole("row").slice(1);
       const openCell = within(first).getAllByRole("cell")[3];
@@ -1125,7 +1125,7 @@ describe("SchoolVisitSummaryPage", () => {
 
         render(await SchoolVisitSummaryPage({ searchParams: Promise.resolve({}) }));
 
-        expect(within(schoolWiseTable()).getByRole("link", { name: "Flags" })).toBeInTheDocument();
+        expect(within(schoolWiseTable()).getByRole("link", { name: "Student flags" })).toBeInTheDocument();
         expect(flagsColumn()).toEqual(["2", "0"]);
       });
 
@@ -1166,7 +1166,7 @@ describe("SchoolVisitSummaryPage", () => {
 
         expect(schoolWiseSql()).toContain("ORDER BY open_flags DESC, school_name ASC, school_code ASC");
         expect(flagsColumn()).toEqual(["2", "0", "—"]);
-        expect(within(schoolWiseTable()).getByRole("link", { name: /Flags/ })).toHaveAttribute(
+        expect(within(schoolWiseTable()).getByRole("link", { name: /Student flags/ })).toHaveAttribute(
           "href",
           "/school-visit-summary?sort=flags&dir=asc"
         );

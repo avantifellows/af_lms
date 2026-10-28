@@ -398,7 +398,7 @@ test.describe("School Visit Summary — Recurring Concerns on the School-wise ta
 
     const headers = adminPage.getByRole("table", { name: "Schools with visits" }).getByRole("columnheader");
     await expect(headers).toHaveText([
-      "School", "Visits", "Last visit", "Open concerns", /^Recurring issues/, "Flags", "Top recurring concern", "Open School page",
+      "School", "Visits", "Last visit", "Open concerns", /^Recurring issues/, "Student flags", "Top recurring concern", "Open School page",
     ]);
     // No red circle or highlight: just the number, styled like Visits.
     const open = schoolColumn(adminPage, 3);
@@ -539,14 +539,14 @@ test.describe("School Visit Summary — Flags on the School-wise tab", () => {
   test("sorts by Flags both ways, ties by School name", async ({ adminPage }) => {
     await adminPage.goto(`/school-visit-summary?pms=${BOTH_PMS}`);
 
-    await sortHeader(adminPage, "Flags").click();
+    await sortHeader(adminPage, "Student flags").click();
     await expect(adminPage).toHaveURL(/[?&]sort=flags&dir=desc(&|$)/);
     await expect(schoolColumn(adminPage, 5)).toHaveText(["2", "1", "0", "0"]);
     await expect(schoolColumn(adminPage, 0)).toHaveText([
       `${PHYSICAL} VSW_E2E`, `${MIXED} VSW_E2E`, NO_REGION_NAME, `${OLD} VSW_E2E`,
     ]);
 
-    await sortHeader(adminPage, /Flags/).click();
+    await sortHeader(adminPage, /Student flags/).click();
     await expect(adminPage).toHaveURL(/[?&]sort=flags&dir=asc(&|$)/);
     await expect(schoolColumn(adminPage, 0)).toHaveText([
       NO_REGION_NAME, `${OLD} VSW_E2E`, `${MIXED} VSW_E2E`, `${PHYSICAL} VSW_E2E`,
