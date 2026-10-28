@@ -1,10 +1,12 @@
 // Field-level validation for the Blended Learning Manage page (pure and
-// client-safe): Resources and Common Action Items. The limits match the
-// db-service CHECKs on blended_learning_resources and
-// blended_learning_common_action_items; errors are keyed by field.
+// client-safe): Resources and Common Action Items, errors keyed by field.
+// The title limit matches the db-service CHECK on blended_learning_resources.
 
 export const RESOURCE_TITLE_MAX = 200;
-export const COMMON_ITEM_TEXT_MAX = 500;
+// Shorter than the DB's 500 (blended_learning_common_action_items and
+// blended_learning_action_items): a pushed item is one concise line, as a
+// Mentor's own items are.
+export const COMMON_ITEM_TEXT_MAX = 200;
 export const COMMON_ITEM_OWNERS = ["student", "mentor", "parent"] as const;
 const COMMON_TARGET_GRADES = [12, 13] as const;
 // The most Student IDs one paste may list, and the longest ID.

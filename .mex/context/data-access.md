@@ -21,7 +21,7 @@ edges:
     condition: when adding a write that must proxy to the DB Service
   - target: patterns/add-api-route.md
     condition: when adding a route that reads or writes
-last_updated: 2026-10-27
+last_updated: 2026-10-28
 ---
 
 # Data Access
@@ -551,14 +551,31 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   `src/lib/blended-learning-profile-doc-dates.ts`: the doc's latest dated conversation only).
   With docs, every matched Student is considered, so a stored Profile Doc link still gives a
   date when the workbook row has none; a Student with no link and no stored row gets no row.
-  `legacy_conversation_summary` and `legacy_action_items` (jsonb `[{text, owner, done_at?, done_by_email?}]`, 1–10;
-  db-service migration `20261027100000`, mirrored in e2e fixture
-  `20261027100000_add_blended_learning_legacy_conversation.sql`) are selected and written only
+  `legacy_conversation_summary` (db-service migration `20261027100000`, mirrored in e2e fixture
+  `20261027100000_add_blended_learning_legacy_conversation.sql`) is selected and written only
   with `--legacy-conversations` too (validation in
   `src/lib/blended-learning-legacy-conversations.ts`): the file's entry for a `dated` doc on
-  that same date, NULL otherwise; an unreadable doc keeps them. The upsert names only the
-  columns the run owns (fixed literals; values bound).
+  that same date, NULL otherwise; an unreadable doc keeps it. The upsert names only the
+  columns the run owns (fixed literals; values bound). The same run syncs that Student's
+  **Profile Doc Action Items** (`blended_learning_action_items.from_profile_doc = true`,
+  `conversation_id` NULL, `bl_action_items_source_check`: a Conversation XOR the Profile Doc;
+  partial unique `bl_action_items_profile_doc_unique` on (student_id, text, owner)): insert
+  missing ones open, keep matching ones (open or done), delete only open ones the file no
+  longer lists (all open ones when the summary is NULL); three batched statements, the DELETE
+  re-checking `status = 'open'`.
   Runbook: `patterns/load-blended-learning-links.md`.
+- **Profile Doc entry on the Mentee pages:** `getMenteeDetail` adds a `kind: "profile_doc"`
+  history entry (`legacy_last_contact_on`, the summary, every Profile Doc Action Item with its
+  status, the Profile Doc URL) at its date, after the app's entries of that date; it needs a
+  date and a summary or an item. It is history, never a Conversation: "Conversations (N)",
+  Last Contact (still `legacy_last_contact_on`), list stats and first-conversation logic count
+  only `blended_learning_conversations` rows. Its open items are in `openActionItems` with
+  `source: "profile_doc"` and `agreedOn` = that date (meta "From Profile Doc · <date>"), and are
+  ticked done from the log form through the normal save (`completeActionItems`). The detail page
+  renders the entry like a Conversation (Summary, Action items with Open/Done, "Open Profile
+  Doc"), admins read-only; the log page's Last Conversation panel shows it while it is the
+  latest. Owner pills are a fixed `w-16` column (`ACTION_ITEM_ROW_CLASSES` in
+  `ActionItemMeta.tsx`) so item text lines up whoever owns it.
 
 ## Blended Learning Manage: Resources and Common Action Items (2026-10-27)
 
@@ -569,7 +586,8 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   `blended_learning_common_action_items` (text ≤ 500, owner, `target_kind` `all|grade|mentor` with
   `target_grade` 12/13 or `target_mentor_user_id`, `created_by_email`, soft removal
   `removed_at` + `removed_by_email`). `blended_learning_action_items.conversation_id` is now
-  nullable, `common_action_item_id` is new, `bl_action_items_source_check` requires exactly one,
+  nullable, `common_action_item_id` is new, `bl_action_items_source_check` requires exactly one of
+  `conversation_id`, `common_action_item_id` and `from_profile_doc` (the Profile Doc carry-over's flag),
   and `bl_action_items_common_student_unique` is the partial unique index
   `(common_action_item_id, student_id) WHERE common_action_item_id IS NOT NULL`. Pushed rows use
   `position` 1. All reads and writes are direct SQL (`query()` / `withTransaction`), gated by
@@ -599,31 +617,24 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   open / done counts and `notYetAdded` (targeted Students without a row: what Push again adds).
 - **Action-item queries audited for NULL `conversation_id`:** `getMenteeDetail` reads every row
   by `student_id` (no join) and now builds `openActionItems` from Conversation rows (as before)
-  plus pushed rows (`common: true`, `agreedOn` = the IST date the row was inserted), newest date
-  first; `groupBy` skips NULL `conversation_id`, so pushed rows never appear in a Conversation's
+  plus the rows with no Conversation: Profile Doc ones (`source: "profile_doc"`) and pushed ones
+  (`source: "common"`, `agreedOn` = the IST date the row was inserted), newest date first;
+  `groupBy` skips NULL `conversation_id`, so pushed rows never appear in a Conversation's
   history. `logEntry`'s tick `UPDATE … WHERE id = ANY($3) AND status = 'open' AND student_id = $4`
   needs no change: a pushed row is ticked like any other (a removal racing the tick → 409).
-  `insertActionItems`, the e2e seeds and the draft review read paths only touch Conversation rows.
-  Nothing else in `src/`, `scripts/` or `e2e/` reads the table (no list counts, flags or exports).
+  `insertActionItems` and the draft review read paths only touch Conversation rows; the links
+  importer's Profile Doc sync and the e2e seed's Profile Doc rows only touch `from_profile_doc`
+  rows. Nothing else in `src/`, `scripts/` or `e2e/` reads the table (no list counts, flags or
+  exports).
 - **UI:** `/blended-learning/manage` (`src/app/blended-learning/manage/`): `ResourcesManager`
   (add / inline edit / ↑ ↓ / remove after `ConfirmDialog`) and `CommonActionItemsManager` with
-  `NewCommonItemForm` (text, owner, target radio + Grade/Mentor select or Student IDs textarea, live preview with the unmatched IDs, confirm
+  `NewCommonItemForm` (who does it and the action item side by side on one line, as on the log form,
+  stacked on a phone; 200 characters in the form and in `validateCommonItemEdit`, though the DB
+  allows 500; target radio + Grade/Mentor select or Student IDs textarea, live preview with the unmatched IDs, confirm
   before push; 422 field errors go back inline). Every change calls `router.refresh()`. The open
   items on the detail page and the log form show a "From program" tag (the UI name; code and DB keep "common") and "Added <date>"
-  (`ActionItemMeta` `common`).
+  (`ActionItemMeta` `source="common"`).
 - **E2E:** `e2e/fixtures/migrations/20261027120000_add_blended_learning_manage.sql` mirrors the
   migration (pg_dump-identical, seed row included). `blended-learning-manage.spec.ts` uses Mentor D
   (`BLENDED_MENTOR_D`) and `MANAGE_MENTEES` (G1, G2 mapped; G3 mapped by the spec to test Push
   again) and removes the Resources it adds, so later specs see only the Mentor Toolkit.
-- **Profile Doc snapshot on the Mentee pages:** `getMenteeDetail` returns
-  `legacyConversation` (`legacy_last_contact_on`, summary, items with index / done state,
-  Profile Doc URL): in full while the Student has no `kind = 'conversation'` row (Attempts
-  don't count), then `superseded` (action items only, compact) while any item is still open;
-  null once all are done. The detail page shows it near the top (next to Open Action Items,
-  admins too) and the log page in the side panel. The log form is never pre-filled.
-  Each item has a Done checkbox: `PATCH /api/blended-learning/students/[id]/legacy-action-items`
-  (`src/lib/blended-learning-legacy-action-items.ts`) sets or clears `done_at` /
-  `done_by_email` on that array element in one UPDATE. Only the Student's own Mentor (403
-  otherwise; admins see disabled boxes); the element must still have the text and owner the
-  Mentor saw, else 409 (a re-import changed the list). Re-imports keep the done state of
-  items whose text and owner are unchanged.

@@ -17,9 +17,8 @@ import {
 
 import { BlendedSelect } from "../BlendedSelect";
 import { ConfirmDialog } from "./ConfirmDialog";
-import { FieldError, TextAreaField } from "./fields";
+import { ActionItemFields, FieldError } from "./fields";
 import { manageRequest, students } from "./manageRequest";
-import { OwnerSelect } from "./OwnerSelect";
 import { targetLabel } from "./targetLabel";
 import { apiTarget, PreviewLine, UnmatchedIds, useTargetPreview, type TargetDraft } from "./targetPreview";
 
@@ -171,18 +170,14 @@ export function NewCommonItemForm({ mentors }: { mentors: TargetMentor[] }) {
 
   return (
     <form onSubmit={form.review} aria-label="New program action item" className="space-y-4">
-      <TextAreaField
-        label="Action item"
-        value={draft.text}
+      <ActionItemFields
+        text={draft.text}
+        owner={draft.owner}
         maxLength={COMMON_ITEM_TEXT_MAX}
-        onChange={(text) => form.change({ text })}
-        error={form.errors.text}
+        onTextChange={(text) => form.change({ text })}
+        onOwnerChange={(owner) => form.change({ owner })}
+        errors={form.errors}
       />
-      <div className="sm:max-w-xs">
-        <FormLabel htmlFor="common-item-owner">Who does it</FormLabel>
-        <OwnerSelect id="common-item-owner" value={draft.owner} onChange={(owner) => form.change({ owner })} />
-        <FieldError message={form.errors.owner} />
-      </div>
       <TargetChoice draft={draft} mentors={mentors} errors={form.errors} onChange={form.change} />
       <PreviewLine draft={draft} preview={preview} />
       <Button type="submit" disabled={count === 0} className="w-full sm:w-auto">

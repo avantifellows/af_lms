@@ -319,7 +319,7 @@ test.describe("Blended Learning Manage — Common Action Items", () => {
     await edit.getByLabel("Action item").fill(edited);
     await edit.getByLabel("Who does it").selectOption({ label: "Parent" });
     await edit.getByRole("button", { name: "Save" }).click();
-    // The open textarea holds the new text too, so wait for the form to close.
+    // The open input holds the new text too, so wait for the form to close.
     await expect(edit).toHaveCount(0);
     const editedItem = commonItem(page, edited);
     await expect(editedItem.getByRole("button", { name: `Edit: ${edited}` })).toBeVisible();

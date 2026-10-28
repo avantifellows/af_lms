@@ -5,7 +5,6 @@ import {
   canAccessBlendedStudent,
   type BlendedLearningAccess,
 } from "./blended-learning-access";
-import { storedLegacyActionItems } from "./blended-learning-legacy-conversations";
 import type { OpenDraftState } from "./blended-learning-mentees";
 import { getObjectText, headObject, presignDocumentPage } from "./s3";
 
@@ -23,9 +22,14 @@ export type ActionItem = {
   owner: ActionItemOwner;
   status: "open" | "done";
 };
-// An open Action Item with the date of the Conversation that agreed it, or,
-// for one pushed from a Common Action Item (`common`), the date it was pushed.
-export type OpenActionItem = Omit<ActionItem, "status"> & { agreedOn: string; common?: boolean };
+// Where an Action Item came from: a Conversation, the latest entry in the
+// Student's Profile Doc (from_profile_doc), or a Common Action Item pushed
+// to the Student. The DB holds each row to exactly one of these.
+export type ActionItemSource = "conversation" | "profile_doc" | "common";
+// An open Action Item with the date of the Conversation that agreed it (for
+// a Profile Doc one, that entry's date, legacy_last_contact_on; for a pushed
+// one, the date it was pushed).
+export type OpenActionItem = Omit<ActionItem, "status"> & { agreedOn: string; source: ActionItemSource };
 export type FlagRecipient = "emotional_wellbeing" | "physics" | "chemistry" | "maths";
 export type MentorFlag = { recipient: FlagRecipient; comment: string | null };
 
@@ -47,30 +51,18 @@ export type HistoryEntry =
       photoCount: number;
       actionItems: ActionItem[];
       flags: MentorFlag[];
+    }
+  // The latest entry in the Student's legacy Google Profile Doc, at its date
+  // (legacy_last_contact_on): its summary and its Profile Doc Action Items.
+  // History, never a Conversation: it is not counted as one anywhere.
+  | {
+      kind: "profile_doc";
+      id: 0;
+      occurredOn: string;
+      summary: string | null;
+      actionItems: ActionItem[];
+      profileDocUrl: string | null;
     };
-
-// One of the Profile Doc conversation's action items. `index` is its place
-// in the stored array, which a tick updates by; a ticked item has doneAt.
-export type LegacyActionItemView = {
-  index: number;
-  text: string;
-  owner: ActionItemOwner;
-  doneAt: string | null;
-  doneByEmail: string | null;
-};
-
-// The latest conversation in the Student's legacy Google Profile Doc, from
-// the links importer's snapshot. Before the first Conversation in the app it
-// is shown in full; after it, only while one of its action items is open.
-export type LegacyConversation = {
-  // A Conversation has been logged in the app: show the action items only.
-  superseded: boolean;
-  // legacy_last_contact_on: the date of that Profile Doc entry.
-  occurredOn: string | null;
-  summary: string;
-  actionItems: LegacyActionItemView[];
-  profileDocUrl: string | null;
-};
 
 export type MenteeDetail = {
   studentId: number;
@@ -84,15 +76,13 @@ export type MenteeDetail = {
   profileDocUrl: string | null;
   screenerUrl: string | null;
   openDraft: { id: number; state: OpenDraftState } | null;
-  // Newest first by (occurred_on, id), Conversations and Attempts interleaved.
+  // Newest first by (occurred_on, id), Conversations and Attempts
+  // interleaved, with the Profile Doc entry after the app's entries of its
+  // date.
   history: HistoryEntry[];
-  // Open Action Items from earlier Conversations and Common Action Items,
-  // newest first by agreed (or pushed) date.
+  // Open Action Items from earlier Conversations, the Profile Doc and
+  // Common Action Items, newest first by agreed (or pushed) date.
   openActionItems: OpenActionItem[];
-  // The Profile Doc's latest conversation: in full while the Student has no
-  // Conversation in the app (Attempts don't count), then only while one of its
-  // action items is still open.
-  legacyConversation: LegacyConversation | null;
   // The Mentor of the Student's active Mapping, for an admin's way back to
   // that Mentor's list.
   mentor: { userId: number; firstName: string };
@@ -110,7 +100,6 @@ type ProfileRow = {
   screener_url: string | null;
   legacy_last_contact_on: string | null;
   legacy_conversation_summary: string | null;
-  legacy_action_items: unknown;
   open_draft_id: number | string | null;
   open_draft_state: OpenDraftState | null;
   mentor_user_id: number | string;
@@ -156,15 +145,17 @@ export function contactNumbers(
 
 type ActionItemRow = {
   conversation_id: number | string | null;
+  from_profile_doc: boolean;
   id: number | string;
   text: string;
   owner: ActionItemOwner;
   status: "open" | "done";
-  // IST date it was added: when a Common Action Item was pushed.
+  // IST date it was added: when a Common Action Item was pushed, or a
+  // Profile Doc item's date when its entry has none.
   added_on: string;
 };
 
-// Rows by Conversation; Action Items pushed from a Common Action Item have no
+// Rows by Conversation; Profile Doc and pushed Action Items have no
 // Conversation and are left out.
 function groupBy<T extends { conversation_id: number | string | null }>(rows: T[]): Map<number, T[]> {
   const groups = new Map<number, T[]>();
@@ -176,20 +167,30 @@ function groupBy<T extends { conversation_id: number | string | null }>(rows: T[
   return groups;
 }
 
+function toActionItem(item: ActionItemRow): ActionItem {
+  return { id: Number(item.id), text: item.text, owner: item.owner, status: item.status };
+}
+
 function openItem(item: ActionItemRow, agreedOn: string): OpenActionItem {
   return {
     id: Number(item.id),
     text: item.text,
     owner: item.owner,
     agreedOn,
-    common: item.conversation_id === null,
+    source: itemSource(item),
   };
 }
 
-// Open items from each Conversation (newest Conversation first) and from
-// Common Action Items, ordered newest first by date; on the same date the
-// Conversations' order holds and pushed items follow.
+function itemSource(item: ActionItemRow): ActionItemSource {
+  if (item.from_profile_doc) return "profile_doc";
+  return item.conversation_id === null ? "common" : "conversation";
+}
+
+// Open items from each Conversation (newest Conversation first), from the
+// Profile Doc and from Common Action Items, newest first by date; on the
+// same date the Conversations' order holds and the others follow.
 function openActionItems(
+  profile: ProfileRow,
   entries: EntryRow[],
   itemsByConversation: Map<number, ActionItemRow[]>,
   items: ActionItemRow[]
@@ -199,30 +200,68 @@ function openActionItems(
       .filter((item) => item.status === "open")
       .map((item) => openItem(item, entry.occurred_on))
   );
-  const pushed = items
+  const withoutConversation = items
     .filter((item) => item.conversation_id === null && item.status === "open")
-    .map((item) => openItem(item, item.added_on));
-  return [...fromConversations, ...pushed].sort((a, b) => b.agreedOn.localeCompare(a.agreedOn));
+    .map((item) =>
+      openItem(item, item.from_profile_doc ? (profile.legacy_last_contact_on ?? item.added_on) : item.added_on)
+    );
+  return [...fromConversations, ...withoutConversation].sort((a, b) => b.agreedOn.localeCompare(a.agreedOn));
 }
 
-// The Profile Doc snapshot: in full before the first Conversation in the
-// app, then only while an action item is open; null when there is none.
-function legacyConversation(profile: ProfileRow, entries: EntryRow[]): LegacyConversation | null {
+// The Profile Doc entry for the history: at its date, with its summary or
+// at least one Profile Doc Action Item; null otherwise.
+function profileDocEntry(profile: ProfileRow, items: ActionItemRow[]): HistoryEntry | null {
   const summary = present(profile.legacy_conversation_summary);
-  if (!summary) return null;
-  const actionItems = storedLegacyActionItems(profile.legacy_action_items).map(
-    (item): LegacyActionItemView => ({
-      index: item.index,
-      text: item.text,
-      owner: item.owner,
-      doneAt: item.done_at,
-      doneByEmail: item.done_by_email,
-    })
-  );
-  const superseded = entries.some((entry) => entry.kind === "conversation");
-  if (superseded && actionItems.every((item) => item.doneAt !== null)) return null;
-  return { superseded, occurredOn: profile.legacy_last_contact_on, summary, actionItems, profileDocUrl: present(profile.profile_doc_url) };
+  const actionItems = items.filter((item) => item.from_profile_doc).map(toActionItem);
+  if (!profile.legacy_last_contact_on || (!summary && actionItems.length === 0)) return null;
+  return {
+    kind: "profile_doc",
+    id: 0,
+    occurredOn: profile.legacy_last_contact_on,
+    summary,
+    actionItems,
+    profileDocUrl: present(profile.profile_doc_url),
+  };
 }
+
+// The app's entries (newest first) with the Profile Doc entry after those of
+// its date and later.
+function withProfileDocEntry(history: HistoryEntry[], entry: HistoryEntry | null): HistoryEntry[] {
+  if (!entry) return history;
+  const index = history.findIndex((other) => other.occurredOn < entry.occurredOn);
+  return index < 0 ? [...history, entry] : [...history.slice(0, index), entry, ...history.slice(index)];
+}
+
+function historyEntry(
+  entry: EntryRow,
+  itemsByConversation: Map<number, ActionItemRow[]>,
+  flagsByConversation: Map<number, FlagRow[]>
+): HistoryEntry {
+  const id = Number(entry.id);
+  if (entry.kind === "attempt") {
+    return { kind: "attempt", id, occurredOn: entry.occurred_on, note: entry.attempt_note };
+  }
+  return {
+    kind: "conversation",
+    id,
+    occurredOn: entry.occurred_on,
+    mode: entry.mode ?? "call",
+    spokeWith: entry.spoke_with ?? "student",
+    durationMinutes: Number(entry.duration_minutes),
+    summary: entry.summary ?? "",
+    hasNotes: entry.has_notes,
+    hasRecording: entry.has_recording,
+    hasTranscript: entry.has_transcript,
+    photoCount: Number(entry.photo_count),
+    actionItems: (itemsByConversation.get(id) ?? []).map(toActionItem),
+    flags: (flagsByConversation.get(id) ?? []).map((flag) => ({
+      recipient: flag.recipient,
+      comment: flag.comment,
+    })),
+  };
+}
+
+type FlagRow = { conversation_id: number | string; recipient: FlagRecipient; comment: string | null };
 
 // One Mentee's profile, contact, links, open draft and history. Null when
 // the Student is out of the actor's scope or has no active Mapping.
@@ -237,7 +276,7 @@ export async function getMenteeDetail(
             current_grade.number AS grade, program.name AS program_name,
             links.profile_doc_url, links.screener_url,
             links.legacy_last_contact_on::text AS legacy_last_contact_on,
-            links.legacy_conversation_summary, links.legacy_action_items,
+            links.legacy_conversation_summary,
             open_draft.id AS open_draft_id, open_draft.state AS open_draft_state,
             mapping.mentor_user_id,
             COALESCE(NULLIF(TRIM(mentor.first_name), ''), NULLIF(TRIM(mentor.last_name), ''),
@@ -279,14 +318,14 @@ export async function getMenteeDetail(
       [studentId]
     ),
     query<ActionItemRow>(
-      `SELECT conversation_id, id, text, owner, status,
+      `SELECT conversation_id, from_profile_doc, id, text, owner, status,
               ((inserted_at AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Kolkata')::date::text AS added_on
        FROM blended_learning_action_items
        WHERE student_id = $1
        ORDER BY conversation_id, position, id`,
       [studentId]
     ),
-    query<{ conversation_id: number | string; recipient: FlagRecipient; comment: string | null }>(
+    query<FlagRow>(
       `SELECT conversation_id, recipient, comment
        FROM blended_learning_mentor_flags
        WHERE student_id = $1
@@ -296,12 +335,6 @@ export async function getMenteeDetail(
     ),
   ]);
   const itemsByConversation = groupBy(actionItems);
-  const toActionItem = (item: (typeof actionItems)[number]): ActionItem => ({
-    id: Number(item.id),
-    text: item.text,
-    owner: item.owner,
-    status: item.status,
-  });
   const flagsByConversation = groupBy(flags);
 
   return {
@@ -318,32 +351,11 @@ export async function getMenteeDetail(
         ? null
         : { id: Number(profile.open_draft_id), state: profile.open_draft_state },
     mentor: { userId: Number(profile.mentor_user_id), firstName: profile.mentor_first_name },
-    legacyConversation: legacyConversation(profile, entries),
-    openActionItems: openActionItems(entries, itemsByConversation, actionItems),
-    history: entries.map((entry): HistoryEntry => {
-      const id = Number(entry.id);
-      if (entry.kind === "attempt") {
-        return { kind: "attempt", id, occurredOn: entry.occurred_on, note: entry.attempt_note };
-      }
-      return {
-        kind: "conversation",
-        id,
-        occurredOn: entry.occurred_on,
-        mode: entry.mode ?? "call",
-        spokeWith: entry.spoke_with ?? "student",
-        durationMinutes: Number(entry.duration_minutes),
-        summary: entry.summary ?? "",
-        hasNotes: entry.has_notes,
-        hasRecording: entry.has_recording,
-        hasTranscript: entry.has_transcript,
-        photoCount: Number(entry.photo_count),
-        actionItems: (itemsByConversation.get(id) ?? []).map(toActionItem),
-        flags: (flagsByConversation.get(id) ?? []).map((flag) => ({
-          recipient: flag.recipient,
-          comment: flag.comment,
-        })),
-      };
-    }),
+    openActionItems: openActionItems(profile, entries, itemsByConversation, actionItems),
+    history: withProfileDocEntry(
+      entries.map((entry) => historyEntry(entry, itemsByConversation, flagsByConversation)),
+      profileDocEntry(profile, actionItems)
+    ),
   };
 }
 

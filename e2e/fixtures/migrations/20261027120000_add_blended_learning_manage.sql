@@ -101,15 +101,21 @@ ALTER TABLE blended_learning_common_action_items ADD CONSTRAINT bl_common_action
     )
   );
 
-ALTER TABLE blended_learning_action_items ALTER COLUMN conversation_id DROP NOT NULL;
-
+-- conversation_id is already nullable (20261027100000, the Profile Doc). A pushed
+-- Action Item has no Conversation either; each row has exactly one source.
 ALTER TABLE blended_learning_action_items
   ADD COLUMN common_action_item_id bigint
     CONSTRAINT blended_learning_action_items_common_action_item_id_fkey
     REFERENCES blended_learning_common_action_items(id);
 
+ALTER TABLE blended_learning_action_items DROP CONSTRAINT bl_action_items_source_check;
+
 ALTER TABLE blended_learning_action_items ADD CONSTRAINT bl_action_items_source_check
-  CHECK ((conversation_id IS NULL) <> (common_action_item_id IS NULL));
+  CHECK (
+    (conversation_id IS NOT NULL)::integer
+      + (common_action_item_id IS NOT NULL)::integer
+      + from_profile_doc::integer = 1
+  );
 
 CREATE UNIQUE INDEX bl_action_items_common_student_unique
   ON blended_learning_action_items (common_action_item_id, student_id)

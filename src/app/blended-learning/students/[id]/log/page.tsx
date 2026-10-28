@@ -1,4 +1,4 @@
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, FileText } from "lucide-react";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
@@ -15,7 +15,7 @@ import { getTodayIST } from "@/lib/curriculum-date-helpers";
 import { loadDashboardChrome } from "@/lib/dashboard-chrome";
 
 import { BlendedPageShell } from "../../../BlendedPageShell";
-import { LegacyConversationCard } from "../LegacyConversationCard";
+import { ExternalLink } from "../../../ExternalLink";
 import { LogEntryForm, type ReviewDraft } from "./LogEntryForm";
 
 // Log a Conversation or an Attempt for one Mentee. Only a Mentor logs, for
@@ -65,39 +65,48 @@ async function currentListGroup(
   return row ? menteeGroup(row.reasons) : null;
 }
 
-// The last Conversation in the app; before the first one, the Profile Doc's
-// latest conversation when there is one. After it, the Profile Doc's still
-// open action items follow it.
-function LastConversationPanels({ mentee, conversation }: { mentee: MenteeDetail; conversation: Conversation | null }) {
-  const legacy = mentee.legacyConversation;
-  const legacyCard = legacy && (
-    <LegacyConversationCard legacy={legacy} studentId={mentee.studentId} canTick headingLevel="h3" />
+type Conversation = Extract<HistoryEntry, { kind: "conversation" }>;
+type ProfileDocHistoryEntry = Extract<HistoryEntry, { kind: "profile_doc" }>;
+
+// The latest earlier conversation: one logged in the app, or the Profile
+// Doc's latest entry when that is newer (as before the first one here).
+function lastConversation(mentee: MenteeDetail): Conversation | ProfileDocHistoryEntry | null {
+  return (
+    mentee.history.find(
+      (entry): entry is Conversation | ProfileDocHistoryEntry => entry.kind === "conversation" || entry.kind === "profile_doc"
+    ) ?? null
   );
-  if (!conversation && legacyCard) return legacyCard;
+}
+
+function ProfileDocSummary({ entry }: { entry: ProfileDocHistoryEntry }) {
   return (
     <>
-      <LastConversationPanel conversation={conversation} />
-      {legacyCard}
+      <p className="text-sm font-bold text-text-primary">{formatCalendarDate(entry.occurredOn)}</p>
+      <p className="text-xs text-text-secondary">From Profile Doc</p>
+      {entry.summary && <p className="whitespace-pre-line break-words text-sm text-text-primary">{entry.summary}</p>}
+      {entry.profileDocUrl && (
+        <ExternalLink href={entry.profileDocUrl} icon={FileText}>
+          Open Profile Doc
+        </ExternalLink>
+      )}
     </>
   );
 }
 
-type Conversation = Extract<HistoryEntry, { kind: "conversation" }>;
-
-function LastConversationPanel({ conversation }: { conversation: Conversation | null }) {
+function LastConversationPanel({ conversation }: { conversation: Conversation | ProfileDocHistoryEntry | null }) {
   return (
     <section aria-label="Last Conversation">
       <Card elevation="sm" className="space-y-2 p-4">
         <h3 className="text-xs font-bold uppercase tracking-wide text-text-muted">Last Conversation</h3>
-        {conversation ? (
+        {conversation?.kind === "profile_doc" && <ProfileDocSummary entry={conversation} />}
+        {conversation?.kind === "conversation" && (
           <>
             <p className="text-sm font-bold text-text-primary">{formatCalendarDate(conversation.occurredOn)}</p>
             <p className="text-xs text-text-secondary">{describeSession(conversation)}</p>
             <p className="whitespace-pre-line break-words text-sm text-text-primary">{conversation.summary}</p>
           </>
-        ) : (
-          <p className="text-sm text-text-secondary">No earlier Conversation. This will be the first one.</p>
         )}
+        {!conversation && <p className="text-sm text-text-secondary">No earlier Conversation. This will be the first one.</p>}
       </Card>
     </section>
   );
@@ -111,9 +120,6 @@ export default async function LogEntryPage({ params }: { params: Promise<{ id: s
   const mentee = await getMenteeDetail(access, Number(id));
   if (!mentee) notFound();
 
-  const lastConversation =
-    mentee.history.find((entry): entry is Extract<HistoryEntry, { kind: "conversation" }> => entry.kind === "conversation") ??
-    null;
   const firstName = mentee.name.split(" ")[0] || mentee.name;
   const subtitle = [mentee.name, mentee.grade !== null ? `Grade ${mentee.grade}` : null, mentee.programName]
     .filter(Boolean)
@@ -143,7 +149,7 @@ export default async function LogEntryPage({ params }: { params: Promise<{ id: s
         subtitle={subtitle}
         today={today}
         listGroup={listGroup}
-        lastConversationPanel={<LastConversationPanels mentee={mentee} conversation={lastConversation} />}
+        lastConversationPanel={<LastConversationPanel conversation={lastConversation(mentee)} />}
         openActionItems={mentee.openActionItems}
         hasOpenDraft={mentee.openDraft !== null}
         draft={draft}
