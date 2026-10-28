@@ -65,7 +65,7 @@ const CHAPTER_CARD_COHORT =
 
 // Test formats that count as "major" (i.e. the Full Tests tab) — these also have
 // real Academic Level (AL) values populated on the section='overall' row.
-export const MAJOR_TEST_FORMATS = [
+const MAJOR_TEST_FORMATS = [
   "major_test",
   "mock_test",
   "part_test",

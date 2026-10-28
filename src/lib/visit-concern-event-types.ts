@@ -1,9 +1,9 @@
 // Client-safe actions and limits for Visit Concern history writes. The write module
 // (`visit-concern-events.ts`) imports the database, so client components import from here instead.
 
-export const VISIT_CONCERN_EVENT_BODY_MAX_LENGTH = 2000;
+const VISIT_CONCERN_EVENT_BODY_MAX_LENGTH = 2000;
 
-export const VISIT_CONCERN_ACTIONS = ["resolve", "comment", "reopen"] as const;
+const VISIT_CONCERN_ACTIONS = ["resolve", "comment", "reopen"] as const;
 export type VisitConcernAction = (typeof VISIT_CONCERN_ACTIONS)[number];
 
 export function isVisitConcernAction(value: unknown): value is VisitConcernAction {

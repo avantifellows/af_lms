@@ -41,7 +41,7 @@ export type RemarkEntry = { label: string; text: string };
 
 export type ActionTypeRollupStatus = "completed" | "in_progress" | "pending" | "not_started";
 export type ActionCompletionBucket = "none" | "partial" | "all_present" | "all_complete";
-export type DateRangePreset = "1d" | "7d" | "30d" | "90d" | "1y" | "all";
+type DateRangePreset = "1d" | "7d" | "30d" | "90d" | "1y" | "all";
 
 const STATUS_RANK: Record<ActionTypeRollupStatus, number> = {
   not_started: 0,
@@ -223,7 +223,7 @@ export function searchParamsWithout(
   return params;
 }
 
-export const VISIT_SUMMARY_VISITS_TAB_HREF = "/school-visit-summary?tab=visits";
+const VISIT_SUMMARY_VISITS_TAB_HREF = "/school-visit-summary?tab=visits";
 
 // The Visit Summary list or one of its School pages, with an optional query; nothing else.
 const VISIT_SUMMARY_BACK_HREF = /^\/school-visit-summary(?:\/schools\/[^/?#\\]+)?(?:\?[^#\\]*)?$/;
