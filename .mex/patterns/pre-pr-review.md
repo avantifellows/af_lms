@@ -146,11 +146,11 @@ npm run build                    # when routes, config or server/client boundari
   server (`DATABASE_NAME`) and a DB Service worktree at the clone, so reads and writes see the same rows. DB Service
   takes its dev database name from `config/dev.exs` (`database: "dbservice_dev"`, port 4000), not from env: change
   `database:` in that worktree only, don't commit it, and run it on :4000 so af_lms's `DB_SERVICE_URL` still
-  reaches it. Then save
-  through the real page or route and read the row back with SQL. The clone starts from the local dump, not staging,
-  so pick write cases the dump has, or insert the rows a real case needs into the clone. Take a
-  real record and change one field at a time, including blanking it: rules that check the submitted form instead of
-  the saved record let impossible combinations through. Drop the clone afterwards.
+  reaches it. Then save through the real page or route and read the row back with SQL. The clone starts from the
+  local dump, not staging, so pick write cases the dump has, or insert the rows a real case needs into the clone.
+  Take a real record and change one field at a time, including blanking it: rules that check the submitted form
+  instead of the saved record let impossible combinations through. Drop the clone afterwards, and revert the
+  `config/dev.exs` change.
 - For each case, write what the base shows next to what the branch shows. **Anything the base showed that the branch
   no longer shows is a finding**, unless the PR says it was removed on purpose.
 - When the change replaces a screen, the old screen must still appear wherever the new one doesn't apply or fails.
