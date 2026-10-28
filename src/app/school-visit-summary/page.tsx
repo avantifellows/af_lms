@@ -1,6 +1,5 @@
 import Link from "next/link";
 
-import StatCard from "@/components/StatCard";
 import ClickableTableRow from "@/components/visits/ClickableTableRow";
 import GpsMapLink from "@/components/visits/GpsMapLink";
 import RecurringOnlyToggle from "@/components/visits/RecurringOnlyToggle";
@@ -653,14 +652,24 @@ function formatMobileActionSummary(summary: VisitActionSummary): string {
   return `${summary.completedTypes}/${REQUIRED_ACTION_TYPE_VALUES.length} required complete`;
 }
 
+// Compact tiles (Vishal, 28 Oct: the full-size StatCards took too much space).
+function StatTile({ label, value }: { label: string; value: number }) {
+  return (
+    <Card elevation="sm" className="px-3 py-2">
+      <span className="block text-[11px] uppercase leading-tight tracking-wider text-text-muted">{label}</span>
+      <div className="mt-0.5 font-mono text-lg font-bold text-text-primary">{value.toLocaleString()}</div>
+    </Card>
+  );
+}
+
 function StatCards({ stats }: { stats: HeaderStats }) {
   return (
-    <div role="group" aria-label="Visit totals" className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-      <StatCard label="Total visits" value={stats.totalVisits} />
-      <StatCard label="Completed" value={stats.completedCount} />
-      <StatCard label="Schools" value={stats.uniqueSchools} />
-      <StatCard label="PMs" value={stats.uniquePms} />
-      <StatCard label="Schools with recurring concerns" value={stats.schoolsWithRecurring} />
+    <div role="group" aria-label="Visit totals" className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-5">
+      <StatTile label="Total visits" value={stats.totalVisits} />
+      <StatTile label="Completed" value={stats.completedCount} />
+      <StatTile label="Schools" value={stats.uniqueSchools} />
+      <StatTile label="PMs" value={stats.uniquePms} />
+      <StatTile label="Schools with recurring concerns" value={stats.schoolsWithRecurring} />
     </div>
   );
 }
