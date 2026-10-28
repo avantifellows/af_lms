@@ -152,6 +152,7 @@ export default async function LogEntryPage({ params }: { params: Promise<{ id: s
         lastConversationPanel={<LastConversationPanel conversation={lastConversation(mentee)} />}
         openActionItems={mentee.openActionItems}
         hasOpenDraft={mentee.openDraft !== null}
+        screener={{ hasLink: mentee.screenerUrl !== null, feedbackDue: mentee.screenerFeedbackDue }}
         draft={draft}
         pendingDraft={pendingDraft}
         canManageDraft={canBlendedLearning(access, "manage_draft")}

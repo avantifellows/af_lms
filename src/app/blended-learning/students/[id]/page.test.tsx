@@ -67,6 +67,7 @@ const MENTEE: MenteeDetail = {
   whatsappPhone: null,
   profileDocUrl: null,
   screenerUrl: null,
+  screenerFeedbackDue: false,
   openDraft: null,
   history: [],
   openActionItems: [],
@@ -79,7 +80,7 @@ function conversation(overrides: Partial<Conversation> = {}): Conversation {
   return {
     kind: "conversation", id: 12, occurredOn: "2026-10-20", mode: "call", spokeWith: "student", durationMinutes: 20,
     summary: "Planned the week.", hasNotes: false, hasRecording: false, hasTranscript: false, photoCount: 0,
-    actionItems: [], flags: [],
+    actionItems: [], flags: [], screenerUsed: null, screenerFeedback: null,
     ...overrides,
   };
 }
@@ -498,6 +499,35 @@ describe("MenteeDetailPage", () => {
     expect(entry.queryByText(/Flag note/)).not.toBeInTheDocument();
     expect(entry.queryByText("Loading photos…")).not.toBeInTheDocument();
     expect(entry.queryByRole("button", { name: "Show notes" })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["a Mentor", MENTOR],
+    ["a read-only Blended Learning Admin", READ_ONLY_ADMIN],
+  ])("shows %s that the screener was used, with the ratings on the Conversation that gave them", async (_who, who) => {
+    signedInAs(who);
+    mockGetMenteeDetail.mockResolvedValue({
+      ...MENTEE,
+      history: [
+        conversation({ id: 14, screenerUsed: true }),
+        conversation({ id: 13, screenerUsed: true, screenerFeedback: { helpedUnderstand: 4, moreComfortable: 1 } }),
+        conversation({ id: 12, screenerUsed: false }),
+      ],
+    });
+
+    await renderPage();
+
+    const [later, gave, unused] = screen.getAllByRole("article").map((article) => within(article));
+    expect(later.getByText("Screener form used")).toBeInTheDocument();
+    expect(later.queryAllByRole("term")).toHaveLength(0);
+    expect(gave.getByText("Screener form used")).toBeInTheDocument();
+    const ratings = gave.getAllByRole("term").map((term) => [term.textContent, term.nextElementSibling?.textContent]);
+    expect(ratings).toEqual([
+      ["Did the screener help you understand this student better?", "4 / 5"],
+      ["Did the student seem more comfortable talking to you than before?", "1 / 5 · Not at all"],
+    ]);
+    expect(unused.queryByText("Screener form used")).not.toBeInTheDocument();
+    expect(unused.queryByRole("heading", { name: "Screener" })).not.toBeInTheDocument();
   });
 
   it("gives a Blended Learning Admin the recording or transcript of a Conversation that has one", async () => {

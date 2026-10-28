@@ -58,7 +58,17 @@ describe("initialEntryValues", () => {
       nextItemKey: 3,
       ticked: new Set(),
       flags: {},
+      screenerUsed: null,
+      screenerFeedbackDue: false,
+      screenerRatings: { helpedUnderstand: null, moreComfortable: null },
     });
+  });
+
+  it("asks the screener question unticked only with a Screener link, and the ratings only while due", () => {
+    const pick = (form: EntryFormValues) => [form.screenerUsed, form.screenerFeedbackDue];
+    expect(pick(initialEntryValues(null, TODAY, { hasLink: true, feedbackDue: true }))).toEqual([false, true]);
+    expect(pick(initialEntryValues(DRAFT, TODAY, { hasLink: true, feedbackDue: false }))).toEqual([false, false]);
+    expect(pick(initialEntryValues(null, TODAY, { hasLink: false, feedbackDue: true }))).toEqual([null, false]);
   });
 
   it("prefills from a draft, keying its Action Items 1..n", () => {
@@ -135,6 +145,17 @@ describe("small helpers", () => {
     expect(missingFields(values({ kind: "attempt" }))).toEqual([]);
   });
 
+  it("needs both screener ratings while they show", () => {
+    const filled = { duration: "20", summary: "Talked", screenerFeedbackDue: true };
+    const ratings = (helpedUnderstand: number | null, moreComfortable: number | null) => ({
+      screenerRatings: { helpedUnderstand, moreComfortable },
+    });
+    expect(missingFields(values({ ...filled, screenerUsed: true, ...ratings(3, null) }))).toEqual(["Screener ratings"]);
+    expect(missingFields(values({ ...filled, screenerUsed: true, ...ratings(3, 1) }))).toEqual([]);
+    expect(missingFields(values({ ...filled, screenerUsed: false }))).toEqual([]);
+    expect(missingFields(values({ ...filled, screenerUsed: true, screenerFeedbackDue: false }))).toEqual([]);
+  });
+
   it("holds a Conversation back while a photo is uploading or failed, never an Attempt", () => {
     expect(photosPending("conversation", [photo(1, "done", "k")])).toBe(false);
     expect(photosPending("conversation", [photo(1, "done", "k"), photo(2, "uploading")])).toBe(true);
@@ -187,6 +208,23 @@ describe("buildEntryPayload", () => {
       completeActionItemIds: [7, 9],
       draftId: 44,
     });
+  });
+
+  it("sends the screener answer only when asked, and the ratings only while they show", () => {
+    const ratings = { helpedUnderstand: 2, moreComfortable: 5 };
+    const asked = { screenerFeedbackDue: true, screenerRatings: ratings };
+    const screener = (overrides: Partial<EntryFormValues>) => {
+      const body = buildEntryPayload(values(overrides), [], null);
+      return { screenerUsed: body.screenerUsed, screenerFeedback: body.screenerFeedback };
+    };
+
+    expect(screener({ screenerUsed: null })).toEqual({});
+    expect(screener({ ...asked, screenerUsed: false })).toEqual({ screenerUsed: false });
+    expect(screener({ ...asked, screenerUsed: true })).toEqual({ screenerUsed: true, screenerFeedback: ratings });
+    expect(screener({ ...asked, screenerUsed: true, screenerFeedbackDue: false })).toEqual({ screenerUsed: true });
+    expect(buildEntryPayload(values({ ...asked, kind: "attempt", screenerUsed: true }), [], null)).not.toHaveProperty(
+      "screenerUsed"
+    );
   });
 
   it("leaves draftId out without a draft and sends a blank duration as null", () => {

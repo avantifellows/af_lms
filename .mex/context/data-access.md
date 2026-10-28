@@ -640,3 +640,37 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   migration (pg_dump-identical, seed row included). `blended-learning-manage.spec.ts` uses Mentor D
   (`BLENDED_MENTOR_D`) and `MANAGE_MENTEES` (G1, G2 mapped; G3 mapped by the spec to test Push
   again) and removes the Resources it adds, so later specs see only the Mentor Toolkit.
+
+## Blended Learning Screener Feedback (2026-10-28)
+
+- **Tables:** db-service `20261028120000_add_blended_learning_screener_feedback` (branch
+  `feat/bl-screener-feedback`, stacked on `feat/bl-admin-manage`; deploy it before this code).
+  `blended_learning_conversations.screener_used` (nullable boolean; a CHECK keeps it NULL on an
+  Attempt) and `blended_learning_screener_feedback` (`student_id` UNIQUE, `conversation_id` with a
+  composite FK to the same Student's Conversation, `mentor_user_id`, `helped_understand` and
+  `more_comfortable` smallint 1–5, `inserted_at`). Conversations are append-only
+  (`bl_conversations_immutable`), so `screener_used` is set in `insertEntry`'s INSERT or never.
+- **Log form:** a Conversation (typed or saved from a draft; never an Attempt) ends with "Was the
+  screener form used?" (`log/ScreenerQuestion.tsx`, unticked) only when
+  `blended_learning_student_links.screener_url` is set. Ticked while
+  `MenteeDetail.screenerFeedbackDue` (a link and no feedback row for the Student from any Mentor),
+  it asks two required 1–5 radio groups (1 "Not at all", 5 "A lot"; copy in
+  `students/[id]/screenerQuestions.ts`), listed as "Screener ratings" in the save bar's missing
+  fields. The body carries `screenerUsed` only when asked and `screenerFeedback` only while the
+  questions show (`logEntryPayload.ts`).
+- **Save:** `logEntry` validates the shape first (`screenerFeedback` without `screenerUsed: true`
+  → 422; ratings must be integers 1–5). Inside the transaction, after the Conversation's parts,
+  `saveScreener` reads the link and whether feedback exists: an answer without a link, no answer
+  with a link, or a tick with no ratings while due → 422 field errors; ratings once feedback exists
+  → 409 with `fieldErrors.screenerFeedback`; else it inserts the feedback (mentor = the mapped
+  Mentor). A racing second insert hits `bl_screener_feedback_student_unique` (23505) and gets the
+  same 409. On that 409 the form drops the questions and keeps the tick, so "Save" again records
+  just `screener_used = true`.
+- **Display:** `getMenteeDetail` LEFT JOINs the feedback by `conversation_id`; each Conversation
+  has `screenerUsed` and `screenerFeedback`. The history shows a "Screener" section ("Screener form
+  used", and the two ratings as `n / 5` on the Conversation that gave them) to Mentors and admins,
+  read-only. The log page shows no past feedback.
+- **E2E:** `e2e/fixtures/migrations/20261028120000_add_blended_learning_screener_feedback.sql`
+  mirrors the migration (pg_dump-identical). `blended-learning-screener-feedback.spec.ts` uses
+  Mentor C's `SCREENER_MENTEES` (J1–J4: one with a link, one without, per viewport) and
+  `SCREENER_RACE_MENTEE` (J5), seeded after every other fixture Student so their phones don't move.

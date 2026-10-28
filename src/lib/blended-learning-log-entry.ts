@@ -8,6 +8,7 @@ import {
   type MappingSnapshot,
 } from "./blended-learning-access";
 import {
+  SCREENER_RATING_ERROR,
   validateEntry,
   type ActionItemInput,
   type ConversationInput,
@@ -25,7 +26,10 @@ import { notifyWellbeingFlag } from "./blended-learning-wellbeing-notifier";
 // commit, an Emotional Well-being flag emails the well-being lead. Saving a
 // reviewed Conversation Draft (`draftId`) happens in the same transaction: the
 // ready draft is locked, its recording and transcript move onto the
-// Conversation, and the draft becomes saved.
+// Conversation, and the draft becomes saved. Last, a Conversation's screener
+// answer is checked against the Student's Screener link, and the first
+// Screener Feedback for the Student is saved with it (once per Student: the
+// UNIQUE student_id turns a racing second save into a 409).
 
 // A photo the request named, with the size S3 holds for it.
 type StoredPhoto = PhotoInput & { byteSize: number };
@@ -75,6 +79,16 @@ async function markDraftSaved(client: PoolClient, draftId: number): Promise<void
   if ((result.rowCount ?? result.rows.length) !== 1) throw new DraftConflict();
 }
 
+// What an Attempt stores in a Conversation's own columns.
+const NO_CONVERSATION = {
+  mode: null,
+  spokeWith: null,
+  durationMinutes: null,
+  summary: null,
+  notesHtml: null,
+  screenerUsed: null,
+} as const;
+
 async function insertEntry(
   client: PoolClient,
   access: BlendedLearningAccess,
@@ -83,10 +97,10 @@ async function insertEntry(
   input: EntryInput,
   draft: ReadyDraft | null
 ): Promise<LoggedEntry> {
-  const conversation = input.kind === "conversation" ? input : null;
+  const conversation = input.kind === "conversation" ? input : NO_CONVERSATION;
   const result = await client.query<{ id: number | string; occurred_on: string }>(
-    `INSERT INTO blended_learning_conversations (student_id, program_id, academic_year, mentor_user_id, logged_by_email, kind, occurred_on, mode, spoke_with, duration_minutes, summary, notes_html, attempt_note, call_recording_s3_key, transcript_s3_key, source_draft_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+    `INSERT INTO blended_learning_conversations (student_id, program_id, academic_year, mentor_user_id, logged_by_email, kind, occurred_on, mode, spoke_with, duration_minutes, summary, notes_html, attempt_note, call_recording_s3_key, transcript_s3_key, source_draft_id, screener_used)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
      RETURNING id, occurred_on::text AS occurred_on`,
     [
       studentId,
@@ -96,15 +110,17 @@ async function insertEntry(
       access.actorEmail,
       input.kind,
       input.occurredOn,
-      conversation?.mode ?? null,
-      conversation?.spokeWith ?? null,
-      conversation?.durationMinutes ?? null,
-      conversation?.summary ?? null,
-      conversation?.notesHtml ?? null,
+      conversation.mode,
+      conversation.spokeWith,
+      conversation.durationMinutes,
+      conversation.summary,
+      conversation.notesHtml,
       input.kind === "attempt" ? input.note : null,
       draft?.callRecordingS3Key ?? null,
       draft?.transcriptS3Key ?? null,
       draft?.id ?? null,
+      // Conversations are append-only, so the answer is set here or never.
+      conversation.screenerUsed,
     ]
   );
   const row = result.rows[0];
@@ -184,6 +200,77 @@ async function completeActionItems(
 class OutOfScope extends Error {}
 class TickConflict extends Error {}
 class DraftConflict extends Error {}
+class ScreenerFeedbackGiven extends Error {}
+class ScreenerInvalid extends Error {
+  constructor(readonly fieldErrors: Record<string, string>) {
+    super("Invalid screener answer");
+  }
+}
+
+type ScreenerState = { hasLink: boolean; feedbackGiven: boolean };
+
+const SCREENER_FEEDBACK_GIVEN =
+  "Screener feedback for this student was already saved, so it isn't asked again. Save again to log this conversation.";
+
+// Whether the Student has a Screener link and already has Screener Feedback
+// (from any Mentor).
+async function readScreenerState(client: PoolClient, studentId: number): Promise<ScreenerState> {
+  const result = await client.query<{ has_link: boolean; feedback_given: boolean }>(
+    `SELECT EXISTS (SELECT 1 FROM blended_learning_student_links links
+                    WHERE links.student_id = $1 AND links.screener_url IS NOT NULL) AS has_link,
+            EXISTS (SELECT 1 FROM blended_learning_screener_feedback feedback
+                    WHERE feedback.student_id = $1) AS feedback_given`,
+    [studentId]
+  );
+  const row = result.rows[0];
+  return { hasLink: row?.has_link === true, feedbackGiven: row?.feedback_given === true };
+}
+
+// The answer is required exactly when there is a Screener link, and a ticked
+// box needs both ratings while the Student's feedback is still due.
+function screenerErrors(input: ConversationInput, state: ScreenerState): Record<string, string> | null {
+  if (input.screenerUsed !== null && !state.hasLink) {
+    return { screenerUsed: "This student has no screener link. Reload and try again." };
+  }
+  if (input.screenerUsed === null && state.hasLink) {
+    return { screenerUsed: "Say whether the screener form was used. Reload if you don't see the question." };
+  }
+  if (input.screenerUsed === true && !state.feedbackGiven && !input.screenerFeedback) {
+    return {
+      "screenerFeedback.helpedUnderstand": SCREENER_RATING_ERROR,
+      "screenerFeedback.moreComfortable": SCREENER_RATING_ERROR,
+    };
+  }
+  return null;
+}
+
+// Check the screener answer, then save the Student's first Screener Feedback
+// against this Conversation and its Mentor.
+async function saveScreener(
+  client: PoolClient,
+  studentId: number,
+  conversationId: number,
+  mentorUserId: number,
+  input: ConversationInput
+): Promise<void> {
+  const state = await readScreenerState(client, studentId);
+  const errors = screenerErrors(input, state);
+  if (errors) throw new ScreenerInvalid(errors);
+  const feedback = input.screenerFeedback;
+  if (!feedback) return;
+  if (state.feedbackGiven) throw new ScreenerFeedbackGiven();
+  await client.query(
+    `INSERT INTO blended_learning_screener_feedback (student_id, conversation_id, mentor_user_id, helped_understand, more_comfortable)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [studentId, conversationId, mentorUserId, feedback.helpedUnderstand, feedback.moreComfortable]
+  );
+}
+
+// Another save gave this Student's Screener Feedback first.
+function isScreenerFeedbackRace(error: unknown): boolean {
+  const pg = error as { code?: unknown; constraint?: unknown } | null;
+  return pg?.code === "23505" && pg.constraint === "bl_screener_feedback_student_unique";
+}
 
 // A check constraint or append-only trigger (23514), or a unique index (23505).
 function isConflict(error: unknown): boolean {
@@ -249,6 +336,7 @@ function saveEntry(
     const wellbeingFlagIds = conversation
       ? await insertConversationParts(client, access, studentId, saved.id, conversation, photos, draft)
       : [];
+    if (conversation) await saveScreener(client, studentId, saved.id, Number(mapping.mentor_user_id), conversation);
     return { saved, mentorUserId: Number(mapping.mentor_user_id), wellbeingFlagIds };
   });
 }
@@ -263,9 +351,19 @@ function conflictMessage(error: unknown): string | null {
   return null;
 }
 
-// A failed save as a result; an unexpected error is rethrown.
+// A failed save as a result; an unexpected error is rethrown. Feedback that
+// is no longer due names `screenerFeedback`, so the form drops the questions.
 function failedSave(error: unknown): LogEntryResult {
   if (error instanceof OutOfScope) return NOT_FOUND;
+  if (error instanceof ScreenerInvalid) return invalid(error.fieldErrors);
+  if (error instanceof ScreenerFeedbackGiven || isScreenerFeedbackRace(error)) {
+    return {
+      ok: false,
+      status: 409,
+      error: SCREENER_FEEDBACK_GIVEN,
+      fieldErrors: { screenerFeedback: SCREENER_FEEDBACK_GIVEN },
+    };
+  }
   const message = conflictMessage(error);
   if (message === null) throw error;
   return { ok: false, status: 409, error: message };

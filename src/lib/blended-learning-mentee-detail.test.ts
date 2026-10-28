@@ -46,6 +46,7 @@ function entry(overrides: Record<string, unknown>) {
     id: "1", kind: "conversation", occurred_on: "2026-10-20", mode: "call", spoke_with: "student",
     duration_minutes: "20", summary: "Summary", attempt_note: null,
     has_notes: false, has_recording: false, has_transcript: false, photo_count: "0",
+    screener_used: null, helped_understand: null, more_comfortable: null,
     ...overrides,
   };
 }
@@ -87,6 +88,7 @@ describe("getMenteeDetail", () => {
       whatsappPhone: null,
       profileDocUrl: "https://docs.example/ira",
       screenerUrl: null,
+      screenerFeedbackDue: false,
       openDraft: null,
       openActionItems: [],
       history: [],
@@ -206,6 +208,41 @@ describe("getMenteeDetail", () => {
     expect((await getMenteeDetail(MENTOR, 501))?.openDraft).toBeNull();
   });
 
+  describe("the Screener", () => {
+    const WITH_LINK = { ...PROFILE, screener_url: " https://forms.example/screener " };
+
+    it("puts the answer on each Conversation and the one feedback on the Conversation that gave it", async () => {
+      givenRows({
+        profile: [WITH_LINK],
+        entries: [
+          entry({ id: "13", occurred_on: "2026-10-21", screener_used: true }),
+          entry({ id: "12", occurred_on: "2026-10-20", screener_used: true, helped_understand: 4, more_comfortable: "2" }),
+          entry({ id: "11", occurred_on: "2026-10-19", screener_used: false }),
+        ],
+      });
+
+      const detail = await getMenteeDetail(MENTOR, 501);
+
+      expect(detail?.history.map((item) => item.kind === "conversation" && [item.screenerUsed, item.screenerFeedback])).toEqual([
+        [true, null],
+        [true, { helpedUnderstand: 4, moreComfortable: 2 }],
+        [false, null],
+      ]);
+      expect(detail?.screenerUrl).toBe("https://forms.example/screener");
+      expect(detail?.screenerFeedbackDue).toBe(false);
+      const [sql] = mockQuery.mock.calls.find(([text]) => String(text).includes("FROM blended_learning_conversations"))!;
+      expect(sql).toContain("LEFT JOIN blended_learning_screener_feedback feedback ON feedback.conversation_id = c.id");
+    });
+
+    it("is due with a Screener link until the Student has feedback, and never without one", async () => {
+      givenRows({ profile: [WITH_LINK], entries: [entry({ screener_used: false })] });
+      expect((await getMenteeDetail(MENTOR, 501))?.screenerFeedbackDue).toBe(true);
+
+      givenRows({ profile: [PROFILE], entries: [] });
+      expect((await getMenteeDetail(MENTOR, 501))?.screenerFeedbackDue).toBe(false);
+    });
+  });
+
   it("interleaves Conversations and Attempts newest first with their items, flags and media", async () => {
     givenRows({
       profile: [PROFILE],
@@ -253,6 +290,8 @@ describe("getMenteeDetail", () => {
           { recipient: "emotional_wellbeing", comment: "Seemed anxious" },
           { recipient: "physics", comment: null },
         ],
+        screenerUsed: null,
+        screenerFeedback: null,
       },
       { kind: "attempt", id: 11, occurredOn: "2026-10-18", note: "No answer" },
       {
@@ -270,6 +309,8 @@ describe("getMenteeDetail", () => {
         photoCount: 0,
         actionItems: [{ id: 100, text: "Old open item", owner: "parent", status: "open" }],
         flags: [],
+        screenerUsed: null,
+        screenerFeedback: null,
       },
     ]);
     // Only open items, newest Conversation first, dated by the Conversation.

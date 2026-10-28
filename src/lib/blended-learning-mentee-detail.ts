@@ -32,6 +32,8 @@ export type ActionItemSource = "conversation" | "profile_doc" | "common";
 export type OpenActionItem = Omit<ActionItem, "status"> & { agreedOn: string; source: ActionItemSource };
 export type FlagRecipient = "emotional_wellbeing" | "physics" | "chemistry" | "maths";
 export type MentorFlag = { recipient: FlagRecipient; comment: string | null };
+// The Mentor's once-per-Student ratings of the Screener, each 1 to 5.
+export type ScreenerFeedback = { helpedUnderstand: number; moreComfortable: number };
 
 export type HistoryEntry =
   | { kind: "attempt"; id: number; occurredOn: string; note: string | null }
@@ -51,6 +53,11 @@ export type HistoryEntry =
       photoCount: number;
       actionItems: ActionItem[];
       flags: MentorFlag[];
+      // "Was the screener form used?": null when the Student had no
+      // Screener link. The Student's one Screener Feedback sits on the
+      // Conversation that gave it.
+      screenerUsed: boolean | null;
+      screenerFeedback: ScreenerFeedback | null;
     }
   // The latest entry in the Student's legacy Google Profile Doc, at its date
   // (legacy_last_contact_on): its summary and its Profile Doc Action Items.
@@ -75,6 +82,9 @@ export type MenteeDetail = {
   whatsappPhone: string | null;
   profileDocUrl: string | null;
   screenerUrl: string | null;
+  // The log form asks the two screener questions (when the box is ticked)
+  // until the Student has Screener Feedback from any Mentor.
+  screenerFeedbackDue: boolean;
   openDraft: { id: number; state: OpenDraftState } | null;
   // Newest first by (occurred_on, id), Conversations and Attempts
   // interleaved, with the Profile Doc entry after the app's entries of its
@@ -119,6 +129,9 @@ type EntryRow = {
   has_recording: boolean;
   has_transcript: boolean;
   photo_count: number | string;
+  screener_used: boolean | null;
+  helped_understand: number | null;
+  more_comfortable: number | null;
 };
 
 // Two numbers are the same contact when their last ten digits match, so a
@@ -258,6 +271,11 @@ function historyEntry(
       recipient: flag.recipient,
       comment: flag.comment,
     })),
+    screenerUsed: entry.screener_used,
+    screenerFeedback:
+      entry.helped_understand === null || entry.more_comfortable === null
+        ? null
+        : { helpedUnderstand: Number(entry.helped_understand), moreComfortable: Number(entry.more_comfortable) },
   };
 }
 
@@ -311,8 +329,10 @@ export async function getMenteeDetail(
               (c.call_recording_s3_key IS NOT NULL) AS has_recording,
               (c.transcript_s3_key IS NOT NULL) AS has_transcript,
               (SELECT count(*) FROM blended_learning_conversation_photos photo
-               WHERE photo.conversation_id = c.id) AS photo_count
+               WHERE photo.conversation_id = c.id) AS photo_count,
+              c.screener_used, feedback.helped_understand, feedback.more_comfortable
        FROM blended_learning_conversations c
+       LEFT JOIN blended_learning_screener_feedback feedback ON feedback.conversation_id = c.id
        WHERE c.student_id = $1
        ORDER BY c.occurred_on DESC, c.id DESC`,
       [studentId]
@@ -336,6 +356,7 @@ export async function getMenteeDetail(
   ]);
   const itemsByConversation = groupBy(actionItems);
   const flagsByConversation = groupBy(flags);
+  const screenerUrl = present(profile.screener_url);
 
   return {
     studentId,
@@ -345,7 +366,8 @@ export async function getMenteeDetail(
     programName: profile.program_name,
     ...contactNumbers(profile.phone, profile.whatsapp_phone),
     profileDocUrl: present(profile.profile_doc_url),
-    screenerUrl: present(profile.screener_url),
+    screenerUrl,
+    screenerFeedbackDue: screenerUrl !== null && !entries.some((entry) => entry.helped_understand !== null),
     openDraft:
       profile.open_draft_id === null || profile.open_draft_state === null
         ? null
