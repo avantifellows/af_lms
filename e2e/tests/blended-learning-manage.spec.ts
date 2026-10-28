@@ -35,7 +35,7 @@ async function withPool<T>(fn: (pool: ReturnType<typeof getTestPool>) => Promise
 test.beforeAll(async () => {
   await withPool(async (pool) => {
     const students = await pool.query<{ student_id: string; id: string }>(
-      `SELECT student_id, id FROM student WHERE student_id LIKE 'E2E-BL-G%'`
+      `SELECT student_id, id FROM student WHERE student_id LIKE 'E2E-BL-H%'`
     );
     for (const row of students.rows) studentIds[row.student_id.replace("E2E-BL-", "")] = Number(row.id);
     const mentor = await pool.query<{ id: string }>(
@@ -392,7 +392,7 @@ test.describe("Blended Learning Manage — specific students", () => {
     await form.getByLabel("Action item").fill(text);
     await form.getByRole("radio", { name: "Specific students" }).check();
     await expect(form.getByText("Paste Student IDs to see how many students get it.")).toBeVisible();
-    // Mentor D's G2 and G3 (G3 was mapped by the test above), whitespace, comma and new-line separated.
+    // Mentor D's H2 and H3 (H3 was mapped by the test above), whitespace, comma and new-line separated.
     await form.getByLabel("Student IDs").fill(`E2E-BL-${second.key},  ${unknown}\n${noMentor} E2E-BL-${mappedLater.key}\nE2E-BL-${second.key}`);
     await expect(form.getByText("Will be added to 2 students.")).toBeVisible();
     await expect(form).toContainText(`1 ID not found: ${unknown}`);
