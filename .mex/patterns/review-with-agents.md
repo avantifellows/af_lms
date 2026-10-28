@@ -47,7 +47,8 @@ says reaches the PR until someone has checked it against the code and the data.
 
 ## 2. Pick the reviewers
 
-- **2 to 5 lens reviewers in parallel**, each with one lens. Lenses that have earned their place:
+- **2 to 5 lens reviewers in parallel**, each with one lens (a small PR, as `pre-pr-review.md` step 0 defines it,
+  can use one). Lenses that have earned their place:
   - correctness and security;
   - cross-repo contracts (db-service, etl-next, CMS, env vars);
   - data and SQL: run the real query with real parameters, SELECT only;
@@ -118,9 +119,9 @@ is not a check.
 ## 7. Posting
 
 - **Nothing goes on GitHub without the go of the person running the review.** Draft in chat, get an "ok", then post.
-- One comment per finding, inline on the affected line where possible, in the shape of `pre-pr-review.md`'s report.
-  Nits go in one "none blocking" comment. Uncertain points are asked as questions. A known risk the team has
-  accepted is stated as accepted.
+- One comment per finding, inline on the affected line where possible, in the shape of `pre-pr-review.md`'s report,
+  with ids replaced by descriptions. Nits go in one "none blocking" comment. Uncertain points are asked as
+  questions. A known risk the team has accepted is stated as accepted.
 - Plain and specific. Length is fine if it carries the issue, how it was verified, and the proposed fix. No first
   person ("I noticed") and no filler.
 - The same issue on another PR gets one line linking to the first comment.

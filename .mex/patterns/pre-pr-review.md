@@ -56,6 +56,8 @@ mustn't be the one that wrote the code.
 - Check out the branch in its own worktree (`git fetch origin pull/<n>/head:pr-<n>`, then `git worktree add`).
   Confirm `git rev-parse HEAD` is the PR's head, and use the PR's actual base (`gh pr view <n> --json baseRefName`),
   not the one you assume. Don't change the tree while reviewers are reading it.
+- Run `npm ci` in every worktree you make, this one and the base one in step 3. Without it `npx fallow` and
+  `npx tsc` fetch the latest release instead of the repo's pinned version.
 - Base: `origin/main`, or the parent branch for a stacked PR. `git diff <base>...HEAD --stat`.
 - A small change (a copy fix, one component, a docs-only PR) needs only steps 0 to 2 and the parts below that the
   diff touches. Step 1 can be one lens plus the second model.
@@ -89,11 +91,12 @@ npm run build                    # when routes, config or server/client boundari
 - Fallow's gate is new-only on changed files, the same as `.github/workflows/fallow.yml`. Use the major version in
   that workflow's `uses: fallow-rs/fallow@vN` line (a newer major gave different results on #435). If a unit test
   times out, vitest writes no coverage file and Fallow silently falls back to an estimate; rerun with
-  `--testTimeout=30000`. Fix the findings; don't suppress them unless the repo already suppresses that kind.
+  `npm run test:unit:coverage -- --testTimeout=30000`. Fix the findings; don't suppress them unless the repo
+  already suppresses that kind.
 - For tsc and failing tests, the base is the baseline: run the same command on the base worktree, and report only
   what the branch adds. A red that is red on the base too is labelled inherited, not ignored.
-- When the PR adds tests, run the touched suites with shuffled seeds a few times (`vitest --sequence.shuffle`); an
-  order-dependent test on #405 failed 4 runs in 6.
+- When the PR adds tests, run the touched suites in shuffled order a few times
+  (`npx vitest run --sequence.shuffle <files>`); an order-dependent test on #405 failed 4 runs in 6.
 
 ## 3. Behaviour: base vs branch, side by side, on real cases
 
@@ -101,8 +104,12 @@ npm run build                    # when routes, config or server/client boundari
   - the branch in its worktree;
   - the base in a temporary detached worktree (`git worktree add --detach <path> <base>`).
 
-  Point both at the same data. Real cases usually need the staging DB and prod BigQuery, because the local dump may
-  not have them. Remove the base worktree afterwards.
+  Point both at the same local data: `dbservice_dev` when its dump has the cases, otherwise a clone of the newest
+  local production snapshot (`CREATE DATABASE <scratch> TEMPLATE <snapshot>`, as in `local-browser-qa.md`). BigQuery
+  numbers come from prod, read-only. **Never point a local server at the staging DB:** Holistic reads reconcile
+  mappings, and that writes (`reconcileHolisticMappings` in `src/lib/holistic-progress.ts`). A case that exists only
+  on staging is checked on the deployed staging app (`deploy-staging-pr.md`). On a clone, set `DB_SERVICE_URL` to a
+  dead port, except for the write test below. Remove the base worktree afterwards.
 - A new screen has no base to compare. Run the branch alone on the same cases, and still check that every screen it
   touches or replaces looks the same as on the base where the feature doesn't apply.
 - Pick **named real cases** with SQL first (prod BigQuery, via `mcp__claude_ai_Avanti_Data__run_query`), and
@@ -125,9 +132,11 @@ npm run build                    # when routes, config or server/client boundari
      an API diff can't: a stuck "Loading...", a fallback that never renders, a missing panel, an error banner off
      screen (#437: 1,651 px below the fold on a laptop, so "minor" became "major").
 - **Writes, when the change saves anything.** Reading is not enough: on #405 the blocker only showed up by saving.
-  Clone the database (`CREATE DATABASE <scratch> TEMPLATE dbservice_dev`), run a DB Service worktree against the
-  clone, then save through the real page or route and read the row back with SQL. The clone starts from the local
-  dump, not staging, so pick write cases the dump has, or insert the rows a real case needs into the clone. Take a
+  Clone the database (`CREATE DATABASE <scratch> TEMPLATE dbservice_dev`). Postgres refuses while anything is
+  connected to `dbservice_dev`, so stop the DB Service on :4000 and the dev servers first. Point both the af_lms
+  server (`DATABASE_NAME`) and a DB Service worktree at the clone, so reads and writes see the same rows. Then save
+  through the real page or route and read the row back with SQL. The clone starts from the local dump, not staging,
+  so pick write cases the dump has, or insert the rows a real case needs into the clone. Take a
   real record and change one field at a time, including blanking it: rules that check the submitted form instead of
   the saved record let impossible combinations through. Drop the clone afterwards.
 - For each case, write what the base shows next to what the branch shows. **Anything the base showed that the branch
@@ -136,10 +145,9 @@ npm run build                    # when routes, config or server/client boundari
   Decide which one to show before loading either.
 - **Every difference found here becomes a unit test that fails on the base** (or without the fix), so it stays
   covered after the review.
-- Login caveat: Dev Login personas exist only in the database that has them (the local `dbservice_dev`). Against
-  the staging DB, check `user_permission` for the persona emails first. If they're missing, say so in the report;
-  don't add rows to a shared database without the owner's go. In a cloned database, insert the `user_permission` rows
-  you need and mint a session the way `e2e/fixtures/auth.ts` does.
+- Login caveat: Dev Login personas exist only in the database that has them (the local `dbservice_dev`). In a
+  cloned database, insert the `user_permission` rows you need and mint a session the way `e2e/fixtures/auth.ts`
+  does. Never add rows to a shared database without the owner's go.
 
 ## 4. Numbers: recompute every figure, across all the data
 
@@ -208,7 +216,8 @@ posted. Drop what a user can't reach from the UI, and say so.
 One finding per problem, written so a reader with no context can act on it, in plain words, in this shape:
 
 - **headline:** what goes wrong, in user terms;
-- **a real example:** the school, test or session id, with what the base shows and what the branch shows;
+- **a real example:** the school, test or session id, with what the base shows and what the branch shows. On
+  GitHub, replace the id with a description ("a Grade 11 NVS school"), because af_lms is public;
 - **impact:** counts over this year's data;
 - **repro:** the steps;
 - **suggested fix**, run on the branch before you suggest it.
