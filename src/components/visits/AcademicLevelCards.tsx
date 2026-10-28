@@ -4,9 +4,9 @@ import { AL_DISPLAY_ORDER, alShortLabel } from "@/lib/academic-level";
 import type { AcademicLevelCard, AcademicLevelCards as AcademicLevelCardsData } from "@/lib/visit-summary-school";
 
 // The School page's academic-level cards (#470): one compact card per physical Centre × grade ×
-// JEE/NEET, each opening that Centre's cumulative report for the grade in the same tab. The body
-// is one Now row of level cells (the exam's three levels always, any other level the data has,
-// then NA); the largest level is red. Predictions are a later follow-up.
+// JEE/NEET, all on one line, each opening that Centre's cumulative report for the grade in the
+// same tab. The body is one Now row of level cells (the exam's three levels always, any other
+// level the data has, then NA); the largest level is red. Predictions are a later follow-up.
 
 const NA_REASON = "No AL-bearing test yet";
 // The cards count every current-year student; the cumulative report lists tested students only.
@@ -44,7 +44,7 @@ function nowCells(card: AcademicLevelCard): { level: string; students: number }[
 
 function Cell({ label, count, largest, title }: { label: string; count: number; largest?: boolean; title?: string }) {
   return (
-    <div title={title} data-largest={largest || undefined} className="flex items-baseline gap-2 border-l border-border px-2.5">
+    <div title={title} data-largest={largest || undefined} className="flex items-baseline gap-1.5 border-l border-border px-1.5">
       <dt className={`font-mono text-xs ${largest ? "text-danger" : "text-text-muted"}`}>{label}</dt>
       <dd className={`font-mono text-sm font-bold ${largest ? "text-danger" : "text-text-primary"}`}>{count}</dd>
     </div>
@@ -58,9 +58,9 @@ function LevelCard({ card }: { card: AcademicLevelCard }) {
     <Link
       href={cumulativeReportHref(card)}
       title={`${card.centreName}. ${CARD_HOVER}`}
-      className="group block rounded-lg border border-border bg-bg-card px-3 py-2.5 hover:border-accent"
+      className="group block h-full rounded-lg border border-border bg-bg-card px-3 py-2.5 hover:border-accent"
     >
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 whitespace-nowrap">
         <span className="rounded bg-accent px-1.5 py-0.5 text-[11px] font-bold uppercase leading-none text-text-on-accent">
           {card.tag}
         </span>
@@ -71,7 +71,7 @@ function LevelCard({ card }: { card: AcademicLevelCard }) {
       </div>
       <div className="mt-2 flex items-baseline">
         <span className="pr-1 text-[11px] font-bold uppercase tracking-wide text-text-muted">Now</span>
-        <dl className="flex flex-wrap items-baseline gap-y-1">
+        <dl className="flex items-baseline whitespace-nowrap">
           {cells.map((cell) => (
             <Cell
               key={cell.level}
@@ -98,9 +98,10 @@ export function AcademicLevelCards({ data }: { data: AcademicLevelCardsData }) {
       ) : data.cards.length === 0 ? (
         <p className="text-sm text-text-muted">No JEE or NEET students at this School&apos;s physical centres</p>
       ) : (
-        <ul aria-labelledby="academic-level-heading" className="flex flex-wrap gap-3">
+        // One line: the cards share the row and scroll sideways (never wrap) when there are too many.
+        <ul aria-labelledby="academic-level-heading" className="flex gap-2 overflow-x-auto pb-1">
           {data.cards.map((card) => (
-            <li key={`${card.centreId}:${card.grade}:${card.exam}`} className="max-w-full">
+            <li key={`${card.centreId}:${card.grade}:${card.exam}`} className="min-w-[14rem] flex-1">
               <LevelCard card={card} />
             </li>
           ))}
