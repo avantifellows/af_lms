@@ -226,7 +226,7 @@ test.describe("School Visit Summary — School-wise tab", () => {
 
     await adminPage.goto(`/school-visit-summary?pms=${SECOND_PM}&status=in_progress`);
     await expect(schoolColumn(adminPage, 0)).toHaveText([`${PHYSICAL} (VSW_E2E)`]);
-    await expect(schoolRow(adminPage, PHYSICAL)).toContainText("01 Sept 2026");
+    await expect(schoolRow(adminPage, PHYSICAL)).toContainText("01 Sep 2026");
 
     await adminPage.goto(`/school-visit-summary?pms=${SECOND_PM}&from=2025-07-20&to=2025-12-31`);
     await expect(schoolColumn(adminPage, 0)).toHaveText([`${OLD} (VSW_E2E)`]);
@@ -643,12 +643,12 @@ test.describe("School Visit Summary — School page concerns", () => {
     await expect(autoReopened).toHaveCount(2);
     await expect(autoReopened.nth(0)).toContainText("Resolved · e2e-vsw-pm3@test.local · 12 Jun 2026, 11:30");
     await expect(autoReopened.nth(0)).toContainText("Practice tests scheduled weekly");
-    await expect(autoReopened.nth(1)).toContainText("Reopened automatically: raised again in visit of 15 Sept 2026");
+    await expect(autoReopened.nth(1)).toContainText("Reopened automatically: raised again in visit of 15 Sep 2026");
 
     await needs.nth(1).getByText("History (2)").click();
     const reopened = needs.nth(1).getByRole("listitem");
     await expect(reopened.nth(0)).toContainText("Substitute teacher arranged");
-    await expect(reopened.nth(1)).toContainText("Reopened · e2e-vsw-pm3@test.local · 17 Sept 2026, 10:30");
+    await expect(reopened.nth(1)).toContainText("Reopened · e2e-vsw-pm3@test.local · 17 Sep 2026, 10:30");
     await expect(reopened.nth(1)).toContainText("Substitute left after a month");
   });
 
@@ -674,7 +674,7 @@ test.describe("School Visit Summary — School page concerns", () => {
     await expandResolved(adminPage);
     await expect(resolved).toHaveCount(1);
     await expect(resolved.first()).toContainText("Water cooler broken");
-    await expect(resolved.first()).toContainText("Resolved by e2e-vsw-pm3@test.local on 16 Sept 2026, 10:30");
+    await expect(resolved.first()).toContainText("Resolved by e2e-vsw-pm3@test.local on 16 Sep 2026, 10:30");
     await expect(resolved.first().getByText("3 visits", { exact: true })).toBeVisible();
     await expect(resolved.first().getByText(compactDates("15 Sep · 06 Aug · 10 Jun", "15 Sep 2026 · 06 Aug 2026 · 10 Jun 2026"), { exact: true })).toBeVisible();
 
@@ -682,7 +682,7 @@ test.describe("School Visit Summary — School page concerns", () => {
     await expect(history).toHaveCount(2);
     await expect(history.nth(0)).toContainText("School replaced the cooler");
     // The author has a case-variant duplicate permission row: one entry, the first row's name.
-    await expect(history.nth(1)).toContainText("Comment · VSW Resolver · 20 Sept 2026, 10:30");
+    await expect(history.nth(1)).toContainText("Comment · VSW Resolver · 20 Sep 2026, 10:30");
     await expect(history.nth(1)).toContainText("Cooler checked again and working");
     await expect(adminPage.getByText("VSW Resolver Duplicate")).toHaveCount(0);
   });

@@ -159,12 +159,8 @@ export function formatCompactVisitDates(visitDates: string[], today: Date | stri
 
 // `15 Oct 2026`, the IST date of a `YYYY-MM-DD` Visit date or a timestamp.
 export function formatIstDate(value: string | Date): string {
-  return new Date(value).toLocaleDateString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    timeZone: "Asia/Kolkata",
-  });
+  const { day, month, year } = istDateTimeParts(value);
+  return `${day} ${month} ${year}`;
 }
 
 // `15 Oct 2026, 14:00` in IST (24-hour); `-` when there is no timestamp.
@@ -173,15 +169,34 @@ export function formatIstTimestamp(value: string | Date | null): string {
     return "-";
   }
 
-  return new Date(value).toLocaleString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-    timeZone: "Asia/Kolkata",
-  });
+  const { day, month, year, hour, minute } = istDateTimeParts(value);
+  return `${day} ${month} ${year}, ${hour}:${minute}`;
+}
+
+// The IST parts of a date, with the month from SHORT_MONTHS so every Visit Summary date reads
+// `Sep` (the en-IN locale would print `Sept`).
+function istDateTimeParts(value: string | Date) {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Kolkata",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    })
+      .formatToParts(new Date(value))
+      .map((part) => [part.type, part.value])
+  );
+
+  return {
+    day: parts.day,
+    month: SHORT_MONTHS[Number(parts.month) - 1],
+    year: parts.year,
+    hour: parts.hour,
+    minute: parts.minute,
+  };
 }
 
 export function formatVisitCount(count: number): string {

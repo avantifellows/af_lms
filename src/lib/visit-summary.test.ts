@@ -272,6 +272,11 @@ describe("IST formatters", () => {
     expect(formatIstDate(new Date("2025-12-31T20:00:00Z"))).toBe("01 Jan 2026");
   });
 
+  it("spells September as Sep, like the concern cards' compact dates", () => {
+    expect(formatIstDate("2026-09-15")).toBe("15 Sep 2026");
+    expect(formatIstTimestamp("2026-09-17T05:00:00Z")).toBe("17 Sep 2026, 10:30");
+  });
+
   it("formats a timestamp in IST on a 24-hour clock, and a missing one as -", () => {
     expect(formatIstTimestamp(new Date("2026-10-20T08:30:00Z"))).toBe("20 Oct 2026, 14:00");
     expect(formatIstTimestamp("2026-10-20T18:45:00Z")).toBe("21 Oct 2026, 00:15");
