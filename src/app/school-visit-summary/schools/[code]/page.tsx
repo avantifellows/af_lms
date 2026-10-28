@@ -45,7 +45,7 @@ function TeachersLine({ groups }: { groups: TeacherGroup[] }) {
         Teachers
       </h2>
       {groups.length === 0 ? (
-        <p className="text-sm text-text-muted">No teaching seats at this School&apos;s physical centres</p>
+        <p className="text-sm text-text-muted">No teachers at this School&apos;s physical centres</p>
       ) : (
         <ul aria-labelledby="teachers-heading" className="space-y-2">
           {groups.map((group) => (
@@ -58,7 +58,7 @@ function TeachersLine({ groups }: { groups: TeacherGroup[] }) {
                   <li key={index} className="rounded-full bg-bg-card-alt px-3 py-1 text-sm text-text-primary">
                     <span className="text-xs font-bold uppercase tracking-wide text-text-muted">{seat.subject}</span>
                     {" - "}
-                    <span className={seat.name ? undefined : "text-text-muted"}>{seat.name ?? "Vacant"}</span>
+                    <span>{seat.name}</span>
                   </li>
                 ))}
               </ul>

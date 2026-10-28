@@ -47,8 +47,7 @@ const UNTYPED_CENTRE_TAG = "Other";
 
 export interface TeacherSeat {
   subject: string;
-  // Null for a vacant seat.
-  name: string | null;
+  name: string;
 }
 
 export interface TeacherGroup {
@@ -59,7 +58,7 @@ export interface TeacherGroup {
 interface TeacherSeatRow {
   type_code: string | null;
   role: string;
-  name: string | null;
+  name: string;
   teacher_subject: string | null;
 }
 
@@ -72,7 +71,6 @@ function seatSubject({ role, teacher_subject }: TeacherSeatRow): string {
 
 function compareSeats(a: TeacherSeat, b: TeacherSeat): number {
   if (a.subject !== b.subject) return a.subject.localeCompare(b.subject);
-  if (a.name === null || b.name === null) return a.name === b.name ? 0 : a.name === null ? 1 : -1;
   return a.name.localeCompare(b.name);
 }
 
@@ -87,15 +85,14 @@ function tagRank(tag: string): number {
   return 2;
 }
 
-// Active teaching seats at the School's active physical Centres, grouped by Centre type (#470).
-// A `subject_tbd` seat shows its teacher's own subject when one is set.
+// The teachers in active teaching seats at the School's active physical Centres, grouped by Centre
+// type (#470). Vacant seats (no person) are left out (Vishal, 28 Oct: "show existing teachers
+// only"). A `subject_tbd` seat shows its teacher's own subject when one is set.
 export async function getVisitSummarySchoolTeachers(schoolCode: string): Promise<TeacherGroup[]> {
   const rows = await query<TeacherSeatRow>(
     `SELECT c.type_code,
             cp.role,
-            CASE WHEN cp.user_id IS NOT NULL THEN
-              COALESCE(NULLIF(BTRIM(CONCAT_WS(' ', u.first_name, u.last_name)), ''), u.email)
-            END AS name,
+            COALESCE(NULLIF(BTRIM(CONCAT_WS(' ', u.first_name, u.last_name)), ''), u.email) AS name,
             CASE WHEN cp.role = 'subject_tbd' THEN (
               SELECT sub.name->0->>'subject'
               FROM teacher t
@@ -107,7 +104,7 @@ export async function getVisitSummarySchoolTeachers(schoolCode: string): Promise
      FROM centre_positions cp
      JOIN centres c ON c.id = cp.centre_id AND c.is_physical AND c.is_active
      JOIN school s ON s.id = c.school_id
-     LEFT JOIN "user" u ON u.id = cp.user_id
+     JOIN "user" u ON u.id = cp.user_id
      WHERE s.code = $1
        AND cp.deleted_at IS NULL
        AND cp.role = ANY($2)`,

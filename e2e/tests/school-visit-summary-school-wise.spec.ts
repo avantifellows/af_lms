@@ -596,22 +596,21 @@ test.describe("School Visit Summary — School page", () => {
     await expect(schoolColumn(adminPage, 0)).toHaveText([`${MIXED} VSW_E2E`, `${PHYSICAL} VSW_E2E`]);
   });
 
-  test("lists teaching seats at the active physical Centres, CoE and Nodal apart", async ({ adminPage }) => {
+  test("lists the teachers seated at the active physical Centres, CoE and Nodal apart, without vacant seats", async ({ adminPage }) => {
     await adminPage.goto("/school-visit-summary/schools/VSWMIXED");
 
     await expect(teacherLines(adminPage)).toHaveCount(2);
     await expect(teacherLines(adminPage).nth(0)).toContainText("CoE");
     await expect(teacherChips(adminPage, "CoE")).toHaveText([
       "BIOLOGY - Ravi Kumar",
-      "CHEMISTRY - Vacant",
       "PHYSICS - Asha Rao",
     ]);
     await expect(teacherLines(adminPage).nth(1)).toContainText("Nodal");
     await expect(teacherChips(adminPage, "Nodal")).toHaveText([
-      "APC - Vacant",
       "MATHS - Kiran Patel",
       "SUBJECT TBD - Meena Shah",
     ]);
+    await expect(adminPage.getByText("Vacant")).toHaveCount(0);
     await expect(adminPage.getByText("Deleted Seat Teacher")).toHaveCount(0);
     await expect(adminPage.getByText("Closed Centre Teacher")).toHaveCount(0);
     await expect(adminPage.getByText("NVS Teacher")).toHaveCount(0);

@@ -48,7 +48,7 @@ describe("getVisitSummarySchool", () => {
 });
 
 describe("getVisitSummarySchoolTeachers", () => {
-  const seat = (type_code: string | null, role: string, name: string | null, teacher_subject: string | null = null) => ({
+  const seat = (type_code: string | null, role: string, name: string, teacher_subject: string | null = null) => ({
     type_code, role, name, teacher_subject,
   });
 
@@ -65,9 +65,8 @@ describe("getVisitSummarySchoolTeachers", () => {
     expect(groups.map((group) => group.tag)).toEqual(["CoE", "Nodal", "emrs", "Other"]);
   });
 
-  it("sorts seats by subject, then name, with vacant seats last", async () => {
+  it("sorts seats by subject, then name", async () => {
     mockQuery.mockResolvedValue([
-      seat("coe", "physics", null),
       seat("coe", "physics", "Zara Khan"),
       seat("coe", "chemistry", "Mohan Das"),
       seat("coe", "physics", "Anil Rao"),
@@ -79,21 +78,29 @@ describe("getVisitSummarySchoolTeachers", () => {
       { subject: "CHEMISTRY", name: "Mohan Das" },
       { subject: "PHYSICS", name: "Anil Rao" },
       { subject: "PHYSICS", name: "Zara Khan" },
-      { subject: "PHYSICS", name: null },
     ]);
+  });
+
+  it("reads only seats with a person in them (an inner join on the seat's user)", async () => {
+    mockQuery.mockResolvedValue([]);
+
+    await getVisitSummarySchoolTeachers("SC001");
+
+    expect(mockQuery.mock.calls[0][0]).toMatch(/\bJOIN "user" u ON u\.id = cp\.user_id/);
+    expect(mockQuery.mock.calls[0][0]).not.toMatch(/LEFT JOIN "user"/);
   });
 
   it("shows a subject_tbd seat under its teacher's own subject, or SUBJECT TBD when none is set", async () => {
     mockQuery.mockResolvedValue([
       seat("coe", "subject_tbd", "Priya Sen", "Biology"),
-      seat("coe", "subject_tbd", null, null),
+      seat("coe", "subject_tbd", "Ravi Das", null),
     ]);
 
     const [coe] = await getVisitSummarySchoolTeachers("SC001");
 
     expect(coe.seats).toEqual([
       { subject: "BIOLOGY", name: "Priya Sen" },
-      { subject: "SUBJECT TBD", name: null },
+      { subject: "SUBJECT TBD", name: "Ravi Das" },
     ]);
   });
 
