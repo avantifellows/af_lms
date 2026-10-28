@@ -49,8 +49,8 @@ function withMissingSelected(
   return [...missing, ...options];
 }
 
-const FIELD_LABEL_CLASS = "text-xs font-bold uppercase tracking-wide text-text-muted";
-const FIELD_INPUT_CLASS = "mt-2 w-full border border-border bg-bg-card px-3 py-2 text-sm text-text-primary";
+const FIELD_LABEL_CLASS = "text-[11px] font-bold uppercase tracking-wide text-text-muted";
+const FIELD_INPUT_CLASS = "mt-1 w-full border border-border bg-bg-card px-2.5 py-1 text-sm text-text-primary";
 
 export default function VisitSummaryFilterBar({
   regionOptions,
@@ -115,8 +115,8 @@ export default function VisitSummaryFilterBar({
   }
 
   return (
-    <section aria-labelledby="visit-summary-filters-heading" className="mb-6 rounded-lg border border-border bg-bg-card p-4 shadow-sm sm:p-5">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+    <section aria-labelledby="visit-summary-filters-heading" className="mb-4 rounded-lg border border-border bg-bg-card px-3 py-2.5 shadow-sm sm:px-4">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
         <h2 id="visit-summary-filters-heading" className="text-sm font-bold uppercase tracking-wider text-text-primary">
           Filters
         </h2>
@@ -125,7 +125,7 @@ export default function VisitSummaryFilterBar({
             <button
               type="button"
               disabled
-              className="border border-border px-3 py-2 text-xs font-bold uppercase text-text-muted disabled:cursor-not-allowed disabled:opacity-60"
+              className="border border-border px-2.5 py-1 text-xs font-bold uppercase text-text-muted disabled:cursor-not-allowed disabled:opacity-60"
             >
               Download CSV
             </button>
@@ -136,7 +136,7 @@ export default function VisitSummaryFilterBar({
           <button
             type="button"
             onClick={clearFilters}
-            className="border border-border px-3 py-2 text-xs font-bold uppercase text-accent hover:bg-hover-bg"
+            className="border border-border px-2.5 py-1 text-xs font-bold uppercase text-accent hover:bg-hover-bg"
           >
             Clear filters
           </button>
@@ -145,7 +145,7 @@ export default function VisitSummaryFilterBar({
 
       {/* grid-cols-1 (minmax(0, 1fr)) and min-w-0 on each field keep a long selected label truncated
           in its button on a narrow screen instead of widening the column. */}
-      <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-[repeat(4,minmax(0,1fr))_minmax(0,1.5fr)_minmax(0,1.2fr)_repeat(2,minmax(0,1fr))]">
+      <div className="grid grid-cols-1 items-start gap-x-3 gap-y-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-[repeat(4,minmax(0,1fr))_minmax(0,1.5fr)_minmax(0,1.2fr)_repeat(2,minmax(0,1fr))]">
         <SearchableMultiSelect
           label="Region"
           options={withMissingSelected(regionOptions, selectedRegions)}

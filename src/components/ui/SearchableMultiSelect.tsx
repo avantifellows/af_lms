@@ -110,7 +110,7 @@ export function SearchableMultiSelect({
       onKeyDown={handleKeyDown}
       className="relative min-w-0"
     >
-      <span id={labelId} className="text-xs font-bold uppercase tracking-wide text-text-muted">
+      <span id={labelId} className="text-[11px] font-bold uppercase tracking-wide text-text-muted">
         {label}
       </span>
       <button
@@ -119,7 +119,7 @@ export function SearchableMultiSelect({
         aria-expanded={open}
         aria-controls={open ? listId : undefined}
         onClick={() => (open ? close(false) : setOpenOrder(selectedFirst(options, selected)))}
-        className="mt-2 flex w-full items-center justify-between gap-2 border border-border bg-bg-card px-3 py-2 text-left text-sm text-text-primary"
+        className="mt-1 flex w-full items-center justify-between gap-2 border border-border bg-bg-card px-2.5 py-1 text-left text-sm text-text-primary"
       >
         <span className="truncate">{buttonText(options, selected, allLabel, pluralNoun)}</span>
         <ChevronDown className="h-4 w-4 shrink-0 text-text-muted" aria-hidden="true" />
