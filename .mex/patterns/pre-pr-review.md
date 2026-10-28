@@ -11,9 +11,9 @@ edges:
   - target: patterns/local-browser-qa.md
     condition: for running the base and the branch side by side (worktree, port, env, login)
   - target: context/permissions.md
-    condition: when checking the gate on new routes and queries (step 4)
+    condition: when checking the gate on new routes and queries (step 5)
   - target: context/data-access.md
-    condition: when recomputing numbers in BigQuery (step 3)
+    condition: when recomputing numbers in BigQuery (step 4)
   - target: patterns/review-with-agents.md
     condition: for running the reviewers, verifying their findings, re-reviewing and posting
 last_updated: 2026-10-28
@@ -41,49 +41,61 @@ Decisions (scope, who sees what) go to the owner as questions; they are not your
 "What and why". The author's session already believes the code is right. How to run the reviewers, verify what
 they find, and post it is in `review-with-agents.md`.
 
+**Roles**, as used here and in `review-with-agents.md`:
+- **author:** whoever wrote the change, a person or an agent session;
+- **owner:** the person the PR belongs to. They answer product questions (scope, who sees what) and accept or
+  reject findings on their PR;
+- **person running the review:** whoever started it. They see the findings first, and decide what is fixed now and
+  what goes on GitHub.
+
+On your own PR, the owner and the person running the review are you. The agent session doing the review still
+mustn't be the one that wrote the code.
+
 ## 0. Scope the change
 
 - Check out the branch in its own worktree (`git fetch origin pull/<n>/head:pr-<n>`, then `git worktree add`).
   Confirm `git rev-parse HEAD` is the PR's head, and use the PR's actual base (`gh pr view <n> --json baseRefName`),
   not the one you assume. Don't change the tree while reviewers are reading it.
 - Base: `origin/main`, or the parent branch for a stacked PR. `git diff <base>...HEAD --stat`.
+- A small change (a copy fix, one component, a docs-only PR) needs only steps 0 to 2 and the parts below that the
+  diff touches. Step 1 can be one lens plus the second model.
 - Sort the diff into the parts below. A part that doesn't apply is skipped, and the report says so:
-  - **mechanical:** always;
-  - **behaviour:** any page, component or API route change (step 2);
-  - **numbers:** any figure a user sees, added or changed (step 3);
-  - **exposure / permissions:** any new query, route or field reaching the browser (step 4);
-  - **audience:** any feature work (step 5);
-  - **docs:** any `.mex/` or `AGENTS.md` line about code the diff touches (step 6);
-  - **other repos:** any db-service, etl-next or CMS change the code depends on (step 7).
+  - **reviewers and mechanical:** always (steps 1 and 2);
+  - **behaviour:** any page, component or API route change (step 3);
+  - **numbers:** any figure a user sees, added or changed (step 4);
+  - **exposure / permissions:** any new query, route or field reaching the browser (step 5);
+  - **audience:** any feature work (step 6);
+  - **docs:** any `.mex/` or `AGENTS.md` line about code the diff touches (step 7);
+  - **other repos:** any db-service, etl-next or CMS change the code depends on (step 8).
 
-## Reviewers: several lenses, a second model, one consolidator
+## 1. Reviewers: several lenses, a second model, one consolidator
 
 Before running anything, have the diff read by 2 to 5 read-only reviewers in parallel, each with one lens, plus one
 run of a second model family on the same commit. Verify every finding before it reaches anyone, and keep or discard
 it with a reason. `review-with-agents.md` has the briefs, the lenses, and what counts as verified.
 
-Steps 1 to 7 are then how the findings get proved, sized, and added to.
+Steps 2 to 8 then prove, size and add to what the reviewers found.
 
-## 1. Mechanical: what CI runs, before CI runs it
+## 2. Mechanical: what CI runs, before CI runs it
 
 ```
 npm run lint
-npx tsc --noEmit                 # compare with the base: main already has ~2,400 errors in test files
+npx tsc --noEmit                 # compare with the base: main already has errors in test files
 npm run test:unit:coverage
 npx fallow audit --base <base> --coverage unit-coverage/coverage-final.json
 npm run build                    # when routes, config or server/client boundaries changed
 ```
 
-- Fallow's gate is new-only on changed files, the same as `.github/workflows/fallow.yml`. Use the same major version
-  as CI (`fallow-rs/fallow@v2`; a 3.x run gave different results on #435). If a unit test times out, vitest writes no
-  coverage file and Fallow silently falls back to an estimate; rerun with `--testTimeout=30000`. Fix the findings;
-  don't suppress them unless the repo already suppresses that kind.
+- Fallow's gate is new-only on changed files, the same as `.github/workflows/fallow.yml`. Use the major version in
+  that workflow's `uses: fallow-rs/fallow@vN` line (a newer major gave different results on #435). If a unit test
+  times out, vitest writes no coverage file and Fallow silently falls back to an estimate; rerun with
+  `--testTimeout=30000`. Fix the findings; don't suppress them unless the repo already suppresses that kind.
 - For tsc and failing tests, the base is the baseline: run the same command on the base worktree, and report only
   what the branch adds. A red that is red on the base too is labelled inherited, not ignored.
 - When the PR adds tests, run the touched suites with shuffled seeds a few times (`vitest --sequence.shuffle`); an
   order-dependent test on #405 failed 4 runs in 6.
 
-## 2. Behaviour: base vs branch, side by side, on real cases
+## 3. Behaviour: base vs branch, side by side, on real cases
 
 - Run both, following `local-browser-qa.md` for worktree, port, env and login:
   - the branch in its worktree;
@@ -114,9 +126,10 @@ npm run build                    # when routes, config or server/client boundari
      screen (#437: 1,651 px below the fold on a laptop, so "minor" became "major").
 - **Writes, when the change saves anything.** Reading is not enough: on #405 the blocker only showed up by saving.
   Clone the database (`CREATE DATABASE <scratch> TEMPLATE dbservice_dev`), run a DB Service worktree against the
-  clone, then save through the real page or route and read the row back with SQL. Take a real record and change
-  one field at a time, including blanking it: rules that check the submitted form instead of the saved record let
-  impossible combinations through. Drop the clone afterwards.
+  clone, then save through the real page or route and read the row back with SQL. The clone starts from the local
+  dump, not staging, so pick write cases the dump has, or insert the rows a real case needs into the clone. Take a
+  real record and change one field at a time, including blanking it: rules that check the submitted form instead of
+  the saved record let impossible combinations through. Drop the clone afterwards.
 - For each case, write what the base shows next to what the branch shows. **Anything the base showed that the branch
   no longer shows is a finding**, unless the PR says it was removed on purpose.
 - When the change replaces a screen, the old screen must still appear wherever the new one doesn't apply or fails.
@@ -128,7 +141,7 @@ npm run build                    # when routes, config or server/client boundari
   don't add rows to a shared database without the owner's go. In a cloned database, insert the `user_permission` rows
   you need and mint a session the way `e2e/fixtures/auth.ts` does.
 
-## 3. Numbers: recompute every figure, across all the data
+## 4. Numbers: recompute every figure, across all the data
 
 - List every figure the change shows: averages, rates, counts, "X of Y", ranks.
 - For each one, write its definition in one line, including the denominator, and how blanks are treated. A student
@@ -145,7 +158,7 @@ npm run build                    # when routes, config or server/client boundari
 - **For any list, check it contains everyone it should.** Write the population independently and compare counts. On
   #405 this found 287 pass-outs under a program the code didn't list, and alumni no list could reach.
 
-## 4. Data exposure and permissions: stop, don't build
+## 5. Data exposure and permissions: stop, don't build
 
 - Does any viewer now see data from outside their own scope: another school, another student, names, UDISE, or a
   small group whose "average" is one student's score? If so, **it is a product decision for the owner before it is
@@ -156,7 +169,7 @@ npm run build                    # when routes, config or server/client boundari
   users, and an out-of-scope school, and record the status codes (on #405 this was a 403/200 matrix per role).
 - When role permissions change, check the five places in `AGENTS.md`'s non-negotiables are still in sync.
 
-## 5. Audience
+## 6. Audience
 
 - The PR's **Audience** line (physical centres, NVS schools, or both) must match the code's gate.
 - Open an NVS school page and a physical-centre page. The side the feature isn't for must look exactly as it does
@@ -164,7 +177,7 @@ npm run build                    # when routes, config or server/client boundari
 - On #437 four reviewers and the author missed that the new fields were never meant for NVS; a teammate caught it.
   If the PR doesn't say who it's for, ask before reviewing anything else.
 
-## 6. Docs
+## 7. Docs
 
 - Re-read every `.mex/` line the diff adds or touches, **after** the last code change, and check each claim against
   the code: parameters, which tests and programs it covers, which status codes it returns.
@@ -172,7 +185,7 @@ npm run build                    # when routes, config or server/client boundari
   clean-up removed).
 - Follow `AGENTS.md`'s GROW step.
 
-## 7. Other repos
+## 8. Other repos
 
 - For each external thing the code relies on, check it exists where the PR will run: BigQuery tables and columns,
   CMS endpoints and auth, Amplify env vars on `main` and `staging`, DB Service fields.
@@ -187,9 +200,10 @@ npm run build                    # when routes, config or server/client boundari
 
 ## Report
 
-Send the full report to the person running the review first. Post to GitHub only what they approve, following
-`review-with-agents.md` §7. Replicate anything contested before it's posted. Drop what a user can't reach from the
-UI, and say so.
+Send the full report to the person running the review first. Before a PR exists, the report stays there, and
+anything the owner accepts as a known issue goes into the PR description when it's opened. On an open PR, post to
+GitHub only what they approve, following `review-with-agents.md` §7. Replicate anything contested before it's
+posted. Drop what a user can't reach from the UI, and say so.
 
 One finding per problem, written so a reader with no context can act on it, in plain words, in this shape:
 

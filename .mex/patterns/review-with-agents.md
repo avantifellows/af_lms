@@ -20,7 +20,8 @@ last_updated: 2026-10-28
 # Reviewing with agents
 
 `pre-pr-review.md` says what a review must check. This file says how to run the reviewers and what to do with
-their findings, on your own PR, on a teammate's, or when answering comments on yours.
+their findings, on your own PR, on a teammate's, or when answering comments on yours. "Author", "owner" and
+"person running the review" mean what `pre-pr-review.md`'s **Roles** says.
 
 **A finding is a claim until it's proven.** Reviewers, including a second model, are often confidently wrong:
 wrong line numbers, a misread type, a "high severity" bug that real data shows can't happen. Nothing a reviewer
@@ -51,7 +52,7 @@ says reaches the PR until someone has checked it against the code and the data.
   - cross-repo contracts (db-service, etl-next, CMS, env vars);
   - data and SQL: run the real query with real parameters, SELECT only;
   - UI, forms and validation;
-  - a test runner for `pre-pr-review.md` step 1;
+  - a test runner for `pre-pr-review.md` step 2;
   - optionally, "what can be deleted" (over-engineering). Its findings are refactors, not defects; see §5 before
     acting on one.
 - **One run of a second model family** (for example Codex at high effort) on the same commit. Name the model and the
@@ -83,7 +84,7 @@ is not a check.
 - If a reviewer returned nothing, or seems to have failed, read its whole output before reporting "clean" or
   "failed".
 
-## 4. Walk the person through it
+## 4. Walk the person running the review through it
 
 - Report in chat first: the verdict, then the kept findings by severity, numbered `n/total`.
 - Each finding, in plain words: current behaviour, expected behaviour, the real impact on a user, and a
@@ -96,8 +97,9 @@ is not a check.
 - Each fix comes with a test that fails without it.
 - **Never make a check pass by weakening it:** no ignore flags, suppressions, loosened assertions or skipped tests.
   If the check itself is wrong, say so and ask.
-- Before applying a clean-up that deletes code, list what it removes. One clean-up removed a privacy test along with
-  the code it called "unneeded".
+- Before applying a clean-up that deletes code, list what it removes. On db-service #806 an over-engineering trim
+  removed a cross-student privacy test, a second round asked "was anything over-trimmed?" and said no, and a
+  teammate caught it.
 - **Write every decision down** (accepted risk, by design, deferred) in the PR description or the issue, so the next
   review round doesn't raise it again. Put deferred items in one follow-up issue.
 
