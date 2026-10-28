@@ -3,6 +3,7 @@
 // Every rule lives in student-support-rules.ts; this file only fetches and shapes.
 import {
   DIM_STUDENT_TABLE,
+  FACT_QUESTION_LEVEL_TABLE,
   FACT_TABLE,
   MAJOR_TEST_FORMATS,
   SUBMITTED_ONLY,
@@ -33,12 +34,17 @@ import type {
   TestScore,
 } from "@/types/student-support";
 
-const CHAPTER_TABLE =
-  "`avantifellows.production_dbt_final.fact_student_test_results_chapter_level`";
+// Question -> live new-CMS chapter, both CMS generations (etl-next bridge_question_chapter).
+const QUESTION_CHAPTER_TABLE = "`avantifellows.production_dbt_final.bridge_question_chapter`";
+const CHAPTER_DIM_TABLE = "`avantifellows.production_dbt_final.dim_chapter`";
 const CUTOFF_TABLE = "`avantifellows.production_dbt_final.dim_test_cutoffs`";
 
 // Chapter competency counts answers from chapter tests as well as full tests.
 const COMPETENCY_FORMATS = [...MAJOR_TEST_FORMATS, "chapter_test"];
+
+// Baselines and dummy tests say nothing about chapters taught: left out of
+// competency, as in the prototype. Matched by name; there is no flag for them.
+const NOT_COMPETENCY = /baseline|dummy/i;
 
 // Each stream sees only its own exams: NEET ↔ medical, JEE ↔ engineering.
 const COURSES: Record<"engineering" | "medical", string[]> = {
@@ -230,8 +236,12 @@ interface ChapterRaw {
 
 /**
  * One student's answers per exam × subject × chapter, summed across tests.
- * The table is partitioned on hashed_session_id: naming the student's own
- * sessions reads ~0.01 GB instead of ~3 GB for the whole year.
+ * Each question's chapter comes from bridge_question_chapter: the new-CMS
+ * question's own chapter, or for an old-CMS question its chapter in Vishal's
+ * per-question tags. An old-CMS question without a tag has no chapter and is
+ * left out (the chapter fact's old-CMS codes use an older numbering).
+ * The question table is partitioned on hashed_session_id: naming the
+ * student's own sessions reads only those partitions.
  */
 async function getChapterRows(
   uid: string,
@@ -239,33 +249,38 @@ async function getChapterRows(
   sessions: { id: string; hash: number }[]
 ): Promise<ChapterRaw[]> {
   if (sessions.length === 0) return [];
-  // Two CMS generations give one chapter several ids; the curriculum code
-  // (12C24) is what a teacher means by "the chapter", so group on it.
   const priority = stream === "medical" ? "priority_medical" : "priority_engineering";
   const sql = `
+    WITH answers AS (
+      SELECT session_id, test_course, section, question_source, question_source_id,
+             is_answered, is_correct, marks_obtained, marking_scheme_correct
+      FROM ${FACT_QUESTION_LEVEL_TABLE}
+      WHERE hashed_session_id IN UNNEST(@hashes)
+        AND session_id IN UNNEST(@sessions)
+        AND enrollment_user_id = @uid
+        AND test_course IN UNNEST(@courses)
+        AND test_format IN UNNEST(@formats)
+        AND section IS NOT NULL
+      QUALIFY ROW_NUMBER() OVER (PARTITION BY session_id, question_id ORDER BY inserted_at_timestamp DESC) = 1
+    )
     SELECT
-      test_course,
-      section,
-      COALESCE(NULLIF(TRIM(chapter_code), ''), chapter_name) AS chapter_key,
-      ANY_VALUE(chapter_name) AS chapter_name,
-      ANY_VALUE(NULLIF(TRIM(chapter_code), '')) AS chapter_code,
-      ARRAY_AGG(${priority} IGNORE NULLS ORDER BY start_date DESC LIMIT 1)[SAFE_OFFSET(0)] AS priority,
-      SUM(total_questions) AS n,
-      SUM(num_attempted) AS attempted,
-      SUM(num_correct) AS correct,
-      SUM(marks_scored) AS marks,
-      SUM(max_marks_possible) AS max_marks,
-      COUNT(DISTINCT session_id) AS tests
-    FROM ${CHAPTER_TABLE}
-    WHERE hashed_session_id IN UNNEST(@hashes)
-      AND session_id IN UNNEST(@sessions)
-      AND enrollment_user_id = @uid
-      AND academic_year = '${CURRENT_ACADEMIC_YEAR}'
-      AND test_course IN UNNEST(@courses)
-      AND test_format IN UNNEST(@formats)
-      AND section IS NOT NULL
-      AND chapter_name IS NOT NULL
-    GROUP BY test_course, section, chapter_key
+      a.test_course,
+      a.section,
+      b.chapter_code AS chapter_key,
+      ANY_VALUE(b.chapter_name) AS chapter_name,
+      b.chapter_code,
+      ANY_VALUE(c.${priority}) AS priority,
+      COUNT(*) AS n,
+      COUNTIF(a.is_answered) AS attempted,
+      COUNTIF(a.is_correct = 1) AS correct,
+      SUM(a.marks_obtained) AS marks,
+      SUM(a.marking_scheme_correct) AS max_marks,
+      COUNT(DISTINCT a.session_id) AS tests
+    FROM answers a
+    JOIN ${QUESTION_CHAPTER_TABLE} b
+      ON b.question_source = a.question_source AND b.question_source_id = a.question_source_id
+    LEFT JOIN ${CHAPTER_DIM_TABLE} c ON c.pk_chapter_id = b.fk_chapter_id
+    GROUP BY a.test_course, a.section, b.chapter_code
   `;
   const [rows] = await getBigQueryClient().query({
     query: sql,
@@ -523,7 +538,9 @@ export async function getStudentReport(
   ]);
   const sat = new Map<string, number>();
   for (const r of testRows) {
-    if (r.section && r.hashed_session_id !== null) sat.set(r.session_id, Number(r.hashed_session_id));
+    if (r.section && r.hashed_session_id !== null && !NOT_COMPETENCY.test(r.test_name)) {
+      sat.set(r.session_id, Number(r.hashed_session_id));
+    }
   }
   const chapterRows = stream
     ? await getChapterRows(uid, stream, [...sat].map(([id, hash]) => ({ id, hash })))
