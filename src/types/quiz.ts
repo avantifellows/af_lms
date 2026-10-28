@@ -6,6 +6,9 @@ export interface TestTrendPoint {
   start_date: string;
   student_count: number;
   stream_student_count: number;
+  // Students who submitted, in the test's stream when it has one (the
+  // chapter-test card's and report's "appeared").
+  appeared_count: number;
   test_format: string | null;
   test_stream: string | null;
   // Grade the test targets (test_grade in BQ), which can differ from the
@@ -15,6 +18,24 @@ export interface TestTrendPoint {
   // Subjects this test covers, derived from non-`overall` `section` values.
   // Empty for tests that have no per-subject breakdown.
   subjects: string[];
+  // Per-student averages (0-100) over submitted attempts in the test's stream (the
+  // chapter-test card's cohort, see appeared_count); null when none submitted.
+  avg_attempt_rate: number | null;
+  avg_accuracy: number | null;
+  avg_score: number | null;
+  cms_test_id: string | null;
+  // Exam the test was set for (test_course): JEE Mains, NEET, …
+  exam: string | null;
+  // The CMS chapter of a new-CMS chapter test (physical centres); null otherwise.
+  chapter: TestChapterInfo | null;
+}
+
+export interface TestChapterInfo {
+  code: string | null;
+  name: string | null;
+  subject: string | null;
+  // High | Medium | Low for the test's stream; null when untagged.
+  priority: string | null;
 }
 
 export interface BatchSummary {

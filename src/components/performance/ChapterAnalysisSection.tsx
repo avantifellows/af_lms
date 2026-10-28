@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { Card } from "@/components/ui/Card";
 import type { ChapterAnalysisRow, TestQuestionLevelRow } from "@/types/quiz";
+import PriorityBadge from "./PriorityBadge";
 
 interface Props {
   chapters: ChapterAnalysisRow[];
@@ -17,26 +18,6 @@ function scoreColorClass(score: number): string {
   if (score < 40) return "bg-danger-bg";
   if (score < 60) return "bg-warning-bg";
   return "bg-success-bg";
-}
-
-// Stream-keyed chapter priority (resolved upstream by etl-next). Untagged
-// chapters render an em-dash so the column reads cleanly until the curriculum
-// team finishes backfilling chapter_tagging.
-function PriorityBadge({ priority }: { priority: string | null }) {
-  if (!priority || priority === "None") {
-    return <span className="text-text-muted">—</span>;
-  }
-  const cls =
-    priority === "High"
-      ? "bg-danger-bg text-danger"
-      : priority === "Medium"
-        ? "bg-warning-bg text-text-primary"
-        : "bg-success-bg text-text-primary";
-  return (
-    <span className={`inline-block rounded px-2 py-0.5 text-xs font-bold ${cls}`}>
-      {priority}
-    </span>
-  );
 }
 
 const TH = "px-4 py-3 text-left text-xs uppercase tracking-wider font-bold bg-bg-card-alt text-text-muted";

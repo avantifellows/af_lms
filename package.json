@@ -35,7 +35,8 @@
     "pm:check": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/check-teacher-centre-vs-prod.ts",
     "pm:promodiff": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/check-promotion-school-diff.ts",
     "pm:mirror": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/mirror-seats-staging-to-prod.ts",
-    "teacher-feedback:bundle": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/generate-teacher-feedback-bundle.ts"
+    "teacher-feedback:bundle": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/generate-teacher-feedback-bundle.ts",
+    "qa:ensure-staging-admin": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/ensure-staging-review-admin.ts"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.1025.0",
@@ -54,8 +55,10 @@
     "@types/pg": "^8.15.6",
     "cfb": "1.2.2",
     "csv-parse": "^6.2.1",
+    "dompurify": "^3.4.17",
     "exceljs": "^4.4.0",
     "jszip": "^3.10.1",
+    "katex": "^0.16.47",
     "lucide-react": "^1.7.0",
     "next": "16.0.7",
     "next-auth": "^4.24.13",
@@ -75,6 +78,7 @@
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
+    "@types/katex": "^0.16.8",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
