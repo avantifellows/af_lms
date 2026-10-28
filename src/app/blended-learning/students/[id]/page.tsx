@@ -322,7 +322,7 @@ function History({
   const conversations = history.filter((entry) => entry.kind === "conversation").length;
   return (
     <section aria-label="History" className="space-y-3">
-      <h2 className="text-lg font-bold text-text-primary sm:text-xl">Conversations ({conversations})</h2>
+      <h2 className="text-lg font-bold text-text-primary sm:text-xl">Conversations in app ({conversations})</h2>
       {history.length === 0 ? (
         <EmptyHistory canLog={canLog} />
       ) : (
