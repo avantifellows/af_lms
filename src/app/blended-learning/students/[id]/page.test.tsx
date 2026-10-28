@@ -162,7 +162,7 @@ describe("MenteeDetailPage", () => {
     expect(screen.queryByText(/Mentee/)).not.toBeInTheDocument();
     expect(screen.queryByTestId("draft-status")).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Open Action Items" })).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 2, name: "Conversations (0)" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Conversations in app (0)" })).toBeInTheDocument();
     expect(screen.getByText("No conversations yet")).toBeInTheDocument();
     expect(screen.getByText("Log the first one to start this student's history.")).toBeInTheDocument();
   });
@@ -332,7 +332,7 @@ describe("MenteeDetailPage", () => {
 
       expect(screen.queryByRole("region", { name: /Profile Doc/ })).not.toBeInTheDocument();
       const history = screen.getByRole("region", { name: "History" });
-      expect(within(history).getByRole("heading", { level: 2, name: "Conversations (1)" })).toBeInTheDocument();
+      expect(within(history).getByRole("heading", { level: 2, name: "Conversations in app (1)" })).toBeInTheDocument();
       const entries = within(history).getAllByRole("article");
       expect(entries).toHaveLength(2);
       const entry = within(entries[1]);
@@ -367,7 +367,7 @@ describe("MenteeDetailPage", () => {
       await renderPage();
 
       const history = screen.getByRole("region", { name: "History" });
-      expect(within(history).getByRole("heading", { level: 2, name: "Conversations (0)" })).toBeInTheDocument();
+      expect(within(history).getByRole("heading", { level: 2, name: "Conversations in app (0)" })).toBeInTheDocument();
       const entry = within(within(history).getByRole("article"));
       expect(entry.getAllByRole("heading", { level: 4 }).map((heading) => heading.textContent)).toEqual(["Action items"]);
       expect(entry.queryByRole("link")).not.toBeInTheDocument();
@@ -424,7 +424,7 @@ describe("MenteeDetailPage", () => {
 
     const history = screen.getByRole("region", { name: "History" });
     // Only Conversations count; Attempts are still listed.
-    expect(within(history).getByRole("heading", { level: 2, name: "Conversations (1)" })).toBeInTheDocument();
+    expect(within(history).getByRole("heading", { level: 2, name: "Conversations in app (1)" })).toBeInTheDocument();
     const entries = within(history).getAllByRole("article");
     expect(entries).toHaveLength(3);
 
