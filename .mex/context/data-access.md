@@ -38,6 +38,20 @@ Five backends. Picking the wrong one for a write is a real bug — read this bef
 - Pool is a singleton (10 conns, 15s `statement_timeout`, 5s connect timeout). **Always `$1` placeholders.** This module is server-only — never import it (transitively) into a client component.
 - DB naming: Ecto — `inserted_at`/`updated_at`, snake_case, server TZ UTC. Derive IST dates in SQL: `(NOW() AT TIME ZONE 'Asia/Kolkata')::date`.
 
+**Documents are read from Postgres, written through the DB Service.** `lms_student_documents` is
+read directly by `listDocumentTypesForStudents` (`src/lib/student-documents.ts`) for the Enrollment
+tab's Data completeness table (#468): one `SELECT DISTINCT student_id, document_type ... WHERE
+student_id = ANY($1::bigint[]) AND deleted_at IS NULL` for the whole School, behind
+`GET /api/schools/[code]/document-status`. The older consent summary still asks the DB Service once
+per Student in capped batches, which is why it could never answer "who is missing which of the seven
+types". Uploads and deletes stay on the DB Service.
+
+**One visible-School predicate.** `findVisibleSchool` (`src/lib/school-lookup.ts`) resolves a School
+by UDISE or code as the School page does — the historical JNV set plus any School linked to an active
+centre. A route that filters on `af_school_category = 'JNV'` alone 404s for the centre Schools whose
+page opens fine, which is what left `% Docs` on "—" for them (#338). Both School-scoped document
+routes share it.
+
 ## 2. DB Service (Elixir/Phoenix) — proxied writes
 External HTTP API. **Student, batch, quiz-session, and document writes go here**, never direct to Postgres.
 ```ts
