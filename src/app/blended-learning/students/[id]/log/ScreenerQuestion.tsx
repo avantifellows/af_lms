@@ -94,7 +94,6 @@ export function ScreenerQuestion({
       </div>
       {screenerQuestionsShown(values) && (
         <section aria-label="Screener feedback" className="space-y-5 rounded-lg bg-bg-card-alt p-4">
-          <p className="text-sm text-text-secondary">Asked once for each student. Both are required.</p>
           {SCREENER_QUESTIONS.map(({ key, question }) => (
             <RatingScale
               key={key}
