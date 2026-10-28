@@ -113,10 +113,28 @@ export const LOGGING_LAST_CONVERSATION_SUMMARY = "Synthetic: planned the week's 
 // Mentor D's Mentees for the Manage spec: two mapped at seed, and one the
 // spec maps later, to check that pushing again reaches only her.
 export const MANAGE_MENTEES = {
-  first: { key: "G1", firstName: "Gita", lastName: "Common", gender: "Female", grade: 12, programId: 80 },
-  second: { key: "G2", firstName: "Hari", lastName: "Common", gender: "Male", grade: 13, programId: 90 },
-  mappedLater: { key: "G3", firstName: "Isha", lastName: "Later", gender: "Female", grade: 12, programId: 80 },
+  first: { key: "H1", firstName: "Gita", lastName: "Common", gender: "Female", grade: 12, programId: 80 },
+  second: { key: "H2", firstName: "Hari", lastName: "Common", gender: "Male", grade: 13, programId: 90 },
+  mappedLater: { key: "H3", firstName: "Isha", lastName: "Later", gender: "Female", grade: 12, programId: 80 },
 } as const satisfies Record<string, FixtureMentee>;
+// Mentor C's Mentees for the Profile Doc carry-over spec, one per viewport,
+// never contacted in the app, each with LEGACY_CONVERSATION as the Profile
+// Doc snapshot on their Student Links row. The spec logs their first
+// Conversation, which supersedes it.
+export const LEGACY_CONVERSATION_MENTEES = {
+  desktop: { key: "G1", firstName: "Gita", lastName: "Desk", gender: "Female", grade: 12, programId: 80 },
+  mobile: { key: "G2", firstName: "Gita", lastName: "Mobile", gender: "Female", grade: 13, programId: 90 },
+} as const satisfies Record<string, FixtureMentee>;
+export const LEGACY_CONVERSATION = {
+  occurredOn: "2026-06-14",
+  summary: "Synthetic: talked through the Profile Doc study plan and the hostel move.",
+  actionItems: [
+    { text: "Synthetic: finish the optics DPP", owner: "student" },
+    { text: "Synthetic: share the mock test schedule", owner: "mentor" },
+    { text: "Synthetic: confirm the hostel fee date", owner: "parent" },
+  ],
+  profileDocUrl: (key: string) => `https://docs.google.com/document/d/e2e-legacy-conversation-${key.toLowerCase()}`,
+} as const;
 
 // Contact numbers on the `user` row (#444). Phones are 98765100 + the
 // Student's seed index. Ira's WhatsApp differs and her parents' phones are
@@ -546,6 +564,7 @@ export async function seedBlendedLearningFixtures(client: Client): Promise<void>
     ...Object.values(ACTION_ITEM_MENTEES),
     ...Object.values(FLAG_MENTEES),
     ...Object.values(DRAFT_REVIEW_MENTEES),
+    ...Object.values(LEGACY_CONVERSATION_MENTEES),
   ];
   const manageMentees = Object.values(MANAGE_MENTEES);
   for (const [index, mentee] of [
@@ -698,6 +717,21 @@ export async function seedBlendedLearningFixtures(client: Client): Promise<void>
       TARA_LINKS.screener,
     ]
   );
+
+  for (const mentee of Object.values(LEGACY_CONVERSATION_MENTEES)) {
+    await client.query(
+      `INSERT INTO blended_learning_student_links
+         (student_id, profile_doc_url, legacy_last_contact_on, legacy_conversation_summary, legacy_action_items)
+       VALUES ($1, $2, $3::date, $4, $5::jsonb)`,
+      [
+        ids[mentee.key],
+        LEGACY_CONVERSATION.profileDocUrl(mentee.key),
+        LEGACY_CONVERSATION.occurredOn,
+        LEGACY_CONVERSATION.summary,
+        JSON.stringify(LEGACY_CONVERSATION.actionItems),
+      ]
+    );
+  }
 
   await seedFeedFlags(client, ids, { mentorA, mentorB });
 }

@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("./db", () => ({ query: vi.fn() }));
 
 import { query } from "./db";
+import { parseLegacyConversations } from "./blended-learning-legacy-conversations";
 import {
   formatBlendedLinksImportReport,
   legacyDateWindow,
@@ -27,6 +28,9 @@ interface LinkRow {
   profile_doc_url: string | null;
   screener_url: string | null;
   legacy_last_contact_on: string | null;
+  // Left undefined (so toEqual ignores them) until a run writes them.
+  legacy_conversation_summary?: string | null;
+  legacy_action_items?: { text: string; owner: string }[] | null;
 }
 
 let linksTable: Map<number, LinkRow>;
@@ -47,18 +51,20 @@ function givenDatabase(mapped: MappedStudent[], links: LinkRow[] = []) {
     }
     if (/INSERT INTO blended_learning_student_links/.test(sql)) {
       writes.push(params ?? []);
-      const [studentId, profileDocUrl, screenerUrl, legacyOn] = params as [
-        number, string | null, string | null, string | null | undefined,
-      ];
+      // The upsert names its columns after student_id; params follow in order.
+      const columns = sql.match(/\(student_id, ([^)]*)\)/)![1].split(",").map((name) => name.trim());
+      const [studentId, ...values] = params as [number, ...unknown[]];
+      const written = Object.fromEntries(columns.map((name, index) => [name, values[index]]));
+      if (typeof written.legacy_action_items === "string") {
+        written.legacy_action_items = JSON.parse(written.legacy_action_items);
+      }
       const existing = linksTable.get(studentId);
       linksTable.set(studentId, {
+        legacy_last_contact_on: null,
+        ...existing,
+        ...written,
         student_id: studentId,
-        profile_doc_url: profileDocUrl,
-        screener_url: screenerUrl,
-        legacy_last_contact_on: /legacy_last_contact_on/.test(sql)
-          ? (legacyOn ?? null)
-          : (existing?.legacy_last_contact_on ?? null),
-      });
+      } as LinkRow);
       return [];
     }
     throw new Error(`Unexpected SQL: ${sql}`);
@@ -401,6 +407,8 @@ describe("formatBlendedLinksImportReport with legacy Profile Docs", () => {
     const lines = formatBlendedLinksImportReport({
       mode: "apply",
       legacy: { dated: 5, no_dates: 2, unreadable: 3, no_doc_link: 1 },
+      legacyConversations: null,
+      legacyConversationIssues: [],
       unreadTabs: [],
       counts: { matched: 11, unmatched: 0, skipped: 0 },
       writes: { inserted: 0, updated: 5, unchanged: 6 },
@@ -410,5 +418,182 @@ describe("formatBlendedLinksImportReport with legacy Profile Docs", () => {
       "Legacy last contact (Profile Docs only): dated 5, NULL with no dated conversation 2, " +
         "unreadable (no export; stored value kept) 3, no Profile Doc link 1"
     );
+  });
+});
+
+describe("runBlendedLinksImport with legacy conversations", () => {
+  // Synthetic Profile Doc exports and summaries only.
+  function profileDocHtml(...entries: string[]) {
+    const tab = (title: string) => `<p class="title"><span>${title}</span></p>`;
+    return `<html><body>${tab("Student Interview")}<p>Notes</p>${tab("September")}${entries.join("")}</body></html>`;
+  }
+  const NEHA = { id: 503, studentId: "2612003", firstName: "Neha", lastName: "Rao" };
+  const KIRAN = { id: 504, studentId: "2612004", firstName: "Kiran", lastName: "Das" };
+  const MOHIT = { id: 505, studentId: "2612005", firstName: "Mohit", lastName: "Jain" };
+  const STUDENTS = [ASHA, RAVI, NEHA, KIRAN, MOHIT];
+
+  function workbook() {
+    const book = new ExcelJS.Workbook();
+    addSheet(book, "Student Profile Docs", ["Student ID", "Student Name", "Profile Doc"],
+      STUDENTS.map((s) => [s.studentId, `${s.firstName} ${s.lastName}`,
+        link("Profile", `https://docs.google.com/document/d/${s.firstName.toLowerCase()}-doc`)]));
+    addSheet(book, "Conversation", ["Student ID", "Name", "Screener Form"], []);
+    return book;
+  }
+
+  const SEP_17 = profileDocHtml("<p>Sep 17, 2026: called</p><p>Talked about mock tests.</p>");
+  const items = [
+    { text: "Synthetic: revise optics", owner: "student" },
+    { text: "Synthetic: send the timetable", owner: "mentor" },
+  ];
+
+  function docs(html: Record<string, string>, file: unknown) {
+    return {
+      readProfileDocHtml: (docId: string) => html[docId] ?? null,
+      window: { from: "2026-04-01", to: "2026-10-23" },
+      conversations: parseLegacyConversations(file),
+    };
+  }
+
+  const FILE = {
+    "asha-doc": { occurredOn: "2026-09-17", summary: "  Synthetic: planned mocks.  ", actionItems: items },
+    // A summary of an older entry: the doc's latest is Sep 17.
+    "ravi-doc": { occurredOn: "2026-09-01", summary: "Synthetic: older.", actionItems: [] },
+    "kiran-doc": { occurredOn: "2026-09-17", summary: "Synthetic: no items.", actionItems: [] },
+    "mohit-doc": { occurredOn: "2026-09-17", summary: "Synthetic", actionItems: [{ text: "x", owner: "teacher" }] },
+    "nobody-doc": { occurredOn: "2026-09-17", summary: "Synthetic: unused.", actionItems: [] },
+  };
+
+  it("loads a dated doc's summary only for that date, NULL otherwise, and reports counts and invalid entries by Student ID", async () => {
+    givenDatabase(STUDENTS);
+    const report = await runBlendedLinksImport({
+      workbook: workbook(),
+      mode: "apply",
+      // Neha's doc is read but has no summary in the file.
+      legacyProfileDocs: docs(
+        { "asha-doc": SEP_17, "ravi-doc": SEP_17, "neha-doc": SEP_17, "kiran-doc": SEP_17, "mohit-doc": SEP_17 },
+        FILE
+      ),
+    });
+
+    expect(report.legacyConversations).toEqual({
+      loaded: 2, summary_missing: 1, summary_stale: 1, summary_invalid: 1, unused: 1,
+    });
+    expect(report.legacyConversationIssues).toEqual([{ studentId: "2612005", reason: "bad_action_item" }]);
+    expect(linksTable.get(501)).toMatchObject({
+      legacy_last_contact_on: "2026-09-17",
+      legacy_conversation_summary: "Synthetic: planned mocks.",
+      legacy_action_items: items,
+    });
+    // An empty list stores NULL items.
+    expect(linksTable.get(504)).toMatchObject({ legacy_conversation_summary: "Synthetic: no items.", legacy_action_items: null });
+    for (const id of [502, 503, 505]) {
+      expect(linksTable.get(id)).toMatchObject({ legacy_conversation_summary: null, legacy_action_items: null });
+    }
+
+    const lines = formatBlendedLinksImportReport(report);
+    expect(lines).toContain(
+      "Legacy conversation (dated Profile Docs): loaded 2, NULL with no summary for the doc 1, " +
+        "NULL with a summary of another date 1, NULL with an invalid summary 1; file entries no dated doc used 1"
+    );
+    expect(lines.slice(-2)).toEqual(["Invalid legacy conversations (left NULL)", "- Student ID 2612005: bad_action_item"]);
+    expect(lines.join("\n")).not.toMatch(/Synthetic|-doc|mock/);
+  });
+
+  it("is re-runnable, clears the summary when the doc has no dated entry, and keeps it when the doc is unreadable", async () => {
+    givenDatabase([ASHA, RAVI]);
+    const file = {
+      "asha-doc": FILE["asha-doc"],
+      "ravi-doc": { occurredOn: "2026-09-17", summary: "Synthetic: Ravi.", actionItems: items },
+    };
+    const run = (html: Record<string, string>) =>
+      runBlendedLinksImport({ workbook: workbook(), mode: "apply", legacyProfileDocs: docs(html, file) });
+
+    await run({ "asha-doc": SEP_17, "ravi-doc": SEP_17 });
+    writes = [];
+    const again = await run({ "asha-doc": SEP_17, "ravi-doc": SEP_17 });
+    expect(again.writes).toEqual({ inserted: 0, updated: 0, unchanged: 2 });
+    expect(writes).toEqual([]);
+
+    // Asha's doc now has no dated entry; Ravi's export is missing.
+    const later = await run({ "asha-doc": profileDocHtml("<p>No dates any more.</p>") });
+    expect(later.legacy).toMatchObject({ no_dates: 1, unreadable: 1 });
+    expect(later.legacyConversations).toMatchObject({ loaded: 0, unused: 2 });
+    expect(linksTable.get(501)).toMatchObject({
+      legacy_last_contact_on: null, legacy_conversation_summary: null, legacy_action_items: null,
+    });
+    expect(linksTable.get(502)).toMatchObject({ legacy_conversation_summary: "Synthetic: Ravi.", legacy_action_items: items });
+  });
+
+  it("keeps a ticked item done on a re-run, matching by text and owner", async () => {
+    const done = { done_at: "2026-10-21T10:00:00+05:30", done_by_email: "m@test.local" };
+    givenDatabase([ASHA], [
+      {
+        student_id: 501, profile_doc_url: "https://docs.google.com/document/d/asha-doc", screener_url: null,
+        legacy_last_contact_on: "2026-09-17", legacy_conversation_summary: "Synthetic: planned mocks.",
+        legacy_action_items: [
+          { ...items[0], ...done },
+          { ...items[1], done_at: null, done_by_email: null },
+        ],
+      },
+    ]);
+    const run = (file: unknown) =>
+      runBlendedLinksImport({ workbook: workbook(), mode: "apply", legacyProfileDocs: docs({ "asha-doc": SEP_17 }, file) });
+
+    const same = await run({ "asha-doc": FILE["asha-doc"] });
+    expect(same.writes).toEqual({ inserted: 0, updated: 0, unchanged: 1 });
+    expect(writes).toEqual([]);
+
+    // The summariser reworded the second item and added one: the first stays done.
+    const reworded = [items[0], { text: "Synthetic: send the timetable today", owner: "mentor" }];
+    const changed = await run({ "asha-doc": { ...FILE["asha-doc"], actionItems: reworded } });
+    expect(changed.writes).toEqual({ inserted: 0, updated: 1, unchanged: 0 });
+    expect(linksTable.get(501)?.legacy_action_items).toEqual([
+      { ...items[0], ...done },
+      { ...reworded[1], done_at: null, done_by_email: null },
+    ]);
+  });
+
+  it("dry run counts what it would load and writes nothing", async () => {
+    givenDatabase([ASHA]);
+    const report = await runBlendedLinksImport({
+      workbook: workbook(),
+      mode: "dry-run",
+      legacyProfileDocs: docs({ "asha-doc": SEP_17 }, { "asha-doc": FILE["asha-doc"] }),
+    });
+    expect(report.legacyConversations).toMatchObject({ loaded: 1 });
+    expect(report.writes).toEqual({ inserted: 1, updated: 0, unchanged: 0 });
+    expect(writes).toEqual([]);
+  });
+
+  it("writes the summary columns only with a conversations file", async () => {
+    givenDatabase([ASHA], [
+      {
+        student_id: 501, profile_doc_url: "https://docs.google.com/document/d/asha-doc", screener_url: null,
+        legacy_last_contact_on: "2026-09-17", legacy_conversation_summary: "Synthetic: kept.", legacy_action_items: null,
+      },
+    ]);
+    const report = await runBlendedLinksImport({
+      workbook: workbook(),
+      mode: "apply",
+      legacyProfileDocs: { readProfileDocHtml: () => SEP_17, window: { from: "2026-04-01", to: "2026-10-23" } },
+    });
+    expect(report.legacyConversations).toBeNull();
+    expect(report.writes).toEqual({ inserted: 0, updated: 0, unchanged: 1 });
+    expect(linksTable.get(501)?.legacy_conversation_summary).toBe("Synthetic: kept.");
+  });
+
+  it("names a Student without a Student ID in an invalid entry's issue", () => {
+    const lines = formatBlendedLinksImportReport({
+      mode: "dry-run",
+      legacy: { dated: 1, no_dates: 0, unreadable: 0, no_doc_link: 0 },
+      legacyConversations: { loaded: 0, summary_missing: 0, summary_stale: 0, summary_invalid: 1, unused: 0 },
+      legacyConversationIssues: [{ studentId: null, reason: "blank_summary" }],
+      unreadTabs: [],
+      counts: { matched: 1, unmatched: 0, skipped: 0 },
+      writes: { inserted: 0, updated: 1, unchanged: 0 },
+      issues: [],
+    });
+    expect(lines.at(-1)).toBe("- Student without a Student ID: blank_summary");
   });
 });

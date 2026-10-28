@@ -15,6 +15,7 @@ import { getTodayIST } from "@/lib/curriculum-date-helpers";
 import { loadDashboardChrome } from "@/lib/dashboard-chrome";
 
 import { BlendedPageShell } from "../../../BlendedPageShell";
+import { LegacyConversationCard } from "../LegacyConversationCard";
 import { LogEntryForm, type ReviewDraft } from "./LogEntryForm";
 
 // Log a Conversation or an Attempt for one Mentee. Only a Mentor logs, for
@@ -64,7 +65,26 @@ async function currentListGroup(
   return row ? menteeGroup(row.reasons) : null;
 }
 
-function LastConversationPanel({ conversation }: { conversation: Extract<HistoryEntry, { kind: "conversation" }> | null }) {
+// The last Conversation in the app; before the first one, the Profile Doc's
+// latest conversation when there is one. After it, the Profile Doc's still
+// open action items follow it.
+function LastConversationPanels({ mentee, conversation }: { mentee: MenteeDetail; conversation: Conversation | null }) {
+  const legacy = mentee.legacyConversation;
+  const legacyCard = legacy && (
+    <LegacyConversationCard legacy={legacy} studentId={mentee.studentId} canTick headingLevel="h3" />
+  );
+  if (!conversation && legacyCard) return legacyCard;
+  return (
+    <>
+      <LastConversationPanel conversation={conversation} />
+      {legacyCard}
+    </>
+  );
+}
+
+type Conversation = Extract<HistoryEntry, { kind: "conversation" }>;
+
+function LastConversationPanel({ conversation }: { conversation: Conversation | null }) {
   return (
     <section aria-label="Last Conversation">
       <Card elevation="sm" className="space-y-2 p-4">
@@ -123,7 +143,7 @@ export default async function LogEntryPage({ params }: { params: Promise<{ id: s
         subtitle={subtitle}
         today={today}
         listGroup={listGroup}
-        lastConversationPanel={<LastConversationPanel conversation={lastConversation} />}
+        lastConversationPanel={<LastConversationPanels mentee={mentee} conversation={lastConversation} />}
         openActionItems={mentee.openActionItems}
         hasOpenDraft={mentee.openDraft !== null}
         draft={draft}

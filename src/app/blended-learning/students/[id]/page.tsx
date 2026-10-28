@@ -25,10 +25,13 @@ import { ConversationPhotos } from "./ConversationPhotos";
 import { ConversationRecording } from "./ConversationRecording";
 import { DraftStatus } from "./DraftStatus";
 import { FLAG_HISTORY } from "./flagRecipients";
+import { LegacyConversationCard } from "./LegacyConversationCard";
 
 // One Mentee, in one column as wide as the log page's: name, profile line,
 // contact and links, any open Conversation Draft (polled while drafting), the
-// Open Action Items, then the newest-first history. Notes and photos load on
+// Profile Doc's latest conversation (in full before the first Conversation in
+// the app, then while one of its action items is open), the Open Action
+// Items, then the newest-first history. Notes and photos load on
 // demand from their API routes.
 // Admins and read-only Mentors see the same page, view only: the log button
 // and the draft's controls stay in place, disabled. Open Action Items are
@@ -368,6 +371,9 @@ export default async function MenteeDetailPage({
           canManage={canBlendedLearning(access, "manage_draft")}
           reviewHref={canLog ? `/blended-learning/students/${mentee.studentId}/log` : null}
         />
+      )}
+      {mentee.legacyConversation && (
+        <LegacyConversationCard legacy={mentee.legacyConversation} studentId={mentee.studentId} canTick={canLog} />
       )}
       {mentee.openActionItems.length > 0 && <OpenActionItems items={mentee.openActionItems} />}
       <History
