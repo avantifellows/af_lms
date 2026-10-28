@@ -32,6 +32,8 @@ const sizeClasses = {
 } as const;
 
 export type ButtonVariant = keyof typeof variantClasses;
+// Part of the ui barrel's public API (src/components/ui/index.ts); nothing imports it yet.
+// fallow-ignore-next-line unused-type
 export type ButtonSize = keyof typeof sizeClasses;
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
