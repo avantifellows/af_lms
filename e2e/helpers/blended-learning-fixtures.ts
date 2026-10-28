@@ -103,10 +103,10 @@ export const DRAFT_REVIEW_MENTEES = {
   mobile: { key: "F2", firstName: "Farah", lastName: "Mobile", gender: "Female", grade: 13, programId: 90 },
 } as const satisfies Record<string, FixtureMentee>;
 export const LOGGING_LAST_CONVERSATION_SUMMARY = "Synthetic: planned the week's revision.";
-// Mentor C's Mentees for the Profile Doc carry-over spec, one per viewport,
-// never contacted in the app, each with LEGACY_CONVERSATION as the Profile
-// Doc snapshot on their Student Links row. The spec logs their first
-// Conversation, which supersedes it.
+// Mentor C's Mentees for the Profile Doc spec, one per viewport, never
+// contacted in the app, each with LEGACY_CONVERSATION's summary on their
+// Student Links row and its action items as open Profile Doc Action Items
+// (from_profile_doc, positions 1..3), as the links importer loads them.
 export const LEGACY_CONVERSATION_MENTEES = {
   desktop: { key: "G1", firstName: "Gita", lastName: "Desk", gender: "Female", grade: 12, programId: 80 },
   mobile: { key: "G2", firstName: "Gita", lastName: "Mobile", gender: "Female", grade: 13, programId: 90 },
@@ -695,14 +695,22 @@ export async function seedBlendedLearningFixtures(client: Client): Promise<void>
   for (const mentee of Object.values(LEGACY_CONVERSATION_MENTEES)) {
     await client.query(
       `INSERT INTO blended_learning_student_links
-         (student_id, profile_doc_url, legacy_last_contact_on, legacy_conversation_summary, legacy_action_items)
-       VALUES ($1, $2, $3::date, $4, $5::jsonb)`,
+         (student_id, profile_doc_url, legacy_last_contact_on, legacy_conversation_summary)
+       VALUES ($1, $2, $3::date, $4)`,
       [
         ids[mentee.key],
         LEGACY_CONVERSATION.profileDocUrl(mentee.key),
         LEGACY_CONVERSATION.occurredOn,
         LEGACY_CONVERSATION.summary,
-        JSON.stringify(LEGACY_CONVERSATION.actionItems),
+      ]
+    );
+    await client.query(
+      `INSERT INTO blended_learning_action_items (student_id, from_profile_doc, position, owner, text)
+       SELECT $1, true, item.position, item.owner, item.text
+       FROM jsonb_to_recordset($2::jsonb) AS item(position int, owner text, text text)`,
+      [
+        ids[mentee.key],
+        JSON.stringify(LEGACY_CONVERSATION.actionItems.map((item, index) => ({ ...item, position: index + 1 }))),
       ]
     );
   }

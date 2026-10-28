@@ -1,6 +1,6 @@
 // fallow-ignore-file code-duplication
 /**
- * Last updated: 2026-10-27. Operator-run, re-runnable — if the schema or app
+ * Last updated: 2026-10-28. Operator-run, re-runnable — if the schema or app
  * has moved on since this date, review/update it before running.
  *
  * Loads Blended Learning Student Links (Profile Doc, Screener Link) from the
@@ -94,9 +94,13 @@ HTML export). A doc read with no dated conversation gives NULL; a doc with no
 export keeps the stored value, so re-run once more docs are shared. Dates after
 today (IST) are ignored. Without the flag that column is untouched.
 --legacy-conversations (with --legacy-docs-dir) also sets legacy_conversation_summary
-and legacy_action_items from { "<Drive file id>": { "occurredOn": "YYYY-MM-DD",
-"summary": "...", "actionItems": [{ "text": "...", "owner": "student|mentor|parent" }] } }:
-loaded only when occurredOn is the doc's latest date, else NULL. Counts only are printed.`);
+from { "<Drive file id>": { "occurredOn": "YYYY-MM-DD", "summary": "...",
+"actionItems": [{ "text": "...", "owner": "student|mentor|parent" }] } }: loaded only
+when occurredOn is the doc's latest date, else NULL. The entry's action items become
+the Student's Profile Doc Action Items: new ones are inserted open, ones with the same
+text and owner are kept (open or done), and open ones no longer listed (all of them
+when the summary is NULL) are removed; done ones are never removed. Counts and
+Student IDs only are printed.`);
 }
 
 // Profile Doc HTML exports in a directory, named <Drive file id>.html.

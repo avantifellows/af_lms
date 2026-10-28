@@ -12,7 +12,7 @@ edges:
     condition: when the e2e run itself fails
   - target: context/data-access.md
     condition: for which tables LMS reads and writes directly
-last_updated: 2026-10-27
+last_updated: 2026-10-28
 ---
 
 # Mirror db-service schema in e2e
@@ -26,7 +26,8 @@ cannot prove scoping or trigger behaviour, so the fixture DDL has to be the real
 Example: `20261022130000_add_blended_learning_schema.sql` (#442). An `alter table` migration
 can be mirrored alone: build the table from the earlier fixture SQL in both scratch DBs, then
 run only the new `.exs` into one (as for `20261027100000_add_blended_learning_legacy_conversation.sql`,
-2026-10-27; column `COMMENT`s show in the dump, so mirror them).
+2026-10-28; column `COMMENT`s show in the dump, so mirror them). Ignore pg_dump's random
+`\restrict` / `\unrestrict` token lines when diffing (`diff -I restrict`).
 
 ## Steps
 1. Copy the migrations into a temp dir without touching the db-service checkout:

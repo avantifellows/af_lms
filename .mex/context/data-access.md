@@ -21,7 +21,7 @@ edges:
     condition: when adding a write that must proxy to the DB Service
   - target: patterns/add-api-route.md
     condition: when adding a route that reads or writes
-last_updated: 2026-10-27
+last_updated: 2026-10-28
 ---
 
 # Data Access
@@ -545,23 +545,28 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   `src/lib/blended-learning-profile-doc-dates.ts`: the doc's latest dated conversation only).
   With docs, every matched Student is considered, so a stored Profile Doc link still gives a
   date when the workbook row has none; a Student with no link and no stored row gets no row.
-  `legacy_conversation_summary` and `legacy_action_items` (jsonb `[{text, owner, done_at?, done_by_email?}]`, 1–10;
-  db-service migration `20261027100000`, mirrored in e2e fixture
-  `20261027100000_add_blended_learning_legacy_conversation.sql`) are selected and written only
+  `legacy_conversation_summary` (db-service migration `20261027100000`, mirrored in e2e fixture
+  `20261027100000_add_blended_learning_legacy_conversation.sql`) is selected and written only
   with `--legacy-conversations` too (validation in
   `src/lib/blended-learning-legacy-conversations.ts`): the file's entry for a `dated` doc on
-  that same date, NULL otherwise; an unreadable doc keeps them. The upsert names only the
-  columns the run owns (fixed literals; values bound).
+  that same date, NULL otherwise; an unreadable doc keeps it. The upsert names only the
+  columns the run owns (fixed literals; values bound). The same run syncs that Student's
+  **Profile Doc Action Items** (`blended_learning_action_items.from_profile_doc = true`,
+  `conversation_id` NULL, `bl_action_items_source_check`: a Conversation XOR the Profile Doc;
+  partial unique `bl_action_items_profile_doc_unique` on (student_id, text, owner)): insert
+  missing ones open, keep matching ones (open or done), delete only open ones the file no
+  longer lists (all open ones when the summary is NULL); three batched statements, the DELETE
+  re-checking `status = 'open'`.
   Runbook: `patterns/load-blended-learning-links.md`.
-- **Profile Doc snapshot on the Mentee pages:** `getMenteeDetail` returns
-  `legacyConversation` (`legacy_last_contact_on`, summary, items with index / done state,
-  Profile Doc URL): in full while the Student has no `kind = 'conversation'` row (Attempts
-  don't count), then `superseded` (action items only, compact) while any item is still open;
-  null once all are done. The detail page shows it near the top (next to Open Action Items,
-  admins too) and the log page in the side panel. The log form is never pre-filled.
-  Each item has a Done checkbox: `PATCH /api/blended-learning/students/[id]/legacy-action-items`
-  (`src/lib/blended-learning-legacy-action-items.ts`) sets or clears `done_at` /
-  `done_by_email` on that array element in one UPDATE. Only the Student's own Mentor (403
-  otherwise; admins see disabled boxes); the element must still have the text and owner the
-  Mentor saw, else 409 (a re-import changed the list). Re-imports keep the done state of
-  items whose text and owner are unchanged.
+- **Profile Doc entry on the Mentee pages:** `getMenteeDetail` adds a `kind: "profile_doc"`
+  history entry (`legacy_last_contact_on`, the summary, every Profile Doc Action Item with its
+  status, the Profile Doc URL) at its date, after the app's entries of that date; it needs a
+  date and a summary or an item. It is history, never a Conversation: "Conversations (N)",
+  Last Contact (still `legacy_last_contact_on`), list stats and first-conversation logic count
+  only `blended_learning_conversations` rows. Its open items are in `openActionItems` with
+  `source: "profile_doc"` and `agreedOn` = that date (meta "From Profile Doc · <date>"), and are
+  ticked done from the log form through the normal save (`completeActionItems`). The detail page
+  renders the entry like a Conversation (Summary, Action items with Open/Done, "Open Profile
+  Doc"), admins read-only; the log page's Last Conversation panel shows it while it is the
+  latest. Owner pills are a fixed `w-16` column (`ACTION_ITEM_ROW_CLASSES` in
+  `ActionItemMeta.tsx`) so item text lines up whoever owns it.

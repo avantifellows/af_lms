@@ -17,7 +17,7 @@ edges:
     condition: for the Blended Learning tables and the Mapping source the script matches against
   - target: context/setup.md
     condition: for the .env files the script reads database credentials from
-last_updated: 2026-10-27
+last_updated: 2026-10-28
 ---
 
 # Load Blended Learning Student Links
@@ -51,16 +51,25 @@ What it reads (hyperlinks, never cell text — a Ctrl+K link or a `HYPERLINK("ur
   `dated`, `no_dates` (doc read, nothing dated → NULL), `unreadable` (no export → stored value
   kept, NULL until a re-run has the doc), `no_doc_link`. Counts only are printed.
 - **`--legacy-conversations=<file.json>`** (needs `--legacy-docs-dir`) →
-  `legacy_conversation_summary`, `legacy_action_items`: the summary and action items of that
-  same latest entry, shown to Mentors until they log the Student's first Conversation in the
-  app (product owner, 2026-10-27). File shape:
+  `legacy_conversation_summary` and the Student's **Profile Doc Action Items**: the summary and
+  action items of that same latest entry. The summary shows in the Student's conversation
+  history at `legacy_last_contact_on` ("From Profile Doc", never counted as a Conversation);
+  the items are ordinary open Action Items (`blended_learning_action_items` rows with
+  `from_profile_doc = true`, no Conversation, positions 1..n) in the one Open Action Items
+  list, ticked done in the log form like any other (product owner, 2026-10-28). File shape:
   `{ "<Drive file id>": { "occurredOn": "YYYY-MM-DD", "summary": "...", "actionItems": [{ "text": "...", "owner": "student|mentor|parent" }] } }`.
   Strict: summary non-blank ≤ 2000, ≤ 10 items, item text non-blank ≤ 500, owner one of the
-  three; `[]` stores NULL items; anything else makes the entry invalid (stored NULL, listed by
-  Student ID with a reason). Per `dated` doc: `loaded` when the entry's `occurredOn` equals the
-  doc's date, else NULL as `summary_missing` / `summary_stale` / `summary_invalid`; `no_dates`
-  → NULL; `unreadable` / `no_doc_link` keep the stored values. `unused` counts file entries no
-  dated doc took. The summaries come from an external step (not in this repo) fed by
+  three (a repeated text + owner is kept once); anything else makes the entry invalid (stored
+  NULL, listed by Student ID with a reason). Per `dated` doc: `loaded` when the entry's
+  `occurredOn` equals the doc's date, else NULL as `summary_missing` / `summary_stale` /
+  `summary_invalid`; `no_dates` → NULL; `unreadable` / `no_doc_link` keep the stored summary
+  and items. `unused` counts file entries no dated doc took.
+  **Item sync** for every read doc (dry run plans only): items missing from the DB are
+  inserted open; stored ones (open or done) with the same text and owner are kept (and
+  re-positioned); open ones the file no longer lists are deleted, all of them when the summary
+  is NULL; done ones are never deleted. A partial unique index on (student, text, owner) keeps
+  re-runs idempotent. Reported as `inserted / kept / removed` totals plus one line per Student
+  ID that gained or lost an item. The summaries come from an external step (not in this repo) fed by
   `npm run blended:export-latest-entries -- --legacy-docs-dir=<dir> --out=<file.json>`
   (`scripts/export-latest-profile-doc-entries.ts`, logic in
   `src/lib/blended-learning-profile-doc-export.ts`): `{ "<Drive file id>": { "occurredOn",
@@ -87,8 +96,10 @@ Name" column.
    `npm run blended:export-latest-entries -- --legacy-docs-dir=<dir> --out=<private>/entries.json`,
    have the external step write the summaries file, then dry run the import with
    `--legacy-docs-dir=<dir> --legacy-conversations=<private>/summaries.json`, check the
-   counts (expect `summary_stale` 0 unless docs changed since the export), then apply. Delete
-   both JSON files afterwards: they hold minors' records.
+   counts (expect `summary_stale` 0 unless docs changed since the export) and the Profile Doc
+   action items line (`removed` should be 0 on a first load), then apply. A re-run with the same
+   file reports `inserted 0, removed 0`. Delete both JSON files afterwards: they hold minors'
+   records.
 5. Re-run the dry run: it should report `inserted 0, updated 0`, i.e. everything `unchanged`.
 
 ## Matching and reporting
@@ -109,7 +120,11 @@ Name" column.
 
 ## Verify
 - `npx vitest run src/lib/blended-learning-links-import.test.ts src/lib/blended-learning-legacy-conversations.test.ts src/lib/blended-learning-profile-doc-export.test.ts src/lib/blended-learning-profile-doc-dates.test.ts`
-- After apply, a Mentee's detail page shows the Profile Doc / Screener links.
+- After apply, a Mentee's detail page shows the Profile Doc / Screener links; with
+  `--legacy-conversations`, the Profile Doc entry in the history and its items in Open Action
+  Items ("From Profile Doc · <date>").
+- e2e: `blended-learning-legacy-conversation.spec.ts` runs `runBlendedLinksImport` in-process
+  against the test DB (`e2e/helpers/test-db-env.ts`) to prove a re-import keeps done items.
 
 ## Debug
 - Everything `no_match`: the export lost the Student ID column header, or you pointed at the
