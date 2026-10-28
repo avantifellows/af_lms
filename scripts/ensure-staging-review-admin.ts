@@ -1,3 +1,4 @@
+// fallow-ignore-file complexity
 /**
  * Last updated: 2026-10-28. Helper for the pre-PR review
  * (.mex/patterns/pre-pr-review.md, step 3), used only when the person running
