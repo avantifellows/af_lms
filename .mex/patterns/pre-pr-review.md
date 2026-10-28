@@ -113,11 +113,13 @@ npm run build                    # when routes, config or server/client boundari
   Point both at the same local data: `dbservice_dev` when its dump has the cases, otherwise a clone of the newest
   local production snapshot (`CREATE DATABASE <scratch> TEMPLATE <snapshot>`, as in `local-browser-qa.md`). BigQuery
   numbers come from prod, read-only. On a clone, set `DB_SERVICE_URL` to a dead port, except for the write test
-  below. Pages that write while reading (Holistic reconciles mappings) change the data for whichever runs second:
-  for those, give the base and the branch a clone each. Remove the base worktree afterwards.
+  below. Opening a School page writes (see the staging rule below), so whichever server runs second sees changed
+  data: when the review opens School pages, give the base and the branch a clone each. Remove the base worktree
+  afterwards.
 - **Staging only on request, and only after approval.** Don't use the staging DB or the deployed staging app on
-  your own, even just to read: Holistic reads reconcile mappings, and that writes (`reconcileHolisticMappings` in
-  `src/lib/holistic-progress.ts`). If a case exists only on staging, say so in the report and ask. Use staging only
+  your own, even just to read. Opening **any** School page writes to whatever database the server points at:
+  `RosterPage` builds the Holistic tab on every load, and that path calls `reconcileHolisticMappings`, which can end
+  mappings and change draft notes. If a case exists only on staging, say so in the report and ask. Use staging only
   when the person running the review asks for it and approves the plan, for example through `deploy-staging-pr.md`.
   Once approved, a local server on staging needs a login: `npm run qa:ensure-staging-admin` checks for the Dev Login
   Admin persona's read-only `user_permission` row on staging (dry run). With `-- --apply` it adds the row if it is
@@ -125,15 +127,21 @@ npm run build                    # when routes, config or server/client boundari
 - A new screen has no base to compare. Run the branch alone on the same cases, and still check that every screen it
   touches or replaces looks the same as on the base where the feature doesn't apply.
 - Pick **named real cases** with SQL first (prod BigQuery, via `mcp__claude_ai_Avanti_Data__run_query`), and
-  record their ids in the report. Pick them with the same rule the page uses to list them, or they 404 (on #467 the
+  record their ids in the report. When the data lives only in Postgres, read-only queries against prod Postgres can
+  pick the cases and recompute the numbers, but only with the go of the person running the review: SELECT only, and
+  the results stay in chat. Pick them with the same rule the page uses to list them, or they 404 (on #467 the
   first picks were schools the LMS doesn't show):
   - the happy path;
   - empty: started but nobody submitted, no data for the filter;
   - partial: a few students, one student;
   - every variant the code branches on: combined test, homework, old-CMS vs new-CMS, physical vs NVS, each stream;
-  - failure: force the new API or query to fail. Intercept it in the browser
-    (`page.route(..., r => r.fulfill({ status: 500 }))`) and label it simulated. Only if that can't reach it, make a
-    local, uncommitted change that throws, and revert it.
+  - failure: make each read the feature depends on fail, including reads it doesn't own, and look for a `catch`
+    that returns empty data. The page then shows "nothing" instead of an error: on #471 a failed exam read made
+    every expected Student "Not registered".
+    - A read the browser makes: intercept it (`page.route(..., r => r.fulfill({ status: 500 }))`) and label it
+      simulated.
+    - A read during the server render can't be reached that way. Add `if (process.env.QA_FAIL_<X>) throw ...` to
+      it, restart only the branch server with `QA_FAIL_<X>=1`, and revert with `git checkout -- <file>`.
 - Compare each case in two passes. Unit tests alone don't count: they check what the author thought of, and on #467
   every test passed while the page was broken.
   1. **API, every case.** Call each route the change touches on both ports, with the same session and parameters
@@ -168,6 +176,10 @@ npm run build                    # when routes, config or server/client boundari
 ## 4. Numbers: recompute every figure, across all the data
 
 - List every figure the change shows: averages, rates, counts, "X of Y", ranks.
+- Before judging a figure, count its source rows for this academic year. A metric over an empty or stale table is a
+  finding, not a pass: on #471 prod had no current exam registrations, so the new row would read ~0% everywhere.
+  Check who is expected, and when, too (Grade 11 doesn't sit JEE Main or NEET, and NEET registration opens around
+  February).
 - For each one, write its definition in one line, including the denominator, and how blanks are treated. A student
   who attempted nothing has no accuracy, which is not the same as 0%.
 - Recompute it directly in SQL over **all of this academic year's** relevant data, and compare with what the code
@@ -179,8 +191,10 @@ npm run build                    # when routes, config or server/client boundari
   report, overview vs deep dive). Run one consistency query over every session, and count mismatches and
   impossible values (over 100%, negative).
 - When the PR changes an existing metric, count how many existing reports change, and by how much.
-- **For any list, check it contains everyone it should.** Write the population independently and compare counts. On
-  #405 this found 287 pass-outs under a program the code didn't list, and alumni no list could reach.
+- **For any list or total, check it contains everyone it should.** Write the population independently and compare
+  counts. On #405 this found 287 pass-outs under a program the code didn't list, and alumni no list could reach. A
+  null key drops people from a denominator silently: on #471, 152 Grade 11/12 Students with no Board Stream were
+  never "expected" and appeared nowhere.
 
 ## 5. Data exposure and permissions: stop, don't build
 
