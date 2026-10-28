@@ -119,6 +119,9 @@ npm run build                    # when routes, config or server/client boundari
   your own, even just to read: Holistic reads reconcile mappings, and that writes (`reconcileHolisticMappings` in
   `src/lib/holistic-progress.ts`). If a case exists only on staging, say so in the report and ask. Use staging only
   when the person running the review asks for it and approves the plan, for example through `deploy-staging-pr.md`.
+  Once approved, a local server on staging needs a login: `npm run qa:ensure-staging-admin` checks for the Dev Login
+  Admin persona's read-only `user_permission` row on staging (dry run). With `-- --apply` it adds the row if it is
+  missing. It refuses any host that isn't staging, and it never revives a revoked row.
 - A new screen has no base to compare. Run the branch alone on the same cases, and still check that every screen it
   touches or replaces looks the same as on the base where the feature doesn't apply.
 - Pick **named real cases** with SQL first (prod BigQuery, via `mcp__claude_ai_Avanti_Data__run_query`), and
