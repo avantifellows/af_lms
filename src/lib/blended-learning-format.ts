@@ -42,8 +42,3 @@ export function isCalendarDate(value: unknown): value is string {
 export function oneOf<T extends string>(values: readonly T[], value: unknown): value is T {
   return typeof value === "string" && (values as readonly string[]).includes(value);
 }
-
-// The IST calendar date (`YYYY-MM-DD`) of an ISO timestamp.
-export function istCalendarDateOf(timestamp: string): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date(timestamp));
-}

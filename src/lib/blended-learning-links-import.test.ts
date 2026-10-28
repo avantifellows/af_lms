@@ -30,16 +30,60 @@ interface LinkRow {
   legacy_last_contact_on: string | null;
   // Left undefined (so toEqual ignores them) until a run writes them.
   legacy_conversation_summary?: string | null;
-  legacy_action_items?: { text: string; owner: string }[] | null;
+}
+// Profile Doc Action Items (from_profile_doc) as stored.
+interface ItemRow {
+  id: number;
+  student_id: number;
+  position: number;
+  text: string;
+  owner: string;
+  status: "open" | "done";
 }
 
 let linksTable: Map<number, LinkRow>;
+let itemsTable: ItemRow[];
+let itemWrites: string[];
 let writes: unknown[][];
 
-function givenDatabase(mapped: MappedStudent[], links: LinkRow[] = []) {
+// The fake's side of the importer's Profile Doc Action Item statements.
+function fakeItemsQuery(sql: string, params: unknown[]): unknown[] | null {
+  if (!/blended_learning_action_items/.test(sql)) return null;
+  if (/^\s*SELECT/.test(sql)) {
+    const ids = params[0] as number[];
+    return itemsTable.filter((item) => ids.includes(item.student_id)).map((item) => ({ ...item }));
+  }
+  if (/^\s*DELETE/.test(sql)) {
+    itemWrites.push("delete");
+    const ids = params[0] as number[];
+    itemsTable = itemsTable.filter((item) => !(ids.includes(item.id) && item.status === "open"));
+    return [];
+  }
+  const rows = JSON.parse(params[0] as string) as Record<string, unknown>[];
+  if (/^\s*INSERT/.test(sql)) {
+    itemWrites.push("insert");
+    for (const row of rows) {
+      const id = Math.max(0, ...itemsTable.map((item) => item.id)) + 1;
+      itemsTable.push({ id, status: "open", ...(row as Omit<ItemRow, "id" | "status">) });
+    }
+    return [];
+  }
+  itemWrites.push("update");
+  for (const row of rows) {
+    const item = itemsTable.find((candidate) => candidate.id === row.id);
+    if (item) item.position = row.position as number;
+  }
+  return [];
+}
+
+function givenDatabase(mapped: MappedStudent[], links: LinkRow[] = [], items: ItemRow[] = []) {
   linksTable = new Map(links.map((l) => [l.student_id, { ...l }]));
+  itemsTable = items.map((item) => ({ ...item }));
+  itemWrites = [];
   writes = [];
   mockQuery.mockImplementation(async (sql: string, params?: unknown[]) => {
+    const items = fakeItemsQuery(sql, params ?? []);
+    if (items) return items as never[];
     if (/FROM blended_learning_mentor_mentee_mappings/.test(sql)) {
       expect(params).toEqual(["2026-2027"]);
       return mapped.map((m) => ({
@@ -55,9 +99,6 @@ function givenDatabase(mapped: MappedStudent[], links: LinkRow[] = []) {
       const columns = sql.match(/\(student_id, ([^)]*)\)/)![1].split(",").map((name) => name.trim());
       const [studentId, ...values] = params as [number, ...unknown[]];
       const written = Object.fromEntries(columns.map((name, index) => [name, values[index]]));
-      if (typeof written.legacy_action_items === "string") {
-        written.legacy_action_items = JSON.parse(written.legacy_action_items);
-      }
       const existing = linksTable.get(studentId);
       linksTable.set(studentId, {
         legacy_last_contact_on: null,
@@ -409,6 +450,8 @@ describe("formatBlendedLinksImportReport with legacy Profile Docs", () => {
       legacy: { dated: 5, no_dates: 2, unreadable: 3, no_doc_link: 1 },
       legacyConversations: null,
       legacyConversationIssues: [],
+      profileDocActionItems: null,
+      profileDocActionItemChanges: [],
       unreadTabs: [],
       counts: { matched: 11, unmatched: 0, skipped: 0 },
       writes: { inserted: 0, updated: 5, unchanged: 6 },
@@ -464,7 +507,13 @@ describe("runBlendedLinksImport with legacy conversations", () => {
     "nobody-doc": { occurredOn: "2026-09-17", summary: "Synthetic: unused.", actionItems: [] },
   };
 
-  it("loads a dated doc's summary only for that date, NULL otherwise, and reports counts and invalid entries by Student ID", async () => {
+  const asItems = (studentId: number) =>
+    itemsTable
+      .filter((item) => item.student_id === studentId)
+      .sort((a, b) => a.position - b.position)
+      .map(({ text, owner, status, position }) => ({ position, text, owner, status }));
+
+  it("loads a dated doc's summary only for that date, NULL otherwise, its items as open Action Items, and reports by Student ID", async () => {
     givenDatabase(STUDENTS);
     const report = await runBlendedLinksImport({
       workbook: workbook(),
@@ -483,24 +532,31 @@ describe("runBlendedLinksImport with legacy conversations", () => {
     expect(linksTable.get(501)).toMatchObject({
       legacy_last_contact_on: "2026-09-17",
       legacy_conversation_summary: "Synthetic: planned mocks.",
-      legacy_action_items: items,
     });
-    // An empty list stores NULL items.
-    expect(linksTable.get(504)).toMatchObject({ legacy_conversation_summary: "Synthetic: no items.", legacy_action_items: null });
-    for (const id of [502, 503, 505]) {
-      expect(linksTable.get(id)).toMatchObject({ legacy_conversation_summary: null, legacy_action_items: null });
-    }
+    expect(asItems(501)).toEqual([
+      { position: 1, ...items[0], status: "open" },
+      { position: 2, ...items[1], status: "open" },
+    ]);
+    expect(linksTable.get(504)).toMatchObject({ legacy_conversation_summary: "Synthetic: no items." });
+    for (const id of [502, 503, 505]) expect(linksTable.get(id)).toMatchObject({ legacy_conversation_summary: null });
+    expect(itemsTable.every((item) => item.student_id === 501)).toBe(true);
+    expect(report.profileDocActionItems).toEqual({ inserted: 2, kept: 0, removed: 0 });
+    expect(report.profileDocActionItemChanges).toEqual([{ studentId: "2612001", inserted: 2, kept: 0, removed: 0 }]);
 
     const lines = formatBlendedLinksImportReport(report);
     expect(lines).toContain(
       "Legacy conversation (dated Profile Docs): loaded 2, NULL with no summary for the doc 1, " +
         "NULL with a summary of another date 1, NULL with an invalid summary 1; file entries no dated doc used 1"
     );
+    expect(lines).toContain(
+      "Profile Doc action items: inserted 2, kept 0, removed 0 (removed: open ones no longer in the doc; done ones are kept)"
+    );
+    expect(lines).toContain("- Student ID 2612001: inserted 2, kept 0, removed 0");
     expect(lines.slice(-2)).toEqual(["Invalid legacy conversations (left NULL)", "- Student ID 2612005: bad_action_item"]);
-    expect(lines.join("\n")).not.toMatch(/Synthetic|-doc|mock/);
+    expect(lines.join("\n")).not.toMatch(/Synthetic|-doc|mock|optics/);
   });
 
-  it("is re-runnable, clears the summary when the doc has no dated entry, and keeps it when the doc is unreadable", async () => {
+  it("is re-runnable, clears the summary and open items when the doc has no dated entry, and keeps both when it is unreadable", async () => {
     givenDatabase([ASHA, RAVI]);
     const file = {
       "asha-doc": FILE["asha-doc"],
@@ -511,46 +567,72 @@ describe("runBlendedLinksImport with legacy conversations", () => {
 
     await run({ "asha-doc": SEP_17, "ravi-doc": SEP_17 });
     writes = [];
+    itemWrites = [];
     const again = await run({ "asha-doc": SEP_17, "ravi-doc": SEP_17 });
     expect(again.writes).toEqual({ inserted: 0, updated: 0, unchanged: 2 });
+    expect(again.profileDocActionItems).toEqual({ inserted: 0, kept: 4, removed: 0 });
+    expect(again.profileDocActionItemChanges).toEqual([]);
     expect(writes).toEqual([]);
+    // Only a no-op position check: nothing inserted or deleted.
+    expect(itemWrites).toEqual(["update"]);
 
+    // Asha's first item was ticked done by a Conversation.
+    itemsTable.find((item) => item.student_id === 501 && item.position === 1)!.status = "done";
     // Asha's doc now has no dated entry; Ravi's export is missing.
     const later = await run({ "asha-doc": profileDocHtml("<p>No dates any more.</p>") });
     expect(later.legacy).toMatchObject({ no_dates: 1, unreadable: 1 });
     expect(later.legacyConversations).toMatchObject({ loaded: 0, unused: 2 });
-    expect(linksTable.get(501)).toMatchObject({
-      legacy_last_contact_on: null, legacy_conversation_summary: null, legacy_action_items: null,
-    });
-    expect(linksTable.get(502)).toMatchObject({ legacy_conversation_summary: "Synthetic: Ravi.", legacy_action_items: items });
+    expect(linksTable.get(501)).toMatchObject({ legacy_last_contact_on: null, legacy_conversation_summary: null });
+    expect(asItems(501)).toEqual([{ position: 1, ...items[0], status: "done" }]);
+    expect(later.profileDocActionItemChanges).toEqual([{ studentId: "2612001", inserted: 0, kept: 0, removed: 1 }]);
+    expect(linksTable.get(502)).toMatchObject({ legacy_conversation_summary: "Synthetic: Ravi." });
+    expect(asItems(502)).toHaveLength(2);
   });
 
-  it("keeps a ticked item done on a re-run, matching by text and owner", async () => {
-    const done = { done_at: "2026-10-21T10:00:00+05:30", done_by_email: "m@test.local" };
-    givenDatabase([ASHA], [
-      {
-        student_id: 501, profile_doc_url: "https://docs.google.com/document/d/asha-doc", screener_url: null,
-        legacy_last_contact_on: "2026-09-17", legacy_conversation_summary: "Synthetic: planned mocks.",
-        legacy_action_items: [
-          { ...items[0], ...done },
-          { ...items[1], done_at: null, done_by_email: null },
-        ],
-      },
-    ]);
-    const run = (file: unknown) =>
-      runBlendedLinksImport({ workbook: workbook(), mode: "apply", legacyProfileDocs: docs({ "asha-doc": SEP_17 }, file) });
+  it("keeps matching items (open or done), inserts new ones and removes only open ones the doc dropped", async () => {
+    givenDatabase(
+      [ASHA],
+      [
+        {
+          student_id: 501, profile_doc_url: "https://docs.google.com/document/d/asha-doc", screener_url: null,
+          legacy_last_contact_on: "2026-09-17", legacy_conversation_summary: "Synthetic: planned mocks.",
+        },
+      ],
+      [
+        { id: 11, student_id: 501, position: 1, ...items[0], status: "done" },
+        { id: 12, student_id: 501, position: 2, ...items[1], status: "open" },
+        { id: 13, student_id: 501, position: 3, text: "Synthetic: dropped but done", owner: "parent", status: "done" },
+      ]
+    );
+    // The summariser reworded the second item and put a new one first.
+    const reworded = [
+      { text: "Synthetic: call the parent", owner: "mentor" },
+      items[0],
+      { text: "Synthetic: send the timetable today", owner: "mentor" },
+    ];
+    const run = (mode: "dry-run" | "apply") =>
+      runBlendedLinksImport({
+        workbook: workbook(),
+        mode,
+        legacyProfileDocs: docs({ "asha-doc": SEP_17 }, { "asha-doc": { ...FILE["asha-doc"], actionItems: reworded } }),
+      });
 
-    const same = await run({ "asha-doc": FILE["asha-doc"] });
-    expect(same.writes).toEqual({ inserted: 0, updated: 0, unchanged: 1 });
-    expect(writes).toEqual([]);
+    const dry = await run("dry-run");
+    expect(dry.profileDocActionItems).toEqual({ inserted: 2, kept: 1, removed: 1 });
+    expect(formatBlendedLinksImportReport(dry)).toContain(
+      "Profile Doc action items (would be): inserted 2, kept 1, removed 1 (removed: open ones no longer in the doc; done ones are kept)"
+    );
+    expect(itemWrites).toEqual([]);
 
-    // The summariser reworded the second item and added one: the first stays done.
-    const reworded = [items[0], { text: "Synthetic: send the timetable today", owner: "mentor" }];
-    const changed = await run({ "asha-doc": { ...FILE["asha-doc"], actionItems: reworded } });
-    expect(changed.writes).toEqual({ inserted: 0, updated: 1, unchanged: 0 });
-    expect(linksTable.get(501)?.legacy_action_items).toEqual([
-      { ...items[0], ...done },
-      { ...reworded[1], done_at: null, done_by_email: null },
+    const applied = await run("apply");
+    expect(applied.writes).toEqual({ inserted: 0, updated: 0, unchanged: 1 });
+    expect(applied.profileDocActionItemChanges).toEqual([{ studentId: "2612001", inserted: 2, kept: 1, removed: 1 }]);
+    expect(itemsTable.map((item) => item.id).sort()).toEqual([11, 13, 14, 15]);
+    expect(asItems(501)).toEqual([
+      { position: 1, ...reworded[0], status: "open" },
+      { position: 2, ...items[0], status: "done" },
+      { position: 3, text: "Synthetic: dropped but done", owner: "parent", status: "done" },
+      { position: 3, ...reworded[2], status: "open" },
     ]);
   });
 
@@ -563,24 +645,33 @@ describe("runBlendedLinksImport with legacy conversations", () => {
     });
     expect(report.legacyConversations).toMatchObject({ loaded: 1 });
     expect(report.writes).toEqual({ inserted: 1, updated: 0, unchanged: 0 });
+    expect(report.profileDocActionItems).toEqual({ inserted: 2, kept: 0, removed: 0 });
     expect(writes).toEqual([]);
+    expect(itemWrites).toEqual([]);
   });
 
-  it("writes the summary columns only with a conversations file", async () => {
-    givenDatabase([ASHA], [
-      {
-        student_id: 501, profile_doc_url: "https://docs.google.com/document/d/asha-doc", screener_url: null,
-        legacy_last_contact_on: "2026-09-17", legacy_conversation_summary: "Synthetic: kept.", legacy_action_items: null,
-      },
-    ]);
+  it("writes the summary and items only with a conversations file", async () => {
+    givenDatabase(
+      [ASHA],
+      [
+        {
+          student_id: 501, profile_doc_url: "https://docs.google.com/document/d/asha-doc", screener_url: null,
+          legacy_last_contact_on: "2026-09-17", legacy_conversation_summary: "Synthetic: kept.",
+        },
+      ],
+      [{ id: 11, student_id: 501, position: 1, ...items[0], status: "open" }]
+    );
     const report = await runBlendedLinksImport({
       workbook: workbook(),
       mode: "apply",
       legacyProfileDocs: { readProfileDocHtml: () => SEP_17, window: { from: "2026-04-01", to: "2026-10-23" } },
     });
     expect(report.legacyConversations).toBeNull();
+    expect(report.profileDocActionItems).toBeNull();
     expect(report.writes).toEqual({ inserted: 0, updated: 0, unchanged: 1 });
     expect(linksTable.get(501)?.legacy_conversation_summary).toBe("Synthetic: kept.");
+    expect(itemsTable).toHaveLength(1);
+    expect(itemWrites).toEqual([]);
   });
 
   it("names a Student without a Student ID in an invalid entry's issue", () => {
@@ -589,6 +680,8 @@ describe("runBlendedLinksImport with legacy conversations", () => {
       legacy: { dated: 1, no_dates: 0, unreadable: 0, no_doc_link: 0 },
       legacyConversations: { loaded: 0, summary_missing: 0, summary_stale: 0, summary_invalid: 1, unused: 0 },
       legacyConversationIssues: [{ studentId: null, reason: "blank_summary" }],
+      profileDocActionItems: { inserted: 0, kept: 0, removed: 1 },
+      profileDocActionItemChanges: [{ studentId: null, inserted: 0, kept: 0, removed: 1 }],
       unreadTabs: [],
       counts: { matched: 1, unmatched: 0, skipped: 0 },
       writes: { inserted: 0, updated: 1, unchanged: 0 },
