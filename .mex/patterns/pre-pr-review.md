@@ -13,7 +13,7 @@ edges:
     condition: when checking the gate on new routes and queries (step 4)
   - target: context/data-access.md
     condition: when recomputing numbers in BigQuery (step 3)
-last_updated: 2026-10-27
+last_updated: 2026-10-28
 ---
 
 # Pre-PR review for af_lms
@@ -58,23 +58,53 @@ suppress them unless the repo already suppresses that kind.
 
 ## 2. Behaviour: base vs branch, side by side, on real cases
 
-- Run both, following `local-browser-qa.md` for worktree, port, env and login:
-  - the branch in its worktree;
-  - the base in a temporary detached worktree (`git worktree add --detach <path> <base>`).
+- **Log in against staging.** Real cases need the staging DB and prod BigQuery (what the main checkout's `.env.local`
+  points to), because the local dump may not have them. Dev Login personas only get access where they have a
+  `user_permission` row, and on staging only the **Admin** persona (`e2e-holistic-global-admin@test.local`) has one:
+  a standing, read-only, level-3 admin row kept for reviews. Don't delete it as clutter. Check it first:
 
-  Point both at the same data. Real cases usually need the staging DB and prod BigQuery, because the local dump may
-  not have them. Remove the base worktree afterwards.
-- Pick **named real cases** with SQL first (prod BigQuery, via `mcp__claude_ai_Avanti_Data__run_query`), and
+  ```
+  npm run qa:ensure-staging-admin            # reports the row, or says it would insert one
+  npm run qa:ensure-staging-admin -- --apply # only if it is missing
+  ```
+
+  The script refuses any host that isn't staging. Dev Login only exists when `NODE_ENV` isn't production, so the row
+  can't be used on deployed staging or prod. Don't add rows for other personas without Pritam's go.
+- **Run both side by side**, following `local-browser-qa.md` for worktree setup:
+  - the base in a temporary detached worktree (`git worktree add --detach <path> <base>`), on port 3470;
+  - the branch, on port 3471.
+
+  `npm ci` in each. Copy `.env.local` with `NEXTAUTH_URL` swapped to each port. Then `npx next dev --port <port>`.
+  Log in from a playwright-core script by calling the same endpoint the login page uses:
+
+  ```js
+  await page.goto(base + "/");
+  await page.evaluate(async () => {
+    const { csrfToken } = await (await fetch("/api/auth/csrf")).json();
+    await fetch("/api/auth/callback/dev-login", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ persona: "admin", csrfToken, json: "true" }),
+    });
+  });
+  ```
+
+  Afterwards, stop both servers and remove the temporary worktrees.
+- Pick **named real cases** with SQL first (prod BigQuery via `mcp__claude_ai_Avanti_Data__run_query`; prod Postgres
+  read-only via `mcp__avanti-db__query`), and
   record their ids in the report:
   - the happy path;
   - empty: started but nobody submitted, no data for the filter;
   - partial: a few students, one student;
   - every variant the code branches on: combined test, homework, old-CMS vs new-CMS, physical vs NVS, each stream;
-  - failure: force the new API or query to fail. Make a local, uncommitted change that throws, and revert it after.
+  - failure: force the new API or query to fail with a local, uncommitted throw behind an env switch, e.g.
+    `if (process.env.QA_FAIL_X) throw new Error("QA forced failure")`. Restart only the branch server with `QA_FAIL_X=1`,
+    then revert with `git checkout -- <file>`. Every read the change depends on gets one, including reads it doesn't
+    own: on #471 the exam-records read failing turned into a whole row of false "Not registered".
 - Compare each case in two passes. Unit tests alone don't count: they check what the author thought of, and on #467
   every test passed while the page was broken.
   1. **API, every case.** Call each route the change touches on both ports, with the same session and parameters
-     (authenticated, the way `local-browser-qa.md` logs in), and diff the JSON. Cheap, and it catches wrong or
+     (`page.request.get(...)` from the logged-in page above), and diff the JSON. Cheap, and it catches wrong or
      missing data.
   2. **Page, for UI changes.** Open the same cases in headless Chromium (`local-browser-qa.md`'s playwright-core
      script, never a personal browser) and screenshot base and branch. This catches what an API diff can't: a stuck
@@ -84,9 +114,6 @@ suppress them unless the repo already suppresses that kind.
 - When the change replaces a screen, the old screen must still appear wherever the new one doesn't apply or fails.
   Decide which one to show before loading either.
 - **Every difference found here becomes a unit test**, so it stays covered after the review.
-- Login caveat: Dev Login personas exist only in the database that has them (the local `dbservice_dev`). Against
-  the staging DB, check `user_permission` for the persona emails first. If they're missing, say so in the report;
-  don't add rows to a shared database without Pritam's go.
 
 ## 3. Numbers: recompute every figure, across all the data
 
