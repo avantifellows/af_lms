@@ -25,7 +25,7 @@ interface Props {
   scope: PerformanceScope;
   /** JNV NVS: the overview lists only System-wide Mandated Tests. */
   isNvs?: boolean;
-  onTestClick: (sessionId: string, testName: string) => void;
+  onTestClick: (sessionId: string, testName: string, testFormat?: string | null) => void;
   onFilterOptions: (opts: {
     streams: string[];
     subjects: string[];
