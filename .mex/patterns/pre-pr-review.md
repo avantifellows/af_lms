@@ -16,6 +16,10 @@ edges:
     condition: when recomputing numbers in BigQuery (step 4)
   - target: patterns/review-with-agents.md
     condition: for running the reviewers, verifying their findings, re-reviewing and posting
+  - target: patterns/mirror-db-service-schema-in-e2e.md
+    condition: when a paired db-service PR's schema must match the e2e fixture (step 8)
+  - target: patterns/deploy-staging-pr.md
+    condition: only when the person running the review asks for staging and approves it (step 3)
 last_updated: 2026-10-28
 ---
 
@@ -56,9 +60,11 @@ mustn't be the one that wrote the code.
 - Check out the branch in its own worktree (`git fetch origin pull/<n>/head:pr-<n>`, then `git worktree add`).
   Confirm `git rev-parse HEAD` is the PR's head, and use the PR's actual base (`gh pr view <n> --json baseRefName`),
   not the one you assume. Don't change the tree while reviewers are reading it.
-- Run `npm ci` in every worktree you make, this one and the base one in step 3. Without it `npx fallow` and
-  `npx tsc` fetch the latest release instead of the repo's pinned version.
 - Base: `origin/main`, or the parent branch for a stacked PR. `git diff <base>...HEAD --stat`.
+- Make the base worktree now too (`git worktree add --detach <path> <base>`): step 2's baselines and step 3's
+  side-by-side both run on it.
+- Run `npm ci` in both worktrees. Without it `npx fallow` and `npx tsc` fetch the latest release instead of the
+  repo's pinned version.
 - A small change (a copy fix, one component, a docs-only PR) needs only steps 0 to 2 and the parts below that the
   diff touches. Step 1 can be one lens plus the second model.
 - Sort the diff into the parts below. A part that doesn't apply is skipped, and the report says so:
@@ -102,12 +108,13 @@ npm run build                    # when routes, config or server/client boundari
 
 - Run both, following `local-browser-qa.md` for worktree, port, env and login:
   - the branch in its worktree;
-  - the base in a temporary detached worktree (`git worktree add --detach <path> <base>`).
+  - the base in the detached worktree from step 0.
 
   Point both at the same local data: `dbservice_dev` when its dump has the cases, otherwise a clone of the newest
   local production snapshot (`CREATE DATABASE <scratch> TEMPLATE <snapshot>`, as in `local-browser-qa.md`). BigQuery
   numbers come from prod, read-only. On a clone, set `DB_SERVICE_URL` to a dead port, except for the write test
-  below. Remove the base worktree afterwards.
+  below. Pages that write while reading (Holistic reconciles mappings) change the data for whichever runs second:
+  for those, give the base and the branch a clone each. Remove the base worktree afterwards.
 - **Staging only on request, and only after approval.** Don't use the staging DB or the deployed staging app on
   your own, even just to read: Holistic reads reconcile mappings, and that writes (`reconcileHolisticMappings` in
   `src/lib/holistic-progress.ts`). If a case exists only on staging, say so in the report and ask. Use staging only
@@ -136,7 +143,10 @@ npm run build                    # when routes, config or server/client boundari
 - **Writes, when the change saves anything.** Reading is not enough: on #405 the blocker only showed up by saving.
   Clone the database (`CREATE DATABASE <scratch> TEMPLATE dbservice_dev`). Postgres refuses while anything is
   connected to `dbservice_dev`, so stop the DB Service on :4000 and the dev servers first. Point both the af_lms
-  server (`DATABASE_NAME`) and a DB Service worktree at the clone, so reads and writes see the same rows. Then save
+  server (`DATABASE_NAME`) and a DB Service worktree at the clone, so reads and writes see the same rows. DB Service
+  takes its dev database name from `config/dev.exs` (`database: "dbservice_dev"`, port 4000), not from env: change
+  `database:` in that worktree only, don't commit it, and run it on :4000 so af_lms's `DB_SERVICE_URL` still
+  reaches it. Then save
   through the real page or route and read the row back with SQL. The clone starts from the local dump, not staging,
   so pick write cases the dump has, or insert the rows a real case needs into the clone. Take a
   real record and change one field at a time, including blanking it: rules that check the submitted form instead of
@@ -147,9 +157,10 @@ npm run build                    # when routes, config or server/client boundari
   Decide which one to show before loading either.
 - **Every difference found here becomes a unit test that fails on the base** (or without the fix), so it stays
   covered after the review.
-- Login caveat: Dev Login personas exist only in the database that has them (the local `dbservice_dev`). In a
-  cloned database, insert the `user_permission` rows you need and mint a session the way `e2e/fixtures/auth.ts`
-  does. Never add rows to a shared database without the owner's go.
+- Login: Dev Login works outside production for any persona whose email has a `user_permission` row.
+  `dbservice_dev` and clones of it already have them. On a production-snapshot clone, insert those rows into the
+  clone and use Dev Login. If you mint a session cookie instead, sign it with the dev server's `NEXTAUTH_SECRET`, not
+  the e2e secret in `e2e/fixtures/auth.ts`. Never add rows to a shared database without the owner's go.
 
 ## 4. Numbers: recompute every figure, across all the data
 
@@ -193,7 +204,8 @@ npm run build                    # when routes, config or server/client boundari
   the code: parameters, which tests and programs it covers, which status codes it returns.
 - Check the PR description lists only what the code now has (on db-service #806 it still listed tests a later
   clean-up removed).
-- Follow `AGENTS.md`'s GROW step.
+- Check the author followed `AGENTS.md`'s GROW step. Missing scaffold updates are findings; a review doesn't make
+  them itself.
 
 ## 8. Other repos
 
@@ -204,7 +216,8 @@ npm run build                    # when routes, config or server/client boundari
   - its migration must roll back and re-apply cleanly;
   - its version must not collide with any on `origin/main` (db-service #776 and #779 were both merged with the same
     one);
-  - `pg_dump -s` of its schema must match the af_lms e2e fixture.
+  - its schema must match the af_lms e2e fixture, compared the way `mirror-db-service-schema-in-e2e.md` does it
+    (a filtered `pg_dump --schema-only`, not the whole schema).
 
   Say which PR deploys first.
 
@@ -217,6 +230,7 @@ posted. Drop what a user can't reach from the UI, and say so.
 
 One finding per problem, written so a reader with no context can act on it, in plain words, in this shape:
 
+- **severity:** P0 to P3, as in `review-with-agents.md` §1;
 - **headline:** what goes wrong, in user terms;
 - **a real example:** the school, test or session id, with what the base shows and what the branch shows. On
   GitHub, replace the id with a description ("a Grade 11 NVS school"), because af_lms is public;

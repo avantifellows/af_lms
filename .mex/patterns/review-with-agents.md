@@ -115,6 +115,8 @@ is not a check.
 - **Stop at decision closure, not at zero findings.** A reviewer always finds something. Stop when no P0 or P1 is
   open, what's left repeats decided points or is a nit, and every risky path has a test. Set a round budget up front
   (three is usually enough). A reviewer that finds nothing doesn't need another run on the same commit.
+- Whatever is still open at the stop (P2, P3, nits) is either accepted by the owner or moved to the follow-up issue,
+  so `pre-pr-review.md`'s "fixed or accepted" rule still holds.
 
 ## 7. Posting
 
