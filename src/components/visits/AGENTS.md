@@ -8,6 +8,9 @@ Client-side components for PM school visit management — starting new visits wi
 |------|---------|
 | `NewVisitForm.tsx` | Form to start a new visit with GPS location acquisition |
 | `EndVisitButton.tsx` | Button to end an active visit with GPS location capture |
+| `SchoolConcernSections.tsx` | Visit Summary School page concern sections (server); cards use `ConcernDisclosure` |
+| `ConcernDisclosure.tsx` | Client expand/collapse for a concern or highlight card ("What PMs said"); opening Resolve/Comment/Reopen expands it |
+| `ConcernActions.tsx` | Client Resolve / Comment / Reopen forms on a concern card (`onOpen` tells the card to expand) |
 
 ## Conventions
 

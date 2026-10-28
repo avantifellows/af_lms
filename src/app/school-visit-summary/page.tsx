@@ -769,6 +769,7 @@ function SchoolWiseTable({
             {header("school_name", "School", "left")}
             {header("visits", "Visits")}
             {header("last_visit", "Last visit")}
+            {header("open", "Open concerns")}
             {header("recurring", "Recurring issues")}
             {header("flags", "Flags")}
             <th className={`${SCHOOL_WISE_HEADER_CLASS} w-full text-left`}>Top recurring concern</th>
@@ -798,6 +799,7 @@ function SchoolWiseTable({
               <td className="whitespace-nowrap px-4 py-3 text-center">
                 <LastVisitPill date={row.lastVisitDate} now={now} />
               </td>
+              <td className="whitespace-nowrap px-4 py-3 text-center text-sm text-text-primary">{row.openCount}</td>
               <td className="whitespace-nowrap px-4 py-3 text-center">
                 {row.recurringCount > 0 ? (
                   <span className="inline-flex h-7 min-w-7 items-center justify-center rounded-full bg-accent px-2 text-xs font-bold text-text-on-accent">

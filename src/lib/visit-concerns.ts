@@ -14,7 +14,7 @@ import {
 import { RECURRING_CONCERN_MIN_VISITS } from "@/lib/visit-summary";
 import type { VisitsActor } from "@/lib/visits-policy";
 
-export type SchoolWiseSortKey = "school_name" | "visits" | "last_visit" | "recurring" | "flags";
+export type SchoolWiseSortKey = "school_name" | "visits" | "last_visit" | "open" | "recurring" | "flags";
 export type SchoolWiseSortDirection = "asc" | "desc";
 
 // The header-sortable columns. Every sort breaks ties by school name. Flags sorts on the raw count;
@@ -26,6 +26,7 @@ export const SCHOOL_WISE_SORT_COLUMNS: Record<
   school_name: { sql: "school_name", defaultDir: "asc" },
   visits: { sql: "visits", defaultDir: "desc" },
   last_visit: { sql: "last_visit_date", defaultDir: "desc" },
+  open: { sql: "open_count", defaultDir: "desc" },
   recurring: { sql: "recurring_count", defaultDir: "desc" },
   flags: { sql: "open_flags", defaultDir: "desc" },
 };
@@ -267,9 +268,20 @@ export interface ConcernHistoryEntry {
   at: Date;
 }
 
+// One live mention in view of a record: the Visit that raised it, its PM, and the LLM's one-line
+// paraphrase of what the PM wrote (`lms_visit_concern_mentions.snippet`, free text: render as text,
+// never log it).
+export interface ConcernMention {
+  visitId: number;
+  visitDate: string;
+  pmEmail: string;
+  pmName: string | null;
+  snippet: string;
+}
+
 // A Visit Concern or Visit Highlight on the School page. `visitDates` holds one `YYYY-MM-DD` per
-// live-mention Visit in view (same-day Visits repeat), newest first. Highlights have no status,
-// history or reopened marker.
+// live-mention Visit in view (same-day Visits repeat), newest first; `mentions` holds the same
+// mentions (one per Visit), newest first. Highlights have no status, history or reopened marker.
 export interface ConcernCard {
   id: number;
   kind: "concern" | "highlight";
@@ -277,6 +289,7 @@ export interface ConcernCard {
   status: "open" | "resolved" | null;
   visitCount: number;
   visitDates: string[];
+  mentions: ConcernMention[];
   reopened: boolean;
   history: ConcernHistoryEntry[];
 }
@@ -319,6 +332,7 @@ interface MentionRow {
   text: string;
   status: "open" | "resolved" | null;
   visit_id: string | number;
+  snippet: string;
 }
 
 interface EventRow {
@@ -388,7 +402,8 @@ function compareCards(a: ConcernCard, b: ConcernCard): number {
 // The School page's concern sections, from the Visits in view at one School (every filter, the
 // actor's scope and the physical-only rule apply). Only live mentions (completed Visits in view)
 // count, so a record with none in view — including one mentioned only by soft-deleted or
-// in-progress Visits — doesn't show. Visit-wise notes list every Visit in view, newest first.
+// in-progress Visits — doesn't show. The one mentions read feeds each card's visit count, dates
+// and mention lines (with snippets) alike, so they always agree. Visit-wise notes list every Visit in view, newest first.
 // The caller has already checked the School is one the actor may see.
 export async function getSchoolConcernPage(
   actor: VisitsActor,
@@ -413,7 +428,7 @@ export async function getSchoolConcernPage(
   const mentions = liveVisitIds.length === 0
     ? []
     : await query<MentionRow>(
-      `SELECT c.id, c.kind, c.text, c.status, m.visit_id
+      `SELECT c.id, c.kind, c.text, c.status, m.visit_id, m.snippet
        FROM lms_visit_concerns c
        JOIN lms_visit_concern_mentions m ON m.concern_id = c.id
        WHERE c.school_code = $1 AND m.visit_id = ANY($2::bigint[])`,
@@ -422,7 +437,7 @@ export async function getSchoolConcernPage(
 
   const concernIds = [...new Set(mentions.filter((row) => row.kind === "concern").map((row) => Number(row.id)))];
   const historyById = await getConcernHistories(concernIds);
-  const visitDateById = new Map(visits.map((visit) => [Number(visit.id), visit.visit_date]));
+  const visitById = new Map(visits.map((visit) => [Number(visit.id), visit]));
 
   const cardsById = new Map<number, ConcernCard>();
   const itemsByVisit = new Map<number, VisitNoteItem[]>();
@@ -437,11 +452,20 @@ export async function getSchoolConcernPage(
       status: mention.status,
       visitCount: 0,
       visitDates: [],
+      mentions: [],
       reopened: isReopened(history),
       history,
     };
+    const visit = visitById.get(visitId);
     card.visitCount += 1;
-    card.visitDates.push(visitDateById.get(visitId) ?? "");
+    card.visitDates.push(visit?.visit_date ?? "");
+    card.mentions.push({
+      visitId,
+      visitDate: visit?.visit_date ?? "",
+      pmEmail: visit?.pm_email ?? "",
+      pmName: visit?.pm_name ?? null,
+      snippet: mention.snippet,
+    });
     cardsById.set(id, card);
 
     const items = itemsByVisit.get(visitId) ?? [];
@@ -452,6 +476,7 @@ export async function getSchoolConcernPage(
   const cards = [...cardsById.values()];
   for (const card of cards) {
     card.visitDates.sort((a, b) => b.localeCompare(a));
+    card.mentions.sort((a, b) => b.visitDate.localeCompare(a.visitDate) || b.visitId - a.visitId);
   }
   cards.sort(compareCards);
   const byId = (a: VisitNoteItem, b: VisitNoteItem) => a.id - b.id;

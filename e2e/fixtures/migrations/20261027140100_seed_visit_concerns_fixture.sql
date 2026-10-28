@@ -14,7 +14,8 @@
 --   VSWCONC "VSW Concern Charlie" 9004730 2026-09-10
 --   VSWCOND "VSW Concern Delta"   9004731 2026-09-12
 --
--- Records (live mentions = mentions on completed, non-deleted Visits):
+-- Records (live mentions = mentions on completed, non-deleted Visits; 9004802's 15 Sep snippet is
+-- HTML-shaped so the School page's mention lines can be checked to render it as text):
 --   9004801 Alpha concern open      Lab equipment missing            21, 22          → 2 visits (same day)
 --   9004802 Alpha concern open      Students lack <b>practice</b>…   20, 23          → 2 visits, auto-reopened
 --   9004803 Alpha concern open      Timetable clashes…               23, 24(deleted) → 1 visit
@@ -61,7 +62,7 @@ VALUES
   (9004801, 9004721, 'Lab has no burettes', '2026-08-07 02:30:00'),
   (9004801, 9004722, 'Chemistry lab still short of equipment', '2026-08-07 02:30:00'),
   (9004802, 9004720, 'Few practice tests', '2026-06-11 02:30:00'),
-  (9004802, 9004723, 'Practice tests still missing', '2026-09-16 02:30:00'),
+  (9004802, 9004723, 'Practice tests still <b>missing</b> <img src=x onerror=alert(2)>', '2026-09-16 02:30:00'),
   (9004803, 9004723, 'Timetable clash', '2026-09-16 02:30:00'),
   (9004803, 9004724, 'Timetable clash again', '2026-09-21 02:30:00'),
   (9004804, 9004720, 'Cooler not working', '2026-06-11 02:30:00'),

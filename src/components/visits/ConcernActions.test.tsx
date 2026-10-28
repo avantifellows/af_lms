@@ -204,4 +204,16 @@ describe("ConcernActions", () => {
 
     expect(screen.getByRole("textbox")).toHaveValue("");
   });
+
+  it("tells the card which form opened, so it can expand", async () => {
+    const onOpen = vi.fn();
+    const { unmount } = render(<ConcernActions concernId={41} status="open" onOpen={onOpen} />);
+    await userEvent.click(screen.getByRole("button", { name: "Resolve" }));
+    expect(onOpen).toHaveBeenCalledWith("resolve");
+    unmount();
+
+    render(<ConcernActions concernId={42} status="resolved" onOpen={onOpen} />);
+    await userEvent.click(screen.getByRole("button", { name: "Reopen" }));
+    expect(onOpen).toHaveBeenLastCalledWith("reopen");
+  });
 });

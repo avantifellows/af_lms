@@ -45,6 +45,7 @@ describe("normalizeSchoolWiseSort", () => {
   it("uses each column's own default direction", () => {
     expect(normalizeSchoolWiseSort("school_name")).toEqual({ sort: "school_name", dir: "asc" });
     expect(normalizeSchoolWiseSort("last_visit")).toEqual({ sort: "last_visit", dir: "desc" });
+    expect(normalizeSchoolWiseSort("open")).toEqual({ sort: "open", dir: "desc" });
   });
 
   it("falls back to the default for a Visits-tab key or anything unknown, keeping a valid dir", () => {
@@ -165,7 +166,7 @@ describe("getSchoolWiseView", () => {
 
 describe("getSchoolConcernPage", () => {
   type Visit = { id: string; visit_date: string; status: string; pm_email: string; pm_name: string | null };
-  type Mention = { id: string; kind: "concern" | "highlight"; text: string; status: "open" | "resolved" | null; visit_id: string };
+  type Mention = { id: string; kind: "concern" | "highlight"; text: string; status: "open" | "resolved" | null; visit_id: string; snippet: string };
   type Event = Record<string, unknown> & { concern_id: string };
 
   // The database for one School: its Visits in view (newest first, as the query orders them), every
@@ -190,7 +191,7 @@ describe("getSchoolConcernPage", () => {
     id, visit_date, status, pm_email: "pm@avantifellows.org", pm_name,
   });
   const mention = (id: string, visit_id: string, kind: Mention["kind"] = "concern", status: Mention["status"] = "open", text = `Item ${id}`): Mention => ({
-    id, kind, text, status: kind === "highlight" ? null : status, visit_id,
+    id, kind, text, status: kind === "highlight" ? null : status, visit_id, snippet: `Said ${id} in ${visit_id}`,
   });
 
   it("counts a concern once per completed Visit that mentions it, same-day Visits separately, dates newest first", async () => {
@@ -205,9 +206,60 @@ describe("getSchoolConcernPage", () => {
       {
         id: 41, kind: "concern", text: "Item 41", status: "open",
         visitCount: 3, visitDates: ["2026-10-15", "2026-08-06", "2026-08-06"],
+        mentions: [
+          { visitId: 3, visitDate: "2026-10-15", pmEmail: "pm@avantifellows.org", pmName: "Ravi PM", snippet: "Said 41 in 3" },
+          { visitId: 2, visitDate: "2026-08-06", pmEmail: "pm@avantifellows.org", pmName: "Ravi PM", snippet: "Said 41 in 2" },
+          { visitId: 1, visitDate: "2026-08-06", pmEmail: "pm@avantifellows.org", pmName: "Ravi PM", snippet: "Said 41 in 1" },
+        ],
         reopened: false, history: [],
       },
     ]);
+  });
+
+  it("gives each card its mentions in view, newest first, with the Visit's PM and the snippet", async () => {
+    respond({
+      visits: [
+        visit("4", "2026-10-20", "in_progress"),
+        { ...visit("3", "2026-09-15", "completed", null), pm_email: "new.pm@avantifellows.org" },
+        visit("2", "2026-08-06"),
+      ],
+      mentions: [
+        mention("41", "2"), mention("41", "4"), mention("41", "3"),
+        mention("42", "3", "highlight"),
+        mention("43", "2", "concern", "resolved"),
+        // A mention on a Visit out of view (deleted, another School's, filtered out) is never asked for.
+        mention("41", "99"),
+      ],
+    });
+
+    const page = await getSchoolConcernPage(ADMIN, "SC001", NO_FILTERS);
+
+    // The in-progress Visit's mention isn't live; the PM's email stands in when they have no name.
+    expect(page.needsAttention[0].mentions).toEqual([
+      { visitId: 3, visitDate: "2026-09-15", pmEmail: "new.pm@avantifellows.org", pmName: null, snippet: "Said 41 in 3" },
+      { visitId: 2, visitDate: "2026-08-06", pmEmail: "pm@avantifellows.org", pmName: "Ravi PM", snippet: "Said 41 in 2" },
+    ]);
+    // The mention lines and the visit count come from the same rows, so they always agree.
+    expect(page.needsAttention[0].visitCount).toBe(page.needsAttention[0].mentions.length);
+    expect(page.goingWell[0].mentions.map((line) => line.visitId)).toEqual([3]);
+    expect(page.resolved[0].mentions.map((line) => line.snippet)).toEqual(["Said 43 in 2"]);
+  });
+
+  it("reads the snippets in the one mentions query, bound to the School and its live Visits in view", async () => {
+    respond({
+      visits: [visit("3", "2026-09-15"), visit("2", "2026-08-06", "in_progress"), visit("1", "2026-08-01")],
+      mentions: [mention("41", "1"), mention("41", "3")],
+    });
+
+    await getSchoolConcernPage(ADMIN, "SC001", NO_FILTERS);
+
+    const mentionReads = mockQuery.mock.calls.filter(([sql]) => String(sql).includes("lms_visit_concern_mentions"));
+    expect(mentionReads).toHaveLength(1);
+    const [sql, params] = mentionReads[0] as [string, unknown[]];
+    expect(sql).toContain("SELECT c.id, c.kind, c.text, c.status, m.visit_id, m.snippet");
+    expect(sql).toContain("WHERE c.school_code = $1 AND m.visit_id = ANY($2::bigint[])");
+    // Only the completed Visits in view (the Visits query applies every filter and drops deleted ones).
+    expect(params).toEqual(["SC001", [3, 1]]);
   });
 
   it("ignores mentions from in-progress Visits, while still listing those Visits in Visit-wise notes", async () => {

@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import { test, expect, signInAs } from "../fixtures/auth";
 import { getTestPool } from "../helpers/db";
 
@@ -44,9 +44,9 @@ function schoolRows(page: Page) {
   return page.getByRole("table", { name: "Schools with visits" }).locator("tbody tr");
 }
 
-// The School (name, then region), Visits, Last visit, Recurring issues, Flags and Top recurring
-// concern cells of each School-wise row, top to bottom.
-function schoolColumn(page: Page, column: 0 | 1 | 2 | 3 | 4 | 5) {
+// The School (name, then region), Visits, Last visit, Open concerns, Recurring issues, Flags and
+// Top recurring concern cells of each School-wise row, top to bottom.
+function schoolColumn(page: Page, column: 0 | 1 | 2 | 3 | 4 | 5 | 6) {
   return schoolRows(page).locator(`td:nth-child(${column + 1})`);
 }
 
@@ -362,6 +362,8 @@ const BRAVO = "VSW Concern Bravo";
 const CHARLIE = "VSW Concern Charlie";
 const DELTA = "VSW Concern Delta";
 const HTML_CONCERN = "Students lack <b>practice</b> tests <img src=x onerror=alert(1)>";
+// 9004802's snippet on the 15 Sep Visit, also HTML-shaped (School page mention lines).
+const HTML_SNIPPET = "Practice tests still <b>missing</b> <img src=x onerror=alert(2)>";
 
 test.describe("School Visit Summary — Recurring Concerns on the School-wise tab", () => {
   test("counts Recurring and open Concerns per School, most recurring first", async ({ adminPage }) => {
@@ -371,7 +373,8 @@ test.describe("School Visit Summary — Recurring Concerns on the School-wise ta
       `${ALPHA} VSW_E2E`, `${BRAVO} VSW_E2E`, `${CHARLIE} VSW_E2E`, `${DELTA} VSW_E2E`,
     ]);
     await expect(schoolColumn(adminPage, 1)).toHaveText(["5", "3", "1", "1"]);
-    await expect(schoolColumn(adminPage, 3)).toHaveText(["3", "1", "0", "0"]);
+    await expect(schoolColumn(adminPage, 3)).toHaveText(["4", "2", "1", "0"]);
+    await expect(schoolColumn(adminPage, 4)).toHaveText(["3", "1", "0", "0"]);
 
     await expect(statValue(adminPage, "Schools")).toHaveText("4");
     await expect(statValue(adminPage, "Total visits")).toHaveText("10");
@@ -379,10 +382,10 @@ test.describe("School Visit Summary — Recurring Concerns on the School-wise ta
     await expect(statValue(adminPage, "Schools with recurring concerns")).toHaveText("2");
 
     // Alpha's three 2-visit concerns tie; the 15 Sep ones beat the 06 Aug one, then the lower id wins.
-    await expect(schoolColumn(adminPage, 5).nth(0)).toHaveText(`${HTML_CONCERN}2 visits`);
-    await expect(schoolColumn(adminPage, 5).nth(1)).toHaveText("Smartboard not working3 visits");
-    await expect(schoolColumn(adminPage, 5).nth(2)).toHaveText("—");
-    await expect(schoolColumn(adminPage, 5).nth(3)).toHaveText("—");
+    await expect(schoolColumn(adminPage, 6).nth(0)).toHaveText(`${HTML_CONCERN}2 visits`);
+    await expect(schoolColumn(adminPage, 6).nth(1)).toHaveText("Smartboard not working3 visits");
+    await expect(schoolColumn(adminPage, 6).nth(2)).toHaveText("—");
+    await expect(schoolColumn(adminPage, 6).nth(3)).toHaveText("—");
 
     await expect(schoolRow(adminPage, ALPHA).getByRole("img", { name: "3 or more recurring concerns" })).toBeVisible();
     await expect(schoolRow(adminPage, BRAVO).getByRole("img", { name: "1–2 recurring concerns" })).toBeVisible();
@@ -390,32 +393,57 @@ test.describe("School Visit Summary — Recurring Concerns on the School-wise ta
     await expect(schoolRow(adminPage, DELTA).getByRole("img", { name: "No open concerns" })).toBeVisible();
   });
 
+  test("shows Open concerns just before Recurring issues as a plain number, sortable most first", async ({ adminPage }) => {
+    await adminPage.goto(`/school-visit-summary?pms=${CONCERN_PM}`);
+
+    const headers = adminPage.getByRole("table", { name: "Schools with visits" }).getByRole("columnheader");
+    await expect(headers).toHaveText([
+      "School", "Visits", "Last visit", "Open concerns", /^Recurring issues/, "Flags", "Top recurring concern", "Open School page",
+    ]);
+    // No red circle or highlight: just the number, styled like Visits.
+    const open = schoolColumn(adminPage, 3);
+    await expect(open).toHaveText(["4", "2", "1", "0"]);
+    await expect(open.locator("*")).toHaveCount(0);
+    expect(await open.first().getAttribute("class")).toBe(await schoolColumn(adminPage, 1).first().getAttribute("class"));
+
+    await sortHeader(adminPage, "Open concerns").click();
+    await expect(adminPage).toHaveURL(/[?&]sort=open&dir=desc(&|$)/);
+    await expect(schoolColumn(adminPage, 3)).toHaveText(["4", "2", "1", "0"]);
+    await sortHeader(adminPage, /Open concerns/).click();
+    await expect(adminPage).toHaveURL(/[?&]sort=open&dir=asc(&|$)/);
+    await expect(schoolColumn(adminPage, 0)).toHaveText([
+      `${DELTA} VSW_E2E`, `${CHARLIE} VSW_E2E`, `${BRAVO} VSW_E2E`, `${ALPHA} VSW_E2E`,
+    ]);
+  });
+
   test("counts only Visits in view: dates and PMs change Recurring counts", async ({ adminPage }) => {
     // August only: Alpha's two same-day Visits are two mentions of "Lab equipment missing".
     await adminPage.goto(`/school-visit-summary?pms=${CONCERN_PM}&from=2026-08-01&to=2026-08-31`);
     await expect(schoolColumn(adminPage, 0)).toHaveText([`${ALPHA} VSW_E2E`, `${BRAVO} VSW_E2E`]);
     await expect(schoolColumn(adminPage, 1)).toHaveText(["2", "1"]);
-    await expect(schoolColumn(adminPage, 3)).toHaveText(["1", "0"]);
-    await expect(schoolColumn(adminPage, 5).nth(0)).toHaveText("Lab equipment missing2 visits");
+    await expect(schoolColumn(adminPage, 3)).toHaveText(["1", "1"]);
+    await expect(schoolColumn(adminPage, 4)).toHaveText(["1", "0"]);
+    await expect(schoolColumn(adminPage, 6).nth(0)).toHaveText("Lab equipment missing2 visits");
     await expect(statValue(adminPage, "Schools with recurring concerns")).toHaveText("1");
     await expect(schoolRow(adminPage, ALPHA).getByRole("img", { name: "1–2 recurring concerns" })).toBeVisible();
 
     // Alpha over every Visit: the resolved concern, the highlight and the concern mentioned only
     // in the soft-deleted Visit don't count.
     await adminPage.goto(`/school-visit-summary?pms=${CONCERN_PM}&schools=VSWCONA`);
-    await expect(schoolColumn(adminPage, 3)).toHaveText(["3"]);
+    await expect(schoolColumn(adminPage, 4)).toHaveText(["3"]);
     await expect(schoolRow(adminPage, ALPHA).getByRole("img", { name: "3 or more recurring concerns" })).toBeVisible();
 
     // From September: the soft-deleted Visit's mention doesn't make "Timetable clashes" recur.
     await adminPage.goto(`/school-visit-summary?pms=${CONCERN_PM}&schools=VSWCONA&from=2026-09-01`);
-    await expect(schoolColumn(adminPage, 3)).toHaveText(["0"]);
+    await expect(schoolColumn(adminPage, 3)).toHaveText(["3"]);
+    await expect(schoolColumn(adminPage, 4)).toHaveText(["0"]);
     await expect(schoolRow(adminPage, ALPHA).getByRole("img", { name: "Open concerns, none recurring" })).toBeVisible();
 
     // Adding the second PM's Visit makes "Library closed" recur at Bravo; the 3-visit concern stays top.
     await adminPage.goto(`/school-visit-summary?pms=${CONCERN_PM},${CONCERN_PM_2}&schools=VSWCONB`);
     await expect(schoolColumn(adminPage, 1)).toHaveText(["4"]);
-    await expect(schoolColumn(adminPage, 3)).toHaveText(["2"]);
-    await expect(schoolColumn(adminPage, 5)).toHaveText(["Smartboard not working3 visits"]);
+    await expect(schoolColumn(adminPage, 4)).toHaveText(["2"]);
+    await expect(schoolColumn(adminPage, 6)).toHaveText(["Smartboard not working3 visits"]);
   });
 
   test("sorts by Recurring issues both ways, ties by School name; Top recurring concern isn't sortable", async ({ adminPage }) => {
@@ -472,7 +500,7 @@ test.describe("School Visit Summary — Recurring Concerns on the School-wise ta
         await expect(adminPage.getByText("Visit notes haven't been summarised yet")).toBeVisible();
         await expect(adminPage.getByText(/summarised up to/)).toHaveCount(0);
         await expect(schoolColumn(adminPage, 0)).toHaveText([`${MIXED} VSW_E2E`, NO_REGION_NAME, `${PHYSICAL} VSW_E2E`]);
-        await expect(schoolColumn(adminPage, 3)).toHaveText(["0", "0", "0"]);
+        await expect(schoolColumn(adminPage, 4)).toHaveText(["0", "0", "0"]);
       } finally {
         for (const row of saved) {
           await pool.query(
@@ -505,7 +533,7 @@ test.describe("School Visit Summary — Flags on the School-wise tab", () => {
     await expect(schoolColumn(adminPage, 0)).toHaveText([
       `${MIXED} VSW_E2E`, NO_REGION_NAME, `${OLD} VSW_E2E`, `${PHYSICAL} VSW_E2E`,
     ]);
-    await expect(schoolColumn(adminPage, 4)).toHaveText(["1", "0", "0", "2"]);
+    await expect(schoolColumn(adminPage, 5)).toHaveText(["1", "0", "0", "2"]);
   });
 
   test("sorts by Flags both ways, ties by School name", async ({ adminPage }) => {
@@ -513,7 +541,7 @@ test.describe("School Visit Summary — Flags on the School-wise tab", () => {
 
     await sortHeader(adminPage, "Flags").click();
     await expect(adminPage).toHaveURL(/[?&]sort=flags&dir=desc(&|$)/);
-    await expect(schoolColumn(adminPage, 4)).toHaveText(["2", "1", "0", "0"]);
+    await expect(schoolColumn(adminPage, 5)).toHaveText(["2", "1", "0", "0"]);
     await expect(schoolColumn(adminPage, 0)).toHaveText([
       `${PHYSICAL} VSW_E2E`, `${MIXED} VSW_E2E`, NO_REGION_NAME, `${OLD} VSW_E2E`,
     ]);
@@ -530,7 +558,7 @@ test.describe("School Visit Summary — Flags on the School-wise tab", () => {
     await page.goto("/school-visit-summary");
 
     await expect(schoolColumn(page, 0)).toHaveText([`${PHYSICAL} VSW_E2E`]);
-    await expect(schoolColumn(page, 4)).toHaveText(["2"]);
+    await expect(schoolColumn(page, 5)).toHaveText(["2"]);
   });
 });
 
@@ -623,6 +651,9 @@ test.describe("School Visit Summary — School page", () => {
 // School page concern fixture: e2e/fixtures/migrations/20261027140400_seed_visit_summary_school_page_concerns_fixture.sql
 // (its header works out every section for VSWCONA).
 
+// The open concerns' section heading (renamed from "Needs attention" at the stakeholder's request).
+const NEEDS_ATTENTION = "All concerns - Need Attention";
+
 function concernSection(page: Page, name: string) {
   return page.getByRole("region", { name, exact: true });
 }
@@ -637,6 +668,24 @@ function highlights(page: Page) {
   return concernSection(page, "Going well").getByRole("listitem");
 }
 
+// A card's expand toggle, and the mention lines it shows when expanded (none while collapsed).
+function cardToggle(card: Locator) {
+  return card.locator("button[aria-expanded]");
+}
+
+function mentionLines(card: Locator) {
+  return card.getByRole("list", { name: "What PMs said" }).getByRole("listitem");
+}
+
+// A card's history entries (not its mention lines).
+function historyEntries(card: Locator) {
+  return card.getByRole("list", { name: "History" }).getByRole("listitem");
+}
+
+async function mentionHrefs(card: Locator) {
+  return mentionLines(card).getByRole("link").evaluateAll((links) => links.map((link) => link.getAttribute("href")));
+}
+
 // One collapsible row per Visit in view.
 function visitNoteRows(page: Page) {
   return concernSection(page, "Visit-wise notes").locator("details");
@@ -646,7 +695,7 @@ test.describe("School Visit Summary — School page concerns", () => {
   test("Needs attention lists the open concerns in view with their Visits, dates and reopened marker", async ({ adminPage }) => {
     await adminPage.goto(ALPHA_PAGE);
 
-    const needs = cards(adminPage, "Needs attention");
+    const needs = cards(adminPage, NEEDS_ATTENTION);
     await expect(needs).toHaveCount(4);
     await expect(needs.nth(0)).toContainText(HTML_CONCERN);
     await expect(needs.nth(1)).toContainText("Physics teacher absent on Saturdays");
@@ -672,7 +721,7 @@ test.describe("School Visit Summary — School page concerns", () => {
 
   test("a concern's history expands, with author names, the reopen and the automatic reopen", async ({ adminPage }) => {
     await adminPage.goto(ALPHA_PAGE);
-    const needs = cards(adminPage, "Needs attention");
+    const needs = cards(adminPage, NEEDS_ATTENTION);
 
     const autoReopened = needs.nth(0).getByRole("listitem");
     await expect(autoReopened.first()).toBeHidden();
@@ -689,6 +738,90 @@ test.describe("School Visit Summary — School page concerns", () => {
     await expect(reopened.nth(0)).toContainText("Substitute teacher arranged");
     await expect(reopened.nth(1)).toContainText("Reopened · e2e-vsw-pm3@test.local · 17 Sep 2026");
     await expect(reopened.nth(1)).toContainText("Substitute left after a month");
+  });
+
+  test("the open concerns' heading reads \"All concerns - Need Attention\" with the open count", async ({ adminPage }) => {
+    await adminPage.goto(ALPHA_PAGE);
+
+    const section = concernSection(adminPage, NEEDS_ATTENTION);
+    await expect(section.getByRole("heading", { level: 2 })).toHaveText(NEEDS_ATTENTION);
+    await expect(section.getByText("4 open", { exact: true })).toBeVisible();
+    await expect(adminPage.getByRole("heading", { name: "Needs attention" })).toHaveCount(0);
+  });
+
+  test("an open concern expands to what the PMs said, newest first, each line opening its Visit", async ({ adminPage }) => {
+    await adminPage.goto(ALPHA_PAGE);
+    const needs = cards(adminPage, NEEDS_ATTENTION);
+    const card = needs.nth(0);
+
+    await expect(cardToggle(card)).toHaveAttribute("aria-expanded", "false");
+    await expect(mentionLines(card)).toHaveCount(0);
+    await cardToggle(card).click();
+    await expect(cardToggle(card)).toHaveAttribute("aria-expanded", "true");
+
+    // Date · PM (their email: they have no permission row), then the snippet, rendered as text.
+    await expect(mentionLines(card)).toHaveText([
+      `15 Sep 2026 · ${CONCERN_PM}${HTML_SNIPPET}`,
+      `10 Jun 2026 · ${CONCERN_PM}Few practice tests`,
+    ]);
+    await expect(card.locator("b, img")).toHaveCount(0);
+    const back = `?${new URLSearchParams({ back: ALPHA_PAGE })}`;
+    expect(await mentionHrefs(card)).toEqual([
+      `/school-visit-summary/9004723${back}`,
+      `/school-visit-summary/9004720${back}`,
+    ]);
+
+    // Only live mentions in view: the soft-deleted and in-progress Visits' mentions don't show.
+    await cardToggle(needs.nth(3)).click();
+    await expect(mentionLines(needs.nth(3))).toHaveText([`15 Sep 2026 · ${CONCERN_PM}Timetable clash`]);
+
+    // It collapses again.
+    await cardToggle(card).click();
+    await expect(cardToggle(card)).toHaveAttribute("aria-expanded", "false");
+    await expect(mentionLines(card)).toHaveCount(0);
+
+    // A line opens its Visit, whose Back returns here.
+    await mentionLines(needs.nth(3)).first().getByRole("link").click();
+    await expect(adminPage).toHaveURL(/\/school-visit-summary\/9004723\?back=/);
+    await adminPage.getByRole("link", { name: /Back to Visit Summary/ }).click();
+    await expect(adminPage).toHaveURL(ALPHA_PAGE);
+  });
+
+  test("resolved concerns and highlights expand too, and the mention lines follow the URL filters", async ({ adminPage }) => {
+    await adminPage.goto(ALPHA_PAGE);
+
+    const resolved = cards(adminPage, "Resolved concerns").first();
+    await cardToggle(resolved).click();
+    await expect(mentionLines(resolved)).toHaveText([
+      `15 Sep 2026 · ${CONCERN_PM}Cooler broken`,
+      `06 Aug 2026 · ${CONCERN_PM}Cooler still broken`,
+      `10 Jun 2026 · ${CONCERN_PM}Cooler not working`,
+    ]);
+    await expect(historyEntries(resolved)).toHaveCount(2);
+
+    const highlight = highlights(adminPage).first();
+    await cardToggle(highlight).click();
+    await expect(mentionLines(highlight)).toHaveText([
+      `15 Sep 2026 · ${CONCERN_PM}Peer learning strong`,
+      `06 Aug 2026 · ${CONCERN_PM}Peer groups active`,
+      `06 Aug 2026 · ${CONCERN_PM}Peer groups active`,
+      `10 Jun 2026 · ${CONCERN_PM}Students teach each other`,
+    ]);
+
+    // August only: the two same-day Visits, newest (higher id) first, linking Back with the filters.
+    const august = `${ALPHA_PAGE}?from=2026-08-01&to=2026-08-31`;
+    await adminPage.goto(august);
+    const card = cards(adminPage, NEEDS_ATTENTION).first();
+    await cardToggle(card).click();
+    await expect(mentionLines(card)).toHaveText([
+      `06 Aug 2026 · ${CONCERN_PM}Chemistry lab still short of equipment`,
+      `06 Aug 2026 · ${CONCERN_PM}Lab has no burettes`,
+    ]);
+    const back = `?${new URLSearchParams({ back: august })}`;
+    expect(await mentionHrefs(card)).toEqual([
+      `/school-visit-summary/9004722${back}`,
+      `/school-visit-summary/9004721${back}`,
+    ]);
   });
 
   test("Going well lists the highlights in view", async ({ adminPage }) => {
@@ -775,9 +908,9 @@ test.describe("School Visit Summary — School page concerns", () => {
   test("follows the date and PM filters carried in the URL", async ({ adminPage }) => {
     await adminPage.goto(`${ALPHA_PAGE}?from=2026-08-01&to=2026-08-31`);
 
-    await expect(cards(adminPage, "Needs attention")).toHaveCount(1);
-    await expect(cards(adminPage, "Needs attention").first()).toContainText("Lab equipment missing");
-    await expect(cards(adminPage, "Needs attention").first().getByText("Recurring · 2 visits", { exact: true })).toBeVisible();
+    await expect(cards(adminPage, NEEDS_ATTENTION)).toHaveCount(1);
+    await expect(cards(adminPage, NEEDS_ATTENTION).first()).toContainText("Lab equipment missing");
+    await expect(cards(adminPage, NEEDS_ATTENTION).first().getByText("Recurring · 2 visits", { exact: true })).toBeVisible();
     await expect(highlights(adminPage).first().getByText(compactDates("06 Aug ×2", "06 Aug 2026 ×2"), { exact: true })).toBeVisible();
     await expect(cards(adminPage, "Resolved concerns")).toHaveCount(1);
     await expect(visitNoteRows(adminPage)).toHaveCount(2);
@@ -791,7 +924,7 @@ test.describe("School Visit Summary — School page concerns", () => {
 
     // Only the in-progress Visit is in view: nothing counts, and each section says so.
     await adminPage.goto(`${ALPHA_PAGE}?pms=${CONCERN_PM_2}`);
-    await expect(concernSection(adminPage, "Needs attention")).toContainText("No open concerns in view");
+    await expect(concernSection(adminPage, NEEDS_ATTENTION)).toContainText("No open concerns in view");
     await expect(concernSection(adminPage, "Going well")).toContainText("No highlights in view");
     await expect(concernSection(adminPage, "Resolved concerns")).toContainText("No resolved concerns in view");
     await expect(visitNoteRows(adminPage)).toHaveCount(1);
@@ -802,6 +935,7 @@ test.describe("School Visit Summary — School page concerns", () => {
 // These tests write history at VSWCONE only, and run in order (Comment needs the concern resolved
 // before Reopen opens it).
 const ECHO_PAGE = "/school-visit-summary/schools/VSWCONE";
+const ECHO_PM = "e2e-vsw-pm5@test.local";
 const READ_ONLY_USER = { name: "VSW Read Only", email: "e2e-vsw-readonly@test.local" };
 
 function concernCard(page: Page, section: string, text: string) {
@@ -811,16 +945,22 @@ function concernCard(page: Page, section: string, text: string) {
 test.describe.serial("School Visit Summary — School page concern actions", () => {
   test("Resolve moves an open concern to Resolved with the explanation in its history", async ({ adminPage }) => {
     await adminPage.goto(ECHO_PAGE);
-    const card = concernCard(adminPage, "Needs attention", "Drinking water tank leaking");
+    const card = concernCard(adminPage, NEEDS_ATTENTION, "Drinking water tank leaking");
 
     await card.getByRole("button", { name: "Resolve" }).click();
+    // Resolve expands the card: what the PMs said sits above the note.
+    await expect(cardToggle(card)).toHaveAttribute("aria-expanded", "true");
+    await expect(mentionLines(card)).toHaveText([`05 Sep 2026 · ${ECHO_PM}Water tank leaks near the hostel`]);
+    const lineBox = await mentionLines(card).first().boundingBox();
+    const noteBox = await card.getByRole("textbox", { name: "How was this resolved?" }).boundingBox();
+    expect(lineBox!.y + lineBox!.height).toBeLessThanOrEqual(noteBox!.y);
     await card.getByRole("textbox", { name: "How was this resolved?" }).fill("  Plumber fixed the tank  ");
     await card.getByRole("button", { name: "Mark resolved" }).click();
 
-    await expect(concernCard(adminPage, "Needs attention", "Drinking water tank leaking")).toHaveCount(0);
+    await expect(concernCard(adminPage, NEEDS_ATTENTION, "Drinking water tank leaking")).toHaveCount(0);
     const resolved = concernCard(adminPage, "Resolved concerns", "Drinking water tank leaking");
     await expect(resolved).toContainText("Resolved by e2e-admin@test.local ·");
-    const history = resolved.getByRole("listitem");
+    const history = historyEntries(resolved);
     await expect(history).toHaveCount(1);
     await expect(history.first()).toContainText("Resolved · e2e-admin@test.local");
     await expect(history.first()).toContainText("Plumber fixed the tank");
@@ -831,14 +971,15 @@ test.describe.serial("School Visit Summary — School page concern actions", () 
     const card = concernCard(adminPage, "Resolved concerns", "Hostel lights not working");
 
     await card.getByRole("button", { name: "Comment" }).click();
+    await expect(mentionLines(card)).toHaveCount(2);
     await card.getByRole("textbox", { name: "Comment" }).fill("Lights checked on the next visit");
     await card.getByRole("button", { name: "Add comment" }).click();
 
-    const history = card.getByRole("listitem");
+    const history = historyEntries(card);
     await expect(history).toHaveCount(2);
     await expect(history.nth(1)).toContainText("Comment · e2e-admin@test.local");
     await expect(history.nth(1)).toContainText("Lights checked on the next visit");
-    await expect(concernCard(adminPage, "Needs attention", "Hostel lights not working")).toHaveCount(0);
+    await expect(concernCard(adminPage, NEEDS_ATTENTION, "Hostel lights not working")).toHaveCount(0);
   });
 
   test("Reopen moves a resolved concern back to Needs attention, marked reopened, with the reason", async ({ adminPage }) => {
@@ -846,22 +987,28 @@ test.describe.serial("School Visit Summary — School page concern actions", () 
     const resolvedCard = concernCard(adminPage, "Resolved concerns", "Hostel lights not working");
 
     await resolvedCard.getByRole("button", { name: "Reopen" }).click();
+    // Reopen expands the card too, newest mention first.
+    await expect(cardToggle(resolvedCard)).toHaveAttribute("aria-expanded", "true");
+    await expect(mentionLines(resolvedCard)).toHaveText([
+      `05 Oct 2026 · ${ECHO_PM}Lights still flicker`,
+      `05 Sep 2026 · ${ECHO_PM}Hostel corridor lights off`,
+    ]);
     await resolvedCard.getByRole("textbox", { name: "Why is this being reopened?" }).fill("Lights failed again");
     await resolvedCard.getByRole("button", { name: "Reopen", exact: true }).click();
 
-    const card = concernCard(adminPage, "Needs attention", "Hostel lights not working");
+    const card = concernCard(adminPage, NEEDS_ATTENTION, "Hostel lights not working");
     await expect(card).toHaveCount(1);
     await expect(card.getByText("reopened", { exact: true })).toBeVisible();
     await expect(concernCard(adminPage, "Resolved concerns", "Hostel lights not working")).toHaveCount(0);
     await card.getByText("History (3)").click();
-    const history = card.getByRole("listitem");
+    const history = historyEntries(card);
     await expect(history.nth(2)).toContainText("Reopened · e2e-admin@test.local");
     await expect(history.nth(2)).toContainText("Lights failed again");
   });
 
   test("a failed save shows the error and keeps the typed text", async ({ adminPage }) => {
     await adminPage.goto(ECHO_PAGE);
-    const card = concernCard(adminPage, "Needs attention", "Exam timetable not shared");
+    const card = concernCard(adminPage, NEEDS_ATTENTION, "Exam timetable not shared");
     await card.getByRole("button", { name: "Resolve" }).click();
     const note = card.getByRole("textbox", { name: "How was this resolved?" });
 
@@ -887,11 +1034,15 @@ test.describe.serial("School Visit Summary — School page concern actions", () 
     await signInAs(page, READ_ONLY_USER);
     await page.goto(ECHO_PAGE);
 
-    await expect(concernCard(page, "Needs attention", "Hostel lights not working")).toHaveCount(1);
+    await expect(concernCard(page, NEEDS_ATTENTION, "Hostel lights not working")).toHaveCount(1);
     await expect(concernCard(page, "Resolved concerns", "Drinking water tank leaking")).toContainText("Plumber fixed the tank");
     for (const name of ["Resolve", "Comment", "Reopen"]) {
       await expect(page.getByRole("button", { name, exact: true })).toHaveCount(0);
     }
+    // Cards still expand to what the PMs said.
+    const card = concernCard(page, NEEDS_ATTENTION, "Hostel lights not working");
+    await cardToggle(card).click();
+    await expect(mentionLines(card)).toHaveCount(2);
 
     const res = await page.request.post("/api/visit-concerns/9004814/events", {
       data: { action: "resolve", body: "Trying anyway" },
@@ -918,8 +1069,8 @@ test.describe("School Visit Summary — School page intervention flags", () => {
     const sections = await adminPage.getByRole("region").evaluateAll((regions) =>
       regions.map((region) => document.getElementById(region.getAttribute("aria-labelledby") ?? "")?.textContent)
     );
-    expect(sections.slice(sections.indexOf("Needs attention"), sections.indexOf("Needs attention") + 3)).toEqual([
-      "Needs attention",
+    expect(sections.slice(sections.indexOf(NEEDS_ATTENTION), sections.indexOf(NEEDS_ATTENTION) + 3)).toEqual([
+      NEEDS_ATTENTION,
       "Going well",
       "Intervention flags",
     ]);

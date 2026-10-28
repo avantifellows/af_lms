@@ -1,4 +1,5 @@
 import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
@@ -9,11 +10,17 @@ vi.mock("next/link", () => ({
   ),
 }));
 
-import type { ConcernCard, SchoolConcernPage } from "@/lib/visit-concerns";
+import type { ConcernCard, ConcernMention, SchoolConcernPage } from "@/lib/visit-concerns";
 import { SchoolConcernSections } from "./SchoolConcernSections";
 
 // 11:30 on 28 Oct 2026 in IST.
 const TODAY = new Date("2026-10-28T06:00:00.000Z");
+
+const NEEDS_ATTENTION = "All concerns - Need Attention";
+
+const mentionOn = (visitId: number, visitDate: string, snippet: string, pmName: string | null = "Ravi PM"): ConcernMention => ({
+  visitId, visitDate, pmEmail: "pm@avantifellows.org", pmName, snippet,
+});
 
 const RECURRING: ConcernCard = {
   id: 1,
@@ -22,6 +29,11 @@ const RECURRING: ConcernCard = {
   status: "open",
   visitCount: 3,
   visitDates: ["2026-10-15", "2026-08-06", "2026-08-06"],
+  mentions: [
+    mentionOn(12, "2026-10-15", "Lab still has no burettes"),
+    mentionOn(11, "2026-08-06", "Burettes <b>missing</b> <img src=x onerror=alert(1)>", null),
+    mentionOn(10, "2026-08-06", "Chemistry lab short of equipment"),
+  ],
   reopened: true,
   history: [
     {
@@ -52,6 +64,7 @@ const ONE_OFF: ConcernCard = {
   status: "open",
   visitCount: 1,
   visitDates: ["2025-12-01"],
+  mentions: [mentionOn(9, "2025-12-01", "Timetable not on the notice board")],
   reopened: false,
   history: [],
 };
@@ -63,6 +76,7 @@ const HIGHLIGHT: ConcernCard = {
   status: null,
   visitCount: 2,
   visitDates: ["2026-10-15", "2026-08-06"],
+  mentions: [mentionOn(12, "2026-10-15", "Many doubts asked in class"), mentionOn(10, "2026-08-06", "Doubt sessions busy")],
   reopened: false,
   history: [],
 };
@@ -74,6 +88,7 @@ const RESOLVED: ConcernCard = {
   status: "resolved",
   visitCount: 2,
   visitDates: ["2026-10-15", "2026-08-06"],
+  mentions: [mentionOn(12, "2026-10-15", "Cooler leaking"), mentionOn(10, "2026-08-06", "Cooler not cooling")],
   reopened: false,
   history: [
     {
@@ -132,6 +147,13 @@ function renderSections(props: Partial<Parameters<typeof SchoolConcernSections>[
     section,
     card: (sectionName: string, text: string) =>
       within(section(sectionName)).getByText(text).closest("article") as HTMLElement,
+    // The card's toggle: the button that owns its expanded area.
+    toggle: (container: HTMLElement) =>
+      within(container).getAllByRole("button").find((button) => button.hasAttribute("aria-expanded")) as HTMLElement,
+    mentionLines: (container: HTMLElement) =>
+      within(container).queryByRole("list", { name: "What PMs said" })
+        ? within(within(container).getByRole("list", { name: "What PMs said" })).getAllByRole("listitem")
+        : [],
     highlight: (text: string) => within(section("Going well")).getByText(text).closest("li") as HTMLElement,
     visitRow: (date: string) =>
       within(section("Visit-wise notes")).getByText(date).closest("details") as HTMLDetailsElement,
@@ -154,12 +176,12 @@ describe("SchoolConcernSections", () => {
   it("marks a concern raised in 2+ visits as Recurring, with its compact visit dates", () => {
     const view = renderSections();
 
-    const recurring = view.card("Needs attention", "Lab equipment missing");
+    const recurring = view.card(NEEDS_ATTENTION, "Lab equipment missing");
     expect(within(recurring).getByText("Recurring · 3 visits")).toBeInTheDocument();
     expect(recurring).toHaveTextContent("15 Oct · 06 Aug ×2");
 
     // A one-off concern shows only its date, which carries its year when it's another year's.
-    const oneOff = view.card("Needs attention", "Timetable not displayed");
+    const oneOff = view.card(NEEDS_ATTENTION, "Timetable not displayed");
     expect(oneOff).not.toHaveTextContent("Recurring");
     expect(oneOff).not.toHaveTextContent("visit");
     expect(within(oneOff).getByText("01 Dec 2025")).toBeInTheDocument();
@@ -168,28 +190,136 @@ describe("SchoolConcernSections", () => {
   it("marks a reopened concern and lists its history, including an automatic reopen", () => {
     const view = renderSections();
 
-    const recurring = view.card("Needs attention", "Lab equipment missing");
+    const recurring = view.card(NEEDS_ATTENTION, "Lab equipment missing");
     expect(within(recurring).getByText("reopened")).toBeInTheDocument();
     expect(recurring).toHaveTextContent("History (2)");
-    const history = within(recurring).getAllByRole("listitem", { hidden: true });
+    const history = within(within(recurring).getByRole("list", { name: "History", hidden: true })).getAllByRole("listitem", { hidden: true });
     expect(history[0]).toHaveTextContent("Resolved · Ravi PM · 10 Aug 2026");
     expect(history[0]).toHaveTextContent("Kits ordered");
     // The date shows; the full IST time is on hover.
     expect(within(history[0]).getByText("10 Aug 2026")).toHaveAttribute("title", "10 Aug 2026, 10:00");
     expect(history[1]).toHaveTextContent("Reopened automatically: raised again in visit of 15 Oct 2026 · 16 Oct 2026");
 
-    const oneOff = view.card("Needs attention", "Timetable not displayed");
+    const oneOff = view.card(NEEDS_ATTENTION, "Timetable not displayed");
     expect(within(oneOff).queryByText("reopened")).not.toBeInTheDocument();
     expect(oneOff).not.toHaveTextContent("History");
   });
 
-  it("counts open concerns and lists highlights as text and dates, without Recurring or controls", () => {
+  it("heads the open concerns \"All concerns - Need Attention\" with the open count on the right", () => {
     const view = renderSections();
 
-    expect(view.section("Needs attention")).toHaveTextContent(/^Needs attention2 open/);
+    const heading = screen.getByRole("heading", { level: 2, name: NEEDS_ATTENTION });
+    expect(heading).toHaveAttribute("id", "needs-attention-heading");
+    expect(heading.nextElementSibling).toHaveTextContent(/^2 open$/);
+    expect(view.section(NEEDS_ATTENTION)).toHaveTextContent(/^All concerns - Need Attention2 open/);
+    expect(screen.queryByText("Needs attention")).not.toBeInTheDocument();
+  });
+
+  it("lists highlights as text and dates, without Recurring or actions", () => {
+    const view = renderSections();
+
     const highlight = view.highlight("Students asking doubts");
-    expect(highlight).toHaveTextContent(/^Students asking doubts15 Oct · 06 Aug$/);
-    expect(within(view.section("Going well")).queryByRole("button")).not.toBeInTheDocument();
+    expect(highlight).toHaveTextContent(/^▸Students asking doubts15 Oct · 06 Aug$/);
+    expect(within(view.section("Going well")).getAllByRole("button").map((button) => button.getAttribute("aria-expanded")))
+      .toEqual(["false"]);
+  });
+
+  it("expands an open concern to what the PMs said, newest first, each line linking to its Visit, and collapses it", async () => {
+    const view = renderSections({ visitBackHref: "/school-visit-summary/schools/SC001?preset=30d&sort=visits" });
+    const card = view.card(NEEDS_ATTENTION, "Lab equipment missing");
+    const toggle = view.toggle(card);
+
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(toggle).toHaveTextContent("Lab equipment missing");
+    expect(view.mentionLines(card)).toEqual([]);
+    expect(card).not.toHaveTextContent("What PMs said");
+
+    await userEvent.click(toggle);
+
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    const panel = document.getElementById(toggle.getAttribute("aria-controls")!)!;
+    expect(panel).toBeVisible();
+    expect(panel).toHaveTextContent("What PMs said");
+    const lines = view.mentionLines(card);
+    expect(lines.map((line) => line.textContent)).toEqual([
+      "15 Oct 2026 · Ravi PMLab still has no burettes",
+      // No name: the PM's email. The snippet is text, never HTML.
+      "06 Aug 2026 · pm@avantifellows.orgBurettes <b>missing</b> <img src=x onerror=alert(1)>",
+      "06 Aug 2026 · Ravi PMChemistry lab short of equipment",
+    ]);
+    expect(card.querySelector("b, img")).toBeNull();
+    const links = lines.map((line) => within(line).getByRole("link"));
+    expect(links.map((link) => new URL(link.getAttribute("href")!, "http://localhost").pathname)).toEqual([
+      "/school-visit-summary/12",
+      "/school-visit-summary/11",
+      "/school-visit-summary/10",
+    ]);
+    expect(new URL(links[0].getAttribute("href")!, "http://localhost").searchParams.get("back"))
+      .toBe("/school-visit-summary/schools/SC001?preset=30d&sort=visits");
+
+    await userEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(view.mentionLines(card)).toEqual([]);
+  });
+
+  it("Resolve expands the card, so the mentions sit above the note, and never collapses it", async () => {
+    const view = renderSections();
+    const card = view.card(NEEDS_ATTENTION, "Timetable not displayed");
+
+    await userEvent.click(within(card).getByRole("button", { name: "Resolve" }));
+
+    expect(view.toggle(card)).toHaveAttribute("aria-expanded", "true");
+    const [line] = view.mentionLines(card);
+    expect(line).toHaveTextContent("01 Dec 2025 · Ravi PMTimetable not on the notice board");
+    const note = within(card).getByRole("textbox", { name: "How was this resolved?" });
+    expect(line.compareDocumentPosition(note) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    // Cancel and Resolve again: the card stays expanded.
+    await userEvent.click(within(card).getByRole("button", { name: "Cancel" }));
+    await userEvent.click(within(card).getByRole("button", { name: "Resolve" }));
+    expect(view.toggle(card)).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("expands a resolved concern on click and on Reopen, mentions above the history and the note", async () => {
+    const view = renderSections();
+    const card = view.card("Resolved concerns", "Water cooler broken");
+
+    await userEvent.click(within(card).getByRole("button", { name: "Reopen" }));
+
+    expect(view.toggle(card)).toHaveAttribute("aria-expanded", "true");
+    expect(view.mentionLines(card).map((line) => line.textContent)).toEqual([
+      "15 Oct 2026 · Ravi PMCooler leaking",
+      "06 Aug 2026 · Ravi PMCooler not cooling",
+    ]);
+    const history = within(card).getByRole("list", { name: "History" });
+    const note = within(card).getByRole("textbox", { name: "Why is this being reopened?" });
+    const [first] = view.mentionLines(card);
+    expect(first.compareDocumentPosition(history) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(history.compareDocumentPosition(note) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    await userEvent.click(view.toggle(card));
+    expect(view.mentionLines(card)).toEqual([]);
+  });
+
+  it("expands a highlight to what the PMs said", async () => {
+    const view = renderSections();
+    const highlight = view.highlight("Students asking doubts");
+
+    await userEvent.click(view.toggle(highlight));
+
+    expect(view.mentionLines(highlight).map((line) => line.textContent)).toEqual([
+      "15 Oct 2026 · Ravi PMMany doubts asked in class",
+      "06 Aug 2026 · Ravi PMDoubt sessions busy",
+    ]);
+  });
+
+  it("expands cards for a viewer who can't act, too", async () => {
+    const view = renderSections({ canAct: false });
+    const card = view.card(NEEDS_ATTENTION, "Lab equipment missing");
+
+    await userEvent.click(view.toggle(card));
+
+    expect(view.mentionLines(card)).toHaveLength(3);
   });
 
   it("shows Resolved concerns open, naming who resolved each and when (email when no name)", () => {
@@ -205,17 +335,20 @@ describe("SchoolConcernSections", () => {
   it("offers Resolve on open concerns and Comment / Reopen on resolved ones when the viewer can act", () => {
     const view = renderSections({ canAct: true });
 
-    const open = view.card("Needs attention", "Lab equipment missing");
-    expect(within(open).getAllByRole("button").map((b) => b.textContent)).toEqual(["Resolve"]);
-    const resolved = view.card("Resolved concerns", "Water cooler broken");
-    expect(within(resolved).getAllByRole("button").map((b) => b.textContent)).toEqual(["Comment", "Reopen"]);
+    const actionNames = (card: HTMLElement) =>
+      within(card).getAllByRole("button").filter((b) => !b.hasAttribute("aria-expanded")).map((b) => b.textContent);
+    expect(actionNames(view.card(NEEDS_ATTENTION, "Lab equipment missing"))).toEqual(["Resolve"]);
+    expect(actionNames(view.card("Resolved concerns", "Water cooler broken"))).toEqual(["Comment", "Reopen"]);
   });
 
   it("hides every control when the viewer can't act, still showing concerns and history", () => {
     const view = renderSections({ canAct: false });
 
-    expect(screen.queryAllByRole("button", { hidden: true })).toEqual([]);
-    expect(view.card("Needs attention", "Lab equipment missing")).toHaveTextContent("History (2)");
+    // Only the cards' expand toggles remain.
+    const buttons = screen.queryAllByRole("button", { hidden: true });
+    expect(buttons.length).toBeGreaterThan(0);
+    expect(buttons.every((button) => button.hasAttribute("aria-expanded"))).toBe(true);
+    expect(view.card(NEEDS_ATTENTION, "Lab equipment missing")).toHaveTextContent("History (2)");
     expect(view.card("Resolved concerns", "Water cooler broken")).toHaveTextContent("Plumber fixed it");
   });
 

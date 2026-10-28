@@ -381,7 +381,7 @@ describe("SchoolVisitSummarySchoolPage", () => {
       render(await renderPage());
 
       expect(screen.getByRole("heading", { level: 1, name: "Test School" })).toBeInTheDocument();
-      expect(screen.getByRole("region", { name: /Needs attention/ })).toBeInTheDocument();
+      expect(screen.getByRole("region", { name: /All concerns - Need Attention/ })).toBeInTheDocument();
       expect(screen.queryByRole("region", { name: /Intervention flags/ })).not.toBeInTheDocument();
       expect(flagQueries()).toHaveLength(0);
     });
@@ -426,8 +426,8 @@ describe("SchoolVisitSummarySchoolPage", () => {
         }
         if (sql.includes("lms_visit_concern_mentions")) {
           return Promise.resolve([
-            { id: "9004801", kind: "concern", text: "Lab equipment missing", status: "open", visit_id: "1" },
-            { id: "9004804", kind: "concern", text: "Water cooler broken", status: "resolved", visit_id: "1" },
+            { id: "9004801", kind: "concern", text: "Lab equipment missing", status: "open", visit_id: "1", snippet: "Said on 15 Sep" },
+            { id: "9004804", kind: "concern", text: "Water cooler broken", status: "resolved", visit_id: "1", snippet: "Said on 15 Sep" },
           ]);
         }
         if (sql.includes("centre_positions")) return Promise.resolve([]);
@@ -480,7 +480,7 @@ describe("SchoolVisitSummarySchoolPage", () => {
         "0 highlights",
         "1 resolved",
       ]);
-      expect(screen.getByRole("region", { name: "Needs attention" })).toHaveTextContent("1 open");
+      expect(screen.getByRole("region", { name: "All concerns - Need Attention" })).toHaveTextContent("1 open");
     });
 
     it("links each Visit-wise note to its Visit, which comes Back to this School page and its filters", async () => {
@@ -501,7 +501,7 @@ describe("SchoolVisitSummarySchoolPage", () => {
 
       render(await renderPage());
 
-      expect(within(screen.getByRole("region", { name: /Needs attention/ })).getByText("Lab equipment missing")).toBeInTheDocument();
+      expect(within(screen.getByRole("region", { name: /All concerns - Need Attention/ })).getByText("Lab equipment missing")).toBeInTheDocument();
       expect(within(screen.getByRole("region", { name: /Resolved concerns/ })).getByText("Water cooler broken")).toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Resolve" })).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Comment" })).not.toBeInTheDocument();

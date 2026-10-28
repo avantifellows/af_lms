@@ -810,10 +810,10 @@ describe("SchoolVisitSummaryPage", () => {
       expect(within(rows[1]).getByRole("img", { name: "1–2 recurring concerns" })).toHaveClass("bg-brand-amber");
       expect(within(rows[2]).getByRole("img", { name: "Open concerns, none recurring" })).toBeInTheDocument();
       expect(within(rows[3]).getByRole("img", { name: "No open concerns" })).toBeInTheDocument();
-      expect(within(rows[0]).getAllByRole("cell")[3].firstElementChild).toHaveClass("rounded-full", "bg-accent");
-      expect(within(rows[3]).getAllByRole("cell")[3]).toHaveTextContent("0");
-      expect(within(rows[3]).getAllByRole("cell")[3].firstElementChild).toHaveClass("text-text-muted");
-      expect(within(rows[0]).getAllByRole("cell")[6]).toHaveTextContent("›");
+      expect(within(rows[0]).getAllByRole("cell")[4].firstElementChild).toHaveClass("rounded-full", "bg-accent");
+      expect(within(rows[3]).getAllByRole("cell")[4]).toHaveTextContent("0");
+      expect(within(rows[3]).getAllByRole("cell")[4].firstElementChild).toHaveClass("text-text-muted");
+      expect(within(rows[0]).getAllByRole("cell")[7]).toHaveTextContent("›");
     });
 
     it("shows the top recurring concern with its visit count beneath", async () => {
@@ -823,9 +823,42 @@ describe("SchoolVisitSummaryPage", () => {
       render(await SchoolVisitSummaryPage({ searchParams: Promise.resolve({}) }));
 
       const [first, second] = within(schoolWiseTable()).getAllByRole("row").slice(1);
-      expect(within(first).getAllByRole("cell")[5]).toHaveTextContent("Lab equipment missing3 visits");
+      expect(within(first).getAllByRole("cell")[6]).toHaveTextContent("Lab equipment missing3 visits");
       expect(within(first).getByText("3 visits")).toHaveClass("text-accent");
-      expect(within(second).getAllByRole("cell")[5]).toHaveTextContent("—");
+      expect(within(second).getAllByRole("cell")[6]).toHaveTextContent("—");
+    });
+
+    it("shows each School's open concern count just before Recurring issues, as a plain number", async () => {
+      setupAuth();
+      setupSchoolWiseQueries();
+
+      render(await SchoolVisitSummaryPage({ searchParams: Promise.resolve({}) }));
+
+      const table = within(schoolWiseTable());
+      // The sort arrow on the active column is decorative.
+      expect(table.getAllByRole("columnheader").map((header) => header.textContent?.replace(/[↑↓]/g, ""))).toEqual([
+        "School", "Visits", "Last visit", "Open concerns", "Recurring issues", "Flags", "Top recurring concern", "Open School page",
+      ]);
+      const [first, second] = table.getAllByRole("row").slice(1);
+      const openCell = within(first).getAllByRole("cell")[3];
+      expect(openCell).toHaveTextContent(/^3$/);
+      // Styled like the Visits cell: no pill, no highlight.
+      expect(openCell.className).toBe(within(first).getAllByRole("cell")[1].className);
+      expect(openCell.firstElementChild).toBeNull();
+      expect(within(second).getAllByRole("cell")[3]).toHaveTextContent(/^0$/);
+    });
+
+    it("sorts by Open concerns, most first by default, ties by School name", async () => {
+      setupAuth();
+      setupSchoolWiseQueries();
+
+      render(await SchoolVisitSummaryPage({ searchParams: Promise.resolve({ sort: "open" }) }));
+
+      expect(schoolWiseSql()).toContain("ORDER BY open_count DESC, school_name ASC, school_code ASC");
+      expect(within(schoolWiseTable()).getByRole("link", { name: /Open concerns/ })).toHaveAttribute(
+        "href",
+        "/school-visit-summary?sort=open&dir=asc"
+      );
     });
 
     it("flags a last visit only when it is more than 45 days before today in IST", async () => {
@@ -860,7 +893,8 @@ describe("SchoolVisitSummaryPage", () => {
       expect(statValue("Schools")).toHaveTextContent("2");
       expect(statValue("PMs")).toHaveTextContent("2");
       expect(statValue("Schools with recurring concerns")).toHaveTextContent("1");
-      expect(screen.queryByText("Open concerns")).not.toBeInTheDocument();
+      // No Open concerns stat card (the count is a table column now).
+      expect(within(screen.getByRole("group", { name: "Visit totals" })).queryByText("Open concerns")).not.toBeInTheDocument();
       expect(screen.getByText("4 visits found")).toBeInTheDocument();
       expect(screen.getByText("2 schools")).toBeInTheDocument();
       // One stats query over the same filters as the rows, not limited to any School.
@@ -1082,7 +1116,7 @@ describe("SchoolVisitSummaryPage", () => {
 
       function flagsColumn(): string[] {
         return within(schoolWiseTable()).getAllByRole("row").slice(1)
-          .map((row) => within(row).getAllByRole("cell")[4].textContent ?? "");
+          .map((row) => within(row).getAllByRole("cell")[5].textContent ?? "");
       }
 
       it("shows each School's open flag count where the viewer may see its flags", async () => {

@@ -10,7 +10,8 @@ import { validateConcernEventBody, type VisitConcernAction } from "@/lib/visit-c
 // Reopen on a resolved one. The note is trimmed and must be 1–2000 characters. A failed save shows
 // the error and keeps the typed text; a saved one refreshes the server page, so the concern moves
 // to its new section. `children` is the card's body: the action buttons sit to its right, and the
-// note form opens below it, in place of the buttons.
+// note form opens below it, in place of the buttons. `onOpen` runs when a form opens (the card
+// expands, so its mentions show above the note).
 
 const FORMS: Record<
   VisitConcernAction,
@@ -58,10 +59,12 @@ export function ConcernActions({
   concernId,
   status,
   children,
+  onOpen,
 }: {
   concernId: number;
   status: "open" | "resolved";
   children?: ReactNode;
+  onOpen?: (action: VisitConcernAction) => void;
 }) {
   const router = useRouter();
   const [action, setAction] = useState<VisitConcernAction | null>(null);
@@ -74,6 +77,7 @@ export function ConcernActions({
   function open(next: VisitConcernAction) {
     setAction(next);
     setError(null);
+    onOpen?.(next);
   }
 
   function cancel() {
