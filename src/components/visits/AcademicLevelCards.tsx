@@ -60,18 +60,18 @@ function LevelCard({ card }: { card: AcademicLevelCard }) {
       title={`${card.centreName}. ${CARD_HOVER}`}
       className="group block h-full rounded-lg border border-border bg-bg-card px-3 py-2.5 hover:border-accent"
     >
-      <div className="flex items-center gap-2 whitespace-nowrap">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
         <span className="rounded bg-accent px-1.5 py-0.5 text-[11px] font-bold uppercase leading-none text-text-on-accent">
           {card.tag}
         </span>
-        <span className="text-sm font-bold text-text-primary group-hover:text-accent">
+        <span className="whitespace-nowrap text-sm font-bold text-text-primary group-hover:text-accent">
           G{card.grade} {card.exam} <span aria-hidden className="text-xs text-text-muted">↗</span>
         </span>
-        <span className="ml-auto pl-2 text-xs text-text-muted">{formatStudents(card.total)}</span>
+        <span className="ml-auto whitespace-nowrap text-xs text-text-muted">{formatStudents(card.total)}</span>
       </div>
       <div className="mt-2 flex items-baseline">
         <span className="pr-1 text-[11px] font-bold uppercase tracking-wide text-text-muted">Now</span>
-        <dl className="flex items-baseline whitespace-nowrap">
+        <dl className="flex flex-wrap items-baseline gap-y-1">
           {cells.map((cell) => (
             <Cell
               key={cell.level}
@@ -98,10 +98,14 @@ export function AcademicLevelCards({ data }: { data: AcademicLevelCardsData }) {
       ) : data.cards.length === 0 ? (
         <p className="text-sm text-text-muted">No JEE or NEET students at this School&apos;s physical centres</p>
       ) : (
-        // One line: the cards share the row and scroll sideways (never wrap) when there are too many.
-        <ul aria-labelledby="academic-level-heading" className="flex gap-2 overflow-x-auto pb-1">
+        // One line from `sm`: equal columns that share the row (a card's cells wrap inside it); past
+        // what fits at 11rem each, the row scrolls sideways instead of wrapping.
+        <ul
+          aria-labelledby="academic-level-heading"
+          className="grid gap-2 overflow-x-auto pb-1 sm:auto-cols-[minmax(11rem,1fr)] sm:grid-flow-col"
+        >
           {data.cards.map((card) => (
-            <li key={`${card.centreId}:${card.grade}:${card.exam}`} className="min-w-[14rem] flex-1">
+            <li key={`${card.centreId}:${card.grade}:${card.exam}`} className="min-w-0">
               <LevelCard card={card} />
             </li>
           ))}
