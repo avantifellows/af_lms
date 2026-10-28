@@ -220,7 +220,7 @@ export default function VisitSummaryFilterBar({
             }}
             className={FIELD_INPUT_CLASS}
           >
-            <option value="">Any required completion</option>
+            <option value="">All visits</option>
             <option value="none">No actions started</option>
             <option value="partial">Few actions started</option>
             <option value="all_present">All actions started, but incomplete</option>
