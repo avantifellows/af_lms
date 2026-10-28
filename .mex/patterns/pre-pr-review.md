@@ -106,10 +106,12 @@ npm run build                    # when routes, config or server/client boundari
 
   Point both at the same local data: `dbservice_dev` when its dump has the cases, otherwise a clone of the newest
   local production snapshot (`CREATE DATABASE <scratch> TEMPLATE <snapshot>`, as in `local-browser-qa.md`). BigQuery
-  numbers come from prod, read-only. **Never point a local server at the staging DB:** Holistic reads reconcile
-  mappings, and that writes (`reconcileHolisticMappings` in `src/lib/holistic-progress.ts`). A case that exists only
-  on staging is checked on the deployed staging app (`deploy-staging-pr.md`). On a clone, set `DB_SERVICE_URL` to a
-  dead port, except for the write test below. Remove the base worktree afterwards.
+  numbers come from prod, read-only. On a clone, set `DB_SERVICE_URL` to a dead port, except for the write test
+  below. Remove the base worktree afterwards.
+- **Staging only on request, and only after approval.** Don't use the staging DB or the deployed staging app on
+  your own, even just to read: Holistic reads reconcile mappings, and that writes (`reconcileHolisticMappings` in
+  `src/lib/holistic-progress.ts`). If a case exists only on staging, say so in the report and ask. Use staging only
+  when the person running the review asks for it and approves the plan, for example through `deploy-staging-pr.md`.
 - A new screen has no base to compare. Run the branch alone on the same cases, and still check that every screen it
   touches or replaces looks the same as on the base where the feature doesn't apply.
 - Pick **named real cases** with SQL first (prod BigQuery, via `mcp__claude_ai_Avanti_Data__run_query`), and

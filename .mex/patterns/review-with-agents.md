@@ -30,7 +30,7 @@ says reaches the PR until someone has checked it against the code and the data.
 ## 1. Brief the reviewers, and show the brief first
 
 - Reviewers are **read-only**: no edits, commits, pushes or GitHub comments, and no secrets or student data written
-  to disk. Say what data access is allowed (for example SELECT-only BigQuery, no AWS or production commands).
+  to disk. Say what data access is allowed (for example SELECT-only BigQuery; no AWS, production or staging commands).
 - Run them on a **frozen commit**: a worktree pinned to the PR head. Don't fix anything until every reviewer has
   reported. On etl-next #192 two reviewers read uncommitted edits made mid-review.
 - Each brief gives:
