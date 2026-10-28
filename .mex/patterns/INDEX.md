@@ -1,6 +1,6 @@
 ---
 name: pattern-index
-last_updated: 2026-10-27
+last_updated: 2026-10-28
 ---
 
 # Pattern Index
@@ -48,6 +48,8 @@ Lookup table for all pattern files in this directory. Check here before starting
 | [local-enrollment-repair.md](local-enrollment-repair.md) | Rehearsing audit-derived enrollment repairs on a dedicated local snapshot |
 | [mirror-db-service-schema-in-e2e.md](mirror-db-service-schema-in-e2e.md) | Mirroring db-service tables missing from `db-dump.sql` into an e2e fixture migration, proven identical by `pg_dump` diff |
 | [merge-roster-changes.md](merge-roster-changes.md) | Merging overlapping school/centre roster queries and SQL bindings |
+| [pre-pr-review.md](pre-pr-review.md) | Before opening (or marking ready) any af_lms PR, or reviewing an open one: CI checks, base-vs-branch on real cases, recompute numbers, data exposure |
 | [presigned-s3-upload.md](presigned-s3-upload.md) | Letting the browser upload a large file straight to S3 with a presigned PUT, then recording it server-side |
 | [reconcile-local-scaffold.md](reconcile-local-scaffold.md) | Cleaning up local .mex notes left on an older branch after related PRs merge |
 | [refresh-ralph-prd.md](refresh-ralph-prd.md) | Refreshing an existing GitHub issue PRD in a Ralph workspace |
+| [review-with-agents.md](review-with-agents.md) | Running agent reviewers on a PR and handling their findings: briefs, verification, re-review, when to stop, posting, answering review comments |
