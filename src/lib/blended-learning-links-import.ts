@@ -1,10 +1,11 @@
 import type ExcelJS from "exceljs";
 
 import { activeBlendedMappingSql } from "./blended-learning-access";
-import type {
-  LegacyActionItem,
-  LegacyConversationInvalidReason,
-  LegacyConversations,
+import {
+  withDoneCarriedOver,
+  type LegacyActionItem,
+  type LegacyConversationInvalidReason,
+  type LegacyConversations,
 } from "./blended-learning-legacy-conversations";
 import {
   latestProfileDocConversationOn,
@@ -381,7 +382,9 @@ type ColumnSet = { legacy: boolean; conversations: boolean };
 
 // jsonb comes back with its keys reordered, so items compare by value.
 function itemsKey(items: LegacyActionItem[] | null): string {
-  return JSON.stringify(items?.map(({ text, owner }) => [text, owner]) ?? null);
+  return JSON.stringify(
+    items?.map((item) => [item.text, item.owner, item.done_at ?? null, item.done_by_email ?? null]) ?? null
+  );
 }
 
 function sameLinks(stored: StudentLinks, next: StudentLinks, columns: ColumnSet): boolean {
@@ -456,17 +459,20 @@ function resolveLegacy(next: StudentLinks, docs: LegacyProfileDocs): LegacyResol
   return { outcome: legacyOn === null ? "no_dates" : "dated", docId, legacyOn };
 }
 
-// The file's entry for a dated doc, only when it is for that same date.
+// The file's entry for a dated doc, only when it is for that same date. Its
+// items keep the done state of the stored ones they match.
 function resolveConversation(
   conversations: LegacyConversations,
   docId: string,
-  legacyOn: string
+  legacyOn: string,
+  storedItems: LegacyActionItem[] | null
 ): { outcome: LegacyConversationOutcome; summary: string | null; items: LegacyActionItem[] | null } {
   const entry = conversations.entries.get(docId);
   if (conversations.invalid.has(docId)) return { outcome: "summary_invalid", summary: null, items: null };
   if (!entry) return { outcome: "summary_missing", summary: null, items: null };
   if (entry.occurredOn !== legacyOn) return { outcome: "summary_stale", summary: null, items: null };
-  return { outcome: "loaded", summary: entry.summary, items: entry.actionItems };
+  const items = entry.actionItems && withDoneCarriedOver(entry.actionItems, storedItems);
+  return { outcome: "loaded", summary: entry.summary, items };
 }
 
 // The legacy columns for one Student's doc, with each outcome counted.
@@ -508,11 +514,12 @@ class LegacyRun {
     docId: string | undefined,
     legacyOn: string | null
   ): void {
+    const storedItems = next.legacyActionItems;
     next.legacySummary = null;
     next.legacyActionItems = null;
     if (!docId || legacyOn === null) return;
     this.usedDocs.add(docId);
-    const found = resolveConversation(conversations, docId, legacyOn);
+    const found = resolveConversation(conversations, docId, legacyOn, storedItems);
     this.conversationCounts[found.outcome]++;
     next.legacySummary = found.summary;
     next.legacyActionItems = found.items;

@@ -32,7 +32,11 @@ const {
 
 vi.mock("next-auth", () => ({ getServerSession: mockGetServerSession }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
-vi.mock("next/navigation", () => ({ redirect: mockRedirect, notFound: mockNotFound }));
+vi.mock("next/navigation", () => ({
+  redirect: mockRedirect,
+  notFound: mockNotFound,
+  useRouter: () => ({ refresh: vi.fn() }),
+}));
 vi.mock("@/lib/blended-learning-access", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/blended-learning-access")>()),
   getBlendedLearningAccess: mockGetBlendedLearningAccess,
@@ -183,29 +187,40 @@ describe("LogEntryPage", () => {
     expect(panel).not.toHaveTextContent("Older Conversation.");
   });
 
-  it("shows the Profile Doc's last conversation and carries its Action Items before the first Conversation", async () => {
-    signedInAs(MENTOR);
-    const legacy = {
+  describe("the Profile Doc's latest conversation", () => {
+    const LEGACY = {
+      superseded: false,
       occurredOn: "2026-09-17",
       summary: "Synthetic: planned the mocks.",
-      actionItems: [{ text: "Synthetic: revise optics", owner: "student" as const }],
+      actionItems: [{ index: 0, text: "Synthetic: revise optics", owner: "student" as const, doneAt: null, doneByEmail: null }],
       profileDocUrl: "https://docs.example/ira",
     };
-    mockGetMenteeDetail.mockResolvedValue({ ...MENTEE, history: [MENTEE.history[0]], openActionItems: [], legacyConversation: legacy });
 
-    await renderPage();
+    it("takes the Last Conversation panel's place before the first Conversation, with tickable items, and fills nothing in", async () => {
+      signedInAs(MENTOR);
+      mockGetMenteeDetail.mockResolvedValue({ ...MENTEE, history: [MENTEE.history[0]], openActionItems: [], legacyConversation: LEGACY });
 
-    const card = screen.getByRole("region", { name: "Last Conversation from Profile Doc" });
-    expect(card).toHaveTextContent("Synthetic: planned the mocks.");
-    expect(screen.getByRole("heading", { level: 3, name: "Last Conversation · from Profile Doc" })).toBeInTheDocument();
-    expect(screen.queryByRole("region", { name: "Last Conversation" })).not.toBeInTheDocument();
-    expect(formProps()).toMatchObject({ carriedActionItems: legacy.actionItems });
-  });
+      await renderPage();
 
-  it("carries nothing without a Profile Doc snapshot", async () => {
-    signedInAs(MENTOR);
-    await renderPage();
-    expect(formProps()).toMatchObject({ carriedActionItems: [] });
+      const card = screen.getByRole("region", { name: "Last Conversation from Profile Doc" });
+      expect(card).toHaveTextContent("Synthetic: planned the mocks.");
+      expect(screen.getByRole("heading", { level: 3, name: "Last Conversation · from Profile Doc" })).toBeInTheDocument();
+      expect(screen.getByRole("checkbox", { name: "Done: Synthetic: revise optics" })).toBeEnabled();
+      expect(screen.queryByRole("region", { name: "Last Conversation" })).not.toBeInTheDocument();
+      expect(formProps()).not.toHaveProperty("carriedActionItems");
+    });
+
+    it("follows the Last Conversation panel as Open from Profile Doc after it", async () => {
+      signedInAs(MENTOR);
+      mockGetMenteeDetail.mockResolvedValue({ ...MENTEE, legacyConversation: { ...LEGACY, superseded: true } });
+
+      await renderPage();
+
+      const last = screen.getByRole("region", { name: "Last Conversation" });
+      const open = screen.getByRole("region", { name: "Open from Profile Doc" });
+      expect(last.compareDocumentPosition(open) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(open).not.toHaveTextContent("Synthetic: planned the mocks.");
+    });
   });
 
   it("says there is no Conversation yet when the history has only Attempts", async () => {

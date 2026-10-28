@@ -4,6 +4,7 @@ import {
   parseLegacyConversationEntry,
   parseLegacyConversations,
   storedLegacyActionItems,
+  withDoneCarriedOver,
 } from "./blended-learning-legacy-conversations";
 
 // Synthetic summaries only.
@@ -22,9 +23,19 @@ describe("parseLegacyConversationEntry", () => {
       occurredOn: "2026-09-17",
       summary: "Synthetic: planned the mocks.",
       actionItems: [
-        { text: "Synthetic: revise optics", owner: "student" },
-        { text: "Synthetic: call back", owner: "parent" },
+        { text: "Synthetic: revise optics", owner: "student", done_at: null, done_by_email: null },
+        { text: "Synthetic: call back", owner: "parent", done_at: null, done_by_email: null },
       ],
+    });
+  });
+
+  it("accepts an item's done state, trimmed", () => {
+    const entry = parseLegacyConversationEntry({
+      ...VALID,
+      actionItems: [{ text: "x", owner: "mentor", done_at: "2026-10-20T10:00:00+05:30", done_by_email: " m@test.local " }],
+    });
+    expect(entry).toMatchObject({
+      actionItems: [{ text: "x", owner: "mentor", done_at: "2026-10-20T10:00:00+05:30", done_by_email: "m@test.local" }],
     });
   });
 
@@ -45,6 +56,10 @@ describe("parseLegacyConversationEntry", () => {
     ["a blank item", { ...VALID, actionItems: [{ text: " ", owner: "mentor" }] }, "bad_action_item"],
     ["a too-long item", { ...VALID, actionItems: [{ text: "a".repeat(501), owner: "mentor" }] }, "bad_action_item"],
     ["an item that is not an object", { ...VALID, actionItems: ["x"] }, "bad_action_item"],
+    ["a done_at that is not a timestamp", { ...VALID, actionItems: [{ text: "x", owner: "mentor", done_at: "2026-10-20" }] }, "bad_action_item"],
+    ["an impossible done_at", { ...VALID, actionItems: [{ text: "x", owner: "mentor", done_at: "2026-13-40T00:00:00Z" }] }, "bad_action_item"],
+    ["a blank done_by_email", { ...VALID, actionItems: [{ text: "x", owner: "mentor", done_at: "2026-10-20T00:00:00Z", done_by_email: " " }] }, "bad_action_item"],
+    ["a done_by_email without done_at", { ...VALID, actionItems: [{ text: "x", owner: "mentor", done_by_email: "m@test.local" }] }, "bad_action_item"],
   ])("refuses %s", (_label, value, reason) => {
     expect(parseLegacyConversationEntry(value)).toEqual({ invalid: reason });
   });
@@ -73,10 +88,43 @@ describe("parseLegacyConversations", () => {
 });
 
 describe("storedLegacyActionItems", () => {
-  it("keeps only valid stored items", () => {
-    expect(storedLegacyActionItems([{ text: "Synthetic: a", owner: "mentor" }, { text: "", owner: "x" }, 3])).toEqual([
-      { text: "Synthetic: a", owner: "mentor" },
+  it("keeps only valid stored items, each with its index in the stored array", () => {
+    expect(
+      storedLegacyActionItems([
+        { text: "", owner: "x" },
+        { text: "Synthetic: a", owner: "mentor", done_at: "2026-10-20T10:00:00+05:30", done_by_email: "m@test.local" },
+        3,
+      ])
+    ).toEqual([
+      { index: 1, text: "Synthetic: a", owner: "mentor", done_at: "2026-10-20T10:00:00+05:30", done_by_email: "m@test.local" },
     ]);
     expect(storedLegacyActionItems(null)).toEqual([]);
+  });
+});
+
+describe("withDoneCarriedOver", () => {
+  const open = (text: string, owner: "student" | "mentor" = "student") => ({ text, owner, done_at: null, done_by_email: null });
+  const DONE = { done_at: "2026-10-20T10:00:00+05:30", done_by_email: "m@test.local" };
+
+  it("keeps a stored done item's state for the same text and owner, each stored item once", () => {
+    const stored = [
+      { ...open("Synthetic: a"), ...DONE },
+      { ...open("Synthetic: b"), ...DONE },
+      open("Synthetic: c"),
+    ];
+    expect(
+      withDoneCarriedOver([open("Synthetic: a"), open("Synthetic: a"), open("Synthetic: b", "mentor"), open("Synthetic: c")], stored)
+    ).toEqual([
+      { ...open("Synthetic: a"), ...DONE },
+      // Only one stored "a" was done.
+      open("Synthetic: a"),
+      // A different owner is a different item.
+      open("Synthetic: b", "mentor"),
+      open("Synthetic: c"),
+    ]);
+  });
+
+  it("changes nothing without stored items", () => {
+    expect(withDoneCarriedOver([open("Synthetic: a")], null)).toEqual([open("Synthetic: a")]);
   });
 });

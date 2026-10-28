@@ -124,13 +124,8 @@ function sentBody(): Record<string, unknown> {
 }
 
 function renderForm(props: Partial<Parameters<typeof LogEntryForm>[0]> = {}) {
-  return render(formElement(props));
-}
-
-function formElement(props: Partial<Parameters<typeof LogEntryForm>[0]> = {}, key?: string) {
-  return (
+  return render(
     <LogEntryForm
-      key={key}
       studentId={501}
       name="Asha Rao"
       firstName="Asha"
@@ -649,93 +644,5 @@ describe("LogEntryForm: required fields", () => {
     await userEvent.clear(screen.getByLabelText("Date"));
     expect(save).toBeDisabled();
     expect(save).toHaveAccessibleDescription("To save, fill in: Date.");
-  });
-});
-
-describe("LogEntryForm: Action items carried over from the Profile Doc", () => {
-  const CARRIED = [
-    { owner: "parent" as const, text: "Synthetic: pay the hostel fee" },
-    { owner: "student" as const, text: "Synthetic: finish the DPP" },
-  ];
-  const NOTICE = /These action items were auto-filled from the last conversation in the Profile Doc\. Remove any that are done before saving\./;
-  const EXPLANATION = "Auto-filled from the last conversation in the Profile Doc";
-
-  it("pre-fills them, editable, under a notice, each marked with a tap-to-open explanation", async () => {
-    renderForm({ carriedActionItems: CARRIED });
-    expect(screen.getByLabelText("Who does action item 1")).toHaveValue("parent");
-    expect(screen.getByLabelText("Action item 1")).toHaveValue("Synthetic: pay the hostel fee");
-    expect(screen.getByLabelText("Action item 2")).toHaveValue("Synthetic: finish the DPP");
-    // No blank starter rows.
-    expect(screen.queryByLabelText("Action item 3")).not.toBeInTheDocument();
-    expect(screen.getByRole("note")).toHaveTextContent(NOTICE);
-
-    const markers = screen.getAllByRole("button", { name: "From Profile Doc" });
-    expect(markers).toHaveLength(2);
-    // The explanation describes the marker and the row's text field.
-    expect(markers[0]).toHaveAccessibleDescription(EXPLANATION);
-    expect(screen.getByLabelText("Action item 1")).toHaveAccessibleDescription(EXPLANATION);
-    expect(markers[0]).toHaveAttribute("aria-expanded", "false");
-    await userEvent.click(markers[0]);
-    expect(markers[0]).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getAllByRole("tooltip")[0]).toHaveClass("block");
-    expect(screen.getAllByRole("tooltip")[0]).not.toHaveClass("hidden");
-    await userEvent.keyboard("{Escape}");
-    expect(markers[0]).toHaveAttribute("aria-expanded", "false");
-    await userEvent.click(markers[0]);
-    await userEvent.click(screen.getByLabelText("Summary"));
-    expect(markers[0]).toHaveAttribute("aria-expanded", "false");
-
-    await userEvent.click(screen.getByRole("button", { name: "Dismiss this notice" }));
-    expect(screen.queryByRole("note")).not.toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "From Profile Doc" })).toHaveLength(2);
-  });
-
-  it("saves what is left after removing one and editing another, once, even after a failed save", async () => {
-    renderForm({ carriedActionItems: CARRIED });
-    await fillConversation();
-    await userEvent.click(screen.getByRole("button", { name: "Remove action item 1" }));
-    await userEvent.type(screen.getByLabelText("Action item 1"), " today");
-    await userEvent.click(screen.getByRole("button", { name: "Add an action" }));
-    await userEvent.type(screen.getByLabelText("Action item 2"), "Synthetic: call back");
-    // A new row is not marked.
-    expect(screen.getAllByRole("button", { name: "From Profile Doc" })).toHaveLength(1);
-
-    answer({ error: "Add a summary.", fieldErrors: { summary: "Add a summary." } }, 422);
-    await save();
-    expect(await screen.findByText("Add a summary.")).toBeInTheDocument();
-    expect(screen.queryByLabelText("Action item 3")).not.toBeInTheDocument();
-
-    answer({ entry: { id: 9 }, mentee: MENTEE });
-    await save();
-    expect(JSON.parse(String((mockFetch.mock.calls[1] as [string, RequestInit])[1].body)).actionItems).toEqual([
-      { owner: "student", text: "Synthetic: finish the DPP today" },
-      { owner: "student", text: "Synthetic: call back" },
-    ]);
-  });
-
-  it("removing every carried row removes the notice", async () => {
-    renderForm({ carriedActionItems: CARRIED.slice(0, 1) });
-    await userEvent.click(screen.getByRole("button", { name: "Remove action item 1" }));
-    expect(screen.queryByRole("note")).not.toBeInTheDocument();
-  });
-
-  it("puts them after a reviewed draft's rows, without duplicating them on re-render or when the draft arrives", () => {
-    const { rerender } = render(formElement({ carriedActionItems: CARRIED }, "entry"));
-    rerender(formElement({ carriedActionItems: CARRIED }, "entry"));
-    expect(screen.getAllByRole("button", { name: "From Profile Doc" })).toHaveLength(2);
-
-    // The page re-keys the form once the draft is ready, so it opens afresh.
-    rerender(formElement({ carriedActionItems: CARRIED, draft: DRAFT }, `review-${DRAFT.id}`));
-    expect(screen.getByLabelText("Action item 1")).toHaveValue("Revise optics");
-    expect(screen.getByLabelText("Action item 2")).toHaveValue("Synthetic: pay the hostel fee");
-    expect(screen.getByLabelText("Action item 3")).toHaveValue("Synthetic: finish the DPP");
-    expect(screen.queryByLabelText("Action item 4")).not.toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "From Profile Doc" })).toHaveLength(2);
-  });
-
-  it("shows no notice or markers without carried items", () => {
-    renderForm();
-    expect(screen.queryByRole("note")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "From Profile Doc" })).not.toBeInTheDocument();
   });
 });

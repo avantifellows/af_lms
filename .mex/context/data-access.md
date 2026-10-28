@@ -523,7 +523,7 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   `src/lib/blended-learning-profile-doc-dates.ts`: the doc's latest dated conversation only).
   With docs, every matched Student is considered, so a stored Profile Doc link still gives a
   date when the workbook row has none; a Student with no link and no stored row gets no row.
-  `legacy_conversation_summary` and `legacy_action_items` (jsonb `[{text, owner}]`, 1–10;
+  `legacy_conversation_summary` and `legacy_action_items` (jsonb `[{text, owner, done_at?, done_by_email?}]`, 1–10;
   db-service migration `20261027100000`, mirrored in e2e fixture
   `20261027100000_add_blended_learning_legacy_conversation.sql`) are selected and written only
   with `--legacy-conversations` too (validation in
@@ -532,9 +532,14 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   columns the run owns (fixed literals; values bound).
   Runbook: `patterns/load-blended-learning-links.md`.
 - **Profile Doc snapshot on the Mentee pages:** `getMenteeDetail` returns
-  `legacyConversation` (`legacy_last_contact_on`, summary, valid items, Profile Doc URL) only
-  while the Student has no `kind = 'conversation'` row (Attempts don't count). The detail page
-  shows it near the top (Open Action Items' slot, admins too); the log page shows it in the
-  side panel and pre-fills its items after any draft's (`initialEntryValues(draft, today,
-  carried)`, marked `carried`; saved as ordinary Action Items). Nothing is written until the
-  Mentor saves.
+  `legacyConversation` (`legacy_last_contact_on`, summary, items with index / done state,
+  Profile Doc URL): in full while the Student has no `kind = 'conversation'` row (Attempts
+  don't count), then `superseded` (action items only, compact) while any item is still open;
+  null once all are done. The detail page shows it near the top (next to Open Action Items,
+  admins too) and the log page in the side panel. The log form is never pre-filled.
+  Each item has a Done checkbox: `PATCH /api/blended-learning/students/[id]/legacy-action-items`
+  (`src/lib/blended-learning-legacy-action-items.ts`) sets or clears `done_at` /
+  `done_by_email` on that array element in one UPDATE. Only the Student's own Mentor (403
+  otherwise; admins see disabled boxes); the element must still have the text and owner the
+  Mentor saw, else 409 (a re-import changed the list). Re-imports keep the done state of
+  items whose text and owner are unchanged.

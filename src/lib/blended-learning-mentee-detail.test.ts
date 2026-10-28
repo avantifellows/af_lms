@@ -96,38 +96,57 @@ describe("getMenteeDetail", () => {
   });
 
   describe("the Profile Doc's latest conversation", () => {
+    const DONE_AT = "2026-10-21T10:00:00+05:30";
     const LEGACY = {
       legacy_last_contact_on: "2026-09-17",
       legacy_conversation_summary: "  Synthetic: planned the mocks.  ",
       legacy_action_items: [
-        { text: "Synthetic: revise optics", owner: "student" },
         { text: "Synthetic: bad owner", owner: "teacher" },
+        { text: "Synthetic: revise optics", owner: "student", done_at: null, done_by_email: null },
+        { text: "Synthetic: send the plan", owner: "mentor", done_at: DONE_AT, done_by_email: "m@test.local" },
       ],
     };
+    const ITEMS = [
+      { index: 1, text: "Synthetic: revise optics", owner: "student", doneAt: null, doneByEmail: null },
+      { index: 2, text: "Synthetic: send the plan", owner: "mentor", doneAt: DONE_AT, doneByEmail: "m@test.local" },
+    ];
 
-    it("is given until the first Conversation in the app, with valid items only and the Profile Doc link", async () => {
+    it("is given in full before the first Conversation in the app, valid items keeping their stored index", async () => {
       // An Attempt is not a Conversation.
       givenRows({ profile: [{ ...PROFILE, ...LEGACY }], entries: [entry({ id: "11", kind: "attempt", mode: null })] });
 
       expect((await getMenteeDetail(MENTOR, 501))?.legacyConversation).toEqual({
+        superseded: false,
         occurredOn: "2026-09-17",
         summary: "Synthetic: planned the mocks.",
-        actionItems: [{ text: "Synthetic: revise optics", owner: "student" }],
+        actionItems: ITEMS,
         profileDocUrl: "https://docs.example/ira",
       });
     });
 
-    it("is gone once a Conversation is logged, and absent without a summary", async () => {
+    it("after a Conversation, stays only while an action item is open", async () => {
       givenRows({ profile: [{ ...PROFILE, ...LEGACY }], entries: [entry({ id: "12" })] });
+      expect((await getMenteeDetail(MENTOR, 501))?.legacyConversation).toMatchObject({ superseded: true, actionItems: ITEMS });
+
+      const allDone = LEGACY.legacy_action_items.slice(2);
+      givenRows({ profile: [{ ...PROFILE, ...LEGACY, legacy_action_items: allDone }], entries: [entry({ id: "12" })] });
       expect((await getMenteeDetail(MENTOR, 501))?.legacyConversation).toBeNull();
 
-      givenRows({ profile: [{ ...PROFILE, ...LEGACY, legacy_conversation_summary: null }] });
+      // With no action items at all, nothing is left to show.
+      givenRows({ profile: [{ ...PROFILE, ...LEGACY, legacy_action_items: null }], entries: [entry({ id: "12" })] });
       expect((await getMenteeDetail(MENTOR, 501))?.legacyConversation).toBeNull();
     });
 
-    it("gives no items for NULL legacy_action_items", async () => {
+    it("is absent without a summary, and gives the summary alone without action items", async () => {
+      givenRows({ profile: [{ ...PROFILE, ...LEGACY, legacy_conversation_summary: null }] });
+      expect((await getMenteeDetail(MENTOR, 501))?.legacyConversation).toBeNull();
+
       givenRows({ profile: [{ ...PROFILE, ...LEGACY, legacy_action_items: null, profile_doc_url: null }] });
-      expect((await getMenteeDetail(MENTOR, 501))?.legacyConversation).toMatchObject({ actionItems: [], profileDocUrl: null });
+      expect((await getMenteeDetail(MENTOR, 501))?.legacyConversation).toMatchObject({
+        superseded: false,
+        actionItems: [],
+        profileDocUrl: null,
+      });
     });
   });
 

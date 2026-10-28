@@ -525,6 +525,35 @@ describe("runBlendedLinksImport with legacy conversations", () => {
     expect(linksTable.get(502)).toMatchObject({ legacy_conversation_summary: "Synthetic: Ravi.", legacy_action_items: items });
   });
 
+  it("keeps a ticked item done on a re-run, matching by text and owner", async () => {
+    const done = { done_at: "2026-10-21T10:00:00+05:30", done_by_email: "m@test.local" };
+    givenDatabase([ASHA], [
+      {
+        student_id: 501, profile_doc_url: "https://docs.google.com/document/d/asha-doc", screener_url: null,
+        legacy_last_contact_on: "2026-09-17", legacy_conversation_summary: "Synthetic: planned mocks.",
+        legacy_action_items: [
+          { ...items[0], ...done },
+          { ...items[1], done_at: null, done_by_email: null },
+        ],
+      },
+    ]);
+    const run = (file: unknown) =>
+      runBlendedLinksImport({ workbook: workbook(), mode: "apply", legacyProfileDocs: docs({ "asha-doc": SEP_17 }, file) });
+
+    const same = await run({ "asha-doc": FILE["asha-doc"] });
+    expect(same.writes).toEqual({ inserted: 0, updated: 0, unchanged: 1 });
+    expect(writes).toEqual([]);
+
+    // The summariser reworded the second item and added one: the first stays done.
+    const reworded = [items[0], { text: "Synthetic: send the timetable today", owner: "mentor" }];
+    const changed = await run({ "asha-doc": { ...FILE["asha-doc"], actionItems: reworded } });
+    expect(changed.writes).toEqual({ inserted: 0, updated: 1, unchanged: 0 });
+    expect(linksTable.get(501)?.legacy_action_items).toEqual([
+      { ...items[0], ...done },
+      { ...reworded[1], done_at: null, done_by_email: null },
+    ]);
+  });
+
   it("dry run counts what it would load and writes nothing", async () => {
     givenDatabase([ASHA]);
     const report = await runBlendedLinksImport({

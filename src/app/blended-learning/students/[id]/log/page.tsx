@@ -66,15 +66,25 @@ async function currentListGroup(
 }
 
 // The last Conversation in the app; before the first one, the Profile Doc's
-// latest conversation when there is one.
-function LastConversationPanel({
-  conversation,
-  legacy,
-}: {
-  conversation: Extract<HistoryEntry, { kind: "conversation" }> | null;
-  legacy: MenteeDetail["legacyConversation"];
-}) {
-  if (!conversation && legacy) return <LegacyConversationCard legacy={legacy} headingLevel="h3" />;
+// latest conversation when there is one. After it, the Profile Doc's still
+// open action items follow it.
+function LastConversationPanels({ mentee, conversation }: { mentee: MenteeDetail; conversation: Conversation | null }) {
+  const legacy = mentee.legacyConversation;
+  const legacyCard = legacy && (
+    <LegacyConversationCard legacy={legacy} studentId={mentee.studentId} canTick headingLevel="h3" />
+  );
+  if (!conversation && legacyCard) return legacyCard;
+  return (
+    <>
+      <LastConversationPanel conversation={conversation} />
+      {legacyCard}
+    </>
+  );
+}
+
+type Conversation = Extract<HistoryEntry, { kind: "conversation" }>;
+
+function LastConversationPanel({ conversation }: { conversation: Conversation | null }) {
   return (
     <section aria-label="Last Conversation">
       <Card elevation="sm" className="space-y-2 p-4">
@@ -133,9 +143,8 @@ export default async function LogEntryPage({ params }: { params: Promise<{ id: s
         subtitle={subtitle}
         today={today}
         listGroup={listGroup}
-        lastConversationPanel={<LastConversationPanel conversation={lastConversation} legacy={mentee.legacyConversation} />}
+        lastConversationPanel={<LastConversationPanels mentee={mentee} conversation={lastConversation} />}
         openActionItems={mentee.openActionItems}
-        carriedActionItems={mentee.legacyConversation?.actionItems ?? []}
         hasOpenDraft={mentee.openDraft !== null}
         draft={draft}
         pendingDraft={pendingDraft}

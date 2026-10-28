@@ -5,7 +5,7 @@ import {
   canAccessBlendedStudent,
   type BlendedLearningAccess,
 } from "./blended-learning-access";
-import { storedLegacyActionItems, type LegacyActionItem } from "./blended-learning-legacy-conversations";
+import { storedLegacyActionItems } from "./blended-learning-legacy-conversations";
 import type { OpenDraftState } from "./blended-learning-mentees";
 import { getObjectText, headObject, presignDocumentPage } from "./s3";
 
@@ -48,14 +48,26 @@ export type HistoryEntry =
       flags: MentorFlag[];
     };
 
+// One of the Profile Doc conversation's action items. `index` is its place
+// in the stored array, which a tick updates by; a ticked item has doneAt.
+export type LegacyActionItemView = {
+  index: number;
+  text: string;
+  owner: ActionItemOwner;
+  doneAt: string | null;
+  doneByEmail: string | null;
+};
+
 // The latest conversation in the Student's legacy Google Profile Doc, from
-// the links importer's snapshot. Shown only until the first Conversation is
-// logged in the app.
+// the links importer's snapshot. Before the first Conversation in the app it
+// is shown in full; after it, only while one of its action items is open.
 export type LegacyConversation = {
+  // A Conversation has been logged in the app: show the action items only.
+  superseded: boolean;
   // legacy_last_contact_on: the date of that Profile Doc entry.
   occurredOn: string | null;
   summary: string;
-  actionItems: LegacyActionItem[];
+  actionItems: LegacyActionItemView[];
   profileDocUrl: string | null;
 };
 
@@ -75,7 +87,9 @@ export type MenteeDetail = {
   history: HistoryEntry[];
   // Open Action Items from earlier Conversations, newest Conversation first.
   openActionItems: OpenActionItem[];
-  // Only while the Student has no Conversation in the app (Attempts don't count).
+  // The Profile Doc's latest conversation: in full while the Student has no
+  // Conversation in the app (Attempts don't count), then only while one of its
+  // action items is still open.
   legacyConversation: LegacyConversation | null;
   // The Mentor of the Student's active Mapping, for an admin's way back to
   // that Mentor's list.
@@ -147,17 +161,23 @@ function groupBy<T extends { conversation_id: number | string }>(rows: T[]): Map
   return groups;
 }
 
-// The Profile Doc snapshot, unless a Conversation in the app supersedes it
-// or there is none.
+// The Profile Doc snapshot: in full before the first Conversation in the
+// app, then only while an action item is open; null when there is none.
 function legacyConversation(profile: ProfileRow, entries: EntryRow[]): LegacyConversation | null {
   const summary = present(profile.legacy_conversation_summary);
-  if (!summary || entries.some((entry) => entry.kind === "conversation")) return null;
-  return {
-    occurredOn: profile.legacy_last_contact_on,
-    summary,
-    actionItems: storedLegacyActionItems(profile.legacy_action_items),
-    profileDocUrl: present(profile.profile_doc_url),
-  };
+  if (!summary) return null;
+  const actionItems = storedLegacyActionItems(profile.legacy_action_items).map(
+    (item): LegacyActionItemView => ({
+      index: item.index,
+      text: item.text,
+      owner: item.owner,
+      doneAt: item.done_at,
+      doneByEmail: item.done_by_email,
+    })
+  );
+  const superseded = entries.some((entry) => entry.kind === "conversation");
+  if (superseded && actionItems.every((item) => item.doneAt !== null)) return null;
+  return { superseded, occurredOn: profile.legacy_last_contact_on, summary, actionItems, profileDocUrl: present(profile.profile_doc_url) };
 }
 
 // One Mentee's profile, contact, links, open draft and history. Null when
