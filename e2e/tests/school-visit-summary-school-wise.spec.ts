@@ -512,7 +512,11 @@ test.describe("School Visit Summary — Flags on the School-wise tab", () => {
 // School page fixture: e2e/fixtures/migrations/20261027140300_seed_visit_summary_school_page_fixture.sql
 // (its header works out the Teachers line asserted below).
 function teacherLines(page: Page) {
-  return page.getByRole("list", { name: "Teachers" }).getByRole("listitem");
+  return page.getByRole("list", { name: "Teachers", exact: true }).getByRole("listitem").filter({ has: page.getByRole("list") });
+}
+
+function teacherChips(page: Page, tag: string) {
+  return page.getByRole("list", { name: `${tag} teachers`, exact: true }).getByRole("listitem");
 }
 
 test.describe("School Visit Summary — School page", () => {
@@ -531,7 +535,7 @@ test.describe("School Visit Summary — School page", () => {
     await schoolRow(adminPage, MIXED).locator("td:nth-child(2)").click();
     await expect(adminPage).toHaveURL(/\/school-visit-summary\/schools\/VSWMIXED\?/);
     expect(Object.fromEntries(new URL(adminPage.url()).searchParams)).toEqual(filters);
-    await expect(adminPage.getByRole("heading", { level: 1 })).toHaveText(`${MIXED} (VSW_E2E)`);
+    await expect(adminPage.getByRole("heading", { level: 1 })).toHaveText(MIXED);
 
     await adminPage.getByRole("link", { name: /Back to School-wise/ }).click();
     await expect(adminPage).toHaveURL(/\/school-visit-summary\?/);
@@ -542,9 +546,18 @@ test.describe("School Visit Summary — School page", () => {
   test("lists teaching seats at the active physical Centres, CoE and Nodal apart", async ({ adminPage }) => {
     await adminPage.goto("/school-visit-summary/schools/VSWMIXED");
 
-    await expect(teacherLines(adminPage)).toHaveText([
-      "CoE BIOLOGY - Ravi Kumar · CHEMISTRY - Vacant · PHYSICS - Asha Rao",
-      "Nodal APC - Vacant · MATHS - Kiran Patel · SUBJECT TBD - Meena Shah",
+    await expect(teacherLines(adminPage)).toHaveCount(2);
+    await expect(teacherLines(adminPage).nth(0)).toContainText("CoE");
+    await expect(teacherChips(adminPage, "CoE")).toHaveText([
+      "BIOLOGY - Ravi Kumar",
+      "CHEMISTRY - Vacant",
+      "PHYSICS - Asha Rao",
+    ]);
+    await expect(teacherLines(adminPage).nth(1)).toContainText("Nodal");
+    await expect(teacherChips(adminPage, "Nodal")).toHaveText([
+      "APC - Vacant",
+      "MATHS - Kiran Patel",
+      "SUBJECT TBD - Meena Shah",
     ]);
     await expect(adminPage.getByText("Deleted Seat Teacher")).toHaveCount(0);
     await expect(adminPage.getByText("Closed Centre Teacher")).toHaveCount(0);
@@ -572,7 +585,7 @@ test.describe("School Visit Summary — School page", () => {
     await signInAs(page, SEATED_PM);
 
     await page.goto("/school-visit-summary/schools/VSWPHYS");
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText(`${PHYSICAL} (VSW_E2E)`);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(PHYSICAL);
 
     // VSWMIXED is outside their seats; VSWNVS is seated but has no physical Centre.
     for (const code of ["VSWMIXED", "VSWNVS"]) {
@@ -601,8 +614,13 @@ function cards(page: Page, section: string) {
 
 const ALPHA_PAGE = "/school-visit-summary/schools/VSWCONA";
 
-async function expandResolved(page: Page) {
-  await concernSection(page, "Resolved concerns").getByText("Resolved concerns", { exact: true }).click();
+function highlights(page: Page) {
+  return concernSection(page, "Going well").getByRole("listitem");
+}
+
+// One collapsible row per Visit in view.
+function visitNoteRows(page: Page) {
+  return concernSection(page, "Visit-wise notes").locator("details");
 }
 
 test.describe("School Visit Summary — School page concerns", () => {
@@ -619,8 +637,8 @@ test.describe("School Visit Summary — School page concerns", () => {
     await expect(needs.nth(0).getByText("Recurring · 2 visits", { exact: true })).toBeVisible();
     await expect(needs.nth(0).getByText(compactDates("15 Sep · 10 Jun", "15 Sep 2026 · 10 Jun 2026"), { exact: true })).toBeVisible();
     await expect(needs.nth(2).getByText(compactDates("06 Aug ×2", "06 Aug 2026 ×2"), { exact: true })).toBeVisible();
-    // The in-progress Visit's and the soft-deleted Visit's mentions don't count.
-    await expect(needs.nth(3).getByText("1 visit", { exact: true })).toBeVisible();
+    // The in-progress Visit's and the soft-deleted Visit's mentions don't count: one Visit, one date.
+    await expect(needs.nth(3)).not.toContainText("Recurring");
     await expect(needs.nth(3).getByText(compactDates("15 Sep", "15 Sep 2026"), { exact: true })).toBeVisible();
 
     await expect(needs.nth(0).getByText("reopened", { exact: true })).toBeVisible();
@@ -641,48 +659,45 @@ test.describe("School Visit Summary — School page concerns", () => {
     await expect(autoReopened.first()).toBeHidden();
     await needs.nth(0).getByText("History (2)").click();
     await expect(autoReopened).toHaveCount(2);
-    await expect(autoReopened.nth(0)).toContainText("Resolved · e2e-vsw-pm3@test.local · 12 Jun 2026, 11:30");
+    await expect(autoReopened.nth(0)).toContainText("Resolved · e2e-vsw-pm3@test.local · 12 Jun 2026");
+    // The full IST time is on hover.
+    await expect(autoReopened.nth(0).locator("time")).toHaveAttribute("title", "12 Jun 2026, 11:30");
     await expect(autoReopened.nth(0)).toContainText("Practice tests scheduled weekly");
     await expect(autoReopened.nth(1)).toContainText("Reopened automatically: raised again in visit of 15 Sep 2026");
 
     await needs.nth(1).getByText("History (2)").click();
     const reopened = needs.nth(1).getByRole("listitem");
     await expect(reopened.nth(0)).toContainText("Substitute teacher arranged");
-    await expect(reopened.nth(1)).toContainText("Reopened · e2e-vsw-pm3@test.local · 17 Sep 2026, 10:30");
+    await expect(reopened.nth(1)).toContainText("Reopened · e2e-vsw-pm3@test.local · 17 Sep 2026");
     await expect(reopened.nth(1)).toContainText("Substitute left after a month");
   });
 
   test("Going well lists the highlights in view", async ({ adminPage }) => {
     await adminPage.goto(ALPHA_PAGE);
 
-    const going = cards(adminPage, "Going well");
+    const going = highlights(adminPage);
     await expect(going).toHaveCount(1);
     await expect(going.nth(0)).toContainText("Strong peer learning culture");
-    await expect(going.nth(0).getByText("4 visits", { exact: true })).toBeVisible();
     await expect(going.nth(0).getByText(
       compactDates("15 Sep · 06 Aug ×2 · 10 Jun", "15 Sep 2026 · 06 Aug 2026 ×2 · 10 Jun 2026"),
       { exact: true }
     )).toBeVisible();
   });
 
-  test("Resolved concerns is collapsed by default and shows who resolved each one, when, and the history", async ({ adminPage }) => {
+  test("Resolved concerns shows who resolved each one, when, and the history", async ({ adminPage }) => {
     await adminPage.goto(ALPHA_PAGE);
 
     const resolved = cards(adminPage, "Resolved concerns");
-    await expect(concernSection(adminPage, "Resolved concerns").getByText("Water cooler broken")).toBeHidden();
-
-    await expandResolved(adminPage);
     await expect(resolved).toHaveCount(1);
+    await expect(resolved.first()).toBeVisible();
     await expect(resolved.first()).toContainText("Water cooler broken");
-    await expect(resolved.first()).toContainText("Resolved by e2e-vsw-pm3@test.local on 16 Sep 2026, 10:30");
-    await expect(resolved.first().getByText("3 visits", { exact: true })).toBeVisible();
-    await expect(resolved.first().getByText(compactDates("15 Sep · 06 Aug · 10 Jun", "15 Sep 2026 · 06 Aug 2026 · 10 Jun 2026"), { exact: true })).toBeVisible();
+    await expect(resolved.first()).toContainText("Resolved by e2e-vsw-pm3@test.local · 16 Sep 2026");
 
     const history = resolved.first().getByRole("listitem");
     await expect(history).toHaveCount(2);
     await expect(history.nth(0)).toContainText("School replaced the cooler");
     // The author has a case-variant duplicate permission row: one entry, the first row's name.
-    await expect(history.nth(1)).toContainText("Comment · VSW Resolver · 20 Sep 2026, 10:30");
+    await expect(history.nth(1)).toContainText("Comment · VSW Resolver · 20 Sep 2026");
     await expect(history.nth(1)).toContainText("Cooler checked again and working");
     await expect(adminPage.getByText("VSW Resolver Duplicate")).toHaveCount(0);
   });
@@ -691,8 +706,15 @@ test.describe("School Visit Summary — School page concerns", () => {
     await adminPage.goto(ALPHA_PAGE);
 
     const notes = concernSection(adminPage, "Visit-wise notes");
-    const visitLinks = notes.getByRole("link");
+    const rows = visitNoteRows(adminPage);
+    await expect(rows).toHaveCount(6);
+    // Collapsed: each row reads date, PM, concern and highlight counts (and In progress).
+    await expect(rows.nth(0).locator("summary")).toHaveText(
+      "▸01 Oct 2026e2e-vsw-pm4@test.local· 0 concerns · 0 highlightsIn progress"
+    );
+    const visitLinks = notes.getByRole("link", { includeHidden: true });
     await expect(visitLinks).toHaveCount(6);
+    await expect(visitLinks.first()).toBeHidden();
     const hrefs = await visitLinks.evaluateAll((links) => links.map((link) => link.getAttribute("href")));
     const back = `?${new URLSearchParams({ back: ALPHA_PAGE })}`;
     expect(hrefs).toEqual([
@@ -703,19 +725,19 @@ test.describe("School Visit Summary — School page concerns", () => {
       `/school-visit-summary/9004721${back}`,
       `/school-visit-summary/9004720${back}`,
     ]);
-    await expect(visitLinks.nth(0)).toHaveText("01 Oct 2026 · e2e-vsw-pm4@test.local");
 
-    const visits = notes.getByRole("article");
-    await expect(visits.nth(0)).toContainText("In progress");
-    await expect(visits.nth(0)).toContainText("No concerns or highlights");
-    await expect(visits.nth(0)).not.toContainText("Timetable clashes");
-    await expect(visits.nth(2)).toContainText("Timetable clashes with board exam preparation");
-    await expect(visits.nth(2)).toContainText("Water cooler broken");
-    await expect(visits.nth(2)).toContainText("Strong peer learning culture");
-    await expect(visits.nth(3)).not.toContainText("Water cooler broken");
+    // Expanding a row shows its notes and the link to the Visit; it collapses again.
+    await rows.nth(0).locator("summary").click();
+    await expect(rows.nth(0).getByText("No concerns or highlights")).toBeVisible();
+    await expect(rows.nth(0).getByRole("link", { name: "Open visit details" })).toBeVisible();
+    await expect(rows.nth(0)).not.toContainText("Timetable clashes");
+    await rows.nth(2).locator("summary").click();
+    await expect(rows.nth(2).getByText("Timetable clashes with board exam preparation")).toBeVisible();
+    await expect(rows.nth(2).getByText("Water cooler broken")).toBeVisible();
+    await expect(rows.nth(2).getByText("Strong peer learning culture")).toBeVisible();
+    await expect(rows.nth(3)).not.toContainText("Water cooler broken");
 
-    // Collapsible.
-    await notes.getByText("Visit-wise notes").click();
+    await rows.nth(0).locator("summary").click();
     await expect(visitLinks.first()).toBeHidden();
   });
 
@@ -723,7 +745,8 @@ test.describe("School Visit Summary — School page concerns", () => {
     const schoolPage = `${ALPHA_PAGE}?from=2026-08-01&to=2026-10-31`;
     await adminPage.goto(schoolPage);
 
-    await concernSection(adminPage, "Visit-wise notes").getByRole("link").first().click();
+    await visitNoteRows(adminPage).first().locator("summary").click();
+    await visitNoteRows(adminPage).first().getByRole("link", { name: "Open visit details" }).click();
     await expect(adminPage).toHaveURL(/\/school-visit-summary\/9004732\?back=/);
 
     await adminPage.getByRole("link", { name: /Back to Visit Summary/ }).click();
@@ -736,18 +759,23 @@ test.describe("School Visit Summary — School page concerns", () => {
     await expect(cards(adminPage, "Needs attention")).toHaveCount(1);
     await expect(cards(adminPage, "Needs attention").first()).toContainText("Lab equipment missing");
     await expect(cards(adminPage, "Needs attention").first().getByText("Recurring · 2 visits", { exact: true })).toBeVisible();
-    await expect(cards(adminPage, "Going well").first().getByText("2 visits", { exact: true })).toBeVisible();
-    await expandResolved(adminPage);
-    await expect(cards(adminPage, "Resolved concerns").first().getByText("1 visit", { exact: true })).toBeVisible();
-    await expect(concernSection(adminPage, "Visit-wise notes").getByRole("link")).toHaveCount(2);
+    await expect(highlights(adminPage).first().getByText(compactDates("06 Aug ×2", "06 Aug 2026 ×2"), { exact: true })).toBeVisible();
+    await expect(cards(adminPage, "Resolved concerns")).toHaveCount(1);
+    await expect(visitNoteRows(adminPage)).toHaveCount(2);
+    // The header counts follow the same filters.
+    await expect(adminPage.getByRole("list", { name: "Concern counts" }).getByRole("listitem")).toHaveText([
+      "1 open concern",
+      "1 recurring",
+      "1 highlight",
+      "1 resolved",
+    ]);
 
     // Only the in-progress Visit is in view: nothing counts, and each section says so.
     await adminPage.goto(`${ALPHA_PAGE}?pms=${CONCERN_PM_2}`);
     await expect(concernSection(adminPage, "Needs attention")).toContainText("No open concerns in view");
     await expect(concernSection(adminPage, "Going well")).toContainText("No highlights in view");
-    await expandResolved(adminPage);
     await expect(concernSection(adminPage, "Resolved concerns")).toContainText("No resolved concerns in view");
-    await expect(concernSection(adminPage, "Visit-wise notes").getByRole("link")).toHaveCount(1);
+    await expect(visitNoteRows(adminPage)).toHaveCount(1);
   });
 });
 
@@ -768,12 +796,11 @@ test.describe.serial("School Visit Summary — School page concern actions", () 
 
     await card.getByRole("button", { name: "Resolve" }).click();
     await card.getByRole("textbox", { name: "How was this resolved?" }).fill("  Plumber fixed the tank  ");
-    await card.getByRole("button", { name: "Save resolution" }).click();
+    await card.getByRole("button", { name: "Mark resolved" }).click();
 
     await expect(concernCard(adminPage, "Needs attention", "Drinking water tank leaking")).toHaveCount(0);
-    await expandResolved(adminPage);
     const resolved = concernCard(adminPage, "Resolved concerns", "Drinking water tank leaking");
-    await expect(resolved).toContainText("Resolved by e2e-admin@test.local on");
+    await expect(resolved).toContainText("Resolved by e2e-admin@test.local ·");
     const history = resolved.getByRole("listitem");
     await expect(history).toHaveCount(1);
     await expect(history.first()).toContainText("Resolved · e2e-admin@test.local");
@@ -782,7 +809,6 @@ test.describe.serial("School Visit Summary — School page concern actions", () 
 
   test("Comment adds to a resolved concern's history without changing its status", async ({ adminPage }) => {
     await adminPage.goto(ECHO_PAGE);
-    await expandResolved(adminPage);
     const card = concernCard(adminPage, "Resolved concerns", "Hostel lights not working");
 
     await card.getByRole("button", { name: "Comment" }).click();
@@ -798,12 +824,11 @@ test.describe.serial("School Visit Summary — School page concern actions", () 
 
   test("Reopen moves a resolved concern back to Needs attention, marked reopened, with the reason", async ({ adminPage }) => {
     await adminPage.goto(ECHO_PAGE);
-    await expandResolved(adminPage);
     const resolvedCard = concernCard(adminPage, "Resolved concerns", "Hostel lights not working");
 
     await resolvedCard.getByRole("button", { name: "Reopen" }).click();
-    await resolvedCard.getByRole("textbox", { name: "Why reopen this concern?" }).fill("Lights failed again");
-    await resolvedCard.getByRole("button", { name: "Reopen concern" }).click();
+    await resolvedCard.getByRole("textbox", { name: "Why is this being reopened?" }).fill("Lights failed again");
+    await resolvedCard.getByRole("button", { name: "Reopen", exact: true }).click();
 
     const card = concernCard(adminPage, "Needs attention", "Hostel lights not working");
     await expect(card).toHaveCount(1);
@@ -824,7 +849,7 @@ test.describe.serial("School Visit Summary — School page concern actions", () 
     // Too long: refused before saving.
     const tooLong = "x".repeat(2001);
     await note.fill(tooLong);
-    await card.getByRole("button", { name: "Save resolution" }).click();
+    await card.getByRole("button", { name: "Mark resolved" }).click();
     await expect(card.getByRole("alert")).toHaveText("Note must be at most 2000 characters");
     await expect(note).toHaveValue(tooLong);
 
@@ -833,10 +858,10 @@ test.describe.serial("School Visit Summary — School page concern actions", () 
       pool.query("UPDATE lms_visit_concerns SET status = 'resolved' WHERE id = 9004815")
     );
     await note.fill("Timetable shared on the notice board");
-    await card.getByRole("button", { name: "Save resolution" }).click();
+    await card.getByRole("button", { name: "Mark resolved" }).click();
     await expect(card.getByRole("alert")).toHaveText("This concern is already resolved");
     await expect(note).toHaveValue("Timetable shared on the notice board");
-    await expect(card.getByRole("button", { name: "Save resolution" })).toBeEnabled();
+    await expect(card.getByRole("button", { name: "Mark resolved" })).toBeEnabled();
   });
 
   test("a read_only user sees concerns and history but no controls, and a direct POST is refused", async ({ page }) => {
@@ -844,7 +869,6 @@ test.describe.serial("School Visit Summary — School page concern actions", () 
     await page.goto(ECHO_PAGE);
 
     await expect(concernCard(page, "Needs attention", "Hostel lights not working")).toHaveCount(1);
-    await expandResolved(page);
     await expect(concernCard(page, "Resolved concerns", "Drinking water tank leaking")).toContainText("Plumber fixed the tank");
     for (const name of ["Resolve", "Comment", "Reopen"]) {
       await expect(page.getByRole("button", { name, exact: true })).toHaveCount(0);
@@ -865,11 +889,11 @@ function flagSection(page: Page) {
 }
 
 function flagRows(page: Page) {
-  return flagSection(page).getByRole("link");
+  return flagSection(page).getByRole("listitem");
 }
 
 test.describe("School Visit Summary — School page intervention flags", () => {
-  test("lists the open flags directly below Needs attention, with the open and resolved counts", async ({ adminPage }) => {
+  test("lists the open flags below Needs attention and Going well, with the open and resolved counts", async ({ adminPage }) => {
     await adminPage.goto("/school-visit-summary/schools/VSWPHYS");
 
     const sections = await adminPage.getByRole("region").evaluateAll((regions) =>
@@ -877,19 +901,21 @@ test.describe("School Visit Summary — School page intervention flags", () => {
     );
     expect(sections.slice(sections.indexOf("Needs attention"), sections.indexOf("Needs attention") + 3)).toEqual([
       "Needs attention",
-      "Intervention flags",
       "Going well",
+      "Intervention flags",
     ]);
 
     await expect(flagSection(adminPage).getByText("2 open · 1 resolved", { exact: true })).toBeVisible();
     await expect(flagRows(adminPage)).toHaveCount(2);
+    // Initials only, with the full name on hover.
     await expect(flagRows(adminPage).nth(0)).toHaveText(
-      "OpenVSW Flag Student TwoGrade 12CoERaised by VSW Seated PM on 05 Oct 2026"
+      "OpenV. F. S. T.G12 CoERaised by VSW Seated PM · 05 Oct 2026Notes in LMS ↗"
     );
+    await expect(flagRows(adminPage).nth(0).getByText("V. F. S. T.")).toHaveAttribute("title", "VSW Flag Student Two");
     await expect(flagRows(adminPage).nth(1)).toHaveText(
-      "OpenVSW Flag Student OneGrade 11CoERaised by e2e-vsw-pm@test.local on 05 Oct 2026"
+      "OpenV. F. S. O.G11 CoERaised by e2e-vsw-pm@test.local · 05 Oct 2026Notes in LMS ↗"
     );
-    await expect(flagSection(adminPage).getByText("VSW Flag Student Three")).toHaveCount(0);
+    await expect(flagSection(adminPage).locator('[title="VSW Flag Student Three"]')).toHaveCount(0);
   });
 
   test("never shows a JNV NVS flag at a mixed JNV, and counts a flag's updates when there are more than one", async ({ adminPage }) => {
@@ -897,16 +923,22 @@ test.describe("School Visit Summary — School page intervention flags", () => {
 
     await expect(flagSection(adminPage).getByText("1 open", { exact: true })).toBeVisible();
     await expect(flagRows(adminPage)).toHaveText([
-      "OpenVSW Flag Student ThreeGrade 11NodalRaised by e2e-vsw-pm@test.local on 06 Oct 2026" + "2 updates",
+      "OpenV. F. S. T.G11 NodalRaised by e2e-vsw-pm@test.local · 06 Oct 2026" + "2 updates" + "Notes in LMS ↗",
     ]);
-    await expect(flagRows(adminPage).nth(0)).toHaveAttribute("href", "/school/VSWMIXED?tab=enrollment&flag=9004755");
-    await expect(adminPage.getByText("VSW Flag Student Four")).toHaveCount(0);
+    await expect(flagRows(adminPage).nth(0).getByRole("link", { name: /Notes in LMS/ })).toHaveAttribute(
+      "href",
+      "/school/VSWMIXED?tab=enrollment&flag=9004755"
+    );
+    await expect(adminPage.locator('[title="VSW Flag Student Four"]')).toHaveCount(0);
   });
 
-  test("a flag row opens the Student's flag on the School's Enrollment tab", async ({ adminPage }) => {
+  test("a flag row's Notes in LMS opens the Student's flag on the School's Enrollment tab", async ({ adminPage }) => {
     await adminPage.goto("/school-visit-summary/schools/14061");
 
-    await flagRows(adminPage).filter({ hasText: "Aaditya Raj Dhawan" }).click();
+    await flagRows(adminPage)
+      .filter({ has: adminPage.locator('[title="Aaditya Raj Dhawan"]') })
+      .getByRole("link", { name: "Notes in LMS for A. R. D." })
+      .click();
 
     await expect(adminPage).toHaveURL(/\/school\/14061\?tab=enrollment&flag=9004751$/);
     const dialog = adminPage.getByRole("dialog");

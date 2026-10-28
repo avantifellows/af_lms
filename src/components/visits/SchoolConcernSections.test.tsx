@@ -132,18 +132,20 @@ function renderSections(props: Partial<Parameters<typeof SchoolConcernSections>[
     section,
     card: (sectionName: string, text: string) =>
       within(section(sectionName)).getByText(text).closest("article") as HTMLElement,
-    isCollapsed: (sectionName: string) => !section(sectionName).querySelector("details")!.open,
+    highlight: (text: string) => within(section("Going well")).getByText(text).closest("li") as HTMLElement,
+    visitRow: (date: string) =>
+      within(section("Visit-wise notes")).getByText(date).closest("details") as HTMLDetailsElement,
   };
 }
 
 describe("SchoolConcernSections", () => {
-  it("orders the sections Needs attention, the flags, Going well, Resolved concerns, Visit-wise notes", () => {
+  it("orders the sections Needs attention, Going well, the flags, Resolved concerns, Visit-wise notes", () => {
     const view = renderSections();
 
     expect(view.sectionNames()).toEqual([
       "needs-attention-heading",
-      "flags-heading",
       "going-well-heading",
+      "flags-heading",
       "resolved-heading",
       "visit-notes-heading",
     ]);
@@ -153,14 +155,14 @@ describe("SchoolConcernSections", () => {
     const view = renderSections();
 
     const recurring = view.card("Needs attention", "Lab equipment missing");
-    expect(recurring).toHaveTextContent("Recurring · 3 visits");
+    expect(within(recurring).getByText("Recurring · 3 visits")).toBeInTheDocument();
     expect(recurring).toHaveTextContent("15 Oct · 06 Aug ×2");
 
+    // A one-off concern shows only its date, which carries its year when it's another year's.
     const oneOff = view.card("Needs attention", "Timetable not displayed");
-    expect(oneOff).toHaveTextContent("1 visit");
     expect(oneOff).not.toHaveTextContent("Recurring");
-    // Another year's date carries its year.
-    expect(oneOff).toHaveTextContent("01 Dec 2025");
+    expect(oneOff).not.toHaveTextContent("visit");
+    expect(within(oneOff).getByText("01 Dec 2025")).toBeInTheDocument();
   });
 
   it("marks a reopened concern and lists its history, including an automatic reopen", () => {
@@ -169,34 +171,35 @@ describe("SchoolConcernSections", () => {
     const recurring = view.card("Needs attention", "Lab equipment missing");
     expect(within(recurring).getByText("reopened")).toBeInTheDocument();
     expect(recurring).toHaveTextContent("History (2)");
-    expect(recurring).toHaveTextContent("Resolved · Ravi PM · 10 Aug 2026");
-    expect(recurring).toHaveTextContent("Kits ordered");
-    expect(recurring).toHaveTextContent("Reopened automatically: raised again in visit of 15 Oct 2026");
+    const history = within(recurring).getAllByRole("listitem", { hidden: true });
+    expect(history[0]).toHaveTextContent("Resolved · Ravi PM · 10 Aug 2026");
+    expect(history[0]).toHaveTextContent("Kits ordered");
+    // The date shows; the full IST time is on hover.
+    expect(within(history[0]).getByText("10 Aug 2026")).toHaveAttribute("title", "10 Aug 2026, 10:00");
+    expect(history[1]).toHaveTextContent("Reopened automatically: raised again in visit of 15 Oct 2026 · 16 Oct 2026");
 
     const oneOff = view.card("Needs attention", "Timetable not displayed");
     expect(within(oneOff).queryByText("reopened")).not.toBeInTheDocument();
     expect(oneOff).not.toHaveTextContent("History");
   });
 
-  it("counts each section and shows a highlight without Recurring or controls", () => {
+  it("counts open concerns and lists highlights as text and dates, without Recurring or controls", () => {
     const view = renderSections();
 
-    expect(view.section("Needs attention")).toHaveTextContent("Needs attention2");
-    expect(view.section("Going well")).toHaveTextContent("Going well1");
-    const highlight = view.card("Going well", "Students asking doubts");
-    expect(highlight).toHaveTextContent("2 visits");
-    expect(highlight).not.toHaveTextContent("Recurring");
-    expect(within(highlight).queryByRole("button")).not.toBeInTheDocument();
+    expect(view.section("Needs attention")).toHaveTextContent(/^Needs attention2 open/);
+    const highlight = view.highlight("Students asking doubts");
+    expect(highlight).toHaveTextContent(/^Students asking doubts15 Oct · 06 Aug$/);
+    expect(within(view.section("Going well")).queryByRole("button")).not.toBeInTheDocument();
   });
 
-  it("keeps Resolved concerns collapsed, naming who resolved each (email when no name)", () => {
+  it("shows Resolved concerns open, naming who resolved each and when (email when no name)", () => {
     const view = renderSections();
 
-    expect(view.isCollapsed("Resolved concerns")).toBe(true);
-    expect(view.isCollapsed("Visit-wise notes")).toBe(false);
+    expect(view.section("Resolved concerns")).toHaveTextContent(/^Resolved concerns1/);
     const resolved = view.card("Resolved concerns", "Water cooler broken");
-    expect(resolved).toHaveTextContent("Resolved by admin@avantifellows.org on 01 Oct 2026");
-    expect(resolved).toHaveTextContent("Plumber fixed it");
+    expect(resolved).toBeVisible();
+    expect(resolved).toHaveTextContent("Resolved by admin@avantifellows.org · 01 Oct 2026");
+    expect(within(resolved).getByRole("listitem")).toHaveTextContent("Resolved · admin@avantifellows.org · 01 Oct 2026Plumber fixed it");
   });
 
   it("offers Resolve on open concerns and Comment / Reopen on resolved ones when the viewer can act", () => {
@@ -205,10 +208,7 @@ describe("SchoolConcernSections", () => {
     const open = view.card("Needs attention", "Lab equipment missing");
     expect(within(open).getAllByRole("button").map((b) => b.textContent)).toEqual(["Resolve"]);
     const resolved = view.card("Resolved concerns", "Water cooler broken");
-    expect(within(resolved).getAllByRole("button", { hidden: true }).map((b) => b.textContent)).toEqual([
-      "Comment",
-      "Reopen",
-    ]);
+    expect(within(resolved).getAllByRole("button").map((b) => b.textContent)).toEqual(["Comment", "Reopen"]);
   });
 
   it("hides every control when the viewer can't act, still showing concerns and history", () => {
@@ -219,14 +219,25 @@ describe("SchoolConcernSections", () => {
     expect(view.card("Resolved concerns", "Water cooler broken")).toHaveTextContent("Plumber fixed it");
   });
 
+  it("lists each Visit as a collapsed row: date, PM, concern and highlight counts, and In progress", () => {
+    const view = renderSections();
+
+    const completed = view.visitRow("15 Oct 2026");
+    expect(completed.open).toBe(false);
+    expect(completed.querySelector("summary")).toHaveTextContent("▸15 Oct 2026Ravi PM· 2 concerns · 1 highlight");
+    expect(completed.querySelector("summary")).not.toHaveTextContent("In progress");
+
+    const inProgress = view.visitRow("20 Oct 2026");
+    expect(inProgress.querySelector("summary")).toHaveTextContent(
+      "▸20 Oct 2026new.pm@avantifellows.org· 0 concerns · 0 highlightsIn progress"
+    );
+  });
+
   it("links each Visit-wise note to its Visit with Back to this School page", () => {
     const view = renderSections({ visitBackHref: "/school-visit-summary/schools/SC001?preset=30d&sort=visits" });
 
-    const links = within(view.section("Visit-wise notes")).getAllByRole("link");
-    expect(links.map((link) => link.textContent)).toEqual([
-      "15 Oct 2026 · Ravi PM",
-      "20 Oct 2026 · new.pm@avantifellows.org",
-    ]);
+    const links = within(view.section("Visit-wise notes")).getAllByRole("link", { hidden: true });
+    expect(links.map((link) => link.textContent)).toEqual(["Open visit details →", "Open visit details →"]);
     const href = new URL(links[0].getAttribute("href")!, "http://localhost");
     expect(href.pathname).toBe("/school-visit-summary/12");
     expect(href.searchParams.get("back")).toBe("/school-visit-summary/schools/SC001?preset=30d&sort=visits");
@@ -235,21 +246,18 @@ describe("SchoolConcernSections", () => {
   it("links a Visit-wise note without ?back= when no Back target is given", () => {
     const view = renderSections({ visitBackHref: undefined });
 
-    const links = within(view.section("Visit-wise notes")).getAllByRole("link");
+    const links = within(view.section("Visit-wise notes")).getAllByRole("link", { hidden: true });
     expect(links[0]).toHaveAttribute("href", "/school-visit-summary/12");
   });
 
-  it("lists a Visit's concerns (marking resolved ones) and highlights, and badges an in-progress Visit", () => {
+  it("lists a Visit's concerns (marking resolved ones) and highlights inside its row", () => {
     const view = renderSections();
 
-    const completed = view.card("Visit-wise notes", "15 Oct 2026 · Ravi PM");
+    const completed = view.visitRow("15 Oct 2026");
     expect(completed).toHaveTextContent("ConcernsLab equipment missingWater cooler broken (resolved)");
     expect(completed).toHaveTextContent("Going wellStudents asking doubts");
-    expect(completed).not.toHaveTextContent("In progress");
 
-    const inProgress = view.card("Visit-wise notes", "20 Oct 2026 · new.pm@avantifellows.org");
-    expect(inProgress).toHaveTextContent("In progress");
-    expect(inProgress).toHaveTextContent("No concerns or highlights");
+    expect(view.visitRow("20 Oct 2026")).toHaveTextContent("No concerns or highlights");
   });
 
   it("shows each section's empty state", () => {

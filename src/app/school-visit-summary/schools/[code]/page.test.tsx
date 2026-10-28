@@ -88,6 +88,11 @@ function setupAuth(permission: Record<string, unknown> = adminPermission) {
   mockGetFeatureAccess.mockReturnValue({ access: "edit", canView: true, canEdit: true });
 }
 
+// The count in an academic-level card's Now cell.
+function cellCount(card: ReturnType<typeof within>, label: string): string | null | undefined {
+  return card.getByText(label, { selector: "dt" }).nextElementSibling?.textContent;
+}
+
 function renderPage(code = "SC001", searchParams: Record<string, string> = {}) {
   return SchoolVisitSummarySchoolPage({
     params: Promise.resolve({ code }),
@@ -152,7 +157,7 @@ describe("SchoolVisitSummarySchoolPage", () => {
         dir: "asc",
       }));
 
-      expect(screen.getByRole("heading", { level: 1, name: "Test School (Bhopal)" })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { level: 1, name: "Test School" })).toBeInTheDocument();
       const back = new URL(
         screen.getByRole("link", { name: /Back to School-wise/ }).getAttribute("href")!,
         "http://localhost"
@@ -198,20 +203,21 @@ describe("SchoolVisitSummarySchoolPage", () => {
 
       render(await renderPage());
 
-      const cards = within(screen.getByRole("list", { name: "Academic levels" })).getAllByRole("listitem");
+      const cards = within(screen.getByRole("list", { name: "Academic level" })).getAllByRole("listitem");
       expect(cards).toHaveLength(2);
 
-      const jee = within(screen.getByRole("link", { name: /CoE · Grade 11 · JEE/ }));
+      const jee = within(screen.getByRole("link", { name: /^CoE ?G11 JEE/ }));
       expect(jee.getByText("24 students")).toBeInTheDocument();
-      expect(jee.getByText("M1 12")).toBeInTheDocument();
-      expect(jee.getByText("M2 5")).toBeInTheDocument();
-      expect(jee.getByText("M3 3")).toBeInTheDocument();
-      expect(jee.getByText("NA 4")).toHaveAttribute("title", "No AL-bearing test yet");
+      expect(cellCount(jee, "M1")).toBe("12");
+      expect(cellCount(jee, "M2")).toBe("5");
+      expect(cellCount(jee, "M3")).toBe("3");
+      expect(cellCount(jee, "NA")).toBe("4");
+      expect(jee.getByText("NA").parentElement).toHaveAttribute("title", "No AL-bearing test yet");
 
-      const neet = within(screen.getByRole("link", { name: /CoE · Grade 11 · NEET/ }));
+      const neet = within(screen.getByRole("link", { name: /^CoE ?G11 NEET/ }));
       expect(neet.getByText("8 students")).toBeInTheDocument();
-      expect(neet.getByText("B1 6")).toBeInTheDocument();
-      expect(neet.getByText("NA 2")).toBeInTheDocument();
+      expect(cellCount(neet, "B1")).toBe("6");
+      expect(cellCount(neet, "NA")).toBe("2");
       expect(mockGetStudentAcademicLevelCounts).toHaveBeenCalledWith("23010100101", "JNV CoE", [11, 12]);
     });
 
@@ -224,7 +230,7 @@ describe("SchoolVisitSummarySchoolPage", () => {
 
       render(await renderPage());
 
-      const card = screen.getByRole("link", { name: /CoE · Grade 12 · NEET/ });
+      const card = screen.getByRole("link", { name: /^CoE ?G12 NEET/ });
       expect(card).toHaveAttribute("href", "/centre/101?tab=performance&grade=12&view=cumulative");
       expect(card).not.toHaveAttribute("target");
     });
@@ -239,9 +245,9 @@ describe("SchoolVisitSummarySchoolPage", () => {
 
       render(await renderPage());
 
-      const jee = within(screen.getByRole("link", { name: /CoE · Grade 11 · JEE/ }));
+      const jee = within(screen.getByRole("link", { name: /^CoE ?G11 JEE/ }));
       expect(jee.getByText("3 students")).toBeInTheDocument();
-      expect(jee.getByText("M3 3")).toBeInTheDocument();
+      expect(cellCount(jee, "M3")).toBe("3");
     });
 
     it("never queries an NVS Centre, and keeps CoE and Nodal cards apart", async () => {
@@ -260,14 +266,14 @@ describe("SchoolVisitSummarySchoolPage", () => {
       render(await renderPage());
 
       expect(mockGetStudentAcademicLevelCounts.mock.calls.map((call) => call[1])).toEqual(["JNV CoE", "JNV Nodal"]);
-      const cards = within(screen.getByRole("list", { name: "Academic levels" })).getAllByRole("link");
+      const cards = within(screen.getByRole("list", { name: "Academic level" })).getAllByRole("link");
       expect(cards.map((card) => card.getAttribute("href"))).toEqual([
         "/centre/101?tab=performance&grade=11&view=cumulative",
         "/centre/102?tab=performance&grade=11&view=cumulative",
       ]);
-      expect(within(cards[0]).getByText("M1 10")).toBeInTheDocument();
-      expect(within(cards[1]).getByText("Nodal · Grade 11 · JEE")).toBeInTheDocument();
-      expect(within(cards[1]).getByText("M2 4")).toBeInTheDocument();
+      expect(cellCount(within(cards[0]), "M1")).toBe("10");
+      expect(cards[1]).toHaveTextContent(/^NodalG11 JEE/);
+      expect(cellCount(within(cards[1]), "M2")).toBe("4");
     });
 
     it("omits the cards, without querying BigQuery, for a viewer who can't see the School's Performance", async () => {
@@ -281,8 +287,8 @@ describe("SchoolVisitSummarySchoolPage", () => {
 
       render(await renderPage());
 
-      expect(screen.getByRole("heading", { level: 1, name: "Test School (Bhopal)" })).toBeInTheDocument();
-      expect(screen.queryByRole("heading", { name: "Academic levels" })).not.toBeInTheDocument();
+      expect(screen.getByRole("heading", { level: 1, name: "Test School" })).toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: "Academic level" })).not.toBeInTheDocument();
       expect(mockGetStudentAcademicLevelCounts).not.toHaveBeenCalled();
     });
 
@@ -301,8 +307,8 @@ describe("SchoolVisitSummarySchoolPage", () => {
 
       render(await renderPage());
 
-      expect(screen.getByRole("heading", { level: 1, name: "Test School (Bhopal)" })).toBeInTheDocument();
-      expect(screen.queryByRole("heading", { name: "Academic levels" })).not.toBeInTheDocument();
+      expect(screen.getByRole("heading", { level: 1, name: "Test School" })).toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: "Academic level" })).not.toBeInTheDocument();
       expect(mockGetStudentAcademicLevelCounts).not.toHaveBeenCalled();
     });
 
@@ -315,7 +321,7 @@ describe("SchoolVisitSummarySchoolPage", () => {
       render(await renderPage());
 
       expect(screen.getByText("Academic levels unavailable")).toBeInTheDocument();
-      expect(screen.queryByRole("list", { name: "Academic levels" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("list", { name: "Academic level" })).not.toBeInTheDocument();
       expect(screen.getByRole("heading", { name: "Teachers" })).toBeInTheDocument();
       expect(screen.getByRole("link", { name: /Back to School-wise/ })).toBeInTheDocument();
     });
@@ -357,7 +363,7 @@ describe("SchoolVisitSummarySchoolPage", () => {
       render(await renderPage());
 
       const section = screen.getByRole("region", { name: /Intervention flags/ });
-      expect(within(section).getByRole("link", { name: /Asha Verma/ })).toHaveAttribute(
+      expect(within(section).getByRole("link", { name: "Notes in LMS for A. V." })).toHaveAttribute(
         "href",
         "/school/SC001?tab=enrollment&flag=9004755"
       );
@@ -374,7 +380,7 @@ describe("SchoolVisitSummarySchoolPage", () => {
 
       render(await renderPage());
 
-      expect(screen.getByRole("heading", { level: 1, name: "Test School (Bhopal)" })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { level: 1, name: "Test School" })).toBeInTheDocument();
       expect(screen.getByRole("region", { name: /Needs attention/ })).toBeInTheDocument();
       expect(screen.queryByRole("region", { name: /Intervention flags/ })).not.toBeInTheDocument();
       expect(flagQueries()).toHaveLength(0);
@@ -395,7 +401,7 @@ describe("SchoolVisitSummarySchoolPage", () => {
 
       render(await renderPage());
 
-      expect(screen.getByRole("heading", { level: 1, name: "Test School (Bhopal)" })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { level: 1, name: "Test School" })).toBeInTheDocument();
       expect(screen.queryByRole("region", { name: /Intervention flags/ })).not.toBeInTheDocument();
       expect(flagQueries()).toHaveLength(0);
     });
@@ -458,6 +464,23 @@ describe("SchoolVisitSummarySchoolPage", () => {
       expect(screen.getByRole("button", { name: "Comment" })).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Reopen" })).toBeInTheDocument();
       expect((await resolveViaApi()).status).toBe(201);
+    });
+
+    it("heads the page with the School, its Visits in view and the concern counts of the sections below", async () => {
+      await withRealMatrix(adminPermission);
+      setupConcerns();
+
+      render(await renderPage("SC001", { preset: "30d" }));
+
+      expect(screen.getByRole("heading", { level: 1, name: "Test School" })).toBeInTheDocument();
+      expect(screen.getByText("SC001 · Bhopal · 1 visit · last 15 Sep 2026")).toBeInTheDocument();
+      expect(within(screen.getByRole("list", { name: "Concern counts" })).getAllByRole("listitem").map((chip) => chip.textContent)).toEqual([
+        "1 open concern",
+        "0 recurring",
+        "0 highlights",
+        "1 resolved",
+      ]);
+      expect(screen.getByRole("region", { name: "Needs attention" })).toHaveTextContent("1 open");
     });
 
     it("links each Visit-wise note to its Visit, which comes Back to this School page and its filters", async () => {

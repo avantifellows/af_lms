@@ -1,20 +1,42 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 
-import { Button, baseInputClasses } from "@/components/ui";
+import { Button, baseInputClasses, type ButtonVariant } from "@/components/ui";
 import { validateConcernEventBody, type VisitConcernAction } from "@/lib/visit-concern-event-types";
 
 // Resolve / Comment / Reopen on a Visit Concern (#470). Resolve on an open concern; Comment and
 // Reopen on a resolved one. The note is trimmed and must be 1–2000 characters. A failed save shows
 // the error and keeps the typed text; a saved one refreshes the server page, so the concern moves
-// to its new section.
+// to its new section. `children` is the card's body: the action buttons sit to its right, and the
+// note form opens below it, in place of the buttons.
 
-const FORMS: Record<VisitConcernAction, { button: string; prompt: string; submit: string }> = {
-  resolve: { button: "Resolve", prompt: "How was this resolved?", submit: "Save resolution" },
-  comment: { button: "Comment", prompt: "Comment", submit: "Add comment" },
-  reopen: { button: "Reopen", prompt: "Why reopen this concern?", submit: "Reopen concern" },
+const FORMS: Record<
+  VisitConcernAction,
+  { button: string; variant: ButtonVariant; prompt: string; placeholder: string; submit: string }
+> = {
+  resolve: {
+    button: "Resolve",
+    variant: "success-outline",
+    prompt: "How was this resolved?",
+    placeholder: "How was this resolved? (required)",
+    submit: "Mark resolved",
+  },
+  comment: {
+    button: "Comment",
+    variant: "secondary",
+    prompt: "Comment",
+    placeholder: "Add a comment (required)",
+    submit: "Add comment",
+  },
+  reopen: {
+    button: "Reopen",
+    variant: "success-outline",
+    prompt: "Why is this being reopened?",
+    placeholder: "Why is this being reopened? (required)",
+    submit: "Reopen",
+  },
 };
 
 async function postEvent(concernId: number, action: VisitConcernAction, body: string): Promise<string | null> {
@@ -32,7 +54,15 @@ async function postEvent(concernId: number, action: VisitConcernAction, body: st
   }
 }
 
-export function ConcernActions({ concernId, status }: { concernId: number; status: "open" | "resolved" }) {
+export function ConcernActions({
+  concernId,
+  status,
+  children,
+}: {
+  concernId: number;
+  status: "open" | "resolved";
+  children?: ReactNode;
+}) {
   const router = useRouter();
   const [action, setAction] = useState<VisitConcernAction | null>(null);
   const [text, setText] = useState("");
@@ -73,44 +103,49 @@ export function ConcernActions({ concernId, status }: { concernId: number; statu
     router.refresh();
   }
 
-  if (!action) {
-    return (
-      <div className="mt-2 flex gap-2">
-        {actions.map((next) => (
-          <Button key={next} type="button" variant="secondary" size="sm" onClick={() => open(next)}>
-            {FORMS[next].button}
-          </Button>
-        ))}
-      </div>
-    );
-  }
-
-  const form = FORMS[action];
+  const form = action ? FORMS[action] : null;
   return (
-    <form onSubmit={submit} className="mt-2 space-y-2">
-      <label className="block">
-        <span className="mb-1 block text-sm font-medium text-text-primary">{form.prompt}</span>
-        <textarea
-          value={text}
-          onChange={(event) => setText(event.target.value)}
-          rows={3}
-          disabled={saving}
-          className={`${baseInputClasses} w-full`}
-        />
-      </label>
-      {error && (
-        <p role="alert" className="text-sm text-danger">
-          {error}
-        </p>
-      )}
-      <div className="flex gap-2">
-        <Button type="submit" size="sm" disabled={saving}>
-          {saving ? "Saving…" : form.submit}
-        </Button>
-        <Button type="button" variant="ghost" size="sm" onClick={cancel} disabled={saving}>
-          Cancel
-        </Button>
+    <div>
+      {/* The buttons wrap below the body when the card is too narrow for both (phones). */}
+      <div className="flex flex-wrap items-start gap-3">
+        <div className="min-w-40 flex-1">{children}</div>
+        {!form && (
+          <div className="flex shrink-0 gap-2">
+            {actions.map((next) => (
+              <Button key={next} type="button" variant={FORMS[next].variant} size="sm" onClick={() => open(next)}>
+                {FORMS[next].button}
+              </Button>
+            ))}
+          </div>
+        )}
       </div>
-    </form>
+      {form && (
+        <form onSubmit={submit} className="mt-3 space-y-2">
+          <textarea
+            aria-label={form.prompt}
+            placeholder={form.placeholder}
+            value={text}
+            onChange={(event) => setText(event.target.value)}
+            rows={3}
+            disabled={saving}
+            autoFocus
+            className={`${baseInputClasses} block w-full bg-bg-input`}
+          />
+          {error && (
+            <p role="alert" className="text-sm text-danger">
+              {error}
+            </p>
+          )}
+          <div className="flex gap-2">
+            <Button type="submit" variant="success" size="sm" disabled={saving}>
+              {saving ? "Saving…" : form.submit}
+            </Button>
+            <Button type="button" variant="secondary" size="sm" onClick={cancel} disabled={saving}>
+              Cancel
+            </Button>
+          </div>
+        </form>
+      )}
+    </div>
   );
 }

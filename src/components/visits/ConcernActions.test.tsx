@@ -39,6 +39,38 @@ describe("ConcernActions", () => {
     expect(screen.getAllByRole("button").map((button) => button.textContent)).toEqual(["Comment", "Reopen"]);
   });
 
+  it("puts the buttons beside the card body, and opens the note form below it in their place", async () => {
+    const user = userEvent.setup();
+    render(
+      <ConcernActions concernId={9004801} status="open">
+        <p>Lab equipment missing</p>
+      </ConcernActions>
+    );
+
+    expect(screen.getByText("Lab equipment missing")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Resolve" }));
+
+    expect(screen.getByText("Lab equipment missing")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "How was this resolved?" })).toHaveAttribute(
+      "placeholder",
+      "How was this resolved? (required)"
+    );
+    expect(screen.getAllByRole("button").map((button) => button.textContent)).toEqual(["Mark resolved", "Cancel"]);
+  });
+
+  it("asks why a resolved concern is being reopened", async () => {
+    const user = userEvent.setup();
+    render(<ConcernActions concernId={9004801} status="resolved" />);
+
+    await user.click(screen.getByRole("button", { name: "Reopen" }));
+
+    expect(screen.getByRole("textbox", { name: "Why is this being reopened?" })).toHaveAttribute(
+      "placeholder",
+      "Why is this being reopened? (required)"
+    );
+    expect(screen.getAllByRole("button").map((button) => button.textContent)).toEqual(["Reopen", "Cancel"]);
+  });
+
   it("resolves with the trimmed note and refreshes the page", async () => {
     const user = userEvent.setup();
     const fetchMock = respondWith({ ok: true });
@@ -46,7 +78,7 @@ describe("ConcernActions", () => {
 
     await user.click(screen.getByRole("button", { name: "Resolve" }));
     await user.type(screen.getByRole("textbox", { name: "How was this resolved?" }), "  Lab kits delivered  ");
-    await user.click(screen.getByRole("button", { name: "Save resolution" }));
+    await user.click(screen.getByRole("button", { name: "Mark resolved" }));
 
     await waitFor(() => expect(mockRefresh).toHaveBeenCalled());
     expect(sentBody(fetchMock)).toEqual({
@@ -61,7 +93,7 @@ describe("ConcernActions", () => {
 
   it.each([
     ["Comment", "Comment", "Add comment", "comment"],
-    ["Reopen", "Why reopen this concern?", "Reopen concern", "reopen"],
+    ["Reopen", "Why is this being reopened?", "Reopen", "reopen"],
   ])("sends %s on a resolved concern", async (button, prompt, submit, action) => {
     const user = userEvent.setup();
     const fetchMock = respondWith({ ok: true });
@@ -82,7 +114,7 @@ describe("ConcernActions", () => {
 
     await user.click(screen.getByRole("button", { name: "Resolve" }));
     await user.type(screen.getByRole("textbox"), "   ");
-    await user.click(screen.getByRole("button", { name: "Save resolution" }));
+    await user.click(screen.getByRole("button", { name: "Mark resolved" }));
 
     expect(screen.getByRole("alert")).toHaveTextContent("Please write a note");
     expect(fetchMock).not.toHaveBeenCalled();
@@ -97,7 +129,7 @@ describe("ConcernActions", () => {
     const textbox = screen.getByRole("textbox");
     await user.click(textbox);
     await user.paste("a".repeat(2001));
-    await user.click(screen.getByRole("button", { name: "Save resolution" }));
+    await user.click(screen.getByRole("button", { name: "Mark resolved" }));
 
     expect(screen.getByRole("alert")).toHaveTextContent("Note must be at most 2000 characters");
     expect(fetchMock).not.toHaveBeenCalled();
@@ -111,7 +143,7 @@ describe("ConcernActions", () => {
 
     await user.click(screen.getByRole("button", { name: "Resolve" }));
     await user.type(screen.getByRole("textbox"), "Fixed");
-    await user.click(screen.getByRole("button", { name: "Save resolution" }));
+    await user.click(screen.getByRole("button", { name: "Mark resolved" }));
 
     expect(screen.getByRole("button", { name: "Saving…" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
@@ -128,11 +160,11 @@ describe("ConcernActions", () => {
 
     await user.click(screen.getByRole("button", { name: "Resolve" }));
     await user.type(screen.getByRole("textbox"), "Lab kits delivered");
-    await user.click(screen.getByRole("button", { name: "Save resolution" }));
+    await user.click(screen.getByRole("button", { name: "Mark resolved" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("This concern is already resolved");
     expect(screen.getByRole("textbox")).toHaveValue("Lab kits delivered");
-    expect(screen.getByRole("button", { name: "Save resolution" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Mark resolved" })).toBeEnabled();
     expect(mockRefresh).not.toHaveBeenCalled();
   });
 
@@ -143,7 +175,7 @@ describe("ConcernActions", () => {
 
     await user.click(screen.getByRole("button", { name: "Resolve" }));
     await user.type(screen.getByRole("textbox"), "Fixed");
-    await user.click(screen.getByRole("button", { name: "Save resolution" }));
+    await user.click(screen.getByRole("button", { name: "Mark resolved" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Something went wrong. Please try again.");
   });
@@ -155,7 +187,7 @@ describe("ConcernActions", () => {
 
     await user.click(screen.getByRole("button", { name: "Resolve" }));
     await user.type(screen.getByRole("textbox"), "Fixed");
-    await user.click(screen.getByRole("button", { name: "Save resolution" }));
+    await user.click(screen.getByRole("button", { name: "Mark resolved" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Could not reach the server. Please try again.");
     expect(screen.getByRole("textbox")).toHaveValue("Fixed");

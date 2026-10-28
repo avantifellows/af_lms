@@ -37,25 +37,41 @@ const NEET_CARD: AcademicLevelCard = {
   total: 1,
 };
 
+// The Now row's cells as "label count", in order.
+function nowCells(card: HTMLElement): string[] {
+  return [...card.querySelectorAll("dt")].map((dt) => `${dt.textContent} ${dt.nextElementSibling?.textContent}`);
+}
+
+function largestCells(card: HTMLElement): string[] {
+  return [...card.querySelectorAll("[data-largest] dt")].map((dt) => dt.textContent ?? "");
+}
+
 describe("AcademicLevelCards", () => {
-  it("shows one card per Centre, grade and exam with its total, Now levels and NA", () => {
+  it("shows one card per Centre, grade and exam with its tag, total and one Now row ending in NA", () => {
     render(<AcademicLevelCards data={{ available: true, cards: [JEE_CARD, NEET_CARD] }} />);
 
-    const cards = within(screen.getByRole("list", { name: "Academic levels" })).getAllByRole("link");
+    const cards = within(screen.getByRole("list", { name: "Academic level" })).getAllByRole("link");
     expect(cards).toHaveLength(2);
 
     // 3 + 5 + 2 levelled + 4 NA = 14.
-    expect(cards[0]).toHaveTextContent("CoE · Grade 11 · JEE");
-    expect(cards[0]).toHaveTextContent("14 students");
-    // Levels best first as given, the long Not Qualified label shortened.
-    expect(within(cards[0]).getByText("Now").parentElement).toHaveTextContent(/^NowM1 3 · M2 5 · NQ 2$/);
-    expect(cards[0]).toHaveTextContent("NA 4");
+    expect(cards[0]).toHaveTextContent(/^CoEG11 JEE ↗14 studentsNow/);
+    // The exam's three levels always (M3 at 0), any other level the data has, best first, then NA.
+    expect(nowCells(cards[0])).toEqual(["M1 3", "M2 5", "M3 0", "NQ 2", "NA 4"]);
+    expect(within(cards[0]).getByText("NA").parentElement).toHaveAttribute("title", "No AL-bearing test yet");
+    expect(screen.queryByText("Pred")).not.toBeInTheDocument();
 
-    expect(cards[1]).toHaveTextContent("Nodal · Grade 12 · NEET");
-    expect(cards[1]).toHaveTextContent("1 student");
-    expect(cards[1]).not.toHaveTextContent("1 students");
-    expect(within(cards[1]).getByText("Now").parentElement).toHaveTextContent(/^Now—$/);
-    expect(cards[1]).toHaveTextContent("NA 1");
+    expect(cards[1]).toHaveTextContent(/^NodalG12 NEET ↗1 studentNow/);
+    expect(nowCells(cards[1])).toEqual(["B1 0", "B2 0", "B3 0", "NA 1"]);
+  });
+
+  it("marks the largest level red, never NA, and none when every level is 0", () => {
+    render(<AcademicLevelCards data={{ available: true, cards: [JEE_CARD, NEET_CARD] }} />);
+
+    const cards = screen.getAllByRole("link");
+    expect(largestCells(cards[0])).toEqual(["M2"]);
+    expect(within(cards[0]).getByText("M2")).toHaveClass("text-danger");
+    expect(within(cards[0]).getByText("M1")).not.toHaveClass("text-danger");
+    expect(largestCells(cards[1])).toEqual([]);
   });
 
   it("opens the Centre's cumulative report for the card's grade", () => {
@@ -70,6 +86,7 @@ describe("AcademicLevelCards", () => {
   it("says Academic levels unavailable when the counts could not be read", () => {
     render(<AcademicLevelCards data={{ available: false }} />);
 
+    expect(screen.getByRole("heading", { name: "Academic level" })).toBeInTheDocument();
     expect(screen.getByText("Academic levels unavailable")).toBeInTheDocument();
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
   });

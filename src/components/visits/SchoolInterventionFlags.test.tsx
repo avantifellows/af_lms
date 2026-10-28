@@ -26,11 +26,15 @@ function section() {
   return screen.getByRole("region", { name: "Intervention flags" });
 }
 
+function rows() {
+  return within(section()).getAllByRole("listitem");
+}
+
 describe("SchoolInterventionFlags", () => {
   it("counts open and resolved flags in the header", () => {
     render(<SchoolInterventionFlags schoolCode="SC001" flags={{ open: [FLAG], resolvedCount: 2 }} />);
 
-    expect(section()).toHaveTextContent("Intervention flags1 open · 2 resolved");
+    expect(section()).toHaveTextContent(/^⚑Intervention flags1 open · 2 resolved/);
   });
 
   it("leaves resolved out of the header when none are resolved", () => {
@@ -40,33 +44,28 @@ describe("SchoolInterventionFlags", () => {
     expect(section()).not.toHaveTextContent("resolved");
   });
 
-  it("shows each open flag's Student, grade, Centre tag, raiser, IST date and update count", () => {
+  it("shows each open flag's Student initials, grade and Centre, raiser, IST date and update count", () => {
     render(<SchoolInterventionFlags schoolCode="SC001" flags={{ open: [FLAG], resolvedCount: 0 }} />);
 
-    const row = within(section()).getByRole("link");
-    expect(row).toHaveTextContent("Open");
-    expect(row).toHaveTextContent("Asha Verma");
-    expect(row).toHaveTextContent("Grade 11");
-    expect(row).toHaveTextContent("CoE");
-    expect(row).toHaveTextContent("Raised by Ravi PM on 21 Oct 2026");
-    expect(row).toHaveTextContent("3 updates");
+    const [row] = rows();
+    expect(row).toHaveTextContent("OpenA. V.G11 CoERaised by Ravi PM · 21 Oct 20263 updatesNotes in LMS ↗");
+    // The full name is on hover only.
+    expect(within(row).getByText("A. V.")).toHaveAttribute("title", "Asha Verma");
+    expect(row).not.toHaveTextContent("Asha Verma");
   });
 
   it("shows no update count for a flag with a single update, and no grade or tag when unknown", () => {
     const bare = { ...FLAG, grade: null, centreTag: null, updateCount: 1 };
     render(<SchoolInterventionFlags schoolCode="SC001" flags={{ open: [bare], resolvedCount: 0 }} />);
 
-    const row = within(section()).getByRole("link");
-    expect(row).not.toHaveTextContent("update");
-    expect(row).not.toHaveTextContent("Grade");
-    expect(row).not.toHaveTextContent("CoE");
+    expect(rows()[0]).toHaveTextContent("OpenA. V.Raised by Ravi PM · 21 Oct 2026Notes in LMS ↗");
   });
 
-  it("opens the Student's flag on the School's Enrollment tab", () => {
+  it("opens the Student's flag on the School's Enrollment tab from Notes in LMS", () => {
     render(
       <SchoolInterventionFlags
         schoolCode="SC 001/A"
-        flags={{ open: [FLAG, { ...FLAG, id: 502, studentName: "Kiran Rao" }], resolvedCount: 0 }}
+        flags={{ open: [FLAG, { ...FLAG, id: 502, studentName: "Kiran  rao" }], resolvedCount: 0 }}
       />
     );
 
@@ -75,6 +74,7 @@ describe("SchoolInterventionFlags", () => {
       "/school/SC%20001%2FA?tab=enrollment&flag=501",
       "/school/SC%20001%2FA?tab=enrollment&flag=502",
     ]);
+    expect(screen.getByRole("link", { name: "Notes in LMS for K. R." })).toBeInTheDocument();
   });
 
   it("says No open flags when there are none", () => {

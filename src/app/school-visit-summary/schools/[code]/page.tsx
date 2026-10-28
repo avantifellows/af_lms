@@ -7,8 +7,8 @@ import { SchoolConcernSections } from "@/components/visits/SchoolConcernSections
 import { SchoolInterventionFlags } from "@/components/visits/SchoolInterventionFlags";
 import { canViewSchoolInterventionFlags } from "@/lib/intervention-flags";
 import { canAccessSchoolSync, getFeatureAccess } from "@/lib/permissions";
-import { getSchoolConcernPage } from "@/lib/visit-concerns";
-import { searchParamsWithout } from "@/lib/visit-summary";
+import { getSchoolConcernPage, type SchoolConcernPage } from "@/lib/visit-concerns";
+import { RECURRING_CONCERN_MIN_VISITS, formatIstDate, searchParamsWithout } from "@/lib/visit-summary";
 import { requireVisitSummaryPage } from "@/lib/visit-summary-page";
 import { normalizeVisitSummaryFilters } from "@/lib/visit-summary-scope";
 import {
@@ -17,6 +17,7 @@ import {
   getVisitSummarySchoolFlags,
   getVisitSummarySchoolTeachers,
   type TeacherGroup,
+  type VisitSummarySchool,
 } from "@/lib/visit-summary-school";
 
 type SummarySearchParams = Record<string, string | undefined>;
@@ -39,26 +40,70 @@ function selfHref(schoolCode: string, currentParams: SummarySearchParams): strin
 
 function TeachersLine({ groups }: { groups: TeacherGroup[] }) {
   return (
-    <div>
-      <h2 id="teachers-heading" className="text-xs font-bold uppercase tracking-wider text-text-muted">
+    <div className="grid gap-2 sm:grid-cols-[8rem_minmax(0,1fr)]">
+      <h2 id="teachers-heading" className="pt-1 text-xs font-bold uppercase tracking-wider text-text-muted">
         Teachers
       </h2>
       {groups.length === 0 ? (
-        <p className="mt-1 text-sm text-text-muted">No teaching seats at this School&apos;s physical centres</p>
+        <p className="text-sm text-text-muted">No teaching seats at this School&apos;s physical centres</p>
       ) : (
-        <ul aria-labelledby="teachers-heading" className="mt-1 space-y-1">
+        <ul aria-labelledby="teachers-heading" className="space-y-2">
           {groups.map((group) => (
-            <li key={group.tag} className="text-sm text-text-primary">
-              <span className="mr-2 inline-flex border border-border bg-bg-card-alt px-1.5 py-0.5 text-xs font-bold uppercase text-text-secondary">
+            <li key={group.tag} className="flex items-start gap-2">
+              <span className="mt-1.5 shrink-0 rounded bg-accent px-2 py-1 text-xs font-bold uppercase leading-none text-text-on-accent">
                 {group.tag}
-              </span>{" "}
-              {group.seats
-                .map((seat) => `${seat.subject} - ${seat.name ?? "Vacant"}`)
-                .join(" · ")}
+              </span>
+              <ul aria-label={`${group.tag} teachers`} className="flex min-w-0 flex-wrap gap-2">
+                {group.seats.map((seat, index) => (
+                  <li key={index} className="rounded-full bg-bg-card-alt px-3 py-1 text-sm text-text-primary">
+                    <span className="text-xs font-bold uppercase tracking-wide text-text-muted">{seat.subject}</span>
+                    {" - "}
+                    <span className={seat.name ? undefined : "text-text-muted"}>{seat.name ?? "Vacant"}</span>
+                  </li>
+                ))}
+              </ul>
             </li>
           ))}
         </ul>
       )}
+    </div>
+  );
+}
+
+function plural(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`;
+}
+
+// The School name, its code, region and Visits in view, and the concern counts — every number
+// from the same concern page (and so the same filters) as the sections below.
+function SchoolHeader({ school, page }: { school: VisitSummarySchool; page: SchoolConcernPage }) {
+  const lastVisit = page.visitNotes[0]?.visitDate;
+  const subline = [
+    school.code,
+    school.region,
+    plural(page.visitNotes.length, "visit"),
+    lastVisit ? `last ${formatIstDate(lastVisit)}` : null,
+  ].filter(Boolean);
+  const recurring = page.needsAttention.filter((card) => card.visitCount >= RECURRING_CONCERN_MIN_VISITS).length;
+  const chips = [
+    { label: `${plural(page.needsAttention.length, "open concern")}`, className: "bg-danger-bg text-danger" },
+    { label: `${recurring} recurring`, className: "bg-accent text-text-on-accent" },
+    { label: plural(page.goingWell.length, "highlight"), className: "bg-success-bg text-success" },
+    { label: `${page.resolved.length} resolved`, className: "border border-border bg-bg-card text-text-secondary" },
+  ];
+  return (
+    <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3 border-b-4 border-border-accent pb-4">
+      <div className="min-w-0">
+        <h1 className="text-xl font-bold uppercase tracking-tight text-text-primary sm:text-2xl">{school.name}</h1>
+        <p className="mt-1 text-sm text-text-secondary">{subline.join(" · ")}</p>
+      </div>
+      <ul aria-label="Concern counts" className="flex flex-wrap gap-2">
+        {chips.map((chip) => (
+          <li key={chip.label} className={`rounded-full px-3 py-1 text-sm font-bold ${chip.className}`}>
+            {chip.label}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -99,17 +144,17 @@ export default async function SchoolVisitSummarySchoolPage({ params, searchParam
       </div>
 
       <main className="space-y-6 px-4 py-6 sm:px-6 lg:px-8">
-        <div className="border-b-4 border-border-accent pb-4">
-          <h1 className="text-xl font-bold uppercase tracking-tight text-text-primary sm:text-2xl">
-            {school.name}
-            {school.region && <>{" "}<span className="font-normal text-text-muted">({school.region})</span></>}
-          </h1>
-          <p className="mt-1 text-sm text-text-secondary">School Visit Summary</p>
-        </div>
+        <SchoolHeader school={school} page={concernPage} />
 
-        <Card elevation="sm" className="space-y-4 p-4">
-          <TeachersLine groups={teacherGroups} />
-          {academicLevels && <AcademicLevelCards data={academicLevels} />}
+        <Card elevation="sm" className="divide-y divide-border px-4">
+          <div className="py-4">
+            <TeachersLine groups={teacherGroups} />
+          </div>
+          {academicLevels && (
+            <div className="py-4">
+              <AcademicLevelCards data={academicLevels} />
+            </div>
+          )}
         </Card>
 
         {/* Resolve / Comment / Reopen follow the rule the events API enforces: visits edit. */}
