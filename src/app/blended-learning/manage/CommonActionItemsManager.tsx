@@ -45,7 +45,7 @@ function EditCommonItemForm({ item, onDone }: { item: CommonActionItem; onDone: 
   }
 
   return (
-    <form onSubmit={save} aria-label="Edit common action item" className="space-y-3">
+    <form onSubmit={save} aria-label="Edit program action item" className="space-y-3">
       <TextAreaField label="Action item" value={text} maxLength={COMMON_ITEM_TEXT_MAX} onChange={setText} error={errors.text} />
       <div className="sm:max-w-xs">
         <FormLabel htmlFor={`common-owner-${item.id}`}>Who does it</FormLabel>
@@ -204,10 +204,10 @@ export function CommonActionItemsManager({ items, mentors }: { items: CommonActi
       <Card elevation="sm" className="space-y-4 p-4 sm:p-6">
         <div>
           <h2 id="manage-common-items" className="text-lg font-bold text-text-primary">
-            Common action items
+            Program action items
           </h2>
           <p className="text-sm text-text-secondary">
-            Added now to each targeted student&apos;s open action items, tagged Common. Mentors tick them off while
+            Added now to each targeted student&apos;s open action items, tagged &ldquo;From program&rdquo;. Mentors tick them off while
             logging.
           </p>
         </div>
@@ -217,7 +217,7 @@ export function CommonActionItemsManager({ items, mentors }: { items: CommonActi
           {items.length === 0 ? (
             <p className="mt-1 text-sm text-text-secondary">None yet.</p>
           ) : (
-            <ul aria-label="Common action items" className="divide-y divide-border">
+            <ul aria-label="Program action items" className="divide-y divide-border">
               {items.map((item) => (
                 <li key={item.id} className="py-3">
                   {editingId === item.id ? (

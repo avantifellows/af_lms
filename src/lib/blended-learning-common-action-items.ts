@@ -14,8 +14,10 @@ import {
 import { currentGradeLateralSql } from "./blended-learning-mentees";
 
 // Common Action Items (server-only): an Action Item a Blended Learning Admin
-// pushes to every Student with an active current-year Mapping, one grade, or
-// one Mentor's Students. Pushing materialises it, then and there, as one open
+// pushes to every Student with an active current-year Mapping, one grade, one
+// Mentor's Students, or specific Students listed by `student.student_id`
+// (stored, so pushing again reaches them too; only those with an active
+// Mapping get it). Mentors see these tagged "From program". Pushing materialises it, then and there, as one open
 // Action Item per targeted Student (conversation_id NULL); Students mapped
 // later get it only when it is pushed again, which adds it to targeted
 // Students who don't have it yet (the partial unique index makes that
@@ -39,6 +41,10 @@ export type CommonActionItem = {
 
 export type TargetMentor = { userId: number; name: string; students: number };
 
+// What a target reaches now. For listed Student IDs, also the IDs that match
+// no Student and those whose Student has no active Mapping, as pasted.
+export type TargetPreview = { count: number; notFound: string[]; noMentor: string[] };
+
 type Failure = { ok: false; status: 403 | 404 | 422; error: string; fieldErrors?: FieldErrors };
 export type CommonItemResult<T> = ({ ok: true } & T) | Failure;
 
@@ -56,11 +62,22 @@ function validId(id: number): boolean {
 const MENTOR_NAME_SQL = (alias: string, idSql: string) =>
   `COALESCE(NULLIF(TRIM(CONCAT_WS(' ', ${alias}.first_name, ${alias}.last_name)), ''), ${alias}.email, CONCAT('Mentor ', ${idSql}))`;
 
+type TargetSql = { kind: string; grade: string; mentor: string; ids: string };
+
+// A Common Action Item's own target, for correlated queries.
+const COMMON_TARGET_COLUMNS: TargetSql = {
+  kind: "common.target_kind",
+  grade: "common.target_grade",
+  mentor: "common.target_mentor_user_id",
+  ids: "common.target_student_ids",
+};
+
 // The Student ids a target reaches: active current-year Mappings (the same
-// source as the Mentee list) and the list's grade. The three SQL arguments
-// are the target's kind, grade and Mentor user id: placeholders, or a Common
-// Action Item's columns. `yearParam` is bound to CURRENT_ACADEMIC_YEAR.
-function targetedStudentsSql(target: { kind: string; grade: string; mentor: string }, yearParam: string): string {
+// source as the Mentee list) and the list's grade. The SQL arguments are the
+// target's kind, grade, Mentor user id and listed `student.student_id`s:
+// placeholders, or COMMON_TARGET_COLUMNS. `yearParam` is bound to
+// CURRENT_ACADEMIC_YEAR.
+function targetedStudentsSql(target: TargetSql, yearParam: string): string {
   return `SELECT mapping.student_id
      FROM blended_learning_mentor_mentee_mappings mapping
      JOIN student st ON st.id = mapping.student_id
@@ -70,14 +87,16 @@ function targetedStudentsSql(target: { kind: string; grade: string; mentor: stri
          ${target.kind} = 'all'
          OR (${target.kind} = 'grade' AND current_grade.number = ${target.grade})
          OR (${target.kind} = 'mentor' AND mapping.mentor_user_id = ${target.mentor})
+         OR (${target.kind} = 'students' AND st.student_id = ANY(${target.ids}))
        )`;
 }
 
-function targetParams(target: CommonTarget): [string, number | null, number | null] {
+function targetParams(target: CommonTarget): [string, number | null, number | null, string[] | null] {
   return [
     target.kind,
     target.kind === "grade" ? target.grade : null,
     target.kind === "mentor" ? target.mentorUserId : null,
+    target.kind === "students" ? target.studentIds : null,
   ];
 }
 
@@ -85,24 +104,51 @@ function targetParams(target: CommonTarget): [string, number | null, number | nu
 async function countTargeted(target: CommonTarget): Promise<number> {
   const rows = await query<{ count: number | string }>(
     `SELECT count(*) AS count FROM (${targetedStudentsSql(
-      { kind: "$1::text", grade: "$2::int", mentor: "$3::bigint" },
-      "$4"
+      { kind: "$1::text", grade: "$2::int", mentor: "$3::bigint", ids: "$4::text[]" },
+      "$5"
     )}) targeted`,
     [...targetParams(target), CURRENT_ACADEMIC_YEAR]
   );
   return Number(rows[0]?.count ?? 0);
 }
 
+// Listed Student IDs that match no Student, and those whose Student has no
+// active current-year Mapping, in the order pasted.
+async function unmatchedStudentIds(studentIds: string[]): Promise<Pick<TargetPreview, "notFound" | "noMentor">> {
+  const rows = await query<{ student_id: string; found: boolean; mapped: boolean }>(
+    `SELECT listed.student_id,
+            EXISTS (SELECT 1 FROM student st WHERE st.student_id = listed.student_id) AS found,
+            EXISTS (
+              SELECT 1
+              FROM student st
+              JOIN blended_learning_mentor_mentee_mappings mapping ON mapping.student_id = st.id
+              WHERE st.student_id = listed.student_id AND ${activeBlendedMappingSql("mapping", "$2")}
+            ) AS mapped
+     FROM unnest($1::text[]) WITH ORDINALITY AS listed(student_id, position)
+     ORDER BY listed.position`,
+    [studentIds, CURRENT_ACADEMIC_YEAR]
+  );
+  return {
+    notFound: rows.filter((row) => !row.found).map((row) => row.student_id),
+    noMentor: rows.filter((row) => row.found && !row.mapped).map((row) => row.student_id),
+  };
+}
+
 // The preview before pushing a new Common Action Item: "Will be added to N
-// students". `raw` is the target (`kind`, `grade`, `mentorUserId`).
+// students", and for listed Student IDs the ones that won't get it. `raw` is
+// the target (`kind`, `grade`, `mentorUserId`, `studentIds`).
 export async function previewCommonTarget(
   access: BlendedLearningAccess,
   raw: unknown
-): Promise<CommonItemResult<{ count: number }>> {
+): Promise<CommonItemResult<TargetPreview>> {
   if (!canBlendedLearning(access, "manage")) return FORBIDDEN;
   const target = validateTarget(raw);
   if (!target.ok) return invalid(target.fieldErrors);
-  return { ok: true, count: await countTargeted(target.input) };
+  const [count, unmatched] = await Promise.all([
+    countTargeted(target.input),
+    target.input.kind === "students" ? unmatchedStudentIds(target.input.studentIds) : { notFound: [], noMentor: [] },
+  ]);
+  return { ok: true, count, ...unmatched };
 }
 
 // Mentors with active current-year Mappings, for the Mentor target, A–Z.
@@ -128,6 +174,7 @@ type CommonRow = {
   target_kind: CommonTarget["kind"];
   target_grade: number | string | null;
   target_mentor_user_id: number | string | null;
+  target_student_ids: string[] | null;
   target_mentor_name: string | null;
   open_count: number | string;
   done_count: number | string;
@@ -138,6 +185,7 @@ type CommonRow = {
 function rowTarget(row: CommonRow): CommonTarget {
   if (row.target_kind === "grade") return { kind: "grade", grade: Number(row.target_grade) as 12 | 13 };
   if (row.target_kind === "mentor") return { kind: "mentor", mentorUserId: Number(row.target_mentor_user_id) };
+  if (row.target_kind === "students") return { kind: "students", studentIds: row.target_student_ids ?? [] };
   return { kind: "all" };
 }
 
@@ -161,17 +209,14 @@ export async function listCommonActionItems(access: BlendedLearningAccess): Prom
   if (!canBlendedLearning(access, "manage")) return [];
   const rows = await query<CommonRow>(
     `SELECT common.id, common.text, common.owner, common.target_kind, common.target_grade,
-            common.target_mentor_user_id,
+            common.target_mentor_user_id, common.target_student_ids,
             CASE WHEN common.target_mentor_user_id IS NULL THEN NULL
                  ELSE ${MENTOR_NAME_SQL("mentor", "common.target_mentor_user_id")} END AS target_mentor_name,
             (SELECT count(*) FROM blended_learning_action_items item
              WHERE item.common_action_item_id = common.id AND item.status = 'open') AS open_count,
             (SELECT count(*) FROM blended_learning_action_items item
              WHERE item.common_action_item_id = common.id AND item.status = 'done') AS done_count,
-            (SELECT count(*) FROM (${targetedStudentsSql(
-              { kind: "common.target_kind", grade: "common.target_grade", mentor: "common.target_mentor_user_id" },
-              "$1"
-            )}) targeted
+            (SELECT count(*) FROM (${targetedStudentsSql(COMMON_TARGET_COLUMNS, "$1")}) targeted
              WHERE NOT EXISTS (
                SELECT 1 FROM blended_learning_action_items item
                WHERE item.common_action_item_id = common.id AND item.student_id = targeted.student_id
@@ -193,10 +238,7 @@ async function materialise(client: PoolClient, commonId: number): Promise<number
     `INSERT INTO blended_learning_action_items (common_action_item_id, student_id, position, owner, text)
      SELECT common.id, targeted.student_id, 1, common.owner, common.text
      FROM blended_learning_common_action_items common
-     CROSS JOIN LATERAL (${targetedStudentsSql(
-       { kind: "common.target_kind", grade: "common.target_grade", mentor: "common.target_mentor_user_id" },
-       "$2"
-     )}) targeted
+     CROSS JOIN LATERAL (${targetedStudentsSql(COMMON_TARGET_COLUMNS, "$2")}) targeted
      WHERE common.id = $1 AND common.removed_at IS NULL
      ON CONFLICT (common_action_item_id, student_id) WHERE common_action_item_id IS NOT NULL DO NOTHING
      RETURNING id`,
@@ -223,8 +265,8 @@ export async function createCommonActionItem(
     return await withTransaction(async (client) => {
       const inserted = await client.query<{ id: number | string }>(
         `INSERT INTO blended_learning_common_action_items
-           (text, owner, target_kind, target_grade, target_mentor_user_id, created_by_email)
-         VALUES ($1, $2, $3, $4, $5, $6)
+           (text, owner, target_kind, target_grade, target_mentor_user_id, target_student_ids, created_by_email)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
          RETURNING id`,
         [text, owner, ...targetParams(target), access.actorEmail]
       );

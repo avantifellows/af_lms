@@ -74,7 +74,7 @@ describe("ManagePage", () => {
   it.each([
     ["a Blended Learning Admin", ADMIN],
     ["an LMS admin", LMS_ADMIN],
-  ])("gives %s Resources and Common action items under the Manage tab", async (_who, access) => {
+  ])("gives %s Resources and Program action items under the Manage tab", async (_who, access) => {
     signedInAs(access);
 
     render(await ManagePage());
@@ -83,9 +83,9 @@ describe("ManagePage", () => {
     expect(within(tabs).getByRole("link", { name: "Manage" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("heading", { level: 1, name: "Manage" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 2, name: "Resources" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 2, name: "Common action items" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Program action items" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Mentor Toolkit (opens in a new tab)" })).toBeInTheDocument();
-    expect(screen.getByRole("form", { name: "New common action item" })).toBeInTheDocument();
+    expect(screen.getByRole("form", { name: "New program action item" })).toBeInTheDocument();
     expect(mockListCommonActionItems).toHaveBeenCalledWith(access);
     expect(mockListTargetMentors).toHaveBeenCalledWith(access);
   });

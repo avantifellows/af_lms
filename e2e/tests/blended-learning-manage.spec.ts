@@ -85,7 +85,7 @@ function resourceList(page: Page) {
 }
 
 function commonItem(page: Page, text: string) {
-  return page.getByRole("list", { name: "Common action items" }).getByRole("listitem").filter({ hasText: text });
+  return page.getByRole("list", { name: "Program action items" }).getByRole("listitem").filter({ hasText: text });
 }
 
 async function horizontalOverflow(page: Page): Promise<number> {
@@ -96,7 +96,7 @@ async function openManage(page: Page) {
   await page.goto("/blended-learning");
   await page.getByRole("navigation", { name: "Admin views" }).getByRole("link", { name: "Manage" }).click();
   await expect(page).toHaveURL(/\/blended-learning\/manage$/);
-  await expect(page.getByRole("heading", { level: 2, name: "Common action items" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 2, name: "Program action items" })).toBeVisible();
 }
 
 test.describe.configure({ mode: "serial" });
@@ -118,7 +118,7 @@ test.describe("Blended Learning Manage — access", () => {
       page.request.patch("/api/blended-learning/resources/1", { data: json }),
       page.request.delete("/api/blended-learning/resources/1"),
       page.request.post("/api/blended-learning/resources/1/move", { data: { direction: "down" } }),
-      page.request.get("/api/blended-learning/common-action-items/preview?kind=all"),
+      page.request.post("/api/blended-learning/common-action-items/preview", { data: { kind: "all" } }),
       page.request.post("/api/blended-learning/common-action-items", {
         data: { text: "Synthetic: nope", owner: "student", target: { kind: "all" } },
       }),
@@ -242,8 +242,8 @@ test.describe("Blended Learning Manage — Common Action Items", () => {
     await openManage(page);
 
     // Preview counts for every kind of target.
-    const preview = async (query: string) =>
-      (await (await page.request.get(`/api/blended-learning/common-action-items/preview?${query}`)).json()).count;
+    const preview = async (target: Record<string, unknown>) =>
+      (await (await page.request.post("/api/blended-learning/common-action-items/preview", { data: target })).json()).count;
     const active = await withPool(async (pool) => {
       const result = await pool.query<{ count: string }>(
         `SELECT count(*) AS count FROM blended_learning_mentor_mentee_mappings WHERE academic_year = $1 AND ended_at IS NULL`,
@@ -251,11 +251,11 @@ test.describe("Blended Learning Manage — Common Action Items", () => {
       );
       return Number(result.rows[0].count);
     });
-    expect(await preview("kind=all")).toBe(active);
-    expect((await preview("kind=grade&grade=12")) + (await preview("kind=grade&grade=13"))).toBe(active);
-    expect(await preview(`kind=mentor&mentorUserId=${mentorDUserId}`)).toBe(2);
+    expect(await preview({ kind: "all" })).toBe(active);
+    expect((await preview({ kind: "grade", grade: 12 })) + (await preview({ kind: "grade", grade: 13 }))).toBe(active);
+    expect(await preview({ kind: "mentor", mentorUserId: mentorDUserId })).toBe(2);
 
-    const form = page.getByRole("form", { name: "New common action item" });
+    const form = page.getByRole("form", { name: "New program action item" });
     await form.getByLabel("Action item").fill(text);
     await form.getByLabel("Who does it").selectOption({ label: "Student" });
     await form.getByRole("radio", { name: "One mentor's students" }).check();
@@ -277,13 +277,13 @@ test.describe("Blended Learning Manage — Common Action Items", () => {
       expect.objectContaining({ student_id: studentIds[second.key], conversation_id: null, text, owner: "student", status: "open" }),
     ]);
 
-    // Mentor D sees it tagged Common and ticks it off while logging.
+    // Mentor D sees it tagged "From program" and ticks it off while logging.
     const mentorContext = await browser.newContext();
     const mentor = await mentorContext.newPage();
     await signInAs(mentor, BLENDED_MENTOR_D);
     await mentor.goto(`/blended-learning/students/${studentIds[first.key]}`);
     const open = mentor.getByRole("region", { name: "Open Action Items" }).getByRole("listitem").filter({ hasText: text });
-    await expect(open).toContainText("Common");
+    await expect(open).toContainText("From program");
     await mentor.goto(`/blended-learning/students/${studentIds[first.key]}/log`);
     const logForm = mentor.getByRole("form", { name: "Log a Conversation or Attempt" });
     await logForm.getByRole("radio", { name: "Call" }).check();
@@ -291,7 +291,7 @@ test.describe("Blended Learning Manage — Common Action Items", () => {
     await logForm.getByLabel("Duration (minutes)").fill("20");
     await logForm.getByLabel("Summary").fill("Synthetic: checked the scholarship form.");
     const panel = mentor.getByRole("region", { name: "Open Action Items" });
-    await expect(panel.getByRole("listitem").filter({ hasText: text })).toContainText("Common");
+    await expect(panel.getByRole("listitem").filter({ hasText: text })).toContainText("From program");
     await panel.getByRole("checkbox", { name: new RegExp(text) }).check();
     await logForm.getByRole("button", { name: "Save conversation" }).click();
     await expect(mentor.getByRole("region", { name: "Saved" }).getByRole("heading", { name: "Conversation saved" })).toBeVisible();
@@ -315,7 +315,7 @@ test.describe("Blended Learning Manage — Common Action Items", () => {
 
     // Editing changes the still-open row only.
     await item.getByRole("button", { name: `Edit: ${text}` }).click();
-    const edit = page.getByRole("form", { name: "Edit common action item" });
+    const edit = page.getByRole("form", { name: "Edit program action item" });
     await edit.getByLabel("Action item").fill(edited);
     await edit.getByLabel("Who does it").selectOption({ label: "Parent" });
     await edit.getByRole("button", { name: "Save" }).click();
@@ -375,6 +375,66 @@ test.describe("Blended Learning Manage — Common Action Items", () => {
     await expect(mentor.getByRole("heading", { name: `${second.firstName} ${second.lastName}` })).toBeVisible();
     await expect(mentor.getByRole("region", { name: "Open Action Items" })).toHaveCount(0);
     await mentorContext.close();
+  });
+});
+
+test.describe("Blended Learning Manage — specific students", () => {
+  const text = "Synthetic: bring the signed hostel form";
+  const { second, mappedLater } = MANAGE_MENTEES;
+  // Mapped to Mentor A last academic year only: found, but no active mentor.
+  const noMentor = "E2E-BL-P1";
+  const unknown = "00012345678";
+
+  test("an admin pastes Student IDs, sees which won't get it, and pushes to the mapped ones", async ({ page, browser }) => {
+    await signInAs(page, BLENDED_ADMIN);
+    await openManage(page);
+    const form = page.getByRole("form", { name: "New program action item" });
+    await form.getByLabel("Action item").fill(text);
+    await form.getByRole("radio", { name: "Specific students" }).check();
+    await expect(form.getByText("Paste Student IDs to see how many students get it.")).toBeVisible();
+    // Mentor D's G2 and G3 (G3 was mapped by the test above), whitespace, comma and new-line separated.
+    await form.getByLabel("Student IDs").fill(`E2E-BL-${second.key},  ${unknown}\n${noMentor} E2E-BL-${mappedLater.key}\nE2E-BL-${second.key}`);
+    await expect(form.getByText("Will be added to 2 students.")).toBeVisible();
+    await expect(form).toContainText(`1 ID not found: ${unknown}`);
+    await expect(form).toContainText(`1 ID found but with no active mentor: ${noMentor}`);
+
+    await form.getByRole("button", { name: "Push to students" }).click();
+    const confirm = page.getByRole("dialog", { name: "Push this action item?" });
+    await expect(confirm).toContainText("Specific students (4 IDs listed) · Will be added to 2 students.");
+    await confirm.getByRole("button", { name: "Push" }).click();
+    await expect(confirm).toHaveCount(0);
+
+    const item = commonItem(page, text);
+    await expect(item).toContainText("Specific students (4 IDs listed)");
+    await expect(item.locator("dt:text-is('Open') + dd")).toHaveText("2");
+    await expect(item.getByRole("button", { name: `Push again: ${text}` })).toBeDisabled();
+    expect((await pushedRows(new RegExp(text))).map((row) => row.student_id)).toEqual([
+      studentIds[second.key],
+      studentIds[mappedLater.key],
+    ]);
+    const stored = await withPool(async (pool) => {
+      const result = await pool.query<{ target_student_ids: string[] }>(
+        `SELECT target_student_ids FROM blended_learning_common_action_items WHERE text = $1`,
+        [text]
+      );
+      return result.rows[0].target_student_ids;
+    });
+    expect(stored).toEqual([`E2E-BL-${second.key}`, unknown, noMentor, `E2E-BL-${mappedLater.key}`]);
+
+    const mentorContext = await browser.newContext();
+    const mentor = await mentorContext.newPage();
+    await signInAs(mentor, BLENDED_MENTOR_D);
+    await mentor.goto(`/blended-learning/students/${studentIds[mappedLater.key]}`);
+    await expect(
+      mentor.getByRole("region", { name: "Open Action Items" }).getByRole("listitem").filter({ hasText: text })
+    ).toContainText("From program");
+    await mentorContext.close();
+
+    // Clean up for later specs.
+    await item.getByRole("button", { name: `Remove: ${text}` }).click();
+    await page.getByRole("dialog", { name: "Remove this action item?" }).getByRole("button", { name: "Remove" }).click();
+    await expect(commonItem(page, text)).toHaveCount(0);
+    expect(await pushedRows(new RegExp(text))).toEqual([]);
   });
 });
 

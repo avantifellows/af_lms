@@ -7,12 +7,18 @@ export const RESOURCE_TITLE_MAX = 200;
 export const COMMON_ITEM_TEXT_MAX = 500;
 export const COMMON_ITEM_OWNERS = ["student", "mentor", "parent"] as const;
 const COMMON_TARGET_GRADES = [12, 13] as const;
+// The most Student IDs one paste may list, and the longest ID.
+const MAX_TARGET_STUDENT_IDS = 1000;
+const MAX_STUDENT_ID_LENGTH = 64;
 
 export type CommonItemOwner = (typeof COMMON_ITEM_OWNERS)[number];
 export type CommonTarget =
   | { kind: "all" }
   | { kind: "grade"; grade: (typeof COMMON_TARGET_GRADES)[number] }
-  | { kind: "mentor"; mentorUserId: number };
+  | { kind: "mentor"; mentorUserId: number }
+  // Specific Students by `student.student_id` (sheet/program IDs, leading
+  // zeros kept), as pasted.
+  | { kind: "students"; studentIds: string[] };
 export type ResourceInput = { title: string; url: string };
 export type CommonItemEdit = { text: string; owner: CommonItemOwner };
 export type CommonItemInput = CommonItemEdit & { target: CommonTarget };
@@ -71,8 +77,29 @@ function positiveInteger(value: unknown): number | null {
   return typeof number === "number" && Number.isSafeInteger(number) && number > 0 ? number : null;
 }
 
-// A target from a request body or the preview's query string: `kind` plus
-// `grade` (12 or 13) or `mentorUserId`.
+// Student IDs as pasted: separated by whitespace, commas or new lines, each
+// kept as written (leading zeros too), repeats dropped, in first-seen order.
+// A list is split the same way, item by item.
+export function parseStudentIds(raw: unknown): string[] {
+  return [...new Set(textParts(raw).flatMap((part) => part.split(/[\s,]+/)).filter(Boolean))];
+}
+
+function textParts(raw: unknown): string[] {
+  if (Array.isArray(raw)) return raw.filter((part): part is string => typeof part === "string");
+  return typeof raw === "string" ? [raw] : [];
+}
+
+function validateStudentIds(raw: unknown): Validated<CommonTarget> {
+  const studentIds = parseStudentIds(raw);
+  let error: string | null = null;
+  if (studentIds.length === 0) error = "Paste at least one Student ID.";
+  else if (studentIds.length > MAX_TARGET_STUDENT_IDS) error = `Paste at most ${MAX_TARGET_STUDENT_IDS} Student IDs.`;
+  else if (studentIds.some((id) => id.length > MAX_STUDENT_ID_LENGTH)) error = "One of these isn't a Student ID.";
+  return error ? { ok: false, fieldErrors: { studentIds: error } } : { ok: true, input: { kind: "students", studentIds } };
+}
+
+// A target from a request body: `kind` plus `grade` (12 or 13),
+// `mentorUserId` or `studentIds` (pasted text or a list).
 export function validateTarget(raw: unknown): Validated<CommonTarget> {
   const body = asRecord(raw);
   if (body.kind === "all") return { ok: true, input: { kind: "all" } };
@@ -86,6 +113,7 @@ export function validateTarget(raw: unknown): Validated<CommonTarget> {
       ? { ok: true, input: { kind: "mentor", mentorUserId } }
       : { ok: false, fieldErrors: { mentorUserId: "Choose a mentor." } };
   }
+  if (body.kind === "students") return validateStudentIds(body.studentIds);
   return { ok: false, fieldErrors: { target: "Choose who gets it." } };
 }
 

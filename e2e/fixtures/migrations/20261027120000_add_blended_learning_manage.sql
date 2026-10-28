@@ -1,8 +1,8 @@
 -- Mirrors db-service migration
 -- 20261027120000_create_blended_learning_resources_and_common_action_items
 -- (branch feat/bl-admin-manage): admin-managed Resources (seeded with the
--- Mentor Toolkit doc) and Common Action Items, whose pushed Action Items have
--- no Conversation. Re-diff with .mex/patterns/mirror-db-service-schema-in-e2e.md
+-- Mentor Toolkit doc) and Common Action Items (targets: all, grade, mentor or
+-- specific students), whose pushed Action Items have no Conversation. Re-diff with .mex/patterns/mirror-db-service-schema-in-e2e.md
 -- if that migration changes.
 
 CREATE TABLE blended_learning_resources (
@@ -47,7 +47,8 @@ CREATE TABLE blended_learning_common_action_items (
   removed_at timestamp(0),
   removed_by_email varchar(255),
   inserted_at timestamp(0) NOT NULL DEFAULT now(),
-  updated_at timestamp(0) NOT NULL DEFAULT now()
+  updated_at timestamp(0) NOT NULL DEFAULT now(),
+  target_student_ids text[]
 );
 
 ALTER TABLE blended_learning_common_action_items ADD CONSTRAINT bl_common_action_items_text_check
@@ -62,17 +63,28 @@ ALTER TABLE blended_learning_common_action_items ADD CONSTRAINT bl_common_action
       target_kind = 'all'
       AND target_grade IS NULL
       AND target_mentor_user_id IS NULL
+      AND target_student_ids IS NULL
     )
     OR (
       target_kind = 'grade'
       AND target_grade IS NOT NULL
       AND target_grade IN (12, 13)
       AND target_mentor_user_id IS NULL
+      AND target_student_ids IS NULL
     )
     OR (
       target_kind = 'mentor'
       AND target_grade IS NULL
       AND target_mentor_user_id IS NOT NULL
+      AND target_student_ids IS NULL
+    )
+    OR (
+      target_kind = 'students'
+      AND target_grade IS NULL
+      AND target_mentor_user_id IS NULL
+      AND target_student_ids IS NOT NULL
+      AND cardinality(target_student_ids) >= 1
+      AND array_position(target_student_ids, NULL) IS NULL
     )
   );
 

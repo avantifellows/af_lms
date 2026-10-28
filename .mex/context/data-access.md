@@ -548,8 +548,12 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
 - **Common Action Items:** `src/lib/blended-learning-common-action-items.ts`. A target reaches the
   Students of active current-year Mappings (`activeBlendedMappingSql`) filtered by the Mentee
   list's grade (`currentGradeLateralSql`, now exported from `blended-learning-mentees.ts` and used
-  by `listMentees`) or the Mapping's `mentor_user_id` (`targetedStudentsSql`). `previewCommonTarget`
-  counts them (the form's "Will be added to N students"). `createCommonActionItem` inserts the item
+  by `listMentees`), the Mapping's `mentor_user_id` or `student.student_id = ANY(target_student_ids)`
+  ("Specific students": IDs pasted by the admin, split on whitespace / commas, deduped, kept as text
+  so leading zeros survive; at most 1000) (`targetedStudentsSql`). `previewCommonTarget` (a POST, as
+  ID lists can be long) counts them (the form's "Will be added to N students") and, for a students
+  target, lists the pasted IDs not found and those found with no active Mapping (`unmatchedStudentIds`).
+  The IDs are stored so Push again reaches the same list. `createCommonActionItem` inserts the item
   and materialises it in one transaction (`INSERT … SELECT … ON CONFLICT (common_action_item_id,
   student_id) WHERE common_action_item_id IS NOT NULL DO NOTHING`); a target with no Students (or
   an unknown Mentor, 23503) rolls back as a 422. `pushCommonActionItem` locks the item `FOR UPDATE`
@@ -568,9 +572,9 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   Nothing else in `src/`, `scripts/` or `e2e/` reads the table (no list counts, flags or exports).
 - **UI:** `/blended-learning/manage` (`src/app/blended-learning/manage/`): `ResourcesManager`
   (add / inline edit / ↑ ↓ / remove after `ConfirmDialog`) and `CommonActionItemsManager` with
-  `NewCommonItemForm` (text, owner, target radio + Grade/Mentor select, live preview, confirm
+  `NewCommonItemForm` (text, owner, target radio + Grade/Mentor select or Student IDs textarea, live preview with the unmatched IDs, confirm
   before push; 422 field errors go back inline). Every change calls `router.refresh()`. The open
-  items on the detail page and the log form show a "Common" tag and "Added <date>"
+  items on the detail page and the log form show a "From program" tag (the UI name; code and DB keep "common") and "Added <date>"
   (`ActionItemMeta` `common`).
 - **E2E:** `e2e/fixtures/migrations/20261027120000_add_blended_learning_manage.sql` mirrors the
   migration (pg_dump-identical, seed row included). `blended-learning-manage.spec.ts` uses Mentor D

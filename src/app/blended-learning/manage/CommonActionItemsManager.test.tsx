@@ -25,9 +25,11 @@ const ITEMS: CommonActionItem[] = [
   },
 ];
 
-// The preview route answers by its query string; writes by queue.
+// The preview route answers with previewCount (and any unmatched IDs);
+// writes answer by queue.
 const writes: Response[] = [];
 let previewCount = 5;
+let unmatched = { notFound: [] as string[], noMentor: [] as string[] };
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status });
@@ -39,17 +41,22 @@ function writeCalls() {
     .map(([url, init]) => ({ url, method: init?.method, body: init?.body ? JSON.parse(init.body) : undefined }));
 }
 
-function previewUrls() {
-  return mockFetch.mock.calls.map(([url]) => String(url)).filter((url) => url.includes("/preview"));
+function previewBodies() {
+  return mockFetch.mock.calls
+    .filter(([url]) => String(url).includes("/preview"))
+    .map(([url, init]) => ({ url, method: init?.method, body: JSON.parse(init.body) }));
 }
 
 beforeEach(() => {
   writes.length = 0;
   previewCount = 5;
+  unmatched = { notFound: [], noMentor: [] };
   mockRefresh.mockReset();
   mockFetch.mockReset();
   mockFetch.mockImplementation(async (url: string) =>
-    url.includes("/preview") ? json({ count: previewCount }) : (writes.shift() ?? json({ error: "Unexpected" }, 500))
+    url.includes("/preview")
+      ? json({ count: previewCount, ...unmatched })
+      : (writes.shift() ?? json({ error: "Unexpected" }, 500))
   );
   vi.stubGlobal("fetch", mockFetch);
 });
@@ -62,7 +69,7 @@ describe("CommonActionItemsManager — pushed items", () => {
   it("lists each item with its owner, target and open, done and not-yet-added counts", () => {
     render(<CommonActionItemsManager items={ITEMS} mentors={MENTORS} />);
 
-    const [first, second] = within(screen.getByRole("list", { name: "Common action items" })).getAllByRole("listitem");
+    const [first, second] = within(screen.getByRole("list", { name: "Program action items" })).getAllByRole("listitem");
     expect(first).toHaveTextContent("StudentFill in the scholarship form");
     expect(first).toHaveTextContent("Faizan Khan's students");
     expect(first).toHaveTextContent("Open2Done1Not yet added1");
@@ -115,7 +122,7 @@ describe("CommonActionItemsManager — pushed items", () => {
     render(<CommonActionItemsManager items={ITEMS} mentors={MENTORS} />);
 
     await user.click(screen.getByRole("button", { name: "Edit: Fill in the scholarship form" }));
-    const form = screen.getByRole("form", { name: "Edit common action item" });
+    const form = screen.getByRole("form", { name: "Edit program action item" });
     expect(form).toHaveTextContent("Changes the 2 students who still have it open.");
     await user.click(within(form).getByRole("button", { name: "Save" }));
     expect(within(form).getByText("Enter the action item.")).toBeInTheDocument();
@@ -131,11 +138,11 @@ describe("CommonActionItemsManager — pushed items", () => {
       body: { text: "Submit the scholarship form", owner: "parent" },
     });
     expect(mockRefresh).toHaveBeenCalled();
-    expect(screen.queryByRole("form", { name: "Edit common action item" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("form", { name: "Edit program action item" })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Edit: Bring the admit card" }));
     await user.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(screen.queryByRole("form", { name: "Edit common action item" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("form", { name: "Edit program action item" })).not.toBeInTheDocument();
   });
 });
 
@@ -144,10 +151,16 @@ describe("CommonActionItemsManager — a new item", () => {
     const user = userEvent.setup();
     writes.push(json({ id: 9, added: 3 }, 201));
     render(<CommonActionItemsManager items={[]} mentors={MENTORS} />);
-    const form = screen.getByRole("form", { name: "New common action item" });
+    const form = screen.getByRole("form", { name: "New program action item" });
 
     expect(await within(form).findByText("Will be added to 5 students.")).toBeInTheDocument();
-    expect(previewUrls()).toEqual(["/api/blended-learning/common-action-items/preview?kind=all&grade=12&mentorUserId="]);
+    expect(previewBodies()).toEqual([
+      {
+        url: "/api/blended-learning/common-action-items/preview",
+        method: "POST",
+        body: { kind: "all", grade: "12", mentorUserId: "", studentIds: "" },
+      },
+    ]);
 
     await user.type(within(form).getByLabelText("Action item"), "Fill in the scholarship form");
     expect(within(form).getByText("28/500")).toBeInTheDocument();
@@ -157,7 +170,7 @@ describe("CommonActionItemsManager — a new item", () => {
     previewCount = 3;
     await user.selectOptions(within(form).getByLabelText("Mentor"), "77");
     expect(await within(form).findByText("Will be added to 3 students.")).toBeInTheDocument();
-    expect(previewUrls().at(-1)).toBe("/api/blended-learning/common-action-items/preview?kind=mentor&grade=12&mentorUserId=77");
+    expect(previewBodies().at(-1)?.body).toEqual({ kind: "mentor", grade: "12", mentorUserId: "77", studentIds: "" });
 
     await user.click(within(form).getByRole("button", { name: "Push to students" }));
     const dialog = screen.getByRole("dialog", { name: "Push this action item?" });
@@ -169,7 +182,11 @@ describe("CommonActionItemsManager — a new item", () => {
       {
         url: "/api/blended-learning/common-action-items",
         method: "POST",
-        body: { text: "Fill in the scholarship form", owner: "mentor", target: { kind: "mentor", grade: "12", mentorUserId: "77" } },
+        body: {
+          text: "Fill in the scholarship form",
+          owner: "mentor",
+          target: { kind: "mentor", grade: "12", mentorUserId: "77", studentIds: "" },
+        },
       },
     ]);
     expect(mockRefresh).toHaveBeenCalled();
@@ -177,10 +194,43 @@ describe("CommonActionItemsManager — a new item", () => {
     expect(within(form).getByLabelText("Action item")).toHaveValue("");
   });
 
+  it("previews pasted Student IDs, naming the ones not found or with no mentor, and pushes to the rest", async () => {
+    const user = userEvent.setup();
+    writes.push(json({ id: 10, added: 2 }, 201));
+    render(<CommonActionItemsManager items={[]} mentors={MENTORS} />);
+    const form = screen.getByRole("form", { name: "New program action item" });
+    await within(form).findByText("Will be added to 5 students.");
+
+    await user.type(within(form).getByLabelText("Action item"), "Bring the signed form");
+    await user.click(within(form).getByRole("radio", { name: "Specific students" }));
+    expect(within(form).getByText("Paste Student IDs to see how many students get it.")).toBeInTheDocument();
+    previewCount = 2;
+    unmatched = { notFound: ["99999999"], noMentor: ["0012345678", "0087654321"] };
+    await user.type(within(form).getByLabelText("Student IDs"), "01234567890, 12345678{Enter}99999999 0012345678 0087654321");
+
+    expect(await within(form).findByText("Will be added to 2 students.")).toBeInTheDocument();
+    expect(form).toHaveTextContent("1 ID not found: 99999999");
+    expect(form).toHaveTextContent("2 IDs found but with no active mentor: 0012345678, 0087654321");
+    expect(previewBodies().at(-1)?.body).toEqual({
+      kind: "students",
+      grade: "12",
+      mentorUserId: "",
+      studentIds: "01234567890, 12345678\n99999999 0012345678 0087654321",
+    });
+
+    await user.click(within(form).getByRole("button", { name: "Push to students" }));
+    const dialog = screen.getByRole("dialog", { name: "Push this action item?" });
+    expect(dialog).toHaveTextContent("Specific students (5 IDs listed) · Will be added to 2 students.");
+    expect(dialog).toHaveTextContent("1 ID not found: 99999999");
+    await user.click(within(dialog).getByRole("button", { name: "Push" }));
+    expect(writeCalls()[0].body.target).toMatchObject({ kind: "students" });
+    expect(mockRefresh).toHaveBeenCalled();
+  });
+
   it("checks the form before confirming, and blocks a target with no students", async () => {
     const user = userEvent.setup();
     render(<CommonActionItemsManager items={[]} mentors={MENTORS} />);
-    const form = screen.getByRole("form", { name: "New common action item" });
+    const form = screen.getByRole("form", { name: "New program action item" });
 
     await user.click(within(form).getByRole("radio", { name: "One mentor's students" }));
     await user.click(within(form).getByRole("button", { name: "Push to students" }));
@@ -202,7 +252,7 @@ describe("CommonActionItemsManager — a new item", () => {
       json({ error: "No students", fieldErrors: { target: "No students match this target. Choose another." } }, 422)
     );
     render(<CommonActionItemsManager items={[]} mentors={MENTORS} />);
-    const form = screen.getByRole("form", { name: "New common action item" });
+    const form = screen.getByRole("form", { name: "New program action item" });
     await within(form).findByText("Will be added to 5 students.");
 
     await user.type(within(form).getByLabelText("Action item"), "Fill in the form");

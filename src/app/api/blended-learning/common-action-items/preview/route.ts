@@ -1,19 +1,15 @@
 import { NextResponse } from "next/server";
-import { failureResponse, requireBlendedLearning } from "@/lib/blended-learning-guard";
+import { failureResponse, requireBlendedLearningJson } from "@/lib/blended-learning-guard";
 import { previewCommonTarget } from "@/lib/blended-learning-common-action-items";
 
-// How many Students a target reaches now, before pushing:
-// `?kind=all|grade|mentor&grade=12|13&mentorUserId=<id>` → `{ count }`
-// (`manage` only).
-export async function GET(request: Request) {
-  const guard = await requireBlendedLearning("manage");
-  if (guard instanceof NextResponse) return guard;
-  const params = new URL(request.url).searchParams;
-  const result = await previewCommonTarget(guard.access, {
-    kind: params.get("kind"),
-    grade: params.get("grade"),
-    mentorUserId: params.get("mentorUserId"),
-  });
+// How many Students a target reaches now, before pushing. A POST, since
+// pasted Student IDs can be long: `{ kind, grade?, mentorUserId?,
+// studentIds? }` → `{ count, notFound, noMentor }` (`manage` only; nothing is
+// written).
+export async function POST(request: Request) {
+  const guarded = await requireBlendedLearningJson("manage", request);
+  if (guarded instanceof NextResponse) return guarded;
+  const result = await previewCommonTarget(guarded.access, guarded.body);
   if (!result.ok) return failureResponse(result);
-  return NextResponse.json({ count: result.count });
+  return NextResponse.json({ count: result.count, notFound: result.notFound, noMentor: result.noMentor });
 }

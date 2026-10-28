@@ -345,7 +345,7 @@ A follow-up agreed in a Conversation, or pushed from a Common Action Item, owned
 _Avoid_: Action (that is a School Visit term), task, to-do
 
 **Common Action Item**:
-An Action Item a Blended Learning Admin pushes to a target (every Mentee, one grade, or one Mentor's Mentees). Pushing adds it, then and there, as one open Action Item for each targeted Mentee, tagged "Common"; Mentees mapped later get it only when the admin pushes it again. Editing it changes the still-open ones; removing it deletes them and keeps the done ones.
+An Action Item a Blended Learning Admin pushes to a target (every Mentee, one grade, one Mentor's Mentees, or Student IDs the admin pastes). Pushing adds it, then and there, as one open Action Item for each targeted Mentee, tagged "From program"; Mentees mapped later get it only when the admin pushes it again. Editing it changes the still-open ones; removing it deletes them and keeps the done ones.
 _Avoid_: template, broadcast, recurring task
 
 **Resource**:

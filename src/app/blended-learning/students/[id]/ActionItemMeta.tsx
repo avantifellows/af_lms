@@ -20,11 +20,12 @@ export function OwnerPill({ owner }: { owner: ActionItemOwner }) {
 }
 
 // Marks an Action Item a Blended Learning Admin pushed to many Students (a
-// Common Action Item) rather than one agreed in a Conversation.
+// Common Action Item, labelled "From program") rather than one agreed in a
+// Conversation.
 function CommonTag() {
   return (
     <span className="mr-1.5 inline-block rounded-md bg-hover-bg px-1.5 text-xs font-bold leading-5 text-accent">
-      Common
+      From program
     </span>
   );
 }

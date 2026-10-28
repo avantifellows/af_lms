@@ -2,12 +2,14 @@
 
 import { Send } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useId, useState, type FormEvent } from "react";
+import { useId, useState, type FormEvent } from "react";
 
 import { Button, FormLabel } from "@/components/ui";
+import { baseInputClasses } from "@/components/ui/styles";
 import type { TargetMentor } from "@/lib/blended-learning-common-action-items";
 import {
   COMMON_ITEM_TEXT_MAX,
+  parseStudentIds,
   validateCommonItem,
   type CommonItemOwner,
   type CommonTarget,
@@ -19,53 +21,49 @@ import { FieldError, TextAreaField } from "./fields";
 import { manageRequest, students } from "./manageRequest";
 import { OwnerSelect } from "./OwnerSelect";
 import { targetLabel } from "./targetLabel";
+import { apiTarget, PreviewLine, UnmatchedIds, useTargetPreview, type TargetDraft } from "./targetPreview";
 
 // A new Common Action Item: its text, who does it and who gets it (every
-// Student with a Mentor, one grade, or one Mentor's Students). Once the target
-// is complete the form previews how many Students it reaches now; pushing asks
-// for confirmation, then adds it as an open Action Item for each of them.
+// Student with a Mentor, one grade, one Mentor's Students, or Student IDs
+// pasted from the sheet). Once the target is complete the form previews how
+// many Students it reaches now (and which pasted IDs won't get it); pushing
+// asks for confirmation, then adds it as an open Action Item for each of them.
 
-type TargetKind = CommonTarget["kind"];
-type Draft = { text: string; owner: CommonItemOwner; kind: TargetKind; grade: string; mentorUserId: string };
+type Draft = TargetDraft & { text: string; owner: CommonItemOwner };
 
-const EMPTY: Draft = { text: "", owner: "student", kind: "all", grade: "12", mentorUserId: "" };
-const TARGET_KINDS: { value: TargetKind; label: string }[] = [
+const EMPTY: Draft = { text: "", owner: "student", kind: "all", grade: "12", mentorUserId: "", studentIds: "" };
+const TARGET_KINDS: { value: TargetDraft["kind"]; label: string }[] = [
   { value: "all", label: "All students" },
   { value: "grade", label: "One grade" },
   { value: "mentor", label: "One mentor's students" },
+  { value: "students", label: "Specific students" },
 ];
-
-// The target as the API takes it (the preview's query string, the body).
-function draftTarget(draft: Draft) {
-  return { kind: draft.kind, grade: draft.grade, mentorUserId: draft.mentorUserId };
-}
 
 // The target as chosen, for its label.
 function chosenTarget(draft: Draft): CommonTarget {
   if (draft.kind === "grade") return { kind: "grade", grade: draft.grade === "13" ? 13 : 12 };
   if (draft.kind === "mentor") return { kind: "mentor", mentorUserId: Number(draft.mentorUserId) };
+  if (draft.kind === "students") return { kind: "students", studentIds: parseStudentIds(draft.studentIds) };
   return { kind: "all" };
 }
 
-// How many Students the draft's target reaches now; null while unknown.
-function usePreview(draft: Draft): number | null {
-  const { kind, grade, mentorUserId } = draft;
-  const [preview, setPreview] = useState<{ key: string; count: number } | null>(null);
-  const key = kind === "mentor" && !mentorUserId ? null : `${kind}:${grade}:${mentorUserId}`;
-
-  useEffect(() => {
-    if (key === null) return;
-    let cancelled = false;
-    const params = new URLSearchParams({ kind, grade, mentorUserId });
-    manageRequest<{ count: number }>(`/api/blended-learning/common-action-items/preview?${params}`).then((result) => {
-      if (!cancelled && result.ok) setPreview({ key, count: result.body.count });
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [key, kind, grade, mentorUserId]);
-
-  return preview && preview.key === key ? preview.count : null;
+function StudentIdsField({ value, error, onChange }: { value: string; error?: string; onChange: (value: string) => void }) {
+  const id = useId();
+  return (
+    <div>
+      <FormLabel htmlFor={id}>Student IDs</FormLabel>
+      <textarea
+        id={id}
+        rows={4}
+        value={value}
+        placeholder="Paste Student IDs, separated by spaces, commas or new lines"
+        onChange={(event) => onChange(event.target.value)}
+        aria-invalid={Boolean(error)}
+        className={`block w-full resize-y font-mono ${baseInputClasses}`}
+      />
+      <FieldError message={error} />
+    </div>
+  );
 }
 
 function TargetChoice({ draft, mentors, errors, onChange }: {
@@ -115,19 +113,11 @@ function TargetChoice({ draft, mentors, errors, onChange }: {
           ))}
         </BlendedSelect>
       )}
+      {draft.kind === "students" && (
+        <StudentIdsField value={draft.studentIds} error={errors.studentIds} onChange={(studentIds) => onChange({ studentIds })} />
+      )}
       <FieldError message={errors.mentorUserId ?? errors.grade ?? errors.target} />
     </fieldset>
-  );
-}
-
-function PreviewLine({ count, kind }: { count: number | null; kind: TargetKind }) {
-  let text = "Counting students…";
-  if (count === null && kind === "mentor") text = "Choose a mentor to see how many students get it.";
-  else if (count !== null) text = count === 0 ? "No students match this target." : `Will be added to ${students(count)}.`;
-  return (
-    <p aria-live="polite" className={`text-sm font-bold ${count === 0 ? "text-danger" : "text-text-primary"}`}>
-      {text}
-    </p>
   );
 }
 
@@ -141,7 +131,7 @@ function useNewCommonItem() {
 
   function review(event: FormEvent) {
     event.preventDefault();
-    const validated = validateCommonItem({ ...draft, target: draftTarget(draft) });
+    const validated = validateCommonItem({ ...draft, target: apiTarget(draft) });
     setErrors(validated.ok ? {} : validated.fieldErrors);
     if (validated.ok) setConfirming(true);
   }
@@ -151,7 +141,7 @@ function useNewCommonItem() {
     setError(null);
     const result = await manageRequest("/api/blended-learning/common-action-items", {
       method: "POST",
-      body: { text: draft.text, owner: draft.owner, target: draftTarget(draft) },
+      body: { text: draft.text, owner: draft.owner, target: apiTarget(draft) },
     });
     setBusy(false);
     if (!result.ok) {
@@ -175,11 +165,12 @@ function useNewCommonItem() {
 export function NewCommonItemForm({ mentors }: { mentors: TargetMentor[] }) {
   const form = useNewCommonItem();
   const { draft } = form;
-  const count = usePreview(draft);
+  const preview = useTargetPreview(draft);
+  const count = preview?.count ?? null;
   const mentorName = mentors.find((mentor) => String(mentor.userId) === draft.mentorUserId)?.name ?? null;
 
   return (
-    <form onSubmit={form.review} aria-label="New common action item" className="space-y-4">
+    <form onSubmit={form.review} aria-label="New program action item" className="space-y-4">
       <TextAreaField
         label="Action item"
         value={draft.text}
@@ -193,7 +184,7 @@ export function NewCommonItemForm({ mentors }: { mentors: TargetMentor[] }) {
         <FieldError message={form.errors.owner} />
       </div>
       <TargetChoice draft={draft} mentors={mentors} errors={form.errors} onChange={form.change} />
-      <PreviewLine count={count} kind={draft.kind} />
+      <PreviewLine draft={draft} preview={preview} />
       <Button type="submit" disabled={count === 0} className="w-full sm:w-auto">
         <Send aria-hidden="true" className="h-4 w-4" />
         Push to students
@@ -212,6 +203,7 @@ export function NewCommonItemForm({ mentors }: { mentors: TargetMentor[] }) {
           {targetLabel(chosenTarget(draft), mentorName)}
           {count !== null && ` · Will be added to ${students(count)}.`}
         </p>
+        {preview && <UnmatchedIds preview={preview} />}
         <p>Students mapped later get it only if you push it again.</p>
       </ConfirmDialog>
     </form>

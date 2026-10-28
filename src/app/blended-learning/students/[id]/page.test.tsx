@@ -318,10 +318,10 @@ describe("MenteeDetailPage", () => {
     expect(within(section).getByText("Revise optics")).toBeInTheDocument();
     expect(within(section).getByText("From 20 Oct 2026")).toBeInTheDocument();
     expect(within(section).queryByText(/Due/)).not.toBeInTheDocument();
-    expect(within(section).queryByText("Common")).not.toBeInTheDocument();
+    expect(within(section).queryByText("From program")).not.toBeInTheDocument();
   });
 
-  it("tags an Open Action Item pushed by an admin as Common, dated when it was added", async () => {
+  it("tags an Open Action Item pushed by an admin as From program, dated when it was added", async () => {
     signedInAs(MENTOR);
     mockGetMenteeDetail.mockResolvedValue({
       ...MENTEE,
@@ -334,9 +334,9 @@ describe("MenteeDetailPage", () => {
     await renderPage();
 
     const [pushed, agreed] = within(screen.getByRole("region", { name: "Open Action Items" })).getAllByRole("listitem");
-    expect(within(pushed).getByText("Common")).toBeInTheDocument();
-    expect(pushed).toHaveTextContent("Fill in the scholarship formCommonAdded 25 Oct 2026");
-    expect(within(agreed).queryByText("Common")).not.toBeInTheDocument();
+    expect(within(pushed).getByText("From program")).toBeInTheDocument();
+    expect(pushed).toHaveTextContent("Fill in the scholarship formFrom programAdded 25 Oct 2026");
+    expect(within(agreed).queryByText("From program")).not.toBeInTheDocument();
     expect(agreed).toHaveTextContent("From 20 Oct 2026");
   });
 

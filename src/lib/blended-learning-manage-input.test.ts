@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   isHttpsUrl,
+  parseStudentIds,
   validateCommonItem,
   validateCommonItemEdit,
   validateResource,
@@ -87,6 +88,36 @@ describe("validateTarget", () => {
     [undefined, { target: "Choose who gets it." }],
   ])("rejects %j", (raw, fieldErrors) => {
     expect(validateTarget(raw)).toEqual({ ok: false, fieldErrors });
+  });
+});
+
+describe("parseStudentIds", () => {
+  it("splits on whitespace, commas and new lines, keeps leading zeros and drops repeats", () => {
+    expect(parseStudentIds(" 01234567890,12345678\n\n0098765432\t01234567890 , ")).toEqual([
+      "01234567890",
+      "12345678",
+      "0098765432",
+    ]);
+    expect(parseStudentIds(["0011 0022", 7, "0011"])).toEqual(["0011", "0022"]);
+    expect(parseStudentIds(undefined)).toEqual([]);
+  });
+});
+
+describe("validateTarget — specific students", () => {
+  it("takes pasted IDs", () => {
+    expect(validateTarget({ kind: "students", studentIds: "0012345678, 12345678" })).toEqual({
+      ok: true,
+      input: { kind: "students", studentIds: ["0012345678", "12345678"] },
+    });
+  });
+
+  it.each([
+    [" ,\n ", "Paste at least one Student ID."],
+    [undefined, "Paste at least one Student ID."],
+    [Array.from({ length: 1001 }, (_, i) => `ID${i}`).join(" "), "Paste at most 1000 Student IDs."],
+    ["x".repeat(65), "One of these isn't a Student ID."],
+  ])("rejects %j", (studentIds, message) => {
+    expect(validateTarget({ kind: "students", studentIds })).toEqual({ ok: false, fieldErrors: { studentIds: message } });
   });
 });
 
