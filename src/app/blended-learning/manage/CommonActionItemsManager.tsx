@@ -4,16 +4,15 @@ import { Pencil, Send, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 
-import { Button, Card, FormLabel } from "@/components/ui";
+import { Button, Card } from "@/components/ui";
 import type { CommonActionItem, TargetMentor } from "@/lib/blended-learning-common-action-items";
 import { COMMON_ITEM_TEXT_MAX, type CommonItemOwner } from "@/lib/blended-learning-manage-input";
 
 import { OwnerPill } from "../students/[id]/ActionItemMeta";
 import { ConfirmDialog } from "./ConfirmDialog";
-import { FieldError, TextAreaField } from "./fields";
+import { ActionItemFields, FieldError } from "./fields";
 import { manageRequest, students } from "./manageRequest";
 import { NewCommonItemForm } from "./NewCommonItemForm";
-import { OwnerSelect } from "./OwnerSelect";
 import { targetLabel } from "./targetLabel";
 
 // The Manage page's Common Action Items: push a new one, and for each one in
@@ -46,12 +45,14 @@ function EditCommonItemForm({ item, onDone }: { item: CommonActionItem; onDone: 
 
   return (
     <form onSubmit={save} aria-label="Edit program action item" className="space-y-3">
-      <TextAreaField label="Action item" value={text} maxLength={COMMON_ITEM_TEXT_MAX} onChange={setText} error={errors.text} />
-      <div className="sm:max-w-xs">
-        <FormLabel htmlFor={`common-owner-${item.id}`}>Who does it</FormLabel>
-        <OwnerSelect id={`common-owner-${item.id}`} value={owner} onChange={setOwner} />
-        <FieldError message={errors.owner} />
-      </div>
+      <ActionItemFields
+        text={text}
+        owner={owner}
+        maxLength={COMMON_ITEM_TEXT_MAX}
+        onTextChange={setText}
+        onOwnerChange={setOwner}
+        errors={errors}
+      />
       <p className="text-xs text-text-secondary">
         Changes the {students(item.openCount)} who still have it open. Done ones stay as they were.
       </p>

@@ -60,9 +60,11 @@ describe("validateCommonItemEdit", () => {
       ok: false,
       fieldErrors: { text: "Enter the action item.", owner: "Choose who does it." },
     });
-    expect(validateCommonItemEdit({ text: "a".repeat(501), owner: "student" })).toEqual({
+    // 200, though the DB allows 500: a pushed item is one concise line.
+    expect(validateCommonItemEdit({ text: "a".repeat(200), owner: "student" })).toMatchObject({ ok: true });
+    expect(validateCommonItemEdit({ text: "a".repeat(201), owner: "student" })).toEqual({
       ok: false,
-      fieldErrors: { text: "Keep it to 500 characters." },
+      fieldErrors: { text: "Keep it to 200 characters." },
     });
   });
 });

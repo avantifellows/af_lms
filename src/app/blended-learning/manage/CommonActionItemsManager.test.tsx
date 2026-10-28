@@ -162,8 +162,12 @@ describe("CommonActionItemsManager — a new item", () => {
       },
     ]);
 
-    await user.type(within(form).getByLabelText("Action item"), "Fill in the scholarship form");
-    expect(within(form).getByText("28/500")).toBeInTheDocument();
+    // One line, as on the Mentor's log form, capped at 200 (the DB allows 500).
+    const text = within(form).getByLabelText("Action item");
+    expect(text.tagName).toBe("INPUT");
+    expect(text).toHaveAttribute("maxlength", "200");
+    await user.type(text, "Fill in the scholarship form");
+    expect(within(form).getByText("28/200")).toBeInTheDocument();
     await user.selectOptions(within(form).getByLabelText("Who does it"), "mentor");
     await user.click(within(form).getByRole("radio", { name: "One mentor's students" }));
     expect(within(form).getByText("Choose a mentor to see how many students get it.")).toBeInTheDocument();

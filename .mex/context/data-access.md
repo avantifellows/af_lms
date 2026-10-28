@@ -622,7 +622,9 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   exports).
 - **UI:** `/blended-learning/manage` (`src/app/blended-learning/manage/`): `ResourcesManager`
   (add / inline edit / ↑ ↓ / remove after `ConfirmDialog`) and `CommonActionItemsManager` with
-  `NewCommonItemForm` (text, owner, target radio + Grade/Mentor select or Student IDs textarea, live preview with the unmatched IDs, confirm
+  `NewCommonItemForm` (who does it and the action item side by side on one line, as on the log form,
+  stacked on a phone; 200 characters in the form and in `validateCommonItemEdit`, though the DB
+  allows 500; target radio + Grade/Mentor select or Student IDs textarea, live preview with the unmatched IDs, confirm
   before push; 422 field errors go back inline). Every change calls `router.refresh()`. The open
   items on the detail page and the log form show a "From program" tag (the UI name; code and DB keep "common") and "Added <date>"
   (`ActionItemMeta` `source="common"`).
