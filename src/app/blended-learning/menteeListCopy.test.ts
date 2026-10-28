@@ -5,7 +5,8 @@ import type { MenteeRow } from "@/lib/blended-learning-mentees";
 import { daysAgo, shortDate, whyNowTags } from "./menteeListCopy";
 
 const BASE: MenteeRow = {
-  studentId: 1, name: "Asha Rao", gender: null, grade: 12, programId: 80, programName: null,
+  studentId: 1, programStudentId: null, category: null, name: "Asha Rao", gender: null, grade: 12,
+  programId: 80, programName: null,
   lastContact: "2026-10-12", lastContactSource: "conversation", latestEntryKind: "attempt",
   openDraftState: null, reasons: [], daysSince: 10, lastAttemptOn: null,
 };

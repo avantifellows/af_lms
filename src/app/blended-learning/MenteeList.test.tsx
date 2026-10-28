@@ -8,12 +8,12 @@ import { MenteeGroups, type MenteeGroupView } from "./MenteeList";
 const TODAY = "2026-10-22";
 
 const KABIR: MenteeRow = {
-  studentId: 489985, name: "Kabir Never", gender: "Male", grade: 12, programId: 80,
+  studentId: 489985, programStudentId: null, category: null, name: "Kabir Never", gender: "Male", grade: 12, programId: 80,
   programName: "STP Voucher Delhi", lastContact: null, lastContactSource: null, latestEntryKind: null,
   openDraftState: "ready", reasons: ["no_contact"], daysSince: null, lastAttemptOn: null,
 };
 const IRA: MenteeRow = {
-  studentId: 501, name: "Ira Attempt", gender: "Female", grade: 12, programId: 80,
+  studentId: 501, programStudentId: "00123456", category: "Gen-EWS", name: "Ira Attempt", gender: "Female", grade: 12, programId: 80,
   programName: "STP Voucher Delhi", lastContact: "2026-10-12", lastContactSource: "conversation",
   latestEntryKind: "attempt", openDraftState: null, reasons: ["attempt"], daysSince: 10,
   lastAttemptOn: "2026-10-20",
@@ -71,13 +71,23 @@ describe("MenteeGroups — one table with group header rows", () => {
     expect(tableGroup("Everyone else")).toHaveTextContent("1 of 1.");
   });
 
-  it("shows Why now second, then grade, program, gender and last conversation in their own cells, with no duration", () => {
+  it("shows Student ID and category under the name, Why now second, then grade, program, gender and last conversation, with no duration", () => {
     renderList(true, [IRA]);
 
     const cells = within(tableRow("Ira Attempt")).getAllByRole("cell").map((cell) => cell.textContent);
     expect(cells).toEqual([
-      "Ira Attempt", "Not reachable, 20 Oct", "12", "STP Voucher Delhi", "Female", "12 Oct10 days ago", "ViewNew log",
+      "Ira AttemptID 00123456Category Gen-EWS", "Not reachable, 20 Oct", "12", "STP Voucher Delhi",
+      "Female", "12 Oct10 days ago", "ViewNew log",
     ]);
+    expect(within(tableRow("Ira Attempt")).getByText("00123456")).toHaveClass("font-mono");
+  });
+
+  it("shows a dash for a missing Student ID or category", () => {
+    renderList(true, [KABIR]);
+
+    expect(within(tableRow("Kabir Never")).getAllByRole("cell")[0]).toHaveTextContent(
+      "Kabir NeverID —Category —"
+    );
   });
 });
 
@@ -173,6 +183,8 @@ describe("MenteeGroups — phone cards", () => {
 
     const talkToFirst = screen.getByRole("region", { name: "Talk to first" });
     const card = within(talkToFirst).getByRole("listitem");
+    expect(card).toHaveTextContent("Ira AttemptID 00123456Category Gen-EWS");
+    expect(within(card).getByText("00123456")).toHaveClass("font-mono");
     expect(card).toHaveTextContent("Not reachable, 20 Oct");
     expect(card).toHaveTextContent("ProgramSTP Voucher Delhi");
     expect(card).toHaveTextContent("Grade12");
@@ -181,5 +193,12 @@ describe("MenteeGroups — phone cards", () => {
     expect(card).not.toHaveTextContent("Duration");
     expect(card).toHaveTextContent("ViewNew log");
     expect(within(screen.getByRole("region", { name: "Everyone else" })).getAllByRole("listitem")).toHaveLength(1);
+  });
+
+  it("shows a dash for a missing Student ID or category on the card's line", () => {
+    renderList(true, [KABIR]);
+
+    const card = within(screen.getByRole("region", { name: "Talk to first" })).getByRole("listitem");
+    expect(card).toHaveTextContent("Kabir NeverID —Category —");
   });
 });

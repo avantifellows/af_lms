@@ -8,7 +8,7 @@ import { FilteredMenteeList } from "./FilteredMenteeList";
 
 function mentee(studentId: number, name: string, overrides: Partial<MenteeRow> = {}): MenteeRow {
   return {
-    studentId, name, gender: "Female", grade: 12, programId: 80, programName: "STP Voucher Delhi",
+    studentId, programStudentId: `0012345${studentId}`, category: "Gen", name, gender: "Female", grade: 12, programId: 80, programName: "STP Voucher Delhi",
     lastContact: "2026-10-12", lastContactSource: "conversation", latestEntryKind: "conversation",
     openDraftState: null, reasons: [], daysSince: 10, lastAttemptOn: null,
     ...overrides,
@@ -37,7 +37,7 @@ describe("FilteredMenteeList", () => {
     renderList();
 
     const filters = screen.getByRole("search", { name: "Filter students" });
-    expect(within(filters).getByRole("searchbox", { name: "Search by name" })).toBeInTheDocument();
+    expect(within(filters).getByRole("searchbox", { name: "Search by name or Student ID" })).toBeInTheDocument();
     for (const name of ["Gender", "Grade", "Program", "Last contact"]) {
       expect(within(filters).getByRole("combobox", { name })).toHaveDisplayValue("All");
     }
@@ -72,11 +72,24 @@ describe("FilteredMenteeList", () => {
     expect(screen.getByRole("rowgroup", { name: "Everyone else" })).toHaveTextContent("1 of 2.");
   });
 
+  it("finds a Student by name or by Student ID, leading zeros included", async () => {
+    const user = userEvent.setup();
+    renderList();
+    const search = screen.getByRole("searchbox", { name: "Search by name or Student ID" });
+
+    await user.type(search, " 00123452 ");
+    expect(tableNames()).toEqual(["Zoya TwentyNine"]);
+
+    await user.clear(search);
+    await user.type(search, "rohan");
+    expect(tableNames()).toEqual(["Rohan Recent"]);
+  });
+
   it("shows an empty state when nothing matches", async () => {
     const user = userEvent.setup();
     renderList();
 
-    await user.type(screen.getByRole("searchbox", { name: "Search by name" }), "nobody");
+    await user.type(screen.getByRole("searchbox", { name: "Search by name or Student ID" }), "nobody");
 
     expect(screen.getByText("No students match these filters.")).toBeInTheDocument();
     expect(screen.queryByRole("table")).not.toBeInTheDocument();

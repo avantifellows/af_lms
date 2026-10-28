@@ -40,11 +40,15 @@ type FixtureMentee = {
   gender: "Male" | "Female";
   grade: Grade;
   programId: number;
+  // `student.category`; NULL when left out.
+  category?: string;
 };
 
 // Mentor A's active current-year Mentees.
 export const MENTEES = {
-  attemptLatest: { key: "A1", firstName: "Ira", lastName: "Attempt", gender: "Female", grade: 12, programId: 80 },
+  attemptLatest: {
+    key: "A1", firstName: "Ira", lastName: "Attempt", gender: "Female", grade: 12, programId: 80, category: "Gen-EWS",
+  },
   neverContacted: { key: "A2", firstName: "Kabir", lastName: "Never", gender: "Male", grade: 13, programId: 90 },
   thirtyDays: { key: "A3", firstName: "Meera", lastName: "Thirty", gender: "Female", grade: 12, programId: 81 },
   legacy: { key: "A4", firstName: "Nikhil", lastName: "Legacy", gender: "Male", grade: 13, programId: 91 },
@@ -202,6 +206,11 @@ export function fullName(mentee: { firstName: string; lastName: string }): strin
 
 // The legacy last-contact date is a fixed past day, so it is always 30+ days
 // ago.
+// The `student.student_id` each fixture Student is seeded with.
+export function programStudentId(mentee: { key: string }): string {
+  return `E2E-BL-${mentee.key}`;
+}
+
 export const LEGACY_LAST_CONTACT_ON = "2026-06-14";
 
 function previousAcademicYear(year: string): string {
@@ -263,8 +272,8 @@ async function seedStudent(
        INSERT INTO enrollment_record (user_id, group_id, group_type, academic_year, is_current, inserted_at, updated_at)
        SELECT account.id, grade_row.id, 'grade', $7, true, now(), now() FROM account, grade_row
      )
-     INSERT INTO student (student_id, user_id, grade_id, status, father_phone, guardian_phone, inserted_at, updated_at)
-     SELECT $8, account.id, grade_row.id, 'active', $10, $11, now(), now() FROM account, grade_row
+     INSERT INTO student (student_id, user_id, grade_id, status, father_phone, guardian_phone, category, inserted_at, updated_at)
+     SELECT $8, account.id, grade_row.id, 'active', $10, $11, $12, now(), now() FROM account, grade_row
      RETURNING id`,
     [
       `e2e-bl-${mentee.key.toLowerCase()}@test.local`,
@@ -274,10 +283,11 @@ async function seedStudent(
       `98765100${String(index).padStart(2, "0")}`,
       mentee.grade,
       CURRENT_ACADEMIC_YEAR,
-      `E2E-BL-${mentee.key}`,
+      programStudentId(mentee),
       contact.whatsapp ?? null,
       contact.fatherPhone ?? null,
       contact.guardianPhone ?? null,
+      mentee.category ?? null,
     ]
   );
   return Number(result.rows[0].id);

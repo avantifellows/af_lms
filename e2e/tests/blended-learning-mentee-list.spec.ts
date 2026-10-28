@@ -5,6 +5,7 @@ import {
   MENTEES,
   OTHER_STUDENTS,
   fullName,
+  programStudentId,
 } from "../helpers/blended-learning-fixtures";
 import { shortDate } from "../../src/app/blended-learning/menteeListCopy";
 
@@ -13,7 +14,8 @@ import { shortDate } from "../../src/app/blended-learning/menteeListCopy";
 // Fixture facts (IST days before today): Ira — Conversation 10 (25 min),
 // Attempt 2; Kabir — nothing logged, a ready draft; Meera — Conversation 30;
 // Nikhil — legacy last-contact date 14 Jun 2026 only; Zoya — Conversation 29;
-// Rohan — Conversation 3, a failed draft.
+// Rohan — Conversation 3, a failed draft. Each Student ID is E2E-BL-<key>;
+// only Ira has a category (Gen-EWS).
 //
 // From 1024 px up the list is one table, each group a named rowgroup with a
 // header row; below that each group is a region of cards.
@@ -145,6 +147,37 @@ for (const { label, viewport, desktop } of VIEWPORTS) {
       const kabir = entry(group(page, "Talk to first"), neverContacted);
       await expect(kabir.getByText("13", { exact: true })).toBeVisible();
       await expect(kabir.getByText("STP Dropper Delhi")).toBeVisible();
+    });
+
+    test("shows each Student's Student ID and category, with a dash for no category", async ({ page }) => {
+      const ira = entry(group(page, "Talk to first"), attemptLatest);
+      const iraId = ira.getByText(programStudentId(attemptLatest), { exact: true });
+      await expect(iraId).toBeVisible();
+      await expect(iraId).toHaveClass(/font-mono/);
+      await expect(ira.getByText("Category Gen-EWS", { exact: true })).toBeVisible();
+
+      const kabir = entry(group(page, "Talk to first"), neverContacted);
+      await expect(kabir.getByText(programStudentId(neverContacted), { exact: true })).toBeVisible();
+      await expect(kabir.getByText("Category —", { exact: true })).toBeVisible();
+
+      // Both sit on the line under the name: in the Student cell, or above
+      // the Program field on a card.
+      const name = await ira.getByRole("link", { name: fullName(attemptLatest), exact: true }).boundingBox();
+      const id = await iraId.boundingBox();
+      expect(id!.y).toBeGreaterThan(name!.y);
+      expect(id!.y).toBeLessThan(name!.y + name!.height + 8);
+      if (!desktop) {
+        const program = await ira.getByText("STP Voucher Delhi").boundingBox();
+        expect(id!.y + id!.height).toBeLessThan(program!.y);
+      }
+    });
+
+    test("finds a Student by Student ID in the search box", async ({ page }) => {
+      await page
+        .getByRole("searchbox", { name: "Search by name or Student ID" })
+        .fill(programStudentId(legacy).toLowerCase());
+      await expect(entries(group(page, "Talk to first"))).toHaveText([new RegExp(fullName(legacy))]);
+      await expect(group(page, "Everyone else")).toHaveCount(0);
     });
 
     test("each Student has View and New log text buttons", async ({ page }) => {

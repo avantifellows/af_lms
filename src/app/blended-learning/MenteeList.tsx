@@ -15,6 +15,9 @@ import { daysAgo, shortDate, whyNowTags } from "./menteeListCopy";
 // Conversation Draft's chip opens it on the log page. For anyone else
 // (admins, read-only users) View is the row's only button and the chip is a
 // plain label. `today` is the IST date, so this year's dates drop the year.
+// The program's Student ID and category sit on a muted line under the name,
+// in the table and on a card alike (the table has no room for two more
+// columns at 1024 px).
 
 export type MenteeGroupView = { title: string; description: string; mentees: MenteeRow[] };
 
@@ -117,6 +120,21 @@ function groupSummary(group: MenteeGroupView, total: number): string {
 
 const COLUMNS = ["Student", "Why now", "Grade", "Program", "Gender", "Last conversation"];
 
+// "ID 00123456  Category OBC" under the name: the program's Student ID, as
+// text so a Punjab ID keeps its leading zeros. "ID", not "Student ID", keeps
+// the Student column as narrow as the name. The table stacks the two; a card
+// keeps them on one line while they fit.
+function StudentIdLine({ mentee, className = "" }: { mentee: MenteeRow; className?: string }) {
+  return (
+    <span className={`flex flex-wrap gap-x-3 text-xs text-text-muted ${className}`}>
+      <span className="whitespace-nowrap">
+        ID <span className="font-mono">{orDash(mentee.programStudentId)}</span>
+      </span>
+      <span className="whitespace-nowrap">Category {orDash(mentee.category)}</span>
+    </span>
+  );
+}
+
 function GroupHeader({ group, total }: { group: MenteeGroupView; total: number }) {
   return (
     <tr>
@@ -139,6 +157,7 @@ function TableRow({ mentee, canLog, today }: RowProps) {
     <tr className="relative cursor-pointer border-t border-border hover:bg-hover-bg">
       <td className={`${cell} whitespace-nowrap`}>
         <NameLink mentee={mentee} />
+        <StudentIdLine mentee={mentee} className="-mt-2 flex-col" />
       </td>
       <td className={cell}>
         <span className="flex flex-col items-start gap-1.5">
@@ -205,8 +224,9 @@ function MenteeCard({ mentee, canLog, today }: RowProps) {
   const hasWhyNow = mentee.reasons.length > 0 || mentee.openDraftState === "ready";
   return (
     <li className="relative grid grid-cols-3 gap-x-3 gap-y-2.5 rounded-xl border border-border bg-bg-card px-4 py-3.5 shadow-sm active:bg-hover-bg">
-      <div className="col-span-3 -my-1.5">
+      <div className="col-span-3 -mt-1.5">
         <NameLink mentee={mentee} />
+        <StudentIdLine mentee={mentee} className="-mt-1.5" />
       </div>
       {hasWhyNow && (
         <div className="col-span-3 flex flex-wrap items-center gap-1.5">

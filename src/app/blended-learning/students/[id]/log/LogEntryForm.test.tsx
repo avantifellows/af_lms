@@ -85,6 +85,8 @@ const OPEN_ITEMS = [
 ];
 const MENTEE: MenteeRow = {
   studentId: 501,
+  programStudentId: null,
+  category: null,
   name: "Asha Rao",
   gender: null,
   grade: 11,
