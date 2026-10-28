@@ -161,7 +161,7 @@ for (const { label, key, viewport } of VIEWPORTS) {
       }
       await expectAligned(rows);
       const history = page.getByRole("region", { name: "History" });
-      await expect(history.getByRole("heading", { level: 2 })).toHaveText("Conversations (0)");
+      await expect(history.getByRole("heading", { level: 2 })).toHaveText("Conversations in app (0)");
       await expectProfileDocEntry(page, profileDocUrl, allOpen);
       await expectAligned(profileDocEntry(page).getByRole("listitem"));
       expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
@@ -196,7 +196,7 @@ for (const { label, key, viewport } of VIEWPORTS) {
 
       // The entry stays in the history; only the app's Conversation counts.
       await page.goto(detailPath);
-      await expect(history.getByRole("heading", { level: 2 })).toHaveText("Conversations (1)");
+      await expect(history.getByRole("heading", { level: 2 })).toHaveText("Conversations in app (1)");
       await expect(history.getByRole("article")).toHaveCount(2);
       await expectProfileDocEntry(page, profileDocUrl, afterTick);
       await expect(openItems(page).getByRole("listitem")).toHaveCount(2);
