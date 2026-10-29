@@ -173,6 +173,8 @@ export interface AcademicLevelCard {
   // Students with no level yet ("No AL-bearing test yet").
   na: number;
   total: number;
+  // Whether the viewer may open the Centre's page, so the card links to its cumulative report.
+  canOpen: boolean;
 }
 
 export type AcademicLevelCards = { available: true; cards: AcademicLevelCard[] } | { available: false };
@@ -191,9 +193,11 @@ function levelRank(level: string): number {
 
 // One card per active physical Centre × grade × exam stream at the School (#470), counted from
 // BigQuery `dim_student` for the Centre's programme. JNV NVS Centres are never queried. Any
-// BigQuery error makes the whole strip unavailable rather than showing partial counts.
+// BigQuery error makes the whole strip unavailable rather than showing partial counts. Every
+// Centre's cards show (School-wide view); only those whose Centre page the viewer can open link.
 export async function getVisitSummaryAcademicLevelCards(
-  school: VisitSummarySchool
+  school: VisitSummarySchool,
+  permission: UserPermission
 ): Promise<AcademicLevelCards> {
   const centres = await query<AcademicLevelCentreRow>(
     `SELECT c.id::text AS id, c.name, c.type_code, c.program_id
@@ -224,6 +228,7 @@ export async function getVisitSummaryAcademicLevelCards(
   const cards: AcademicLevelCard[] = [];
   queried.forEach(({ centre }, index) => {
     const byClass = new Map<string, AcademicLevelCard>();
+    const canOpen = canOpenCentrePage(permission, school, centre.id);
     for (const row of counts[index]) {
       const exam = STREAM_EXAMS[canonicalStream(row.stream) ?? ""];
       if (!exam || row.students <= 0) continue;
@@ -239,6 +244,7 @@ export async function getVisitSummaryAcademicLevelCards(
           levels: [],
           na: 0,
           total: 0,
+          canOpen,
         };
         byClass.set(key, card);
       }

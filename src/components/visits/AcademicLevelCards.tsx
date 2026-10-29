@@ -5,7 +5,7 @@ import type { AcademicLevelCard, AcademicLevelCards as AcademicLevelCardsData } 
 
 // The School page's academic-level cards (#470): one compact card per physical Centre × grade ×
 // JEE/NEET, all on one line, each opening that Centre's cumulative report for the grade in the
-// same tab. The body is one Now row of level cells (the exam's three levels always, any other
+// same tab when the viewer can open that Centre's page. The body is one Now row of level cells (the exam's three levels always, any other
 // level the data has, then NA); the largest level is red. Predictions are a later follow-up.
 
 const NA_REASON = "No AL-bearing test yet";
@@ -51,21 +51,43 @@ function Cell({ label, count, largest, title }: { label: string; count: number; 
   );
 }
 
+const CARD_CLASS = "block h-full rounded-lg border border-border bg-bg-card px-3 py-2.5";
+
+// A card opens its Centre's report only when the viewer can open that Centre's page (the server
+// decides); otherwise it shows the same counts with no link.
 function LevelCard({ card }: { card: AcademicLevelCard }) {
+  const title = `${card.centreName}. ${CARD_HOVER}`;
+  if (!card.canOpen) {
+    return (
+      <div title={title} className={CARD_CLASS}>
+        <LevelCardBody card={card} />
+      </div>
+    );
+  }
+  return (
+    <Link href={cumulativeReportHref(card)} title={title} className={`group ${CARD_CLASS} hover:border-accent`}>
+      <LevelCardBody card={card} />
+    </Link>
+  );
+}
+
+function LevelCardBody({ card }: { card: AcademicLevelCard }) {
   const cells = nowCells(card);
   const largest = Math.max(0, ...cells.map((cell) => cell.students));
   return (
-    <Link
-      href={cumulativeReportHref(card)}
-      title={`${card.centreName}. ${CARD_HOVER}`}
-      className="group block h-full rounded-lg border border-border bg-bg-card px-3 py-2.5 hover:border-accent"
-    >
+    <>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
         <span className="rounded bg-accent px-1.5 py-0.5 text-[11px] font-bold uppercase leading-none text-text-on-accent">
           {card.tag}
         </span>
         <span className="whitespace-nowrap text-sm font-bold text-text-primary group-hover:text-accent">
-          G{card.grade} {card.exam} <span aria-hidden className="text-xs text-text-muted">↗</span>
+          G{card.grade} {card.exam}
+          {card.canOpen && (
+            <>
+              {" "}
+              <span aria-hidden className="text-xs text-text-muted">↗</span>
+            </>
+          )}
         </span>
         <span className="ml-auto whitespace-nowrap text-xs text-text-muted">{formatStudents(card.total)}</span>
       </div>
@@ -83,7 +105,7 @@ function LevelCard({ card }: { card: AcademicLevelCard }) {
           <Cell label="NA" count={card.na} title={NA_REASON} />
         </dl>
       </div>
-    </Link>
+    </>
   );
 }
 

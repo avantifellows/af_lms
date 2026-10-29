@@ -140,7 +140,7 @@ describe("getVisitSummaryAcademicLevelCards", () => {
       { grade: 11, stream: "engineering", academicLevel: null, students: 6 },
     ]);
 
-    const result = await getVisitSummaryAcademicLevelCards(SCHOOL);
+    const result = await getVisitSummaryAcademicLevelCards(SCHOOL, ADMIN);
 
     expect(result).toEqual({
       available: true,
@@ -155,9 +155,24 @@ describe("getVisitSummaryAcademicLevelCards", () => {
           ],
           na: 6,
           total: 18,
+          canOpen: true,
         },
       ],
     });
+  });
+
+  it("shows every Centre's cards, opening only those whose Centre page the viewer can open", async () => {
+    mockQuery.mockResolvedValue([coe, nodal]);
+    mockGetStudentAcademicLevelCounts.mockResolvedValue([{ grade: 11, stream: "pcm", academicLevel: "M1", students: 1 }]);
+
+    const cardsFor = async (permission: UserPermission) => {
+      const result = await getVisitSummaryAcademicLevelCards(SCHOOL, permission);
+      return result.available && result.cards.map((card) => `${card.tag} ${card.canOpen}`);
+    };
+
+    // Seated only at the CoE, the PM sees the Nodal card too, but can't open the Nodal's page.
+    expect(await cardsFor(COE_SEATED_PM)).toEqual(["CoE true", "Nodal false"]);
+    expect(await cardsFor(ADMIN)).toEqual(["CoE true", "Nodal true"]);
   });
 
   it("skips streams with no exam and empty rows, so such a class gets no card", async () => {
@@ -169,7 +184,7 @@ describe("getVisitSummaryAcademicLevelCards", () => {
       { grade: 12, stream: "medical", academicLevel: "B1", students: 0 },
     ]);
 
-    await expect(getVisitSummaryAcademicLevelCards(SCHOOL)).resolves.toEqual({ available: true, cards: [] });
+    await expect(getVisitSummaryAcademicLevelCards(SCHOOL, ADMIN)).resolves.toEqual({ available: true, cards: [] });
   });
 
   it("orders cards CoE before Nodal, then by grade, JEE before NEET", async () => {
@@ -184,7 +199,7 @@ describe("getVisitSummaryAcademicLevelCards", () => {
         : [{ grade: 11, stream: "pcm", academicLevel: "M1", students: 1 }]
     );
 
-    const result = await getVisitSummaryAcademicLevelCards(SCHOOL);
+    const result = await getVisitSummaryAcademicLevelCards(SCHOOL, ADMIN);
 
     expect(result.available && result.cards.map((card) => `${card.tag} ${card.grade} ${card.exam}`)).toEqual([
       "CoE 11 NEET",
@@ -198,7 +213,7 @@ describe("getVisitSummaryAcademicLevelCards", () => {
     mockQuery.mockResolvedValue([coe, { ...nodal, program_id: null }, { ...nodal, id: "103", program_id: 9999 }]);
     mockGetStudentAcademicLevelCounts.mockResolvedValue([]);
 
-    await getVisitSummaryAcademicLevelCards({ ...SCHOOL, udise_code: null });
+    await getVisitSummaryAcademicLevelCards({ ...SCHOOL, udise_code: null }, ADMIN);
 
     expect(mockGetStudentAcademicLevelCounts.mock.calls).toEqual([["SC001", "JNV CoE", [11, 12]]]);
   });
@@ -210,7 +225,7 @@ describe("getVisitSummaryAcademicLevelCards", () => {
       .mockRejectedValueOnce(new Error("BigQuery down"));
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    await expect(getVisitSummaryAcademicLevelCards(SCHOOL)).resolves.toEqual({ available: false });
+    await expect(getVisitSummaryAcademicLevelCards(SCHOOL, ADMIN)).resolves.toEqual({ available: false });
     consoleError.mockRestore();
   });
 });

@@ -24,6 +24,7 @@ const JEE_CARD: AcademicLevelCard = {
   ],
   na: 4,
   total: 14,
+  canOpen: true,
 };
 
 const NEET_CARD: AcademicLevelCard = {
@@ -35,6 +36,7 @@ const NEET_CARD: AcademicLevelCard = {
   levels: [],
   na: 1,
   total: 1,
+  canOpen: true,
 };
 
 // The Now row's cells as "label count", in order.
@@ -81,6 +83,18 @@ describe("AcademicLevelCards", () => {
     expect(cards[0]).toHaveAttribute("href", "/centre/41?tab=performance&grade=11&view=cumulative");
     expect(cards[1]).toHaveAttribute("href", "/centre/42?tab=performance&grade=12&view=cumulative");
     expect(cards[0].getAttribute("title")).toMatch(/^JNV Bhopal CoE\. NA: no al-bearing test yet\./);
+  });
+
+  it("shows a card the viewer can't open, with the same counts, but no link", () => {
+    render(<AcademicLevelCards data={{ available: true, cards: [JEE_CARD, { ...NEET_CARD, canOpen: false }] }} />);
+
+    const items = within(screen.getByRole("list", { name: "Academic level" })).getAllByRole("listitem");
+    expect(items).toHaveLength(2);
+    expect(within(items[0]).getByRole("link")).toHaveAttribute("href", "/centre/41?tab=performance&grade=11&view=cumulative");
+    expect(within(items[1]).queryByRole("link")).not.toBeInTheDocument();
+    expect(items[1]).toHaveTextContent(/^NodalG12 NEET1 studentNow/);
+    expect(nowCells(items[1])).toEqual(["B1 0", "B2 0", "B3 0", "NA 1"]);
+    expect(items[1].firstElementChild?.getAttribute("title")).toMatch(/^JNV Bhopal Nodal\. NA: no al-bearing test yet\./);
   });
 
   it("says Academic levels unavailable when the counts could not be read", () => {

@@ -131,7 +131,7 @@ export default async function SchoolVisitSummarySchoolPage({ params, searchParam
   const [teacherGroups, concernPage, academicLevels, flags] = await Promise.all([
     getVisitSummarySchoolTeachers(school.code),
     getSchoolConcernPage(actor, school.code, normalizeVisitSummaryFilters(currentParams)),
-    canViewPerformance ? getVisitSummaryAcademicLevelCards(school) : null,
+    canViewPerformance ? getVisitSummaryAcademicLevelCards(school, permission) : null,
     canViewFlags ? getVisitSummarySchoolFlags(school, permission) : null,
   ]);
 
