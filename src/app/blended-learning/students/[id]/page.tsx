@@ -26,7 +26,7 @@ import { ConversationPhotos } from "./ConversationPhotos";
 import { ConversationRecording } from "./ConversationRecording";
 import { DraftStatus } from "./DraftStatus";
 import { FLAG_HISTORY } from "./flagRecipients";
-import { SCREENER_END_LABEL, SCREENER_QUESTIONS } from "./screenerQuestions";
+import { SCREENER_QUESTIONS } from "./screenerQuestions";
 
 // One Mentee, in one column as wide as the log page's: name, profile line,
 // contact and links, any open Conversation Draft (polled while drafting), the
@@ -216,14 +216,9 @@ function ScreenerUsed({ feedback }: { feedback: ScreenerFeedback | null }) {
       {feedback && (
         <dl className="space-y-2 sm:max-w-2xl">
           {SCREENER_QUESTIONS.map(({ key, question }) => (
-            <div key={key} className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 text-sm">
+            <div key={key} className="grid grid-cols-[1fr_auto] items-baseline gap-x-3 text-sm">
               <dt className="min-w-0 text-text-secondary">{question}</dt>
-              <dd className="shrink-0 text-text-primary">
-                <span className="font-mono font-bold">{`${feedback[key]} / 5`}</span>
-                {SCREENER_END_LABEL[feedback[key]] && (
-                  <span className="text-text-secondary">{` · ${SCREENER_END_LABEL[feedback[key]]}`}</span>
-                )}
-              </dd>
+              <dd className="text-right font-mono font-bold text-text-primary">{`${feedback[key]} / 5`}</dd>
             </div>
           ))}
         </dl>

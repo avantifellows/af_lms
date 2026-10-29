@@ -524,7 +524,7 @@ describe("MenteeDetailPage", () => {
     const ratings = gave.getAllByRole("term").map((term) => [term.textContent, term.nextElementSibling?.textContent]);
     expect(ratings).toEqual([
       ["Did the screener help you understand this student better?", "4 / 5"],
-      ["Did the student seem more comfortable talking to you than before?", "1 / 5 · Not at all"],
+      ["Did the student seem more comfortable talking to you than before?", "1 / 5"],
     ]);
     expect(unused.queryByText("Screener form used")).not.toBeInTheDocument();
     expect(unused.queryByRole("heading", { name: "Screener" })).not.toBeInTheDocument();

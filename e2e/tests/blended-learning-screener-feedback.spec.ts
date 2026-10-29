@@ -197,7 +197,7 @@ for (const { label, key, viewport } of VIEWPORTS) {
       await expect(entry.getByText("Screener form used")).toBeVisible();
       expect(await historyRatings(entry)).toEqual([
         [HELPED, "4 / 5"],
-        [COMFORTABLE, "5 / 5 · A lot"],
+        [COMFORTABLE, "5 / 5"],
       ]);
       expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
     });
@@ -268,7 +268,7 @@ for (const { label, key, viewport } of VIEWPORTS) {
       await expect(first.getByText("Screener form used")).toBeVisible();
       expect(await historyRatings(first)).toEqual([
         [HELPED, "4 / 5"],
-        [COMFORTABLE, "5 / 5 · A lot"],
+        [COMFORTABLE, "5 / 5"],
       ]);
       const history = page.getByRole("region", { name: "History" });
       await expect(history.getByRole("checkbox")).toHaveCount(0);
