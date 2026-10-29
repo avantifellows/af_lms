@@ -43,7 +43,7 @@ export type MenteeRow = {
   openDraftState: OpenDraftState | null;
   reasons: TalkToFirstReason[];
   daysSince: number | null;
-  // Date of the latest Attempt, for the "Not reachable, 4 Oct" Why now tag.
+  // Date of the latest Attempt, for the "Unreachable · 4 Oct" Why now tag.
   lastAttemptOn?: string | null;
 };
 

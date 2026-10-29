@@ -84,7 +84,7 @@ for (const { label, viewport } of VIEWPORTS) {
       await expect(page).toHaveURL(new RegExp(`${detailPath(ira)}$`));
       await expect(page.getByRole("heading", { level: 1, name: fullName(ira) })).toBeVisible();
       await expect(page.getByText("Grade 12")).toBeVisible();
-      await expect(page.getByText("STP Voucher Delhi")).toBeVisible();
+      await expect(page.getByText("Voucher DL", { exact: true })).toBeVisible();
       await expect(page.getByText("Female")).toBeVisible();
       await expect(page.getByRole("link", { name: "Log conversation" })).toHaveAttribute(
         "href",

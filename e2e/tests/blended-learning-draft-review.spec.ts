@@ -148,7 +148,7 @@ for (const { label, key, viewport, entryRole } of VIEWPORTS) {
       await page.goto("/blended-learning");
       const before = listEntry(page, "Talk to first");
       await expect(before).toContainText("Never");
-      await expect(before).toContainText("No conversation yet");
+      await expect(before.getByText("No conversation", { exact: true })).toBeVisible();
 
       // The detail page offers the review too.
       await page.goto(`/blended-learning/students/${studentId}`);

@@ -3,6 +3,7 @@ import { ArrowUpRight, MessageCirclePlus } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { Badge } from "@/components/ui";
+import { shortProgramName } from "@/lib/blended-learning-format";
 import type { MenteeRow } from "@/lib/blended-learning-mentees";
 
 import { daysAgo, shortDate, whyNowTags } from "./menteeListCopy";
@@ -115,13 +116,18 @@ function orDash(value: string | number | null) {
   return value === null ? "—" : value;
 }
 
+// "Voucher DL" for "STP Voucher Delhi".
+function programLabel(mentee: MenteeRow) {
+  return orDash(mentee.programName === null ? null : shortProgramName(mentee.programName));
+}
+
 // "Not reachable on the last try, … 4 of 12."
 function groupSummary(group: MenteeGroupView, total: number): string {
   return `${group.description} ${group.mentees.length} of ${total}.`.trim();
 }
 
 const COLUMNS = [
-  "Student", "Student ID", "Category", "Why now", "Grade", "Program", "Gender", "Last conversation",
+  "Student", "Student ID", "Category", "Why now", "Grade", "Program", "Gender", "Last talked",
 ];
 
 // The program's Student ID, as text so a Punjab ID keeps its leading zeros.
@@ -178,7 +184,7 @@ function TableRow({ mentee, canLog, today }: RowProps) {
         </span>
       </td>
       <td className={`${cell} whitespace-nowrap`}>{orDash(mentee.grade)}</td>
-      <td className={cell}>{orDash(mentee.programName)}</td>
+      <td className={cell}>{programLabel(mentee)}</td>
       <td className={`${cell} whitespace-nowrap`}>{orDash(mentee.gender)}</td>
       <td className={cell}>
         <LastContact mentee={mentee} today={today} />
@@ -246,10 +252,10 @@ function MenteeCard({ mentee, canLog, today }: RowProps) {
           <DraftChip mentee={mentee} canLog={canLog} className="min-h-11 -my-2.5" />
         </div>
       )}
-      <CardField label="Program" className="col-span-3">{orDash(mentee.programName)}</CardField>
+      <CardField label="Program" className="col-span-3">{programLabel(mentee)}</CardField>
       <CardField label="Grade">{orDash(mentee.grade)}</CardField>
       <CardField label="Gender">{orDash(mentee.gender)}</CardField>
-      <CardField label="Last conversation">
+      <CardField label="Last talked">
         <LastContact mentee={mentee} today={today} />
       </CardField>
       <div className="col-span-3 flex gap-2 pt-1">

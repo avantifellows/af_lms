@@ -57,7 +57,7 @@ describe("MenteeGroups — one table with group header rows", () => {
 
     expect(screen.getAllByRole("table")).toHaveLength(1);
     expect(screen.getAllByRole("columnheader").map((header) => header.textContent)).toEqual([
-      "Student", "Student ID", "Category", "Why now", "Grade", "Program", "Gender", "Last conversation",
+      "Student", "Student ID", "Category", "Why now", "Grade", "Program", "Gender", "Last talked",
       "Actions",
     ]);
     expect(tableGroup("Talk to first")).toHaveTextContent("Talk to firstNot reachable on the last try. 1 of 2.");
@@ -72,12 +72,12 @@ describe("MenteeGroups — one table with group header rows", () => {
     expect(tableGroup("Everyone else")).toHaveTextContent("1 of 1.");
   });
 
-  it("shows Student ID and category columns after the name, then Why now, grade, program, gender and last conversation, with no duration", () => {
+  it("shows Student ID and category columns after the name, then Why now, grade, program, gender and last talked, with no duration", () => {
     renderList(true, [IRA]);
 
     const cells = within(tableRow("Ira Attempt")).getAllByRole("cell").map((cell) => cell.textContent);
     expect(cells).toEqual([
-      "Ira Attempt", "00123456", "Gen-EWS", "Not reachable, 20 Oct", "12", "STP Voucher Delhi",
+      "Ira Attempt", "00123456", "Gen-EWS", "Unreachable · 20 Oct", "12", "Voucher DL",
       "Female", "12 Oct10 days ago", "ViewNew log",
     ]);
     expect(within(tableRow("Ira Attempt")).getByText("00123456")).toHaveClass("font-mono");
@@ -95,16 +95,16 @@ describe("MenteeGroups — Why now and last conversation copy", () => {
   it("dates the failed try in red, and counts the days since contact", () => {
     renderList(true, [IRA, MEERA]);
 
-    const ira = within(tableRow("Ira Attempt")).getByText("Not reachable, 20 Oct");
+    const ira = within(tableRow("Ira Attempt")).getByText("Unreachable · 20 Oct");
     expect(ira).toHaveClass("bg-danger-bg", "whitespace-nowrap");
-    expect(within(tableRow("Meera Thirty")).getByText("Not contacted in 30 days")).toHaveClass("bg-warning-bg");
+    expect(within(tableRow("Meera Thirty")).getByText("No contact · 30 days")).toHaveClass("bg-warning-bg");
   });
 
   it("says when a Student has no conversation yet, with Never for the last one", () => {
     renderList(true, [KABIR]);
 
     const kabir = within(tableRow("Kabir Never"));
-    expect(kabir.getByText("No conversation yet")).toBeInTheDocument();
+    expect(kabir.getByText("No conversation")).toBeInTheDocument();
     expect(kabir.getByText("Never")).toBeInTheDocument();
   });
 
@@ -112,7 +112,7 @@ describe("MenteeGroups — Why now and last conversation copy", () => {
     renderList(true, [NIKHIL]);
 
     const nikhil = within(tableRow("Nikhil Legacy"));
-    expect(nikhil.getByText("Not contacted in 130 days")).toBeInTheDocument();
+    expect(nikhil.getByText("No contact · 130 days")).toBeInTheDocument();
     expect(nikhil.getByText(/^14 Jun/)).toBeInTheDocument();
     expect(nikhil.getByText("before app")).toBeInTheDocument();
   });
@@ -191,11 +191,11 @@ describe("MenteeGroups — phone cards", () => {
     const card = within(talkToFirst).getByRole("listitem");
     expect(card).toHaveTextContent("Ira AttemptID 00123456Category Gen-EWS");
     expect(within(card).getByText("00123456")).toHaveClass("font-mono");
-    expect(card).toHaveTextContent("Not reachable, 20 Oct");
-    expect(card).toHaveTextContent("ProgramSTP Voucher Delhi");
+    expect(card).toHaveTextContent("Unreachable · 20 Oct");
+    expect(card).toHaveTextContent("ProgramVoucher DL");
     expect(card).toHaveTextContent("Grade12");
     expect(card).toHaveTextContent("GenderFemale");
-    expect(card).toHaveTextContent("Last conversation12 Oct10 days ago");
+    expect(card).toHaveTextContent("Last talked12 Oct10 days ago");
     expect(card).not.toHaveTextContent("Duration");
     expect(card).toHaveTextContent("ViewNew log");
     expect(within(screen.getByRole("region", { name: "Everyone else" })).getAllByRole("listitem")).toHaveLength(1);

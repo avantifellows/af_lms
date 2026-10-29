@@ -4,6 +4,7 @@ import { Search } from "lucide-react";
 import { useState } from "react";
 
 import { FormLabel, Input } from "@/components/ui";
+import { shortProgramName } from "@/lib/blended-learning-format";
 import type { MenteeList, MenteeRow } from "@/lib/blended-learning-mentees";
 import { thirtyDaysOrMore } from "@/lib/blended-learning-talk-to-first";
 
@@ -64,7 +65,8 @@ function asOptions(values: string[]): { value: string; label: string }[] {
 function programOptions(mentees: MenteeRow[]): { value: string; label: string }[] {
   const programs = new Map<number, string>();
   for (const mentee of mentees) {
-    programs.set(mentee.programId, mentee.programName ?? `Program ${mentee.programId}`);
+    const name = mentee.programName ? shortProgramName(mentee.programName) : `Program ${mentee.programId}`;
+    programs.set(mentee.programId, name);
   }
   return [...programs]
     .map(([id, name]) => ({ value: String(id), label: name }))

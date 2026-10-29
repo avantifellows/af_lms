@@ -168,7 +168,7 @@ describe("LogEntryPage", () => {
       studentId: 501,
       name: "Ira Sharma",
       firstName: "Ira",
-      subtitle: "Ira Sharma · Grade 12 · STP Voucher Delhi",
+      subtitle: "Ira Sharma · Grade 12 · Voucher DL",
       today: "2026-10-22",
       listGroup: "Talk to first",
       openActionItems: OPEN_ITEMS,

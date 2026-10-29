@@ -2,7 +2,7 @@ import { ArrowUpRight } from "lucide-react";
 import Link from "next/link";
 
 import type { FlagCard, FlagsPage } from "@/lib/blended-learning-flags";
-import { formatCalendarDate } from "@/lib/blended-learning-format";
+import { formatCalendarDate, shortProgramName } from "@/lib/blended-learning-format";
 import type { FlagRecipient } from "@/lib/blended-learning-mentee-detail";
 
 import { FlagsFilters } from "./FlagsFilters";
@@ -40,7 +40,8 @@ function feedHref(view: FlagsView, cursor: number | null): string {
 }
 
 function FlagCardView({ flag, ownStudents }: { flag: FlagCard; ownStudents: boolean }) {
-  const meta = [flag.grade === null ? null : `Grade ${flag.grade}`, flag.programName, flag.gender].filter(Boolean);
+  const program = flag.programName && shortProgramName(flag.programName);
+  const meta = [flag.grade === null ? null : `Grade ${flag.grade}`, program, flag.gender].filter(Boolean);
   return (
     <article
       className={`space-y-2 rounded-lg border bg-bg-card p-4 shadow-sm ${

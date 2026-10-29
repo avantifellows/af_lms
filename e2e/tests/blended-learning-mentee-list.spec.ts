@@ -85,23 +85,23 @@ for (const { label, viewport, desktop } of VIEWPORTS) {
 
       const ira = entry(talkToFirst, attemptLatest);
       const lastTry = istDaysAgo(2);
-      await expect(ira.getByText(`Not reachable, ${shortDate(lastTry, istDaysAgo(0))}`)).toBeVisible();
+      await expect(ira.getByText(`Unreachable · ${shortDate(lastTry, istDaysAgo(0))}`)).toBeVisible();
       // The Attempt 2 days ago never counts as Last Contact.
       await expect(ira.getByText("10 days ago")).toBeVisible();
       // The list shows no duration.
       await expect(ira.getByText("25 min")).toHaveCount(0);
 
       const kabir = entry(talkToFirst, neverContacted);
-      await expect(kabir.getByText("No conversation yet")).toBeVisible();
+      await expect(kabir.getByText("No conversation", { exact: true })).toBeVisible();
       await expect(kabir.getByText("Never", { exact: true })).toBeVisible();
 
       const nikhil = entry(talkToFirst, legacy);
-      await expect(nikhil.getByText(/^Not contacted in \d+ days$/)).toBeVisible();
+      await expect(nikhil.getByText(/^No contact · \d+ days$/)).toBeVisible();
       await expect(nikhil.getByText("before app")).toBeVisible();
       await expect(nikhil.getByText("Not recorded")).toHaveCount(0);
 
       const meera = entry(talkToFirst, thirtyDays);
-      await expect(meera.getByText("Not contacted in 30 days")).toBeVisible();
+      await expect(meera.getByText("No contact · 30 days")).toBeVisible();
       await expect(meera.getByText("30 days ago")).toBeVisible();
     });
 
@@ -142,12 +142,12 @@ for (const { label, viewport, desktop } of VIEWPORTS) {
     test("shows each Student's grade, program and gender", async ({ page }) => {
       const ira = entry(group(page, "Talk to first"), attemptLatest);
       await expect(ira.getByText("12", { exact: true })).toBeVisible();
-      await expect(ira.getByText("STP Voucher Delhi")).toBeVisible();
+      await expect(ira.getByText("Voucher DL", { exact: true })).toBeVisible();
       await expect(ira.getByText("Female", { exact: true })).toBeVisible();
 
       const kabir = entry(group(page, "Talk to first"), neverContacted);
       await expect(kabir.getByText("13", { exact: true })).toBeVisible();
-      await expect(kabir.getByText("STP Dropper Delhi")).toBeVisible();
+      await expect(kabir.getByText("Dropper DL", { exact: true })).toBeVisible();
     });
 
     test("shows each Student's Student ID and category, with a dash for no category", async ({ page }) => {
@@ -172,7 +172,7 @@ for (const { label, viewport, desktop } of VIEWPORTS) {
       await expect(kabir.getByText("Category —", { exact: true })).toBeVisible();
       const name = await ira.getByRole("link", { name: fullName(attemptLatest), exact: true }).boundingBox();
       const id = await iraId.boundingBox();
-      const program = await ira.getByText("STP Voucher Delhi").boundingBox();
+      const program = await ira.getByText("Voucher DL", { exact: true }).boundingBox();
       expect(id!.y).toBeGreaterThan(name!.y);
       expect(id!.y + id!.height).toBeLessThan(program!.y);
     });
@@ -221,7 +221,7 @@ for (const { label, viewport, desktop } of VIEWPORTS) {
         const table = page.getByRole("table");
         await expect(table).toHaveCount(1);
         await expect(table.getByRole("columnheader")).toHaveText([
-          "Student", "Student ID", "Category", "Why now", "Grade", "Program", "Gender", "Last conversation",
+          "Student", "Student ID", "Category", "Why now", "Grade", "Program", "Gender", "Last talked",
           "Actions",
         ]);
         // The table fits its card at 1280 px, and at 1024 px with icon-only
@@ -240,7 +240,7 @@ for (const { label, viewport, desktop } of VIEWPORTS) {
       test("a click anywhere on a row opens the Student", async ({ page }) => {
         const ira = entry(group(page, "Talk to first"), attemptLatest);
         // The name's link stretches over the row, so it takes the click.
-        await ira.getByText("STP Voucher Delhi").click({ force: true });
+        await ira.getByText("Voucher DL", { exact: true }).click({ force: true });
         await expect(page).toHaveURL(/\/blended-learning\/students\/\d+$/);
         await expect(page.getByRole("heading", { name: fullName(attemptLatest) })).toBeVisible();
       });
