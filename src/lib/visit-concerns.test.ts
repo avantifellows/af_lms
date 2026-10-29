@@ -9,6 +9,7 @@ import {
   getSchoolConcernPage,
   getSchoolWiseView,
   normalizeSchoolWiseSort,
+  withRecurringSchoolsOnly,
 } from "./visit-concerns";
 import type { VisitSummaryFilters } from "./visit-summary-scope";
 import { buildVisitsActor } from "./visits-policy";
@@ -161,6 +162,27 @@ describe("getSchoolWiseView", () => {
     const view = await getSchoolWiseView(SC001_PROGRAM_ADMIN, NO_FILTERS, { sort: "visits", dir: "desc" });
 
     expect(view.rows.map((row) => row.schoolCode)).toEqual(["SC002", "SC001"]);
+  });
+});
+
+describe("withRecurringSchoolsOnly", () => {
+  const where = { whereSql: "v.deleted_at IS NULL AND v.status = $1", joinSql: "LEFT JOIN extra", params: ["completed"] };
+
+  it("keeps the Visits in view and adds the Schools-with-a-Recurring-Concern rule over those same Visits", () => {
+    const narrowed = withRecurringSchoolsOnly(where);
+    const sql = narrowed.whereSql.replace(/\s+/g, " ");
+
+    expect(narrowed.joinSql).toBe("LEFT JOIN extra");
+    expect(narrowed.params).toEqual(["completed", 2]);
+    expect(sql.startsWith("v.deleted_at IS NULL AND v.status = $1 AND v.school_code IN (")).toBe(true);
+    // The inner Visits in view are the same WHERE (and joins) on their own aliases, completed only.
+    expect(sql).toContain(
+      "FROM lms_pm_school_visits v LEFT JOIN school s ON s.code = v.school_code LEFT JOIN extra WHERE v.deleted_at IS NULL AND v.status = $1 AND v.status = 'completed'"
+    );
+    // getSchoolWiseView's rule: an open Concern at the School with live mentions in 2+ distinct Visits.
+    expect(sql).toContain("JOIN lms_visit_concerns c ON c.id = m.concern_id AND c.school_code = viv.school_code");
+    expect(sql).toContain("WHERE c.kind = 'concern' AND c.status = 'open'");
+    expect(sql).toContain("GROUP BY viv.school_code, c.id HAVING COUNT(DISTINCT viv.id) >= $2");
   });
 });
 

@@ -42,6 +42,7 @@ import {
   SCHOOL_WISE_SORT_COLUMNS,
   getSchoolWiseView,
   normalizeSchoolWiseSort,
+  withRecurringSchoolsOnly,
   type SchoolWiseSort,
   type SchoolWiseView,
   type SchoolWiseRow,
@@ -433,12 +434,14 @@ async function getSchoolWiseSummary(
 ): Promise<SchoolWiseResult> {
   const sort = normalizeSchoolWiseSort(searchParams.sort, searchParams.dir);
   const filters = normalizeVisitSummaryFilters(searchParams);
+  // With `recurring=1` the options offer only what the table keeps, so no pick empties it.
+  const narrowOptions = filters.recurringOnly ? withRecurringSchoolsOnly : undefined;
   const [view, allSchoolsStats, schoolOptions, pmOptions, regionOptions] = await Promise.all([
     getSchoolWiseView(actor, filters, sort),
     filters.recurringOnly ? null : getSummaryStats(actor, filters),
-    getVisitSummarySchoolOptions(actor, filters),
-    getVisitSummaryPmOptions(actor, filters),
-    getVisitSummaryRegionOptions(actor, filters),
+    getVisitSummarySchoolOptions(actor, filters, narrowOptions),
+    getVisitSummaryPmOptions(actor, filters, narrowOptions),
+    getVisitSummaryRegionOptions(actor, filters, narrowOptions),
   ]);
   const stats = allSchoolsStats ?? await getKeptSchoolsStats(actor, filters, view.rows);
 

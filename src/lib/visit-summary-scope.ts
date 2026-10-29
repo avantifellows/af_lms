@@ -230,11 +230,15 @@ export function buildVisitSummaryWhere(
   };
 }
 
+// Lets a caller narrow an option list's Visits in view further (the School-wise tab's `recurring=1`).
+export type NarrowVisitSummaryWhere = (where: VisitSummaryWhere) => VisitSummaryWhere;
+
 export async function getVisitSummaryRegionOptions(
   actor: VisitsActor,
-  filters: VisitSummaryFilters
+  filters: VisitSummaryFilters,
+  narrow: NarrowVisitSummaryWhere = (where) => where
 ): Promise<RegionFilterOption[]> {
-  const { whereSql, joinSql, params } = buildVisitSummaryWhere(actor, filters, { exclude: "regions" });
+  const { whereSql, joinSql, params } = narrow(buildVisitSummaryWhere(actor, filters, { exclude: "regions" }));
 
   const rows = await query<{ region: string | null }>(
     `SELECT DISTINCT s.region
@@ -253,9 +257,10 @@ export async function getVisitSummaryRegionOptions(
 
 export async function getVisitSummarySchoolOptions(
   actor: VisitsActor,
-  filters: VisitSummaryFilters
+  filters: VisitSummaryFilters,
+  narrow: NarrowVisitSummaryWhere = (where) => where
 ): Promise<SchoolFilterOption[]> {
-  const { whereSql, joinSql, params } = buildVisitSummaryWhere(actor, filters, { exclude: "schools" });
+  const { whereSql, joinSql, params } = narrow(buildVisitSummaryWhere(actor, filters, { exclude: "schools" }));
 
   return query<SchoolFilterOption>(
     `SELECT DISTINCT v.school_code AS code, COALESCE(s.name, v.school_code) AS name
@@ -270,9 +275,10 @@ export async function getVisitSummarySchoolOptions(
 
 export async function getVisitSummaryPmOptions(
   actor: VisitsActor,
-  filters: VisitSummaryFilters
+  filters: VisitSummaryFilters,
+  narrow: NarrowVisitSummaryWhere = (where) => where
 ): Promise<PmFilterOption[]> {
-  const { whereSql, joinSql, params } = buildVisitSummaryWhere(actor, filters, { exclude: "pms" });
+  const { whereSql, joinSql, params } = narrow(buildVisitSummaryWhere(actor, filters, { exclude: "pms" }));
 
   return query<PmFilterOption>(
     `SELECT DISTINCT LOWER(v.pm_email) AS email, up.full_name AS name

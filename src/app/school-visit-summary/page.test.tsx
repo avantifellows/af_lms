@@ -746,6 +746,7 @@ describe("SchoolVisitSummaryPage", () => {
       stats: (params: unknown[]) => Record<string, unknown> = () => schoolWiseStats
     ) {
       mockQuery.mockImplementation((sql: string, params: unknown[] = []) => {
+        if (sql.trimStart().startsWith("SELECT DISTINCT")) return Promise.resolve([]); // filter options
         if (sql.includes("lms_visit_concerns")) return Promise.resolve(rows);
         if (sql.includes("lms_visit_note_summaries")) return Promise.resolve([freshness]);
         if (sql.includes("WITH action_completion")) return Promise.resolve([stats(params)]);
@@ -952,6 +953,53 @@ describe("SchoolVisitSummaryPage", () => {
       expect(screen.getByText("0 schools")).toBeInTheDocument();
       expect(screen.getByText("No schools match your filters")).toBeInTheDocument();
       expect(screen.getByRole("checkbox", { name: "Recurring concerns only" })).toBeChecked();
+    });
+
+    describe("filter options with recurring=1", () => {
+      function optionQueries() {
+        return (mockQuery.mock.calls as [string, unknown[]][]).filter(([sql]) => sql.trimStart().startsWith("SELECT DISTINCT"));
+      }
+
+      it("offer only Schools with a Recurring Concern (and their Regions and PMs) on the School-wise tab", async () => {
+        setupAuth();
+        setupSchoolWiseQueries();
+
+        await SchoolVisitSummaryPage({ searchParams: Promise.resolve({ recurring: "1", status: "completed" }) });
+
+        const options = optionQueries();
+        expect(options.map(([sql]) => sql.match(/SELECT DISTINCT (\S+)/)?.[1])).toEqual([
+          "v.school_code", "LOWER(v.pm_email)", "s.region",
+        ]);
+        for (const [sql, params] of options) {
+          expect(sql).toContain("AND v.school_code IN (");
+          expect(sql).toContain("JOIN lms_visit_concerns c");
+          expect(sql).toContain(`HAVING COUNT(DISTINCT viv.id) >= $${params.length}`);
+          expect(params).toEqual(["completed", 2]);
+        }
+      });
+
+      it("offer every School in view without recurring=1", async () => {
+        setupAuth();
+        setupSchoolWiseQueries();
+
+        await SchoolVisitSummaryPage({ searchParams: Promise.resolve({ status: "completed" }) });
+
+        expect(optionQueries()).toHaveLength(3);
+        for (const [sql] of optionQueries()) expect(sql).not.toContain("lms_visit_concerns");
+      });
+
+      it("are unchanged on the Visits tab, which ignores recurring=1", async () => {
+        setupAuth();
+        setupSummaryQueries();
+
+        await SchoolVisitSummaryPage({ searchParams: Promise.resolve({ tab: "visits", recurring: "1" }) });
+
+        const options = (mockQuery.mock.calls as [string, unknown[]][]).slice(2, 5);
+        expect(options.map(([sql]) => sql.match(/SELECT DISTINCT (\S+)/)?.[1])).toEqual([
+          "v.school_code", "LOWER(v.pm_email)", "s.region",
+        ]);
+        for (const [sql] of options) expect(sql).not.toContain("lms_visit_concerns");
+      });
     });
 
     it("offers Recurring concerns only on the School-wise tab", async () => {

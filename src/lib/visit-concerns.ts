@@ -10,6 +10,7 @@ import {
   buildVisitSummarySchoolPredicate,
   buildVisitSummaryWhere,
   type VisitSummaryFilters,
+  type VisitSummaryWhere,
 } from "@/lib/visit-summary-scope";
 import { RECURRING_CONCERN_MIN_VISITS } from "@/lib/visit-summary";
 import type { VisitsActor } from "@/lib/visits-policy";
@@ -250,6 +251,33 @@ export async function getSchoolWiseView(
       waitingVisits: schoolRows.reduce((total, row) => total + row.waitingVisits, 0),
     },
     rows: schoolRows,
+  };
+}
+
+// Narrows a Visit Summary WHERE (`v`/`s` aliases) to Visits at Schools with a Recurring Concern over
+// the same Visits in view: getSchoolWiseView's rule, so with `recurring=1` an option list offers only
+// Schools the table keeps (and the Regions and PMs of Visits at them). The inner query re-declares
+// `v` and `s`, so it reuses the WHERE and its placeholders unchanged.
+export function withRecurringSchoolsOnly(where: VisitSummaryWhere): VisitSummaryWhere {
+  const minVisits = `$${where.params.length + 1}`;
+  return {
+    whereSql: `${where.whereSql} AND v.school_code IN (
+       SELECT viv.school_code
+       FROM (
+         SELECT v.id, v.school_code
+         FROM lms_pm_school_visits v
+         LEFT JOIN school s ON s.code = v.school_code
+         ${where.joinSql}
+         WHERE ${where.whereSql} AND v.status = 'completed'
+       ) viv
+       JOIN lms_visit_concern_mentions m ON m.visit_id = viv.id
+       JOIN lms_visit_concerns c ON c.id = m.concern_id AND c.school_code = viv.school_code
+       WHERE c.kind = 'concern' AND c.status = 'open'
+       GROUP BY viv.school_code, c.id
+       HAVING COUNT(DISTINCT viv.id) >= ${minVisits}
+     )`,
+    joinSql: where.joinSql,
+    params: [...where.params, RECURRING_CONCERN_MIN_VISITS],
   };
 }
 
