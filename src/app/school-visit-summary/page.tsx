@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import ClickableTableRow from "@/components/visits/ClickableTableRow";
+import { ConcernFreshnessLine } from "@/components/visits/ConcernFreshnessLine";
 import GpsMapLink from "@/components/visits/GpsMapLink";
 import RecurringOnlyToggle from "@/components/visits/RecurringOnlyToggle";
 import VisitSummaryFilterBar from "@/components/visits/VisitSummaryFilterBar";
@@ -717,16 +718,6 @@ function LastVisitPill({ date, now }: { date: string; now: Date }) {
       <time dateTime={date}>{formatCompactVisitDates([date], now)}</time>
       {stale && <>{" "}<span className="sr-only">{STALE_LAST_VISIT_LABEL}</span></>}
     </span>
-  );
-}
-
-function ConcernFreshnessLine({ freshness }: { freshness: SchoolWiseView["freshness"] }) {
-  return (
-    <p className="text-xs text-text-muted">
-      {freshness.summarisedUpTo
-        ? `Visit notes summarised up to ${formatIstTimestamp(freshness.summarisedUpTo)} · ${formatVisitCount(freshness.waitingVisits)} waiting`
-        : "Visit notes haven't been summarised yet"}
-    </p>
   );
 }
 

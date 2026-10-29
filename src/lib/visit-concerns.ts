@@ -62,8 +62,9 @@ export interface SchoolWiseRow {
 }
 
 // `summarisedUpTo` is the latest summary run over all Visits (null: never summarised);
-// `waitingVisits` counts the completed Visits in view with no summary yet, at the Schools kept
-// (so it follows `recurringOnly` like the stats).
+// `waitingVisits` counts the completed Visits in view with no summary yet: on the School-wise tab
+// at the Schools kept (so it follows `recurringOnly` like the stats), on the School page at that
+// School.
 export interface ConcernFreshness {
   summarisedUpTo: Date | null;
   waitingVisits: number;
@@ -93,6 +94,19 @@ interface SchoolWiseQueryRow {
 
 interface FreshnessQueryRow {
   summarised_up_to: Date | string | null;
+}
+
+// A Visit (aliased `v`) counts as summarised once it has a note summary row; a completed Visit
+// without one is waiting for the next summary run.
+const VISIT_SUMMARISED_SQL = "EXISTS (SELECT 1 FROM lms_visit_note_summaries ns WHERE ns.visit_id = v.id)";
+
+// The latest summary run over all Visits (null: never summarised). summarised_at holds UTC in a
+// timestamp without time zone.
+async function getSummarisedUpTo(): Promise<Date | null> {
+  const [row] = await query<FreshnessQueryRow>(
+    `SELECT MAX(summarised_at) AT TIME ZONE 'UTC' AS summarised_up_to FROM lms_visit_note_summaries`
+  );
+  return row?.summarised_up_to ? new Date(row.summarised_up_to) : null;
 }
 
 function isSchoolWiseSortKey(value: string | undefined): value is SchoolWiseSortKey {
@@ -135,7 +149,7 @@ export async function getSchoolWiseView(
     `WITH visits_in_view AS (
        SELECT v.id, v.school_code, v.visit_date, v.status,
               COALESCE(s.name, v.school_code) AS school_name, s.region, s.af_school_category,
-              EXISTS (SELECT 1 FROM lms_visit_note_summaries ns WHERE ns.visit_id = v.id) AS summarised
+              ${VISIT_SUMMARISED_SQL} AS summarised
        FROM lms_pm_school_visits v
        LEFT JOIN school s ON s.code = v.school_code
        ${joinSql}
@@ -203,11 +217,7 @@ export async function getSchoolWiseView(
      ORDER BY ${buildOrderClause(sort)}`,
     [...params, PROGRAM_IDS.NVS, RECURRING_CONCERN_MIN_VISITS]
   );
-  // The latest summary run over all Visits. summarised_at holds UTC in a timestamp without time zone.
-  const freshnessQuery = query<FreshnessQueryRow>(
-    `SELECT MAX(summarised_at) AT TIME ZONE 'UTC' AS summarised_up_to FROM lms_visit_note_summaries`
-  );
-  const [rows, [freshness]] = await Promise.all([rowsQuery, freshnessQuery]);
+  const [rows, summarisedUpTo] = await Promise.all([rowsQuery, getSummarisedUpTo()]);
 
   const allRows = rows.map((row): SchoolWiseRow => ({
     schoolCode: row.school_code,
@@ -247,7 +257,7 @@ export async function getSchoolWiseView(
       openConcerns: schoolRows.reduce((total, row) => total + row.openCount, 0),
     },
     freshness: {
-      summarisedUpTo: freshness?.summarised_up_to ? new Date(freshness.summarised_up_to) : null,
+      summarisedUpTo,
       waitingVisits: schoolRows.reduce((total, row) => total + row.waitingVisits, 0),
     },
     rows: schoolRows,
@@ -333,6 +343,8 @@ export interface VisitNotes {
   visitId: number;
   visitDate: string;
   status: string;
+  // Has a note summary; a completed Visit without one has no concerns or highlights yet.
+  summarised: boolean;
   pmEmail: string;
   pmName: string | null;
   concerns: VisitNoteItem[];
@@ -344,6 +356,7 @@ export interface SchoolConcernPage {
   goingWell: ConcernCard[];
   resolved: ConcernCard[];
   visitNotes: VisitNotes[];
+  freshness: ConcernFreshness;
 }
 
 interface SchoolVisitRow {
@@ -352,6 +365,7 @@ interface SchoolVisitRow {
   status: string;
   pm_email: string;
   pm_name: string | null;
+  summarised: boolean;
 }
 
 interface MentionRow {
@@ -432,6 +446,8 @@ function compareCards(a: ConcernCard, b: ConcernCard): number {
 // count, so a record with none in view — including one mentioned only by soft-deleted or
 // in-progress Visits — doesn't show. The one mentions read feeds each card's visit count, dates
 // and mention lines (with snippets) alike, so they always agree. Visit-wise notes list every Visit in view, newest first.
+// `freshness` is the School-wise tab's, for this School: the latest summary run, and this School's
+// completed Visits in view with no summary yet.
 // The caller has already checked the School is one the actor may see.
 export async function getSchoolConcernPage(
   actor: VisitsActor,
@@ -441,16 +457,20 @@ export async function getSchoolConcernPage(
   const { whereSql, joinSql, params } = buildVisitSummaryWhere(actor, filters);
   const schoolIndex = params.length + 1;
 
-  const visits = await query<SchoolVisitRow>(
-    `SELECT v.id, TO_CHAR(v.visit_date, 'YYYY-MM-DD') AS visit_date, v.status, v.pm_email,
-            ${permissionNameSql("v.pm_email")} AS pm_name
-     FROM lms_pm_school_visits v
-     LEFT JOIN school s ON s.code = v.school_code
-     ${joinSql}
-     WHERE ${whereSql} AND v.school_code = $${schoolIndex}
-     ORDER BY v.visit_date DESC, v.id DESC`,
-    [...params, schoolCode]
-  );
+  const [visits, summarisedUpTo] = await Promise.all([
+    query<SchoolVisitRow>(
+      `SELECT v.id, TO_CHAR(v.visit_date, 'YYYY-MM-DD') AS visit_date, v.status, v.pm_email,
+              ${permissionNameSql("v.pm_email")} AS pm_name,
+              ${VISIT_SUMMARISED_SQL} AS summarised
+       FROM lms_pm_school_visits v
+       LEFT JOIN school s ON s.code = v.school_code
+       ${joinSql}
+       WHERE ${whereSql} AND v.school_code = $${schoolIndex}
+       ORDER BY v.visit_date DESC, v.id DESC`,
+      [...params, schoolCode]
+    ),
+    getSummarisedUpTo(),
+  ]);
 
   const liveVisitIds = visits.filter((visit) => visit.status === "completed").map((visit) => Number(visit.id));
   const mentions = liveVisitIds.length === 0
@@ -519,12 +539,17 @@ export async function getSchoolConcernPage(
         visitId: Number(visit.id),
         visitDate: visit.visit_date,
         status: visit.status,
+        summarised: Boolean(visit.summarised),
         pmEmail: visit.pm_email,
         pmName: visit.pm_name,
         concerns: items.filter((item) => item.kind === "concern").sort(byId),
         highlights: items.filter((item) => item.kind === "highlight").sort(byId),
       };
     }),
+    freshness: {
+      summarisedUpTo,
+      waitingVisits: visits.filter((visit) => visit.status === "completed" && !visit.summarised).length,
+    },
   };
 }
 

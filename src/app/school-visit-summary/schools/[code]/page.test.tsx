@@ -505,6 +505,31 @@ describe("SchoolVisitSummarySchoolPage", () => {
       expect(screen.getByRole("region", { name: "All concerns - Need Attention" })).toHaveTextContent("1 open");
     });
 
+    it("says the School's Visits aren't summarised yet, with the summary run, instead of showing no concerns", async () => {
+      await withRealMatrix(adminPermission);
+      mockQuery.mockImplementation((sql: string) => {
+        if (sql.includes("MAX(summarised_at)")) {
+          return Promise.resolve([{ summarised_up_to: new Date("2026-10-20T08:30:00Z") }]);
+        }
+        if (sql.includes("centre_positions")) return Promise.resolve([]);
+        if (sql.includes("lms_visit_concern_mentions")) return Promise.resolve([]);
+        if (sql.includes("lms_pm_school_visits")) {
+          return Promise.resolve([
+            { id: "1", visit_date: "2026-10-25", status: "completed", pm_email: "pm@avantifellows.org", pm_name: "PM", summarised: false },
+          ]);
+        }
+        return Promise.resolve([{ code: "SC001", name: "Test School", region: "Bhopal" }]);
+      });
+
+      render(await renderPage());
+
+      expect(screen.getByText("Visit notes summarised up to 20 Oct 2026, 14:00 · 1 visit waiting")).toBeInTheDocument();
+      const needsAttention = screen.getByRole("region", { name: "All concerns - Need Attention" });
+      expect(needsAttention).toHaveTextContent("1 visit not summarised yet");
+      expect(within(needsAttention).getByText("Not summarised yet")).toBeInTheDocument();
+      expect(screen.queryByText("No open concerns in view")).not.toBeInTheDocument();
+    });
+
     it("links each Visit-wise note to its Visit, which comes Back to this School page and its filters", async () => {
       await withRealMatrix(adminPermission);
       setupConcerns();

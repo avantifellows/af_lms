@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 
 import { Badge, Card } from "@/components/ui";
 import { ConcernDisclosure } from "@/components/visits/ConcernDisclosure";
+import { ConcernFreshnessLine } from "@/components/visits/ConcernFreshnessLine";
 import type {
   ConcernCard,
   ConcernHistoryEntry,
@@ -26,7 +27,10 @@ import {
 // mentions in view, newest first, each linking to its Visit. Every text — concern text, snippets,
 // notes — is stored text and renders as text. `today` decides the compact dates' year rule.
 // `canAct` (visits edit, the rule the events API enforces) adds Resolve on open concerns and
-// Comment / Reopen on resolved ones.
+// Comment / Reopen on resolved ones. Concerns come from a summary run (etl-next, a few times a day),
+// so the sections open with the School-wise tab's freshness line; Needs attention says how many
+// completed Visits in view aren't summarised yet, their Visit-wise notes are marked, and when none
+// is summarised the concern and highlight empty states say "Not summarised yet", not "nothing in view".
 
 const EVENT_LABELS: Record<Exclude<ConcernHistoryEntry["kind"], "auto_reopened">, { label: string; className: string }> = {
   resolved: { label: "Resolved", className: "text-success" },
@@ -111,6 +115,21 @@ function EmptyState({ children }: { children: ReactNode }) {
   return <p className="text-sm text-text-muted">{children}</p>;
 }
 
+// How far the summary run has reached this School's Visits in view: how many completed Visits it
+// hasn't summarised yet, and whether it has summarised none of them.
+interface SummaryProgress {
+  waitingVisits: number;
+  noneSummarised: boolean;
+}
+
+function summaryProgress(page: SchoolConcernPage): SummaryProgress {
+  const completed = page.visitNotes.filter((visit) => visit.status === "completed");
+  return {
+    waitingVisits: page.freshness.waitingVisits,
+    noneSummarised: completed.length > 0 && completed.every((visit) => !visit.summarised),
+  };
+}
+
 // What the PMs said: a card's mentions in view, newest first. Each line reads date · PM (email when
 // they have no name), then the snippet, and links to that Visit.
 function MentionLines({ cardId, mentions, backHref }: { cardId: number; mentions: ConcernMention[]; backHref?: string }) {
@@ -170,7 +189,13 @@ function OpenConcernCard({ card, today, canAct, backHref }: CardProps) {
   );
 }
 
-function NeedsAttention({ cards, today, canAct, backHref }: Omit<CardProps, "card"> & { cards: ConcernCard[] }) {
+function NeedsAttention({
+  cards,
+  today,
+  canAct,
+  backHref,
+  progress,
+}: Omit<CardProps, "card"> & { cards: ConcernCard[]; progress: SummaryProgress }) {
   return (
     <section aria-labelledby="needs-attention-heading" className="min-w-0 space-y-3">
       <SectionHeading
@@ -179,9 +204,14 @@ function NeedsAttention({ cards, today, canAct, backHref }: Omit<CardProps, "car
         count={`${cards.length} open`}
         tone="text-danger"
       />
+      {progress.waitingVisits > 0 && (
+        <p className="text-sm font-medium text-warning-text">
+          {formatVisitCount(progress.waitingVisits)} not summarised yet
+        </p>
+      )}
       {cards.length === 0 ? (
         <Card elevation="sm" className="p-4">
-          <EmptyState>No open concerns in view</EmptyState>
+          <EmptyState>{progress.noneSummarised ? "Not summarised yet" : "No open concerns in view"}</EmptyState>
         </Card>
       ) : (
         cards.map((card) => (
@@ -192,14 +222,24 @@ function NeedsAttention({ cards, today, canAct, backHref }: Omit<CardProps, "car
   );
 }
 
-function GoingWell({ cards, today, backHref }: { cards: ConcernCard[]; today: Date; backHref?: string }) {
+function GoingWell({
+  cards,
+  today,
+  backHref,
+  noneSummarised,
+}: {
+  cards: ConcernCard[];
+  today: Date;
+  backHref?: string;
+  noneSummarised: boolean;
+}) {
   return (
     <section aria-labelledby="going-well-heading" className="min-w-0 space-y-3">
       <SectionHeading id="going-well-heading" title="Going well" tone="text-success" />
       <Card elevation="sm" className="px-4 py-1">
         {cards.length === 0 ? (
           <div className="py-3">
-            <EmptyState>No highlights in view</EmptyState>
+            <EmptyState>{noneSummarised ? "Not summarised yet" : "No highlights in view"}</EmptyState>
           </div>
         ) : (
           <ul className="divide-y divide-border">
@@ -302,6 +342,7 @@ function VisitNotesRow({ visit, backHref }: { visit: VisitNotes; backHref?: stri
             · {plural(visit.concerns.length, "concern")} · {plural(visit.highlights.length, "highlight")}
           </span>
           {visit.status !== "completed" && <Badge variant="info">In progress</Badge>}
+          {visit.status === "completed" && !visit.summarised && <Badge variant="warning">Not summarised yet</Badge>}
         </summary>
         <div className="space-y-2 pb-3 pl-5">
           {empty ? (
@@ -358,11 +399,24 @@ export function SchoolConcernSections({
   // with its filters).
   visitBackHref?: string;
 }) {
+  const progress = summaryProgress(page);
   return (
     <>
+      <ConcernFreshnessLine freshness={page.freshness} />
       <div className={COLUMNS}>
-        <NeedsAttention cards={page.needsAttention} today={today} canAct={canAct} backHref={visitBackHref} />
-        <GoingWell cards={page.goingWell} today={today} backHref={visitBackHref} />
+        <NeedsAttention
+          cards={page.needsAttention}
+          today={today}
+          canAct={canAct}
+          backHref={visitBackHref}
+          progress={progress}
+        />
+        <GoingWell
+          cards={page.goingWell}
+          today={today}
+          backHref={visitBackHref}
+          noneSummarised={progress.noneSummarised}
+        />
       </div>
       {flags && (
         <div className={COLUMNS}>

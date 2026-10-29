@@ -107,11 +107,13 @@ const PAGE: SchoolConcernPage = {
   needsAttention: [RECURRING, ONE_OFF],
   goingWell: [HIGHLIGHT],
   resolved: [RESOLVED],
+  freshness: { summarisedUpTo: new Date("2026-10-20T08:30:00.000Z"), waitingVisits: 0 },
   visitNotes: [
     {
       visitId: 12,
       visitDate: "2026-10-15",
       status: "completed",
+      summarised: true,
       pmEmail: "pm@avantifellows.org",
       pmName: "Ravi PM",
       concerns: [
@@ -124,12 +126,27 @@ const PAGE: SchoolConcernPage = {
       visitId: 13,
       visitDate: "2026-10-20",
       status: "in_progress",
+      summarised: false,
       pmEmail: "new.pm@avantifellows.org",
       pmName: null,
       concerns: [],
       highlights: [],
     },
   ],
+};
+
+const EMPTY_PAGE: SchoolConcernPage = { ...PAGE, needsAttention: [], goingWell: [], resolved: [] };
+
+// A completed Visit the summary run hasn't reached yet.
+const UNSUMMARISED_VISIT: SchoolConcernPage["visitNotes"][number] = {
+  visitId: 14,
+  visitDate: "2026-10-25",
+  status: "completed",
+  summarised: false,
+  pmEmail: "pm@avantifellows.org",
+  pmName: "Ravi PM",
+  concerns: [],
+  highlights: [],
 };
 
 const FLAGS = (
@@ -393,8 +410,53 @@ describe("SchoolConcernSections", () => {
     expect(view.visitRow("20 Oct 2026")).toHaveTextContent("No concerns or highlights");
   });
 
+  it("says up to when Visit notes were summarised and how many Visits in view are waiting, like the School-wise tab", () => {
+    renderSections({ page: { ...PAGE, freshness: { ...PAGE.freshness, waitingVisits: 2 } } });
+
+    expect(screen.getByText("Visit notes summarised up to 20 Oct 2026, 14:00 · 2 visits waiting")).toBeInTheDocument();
+  });
+
+  it("says Visit notes haven't been summarised yet when there is no summary run", () => {
+    renderSections({ page: { ...PAGE, freshness: { summarisedUpTo: null, waitingVisits: 0 } } });
+
+    expect(screen.getByText("Visit notes haven't been summarised yet")).toBeInTheDocument();
+  });
+
+  it("says how many Visits aren't summarised yet beside the concerns, and marks those Visit-wise notes", () => {
+    const view = renderSections({
+      page: {
+        ...PAGE,
+        freshness: { ...PAGE.freshness, waitingVisits: 1 },
+        visitNotes: [UNSUMMARISED_VISIT, ...PAGE.visitNotes],
+      },
+    });
+
+    expect(view.section(NEEDS_ATTENTION)).toHaveTextContent("1 visit not summarised yet");
+    expect(view.visitRow("25 Oct 2026").querySelector("summary")).toHaveTextContent("Not summarised yet");
+    // A summarised Visit and an in-progress one aren't marked.
+    expect(view.visitRow("15 Oct 2026").querySelector("summary")).not.toHaveTextContent("Not summarised yet");
+    expect(view.visitRow("20 Oct 2026").querySelector("summary")).not.toHaveTextContent("Not summarised yet");
+  });
+
+  it("says Not summarised yet, not that nothing is in view, when no completed Visit in view is summarised", () => {
+    const view = renderSections({
+      page: { ...EMPTY_PAGE, freshness: { ...PAGE.freshness, waitingVisits: 1 }, visitNotes: [UNSUMMARISED_VISIT] },
+    });
+
+    expect(within(view.section(NEEDS_ATTENTION)).getByText("Not summarised yet")).toBeInTheDocument();
+    expect(within(view.section("Going well")).getByText("Not summarised yet")).toBeInTheDocument();
+    expect(screen.queryByText("No open concerns in view")).not.toBeInTheDocument();
+    expect(screen.queryByText("No highlights in view")).not.toBeInTheDocument();
+  });
+
+  it("shows no waiting note when every completed Visit is summarised", () => {
+    const view = renderSections();
+
+    expect(view.section(NEEDS_ATTENTION)).not.toHaveTextContent("not summarised yet");
+  });
+
   it("shows each section's empty state", () => {
-    renderSections({ page: { needsAttention: [], goingWell: [], resolved: [], visitNotes: [] } });
+    renderSections({ page: { ...EMPTY_PAGE, visitNotes: [] } });
 
     expect(screen.getByText("No open concerns in view")).toBeInTheDocument();
     expect(screen.getByText("No highlights in view")).toBeInTheDocument();

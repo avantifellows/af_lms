@@ -187,15 +187,21 @@ describe("withRecurringSchoolsOnly", () => {
 });
 
 describe("getSchoolConcernPage", () => {
-  type Visit = { id: string; visit_date: string; status: string; pm_email: string; pm_name: string | null };
+  type Visit = { id: string; visit_date: string; status: string; pm_email: string; pm_name: string | null; summarised: boolean };
   type Mention = { id: string; kind: "concern" | "highlight"; text: string; status: "open" | "resolved" | null; visit_id: string; snippet: string };
   type Event = Record<string, unknown> & { concern_id: string };
 
   // The database for one School: its Visits in view (newest first, as the query orders them), every
-  // mention, and every concern event. The mentions read answers only for the Visit ids it is asked
-  // about; the events read only for the concern ids it is asked about.
-  function respond({ visits, mentions = [], events = [] }: { visits: Visit[]; mentions?: Mention[]; events?: Event[] }) {
+  // mention, every concern event and the latest summary run. The mentions read answers only for the
+  // Visit ids it is asked about; the events read only for the concern ids it is asked about.
+  function respond({
+    visits,
+    mentions = [],
+    events = [],
+    summarisedUpTo = "2026-10-20T08:30:00.000Z",
+  }: { visits: Visit[]; mentions?: Mention[]; events?: Event[]; summarisedUpTo?: string | null }) {
     mockQuery.mockImplementation(async (sql: string, params: unknown[]) => {
+      if (sql.includes("MAX(summarised_at)")) return [{ summarised_up_to: summarisedUpTo }];
       if (sql.includes("lms_visit_concern_events")) {
         const ids = (params[0] as number[]).map(String);
         return events.filter((event) => ids.includes(event.concern_id));
@@ -209,8 +215,8 @@ describe("getSchoolConcernPage", () => {
     });
   }
 
-  const visit = (id: string, visit_date: string, status = "completed", pm_name: string | null = "Ravi PM"): Visit => ({
-    id, visit_date, status, pm_email: "pm@avantifellows.org", pm_name,
+  const visit = (id: string, visit_date: string, status = "completed", pm_name: string | null = "Ravi PM", summarised = true): Visit => ({
+    id, visit_date, status, pm_email: "pm@avantifellows.org", pm_name, summarised,
   });
   const mention = (id: string, visit_id: string, kind: Mention["kind"] = "concern", status: Mention["status"] = "open", text = `Item ${id}`): Mention => ({
     id, kind, text, status: kind === "highlight" ? null : status, visit_id, snippet: `Said ${id} in ${visit_id}`,
@@ -368,7 +374,7 @@ describe("getSchoolConcernPage", () => {
 
     expect(page.visitNotes).toEqual([
       {
-        visitId: 2, visitDate: "2026-10-15", status: "completed", pmEmail: "pm@avantifellows.org", pmName: null,
+        visitId: 2, visitDate: "2026-10-15", status: "completed", summarised: true, pmEmail: "pm@avantifellows.org", pmName: null,
         concerns: [
           { id: 41, kind: "concern", text: "Lab equipment missing", status: "open" },
           { id: 43, kind: "concern", text: "Water cooler broken", status: "resolved" },
@@ -376,11 +382,36 @@ describe("getSchoolConcernPage", () => {
         highlights: [{ id: 45, kind: "highlight", text: "Students asking doubts", status: null }],
       },
       {
-        visitId: 1, visitDate: "2026-08-06", status: "completed", pmEmail: "pm@avantifellows.org", pmName: "Ravi PM",
+        visitId: 1, visitDate: "2026-08-06", status: "completed", summarised: true, pmEmail: "pm@avantifellows.org", pmName: "Ravi PM",
         concerns: [],
         highlights: [],
       },
     ]);
+  });
+
+  it("counts the School's completed Visits in view with no summary as waiting, like the School-wise tab, and marks each Visit-wise note", async () => {
+    respond({
+      visits: [
+        visit("3", "2026-10-15", "completed", "Ravi PM", false),
+        visit("2", "2026-10-10", "in_progress", "Ravi PM", false),
+        visit("1", "2026-08-06", "completed", "Ravi PM", true),
+      ],
+    });
+
+    const page = await getSchoolConcernPage(ADMIN, "SC001", NO_FILTERS);
+
+    expect(page.freshness).toEqual({ summarisedUpTo: new Date("2026-10-20T08:30:00.000Z"), waitingVisits: 1 });
+    expect(page.visitNotes.map((notes) => [notes.visitId, notes.summarised])).toEqual([[3, false], [2, false], [1, true]]);
+    const [visitsSql] = mockQuery.mock.calls.find(([sql]) => String(sql).includes("lms_pm_school_visits"))!;
+    expect(visitsSql).toMatch(/EXISTS \(SELECT 1 FROM lms_visit_note_summaries ns WHERE ns\.visit_id = v\.id\) AS summarised/);
+  });
+
+  it("has no summary run when Visit notes were never summarised", async () => {
+    respond({ visits: [visit("1", "2026-10-15", "completed", "Ravi PM", false)], summarisedUpTo: null });
+
+    const page = await getSchoolConcernPage(ADMIN, "SC001", NO_FILTERS);
+
+    expect(page.freshness).toEqual({ summarisedUpTo: null, waitingVisits: 1 });
   });
 
   it("is empty but for Visit-wise notes when no Visit in view is completed", async () => {
