@@ -476,7 +476,7 @@ describe("MenteeDetailPage", () => {
     const attempt = within(entries[1]);
     expect(attempt.getByRole("heading", { level: 3, name: "18 Oct 2026" })).toBeInTheDocument();
     expect(attempt.getByText("Attempt")).toBeInTheDocument();
-    expect(attempt.getByText("Not reachable")).toBeInTheDocument();
+    expect(attempt.getByText("Unreachable")).toBeInTheDocument();
     expect(attempt.getByText("No answer")).toBeInTheDocument();
     // An Attempt without a note shows only its header.
     expect(entries[2].querySelectorAll("p")).toHaveLength(1);
