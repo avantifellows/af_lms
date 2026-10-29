@@ -1005,7 +1005,7 @@ test.describe.serial("School Visit Summary — School page concern actions", () 
     await expect(history.nth(2)).toContainText("Lights failed again");
   });
 
-  test("a failed save shows the error and keeps the typed text", async ({ adminPage }) => {
+  test("a too-long note is refused with the text kept, and a 409 refreshes the page", async ({ adminPage }) => {
     await adminPage.goto(ECHO_PAGE);
     const card = concernCard(adminPage, NEEDS_ATTENTION, "Exam timetable not shared");
     await card.getByRole("button", { name: "Resolve" }).click();
@@ -1018,15 +1018,16 @@ test.describe.serial("School Visit Summary — School page concern actions", () 
     await expect(card.getByRole("alert")).toHaveText("Note must be at most 2000 characters");
     await expect(note).toHaveValue(tooLong);
 
-    // Someone else resolved it after the page loaded: the API's 409 shows, and the text stays.
+    // Someone else resolved it after the page loaded: the API's 409 refreshes the page, so the
+    // concern shows in its current state, under Resolved concerns (the component test covers the
+    // message shown while the refresh is in flight).
     await withPool((pool) =>
       pool.query("UPDATE lms_visit_concerns SET status = 'resolved' WHERE id = 9004815")
     );
     await note.fill("Timetable shared on the notice board");
     await card.getByRole("button", { name: "Mark resolved" }).click();
-    await expect(card.getByRole("alert")).toHaveText("This concern is already resolved");
-    await expect(note).toHaveValue("Timetable shared on the notice board");
-    await expect(card.getByRole("button", { name: "Mark resolved" })).toBeEnabled();
+    await expect(concernCard(adminPage, NEEDS_ATTENTION, "Exam timetable not shared")).toHaveCount(0);
+    await expect(concernCard(adminPage, "Resolved concerns", "Exam timetable not shared")).toHaveCount(1);
   });
 
   test("a read_only user sees concerns and history but no controls, and a direct POST is refused", async ({ page }) => {
