@@ -1105,12 +1105,14 @@ test.describe("School Visit Summary — School page intervention flags", () => {
   test("a flag row's Notes in LMS opens the Student's flag on the School's Enrollment tab", async ({ adminPage }) => {
     await adminPage.goto("/school-visit-summary/schools/14061");
 
-    await flagRows(adminPage)
+    const notesLink = flagRows(adminPage)
       .filter({ has: adminPage.locator('[title="Aaditya Raj Dhawan"]') })
-      .getByRole("link", { name: "Notes in LMS for A. R. D." })
-      .click();
+      .getByRole("link", { name: "Notes in LMS for A. R. D." });
+    await expect(notesLink).toHaveAttribute("href", "/school/14061?tab=enrollment&flag=9004751");
+    await notesLink.click();
 
-    await expect(adminPage).toHaveURL(/\/school\/14061\?tab=enrollment&flag=9004751$/);
+    // The Enrollment tab consumes `flag` once it opens the modal, so the URL may already have dropped it.
+    await expect(adminPage).toHaveURL(/\/school\/14061\?tab=enrollment/);
     const dialog = adminPage.getByRole("dialog");
     await expect(dialog.getByRole("heading", { name: "Aaditya Raj Dhawan" })).toBeVisible();
     await expect(dialog.getByText("Missed two weeks after a family bereavement.")).toBeVisible();
