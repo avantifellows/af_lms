@@ -95,6 +95,17 @@ describe("POST /api/visit-concerns/[id]/events", () => {
     expect(mockWithTransaction).not.toHaveBeenCalled();
   });
 
+  it("is 400 with the validation error for a body containing a NUL character (Postgres text rejects it)", async () => {
+    signIn(ADMIN);
+
+    const res = await post("9004801", { action: "resolve", body: "Lab kits\u0000 delivered" });
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "Note can't contain a NUL character" });
+    expect(mockQuery).not.toHaveBeenCalled();
+    expect(mockWithTransaction).not.toHaveBeenCalled();
+  });
+
   it("is 404 when the concern isn't one the actor can see on the Visit Summary, without writing", async () => {
     // Missing, outside the actor's summary scope, at a School with no active physical Centre, or
     // with no live mention: the lookup finds nothing either way.

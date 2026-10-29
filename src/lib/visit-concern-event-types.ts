@@ -10,13 +10,15 @@ export function isVisitConcernAction(value: unknown): value is VisitConcernActio
   return typeof value === "string" && (VISIT_CONCERN_ACTIONS as readonly string[]).includes(value);
 }
 
-// The body is trimmed and must be 1–2000 characters.
+// The body is trimmed and must be 1–2000 characters, with no NUL character (Postgres text rejects
+// it, so it would fail the write).
 export function validateConcernEventBody(
   raw: unknown
 ): { ok: true; body: string } | { ok: false; error: string } {
   if (typeof raw !== "string") return { ok: false, error: "body must be a string" };
   const body = raw.trim();
   if (body.length === 0) return { ok: false, error: "Please write a note" };
+  if (body.includes("\u0000")) return { ok: false, error: "Note can't contain a NUL character" };
   if (body.length > VISIT_CONCERN_EVENT_BODY_MAX_LENGTH) {
     return { ok: false, error: `Note must be at most ${VISIT_CONCERN_EVENT_BODY_MAX_LENGTH} characters` };
   }

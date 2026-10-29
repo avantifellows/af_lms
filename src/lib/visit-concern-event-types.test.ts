@@ -17,6 +17,7 @@ describe("validateConcernEventBody", () => {
     ["a whitespace-only note", " \n\t ", "Please write a note"],
     ["a 2001-character note", "a".repeat(2001), "Note must be at most 2000 characters"],
     ["a non-string", 42, "body must be a string"],
+    ["a note containing a NUL character", "Fixed\u0000", "Note can't contain a NUL character"],
   ])("refuses %s", (_label, raw, error) => {
     expect(validateConcernEventBody(raw)).toEqual({ ok: false, error });
   });
