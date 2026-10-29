@@ -28,6 +28,23 @@ describe("Visit Summary scope", () => {
     mockQuery.mockReset();
   });
 
+  describe("Manual dates", () => {
+    it("keep a real calendar date", () => {
+      expect(normalizeVisitSummaryFilters({ from: "2028-02-29", to: "2026-12-31" })).toMatchObject({
+        from: "2028-02-29",
+        to: "2026-12-31",
+      });
+    });
+
+    it("drop a date shaped like YYYY-MM-DD that isn't on the calendar, so Postgres never sees it", () => {
+      for (const date of ["2026-13-45", "2026-02-29", "2026-04-31", "2026-00-10", "2026-01-00"]) {
+        const filters = normalizeVisitSummaryFilters({ from: date, to: date });
+        expect(filters.from).toBeUndefined();
+        expect(filters.to).toBeUndefined();
+      }
+    });
+  });
+
   describe("School options", () => {
     it("ignore the School filter but keep the PM and status filters", async () => {
       mockQuery.mockResolvedValueOnce([
