@@ -1,9 +1,10 @@
 -- Visit Concerns schema for e2e (issue #470, slice #478). None of these tables is in
--- db-dump.sql. Production DDL is owned by the db-service migration (#470 PRD §1); no
--- db-service PR existed when this mirror was written (27 Oct 2026), so it follows the PRD.
--- When that migration lands, re-diff a pg_dump of this file against a pg_dump of the Ecto
--- migration (patterns/mirror-db-service-schema-in-e2e.md) and match it. Idempotent, so a
--- local dump refreshed after that migration (db-dump.sql is not committed) still loads.
+-- db-dump.sql. Production DDL is owned by db-service migration
+-- `20261028120000_create_lms_visit_concerns.exs` (db-service issue #823); this mirrors its
+-- tables, indexes, CHECKs, function and trigger. If that migration changes, re-diff a pg_dump
+-- of this file against a pg_dump of the Ecto migration
+-- (patterns/mirror-db-service-schema-in-e2e.md) and match it. Idempotent, so a local dump
+-- refreshed after that migration (db-dump.sql is not committed) still loads.
 -- Timestamps are `timestamp without time zone` holding UTC.
 
 CREATE TABLE IF NOT EXISTS lms_visit_concerns (
@@ -85,6 +86,26 @@ BEGIN
     ALTER TABLE lms_visit_concern_events
       ADD CONSTRAINT lms_visit_concern_events_auto_reopened_check
       CHECK ((kind = 'auto_reopened') = (author_email IS NULL AND visit_id IS NOT NULL AND body IS NULL));
+  END IF;
+
+  -- Human events carry a non-blank body of at most 2000 characters after trimming.
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'lms_visit_concern_events_body_check') THEN
+    ALTER TABLE lms_visit_concern_events
+      ADD CONSTRAINT lms_visit_concern_events_body_check
+      CHECK (
+        kind = 'auto_reopened' OR
+        (body IS NOT NULL AND body ~ '[^[:space:]]' AND char_length(btrim(body)) <= 2000)
+      );
+  END IF;
+
+  -- Human events have a non-blank author and never name a Visit.
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'lms_visit_concern_events_author_check') THEN
+    ALTER TABLE lms_visit_concern_events
+      ADD CONSTRAINT lms_visit_concern_events_author_check
+      CHECK (
+        kind = 'auto_reopened' OR
+        (author_email IS NOT NULL AND author_email ~ '[^[:space:]]' AND visit_id IS NULL)
+      );
   END IF;
 END
 $$;
