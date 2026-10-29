@@ -7,7 +7,7 @@ import { canBlendedLearning, type BlendedLearningAccess } from "@/lib/blended-le
 import { requireBlendedLearningPage, requireNumericPageId } from "@/lib/blended-learning-guard";
 import { draftNotesToHtml } from "@/lib/blended-learning-draft-notes";
 import { getDraftForReview, getDraftStatus, type DraftForReview } from "@/lib/blended-learning-drafts";
-import { describeSession, formatCalendarDate } from "@/lib/blended-learning-format";
+import { describeSession, formatCalendarDate, shortProgramName } from "@/lib/blended-learning-format";
 import { getMenteeDetail, type HistoryEntry, type MenteeDetail } from "@/lib/blended-learning-mentee-detail";
 import { listMentees } from "@/lib/blended-learning-mentees";
 import { menteeGroup, type MenteeGroup } from "@/lib/blended-learning-talk-to-first";
@@ -121,7 +121,8 @@ export default async function LogEntryPage({ params }: { params: Promise<{ id: s
   if (!mentee) notFound();
 
   const firstName = mentee.name.split(" ")[0] || mentee.name;
-  const subtitle = [mentee.name, mentee.grade !== null ? `Grade ${mentee.grade}` : null, mentee.programName]
+  const program = mentee.programName && shortProgramName(mentee.programName);
+  const subtitle = [mentee.name, mentee.grade !== null ? `Grade ${mentee.grade}` : null, program]
     .filter(Boolean)
     .join(" · ");
   const today = getTodayIST();

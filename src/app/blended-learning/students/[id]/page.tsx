@@ -7,7 +7,7 @@ import { Badge, Button, Card } from "@/components/ui";
 import { canBlendedLearning, type BlendedLearningAccess } from "@/lib/blended-learning-access";
 import { requireBlendedLearningPage, requireNumericPageId } from "@/lib/blended-learning-guard";
 import { getDraftStatus } from "@/lib/blended-learning-drafts";
-import { describeSession, formatCalendarDate } from "@/lib/blended-learning-format";
+import { describeSession, formatCalendarDate, shortProgramName } from "@/lib/blended-learning-format";
 import {
   getMenteeDetail,
   type ActionItem,
@@ -40,7 +40,8 @@ type Conversation = Extract<HistoryEntry, { kind: "conversation" }>;
 type ProfileDocHistoryEntry = Extract<HistoryEntry, { kind: "profile_doc" }>;
 
 function profileMeta(mentee: MenteeDetail): string[] {
-  return [mentee.grade === null ? null : `Grade ${mentee.grade}`, mentee.programName, mentee.gender].filter(
+  const program = mentee.programName && shortProgramName(mentee.programName);
+  return [mentee.grade === null ? null : `Grade ${mentee.grade}`, program, mentee.gender].filter(
     (part): part is string => Boolean(part)
   );
 }

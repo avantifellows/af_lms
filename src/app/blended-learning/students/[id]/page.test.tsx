@@ -142,7 +142,7 @@ describe("MenteeDetailPage", () => {
 
     expect(screen.getByRole("heading", { level: 1, name: "Ira Sharma" })).toBeInTheDocument();
     expect(screen.getByText("Grade 12")).toBeInTheDocument();
-    expect(screen.getByText("STP Voucher Delhi")).toBeInTheDocument();
+    expect(screen.getByText("Voucher DL")).toBeInTheDocument();
     expect(screen.getByText("Female")).toBeInTheDocument();
     const contact = screen.getByRole("region", { name: "Contact" });
     expect(within(contact).getByRole("link", { name: "+91 98765 43210" })).toHaveAttribute("href", "tel:+91 98765 43210");
