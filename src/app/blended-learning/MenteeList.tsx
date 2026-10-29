@@ -163,8 +163,8 @@ function GroupHeader({ group, total }: { group: MenteeGroupView; total: number }
   );
 }
 
-// Tight paddings, a name and a header may wrap, and Program wraps, so the
-// table fits its card from 1024 px with the Student ID and Category columns.
+// Tight paddings and a name may wrap; headers and short Program names stay
+// on one line. The table fits its card from 1024 px with every column.
 const cell = "px-2 py-2.5 align-middle xl:px-2.5";
 
 function TableRow({ mentee, canLog, today }: RowProps) {
@@ -184,7 +184,7 @@ function TableRow({ mentee, canLog, today }: RowProps) {
         </span>
       </td>
       <td className={`${cell} whitespace-nowrap`}>{orDash(mentee.grade)}</td>
-      <td className={cell}>{programLabel(mentee)}</td>
+      <td className={`${cell} whitespace-nowrap`}>{programLabel(mentee)}</td>
       <td className={`${cell} whitespace-nowrap`}>{orDash(mentee.gender)}</td>
       <td className={cell}>
         <LastContact mentee={mentee} today={today} />
@@ -207,7 +207,7 @@ function MenteeTable({ groups, total, canLog, today }: ListProps) {
         <thead className="text-xs uppercase tracking-wide text-text-muted">
           <tr>
             {COLUMNS.map((column) => (
-              <th key={column} scope="col" className="px-2 py-3 align-bottom font-bold xl:px-2.5">
+              <th key={column} scope="col" className="whitespace-nowrap px-2 py-3 align-bottom font-bold xl:px-2.5">
                 {column}
               </th>
             ))}
