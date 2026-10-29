@@ -590,6 +590,19 @@ describe("SchoolVisitSummaryPage", () => {
       expect(sql).toContain("ORDER BY v.visit_date DESC, v.id DESC");
       expect(sql).not.toContain("DROP TABLE");
     });
+
+    it("falls back to the default sort for an inherited object key such as constructor", async () => {
+      for (const sort of ["constructor", "toString", "__proto__"]) {
+        mockQuery.mockReset();
+        setupAuth();
+        setupSummaryQueries();
+
+        render(await SchoolVisitSummaryPage({ searchParams: Promise.resolve({ tab: "visits", sort }) }));
+
+        const [sql] = mockQuery.mock.calls[1];
+        expect(sql).toContain("ORDER BY v.visit_date DESC, v.id DESC");
+      }
+    });
   });
 
   describe("pagination", () => {

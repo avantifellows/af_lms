@@ -174,8 +174,10 @@ const SORT_COLUMNS: Record<SortKey, { sql: string; defaultDir: SortDirection }> 
   completed_at: { sql: "v.completed_at", defaultDir: "desc" },
 };
 
+// An own key only: `in` would also accept `constructor` and the like, and their undefined defaultDir
+// would throw.
 function isSortKey(value: string | undefined): value is SortKey {
-  return Boolean(value && value in SORT_COLUMNS);
+  return Boolean(value && Object.hasOwn(SORT_COLUMNS, value));
 }
 
 function normalizeSort(sortParam?: string, dirParam?: string): { sort: SortKey; dir: SortDirection } {
