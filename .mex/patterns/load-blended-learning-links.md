@@ -17,7 +17,7 @@ edges:
     condition: for the Blended Learning tables and the Mapping source the script matches against
   - target: context/setup.md
     condition: for the .env files the script reads database credentials from
-last_updated: 2026-10-28
+last_updated: 2026-10-29
 ---
 
 # Load Blended Learning Student Links
@@ -36,7 +36,10 @@ What it reads (hyperlinks, never cell text — a Ctrl+K link or a `HYPERLINK("ur
 - **`Conversation` tab** → `screener_url`: the "Screener Form" column's link only. There is no
   row fallback here: with no "Screener Form" header every row is `no_link`, so a hyperlinked
   name or any other link is never written as a Screener Link.
-- **`--legacy-docs-dir=<dir>`** → `legacy_last_contact_on`: the latest dated conversation in each
+- **`--legacy-docs-dir=<dir>`** (only with `--legacy-conversations`; the script refuses one
+  without the other, so a date never moves without its summary and items — a date-only run
+  would show the stored summary and items under the new date) → `legacy_last_contact_on`:
+  the latest dated conversation in each
   Student's Profile Doc, read from `<dir>/<Drive file id>.html` (the doc's HTML export). Product
   owner rule (2026-10-23): the doc only, never the Sheet's monthly counts. With docs, every
   matched Student is considered, so one whose workbook rows had no usable link still gets a date
@@ -50,7 +53,7 @@ What it reads (hyperlinks, never cell text — a Ctrl+K link or a `HYPERLINK("ur
   previous-year history). Outcomes per Student:
   `dated`, `no_dates` (doc read, nothing dated → NULL), `unreadable` (no export → stored value
   kept, NULL until a re-run has the doc), `no_doc_link`. Counts only are printed.
-- **`--legacy-conversations=<file.json>`** (needs `--legacy-docs-dir`) →
+- **`--legacy-conversations=<file.json>`** (only with `--legacy-docs-dir`) →
   `legacy_conversation_summary` and the Student's **Profile Doc Action Items**: the summary and
   action items of that same latest entry. The summary shows in the Student's conversation
   history at `legacy_last_contact_on` ("From Profile Doc", never counted as a Conversation);
@@ -76,6 +79,8 @@ What it reads (hyperlinks, never cell text — a Ctrl+K link or a `HYPERLINK("ur
   "text" } }` for each dated doc, the entry's plain text from its date line to the next date
   line or the end of its tab (tables included, images and link targets dropped, 20,000
   characters at most; `latestProfileDocEntry`), written with mode 0600; counts only printed.
+- **`--apply` is one transaction:** the links upserts and the item sync run on one client, so a
+  failure part way (e.g. after a summary is written, before its items are) rolls all of it back.
 
 Each tab's header row is the first of the top ten rows with a "Student ID" or "Name"/"Student
 Name" column.
@@ -88,18 +93,18 @@ Name" column.
 3. Read the counts and issues. Expect roughly 174 Profile Docs and 127 Screener Links for the
    176 Mentees (Oct 2026 Sheet). Fix the Sheet for any `no_match` / `ambiguous_name` /
    `duplicate_row` you care about, re-download, dry run again.
-4. Apply: same command plus `--apply`. For legacy dates, export each readable Profile Doc as
-   HTML into a private directory outside the repo named `<Drive file id>.html` (it holds minors'
-   PII: delete it afterwards), add `--legacy-docs-dir=<dir>`, dry run, then apply. Re-run the
-   same way when more docs are shared; unchanged Students are not rewritten.
-4b. Latest conversations (needs db-service `20261027100000` deployed): run
+4. Apply: same command plus `--apply`.
+4b. Legacy dates and latest conversations (needs db-service `20261027100000` deployed): export
+   each readable Profile Doc as HTML into a private directory outside the repo named
+   `<Drive file id>.html` (it holds minors' PII: delete it afterwards), run
    `npm run blended:export-latest-entries -- --legacy-docs-dir=<dir> --out=<private>/entries.json`,
    have the external step write the summaries file, then dry run the import with
    `--legacy-docs-dir=<dir> --legacy-conversations=<private>/summaries.json`, check the
    counts (expect `summary_stale` 0 unless docs changed since the export) and the Profile Doc
    action items line (`removed` should be 0 on a first load), then apply. A re-run with the same
-   file reports `inserted 0, removed 0`. Delete both JSON files afterwards: they hold minors'
-   records.
+   file reports `inserted 0, removed 0`. When more docs are shared or docs gain entries, repeat
+   the whole step (export, summarise, import) — never the docs alone. Delete the HTML directory
+   and both JSON files afterwards: they hold minors' records.
 5. Re-run the dry run: it should report `inserted 0, updated 0`, i.e. everything `unchanged`.
 
 ## Matching and reporting
