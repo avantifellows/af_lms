@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useState, useTransition, type FormEvent, type ReactNode } from "react";
 
 import { Button, baseInputClasses, type ButtonVariant } from "@/components/ui";
 import { validateConcernEventBody, type VisitConcernAction } from "@/lib/visit-concern-event-types";
@@ -9,7 +9,9 @@ import { validateConcernEventBody, type VisitConcernAction } from "@/lib/visit-c
 // Resolve / Comment / Reopen on a Visit Concern (#470). Resolve on an open concern; Comment and
 // Reopen on a resolved one. The note is trimmed and must be 1–2000 characters. A failed save shows
 // the error and keeps the typed text; a saved one refreshes the server page, so the concern moves
-// to its new section. `children` is the card's body: the action buttons sit to its right, and the
+// to its new section. The form stays open and disabled until that refresh lands, so the old buttons
+// never come back to be pressed twice. A 409 (someone else changed the concern) shows the error and
+// refreshes too, so the user sees its current state. `children` is the card's body: the action buttons sit to its right, and the
 // note form opens below it, in place of the buttons. `onOpen` runs when a form opens (the card
 // expands, so its mentions show above the note).
 
@@ -40,7 +42,12 @@ const FORMS: Record<
   },
 };
 
-async function postEvent(concernId: number, action: VisitConcernAction, body: string): Promise<string | null> {
+// null on success; otherwise the error to show, and whether the concern changed under the user.
+async function postEvent(
+  concernId: number,
+  action: VisitConcernAction,
+  body: string
+): Promise<{ error: string; stale: boolean } | null> {
   try {
     const res = await fetch(`/api/visit-concerns/${concernId}/events`, {
       method: "POST",
@@ -49,9 +56,9 @@ async function postEvent(concernId: number, action: VisitConcernAction, body: st
     });
     if (res.ok) return null;
     const data = (await res.json().catch(() => null)) as { error?: string } | null;
-    return data?.error ?? "Something went wrong. Please try again.";
+    return { error: data?.error ?? "Something went wrong. Please try again.", stale: res.status === 409 };
   } catch {
-    return "Could not reach the server. Please try again.";
+    return { error: "Could not reach the server. Please try again.", stale: false };
   }
 }
 
@@ -70,7 +77,9 @@ export function ConcernActions({
   const [action, setAction] = useState<VisitConcernAction | null>(null);
   const [text, setText] = useState("");
   const [saving, setSaving] = useState(false);
+  const [refreshing, startRefresh] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const busy = saving || refreshing;
 
   const actions: VisitConcernAction[] = status === "open" ? ["resolve"] : ["comment", "reopen"];
 
@@ -88,7 +97,7 @@ export function ConcernActions({
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!action || saving) return;
+    if (!action || busy) return;
     const body = validateConcernEventBody(text);
     if (!body.ok) {
       setError(body.error);
@@ -99,12 +108,16 @@ export function ConcernActions({
     const failure = await postEvent(concernId, action, body.body);
     setSaving(false);
     if (failure) {
-      setError(failure);
+      setError(failure.error);
+      if (failure.stale) startRefresh(() => router.refresh());
       return;
     }
-    setAction(null);
-    setText("");
-    router.refresh();
+    // The form closes in the same transition as the refresh, so it stays until the new page lands.
+    startRefresh(() => {
+      setAction(null);
+      setText("");
+      router.refresh();
+    });
   }
 
   const form = action ? FORMS[action] : null;
@@ -131,7 +144,7 @@ export function ConcernActions({
             value={text}
             onChange={(event) => setText(event.target.value)}
             rows={3}
-            disabled={saving}
+            disabled={busy}
             autoFocus
             className={`${baseInputClasses} block w-full bg-bg-input`}
           />
@@ -141,10 +154,10 @@ export function ConcernActions({
             </p>
           )}
           <div className="flex gap-2">
-            <Button type="submit" variant="success" size="sm" disabled={saving}>
-              {saving ? "Saving…" : form.submit}
+            <Button type="submit" variant="success" size="sm" disabled={busy}>
+              {busy ? "Saving…" : form.submit}
             </Button>
-            <Button type="button" variant="secondary" size="sm" onClick={cancel} disabled={saving}>
+            <Button type="button" variant="secondary" size="sm" onClick={cancel} disabled={busy}>
               Cancel
             </Button>
           </div>

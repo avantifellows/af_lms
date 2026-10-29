@@ -1,13 +1,38 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { mockRefresh } = vi.hoisted(() => ({ mockRefresh: vi.fn() }));
+const { mockRefresh, transition } = vi.hoisted(() => ({
+  mockRefresh: vi.fn(),
+  // With `hold` set, a transition stays pending until `land()` runs it: a router.refresh() whose
+  // server render hasn't arrived yet.
+  transition: { hold: false, land: () => {} },
+}));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: mockRefresh }) }));
+vi.mock("react", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("react")>();
+  function useHeldTransition(): [boolean, (callback: () => void) => void] {
+    const [pending, setPending] = actual.useState(false);
+    return [
+      pending,
+      (callback) => {
+        setPending(true);
+        transition.land = () => {
+          callback();
+          setPending(false);
+        };
+      },
+    ];
+  }
+  return {
+    ...actual,
+    useTransition: () => (transition.hold ? useHeldTransition() : actual.useTransition()),
+  };
+});
 
 import { ConcernActions } from "./ConcernActions";
 
-function respondWith(response: { ok: boolean; json?: () => Promise<unknown> }) {
+function respondWith(response: { ok: boolean; status?: number; json?: () => Promise<unknown> }) {
   const fetchMock = vi.fn().mockResolvedValue({ json: () => Promise.resolve({}), ...response });
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
@@ -20,6 +45,7 @@ function sentBody(fetchMock: ReturnType<typeof vi.fn>) {
 
 beforeEach(() => {
   mockRefresh.mockReset();
+  transition.hold = false;
 });
 
 afterEach(() => {
@@ -151,6 +177,41 @@ describe("ConcernActions", () => {
 
     finish({ ok: true, json: () => Promise.resolve({}) });
     await waitFor(() => expect(mockRefresh).toHaveBeenCalled());
+  });
+
+  it("keeps the form disabled until the refreshed page lands, so the old buttons can't be pressed again", async () => {
+    const user = userEvent.setup();
+    transition.hold = true;
+    respondWith({ ok: true });
+    render(<ConcernActions concernId={9004801} status="open" />);
+
+    await user.click(screen.getByRole("button", { name: "Resolve" }));
+    await user.type(screen.getByRole("textbox"), "Lab kits delivered");
+    await user.click(screen.getByRole("button", { name: "Mark resolved" }));
+
+    // Saved, but the refresh is still in flight: the form stays, disabled, and Resolve doesn't come back.
+    await waitFor(() => expect(screen.getByRole("button", { name: "Saving…" })).toBeDisabled());
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
+    expect(screen.getByRole("textbox")).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Resolve" })).not.toBeInTheDocument();
+
+    act(() => transition.land());
+
+    expect(mockRefresh).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+
+  it("shows the message and refreshes the page when the concern changed under the user (409)", async () => {
+    const user = userEvent.setup();
+    respondWith({ ok: false, status: 409, json: () => Promise.resolve({ error: "This concern is already resolved" }) });
+    render(<ConcernActions concernId={9004801} status="open" />);
+
+    await user.click(screen.getByRole("button", { name: "Resolve" }));
+    await user.type(screen.getByRole("textbox"), "Lab kits delivered");
+    await user.click(screen.getByRole("button", { name: "Mark resolved" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("This concern is already resolved");
+    await waitFor(() => expect(mockRefresh).toHaveBeenCalledTimes(1));
   });
 
   it("shows the API's error and keeps the typed text when the save fails", async () => {
