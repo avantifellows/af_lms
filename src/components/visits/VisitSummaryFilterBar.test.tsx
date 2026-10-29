@@ -341,6 +341,19 @@ describe("VisitSummaryFilterBar", () => {
       expect(mockReplace).not.toHaveBeenCalled();
     });
 
+    it("shows the URL Back lands on even when it carries the filters of an update still on the way", () => {
+      const { navigateTo } = renderBar({ tab: "visits", status: "completed" });
+      fireEvent.change(screen.getByLabelText("Status"), { target: { value: "" } });
+      advance(300);
+      // While that update (no filters) loads, a new pick waits; then Back lands on an unfiltered page.
+      fireEvent.change(screen.getByLabelText("Required actions"), { target: { value: "partial" } });
+
+      window.dispatchEvent(new PopStateEvent("popstate"));
+      navigateTo({ tab: "schools" });
+
+      expect(screen.getByLabelText("Required actions")).toHaveValue("");
+    });
+
     it("sends nothing after it unmounts", () => {
       const { unmount } = renderBar({ tab: "schools" });
       fireEvent.change(screen.getByLabelText("Status"), { target: { value: "completed" } });

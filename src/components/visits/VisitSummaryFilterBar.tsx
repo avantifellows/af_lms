@@ -163,20 +163,25 @@ export default function VisitSummaryFilterBar({
 
   // A pointer or focus landing outside the bar sends a waiting update at once, before any navigation
   // that click starts (a tab, a sort header, a School row): Next discards the earlier navigation, so
-  // a waiting update can never land after a tab switch and undo it. Back/Forward drops it instead.
+  // a waiting update can never land after a tab switch and undo it. Back/Forward drops it instead,
+  // and forgets the update last sent, so the fields always show the URL it lands on.
   useEffect(() => {
     function sendBeforeLeaving(event: Event) {
       if (debounceRef.current !== null && !sectionRef.current?.contains(event.target as Node)) {
         sendPending();
       }
     }
+    function onHistoryMove() {
+      dropPending();
+      setSentFilters(null);
+    }
     document.addEventListener("pointerdown", sendBeforeLeaving, true);
     document.addEventListener("focusin", sendBeforeLeaving, true);
-    window.addEventListener("popstate", dropPending);
+    window.addEventListener("popstate", onHistoryMove);
     return () => {
       document.removeEventListener("pointerdown", sendBeforeLeaving, true);
       document.removeEventListener("focusin", sendBeforeLeaving, true);
-      window.removeEventListener("popstate", dropPending);
+      window.removeEventListener("popstate", onHistoryMove);
     };
   }, [dropPending, sendPending]);
 
