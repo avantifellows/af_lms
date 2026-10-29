@@ -21,15 +21,16 @@ const ITEMS: CommonActionItem[] = [
   },
   {
     id: 7, text: "Bring the admit card", owner: "parent", target: { kind: "grade", grade: 13 },
-    targetMentorName: null, openCount: 4, doneCount: 0, notYetAdded: 0, createdOn: "2026-10-26",
+    targetMentorName: null, openCount: 1, doneCount: 0, notYetAdded: 0, createdOn: "2026-10-26",
   },
 ];
 
-// The preview route answers with previewCount (and any unmatched IDs);
-// writes answer by queue.
+// The preview route answers with previewCount (and any unmatched IDs), or
+// with previewReply when a test sets it; writes answer by queue.
 const writes: Response[] = [];
 let previewCount = 5;
 let unmatched = { notFound: [] as string[], noMentor: [] as string[] };
+let previewReply: (() => Promise<Response>) | null = null;
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status });
@@ -51,11 +52,12 @@ beforeEach(() => {
   writes.length = 0;
   previewCount = 5;
   unmatched = { notFound: [], noMentor: [] };
+  previewReply = null;
   mockRefresh.mockReset();
   mockFetch.mockReset();
   mockFetch.mockImplementation(async (url: string) =>
     url.includes("/preview")
-      ? json({ count: previewCount, ...unmatched })
+      ? (previewReply?.() ?? json({ count: previewCount, ...unmatched }))
       : (writes.shift() ?? json({ error: "Unexpected" }, 500))
   );
   vi.stubGlobal("fetch", mockFetch);
@@ -90,12 +92,25 @@ describe("CommonActionItemsManager — pushed items", () => {
 
     await user.click(screen.getByRole("button", { name: "Push again: Fill in the scholarship form" }));
     const dialog = screen.getByRole("dialog", { name: "Push this action item again?" });
-    expect(dialog).toHaveTextContent("Will be added to 1 student who don't have it yet.");
+    expect(dialog).toHaveTextContent("Will be added to 1 student who doesn't have it yet.");
     await user.click(within(dialog).getByRole("button", { name: "Push" }));
 
     expect(writeCalls()).toEqual([{ url: "/api/blended-learning/common-action-items/8/push", method: "POST", body: undefined }]);
     expect(mockRefresh).toHaveBeenCalled();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Added to 1 student.");
+  });
+
+  it("says when pushing again added it to no one, as when they got it meanwhile", async () => {
+    const user = userEvent.setup();
+    writes.push(json({ added: 0 }));
+    render(<CommonActionItemsManager items={ITEMS} mentors={MENTORS} />);
+    expect(screen.getByRole("status")).toBeEmptyDOMElement();
+
+    await user.click(screen.getByRole("button", { name: "Push again: Fill in the scholarship form" }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Push" }));
+
+    expect(screen.getByRole("status")).toHaveTextContent("Added to 0 students.");
   });
 
   it("removes after confirming what is deleted and kept, and shows a failure in the dialog", async () => {
@@ -105,7 +120,7 @@ describe("CommonActionItemsManager — pushed items", () => {
 
     await user.click(screen.getByRole("button", { name: "Remove: Fill in the scholarship form" }));
     const dialog = screen.getByRole("dialog", { name: "Remove this action item?" });
-    expect(dialog).toHaveTextContent("Deletes it from the 2 students who still have it open. The 1 done stay in their history.");
+    expect(dialog).toHaveTextContent("Deletes it from the 2 students who still have it open. The 1 done stays in their history.");
     await user.click(within(dialog).getByRole("button", { name: "Remove" }));
 
     expect(writeCalls()).toEqual([{ url: "/api/blended-learning/common-action-items/8", method: "DELETE", body: undefined }]);
@@ -113,6 +128,12 @@ describe("CommonActionItemsManager — pushed items", () => {
     expect(mockRefresh).not.toHaveBeenCalled();
     await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    // One open, none done: no word about done ones.
+    await user.click(screen.getByRole("button", { name: "Remove: Bring the admit card" }));
+    const single = screen.getByRole("dialog", { name: "Remove this action item?" });
+    expect(single).toHaveTextContent("Deletes it from the 1 student who still has it open.");
+    expect(single).not.toHaveTextContent(/done/);
   });
 
   it("edits the text and owner of an item in place", async () => {
@@ -141,6 +162,9 @@ describe("CommonActionItemsManager — pushed items", () => {
     expect(screen.queryByRole("form", { name: "Edit program action item" })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Edit: Bring the admit card" }));
+    expect(screen.getByRole("form", { name: "Edit program action item" })).toHaveTextContent(
+      "Changes the 1 student who still has it open."
+    );
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("form", { name: "Edit program action item" })).not.toBeInTheDocument();
   });
@@ -196,6 +220,7 @@ describe("CommonActionItemsManager — a new item", () => {
     expect(mockRefresh).toHaveBeenCalled();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(within(form).getByLabelText("Action item")).toHaveValue("");
+    expect(screen.getByRole("status")).toHaveTextContent("Added to 3 students.");
   });
 
   it("previews pasted Student IDs, naming the ones not found or with no mentor, and pushes to the rest", async () => {
@@ -247,6 +272,86 @@ describe("CommonActionItemsManager — a new item", () => {
     await user.selectOptions(within(form).getByLabelText("Grade"), "13");
     expect(await within(form).findByText("No students match this target.")).toBeInTheDocument();
     expect(within(form).getByRole("button", { name: "Push to students" })).toBeDisabled();
+  });
+
+  it("keeps Push off while counting, including while typing pauses, and for each new target", async () => {
+    const user = userEvent.setup();
+    let answer: (response: Response) => void = () => {};
+    previewReply = () => new Promise((resolve) => (answer = resolve));
+    render(<CommonActionItemsManager items={[]} mentors={MENTORS} />);
+    const form = screen.getByRole("form", { name: "New program action item" });
+    const pushButton = within(form).getByRole("button", { name: "Push to students" });
+
+    await user.type(within(form).getByLabelText("Action item"), "Fill in the form");
+    expect(within(form).getByText("Counting students…")).toBeInTheDocument();
+    expect(pushButton).toBeDisabled();
+    answer(json({ count: 5, notFound: [], noMentor: [] }));
+    expect(await within(form).findByText("Will be added to 5 students.")).toBeInTheDocument();
+    expect(pushButton).toBeEnabled();
+
+    // Typing IDs: off at once, through the pause and until that count lands.
+    await user.click(within(form).getByRole("radio", { name: "Specific students" }));
+    await user.type(within(form).getByLabelText("Student IDs"), "12345678");
+    expect(within(form).getByText("Counting students…")).toBeInTheDocument();
+    expect(pushButton).toBeDisabled();
+    await user.click(pushButton);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await waitFor(() => expect(previewBodies()).toHaveLength(2));
+    expect(pushButton).toBeDisabled();
+    answer(json({ count: 1, notFound: [], noMentor: [] }));
+    expect(await within(form).findByText("Will be added to 1 student.")).toBeInTheDocument();
+    expect(pushButton).toBeEnabled();
+  });
+
+  it("shows why the preview turned pasted IDs down and keeps Push off", async () => {
+    const user = userEvent.setup();
+    render(<CommonActionItemsManager items={[]} mentors={MENTORS} />);
+    const form = screen.getByRole("form", { name: "New program action item" });
+    await within(form).findByText("Will be added to 5 students.");
+
+    previewReply = async () =>
+      json({ error: "Check the target.", fieldErrors: { studentIds: "Paste at most 1000 Student IDs." } }, 422);
+    await user.type(within(form).getByLabelText("Action item"), "Fill in the form");
+    await user.click(within(form).getByRole("radio", { name: "Specific students" }));
+    await user.type(within(form).getByLabelText("Student IDs"), "12345678");
+
+    expect(await within(form).findByRole("alert")).toHaveTextContent("Paste at most 1000 Student IDs.");
+    expect(within(form).queryByText("Counting students…")).not.toBeInTheDocument();
+    expect(within(form).getByLabelText("Student IDs")).toHaveAttribute("aria-invalid", "true");
+    // Retrying the same IDs can't help; editing them asks again.
+    expect(within(form).queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+    expect(within(form).getByRole("button", { name: "Push to students" })).toBeDisabled();
+
+    previewReply = null;
+    previewCount = 1;
+    await user.type(within(form).getByLabelText("Student IDs"), "9");
+    expect(await within(form).findByText("Will be added to 1 student.")).toBeInTheDocument();
+    expect(within(form).getByLabelText("Student IDs")).toHaveAttribute("aria-invalid", "false");
+    expect(within(form).getByRole("button", { name: "Push to students" })).toBeEnabled();
+  });
+
+  it("says when the preview fails, keeps Push off and counts again on Retry", async () => {
+    const user = userEvent.setup();
+    previewReply = async () => json({ error: "Something broke" }, 500);
+    render(<CommonActionItemsManager items={[]} mentors={MENTORS} />);
+    const form = screen.getByRole("form", { name: "New program action item" });
+
+    expect(await within(form).findByRole("alert")).toHaveTextContent("Couldn't count students. Something broke");
+    expect(within(form).getByRole("button", { name: "Push to students" })).toBeDisabled();
+
+    // A network error says so too.
+    previewReply = async () => {
+      throw new TypeError("Failed to fetch");
+    };
+    await user.click(within(form).getByRole("button", { name: "Retry" }));
+    expect(await within(form).findByText("Couldn't count students. Couldn't reach the server. Try again.")).toBeInTheDocument();
+    expect(previewBodies()).toHaveLength(2);
+
+    previewReply = null;
+    await user.click(within(form).getByRole("button", { name: "Retry" }));
+    expect(await within(form).findByText("Will be added to 5 students.")).toBeInTheDocument();
+    expect(within(form).queryByRole("alert")).not.toBeInTheDocument();
+    expect(within(form).getByRole("button", { name: "Push to students" })).toBeEnabled();
   });
 
   it("puts a 422's field errors back on the form, and keeps a server error in the dialog", async () => {

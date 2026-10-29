@@ -21,6 +21,9 @@ export type ActionItem = {
   text: string;
   owner: ActionItemOwner;
   status: "open" | "done";
+  // Only on a done Common Action Item, listed in the history of the
+  // Conversation that ticked it ("From program").
+  source?: "common";
 };
 // Where an Action Item came from: a Conversation, the latest entry in the
 // Student's Profile Doc (from_profile_doc), or a Common Action Item pushed
@@ -29,7 +32,7 @@ export type ActionItemSource = "conversation" | "profile_doc" | "common";
 // An open Action Item with the date of the Conversation that agreed it (for
 // a Profile Doc one, that entry's date, legacy_last_contact_on; for a pushed
 // one, the date it was pushed).
-export type OpenActionItem = Omit<ActionItem, "status"> & { agreedOn: string; source: ActionItemSource };
+export type OpenActionItem = Omit<ActionItem, "status" | "source"> & { agreedOn: string; source: ActionItemSource };
 export type FlagRecipient = "emotional_wellbeing" | "physics" | "chemistry" | "maths";
 export type MentorFlag = { recipient: FlagRecipient; comment: string | null };
 // The Mentor's once-per-Student ratings of the Screener, each 1 to 5.
@@ -51,6 +54,7 @@ export type HistoryEntry =
       hasRecording: boolean;
       hasTranscript: boolean;
       photoCount: number;
+      // The items it agreed, then the Common Action Items it ticked done.
       actionItems: ActionItem[];
       flags: MentorFlag[];
       // "Was the screener form used?": null when the Student had no
@@ -158,6 +162,7 @@ export function contactNumbers(
 
 type ActionItemRow = {
   conversation_id: number | string | null;
+  completed_by_conversation_id: number | string | null;
   from_profile_doc: boolean;
   id: number | string;
   text: string;
@@ -169,7 +174,8 @@ type ActionItemRow = {
 };
 
 // Rows by Conversation; Profile Doc and pushed Action Items have no
-// Conversation and are left out.
+// Conversation and are left out (a done pushed one joins the Conversation
+// that ticked it, below).
 function groupBy<T extends { conversation_id: number | string | null }>(rows: T[]): Map<number, T[]> {
   const groups = new Map<number, T[]>();
   for (const row of rows) {
@@ -182,6 +188,18 @@ function groupBy<T extends { conversation_id: number | string | null }>(rows: T[
 
 function toActionItem(item: ActionItemRow): ActionItem {
   return { id: Number(item.id), text: item.text, owner: item.owner, status: item.status };
+}
+
+// Done Common Action Items by the Conversation that ticked them. They were
+// agreed in no Conversation, so this is where their history lives.
+function doneCommonItemsByConversation(items: ActionItemRow[]): Map<number, ActionItem[]> {
+  const groups = new Map<number, ActionItem[]>();
+  for (const item of items) {
+    if (itemSource(item) !== "common" || item.status !== "done" || item.completed_by_conversation_id === null) continue;
+    const key = Number(item.completed_by_conversation_id);
+    groups.set(key, [...(groups.get(key) ?? []), { ...toActionItem(item), source: "common" }]);
+  }
+  return groups;
 }
 
 function openItem(item: ActionItemRow, agreedOn: string): OpenActionItem {
@@ -248,6 +266,7 @@ function withProfileDocEntry(history: HistoryEntry[], entry: HistoryEntry | null
 function historyEntry(
   entry: EntryRow,
   itemsByConversation: Map<number, ActionItemRow[]>,
+  commonItemsByConversation: Map<number, ActionItem[]>,
   flagsByConversation: Map<number, FlagRow[]>
 ): HistoryEntry {
   const id = Number(entry.id);
@@ -266,7 +285,10 @@ function historyEntry(
     hasRecording: entry.has_recording,
     hasTranscript: entry.has_transcript,
     photoCount: Number(entry.photo_count),
-    actionItems: (itemsByConversation.get(id) ?? []).map(toActionItem),
+    actionItems: [
+      ...(itemsByConversation.get(id) ?? []).map(toActionItem),
+      ...(commonItemsByConversation.get(id) ?? []),
+    ],
     flags: (flagsByConversation.get(id) ?? []).map((flag) => ({
       recipient: flag.recipient,
       comment: flag.comment,
@@ -338,7 +360,7 @@ export async function getMenteeDetail(
       [studentId]
     ),
     query<ActionItemRow>(
-      `SELECT conversation_id, from_profile_doc, id, text, owner, status,
+      `SELECT conversation_id, completed_by_conversation_id, from_profile_doc, id, text, owner, status,
               ((inserted_at AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Kolkata')::date::text AS added_on
        FROM blended_learning_action_items
        WHERE student_id = $1
@@ -355,6 +377,7 @@ export async function getMenteeDetail(
     ),
   ]);
   const itemsByConversation = groupBy(actionItems);
+  const commonItemsByConversation = doneCommonItemsByConversation(actionItems);
   const flagsByConversation = groupBy(flags);
   const screenerUrl = present(profile.screener_url);
 
@@ -375,7 +398,7 @@ export async function getMenteeDetail(
     mentor: { userId: Number(profile.mentor_user_id), firstName: profile.mentor_first_name },
     openActionItems: openActionItems(profile, entries, itemsByConversation, actionItems),
     history: withProfileDocEntry(
-      entries.map((entry) => historyEntry(entry, itemsByConversation, flagsByConversation)),
+      entries.map((entry) => historyEntry(entry, itemsByConversation, commonItemsByConversation, flagsByConversation)),
       profileDocEntry(profile, actionItems)
     ),
   };

@@ -2,12 +2,15 @@
 
 import { useEffect, useState } from "react";
 
+import { Button } from "@/components/ui";
 import type { TargetPreview } from "@/lib/blended-learning-common-action-items";
 
-import { manageRequest, students } from "./manageRequest";
+import { manageRequest, students, type ManageResponse } from "./manageRequest";
 
 // The new item's target as the form holds it, and its live preview: how many
 // Students it reaches now and, for pasted Student IDs, which IDs won't get it.
+// A preview that fails (IDs the server won't take, or the request fails)
+// says why, and the form can't push until one for the current target lands.
 
 export type TargetDraft = { kind: "all" | "grade" | "mentor" | "students"; grade: string; mentorUserId: string; studentIds: string };
 
@@ -27,22 +30,46 @@ function missingChoice(draft: TargetDraft): string | null {
   return null;
 }
 
-// The preview for the draft's target; null while unknown.
-export function useTargetPreview(draft: TargetDraft): TargetPreview | null {
+// The preview of the draft's target: what is still to choose, counting
+// (also while typing pauses), failed with the error to show (a field error,
+// such as too many IDs, can't be retried as is), or counted.
+export type PreviewState =
+  | { status: "incomplete"; hint: string }
+  | { status: "counting" }
+  | { status: "failed"; error: string; canRetry: boolean }
+  | { status: "ready"; preview: TargetPreview };
+
+function previewState(response: ManageResponse<TargetPreview>): PreviewState {
+  if (response.ok) return { status: "ready", preview: response.body };
+  const fieldError = response.fieldErrors.studentIds ?? Object.values(response.fieldErrors)[0];
+  return fieldError
+    ? { status: "failed", error: fieldError, canRetry: false }
+    : { status: "failed", error: `Couldn't count students. ${response.error}`, canRetry: true };
+}
+
+// The preview for the draft's target, and a way to ask again after a failure.
+// Only a response for the current target (and the latest retry) counts.
+export function useTargetPreview(draft: TargetDraft): { state: PreviewState; retry: () => void } {
   const target = apiTarget(draft);
-  const key = missingChoice(draft) === null ? JSON.stringify(target) : null;
-  const [preview, setPreview] = useState<{ key: string; value: TargetPreview } | null>(null);
+  const hint = missingChoice(draft);
+  const key = hint === null ? JSON.stringify(target) : null;
+  const [attempt, setAttempt] = useState(0);
+  const [response, setResponse] = useState<{
+    key: string;
+    attempt: number;
+    value: ManageResponse<TargetPreview>;
+  } | null>(null);
 
   useEffect(() => {
     if (key === null) return;
     let cancelled = false;
     const timer = setTimeout(
       async () => {
-        const result = await manageRequest<TargetPreview>("/api/blended-learning/common-action-items/preview", {
+        const value = await manageRequest<TargetPreview>("/api/blended-learning/common-action-items/preview", {
           method: "POST",
           body: JSON.parse(key),
         });
-        if (!cancelled && result.ok) setPreview({ key, value: result.body });
+        if (!cancelled) setResponse({ key, attempt, value });
       },
       draft.kind === "students" ? TYPING_DELAY_MS : 0
     );
@@ -50,9 +77,17 @@ export function useTargetPreview(draft: TargetDraft): TargetPreview | null {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [key, draft.kind]);
+  }, [key, draft.kind, attempt]);
 
-  return preview && preview.key === key ? preview.value : null;
+  const retry = () => setAttempt((current) => current + 1);
+  if (hint !== null) return { state: { status: "incomplete", hint }, retry };
+  if (!response || response.key !== key || response.attempt !== attempt) return { state: { status: "counting" }, retry };
+  return { state: previewState(response.value), retry };
+}
+
+// The counted preview, or null until there is one.
+export function countedPreview(state: PreviewState): TargetPreview | null {
+  return state.status === "ready" ? state.preview : null;
 }
 
 function ids(count: number): string {
@@ -80,9 +115,24 @@ export function UnmatchedIds({ preview }: { preview: TargetPreview }) {
   );
 }
 
-export function PreviewLine({ draft, preview }: { draft: TargetDraft; preview: TargetPreview | null }) {
+export function PreviewLine({ state, onRetry }: { state: PreviewState; onRetry: () => void }) {
+  if (state.status === "failed") {
+    return (
+      <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:gap-3">
+        <p role="alert" className="text-sm font-bold text-danger">
+          {state.error}
+        </p>
+        {state.canRetry && (
+          <Button type="button" variant="secondary" onClick={onRetry}>
+            Retry
+          </Button>
+        )}
+      </div>
+    );
+  }
+  const preview = countedPreview(state);
   const count = preview?.count ?? null;
-  let text = missingChoice(draft) ?? "Counting students…";
+  let text = state.status === "incomplete" ? state.hint : "Counting students…";
   if (count !== null) text = count === 0 ? "No students match this target." : `Will be added to ${students(count)}.`;
   return (
     <div aria-live="polite" className="space-y-1">

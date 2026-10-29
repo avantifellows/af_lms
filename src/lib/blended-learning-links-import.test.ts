@@ -1,22 +1,25 @@
 import ExcelJS from "exceljs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("./db", () => ({ query: vi.fn() }));
+vi.mock("./db", () => ({ query: vi.fn(), withTransaction: vi.fn() }));
 
-import { query } from "./db";
+import { query, withTransaction } from "./db";
 import { parseLegacyConversations } from "./blended-learning-legacy-conversations";
 import {
   formatBlendedLinksImportReport,
   legacyDateWindow,
   profileDocId,
   runBlendedLinksImport,
+  type LegacyProfileDocs,
 } from "./blended-learning-links-import";
 
 const mockQuery = vi.mocked(query);
+const mockWithTransaction = vi.mocked(withTransaction);
 
 // Fixture: active current-year Mappings (student pk, Student ID, name) and the
 // links table as it stands. The fake answers the Mapping read, the links read
-// and the upsert, keeping the links table in memory.
+// and the upsert, keeping the links table in memory. Its transaction runs the
+// same fake on a client and restores both tables when the callback throws.
 interface MappedStudent {
   id: number;
   studentId: string;
@@ -45,6 +48,8 @@ let linksTable: Map<number, LinkRow>;
 let itemsTable: ItemRow[];
 let itemWrites: string[];
 let writes: unknown[][];
+// A statement the fake fails, as a dropped connection or a timeout would.
+let failingStatement: RegExp | null;
 
 // The fake's side of the importer's Profile Doc Action Item statements.
 function fakeItemsQuery(sql: string, params: unknown[]): unknown[] | null {
@@ -81,7 +86,20 @@ function givenDatabase(mapped: MappedStudent[], links: LinkRow[] = [], items: It
   itemsTable = items.map((item) => ({ ...item }));
   itemWrites = [];
   writes = [];
+  failingStatement = null;
+  mockWithTransaction.mockImplementation(async (fn) => {
+    const saved = { links: new Map([...linksTable].map(([id, row]) => [id, { ...row }])), items: itemsTable.map((item) => ({ ...item })) };
+    const client = { query: async (sql: string, params?: unknown[]) => ({ rows: await mockQuery(sql, params) }) };
+    try {
+      return await fn(client as never);
+    } catch (error) {
+      linksTable = saved.links;
+      itemsTable = saved.items;
+      throw error;
+    }
+  });
   mockQuery.mockImplementation(async (sql: string, params?: unknown[]) => {
+    if (failingStatement?.test(sql)) throw new Error("Synthetic: connection lost");
     const items = fakeItemsQuery(sql, params ?? []);
     if (items) return items as never[];
     if (/FROM blended_learning_mentor_mentee_mappings/.test(sql)) {
@@ -296,6 +314,7 @@ describe("runBlendedLinksImport", () => {
     return {
       readProfileDocHtml: (docId: string) => docs[docId] ?? null,
       window: { from: "2026-04-01", to: "2026-10-23" },
+      conversations: parseLegacyConversations({}),
     };
   }
 
@@ -313,7 +332,7 @@ describe("runBlendedLinksImport", () => {
     expect(linksTable.get(501)?.legacy_last_contact_on).toBe("2026-09-17");
     expect(linksTable.get(502)?.legacy_last_contact_on).toBeNull();
     expect(linksTable.get(503)?.legacy_last_contact_on).toBeNull();
-    expect(writes.every((params) => params.length === 4)).toBe(true);
+    expect(writes.every((params) => params.length === 5)).toBe(true);
   });
 
   it("is re-runnable: unchanged on a second run, fills a doc once it is shared, keeps a stored date for an unreadable doc", async () => {
@@ -650,28 +669,37 @@ describe("runBlendedLinksImport with legacy conversations", () => {
     expect(itemWrites).toEqual([]);
   });
 
-  it("writes the summary and items only with a conversations file", async () => {
-    givenDatabase(
-      [ASHA],
-      [
-        {
-          student_id: 501, profile_doc_url: "https://docs.google.com/document/d/asha-doc", screener_url: null,
-          legacy_last_contact_on: "2026-09-17", legacy_conversation_summary: "Synthetic: kept.",
-        },
-      ],
-      [{ id: 11, student_id: 501, position: 1, ...items[0], status: "open" }]
-    );
-    const report = await runBlendedLinksImport({
-      workbook: workbook(),
-      mode: "apply",
-      legacyProfileDocs: { readProfileDocHtml: () => SEP_17, window: { from: "2026-04-01", to: "2026-10-23" } },
-    });
-    expect(report.legacyConversations).toBeNull();
-    expect(report.profileDocActionItems).toBeNull();
-    expect(report.writes).toEqual({ inserted: 0, updated: 0, unchanged: 1 });
-    expect(linksTable.get(501)?.legacy_conversation_summary).toBe("Synthetic: kept.");
-    expect(itemsTable).toHaveLength(1);
-    expect(itemWrites).toEqual([]);
+  // A stored Sep 1 entry, its summary and one open item.
+  const SEP_1_STORED: LinkRow = {
+    student_id: 501, profile_doc_url: "https://docs.google.com/document/d/asha-doc", screener_url: null,
+    legacy_last_contact_on: "2026-09-01", legacy_conversation_summary: "Synthetic: Sep 1.",
+  };
+  const SEP_1_ITEM: ItemRow = { id: 11, student_id: 501, position: 1, text: "Synthetic: Sep 1 task", owner: "student", status: "open" };
+
+  it("refuses legacy Profile Docs without their conversations file, so a date never moves without its summary", async () => {
+    givenDatabase([ASHA], [SEP_1_STORED], [SEP_1_ITEM]);
+    const dateOnly = { readProfileDocHtml: () => SEP_17, window: { from: "2026-04-01", to: "2026-10-23" } };
+
+    await expect(
+      runBlendedLinksImport({ workbook: workbook(), mode: "apply", legacyProfileDocs: dateOnly as unknown as LegacyProfileDocs })
+    ).rejects.toThrow("Legacy Profile Docs need their conversations file");
+    expect(linksTable.get(501)).toEqual(SEP_1_STORED);
+    expect(itemsTable).toEqual([SEP_1_ITEM]);
+  });
+
+  it("applies in one transaction: a failed item insert rolls back the summary and the removed items", async () => {
+    givenDatabase([ASHA], [SEP_1_STORED], [SEP_1_ITEM]);
+    failingStatement = /^\s*INSERT INTO blended_learning_action_items/;
+
+    await expect(
+      runBlendedLinksImport({
+        workbook: workbook(),
+        mode: "apply",
+        legacyProfileDocs: docs({ "asha-doc": SEP_17 }, { "asha-doc": FILE["asha-doc"] }),
+      })
+    ).rejects.toThrow("Synthetic: connection lost");
+    expect(linksTable.get(501)).toEqual(SEP_1_STORED);
+    expect(itemsTable).toEqual([SEP_1_ITEM]);
   });
 
   it("names a Student without a Student ID in an invalid entry's issue", () => {

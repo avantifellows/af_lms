@@ -32,3 +32,8 @@ export async function manageRequest<T = unknown>(
 export function students(count: number): string {
   return `${count} ${count === 1 ? "student" : "students"}`;
 }
+
+// The verb that agrees with a count: agree(1, "has", "have") is "has".
+export function agree(count: number, one: string, many: string): string {
+  return count === 1 ? one : many;
+}

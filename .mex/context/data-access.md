@@ -21,7 +21,7 @@ edges:
     condition: when adding a write that must proxy to the DB Service
   - target: patterns/add-api-route.md
     condition: when adding a route that reads or writes
-last_updated: 2026-10-28
+last_updated: 2026-10-29
 ---
 
 # Data Access
@@ -549,13 +549,14 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   upserts `ON CONFLICT (student_id)` per changed Student only, so an unchanged re-run writes
   nothing. Non-`https://` values are skipped before the DB CHECK sees them; a value missing from
   the workbook keeps the stored one. `legacy_last_contact_on` is selected and written only
-  with `--legacy-docs-dir` (Profile Doc HTML exports; date extraction in
+  with `--legacy-docs-dir`, which needs `--legacy-conversations` so a date never moves
+  without its summary and items (Profile Doc HTML exports; date extraction in
   `src/lib/blended-learning-profile-doc-dates.ts`: the doc's latest dated conversation only).
   With docs, every matched Student is considered, so a stored Profile Doc link still gives a
   date when the workbook row has none; a Student with no link and no stored row gets no row.
   `legacy_conversation_summary` (db-service migration `20261027100000`, mirrored in e2e fixture
-  `20261027100000_add_blended_learning_legacy_conversation.sql`) is selected and written only
-  with `--legacy-conversations` too (validation in
+  `20261027100000_add_blended_learning_legacy_conversation.sql`) is selected and written with
+  it, from `--legacy-conversations` (validation in
   `src/lib/blended-learning-legacy-conversations.ts`): the file's entry for a `dated` doc on
   that same date, NULL otherwise; an unreadable doc keeps it. The upsert names only the
   columns the run owns (fixed literals; values bound). The same run syncs that Student's
@@ -564,7 +565,8 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   partial unique `bl_action_items_profile_doc_unique` on (student_id, text, owner)): insert
   missing ones open, keep matching ones (open or done), delete only open ones the file no
   longer lists (all open ones when the summary is NULL); three batched statements, the DELETE
-  re-checking `status = 'open'`.
+  re-checking `status = 'open'`. An apply runs the reads, upserts and item sync in one
+  `withTransaction`, so a failure part way rolls everything back; a dry run uses `query()`.
   Runbook: `patterns/load-blended-learning-links.md`.
 - **Profile Doc entry on the Mentee pages:** `getMenteeDetail` adds a `kind: "profile_doc"`
   history entry (`legacy_last_contact_on`, the summary, every Profile Doc Action Item with its
@@ -621,8 +623,10 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   by `student_id` (no join) and now builds `openActionItems` from Conversation rows (as before)
   plus the rows with no Conversation: Profile Doc ones (`source: "profile_doc"`) and pushed ones
   (`source: "common"`, `agreedOn` = the IST date the row was inserted), newest date first;
-  `groupBy` skips NULL `conversation_id`, so pushed rows never appear in a Conversation's
-  history. `logEntry`'s tick `UPDATE … WHERE id = ANY($3) AND status = 'open' AND student_id = $4`
+  `groupBy` skips NULL `conversation_id`, so an open pushed row is in no Conversation's history; a
+  done one (`completed_by_conversation_id` set) is listed after the items of the Conversation that
+  ticked it, as `{ …, status: "done", source: "common" }` (`doneCommonItemsByConversation`), so the
+  "done ones stay in their history" promise of Remove holds. `logEntry`'s tick `UPDATE … WHERE id = ANY($3) AND status = 'open' AND student_id = $4`
   needs no change: a pushed row is ticked like any other (a removal racing the tick → 409).
   `insertActionItems` and the draft review read paths only touch Conversation rows; the links
   importer's Profile Doc sync and the e2e seed's Profile Doc rows only touch `from_profile_doc`
@@ -633,9 +637,18 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   `NewCommonItemForm` (who does it and the action item side by side on one line, as on the log form,
   stacked on a phone; 200 characters in the form and in `validateCommonItemEdit`, though the DB
   allows 500; target radio + Grade/Mentor select or Student IDs textarea, live preview with the unmatched IDs, confirm
-  before push; 422 field errors go back inline). Every change calls `router.refresh()`. The open
-  items on the detail page and the log form show a "From program" tag (the UI name; code and DB keep "common") and "Added <date>"
-  (`ActionItemMeta` `source="common"`).
+  before push; 422 field errors go back inline). `useTargetPreview` returns `incomplete | counting |
+  failed | ready` for the current target only (counting also covers the typing pause); a failed
+  preview shows its `studentIds` field error (too many IDs, a token over 64 characters) or "Couldn't
+  count students. …" with Retry, and Push is disabled while counting, failed or at 0 (an incomplete
+  target keeps Push so the form's own checks show). After a push or Push again the section's status
+  line says "Added to N students." from the response's `added` (0 included). Every change calls
+  `router.refresh()`. The open items on the detail page and the log form show a "From program" tag
+  (the UI name; code and DB keep "common") and "Added <date>" (`ActionItemMeta` `source="common"`);
+  a done one shows struck through in its ticking Conversation's history with the same tag.
+- **Known gaps (not built):** an admin edit while a Mentor's log form is open means the Mentor's
+  tick completes the new wording (no version check); a create retried after a network error that
+  the server had committed pushes a second item (no idempotency key).
 - **E2E:** `e2e/fixtures/migrations/20261027120000_add_blended_learning_manage.sql` mirrors the
   migration (pg_dump-identical, seed row included). `blended-learning-manage.spec.ts` uses Mentor D
   (`BLENDED_MENTOR_D`) and `MANAGE_MENTEES` (G1, G2 mapped; G3 mapped by the spec to test Push

@@ -84,6 +84,21 @@ function resourceList(page: Page) {
   return page.getByRole("list", { name: "Resources" }).getByRole("listitem");
 }
 
+// The Manage section's line saying how many Students the last push reached.
+function pushedStatus(page: Page) {
+  return page.getByRole("region", { name: "Program action items" }).getByRole("status");
+}
+
+// The Action Item rows of the history entry whose summary is `summary`.
+function historyItems(page: Page, summary: string) {
+  return page
+    .getByRole("region", { name: "History" })
+    .getByRole("article")
+    .filter({ hasText: summary })
+    .getByRole("list", { name: "Action Items" })
+    .getByRole("listitem");
+}
+
 function commonItem(page: Page, text: string) {
   return page.getByRole("list", { name: "Program action items" }).getByRole("listitem").filter({ hasText: text });
 }
@@ -267,6 +282,7 @@ test.describe("Blended Learning Manage — Common Action Items", () => {
     await expect(confirm).toContainText(`${BLENDED_MENTOR_D.name}'s students · Will be added to 2 students.`);
     await confirm.getByRole("button", { name: "Push" }).click();
     await expect(confirm).toHaveCount(0);
+    await expect(pushedStatus(page)).toHaveText("Added to 2 students.");
 
     const item = commonItem(page, text);
     await expect(item).toContainText(`${BLENDED_MENTOR_D.name}'s students`);
@@ -289,7 +305,8 @@ test.describe("Blended Learning Manage — Common Action Items", () => {
     await logForm.getByRole("radio", { name: "Call" }).check();
     await logForm.getByRole("radio", { name: "Student", exact: true }).check();
     await logForm.getByLabel("Duration (minutes)").fill("20");
-    await logForm.getByLabel("Summary").fill("Synthetic: checked the scholarship form.");
+    const summary = "Synthetic: checked the scholarship form.";
+    await logForm.getByLabel("Summary").fill(summary);
     const panel = mentor.getByRole("region", { name: "Open Action Items" });
     await expect(panel.getByRole("listitem").filter({ hasText: text })).toContainText("From program");
     await panel.getByRole("checkbox", { name: new RegExp(text) }).check();
@@ -308,6 +325,14 @@ test.describe("Blended Learning Manage — Common Action Items", () => {
       completed_by_conversation_id: savedConversation,
       completed_by_email: BLENDED_MENTOR_D.email,
     });
+    // Done, it leaves Open Action Items and shows in the history of the
+    // Conversation that ticked it, still tagged.
+    await mentor.goto(`/blended-learning/students/${studentIds[first.key]}`);
+    await expect(mentor.getByRole("region", { name: "Open Action Items" })).toHaveCount(0);
+    const ticked = historyItems(mentor, summary).filter({ hasText: text });
+    await expect(ticked).toContainText("From program");
+    await expect(ticked).toContainText("Done");
+    await expect(ticked.getByText(text, { exact: true })).toHaveClass(/line-through/);
 
     await page.reload();
     await expect(item.locator("dt:text-is('Open') + dd")).toHaveText("1");
@@ -341,9 +366,10 @@ test.describe("Blended Learning Manage — Common Action Items", () => {
     await expect(editedItem.locator("dt:text-is('Not yet added') + dd")).toHaveText("1");
     await editedItem.getByRole("button", { name: `Push again: ${edited}` }).click();
     const again = page.getByRole("dialog", { name: "Push this action item again?" });
-    await expect(again).toContainText("Will be added to 1 student who don't have it yet.");
+    await expect(again).toContainText("Will be added to 1 student who doesn't have it yet.");
     await again.getByRole("button", { name: "Push" }).click();
     await expect(again).toHaveCount(0);
+    await expect(pushedStatus(page)).toHaveText("Added to 1 student.");
     await expect(editedItem.locator("dt:text-is('Open') + dd")).toHaveText("2");
     await expect(editedItem.getByRole("button", { name: `Push again: ${edited}` })).toBeDisabled();
     expect(await pushedRows()).toHaveLength(3);
@@ -355,7 +381,7 @@ test.describe("Blended Learning Manage — Common Action Items", () => {
     // Removing deletes the open rows and keeps the done one.
     await editedItem.getByRole("button", { name: `Remove: ${edited}` }).click();
     const remove = page.getByRole("dialog", { name: "Remove this action item?" });
-    await expect(remove).toContainText("Deletes it from the 2 students who still have it open. The 1 done stay in their history.");
+    await expect(remove).toContainText("Deletes it from the 2 students who still have it open. The 1 done stays in their history.");
     await remove.getByRole("button", { name: "Remove" }).click();
     await expect(remove).toHaveCount(0);
     await expect(commonItem(page, edited)).toHaveCount(0);
@@ -375,6 +401,19 @@ test.describe("Blended Learning Manage — Common Action Items", () => {
     await expect(mentor.getByRole("heading", { name: `${second.firstName} ${second.lastName}` })).toBeVisible();
     await expect(mentor.getByRole("region", { name: "Open Action Items" })).toHaveCount(0);
     await mentorContext.close();
+
+    // As the dialog said, the done one stays in that Student's history: a
+    // read-only admin sees it too, and on a phone it fits.
+    const adminContext = await browser.newContext({ viewport: { width: 360, height: 740 } });
+    const readOnly = await adminContext.newPage();
+    await signInAs(readOnly, READ_ONLY_ADMIN);
+    await readOnly.goto(`/blended-learning/students/${studentIds[first.key]}`);
+    const kept = historyItems(readOnly, summary).filter({ hasText: text });
+    await expect(kept).toContainText("From program");
+    await expect(kept).toContainText("Done");
+    await expect(kept.getByRole("checkbox")).toHaveCount(0);
+    expect(await horizontalOverflow(readOnly)).toBeLessThanOrEqual(0);
+    await adminContext.close();
   });
 });
 
@@ -392,13 +431,35 @@ test.describe("Blended Learning Manage — specific students", () => {
     await form.getByLabel("Action item").fill(text);
     await form.getByRole("radio", { name: "Specific students" }).check();
     await expect(form.getByText("Paste Student IDs to see how many students get it.")).toBeVisible();
+    const push = form.getByRole("button", { name: "Push to students" });
+
+    // IDs the server turns down say why, and Push stays off.
+    await form.getByLabel("Student IDs").fill(`E2E-BL-${second.key} ${"9".repeat(65)}`);
+    await expect(form.getByRole("alert")).toHaveText("One of these isn't a Student ID.");
+    await expect(form.getByText("Counting students…")).toHaveCount(0);
+    await expect(push).toBeDisabled();
+    await form.getByLabel("Student IDs").fill(Array.from({ length: 1001 }, (_, index) => `ID${index}`).join(" "));
+    await expect(form.getByRole("alert")).toHaveText("Paste at most 1000 Student IDs.");
+    await expect(push).toBeDisabled();
+
+    // A failed request offers Retry, and Push stays off until a count lands.
+    await page.route("**/api/blended-learning/common-action-items/preview", (route) => route.abort());
+    await form.getByLabel("Student IDs").fill(`E2E-BL-${second.key}`);
+    await expect(form.getByRole("alert")).toHaveText("Couldn't count students. Couldn't reach the server. Try again.");
+    await expect(push).toBeDisabled();
+    await page.unroute("**/api/blended-learning/common-action-items/preview");
+    await form.getByRole("button", { name: "Retry" }).click();
+    await expect(form.getByText("Will be added to 1 student.")).toBeVisible();
+    await expect(form.getByRole("alert")).toHaveCount(0);
+    await expect(push).toBeEnabled();
+
     // Mentor D's H2 and H3 (H3 was mapped by the test above), whitespace, comma and new-line separated.
     await form.getByLabel("Student IDs").fill(`E2E-BL-${second.key},  ${unknown}\n${noMentor} E2E-BL-${mappedLater.key}\nE2E-BL-${second.key}`);
     await expect(form.getByText("Will be added to 2 students.")).toBeVisible();
     await expect(form).toContainText(`1 ID not found: ${unknown}`);
     await expect(form).toContainText(`1 ID found but with no active mentor: ${noMentor}`);
 
-    await form.getByRole("button", { name: "Push to students" }).click();
+    await push.click();
     const confirm = page.getByRole("dialog", { name: "Push this action item?" });
     await expect(confirm).toContainText("Specific students (4 IDs listed) · Will be added to 2 students.");
     await confirm.getByRole("button", { name: "Push" }).click();
