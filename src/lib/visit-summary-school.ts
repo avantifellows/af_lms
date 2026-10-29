@@ -2,8 +2,9 @@
 // reads through `@/lib/db`).
 import { AL_DISPLAY_ORDER } from "@/lib/academic-level";
 import { canonicalStream, getStudentAcademicLevelCounts } from "@/lib/bigquery";
-import { PROGRAM_ID_TO_LABEL, PROGRAM_IDS } from "@/lib/constants";
+import { PROGRAM_ID_TO_LABEL, PROGRAM_IDS, isPmuRole } from "@/lib/constants";
 import { query } from "@/lib/db";
+import { canAccessSchoolSync, canViewCentre, getCentreConfinement, type UserPermission } from "@/lib/permissions";
 import { buildVisitSummarySchoolPredicate } from "@/lib/visit-summary-scope";
 import type { VisitsActor } from "@/lib/visits-policy";
 
@@ -35,6 +36,26 @@ export async function getVisitSummarySchool(
     [schoolCode, ...onSummary.params]
   );
   return rows[0] ?? null;
+}
+
+// The roster pages this page links to keep their own gates (`RosterPage`), narrower than this
+// page's: a Centre-seated user (every PM) may open only their own Centres' pages, never the
+// School's. A link is drawn only to a page the viewer can open.
+
+// RosterPage's Centre gate.
+function canOpenCentrePage(permission: UserPermission, school: VisitSummarySchool, centreId: string): boolean {
+  return canViewCentre(permission, {
+    centreId: Number(centreId),
+    schoolCode: school.code,
+    schoolRegion: school.region ?? undefined,
+  });
+}
+
+// RosterPage's School gate: School access, PMU roles only at JNV Schools, and no Centre seat.
+function canOpenSchoolPage(permission: UserPermission, school: VisitSummarySchool): boolean {
+  if (!canAccessSchoolSync(permission, school.code, school.region ?? undefined)) return false;
+  if (isPmuRole(permission.role) && school.af_school_category !== "JNV") return false;
+  return !getCentreConfinement(permission).confined;
 }
 
 // Seat roles that teach (every seat role except the PM tiers).
@@ -257,6 +278,8 @@ export interface VisitSummaryFlagRow {
   raisedBy: string;
   raisedAt: string;
   updateCount: number;
+  // Where "Notes in LMS" opens the flag for this viewer; null when they can open no page with it.
+  notesHref: string | null;
 }
 
 export interface VisitSummaryFlags {
@@ -277,10 +300,28 @@ interface FlagQueryRow {
   update_count: number;
 }
 
+// The Enrollment tab that opens a flag for this viewer: the School's when they may open the School's
+// roster page, else the flag's Centre's when they may open that (a Centre-seated PM at their own
+// Centre), else none.
+function flagNotesHref(
+  permission: UserPermission,
+  school: VisitSummarySchool,
+  flagId: number,
+  centreId: string | null
+): string | null {
+  const params = new URLSearchParams({ tab: "enrollment", flag: String(flagId) });
+  if (canOpenSchoolPage(permission, school)) return `/school/${encodeURIComponent(school.code)}?${params}`;
+  if (centreId !== null && canOpenCentrePage(permission, school, centreId)) return `/centre/${centreId}?${params}`;
+  return null;
+}
+
 // The School's intervention flags for the School page (#470), JNV NVS ones excluded: its open flags,
 // newest first, and how many are resolved. The caller checks `canViewSchoolInterventionFlags`.
 // The raiser's name comes from `user_permission` like other author names, falling back to the email.
-export async function getVisitSummarySchoolFlags(schoolCode: string): Promise<VisitSummaryFlags> {
+export async function getVisitSummarySchoolFlags(
+  school: VisitSummarySchool,
+  permission: UserPermission
+): Promise<VisitSummaryFlags> {
   const rows = await query<FlagQueryRow>(
     `SELECT f.id::int AS id,
             f.status,
@@ -320,7 +361,7 @@ export async function getVisitSummarySchoolFlags(schoolCode: string): Promise<Vi
      WHERE s.code = $1
        AND f.program_id IS DISTINCT FROM $2
      ORDER BY f.inserted_at DESC, f.id DESC`,
-    [schoolCode, PROGRAM_IDS.NVS]
+    [school.code, PROGRAM_IDS.NVS]
   );
 
   return {
@@ -334,6 +375,7 @@ export async function getVisitSummarySchoolFlags(schoolCode: string): Promise<Vi
         raisedBy: row.raised_by_name ?? row.raised_by_email,
         raisedAt: row.inserted_at,
         updateCount: Number(row.update_count),
+        notesHref: flagNotesHref(permission, school, Number(row.id), row.centre_id),
       })),
     resolvedCount: rows.filter((row) => row.status === "resolved").length,
   };

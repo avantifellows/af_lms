@@ -6,7 +6,8 @@ import type { VisitSummaryFlagRow, VisitSummaryFlags } from "@/lib/visit-summary
 
 // The School page's Intervention flags section (#470): the School's open flags (JNV NVS ones never
 // reach it), one row each with the Student's initials (full name on hover) and a "Notes in LMS"
-// link that opens that Student's flag on the School's Enrollment tab.
+// link that opens that Student's flag on an Enrollment tab the viewer can open (the School's, or
+// for a Centre-seated PM their Centre's; the server picks it). With none, the row has no link.
 
 // "Asha Rani Verma" → "A. R. V.".
 function initialsOf(name: string): string {
@@ -17,8 +18,7 @@ function initialsOf(name: string): string {
     .join(" ");
 }
 
-function FlagRow({ schoolCode, flag }: { schoolCode: string; flag: VisitSummaryFlagRow }) {
-  const params = new URLSearchParams({ tab: "enrollment", flag: String(flag.id) });
+function FlagRow({ flag }: { flag: VisitSummaryFlagRow }) {
   const initials = initialsOf(flag.studentName);
   const gradeAndCentre = [flag.grade !== null ? `G${flag.grade}` : null, flag.centreTag].filter(Boolean).join(" ");
   return (
@@ -34,18 +34,20 @@ function FlagRow({ schoolCode, flag }: { schoolCode: string; flag: VisitSummaryF
         Raised by {flag.raisedBy} · {formatIstDate(flag.raisedAt)}
       </span>
       {flag.updateCount > 1 && <span className="text-xs font-bold text-text-secondary">{flag.updateCount} updates</span>}
-      <Link
-        href={`/school/${encodeURIComponent(schoolCode)}?${params.toString()}`}
-        aria-label={`Notes in LMS for ${initials}`}
-        className="ml-auto text-xs font-bold uppercase tracking-wide text-accent hover:text-accent-hover"
-      >
-        Notes in LMS <span aria-hidden>↗</span>
-      </Link>
+      {flag.notesHref && (
+        <Link
+          href={flag.notesHref}
+          aria-label={`Notes in LMS for ${initials}`}
+          className="ml-auto text-xs font-bold uppercase tracking-wide text-accent hover:text-accent-hover"
+        >
+          Notes in LMS <span aria-hidden>↗</span>
+        </Link>
+      )}
     </li>
   );
 }
 
-export function SchoolInterventionFlags({ schoolCode, flags }: { schoolCode: string; flags: VisitSummaryFlags }) {
+export function SchoolInterventionFlags({ flags }: { flags: VisitSummaryFlags }) {
   return (
     <section aria-labelledby="intervention-flags-heading" className="space-y-3">
       <div className="flex items-baseline justify-between gap-3">
@@ -64,7 +66,7 @@ export function SchoolInterventionFlags({ schoolCode, flags }: { schoolCode: str
         ) : (
           <ul className="divide-y divide-border">
             {flags.open.map((flag) => (
-              <FlagRow key={flag.id} schoolCode={schoolCode} flag={flag} />
+              <FlagRow key={flag.id} flag={flag} />
             ))}
           </ul>
         )}

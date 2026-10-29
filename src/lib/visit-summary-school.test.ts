@@ -29,6 +29,20 @@ const SCHOOL: VisitSummarySchool = {
   af_school_category: "JNV",
 };
 
+// A level-3 admin: every School and Centre.
+const ADMIN = { email: "admin@avantifellows.org", level: 3, role: "admin", read_only: false } as UserPermission;
+
+// A PM seated only at the School's CoE (Centre 101): School access through the seat, Centre access
+// to 101 only, and so confined to it (no whole-School roster page).
+const COE_SEATED_PM = {
+  email: "pm@avantifellows.org",
+  level: 1,
+  role: "program_manager",
+  read_only: false,
+  school_codes: [],
+  scope: { schools: new Set(["SC001"]), centres: new Set([101]), programs: new Set([1]) },
+} as UserPermission;
+
 beforeEach(() => {
   mockQuery.mockReset();
   mockGetStudentAcademicLevelCounts.mockReset();
@@ -227,17 +241,19 @@ describe("getVisitSummarySchoolFlags", () => {
       flag({ id: 504, status: "resolved" }),
     ]);
 
-    const flags = await getVisitSummarySchoolFlags("SC001");
+    const flags = await getVisitSummarySchoolFlags(SCHOOL, ADMIN);
 
     expect(flags).toEqual({
       open: [
         {
           id: 501, studentName: "Asha Verma", grade: 11, centreTag: "CoE",
           raisedBy: "Ravi PM", raisedAt: "2026-10-20T20:00:00.000Z", updateCount: 3,
+          notesHref: "/school/SC001?tab=enrollment&flag=501",
         },
         {
           id: 503, studentName: "Kiran Rao", grade: null, centreTag: null,
           raisedBy: "ravi.pm@avantifellows.org", raisedAt: "2026-10-20T20:00:00.000Z", updateCount: 1,
+          notesHref: "/school/SC001?tab=enrollment&flag=503",
         },
       ],
       resolvedCount: 2,
@@ -250,8 +266,30 @@ describe("getVisitSummarySchoolFlags", () => {
       flag({ id: 2, centre_type_code: "nodal" }),
     ]);
 
-    const { open } = await getVisitSummarySchoolFlags("SC001");
+    const { open } = await getVisitSummarySchoolFlags(SCHOOL, ADMIN);
 
     expect(open.map((row) => row.centreTag)).toEqual(["Other", "Nodal"]);
+  });
+
+  it("links a viewer who may open the School's roster page to the flag there, encoding the School code", async () => {
+    mockQuery.mockResolvedValue([flag({ id: 7 })]);
+
+    const { open } = await getVisitSummarySchoolFlags({ ...SCHOOL, code: "SC 001/A" }, ADMIN);
+
+    expect(open[0].notesHref).toBe("/school/SC%20001%2FA?tab=enrollment&flag=7");
+  });
+
+  it("links a Centre-seated PM, who can't open the School's roster page, to the flag on their Centre's page", async () => {
+    mockQuery.mockResolvedValue([
+      flag({ id: 1, centre_id: "101" }),
+      // At the School's Nodal, where this PM holds no seat.
+      flag({ id: 2, centre_id: "102", centre_type_code: "nodal" }),
+      // No active physical Centre runs the flag's programme.
+      flag({ id: 3, centre_id: null, centre_type_code: null }),
+    ]);
+
+    const { open } = await getVisitSummarySchoolFlags(SCHOOL, COE_SEATED_PM);
+
+    expect(open.map((row) => row.notesHref)).toEqual(["/centre/101?tab=enrollment&flag=1", null, null]);
   });
 });

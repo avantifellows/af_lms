@@ -132,7 +132,7 @@ export default async function SchoolVisitSummarySchoolPage({ params, searchParam
     getVisitSummarySchoolTeachers(school.code),
     getSchoolConcernPage(actor, school.code, normalizeVisitSummaryFilters(currentParams)),
     canViewPerformance ? getVisitSummaryAcademicLevelCards(school) : null,
-    canViewFlags ? getVisitSummarySchoolFlags(school.code) : null,
+    canViewFlags ? getVisitSummarySchoolFlags(school, permission) : null,
   ]);
 
   return (
@@ -163,7 +163,7 @@ export default async function SchoolVisitSummarySchoolPage({ params, searchParam
           today={new Date()}
           canAct={visitsAccess.canEdit}
           visitBackHref={selfHref(school.code, currentParams)}
-          flags={flags && <SchoolInterventionFlags schoolCode={school.code} flags={flags} />}
+          flags={flags && <SchoolInterventionFlags flags={flags} />}
         />
       </main>
     </div>

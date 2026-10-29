@@ -369,6 +369,28 @@ describe("SchoolVisitSummarySchoolPage", () => {
       );
     });
 
+    it("links a PM seated at the flag's Centre to the flag on that Centre's page, which they can open", async () => {
+      // Seated at the School's Nodal (Centre 102), so the School's roster page is Access Denied to them.
+      setupAuth({
+        email: "pm@avantifellows.org",
+        level: 1,
+        role: "program_manager",
+        school_codes: [],
+        read_only: false,
+        program_ids: [2],
+        scope: { schools: new Set(["SC001"]), centres: new Set([102]), programs: new Set([2]), visitManagedSchools: new Set(["SC001"]) },
+      });
+      setupSchool();
+
+      render(await renderPage());
+
+      const section = screen.getByRole("region", { name: /Intervention flags/ });
+      expect(within(section).getByRole("link", { name: "Notes in LMS for A. V." })).toHaveAttribute(
+        "href",
+        "/centre/102?tab=enrollment&flag=9004755"
+      );
+    });
+
     it("omits the section, without reading flags, for a viewer without Student view access", async () => {
       setupAuth();
       setupSchool();
