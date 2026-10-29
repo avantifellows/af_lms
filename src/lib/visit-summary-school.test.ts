@@ -238,6 +238,7 @@ describe("getVisitSummarySchoolFlags", () => {
     grade: 11,
     centre_id: "101",
     centre_type_code: "coe",
+    centre_ids: ["101"],
     raised_by_email: "ravi.pm@avantifellows.org",
     raised_by_name: "Ravi PM",
     inserted_at: "2026-10-20T20:00:00.000Z",
@@ -250,7 +251,7 @@ describe("getVisitSummarySchoolFlags", () => {
       flag({}),
       flag({ id: 502, status: "resolved" }),
       flag({
-        id: 503, student_name: "Kiran Rao", grade: null, centre_id: null, centre_type_code: null,
+        id: 503, student_name: "Kiran Rao", grade: null, centre_id: null, centre_type_code: null, centre_ids: null,
         raised_by_name: null, update_count: 1,
       }),
       flag({ id: 504, status: "resolved" }),
@@ -298,13 +299,23 @@ describe("getVisitSummarySchoolFlags", () => {
     mockQuery.mockResolvedValue([
       flag({ id: 1, centre_id: "101" }),
       // At the School's Nodal, where this PM holds no seat.
-      flag({ id: 2, centre_id: "102", centre_type_code: "nodal" }),
+      flag({ id: 2, centre_id: "102", centre_type_code: "nodal", centre_ids: ["102"] }),
       // No active physical Centre runs the flag's programme.
-      flag({ id: 3, centre_id: null, centre_type_code: null }),
+      flag({ id: 3, centre_id: null, centre_type_code: null, centre_ids: null }),
     ]);
 
     const { open } = await getVisitSummarySchoolFlags(SCHOOL, COE_SEATED_PM);
 
     expect(open.map((row) => row.notesHref)).toEqual(["/centre/101?tab=enrollment&flag=1", null, null]);
+  });
+
+  it("links a Centre-seated PM to whichever of the programme's Centres they can open, not only the first", async () => {
+    // Two active physical Centres run the flag's programme; the tag shows the first (100), but the
+    // PM's seat is at 101.
+    mockQuery.mockResolvedValue([flag({ id: 4, centre_id: "100", centre_ids: ["100", "101"] })]);
+
+    const { open } = await getVisitSummarySchoolFlags(SCHOOL, COE_SEATED_PM);
+
+    expect(open[0].notesHref).toBe("/centre/101?tab=enrollment&flag=4");
   });
 });

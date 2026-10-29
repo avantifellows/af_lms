@@ -300,6 +300,8 @@ interface FlagQueryRow {
   grade: number | null;
   centre_id: string | null;
   centre_type_code: string | null;
+  // Every active physical Centre at the School running the flag's programme (null: none).
+  centre_ids: string[] | null;
   raised_by_email: string;
   raised_by_name: string | null;
   inserted_at: string;
@@ -307,18 +309,18 @@ interface FlagQueryRow {
 }
 
 // The Enrollment tab that opens a flag for this viewer: the School's when they may open the School's
-// roster page, else the flag's Centre's when they may open that (a Centre-seated PM at their own
-// Centre), else none.
+// roster page, else the first of the flag's programme Centres they may open (a Centre-seated PM at
+// their own Centre), else none.
 function flagNotesHref(
   permission: UserPermission,
   school: VisitSummarySchool,
   flagId: number,
-  centreId: string | null
+  centreIds: string[]
 ): string | null {
   const params = new URLSearchParams({ tab: "enrollment", flag: String(flagId) });
   if (canOpenSchoolPage(permission, school)) return `/school/${encodeURIComponent(school.code)}?${params}`;
-  if (centreId !== null && canOpenCentrePage(permission, school, centreId)) return `/centre/${centreId}?${params}`;
-  return null;
+  const centreId = centreIds.find((id) => canOpenCentrePage(permission, school, id));
+  return centreId === undefined ? null : `/centre/${centreId}?${params}`;
 }
 
 // The School's intervention flags for the School page (#470), JNV NVS ones excluded: its open flags,
@@ -335,6 +337,10 @@ export async function getVisitSummarySchoolFlags(
             grade.number AS grade,
             centre.id::text AS centre_id,
             centre.type_code AS centre_type_code,
+            (SELECT ARRAY_AGG(c.id::text ORDER BY c.id)
+             FROM centres c
+             WHERE c.school_id = f.school_id AND c.program_id = f.program_id AND c.is_physical AND c.is_active)
+              AS centre_ids,
             f.raised_by_email,
             NULLIF(TRIM(up.full_name), '') AS raised_by_name,
             f.inserted_at AT TIME ZONE 'UTC' AS inserted_at,
@@ -381,7 +387,7 @@ export async function getVisitSummarySchoolFlags(
         raisedBy: row.raised_by_name ?? row.raised_by_email,
         raisedAt: row.inserted_at,
         updateCount: Number(row.update_count),
-        notesHref: flagNotesHref(permission, school, Number(row.id), row.centre_id),
+        notesHref: flagNotesHref(permission, school, Number(row.id), row.centre_ids ?? []),
       })),
     resolvedCount: rows.filter((row) => row.status === "resolved").length,
   };

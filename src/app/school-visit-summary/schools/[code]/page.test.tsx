@@ -335,6 +335,7 @@ describe("SchoolVisitSummarySchoolPage", () => {
       student_name: "Asha Verma",
       grade: 11,
       centre_id: "102",
+      centre_ids: ["102"],
       centre_type_code: "nodal",
       raised_by_email: "pm@avantifellows.org",
       raised_by_name: "Priya PM",
