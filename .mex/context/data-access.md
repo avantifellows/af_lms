@@ -21,7 +21,7 @@ edges:
     condition: when adding a write that must proxy to the DB Service
   - target: patterns/add-api-route.md
     condition: when adding a route that reads or writes
-last_updated: 2026-10-28
+last_updated: 2026-10-29
 ---
 
 # Data Access
@@ -541,13 +541,14 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   upserts `ON CONFLICT (student_id)` per changed Student only, so an unchanged re-run writes
   nothing. Non-`https://` values are skipped before the DB CHECK sees them; a value missing from
   the workbook keeps the stored one. `legacy_last_contact_on` is selected and written only
-  with `--legacy-docs-dir` (Profile Doc HTML exports; date extraction in
+  with `--legacy-docs-dir`, which needs `--legacy-conversations` so a date never moves
+  without its summary and items (Profile Doc HTML exports; date extraction in
   `src/lib/blended-learning-profile-doc-dates.ts`: the doc's latest dated conversation only).
   With docs, every matched Student is considered, so a stored Profile Doc link still gives a
   date when the workbook row has none; a Student with no link and no stored row gets no row.
   `legacy_conversation_summary` (db-service migration `20261027100000`, mirrored in e2e fixture
-  `20261027100000_add_blended_learning_legacy_conversation.sql`) is selected and written only
-  with `--legacy-conversations` too (validation in
+  `20261027100000_add_blended_learning_legacy_conversation.sql`) is selected and written with
+  it, from `--legacy-conversations` (validation in
   `src/lib/blended-learning-legacy-conversations.ts`): the file's entry for a `dated` doc on
   that same date, NULL otherwise; an unreadable doc keeps it. The upsert names only the
   columns the run owns (fixed literals; values bound). The same run syncs that Student's
@@ -556,7 +557,8 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   partial unique `bl_action_items_profile_doc_unique` on (student_id, text, owner)): insert
   missing ones open, keep matching ones (open or done), delete only open ones the file no
   longer lists (all open ones when the summary is NULL); three batched statements, the DELETE
-  re-checking `status = 'open'`.
+  re-checking `status = 'open'`. An apply runs the reads, upserts and item sync in one
+  `withTransaction`, so a failure part way rolls everything back; a dry run uses `query()`.
   Runbook: `patterns/load-blended-learning-links.md`.
 - **Profile Doc entry on the Mentee pages:** `getMenteeDetail` adds a `kind: "profile_doc"`
   history entry (`legacy_last_contact_on`, the summary, every Profile Doc Action Item with its
