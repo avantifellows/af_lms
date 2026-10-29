@@ -293,7 +293,7 @@ function ProfileDocEntry({ entry }: { entry: ProfileDocHistoryEntry }) {
 function AttemptEntry({ entry }: { entry: Extract<HistoryEntry, { kind: "attempt" }> }) {
   return (
     <>
-      <EntryHeader date={entry.occurredOn} meta="Attempt" chips={<Badge variant="danger">Not reachable</Badge>} />
+      <EntryHeader date={entry.occurredOn} meta="Attempt" chips={<Badge variant="danger">Unreachable</Badge>} />
       {entry.note && <p className="mt-2 break-words text-sm text-text-primary">{entry.note}</p>}
     </>
   );

@@ -110,7 +110,7 @@ for (const { label, viewport } of VIEWPORTS) {
       ]);
       const attempt = entryWith(page, attempt2.note);
       await expect(attempt.getByText("Attempt", { exact: true })).toBeVisible();
-      await expect(attempt.getByText("Not reachable", { exact: true })).toBeVisible();
+      await expect(attempt.getByText("Unreachable", { exact: true })).toBeVisible();
     });
 
     test("a Conversation shows its details, Action Items, Mentor Flags and photos", async ({ page }) => {
