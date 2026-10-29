@@ -1,8 +1,8 @@
 import type { ScreenerFeedback } from "@/lib/blended-learning-mentee-detail";
 
-// The two Screener Feedback questions, worded as Poojita confirmed, for the
-// log form's rating scales and the history's read-only answers. Each is
-// rated 1 (not at all) to 5 (a lot).
+// The two Screener Feedback questions, worded as the Blended Learning program
+// lead confirmed, for the log form's rating scales and the history's read-only
+// answers. Each is rated 1 (not at all) to 5 (a lot).
 export const SCREENER_QUESTIONS: { key: keyof ScreenerFeedback; question: string }[] = [
   { key: "helpedUnderstand", question: "Did the screener help you understand this student better?" },
   { key: "moreComfortable", question: "Did the student seem more comfortable talking to you than before?" },

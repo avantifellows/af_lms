@@ -659,13 +659,16 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   fields. The body carries `screenerUsed` only when asked and `screenerFeedback` only while the
   questions show (`logEntryPayload.ts`).
 - **Save:** `logEntry` validates the shape first (`screenerFeedback` without `screenerUsed: true`
-  → 422; ratings must be integers 1–5). Inside the transaction, after the Conversation's parts,
-  `saveScreener` reads the link and whether feedback exists: an answer without a link, no answer
-  with a link, or a tick with no ratings while due → 422 field errors; ratings once feedback exists
-  → 409 with `fieldErrors.screenerFeedback`; else it inserts the feedback (mentor = the mapped
-  Mentor). A racing second insert hits `bl_screener_feedback_student_unique` (23505) and gets the
-  same 409. On that 409 the form drops the questions and keeps the tick, so "Save" again records
-  just `screener_used = true`.
+  → 422; ratings must be integers 1–5). Inside the transaction, before the Conversation's INSERT,
+  `checkScreener` reads the link and whether feedback exists (only when an answer was sent). The
+  link can change while the form is open, so a mismatch is not an error: an answer without a link,
+  or no answer with a link, saves `screener_used = NULL` with no feedback. With a link, a tick with
+  no ratings while due → 422 field errors; ratings once feedback exists → 409 with
+  `fieldErrors.screenerFeedback`; else the feedback is inserted after the Conversation's parts
+  (mentor = the mapped Mentor). A racing second insert hits `bl_screener_feedback_student_unique`
+  (23505) and gets the same 409. On that 409 the form drops the questions and keeps the tick, so
+  "Save" again records just `screener_used = true`. Any 422 field error no rendered field owns
+  (`unshownFieldError` in `logEntryPayload.ts`) shows in the save bar, so none is silent.
 - **Display:** `getMenteeDetail` LEFT JOINs the feedback by `conversation_id`; each Conversation
   has `screenerUsed` and `screenerFeedback`. The history shows a "Screener" section ("Screener form
   used", and the two ratings as `n / 5` on the Conversation that gave them) to Mentors and admins,

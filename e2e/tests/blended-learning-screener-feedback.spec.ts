@@ -143,8 +143,18 @@ for (const { label, key, viewport } of VIEWPORTS) {
       await form.getByRole("button", { name: "Save conversation" }).click();
       await savedConfirmation(page);
 
+      // A form opened before the link was removed still sends its answer: it
+      // saves as not asked, with no feedback.
+      const stale = await page.request.post(entriesUrl(noLink), {
+        data: { ...conversation(`Synthetic ${key}: link gone.`), screenerUsed: true, screenerFeedback: { helpedUnderstand: 3, moreComfortable: 3 } },
+      });
+      expect(stale.status()).toBe(201);
+
       expect(await saved(studentIds[noLink.key])).toEqual({
-        entries: [{ kind: "conversation", summary: `Synthetic ${key}: no screener here.`, screener_used: null }],
+        entries: [
+          { kind: "conversation", summary: `Synthetic ${key}: no screener here.`, screener_used: null },
+          { kind: "conversation", summary: `Synthetic ${key}: link gone.`, screener_used: null },
+        ],
         feedback: [],
       });
       await page.goto(detailPath(noLink));
@@ -221,8 +231,6 @@ for (const { label, key, viewport } of VIEWPORTS) {
         data: { ...conversation("Synthetic: unticked."), screenerUsed: false, screenerFeedback: { helpedUnderstand: 1, moreComfortable: 1 } },
       });
       expect(unticked.status()).toBe(422);
-      const noAnswer = await page.request.post(entriesUrl(withLink), { data: conversation("Synthetic: no answer.") });
-      expect(noAnswer.status()).toBe(422);
 
       expect(await saved(studentIds[withLink.key])).toMatchObject({
         entries: [
@@ -238,6 +246,12 @@ for (const { label, key, viewport } of VIEWPORTS) {
       await expect(latest.getByText("Screener form used")).toBeVisible();
       await expect(latest.getByRole("term")).toHaveCount(0);
       await expect(first.getByRole("term")).toHaveCount(2);
+
+      // A form opened before the link was added sends no answer: it saves as
+      // not asked.
+      const noAnswer = await page.request.post(entriesUrl(withLink), { data: conversation("Synthetic: no answer.") });
+      expect(noAnswer.status()).toBe(201);
+      expect((await saved(studentIds[withLink.key])).entries.at(-1)).toMatchObject({ summary: "Synthetic: no answer.", screener_used: null });
     });
 
     test("an Attempt has no checkbox and saves screener_used NULL", async ({ page }) => {

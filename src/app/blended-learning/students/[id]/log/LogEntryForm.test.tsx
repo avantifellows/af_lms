@@ -751,6 +751,19 @@ describe("LogEntryForm: Screener", () => {
     expect(JSON.parse(String(retry.body))).not.toHaveProperty("screenerFeedback");
   });
 
+  // The form didn't ask (no Screener link), so no field shows the error; it
+  // must not be silent.
+  it("shows an error for a question the form doesn't ask in the save bar", async () => {
+    renderForm();
+    await fillConversation();
+    const unasked = "Say whether the screener form was used.";
+    answer({ error: unasked, fieldErrors: { screenerUsed: unasked } }, 422);
+    await save();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(unasked);
+    expect(screen.getByRole("button", { name: "Save conversation" })).toBeEnabled();
+  });
+
   it("shows a missing rating's error under its question", async () => {
     renderForm({ screener: DUE });
     await fillConversation();

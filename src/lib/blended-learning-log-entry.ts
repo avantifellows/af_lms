@@ -15,6 +15,7 @@ import {
   type EntryInput,
   type FlagInput,
   type PhotoInput,
+  type ScreenerFeedbackInput,
 } from "./blended-learning-log-entry-input";
 import { listMentees, type MenteeRow } from "./blended-learning-mentees";
 import { uploadedPhotoSizes } from "./blended-learning-photos";
@@ -26,10 +27,10 @@ import { notifyWellbeingFlag } from "./blended-learning-wellbeing-notifier";
 // commit, an Emotional Well-being flag emails the well-being lead. Saving a
 // reviewed Conversation Draft (`draftId`) happens in the same transaction: the
 // ready draft is locked, its recording and transcript move onto the
-// Conversation, and the draft becomes saved. Last, a Conversation's screener
-// answer is checked against the Student's Screener link, and the first
-// Screener Feedback for the Student is saved with it (once per Student: the
-// UNIQUE student_id turns a racing second save into a 409).
+// Conversation, and the draft becomes saved. A Conversation's screener answer
+// is checked against the Student's Screener link before it is saved, and the
+// first Screener Feedback for the Student is saved with it, last (once per
+// Student: the UNIQUE student_id turns a racing second save into a 409).
 
 // A photo the request named, with the size S3 holds for it.
 type StoredPhoto = PhotoInput & { byteSize: number };
@@ -201,11 +202,7 @@ class OutOfScope extends Error {}
 class TickConflict extends Error {}
 class DraftConflict extends Error {}
 class ScreenerFeedbackGiven extends Error {}
-class ScreenerInvalid extends Error {
-  constructor(readonly fieldErrors: Record<string, string>) {
-    super("Invalid screener answer");
-  }
-}
+class ScreenerRatingsMissing extends Error {}
 
 type ScreenerState = { hasLink: boolean; feedbackGiven: boolean };
 
@@ -226,39 +223,35 @@ async function readScreenerState(client: PoolClient, studentId: number): Promise
   return { hasLink: row?.has_link === true, feedbackGiven: row?.feedback_given === true };
 }
 
-// The answer is required exactly when there is a Screener link, and a ticked
-// box needs both ratings while the Student's feedback is still due.
-function screenerErrors(input: ConversationInput, state: ScreenerState): Record<string, string> | null {
-  if (input.screenerUsed !== null && !state.hasLink) {
-    return { screenerUsed: "This student has no screener link. Reload and try again." };
-  }
-  if (input.screenerUsed === null && state.hasLink) {
-    return { screenerUsed: "Say whether the screener form was used. Reload if you don't see the question." };
-  }
-  if (input.screenerUsed === true && !state.feedbackGiven && !input.screenerFeedback) {
-    return {
-      "screenerFeedback.helpedUnderstand": SCREENER_RATING_ERROR,
-      "screenerFeedback.moreComfortable": SCREENER_RATING_ERROR,
-    };
-  }
-  return null;
+const NOT_ASKED = { screenerUsed: null, screenerFeedback: null } as const;
+
+// The Conversation with the screener answer it keeps. The form asks only when
+// it saw a Screener link, and a link can be added or removed while the form is
+// open, so a mismatch saves the Conversation as not asked (NULL, no feedback)
+// instead of refusing it. With a link, a ticked box needs both ratings while
+// the Student's feedback is still due, and ratings once it is given are a 409.
+async function checkScreener(
+  client: PoolClient,
+  studentId: number,
+  input: ConversationInput
+): Promise<ConversationInput> {
+  if (input.screenerUsed === null) return input;
+  const state = await readScreenerState(client, studentId);
+  if (!state.hasLink) return { ...input, ...NOT_ASKED };
+  if (input.screenerUsed && !state.feedbackGiven && !input.screenerFeedback) throw new ScreenerRatingsMissing();
+  if (input.screenerFeedback && state.feedbackGiven) throw new ScreenerFeedbackGiven();
+  return input;
 }
 
-// Check the screener answer, then save the Student's first Screener Feedback
-// against this Conversation and its Mentor.
-async function saveScreener(
+// The Student's first Screener Feedback, against this Conversation and its
+// Mentor.
+async function insertScreenerFeedback(
   client: PoolClient,
   studentId: number,
   conversationId: number,
   mentorUserId: number,
-  input: ConversationInput
+  feedback: ScreenerFeedbackInput
 ): Promise<void> {
-  const state = await readScreenerState(client, studentId);
-  const errors = screenerErrors(input, state);
-  if (errors) throw new ScreenerInvalid(errors);
-  const feedback = input.screenerFeedback;
-  if (!feedback) return;
-  if (state.feedbackGiven) throw new ScreenerFeedbackGiven();
   await client.query(
     `INSERT INTO blended_learning_screener_feedback (student_id, conversation_id, mentor_user_id, helped_understand, more_comfortable)
      VALUES ($1, $2, $3, $4, $5)`,
@@ -330,14 +323,18 @@ function saveEntry(
   return withTransaction(async (client) => {
     const mapping = await lockMappingInScope(client, access, studentId);
     if (!mapping) throw new OutOfScope();
-    const conversation = input.kind === "conversation" ? input : null;
-    const draft = conversation?.draftId ? await lockReadyDraft(client, studentId, conversation.draftId) : null;
-    const saved = await insertEntry(client, access, studentId, mapping, input, draft);
+    const draftId = input.kind === "conversation" ? input.draftId : null;
+    const draft = draftId ? await lockReadyDraft(client, studentId, draftId) : null;
+    const conversation = input.kind === "conversation" ? await checkScreener(client, studentId, input) : null;
+    const mentorUserId = Number(mapping.mentor_user_id);
+    const saved = await insertEntry(client, access, studentId, mapping, conversation ?? input, draft);
     const wellbeingFlagIds = conversation
       ? await insertConversationParts(client, access, studentId, saved.id, conversation, photos, draft)
       : [];
-    if (conversation) await saveScreener(client, studentId, saved.id, Number(mapping.mentor_user_id), conversation);
-    return { saved, mentorUserId: Number(mapping.mentor_user_id), wellbeingFlagIds };
+    if (conversation?.screenerFeedback) {
+      await insertScreenerFeedback(client, studentId, saved.id, mentorUserId, conversation.screenerFeedback);
+    }
+    return { saved, mentorUserId, wellbeingFlagIds };
   });
 }
 
@@ -355,7 +352,12 @@ function conflictMessage(error: unknown): string | null {
 // is no longer due names `screenerFeedback`, so the form drops the questions.
 function failedSave(error: unknown): LogEntryResult {
   if (error instanceof OutOfScope) return NOT_FOUND;
-  if (error instanceof ScreenerInvalid) return invalid(error.fieldErrors);
+  if (error instanceof ScreenerRatingsMissing) {
+    return invalid({
+      "screenerFeedback.helpedUnderstand": SCREENER_RATING_ERROR,
+      "screenerFeedback.moreComfortable": SCREENER_RATING_ERROR,
+    });
+  }
   if (error instanceof ScreenerFeedbackGiven || isScreenerFeedbackRace(error)) {
     return {
       ok: false,

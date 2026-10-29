@@ -209,12 +209,12 @@ describe("POST /api/blended-learning/students/[id]/entries", () => {
       rows({ has_link: hasLink, feedback_given: feedbackGiven });
     const RATINGS = { helpedUnderstand: 4, moreComfortable: 2 };
 
-    // Mapping, the Conversation, then (with no parts) the screener state.
+    // Mapping, the screener state, then the Conversation (with no parts).
     function scriptSave(hasLink: boolean, feedbackGiven: boolean) {
       clientQuery
         .mockResolvedValueOnce(rows(MAPPING))
-        .mockResolvedValueOnce(SAVED)
-        .mockResolvedValueOnce(SCREENER_STATE(hasLink, feedbackGiven));
+        .mockResolvedValueOnce(SCREENER_STATE(hasLink, feedbackGiven))
+        .mockResolvedValueOnce(SAVED);
     }
 
     it("saves the tick on the Conversation and the first feedback with it, in the same transaction", async () => {
@@ -224,11 +224,11 @@ describe("POST /api/blended-learning/students/[id]/entries", () => {
 
       expect(res.status).toBe(201);
       expect(withTransaction).toHaveBeenCalledTimes(1);
-      expectWrite(2, "INSERT INTO blended_learning_conversations", [
+      expectWrite(2, "blended_learning_screener_feedback", [501]);
+      expectWrite(3, "INSERT INTO blended_learning_conversations", [
         501, 80, MAPPING.academic_year, 9001, MENTOR.actorEmail, "conversation", "2026-10-21",
         "call", "both", 35, CONVERSATION.summary, null, null, null, null, null, true,
       ]);
-      expectWrite(3, "blended_learning_screener_feedback", [501]);
       expectWrite(4, "INSERT INTO blended_learning_screener_feedback", [501, 700, 9001, 4, 2]);
       expect(clientQuery).toHaveBeenCalledTimes(4);
     });
@@ -242,7 +242,7 @@ describe("POST /api/blended-learning/students/[id]/entries", () => {
       const res = await postEntry("501", { ...CONVERSATION, screenerUsed: used });
 
       expect(res.status).toBe(201);
-      expect(clientQuery.mock.calls[1][1].at(-1)).toBe(used);
+      expect(clientQuery.mock.calls[2][1].at(-1)).toBe(used);
       expect(clientQuery).toHaveBeenCalledTimes(3);
     });
 
@@ -256,19 +256,36 @@ describe("POST /api/blended-learning/students/[id]/entries", () => {
         "screenerFeedback.helpedUnderstand": expect.stringContaining("1 (not at all) to 5 (a lot)"),
         "screenerFeedback.moreComfortable": expect.stringContaining("1 (not at all) to 5 (a lot)"),
       });
+      expect(clientQuery).toHaveBeenCalledTimes(2);
+    });
+
+    // The Screener link can change while the form is open: what the form
+    // asked no longer matches, so the Conversation saves as not asked.
+    it("saves an answer for a Student whose Screener link is gone as not asked (NULL, no feedback)", async () => {
+      scriptSave(false, false);
+
+      const res = await postEntry("501", { ...CONVERSATION, screenerUsed: true, screenerFeedback: RATINGS });
+
+      expect(res.status).toBe(201);
+      expect(clientQuery.mock.calls[2][1].at(-1)).toBeNull();
       expect(clientQuery).toHaveBeenCalledTimes(3);
     });
 
-    it("rejects an answer for a Student with no Screener link, and a missing one when there is a link (422)", async () => {
-      scriptSave(false, false);
-      const ticked = await postEntry("501", { ...CONVERSATION, screenerUsed: false });
-      expect(ticked.status).toBe(422);
-      expect(ticked.body.fieldErrors).toEqual({ screenerUsed: expect.stringContaining("no screener link") });
+    it("saves no answer for a Student given a Screener link meanwhile as not asked, without reading the link", async () => {
+      // The link's state is scripted but never read.
+      clientQuery
+        .mockResolvedValueOnce(rows(MAPPING))
+        .mockResolvedValueOnce(SAVED)
+        .mockResolvedValueOnce(SCREENER_STATE(true, false));
 
-      scriptSave(true, false);
-      const unanswered = await postEntry("501", CONVERSATION);
-      expect(unanswered.status).toBe(422);
-      expect(unanswered.body.fieldErrors).toEqual({ screenerUsed: expect.stringContaining("Say whether") });
+      const res = await postEntry("501", CONVERSATION);
+
+      expect(res.status).toBe(201);
+      expectWrite(2, "INSERT INTO blended_learning_conversations", [
+        501, 80, MAPPING.academic_year, 9001, MENTOR.actorEmail, "conversation", "2026-10-21",
+        "call", "both", 35, CONVERSATION.summary, null, null, null, null, null, null,
+      ]);
+      expect(clientQuery).toHaveBeenCalledTimes(2);
     });
 
     it("rejects ratings once the Student's feedback is given (409, the form drops the questions)", async () => {
@@ -283,7 +300,7 @@ describe("POST /api/blended-learning/students/[id]/entries", () => {
           fieldErrors: { screenerFeedback: expect.stringContaining("Save again") },
         },
       });
-      expect(clientQuery).toHaveBeenCalledTimes(3);
+      expect(clientQuery).toHaveBeenCalledTimes(2);
     });
 
     it("turns a racing second feedback (the UNIQUE student_id) into the same 409", async () => {

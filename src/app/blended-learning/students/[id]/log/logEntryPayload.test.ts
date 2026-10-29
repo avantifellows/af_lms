@@ -10,6 +10,7 @@ import {
   raisedFlags,
   sentActionItemIndex,
   toggled,
+  unshownFieldError,
   withoutFieldErrors,
   type EntryFormValues,
   type ReviewDraft,
@@ -154,6 +155,22 @@ describe("small helpers", () => {
     expect(missingFields(values({ ...filled, screenerUsed: true, ...ratings(3, 1) }))).toEqual([]);
     expect(missingFields(values({ ...filled, screenerUsed: false }))).toEqual([]);
     expect(missingFields(values({ ...filled, screenerUsed: true, screenerFeedbackDue: false }))).toEqual([]);
+  });
+
+  it("finds the first error no field on the form shows, for the save bar", () => {
+    const shown = { summary: "Add a summary.", "actionItems.0.text": "Add text.", "flags.1.comment": "Too long." };
+    expect(unshownFieldError(shown, values({}))).toBeNull();
+    expect(unshownFieldError({ ...shown, completeActionItemIds: "Bad ids." }, values({}))).toBe("Bad ids.");
+    // The screener's errors show only while it is asked, the ratings' only while they show.
+    const answer = { screenerUsed: "Say whether the screener form was used." };
+    expect(unshownFieldError(answer, values({ screenerUsed: null }))).toBe(answer.screenerUsed);
+    expect(unshownFieldError(answer, values({ screenerUsed: false }))).toBeNull();
+    const rating = { "screenerFeedback.moreComfortable": "Choose a rating." };
+    expect(unshownFieldError(rating, values({ screenerUsed: true, screenerFeedbackDue: true }))).toBeNull();
+    expect(unshownFieldError(rating, values({ screenerUsed: true, screenerFeedbackDue: false }))).toBe("Choose a rating.");
+    // An Attempt shows only the date (and the kind).
+    expect(unshownFieldError({ occurredOn: "Enter the date." }, values({ kind: "attempt" }))).toBeNull();
+    expect(unshownFieldError(shown, values({ kind: "attempt" }))).toBe("Add a summary.");
   });
 
   it("holds a Conversation back while a photo is uploading or failed, never an Attempt", () => {

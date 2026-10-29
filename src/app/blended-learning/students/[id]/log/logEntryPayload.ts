@@ -128,6 +128,27 @@ export function withoutFieldErrors(errors: FieldErrors, prefix: string): FieldEr
   return Object.fromEntries(Object.entries(errors).filter(([field]) => !field.startsWith(prefix)));
 }
 
+// A Conversation's fields that show a server error under them, by key.
+const CONVERSATION_ERROR_KEY =
+  /^(mode|spokeWith|durationMinutes|summary|notesHtml|actionItems(\.\d+\.\w+)?|photoKeys(\.\d+)?|flags(\..+)?)$/;
+
+// Whether a field the form shows for these values owns the error keyed `key`:
+// the screener's only while it is asked, the ratings only while they show.
+function errorShown(key: string, values: EntryFormValues): boolean {
+  if (key === "kind" || key === "occurredOn") return true;
+  if (values.kind !== "conversation") return false;
+  if (CONVERSATION_ERROR_KEY.test(key)) return true;
+  if (key === "screenerUsed" || key === "screenerFeedback") return values.screenerUsed !== null;
+  return key.startsWith("screenerFeedback.") && screenerQuestionsShown(values);
+}
+
+// The first error no field on the form shows (say, for a question the form
+// doesn't ask), for the save bar to show instead, so no error is silent.
+export function unshownFieldError(errors: FieldErrors, values: EntryFormValues): string | null {
+  const key = Object.keys(errors).find((field) => !errorShown(field, values));
+  return key === undefined ? null : errors[key];
+}
+
 // The switched-on Flag Recipients, in display order.
 export function raisedFlags(flags: DraftFlags): FlagRecipient[] {
   return FLAG_RECIPIENTS.filter((recipient) => flags[recipient] !== undefined);

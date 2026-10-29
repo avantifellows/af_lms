@@ -15,6 +15,7 @@ import {
   photosPending,
   postEntry,
   toggled,
+  unshownFieldError,
   type EntryFormValues,
   type FieldErrors,
   type Kind,
@@ -347,7 +348,7 @@ function EntryForm({
         )}
         <SaveBar
           studentId={studentId}
-          error={error}
+          error={error ?? unshownFieldError(fieldErrors, values)}
           saving={saving}
           kind={kind}
           drafting={drafting}
