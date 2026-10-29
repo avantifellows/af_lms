@@ -133,6 +133,42 @@ export function buildVisitSummarySchoolPredicate(
   };
 }
 
+const REQUIRED_ACTION_COUNT = REQUIRED_ACTION_TYPE_VALUES.length;
+
+// Read against `action_agg`, the per-Visit counts from actionAggregateJoin.
+const ACTION_BUCKET_PREDICATES: Record<ActionCompletionBucketFilter, string> = {
+  none: "COALESCE(action_agg.touched_types, 0) = 0",
+  partial: `COALESCE(action_agg.touched_types, 0) > 0 AND COALESCE(action_agg.touched_types, 0) < ${REQUIRED_ACTION_COUNT}`,
+  all_present: `COALESCE(action_agg.touched_types, 0) = ${REQUIRED_ACTION_COUNT} AND COALESCE(action_agg.completed_types, 0) < ${REQUIRED_ACTION_COUNT}`,
+  all_complete: `COALESCE(action_agg.completed_types, 0) = ${REQUIRED_ACTION_COUNT}`,
+};
+
+// Counts each Visit's required action types that were started and completed. `knownTypes` is the
+// placeholder holding REQUIRED_ACTION_TYPE_VALUES.
+function actionAggregateJoin(knownTypes: string): string {
+  return `LEFT JOIN (
+        SELECT visit_id,
+               COUNT(DISTINCT action_type) FILTER (WHERE action_type = ANY(${knownTypes}::text[])) AS touched_types,
+               COUNT(DISTINCT CASE WHEN status = 'completed' AND action_type = ANY(${knownTypes}::text[]) THEN action_type END) AS completed_types
+        FROM lms_pm_school_visit_actions
+        WHERE deleted_at IS NULL
+        GROUP BY visit_id
+      ) AS action_agg ON action_agg.visit_id = v.id`;
+}
+
+// Named Regions match by value; the "no Region" option matches Schools whose region is NULL.
+function regionFilterPredicate(regions: string[], bind: (value: unknown) => string): string {
+  const namedRegions = regions.filter((region) => region !== NO_REGION_FILTER_VALUE);
+  const regionMatches: string[] = [];
+  if (namedRegions.length > 0) {
+    regionMatches.push(`s.region = ANY(${bind(namedRegions)})`);
+  }
+  if (regions.includes(NO_REGION_FILTER_VALUE)) {
+    regionMatches.push("s.region IS NULL");
+  }
+  return `(${regionMatches.join(" OR ")})`;
+}
+
 // Expects the caller's query to alias the Visit as `v` and LEFT JOIN `school s ON s.code =
 // v.school_code` (the region scope reads `s.region`). Placeholders start at `startIndex`.
 export function buildVisitSummaryWhere(
@@ -144,84 +180,40 @@ export function buildVisitSummaryWhere(
   const predicates = ["v.deleted_at IS NULL"];
   const joins: string[] = [];
   const params: unknown[] = [];
-  let nextIndex = startIndex;
+  // Adds a parameter and returns its placeholder.
+  const bind = (value: unknown) => {
+    params.push(value);
+    return `$${startIndex + params.length - 1}`;
+  };
 
   if (filters.forceEmpty) {
     predicates.push("1 = 0");
   }
-
   if (exclude !== "regions" && filters.regions.length > 0) {
-    const namedRegions = filters.regions.filter((region) => region !== NO_REGION_FILTER_VALUE);
-    const regionMatches: string[] = [];
-    if (namedRegions.length > 0) {
-      regionMatches.push(`s.region = ANY($${nextIndex})`);
-      params.push(namedRegions);
-      nextIndex += 1;
-    }
-    if (filters.regions.includes(NO_REGION_FILTER_VALUE)) {
-      regionMatches.push("s.region IS NULL");
-    }
-    predicates.push(`(${regionMatches.join(" OR ")})`);
+    predicates.push(regionFilterPredicate(filters.regions, bind));
   }
-
   if (exclude !== "schools" && filters.schools.length > 0) {
-    predicates.push(`v.school_code = ANY($${nextIndex})`);
-    params.push(filters.schools);
-    nextIndex += 1;
+    predicates.push(`v.school_code = ANY(${bind(filters.schools)})`);
   }
-
   if (exclude !== "pms" && filters.pms.length > 0) {
-    predicates.push(`LOWER(v.pm_email) = ANY($${nextIndex})`);
-    params.push(filters.pms);
-    nextIndex += 1;
+    predicates.push(`LOWER(v.pm_email) = ANY(${bind(filters.pms)})`);
   }
-
   if (filters.status) {
-    predicates.push(`v.status = $${nextIndex}`);
-    params.push(filters.status);
-    nextIndex += 1;
+    predicates.push(`v.status = ${bind(filters.status)}`);
   }
-
   if (filters.from) {
-    predicates.push(`v.visit_date >= $${nextIndex}`);
-    params.push(filters.from);
-    nextIndex += 1;
+    predicates.push(`v.visit_date >= ${bind(filters.from)}`);
   }
-
   if (filters.to) {
-    predicates.push(`v.visit_date <= $${nextIndex}`);
-    params.push(filters.to);
-    nextIndex += 1;
+    predicates.push(`v.visit_date <= ${bind(filters.to)}`);
   }
-
   if (filters.bucket) {
-    const knownTypesIndex = nextIndex;
-    joins.push(
-      `LEFT JOIN (
-        SELECT visit_id,
-               COUNT(DISTINCT action_type) FILTER (WHERE action_type = ANY($${knownTypesIndex}::text[])) AS touched_types,
-               COUNT(DISTINCT CASE WHEN status = 'completed' AND action_type = ANY($${knownTypesIndex}::text[]) THEN action_type END) AS completed_types
-        FROM lms_pm_school_visit_actions
-        WHERE deleted_at IS NULL
-        GROUP BY visit_id
-      ) AS action_agg ON action_agg.visit_id = v.id`
-    );
-    params.push(REQUIRED_ACTION_TYPE_VALUES);
-    nextIndex += 1;
-
-    if (filters.bucket === "none") {
-      predicates.push("COALESCE(action_agg.touched_types, 0) = 0");
-    } else if (filters.bucket === "partial") {
-      predicates.push(`COALESCE(action_agg.touched_types, 0) > 0 AND COALESCE(action_agg.touched_types, 0) < ${REQUIRED_ACTION_TYPE_VALUES.length}`);
-    } else if (filters.bucket === "all_present") {
-      predicates.push(`COALESCE(action_agg.touched_types, 0) = ${REQUIRED_ACTION_TYPE_VALUES.length} AND COALESCE(action_agg.completed_types, 0) < ${REQUIRED_ACTION_TYPE_VALUES.length}`);
-    } else {
-      predicates.push(`COALESCE(action_agg.completed_types, 0) = ${REQUIRED_ACTION_TYPE_VALUES.length}`);
-    }
+    joins.push(actionAggregateJoin(bind(REQUIRED_ACTION_TYPE_VALUES)));
+    predicates.push(ACTION_BUCKET_PREDICATES[filters.bucket]);
   }
 
   const school = buildVisitSummarySchoolPredicate(actor, {
-    startIndex: nextIndex,
+    startIndex: startIndex + params.length,
     schoolCodeColumn: "v.school_code",
     schoolRegionColumn: "s.region",
   });
