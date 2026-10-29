@@ -11,8 +11,10 @@ const { mockRefresh, transition } = vi.hoisted(() => ({
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: mockRefresh }) }));
 vi.mock("react", async (importOriginal) => {
   const actual = await importOriginal<typeof import("react")>();
-  function useHeldTransition(): [boolean, (callback: () => void) => void] {
+  function useMaybeHeldTransition(): [boolean, (callback: () => void) => void] {
+    const real = actual.useTransition();
     const [pending, setPending] = actual.useState(false);
+    if (!transition.hold) return real;
     return [
       pending,
       (callback) => {
@@ -24,10 +26,7 @@ vi.mock("react", async (importOriginal) => {
       },
     ];
   }
-  return {
-    ...actual,
-    useTransition: () => (transition.hold ? useHeldTransition() : actual.useTransition()),
-  };
+  return { ...actual, useTransition: useMaybeHeldTransition };
 });
 
 import { ConcernActions } from "./ConcernActions";
@@ -264,6 +263,45 @@ describe("ConcernActions", () => {
     await user.click(screen.getByRole("button", { name: "Comment" }));
 
     expect(screen.getByRole("textbox")).toHaveValue("");
+  });
+
+  it("Escape closes the form, clears the text and puts focus back on the button that opened it", async () => {
+    const user = userEvent.setup();
+    render(<ConcernActions concernId={9004801} status="resolved" />);
+
+    await user.click(screen.getByRole("button", { name: "Reopen" }));
+    await user.type(screen.getByRole("textbox"), "Draft");
+    await user.keyboard("{Escape}");
+
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reopen" })).toHaveFocus();
+    await user.click(screen.getByRole("button", { name: "Reopen" }));
+    expect(screen.getByRole("textbox")).toHaveValue("");
+  });
+
+  it("Cancel also puts focus back on the button that opened the form", async () => {
+    const user = userEvent.setup();
+    render(<ConcernActions concernId={9004801} status="resolved" />);
+
+    await user.click(screen.getByRole("button", { name: "Comment" }));
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(screen.getByRole("button", { name: "Comment" })).toHaveFocus();
+  });
+
+  it("labels the note with a visible prompt and counts its characters against the 2000 limit", async () => {
+    const user = userEvent.setup();
+    render(<ConcernActions concernId={9004801} status="open" />);
+
+    await user.click(screen.getByRole("button", { name: "Resolve" }));
+    const textbox = screen.getByLabelText("How was this resolved?");
+    expect(screen.getByText("How was this resolved?").tagName).toBe("LABEL");
+    expect(textbox).toHaveAccessibleDescription("0/2000");
+
+    await user.type(textbox, "Fixed");
+
+    expect(screen.getByText("5/2000")).toBeInTheDocument();
+    expect(textbox).toHaveAccessibleDescription("5/2000");
   });
 
   it("tells the card which form opened, so it can expand", async () => {
