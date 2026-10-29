@@ -16,7 +16,7 @@ edges:
     condition: for the Visit Concern events route and its status matrix
   - target: context/permissions.md
     condition: when deciding the gate (feature edit vs. read_only)
-last_updated: 2026-10-27
+last_updated: 2026-10-29
 ---
 
 # LMS-owned status change + history write
@@ -36,8 +36,10 @@ are written directly with a `withTransaction` client. References: `addFlagUpdate
    out-of-scope or hidden records alike, and answer 404 so existence never leaks.
 3. **In one `withTransaction`:** `SELECT … FOR UPDATE` the record, check kind/status (wrong state →
    a typed error the route maps to 409), `UPDATE` status and `updated_at` when it changes, then
-   `INSERT` the history row. All with `$n` params, timestamps as `NOW() AT TIME ZONE 'UTC'`,
-   emails lower-cased.
+   `INSERT` the history row. All with `$n` params, timestamps as
+   `clock_timestamp() AT TIME ZONE 'UTC'` (when the write runs, after the lock; `NOW()` is the
+   transaction start, so a writer that waited on the lock could stamp earlier than the one that
+   held it, and the history would sort out of order), emails lower-cased.
 4. **Respond 201** with the record's fresh state read after commit.
 5. **Client:** put limits and action names in a client-safe `*-types.ts` module; validate before
    posting, keep the typed text on failure, `router.refresh()` on success.

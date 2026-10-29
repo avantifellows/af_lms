@@ -12,9 +12,10 @@ import {
 // A transaction client over one stored concern row (or none): the locking read returns it, the
 // status UPDATE changes it and the event INSERT appends to its history.
 function fakeClient(row: { kind: "concern" | "highlight"; status: "open" | "resolved" | null } | null) {
-  const state = { row, events: [] as { concernId: number; kind: string; body: string; author: string }[] };
+  const state = { row, events: [] as { concernId: number; kind: string; body: string; author: string }[], sql: [] as string[] };
   const client = {
     async query(sql: string, params: unknown[] = []) {
+      state.sql.push(sql);
       if (/FOR UPDATE/.test(sql)) return { rows: state.row ? [{ ...state.row }] : [] };
       if (/^\s*UPDATE lms_visit_concerns/.test(sql)) {
         state.row = { ...state.row!, status: params[1] as "open" | "resolved" };
@@ -67,6 +68,25 @@ describe("visit concern event writers", () => {
 
     expect(state.row?.status).toBe("open");
     expect(state.events.map((event) => [event.kind, event.body])).toEqual([["reopened", "Kits went missing"]]);
+  });
+
+  it.each([
+    ["resolve", resolveConcern, "open"],
+    ["comment", commentOnConcern, "resolved"],
+    ["reopen", reopenConcern, "resolved"],
+  ] as const)("%s stamps its writes with the DB clock when they run, after the lock", async (_label, write, status) => {
+    const { client, state } = fakeClient({ kind: "concern", status });
+
+    await write(client, PARAMS);
+
+    // NOW() is the transaction start, which can be earlier than a db-service auto-reopen that took
+    // the lock first; clock_timestamp() keeps the history in lock order.
+    const writes = state.sql.filter((sql) => !/FOR UPDATE/.test(sql));
+    expect(writes.length).toBeGreaterThan(0);
+    for (const sql of writes) {
+      expect(sql).toContain("clock_timestamp() AT TIME ZONE 'UTC'");
+      expect(sql).not.toContain("NOW()");
+    }
   });
 
   it.each([

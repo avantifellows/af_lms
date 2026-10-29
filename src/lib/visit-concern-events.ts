@@ -45,11 +45,13 @@ async function requireStatus(client: PoolClient, concernId: number, expected: Co
   if (concern.status !== expected) throw new VisitConcernEventError(409, message);
 }
 
-// Timestamps are `timestamp without time zone` holding UTC.
+// Timestamps are `timestamp without time zone` holding UTC, from `clock_timestamp()` (when the write
+// runs, after the row lock) rather than NOW() (the transaction start), so the history follows lock
+// order alongside db-service's auto-reopen, which stamps the same way.
 async function setStatus(client: PoolClient, concernId: number, status: ConcernStatus) {
   await client.query(
     `UPDATE lms_visit_concerns
-     SET status = $2, updated_at = (NOW() AT TIME ZONE 'UTC')
+     SET status = $2, updated_at = (clock_timestamp() AT TIME ZONE 'UTC')
      WHERE id = $1`,
     [concernId, status]
   );
@@ -62,7 +64,7 @@ async function appendEvent(
 ) {
   await client.query(
     `INSERT INTO lms_visit_concern_events (concern_id, kind, body, author_email, inserted_at)
-     VALUES ($1, $2, $3, $4, (NOW() AT TIME ZONE 'UTC'))`,
+     VALUES ($1, $2, $3, $4, (clock_timestamp() AT TIME ZONE 'UTC'))`,
     [concernId, kind, body, actorEmail.toLowerCase()]
   );
 }
