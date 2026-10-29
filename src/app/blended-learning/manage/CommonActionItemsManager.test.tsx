@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -352,6 +352,55 @@ describe("CommonActionItemsManager — a new item", () => {
     expect(await within(form).findByText("Will be added to 5 students.")).toBeInTheDocument();
     expect(within(form).queryByRole("alert")).not.toBeInTheDocument();
     expect(within(form).getByRole("button", { name: "Push to students" })).toBeEnabled();
+  });
+
+  it("counts a target again on coming back to it, keeping Push off until that count lands", async () => {
+    const user = userEvent.setup();
+    render(<CommonActionItemsManager items={[]} mentors={MENTORS} />);
+    const form = screen.getByRole("form", { name: "New program action item" });
+    const pushButton = within(form).getByRole("button", { name: "Push to students" });
+    await within(form).findByText("Will be added to 5 students.");
+    await user.type(within(form).getByLabelText("Action item"), "Fill in the form");
+
+    let answer: (response: Response) => void = () => {};
+    previewReply = () => new Promise((resolve) => (answer = resolve));
+    await user.click(within(form).getByRole("radio", { name: "One mentor's students" }));
+    await user.click(within(form).getByRole("radio", { name: "All students" }));
+    await waitFor(() => expect(previewBodies()).toHaveLength(2));
+    expect(within(form).getByText("Counting students…")).toBeInTheDocument();
+    expect(pushButton).toBeDisabled();
+    await user.click(pushButton);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    answer(json({ error: "Something broke" }, 500));
+    expect(await within(form).findByRole("alert")).toHaveTextContent("Couldn't count students. Something broke");
+    expect(pushButton).toBeDisabled();
+    expect(writeCalls()).toEqual([]);
+  });
+
+  it("turns the dialog's Push off when the count is no longer current, and pushes nothing", async () => {
+    const user = userEvent.setup();
+    render(<CommonActionItemsManager items={[]} mentors={MENTORS} />);
+    const form = screen.getByRole("form", { name: "New program action item" });
+    await within(form).findByText("Will be added to 5 students.");
+    await user.type(within(form).getByLabelText("Action item"), "Fill in the form");
+    await user.click(within(form).getByRole("button", { name: "Push to students" }));
+    const dialog = screen.getByRole("dialog", { name: "Push this action item?" });
+    expect(within(dialog).getByRole("button", { name: "Push" })).toBeEnabled();
+
+    // The target changes under the open dialog and its count fails.
+    let answer: (response: Response) => void = () => {};
+    previewReply = () => new Promise((resolve) => (answer = resolve));
+    fireEvent.click(within(form).getByRole("radio", { name: "One grade" }));
+    expect(within(dialog).getByRole("button", { name: "Push" })).toBeDisabled();
+    expect(dialog).toHaveTextContent("Counting students…");
+    await waitFor(() => expect(previewBodies()).toHaveLength(2));
+    answer(json({ error: "Something broke" }, 500));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Couldn't count students. Something broke");
+    const dialogPush = within(dialog).getByRole("button", { name: "Push" });
+    expect(dialogPush).toBeDisabled();
+    fireEvent.click(dialogPush);
+    expect(writeCalls()).toEqual([]);
   });
 
   it("puts a 422's field errors back on the form, and keeps a server error in the dialog", async () => {

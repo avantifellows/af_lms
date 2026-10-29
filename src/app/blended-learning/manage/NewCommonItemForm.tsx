@@ -36,7 +36,8 @@ import {
 // asks for confirmation, then adds it as an open Action Item for each of them.
 // Push waits for that preview: it is off while counting, after a failed
 // preview and when no one matches (an incomplete target still gets the
-// form's own checks).
+// form's own checks). The dialog's Push is off on the same terms, should the
+// count change while it is open.
 
 type Draft = TargetDraft & { text: string; owner: CommonItemOwner };
 
@@ -167,6 +168,7 @@ function useNewCommonItem(onPushed: (added: number) => void) {
   }
 
   async function push() {
+    if (!canConfirm) return;
     setBusy(true);
     setError(null);
     const result = await manageRequest<{ added: number }>("/api/blended-learning/common-action-items", {
@@ -191,7 +193,7 @@ function useNewCommonItem(onPushed: (added: number) => void) {
     setError(null);
   };
   const pushOff = preview.state.status === "counting" || preview.state.status === "failed" || counted?.count === 0;
-  return { draft, change, preview, counted, pushOff, errors, confirming, busy, error, review, push, cancel };
+  return { draft, change, preview, counted, canConfirm, pushOff, errors, confirming, busy, error, review, push, cancel };
 }
 
 export function NewCommonItemForm({ mentors, onPushed }: { mentors: TargetMentor[]; onPushed: (added: number) => void }) {
@@ -228,6 +230,7 @@ export function NewCommonItemForm({ mentors, onPushed }: { mentors: TargetMentor
         title="Push this action item?"
         confirmLabel="Push"
         busy={form.busy}
+        confirmDisabled={!form.canConfirm}
         error={form.error}
         onConfirm={form.push}
         onCancel={form.cancel}
@@ -237,7 +240,7 @@ export function NewCommonItemForm({ mentors, onPushed }: { mentors: TargetMentor
           {targetLabel(chosenTarget(draft), mentorName)}
           {count !== null && ` · Will be added to ${students(count)}.`}
         </p>
-        {preview && <UnmatchedIds preview={preview} />}
+        {preview ? <UnmatchedIds preview={preview} /> : <PreviewLine state={form.preview.state} onRetry={form.preview.retry} />}
         <p>Students mapped later get it only if you push it again.</p>
       </ConfirmDialog>
     </form>

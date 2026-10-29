@@ -48,17 +48,20 @@ function previewState(response: ManageResponse<TargetPreview>): PreviewState {
 }
 
 // The preview for the draft's target, and a way to ask again after a failure.
-// Only a response for the current target (and the latest retry) counts.
+// Each change of target (complete or not) and each retry starts a new
+// generation, and only a response from the current one counts: a response
+// saved for a target chosen earlier never counts for it again.
 export function useTargetPreview(draft: TargetDraft): { state: PreviewState; retry: () => void } {
-  const target = apiTarget(draft);
+  const target = JSON.stringify(apiTarget(draft));
   const hint = missingChoice(draft);
-  const key = hint === null ? JSON.stringify(target) : null;
-  const [attempt, setAttempt] = useState(0);
-  const [response, setResponse] = useState<{
-    key: string;
-    attempt: number;
-    value: ManageResponse<TargetPreview>;
-  } | null>(null);
+  const key = hint === null ? target : null;
+  const [generation, setGeneration] = useState(0);
+  const [generationTarget, setGenerationTarget] = useState(target);
+  if (generationTarget !== target) {
+    setGenerationTarget(target);
+    setGeneration((current) => current + 1);
+  }
+  const [response, setResponse] = useState<{ generation: number; value: ManageResponse<TargetPreview> } | null>(null);
 
   useEffect(() => {
     if (key === null) return;
@@ -69,7 +72,7 @@ export function useTargetPreview(draft: TargetDraft): { state: PreviewState; ret
           method: "POST",
           body: JSON.parse(key),
         });
-        if (!cancelled) setResponse({ key, attempt, value });
+        if (!cancelled) setResponse({ generation, value });
       },
       draft.kind === "students" ? TYPING_DELAY_MS : 0
     );
@@ -77,11 +80,11 @@ export function useTargetPreview(draft: TargetDraft): { state: PreviewState; ret
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [key, draft.kind, attempt]);
+  }, [key, draft.kind, generation]);
 
-  const retry = () => setAttempt((current) => current + 1);
+  const retry = () => setGeneration((current) => current + 1);
   if (hint !== null) return { state: { status: "incomplete", hint }, retry };
-  if (!response || response.key !== key || response.attempt !== attempt) return { state: { status: "counting" }, retry };
+  if (response?.generation !== generation) return { state: { status: "counting" }, retry };
   return { state: previewState(response.value), retry };
 }
 
