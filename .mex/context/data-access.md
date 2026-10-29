@@ -613,8 +613,10 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   by `student_id` (no join) and now builds `openActionItems` from Conversation rows (as before)
   plus the rows with no Conversation: Profile Doc ones (`source: "profile_doc"`) and pushed ones
   (`source: "common"`, `agreedOn` = the IST date the row was inserted), newest date first;
-  `groupBy` skips NULL `conversation_id`, so pushed rows never appear in a Conversation's
-  history. `logEntry`'s tick `UPDATE … WHERE id = ANY($3) AND status = 'open' AND student_id = $4`
+  `groupBy` skips NULL `conversation_id`, so an open pushed row is in no Conversation's history; a
+  done one (`completed_by_conversation_id` set) is listed after the items of the Conversation that
+  ticked it, as `{ …, status: "done", source: "common" }` (`doneCommonItemsByConversation`), so the
+  "done ones stay in their history" promise of Remove holds. `logEntry`'s tick `UPDATE … WHERE id = ANY($3) AND status = 'open' AND student_id = $4`
   needs no change: a pushed row is ticked like any other (a removal racing the tick → 409).
   `insertActionItems` and the draft review read paths only touch Conversation rows; the links
   importer's Profile Doc sync and the e2e seed's Profile Doc rows only touch `from_profile_doc`
@@ -625,9 +627,18 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   `NewCommonItemForm` (who does it and the action item side by side on one line, as on the log form,
   stacked on a phone; 200 characters in the form and in `validateCommonItemEdit`, though the DB
   allows 500; target radio + Grade/Mentor select or Student IDs textarea, live preview with the unmatched IDs, confirm
-  before push; 422 field errors go back inline). Every change calls `router.refresh()`. The open
-  items on the detail page and the log form show a "From program" tag (the UI name; code and DB keep "common") and "Added <date>"
-  (`ActionItemMeta` `source="common"`).
+  before push; 422 field errors go back inline). `useTargetPreview` returns `incomplete | counting |
+  failed | ready` for the current target only (counting also covers the typing pause); a failed
+  preview shows its `studentIds` field error (too many IDs, a token over 64 characters) or "Couldn't
+  count students. …" with Retry, and Push is disabled while counting, failed or at 0 (an incomplete
+  target keeps Push so the form's own checks show). After a push or Push again the section's status
+  line says "Added to N students." from the response's `added` (0 included). Every change calls
+  `router.refresh()`. The open items on the detail page and the log form show a "From program" tag
+  (the UI name; code and DB keep "common") and "Added <date>" (`ActionItemMeta` `source="common"`);
+  a done one shows struck through in its ticking Conversation's history with the same tag.
+- **Known gaps (not built):** an admin edit while a Mentor's log form is open means the Mentor's
+  tick completes the new wording (no version check); a create retried after a network error that
+  the server had committed pushes a second item (no idempotency key).
 - **E2E:** `e2e/fixtures/migrations/20261027120000_add_blended_learning_manage.sql` mirrors the
   migration (pg_dump-identical, seed row included). `blended-learning-manage.spec.ts` uses Mentor D
   (`BLENDED_MENTOR_D`) and `MANAGE_MENTEES` (G1, G2 mapped; G3 mapped by the spec to test Push

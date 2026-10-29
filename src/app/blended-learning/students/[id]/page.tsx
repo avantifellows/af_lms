@@ -160,12 +160,17 @@ function FlagChips({ flags }: { flags: MentorFlag[] }) {
   );
 }
 
+// A Common Action Item the Conversation ticked done carries the "From
+// program" tag under its text.
 function ActionItemRow({ item }: { item: ActionItem }) {
   const done = item.status === "done";
   return (
     <li className="grid grid-cols-[4rem_minmax(0,1fr)] items-baseline gap-x-2.5 gap-y-0.5 text-sm sm:grid-cols-[4rem_minmax(0,1fr)_auto]">
       <OwnerPill owner={item.owner} />
-      <span className={`break-words ${done ? "text-text-muted line-through" : "text-text-primary"}`}>{item.text}</span>
+      <span className="min-w-0 break-words">
+        <span className={done ? "text-text-muted line-through" : "text-text-primary"}>{item.text}</span>
+        {item.source === "common" && <ActionItemMeta source="common" />}
+      </span>
       <span className={`col-start-2 text-xs font-bold sm:col-start-auto ${done ? "text-success" : "text-accent"}`}>
         {done ? "Done" : "Open"}
       </span>

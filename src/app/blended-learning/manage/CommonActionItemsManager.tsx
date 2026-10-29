@@ -11,7 +11,7 @@ import { COMMON_ITEM_TEXT_MAX, type CommonItemOwner } from "@/lib/blended-learni
 import { OwnerPill } from "../students/[id]/ActionItemMeta";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { ActionItemFields, FieldError } from "./fields";
-import { manageRequest, students } from "./manageRequest";
+import { agree, manageRequest, students } from "./manageRequest";
 import { NewCommonItemForm } from "./NewCommonItemForm";
 import { targetLabel } from "./targetLabel";
 
@@ -19,7 +19,8 @@ import { targetLabel } from "./targetLabel";
 // force see its target and how many of its Action Items are open and done.
 // Editing the text or owner changes the still-open ones; pushing again adds it
 // to targeted Students who don't have it yet; removing deletes the still-open
-// ones and keeps the done ones. Every change re-reads the page.
+// ones and keeps the done ones. Every change re-reads the page; a push (new
+// or again) then says how many Students it was added to.
 
 type Pending = { kind: "push" | "remove"; item: CommonActionItem };
 
@@ -54,7 +55,8 @@ function EditCommonItemForm({ item, onDone }: { item: CommonActionItem; onDone: 
         errors={errors}
       />
       <p className="text-xs text-text-secondary">
-        Changes the {students(item.openCount)} who still have it open. Done ones stay as they were.
+        Changes the {students(item.openCount)} who still {agree(item.openCount, "has", "have")} it open. Done ones stay as
+        they were.
       </p>
       <FieldError message={errors.form} />
       <div className="flex flex-col gap-2 sm:flex-row">
@@ -158,18 +160,23 @@ function PendingDialog({
       onCancel={onCancel}
     >
       <p className="break-words font-bold text-text-primary">{item?.text}</p>
-      {item && push && <p>Will be added to {students(item.notYetAdded)} who don&apos;t have it yet.</p>}
+      {item && push && (
+        <p>
+          Will be added to {students(item.notYetAdded)} who {agree(item.notYetAdded, "doesn't", "don't")} have it yet.
+        </p>
+      )}
       {item && !push && (
         <p>
-          Deletes it from the {students(item.openCount)} who still have it open. The {item.doneCount} done stay in
-          their history.
+          Deletes it from the {students(item.openCount)} who still {agree(item.openCount, "has", "have")} it open.
+          {item.doneCount > 0 && ` The ${item.doneCount} done ${agree(item.doneCount, "stays", "stay")} in their history.`}
         </p>
       )}
     </ConfirmDialog>
   );
 }
 
-function usePendingAction() {
+// `onDone` gets how many Students a push added it to, or null after a remove.
+function usePendingAction(onDone: (added: number | null) => void) {
   const router = useRouter();
   const [pending, setPending] = useState<Pending | null>(null);
   const [busy, setBusy] = useState(false);
@@ -180,11 +187,13 @@ function usePendingAction() {
     setBusy(true);
     setError(null);
     const url = `/api/blended-learning/common-action-items/${pending.item.id}`;
-    const result = await (pending.kind === "push"
-      ? manageRequest(`${url}/push`, { method: "POST" })
-      : manageRequest(url, { method: "DELETE" }));
+    const push = pending.kind === "push";
+    const result = await manageRequest<{ added?: number }>(push ? `${url}/push` : url, {
+      method: push ? "POST" : "DELETE",
+    });
     setBusy(false);
     if (!result.ok) return setError(result.error);
+    onDone(push ? (result.body.added ?? 0) : null);
     setPending(null);
     router.refresh();
   }
@@ -198,7 +207,9 @@ function usePendingAction() {
 
 export function CommonActionItemsManager({ items, mentors }: { items: CommonActionItem[]; mentors: TargetMentor[] }) {
   const [editingId, setEditingId] = useState<number | null>(null);
-  const action = usePendingAction();
+  // How many Students the last push (new or again) added it to.
+  const [added, setAdded] = useState<number | null>(null);
+  const action = usePendingAction(setAdded);
 
   return (
     <section aria-labelledby="manage-common-items">
@@ -212,9 +223,12 @@ export function CommonActionItemsManager({ items, mentors }: { items: CommonActi
             logging.
           </p>
         </div>
-        <NewCommonItemForm mentors={mentors} />
+        <NewCommonItemForm mentors={mentors} onPushed={setAdded} />
         <div className="border-t border-border pt-4">
           <h3 className="text-sm font-bold text-text-primary">Pushed</h3>
+          <p role="status" className="text-sm font-bold text-success">
+            {added !== null && `Added to ${students(added)}.`}
+          </p>
           {items.length === 0 ? (
             <p className="mt-1 text-sm text-text-secondary">None yet.</p>
           ) : (
