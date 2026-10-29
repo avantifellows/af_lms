@@ -6,7 +6,7 @@ import { Button, Modal } from "@/components/ui";
 
 // A confirmation before a push or a removal: what will happen, then Cancel
 // and the action. While the action runs both buttons are disabled; an error
-// shows above them.
+// shows above them. The action is also off while confirmDisabled.
 export function ConfirmDialog({
   open,
   title,
@@ -14,6 +14,7 @@ export function ConfirmDialog({
   confirmLabel,
   danger = false,
   busy,
+  confirmDisabled = false,
   error,
   onConfirm,
   onCancel,
@@ -24,6 +25,7 @@ export function ConfirmDialog({
   confirmLabel: string;
   danger?: boolean;
   busy: boolean;
+  confirmDisabled?: boolean;
   error: string | null;
   onConfirm: () => void;
   onCancel: () => void;
@@ -45,7 +47,7 @@ export function ConfirmDialog({
           <Button type="button" variant="secondary" onClick={onCancel} disabled={busy}>
             Cancel
           </Button>
-          <Button type="button" variant={danger ? "danger" : "primary"} onClick={onConfirm} disabled={busy}>
+          <Button type="button" variant={danger ? "danger" : "primary"} onClick={onConfirm} disabled={busy || confirmDisabled}>
             {confirmLabel}
           </Button>
         </div>
