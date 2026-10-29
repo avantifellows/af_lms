@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 
 import {
@@ -52,6 +52,40 @@ function withMissingSelected(
 const FIELD_LABEL_CLASS = "text-[11px] font-bold uppercase tracking-wide text-text-muted";
 const FIELD_INPUT_CLASS = "mt-1 w-full border border-border bg-bg-card px-2.5 py-1 text-sm text-text-primary";
 
+type Params = Record<string, string | undefined>;
+
+const FILTER_PARAM_KEYS = ["regions", "schools", "pms", "status", "bucket", "preset", "from", "to"] as const;
+
+// The URL's filter values, as one string to compare.
+function filterSignature(params: Params): string {
+  return JSON.stringify(FILTER_PARAM_KEYS.map((key) => params[key] || ""));
+}
+
+// Every param, as one string to compare: a tab switch changes the URL but keeps the filters.
+function paramsSignature(params: Params): string {
+  return JSON.stringify(Object.entries(params).filter(([, value]) => value));
+}
+
+// `base` with `updates` applied. A filter change goes back to the first page: drop `page` rather
+// than pin `page=1`.
+function withUpdates(base: Params, updates: Params): URLSearchParams {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(base)) {
+    if (value && !Object.hasOwn(updates, key)) {
+      params.set(key, value);
+    }
+  }
+  params.delete("page");
+  for (const [key, value] of Object.entries(updates)) {
+    if (value) {
+      params.set(key, value);
+    } else {
+      params.delete(key);
+    }
+  }
+  return params;
+}
+
 export default function VisitSummaryFilterBar({
   regionOptions,
   schoolOptions,
@@ -60,8 +94,12 @@ export default function VisitSummaryFilterBar({
 }: FilterBarProps) {
   const router = useRouter();
   const pathname = usePathname();
+  const sectionRef = useRef<HTMLElement>(null);
   const debounceRef = useRef<number | null>(null);
-  const pendingUpdatesRef = useRef<Record<string, string | undefined>>({});
+  const pendingUpdatesRef = useRef<Params>({});
+  // What the next update builds on: the URL as last seen, or the update last sent if newer, so a
+  // second update sent before the first lands keeps it.
+  const baseParamsRef = useRef<Params>(currentParams);
   const [selectedRegions, setSelectedRegions] = useState(() => parseListParam(currentParams.regions));
   const [selectedSchools, setSelectedSchools] = useState(() => parseListParam(currentParams.schools));
   const [selectedPms, setSelectedPms] = useState(() => parseListParam(currentParams.pms));
@@ -70,52 +108,103 @@ export default function VisitSummaryFilterBar({
   const [from, setFrom] = useState(currentParams.from || "");
   const [to, setTo] = useState(currentParams.to || "");
   const [bucket, setBucket] = useState(currentParams.bucket || "");
+  const [seenParams, setSeenParams] = useState(() => paramsSignature(currentParams));
+  // The filters of the update this bar last sent, until it lands.
+  const [sentFilters, setSentFilters] = useState<string | null>(null);
 
-  function replaceWith(updates: Record<string, string | undefined>) {
-    Object.assign(pendingUpdatesRef.current, updates);
+  function showFilters(params: Params) {
+    setSelectedRegions(parseListParam(params.regions));
+    setSelectedSchools(parseListParam(params.schools));
+    setSelectedPms(parseListParam(params.pms));
+    setStatus(params.status || "");
+    setPreset(params.preset || "");
+    setFrom(params.from || "");
+    setTo(params.to || "");
+    setBucket(params.bucket || "");
+  }
 
+  // A new URL. When it carries the filters this bar sent, its own update landed: the fields already
+  // show it, and any pick made meanwhile. Otherwise (Clear filters, Back, a navigation that replaced
+  // this bar's update) the fields show the URL. Not a remount, so an open list and focus stay.
+  const urlSignature = paramsSignature(currentParams);
+  if (urlSignature !== seenParams) {
+    setSeenParams(urlSignature);
+    if (filterSignature(currentParams) === sentFilters) {
+      setSentFilters(null);
+    } else {
+      showFilters(currentParams);
+    }
+  }
+
+  useEffect(() => {
+    baseParamsRef.current = currentParams;
+  }, [currentParams]);
+
+  const send = useCallback((params: URLSearchParams) => {
+    baseParamsRef.current = Object.fromEntries(params);
+    setSentFilters(filterSignature(baseParamsRef.current));
+    const query = params.toString();
+    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+  }, [pathname, router]);
+
+  const dropPending = useCallback(() => {
     if (debounceRef.current !== null) {
       window.clearTimeout(debounceRef.current);
     }
+    debounceRef.current = null;
+    pendingUpdatesRef.current = {};
+  }, []);
 
-    debounceRef.current = window.setTimeout(() => {
-      const merged = pendingUpdatesRef.current;
-      pendingUpdatesRef.current = {};
+  const sendPending = useCallback(() => {
+    const updates = pendingUpdatesRef.current;
+    dropPending();
+    send(withUpdates(baseParamsRef.current, updates));
+  }, [dropPending, send]);
 
-      const params = new URLSearchParams();
-      for (const [key, value] of Object.entries(currentParams)) {
-        if (value && !(key in merged)) {
-          params.set(key, value);
-        }
+  // A pointer or focus landing outside the bar sends a waiting update at once, before any navigation
+  // that click starts (a tab, a sort header, a School row): Next discards the earlier navigation, so
+  // a waiting update can never land after a tab switch and undo it. Back/Forward drops it instead.
+  useEffect(() => {
+    function sendBeforeLeaving(event: Event) {
+      if (debounceRef.current !== null && !sectionRef.current?.contains(event.target as Node)) {
+        sendPending();
       }
-      // A filter change goes back to the first page: drop `page` rather than pin `page=1`.
-      params.delete("page");
-      for (const [key, value] of Object.entries(merged)) {
-        if (value) {
-          params.set(key, value);
-        } else {
-          params.delete(key);
-        }
-      }
+    }
+    document.addEventListener("pointerdown", sendBeforeLeaving, true);
+    document.addEventListener("focusin", sendBeforeLeaving, true);
+    window.addEventListener("popstate", dropPending);
+    return () => {
+      document.removeEventListener("pointerdown", sendBeforeLeaving, true);
+      document.removeEventListener("focusin", sendBeforeLeaving, true);
+      window.removeEventListener("popstate", dropPending);
+    };
+  }, [dropPending, sendPending]);
 
-      const query = params.toString();
-      router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
-    }, 300);
+  // Nothing is sent after the bar unmounts.
+  useEffect(() => dropPending, [dropPending]);
+
+  function replaceWith(updates: Params) {
+    Object.assign(pendingUpdatesRef.current, updates);
+    if (debounceRef.current !== null) {
+      window.clearTimeout(debounceRef.current);
+    }
+    debounceRef.current = window.setTimeout(sendPending, 300);
   }
 
   function clearFilters() {
+    dropPending();
+    showFilters({});
     const params = new URLSearchParams();
     for (const key of ["tab", "sort", "dir"]) {
       if (currentParams[key]) {
         params.set(key, currentParams[key]);
       }
     }
-    const query = params.toString();
-    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+    send(params);
   }
 
   return (
-    <section aria-labelledby="visit-summary-filters-heading" className="mb-4 rounded-lg border border-border bg-bg-card px-3 py-2.5 shadow-sm sm:px-4">
+    <section ref={sectionRef} aria-labelledby="visit-summary-filters-heading" className="mb-4 rounded-lg border border-border bg-bg-card px-3 py-2.5 shadow-sm sm:px-4">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
         <h2 id="visit-summary-filters-heading" className="text-sm font-bold uppercase tracking-wider text-text-primary">
           Filters
