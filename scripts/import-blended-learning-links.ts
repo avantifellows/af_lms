@@ -1,6 +1,6 @@
 // fallow-ignore-file code-duplication
 /**
- * Last updated: 2026-10-28. Operator-run, re-runnable — if the schema or app
+ * Last updated: 2026-10-29. Operator-run, re-runnable — if the schema or app
  * has moved on since this date, review/update it before running.
  *
  * Loads Blended Learning Student Links (Profile Doc, Screener Link) from the
@@ -10,8 +10,7 @@
  * Usage:
  *   npm run blended:import-links -- --file=/path/to/profile-dashboard.xlsx
  *   npm run blended:import-links -- --file=/path/to/profile-dashboard.xlsx --apply
- *   npm run blended:import-links -- --file=... --legacy-docs-dir=/path/to/profile-doc-html
- *   npm run blended:import-links -- --file=... --legacy-docs-dir=... --legacy-conversations=/private/path/summaries.json
+ *   npm run blended:import-links -- --file=... --legacy-docs-dir=/path/to/profile-doc-html --legacy-conversations=/private/path/summaries.json
  *   npm run blended:import-links -- --file=... --env=staging
  *   npm run blended:import-links -- --file=... --env-file=.env.local
  */
@@ -71,8 +70,12 @@ function parseArgs(argv: string[]): CliOptions {
   if (sawApply && sawDryRun) {
     throw new Error("Use either --apply or --dry-run, not both.");
   }
-  if (options.legacyConversations && !options.legacyDocsDir) {
-    throw new Error("--legacy-conversations needs --legacy-docs-dir: a summary is loaded only for its doc's latest date.");
+  // A date moved without its summary and items would show the stored ones
+  // under the new date, so the two flags come together.
+  if (Boolean(options.legacyConversations) !== Boolean(options.legacyDocsDir)) {
+    throw new Error(
+      "--legacy-docs-dir and --legacy-conversations go together: a Profile Doc's date, summary and items are loaded as one."
+    );
   }
 
   return options;
@@ -82,18 +85,19 @@ function printUsage(): void {
   console.log(`Usage:
   npm run blended:import-links -- --file=/path/to/profile-dashboard.xlsx
   npm run blended:import-links -- --file=... --apply
-  npm run blended:import-links -- --file=... --legacy-docs-dir=/path/to/profile-doc-html
-  npm run blended:import-links -- --file=... --legacy-docs-dir=... --legacy-conversations=/private/path/summaries.json
+  npm run blended:import-links -- --file=... --legacy-docs-dir=/path/to/profile-doc-html --legacy-conversations=/private/path/summaries.json
   npm run blended:import-links -- --file=... --env=staging
   npm run blended:import-links -- --file=... --env-file=.env.local
 
-Defaults to dry-run. Writes require the explicit --apply flag.
---legacy-docs-dir also sets legacy_last_contact_on: the latest dated conversation
-in each Student's Profile Doc, read from <dir>/<Drive file id>.html (the doc's
-HTML export). A doc read with no dated conversation gives NULL; a doc with no
-export keeps the stored value, so re-run once more docs are shared. Dates after
-today (IST) are ignored. Without the flag that column is untouched.
---legacy-conversations (with --legacy-docs-dir) also sets legacy_conversation_summary
+Defaults to dry-run. Writes require the explicit --apply flag, and an apply
+writes everything in one transaction.
+--legacy-docs-dir (only with --legacy-conversations) also sets legacy_last_contact_on:
+the latest dated conversation in each Student's Profile Doc, read from
+<dir>/<Drive file id>.html (the doc's HTML export). A doc read with no dated
+conversation gives NULL; a doc with no export keeps the stored value, so re-run
+once more docs are shared. Dates after today (IST) are ignored. Without the flags
+the legacy columns and Profile Doc Action Items are untouched.
+--legacy-conversations (only with --legacy-docs-dir) sets legacy_conversation_summary
 from { "<Drive file id>": { "occurredOn": "YYYY-MM-DD", "summary": "...",
 "actionItems": [{ "text": "...", "owner": "student|mentor|parent" }] } }: loaded only
 when occurredOn is the doc's latest date, else NULL. The entry's action items become
@@ -104,7 +108,10 @@ Student IDs only are printed.`);
 }
 
 // Profile Doc HTML exports in a directory, named <Drive file id>.html.
-function profileDocsFrom(dir: string, window: LegacyProfileDocs["window"]): LegacyProfileDocs {
+function profileDocsFrom(
+  dir: string,
+  window: LegacyProfileDocs["window"]
+): Omit<LegacyProfileDocs, "conversations"> {
   if (!fs.statSync(dir).isDirectory()) throw new Error(`Not a directory: ${dir}`);
   return {
     readProfileDocHtml: (docId) => {
@@ -115,14 +122,12 @@ function profileDocsFrom(dir: string, window: LegacyProfileDocs["window"]): Lega
   };
 }
 
-// fallow-ignore-next-line complexity
 async function loadLegacyProfileDocs(
   options: CliOptions,
   window: LegacyProfileDocs["window"]
 ): Promise<LegacyProfileDocs | null> {
-  if (!options.legacyDocsDir) return null;
+  if (!options.legacyDocsDir || !options.legacyConversations) return null;
   const docs = profileDocsFrom(options.legacyDocsDir, window);
-  if (!options.legacyConversations) return docs;
   const { parseLegacyConversations } = await import("../src/lib/blended-learning-legacy-conversations");
   return { ...docs, conversations: parseLegacyConversations(readJsonQuietly(options.legacyConversations)) };
 }

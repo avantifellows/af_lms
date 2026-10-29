@@ -20,13 +20,23 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { ActionItemFields, FieldError } from "./fields";
 import { manageRequest, students } from "./manageRequest";
 import { targetLabel } from "./targetLabel";
-import { apiTarget, PreviewLine, UnmatchedIds, useTargetPreview, type TargetDraft } from "./targetPreview";
+import {
+  apiTarget,
+  countedPreview,
+  PreviewLine,
+  UnmatchedIds,
+  useTargetPreview,
+  type TargetDraft,
+} from "./targetPreview";
 
 // A new Common Action Item: its text, who does it and who gets it (every
 // Student with a Mentor, one grade, one Mentor's Students, or Student IDs
 // pasted from the sheet). Once the target is complete the form previews how
 // many Students it reaches now (and which pasted IDs won't get it); pushing
 // asks for confirmation, then adds it as an open Action Item for each of them.
+// Push waits for that preview: it is off while counting, after a failed
+// preview and when no one matches (an incomplete target still gets the
+// form's own checks).
 
 type Draft = TargetDraft & { text: string; owner: CommonItemOwner };
 
@@ -46,7 +56,18 @@ function chosenTarget(draft: Draft): CommonTarget {
   return { kind: "all" };
 }
 
-function StudentIdsField({ value, error, onChange }: { value: string; error?: string; onChange: (value: string) => void }) {
+function StudentIdsField({
+  value,
+  error,
+  invalid,
+  onChange,
+}: {
+  value: string;
+  error?: string;
+  // The preview turned the IDs down; its line says why.
+  invalid: boolean;
+  onChange: (value: string) => void;
+}) {
   const id = useId();
   return (
     <div>
@@ -57,7 +78,7 @@ function StudentIdsField({ value, error, onChange }: { value: string; error?: st
         value={value}
         placeholder="Paste Student IDs, separated by spaces, commas or new lines"
         onChange={(event) => onChange(event.target.value)}
-        aria-invalid={Boolean(error)}
+        aria-invalid={Boolean(error) || invalid}
         className={`block w-full resize-y font-mono ${baseInputClasses}`}
       />
       <FieldError message={error} />
@@ -65,10 +86,11 @@ function StudentIdsField({ value, error, onChange }: { value: string; error?: st
   );
 }
 
-function TargetChoice({ draft, mentors, errors, onChange }: {
+function TargetChoice({ draft, mentors, errors, idsTurnedDown, onChange }: {
   draft: Draft;
   mentors: TargetMentor[];
   errors: Record<string, string>;
+  idsTurnedDown: boolean;
   onChange: (change: Partial<Draft>) => void;
 }) {
   const name = useId();
@@ -113,32 +135,41 @@ function TargetChoice({ draft, mentors, errors, onChange }: {
         </BlendedSelect>
       )}
       {draft.kind === "students" && (
-        <StudentIdsField value={draft.studentIds} error={errors.studentIds} onChange={(studentIds) => onChange({ studentIds })} />
+        <StudentIdsField
+          value={draft.studentIds}
+          error={errors.studentIds}
+          invalid={idsTurnedDown}
+          onChange={(studentIds) => onChange({ studentIds })}
+        />
       )}
       <FieldError message={errors.mentorUserId ?? errors.grade ?? errors.target} />
     </fieldset>
   );
 }
 
-function useNewCommonItem() {
+function useNewCommonItem(onPushed: (added: number) => void) {
   const router = useRouter();
   const [draft, setDraft] = useState<Draft>(EMPTY);
+  const preview = useTargetPreview(draft);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const counted = countedPreview(preview.state);
+  // Push only once the current target is counted and reaches someone.
+  const canConfirm = counted !== null && counted.count > 0;
 
   function review(event: FormEvent) {
     event.preventDefault();
     const validated = validateCommonItem({ ...draft, target: apiTarget(draft) });
     setErrors(validated.ok ? {} : validated.fieldErrors);
-    if (validated.ok) setConfirming(true);
+    if (validated.ok && canConfirm) setConfirming(true);
   }
 
   async function push() {
     setBusy(true);
     setError(null);
-    const result = await manageRequest("/api/blended-learning/common-action-items", {
+    const result = await manageRequest<{ added: number }>("/api/blended-learning/common-action-items", {
       method: "POST",
       body: { text: draft.text, owner: draft.owner, target: apiTarget(draft) },
     });
@@ -150,6 +181,7 @@ function useNewCommonItem() {
     }
     setConfirming(false);
     setDraft(EMPTY);
+    onPushed(result.body.added);
     router.refresh();
   }
 
@@ -158,14 +190,15 @@ function useNewCommonItem() {
     setConfirming(false);
     setError(null);
   };
-  return { draft, change, errors, confirming, busy, error, review, push, cancel };
+  const pushOff = preview.state.status === "counting" || preview.state.status === "failed" || counted?.count === 0;
+  return { draft, change, preview, counted, pushOff, errors, confirming, busy, error, review, push, cancel };
 }
 
-export function NewCommonItemForm({ mentors }: { mentors: TargetMentor[] }) {
-  const form = useNewCommonItem();
-  const { draft } = form;
-  const preview = useTargetPreview(draft);
+export function NewCommonItemForm({ mentors, onPushed }: { mentors: TargetMentor[]; onPushed: (added: number) => void }) {
+  const form = useNewCommonItem(onPushed);
+  const { draft, counted: preview } = form;
   const count = preview?.count ?? null;
+  const idsTurnedDown = form.preview.state.status === "failed" && !form.preview.state.canRetry;
   const mentorName = mentors.find((mentor) => String(mentor.userId) === draft.mentorUserId)?.name ?? null;
 
   return (
@@ -178,9 +211,15 @@ export function NewCommonItemForm({ mentors }: { mentors: TargetMentor[] }) {
         onOwnerChange={(owner) => form.change({ owner })}
         errors={form.errors}
       />
-      <TargetChoice draft={draft} mentors={mentors} errors={form.errors} onChange={form.change} />
-      <PreviewLine draft={draft} preview={preview} />
-      <Button type="submit" disabled={count === 0} className="w-full sm:w-auto">
+      <TargetChoice
+        draft={draft}
+        mentors={mentors}
+        errors={form.errors}
+        idsTurnedDown={idsTurnedDown}
+        onChange={form.change}
+      />
+      <PreviewLine state={form.preview.state} onRetry={form.preview.retry} />
+      <Button type="submit" disabled={form.pushOff} className="w-full sm:w-auto">
         <Send aria-hidden="true" className="h-4 w-4" />
         Push to students
       </Button>
