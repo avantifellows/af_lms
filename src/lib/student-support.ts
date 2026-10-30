@@ -15,13 +15,18 @@ import { CURRENT_ACADEMIC_YEAR } from "./constants";
 import { query } from "./db";
 import { ttlCache } from "./ttl-cache";
 import {
+  type JourneySitting,
   alStatus,
   byDateThenSession,
   chapterFlag,
   examName,
+  latestChange,
+  latestLevel,
   levelForTest,
   passMark,
   questionsToNext,
+  retestIds,
+  scoreTrend,
   studentExamStream,
   testInStream,
   topicFlag,
@@ -158,32 +163,41 @@ async function loadCutoffs(): Promise<Map<string, number>> {
 const cutoffKey = (stream: string, category: string, level: string) =>
   `${stream.toLowerCase()}|${category.trim().toLowerCase()}|${level}`;
 
-type Progression = { marks: number; pct: number | null; level: string; test: string }[];
+/** Score % on the newest sitting with marks, retests included. */
+function latestPct(sittings: JourneySitting[]): number | null {
+  for (let i = sittings.length - 1; i >= 0; i--) {
+    const { marks, max } = sittings[i];
+    if (marks !== null && max) return round1((marks / max) * 100);
+  }
+  return null;
+}
 
 function journeyRow(
   s: StudentRaw,
-  progression: Progression,
+  sittings: JourneySitting[],
   cutoffs: Map<string, number>
 ): Omit<ScoreJourneyRow, "results"> {
   const stream = studentExamStream(s.stream);
-  const recent = progression.slice(-3);
-  const latest = recent[recent.length - 1];
+  const latest = latestLevel(sittings);
   return {
     uid: s.uid,
     studentId: s.student_id,
     name: s.name?.trim() || s.uid,
     gender: s.gender,
     category: s.category,
+    stream: s.stream,
     examStream: stream,
     predicted: s.predicted_al,
     predictedPct: num(s.predicted_pct),
     mode: s.mode_al,
     status: alStatus(s.predicted_al, s.mode_al),
-    last3: recent.map((p) => p.level),
-    latestPct: latest ? round1(latest.pct) : null,
-    toNext: questionsToNext(s.mode_al, recent, (level) =>
+    latestAl: latest,
+    toNext: questionsToNext(latest, (level) =>
       s.category ? (cutoffs.get(cutoffKey(stream, s.category, level)) ?? null) : null
     ),
+    trend: scoreTrend(sittings),
+    change: latestChange(sittings),
+    latestPct: latestPct(sittings),
   };
 }
 
@@ -193,6 +207,7 @@ interface Sitting {
   date: string;
   testStream: string | null;
   testName: string;
+  retest: boolean;
   level: string;
   marks: number | null;
   max: number | null;
@@ -201,9 +216,9 @@ interface Sitting {
 /**
  * Per student: their levelled full-test sittings (Advanced excluded, the same
  * tests that decide dim_student.academic_level), plus every test's raw result
- * for the "All tests" columns. The cumulative AL read already returns exactly
+ * for the per-test columns. The cumulative AL read already returns exactly
  * these and applies the test-grade filter. Tests are ordered by date, then
- * session id.
+ * session id, each with its maximum marks and whether it is a retest.
  */
 async function getProgressions(
   udise: string,
@@ -213,8 +228,22 @@ async function getProgressions(
   testGrade?: number
 ): Promise<{ tests: JourneyTest[]; byStudent: Map<string, { sittings: Sitting[]; results: Record<string, TestResult> }> }> {
   const data = await getCumulativeALData(udise, grade, program, stream, testGrade);
-  const tests = data.tests
-    .map((t) => ({ sessionId: t.session_id, name: t.test_name, date: t.start_date, stream: t.stream }))
+  const retests = retestIds(data.tests.map((t) => ({ sessionId: t.session_id, name: t.test_name, date: t.start_date })));
+  const maxBySession = new Map<string, number>();
+  for (const s of data.students) {
+    for (const p of s.progression) {
+      if (p.max_marks_possible) maxBySession.set(p.session_id, Math.max(maxBySession.get(p.session_id) ?? 0, p.max_marks_possible));
+    }
+  }
+  const tests: JourneyTest[] = data.tests
+    .map((t) => ({
+      sessionId: t.session_id,
+      name: t.test_name,
+      date: t.start_date,
+      stream: t.stream,
+      max: maxBySession.get(t.session_id) ?? null,
+      retest: retests.has(t.session_id),
+    }))
     .sort(byDateThenSession);
   const bySession = new Map(tests.map((t) => [t.sessionId, t]));
   const byStudent = new Map<string, { sittings: Sitting[]; results: Record<string, TestResult> }>();
@@ -229,6 +258,7 @@ async function getProgressions(
         date: test?.date ?? "",
         testStream: test?.stream ?? null,
         testName: test?.name ?? p.session_id,
+        retest: test?.retest ?? false,
         level: p.academic_level,
         marks: p.marks_scored,
         max: p.max_marks_possible,
@@ -240,16 +270,18 @@ async function getProgressions(
 }
 
 /** A student's journey from their sittings: only tests of their exam stream
- *  (as in the report), oldest first, as marks + level. */
-function journeyProgression(sittings: Sitting[], stream: "engineering" | "medical"): Progression {
-  const progression: Progression = [];
-  for (const t of sittings) {
-    if (!testInStream(t.testStream, stream)) continue;
-    const level = levelForTest(t.level, stream);
-    if (!level || t.marks === null) continue;
-    progression.push({ marks: t.marks, pct: t.max ? (t.marks / t.max) * 100 : null, level, test: t.testName });
-  }
-  return progression;
+ *  (as in the report), oldest first, with each level as the mode reads it. */
+function journeySittings(sittings: Sitting[], stream: "engineering" | "medical"): JourneySitting[] {
+  return sittings
+    .filter((t) => testInStream(t.testStream, stream))
+    .map((t) => ({
+      sessionId: t.sessionId,
+      test: t.testName,
+      level: levelForTest(t.level, stream),
+      marks: t.marks,
+      max: t.max,
+      retest: t.retest,
+    }));
 }
 
 export function getScoreJourney(
@@ -279,8 +311,8 @@ async function loadScoreJourney(
     tests: progressions.tests,
     students: students.map((s) => {
       const p = progressions.byStudent.get(s.uid);
-      const progression = journeyProgression(p?.sittings ?? [], studentExamStream(s.stream));
-      return { ...journeyRow(s, progression, cutoffs), results: p?.results ?? {} };
+      const sittings = journeySittings(p?.sittings ?? [], studentExamStream(s.stream));
+      return { ...journeyRow(s, sittings, cutoffs), results: p?.results ?? {} };
     }),
   };
 }
@@ -613,24 +645,31 @@ function setChanges(tests: TestHistoryRow[]) {
 /**
  * The student's levelled full tests, oldest first: the same tests the
  * cumulative AL read gives the Score journey (Advanced excluded), taken from
- * rows the report already has rather than a second scan.
+ * rows the report already has rather than a second scan. Retests are marked
+ * over every such test the School + grade + program sat, in any stream.
  */
-function progressionFromTests(rows: TestRaw[], stream: "engineering" | "medical"): Progression {
+function sittingsFromTests(
+  allRows: TestRaw[],
+  rows: TestRaw[],
+  stream: "engineering" | "medical"
+): JourneySitting[] {
+  const levelled = (r: TestRaw) => isFullTest(r) && !isAdvancedTest(r.test_name);
+  const tests = new Map<string, { sessionId: string; name: string; date: string }>();
+  for (const r of allRows.filter(levelled)) {
+    tests.set(r.session_id, { sessionId: r.session_id, name: r.test_name, date: dateString(r.start_date) });
+  }
+  const retests = retestIds([...tests.values()]);
   return rows
-    .filter((r) => isFullTest(r) && r.section?.toLowerCase() === "overall" && !isAdvancedTest(r.test_name))
-    .map((r) => ({
-      r,
-      level: r.academic_level ? levelForTest(r.academic_level, stream) : null,
-      date: dateString(r.start_date),
-      sessionId: r.session_id,
-    }))
-    .filter((x): x is { r: TestRaw; level: string; date: string; sessionId: string } => !!x.level && x.r.marks_scored !== null)
+    .filter((r) => levelled(r) && r.section?.toLowerCase() === "overall" && r.academic_level)
+    .map((r) => ({ r, date: dateString(r.start_date), sessionId: r.session_id }))
     .sort(byDateThenSession)
-    .map(({ r, level }) => ({
-      marks: Number(r.marks_scored),
-      pct: r.max_marks_possible ? (Number(r.marks_scored) / Number(r.max_marks_possible)) * 100 : null,
-      level,
+    .map(({ r }) => ({
+      sessionId: r.session_id,
       test: r.test_name,
+      level: levelForTest(r.academic_level!, stream),
+      marks: num(r.marks_scored),
+      max: num(r.max_marks_possible),
+      retest: retests.has(r.session_id),
     }));
 }
 
@@ -670,7 +709,7 @@ async function loadStudentReport(
   }
   const chapterRows = await getChapterRows(uid, stream, [...sat].map(([id, hash]) => ({ id, hash })));
   return {
-    student: { ...journeyRow(student, progressionFromTests(testRows, stream), cutoffs), results: {} },
+    student: { ...journeyRow(student, sittingsFromTests(allTestRows, testRows, stream), cutoffs), results: {} },
     chapters: shapeChapters(chapterRows, pyq),
     tests: shapeTests(testRows),
   };

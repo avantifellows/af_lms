@@ -10,14 +10,17 @@ function row(over: Partial<ScoreJourneyRow>): ScoreJourneyRow {
     name: "A",
     gender: "Female",
     category: "Gen",
+    stream: null,
     examStream: "engineering",
     predicted: null,
     predictedPct: null,
     mode: null,
     status: null,
-    last3: [],
-    latestPct: null,
+    latestAl: null,
     toNext: { kind: "none" },
+    trend: null,
+    change: null,
+    latestPct: null,
     results: {},
     ...over,
   };
@@ -67,20 +70,23 @@ describe("Score journey ordering", () => {
   });
 
   it("sorts blanks last in either direction", () => {
-    const rows = [row({ uid: "x", latestPct: null }), row({ uid: "y", latestPct: 30 }), row({ uid: "z", latestPct: 60 })];
-    expect(sortRows(rows, "latest", false).map((r) => r.uid)).toEqual(["z", "y", "x"]);
-    expect(sortRows(rows, "latest", true).map((r) => r.uid)).toEqual(["y", "z", "x"]);
+    const trend = (slope: number) => ({ points: [], direction: "Same" as const, slope, recent: 2 });
+    const rows = [row({ uid: "x", trend: null }), row({ uid: "y", trend: trend(-1) }), row({ uid: "z", trend: trend(2) })];
+    expect(sortRows(rows, "trend", false).map((r) => r.uid)).toEqual(["z", "y", "x"]);
+    expect(sortRows(rows, "trend", true).map((r) => r.uid)).toEqual(["y", "z", "x"]);
   });
 
-  it("sorts by name, predicted level, questions to next level and status", () => {
+  it("sorts by name, predicted level, Latest AL, questions to next level and status", () => {
+    const count = { kind: "count" as const, gap: 0, cutoff: 100, nextLevel: "M2", test: "T", marks: 100 };
+    const latest = (level: string) => ({ level, marks: 1, test: "T" });
     const rows = [
-      row({ uid: "b", name: "bala", predicted: "M3", toNext: { kind: "top" }, status: "Improving" }),
+      row({ uid: "b", name: "bala", predicted: "M3", latestAl: latest("M1"), toNext: { kind: "top" }, status: "Improving" }),
       row({ uid: "a", name: "Asha", predicted: "M1", toNext: { kind: "none" }, status: null }),
       row({
-        uid: "c", name: "Chitra", predicted: null, status: "Sliding",
-        toNext: { kind: "count", questions: 5, median: 80, cutoff: 100, nextLevel: "M2", tests: [] },
+        uid: "c", name: "Chitra", predicted: null, latestAl: latest("M3"), status: "Sliding",
+        toNext: { ...count, questions: 5 },
       }),
-      row({ uid: "d", name: "Dev", predicted: "X9", toNext: { kind: "reached" }, status: "Same" }),
+      row({ uid: "d", name: "Dev", predicted: "X9", latestAl: latest("M2"), toNext: { ...count, questions: 0 }, status: "Same" }),
     ];
     const order = (key: Parameters<typeof sortRows>[1], ascending: boolean) =>
       sortRows(rows, key, ascending).map((r) => r.uid);
@@ -89,8 +95,9 @@ describe("Score journey ordering", () => {
     expect(order("name", false)).toEqual(["d", "c", "b", "a"]);
     // Best predicted level first ascending; an unknown or missing level last, by name.
     expect(order("predicted", true)).toEqual(["a", "b", "c", "d"]);
-    // Top and Reached count as 0 questions; no figure sorts last.
-    expect(order("toNext", false)).toEqual(["c", "b", "d", "a"]);
+    // Top sorts below 0 questions; no figure sorts last.
+    expect(order("toNext", false)).toEqual(["c", "d", "b", "a"]);
+    expect(order("latestAl", true)).toEqual(["b", "d", "c", "a"]);
     expect(order("status", true)).toEqual(["c", "d", "b", "a"]);
   });
 
@@ -128,10 +135,11 @@ describe("Student report chapters", () => {
 });
 
 describe("Cumulative report sections", () => {
+  const test = { max: 300, retest: false };
   const tests = [
-    { sessionId: "j", name: "JEE", date: "2026-08-01", stream: "engineering" },
-    { sessionId: "n", name: "NEET", date: "2026-08-02", stream: "medical" },
-    { sessionId: "x", name: "Common", date: "2026-08-03", stream: null },
+    { ...test, sessionId: "j", name: "JEE", date: "2026-08-01", stream: "engineering" },
+    { ...test, sessionId: "n", name: "NEET", date: "2026-08-02", stream: "medical" },
+    { ...test, sessionId: "x", name: "Common", date: "2026-08-03", stream: null },
   ];
 
   it("splits students by exam stream, JEE first, each with its own and stream-less tests", () => {

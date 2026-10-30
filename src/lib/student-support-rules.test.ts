@@ -1,13 +1,20 @@
 import { describe, expect, it } from "vitest";
 import {
+  type JourneySitting,
   alStatus,
+  changeDirection,
   chapterFlag,
   examName,
   examStream,
+  latestChange,
+  latestLevel,
   levelForTest,
-  median,
   passMark,
   questionsToNext,
+  retestIds,
+  scoreDirection,
+  scoreTrend,
+  slope,
   topicFlag,
 } from "./student-support-rules";
 
@@ -45,43 +52,135 @@ describe("alStatus", () => {
   });
 });
 
-describe("questionsToNext", () => {
-  const cutoffs: Record<string, number> = { M1: 93, M2: 60 };
-  const cutoffFor = (level: string) => cutoffs[level] ?? null;
-  const tests = (...marks: number[]) => marks.map((m, i) => ({ marks: m, test: `T${i + 1}` }));
+function sitting(over: Partial<JourneySitting>): JourneySitting {
+  return { sessionId: "s", test: "T", level: "M2", marks: 100, max: 300, retest: false, ...over };
+}
 
-  it("counts +4 answers from the median to the next cutoff (median 85 vs 93 → 2)", () => {
-    expect(questionsToNext("M2", tests(80, 85, 90), cutoffFor)).toEqual({
-      kind: "count",
-      questions: 2,
-      median: 85,
-      cutoff: 93,
-      nextLevel: "M1",
-      tests: ["T1", "T2", "T3"],
-    });
+describe("retestIds", () => {
+  it("marks a later session with an earlier session's name, whatever order they arrive in", () => {
+    const ids = retestIds([
+      { sessionId: "b", name: "FT 2", date: "2026-08-01" },
+      { sessionId: "r2", name: "FT 1 ", date: "2026-09-01" },
+      { sessionId: "a", name: "FT 1", date: "2026-07-01" },
+      { sessionId: "r1", name: "FT 1", date: "2026-07-01" },
+    ]);
+    // Same day: the higher session id is the retest.
+    expect([...ids].sort()).toEqual(["r1", "r2"]);
   });
 
-  it("says Reached when the median already clears the cutoff", () => {
-    expect(questionsToNext("M3", tests(70, 75), cutoffFor)).toEqual({ kind: "reached" });
-  });
-
-  it("says Top at M1 / B1", () => {
-    expect(questionsToNext("M1", tests(10), cutoffFor)).toEqual({ kind: "top" });
-    expect(questionsToNext("B1", [], cutoffFor)).toEqual({ kind: "top" });
-  });
-
-  it("is blank with no tests, no mode or no cutoff", () => {
-    expect(questionsToNext("M2", [], cutoffFor)).toEqual({ kind: "none" });
-    expect(questionsToNext(null, tests(50), cutoffFor)).toEqual({ kind: "none" });
-    expect(questionsToNext("B2", tests(50), cutoffFor)).toEqual({ kind: "none" });
+  it("marks nothing when every name is new", () => {
+    expect(retestIds([{ sessionId: "a", name: "FT 1", date: "2026-07-01" }]).size).toBe(0);
   });
 });
 
-describe("median", () => {
-  it("handles odd, even and empty lists", () => {
-    expect(median([3, 1, 2])).toBe(2);
-    expect(median([1, 2, 3, 4])).toBe(2.5);
-    expect(median([])).toBeNull();
+describe("latestLevel", () => {
+  it("is the newest sitting with a level that is not a retest", () => {
+    expect(
+      latestLevel([
+        sitting({ test: "FT 1", level: "M3", marks: 40 }),
+        sitting({ test: "FT 2", level: "M2", marks: 90 }),
+        sitting({ test: "FT 3", level: null, marks: 10 }),
+        sitting({ test: "FT 2", level: "M1", marks: 200, retest: true }),
+      ])
+    ).toEqual({ level: "M2", marks: 90, test: "FT 2" });
+  });
+
+  it("is null without such a sitting", () => {
+    expect(latestLevel([sitting({ retest: true })])).toBeNull();
+    expect(latestLevel([])).toBeNull();
+  });
+});
+
+describe("questionsToNext", () => {
+  const cutoffs: Record<string, number> = { M1: 93, M2: 60 };
+  const cutoffFor = (level: string) => cutoffs[level] ?? null;
+
+  it("counts +4 answers from the latest test's marks to the cutoff above (85 vs 93 → 2)", () => {
+    expect(questionsToNext({ level: "M2", marks: 85, test: "FT 3" }, cutoffFor)).toEqual({
+      kind: "count",
+      questions: 2,
+      gap: 8,
+      cutoff: 93,
+      nextLevel: "M1",
+      test: "FT 3",
+      marks: 85,
+    });
+  });
+
+  it("rounds the marks gap up before counting answers", () => {
+    expect(questionsToNext({ level: "M2", marks: 88.5, test: "T" }, cutoffFor)).toMatchObject({ gap: 5, questions: 2 });
+  });
+
+  it("is 0 when the latest marks already clear the cutoff", () => {
+    expect(questionsToNext({ level: "M3", marks: 75, test: "T" }, cutoffFor)).toMatchObject({
+      kind: "count", questions: 0, gap: -15, nextLevel: "M2",
+    });
+  });
+
+  it("says Top at M1 / B1", () => {
+    expect(questionsToNext({ level: "M1", marks: 10, test: "T" }, cutoffFor)).toEqual({ kind: "top" });
+    expect(questionsToNext({ level: "B1", marks: null, test: "T" }, cutoffFor)).toEqual({ kind: "top" });
+  });
+
+  it("is blank with no Latest AL, no marks or no cutoff", () => {
+    expect(questionsToNext(null, cutoffFor)).toEqual({ kind: "none" });
+    expect(questionsToNext({ level: "M2", marks: null, test: "T" }, cutoffFor)).toEqual({ kind: "none" });
+    expect(questionsToNext({ level: "B2", marks: 50, test: "T" }, cutoffFor)).toEqual({ kind: "none" });
+  });
+});
+
+describe("score trend", () => {
+  it("fits a least-squares slope", () => {
+    expect(slope([10, 20, 30])).toBe(10);
+    expect(slope([30, 10, 30, 10])).toBeCloseTo(-4);
+  });
+
+  it("reads above +0.25 as Improving, below -0.25 as Declining, else Same", () => {
+    expect(scoreDirection(0.26)).toBe("Improving");
+    expect(scoreDirection(0.25)).toBe("Same");
+    expect(scoreDirection(-0.25)).toBe("Same");
+    expect(scoreDirection(-0.26)).toBe("Declining");
+  });
+
+  it("plots every non-retest score % but reads the direction over the last 5", () => {
+    const marks = [300, 30, 45, 60, 75, 90];
+    const trend = scoreTrend([
+      ...marks.map((m) => sitting({ marks: m, max: 300 })),
+      sitting({ marks: 0, max: 300, retest: true }),
+      sitting({ marks: null }),
+      sitting({ marks: 50, max: null }),
+    ]);
+    // The first test's 100% would make it Declining; only the last 5 count.
+    expect(trend).toEqual({ points: [100, 10, 15, 20, 25, 30], direction: "Improving", slope: 5, recent: 5 });
+  });
+
+  it("is null with fewer than two scored tests", () => {
+    expect(scoreTrend([sitting({}), sitting({ retest: true })])).toBeNull();
+  });
+});
+
+describe("latestChange", () => {
+  it("compares the latest non-retest marks with the previous one", () => {
+    expect(
+      latestChange([
+        sitting({ sessionId: "a", test: "FT 1", marks: 80 }),
+        sitting({ sessionId: "b", test: "FT 2", marks: 100 }),
+        sitting({ sessionId: "c", test: "FT 2", marks: 150, retest: true }),
+        sitting({ sessionId: "d", test: "FT 3", marks: null }),
+        sitting({ sessionId: "e", test: "FT 4", marks: 92.5 }),
+      ])
+    ).toEqual({ sessionId: "e", change: -7.5, previous: "FT 2" });
+  });
+
+  it("is null with fewer than two", () => {
+    expect(latestChange([sitting({})])).toBeNull();
+  });
+
+  it("is up above +0.5, down below -0.5, else flat", () => {
+    expect(changeDirection(0.6)).toBe("up");
+    expect(changeDirection(0.5)).toBe("flat");
+    expect(changeDirection(-0.5)).toBe("flat");
+    expect(changeDirection(-0.6)).toBe("down");
   });
 });
 

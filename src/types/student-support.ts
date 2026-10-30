@@ -4,20 +4,49 @@
 export type AlStatus = "Sliding" | "Same" | "Improving";
 export type ChapterFlag = "C" | "S";
 
-/** "Questions to next mode AL", already decided server-side. */
+/** "Questions to next AL", already decided server-side: extra correct
+ *  answers (+4 each) the Latest AL's marks need to reach the level above. */
 export type ToNextLevel =
   | { kind: "top" }
-  | { kind: "reached" }
   | { kind: "none" }
   | {
       kind: "count";
+      /** 0 when the latest marks already clear the cutoff. */
       questions: number;
-      /** Median marks of the tests used, and the cutoff for the next level. */
-      median: number;
+      /** Marks short of the cutoff, rounded up (≤ 0 when cleared). */
+      gap: number;
       cutoff: number;
       nextLevel: string;
-      tests: string[];
+      /** The latest test and the student's marks on it. */
+      test: string;
+      marks: number;
     };
+
+/** The level on the student's newest non-retest sitting that has one. */
+export interface LatestLevel {
+  level: string;
+  marks: number | null;
+  test: string;
+}
+
+export type ScoreDirection = "Improving" | "Same" | "Declining";
+
+/** Score % on every non-retest test the student sat, oldest first, and the
+ *  direction over the last few. */
+export interface ScoreTrend {
+  points: number[];
+  direction: ScoreDirection;
+  /** Least-squares slope over the last `recent` points, in points per test. */
+  slope: number;
+  recent: number;
+}
+
+/** Marks change on the student's latest non-retest sitting vs the one before. */
+export interface TestChange {
+  sessionId: string;
+  change: number;
+  previous: string;
+}
 
 export interface ScoreJourneyRow {
   /** enrollment_user_id: the row key and the report's student param. */
@@ -27,6 +56,8 @@ export interface ScoreJourneyRow {
   name: string;
   gender: string | null;
   category: string | null;
+  /** The student's stream as the warehouse spells it. */
+  stream: string | null;
   /** "engineering" | "medical" | null (not a JEE/NEET stream). */
   examStream: string | null;
   /** Predicted AL from grade-10 marks (JEE Main only). */
@@ -35,22 +66,29 @@ export interface ScoreJourneyRow {
   /** dim_student.academic_level: mode of the last 3 major tests. */
   mode: string | null;
   status: AlStatus | null;
-  /** Per-test ALs of the latest ≤3 levelled tests, oldest first. */
-  last3: string[];
-  /** Score % on the latest levelled test. */
-  latestPct: number | null;
+  latestAl: LatestLevel | null;
   toNext: ToNextLevel;
+  /** Null with fewer than two scored tests. */
+  trend: ScoreTrend | null;
+  change: TestChange | null;
+  /** Score % on the newest test the student sat (retests included): the
+   *  default order within a group. */
+  latestPct: number | null;
   /** Per session_id: the student's result on each test in `tests` they sat. */
   results: Record<string, TestResult>;
 }
 
-/** One major test in the Score journey's "All tests" columns. */
+/** One major test in the Score journey's per-test columns. */
 export interface JourneyTest {
   sessionId: string;
   name: string;
   date: string;
   /** Canonical test stream ("engineering", "medical"), if any. */
   stream: string | null;
+  /** Maximum marks, from the sittings. */
+  max: number | null;
+  /** A later sitting of an earlier test's name: shown, never counted. */
+  retest: boolean;
 }
 
 /** A student's result on one test: the warehouse's per-test AL (M1 … Not

@@ -3,7 +3,7 @@
 import type { AlStatus, JourneyTest, ScoreJourneyRow, ToNextLevel } from "@/types/student-support";
 
 export type GenderFilter = "all" | "female" | "male";
-export type SortKey = "default" | "name" | "predicted" | "toNext" | "latest" | "status";
+export type SortKey = "default" | "name" | "predicted" | "status" | "latestAl" | "toNext" | "trend";
 
 export interface JourneyGroup {
   /** "M1", "B2" …, or null for students with no Mode AL yet. */
@@ -26,10 +26,11 @@ export function statusCounts(rows: ScoreJourneyRow[]): Record<AlStatus, number> 
   return counts;
 }
 
-/** Numbers for sorting; a missing value is null and always sorts last. */
+/** Numbers for sorting; a missing value is null and always sorts last. Top
+ *  sorts below 0 questions, as in the prototype. */
 function toNextValue(t: ToNextLevel): number | null {
   if (t.kind === "count") return t.questions;
-  if (t.kind === "reached" || t.kind === "top") return 0;
+  if (t.kind === "top") return -1;
   return null;
 }
 
@@ -39,10 +40,12 @@ function sortValue(row: ScoreJourneyRow, key: SortKey): number | string | null {
       return row.name.toLowerCase();
     case "predicted":
       return row.predicted ? (LEVEL_ORDER[row.predicted] ?? null) : null;
+    case "latestAl":
+      return row.latestAl ? (LEVEL_ORDER[row.latestAl.level] ?? null) : null;
     case "toNext":
       return toNextValue(row.toNext);
-    case "latest":
-      return row.latestPct;
+    case "trend":
+      return row.trend?.slope ?? null;
     case "status":
       return row.status ? STATUS_ORDER[row.status] : null;
     default:
@@ -71,7 +74,8 @@ export function sortRows(rows: ScoreJourneyRow[], key: SortKey, ascending: boole
   });
 }
 
-/** One group per Mode AL, best first, then "No Mode AL yet"; sorted within. */
+/** One group per Mode AL, best first (M1→M3, B1→B3), then "No Mode AL yet";
+ *  sorted within. */
 export function groupRows(rows: ScoreJourneyRow[], key: SortKey, ascending: boolean): JourneyGroup[] {
   const groups: JourneyGroup[] = [];
   for (const level of GROUP_ORDER) {
@@ -88,7 +92,7 @@ export interface StreamSection {
   key: string;
   label: string;
   rows: ScoreJourneyRow[];
-  /** The tests shown as "All tests" columns: the section's stream, or stream-less tests. */
+  /** The per-test columns: the section's stream's tests, or stream-less tests. */
   tests: JourneyTest[];
 }
 

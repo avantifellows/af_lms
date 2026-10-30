@@ -1,6 +1,14 @@
 // The Student support view's metric rules, from Vishal's Teacher View v2 spec
 // (af_lms #324). Pure and client-safe so every rule is unit-tested on its own.
-import type { AlStatus, ChapterFlag, ToNextLevel } from "@/types/student-support";
+import type {
+  AlStatus,
+  ChapterFlag,
+  LatestLevel,
+  ScoreDirection,
+  ScoreTrend,
+  TestChange,
+  ToNextLevel,
+} from "@/types/student-support";
 
 /** JEE (engineering) or NEET (medical) from a stream label, else null. The
  *  warehouse spells streams many ways (PCM, Engg, engineering, PCB, Med …). */
@@ -24,8 +32,8 @@ export function testInStream(testStream: string | null | undefined, stream: "eng
   return !testStream || testStream.trim().toLowerCase() === stream;
 }
 
-/** Oldest first; tests on the same day in session id order, so the last
- *  three are the same on every read. */
+/** Oldest first; tests on the same day in session id order, so the order
+ *  is the same on every read. */
 export function byDateThenSession(
   a: { date: string; sessionId: string },
   b: { date: string; sessionId: string }
@@ -56,30 +64,128 @@ export function alStatus(predicted: string | null, mode: string | null): AlStatu
 
 const NEXT_LEVEL: Record<string, string> = { M3: "M2", M2: "M1", B3: "B2", B2: "B1" };
 
-export function median(values: number[]): number | null {
-  if (values.length === 0) return null;
-  const sorted = [...values].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+/**
+ * Session ids of retests. The warehouse names a retest exactly like the
+ * original, so a session is a retest when an earlier one (by date, then
+ * session id) has the same test name.
+ */
+export function retestIds(tests: { sessionId: string; name: string; date: string }[]): Set<string> {
+  const seen = new Set<string>();
+  const retests = new Set<string>();
+  for (const t of [...tests].sort(byDateThenSession)) {
+    const name = t.name.trim();
+    if (seen.has(name)) retests.add(t.sessionId);
+    else seen.add(name);
+  }
+  return retests;
+}
+
+/** One test a student sat, oldest first; `level` as the mode reads it. */
+export interface JourneySitting {
+  sessionId: string;
+  test: string;
+  level: string | null;
+  marks: number | null;
+  max: number | null;
+  retest: boolean;
 }
 
 /**
- * Extra correct answers (+4 marks each) the median of the latest ≤3 levelled
- * tests needs to reach the cutoff of the level above the student's mode.
+ * The level on the newest sitting that is not a retest and has a level. (The
+ * prototype also skips one-paper "partial" sittings; the warehouse has no
+ * such flag, so only retests and unlevelled sittings are skipped.)
+ */
+export function latestLevel(sittings: JourneySitting[]): LatestLevel | null {
+  for (let i = sittings.length - 1; i >= 0; i--) {
+    const s = sittings[i];
+    if (s.retest || !s.level) continue;
+    return { level: s.level, marks: s.marks, test: s.test };
+  }
+  return null;
+}
+
+/**
+ * Extra correct answers (+4 marks each) the Latest AL's marks need to reach
+ * the cutoff of the level above it; 0 when they already clear it.
  */
 export function questionsToNext(
-  mode: string | null,
-  recent: { marks: number; test: string }[],
+  latest: LatestLevel | null,
   cutoffFor: (level: string) => number | null
 ): ToNextLevel {
-  if (mode === "M1" || mode === "B1") return { kind: "top" };
-  const next = mode ? NEXT_LEVEL[mode] : undefined;
-  const med = median(recent.map((r) => r.marks));
+  if (!latest) return { kind: "none" };
+  if (latest.level === "M1" || latest.level === "B1") return { kind: "top" };
+  const next = NEXT_LEVEL[latest.level];
   const cutoff = next ? cutoffFor(next) : null;
-  if (!next || med === null || cutoff === null) return { kind: "none" };
-  const questions = Math.ceil((cutoff - med) / 4);
-  if (questions <= 0) return { kind: "reached" };
-  return { kind: "count", questions, median: med, cutoff, nextLevel: next, tests: recent.map((r) => r.test) };
+  if (!next || cutoff === null || latest.marks === null) return { kind: "none" };
+  const gap = Math.ceil(cutoff - latest.marks);
+  return {
+    kind: "count",
+    questions: gap <= 0 ? 0 : Math.ceil(gap / 4),
+    gap,
+    cutoff,
+    nextLevel: next,
+    test: latest.test,
+    marks: latest.marks,
+  };
+}
+
+/** The score graph's direction is read over this many latest tests. */
+const TREND_TESTS = 5;
+
+/** Least-squares slope of the values against 0, 1, 2 … (two or more values). */
+export function slope(values: number[]): number {
+  const n = values.length;
+  const xm = (n - 1) / 2;
+  const ym = values.reduce((a, b) => a + b, 0) / n;
+  let num = 0;
+  let den = 0;
+  values.forEach((y, x) => {
+    num += (x - xm) * (y - ym);
+    den += (x - xm) ** 2;
+  });
+  return num / den;
+}
+
+/** Above +0.25 points per test → Improving, below −0.25 → Declining, else Same. */
+export function scoreDirection(s: number): ScoreDirection {
+  if (s > 0.25) return "Improving";
+  if (s < -0.25) return "Declining";
+  return "Same";
+}
+
+/**
+ * Score % on every non-retest test the student sat with marks, oldest first,
+ * coloured by the direction over the last TREND_TESTS. Null with fewer than two.
+ */
+export function scoreTrend(sittings: JourneySitting[]): ScoreTrend | null {
+  const points: number[] = [];
+  for (const s of sittings) {
+    if (!s.retest && s.marks !== null && s.max) points.push((s.marks / s.max) * 100);
+  }
+  if (points.length < 2) return null;
+  const recent = points.slice(-TREND_TESTS);
+  const m = slope(recent);
+  return {
+    points: points.map((p) => Math.round(p * 10) / 10),
+    direction: scoreDirection(m),
+    slope: Math.round(m * 100) / 100,
+    recent: recent.length,
+  };
+}
+
+/** Marks change on the latest non-retest sitting vs the previous one. */
+export function latestChange(sittings: JourneySitting[]): TestChange | null {
+  const marked = sittings.filter((s) => !s.retest && s.marks !== null);
+  if (marked.length < 2) return null;
+  const [prev, last] = marked.slice(-2);
+  return { sessionId: last.sessionId, change: last.marks! - prev.marks!, previous: prev.test };
+}
+
+/** ▲ above +0.5, ▼ below −0.5, else flat. */
+export function changeDirection(change: number): "up" | "down" | "flat" {
+  if (change > 0.5) return "up";
+  if (change < -0.5) return "down";
+  return "flat";
 }
 
 /** Score % a chapter must reach: JEE Main 35, JEE Advanced 30, NEET 50

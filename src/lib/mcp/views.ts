@@ -104,7 +104,7 @@ export const LMS_VIEWS: LmsView[] = [
   {
     path: "/api/quiz-analytics/[udise]/student-support",
     description:
-      "The cumulative report (Score journey) for a grade at a physical centre (not JNV NVS): per student, Predicted AL (grade-10 model, JEE Main only), Mode AL, AL status (Sliding / Same / Improving), the last 3 test ALs, latest score, questions to the next mode AL, and every major test's AL and marks (`tests` + `results`).",
+      "The cumulative report (Score journey) for a grade at a physical centre (not JNV NVS): per student, Predicted AL (grade-10 model, JEE Main only), Mode AL, AL status (Sliding / Same / Improving), Latest AL (newest non-retest test with a level), questions to the level above the Latest AL from that test's marks (`toNext`), the score % trend over non-retest tests (`trend`: Improving / Same / Declining over the last 5), the marks change on the latest test (`change`), and every major test's AL and marks (`tests`, each flagged `retest`, + `results`).",
     query: {
       grade: "required — integer",
       ...QUIZ_FILTERS,

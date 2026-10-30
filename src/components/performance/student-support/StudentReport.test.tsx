@@ -28,8 +28,8 @@ function test(over: Partial<TestHistoryRow>): TestHistoryRow {
 const REPORT: StudentReportData = {
   student: {
     uid: "1", studentId: "S1", name: "Asha", gender: "Female", category: null, examStream: "engineering",
-    predicted: "M1", predictedPct: null, mode: "M2", status: "Sliding", last3: [], latestPct: null,
-    toNext: { kind: "none" }, results: {},
+    predicted: "M1", predictedPct: null, mode: "M2", status: "Sliding", latestAl: null,
+    toNext: { kind: "none" }, trend: null, change: null, latestPct: null, stream: null, results: {},
   },
   chapters: [
     {
