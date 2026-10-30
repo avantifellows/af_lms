@@ -84,7 +84,7 @@ for (const { label, viewport } of VIEWPORTS) {
       await expect(page).toHaveURL(new RegExp(`${detailPath(ira)}$`));
       await expect(page.getByRole("heading", { level: 1, name: fullName(ira) })).toBeVisible();
       await expect(page.getByText("Grade 12")).toBeVisible();
-      await expect(page.getByText("STP Voucher Delhi")).toBeVisible();
+      await expect(page.getByText("Voucher DL", { exact: true })).toBeVisible();
       await expect(page.getByText("Female")).toBeVisible();
       await expect(page.getByRole("link", { name: "Log conversation" })).toHaveAttribute(
         "href",
@@ -100,7 +100,7 @@ for (const { label, viewport } of VIEWPORTS) {
 
       // Two Conversations; the Attempts are listed but not counted.
       await expect(
-        page.getByRole("region", { name: "History" }).getByRole("heading", { level: 2, name: "Conversations (2)" })
+        page.getByRole("region", { name: "History" }).getByRole("heading", { level: 2, name: "Conversations in app (2)" })
       ).toBeVisible();
       await expect(historyEntries(page)).toHaveText([
         new RegExp(attempt2.note),
@@ -110,7 +110,7 @@ for (const { label, viewport } of VIEWPORTS) {
       ]);
       const attempt = entryWith(page, attempt2.note);
       await expect(attempt.getByText("Attempt", { exact: true })).toBeVisible();
-      await expect(attempt.getByText("Not reachable", { exact: true })).toBeVisible();
+      await expect(attempt.getByText("Unreachable", { exact: true })).toBeVisible();
     });
 
     test("a Conversation shows its details, Action Items, Mentor Flags and photos", async ({ page }) => {
@@ -202,7 +202,7 @@ for (const { label, viewport } of VIEWPORTS) {
       const kabirDraft = page.getByRole("region", { name: "Conversation Draft" });
       await expect(kabirDraft.getByText("Draft ready to review")).toBeVisible();
       await expect(page.getByText("No conversations yet")).toBeVisible();
-      await expect(page.getByRole("heading", { level: 2, name: "Conversations (0)" })).toBeVisible();
+      await expect(page.getByRole("heading", { level: 2, name: "Conversations in app (0)" })).toBeVisible();
 
       await page.goto(detailPath(rohan));
       await expect(page.getByRole("region", { name: "Conversation Draft" }).getByText("Drafting failed")).toBeVisible();

@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -69,7 +69,7 @@ const READ_ONLY_ADMIN = { ...BLENDED_ADMIN, readOnly: true, actorEmail: "viewer@
 const LMS_ADMIN = { ...BLENDED_ADMIN, role: "admin", actorEmail: "panchali@avantifellows.org" };
 const READ_ONLY_MENTOR = { ...MENTOR, readOnly: true, actorEmail: "mentor-viewer@avantifellows.org" };
 
-const OPEN_ITEMS = [{ id: 120, text: "Revise optics", owner: "student", agreedOn: "2026-10-12" }];
+const OPEN_ITEMS = [{ id: 120, text: "Revise optics", owner: "student", agreedOn: "2026-10-12", source: "conversation" }];
 
 const MENTEE: MenteeDetail = {
   studentId: 501,
@@ -81,18 +81,19 @@ const MENTEE: MenteeDetail = {
   whatsappPhone: null,
   profileDocUrl: null,
   screenerUrl: null,
+  screenerFeedbackDue: false,
   openDraft: null,
   history: [
     { kind: "attempt", id: 13, occurredOn: "2026-10-20", note: "No answer" },
     {
       kind: "conversation", id: 12, occurredOn: "2026-10-12", mode: "in_person", spokeWith: "parent_or_sibling",
       durationMinutes: 15, summary: "Spoke with her brother.", hasNotes: false, hasRecording: false,
-      hasTranscript: false, photoCount: 0, actionItems: [], flags: [],
+      hasTranscript: false, photoCount: 0, actionItems: [], flags: [], screenerUsed: null, screenerFeedback: null,
     },
     {
       kind: "conversation", id: 11, occurredOn: "2026-10-01", mode: "call", spokeWith: "student",
       durationMinutes: 30, summary: "Older Conversation.", hasNotes: false, hasRecording: false,
-      hasTranscript: false, photoCount: 0, actionItems: [], flags: [],
+      hasTranscript: false, photoCount: 0, actionItems: [], flags: [], screenerUsed: null, screenerFeedback: null,
     },
   ],
   openActionItems: OPEN_ITEMS as MenteeDetail["openActionItems"],
@@ -167,7 +168,7 @@ describe("LogEntryPage", () => {
       studentId: 501,
       name: "Ira Sharma",
       firstName: "Ira",
-      subtitle: "Ira Sharma · Grade 12 · STP Voucher Delhi",
+      subtitle: "Ira Sharma · Grade 12 · Voucher DL",
       today: "2026-10-22",
       listGroup: "Talk to first",
       openActionItems: OPEN_ITEMS,
@@ -180,6 +181,56 @@ describe("LogEntryPage", () => {
     expect(panel).toHaveTextContent("In person · 15 min · Spoke with parent or sibling");
     expect(panel).toHaveTextContent("Spoke with her brother.");
     expect(panel).not.toHaveTextContent("Older Conversation.");
+  });
+
+  describe("the Profile Doc's latest entry", () => {
+    const PROFILE_DOC_ENTRY = {
+      kind: "profile_doc" as const,
+      id: 0 as const,
+      occurredOn: "2026-09-17",
+      summary: "Synthetic: planned the mocks.",
+      actionItems: [{ id: 201, text: "Synthetic: revise optics", owner: "student" as const, status: "open" as const }],
+      profileDocUrl: "https://docs.example/ira",
+    };
+
+    it("is the Last Conversation before the first one in the app", async () => {
+      signedInAs(MENTOR);
+      mockGetMenteeDetail.mockResolvedValue({ ...MENTEE, history: [MENTEE.history[0], PROFILE_DOC_ENTRY] });
+
+      await renderPage();
+
+      const panel = screen.getByRole("region", { name: "Last Conversation" });
+      expect(panel).toHaveTextContent("17 Sept 2026");
+      expect(panel).toHaveTextContent("From Profile Doc");
+      expect(panel).toHaveTextContent("Synthetic: planned the mocks.");
+      expect(within(panel).getByRole("link", { name: "Open Profile Doc (opens in a new tab)" })).toHaveAttribute(
+        "href",
+        "https://docs.example/ira"
+      );
+      expect(panel).not.toHaveTextContent("No earlier Conversation");
+      expect(screen.queryByRole("checkbox", { name: /Synthetic: revise optics/ })).not.toBeInTheDocument();
+    });
+
+    it("gives way to a newer Conversation in the app", async () => {
+      signedInAs(MENTOR);
+      mockGetMenteeDetail.mockResolvedValue({ ...MENTEE, history: [...MENTEE.history, PROFILE_DOC_ENTRY] });
+
+      await renderPage();
+
+      const panel = screen.getByRole("region", { name: "Last Conversation" });
+      expect(panel).not.toHaveTextContent("From Profile Doc");
+      expect(panel).not.toHaveTextContent("Synthetic: planned the mocks.");
+    });
+  });
+
+  it("asks about the screener only with a Screener link, and its questions while the feedback is due", async () => {
+    signedInAs(MENTOR);
+    await renderPage();
+    expect(formProps()?.screener).toEqual({ hasLink: false, feedbackDue: false });
+
+    mockGetMenteeDetail.mockResolvedValue({ ...MENTEE, screenerUrl: "https://forms.example/s", screenerFeedbackDue: true });
+    await renderPage();
+    expect(formProps()?.screener).toEqual({ hasLink: true, feedbackDue: true });
   });
 
   it("says there is no Conversation yet when the history has only Attempts", async () => {

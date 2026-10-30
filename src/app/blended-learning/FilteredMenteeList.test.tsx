@@ -8,7 +8,7 @@ import { FilteredMenteeList } from "./FilteredMenteeList";
 
 function mentee(studentId: number, name: string, overrides: Partial<MenteeRow> = {}): MenteeRow {
   return {
-    studentId, name, gender: "Female", grade: 12, programId: 80, programName: "STP Voucher Delhi",
+    studentId, programStudentId: `0012345${studentId}`, category: "Gen", name, gender: "Female", grade: 12, programId: 80, programName: "STP Voucher Delhi",
     lastContact: "2026-10-12", lastContactSource: "conversation", latestEntryKind: "conversation",
     openDraftState: null, reasons: [], daysSince: 10, lastAttemptOn: null,
     ...overrides,
@@ -20,7 +20,9 @@ const KABIR = mentee(1, "Kabir Never", {
   reasons: ["no_contact"], daysSince: null,
 });
 const ZOYA = mentee(2, "Zoya TwentyNine", { daysSince: 29 });
-const ROHAN = mentee(3, "Rohan Recent", { gender: "Male", daysSince: 3 });
+const ROHAN = mentee(3, "Rohan Recent", {
+  gender: "Male", daysSince: 3, programId: 81, programName: "STP Dropper Himachal Pradesh",
+});
 
 function renderList() {
   render(<FilteredMenteeList list={{ talkToFirst: [KABIR], everyoneElse: [ZOYA, ROHAN] }} canLog today="2026-10-22" />);
@@ -37,11 +39,24 @@ describe("FilteredMenteeList", () => {
     renderList();
 
     const filters = screen.getByRole("search", { name: "Filter students" });
-    expect(within(filters).getByRole("searchbox", { name: "Search by name" })).toBeInTheDocument();
+    expect(within(filters).getByRole("searchbox", { name: "Search by name or Student ID" })).toBeInTheDocument();
     for (const name of ["Gender", "Grade", "Program", "Last contact"]) {
       expect(within(filters).getByRole("combobox", { name })).toHaveDisplayValue("All");
     }
     expect(within(filters).queryByRole("button", { name: "Clear filters" })).not.toBeInTheDocument();
+  });
+
+  it("offers each program by its short name, and narrows to it", async () => {
+    const user = userEvent.setup();
+    renderList();
+
+    const program = screen.getByRole("combobox", { name: "Program" });
+    expect(within(program).getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "All", "Dropper HP", "Voucher DL",
+    ]);
+    await user.selectOptions(program, "Dropper HP");
+
+    expect(tableNames()).toEqual(["Rohan Recent"]);
   });
 
   it("narrows to 30 days or more with the Last contact select, marking it active, and Clear filters restores all", async () => {
@@ -72,11 +87,24 @@ describe("FilteredMenteeList", () => {
     expect(screen.getByRole("rowgroup", { name: "Everyone else" })).toHaveTextContent("1 of 2.");
   });
 
+  it("finds a Student by name or by Student ID, leading zeros included", async () => {
+    const user = userEvent.setup();
+    renderList();
+    const search = screen.getByRole("searchbox", { name: "Search by name or Student ID" });
+
+    await user.type(search, " 00123452 ");
+    expect(tableNames()).toEqual(["Zoya TwentyNine"]);
+
+    await user.clear(search);
+    await user.type(search, "rohan");
+    expect(tableNames()).toEqual(["Rohan Recent"]);
+  });
+
   it("shows an empty state when nothing matches", async () => {
     const user = userEvent.setup();
     renderList();
 
-    await user.type(screen.getByRole("searchbox", { name: "Search by name" }), "nobody");
+    await user.type(screen.getByRole("searchbox", { name: "Search by name or Student ID" }), "nobody");
 
     expect(screen.getByText("No students match these filters.")).toBeInTheDocument();
     expect(screen.queryByRole("table")).not.toBeInTheDocument();

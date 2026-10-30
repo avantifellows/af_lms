@@ -26,7 +26,12 @@ import {
 export type OpenDraftState = "transcribing" | "ready" | "failed";
 
 export type MenteeRow = {
+  // `student.id`, for links and every Blended Learning id.
   studentId: number;
+  // `student.student_id`, the program's Student ID as text (leading zeros
+  // kept), and `student.category`; either may be NULL.
+  programStudentId: string | null;
+  category: string | null;
   name: string;
   gender: string | null;
   grade: number | null;
@@ -38,7 +43,7 @@ export type MenteeRow = {
   openDraftState: OpenDraftState | null;
   reasons: TalkToFirstReason[];
   daysSince: number | null;
-  // Date of the latest Attempt, for the "Not reachable, 4 Oct" Why now tag.
+  // Date of the latest Attempt, for the "Unreachable · 4 Oct" Why now tag.
   lastAttemptOn?: string | null;
 };
 
@@ -48,6 +53,8 @@ type MenteeQueryRow = {
   mentor_user_id: number | string;
   mentor_name: string;
   student_id: number | string;
+  program_student_id: string | null;
+  category: string | null;
   first_name: string | null;
   last_name: string | null;
   gender: string | null;
@@ -78,6 +85,8 @@ function toMentee(row: MenteeQueryRow, today: string): MenteeRow {
   });
   return {
     studentId: Number(row.student_id),
+    programStudentId: row.program_student_id,
+    category: row.category,
     name: [row.first_name, row.last_name].filter(Boolean).join(" "),
     gender: row.gender,
     grade: row.grade === null ? null : Number(row.grade),
@@ -93,6 +102,20 @@ function toMentee(row: MenteeQueryRow, today: string): MenteeRow {
   };
 }
 
+// The Student's grade, as the list shows it: the number of their current
+// grade enrollment, joined as `current_grade` (NULL when there is none).
+// `userId` is the SQL for the Student's `user` id.
+export function currentGradeLateralSql(userId: string): string {
+  return `LEFT JOIN LATERAL (
+       SELECT grade.number
+       FROM enrollment_record er
+       JOIN grade ON grade.id = er.group_id
+       WHERE er.user_id = ${userId} AND er.group_type = 'grade' AND er.is_current IS TRUE
+       ORDER BY er.updated_at DESC NULLS LAST, er.id DESC
+       LIMIT 1
+     ) current_grade ON true`;
+}
+
 // Active current-year Mappings with what Last Contact and Talk to First need,
 // optionally narrowed to one Mentor or one Student.
 function menteeRows(mentorUserId: number | null, studentId: number | null) {
@@ -100,7 +123,8 @@ function menteeRows(mentorUserId: number | null, studentId: number | null) {
     `SELECT mapping.mentor_user_id,
             COALESCE(NULLIF(TRIM(CONCAT_WS(' ', mentor.first_name, mentor.last_name)), ''),
                      mentor.email, CONCAT('Mentor ', mapping.mentor_user_id)) AS mentor_name,
-            st.id AS student_id, account.first_name, account.last_name, account.gender,
+            st.id AS student_id, st.student_id AS program_student_id, st.category,
+            account.first_name, account.last_name, account.gender,
             current_grade.number AS grade, mapping.program_id, program.name AS program_name,
             latest_conversation.occurred_on::text AS last_conversation_on,
             latest_conversation.id AS last_conversation_id,
@@ -113,14 +137,7 @@ function menteeRows(mentorUserId: number | null, studentId: number | null) {
      JOIN "user" account ON account.id = st.user_id
      JOIN program ON program.id = mapping.program_id
      LEFT JOIN "user" mentor ON mentor.id = mapping.mentor_user_id
-     LEFT JOIN LATERAL (
-       SELECT grade.number
-       FROM enrollment_record er
-       JOIN grade ON grade.id = er.group_id
-       WHERE er.user_id = account.id AND er.group_type = 'grade' AND er.is_current IS TRUE
-       ORDER BY er.updated_at DESC NULLS LAST, er.id DESC
-       LIMIT 1
-     ) current_grade ON true
+     ${currentGradeLateralSql("account.id")}
      LEFT JOIN LATERAL (
        SELECT c.occurred_on, c.id
        FROM blended_learning_conversations c

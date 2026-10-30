@@ -10,10 +10,12 @@ import { withoutFieldErrors, type EntryFormValues, type FieldErrors } from "./lo
 import { MentorFlagsEditor } from "./MentorFlagsEditor";
 import { NotesEditor } from "./NotesEditor";
 import { PhotoPicker, type PickedPhoto } from "./PhotoPicker";
+import { ScreenerQuestion } from "./ScreenerQuestion";
 import type { ChangeValues } from "./SessionDetailsCard";
 
 // The Write-up card: Summary, Action items and Notes, then photos, then the
-// Mentor Flags below a rule. While a draft is being drafted the first three
+// Mentor Flags below a rule, and last, when the Student has a Screener link,
+// "Was the screener form used?" below another. While a draft is being drafted the first three
 // are held, under their labels; while one is reviewed each is marked as
 // coming from the recording until the Mentor edits it.
 
@@ -220,6 +222,7 @@ export function WriteUpCard({
           clearErrors("flags");
         }}
       />
+      <ScreenerQuestion values={values} change={change} fieldErrors={fieldErrors} clearErrors={clearErrors} />
     </FormCard>
   );
 }

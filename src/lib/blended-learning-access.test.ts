@@ -132,8 +132,8 @@ describe("canBlendedLearning", () => {
   const lmsAdmin: BlendedLearningAccess = { ...admin, role: "admin" };
   const readOnlyMentor: BlendedLearningAccess = { ...mentor, readOnly: true };
 
-  // Rows: action → [Mentor, Admin, read-only Admin]. Only a Mentor mutates;
-  // every Blended Learning Admin is view only.
+  // Rows: action → [Mentor, Admin, read-only Admin]. Only a Mentor mutates
+  // Mentee records; an admin only manages Resources and Common Action Items.
   const table: [BlendedLearningAction, boolean, boolean, boolean][] = [
     ["view_list", true, true, true],
     ["view_student", true, true, true],
@@ -144,6 +144,8 @@ describe("canBlendedLearning", () => {
     // A Mentor's flags are scoped to their own Students (blended-learning-flags).
     ["view_flags", true, true, true],
     ["view_mentors", false, true, true],
+    // Resources and Common Action Items: the one thing an admin edits.
+    ["manage", false, true, false],
   ];
 
   it.each(table)("%s: Mentor %s, Admin %s, read-only Admin %s", (action, forMentor, forAdmin, forReadOnly) => {
@@ -153,7 +155,7 @@ describe("canBlendedLearning", () => {
     expect(canBlendedLearning(readOnlyAdmin, action)).toBe(forReadOnly);
   });
 
-  it.each(["log", "upload", "manage_draft"] as const)("refuses a read-only Mentor %s", (action) => {
+  it.each(["log", "upload", "manage_draft", "manage"] as const)("refuses a read-only Mentor %s", (action) => {
     expect(canBlendedLearning(readOnlyMentor, action)).toBe(false);
     expect(canBlendedLearning(readOnlyMentor, "view_student")).toBe(true);
   });

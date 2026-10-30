@@ -20,6 +20,14 @@ export const MENTOR: BlendedLearningAccess = {
   mentorUserId: 9001,
 };
 
+// A Blended Learning Admin who may manage Resources and Common Action Items.
+export const ADMIN: BlendedLearningAccess = {
+  kind: "admin",
+  role: "blended_admin",
+  readOnly: false,
+  actorEmail: "admin@test.local",
+};
+
 export const READ_ONLY_ADMIN: BlendedLearningAccess = {
   kind: "admin",
   role: "blended_admin",

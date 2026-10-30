@@ -21,7 +21,7 @@ edges:
     condition: when adding a write that must proxy to the DB Service
   - target: patterns/add-api-route.md
     condition: when adding a route that reads or writes
-last_updated: 2026-10-27
+last_updated: 2026-10-30
 ---
 
 # Data Access
@@ -297,6 +297,13 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   state (`transcribing|ready|failed`). A Mentor always gets their own Mentees, whatever
   `mentorUserId` says; a Mentor without a Mentor user id gets an empty list without a query.
   Rows are grouped (Talk to First = any reason) and sorted in JS by the pure policy.
+  Each row also carries `programStudentId` (`student.student_id`, kept as text so leading zeros
+  survive) and `category` (`student.category`), both nullable; `studentId` stays `student.id`
+  for links. The table gives each its own column right after Student ("Student ID" in
+  `font-mono`, "Category"; "—" for NULL); a card shows both on the muted line under the name
+  ("ID <id>  Category <value>"). To fit at 1024 px the table uses tight paddings, lets names,
+  headers and Program wrap, and shows View / New log as 44 px icon buttons (aria-labelled)
+  below `xl` (1280 px).
 - **Mentor cards (#452):** `listMentorCards(access, today)` in the same module, for
   `view_mentors` only (anyone else gets `[]`). It reuses the list's query unnarrowed (one row
   per active current-year Mapping, with the Mentor's `user` name, else email) and counts per
@@ -310,7 +317,8 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   conversation), else none (`no_contact`). Drafts never feed it.
 - **Search and filters (#443):** client-side in `src/app/blended-learning/FilteredMenteeList.tsx`
   over the already grouped and sorted `MenteeList` (about 46 Mentees per Mentor, so no server
-  pagination). Name search is a trimmed, case-insensitive substring match. Gender and Program
+  pagination). The search ("Search by name or Student ID") is a trimmed, case-insensitive
+  substring match on the name or `programStudentId`. Gender and Program
   options come from the list itself; Grade is fixed to 12/13. "30 days or more" uses the
   policy's `thirtyDaysOrMore(daysSince)`, so no Last Contact counts and a legacy date counts from
   its day. Filters combine (AND), keep both groups and their order, and are not in the URL.
@@ -354,8 +362,9 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   new items are inserted with `position` 1..n after the Conversation. The ticks are one
   `UPDATE … SET status = 'done', completed_by_conversation_id, completed_by_email, completed_at,
   updated_at WHERE id = ANY($3::bigint[]) AND status = 'open' AND student_id = $4`. Fewer
-  returned rows than ids (an id already done, unknown or another Student's) throws, so the
-  whole save rolls back and returns 409. af_lms makes only that open → done change, and
+  returned rows than ids throws when a missed id still exists (already done or another
+  Student's), so the whole save rolls back and returns 409; a missed id with no row (deleted by
+  a Common Action Item's removal or a Profile Doc re-sync) is skipped. af_lms makes only that open → done change, and
   `bl_action_items_completion_check` keeps the completion columns consistent. `getMenteeDetail`
   returns each item's `owner` and `openActionItems` (open items, newest Conversation first, with `agreedOn`). There are no
   reminders, overdue logic or item editing.
@@ -541,8 +550,146 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   upserts `ON CONFLICT (student_id)` per changed Student only, so an unchanged re-run writes
   nothing. Non-`https://` values are skipped before the DB CHECK sees them; a value missing from
   the workbook keeps the stored one. `legacy_last_contact_on` is selected and written only
-  with `--legacy-docs-dir` (Profile Doc HTML exports; date extraction in
+  with `--legacy-docs-dir`, which needs `--legacy-conversations` so a date never moves
+  without its summary and items (Profile Doc HTML exports; date extraction in
   `src/lib/blended-learning-profile-doc-dates.ts`: the doc's latest dated conversation only).
   With docs, every matched Student is considered, so a stored Profile Doc link still gives a
   date when the workbook row has none; a Student with no link and no stored row gets no row.
+  `legacy_conversation_summary` (db-service migration `20261027100000`, mirrored in e2e fixture
+  `20261027100000_add_blended_learning_legacy_conversation.sql`) is selected and written with
+  it, from `--legacy-conversations` (validation in
+  `src/lib/blended-learning-legacy-conversations.ts`): the file's entry for a `dated` doc on
+  that same date, NULL otherwise; an unreadable doc keeps it. The upsert names only the
+  columns the run owns (fixed literals; values bound). The same run syncs that Student's
+  **Profile Doc Action Items** (`blended_learning_action_items.from_profile_doc = true`,
+  `conversation_id` NULL, `bl_action_items_source_check`: a Conversation XOR the Profile Doc;
+  partial unique `bl_action_items_profile_doc_unique` on (student_id, text, owner)): insert
+  missing ones open, keep matching ones (open or done), delete only open ones the file no
+  longer lists (all open ones when the summary is NULL); three batched statements, the DELETE
+  re-checking `status = 'open'`. An apply runs the reads, upserts and item sync in one
+  `withTransaction`, so a failure part way rolls everything back; a dry run uses `query()`.
   Runbook: `patterns/load-blended-learning-links.md`.
+- **Profile Doc entry on the Mentee pages:** `getMenteeDetail` adds a `kind: "profile_doc"`
+  history entry (`legacy_last_contact_on`, the summary, every Profile Doc Action Item with its
+  status, the Profile Doc URL) at its date, after the app's entries of that date; it needs a
+  date and a summary or an item. It is history, never a Conversation: "Conversations (N)",
+  Last Contact (still `legacy_last_contact_on`), list stats and first-conversation logic count
+  only `blended_learning_conversations` rows. Its open items are in `openActionItems` with
+  `source: "profile_doc"` and `agreedOn` = that date (meta "From Profile Doc · <date>"), and are
+  ticked done from the log form through the normal save (`completeActionItems`). The detail page
+  renders the entry like a Conversation (Summary, Action items with Open/Done, "Open Profile
+  Doc"), admins read-only; the log page's Last Conversation panel shows it while it is the
+  latest. Owner pills are a fixed `w-16` column (`ACTION_ITEM_ROW_CLASSES` in
+  `ActionItemMeta.tsx`) so item text lines up whoever owns it.
+
+## Blended Learning Manage: Resources and Common Action Items (2026-10-27)
+
+- **Tables:** db-service `20261027120000_create_blended_learning_resources_and_common_action_items`
+  (branch `feat/bl-admin-manage`; deploy it before this code). `blended_learning_resources`
+  (title ≤ 200, `^https://[^[:space:]]+$` url, `position` ≥ 1, `created_by_email` /
+  `updated_by_email`, NULL only on the seeded Mentor Toolkit row; hard delete) and
+  `blended_learning_common_action_items` (text ≤ 500, owner, `target_kind` `all|grade|mentor` with
+  `target_grade` 12/13 or `target_mentor_user_id`, `created_by_email`, soft removal
+  `removed_at` + `removed_by_email`). `blended_learning_action_items.conversation_id` is now
+  nullable, `common_action_item_id` is new, `bl_action_items_source_check` requires exactly one of
+  `conversation_id`, `common_action_item_id` and `from_profile_doc` (the Profile Doc carry-over's flag),
+  and `bl_action_items_common_student_unique` is the partial unique index
+  `(common_action_item_id, student_id) WHERE common_action_item_id IS NOT NULL`. Pushed rows use
+  `position` 1. All reads and writes are direct SQL (`query()` / `withTransaction`), gated by
+  `manage` (see `context/permissions.md`).
+- **Resources:** `src/lib/blended-learning-resources.ts`. `listResources()` (`ORDER BY position,
+  id`) feeds the Resources tab (`MentorResources`, no longer hard-coded) and the Manage page.
+  Create appends at `MAX(position) + 1`; move locks every row `FOR UPDATE` and renumbers 1..n in
+  the new order through `unnest(...) WITH ORDINALITY` (`movedOrder`); edit and delete are 404 for
+  an unknown id. Validation (`validateResource` in the client-safe
+  `src/lib/blended-learning-manage-input.ts`) → 422 `fieldErrors`.
+- **Common Action Items:** `src/lib/blended-learning-common-action-items.ts`. A target reaches the
+  Students of active current-year Mappings (`activeBlendedMappingSql`) filtered by the Mentee
+  list's grade (`currentGradeLateralSql`, now exported from `blended-learning-mentees.ts` and used
+  by `listMentees`), the Mapping's `mentor_user_id` or `student.student_id = ANY(target_student_ids)`
+  ("Specific students": IDs pasted by the admin, split on whitespace / commas, deduped, kept as text
+  so leading zeros survive; at most 1000) (`targetedStudentsSql`). `previewCommonTarget` (a POST, as
+  ID lists can be long) counts them (the form's "Will be added to N students") and, for a students
+  target, lists the pasted IDs not found and those found with no active Mapping (`unmatchedStudentIds`).
+  The IDs are stored so Push again reaches the same list. `createCommonActionItem` inserts the item
+  and materialises it in one transaction (`INSERT … SELECT … ON CONFLICT (common_action_item_id,
+  student_id) WHERE common_action_item_id IS NOT NULL DO NOTHING`); a target with no Students (or
+  an unknown Mentor, 23503) rolls back as a 422. `pushCommonActionItem` locks the item `FOR UPDATE`
+  (removed → 404) and runs the same insert, so it adds only targeted Students who don't have it
+  (done included) and a repeat adds 0. `updateCommonActionItem` updates the item and its rows
+  `WHERE status = 'open'`; `removeCommonActionItem` soft-removes it and deletes its rows `WHERE
+  status = 'open'`, keeping done ones. `listCommonActionItems` (items in force, newest first) adds
+  open / done counts and `notYetAdded` (targeted Students without a row: what Push again adds).
+- **Action-item queries audited for NULL `conversation_id`:** `getMenteeDetail` reads every row
+  by `student_id` (no join) and now builds `openActionItems` from Conversation rows (as before)
+  plus the rows with no Conversation: Profile Doc ones (`source: "profile_doc"`) and pushed ones
+  (`source: "common"`, `agreedOn` = the IST date the row was inserted), newest date first;
+  `groupBy` skips NULL `conversation_id`, so an open pushed row is in no Conversation's history; a
+  done one (`completed_by_conversation_id` set) is listed after the items of the Conversation that
+  ticked it, as `{ …, status: "done", source: "common" }` (`doneCommonItemsByConversation`), so the
+  "done ones stay in their history" promise of Remove holds. `logEntry`'s tick `UPDATE … WHERE id = ANY($3) AND status = 'open' AND student_id = $4`
+  ticks a pushed row like any other. A ticked id with no row left (removed while the Mentor's form
+  was open) is skipped and the rest saves; only a missed id that still exists (done, or another
+  Student's) is the 409.
+  `insertActionItems` and the draft review read paths only touch Conversation rows; the links
+  importer's Profile Doc sync and the e2e seed's Profile Doc rows only touch `from_profile_doc`
+  rows. Nothing else in `src/`, `scripts/` or `e2e/` reads the table (no list counts, flags or
+  exports).
+- **UI:** `/blended-learning/manage` (`src/app/blended-learning/manage/`): `ResourcesManager`
+  (add / inline edit / ↑ ↓ / remove after `ConfirmDialog`) and `CommonActionItemsManager` with
+  `NewCommonItemForm` (who does it and the action item side by side on one line, as on the log form,
+  stacked on a phone; 200 characters in the form and in `validateCommonItemEdit`, though the DB
+  allows 500; target radio + Grade/Mentor select or Student IDs textarea, live preview with the unmatched IDs, confirm
+  before push; 422 field errors go back inline). `useTargetPreview` returns `incomplete | counting |
+  failed | ready` for the current target only (counting also covers the typing pause); a failed
+  preview shows its `studentIds` field error (too many IDs, a token over 64 characters) or "Couldn't
+  count students. …" with Retry, and Push is disabled while counting, failed or at 0 (an incomplete
+  target keeps Push so the form's own checks show). After a push or Push again the section's status
+  line says "Added to N students." from the response's `added` (0 included). Every change calls
+  `router.refresh()`. The open items on the detail page and the log form show a "From program" tag
+  (the UI name; code and DB keep "common") and "Added <date>" (`ActionItemMeta` `source="common"`);
+  a done one shows struck through in its ticking Conversation's history with the same tag.
+- **Known gaps (not built):** an admin edit while a Mentor's log form is open means the Mentor's
+  tick completes the new wording (no version check); a create retried after a network error that
+  the server had committed pushes a second item (no idempotency key).
+- **E2E:** `e2e/fixtures/migrations/20261027120000_add_blended_learning_manage.sql` mirrors the
+  migration (pg_dump-identical, seed row included). `blended-learning-manage.spec.ts` uses Mentor D
+  (`BLENDED_MENTOR_D`) and `MANAGE_MENTEES` (G1, G2 mapped; G3 mapped by the spec to test Push
+  again) and removes the Resources it adds, so later specs see only the Mentor Toolkit.
+
+## Blended Learning Screener Feedback (2026-10-28)
+
+- **Tables:** db-service `20261030120000_add_blended_learning_screener_feedback` (branch
+  `feat/bl-screener-feedback`, stacked on `feat/bl-admin-manage`; deploy it before this code).
+  `blended_learning_conversations.screener_used` (nullable boolean; a CHECK keeps it NULL on an
+  Attempt) and `blended_learning_screener_feedback` (`student_id` UNIQUE, `conversation_id` with a
+  composite FK to the same Student's Conversation, `mentor_user_id`, `helped_understand` and
+  `more_comfortable` smallint 1–5, `inserted_at`). Conversations are append-only
+  (`bl_conversations_immutable`), so `screener_used` is set in `insertEntry`'s INSERT or never.
+- **Log form:** a Conversation (typed or saved from a draft; never an Attempt) ends with "Was the
+  screener form used?" (`log/ScreenerQuestion.tsx`, unticked) only when
+  `blended_learning_student_links.screener_url` is set. Ticked while
+  `MenteeDetail.screenerFeedbackDue` (a link and no feedback row for the Student from any Mentor),
+  it asks two required 1–5 radio groups (1 "Not at all", 5 "A lot"; copy in
+  `students/[id]/screenerQuestions.ts`), listed as "Screener ratings" in the save bar's missing
+  fields. The body carries `screenerUsed` only when asked and `screenerFeedback` only while the
+  questions show (`logEntryPayload.ts`).
+- **Save:** `logEntry` validates the shape first (`screenerFeedback` without `screenerUsed: true`
+  → 422; ratings must be integers 1–5). Inside the transaction, before the Conversation's INSERT,
+  `checkScreener` reads the link and whether feedback exists (only when an answer was sent). The
+  link can change while the form is open, so a mismatch is not an error: an answer without a link,
+  or no answer with a link, saves `screener_used = NULL` with no feedback. With a link, a tick with
+  no ratings while due → 422 field errors; ratings once feedback exists → 409 with
+  `fieldErrors.screenerFeedback`; else the feedback is inserted after the Conversation's parts
+  (mentor = the mapped Mentor). A racing second insert hits `bl_screener_feedback_student_unique`
+  (23505) and gets the same 409. On that 409 the form drops the questions and keeps the tick, so
+  "Save" again records just `screener_used = true`. Any 422 field error no rendered field owns
+  (`unshownFieldError` in `logEntryPayload.ts`) shows in the save bar, so none is silent.
+- **Display:** `getMenteeDetail` LEFT JOINs the feedback by `conversation_id`; each Conversation
+  has `screenerUsed` and `screenerFeedback`. The history shows a "Screener" section ("Screener form
+  used", and the two ratings as `n / 5` on the Conversation that gave them) to Mentors and admins,
+  read-only. The log page shows no past feedback.
+- **E2E:** `e2e/fixtures/migrations/20261030120000_add_blended_learning_screener_feedback.sql`
+  mirrors the migration (pg_dump-identical). `blended-learning-screener-feedback.spec.ts` uses
+  Mentor C's `SCREENER_MENTEES` (J1–J4: one with a link, one without, per viewport) and
+  `SCREENER_RACE_MENTEE` (J5), seeded after every other fixture Student so their phones don't move.

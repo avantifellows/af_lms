@@ -28,7 +28,7 @@ import { MentorCards } from "./MentorCards";
 import { SECTION_TAB_TITLE, SectionTabs, type SectionTab } from "./SectionTabs";
 
 type SearchParam = string | string[] | undefined;
-type LandingTab = Exclude<SectionTab, "resources">;
+type LandingTab = Exclude<SectionTab, "resources" | "manage">;
 type SearchParams = {
   tab?: SearchParam;
   mentor?: SearchParam;
@@ -83,7 +83,12 @@ function LandingView({
     <div className="space-y-5">
       {/* The header's name isn't a heading, so the open tab names the page. */}
       <h1 className="sr-only">{SECTION_TAB_TITLE[tab]}</h1>
-      <SectionTabs kind={access.kind} current={tab} newFlags={newFlags} />
+      <SectionTabs
+        kind={access.kind}
+        current={tab}
+        newFlags={newFlags}
+        canManage={canBlendedLearning(access, "manage")}
+      />
       {mentees && <MentorMenteeList list={mentees} canLog={canBlendedLearning(access, "log")} today={today} />}
       {tab === "mentors" && <MentorCards cards={cards} />}
       {flags && (

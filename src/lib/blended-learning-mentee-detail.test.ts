@@ -46,6 +46,7 @@ function entry(overrides: Record<string, unknown>) {
     id: "1", kind: "conversation", occurred_on: "2026-10-20", mode: "call", spoke_with: "student",
     duration_minutes: "20", summary: "Summary", attempt_note: null,
     has_notes: false, has_recording: false, has_transcript: false, photo_count: "0",
+    screener_used: null, helped_understand: null, more_comfortable: null,
     ...overrides,
   };
 }
@@ -87,10 +88,95 @@ describe("getMenteeDetail", () => {
       whatsappPhone: null,
       profileDocUrl: "https://docs.example/ira",
       screenerUrl: null,
+      screenerFeedbackDue: false,
       openDraft: null,
       openActionItems: [],
       history: [],
       mentor: { userId: 9001, firstName: "Faizan" },
+    });
+  });
+
+  describe("the Profile Doc's latest entry", () => {
+    const LEGACY = {
+      legacy_last_contact_on: "2026-09-17",
+      legacy_conversation_summary: "  Synthetic: planned the mocks.  ",
+    };
+    const profileDocItem = (overrides: Record<string, unknown>) => ({
+      conversation_id: null, from_profile_doc: true, owner: "student", status: "open", added_on: "2026-10-27",
+      ...overrides,
+    });
+    const ITEMS = [
+      profileDocItem({ id: "201", text: "Synthetic: revise optics" }),
+      profileDocItem({ id: "202", text: "Synthetic: send the plan", owner: "mentor", status: "done" }),
+    ];
+
+    it("sits in the history at its date, after the app's entries of that date, and is not a Conversation", async () => {
+      givenRows({
+        profile: [{ ...PROFILE, ...LEGACY }],
+        entries: [
+          entry({ id: "12", occurred_on: "2026-10-01" }),
+          entry({ id: "11", kind: "attempt", occurred_on: "2026-09-17", mode: null }),
+          entry({ id: "10", occurred_on: "2026-09-01" }),
+        ],
+        actionItems: [
+          { conversation_id: "10", from_profile_doc: false, id: "100", text: "Old", owner: "parent", status: "open", added_on: "2026-09-01" },
+          ...ITEMS,
+        ],
+      });
+
+      const detail = await getMenteeDetail(MENTOR, 501);
+
+      expect(detail?.history.map((item) => `${item.kind}-${item.id}`)).toEqual([
+        "conversation-12",
+        "attempt-11",
+        "profile_doc-0",
+        "conversation-10",
+      ]);
+      expect(detail?.history[2]).toEqual({
+        kind: "profile_doc",
+        id: 0,
+        occurredOn: "2026-09-17",
+        summary: "Synthetic: planned the mocks.",
+        actionItems: [
+          { id: 201, text: "Synthetic: revise optics", owner: "student", status: "open" },
+          { id: 202, text: "Synthetic: send the plan", owner: "mentor", status: "done" },
+        ],
+        profileDocUrl: "https://docs.example/ira",
+      });
+      // Its open items join the others, dated by the entry, newest first.
+      expect(detail?.openActionItems).toEqual([
+        { id: 201, text: "Synthetic: revise optics", owner: "student", agreedOn: "2026-09-17", source: "profile_doc" },
+        { id: 100, text: "Old", owner: "parent", agreedOn: "2026-09-01", source: "conversation" },
+      ]);
+    });
+
+    it("comes last when it is older than every entry, and alone without any", async () => {
+      givenRows({ profile: [{ ...PROFILE, ...LEGACY }], entries: [entry({ id: "12", occurred_on: "2026-10-01" })], actionItems: ITEMS });
+      expect((await getMenteeDetail(MENTOR, 501))?.history.map((item) => item.kind)).toEqual(["conversation", "profile_doc"]);
+
+      givenRows({ profile: [{ ...PROFILE, ...LEGACY, profile_doc_url: null }] });
+      expect((await getMenteeDetail(MENTOR, 501))?.history).toEqual([
+        {
+          kind: "profile_doc", id: 0, occurredOn: "2026-09-17", summary: "Synthetic: planned the mocks.",
+          actionItems: [], profileDocUrl: null,
+        },
+      ]);
+    });
+
+    it("keeps items without a summary, and needs a date and a summary or an item", async () => {
+      givenRows({ profile: [{ ...PROFILE, ...LEGACY, legacy_conversation_summary: null }], actionItems: ITEMS });
+      expect((await getMenteeDetail(MENTOR, 501))?.history).toMatchObject([{ kind: "profile_doc", summary: null }]);
+
+      givenRows({ profile: [{ ...PROFILE, ...LEGACY, legacy_conversation_summary: " " }] });
+      expect((await getMenteeDetail(MENTOR, 501))?.history).toEqual([]);
+
+      // Without a date, its open items are dated by when they were added.
+      givenRows({ profile: [{ ...PROFILE, ...LEGACY, legacy_last_contact_on: null }], actionItems: ITEMS });
+      const detail = await getMenteeDetail(MENTOR, 501);
+      expect(detail?.history).toEqual([]);
+      expect(detail?.openActionItems).toEqual([
+        { id: 201, text: "Synthetic: revise optics", owner: "student", agreedOn: "2026-10-27", source: "profile_doc" },
+      ]);
     });
   });
 
@@ -122,6 +208,41 @@ describe("getMenteeDetail", () => {
     expect((await getMenteeDetail(MENTOR, 501))?.openDraft).toBeNull();
   });
 
+  describe("the Screener", () => {
+    const WITH_LINK = { ...PROFILE, screener_url: " https://forms.example/screener " };
+
+    it("puts the answer on each Conversation and the one feedback on the Conversation that gave it", async () => {
+      givenRows({
+        profile: [WITH_LINK],
+        entries: [
+          entry({ id: "13", occurred_on: "2026-10-21", screener_used: true }),
+          entry({ id: "12", occurred_on: "2026-10-20", screener_used: true, helped_understand: 4, more_comfortable: "2" }),
+          entry({ id: "11", occurred_on: "2026-10-19", screener_used: false }),
+        ],
+      });
+
+      const detail = await getMenteeDetail(MENTOR, 501);
+
+      expect(detail?.history.map((item) => item.kind === "conversation" && [item.screenerUsed, item.screenerFeedback])).toEqual([
+        [true, null],
+        [true, { helpedUnderstand: 4, moreComfortable: 2 }],
+        [false, null],
+      ]);
+      expect(detail?.screenerUrl).toBe("https://forms.example/screener");
+      expect(detail?.screenerFeedbackDue).toBe(false);
+      const [sql] = mockQuery.mock.calls.find(([text]) => String(text).includes("FROM blended_learning_conversations"))!;
+      expect(sql).toContain("LEFT JOIN blended_learning_screener_feedback feedback ON feedback.conversation_id = c.id");
+    });
+
+    it("is due with a Screener link until the Student has feedback, and never without one", async () => {
+      givenRows({ profile: [WITH_LINK], entries: [entry({ screener_used: false })] });
+      expect((await getMenteeDetail(MENTOR, 501))?.screenerFeedbackDue).toBe(true);
+
+      givenRows({ profile: [PROFILE], entries: [] });
+      expect((await getMenteeDetail(MENTOR, 501))?.screenerFeedbackDue).toBe(false);
+    });
+  });
+
   it("interleaves Conversations and Attempts newest first with their items, flags and media", async () => {
     givenRows({
       profile: [PROFILE],
@@ -136,9 +257,9 @@ describe("getMenteeDetail", () => {
         }),
       ],
       actionItems: [
-        { conversation_id: "10", id: "100", text: "Old open item", owner: "parent", status: "open" },
-        { conversation_id: "12", id: "120", text: "Revise optics", owner: "student", status: "open" },
-        { conversation_id: 12, id: 121, text: "Share notes", owner: "mentor", status: "done" },
+        { conversation_id: "10", from_profile_doc: false, id: "100", text: "Old open item", owner: "parent", status: "open", added_on: "2026-10-12" },
+        { conversation_id: "12", from_profile_doc: false, id: "120", text: "Revise optics", owner: "student", status: "open", added_on: "2026-10-20" },
+        { conversation_id: 12, from_profile_doc: false, id: 121, text: "Share notes", owner: "mentor", status: "done", added_on: "2026-10-20" },
       ],
       flags: [
         { conversation_id: "12", recipient: "emotional_wellbeing", comment: "Seemed anxious" },
@@ -169,6 +290,8 @@ describe("getMenteeDetail", () => {
           { recipient: "emotional_wellbeing", comment: "Seemed anxious" },
           { recipient: "physics", comment: null },
         ],
+        screenerUsed: null,
+        screenerFeedback: null,
       },
       { kind: "attempt", id: 11, occurredOn: "2026-10-18", note: "No answer" },
       {
@@ -186,12 +309,56 @@ describe("getMenteeDetail", () => {
         photoCount: 0,
         actionItems: [{ id: 100, text: "Old open item", owner: "parent", status: "open" }],
         flags: [],
+        screenerUsed: null,
+        screenerFeedback: null,
       },
     ]);
     // Only open items, newest Conversation first, dated by the Conversation.
     expect(detail?.openActionItems).toEqual([
-      { id: 120, text: "Revise optics", owner: "student", agreedOn: "2026-10-20" },
-      { id: 100, text: "Old open item", owner: "parent", agreedOn: "2026-10-12" },
+      { id: 120, text: "Revise optics", owner: "student", agreedOn: "2026-10-20", source: "conversation" },
+      { id: 100, text: "Old open item", owner: "parent", agreedOn: "2026-10-12", source: "conversation" },
     ]);
+  });
+
+  it("lists open Action Items pushed from Common Action Items, tagged and dated when added; a done one joins the history of the Conversation that ticked it", async () => {
+    givenRows({
+      profile: [PROFILE],
+      entries: [
+        entry({ id: "12", occurred_on: "2026-10-20" }),
+        entry({ id: "10", occurred_on: "2026-10-12" }),
+      ],
+      actionItems: [
+        { conversation_id: "10", from_profile_doc: false, id: "100", text: "Old open item", owner: "parent", status: "open", added_on: "2026-10-12" },
+        { conversation_id: "12", from_profile_doc: false, id: "120", text: "Revise optics", owner: "student", status: "open", added_on: "2026-10-20" },
+        // Pushed: no Conversation. A done one shows in its ticking Conversation's history.
+        { conversation_id: null, from_profile_doc: false, id: "130", text: "Fill in the form", owner: "student", status: "open", added_on: "2026-10-25" },
+        { conversation_id: null, from_profile_doc: false, id: "131", text: "Same day push", owner: "mentor", status: "open", added_on: "2026-10-20" },
+        { conversation_id: null, completed_by_conversation_id: "12", from_profile_doc: false, id: "132", text: "Already done", owner: "parent", status: "done", added_on: "2026-10-01" },
+        // A done Profile Doc item stays with the Profile Doc entry, not its ticking Conversation.
+        { conversation_id: null, completed_by_conversation_id: "10", from_profile_doc: true, id: "140", text: "Doc item", owner: "student", status: "done", added_on: "2026-09-01" },
+      ],
+    });
+
+    const detail = await getMenteeDetail(MENTOR, 501);
+
+    // Newest first by date; on the same day a Conversation's items come first.
+    expect(detail?.openActionItems).toEqual([
+      { id: 130, text: "Fill in the form", owner: "student", agreedOn: "2026-10-25", source: "common" },
+      { id: 120, text: "Revise optics", owner: "student", agreedOn: "2026-10-20", source: "conversation" },
+      { id: 131, text: "Same day push", owner: "mentor", agreedOn: "2026-10-20", source: "common" },
+      { id: 100, text: "Old open item", owner: "parent", agreedOn: "2026-10-12", source: "conversation" },
+    ]);
+    const conversationItems = (id: number) =>
+      detail?.history.flatMap((item) => (item.kind === "conversation" && item.id === id ? item.actionItems : []));
+    // After the items the Conversation agreed, tagged as pushed.
+    expect(conversationItems(12)).toEqual([
+      { id: 120, text: "Revise optics", owner: "student", status: "open" },
+      { id: 132, text: "Already done", owner: "parent", status: "done", source: "common" },
+    ]);
+    expect(conversationItems(10)).toEqual([{ id: 100, text: "Old open item", owner: "parent", status: "open" }]);
+    // Every Action Item of the Student is read, a pushed one included.
+    const actionItemsSql = mockQuery.mock.calls.map(([sql]) => sql).find((sql) => sql.includes("FROM blended_learning_action_items"));
+    expect(actionItemsSql).toMatch(/WHERE student_id = \$1\s+ORDER BY/);
+    expect(actionItemsSql).not.toMatch(/JOIN/);
   });
 });
