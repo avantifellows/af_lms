@@ -378,6 +378,16 @@ test.describe("Blended Learning Manage — Common Action Items", () => {
     );
     expect(await repeat.json()).toEqual({ added: 0 });
 
+    // Mentor D ticks it for the second Student in a form left open while the
+    // admin removes it below.
+    await mentor.goto(`/blended-learning/students/${studentIds[second.key]}/log`);
+    await logForm.getByRole("radio", { name: "Call" }).check();
+    await logForm.getByRole("radio", { name: "Student", exact: true }).check();
+    await logForm.getByLabel("Duration (minutes)").fill("15");
+    const secondSummary = "Synthetic: talked through the hostel move.";
+    await logForm.getByLabel("Summary").fill(secondSummary);
+    await panel.getByRole("checkbox", { name: new RegExp(edited) }).check();
+
     // Removing deletes the open rows and keeps the done one.
     await editedItem.getByRole("button", { name: `Remove: ${edited}` }).click();
     const remove = page.getByRole("dialog", { name: "Remove this action item?" });
@@ -396,6 +406,22 @@ test.describe("Blended Learning Manage — Common Action Items", () => {
       return result.rows;
     });
     expect(removed).toEqual([{ removed: true, removed_by_email: BLENDED_ADMIN.email }]);
+
+    // The open form still has the removed item ticked: the Conversation saves
+    // and the tick is skipped.
+    await logForm.getByRole("button", { name: "Save conversation" }).click();
+    await expect(mentor.getByRole("region", { name: "Saved" }).getByRole("heading", { name: "Conversation saved" })).toBeVisible();
+    const secondSaved = await withPool(async (pool) => {
+      const result = await pool.query<{ summary: string }>(
+        `SELECT summary FROM blended_learning_conversations WHERE student_id = $1 ORDER BY id DESC LIMIT 1`,
+        [studentIds[second.key]]
+      );
+      return result.rows.map((row) => row.summary);
+    });
+    expect(secondSaved).toEqual([secondSummary]);
+    expect(await pushedRows()).toEqual([
+      expect.objectContaining({ student_id: studentIds[first.key], text, status: "done" }),
+    ]);
 
     await mentor.goto(`/blended-learning/students/${studentIds[second.key]}`);
     await expect(mentor.getByRole("heading", { name: `${second.firstName} ${second.lastName}` })).toBeVisible();
