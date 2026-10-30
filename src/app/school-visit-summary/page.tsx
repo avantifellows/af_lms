@@ -1,14 +1,12 @@
 import Link from "next/link";
-import { getServerSession } from "next-auth";
-import { redirect } from "next/navigation";
 
-import StatCard from "@/components/StatCard";
+import ClickableTableRow from "@/components/visits/ClickableTableRow";
+import { ConcernFreshnessLine } from "@/components/visits/ConcernFreshnessLine";
 import GpsMapLink from "@/components/visits/GpsMapLink";
+import RecurringOnlyToggle from "@/components/visits/RecurringOnlyToggle";
 import VisitSummaryFilterBar from "@/components/visits/VisitSummaryFilterBar";
 import { Card } from "@/components/ui";
-import { authOptions } from "@/lib/auth";
 import { query } from "@/lib/db";
-import { getFeatureAccess, getResolvedPermission, type UserPermission } from "@/lib/permissions";
 import {
   ACTION_TYPES,
   ACTION_TYPE_VALUES,
@@ -18,15 +16,40 @@ import {
   type ActionType,
 } from "@/lib/visit-actions";
 import {
-  resolvePresetDateRange,
+  STALE_LAST_VISIT_DAYS,
+  concernSeverity,
+  formatCompactVisitDates,
+  formatIstDate,
+  formatIstTimestamp,
+  formatVisitCount,
+  isStaleLastVisit,
   rollupActionTypes,
+  searchParamsWithout,
   type ActionTypeRollupStatus,
+  type ConcernSeverity,
 } from "@/lib/visit-summary";
 import {
-  buildVisitSummaryScopePredicate,
-  buildVisitsActor,
-  canViewVisitSummary,
-} from "@/lib/visits-policy";
+  buildVisitSummaryWhere,
+  getVisitSummaryPmOptions,
+  getVisitSummaryRegionOptions,
+  getVisitSummarySchoolOptions,
+  normalizeVisitSummaryFilters,
+  type PmFilterOption,
+  type RegionFilterOption,
+  type SchoolFilterOption,
+  type VisitSummaryFilters,
+} from "@/lib/visit-summary-scope";
+import {
+  SCHOOL_WISE_SORT_COLUMNS,
+  getSchoolWiseView,
+  normalizeSchoolWiseSort,
+  withRecurringSchoolsOnly,
+  type SchoolWiseSort,
+  type SchoolWiseView,
+  type SchoolWiseRow,
+} from "@/lib/visit-concerns";
+import { requireVisitSummaryPage } from "@/lib/visit-summary-page";
+import type { VisitsActor } from "@/lib/visits-policy";
 
 const VISITS_PER_PAGE = 20;
 
@@ -82,20 +105,22 @@ interface VisitActionSummary {
   rollup: Record<ActionType, ActionTypeRollupStatus>;
 }
 
-interface SchoolFilterOption {
-  code: string;
-  name: string;
-}
-
-interface PmFilterOption {
-  email: string;
-  name: string | null;
+// The stat cards both tabs show. The first four count the Visits in view (`getSummaryStats`);
+// the last is the School-wise read model's count of Schools with a Recurring Concern.
+interface HeaderStats {
+  totalVisits: number;
+  completedCount: number;
+  uniqueSchools: number;
+  uniquePms: number;
+  schoolsWithRecurring: number;
 }
 
 interface SummaryResult {
   visits: SummaryVisit[];
   stats: SummaryStats;
+  headerStats: HeaderStats;
   actionSummaries: Map<number, VisitActionSummary>;
+  regionOptions: RegionFilterOption[];
   schoolOptions: SchoolFilterOption[];
   pmOptions: PmFilterOption[];
   totalCount: number;
@@ -105,11 +130,22 @@ interface SummaryResult {
   dir: SortDirection;
 }
 
+interface SchoolWiseResult {
+  view: SchoolWiseView;
+  headerStats: HeaderStats;
+  regionOptions: RegionFilterOption[];
+  schoolOptions: SchoolFilterOption[];
+  pmOptions: PmFilterOption[];
+  sort: SchoolWiseSort;
+}
+
 interface PageProps {
   searchParams: Promise<{
+    tab?: string;
     sort?: string;
     dir?: string;
     page?: string;
+    regions?: string;
     schools?: string;
     pms?: string;
     status?: string;
@@ -117,25 +153,18 @@ interface PageProps {
     to?: string;
     preset?: string;
     bucket?: string;
+    recurring?: string;
   }>;
 }
 
 type SortKey = "visit_date" | "school_name" | "pm_email" | "status" | "inserted_at" | "completed_at";
 type SortDirection = "asc" | "desc";
-type VisitSummaryStatusFilter = "in_progress" | "completed";
-type FilterExclusion = "schools" | "pms";
-type ActionCompletionBucketFilter = "none" | "partial" | "all_present" | "all_complete";
 type SummarySearchParams = Record<string, string | undefined>;
+type SummaryTab = "schools" | "visits";
 
-interface VisitSummaryFilters {
-  schools: string[];
-  pms: string[];
-  status?: VisitSummaryStatusFilter;
-  from?: string;
-  to?: string;
-  preset?: string;
-  bucket?: ActionCompletionBucketFilter;
-  forceEmpty: boolean;
+// School-wise is the default; any `tab` other than `visits` shows it.
+function normalizeTab(tabParam?: string): SummaryTab {
+  return tabParam === "visits" ? "visits" : "schools";
 }
 
 const SORT_COLUMNS: Record<SortKey, { sql: string; defaultDir: SortDirection }> = {
@@ -147,8 +176,10 @@ const SORT_COLUMNS: Record<SortKey, { sql: string; defaultDir: SortDirection }> 
   completed_at: { sql: "v.completed_at", defaultDir: "desc" },
 };
 
+// An own key only: `in` would also accept `constructor` and the like, and their undefined defaultDir
+// would throw.
 function isSortKey(value: string | undefined): value is SortKey {
-  return Boolean(value && value in SORT_COLUMNS);
+  return Boolean(value && Object.hasOwn(SORT_COLUMNS, value));
 }
 
 function normalizeSort(sortParam?: string, dirParam?: string): { sort: SortKey; dir: SortDirection } {
@@ -163,75 +194,6 @@ function normalizeSort(sortParam?: string, dirParam?: string): { sort: SortKey; 
 function normalizePage(pageParam?: string): number {
   const parsed = Number.parseInt(pageParam || "1", 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
-}
-
-function parseListFilter(value: string | undefined, transform: (item: string) => string = (item) => item): string[] {
-  return (value || "")
-    .split(",")
-    .map((item) => transform(item.trim()))
-    .filter(Boolean);
-}
-
-function isDateString(value: string | undefined): value is string {
-  return Boolean(value && /^\d{4}-\d{2}-\d{2}$/.test(value));
-}
-
-function normalizeFilters(searchParams: {
-  schools?: string;
-  pms?: string;
-  status?: string;
-  from?: string;
-  to?: string;
-  preset?: string;
-  bucket?: string;
-}): VisitSummaryFilters {
-  const presetRange = resolvePresetDateRange(searchParams.preset, new Date());
-  const manualFrom = isDateString(searchParams.from) ? searchParams.from : undefined;
-  const manualTo = isDateString(searchParams.to) ? searchParams.to : undefined;
-  const from = presetRange?.from ?? manualFrom;
-  const to = presetRange?.to ?? manualTo;
-
-  return {
-    schools: parseListFilter(searchParams.schools),
-    pms: parseListFilter(searchParams.pms, (item) => item.toLowerCase()),
-    status: searchParams.status === "in_progress" || searchParams.status === "completed"
-      ? searchParams.status
-      : undefined,
-    from,
-    to,
-    preset: presetRange || searchParams.preset === "all" ? searchParams.preset : undefined,
-    bucket: isActionCompletionBucket(searchParams.bucket) ? searchParams.bucket : undefined,
-    forceEmpty: Boolean(from && to && from > to),
-  };
-}
-
-function isActionCompletionBucket(value: string | undefined): value is ActionCompletionBucketFilter {
-  return value === "none" || value === "partial" || value === "all_present" || value === "all_complete";
-}
-
-function formatDate(value: string): string {
-  return new Date(value).toLocaleDateString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    timeZone: "Asia/Kolkata",
-  });
-}
-
-function formatTimestamp(value: string | null): string {
-  if (!value) {
-    return "-";
-  }
-
-  return new Date(value).toLocaleString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-    timeZone: "Asia/Kolkata",
-  });
 }
 
 function formatStatus(status: string): string {
@@ -273,97 +235,6 @@ function formatDuration(visit: SummaryVisit, now = new Date()): string {
   return `${hours}h ${minutes}m`;
 }
 
-function buildWhereClause(
-  permission: UserPermission,
-  actorEmail: string,
-  filters: VisitSummaryFilters = { schools: [], pms: [], forceEmpty: false },
-  startIndex = 1,
-  exclude?: FilterExclusion
-): { whereSql: string; joinSql: string; params: unknown[] } {
-  const actor = buildVisitsActor(actorEmail, permission);
-  const predicates = ["v.deleted_at IS NULL"];
-  const joins: string[] = [];
-  const params: unknown[] = [];
-  let nextIndex = startIndex;
-
-  if (filters.forceEmpty) {
-    predicates.push("1 = 0");
-  }
-
-  if (exclude !== "schools" && filters.schools.length > 0) {
-    predicates.push(`v.school_code = ANY($${nextIndex})`);
-    params.push(filters.schools);
-    nextIndex += 1;
-  }
-
-  if (exclude !== "pms" && filters.pms.length > 0) {
-    predicates.push(`LOWER(v.pm_email) = ANY($${nextIndex})`);
-    params.push(filters.pms);
-    nextIndex += 1;
-  }
-
-  if (filters.status) {
-    predicates.push(`v.status = $${nextIndex}`);
-    params.push(filters.status);
-    nextIndex += 1;
-  }
-
-  if (filters.from) {
-    predicates.push(`v.visit_date >= $${nextIndex}`);
-    params.push(filters.from);
-    nextIndex += 1;
-  }
-
-  if (filters.to) {
-    predicates.push(`v.visit_date <= $${nextIndex}`);
-    params.push(filters.to);
-    nextIndex += 1;
-  }
-
-  if (filters.bucket) {
-    const knownTypesIndex = nextIndex;
-    joins.push(
-      `LEFT JOIN (
-        SELECT visit_id,
-               COUNT(DISTINCT action_type) FILTER (WHERE action_type = ANY($${knownTypesIndex}::text[])) AS touched_types,
-               COUNT(DISTINCT CASE WHEN status = 'completed' AND action_type = ANY($${knownTypesIndex}::text[]) THEN action_type END) AS completed_types
-        FROM lms_pm_school_visit_actions
-        WHERE deleted_at IS NULL
-        GROUP BY visit_id
-      ) AS action_agg ON action_agg.visit_id = v.id`
-    );
-    params.push(REQUIRED_ACTION_TYPE_VALUES);
-    nextIndex += 1;
-
-    if (filters.bucket === "none") {
-      predicates.push("COALESCE(action_agg.touched_types, 0) = 0");
-    } else if (filters.bucket === "partial") {
-      predicates.push(`COALESCE(action_agg.touched_types, 0) > 0 AND COALESCE(action_agg.touched_types, 0) < ${REQUIRED_ACTION_TYPE_VALUES.length}`);
-    } else if (filters.bucket === "all_present") {
-      predicates.push(`COALESCE(action_agg.touched_types, 0) = ${REQUIRED_ACTION_TYPE_VALUES.length} AND COALESCE(action_agg.completed_types, 0) < ${REQUIRED_ACTION_TYPE_VALUES.length}`);
-    } else {
-      predicates.push(`COALESCE(action_agg.completed_types, 0) = ${REQUIRED_ACTION_TYPE_VALUES.length}`);
-    }
-  }
-
-  const scope = buildVisitSummaryScopePredicate(actor, {
-    startIndex: nextIndex,
-    schoolCodeColumn: "v.school_code",
-    schoolRegionColumn: "s.region",
-  });
-
-  if (scope.clause) {
-    predicates.push(scope.clause);
-    params.push(...scope.params);
-  }
-
-  return {
-    whereSql: predicates.join(" AND "),
-    joinSql: joins.join("\n"),
-    params,
-  };
-}
-
 function buildOrderClause(sort: SortKey, dir: SortDirection): string {
   const sortColumn = SORT_COLUMNS[sort].sql;
   const nullsClause = sort === "completed_at" && dir === "asc" ? " NULLS LAST" : "";
@@ -387,11 +258,10 @@ function parseNullableNumber(value: string | number | null | undefined): number 
 }
 
 async function getSummaryStats(
-  actorEmail: string,
-  permission: UserPermission,
+  actor: VisitsActor,
   filters: VisitSummaryFilters
 ): Promise<SummaryStats> {
-  const { whereSql, joinSql, params } = buildWhereClause(permission, actorEmail, filters, 3);
+  const { whereSql, joinSql, params } = buildVisitSummaryWhere(actor, filters, { startIndex: 3 });
   const rows = await query<SummaryStatsRow>(
     `WITH action_completion AS (
        SELECT a.visit_id,
@@ -430,14 +300,13 @@ async function getSummaryStats(
 }
 
 async function getPaginatedVisits(
-  actorEmail: string,
-  permission: UserPermission,
+  actor: VisitsActor,
   filters: VisitSummaryFilters,
   sort: SortKey,
   dir: SortDirection,
   page: number
 ): Promise<SummaryVisit[]> {
-  const { whereSql, joinSql, params } = buildWhereClause(permission, actorEmail, filters);
+  const { whereSql, joinSql, params } = buildVisitSummaryWhere(actor, filters);
   const offset = (page - 1) * VISITS_PER_PAGE;
   const limitIndex = params.length + 1;
   const offsetIndex = params.length + 2;
@@ -455,43 +324,6 @@ async function getPaginatedVisits(
      ORDER BY ${buildOrderClause(sort, dir)}
      LIMIT $${limitIndex} OFFSET $${offsetIndex}`,
     [...params, VISITS_PER_PAGE, offset]
-  );
-}
-
-async function getSchoolFilterOptions(
-  actorEmail: string,
-  permission: UserPermission,
-  filters: VisitSummaryFilters
-): Promise<SchoolFilterOption[]> {
-  const { whereSql, joinSql, params } = buildWhereClause(permission, actorEmail, filters, 1, "schools");
-
-  return query<SchoolFilterOption>(
-    `SELECT DISTINCT v.school_code AS code, COALESCE(s.name, v.school_code) AS name
-     FROM lms_pm_school_visits v
-     LEFT JOIN school s ON s.code = v.school_code
-     ${joinSql}
-     WHERE ${whereSql}
-     ORDER BY name ASC, code ASC`,
-    params
-  );
-}
-
-async function getPmFilterOptions(
-  actorEmail: string,
-  permission: UserPermission,
-  filters: VisitSummaryFilters
-): Promise<PmFilterOption[]> {
-  const { whereSql, joinSql, params } = buildWhereClause(permission, actorEmail, filters, 1, "pms");
-
-  return query<PmFilterOption>(
-    `SELECT DISTINCT LOWER(v.pm_email) AS email, up.full_name AS name
-     FROM lms_pm_school_visits v
-     LEFT JOIN school s ON s.code = v.school_code
-     LEFT JOIN user_permission up ON LOWER(up.email) = LOWER(v.pm_email)
-     ${joinSql}
-     WHERE ${whereSql}
-     ORDER BY name ASC NULLS LAST, email ASC`,
-    params
   );
 }
 
@@ -544,12 +376,12 @@ function buildActionSummaryMap(visits: SummaryVisit[], actions: VisitActionRow[]
 }
 
 async function getSummaryVisits(
-  actorEmail: string,
-  permission: UserPermission,
+  actor: VisitsActor,
   searchParams: {
     sort?: string;
     dir?: string;
     page?: string;
+    regions?: string;
     schools?: string;
     pms?: string;
     status?: string;
@@ -560,19 +392,23 @@ async function getSummaryVisits(
   }
 ): Promise<SummaryResult> {
   const { sort, dir } = normalizeSort(searchParams.sort, searchParams.dir);
-  const filters = normalizeFilters(searchParams);
+  const filters = normalizeVisitSummaryFilters(searchParams);
   const requestedPage = normalizePage(searchParams.page);
-  const [stats, initialVisits, schoolOptions, pmOptions] = await Promise.all([
-    getSummaryStats(actorEmail, permission, filters),
-    getPaginatedVisits(actorEmail, permission, filters, sort, dir, requestedPage),
-    getSchoolFilterOptions(actorEmail, permission, filters),
-    getPmFilterOptions(actorEmail, permission, filters),
+  const [stats, initialVisits, schoolOptions, pmOptions, regionOptions, schoolWiseView] = await Promise.all([
+    getSummaryStats(actor, filters),
+    getPaginatedVisits(actor, filters, sort, dir, requestedPage),
+    getVisitSummarySchoolOptions(actor, filters),
+    getVisitSummaryPmOptions(actor, filters),
+    getVisitSummaryRegionOptions(actor, filters),
+    // The "Schools with recurring concerns" card: the same School-wise read model over the same
+    // Visits in view. `recurring=1` is a School-wise row filter, so the Visits tab ignores it.
+    getSchoolWiseView(actor, { ...filters, recurringOnly: false }, normalizeSchoolWiseSort()),
   ]);
   const totalCount = stats.totalVisits;
   const totalPages = Math.max(1, Math.ceil(totalCount / VISITS_PER_PAGE));
   const currentPage = Math.min(requestedPage, totalPages);
   const visits = totalCount > 0 && currentPage !== requestedPage
-    ? await getPaginatedVisits(actorEmail, permission, filters, sort, dir, currentPage)
+    ? await getPaginatedVisits(actor, filters, sort, dir, currentPage)
     : initialVisits;
   const actionRows = await getActionRowsForVisits(visits.map((visit) => visit.id));
   const actionSummaries = buildActionSummaryMap(visits, actionRows);
@@ -580,7 +416,9 @@ async function getSummaryVisits(
   return {
     visits,
     stats,
+    headerStats: toHeaderStats(stats, schoolWiseView.stats.schoolsWithRecurring),
     actionSummaries,
+    regionOptions,
     schoolOptions,
     pmOptions,
     totalCount,
@@ -591,21 +429,108 @@ async function getSummaryVisits(
   };
 }
 
+async function getSchoolWiseSummary(
+  actor: VisitsActor,
+  searchParams: SummarySearchParams
+): Promise<SchoolWiseResult> {
+  const sort = normalizeSchoolWiseSort(searchParams.sort, searchParams.dir);
+  const filters = normalizeVisitSummaryFilters(searchParams);
+  // With `recurring=1` the options offer only what the table keeps, so no pick empties it.
+  const narrowOptions = filters.recurringOnly ? withRecurringSchoolsOnly : undefined;
+  const [view, allSchoolsStats, schoolOptions, pmOptions, regionOptions] = await Promise.all([
+    getSchoolWiseView(actor, filters, sort),
+    filters.recurringOnly ? null : getSummaryStats(actor, filters),
+    getVisitSummarySchoolOptions(actor, filters, narrowOptions),
+    getVisitSummaryPmOptions(actor, filters, narrowOptions),
+    getVisitSummaryRegionOptions(actor, filters, narrowOptions),
+  ]);
+  const stats = allSchoolsStats ?? await getKeptSchoolsStats(actor, filters, view.rows);
+
+  return {
+    view,
+    headerStats: toHeaderStats(stats, view.stats.schoolsWithRecurring),
+    regionOptions,
+    schoolOptions,
+    pmOptions,
+    sort,
+  };
+}
+
+const EMPTY_SUMMARY_STATS: SummaryStats = {
+  totalVisits: 0,
+  inProgressCount: 0,
+  completedCount: 0,
+  uniqueSchools: 0,
+  uniquePms: 0,
+  avgActionCompletion: null,
+};
+
+// With `recurring=1` the stat cards follow the Schools kept, like the table: the Visits in view at
+// those Schools only. No Schools kept means no Visits (an empty `schools` filter would mean all).
+async function getKeptSchoolsStats(
+  actor: VisitsActor,
+  filters: VisitSummaryFilters,
+  rows: SchoolWiseRow[]
+): Promise<SummaryStats> {
+  if (rows.length === 0) {
+    return EMPTY_SUMMARY_STATS;
+  }
+  return getSummaryStats(actor, { ...filters, schools: rows.map((row) => row.schoolCode) });
+}
+
+function toHeaderStats(stats: SummaryStats, schoolsWithRecurring: number): HeaderStats {
+  return {
+    totalVisits: stats.totalVisits,
+    completedCount: stats.completedCount,
+    uniqueSchools: stats.uniqueSchools,
+    uniquePms: stats.uniquePms,
+    schoolsWithRecurring,
+  };
+}
+
+// Switching tabs keeps every filter and drops `sort`, `dir` and `page`, which belong to one tab.
+function tabHref(tab: SummaryTab, currentParams: SummarySearchParams): string {
+  const params = searchParamsWithout(currentParams, ["tab", "sort", "dir", "page"], { tab });
+  return `/school-visit-summary?${params.toString()}`;
+}
+
+function SummaryTabs({ tab, currentParams }: { tab: SummaryTab; currentParams: SummarySearchParams }) {
+  const tabs: Array<{ value: SummaryTab; label: string }> = [
+    { value: "schools", label: "School-wise" },
+    { value: "visits", label: "Visits" },
+  ];
+
+  return (
+    <nav aria-label="Visit Summary views" className="mb-4 flex border-b-2 border-accent">
+      {tabs.map(({ value, label }) => (
+        <Link
+          key={value}
+          href={tabHref(value, currentParams)}
+          aria-current={value === tab ? "page" : undefined}
+          className={`border px-4 py-2.5 text-sm font-bold uppercase tracking-wider sm:px-6 ${value === tab
+            ? "border-accent bg-accent text-text-on-accent"
+            : "border-b-0 border-border bg-bg-card-alt text-text-secondary hover:bg-hover-bg hover:text-text-primary"}`}
+        >
+          {label}
+        </Link>
+      ))}
+    </nav>
+  );
+}
+
+type SortColumns = Record<string, { defaultDir: SortDirection }>;
+
 function sortHref(
-  column: SortKey,
-  currentSort: SortKey,
+  column: string,
+  currentSort: string,
   currentDir: SortDirection,
-  currentParams: SummarySearchParams
+  currentParams: SummarySearchParams,
+  columns: SortColumns
 ): string {
   const dir = column === currentSort
     ? currentDir === "asc" ? "desc" : "asc"
-    : SORT_COLUMNS[column].defaultDir;
-  const params = new URLSearchParams();
-  for (const [key, value] of Object.entries(currentParams)) {
-    if (value && key !== "sort" && key !== "dir" && key !== "page") {
-      params.set(key, value);
-    }
-  }
+    : columns[column].defaultDir;
+  const params = searchParamsWithout(currentParams, ["sort", "dir", "page"]);
   params.set("sort", column);
   params.set("dir", dir);
   return `/school-visit-summary?${params.toString()}`;
@@ -616,19 +541,21 @@ function SortHeader({
   currentSort,
   currentDir,
   currentParams,
+  columns = SORT_COLUMNS,
   children,
 }: {
-  column: SortKey;
-  currentSort: SortKey;
+  column: string;
+  currentSort: string;
   currentDir: SortDirection;
   currentParams: SummarySearchParams;
+  columns?: SortColumns;
   children: React.ReactNode;
 }) {
   const active = column === currentSort;
 
   return (
     <Link
-      href={sortHref(column, currentSort, currentDir, currentParams)}
+      href={sortHref(column, currentSort, currentDir, currentParams, columns)}
       className="inline-flex items-center gap-1 hover:text-text-primary"
     >
       {children}
@@ -655,12 +582,7 @@ function PaginationControls({
   }
 
   const hrefFor = (page: number) => {
-    const params = new URLSearchParams();
-    for (const [key, value] of Object.entries(currentParams)) {
-      if (value && key !== "page") {
-        params.set(key, value);
-      }
-    }
+    const params = searchParamsWithout(currentParams, ["page"]);
     params.set("sort", sort);
     params.set("dir", dir);
     if (page > 1) {
@@ -736,16 +658,176 @@ function formatMobileActionSummary(summary: VisitActionSummary): string {
   return `${summary.completedTypes}/${REQUIRED_ACTION_TYPE_VALUES.length} required complete`;
 }
 
-function StatCards({ stats }: { stats: SummaryStats }) {
+// Compact tiles (Vishal, 28 Oct: the full-size StatCards took too much space).
+function StatTile({ label, value }: { label: string; value: number }) {
   return (
-    <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-6">
-      <StatCard label="Total Visits" value={stats.totalVisits} size="sm" />
-      <StatCard label="In Progress" value={stats.inProgressCount} size="sm" />
-      <StatCard label="Completed" value={stats.completedCount} size="sm" />
-      <StatCard label="Unique Schools" value={stats.uniqueSchools} size="sm" />
-      <StatCard label="Unique PMs" value={stats.uniquePms} size="sm" />
-      <StatCard label="Avg Completion" value={formatPercent(stats.avgActionCompletion)} size="sm" />
+    <Card elevation="sm" className="px-3 py-2">
+      <span className="block text-[11px] uppercase leading-tight tracking-wider text-text-muted">{label}</span>
+      <div className="mt-0.5 font-mono text-lg font-bold text-text-primary">{value.toLocaleString()}</div>
+    </Card>
+  );
+}
+
+function StatCards({ stats }: { stats: HeaderStats }) {
+  return (
+    <div role="group" aria-label="Visit totals" className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-5">
+      <StatTile label="Total visits" value={stats.totalVisits} />
+      <StatTile label="Completed" value={stats.completedCount} />
+      <StatTile label="Schools" value={stats.uniqueSchools} />
+      <StatTile label="PMs" value={stats.uniquePms} />
+      <StatTile label="Schools with recurring concerns" value={stats.schoolsWithRecurring} />
     </div>
+  );
+}
+
+// A bar down the left edge of a School-wise row, coloured by `concernSeverity`; the label is its
+// text alternative.
+const SEVERITY_BARS: Record<ConcernSeverity, { label: string; className: string }> = {
+  high: { label: "3 or more recurring concerns", className: "bg-danger" },
+  medium: { label: "1–2 recurring concerns", className: "bg-brand-amber" },
+  low: { label: "Open concerns, none recurring", className: "bg-brand-amber/40" },
+  none: { label: "No open concerns", className: "bg-transparent" },
+};
+
+function SeverityBar({ row }: { row: SchoolWiseRow }) {
+  const { label, className } = SEVERITY_BARS[concernSeverity(row)];
+
+  return (
+    <span
+      role="img"
+      aria-label={label}
+      title={label}
+      className={`absolute inset-y-3 left-2 w-1 rounded-full ${className}`}
+    />
+  );
+}
+
+const STALE_LAST_VISIT_LABEL = `Stale: last visit over ${STALE_LAST_VISIT_DAYS} days ago`;
+
+// `19 Aug` (the year only outside the current one) in a pill; a stale date gets the amber tint.
+function LastVisitPill({ date, now }: { date: string; now: Date }) {
+  const stale = isStaleLastVisit(date, now);
+
+  return (
+    <span
+      title={stale ? `${formatIstDate(date)} · ${STALE_LAST_VISIT_LABEL}` : formatIstDate(date)}
+      className={`relative inline-flex rounded-full px-2.5 py-0.5 font-mono text-xs ${stale
+        ? "bg-brand-amber/25 font-bold text-warning-text"
+        : "bg-bg-card-alt text-text-secondary"}`}
+    >
+      <time dateTime={date}>{formatCompactVisitDates([date], now)}</time>
+      {stale && <>{" "}<span className="sr-only">{STALE_LAST_VISIT_LABEL}</span></>}
+    </span>
+  );
+}
+
+// A School-wise row opens its School page carrying every filter (and the table's sort), so the
+// page's Back link can return to this same table.
+function schoolPageHref(schoolCode: string, currentParams: SummarySearchParams): string {
+  const query = searchParamsWithout(currentParams, ["tab"]).toString();
+  return `/school-visit-summary/schools/${encodeURIComponent(schoolCode)}${query ? `?${query}` : ""}`;
+}
+
+const SCHOOL_WISE_HEADER_CLASS = "px-4 py-3 text-xs font-bold uppercase tracking-wider text-text-muted";
+
+function SchoolWiseTable({
+  rows,
+  sort,
+  currentParams,
+}: {
+  rows: SchoolWiseView["rows"];
+  sort: SchoolWiseSort;
+  currentParams: SummarySearchParams;
+}) {
+  const header = (column: keyof typeof SCHOOL_WISE_SORT_COLUMNS, label: string, align: "left" | "center" = "center") => (
+    <th className={`${SCHOOL_WISE_HEADER_CLASS} whitespace-nowrap ${align === "left" ? "pl-6 text-left" : "text-center"}`}>
+      <SortHeader
+        column={column}
+        currentSort={sort.sort}
+        currentDir={sort.dir}
+        currentParams={currentParams}
+        columns={SCHOOL_WISE_SORT_COLUMNS}
+      >
+        {label}
+      </SortHeader>
+    </th>
+  );
+
+  const now = new Date();
+
+  return (
+    // `relative` makes the scroll box the containing block of the absolutely positioned severity
+    // bars and sr-only labels, so they scroll with the table instead of widening the page.
+    <Card elevation="sm" className="relative overflow-x-auto">
+      <table aria-label="Schools with visits" className="min-w-full">
+        <thead className="border-b border-border">
+          <tr>
+            {header("school_name", "School", "left")}
+            {header("visits", "Visits")}
+            {header("last_visit", "Last visit")}
+            {header("open", "Open concerns")}
+            {header("recurring", "Recurring issues")}
+            {header("flags", "Student flags")}
+            <th className={`${SCHOOL_WISE_HEADER_CLASS} w-full text-left`}>Top recurring concern</th>
+            <th className="w-10 px-2">
+              <span className="sr-only">Open School page</span>
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <ClickableTableRow
+              key={row.schoolCode}
+              href={schoolPageHref(row.schoolCode, currentParams)}
+              className="border-b border-border/40 last:border-b-0 hover:bg-hover-bg"
+            >
+              <td className="relative whitespace-nowrap py-3 pl-6 pr-4">
+                <SeverityBar row={row} />
+                <Link
+                  href={schoolPageHref(row.schoolCode, currentParams)}
+                  className="block text-sm font-bold text-text-primary hover:text-accent"
+                >
+                  {row.schoolName}
+                </Link>
+                {row.region && <>{" "}<span className="block text-xs text-text-muted">{row.region}</span></>}
+              </td>
+              <td className="whitespace-nowrap px-4 py-3 text-center text-sm text-text-primary">{row.visits}</td>
+              <td className="whitespace-nowrap px-4 py-3 text-center">
+                <LastVisitPill date={row.lastVisitDate} now={now} />
+              </td>
+              <td className="whitespace-nowrap px-4 py-3 text-center text-sm text-text-primary">{row.openCount}</td>
+              <td className="whitespace-nowrap px-4 py-3 text-center">
+                {row.recurringCount > 0 ? (
+                  <span className="inline-flex h-7 min-w-7 items-center justify-center rounded-full bg-accent px-2 text-xs font-bold text-text-on-accent">
+                    {row.recurringCount}
+                  </span>
+                ) : (
+                  <span className="font-mono text-sm text-text-muted">0</span>
+                )}
+              </td>
+              <td className="whitespace-nowrap px-4 py-3 text-center font-mono text-sm">
+                {row.flagsOpen === null
+                  ? <span className="text-text-muted">—</span>
+                  : <span className={row.flagsOpen > 0 ? "font-bold text-text-primary" : "text-text-muted"}>{row.flagsOpen}</span>}
+              </td>
+              <td className="min-w-64 px-4 py-3 text-sm text-text-primary">
+                {row.topRecurring ? (
+                  <>
+                    <div title={row.topRecurring.text} className="line-clamp-2">{row.topRecurring.text}</div>
+                    <div className="mt-0.5 text-xs font-bold text-accent">{formatVisitCount(row.topRecurring.visitCount)}</div>
+                  </>
+                ) : (
+                  <span className="text-text-muted">—</span>
+                )}
+              </td>
+              <td className="px-2 py-3 text-center text-xl leading-none text-text-muted">
+                <span aria-hidden="true">›</span>
+              </td>
+            </ClickableTableRow>
+          ))}
+        </tbody>
+      </table>
+    </Card>
   );
 }
 
@@ -769,7 +851,7 @@ function VisitMobileCard({
           </span>
         </div>
         <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs font-mono text-text-muted">
-          <span>{formatDate(visit.visit_date)}</span>
+          <span>{formatIstDate(visit.visit_date)}</span>
           <span>{formatDuration(visit)}</span>
           <span>{formatMobileActionSummary(actionSummary)}</span>
         </div>
@@ -851,7 +933,7 @@ function VisitDesktopTable({
                   {visit.pm_name && <div className="text-xs text-text-muted">{visit.pm_email}</div>}
                 </td>
                 <td className="whitespace-nowrap px-4 py-4 text-sm font-mono text-text-secondary">
-                  {formatDate(visit.visit_date)}
+                  {formatIstDate(visit.visit_date)}
                 </td>
                 <td className="whitespace-nowrap px-4 py-4">
                   <span className={`inline-flex ${statusBadgeClass(visit.status)}`}>
@@ -859,10 +941,10 @@ function VisitDesktopTable({
                   </span>
                 </td>
                 <td className="whitespace-nowrap px-4 py-4 text-sm font-mono text-text-secondary">
-                  {formatTimestamp(visit.inserted_at)}
+                  {formatIstTimestamp(visit.inserted_at)}
                 </td>
                 <td className="whitespace-nowrap px-4 py-4 text-sm font-mono text-text-secondary">
-                  {formatTimestamp(visit.completed_at)}
+                  {formatIstTimestamp(visit.completed_at)}
                 </td>
                 <td className="whitespace-nowrap px-4 py-4 text-sm font-mono text-text-secondary">
                   {formatDuration(visit)}
@@ -900,51 +982,94 @@ function VisitDesktopTable({
   );
 }
 
+function VisitsTab({
+  summary: { visits, actionSummaries, currentPage, totalPages, sort, dir },
+  currentParams,
+}: {
+  summary: SummaryResult;
+  currentParams: SummarySearchParams;
+}) {
+  if (visits.length === 0) {
+    return (
+      <div className="py-12 text-center">
+        <div className="text-text-muted uppercase tracking-wide">No visits match your filters</div>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="space-y-3 sm:hidden">
+        {visits.map((visit) => (
+          <VisitMobileCard
+            key={visit.id}
+            visit={visit}
+            actionSummary={actionSummaries.get(visit.id) || summarizeActions([])}
+          />
+        ))}
+      </div>
+
+      <VisitDesktopTable
+        visits={visits}
+        actionSummaries={actionSummaries}
+        sort={sort}
+        dir={dir}
+        currentParams={currentParams}
+      />
+
+      <PaginationControls
+        currentPage={currentPage}
+        totalPages={totalPages}
+        sort={sort}
+        dir={dir}
+        currentParams={currentParams}
+      />
+    </>
+  );
+}
+
+function SchoolWiseTab({
+  summary: { view, sort },
+  currentParams,
+}: {
+  summary: SchoolWiseResult;
+  currentParams: SummarySearchParams;
+}) {
+  const schools = view.stats.schools;
+
+  return (
+    <>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
+        <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+          <p className="text-sm font-bold text-text-primary">
+            {schools} school{schools === 1 ? "" : "s"}
+          </p>
+          <ConcernFreshnessLine freshness={view.freshness} />
+        </div>
+        {/* Remounts when the param changes (e.g. Clear filters), so the box follows the URL. */}
+        <RecurringOnlyToggle key={currentParams.recurring ?? ""} currentParams={currentParams} />
+      </div>
+
+      {view.rows.length === 0 ? (
+        <div className="py-12 text-center">
+          <div className="text-text-muted uppercase tracking-wide">No schools match your filters</div>
+        </div>
+      ) : (
+        <SchoolWiseTable rows={view.rows} sort={sort} currentParams={currentParams} />
+      )}
+    </>
+  );
+}
+
 export default async function SchoolVisitSummaryPage({ searchParams }: PageProps) {
-  const session = await getServerSession(authOptions);
+  const { actor } = await requireVisitSummaryPage();
   const rawSearchParams = await searchParams;
 
-  if (!session) {
-    redirect("/");
-  }
-
-  if (!session.user?.email) {
-    redirect("/");
-  }
-
-  const permission = await getResolvedPermission(session.user.email);
-  if (!permission) {
-    redirect("/dashboard");
-  }
-
-  if (!getFeatureAccess(permission, "visits").canView) {
-    redirect("/dashboard");
-  }
-
-  const actor = buildVisitsActor(session.user.email, permission);
-  if (!canViewVisitSummary(actor)) {
-    if (actor.role === "program_manager") {
-      redirect("/visits");
-    }
-    redirect("/dashboard");
-  }
-
-  const {
-    visits,
-    stats,
-    actionSummaries,
-    schoolOptions,
-    pmOptions,
-    totalCount,
-    currentPage,
-    totalPages,
-    sort,
-    dir,
-  } = await getSummaryVisits(
-    session.user.email,
-    permission,
-    rawSearchParams
-  );
+  const tab = normalizeTab(rawSearchParams.tab);
+  const summary = tab === "visits"
+    ? { tab: "visits" as const, ...(await getSummaryVisits(actor, rawSearchParams)) }
+    : { tab: "schools" as const, ...(await getSchoolWiseSummary(actor, rawSearchParams)) };
+  const { headerStats } = summary;
 
   return (
     <div className="min-h-screen bg-bg">
@@ -973,12 +1098,12 @@ export default async function SchoolVisitSummaryPage({ searchParams }: PageProps
             </nav>
           </div>
           <div className="flex items-center gap-3 sm:gap-4">
-            {permission.role === "admin" && (
+            {actor.role === "admin" && (
               <Link href="/admin" className="text-sm font-bold uppercase text-accent hover:text-accent-hover">
                 Admin
               </Link>
             )}
-            <span className="hidden font-mono text-sm text-text-muted sm:inline">{session.user.email}</span>
+            <span className="hidden font-mono text-sm text-text-muted sm:inline">{actor.email}</span>
             <Link href="/api/auth/signout" className="text-sm font-bold text-danger hover:text-danger/80">
               Sign out
             </Link>
@@ -993,52 +1118,25 @@ export default async function SchoolVisitSummaryPage({ searchParams }: PageProps
               School Visit Summary
             </h1>
             <p className="mt-1 text-sm text-text-secondary">
-              {totalCount} visit{totalCount === 1 ? "" : "s"} found
+              {formatVisitCount(headerStats.totalVisits)} found
             </p>
           </div>
         </div>
 
-        <StatCards stats={stats} />
-
         <VisitSummaryFilterBar
-          schoolOptions={schoolOptions}
-          pmOptions={pmOptions}
+          regionOptions={summary.regionOptions}
+          schoolOptions={summary.schoolOptions}
+          pmOptions={summary.pmOptions}
           currentParams={rawSearchParams}
         />
 
-        {visits.length === 0 ? (
-          <div className="py-12 text-center">
-            <div className="text-text-muted uppercase tracking-wide">No visits match your filters</div>
-          </div>
-        ) : (
-          <>
-            <div className="space-y-3 sm:hidden">
-              {visits.map((visit) => (
-                <VisitMobileCard
-                  key={visit.id}
-                  visit={visit}
-                  actionSummary={actionSummaries.get(visit.id) || summarizeActions([])}
-                />
-              ))}
-            </div>
+        <StatCards stats={headerStats} />
 
-            <VisitDesktopTable
-              visits={visits}
-              actionSummaries={actionSummaries}
-              sort={sort}
-              dir={dir}
-              currentParams={rawSearchParams}
-            />
+        <SummaryTabs tab={summary.tab} currentParams={rawSearchParams} />
 
-            <PaginationControls
-              currentPage={currentPage}
-              totalPages={totalPages}
-              sort={sort}
-              dir={dir}
-              currentParams={rawSearchParams}
-            />
-          </>
-        )}
+        {summary.tab === "visits"
+          ? <VisitsTab summary={summary} currentParams={rawSearchParams} />
+          : <SchoolWiseTab summary={summary} currentParams={rawSearchParams} />}
       </main>
     </div>
   );

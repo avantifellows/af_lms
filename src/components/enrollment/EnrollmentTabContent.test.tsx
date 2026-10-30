@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { PROGRAM_IDS } from "@/lib/constants";
@@ -11,13 +11,15 @@ import EnrollmentTabContent from "./EnrollmentTabContent";
 import type { Student } from "@/components/StudentTable";
 import type { ProgramStats } from "@/lib/enrollment-stats";
 
-const { mockRefresh, createdResult } = vi.hoisted(() => ({
+const { mockRefresh, createdResult, urlState } = vi.hoisted(() => ({
   mockRefresh: vi.fn(),
   createdResult: { studentId: "202812345678" as string | null, penNumber: "12345678901" as string | null },
+  urlState: { search: "" },
 }));
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: mockRefresh }),
+  useSearchParams: () => new URLSearchParams(urlState.search),
 }));
 
 vi.mock("@/components/StudentTable", () => ({
@@ -27,6 +29,7 @@ vi.mock("@/components/StudentTable", () => ({
     canEditStudent?: boolean;
     selectedGrade?: string;
     selectedStream?: string;
+    selectedProgramId?: number | null;
     searchQuery?: string;
     openFlagStudentIds?: Set<string>;
     onOpenInterventionFlag?: unknown;
@@ -39,6 +42,7 @@ vi.mock("@/components/StudentTable", () => ({
       data-grade={props.selectedGrade}
       data-stream={props.selectedStream}
       data-search={props.searchQuery ?? ""}
+      data-program={String(props.selectedProgramId)}
     />
   ),
 }));
@@ -86,6 +90,7 @@ const baseProps = {
 describe("EnrollmentTabContent", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    urlState.search = "";
     createdResult.studentId = "202812345678";
     createdResult.penNumber = "12345678901";
   });
@@ -557,5 +562,168 @@ describe("EnrollmentTabContent", () => {
     expect(flagsCalls()).toHaveLength(1);
     expect(screen.getByTestId("student-table")).toHaveAttribute("data-flags-shown", "true");
     vi.unstubAllGlobals();
+  });
+
+  describe("flag deep link (?flag=<id>)", () => {
+    const coeStudent = {
+      group_user_id: "gu-11",
+      student_pk_id: "11",
+      first_name: "Asha",
+      last_name: "Verma",
+      grade: 11,
+      program_id: PROGRAM_IDS.COE,
+      student_program_ids: [PROGRAM_IDS.COE],
+    } as unknown as Student;
+    const nodalStudent = {
+      group_user_id: "gu-22",
+      student_pk_id: "22",
+      first_name: "Bina",
+      last_name: "Rao",
+      grade: 12,
+      program_id: PROGRAM_IDS.NODAL,
+      student_program_ids: [PROGRAM_IDS.NODAL],
+    } as unknown as Student;
+    const nvsStudent = {
+      group_user_id: "gu-33",
+      student_pk_id: "33",
+      first_name: "Chetan",
+      last_name: "Das",
+      grade: 11,
+      program_id: PROGRAM_IDS.NVS,
+      student_program_ids: [PROGRAM_IDS.NVS],
+    } as unknown as Student;
+    const flag = (id: number, studentPkId: string) => ({
+      id,
+      student_pk_id: studentPkId,
+      status: "open",
+      raised_by_email: "pm@example.com",
+      inserted_at: "2026-09-25T05:00:00Z",
+      resolved_at: null,
+      updates: [],
+    });
+
+    function renderWithFlags(search: string) {
+      urlState.search = search;
+      window.history.replaceState(null, "", `/school/14061?${search}`);
+      const fetchMock = vi.fn(async (url: string) => ({
+        ok: true,
+        json: async () =>
+          url.includes("intervention-flags")
+            ? { flags: [flag(501, "11"), flag(502, "22"), flag(503, "33")] }
+            : { consent: {} },
+      }));
+      vi.stubGlobal("fetch", fetchMock);
+      render(
+        <EnrollmentTabContent
+          {...baseProps}
+          programs={[
+            program(PROGRAM_IDS.COE, "JNV CoE"),
+            program(PROGRAM_IDS.NODAL, "JNV Nodal"),
+            program(PROGRAM_IDS.NVS, "JNV NVS"),
+          ]}
+          userProgramIds={[PROGRAM_IDS.COE, PROGRAM_IDS.NODAL, PROGRAM_IDS.NVS]}
+          activeStudents={[coeStudent, nodalStudent, nvsStudent]}
+        />,
+      );
+      return fetchMock;
+    }
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+      window.history.replaceState(null, "", "/");
+    });
+
+    it("opens the flagged Student's modal on their programme card once flags load", async () => {
+      renderWithFlags("tab=enrollment&flag=502");
+
+      const dialog = await screen.findByRole("dialog");
+      expect(within(dialog).getByRole("heading", { name: "Bina Rao" })).toBeInTheDocument();
+      expect(screen.getByTestId("student-table")).toHaveAttribute(
+        "data-program",
+        String(PROGRAM_IDS.NODAL),
+      );
+    });
+
+    it("drops `flag` from the URL once consumed, keeping the other params", async () => {
+      renderWithFlags("tab=enrollment&grade=12&flag=502");
+
+      await screen.findByRole("dialog");
+      expect(window.location.pathname).toBe("/school/14061");
+      expect(window.location.search).toBe("?tab=enrollment&grade=12");
+    });
+
+    it("does not reopen when the tab remounts after the dialog is closed", async () => {
+      // SchoolTabs unmounts the Enrollment tab when another tab is shown and
+      // mounts it afresh on the way back, reading the URL as it then stands.
+      const user = userEvent.setup();
+      const fetchMock = renderWithFlags("tab=enrollment&flag=502");
+      const flagsCalls = () =>
+        fetchMock.mock.calls.filter(([url]) => url.includes("intervention-flags"));
+
+      const dialog = await screen.findByRole("dialog");
+      await user.click(within(dialog).getByRole("button", { name: "Close" }));
+      cleanup();
+
+      urlState.search = window.location.search.slice(1);
+      expect(urlState.search).toBe("tab=enrollment");
+      render(
+        <EnrollmentTabContent
+          {...baseProps}
+          programs={[
+            program(PROGRAM_IDS.COE, "JNV CoE"),
+            program(PROGRAM_IDS.NODAL, "JNV Nodal"),
+            program(PROGRAM_IDS.NVS, "JNV NVS"),
+          ]}
+          userProgramIds={[PROGRAM_IDS.COE, PROGRAM_IDS.NODAL, PROGRAM_IDS.NVS]}
+          activeStudents={[coeStudent, nodalStudent, nvsStudent]}
+        />,
+      );
+
+      await vi.waitFor(() => expect(flagsCalls()).toHaveLength(2));
+      expect(await screen.findByLabelText("Needs intervention only (1)")).toBeInTheDocument();
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+
+    it.each([
+      ["an unknown id (e.g. another School's flag)", "999"],
+      ["a non-numeric id", "abc"],
+      ["a partly numeric id", "502x"],
+      ["the id of a flag on the hidden JNV NVS card", "503"],
+    ])("ignores %s: no dialog, the tab renders normally, `flag` is dropped", async (_label, id) => {
+      const fetchMock = renderWithFlags(`tab=enrollment&flag=${id}`);
+
+      expect(await screen.findByLabelText("Needs intervention only (1)")).toBeInTheDocument();
+      await vi.waitFor(() => expect(window.location.search).toBe("?tab=enrollment"));
+      expect(
+        fetchMock.mock.calls.filter(([url]) => url.includes("intervention-flags")),
+      ).toHaveLength(1);
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(screen.getByTestId("student-table")).toHaveAttribute(
+        "data-program",
+        String(PROGRAM_IDS.COE),
+      );
+    });
+
+    it("stays closed after the dialog is closed, even when the flags reload", async () => {
+      const user = userEvent.setup();
+      const fetchMock = renderWithFlags("tab=enrollment&flag=502");
+      const flagsCalls = () =>
+        fetchMock.mock.calls.filter(([url]) => url.includes("intervention-flags"));
+
+      const dialog = await screen.findByRole("dialog");
+      await user.click(within(dialog).getByRole("button", { name: "Close" }));
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+      // Leaving for the NVS card and coming back refetches the flags.
+      await user.click(screen.getByRole("button", { name: "JNV NVS" }));
+      await user.click(screen.getByRole("button", { name: "JNV Nodal" }));
+      await vi.waitFor(() => expect(flagsCalls()).toHaveLength(2));
+      expect(await screen.findByLabelText("Needs intervention only (1)")).toBeInTheDocument();
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(screen.getByTestId("student-table")).toHaveAttribute(
+        "data-program",
+        String(PROGRAM_IDS.NODAL),
+      );
+    });
   });
 });
