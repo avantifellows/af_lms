@@ -4,7 +4,8 @@ import * as curriculumProgress from "@/app/api/curriculum/progress/route";
 import * as curriculumChapters from "@/app/api/curriculum/chapters/route";
 import * as quizGrades from "@/app/api/quiz-analytics/[udise]/grades/route";
 import * as quizBatchOverview from "@/app/api/quiz-analytics/[udise]/batch-overview/route";
-import * as quizCumulativeAls from "@/app/api/quiz-analytics/[udise]/cumulative-als/route";
+import * as quizStudentSupport from "@/app/api/quiz-analytics/[udise]/student-support/route";
+import * as quizStudentReport from "@/app/api/quiz-analytics/[udise]/student-report/route";
 import * as quizTestDeepDive from "@/app/api/quiz-analytics/[udise]/test-deep-dive/route";
 import * as holisticProgress from "@/app/api/holistic-mentorship/progress/route";
 import type { Feature } from "@/lib/permissions";
@@ -101,11 +102,29 @@ export const LMS_VIEWS: LmsView[] = [
     programScoped: true,
   },
   {
-    path: "/api/quiz-analytics/[udise]/cumulative-als",
-    description: "Each student's academic level across major tests for a grade at a school, with the progression.",
-    query: { grade: "required — integer", ...QUIZ_FILTERS },
+    path: "/api/quiz-analytics/[udise]/student-support",
+    description:
+      "The cumulative report (Score journey) for a grade at a physical centre (not JNV NVS): per student, Predicted AL (grade-10 model, JEE Main only), Mode AL, AL status (Sliding / Same / Improving), Latest AL (newest non-retest test with a level), questions to the level above the Latest AL from that test's marks (`toNext`), the score % trend over non-retest tests (`trend`: Improving / Same / Declining over the last 5), the marks change on the latest test (`change`), and every major test's AL and marks (`tests`, each flagged `retest`, + `results`).",
+    query: {
+      grade: "required — integer",
+      ...QUIZ_FILTERS,
+      testGrade: "optional — integer; only tests set for this grade",
+    },
     feature: "performance",
-    handler: handler(quizCumulativeAls.GET),
+    handler: handler(quizStudentSupport.GET),
+    programScoped: true,
+  },
+  {
+    path: "/api/quiz-analytics/[udise]/student-report",
+    description:
+      "One student's report at a physical centre (not JNV NVS): chapter competency per exam and subject (attempt, accuracy, score, priority, C = concept gap / S = skipping flags, PYQ links) and full-test history (marks, answers, level, rank in centre, absences).",
+    query: {
+      grade: "required — integer",
+      program: QUIZ_FILTERS.program,
+      student: "required — a student's uid from student-support",
+    },
+    feature: "performance",
+    handler: handler(quizStudentReport.GET),
     programScoped: true,
   },
   {

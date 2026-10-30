@@ -106,10 +106,10 @@ interface CumulativeALProps {
   stream?: string;
   testGrade?: number;
 }
-vi.mock("./performance/CumulativeALTable", () => ({
+vi.mock("./performance/student-support/StudentSupport", () => ({
   default: (props: CumulativeALProps) => (
     <div data-testid="cumulative-al-table">
-      CumulativeALTable: udise={props.schoolUdise}, grade={props.grade}, stream={props.stream ?? "none"}, testGrade={props.testGrade ?? "none"}
+      StudentSupport: udise={props.schoolUdise}, grade={props.grade}, program={props.program ?? "none"}, stream={props.stream ?? "none"}, testGrade={props.testGrade ?? "none"}
     </div>
   ),
 }));
@@ -497,7 +497,7 @@ describe("PerformanceTab", () => {
     expect(urls.some((url: string) => url.includes("chapter-test-report"))).toBe(false);
   });
 
-  it("renders Per Test/Cumulative sub-tab on Full Tests, and switches to CumulativeALTable", async () => {
+  it("renders Per Test/Cumulative sub-tab on Full Tests, and switches to the cumulative report", async () => {
     vi.stubGlobal("fetch", mockGradesResponse([11], ["JNV CoE"]));
 
     render(<PerformanceTab schoolUdise="12345" />);
