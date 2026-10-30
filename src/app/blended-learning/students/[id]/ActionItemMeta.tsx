@@ -21,12 +21,24 @@ export function OwnerPill({ owner }: { owner: ActionItemOwner }) {
   );
 }
 
+// Marks an Action Item a Blended Learning Admin pushed to many Students (a
+// Common Action Item, labelled "From program") rather than one agreed in a
+// Conversation or brought over from the Profile Doc.
+function CommonTag() {
+  return (
+    <span className="mr-1.5 inline-block rounded-md bg-hover-bg px-1.5 text-xs font-bold leading-5 text-accent">
+      From program
+    </span>
+  );
+}
+
 // The pill, then the text with anything under it (such as the meta line),
 // in a fixed first column.
 export const ACTION_ITEM_ROW_CLASSES = "grid grid-cols-[4rem_minmax(0,1fr)] items-baseline gap-x-2.5";
 
-// Where the agreeing Conversation's date, or the Profile Doc's, as one muted
-// line: "From 14 Jun 2026" or "From Profile Doc · 14 Jun 2026".
+// Where the item came from and its date, as one muted line: "From 14 Jun
+// 2026" (a Conversation), "From Profile Doc · 14 Jun 2026", or a Common
+// Action Item's tag and "Added 14 Jun 2026".
 export function ActionItemMeta({
   owner,
   agreedOn,
@@ -36,13 +48,19 @@ export function ActionItemMeta({
   agreedOn?: string;
   source?: ActionItemSource;
 }) {
+  const common = source === "common";
   const from = source === "profile_doc" ? "From Profile Doc" : null;
   const date = agreedOn ? formatCalendarDate(agreedOn) : null;
   const parts = [
     owner ? ACTION_ITEM_OWNER[owner] : null,
     from,
-    date && (from ? date : `From ${date}`),
+    date && (from ? date : `${common ? "Added" : "From"} ${date}`),
   ].filter((part): part is string => Boolean(part));
-  if (parts.length === 0) return null;
-  return <span className="block text-xs text-text-muted">{parts.join(" · ")}</span>;
+  if (parts.length === 0 && !common) return null;
+  return (
+    <span className="block text-xs text-text-muted">
+      {common && <CommonTag />}
+      {parts.join(" · ")}
+    </span>
+  );
 }

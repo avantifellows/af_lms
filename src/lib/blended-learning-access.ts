@@ -17,12 +17,13 @@ export type BlendedLearningAction =
   | "manage_draft"
   | "play_recording"
   | "view_flags"
-  | "view_mentors";
+  | "view_mentors"
+  | "manage";
 
 export type BlendedLearningAccess = {
   // A Blended Learning Mentor sees and logs for their own Mentees; a Blended
   // Learning Admin (a blended_admin or an LMS admin) sees every Mentor's, view
-  // only.
+  // only, and (unless read-only) manages Resources and Common Action Items.
   kind: "mentor" | "admin";
   role: "blended_mentor" | "blended_admin" | "admin";
   readOnly: boolean;
@@ -62,10 +63,12 @@ export async function getBlendedLearningAccess(
   return { kind: "admin", ...base };
 }
 
-// Only a Mentor who is not read-only mutates (logs, uploads, manages drafts);
-// every Blended Learning Admin is view only. Recordings and Mentor cards are
-// for Blended Learning Admins (including read-only ones). Everyone sees flags:
-// an admin every flag, a Mentor only those on their own Students
+// Only a Mentor who is not read-only mutates Mentee records (logs, uploads,
+// manages drafts); a Blended Learning Admin views them. The Manage page
+// (Resources and Common Action Items) is the one thing an admin edits, and
+// only when not read-only; Mentors never. Recordings and Mentor cards are for
+// Blended Learning Admins (including read-only ones). Everyone sees flags: an
+// admin every flag, a Mentor only those on their own Students
 // (blended-learning-flags).
 export function canBlendedLearning(
   access: BlendedLearningAccess | null,
@@ -73,6 +76,7 @@ export function canBlendedLearning(
 ): boolean {
   if (!access) return false;
   if (MUTATIONS.has(action)) return access.kind === "mentor" && !access.readOnly;
+  if (action === "manage") return access.kind === "admin" && !access.readOnly;
   if (ADMIN_ONLY.has(action)) return access.kind === "admin";
   return true;
 }

@@ -52,6 +52,10 @@ run only the new `.exs` into one (as for `20261027100000_add_blended_learning_le
   Columns added by a later `alter table` go at the end, so keep migration order.
 - For an "ensure" migration (idempotent re-create), mirror it with `IF NOT EXISTS` and a
   `DO` block that adds missing CHECKs.
+- A migration that seeds rows (`execute("INSERT …")`, e.g. the Mentor Toolkit Resource in
+  `20261027120000_add_blended_learning_manage.sql`) needs the same INSERT in the fixture; a
+  schema-only dump won't see it, so also compare `SELECT` output from both scratch DBs. Recent
+  `pg_dump` prints a random `\restrict` token per dump; drop those lines before diffing.
 - Function bodies are compared verbatim, so copy them exactly. Comments inside a body show up
   in the diff.
 

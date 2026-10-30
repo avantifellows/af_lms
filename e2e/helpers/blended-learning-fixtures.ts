@@ -25,6 +25,13 @@ export const BLENDED_MENTOR_C = {
   email: "e2e-blended-mentor-c@test.local",
 };
 
+// Mentor D's Mentees exist only for the Manage spec, which pushes Common
+// Action Items to them. Other specs must not assert on Mentor D or them.
+export const BLENDED_MENTOR_D = {
+  name: "Synthetic Blended Mentor D",
+  email: "e2e-blended-mentor-d@test.local",
+};
+
 type Grade = 12 | 13;
 type FixtureMentee = {
   key: string;
@@ -103,6 +110,13 @@ export const DRAFT_REVIEW_MENTEES = {
   mobile: { key: "F2", firstName: "Farah", lastName: "Mobile", gender: "Female", grade: 13, programId: 90 },
 } as const satisfies Record<string, FixtureMentee>;
 export const LOGGING_LAST_CONVERSATION_SUMMARY = "Synthetic: planned the week's revision.";
+// Mentor D's Mentees for the Manage spec: two mapped at seed, and one the
+// spec maps later, to check that pushing again reaches only her.
+export const MANAGE_MENTEES = {
+  first: { key: "H1", firstName: "Gita", lastName: "Common", gender: "Female", grade: 12, programId: 80 },
+  second: { key: "H2", firstName: "Hari", lastName: "Common", gender: "Male", grade: 13, programId: 90 },
+  mappedLater: { key: "H3", firstName: "Isha", lastName: "Later", gender: "Female", grade: 12, programId: 80 },
+} as const satisfies Record<string, FixtureMentee>;
 // Mentor C's Mentees for the Profile Doc spec, one per viewport, never
 // contacted in the app, each with LEGACY_CONVERSATION's summary on their
 // Student Links row and its action items as open Profile Doc Action Items
@@ -538,6 +552,7 @@ export async function seedBlendedLearningFixtures(client: Client): Promise<void>
   const mentorA = await mentorUserId(client, BLENDED_MENTOR_A.email);
   const mentorB = await seedMentor(client, BLENDED_MENTOR_B);
   const mentorC = await seedMentor(client, BLENDED_MENTOR_C);
+  const mentorD = await seedMentor(client, BLENDED_MENTOR_D);
 
   const ids: Record<string, number> = {};
   const contacts: Record<string, FixtureContact> = {
@@ -551,10 +566,12 @@ export async function seedBlendedLearningFixtures(client: Client): Promise<void>
     ...Object.values(DRAFT_REVIEW_MENTEES),
     ...Object.values(LEGACY_CONVERSATION_MENTEES),
   ];
+  const manageMentees = Object.values(MANAGE_MENTEES);
   for (const [index, mentee] of [
     ...Object.values(MENTEES),
     ...Object.values(OTHER_STUDENTS),
     ...loggingMentees,
+    ...manageMentees,
   ].entries()) {
     ids[mentee.key] = await seedStudent(client, mentee, index, contacts[mentee.key]);
   }
@@ -598,6 +615,15 @@ export async function seedBlendedLearningFixtures(client: Client): Promise<void>
     await seedMapping(client, {
       studentId: ids[mentee.key],
       mentorUserId: mentorC,
+      programId: mentee.programId,
+      academicYear: CURRENT_ACADEMIC_YEAR,
+      startedDaysAgo: 90,
+    });
+  }
+  for (const mentee of [MANAGE_MENTEES.first, MANAGE_MENTEES.second]) {
+    await seedMapping(client, {
+      studentId: ids[mentee.key],
+      mentorUserId: mentorD,
       programId: mentee.programId,
       academicYear: CURRENT_ACADEMIC_YEAR,
       startedDaysAgo: 90,

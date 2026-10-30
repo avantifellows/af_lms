@@ -65,6 +65,19 @@ export async function readJsonBody(request: Request): Promise<{ body: unknown } 
   }
 }
 
+// A non-`[id]` API route that takes a JSON body: the guard's or the body's
+// error response, or the access and the parsed body.
+export async function requireBlendedLearningJson(
+  action: BlendedLearningAction,
+  request: Request
+): Promise<{ access: BlendedLearningAccess; body: unknown } | NextResponse> {
+  const guard = await requireBlendedLearning(action);
+  if (guard instanceof NextResponse) return guard;
+  const parsed = await readJsonBody(request);
+  if (parsed instanceof NextResponse) return parsed;
+  return { access: guard.access, body: parsed.body };
+}
+
 // A use case's failure as a response, with its fieldErrors when it has them.
 export function failureResponse(result: {
   error: string;

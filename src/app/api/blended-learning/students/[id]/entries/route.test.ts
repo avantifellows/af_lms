@@ -160,6 +160,20 @@ describe("POST /api/blended-learning/students/[id]/entries", () => {
     expect(mockNotify.mock.calls).toEqual([[41]]);
   });
 
+  it("skips a ticked Action Item that no longer exists, like a removed Common Action Item's, and saves the rest", async () => {
+    clientQuery
+      .mockResolvedValueOnce(rows(MAPPING))
+      .mockResolvedValueOnce(SAVED)
+      .mockResolvedValueOnce(rows({ id: 802 }))
+      .mockResolvedValueOnce(rows());
+
+    const res = await postEntry("501", { ...CONVERSATION, completeActionItemIds: [801, 802] });
+
+    expect(res.status).toBe(201);
+    expectWrite(3, "UPDATE blended_learning_action_items", [700, MENTOR.actorEmail, [801, 802], 501]);
+    expectWrite(4, "SELECT 1 FROM blended_learning_action_items", [[801]]);
+  });
+
   it("returns 422 for a photo whose upload never reached S3, and saves nothing", async () => {
     const missing = PHOTO.replace("0d6f1d8e", "ffffffff");
     const res = await postEntry("501", { ...CONVERSATION, photoKeys: [missing] });
@@ -186,11 +200,13 @@ describe("POST /api/blended-learning/students/[id]/entries", () => {
         .mockResolvedValueOnce(rows(MAPPING))
         .mockResolvedValueOnce(SAVED)
         .mockResolvedValueOnce(rows({ id: 41 }))
-        .mockResolvedValueOnce(rows({ id: 802 }));
+        .mockResolvedValueOnce(rows({ id: 802 }))
+        .mockResolvedValueOnce(rows({ "?column?": 1 }));
 
       const res = await postEntry("501", { ...WELLBEING, completeActionItemIds: [801, 802] });
 
       expect(res).toEqual({ status: 409, body: { error: expect.stringContaining("already done") } });
+      expectWrite(5, "SELECT 1 FROM blended_learning_action_items", [[801]]);
       expect(mockNotify).not.toHaveBeenCalled();
     });
 

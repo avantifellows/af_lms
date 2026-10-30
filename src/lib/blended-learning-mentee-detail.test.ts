@@ -278,4 +278,46 @@ describe("getMenteeDetail", () => {
       { id: 100, text: "Old open item", owner: "parent", agreedOn: "2026-10-12", source: "conversation" },
     ]);
   });
+
+  it("lists open Action Items pushed from Common Action Items, tagged and dated when added; a done one joins the history of the Conversation that ticked it", async () => {
+    givenRows({
+      profile: [PROFILE],
+      entries: [
+        entry({ id: "12", occurred_on: "2026-10-20" }),
+        entry({ id: "10", occurred_on: "2026-10-12" }),
+      ],
+      actionItems: [
+        { conversation_id: "10", from_profile_doc: false, id: "100", text: "Old open item", owner: "parent", status: "open", added_on: "2026-10-12" },
+        { conversation_id: "12", from_profile_doc: false, id: "120", text: "Revise optics", owner: "student", status: "open", added_on: "2026-10-20" },
+        // Pushed: no Conversation. A done one shows in its ticking Conversation's history.
+        { conversation_id: null, from_profile_doc: false, id: "130", text: "Fill in the form", owner: "student", status: "open", added_on: "2026-10-25" },
+        { conversation_id: null, from_profile_doc: false, id: "131", text: "Same day push", owner: "mentor", status: "open", added_on: "2026-10-20" },
+        { conversation_id: null, completed_by_conversation_id: "12", from_profile_doc: false, id: "132", text: "Already done", owner: "parent", status: "done", added_on: "2026-10-01" },
+        // A done Profile Doc item stays with the Profile Doc entry, not its ticking Conversation.
+        { conversation_id: null, completed_by_conversation_id: "10", from_profile_doc: true, id: "140", text: "Doc item", owner: "student", status: "done", added_on: "2026-09-01" },
+      ],
+    });
+
+    const detail = await getMenteeDetail(MENTOR, 501);
+
+    // Newest first by date; on the same day a Conversation's items come first.
+    expect(detail?.openActionItems).toEqual([
+      { id: 130, text: "Fill in the form", owner: "student", agreedOn: "2026-10-25", source: "common" },
+      { id: 120, text: "Revise optics", owner: "student", agreedOn: "2026-10-20", source: "conversation" },
+      { id: 131, text: "Same day push", owner: "mentor", agreedOn: "2026-10-20", source: "common" },
+      { id: 100, text: "Old open item", owner: "parent", agreedOn: "2026-10-12", source: "conversation" },
+    ]);
+    const conversationItems = (id: number) =>
+      detail?.history.flatMap((item) => (item.kind === "conversation" && item.id === id ? item.actionItems : []));
+    // After the items the Conversation agreed, tagged as pushed.
+    expect(conversationItems(12)).toEqual([
+      { id: 120, text: "Revise optics", owner: "student", status: "open" },
+      { id: 132, text: "Already done", owner: "parent", status: "done", source: "common" },
+    ]);
+    expect(conversationItems(10)).toEqual([{ id: 100, text: "Old open item", owner: "parent", status: "open" }]);
+    // Every Action Item of the Student is read, a pushed one included.
+    const actionItemsSql = mockQuery.mock.calls.map(([sql]) => sql).find((sql) => sql.includes("FROM blended_learning_action_items"));
+    expect(actionItemsSql).toMatch(/WHERE student_id = \$1\s+ORDER BY/);
+    expect(actionItemsSql).not.toMatch(/JOIN/);
+  });
 });

@@ -390,6 +390,26 @@ describe("MenteeDetailPage", () => {
     expect(within(section).getByText("Revise optics")).toBeInTheDocument();
     expect(within(section).getByText("From 20 Oct 2026")).toBeInTheDocument();
     expect(within(section).queryByText(/Due/)).not.toBeInTheDocument();
+    expect(within(section).queryByText("From program")).not.toBeInTheDocument();
+  });
+
+  it("tags an Open Action Item pushed by an admin as From program, dated when it was added", async () => {
+    signedInAs(MENTOR);
+    mockGetMenteeDetail.mockResolvedValue({
+      ...MENTEE,
+      openActionItems: [
+        { id: 130, text: "Fill in the scholarship form", owner: "student", agreedOn: "2026-10-25", source: "common" },
+        { id: 120, text: "Revise optics", owner: "student", agreedOn: "2026-10-20", source: "conversation" },
+      ],
+    });
+
+    await renderPage();
+
+    const [pushed, agreed] = within(screen.getByRole("region", { name: "Open Action Items" })).getAllByRole("listitem");
+    expect(within(pushed).getByText("From program")).toBeInTheDocument();
+    expect(pushed).toHaveTextContent("Fill in the scholarship formFrom programAdded 25 Oct 2026");
+    expect(within(agreed).queryByText("From program")).not.toBeInTheDocument();
+    expect(agreed).toHaveTextContent("From 20 Oct 2026");
   });
 
   it("shows the history newest first: Attempts with their note, Conversations with labelled sections", async () => {
@@ -460,6 +480,32 @@ describe("MenteeDetailPage", () => {
     expect(attempt.getByText("No answer")).toBeInTheDocument();
     // An Attempt without a note shows only its header.
     expect(entries[2].querySelectorAll("p")).toHaveLength(1);
+  });
+
+  it("shows a done Common Action Item in the Conversation that ticked it, tagged From program", async () => {
+    signedInAs(MENTOR);
+    mockGetMenteeDetail.mockResolvedValue({
+      ...MENTEE,
+      history: [
+        conversation({
+          actionItems: [
+            { id: 120, text: "Revise optics", owner: "student", status: "open" },
+            { id: 132, text: "Fill in the scholarship form", owner: "parent", status: "done", source: "common" },
+          ],
+        }),
+      ],
+    });
+
+    await renderPage();
+
+    const [agreed, pushed] = within(within(screen.getByRole("article")).getByRole("list", { name: "Action Items" })).getAllByRole(
+      "listitem"
+    );
+    expect(pushed).toHaveTextContent("ParentFill in the scholarship formFrom programDone");
+    expect(within(pushed).getByText("Fill in the scholarship form")).toHaveClass("line-through");
+    // The tag sits under the text, not struck through.
+    expect(within(pushed).getByText("From program").closest(".line-through")).toBeNull();
+    expect(within(agreed).queryByText("From program")).not.toBeInTheDocument();
   });
 
   it("shows a plain Conversation with None agreed and no flag, photo or notes sections", async () => {
