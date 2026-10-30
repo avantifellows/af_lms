@@ -81,18 +81,19 @@ const MENTEE: MenteeDetail = {
   whatsappPhone: null,
   profileDocUrl: null,
   screenerUrl: null,
+  screenerFeedbackDue: false,
   openDraft: null,
   history: [
     { kind: "attempt", id: 13, occurredOn: "2026-10-20", note: "No answer" },
     {
       kind: "conversation", id: 12, occurredOn: "2026-10-12", mode: "in_person", spokeWith: "parent_or_sibling",
       durationMinutes: 15, summary: "Spoke with her brother.", hasNotes: false, hasRecording: false,
-      hasTranscript: false, photoCount: 0, actionItems: [], flags: [],
+      hasTranscript: false, photoCount: 0, actionItems: [], flags: [], screenerUsed: null, screenerFeedback: null,
     },
     {
       kind: "conversation", id: 11, occurredOn: "2026-10-01", mode: "call", spokeWith: "student",
       durationMinutes: 30, summary: "Older Conversation.", hasNotes: false, hasRecording: false,
-      hasTranscript: false, photoCount: 0, actionItems: [], flags: [],
+      hasTranscript: false, photoCount: 0, actionItems: [], flags: [], screenerUsed: null, screenerFeedback: null,
     },
   ],
   openActionItems: OPEN_ITEMS as MenteeDetail["openActionItems"],
@@ -220,6 +221,16 @@ describe("LogEntryPage", () => {
       expect(panel).not.toHaveTextContent("From Profile Doc");
       expect(panel).not.toHaveTextContent("Synthetic: planned the mocks.");
     });
+  });
+
+  it("asks about the screener only with a Screener link, and its questions while the feedback is due", async () => {
+    signedInAs(MENTOR);
+    await renderPage();
+    expect(formProps()?.screener).toEqual({ hasLink: false, feedbackDue: false });
+
+    mockGetMenteeDetail.mockResolvedValue({ ...MENTEE, screenerUrl: "https://forms.example/s", screenerFeedbackDue: true });
+    await renderPage();
+    expect(formProps()?.screener).toEqual({ hasLink: true, feedbackDue: true });
   });
 
   it("says there is no Conversation yet when the history has only Attempts", async () => {

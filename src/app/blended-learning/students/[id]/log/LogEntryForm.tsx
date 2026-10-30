@@ -15,10 +15,12 @@ import {
   photosPending,
   postEntry,
   toggled,
+  unshownFieldError,
   type EntryFormValues,
   type FieldErrors,
   type Kind,
   type ReviewDraft,
+  type ScreenerAsk,
 } from "./logEntryPayload";
 import type { PickedPhoto } from "./PhotoPicker";
 import { RecordingCard, type PendingDraft } from "./RecordingCard";
@@ -141,7 +143,7 @@ function LogHeading({ heading, subtitle }: { heading: string; subtitle: string }
 // failure's field errors replace the form's; a success goes to `onSaved`.
 function useEntrySave(
   studentId: number,
-  setFieldErrors: Dispatch<SetStateAction<FieldErrors>>,
+  setFieldErrors: (fieldErrors: FieldErrors) => void,
   onSaved: (saved: Saved) => void
 ) {
   const [error, setError] = useState<string | null>(null);
@@ -248,6 +250,8 @@ type LogEntryFormProps = {
   openActionItems: OpenActionItem[];
   // A Mentee has at most one open Conversation Draft, so no second upload.
   hasOpenDraft: boolean;
+  // Whether to ask "Was the screener form used?" and its two questions.
+  screener?: ScreenerAsk;
   // A ready Conversation Draft to review and save as this Conversation.
   draft?: ReviewDraft | null;
   // An open draft that isn't ready yet; its progress shows in the form.
@@ -271,7 +275,13 @@ function EntryForm({
   const { studentId, draft = null, pendingDraft = null } = props;
   const [photos, setPhotos] = useState<PickedPhoto[]>([]);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
-  const { error, setError, saving, save } = useEntrySave(studentId, setFieldErrors, onSaved);
+  // `screenerFeedback` means the Student's feedback was given meanwhile (by
+  // another save): the questions go, and saving again records only the tick.
+  const failed = (errors: FieldErrors) => {
+    setFieldErrors(errors);
+    if (errors.screenerFeedback) change(() => ({ screenerFeedbackDue: false }));
+  };
+  const { error, setError, saving, save } = useEntrySave(studentId, failed, onSaved);
   const { kind } = values;
   const drafting = waitsForDraft(kind, pendingDraft);
 
@@ -338,7 +348,7 @@ function EntryForm({
         )}
         <SaveBar
           studentId={studentId}
-          error={error}
+          error={error ?? unshownFieldError(fieldErrors, values)}
           saving={saving}
           kind={kind}
           drafting={drafting}
@@ -351,7 +361,7 @@ function EntryForm({
 
 export function LogEntryForm(props: LogEntryFormProps) {
   const { name, draft = null } = props;
-  const [values, setValues] = useState(() => initialEntryValues(draft, props.today));
+  const [values, setValues] = useState(() => initialEntryValues(draft, props.today, props.screener));
   const [saved, setSaved] = useState<Saved | null>(null);
   const change: ChangeValues = (update) => setValues((current) => ({ ...current, ...update(current) }));
 

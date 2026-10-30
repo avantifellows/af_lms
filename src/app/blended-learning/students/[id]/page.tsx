@@ -14,6 +14,7 @@ import {
   type HistoryEntry,
   type MenteeDetail,
   type MentorFlag,
+  type ScreenerFeedback,
 } from "@/lib/blended-learning-mentee-detail";
 import { loadDashboardChrome } from "@/lib/dashboard-chrome";
 
@@ -25,6 +26,7 @@ import { ConversationPhotos } from "./ConversationPhotos";
 import { ConversationRecording } from "./ConversationRecording";
 import { DraftStatus } from "./DraftStatus";
 import { FLAG_HISTORY } from "./flagRecipients";
+import { SCREENER_QUESTIONS } from "./screenerQuestions";
 
 // One Mentee, in one column as wide as the log page's: name, profile line,
 // contact and links, any open Conversation Draft (polled while drafting), the
@@ -34,7 +36,9 @@ import { FLAG_HISTORY } from "./flagRecipients";
 // Admins and read-only Mentors see the same page, view only: the log button
 // and the draft's controls stay in place, disabled. Open Action Items are
 // ticked done from the log page. Only Blended Learning Admins (read-only too)
-// can play a saved Call Recording or read its transcript.
+// can play a saved Call Recording or read its transcript. A Conversation
+// that used the Screener says so, with the Student's one Screener Feedback
+// on the Conversation that gave it.
 
 type Conversation = Extract<HistoryEntry, { kind: "conversation" }>;
 type ProfileDocHistoryEntry = Extract<HistoryEntry, { kind: "profile_doc" }>;
@@ -207,6 +211,28 @@ function FlagNotes({ flags }: { flags: MentorFlag[] }) {
     ));
 }
 
+// "Screener form used", and the two ratings where they were given.
+function ScreenerUsed({ feedback }: { feedback: ScreenerFeedback | null }) {
+  return (
+    <EntrySection label="Screener">
+      <p className="flex items-center gap-1.5 text-sm text-text-primary">
+        <ClipboardList aria-hidden="true" className="h-4 w-4 shrink-0 text-text-muted" />
+        Screener form used
+      </p>
+      {feedback && (
+        <dl className="space-y-2 sm:max-w-2xl">
+          {SCREENER_QUESTIONS.map(({ key, question }) => (
+            <div key={key} className="grid grid-cols-[1fr_auto] items-baseline gap-x-3 text-sm">
+              <dt className="min-w-0 text-text-secondary">{question}</dt>
+              <dd className="text-right font-mono font-bold text-text-primary">{`${feedback[key]} / 5`}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+    </EntrySection>
+  );
+}
+
 function ConversationMedia({ entry, canPlayRecording }: { entry: Conversation; canPlayRecording: boolean }) {
   return (
     <>
@@ -237,6 +263,7 @@ function ConversationEntry({ entry, canPlayRecording }: { entry: Conversation; c
           </EntrySection>
         )}
         <FlagNotes flags={entry.flags} />
+        {entry.screenerUsed && <ScreenerUsed feedback={entry.screenerFeedback} />}
       </div>
       <div className="mt-2">
         <ConversationMedia entry={entry} canPlayRecording={canPlayRecording} />
