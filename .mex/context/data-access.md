@@ -659,7 +659,7 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
 
 ## Blended Learning Screener Feedback (2026-10-28)
 
-- **Tables:** db-service `20261029120000_add_blended_learning_screener_feedback` (branch
+- **Tables:** db-service `20261030120000_add_blended_learning_screener_feedback` (branch
   `feat/bl-screener-feedback`, stacked on `feat/bl-admin-manage`; deploy it before this code).
   `blended_learning_conversations.screener_used` (nullable boolean; a CHECK keeps it NULL on an
   Attempt) and `blended_learning_screener_feedback` (`student_id` UNIQUE, `conversation_id` with a
@@ -689,7 +689,7 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   has `screenerUsed` and `screenerFeedback`. The history shows a "Screener" section ("Screener form
   used", and the two ratings as `n / 5` on the Conversation that gave them) to Mentors and admins,
   read-only. The log page shows no past feedback.
-- **E2E:** `e2e/fixtures/migrations/20261029120000_add_blended_learning_screener_feedback.sql`
+- **E2E:** `e2e/fixtures/migrations/20261030120000_add_blended_learning_screener_feedback.sql`
   mirrors the migration (pg_dump-identical). `blended-learning-screener-feedback.spec.ts` uses
   Mentor C's `SCREENER_MENTEES` (J1–J4: one with a link, one without, per viewport) and
   `SCREENER_RACE_MENTEE` (J5), seeded after every other fixture Student so their phones don't move.
