@@ -16,7 +16,7 @@
 --
 -- Records (live mentions = mentions on completed, non-deleted Visits; 9004802's 15 Sep snippet is
 -- HTML-shaped so the School page's mention lines can be checked to render it as text):
---   9004801 Alpha concern open      Lab equipment missing            21, 22          → 2 visits (same day)
+--   9004801 Alpha concern open      Lab equipment missing            21, 22          → 2 visits, 1 date (not recurring)
 --   9004802 Alpha concern open      Students lack <b>practice</b>…   20, 23          → 2 visits, auto-reopened
 --   9004803 Alpha concern open      Timetable clashes…               23, 24(deleted) → 1 visit
 --   9004804 Alpha concern resolved  Water cooler broken              20, 21, 23      → never counts
@@ -29,16 +29,19 @@
 --   9004811 Delta concern resolved  Shortage of chairs               31              → never counts
 --   9004812 Delta highlight         Regular parent meetings          31              → never counts
 --
+-- Recurring = open, with live mentions on 2+ distinct visit dates in view (same-day Visits count
+-- once; stakeholder decision 30 Oct 2026). The "N visits" labels still count Visits.
 -- Hand-worked answers under ?pms=e2e-vsw-pm3@test.local (default sort Recurring issues desc):
---   Alpha   5 visits · 3 recurring (801, 802, 805), 4 open · top 802 (ties 805 on 2 visits and
---           15 Sep, lower id; beats 801's older 06 Aug) · severity 3+
+--   Alpha   5 visits · 2 recurring (802, 805; 801's two Visits share 06 Aug), 4 open · top 802
+--           "2 visits" (ties 805 on 2 dates, 2 visits and 15 Sep, lower id) · severity 1–2
 --   Bravo   3 visits · 1 recurring (808), 2 open · top 808 "3 visits" · severity 1–2
 --   Charlie 1 visit  · 0 recurring, 1 open · severity open-not-recurring
 --   Delta   1 visit  · 0 recurring, 0 open · severity none
 --   Stats: Schools 4 · Visits 10 · Schools with recurring concerns 2 · Open concerns 7
 --   Freshness: summarised up to 20 Oct 2026, 14:00 IST (08:30 UTC) · 1 visit waiting (9004725)
--- Adding e2e-vsw-pm4: Bravo 4 visits, 2 recurring (808 with 3 visits stays top over 809's newer 2).
--- Only August 2026: Alpha 2 visits, 1 recurring (801, "2 visits"), 1 open; Bravo 1 visit, 0 recurring, 1 open.
+-- Adding e2e-vsw-pm4: Bravo 4 visits, 2 recurring (808 on 3 dates stays top over 809's newer 2).
+-- Only August 2026: Alpha 2 visits, 0 recurring (801's two Visits are one date), 1 open, severity
+-- open-not-recurring; Bravo 1 visit, 0 recurring, 1 open; Schools with recurring concerns 0.
 -- From 1 Sep 2026: Alpha 0 recurring, 3 open (802, 803, 805: the deleted Visit and the hidden concern don't count).
 
 INSERT INTO public.lms_visit_concerns (id, school_code, kind, text, status, inserted_at, updated_at)

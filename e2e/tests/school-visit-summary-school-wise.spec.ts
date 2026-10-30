@@ -374,20 +374,22 @@ test.describe("School Visit Summary — Recurring Concerns on the School-wise ta
     ]);
     await expect(schoolColumn(adminPage, 1)).toHaveText(["5", "3", "1", "1"]);
     await expect(schoolColumn(adminPage, 3)).toHaveText(["4", "2", "1", "0"]);
-    await expect(schoolColumn(adminPage, 4)).toHaveText(["3", "1", "0", "0"]);
+    // Alpha's "Lab equipment missing" was raised by two Visits on the same day: one visit date, so
+    // it is open but not Recurring.
+    await expect(schoolColumn(adminPage, 4)).toHaveText(["2", "1", "0", "0"]);
 
     await expect(statValue(adminPage, "Schools")).toHaveText("4");
     await expect(statValue(adminPage, "Total visits")).toHaveText("10");
     await expect(statValue(adminPage, "PMs")).toHaveText("1");
     await expect(statValue(adminPage, "Schools with recurring concerns")).toHaveText("2");
 
-    // Alpha's three 2-visit concerns tie; the 15 Sep ones beat the 06 Aug one, then the lower id wins.
+    // Alpha's two Recurring Concerns tie on 2 visit dates, 2 Visits and 15 Sep; the lower id wins.
     await expect(schoolColumn(adminPage, 6).nth(0)).toHaveText(`${HTML_CONCERN}2 visits`);
     await expect(schoolColumn(adminPage, 6).nth(1)).toHaveText("Smartboard not working3 visits");
     await expect(schoolColumn(adminPage, 6).nth(2)).toHaveText("—");
     await expect(schoolColumn(adminPage, 6).nth(3)).toHaveText("—");
 
-    await expect(schoolRow(adminPage, ALPHA).getByRole("img", { name: "3 or more recurring concerns" })).toBeVisible();
+    await expect(schoolRow(adminPage, ALPHA).getByRole("img", { name: "1–2 recurring concerns" })).toBeVisible();
     await expect(schoolRow(adminPage, BRAVO).getByRole("img", { name: "1–2 recurring concerns" })).toBeVisible();
     await expect(schoolRow(adminPage, CHARLIE).getByRole("img", { name: "Open concerns, none recurring" })).toBeVisible();
     await expect(schoolRow(adminPage, DELTA).getByRole("img", { name: "No open concerns" })).toBeVisible();
@@ -417,21 +419,22 @@ test.describe("School Visit Summary — Recurring Concerns on the School-wise ta
   });
 
   test("counts only Visits in view: dates and PMs change Recurring counts", async ({ adminPage }) => {
-    // August only: Alpha's two same-day Visits are two mentions of "Lab equipment missing".
+    // August only: Alpha's two same-day Visits both mention "Lab equipment missing", but on one
+    // visit date, so it isn't Recurring (stakeholder decision, 30 Oct 2026).
     await adminPage.goto(`/school-visit-summary?pms=${CONCERN_PM}&from=2026-08-01&to=2026-08-31`);
     await expect(schoolColumn(adminPage, 0)).toHaveText([`${ALPHA} VSW_E2E`, `${BRAVO} VSW_E2E`]);
     await expect(schoolColumn(adminPage, 1)).toHaveText(["2", "1"]);
     await expect(schoolColumn(adminPage, 3)).toHaveText(["1", "1"]);
-    await expect(schoolColumn(adminPage, 4)).toHaveText(["1", "0"]);
-    await expect(schoolColumn(adminPage, 6).nth(0)).toHaveText("Lab equipment missing2 visits");
-    await expect(statValue(adminPage, "Schools with recurring concerns")).toHaveText("1");
-    await expect(schoolRow(adminPage, ALPHA).getByRole("img", { name: "1–2 recurring concerns" })).toBeVisible();
+    await expect(schoolColumn(adminPage, 4)).toHaveText(["0", "0"]);
+    await expect(schoolColumn(adminPage, 6)).toHaveText(["—", "—"]);
+    await expect(statValue(adminPage, "Schools with recurring concerns")).toHaveText("0");
+    await expect(schoolRow(adminPage, ALPHA).getByRole("img", { name: "Open concerns, none recurring" })).toBeVisible();
 
-    // Alpha over every Visit: the resolved concern, the highlight and the concern mentioned only
-    // in the soft-deleted Visit don't count.
+    // Alpha over every Visit: the resolved concern, the highlight, the concern mentioned only in the
+    // soft-deleted Visit and the same-day pair don't count.
     await adminPage.goto(`/school-visit-summary?pms=${CONCERN_PM}&schools=VSWCONA`);
-    await expect(schoolColumn(adminPage, 4)).toHaveText(["3"]);
-    await expect(schoolRow(adminPage, ALPHA).getByRole("img", { name: "3 or more recurring concerns" })).toBeVisible();
+    await expect(schoolColumn(adminPage, 4)).toHaveText(["2"]);
+    await expect(schoolRow(adminPage, ALPHA).getByRole("img", { name: "1–2 recurring concerns" })).toBeVisible();
 
     // From September: the soft-deleted Visit's mention doesn't make "Timetable clashes" recur.
     await adminPage.goto(`/school-visit-summary?pms=${CONCERN_PM}&schools=VSWCONA&from=2026-09-01`);
@@ -704,6 +707,14 @@ test.describe("School Visit Summary — School page concerns", () => {
     await expect(needs.nth(0).getByText("Recurring · 2 visits", { exact: true })).toBeVisible();
     await expect(needs.nth(0).getByText(compactDates("15 Sep · 10 Jun", "15 Sep 2026 · 10 Jun 2026"), { exact: true })).toBeVisible();
     await expect(needs.nth(2).getByText(compactDates("06 Aug ×2", "06 Aug 2026 ×2"), { exact: true })).toBeVisible();
+    // Two Visits on one date aren't Recurring: just the dates.
+    await expect(needs.nth(2)).not.toContainText("Recurring");
+    await expect(adminPage.getByRole("list", { name: "Concern counts" }).getByRole("listitem")).toHaveText([
+      "4 open concerns",
+      "2 recurring",
+      "1 highlight",
+      "1 resolved",
+    ]);
     // The in-progress Visit's and the soft-deleted Visit's mentions don't count: one Visit, one date.
     await expect(needs.nth(3)).not.toContainText("Recurring");
     await expect(needs.nth(3).getByText(compactDates("15 Sep", "15 Sep 2026"), { exact: true })).toBeVisible();
@@ -909,14 +920,16 @@ test.describe("School Visit Summary — School page concerns", () => {
 
     await expect(cards(adminPage, NEEDS_ATTENTION)).toHaveCount(1);
     await expect(cards(adminPage, NEEDS_ATTENTION).first()).toContainText("Lab equipment missing");
-    await expect(cards(adminPage, NEEDS_ATTENTION).first().getByText("Recurring · 2 visits", { exact: true })).toBeVisible();
+    // Its two Visits are on one date, so it isn't Recurring.
+    await expect(cards(adminPage, NEEDS_ATTENTION).first()).not.toContainText("Recurring");
+    await expect(cards(adminPage, NEEDS_ATTENTION).first().getByText(compactDates("06 Aug ×2", "06 Aug 2026 ×2"), { exact: true })).toBeVisible();
     await expect(highlights(adminPage).first().getByText(compactDates("06 Aug ×2", "06 Aug 2026 ×2"), { exact: true })).toBeVisible();
     await expect(cards(adminPage, "Resolved concerns")).toHaveCount(1);
     await expect(visitNoteRows(adminPage)).toHaveCount(2);
     // The header counts follow the same filters.
     await expect(adminPage.getByRole("list", { name: "Concern counts" }).getByRole("listitem")).toHaveText([
       "1 open concern",
-      "1 recurring",
+      "0 recurring",
       "1 highlight",
       "1 resolved",
     ]);

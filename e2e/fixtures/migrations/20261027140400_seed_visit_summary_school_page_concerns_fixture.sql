@@ -10,14 +10,16 @@
 --
 -- Hand-worked School page for VSWCONA with no filters (Visits in view: 9004720 10 Jun, 9004721 and
 -- 9004722 06 Aug, 9004723 15 Sep, 9004725 25 Sep (no mentions), 9004732 01 Oct in progress; the
--- soft-deleted 9004724 is never in view). Cards sort by visits, then latest mention, then id:
+-- soft-deleted 9004724 is never in view). Cards sort by distinct visit dates, then visits, then
+-- latest mention, then id; "Recurring ·" needs 2+ visit dates (same-day Visits count once).
+--   Header chips: 4 open concerns · 2 recurring · 1 highlight · 1 resolved
 --   Needs attention (4)
 --     9004802 Students lack <b>practice</b>…   Recurring · 2 visits  15 Sep · 10 Jun   reopened
 --             history: Resolved by e2e-vsw-pm3 12 Jun 2026, 11:30 "Practice tests scheduled weekly"
 --                      Reopened automatically: raised again in visit of 15 Sept 2026
 --     9004805 Physics teacher absent…          Recurring · 2 visits  15 Sep · 10 Jun   reopened
 --             history: Resolved "Substitute teacher arranged" · Reopened "Substitute left after a month"
---     9004801 Lab equipment missing            Recurring · 2 visits  06 Aug ×2
+--     9004801 Lab equipment missing            (not recurring)       06 Aug ×2   (2 visits, 1 date)
 --     9004803 Timetable clashes…               1 visit               15 Sep
 --   Going well (1)
 --     9004806 Strong peer learning culture     4 visits              15 Sep · 06 Aug ×2 · 10 Jun
@@ -28,8 +30,9 @@
 --   Hidden: 9004807 (only mentioned in the soft-deleted Visit).
 --   Visit-wise notes (newest first): 01 Oct (in progress, none) · 25 Sep (none) ·
 --     15 Sep (802, 803, 804, 805 + 806) · 06 Aug ×2 (801, 804 + 806 / 801 + 806) · 10 Jun (802, 804, 805 + 806)
--- With ?from=2026-08-01&to=2026-08-31: Needs attention 801 "Recurring · 2 visits" only; Going
--- well 806 "2 visits"; Resolved 804 "1 visit"; Visit-wise notes the two 06 Aug Visits.
+-- With ?from=2026-08-01&to=2026-08-31: Needs attention 801 only, not recurring ("06 Aug ×2");
+-- header 1 open concern · 0 recurring · 1 highlight · 1 resolved; Going well 806 "2 visits";
+-- Resolved 804 "1 visit"; Visit-wise notes the two 06 Aug Visits.
 
 INSERT INTO public.lms_pm_school_visits
   (id, school_code, pm_email, visit_date, status, inserted_at, updated_at, completed_at, deleted_at)
