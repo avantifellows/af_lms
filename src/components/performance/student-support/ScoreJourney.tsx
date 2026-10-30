@@ -102,12 +102,7 @@ function Row({
       </td>
       <td className="px-3 py-2">{row.gender ?? "—"}</td>
       <td className="px-3 py-2">{row.category ?? "—"}</td>
-      <td className="px-3 py-2">
-        <LevelChip level={row.predicted} />
-        {row.predictedPct !== null && (
-          <span className="ml-1 text-xs text-text-muted tabular-nums">{row.predictedPct}%ile</span>
-        )}
-      </td>
+      <td className="px-3 py-2"><LevelChip level={row.predicted} /></td>
       <td className="px-3 py-2"><LevelChip level={row.mode} /></td>
       <td className="px-3 py-2">
         {row.last3.length ? (

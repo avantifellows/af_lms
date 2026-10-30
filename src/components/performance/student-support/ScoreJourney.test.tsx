@@ -113,7 +113,8 @@ describe("ScoreJourney", () => {
 
     const asha = within(rowOf("Asha"));
     expect(asha.getByText("S1")).toBeInTheDocument();
-    expect(asha.getByText("92.5%ile")).toBeInTheDocument();
+    // Only the predicted level is shown, as in the prototype; not the percentile.
+    expect(asha.queryByText(/%ile/)).not.toBeInTheDocument();
     expect(asha.getByText("33.3%")).toBeInTheDocument();
     expect(asha.getByTitle("Median 100 marks of FT 1, Common FT; M1 cutoff 150")).toHaveTextContent("13 to M1");
     expect(asha.getByText("Sliding")).toBeInTheDocument();
