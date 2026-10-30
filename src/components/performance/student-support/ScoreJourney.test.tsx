@@ -102,6 +102,9 @@ describe("ScoreJourney", () => {
     await screen.findByText("JEE (Engineering)");
 
     expect(screen.getByText("Mode AL distribution").parentElement).toHaveTextContent("M1:1 · M2:2 · B2:1 · No AL:1");
+    // The number of levelled major tests, not a sum of sittings, so not "taken".
+    expect(screen.getByText("Major tests")).toBeInTheDocument();
+    expect(screen.queryByText("Major tests taken")).not.toBeInTheDocument();
     expect(screen.getByText("NEET (Medical)")).toHaveTextContent("· 1 students");
     expect(screen.getByText("Other streams")).toBeInTheDocument();
     expect(screen.getByText("No Mode AL yet")).toBeInTheDocument();

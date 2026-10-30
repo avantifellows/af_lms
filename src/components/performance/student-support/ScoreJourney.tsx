@@ -247,7 +247,7 @@ export default function ScoreJourney({ schoolUdise, grade, program, stream, test
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 md:gap-4">
         <StatCard label="Students" value={byGender.length} color="brand-gold" />
-        <StatCard label="Major tests taken" value={state.data.tests.length} color="brand-coral" />
+        <StatCard label="Major tests" value={state.data.tests.length} color="brand-coral" />
         <StatCard label="Mode AL distribution" value={modeDistribution(byGender) || "—"} size="sm" color="brand-amber" />
       </div>
 
