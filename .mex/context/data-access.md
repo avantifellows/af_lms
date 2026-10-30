@@ -21,7 +21,7 @@ edges:
     condition: when adding a write that must proxy to the DB Service
   - target: patterns/add-api-route.md
     condition: when adding a route that reads or writes
-last_updated: 2026-10-29
+last_updated: 2026-10-30
 ---
 
 # Data Access
@@ -362,8 +362,9 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   new items are inserted with `position` 1..n after the Conversation. The ticks are one
   `UPDATE … SET status = 'done', completed_by_conversation_id, completed_by_email, completed_at,
   updated_at WHERE id = ANY($3::bigint[]) AND status = 'open' AND student_id = $4`. Fewer
-  returned rows than ids (an id already done, unknown or another Student's) throws, so the
-  whole save rolls back and returns 409. af_lms makes only that open → done change, and
+  returned rows than ids throws when a missed id still exists (already done or another
+  Student's), so the whole save rolls back and returns 409; a missed id with no row (deleted by
+  a Common Action Item's removal or a Profile Doc re-sync) is skipped. af_lms makes only that open → done change, and
   `bl_action_items_completion_check` keeps the completion columns consistent. `getMenteeDetail`
   returns each item's `owner` and `openActionItems` (open items, newest Conversation first, with `agreedOn`). There are no
   reminders, overdue logic or item editing.
@@ -627,7 +628,9 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   done one (`completed_by_conversation_id` set) is listed after the items of the Conversation that
   ticked it, as `{ …, status: "done", source: "common" }` (`doneCommonItemsByConversation`), so the
   "done ones stay in their history" promise of Remove holds. `logEntry`'s tick `UPDATE … WHERE id = ANY($3) AND status = 'open' AND student_id = $4`
-  needs no change: a pushed row is ticked like any other (a removal racing the tick → 409).
+  ticks a pushed row like any other. A ticked id with no row left (removed while the Mentor's form
+  was open) is skipped and the rest saves; only a missed id that still exists (done, or another
+  Student's) is the 409.
   `insertActionItems` and the draft review read paths only touch Conversation rows; the links
   importer's Profile Doc sync and the e2e seed's Profile Doc rows only touch `from_profile_doc`
   rows. Nothing else in `src/`, `scripts/` or `e2e/` reads the table (no list counts, flags or
