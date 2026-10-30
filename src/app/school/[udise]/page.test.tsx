@@ -51,6 +51,7 @@ vi.mock("next/navigation", () => ({
   redirect: mockRedirect,
   notFound: mockNotFound,
   useRouter: () => ({ refresh: mockRouterRefresh }),
+  useSearchParams: () => new URLSearchParams(),
 }));
 vi.mock("@/lib/permissions", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/permissions")>();

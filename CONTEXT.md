@@ -161,12 +161,28 @@ Setting `deleted_at` timestamp instead of removing the row. Used for actions and
 _Avoid_: Archive, deactivate
 
 **School Visit Summary**:
-An admin-facing read-only dashboard for reviewing all visits across schools. Two pages: a filterable list view (`/school-visit-summary`) and a per-visit detail view (`/school-visit-summary/[id]`). Distinct from the PM's operational workspace at `/visits/[id]`.
+A manager-facing dashboard for reviewing visits across physical-centre Schools: a School-wise view of each School's Visit Concerns and Visit Highlights (with a per-School page), a filterable Visits list (`/school-visit-summary`), and a per-visit detail view (`/school-visit-summary/[id]`). Distinct from the PM's operational workspace at `/visits/[id]`.
 _Avoid_: Visit dashboard, visit report, visit overview
 
 **Remark**:
 A freeform text note attached to a question answer within an action's JSONB `data` payload. Used as "visit notes" on the summary detail page.
 _Avoid_: Note, comment (these imply a separate entity; remarks live inside action data)
+
+**Visit Concern**:
+A durable record of one problem, gap, request or risk needing Avanti's action at a School, distilled from the free text of one or more completed Visits. It keeps its identity as later Visits mention it again, and is either open or resolved.
+_Avoid_: Issue, ticket, theme, remark (a Remark is the raw text; a Visit Concern is what it says)
+
+**Visit Highlight**:
+A durable record of something going well at a School, distilled from the free text of one or more completed Visits. It has no resolve lifecycle.
+_Avoid_: Strength, positive, theme
+
+**Recurring Concern**:
+An open Visit Concern mentioned in two or more distinct Visits among those currently in view, so whether a concern recurs depends on the active filters.
+_Avoid_: Repeated issue, persistent concern
+
+**Concern Resolution**:
+The act of marking a Visit Concern resolved with a required explanation. Resolutions, comments and reopens form the Concern's permanent history; nothing in it is edited or deleted.
+_Avoid_: Closing, dismissal, fix
 
 ### Roles & Access
 
@@ -758,6 +774,11 @@ _Avoid_: Screener Form (as a Quiz Form), Holistic Student Profile Questionnaire
 - A saved **Conversation** is not edited; a later Conversation can mark earlier **Action Items** done
 - An **Action Item** belongs to exactly one **Conversation** or one **Common Action Item**; a Mentee gets a **Common Action Item** at most once
 - A **Mentor Flag** to **Emotional Well-being** notifies its recipient by email without the notes or comment; Physics, Chemistry, and Maths Teacher flags notify no one until those people are named
+- The **School Visit Summary** covers only Schools with an active physical **Centre**; JNV NVS Students' data never appears on it
+- A **Visit Concern** or **Visit Highlight** belongs to one **School**, not a **Centre**, because a **Visit** is to a School
+- Only completed **Visits** contribute to **Visit Concerns** and **Visit Highlights**
+- A new mention of an existing **Visit Concern** attaches to it rather than creating a new one, so its **Concern Resolution** history stays with it
+- A resolved **Visit Concern** reopens automatically when a **Visit** dated after its resolution mentions it again; a Visit dated on or before the resolution never reopens it
 
 ## Example dialogue
 

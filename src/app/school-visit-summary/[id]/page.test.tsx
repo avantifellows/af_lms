@@ -260,8 +260,8 @@ function setupAuth(permission = adminPermission, session = adminSession) {
   mockGetFeatureAccess.mockReturnValue({ access: "edit", canView: true, canEdit: true });
 }
 
-function pageProps(id = "101") {
-  return { params: Promise.resolve({ id }) };
+function pageProps(id = "101", searchParams?: { back?: string }) {
+  return { params: Promise.resolve({ id }), ...(searchParams ? { searchParams: Promise.resolve(searchParams) } : {}) };
 }
 
 describe("SchoolVisitSummaryDetailPage", () => {
@@ -281,6 +281,19 @@ describe("SchoolVisitSummaryDetailPage", () => {
     vi.clearAllMocks();
     setupAuth(teacherPermission, { user: { email: "teacher@avantifellows.org" } });
     await expect(SchoolVisitSummaryDetailPage(pageProps())).rejects.toThrow("REDIRECT:/dashboard");
+  });
+
+  it.each([
+    ["the School page that opened it", "/school-visit-summary/schools/SC001?preset=30d", "/school-visit-summary/schools/SC001?preset=30d"],
+    ["the Visits tab for an off-site back", "https://evil.example/school-visit-summary", "/school-visit-summary?tab=visits"],
+    ["the Visits tab for a back elsewhere in the app", "/dashboard", "/school-visit-summary?tab=visits"],
+  ])("goes Back to %s", async (_label, back, href) => {
+    setupAuth();
+    mockQuery.mockResolvedValueOnce([visit]).mockResolvedValueOnce(actions);
+
+    render(await SchoolVisitSummaryDetailPage(pageProps("101", { back })));
+
+    expect(screen.getByRole("link", { name: /Back to Visit Summary/i })).toHaveAttribute("href", href);
   });
 
   it("scopes a visit-manager PM's detail lookup to their Centres' Schools", async () => {
@@ -328,7 +341,8 @@ describe("SchoolVisitSummaryDetailPage", () => {
     const jsx = await SchoolVisitSummaryDetailPage(pageProps());
     render(jsx);
 
-    expect(screen.getByRole("link", { name: /Back to Visit Summary/i })).toHaveAttribute("href", "/school-visit-summary");
+    // School-wise is the list's default tab, so a bare Back would land there.
+    expect(screen.getByRole("link", { name: /Back to Visit Summary/i })).toHaveAttribute("href", "/school-visit-summary?tab=visits");
     expect(screen.getByRole("heading", { name: "Test School (SC001)" })).toBeInTheDocument();
     expect(screen.getByText("Program Manager")).toBeInTheDocument();
     expect(screen.getByText("pm@avantifellows.org")).toBeInTheDocument();

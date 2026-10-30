@@ -14,7 +14,7 @@ edges:
     condition: for the testing stack (Vitest + RTL) specifics
   - target: context/permissions.md
     condition: when the component imports shared constants (use @/lib/constants, not @/lib/permissions)
-last_updated: 2026-10-07
+last_updated: 2026-10-27
 ---
 
 # Add a React Component
@@ -40,6 +40,7 @@ inputs (`RadioPair`, `RemarkField`, `FormLabel`). Test stack: Vitest + `@testing
 - **Variables used inside a `vi.mock()` factory** must be wrapped in `vi.hoisted()` (the factory is hoisted above `const`s).
 - **Fake timers + async rendering**: call `vi.useFakeTimers()` AFTER `await ServerComponent(props)` + `render(jsx)`; use `fireEvent` not `userEvent`, wrap advances in `act(async () => await vi.advanceTimersByTimeAsync(n))`; don't pair `waitFor` with fake timers.
 - **Shared `ui/Modal`**: it already renders `role="dialog"` + `aria-modal="true"` on its root (callers pass `aria-labelledby` etc. straight to `<Modal>` — never nest another `role="dialog"` inside it), moves focus to the first focusable element (or the dialog itself) on open, traps Tab/Shift+Tab while it is the topmost open Modal, and restores focus to the opener on close.
+- **`ui/SearchableMultiSelect`** (#476): a button-opened, searchable checkbox list for multi-value filters — props `{ label, options: {value, label}[], selected, allLabel, pluralNoun, onChange }`. The button reads `allLabel`, the one selected label, or "n `pluralNoun`"; no chips. Selected options are listed first, in an order fixed when the list opens (so a ticked option doesn't jump). It wraps everything in `role="group"` named by `label`, so tests find it with `getByRole("group", { name })`, open it via its button, and tick native checkboxes. It is controlled: the caller owns `selected` and any URL writing. First used by the Visit Summary filter bar.
 - **GPS state machines** (visit forms): mock `@/lib/geolocation` (`getAccurateLocation`/`getAccuracyStatus`); hold the fetch promise open to observe intermediate states (see `src/components/visits/AGENTS.md`).
 
 ## Verify

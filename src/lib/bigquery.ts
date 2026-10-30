@@ -65,7 +65,7 @@ const CHAPTER_CARD_COHORT =
 
 // Test formats that count as "major" (i.e. the Full Tests tab) — these also have
 // real Academic Level (AL) values populated on the section='overall' row.
-export const MAJOR_TEST_FORMATS = [
+const MAJOR_TEST_FORMATS = [
   "major_test",
   "mock_test",
   "part_test",
@@ -318,6 +318,55 @@ export async function getBatchOverviewData(
 
   const streamRows = enrolledRows[0] as { stream: string; total: number }[];
   return { tests, ...summariseEnrolment(streamRows, stream) };
+}
+
+export interface StudentAcademicLevelCount {
+  grade: number;
+  // Raw `student_stream`; the caller canonicalises it.
+  stream: string | null;
+  // Null for a student dbt has not levelled yet (no AL-bearing test).
+  academicLevel: string | null;
+  students: number;
+}
+
+/**
+ * Current-year students at a School + programme, counted per grade, stream and
+ * dim_student.academic_level (the Visit Summary School page's academic-level
+ * cards, #470). Reads dim_student, so students with no test are counted too
+ * (with a null level). Every value is a query param.
+ */
+export async function getStudentAcademicLevelCounts(
+  udise: string,
+  program: string,
+  grades: readonly number[]
+): Promise<StudentAcademicLevelCount[]> {
+  const client = getBigQueryClient();
+  const query = `
+    SELECT
+      student_grade AS grade,
+      student_stream AS stream,
+      academic_level,
+      COUNT(DISTINCT enrollment_user_id) AS students
+    FROM ${DIM_STUDENT_TABLE}
+    WHERE academic_year = @academicYear
+      AND student_school_udise_code = @udise
+      AND student_program = @program
+      AND student_grade IN UNNEST(@grades)
+      AND enrollment_user_id IS NOT NULL
+    GROUP BY grade, stream, academic_level
+  `;
+  const [rows] = await client.query({
+    query,
+    params: { udise, program, grades: [...grades], academicYear: CURRENT_ACADEMIC_YEAR },
+  });
+  return (
+    rows as { grade: number; stream: string | null; academic_level: string | null; students: number }[]
+  ).map((r) => ({
+    grade: Number(r.grade),
+    stream: r.stream,
+    academicLevel: r.academic_level,
+    students: Number(r.students),
+  }));
 }
 
 /**
