@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { authorizeSchoolAccess } from "./api-auth";
 import { isNvsProgram } from "./constants";
-import { resolvePerformanceProgram } from "./performance-program";
+import { performancePrograms, resolvePerformanceProgram } from "./performance-program";
 
 export type StudentSupportRequest =
   | { ok: true; program: string; grade: number; schoolCode: string; searchParams: URLSearchParams }
@@ -14,10 +14,11 @@ const fail = (error: string, status: number): StudentSupportRequest => ({
 
 /**
  * Gate for the Student support reads: Performance access to the School, then
- * a program that is required and not JNV NVS. Student support is for
- * physical centres only. Unlike the chapter-test report's gate, a missing
- * program is refused rather than read as "not NVS", so an NVS-only School
- * can't get in by leaving the param out.
+ * a program that is required, not JNV NVS, and one of the caller's programs
+ * (the programs the grades route offers them, as MCP checks; admins pass).
+ * Student support is for physical centres only. Unlike the chapter-test
+ * report's gate, a missing program is refused rather than read as "not NVS",
+ * so an NVS-only School can't get in by leaving the param out.
  */
 async function authorizeStudentSupportRead(
   request: Request,
@@ -31,6 +32,8 @@ async function authorizeStudentSupportRead(
   if (!pinned.ok) return { ok: false, response: pinned.response };
   if (!pinned.program) return fail("program is required", 400);
   if (isNvsProgram(pinned.program)) return fail("Not available for JNV NVS", 403);
+  const allowed = performancePrograms(auth.permission);
+  if (allowed !== "all" && !allowed.has(pinned.program)) return fail("Access denied", 403);
 
   const grade = Number(searchParams.get("grade"));
   if (!searchParams.get("grade") || !Number.isInteger(grade)) {

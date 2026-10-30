@@ -11,6 +11,28 @@ export function examStream(stream: string | null | undefined): "engineering" | "
   return null;
 }
 
+/** The exam stream a student is read under: their own, else engineering, as
+ *  dbt defaults a NULL stream. So a student with no usable stream still gets
+ *  JEE tests and chapters. */
+export function studentExamStream(stream: string | null | undefined): "engineering" | "medical" {
+  return examStream(stream) ?? "engineering";
+}
+
+/** Whether a test counts for a student of this exam stream: a test with no
+ *  stream counts for everyone, any other only for its own stream. */
+export function testInStream(testStream: string | null | undefined, stream: "engineering" | "medical"): boolean {
+  return !testStream || testStream.trim().toLowerCase() === stream;
+}
+
+/** Oldest first; tests on the same day in session id order, so the last
+ *  three are the same on every read. */
+export function byDateThenSession(
+  a: { date: string; sessionId: string },
+  b: { date: string; sessionId: string }
+): number {
+  return a.date.localeCompare(b.date) || a.sessionId.localeCompare(b.sessionId);
+}
+
 const LEVEL_RANK: Record<string, number> = { M1: 3, B1: 3, M2: 2, B2: 2, M3: 1, B3: 1 };
 
 /** A per-test AL as the mode reads it: "Not Qualified" counts as M3 / B3,

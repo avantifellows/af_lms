@@ -79,6 +79,9 @@ describe("getScoreJourney", () => {
       tests: [
         { session_id: "t1", test_name: "FT 1", start_date: "2026-07-01", stream: "engineering" },
         { session_id: "t2", test_name: "FT 2", start_date: "2026-08-01", stream: null },
+        { session_id: "t3", test_name: "FT 3", start_date: "2026-08-15", stream: null },
+        { session_id: "t4", test_name: "FT 4", start_date: "2026-09-01", stream: null },
+        { session_id: "t5", test_name: "FT 5", start_date: "2026-09-15", stream: null },
       ],
       students: [
         {
@@ -119,6 +122,9 @@ describe("getScoreJourney", () => {
     expect(data.tests).toEqual([
       { sessionId: "t1", name: "FT 1", date: "2026-07-01", stream: "engineering" },
       { sessionId: "t2", name: "FT 2", date: "2026-08-01", stream: null },
+      { sessionId: "t3", name: "FT 3", date: "2026-08-15", stream: null },
+      { sessionId: "t4", name: "FT 4", date: "2026-09-01", stream: null },
+      { sessionId: "t5", name: "FT 5", date: "2026-09-15", stream: null },
     ]);
     const [asha, other] = data.students;
     expect(asha).toMatchObject({
@@ -136,17 +142,70 @@ describe("getScoreJourney", () => {
     });
     // Median of 100, 40, 200 = 100; the M1 cutoff 150 is 50 marks = 13 questions away.
     expect(asha.toNext).toEqual({
-      kind: "count", questions: 13, median: 100, cutoff: 150, nextLevel: "M1", tests: ["FT 1", "FT 2", "t5"],
+      kind: "count", questions: 13, median: 100, cutoff: 150, nextLevel: "M1", tests: ["FT 1", "FT 2", "FT 5"],
     });
     // Every test's raw result, levelled or not.
     expect(Object.keys(asha.results)).toEqual(["t1", "t2", "t3", "t4", "t5"]);
     expect(asha.results.t2).toEqual({ level: "Not Qualified", marks: 40, max: 300 });
 
-    // No name, no stream, no tests.
+    // No name, no tests; no usable stream reads as engineering.
     expect(other).toMatchObject({
-      uid: "102", name: "102", examStream: null, status: null, last3: [], latestPct: null,
+      uid: "102", name: "102", examStream: "engineering", status: null, last3: [], latestPct: null,
       predictedPct: null, toNext: { kind: "none" }, results: {},
     });
+  });
+
+  it("counts only the student's own stream's tests, so the journey agrees with the report", async () => {
+    warehouse({
+      students: [ASHA, { ...ASHA, uid: "103", stream: "PCB" }, { ...ASHA, uid: "104", stream: null }],
+      cutoffs: CUTOFFS,
+    });
+    const sittings = [
+      { session_id: "jee", academic_level: "Not Qualified", marks_scored: 20, max_marks_possible: 300 },
+      { session_id: "neet", academic_level: "B1", marks_scored: 600, max_marks_possible: 720 },
+      { session_id: "any", academic_level: "M2", marks_scored: 100, max_marks_possible: 300 },
+    ];
+    cumulative.mockResolvedValue({
+      tests: [
+        { session_id: "jee", test_name: "JEE FT", start_date: "2026-07-01", stream: "engineering" },
+        { session_id: "neet", test_name: "NEET FT", start_date: "2026-07-02", stream: "medical" },
+        { session_id: "any", test_name: "Common FT", start_date: "2026-07-03", stream: null },
+      ],
+      students: ["101", "103", "104"].map((id) => ({ student_id: id, stream: null, progression: sittings })),
+    });
+    const { students } = await mod.getScoreJourney("70705", 12, "JNV CoE");
+    const byUid = Object.fromEntries(students.map((s) => [s.uid, s]));
+    // Engineering: the JEE paper and the common one, never the NEET paper.
+    expect(byUid["101"].last3).toEqual(["M3", "M2"]);
+    // Medical: a JEE "Not Qualified" is not a B3.
+    expect(byUid["103"]).toMatchObject({ examStream: "medical", last3: ["B1", "M2"] });
+    // No usable stream: engineering, as dbt defaults it.
+    expect(byUid["104"]).toMatchObject({ examStream: "engineering", last3: ["M3", "M2"] });
+  });
+
+  it("orders tests on the same day by session id, whatever order the warehouse returns", async () => {
+    const day = "2026-07-01";
+    cumulative.mockResolvedValue({
+      tests: [
+        { session_id: "s3", test_name: "C", start_date: day, stream: null },
+        { session_id: "s1", test_name: "A", start_date: day, stream: null },
+        { session_id: "s2", test_name: "B", start_date: day, stream: null },
+      ],
+      students: [
+        {
+          student_id: "101",
+          stream: "PCM",
+          progression: [
+            { session_id: "s3", academic_level: "M1", marks_scored: 200, max_marks_possible: 300 },
+            { session_id: "s1", academic_level: "M3", marks_scored: 30, max_marks_possible: 300 },
+            { session_id: "s2", academic_level: "M2", marks_scored: 100, max_marks_possible: 300 },
+          ],
+        },
+      ],
+    });
+    const data = await mod.getScoreJourney("70705", 12, "JNV CoE");
+    expect(data.tests.map((t) => t.sessionId)).toEqual(["s1", "s2", "s3"]);
+    expect(data.students[0].last3).toEqual(["M3", "M2", "M1"]);
   });
 
   it("keeps the latest score as a percentage, rounded", async () => {
@@ -285,11 +344,34 @@ describe("getStudentReport", () => {
     expect(callsTo("WITH answers AS")).toHaveLength(0);
   });
 
-  it("shows nothing but the header for a student outside JEE and NEET", async () => {
-    warehouse({ students: [{ ...ASHA, stream: "Arts" }], cutoffs: CUTOFFS, tests: TEST_ROWS });
-    const report = await mod.getStudentReport("70705", 12, "JNV CoE", "101");
-    expect(report).toMatchObject({ chapters: [], tests: [], student: { examStream: null, last3: [] } });
-    expect(callsTo("WITH answers AS")).toHaveLength(0);
+  it("reads a student with no usable stream as engineering, as dbt does", async () => {
+    for (const stream of ["Arts", null]) {
+      bq.mockReset();
+      vi.resetModules();
+      mod = await import("./student-support");
+      warehouse({ students: [{ ...ASHA, stream }], cutoffs: CUTOFFS, tests: TEST_ROWS, chapters: [] });
+      const report = (await mod.getStudentReport("70705", 12, "JNV CoE", "101"))!;
+      expect(report.student).toMatchObject({ examStream: "engineering", last3: ["M3", "M3", "M2"] });
+      expect(report.tests.map((t) => t.sessionId)).toEqual(["adv", "c", "b", "a", "base"]);
+      expect(callsTo("WITH answers AS")[0].params.courses).toEqual(["JEE Mains", "JEE Advanced"]);
+    }
+  });
+
+  it("orders same-day tests by session id in the history and the level journey", async () => {
+    const day = { start_date: "2026-08-01", hashed_session_id: 20 };
+    warehouse({
+      students: [ASHA],
+      cutoffs: CUTOFFS,
+      chapters: [],
+      tests: [
+        testRow({ ...day, session_id: "s2", test_name: "FT 2", academic_level: "M2", marks_scored: 100 }),
+        testRow({ ...day, session_id: "s3", test_name: "FT 3", academic_level: "M1", marks_scored: 200 }),
+        testRow({ ...day, session_id: "s1", test_name: "FT 1", academic_level: "M3", marks_scored: 30 }),
+      ],
+    });
+    const report = (await mod.getStudentReport("70705", 12, "JNV CoE", "101"))!;
+    expect(report.tests.map((t) => t.sessionId)).toEqual(["s3", "s2", "s1"]);
+    expect(report.student.last3).toEqual(["M3", "M2", "M1"]);
   });
 
   it("asks a medical student's chapters for NEET with the medical priority", async () => {

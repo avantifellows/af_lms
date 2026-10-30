@@ -54,7 +54,14 @@ describe("GET /api/quiz-analytics/[udise]/student-support/notes", () => {
     const res = await GET(request({ grade: "12", program: "JNV CoE" }), routeParams({ udise: "1234" }));
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ counts: { "101": 2 } });
-    expect(mockCounts).toHaveBeenCalledWith(SESSION, "70705", 12);
+    expect(mockCounts).toHaveBeenCalledWith(SESSION, "70705", "JNV CoE", 12);
+  });
+
+  it("refuses a program outside the caller's programs", async () => {
+    mockAuth.mockResolvedValue({ authorized: true, school: SCHOOL, permission: { role: "teacher", program_ids: [1] } } as never);
+    const res = await GET(request({ grade: "12", program: "Punjab CoE" }), routeParams({ udise: "1234" }));
+    expect(res.status).toBe(403);
+    expect(mockCounts).not.toHaveBeenCalled();
   });
 
   it("requires a numeric student id", async () => {
@@ -66,7 +73,7 @@ describe("GET /api/quiz-analytics/[udise]/student-support/notes", () => {
     mockNotes.mockResolvedValue(null);
     const res = await GET(request({ grade: "12", program: "JNV CoE", student: "101" }), routeParams({ udise: "1234" }));
     expect(res.status).toBe(404);
-    expect(mockNotes).toHaveBeenCalledWith(SESSION, "70705", "101");
+    expect(mockNotes).toHaveBeenCalledWith(SESSION, "70705", "JNV CoE", "101");
   });
 
   it("returns the student's interactions", async () => {

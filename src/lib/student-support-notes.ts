@@ -3,7 +3,12 @@
 // that student's notes in Holistic Mentorship. A teacher sees their own
 // mentees; PM / program admin / admin see the program. Confidential: these
 // reads are never exposed through the MCP views.
-import { CURRENT_ACADEMIC_YEAR, isHolisticHistoricalImportProgramId } from "./constants";
+import {
+  CURRENT_ACADEMIC_YEAR,
+  isHolisticHistoricalImportProgramId,
+  isHolisticMentorshipProgramId,
+  programIdForLabel,
+} from "./constants";
 import { query } from "./db";
 import { requireHolisticMentorshipAccess, type HolisticMentorshipSession } from "./holistic-mentorship";
 import { getResolvedPermission } from "./permissions";
@@ -15,12 +20,21 @@ type NotesReader =
   | { kind: "program"; programId: number; schoolId: number };
 
 /**
- * The Holistic gate for the whole School. A teacher reads only their mapped
- * mentees ("roster_view" proves they mentor here; the counts query then keeps
- * their active mappings). Everyone else needs "mapped_student_read", the action
- * the Holistic student read uses. Null = no notes for this viewer.
+ * The Holistic gate for the School in the program being viewed (the report's
+ * `program` label, e.g. "JNV CoE"). A School can have active centres in two
+ * Holistic programs, so the gate is always asked for this one. A teacher reads
+ * only their mapped mentees ("roster_view" proves they mentor here; the counts
+ * query then keeps their active mappings). Everyone else needs
+ * "mapped_student_read", the action the Holistic student read uses. Null = no
+ * notes for this viewer, or a program that isn't a Holistic Mentorship one.
  */
-async function notesReader(session: HolisticMentorshipSession, schoolCode: string): Promise<NotesReader | null> {
+async function notesReader(
+  session: HolisticMentorshipSession,
+  schoolCode: string,
+  program: string
+): Promise<NotesReader | null> {
+  const programId = programIdForLabel(program);
+  if (!isHolisticMentorshipProgramId(programId)) return null;
   const email = session?.user?.email;
   if (!email) return null;
   const permission = await getResolvedPermission(email);
@@ -29,6 +43,7 @@ async function notesReader(session: HolisticMentorshipSession, schoolCode: strin
   const teacher = permission?.role === "teacher";
   const access = await requireHolisticMentorshipAccess(session, teacher ? "roster_view" : "mapped_student_read", {
     schoolCode,
+    programId,
   });
   if (!access.ok || !access.school || access.programId === undefined) return null;
   if (teacher) {
@@ -55,9 +70,10 @@ const HISTORICAL_SOURCES = "('approved_2025_holistic_export', 'synthetic_fixture
 export async function getMentorNoteCounts(
   session: HolisticMentorshipSession,
   schoolCode: string,
+  program: string,
   grade: number
 ): Promise<Record<string, number>> {
-  const reader = await notesReader(session, schoolCode);
+  const reader = await notesReader(session, schoolCode, program);
   if (!reader) return {};
   const historical = isHolisticHistoricalImportProgramId(reader.programId);
   const rows = await query<{ uid: string; notes: number | string }>(
@@ -68,7 +84,9 @@ export async function getMentorNoteCounts(
               WHERE notes.student_id = student.id AND notes.state = 'submitted' AND plan.program_id = $2)
           + (SELECT COUNT(*) FROM holistic_mentorship_historical_notes historical
               WHERE $5::boolean AND historical.student_id = student.id
-                AND historical.source_system IN ${HISTORICAL_SOURCES}) AS notes
+                AND historical.source_system IN ${HISTORICAL_SOURCES}
+                AND EXISTS (SELECT 1 FROM holistic_mentorship_historical_note_answers answer
+                             WHERE answer.historical_note_id = historical.id)) AS notes
      FROM student
      JOIN centre_students roster ON roster.user_id = student.user_id
      JOIN centres centre
@@ -115,6 +133,7 @@ interface NoteRow {
 export async function getMentorNotes(
   session: HolisticMentorshipSession,
   schoolCode: string,
+  program: string,
   uid: string
 ): Promise<MentorInteraction[] | null> {
   const [student] = await query<{ id: number | string }>(`SELECT id FROM student WHERE user_id = $1 LIMIT 1`, [
@@ -122,7 +141,7 @@ export async function getMentorNotes(
   ]);
   if (!student) return null;
   const studentId = Number(student.id);
-  const reader = await notesReader(session, schoolCode);
+  const reader = await notesReader(session, schoolCode, program);
   if (!reader) return null;
   const access = await requireHolisticMentorshipAccess(session, "mapped_student_read", {
     schoolCode,

@@ -226,5 +226,35 @@ describe("ScoreJourney", () => {
     renderJourney();
     await screen.findByText("JEE (Engineering)");
     expect(screen.queryByRole("button", { name: /notes?$/ })).not.toBeInTheDocument();
+    expect(screen.getByText("Mentor notes unavailable")).toBeInTheDocument();
+  });
+
+  it("says nothing about mentor notes when they load", async () => {
+    mockFetch({ journey: ready(JOURNEY), counts: ready({ counts: {} }) });
+    renderJourney();
+    await screen.findByText("JEE (Engineering)");
+    expect(screen.queryByText("Mentor notes unavailable")).not.toBeInTheDocument();
+  });
+
+  it("says so when no student matches the filters, and clears both", async () => {
+    mockFetch({ journey: ready(JOURNEY) });
+    renderJourney();
+    await screen.findByText("JEE (Engineering)");
+    await userEvent.click(screen.getByRole("button", { name: "Boys" }));
+    await userEvent.click(screen.getByRole("button", { name: "Sliding 0" }));
+    expect(screen.getByText(/No students match these filters/)).toBeInTheDocument();
+    expect(screen.queryByText("JEE (Engineering)")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Clear" }));
+    expect(screen.queryByText(/No students match these filters/)).not.toBeInTheDocument();
+    expect(shownNames()).toHaveLength(5);
+    expect(screen.getByRole("button", { name: "All" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("lets the AL status filters wrap on a narrow screen", async () => {
+    mockFetch({ journey: ready(JOURNEY) });
+    renderJourney();
+    const sliding = await screen.findByRole("button", { name: "Sliding 1" });
+    expect(sliding.parentElement).toHaveClass("flex-wrap");
   });
 });

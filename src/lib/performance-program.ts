@@ -29,3 +29,22 @@ export function resolvePerformanceProgram(
     response: NextResponse.json({ error: "Access denied" }, { status: 403 }),
   };
 }
+
+/**
+ * The Performance programs (BigQuery `student_program` labels) a caller may
+ * read: "all" for admins (read-only too) and a caller with no permission row,
+ * the pinned JNV NVS for PMU roles, else the labels of the row's program_ids.
+ * The same filter the grades route applies to the programs it offers (which
+ * MCP's program guard reads): keep the two in step.
+ */
+export function performancePrograms(
+  permission: { role: string; program_ids?: number[] | null } | null | undefined,
+): "all" | Set<string> {
+  if (!permission || permission.role === "admin") return "all";
+  if (isPmuRole(permission.role)) return new Set([PROGRAM_ID_TO_LABEL[PMU_PROGRAM_ID]]);
+  return new Set(
+    (permission.program_ids ?? [])
+      .map((id) => PROGRAM_ID_TO_LABEL[id])
+      .filter((label): label is string => Boolean(label)),
+  );
+}

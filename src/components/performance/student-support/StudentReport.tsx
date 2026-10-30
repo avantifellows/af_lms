@@ -10,6 +10,7 @@ import { type ChapterSort, focusChapters, sortChapters } from "./report-view";
 import { passMark } from "@/lib/student-support-rules";
 import type {
   ChapterRow,
+  ExamChapters,
   StudentReportData,
   SubjectChapters,
   TestHistoryRow,
@@ -205,8 +206,19 @@ function TestRow({ t }: { t: TestHistoryRow }) {
     <>
       <tr className="cursor-pointer border-t border-border hover:bg-bg-card-alt/40" onClick={() => setOpen(!open)}>
         <td className="px-3 py-2">
-          <span className="mr-1 text-text-muted">{open ? "▾" : "▸"}</span>
-          <span className="text-xs text-text-muted tabular-nums">{t.date}</span> · {t.name}
+          <button
+            type="button"
+            aria-expanded={open}
+            className="text-left"
+            onClick={(e) => {
+              // The row toggles too; one click must toggle once.
+              e.stopPropagation();
+              setOpen(!open);
+            }}
+          >
+            <span className="mr-1 text-text-muted" aria-hidden="true">{open ? "▾" : "▸"}</span>
+            <span className="text-xs text-text-muted tabular-nums">{t.date}</span> · {t.name}
+          </button>
         </td>
         <td className="px-3 py-2"><LevelChip level={t.level} /></td>
         <ScoreCells s={t.overall} pass={pass} />
@@ -255,6 +267,26 @@ function TestHistory({ tests }: { tests: TestHistoryRow[] }) {
   );
 }
 
+// Full tests with no exam are listed under this choice.
+const OTHER_EXAM = "Other";
+
+/**
+ * The exams a student can be shown: those with chapter data (labelled with
+ * their flagged-chapter count), then any other exam they have full tests in,
+ * so every test is reachable under its exam.
+ */
+function examChoices(chapters: ExamChapters[], tests: TestHistoryRow[]): { exam: string; label: string }[] {
+  const choices = chapters.map((e) => ({
+    exam: e.exam,
+    label: `${e.exam} (${e.subjects.reduce((n, s) => n + s.chapters.filter((c) => c.flag).length, 0)})`,
+  }));
+  for (const t of tests) {
+    const exam = t.exam ?? OTHER_EXAM;
+    if (!choices.some((c) => c.exam === exam)) choices.push({ exam, label: exam });
+  }
+  return choices;
+}
+
 export default function StudentReport({ schoolUdise, grade, program, uid, onBack }: Props) {
   const [exam, setExam] = useState<string | null>(null);
   const [subject, setSubject] = useState<string | null>(null);
@@ -273,9 +305,11 @@ export default function StudentReport({ schoolUdise, grade, program, uid, onBack
   if (state.status === "error") return <div className="space-y-2">{back}<PerformanceNotice>{state.message}</PerformanceNotice></div>;
 
   const { student, chapters, tests } = state.data;
-  const examData = chapters.find((e) => e.exam === exam) ?? chapters[0];
+  const choices = examChoices(chapters, tests);
+  const selected = choices.find((c) => c.exam === exam) ?? choices[0];
+  const examData = chapters.find((e) => e.exam === selected?.exam);
   const subjectData = examData?.subjects.find((s) => s.subject === subject) ?? examData?.subjects[0];
-  const examTests = examData ? tests.filter((t) => t.exam === examData.exam) : tests;
+  const examTests = selected ? tests.filter((t) => (t.exam ?? OTHER_EXAM) === selected.exam) : tests;
 
   return (
     <div className="space-y-4">
@@ -292,20 +326,17 @@ export default function StudentReport({ schoolUdise, grade, program, uid, onBack
         <StatusChip status={student.status} />
       </div>
 
-      {examData ? (
-        <>
-          <div className="flex flex-wrap gap-x-6 gap-y-2">
-            {chapters.length > 1 && (
-              <SegmentedControl
-                label="Exam"
-                options={chapters.map((e) => ({
-                  value: e.exam,
-                  label: `${e.exam} (${e.subjects.reduce((n, s) => n + s.chapters.filter((c) => c.flag).length, 0)})`,
-                }))}
-                value={examData.exam}
-                onChange={(v) => { setExam(v); setSubject(null); }}
-              />
-            )}
+      {(choices.length > 1 || examData) && (
+        <div className="flex flex-wrap gap-x-6 gap-y-2">
+          {choices.length > 1 && (
+            <SegmentedControl
+              label="Exam"
+              options={choices.map((c) => ({ value: c.exam, label: c.label }))}
+              value={selected.exam}
+              onChange={(v) => { setExam(v); setSubject(null); }}
+            />
+          )}
+          {examData && (
             <SegmentedControl
               label="Subject"
               options={examData.subjects.map((s) => ({
@@ -315,23 +346,25 @@ export default function StudentReport({ schoolUdise, grade, program, uid, onBack
               value={subjectData?.subject ?? ""}
               onChange={setSubject}
             />
-          </div>
-          {subjectData && (
-            <>
-              <Section title="Focus chapters · self-prep plan" open>
-                <FocusCards subject={subjectData} />
-              </Section>
-              <Section title="Detailed chapter competency map">
-                <ChapterMap key={`${examData.exam}|${subjectData.subject}`} subject={subjectData} />
-              </Section>
-            </>
           )}
-        </>
+        </div>
+      )}
+      {examData ? (
+        subjectData && (
+          <>
+            <Section title="Focus chapters · self-prep plan" open>
+              <FocusCards subject={subjectData} />
+            </Section>
+            <Section title="Detailed chapter competency map">
+              <ChapterMap key={`${examData.exam}|${subjectData.subject}`} subject={subjectData} />
+            </Section>
+          </>
+        )
       ) : (
         <PerformanceNotice>No chapter data for this student yet.</PerformanceNotice>
       )}
 
-      <Section title={`Detailed full test scores${examData ? ` · ${examData.exam}` : ""}`}>
+      <Section title={`Detailed full test scores${selected ? ` · ${selected.exam}` : ""}`}>
         <TestHistory tests={examTests} />
       </Section>
     </div>

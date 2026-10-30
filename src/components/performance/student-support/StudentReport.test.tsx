@@ -200,7 +200,11 @@ describe("StudentReport", () => {
 
     const testB = history.getByText(/FT B/).closest("tr")!;
     expect(history.queryByText("Maths")).not.toBeInTheDocument();
+    await userEvent.click(within(testB).getAllByRole("cell")[1]);
+    expect(history.getByText("Maths")).toBeInTheDocument();
     await userEvent.click(testB);
+    expect(history.queryByText("Maths")).not.toBeInTheDocument();
+    await userEvent.click(within(testB).getByRole("button", { name: /FT B/ }));
     const maths = history.getByText("Maths").closest("tr")!;
     expect(within(maths).getByText("4 (+2 partial)")).toBeInTheDocument();
     expect(within(maths).getByText("50/100")).toBeInTheDocument();
@@ -227,7 +231,63 @@ describe("StudentReport", () => {
     renderReport();
     expect(await screen.findByText("No chapter data for this student yet.")).toBeInTheDocument();
     expect(screen.queryByRole("group", { name: "Subject" })).not.toBeInTheDocument();
-    expect(section("Detailed full test scores").getByText(/Old FT/)).toBeInTheDocument();
+    expect(section("Detailed full test scores · Other").getByText(/Old FT/)).toBeInTheDocument();
+    // One choice: no exam switch.
+    expect(screen.queryByRole("group", { name: "Exam" })).not.toBeInTheDocument();
+  });
+
+  it("opens and closes a test's subjects from the keyboard", async () => {
+    mockFetch({ ok: true, body: REPORT });
+    renderReport();
+    await screen.findByText("Asha");
+    const history = section("Detailed full test scores · JEE Main");
+    const toggle = history.getByRole("button", { name: /FT B/ });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    toggle.focus();
+    await userEvent.keyboard("{Enter}");
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(history.getByText("Maths")).toBeInTheDocument();
+    await userEvent.keyboard(" ");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(history.queryByText("Maths")).not.toBeInTheDocument();
+  });
+
+  it("offers every exam the student has tests in, even with no chapter data for it", async () => {
+    mockFetch({
+      ok: true,
+      body: {
+        ...REPORT,
+        chapters: [REPORT.chapters[0]],
+        tests: [
+          test({ sessionId: "adv", name: "Adv FT", exam: "JEE Advanced" }),
+          test({ sessionId: "old", name: "Old FT", exam: null }),
+        ],
+      },
+    });
+    renderReport();
+    await screen.findByText("Asha");
+    expect(screen.getByRole("group", { name: "Exam" })).toBeInTheDocument();
+    expect(section("Detailed full test scores · JEE Main").getByText("No full tests yet.")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "JEE Advanced" }));
+    expect(screen.getByText("No chapter data for this student yet.")).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Subject" })).not.toBeInTheDocument();
+    expect(section("Detailed full test scores · JEE Advanced").getByText(/Adv FT/)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Other" }));
+    expect(section("Detailed full test scores · Other").getByText(/Old FT/)).toBeInTheDocument();
+  });
+
+  it("offers the exams of a student's tests when there is no chapter data at all", async () => {
+    mockFetch({
+      ok: true,
+      body: { ...REPORT, chapters: [], tests: [test({ sessionId: "m", name: "Main FT" }), test({ sessionId: "o", name: "Old FT", exam: null })] },
+    });
+    renderReport();
+    await screen.findByText("No chapter data for this student yet.");
+    const exams = within(screen.getByRole("group", { name: "Exam" })).getAllByRole("button");
+    expect(exams.map((b) => b.textContent)).toEqual(["JEE Main", "Other"]);
+    expect(section("Detailed full test scores · JEE Main").getByText(/Main FT/)).toBeInTheDocument();
   });
 
   it("says so when there are no full tests", async () => {

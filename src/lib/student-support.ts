@@ -16,12 +16,14 @@ import { query } from "./db";
 import { ttlCache } from "./ttl-cache";
 import {
   alStatus,
+  byDateThenSession,
   chapterFlag,
   examName,
-  examStream,
   levelForTest,
   passMark,
   questionsToNext,
+  studentExamStream,
+  testInStream,
   topicFlag,
 } from "./student-support-rules";
 import type {
@@ -163,7 +165,7 @@ function journeyRow(
   progression: Progression,
   cutoffs: Map<string, number>
 ): Omit<ScoreJourneyRow, "results"> {
-  const stream = examStream(s.stream);
+  const stream = studentExamStream(s.stream);
   const recent = progression.slice(-3);
   const latest = recent[recent.length - 1];
   return {
@@ -180,16 +182,28 @@ function journeyRow(
     last3: recent.map((p) => p.level),
     latestPct: latest ? round1(latest.pct) : null,
     toNext: questionsToNext(s.mode_al, recent, (level) =>
-      stream && s.category ? (cutoffs.get(cutoffKey(stream, s.category, level)) ?? null) : null
+      s.category ? (cutoffs.get(cutoffKey(stream, s.category, level)) ?? null) : null
     ),
   };
 }
 
+/** One levelled-test sitting as the cumulative AL read gives it. */
+interface Sitting {
+  sessionId: string;
+  date: string;
+  testStream: string | null;
+  testName: string;
+  level: string;
+  marks: number | null;
+  max: number | null;
+}
+
 /**
- * Per student: the levelled full tests (Advanced excluded, the same tests that
- * decide dim_student.academic_level), oldest first, as marks + level, plus every
- * test's raw result for the "All tests" columns. The cumulative AL read already
- * returns exactly these, in order, and applies the test-grade filter.
+ * Per student: their levelled full-test sittings (Advanced excluded, the same
+ * tests that decide dim_student.academic_level), plus every test's raw result
+ * for the "All tests" columns. The cumulative AL read already returns exactly
+ * these and applies the test-grade filter. Tests are ordered by date, then
+ * session id.
  */
 async function getProgressions(
   udise: string,
@@ -197,29 +211,45 @@ async function getProgressions(
   program: string,
   stream?: string,
   testGrade?: number
-): Promise<{ tests: JourneyTest[]; byStudent: Map<string, { progression: Progression; results: Record<string, TestResult> }> }> {
+): Promise<{ tests: JourneyTest[]; byStudent: Map<string, { sittings: Sitting[]; results: Record<string, TestResult> }> }> {
   const data = await getCumulativeALData(udise, grade, program, stream, testGrade);
-  const names = new Map(data.tests.map((t) => [t.session_id, t.test_name]));
-  const byStudent = new Map<string, { progression: Progression; results: Record<string, TestResult> }>();
+  const tests = data.tests
+    .map((t) => ({ sessionId: t.session_id, name: t.test_name, date: t.start_date, stream: t.stream }))
+    .sort(byDateThenSession);
+  const bySession = new Map(tests.map((t) => [t.sessionId, t]));
+  const byStudent = new Map<string, { sittings: Sitting[]; results: Record<string, TestResult> }>();
   for (const s of data.students) {
-    const exam = examStream(s.stream);
-    const progression: Progression = [];
+    const sittings: Sitting[] = [];
     const results: Record<string, TestResult> = {};
     for (const p of s.progression) {
       results[p.session_id] = { level: p.academic_level, marks: p.marks_scored, max: p.max_marks_possible };
-      const level = levelForTest(p.academic_level, exam);
-      if (!level || p.marks_scored === null) continue;
-      progression.push({
+      const test = bySession.get(p.session_id);
+      sittings.push({
+        sessionId: p.session_id,
+        date: test?.date ?? "",
+        testStream: test?.stream ?? null,
+        testName: test?.name ?? p.session_id,
+        level: p.academic_level,
         marks: p.marks_scored,
-        pct: p.max_marks_possible ? (p.marks_scored / p.max_marks_possible) * 100 : null,
-        level,
-        test: names.get(p.session_id) ?? p.session_id,
+        max: p.max_marks_possible,
       });
     }
-    byStudent.set(s.student_id, { progression, results });
+    byStudent.set(s.student_id, { sittings: sittings.sort(byDateThenSession), results });
   }
-  const tests = data.tests.map((t) => ({ sessionId: t.session_id, name: t.test_name, date: t.start_date, stream: t.stream }));
   return { tests, byStudent };
+}
+
+/** A student's journey from their sittings: only tests of their exam stream
+ *  (as in the report), oldest first, as marks + level. */
+function journeyProgression(sittings: Sitting[], stream: "engineering" | "medical"): Progression {
+  const progression: Progression = [];
+  for (const t of sittings) {
+    if (!testInStream(t.testStream, stream)) continue;
+    const level = levelForTest(t.level, stream);
+    if (!level || t.marks === null) continue;
+    progression.push({ marks: t.marks, pct: t.max ? (t.marks / t.max) * 100 : null, level, test: t.testName });
+  }
+  return progression;
 }
 
 export function getScoreJourney(
@@ -249,7 +279,8 @@ async function loadScoreJourney(
     tests: progressions.tests,
     students: students.map((s) => {
       const p = progressions.byStudent.get(s.uid);
-      return { ...journeyRow(s, p?.progression ?? [], cutoffs), results: p?.results ?? {} };
+      const progression = journeyProgression(p?.sittings ?? [], studentExamStream(s.stream));
+      return { ...journeyRow(s, progression, cutoffs), results: p?.results ?? {} };
     }),
   };
 }
@@ -559,7 +590,7 @@ function shapeTests(rows: TestRaw[]): TestHistoryRow[] {
     }
     bySession.set(r.session_id, row);
   }
-  const tests = [...bySession.values()].sort((a, b) => b.date.localeCompare(a.date));
+  const tests = [...bySession.values()].sort((a, b) => byDateThenSession(b, a));
   setChanges(tests);
   for (const t of tests) t.subjects.sort((a, b) => a.subject.localeCompare(b.subject));
   return tests;
@@ -584,12 +615,17 @@ function setChanges(tests: TestHistoryRow[]) {
  * cumulative AL read gives the Score journey (Advanced excluded), taken from
  * rows the report already has rather than a second scan.
  */
-function progressionFromTests(rows: TestRaw[], stream: "engineering" | "medical" | null): Progression {
+function progressionFromTests(rows: TestRaw[], stream: "engineering" | "medical"): Progression {
   return rows
     .filter((r) => isFullTest(r) && r.section?.toLowerCase() === "overall" && !isAdvancedTest(r.test_name))
-    .map((r) => ({ r, level: r.academic_level ? levelForTest(r.academic_level, stream) : null, date: dateString(r.start_date) }))
-    .filter((x): x is { r: TestRaw; level: string; date: string } => !!x.level && x.r.marks_scored !== null)
-    .sort((a, b) => a.date.localeCompare(b.date))
+    .map((r) => ({
+      r,
+      level: r.academic_level ? levelForTest(r.academic_level, stream) : null,
+      date: dateString(r.start_date),
+      sessionId: r.session_id,
+    }))
+    .filter((x): x is { r: TestRaw; level: string; date: string; sessionId: string } => !!x.level && x.r.marks_scored !== null)
+    .sort(byDateThenSession)
     .map(({ r, level }) => ({
       marks: Number(r.marks_scored),
       pct: r.max_marks_possible ? (Number(r.marks_scored) / Number(r.max_marks_possible)) * 100 : null,
@@ -624,19 +660,15 @@ async function loadStudentReport(
     getPyqLinks(),
   ]);
   if (!student) return null;
-  const stream = examStream(student.stream);
-  const testRows = stream
-    ? allTestRows.filter((r) => r.test_stream === null || r.test_stream.toLowerCase() === stream)
-    : [];
+  const stream = studentExamStream(student.stream);
+  const testRows = allTestRows.filter((r) => testInStream(r.test_stream, stream));
   const sat = new Map<string, number>();
   for (const r of testRows) {
     if (r.section && r.hashed_session_id !== null && !NOT_COMPETENCY.test(r.test_name)) {
       sat.set(r.session_id, Number(r.hashed_session_id));
     }
   }
-  const chapterRows = stream
-    ? await getChapterRows(uid, stream, [...sat].map(([id, hash]) => ({ id, hash })))
-    : [];
+  const chapterRows = await getChapterRows(uid, stream, [...sat].map(([id, hash]) => ({ id, hash })));
   return {
     student: { ...journeyRow(student, progressionFromTests(testRows, stream), cutoffs), results: {} },
     chapters: shapeChapters(chapterRows, pyq),

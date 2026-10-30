@@ -20,6 +20,7 @@ const mockJourney = vi.mocked(getScoreJourney);
 const mockReport = vi.mocked(getStudentReport);
 
 const SCHOOL = { id: "1", code: "70705", name: "Test School", region: "North" };
+const TEACHER = { role: "teacher", program_ids: [1] };
 
 const request = (path: string, params: Record<string, string>) =>
   getRequest(`http://localhost/api/quiz-analytics/1234/${path}`, params);
@@ -72,6 +73,16 @@ describe("GET /api/quiz-analytics/[udise]/student-support", () => {
     expect(mockJourney).toHaveBeenCalledWith("1234", 12, "JNV CoE", "engineering", undefined);
   });
 
+  it("serves a teacher their own program and refuses them another", async () => {
+    mockAuth.mockResolvedValue({ authorized: true, school: SCHOOL, permission: TEACHER } as never);
+    mockJourney.mockResolvedValue({ tests: [], students: [] });
+    const own = await GET(request("student-support", { grade: "12", program: "JNV CoE" }), routeParams({ udise: "1234" }));
+    expect(own.status).toBe(200);
+    const other = await GET(request("student-support", { grade: "12", program: "Punjab CoE" }), routeParams({ udise: "1234" }));
+    expect(other.status).toBe(403);
+    expect(mockJourney).toHaveBeenCalledTimes(1);
+  });
+
   it("answers 500 when the read fails", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     mockJourney.mockRejectedValue(new Error("bq down"));
@@ -106,6 +117,16 @@ describe("GET /api/quiz-analytics/[udise]/student-report", () => {
     );
     expect(res.status).toBe(404);
     expect(mockReport).toHaveBeenCalledWith("1234", 12, "JNV CoE", "5");
+  });
+
+  it("refuses a program outside the caller's programs", async () => {
+    mockAuth.mockResolvedValue({ authorized: true, school: SCHOOL, permission: TEACHER } as never);
+    const res = await GET_REPORT(
+      request("student-report", { grade: "12", program: "Punjab CoE", student: "5" }),
+      routeParams({ udise: "1234" })
+    );
+    expect(res.status).toBe(403);
+    expect(mockReport).not.toHaveBeenCalled();
   });
 
   it("returns the report", async () => {

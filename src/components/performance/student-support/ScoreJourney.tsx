@@ -218,7 +218,8 @@ export default function ScoreJourney({ schoolUdise, grade, program, stream, test
     "Failed to load the score journey"
   );
   // Separate from the journey (and from MCP): counts only for students whose
-  // mentorship notes this viewer may read. A failure just leaves "—".
+  // mentorship notes this viewer may read. A failure leaves "—" in the cells
+  // and says so above the table, so it doesn't read as "no notes".
   const notesState = useJsonFetch<MentorNoteCounts>(
     `/api/quiz-analytics/${schoolUdise}/student-support/notes?${new URLSearchParams({ grade: String(grade), program })}`,
     "Failed to load mentor notes"
@@ -261,7 +262,7 @@ export default function ScoreJourney({ schoolUdise, grade, program, stream, test
           value={gender}
           onChange={setGender}
         />
-        <div className="flex items-center gap-2 text-sm">
+        <div className="flex flex-wrap items-center gap-2 text-sm">
           <span className="text-xs font-bold uppercase tracking-wide text-text-muted">AL status</span>
           {STATUSES.map((st) => (
             <button
@@ -290,6 +291,24 @@ export default function ScoreJourney({ schoolUdise, grade, program, stream, test
           All tests
         </label>
       </div>
+
+      {notesState.status === "error" && <p className="text-sm text-text-muted">Mentor notes unavailable</p>}
+
+      {shown.length === 0 && (
+        <div className="rounded-lg border border-border bg-bg-card-alt p-8 text-center text-sm text-text-muted shadow-sm">
+          No students match these filters ·{" "}
+          <button
+            type="button"
+            className="underline"
+            onClick={() => {
+              setStatus(null);
+              setGender("all");
+            }}
+          >
+            Clear
+          </button>
+        </div>
+      )}
 
       {sections.map((s) => (
         <SectionTable
