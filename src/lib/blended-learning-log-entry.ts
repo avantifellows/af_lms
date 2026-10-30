@@ -161,7 +161,9 @@ async function insertFlags(
 }
 
 // Mark this Mentee's earlier open Action Items done by this Conversation. An
-// id that is already done, unknown or another Student's updates no row.
+// id that is already done or another Student's conflicts; one with no row is
+// skipped, since removing a Common Action Item deletes its open items while
+// a Mentor may still have one ticked in an open form.
 async function completeActionItems(
   client: PoolClient,
   access: BlendedLearningAccess,
@@ -170,7 +172,7 @@ async function completeActionItems(
   ids: number[]
 ): Promise<void> {
   if (ids.length === 0) return;
-  const result = await client.query(
+  const result = await client.query<{ id: number | string }>(
     `UPDATE blended_learning_action_items
      SET status = 'done', completed_by_conversation_id = $1, completed_by_email = $2,
          completed_at = now(), updated_at = now()
@@ -178,7 +180,13 @@ async function completeActionItems(
      RETURNING id`,
     [conversationId, access.actorEmail, ids, studentId]
   );
-  if ((result.rowCount ?? result.rows.length) < ids.length) throw new TickConflict();
+  if ((result.rowCount ?? result.rows.length) === ids.length) return;
+  const completed = new Set(result.rows.map((row) => Number(row.id)));
+  const missed = ids.filter((id) => !completed.has(id));
+  const existing = await client.query(`SELECT 1 FROM blended_learning_action_items WHERE id = ANY($1::bigint[]) LIMIT 1`, [
+    missed,
+  ]);
+  if (existing.rows.length > 0) throw new TickConflict();
 }
 
 class OutOfScope extends Error {}
