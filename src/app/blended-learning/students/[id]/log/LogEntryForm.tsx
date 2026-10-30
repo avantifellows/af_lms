@@ -7,7 +7,7 @@ import { Button, Card } from "@/components/ui";
 import type { OpenActionItem } from "@/lib/blended-learning-mentee-detail";
 import type { MenteeGroup } from "@/lib/blended-learning-talk-to-first";
 
-import { ActionItemMeta, OwnerPill } from "../ActionItemMeta";
+import { ACTION_ITEM_ROW_CLASSES, ActionItemMeta, OwnerPill } from "../ActionItemMeta";
 import {
   buildEntryPayload,
   initialEntryValues,
@@ -41,14 +41,14 @@ import { WriteUpCard } from "./WriteUpCard";
 
 export type { ReviewDraft };
 
-// Owner pill, text and agreed date, as on the detail page.
+// Owner pill, text and where it is from, as on the detail page.
 function OpenItemText({ item }: { item: OpenActionItem }) {
   return (
-    <span className="flex min-w-0 items-baseline gap-2.5">
+    <span className={`${ACTION_ITEM_ROW_CLASSES} min-w-0 flex-1`}>
       <OwnerPill owner={item.owner} />
       <span className="min-w-0 break-words">
         {item.text}
-        <ActionItemMeta agreedOn={item.agreedOn} />
+        <ActionItemMeta agreedOn={item.agreedOn} source={item.source} />
       </span>
     </span>
   );

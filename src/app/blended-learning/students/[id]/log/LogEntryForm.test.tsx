@@ -81,7 +81,7 @@ import { LogEntryForm, type ReviewDraft } from "./LogEntryForm";
 
 const TODAY = "2026-10-22";
 const OPEN_ITEMS = [
-  { id: 7, text: "Bring the admit card", owner: "student" as const, agreedOn: "2026-10-01" },
+  { id: 7, text: "Bring the admit card", owner: "student" as const, agreedOn: "2026-10-01", source: "conversation" as const },
 ];
 const MENTEE: MenteeRow = {
   studentId: 501,
@@ -293,6 +293,25 @@ describe("LogEntryForm: Conversation", () => {
     expect(within(saved).getByRole("link", { name: "Back to students" })).toHaveAttribute("href", "/blended-learning");
     // The page title stays above the confirmation.
     expect(screen.getByRole("heading", { level: 1, name: "Log a conversation" })).toBeInTheDocument();
+  });
+
+  it("lists a Profile Doc item with the others, marked as from the Profile Doc, and ticks it the same way", async () => {
+    renderForm({
+      openActionItems: [
+        ...OPEN_ITEMS,
+        { id: 8, text: "Synthetic: pay the hostel fee", owner: "parent", agreedOn: "2026-06-14", source: "profile_doc" },
+      ],
+    });
+    const panel = screen.getByRole("region", { name: "Open Action Items" });
+    expect(within(panel).getByText("From 1 Oct 2026")).toBeInTheDocument();
+    expect(within(panel).getByText("From Profile Doc · 14 Jun 2026")).toBeInTheDocument();
+    await fillConversation();
+    await userEvent.click(screen.getByRole("checkbox", { name: /Synthetic: pay the hostel fee/ }));
+
+    answer({ entry: { id: 9 }, mentee: MENTEE });
+    await save();
+
+    expect(sentBody()).toMatchObject({ completeActionItemIds: [8] });
   });
 
   it("sends a Conversation's photo, Mentor Flags, ticks and notes, and lists them once saved", async () => {

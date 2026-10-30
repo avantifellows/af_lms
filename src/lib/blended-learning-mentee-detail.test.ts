@@ -94,6 +94,90 @@ describe("getMenteeDetail", () => {
     });
   });
 
+  describe("the Profile Doc's latest entry", () => {
+    const LEGACY = {
+      legacy_last_contact_on: "2026-09-17",
+      legacy_conversation_summary: "  Synthetic: planned the mocks.  ",
+    };
+    const profileDocItem = (overrides: Record<string, unknown>) => ({
+      conversation_id: null, from_profile_doc: true, owner: "student", status: "open", added_on: "2026-10-27",
+      ...overrides,
+    });
+    const ITEMS = [
+      profileDocItem({ id: "201", text: "Synthetic: revise optics" }),
+      profileDocItem({ id: "202", text: "Synthetic: send the plan", owner: "mentor", status: "done" }),
+    ];
+
+    it("sits in the history at its date, after the app's entries of that date, and is not a Conversation", async () => {
+      givenRows({
+        profile: [{ ...PROFILE, ...LEGACY }],
+        entries: [
+          entry({ id: "12", occurred_on: "2026-10-01" }),
+          entry({ id: "11", kind: "attempt", occurred_on: "2026-09-17", mode: null }),
+          entry({ id: "10", occurred_on: "2026-09-01" }),
+        ],
+        actionItems: [
+          { conversation_id: "10", from_profile_doc: false, id: "100", text: "Old", owner: "parent", status: "open", added_on: "2026-09-01" },
+          ...ITEMS,
+        ],
+      });
+
+      const detail = await getMenteeDetail(MENTOR, 501);
+
+      expect(detail?.history.map((item) => `${item.kind}-${item.id}`)).toEqual([
+        "conversation-12",
+        "attempt-11",
+        "profile_doc-0",
+        "conversation-10",
+      ]);
+      expect(detail?.history[2]).toEqual({
+        kind: "profile_doc",
+        id: 0,
+        occurredOn: "2026-09-17",
+        summary: "Synthetic: planned the mocks.",
+        actionItems: [
+          { id: 201, text: "Synthetic: revise optics", owner: "student", status: "open" },
+          { id: 202, text: "Synthetic: send the plan", owner: "mentor", status: "done" },
+        ],
+        profileDocUrl: "https://docs.example/ira",
+      });
+      // Its open items join the others, dated by the entry, newest first.
+      expect(detail?.openActionItems).toEqual([
+        { id: 201, text: "Synthetic: revise optics", owner: "student", agreedOn: "2026-09-17", source: "profile_doc" },
+        { id: 100, text: "Old", owner: "parent", agreedOn: "2026-09-01", source: "conversation" },
+      ]);
+    });
+
+    it("comes last when it is older than every entry, and alone without any", async () => {
+      givenRows({ profile: [{ ...PROFILE, ...LEGACY }], entries: [entry({ id: "12", occurred_on: "2026-10-01" })], actionItems: ITEMS });
+      expect((await getMenteeDetail(MENTOR, 501))?.history.map((item) => item.kind)).toEqual(["conversation", "profile_doc"]);
+
+      givenRows({ profile: [{ ...PROFILE, ...LEGACY, profile_doc_url: null }] });
+      expect((await getMenteeDetail(MENTOR, 501))?.history).toEqual([
+        {
+          kind: "profile_doc", id: 0, occurredOn: "2026-09-17", summary: "Synthetic: planned the mocks.",
+          actionItems: [], profileDocUrl: null,
+        },
+      ]);
+    });
+
+    it("keeps items without a summary, and needs a date and a summary or an item", async () => {
+      givenRows({ profile: [{ ...PROFILE, ...LEGACY, legacy_conversation_summary: null }], actionItems: ITEMS });
+      expect((await getMenteeDetail(MENTOR, 501))?.history).toMatchObject([{ kind: "profile_doc", summary: null }]);
+
+      givenRows({ profile: [{ ...PROFILE, ...LEGACY, legacy_conversation_summary: " " }] });
+      expect((await getMenteeDetail(MENTOR, 501))?.history).toEqual([]);
+
+      // Without a date, its open items are dated by when they were added.
+      givenRows({ profile: [{ ...PROFILE, ...LEGACY, legacy_last_contact_on: null }], actionItems: ITEMS });
+      const detail = await getMenteeDetail(MENTOR, 501);
+      expect(detail?.history).toEqual([]);
+      expect(detail?.openActionItems).toEqual([
+        { id: 201, text: "Synthetic: revise optics", owner: "student", agreedOn: "2026-10-27", source: "profile_doc" },
+      ]);
+    });
+  });
+
   it("keeps a different WhatsApp number, a missing grade and last name, and an open draft", async () => {
     givenRows({
       profile: [{
@@ -136,9 +220,9 @@ describe("getMenteeDetail", () => {
         }),
       ],
       actionItems: [
-        { conversation_id: "10", id: "100", text: "Old open item", owner: "parent", status: "open" },
-        { conversation_id: "12", id: "120", text: "Revise optics", owner: "student", status: "open" },
-        { conversation_id: 12, id: 121, text: "Share notes", owner: "mentor", status: "done" },
+        { conversation_id: "10", from_profile_doc: false, id: "100", text: "Old open item", owner: "parent", status: "open", added_on: "2026-10-12" },
+        { conversation_id: "12", from_profile_doc: false, id: "120", text: "Revise optics", owner: "student", status: "open", added_on: "2026-10-20" },
+        { conversation_id: 12, from_profile_doc: false, id: 121, text: "Share notes", owner: "mentor", status: "done", added_on: "2026-10-20" },
       ],
       flags: [
         { conversation_id: "12", recipient: "emotional_wellbeing", comment: "Seemed anxious" },
@@ -190,8 +274,8 @@ describe("getMenteeDetail", () => {
     ]);
     // Only open items, newest Conversation first, dated by the Conversation.
     expect(detail?.openActionItems).toEqual([
-      { id: 120, text: "Revise optics", owner: "student", agreedOn: "2026-10-20" },
-      { id: 100, text: "Old open item", owner: "parent", agreedOn: "2026-10-12" },
+      { id: 120, text: "Revise optics", owner: "student", agreedOn: "2026-10-20", source: "conversation" },
+      { id: 100, text: "Old open item", owner: "parent", agreedOn: "2026-10-12", source: "conversation" },
     ]);
   });
 });

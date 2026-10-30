@@ -162,7 +162,7 @@ describe("MenteeDetailPage", () => {
     expect(screen.queryByText(/Mentee/)).not.toBeInTheDocument();
     expect(screen.queryByTestId("draft-status")).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Open Action Items" })).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 2, name: "Conversations (0)" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Conversations in app (0)" })).toBeInTheDocument();
     expect(screen.getByText("No conversations yet")).toBeInTheDocument();
     expect(screen.getByText("Log the first one to start this student's history.")).toBeInTheDocument();
   });
@@ -290,7 +290,7 @@ describe("MenteeDetailPage", () => {
     mockGetMenteeDetail.mockResolvedValue({
       ...MENTEE,
       openDraft: { id: 41, state: "ready" },
-      openActionItems: [{ id: 120, text: "Revise optics", owner: "student", agreedOn: "2026-10-20" }],
+      openActionItems: [{ id: 120, text: "Revise optics", owner: "student", agreedOn: "2026-10-20", source: "conversation" }],
     });
 
     await renderPage();
@@ -302,12 +302,84 @@ describe("MenteeDetailPage", () => {
     expect(items.compareDocumentPosition(history) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  describe("the Profile Doc's latest entry", () => {
+    const PROFILE_DOC_ENTRY = {
+      kind: "profile_doc" as const,
+      id: 0 as const,
+      occurredOn: "2026-09-17",
+      summary: "Synthetic: planned the mocks.",
+      actionItems: [
+        { id: 201, text: "Synthetic: revise optics", owner: "student" as const, status: "open" as const },
+        { id: 202, text: "Synthetic: pay the hostel fee", owner: "parent" as const, status: "done" as const },
+      ],
+      profileDocUrl: "https://docs.example/ira",
+    };
+
+    it.each([
+      ["a Mentor", MENTOR],
+      ["a read-only Blended Learning Admin", READ_ONLY_ADMIN],
+    ])("shows %s the entry in the history at its date, laid out as a Conversation, not counted as one", async (_label, access) => {
+      signedInAs(access);
+      mockGetMenteeDetail.mockResolvedValue({
+        ...MENTEE,
+        history: [conversation({ id: 12 }), PROFILE_DOC_ENTRY],
+        openActionItems: [
+          { id: 201, text: "Synthetic: revise optics", owner: "student", agreedOn: "2026-09-17", source: "profile_doc" },
+        ],
+      });
+
+      await renderPage();
+
+      expect(screen.queryByRole("region", { name: /Profile Doc/ })).not.toBeInTheDocument();
+      const history = screen.getByRole("region", { name: "History" });
+      expect(within(history).getByRole("heading", { level: 2, name: "Conversations in app (1)" })).toBeInTheDocument();
+      const entries = within(history).getAllByRole("article");
+      expect(entries).toHaveLength(2);
+      const entry = within(entries[1]);
+      expect(entry.getByRole("heading", { level: 3, name: "17 Sept 2026" })).toBeInTheDocument();
+      expect(entry.getByText("From Profile Doc")).toBeInTheDocument();
+      expect(entry.getAllByRole("heading", { level: 4 }).map((heading) => heading.textContent)).toEqual([
+        "Summary",
+        "Action items",
+      ]);
+      expect(entry.getByText("Synthetic: planned the mocks.")).toBeInTheDocument();
+      const items = within(entry.getByRole("list", { name: "Action Items" })).getAllByRole("listitem");
+      expect(items.map((item) => item.textContent)).toEqual([
+        "StudentSynthetic: revise opticsOpen",
+        "ParentSynthetic: pay the hostel feeDone",
+      ]);
+      expect(entry.queryByRole("checkbox")).not.toBeInTheDocument();
+      expect(entry.getByRole("link", { name: "Open Profile Doc (opens in a new tab)" })).toHaveAttribute(
+        "href",
+        "https://docs.example/ira"
+      );
+      const open = screen.getByRole("region", { name: "Open Action Items" });
+      expect(within(open).getByText("From Profile Doc · 17 Sept 2026")).toBeInTheDocument();
+    });
+
+    it("leaves out the summary and link when the entry has none", async () => {
+      signedInAs(MENTOR);
+      mockGetMenteeDetail.mockResolvedValue({
+        ...MENTEE,
+        history: [{ ...PROFILE_DOC_ENTRY, summary: null, profileDocUrl: null }],
+      });
+
+      await renderPage();
+
+      const history = screen.getByRole("region", { name: "History" });
+      expect(within(history).getByRole("heading", { level: 2, name: "Conversations in app (0)" })).toBeInTheDocument();
+      const entry = within(within(history).getByRole("article"));
+      expect(entry.getAllByRole("heading", { level: 4 }).map((heading) => heading.textContent)).toEqual(["Action items"]);
+      expect(entry.queryByRole("link")).not.toBeInTheDocument();
+    });
+  });
+
   it("lists Open Action Items with their owner and when they were agreed", async () => {
     signedInAs(MENTOR);
     mockGetMenteeDetail.mockResolvedValue({
       ...MENTEE,
       openActionItems: [
-        { id: 120, text: "Revise optics", owner: "student", agreedOn: "2026-10-20" },
+        { id: 120, text: "Revise optics", owner: "student", agreedOn: "2026-10-20", source: "conversation" },
       ],
     });
 
@@ -352,7 +424,7 @@ describe("MenteeDetailPage", () => {
 
     const history = screen.getByRole("region", { name: "History" });
     // Only Conversations count; Attempts are still listed.
-    expect(within(history).getByRole("heading", { level: 2, name: "Conversations (1)" })).toBeInTheDocument();
+    expect(within(history).getByRole("heading", { level: 2, name: "Conversations in app (1)" })).toBeInTheDocument();
     const entries = within(history).getAllByRole("article");
     expect(entries).toHaveLength(3);
 

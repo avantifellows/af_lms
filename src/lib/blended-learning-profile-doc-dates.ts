@@ -16,8 +16,15 @@
 // (pasted data exports) or mid-sentence are never read. A date line with
 // nothing under it (a placeholder) does not count, and neither does a date
 // outside [from, to]: one after `to` is a typo or a plan, not a contact.
+//
+// latestProfileDocEntry also gives that latest entry's plain text: from its
+// date line to the next date line or the end of its tab, tables included,
+// images and link targets left out. The links importer stores the date; an
+// operator-run export hands the text to an external summarising step.
 
-type DocBlock = { text: string; tabTitle: boolean; inTable: boolean; hasImage: boolean };
+import { CURRENT_ACADEMIC_YEAR } from "./constants";
+
+type DocBlock = { text: string; tabTitle: boolean; inTable: boolean; hasImage: boolean; listItem: boolean };
 
 const BLOCK_TAGS = new Set(["p", "h1", "h2", "h3", "h4", "h5", "h6", "li"]);
 
@@ -49,9 +56,9 @@ class BlockReader {
     if (block.text || block.hasImage) this.blocks.push(block);
   }
 
-  private open(tabTitle: boolean): void {
+  private open(tabTitle: boolean, listItem = false): void {
     this.flush();
-    this.current = { text: "", tabTitle, inTable: this.tableDepth > 0, hasImage: false };
+    this.current = { text: "", tabTitle, inTable: this.tableDepth > 0, hasImage: false, listItem };
   }
 
   tag(closing: boolean, name: string, attributes: string): void {
@@ -60,7 +67,7 @@ class BlockReader {
       this.tableDepth = Math.max(0, this.tableDepth + (closing ? -1 : 1));
     } else if (BLOCK_TAGS.has(name)) {
       if (closing) this.flush();
-      else this.open(name === "p" && /class="(?:[^"]*\s)?title(?:\s[^"]*)?"/.test(attributes));
+      else this.open(name === "p" && /class="(?:[^"]*\s)?title(?:\s[^"]*)?"/.test(attributes), name === "li");
     } else if (name === "img" && !closing) {
       if (!this.current) this.open(false);
       this.current!.hasImage = true;
@@ -212,49 +219,96 @@ function isSkippedTab(tab: DocBlock[], year: number): boolean {
 // Usually the academic year's first day to today.
 export type DateWindow = { from: string; to: string };
 
+// The academic year's first day to asOf (an IST YYYY-MM-DD).
+export function legacyDateWindow(asOf: string): DateWindow {
+  return { from: `${CURRENT_ACADEMIC_YEAR.slice(0, 4)}-04-01`, to: asOf };
+}
+
+// An entry's blocks are tab[start, end): its date line(s) up to the next
+// date line or the end of the tab.
+type Entry = Anchor & { start: number; end: number };
+
 // The tab's entries that have something under them. Repeated date lines for
 // one entry (a chip line duplicated, a dated tab title then the same date
-// again) are one entry.
-function tabEntries(tab: DocBlock[], year: number): Anchor[] {
-  const entries: Anchor[] = [];
-  let pending: Anchor | null = null;
-  const settle = () => {
-    if (pending?.ownContent) entries.push(pending);
+// again) are one entry. Any other date line ends the entry, even one that is
+// not an entry itself (a placeholder, a plan).
+function tabEntries(tab: DocBlock[], year: number): Entry[] {
+  const entries: Entry[] = [];
+  let pending: Entry | null = null;
+  const settle = (end: number) => {
+    if (pending?.ownContent) entries.push({ ...pending, end });
   };
-  for (const block of tab) {
+  tab.forEach((block, index) => {
     const anchor = blockAnchor(block, year);
     if (anchor && pending?.date === anchor.date) {
       pending.ownContent ||= anchor.ownContent;
     } else if (anchor) {
-      settle();
-      pending = { ...anchor };
+      settle(index);
+      pending = { ...anchor, start: index, end: tab.length };
     } else if (pending && isContent(block)) {
       pending.ownContent = true;
     }
-  }
-  settle();
+  });
+  settle(tab.length);
   return entries;
 }
 
-// The tab's entry dates. A tab whose entries with a written year are all
+// The tab's dated entries. A tab whose entries with a written year are all
 // from before `year` is a previous year's history, so its year-less dates
 // are not this year's and are dropped.
-function tabEntryDates(tab: DocBlock[], year: number): string[] {
+function tabDatedEntries(tab: DocBlock[], year: number): Entry[] {
   const entries = tabEntries(tab, year);
   const written = entries.filter((entry) => !entry.yearless);
   const previousYear = written.length > 0 && written.every((entry) => Number(entry.date.slice(0, 4)) < year);
-  return entries.filter((entry) => !(previousYear && entry.yearless)).map((entry) => entry.date);
+  return entries.filter((entry) => !(previousYear && entry.yearless));
+}
+
+// The latest date within the window, and the blocks of every entry on it in
+// doc order (one day can have entries in two tabs).
+type LatestEntries = { date: string; entries: DocBlock[][] };
+
+function latestEntries(html: string, window: DateWindow): LatestEntries | null {
+  const year = Number(window.from.slice(0, 4));
+  let latest = null as LatestEntries | null;
+  for (const tab of splitTabs(docBlocks(html))) {
+    if (isSkippedTab(tab, year)) continue;
+    for (const entry of tabDatedEntries(tab, year)) {
+      if (entry.date < window.from || entry.date > window.to || (latest && entry.date < latest.date)) continue;
+      const blocks = tab.slice(entry.start, entry.end);
+      if (latest?.date === entry.date) latest.entries.push(blocks);
+      else latest = { date: entry.date, entries: [blocks] };
+    }
+  }
+  return latest;
 }
 
 // The latest conversation date in the doc within the window, or null.
 export function latestProfileDocConversationOn(html: string, window: DateWindow): string | null {
-  const year = Number(window.from.slice(0, 4));
-  let latest: string | null = null;
-  for (const tab of splitTabs(docBlocks(html))) {
-    if (isSkippedTab(tab, year)) continue;
-    for (const date of tabEntryDates(tab, year)) {
-      if (date >= window.from && date <= window.to && (latest === null || date > latest)) latest = date;
-    }
-  }
-  return latest;
+  return latestEntries(html, window)?.date ?? null;
+}
+
+// Enough for any one conversation; a longer entry is cut here.
+export const PROFILE_DOC_ENTRY_TEXT_LIMIT = 20_000;
+
+// A block as plain text: link targets left out, list items bulleted.
+function blockText(block: DocBlock): string {
+  const text = block.text.replace(/\bhttps?:\/\/\S+/gi, "").replace(/\s+/g, " ").trim();
+  return text && block.listItem ? `- ${text}` : text;
+}
+
+function entryText(entries: DocBlock[][]): string {
+  const text = entries
+    .map((blocks) => blocks.map(blockText).filter(Boolean).join("\n"))
+    .join("\n\n");
+  return text.slice(0, PROFILE_DOC_ENTRY_TEXT_LIMIT);
+}
+
+// The latest conversation (the date latestProfileDocConversationOn gives)
+// and its plain text, or null when the doc has none in the window.
+export function latestProfileDocEntry(
+  html: string,
+  window: DateWindow
+): { occurredOn: string; text: string } | null {
+  const latest = latestEntries(html, window);
+  return latest && { occurredOn: latest.date, text: entryText(latest.entries) };
 }
