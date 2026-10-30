@@ -167,7 +167,7 @@ for (const { label, viewport } of VIEWPORTS) {
       await expect(studentLink).toHaveAttribute("href", /\/blended-learning\/students\/\d+\?from=flags$/);
       await expect(studentLink.locator("svg")).toHaveAttribute("aria-hidden", "true");
       await expect(iraWellbeing.getByText("Emotional Well-being", { exact: true })).toBeVisible();
-      await expect(iraWellbeing.getByText("Grade 12 · STP Voucher Delhi · Female")).toBeVisible();
+      await expect(iraWellbeing.getByText("Grade 12 · Voucher DL · Female")).toBeVisible();
       // Postgres writes "Sep"; en-GB dates write "Sept".
       await expect(
         iraWellbeing.getByText(new RegExp(`^${conversationDate.replace(/^(\d+ )Sep /, "$1Sept ")} · ${BLENDED_MENTOR_A.name}$`))

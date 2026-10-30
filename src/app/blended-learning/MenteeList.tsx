@@ -3,6 +3,7 @@ import { ArrowUpRight, MessageCirclePlus } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { Badge } from "@/components/ui";
+import { shortProgramName } from "@/lib/blended-learning-format";
 import type { MenteeRow } from "@/lib/blended-learning-mentees";
 
 import { daysAgo, shortDate, whyNowTags } from "./menteeListCopy";
@@ -15,6 +16,9 @@ import { daysAgo, shortDate, whyNowTags } from "./menteeListCopy";
 // Conversation Draft's chip opens it on the log page. For anyone else
 // (admins, read-only users) View is the row's only button and the chip is a
 // plain label. `today` is the IST date, so this year's dates drop the year.
+// The program's Student ID and category sit on a muted line under the name,
+// in the table and on a card alike (the table has no room for two more
+// columns at 1024 px).
 
 export type MenteeGroupView = { title: string; description: string; mentees: MenteeRow[] };
 
@@ -81,16 +85,18 @@ const outlined = `${actionBase} border-border bg-bg-card text-text-primary hover
 const primary = `${actionBase} border-accent bg-accent text-text-on-accent hover:bg-accent-hover`;
 
 // Small text buttons, 44 px tall; on a card each takes half the row and the
-// icons drop out below 400 px so both labels fit at 360 px. The accessible
-// names say which Student.
+// icons drop out below 400 px so both labels fit at 360 px. In the table they
+// are 44 px icon buttons below 1280 px, so the Student ID and Category
+// columns fit at 1024 px. The accessible names say which Student.
 function RowActions({ mentee, canLog, card }: { mentee: MenteeRow; canLog: boolean; card: boolean }) {
-  const size = card ? "min-h-11 flex-1 px-2 text-[13px]" : "min-h-11 px-3 text-sm";
+  const size = card ? "min-h-11 flex-1 px-2 text-[13px]" : "min-h-11 min-w-11 px-3 text-sm";
   const iconClass = `h-4 w-4 shrink-0 ${card ? "hidden min-[400px]:block" : ""}`;
+  const labelClass = `whitespace-nowrap ${card ? "" : "hidden xl:inline"}`;
   return (
     <>
       <Link href={menteeHref(mentee)} aria-label={`View ${mentee.name}`} className={`${outlined} ${size}`}>
         <ArrowUpRight aria-hidden="true" className={iconClass} />
-        <span className="whitespace-nowrap">View</span>
+        <span className={labelClass}>View</span>
       </Link>
       {canLog && (
         <Link
@@ -99,7 +105,7 @@ function RowActions({ mentee, canLog, card }: { mentee: MenteeRow; canLog: boole
           className={`${primary} ${size}`}
         >
           <MessageCirclePlus aria-hidden="true" className={iconClass} />
-          <span className="whitespace-nowrap">New log</span>
+          <span className={labelClass}>New log</span>
         </Link>
       )}
     </>
@@ -110,12 +116,37 @@ function orDash(value: string | number | null) {
   return value === null ? "—" : value;
 }
 
+// "Voucher DL" for "STP Voucher Delhi".
+function programLabel(mentee: MenteeRow) {
+  return orDash(mentee.programName === null ? null : shortProgramName(mentee.programName));
+}
+
 // "Not reachable on the last try, … 4 of 12."
 function groupSummary(group: MenteeGroupView, total: number): string {
   return `${group.description} ${group.mentees.length} of ${total}.`.trim();
 }
 
-const COLUMNS = ["Student", "Why now", "Grade", "Program", "Gender", "Last conversation"];
+const COLUMNS = [
+  "Student", "Student ID", "Category", "Why now", "Grade", "Program", "Gender", "Last talked",
+];
+
+// The program's Student ID, as text so a Punjab ID keeps its leading zeros.
+function ProgramStudentId({ mentee }: { mentee: MenteeRow }) {
+  return <span className="font-mono">{orDash(mentee.programStudentId)}</span>;
+}
+
+// A card's "ID 00123456  Category OBC" line under the name; the table gives
+// each its own column instead.
+function StudentIdLine({ mentee, className = "" }: { mentee: MenteeRow; className?: string }) {
+  return (
+    <span className={`flex flex-wrap gap-x-3 text-xs text-text-muted ${className}`}>
+      <span className="whitespace-nowrap">
+        ID <ProgramStudentId mentee={mentee} />
+      </span>
+      <span className="whitespace-nowrap">Category {orDash(mentee.category)}</span>
+    </span>
+  );
+}
 
 function GroupHeader({ group, total }: { group: MenteeGroupView; total: number }) {
   return (
@@ -132,14 +163,20 @@ function GroupHeader({ group, total }: { group: MenteeGroupView; total: number }
   );
 }
 
-const cell = "px-3 py-2.5 align-middle";
+// Tight paddings and a name may wrap; headers and short Program names stay
+// on one line. The table fits its card from 1024 px with every column.
+const cell = "px-2 py-2.5 align-middle xl:px-2.5";
 
 function TableRow({ mentee, canLog, today }: RowProps) {
   return (
     <tr className="relative cursor-pointer border-t border-border hover:bg-hover-bg">
-      <td className={`${cell} whitespace-nowrap`}>
+      <td className={cell}>
         <NameLink mentee={mentee} />
       </td>
+      <td className={`${cell} whitespace-nowrap`}>
+        <ProgramStudentId mentee={mentee} />
+      </td>
+      <td className={`${cell} whitespace-nowrap`}>{orDash(mentee.category)}</td>
       <td className={cell}>
         <span className="flex flex-col items-start gap-1.5">
           <WhyNowTags mentee={mentee} today={today} />
@@ -147,12 +184,12 @@ function TableRow({ mentee, canLog, today }: RowProps) {
         </span>
       </td>
       <td className={`${cell} whitespace-nowrap`}>{orDash(mentee.grade)}</td>
-      <td className={cell}>{orDash(mentee.programName)}</td>
+      <td className={`${cell} whitespace-nowrap`}>{programLabel(mentee)}</td>
       <td className={`${cell} whitespace-nowrap`}>{orDash(mentee.gender)}</td>
       <td className={cell}>
         <LastContact mentee={mentee} today={today} />
       </td>
-      <td className={`${cell} w-px whitespace-nowrap pr-4`}>
+      <td className={`${cell} w-px whitespace-nowrap pr-3`}>
         <span className="flex gap-2">
           <RowActions mentee={mentee} canLog={canLog} card={false} />
         </span>
@@ -170,11 +207,11 @@ function MenteeTable({ groups, total, canLog, today }: ListProps) {
         <thead className="text-xs uppercase tracking-wide text-text-muted">
           <tr>
             {COLUMNS.map((column) => (
-              <th key={column} scope="col" className="whitespace-nowrap px-3 py-3 font-bold">
+              <th key={column} scope="col" className="whitespace-nowrap px-2 py-3 align-bottom font-bold xl:px-2.5">
                 {column}
               </th>
             ))}
-            <th scope="col" className="px-3 py-3">
+            <th scope="col" className="px-2 py-3 xl:px-2.5">
               <span className="sr-only">Actions</span>
             </th>
           </tr>
@@ -205,8 +242,9 @@ function MenteeCard({ mentee, canLog, today }: RowProps) {
   const hasWhyNow = mentee.reasons.length > 0 || mentee.openDraftState === "ready";
   return (
     <li className="relative grid grid-cols-3 gap-x-3 gap-y-2.5 rounded-xl border border-border bg-bg-card px-4 py-3.5 shadow-sm active:bg-hover-bg">
-      <div className="col-span-3 -my-1.5">
+      <div className="col-span-3 -mt-1.5">
         <NameLink mentee={mentee} />
+        <StudentIdLine mentee={mentee} className="-mt-1.5" />
       </div>
       {hasWhyNow && (
         <div className="col-span-3 flex flex-wrap items-center gap-1.5">
@@ -214,10 +252,10 @@ function MenteeCard({ mentee, canLog, today }: RowProps) {
           <DraftChip mentee={mentee} canLog={canLog} className="min-h-11 -my-2.5" />
         </div>
       )}
-      <CardField label="Program" className="col-span-3">{orDash(mentee.programName)}</CardField>
+      <CardField label="Program" className="col-span-3">{programLabel(mentee)}</CardField>
       <CardField label="Grade">{orDash(mentee.grade)}</CardField>
       <CardField label="Gender">{orDash(mentee.gender)}</CardField>
-      <CardField label="Last conversation">
+      <CardField label="Last talked">
         <LastContact mentee={mentee} today={today} />
       </CardField>
       <div className="col-span-3 flex gap-2 pt-1">

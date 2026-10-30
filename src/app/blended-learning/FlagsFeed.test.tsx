@@ -47,6 +47,7 @@ describe("FlagsFeed", () => {
     expect(link).toHaveAttribute("href", "/blended-learning/students/501?from=flags");
     expect(link.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
     expect(within(card).getByRole("button", { name: "Show Session Notes" })).toBeInTheDocument();
+    expect(within(card).getByText("Grade 12 · Voucher DL · Female")).toBeInTheDocument();
   });
 
   it("shows a flag whose Mapping has ended without a Student link or notes that would 404", () => {

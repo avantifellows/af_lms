@@ -142,7 +142,7 @@ describe("MenteeDetailPage", () => {
 
     expect(screen.getByRole("heading", { level: 1, name: "Ira Sharma" })).toBeInTheDocument();
     expect(screen.getByText("Grade 12")).toBeInTheDocument();
-    expect(screen.getByText("STP Voucher Delhi")).toBeInTheDocument();
+    expect(screen.getByText("Voucher DL")).toBeInTheDocument();
     expect(screen.getByText("Female")).toBeInTheDocument();
     const contact = screen.getByRole("region", { name: "Contact" });
     expect(within(contact).getByRole("link", { name: "+91 98765 43210" })).toHaveAttribute("href", "tel:+91 98765 43210");
@@ -476,7 +476,7 @@ describe("MenteeDetailPage", () => {
     const attempt = within(entries[1]);
     expect(attempt.getByRole("heading", { level: 3, name: "18 Oct 2026" })).toBeInTheDocument();
     expect(attempt.getByText("Attempt")).toBeInTheDocument();
-    expect(attempt.getByText("Not reachable")).toBeInTheDocument();
+    expect(attempt.getByText("Unreachable")).toBeInTheDocument();
     expect(attempt.getByText("No answer")).toBeInTheDocument();
     // An Attempt without a note shows only its header.
     expect(entries[2].querySelectorAll("p")).toHaveLength(1);

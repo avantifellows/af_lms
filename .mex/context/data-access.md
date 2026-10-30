@@ -297,6 +297,13 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   state (`transcribing|ready|failed`). A Mentor always gets their own Mentees, whatever
   `mentorUserId` says; a Mentor without a Mentor user id gets an empty list without a query.
   Rows are grouped (Talk to First = any reason) and sorted in JS by the pure policy.
+  Each row also carries `programStudentId` (`student.student_id`, kept as text so leading zeros
+  survive) and `category` (`student.category`), both nullable; `studentId` stays `student.id`
+  for links. The table gives each its own column right after Student ("Student ID" in
+  `font-mono`, "Category"; "—" for NULL); a card shows both on the muted line under the name
+  ("ID <id>  Category <value>"). To fit at 1024 px the table uses tight paddings, lets names,
+  headers and Program wrap, and shows View / New log as 44 px icon buttons (aria-labelled)
+  below `xl` (1280 px).
 - **Mentor cards (#452):** `listMentorCards(access, today)` in the same module, for
   `view_mentors` only (anyone else gets `[]`). It reuses the list's query unnarrowed (one row
   per active current-year Mapping, with the Mentor's `user` name, else email) and counts per
@@ -310,7 +317,8 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   conversation), else none (`no_contact`). Drafts never feed it.
 - **Search and filters (#443):** client-side in `src/app/blended-learning/FilteredMenteeList.tsx`
   over the already grouped and sorted `MenteeList` (about 46 Mentees per Mentor, so no server
-  pagination). Name search is a trimmed, case-insensitive substring match. Gender and Program
+  pagination). The search ("Search by name or Student ID") is a trimmed, case-insensitive
+  substring match on the name or `programStudentId`. Gender and Program
   options come from the list itself; Grade is fixed to 12/13. "30 days or more" uses the
   policy's `thirtyDaysOrMore(daysSince)`, so no Last Contact counts and a legacy date counts from
   its day. Filters combine (AND), keep both groups and their order, and are not in the URL.
