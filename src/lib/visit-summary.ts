@@ -203,9 +203,11 @@ export function formatVisitCount(count: number): string {
   return `${count} visit${count === 1 ? "" : "s"}`;
 }
 
-// A Visit Concern is Recurring when it has live mentions in at least this many distinct Visits in
-// view. The School-wise counts (SQL) and the School page's "Recurring ·" label both read it.
-export const RECURRING_CONCERN_MIN_VISITS = 2;
+// A Visit Concern is Recurring when it has live mentions on at least this many distinct visit dates
+// in view: Visits on the same day (two PMs at the School that day) count once. The counts shown
+// beside it are still Visits ("Recurring · 3 visits"). The School-wise counts (SQL), the School
+// page's "Recurring ·" label and its header chip all read it.
+export const RECURRING_CONCERN_MIN_DAYS = 2;
 
 // The current search params as URLSearchParams, starting from `initial` and leaving out empty
 // values and every key in `omit` (the Visit Summary's tab, sort and page links).

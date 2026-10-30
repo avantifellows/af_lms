@@ -506,6 +506,47 @@ describe("SchoolVisitSummarySchoolPage", () => {
       expect(screen.getByRole("region", { name: "All concerns - Need Attention" })).toHaveTextContent("1 open");
     });
 
+    it("counts a concern as recurring in the header only when it was raised on 2+ visit dates", async () => {
+      await withRealMatrix(adminPermission);
+      // 9004801: two PMs on 15 Sep (one date); 9004802: 15 Sep and 1 Aug (two dates).
+      mockQuery.mockImplementation((sql: string) => {
+        if (sql.includes("lms_visit_concern_events")) return Promise.resolve([]);
+        if (sql.includes("centre_positions")) return Promise.resolve([]);
+        if (sql.includes("lms_visit_concern_mentions")) {
+          return Promise.resolve([
+            { id: "9004801", kind: "concern", text: "Lab equipment missing", status: "open", visit_id: "1", snippet: "Said" },
+            { id: "9004801", kind: "concern", text: "Lab equipment missing", status: "open", visit_id: "2", snippet: "Said" },
+            { id: "9004802", kind: "concern", text: "Fans broken", status: "open", visit_id: "2", snippet: "Said" },
+            { id: "9004802", kind: "concern", text: "Fans broken", status: "open", visit_id: "3", snippet: "Said" },
+          ]);
+        }
+        if (sql.includes("lms_pm_school_visits")) {
+          return Promise.resolve([
+            { id: "2", visit_date: "2026-09-15", status: "completed", pm_email: "pm2@avantifellows.org", pm_name: "PM 2" },
+            { id: "1", visit_date: "2026-09-15", status: "completed", pm_email: "pm@avantifellows.org", pm_name: "PM" },
+            { id: "3", visit_date: "2026-08-01", status: "completed", pm_email: "pm@avantifellows.org", pm_name: "PM" },
+          ]);
+        }
+        return Promise.resolve([{ code: "SC001", name: "Test School", region: "Bhopal" }]);
+      });
+
+      render(await renderPage());
+
+      expect(within(screen.getByRole("list", { name: "Concern counts" })).getAllByRole("listitem").map((chip) => chip.textContent)).toEqual([
+        "2 open concerns",
+        "1 recurring",
+        "0 highlights",
+        "0 resolved",
+      ]);
+      const needsAttention = screen.getByRole("region", { name: "All concerns - Need Attention" });
+      // Both were raised in 2 Visits; only the one on two dates is Recurring, and it sorts first.
+      const cards = within(needsAttention).getAllByRole("article");
+      expect(cards.map((card) => card.textContent)).toEqual([
+        expect.stringMatching(/^▸Fans brokenRecurring · 2 visits15 Sep · 01 Aug/),
+        expect.stringMatching(/^▸Lab equipment missing15 Sep ×2/),
+      ]);
+    });
+
     it("says the School's Visits aren't summarised yet, with the summary run, instead of showing no concerns", async () => {
       await withRealMatrix(adminPermission);
       mockQuery.mockImplementation((sql: string) => {

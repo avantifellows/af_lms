@@ -13,7 +13,7 @@ import type {
   VisitNotes,
 } from "@/lib/visit-concerns";
 import {
-  RECURRING_CONCERN_MIN_VISITS,
+  RECURRING_CONCERN_MIN_DAYS,
   formatCompactVisitDates,
   formatIstDate,
   formatIstTimestamp,
@@ -166,7 +166,7 @@ function OpenConcernCard({ card, today, canAct, backHref }: CardProps) {
           <>
             <span className="block font-bold text-text-primary">{card.text}</span>
             <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-text-secondary">
-              {card.visitCount >= RECURRING_CONCERN_MIN_VISITS && (
+              {card.dayCount >= RECURRING_CONCERN_MIN_DAYS && (
                 <span className="font-bold text-danger">{`Recurring · ${formatVisitCount(card.visitCount)}`}</span>
               )}
               <span>{formatCompactVisitDates(card.visitDates, today)}</span>

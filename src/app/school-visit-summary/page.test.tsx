@@ -973,7 +973,8 @@ describe("SchoolVisitSummaryPage", () => {
         for (const [sql, params] of options) {
           expect(sql).toContain("AND v.school_code IN (");
           expect(sql).toContain("JOIN lms_visit_concerns c");
-          expect(sql).toContain(`HAVING COUNT(DISTINCT viv.id) >= $${params.length}`);
+          // The same Recurring rule as the table: distinct visit dates, not Visits.
+          expect(sql).toContain(`HAVING COUNT(DISTINCT viv.visit_date) >= $${params.length}`);
           expect(params).toEqual(["completed", 2]);
         }
       });
@@ -1052,8 +1053,9 @@ describe("SchoolVisitSummaryPage", () => {
       const [, params] = mockQuery.mock.calls.find(([query]) => String(query).includes("lms_visit_concerns"))!;
       const recurringIndex = (params as unknown[]).length;
       expect((params as unknown[])[recurringIndex - 1]).toBe(2);
-      expect(sql).toContain(`COUNT(*) FILTER (WHERE visit_count >= $${recurringIndex}) AS recurring_count`);
-      expect(sql).toContain(`WHERE visit_count >= $${recurringIndex}`);
+      // Recurring counts distinct visit dates in view, not Visits.
+      expect(sql).toContain(`COUNT(*) FILTER (WHERE day_count >= $${recurringIndex}) AS recurring_count`);
+      expect(sql).toContain(`WHERE day_count >= $${recurringIndex}`);
     });
 
     it("says one Visit waiting in the singular", async () => {

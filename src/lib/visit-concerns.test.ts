@@ -156,6 +156,23 @@ describe("getSchoolWiseView", () => {
     ]);
   });
 
+  it("counts a Recurring Concern by distinct visit dates in view, not Visits, and still returns its visit count", async () => {
+    respond([SC001]);
+
+    await getSchoolWiseView(ADMIN, NO_FILTERS, { sort: "recurring", dir: "desc" });
+
+    const [sql, params] = mockQuery.mock.calls.find(([query]) => String(query).includes("lms_visit_concerns")) as [string, unknown[]];
+    const flat = sql.replace(/\s+/g, " ");
+    const minDays = `$${params.length}`;
+    expect(params[params.length - 1]).toBe(2);
+    // Two PMs at the School on the same day count as one day.
+    expect(flat).toContain("COUNT(DISTINCT viv.id) AS visit_count, COUNT(DISTINCT viv.visit_date) AS day_count");
+    expect(flat).toContain(`COUNT(*) FILTER (WHERE day_count >= ${minDays}) AS recurring_count`);
+    expect(flat).toContain(`WHERE day_count >= ${minDays} ORDER BY school_code, day_count DESC, visit_count DESC, last_mentioned_on DESC, id ASC`);
+    expect(flat).toContain("tr.visit_count AS top_recurring_visit_count");
+    expect(flat).not.toMatch(/visit_count >= \$/);
+  });
+
   it("leaves the query's order alone for any other sort", async () => {
     respond([SC002, SC001]);
 
@@ -177,12 +194,13 @@ describe("withRecurringSchoolsOnly", () => {
     expect(sql.startsWith("v.deleted_at IS NULL AND v.status = $1 AND v.school_code IN (")).toBe(true);
     // The inner Visits in view are the same WHERE (and joins) on their own aliases, completed only.
     expect(sql).toContain(
-      "FROM lms_pm_school_visits v LEFT JOIN school s ON s.code = v.school_code LEFT JOIN extra WHERE v.deleted_at IS NULL AND v.status = $1 AND v.status = 'completed'"
+      "SELECT v.id, v.school_code, v.visit_date FROM lms_pm_school_visits v LEFT JOIN school s ON s.code = v.school_code LEFT JOIN extra WHERE v.deleted_at IS NULL AND v.status = $1 AND v.status = 'completed'"
     );
-    // getSchoolWiseView's rule: an open Concern at the School with live mentions in 2+ distinct Visits.
+    // getSchoolWiseView's rule: an open Concern at the School with live mentions on 2+ distinct
+    // visit dates (same-day Visits count once).
     expect(sql).toContain("JOIN lms_visit_concerns c ON c.id = m.concern_id AND c.school_code = viv.school_code");
     expect(sql).toContain("WHERE c.kind = 'concern' AND c.status = 'open'");
-    expect(sql).toContain("GROUP BY viv.school_code, c.id HAVING COUNT(DISTINCT viv.id) >= $2");
+    expect(sql).toContain("GROUP BY viv.school_code, c.id HAVING COUNT(DISTINCT viv.visit_date) >= $2");
   });
 });
 
@@ -222,7 +240,7 @@ describe("getSchoolConcernPage", () => {
     id, kind, text, status: kind === "highlight" ? null : status, visit_id, snippet: `Said ${id} in ${visit_id}`,
   });
 
-  it("counts a concern once per completed Visit that mentions it, same-day Visits separately, dates newest first", async () => {
+  it("counts a concern once per completed Visit that mentions it and once per visit date, dates newest first", async () => {
     respond({
       visits: [visit("3", "2026-10-15"), visit("2", "2026-08-06"), visit("1", "2026-08-06")],
       mentions: [mention("41", "1"), mention("41", "3"), mention("41", "2")],
@@ -233,7 +251,7 @@ describe("getSchoolConcernPage", () => {
     expect(page.needsAttention).toEqual([
       {
         id: 41, kind: "concern", text: "Item 41", status: "open",
-        visitCount: 3, visitDates: ["2026-10-15", "2026-08-06", "2026-08-06"],
+        visitCount: 3, dayCount: 2, visitDates: ["2026-10-15", "2026-08-06", "2026-08-06"],
         mentions: [
           { visitId: 3, visitDate: "2026-10-15", pmEmail: "pm@avantifellows.org", pmName: "Ravi PM", snippet: "Said 41 in 3" },
           { visitId: 2, visitDate: "2026-08-06", pmEmail: "pm@avantifellows.org", pmName: "Ravi PM", snippet: "Said 41 in 2" },
@@ -302,6 +320,44 @@ describe("getSchoolConcernPage", () => {
     expect(page.visitNotes.map((notes) => [notes.visitId, notes.status, notes.concerns.length])).toEqual([
       [2, "in_progress", 0],
       [1, "completed", 1],
+    ]);
+  });
+
+  it("counts two same-day Visits as one visit date, so the concern isn't Recurring", async () => {
+    respond({
+      visits: [visit("3", "2026-10-15"), visit("2", "2026-08-06"), visit("1", "2026-08-06")],
+      mentions: [mention("41", "1"), mention("41", "2"), mention("42", "1"), mention("42", "3")],
+    });
+
+    const page = await getSchoolConcernPage(ADMIN, "SC001", NO_FILTERS);
+
+    // 42: two Visits on two dates; 41: two Visits on one date. Both show "2 visits".
+    expect(page.needsAttention.map((card) => [card.id, card.visitCount, card.dayCount])).toEqual([
+      [42, 2, 2],
+      [41, 2, 1],
+    ]);
+  });
+
+  it("sorts cards by most visit dates, then most Visits, then the most recent mention, then the lowest id", async () => {
+    respond({
+      visits: [
+        visit("7", "2026-10-20"), visit("4", "2026-10-20"), visit("3", "2026-10-15"), visit("2", "2026-09-01"),
+        visit("6", "2026-08-06"), visit("5", "2026-08-06"), visit("1", "2026-08-06"),
+      ],
+      mentions: [
+        // 70: three Visits on one date; 71: two Visits on two dates; 72: two Visits on one later date.
+        mention("70", "1"), mention("70", "5"), mention("70", "6"),
+        mention("71", "1"), mention("71", "2"),
+        mention("72", "4"), mention("72", "7"),
+      ],
+    });
+
+    const page = await getSchoolConcernPage(ADMIN, "SC001", NO_FILTERS);
+
+    expect(page.needsAttention.map((card) => [card.id, card.dayCount, card.visitCount])).toEqual([
+      [71, 2, 2],
+      [70, 1, 3],
+      [72, 1, 2],
     ]);
   });
 

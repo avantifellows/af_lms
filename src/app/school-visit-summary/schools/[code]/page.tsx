@@ -8,7 +8,7 @@ import { SchoolInterventionFlags } from "@/components/visits/SchoolInterventionF
 import { canViewSchoolInterventionFlags } from "@/lib/intervention-flags";
 import { canAccessSchoolSync, getFeatureAccess } from "@/lib/permissions";
 import { getSchoolConcernPage, type SchoolConcernPage } from "@/lib/visit-concerns";
-import { RECURRING_CONCERN_MIN_VISITS, formatIstDate, searchParamsWithout } from "@/lib/visit-summary";
+import { RECURRING_CONCERN_MIN_DAYS, formatIstDate, searchParamsWithout } from "@/lib/visit-summary";
 import { requireVisitSummaryPage } from "@/lib/visit-summary-page";
 import { normalizeVisitSummaryFilters } from "@/lib/visit-summary-scope";
 import {
@@ -84,7 +84,7 @@ function SchoolHeader({ school, page }: { school: VisitSummarySchool; page: Scho
     plural(page.visitNotes.length, "visit"),
     lastVisit ? `last ${formatIstDate(lastVisit)}` : null,
   ].filter(Boolean);
-  const recurring = page.needsAttention.filter((card) => card.visitCount >= RECURRING_CONCERN_MIN_VISITS).length;
+  const recurring = page.needsAttention.filter((card) => card.dayCount >= RECURRING_CONCERN_MIN_DAYS).length;
   const chips = [
     { label: `${plural(page.needsAttention.length, "open concern")}`, className: "bg-danger-bg text-danger" },
     { label: `${recurring} recurring`, className: "bg-accent text-text-on-accent" },

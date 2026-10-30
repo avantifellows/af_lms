@@ -28,6 +28,7 @@ const RECURRING: ConcernCard = {
   text: "Lab equipment missing",
   status: "open",
   visitCount: 3,
+  dayCount: 2,
   visitDates: ["2026-10-15", "2026-08-06", "2026-08-06"],
   mentions: [
     mentionOn(12, "2026-10-15", "Lab still has no burettes"),
@@ -63,6 +64,7 @@ const ONE_OFF: ConcernCard = {
   text: "Timetable not displayed",
   status: "open",
   visitCount: 1,
+  dayCount: 1,
   visitDates: ["2025-12-01"],
   mentions: [mentionOn(9, "2025-12-01", "Timetable not on the notice board")],
   reopened: false,
@@ -75,6 +77,7 @@ const HIGHLIGHT: ConcernCard = {
   text: "Students asking doubts",
   status: null,
   visitCount: 2,
+  dayCount: 2,
   visitDates: ["2026-10-15", "2026-08-06"],
   mentions: [mentionOn(12, "2026-10-15", "Many doubts asked in class"), mentionOn(10, "2026-08-06", "Doubt sessions busy")],
   reopened: false,
@@ -87,6 +90,7 @@ const RESOLVED: ConcernCard = {
   text: "Water cooler broken",
   status: "resolved",
   visitCount: 2,
+  dayCount: 2,
   visitDates: ["2026-10-15", "2026-08-06"],
   mentions: [mentionOn(12, "2026-10-15", "Cooler leaking"), mentionOn(10, "2026-08-06", "Cooler not cooling")],
   reopened: false,
@@ -101,6 +105,20 @@ const RESOLVED: ConcernCard = {
       at: new Date("2026-10-01T04:30:00.000Z"),
     },
   ],
+};
+
+// Raised by two PMs who visited on the same day: two Visits, one visit date, so not Recurring.
+const SAME_DAY: ConcernCard = {
+  id: 5,
+  kind: "concern",
+  text: "Library closed in the evening",
+  status: "open",
+  visitCount: 2,
+  dayCount: 1,
+  visitDates: ["2026-08-06", "2026-08-06"],
+  mentions: [mentionOn(11, "2026-08-06", "Library locked after 5"), mentionOn(10, "2026-08-06", "No evening library")],
+  reopened: false,
+  history: [],
 };
 
 const PAGE: SchoolConcernPage = {
@@ -190,7 +208,7 @@ describe("SchoolConcernSections", () => {
     ]);
   });
 
-  it("marks a concern raised in 2+ visits as Recurring, with its compact visit dates", () => {
+  it("marks a concern raised on 2+ visit dates as Recurring, with its visit count and compact visit dates", () => {
     const view = renderSections();
 
     const recurring = view.card(NEEDS_ATTENTION, "Lab equipment missing");
@@ -202,6 +220,15 @@ describe("SchoolConcernSections", () => {
     expect(oneOff).not.toHaveTextContent("Recurring");
     expect(oneOff).not.toHaveTextContent("visit");
     expect(within(oneOff).getByText("01 Dec 2025")).toBeInTheDocument();
+  });
+
+  it("marks a concern Recurring only when it was raised on 2+ visit dates, not by two same-day visits", () => {
+    const view = renderSections({ page: { ...PAGE, needsAttention: [RECURRING, SAME_DAY] } });
+
+    const sameDay = view.card(NEEDS_ATTENTION, "Library closed in the evening");
+    expect(sameDay).not.toHaveTextContent("Recurring");
+    expect(within(sameDay).getByText("06 Aug ×2")).toBeInTheDocument();
+    expect(within(view.card(NEEDS_ATTENTION, "Lab equipment missing")).getByText("Recurring · 3 visits")).toBeInTheDocument();
   });
 
   it("marks a reopened concern and lists its history, including an automatic reopen", () => {

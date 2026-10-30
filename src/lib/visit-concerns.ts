@@ -12,7 +12,7 @@ import {
   type VisitSummaryFilters,
   type VisitSummaryWhere,
 } from "@/lib/visit-summary-scope";
-import { RECURRING_CONCERN_MIN_VISITS } from "@/lib/visit-summary";
+import { RECURRING_CONCERN_MIN_DAYS } from "@/lib/visit-summary";
 import type { VisitsActor } from "@/lib/visits-policy";
 
 export type SchoolWiseSortKey = "school_name" | "visits" | "last_visit" | "open" | "recurring" | "flags";
@@ -128,10 +128,11 @@ function buildOrderClause({ sort, dir }: SchoolWiseSort): string {
 }
 
 // One row per School with at least one Visit in view (any status), with its Recurring Concerns
-// (open, live mentions in RECURRING_CONCERN_MIN_VISITS+ distinct Visits in view; same-day Visits
-// count separately), its open
-// Concerns (open, 1+ live mention in view) and its top Recurring Concern (most Visits, then the
-// most recent mention's visit_date, then the lowest id). Resolved Concerns and Highlights never count.
+// (open, live mentions on RECURRING_CONCERN_MIN_DAYS+ distinct visit dates in view; same-day
+// Visits count once), its open Concerns (open, 1+ live mention in view) and its top Recurring
+// Concern (most visit dates, then most Visits, then the most recent mention's visit_date, then the
+// lowest id; its `visitCount` is still Visits, for the "N visits" label). Resolved Concerns and
+// Highlights never count.
 // `filters.recurringOnly` keeps only Schools with a Recurring Concern; the stats and the waiting
 // count follow the rows kept.
 // Open intervention flags are counted per School in the same query (JNV NVS flags never count) and
@@ -158,6 +159,7 @@ export async function getSchoolWiseView(
      open_concerns AS (
        SELECT c.id, c.school_code, c.text,
               COUNT(DISTINCT viv.id) AS visit_count,
+              COUNT(DISTINCT viv.visit_date) AS day_count,
               MAX(viv.visit_date) AS last_mentioned_on
        FROM lms_visit_concerns c
        JOIN lms_visit_concern_mentions m ON m.concern_id = c.id
@@ -169,7 +171,7 @@ export async function getSchoolWiseView(
      ),
      school_concerns AS (
        SELECT school_code,
-              COUNT(*) FILTER (WHERE visit_count >= $${recurringIndex}) AS recurring_count,
+              COUNT(*) FILTER (WHERE day_count >= $${recurringIndex}) AS recurring_count,
               COUNT(*) AS open_count
        FROM open_concerns
        GROUP BY school_code
@@ -177,8 +179,8 @@ export async function getSchoolWiseView(
      top_recurring AS (
        SELECT DISTINCT ON (school_code) school_code, id, text, visit_count
        FROM open_concerns
-       WHERE visit_count >= $${recurringIndex}
-       ORDER BY school_code, visit_count DESC, last_mentioned_on DESC, id ASC
+       WHERE day_count >= $${recurringIndex}
+       ORDER BY school_code, day_count DESC, visit_count DESC, last_mentioned_on DESC, id ASC
      ),
      school_visits AS (
        SELECT school_code, school_name, region, af_school_category,
@@ -215,7 +217,7 @@ export async function getSchoolWiseView(
      LEFT JOIN top_recurring tr ON tr.school_code = sv.school_code
      LEFT JOIN school_flags sf ON sf.school_code = sv.school_code
      ORDER BY ${buildOrderClause(sort)}`,
-    [...params, PROGRAM_IDS.NVS, RECURRING_CONCERN_MIN_VISITS]
+    [...params, PROGRAM_IDS.NVS, RECURRING_CONCERN_MIN_DAYS]
   );
   const [rows, summarisedUpTo] = await Promise.all([rowsQuery, getSummarisedUpTo()]);
 
@@ -269,12 +271,12 @@ export async function getSchoolWiseView(
 // Schools the table keeps (and the Regions and PMs of Visits at them). The inner query re-declares
 // `v` and `s`, so it reuses the WHERE and its placeholders unchanged.
 export function withRecurringSchoolsOnly(where: VisitSummaryWhere): VisitSummaryWhere {
-  const minVisits = `$${where.params.length + 1}`;
+  const minDays = `$${where.params.length + 1}`;
   return {
     whereSql: `${where.whereSql} AND v.school_code IN (
        SELECT viv.school_code
        FROM (
-         SELECT v.id, v.school_code
+         SELECT v.id, v.school_code, v.visit_date
          FROM lms_pm_school_visits v
          LEFT JOIN school s ON s.code = v.school_code
          ${where.joinSql}
@@ -284,10 +286,10 @@ export function withRecurringSchoolsOnly(where: VisitSummaryWhere): VisitSummary
        JOIN lms_visit_concerns c ON c.id = m.concern_id AND c.school_code = viv.school_code
        WHERE c.kind = 'concern' AND c.status = 'open'
        GROUP BY viv.school_code, c.id
-       HAVING COUNT(DISTINCT viv.id) >= ${minVisits}
+       HAVING COUNT(DISTINCT viv.visit_date) >= ${minDays}
      )`,
     joinSql: where.joinSql,
-    params: [...where.params, RECURRING_CONCERN_MIN_VISITS],
+    params: [...where.params, RECURRING_CONCERN_MIN_DAYS],
   };
 }
 
@@ -317,8 +319,10 @@ export interface ConcernMention {
   snippet: string;
 }
 
-// A Visit Concern or Visit Highlight on the School page. `visitDates` holds one `YYYY-MM-DD` per
-// live-mention Visit in view (same-day Visits repeat), newest first; `mentions` holds the same
+// A Visit Concern or Visit Highlight on the School page. `visitCount` counts its live-mention Visits
+// in view and `dayCount` their distinct visit dates (what Recurring reads: same-day Visits count
+// once). `visitDates` holds one `YYYY-MM-DD` per live-mention Visit in view (same-day Visits
+// repeat), newest first; `mentions` holds the same
 // mentions (one per Visit), newest first. Highlights have no status, history or reopened marker.
 export interface ConcernCard {
   id: number;
@@ -326,6 +330,7 @@ export interface ConcernCard {
   text: string;
   status: "open" | "resolved" | null;
   visitCount: number;
+  dayCount: number;
   visitDates: string[];
   mentions: ConcernMention[];
   reopened: boolean;
@@ -433,10 +438,11 @@ function isReopened(history: ConcernHistoryEntry[]): boolean {
   return history.some((entry) => entry.kind === "reopened" || entry.kind === "auto_reopened");
 }
 
-// Most Visits first, then the most recent mention, then the lowest id (the School-wise tab's
-// top-recurring order).
+// Most visit dates first, then most Visits, then the most recent mention, then the lowest id (the
+// School-wise tab's top-recurring order).
 function compareCards(a: ConcernCard, b: ConcernCard): number {
-  return b.visitCount - a.visitCount
+  return b.dayCount - a.dayCount
+    || b.visitCount - a.visitCount
     || (b.visitDates[0] ?? "").localeCompare(a.visitDates[0] ?? "")
     || a.id - b.id;
 }
@@ -499,6 +505,7 @@ export async function getSchoolConcernPage(
       text: mention.text,
       status: mention.status,
       visitCount: 0,
+      dayCount: 0,
       visitDates: [],
       mentions: [],
       reopened: isReopened(history),
@@ -523,6 +530,7 @@ export async function getSchoolConcernPage(
 
   const cards = [...cardsById.values()];
   for (const card of cards) {
+    card.dayCount = new Set(card.visitDates).size;
     card.visitDates.sort((a, b) => b.localeCompare(a));
     card.mentions.sort((a, b) => b.visitDate.localeCompare(a.visitDate) || b.visitId - a.visitId);
   }
