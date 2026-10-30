@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
-import { authorizeStudentSupportRead } from "@/lib/student-support-request";
+import { badStudentParam, withStudentSupportRead } from "@/lib/student-support-request";
 import { getMentorNoteCounts, getMentorNotes } from "@/lib/student-support-notes";
 
 /**
@@ -9,18 +9,10 @@ import { getMentorNoteCounts, getMentorNotes } from "@/lib/student-support-notes
  * Holistic Mentorship read rules apply (teachers: own mentees only). Not an
  * MCP view: notes are confidential.
  */
-export async function GET(
-  request: Request,
-  { params }: { params: Promise<{ udise: string }> }
-) {
-  const { udise } = await params;
-  const req = await authorizeStudentSupportRead(request, udise);
-  if (!req.ok) return req.response;
-
+export const GET = withStudentSupportRead(async (req) => {
   const student = req.searchParams.get("student");
-  if (student !== null && !/^\d+$/.test(student)) {
-    return NextResponse.json({ error: "student must be a numeric id" }, { status: 400 });
-  }
+  const invalid = student === null ? null : badStudentParam(student);
+  if (invalid) return invalid;
 
   try {
     const session = await getSession();
@@ -35,4 +27,4 @@ export async function GET(
     console.error("Mentor notes error:", error);
     return NextResponse.json({ error: "Failed to fetch mentor notes" }, { status: 500 });
   }
-}
+});

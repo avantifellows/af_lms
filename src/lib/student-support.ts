@@ -560,7 +560,14 @@ function shapeTests(rows: TestRaw[]): TestHistoryRow[] {
     bySession.set(r.session_id, row);
   }
   const tests = [...bySession.values()].sort((a, b) => b.date.localeCompare(a.date));
-  // Change vs the previous sitting of the same exam the student actually sat.
+  setChanges(tests);
+  for (const t of tests) t.subjects.sort((a, b) => a.subject.localeCompare(b.subject));
+  return tests;
+}
+
+/** Change vs the previous sitting of the same exam the student actually sat
+ *  (tests newest first). */
+function setChanges(tests: TestHistoryRow[]) {
   const previous = new Map<string, number>();
   for (const t of [...tests].reverse()) {
     const key = t.exam ?? "";
@@ -570,8 +577,6 @@ function shapeTests(rows: TestRaw[]): TestHistoryRow[] {
     t.change = before === undefined ? null : round1(p - before);
     previous.set(key, p);
   }
-  for (const t of tests) t.subjects.sort((a, b) => a.subject.localeCompare(b.subject));
-  return tests;
 }
 
 /**

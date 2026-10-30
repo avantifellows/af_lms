@@ -14,7 +14,7 @@ import { authorizeSchoolAccess } from "@/lib/api-auth";
 import { getSession } from "@/lib/session";
 import { getMentorNoteCounts, getMentorNotes } from "@/lib/student-support-notes";
 import { GET } from "./route";
-import { routeParams } from "../../../../__test-utils__/api-test-helpers";
+import { getRequest, routeParams } from "../../../../__test-utils__/api-test-helpers";
 
 const mockAuth = vi.mocked(authorizeSchoolAccess);
 const mockSession = vi.mocked(getSession);
@@ -24,11 +24,8 @@ const mockNotes = vi.mocked(getMentorNotes);
 const SCHOOL = { id: "1", code: "70705", name: "Test School", region: "North" };
 const SESSION = { user: { email: "t@avantifellows.org" } } as never;
 
-function request(params: Record<string, string>) {
-  const url = new URL("http://localhost/api/quiz-analytics/1234/student-support/notes");
-  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
-  return new Request(url.toString());
-}
+const request = (params: Record<string, string>) =>
+  getRequest("http://localhost/api/quiz-analytics/1234/student-support/notes", params);
 
 beforeEach(() => {
   vi.resetAllMocks();

@@ -72,6 +72,28 @@ describe("Score journey ordering", () => {
     expect(sortRows(rows, "latest", true).map((r) => r.uid)).toEqual(["y", "z", "x"]);
   });
 
+  it("sorts by name, predicted level, questions to next level and status", () => {
+    const rows = [
+      row({ uid: "b", name: "bala", predicted: "M3", toNext: { kind: "top" }, status: "Improving" }),
+      row({ uid: "a", name: "Asha", predicted: "M1", toNext: { kind: "none" }, status: null }),
+      row({
+        uid: "c", name: "Chitra", predicted: null, status: "Sliding",
+        toNext: { kind: "count", questions: 5, median: 80, cutoff: 100, nextLevel: "M2", tests: [] },
+      }),
+      row({ uid: "d", name: "Dev", predicted: "X9", toNext: { kind: "reached" }, status: "Same" }),
+    ];
+    const order = (key: Parameters<typeof sortRows>[1], ascending: boolean) =>
+      sortRows(rows, key, ascending).map((r) => r.uid);
+
+    expect(order("name", true)).toEqual(["a", "b", "c", "d"]);
+    expect(order("name", false)).toEqual(["d", "c", "b", "a"]);
+    // Best predicted level first ascending; an unknown or missing level last, by name.
+    expect(order("predicted", true)).toEqual(["a", "b", "c", "d"]);
+    // Top and Reached count as 0 questions; no figure sorts last.
+    expect(order("toNext", false)).toEqual(["c", "b", "d", "a"]);
+    expect(order("status", true)).toEqual(["c", "d", "b", "a"]);
+  });
+
   it("filters by gender and counts statuses", () => {
     const rows = [row({ gender: "Male", status: "Sliding" }), row({ gender: "Female", status: "Sliding" }), row({ status: "Same" })];
     expect(rows.filter((r) => matchesGender(r, "male"))).toHaveLength(1);

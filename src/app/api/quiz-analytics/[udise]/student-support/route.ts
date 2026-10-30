@@ -1,16 +1,9 @@
 import { NextResponse } from "next/server";
-import { authorizeStudentSupportRead } from "@/lib/student-support-request";
+import { withStudentSupportRead } from "@/lib/student-support-request";
 import { getScoreJourney } from "@/lib/student-support";
 
 /** Score journey: every enrolled student of the grade, Predicted vs Mode AL. */
-export async function GET(
-  request: Request,
-  { params }: { params: Promise<{ udise: string }> }
-) {
-  const { udise } = await params;
-  const req = await authorizeStudentSupportRead(request, udise);
-  if (!req.ok) return req.response;
-
+export const GET = withStudentSupportRead(async (req, udise) => {
   try {
     const stream = req.searchParams.get("stream")?.toLowerCase() || undefined;
     const testGradeParam = Number(req.searchParams.get("testGrade"));
@@ -20,4 +13,4 @@ export async function GET(
     console.error("Score journey error:", error);
     return NextResponse.json({ error: "Failed to fetch the score journey" }, { status: 500 });
   }
-}
+});

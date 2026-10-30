@@ -13,7 +13,7 @@ import { authorizeSchoolAccess } from "@/lib/api-auth";
 import { getScoreJourney, getStudentReport } from "@/lib/student-support";
 import { GET } from "./route";
 import { GET as GET_REPORT } from "../student-report/route";
-import { PMU_MANAGER_PERMISSION, routeParams } from "../../../__test-utils__/api-test-helpers";
+import { PMU_MANAGER_PERMISSION, getRequest, routeParams } from "../../../__test-utils__/api-test-helpers";
 
 const mockAuth = vi.mocked(authorizeSchoolAccess);
 const mockJourney = vi.mocked(getScoreJourney);
@@ -21,11 +21,8 @@ const mockReport = vi.mocked(getStudentReport);
 
 const SCHOOL = { id: "1", code: "70705", name: "Test School", region: "North" };
 
-function request(path: string, params: Record<string, string>) {
-  const url = new URL(`http://localhost/api/quiz-analytics/1234/${path}`);
-  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
-  return new Request(url.toString());
-}
+const request = (path: string, params: Record<string, string>) =>
+  getRequest(`http://localhost/api/quiz-analytics/1234/${path}`, params);
 
 beforeEach(() => {
   vi.resetAllMocks();

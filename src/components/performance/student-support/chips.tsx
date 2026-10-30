@@ -30,7 +30,7 @@ export function StatusChip({ status }: { status: AlStatus | null }) {
   return <span className={`${BASE} ${STATUS_CLASS[status]}`}>{status}</span>;
 }
 
-export const FLAG_LABEL: Record<ChapterFlag, string> = { C: "Concept gap", S: "Skipping" };
+const FLAG_LABEL: Record<ChapterFlag, string> = { C: "Concept gap", S: "Skipping" };
 
 export function FlagChip({ flag }: { flag: ChapterFlag | null }) {
   if (!flag) return null;
