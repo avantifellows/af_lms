@@ -14,6 +14,7 @@ import type {
   SubjectChapters,
   TestHistoryRow,
   TestScore,
+  TopicRow,
 } from "@/types/student-support";
 
 interface Props {
@@ -62,6 +63,11 @@ function FocusCards({ subject }: { subject: SubjectChapters }) {
             <FlagChip flag={c.flag} />
           </div>
           <ScoreBar value={c.score} pass={subject.passMark} />
+          {c.topics.some((t) => t.flag) && (
+            <ul className="list-disc space-y-0.5 pl-4 text-xs">
+              {c.topics.filter((t) => t.flag).slice(0, 3).map((t) => <li key={t.code}>{t.name}</li>)}
+            </ul>
+          )}
           <PyqLinks links={c.pyq} />
         </div>
       ))}
@@ -69,20 +75,56 @@ function FocusCards({ subject }: { subject: SubjectChapters }) {
   );
 }
 
+// One grid for the map's header, chapters and topics, so the priority, score
+// and flag columns line up (prototype layout); rows wrap below md.
+const MAP_ROW =
+  "flex flex-wrap items-center gap-x-3 gap-y-1 md:grid md:grid-cols-[4.5rem_minmax(0,1fr)_5.5rem_11rem_10rem]";
+
+function TopicLine({ t, pass }: { t: TopicRow; pass: number }) {
+  return (
+    <div className={`${MAP_ROW} border-t border-dashed border-border py-1.5 text-xs`}>
+      <span className="min-w-[12rem] flex-1 md:col-start-2 md:col-end-4">{t.name}</span>
+      <ScoreBar value={t.score} pass={pass} />
+      <span><FlagChip flag={t.flag} /></span>
+    </div>
+  );
+}
+
+/** Flagged topics first; topics on track behind a toggle, as in the prototype. */
+function ChapterTopics({ c, pass }: { c: ChapterRow; pass: number }) {
+  const [showOk, setShowOk] = useState(false);
+  const flagged = c.topics.filter((t) => t.flag);
+  const onTrack = c.topics.filter((t) => !t.flag);
+  return (
+    <div className="pb-2">
+      {(showOk ? c.topics : flagged).map((t) => <TopicLine key={t.code} t={t} pass={pass} />)}
+      {onTrack.length > 0 && (
+        <button type="button" onClick={() => setShowOk(!showOk)} className="mt-1 text-xs text-accent hover:underline md:ml-[5.25rem]">
+          {showOk ? "Hide" : "Show"} {onTrack.length} topic{onTrack.length === 1 ? "" : "s"} on track
+        </button>
+      )}
+    </div>
+  );
+}
+
 function ChapterLine({ c, pass }: { c: ChapterRow; pass: number }) {
   return (
-    <details className="border-t border-border first:border-t-0">
-      <summary className="flex cursor-pointer flex-wrap items-center gap-3 py-2 text-sm">
-        <span className="w-16 text-xs text-text-muted tabular-nums">{c.code ?? ""}</span>
+    <details className="group border-t border-border first:border-t-0">
+      <summary className={`${MAP_ROW} cursor-pointer list-none py-2 text-sm`}>
+        <span className="w-16 text-xs text-text-muted tabular-nums md:w-auto">
+          <span className="mr-1 inline-block transition-transform group-open:rotate-90">▸</span>
+          {c.code ?? ""}
+        </span>
         <span className="min-w-[12rem] flex-1">{c.name}</span>
-        <PriorityBadge priority={c.priority} />
+        <span><PriorityBadge priority={c.priority} /></span>
         <ScoreBar value={c.score} pass={pass} />
-        <FlagChip flag={c.flag} />
+        <span><FlagChip flag={c.flag} /></span>
       </summary>
-      <div className="pb-2 pl-20 text-xs text-text-muted tabular-nums">
+      <div className="pb-1 text-xs text-text-muted tabular-nums md:pl-[5.25rem]">
         {c.n} answers · attempt {c.attempt ?? "—"}% · accuracy {c.accuracy ?? "—"}% · {c.tests} tests
         {c.pyq.length > 0 && <span className="ml-3"><PyqLinks links={c.pyq} /></span>}
       </div>
+      <ChapterTopics c={c} pass={pass} />
     </details>
   );
 }
@@ -109,6 +151,13 @@ function ChapterMap({ subject }: { subject: SubjectChapters }) {
           value={sort}
           onChange={setSort}
         />
+      </div>
+      <div className={`${MAP_ROW} hidden border-b border-border pb-1 text-[11px] font-bold uppercase tracking-wide text-text-muted md:grid`}>
+        <span />
+        <span>Chapter</span>
+        <span>Priority</span>
+        <span>Score</span>
+        <span>Flags</span>
       </div>
       {[
         { title: "Needs work", list: flagged },

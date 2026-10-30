@@ -53,7 +53,7 @@ export default function StudentSupport({ schoolUdise, grade, program, stream, te
           <ul className="list-disc space-y-1.5 pl-5">
             <li><b>Test grade</b> filters the test columns (last 3 tests, latest score, questions to next AL, all tests). Mode AL, Predicted and AL status are the student&apos;s overall values.</li>
             <li><b>Mode AL</b>: the most frequent level in the student&apos;s last 3 full tests (JEE Advanced papers excluded; a tie goes to the lower level). Retests count as tests.</li>
-            <li><b>Predicted</b>: from grade-10 Maths and Science marks (65+ in both). JEE Main only; JEE Advanced and NEET predictions will come later.</li>
+            <li><b>Predicted</b>: from grade-10 Maths and Science marks; below 65 in either is M3, with no percentile. JEE Main only; JEE Advanced and NEET predictions will come later.</li>
             <li><b>AL status</b>: Mode better than Predicted is <i>Improving</i>, worse is <i>Sliding</i>, equal is <i>Same</i>.</li>
             <li><b>Questions to next mode AL</b>: extra correct answers (+4 each) the median of the last 3 levelled tests needs to reach the next level&apos;s cutoff.</li>
             <li><b>Chapter flags</b> (4+ answers, score below the pass mark): <i>C · Concept gap</i> when accuracy is under 60%; <i>S · Skipping</i> when attempt is under 70% or nothing was attempted.</li>

@@ -19,7 +19,7 @@ export function LevelChip({ level }: { level: string | null }) {
   return <span className={`${BASE} ${levelClass(level)}`}>{label}</span>;
 }
 
-const STATUS_CLASS: Record<AlStatus, string> = {
+export const STATUS_CLASS: Record<AlStatus, string> = {
   Sliding: "bg-danger-bg text-danger border-danger/30",
   Same: "bg-bg-card-alt text-text-muted border-border",
   Improving: "bg-success-bg text-success border-success/30",
@@ -57,7 +57,7 @@ export function ScoreBar({ value, pass }: { value: number | null; pass: number }
           style={{ width: `${Math.max(0, Math.min(100, value))}%` }}
         />
       </span>
-      <span className={`tabular-nums text-xs ${below ? "text-danger font-semibold" : ""}`}>{value}%</span>
+      <span className={`w-12 text-right tabular-nums text-xs ${below ? "text-danger font-semibold" : ""}`}>{value}%</span>
     </span>
   );
 }

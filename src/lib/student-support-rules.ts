@@ -84,6 +84,19 @@ export function chapterFlag(
   return "C";
 }
 
+/**
+ * A topic is flagged only inside a flagged chapter, when its own score is
+ * below the pass mark; C or S by the chapter rule, with no minimum count.
+ */
+export function topicFlag(
+  t: { attempt: number | null; accuracy: number | null; score: number | null },
+  chapter: ChapterFlag | null,
+  pass: number
+): ChapterFlag | null {
+  if (!chapter || t.score === null || t.score >= pass) return null;
+  return chapterFlag({ ...t, n: Infinity }, pass);
+}
+
 /** The exam's display name from the warehouse's test_course. */
 export function examName(course: string | null): string | null {
   if (!course) return null;

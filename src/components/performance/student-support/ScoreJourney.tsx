@@ -5,7 +5,8 @@ import StatCard from "@/components/StatCard";
 import { SegmentedControl } from "@/components/ui/SegmentedControl";
 import { useJsonFetch } from "../chapter-report/useJsonFetch";
 import { PerformanceNotice } from "../PerformanceStates";
-import { LevelChip, StatusChip } from "./chips";
+import { LevelChip, STATUS_CLASS, StatusChip } from "./chips";
+import MentorNotes, { NotesCell } from "./MentorNotes";
 import {
   type GenderFilter,
   type SortKey,
@@ -19,6 +20,7 @@ import {
 import type {
   AlStatus,
   JourneyTest,
+  MentorNoteCounts,
   ScoreJourneyData,
   ScoreJourneyRow,
   ToNextLevel,
@@ -45,6 +47,7 @@ const COLUMNS: { key: SortKey | null; label: string; className?: string }[] = [
   { key: "latest", label: "Latest score" },
   { key: "toNext", label: "Questions to next mode AL" },
   { key: "status", label: "AL status" },
+  { key: null, label: "Mentor notes" },
 ];
 
 function formatDate(iso: string): string {
@@ -76,7 +79,19 @@ function TestCell({ row, test }: { row: ScoreJourneyRow; test: JourneyTest }) {
   );
 }
 
-function Row({ row, tests, onOpen }: { row: ScoreJourneyRow; tests: JourneyTest[]; onOpen: () => void }) {
+function Row({
+  row,
+  tests,
+  notes,
+  onOpen,
+  onOpenNotes,
+}: {
+  row: ScoreJourneyRow;
+  tests: JourneyTest[];
+  notes: number | undefined;
+  onOpen: () => void;
+  onOpenNotes: () => void;
+}) {
   return (
     <tr className="border-t border-border hover:bg-bg-card-alt/40">
       <td className="sticky left-0 z-10 bg-bg-card px-3 py-2">
@@ -106,6 +121,7 @@ function Row({ row, tests, onOpen }: { row: ScoreJourneyRow; tests: JourneyTest[
       <td className="px-3 py-2 tabular-nums">{row.latestPct !== null ? `${row.latestPct}%` : "—"}</td>
       <td className="px-3 py-2"><ToNextCell value={row.toNext} /></td>
       <td className="px-3 py-2"><StatusChip status={row.status} /></td>
+      <td className="px-3 py-2"><NotesCell count={notes} onOpen={onOpenNotes} /></td>
       {tests.map((t) => (
         <td key={t.sessionId} className="px-2 py-2 text-center"><TestCell row={row} test={t} /></td>
       ))}
@@ -117,14 +133,18 @@ function SectionTable({
   section,
   allTests,
   sort,
+  notes,
   onSort,
   onOpenStudent,
+  onOpenNotes,
 }: {
   section: StreamSection;
   allTests: boolean;
   sort: { key: SortKey; ascending: boolean };
+  notes: Record<string, number>;
   onSort: (key: SortKey | null) => void;
   onOpenStudent: (uid: string) => void;
+  onOpenNotes: (row: ScoreJourneyRow) => void;
 }) {
   const tests = allTests ? section.tests : [];
   const groups = groupRows(section.rows, sort.key, sort.ascending);
@@ -166,7 +186,14 @@ function SectionTable({
                 </td>
               </tr>
               {g.rows.map((r) => (
-                <Row key={r.uid} row={r} tests={tests} onOpen={() => onOpenStudent(r.uid)} />
+                <Row
+                  key={r.uid}
+                  row={r}
+                  tests={tests}
+                  notes={notes[r.uid]}
+                  onOpen={() => onOpenStudent(r.uid)}
+                  onOpenNotes={() => onOpenNotes(r)}
+                />
               ))}
             </tbody>
           ))}
@@ -181,6 +208,7 @@ export default function ScoreJourney({ schoolUdise, grade, program, stream, test
   const [status, setStatus] = useState<AlStatus | null>(null);
   const [allTests, setAllTests] = useState(false);
   const [sort, setSort] = useState<{ key: SortKey; ascending: boolean }>({ key: "default", ascending: false });
+  const [notesFor, setNotesFor] = useState<ScoreJourneyRow | null>(null);
 
   const qs = new URLSearchParams({ grade: String(grade), program });
   if (stream) qs.set("stream", stream);
@@ -189,6 +217,13 @@ export default function ScoreJourney({ schoolUdise, grade, program, stream, test
     `/api/quiz-analytics/${schoolUdise}/student-support?${qs}`,
     "Failed to load the score journey"
   );
+  // Separate from the journey (and from MCP): counts only for students whose
+  // mentorship notes this viewer may read. A failure just leaves "—".
+  const notesState = useJsonFetch<MentorNoteCounts>(
+    `/api/quiz-analytics/${schoolUdise}/student-support/notes?${new URLSearchParams({ grade: String(grade), program })}`,
+    "Failed to load mentor notes"
+  );
+  const noteCounts = notesState.status === "ready" ? notesState.data.counts : {};
 
   if (state.status === "loading") return <PerformanceNotice>Loading the score journey…</PerformanceNotice>;
   if (state.status === "error") return <PerformanceNotice>{state.message}</PerformanceNotice>;
@@ -234,8 +269,8 @@ export default function ScoreJourney({ schoolUdise, grade, program, stream, test
               type="button"
               aria-pressed={status === st}
               onClick={() => setStatus(status === st ? null : st)}
-              className={`rounded border px-2 py-1 text-xs font-semibold ${
-                status === st ? "bg-accent text-white border-accent" : "bg-bg-card-alt text-text-muted border-border"
+              className={`rounded border px-2 py-1 text-xs font-semibold ${STATUS_CLASS[st]} ${
+                status === st ? "ring-2 ring-current ring-offset-1" : status ? "opacity-50" : ""
               }`}
             >
               {st} <span className="tabular-nums">{counts[st]}</span>
@@ -262,10 +297,23 @@ export default function ScoreJourney({ schoolUdise, grade, program, stream, test
           section={s}
           allTests={allTests}
           sort={sort}
+          notes={noteCounts}
           onSort={onSort}
           onOpenStudent={onOpenStudent}
+          onOpenNotes={setNotesFor}
         />
       ))}
+
+      {notesFor && (
+        <MentorNotes
+          schoolUdise={schoolUdise}
+          grade={grade}
+          program={program}
+          uid={notesFor.uid}
+          name={notesFor.name}
+          onClose={() => setNotesFor(null)}
+        />
+      )}
     </div>
   );
 }

@@ -8,6 +8,7 @@ import {
   median,
   passMark,
   questionsToNext,
+  topicFlag,
 } from "./student-support-rules";
 
 describe("examStream", () => {
@@ -109,6 +110,21 @@ describe("chapterFlag", () => {
 
   it("flags nothing attempted as skipping", () => {
     expect(chapterFlag({ n: 6, attempt: 0, accuracy: null, score: 0 }, 35)).toBe("S");
+  });
+});
+
+describe("topicFlag", () => {
+  it("flags nothing inside an on-track chapter", () => {
+    expect(topicFlag({ attempt: 80, accuracy: 20, score: 10 }, null, 35)).toBeNull();
+  });
+
+  it("flags a weak topic of a flagged chapter, even with one answer", () => {
+    expect(topicFlag({ attempt: 100, accuracy: 0, score: -25 }, "S", 35)).toBe("C");
+    expect(topicFlag({ attempt: 0, accuracy: null, score: 0 }, "C", 35)).toBe("S");
+  });
+
+  it("leaves a topic at or above the pass mark unflagged", () => {
+    expect(topicFlag({ attempt: 100, accuracy: 50, score: 35 }, "C", 35)).toBeNull();
   });
 
   it("falls back to concept gap when both accuracy and attempt are high", () => {

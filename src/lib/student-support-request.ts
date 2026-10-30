@@ -4,7 +4,7 @@ import { isNvsProgram } from "./constants";
 import { resolvePerformanceProgram } from "./performance-program";
 
 export type StudentSupportRequest =
-  | { ok: true; program: string; grade: number; searchParams: URLSearchParams }
+  | { ok: true; program: string; grade: number; schoolCode: string; searchParams: URLSearchParams }
   | { ok: false; response: NextResponse };
 
 const fail = (error: string, status: number): StudentSupportRequest => ({
@@ -36,5 +36,5 @@ export async function authorizeStudentSupportRead(
   if (!searchParams.get("grade") || !Number.isInteger(grade)) {
     return fail("grade must be an integer", 400);
   }
-  return { ok: true, program: pinned.program, grade, searchParams };
+  return { ok: true, program: pinned.program, grade, schoolCode: auth.school.code, searchParams };
 }

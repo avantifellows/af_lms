@@ -80,6 +80,18 @@ export interface ChapterRow {
   tests: number;
   flag: ChapterFlag | null;
   pyq: string[];
+  /** The chapter's topics, weakest first. */
+  topics: TopicRow[];
+}
+
+export interface TopicRow {
+  code: string;
+  name: string;
+  n: number;
+  attempt: number | null;
+  accuracy: number | null;
+  score: number | null;
+  flag: ChapterFlag | null;
 }
 
 export interface SubjectChapters {
@@ -125,4 +137,18 @@ export interface StudentReportData {
   student: ScoreJourneyRow;
   chapters: ExamChapters[];
   tests: TestHistoryRow[];
+}
+
+/** One mentor interaction (a post-session note), answers as written. */
+export interface MentorInteraction {
+  title: string;
+  /** ISO timestamp the notes were submitted; null for imported notes. */
+  date: string | null;
+  mentor: string | null;
+  answers: { question: string; answer: string | null }[];
+}
+
+/** Note counts per uid. Students the viewer can't read are absent. */
+export interface MentorNoteCounts {
+  counts: Record<string, number>;
 }

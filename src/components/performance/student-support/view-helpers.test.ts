@@ -33,6 +33,7 @@ function chapter(over: Partial<ChapterRow>): ChapterRow {
     attempt: 50,
     accuracy: 50,
     score: 20,
+    topics: [],
     tests: 2,
     flag: null,
     pyq: [],

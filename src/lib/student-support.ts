@@ -13,6 +13,7 @@ import {
 import { isAdvancedTest } from "./academic-level";
 import { CURRENT_ACADEMIC_YEAR } from "./constants";
 import { query } from "./db";
+import { ttlCache } from "./ttl-cache";
 import {
   alStatus,
   chapterFlag,
@@ -21,10 +22,12 @@ import {
   levelForTest,
   passMark,
   questionsToNext,
+  topicFlag,
 } from "./student-support-rules";
 import type {
   ChapterRow,
   JourneyTest,
+  TopicRow,
   TestResult,
   ExamChapters,
   ScoreJourneyData,
@@ -37,6 +40,13 @@ import type {
 // Question -> live new-CMS chapter, both CMS generations (etl-next bridge_question_chapter).
 const QUESTION_CHAPTER_TABLE = "`avantifellows.production_dbt_final.bridge_question_chapter`";
 const CHAPTER_DIM_TABLE = "`avantifellows.production_dbt_final.dim_chapter`";
+// Question -> topic: a new-CMS question's tagged topics, or an old-CMS
+// question's topics in Vishal's per-question tags. Topic codes are per exam
+// (JM-/JA-/NE-), so the topic of the test's own exam wins, then the primary
+// or most confident tag, as in the prototype.
+const QUESTION_TOPIC_TABLE = "`avantifellows.production_dbt_final.bridge_question_topic`";
+const TOPIC_DIM_TABLE = "`avantifellows.production_dbt_final.dim_topic`";
+const LEGACY_TOPIC_TAGS_TABLE = "`avantifellows.curriculum.legacy_question_topic_tags`";
 const CUTOFF_TABLE = "`avantifellows.production_dbt_final.dim_test_cutoffs`";
 
 // Chapter competency counts answers from chapter tests as well as full tests.
@@ -58,6 +68,16 @@ const num = (v: unknown): number | null => {
   return Number.isFinite(n) ? n : null;
 };
 const round1 = (v: number | null) => (v === null ? null : Math.round(v * 10) / 10);
+
+// The warehouse changes only when the ETL runs, so views are kept for 15
+// minutes per server instance; cutoffs and PYQ links, which change far less
+// often, for an hour.
+const VIEW_TTL_MS = 15 * 60 * 1000;
+const REFERENCE_TTL_MS = 60 * 60 * 1000;
+const journeyCache = ttlCache<ScoreJourneyData>(VIEW_TTL_MS);
+const reportCache = ttlCache<StudentReportData | null>(VIEW_TTL_MS);
+const cutoffCache = ttlCache<Map<string, number>>(REFERENCE_TTL_MS, 1);
+const pyqCache = ttlCache<Map<string, string[]>>(REFERENCE_TTL_MS, 1);
 const pct = (part: number, whole: number) => (whole > 0 ? (part / whole) * 100 : null);
 const dateString = (v: unknown) =>
   typeof v === "string" ? v : ((v as { value?: string } | null)?.value ?? "");
@@ -113,7 +133,11 @@ async function getStudents(
  * Cutoff marks per stream + category + level, for the current year or the
  * latest earlier year that has them (the warehouse's own carry-forward rule).
  */
-async function getCutoffs(): Promise<Map<string, number>> {
+function getCutoffs(): Promise<Map<string, number>> {
+  return cutoffCache("cutoffs", loadCutoffs);
+}
+
+async function loadCutoffs(): Promise<Map<string, number>> {
   const sql = `
     SELECT test_stream, category, academic_level, cutoff_marks
     FROM ${CUTOFF_TABLE}
@@ -198,7 +222,18 @@ async function getProgressions(
   return { tests, byStudent };
 }
 
-export async function getScoreJourney(
+export function getScoreJourney(
+  udise: string,
+  grade: number,
+  program: string,
+  stream?: string,
+  testGrade?: number
+): Promise<ScoreJourneyData> {
+  const key = JSON.stringify([udise, grade, program, stream ?? null, testGrade ?? null]);
+  return journeyCache(key, () => loadScoreJourney(udise, grade, program, stream, testGrade));
+}
+
+async function loadScoreJourney(
   udise: string,
   grade: number,
   program: string,
@@ -226,20 +261,24 @@ interface ChapterRaw {
   chapter_name: string | null;
   chapter_code: string | null;
   priority: string | null;
+  topic_code: string | null;
+  topic_name: string | null;
   n: number;
   attempted: number;
   correct: number;
   marks: number;
   max_marks: number;
-  tests: number;
+  sessions: string[];
 }
 
 /**
- * One student's answers per exam × subject × chapter, summed across tests.
+ * One student's answers per exam × subject × chapter × topic, summed across tests.
  * Each question's chapter comes from bridge_question_chapter: the new-CMS
  * question's own chapter, or for an old-CMS question its chapter in Vishal's
  * per-question tags. An old-CMS question without a tag has no chapter and is
- * left out (the chapter fact's old-CMS codes use an older numbering).
+ * left out (the chapter fact's old-CMS codes use an older numbering). The
+ * topic comes from the matching topic source; a question without one stays
+ * in its chapter under a null topic.
  * The question table is partitioned on hashed_session_id: naming the
  * student's own sessions reads only those partitions.
  */
@@ -252,7 +291,7 @@ async function getChapterRows(
   const priority = stream === "medical" ? "priority_medical" : "priority_engineering";
   const sql = `
     WITH answers AS (
-      SELECT session_id, test_course, section, question_source, question_source_id,
+      SELECT session_id, question_id, test_course, section, question_source, question_source_id,
              is_answered, is_correct, marks_obtained, marking_scheme_correct
       FROM ${FACT_QUESTION_LEVEL_TABLE}
       WHERE hashed_session_id IN UNNEST(@hashes)
@@ -262,6 +301,28 @@ async function getChapterRows(
         AND test_format IN UNNEST(@formats)
         AND section IS NOT NULL
       QUALIFY ROW_NUMBER() OVER (PARTITION BY session_id, question_id ORDER BY inserted_at_timestamp DESC) = 1
+    ),
+    candidate_topics AS (
+      SELECT 'nex-gen-cms' AS question_source, CAST(q.fk_question_id AS STRING) AS question_source_id,
+             t.topic_code, t.topic_name, q.is_primary, 1.0 AS confidence, t.fk_chapter_id, t.pk_topic_id
+      FROM ${QUESTION_TOPIC_TABLE} q
+      JOIN ${TOPIC_DIM_TABLE} t ON t.pk_topic_id = q.fk_topic_id
+      UNION ALL
+      SELECT 'cms', tags.problem_id, t.topic_code, t.topic_name, FALSE, tags.confidence, t.fk_chapter_id, t.pk_topic_id
+      FROM ${LEGACY_TOPIC_TAGS_TABLE} tags
+      JOIN ${TOPIC_DIM_TABLE} t ON t.pk_topic_id = tags.topic_row_id
+    ),
+    answer_topics AS (
+      SELECT a.*, tp.topic_code, tp.topic_name
+      FROM answers a
+      LEFT JOIN candidate_topics tp
+        ON tp.question_source = a.question_source AND tp.question_source_id = a.question_source_id
+      QUALIFY ROW_NUMBER() OVER (
+        PARTITION BY a.session_id, a.question_id
+        ORDER BY STARTS_WITH(tp.topic_code, CASE a.test_course WHEN 'JEE Mains' THEN 'JM-'
+                   WHEN 'JEE Advanced' THEN 'JA-' WHEN 'NEET' THEN 'NE-' END) DESC,
+                 tp.is_primary DESC, tp.confidence DESC, tp.fk_chapter_id, tp.pk_topic_id
+      ) = 1
     )
     SELECT
       a.test_course,
@@ -270,17 +331,19 @@ async function getChapterRows(
       ANY_VALUE(b.chapter_name) AS chapter_name,
       b.chapter_code,
       ANY_VALUE(c.${priority}) AS priority,
+      a.topic_code,
+      ANY_VALUE(a.topic_name) AS topic_name,
       COUNT(*) AS n,
       COUNTIF(a.is_answered) AS attempted,
       COUNTIF(a.is_correct = 1) AS correct,
       SUM(a.marks_obtained) AS marks,
       SUM(a.marking_scheme_correct) AS max_marks,
-      COUNT(DISTINCT a.session_id) AS tests
-    FROM answers a
+      ARRAY_AGG(DISTINCT a.session_id) AS sessions
+    FROM answer_topics a
     JOIN ${QUESTION_CHAPTER_TABLE} b
       ON b.question_source = a.question_source AND b.question_source_id = a.question_source_id
     LEFT JOIN ${CHAPTER_DIM_TABLE} c ON c.pk_chapter_id = b.fk_chapter_id
-    GROUP BY a.test_course, a.section, b.chapter_code
+    GROUP BY a.test_course, a.section, b.chapter_code, a.topic_code
   `;
   const [rows] = await getBigQueryClient().query({
     query: sql,
@@ -295,22 +358,35 @@ async function getChapterRows(
   return rows as ChapterRaw[];
 }
 
-/** PYQ document links per chapter code, from the CMS tables in Postgres. */
-async function getPyqLinks(codes: string[]): Promise<Map<string, string[]>> {
-  const map = new Map<string, string[]>();
-  if (codes.length === 0) return map;
-  const rows = await query<{ code: string; url: string }>(
-    `SELECT c.code, r.type_params->>'src_link' AS url
-       FROM resource r
-       JOIN resource_chapter rc ON rc.resource_id = r.id
-       JOIN chapter c ON c.id = rc.chapter_id
-      WHERE r.subtype = 'Previous Year Questions'
-        AND r.type_params->>'src_link' IS NOT NULL
-        AND c.code = ANY($1)`,
-    [codes]
-  );
-  for (const r of rows) map.set(r.code, [...(map.get(r.code) ?? []), r.url]);
-  return map;
+/** Every PYQ document link per chapter code, from the CMS tables in Postgres
+ *  (a few hundred rows, so read whole and kept). */
+function getPyqLinks(): Promise<Map<string, string[]>> {
+  return pyqCache("pyq", async () => {
+    const rows = await query<{ code: string; url: string }>(
+      `SELECT c.code, r.type_params->>'src_link' AS url
+         FROM resource r
+         JOIN resource_chapter rc ON rc.resource_id = r.id
+         JOIN chapter c ON c.id = rc.chapter_id
+        WHERE r.subtype = 'Previous Year Questions'
+          AND r.type_params->>'src_link' IS NOT NULL`
+    );
+    const map = new Map<string, string[]>();
+    for (const r of rows) map.set(r.code, [...(map.get(r.code) ?? []), r.url]);
+    return map;
+  });
+}
+
+/** Answers, attempt %, accuracy % and score % over some topic rows. */
+function stats(rows: ChapterRaw[]) {
+  const sum = (f: (r: ChapterRaw) => number) => rows.reduce((a, r) => a + (Number(f(r)) || 0), 0);
+  const n = sum((r) => r.n);
+  const att = sum((r) => r.attempted);
+  return {
+    n,
+    attempt: round1(pct(att, n)),
+    accuracy: round1(pct(sum((r) => r.correct), att)),
+    score: round1(pct(sum((r) => r.marks), sum((r) => r.max_marks))),
+  };
 }
 
 function shapeChapters(rows: ChapterRaw[], pyq: Map<string, string[]>): ExamChapters[] {
@@ -326,39 +402,38 @@ function shapeChapters(rows: ChapterRaw[], pyq: Map<string, string[]>): ExamChap
     subjects: [...subjects.entries()]
       .map(([subject, raws]) => {
         const pass = passMark(exam, subject);
-        let answers = 0;
-        let attempted = 0;
-        let correct = 0;
-        const chapters: ChapterRow[] = raws.map((r) => {
-          const n = Number(r.n) || 0;
-          const att = Number(r.attempted) || 0;
-          const cor = Number(r.correct) || 0;
-          answers += n;
-          attempted += att;
-          correct += cor;
-          const c = {
-            n,
-            attempt: round1(pct(att, n)),
-            accuracy: round1(pct(cor, att)),
-            score: round1(pct(Number(r.marks) || 0, Number(r.max_marks) || 0)),
-          };
+        const byChapter = new Map<string, ChapterRaw[]>();
+        for (const r of raws) byChapter.set(r.chapter_key, [...(byChapter.get(r.chapter_key) ?? []), r]);
+        const chapters: ChapterRow[] = [...byChapter.values()].map((topicRaws) => {
+          const first = topicRaws[0];
+          const c = stats(topicRaws);
+          const flag = chapterFlag(c, pass);
+          const topics: TopicRow[] = topicRaws
+            .filter((r) => r.topic_code)
+            .map((r) => {
+              const t = stats([r]);
+              return { code: r.topic_code!, name: r.topic_name ?? r.topic_code!, ...t, flag: topicFlag(t, flag, pass) };
+            })
+            .sort((a, b) => (a.score ?? Infinity) - (b.score ?? Infinity));
           return {
-            key: r.chapter_key,
-            code: r.chapter_code,
-            name: r.chapter_name ?? r.chapter_key,
-            priority: r.priority,
+            key: first.chapter_key,
+            code: first.chapter_code,
+            name: first.chapter_name ?? first.chapter_key,
+            priority: first.priority,
             ...c,
-            tests: Number(r.tests) || 0,
-            flag: chapterFlag(c, pass),
-            pyq: r.chapter_code ? (pyq.get(r.chapter_code) ?? []) : [],
+            tests: new Set(topicRaws.flatMap((r) => r.sessions ?? [])).size,
+            flag,
+            pyq: first.chapter_code ? (pyq.get(first.chapter_code) ?? []) : [],
+            topics,
           };
         });
+        const all = stats(raws);
         return {
           subject,
           passMark: pass,
-          answers,
-          attempt: round1(pct(attempted, answers)),
-          accuracy: round1(pct(correct, attempted)),
+          answers: all.n,
+          attempt: all.attempt,
+          accuracy: all.accuracy,
           chapters,
         };
       })
@@ -372,6 +447,7 @@ interface TestRaw {
   start_date: unknown;
   test_course: string | null;
   test_format: string | null;
+  test_stream: string | null;
   hashed_session_id: number | null;
   section: string | null;
   marks_scored: number | null;
@@ -387,18 +463,14 @@ interface TestRaw {
 }
 
 /**
- * Every full or chapter test the student's School + grade + program sat in the
- * student's stream, with the student's result per section (none = absent) and
- * their rank among the School's students. Full tests make the test history;
- * the sessions the student sat also scope the chapter read.
+ * Every full or chapter test the student's School + grade + program sat, in
+ * every stream, with the student's result per section (none = absent) and
+ * their rank among the School's students. The caller keeps the student's
+ * stream: not filtering here lets this read start before the student's stream
+ * is known. Full tests make the test history; the sessions the student sat
+ * also scope the chapter read.
  */
-async function getTestRows(
-  udise: string,
-  grade: number,
-  program: string,
-  uid: string,
-  stream: "engineering" | "medical"
-): Promise<TestRaw[]> {
+async function getTestRows(udise: string, grade: number, program: string, uid: string): Promise<TestRaw[]> {
   const formats = COMPETENCY_FORMATS.map((f) => `'${f}'`).join(",");
   const sql = `
     WITH results AS (
@@ -413,13 +485,13 @@ async function getTestRows(
         AND academic_year = '${CURRENT_ACADEMIC_YEAR}'
         AND test_format IN (${formats})
         AND session_id IS NOT NULL
-        AND (test_stream IS NULL OR LOWER(test_stream) = @stream)
         ${SUBMITTED_ONLY}
     ),
     tests AS (
       SELECT session_id, ANY_VALUE(hashed_session_id) AS hashed_session_id,
              ANY_VALUE(test_name) AS test_name, MIN(start_date) AS start_date,
-             ANY_VALUE(test_course) AS test_course, ANY_VALUE(test_format) AS test_format
+             ANY_VALUE(test_course) AS test_course, ANY_VALUE(test_format) AS test_format,
+             ANY_VALUE(test_stream) AS test_stream
       FROM results GROUP BY session_id
     ),
     ranked AS (
@@ -428,7 +500,7 @@ async function getTestRows(
              COUNT(*) OVER (PARTITION BY session_id) AS takers
       FROM results WHERE LOWER(section) = 'overall'
     )
-    SELECT t.session_id, t.hashed_session_id, t.test_name, t.start_date, t.test_course, t.test_format,
+    SELECT t.session_id, t.hashed_session_id, t.test_name, t.start_date, t.test_course, t.test_format, t.test_stream,
            r.section, r.marks_scored, r.max_marks_possible, r.percentage, r.num_correct,
            r.num_wrong, r.num_partially_correct, r.num_skipped, r.academic_level,
            k.centre_rank, k.takers
@@ -439,7 +511,7 @@ async function getTestRows(
   `;
   const [rows] = await getBigQueryClient().query({
     query: sql,
-    params: { udise, grade, program, uid, stream },
+    params: { udise, grade, program, uid },
   });
   return rows as TestRaw[];
 }
@@ -523,19 +595,34 @@ function progressionFromTests(rows: TestRaw[], stream: "engineering" | "medical"
 
 /** One student's report, or null when they are not an enrolled student of
  *  this School + grade + program (the caller answers 404). */
-export async function getStudentReport(
+export function getStudentReport(
   udise: string,
   grade: number,
   program: string,
   uid: string
 ): Promise<StudentReportData | null> {
-  const [student] = await getStudents(udise, grade, program, { uid });
+  return reportCache(JSON.stringify([udise, grade, program, uid]), () => loadStudentReport(udise, grade, program, uid));
+}
+
+async function loadStudentReport(
+  udise: string,
+  grade: number,
+  program: string,
+  uid: string
+): Promise<StudentReportData | null> {
+  // Two rounds of reads: everything that needs only the request, then the
+  // chapter answers, which need the sessions the student sat.
+  const [[student], cutoffs, allTestRows, pyq] = await Promise.all([
+    getStudents(udise, grade, program, { uid }),
+    getCutoffs(),
+    getTestRows(udise, grade, program, uid),
+    getPyqLinks(),
+  ]);
   if (!student) return null;
   const stream = examStream(student.stream);
-  const [cutoffs, testRows] = await Promise.all([
-    getCutoffs(),
-    stream ? getTestRows(udise, grade, program, uid, stream) : Promise.resolve([]),
-  ]);
+  const testRows = stream
+    ? allTestRows.filter((r) => r.test_stream === null || r.test_stream.toLowerCase() === stream)
+    : [];
   const sat = new Map<string, number>();
   for (const r of testRows) {
     if (r.section && r.hashed_session_id !== null && !NOT_COMPETENCY.test(r.test_name)) {
@@ -545,8 +632,6 @@ export async function getStudentReport(
   const chapterRows = stream
     ? await getChapterRows(uid, stream, [...sat].map(([id, hash]) => ({ id, hash })))
     : [];
-  const codes = [...new Set(chapterRows.map((r) => r.chapter_code).filter((c): c is string => !!c))];
-  const pyq = await getPyqLinks(codes);
   return {
     student: { ...journeyRow(student, progressionFromTests(testRows, stream), cutoffs), results: {} },
     chapters: shapeChapters(chapterRows, pyq),
