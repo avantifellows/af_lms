@@ -105,6 +105,19 @@ const wholeSchoolSummary = {
   noActivePhase: 2,
 };
 
+// A server summary no derivation from `coverageStudents` can produce, so a
+// test can tell which one is on screen.
+const serverOnlySummary = {
+  eligible: 99,
+  assigned: 50,
+  unassigned: 49,
+  activeMentors: 7,
+  coveragePercentage: 50.5,
+  completed: 11,
+  pending: 22,
+  noActivePhase: 33,
+};
+
 function expectSummaryMetrics(expected: typeof wholeSchoolSummary) {
   const summary = within(screen.getByRole("region", { name: "Assignment Coverage summary" }));
   const metrics = [
@@ -614,7 +627,8 @@ describe("AdminSchoolRoster", () => {
   });
 
   it("combines every filter, with the summary always describing the rows shown", () => {
-    render(<AdminSchoolRoster students={coverageStudents} schoolCode="SCH001" summary={wholeSchoolSummary} />);
+    render(<AdminSchoolRoster students={coverageStudents} schoolCode="SCH001" summary={serverOnlySummary} />);
+    expectSummaryMetrics(serverOnlySummary);
 
     fireEvent.change(screen.getByRole("combobox", { name: "Filter by Grade" }), { target: { value: "11" } });
     fireEvent.change(screen.getByRole("combobox", { name: "Filter by Mentor" }), { target: { value: "9" } });
@@ -639,7 +653,33 @@ describe("AdminSchoolRoster", () => {
     fireEvent.change(screen.getByRole("combobox", { name: "Filter by Progress" }), { target: { value: "" } });
     fireEvent.change(screen.getByRole("combobox", { name: "Filter by Assignment" }), { target: { value: "all" } });
     expect(screen.getByRole("status")).toHaveTextContent("Showing 6 of 6 Students");
+    expectSummaryMetrics(serverOnlySummary);
+  });
+
+  it("switches to derived numbers once a filter is active, even one matching every row", () => {
+    render(<AdminSchoolRoster students={coverageStudents} schoolCode="SCH001" summary={serverOnlySummary} />);
+    expectSummaryMetrics(serverOnlySummary);
+
+    // Every Student ID starts with "S4", so all six rows still show.
+    fireEvent.change(screen.getByRole("textbox", { name: "Search Students" }), { target: { value: "S4" } });
+
+    expect(screen.getByRole("status")).toHaveTextContent("Showing 6 of 6 Students");
     expectSummaryMetrics(wholeSchoolSummary);
+  });
+
+  it("rounds derived Coverage half-way values like the server (201 of 400 is 50.3%)", () => {
+    const rows = Array.from({ length: 400 }, (_, index) => ({
+      ...coverageStudents[1],
+      studentId: 1000 + index,
+      name: `Student ${index}`,
+      externalStudentId: `X${index}`,
+      ownership: index < 201 ? { mappingId: 5000 + index, mentorUserId: 9, mentorName: "Anita Mentor" } : null,
+    }));
+    render(<AdminSchoolRoster students={rows} schoolCode="SCH001" />);
+
+    const summary = within(screen.getByRole("region", { name: "Assignment Coverage summary" }));
+    expect(summary.getByText("Coverage").previousSibling).toHaveTextContent("50.3%");
+    expect(summary.getByText("Assigned").previousSibling).toHaveTextContent("201");
   });
 
   it("disables Unassigned while a Mentor is selected and resets it when a Mentor is chosen", () => {
@@ -703,13 +743,14 @@ describe("AdminSchoolRoster", () => {
     "hm_mentor=-9&hm_grade=&hm_progress=",
   ])("falls back to defaults for invalid URL filters (%s)", (query) => {
     window.history.replaceState(null, "", `/school/SCH001?tab=holistic_mentorship&${query}`);
-    render(<AdminSchoolRoster students={coverageStudents} schoolCode="SCH001" summary={wholeSchoolSummary} />);
+    render(<AdminSchoolRoster students={coverageStudents} schoolCode="SCH001" summary={serverOnlySummary} />);
 
     expect(screen.getByRole("combobox", { name: "Filter by Grade" })).toHaveValue("");
     expect(screen.getByRole("combobox", { name: "Filter by Mentor" })).toHaveValue("");
     expect(screen.getByRole("combobox", { name: "Filter by Progress" })).toHaveValue("");
     expect(screen.getByRole("combobox", { name: "Filter by Assignment" })).toHaveValue("all");
     expect(screen.getByRole("status")).toHaveTextContent("Showing 6 of 6 Students");
+    expectSummaryMetrics(serverOnlySummary);
   });
 
   it("drops a URL Unassigned filter that conflicts with a URL Mentor", async () => {

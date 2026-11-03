@@ -78,7 +78,9 @@ function derivedSummary(students: Student[]): HolisticAssignmentCoverageSummary 
   const mentors = new Set(students.flatMap((student) =>
     student.ownership ? [student.ownership.mentorUserId] : [])).size;
   const coveragePercentage = students.length
-    ? Math.round((assigned / students.length) * 1000) / 10
+    // Multiply before dividing so half-way values round like Postgres ROUND
+    // (201 of 400 is 50.3%; dividing first gives 502.4999… and 50.2%).
+    ? Math.round((assigned * 1000) / students.length) / 10
     : 0;
   return {
     eligible: students.length,
