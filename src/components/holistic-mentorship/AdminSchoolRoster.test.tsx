@@ -109,7 +109,7 @@ function expectSummaryMetrics(expected: typeof wholeSchoolSummary) {
     ["Coverage", `${expected.coveragePercentage.toFixed(1)}%`],
     ["Completed", expected.completed],
     ["Pending", expected.pending],
-    ["No active Phase", expected.noActivePhase],
+    ["No active phase", expected.noActivePhase],
   ] as const;
   for (const [label, value] of metrics) {
     expect(summary.getByText(label).previousSibling).toHaveTextContent(String(value));
@@ -194,7 +194,7 @@ describe("AdminSchoolRoster", () => {
     expect(summary.getByText("Coverage").previousSibling).toHaveTextContent("33.3%");
     expect(summary.getByText("Completed").previousSibling).toHaveTextContent("1");
     expect(summary.getByText("Pending").previousSibling).toHaveTextContent("1");
-    expect(summary.getByText("No active Phase").previousSibling).toHaveTextContent("1");
+    expect(summary.getByText("No active phase").previousSibling).toHaveTextContent("1");
     expect(screen.queryByRole("button", { name: /Assign|Remove Mentor/ })).not.toBeInTheDocument();
   });
 
@@ -563,9 +563,12 @@ describe("AdminSchoolRoster", () => {
     expect(within(mentor).getAllByRole("option").map((option) => option.textContent)).toEqual([
       "All Mentors",
       "Anil Kumar (1)",
-      "priya shah · ID 30 (1)",
-      "Priya Shah · priya.s@example.com (2)",
+      "priya shah (1) · ID 30",
+      "Priya Shah (2) · priya.s@example.com",
     ]);
+    expect(mentor).toHaveAttribute("title", "All Mentors");
+    fireEvent.change(mentor, { target: { value: "31" } });
+    expect(mentor).toHaveAttribute("title", "Priya Shah (2) · priya.s@example.com");
   });
 
   it("filters by Mentor without changing the summary cards", () => {
@@ -585,7 +588,7 @@ describe("AdminSchoolRoster", () => {
     render(<AdminSchoolRoster students={coverageStudents} schoolCode="SCH001" summary={wholeSchoolSummary} />);
     const progressFilter = screen.getByRole("combobox", { name: "Filter by Progress" });
     expect(within(progressFilter).getAllByRole("option").map((option) => option.textContent)).toEqual([
-      "All Progress", "Completed", "Pending", "No active Phase",
+      "All Progress", "Completed", "Pending", "No active phase",
     ]);
 
     fireEvent.change(progressFilter, { target: { value: "pending" } });
@@ -639,7 +642,7 @@ describe("AdminSchoolRoster", () => {
     render(<AdminSchoolRoster students={coverageStudents} schoolCode="SCH001" summary={wholeSchoolSummary} />);
     const assignment = screen.getByRole("combobox", { name: "Filter by Assignment" });
     const mentor = screen.getByRole("combobox", { name: "Filter by Mentor" });
-    const unassigned = within(assignment).getByRole("option", { name: "Unassigned" });
+    const unassigned = within(assignment).getByRole("option", { name: /^Unassigned/ });
 
     fireEvent.change(assignment, { target: { value: "unassigned" } });
     expect(screen.getByRole("status")).toHaveTextContent("Showing 2 of 6 Students");
@@ -648,12 +651,14 @@ describe("AdminSchoolRoster", () => {
     fireEvent.change(mentor, { target: { value: "9" } });
     expect(assignment).toHaveValue("all");
     expect(unassigned).toBeDisabled();
+    expect(unassigned).toHaveTextContent("Unassigned (clear Mentor first)");
     expect(screen.getByRole("status")).toHaveTextContent("Showing 2 of 6 Students");
     expect(screen.getByText("Asha Rao")).toBeInTheDocument();
     expect(screen.getByText("Meera Das")).toBeInTheDocument();
 
     fireEvent.change(mentor, { target: { value: "" } });
     expect(unassigned).toBeEnabled();
+    expect(unassigned).toHaveTextContent(/^Unassigned$/);
     expect(assignment).toHaveValue("all");
     expect(screen.getByRole("status")).toHaveTextContent("Showing 6 of 6 Students");
   });
@@ -774,6 +779,11 @@ describe("AdminSchoolRoster", () => {
     rerender(<AdminSchoolRoster schoolCode="SCH001" students={coverageStudents.map((student) =>
       student.ownership?.mentorUserId === 10 ? { ...student, ownership: null } : student)} />);
 
+    expect(screen.getByRole("combobox", { name: "Filter by Mentor" })).toHaveValue("");
+    expect(screen.getByRole("status")).toHaveTextContent("Showing 6 of 6 Students");
+
+    // Assigned again later: the dropped filter stays forgotten.
+    rerender(<AdminSchoolRoster students={coverageStudents} schoolCode="SCH001" />);
     expect(screen.getByRole("combobox", { name: "Filter by Mentor" })).toHaveValue("");
     expect(screen.getByRole("status")).toHaveTextContent("Showing 6 of 6 Students");
   });

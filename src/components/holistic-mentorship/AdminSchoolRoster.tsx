@@ -98,7 +98,7 @@ function Summary({ summary }: { summary: HolisticAssignmentCoverageSummary }) {
     ["Coverage", `${summary.coveragePercentage.toFixed(1)}%`],
     ["Completed", summary.completed],
     ["Pending", summary.pending],
-    ["No active Phase", summary.noActivePhase],
+    ["No active phase", summary.noActivePhase],
   ];
   return <div role="region" aria-label="Assignment Coverage summary"
     className="grid grid-cols-2 border-y border-border bg-bg-card sm:grid-cols-4 lg:grid-cols-8">
@@ -185,7 +185,8 @@ function RosterFilters({ filters, mentorOptions, onChange }: {
   mentorOptions: MentorFilterOption[];
   onChange: (change: Partial<CoverageFilters>) => void;
 }) {
-  return <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_8.5rem_14rem_10.5rem_10rem]">
+  const mentorLabel = mentorOptions.find((option) => option.value === filters.mentor)?.label ?? "All Mentors";
+  return <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_8rem_minmax(14rem,1.5fr)_10.5rem_10rem]">
     <label className={`${FILTER_LABEL} sm:col-span-2 lg:col-span-1`}>
       Search Student
       <span className="relative mt-1 block">
@@ -203,7 +204,7 @@ function RosterFilters({ filters, mentorOptions, onChange }: {
     </label>
     <label className={FILTER_LABEL}>
       Mentor
-      <Select aria-label="Filter by Mentor" className="mt-1" value={filters.mentor}
+      <Select aria-label="Filter by Mentor" className="mt-1" value={filters.mentor} title={mentorLabel}
         onChange={(event) => onChange({ mentor: event.target.value })}>
         <option value="">All Mentors</option>
         {mentorOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
@@ -214,7 +215,7 @@ function RosterFilters({ filters, mentorOptions, onChange }: {
       <Select aria-label="Filter by Progress" className="mt-1" value={filters.progress}
         onChange={(event) => onChange({ progress: event.target.value as CoverageFilters["progress"] })}>
         <option value="">All Progress</option><option value="completed">Completed</option>
-        <option value="pending">Pending</option><option value="none">No active Phase</option>
+        <option value="pending">Pending</option><option value="none">No active phase</option>
       </Select>
     </label>
     <label className={FILTER_LABEL}>
@@ -223,7 +224,9 @@ function RosterFilters({ filters, mentorOptions, onChange }: {
         onChange={(event) => onChange({ assignment: event.target.value as AssignmentFilter })}>
         <option value="all">All Students</option><option value="assigned">Assigned</option>
         {/* A Mentor's Students are all assigned, so Unassigned would always be empty. */}
-        <option value="unassigned" disabled={filters.mentor !== ""}>Unassigned</option>
+        <option value="unassigned" disabled={filters.mentor !== ""}>
+          {filters.mentor ? "Unassigned (clear Mentor first)" : "Unassigned"}
+        </option>
       </Select>
     </label>
   </div>;
@@ -436,7 +439,8 @@ const nameKey = (name: string) => name.trim().toLocaleLowerCase();
 
 // Every current Mentor in this roster (read from the rows, so read-only viewers
 // get them too), by name, with their assigned-Student count. Mentors sharing a
-// name are told apart by email when known, otherwise by user ID.
+// name are told apart by email when known, otherwise by user ID, after the count
+// so a narrow closed select still shows the name and count.
 function mentorFilterOptions(students: Student[], mentors: EligibleMentor[]): MentorFilterOption[] {
   const byId = new Map<number, { name: string; count: number }>();
   for (const { ownership } of students) {
@@ -452,7 +456,7 @@ function mentorFilterOptions(students: Student[], mentors: EligibleMentor[]): Me
   return rows.map(({ userId, name, count }) => {
     const shared = (nameUses.get(nameKey(name)) ?? 0) > 1;
     const suffix = shared ? ` · ${emails.get(userId) ?? `ID ${userId}`}` : "";
-    return { value: String(userId), label: `${name}${suffix} (${count})` };
+    return { value: String(userId), label: `${name} (${count})${suffix}` };
   });
 }
 
@@ -480,6 +484,9 @@ function useCoverageFilters(students: Student[], mentors: EligibleMentor[]) {
   const [selected, setSelected] = useState(() => readCoverageFilters(searchParams));
   const mentorOptions = useMemo(() => mentorFilterOptions(students, mentors), [students, mentors]);
   const filters = useMemo(() => resolveFilters(selected, mentorOptions), [selected, mentorOptions]);
+  // Forget a value the roster dropped (a Mentor who lost their last Student),
+  // so it can't come back on its own if that Mentor is assigned again.
+  if (filters !== selected) setSelected(filters);
   useEffect(() => {
     const timer = window.setTimeout(() => replaceCoverageUrl(filters), URL_WRITE_DELAY_MS);
     return () => window.clearTimeout(timer);

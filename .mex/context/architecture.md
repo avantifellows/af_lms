@@ -79,8 +79,9 @@ changes. Student links carry the same params, plus `centre_id` when the roster w
 opened on a Centre page. The Student/Phase page accepts them only for `school` and
 `school-progress` sources, cleans them with `coverageReturnQuery`, and keeps them on
 Phase links and locked-Phase redirects. Its back link goes to
-`/centre/<id>?tab=holistic_mentorship` (when `centre_id` is set) or to the School
-URL, with the filters. Before #491, a Centre-opened drill-down returned to the
+`/centre/<id>?tab=holistic_mentorship` only when the source is `school` and
+`centre_id` is set (Centre pages never send `school-progress`). Otherwise it goes
+to the School URL. Both keep the filters. Before #491, a Centre-opened drill-down returned to the
 School page, which a Centre-seated manager cannot open.
 
 ## Issue #383 navigation fixes — implemented in PR #394
