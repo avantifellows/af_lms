@@ -231,8 +231,9 @@ function RosterFilters({ filters, mentorOptions, onChange, onSearchBlur }: {
       Progress
       <Select aria-label="Filter by Progress" className="mt-1" value={filters.progress}
         onChange={(event) => onChange({ progress: event.target.value as CoverageFilters["progress"] })}>
-        {/* Students & Progress's options and order, less Skipped: this view shows
-            only each Student's current Phase, where Skipped can't occur. */}
+        {/* Students & Progress's options and order, less Skipped. Skipped is rare
+            on the current Phase (only after an Admin re-locks a later Phase);
+            this view shows such a Student as Pending. */}
         <option value="">All Students</option><option value="assigned">All Assigned</option>
         <option value="pending">Pending</option><option value="completed">Completed</option>
         <option value="no_active_phase">No active phase</option>

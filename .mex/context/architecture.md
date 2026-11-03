@@ -65,9 +65,12 @@ link restores `source=progress` on the School URL. Ordinary School drill-downs
 retain `source=school`, so their original dashboard return does not change.
 
 School Assignment Coverage filters (Search, Grade, Mentor, Progress; issue #491)
-narrow the table and the 8 summary cards together. Progress uses Students &
-Progress's options and value strings, minus Skipped: All Students (`""`),
-`assigned`, `pending`, `completed`, `no_active_phase`, `unassigned`. Pending,
+narrow the table and the 8 summary cards together. Progress has Students &
+Progress's options and order, minus Skipped: All Students (`""`), `assigned`,
+`pending`, `completed`, `no_active_phase`, `unassigned`. The last four are S&P's
+value strings. The first two differ, because S&P's `""` means All Assigned and it
+has no `assigned`. Skipped is rare on the current Phase (only after an Admin
+re-locks a later Phase), and this view shows such Students as Pending. Pending,
 Completed and No active phase mean assigned Students only. Unassigned means no
 active Mapping, whatever the Phase. The matching cards, both `derivedSummary` and
 the `getHolisticAssignmentCoverageSummary` SQL, count assigned Students only, so

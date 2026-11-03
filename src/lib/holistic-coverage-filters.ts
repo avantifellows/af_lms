@@ -6,9 +6,12 @@
 // and invalid values read as defaults. Client-safe: no server-only imports.
 
 /**
- * Progress filter values, in Students & Progress's order and with its value
- * strings ("" is All Students). Pending, Completed and No active phase are
- * assigned Students only; Unassigned is every Student without a Mentor.
+ * Progress filter values. The options and order match Students & Progress
+ * (less Skipped), and pending / completed / no_active_phase / unassigned are
+ * its value strings. Two differ: here "" is All Students and `assigned` is All
+ * Assigned, while S&P's "" is All Assigned and it has no `assigned`.
+ * Pending, Completed and No active phase are assigned Students only;
+ * Unassigned is every Student without a Mentor.
  */
 const COVERAGE_PROGRESS_VALUES = [
   "assigned",
