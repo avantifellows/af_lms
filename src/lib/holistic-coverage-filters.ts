@@ -65,6 +65,21 @@ function isDefaultFilter(filters: CoverageFilters, key: keyof CoverageFilters) {
   return filters[key] === DEFAULT_COVERAGE_FILTERS[key];
 }
 
+const FILTER_PARAM_NAMES = new Set(Object.values(FILTER_PARAMS));
+
+/**
+ * Which page a URL is, for the coverage filters: the path and every param
+ * except the filters and the School tab (switching tabs stays on the page).
+ * A different Centre, `program_id` or Program choice screen is another page.
+ */
+export function coveragePageKey(pathname: string, params: Iterable<[string, string]>) {
+  const rest = [...params]
+    .filter(([name]) => name !== "tab" && !FILTER_PARAM_NAMES.has(name))
+    .map(([name, value]) => `${encodeURIComponent(name)}=${encodeURIComponent(value)}`)
+    .sort();
+  return `${pathname}?${rest.join("&")}`;
+}
+
 /** Sets the non-default filters on `params` and removes the default ones. */
 export function writeCoverageFilters(params: URLSearchParams, filters: CoverageFilters) {
   for (const key of Object.keys(FILTER_PARAMS) as Array<keyof CoverageFilters>) {

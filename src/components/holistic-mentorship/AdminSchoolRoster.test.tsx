@@ -2,13 +2,15 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const { mockRefresh, mockSearchParams } = vi.hoisted(() => ({
+const { mockRefresh, mockSearchParams, mockPathname } = vi.hoisted(() => ({
   mockRefresh: vi.fn(),
   mockSearchParams: vi.fn(() => new URLSearchParams(window.location.search)),
+  mockPathname: vi.fn(() => window.location.pathname),
 }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: mockRefresh }),
   useSearchParams: mockSearchParams,
+  usePathname: mockPathname,
 }));
 
 import SchoolTabs from "@/components/SchoolTabs";
@@ -128,6 +130,7 @@ describe("AdminSchoolRoster", () => {
     vi.clearAllMocks();
     vi.restoreAllMocks();
     mockSearchParams.mockImplementation(() => new URLSearchParams(window.location.search));
+    mockPathname.mockImplementation(() => window.location.pathname);
     window.history.replaceState(null, "", "/");
   });
 
@@ -850,5 +853,40 @@ describe("AdminSchoolRoster", () => {
     unmount();
 
     expect(window.location.search).toBe("?source=school");
+  });
+  it("opens another Centre with its own URL filters, not the previous Centre's", async () => {
+    window.history.replaceState(null, "", "/centre/8?tab=holistic_mentorship&hm_search=Kabir&hm_grade=12");
+    const { rerender } = render(<AdminSchoolRoster key="8" students={coverageStudents} schoolCode="SCH001"
+      centreId={8} />);
+    expect(screen.getByRole("textbox", { name: "Search Students" })).toHaveValue("Kabir");
+
+    // The Centre switcher's push: the router already names Centre 9 while it
+    // renders, but the browser URL is still Centre 8's until after the commit.
+    mockPathname.mockImplementation(() => "/centre/9");
+    mockSearchParams.mockImplementation(() => new URLSearchParams("tab=holistic_mentorship"));
+    rerender(<AdminSchoolRoster key="9" students={coverageStudents} schoolCode="SCH001" centreId={9} />);
+    window.history.pushState(null, "", "/centre/9?tab=holistic_mentorship");
+
+    expect(screen.getByRole("textbox", { name: "Search Students" })).toHaveValue("");
+    expect(screen.getByRole("combobox", { name: "Filter by Grade" })).toHaveValue("");
+    expect(screen.getByRole("status")).toHaveTextContent("Showing 6 of 6 Students");
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(window.location.search).toBe("?tab=holistic_mentorship");
+  });
+
+  it("does not carry one Program's filters through Back to the Program choice", () => {
+    window.history.replaceState(null, "", "/school/SCH001?tab=holistic_mentorship&program_id=1");
+    const { unmount } = render(<AdminSchoolRoster students={coverageStudents} schoolCode="SCH001" programId={1} />);
+    fireEvent.change(screen.getByRole("textbox", { name: "Search Students" }), { target: { value: "Asha" } });
+
+    // Browser Back: the URL changes first, then the choice screen replaces the roster.
+    window.history.pushState(null, "", "/school/SCH001?tab=holistic_mentorship");
+    unmount();
+    expect(window.location.search).toBe("?tab=holistic_mentorship");
+
+    // Picking Program 78 opens its roster without Program 1's search.
+    window.history.pushState(null, "", "/school/SCH001?tab=holistic_mentorship&program_id=78");
+    render(<AdminSchoolRoster students={coverageStudents} schoolCode="SCH001" programId={78} />);
+    expect(screen.getByRole("textbox", { name: "Search Students" })).toHaveValue("");
   });
 });

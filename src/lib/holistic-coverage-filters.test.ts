@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  coveragePageKey,
   coverageReturnFor,
   coverageReturnQuery,
   DEFAULT_COVERAGE_FILTERS,
@@ -32,6 +33,18 @@ describe("holistic coverage filters", () => {
     expect(searched.toString()).toBe("");
     writeCoverageFilters(searched, { ...DEFAULT_COVERAGE_FILTERS, search: " Ravi  Shah" });
     expect(searched.get("hm_search")).toBe(" Ravi  Shah");
+  });
+
+  it("keys a page by path and non-filter params, ignoring the School tab", () => {
+    const key = (url: string) => {
+      const parsed = new URL(url, "http://lms.test");
+      return coveragePageKey(parsed.pathname, parsed.searchParams);
+    };
+    expect(key("/school/S1?program_id=1&tab=holistic_mentorship&hm_search=a"))
+      .toBe(key("/school/S1?tab=enrollment&program_id=1"));
+    expect(key("/school/S1?program_id=1")).not.toBe(key("/school/S1?program_id=78"));
+    expect(key("/school/S1?program_id=1")).not.toBe(key("/school/S1"));
+    expect(key("/centre/8?tab=holistic_mentorship")).not.toBe(key("/centre/9?tab=holistic_mentorship"));
   });
 
   it("builds and splits a sanitized coverage return query", () => {

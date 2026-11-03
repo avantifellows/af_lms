@@ -79,7 +79,14 @@ the filters before the page changes), and on unmount while the page is unchanged
 School tab switch). `SchoolTabs` builds its next URL from the live
 `window.location.search` rather than its `useSearchParams` snapshot, which can lag
 behind a `replaceState` because Next applies it in a transition. A remounted roster
-reads the live URL for the same reason. A blank or spaces-only search is left out
+reads the live URL for the same reason, but only when that URL is its own page.
+That page is fixed at mount from `usePathname` and `useSearchParams`, as the path
+plus every non-`hm_`, non-`tab` param (`coveragePageKey`). During an in-app
+navigation, Next renders the new page before it updates the browser URL, so a
+Centre switch or a Program change would otherwise inherit the previous page's
+filters. Every write (debounced, click, blur, unmount) is skipped once the browser
+URL is a different page, such as another Centre or the Program choice screen after
+Back. A blank or spaces-only search is left out
 of the URL. The input's `maxLength` and the URL reader share
 `MAX_COVERAGE_SEARCH_LENGTH` (100). Student links carry the same params, plus `centre_id` when the roster was
 opened on a Centre page. The Student/Phase page accepts them only for `school` and

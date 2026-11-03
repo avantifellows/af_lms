@@ -2,12 +2,13 @@
 
 import { ArrowUpRight, Search, UserRound, Users } from "lucide-react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Badge, Button, Input, Modal, Select } from "@/components/ui";
 import { CURRENT_ACADEMIC_YEAR, PROGRAM_IDS } from "@/lib/constants";
 import {
+  coveragePageKey,
   coverageReturnFor,
   DEFAULT_COVERAGE_FILTERS,
   MAX_COVERAGE_SEARCH_LENGTH,
@@ -476,56 +477,72 @@ function resolveFilters(filters: CoverageFilters, mentorOptions: MentorFilterOpt
 // Rewrites only the `hm_` params, in place: no history entry, no server round
 // trip (Next's patched history API updates useSearchParams without a fetch,
 // unlike router.replace, which would re-render the roster on the server).
-function replaceCoverageUrl(filters: CoverageFilters) {
+// Every write is skipped unless the browser URL is still this roster's page:
+// after leaving it (another Centre, a Program choice screen) the filters
+// belong to no one there.
+function replaceCoverageUrl(filters: CoverageFilters, page: string) {
+  if (livePageKey() !== page) return;
   const url = new URL(window.location.href);
   writeCoverageFilters(url.searchParams, filters);
   if (url.search === new URL(window.location.href).search) return;
   window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
 }
 
-// The live URL on the client: a School tab switch can remount this roster
-// before useSearchParams has caught up with the filters it wrote on unmount.
-function initialCoverageFilters(searchParams: URLSearchParams) {
-  return readCoverageFilters(typeof window === "undefined"
-    ? searchParams
-    : new URLSearchParams(window.location.search));
+function livePageKey() {
+  return coveragePageKey(window.location.pathname, new URLSearchParams(window.location.search));
 }
 
-// On unmount, write any pending change, unless the page itself has changed
-// (leaving for a Student already wrote it, on the click).
-function useWriteOnUnmount(filters: CoverageFilters) {
+// This roster's page, fixed at mount from the router (usePathname and
+// useSearchParams), which already names the new page while an in-app
+// navigation renders it; the browser URL changes only after that render.
+function useCoveragePage() {
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const [page] = useState(() => coveragePageKey(pathname, searchParams));
+  return { page, searchParams };
+}
+
+// Prefer the live URL when it is this page: a School tab switch can remount
+// the roster before useSearchParams has caught up with the filters it wrote on
+// unmount. Mid-navigation the live URL is still the previous page's, so use
+// useSearchParams.
+function initialCoverageFilters(searchParams: URLSearchParams, page: string) {
+  const live = typeof window !== "undefined" && livePageKey() === page;
+  return readCoverageFilters(live ? new URLSearchParams(window.location.search) : searchParams);
+}
+
+// On unmount (a School tab switch), write any pending change, if the URL is
+// still this page.
+function useWriteOnUnmount(filters: CoverageFilters, page: string) {
   const latest = useRef(filters);
   useEffect(() => {
     latest.current = filters;
   }, [filters]);
   useEffect(() => {
-    const pathname = window.location.pathname;
     const pending = latest;
-    return () => {
-      if (window.location.pathname === pathname) replaceCoverageUrl(pending.current);
-    };
-  }, []);
+    return () => replaceCoverageUrl(pending.current, page);
+  }, [page]);
 }
 
 function useCoverageFilters(students: Student[], mentors: EligibleMentor[]) {
-  const searchParams = useSearchParams();
-  const [selected, setSelected] = useState(() => initialCoverageFilters(searchParams));
+  const { page, searchParams } = useCoveragePage();
+  const [selected, setSelected] = useState(() => initialCoverageFilters(searchParams, page));
   const mentorOptions = useMemo(() => mentorFilterOptions(students, mentors), [students, mentors]);
   const filters = useMemo(() => resolveFilters(selected, mentorOptions), [selected, mentorOptions]);
   // Forget a value the roster dropped (a Mentor who lost their last Student),
   // so it can't come back on its own if that Mentor is assigned again.
   if (filters !== selected) setSelected(filters);
   useEffect(() => {
-    const timer = window.setTimeout(() => replaceCoverageUrl(filters), URL_WRITE_DELAY_MS);
+    const timer = window.setTimeout(() => replaceCoverageUrl(filters, page), URL_WRITE_DELAY_MS);
     return () => window.clearTimeout(timer);
-  }, [filters]);
-  useWriteOnUnmount(filters);
+  }, [filters, page]);
+  useWriteOnUnmount(filters, page);
   return {
     filters,
     mentorOptions,
     update: (change: Partial<CoverageFilters>) =>
       setSelected(resolveFilters({ ...filters, ...change }, mentorOptions)),
-    writeUrl: () => replaceCoverageUrl(filters),
+    writeUrl: () => replaceCoverageUrl(filters, page),
   };
 }
 
