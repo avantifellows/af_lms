@@ -104,7 +104,7 @@ export const LMS_VIEWS: LmsView[] = [
   {
     path: "/api/quiz-analytics/[udise]/student-support",
     description:
-      "The cumulative report (Score journey) for a grade at a physical centre (not JNV NVS): per student, Predicted AL (grade-10 model, JEE Main only), Mode AL, AL status (Sliding / Same / Improving), Latest AL (newest non-retest test with a level), questions to the level above the Latest AL from that test's marks (`toNext`), the score % trend over non-retest tests (`trend`: Improving / Same / Declining over the last 5), the marks change on the latest test (`change`), and every major test's AL and marks (`tests`, each flagged `retest`, + `results`).",
+      "The cumulative report (Score journey) for a grade at a physical centre (not JNV NVS): per student, Predicted AL (grade-10 model, JEE Main only), Mode AL, AL status (Sliding / Same / Improving), Latest AL (newest test with a level that isn't the student's own retest), questions to the level above the Latest AL from that test's marks (`toNext`), the score % trend over levelled non-retest tests (`trend`: Improving / Same / Declining over the last 5), the change in score % points on the latest test vs the previous one of the same exam (`change`), and this year's major tests sat by at least 20% of the cohort with each student's AL and marks (`tests`, flagged `retest` when every sitting is a retest, + `results`, each flagged `retest`).",
     query: {
       grade: "required — integer",
       ...QUIZ_FILTERS,
@@ -113,11 +113,12 @@ export const LMS_VIEWS: LmsView[] = [
     feature: "performance",
     handler: handler(quizStudentSupport.GET),
     programScoped: true,
+    redact: redactStudentSupport,
   },
   {
     path: "/api/quiz-analytics/[udise]/student-report",
     description:
-      "One student's report at a physical centre (not JNV NVS): chapter competency per exam and subject (attempt, accuracy, score, priority, C = concept gap / S = skipping flags, PYQ links) and full-test history (marks, answers, level, rank in centre, absences).",
+      "One student's report at a physical centre (not JNV NVS): chapter competency per exam and subject (attempt, accuracy, score, priority, C = concept gap / S = skipping flags, PYQ links) and full-test history (this year's tests sat by at least 20% of the cohort or by the student: marks, answers, level, change in score % points, retests, rank in centre, absences).",
     query: {
       grade: "required — integer",
       program: QUIZ_FILTERS.program,
@@ -126,6 +127,7 @@ export const LMS_VIEWS: LmsView[] = [
     feature: "performance",
     handler: handler(quizStudentReport.GET),
     programScoped: true,
+    redact: redactStudentReport,
   },
   {
     path: "/api/quiz-analytics/[udise]/test-deep-dive",
@@ -177,6 +179,25 @@ function redactHolisticProgress(body: unknown, { includeNotes }: { includeNotes:
       return { ...rest, answersSubmitted: Array.isArray(answers) ? answers.length : 0 };
     }),
   };
+}
+
+// A student's caste category is a column in the LMS (it sets their cutoffs),
+// but Claude never needs it: drop it from every student row.
+function withoutCategory(student: unknown): unknown {
+  if (!student || typeof student !== "object") return student;
+  const rest = { ...(student as Record<string, unknown>) };
+  delete rest.category;
+  return rest;
+}
+
+function redactStudentSupport(body: unknown): unknown {
+  if (!body || typeof body !== "object" || !("students" in body) || !Array.isArray(body.students)) return body;
+  return { ...body, students: body.students.map(withoutCategory) };
+}
+
+function redactStudentReport(body: unknown): unknown {
+  if (!body || typeof body !== "object" || !("student" in body)) return body;
+  return { ...body, student: withoutCategory(body.student) };
 }
 
 // Match a concrete path ("/api/quiz-analytics/123/grades") to its view and

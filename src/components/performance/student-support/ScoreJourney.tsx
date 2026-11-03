@@ -12,8 +12,10 @@ import {
   type SortKey,
   type StreamSection,
   groupRows,
+  journeyQuery,
   matchesGender,
   modeDistribution,
+  nextSort,
   statusCounts,
   streamSections,
 } from "./score-journey-view";
@@ -56,7 +58,7 @@ const COLUMNS: { key: SortKey | null; label: string; title?: string; className?:
   { key: "trend", label: "Score graph", title: "Score % in every test, joined test to test; colour = direction over the last 5" },
 ];
 
-const RETEST_TITLE = "Retest — not counted in status or trend.";
+const RETEST_TITLE = "Retest — not counted in Latest AL, the score graph or the change.";
 
 function formatDate(iso: string): string {
   const d = new Date(iso);
@@ -106,6 +108,11 @@ function TestCell({ row, test }: { row: ScoreJourneyRow; test: JourneyTest }) {
     <span className="inline-flex items-center gap-1 whitespace-nowrap">
       <span className="tabular-nums">{r.marks !== null ? formatMarks(r.marks) : "—"}</span>
       <LevelChip level={level} />
+      {r.retest && (
+        <span className="text-[10px] font-semibold text-accent" title={RETEST_TITLE}>
+          R
+        </span>
+      )}
       {row.change?.sessionId === test.sessionId && <ChangeArrow change={row.change} />}
     </span>
   );
@@ -240,50 +247,76 @@ function SectionTable({
   );
 }
 
-export default function ScoreJourney({ schoolUdise, grade, program, stream, testGrade, onOpenStudent }: Props) {
+function StatusFilter({
+  counts,
+  status,
+  shown,
+  total,
+  onChange,
+}: {
+  counts: Record<AlStatus, number>;
+  status: AlStatus | null;
+  shown: number;
+  total: number;
+  onChange: (status: AlStatus | null) => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-sm">
+      <span className="text-xs font-bold uppercase tracking-wide text-text-muted">AL status</span>
+      {STATUSES.map((st) => (
+        <button
+          key={st}
+          type="button"
+          aria-pressed={status === st}
+          onClick={() => onChange(status === st ? null : st)}
+          className={`rounded border px-2 py-1 text-xs font-semibold ${STATUS_CLASS[st]} ${
+            status === st ? "ring-2 ring-current ring-offset-1" : status ? "opacity-50" : ""
+          }`}
+        >
+          {st} <span className="tabular-nums">{counts[st]}</span>
+        </button>
+      ))}
+      {status && (
+        <span className="text-xs text-text-muted">
+          Showing {shown} of {total} ·{" "}
+          <button type="button" className="underline" onClick={() => onChange(null)}>
+            Clear filter
+          </button>
+        </span>
+      )}
+    </div>
+  );
+}
+
+function JourneyBody({
+  data,
+  noteCounts,
+  notesFailed,
+  onOpenStudent,
+  onOpenNotes,
+}: {
+  data: ScoreJourneyData;
+  noteCounts: Record<string, number>;
+  notesFailed: boolean;
+  onOpenStudent: (uid: string) => void;
+  onOpenNotes: (row: ScoreJourneyRow) => void;
+}) {
   const [gender, setGender] = useState<GenderFilter>("all");
   const [status, setStatus] = useState<AlStatus | null>(null);
   const [sort, setSort] = useState<{ key: SortKey; ascending: boolean }>({ key: "default", ascending: false });
-  const [notesFor, setNotesFor] = useState<ScoreJourneyRow | null>(null);
 
-  const qs = new URLSearchParams({ grade: String(grade), program });
-  if (stream) qs.set("stream", stream);
-  if (testGrade != null) qs.set("testGrade", String(testGrade));
-  const state = useJsonFetch<ScoreJourneyData>(
-    `/api/quiz-analytics/${schoolUdise}/student-support?${qs}`,
-    "Failed to load the score journey"
-  );
-  // Separate from the journey (and from MCP): counts only for students whose
-  // mentorship notes this viewer may read. A failure leaves "—" in the cells
-  // and says so above the table, so it doesn't read as "no notes".
-  const notesState = useJsonFetch<MentorNoteCounts>(
-    `/api/quiz-analytics/${schoolUdise}/student-support/notes?${new URLSearchParams({ grade: String(grade), program })}`,
-    "Failed to load mentor notes"
-  );
-  const noteCounts = notesState.status === "ready" ? notesState.data.counts : {};
-
-  if (state.status === "loading") return <PerformanceNotice>Loading the score journey…</PerformanceNotice>;
-  if (state.status === "error") return <PerformanceNotice>{state.message}</PerformanceNotice>;
-  if (state.data.students.length === 0) {
-    return <PerformanceNotice>No enrolled students for this grade.</PerformanceNotice>;
-  }
-
-  const byGender = state.data.students.filter((r) => matchesGender(r, gender));
-  const counts = statusCounts(byGender);
+  const byGender = data.students.filter((r) => matchesGender(r, gender));
   const shown = status ? byGender.filter((r) => r.status === status) : byGender;
-  const sections = streamSections(shown, state.data.tests);
-
+  const sections = streamSections(shown, data.tests);
   const onSort = (key: SortKey | null) => {
-    if (!key) return;
-    // Text sorts A→Z first; numbers start high → low.
-    setSort((s) => (s.key === key ? { key, ascending: !s.ascending } : { key, ascending: key === "name" }));
+    if (key) setSort((s) => nextSort(s, key));
   };
 
   return (
-    <div className="space-y-4">
+    <>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 md:gap-4">
         <StatCard label="Students" value={byGender.length} color="brand-gold" />
-        <StatCard label="Major tests" value={state.data.tests.length} color="brand-coral" />
+        <StatCard label="Major tests" value={data.tests.length} color="brand-coral" />
         <StatCard label="Mode AL distribution" value={modeDistribution(byGender) || "—"} size="sm" color="brand-amber" />
       </div>
 
@@ -298,33 +331,16 @@ export default function ScoreJourney({ schoolUdise, grade, program, stream, test
           value={gender}
           onChange={setGender}
         />
-        <div className="flex flex-wrap items-center gap-2 text-sm">
-          <span className="text-xs font-bold uppercase tracking-wide text-text-muted">AL status</span>
-          {STATUSES.map((st) => (
-            <button
-              key={st}
-              type="button"
-              aria-pressed={status === st}
-              onClick={() => setStatus(status === st ? null : st)}
-              className={`rounded border px-2 py-1 text-xs font-semibold ${STATUS_CLASS[st]} ${
-                status === st ? "ring-2 ring-current ring-offset-1" : status ? "opacity-50" : ""
-              }`}
-            >
-              {st} <span className="tabular-nums">{counts[st]}</span>
-            </button>
-          ))}
-          {status && (
-            <span className="text-xs text-text-muted">
-              Showing {shown.length} of {byGender.length} ·{" "}
-              <button type="button" className="underline" onClick={() => setStatus(null)}>
-                Clear filter
-              </button>
-            </span>
-          )}
-        </div>
+        <StatusFilter
+          counts={statusCounts(byGender)}
+          status={status}
+          shown={shown.length}
+          total={byGender.length}
+          onChange={setStatus}
+        />
       </div>
 
-      {notesState.status === "error" && <p className="text-sm text-text-muted">Mentor notes unavailable</p>}
+      {notesFailed && <p className="text-sm text-text-muted">Mentor notes unavailable</p>}
 
       {shown.length === 0 && (
         <div className="rounded-lg border border-border bg-bg-card-alt p-8 text-center text-sm text-text-muted shadow-sm">
@@ -350,10 +366,42 @@ export default function ScoreJourney({ schoolUdise, grade, program, stream, test
           notes={noteCounts}
           onSort={onSort}
           onOpenStudent={onOpenStudent}
-          onOpenNotes={setNotesFor}
+          onOpenNotes={onOpenNotes}
         />
       ))}
+    </>
+  );
+}
 
+export default function ScoreJourney({ schoolUdise, grade, program, stream, testGrade, onOpenStudent }: Props) {
+  const [notesFor, setNotesFor] = useState<ScoreJourneyRow | null>(null);
+  const state = useJsonFetch<ScoreJourneyData>(
+    `/api/quiz-analytics/${schoolUdise}/student-support?${journeyQuery(grade, program, stream, testGrade)}`,
+    "Failed to load the score journey"
+  );
+  // Separate from the journey (and from MCP): counts only for students whose
+  // mentorship notes this viewer may read. A failure leaves "—" in the cells
+  // and says so above the table, so it doesn't read as "no notes".
+  const notesState = useJsonFetch<MentorNoteCounts>(
+    `/api/quiz-analytics/${schoolUdise}/student-support/notes?${new URLSearchParams({ grade: String(grade), program })}`,
+    "Failed to load mentor notes"
+  );
+
+  if (state.status === "loading") return <PerformanceNotice>Loading the score journey…</PerformanceNotice>;
+  if (state.status === "error") return <PerformanceNotice>{state.message}</PerformanceNotice>;
+  if (state.data.students.length === 0) {
+    return <PerformanceNotice>No enrolled students for this grade.</PerformanceNotice>;
+  }
+
+  return (
+    <div className="space-y-4">
+      <JourneyBody
+        data={state.data}
+        noteCounts={notesState.status === "ready" ? notesState.data.counts : {}}
+        notesFailed={notesState.status === "error"}
+        onOpenStudent={onOpenStudent}
+        onOpenNotes={setNotesFor}
+      />
       {notesFor && (
         <MentorNotes
           schoolUdise={schoolUdise}

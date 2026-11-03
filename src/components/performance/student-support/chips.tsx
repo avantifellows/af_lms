@@ -123,12 +123,12 @@ const CHANGE_STYLE = {
   flat: { arrow: "▬", className: "text-text-muted" },
 };
 
-/** Marks change vs the previous non-retest test: ▲ / ▼ / ▬ and its size. */
+/** Change in score % (percentage points) vs the previous sitting of the same exam: ▲ / ▼ / ▬ and its size. */
 export function ChangeArrow({ change }: { change: TestChange }) {
   const style = CHANGE_STYLE[changeDirection(change.change)];
   return (
     <span className={`text-[11px] tabular-nums ${style.className}`} title={`vs ${change.previous}`}>
-      {style.arrow} {Math.abs(change.change).toFixed(1)}
+      {style.arrow} {Math.abs(change.change).toFixed(1)}%
     </span>
   );
 }

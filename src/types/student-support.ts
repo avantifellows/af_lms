@@ -31,8 +31,8 @@ export interface LatestLevel {
 
 export type ScoreDirection = "Improving" | "Same" | "Declining";
 
-/** Score % on every non-retest test the student sat, oldest first, and the
- *  direction over the last few. */
+/** Score % on every levelled test the student sat that isn't their own
+ *  retest, oldest first, and the direction over the last few. */
 export interface ScoreTrend {
   points: number[];
   direction: ScoreDirection;
@@ -41,10 +41,12 @@ export interface ScoreTrend {
   recent: number;
 }
 
-/** Marks change on the student's latest non-retest sitting vs the one before. */
+/** Change in score % (percentage points) on a sitting vs the student's
+ *  previous non-retest, levelled sitting of the same exam. */
 export interface TestChange {
   sessionId: string;
   change: number;
+  /** The previous sitting's test name. */
   previous: string;
 }
 
@@ -62,7 +64,6 @@ export interface ScoreJourneyRow {
   examStream: string | null;
   /** Predicted AL from grade-10 marks (JEE Main only). */
   predicted: string | null;
-  predictedPct: number | null;
   /** dim_student.academic_level: mode of the last 3 major tests. */
   mode: string | null;
   status: AlStatus | null;
@@ -87,7 +88,8 @@ export interface JourneyTest {
   stream: string | null;
   /** Maximum marks, from the sittings. */
   max: number | null;
-  /** A later sitting of an earlier test's name: shown, never counted. */
+  /** Every sitting of it is a retest (the student had already sat a test
+   *  of the same name and stream): shown, never counted. */
   retest: boolean;
 }
 
@@ -97,10 +99,13 @@ export interface TestResult {
   level: string;
   marks: number | null;
   max: number | null;
+  /** The student's own retest: shown, not counted. */
+  retest: boolean;
 }
 
 export interface ScoreJourneyData {
-  /** Levelled major tests in date order, after the test-grade filter. */
+  /** Levelled major tests in date order, after the test-grade filter: only
+   *  the sessions `listedSessions` keeps (this year, ≥ 20% of the cohort). */
   tests: JourneyTest[];
   students: ScoreJourneyRow[];
 }
@@ -162,12 +167,15 @@ export interface TestHistoryRow {
   date: string;
   exam: string | null;
   absent: boolean;
+  /** The student's own retest: no change shown. */
+  retest: boolean;
   level: string | null;
   rank: number | null;
   takers: number | null;
   overall: TestScore | null;
   subjects: (TestScore & { subject: string })[];
-  /** Percentage-point change in overall score vs the previous sitting of the same exam. */
+  /** Percentage-point change in overall score vs the student's previous
+   *  non-retest, levelled sitting of the same exam (as the Score journey's). */
   change: number | null;
 }
 

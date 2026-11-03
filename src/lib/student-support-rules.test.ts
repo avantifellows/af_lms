@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   type JourneySitting,
+  academicYearStart,
   alStatus,
   changeDirection,
   chapterFlag,
@@ -9,12 +10,14 @@ import {
   latestChange,
   latestLevel,
   levelForTest,
+  listedSessions,
   passMark,
   questionsToNext,
-  retestIds,
   scoreDirection,
   scoreTrend,
+  sittingChanges,
   slope,
+  studentRetests,
   topicFlag,
 } from "./student-support-rules";
 
@@ -53,23 +56,81 @@ describe("alStatus", () => {
 });
 
 function sitting(over: Partial<JourneySitting>): JourneySitting {
-  return { sessionId: "s", test: "T", level: "M2", marks: 100, max: 300, retest: false, ...over };
+  return { sessionId: "s", test: "T", exam: "JEE Mains", level: "M2", marks: 100, max: 300, retest: false, ...over };
 }
 
-describe("retestIds", () => {
-  it("marks a later session with an earlier session's name, whatever order they arrive in", () => {
-    const ids = retestIds([
-      { sessionId: "b", name: "FT 2", date: "2026-08-01" },
-      { sessionId: "r2", name: "FT 1 ", date: "2026-09-01" },
-      { sessionId: "a", name: "FT 1", date: "2026-07-01" },
-      { sessionId: "r1", name: "FT 1", date: "2026-07-01" },
+describe("studentRetests", () => {
+  const t = (sessionId: string, name: string, date: string, stream: string | null = "engineering") => ({
+    sessionId,
+    name,
+    date,
+    stream,
+  });
+
+  it("marks the student's later sitting of a name they already sat, whatever order they arrive in", () => {
+    const ids = studentRetests([
+      t("b", "FT 2", "2026-08-01"),
+      t("r2", "FT 1 ", "2026-09-01"),
+      t("a", "FT 1", "2026-07-01"),
+      t("r1", "FT 1", "2026-07-01"),
     ]);
     // Same day: the higher session id is the retest.
     expect([...ids].sort()).toEqual(["r1", "r2"]);
   });
 
-  it("marks nothing when every name is new", () => {
-    expect(retestIds([{ sessionId: "a", name: "FT 1", date: "2026-07-01" }]).size).toBe(0);
+  it("does not mark a student's only sitting, though another batch sat the name earlier", () => {
+    // Batch A sat "Baseline" on 1 Jul (session a), batch B on 8 Jul (session b):
+    // each student sat one of them, so neither is a retest for anyone.
+    expect(studentRetests([t("b", "Baseline", "2026-07-08")]).size).toBe(0);
+    expect(studentRetests([t("a", "Baseline", "2026-07-01")]).size).toBe(0);
+  });
+
+  it("keeps streams apart: the same name in another stream is not a retest", () => {
+    expect(studentRetests([t("a", "FT 1", "2026-07-01", "engineering"), t("b", "FT 1", "2026-07-02", "medical")]).size).toBe(0);
+    expect([...studentRetests([t("a", "FT 1", "2026-07-01", null), t("b", "FT 1", "2026-07-02", null)])]).toEqual(["b"]);
+  });
+});
+
+describe("listedSessions", () => {
+  const sat = (uid: string, sessionId: string, date = "2026-07-01", stream: string | null = "engineering") => ({
+    uid,
+    sessionId,
+    date,
+    stream,
+  });
+  // Ten engineering students all sat "main"; one sat "rare".
+  const cohort = Array.from({ length: 10 }, (_, i) => sat(`u${i}`, "main"));
+
+  it("starts the year on 1 April", () => {
+    expect(academicYearStart("2026-2027")).toBe("2026-04-01");
+  });
+
+  it("drops a session dated before the year started, even one the student sat", () => {
+    const listed = listedSessions([...cohort, ...cohort.map((c) => ({ ...c, sessionId: "old", date: "2026-03-31" }))], "2026-04-01", "u0");
+    expect([...listed]).toEqual(["main"]);
+  });
+
+  it("keeps a session at least 20% of its cohort sat, and drops a rarer one", () => {
+    const listed = listedSessions(
+      [...cohort, sat("u0", "pair"), sat("u1", "pair"), sat("u2", "rare")],
+      "2026-04-01"
+    );
+    expect([...listed].sort()).toEqual(["main", "pair"]);
+  });
+
+  it("keeps a rare session for the student who sat it", () => {
+    const takers = [...cohort, sat("u2", "rare")];
+    expect(listedSessions(takers, "2026-04-01", "u2").has("rare")).toBe(true);
+    expect(listedSessions(takers, "2026-04-01", "u3").has("rare")).toBe(false);
+  });
+
+  it("measures a stream's test against that stream's cohort, a stream-less one against everyone", () => {
+    // 2 medical students among 10 engineering ones: their NEET test is 2 of 2.
+    const takers = [...cohort, sat("m1", "neet", "2026-07-01", "medical"), sat("m2", "neet", "2026-07-01", "medical"), sat("m1", "gen", "2026-07-01", null)];
+    const listed = listedSessions(takers, "2026-04-01");
+    expect(listed.has("neet")).toBe(true);
+    // 1 of 12 students sat the stream-less test.
+    expect(listed.has("gen")).toBe(false);
   });
 });
 
@@ -149,6 +210,8 @@ describe("score trend", () => {
       sitting({ marks: 0, max: 300, retest: true }),
       sitting({ marks: null }),
       sitting({ marks: 50, max: null }),
+      // A Not-Eligible paper (e.g. State CET) has no level: not plotted.
+      sitting({ marks: 170, max: 180, level: null }),
     ]);
     // The first test's 100% would make it Declining; only the last 5 count.
     expect(trend).toEqual({ points: [100, 10, 15, 20, 25, 30], direction: "Improving", slope: 5, recent: 5 });
@@ -160,20 +223,36 @@ describe("score trend", () => {
 });
 
 describe("latestChange", () => {
-  it("compares the latest non-retest marks with the previous one", () => {
+  it("is the score % change vs the previous non-retest, levelled sitting of the same exam", () => {
     expect(
       latestChange([
         sitting({ sessionId: "a", test: "FT 1", marks: 80 }),
-        sitting({ sessionId: "b", test: "FT 2", marks: 100 }),
+        sitting({ sessionId: "b", test: "FT 2", marks: 120 }),
         sitting({ sessionId: "c", test: "FT 2", marks: 150, retest: true }),
         sitting({ sessionId: "d", test: "FT 3", marks: null }),
-        sitting({ sessionId: "e", test: "FT 4", marks: 92.5 }),
+        sitting({ sessionId: "n", test: "Not eligible", level: null, marks: 290 }),
+        sitting({ sessionId: "e", test: "FT 4", marks: 105 }),
       ])
-    ).toEqual({ sessionId: "e", change: -7.5, previous: "FT 2" });
+    ).toEqual({ sessionId: "e", change: -5, previous: "FT 2" });
   });
 
-  it("is null with fewer than two", () => {
+  it("compares % not marks, against the same exam only", () => {
+    // A 300-mark JEE paper (40%), a 180-mark CET paper, then a JEE paper at 50%:
+    // marks fell from 150 to 90 on the CET paper, but the JEE % went up 10 points.
+    const changes = sittingChanges([
+      sitting({ sessionId: "j1", test: "JEE 1", marks: 120, max: 300 }),
+      sitting({ sessionId: "c1", test: "CET 1", exam: "State CET", marks: 150, max: 180 }),
+      sitting({ sessionId: "c2", test: "CET 2", exam: "State CET", marks: 90, max: 180 }),
+      sitting({ sessionId: "j2", test: "JEE 2", marks: 150, max: 300 }),
+    ]);
+    expect(changes.get("j2")).toEqual({ sessionId: "j2", change: 10, previous: "JEE 1" });
+    expect(changes.get("c2")?.change).toBeCloseTo(-33.3, 1);
+    expect(changes.has("j1")).toBe(false);
+  });
+
+  it("is null with fewer than two, or when the latest has no earlier sitting of its exam", () => {
     expect(latestChange([sitting({})])).toBeNull();
+    expect(latestChange([sitting({ sessionId: "a" }), sitting({ sessionId: "b", exam: "NEET" })])).toBeNull();
   });
 
   it("is up above +0.5, down below -0.5, else flat", () => {

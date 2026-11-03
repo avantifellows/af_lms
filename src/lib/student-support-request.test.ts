@@ -53,6 +53,19 @@ describe("withStudentSupportRead: the caller's programs", () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
+  it("lets a teacher whose access comes only from a centre seat read the seat's program, and no other", async () => {
+    vi.mocked(getResolvedPermission).mockResolvedValue(
+      row({
+        role: "teacher",
+        level: 1,
+        program_ids: [],
+        scope: { schools: new Set(["70705"]), centres: new Set([9]), programs: new Set([74]) },
+      })
+    );
+    expect((await call("Punjab CoE")).status).toBe(200);
+    expect((await call("JNV CoE")).status).toBe(403);
+  });
+
   it("lets an admin read any program, with or without program_ids, read-only too", async () => {
     for (const over of [{ program_ids: null }, { program_ids: [1] }, { program_ids: [], read_only: true }]) {
       vi.mocked(getResolvedPermission).mockResolvedValue(row({ role: "admin", ...over }));

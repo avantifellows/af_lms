@@ -61,6 +61,23 @@ function defaultCompare(a: ScoreJourneyRow, b: ScoreJourneyRow): number {
   return (b.latestPct ?? -1) - (a.latestPct ?? -1);
 }
 
+/** A click on a sortable header: the same key flips the order; a new key
+ *  sorts text A→Z first and numbers high → low. */
+export function nextSort(
+  current: { key: SortKey; ascending: boolean },
+  key: SortKey
+): { key: SortKey; ascending: boolean } {
+  return current.key === key ? { key, ascending: !current.ascending } : { key, ascending: key === "name" };
+}
+
+/** The Score journey request's query string. */
+export function journeyQuery(grade: number, program: string, stream?: string, testGrade?: number): URLSearchParams {
+  const qs = new URLSearchParams({ grade: String(grade), program });
+  if (stream) qs.set("stream", stream);
+  if (testGrade != null) qs.set("testGrade", String(testGrade));
+  return qs;
+}
+
 export function sortRows(rows: ScoreJourneyRow[], key: SortKey, ascending: boolean): ScoreJourneyRow[] {
   if (key === "default") return [...rows].sort(defaultCompare);
   return [...rows].sort((a, b) => {

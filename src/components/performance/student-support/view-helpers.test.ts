@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { groupRows, matchesGender, modeDistribution, sortRows, statusCounts, streamSections } from "./score-journey-view";
+import {
+  groupRows,
+  journeyQuery,
+  matchesGender,
+  modeDistribution,
+  nextSort,
+  sortRows,
+  statusCounts,
+  streamSections,
+} from "./score-journey-view";
 import { focusChapters, sortChapters } from "./report-view";
 import type { ChapterRow, ScoreJourneyRow } from "@/types/student-support";
 
@@ -13,7 +22,6 @@ function row(over: Partial<ScoreJourneyRow>): ScoreJourneyRow {
     stream: null,
     examStream: "engineering",
     predicted: null,
-    predictedPct: null,
     mode: null,
     status: null,
     latestAl: null,
@@ -162,5 +170,21 @@ describe("Cumulative report sections", () => {
     expect(
       modeDistribution([row({ mode: "M3" }), row({ mode: null }), row({ mode: "M1" }), row({ mode: "M3" })])
     ).toBe("M1:1 · M3:2 · No AL:1");
+  });
+});
+
+describe("nextSort", () => {
+  it("flips the order on the same key, and starts text A→Z and numbers high → low", () => {
+    expect(nextSort({ key: "trend", ascending: false }, "trend")).toEqual({ key: "trend", ascending: true });
+    expect(nextSort({ key: "trend", ascending: true }, "name")).toEqual({ key: "name", ascending: true });
+    expect(nextSort({ key: "name", ascending: true }, "toNext")).toEqual({ key: "toNext", ascending: false });
+  });
+});
+
+describe("journeyQuery", () => {
+  it("sends grade and program, and stream and test grade only when set", () => {
+    expect(journeyQuery(12, "JNV CoE").toString()).toBe("grade=12&program=JNV+CoE");
+    expect(journeyQuery(12, "JNV CoE", "medical", 11).toString()).toBe("grade=12&program=JNV+CoE&stream=medical&testGrade=11");
+    expect(journeyQuery(11, "Punjab CoE", undefined, 0).get("testGrade")).toBe("0");
   });
 });

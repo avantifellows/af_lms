@@ -16,6 +16,7 @@ import { query } from "./db";
 import { ttlCache } from "./ttl-cache";
 import {
   type JourneySitting,
+  academicYearStart,
   alStatus,
   byDateThenSession,
   chapterFlag,
@@ -23,10 +24,12 @@ import {
   latestChange,
   latestLevel,
   levelForTest,
+  listedSessions,
   passMark,
   questionsToNext,
-  retestIds,
   scoreTrend,
+  sittingChanges,
+  studentRetests,
   studentExamStream,
   testInStream,
   topicFlag,
@@ -40,9 +43,11 @@ import type {
   ScoreJourneyData,
   ScoreJourneyRow,
   StudentReportData,
+  TestChange,
   TestHistoryRow,
   TestScore,
 } from "@/types/student-support";
+import type { ProgressionEntry, ProgressionTest } from "@/types/quiz";
 
 // Question -> live new-CMS chapter, both CMS generations (etl-next bridge_question_chapter).
 const QUESTION_CHAPTER_TABLE = "`avantifellows.production_dbt_final.bridge_question_chapter`";
@@ -98,7 +103,6 @@ interface StudentRaw {
   category: string | null;
   mode_al: string | null;
   predicted_al: string | null;
-  predicted_pct: number | null;
 }
 
 /** Enrolled students of one School + grade + program, from dim_student. */
@@ -120,8 +124,7 @@ async function getStudents(
       ANY_VALUE(student_stream) AS stream,
       ANY_VALUE(student_category) AS category,
       MAX(academic_level) AS mode_al,
-      MAX(predicted_academic_level) AS predicted_al,
-      MAX(predicted_jee_percentile) AS predicted_pct
+      MAX(predicted_academic_level) AS predicted_al
     FROM ${DIM_STUDENT_TABLE}
     WHERE student_school_udise_code = @udise
       AND student_grade = @grade
@@ -188,7 +191,6 @@ function journeyRow(
     stream: s.stream,
     examStream: stream,
     predicted: s.predicted_al,
-    predictedPct: num(s.predicted_pct),
     mode: s.mode_al,
     status: alStatus(s.predicted_al, s.mode_al),
     latestAl: latest,
@@ -201,24 +203,54 @@ function journeyRow(
   };
 }
 
+const YEAR_START = academicYearStart(CURRENT_ACADEMIC_YEAR);
+
 /** One levelled-test sitting as the cumulative AL read gives it. */
 interface Sitting {
   sessionId: string;
   date: string;
   testStream: string | null;
   testName: string;
+  exam: string | null;
+  /** The student's own retest (see studentRetests). */
   retest: boolean;
   level: string;
   marks: number | null;
   max: number | null;
 }
 
+/** A student's in-year sittings, oldest first, each marked if it is their
+ *  own retest. */
+function studentSittings(progression: ProgressionEntry[], tests: Map<string, ProgressionTest>): Sitting[] {
+  const sittings: Sitting[] = [];
+  for (const p of progression) {
+    const test = tests.get(p.session_id);
+    if (!test || test.start_date < YEAR_START) continue;
+    sittings.push({
+      sessionId: p.session_id,
+      date: test.start_date,
+      testStream: test.stream,
+      testName: test.test_name,
+      exam: test.course,
+      retest: false,
+      level: p.academic_level,
+      marks: p.marks_scored,
+      max: p.max_marks_possible,
+    });
+  }
+  const retests = studentRetests(sittings.map((t) => ({ ...t, name: t.testName, stream: t.testStream })));
+  for (const t of sittings) t.retest = retests.has(t.sessionId);
+  return sittings.sort(byDateThenSession);
+}
+
 /**
- * Per student: their levelled full-test sittings (Advanced excluded, the same
- * tests that decide dim_student.academic_level), plus every test's raw result
- * for the per-test columns. The cumulative AL read already returns exactly
- * these and applies the test-grade filter. Tests are ordered by date, then
- * session id, each with its maximum marks and whether it is a retest.
+ * Per student: their in-year levelled full-test sittings (Advanced excluded,
+ * the same tests that decide dim_student.academic_level), plus their result
+ * on each listed test for the per-test columns. The cumulative AL read
+ * already returns exactly these and applies the test-grade filter. The
+ * columns are the sessions `listedSessions` keeps, ordered by date, then
+ * session id, each with its maximum marks and whether every sitting of it
+ * was a retest.
  */
 async function getProgressions(
   udise: string,
@@ -228,44 +260,40 @@ async function getProgressions(
   testGrade?: number
 ): Promise<{ tests: JourneyTest[]; byStudent: Map<string, { sittings: Sitting[]; results: Record<string, TestResult> }> }> {
   const data = await getCumulativeALData(udise, grade, program, stream, testGrade);
-  const retests = retestIds(data.tests.map((t) => ({ sessionId: t.session_id, name: t.test_name, date: t.start_date })));
-  const maxBySession = new Map<string, number>();
-  for (const s of data.students) {
-    for (const p of s.progression) {
-      if (p.max_marks_possible) maxBySession.set(p.session_id, Math.max(maxBySession.get(p.session_id) ?? 0, p.max_marks_possible));
-    }
-  }
-  const tests: JourneyTest[] = data.tests
-    .map((t) => ({
-      sessionId: t.session_id,
-      name: t.test_name,
-      date: t.start_date,
-      stream: t.stream,
-      max: maxBySession.get(t.session_id) ?? null,
-      retest: retests.has(t.session_id),
-    }))
-    .sort(byDateThenSession);
-  const bySession = new Map(tests.map((t) => [t.sessionId, t]));
+  const testsById = new Map(data.tests.map((t) => [t.session_id, t]));
   const byStudent = new Map<string, { sittings: Sitting[]; results: Record<string, TestResult> }>();
   for (const s of data.students) {
-    const sittings: Sitting[] = [];
-    const results: Record<string, TestResult> = {};
-    for (const p of s.progression) {
-      results[p.session_id] = { level: p.academic_level, marks: p.marks_scored, max: p.max_marks_possible };
-      const test = bySession.get(p.session_id);
-      sittings.push({
-        sessionId: p.session_id,
-        date: test?.date ?? "",
-        testStream: test?.stream ?? null,
-        testName: test?.name ?? p.session_id,
-        retest: test?.retest ?? false,
-        level: p.academic_level,
-        marks: p.marks_scored,
-        max: p.max_marks_possible,
-      });
-    }
-    byStudent.set(s.student_id, { sittings: sittings.sort(byDateThenSession), results });
+    byStudent.set(s.student_id, { sittings: studentSittings(s.progression, testsById), results: {} });
   }
+  const all = [...byStudent].flatMap(([uid, { sittings }]) => sittings.map((t) => ({ uid, t })));
+  const listed = listedSessions(
+    all.map(({ uid, t }) => ({ uid, sessionId: t.sessionId, date: t.date, stream: t.testStream })),
+    YEAR_START
+  );
+  const stats = new Map<string, { max: number; sat: number; retests: number }>();
+  for (const { uid, t } of all.filter(({ t }) => listed.has(t.sessionId))) {
+    byStudent.get(uid)!.results[t.sessionId] = { level: t.level, marks: t.marks, max: t.max, retest: t.retest };
+    const st = stats.get(t.sessionId) ?? { max: 0, sat: 0, retests: 0 };
+    stats.set(t.sessionId, {
+      max: Math.max(st.max, t.max ?? 0),
+      sat: st.sat + 1,
+      retests: st.retests + (t.retest ? 1 : 0),
+    });
+  }
+  const tests: JourneyTest[] = data.tests
+    .filter((t) => listed.has(t.session_id))
+    .map((t) => {
+      const st = stats.get(t.session_id)!;
+      return {
+        sessionId: t.session_id,
+        name: t.test_name,
+        date: t.start_date,
+        stream: t.stream,
+        max: st.max || null,
+        retest: st.retests === st.sat,
+      };
+    })
+    .sort(byDateThenSession);
   return { tests, byStudent };
 }
 
@@ -277,6 +305,7 @@ function journeySittings(sittings: Sitting[], stream: "engineering" | "medical")
     .map((t) => ({
       sessionId: t.sessionId,
       test: t.testName,
+      exam: t.exam,
       level: levelForTest(t.level, stream),
       marks: t.marks,
       max: t.max,
@@ -523,6 +552,8 @@ interface TestRaw {
   academic_level: string | null;
   centre_rank: number | null;
   takers: number | null;
+  /** Everyone at the School + grade + program who sat the session (uids). */
+  taker_uids: string[] | null;
 }
 
 /**
@@ -531,7 +562,8 @@ interface TestRaw {
  * their rank among the School's students. The caller keeps the student's
  * stream: not filtering here lets this read start before the student's stream
  * is known. Full tests make the test history; the sessions the student sat
- * also scope the chapter read.
+ * also scope the chapter read. Each row carries the session's takers, for
+ * `listedSessions`.
  */
 async function getTestRows(udise: string, grade: number, program: string, uid: string): Promise<TestRaw[]> {
   const formats = COMPETENCY_FORMATS.map((f) => `'${f}'`).join(",");
@@ -554,7 +586,8 @@ async function getTestRows(udise: string, grade: number, program: string, uid: s
       SELECT session_id, ANY_VALUE(hashed_session_id) AS hashed_session_id,
              ANY_VALUE(test_name) AS test_name, MIN(start_date) AS start_date,
              ANY_VALUE(test_course) AS test_course, ANY_VALUE(test_format) AS test_format,
-             ANY_VALUE(test_stream) AS test_stream
+             ANY_VALUE(test_stream) AS test_stream,
+             ARRAY_AGG(DISTINCT IF(LOWER(section) = 'overall', uid, NULL) IGNORE NULLS) AS taker_uids
       FROM results GROUP BY session_id
     ),
     ranked AS (
@@ -566,7 +599,7 @@ async function getTestRows(udise: string, grade: number, program: string, uid: s
     SELECT t.session_id, t.hashed_session_id, t.test_name, t.start_date, t.test_course, t.test_format, t.test_stream,
            r.section, r.marks_scored, r.max_marks_possible, r.percentage, r.num_correct,
            r.num_wrong, r.num_partially_correct, r.num_skipped, r.academic_level,
-           k.centre_rank, k.takers
+           k.centre_rank, k.takers, t.taker_uids
     FROM tests t
     LEFT JOIN results r ON r.session_id = t.session_id AND r.uid = @uid
     LEFT JOIN ranked k ON k.session_id = t.session_id AND k.uid = @uid
@@ -592,26 +625,48 @@ function score(r: TestRaw): TestScore {
 }
 
 const isFullTest = (r: TestRaw) => MAJOR_TEST_FORMATS.includes(r.test_format ?? "");
+const isOverall = (r: TestRaw) => r.section?.toLowerCase() === "overall";
 
-function shapeTests(rows: TestRaw[]): TestHistoryRow[] {
+/** The full tests the report's history lists (see listedSessions): this
+ *  year's, sat by ≥ 20% of the cohort or by the student. */
+function listedFullTests(rows: TestRaw[], uid: string): Set<string> {
+  const seen = new Set<string>();
+  const takers = [];
+  for (const r of rows.filter(isFullTest)) {
+    if (seen.has(r.session_id)) continue;
+    seen.add(r.session_id);
+    const date = dateString(r.start_date);
+    for (const u of r.taker_uids ?? []) takers.push({ uid: u, sessionId: r.session_id, date, stream: r.test_stream });
+  }
+  return listedSessions(takers, YEAR_START, uid);
+}
+
+function emptyHistoryRow(r: TestRaw): TestHistoryRow {
+  return {
+    sessionId: r.session_id,
+    name: r.test_name,
+    date: dateString(r.start_date),
+    exam: examName(r.test_course),
+    absent: true,
+    retest: false,
+    level: null,
+    rank: null,
+    takers: null,
+    overall: null,
+    subjects: [],
+    change: null,
+  };
+}
+
+/** The history, newest first. `retests` and `changes` come from the
+ *  student's sittings, so each row agrees with the Score journey. */
+function shapeTests(rows: TestRaw[], retests: Set<string>, changes: Map<string, TestChange>): TestHistoryRow[] {
   const bySession = new Map<string, TestHistoryRow>();
   for (const r of rows.filter(isFullTest)) {
-    const row = bySession.get(r.session_id) ?? {
-      sessionId: r.session_id,
-      name: r.test_name,
-      date: dateString(r.start_date),
-      exam: examName(r.test_course),
-      absent: true,
-      level: null,
-      rank: null,
-      takers: null,
-      overall: null,
-      subjects: [],
-      change: null,
-    };
+    const row = bySession.get(r.session_id) ?? emptyHistoryRow(r);
     if (r.section) {
       row.absent = false;
-      if (r.section.toLowerCase() === "overall") {
+      if (isOverall(r)) {
         row.overall = score(r);
         row.level = r.academic_level;
         row.rank = num(r.centre_rank);
@@ -623,49 +678,41 @@ function shapeTests(rows: TestRaw[]): TestHistoryRow[] {
     bySession.set(r.session_id, row);
   }
   const tests = [...bySession.values()].sort((a, b) => byDateThenSession(b, a));
-  setChanges(tests);
-  for (const t of tests) t.subjects.sort((a, b) => a.subject.localeCompare(b.subject));
+  for (const t of tests) {
+    t.retest = retests.has(t.sessionId);
+    t.change = changes.get(t.sessionId)?.change ?? null;
+    t.subjects.sort((a, b) => a.subject.localeCompare(b.subject));
+  }
   return tests;
 }
 
-/** Change vs the previous sitting of the same exam the student actually sat
- *  (tests newest first). */
-function setChanges(tests: TestHistoryRow[]) {
-  const previous = new Map<string, number>();
-  for (const t of [...tests].reverse()) {
-    const key = t.exam ?? "";
-    const p = t.overall?.pct ?? null;
-    if (p === null) continue;
-    const before = previous.get(key);
-    t.change = before === undefined ? null : round1(p - before);
-    previous.set(key, p);
-  }
+/** Ids of the student's own retests among the full tests they sat. */
+function reportRetests(rows: TestRaw[]): Set<string> {
+  return studentRetests(
+    rows
+      .filter((r) => isFullTest(r) && isOverall(r))
+      .map((r) => ({ sessionId: r.session_id, name: r.test_name, date: dateString(r.start_date), stream: r.test_stream }))
+  );
 }
 
 /**
  * The student's levelled full tests, oldest first: the same tests the
  * cumulative AL read gives the Score journey (Advanced excluded), taken from
- * rows the report already has rather than a second scan. Retests are marked
- * over every such test the School + grade + program sat, in any stream.
+ * rows the report already has rather than a second scan.
  */
 function sittingsFromTests(
-  allRows: TestRaw[],
   rows: TestRaw[],
+  retests: Set<string>,
   stream: "engineering" | "medical"
 ): JourneySitting[] {
-  const levelled = (r: TestRaw) => isFullTest(r) && !isAdvancedTest(r.test_name);
-  const tests = new Map<string, { sessionId: string; name: string; date: string }>();
-  for (const r of allRows.filter(levelled)) {
-    tests.set(r.session_id, { sessionId: r.session_id, name: r.test_name, date: dateString(r.start_date) });
-  }
-  const retests = retestIds([...tests.values()]);
   return rows
-    .filter((r) => levelled(r) && r.section?.toLowerCase() === "overall" && r.academic_level)
+    .filter((r) => isFullTest(r) && !isAdvancedTest(r.test_name) && isOverall(r) && r.academic_level)
     .map((r) => ({ r, date: dateString(r.start_date), sessionId: r.session_id }))
     .sort(byDateThenSession)
     .map(({ r }) => ({
       sessionId: r.session_id,
       test: r.test_name,
+      exam: r.test_course,
       level: levelForTest(r.academic_level!, stream),
       marks: num(r.marks_scored),
       max: num(r.max_marks_possible),
@@ -700,7 +747,10 @@ async function loadStudentReport(
   ]);
   if (!student) return null;
   const stream = studentExamStream(student.stream);
-  const testRows = allTestRows.filter((r) => testInStream(r.test_stream, stream));
+  const listed = listedFullTests(allTestRows, uid);
+  const testRows = allTestRows.filter(
+    (r) => testInStream(r.test_stream, stream) && (!isFullTest(r) || listed.has(r.session_id))
+  );
   const sat = new Map<string, number>();
   for (const r of testRows) {
     if (r.section && r.hashed_session_id !== null && !NOT_COMPETENCY.test(r.test_name)) {
@@ -708,9 +758,11 @@ async function loadStudentReport(
     }
   }
   const chapterRows = await getChapterRows(uid, stream, [...sat].map(([id, hash]) => ({ id, hash })));
+  const retests = reportRetests(testRows);
+  const sittings = sittingsFromTests(testRows, retests, stream);
   return {
-    student: { ...journeyRow(student, sittingsFromTests(allTestRows, testRows, stream), cutoffs), results: {} },
+    student: { ...journeyRow(student, sittings, cutoffs), results: {} },
     chapters: shapeChapters(chapterRows, pyq),
-    tests: shapeTests(testRows),
+    tests: shapeTests(testRows, retests, sittingChanges(sittings)),
   };
 }

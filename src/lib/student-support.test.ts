@@ -48,7 +48,6 @@ const ASHA = {
   category: "Gen",
   mode_al: "M2",
   predicted_al: "M1",
-  predicted_pct: "92.5",
 };
 
 const CUTOFFS = [
@@ -70,18 +69,18 @@ describe("getScoreJourney", () => {
         ASHA,
         {
           uid: "102", student_id: null, name: null, gender: null, stream: "Arts", category: null,
-          mode_al: null, predicted_al: null, predicted_pct: null,
+          mode_al: null, predicted_al: null,
         },
       ],
       cutoffs: CUTOFFS,
     });
     cumulative.mockResolvedValue({
       tests: [
-        { session_id: "t1", test_name: "FT 1", start_date: "2026-07-01", stream: "engineering" },
-        { session_id: "t2", test_name: "FT 2", start_date: "2026-08-01", stream: null },
-        { session_id: "t3", test_name: "FT 3", start_date: "2026-08-15", stream: null },
-        { session_id: "t4", test_name: "FT 4", start_date: "2026-09-01", stream: null },
-        { session_id: "t5", test_name: "FT 5", start_date: "2026-09-15", stream: null },
+        { session_id: "t1", test_name: "FT 1", start_date: "2026-07-01", stream: "engineering", course: "JEE Mains" },
+        { session_id: "t2", test_name: "FT 2", start_date: "2026-08-01", stream: null, course: "JEE Mains" },
+        { session_id: "t3", test_name: "FT 3", start_date: "2026-08-15", stream: null, course: "State CET" },
+        { session_id: "t4", test_name: "FT 4", start_date: "2026-09-01", stream: null, course: "JEE Mains" },
+        { session_id: "t5", test_name: "FT 5", start_date: "2026-09-15", stream: null, course: "JEE Mains" },
       ],
       students: [
         {
@@ -136,25 +135,25 @@ describe("getScoreJourney", () => {
       stream: "PCM",
       examStream: "engineering",
       predicted: "M1",
-      predictedPct: 92.5,
       mode: "M2",
       status: "Sliding",
       latestAl: { level: "M1", marks: 200, test: "FT 5" },
       toNext: { kind: "top" },
       // FT 5 has no maximum and FT 4 no marks: the newest score % is FT 3's.
       latestPct: 3.3,
-      // 100, 40, 10 of 300; Not Eligible still has a score.
-      trend: { points: [33.3, 13.3, 3.3], direction: "Declining", slope: -15, recent: 3 },
-      change: { sessionId: "t5", change: 190, previous: "FT 3" },
+      // 100 and 40 of 300; Not Eligible (no level), no marks and no maximum are skipped.
+      trend: { points: [33.3, 13.3], direction: "Declining", slope: -20, recent: 2 },
+      change: { sessionId: "t2", change: -20, previous: "FT 1" },
     });
+    expect("predictedPct" in asha).toBe(false);
     // Every test's raw result, levelled or not.
     expect(Object.keys(asha.results)).toEqual(["t1", "t2", "t3", "t4", "t5"]);
-    expect(asha.results.t2).toEqual({ level: "Not Qualified", marks: 40, max: 300 });
+    expect(asha.results.t2).toEqual({ level: "Not Qualified", marks: 40, max: 300, retest: false });
 
     // No name, no tests; no usable stream reads as engineering.
     expect(other).toMatchObject({
       uid: "102", name: "102", examStream: "engineering", status: null, latestAl: null, latestPct: null,
-      predictedPct: null, toNext: { kind: "none" }, trend: null, change: null, results: {},
+      toNext: { kind: "none" }, trend: null, change: null, results: {},
     });
   });
 
@@ -170,9 +169,9 @@ describe("getScoreJourney", () => {
     ];
     cumulative.mockResolvedValue({
       tests: [
-        { session_id: "jee", test_name: "JEE FT", start_date: "2026-07-01", stream: "engineering" },
-        { session_id: "neet", test_name: "NEET FT", start_date: "2026-07-02", stream: "medical" },
-        { session_id: "any", test_name: "Common FT", start_date: "2026-07-03", stream: null },
+        { session_id: "jee", test_name: "JEE FT", start_date: "2026-07-01", stream: "engineering", course: "JEE Mains" },
+        { session_id: "neet", test_name: "NEET FT", start_date: "2026-07-02", stream: "medical", course: "NEET" },
+        { session_id: "any", test_name: "Common FT", start_date: "2026-07-03", stream: null, course: "JEE Mains" },
       ],
       students: ["101", "103", "104"].map((id) => ({ student_id: id, stream: null, progression: sittings })),
     });
@@ -183,14 +182,15 @@ describe("getScoreJourney", () => {
       examStream: "engineering",
       latestAl: { level: "M2", marks: 100, test: "Common FT" },
       trend: { points: [6.7, 33.3] },
-      change: { change: 80, previous: "JEE FT" },
+      change: { change: 26.7, previous: "JEE FT" },
     };
     expect(byUid["101"]).toMatchObject(engineering);
     // Medical: the NEET paper and the common one.
     expect(byUid["103"]).toMatchObject({
       examStream: "medical",
       trend: { points: [83.3, 33.3] },
-      change: { change: -500, previous: "NEET FT" },
+      // The common paper is a JEE Main paper: no earlier JEE Main sitting.
+      change: null,
     });
     // No usable stream: engineering, as dbt defaults it.
     expect(byUid["104"]).toMatchObject(engineering);
@@ -222,12 +222,12 @@ describe("getScoreJourney", () => {
     expect(data.students[0].latestAl).toEqual({ level: "M1", marks: 200, test: "C" });
   });
 
-  it("marks a retest and leaves it out of Latest AL, the score graph and the change", async () => {
+  it("marks a student's own retest and leaves it out of Latest AL, the score graph and the change", async () => {
     cumulative.mockResolvedValue({
       tests: [
-        { session_id: "r", test_name: "FT 1", start_date: "2026-07-20", stream: null },
-        { session_id: "a", test_name: "FT 1", start_date: "2026-07-01", stream: null },
-        { session_id: "b", test_name: "FT 2", start_date: "2026-07-10", stream: null },
+        { session_id: "r", test_name: "FT 1", start_date: "2026-07-20", stream: null, course: "JEE Mains" },
+        { session_id: "a", test_name: "FT 1", start_date: "2026-07-01", stream: null, course: "JEE Mains" },
+        { session_id: "b", test_name: "FT 2", start_date: "2026-07-10", stream: null, course: "JEE Mains" },
       ],
       students: [
         {
@@ -247,15 +247,76 @@ describe("getScoreJourney", () => {
     // Latest AL is FT 2's Not Qualified, read as M3; 40 marks is 20 short of M2's 60.
     expect(asha.latestAl).toEqual({ level: "M3", marks: 40, test: "FT 2" });
     expect(asha.trend?.points).toEqual([33.3, 13.3]);
-    expect(asha.change).toEqual({ sessionId: "b", change: -60, previous: "FT 1" });
+    expect(asha.change).toEqual({ sessionId: "b", change: -20, previous: "FT 1" });
     // The retest is still a result, for its column; and the newest score.
-    expect(asha.results.r).toEqual({ level: "M1", marks: 200, max: 300 });
+    expect(asha.results.r).toEqual({ level: "M1", marks: 200, max: 300, retest: true });
     expect(asha.latestPct).toBe(66.7);
+  });
+
+  it("counts another batch's sitting of the same test name as a first sitting, not a retest", async () => {
+    warehouse({ students: [ASHA, { ...ASHA, uid: "102" }, { ...ASHA, uid: "103" }], cutoffs: CUTOFFS });
+    const sit = (session_id: string, academic_level: string, marks_scored: number) => ({
+      session_id, academic_level, marks_scored, max_marks_possible: 300,
+    });
+    cumulative.mockResolvedValue({
+      tests: [
+        { session_id: "a", test_name: "Baseline", start_date: "2026-07-01", stream: null, course: "JEE Mains" },
+        { session_id: "b", test_name: "Baseline", start_date: "2026-07-08", stream: null, course: "JEE Mains" },
+        { session_id: "c", test_name: "Retake", start_date: "2026-07-09", stream: null, course: "JEE Mains" },
+        { session_id: "d", test_name: "Retake", start_date: "2026-07-10", stream: null, course: "JEE Mains" },
+      ],
+      students: [
+        // Batch 1 sat on 1 Jul; batch 2 only on 8 Jul.
+        { student_id: "101", progression: [sit("a", "M2", 100), sit("c", "M3", 40), sit("d", "M1", 200)] },
+        { student_id: "102", progression: [sit("b", "M1", 210), sit("c", "M3", 30), sit("d", "M2", 120)] },
+        // Sat both Baseline sessions: their second is a retest.
+        { student_id: "103", progression: [sit("a", "M2", 90), sit("b", "M1", 250)] },
+      ],
+    });
+    const data = await mod.getScoreJourney("70705", 12, "JNV CoE");
+    const byUid = Object.fromEntries(data.students.map((s) => [s.uid, s]));
+    expect(byUid["102"].latestAl).toEqual({ level: "M3", marks: 30, test: "Retake" });
+    expect(byUid["102"].results.b.retest).toBe(false);
+    expect(byUid["103"].latestAl).toEqual({ level: "M2", marks: 90, test: "Baseline" });
+    expect(byUid["103"].results.b.retest).toBe(true);
+    // A column is a Retest only when every sitting in it is one.
+    expect(data.tests.map((t) => [t.sessionId, t.retest])).toEqual([["a", false], ["b", false], ["c", false], ["d", true]]);
+  });
+
+  it("lists only this year's sessions that 20% of the cohort sat; a student's own sittings still count", async () => {
+    const ten = ["101", "102", "103", "104", "105", "106", "107", "108", "109", "110"];
+    warehouse({ students: ten.map((uid) => ({ ...ASHA, uid })), cutoffs: CUTOFFS });
+    const sit = (session_id: string, academic_level: string, marks_scored: number) => ({
+      session_id, academic_level, marks_scored, max_marks_possible: 300,
+    });
+    cumulative.mockResolvedValue({
+      tests: [
+        { session_id: "old", test_name: "AIET 2026", start_date: "2026-02-01", stream: null, course: "JEE Mains" },
+        { session_id: "main", test_name: "FT 1", start_date: "2026-07-01", stream: "engineering", course: "JEE Mains" },
+        { session_id: "rare", test_name: "Makeup", start_date: "2026-07-20", stream: "engineering", course: "JEE Mains" },
+      ],
+      students: ten.map((uid) => ({
+        student_id: uid,
+        progression: [
+          sit("old", "M1", 250),
+          sit("main", "M3", 30),
+          ...(uid === "110" ? [sit("rare", "M2", 120)] : []),
+        ],
+      })),
+    });
+    const data = await mod.getScoreJourney("70705", 12, "JNV CoE");
+    expect(data.tests.map((t) => t.sessionId)).toEqual(["main"]);
+    const byUid = Object.fromEntries(data.students.map((s) => [s.uid, s]));
+    // Last year's AIET is not this year's: not a column, not counted.
+    expect(byUid["101"].latestAl).toEqual({ level: "M3", marks: 30, test: "FT 1" });
+    expect(Object.keys(byUid["101"].results)).toEqual(["main"]);
+    // 1 of 10 sat the makeup: no column, but it is the taker's own latest test.
+    expect(byUid["110"].latestAl).toEqual({ level: "M2", marks: 120, test: "Makeup" });
   });
 
   it("keeps the latest score as a percentage, rounded", async () => {
     cumulative.mockResolvedValue({
-      tests: [],
+      tests: [{ session_id: "t1", test_name: "FT 1", start_date: "2026-07-01", stream: null, course: "JEE Mains" }],
       students: [
         {
           student_id: "101",
@@ -275,6 +336,9 @@ describe("getScoreJourney", () => {
     expect(callsTo("`dim_student`")).toHaveLength(1);
   });
 });
+
+// Ten students sat each test, the report's student (101) among them.
+const TAKERS = ["101", "102", "103", "104", "105", "106", "107", "108", "109", "110"];
 
 // A full test's rows: the overall row plus a row per subject the student sat.
 function testRow(over: Record<string, unknown>) {
@@ -297,6 +361,7 @@ function testRow(over: Record<string, unknown>) {
     academic_level: "M3",
     centre_rank: 5,
     takers: 40,
+    taker_uids: TAKERS,
     ...over,
   };
 }
@@ -353,6 +418,12 @@ const CHAPTER_ROWS = [
   chapterRow({ test_course: "JEE Advanced", n: 3, attempted: 3, correct: 3, marks: 9, max_marks: 9, sessions: ["adv"] }),
 ];
 
+/** Asha's report over these test rows, with no chapter answers. */
+async function reportWith(tests: object[]) {
+  warehouse({ students: [ASHA], cutoffs: CUTOFFS, chapters: [], tests });
+  return (await mod.getStudentReport("70705", 12, "JNV CoE", "101"))!;
+}
+
 describe("getStudentReport", () => {
   beforeEach(() => {
     warehouse({ students: [ASHA], cutoffs: CUTOFFS, tests: TEST_ROWS, chapters: CHAPTER_ROWS });
@@ -404,17 +475,11 @@ describe("getStudentReport", () => {
 
   it("orders same-day tests by session id in the history and the level journey", async () => {
     const day = { start_date: "2026-08-01", hashed_session_id: 20 };
-    warehouse({
-      students: [ASHA],
-      cutoffs: CUTOFFS,
-      chapters: [],
-      tests: [
-        testRow({ ...day, session_id: "s2", test_name: "FT 2", academic_level: "M2", marks_scored: 100 }),
-        testRow({ ...day, session_id: "s3", test_name: "FT 3", academic_level: "M1", marks_scored: 200 }),
-        testRow({ ...day, session_id: "s1", test_name: "FT 1", academic_level: "M3", marks_scored: 30 }),
-      ],
-    });
-    const report = (await mod.getStudentReport("70705", 12, "JNV CoE", "101"))!;
+    const report = await reportWith([
+      testRow({ ...day, session_id: "s2", test_name: "FT 2", academic_level: "M2", marks_scored: 100 }),
+      testRow({ ...day, session_id: "s3", test_name: "FT 3", academic_level: "M1", marks_scored: 200 }),
+      testRow({ ...day, session_id: "s1", test_name: "FT 1", academic_level: "M3", marks_scored: 30 }),
+    ]);
     expect(report.tests.map((t) => t.sessionId)).toEqual(["s3", "s2", "s1"]);
     expect(report.student.latestAl).toEqual({ level: "M1", marks: 200, test: "FT 3" });
     expect(report.student.trend?.points).toEqual([10, 33.3, 66.7]);
@@ -437,7 +502,8 @@ describe("getStudentReport", () => {
       latestPct: 40,
       // Baseline 60, FT A 90, FT B 120 of 300; Advanced and the absence left out.
       trend: { points: [20, 30, 40], direction: "Improving" },
-      change: { sessionId: "b", change: 30, previous: "FT A" },
+      // 40% on FT B vs 30% on FT A: percentage points, not marks.
+      change: { sessionId: "b", change: 10, previous: "FT A" },
       results: {},
     });
     // FT B's 120 is 30 marks short of the M1 cutoff 150: 8 questions.
@@ -447,19 +513,50 @@ describe("getStudentReport", () => {
   });
 
   it("skips a retest of a full test the School sat for the student's Latest AL", async () => {
-    warehouse({
-      students: [ASHA],
-      cutoffs: CUTOFFS,
-      chapters: [],
-      tests: [
-        ...TEST_ROWS,
-        testRow({ session_id: "b2", hashed_session_id: 18, test_name: "FT B", start_date: "2026-08-20",
-          marks_scored: 200, academic_level: "M1" }),
-      ],
-    });
-    const { student } = (await mod.getStudentReport("70705", 12, "JNV CoE", "101"))!;
+    const { student, tests } = await reportWith([
+      ...TEST_ROWS,
+      testRow({ session_id: "b2", hashed_session_id: 18, test_name: "FT B", start_date: "2026-08-20",
+        marks_scored: 200, academic_level: "M1" }),
+    ]);
     expect(student.latestAl).toEqual({ level: "M2", marks: 120, test: "FT B" });
     expect(student.trend?.points).toEqual([20, 30, 40]);
+    // Marked in the history, with no change of its own.
+    expect(tests.find((t) => t.sessionId === "b2")).toMatchObject({ retest: true, change: null });
+  });
+
+  it("counts the student's only sitting of a test the School sat earlier, not as a retest", async () => {
+    const report = await reportWith([
+      // Batch 1 sat FT B on 1 Aug (absent for this student); their batch on 20 Aug.
+      testRow({ session_id: "b", test_name: "FT B", start_date: "2026-08-01", section: null, academic_level: null,
+        taker_uids: TAKERS.slice(1) }),
+      testRow({ session_id: "a", test_name: "FT A", start_date: "2026-07-01" }),
+      testRow({ session_id: "b2", hashed_session_id: 18, test_name: "FT B", start_date: "2026-08-20",
+        marks_scored: 210, academic_level: "M1" }),
+    ]);
+    expect(report.student.latestAl).toEqual({ level: "M1", marks: 210, test: "FT B" });
+    expect(report.student.change).toEqual({ sessionId: "b2", change: 40, previous: "FT A" });
+    expect(report.tests.map((t) => [t.sessionId, t.retest, t.change])).toEqual([
+      ["b2", false, 40],
+      ["b", false, null],
+      ["a", false, null],
+    ]);
+  });
+
+  it("lists only this year's tests that 20% of the cohort or the student sat", async () => {
+    const report = await reportWith([
+      ...TEST_ROWS,
+      // Last year's AIET, tagged this academic year, sat by everyone: dropped.
+      testRow({ session_id: "aiet", hashed_session_id: 30, test_name: "AIET", start_date: "2026-03-01",
+        marks_scored: 290, academic_level: "M1" }),
+      // One of ten sat a makeup, not this student: dropped, no "AB".
+      testRow({ session_id: "mk", hashed_session_id: 31, test_name: "Makeup", start_date: "2026-08-10",
+        section: null, academic_level: null, taker_uids: ["110"] }),
+      // One of ten sat a makeup, this student: listed.
+      testRow({ session_id: "own", hashed_session_id: 32, test_name: "Own makeup", start_date: "2026-08-11",
+        taker_uids: ["101"] }),
+    ]);
+    expect(report.tests.map((t) => t.sessionId)).toEqual(["adv", "c", "own", "b", "a", "base"]);
+    expect(report.student.latestAl?.test).toBe("Own makeup");
   });
 
   it("lists every full test newest first, with absences, subjects A–Z and change per exam", async () => {

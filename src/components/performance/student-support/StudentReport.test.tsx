@@ -18,7 +18,7 @@ function chapter(over: Partial<ChapterRow>): ChapterRow {
 
 function test(over: Partial<TestHistoryRow>): TestHistoryRow {
   return {
-    sessionId: "s", name: "FT", date: "2026-07-01", exam: "JEE Main", absent: false, level: "M2",
+    sessionId: "s", name: "FT", date: "2026-07-01", exam: "JEE Main", absent: false, retest: false, level: "M2",
     rank: null, takers: null, change: null, subjects: [],
     overall: { marks: 90, max: 300, pct: 30, correct: 25, wrong: 10, partial: 0, skipped: 40 },
     ...over,
@@ -28,7 +28,7 @@ function test(over: Partial<TestHistoryRow>): TestHistoryRow {
 const REPORT: StudentReportData = {
   student: {
     uid: "1", studentId: "S1", name: "Asha", gender: "Female", category: null, examStream: "engineering",
-    predicted: "M1", predictedPct: null, mode: "M2", status: "Sliding", latestAl: null,
+    predicted: "M1", mode: "M2", status: "Sliding", latestAl: null,
     toNext: { kind: "none" }, trend: null, change: null, latestPct: null, stream: null, results: {},
   },
   chapters: [
@@ -71,7 +71,7 @@ const REPORT: StudentReportData = {
       subjects: [{ subject: "Maths", marks: 50, max: 100, pct: 50, correct: 12, wrong: 4, partial: 2, skipped: 9 }],
     }),
     test({ sessionId: "c", name: "FT C", date: "2026-07-15", absent: true, overall: null, level: null }),
-    test({ sessionId: "a", name: "FT A", date: "2026-07-01", change: -5 }),
+    test({ sessionId: "a", name: "FT A", date: "2026-07-01", change: -5, retest: true }),
     test({ sessionId: "n", name: "NEET FT", exam: "NEET", overall: { marks: null, max: null, pct: 55, correct: null, wrong: null, partial: null, skipped: null } }),
   ],
 };
@@ -197,6 +197,9 @@ describe("StudentReport", () => {
     expect(history.getByText("+10")).toBeInTheDocument();
     expect(history.getByText("-5")).toHaveClass("text-danger");
     expect(history.getByText("3 / 40")).toBeInTheDocument();
+    // Only the student's own retest is marked.
+    expect(history.getAllByText("· Retest")).toHaveLength(1);
+    expect(history.getByText("· Retest").closest("tr")).toHaveTextContent("FT A");
 
     const testB = history.getByText(/FT B/).closest("tr")!;
     expect(history.queryByText("Maths")).not.toBeInTheDocument();

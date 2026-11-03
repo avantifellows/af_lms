@@ -15,7 +15,6 @@ function student(over: Partial<ScoreJourneyRow>): ScoreJourneyRow {
     stream: null,
     examStream: "engineering",
     predicted: null,
-    predictedPct: null,
     mode: null,
     status: null,
     latestAl: null,
@@ -38,15 +37,15 @@ const JOURNEY: ScoreJourneyData = {
   students: [
     student({
       uid: "1", studentId: "S1", name: "Asha", gender: "Female", category: "Gen", stream: "PCM",
-      predicted: "M1", predictedPct: 92.5, mode: "M2", status: "Sliding", latestPct: 33.3,
+      predicted: "M1", mode: "M2", status: "Sliding", latestPct: 33.3,
       latestAl: { level: "M2", marks: 150, test: "Common FT" },
       toNext: { kind: "count", questions: 0, gap: 0, cutoff: 150, nextLevel: "M1", test: "Common FT", marks: 150 },
       trend: { points: [33.3, 50], direction: "Improving", slope: 16.7, recent: 2 },
-      change: { sessionId: "t2", change: 50, previous: "FT 1" },
+      change: { sessionId: "t2", change: 16.7, previous: "FT 1" },
       results: {
-        t1: { level: "M2", marks: 100, max: 300 },
-        t2: { level: "Not Qualified", marks: 150, max: 300 },
-        t4: { level: "M1", marks: 200, max: 300 },
+        t1: { level: "M2", marks: 100, max: 300, retest: false },
+        t2: { level: "Not Qualified", marks: 150, max: 300, retest: false },
+        t4: { level: "M1", marks: 200, max: 300, retest: true },
       },
     }),
     student({
@@ -80,6 +79,13 @@ function renderJourney(props: Partial<React.ComponentProps<typeof ScoreJourney>>
   const onOpenStudent = vi.fn();
   render(<ScoreJourney schoolUdise="70705" grade={12} program="JNV CoE" onOpenStudent={onOpenStudent} {...props} />);
   return onOpenStudent;
+}
+
+/** The default journey, loaded. */
+async function showJourney() {
+  mockFetch({ journey: ready(JOURNEY) });
+  renderJourney();
+  await screen.findByText("JEE (Engineering)");
 }
 
 const rowOf = (name: string) => screen.getByRole("button", { name }).closest("tr")!;
@@ -193,9 +199,7 @@ describe("ScoreJourney", () => {
   });
 
   it("filters by gender, and counts statuses over the students shown", async () => {
-    mockFetch({ journey: ready(JOURNEY) });
-    renderJourney();
-    await screen.findByText("JEE (Engineering)");
+    await showJourney();
     await userEvent.click(screen.getByRole("button", { name: "Boys" }));
     expect(shownNames()).toEqual(["Bala", "Dev"]);
     expect(screen.getByRole("button", { name: "Improving 0" })).toBeInTheDocument();
@@ -203,9 +207,7 @@ describe("ScoreJourney", () => {
   });
 
   it("sorts within each Mode AL group by the column clicked, toggling direction", async () => {
-    mockFetch({ journey: ready(JOURNEY) });
-    renderJourney();
-    await screen.findByText("JEE (Engineering)");
+    await showJourney();
     const [jee] = screen.getAllByRole("table");
 
     await userEvent.click(within(jee).getByRole("button", { name: "Score graph" }));
@@ -224,9 +226,7 @@ describe("ScoreJourney", () => {
   });
 
   it("adds a column per test of the section's stream, newest first, with marks, level and the latest change", async () => {
-    mockFetch({ journey: ready(JOURNEY) });
-    renderJourney();
-    await screen.findByText("JEE (Engineering)");
+    await showJourney();
     const [jee, neet] = screen.getAllByRole("table");
     expect(within(jee).getByTitle("Common FT · out of 300")).toBeInTheDocument();
     expect(within(jee).queryByText("NEET FT")).not.toBeInTheDocument();
@@ -235,28 +235,29 @@ describe("ScoreJourney", () => {
     expect(within(neet).getByText("soon")).toBeInTheDocument();
 
     const cells = within(rowOf("Asha")).getAllByRole("cell").slice(11);
-    expect(cells.map((c) => c.textContent)).toEqual(["200M1", "150NQ▲ 50.0", "100M2"]);
-    // The change is on the latest non-retest sitting, against the previous one.
+    expect(cells.map((c) => c.textContent)).toEqual(["200M1R", "150NQ▲ 16.7%", "100M2"]);
+    // The change (in score % points) is on the latest non-retest sitting, against the previous one.
     expect(within(cells[1]).getByTitle("vs FT 1")).toHaveClass("text-success");
     // Bala sat none of them.
     expect(within(rowOf("Bala")).getAllByText("AB")).toHaveLength(3);
   });
 
   it("marks a retest column, which is shown but not counted", async () => {
-    mockFetch({ journey: ready(JOURNEY) });
-    renderJourney();
-    await screen.findByText("JEE (Engineering)");
+    await showJourney();
     const [jee] = screen.getAllByRole("table");
-    const retest = within(jee).getByTitle("Retest — not counted in status or trend. FT 1 · out of 300");
+    const title = "Retest — not counted in Latest AL, the score graph or the change.";
+    const retest = within(jee).getByTitle(`${title} FT 1 · out of 300`);
     expect(retest).toHaveTextContent("Retest");
     expect(retest).toHaveClass("text-accent");
     expect(within(jee).getByTitle("FT 1 · out of 300")).not.toHaveTextContent("Retest");
+    // The student's own retest sitting is marked R; their first sitting isn't.
+    const cells = within(rowOf("Asha")).getAllByRole("cell").slice(11);
+    expect(within(cells[0]).getByTitle(title)).toHaveTextContent("R");
+    expect(within(cells[2]).queryByTitle(title)).not.toBeInTheDocument();
   });
 
   it("draws a score graph coloured by direction, with an accessible label", async () => {
-    mockFetch({ journey: ready(JOURNEY) });
-    renderJourney();
-    await screen.findByText("JEE (Engineering)");
+    await showJourney();
     const improving = within(rowOf("Asha")).getByRole("img", { name: "Score trend: Improving over the last 2 tests" });
     expect(improving).toHaveClass("text-success");
     expect(improving.querySelectorAll("circle")).toHaveLength(2);
@@ -297,9 +298,7 @@ describe("ScoreJourney", () => {
   });
 
   it("says so when no student matches the filters, and clears both", async () => {
-    mockFetch({ journey: ready(JOURNEY) });
-    renderJourney();
-    await screen.findByText("JEE (Engineering)");
+    await showJourney();
     await userEvent.click(screen.getByRole("button", { name: "Boys" }));
     await userEvent.click(screen.getByRole("button", { name: "Sliding 0" }));
     expect(screen.getByText(/No students match these filters/)).toBeInTheDocument();

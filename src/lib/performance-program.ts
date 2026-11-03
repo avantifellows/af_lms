@@ -4,6 +4,7 @@ import {
   PROGRAM_ID_TO_LABEL,
   isPmuRole,
 } from "@/lib/constants";
+import { type UserPermission, getProgramContextSync } from "@/lib/permissions";
 
 type PerformanceProgram =
   | { ok: true; program: string | undefined }
@@ -33,18 +34,18 @@ export function resolvePerformanceProgram(
 /**
  * The Performance programs (BigQuery `student_program` labels) a caller may
  * read: "all" for admins (read-only too) and a caller with no permission row,
- * the pinned JNV NVS for PMU roles, else the labels of the row's program_ids.
- * The same filter the grades route applies to the programs it offers (which
- * MCP's program guard reads): keep the two in step.
+ * the pinned JNV NVS for PMU roles, else the labels of the programs
+ * getProgramContextSync gives them: their program_ids plus the program of
+ * each centre seat, so a teacher whose access comes only from their seat can
+ * read their centre's program. (The grades route still offers only the
+ * program_ids' programs, so MCP's program guard is narrower for them.)
  */
-export function performancePrograms(
-  permission: { role: string; program_ids?: number[] | null } | null | undefined,
-): "all" | Set<string> {
+export function performancePrograms(permission: UserPermission | null | undefined): "all" | Set<string> {
   if (!permission || permission.role === "admin") return "all";
   if (isPmuRole(permission.role)) return new Set([PROGRAM_ID_TO_LABEL[PMU_PROGRAM_ID]]);
   return new Set(
-    (permission.program_ids ?? [])
-      .map((id) => PROGRAM_ID_TO_LABEL[id])
+    getProgramContextSync(permission)
+      .programIds.map((id) => PROGRAM_ID_TO_LABEL[id])
       .filter((label): label is string => Boolean(label)),
   );
 }

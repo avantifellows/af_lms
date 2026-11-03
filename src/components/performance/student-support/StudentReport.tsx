@@ -218,6 +218,11 @@ function TestRow({ t }: { t: TestHistoryRow }) {
           >
             <span className="mr-1 text-text-muted" aria-hidden="true">{open ? "▾" : "▸"}</span>
             <span className="text-xs text-text-muted tabular-nums">{t.date}</span> · {t.name}
+            {t.retest && (
+              <span className="ml-1 text-xs font-semibold text-accent" title="Retest — not counted in Latest AL, the score graph or the change">
+                · Retest
+              </span>
+            )}
           </button>
         </td>
         <td className="px-3 py-2"><LevelChip level={t.level} /></td>
@@ -287,24 +292,41 @@ function examChoices(chapters: ExamChapters[], tests: TestHistoryRow[]): { exam:
   return choices;
 }
 
-export default function StudentReport({ schoolUdise, grade, program, uid, onBack }: Props) {
+function ReportHeader({ student }: { student: StudentReportData["student"] }) {
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-bg-card p-4">
+      <div className="mr-4">
+        <div className="text-lg font-bold">{student.name}</div>
+        <div className="text-xs text-text-muted">
+          {[student.studentId, student.gender, student.category].filter(Boolean).join(" · ")}
+        </div>
+      </div>
+      <span className="text-xs text-text-muted">Predicted</span> <LevelChip level={student.predicted} />
+      <span className="text-xs text-text-muted">Mode</span> <LevelChip level={student.mode} />
+      <StatusChip status={student.status} />
+    </div>
+  );
+}
+
+function ChapterSections({ examData, subjectData }: { examData: ExamChapters | undefined; subjectData: SubjectChapters | undefined }) {
+  if (!examData) return <PerformanceNotice>No chapter data for this student yet.</PerformanceNotice>;
+  if (!subjectData) return null;
+  return (
+    <>
+      <Section title="Focus chapters · self-prep plan" open>
+        <FocusCards subject={subjectData} />
+      </Section>
+      <Section title="Detailed chapter competency map">
+        <ChapterMap key={`${examData.exam}|${subjectData.subject}`} subject={subjectData} />
+      </Section>
+    </>
+  );
+}
+
+function ReportBody({ data }: { data: StudentReportData }) {
   const [exam, setExam] = useState<string | null>(null);
   const [subject, setSubject] = useState<string | null>(null);
-  const qs = new URLSearchParams({ grade: String(grade), program, student: uid });
-  const state = useJsonFetch<StudentReportData>(
-    `/api/quiz-analytics/${schoolUdise}/student-report?${qs}`,
-    "Failed to load the student report"
-  );
-
-  const back = (
-    <button type="button" onClick={onBack} className="text-sm text-accent hover:underline">
-      ← Score journey
-    </button>
-  );
-  if (state.status === "loading") return <div className="space-y-2">{back}<PerformanceNotice>Loading the report…</PerformanceNotice></div>;
-  if (state.status === "error") return <div className="space-y-2">{back}<PerformanceNotice>{state.message}</PerformanceNotice></div>;
-
-  const { student, chapters, tests } = state.data;
+  const { student, chapters, tests } = data;
   const choices = examChoices(chapters, tests);
   const selected = choices.find((c) => c.exam === exam) ?? choices[0];
   const examData = chapters.find((e) => e.exam === selected?.exam);
@@ -312,19 +334,8 @@ export default function StudentReport({ schoolUdise, grade, program, uid, onBack
   const examTests = selected ? tests.filter((t) => (t.exam ?? OTHER_EXAM) === selected.exam) : tests;
 
   return (
-    <div className="space-y-4">
-      {back}
-      <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-bg-card p-4">
-        <div className="mr-4">
-          <div className="text-lg font-bold">{student.name}</div>
-          <div className="text-xs text-text-muted">
-            {[student.studentId, student.gender, student.category].filter(Boolean).join(" · ")}
-          </div>
-        </div>
-        <span className="text-xs text-text-muted">Predicted</span> <LevelChip level={student.predicted} />
-        <span className="text-xs text-text-muted">Mode</span> <LevelChip level={student.mode} />
-        <StatusChip status={student.status} />
-      </div>
+    <>
+      <ReportHeader student={student} />
 
       {(choices.length > 1 || examData) && (
         <div className="flex flex-wrap gap-x-6 gap-y-2">
@@ -349,24 +360,30 @@ export default function StudentReport({ schoolUdise, grade, program, uid, onBack
           )}
         </div>
       )}
-      {examData ? (
-        subjectData && (
-          <>
-            <Section title="Focus chapters · self-prep plan" open>
-              <FocusCards subject={subjectData} />
-            </Section>
-            <Section title="Detailed chapter competency map">
-              <ChapterMap key={`${examData.exam}|${subjectData.subject}`} subject={subjectData} />
-            </Section>
-          </>
-        )
-      ) : (
-        <PerformanceNotice>No chapter data for this student yet.</PerformanceNotice>
-      )}
+      <ChapterSections examData={examData} subjectData={subjectData} />
 
       <Section title={`Detailed full test scores${selected ? ` · ${selected.exam}` : ""}`}>
         <TestHistory tests={examTests} />
       </Section>
+    </>
+  );
+}
+
+export default function StudentReport({ schoolUdise, grade, program, uid, onBack }: Props) {
+  const qs = new URLSearchParams({ grade: String(grade), program, student: uid });
+  const state = useJsonFetch<StudentReportData>(
+    `/api/quiz-analytics/${schoolUdise}/student-report?${qs}`,
+    "Failed to load the student report"
+  );
+
+  return (
+    <div className="space-y-4">
+      <button type="button" onClick={onBack} className="text-sm text-accent hover:underline">
+        ← Score journey
+      </button>
+      {state.status === "loading" && <PerformanceNotice>Loading the report…</PerformanceNotice>}
+      {state.status === "error" && <PerformanceNotice>{state.message}</PerformanceNotice>}
+      {state.status === "ready" && <ReportBody data={state.data} />}
     </div>
   );
 }
