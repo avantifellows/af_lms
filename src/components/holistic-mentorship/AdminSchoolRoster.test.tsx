@@ -100,9 +100,10 @@ const wholeSchoolSummary = {
   unassigned: 2,
   activeMentors: 2,
   coveragePercentage: 66.7,
+  // Progress counts cover assigned Students only: 2 + 1 + 1 = 4 Assigned.
   completed: 2,
-  pending: 2,
-  noActivePhase: 2,
+  pending: 1,
+  noActivePhase: 1,
 };
 
 // A server summary no derivation from `coverageStudents` can produce, so a
@@ -162,9 +163,12 @@ describe("AdminSchoolRoster", () => {
     expect(screen.getByText("50.0%")).toBeInTheDocument();
     expect(screen.getByText("Anita Mentor")).toBeInTheDocument();
     const table = within(screen.getByRole("region", { name: "School mentorship coverage" }));
-    expect(table.getAllByText("Pending")).toHaveLength(2);
+    expect(table.getAllByText("Pending")).toHaveLength(1);
     expect(table.queryByText("Draft saved")).not.toBeInTheDocument();
-    expect(table.getByText("Unassigned")).toBeInTheDocument();
+    // Ravi has no Mentor: "Unassigned" in both the Mentor and Progress columns.
+    const raviCells = within(table.getByText("Ravi Shah").closest("tr")!).getAllByRole("cell");
+    expect(raviCells[2]).toHaveTextContent("Unassigned");
+    expect(raviCells[3]).toHaveTextContent("Unassigned");
     expect(screen.getByRole("link", { name: "Open Asha Rao" })).toHaveAttribute(
       "href",
       "/holistic-mentorship/students/41/phases/73?school_code=SCH001&academic_year=2026-2027&program_id=1&source=school"
@@ -233,22 +237,13 @@ describe("AdminSchoolRoster", () => {
     expect(screen.getByText("Ishaan Kumar")).toBeInTheDocument();
     expect(screen.queryByText("Asha Rao")).not.toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("Showing 3 of 6 Students");
-    expectSummaryMetrics({
-      eligible: 3,
-      assigned: 1,
-      unassigned: 2,
-      activeMentors: 1,
-      coveragePercentage: 33.3,
-      completed: 1,
-      pending: 1,
-      noActivePhase: 1,
-    });
+    expectSummaryMetrics({ eligible: 3, assigned: 1, unassigned: 2, activeMentors: 1, coveragePercentage: 33.3, completed: 1, pending: 0, noActivePhase: 0 });
   });
 
-  it("derives every summary metric from assignment-filtered rows", () => {
+  it("derives every summary metric from Unassigned rows", () => {
     render(<AdminSchoolRoster students={coverageStudents} schoolCode="SCH001" summary={wholeSchoolSummary} />);
 
-    fireEvent.change(screen.getByRole("combobox", { name: "Filter by Assignment" }), {
+    fireEvent.change(screen.getByRole("combobox", { name: "Filter by Progress" }), {
       target: { value: "unassigned" },
     });
 
@@ -256,7 +251,7 @@ describe("AdminSchoolRoster", () => {
     expect(screen.getByText("Ishaan Kumar")).toBeInTheDocument();
     expect(screen.queryByText("Asha Rao")).not.toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("Showing 2 of 6 Students");
-    expectSummaryMetrics({ eligible: 2, assigned: 0, unassigned: 2, activeMentors: 0, coveragePercentage: 0, completed: 0, pending: 1, noActivePhase: 1 });
+    expectSummaryMetrics({ eligible: 2, assigned: 0, unassigned: 2, activeMentors: 0, coveragePercentage: 0, completed: 0, pending: 0, noActivePhase: 0 });
   });
 
   it("derives every summary metric from search-filtered rows", () => {
@@ -302,7 +297,7 @@ describe("AdminSchoolRoster", () => {
     });
   });
 
-  it("derives the summary from search, grade and assignment together", () => {
+  it("derives the summary from search, grade and All Assigned together", () => {
     render(<AdminSchoolRoster students={coverageStudents} schoolCode="SCH001" summary={wholeSchoolSummary} />);
 
     fireEvent.change(screen.getByRole("textbox", { name: "Search Students" }), {
@@ -311,7 +306,7 @@ describe("AdminSchoolRoster", () => {
     fireEvent.change(screen.getByRole("combobox", { name: "Filter by Grade" }), {
       target: { value: "12" },
     });
-    fireEvent.change(screen.getByRole("combobox", { name: "Filter by Assignment" }), {
+    fireEvent.change(screen.getByRole("combobox", { name: "Filter by Progress" }), {
       target: { value: "assigned" },
     });
 
@@ -598,32 +593,63 @@ describe("AdminSchoolRoster", () => {
     expectSummaryMetrics({ eligible: 2, assigned: 2, unassigned: 0, activeMentors: 1, coveragePercentage: 100, completed: 1, pending: 1, noActivePhase: 0 });
   });
 
-  it("filters by Progress to match the badge, including unassigned Students with an active Phase", () => {
+  it("offers Students & Progress's Progress options, in its order, without Skipped", () => {
+    render(<AdminSchoolRoster students={coverageStudents} schoolCode="SCH001" />);
+    const progressFilter = screen.getByRole("combobox", { name: "Filter by Progress" });
+
+    expect(within(progressFilter).getAllByRole("option").map((option) => [option.getAttribute("value"),
+      option.textContent])).toEqual([
+      ["", "All Students"],
+      ["assigned", "All Assigned"],
+      ["pending", "Pending"],
+      ["completed", "Completed"],
+      ["no_active_phase", "No active phase"],
+      ["unassigned", "Unassigned"],
+    ]);
+    expect(progressFilter).toHaveValue("");
+    expect(screen.queryByRole("combobox", { name: "Filter by Assignment" })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("combobox").map((control) => control.getAttribute("aria-label"))).toEqual([
+      "Filter by Grade", "Filter by Mentor", "Filter by Progress",
+    ]);
+  });
+
+  it("filters by Progress like Students & Progress: an unassigned Student is Unassigned, never Pending", () => {
     render(<AdminSchoolRoster students={coverageStudents} schoolCode="SCH001" summary={wholeSchoolSummary} />);
     const progressFilter = screen.getByRole("combobox", { name: "Filter by Progress" });
-    expect(within(progressFilter).getAllByRole("option").map((option) => option.textContent)).toEqual([
-      "All Progress", "Completed", "Pending", "No active phase",
-    ]);
+    const table = () => within(screen.getByRole("region", { name: "School mentorship coverage" }));
 
+    // Pending, Completed and No active phase are assigned Students only.
     fireEvent.change(progressFilter, { target: { value: "pending" } });
-    const table = within(screen.getByRole("region", { name: "School mentorship coverage" }));
-    expect(table.getAllByRole("row").slice(1).map((row) => within(row).getByText(/^Pending$/))).toHaveLength(2);
-    expect(table.getByText("Ravi Shah")).toBeInTheDocument();
-    expect(table.getByText("Nisha Patel")).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("Showing 2 of 6 Students");
-    expectSummaryMetrics({ eligible: 2, assigned: 1, unassigned: 1, activeMentors: 1, coveragePercentage: 50, completed: 0, pending: 2, noActivePhase: 0 });
+    expect(table().getByText("Nisha Patel")).toBeInTheDocument();
+    expect(table().queryByText("Ravi Shah")).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Showing 1 of 6 Students");
+    expectSummaryMetrics({ eligible: 1, assigned: 1, unassigned: 0, activeMentors: 1, coveragePercentage: 100, completed: 0, pending: 1, noActivePhase: 0 });
 
-    fireEvent.change(progressFilter, { target: { value: "none" } });
-    expect(screen.getByText("Meera Das")).toBeInTheDocument();
-    expect(screen.getByText("Ishaan Kumar")).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("Showing 2 of 6 Students");
-    expectSummaryMetrics({ eligible: 2, assigned: 1, unassigned: 1, activeMentors: 1, coveragePercentage: 50, completed: 0, pending: 0, noActivePhase: 2 });
+    fireEvent.change(progressFilter, { target: { value: "no_active_phase" } });
+    expect(table().getByText("Meera Das")).toBeInTheDocument();
+    expect(table().queryByText("Ishaan Kumar")).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Showing 1 of 6 Students");
+    expectSummaryMetrics({ eligible: 1, assigned: 1, unassigned: 0, activeMentors: 1, coveragePercentage: 100, completed: 0, pending: 0, noActivePhase: 1 });
 
     fireEvent.change(progressFilter, { target: { value: "completed" } });
-    expect(screen.getByText("Asha Rao")).toBeInTheDocument();
-    expect(screen.getByText("Kabir Singh")).toBeInTheDocument();
+    expect(table().getByText("Asha Rao")).toBeInTheDocument();
+    expect(table().getByText("Kabir Singh")).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("Showing 2 of 6 Students");
     expectSummaryMetrics({ eligible: 2, assigned: 2, unassigned: 0, activeMentors: 2, coveragePercentage: 100, completed: 2, pending: 0, noActivePhase: 0 });
+
+    // Unassigned is every Student without a Mentor, whatever their Phase.
+    fireEvent.change(progressFilter, { target: { value: "unassigned" } });
+    expect(screen.getByRole("status")).toHaveTextContent("Showing 2 of 6 Students");
+    for (const name of ["Ravi Shah", "Ishaan Kumar"]) {
+      const cells = within(table().getByText(name).closest("tr")!).getAllByRole("cell");
+      expect(cells[3]).toHaveTextContent(/^Unassigned$/);
+    }
+    expectSummaryMetrics({ eligible: 2, assigned: 0, unassigned: 2, activeMentors: 0, coveragePercentage: 0, completed: 0, pending: 0, noActivePhase: 0 });
+
+    fireEvent.change(progressFilter, { target: { value: "assigned" } });
+    expect(screen.getByRole("status")).toHaveTextContent("Showing 4 of 6 Students");
+    expect(table().queryByText("Ravi Shah")).not.toBeInTheDocument();
+    expectSummaryMetrics({ eligible: 4, assigned: 4, unassigned: 0, activeMentors: 2, coveragePercentage: 100, completed: 2, pending: 1, noActivePhase: 1 });
   });
 
   it("combines every filter, with the summary always describing the rows shown", () => {
@@ -632,8 +658,9 @@ describe("AdminSchoolRoster", () => {
 
     fireEvent.change(screen.getByRole("combobox", { name: "Filter by Grade" }), { target: { value: "11" } });
     fireEvent.change(screen.getByRole("combobox", { name: "Filter by Mentor" }), { target: { value: "9" } });
-    fireEvent.change(screen.getByRole("combobox", { name: "Filter by Progress" }), { target: { value: "none" } });
-    fireEvent.change(screen.getByRole("combobox", { name: "Filter by Assignment" }), { target: { value: "assigned" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Filter by Progress" }), {
+      target: { value: "no_active_phase" },
+    });
 
     expect(screen.getByText("Meera Das")).toBeInTheDocument();
     expect(screen.queryByText("Asha Rao")).not.toBeInTheDocument();
@@ -651,7 +678,6 @@ describe("AdminSchoolRoster", () => {
     fireEvent.change(screen.getByRole("combobox", { name: "Filter by Grade" }), { target: { value: "" } });
     fireEvent.change(screen.getByRole("combobox", { name: "Filter by Mentor" }), { target: { value: "" } });
     fireEvent.change(screen.getByRole("combobox", { name: "Filter by Progress" }), { target: { value: "" } });
-    fireEvent.change(screen.getByRole("combobox", { name: "Filter by Assignment" }), { target: { value: "all" } });
     expect(screen.getByRole("status")).toHaveTextContent("Showing 6 of 6 Students");
     expectSummaryMetrics(serverOnlySummary);
   });
@@ -684,16 +710,16 @@ describe("AdminSchoolRoster", () => {
 
   it("disables Unassigned while a Mentor is selected and resets it when a Mentor is chosen", () => {
     render(<AdminSchoolRoster students={coverageStudents} schoolCode="SCH001" summary={wholeSchoolSummary} />);
-    const assignment = screen.getByRole("combobox", { name: "Filter by Assignment" });
+    const progressFilter = screen.getByRole("combobox", { name: "Filter by Progress" });
     const mentor = screen.getByRole("combobox", { name: "Filter by Mentor" });
-    const unassigned = within(assignment).getByRole("option", { name: /^Unassigned/ });
+    const unassigned = within(progressFilter).getByRole("option", { name: /^Unassigned/ });
 
-    fireEvent.change(assignment, { target: { value: "unassigned" } });
+    fireEvent.change(progressFilter, { target: { value: "unassigned" } });
     expect(screen.getByRole("status")).toHaveTextContent("Showing 2 of 6 Students");
     expect(unassigned).toBeEnabled();
 
     fireEvent.change(mentor, { target: { value: "9" } });
-    expect(assignment).toHaveValue("all");
+    expect(progressFilter).toHaveValue("");
     expect(unassigned).toBeDisabled();
     expect(unassigned).toHaveTextContent("Unassigned (clear Mentor first)");
     expect(screen.getByRole("status")).toHaveTextContent("Showing 2 of 6 Students");
@@ -703,8 +729,14 @@ describe("AdminSchoolRoster", () => {
     fireEvent.change(mentor, { target: { value: "" } });
     expect(unassigned).toBeEnabled();
     expect(unassigned).toHaveTextContent(/^Unassigned$/);
-    expect(assignment).toHaveValue("all");
+    expect(progressFilter).toHaveValue("");
     expect(screen.getByRole("status")).toHaveTextContent("Showing 6 of 6 Students");
+
+    // All Assigned with a Mentor is fine.
+    fireEvent.change(mentor, { target: { value: "10" } });
+    fireEvent.change(progressFilter, { target: { value: "assigned" } });
+    expect(progressFilter).toHaveValue("assigned");
+    expect(screen.getByRole("status")).toHaveTextContent("Showing 2 of 6 Students");
   });
 
   it("shows a visible Showing count as a live status", () => {
@@ -721,26 +753,38 @@ describe("AdminSchoolRoster", () => {
   it("restores every filter from the URL", () => {
     window.history.replaceState(null, "",
       "/school/SCH001?tab=holistic_mentorship&program_id=1&hm_search=Kabir&hm_grade=12&hm_mentor=10" +
-      "&hm_progress=completed&hm_assignment=assigned");
+      "&hm_progress=completed");
     render(<AdminSchoolRoster students={coverageStudents} schoolCode="SCH001" summary={wholeSchoolSummary} />);
 
     expect(screen.getByRole("textbox", { name: "Search Students" })).toHaveValue("Kabir");
     expect(screen.getByRole("combobox", { name: "Filter by Grade" })).toHaveValue("12");
     expect(screen.getByRole("combobox", { name: "Filter by Mentor" })).toHaveValue("10");
     expect(screen.getByRole("combobox", { name: "Filter by Progress" })).toHaveValue("completed");
-    expect(screen.getByRole("combobox", { name: "Filter by Assignment" })).toHaveValue("assigned");
     expect(screen.getByRole("status")).toHaveTextContent("Showing 1 of 6 Students");
     expect(screen.getByRole("link", { name: "Open Kabir Singh" })).toHaveAttribute(
       "href",
       "/holistic-mentorship/students/44/phases/75?school_code=SCH001&academic_year=2026-2027&program_id=1" +
-        "&source=school&hm_search=Kabir&hm_grade=12&hm_mentor=10&hm_progress=completed&hm_assignment=assigned",
+        "&source=school&hm_search=Kabir&hm_grade=12&hm_mentor=10&hm_progress=completed",
     );
   });
 
   it.each([
-    "hm_grade=13&hm_progress=started&hm_assignment=nobody&hm_mentor=abc",
+    ["assigned", 4], ["pending", 1], ["completed", 2], ["no_active_phase", 1], ["unassigned", 2],
+  ])("restores hm_progress=%s from the URL", (value, count) => {
+    window.history.replaceState(null, "", `/school/SCH001?hm_progress=${value}`);
+    render(<AdminSchoolRoster students={coverageStudents} schoolCode="SCH001" />);
+
+    expect(screen.getByRole("combobox", { name: "Filter by Progress" })).toHaveValue(value);
+    expect(screen.getByRole("status")).toHaveTextContent(`Showing ${count} of 6 Students`);
+  });
+
+  it.each([
+    "hm_grade=13&hm_progress=started&hm_mentor=abc",
     "hm_mentor=999",
     "hm_mentor=-9&hm_grade=&hm_progress=",
+    "hm_progress=none",
+    "hm_progress=skipped",
+    "hm_assignment=unassigned",
   ])("falls back to defaults for invalid URL filters (%s)", (query) => {
     window.history.replaceState(null, "", `/school/SCH001?tab=holistic_mentorship&${query}`);
     render(<AdminSchoolRoster students={coverageStudents} schoolCode="SCH001" summary={serverOnlySummary} />);
@@ -748,23 +792,24 @@ describe("AdminSchoolRoster", () => {
     expect(screen.getByRole("combobox", { name: "Filter by Grade" })).toHaveValue("");
     expect(screen.getByRole("combobox", { name: "Filter by Mentor" })).toHaveValue("");
     expect(screen.getByRole("combobox", { name: "Filter by Progress" })).toHaveValue("");
-    expect(screen.getByRole("combobox", { name: "Filter by Assignment" })).toHaveValue("all");
     expect(screen.getByRole("status")).toHaveTextContent("Showing 6 of 6 Students");
     expectSummaryMetrics(serverOnlySummary);
   });
 
   it("drops a URL Unassigned filter that conflicts with a URL Mentor", async () => {
-    window.history.replaceState(null, "", "/school/SCH001?tab=holistic_mentorship&hm_mentor=9&hm_assignment=unassigned");
+    window.history.replaceState(null, "", "/school/SCH001?tab=holistic_mentorship&hm_mentor=9&hm_progress=unassigned");
     render(<AdminSchoolRoster students={coverageStudents} schoolCode="SCH001" summary={wholeSchoolSummary} />);
 
     expect(screen.getByRole("combobox", { name: "Filter by Mentor" })).toHaveValue("9");
-    expect(screen.getByRole("combobox", { name: "Filter by Assignment" })).toHaveValue("all");
+    expect(screen.getByRole("combobox", { name: "Filter by Progress" })).toHaveValue("");
     expect(screen.getByRole("status")).toHaveTextContent("Showing 2 of 6 Students");
     await waitFor(() => expect(window.location.search).toBe("?tab=holistic_mentorship&hm_mentor=9"));
   });
 
   it("writes filters to the URL in place, keeping other params and omitting defaults", async () => {
-    window.history.replaceState(null, "", "/school/SCH001?tab=holistic_mentorship&program_id=78&grade=9#coverage");
+    // A retired hm_assignment is dropped on the first write.
+    window.history.replaceState(null, "",
+      "/school/SCH001?tab=holistic_mentorship&program_id=78&grade=9&hm_assignment=assigned#coverage");
     const replaceState = vi.spyOn(window.history, "replaceState");
     const pushState = vi.spyOn(window.history, "pushState");
     render(<AdminSchoolRoster students={coverageStudents} schoolCode="SCH001" programId={78} />);
@@ -805,14 +850,14 @@ describe("AdminSchoolRoster", () => {
     render(<AdminSchoolRoster students={coverageStudents} schoolCode="SCH001" centreId={30} />);
 
     fireEvent.change(screen.getByRole("combobox", { name: "Filter by Grade" }), { target: { value: "12" } });
-    fireEvent.change(screen.getByRole("combobox", { name: "Filter by Assignment" }), {
+    fireEvent.change(screen.getByRole("combobox", { name: "Filter by Progress" }), {
       target: { value: "unassigned" },
     });
 
     expect(screen.getByRole("link", { name: "Open Ravi Shah" })).toHaveAttribute(
       "href",
       "/holistic-mentorship/students/42/phases/74?school_code=SCH001&academic_year=2026-2027&program_id=1" +
-        "&source=school&centre_id=30&hm_grade=12&hm_assignment=unassigned",
+        "&source=school&centre_id=30&hm_grade=12&hm_progress=unassigned",
     );
   });
 

@@ -64,12 +64,19 @@ source. Phase links and locked-phase redirects preserve it, and the Student Back
 link restores `source=progress` on the School URL. Ordinary School drill-downs
 retain `source=school`, so their original dashboard return does not change.
 
-School Assignment Coverage filters (Search, Grade, Mentor, Progress, Assignment;
-issue #491) narrow the table and the 8 summary cards together. With any filter
+School Assignment Coverage filters (Search, Grade, Mentor, Progress; issue #491)
+narrow the table and the 8 summary cards together. Progress uses Students &
+Progress's options and value strings, minus Skipped: All Students (`""`),
+`assigned`, `pending`, `completed`, `no_active_phase`, `unassigned`. Pending,
+Completed and No active phase mean assigned Students only. Unassigned means no
+active Mapping, whatever the Phase. The matching cards, both `derivedSummary` and
+the `getHolisticAssignmentCoverageSummary` SQL, count assigned Students only, so
+Completed + Pending + No active phase = Assigned. With any filter
 active, the cards are derived from exactly the rows shown, the same set as
 "Showing N of M Students". With none active, they use the server summary. The
-filters live in the School/Centre URL as `hm_search`, `hm_grade`, `hm_mentor`,
-`hm_progress` and `hm_assignment` (`src/lib/holistic-coverage-filters.ts`). The
+filters live in the School/Centre URL as `hm_search`, `hm_grade`, `hm_mentor` and
+`hm_progress` (`src/lib/holistic-coverage-filters.ts`). Any other `hm_` param, such
+as the retired `hm_assignment`, is ignored and dropped on the next write. The
 prefix keeps them clear of the page's other params (`tab`, `program_id`, `source`,
 Enrollment's `grade`/`stream`, and so on). Defaults are omitted, invalid values read
 as defaults, and a Mentor that is no longer in the roster reads as All Mentors. The

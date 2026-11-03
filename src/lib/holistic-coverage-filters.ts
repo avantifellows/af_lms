@@ -5,16 +5,27 @@
 // stream, students, curriculum, flag, view, q, page, ...). Defaults are omitted
 // and invalid values read as defaults. Client-safe: no server-only imports.
 
-export type CoverageAssignment = "all" | "assigned" | "unassigned";
-export type CoverageProgress = "completed" | "pending" | "none";
+/**
+ * Progress filter values, in Students & Progress's order and with its value
+ * strings ("" is All Students). Pending, Completed and No active phase are
+ * assigned Students only; Unassigned is every Student without a Mentor.
+ */
+const COVERAGE_PROGRESS_VALUES = [
+  "assigned",
+  "pending",
+  "completed",
+  "no_active_phase",
+  "unassigned",
+] as const;
+export type CoverageProgress = typeof COVERAGE_PROGRESS_VALUES[number];
 
 export type CoverageFilters = {
   search: string;
   grade: "" | "11" | "12";
   /** A Mentor's user ID, or "" for All Mentors. */
   mentor: string;
+  /** "" is All Students. */
   progress: "" | CoverageProgress;
-  assignment: CoverageAssignment;
 };
 
 export const DEFAULT_COVERAGE_FILTERS: CoverageFilters = {
@@ -22,7 +33,6 @@ export const DEFAULT_COVERAGE_FILTERS: CoverageFilters = {
   grade: "",
   mentor: "",
   progress: "",
-  assignment: "all",
 };
 
 const FILTER_PARAMS: Record<keyof CoverageFilters, string> = {
@@ -30,8 +40,8 @@ const FILTER_PARAMS: Record<keyof CoverageFilters, string> = {
   grade: "hm_grade",
   mentor: "hm_mentor",
   progress: "hm_progress",
-  assignment: "hm_assignment",
 };
+const FILTER_PREFIX = "hm_";
 
 const CENTRE_PARAM = "centre_id";
 /** The longest search the URL keeps; the search input uses the same limit. */
@@ -53,8 +63,7 @@ export function readCoverageFilters(params: ParamReader): CoverageFilters {
     search: (params.get(FILTER_PARAMS.search) ?? "").slice(0, MAX_COVERAGE_SEARCH_LENGTH),
     grade: oneOf(params.get(FILTER_PARAMS.grade), ["11", "12"] as const, ""),
     mentor: positiveId(params.get(FILTER_PARAMS.mentor)),
-    progress: oneOf(params.get(FILTER_PARAMS.progress), ["completed", "pending", "none"] as const, ""),
-    assignment: oneOf(params.get(FILTER_PARAMS.assignment), ["assigned", "unassigned"] as const, "all"),
+    progress: oneOf(params.get(FILTER_PARAMS.progress), COVERAGE_PROGRESS_VALUES, ""),
   };
 }
 
@@ -65,16 +74,15 @@ function isDefaultFilter(filters: CoverageFilters, key: keyof CoverageFilters) {
   return filters[key] === DEFAULT_COVERAGE_FILTERS[key];
 }
 
-const FILTER_PARAM_NAMES = new Set(Object.values(FILTER_PARAMS));
-
 /**
  * Which page a URL is, for the coverage filters: the path and every param
- * except the filters and the School tab (switching tabs stays on the page).
- * A different Centre, `program_id` or Program choice screen is another page.
+ * except `hm_` ones (filters, current or retired) and the School tab
+ * (switching tabs stays on the page). A different Centre, `program_id` or
+ * Program choice screen is another page.
  */
 export function coveragePageKey(pathname: string, params: Iterable<[string, string]>) {
   const rest = [...params]
-    .filter(([name]) => name !== "tab" && !FILTER_PARAM_NAMES.has(name))
+    .filter(([name]) => name !== "tab" && !name.startsWith(FILTER_PREFIX))
     .map(([name, value]) => `${encodeURIComponent(name)}=${encodeURIComponent(value)}`)
     .sort();
   return `${pathname}?${rest.join("&")}`;
@@ -86,8 +94,15 @@ export function hasActiveCoverageFilters(filters: CoverageFilters) {
     .some((key) => !isDefaultFilter(filters, key));
 }
 
-/** Sets the non-default filters on `params` and removes the default ones. */
+/**
+ * Sets the non-default filters on `params` and removes the default ones, and
+ * any other `hm_` param (e.g. the retired `hm_assignment`).
+ */
 export function writeCoverageFilters(params: URLSearchParams, filters: CoverageFilters) {
+  const known = new Set(Object.values(FILTER_PARAMS));
+  for (const name of [...params.keys()]) {
+    if (name.startsWith(FILTER_PREFIX) && !known.has(name)) params.delete(name);
+  }
   for (const key of Object.keys(FILTER_PARAMS) as Array<keyof CoverageFilters>) {
     if (isDefaultFilter(filters, key)) params.delete(FILTER_PARAMS[key]);
     else params.set(FILTER_PARAMS[key], filters[key]);

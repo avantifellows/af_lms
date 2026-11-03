@@ -411,12 +411,12 @@ describe("StudentPhasePage", () => {
     coverageAdmin();
 
     render(await StudentPhasePage(coverageProps({
-      source: "school", centre_id: "30", hm_search: "Asha Rao", hm_assignment: "assigned",
+      source: "school", centre_id: "30", hm_search: "Asha Rao", hm_progress: "assigned",
     })));
 
     expect(screen.getByRole("link", { name: "Back to Assignment Coverage" })).toHaveAttribute(
       "href",
-      "/centre/30?tab=holistic_mentorship&hm_search=Asha+Rao&hm_assignment=assigned",
+      "/centre/30?tab=holistic_mentorship&hm_search=Asha+Rao&hm_progress=assigned",
     );
   });
 
@@ -431,11 +431,12 @@ describe("StudentPhasePage", () => {
       hm_progress: "started",
       hm_assignment: "unassigned",
       hm_other: "x",
+      hm_search: "Ravi",
     })));
 
     expect(screen.getByRole("link", { name: "Back to Assignment Coverage" })).toHaveAttribute(
       "href",
-      "/school/SCH001?tab=holistic_mentorship&program_id=78&hm_assignment=unassigned",
+      "/school/SCH001?tab=holistic_mentorship&program_id=78&hm_search=Ravi",
     );
   });
 
@@ -472,7 +473,7 @@ describe("StudentPhasePage", () => {
       selectedPhase: { phaseId: 73, number: 1, title: "Locked", locked: true },
     });
 
-    await expect(StudentPhasePage(coverageProps({ source: "school", centre_id: "30", hm_progress: "none" })))
-      .rejects.toThrow("REDIRECT:/centre/30?tab=holistic_mentorship&hm_progress=none");
+    await expect(StudentPhasePage(coverageProps({ source: "school", centre_id: "30", hm_progress: "no_active_phase" })))
+      .rejects.toThrow("REDIRECT:/centre/30?tab=holistic_mentorship&hm_progress=no_active_phase");
   });
 });

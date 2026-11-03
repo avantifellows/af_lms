@@ -14,9 +14,7 @@ import {
   MAX_COVERAGE_SEARCH_LENGTH,
   readCoverageFilters,
   writeCoverageFilters,
-  type CoverageAssignment as AssignmentFilter,
   type CoverageFilters,
-  type CoverageProgress as Progress,
 } from "@/lib/holistic-coverage-filters";
 import { holisticStudentPhaseHref } from "@/lib/holistic-links";
 import type {
@@ -42,22 +40,38 @@ const NO_MENTORS: EligibleMentor[] = [];
 const URL_WRITE_DELAY_MS = 300;
 const FILTER_LABEL = "block text-[11px] font-extrabold uppercase tracking-wide text-text-muted";
 
-const PROGRESS_LABEL: Record<Progress, string> = {
+// A row's Current Progress, as on Students & Progress: Pending, Completed and
+// No active phase describe an assigned Student's current Phase; a Student
+// without a Mentor is Unassigned whatever their Phase.
+type RowProgress = "completed" | "pending" | "no_active_phase" | "unassigned";
+
+const PROGRESS_LABEL: Record<RowProgress, string> = {
   completed: "Completed",
   pending: "Pending",
-  none: "No active phase",
+  no_active_phase: "No active phase",
+  unassigned: "Unassigned",
 };
 
-const PROGRESS_CLASSES: Record<Progress, string> = {
+const PROGRESS_CLASSES: Record<Exclude<RowProgress, "unassigned">, string> = {
   completed: "bg-success-bg text-success",
   pending: "border border-border bg-bg-card-alt text-text-muted",
-  none: "border border-border bg-bg-card-alt text-text-muted",
+  no_active_phase: "border border-border bg-bg-card-alt text-text-muted",
 };
 
-function progress(student: Student): Progress {
-  if (student.activePhaseId === null) return "none";
+function progress(student: Student): RowProgress {
+  if (student.ownership === null) return "unassigned";
+  if (student.activePhaseId === null) return "no_active_phase";
   if (student.activeNotesState === "submitted") return "completed";
   return "pending";
+}
+
+function ProgressBadge({ state }: { state: RowProgress }) {
+  // Styled like Students & Progress's Unassigned badge.
+  if (state === "unassigned") return <Badge variant="default">{PROGRESS_LABEL.unassigned}</Badge>;
+  return <span
+    className={`inline-flex whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-bold ${PROGRESS_CLASSES[state]}`}>
+    {PROGRESS_LABEL[state]}
+  </span>;
 }
 
 function studentHref(student: Student, link: StudentLinkContext) {
@@ -90,7 +104,7 @@ function derivedSummary(students: Student[]): HolisticAssignmentCoverageSummary 
     coveragePercentage,
     completed: students.filter((student) => progress(student) === "completed").length,
     pending: students.filter((student) => progress(student) === "pending").length,
-    noActivePhase: students.filter((student) => progress(student) === "none").length,
+    noActivePhase: students.filter((student) => progress(student) === "no_active_phase").length,
   };
 }
 
@@ -138,7 +152,6 @@ function CoverageTable({ students, link, canManage, controlsDisabled,
         </thead>
         <tbody className="divide-y divide-border">{students.map((student) => {
           const href = studentHref(student, link);
-          const state = progress(student);
           return <tr key={student.studentId} className="hover:bg-hover-bg">
             <td className="px-4 py-3"><StudentIdentity student={student} /></td>
             <td className="px-4 py-3 text-text-secondary">Grade {student.grade}</td>
@@ -148,10 +161,7 @@ function CoverageTable({ students, link, canManage, controlsDisabled,
                 {student.ownership.mentorName}
               </span>
               : <span className="font-medium text-warning-text">Unassigned</span>}</td>
-            <td className="px-4 py-3"><span
-              className={`inline-flex whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-bold ${PROGRESS_CLASSES[state]}`}>
-              {PROGRESS_LABEL[state]}
-            </span></td>
+            <td className="px-4 py-3"><ProgressBadge state={progress(student)} /></td>
             <td className="px-4 py-3"><div className="flex items-center justify-end gap-1">
               {href && <Link href={href} aria-label={`Open ${student.name}`}
                 title="Open Student" className="grid h-10 w-10 place-items-center rounded-lg text-text-muted hover:bg-hover-bg hover:text-accent">
@@ -192,8 +202,8 @@ function RosterFilters({ filters, mentorOptions, onChange, onSearchBlur }: {
   onSearchBlur: () => void;
 }) {
   const mentorLabel = mentorOptions.find((option) => option.value === filters.mentor)?.label ?? "All Mentors";
-  return <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_8rem_minmax(14rem,1.5fr)_10.5rem_10rem]">
-    <label className={`${FILTER_LABEL} sm:col-span-2 lg:col-span-1`}>
+  return <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_8rem_minmax(14rem,1.5fr)_11rem]">
+    <label className={FILTER_LABEL}>
       Search Student
       <span className="relative mt-1 block">
         <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-text-muted" />
@@ -221,15 +231,11 @@ function RosterFilters({ filters, mentorOptions, onChange, onSearchBlur }: {
       Progress
       <Select aria-label="Filter by Progress" className="mt-1" value={filters.progress}
         onChange={(event) => onChange({ progress: event.target.value as CoverageFilters["progress"] })}>
-        <option value="">All Progress</option><option value="completed">Completed</option>
-        <option value="pending">Pending</option><option value="none">No active phase</option>
-      </Select>
-    </label>
-    <label className={FILTER_LABEL}>
-      Assignment
-      <Select aria-label="Filter by Assignment" className="mt-1" value={filters.assignment}
-        onChange={(event) => onChange({ assignment: event.target.value as AssignmentFilter })}>
-        <option value="all">All Students</option><option value="assigned">Assigned</option>
+        {/* Students & Progress's options and order, less Skipped: this view shows
+            only each Student's current Phase, where Skipped can't occur. */}
+        <option value="">All Students</option><option value="assigned">All Assigned</option>
+        <option value="pending">Pending</option><option value="completed">Completed</option>
+        <option value="no_active_phase">No active phase</option>
         {/* A Mentor's Students are all assigned, so Unassigned would always be empty. */}
         <option value="unassigned" disabled={filters.mentor !== ""}>
           {filters.mentor ? "Unassigned (clear Mentor first)" : "Unassigned"}
@@ -402,8 +408,7 @@ function filterStudents(students: Student[], filters: CoverageFilters) {
   return students.filter((student) =>
     matchesGrade(student, filters.grade) &&
     matchesMentor(student, filters.mentor) &&
-    (!filters.progress || progress(student) === filters.progress) &&
-    matchesAssignment(student, filters.assignment) &&
+    matchesProgress(student, filters.progress) &&
     matchesStudentQuery(student, query)
   );
 }
@@ -416,10 +421,10 @@ function matchesMentor(student: Student, mentor: string) {
   return !mentor || String(student.ownership?.mentorUserId) === mentor;
 }
 
-function matchesAssignment(student: Student, assignment: AssignmentFilter) {
-  if (assignment === "assigned") return student.ownership !== null;
-  if (assignment === "unassigned") return student.ownership === null;
-  return true;
+function matchesProgress(student: Student, filter: CoverageFilters["progress"]) {
+  if (!filter) return true;
+  if (filter === "assigned") return student.ownership !== null;
+  return progress(student) === filter;
 }
 
 function matchesStudentQuery(student: Student, query: string) {
@@ -465,9 +470,9 @@ function mentorFilterOptions(students: Student[], mentors: EligibleMentor[]): Me
 // out Unassigned (its Students are all assigned).
 function resolveFilters(filters: CoverageFilters, mentorOptions: MentorFilterOption[]): CoverageFilters {
   const mentor = mentorOptions.some((option) => option.value === filters.mentor) ? filters.mentor : "";
-  const assignment = mentor && filters.assignment === "unassigned" ? "all" : filters.assignment;
-  if (mentor === filters.mentor && assignment === filters.assignment) return filters;
-  return { ...filters, mentor, assignment };
+  const progressFilter = mentor && filters.progress === "unassigned" ? "" : filters.progress;
+  if (mentor === filters.mentor && progressFilter === filters.progress) return filters;
+  return { ...filters, mentor, progress: progressFilter };
 }
 
 // Rewrites only the `hm_` params, in place: no history entry, no server round
