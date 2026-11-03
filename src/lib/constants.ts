@@ -101,6 +101,13 @@ export const PROGRAM_ID_TO_LABEL: Record<number, string> = {
   [PROGRAM_IDS.MAHARASHTRA_COACHING_FOUNDATION]: "Maharashtra Coaching Foundation",
 };
 
+// The program id behind a BigQuery `student_program` label (the reverse of
+// PROGRAM_ID_TO_LABEL), or undefined for a label it doesn't list.
+export function programIdForLabel(label: string): number | undefined {
+  const match = Object.entries(PROGRAM_ID_TO_LABEL).find(([, name]) => name === label);
+  return match ? Number(match[0]) : undefined;
+}
+
 // True when a BigQuery `student_program` label is JNV NVS. The one place the
 // label is compared, so NVS-specific Performance rules don't each respell it.
 export function isNvsProgram(program: string | null | undefined): boolean {

@@ -65,7 +65,7 @@ const CHAPTER_CARD_COHORT =
 
 // Test formats that count as "major" (i.e. the Full Tests tab) — these also have
 // real Academic Level (AL) values populated on the section='overall' row.
-const MAJOR_TEST_FORMATS = [
+export const MAJOR_TEST_FORMATS = [
   "major_test",
   "mock_test",
   "part_test",
@@ -424,6 +424,7 @@ export async function getCumulativeALData(
       ANY_VALUE(f.test_name) AS test_name,
       MIN(f.start_date) AS start_date,
       ANY_VALUE(f.test_stream) AS test_stream,
+      ANY_VALUE(f.test_course) AS test_course,
       ANY_VALUE(f.academic_level) AS academic_level,
       ANY_VALUE(f.marks_scored) AS marks_scored,
       ANY_VALUE(f.max_marks_possible) AS max_marks_possible
@@ -462,6 +463,7 @@ export async function getCumulativeALData(
     test_name: string;
     start_date: string;
     test_stream: string | null;
+    test_course: string | null;
     academic_level: string;
     marks_scored: number | string | null;
     max_marks_possible: number | string | null;
@@ -499,6 +501,7 @@ export async function getCumulativeALData(
         test_name: r.test_name,
         start_date: startDate,
         stream: canonicalStream(r.test_stream),
+        course: r.test_course,
       });
     }
 

@@ -8,6 +8,7 @@ vi.mock("@/lib/bigquery", () => ({
   getAvailablePrograms: vi.fn().mockResolvedValue(["JNV CoE", "JNV NVS"]),
 }));
 vi.mock("@/lib/dynamodb", () => ({ getTestDeepDiveFromDynamo: vi.fn() }));
+vi.mock("@/lib/student-support", () => ({ getScoreJourney: vi.fn(), getStudentReport: vi.fn() }));
 vi.mock("@/lib/curriculum-schema", () => ({
   checkCurriculumSchema: vi.fn().mockResolvedValue({ ok: true }),
 }));
