@@ -5,7 +5,8 @@ import type { MenteeRow } from "@/lib/blended-learning-mentees";
 import { daysAgo, shortDate, whyNowTags } from "./menteeListCopy";
 
 const BASE: MenteeRow = {
-  studentId: 1, name: "Asha Rao", gender: null, grade: 12, programId: 80, programName: null,
+  studentId: 1, programStudentId: null, category: null, name: "Asha Rao", gender: null, grade: 12,
+  programId: 80, programName: null,
   lastContact: "2026-10-12", lastContactSource: "conversation", latestEntryKind: "attempt",
   openDraftState: null, reasons: [], daysSince: 10, lastAttemptOn: null,
 };
@@ -34,19 +35,19 @@ describe("whyNowTags", () => {
       ...BASE, lastContact: null, daysSince: null, reasons: ["attempt", "no_contact"], lastAttemptOn: "2026-10-04",
     };
     expect(whyNowTags(mentee, "2026-10-22")).toEqual([
-      { reason: "attempt", text: "Not reachable, 4 Oct", tone: "danger" },
-      { reason: "no_contact", text: "No conversation yet", tone: "warning" },
+      { reason: "attempt", text: "Unreachable · 4 Oct", tone: "danger" },
+      { reason: "no_contact", text: "No conversation", tone: "warning" },
     ]);
   });
 
   it("falls back to undated wording when the Attempt's date is missing", () => {
-    expect(whyNowTags({ ...BASE, reasons: ["attempt"] })[0].text).toBe("Not reachable on the last try");
+    expect(whyNowTags({ ...BASE, reasons: ["attempt"] })[0].text).toBe("Unreachable");
   });
 
   it("counts days since the Last Contact, a Conversation or an exact legacy date alike", () => {
-    expect(whyNowTags({ ...BASE, reasons: ["gap_30"], daysSince: 46 })[0].text).toBe("Not contacted in 46 days");
+    expect(whyNowTags({ ...BASE, reasons: ["gap_30"], daysSince: 46 })[0].text).toBe("No contact · 46 days");
     expect(
       whyNowTags({ ...BASE, reasons: ["gap_30"], lastContact: "2026-06-14", lastContactSource: "legacy", daysSince: 130 })[0].text
-    ).toBe("Not contacted in 130 days");
+    ).toBe("No contact · 130 days");
   });
 });

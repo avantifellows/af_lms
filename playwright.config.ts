@@ -85,6 +85,10 @@ export default defineConfig({
       // transcribing.
       BLENDED_LEARNING_ETL_URL: " ",
       BLENDED_LEARNING_ETL_TOKEN: " ",
+      // BigQuery stays unavailable, so server-rendered pages never query the
+      // warehouse from .env.local credentials (the Visit Summary School page
+      // shows "Academic levels unavailable"). Specs stub /api/quiz-analytics.
+      GOOGLE_SERVICE_ACCOUNT_JSON: " ",
     },
   },
 });

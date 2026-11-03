@@ -92,14 +92,14 @@ const ROLE_DESCRIPTIONS: Record<string, string> = {
   pmu_manager: "PMU Managers can view and manage JNV NVS students and view performance in their assigned JNV Schools",
   pmu_govt_school_user: "PMU Govt School Users can view and manage JNV NVS students and view performance in their one JNV School",
   blended_mentor: "Blended Learning Mentors can see and log Conversations with only their own Mentees. They have no other LMS access",
-  blended_admin: "Blended Learning Admins can see every Mentor's Mentees and Mentor Flags, and play Call Recordings and read their transcripts. They view only: only Mentors log. They have no other LMS access",
+  blended_admin: "Blended Learning Admins can see every Mentor's Mentees and Mentor Flags, play Call Recordings and read their transcripts, and manage Resources and Common Action Items. Only Mentors log. They have no other LMS access",
   alumni_manager: "Alumni Managers can view and update alumni of their assigned schools only — no access to students or any other feature",
 };
 
 // Only Blended Learning Admins play recordings (play_recording is admin-only).
 const BLENDED_READ_ONLY_LABELS: Record<string, string> = {
   blended_mentor: "Read-only access (can view their own Mentees, cannot log or change anything)",
-  blended_admin: "Read-only access (Blended Learning Admins are always view only)",
+  blended_admin: "Read-only access (view only: cannot manage Resources or Common Action Items)",
 };
 
 type UserFormValues = {

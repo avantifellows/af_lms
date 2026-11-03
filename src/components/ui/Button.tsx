@@ -12,6 +12,11 @@ const variantClasses = {
     `${base} rounded-lg border border-border bg-bg-card px-4 text-sm text-text-primary shadow-sm hover:bg-hover-bg active:bg-bg-card-alt`,
   ghost:
     `${base} rounded-lg px-4 text-sm text-accent hover:bg-hover-bg active:bg-hover-bg/80`,
+  // Green for a positive action (Visit Concern Resolve / Mark resolved): filled and outlined.
+  success:
+    `${base} rounded-lg bg-success px-4 text-sm font-bold text-text-on-accent shadow-sm hover:bg-success/90 active:bg-success/80`,
+  "success-outline":
+    `${base} rounded-lg border border-success bg-bg-card px-4 text-sm font-bold text-success hover:bg-success-bg active:bg-success-bg`,
   danger:
     `${base} rounded-lg bg-danger px-4 text-sm text-white shadow-sm hover:bg-red-700 active:bg-red-800`,
   "danger-ghost":
@@ -27,6 +32,8 @@ const sizeClasses = {
 } as const;
 
 export type ButtonVariant = keyof typeof variantClasses;
+// Part of the ui barrel's public API (src/components/ui/index.ts); nothing imports it yet.
+// fallow-ignore-next-line unused-type
 export type ButtonSize = keyof typeof sizeClasses;
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {

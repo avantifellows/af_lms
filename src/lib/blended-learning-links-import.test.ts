@@ -1,21 +1,25 @@
 import ExcelJS from "exceljs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("./db", () => ({ query: vi.fn() }));
+vi.mock("./db", () => ({ query: vi.fn(), withTransaction: vi.fn() }));
 
-import { query } from "./db";
+import { query, withTransaction } from "./db";
+import { parseLegacyConversations } from "./blended-learning-legacy-conversations";
 import {
   formatBlendedLinksImportReport,
   legacyDateWindow,
   profileDocId,
   runBlendedLinksImport,
+  type LegacyProfileDocs,
 } from "./blended-learning-links-import";
 
 const mockQuery = vi.mocked(query);
+const mockWithTransaction = vi.mocked(withTransaction);
 
 // Fixture: active current-year Mappings (student pk, Student ID, name) and the
 // links table as it stands. The fake answers the Mapping read, the links read
-// and the upsert, keeping the links table in memory.
+// and the upsert, keeping the links table in memory. Its transaction runs the
+// same fake on a client and restores both tables when the callback throws.
 interface MappedStudent {
   id: number;
   studentId: string;
@@ -27,15 +31,77 @@ interface LinkRow {
   profile_doc_url: string | null;
   screener_url: string | null;
   legacy_last_contact_on: string | null;
+  // Left undefined (so toEqual ignores them) until a run writes them.
+  legacy_conversation_summary?: string | null;
+}
+// Profile Doc Action Items (from_profile_doc) as stored.
+interface ItemRow {
+  id: number;
+  student_id: number;
+  position: number;
+  text: string;
+  owner: string;
+  status: "open" | "done";
 }
 
 let linksTable: Map<number, LinkRow>;
+let itemsTable: ItemRow[];
+let itemWrites: string[];
 let writes: unknown[][];
+// A statement the fake fails, as a dropped connection or a timeout would.
+let failingStatement: RegExp | null;
 
-function givenDatabase(mapped: MappedStudent[], links: LinkRow[] = []) {
+// The fake's side of the importer's Profile Doc Action Item statements.
+function fakeItemsQuery(sql: string, params: unknown[]): unknown[] | null {
+  if (!/blended_learning_action_items/.test(sql)) return null;
+  if (/^\s*SELECT/.test(sql)) {
+    const ids = params[0] as number[];
+    return itemsTable.filter((item) => ids.includes(item.student_id)).map((item) => ({ ...item }));
+  }
+  if (/^\s*DELETE/.test(sql)) {
+    itemWrites.push("delete");
+    const ids = params[0] as number[];
+    itemsTable = itemsTable.filter((item) => !(ids.includes(item.id) && item.status === "open"));
+    return [];
+  }
+  const rows = JSON.parse(params[0] as string) as Record<string, unknown>[];
+  if (/^\s*INSERT/.test(sql)) {
+    itemWrites.push("insert");
+    for (const row of rows) {
+      const id = Math.max(0, ...itemsTable.map((item) => item.id)) + 1;
+      itemsTable.push({ id, status: "open", ...(row as Omit<ItemRow, "id" | "status">) });
+    }
+    return [];
+  }
+  itemWrites.push("update");
+  for (const row of rows) {
+    const item = itemsTable.find((candidate) => candidate.id === row.id);
+    if (item) item.position = row.position as number;
+  }
+  return [];
+}
+
+function givenDatabase(mapped: MappedStudent[], links: LinkRow[] = [], items: ItemRow[] = []) {
   linksTable = new Map(links.map((l) => [l.student_id, { ...l }]));
+  itemsTable = items.map((item) => ({ ...item }));
+  itemWrites = [];
   writes = [];
+  failingStatement = null;
+  mockWithTransaction.mockImplementation(async (fn) => {
+    const saved = { links: new Map([...linksTable].map(([id, row]) => [id, { ...row }])), items: itemsTable.map((item) => ({ ...item })) };
+    const client = { query: async (sql: string, params?: unknown[]) => ({ rows: await mockQuery(sql, params) }) };
+    try {
+      return await fn(client as never);
+    } catch (error) {
+      linksTable = saved.links;
+      itemsTable = saved.items;
+      throw error;
+    }
+  });
   mockQuery.mockImplementation(async (sql: string, params?: unknown[]) => {
+    if (failingStatement?.test(sql)) throw new Error("Synthetic: connection lost");
+    const items = fakeItemsQuery(sql, params ?? []);
+    if (items) return items as never[];
     if (/FROM blended_learning_mentor_mentee_mappings/.test(sql)) {
       expect(params).toEqual(["2026-2027"]);
       return mapped.map((m) => ({
@@ -47,18 +113,17 @@ function givenDatabase(mapped: MappedStudent[], links: LinkRow[] = []) {
     }
     if (/INSERT INTO blended_learning_student_links/.test(sql)) {
       writes.push(params ?? []);
-      const [studentId, profileDocUrl, screenerUrl, legacyOn] = params as [
-        number, string | null, string | null, string | null | undefined,
-      ];
+      // The upsert names its columns after student_id; params follow in order.
+      const columns = sql.match(/\(student_id, ([^)]*)\)/)![1].split(",").map((name) => name.trim());
+      const [studentId, ...values] = params as [number, ...unknown[]];
+      const written = Object.fromEntries(columns.map((name, index) => [name, values[index]]));
       const existing = linksTable.get(studentId);
       linksTable.set(studentId, {
+        legacy_last_contact_on: null,
+        ...existing,
+        ...written,
         student_id: studentId,
-        profile_doc_url: profileDocUrl,
-        screener_url: screenerUrl,
-        legacy_last_contact_on: /legacy_last_contact_on/.test(sql)
-          ? (legacyOn ?? null)
-          : (existing?.legacy_last_contact_on ?? null),
-      });
+      } as LinkRow);
       return [];
     }
     throw new Error(`Unexpected SQL: ${sql}`);
@@ -249,6 +314,7 @@ describe("runBlendedLinksImport", () => {
     return {
       readProfileDocHtml: (docId: string) => docs[docId] ?? null,
       window: { from: "2026-04-01", to: "2026-10-23" },
+      conversations: parseLegacyConversations({}),
     };
   }
 
@@ -266,7 +332,7 @@ describe("runBlendedLinksImport", () => {
     expect(linksTable.get(501)?.legacy_last_contact_on).toBe("2026-09-17");
     expect(linksTable.get(502)?.legacy_last_contact_on).toBeNull();
     expect(linksTable.get(503)?.legacy_last_contact_on).toBeNull();
-    expect(writes.every((params) => params.length === 4)).toBe(true);
+    expect(writes.every((params) => params.length === 5)).toBe(true);
   });
 
   it("is re-runnable: unchanged on a second run, fills a doc once it is shared, keeps a stored date for an unreadable doc", async () => {
@@ -401,6 +467,10 @@ describe("formatBlendedLinksImportReport with legacy Profile Docs", () => {
     const lines = formatBlendedLinksImportReport({
       mode: "apply",
       legacy: { dated: 5, no_dates: 2, unreadable: 3, no_doc_link: 1 },
+      legacyConversations: null,
+      legacyConversationIssues: [],
+      profileDocActionItems: null,
+      profileDocActionItemChanges: [],
       unreadTabs: [],
       counts: { matched: 11, unmatched: 0, skipped: 0 },
       writes: { inserted: 0, updated: 5, unchanged: 6 },
@@ -410,5 +480,241 @@ describe("formatBlendedLinksImportReport with legacy Profile Docs", () => {
       "Legacy last contact (Profile Docs only): dated 5, NULL with no dated conversation 2, " +
         "unreadable (no export; stored value kept) 3, no Profile Doc link 1"
     );
+  });
+});
+
+describe("runBlendedLinksImport with legacy conversations", () => {
+  // Synthetic Profile Doc exports and summaries only.
+  function profileDocHtml(...entries: string[]) {
+    const tab = (title: string) => `<p class="title"><span>${title}</span></p>`;
+    return `<html><body>${tab("Student Interview")}<p>Notes</p>${tab("September")}${entries.join("")}</body></html>`;
+  }
+  const NEHA = { id: 503, studentId: "2612003", firstName: "Neha", lastName: "Rao" };
+  const KIRAN = { id: 504, studentId: "2612004", firstName: "Kiran", lastName: "Das" };
+  const MOHIT = { id: 505, studentId: "2612005", firstName: "Mohit", lastName: "Jain" };
+  const STUDENTS = [ASHA, RAVI, NEHA, KIRAN, MOHIT];
+
+  function workbook() {
+    const book = new ExcelJS.Workbook();
+    addSheet(book, "Student Profile Docs", ["Student ID", "Student Name", "Profile Doc"],
+      STUDENTS.map((s) => [s.studentId, `${s.firstName} ${s.lastName}`,
+        link("Profile", `https://docs.google.com/document/d/${s.firstName.toLowerCase()}-doc`)]));
+    addSheet(book, "Conversation", ["Student ID", "Name", "Screener Form"], []);
+    return book;
+  }
+
+  const SEP_17 = profileDocHtml("<p>Sep 17, 2026: called</p><p>Talked about mock tests.</p>");
+  const items = [
+    { text: "Synthetic: revise optics", owner: "student" },
+    { text: "Synthetic: send the timetable", owner: "mentor" },
+  ];
+
+  function docs(html: Record<string, string>, file: unknown) {
+    return {
+      readProfileDocHtml: (docId: string) => html[docId] ?? null,
+      window: { from: "2026-04-01", to: "2026-10-23" },
+      conversations: parseLegacyConversations(file),
+    };
+  }
+
+  const FILE = {
+    "asha-doc": { occurredOn: "2026-09-17", summary: "  Synthetic: planned mocks.  ", actionItems: items },
+    // A summary of an older entry: the doc's latest is Sep 17.
+    "ravi-doc": { occurredOn: "2026-09-01", summary: "Synthetic: older.", actionItems: [] },
+    "kiran-doc": { occurredOn: "2026-09-17", summary: "Synthetic: no items.", actionItems: [] },
+    "mohit-doc": { occurredOn: "2026-09-17", summary: "Synthetic", actionItems: [{ text: "x", owner: "teacher" }] },
+    "nobody-doc": { occurredOn: "2026-09-17", summary: "Synthetic: unused.", actionItems: [] },
+  };
+
+  const asItems = (studentId: number) =>
+    itemsTable
+      .filter((item) => item.student_id === studentId)
+      .sort((a, b) => a.position - b.position)
+      .map(({ text, owner, status, position }) => ({ position, text, owner, status }));
+
+  it("loads a dated doc's summary only for that date, NULL otherwise, its items as open Action Items, and reports by Student ID", async () => {
+    givenDatabase(STUDENTS);
+    const report = await runBlendedLinksImport({
+      workbook: workbook(),
+      mode: "apply",
+      // Neha's doc is read but has no summary in the file.
+      legacyProfileDocs: docs(
+        { "asha-doc": SEP_17, "ravi-doc": SEP_17, "neha-doc": SEP_17, "kiran-doc": SEP_17, "mohit-doc": SEP_17 },
+        FILE
+      ),
+    });
+
+    expect(report.legacyConversations).toEqual({
+      loaded: 2, summary_missing: 1, summary_stale: 1, summary_invalid: 1, unused: 1,
+    });
+    expect(report.legacyConversationIssues).toEqual([{ studentId: "2612005", reason: "bad_action_item" }]);
+    expect(linksTable.get(501)).toMatchObject({
+      legacy_last_contact_on: "2026-09-17",
+      legacy_conversation_summary: "Synthetic: planned mocks.",
+    });
+    expect(asItems(501)).toEqual([
+      { position: 1, ...items[0], status: "open" },
+      { position: 2, ...items[1], status: "open" },
+    ]);
+    expect(linksTable.get(504)).toMatchObject({ legacy_conversation_summary: "Synthetic: no items." });
+    for (const id of [502, 503, 505]) expect(linksTable.get(id)).toMatchObject({ legacy_conversation_summary: null });
+    expect(itemsTable.every((item) => item.student_id === 501)).toBe(true);
+    expect(report.profileDocActionItems).toEqual({ inserted: 2, kept: 0, removed: 0 });
+    expect(report.profileDocActionItemChanges).toEqual([{ studentId: "2612001", inserted: 2, kept: 0, removed: 0 }]);
+
+    const lines = formatBlendedLinksImportReport(report);
+    expect(lines).toContain(
+      "Legacy conversation (dated Profile Docs): loaded 2, NULL with no summary for the doc 1, " +
+        "NULL with a summary of another date 1, NULL with an invalid summary 1; file entries no dated doc used 1"
+    );
+    expect(lines).toContain(
+      "Profile Doc action items: inserted 2, kept 0, removed 0 (removed: open ones no longer in the doc; done ones are kept)"
+    );
+    expect(lines).toContain("- Student ID 2612001: inserted 2, kept 0, removed 0");
+    expect(lines.slice(-2)).toEqual(["Invalid legacy conversations (left NULL)", "- Student ID 2612005: bad_action_item"]);
+    expect(lines.join("\n")).not.toMatch(/Synthetic|-doc|mock|optics/);
+  });
+
+  it("is re-runnable, clears the summary and open items when the doc has no dated entry, and keeps both when it is unreadable", async () => {
+    givenDatabase([ASHA, RAVI]);
+    const file = {
+      "asha-doc": FILE["asha-doc"],
+      "ravi-doc": { occurredOn: "2026-09-17", summary: "Synthetic: Ravi.", actionItems: items },
+    };
+    const run = (html: Record<string, string>) =>
+      runBlendedLinksImport({ workbook: workbook(), mode: "apply", legacyProfileDocs: docs(html, file) });
+
+    await run({ "asha-doc": SEP_17, "ravi-doc": SEP_17 });
+    writes = [];
+    itemWrites = [];
+    const again = await run({ "asha-doc": SEP_17, "ravi-doc": SEP_17 });
+    expect(again.writes).toEqual({ inserted: 0, updated: 0, unchanged: 2 });
+    expect(again.profileDocActionItems).toEqual({ inserted: 0, kept: 4, removed: 0 });
+    expect(again.profileDocActionItemChanges).toEqual([]);
+    expect(writes).toEqual([]);
+    // Only a no-op position check: nothing inserted or deleted.
+    expect(itemWrites).toEqual(["update"]);
+
+    // Asha's first item was ticked done by a Conversation.
+    itemsTable.find((item) => item.student_id === 501 && item.position === 1)!.status = "done";
+    // Asha's doc now has no dated entry; Ravi's export is missing.
+    const later = await run({ "asha-doc": profileDocHtml("<p>No dates any more.</p>") });
+    expect(later.legacy).toMatchObject({ no_dates: 1, unreadable: 1 });
+    expect(later.legacyConversations).toMatchObject({ loaded: 0, unused: 2 });
+    expect(linksTable.get(501)).toMatchObject({ legacy_last_contact_on: null, legacy_conversation_summary: null });
+    expect(asItems(501)).toEqual([{ position: 1, ...items[0], status: "done" }]);
+    expect(later.profileDocActionItemChanges).toEqual([{ studentId: "2612001", inserted: 0, kept: 0, removed: 1 }]);
+    expect(linksTable.get(502)).toMatchObject({ legacy_conversation_summary: "Synthetic: Ravi." });
+    expect(asItems(502)).toHaveLength(2);
+  });
+
+  it("keeps matching items (open or done), inserts new ones and removes only open ones the doc dropped", async () => {
+    givenDatabase(
+      [ASHA],
+      [
+        {
+          student_id: 501, profile_doc_url: "https://docs.google.com/document/d/asha-doc", screener_url: null,
+          legacy_last_contact_on: "2026-09-17", legacy_conversation_summary: "Synthetic: planned mocks.",
+        },
+      ],
+      [
+        { id: 11, student_id: 501, position: 1, ...items[0], status: "done" },
+        { id: 12, student_id: 501, position: 2, ...items[1], status: "open" },
+        { id: 13, student_id: 501, position: 3, text: "Synthetic: dropped but done", owner: "parent", status: "done" },
+      ]
+    );
+    // The summariser reworded the second item and put a new one first.
+    const reworded = [
+      { text: "Synthetic: call the parent", owner: "mentor" },
+      items[0],
+      { text: "Synthetic: send the timetable today", owner: "mentor" },
+    ];
+    const run = (mode: "dry-run" | "apply") =>
+      runBlendedLinksImport({
+        workbook: workbook(),
+        mode,
+        legacyProfileDocs: docs({ "asha-doc": SEP_17 }, { "asha-doc": { ...FILE["asha-doc"], actionItems: reworded } }),
+      });
+
+    const dry = await run("dry-run");
+    expect(dry.profileDocActionItems).toEqual({ inserted: 2, kept: 1, removed: 1 });
+    expect(formatBlendedLinksImportReport(dry)).toContain(
+      "Profile Doc action items (would be): inserted 2, kept 1, removed 1 (removed: open ones no longer in the doc; done ones are kept)"
+    );
+    expect(itemWrites).toEqual([]);
+
+    const applied = await run("apply");
+    expect(applied.writes).toEqual({ inserted: 0, updated: 0, unchanged: 1 });
+    expect(applied.profileDocActionItemChanges).toEqual([{ studentId: "2612001", inserted: 2, kept: 1, removed: 1 }]);
+    expect(itemsTable.map((item) => item.id).sort()).toEqual([11, 13, 14, 15]);
+    expect(asItems(501)).toEqual([
+      { position: 1, ...reworded[0], status: "open" },
+      { position: 2, ...items[0], status: "done" },
+      { position: 3, text: "Synthetic: dropped but done", owner: "parent", status: "done" },
+      { position: 3, ...reworded[2], status: "open" },
+    ]);
+  });
+
+  it("dry run counts what it would load and writes nothing", async () => {
+    givenDatabase([ASHA]);
+    const report = await runBlendedLinksImport({
+      workbook: workbook(),
+      mode: "dry-run",
+      legacyProfileDocs: docs({ "asha-doc": SEP_17 }, { "asha-doc": FILE["asha-doc"] }),
+    });
+    expect(report.legacyConversations).toMatchObject({ loaded: 1 });
+    expect(report.writes).toEqual({ inserted: 1, updated: 0, unchanged: 0 });
+    expect(report.profileDocActionItems).toEqual({ inserted: 2, kept: 0, removed: 0 });
+    expect(writes).toEqual([]);
+    expect(itemWrites).toEqual([]);
+  });
+
+  // A stored Sep 1 entry, its summary and one open item.
+  const SEP_1_STORED: LinkRow = {
+    student_id: 501, profile_doc_url: "https://docs.google.com/document/d/asha-doc", screener_url: null,
+    legacy_last_contact_on: "2026-09-01", legacy_conversation_summary: "Synthetic: Sep 1.",
+  };
+  const SEP_1_ITEM: ItemRow = { id: 11, student_id: 501, position: 1, text: "Synthetic: Sep 1 task", owner: "student", status: "open" };
+
+  it("refuses legacy Profile Docs without their conversations file, so a date never moves without its summary", async () => {
+    givenDatabase([ASHA], [SEP_1_STORED], [SEP_1_ITEM]);
+    const dateOnly = { readProfileDocHtml: () => SEP_17, window: { from: "2026-04-01", to: "2026-10-23" } };
+
+    await expect(
+      runBlendedLinksImport({ workbook: workbook(), mode: "apply", legacyProfileDocs: dateOnly as unknown as LegacyProfileDocs })
+    ).rejects.toThrow("Legacy Profile Docs need their conversations file");
+    expect(linksTable.get(501)).toEqual(SEP_1_STORED);
+    expect(itemsTable).toEqual([SEP_1_ITEM]);
+  });
+
+  it("applies in one transaction: a failed item insert rolls back the summary and the removed items", async () => {
+    givenDatabase([ASHA], [SEP_1_STORED], [SEP_1_ITEM]);
+    failingStatement = /^\s*INSERT INTO blended_learning_action_items/;
+
+    await expect(
+      runBlendedLinksImport({
+        workbook: workbook(),
+        mode: "apply",
+        legacyProfileDocs: docs({ "asha-doc": SEP_17 }, { "asha-doc": FILE["asha-doc"] }),
+      })
+    ).rejects.toThrow("Synthetic: connection lost");
+    expect(linksTable.get(501)).toEqual(SEP_1_STORED);
+    expect(itemsTable).toEqual([SEP_1_ITEM]);
+  });
+
+  it("names a Student without a Student ID in an invalid entry's issue", () => {
+    const lines = formatBlendedLinksImportReport({
+      mode: "dry-run",
+      legacy: { dated: 1, no_dates: 0, unreadable: 0, no_doc_link: 0 },
+      legacyConversations: { loaded: 0, summary_missing: 0, summary_stale: 0, summary_invalid: 1, unused: 0 },
+      legacyConversationIssues: [{ studentId: null, reason: "blank_summary" }],
+      profileDocActionItems: { inserted: 0, kept: 0, removed: 1 },
+      profileDocActionItemChanges: [{ studentId: null, inserted: 0, kept: 0, removed: 1 }],
+      unreadTabs: [],
+      counts: { matched: 1, unmatched: 0, skipped: 0 },
+      writes: { inserted: 0, updated: 1, unchanged: 0 },
+      issues: [],
+    });
+    expect(lines.at(-1)).toBe("- Student without a Student ID: blank_summary");
   });
 });

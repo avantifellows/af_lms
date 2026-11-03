@@ -17,6 +17,14 @@ export type DraftActionItem = { key: number; owner: ActionItemOwner; text: strin
 // A switched-on Flag Recipient maps to its comment; off is absent.
 export type DraftFlags = Partial<Record<FlagRecipient, string>>;
 export const FLAG_RECIPIENTS = Object.keys(FLAG_RECIPIENT) as FlagRecipient[];
+// The two screener questions, each 1 (not at all) to 5 (a lot); null is
+// unanswered.
+export type ScreenerRatings = { helpedUnderstand: number | null; moreComfortable: number | null };
+// What the form asks about the Screener: "Was the screener form used?" only
+// when the Student has a Screener link, and the two ratings (when ticked)
+// only until the Student has Screener Feedback.
+export type ScreenerAsk = { hasLink: boolean; feedbackDue: boolean };
+const NO_SCREENER: ScreenerAsk = { hasLink: false, feedbackDue: false };
 
 // A ready Conversation Draft, as the form opens it. Session details are those
 // the Mentor entered before uploading; `notesHtml` is the drafted notes with
@@ -49,6 +57,11 @@ export type EntryFormValues = {
   // Earlier open Action Items ticked done.
   ticked: Set<number>;
   flags: DraftFlags;
+  // Unticked to start; null when not asked (no Screener link).
+  screenerUsed: boolean | null;
+  // Cleared when a save finds the Student's feedback already given.
+  screenerFeedbackDue: boolean;
+  screenerRatings: ScreenerRatings;
 };
 
 // A new Conversation starts with two blank Action Item rows, one the
@@ -61,7 +74,11 @@ const STARTER_ACTION_ITEMS: { owner: ActionItemOwner; text: string }[] = [
 // A new form, prefilled from the draft under review if there is one. A new
 // Conversation starts as a call with the Student; a draft keeps what the
 // Mentor entered before uploading, and its Action Items unless it has none.
-export function initialEntryValues(draft: ReviewDraft | null, today: string): EntryFormValues {
+export function initialEntryValues(
+  draft: ReviewDraft | null,
+  today: string,
+  screener: ScreenerAsk = NO_SCREENER
+): EntryFormValues {
   const drafted = draft?.actionItems ?? [];
   const actionItems = (drafted.length > 0 ? drafted : STARTER_ACTION_ITEMS).map((item, index) => ({
     key: index + 1,
@@ -81,7 +98,16 @@ export function initialEntryValues(draft: ReviewDraft | null, today: string): En
     nextItemKey: actionItems.length + 1,
     ticked: new Set(),
     flags: {},
+    screenerUsed: screener.hasLink ? false : null,
+    screenerFeedbackDue: screener.hasLink && screener.feedbackDue,
+    screenerRatings: { helpedUnderstand: null, moreComfortable: null },
   };
+}
+
+// The two screener questions show (and are required) on a Conversation with
+// the box ticked while the Student's feedback is still due.
+export function screenerQuestionsShown(values: EntryFormValues): boolean {
+  return values.kind === "conversation" && values.screenerUsed === true && values.screenerFeedbackDue;
 }
 
 export function durationMinutes(duration: string): number | null {
@@ -102,13 +128,35 @@ export function withoutFieldErrors(errors: FieldErrors, prefix: string): FieldEr
   return Object.fromEntries(Object.entries(errors).filter(([field]) => !field.startsWith(prefix)));
 }
 
+// A Conversation's fields that show a server error under them, by key.
+const CONVERSATION_ERROR_KEY =
+  /^(mode|spokeWith|durationMinutes|summary|notesHtml|actionItems(\.\d+\.\w+)?|photoKeys(\.\d+)?|flags(\..+)?)$/;
+
+// Whether a field the form shows for these values owns the error keyed `key`:
+// the screener's only while it is asked, the ratings only while they show.
+function errorShown(key: string, values: EntryFormValues): boolean {
+  if (key === "kind" || key === "occurredOn") return true;
+  if (values.kind !== "conversation") return false;
+  if (CONVERSATION_ERROR_KEY.test(key)) return true;
+  if (key === "screenerUsed" || key === "screenerFeedback") return values.screenerUsed !== null;
+  return key.startsWith("screenerFeedback.") && screenerQuestionsShown(values);
+}
+
+// The first error no field on the form shows (say, for a question the form
+// doesn't ask), for the save bar to show instead, so no error is silent.
+export function unshownFieldError(errors: FieldErrors, values: EntryFormValues): string | null {
+  const key = Object.keys(errors).find((field) => !errorShown(field, values));
+  return key === undefined ? null : errors[key];
+}
+
 // The switched-on Flag Recipients, in display order.
 export function raisedFlags(flags: DraftFlags): FlagRecipient[] {
   return FLAG_RECIPIENTS.filter((recipient) => flags[recipient] !== undefined);
 }
 
-// The required fields still empty, by label: the date for either kind, and a
-// Conversation's mode, who was spoken with, duration and summary. Whether
+// The required fields still empty, by label: the date for either kind, a
+// Conversation's mode, who was spoken with, duration and summary, and the
+// screener ratings while they show. Whether
 // what is filled in is valid stays the server's call.
 export function missingFields(values: EntryFormValues): string[] {
   const required: [string, boolean][] = [["Date", values.occurredOn !== ""]];
@@ -119,6 +167,10 @@ export function missingFields(values: EntryFormValues): string[] {
       ["Duration", values.duration.trim() !== ""],
       ["Summary", values.summary.trim() !== ""]
     );
+  }
+  if (screenerQuestionsShown(values)) {
+    const { helpedUnderstand, moreComfortable } = values.screenerRatings;
+    required.push(["Screener ratings", helpedUnderstand !== null && moreComfortable !== null]);
   }
   return required.filter(([, filled]) => !filled).map(([label]) => label);
 }
@@ -161,7 +213,15 @@ export function buildEntryPayload(
     flags: raisedFlags(values.flags).map((recipient) => ({ recipient, comment: values.flags[recipient] || null })),
     completeActionItemIds: [...values.ticked],
     ...(draftId !== null ? { draftId } : {}),
+    ...screenerPayload(values),
   };
+}
+
+// The screener answer when it was asked, with the ratings when they showed.
+function screenerPayload(values: EntryFormValues): Record<string, unknown> {
+  if (values.screenerUsed === null) return {};
+  if (!screenerQuestionsShown(values)) return { screenerUsed: values.screenerUsed };
+  return { screenerUsed: true, screenerFeedback: { ...values.screenerRatings } };
 }
 
 // The save's outcome. A failure's `fieldErrors` replace the form's, or are

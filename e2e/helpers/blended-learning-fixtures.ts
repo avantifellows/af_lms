@@ -25,6 +25,13 @@ export const BLENDED_MENTOR_C = {
   email: "e2e-blended-mentor-c@test.local",
 };
 
+// Mentor D's Mentees exist only for the Manage spec, which pushes Common
+// Action Items to them. Other specs must not assert on Mentor D or them.
+export const BLENDED_MENTOR_D = {
+  name: "Synthetic Blended Mentor D",
+  email: "e2e-blended-mentor-d@test.local",
+};
+
 type Grade = 12 | 13;
 type FixtureMentee = {
   key: string;
@@ -33,11 +40,15 @@ type FixtureMentee = {
   gender: "Male" | "Female";
   grade: Grade;
   programId: number;
+  // `student.category`; NULL when left out.
+  category?: string;
 };
 
 // Mentor A's active current-year Mentees.
 export const MENTEES = {
-  attemptLatest: { key: "A1", firstName: "Ira", lastName: "Attempt", gender: "Female", grade: 12, programId: 80 },
+  attemptLatest: {
+    key: "A1", firstName: "Ira", lastName: "Attempt", gender: "Female", grade: 12, programId: 80, category: "Gen-EWS",
+  },
   neverContacted: { key: "A2", firstName: "Kabir", lastName: "Never", gender: "Male", grade: 13, programId: 90 },
   thirtyDays: { key: "A3", firstName: "Meera", lastName: "Thirty", gender: "Female", grade: 12, programId: 81 },
   legacy: { key: "A4", firstName: "Nikhil", lastName: "Legacy", gender: "Male", grade: 13, programId: 91 },
@@ -103,6 +114,53 @@ export const DRAFT_REVIEW_MENTEES = {
   mobile: { key: "F2", firstName: "Farah", lastName: "Mobile", gender: "Female", grade: 13, programId: 90 },
 } as const satisfies Record<string, FixtureMentee>;
 export const LOGGING_LAST_CONVERSATION_SUMMARY = "Synthetic: planned the week's revision.";
+// Mentor D's Mentees for the Manage spec: two mapped at seed, and one the
+// spec maps later, to check that pushing again reaches only her.
+export const MANAGE_MENTEES = {
+  first: { key: "H1", firstName: "Gita", lastName: "Common", gender: "Female", grade: 12, programId: 80 },
+  second: { key: "H2", firstName: "Hari", lastName: "Common", gender: "Male", grade: 13, programId: 90 },
+  mappedLater: { key: "H3", firstName: "Isha", lastName: "Later", gender: "Female", grade: 12, programId: 80 },
+} as const satisfies Record<string, FixtureMentee>;
+// Mentor C's Mentees for the Profile Doc spec, one per viewport, never
+// contacted in the app, each with LEGACY_CONVERSATION's summary on their
+// Student Links row and its action items as open Profile Doc Action Items
+// (from_profile_doc, positions 1..3), as the links importer loads them.
+export const LEGACY_CONVERSATION_MENTEES = {
+  desktop: { key: "G1", firstName: "Gita", lastName: "Desk", gender: "Female", grade: 12, programId: 80 },
+  mobile: { key: "G2", firstName: "Gita", lastName: "Mobile", gender: "Female", grade: 13, programId: 90 },
+} as const satisfies Record<string, FixtureMentee>;
+export const LEGACY_CONVERSATION = {
+  occurredOn: "2026-06-14",
+  summary: "Synthetic: talked through the Profile Doc study plan and the hostel move.",
+  actionItems: [
+    { text: "Synthetic: finish the optics DPP", owner: "student" },
+    { text: "Synthetic: share the mock test schedule", owner: "mentor" },
+    { text: "Synthetic: confirm the hostel fee date", owner: "parent" },
+  ],
+  profileDocUrl: (key: string) => `https://docs.google.com/document/d/e2e-legacy-conversation-${key.toLowerCase()}`,
+} as const;
+// Mentor C's Mentees for the Screener Feedback spec, one pair per viewport,
+// never contacted: "withLink" has a Screener link (screenerLink(key)) and no
+// Profile Doc, "noLink" has no Student Links row. The spec appends
+// Conversations and an Attempt to them.
+export const SCREENER_MENTEES = {
+  desktop: {
+    withLink: { key: "J1", firstName: "Juhi", lastName: "Desk", gender: "Female", grade: 12, programId: 80 },
+    noLink: { key: "J2", firstName: "Jai", lastName: "Desk", gender: "Male", grade: 13, programId: 90 },
+  },
+  mobile: {
+    withLink: { key: "J3", firstName: "Juhi", lastName: "Mobile", gender: "Female", grade: 12, programId: 80 },
+    noLink: { key: "J4", firstName: "Jai", lastName: "Mobile", gender: "Male", grade: 13, programId: 90 },
+  },
+} as const satisfies Record<string, Record<string, FixtureMentee>>;
+// With a Screener link too; the spec saves two Conversations with feedback
+// for her at once.
+export const SCREENER_RACE_MENTEE = {
+  key: "J5", firstName: "Kavya", lastName: "Race", gender: "Female", grade: 12, programId: 80,
+} as const satisfies FixtureMentee;
+export function screenerLink(mentee: { key: string }): string {
+  return `https://forms.gle/e2e-screener-${mentee.key.toLowerCase()}`;
+}
 
 // Contact numbers on the `user` row (#444). Phones are 98765100 + the
 // Student's seed index. Ira's WhatsApp differs and her parents' phones are
@@ -170,6 +228,11 @@ export function fullName(mentee: { firstName: string; lastName: string }): strin
 
 // The legacy last-contact date is a fixed past day, so it is always 30+ days
 // ago.
+// The `student.student_id` each fixture Student is seeded with.
+export function programStudentId(mentee: { key: string }): string {
+  return `E2E-BL-${mentee.key}`;
+}
+
 export const LEGACY_LAST_CONTACT_ON = "2026-06-14";
 
 function previousAcademicYear(year: string): string {
@@ -231,8 +294,8 @@ async function seedStudent(
        INSERT INTO enrollment_record (user_id, group_id, group_type, academic_year, is_current, inserted_at, updated_at)
        SELECT account.id, grade_row.id, 'grade', $7, true, now(), now() FROM account, grade_row
      )
-     INSERT INTO student (student_id, user_id, grade_id, status, father_phone, guardian_phone, inserted_at, updated_at)
-     SELECT $8, account.id, grade_row.id, 'active', $10, $11, now(), now() FROM account, grade_row
+     INSERT INTO student (student_id, user_id, grade_id, status, father_phone, guardian_phone, category, inserted_at, updated_at)
+     SELECT $8, account.id, grade_row.id, 'active', $10, $11, $12, now(), now() FROM account, grade_row
      RETURNING id`,
     [
       `e2e-bl-${mentee.key.toLowerCase()}@test.local`,
@@ -242,10 +305,11 @@ async function seedStudent(
       `98765100${String(index).padStart(2, "0")}`,
       mentee.grade,
       CURRENT_ACADEMIC_YEAR,
-      `E2E-BL-${mentee.key}`,
+      programStudentId(mentee),
       contact.whatsapp ?? null,
       contact.fatherPhone ?? null,
       contact.guardianPhone ?? null,
+      mentee.category ?? null,
     ]
   );
   return Number(result.rows[0].id);
@@ -520,6 +584,7 @@ export async function seedBlendedLearningFixtures(client: Client): Promise<void>
   const mentorA = await mentorUserId(client, BLENDED_MENTOR_A.email);
   const mentorB = await seedMentor(client, BLENDED_MENTOR_B);
   const mentorC = await seedMentor(client, BLENDED_MENTOR_C);
+  const mentorD = await seedMentor(client, BLENDED_MENTOR_D);
 
   const ids: Record<string, number> = {};
   const contacts: Record<string, FixtureContact> = {
@@ -531,11 +596,20 @@ export async function seedBlendedLearningFixtures(client: Client): Promise<void>
     ...Object.values(ACTION_ITEM_MENTEES),
     ...Object.values(FLAG_MENTEES),
     ...Object.values(DRAFT_REVIEW_MENTEES),
+    ...Object.values(LEGACY_CONVERSATION_MENTEES),
+  ];
+  const manageMentees = Object.values(MANAGE_MENTEES);
+  // Seeded last, so every earlier Student keeps its phone number.
+  const screenerMentees = [
+    ...Object.values(SCREENER_MENTEES).flatMap((set) => Object.values(set)),
+    SCREENER_RACE_MENTEE,
   ];
   for (const [index, mentee] of [
     ...Object.values(MENTEES),
     ...Object.values(OTHER_STUDENTS),
     ...loggingMentees,
+    ...manageMentees,
+    ...screenerMentees,
   ].entries()) {
     ids[mentee.key] = await seedStudent(client, mentee, index, contacts[mentee.key]);
   }
@@ -579,6 +653,30 @@ export async function seedBlendedLearningFixtures(client: Client): Promise<void>
     await seedMapping(client, {
       studentId: ids[mentee.key],
       mentorUserId: mentorC,
+      programId: mentee.programId,
+      academicYear: CURRENT_ACADEMIC_YEAR,
+      startedDaysAgo: 90,
+    });
+  }
+  for (const mentee of screenerMentees) {
+    await seedMapping(client, {
+      studentId: ids[mentee.key],
+      mentorUserId: mentorC,
+      programId: mentee.programId,
+      academicYear: CURRENT_ACADEMIC_YEAR,
+      startedDaysAgo: 90,
+    });
+  }
+  for (const withLink of [...Object.values(SCREENER_MENTEES).map((set) => set.withLink), SCREENER_RACE_MENTEE]) {
+    await client.query(`INSERT INTO blended_learning_student_links (student_id, screener_url) VALUES ($1, $2)`, [
+      ids[withLink.key],
+      screenerLink(withLink),
+    ]);
+  }
+  for (const mentee of [MANAGE_MENTEES.first, MANAGE_MENTEES.second]) {
+    await seedMapping(client, {
+      studentId: ids[mentee.key],
+      mentorUserId: mentorD,
       programId: mentee.programId,
       academicYear: CURRENT_ACADEMIC_YEAR,
       startedDaysAgo: 90,
@@ -672,6 +770,29 @@ export async function seedBlendedLearningFixtures(client: Client): Promise<void>
       TARA_LINKS.screener,
     ]
   );
+
+  for (const mentee of Object.values(LEGACY_CONVERSATION_MENTEES)) {
+    await client.query(
+      `INSERT INTO blended_learning_student_links
+         (student_id, profile_doc_url, legacy_last_contact_on, legacy_conversation_summary)
+       VALUES ($1, $2, $3::date, $4)`,
+      [
+        ids[mentee.key],
+        LEGACY_CONVERSATION.profileDocUrl(mentee.key),
+        LEGACY_CONVERSATION.occurredOn,
+        LEGACY_CONVERSATION.summary,
+      ]
+    );
+    await client.query(
+      `INSERT INTO blended_learning_action_items (student_id, from_profile_doc, position, owner, text)
+       SELECT $1, true, item.position, item.owner, item.text
+       FROM jsonb_to_recordset($2::jsonb) AS item(position int, owner text, text text)`,
+      [
+        ids[mentee.key],
+        JSON.stringify(LEGACY_CONVERSATION.actionItems.map((item, index) => ({ ...item, position: index + 1 }))),
+      ]
+    );
+  }
 
   await seedFeedFlags(client, ids, { mentorA, mentorB });
 }

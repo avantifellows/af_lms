@@ -107,15 +107,25 @@ export async function authorizeInterventionFlags(
   const school = schools[0];
   if (!school) return deny(404, "School not found");
 
-  const { permission } = actorResult.actor;
-  if (!canAccessSchoolSync(permission, school.code, school.region ?? undefined)) {
-    return deny(403, "Forbidden");
-  }
-  // PMU roles never reach a non-JNV School, even at level 3.
-  if (isPmuRole(permission.role) && school.af_school_category !== "JNV") {
+  if (!canViewSchoolInterventionFlags(actorResult.actor.permission, school)) {
     return deny(403, "Forbidden");
   }
   return { ok: true, actor: actorResult.actor, school };
+}
+
+/**
+ * The School rule behind `authorizeInterventionFlags(…, "view")`, with no DB lookup: `students`
+ * view, access to the School, and PMU roles only at JNV Schools. Lists that show flag counts for
+ * many Schools (the School Visit Summary) call it per row.
+ */
+export function canViewSchoolInterventionFlags(
+  permission: UserPermission | null,
+  school: Pick<InterventionFlagSchool, "code" | "region" | "af_school_category">,
+): boolean {
+  if (!permission || !interventionFlagAccess(permission).canView) return false;
+  if (!canAccessSchoolSync(permission, school.code, school.region ?? undefined)) return false;
+  // PMU roles never reach a non-JNV School, even at level 3.
+  return !(isPmuRole(permission.role) && school.af_school_category !== "JNV");
 }
 
 /**
