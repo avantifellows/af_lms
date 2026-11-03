@@ -18,7 +18,7 @@ edges:
     condition: when a route or page needs to gate access
   - target: context/visits.md
     condition: when working on PM school visits or visit action types
-last_updated: 2026-10-20
+last_updated: 2026-11-03
 ---
 
 # Architecture
@@ -63,6 +63,25 @@ Student drill-downs from a progress-origin School use the fixed `school-progress
 source. Phase links and locked-phase redirects preserve it, and the Student Back
 link restores `source=progress` on the School URL. Ordinary School drill-downs
 retain `source=school`, so their original dashboard return does not change.
+
+School Assignment Coverage filters (Search, Grade, Mentor, Progress, Assignment;
+issue #491) live in the School/Centre URL as `hm_search`, `hm_grade`, `hm_mentor`,
+`hm_progress` and `hm_assignment` (`src/lib/holistic-coverage-filters.ts`). The
+prefix keeps them clear of the page's other params (`tab`, `program_id`, `source`,
+Enrollment's `grade`/`stream`, and so on). Defaults are omitted, invalid values read
+as defaults, and a Mentor that is no longer in the roster reads as All Mentors. The
+roster keeps the filters in React state, seeded from `useSearchParams` on mount,
+and writes them with native `history.replaceState`: no history entry, and no server
+re-render, which `router.replace` would cause. The write waits 300 ms after typing
+stops, because browsers throttle rapid `replaceState` calls, and happens at once on
+any click inside the roster, so a Student click saves the filters before the page
+changes. Student links carry the same params, plus `centre_id` when the roster was
+opened on a Centre page. The Student/Phase page accepts them only for `school` and
+`school-progress` sources, cleans them with `coverageReturnQuery`, and keeps them on
+Phase links and locked-Phase redirects. Its back link goes to
+`/centre/<id>?tab=holistic_mentorship` (when `centre_id` is set) or to the School
+URL, with the filters. Before #491, a Centre-opened drill-down returned to the
+School page, which a Centre-seated manager cannot open.
 
 ## Issue #383 navigation fixes — implemented in PR #394
 

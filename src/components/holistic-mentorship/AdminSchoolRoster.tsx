@@ -2,11 +2,21 @@
 
 import { ArrowUpRight, Search, UserRound, Users } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
 
 import { Badge, Button, Input, Modal, Select } from "@/components/ui";
 import { CURRENT_ACADEMIC_YEAR, PROGRAM_IDS } from "@/lib/constants";
+import {
+  coverageReturnFor,
+  DEFAULT_COVERAGE_FILTERS,
+  readCoverageFilters,
+  writeCoverageFilters,
+  type CoverageAssignment as AssignmentFilter,
+  type CoverageFilters,
+  type CoverageProgress as Progress,
+} from "@/lib/holistic-coverage-filters";
+import { holisticStudentPhaseHref } from "@/lib/holistic-links";
 import type {
   HolisticAssignmentCoverageSummary,
   HolisticAssignmentRosterStudent as Student,
@@ -14,9 +24,20 @@ import type {
 import HolisticTutorialLink from "./HolisticTutorialLink";
 import StudentIdentity from "./StudentIdentity";
 
-type AssignmentFilter = "all" | "assigned" | "unassigned";
-type Progress = "completed" | "pending" | "none";
 type EligibleMentor = { userId: number; name: string; email: string | null };
+type MentorFilterOption = { value: string; label: string };
+type StudentLinkContext = {
+  schoolCode: string;
+  programId: number;
+  fromHolisticProgress: boolean;
+  returnQuery: string;
+};
+
+const NO_MENTORS: EligibleMentor[] = [];
+// Search writes to the URL once typing pauses (browsers throttle rapid
+// history.replaceState calls); any click inside the roster writes at once.
+const URL_WRITE_DELAY_MS = 300;
+const FILTER_LABEL = "block text-[11px] font-extrabold uppercase tracking-wide text-text-muted";
 
 const PROGRESS_LABEL: Record<Progress, string> = {
   completed: "Completed",
@@ -36,15 +57,17 @@ function progress(student: Student): Progress {
   return "pending";
 }
 
-function studentHref(student: Student, schoolCode: string, programId: number, fromHolisticProgress: boolean) {
+function studentHref(student: Student, link: StudentLinkContext) {
   if (!student.activePhaseId) return null;
-  const params = new URLSearchParams({
-    school_code: schoolCode,
-    academic_year: CURRENT_ACADEMIC_YEAR,
-    program_id: String(programId),
-    source: fromHolisticProgress ? "school-progress" : "school",
+  return holisticStudentPhaseHref({
+    studentId: student.studentId,
+    phaseId: student.activePhaseId,
+    schoolCode: link.schoolCode,
+    academicYear: CURRENT_ACADEMIC_YEAR,
+    programId: link.programId,
+    source: link.fromHolisticProgress ? "school-progress" : "school",
+    returnQuery: link.returnQuery,
   });
-  return `/holistic-mentorship/students/${student.studentId}/phases/${student.activePhaseId}?${params}`;
 }
 
 function derivedSummary(students: Student[]): HolisticAssignmentCoverageSummary {
@@ -88,10 +111,8 @@ function Summary({ summary }: { summary: HolisticAssignmentCoverageSummary }) {
 }
 
 type CoverageTableProps = {
-  fromHolisticProgress?: boolean;
   students: Student[];
-  schoolCode: string;
-  programId: number;
+  link: StudentLinkContext;
   canManage: boolean;
   controlsDisabled: boolean;
   onAssign: (student: Student) => void;
@@ -99,7 +120,7 @@ type CoverageTableProps = {
   onRemove: (student: Student) => void;
 };
 
-function CoverageTable({ fromHolisticProgress = false, students, schoolCode, programId, canManage, controlsDisabled,
+function CoverageTable({ students, link, canManage, controlsDisabled,
   onAssign, onReassign, onRemove }: CoverageTableProps) {
   return <div className="overflow-hidden rounded-lg border border-border bg-bg-card shadow-sm">
     <div role="region" aria-label="School mentorship coverage" tabIndex={0}
@@ -111,7 +132,7 @@ function CoverageTable({ fromHolisticProgress = false, students, schoolCode, pro
             <th className="w-36 px-4 py-3"><span className="sr-only">Actions</span></th></tr>
         </thead>
         <tbody className="divide-y divide-border">{students.map((student) => {
-          const href = studentHref(student, schoolCode, programId, fromHolisticProgress);
+          const href = studentHref(student, link);
           const state = progress(student);
           return <tr key={student.studentId} className="hover:bg-hover-bg">
             <td className="px-4 py-3"><StudentIdentity student={student} /></td>
@@ -159,39 +180,60 @@ function RosterHeader({ canEdit, academicYear }: { canEdit: boolean; academicYea
   </div>;
 }
 
-function RosterFilters({ search, grade, assignment, onSearchChange, onGradeChange,
-  onAssignmentChange }: {
-  search: string;
-  grade: string;
-  assignment: AssignmentFilter;
-  onSearchChange: (value: string) => void;
-  onGradeChange: (value: string) => void;
-  onAssignmentChange: (value: AssignmentFilter) => void;
+function RosterFilters({ filters, mentorOptions, onChange }: {
+  filters: CoverageFilters;
+  mentorOptions: MentorFilterOption[];
+  onChange: (change: Partial<CoverageFilters>) => void;
 }) {
-  return <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_10rem_12rem]">
-    <label className="block text-[11px] font-extrabold uppercase tracking-wide text-text-muted">
+  return <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_8.5rem_14rem_10.5rem_10rem]">
+    <label className={`${FILTER_LABEL} sm:col-span-2 lg:col-span-1`}>
       Search Student
       <span className="relative mt-1 block">
         <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-text-muted" />
-        <Input aria-label="Search Students" value={search} placeholder="Name or Student ID" className="pl-9"
-          onChange={(event) => onSearchChange(event.target.value)} />
+        <Input aria-label="Search Students" value={filters.search} placeholder="Name or Student ID" className="pl-9"
+          onChange={(event) => onChange({ search: event.target.value })} />
       </span>
     </label>
-    <label className="block text-[11px] font-extrabold uppercase tracking-wide text-text-muted">
+    <label className={FILTER_LABEL}>
       Grade
-      <Select aria-label="Filter by Grade" className="mt-1" value={grade}
-        onChange={(event) => onGradeChange(event.target.value)}>
+      <Select aria-label="Filter by Grade" className="mt-1" value={filters.grade}
+        onChange={(event) => onChange({ grade: event.target.value as CoverageFilters["grade"] })}>
         <option value="">All Grades</option><option value="11">Grade 11</option><option value="12">Grade 12</option>
       </Select>
     </label>
-    <label className="block text-[11px] font-extrabold uppercase tracking-wide text-text-muted">
+    <label className={FILTER_LABEL}>
+      Mentor
+      <Select aria-label="Filter by Mentor" className="mt-1" value={filters.mentor}
+        onChange={(event) => onChange({ mentor: event.target.value })}>
+        <option value="">All Mentors</option>
+        {mentorOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+      </Select>
+    </label>
+    <label className={FILTER_LABEL}>
+      Progress
+      <Select aria-label="Filter by Progress" className="mt-1" value={filters.progress}
+        onChange={(event) => onChange({ progress: event.target.value as CoverageFilters["progress"] })}>
+        <option value="">All Progress</option><option value="completed">Completed</option>
+        <option value="pending">Pending</option><option value="none">No active Phase</option>
+      </Select>
+    </label>
+    <label className={FILTER_LABEL}>
       Assignment
-      <Select aria-label="Filter by Assignment" className="mt-1" value={assignment}
-        onChange={(event) => onAssignmentChange(event.target.value as AssignmentFilter)}>
-        <option value="all">All Students</option><option value="assigned">Assigned</option><option value="unassigned">Unassigned</option>
+      <Select aria-label="Filter by Assignment" className="mt-1" value={filters.assignment}
+        onChange={(event) => onChange({ assignment: event.target.value as AssignmentFilter })}>
+        <option value="all">All Students</option><option value="assigned">Assigned</option>
+        {/* A Mentor's Students are all assigned, so Unassigned would always be empty. */}
+        <option value="unassigned" disabled={filters.mentor !== ""}>Unassigned</option>
       </Select>
     </label>
   </div>;
+}
+
+function ShowingCount({ shown, total }: { shown: number; total: number }) {
+  return <p role="status" className="text-sm text-text-muted">
+    Showing <span className="font-mono font-semibold text-text-primary">{shown}</span> of{" "}
+    <span className="font-mono font-semibold text-text-primary">{total}</span> Students
+  </p>;
 }
 
 function NoMatchingStudents() {
@@ -345,22 +387,23 @@ function RemoveMentorModal({ student, reason, submitting, submitError, onReasonC
   </Modal>;
 }
 
-function filterStudents(
-  students: Student[],
-  search: string,
-  grade: string,
-  assignment: AssignmentFilter
-) {
-  const query = search.trim().toLowerCase();
+function filterStudents(students: Student[], filters: CoverageFilters) {
+  const query = filters.search.trim().toLowerCase();
   return students.filter((student) =>
-    matchesGrade(student, grade) &&
-    matchesAssignment(student, assignment) &&
+    matchesGrade(student, filters.grade) &&
+    matchesMentor(student, filters.mentor) &&
+    (!filters.progress || progress(student) === filters.progress) &&
+    matchesAssignment(student, filters.assignment) &&
     matchesStudentQuery(student, query)
   );
 }
 
 function matchesGrade(student: Student, grade: string) {
   return !grade || String(student.grade) === grade;
+}
+
+function matchesMentor(student: Student, mentor: string) {
+  return !mentor || String(student.ownership?.mentorUserId) === mentor;
 }
 
 function matchesAssignment(student: Student, assignment: AssignmentFilter) {
@@ -373,6 +416,81 @@ function matchesStudentQuery(student: Student, query: string) {
   if (!query) return true;
   return student.name.toLowerCase().includes(query) ||
     (student.externalStudentId ?? "").toLowerCase().includes(query);
+}
+
+// Search and Grade narrow the summary cards; Mentor, Progress and Assignment
+// only narrow the table.
+function coverageSummary(students: Student[], filters: CoverageFilters,
+  summary?: HolisticAssignmentCoverageSummary) {
+  if (filters.search.trim() || filters.grade) {
+    return derivedSummary(filterStudents(students, {
+      ...DEFAULT_COVERAGE_FILTERS,
+      search: filters.search,
+      grade: filters.grade,
+    }));
+  }
+  return summary ?? derivedSummary(students);
+}
+
+const nameKey = (name: string) => name.trim().toLocaleLowerCase();
+
+// Every current Mentor in this roster (read from the rows, so read-only viewers
+// get them too), by name, with their assigned-Student count. Mentors sharing a
+// name are told apart by email when known, otherwise by user ID.
+function mentorFilterOptions(students: Student[], mentors: EligibleMentor[]): MentorFilterOption[] {
+  const byId = new Map<number, { name: string; count: number }>();
+  for (const { ownership } of students) {
+    if (!ownership) continue;
+    const count = (byId.get(ownership.mentorUserId)?.count ?? 0) + 1;
+    byId.set(ownership.mentorUserId, { name: ownership.mentorName, count });
+  }
+  const rows = [...byId].map(([userId, entry]) => ({ userId, ...entry }))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }) || a.userId - b.userId);
+  const nameUses = new Map<string, number>();
+  for (const row of rows) nameUses.set(nameKey(row.name), (nameUses.get(nameKey(row.name)) ?? 0) + 1);
+  const emails = new Map(mentors.map((mentor) => [mentor.userId, mentor.email]));
+  return rows.map(({ userId, name, count }) => {
+    const shared = (nameUses.get(nameKey(name)) ?? 0) > 1;
+    const suffix = shared ? ` · ${emails.get(userId) ?? `ID ${userId}`}` : "";
+    return { value: String(userId), label: `${name}${suffix} (${count})` };
+  });
+}
+
+// A Mentor no longer in the roster reads as All Mentors, and a Mentor rules
+// out Unassigned (its Students are all assigned).
+function resolveFilters(filters: CoverageFilters, mentorOptions: MentorFilterOption[]): CoverageFilters {
+  const mentor = mentorOptions.some((option) => option.value === filters.mentor) ? filters.mentor : "";
+  const assignment = mentor && filters.assignment === "unassigned" ? "all" : filters.assignment;
+  if (mentor === filters.mentor && assignment === filters.assignment) return filters;
+  return { ...filters, mentor, assignment };
+}
+
+// Rewrites only the `hm_` params, in place: no history entry, no server round
+// trip (Next's patched history API updates useSearchParams without a fetch,
+// unlike router.replace, which would re-render the roster on the server).
+function replaceCoverageUrl(filters: CoverageFilters) {
+  const url = new URL(window.location.href);
+  writeCoverageFilters(url.searchParams, filters);
+  if (url.search === new URL(window.location.href).search) return;
+  window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+}
+
+function useCoverageFilters(students: Student[], mentors: EligibleMentor[]) {
+  const searchParams = useSearchParams();
+  const [selected, setSelected] = useState(() => readCoverageFilters(searchParams));
+  const mentorOptions = useMemo(() => mentorFilterOptions(students, mentors), [students, mentors]);
+  const filters = useMemo(() => resolveFilters(selected, mentorOptions), [selected, mentorOptions]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => replaceCoverageUrl(filters), URL_WRITE_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [filters]);
+  return {
+    filters,
+    mentorOptions,
+    update: (change: Partial<CoverageFilters>) =>
+      setSelected(resolveFilters({ ...filters, ...change }, mentorOptions)),
+    writeUrl: () => replaceCoverageUrl(filters),
+  };
 }
 
 async function requestMappingMutation(
@@ -504,10 +622,10 @@ function canManageMappings(role: string | undefined, academicYear: string) {
   return adminRole && academicYear === CURRENT_ACADEMIC_YEAR;
 }
 
-function CoverageResults({ fromHolisticProgress, students, schoolCode, programId, canManage, controlsDisabled,
+function CoverageResults({ students, link, canManage, controlsDisabled,
   onAssign, onReassign, onRemove }: CoverageTableProps) {
   if (students.length === 0) return <NoMatchingStudents />;
-  return <CoverageTable fromHolisticProgress={fromHolisticProgress} students={students} schoolCode={schoolCode} programId={programId}
+  return <CoverageTable students={students} link={link}
     canManage={canManage} controlsDisabled={controlsDisabled} onAssign={onAssign}
     onReassign={onReassign} onRemove={onRemove} />;
 }
@@ -536,17 +654,20 @@ function MappingDialogs({ dialogs, mentors }: {
 
 export default function AdminSchoolRoster({
   fromHolisticProgress = false,
+  centreId,
   students,
   schoolCode,
   programId = PROGRAM_IDS.COE,
   academicYear = CURRENT_ACADEMIC_YEAR,
   role,
   canEdit = true,
-  mentors = [],
+  mentors = NO_MENTORS,
   summary,
 }: {
   students: Student[];
   schoolCode: string;
+  /** Set on a Centre page, so a Student's back link returns to that Centre. */
+  centreId?: number;
   programId?: number;
   academicYear?: string;
   role?: string;
@@ -555,30 +676,27 @@ export default function AdminSchoolRoster({
   summary?: HolisticAssignmentCoverageSummary;
   fromHolisticProgress?: boolean;
 }) {
-  const [search, setSearch] = useState("");
-  const [grade, setGrade] = useState("");
-  const [assignment, setAssignment] = useState<AssignmentFilter>("all");
+  const coverage = useCoverageFilters(students, mentors);
   const dialogs = useMappingDialogs({ schoolCode, programId, academicYear, canEdit, students });
   const canManage = canManageMappings(role, academicYear);
-  const shown = useMemo(
-    () => filterStudents(students, search, grade, assignment),
-    [assignment, grade, students, search]
-  );
-  const hasSearchOrGradeFilter = search.trim().length > 0 || Boolean(grade);
-  const displayedSummary = hasSearchOrGradeFilter
-    ? derivedSummary(filterStudents(students, search, grade, "all"))
-    : summary ?? derivedSummary(students);
+  const shown = useMemo(() => filterStudents(students, coverage.filters), [coverage.filters, students]);
+  const link = {
+    schoolCode, programId, fromHolisticProgress,
+    returnQuery: coverageReturnFor(coverage.filters, centreId),
+  };
 
-  return <section className="min-w-0 max-w-full space-y-5">
+  // Clicking a Student (or anything else here) writes a pending search to the
+  // URL first, so browser Back returns to it.
+  return <section className="min-w-0 max-w-full space-y-5" onClickCapture={coverage.writeUrl}>
     <RosterHeader canEdit={canEdit} academicYear={academicYear} />
-    <Summary summary={displayedSummary} />
-    <RosterFilters search={search} grade={grade} assignment={assignment}
-      onSearchChange={setSearch} onGradeChange={setGrade} onAssignmentChange={setAssignment} />
-    <CoverageResults fromHolisticProgress={fromHolisticProgress} students={shown} schoolCode={schoolCode} programId={programId}
+    <Summary summary={coverageSummary(students, coverage.filters, summary)} />
+    <RosterFilters filters={coverage.filters} mentorOptions={coverage.mentorOptions}
+      onChange={coverage.update} />
+    <ShowingCount shown={shown.length} total={students.length} />
+    <CoverageResults students={shown} link={link}
       canManage={canManage} controlsDisabled={!canEdit || dialogs.submitting || dialogs.rosterStale}
       onAssign={dialogs.setAssigning} onReassign={dialogs.setReassigning}
       onRemove={dialogs.setRemoving} />
-    <div className="sr-only" role="status">Showing {shown.length} of {students.length} Students</div>
     <MappingDialogs dialogs={dialogs} mentors={mentors} />
   </section>;
 }

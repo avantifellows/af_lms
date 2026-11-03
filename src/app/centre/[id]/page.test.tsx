@@ -89,6 +89,7 @@ vi.mock("@/lib/holistic-mentorship", () => ({
 }));
 vi.mock("@/lib/holistic-mappings", () => ({
   listHolisticAssignmentRoster: mockListHolisticAssignmentRoster,
+  getHolisticAssignmentCoverageSummary: async () => undefined,
 }));
 vi.mock("next/link", () => ({
   __esModule: true,
@@ -160,8 +161,9 @@ vi.mock("@/components/holistic-mentorship/HolisticMentorshipWorkspace", () => ({
 }));
 vi.mock("@/components/holistic-mentorship/AdminSchoolRoster", () => ({
   __esModule: true,
-  default: ({ schoolCode }: { schoolCode: string }) => (
-    <div data-testid="holistic-admin-roster" data-school-code={schoolCode}>
+  default: ({ schoolCode, centreId }: { schoolCode: string; centreId?: number }) => (
+    <div data-testid="holistic-admin-roster" data-school-code={schoolCode}
+      data-centre-id={String(centreId)}>
       AdminSchoolRoster
     </div>
   ),
@@ -305,6 +307,27 @@ describe("CentrePage → RosterPage (centre scope)", () => {
   // A centre page shows only its own program's surfaces. Holistic is Program 1,
   // so a Nodal centre must not surface it even when the parent school has a CoE
   // centre too (which is what requireHolisticMentorshipAccess would allow).
+  it("gives a read-only manager's Centre coverage the Centre to return to", async () => {
+    const permission = makePermission({ email: "pm@avantifellows.org", role: "program_manager", level: 2 });
+    setupCentre({}, permission);
+    mockRequireHolisticMentorshipAccess.mockResolvedValue({
+      ok: true,
+      email: permission.email,
+      permission,
+      canEdit: false,
+      school: { id: 20, code: "70705", name: "JNV Bhavnagar", region: "West", programId: 1 },
+    });
+
+    await renderCentre();
+
+    expect(screen.getByTestId("holistic-admin-roster")).toHaveAttribute("data-centre-id", "8");
+    expect(mockRequireHolisticMentorshipAccess).toHaveBeenCalledWith(
+      expect.anything(),
+      "assignment_coverage_read",
+      { schoolCode: "70705", programId: 1 },
+    );
+  });
+
   it("hides Holistic Mentorship on a non-CoE centre at a CoE school", async () => {
     setupCentre({ id: "11", program_id: 2, program_name: "JNV Nodal" }, {
       program_ids: [2],

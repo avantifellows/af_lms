@@ -1006,6 +1006,7 @@ export default function StudentPhaseWorkspace({
   academicYear,
   programId = PROGRAM_IDS.COE,
   source,
+  returnQuery,
   backHref,
   canRegenerateProfile = true,
   viewerRole = "admin",
@@ -1015,6 +1016,8 @@ export default function StudentPhaseWorkspace({
   academicYear: string;
   programId?: number;
   source?: HolisticStudentPhaseSource;
+  /** The coverage view (Centre, filters) Phase links keep for the back link. */
+  returnQuery?: string;
   backHref?: string;
   canRegenerateProfile?: boolean;
   viewerRole?: string;
@@ -1023,8 +1026,8 @@ export default function StudentPhaseWorkspace({
   if (detail.readOnly) {
     return <AdminReadOnlyWorkspace detail={detail} schoolCode={schoolCode}
       academicYear={academicYear} programId={programId}
-      source={source} backHref={backHref} canRegenerateProfile={canRegenerateProfile}
-      viewerRole={viewerRole} />;
+      source={source} returnQuery={returnQuery} backHref={backHref}
+      canRegenerateProfile={canRegenerateProfile} viewerRole={viewerRole} />;
   }
   const phases = detail.phases.map((phase) =>
     phase.phaseId !== null && "locked" in phase && !phase.locked && completedPhaseIds.has(phase.phaseId)
@@ -1040,7 +1043,8 @@ export default function StudentPhaseWorkspace({
       <StudentIdentity student={detail.student} backHref={backHref} />
       <PhaseNavigation studentId={detail.student.id} phases={phases}
         selectedPhaseId={detail.selectedPhase.phaseId} schoolCode={schoolCode}
-        academicYear={academicYear} programId={programId} source={source} />
+        academicYear={academicYear} programId={programId} source={source}
+        returnQuery={returnQuery} />
       <InactivePhasePanels studentId={detail.student.id} phases={phases}
         selectedPhaseId={detail.selectedPhase.phaseId} />
       <SelectedPhaseContent phase={visibleSelected} studentId={detail.student.id}
@@ -1052,13 +1056,14 @@ export default function StudentPhaseWorkspace({
   );
 }
 
-function AdminReadOnlyWorkspace({ detail, schoolCode, academicYear, programId, source, backHref,
-  canRegenerateProfile, viewerRole }: {
+function AdminReadOnlyWorkspace({ detail, schoolCode, academicYear, programId, source, returnQuery,
+  backHref, canRegenerateProfile, viewerRole }: {
   detail: HolisticStudentPhaseDetail;
   schoolCode: string;
   academicYear: string;
   programId: number;
   source?: HolisticStudentPhaseSource;
+  returnQuery?: string;
   backHref?: string;
   canRegenerateProfile: boolean;
   viewerRole: string;
@@ -1072,7 +1077,8 @@ function AdminReadOnlyWorkspace({ detail, schoolCode, academicYear, programId, s
       <Card elevation="sm" className="overflow-hidden">
         <PhaseNavigation readOnly studentId={detail.student.id} phases={detail.phases}
           selectedPhaseId={detail.selectedPhase.phaseId} schoolCode={schoolCode}
-          academicYear={academicYear} programId={programId} source={source} />
+          academicYear={academicYear} programId={programId} source={source}
+          returnQuery={returnQuery} />
         <AdminSelectedPhase phase={selectedOpenPhase(detail)} selectedPhase={detail.selectedPhase}
           studentId={detail.student.id} schoolCode={schoolCode}
           academicYear={academicYear} programId={programId}
@@ -1148,7 +1154,8 @@ function InactivePhasePanels({ studentId, phases, selectedPhaseId }: {
     aria-labelledby={phaseTabId(studentId, phase)} hidden />)}</>;
 }
 
-function PhaseNavigation({ studentId, phases, selectedPhaseId, schoolCode, academicYear, programId, source, readOnly = false }: {
+function PhaseNavigation({ studentId, phases, selectedPhaseId, schoolCode, academicYear, programId, source,
+  returnQuery, readOnly = false }: {
   studentId: number;
   phases: HolisticStudentPhaseDetail["phases"];
   selectedPhaseId: number | null;
@@ -1156,6 +1163,7 @@ function PhaseNavigation({ studentId, phases, selectedPhaseId, schoolCode, acade
   academicYear: string;
   programId: number;
   source?: HolisticStudentPhaseSource;
+  returnQuery?: string;
   readOnly?: boolean;
 }) {
   const onKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
@@ -1177,8 +1185,8 @@ function PhaseNavigation({ studentId, phases, selectedPhaseId, schoolCode, acade
   return <nav role="tablist" aria-label="Holistic Phases" onKeyDown={onKeyDown}
     className="flex overflow-x-auto border-b border-border">
     {phases.map((phase) => <PhaseTab key={`${phase.number}-${phase.title}`} phase={phase}
-      current={phase.phaseId === selectedPhaseId} studentId={studentId} schoolCode={schoolCode}
-      academicYear={academicYear} programId={programId} source={source} admin={readOnly} />)}
+      current={phase.phaseId === selectedPhaseId} studentId={studentId}
+      link={{ schoolCode, academicYear, programId, source, returnQuery }} admin={readOnly} />)}
   </nav>;
 }
 
@@ -1193,10 +1201,8 @@ type PhaseTabProps = {
   phase: PhaseNavigationItem;
   current: boolean;
   studentId: number;
-  schoolCode: string;
-  academicYear: string;
-  programId: number;
-  source?: HolisticStudentPhaseSource;
+  /** Everything a Phase link keeps besides the Student and Phase. */
+  link: Omit<Parameters<typeof holisticStudentPhaseHref>[0], "studentId" | "phaseId">;
   admin: boolean;
 };
 
@@ -1224,7 +1230,7 @@ function LockedPhaseTab({ phase, studentId, admin }: PhaseTabProps) {
   </button>;
 }
 
-function OpenPhaseTab({ phase, current, studentId, schoolCode, academicYear, programId, source, admin }:
+function OpenPhaseTab({ phase, current, studentId, link, admin }:
   PhaseTabProps & { phase: PhaseNavigationItem & { phaseId: number } }) {
   const stage = phaseStage(phase);
   const className = admin
@@ -1232,14 +1238,7 @@ function OpenPhaseTab({ phase, current, studentId, schoolCode, academicYear, pro
     : `border-b-[3px] ${current
       ? "border-accent bg-bg-card text-text-primary"
       : "border-transparent text-text-muted hover:bg-accent/5"}`;
-  return <Link href={holisticStudentPhaseHref({
-    studentId,
-    phaseId: phase.phaseId,
-    schoolCode,
-    academicYear,
-    programId,
-    source,
-  })}
+  return <Link href={holisticStudentPhaseHref({ ...link, studentId, phaseId: phase.phaseId })}
     id={phaseTabId(studentId, phase)} role="tab" aria-selected={current} tabIndex={current ? 0 : -1}
     aria-controls={phasePanelId(studentId, phase)}
     aria-label={`Phase ${phase.number} - ${phase.title} - ${stage}`}

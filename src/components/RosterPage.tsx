@@ -412,13 +412,40 @@ function HolisticProgramChoice({ schoolCode, programIds }: {
  * HOLISTIC_MENTORSHIP_PROGRAM_IDS (JNV CoE + EMRS CoE), not a hardcoded CoE —
  * both active EMRS CoE centres are school-linked and must show the tab.
  */
+type GrantedHolisticAccess = Extract<
+  Awaited<ReturnType<typeof requireHolisticMentorshipAccess>>,
+  { ok: true }
+>;
+
+// The current-year roster, summary and (for editors) eligible Mentors.
+function loadAssignmentCoverage(holisticAccess: GrantedHolisticAccess) {
+  const school = holisticAccess.school!;
+  return Promise.all([
+    listHolisticAssignmentRoster({
+      permission: holisticAccess.permission,
+      schoolId: school.id,
+      programId: school.programId,
+      academicYear: CURRENT_ACADEMIC_YEAR,
+    }),
+    getHolisticAssignmentCoverageSummary({
+      permission: holisticAccess.permission,
+      schoolId: school.id,
+      programId: school.programId,
+      academicYear: CURRENT_ACADEMIC_YEAR,
+    }),
+    holisticAccess.canEdit
+      ? listEligibleHolisticMentors({ schoolId: school.id, programId: school.programId })
+      : Promise.resolve([]),
+  ]);
+}
+
 async function buildHolisticMentorshipContent({
   session,
   permission,
   schoolCode,
   access,
   isCentre,
-  centreProgramId,
+  centre,
   programId,
   programChoices,
   fromHolisticProgress = false,
@@ -428,13 +455,13 @@ async function buildHolisticMentorshipContent({
   schoolCode: string;
   access: FeatureAccessResult;
   isCentre: boolean;
-  centreProgramId?: number;
+  centre?: { centreId?: number; programId?: number };
   programId?: number | null;
   programChoices?: number[];
   fromHolisticProgress?: boolean;
 }): Promise<ReactNode | null> {
   if (!access.canView || programId === null) return null;
-  if (isCentre && !isHolisticMentorshipProgramId(Number(centreProgramId))) return null;
+  if (isCentre && !isHolisticMentorshipProgramId(Number(centre?.programId))) return null;
   if (shouldChooseHolisticProgram(programId, programChoices)) {
     return <HolisticProgramChoice schoolCode={schoolCode} programIds={programChoices!} />;
   }
@@ -456,29 +483,11 @@ async function buildHolisticMentorshipContent({
       />
     );
   }
-  const [students, summary, mentors] = await Promise.all([
-    listHolisticAssignmentRoster({
-      permission: holisticAccess.permission,
-      schoolId: holisticAccess.school!.id,
-      programId: holisticAccess.school!.programId,
-      academicYear: CURRENT_ACADEMIC_YEAR,
-    }),
-    getHolisticAssignmentCoverageSummary({
-      permission: holisticAccess.permission,
-      schoolId: holisticAccess.school!.id,
-      programId: holisticAccess.school!.programId,
-      academicYear: CURRENT_ACADEMIC_YEAR,
-    }),
-    holisticAccess.canEdit
-      ? listEligibleHolisticMentors({
-          schoolId: holisticAccess.school!.id,
-          programId: holisticAccess.school!.programId,
-        })
-      : Promise.resolve([]),
-  ]);
+  const [students, summary, mentors] = await loadAssignmentCoverage(holisticAccess);
   return (
     <AdminSchoolRoster
       fromHolisticProgress={!isCentre && fromHolisticProgress}
+      centreId={centre?.centreId}
       schoolCode={schoolCode}
       programId={holisticAccess.school!.programId}
       academicYear={CURRENT_ACADEMIC_YEAR}
@@ -1342,7 +1351,7 @@ export default async function RosterPage({
     schoolCode: school.code,
     access: access.holisticMentorship,
     isCentre,
-    centreProgramId: centre.programId,
+    centre,
     programId: holistic.programId,
     programChoices: holistic.choices,
     fromHolisticProgress,
