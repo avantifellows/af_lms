@@ -127,8 +127,21 @@ describe("SchoolTabs", () => {
     expect(screen.getByText("Mounted at ?source=progress&tab=performance")).toBeInTheDocument();
   });
 
+  it("keeps params a tab wrote to the live URL before useSearchParams caught up", async () => {
+    window.history.replaceState(null, "", "/school/123?tab=visits&hm_search=kes");
+    mockSearchParams = new URLSearchParams("tab=visits");
+    const user = userEvent.setup();
+    render(<SchoolTabs tabs={tabs} />);
+
+    await user.click(screen.getByRole("tab", { name: "Info" }));
+
+    expect(window.location.search).toBe("?tab=info&hm_search=kes");
+    mockSearchParams = new URLSearchParams();
+  });
+
   it("preserves the Holistic return marker when switching tabs", async () => {
     mockSearchParams = new URLSearchParams("program_id=94&source=progress");
+    window.history.replaceState(null, "", "/school/123?program_id=94&source=progress");
     const user = userEvent.setup();
     render(<SchoolTabs tabs={tabs} />);
 
@@ -212,6 +225,7 @@ describe("SchoolTabs", () => {
       mockSearchParams = new URLSearchParams(
         "program_id=94&source=progress&tab=performance&grade=12&stream=pcm&category=chapter&session=sess-a"
       );
+      window.history.replaceState(null, "", `/school/123?${mockSearchParams}`);
       const user = userEvent.setup();
       render(<SchoolTabs tabs={withPerformance} />);
 

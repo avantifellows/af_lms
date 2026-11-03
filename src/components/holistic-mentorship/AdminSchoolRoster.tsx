@@ -3,13 +3,14 @@
 import { ArrowUpRight, Search, UserRound, Users } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Badge, Button, Input, Modal, Select } from "@/components/ui";
 import { CURRENT_ACADEMIC_YEAR, PROGRAM_IDS } from "@/lib/constants";
 import {
   coverageReturnFor,
   DEFAULT_COVERAGE_FILTERS,
+  MAX_COVERAGE_SEARCH_LENGTH,
   readCoverageFilters,
   writeCoverageFilters,
   type CoverageAssignment as AssignmentFilter,
@@ -35,7 +36,8 @@ type StudentLinkContext = {
 
 const NO_MENTORS: EligibleMentor[] = [];
 // Search writes to the URL once typing pauses (browsers throttle rapid
-// history.replaceState calls); any click inside the roster writes at once.
+// history.replaceState calls). Leaving the search box, any click inside the
+// roster, and unmounting (a School tab switch) write at once.
 const URL_WRITE_DELAY_MS = 300;
 const FILTER_LABEL = "block text-[11px] font-extrabold uppercase tracking-wide text-text-muted";
 
@@ -180,10 +182,11 @@ function RosterHeader({ canEdit, academicYear }: { canEdit: boolean; academicYea
   </div>;
 }
 
-function RosterFilters({ filters, mentorOptions, onChange }: {
+function RosterFilters({ filters, mentorOptions, onChange, onSearchBlur }: {
   filters: CoverageFilters;
   mentorOptions: MentorFilterOption[];
   onChange: (change: Partial<CoverageFilters>) => void;
+  onSearchBlur: () => void;
 }) {
   const mentorLabel = mentorOptions.find((option) => option.value === filters.mentor)?.label ?? "All Mentors";
   return <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_8rem_minmax(14rem,1.5fr)_10.5rem_10rem]">
@@ -192,6 +195,7 @@ function RosterFilters({ filters, mentorOptions, onChange }: {
       <span className="relative mt-1 block">
         <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-text-muted" />
         <Input aria-label="Search Students" value={filters.search} placeholder="Name or Student ID" className="pl-9"
+          maxLength={MAX_COVERAGE_SEARCH_LENGTH} onBlur={onSearchBlur}
           onChange={(event) => onChange({ search: event.target.value })} />
       </span>
     </label>
@@ -479,9 +483,33 @@ function replaceCoverageUrl(filters: CoverageFilters) {
   window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
 }
 
+// The live URL on the client: a School tab switch can remount this roster
+// before useSearchParams has caught up with the filters it wrote on unmount.
+function initialCoverageFilters(searchParams: URLSearchParams) {
+  return readCoverageFilters(typeof window === "undefined"
+    ? searchParams
+    : new URLSearchParams(window.location.search));
+}
+
+// On unmount, write any pending change, unless the page itself has changed
+// (leaving for a Student already wrote it, on the click).
+function useWriteOnUnmount(filters: CoverageFilters) {
+  const latest = useRef(filters);
+  useEffect(() => {
+    latest.current = filters;
+  }, [filters]);
+  useEffect(() => {
+    const pathname = window.location.pathname;
+    const pending = latest;
+    return () => {
+      if (window.location.pathname === pathname) replaceCoverageUrl(pending.current);
+    };
+  }, []);
+}
+
 function useCoverageFilters(students: Student[], mentors: EligibleMentor[]) {
   const searchParams = useSearchParams();
-  const [selected, setSelected] = useState(() => readCoverageFilters(searchParams));
+  const [selected, setSelected] = useState(() => initialCoverageFilters(searchParams));
   const mentorOptions = useMemo(() => mentorFilterOptions(students, mentors), [students, mentors]);
   const filters = useMemo(() => resolveFilters(selected, mentorOptions), [selected, mentorOptions]);
   // Forget a value the roster dropped (a Mentor who lost their last Student),
@@ -491,6 +519,7 @@ function useCoverageFilters(students: Student[], mentors: EligibleMentor[]) {
     const timer = window.setTimeout(() => replaceCoverageUrl(filters), URL_WRITE_DELAY_MS);
     return () => window.clearTimeout(timer);
   }, [filters]);
+  useWriteOnUnmount(filters);
   return {
     filters,
     mentorOptions,
@@ -698,7 +727,7 @@ export default function AdminSchoolRoster({
     <RosterHeader canEdit={canEdit} academicYear={academicYear} />
     <Summary summary={coverageSummary(students, coverage.filters, summary)} />
     <RosterFilters filters={coverage.filters} mentorOptions={coverage.mentorOptions}
-      onChange={coverage.update} />
+      onChange={coverage.update} onSearchBlur={coverage.writeUrl} />
     <ShowingCount shown={shown.length} total={students.length} />
     <CoverageResults students={shown} link={link}
       canManage={canManage} controlsDisabled={!canEdit || dialogs.submitting || dialogs.rosterStale}

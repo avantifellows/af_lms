@@ -1,13 +1,17 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const mockRefresh = vi.hoisted(() => vi.fn());
+const { mockRefresh, mockSearchParams } = vi.hoisted(() => ({
+  mockRefresh: vi.fn(),
+  mockSearchParams: vi.fn(() => new URLSearchParams(window.location.search)),
+}));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: mockRefresh }),
-  useSearchParams: () => new URLSearchParams(window.location.search),
+  useSearchParams: mockSearchParams,
 }));
 
+import SchoolTabs from "@/components/SchoolTabs";
 import AdminSchoolRoster from "./AdminSchoolRoster";
 
 const students = [
@@ -118,9 +122,12 @@ function expectSummaryMetrics(expected: typeof wholeSchoolSummary) {
 
 describe("AdminSchoolRoster", () => {
   afterEach(() => {
+    // Unmount first: the roster writes pending filters to the URL on unmount.
+    cleanup();
     vi.unstubAllGlobals();
     vi.clearAllMocks();
     vi.restoreAllMocks();
+    mockSearchParams.mockImplementation(() => new URLSearchParams(window.location.search));
     window.history.replaceState(null, "", "/");
   });
 
@@ -786,5 +793,62 @@ describe("AdminSchoolRoster", () => {
     rerender(<AdminSchoolRoster students={coverageStudents} schoolCode="SCH001" />);
     expect(screen.getByRole("combobox", { name: "Filter by Mentor" })).toHaveValue("");
     expect(screen.getByRole("status")).toHaveTextContent("Showing 6 of 6 Students");
+  });
+  it("keeps a just-typed search across a School tab switch and back", async () => {
+    window.history.replaceState(null, "", "/school/SCH001?tab=holistic_mentorship&program_id=1");
+    // Next updates useSearchParams after replaceState in a transition; model the
+    // worst case, a snapshot that never catches up.
+    const snapshot = new URLSearchParams(window.location.search);
+    mockSearchParams.mockImplementation(() => snapshot);
+    const user = userEvent.setup();
+    render(<SchoolTabs defaultTab="enrollment" tabs={[
+      { id: "enrollment", label: "Enrollment", content: <div>Enrollment Content</div> },
+      { id: "holistic_mentorship", label: "Holistic Mentorship",
+        content: <AdminSchoolRoster students={coverageStudents} schoolCode="SCH001" /> },
+    ]} />);
+
+    await user.type(screen.getByRole("textbox", { name: "Search Students" }), "kes");
+    await user.click(screen.getByRole("tab", { name: "Enrollment" }));
+    expect(screen.getByText("Enrollment Content")).toBeInTheDocument();
+    expect(window.location.search).toBe("?program_id=1&hm_search=kes");
+
+    await user.click(screen.getByRole("tab", { name: "Holistic Mentorship" }));
+    expect(screen.getByRole("textbox", { name: "Search Students" })).toHaveValue("kes");
+    expect(window.location.search).toBe("?program_id=1&hm_search=kes&tab=holistic_mentorship");
+  });
+
+  it("writes the search when the search box loses focus", () => {
+    window.history.replaceState(null, "", "/school/SCH001?tab=holistic_mentorship");
+    render(<AdminSchoolRoster students={coverageStudents} schoolCode="SCH001" />);
+    const search = screen.getByRole("textbox", { name: "Search Students" });
+
+    fireEvent.change(search, { target: { value: "Ravi  Shah" } });
+    fireEvent.blur(search);
+
+    expect(window.location.search).toBe("?tab=holistic_mentorship&hm_search=Ravi++Shah");
+  });
+
+  it("does not write a blank search and limits search to what the URL keeps", async () => {
+    window.history.replaceState(null, "", "/school/SCH001?tab=holistic_mentorship&hm_search=Asha");
+    render(<AdminSchoolRoster students={coverageStudents} schoolCode="SCH001" />);
+    const search = screen.getByRole("textbox", { name: "Search Students" });
+    expect(search).toHaveAttribute("maxLength", "100");
+
+    fireEvent.change(search, { target: { value: "   " } });
+    fireEvent.blur(search);
+
+    expect(window.location.search).toBe("?tab=holistic_mentorship");
+    expect(screen.getByRole("status")).toHaveTextContent("Showing 6 of 6 Students");
+  });
+
+  it("does not write to the URL on unmount once the page has changed", () => {
+    window.history.replaceState(null, "", "/school/SCH001?tab=holistic_mentorship");
+    const { unmount } = render(<AdminSchoolRoster students={coverageStudents} schoolCode="SCH001" />);
+    fireEvent.change(screen.getByRole("textbox", { name: "Search Students" }), { target: { value: "Asha" } });
+
+    window.history.pushState(null, "", "/holistic-mentorship/students/41/phases/73?source=school");
+    unmount();
+
+    expect(window.location.search).toBe("?source=school");
   });
 });

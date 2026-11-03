@@ -73,9 +73,15 @@ as defaults, and a Mentor that is no longer in the roster reads as All Mentors. 
 roster keeps the filters in React state, seeded from `useSearchParams` on mount,
 and writes them with native `history.replaceState`: no history entry, and no server
 re-render, which `router.replace` would cause. The write waits 300 ms after typing
-stops, because browsers throttle rapid `replaceState` calls, and happens at once on
-any click inside the roster, so a Student click saves the filters before the page
-changes. Student links carry the same params, plus `centre_id` when the roster was
+stops, because browsers throttle rapid `replaceState` calls. It happens at once when
+the search box loses focus, on any click inside the roster (so a Student click saves
+the filters before the page changes), and on unmount while the page is unchanged (a
+School tab switch). `SchoolTabs` builds its next URL from the live
+`window.location.search` rather than its `useSearchParams` snapshot, which can lag
+behind a `replaceState` because Next applies it in a transition. A remounted roster
+reads the live URL for the same reason. A blank or spaces-only search is left out
+of the URL. The input's `maxLength` and the URL reader share
+`MAX_COVERAGE_SEARCH_LENGTH` (100). Student links carry the same params, plus `centre_id` when the roster was
 opened on a Centre page. The Student/Phase page accepts them only for `school` and
 `school-progress` sources, cleans them with `coverageReturnQuery`, and keeps them on
 Phase links and locked-Phase redirects. Its back link goes to

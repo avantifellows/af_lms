@@ -27,6 +27,11 @@ describe("holistic coverage filters", () => {
     const params = new URLSearchParams("tab=holistic_mentorship&hm_grade=12&grade=9");
     writeCoverageFilters(params, { ...DEFAULT_COVERAGE_FILTERS, mentor: "7", progress: "completed" });
     expect(params.toString()).toBe("tab=holistic_mentorship&grade=9&hm_mentor=7&hm_progress=completed");
+    const searched = new URLSearchParams("hm_search=old");
+    writeCoverageFilters(searched, { ...DEFAULT_COVERAGE_FILTERS, search: "  	 " });
+    expect(searched.toString()).toBe("");
+    writeCoverageFilters(searched, { ...DEFAULT_COVERAGE_FILTERS, search: " Ravi  Shah" });
+    expect(searched.get("hm_search")).toBe(" Ravi  Shah");
   });
 
   it("builds and splits a sanitized coverage return query", () => {

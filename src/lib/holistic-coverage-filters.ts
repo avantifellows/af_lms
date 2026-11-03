@@ -34,7 +34,8 @@ const FILTER_PARAMS: Record<keyof CoverageFilters, string> = {
 };
 
 const CENTRE_PARAM = "centre_id";
-const MAX_SEARCH_LENGTH = 100;
+/** The longest search the URL keeps; the search input uses the same limit. */
+export const MAX_COVERAGE_SEARCH_LENGTH = 100;
 const POSITIVE_ID = /^[1-9]\d{0,9}$/;
 
 type ParamReader = { get(name: string): string | null };
@@ -49,7 +50,7 @@ function positiveId(value: string | null) {
 
 export function readCoverageFilters(params: ParamReader): CoverageFilters {
   return {
-    search: (params.get(FILTER_PARAMS.search) ?? "").slice(0, MAX_SEARCH_LENGTH),
+    search: (params.get(FILTER_PARAMS.search) ?? "").slice(0, MAX_COVERAGE_SEARCH_LENGTH),
     grade: oneOf(params.get(FILTER_PARAMS.grade), ["11", "12"] as const, ""),
     mentor: positiveId(params.get(FILTER_PARAMS.mentor)),
     progress: oneOf(params.get(FILTER_PARAMS.progress), ["completed", "pending", "none"] as const, ""),
@@ -57,10 +58,17 @@ export function readCoverageFilters(params: ParamReader): CoverageFilters {
   };
 }
 
+// A blank (or spaces-only) search filters nothing, so it is left out like a
+// default; a real search keeps its spacing as typed.
+function isDefaultFilter(filters: CoverageFilters, key: keyof CoverageFilters) {
+  if (key === "search") return filters.search.trim() === "";
+  return filters[key] === DEFAULT_COVERAGE_FILTERS[key];
+}
+
 /** Sets the non-default filters on `params` and removes the default ones. */
 export function writeCoverageFilters(params: URLSearchParams, filters: CoverageFilters) {
   for (const key of Object.keys(FILTER_PARAMS) as Array<keyof CoverageFilters>) {
-    if (filters[key] === DEFAULT_COVERAGE_FILTERS[key]) params.delete(FILTER_PARAMS[key]);
+    if (isDefaultFilter(filters, key)) params.delete(FILTER_PARAMS[key]);
     else params.set(FILTER_PARAMS[key], filters[key]);
   }
 }
