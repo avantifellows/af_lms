@@ -65,7 +65,10 @@ link restores `source=progress` on the School URL. Ordinary School drill-downs
 retain `source=school`, so their original dashboard return does not change.
 
 School Assignment Coverage filters (Search, Grade, Mentor, Progress, Assignment;
-issue #491) live in the School/Centre URL as `hm_search`, `hm_grade`, `hm_mentor`,
+issue #491) narrow the table and the 8 summary cards together. With any filter
+active, the cards are derived from exactly the rows shown, the same set as
+"Showing N of M Students". With none active, they use the server summary. The
+filters live in the School/Centre URL as `hm_search`, `hm_grade`, `hm_mentor`,
 `hm_progress` and `hm_assignment` (`src/lib/holistic-coverage-filters.ts`). The
 prefix keeps them clear of the page's other params (`tab`, `program_id`, `source`,
 Enrollment's `grade`/`stream`, and so on). Defaults are omitted, invalid values read

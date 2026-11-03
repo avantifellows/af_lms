@@ -10,7 +10,7 @@ import { CURRENT_ACADEMIC_YEAR, PROGRAM_IDS } from "@/lib/constants";
 import {
   coveragePageKey,
   coverageReturnFor,
-  DEFAULT_COVERAGE_FILTERS,
+  hasActiveCoverageFilters,
   MAX_COVERAGE_SEARCH_LENGTH,
   readCoverageFilters,
   writeCoverageFilters,
@@ -426,17 +426,11 @@ function matchesStudentQuery(student: Student, query: string) {
     (student.externalStudentId ?? "").toLowerCase().includes(query);
 }
 
-// Search and Grade narrow the summary cards; Mentor, Progress and Assignment
-// only narrow the table.
-function coverageSummary(students: Student[], filters: CoverageFilters,
+// With any filter active, the cards describe exactly the rows shown (the same
+// set as "Showing N of M"); otherwise the server's whole-School summary.
+function coverageSummary(students: Student[], shown: Student[], filters: CoverageFilters,
   summary?: HolisticAssignmentCoverageSummary) {
-  if (filters.search.trim() || filters.grade) {
-    return derivedSummary(filterStudents(students, {
-      ...DEFAULT_COVERAGE_FILTERS,
-      search: filters.search,
-      grade: filters.grade,
-    }));
-  }
+  if (hasActiveCoverageFilters(filters)) return derivedSummary(shown);
   return summary ?? derivedSummary(students);
 }
 
@@ -742,7 +736,7 @@ export default function AdminSchoolRoster({
   // URL first, so browser Back returns to it.
   return <section className="min-w-0 max-w-full space-y-5" onClickCapture={coverage.writeUrl}>
     <RosterHeader canEdit={canEdit} academicYear={academicYear} />
-    <Summary summary={coverageSummary(students, coverage.filters, summary)} />
+    <Summary summary={coverageSummary(students, shown, coverage.filters, summary)} />
     <RosterFilters filters={coverage.filters} mentorOptions={coverage.mentorOptions}
       onChange={coverage.update} onSearchBlur={coverage.writeUrl} />
     <ShowingCount shown={shown.length} total={students.length} />

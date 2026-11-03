@@ -80,6 +80,12 @@ export function coveragePageKey(pathname: string, params: Iterable<[string, stri
   return `${pathname}?${rest.join("&")}`;
 }
 
+/** Whether any filter narrows the roster (a blank search does not). */
+export function hasActiveCoverageFilters(filters: CoverageFilters) {
+  return (Object.keys(FILTER_PARAMS) as Array<keyof CoverageFilters>)
+    .some((key) => !isDefaultFilter(filters, key));
+}
+
 /** Sets the non-default filters on `params` and removes the default ones. */
 export function writeCoverageFilters(params: URLSearchParams, filters: CoverageFilters) {
   for (const key of Object.keys(FILTER_PARAMS) as Array<keyof CoverageFilters>) {

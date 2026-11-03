@@ -5,6 +5,7 @@ import {
   coverageReturnFor,
   coverageReturnQuery,
   DEFAULT_COVERAGE_FILTERS,
+  hasActiveCoverageFilters,
   readCoverageFilters,
   splitCoverageReturn,
   writeCoverageFilters,
@@ -33,6 +34,15 @@ describe("holistic coverage filters", () => {
     expect(searched.toString()).toBe("");
     writeCoverageFilters(searched, { ...DEFAULT_COVERAGE_FILTERS, search: " Ravi  Shah" });
     expect(searched.get("hm_search")).toBe(" Ravi  Shah");
+  });
+
+  it("treats any non-default filter, but not a blank search, as active", () => {
+    expect(hasActiveCoverageFilters(DEFAULT_COVERAGE_FILTERS)).toBe(false);
+    expect(hasActiveCoverageFilters({ ...DEFAULT_COVERAGE_FILTERS, search: "   " })).toBe(false);
+    expect(hasActiveCoverageFilters({ ...DEFAULT_COVERAGE_FILTERS, search: "a" })).toBe(true);
+    expect(hasActiveCoverageFilters({ ...DEFAULT_COVERAGE_FILTERS, mentor: "9" })).toBe(true);
+    expect(hasActiveCoverageFilters({ ...DEFAULT_COVERAGE_FILTERS, progress: "none" })).toBe(true);
+    expect(hasActiveCoverageFilters({ ...DEFAULT_COVERAGE_FILTERS, assignment: "assigned" })).toBe(true);
   });
 
   it("keys a page by path and non-filter params, ignoring the School tab", () => {
