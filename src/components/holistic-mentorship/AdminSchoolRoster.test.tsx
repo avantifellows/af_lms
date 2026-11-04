@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { Suspense, use, useEffect, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const { mockRefresh, mockSearchParams, mockPathname } = vi.hoisted(() => ({
@@ -820,7 +821,9 @@ describe("AdminSchoolRoster", () => {
       .toBe("?tab=holistic_mentorship&program_id=78&grade=9&hm_grade=12&hm_progress=pending"));
     expect(window.location.pathname).toBe("/school/SCH001");
     expect(window.location.hash).toBe("#coverage");
-    expect(replaceState).toHaveBeenCalledTimes(1);
+    // One write per pick; the delayed write that follows finds nothing to change.
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(replaceState).toHaveBeenCalledTimes(2);
 
     fireEvent.change(screen.getByRole("combobox", { name: "Filter by Grade" }), { target: { value: "" } });
     fireEvent.change(screen.getByRole("combobox", { name: "Filter by Progress" }), { target: { value: "" } });
@@ -844,6 +847,66 @@ describe("AdminSchoolRoster", () => {
     open.addEventListener("click", (event) => event.preventDefault());
     fireEvent.click(open);
     expect(window.location.search).toBe("?tab=holistic_mentorship&hm_search=Nisha");
+  });
+
+  it("writes a dropdown pick at once; only typing waits for a pause", () => {
+    window.history.replaceState(null, "", "/school/SCH001?tab=holistic_mentorship");
+    render(<AdminSchoolRoster students={coverageStudents} schoolCode="SCH001" />);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Filter by Grade" }), { target: { value: "12" } });
+    expect(window.location.search).toBe("?tab=holistic_mentorship&hm_grade=12");
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Filter by Progress" }), { target: { value: "pending" } });
+    expect(window.location.search).toBe("?tab=holistic_mentorship&hm_grade=12&hm_progress=pending");
+  });
+
+  it("holds URL writes while a roster refresh is in flight, then writes the latest filters", async () => {
+    // Next treats history.replaceState as a "restore" that discards a pending
+    // router.refresh(). Model a real refresh: a transition that stays pending
+    // until the refreshed roster (here, a held promise) lands.
+    let land = () => {};
+    const landed = new Promise<void>((resolve) => { land = resolve; });
+    const refresh = { start: () => {} };
+    function RefreshingRoster() {
+      const [refreshing, setRefreshing] = useState(false);
+      useEffect(() => {
+        refresh.start = () => setRefreshing(true);
+      }, []);
+      return <>
+        <AdminSchoolRoster students={students} schoolCode="SCH001" programId={78} role="holistic_mentorship_admin"
+          mentors={[
+            { userId: 9, name: "Anita Mentor", email: "anita@example.com" },
+            { userId: 27, name: "Nila Mentor", email: "nila@example.com" },
+          ]} />
+        {refreshing && <AwaitRefresh promise={landed} />}
+      </>;
+    }
+    function AwaitRefresh({ promise }: { promise: Promise<void> }) {
+      use(promise);
+      return null;
+    }
+    mockRefresh.mockImplementation(() => refresh.start());
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true, changed: 1 }) }));
+    window.history.replaceState(null, "", "/school/SCH001?tab=holistic_mentorship");
+    const user = userEvent.setup();
+    render(<Suspense fallback={null}><RefreshingRoster /></Suspense>);
+
+    await user.click(screen.getByRole("button", { name: "Reassign Mentor for Asha Rao" }));
+    const dialog = screen.getByRole("dialog", { name: "Reassign Mentor for Asha Rao" });
+    await user.selectOptions(within(dialog).getByRole("combobox", { name: "Replacement Mentor" }), "27");
+    await user.type(within(dialog).getByRole("textbox", { name: "Reassignment reason" }), "Mentor handover");
+    await user.click(within(dialog).getByRole("button", { name: "Reassign Mentor" }));
+    await waitFor(() => expect(mockRefresh).toHaveBeenCalledOnce());
+    const replaceState = vi.spyOn(window.history, "replaceState");
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Filter by Grade" }), { target: { value: "12" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Search Students" }), { target: { value: "Ravi" } });
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(replaceState).not.toHaveBeenCalled();
+    expect(window.location.search).toBe("?tab=holistic_mentorship");
+
+    land();
+    await waitFor(() => expect(window.location.search).toBe("?tab=holistic_mentorship&hm_search=Ravi&hm_grade=12"));
   });
 
   it("carries the filters and Centre into the Student link", () => {

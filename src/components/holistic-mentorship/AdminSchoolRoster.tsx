@@ -3,7 +3,7 @@
 import { ArrowUpRight, Search, UserRound, Users } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 
 import { Badge, Button, Input, Modal, Select } from "@/components/ui";
 import { CURRENT_ACADEMIC_YEAR, PROGRAM_IDS } from "@/lib/constants";
@@ -202,7 +202,7 @@ function RosterFilters({ filters, mentorOptions, onChange, onSearchBlur }: {
   onSearchBlur: () => void;
 }) {
   const mentorLabel = mentorOptions.find((option) => option.value === filters.mentor)?.label ?? "All Mentors";
-  return <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_8rem_minmax(14rem,1.5fr)_11rem]">
+  return <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_8rem_minmax(14rem,1.5fr)_11rem]">
     <label className={FILTER_LABEL}>
       Search Student
       <span className="relative mt-1 block">
@@ -526,7 +526,11 @@ function useWriteOnUnmount(filters: CoverageFilters, page: string) {
   }, [page]);
 }
 
-function useCoverageFilters(students: Student[], mentors: EligibleMentor[]) {
+// `refreshing` holds every URL write while a roster refresh is in flight: Next
+// treats a history.replaceState as a navigation-priority "restore", which
+// discards a pending router.refresh(), leaving the old roster on screen. The
+// held write goes out once the refresh lands.
+function useCoverageFilters(students: Student[], mentors: EligibleMentor[], refreshing: boolean) {
   const { page, searchParams } = useCoveragePage();
   const [selected, setSelected] = useState(() => initialCoverageFilters(searchParams, page));
   const mentorOptions = useMemo(() => mentorFilterOptions(students, mentors), [students, mentors]);
@@ -535,16 +539,24 @@ function useCoverageFilters(students: Student[], mentors: EligibleMentor[]) {
   // so it can't come back on its own if that Mentor is assigned again.
   if (filters !== selected) setSelected(filters);
   useEffect(() => {
+    if (refreshing) return;
     const timer = window.setTimeout(() => replaceCoverageUrl(filters, page), URL_WRITE_DELAY_MS);
     return () => window.clearTimeout(timer);
-  }, [filters, page]);
+  }, [filters, page, refreshing]);
   useWriteOnUnmount(filters, page);
   return {
     filters,
     mentorOptions,
-    update: (change: Partial<CoverageFilters>) =>
-      setSelected(resolveFilters({ ...filters, ...change }, mentorOptions)),
-    writeUrl: () => replaceCoverageUrl(filters, page),
+    // Only typing waits for a pause; a dropdown pick is written at once, so a
+    // quick link click or tab switch after it can't race the delayed write.
+    update: (change: Partial<CoverageFilters>) => {
+      const next = resolveFilters({ ...filters, ...change }, mentorOptions);
+      setSelected(next);
+      if (!("search" in change) && !refreshing) replaceCoverageUrl(next, page);
+    },
+    writeUrl: () => {
+      if (!refreshing) replaceCoverageUrl(filters, page);
+    },
   };
 }
 
@@ -578,6 +590,9 @@ function useMappingDialogs({ schoolCode, programId, academicYear, canEdit, stude
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [staleStudents, setStaleStudents] = useState<Student[] | null>(null);
+  // A transition, so `refreshing` stays true until the refreshed roster lands.
+  const [refreshing, startRefresh] = useTransition();
+  const refresh = () => startRefresh(() => router.refresh());
   const resetFields = () => {
     setMentorUserId("");
     setReason("");
@@ -611,7 +626,7 @@ function useMappingDialogs({ schoolCode, programId, academicYear, canEdit, stude
         reason: reason.trim(),
       }, "Unable to assign Mentor");
       closeAssign();
-      router.refresh();
+      refresh();
     } catch (problem) {
       setSubmitError(problem instanceof Error ? problem.message : "Unable to assign Mentor");
     } finally {
@@ -635,7 +650,7 @@ function useMappingDialogs({ schoolCode, programId, academicYear, canEdit, stude
       }, "Unable to reassign Mentor");
       setStaleStudents(students);
       closeReassign();
-      router.refresh();
+      refresh();
     } catch (problem) {
       setSubmitError(problem instanceof Error ? problem.message : "Unable to reassign Mentor");
     } finally {
@@ -657,7 +672,7 @@ function useMappingDialogs({ schoolCode, programId, academicYear, canEdit, stude
         reason: reason.trim(),
       }, "Unable to remove Mentor");
       closeRemove();
-      router.refresh();
+      refresh();
     } catch (problem) {
       setSubmitError(problem instanceof Error ? problem.message : "Unable to remove Mentor");
     } finally {
@@ -667,6 +682,7 @@ function useMappingDialogs({ schoolCode, programId, academicYear, canEdit, stude
   return {
     assigning, reassigning, removing, mentorUserId, reason, submitting, submitError,
     rosterStale: staleStudents === students,
+    refreshing,
     setAssigning, setReassigning, setRemoving, setMentorUserId, setReason,
     closeAssign, closeReassign, closeRemove, submitAssign, submitReassign, submitRemove,
   };
@@ -731,8 +747,8 @@ export default function AdminSchoolRoster({
   summary?: HolisticAssignmentCoverageSummary;
   fromHolisticProgress?: boolean;
 }) {
-  const coverage = useCoverageFilters(students, mentors);
   const dialogs = useMappingDialogs({ schoolCode, programId, academicYear, canEdit, students });
+  const coverage = useCoverageFilters(students, mentors, dialogs.refreshing);
   const canManage = canManageMappings(role, academicYear);
   const shown = useMemo(() => filterStudents(students, coverage.filters), [coverage.filters, students]);
   const link = {
