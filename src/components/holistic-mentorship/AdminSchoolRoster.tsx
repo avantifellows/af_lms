@@ -557,6 +557,12 @@ function useCoverageFilters(students: Student[], mentors: EligibleMentor[], refr
     writeUrl: () => {
       if (!refreshing) replaceCoverageUrl(filters, page);
     },
+    // A link click navigates away, which discards a pending refresh anyway,
+    // so write even then: browser Back must return to these filters.
+    writeUrlBeforeLink: (event: React.MouseEvent) => {
+      if (refreshing && !(event.target instanceof Element && event.target.closest("a[href]"))) return;
+      replaceCoverageUrl(filters, page);
+    },
   };
 }
 
@@ -758,7 +764,7 @@ export default function AdminSchoolRoster({
 
   // Clicking a Student (or anything else here) writes a pending search to the
   // URL first, so browser Back returns to it.
-  return <section className="min-w-0 max-w-full space-y-5" onClickCapture={coverage.writeUrl}>
+  return <section className="min-w-0 max-w-full space-y-5" onClickCapture={coverage.writeUrlBeforeLink}>
     <RosterHeader canEdit={canEdit} academicYear={academicYear} />
     <Summary summary={coverageSummary(students, shown, coverage.filters, summary)} />
     <RosterFilters filters={coverage.filters} mentorOptions={coverage.mentorOptions}

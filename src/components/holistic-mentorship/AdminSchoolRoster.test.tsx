@@ -905,8 +905,20 @@ describe("AdminSchoolRoster", () => {
     expect(replaceState).not.toHaveBeenCalled();
     expect(window.location.search).toBe("?tab=holistic_mentorship");
 
+    // A click or blur that isn't a link still waits; opening a Student writes
+    // at once (that navigation discards the refresh anyway).
+    fireEvent.click(screen.getByRole("status"));
+    fireEvent.blur(screen.getByRole("textbox", { name: "Search Students" }));
+    expect(replaceState).not.toHaveBeenCalled();
+    const open = screen.getByRole("link", { name: "Open Ravi Shah" });
+    open.addEventListener("click", (event) => event.preventDefault());
+    fireEvent.click(open);
+    expect(window.location.search).toBe("?tab=holistic_mentorship&hm_search=Ravi&hm_grade=12");
+    replaceState.mockClear();
+
     land();
-    await waitFor(() => expect(window.location.search).toBe("?tab=holistic_mentorship&hm_search=Ravi&hm_grade=12"));
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(replaceState).not.toHaveBeenCalled();
   });
 
   it("carries the filters and Centre into the Student link", () => {
