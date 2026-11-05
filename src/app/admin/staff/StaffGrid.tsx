@@ -515,10 +515,14 @@ export default function StaffGrid({
     }
   };
 
+  // Staff rows need an AF id (staff.employee_code is NOT NULL); teachers and
+  // APCs can be added before they have one.
+  const addCodeRequired = addKindFor(addRole) === "staff";
   const addValid =
     addEmail.trim().includes("@") &&
     !!addCentre &&
-    (addRole === "teacher" ? !!addSubject : true);
+    (addRole === "teacher" ? !!addSubject : true) &&
+    (!addCodeRequired || addCode.trim() !== "");
 
   const saveExit = (row: StaffRosterRow) => {
     const url =
@@ -1316,7 +1320,7 @@ export default function StaffGrid({
             </label>
             <label>
               <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-text-muted">
-                AF id (optional)
+                {addCodeRequired ? "AF id" : "AF id (optional)"}
               </span>
               <Input
                 value={addCode}
@@ -1329,7 +1333,10 @@ export default function StaffGrid({
 
           <p className="mt-3 text-xs text-text-muted">
             Centre staff are seat-scoped: program is taken from the centre and
-            access follows the seat. AF id can be added later.
+            access follows the seat.{" "}
+            {addCodeRequired
+              ? "PM and staff roles need their AF id (from the Employee Master)."
+              : "AF id can be added later."}
           </p>
 
           {addError && (
