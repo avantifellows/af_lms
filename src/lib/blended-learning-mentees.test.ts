@@ -20,7 +20,8 @@ const ADMIN: BlendedLearningAccess = {
 function row(studentId: number, mentorUserId: number, name: string) {
   const [first_name, last_name] = name.split(" ");
   return {
-    student_id: studentId, mentor_user_id: mentorUserId, first_name, last_name, gender: "Female",
+    student_id: studentId, program_student_id: null as string | null, category: null as string | null,
+    mentor_user_id: mentorUserId, first_name, last_name, gender: "Female",
     grade: 12, program_id: 80, program_name: "STP Voucher Delhi",
     last_conversation_on: "2026-10-20", last_conversation_id: studentId * 10,
     last_attempt_on: null as string | null, last_attempt_id: null as number | null, legacy_last_contact_on: null, open_draft_state: null,
@@ -81,5 +82,21 @@ describe("listMentees", () => {
       lastAttemptOn: "2026-10-21",
     });
     expect(list.talkToFirst[0]).not.toHaveProperty("lastDurationMinutes");
+  });
+
+  it("reads the program's Student ID as text with leading zeros, and the category", async () => {
+    givenMappedMentees([
+      { ...FAIZANS, program_student_id: "00123456", category: "Gen-EWS" },
+      { ...LOKESHS, mentor_user_id: 9001 },
+    ]);
+
+    const list = await listMentees({ access: MENTOR, today: "2026-10-22" });
+
+    expect(list.everyoneElse.map(({ studentId, programStudentId, category }) => ({ studentId, programStudentId, category })))
+      .toEqual([
+        { studentId: 501, programStudentId: "00123456", category: "Gen-EWS" },
+        { studentId: 601, programStudentId: null, category: null },
+      ]);
+    expect(mockQuery.mock.calls[0][0]).toContain("st.student_id AS program_student_id, st.category");
   });
 });

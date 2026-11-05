@@ -21,7 +21,7 @@ edges:
     condition: when adding a write that must proxy to the DB Service
   - target: patterns/add-api-route.md
     condition: when adding a route that reads or writes
-last_updated: 2026-10-26
+last_updated: 2026-11-03
 ---
 
 # Data Access
@@ -31,7 +31,7 @@ Five backends. Picking the wrong one for a write is a real bug — read this bef
 ## 1. PostgreSQL — `query()` (the default)
 `import { query } from "@/lib/db"` → `query<RowType>(sql, params)`. Returns `rows`.
 - **All reads** (lists, dashboards, detail pages, scope resolution).
-- **Direct writes** for LMS-owned tables only: PM visits (`lms_pm_school_visits`, `lms_pm_school_visit_actions`), curriculum (including Curriculum Plans: `lms_curriculum_plans`, `lms_curriculum_plan_chapters`, `lms_curriculum_plan_assignments`, written through `src/lib/curriculum-plans.ts` (Plan Assignments, by plan and by Centre, plus Centre coverage through `src/lib/curriculum-plan-assignments.ts`) in `withTransaction()` with the plan row locked `FOR UPDATE`; the plan schema preflight (`checkCurriculumPlansSchema`) lists every column those writes use, audit columns included, so a partly applied migration 503s; db-service owns their migrations, mirrored by `e2e/fixtures/migrations/20261019120000_add_lms_curriculum_plans.sql` and `20261023091700_widen_lms_curriculum_plan_exam_tracks.sql`, which lets `exam_tracks` include `cet` and indexes the remaining foreign keys), permissions/centre tables, Academic Mentor-Mentee Mappings, Holistic Mentorship product records, and intervention flags (`lms_student_intervention_flags` + append-only `lms_student_intervention_flag_updates`; a DB trigger allows only clearing `body`).
+- **Direct writes** for LMS-owned tables only: PM visits (`lms_pm_school_visits`, `lms_pm_school_visit_actions`), curriculum (including Curriculum Plans: `lms_curriculum_plans`, `lms_curriculum_plan_chapters`, `lms_curriculum_plan_assignments`, written through `src/lib/curriculum-plans.ts` (Plan Assignments, by plan and by Centre, plus Centre coverage through `src/lib/curriculum-plan-assignments.ts`) in `withTransaction()` with the plan row locked `FOR UPDATE`; the plan schema preflight (`checkCurriculumPlansSchema`) lists every column those writes use, audit columns included, so a partly applied migration 503s; db-service owns their migrations, mirrored by `e2e/fixtures/migrations/20261019120000_add_lms_curriculum_plans.sql` and `20261023091700_widen_lms_curriculum_plan_exam_tracks.sql`, which lets `exam_tracks` include `cet` and indexes the remaining foreign keys), permissions/centre tables, Academic Mentor-Mentee Mappings, Holistic Mentorship product records, and intervention flags (`lms_student_intervention_flags` + append-only `lms_student_intervention_flag_updates`; a DB trigger allows only clearing `body`; mirrored for e2e, idempotently, by `e2e/fixtures/migrations/20261027130000_add_lms_student_intervention_flags.sql`).
 - Holistic Profile regeneration first records an attributable request atomically in Postgres, then calls the configured ETL collection endpoint at `/{request_key}/enqueue` with the matching `APP_ENV` in the body. No Student data is sent. Ambiguous network outcomes remain queued for retry; confirmed rejection is recorded as failed without replacing the previous Profile.
 - Curriculum eligible Centres (#417) have one definition: `src/lib/curriculum-eligible-centres.ts`. `ELIGIBLE_CENTRE_TRACKS_FROM_SQL` (`centres c` + `school s` + `centre_exam_tracks cet`) and `ELIGIBLE_CENTRE_SQL` (active, physical, JNV) are static fragments. Plan assignment (by plan, by Centre, Centre coverage) and the Curriculum Summary's `scoped_centres` both build their queries from them, so the Centres you can assign match the Centres the Summary shows. `loadTracksWithContent(db, { gradeIds } | { gradeNumbers })` returns the Grade's in-syllabus LMS Chapter Exam Config tracks, keyed by Grade number. Change the rule there, never in a copy.
 - Multi-statement writes: `withTransaction(async (client) => { ... })` (no nesting — it throws).
@@ -81,10 +81,11 @@ if (!res.ok) { const text = await res.text(); /* surface upstream error */ }
 - **Batch-overview stream options (PR #376):** `getBatchOverviewData`'s enrolment query (`GROUP BY student_stream`) doesn't filter by stream, so the returned `streams` always lists every stream at the School and grade. The Performance Stream filter therefore keeps all its options after one is picked. `summariseEnrolment` applies the selected stream to `totalEnrolled` and `enrolledByStream` in JS, with the same `LOWER(stream) = @stream` semantics as before; the test-list query still filters by stream.
 - **NVS Student Results:** `StudentResultsTable` hides the AL and On Track columns when `isNvsProgram(program)` is true, exactly as it does for Advanced tests (`showALColumns`). Its header cells are built as one list, and the expanded row's `colSpan` is `headerCells.length`. So to add a column, add it to that list (#353).
 - **Student Results row identity:** `StudentResultsTable` identifies each row by `studentKey()`: `enrollment_user_id`, or `student_name` only when the id is null (with `id:` / `name:` prefixes, so the two never collide). The row `key`, the expanded-row state and the rank map all use it. Sorting and display still use the name. Two Students with the same name in one test are common in large Schools, so never key a Student on the name.
-- **NVS Performance filters:** for JNV NVS, `effectiveSelection()` in `src/components/performance/usePerformanceFilters.ts` forces the effective `testCategory="full"`, `fullTestView="per_test"`, and no subject/testGrade, so the overview never gets a subject or test grade and the Cumulative AL table never renders. `PerformanceFilterBar` gets `isNvs` and renders only Grade and Stream. The raw selection and URL are left as they are: `?view=cumulative&category=chapter&subject=…&testGrade=…` is ignored on NVS, not rewritten.
+- **NVS Performance filters:** for JNV NVS, `effectiveSelection()` in `src/components/performance/usePerformanceFilters.ts` forces the effective `testCategory="full"`, `fullTestView="per_test"`, and no subject/testGrade, so the overview never gets a subject or test grade and Student support (the Cumulative view) never renders. `PerformanceFilterBar` gets `isNvs` and renders only Grade and Stream. The raw selection and URL are left as they are: `?view=cumulative&category=chapter&subject=…&testGrade=…` is ignored on NVS, not rewritten.
 - **Performance filter history (#392):** `usePerformanceFilters` reads every raw selection (program, grade, stream, subject, testGrade, category, view, session) from the URL on each render, so Back/Forward rehydrates the mounted tab in place. Deliberate choices `router.push` one entry each with `scroll: false`, carrying their resets atomically (Program clears grade/session/stream/subject/testGrade; Grade clears session/stream/subject/testGrade; Category clears testGrade, and subject when leaving Chapter). Reselecting is a no-op. Automatic Grade reconciliation uses `replace`. Patches compose against the latest *intended* query, but navigations go to the router one at a time (the App Router drops a pending navigation when another starts, which would lose a history entry); any other URL landing is Back/Forward and discards the queue. Grades and `BatchOverview` responses are keyed to their request, so obsolete success/failure/option publications are inert. Report open/close: see #393 below.
 - **Performance report history (#393):** opening a report pushes `session` (one step, `scroll: false`); `TestDeepDiveView` is keyed by session, so a new report starts fresh and nameless until its own data names it. "Back to overview" calls `router.back()` only when the hook's transient trail (in `usePerformanceUrl`, in memory per mount) proves the current entry was pushed by the tab directly on top of its own overview (same query without `session`). The trail follows Back/Forward by matching exactly one neighbouring entry's URL; an ambiguous or unrelated URL, a replace of the entry, a reload, a direct link or a remount leaves nothing proven, and then the in-page Back replaces away only `session`. No storage. `SchoolTabs` derives the visible tab from `?tab=` (absent/invalid → `defaultTab` if visible, else the first tab), so history to `tab=performance` remounts Performance from its URL. A tab click synchronously uses native `history.replaceState`, preserving every unrelated query parameter and the hash before its content mounts; this prevents a fast automatic Grade replace from erasing `tab=performance`. Performance loading frames keep the previous settled height only while data reloads, then release it to the new content's natural height or the minimum needed to keep the current non-zero scroll valid. Scrolling upward can only shrink that floor, while downward scrolling cannot grow it; stale interactive content is never kept on screen. On report-to-overview transitions, if the shorter natural overview is entirely above the current viewport, the frame releases the report height and scrolls only as far as the last viewport that intersects the overview. Normal filter/history transitions and report exits that already overlap the viewport keep their scroll position.
 - **Deep-dive response ownership (#393):** `TestDeepDive` aborts an obsolete request and also marks its lifecycle inactive, so a fetch implementation that resolves or rejects after abort cannot publish stale report data, errors, loading state, or the report-name callback over the current session.
+- **Student support (Teacher View v2, #324; physical centres only):** `src/lib/student-support.ts` replaces the Cumulative AL table (`CumulativeALTable` and the `cumulative-als` route are gone; `getCumulativeALData` and `CumulativeALRow` remain as the Score journey's per-test source). Sources: `dim_student` (`academic_level` = Mode AL, `predicted_academic_level` from etl-next #198/#204 (`predicted_jee_percentile` is not read), current year, enrolled), `dim_test_cutoffs`, `fact_student_test_results_overall` (test history, rank among everyone at the School + grade + program who sat, including leavers), and `fact_student_test_results_question_level` (pruned by the student's `hashed_session_id`s) joined to etl-next `bridge_question_chapter` (question → live new-CMS chapter; old-CMS questions via per-question tags, untagged ones dropped). Topics: `bridge_question_topic` + `dim_topic` for new-CMS questions and `curriculum.legacy_question_topic_tags` for old-CMS ones; the tag for the test's exam (JM-/JA-/NE-) wins, then primary / most confident. Each student sees only their own exam stream's tests (no stream = engineering). Retests are per student: a sitting is a retest when the same student already sat an earlier session (date, then session id) with the same test name and stream (`studentRetests`); a column is marked Retest only when every sitting in it is one. Latest AL, the score graph and the ▲/▼ change skip the student's retests; the graph and the change also skip sittings with no level (Not Eligible, e.g. State CET / Advanced), and the change is score % minus the student's previous counted sitting of the same `test_course` (`sittingChanges`, shared by the journey row and the report's history so they agree). Listed sessions (`listedSessions`): the per-test columns and the report's test history show only sessions dated on or after 1 April of `CURRENT_ACADEMIC_YEAR` (the fact table tags some earlier-year sittings with the current year) sat by ≥ 20% of the session's cohort (everyone who sat an in-year test of the same test stream; everyone for a stream-less test) or, in the report, by the student; a student's own in-year sittings always count for their Latest AL, graph and change. MCP's `redact` drops `category` from both views. PYQ links come from Postgres `resource`/`resource_chapter`. Views are cached 15 min per server instance (`src/lib/ttl-cache.ts`), cutoffs and PYQ links 1 h. Rules live in `student-support-rules.ts`.
 - **NVS Time Spent (#357):** `getStudentTimeSpentData()` reads `MAX(total_time_spent)` (INT64 seconds) from `fact_student_test_results_overall`, grouped by `enrollment_user_id` + `LOWER(section)`. Its filters are the same as `getStudentQuestionLevelData` (udise, student grade, session, current year, optional program/stream, `enrollment_user_id IS NOT NULL`). It returns `Map<id, { overall, bySection }>`. The `test-deep-dive` route calls it only when `isNvsProgram(program)`, in parallel with the DynamoDB read, and merges `time_spent_seconds` onto each student (overall) and each subject score (`subject.toLowerCase()`). Unmatched students get null. If the lookup fails, the route logs only the error message and returns the deep dive with null times; DynamoDB failures still return 500/404. `StudentResultsTable` shows a sortable "Time Spent (min)" column after Attempt Rate (`Math.round(s/60)` or "—", nulls last in both directions), a subject-row time cell, and a blank chapter cell. Non-NVS payloads have no time fields.
 
 - **Chapter-test report (physical centres, lms-chapter-reports):** opening a single-chapter test (`test_format = chapter_test`) from the Chapter tests overview (`category=chapter`, not JNV NVS) renders `ChapterTestReport` instead of the general stats and analysis; Student Results and the combined reports are kept.
@@ -311,6 +312,13 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   state (`transcribing|ready|failed`). A Mentor always gets their own Mentees, whatever
   `mentorUserId` says; a Mentor without a Mentor user id gets an empty list without a query.
   Rows are grouped (Talk to First = any reason) and sorted in JS by the pure policy.
+  Each row also carries `programStudentId` (`student.student_id`, kept as text so leading zeros
+  survive) and `category` (`student.category`), both nullable; `studentId` stays `student.id`
+  for links. The table gives each its own column right after Student ("Student ID" in
+  `font-mono`, "Category"; "—" for NULL); a card shows both on the muted line under the name
+  ("ID <id>  Category <value>"). To fit at 1024 px the table uses tight paddings, lets names,
+  headers and Program wrap, and shows View / New log as 44 px icon buttons (aria-labelled)
+  below `xl` (1280 px).
 - **Mentor cards (#452):** `listMentorCards(access, today)` in the same module, for
   `view_mentors` only (anyone else gets `[]`). It reuses the list's query unnarrowed (one row
   per active current-year Mapping, with the Mentor's `user` name, else email) and counts per
@@ -324,7 +332,8 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   conversation), else none (`no_contact`). Drafts never feed it.
 - **Search and filters (#443):** client-side in `src/app/blended-learning/FilteredMenteeList.tsx`
   over the already grouped and sorted `MenteeList` (about 46 Mentees per Mentor, so no server
-  pagination). Name search is a trimmed, case-insensitive substring match. Gender and Program
+  pagination). The search ("Search by name or Student ID") is a trimmed, case-insensitive
+  substring match on the name or `programStudentId`. Gender and Program
   options come from the list itself; Grade is fixed to 12/13. "30 days or more" uses the
   policy's `thirtyDaysOrMore(daysSince)`, so no Last Contact counts and a legacy date counts from
   its day. Filters combine (AND), keep both groups and their order, and are not in the URL.
@@ -368,8 +377,9 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   new items are inserted with `position` 1..n after the Conversation. The ticks are one
   `UPDATE … SET status = 'done', completed_by_conversation_id, completed_by_email, completed_at,
   updated_at WHERE id = ANY($3::bigint[]) AND status = 'open' AND student_id = $4`. Fewer
-  returned rows than ids (an id already done, unknown or another Student's) throws, so the
-  whole save rolls back and returns 409. af_lms makes only that open → done change, and
+  returned rows than ids throws when a missed id still exists (already done or another
+  Student's), so the whole save rolls back and returns 409; a missed id with no row (deleted by
+  a Common Action Item's removal or a Profile Doc re-sync) is skipped. af_lms makes only that open → done change, and
   `bl_action_items_completion_check` keeps the completion columns consistent. `getMenteeDetail`
   returns each item's `owner` and `openActionItems` (open items, newest Conversation first, with `agreedOn`). There are no
   reminders, overdue logic or item editing.
@@ -555,8 +565,146 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   upserts `ON CONFLICT (student_id)` per changed Student only, so an unchanged re-run writes
   nothing. Non-`https://` values are skipped before the DB CHECK sees them; a value missing from
   the workbook keeps the stored one. `legacy_last_contact_on` is selected and written only
-  with `--legacy-docs-dir` (Profile Doc HTML exports; date extraction in
+  with `--legacy-docs-dir`, which needs `--legacy-conversations` so a date never moves
+  without its summary and items (Profile Doc HTML exports; date extraction in
   `src/lib/blended-learning-profile-doc-dates.ts`: the doc's latest dated conversation only).
   With docs, every matched Student is considered, so a stored Profile Doc link still gives a
   date when the workbook row has none; a Student with no link and no stored row gets no row.
+  `legacy_conversation_summary` (db-service migration `20261027100000`, mirrored in e2e fixture
+  `20261027100000_add_blended_learning_legacy_conversation.sql`) is selected and written with
+  it, from `--legacy-conversations` (validation in
+  `src/lib/blended-learning-legacy-conversations.ts`): the file's entry for a `dated` doc on
+  that same date, NULL otherwise; an unreadable doc keeps it. The upsert names only the
+  columns the run owns (fixed literals; values bound). The same run syncs that Student's
+  **Profile Doc Action Items** (`blended_learning_action_items.from_profile_doc = true`,
+  `conversation_id` NULL, `bl_action_items_source_check`: a Conversation XOR the Profile Doc;
+  partial unique `bl_action_items_profile_doc_unique` on (student_id, text, owner)): insert
+  missing ones open, keep matching ones (open or done), delete only open ones the file no
+  longer lists (all open ones when the summary is NULL); three batched statements, the DELETE
+  re-checking `status = 'open'`. An apply runs the reads, upserts and item sync in one
+  `withTransaction`, so a failure part way rolls everything back; a dry run uses `query()`.
   Runbook: `patterns/load-blended-learning-links.md`.
+- **Profile Doc entry on the Mentee pages:** `getMenteeDetail` adds a `kind: "profile_doc"`
+  history entry (`legacy_last_contact_on`, the summary, every Profile Doc Action Item with its
+  status, the Profile Doc URL) at its date, after the app's entries of that date; it needs a
+  date and a summary or an item. It is history, never a Conversation: "Conversations (N)",
+  Last Contact (still `legacy_last_contact_on`), list stats and first-conversation logic count
+  only `blended_learning_conversations` rows. Its open items are in `openActionItems` with
+  `source: "profile_doc"` and `agreedOn` = that date (meta "From Profile Doc · <date>"), and are
+  ticked done from the log form through the normal save (`completeActionItems`). The detail page
+  renders the entry like a Conversation (Summary, Action items with Open/Done, "Open Profile
+  Doc"), admins read-only; the log page's Last Conversation panel shows it while it is the
+  latest. Owner pills are a fixed `w-16` column (`ACTION_ITEM_ROW_CLASSES` in
+  `ActionItemMeta.tsx`) so item text lines up whoever owns it.
+
+## Blended Learning Manage: Resources and Common Action Items (2026-10-27)
+
+- **Tables:** db-service `20261027120000_create_blended_learning_resources_and_common_action_items`
+  (branch `feat/bl-admin-manage`; deploy it before this code). `blended_learning_resources`
+  (title ≤ 200, `^https://[^[:space:]]+$` url, `position` ≥ 1, `created_by_email` /
+  `updated_by_email`, NULL only on the seeded Mentor Toolkit row; hard delete) and
+  `blended_learning_common_action_items` (text ≤ 500, owner, `target_kind` `all|grade|mentor` with
+  `target_grade` 12/13 or `target_mentor_user_id`, `created_by_email`, soft removal
+  `removed_at` + `removed_by_email`). `blended_learning_action_items.conversation_id` is now
+  nullable, `common_action_item_id` is new, `bl_action_items_source_check` requires exactly one of
+  `conversation_id`, `common_action_item_id` and `from_profile_doc` (the Profile Doc carry-over's flag),
+  and `bl_action_items_common_student_unique` is the partial unique index
+  `(common_action_item_id, student_id) WHERE common_action_item_id IS NOT NULL`. Pushed rows use
+  `position` 1. All reads and writes are direct SQL (`query()` / `withTransaction`), gated by
+  `manage` (see `context/permissions.md`).
+- **Resources:** `src/lib/blended-learning-resources.ts`. `listResources()` (`ORDER BY position,
+  id`) feeds the Resources tab (`MentorResources`, no longer hard-coded) and the Manage page.
+  Create appends at `MAX(position) + 1`; move locks every row `FOR UPDATE` and renumbers 1..n in
+  the new order through `unnest(...) WITH ORDINALITY` (`movedOrder`); edit and delete are 404 for
+  an unknown id. Validation (`validateResource` in the client-safe
+  `src/lib/blended-learning-manage-input.ts`) → 422 `fieldErrors`.
+- **Common Action Items:** `src/lib/blended-learning-common-action-items.ts`. A target reaches the
+  Students of active current-year Mappings (`activeBlendedMappingSql`) filtered by the Mentee
+  list's grade (`currentGradeLateralSql`, now exported from `blended-learning-mentees.ts` and used
+  by `listMentees`), the Mapping's `mentor_user_id` or `student.student_id = ANY(target_student_ids)`
+  ("Specific students": IDs pasted by the admin, split on whitespace / commas, deduped, kept as text
+  so leading zeros survive; at most 1000) (`targetedStudentsSql`). `previewCommonTarget` (a POST, as
+  ID lists can be long) counts them (the form's "Will be added to N students") and, for a students
+  target, lists the pasted IDs not found and those found with no active Mapping (`unmatchedStudentIds`).
+  The IDs are stored so Push again reaches the same list. `createCommonActionItem` inserts the item
+  and materialises it in one transaction (`INSERT … SELECT … ON CONFLICT (common_action_item_id,
+  student_id) WHERE common_action_item_id IS NOT NULL DO NOTHING`); a target with no Students (or
+  an unknown Mentor, 23503) rolls back as a 422. `pushCommonActionItem` locks the item `FOR UPDATE`
+  (removed → 404) and runs the same insert, so it adds only targeted Students who don't have it
+  (done included) and a repeat adds 0. `updateCommonActionItem` updates the item and its rows
+  `WHERE status = 'open'`; `removeCommonActionItem` soft-removes it and deletes its rows `WHERE
+  status = 'open'`, keeping done ones. `listCommonActionItems` (items in force, newest first) adds
+  open / done counts and `notYetAdded` (targeted Students without a row: what Push again adds).
+- **Action-item queries audited for NULL `conversation_id`:** `getMenteeDetail` reads every row
+  by `student_id` (no join) and now builds `openActionItems` from Conversation rows (as before)
+  plus the rows with no Conversation: Profile Doc ones (`source: "profile_doc"`) and pushed ones
+  (`source: "common"`, `agreedOn` = the IST date the row was inserted), newest date first;
+  `groupBy` skips NULL `conversation_id`, so an open pushed row is in no Conversation's history; a
+  done one (`completed_by_conversation_id` set) is listed after the items of the Conversation that
+  ticked it, as `{ …, status: "done", source: "common" }` (`doneCommonItemsByConversation`), so the
+  "done ones stay in their history" promise of Remove holds. `logEntry`'s tick `UPDATE … WHERE id = ANY($3) AND status = 'open' AND student_id = $4`
+  ticks a pushed row like any other. A ticked id with no row left (removed while the Mentor's form
+  was open) is skipped and the rest saves; only a missed id that still exists (done, or another
+  Student's) is the 409.
+  `insertActionItems` and the draft review read paths only touch Conversation rows; the links
+  importer's Profile Doc sync and the e2e seed's Profile Doc rows only touch `from_profile_doc`
+  rows. Nothing else in `src/`, `scripts/` or `e2e/` reads the table (no list counts, flags or
+  exports).
+- **UI:** `/blended-learning/manage` (`src/app/blended-learning/manage/`): `ResourcesManager`
+  (add / inline edit / ↑ ↓ / remove after `ConfirmDialog`) and `CommonActionItemsManager` with
+  `NewCommonItemForm` (who does it and the action item side by side on one line, as on the log form,
+  stacked on a phone; 200 characters in the form and in `validateCommonItemEdit`, though the DB
+  allows 500; target radio + Grade/Mentor select or Student IDs textarea, live preview with the unmatched IDs, confirm
+  before push; 422 field errors go back inline). `useTargetPreview` returns `incomplete | counting |
+  failed | ready` for the current target only (counting also covers the typing pause); a failed
+  preview shows its `studentIds` field error (too many IDs, a token over 64 characters) or "Couldn't
+  count students. …" with Retry, and Push is disabled while counting, failed or at 0 (an incomplete
+  target keeps Push so the form's own checks show). After a push or Push again the section's status
+  line says "Added to N students." from the response's `added` (0 included). Every change calls
+  `router.refresh()`. The open items on the detail page and the log form show a "From program" tag
+  (the UI name; code and DB keep "common") and "Added <date>" (`ActionItemMeta` `source="common"`);
+  a done one shows struck through in its ticking Conversation's history with the same tag.
+- **Known gaps (not built):** an admin edit while a Mentor's log form is open means the Mentor's
+  tick completes the new wording (no version check); a create retried after a network error that
+  the server had committed pushes a second item (no idempotency key).
+- **E2E:** `e2e/fixtures/migrations/20261027120000_add_blended_learning_manage.sql` mirrors the
+  migration (pg_dump-identical, seed row included). `blended-learning-manage.spec.ts` uses Mentor D
+  (`BLENDED_MENTOR_D`) and `MANAGE_MENTEES` (G1, G2 mapped; G3 mapped by the spec to test Push
+  again) and removes the Resources it adds, so later specs see only the Mentor Toolkit.
+
+## Blended Learning Screener Feedback (2026-10-28)
+
+- **Tables:** db-service `20261030120000_add_blended_learning_screener_feedback` (branch
+  `feat/bl-screener-feedback`, stacked on `feat/bl-admin-manage`; deploy it before this code).
+  `blended_learning_conversations.screener_used` (nullable boolean; a CHECK keeps it NULL on an
+  Attempt) and `blended_learning_screener_feedback` (`student_id` UNIQUE, `conversation_id` with a
+  composite FK to the same Student's Conversation, `mentor_user_id`, `helped_understand` and
+  `more_comfortable` smallint 1–5, `inserted_at`). Conversations are append-only
+  (`bl_conversations_immutable`), so `screener_used` is set in `insertEntry`'s INSERT or never.
+- **Log form:** a Conversation (typed or saved from a draft; never an Attempt) ends with "Was the
+  screener form used?" (`log/ScreenerQuestion.tsx`, unticked) only when
+  `blended_learning_student_links.screener_url` is set. Ticked while
+  `MenteeDetail.screenerFeedbackDue` (a link and no feedback row for the Student from any Mentor),
+  it asks two required 1–5 radio groups (1 "Not at all", 5 "A lot"; copy in
+  `students/[id]/screenerQuestions.ts`), listed as "Screener ratings" in the save bar's missing
+  fields. The body carries `screenerUsed` only when asked and `screenerFeedback` only while the
+  questions show (`logEntryPayload.ts`).
+- **Save:** `logEntry` validates the shape first (`screenerFeedback` without `screenerUsed: true`
+  → 422; ratings must be integers 1–5). Inside the transaction, before the Conversation's INSERT,
+  `checkScreener` reads the link and whether feedback exists (only when an answer was sent). The
+  link can change while the form is open, so a mismatch is not an error: an answer without a link,
+  or no answer with a link, saves `screener_used = NULL` with no feedback. With a link, a tick with
+  no ratings while due → 422 field errors; ratings once feedback exists → 409 with
+  `fieldErrors.screenerFeedback`; else the feedback is inserted after the Conversation's parts
+  (mentor = the mapped Mentor). A racing second insert hits `bl_screener_feedback_student_unique`
+  (23505) and gets the same 409. On that 409 the form drops the questions and keeps the tick, so
+  "Save" again records just `screener_used = true`. Any 422 field error no rendered field owns
+  (`unshownFieldError` in `logEntryPayload.ts`) shows in the save bar, so none is silent.
+- **Display:** `getMenteeDetail` LEFT JOINs the feedback by `conversation_id`; each Conversation
+  has `screenerUsed` and `screenerFeedback`. The history shows a "Screener" section ("Screener form
+  used", and the two ratings as `n / 5` on the Conversation that gave them) to Mentors and admins,
+  read-only. The log page shows no past feedback.
+- **E2E:** `e2e/fixtures/migrations/20261030120000_add_blended_learning_screener_feedback.sql`
+  mirrors the migration (pg_dump-identical). `blended-learning-screener-feedback.spec.ts` uses
+  Mentor C's `SCREENER_MENTEES` (J1–J4: one with a link, one without, per viewport) and
+  `SCREENER_RACE_MENTEE` (J5), seeded after every other fixture Student so their phones don't move.

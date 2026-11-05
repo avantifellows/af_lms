@@ -15,7 +15,7 @@ edges:
     condition: when configuring which backend env vars point at
   - target: context/architecture.md
     condition: when understanding how components connect during setup
-last_updated: 2026-10-22
+last_updated: 2026-10-27
 ---
 
 # Setup
@@ -41,7 +41,7 @@ Required (app won't function without them):
 - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` — Google OAuth.
 
 Conditionally required (only if the feature is used):
-- `GOOGLE_SERVICE_ACCOUNT_JSON` (or `GOOGLE_APPLICATION_CREDENTIALS`) — BigQuery quiz analytics.
+- `GOOGLE_SERVICE_ACCOUNT_JSON` (or `GOOGLE_APPLICATION_CREDENTIALS`) — BigQuery quiz analytics and the Visit Summary School page's academic-level cards. The Playwright web server sets it to `" "` (a blank value would be refilled from `.env.local`), so E2E never reaches the warehouse; specs stub `/api/quiz-analytics/**` in the browser.
 - `DYNAMODB_URL`, `DYNAMODB_REGION`, `DYNAMODB_ACCESS_KEY`, `DYNAMODB_SECRET_KEY` — performance dashboard.
 - `S3_DOCS_BUCKET`, `S3_DOCS_PREFIX`, `S3_DOCS_REGION`, `S3_DOCS_ACCESS_KEY_ID`, `S3_DOCS_SECRET_ACCESS_KEY` — document uploads (bucket shared with prod). Blended Learning photos are uploaded (`PutObject`), checked (`HeadObject`) and presigned with them too, and Call Recordings get presigned PUTs from them (`presignUpload`). `S3_DOCS_PREFIX` must be `lms-documents`, so recording keys match the 180-day lifecycle rule and etl-next's prefixes; the bucket also needs a CORS rule allowing browser `PUT` with `Content-Type` from the LMS origins (a rollout task, not code). The Playwright web server sets fake values (`e2e-fake-docs`, `lms-documents`), so presigning works locally with no AWS traffic; specs answer `amazonaws.com` requests with `page.route`.
 - `AF_ACCESS_KEY_ID`, `AF_SECRET_ACCESS_KEY`, `AF_TOPIC_ARN`, `APP_ENV` — SNS session creator.

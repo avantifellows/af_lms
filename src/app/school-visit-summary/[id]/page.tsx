@@ -1,12 +1,10 @@
 import Link from "next/link";
-import { getServerSession } from "next-auth";
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 
 import GpsMapLink from "@/components/visits/GpsMapLink";
 import { Card } from "@/components/ui";
-import { authOptions } from "@/lib/auth";
 import { query } from "@/lib/db";
-import { getFeatureAccess, getUserPermission, getResolvedPermission } from "@/lib/permissions";
+import type { getUserPermission } from "@/lib/permissions";
 import {
   ACTION_TYPE_VALUES,
   ACTION_TYPES,
@@ -17,16 +15,18 @@ import {
 import {
   dispatchComputeInlineStats,
   dispatchExtractRemarks,
+  formatIstDate,
+  formatIstTimestamp,
+  visitSummaryBackHref,
   type RemarkEntry,
 } from "@/lib/visit-summary";
-import {
-  buildVisitSummaryScopePredicate,
-  buildVisitsActor,
-  canViewVisitSummary,
-} from "@/lib/visits-policy";
+import { requireVisitSummaryPage } from "@/lib/visit-summary-page";
+import { buildVisitSummaryScopePredicate, buildVisitsActor } from "@/lib/visits-policy";
 
 interface PageProps {
   params: Promise<{ id: string }>;
+  // `back`: the Visit Summary page that opened this Visit (a School page); see visitSummaryBackHref.
+  searchParams?: Promise<{ back?: string }>;
 }
 
 interface VisitSummaryDetail {
@@ -70,31 +70,6 @@ interface RemarkGroup {
   detailHref: string;
   chips: string[];
   remarks: RemarkEntry[];
-}
-
-function formatDate(value: string): string {
-  return new Date(value).toLocaleDateString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    timeZone: "Asia/Kolkata",
-  });
-}
-
-function formatTimestamp(value: string | null): string {
-  if (!value) {
-    return "-";
-  }
-
-  return new Date(value).toLocaleString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-    timeZone: "Asia/Kolkata",
-  });
 }
 
 function formatDuration(startValue: string, endValue: string | null, now = new Date()): string {
@@ -327,10 +302,10 @@ function MetadataGrid({ visit }: { visit: VisitSummaryDetail }) {
   const items = [
     ["School", formatSchool(visit)],
     ["PM", formatPm(visit)],
-    ["Visit Date", formatDate(visit.visit_date)],
-    ["Started", formatTimestamp(visit.inserted_at)],
-    ["Completed", formatTimestamp(visit.completed_at)],
-    ["Updated", formatTimestamp(visit.updated_at)],
+    ["Visit Date", formatIstDate(visit.visit_date)],
+    ["Started", formatIstTimestamp(visit.inserted_at)],
+    ["Completed", formatIstTimestamp(visit.completed_at)],
+    ["Updated", formatIstTimestamp(visit.updated_at)],
     ["Duration", formatDuration(visit.inserted_at, visit.completed_at)],
   ];
 
@@ -382,10 +357,10 @@ function ActionRow({ action }: { action: VisitActionDetail }) {
             <span className="font-mono text-xs text-text-muted">Action #{action.id}</span>
           </div>
           <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 font-mono text-xs text-text-muted">
-            <span>Started: {formatTimestamp(action.started_at)}</span>
-            <span>Ended: {formatTimestamp(action.ended_at)}</span>
-            <span>Created: {formatTimestamp(action.inserted_at)}</span>
-            <span>Updated: {formatTimestamp(action.updated_at)}</span>
+            <span>Started: {formatIstTimestamp(action.started_at)}</span>
+            <span>Ended: {formatIstTimestamp(action.ended_at)}</span>
+            <span>Created: {formatIstTimestamp(action.inserted_at)}</span>
+            <span>Updated: {formatIstTimestamp(action.updated_at)}</span>
           </div>
           {chips.length > 0 && (
             <div className="mt-3 flex flex-wrap gap-2">
@@ -501,40 +476,15 @@ function RemarksSection({ groups }: { groups: RemarkGroup[] }) {
   );
 }
 
-export default async function SchoolVisitSummaryDetailPage({ params }: PageProps) {
-  const { id } = await params;
-  const session = await getServerSession(authOptions);
-
-  if (!session) {
-    redirect("/");
-  }
-
-  if (!session.user?.email) {
-    redirect("/");
-  }
-
-  const permission = await getResolvedPermission(session.user.email);
-  if (!permission) {
-    redirect("/dashboard");
-  }
-
-  if (!getFeatureAccess(permission, "visits").canView) {
-    redirect("/dashboard");
-  }
-
-  const actor = buildVisitsActor(session.user.email, permission);
-  if (!canViewVisitSummary(actor)) {
-    if (actor.role === "program_manager") {
-      redirect("/visits");
-    }
-    redirect("/dashboard");
-  }
+export default async function SchoolVisitSummaryDetailPage({ params, searchParams }: PageProps) {
+  const [{ id }, { back }] = await Promise.all([params, searchParams ?? Promise.resolve<{ back?: string }>({})]);
+  const { actor } = await requireVisitSummaryPage();
 
   if (!/^\d+$/.test(id)) {
     notFound();
   }
 
-  const { visit, actions } = await getVisitSummaryDetail(id, session.user.email, permission);
+  const { visit, actions } = await getVisitSummaryDetail(id, actor.email, actor.permission);
   if (!visit) {
     notFound();
   }
@@ -545,7 +495,7 @@ export default async function SchoolVisitSummaryDetailPage({ params }: PageProps
     <div className="min-h-screen bg-bg">
       <div className="sticky top-0 z-10 border-b border-border bg-bg-card/95 px-4 py-3 shadow-sm backdrop-blur sm:px-6 lg:px-8">
         <div className="mx-auto max-w-7xl">
-          <Link href="/school-visit-summary" className="text-sm font-bold uppercase text-accent hover:text-accent-hover">
+          <Link href={visitSummaryBackHref(back)} className="text-sm font-bold uppercase text-accent hover:text-accent-hover">
             &larr; Back to Visit Summary
           </Link>
         </div>

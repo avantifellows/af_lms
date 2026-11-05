@@ -1,0 +1,430 @@
+import Link from "next/link";
+import type { ReactNode } from "react";
+
+import { Badge, Card } from "@/components/ui";
+import { ConcernDisclosure } from "@/components/visits/ConcernDisclosure";
+import { ConcernFreshnessLine } from "@/components/visits/ConcernFreshnessLine";
+import type {
+  ConcernCard,
+  ConcernHistoryEntry,
+  ConcernMention,
+  SchoolConcernPage,
+  VisitNoteItem,
+  VisitNotes,
+} from "@/lib/visit-concerns";
+import {
+  RECURRING_CONCERN_MIN_DAYS,
+  formatCompactVisitDates,
+  formatIstDate,
+  formatIstTimestamp,
+  formatVisitCount,
+} from "@/lib/visit-summary";
+
+// The School page's concern sections (#470), in order: All concerns - Need Attention and Going well
+// side by side (stacked on mobile), the Intervention flags section (`flags`, when the viewer may
+// see it), Resolved concerns, and Visit-wise notes (one collapsible row per Visit). Every concern,
+// resolved concern and highlight card expands (`ConcernDisclosure`) to what the PMs said: its
+// mentions in view, newest first, each linking to its Visit. Every text — concern text, snippets,
+// notes — is stored text and renders as text. `today` decides the compact dates' year rule.
+// `canAct` (visits edit, the rule the events API enforces) adds Resolve on open concerns and
+// Comment / Reopen on resolved ones. Concerns come from a summary run (etl-next, a few times a day),
+// so the sections open with the School-wise tab's freshness line; Needs attention says how many
+// completed Visits in view aren't summarised yet, their Visit-wise notes are marked, and when none
+// is summarised the concern and highlight empty states say "Not summarised yet", not "nothing in view".
+
+const EVENT_LABELS: Record<Exclude<ConcernHistoryEntry["kind"], "auto_reopened">, { label: string; className: string }> = {
+  resolved: { label: "Resolved", className: "text-success" },
+  reopened: { label: "Reopened", className: "text-danger" },
+  comment: { label: "Comment", className: "text-text-secondary" },
+};
+
+// Two columns on desktop, Needs attention the wider; the flags section sits under its column.
+const COLUMNS = "grid gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]";
+
+// A Visit's detail page, going Back to this School page when `backHref` is given.
+function visitHref(visitId: number, backHref?: string): string {
+  return `/school-visit-summary/${visitId}${backHref ? `?${new URLSearchParams({ back: backHref })}` : ""}`;
+}
+
+function authorOf(entry: ConcernHistoryEntry): string {
+  return entry.authorName ?? entry.authorEmail ?? "Unknown";
+}
+
+function plural(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`;
+}
+
+// The IST date, with the full IST time on hover.
+function EventDate({ at }: { at: Date }) {
+  return (
+    <time dateTime={new Date(at).toISOString()} title={formatIstTimestamp(at)}>
+      {formatIstDate(at)}
+    </time>
+  );
+}
+
+function HistoryList({ history }: { history: ConcernHistoryEntry[] }) {
+  return (
+    <ol aria-label="History" className="mt-3 space-y-2">
+      {history.map((entry, index) => (
+        <li key={index} className="rounded-md bg-bg-card/70 px-3 py-2 text-sm">
+          <p className="text-xs text-text-muted">
+            {entry.kind === "auto_reopened" ? (
+              <span className="font-bold text-danger">
+                Reopened automatically: raised again in visit of {entry.visitDate ? formatIstDate(entry.visitDate) : "an unknown date"}
+              </span>
+            ) : (
+              <>
+                <span className={`font-bold ${EVENT_LABELS[entry.kind].className}`}>{EVENT_LABELS[entry.kind].label}</span>
+                {` · ${authorOf(entry)}`}
+              </>
+            )}
+            {" · "}
+            <EventDate at={entry.at} />
+          </p>
+          {entry.body && <p className="mt-0.5 whitespace-pre-wrap text-text-primary">{entry.body}</p>}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+// Section heading with its count on the right. `tone` colours the heading.
+function SectionHeading({
+  id,
+  title,
+  count,
+  tone = "text-text-primary",
+}: {
+  id: string;
+  title: string;
+  count?: string;
+  tone?: string;
+}) {
+  return (
+    <div className="flex items-baseline justify-between gap-3">
+      <h2 id={id} className={`text-sm font-bold uppercase tracking-wider ${tone}`}>
+        {title}
+      </h2>
+      {count !== undefined && <span className="text-sm text-text-muted">{count}</span>}
+    </div>
+  );
+}
+
+function EmptyState({ children }: { children: ReactNode }) {
+  return <p className="text-sm text-text-muted">{children}</p>;
+}
+
+// How far the summary run has reached this School's Visits in view: how many completed Visits it
+// hasn't summarised yet, and whether it has summarised none of them.
+interface SummaryProgress {
+  waitingVisits: number;
+  noneSummarised: boolean;
+}
+
+function summaryProgress(page: SchoolConcernPage): SummaryProgress {
+  const completed = page.visitNotes.filter((visit) => visit.status === "completed");
+  return {
+    waitingVisits: page.freshness.waitingVisits,
+    noneSummarised: completed.length > 0 && completed.every((visit) => !visit.summarised),
+  };
+}
+
+// What the PMs said: a card's mentions in view, newest first. Each line reads date · PM (email when
+// they have no name), then the snippet, and links to that Visit.
+function MentionLines({ cardId, mentions, backHref }: { cardId: number; mentions: ConcernMention[]; backHref?: string }) {
+  const headingId = `concern-${cardId}-mentions`;
+  return (
+    <div className="mt-3 border-l-2 border-border pl-3">
+      <p id={headingId} className="text-xs font-bold uppercase tracking-wider text-text-muted">
+        What PMs said
+      </p>
+      <ul aria-labelledby={headingId} className="mt-1 divide-y divide-border/60">
+        {mentions.map((mention) => (
+          <li key={mention.visitId}>
+            <Link href={visitHref(mention.visitId, backHref)} className="group block py-1.5 text-sm">
+              <span className="block text-xs text-text-muted">
+                <time dateTime={mention.visitDate}>{formatIstDate(mention.visitDate)}</time>
+                {` · ${mention.pmName ?? mention.pmEmail}`}
+              </span>
+              <span className="block text-text-primary group-hover:text-accent group-hover:underline">{mention.snippet}</span>
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+type CardProps = { card: ConcernCard; today: Date; canAct: boolean; backHref?: string };
+
+function OpenConcernCard({ card, today, canAct, backHref }: CardProps) {
+  return (
+    <article className="rounded-lg border border-l-4 border-border border-l-text-muted/30 bg-bg-card p-4 shadow-sm">
+      <ConcernDisclosure
+        summary={
+          <>
+            <span className="block font-bold text-text-primary">{card.text}</span>
+            <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-text-secondary">
+              {card.dayCount >= RECURRING_CONCERN_MIN_DAYS && (
+                <span className="font-bold text-danger">{`Recurring · ${formatVisitCount(card.visitCount)}`}</span>
+              )}
+              <span>{formatCompactVisitDates(card.visitDates, today)}</span>
+              {card.reopened && <Badge variant="warning">reopened</Badge>}
+            </span>
+          </>
+        }
+        mentions={<MentionLines cardId={card.id} mentions={card.mentions} backHref={backHref} />}
+        after={card.history.length > 0 && (
+          <details className="mt-2">
+            <summary className="cursor-pointer text-xs font-bold uppercase text-accent">
+              History ({card.history.length})
+            </summary>
+            <HistoryList history={card.history} />
+          </details>
+        )}
+        actions={canAct ? { concernId: card.id, status: "open" } : undefined}
+      />
+    </article>
+  );
+}
+
+function NeedsAttention({
+  cards,
+  today,
+  canAct,
+  backHref,
+  progress,
+}: Omit<CardProps, "card"> & { cards: ConcernCard[]; progress: SummaryProgress }) {
+  return (
+    <section aria-labelledby="needs-attention-heading" className="min-w-0 space-y-3">
+      <SectionHeading
+        id="needs-attention-heading"
+        title="All concerns - Need Attention"
+        count={`${cards.length} open`}
+        tone="text-danger"
+      />
+      {progress.waitingVisits > 0 && (
+        <p className="text-sm font-medium text-warning-text">
+          {formatVisitCount(progress.waitingVisits)} not summarised yet
+        </p>
+      )}
+      {cards.length === 0 ? (
+        <Card elevation="sm" className="p-4">
+          <EmptyState>{progress.noneSummarised ? "Not summarised yet" : "No open concerns in view"}</EmptyState>
+        </Card>
+      ) : (
+        cards.map((card) => (
+          <OpenConcernCard key={card.id} card={card} today={today} canAct={canAct} backHref={backHref} />
+        ))
+      )}
+    </section>
+  );
+}
+
+function GoingWell({
+  cards,
+  today,
+  backHref,
+  noneSummarised,
+}: {
+  cards: ConcernCard[];
+  today: Date;
+  backHref?: string;
+  noneSummarised: boolean;
+}) {
+  return (
+    <section aria-labelledby="going-well-heading" className="min-w-0 space-y-3">
+      <SectionHeading id="going-well-heading" title="Going well" tone="text-success" />
+      <Card elevation="sm" className="px-4 py-1">
+        {cards.length === 0 ? (
+          <div className="py-3">
+            <EmptyState>{noneSummarised ? "Not summarised yet" : "No highlights in view"}</EmptyState>
+          </div>
+        ) : (
+          <ul className="divide-y divide-border">
+            {cards.map((card) => (
+              <li key={card.id} className="flex gap-3 py-3">
+                <span aria-hidden className="mt-2 h-2 w-2 shrink-0 rounded-full bg-success" />
+                <div className="min-w-0 flex-1">
+                  <ConcernDisclosure
+                    summary={
+                      <>
+                        <span className="block text-text-primary">{card.text}</span>
+                        <span className="mt-0.5 block text-sm text-text-muted">
+                          {formatCompactVisitDates(card.visitDates, today)}
+                        </span>
+                      </>
+                    }
+                    mentions={<MentionLines cardId={card.id} mentions={card.mentions} backHref={backHref} />}
+                  />
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+    </section>
+  );
+}
+
+function latestResolution(card: ConcernCard): ConcernHistoryEntry | undefined {
+  return card.history.filter((entry) => entry.kind === "resolved").at(-1);
+}
+
+function ResolvedConcernCard({ card, canAct, backHref }: Omit<CardProps, "today">) {
+  const resolution = latestResolution(card);
+  return (
+    <article className="rounded-md border-l-4 border-l-success bg-bg-card-alt p-4">
+      <ConcernDisclosure
+        summary={
+          <>
+            <span className="block font-medium text-text-secondary">{card.text}</span>
+            {resolution && (
+              <span className="mt-1 block text-sm text-text-muted">
+                Resolved by {authorOf(resolution)} · <EventDate at={resolution.at} />
+              </span>
+            )}
+          </>
+        }
+        mentions={<MentionLines cardId={card.id} mentions={card.mentions} backHref={backHref} />}
+        after={<HistoryList history={card.history} />}
+        actions={canAct ? { concernId: card.id, status: "resolved" } : undefined}
+      />
+    </article>
+  );
+}
+
+function ResolvedConcerns({ cards, canAct, backHref }: { cards: ConcernCard[]; canAct: boolean; backHref?: string }) {
+  return (
+    <Card elevation="sm" className="p-4">
+      <section aria-labelledby="resolved-heading" className="space-y-3">
+        <SectionHeading id="resolved-heading" title="Resolved concerns" count={String(cards.length)} />
+        {cards.length === 0 ? (
+          <EmptyState>No resolved concerns in view</EmptyState>
+        ) : (
+          cards.map((card) => <ResolvedConcernCard key={card.id} card={card} canAct={canAct} backHref={backHref} />)
+        )}
+      </section>
+    </Card>
+  );
+}
+
+function NoteItems({ title, items }: { title: string; items: VisitNoteItem[] }) {
+  if (items.length === 0) return null;
+  return (
+    <div>
+      <p className="text-xs font-bold uppercase text-text-muted">{title}</p>
+      <ul className="list-disc pl-5 text-sm text-text-primary">
+        {items.map((item) => (
+          <li key={item.id}>
+            {item.text}
+            {item.status === "resolved" && <span className="text-text-muted"> (resolved)</span>}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function VisitNotesRow({ visit, backHref }: { visit: VisitNotes; backHref?: string }) {
+  const empty = visit.concerns.length === 0 && visit.highlights.length === 0;
+  return (
+    <li>
+      <details className="group">
+        <summary className="flex cursor-pointer list-none flex-wrap items-baseline gap-x-2 gap-y-1 py-3 [&::-webkit-details-marker]:hidden">
+          <span aria-hidden className="inline-block w-3 text-sm text-text-secondary transition-transform group-open:rotate-90">
+            ▸
+          </span>
+          <span className="font-bold text-text-primary">{formatIstDate(visit.visitDate)}</span>
+          <span className="text-text-secondary">{visit.pmName ?? visit.pmEmail}</span>
+          <span className="text-text-muted">
+            · {plural(visit.concerns.length, "concern")} · {plural(visit.highlights.length, "highlight")}
+          </span>
+          {visit.status !== "completed" && <Badge variant="info">In progress</Badge>}
+          {visit.status === "completed" && !visit.summarised && <Badge variant="warning">Not summarised yet</Badge>}
+        </summary>
+        <div className="space-y-2 pb-3 pl-5">
+          {empty ? (
+            <EmptyState>No concerns or highlights</EmptyState>
+          ) : (
+            <>
+              <NoteItems title="Concerns" items={visit.concerns} />
+              <NoteItems title="Going well" items={visit.highlights} />
+            </>
+          )}
+          <Link
+            href={visitHref(visit.visitId, backHref)}
+            className="inline-block text-sm font-bold text-accent hover:text-accent-hover"
+          >
+            Open visit details →
+          </Link>
+        </div>
+      </details>
+    </li>
+  );
+}
+
+function VisitWiseNotes({ visits, backHref }: { visits: VisitNotes[]; backHref?: string }) {
+  return (
+    <Card elevation="sm" className="p-4">
+      <section aria-labelledby="visit-notes-heading">
+        <SectionHeading id="visit-notes-heading" title="Visit-wise notes" count={plural(visits.length, "visit")} />
+        {visits.length === 0 ? (
+          <div className="mt-3">
+            <EmptyState>No visits in view</EmptyState>
+          </div>
+        ) : (
+          <ul className="mt-1 divide-y divide-border">
+            {visits.map((visit) => <VisitNotesRow key={visit.visitId} visit={visit} backHref={backHref} />)}
+          </ul>
+        )}
+      </section>
+    </Card>
+  );
+}
+
+export function SchoolConcernSections({
+  page,
+  today,
+  canAct,
+  flags,
+  visitBackHref,
+}: {
+  page: SchoolConcernPage;
+  today: Date;
+  canAct: boolean;
+  flags?: ReactNode;
+  // Where a Visit opened from a mention line or a Visit-wise note goes Back to (this School page
+  // with its filters).
+  visitBackHref?: string;
+}) {
+  const progress = summaryProgress(page);
+  return (
+    <>
+      <ConcernFreshnessLine freshness={page.freshness} />
+      <div className={COLUMNS}>
+        <NeedsAttention
+          cards={page.needsAttention}
+          today={today}
+          canAct={canAct}
+          backHref={visitBackHref}
+          progress={progress}
+        />
+        <GoingWell
+          cards={page.goingWell}
+          today={today}
+          backHref={visitBackHref}
+          noneSummarised={progress.noneSummarised}
+        />
+      </div>
+      {flags && (
+        <div className={COLUMNS}>
+          <div className="min-w-0">{flags}</div>
+        </div>
+      )}
+      <ResolvedConcerns cards={page.resolved} canAct={canAct} backHref={visitBackHref} />
+      <VisitWiseNotes visits={page.visitNotes} backHref={visitBackHref} />
+    </>
+  );
+}

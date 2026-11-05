@@ -218,6 +218,9 @@ jobs:
     if: github.event_name == 'pull_request' && github.event.action != 'closed'
     runs-on: ubuntu-latest
     environment: Preview
+    permissions:
+      contents: write # force-push the PR code to the staging branch
+      pull-requests: write # post the preview URL comment
 
     steps:
       - name: Checkout PR code

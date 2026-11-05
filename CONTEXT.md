@@ -161,12 +161,28 @@ Setting `deleted_at` timestamp instead of removing the row. Used for actions and
 _Avoid_: Archive, deactivate
 
 **School Visit Summary**:
-An admin-facing read-only dashboard for reviewing all visits across schools. Two pages: a filterable list view (`/school-visit-summary`) and a per-visit detail view (`/school-visit-summary/[id]`). Distinct from the PM's operational workspace at `/visits/[id]`.
+A manager-facing dashboard for reviewing visits across physical-centre Schools: a School-wise view of each School's Visit Concerns and Visit Highlights (with a per-School page), a filterable Visits list (`/school-visit-summary`), and a per-visit detail view (`/school-visit-summary/[id]`). Distinct from the PM's operational workspace at `/visits/[id]`.
 _Avoid_: Visit dashboard, visit report, visit overview
 
 **Remark**:
 A freeform text note attached to a question answer within an action's JSONB `data` payload. Used as "visit notes" on the summary detail page.
 _Avoid_: Note, comment (these imply a separate entity; remarks live inside action data)
+
+**Visit Concern**:
+A durable record of one problem, gap, request or risk needing Avanti's action at a School, distilled from the free text of one or more completed Visits. It keeps its identity as later Visits mention it again, and is either open or resolved.
+_Avoid_: Issue, ticket, theme, remark (a Remark is the raw text; a Visit Concern is what it says)
+
+**Visit Highlight**:
+A durable record of something going well at a School, distilled from the free text of one or more completed Visits. It has no resolve lifecycle.
+_Avoid_: Strength, positive, theme
+
+**Recurring Concern**:
+An open Visit Concern mentioned in two or more distinct Visits among those currently in view, so whether a concern recurs depends on the active filters.
+_Avoid_: Repeated issue, persistent concern
+
+**Concern Resolution**:
+The act of marking a Visit Concern resolved with a required explanation. Resolutions, comments and reopens form the Concern's permanent history; nothing in it is edited or deleted.
+_Avoid_: Closing, dismissal, fix
 
 ### Roles & Access
 
@@ -309,7 +325,7 @@ A staff User with the dedicated Blended Learning Mentor LMS role who is responsi
 _Avoid_: Holistic Mentor, Academic Mentor, counsellor, POC
 
 **Blended Learning Admin**:
-A staff User who can see every Blended Learning Mentor's Students and every Mentor Flag, view only: either an LMS Admin or a User with the dedicated Blended Learning Admin role. Only Mentors log, upload or manage drafts; an admin never does.
+A staff User who can see every Blended Learning Mentor's Students and every Mentor Flag: either an LMS Admin or a User with the dedicated Blended Learning Admin role. Only Mentors log, upload or manage drafts; an admin never does. An admin who is not read-only manages Resources and Common Action Items.
 _Avoid_: Program lead, mentor manager
 
 **Blended Learning Mentee**:
@@ -341,8 +357,16 @@ The queued, running, completed, or failed record the LMS creates after a Call Re
 _Avoid_: Regeneration Request, transcription job
 
 **Action Item**:
-A follow-up agreed in a Conversation, owned by the Student, the Mentor, or the Parent, that stays open until a later Conversation marks it done.
+A follow-up agreed in a Conversation, or pushed from a Common Action Item, owned by the Student, the Mentor, or the Parent, that stays open until a later Conversation marks it done.
 _Avoid_: Action (that is a School Visit term), task, to-do
+
+**Common Action Item**:
+An Action Item a Blended Learning Admin pushes to a target (every Mentee, one grade, one Mentor's Mentees, or Student IDs the admin pastes). Pushing adds it, then and there, as one open Action Item for each targeted Mentee, tagged "From program"; Mentees mapped later get it only when the admin pushes it again. Editing it changes the still-open ones; removing it deletes them and keeps the done ones.
+_Avoid_: template, broadcast, recurring task
+
+**Resource**:
+A titled link on the Mentors' Resources tab, in an order the Blended Learning Admins set on the Manage page.
+_Avoid_: Mentor Toolkit (one Resource), Profile Doc
 
 **Mentor Flag**:
 A concern raised on one Conversation for one Flag Recipient, with an optional comment. A Conversation can carry several.
@@ -748,7 +772,13 @@ _Avoid_: Screener Form (as a Quiz Form), Holistic Student Profile Questionnaire
 - A **Conversation** has zero or more **Action Items**, zero or more photo attachments, and zero or more **Mentor Flags**, at most one per **Flag Recipient**
 - A **Conversation Draft** becomes a **Conversation** only when the Mentor saves it; a draft does not change **Last Contact**, **Talk to First**, counts, or **Mentor Flags**; a Mentee has at most one open draft
 - A saved **Conversation** is not edited; a later Conversation can mark earlier **Action Items** done
+- An **Action Item** belongs to exactly one **Conversation** or one **Common Action Item**; a Mentee gets a **Common Action Item** at most once
 - A **Mentor Flag** to **Emotional Well-being** notifies its recipient by email without the notes or comment; Physics, Chemistry, and Maths Teacher flags notify no one until those people are named
+- The **School Visit Summary** covers only Schools with an active physical **Centre**; JNV NVS Students' data never appears on it
+- A **Visit Concern** or **Visit Highlight** belongs to one **School**, not a **Centre**, because a **Visit** is to a School
+- Only completed **Visits** contribute to **Visit Concerns** and **Visit Highlights**
+- A new mention of an existing **Visit Concern** attaches to it rather than creating a new one, so its **Concern Resolution** history stays with it
+- A resolved **Visit Concern** reopens automatically when a **Visit** dated after its resolution mentions it again; a Visit dated on or before the resolution never reopens it
 
 ## Example dialogue
 

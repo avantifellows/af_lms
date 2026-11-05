@@ -1,0 +1,318 @@
+import { act, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const { mockRefresh, transition } = vi.hoisted(() => ({
+  mockRefresh: vi.fn(),
+  // With `hold` set, a transition stays pending until `land()` runs it: a router.refresh() whose
+  // server render hasn't arrived yet.
+  transition: { hold: false, land: () => {} },
+}));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: mockRefresh }) }));
+vi.mock("react", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("react")>();
+  function useMaybeHeldTransition(): [boolean, (callback: () => void) => void] {
+    const real = actual.useTransition();
+    const [pending, setPending] = actual.useState(false);
+    if (!transition.hold) return real;
+    return [
+      pending,
+      (callback) => {
+        setPending(true);
+        transition.land = () => {
+          callback();
+          setPending(false);
+        };
+      },
+    ];
+  }
+  return { ...actual, useTransition: useMaybeHeldTransition };
+});
+
+import { ConcernActions } from "./ConcernActions";
+
+function respondWith(response: { ok: boolean; status?: number; json?: () => Promise<unknown> }) {
+  const fetchMock = vi.fn().mockResolvedValue({ json: () => Promise.resolve({}), ...response });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+function sentBody(fetchMock: ReturnType<typeof vi.fn>) {
+  const [url, init] = fetchMock.mock.calls[0];
+  return { url, method: init.method, body: JSON.parse(init.body) };
+}
+
+beforeEach(() => {
+  mockRefresh.mockReset();
+  transition.hold = false;
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe("ConcernActions", () => {
+  it("offers only Resolve on an open concern", () => {
+    render(<ConcernActions concernId={9004801} status="open" />);
+
+    expect(screen.getAllByRole("button").map((button) => button.textContent)).toEqual(["Resolve"]);
+  });
+
+  it("offers Comment and Reopen on a resolved concern", () => {
+    render(<ConcernActions concernId={9004801} status="resolved" />);
+
+    expect(screen.getAllByRole("button").map((button) => button.textContent)).toEqual(["Comment", "Reopen"]);
+  });
+
+  it("puts the buttons beside the card body, and opens the note form below it in their place", async () => {
+    const user = userEvent.setup();
+    render(
+      <ConcernActions concernId={9004801} status="open">
+        <p>Lab equipment missing</p>
+      </ConcernActions>
+    );
+
+    expect(screen.getByText("Lab equipment missing")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Resolve" }));
+
+    expect(screen.getByText("Lab equipment missing")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "How was this resolved?" })).toHaveAttribute(
+      "placeholder",
+      "How was this resolved? (required)"
+    );
+    expect(screen.getAllByRole("button").map((button) => button.textContent)).toEqual(["Mark resolved", "Cancel"]);
+  });
+
+  it("asks why a resolved concern is being reopened", async () => {
+    const user = userEvent.setup();
+    render(<ConcernActions concernId={9004801} status="resolved" />);
+
+    await user.click(screen.getByRole("button", { name: "Reopen" }));
+
+    expect(screen.getByRole("textbox", { name: "Why is this being reopened?" })).toHaveAttribute(
+      "placeholder",
+      "Why is this being reopened? (required)"
+    );
+    expect(screen.getAllByRole("button").map((button) => button.textContent)).toEqual(["Reopen", "Cancel"]);
+  });
+
+  it("resolves with the trimmed note and refreshes the page", async () => {
+    const user = userEvent.setup();
+    const fetchMock = respondWith({ ok: true });
+    render(<ConcernActions concernId={9004801} status="open" />);
+
+    await user.click(screen.getByRole("button", { name: "Resolve" }));
+    await user.type(screen.getByRole("textbox", { name: "How was this resolved?" }), "  Lab kits delivered  ");
+    await user.click(screen.getByRole("button", { name: "Mark resolved" }));
+
+    await waitFor(() => expect(mockRefresh).toHaveBeenCalled());
+    expect(sentBody(fetchMock)).toEqual({
+      url: "/api/visit-concerns/9004801/events",
+      method: "POST",
+      body: { action: "resolve", body: "Lab kits delivered" },
+    });
+    // The form closes and the action buttons come back.
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Resolve" })).toBeInTheDocument();
+  });
+
+  it.each([
+    ["Comment", "Comment", "Add comment", "comment"],
+    ["Reopen", "Why is this being reopened?", "Reopen", "reopen"],
+  ])("sends %s on a resolved concern", async (button, prompt, submit, action) => {
+    const user = userEvent.setup();
+    const fetchMock = respondWith({ ok: true });
+    render(<ConcernActions concernId={7} status="resolved" />);
+
+    await user.click(screen.getByRole("button", { name: button }));
+    await user.type(screen.getByRole("textbox", { name: prompt }), "Checked again");
+    await user.click(screen.getByRole("button", { name: submit }));
+
+    await waitFor(() => expect(mockRefresh).toHaveBeenCalled());
+    expect(sentBody(fetchMock).body).toEqual({ action, body: "Checked again" });
+  });
+
+  it("refuses a whitespace-only note without calling the API", async () => {
+    const user = userEvent.setup();
+    const fetchMock = respondWith({ ok: true });
+    render(<ConcernActions concernId={9004801} status="open" />);
+
+    await user.click(screen.getByRole("button", { name: "Resolve" }));
+    await user.type(screen.getByRole("textbox"), "   ");
+    await user.click(screen.getByRole("button", { name: "Mark resolved" }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Please write a note");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses a note over 2000 characters without calling the API", async () => {
+    const user = userEvent.setup();
+    const fetchMock = respondWith({ ok: true });
+    render(<ConcernActions concernId={9004801} status="open" />);
+
+    await user.click(screen.getByRole("button", { name: "Resolve" }));
+    const textbox = screen.getByRole("textbox");
+    await user.click(textbox);
+    await user.paste("a".repeat(2001));
+    await user.click(screen.getByRole("button", { name: "Mark resolved" }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Note must be at most 2000 characters");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("shows Saving… and disables the form while the request is in flight", async () => {
+    const user = userEvent.setup();
+    let finish: (value: { ok: boolean; json: () => Promise<unknown> }) => void = () => {};
+    vi.stubGlobal("fetch", vi.fn(() => new Promise((resolve) => { finish = resolve; })));
+    render(<ConcernActions concernId={9004801} status="open" />);
+
+    await user.click(screen.getByRole("button", { name: "Resolve" }));
+    await user.type(screen.getByRole("textbox"), "Fixed");
+    await user.click(screen.getByRole("button", { name: "Mark resolved" }));
+
+    expect(screen.getByRole("button", { name: "Saving…" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
+    expect(screen.getByRole("textbox")).toBeDisabled();
+
+    finish({ ok: true, json: () => Promise.resolve({}) });
+    await waitFor(() => expect(mockRefresh).toHaveBeenCalled());
+  });
+
+  it("keeps the form disabled until the refreshed page lands, so the old buttons can't be pressed again", async () => {
+    const user = userEvent.setup();
+    transition.hold = true;
+    respondWith({ ok: true });
+    render(<ConcernActions concernId={9004801} status="open" />);
+
+    await user.click(screen.getByRole("button", { name: "Resolve" }));
+    await user.type(screen.getByRole("textbox"), "Lab kits delivered");
+    await user.click(screen.getByRole("button", { name: "Mark resolved" }));
+
+    // Saved, but the refresh is still in flight: the form stays, disabled, and Resolve doesn't come back.
+    await waitFor(() => expect(screen.getByRole("button", { name: "Saving…" })).toBeDisabled());
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
+    expect(screen.getByRole("textbox")).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Resolve" })).not.toBeInTheDocument();
+
+    act(() => transition.land());
+
+    expect(mockRefresh).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+
+  it("shows the message and refreshes the page when the concern changed under the user (409)", async () => {
+    const user = userEvent.setup();
+    respondWith({ ok: false, status: 409, json: () => Promise.resolve({ error: "This concern is already resolved" }) });
+    render(<ConcernActions concernId={9004801} status="open" />);
+
+    await user.click(screen.getByRole("button", { name: "Resolve" }));
+    await user.type(screen.getByRole("textbox"), "Lab kits delivered");
+    await user.click(screen.getByRole("button", { name: "Mark resolved" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("This concern is already resolved");
+    await waitFor(() => expect(mockRefresh).toHaveBeenCalledTimes(1));
+  });
+
+  it("shows the API's error and keeps the typed text when the save fails", async () => {
+    const user = userEvent.setup();
+    respondWith({ ok: false, json: () => Promise.resolve({ error: "This concern is already resolved" }) });
+    render(<ConcernActions concernId={9004801} status="open" />);
+
+    await user.click(screen.getByRole("button", { name: "Resolve" }));
+    await user.type(screen.getByRole("textbox"), "Lab kits delivered");
+    await user.click(screen.getByRole("button", { name: "Mark resolved" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("This concern is already resolved");
+    expect(screen.getByRole("textbox")).toHaveValue("Lab kits delivered");
+    expect(screen.getByRole("button", { name: "Mark resolved" })).toBeEnabled();
+    expect(mockRefresh).not.toHaveBeenCalled();
+  });
+
+  it("falls back to a generic error when the failed response has no JSON error", async () => {
+    const user = userEvent.setup();
+    respondWith({ ok: false, json: () => Promise.reject(new Error("not json")) });
+    render(<ConcernActions concernId={9004801} status="open" />);
+
+    await user.click(screen.getByRole("button", { name: "Resolve" }));
+    await user.type(screen.getByRole("textbox"), "Fixed");
+    await user.click(screen.getByRole("button", { name: "Mark resolved" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Something went wrong. Please try again.");
+  });
+
+  it("says the server could not be reached when the request itself fails", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
+    render(<ConcernActions concernId={9004801} status="open" />);
+
+    await user.click(screen.getByRole("button", { name: "Resolve" }));
+    await user.type(screen.getByRole("textbox"), "Fixed");
+    await user.click(screen.getByRole("button", { name: "Mark resolved" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not reach the server. Please try again.");
+    expect(screen.getByRole("textbox")).toHaveValue("Fixed");
+  });
+
+  it("Cancel closes the form and clears the typed text", async () => {
+    const user = userEvent.setup();
+    render(<ConcernActions concernId={9004801} status="resolved" />);
+
+    await user.click(screen.getByRole("button", { name: "Comment" }));
+    await user.type(screen.getByRole("textbox"), "Draft");
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await user.click(screen.getByRole("button", { name: "Comment" }));
+
+    expect(screen.getByRole("textbox")).toHaveValue("");
+  });
+
+  it("Escape closes the form, clears the text and puts focus back on the button that opened it", async () => {
+    const user = userEvent.setup();
+    render(<ConcernActions concernId={9004801} status="resolved" />);
+
+    await user.click(screen.getByRole("button", { name: "Reopen" }));
+    await user.type(screen.getByRole("textbox"), "Draft");
+    await user.keyboard("{Escape}");
+
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reopen" })).toHaveFocus();
+    await user.click(screen.getByRole("button", { name: "Reopen" }));
+    expect(screen.getByRole("textbox")).toHaveValue("");
+  });
+
+  it("Cancel also puts focus back on the button that opened the form", async () => {
+    const user = userEvent.setup();
+    render(<ConcernActions concernId={9004801} status="resolved" />);
+
+    await user.click(screen.getByRole("button", { name: "Comment" }));
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(screen.getByRole("button", { name: "Comment" })).toHaveFocus();
+  });
+
+  it("labels the note with a visible prompt and counts its characters against the 2000 limit", async () => {
+    const user = userEvent.setup();
+    render(<ConcernActions concernId={9004801} status="open" />);
+
+    await user.click(screen.getByRole("button", { name: "Resolve" }));
+    const textbox = screen.getByLabelText("How was this resolved?");
+    expect(screen.getByText("How was this resolved?").tagName).toBe("LABEL");
+    expect(textbox).toHaveAccessibleDescription("0/2000");
+
+    await user.type(textbox, "Fixed");
+
+    expect(screen.getByText("5/2000")).toBeInTheDocument();
+    expect(textbox).toHaveAccessibleDescription("5/2000");
+  });
+
+  it("tells the card which form opened, so it can expand", async () => {
+    const onOpen = vi.fn();
+    const { unmount } = render(<ConcernActions concernId={41} status="open" onOpen={onOpen} />);
+    await userEvent.click(screen.getByRole("button", { name: "Resolve" }));
+    expect(onOpen).toHaveBeenCalledWith("resolve");
+    unmount();
+
+    render(<ConcernActions concernId={42} status="resolved" onOpen={onOpen} />);
+    await userEvent.click(screen.getByRole("button", { name: "Reopen" }));
+    expect(onOpen).toHaveBeenLastCalledWith("reopen");
+  });
+});

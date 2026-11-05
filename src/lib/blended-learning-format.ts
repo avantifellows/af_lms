@@ -24,6 +24,21 @@ export function describeSession(session: {
   return `${MODE_LABEL[session.mode]} · ${session.durationMinutes} min · Spoke with ${spokeWith}`;
 }
 
+const STATE_CODE: Record<string, string> = {
+  Delhi: "DL",
+  "Himachal Pradesh": "HP",
+  Punjab: "PB",
+  Uttarakhand: "UK",
+};
+
+// A program's name as Blended Learning shows it: "STP Voucher Delhi" →
+// "Voucher DL", "STP Dropper Himachal Pradesh" → "Dropper HP". Any other
+// name is shown as it is; the stored name stays the full one.
+export function shortProgramName(name: string): string {
+  const match = /^STP (.+) (Delhi|Himachal Pradesh|Punjab|Uttarakhand)$/.exec(name.trim());
+  return match ? `${match[1]} ${STATE_CODE[match[2]]}` : name;
+}
+
 // A `YYYY-MM-DD` calendar date as "5 Mar 2026", never shifted by time zone.
 export function formatCalendarDate(date: string): string {
   const [year, month, day] = date.split("-").map(Number);

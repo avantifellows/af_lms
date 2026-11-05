@@ -28,17 +28,17 @@ export function daysAgo(days: number): string {
 }
 
 function notReachable(mentee: MenteeRow, today?: string): string {
-  return mentee.lastAttemptOn ? `Not reachable, ${shortDate(mentee.lastAttemptOn, today)}` : "Not reachable on the last try";
+  return mentee.lastAttemptOn ? `Unreachable · ${shortDate(mentee.lastAttemptOn, today)}` : "Unreachable";
 }
 
 function notContacted(mentee: MenteeRow): string {
-  return `Not contacted in ${mentee.daysSince} days`;
+  return `No contact · ${mentee.daysSince} days`;
 }
 
 export function whyNowTags(mentee: MenteeRow, today?: string): WhyNowTag[] {
   return mentee.reasons.map((reason) => {
     if (reason === "attempt") return { reason, text: notReachable(mentee, today), tone: "danger" };
-    if (reason === "no_contact") return { reason, text: "No conversation yet", tone: "warning" };
+    if (reason === "no_contact") return { reason, text: "No conversation", tone: "warning" };
     return { reason, text: notContacted(mentee), tone: "warning" };
   });
 }

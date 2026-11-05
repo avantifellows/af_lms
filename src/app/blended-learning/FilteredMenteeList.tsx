@@ -4,13 +4,14 @@ import { Search } from "lucide-react";
 import { useState } from "react";
 
 import { FormLabel, Input } from "@/components/ui";
+import { shortProgramName } from "@/lib/blended-learning-format";
 import type { MenteeList, MenteeRow } from "@/lib/blended-learning-mentees";
 import { thirtyDaysOrMore } from "@/lib/blended-learning-talk-to-first";
 
 import { BlendedSelect } from "./BlendedSelect";
 import { MenteeGroups } from "./MenteeList";
 
-// The Student list with name search and filters, in one row above the list.
+// The Student list with a name or Student ID search and filters, in one row above the list.
 // Filtering keeps the server's Talk to first / Everyone else grouping and
 // sort order. The copy names no viewer, so it reads the same to a Mentor and
 // to an admin looking at a Mentor's list.
@@ -34,9 +35,15 @@ type Filters = {
 
 const NO_FILTERS: Filters = { search: "", gender: "", grade: "", programId: "", lastContact: "" };
 
+// A trimmed, case-insensitive substring of the name or the Student ID.
+function matchesSearch(mentee: MenteeRow, search: string): boolean {
+  const term = search.trim().toLowerCase();
+  return [mentee.name, mentee.programStudentId ?? ""].some((text) => text.toLowerCase().includes(term));
+}
+
 // Each check passes when its filter is "All" ("") or the Student matches it.
 const CHECKS: ((mentee: MenteeRow, filters: Filters) => boolean)[] = [
-  (mentee, { search }) => mentee.name.toLowerCase().includes(search.trim().toLowerCase()),
+  (mentee, { search }) => matchesSearch(mentee, search),
   (mentee, { gender }) => gender === "" || mentee.gender === gender,
   (mentee, { grade }) => grade === "" || mentee.grade === Number(grade),
   (mentee, { programId }) => programId === "" || mentee.programId === Number(programId),
@@ -58,7 +65,8 @@ function asOptions(values: string[]): { value: string; label: string }[] {
 function programOptions(mentees: MenteeRow[]): { value: string; label: string }[] {
   const programs = new Map<number, string>();
   for (const mentee of mentees) {
-    programs.set(mentee.programId, mentee.programName ?? `Program ${mentee.programId}`);
+    const name = mentee.programName ? shortProgramName(mentee.programName) : `Program ${mentee.programId}`;
+    programs.set(mentee.programId, name);
   }
   return [...programs]
     .map(([id, name]) => ({ value: String(id), label: name }))
@@ -98,15 +106,15 @@ function FilterSelect({
 
 function SearchBox({ value, onChange }: { value: string; onChange: (value: string) => void }) {
   return (
-    <div className="relative w-full sm:w-60">
+    <div className="relative w-full sm:w-72">
       <Search
         aria-hidden="true"
         className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted"
       />
       <Input
         type="search"
-        aria-label="Search by name"
-        placeholder="Search by name"
+        aria-label="Search by name or Student ID"
+        placeholder="Search by name or Student ID"
         autoComplete="off"
         className="pl-9"
         value={value}

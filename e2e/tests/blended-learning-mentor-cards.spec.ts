@@ -134,7 +134,7 @@ for (const { label, viewport, entryRole } of VIEWPORTS) {
       await expect(entries(group(page, "Everyone else"))).toHaveText(
         [twentyNineDays, recent].map((mentee) => new RegExp(fullName(mentee)))
       );
-      await expect(talkToFirst.filter({ hasText: fullName(attemptLatest) }).getByText(/^Not reachable, \d{1,2} [A-Z][a-z]{2}/)).toBeVisible();
+      await expect(talkToFirst.filter({ hasText: fullName(attemptLatest) }).getByText(/^Unreachable · \d{1,2} [A-Z][a-z]{2}/)).toBeVisible();
       await expect(talkToFirst.filter({ hasText: fullName(neverContacted) }).getByText("Draft ready to review")).toBeVisible();
       // Admins are view only: the chip is a plain label and no row offers a new log.
       await expect(

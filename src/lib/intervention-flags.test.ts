@@ -16,6 +16,7 @@ import {
   InterventionFlagError,
   addFlagUpdate,
   authorizeInterventionFlags,
+  canViewSchoolInterventionFlags,
   flagStudentScopeForPmu,
   interventionFlagAccess,
   listSchoolFlags,
@@ -147,6 +148,49 @@ describe("authorizeInterventionFlags", () => {
       expect(result.school).toEqual(SCHOOL);
       expect(result.actor).toMatchObject({ email: TEACHER.email, userId: 42 });
     }
+  });
+});
+
+describe("canViewSchoolInterventionFlags", () => {
+  const ADMIN: UserPermission = {
+    email: "admin@avantifellows.org", level: 3, role: "admin", program_ids: [1], read_only: false,
+  };
+  const REGION_PROGRAM_ADMIN: UserPermission = {
+    email: "pa@avantifellows.org", level: 2, role: "program_admin", regions: ["North"], program_ids: [1], read_only: false,
+  };
+  const SEATED_PM: UserPermission = {
+    email: "pm@avantifellows.org", level: 1, role: "program_manager", school_codes: [], program_ids: [1], read_only: false,
+    scope: { schools: new Set(["70705"]), centres: new Set([7]), programs: new Set([1]), visitManagedSchools: new Set(["70705"]) },
+  };
+  const SOUTH_SCHOOL = { ...SCHOOL, code: "60606", region: "South" };
+
+  it("lets an admin see flags at any School", () => {
+    expect(canViewSchoolInterventionFlags(ADMIN, SCHOOL)).toBe(true);
+    expect(canViewSchoolInterventionFlags(ADMIN, NON_JNV_SCHOOL)).toBe(true);
+  });
+
+  it("limits a region-scoped program_admin to Schools in their regions", () => {
+    expect(canViewSchoolInterventionFlags(REGION_PROGRAM_ADMIN, SCHOOL)).toBe(true);
+    expect(canViewSchoolInterventionFlags(REGION_PROGRAM_ADMIN, SOUTH_SCHOOL)).toBe(false);
+  });
+
+  it("lets a seated PM see flags only at their seat Schools", () => {
+    expect(canViewSchoolInterventionFlags(SEATED_PM, SCHOOL)).toBe(true);
+    expect(canViewSchoolInterventionFlags(SEATED_PM, NON_JNV_SCHOOL)).toBe(false);
+  });
+
+  it("keeps a PMU role out of a non-JNV School, even at level 3", () => {
+    expect(canViewSchoolInterventionFlags(PMU_MANAGER, SCHOOL)).toBe(true);
+    expect(canViewSchoolInterventionFlags(PMU_MANAGER, NON_JNV_SCHOOL)).toBe(false);
+  });
+
+  it("lets a read-only user see flags in scope", () => {
+    expect(canViewSchoolInterventionFlags({ ...ADMIN, read_only: true }, SCHOOL)).toBe(true);
+  });
+
+  it("refuses a role without students view, and a missing permission", () => {
+    expect(canViewSchoolInterventionFlags({ ...ADMIN, role: "holistic_mentorship_admin" }, SCHOOL)).toBe(false);
+    expect(canViewSchoolInterventionFlags(null, SCHOOL)).toBe(false);
   });
 });
 

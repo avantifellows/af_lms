@@ -14,6 +14,7 @@
     "db:setup-permissions": "npx ts-node scripts/setup-permissions.ts",
     "centres:import": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/import-centres.ts",
     "blended:import-links": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/import-blended-learning-links.ts",
+    "blended:export-latest-entries": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/export-latest-profile-doc-entries.ts",
     "holistic:prepare-history": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/prepare-holistic-historical-notes.ts",
     "holistic:import-history": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/import-holistic-historical-notes.ts",
     "holistic:rollover": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/rollover-holistic-mappings.ts",
@@ -34,7 +35,8 @@
     "pm:check": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/check-teacher-centre-vs-prod.ts",
     "pm:promodiff": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/check-promotion-school-diff.ts",
     "pm:mirror": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/mirror-seats-staging-to-prod.ts",
-    "teacher-feedback:bundle": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/generate-teacher-feedback-bundle.ts"
+    "teacher-feedback:bundle": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/generate-teacher-feedback-bundle.ts",
+    "qa:ensure-staging-admin": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/ensure-staging-review-admin.ts"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.1025.0",

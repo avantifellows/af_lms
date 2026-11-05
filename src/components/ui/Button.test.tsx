@@ -24,6 +24,14 @@ describe("Button", () => {
     expect(screen.getByRole("button")).toHaveClass("bg-danger");
   });
 
+  it("applies the success variants", () => {
+    const { rerender } = render(<Button variant="success">Mark resolved</Button>);
+    expect(screen.getByRole("button")).toHaveClass("bg-success");
+
+    rerender(<Button variant="success-outline">Resolve</Button>);
+    expect(screen.getByRole("button")).toHaveClass("border-success", "text-success");
+  });
+
   it("applies ghost variant", () => {
     render(<Button variant="ghost">Link</Button>);
     expect(screen.getByRole("button")).toHaveClass("text-accent");

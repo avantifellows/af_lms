@@ -15,6 +15,13 @@ export function jsonRequest(
   return new Request(url, init);
 }
 
+/** A GET Request for `url` with these query params. */
+export function getRequest(url: string, params: Record<string, string>): Request {
+  const u = new URL(url);
+  for (const [k, v] of Object.entries(params)) u.searchParams.set(k, v);
+  return new Request(u.toString());
+}
+
 /** Wrap route params in a Promise (Next.js 16 pattern). */
 export function routeParams<T extends Record<string, string>>(p: T) {
   return { params: Promise.resolve(p) };

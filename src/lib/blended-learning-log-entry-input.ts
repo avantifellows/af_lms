@@ -18,6 +18,9 @@ type FlagRecipient = "emotional_wellbeing" | "physics" | "chemistry" | "maths";
 export type FlagInput = { recipient: FlagRecipient; comment: string | null };
 // An uploaded photo, already under this Student's photo prefix.
 export type PhotoInput = { s3Key: string; contentType: string };
+// The Mentor's once-per-Student ratings of the Screener, each 1 (not at all)
+// to 5 (a lot).
+export type ScreenerFeedbackInput = { helpedUnderstand: number; moreComfortable: number };
 
 export type ConversationInput = {
   kind: "conversation";
@@ -34,6 +37,10 @@ export type ConversationInput = {
   completeActionItemIds: number[];
   // The ready Conversation Draft this Conversation was reviewed from.
   draftId: number | null;
+  // "Was the screener form used?": null when it wasn't asked (no Screener
+  // link). Whether it should have been is checked against the database.
+  screenerUsed: boolean | null;
+  screenerFeedback: ScreenerFeedbackInput | null;
 };
 type AttemptInput = { kind: "attempt"; occurredOn: string; note: string | null };
 export type EntryInput = ConversationInput | AttemptInput;
@@ -49,7 +56,12 @@ const CONVERSATION_ONLY: [field: string, message: string][] = [
   ["photoKeys", "An Attempt can't have photos."],
   ["flags", "An Attempt can't have Mentor Flags."],
   ["completeActionItemIds", "Only a Conversation can tick Action Items done."],
+  ["screenerUsed", "Only a Conversation records whether the screener form was used."],
+  ["screenerFeedback", "Only a Conversation can give screener feedback."],
 ];
+
+const SCREENER_RATINGS = ["helpedUnderstand", "moreComfortable"] as const;
+export const SCREENER_RATING_ERROR = "Choose a rating from 1 (not at all) to 5 (a lot).";
 
 function optionalText(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
@@ -104,7 +116,44 @@ function validateConversation(body: Record<string, unknown>, today: string, stud
     flags: validateFlags(body.flags, errors),
     completeActionItemIds: validateCompleteActionItemIds(body.completeActionItemIds, errors),
     draftId: validateDraftId(body.draftId, errors),
+    ...validateScreener(body.screenerUsed, body.screenerFeedback, errors),
   });
+}
+
+// The screener answer and, only when the form was used, its two ratings.
+// Whether this Student has a Screener link and still owes feedback is the
+// save's check, inside its transaction.
+function validateScreener(
+  rawUsed: unknown,
+  rawFeedback: unknown,
+  errors: FieldErrors
+): Pick<ConversationInput, "screenerUsed" | "screenerFeedback"> {
+  const screenerUsed = isNullish(rawUsed) ? null : rawUsed;
+  if (screenerUsed !== null && typeof screenerUsed !== "boolean") {
+    errors.screenerUsed = "Say whether the screener form was used.";
+    return { screenerUsed: null, screenerFeedback: null };
+  }
+  if (isNullish(rawFeedback)) return { screenerUsed, screenerFeedback: null };
+  if (screenerUsed !== true) {
+    errors.screenerFeedback = "Screener feedback is only given when the screener form was used.";
+    return { screenerUsed, screenerFeedback: null };
+  }
+  return { screenerUsed, screenerFeedback: validateRatings(rawFeedback, errors) };
+}
+
+// Both screener ratings, each an integer from 1 to 5.
+function validateRatings(raw: unknown, errors: FieldErrors): ScreenerFeedbackInput {
+  const feedback = asRecord(raw);
+  for (const rating of SCREENER_RATINGS) {
+    const value = feedback[rating];
+    if (!Number.isInteger(value) || (value as number) < 1 || (value as number) > 5) {
+      errors[`screenerFeedback.${rating}`] = SCREENER_RATING_ERROR;
+    }
+  }
+  return {
+    helpedUnderstand: feedback.helpedUnderstand as number,
+    moreComfortable: feedback.moreComfortable as number,
+  };
 }
 
 // Notes are optional HTML, sanitised for storage.

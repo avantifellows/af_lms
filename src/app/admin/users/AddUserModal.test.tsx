@@ -1107,10 +1107,10 @@ describe("AddUserModal — Blended Learning roles", () => {
 
     await user.selectOptions(roleSelect, "blended_admin");
     expect(
-      screen.getByText("Blended Learning Admins can see every Mentor's Mentees and Mentor Flags, and play Call Recordings and read their transcripts. They view only: only Mentors log. They have no other LMS access")
+      screen.getByText("Blended Learning Admins can see every Mentor's Mentees and Mentor Flags, play Call Recordings and read their transcripts, and manage Resources and Common Action Items. Only Mentors log. They have no other LMS access")
     ).toBeInTheDocument();
     expect(
-      screen.getByLabelText("Read-only access (Blended Learning Admins are always view only)")
+      screen.getByLabelText("Read-only access (view only: cannot manage Resources or Common Action Items)")
     ).toBeInTheDocument();
   });
 

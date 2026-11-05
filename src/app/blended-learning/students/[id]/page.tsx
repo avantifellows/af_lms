@@ -7,38 +7,45 @@ import { Badge, Button, Card } from "@/components/ui";
 import { canBlendedLearning, type BlendedLearningAccess } from "@/lib/blended-learning-access";
 import { requireBlendedLearningPage, requireNumericPageId } from "@/lib/blended-learning-guard";
 import { getDraftStatus } from "@/lib/blended-learning-drafts";
-import { describeSession, formatCalendarDate } from "@/lib/blended-learning-format";
+import { describeSession, formatCalendarDate, shortProgramName } from "@/lib/blended-learning-format";
 import {
   getMenteeDetail,
   type ActionItem,
   type HistoryEntry,
   type MenteeDetail,
   type MentorFlag,
+  type ScreenerFeedback,
 } from "@/lib/blended-learning-mentee-detail";
 import { loadDashboardChrome } from "@/lib/dashboard-chrome";
 
 import { BlendedPageShell } from "../../BlendedPageShell";
 import { ExternalLink } from "../../ExternalLink";
-import { ActionItemMeta, OwnerPill } from "./ActionItemMeta";
+import { ACTION_ITEM_ROW_CLASSES, ActionItemMeta, OwnerPill } from "./ActionItemMeta";
 import { ConversationNotes } from "./ConversationNotes";
 import { ConversationPhotos } from "./ConversationPhotos";
 import { ConversationRecording } from "./ConversationRecording";
 import { DraftStatus } from "./DraftStatus";
 import { FLAG_HISTORY } from "./flagRecipients";
+import { SCREENER_QUESTIONS } from "./screenerQuestions";
 
 // One Mentee, in one column as wide as the log page's: name, profile line,
 // contact and links, any open Conversation Draft (polled while drafting), the
-// Open Action Items, then the newest-first history. Notes and photos load on
-// demand from their API routes.
+// Open Action Items (the Profile Doc's among them), then the newest-first
+// history, where the Profile Doc's latest entry sits at its date. Notes and
+// photos load on demand from their API routes.
 // Admins and read-only Mentors see the same page, view only: the log button
 // and the draft's controls stay in place, disabled. Open Action Items are
 // ticked done from the log page. Only Blended Learning Admins (read-only too)
-// can play a saved Call Recording or read its transcript.
+// can play a saved Call Recording or read its transcript. A Conversation
+// that used the Screener says so, with the Student's one Screener Feedback
+// on the Conversation that gave it.
 
 type Conversation = Extract<HistoryEntry, { kind: "conversation" }>;
+type ProfileDocHistoryEntry = Extract<HistoryEntry, { kind: "profile_doc" }>;
 
 function profileMeta(mentee: MenteeDetail): string[] {
-  return [mentee.grade === null ? null : `Grade ${mentee.grade}`, mentee.programName, mentee.gender].filter(
+  const program = mentee.programName && shortProgramName(mentee.programName);
+  return [mentee.grade === null ? null : `Grade ${mentee.grade}`, program, mentee.gender].filter(
     (part): part is string => Boolean(part)
   );
 }
@@ -158,12 +165,17 @@ function FlagChips({ flags }: { flags: MentorFlag[] }) {
   );
 }
 
+// A Common Action Item the Conversation ticked done carries the "From
+// program" tag under its text.
 function ActionItemRow({ item }: { item: ActionItem }) {
   const done = item.status === "done";
   return (
-    <li className="grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-2.5 gap-y-0.5 text-sm sm:grid-cols-[auto_minmax(0,1fr)_auto]">
+    <li className="grid grid-cols-[4rem_minmax(0,1fr)] items-baseline gap-x-2.5 gap-y-0.5 text-sm sm:grid-cols-[4rem_minmax(0,1fr)_auto]">
       <OwnerPill owner={item.owner} />
-      <span className={`break-words ${done ? "text-text-muted line-through" : "text-text-primary"}`}>{item.text}</span>
+      <span className="min-w-0 break-words">
+        <span className={done ? "text-text-muted line-through" : "text-text-primary"}>{item.text}</span>
+        {item.source === "common" && <ActionItemMeta source="common" />}
+      </span>
       <span className={`col-start-2 text-xs font-bold sm:col-start-auto ${done ? "text-success" : "text-accent"}`}>
         {done ? "Done" : "Open"}
       </span>
@@ -199,6 +211,28 @@ function FlagNotes({ flags }: { flags: MentorFlag[] }) {
     ));
 }
 
+// "Screener form used", and the two ratings where they were given.
+function ScreenerUsed({ feedback }: { feedback: ScreenerFeedback | null }) {
+  return (
+    <EntrySection label="Screener">
+      <p className="flex items-center gap-1.5 text-sm text-text-primary">
+        <ClipboardList aria-hidden="true" className="h-4 w-4 shrink-0 text-text-muted" />
+        Screener form used
+      </p>
+      {feedback && (
+        <dl className="space-y-2 sm:max-w-2xl">
+          {SCREENER_QUESTIONS.map(({ key, question }) => (
+            <div key={key} className="grid grid-cols-[1fr_auto] items-baseline gap-x-3 text-sm">
+              <dt className="min-w-0 text-text-secondary">{question}</dt>
+              <dd className="text-right font-mono font-bold text-text-primary">{`${feedback[key]} / 5`}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+    </EntrySection>
+  );
+}
+
 function ConversationMedia({ entry, canPlayRecording }: { entry: Conversation; canPlayRecording: boolean }) {
   return (
     <>
@@ -229,6 +263,7 @@ function ConversationEntry({ entry, canPlayRecording }: { entry: Conversation; c
           </EntrySection>
         )}
         <FlagNotes flags={entry.flags} />
+        {entry.screenerUsed && <ScreenerUsed feedback={entry.screenerFeedback} />}
       </div>
       <div className="mt-2">
         <ConversationMedia entry={entry} canPlayRecording={canPlayRecording} />
@@ -237,10 +272,33 @@ function ConversationEntry({ entry, canPlayRecording }: { entry: Conversation; c
   );
 }
 
+// The Profile Doc's latest entry, laid out as a Conversation: its summary
+// as the write-up and its action items with their status.
+function ProfileDocEntry({ entry }: { entry: ProfileDocHistoryEntry }) {
+  return (
+    <>
+      <EntryHeader date={entry.occurredOn} meta="From Profile Doc" chips={null} />
+      <div className="mt-4 space-y-4">
+        {entry.summary && (
+          <EntrySection label="Summary">
+            <p className="whitespace-pre-line break-words text-sm text-text-primary">{entry.summary}</p>
+          </EntrySection>
+        )}
+        <ActionItems items={entry.actionItems} />
+        {entry.profileDocUrl && (
+          <ExternalLink href={entry.profileDocUrl} icon={FileText}>
+            Open Profile Doc
+          </ExternalLink>
+        )}
+      </div>
+    </>
+  );
+}
+
 function AttemptEntry({ entry }: { entry: Extract<HistoryEntry, { kind: "attempt" }> }) {
   return (
     <>
-      <EntryHeader date={entry.occurredOn} meta="Attempt" chips={<Badge variant="danger">Not reachable</Badge>} />
+      <EntryHeader date={entry.occurredOn} meta="Attempt" chips={<Badge variant="danger">Unreachable</Badge>} />
       {entry.note && <p className="mt-2 break-words text-sm text-text-primary">{entry.note}</p>}
     </>
   );
@@ -254,11 +312,11 @@ function OpenActionItems({ items }: { items: MenteeDetail["openActionItems"] }) 
         <h2 className="text-xs font-bold uppercase tracking-wide text-text-muted">Open Action Items</h2>
         <ul className="space-y-2">
           {items.map((item) => (
-            <li key={item.id} className="flex items-baseline gap-2.5 text-sm text-text-primary">
+            <li key={item.id} className={`${ACTION_ITEM_ROW_CLASSES} text-sm text-text-primary`}>
               <OwnerPill owner={item.owner} />
               <span className="min-w-0 break-words">
                 {item.text}
-                <ActionItemMeta agreedOn={item.agreedOn} />
+                <ActionItemMeta agreedOn={item.agreedOn} source={item.source} />
               </span>
             </li>
           ))}
@@ -277,6 +335,14 @@ function EmptyHistory({ canLog }: { canLog: boolean }) {
   );
 }
 
+function HistoryArticle({ entry, canPlayRecording }: { entry: HistoryEntry; canPlayRecording: boolean }) {
+  if (entry.kind === "attempt") return <AttemptEntry entry={entry} />;
+  if (entry.kind === "profile_doc") return <ProfileDocEntry entry={entry} />;
+  return <ConversationEntry entry={entry} canPlayRecording={canPlayRecording} />;
+}
+
+// Conversations count only those logged in the app: never Attempts or the
+// Profile Doc entry.
 function History({
   history,
   canPlayRecording,
@@ -289,19 +355,15 @@ function History({
   const conversations = history.filter((entry) => entry.kind === "conversation").length;
   return (
     <section aria-label="History" className="space-y-3">
-      <h2 className="text-lg font-bold text-text-primary sm:text-xl">Conversations ({conversations})</h2>
+      <h2 className="text-lg font-bold text-text-primary sm:text-xl">Conversations in app ({conversations})</h2>
       {history.length === 0 ? (
         <EmptyHistory canLog={canLog} />
       ) : (
         <ol className="space-y-3">
           {history.map((entry) => (
-            <li key={entry.id}>
+            <li key={`${entry.kind}-${entry.id}`}>
               <article className="rounded-lg border border-border bg-bg-card p-4 shadow-sm sm:p-6">
-                {entry.kind === "attempt" ? (
-                  <AttemptEntry entry={entry} />
-                ) : (
-                  <ConversationEntry entry={entry} canPlayRecording={canPlayRecording} />
-                )}
+                <HistoryArticle entry={entry} canPlayRecording={canPlayRecording} />
               </article>
             </li>
           ))}
