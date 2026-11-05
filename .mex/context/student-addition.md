@@ -18,7 +18,7 @@ edges:
     condition: when adding LMS API routes for create or bulk upload
   - target: patterns/db-service-write.md
     condition: when proxying student writes to the DB Service
-last_updated: 2026-10-26
+last_updated: 2026-11-05
 ---
 
 # Student Addition
@@ -235,9 +235,26 @@ Three rows, built by `src/lib/data-completeness.ts`:
   has recorded stays counted — nothing rules it out, and the Category chip is where that gap shows.
   Where no Student in scope could produce one, the row says so rather than calling it complete, and
   those slots leave the percentage.
-- **Exams** — one chip per exam the Student's Board Stream calls for (`STREAM_EXPECTED_EXAM_NAMES`),
-  counting Students with no registration for it. An exam no Student in scope is expected to sit gets
-  a note ("NEET not expected — no Student on PCB or PCMB") rather than silently missing.
+- **Exams** — **Grade 12 only** (`EXAM_REGISTRATION_GRADE`), one chip per exam the Student's Board
+  Stream calls for (`STREAM_EXPECTED_EXAM_NAMES`), counting candidates with no registration for it.
+  Grade 11 was in scope until the PR review (2026-10-28, decided by Pritam): they sit the exam next
+  year, and counting them read ~0% at every centre — about 3,100 physical-centre Students, 1,617 of
+  them in Grade 11. The narrower scope earns a note of its own ("Grade 12 only — 55 of 77 students")
+  so a count of 40 isn't read against the Info row's denominator, and a roster with no Grade 12 at
+  all says "Not expected yet" instead of showing a bare 100%. An exam no candidate is expected to sit
+  gets a note ("NEET not expected — no Grade 12 Student on PCB or PCMB") rather than silently
+  missing. A candidate with **no Board Stream** gets a chip of its own
+  (`BOARD_STREAM_FILTER_KEY`, filed under Exams by `groupOf`): without a stream nothing can say which
+  exams they owe, and Board Stream is not an Info item, so the gap used to appear nowhere on the
+  table — 152 such Students in prod, 55 of them in Grade 12. A candidate owes either a Board Stream
+  or their registrations, never both, so the row reads 0% when nobody has been streamed instead of
+  the 100% that "no registration is expected" would otherwise give.
+
+Open questions from the review, unanswered and not blocking: whether an exam should count as missing
+only once its registration window is open (NEET's opens around February, so every PCB candidate
+reads red until then), and whether registrations should be scoped to an academic year —
+`student_exam_record` has no year column, so a 2024 registration counts as this year's. Prod holds no
+exam registration for any current physical-centre Student; the only 4,227 rows are a Dec 2024 import.
 
 Every percentage is **slot-based** (filled ÷ Students × items), not all-or-nothing, so it moves as
 gaps close. Chips sort worst first and anything nobody is missing folds into "✓ N complete" with the
@@ -261,6 +278,15 @@ a roster. A failure never writes to `documents`: null (nothing read yet) keeps t
 its group label disabled, because "missing any document" would otherwise match nobody and read as
 "nobody is missing one"; a failed *re*fetch after an upload keeps the counts it already had and adds
 a "couldn't refresh" note rather than blanking a table the PM is reading.
+
+The **exam** read fails differently and now says so too (review finding, 2026-10-28).
+`listExamSummariesForStudents` catches its own failure — the registrations are a display extra on a
+page whose point is the roster — but it used to return an empty map, which is exactly what "nobody
+has registered" looks like, so the row went red instead of reporting an error. It now returns
+`{ byStudent, failed }`, `withExamRecords` carries `failed` to `SchoolRoster.examRecordsFailed`, and
+`RosterPage` passes it to the table as `examsError`. Unlike the documents there is no earlier answer
+to fall back on — the exam read happens once, with the roster — so the row shows the error, hides its
+percentage and disables its group label rather than going stale.
 
 ## Settled Product Shape
 - v1 is JNV PMU / JNV NVS only. In current LMS code this is `PROGRAM_IDS.NVS` (`64`, label `JNV NVS`) from `src/lib/constants.ts`.

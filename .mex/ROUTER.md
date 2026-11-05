@@ -26,7 +26,7 @@ edges:
     condition: when working on teacher feedback setup, the feedback form, or its report
   - target: patterns/INDEX.md
     condition: when starting a task — check the pattern index for a matching pattern file
-last_updated: 2026-10-26
+last_updated: 2026-11-05
 ---
 
 # Session Bootstrap
@@ -40,8 +40,9 @@ Then read this file fully before doing anything else in this session.
 **Working:**
 - Chapter-test screens for physical centres (feature branch `feat/chapter-test-reports`, task lms-chapter-reports; not merged). The Chapter tests overview shows chapter-test cards, and a chapter test's report is the chapter-test report: overview, topic and difficulty insights, per-question breakdown with question text from the CMS (KaTeX), rankings, gender split and other centres on the same test. Student Results stays. JNV NVS is unchanged. See `context/data-access.md` §3.
 - The Enrollment tab has a **Data completeness** table for physical centres (issue #468), in place of
-  the Admission row. Three rows — Info (ten profile fields), Documents (all seven types) and Exams
-  (one chip per exam the Board Stream calls for) — each with a slot-based percentage, a thin meter
+  the Admission row. Three rows — Info (eleven profile fields), Documents (all seven types) and Exams
+  (one chip per exam the Board Stream calls for, over **Grade 12 only**, plus a Board Stream chip for
+  a candidate nobody has streamed) — each with a slot-based percentage, a thin meter
   and one chip per item counting the Students missing it, worst first; items nobody is missing fold
   into a "✓ N complete" chip. Tapping a chip (or a group label, for "missing any") narrows the roster
   below to exactly those Students, with a Clear action; the counts follow Filter by Grade and Filter
@@ -49,7 +50,9 @@ Then read this file fully before doing anything else in this session.
   share one rule in `src/lib/data-completeness.ts`, so a chip's number and the list it opens cannot
   disagree. Documents come from one bulk Postgres read for the School
   (`GET /api/schools/[code]/document-status`), not the consent summary's per-Student fan-out. JNV NVS
-  keeps its Admission row, sees no table, and the new route 403s PMU roles. See
+  keeps its Admission row, sees no table, and the new route 403s PMU roles. A read that fails — the
+  documents fetch, or the roster's exam-registration query — says so on its row rather than counting
+  every Student as a gap; `SchoolRoster.examRecordsFailed` carries the exam one. See
   `context/student-addition.md` and `context/data-access.md` §1.
 - Issue #457 (PR #466, feature branch): Mentors tick Academic / Non-academic Challenge Categories in Post-Session Notes (stored in db-service #806's table, deploy it first, including migration `20261026101410`; erased as Notes content and counted on the privacy tombstone as `post_session_challenges_erased`). They show in read-only Notes, Student Context, the Students & Progress CSV (MCP-redacted with answers) and a "Challenge Categories" Admin-workspace tab: a per-School heatmap (single or All Programs, Grade/Phase filters, CSV download) for every `program_read` viewer, never Teachers. The tab persists in `?tab=`. See `context/data-access.md`.
 - Issue #440 PR #456 QA/review fixes (feature branch): switching Conversation → Attempt → Conversation keeps the notes on screen and saves only what is shown (QA-06); the Flags tab carries the visit's "last seen" cutoff through filter and page links (`?since=`) and records a visit only on tab entry (QA-12); `createDraft` rejects a recording S3 holds at over 200 MB (the presigned PUT doesn't sign its length); the links import takes a Screener Link only from the Conversation tab's "Screener Form" column; read-only viewers get a plain "Draft ready to review" chip (QA-14); flag cards for a Student with no active Mapping hide the Student link and "Show notes"; the proxy's signed-out redirect keeps `?callbackUrl=`; Admin Users' Blended role texts match `play_recording`; `docs/permissions.md` lists the Blended roles.
@@ -202,13 +205,13 @@ Then read this file fully before doing anything else in this session.
 
 - Holistic progress roster cleanup keeps Program/year/Grade filters in its per-query snapshot and removes duplicate consumer checks; eligibility and historical behavior are unchanged. See `context/data-access.md`.
 
-**On staging:** PR #471 (#468, Data completeness) — staging branch `10c7c7ec`, a merge of head
-`202fb96b` into main `6d76e572`, deployed by its own green `deploy-preview` run on 2026-10-27.
-It carries the Programs team's two staging asks: Uniform Size in the Info row, and the caste
-certificate counted only for reserved-category Students.
-`https://staging.dr1eqhpsk9y2d.amplifyapp.com` answers 200. The Amplify job itself was not
-inspected (no AWS credentials in that session), and staging shares one URL, so the next PR
-deployment replaces this one.
+**On staging:** PR #471 (#468, Data completeness) was deployed from head `202fb96b` on
+2026-10-27 (staging branch `10c7c7ec`, a merge into main `6d76e572`), carrying the Programs
+team's two staging asks: Uniform Size in the Info row, and the caste certificate counted only
+for reserved-category Students. Staging shares one URL, so a later PR deployment replaces it —
+check `deploy-preview` on the PR before assuming what is live.
+The 2026-11-05 review fixes (Exams row: Grade 12 only, the Board Stream chip, and a failed exam
+read shown as an error) are **not yet on staging**.
 
 **Known issues:**
 

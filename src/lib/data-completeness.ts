@@ -41,6 +41,19 @@ function expectsCasteCertificate(student: Student): boolean {
   return !GENERAL_CATEGORY.test(category);
 }
 
+/**
+ * The grade that sits JEE Main and NEET this academic year. A Grade 11 Student
+ * registers next year, so counting them as missing a registration would paint
+ * two thirds of every centre red for a gap nobody can close yet (review of
+ * #468).
+ */
+const EXAM_REGISTRATION_GRADE = 12;
+
+/** The Students the Exams row is about: this year's board candidates. */
+function sitsExamsThisYear(student: Student): boolean {
+  return student.grade != null && Number(student.grade) === EXAM_REGISTRATION_GRADE;
+}
+
 // Who each document applies to. Everything but the caste certificate applies
 // to every Student in scope.
 const DOCUMENT_APPLIES_TO: Partial<
@@ -153,6 +166,19 @@ export function groupFilterKey(group: CompletenessGroupKey): CompletenessFilterK
   return `group:${group}`;
 }
 
+/**
+ * The Exams row's one non-exam chip. A Grade 12 Student with no Board Stream
+ * is expected to sit nothing, so without this they drop out of the row in
+ * silence — and Board Stream is not one of the Info items either, so the gap
+ * would show nowhere on the table at all.
+ *
+ * Its own prefix, not `exam:`, so it can never collide with an exam name;
+ * `groupOf` still files it under Exams, which is where it is read and filtered.
+ */
+export const BOARD_STREAM_FILTER_KEY: CompletenessFilterKey = "stream:board_stream";
+
+const BOARD_STREAM_LABEL = "Board Stream";
+
 export interface CompletenessItem {
   key: CompletenessFilterKey;
   label: string;
@@ -224,9 +250,19 @@ function documentTypesFor(
   return new Set(id ? (documents[id] ?? []) : []);
 }
 
-/** Exam names this Student's Board Stream calls for, registered or not. */
+/**
+ * Exam names this Student's Board Stream calls for, registered or not. Empty
+ * for anyone not sitting the exams this year — the gap starts existing when
+ * the registration does.
+ */
 function expectedExamNames(student: Student): readonly string[] {
+  if (!sitsExamsThisYear(student)) return [];
   return requiredExamNamesForBoardStream(student.board_stream);
+}
+
+/** A board candidate whose Board Stream nobody has recorded. */
+function missingBoardStream(student: Student): boolean {
+  return sitsExamsThisYear(student) && !filled(student.board_stream);
 }
 
 function registeredExamNames(student: Student): ReadonlySet<string> {
@@ -267,6 +303,8 @@ export function missingKeysForStudent(
     for (const key of missingDocumentKeys(student, documents)) keys.add(key);
   }
 
+  if (missingBoardStream(student)) keys.add(BOARD_STREAM_FILTER_KEY);
+
   const registered = registeredExamNames(student);
   for (const examName of expectedExamNames(student)) {
     if (!registered.has(examName)) keys.add(examFilterKey(examName));
@@ -279,6 +317,7 @@ function groupOf(key: CompletenessFilterKey): CompletenessGroupKey | null {
   if (key.startsWith("info:")) return "info";
   if (key.startsWith("doc:")) return "documents";
   if (key.startsWith("exam:")) return "exams";
+  if (key.startsWith("stream:")) return "exams";
   return null;
 }
 
@@ -413,42 +452,78 @@ function buildDocumentsGroup(
   };
 }
 
-// An exam no Student in scope is expected to sit earns a note rather than
-// silence, so a missing NEET chip doesn't read as "NEET is covered".
-function buildExamsGroup(students: Student[]): CompletenessGroup {
+/** The row when nobody in scope sits an exam this year. */
+function noExamCandidatesGroup(hasStudents: boolean): CompletenessGroup {
+  // Saying why beats a bare 100% beside notes about streams that were never
+  // the reason.
+  return {
+    key: "exams",
+    title: GROUP_TITLES.exams,
+    pct: 100,
+    items: [],
+    complete: [],
+    notes: hasStudents
+      ? [`Not expected yet — no Student in Grade ${EXAM_REGISTRATION_GRADE}`]
+      : [],
+    pending: false,
+  };
+}
+
+/** The candidates each exam is expected of, by exam name. */
+function examCandidates(candidates: Student[]): Map<string, Student[]> {
   const expectedBy = new Map<string, Student[]>();
-  for (const student of students) {
+  for (const student of candidates) {
     for (const examName of expectedExamNames(student)) {
       const list = expectedBy.get(examName) ?? [];
       list.push(student);
       expectedBy.set(examName, list);
     }
   }
+  return expectedBy;
+}
 
-  const items: CompletenessItem[] = [];
-  const complete: string[] = [];
-  const notes: string[] = [];
-  let expectedSlots = 0;
-  let registeredSlots = 0;
+interface ExamTally {
+  items: CompletenessItem[];
+  complete: string[];
+  notes: string[];
+  expectedSlots: number;
+  registeredSlots: number;
+}
+
+/**
+ * One chip per exam some candidate's Board Stream calls for. An exam nobody
+ * here is expected to sit earns a note instead, so a missing NEET chip can't
+ * read as "NEET is covered" — unless nobody has been streamed at all, when the
+ * Board Stream chip is already the reason and repeating it per exam buries it.
+ */
+function tallyExams(
+  expectedBy: Map<string, Student[]>,
+  streamMixKnown: boolean,
+): ExamTally {
+  const tally: ExamTally = {
+    items: [],
+    complete: [],
+    notes: [],
+    expectedSlots: 0,
+    registeredSlots: 0,
+  };
 
   for (const examName of STREAM_EXPECTED_EXAM_NAMES) {
     const expecting = expectedBy.get(examName) ?? [];
     if (expecting.length === 0) {
-      notes.push(
-        `${examName} not expected — no Student on ${formatStreams(boardStreamsExpecting(examName))}`,
-      );
+      if (streamMixKnown) tally.notes.push(examNotExpectedNote(examName));
       continue;
     }
     const missing = expecting.filter(
       (student) => !registeredExamNames(student).has(examName),
     ).length;
-    expectedSlots += expecting.length;
-    registeredSlots += expecting.length - missing;
+    tally.expectedSlots += expecting.length;
+    tally.registeredSlots += expecting.length - missing;
     if (missing === 0) {
-      complete.push(examName);
+      tally.complete.push(examName);
       continue;
     }
-    items.push({
+    tally.items.push({
       key: examFilterKey(examName),
       label: examName,
       missing,
@@ -459,10 +534,62 @@ function buildExamsGroup(students: Student[]): CompletenessGroup {
     });
   }
 
+  return tally;
+}
+
+function examNotExpectedNote(examName: string): string {
+  const streams = formatStreams(boardStreamsExpecting(examName));
+  return `${examName} not expected — no Grade ${EXAM_REGISTRATION_GRADE} Student on ${streams}`;
+}
+
+/**
+ * The Exams row, over this year's board candidates only.
+ *
+ * A candidate owes either a Board Stream or their registrations, never both:
+ * one unanswered slot for a Student nobody has streamed, and their exam slots
+ * once somebody has. So a roster where nobody is streamed reads 0%, not the
+ * 100% that "no registration is expected" would otherwise give, while a fully
+ * streamed roster keeps reading as the share registered.
+ */
+function buildExamsGroup(students: Student[]): CompletenessGroup {
+  const candidates = students.filter(sitsExamsThisYear);
+  if (candidates.length === 0) return noExamCandidatesGroup(students.length > 0);
+
+  const withoutStream = candidates.filter(missingBoardStream);
+  const tally = tallyExams(
+    examCandidates(candidates),
+    withoutStream.length < candidates.length,
+  );
+
+  // The narrower scope earns a note too: a count of 40 beside an Info count of
+  // 77 shouldn't be read against the same denominator.
+  const notes = [...tally.notes];
+  if (candidates.length < students.length) {
+    notes.unshift(
+      `Grade ${EXAM_REGISTRATION_GRADE} only — ${candidates.length} of ${students.length} students`,
+    );
+  }
+
+  const items = [...tally.items];
+  const complete = [...tally.complete];
+  if (withoutStream.length === 0) {
+    complete.unshift(BOARD_STREAM_LABEL);
+  } else {
+    items.push({
+      key: BOARD_STREAM_FILTER_KEY,
+      label: BOARD_STREAM_LABEL,
+      missing: withoutStream.length,
+      expected: candidates.length,
+      filterLabel: `Missing ${BOARD_STREAM_LABEL}`,
+      locked: false,
+      required: true,
+    });
+  }
+
   return {
     key: "exams",
     title: GROUP_TITLES.exams,
-    pct: pct(registeredSlots, expectedSlots),
+    pct: pct(tally.registeredSlots, tally.expectedSlots + withoutStream.length),
     items: sortByMissing(items),
     complete,
     notes,
@@ -518,7 +645,8 @@ export function filterLabelFor(
       {
         info: "Any info missing",
         documents: "Any document missing",
-        exams: "No exam registration",
+        // Not "No exam registration": the row also holds the Board Stream gap.
+        exams: "Exam details missing",
       } satisfies Record<CompletenessGroupKey, string>
     )[group];
   }

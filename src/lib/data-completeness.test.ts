@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import type { Student } from "@/components/StudentTable";
 import { DOCUMENT_TYPES, type DocumentType } from "./document-types";
 import {
+  BOARD_STREAM_FILTER_KEY,
   buildDataCompleteness,
   countStudentsMatching,
   documentFilterKey,
@@ -342,11 +343,17 @@ describe("the Documents row", () => {
 });
 
 describe("the Exams row", () => {
+  // Only this year's board candidates are expected to have registered, so
+  // every Student here is in Grade 12. Grade 11 has its own tests below.
+  function candidate(overrides: Partial<Student> = {}): Student {
+    return student({ grade: 12, ...overrides });
+  }
+
   it("counts only the Students whose Board Stream calls for the exam", () => {
     const students = [
-      student({ student_pk_id: "1", board_stream: "PCM" }),
-      student({ student_pk_id: "2", board_stream: "PCB" }),
-      student({ student_pk_id: "3", board_stream: "Commerce" }),
+      candidate({ student_pk_id: "1", board_stream: "PCM" }),
+      candidate({ student_pk_id: "2", board_stream: "PCB" }),
+      candidate({ student_pk_id: "3", board_stream: "Commerce" }),
     ];
 
     const exams = groupOf(buildDataCompleteness(students, null), "exams");
@@ -361,7 +368,7 @@ describe("the Exams row", () => {
 
   it("counts a PCMB Student against both exams, and a registration closes one", () => {
     const students = [
-      student({
+      candidate({
         student_pk_id: "1",
         board_stream: "PCMB",
         exam_records: [
@@ -380,24 +387,24 @@ describe("the Exams row", () => {
     const exams = groupOf(buildDataCompleteness(students, null), "exams");
 
     expect(exams.items.map((item) => item.label)).toEqual(["NEET"]);
-    expect(exams.complete).toEqual(["JEE Mains"]);
+    expect(exams.complete).toEqual(["Board Stream", "JEE Mains"]);
     expect(exams.pct).toBe(50);
   });
 
   it("says an exam is not expected instead of leaving the row silent", () => {
     const exams = groupOf(
-      buildDataCompleteness([student({ board_stream: "PCM" })], null),
+      buildDataCompleteness([candidate({ board_stream: "PCM" })], null),
       "exams",
     );
 
     expect(exams.notes).toEqual([
-      "NEET not expected — no Student on PCB or PCMB",
+      "NEET not expected — no Grade 12 Student on PCB or PCMB",
     ]);
   });
 
   it("reads 100% when no Student is expected to sit anything", () => {
     const exams = groupOf(
-      buildDataCompleteness([student({ board_stream: "Arts" })], null),
+      buildDataCompleteness([candidate({ board_stream: "Arts" })], null),
       "exams",
     );
 
@@ -411,10 +418,10 @@ describe("the Exams row", () => {
   it("counts against the Students the exam applies to, not the whole roster", () => {
     const students = [
       ...Array.from({ length: 10 }, (_, i) =>
-        student({ student_pk_id: String(i + 1), board_stream: "PCB" }),
+        candidate({ student_pk_id: String(i + 1), board_stream: "PCB" }),
       ),
       ...Array.from({ length: 67 }, (_, i) =>
-        student({ student_pk_id: String(i + 11), board_stream: "PCM" }),
+        candidate({ student_pk_id: String(i + 11), board_stream: "PCM" }),
       ),
     ];
 
@@ -429,9 +436,106 @@ describe("the Exams row", () => {
     expect(severityFor(neet.missing, students.length)).toBe("low");
   });
 
+  // Review of #468: every PCM/PCB Student in Grade 11 and 12 was expected to
+  // have registered, which read ~0% at every centre for a gap Grade 11 can't
+  // close — they sit the exam next year.
+  it("expects a registration from this year's board candidates only", () => {
+    const students = [
+      candidate({ student_pk_id: "1", board_stream: "PCM" }),
+      student({ student_pk_id: "2", board_stream: "PCM", grade: 11 }),
+    ];
+
+    const exams = groupOf(buildDataCompleteness(students, null), "exams");
+    const jee = exams.items.find((item) => item.label === "JEE Mains")!;
+
+    expect(jee.missing).toBe(1);
+    expect(jee.expected).toBe(1);
+    expect(exams.notes).toContain("Grade 12 only — 1 of 2 students");
+    expect(
+      countStudentsMatching(students, examFilterKey("JEE Mains"), null),
+    ).toBe(1);
+    expect(
+      studentMatchesCompletenessFilter(students[1], examFilterKey("JEE Mains"), null),
+    ).toBe(false);
+  });
+
+  it("says so rather than reading 0% when nobody is in Grade 12 yet", () => {
+    const exams = groupOf(
+      buildDataCompleteness([student({ grade: 11, board_stream: "PCM" })], null),
+      "exams",
+    );
+
+    expect(exams.items).toEqual([]);
+    expect(exams.pct).toBe(100);
+    expect(exams.notes).toEqual(["Not expected yet — no Student in Grade 12"]);
+  });
+
+  // Review of #468: a Grade 12 Student with no Board Stream is expected to sit
+  // nothing, and Board Stream is not an Info item either, so the gap used to
+  // appear nowhere on the table at all.
+  it("shows a candidate with no Board Stream as a chip of its own", () => {
+    const students = [
+      candidate({ student_pk_id: "1", board_stream: null }),
+      candidate({ student_pk_id: "2", board_stream: "PCM" }),
+    ];
+
+    const exams = groupOf(buildDataCompleteness(students, null), "exams");
+    const stream = exams.items.find(
+      (item) => item.key === BOARD_STREAM_FILTER_KEY,
+    )!;
+
+    expect(stream.label).toBe("Board Stream");
+    expect(stream.missing).toBe(1);
+    expect(stream.expected).toBe(2);
+    expect(filterLabelFor(buildDataCompleteness(students, null), stream.key)).toBe(
+      "Missing Board Stream",
+    );
+    expect(countStudentsMatching(students, stream.key, null)).toBe(1);
+    // It belongs to the Exams row, so the group label opens it too.
+    expect(countStudentsMatching(students, groupFilterKey("exams"), null)).toBe(2);
+  });
+
+  it("never asks a Grade 11 Student for a Board Stream here", () => {
+    expect(
+      missingKeysForStudent(student({ grade: 11, board_stream: null }), null),
+    ).not.toContain(BOARD_STREAM_FILTER_KEY);
+  });
+
+  // The old slot rule had nothing to count when nobody was streamed, so the
+  // row read 100% — "all done" — beside a roster nobody had streamed at all.
+  it("reads 0%, not 100%, when no candidate has been streamed", () => {
+    const exams = groupOf(
+      buildDataCompleteness(
+        [
+          candidate({ student_pk_id: "1", board_stream: null }),
+          candidate({ student_pk_id: "2", board_stream: "" }),
+        ],
+        null,
+      ),
+      "exams",
+    );
+
+    expect(exams.pct).toBe(0);
+    expect(exams.items.map((item) => item.label)).toEqual(["Board Stream"]);
+    // The Board Stream chip is the reason; repeating it per exam would bury it.
+    expect(exams.notes).toEqual([]);
+  });
+
+  it("counts a streamed candidate on their exams, not their stream", () => {
+    const students = [
+      candidate({ student_pk_id: "1", board_stream: null }),
+      ...Array.from({ length: 3 }, (_, i) =>
+        candidate({ student_pk_id: String(i + 2), board_stream: "PCM" }),
+      ),
+    ];
+
+    // Four slots: one unanswered stream, three unmade registrations.
+    expect(groupOf(buildDataCompleteness(students, null), "exams").pct).toBe(0);
+  });
+
   it("says 'Not registered for', not 'Missing', on the filter line", () => {
     const completeness = buildDataCompleteness(
-      [student({ board_stream: "PCM" })],
+      [candidate({ board_stream: "PCM" })],
       null,
     );
 
@@ -442,10 +546,11 @@ describe("the Exams row", () => {
 });
 
 describe("the filter behind a chip", () => {
+  // Grade 12 so the Exams row has something to say about them.
   const students = [
-    student({ student_pk_id: "1", address: null }),
-    student({ student_pk_id: "2", apaar_id: null }),
-    student({ student_pk_id: "3" }),
+    student({ student_pk_id: "1", address: null, grade: 12 }),
+    student({ student_pk_id: "2", apaar_id: null, grade: 12 }),
+    student({ student_pk_id: "3", grade: 12 }),
   ];
   const documents = { "1": ALL_DOCUMENT_TYPES, "2": [], "3": ALL_DOCUMENT_TYPES };
 
@@ -500,7 +605,7 @@ describe("the filter behind a chip", () => {
       "Any document missing",
     );
     expect(filterLabelFor(completeness, groupFilterKey("exams"))).toBe(
-      "No exam registration",
+      "Exam details missing",
     );
     expect(filterLabelFor(completeness, null)).toBeNull();
   });

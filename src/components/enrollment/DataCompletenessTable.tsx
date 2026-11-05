@@ -24,6 +24,8 @@ interface Props {
   scopeNoun: string;
   /** The documents read failed; the Documents row says so instead of counting. */
   documentsError?: boolean;
+  /** The exam-registration read failed; the Exams row says so instead of counting. */
+  examsError?: boolean;
 }
 
 // Count-pill colours. Red from half the Students up, amber from a fifth — the
@@ -95,34 +97,55 @@ function MissingChip({
   );
 }
 
+/**
+ * How a row reads when its data didn't arrive. A failed *re*fetch of the
+ * documents keeps the ones the row already had, so it still counts and only
+ * says the numbers may be a save behind. Nothing else has anything to fall
+ * back on: the first documents read, and the exam read, which happens once
+ * with the roster.
+ */
+function readState(
+  group: CompletenessGroup,
+  documentsError?: boolean,
+  examsError?: boolean,
+): { failed: boolean; stale: boolean } {
+  const errored =
+    (group.key === "documents" && documentsError === true) ||
+    (group.key === "exams" && examsError === true);
+  const stale = errored && group.key === "documents" && !group.pending;
+  return { failed: errored && !stale, stale };
+}
+
+function groupHint(group: CompletenessGroup, failed: boolean): string {
+  if (failed) return `${group.title} couldn't be read`;
+  if (group.pending) return `${group.title} are still being read`;
+  return `Show students missing any ${group.title.toLowerCase()}`;
+}
+
 function GroupRow({
   group,
   activeFilter,
   onFilterChange,
   documentsError,
+  examsError,
   withRule,
 }: {
   group: CompletenessGroup;
   activeFilter: CompletenessFilterKey | null;
   onFilterChange: (key: CompletenessFilterKey | null) => void;
   documentsError?: boolean;
+  examsError?: boolean;
   withRule: boolean;
 }) {
   const groupKey = `group:${group.key}`;
   const groupPressed = activeFilter === groupKey;
   const toggle = (key: CompletenessFilterKey) =>
     onFilterChange(activeFilter === key ? null : key);
-  const errored = group.key === "documents" && documentsError === true;
-  // Nothing to show: the first read failed, or none has landed yet. A failed
-  // *re*fetch keeps the Students' documents it already had, so that row still
-  // counts — it only says the numbers may be a save behind.
-  const unanswered = group.pending;
-  const failed = errored && unanswered;
-  const stale = errored && !unanswered;
+  const { failed, stale } = readState(group, documentsError, examsError);
   // Until the row has an answer, "missing any document" would match nobody,
   // which reads as "nobody is missing one"; and an empty first read would
   // match everybody. Neither is true, so the label doesn't invite the tap.
-  const groupDisabled = unanswered;
+  const groupDisabled = group.pending || failed;
 
   return (
     <div
@@ -136,11 +159,7 @@ function GroupRow({
         aria-pressed={groupPressed}
         onClick={() => toggle(groupKey)}
         disabled={groupDisabled}
-        title={
-          groupDisabled
-            ? `${group.title} are still being read`
-            : `Show students missing any ${group.title.toLowerCase()}`
-        }
+        title={groupHint(group, failed)}
         className={`inline-flex min-h-[32px] w-full items-center gap-2 rounded-md px-1.5 py-1 text-left transition-colors disabled:cursor-not-allowed sm:w-44 ${
           groupPressed ? "bg-danger-bg ring-1 ring-danger" : "hover:bg-bg-card-alt"
         } ${groupDisabled ? "hover:bg-transparent" : ""}`}
@@ -171,7 +190,7 @@ function GroupRow({
       <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
         {failed ? (
           <span className="text-xs text-text-muted">
-            Documents couldn&apos;t be loaded. Reload to try again.
+            {group.title} couldn&apos;t be loaded. Reload to try again.
           </span>
         ) : group.pending ? (
           <span className="text-xs text-text-muted">Loading documents…</span>
@@ -230,6 +249,7 @@ export default function DataCompletenessTable({
   filteredCount,
   scopeNoun,
   documentsError = false,
+  examsError = false,
 }: Props) {
   const [collapsed, setCollapsed] = useState(false);
   const { total, groups } = completeness;
@@ -281,6 +301,7 @@ export default function DataCompletenessTable({
               activeFilter={activeFilter}
               onFilterChange={onFilterChange}
               documentsError={documentsError}
+              examsError={examsError}
               withRule={index < groups.length - 1}
             />
           ))}

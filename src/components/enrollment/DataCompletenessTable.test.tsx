@@ -307,6 +307,33 @@ describe("DataCompletenessTable", () => {
     expect(screen.getByRole("button", { name: /^Info/ })).toBeEnabled();
   });
 
+  // Review of #468: a failed exam read left `exam_records` absent everywhere,
+  // which the row counted as "nobody registered" — a red row in place of an
+  // error. Unlike the documents, there is no earlier answer to fall back on:
+  // the exam read happens once, with the roster.
+  it("says so when the exam read failed, instead of counting everyone as unregistered", () => {
+    renderTable({ examsError: true });
+
+    expect(
+      screen.getByText("Exams couldn't be loaded. Reload to try again."),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", {
+        name: "10 of 10 students missing JEE Mains",
+      }),
+    ).not.toBeInTheDocument();
+    // No percentage either: 0% would read as a count nobody made.
+    expect(
+      within(screen.getByTestId("completeness-row-exams")).queryByText("0%"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Exams/ })).toBeDisabled();
+    // The other rows are untouched.
+    expect(screen.getByRole("button", { name: /^Documents/ })).toBeEnabled();
+    expect(
+      screen.getByRole("button", { name: "3 of 10 students missing Address" }),
+    ).toBeInTheDocument();
+  });
+
   it("says a scope with no Students has nothing to measure", () => {
     renderTable({ completeness: { total: 0, groups: completeness.groups } });
 

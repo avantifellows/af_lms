@@ -133,6 +133,12 @@ interface Props {
   schoolUdise: string;
   /** School code/UDISE used to fetch grade 11/12 consent status. */
   schoolCode: string;
+  /**
+   * The roster's exam-registration read failed, so `exam_records` is absent
+   * everywhere and means nothing. The completeness table's Exams row says so
+   * instead of counting every expected Student as unregistered (#468).
+   */
+  examRecordsFailed?: boolean;
   /** Code-controlled Registration Mode; defaults to the active mode. */
   registrationMode?: RegistrationMode;
 }
@@ -155,6 +161,7 @@ export default function EnrollmentTabContent({
   nvsStreams,
   schoolUdise,
   schoolCode,
+  examRecordsFailed = false,
   registrationMode = ACTIVE_REGISTRATION_MODE,
 }: Props) {
   const phoneMode = registrationMode === PHONE_REGISTRATION_MODE;
@@ -644,6 +651,7 @@ export default function EnrollmentTabContent({
               : `Grade ${selectedGrade} students`
           }
           documentsError={documentsError}
+          examsError={examRecordsFailed}
         />
       )}
 

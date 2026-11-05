@@ -569,8 +569,9 @@ describe("EnrollmentTabContent", () => {
 // ─── Data completeness table (#468) ─────────────────────────────────────────
 
 describe("EnrollmentTabContent - data completeness", () => {
-  // Two CoE Students: one missing an Address, both missing every document and
-  // their JEE Mains registration.
+  // Two CoE Students, one in Grade 11 and one in Grade 12: one missing an
+  // Address, both missing every document. Only the Grade 12 Student is
+  // expected to have registered for JEE Mains this year (#468 review).
   function centreStudent(overrides: Partial<Student> = {}): Student {
     return {
       group_user_id: `gu-${overrides.student_pk_id ?? "1"}`,
@@ -693,7 +694,7 @@ describe("EnrollmentTabContent - data completeness", () => {
       }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "2 of 2 students missing JEE Mains" }),
+      screen.getByRole("button", { name: "1 of 1 students missing JEE Mains" }),
     ).toBeInTheDocument();
   });
 
@@ -760,6 +761,19 @@ describe("EnrollmentTabContent - data completeness", () => {
     ).toBeInTheDocument();
   });
 
+  it("passes a failed exam read through to the Exams row", async () => {
+    stubFetch();
+    render(<EnrollmentTabContent {...centreProps} examRecordsFailed />);
+
+    await screen.findByTestId("data-completeness");
+    expect(
+      screen.getByText("Exams couldn't be loaded. Reload to try again."),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /students missing JEE Mains/ }),
+    ).not.toBeInTheDocument();
+  });
+
   it("keeps a filter the grade change still leaves someone in", async () => {
     stubFetch();
     const user = userEvent.setup();
@@ -767,7 +781,7 @@ describe("EnrollmentTabContent - data completeness", () => {
 
     await screen.findByTestId("data-completeness");
     await user.click(
-      screen.getByRole("button", { name: "2 of 2 students missing JEE Mains" }),
+      screen.getByRole("button", { name: "1 of 1 students missing JEE Mains" }),
     );
     await user.selectOptions(screen.getByLabelText("Filter by Grade:"), "12");
 
