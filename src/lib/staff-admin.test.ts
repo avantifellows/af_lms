@@ -1439,6 +1439,34 @@ describe("positions", () => {
     expect(seatInsert![1]).toEqual([8, "spm", 701]);
   });
 
+  it("createSeatedUser re-adds a deleted PM with their own AF id (reactivates the dormant staff row)", async () => {
+    mockSchemaReady();
+    mockQuery.mockResolvedValueOnce([{ id: 8, program_id: 2 }]); // centre
+    mockQuery.mockResolvedValueOnce([]); // existing permission (none — was deleted)
+    // AF clash: the only staff row holding AF123 is this person's own dormant
+    // one, which the query must exclude by the email's user.
+    mockQuery.mockImplementationOnce(async (sql: string, params: unknown[]) =>
+      sql.includes('FROM "user" WHERE LOWER(email) = LOWER($2)') &&
+      params[1] === "back@x.org"
+        ? []
+        : [{ id: 55 }]
+    );
+    mockClientQuery
+      .mockResolvedValueOnce({ rows: [{ id: 606 }] }) // INSERT user_permission
+      .mockResolvedValueOnce({ rows: [{ id: 246197 }] }) // SELECT user (exists by email)
+      .mockResolvedValueOnce({ rows: [] }) // UPDATE user_permission user_id
+      .mockResolvedValueOnce({ rows: [{ id: 55 }] }); // dormant staff row exists
+    expect(
+      await createSeatedUser({
+        body: { email: "back@x.org", kind: "staff", role: "apm", centre_id: 8, af_id: "AF123" },
+      })
+    ).toEqual({ ok: true });
+    const staffUpdate = mockClientQuery.mock.calls.find((c) =>
+      String(c[0]).includes("UPDATE staff SET")
+    );
+    expect(staffUpdate![1]).toEqual(["AF123", 55]);
+  });
+
   it("createSeatedUser requires an AF id for PM/staff roles (staff.employee_code is NOT NULL)", async () => {
     mockSchemaReady();
     expect(

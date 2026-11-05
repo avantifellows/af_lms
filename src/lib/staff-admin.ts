@@ -1381,11 +1381,17 @@ export async function createSeatedUser(params: {
   }
 
   if (code) {
+    // A staff add ignores the person's own dormant staff row (left behind when
+    // their permission was deleted): re-adding a PM with their own AF id must
+    // reactivate that row below, not clash with it. Teachers can still be
+    // re-added with a blank AF id, so their check is unchanged.
     const codeClash = await query<{ id: number }>(
       makesTeacherRecord(kind)
         ? `SELECT id FROM teacher WHERE teacher_id = $1`
-        : `SELECT id FROM staff WHERE employee_code = $1`,
-      [code]
+        : `SELECT id FROM staff
+           WHERE employee_code = $1
+             AND user_id NOT IN (SELECT id FROM "user" WHERE LOWER(email) = LOWER($2))`,
+      makesTeacherRecord(kind) ? [code] : [code, email]
     );
     if (codeClash.length > 0) {
       return {

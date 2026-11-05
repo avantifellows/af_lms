@@ -249,6 +249,87 @@ describe("StaffGrid", () => {
     });
   });
 
+  it("saves a changed name for a linked person via PATCH /name with user_id", async () => {
+    const mockFetch = stubFetch((url, init) => {
+      if (url === "/api/admin/staff/name" && init?.method === "PATCH") {
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+      return undefined;
+    });
+
+    renderGrid();
+    fireEvent.click(screen.getByLabelText("Edit Asha Teacher"));
+    fireEvent.change(screen.getByLabelText("Full name"), {
+      target: { value: "  Asha T  " },
+    });
+    fireEvent.click(screen.getByText("Save"));
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/admin/staff/name",
+        expect.objectContaining({
+          method: "PATCH",
+          body: JSON.stringify({ full_name: "Asha T", user_id: 70 }),
+        })
+      );
+    });
+    // The AF code didn't change, so no code PATCH is sent.
+    expect(
+      mockFetch.mock.calls.some(([url]) => String(url).startsWith("/api/admin/staff/teachers/"))
+    ).toBe(false);
+  });
+
+  it("saves a pending PM's name on the permission (permission_id, no user_id)", async () => {
+    const mockFetch = stubFetch((url, init) => {
+      if (url === "/api/admin/staff/name" && init?.method === "PATCH") {
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+      return undefined;
+    });
+
+    renderGrid();
+    fireEvent.click(screen.getByLabelText("Edit Pending Pm"));
+    fireEvent.change(screen.getByLabelText("Full name"), {
+      target: { value: "Pending Person" },
+    });
+    fireEvent.click(screen.getByText("Save"));
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/admin/staff/name",
+        expect.objectContaining({
+          method: "PATCH",
+          body: JSON.stringify({ full_name: "Pending Person", permission_id: 5 }),
+        })
+      );
+    });
+  });
+
+  it("shows a name-save field error and stops before saving the code", async () => {
+    const mockFetch = stubFetch((url, init) => {
+      if (url === "/api/admin/staff/name" && init?.method === "PATCH") {
+        return new Response(
+          JSON.stringify({ error: "Validation failed", fields: { full_name: "Name is too long" } }),
+          { status: 422 }
+        );
+      }
+      return undefined;
+    });
+
+    renderGrid();
+    fireEvent.click(screen.getByLabelText("Edit Binu Codeless"));
+    fireEvent.change(screen.getByLabelText("Full name"), { target: { value: "Binu C" } });
+    fireEvent.change(screen.getByLabelText("Employee code"), { target: { value: "AF202" } });
+    fireEvent.click(screen.getByText("Save"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Name is too long")).toBeTruthy();
+    });
+    expect(
+      mockFetch.mock.calls.some(([url]) => String(url).startsWith("/api/admin/staff/teachers/"))
+    ).toBe(false);
+  });
+
   it("creates a staff record for a pending PM via POST", async () => {
     const mockFetch = stubFetch((url, init) => {
       if (url === "/api/admin/staff/members" && init?.method === "POST") {
