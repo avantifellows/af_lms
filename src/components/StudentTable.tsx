@@ -126,6 +126,14 @@ interface StudentTableProps {
   /** False for read-only viewers: they get "View flag" only, never "Flag". */
   canRaiseInterventionFlag?: boolean;
   flaggedOnly?: boolean;
+  /**
+   * Active Students to keep, by `group_user_id` — the Data completeness
+   * table's tap-to-filter (#468). The roster's row key, not `student_pk_id`,
+   * because a row whose `student` join missed still shows a card and is still
+   * counted by the table's chips. null or absent means no such filter. The
+   * Dropout tab is left alone: the table counts the active roster.
+   */
+  restrictToGroupUserIds?: ReadonlySet<string> | null;
 }
 
 function studentBelongsToProgram(student: Student, programId: number) {
@@ -719,6 +727,7 @@ export default function StudentTable({
   onOpenInterventionFlag,
   canRaiseInterventionFlag = true,
   flaggedOnly = false,
+  restrictToGroupUserIds = null,
 }: StudentTableProps) {
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [dropoutStudent, setDropoutStudent] = useState<Student | null>(null);
@@ -807,12 +816,17 @@ export default function StudentTable({
   const hasOpenFlag = (student: Student) =>
     student.student_pk_id != null &&
     Boolean(openFlagStudentIds?.has(student.student_pk_id));
+  const keptByCompleteness = (student: Student) =>
+    restrictToGroupUserIds == null ||
+    activeTab !== "active" ||
+    restrictToGroupUserIds.has(student.group_user_id);
   const filteredStudents = currentStudents.filter(
     (student) =>
       (selectedGrade === "all" || student.grade === parseInt(selectedGrade)) &&
       matchesStreamFilter(student.stream, selectedStream) &&
       matchesStudentSearch(student, searchQuery) &&
-      (!flaggedOnly || activeTab !== "active" || hasOpenFlag(student)),
+      (!flaggedOnly || activeTab !== "active" || hasOpenFlag(student)) &&
+      keptByCompleteness(student),
   );
 
   // Reset grade filter when switching tabs if the selected grade doesn't exist in new tab
