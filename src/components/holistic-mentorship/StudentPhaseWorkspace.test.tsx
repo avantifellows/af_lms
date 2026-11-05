@@ -250,6 +250,19 @@ describe("StudentPhaseWorkspace", () => {
     );
   });
 
+  it("keeps the coverage return view on Phase links", () => {
+    render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027"
+      source="school" returnQuery="centre_id=30&hm_grade=12&hm_mentor=9"
+      backHref="/centre/30?tab=holistic_mentorship&hm_grade=12&hm_mentor=9"
+      detail={adminDetail()} />);
+
+    expect(screen.getByRole("tab", { name: /Phase 5/ })).toHaveAttribute(
+      "href",
+      "/holistic-mentorship/students/41/phases/70?school_code=SCH001&academic_year=2026-2027&program_id=1" +
+        "&source=school&centre_id=30&hm_grade=12&hm_mentor=9",
+    );
+  });
+
   it("preserves the Progress source while a read-only viewer changes Phase", () => {
     render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027"
       source="progress" backHref="/admin/holistic-mentorship?program_id=1"

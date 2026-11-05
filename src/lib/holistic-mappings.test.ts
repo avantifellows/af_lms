@@ -147,13 +147,13 @@ describe("Holistic Mentor-Mentee Mappings", () => {
     expect(params).toEqual([4, "2026-2027", 1, "%%", null, false, null, ["SCH001"]]);
   });
 
-  it("reports server-scoped Assignment Coverage metrics with an exhaustive status partition", async () => {
+  it("reports server-scoped Assignment Coverage metrics, partitioning assigned Students by progress", async () => {
     mockQuery.mockResolvedValueOnce([{
-      eligible_count: "3",
-      assigned_count: "2",
+      eligible_count: "4",
+      assigned_count: "3",
       unassigned_count: "1",
       active_mentor_count: "2",
-      coverage_percentage: "66.7",
+      coverage_percentage: "75.0",
       completed_count: "1",
       pending_count: "1",
       no_active_phase_count: "1",
@@ -172,11 +172,11 @@ describe("Holistic Mentor-Mentee Mappings", () => {
       schoolId: 4,
       academicYear: "2026-2027",
     })).resolves.toEqual({
-      eligible: 3,
-      assigned: 2,
+      eligible: 4,
+      assigned: 3,
       unassigned: 1,
       activeMentors: 2,
-      coveragePercentage: 66.7,
+      coveragePercentage: 75,
       completed: 1,
       pending: 1,
       noActivePhase: 1,
@@ -186,16 +186,22 @@ describe("Holistic Mentor-Mentee Mappings", () => {
     expect(String(sql)).toContain("scope_school.code = ANY($4::text[])");
     expect(String(sql)).toContain("COUNT(*) FILTER (WHERE mentor_user_id IS NULL)");
     expect(String(sql)).toContain("COUNT(DISTINCT mentor_user_id)");
-    expect(String(sql)).toContain("active_phase_id IS NOT NULL AND has_submitted_notes");
-    expect(String(sql)).toContain("active_phase_id IS NOT NULL AND NOT has_submitted_notes");
-    expect(String(sql)).toContain("active_phase_id IS NULL");
+    // Completed / Pending / No active phase count assigned Students only.
+    expect(String(sql)).toContain(
+      "WHERE mentor_user_id IS NOT NULL AND active_phase_id IS NOT NULL AND has_submitted_notes",
+    );
+    expect(String(sql)).toContain(
+      "WHERE mentor_user_id IS NOT NULL AND active_phase_id IS NOT NULL AND NOT has_submitted_notes",
+    );
+    expect(String(sql)).toContain("WHERE mentor_user_id IS NOT NULL AND active_phase_id IS NULL");
+    expect(String(sql)).not.toMatch(/FILTER \(WHERE active_phase_id/);
     expect(String(sql)).toContain("ROUND(assigned_count * 100.0 / eligible_count, 1)");
     expect(String(sql)).toContain("notes.student_id = st.id");
     expect(String(sql)).toContain("notes.phase_id = active_phase.id");
     expect(params).toEqual([4, "2026-2027", 1, ["SCH001"]]);
   });
 
-  it("reports zero percent and an empty exhaustive partition when no Students are eligible", async () => {
+  it("reports zero percent and an empty partition when no Students are eligible", async () => {
     mockQuery.mockResolvedValueOnce([{
       eligible_count: 0,
       assigned_count: 0,

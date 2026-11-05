@@ -18,7 +18,7 @@ edges:
     condition: when a route or page needs to gate access
   - target: context/visits.md
     condition: when working on PM school visits or visit action types
-last_updated: 2026-10-20
+last_updated: 2026-11-03
 ---
 
 # Architecture
@@ -63,6 +63,52 @@ Student drill-downs from a progress-origin School use the fixed `school-progress
 source. Phase links and locked-phase redirects preserve it, and the Student Back
 link restores `source=progress` on the School URL. Ordinary School drill-downs
 retain `source=school`, so their original dashboard return does not change.
+
+School Assignment Coverage filters (Search, Grade, Mentor, Progress; issue #491)
+narrow the table and the 8 summary cards together. Progress has Students &
+Progress's options and order, minus Skipped: All Students (`""`), `assigned`,
+`pending`, `completed`, `no_active_phase`, `unassigned`. The last four are S&P's
+value strings. The first two differ, because S&P's `""` means All Assigned and it
+has no `assigned`. Skipped is rare on the current Phase (only after an Admin
+re-locks a later Phase), and this view shows such Students as Pending. Pending,
+Completed and No active phase mean assigned Students only. Unassigned means no
+active Mapping, whatever the Phase. The matching cards, both `derivedSummary` and
+the `getHolisticAssignmentCoverageSummary` SQL, count assigned Students only, so
+Completed + Pending + No active phase = Assigned. With any filter
+active, the cards are derived from exactly the rows shown, the same set as
+"Showing N of M Students". With none active, they use the server summary. The
+filters live in the School/Centre URL as `hm_search`, `hm_grade`, `hm_mentor` and
+`hm_progress` (`src/lib/holistic-coverage-filters.ts`). Any other `hm_` param, such
+as the retired `hm_assignment`, is ignored and dropped on the next write. The
+prefix keeps them clear of the page's other params (`tab`, `program_id`, `source`,
+Enrollment's `grade`/`stream`, and so on). Defaults are omitted, invalid values read
+as defaults, and a Mentor that is no longer in the roster reads as All Mentors. The
+roster keeps the filters in React state, seeded from `useSearchParams` on mount,
+and writes them with native `history.replaceState`: no history entry, and no server
+re-render, which `router.replace` would cause. The write waits 300 ms after typing
+stops, because browsers throttle rapid `replaceState` calls. It happens at once when
+the search box loses focus, on any click inside the roster (so a Student click saves
+the filters before the page changes), and on unmount while the page is unchanged (a
+School tab switch). `SchoolTabs` builds its next URL from the live
+`window.location.search` rather than its `useSearchParams` snapshot, which can lag
+behind a `replaceState` because Next applies it in a transition. A remounted roster
+reads the live URL for the same reason, but only when that URL is its own page.
+That page is fixed at mount from `usePathname` and `useSearchParams`, as the path
+plus every non-`hm_`, non-`tab` param (`coveragePageKey`). During an in-app
+navigation, Next renders the new page before it updates the browser URL, so a
+Centre switch or a Program change would otherwise inherit the previous page's
+filters. Every write (debounced, click, blur, unmount) is skipped once the browser
+URL is a different page, such as another Centre or the Program choice screen after
+Back. A blank or spaces-only search is left out
+of the URL. The input's `maxLength` and the URL reader share
+`MAX_COVERAGE_SEARCH_LENGTH` (100). Student links carry the same params, plus `centre_id` when the roster was
+opened on a Centre page. The Student/Phase page accepts them only for `school` and
+`school-progress` sources, cleans them with `coverageReturnQuery`, and keeps them on
+Phase links and locked-Phase redirects. Its back link goes to
+`/centre/<id>?tab=holistic_mentorship` only when the source is `school` and
+`centre_id` is set (Centre pages never send `school-progress`). Otherwise it goes
+to the School URL. Both keep the filters. Before #491, a Centre-opened drill-down returned to the
+School page, which a Centre-seated manager cannot open.
 
 ## Issue #383 navigation fixes — implemented in PR #394
 

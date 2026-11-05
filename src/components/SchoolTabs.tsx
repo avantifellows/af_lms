@@ -37,7 +37,10 @@ export default function SchoolTabs({ tabs, defaultTab }: Props) {
 
   const setActiveTab = (id: string) => {
     setClicked({ tab: id, urlTab });
-    const params = new URLSearchParams(searchParams.toString());
+    // Start from the live URL, not the useSearchParams snapshot: a tab's
+    // content may have just written its own params (the Holistic coverage
+    // filters) with replaceState, ahead of the snapshot catching up.
+    const params = new URLSearchParams(window.location.search);
     if (id === fallback) params.delete("tab");
     else params.set("tab", id);
     const qs = params.toString();
