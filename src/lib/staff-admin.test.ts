@@ -1411,17 +1411,18 @@ describe("positions", () => {
     expect(seatInsert![1]).toEqual([8, "subject_tbd", 700]);
   });
 
-  it("createSeatedUser creates a PM/staff member + tier seat (AF optional)", async () => {
+  it("createSeatedUser creates a PM/staff member + tier seat with their AF id", async () => {
     mockSchemaReady();
     mockQuery.mockResolvedValueOnce([{ id: 8, program_id: 2 }]); // centre
     mockQuery.mockResolvedValueOnce([]); // existing permission (none)
+    mockQuery.mockResolvedValueOnce([]); // AF clash (none)
     mockClientQuery
       .mockResolvedValueOnce({ rows: [{ id: 601 }] }) // INSERT user_permission
       .mockResolvedValueOnce({ rows: [] }) // SELECT user (none)
       .mockResolvedValueOnce({ rows: [{ id: 701 }] }); // INSERT user
     expect(
       await createSeatedUser({
-        body: { email: "pm@x.org", kind: "staff", role: "spm", centre_id: 8 },
+        body: { email: "pm@x.org", kind: "staff", role: "spm", centre_id: 8, af_id: "af1014" },
       })
     ).toEqual({ ok: true });
     const permInsert = mockClientQuery.mock.calls.find((c) =>
@@ -1431,11 +1432,25 @@ describe("positions", () => {
     const staffInsert = mockClientQuery.mock.calls.find((c) =>
       String(c[0]).includes("INSERT INTO staff")
     );
-    expect(staffInsert![1]).toEqual([701, null]); // employee_code null (no AF)
+    expect(staffInsert![1]).toEqual([701, "AF1014"]);
     const seatInsert = mockClientQuery.mock.calls.find((c) =>
       String(c[0]).includes("INSERT INTO centre_positions")
     );
     expect(seatInsert![1]).toEqual([8, "spm", 701]);
+  });
+
+  it("createSeatedUser requires an AF id for PM/staff roles (staff.employee_code is NOT NULL)", async () => {
+    mockSchemaReady();
+    expect(
+      await createSeatedUser({
+        body: { email: "apm@x.org", kind: "staff", role: "apm", centre_id: 8 },
+      })
+    ).toMatchObject({
+      ok: false,
+      status: 422,
+      fields: { af_id: "AF id is required for PM and staff roles" },
+    });
+    expect(mockClientQuery).not.toHaveBeenCalled();
   });
 
   it("createSeatedUser creates an APC: teacher record, 'apc' seat, no subject", async () => {

@@ -49,9 +49,23 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const result = await createSeatedUser({
-    body: (body ?? {}) as Record<string, unknown>,
-  });
+  let result: Awaited<ReturnType<typeof createSeatedUser>>;
+  try {
+    result = await createSeatedUser({
+      body: (body ?? {}) as Record<string, unknown>,
+    });
+  } catch (error) {
+    // The create runs in one transaction, so a failure here leaves nothing
+    // behind. Say so, instead of the form's bare "Failed to add user".
+    console.error("Error adding seated user:", error);
+    return NextResponse.json(
+      {
+        error:
+          "Couldn't add this user because of an unexpected error. Nothing was saved. Try again, or report it to the tech team.",
+      },
+      { status: 500 }
+    );
+  }
   if (!result.ok) {
     return NextResponse.json(safeStaffApiError(result), {
       status: result.status,

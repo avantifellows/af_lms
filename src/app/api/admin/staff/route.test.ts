@@ -1,22 +1,28 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-const { mockGetServerSession, mockRequireStaffAdmin, mockGetStaffRoster } =
-  vi.hoisted(() => ({
-    mockGetServerSession: vi.fn(),
-    mockRequireStaffAdmin: vi.fn(),
-    mockGetStaffRoster: vi.fn(),
-  }));
+const {
+  mockGetServerSession,
+  mockRequireStaffAdmin,
+  mockGetStaffRoster,
+  mockCreateSeatedUser,
+} = vi.hoisted(() => ({
+  mockGetServerSession: vi.fn(),
+  mockRequireStaffAdmin: vi.fn(),
+  mockGetStaffRoster: vi.fn(),
+  mockCreateSeatedUser: vi.fn(),
+}));
 
 vi.mock("next-auth", () => ({ getServerSession: mockGetServerSession }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("@/lib/staff-admin", () => ({
   requireStaffAdmin: mockRequireStaffAdmin,
   getStaffRoster: mockGetStaffRoster,
+  createSeatedUser: mockCreateSeatedUser,
   safeStaffApiError: (result: { error: string }) => ({ error: result.error }),
 }));
 
-import { GET } from "./route";
+import { GET, POST } from "./route";
 
 function rosterRequest(url = "http://localhost/api/admin/staff") {
   return new NextRequest(new URL(url));
@@ -80,5 +86,41 @@ describe("GET /api/admin/staff", () => {
     expect(await response.json()).toEqual({
       error: "Staff management schema unavailable",
     });
+  });
+});
+
+describe("POST /api/admin/staff", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    mockRequireStaffAdmin.mockResolvedValue({
+      ok: true,
+      email: "admin@avantifellows.org",
+    });
+  });
+
+  function addRequest(body: unknown) {
+    return new NextRequest(new URL("http://localhost/api/admin/staff"), {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  it("creates the user", async () => {
+    mockCreateSeatedUser.mockResolvedValueOnce({ ok: true });
+    const response = await POST(addRequest({ email: "a@x.org" }));
+    expect(response.status).toBe(201);
+  });
+
+  it("returns a readable message, not a bare 500, when the create throws", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockCreateSeatedUser.mockRejectedValueOnce(
+      new Error('null value in column "employee_code" of relation "staff"')
+    );
+    const response = await POST(addRequest({ email: "a@x.org" }));
+    expect(response.status).toBe(500);
+    const data = await response.json();
+    expect(data.error).toMatch(/Nothing was saved/);
+    expect(data.error).not.toMatch(/employee_code/);
+    consoleError.mockRestore();
   });
 });

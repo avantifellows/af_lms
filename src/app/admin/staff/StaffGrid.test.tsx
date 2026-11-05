@@ -630,7 +630,7 @@ describe("StaffGrid", () => {
     });
   });
 
-  it("adds an SPM from the flat role list — kind 'staff', role 'spm', no subject field", async () => {
+  it("adds an SPM from the flat role list — kind 'staff', role 'spm', no subject field, AF id required", async () => {
     const mockFetch = stubFetch((url, init) => {
       if (url === "/api/admin/staff" && init?.method === "POST") {
         return new Response(JSON.stringify({ ok: true }), { status: 201 });
@@ -660,6 +660,12 @@ describe("StaffGrid", () => {
       target: { value: "spm@avantifellows.org" },
     });
     fireEvent.change(screen.getByLabelText("Centre"), { target: { value: "8" } });
+    // Staff rows need an AF id (staff.employee_code is NOT NULL): the field is
+    // marked required and Add stays disabled until it is filled.
+    expect(screen.getByText("AF id")).toBeInTheDocument();
+    expect(screen.queryByText("AF id (optional)")).toBeNull();
+    expect(screen.getByRole("button", { name: "Add User" })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("AF id"), { target: { value: "AF1014" } });
     fireEvent.click(screen.getByRole("button", { name: "Add User" }));
 
     await waitFor(() => {
@@ -672,6 +678,7 @@ describe("StaffGrid", () => {
             kind: "staff",
             centre_id: 8,
             role: "spm",
+            af_id: "AF1014",
           }),
         })
       );

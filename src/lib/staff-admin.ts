@@ -1234,6 +1234,23 @@ function validateOptionalAfCode(
   return code;
 }
 
+// PM-tier and other staff get a `staff` row, whose employee_code is NOT NULL
+// (and unique) in the DB Service schema. A blank AF id there used to reach the
+// INSERT and fail as an unexplained 500. Teachers and APCs keep it optional:
+// teacher.teacher_id is nullable (a not-yet-hired TBH).
+function validateAfCodeForKind(
+  kind: unknown,
+  raw: unknown,
+  fields: Record<string, string>
+): string | null {
+  const code = validateOptionalAfCode(raw, fields);
+  const needsCode = isSeatedUserKind(kind) && !makesTeacherRecord(kind);
+  if (needsCode && code === null && !fields.af_id) {
+    fields.af_id = "AF id is required for PM and staff roles";
+  }
+  return code;
+}
+
 // What each kind gets seated as. Teacher: subject required, but seated
 // `subject_tbd` — the seat role is the subject and Ops confirms it later.
 // APC: subject optional (APC is not a subject), seated 'apc'. Staff: the PM
@@ -1290,7 +1307,7 @@ function validateSeatedUserBody(
     fields.centre_id = "Centre is required";
   }
   const { subjectId, seatRole } = resolveSeatAndSubject(kind, body, fields);
-  const code = validateOptionalAfCode(body.af_id, fields);
+  const code = validateAfCodeForKind(kind, body.af_id, fields);
 
   if (Object.keys(fields).length > 0) {
     return { ok: false, status: 422, error: "Validation failed", fields };
