@@ -527,6 +527,7 @@ export async function getCurriculumChapters(params: {
        JOIN topic_curriculum tc
          ON tc.topic_id = t.id
         AND tc.curriculum_id = $4
+        AND t.cms_status_id IS DISTINCT FROM 1
      ) ON t.chapter_id = ch.id
      WHERE cfg.exam_track = $1
        AND cfg.is_in_syllabus = true

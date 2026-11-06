@@ -254,6 +254,7 @@ async function loadValidTopics(params: {
       AND cfg.exam_track = $1
       AND cfg.is_in_syllabus = true
      WHERE t.id = ANY($2::int[])
+       AND t.cms_status_id IS DISTINCT FROM 1
        AND g.number = $3
        AND ch.subject_id = $4`,
     [

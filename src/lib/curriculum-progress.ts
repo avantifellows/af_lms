@@ -118,6 +118,7 @@ export async function getCurriculumProgress(params: {
        JOIN topic_curriculum topic_scope
          ON topic_scope.topic_id = t.id
         AND topic_scope.curriculum_id = $7
+        AND t.cms_status_id IS DISTINCT FROM 1
      ) ON t.chapter_id = ch.id
      LEFT JOIN scoped_log_topics slt ON slt.topic_id = t.id
      WHERE cfg.exam_track = $5
