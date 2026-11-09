@@ -60,19 +60,32 @@ export async function getCurriculumProgress(params: {
 
   const totalRows = await query<SubjectTotalRow>(
     // Only Regular Class logs are teaching time; cancellations and doubt solving
-    // never move Actual Hours.
+    // never move Actual Hours. Time on topics archived in the CMS
+    // (cms_status_id = 1) is left out, as in the chapter times below: each
+    // regular log counts for its share of topics that are not archived. A log
+    // with no topic rows counts in full.
     `SELECT
-       COALESCE(SUM(duration_minutes) FILTER (WHERE log_type = 'regular'), 0)
+       COALESCE(ROUND(SUM(l.duration_minutes * COALESCE(tf.live_share, 1))
+         FILTER (WHERE l.log_type = 'regular')), 0)
          AS subject_total_time_minutes,
-       COALESCE(SUM(duration_minutes) FILTER (WHERE log_type = 'doubt_solving'), 0)
+       COALESCE(SUM(l.duration_minutes) FILTER (WHERE l.log_type = 'doubt_solving'), 0)
          AS doubt_solving_total_time_minutes
-     FROM lms_curriculum_logs
-     WHERE school_code = $1
-       AND program_id = $2
-       AND grade_id = $3
-       AND subject_id = $4
-       AND exam_track = $5
-       AND deleted_at IS NULL`,
+     FROM lms_curriculum_logs l
+     LEFT JOIN LATERAL (
+       SELECT
+         COUNT(*) FILTER (WHERE tp.cms_status_id IS DISTINCT FROM 1)::numeric
+           / COUNT(*) AS live_share
+       FROM lms_curriculum_log_topics lt
+       JOIN topic tp ON tp.id = lt.topic_id
+       WHERE lt.curriculum_log_id = l.id
+       HAVING COUNT(*) > 0
+     ) tf ON true
+     WHERE l.school_code = $1
+       AND l.program_id = $2
+       AND l.grade_id = $3
+       AND l.subject_id = $4
+       AND l.exam_track = $5
+       AND l.deleted_at IS NULL`,
     [
       params.schoolCode,
       params.programId,
