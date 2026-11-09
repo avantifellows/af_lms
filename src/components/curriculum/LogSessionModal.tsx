@@ -55,7 +55,7 @@ function parseDurationInput(value: string): number {
 
 // fallow-ignore-next-line complexity
 export default function LogSessionModal({
-  chapters,
+  chapters: chaptersProp,
   progress,
   scopeLabel,
   onClose,
@@ -65,6 +65,33 @@ export default function LogSessionModal({
   editLog = null,
 }: LogSessionModalProps) {
   const isEditMode = editLog != null;
+  // The chapter list leaves out topics archived in the CMS, but a log saved
+  // earlier can still hold one. Editing shows that topic like any other, so it
+  // is visible, counted and can be unticked. New logs never offer archived topics.
+  const { chapters, archivedTopicIds } = useMemo(() => {
+    const archivedIds = new Set<number>();
+    if (!editLog) return { chapters: chaptersProp, archivedTopicIds: archivedIds };
+    const withArchived = chaptersProp.map((chapter) => {
+      const listed = new Set(chapter.topics.map((topic) => Number(topic.id)));
+      const archived = editLog.topics
+        .filter(
+          (topic) =>
+            Number(topic.chapterId) === Number(chapter.id) &&
+            !listed.has(Number(topic.topicId))
+        )
+        .map((topic) => ({
+          id: Number(topic.topicId),
+          code: "",
+          name: topic.topicName,
+          chapterId: Number(chapter.id),
+        }));
+      archived.forEach((topic) => archivedIds.add(topic.id));
+      return archived.length > 0
+        ? { ...chapter, topics: [...chapter.topics, ...archived] }
+        : chapter;
+    });
+    return { chapters: withArchived, archivedTopicIds: archivedIds };
+  }, [chaptersProp, editLog]);
   const initialTopicIds = useMemo(
     () => editLog?.topics.map((topic) => Number(topic.topicId)) ?? [],
     [editLog]
@@ -459,7 +486,10 @@ export default function LogSessionModal({
                           {chapter.topics.map((topic) => {
                             const topicId = Number(topic.id);
                             const isSelected = selectedTopicIds.has(topicId);
+                            // An archived topic on the log being edited was taught by
+                            // that log, though progress no longer lists it.
                             const wasAlreadyCovered =
+                              archivedTopicIds.has(topicId) ||
                               chapterProgress?.completedTopicIds
                                 .map((id) => Number(id))
                                 .includes(topicId);

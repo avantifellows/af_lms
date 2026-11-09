@@ -356,4 +356,51 @@ describe("LogSessionModal", () => {
       uncompleteChapterIds: [],
     });
   });
+
+  it("shows a topic archived since the log was saved, counted and removable", async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn();
+    renderModal({
+      onSave,
+      editLog: {
+        id: 13,
+        logType: "regular",
+        logDate: "2026-02-12",
+        durationMinutes: 60,
+        programId: 1,
+        gradeId: 3,
+        subjectId: 4,
+        examTrack: "jee_main",
+        chapterId: null,
+        chapterName: null,
+        topics: [
+          // 102 is still listed by the chapter; 999 is no longer in the chapter list.
+          { topicId: 102, topicName: "Projectile Motion", chapterId: 1, chapterName: "Kinematics" },
+          { topicId: 999, topicName: "Relative Velocity", chapterId: 1, chapterName: "Kinematics" },
+        ],
+        isEditable: true,
+        createdAt: "2026-02-12T10:00:00.000Z",
+        updatedAt: "2026-02-12T10:00:00.000Z",
+      },
+    });
+
+    // Shown like any other topic, ticked, and included in the count.
+    const archivedLabel = screen.getByText("Relative Velocity").closest("label")!;
+    expect(within(archivedLabel).getByRole("checkbox")).toBeChecked();
+    expect(within(archivedLabel).getByText("✓ covered")).toBeInTheDocument();
+    expect(screen.getByText(/Topics: 2 selected/)).toBeInTheDocument();
+
+    // It can be unticked on purpose, and then it is not saved with the log.
+    await user.click(within(archivedLabel).getByRole("checkbox"));
+    expect(screen.getByText(/Topics: 1 selected/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({ topicIds: [102] })
+    );
+  });
+
+  it("never offers archived topics when logging a new class", () => {
+    renderModal();
+    expect(screen.queryByText("Relative Velocity")).not.toBeInTheDocument();
+  });
 });
