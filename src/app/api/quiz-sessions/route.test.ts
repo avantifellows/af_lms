@@ -318,6 +318,7 @@ describe("POST /api/quiz-sessions", () => {
           stream: "engineering",
           startTime: "2026-04-15T04:30:00.000Z",
           endTime: "2026-04-15T08:30:00.000Z",
+          isRetest: false,
         },
       }) as never
     );
@@ -349,6 +350,7 @@ describe("POST /api/quiz-sessions", () => {
           stream: "engineering",
           startTime: "2026-04-15T04:30:00.000Z",
           endTime: "2026-04-15T08:30:00.000Z",
+          isRetest: false,
         },
       }) as never
     );
@@ -375,6 +377,7 @@ describe("POST /api/quiz-sessions", () => {
           stream: "engineering",
           startTime: "2026-04-15T04:30:00.000Z",
           endTime: "2026-04-15T08:30:00.000Z",
+          isRetest: false,
         },
       }) as never
     );
@@ -429,6 +432,7 @@ describe("POST /api/quiz-sessions", () => {
           gurukulFormatType: "omr",
           startTime: "2026-04-15T04:30:00.000Z",
           endTime: "2026-04-15T08:30:00.000Z",
+          isRetest: false,
         },
       }) as never
     );
@@ -458,6 +462,7 @@ describe("POST /api/quiz-sessions", () => {
         show_scores: true,
         shuffle: true,
         gurukul_format_type: "qa",
+        is_retest: false,
         status: "pending",
         has_synced_to_bq: false,
         created_by: ADMIN_SESSION.user.email,

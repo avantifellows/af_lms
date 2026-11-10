@@ -56,6 +56,9 @@ interface CreateFromCmsBody {
   gurukulFormatType?: string;
   // Regional language shown under the English in the quiz (e.g. "hi"); omitted = English.
   langCode?: string;
+  // Have these students already sat this paper? Required, so the creator answers it
+  // explicitly; stored as meta_data.is_retest, which keeps the session out of the AL.
+  isRetest?: boolean;
   startTime?: string;
   endTime?: string;
 }
@@ -151,6 +154,9 @@ export async function POST(request: NextRequest) {
   }
   if (!isCmsTestType(body.testType)) {
     return NextResponse.json({ error: "Valid testType is required" }, { status: 400 });
+  }
+  if (typeof body.isRetest !== "boolean") {
+    return NextResponse.json({ error: "Say whether this is a retest (isRetest true or false)" }, { status: 400 });
   }
   const langCode = body.langCode?.trim().toLowerCase() || "";
   if (langCode && !/^[a-z]{2}$/.test(langCode)) {
@@ -375,6 +381,7 @@ export async function POST(request: NextRequest) {
       test_format: body.testType,
       test_purpose: "test",
       test_type: "assessment",
+      is_retest: body.isRetest,
       gurukul_format_type: gurukulFormatType,
       marking_scheme: "4,-1",
       // Intentionally null for CMS sessions: optional-attempt limits are encoded

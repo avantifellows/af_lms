@@ -478,6 +478,7 @@ describe("QuizSessionsTab", () => {
     expect(screen.getByRole("button", { name: "Q & A" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "OMR" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Both" })).toBeDisabled();
+    await user.click(screen.getByRole("radio", { name: /No, first time/ }));
     await user.click(screen.getByRole("button", { name: "Create Session" }));
 
     await waitFor(() => {
@@ -545,6 +546,7 @@ describe("QuizSessionsTab", () => {
 
     expect(await screen.findByText("Part Test 11")).toBeInTheDocument();
     await user.click(screen.getByText("Part Test 11"));
+    await user.click(screen.getByRole("radio", { name: /No, first time/ }));
     await user.click(screen.getByRole("button", { name: "Create Session" }));
 
     await waitFor(() => {
@@ -586,6 +588,7 @@ describe("QuizSessionsTab", () => {
     await user.click(paper);
     expect(paper).toHaveAttribute("aria-pressed", "false");
 
+    await user.click(screen.getByRole("radio", { name: /No, first time/ }));
     await user.click(screen.getByRole("button", { name: "Create Session" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Please select a paper."
@@ -660,6 +663,7 @@ describe("QuizSessionsTab", () => {
     expect(await screen.findByText("Existing Quiz")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Create Quiz Session" }));
+    await user.click(screen.getByRole("radio", { name: /No, first time/ }));
     await user.click(screen.getByRole("button", { name: "Create Session" }));
 
     const alert = await screen.findByRole("alert");
@@ -679,6 +683,7 @@ describe("QuizSessionsTab", () => {
     await user.click(screen.getByRole("button", { name: "Create Quiz Session" }));
     await user.click(screen.getByLabelText("Class 11 Engg A"));
     await user.click(screen.getByLabelText("Class 11 Med A"));
+    await user.click(screen.getByRole("radio", { name: /No, first time/ }));
     await user.click(screen.getByRole("button", { name: "Create Session" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
@@ -960,6 +965,7 @@ describe("QuizSessionsTab", () => {
     await user.click(screen.getByLabelText("Class 11 Engg A"));
     await user.click(screen.getByRole("button", { name: "New CMS Test" }));
 
+    await user.click(screen.getByRole("radio", { name: /No, first time/ }));
     const submit = () => user.click(screen.getByRole("button", { name: "Create Session" }));
     await submit();
     expect(await screen.findByRole("alert")).toHaveTextContent("Exam track is required.");
@@ -1014,6 +1020,29 @@ describe("QuizSessionsTab", () => {
     expect(await screen.findByText("Failed to fetch chapters")).toBeInTheDocument();
   });
 
+  it("requires an explicit retest answer and sends it with the session", async () => {
+    const user = userEvent.setup();
+
+    render(<QuizSessionsTab schoolId="school-1" canEdit />);
+
+    await user.click(await screen.findByRole("button", { name: "Create Quiz Session" }));
+    await user.click(screen.getByLabelText("Class 11 Engg A"));
+    await user.selectOptions(screen.getByLabelText("Grade"), "11");
+    await user.selectOptions(screen.getByLabelText("Test Format"), "part_test");
+    await user.click(await screen.findByText("Part Test 11"));
+
+    // Nothing is pre-selected: creating without an answer is blocked.
+    expect(screen.getByRole("radio", { name: /No, first time/ })).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByRole("radio", { name: /Yes, this is a retest/ })).toHaveAttribute("aria-checked", "false");
+    await user.click(screen.getByRole("button", { name: "Create Session" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Say whether students have already taken this paper");
+    expect(createdPayload).toBeNull();
+
+    await user.click(screen.getByRole("radio", { name: /Yes, this is a retest/ }));
+    await user.click(screen.getByRole("button", { name: "Create Session" }));
+    await waitFor(() => expect(createdPayload).toMatchObject({ resourceId: 501, isRetest: true }));
+  });
+
   it("validates a scheduled window and shows the server's create error", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     overrideFetch((url, init) =>
@@ -1039,6 +1068,7 @@ describe("QuizSessionsTab", () => {
     await user.type(startInput, "2099-01-01T18:00");
     await user.clear(endInput);
     await user.type(endInput, "2099-01-01T10:00");
+    await user.click(screen.getByRole("radio", { name: /No, first time/ }));
     await user.click(screen.getByRole("button", { name: "Create Session" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "End time must be after start time."
