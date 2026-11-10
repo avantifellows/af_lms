@@ -201,6 +201,31 @@ Student Phase workspace shows an "N / 10,000" counter at 9,000 characters or mor
 editable answer box (draft, author's Edit, Add Follow-up Note). Read-only views show no
 counter. Use this constant for any new answer-length check (e.g. Dictation, #500).
 
+## Holistic Dictation usage records (#500, slice #509)
+
+- **Table ownership:** `holistic_mentorship_dictation_usage_records` comes from db-service #858
+  (migration `20261110151931_create_holistic_mentorship_dictation_usage_records`); LMS inserts and
+  updates it directly through `query()` (ADR 0005). Content-free: no Student, Phase, Question,
+  text or audio column, so it is outside Holistic privacy erasure.
+- **Write path** (`transcribeHolisticDictation` in `src/lib/holistic-dictation.ts`): limit check →
+  insert `outcome='failed'`, `characters_returned=0`, `completed_at` NULL → ElevenLabs call → update
+  to `ok` / `nothing_heard` / `failed` with `characters_returned`, `completed_at`, and
+  `audio_seconds = min(125, ceil(max(duration_ms/1000, last word end)))`. A request killed
+  mid-call leaves the `failed`, uncompleted row, which still counts.
+- **Timestamps:** the columns are naive UTC and the shared Postgres session time zone may be
+  Asia/Kolkata (the local test DBs are), so the insert writes `$now::timestamptz AT TIME ZONE 'UTC'`
+  and `completed_at = now() AT TIME ZONE 'UTC'` explicitly; never rely on the `now()` default here.
+- **Daily limit:** remaining = 1,800 − SUM(`audio_seconds`) of this Mentor's rows whose
+  `inserted_at` is in the current Asia/Kolkata day (converted to a UTC window), floored at 0
+  (`getHolisticDictationRemainingSeconds`). A clip is refused (429 `daily_limit`) when used +
+  `ceil(duration_ms/1000)` > 1,805. The check and insert are not atomic; racing tabs can overshoot
+  by one clip each (accepted).
+- **Write scope before the call:** `checkHolisticDictationScope` runs `loadHolisticMentorWriteScope`
+  (plus submitted Notes for `follow_up`) in its own `withTransaction`, which commits before the
+  provider call, so no row lock is held while ElevenLabs works.
+- **Opt-in integration test:** `src/lib/holistic-dictation.integration.test.ts` with
+  `HOLISTIC_DICTATION_TEST_DATABASE=dbservice_test_*` (IST day boundary, sum/floor, killed attempt).
+
 ## Holistic Follow-up Notes (#377)
 
 - **Table ownership:** `holistic_mentorship_follow_up_notes` is created by the db-service

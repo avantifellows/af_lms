@@ -18,7 +18,7 @@ edges:
     condition: when a route or page needs to gate access
   - target: context/visits.md
     condition: when working on PM school visits or visit action types
-last_updated: 2026-11-03
+last_updated: 2026-11-10
 ---
 
 # Architecture
@@ -252,6 +252,7 @@ join SQL) and the mixed-group cases in `src/lib/centre-switcher.test.ts`.
 - **DynamoDB** (`@aws-sdk/lib-dynamodb`) — read-only source for the performance dashboard deep-dive (`src/lib/dynamodb.ts`).
 - **S3** (`@aws-sdk/client-s3`) — student document uploads (`src/lib/s3.ts`), presigned URLs. Bucket shared with prod.
 - **SNS** (`@aws-sdk/client-sns`) — `src/lib/sns.ts` publishes session-creation messages.
+- **ElevenLabs Scribe (speech-to-text, Dictation #500, ADR 0012)** — the LMS's **first external provider key**, `HOLISTIC_DICTATION_ELEVENLABS_API_KEY` (server-only, sent in the `xi-api-key` header, never logged or sent to the browser). `src/lib/elevenlabs-scribe.ts` `transcribeSpeech` posts one clip to `https://api.elevenlabs.io/v1/speech-to-text` (`model_id=scribe_v2`, `tag_audio_events=false`, no `language_code`/diarization; `?enable_logging=false` only when `HOLISTIC_DICTATION_ELEVENLABS_ZERO_RETENTION=true`), 25 s abort, no retry; its errors carry only a failure class and HTTP status. Verbatim speech-to-text only: any LLM work still belongs in etl-next (ADR 0009).
 - **Google OAuth** — the only login, via NextAuth, open to any Google account; access comes only from a `user_permission` row. Passcode login was removed (ADR 0007).
 
 ## What Does NOT Exist Here
