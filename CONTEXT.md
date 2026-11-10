@@ -286,6 +286,14 @@ _Avoid_: Session log, multiple interaction entries, Follow-up Note, Academic Men
 An immutable, timestamped answer set recording one extra offline conversation with a Holistic Mentee in a Holistic Phase whose Post-Session Notes are already submitted. A Mentee and Phase may have many.
 _Avoid_: Additional Notes, Check-in Notes, extra Post-Session Notes, session log
 
+**Dictation**:
+A Holistic Mentor's spoken words turned into verbatim text and added to a Post-Session Notes or Follow-up Note answer they are editing. The audio is not kept.
+_Avoid_: Voice note, voice-to-text, speech note, Call Recording
+
+**Dictation Usage Record**:
+The content-free record of one Dictation attempt: who dictated, where, for how long, and whether it worked.
+_Avoid_: Transcript log, Dictation history, audio log
+
 **Challenge Category**:
 One fixed, coded Academic or Non-academic classification of a challenge a Holistic Mentor selects for a Holistic Mentee in Post-Session Notes.
 _Avoid_: Tag, challenge tag, issue type
@@ -536,7 +544,8 @@ _Avoid_: Screener Form (as a Quiz Form), Holistic Student Profile Questionnaire
 - V1 Student Profile generation sends every answered questionnaire Question and its human-readable answer to the approved OpenRouter model, regardless of Quiz priority, but excludes the Student's name, User ID, Student ID, School, and other direct LMS identifiers from the external payload
 - V1 does not expose raw **Holistic Student Profile Questionnaire** answers in LMS; Mentors and Mentorship Admins see the generated Student Profile summary, while technical investigation uses the protected source system
 - V1 OpenRouter requests prefer Zero Data Retention; if ZDR routing is unavailable they may fall back only with provider data collection denied and OpenRouter prompt/response logging disabled
-- V1 external AI processing is limited to **Holistic Student Profile Questionnaire** answers; Post-Session Notes, Phase Guidance, Mentor-Mentee Mappings, School data, and other LMS records are not sent to OpenRouter
+- External processing of Holistic Mentorship content is limited to two cases: **Holistic Student Profile Questionnaire** answers sent to OpenRouter for Student Profile generation, and **Dictation** audio sent to ElevenLabs for speech-to-text only; saved Post-Session Notes and Follow-up Note text, Phase Guidance, Mentor-Mentee Mappings, School data, and other LMS records are not sent to any external AI service
+- **Dictation** audio is not stored by LMS; ElevenLabs zero retention is not in place at launch and is switched on once the account supports it, so until then the provider's standard retention applies to that audio
 - V1 Holistic Mentorship storage keeps the generated Student Profile summary and its provenance but does not duplicate the raw questionnaire answers held by the existing Quiz and BigQuery source path
 - Student Profile summaries and Post-Session Notes remain as historical records after a Student exits a School or Program or an academic year ends; former actors lose access through normal scope rules, while authorized Admin access remains
 - No LMS role may permanently erase a Student's Holistic Mentorship content; the former LMS privacy-erasure endpoint and action are disabled, and any source-system privacy request is coordinated outside LMS
@@ -634,6 +643,10 @@ _Avoid_: Screener Form (as a Quiz Form), Holistic Student Profile Questionnaire
 - A **Follow-up Note** has no draft and cannot be edited or deleted after it is saved; a correction is recorded as another Follow-up Note
 - A **Follow-up Note** records its author and system save time but no manually entered conversation date; a Mentee and Phase have no limit on Follow-up Notes
 - **Follow-up Notes** are readable by the same audience as submitted Post-Session Notes, appear only on their own Phase, do not feed Student Context, do not change Phase progress, and remain as history when a Mapping ends
+- **Dictation** is offered only where a Holistic Mentor can edit the answer: draft Post-Session Notes, the author's Edit of submitted Notes, and a new Follow-up Note; read-only viewers never see it, and Blended Learning and School Visit forms have no Dictation
+- **Dictation** text is the speech-to-text output as returned, with no rewriting, translation, or summarising; it is added to the end of the answer and from then on is ordinary answer text, saved and limited like typed text and carrying no mark that it was dictated
+- One **Dictation** recording lasts at most two minutes, and a Mentor may dictate at most thirty minutes in a day
+- Every **Dictation** attempt leaves one **Dictation Usage Record** holding the Mentor, School, Program, whether it was for Post-Session Notes or a Follow-up Note, audio seconds, characters returned, outcome, and time; it never holds the Student, the Question, the text, or the audio
 - Draft **Post-Session Notes** allow partial answers and autosave with visible state, but opening or viewing a blank form does not persist data or freeze the Phase
 - An unfinished Notes draft and the fact that it has been saved are visible only to its author while they remain the current Mentor; Program Managers, Program Admins, Holistic Mentorship Admins, and Admins derive progress as though the draft does not exist (normally Pending, while an otherwise Skipped Phase remains Skipped) until Notes are submitted
 - If a Mapping ends before Notes submission, LMS warns when applicable, discards the draft content, records a content-free actor/time/reason audit event, and gives the replacement Mentor a blank form
@@ -805,3 +818,4 @@ _Avoid_: Screener Form (as a Quiz Form), Holistic Student Profile Questionnaire
 - "flag": a **Mentor Flag** belongs to one Conversation and names a Flag Recipient; it is unrelated to the School roster's needs-intervention flag.
 - "action": an **Action** is part of a School Visit; an **Action Item** is a follow-up agreed in a Blended Learning **Conversation**.
 - "mentor" alone is ambiguous across Academic, Holistic, and Blended Learning Mentoring; always use the full term.
+- "voice note" / "voice-to-text": **Dictation** produces answer text in Holistic Mentorship and keeps no audio; a **Call Recording** is a kept audio file of a Blended Learning Conversation. Issue #500's "Post-Mentorship Notes" are **Post-Session Notes**.
