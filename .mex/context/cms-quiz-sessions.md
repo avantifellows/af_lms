@@ -21,7 +21,7 @@ edges:
     condition: when tracing the request flow across af_lms / quiz-backend / db-service
   - target: patterns/db-service-write.md
     condition: when adding a session or occurrence write
-last_updated: 2026-10-19
+last_updated: 2026-11-10
 ---
 
 # CMS-sourced quiz sessions
@@ -30,6 +30,14 @@ Sessions built from the new CMS (`meta_data.cms_source === "nex-gen-cms"`, `CMS_
 `src/lib/cms-tests.ts`) are created synchronously by af_lms, replacing the legacy
 SNS → etl-data-flow `sessionCreator` Lambda. Legacy sheet-driven sessions still go through
 that Lambda, so **both paths are live** and must stay at feature parity.
+
+**Test types the picker offers** (`CMS_TEST_TYPES` in `src/lib/cms-tests.ts`): `chapter_test`
+(Exam track → Grade → Subject → Chapter), and `major_test` / `full_syllabus_test` (straight off
+Exam track + Grade). The list route forwards the type to the CMS as `testtype-dropdown` and
+keeps only tests whose `subtype` matches exactly, so a CMS type missing from this list is
+invisible in the LMS, with no error. `full_syllabus_test` was added on 10 Nov 2026 when AIAT-05
+(`JN-FST-2-26`) was authored as an FST and didn't show under Major Test. quiz-backend ingest and
+`MAJOR_TEST_FORMATS` already handled it; adding a new CMS type is a picker-only change.
 
 ## The one thing that breaks silently: two homes per setting
 

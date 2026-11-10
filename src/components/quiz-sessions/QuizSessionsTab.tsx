@@ -1260,12 +1260,12 @@ function QuizSessionCreateModal({
   }, [cmsChapterId, cmsChapters]);
 
   // CMS cascade: fetch tests once the type's inputs are complete — chapter tests need a
-  // chapter selected; major tests list straight off exam track + grade.
+  // chapter selected; major and full-syllabus tests list straight off exam track + grade.
   const cmsTestsReady =
     testSource === "cms" &&
     !!cmsExamTrack &&
     !!cmsGrade &&
-    (cmsTestType === "major_test" || cmsChapterId !== null);
+    (cmsTestType !== "chapter_test" || cmsChapterId !== null);
   useEffect(() => {
     if (!cmsTestsReady) {
       setCmsTests([]);
@@ -1976,7 +1976,7 @@ function QuizSessionCreateModal({
                         <div className="rounded-lg border border-border bg-bg-card-alt px-3 py-3 text-sm text-text-secondary">
                           {cmsTestType === "chapter_test"
                             ? "Choose exam track, grade, subject, and chapter to see its tests."
-                            : "Choose exam track and grade to see the major tests."}
+                            : "Choose exam track and grade to see the tests."}
                         </div>
                       ) : loadingCmsTests ? (
                         <div className="rounded-lg border border-border bg-bg-card-alt px-3 py-3 text-sm text-text-secondary">
@@ -1986,7 +1986,7 @@ function QuizSessionCreateModal({
                         <div className="rounded-lg border border-border bg-bg-card-alt px-3 py-3 text-sm text-text-secondary">
                           {cmsTestType === "chapter_test"
                             ? "No chapter tests found for this chapter."
-                            : "No major tests found for this exam track and grade."}
+                            : `No ${cmsTestType === "full_syllabus_test" ? "full syllabus" : "major"} tests found for this exam track and grade.`}
                         </div>
                       ) : (
                         <div className="space-y-2">

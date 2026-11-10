@@ -97,6 +97,26 @@ describe("GET /api/cms/tests", () => {
     expect(tests.map((test: { id: number }) => test.id)).toEqual([9535, 4379]);
   });
 
+  it("lists full syllabus tests (AIAT-05 is typed full_syllabus_test in the CMS)", async () => {
+    const fst = {
+      id: 17041,
+      code: "JN-FST-2-26",
+      name: [{ lang_code: "en", resource: "JNV-G12-FST-01-JEE Main (AIAT-05)" }],
+      subtype: "full_syllabus_test",
+      type_params: { marks: 300, duration: "180" },
+    };
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(JSON.stringify([fst, RAW_TESTS[0]]), { status: 200 })
+    );
+
+    const res = await GET(req("exam_track=jee_main&grade=12&test_type=full_syllabus_test"));
+
+    expect(res.status).toBe(200);
+    const { tests } = await res.json();
+    expect(tests.map((test: { code: string }) => test.code)).toEqual(["JN-FST-2-26"]);
+    expect(vi.mocked(fetch).mock.calls[0][0]).toContain("testtype-dropdown=full_syllabus_test");
+  });
+
   it("400s on an invalid scope", async () => {
     expect((await GET(req("grade=12"))).status).toBe(400);
   });
