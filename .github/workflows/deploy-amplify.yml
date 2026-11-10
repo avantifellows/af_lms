@@ -53,8 +53,9 @@ jobs:
         run: |
           BRANCH="${{ steps.preview.outputs.branch }}"
 
-          # Check if branch exists
-          if aws amplify get-branch --app-id ${{ env.AMPLIFY_APP_ID }} --branch-name "$BRANCH" 2>/dev/null; then
+          # Check if branch exists. Discard the output: Amplify returns the
+          # branch's environment variables, and this log is public.
+          if aws amplify get-branch --app-id ${{ env.AMPLIFY_APP_ID }} --branch-name "$BRANCH" >/dev/null 2>&1; then
             echo "Branch $BRANCH already exists, updating..."
           else
             echo "Creating new branch $BRANCH..."
@@ -62,7 +63,8 @@ jobs:
               --app-id ${{ env.AMPLIFY_APP_ID }} \
               --branch-name "$BRANCH" \
               --stage DEVELOPMENT \
-              --no-enable-auto-build
+              --no-enable-auto-build \
+              --query 'branch.branchName' --output text
           fi
 
       - name: Sync Preview environment variables
@@ -198,7 +200,8 @@ jobs:
           aws amplify update-branch \
             --app-id ${{ env.AMPLIFY_APP_ID }} \
             --branch-name "$BRANCH" \
-            --environment-variables "$ENV_VARS"
+            --environment-variables "$ENV_VARS" \
+            --query 'branch.branchName' --output text
 
       - name: Trigger preview build
         run: |
@@ -251,8 +254,9 @@ jobs:
         run: |
           BRANCH="${{ steps.preview.outputs.branch }}"
 
-          # Check if branch exists
-          if aws amplify get-branch --app-id ${{ env.AMPLIFY_APP_ID }} --branch-name "$BRANCH" 2>/dev/null; then
+          # Check if branch exists. Discard the output: Amplify returns the
+          # branch's environment variables, and this log is public.
+          if aws amplify get-branch --app-id ${{ env.AMPLIFY_APP_ID }} --branch-name "$BRANCH" >/dev/null 2>&1; then
             echo "Branch $BRANCH already exists, updating..."
           else
             echo "Creating new branch $BRANCH..."
@@ -260,7 +264,8 @@ jobs:
               --app-id ${{ env.AMPLIFY_APP_ID }} \
               --branch-name "$BRANCH" \
               --stage DEVELOPMENT \
-              --no-enable-auto-build
+              --no-enable-auto-build \
+              --query 'branch.branchName' --output text
           fi
 
       - name: Sync Preview environment variables
@@ -396,7 +401,8 @@ jobs:
           aws amplify update-branch \
             --app-id ${{ env.AMPLIFY_APP_ID }} \
             --branch-name "$BRANCH" \
-            --environment-variables "$ENV_VARS"
+            --environment-variables "$ENV_VARS" \
+            --query 'branch.branchName' --output text
 
       - name: Trigger preview build
         run: |
@@ -601,7 +607,8 @@ jobs:
           aws amplify update-branch \
             --app-id ${{ env.AMPLIFY_APP_ID }} \
             --branch-name main \
-            --environment-variables "$ENV_VARS"
+            --environment-variables "$ENV_VARS" \
+            --query 'branch.branchName' --output text
 
       # Amplify auto-build is enabled on main — it triggers a build on every
       # push automatically. The env vars synced above will be picked up by
