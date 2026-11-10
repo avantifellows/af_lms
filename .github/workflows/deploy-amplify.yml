@@ -91,6 +91,9 @@ jobs:
           BLENDED_LEARNING_SES_SECRET_ACCESS_KEY: ${{ secrets.BLENDED_LEARNING_SES_SECRET_ACCESS_KEY }}
           BLENDED_LEARNING_SES_REGION: ${{ secrets.BLENDED_LEARNING_SES_REGION }}
           BLENDED_LEARNING_WELLBEING_EMAILS: ${{ secrets.BLENDED_LEARNING_WELLBEING_EMAILS }}
+          HOLISTIC_DICTATION_ENABLED: ${{ secrets.HOLISTIC_DICTATION_ENABLED }}
+          HOLISTIC_DICTATION_ELEVENLABS_API_KEY: ${{ secrets.HOLISTIC_DICTATION_ELEVENLABS_API_KEY }}
+          HOLISTIC_DICTATION_ELEVENLABS_ZERO_RETENTION: ${{ secrets.HOLISTIC_DICTATION_ELEVENLABS_ZERO_RETENTION }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           DYNAMODB_URL: ${{ secrets.DYNAMODB_URL }}
           DYNAMODB_REGION: ${{ secrets.DYNAMODB_REGION }}
@@ -135,6 +138,9 @@ jobs:
             --arg blended_ses_secret "$BLENDED_LEARNING_SES_SECRET_ACCESS_KEY" \
             --arg blended_ses_region "$BLENDED_LEARNING_SES_REGION" \
             --arg blended_wellbeing_emails "$BLENDED_LEARNING_WELLBEING_EMAILS" \
+            --arg dictation_enabled "$HOLISTIC_DICTATION_ENABLED" \
+            --arg dictation_key "$HOLISTIC_DICTATION_ELEVENLABS_API_KEY" \
+            --arg dictation_zero_retention "$HOLISTIC_DICTATION_ELEVENLABS_ZERO_RETENTION" \
             --arg l "$GOOGLE_SERVICE_ACCOUNT_JSON" \
             --arg m "$DYNAMODB_URL" \
             --arg n "$DYNAMODB_REGION" \
@@ -177,6 +183,9 @@ jobs:
               BLENDED_LEARNING_SES_SECRET_ACCESS_KEY: $blended_ses_secret,
               BLENDED_LEARNING_SES_REGION: $blended_ses_region,
               BLENDED_LEARNING_WELLBEING_EMAILS: $blended_wellbeing_emails,
+              HOLISTIC_DICTATION_ENABLED: $dictation_enabled,
+              HOLISTIC_DICTATION_ELEVENLABS_API_KEY: $dictation_key,
+              HOLISTIC_DICTATION_ELEVENLABS_ZERO_RETENTION: $dictation_zero_retention,
               GOOGLE_SERVICE_ACCOUNT_JSON: $l,
               DYNAMODB_URL: $m,
               DYNAMODB_REGION: $n,
@@ -292,6 +301,9 @@ jobs:
           BLENDED_LEARNING_SES_SECRET_ACCESS_KEY: ${{ secrets.BLENDED_LEARNING_SES_SECRET_ACCESS_KEY }}
           BLENDED_LEARNING_SES_REGION: ${{ secrets.BLENDED_LEARNING_SES_REGION }}
           BLENDED_LEARNING_WELLBEING_EMAILS: ${{ secrets.BLENDED_LEARNING_WELLBEING_EMAILS }}
+          HOLISTIC_DICTATION_ENABLED: ${{ secrets.HOLISTIC_DICTATION_ENABLED }}
+          HOLISTIC_DICTATION_ELEVENLABS_API_KEY: ${{ secrets.HOLISTIC_DICTATION_ELEVENLABS_API_KEY }}
+          HOLISTIC_DICTATION_ELEVENLABS_ZERO_RETENTION: ${{ secrets.HOLISTIC_DICTATION_ELEVENLABS_ZERO_RETENTION }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           DYNAMODB_URL: ${{ secrets.DYNAMODB_URL }}
           DYNAMODB_REGION: ${{ secrets.DYNAMODB_REGION }}
@@ -336,6 +348,9 @@ jobs:
             --arg blended_ses_secret "$BLENDED_LEARNING_SES_SECRET_ACCESS_KEY" \
             --arg blended_ses_region "$BLENDED_LEARNING_SES_REGION" \
             --arg blended_wellbeing_emails "$BLENDED_LEARNING_WELLBEING_EMAILS" \
+            --arg dictation_enabled "$HOLISTIC_DICTATION_ENABLED" \
+            --arg dictation_key "$HOLISTIC_DICTATION_ELEVENLABS_API_KEY" \
+            --arg dictation_zero_retention "$HOLISTIC_DICTATION_ELEVENLABS_ZERO_RETENTION" \
             --arg l "$GOOGLE_SERVICE_ACCOUNT_JSON" \
             --arg m "$DYNAMODB_URL" \
             --arg n "$DYNAMODB_REGION" \
@@ -378,6 +393,9 @@ jobs:
               BLENDED_LEARNING_SES_SECRET_ACCESS_KEY: $blended_ses_secret,
               BLENDED_LEARNING_SES_REGION: $blended_ses_region,
               BLENDED_LEARNING_WELLBEING_EMAILS: $blended_wellbeing_emails,
+              HOLISTIC_DICTATION_ENABLED: $dictation_enabled,
+              HOLISTIC_DICTATION_ELEVENLABS_API_KEY: $dictation_key,
+              HOLISTIC_DICTATION_ELEVENLABS_ZERO_RETENTION: $dictation_zero_retention,
               GOOGLE_SERVICE_ACCOUNT_JSON: $l,
               DYNAMODB_URL: $m,
               DYNAMODB_REGION: $n,
@@ -500,6 +518,9 @@ jobs:
           BLENDED_LEARNING_SES_SECRET_ACCESS_KEY: ${{ secrets.BLENDED_LEARNING_SES_SECRET_ACCESS_KEY }}
           BLENDED_LEARNING_SES_REGION: ${{ secrets.BLENDED_LEARNING_SES_REGION }}
           BLENDED_LEARNING_WELLBEING_EMAILS: ${{ secrets.BLENDED_LEARNING_WELLBEING_EMAILS }}
+          HOLISTIC_DICTATION_ENABLED: ${{ secrets.HOLISTIC_DICTATION_ENABLED }}
+          HOLISTIC_DICTATION_ELEVENLABS_API_KEY: ${{ secrets.HOLISTIC_DICTATION_ELEVENLABS_API_KEY }}
+          HOLISTIC_DICTATION_ELEVENLABS_ZERO_RETENTION: ${{ secrets.HOLISTIC_DICTATION_ELEVENLABS_ZERO_RETENTION }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           DYNAMODB_URL: ${{ secrets.DYNAMODB_URL }}
           DYNAMODB_REGION: ${{ secrets.DYNAMODB_REGION }}
@@ -543,6 +564,9 @@ jobs:
             --arg blended_ses_secret "$BLENDED_LEARNING_SES_SECRET_ACCESS_KEY" \
             --arg blended_ses_region "$BLENDED_LEARNING_SES_REGION" \
             --arg blended_wellbeing_emails "$BLENDED_LEARNING_WELLBEING_EMAILS" \
+            --arg dictation_enabled "$HOLISTIC_DICTATION_ENABLED" \
+            --arg dictation_key "$HOLISTIC_DICTATION_ELEVENLABS_API_KEY" \
+            --arg dictation_zero_retention "$HOLISTIC_DICTATION_ELEVENLABS_ZERO_RETENTION" \
             --arg l "$GOOGLE_SERVICE_ACCOUNT_JSON" \
             --arg m "$DYNAMODB_URL" \
             --arg n "$DYNAMODB_REGION" \
@@ -585,6 +609,9 @@ jobs:
               BLENDED_LEARNING_SES_SECRET_ACCESS_KEY: $blended_ses_secret,
               BLENDED_LEARNING_SES_REGION: $blended_ses_region,
               BLENDED_LEARNING_WELLBEING_EMAILS: $blended_wellbeing_emails,
+              HOLISTIC_DICTATION_ENABLED: $dictation_enabled,
+              HOLISTIC_DICTATION_ELEVENLABS_API_KEY: $dictation_key,
+              HOLISTIC_DICTATION_ELEVENLABS_ZERO_RETENTION: $dictation_zero_retention,
               GOOGLE_SERVICE_ACCOUNT_JSON: $l,
               DYNAMODB_URL: $m,
               DYNAMODB_REGION: $n,
