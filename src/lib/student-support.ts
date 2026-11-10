@@ -10,6 +10,7 @@ import {
   getBigQueryClient,
   getCumulativeALData,
 } from "./bigquery";
+import { getRetestSessionIds } from "./quiz-session-retests";
 import { isAdvancedTest } from "./academic-level";
 import { CURRENT_ACADEMIC_YEAR } from "./constants";
 import { query } from "./db";
@@ -212,16 +213,22 @@ interface Sitting {
   testStream: string | null;
   testName: string;
   exam: string | null;
-  /** The student's own retest (see studentRetests). */
+  /** A retest: a sitting of a session flagged as a retest (meta_data.is_retest),
+   *  or the student's own repeat of a test name (see studentRetests). */
   retest: boolean;
   level: string;
   marks: number | null;
   max: number | null;
 }
 
-/** A student's in-year sittings, oldest first, each marked if it is their
- *  own retest. */
-function studentSittings(progression: ProgressionEntry[], tests: Map<string, ProgressionTest>): Sitting[] {
+/** A student's in-year sittings, oldest first, each marked if it is a
+ *  retest: a session flagged as one (`retestSessions`), or the student's own
+ *  repeat of a test name. */
+function studentSittings(
+  progression: ProgressionEntry[],
+  tests: Map<string, ProgressionTest>,
+  retestSessions: Set<string>
+): Sitting[] {
   const sittings: Sitting[] = [];
   for (const p of progression) {
     const test = tests.get(p.session_id);
@@ -239,7 +246,7 @@ function studentSittings(progression: ProgressionEntry[], tests: Map<string, Pro
     });
   }
   const retests = studentRetests(sittings.map((t) => ({ ...t, name: t.testName, stream: t.testStream })));
-  for (const t of sittings) t.retest = retests.has(t.sessionId);
+  for (const t of sittings) t.retest = retests.has(t.sessionId) || retestSessions.has(t.sessionId);
   return sittings.sort(byDateThenSession);
 }
 
@@ -249,8 +256,8 @@ function studentSittings(progression: ProgressionEntry[], tests: Map<string, Pro
  * on each listed test for the per-test columns. The cumulative AL read
  * already returns exactly these and applies the test-grade filter. The
  * columns are the sessions `listedSessions` keeps, ordered by date, then
- * session id, each with its maximum marks and whether every sitting of it
- * was a retest.
+ * session id, each with its maximum marks and whether it is a retest column
+ * (flagged as a retest, or every sitting of it a student's own repeat).
  */
 async function getProgressions(
   udise: string,
@@ -260,10 +267,11 @@ async function getProgressions(
   testGrade?: number
 ): Promise<{ tests: JourneyTest[]; byStudent: Map<string, { sittings: Sitting[]; results: Record<string, TestResult> }> }> {
   const data = await getCumulativeALData(udise, grade, program, stream, testGrade);
+  const flagged = await getRetestSessionIds(data.tests.map((t) => t.session_id));
   const testsById = new Map(data.tests.map((t) => [t.session_id, t]));
   const byStudent = new Map<string, { sittings: Sitting[]; results: Record<string, TestResult> }>();
   for (const s of data.students) {
-    byStudent.set(s.student_id, { sittings: studentSittings(s.progression, testsById), results: {} });
+    byStudent.set(s.student_id, { sittings: studentSittings(s.progression, testsById, flagged), results: {} });
   }
   const all = [...byStudent].flatMap(([uid, { sittings }]) => sittings.map((t) => ({ uid, t })));
   const listed = listedSessions(
@@ -290,7 +298,7 @@ async function getProgressions(
         date: t.start_date,
         stream: t.stream,
         max: st.max || null,
-        retest: st.retests === st.sat,
+        retest: flagged.has(t.session_id) || st.retests === st.sat,
       };
     })
     .sort(byDateThenSession);
@@ -757,8 +765,12 @@ async function loadStudentReport(
       sat.set(r.session_id, Number(r.hashed_session_id));
     }
   }
-  const chapterRows = await getChapterRows(uid, stream, [...sat].map(([id, hash]) => ({ id, hash })));
+  const [chapterRows, flagged] = await Promise.all([
+    getChapterRows(uid, stream, [...sat].map(([id, hash]) => ({ id, hash }))),
+    getRetestSessionIds(testRows.map((r) => r.session_id)),
+  ]);
   const retests = reportRetests(testRows);
+  for (const id of flagged) retests.add(id);
   const sittings = sittingsFromTests(testRows, retests, stream);
   return {
     student: { ...journeyRow(student, sittings, cutoffs), results: {} },

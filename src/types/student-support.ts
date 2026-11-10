@@ -88,8 +88,9 @@ export interface JourneyTest {
   stream: string | null;
   /** Maximum marks, from the sittings. */
   max: number | null;
-  /** Every sitting of it is a retest (the student had already sat a test
-   *  of the same name and stream): shown, never counted. */
+  /** A retest column: the session is flagged as a retest (meta_data.is_retest),
+   *  or every sitting of it is a student's own repeat of the name. Shown
+   *  greyed, never counted, not even for a student who sat only the retest. */
   retest: boolean;
 }
 

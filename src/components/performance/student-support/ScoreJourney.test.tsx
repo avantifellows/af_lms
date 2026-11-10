@@ -141,7 +141,7 @@ describe("ScoreJourney", () => {
       "Student", "Gender", "Stream", "Category", "Predicted", "Mode AL", "AL status", "Latest AL",
       "Questions to next AL", "Mentor notes", "Score graph",
       // Every test, newest first; no toggle.
-      "FT 120 Aug · Retest", "Common FT5 Aug", "FT 11 Jul",
+      "FT 120 AugRetest · not in AL", "Common FT5 Aug", "FT 11 Jul",
     ]);
     expect(screen.queryByRole("checkbox", { name: "All tests" })).not.toBeInTheDocument();
 
@@ -235,25 +235,29 @@ describe("ScoreJourney", () => {
     expect(within(neet).getByText("soon")).toBeInTheDocument();
 
     const cells = within(rowOf("Asha")).getAllByRole("cell").slice(11);
-    expect(cells.map((c) => c.textContent)).toEqual(["200M1R", "150NQ▲ 16.7%", "100M2"]);
+    expect(cells.map((c) => c.textContent)).toEqual(["200M1", "150NQ▲ 16.7%", "100M2"]);
     // The change (in score % points) is on the latest non-retest sitting, against the previous one.
     expect(within(cells[1]).getByTitle("vs FT 1")).toHaveClass("text-success");
     // Bala sat none of them.
     expect(within(rowOf("Bala")).getAllByText("AB")).toHaveLength(3);
   });
 
-  it("marks a retest column, which is shown but not counted", async () => {
+  it("greys a retest column, which is shown but not counted for anyone", async () => {
     await showJourney();
     const [jee] = screen.getAllByRole("table");
-    const title = "Retest — not counted in Latest AL, the score graph or the change.";
+    const title =
+      "Retest: students had already taken this paper. Not counted in the AL, Latest AL, the score graph or the change, " +
+      "for anyone (a student who sat only the retest counts as absent from the original).";
     const retest = within(jee).getByTitle(`${title} FT 1 · out of 300`);
-    expect(retest).toHaveTextContent("Retest");
-    expect(retest).toHaveClass("text-accent");
+    expect(retest).toHaveTextContent("Retest · not in AL");
+    expect(retest).toHaveClass("bg-bg-card-alt");
     expect(within(jee).getByTitle("FT 1 · out of 300")).not.toHaveTextContent("Retest");
-    // The student's own retest sitting is marked R; their first sitting isn't.
+    // Every sitting in the retest column is greyed and struck through; others aren't.
     const cells = within(rowOf("Asha")).getAllByRole("cell").slice(11);
-    expect(within(cells[0]).getByTitle(title)).toHaveTextContent("R");
+    expect(cells[0]).toHaveClass("bg-bg-card-alt/60");
+    expect(within(cells[0]).getByTitle(title)).toHaveTextContent("200M1");
     expect(within(cells[2]).queryByTitle(title)).not.toBeInTheDocument();
+    expect(screen.getByText(/don.t count toward the AL/)).toBeInTheDocument();
   });
 
   it("draws a score graph coloured by direction, with an accessible label", async () => {
