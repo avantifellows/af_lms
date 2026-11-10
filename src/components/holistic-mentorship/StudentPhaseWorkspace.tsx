@@ -605,8 +605,9 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
   const localDirty = hasLocalNotesWork(valueChanged, status);
   const refs = useNotesEditorRefs(props, state);
   const { savedRef, textareasRef, categoryFieldsetsRef, mutationRevisionRef } = refs;
-  const validationErrorId = useId();
-  const categoryErrorId = useId();
+  const errorId = useId();
+  const validationErrorId = `${errorId}-answers`;
+  const categoryErrorId = `${errorId}-categories`;
   const mutate = useNotesMutation(props, mutationRevisionRef);
   const apiUrl = notesApiUrl(props);
   const canAutosave = canAutosaveNotes(props.editable, notesState);

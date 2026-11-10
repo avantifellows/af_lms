@@ -190,6 +190,40 @@ function stopTracks(stream: MediaStream | null) {
   stream?.getTracks().forEach((track) => track.stop());
 }
 
+// The recorder's working parts. They change without a re-render, so they
+// share one ref.
+type Live = {
+  /** Bumped by discard(): anything started under an older session is ignored. */
+  session: number;
+  stream: MediaStream | null;
+  recorder: MediaRecorder | null;
+  autoStop: number | null;
+  upload: AbortController | null;
+  stop: Stop | null;
+  startedAt: number;
+};
+
+function releaseMic(live: Live) {
+  stopTracks(live.stream);
+  live.stream = null;
+}
+
+function clearAutoStop(live: Live) {
+  if (live.autoStop !== null) window.clearTimeout(live.autoStop);
+  live.autoStop = null;
+}
+
+// Ticks while a recording runs, for the "Recording m:ss" label.
+function useElapsedMs(startedAt: number | null) {
+  const [now, setNow] = useState(0);
+  useEffect(() => {
+    if (startedAt === null) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 250);
+    return () => window.clearInterval(timer);
+  }, [startedAt]);
+  return startedAt === null ? 0 : Math.max(0, now - startedAt);
+}
+
 export function useDictationRecorder(options: {
   url: string;
   kind: DictationKind;
@@ -198,64 +232,48 @@ export function useDictationRecorder(options: {
   onText: ApplyDictationText;
 }): DictationRecorder {
   const [state, setState] = useState<DictationState>({ kind: "idle" });
-  const [now, setNow] = useState(0);
+  // The latest props, for callbacks that outlive a render. `remainingSeconds`
+  // is the page's count, so a recording started after a reply, or after the
+  // other form dictated, stops at what is really left.
   const optionsRef = useRef(options);
   useEffect(() => { optionsRef.current = options; });
-  // Mirrors the page's count so a recording started right after a reply, or
-  // after the other form dictated, stops at what is really left.
-  const remainingRef = useRef(options.remainingSeconds);
-  useEffect(() => { remainingRef.current = options.remainingSeconds; }, [options.remainingSeconds]);
-  // Bumped by discard(): anything started under an older session is ignored.
-  const sessionRef = useRef(0);
-  const streamRef = useRef<MediaStream | null>(null);
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const autoStopRef = useRef<number | null>(null);
-  const uploadRef = useRef<AbortController | null>(null);
-  const stopRef = useRef<Stop | null>(null);
-  const startedAtRef = useRef(0);
-
-  const releaseMic = useCallback(() => {
-    stopTracks(streamRef.current);
-    streamRef.current = null;
-  }, []);
-
-  const clearAutoStop = useCallback(() => {
-    if (autoStopRef.current !== null) window.clearTimeout(autoStopRef.current);
-    autoStopRef.current = null;
-  }, []);
+  const liveRef = useRef<Live>({
+    session: 0, stream: null, recorder: null, autoStop: null, upload: null, stop: null, startedAt: 0,
+  });
 
   const upload = useCallback(async (target: string, clip: Blob, stop: Stop, session: number) => {
+    const live = liveRef.current;
     setState({ kind: "transcribing", target });
     const controller = new AbortController();
-    uploadRef.current = controller;
+    live.upload = controller;
     const reply = await postClip(optionsRef.current, clip, stop.durationMs, controller.signal);
-    if (session !== sessionRef.current) return;
-    uploadRef.current = null;
-    const remaining = remainingAfter(reply);
-    if (remaining !== null) {
-      remainingRef.current = remaining;
-      optionsRef.current.onRemainingSeconds(remaining);
-    }
+    if (session !== live.session) return;
+    live.upload = null;
+    const reported = remainingAfter(reply);
+    if (reported !== null) optionsRef.current.onRemainingSeconds(reported);
+    const remaining = reported ?? optionsRef.current.remainingSeconds;
     setState(stateAfterReply(reply, {
-      target, clip, stop, limitReached: remainingRef.current <= 0, onText: optionsRef.current.onText,
+      target, clip, stop, limitReached: remaining <= 0, onText: optionsRef.current.onText,
     }));
   }, []);
 
   const retry = useCallback(() => {
     if (state.kind !== "failed") return;
-    void upload(state.target, state.clip, { durationMs: state.durationMs, notice: null }, sessionRef.current);
+    void upload(state.target, state.clip, { durationMs: state.durationMs, notice: null }, liveRef.current.session);
   }, [state, upload]);
 
   const stop = useCallback((notice: string | null) => {
-    clearAutoStop();
-    const recorder = recorderRef.current;
+    const live = liveRef.current;
+    clearAutoStop(live);
+    const recorder = live.recorder;
     if (!recorder || recorder.state === "inactive") return;
-    stopRef.current = { durationMs: Math.max(1, Date.now() - startedAtRef.current), notice };
+    live.stop = { durationMs: Math.max(1, Date.now() - live.startedAt), notice };
     recorder.stop();
-  }, [clearAutoStop]);
+  }, []);
 
   const start = useCallback(async (target: string) => {
-    const session = sessionRef.current;
+    const live = liveRef.current;
+    const session = live.session;
     if (micUnsupported()) {
       setState({ kind: "notice", target, message: DICTATION_MESSAGES.unsupported });
       return;
@@ -265,76 +283,71 @@ export function useDictationRecorder(options: {
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch (error) {
-      if (session === sessionRef.current) setState({ kind: "notice", target, message: micErrorMessage(error) });
+      if (session === live.session) setState({ kind: "notice", target, message: micErrorMessage(error) });
       return;
     }
-    if (session !== sessionRef.current) {
+    if (session !== live.session) {
       stopTracks(stream);
       return;
     }
-    streamRef.current = stream;
+    live.stream = stream;
     let recorder: MediaRecorder;
     try {
       recorder = new MediaRecorder(stream, recorderOptions());
     } catch {
-      releaseMic();
+      releaseMic(live);
       setState({ kind: "notice", target, message: DICTATION_MESSAGES.unsupported });
       return;
     }
-    recorderRef.current = recorder;
+    live.recorder = recorder;
     const chunks: Blob[] = [];
     recorder.ondataavailable = (event) => { if (event.data.size > 0) chunks.push(event.data); };
     recorder.onstop = () => {
-      releaseMic();
-      recorderRef.current = null;
-      const finished = stopRef.current;
-      stopRef.current = null;
-      if (session !== sessionRef.current || !finished) return;
+      releaseMic(live);
+      live.recorder = null;
+      const finished = live.stop;
+      live.stop = null;
+      if (session !== live.session || !finished) return;
       const clip = new Blob(chunks, { type: recorder.mimeType || chunks[0]?.type || "" });
       void upload(target, clip, finished, session);
     };
     recorder.start();
     const startedAt = Date.now();
-    startedAtRef.current = startedAt;
-    const stopAtSeconds = Math.min(MAX_CLIP_SECONDS, remainingRef.current);
+    live.startedAt = startedAt;
+    const stopAtSeconds = Math.min(MAX_CLIP_SECONDS, optionsRef.current.remainingSeconds);
     const stopAtMs = stopAtSeconds * 1000;
-    autoStopRef.current = window.setTimeout(() => stop(autoStopNotice(stopAtSeconds)), stopAtMs);
-    setNow(startedAt);
+    live.autoStop = window.setTimeout(() => stop(autoStopNotice(stopAtSeconds)), stopAtMs);
     setState({ kind: "recording", target, startedAt, stopAtMs });
-  }, [releaseMic, stop, upload]);
+  }, [stop, upload]);
 
   const discard = useCallback(() => {
-    sessionRef.current += 1;
-    clearAutoStop();
-    uploadRef.current?.abort();
-    uploadRef.current = null;
-    const recorder = recorderRef.current;
-    recorderRef.current = null;
-    stopRef.current = null;
+    const live = liveRef.current;
+    live.session += 1;
+    clearAutoStop(live);
+    live.upload?.abort();
+    live.upload = null;
+    const recorder = live.recorder;
+    live.recorder = null;
+    live.stop = null;
     if (recorder && recorder.state !== "inactive") {
       recorder.ondataavailable = null;
       recorder.onstop = null;
       recorder.stop();
     }
-    releaseMic();
+    releaseMic(live);
     setState({ kind: "idle" });
-  }, [clearAutoStop, releaseMic]);
+  }, []);
 
   const toggle = useCallback((target: string) => {
     if (state.kind === "recording" && state.target === target) {
       stop(null);
       return;
     }
-    if (dictationBusy(state) || remainingRef.current <= 0) return;
+    if (dictationBusy(state) || optionsRef.current.remainingSeconds <= 0) return;
     void start(target);
   }, [start, state, stop]);
 
-  const recording = state.kind === "recording";
-  useEffect(() => {
-    if (!recording) return;
-    const timer = window.setInterval(() => setNow(Date.now()), 250);
-    return () => window.clearInterval(timer);
-  }, [recording]);
+  const elapsedMs = useElapsedMs(state.kind === "recording" ? state.startedAt : null);
 
   // Leaving the page or unmounting the form drops the recording and any late text.
   useEffect(() => {
@@ -345,13 +358,7 @@ export function useDictationRecorder(options: {
     };
   }, [discard]);
 
-  return {
-    state: shownState(state, options.remainingSeconds),
-    elapsedMs: state.kind === "recording" ? Math.max(0, now - state.startedAt) : 0,
-    toggle,
-    retry,
-    discard,
-  };
+  return { state: shownState(state, options.remainingSeconds), elapsedMs, toggle, retry, discard };
 }
 
 export function dictationBusy(state: DictationState) {
