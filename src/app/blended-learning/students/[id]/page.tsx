@@ -7,6 +7,8 @@ import { Badge, Button, Card } from "@/components/ui";
 import { canBlendedLearning, isTeamLead, type BlendedLearningAccess } from "@/lib/blended-learning-access";
 import { requireBlendedLearningPage, requireNumericPageId } from "@/lib/blended-learning-guard";
 import { getDraftStatus } from "@/lib/blended-learning-drafts";
+import { getJeeForm } from "@/lib/blended-learning-jee-form";
+import type { JeeFormView } from "@/lib/blended-learning-jee-form-input";
 import { describeSession, formatCalendarDate, shortProgramName } from "@/lib/blended-learning-format";
 import {
   getMenteeDetail,
@@ -28,6 +30,7 @@ import { ConversationPhotos } from "./ConversationPhotos";
 import { ConversationRecording } from "./ConversationRecording";
 import { DraftStatus } from "./DraftStatus";
 import { FLAG_HISTORY } from "./flagRecipients";
+import { JeeFormCard } from "./JeeFormCard";
 import { SCREENER_QUESTIONS } from "./screenerQuestions";
 
 // One Mentee, in one column as wide as the log page's: name, profile line,
@@ -41,7 +44,9 @@ import { SCREENER_QUESTIONS } from "./screenerQuestions";
 // ticked done from the log page. Only Blended Learning Admins (read-only too)
 // can play a saved Call Recording or read its transcript. A Conversation
 // that used the Screener says so, with the Student's one Screener Feedback
-// on the Conversation that gave it.
+// on the Conversation that gave it. The JEE form card sits between the Open
+// Action Items and the history; the Mentor and (non-read-only) admins record
+// it there.
 
 type Conversation = Extract<HistoryEntry, { kind: "conversation" }>;
 type ProfileDocHistoryEntry = Extract<HistoryEntry, { kind: "profile_doc" }>;
@@ -403,6 +408,17 @@ function backLink(access: BlendedLearningAccess, mentee: MenteeDetail, from: Bac
   };
 }
 
+// The JEE form card's data. The page still renders without it (the card says
+// it can't be shown), e.g. on a database without the JEE form migration.
+async function loadJeeForm(access: BlendedLearningAccess, studentId: number): Promise<JeeFormView | null> {
+  try {
+    return await getJeeForm(access, studentId);
+  } catch (error) {
+    console.error("Failed to load the JEE form card:", error instanceof Error ? error.name : "unknown");
+    return null;
+  }
+}
+
 export default async function MenteeDetailPage({
   params,
   searchParams,
@@ -420,6 +436,7 @@ export default async function MenteeDetailPage({
   ]);
   // A supervised Mentor's Mentee is view only: no logging or draft changes.
   const canLog = !mentee.viewOnly && canBlendedLearning(access, "log");
+  const jeeForm = await loadJeeForm(access, mentee.studentId);
   const back = backLink(access, mentee, backOrigin(query?.from));
 
   return (
@@ -444,6 +461,11 @@ export default async function MenteeDetailPage({
         />
       )}
       {mentee.openActionItems.length > 0 && <OpenActionItems items={mentee.openActionItems} />}
+      <JeeFormCard
+        studentId={mentee.studentId}
+        form={jeeForm}
+        canRecord={!mentee.viewOnly && canBlendedLearning(access, "record_jee_form")}
+      />
       <History
         history={mentee.history}
         canPlayRecording={canBlendedLearning(access, "play_recording")}

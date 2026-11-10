@@ -19,7 +19,8 @@ export type BlendedLearningAction =
   | "play_recording"
   | "view_flags"
   | "view_mentors"
-  | "manage";
+  | "manage"
+  | "record_jee_form";
 
 export type BlendedLearningAccess = {
   // A Blended Learning Mentor sees and logs for their own Mentees; a Blended
@@ -119,7 +120,8 @@ export async function getBlendedLearningAccess(
 // team lead gets only their own and their reportees' cards (isTeamLead,
 // listMentorCards). Everyone sees flags: an
 // admin every flag, a Mentor only those on their own Students
-// (blended-learning-flags).
+// (blended-learning-flags). The JEE form card is recorded by the Mentor or a
+// Blended Learning Admin, never by a read-only account.
 export function canBlendedLearning(
   access: BlendedLearningAccess | null,
   action: BlendedLearningAction
@@ -127,6 +129,7 @@ export function canBlendedLearning(
   if (!access) return false;
   if (MUTATIONS.has(action)) return access.kind === "mentor" && !access.readOnly;
   if (action === "manage") return access.kind === "admin" && !access.readOnly;
+  if (action === "record_jee_form") return !access.readOnly;
   if (ADMIN_ONLY.has(action)) return access.kind === "admin";
   return true;
 }

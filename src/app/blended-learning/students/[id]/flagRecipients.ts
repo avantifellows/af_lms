@@ -1,3 +1,4 @@
+import type { FeedFlagRecipient } from "@/lib/blended-learning-flags";
 import type { FlagRecipient } from "@/lib/blended-learning-mentee-detail";
 
 // Flag Recipient labels, in display order, for the history chips; the log
@@ -7,6 +8,13 @@ export const FLAG_RECIPIENT: Record<FlagRecipient, string> = {
   physics: "Physics Teacher",
   chemistry: "Chemistry Teacher",
   maths: "Maths Teacher",
+};
+
+// The Flags feed's labels: the four above, and the JEE form card's flag for
+// the program team (raised when a Mentee's form is recorded as not filled).
+export const FEED_FLAG_RECIPIENT: Record<FeedFlagRecipient, string> = {
+  ...FLAG_RECIPIENT,
+  jee_form: "JEE form (program team)",
 };
 
 // The well-being lead, named on the log form as in the PRD.

@@ -9,6 +9,12 @@ import {
 } from "./blended-learning-access";
 import { contactNumbers, present, type FlagRecipient } from "./blended-learning-mentee-detail";
 
+// The feed also carries the JEE form card's flags for the program team
+// (`jee_form`), raised when a Mentee's form is recorded as not filled. They
+// have no Conversation: the Mentor, program and date come from the JEE form
+// update instead.
+export type FeedFlagRecipient = FlagRecipient | "jee_form";
+
 // The Flags feed (server-only): for a Blended Learning Admin every Mentor
 // Flag, for a Mentor only the flags on their own Students (an active
 // current-year Mapping to them) and on the Students of Mentors they supervise,
@@ -24,18 +30,26 @@ import { contactNumbers, present, type FlagRecipient } from "./blended-learning-
 // New for the whole visit even though "last seen" has moved on.
 
 const FLAGS_PAGE_SIZE = 50;
-export const FLAG_RECIPIENTS: readonly FlagRecipient[] = ["emotional_wellbeing", "physics", "chemistry", "maths"];
+export const FLAG_RECIPIENTS: readonly FeedFlagRecipient[] = [
+  "emotional_wellbeing",
+  "physics",
+  "chemistry",
+  "maths",
+  "jee_form",
+];
 
 export type FlagCard = {
   id: number;
-  recipient: FlagRecipient;
+  recipient: FeedFlagRecipient;
   comment: string | null;
   // Raised after the viewer's previous visit.
   isNew: boolean;
   // The Student still has an active current-year Mapping, so their page and
   // the Conversation's notes can be opened. A flag outlives its Mapping.
   inScope: boolean;
-  conversationId: number;
+  // Null for a JEE form flag, which has no Conversation (nor notes).
+  conversationId: number | null;
+  // The Conversation's date, or the IST date a JEE form flag was raised.
   occurredOn: string;
   hasNotes: boolean;
   mentorUserId: number;
@@ -61,7 +75,7 @@ export type FlagsPage = {
 
 export type FlagFilters = {
   mentorUserId?: number | null;
-  recipient?: FlagRecipient | null;
+  recipient?: FeedFlagRecipient | null;
   // The id of the last flag on the previous page.
   cursor?: number | null;
 };
@@ -94,11 +108,11 @@ export function parseFlagsCutoff(value: string | undefined): FlagsCutoff | null 
 
 type FlagRow = {
   id: number | string;
-  recipient: FlagRecipient;
+  recipient: FeedFlagRecipient;
   comment: string | null;
   is_new: boolean;
   in_scope: boolean;
-  conversation_id: number | string;
+  conversation_id: number | string | null;
   occurred_on: string;
   has_notes: boolean;
   mentor_user_id: number | string;
@@ -115,8 +129,14 @@ type FlagRow = {
   screener_url: string | null;
 };
 
+// A flag's Mentor and program: its Conversation's, or its JEE form update's
+// (`c` and `jee` are LEFT JOINed; exactly one matches).
+const FLAG_MENTOR_SQL = `COALESCE(c.mentor_user_id, jee.mentor_user_id)`;
+const FLAG_SOURCES_SQL = `LEFT JOIN blended_learning_conversations c ON c.id = flag.conversation_id
+       LEFT JOIN blended_learning_jee_form_updates jee ON jee.id = flag.jee_form_update_id`;
+
 const MENTOR_NAME_SQL = `COALESCE(NULLIF(TRIM(CONCAT_WS(' ', mentor.first_name, mentor.last_name)), ''),
-                     mentor.email, CONCAT('Mentor ', c.mentor_user_id))`;
+                     mentor.email, CONCAT('Mentor ', ${FLAG_MENTOR_SQL}))`;
 
 // The viewer's scope as query parameters: whether to narrow to some Mentors'
 // Students, and those Mentors (a Mentor's own id and the Mentors they
@@ -207,19 +227,21 @@ export async function listFlags(
                 SELECT 1 FROM blended_learning_mentor_mentee_mappings mapping
                 WHERE mapping.student_id = st.id AND ${activeBlendedMappingSql("mapping", "$6")}
               ) AS in_scope,
-              c.id AS conversation_id, c.occurred_on::text AS occurred_on,
+              c.id AS conversation_id,
+              COALESCE(c.occurred_on,
+                       ((flag.inserted_at AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Kolkata')::date)::text AS occurred_on,
               (c.notes_html IS NOT NULL) AS has_notes,
-              c.mentor_user_id, ${MENTOR_NAME_SQL} AS mentor_name,
+              ${FLAG_MENTOR_SQL} AS mentor_user_id, ${MENTOR_NAME_SQL} AS mentor_name,
               st.id AS student_id, account.first_name, account.last_name, account.gender,
               account.phone, account.whatsapp_phone,
               current_grade.number AS grade, program.name AS program_name,
               links.profile_doc_url, links.screener_url
        FROM blended_learning_mentor_flags flag
-       JOIN blended_learning_conversations c ON c.id = flag.conversation_id
+       ${FLAG_SOURCES_SQL}
        JOIN student st ON st.id = flag.student_id
        JOIN "user" account ON account.id = st.user_id
-       LEFT JOIN "user" mentor ON mentor.id = c.mentor_user_id
-       LEFT JOIN program ON program.id = c.program_id
+       LEFT JOIN "user" mentor ON mentor.id = ${FLAG_MENTOR_SQL}
+       LEFT JOIN program ON program.id = COALESCE(c.program_id, jee.program_id)
        LEFT JOIN LATERAL (
          SELECT grade.number
          FROM enrollment_record er
@@ -230,7 +252,7 @@ export async function listFlags(
        ) current_grade ON true
        LEFT JOIN blended_learning_student_links links ON links.student_id = st.id
        WHERE ${inViewerScopeSql("$7", "$8", "$6")}
-         AND ($2::bigint IS NULL OR c.mentor_user_id = $2::bigint)
+         AND ($2::bigint IS NULL OR ${FLAG_MENTOR_SQL} = $2::bigint)
          AND ($9::bigint IS NULL OR EXISTS (
                SELECT 1 FROM blended_learning_mentor_mentee_mappings current_mapping
                WHERE current_mapping.student_id = flag.student_id AND current_mapping.mentor_user_id = $9::bigint
@@ -263,7 +285,7 @@ export async function listFlags(
       comment: row.comment,
       isNew: row.is_new,
       inScope: row.in_scope,
-      conversationId: Number(row.conversation_id),
+      conversationId: row.conversation_id === null ? null : Number(row.conversation_id),
       occurredOn: row.occurred_on,
       hasNotes: row.has_notes,
       mentorUserId: Number(row.mentor_user_id),
@@ -282,20 +304,20 @@ export async function listFlags(
   };
 }
 
-// The Mentors who have Conversations with flags, A–Z, for the admins' Mentor
-// filter. A Mentor has none; a supervisor's lists themself and the Mentors
-// they supervise (listSupervisedMentors).
+// The Mentors with flags (on Conversations or JEE forms), A–Z, for the
+// admins' Mentor filter. A Mentor has none; a supervisor's lists themself and
+// the Mentors they supervise (listSupervisedMentors).
 export async function listFlagMentors(
   access: BlendedLearningAccess
 ): Promise<{ mentorUserId: number; name: string }[]> {
   if (access.kind !== "admin" || !canBlendedLearning(access, "view_flags")) return [];
   const rows = await query<{ mentor_user_id: number | string; mentor_name: string }>(
-    `SELECT DISTINCT c.mentor_user_id, ${MENTOR_NAME_SQL} AS mentor_name
+    `SELECT DISTINCT ${FLAG_MENTOR_SQL} AS mentor_user_id, ${MENTOR_NAME_SQL} AS mentor_name
      FROM blended_learning_mentor_flags flag
-     JOIN blended_learning_conversations c ON c.id = flag.conversation_id
-     LEFT JOIN "user" mentor ON mentor.id = c.mentor_user_id
+     ${FLAG_SOURCES_SQL}
+     LEFT JOIN "user" mentor ON mentor.id = ${FLAG_MENTOR_SQL}
      WHERE ${notBlendedDropoutSql("flag.student_id")}
-     ORDER BY mentor_name, c.mentor_user_id`
+     ORDER BY mentor_name, mentor_user_id`
   );
   return rows.map((row) => ({ mentorUserId: Number(row.mentor_user_id), name: row.mentor_name }));
 }
