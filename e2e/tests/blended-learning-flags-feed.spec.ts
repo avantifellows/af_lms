@@ -66,14 +66,16 @@ async function resetLastSeen(email: string) {
   );
 }
 
-// Flags other specs have raised on Mentor C's Mentees so far.
+// Flags other specs have raised on Mentor C's Mentees so far (in Conversations
+// or on the JEE form card).
 async function mentorCFlagCount(): Promise<number> {
   return withPool(async (pool) => {
     const result = await pool.query<{ count: number }>(
       `SELECT count(*)::int AS count
        FROM blended_learning_mentor_flags flag
-       JOIN blended_learning_conversations c ON c.id = flag.conversation_id
-       JOIN user_permission mentor ON mentor.user_id = c.mentor_user_id
+       LEFT JOIN blended_learning_conversations c ON c.id = flag.conversation_id
+       LEFT JOIN blended_learning_jee_form_updates jee ON jee.id = flag.jee_form_update_id
+       JOIN user_permission mentor ON mentor.user_id = COALESCE(c.mentor_user_id, jee.mentor_user_id)
        WHERE LOWER(mentor.email) = LOWER($1)`,
       [BLENDED_MENTOR_C.email]
     );

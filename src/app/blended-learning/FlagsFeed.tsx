@@ -1,13 +1,12 @@
 import { ArrowUpRight } from "lucide-react";
 import Link from "next/link";
 
-import type { FlagCard, FlagsPage } from "@/lib/blended-learning-flags";
+import type { FeedFlagRecipient, FlagCard, FlagsPage } from "@/lib/blended-learning-flags";
 import { formatCalendarDate, shortProgramName } from "@/lib/blended-learning-format";
-import type { FlagRecipient } from "@/lib/blended-learning-mentee-detail";
 
 import { FlagsFilters } from "./FlagsFilters";
 import { ConversationNotes } from "./students/[id]/ConversationNotes";
-import { FLAG_RECIPIENT } from "./students/[id]/flagRecipients";
+import { FEED_FLAG_RECIPIENT } from "./students/[id]/flagRecipients";
 
 // The Flags tab: a read-only feed of Mentor Flags, newest first, filtered
 // through the URL and applied as soon as a filter changes. An admin sees every
@@ -22,7 +21,7 @@ export type FlagsView = {
   // A Mentor's own feed: no Mentor filter or names.
   ownStudents: boolean;
   mentorUserId: number | null;
-  recipient: FlagRecipient | null;
+  recipient: FeedFlagRecipient | null;
   cursor: number | null;
   // The visit's cutoff as a URL value (flagsCutoffParam).
   since: string;
@@ -69,7 +68,7 @@ function FlagCardView({ flag, ownStudents }: { flag: FlagCard; ownStudents: bool
             <span className="rounded-full bg-accent px-2 py-0.5 text-xs font-bold text-text-on-accent">New</span>
           )}
           <span className="rounded-lg bg-danger-bg px-2.5 py-1 text-xs font-bold text-danger">
-            {FLAG_RECIPIENT[flag.recipient]}
+            {FEED_FLAG_RECIPIENT[flag.recipient]}
           </span>
         </div>
       </div>
@@ -103,7 +102,9 @@ function FlagCardView({ flag, ownStudents }: { flag: FlagCard; ownStudents: bool
           </a>
         )}
       </div>
-      {flag.hasNotes && flag.inScope && <ConversationNotes conversationId={flag.conversationId} label="Session Notes" />}
+      {flag.hasNotes && flag.inScope && flag.conversationId !== null && (
+        <ConversationNotes conversationId={flag.conversationId} label="Session Notes" />
+      )}
     </article>
   );
 }

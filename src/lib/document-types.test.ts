@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   DOCUMENT_TYPES,
+  documentTypeLabel,
   isValidDocumentType,
   labelFor,
 } from "./document-types";
@@ -39,5 +40,17 @@ describe("labelFor", () => {
     expect(labelFor("income_certificate")).toBe("Income Certificate");
     expect(labelFor("caste_certificate")).toBe("Caste Certificate");
     expect(labelFor("wise_research_consent")).toBe("WISE Research Consent");
+  });
+});
+
+describe("documentTypeLabel", () => {
+  it("labels picker types, the JEE form card's confirmation page, and shows anything else as stored", () => {
+    expect(documentTypeLabel("income_certificate")).toBe("Income Certificate");
+    expect(documentTypeLabel("jee_main_confirmation")).toBe("JEE Main confirmation page");
+    expect(documentTypeLabel("something_else")).toBe("something_else");
+  });
+
+  it("does not offer the confirmation page in the upload picker", () => {
+    expect(isValidDocumentType("jee_main_confirmation")).toBe(false);
   });
 });

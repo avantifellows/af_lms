@@ -53,7 +53,7 @@ describe("listFlags", () => {
 
     const page = await listFlags(ADMIN, { mentorUserId: 9001 }, { lastSeenAt: "2026-10-21T09:30:00" });
 
-    const [listSql, listParams] = mockQuery.mock.calls.find(([sql]) => /FROM blended_learning_mentor_flags flag\s+JOIN/.test(sql))!;
+    const [listSql, listParams] = mockQuery.mock.calls.find(([sql]) => /FROM blended_learning_mentor_flags flag\s+LEFT JOIN blended_learning_conversations/.test(sql))!;
     expect(listSql).toContain("flag.inserted_at > $1::timestamp");
     expect(listSql).not.toContain("blended_learning_flag_views");
     // An admin's feed is not narrowed to one Mentor's Students.
@@ -130,5 +130,47 @@ describe("a Mentor's flags", () => {
   it("offers a Mentor no Mentor filter, without querying other Mentors", async () => {
     expect(await listFlagMentors(MENTOR)).toEqual([]);
     expect(mockQuery).not.toHaveBeenCalled();
+  });
+});
+
+describe("JEE form flags in the feed", () => {
+  const JEE_ROW = {
+    ...FLAG_ROW,
+    id: 8,
+    recipient: "jee_form",
+    comment: "JEE Main 2027 form not filled: Not aware about the exam",
+    conversation_id: null,
+    occurred_on: "2026-11-10",
+    has_notes: false,
+  };
+
+  it("takes a JEE form flag's Mentor, program and date from its update, with no Conversation", async () => {
+    mockQuery.mockImplementation(async (sql: string) => (/count\(\*\)/.test(sql) ? [{ count: 1 }] : [JEE_ROW]));
+
+    const page = await listFlags(ADMIN, { mentorUserId: 9001, recipient: "jee_form" }, { lastSeenAt: null });
+
+    const [listSql, listParams] = mockQuery.mock.calls.find(([sql]) => /AS in_scope/.test(sql))!;
+    expect(listSql).toContain("LEFT JOIN blended_learning_jee_form_updates jee ON jee.id = flag.jee_form_update_id");
+    expect(listSql).toContain("COALESCE(c.mentor_user_id, jee.mentor_user_id) = $2::bigint");
+    expect(listSql).toContain("COALESCE(c.program_id, jee.program_id)");
+    expect(listSql).toMatch(/COALESCE\(c\.occurred_on,\s+\(\(flag\.inserted_at AT TIME ZONE 'UTC'\) AT TIME ZONE 'Asia\/Kolkata'\)::date\)/);
+    expect(listParams?.[2]).toBe("jee_form");
+    expect(page?.flags[0]).toMatchObject({
+      id: 8,
+      recipient: "jee_form",
+      conversationId: null,
+      occurredOn: "2026-11-10",
+      hasNotes: false,
+      mentorUserId: 9001,
+    });
+  });
+
+  it("lists Mentors with JEE form flags in the admin's Mentor filter", async () => {
+    mockQuery.mockResolvedValue([{ mentor_user_id: 9001, mentor_name: "Synthetic Mentor" }]);
+
+    expect(await listFlagMentors(ADMIN)).toEqual([{ mentorUserId: 9001, name: "Synthetic Mentor" }]);
+    const [sql] = mockQuery.mock.calls[0];
+    expect(sql).toContain("SELECT DISTINCT COALESCE(c.mentor_user_id, jee.mentor_user_id) AS mentor_user_id");
+    expect(sql).toContain("LEFT JOIN blended_learning_jee_form_updates jee");
   });
 });
