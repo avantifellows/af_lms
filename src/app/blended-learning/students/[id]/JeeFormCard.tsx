@@ -447,6 +447,40 @@ function SavedStatus({
   );
 }
 
+// The card's body for loaded data: the form (before anything is recorded, a
+// recorder sees the choice straight away) or what is saved, then history.
+function CardBody({ studentId, form, canRecord }: { studentId: number; form: JeeFormView; canRecord: boolean }) {
+  const router = useRouter();
+  const [changing, setChanging] = useState(false);
+  const { current } = form;
+  const editing = canRecord && (changing || current === null);
+
+  function saved() {
+    setChanging(false);
+    router.refresh();
+  }
+
+  if (editing) {
+    return (
+      <EditForm
+        // A fresh form each time it opens, from what is saved.
+        key={current?.id ?? "new"}
+        studentId={studentId}
+        initial={draftFrom(current)}
+        reminderOpen={form.reminderItems.some((item) => item.status === "open")}
+        onCancel={current ? () => setChanging(false) : null}
+        onSaved={saved}
+      />
+    );
+  }
+  return (
+    <>
+      <SavedStatus studentId={studentId} form={form} onChange={canRecord ? () => setChanging(true) : null} />
+      <EarlierUpdates updates={form.earlier} />
+    </>
+  );
+}
+
 export function JeeFormCard({
   studentId,
   form,
@@ -456,18 +490,7 @@ export function JeeFormCard({
   form: JeeFormView | null;
   canRecord: boolean;
 }) {
-  const router = useRouter();
   const titleId = useId();
-  const [changing, setChanging] = useState(false);
-  const current = form?.current ?? null;
-  // Before anything is recorded, a recorder sees the choice straight away.
-  const editing = canRecord && form !== null && (changing || current === null);
-
-  function saved() {
-    setChanging(false);
-    router.refresh();
-  }
-
   return (
     <section aria-labelledby={titleId}>
       <Card elevation="sm" className="space-y-4 p-4 sm:p-6">
@@ -475,28 +498,13 @@ export function JeeFormCard({
           <h2 id={titleId} className="text-lg font-bold text-text-primary">
             {JEE_FORM_EXAM.label} form
           </h2>
-          {form && <StatusBadge current={current} />}
+          {form && <StatusBadge current={form.current} />}
         </header>
-        {form === null ? (
-          <p className="text-sm text-text-secondary">The JEE form can&apos;t be shown right now.</p>
-        ) : editing ? (
-          <EditForm
-            // A fresh form each time it opens, from what is saved.
-            key={current?.id ?? "new"}
-            studentId={studentId}
-            initial={draftFrom(current)}
-            reminderOpen={form.reminderItems.some((item) => item.status === "open")}
-            onCancel={current ? () => setChanging(false) : null}
-            onSaved={saved}
-          />
+        {form ? (
+          <CardBody studentId={studentId} form={form} canRecord={canRecord} />
         ) : (
-          <SavedStatus
-            studentId={studentId}
-            form={form}
-            onChange={canRecord ? () => setChanging(true) : null}
-          />
+          <p className="text-sm text-text-secondary">The JEE form can&apos;t be shown right now.</p>
         )}
-        {form && !editing && <EarlierUpdates updates={form.earlier} />}
       </Card>
     </section>
   );
