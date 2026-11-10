@@ -1333,6 +1333,7 @@ export default async function RosterPage({
         nvsStreams={getDistinctNVSStreams(batches)}
         schoolUdise={schoolUdise}
         schoolCode={school.code}
+        examRecordsFailed={roster.examRecordsFailed}
       />
     </div>
   );
