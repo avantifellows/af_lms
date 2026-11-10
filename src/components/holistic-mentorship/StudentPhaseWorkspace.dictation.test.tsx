@@ -62,12 +62,17 @@ function installFakeMic() {
 
 // ---- Network boundary: the Dictation route and the Notes route ----
 
-type Deferred = { resolve: (response: Response) => void; promise: Promise<Response> };
+type Deferred = {
+  resolve: (response: Response) => void;
+  reject: (error: Error) => void;
+  promise: Promise<Response>;
+};
 
 function deferred(): Deferred {
   let resolve!: (response: Response) => void;
-  const promise = new Promise<Response>((done) => { resolve = done; });
-  return { resolve, promise };
+  let reject!: (error: Error) => void;
+  const promise = new Promise<Response>((done, fail) => { resolve = done; reject = fail; });
+  return { resolve, reject, promise };
 }
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
@@ -92,8 +97,17 @@ function stubNetwork() {
       pendingDictation.shift()!.resolve(json({ outcome: "ok", text, remainingSeconds }));
     });
   };
-  return { dictationCalls, notesCalls, transcribe };
+  const respond = async (body: unknown, status = 200) => {
+    await act(async () => { pendingDictation.shift()!.resolve(json(body, status)); });
+  };
+  const dropConnection = async () => {
+    await act(async () => { pendingDictation.shift()!.reject(new TypeError("Failed to fetch")); });
+  };
+  return { dictationCalls, notesCalls, transcribe, respond, dropConnection };
 }
+
+const bytesOf = async (form: FormData) =>
+  Array.from(new Uint8Array(await (form.get("audio") as Blob).arrayBuffer()));
 
 // ---- Fixtures ----
 
@@ -274,6 +288,7 @@ describe("StudentPhaseWorkspace Dictation", () => {
     expect(network.dictationCalls[0].body.get("duration_ms")).toBe("45000");
     await network.transcribe("Short one", 0);
     expect(screen.getByText("Recording stopped: today's Dictation time ran out.")).toBeInTheDocument();
+    expect(mic("What helped?")).toBeDisabled();
   });
 
   it("uses the remaining time the last transcription reported for the next recording", async () => {
@@ -432,6 +447,270 @@ describe("StudentPhaseWorkspace Dictation", () => {
     });
   });
 
+  describe("when Dictation can't produce text", () => {
+    const micError = (name: string) => {
+      const getUserMedia = vi.fn(async () => { throw new DOMException("mic", name); });
+      Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { getUserMedia } });
+    };
+
+    it("says the mic is blocked when permission is denied, keeps the box editable, and sends nothing", async () => {
+      const network = stubNetwork();
+      micError("NotAllowedError");
+      renderWorkspace(mentorDetail(draft({ 91: "Met parents" })));
+
+      await act(async () => fireEvent.click(mic("What helped?")));
+
+      expect(screen.getByText(/Microphone is blocked\. Allow microphone access for this site/))
+        .toHaveAttribute("aria-live", "polite");
+      expect(mic("What helped?")).toHaveAttribute("aria-pressed", "false");
+      fireEvent.change(box("What helped?"), { target: { value: "Met parents, typed instead" } });
+      expect(box("What helped?")).toHaveValue("Met parents, typed instead");
+      expect(network.dictationCalls).toHaveLength(0);
+    });
+
+    it("says no microphone was found when the device has none", async () => {
+      const network = stubNetwork();
+      micError("NotFoundError");
+      renderWorkspace(mentorDetail());
+
+      await act(async () => fireEvent.click(mic("What helped?")));
+
+      expect(screen.getByText(/^No microphone found\./)).toHaveAttribute("aria-live", "polite");
+      expect(box("What helped?")).toBeEnabled();
+      expect(network.dictationCalls).toHaveLength(0);
+    });
+
+    it("says this browser can't record when it has no MediaRecorder", async () => {
+      const network = stubNetwork();
+      const getUserMedia = installFakeMic();
+      vi.stubGlobal("MediaRecorder", undefined);
+      renderWorkspace(mentorDetail());
+
+      await act(async () => fireEvent.click(mic("What helped?")));
+
+      expect(screen.getByText(/^This browser can't record audio\./)).toHaveAttribute("aria-live", "polite");
+      expect(box("What helped?")).toBeEnabled();
+      expect(getUserMedia).not.toHaveBeenCalled();
+      expect(network.dictationCalls).toHaveLength(0);
+    });
+
+    it("says this browser can't record when it has no getUserMedia", async () => {
+      const network = stubNetwork();
+      Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: undefined });
+      renderWorkspace(mentorDetail());
+
+      await act(async () => fireEvent.click(mic("What helped?")));
+
+      expect(screen.getByText(/^This browser can't record audio\./)).toHaveAttribute("aria-live", "polite");
+      expect(network.dictationCalls).toHaveLength(0);
+    });
+  });
+
+  describe("Couldn't transcribe", () => {
+    it("shows a 502 as Couldn't transcribe, and Retry resends the same clip and duration", async () => {
+      const network = stubNetwork();
+      vi.useFakeTimers();
+      renderWorkspace(mentorDetail(draft({ 91: "Met parents" })));
+
+      await dictate("What helped?", 4);
+      await network.respond({ error: "Couldn't transcribe. Try again", remainingSeconds: 1_790 }, 502);
+
+      expect(screen.getByText("Couldn't transcribe. Try again")).toHaveAttribute("aria-live", "polite");
+      expect(box("What helped?")).toHaveValue("Met parents");
+      await act(async () => fireEvent.click(screen.getByRole("button", { name: "Retry" })));
+
+      expect(network.dictationCalls).toHaveLength(2);
+      const [first, retry] = network.dictationCalls;
+      expect(retry.body.get("duration_ms")).toBe("4000");
+      expect(retry.body.get("kind")).toBe("post_session");
+      expect(await bytesOf(retry.body)).toEqual(await bytesOf(first.body));
+      expect(await bytesOf(retry.body)).toEqual(Array.from(new TextEncoder().encode("spoken clip")));
+      expect(FakeMediaRecorder.instances).toHaveLength(1);
+
+      await network.transcribe("met the student");
+      expect(box("What helped?")).toHaveValue("Met parents met the student");
+      expect(screen.queryByText("Couldn't transcribe. Try again")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+    });
+
+    it("treats a dropped connection on upload the same as a 502", async () => {
+      const network = stubNetwork();
+      vi.useFakeTimers();
+      renderWorkspace(mentorDetail());
+
+      await dictate("What happens next?", 2);
+      await network.dropConnection();
+
+      expect(screen.getByText("Couldn't transcribe. Try again")).toHaveAttribute("aria-live", "polite");
+      await act(async () => fireEvent.click(screen.getByRole("button", { name: "Retry" })));
+      expect(network.dictationCalls).toHaveLength(2);
+      expect(network.dictationCalls[1].body.get("duration_ms")).toBe("2000");
+      expect(await bytesOf(network.dictationCalls[1].body)).toEqual(await bytesOf(network.dictationCalls[0].body));
+
+      await network.transcribe("Review in a week");
+      expect(box("What happens next?")).toHaveValue("Review in a week");
+      expect(screen.queryByText("Couldn't transcribe. Try again")).not.toBeInTheDocument();
+    });
+
+    async function failOnce(network: ReturnType<typeof stubNetwork>, question: string) {
+      await act(async () => fireEvent.click(mic(question)));
+      await act(async () => fireEvent.click(mic(question)));
+      await network.respond({ error: "Couldn't transcribe. Try again", remainingSeconds: 1_790 }, 502);
+      expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+    }
+
+    const noRetry = () => {
+      expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+      expect(screen.queryByText("Couldn't transcribe. Try again")).not.toBeInTheDocument();
+    };
+
+    it("a new recording in another box drops the failed clip and its message", async () => {
+      const network = stubNetwork();
+      renderWorkspace(mentorDetail());
+
+      await failOnce(network, "What helped?");
+      await act(async () => fireEvent.click(mic("What happens next?")));
+
+      expect(mic("What happens next?")).toHaveAttribute("aria-pressed", "true");
+      noRetry();
+      await act(async () => fireEvent.click(mic("What happens next?")));
+      await network.transcribe("Next steps");
+      noRetry();
+      expect(box("What helped?")).toHaveValue("");
+      expect(network.dictationCalls).toHaveLength(2);
+    });
+
+    it("Submit drops the failed clip, even when the Mentor backs out of submitting", async () => {
+      const network = stubNetwork();
+      vi.spyOn(window, "confirm").mockReturnValue(false);
+      renderWorkspace(mentorDetail(draft({ 91: "A plan", 92: "Review it" })));
+
+      await failOnce(network, "What helped?");
+      await act(async () => fireEvent.click(screen.getByRole("button", { name: "Submit Notes" })));
+
+      noRetry();
+      expect(network.dictationCalls).toHaveLength(1);
+    });
+
+    it("Save Changes drops the failed clip", async () => {
+      const network = stubNetwork();
+      vi.spyOn(window, "confirm").mockReturnValue(false);
+      renderWorkspace(mentorDetail(submitted({ 91: "First answer", 92: "Then this" })));
+
+      fireEvent.click(screen.getByRole("button", { name: "Edit Notes" }));
+      await failOnce(network, "What helped?");
+      await act(async () => fireEvent.click(screen.getByRole("button", { name: "Save Changes" })));
+
+      noRetry();
+      expect(network.dictationCalls).toHaveLength(1);
+    });
+
+    it("Cancel in Edit drops the failed clip", async () => {
+      const network = stubNetwork();
+      renderWorkspace(mentorDetail(submitted({ 91: "First answer", 92: "Then this" })));
+
+      fireEvent.click(screen.getByRole("button", { name: "Edit Notes" }));
+      await failOnce(network, "What helped?");
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+      fireEvent.click(screen.getByRole("button", { name: "Edit Notes" }));
+
+      noRetry();
+      expect(network.dictationCalls).toHaveLength(1);
+    });
+
+    it("pagehide drops the failed clip", async () => {
+      const network = stubNetwork();
+      renderWorkspace(mentorDetail());
+
+      await failOnce(network, "What helped?");
+      await act(async () => { window.dispatchEvent(new Event("pagehide")); });
+
+      noRetry();
+      expect(mic("What helped?")).toBeEnabled();
+    });
+  });
+
+  it("says Didn't catch anything when nothing was heard, adds nothing, and leaves the mic ready", async () => {
+    const network = stubNetwork();
+    vi.useFakeTimers();
+    renderWorkspace(mentorDetail(draft({ 91: "Met parents" })));
+
+    await dictate("What helped?");
+    await network.respond({ outcome: "nothing_heard", remainingSeconds: 1_797 });
+
+    expect(screen.getByText(/^Didn't catch anything\. Try speaking closer to the mic or a little louder\./))
+      .toHaveAttribute("aria-live", "polite");
+    expect(box("What helped?")).toHaveValue("Met parents");
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+    expect(mic("What helped?")).toBeEnabled();
+    expect(mic("What happens next?")).toBeEnabled();
+    await act(async () => fireEvent.click(mic("What helped?")));
+    expect(mic("What helped?")).toHaveAttribute("aria-pressed", "true");
+  });
+
+  describe("daily limit", () => {
+    const LIMIT = "You've used today's 30 minutes of Dictation. You can keep typing.";
+
+    it("shows the limit message after a 429 daily_limit and stops every mic accepting recordings", async () => {
+      const network = stubNetwork();
+      vi.useFakeTimers();
+      renderWorkspace(mentorDetail(draft({ 91: "Met parents" })), { enabled: true, remainingSeconds: 10 });
+
+      await dictate("What helped?", 5);
+      await network.respond({ error: "You've used today's Dictation time", code: "daily_limit" }, 429);
+
+      const messages = screen.getAllByText(LIMIT);
+      expect(messages.some((message) => message.closest("[aria-live='polite']"))).toBe(true);
+      expect(mic("What helped?")).toBeDisabled();
+      expect(mic("What happens next?")).toBeDisabled();
+      expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+      expect(box("What helped?")).toHaveValue("Met parents");
+      fireEvent.change(box("What helped?"), { target: { value: "Met parents. Typed on." } });
+      expect(box("What helped?")).toHaveValue("Met parents. Typed on.");
+    });
+
+    it("shows mics in the limit state from the start when the page loads with no time left", async () => {
+      const network = stubNetwork();
+      renderWorkspace(mentorDetail(), { enabled: true, remainingSeconds: 0 });
+
+      expect(mic("What helped?")).toBeDisabled();
+      expect(mic("What happens next?")).toBeDisabled();
+      expect(screen.getAllByText(LIMIT)).toHaveLength(2);
+      await act(async () => fireEvent.click(mic("What helped?")));
+      expect(network.dictationCalls).toHaveLength(0);
+      expect(box("What helped?")).toBeEnabled();
+    });
+
+    it("keeps mics in the limit state after Cancel in Edit or pagehide", async () => {
+      stubNetwork();
+      renderWorkspace(mentorDetail(submitted({ 91: "First answer", 92: "Then this" })),
+        { enabled: true, remainingSeconds: 0 });
+
+      fireEvent.click(screen.getByRole("button", { name: "Edit Notes" }));
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+      fireEvent.click(screen.getByRole("button", { name: "Edit Notes" }));
+      expect(mic("What helped?")).toBeDisabled();
+      await act(async () => { window.dispatchEvent(new Event("pagehide")); });
+
+      expect(mic("What helped?")).toBeDisabled();
+      expect(screen.getAllByText(LIMIT)).toHaveLength(2);
+    });
+
+    it("adds the words and then shows the limit when a transcription reports no time left", async () => {
+      const network = stubNetwork();
+      vi.useFakeTimers();
+      renderWorkspace(mentorDetail());
+
+      await dictate("What helped?");
+      await network.transcribe("Last words today", 0);
+
+      expect(box("What helped?")).toHaveValue("Last words today");
+      expect(mic("What helped?")).toBeDisabled();
+      expect(mic("What happens next?")).toBeDisabled();
+      expect(screen.getAllByText(LIMIT)).toHaveLength(2);
+    });
+  });
+
   it("refuses words that would push the answer past 10,000 characters and keeps the answer", async () => {
     const network = stubNetwork();
     vi.useFakeTimers();
@@ -443,5 +722,7 @@ describe("StudentPhaseWorkspace Dictation", () => {
     expect(box("What helped?")).toHaveValue("a".repeat(9_995));
     expect(screen.getByText("Not added: the answer would go over 10,000 characters."))
       .toHaveAttribute("aria-live", "polite");
+    await act(async () => vi.advanceTimersByTimeAsync(2_000));
+    expect(network.notesCalls).toHaveLength(0);
   });
 });

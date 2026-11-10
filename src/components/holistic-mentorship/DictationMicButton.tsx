@@ -1,6 +1,6 @@
 import { Mic, Square } from "lucide-react";
 
-import { dictationBusy, type DictationRecorder } from "./useDictationRecorder";
+import { DICTATION_MESSAGES, dictationBusy, type DictationRecorder } from "./useDictationRecorder";
 
 function formatElapsed(ms: number) {
   const seconds = Math.floor(ms / 1000);
@@ -18,7 +18,7 @@ export function DictationMicButton({ question, target, recorder, disabled = fals
 }) {
   const { state } = recorder;
   const recording = state.kind === "recording" && state.target === target;
-  const blocked = disabled || (dictationBusy(state) && !recording);
+  const blocked = disabled || state.kind === "unavailable" || (dictationBusy(state) && !recording);
   return <div className="flex flex-wrap items-center gap-2">
     <button type="button" aria-label={`Dictate: ${question}`} aria-pressed={recording}
       disabled={blocked} onClick={() => recorder.toggle(target)}
@@ -38,13 +38,35 @@ export function DictationMicButton({ question, target, recorder, disabled = fals
   </div>;
 }
 
+function statusMessage(state: DictationRecorder["state"]) {
+  switch (state.kind) {
+    case "transcribing": return "Transcribing…";
+    case "failed": return DICTATION_MESSAGES.failed;
+    case "notice": return state.message;
+    default: return "";
+  }
+}
+
 // The box's Dictation messages, in a polite live region that is always present
-// so screen readers announce each change.
+// so screen readers announce each change. A failed clip offers Retry, which
+// resends the same audio without re-recording.
 export function DictationStatus({ target, recorder }: { target: string; recorder: DictationRecorder }) {
   const { state } = recorder;
   const mine = "target" in state && state.target === target;
-  const message = !mine ? "" : state.kind === "transcribing"
-    ? "Transcribing…"
-    : state.kind === "notice" ? state.message : "";
-  return <p aria-live="polite" className="text-xs text-text-muted">{message}</p>;
+  const limitHere = mine && state.kind === "unavailable";
+  return <div className="flex flex-wrap items-center gap-2">
+    <p aria-live="polite" className="text-xs text-text-muted">
+      {limitHere
+        ? <>{state.note && <><span>{state.note}</span>{" "}</>}<span>{DICTATION_MESSAGES.dailyLimit}</span></>
+        : mine ? statusMessage(state) : ""}
+    </p>
+    {/* Every other box shows the limit too, without announcing it again. */}
+    {state.kind === "unavailable" && !mine && <p className="text-xs text-text-muted">
+      {DICTATION_MESSAGES.dailyLimit}
+    </p>}
+    {mine && state.kind === "failed" && <button type="button" onClick={recorder.retry}
+      className="inline-flex min-h-9 items-center rounded-md border border-border bg-bg-card px-2.5 text-xs font-semibold text-text-secondary hover:border-accent hover:text-accent">
+      Retry
+    </button>}
+  </div>;
 }
