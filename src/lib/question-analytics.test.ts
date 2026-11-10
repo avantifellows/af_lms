@@ -7,6 +7,7 @@ vi.mock("@/lib/bigquery", () => ({
   FACT_QUESTION_LEVEL_TABLE: "`fact_question`",
   DIM_STUDENT_TABLE: "`dim_student`",
   SUBMITTED_ONLY: "AND has_quiz_ended IS NOT FALSE",
+  SESSION_PARTITION: "hashed_session_id = MOD(ABS(FARM_FINGERPRINT(@sessionId)), 4000) + 1",
 }));
 
 import {
