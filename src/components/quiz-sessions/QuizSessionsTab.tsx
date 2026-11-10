@@ -46,6 +46,7 @@ interface EditQuizSessionValues {
   showScores: boolean;
   shuffle: boolean;
   gurukulFormatType: string;
+  isRetest: boolean;
 }
 
 interface FeedbackToast {
@@ -775,7 +776,10 @@ export default function QuizSessionsTab({
                     } ${highlightedSessionId === session.id ? "bg-success-bg" : ""}`}
                   >
                     <td className="px-4 py-4 text-sm">
-                      <div className="font-semibold text-text-primary">{session.name}</div>
+                      <div className="font-semibold text-text-primary">
+                        {session.name}
+                        {getMetaBoolean(session.meta_data, "is_retest") ? <RetestBadge /> : null}
+                      </div>
                       {testCode ? (
                         <div className="mt-1 font-mono text-xs text-text-secondary">
                           {testCode}
@@ -1027,6 +1031,9 @@ function QuizSessionCreateModal({
   const [showScores, setShowScores] = useState(true);
   const [shuffle, setShuffle] = useState(false);
   const [gurukulFormatType, setGurukulFormatType] = useState("both");
+  // Unanswered until the creator picks: no default, so every session says explicitly
+  // whether it is a retest (the warehouse keeps retests out of the AL).
+  const [isRetest, setIsRetest] = useState<boolean | null>(null);
   const [startTime, setStartTime] = useState(() => {
     const now = new Date();
     return toDateTimeLocalValue(now);
@@ -1493,6 +1500,10 @@ function QuizSessionCreateModal({
       }
     }
 
+    if (isRetest === null) {
+      return "Say whether students have already taken this paper (retest or first sitting).";
+    }
+
     if (timingMode === "schedule") {
       const start = new Date(startTime);
       const end = new Date(endTime);
@@ -1550,6 +1561,7 @@ function QuizSessionCreateModal({
           shuffle,
           gurukulFormatType: getGurukulFormatForShuffle(gurukulFormatType, shuffle),
           langCode: selectedCmsLangCode,
+          isRetest,
           startTime: computedStart.toISOString(),
           endTime: computedEnd.toISOString(),
         };
@@ -1589,6 +1601,7 @@ function QuizSessionCreateModal({
         showScores,
         shuffle,
         gurukulFormatType: getGurukulFormatForShuffle(gurukulFormatType, shuffle),
+        isRetest,
         startTime: computedStart.toISOString(),
         endTime: computedEnd.toISOString(),
       };
@@ -2121,6 +2134,11 @@ function QuizSessionCreateModal({
               {!duplicateGate && (
               <SectionCard title="3. When And How">
                 <div className="space-y-4">
+                  <RetestQuestion
+                    value={isRetest}
+                    ranBefore={batchSessions.length > 0}
+                    onChange={setIsRetest}
+                  />
                   <div className="grid gap-3 md:grid-cols-2">
                     <button
                       type="button"
@@ -2310,6 +2328,68 @@ function QuizSessionCreateModal({
         </div>
       </div>
     </div>
+  );
+}
+
+function RetestBadge() {
+  return (
+    <span
+      className="ml-2 inline-block rounded bg-bg-card-alt px-1.5 py-0.5 align-middle text-[10px] font-semibold uppercase tracking-wide text-text-secondary"
+      title="Retest: students already took this paper. Not counted in the Academic Level."
+    >
+      Retest
+    </span>
+  );
+}
+
+const RETEST_OPTIONS: { value: boolean; label: string; hint: string }[] = [
+  { value: false, label: "No, first time", hint: "Scores count toward the Academic Level." },
+  {
+    value: true,
+    label: "Yes, this is a retest",
+    hint: "Scores are shown but not counted in the Academic Level, for anyone in this session.",
+  },
+];
+
+function RetestQuestion({
+  value,
+  ranBefore,
+  onChange,
+}: {
+  value: boolean | null;
+  ranBefore: boolean;
+  onChange: (value: boolean) => void;
+}) {
+  return (
+    <fieldset>
+      <legend className="mb-2 text-xs font-bold uppercase tracking-wide text-text-muted">
+        Have these students already taken this paper?
+      </legend>
+      {ranBefore ? (
+        <p className="mb-2 text-sm text-warning-text">
+          This paper already ran for these batches. If students are taking it again, choose Yes.
+        </p>
+      ) : null}
+      <div className="grid gap-3 md:grid-cols-2" role="radiogroup">
+        {RETEST_OPTIONS.map((option) => (
+          <button
+            key={option.label}
+            type="button"
+            role="radio"
+            aria-checked={value === option.value}
+            onClick={() => onChange(option.value)}
+            className={`rounded-lg border px-4 py-3 text-left shadow-sm transition-colors ${
+              value === option.value
+                ? "border-border-accent bg-success-bg"
+                : "border-border bg-bg-card hover:bg-hover-bg"
+            }`}
+          >
+            <div className="text-sm font-semibold text-text-primary">{option.label}</div>
+            <div className="mt-1 text-sm text-text-secondary">{option.hint}</div>
+          </button>
+        ))}
+      </div>
+    </fieldset>
   );
 }
 
@@ -2504,6 +2584,7 @@ function QuizSessionEditModal({
   );
   const initialShuffle = getMetaBoolean(session.meta_data, "shuffle") ?? false;
   const [shuffle, setShuffle] = useState(initialShuffle);
+  const [isRetest, setIsRetest] = useState(getMetaBoolean(session.meta_data, "is_retest") ?? false);
   const [gurukulFormatType, setGurukulFormatType] = useState(
     getGurukulFormatForShuffle(
       getMetaString(session.meta_data, "gurukul_format_type") || "both",
@@ -2562,6 +2643,7 @@ function QuizSessionEditModal({
       showScores,
       shuffle,
       gurukulFormatType: getGurukulFormatForShuffle(gurukulFormatType, shuffle),
+      isRetest,
     };
 
     try {
@@ -2714,6 +2796,15 @@ function QuizSessionEditModal({
                         className="h-4 w-4 accent-accent"
                       />
                       Shuffle question order
+                    </label>
+                    <label className="flex items-center gap-2 text-sm text-text-primary">
+                      <input
+                        type="checkbox"
+                        checked={isRetest}
+                        onChange={(event) => setIsRetest(event.target.checked)}
+                        className="h-4 w-4 accent-accent"
+                      />
+                      Retest: students already took this paper (not counted in the Academic Level)
                     </label>
 
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
@@ -2894,6 +2985,10 @@ function QuizSessionDetailsModal({
                     value={cmsQuizLanguageLabel(getMetaString(session.meta_data, "lang_code"))}
                   />
                 ) : null}
+                <InfoRow
+                  label="Retest"
+                  value={getMetaBoolean(session.meta_data, "is_retest") ? "Yes, not counted in the Academic Level" : "No"}
+                />
               </div>
             </SectionCard>
 

@@ -56,6 +56,8 @@ interface CreateQuizSessionBody {
   gurukulFormatType?: string;
   startTime?: string;
   endTime?: string;
+  // Have these students already sat this paper? Required; stored as meta_data.is_retest.
+  isRetest?: boolean;
 }
 
 function getDefaultSessionName(baseName: string): string {
@@ -327,6 +329,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
+  if (typeof body.isRetest !== "boolean") {
+    return NextResponse.json({ error: "Say whether this is a retest (isRetest true or false)" }, { status: 400 });
+  }
+
   if (!body.stream) {
     return NextResponse.json(
       { error: "stream is required" },
@@ -467,6 +473,7 @@ export async function POST(request: NextRequest) {
       show_answers: body.showAnswers ?? true,
       show_scores: body.showScores ?? true,
       shuffle,
+      is_retest: body.isRetest,
       next_step_url: "",
       next_step_text: "",
       single_page_mode: false,

@@ -31,6 +31,15 @@ Sessions built from the new CMS (`meta_data.cms_source === "nex-gen-cms"`, `CMS_
 SNS → etl-data-flow `sessionCreator` Lambda. Legacy sheet-driven sessions still go through
 that Lambda, so **both paths are live** and must stay at feature parity.
 
+**Retest flag (`meta_data.is_retest`, Nov 2026).** Both create routes (CMS and legacy template)
+require `isRetest` (boolean) and store it; the create form asks "Have these students already
+taken this paper?" with no default, hinting Yes when the earlier-session check found the paper
+already ran for the chosen batches. The Edit dialog toggles it (session only, no quiz-doc
+field). Session Manager (quiz-creator) asks the same question. The warehouse reads it as
+`dim_session.session_is_retest` to keep retest sessions out of the Academic Level for everyone
+in them, including students who sat only the retest. sessionCreator's `db_id` path updates
+`meta_data` key by key, so the flag survives it; quiz-creator edits spread `meta_data`.
+
 **Test types the picker offers** (`CMS_TEST_TYPES` in `src/lib/cms-tests.ts`): `chapter_test`
 (Exam track → Grade → Subject → Chapter), and `major_test` / `full_syllabus_test` (straight off
 Exam track + Grade). The list route forwards the type to the CMS as `testtype-dropdown` and
