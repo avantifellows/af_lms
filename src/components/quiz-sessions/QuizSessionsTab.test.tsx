@@ -339,6 +339,26 @@ describe("QuizSessionsTab", () => {
     expect(screen.getByText("NEET Major 1")).toBeInTheDocument();
   });
 
+  it("lists full syllabus tests straight off exam track and grade", async () => {
+    const user = userEvent.setup();
+
+    render(<QuizSessionsTab schoolId="school-1" canEdit />);
+
+    await user.click(await screen.findByRole("button", { name: "Create Quiz Session" }));
+    await user.click(screen.getByRole("button", { name: "New CMS Test" }));
+    await user.selectOptions(screen.getByDisplayValue("Chapter Test"), "full_syllabus_test");
+    await user.selectOptions(screen.getByDisplayValue("Select exam track"), "neet");
+    await user.selectOptions(screen.getByDisplayValue("Select grade"), "12");
+
+    expect(await screen.findByText("NEET Major 1")).toBeInTheDocument();
+    expect(screen.queryByDisplayValue("Select chapter")).not.toBeInTheDocument();
+    expect(
+      vi.mocked(fetch).mock.calls.some(([url]) =>
+        String(url).includes("test_type=full_syllabus_test")
+      )
+    ).toBe(true);
+  });
+
   it("offers a quiz language for a CMS test with a translation", async () => {
     const user = userEvent.setup();
 
