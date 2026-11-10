@@ -446,6 +446,15 @@ test.describe("Holistic Mentorship release workflows", () => {
     await holisticTeacherPage.getByRole("button", { name: "Assign to me (1)" }).click();
     await expect((await assignment).status()).toBe(200);
 
+    // Follow-up Notes can't be deleted, so each attempt tags its own answers.
+    const token = String(Date.now());
+    await holisticTeacherPage.addInitScript(installFakeMic);
+    const clips: string[] = [];
+    // The dictation route is faked: the e2e server never calls ElevenLabs.
+    await holisticTeacherPage.route("**/dictation?**", async (route) => {
+      clips.push(route.request().postDataBuffer()?.toString("latin1") ?? "");
+      await route.fulfill({ json: { outcome: "ok", text: `dictated follow-up ${token}`, remainingSeconds: 1_790 } });
+    });
     await holisticTeacherPage.goto(studentPhaseUrl(fixture.draftStudentId, fixture.activeGrade11PhaseId));
     // A textbox: with Dictation on, its mic button's label names the Question too.
     const notes = holisticTeacherPage.getByRole("textbox", { name: "What support will help next?" });
@@ -491,8 +500,6 @@ test.describe("Holistic Mentorship release workflows", () => {
     await expect((await correction).status()).toBe(200);
     await expect(holisticTeacherPage.getByText("Submitted Notes updated.")).toBeVisible();
 
-    // Follow-up Notes can't be deleted, so each attempt tags its own answers.
-    const token = String(Date.now());
     await expect(addFollowUp).toBeEnabled();
     await addFollowUpNote(holisticTeacherPage, {
       "What challenges did the student talk about?": `Synthetic follow-up challenge ${token}`,
@@ -509,6 +516,32 @@ test.describe("Holistic Mentorship release workflows", () => {
     ]);
     await expect(cards.nth(1)).toContainText(`Synthetic follow-up challenge ${token}`);
     await expect(cards.nth(1).locator("h4")).toHaveText(["What challenges did the student talk about?"]);
+
+    // The Mentor dictates into one Follow-up box and saves the note.
+    await addFollowUp.click();
+    const dialog = holisticTeacherPage.getByRole("dialog", { name: "Add follow-up notes" });
+    const planBox = dialog.getByRole("textbox", {
+      name: "Was the student able to follow the action plan shared previously?",
+    });
+    await planBox.fill("Partly.");
+    const mic = dialog.getByRole("button", {
+      name: "Dictate: Was the student able to follow the action plan shared previously?",
+    });
+    await mic.click();
+    await expect(mic).toHaveAttribute("aria-pressed", "true");
+    await expect(dialog.getByText(/^Recording 0:0[1-9]$/)).toBeVisible();
+    await mic.click();
+    await expect(planBox).toHaveValue(`Partly. dictated follow-up ${token}`);
+    expect(clips).toHaveLength(1);
+    expect(clips[0]).toContain('name="kind"\r\n\r\nfollow_up');
+    const saved = holisticTeacherPage.waitForResponse((response) =>
+      response.url().includes("/follow-up-notes?") && response.request().method() === "POST"
+    );
+    await dialog.getByRole("button", { name: "Save" }).click();
+    expect((await saved).status()).toBe(201);
+    await expect(dialog).toBeHidden();
+    await expect(cards.nth(0)).toContainText(`Partly. dictated follow-up ${token}`);
+    await expect(cards.nth(0).getByRole("button", { name: /^Dictate/ })).toHaveCount(0);
   });
 
   test("Mentor captures Challenge Categories above matching Questions and on Edit notes", async ({

@@ -205,7 +205,11 @@ function notesApiUrl(props: NotesEditorProps) {
   })}`;
 }
 
-function dictationApiUrl(props: NotesEditorProps) {
+type DictationRouteScope = Pick<NotesEditorProps, "studentId" | "phaseId" | "schoolCode" | "academicYear" | "programId">;
+
+const DICTATION_TOO_LONG = "Not added: the answer would go over 10,000 characters.";
+
+function dictationApiUrl(props: DictationRouteScope) {
   return `/api/holistic-mentorship/students/${props.studentId}/phases/${props.phaseId}/dictation?${
     new URLSearchParams({
       school_code: props.schoolCode,
@@ -647,7 +651,7 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
   const applyDictation = (target: string, text: string) => {
     const questionId = Number(target);
     const appended = appendDictation(value.answers[questionId] ?? "", text);
-    if (!appended.ok) return "Not added: the answer would go over 10,000 characters.";
+    if (!appended.ok) return DICTATION_TOO_LONG;
     updateAnswer(questionId, appended.value);
     return null;
   };
@@ -1385,7 +1389,8 @@ function SelectedPhaseContent({ phase, selectedPhase, studentId, readOnly, schoo
       onSubmitted={() => onSubmitted(phase.phaseId)} />
     <MentorFollowUpNotes key={`${phase.phaseId}-${phase.mappingId}`} phase={phase} apiUrl={`/api/holistic-mentorship/students/${studentId}/phases/${phase.phaseId}/follow-up-notes?${new URLSearchParams(
       { school_code: schoolCode, academic_year: academicYear, program_id: String(programId) }
-    )}`} />
+    )}`} dictation={dictation} dictationUrl={dictationApiUrl(
+      { studentId, phaseId: phase.phaseId, schoolCode, academicYear, programId })} />
   </section>;
 }
 
@@ -1725,7 +1730,12 @@ const FOLLOW_UP_ANSWER_TOO_LONG =
 const FOLLOW_UP_MAYBE_SAVED =
   "This note may have saved. Check the Follow-up Notes list before trying again.";
 
-function MentorFollowUpNotes({ phase, apiUrl }: { phase: OpenSelectedPhase; apiUrl: string }) {
+function MentorFollowUpNotes({ phase, apiUrl, dictation, dictationUrl }: {
+  phase: OpenSelectedPhase;
+  apiUrl: string;
+  dictation: DictationAvailability;
+  dictationUrl: string;
+}) {
   const hintId = useId();
   const [open, setOpen] = useState(false);
   const canAdd = phase.progress === "completed";
@@ -1735,13 +1745,18 @@ function MentorFollowUpNotes({ phase, apiUrl }: { phase: OpenSelectedPhase; apiU
       <Button type="button" variant="secondary" size="sm" disabled={!canAdd}
         aria-describedby={canAdd ? undefined : hintId} onClick={() => setOpen(true)}>Add notes</Button>
     </div>} />
-    <AddFollowUpNoteModal open={open} apiUrl={apiUrl} onClose={() => setOpen(false)} />
+    <AddFollowUpNoteModal open={open} apiUrl={apiUrl} dictation={dictation} dictationUrl={dictationUrl}
+      onClose={() => setOpen(false)} />
   </>;
 }
 
-function AddFollowUpNoteModal({ open, apiUrl, onClose }: {
+// The modal owns its own Dictation recorder; closing it, saving, or leaving
+// the page drops any recording and ignores a transcription still in flight.
+function AddFollowUpNoteModal({ open, apiUrl, dictation, dictationUrl, onClose }: {
   open: boolean;
   apiUrl: string;
+  dictation: DictationAvailability;
+  dictationUrl: string;
   onClose: () => void;
 }) {
   const router = useRouter();
@@ -1753,8 +1768,24 @@ function AddFollowUpNoteModal({ open, apiUrl, onClose }: {
   const hasAnswer = Object.values(draft).some((answer) => answer.trim());
   const isTooLong = (answer: string) => answer.length > HOLISTIC_ANSWER_MAX_LENGTH;
   const hasTooLongAnswer = Object.values(draft).some(isTooLong);
+  // The words land at the end of the box as it is when they arrive, through
+  // the same setDraft path typing uses.
+  const applyDictation = (target: string, text: string) => {
+    const key = target as HolisticFollowUpQuestionKey;
+    const appended = appendDictation(draft[key], text);
+    if (!appended.ok) return DICTATION_TOO_LONG;
+    setDraft((current) => ({ ...current, [key]: appended.value }));
+    return null;
+  };
+  const recorder = useDictationRecorder({
+    url: dictationUrl,
+    kind: "follow_up",
+    remainingSeconds: dictation.remainingSeconds,
+    onText: applyDictation,
+  });
 
   function close() {
+    recorder.discard();
     setDraft(EMPTY_FOLLOW_UP_DRAFT);
     setError("");
     onClose();
@@ -1762,11 +1793,13 @@ function AddFollowUpNoteModal({ open, apiUrl, onClose }: {
 
   function requestClose() {
     if (saving) return;
+    recorder.discard();
     if (Object.values(draft).some(Boolean) && !window.confirm("Discard this follow-up note?")) return;
     close();
   }
 
   async function save() {
+    recorder.discard();
     setError("");
     setSaving(true);
     const response = await fetch(apiUrl, {
@@ -1812,6 +1845,10 @@ function AddFollowUpNoteModal({ open, apiUrl, onClose }: {
           {tooLong && <p id={`${fieldId}-${key}-error`} className="mt-1 text-sm text-danger">
             {FOLLOW_UP_ANSWER_TOO_LONG}
           </p>}
+          {dictation.enabled && <div className="mt-1 space-y-1">
+            <DictationMicButton question={text} target={key} recorder={recorder} disabled={saving} />
+            <DictationStatus target={key} recorder={recorder} />
+          </div>}
         </div>;
       })}
     </div>

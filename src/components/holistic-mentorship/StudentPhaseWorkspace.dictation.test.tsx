@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { mockPush, mockRefresh } = vi.hoisted(() => ({
@@ -724,5 +724,378 @@ describe("StudentPhaseWorkspace Dictation", () => {
       .toHaveAttribute("aria-live", "polite");
     await act(async () => vi.advanceTimersByTimeAsync(2_000));
     expect(network.notesCalls).toHaveLength(0);
+  });
+});
+
+describe("Follow-up Note Dictation", () => {
+  const CHALLENGES = "What challenges did the student talk about?";
+  const SOLUTIONS = "What solutions did you suggest?";
+  const ACTION_PLAN = "Was the student able to follow the action plan shared previously?";
+
+  const completedDetail = () => mentorDetail(submitted({ 91: "First answer", 92: "Then this" }),
+    { progress: "completed" });
+
+  function openModal() {
+    fireEvent.click(screen.getByRole("button", { name: "Add notes" }));
+    return screen.getByRole("dialog", { name: "Add follow-up notes" });
+  }
+
+  const modalMic = (dialog: HTMLElement, question: string) =>
+    within(dialog).getByRole("button", { name: `Dictate: ${question}` });
+  const modalBox = (dialog: HTMLElement, question: string) =>
+    within(dialog).getByRole("textbox", { name: question });
+
+  beforeEach(() => {
+    installFakeMic();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    window.sessionStorage.clear();
+  });
+
+  it("shows a mic beside each of the three boxes in the open modal, labelled with its Question", () => {
+    renderWorkspace(completedDetail());
+    expect(screen.queryByRole("button", { name: /^Dictate/ })).not.toBeInTheDocument();
+
+    const dialog = openModal();
+
+    for (const question of [CHALLENGES, SOLUTIONS, ACTION_PLAN]) {
+      expect(modalMic(dialog, question)).toHaveAttribute("aria-pressed", "false");
+    }
+  });
+
+  it("shows no mic in the modal when Dictation is off", () => {
+    renderWorkspace(completedDetail(), { enabled: false, remainingSeconds: 1_800 });
+
+    const dialog = openModal();
+
+    expect(modalBox(dialog, CHALLENGES)).toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: /^Dictate/ })).not.toBeInTheDocument();
+  });
+
+  async function dictate(dialog: HTMLElement, question: string, seconds = 3) {
+    await act(async () => fireEvent.click(modalMic(dialog, question)));
+    await act(async () => vi.advanceTimersByTimeAsync(seconds * 1_000));
+    await act(async () => fireEvent.click(modalMic(dialog, question)));
+  }
+
+  it("uploads the clip as a Follow-up dictation and adds the words to that box, then saves them", async () => {
+    const network = stubNetwork();
+    vi.useFakeTimers();
+    renderWorkspace(completedDetail());
+    const dialog = openModal();
+    fireEvent.change(modalBox(dialog, SOLUTIONS), { target: { value: "Daily check-in" } });
+
+    await dictate(dialog, SOLUTIONS, 4);
+    expect(network.dictationCalls).toHaveLength(1);
+    const [call] = network.dictationCalls;
+    expect(call.url).toBe("/api/holistic-mentorship/students/41/phases/73/dictation"
+      + "?school_code=SCH001&academic_year=2026-2027&program_id=1");
+    expect(call.body.get("kind")).toBe("follow_up");
+    expect(call.body.get("duration_ms")).toBe("4000");
+    expect(within(dialog).getByText("Transcribing…")).toBeInTheDocument();
+
+    fireEvent.change(modalBox(dialog, SOLUTIONS), { target: { value: "Daily check-in with the warden." } });
+    await network.transcribe(" and a weekly call home ");
+    expect(modalBox(dialog, SOLUTIONS)).toHaveValue("Daily check-in with the warden. and a weekly call home");
+    expect(modalBox(dialog, CHALLENGES)).toHaveValue("");
+    expect(modalBox(dialog, ACTION_PLAN)).toHaveValue("");
+
+    await act(async () => fireEvent.click(within(dialog).getByRole("button", { name: "Save" })));
+    expect(network.notesCalls).toHaveLength(1);
+    expect(network.notesCalls[0].url).toBe("/api/holistic-mentorship/students/41/phases/73/follow-up-notes"
+      + "?school_code=SCH001&academic_year=2026-2027&program_id=1");
+    expect(network.notesCalls[0].body).toEqual({
+      answers: { challenges: "", solutions: "Daily check-in with the warden. and a weekly call home", action_plan: "" },
+    });
+  });
+
+  it("starts an empty box with the dictated words and no leading space", async () => {
+    const network = stubNetwork();
+    vi.useFakeTimers();
+    renderWorkspace(completedDetail());
+    const dialog = openModal();
+
+    await dictate(dialog, ACTION_PLAN);
+    await network.transcribe("Yes, mostly");
+
+    expect(modalBox(dialog, ACTION_PLAN)).toHaveValue("Yes, mostly");
+  });
+
+  it("disables the other two mics while one box records or transcribes", async () => {
+    const network = stubNetwork();
+    renderWorkspace(completedDetail());
+    const dialog = openModal();
+
+    await act(async () => fireEvent.click(modalMic(dialog, CHALLENGES)));
+    expect(modalMic(dialog, CHALLENGES)).toBeEnabled();
+    expect(modalMic(dialog, SOLUTIONS)).toBeDisabled();
+    expect(modalMic(dialog, ACTION_PLAN)).toBeDisabled();
+
+    await act(async () => fireEvent.click(modalMic(dialog, CHALLENGES)));
+    expect(modalMic(dialog, CHALLENGES)).toBeDisabled();
+    expect(modalMic(dialog, SOLUTIONS)).toBeDisabled();
+    expect(modalMic(dialog, ACTION_PLAN)).toBeDisabled();
+
+    await network.transcribe("Homesick");
+    for (const question of [CHALLENGES, SOLUTIONS, ACTION_PLAN]) expect(modalMic(dialog, question)).toBeEnabled();
+  });
+
+  describe("dropping a recording", () => {
+    it("Save stops the recording, releases the mic, uploads nothing, and saves what is in the boxes", async () => {
+      const network = stubNetwork();
+      renderWorkspace(completedDetail());
+      const dialog = openModal();
+      fireEvent.change(modalBox(dialog, CHALLENGES), { target: { value: "Homesick" } });
+
+      await act(async () => fireEvent.click(modalMic(dialog, SOLUTIONS)));
+      expect(tracks[0].stop).not.toHaveBeenCalled();
+      await act(async () => fireEvent.click(within(dialog).getByRole("button", { name: "Save" })));
+
+      expect(tracks[0].stop).toHaveBeenCalled();
+      expect(network.dictationCalls).toHaveLength(0);
+      expect(network.notesCalls[0].body).toEqual({
+        answers: { challenges: "Homesick", solutions: "", action_plan: "" },
+      });
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+
+    it("Cancel stops the recording, releases the mic, and uploads nothing", async () => {
+      const network = stubNetwork();
+      renderWorkspace(completedDetail());
+      const dialog = openModal();
+
+      await act(async () => fireEvent.click(modalMic(dialog, CHALLENGES)));
+      await act(async () => fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" })));
+
+      expect(tracks[0].stop).toHaveBeenCalled();
+      expect(network.dictationCalls).toHaveLength(0);
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+
+    it("closing with Escape stops the recording, releases the mic, and uploads nothing", async () => {
+      const network = stubNetwork();
+      renderWorkspace(completedDetail());
+      const dialog = openModal();
+
+      await act(async () => fireEvent.click(modalMic(dialog, CHALLENGES)));
+      await act(async () => fireEvent.keyDown(document, { key: "Escape" }));
+
+      expect(tracks[0].stop).toHaveBeenCalled();
+      expect(network.dictationCalls).toHaveLength(0);
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+
+    it("closing while transcribing ignores the late words and reopens a blank, idle modal", async () => {
+      const network = stubNetwork();
+      vi.spyOn(window, "confirm").mockReturnValue(true);
+      renderWorkspace(completedDetail());
+      let dialog = openModal();
+      fireEvent.change(modalBox(dialog, CHALLENGES), { target: { value: "Homesick" } });
+
+      await act(async () => fireEvent.click(modalMic(dialog, CHALLENGES)));
+      await act(async () => fireEvent.click(modalMic(dialog, CHALLENGES)));
+      expect(within(dialog).getByText("Transcribing…")).toBeInTheDocument();
+      await act(async () => fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" })));
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      await network.transcribe("Late words");
+
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      dialog = openModal();
+      expect(modalBox(dialog, CHALLENGES)).toHaveValue("");
+      expect(within(dialog).queryByText("Transcribing…")).not.toBeInTheDocument();
+      for (const question of [CHALLENGES, SOLUTIONS, ACTION_PLAN]) expect(modalMic(dialog, question)).toBeEnabled();
+    });
+
+    it("Cancel stops the recording even when the Mentor keeps the note open", async () => {
+      const network = stubNetwork();
+      const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+      renderWorkspace(completedDetail());
+      const dialog = openModal();
+      fireEvent.change(modalBox(dialog, CHALLENGES), { target: { value: "Homesick" } });
+
+      await act(async () => fireEvent.click(modalMic(dialog, SOLUTIONS)));
+      await act(async () => fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" })));
+
+      expect(confirm).toHaveBeenCalledWith("Discard this follow-up note?");
+      expect(tracks[0].stop).toHaveBeenCalled();
+      expect(network.dictationCalls).toHaveLength(0);
+      expect(modalBox(dialog, CHALLENGES)).toHaveValue("Homesick");
+      expect(modalMic(dialog, SOLUTIONS)).toHaveAttribute("aria-pressed", "false");
+    });
+
+    it("pagehide stops the recording and uploads nothing", async () => {
+      const network = stubNetwork();
+      renderWorkspace(completedDetail());
+      const dialog = openModal();
+
+      await act(async () => fireEvent.click(modalMic(dialog, CHALLENGES)));
+      await act(async () => { window.dispatchEvent(new Event("pagehide")); });
+
+      expect(tracks[0].stop).toHaveBeenCalled();
+      expect(network.dictationCalls).toHaveLength(0);
+    });
+
+    it("leaving the page stops the recording, releases the mic, and uploads nothing", async () => {
+      const network = stubNetwork();
+      const { unmount } = renderWorkspace(completedDetail());
+      const dialog = openModal();
+
+      await act(async () => fireEvent.click(modalMic(dialog, CHALLENGES)));
+      unmount();
+
+      expect(tracks[0].stop).toHaveBeenCalled();
+      expect(network.dictationCalls).toHaveLength(0);
+    });
+  });
+
+  describe("when Dictation can't produce text", () => {
+    const LIMIT = "You've used today's 30 minutes of Dictation. You can keep typing.";
+
+    it("shows Couldn't transcribe, and Retry resends the same clip as a Follow-up dictation", async () => {
+      const network = stubNetwork();
+      vi.useFakeTimers();
+      renderWorkspace(completedDetail());
+      const dialog = openModal();
+
+      await dictate(dialog, CHALLENGES, 4);
+      await network.respond({ error: "Couldn't transcribe. Try again", remainingSeconds: 1_790 }, 502);
+      expect(within(dialog).getByText("Couldn't transcribe. Try again")).toHaveAttribute("aria-live", "polite");
+      await act(async () => fireEvent.click(within(dialog).getByRole("button", { name: "Retry" })));
+
+      const [first, retry] = network.dictationCalls;
+      expect(retry.body.get("kind")).toBe("follow_up");
+      expect(retry.body.get("duration_ms")).toBe("4000");
+      expect(await bytesOf(retry.body)).toEqual(await bytesOf(first.body));
+      expect(FakeMediaRecorder.instances).toHaveLength(1);
+      await network.transcribe("Homesick");
+      expect(modalBox(dialog, CHALLENGES)).toHaveValue("Homesick");
+      expect(within(dialog).queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+    });
+
+    it("closing the modal drops a failed clip", async () => {
+      const network = stubNetwork();
+      renderWorkspace(completedDetail());
+      let dialog = openModal();
+
+      await act(async () => fireEvent.click(modalMic(dialog, CHALLENGES)));
+      await act(async () => fireEvent.click(modalMic(dialog, CHALLENGES)));
+      await network.respond({ error: "Couldn't transcribe. Try again" }, 502);
+      fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+      dialog = openModal();
+
+      expect(within(dialog).queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+      expect(within(dialog).queryByText("Couldn't transcribe. Try again")).not.toBeInTheDocument();
+      expect(network.dictationCalls).toHaveLength(1);
+    });
+
+    it("says Didn't catch anything when nothing was heard and adds nothing", async () => {
+      const network = stubNetwork();
+      vi.useFakeTimers();
+      renderWorkspace(completedDetail());
+      const dialog = openModal();
+      fireEvent.change(modalBox(dialog, SOLUTIONS), { target: { value: "Daily check-in" } });
+
+      await dictate(dialog, SOLUTIONS);
+      await network.respond({ outcome: "nothing_heard", remainingSeconds: 1_797 });
+
+      expect(within(dialog).getByText(/^Didn't catch anything\./)).toHaveAttribute("aria-live", "polite");
+      expect(modalBox(dialog, SOLUTIONS)).toHaveValue("Daily check-in");
+      expect(modalMic(dialog, SOLUTIONS)).toBeEnabled();
+    });
+
+    it("says the mic is blocked when permission is denied and uploads nothing", async () => {
+      const network = stubNetwork();
+      const getUserMedia = vi.fn(async () => { throw new DOMException("mic", "NotAllowedError"); });
+      Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { getUserMedia } });
+      renderWorkspace(completedDetail());
+      const dialog = openModal();
+
+      await act(async () => fireEvent.click(modalMic(dialog, CHALLENGES)));
+
+      expect(within(dialog).getByText(/^Microphone is blocked\./)).toBeInTheDocument();
+      expect(network.dictationCalls).toHaveLength(0);
+    });
+
+    it("shows the daily limit after a 429 and stops all three mics accepting recordings", async () => {
+      const network = stubNetwork();
+      vi.useFakeTimers();
+      renderWorkspace(completedDetail(), { enabled: true, remainingSeconds: 10 });
+      const dialog = openModal();
+
+      await dictate(dialog, CHALLENGES, 5);
+      await network.respond({ error: "You've used today's Dictation time", code: "daily_limit" }, 429);
+
+      expect(within(dialog).getAllByText(LIMIT)).toHaveLength(3);
+      for (const question of [CHALLENGES, SOLUTIONS, ACTION_PLAN]) expect(modalMic(dialog, question)).toBeDisabled();
+      expect(within(dialog).queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+    });
+
+    it("opens with all three mics in the limit state when there is no time left today", async () => {
+      const network = stubNetwork();
+      renderWorkspace(completedDetail(), { enabled: true, remainingSeconds: 0 });
+      const dialog = openModal();
+
+      for (const question of [CHALLENGES, SOLUTIONS, ACTION_PLAN]) expect(modalMic(dialog, question)).toBeDisabled();
+      expect(within(dialog).getAllByText(LIMIT)).toHaveLength(3);
+      await act(async () => fireEvent.click(modalMic(dialog, CHALLENGES)));
+      expect(network.dictationCalls).toHaveLength(0);
+    });
+
+    it("stops by itself at the Mentor's remaining time for today", async () => {
+      const network = stubNetwork();
+      vi.useFakeTimers();
+      renderWorkspace(completedDetail(), { enabled: true, remainingSeconds: 45 });
+      const dialog = openModal();
+
+      await act(async () => fireEvent.click(modalMic(dialog, CHALLENGES)));
+      await act(async () => vi.advanceTimersByTimeAsync(45_000));
+
+      expect(network.dictationCalls).toHaveLength(1);
+      expect(network.dictationCalls[0].body.get("duration_ms")).toBe("45000");
+    });
+
+    it("refuses words that would push the answer past 10,000 characters and keeps the answer", async () => {
+      const network = stubNetwork();
+      vi.useFakeTimers();
+      renderWorkspace(completedDetail());
+      const dialog = openModal();
+      fireEvent.change(modalBox(dialog, CHALLENGES), { target: { value: "a".repeat(9_995) } });
+
+      await dictate(dialog, CHALLENGES);
+      await network.transcribe("hello");
+
+      expect(modalBox(dialog, CHALLENGES)).toHaveValue("a".repeat(9_995));
+      expect(within(dialog).getByText("Not added: the answer would go over 10,000 characters."))
+        .toHaveAttribute("aria-live", "polite");
+    });
+  });
+
+  describe("where the mic shows", () => {
+    const savedNote = {
+      id: 503, submittedAt: "2026-07-03T10:00:00Z", authorName: "Anita Sharma",
+      answers: [{ key: "challenges" as const, answer: "Homesick" }],
+    };
+
+    it("shows no mic on saved Follow-up Note cards", () => {
+      renderWorkspace(mentorDetail(submitted({ 91: "First answer", 92: "Then this" }),
+        { progress: "completed", followUpNotes: [savedNote] }));
+
+      expect(screen.getByText("Homesick")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /^Dictate/ })).not.toBeInTheDocument();
+    });
+
+    it("shows no mic on a read-only workspace, even with Dictation on", () => {
+      const detail = mentorDetail(submitted({ 91: "First answer" }),
+        { progress: "completed", canEditNotes: false, followUpNotes: [savedNote] });
+      renderWorkspace({ ...detail, readOnly: true });
+
+      expect(screen.getByText("Homesick")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Add notes" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /^Dictate/ })).not.toBeInTheDocument();
+    });
   });
 });
