@@ -24,3 +24,15 @@ export function isValidDocumentType(s: string): s is DocumentType {
 export function labelFor(type: DocumentType): string {
   return DOCUMENT_TYPES.find((t) => t.value === type)?.label ?? type;
 }
+
+// Types other flows store in `lms_student_documents` without offering them in
+// the upload picker: the Blended Learning JEE form card's confirmation page.
+const OTHER_DOCUMENT_TYPE_LABELS: Readonly<Record<string, string>> = {
+  jee_main_confirmation: "JEE Main confirmation page",
+};
+
+/** The Documents list's label for any stored type; unknown types show as stored. */
+export function documentTypeLabel(type: string): string {
+  if (isValidDocumentType(type)) return labelFor(type);
+  return OTHER_DOCUMENT_TYPE_LABELS[type] ?? type;
+}

@@ -91,4 +91,29 @@ describe("FlagsFeed", () => {
     rerender(<FlagsFeed view={view([], { mentorUserId: 9002 })} />);
     expect(screen.getByText("No Mentor Flags match these filters.")).toHaveAttribute("role", "status");
   });
+
+  it("shows a JEE form flag for the program team with its date and reasons, and no Session Notes", () => {
+    render(
+      <FlagsFeed
+        view={view([
+          {
+            ...FLAG,
+            id: 8,
+            recipient: "jee_form",
+            comment: "JEE Main 2027 form not filled: Not aware about the exam",
+            conversationId: null,
+            occurredOn: "2026-11-10",
+            hasNotes: false,
+          },
+        ])}
+      />
+    );
+
+    const card = screen.getByRole("article");
+    expect(within(card).getByText("JEE form (program team)")).toBeInTheDocument();
+    expect(within(card).getByText("JEE Main 2027 form not filled: Not aware about the exam")).toBeInTheDocument();
+    expect(within(card).queryByRole("button", { name: "Show Session Notes" })).not.toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "JEE form (program team)" })).toBeInTheDocument();
+  });
 });
+

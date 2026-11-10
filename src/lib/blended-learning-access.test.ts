@@ -146,6 +146,8 @@ describe("canBlendedLearning", () => {
     ["view_mentors", false, true, true],
     // Resources and Common Action Items: the one thing an admin edits.
     ["manage", false, true, false],
+    // The JEE form card: the Mentor or an admin, never read-only.
+    ["record_jee_form", true, true, false],
   ];
 
   it.each(table)("%s: Mentor %s, Admin %s, read-only Admin %s", (action, forMentor, forAdmin, forReadOnly) => {
@@ -155,7 +157,7 @@ describe("canBlendedLearning", () => {
     expect(canBlendedLearning(readOnlyAdmin, action)).toBe(forReadOnly);
   });
 
-  it.each(["log", "upload", "manage_draft", "manage"] as const)("refuses a read-only Mentor %s", (action) => {
+  it.each(["log", "upload", "manage_draft", "manage", "record_jee_form"] as const)("refuses a read-only Mentor %s", (action) => {
     expect(canBlendedLearning(readOnlyMentor, action)).toBe(false);
     expect(canBlendedLearning(readOnlyMentor, "view_student")).toBe(true);
   });

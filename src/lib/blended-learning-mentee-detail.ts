@@ -370,7 +370,7 @@ export async function getMenteeDetail(
     query<FlagRow>(
       `SELECT conversation_id, recipient, comment
        FROM blended_learning_mentor_flags
-       WHERE student_id = $1
+       WHERE student_id = $1 AND conversation_id IS NOT NULL
        ORDER BY conversation_id, CASE recipient
          WHEN 'emotional_wellbeing' THEN 1 WHEN 'physics' THEN 2 WHEN 'chemistry' THEN 3 ELSE 4 END`,
       [studentId]

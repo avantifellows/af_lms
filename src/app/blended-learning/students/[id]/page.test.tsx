@@ -12,7 +12,11 @@ const {
   mockRedirect,
   mockNotFound,
   mockLoadDashboardChrome,
+  mockGetJeeForm,
+  mockJeeFormCard,
 } = vi.hoisted(() => ({
+  mockGetJeeForm: vi.fn(),
+  mockJeeFormCard: vi.fn(),
   mockLoadDashboardChrome: vi.fn(),
   mockGetServerSession: vi.fn(),
   mockGetBlendedLearningAccess: vi.fn(),
@@ -37,6 +41,14 @@ vi.mock("@/lib/blended-learning-access", async (importOriginal) => ({
 vi.mock("@/lib/blended-learning-mentee-detail", () => ({ getMenteeDetail: mockGetMenteeDetail }));
 vi.mock("@/lib/blended-learning-drafts", () => ({ getDraftStatus: mockGetDraftStatus }));
 vi.mock("@/lib/dashboard-chrome", () => ({ loadDashboardChrome: mockLoadDashboardChrome }));
+vi.mock("@/lib/blended-learning-jee-form", () => ({ getJeeForm: mockGetJeeForm }));
+// JeeFormCard has its own tests; here only the props it gets matter.
+vi.mock("./JeeFormCard", () => ({
+  JeeFormCard: (props: Record<string, unknown>) => {
+    mockJeeFormCard(props);
+    return <div data-testid="jee-form-card" />;
+  },
+}));
 // DraftStatus polls and has its own tests; here only the props it gets matter.
 vi.mock("./DraftStatus", () => ({
   DraftStatus: (props: Record<string, unknown>) => {
@@ -85,6 +97,8 @@ function conversation(overrides: Partial<Conversation> = {}): Conversation {
   };
 }
 
+const JEE_FORM = { current: null, earlier: [], reminderItems: [] };
+
 function signedInAs(access: { actorEmail: string }) {
   mockGetServerSession.mockResolvedValue({ user: { email: access.actorEmail } });
   mockGetBlendedLearningAccess.mockResolvedValue(access);
@@ -101,6 +115,7 @@ beforeEach(() => {
   mockGetMenteeDetail.mockResolvedValue(MENTEE);
   mockGetDraftStatus.mockResolvedValue(null);
   mockLoadDashboardChrome.mockResolvedValue(null);
+  mockGetJeeForm.mockResolvedValue(JEE_FORM);
   // ConversationPhotos loads its photos as it mounts.
   vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ photos: [] }))));
 });
@@ -575,5 +590,34 @@ describe("MenteeDetailPage", () => {
     expect(recordingOnly.getByRole("button", { name: "Play recording" })).toBeInTheDocument();
     expect(recordingOnly.queryByRole("button", { name: "Show transcript" })).not.toBeInTheDocument();
     expect(neither.queryByRole("region", { name: "Call Recording" })).not.toBeInTheDocument();
+  });
+
+  describe("the JEE form card", () => {
+    it.each([
+      ["a Mentor", MENTOR, true],
+      ["a Blended Learning Admin", BLENDED_ADMIN, true],
+      ["a read-only Blended Learning Admin", READ_ONLY_ADMIN, false],
+    ] as const)("gives %s the card, recording only when not read-only", async (_who, access, canRecord) => {
+      signedInAs(access);
+
+      await renderPage();
+
+      expect(screen.getByTestId("jee-form-card")).toBeInTheDocument();
+      expect(mockGetJeeForm).toHaveBeenCalledWith(access, 501);
+      expect(mockJeeFormCard).toHaveBeenCalledWith({ studentId: 501, form: JEE_FORM, canRecord });
+    });
+
+    it("still renders the page when the card's data fails to load, without logging what failed", async () => {
+      signedInAs(MENTOR);
+      const error = vi.spyOn(console, "error").mockImplementation(() => {});
+      mockGetJeeForm.mockRejectedValue(Object.assign(new Error("relation does not exist"), { name: "DatabaseError" }));
+
+      await renderPage();
+
+      expect(screen.getByRole("heading", { name: "Ira Sharma" })).toBeInTheDocument();
+      expect(mockJeeFormCard).toHaveBeenCalledWith({ studentId: 501, form: null, canRecord: true });
+      expect(error).toHaveBeenCalledWith("Failed to load the JEE form card:", "DatabaseError");
+      error.mockRestore();
+    });
   });
 });
