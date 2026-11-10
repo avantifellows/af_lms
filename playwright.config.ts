@@ -89,6 +89,11 @@ export default defineConfig({
       // warehouse from .env.local credentials (the Visit Summary School page
       // shows "Academic levels unavailable"). Specs stub /api/quiz-analytics.
       GOOGLE_SERVICE_ACCOUNT_JSON: " ",
+      // Holistic Dictation is on with a dummy key; specs fake the dictation
+      // route with page.route, so ElevenLabs is never called.
+      HOLISTIC_DICTATION_ENABLED: "true",
+      HOLISTIC_DICTATION_ELEVENLABS_API_KEY: "e2e-dummy-elevenlabs-key",
+      HOLISTIC_DICTATION_ELEVENLABS_ZERO_RETENTION: "false",
     },
   },
 });

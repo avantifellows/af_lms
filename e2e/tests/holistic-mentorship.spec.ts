@@ -382,6 +382,48 @@ test.describe("Holistic Mentorship release workflows", () => {
     expect(mutationBodies.get("DELETE")).toHaveProperty("expected_mapping_id");
   });
 
+  test("Mentor dictates into a draft answer that autosaves, and a read-only Admin sees no mic", async ({
+    holisticTeacherPage: page,
+    holisticAdminPage,
+  }) => {
+    const health = collectBrowserHealth(page);
+    await page.addInitScript(installFakeMic);
+    const clips: string[] = [];
+    // The dictation route is faked: the e2e server never calls ElevenLabs.
+    await page.route("**/dictation?**", async (route) => {
+      clips.push(route.request().postDataBuffer()?.toString("latin1") ?? "");
+      await route.fulfill({ json: { outcome: "ok", text: " met the student ", remainingSeconds: 1_790 } });
+    });
+    await page.goto(studentPhaseUrl(fixture.draftStudentId, fixture.activeGrade11PhaseId));
+    const answer = page.getByRole("textbox", { name: "What support will help next?" });
+    const draftSaved = (text: string) => page.waitForResponse((response) =>
+      response.request().method() === "PATCH" &&
+      response.request().postData()?.includes(`"answer":${JSON.stringify(text)}`) === true
+    );
+    const typed = draftSaved("Met parents");
+    await answer.fill("Met parents");
+    expect((await typed).status()).toBe(200);
+
+    const mic = page.getByRole("button", { name: /^Dictate: .*What support will help next\?$/ });
+    await mic.click();
+    await expect(mic).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByText(/^Recording 0:0[1-9]$/)).toBeVisible();
+    const dictated = draftSaved("Met parents met the student");
+    await mic.click();
+    await expect(answer).toHaveValue("Met parents met the student");
+    expect((await dictated).status()).toBe(200);
+    expect(clips).toHaveLength(1);
+    expect(clips[0]).toContain('name="kind"\r\n\r\npost_session');
+
+    await page.reload();
+    await expect(answer).toHaveValue("Met parents met the student");
+    expectBrowserHealth(health);
+
+    await holisticAdminPage.goto(studentPhaseUrl(fixture.draftStudentId, fixture.activeGrade11PhaseId));
+    await expect(holisticAdminPage.getByText(/read-only view$/)).toBeVisible();
+    await expect(holisticAdminPage.getByRole("button", { name: /^Dictate/ })).toHaveCount(0);
+  });
+
   test("eligible Teacher assigns a Student, submits Notes, and edits the official Notes", async ({
     holisticTeacherPage,
   }) => {
@@ -405,7 +447,8 @@ test.describe("Holistic Mentorship release workflows", () => {
     await expect((await assignment).status()).toBe(200);
 
     await holisticTeacherPage.goto(studentPhaseUrl(fixture.draftStudentId, fixture.activeGrade11PhaseId));
-    const notes = holisticTeacherPage.getByLabel("What support will help next?");
+    // A textbox: with Dictation on, its mic button's label names the Question too.
+    const notes = holisticTeacherPage.getByRole("textbox", { name: "What support will help next?" });
     await expect(notes).toBeVisible();
     const autosave = holisticTeacherPage.waitForResponse((response) =>
       response.url().includes(`/students/${fixture.draftStudentId}/phases/`) &&
@@ -930,6 +973,34 @@ test.describe("Holistic Mentorship release workflows", () => {
     }
   });
 });
+
+// The browser recording boundary. Headless Chromium's fake capture device (and
+// Web Audio) can stall on macOS, so the mic and recorder are faked in the page:
+// getUserMedia yields one track and MediaRecorder hands back a small webm clip.
+function installFakeMic() {
+  const track = { stop() {} };
+  const stream = { getTracks: () => [track] };
+  Object.defineProperty(navigator, "mediaDevices", {
+    configurable: true,
+    value: { getUserMedia: async () => stream },
+  });
+  class FakeMediaRecorder {
+    static isTypeSupported(type: string) { return type === "audio/webm;codecs=opus"; }
+    state = "inactive";
+    mimeType: string;
+    ondataavailable: ((event: { data: Blob }) => void) | null = null;
+    onstop: (() => void) | null = null;
+    constructor(_stream: unknown, options: { mimeType?: string } = {}) { this.mimeType = options.mimeType ?? ""; }
+    start() { this.state = "recording"; }
+    stop() {
+      if (this.state === "inactive") return;
+      this.state = "inactive";
+      this.ondataavailable?.({ data: new Blob(["e2e clip"], { type: this.mimeType }) });
+      this.onstop?.();
+    }
+  }
+  Object.defineProperty(window, "MediaRecorder", { configurable: true, value: FakeMediaRecorder });
+}
 
 function assignmentSummary(page: Page) {
   return page.locator("summary").filter({ hasText: "Assign Students" });

@@ -15,7 +15,7 @@ edges:
     condition: when configuring which backend env vars point at
   - target: context/architecture.md
     condition: when understanding how components connect during setup
-last_updated: 2026-10-27
+last_updated: 2026-11-10
 ---
 
 # Setup
@@ -47,6 +47,8 @@ Conditionally required (only if the feature is used):
 - `AF_ACCESS_KEY_ID`, `AF_SECRET_ACCESS_KEY`, `AF_TOPIC_ARN`, `APP_ENV` — SNS session creator.
 - `BLENDED_LEARNING_SES_ACCESS_KEY_ID`, `BLENDED_LEARNING_SES_SECRET_ACCESS_KEY`, `BLENDED_LEARNING_SES_REGION` (default `ap-south-1`), `BLENDED_LEARNING_WELLBEING_EMAILS` (comma-separated; `shalinijha@` in production) — the well-being email sent after a Conversation with an Emotional Well-being Mentor Flag is saved (`src/lib/blended-learning-wellbeing-notifier.ts`, `af-lms-ses` IAM user, from `no-reply@avantifellows.org`). The link uses `NEXTAUTH_URL`. If the key id, secret or recipients are unset, the email is skipped without error. The Playwright web server sets the key id and recipients to `" "` (a blank value would be refilled from `.env.local`), so e2e never sends.
 - `BLENDED_LEARNING_ETL_URL` (the etl-next base URL, no path), `BLENDED_LEARNING_ETL_TOKEN` (machine token bound to `APP_ENV`) — the wake call after a Call Recording upload creates a Conversation Draft (`wakeTranscription` in `src/lib/blended-learning-drafts.ts`): `POST {URL}/api/internal/blended-learning/transcription-requests/{request_key}/enqueue` with `{"environment": APP_ENV}`. If the URL or token is unset (blank after trimming) or `APP_ENV` is not `staging`/`production`, the wake is skipped without error and the draft stays `transcribing`. The Playwright web server sets both to `" "`, so e2e never calls etl-next.
+
+- `HOLISTIC_DICTATION_ENABLED`, `HOLISTIC_DICTATION_ELEVENLABS_API_KEY`, `HOLISTIC_DICTATION_ELEVENLABS_ZERO_RETENTION` — Holistic Dictation (#500), server-only. The Playwright web server sets the flag on with a dummy key; `holistic-mentorship.spec.ts` fakes the dictation route with `page.route`, so ElevenLabs is never called. The page reads today's usage from `holistic_mentorship_dictation_usage_records`, which e2e gets from the `*holistic*.exs` migration in `../db-service_holistic_mentorship` (db-service #858; check the checkout has `20261110151931_create_holistic_mentorship_dictation_usage_records.exs`). The spec also fakes `getUserMedia` and `MediaRecorder` with an init script: headless Chromium's `--use-fake-device-for-media-stream` (and even Web Audio) stalled on macOS, so the browser's audio stack is not used.
 
 Never commit real values — `.env.local` is gitignored; CI injects prod/preview values via the Amplify workflow.
 

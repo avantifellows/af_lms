@@ -6,6 +6,10 @@ import StudentPhaseWorkspace from "@/components/holistic-mentorship/StudentPhase
 import { authOptions } from "@/lib/auth";
 import { isHolisticMentorshipProgramId, PROGRAM_IDS } from "@/lib/constants";
 import { coverageReturnQuery, splitCoverageReturn } from "@/lib/holistic-coverage-filters";
+import {
+  getHolisticDictationRemainingSeconds,
+  holisticDictationSettings,
+} from "@/lib/holistic-dictation";
 import { holisticStudentPhaseHref, type HolisticStudentPhaseSource } from "@/lib/holistic-links";
 import { validateAcademicYear } from "@/lib/holistic-phase-plans";
 import {
@@ -118,6 +122,18 @@ function studentPhaseBackHref(
 
 type PhaseNavigationItem = HolisticStudentPhaseDetail["phases"][number];
 
+// Dictation (#500) is on only for the editing Mentor (a workspace that isn't
+// read-only) while the server-side switch is on. The client never sees the settings.
+async function studentPhaseDictation(detail: HolisticStudentPhaseDetail, actorUserId: number | undefined) {
+  if (detail.readOnly || !actorUserId || !holisticDictationSettings().enabled) {
+    return { enabled: false, remainingSeconds: 0 };
+  }
+  return {
+    enabled: true,
+    remainingSeconds: await getHolisticDictationRemainingSeconds(actorUserId, new Date()),
+  };
+}
+
 function unlockedPhase(phase: PhaseNavigationItem) {
   return phase.phaseId !== null && "locked" in phase && !phase.locked;
 }
@@ -189,6 +205,7 @@ export default async function StudentPhasePage(props: StudentPhasePageProps) {
     source,
     request.returnQuery,
   );
+  const dictation = await studentPhaseDictation(detail, access.actorUserId);
   const canRegenerateProfile = access.canEdit && (
     access.permission.role === "admin" ||
     access.permission.role === "holistic_mentorship_admin"
@@ -207,7 +224,7 @@ export default async function StudentPhasePage(props: StudentPhasePageProps) {
           programId={request.programId}
           source={source} returnQuery={request.returnQuery} backHref={backHref}
           canRegenerateProfile={canRegenerateProfile}
-          viewerRole={access.permission.role} />
+          viewerRole={access.permission.role} dictation={dictation} />
       </main>
     </div>
   );
