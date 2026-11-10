@@ -26,7 +26,8 @@ import { Modal } from "@/components/ui/Modal";
 import GuidancePreview from "./GuidancePreview";
 import { DictationMicButton, DictationStatus } from "./DictationMicButton";
 import {
-  DICTATION_OFF, useDictationRecorder, type DictationAvailability, type DictationRecorder,
+  DICTATION_OFF, useDictationRecorder, useSharedDictationAvailability,
+  type DictationAvailability, type DictationRecorder, type SharedDictationAvailability,
 } from "./useDictationRecorder";
 
 type NotesEditorProps = {
@@ -49,7 +50,7 @@ type NotesEditorProps = {
   };
   timestampNotes: OpenSelectedPhase["notes"];
   onNotesSaved: (submitted: boolean) => void;
-  dictation: DictationAvailability;
+  dictation: SharedDictationAvailability;
 };
 type NotesEditorStatus = "idle" | "saving" | "saved" | "failed";
 // Answers and Challenge Categories autosave, hydrate and submit together.
@@ -567,6 +568,30 @@ function useNotesDraftAutosave({ state, refs, mutate, canAutosave, autosaveEnabl
   return flushDraft;
 }
 
+// The Post-Session Notes recorder. The words land at the end of the box's
+// value as it is when they arrive, through the same handler typing uses, so
+// autosave and saving are unchanged.
+function useNotesDictation(
+  props: NotesEditorProps,
+  answers: NotesValue["answers"],
+  updateAnswer: (questionId: number, answer: string) => void
+) {
+  const applyDictation = (target: string, text: string) => {
+    const questionId = Number(target);
+    const appended = appendDictation(answers[questionId] ?? "", text);
+    if (!appended.ok) return DICTATION_TOO_LONG;
+    updateAnswer(questionId, appended.value);
+    return null;
+  };
+  return useDictationRecorder({
+    url: dictationApiUrl(props),
+    kind: "post_session",
+    remainingSeconds: props.dictation.remainingSeconds,
+    onRemainingSeconds: props.dictation.onRemainingSeconds,
+    onText: applyDictation,
+  });
+}
+
 function PostSessionNotesEditor(props: NotesEditorProps) {
   const router = useRouter();
   const state = useNotesEditorState(props);
@@ -646,21 +671,7 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
     if (validationError && !hasBlankAnswer(props.questions, nextAnswers)) setValidationError("");
     setSuccess("");
   };
-  // The words land at the end of the box's value as it is when they arrive,
-  // through the same handler typing uses, so autosave and saving are unchanged.
-  const applyDictation = (target: string, text: string) => {
-    const questionId = Number(target);
-    const appended = appendDictation(value.answers[questionId] ?? "", text);
-    if (!appended.ok) return DICTATION_TOO_LONG;
-    updateAnswer(questionId, appended.value);
-    return null;
-  };
-  const dictation = useDictationRecorder({
-    url: dictationApiUrl(props),
-    kind: "post_session",
-    remainingSeconds: props.dictation.remainingSeconds,
-    onText: applyDictation,
-  });
+  const dictation = useNotesDictation(props, value.answers, updateAnswer);
   const submit = async () => {
     dictation.discard();
     if (!validateFinalWrite(SUBMIT_BLANK_ANSWER_ERROR)) return;
@@ -1350,6 +1361,8 @@ function SelectedPhaseContent({ phase, selectedPhase, studentId, readOnly, schoo
   onSubmitted: (phaseId: number) => void;
 }) {
   const [mobilePanel, setMobilePanel] = useState<"context" | "guidance">("context");
+  // Post-Session Notes and Follow-up Notes spend the same daily Dictation time.
+  const sharedDictation = useSharedDictationAvailability(dictation);
   const tabId = phaseTabId(studentId, selectedPhase);
   const panelId = phasePanelId(studentId, selectedPhase);
   if (!phase) return <LockedPhasePanel bordered studentId={studentId} selectedPhase={selectedPhase} />;
@@ -1385,11 +1398,11 @@ function SelectedPhaseContent({ phase, selectedPhase, studentId, readOnly, schoo
     </div>
     <PostSessionNotes key={`${phase.phaseId}-${phase.mappingId}-${phase.revision}`}
       phase={phase} studentId={studentId} readOnly={readOnly}
-      schoolCode={schoolCode} academicYear={academicYear} programId={programId} dictation={dictation}
+      schoolCode={schoolCode} academicYear={academicYear} programId={programId} dictation={sharedDictation}
       onSubmitted={() => onSubmitted(phase.phaseId)} />
     <MentorFollowUpNotes key={`${phase.phaseId}-${phase.mappingId}`} phase={phase} apiUrl={`/api/holistic-mentorship/students/${studentId}/phases/${phase.phaseId}/follow-up-notes?${new URLSearchParams(
       { school_code: schoolCode, academic_year: academicYear, program_id: String(programId) }
-    )}`} dictation={dictation} dictationUrl={dictationApiUrl(
+    )}`} dictation={sharedDictation} dictationUrl={dictationApiUrl(
       { studentId, phaseId: phase.phaseId, schoolCode, academicYear, programId })} />
   </section>;
 }
@@ -1733,7 +1746,7 @@ const FOLLOW_UP_MAYBE_SAVED =
 function MentorFollowUpNotes({ phase, apiUrl, dictation, dictationUrl }: {
   phase: OpenSelectedPhase;
   apiUrl: string;
-  dictation: DictationAvailability;
+  dictation: SharedDictationAvailability;
   dictationUrl: string;
 }) {
   const hintId = useId();
@@ -1755,7 +1768,7 @@ function MentorFollowUpNotes({ phase, apiUrl, dictation, dictationUrl }: {
 function AddFollowUpNoteModal({ open, apiUrl, dictation, dictationUrl, onClose }: {
   open: boolean;
   apiUrl: string;
-  dictation: DictationAvailability;
+  dictation: SharedDictationAvailability;
   dictationUrl: string;
   onClose: () => void;
 }) {
@@ -1781,6 +1794,7 @@ function AddFollowUpNoteModal({ open, apiUrl, dictation, dictationUrl, onClose }
     url: dictationUrl,
     kind: "follow_up",
     remainingSeconds: dictation.remainingSeconds,
+    onRemainingSeconds: dictation.onRemainingSeconds,
     onText: applyDictation,
   });
 
@@ -2000,7 +2014,7 @@ function PostSessionNotes({ phase, studentId, readOnly, schoolCode, academicYear
   schoolCode: string;
   academicYear: string;
   programId: number;
-  dictation: DictationAvailability;
+  dictation: SharedDictationAvailability;
   onSubmitted: () => void;
 }) {
   const [visibleNotesOverride, setVisibleNotes] = useState<OpenSelectedPhase["notes"] | undefined>();

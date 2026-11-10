@@ -1,10 +1,32 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 // What the server-rendered Student Phase page tells the client about
 // Dictation (#500). The client never reads the HOLISTIC_DICTATION_* settings.
 export type DictationAvailability = { enabled: boolean; remainingSeconds: number };
 
 export const DICTATION_OFF: DictationAvailability = { enabled: false, remainingSeconds: 0 };
+
+// The page's one count of today's remaining Dictation time. Every recorder on
+// the page reads it and reports what the server says after each clip.
+export type SharedDictationAvailability = DictationAvailability & {
+  onRemainingSeconds: (seconds: number) => void;
+};
+
+// Post-Session Notes and the Follow-up Note form each own a recorder but spend
+// the same daily limit, so the count lives above both. A new count from the
+// server (the page refreshed) replaces what the recorders reported.
+export function useSharedDictationAvailability(server: DictationAvailability): SharedDictationAvailability {
+  const [serverSeconds, setServerSeconds] = useState(server.remainingSeconds);
+  const [remainingSeconds, setRemainingSeconds] = useState(server.remainingSeconds);
+  if (serverSeconds !== server.remainingSeconds) {
+    setServerSeconds(server.remainingSeconds);
+    setRemainingSeconds(server.remainingSeconds);
+  }
+  return useMemo(
+    () => ({ enabled: server.enabled, remainingSeconds, onRemainingSeconds: setRemainingSeconds }),
+    [server.enabled, remainingSeconds]
+  );
+}
 
 // One recorder per form; `target` names the answer box being dictated into.
 export type DictationState =
@@ -61,6 +83,45 @@ function autoStopNotice(stopAtSeconds: number) {
 
 type Stop = { durationMs: number; notice: string | null };
 
+type DictationReply = {
+  status: number;
+  body: { outcome?: string; text?: string; remainingSeconds?: number; code?: string } | null;
+};
+
+async function postClip(
+  request: { url: string; kind: DictationKind },
+  clip: Blob,
+  durationMs: number,
+  signal: AbortSignal
+): Promise<DictationReply> {
+  const form = new FormData();
+  form.append("audio", clip, clipFilename(clip));
+  form.append("kind", request.kind);
+  form.append("duration_ms", String(durationMs));
+  try {
+    const response = await fetch(request.url, { method: "POST", body: form, signal });
+    return { status: response.status, body: await response.json().catch(() => null) };
+  } catch {
+    // A network failure is treated the same as a 502.
+    return { status: 0, body: null };
+  }
+}
+
+// Today's remaining time as the server reports it, or null when it didn't say.
+function remainingAfter({ status, body }: DictationReply): number | null {
+  if (status === 429 && body?.code === "daily_limit") return 0;
+  return typeof body?.remainingSeconds === "number" ? body.remainingSeconds : null;
+}
+
+function replyText({ status, body }: DictationReply): string | null {
+  const ok = status === 200 && body?.outcome === "ok";
+  return ok && typeof body.text === "string" ? body.text : null;
+}
+
+function heardNothing({ status, body }: DictationReply) {
+  return status === 200 && body?.outcome === "nothing_heard";
+}
+
 // Messages shown under the box when Dictation can't produce text. They live
 // here so every form that dictates (Post-Session and Follow-up) shows the same words.
 export const DICTATION_MESSAGES = {
@@ -85,24 +146,65 @@ function micErrorMessage(error: unknown) {
   return DICTATION_MESSAGES.micFailed;
 }
 
-// With no time left today, the form rests in the limit state, not idle.
-function restingState(remainingSeconds: number): DictationState {
-  return remainingSeconds > 0
-    ? { kind: "idle" }
-    : { kind: "unavailable", reason: "daily_limit", target: null, note: null };
+function limitState(target: string | null, note: string | null): DictationState {
+  return { kind: "unavailable", reason: "daily_limit", target, note };
+}
+
+// The state the form shows. With no time left today a resting form is locked,
+// whichever recorder on the page used the time up; it unlocks when a fresh
+// count from the server has time again.
+function shownState(state: DictationState, remainingSeconds: number): DictationState {
+  if (remainingSeconds > 0) return state.kind === "unavailable" ? { kind: "idle" } : state;
+  if (state.kind === "idle") return limitState(null, null);
+  if (state.kind === "notice") return limitState(state.target, state.message);
+  return state;
+}
+
+// What the form shows once the reply is in. A clip that produced nothing
+// stays in memory only, so Retry can resend it without re-recording.
+function stateAfterReply(reply: DictationReply, attempt: {
+  target: string;
+  clip: Blob;
+  stop: Stop;
+  limitReached: boolean;
+  onText: ApplyDictationText;
+}): DictationState {
+  const { target, clip, stop, limitReached } = attempt;
+  const text = replyText(reply);
+  const nothingHeard = heardNothing(reply);
+  if (text === null && !nothingHeard && !limitReached) {
+    return { kind: "failed", target, clip, durationMs: stop.durationMs };
+  }
+  const heard = nothingHeard ? DICTATION_MESSAGES.nothingHeard : null;
+  const message = text === null ? heard : attempt.onText(target, text);
+  const notice = message ?? stop.notice;
+  if (limitReached) return limitState(target, notice);
+  return notice ? { kind: "notice", target, message: notice } : { kind: "idle" };
+}
+
+function micUnsupported() {
+  return typeof MediaRecorder === "undefined" || !navigator.mediaDevices?.getUserMedia;
+}
+
+function stopTracks(stream: MediaStream | null) {
+  stream?.getTracks().forEach((track) => track.stop());
 }
 
 export function useDictationRecorder(options: {
   url: string;
   kind: DictationKind;
   remainingSeconds: number;
+  onRemainingSeconds: (seconds: number) => void;
   onText: ApplyDictationText;
 }): DictationRecorder {
-  const [state, setState] = useState<DictationState>(() => restingState(options.remainingSeconds));
+  const [state, setState] = useState<DictationState>({ kind: "idle" });
   const [now, setNow] = useState(0);
   const optionsRef = useRef(options);
   useEffect(() => { optionsRef.current = options; });
+  // Mirrors the page's count so a recording started right after a reply, or
+  // after the other form dictated, stops at what is really left.
   const remainingRef = useRef(options.remainingSeconds);
+  useEffect(() => { remainingRef.current = options.remainingSeconds; }, [options.remainingSeconds]);
   // Bumped by discard(): anything started under an older session is ignored.
   const sessionRef = useRef(0);
   const streamRef = useRef<MediaStream | null>(null);
@@ -113,7 +215,7 @@ export function useDictationRecorder(options: {
   const startedAtRef = useRef(0);
 
   const releaseMic = useCallback(() => {
-    streamRef.current?.getTracks().forEach((track) => track.stop());
+    stopTracks(streamRef.current);
     streamRef.current = null;
   }, []);
 
@@ -126,37 +228,17 @@ export function useDictationRecorder(options: {
     setState({ kind: "transcribing", target });
     const controller = new AbortController();
     uploadRef.current = controller;
-    const form = new FormData();
-    form.append("audio", clip, clipFilename(clip));
-    form.append("kind", optionsRef.current.kind);
-    form.append("duration_ms", String(stop.durationMs));
-    let status = 0;
-    let body: { outcome?: string; text?: string; remainingSeconds?: number; code?: string } | null = null;
-    try {
-      const response = await fetch(optionsRef.current.url, { method: "POST", body: form, signal: controller.signal });
-      status = response.status;
-      body = await response.json().catch(() => null);
-    } catch {
-      // A network failure is treated the same as a 502.
-    }
+    const reply = await postClip(optionsRef.current, clip, stop.durationMs, controller.signal);
     if (session !== sessionRef.current) return;
     uploadRef.current = null;
-    if (typeof body?.remainingSeconds === "number") remainingRef.current = body.remainingSeconds;
-    if (status === 429 && body?.code === "daily_limit") remainingRef.current = 0;
-    const ok = status === 200 && body?.outcome === "ok" && typeof body.text === "string";
-    const nothingHeard = status === 200 && body?.outcome === "nothing_heard";
-    const limitReached = remainingRef.current <= 0;
-    if (!ok && !nothingHeard && !limitReached) {
-      // The clip stays in memory only, so Retry can resend it without re-recording.
-      setState({ kind: "failed", target, clip, durationMs: stop.durationMs });
-      return;
+    const remaining = remainingAfter(reply);
+    if (remaining !== null) {
+      remainingRef.current = remaining;
+      optionsRef.current.onRemainingSeconds(remaining);
     }
-    const message = ok
-      ? optionsRef.current.onText(target, body!.text!)
-      : nothingHeard ? DICTATION_MESSAGES.nothingHeard : null;
-    const notice = message ?? stop.notice;
-    if (limitReached) setState({ kind: "unavailable", reason: "daily_limit", target, note: notice });
-    else setState(notice ? { kind: "notice", target, message: notice } : { kind: "idle" });
+    setState(stateAfterReply(reply, {
+      target, clip, stop, limitReached: remainingRef.current <= 0, onText: optionsRef.current.onText,
+    }));
   }, []);
 
   const retry = useCallback(() => {
@@ -174,7 +256,7 @@ export function useDictationRecorder(options: {
 
   const start = useCallback(async (target: string) => {
     const session = sessionRef.current;
-    if (typeof MediaRecorder === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+    if (micUnsupported()) {
       setState({ kind: "notice", target, message: DICTATION_MESSAGES.unsupported });
       return;
     }
@@ -187,7 +269,7 @@ export function useDictationRecorder(options: {
       return;
     }
     if (session !== sessionRef.current) {
-      stream.getTracks().forEach((track) => track.stop());
+      stopTracks(stream);
       return;
     }
     streamRef.current = stream;
@@ -235,7 +317,7 @@ export function useDictationRecorder(options: {
       recorder.stop();
     }
     releaseMic();
-    setState(restingState(remainingRef.current));
+    setState({ kind: "idle" });
   }, [clearAutoStop, releaseMic]);
 
   const toggle = useCallback((target: string) => {
@@ -243,7 +325,7 @@ export function useDictationRecorder(options: {
       stop(null);
       return;
     }
-    if (dictationBusy(state) || state.kind === "unavailable") return;
+    if (dictationBusy(state) || remainingRef.current <= 0) return;
     void start(target);
   }, [start, state, stop]);
 
@@ -264,7 +346,7 @@ export function useDictationRecorder(options: {
   }, [discard]);
 
   return {
-    state,
+    state: shownState(state, options.remainingSeconds),
     elapsedMs: state.kind === "recording" ? Math.max(0, now - state.startedAt) : 0,
     toggle,
     retry,

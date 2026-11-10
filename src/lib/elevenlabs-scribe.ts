@@ -3,7 +3,7 @@
 // puts the provider's response body in an error, so nothing said by a Mentor
 // can reach a log through it.
 
-export const ELEVENLABS_SPEECH_TO_TEXT_URL = "https://api.elevenlabs.io/v1/speech-to-text";
+const ELEVENLABS_SPEECH_TO_TEXT_URL = "https://api.elevenlabs.io/v1/speech-to-text";
 
 export type TranscribeSpeechInput = {
   audio: Blob;

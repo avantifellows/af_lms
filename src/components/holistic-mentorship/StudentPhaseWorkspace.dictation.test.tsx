@@ -1074,6 +1074,70 @@ describe("Follow-up Note Dictation", () => {
     });
   });
 
+  describe("one daily count for both forms", () => {
+    const LIMIT = "You've used today's 30 minutes of Dictation. You can keep typing.";
+
+    it("stops a Follow-up recording at the time left after a Post-Session dictation", async () => {
+      const network = stubNetwork();
+      vi.useFakeTimers();
+      renderWorkspace(completedDetail());
+      fireEvent.click(screen.getByRole("button", { name: "Edit Notes" }));
+
+      await act(async () => fireEvent.click(mic("What helped?")));
+      await act(async () => vi.advanceTimersByTimeAsync(3_000));
+      await act(async () => fireEvent.click(mic("What helped?")));
+      await network.transcribe("Spoken in Notes", 30);
+      const dialog = openModal();
+      await act(async () => fireEvent.click(modalMic(dialog, CHALLENGES)));
+      await act(async () => vi.advanceTimersByTimeAsync(30_000));
+
+      expect(network.dictationCalls).toHaveLength(2);
+      expect(network.dictationCalls[1].body.get("kind")).toBe("follow_up");
+      expect(network.dictationCalls[1].body.get("duration_ms")).toBe("30000");
+    });
+
+    it("locks the Post-Session mics when a Follow-up dictation uses up today's time", async () => {
+      const network = stubNetwork();
+      vi.useFakeTimers();
+      vi.spyOn(window, "confirm").mockReturnValue(true);
+      renderWorkspace(completedDetail());
+      fireEvent.click(screen.getByRole("button", { name: "Edit Notes" }));
+      const dialog = openModal();
+
+      await dictate(dialog, CHALLENGES);
+      await network.transcribe("Last words today", 0);
+      expect(modalMic(dialog, SOLUTIONS)).toBeDisabled();
+      fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+      expect(mic("What helped?")).toBeDisabled();
+      expect(mic("What happens next?")).toBeDisabled();
+      expect(screen.getAllByText(LIMIT)).toHaveLength(2);
+      await act(async () => fireEvent.click(mic("What helped?")));
+      expect(network.dictationCalls).toHaveLength(1);
+    });
+
+    it("takes a new count from the server when the page refreshes", async () => {
+      const network = stubNetwork();
+      vi.useFakeTimers();
+      const detail = mentorDetail();
+      const view = renderWorkspace(detail);
+      const refresh = (remainingSeconds: number) => view.rerender(
+        <StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027"
+          detail={detail} dictation={{ enabled: true, remainingSeconds }} />);
+
+      refresh(0);
+      expect(mic("What helped?")).toBeDisabled();
+      expect(screen.getAllByText(LIMIT)).toHaveLength(2);
+
+      refresh(20);
+      expect(mic("What helped?")).toBeEnabled();
+      expect(screen.queryByText(LIMIT)).not.toBeInTheDocument();
+      await act(async () => fireEvent.click(mic("What helped?")));
+      await act(async () => vi.advanceTimersByTimeAsync(20_000));
+      expect(network.dictationCalls[0].body.get("duration_ms")).toBe("20000");
+    });
+  });
+
   describe("where the mic shows", () => {
     const savedNote = {
       id: 503, submittedAt: "2026-07-03T10:00:00Z", authorName: "Anita Sharma",
