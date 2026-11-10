@@ -23,6 +23,8 @@ on:
 
 env:
   AWS_REGION: ap-south-1
+  # Short-lived AWS login through GitHub OIDC; no stored access key.
+  AWS_DEPLOY_ROLE_ARN: arn:aws:iam::111766607077:role/af-lms-amplify-deploy
   AMPLIFY_APP_ID: dr1eqhpsk9y2d
 
 jobs:
@@ -31,13 +33,14 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.deploy_type == 'preview'
     runs-on: ubuntu-latest
     environment: Preview
+    permissions:
+      id-token: write # AWS login through OIDC
 
     steps:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ env.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Set preview branch name
@@ -224,6 +227,7 @@ jobs:
     permissions:
       contents: write # force-push the PR code to the staging branch
       pull-requests: write # post the preview URL comment
+      id-token: write # AWS login through OIDC
 
     steps:
       - name: Checkout PR code
@@ -236,8 +240,7 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ env.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Set preview branch name
@@ -460,13 +463,14 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: Production
+    permissions:
+      id-token: write # AWS login through OIDC
 
     steps:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ env.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Generate production URL
