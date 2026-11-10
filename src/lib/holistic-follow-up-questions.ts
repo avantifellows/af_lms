@@ -1,3 +1,5 @@
+import { HOLISTIC_ANSWER_MAX_LENGTH } from "./holistic-answer-limit";
+
 // Client-safe: the fixed Follow-up Note questions shared by every Program,
 // Grade, and Phase. Each key maps one-to-one to a `<key>_answer` column of
 // holistic_mentorship_follow_up_notes. Keys are stable; text may change.
@@ -18,8 +20,6 @@ export type HolisticFollowUpNote = {
 
 export type HolisticFollowUpAnswers = Record<HolisticFollowUpQuestionKey, string | null>;
 
-export const HOLISTIC_FOLLOW_UP_ANSWER_MAX_LENGTH = 10_000;
-
 export type HolisticFollowUpAnswersResult =
   | { ok: true; answers: HolisticFollowUpAnswers }
   | { ok: false; error: string };
@@ -37,7 +37,7 @@ export function normalizeHolisticFollowUpAnswers(
   if (values.some((value) => value !== undefined && typeof value !== "string")) {
     return { ok: false, error: "Follow-up answers must be text" };
   }
-  if ((values as Array<string | undefined>).some((value) => (value?.length ?? 0) > HOLISTIC_FOLLOW_UP_ANSWER_MAX_LENGTH)) {
+  if ((values as Array<string | undefined>).some((value) => (value?.length ?? 0) > HOLISTIC_ANSWER_MAX_LENGTH)) {
     return { ok: false, error: "Follow-up answers must be 10,000 characters or fewer" };
   }
   const answers = Object.fromEntries(HOLISTIC_FOLLOW_UP_QUESTIONS.map(({ key }) => {

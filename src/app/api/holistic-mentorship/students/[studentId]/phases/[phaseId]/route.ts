@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { HOLISTIC_ANSWER_MAX_LENGTH } from "@/lib/holistic-answer-limit";
 import { validateHolisticChallengeCategories } from "@/lib/holistic-challenge-categories";
 import { saveHolisticNotes } from "@/lib/holistic-notes";
 import { getHolisticStudentPhase } from "@/lib/holistic-student-phase";
@@ -17,7 +18,7 @@ function parseAnswer(value: unknown): { questionId: number; answer: string } | n
   if (!value || typeof value !== "object") return null;
   const item = value as Record<string, unknown>;
   const questionId = positiveInteger(item.question_id);
-  return questionId && typeof item.answer === "string" && item.answer.length <= 10_000
+  return questionId && typeof item.answer === "string" && item.answer.length <= HOLISTIC_ANSWER_MAX_LENGTH
     ? { questionId, answer: item.answer }
     : null;
 }

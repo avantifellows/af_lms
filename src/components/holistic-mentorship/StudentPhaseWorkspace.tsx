@@ -15,10 +15,8 @@ import {
   holisticChallengeCategoryGroupsMessage, placeHolisticChallengeCategories, toggleHolisticChallengeCategory,
   validateHolisticChallengeCategories, type HolisticChallengeCategoryCode, type HolisticChallengeCategoryGroup,
 } from "@/lib/holistic-challenge-categories";
-import {
-  HOLISTIC_FOLLOW_UP_ANSWER_MAX_LENGTH, HOLISTIC_FOLLOW_UP_QUESTIONS,
-  type HolisticFollowUpQuestionKey,
-} from "@/lib/holistic-follow-up-questions";
+import { HOLISTIC_ANSWER_MAX_LENGTH } from "@/lib/holistic-answer-limit";
+import { HOLISTIC_FOLLOW_UP_QUESTIONS, type HolisticFollowUpQuestionKey } from "@/lib/holistic-follow-up-questions";
 import { holisticStudentPhaseHref, type HolisticStudentPhaseSource } from "@/lib/holistic-links";
 import { Button } from "@/components/ui/Button";
 import { Badge, type BadgeVariant } from "@/components/ui/Badge";
@@ -870,20 +868,46 @@ function NotesAnswerField({ question, answer, validationError, validationErrorId
   onAnswerChange: (questionId: number, answer: string) => void;
   children: ReactNode;
 }) {
+  const counterId = useId();
   const invalid = Boolean(validationError && !answer?.trim());
+  const counted = showsAnswerCounter(answer ?? "");
   return <div className="space-y-3">
     {children}
-    <label className="block space-y-1 text-sm font-semibold text-text-secondary">
-      {question.text} <span aria-hidden="true" className="text-accent">*</span>
-      <span className="sr-only">required</span>
-      <textarea ref={(element) => onTextarea(question.questionId, element)} aria-label={question.text}
-      aria-invalid={invalid} aria-describedby={invalid ? validationErrorId : undefined} rows={4}
-      disabled={disabled}
-      value={answer ?? ""}
-      onChange={(event) => onAnswerChange(question.questionId, event.target.value)}
-      className="w-full resize-y rounded-md border border-border bg-bg-card p-3 font-normal text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20" />
-    </label>
+    <div className="space-y-1">
+      <label className="block space-y-1 text-sm font-semibold text-text-secondary">
+        {question.text} <span aria-hidden="true" className="text-accent">*</span>
+        <span className="sr-only">required</span>
+        <textarea ref={(element) => onTextarea(question.questionId, element)} aria-label={question.text}
+        aria-invalid={invalid}
+        aria-describedby={describedBy(invalid && validationErrorId, counted && counterId)} rows={4}
+        disabled={disabled}
+        value={answer ?? ""}
+        onChange={(event) => onAnswerChange(question.questionId, event.target.value)}
+        className="w-full resize-y rounded-md border border-border bg-bg-card p-3 font-normal text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20" />
+      </label>
+      <AnswerCounter id={counterId} answer={answer ?? ""} />
+    </div>
   </div>;
+}
+
+const ANSWER_COUNTER_THRESHOLD = 9_000;
+
+function showsAnswerCounter(answer: string) {
+  return answer.length >= ANSWER_COUNTER_THRESHOLD;
+}
+
+function describedBy(...ids: Array<string | false>) {
+  return ids.filter(Boolean).join(" ") || undefined;
+}
+
+// Shown near the limit in every editable answer box. Not a live region: screen
+// readers hear it with the box's description, not on each keystroke.
+function AnswerCounter({ id, answer }: { id: string; answer: string }) {
+  if (!showsAnswerCounter(answer)) return null;
+  const over = answer.length > HOLISTIC_ANSWER_MAX_LENGTH;
+  return <p id={id} className={`text-right text-xs ${over ? "text-danger" : "text-text-muted"}`}>
+    {`${answer.length.toLocaleString("en-US")} / ${HOLISTIC_ANSWER_MAX_LENGTH.toLocaleString("en-US")}`}
+  </p>;
 }
 
 // `actions` renders below the fields: the Notes errors and Submit/Save controls.
@@ -1649,7 +1673,7 @@ const EMPTY_FOLLOW_UP_DRAFT = Object.fromEntries(
 ) as FollowUpDraft;
 
 const FOLLOW_UP_ANSWER_TOO_LONG =
-  `Keep this answer to ${HOLISTIC_FOLLOW_UP_ANSWER_MAX_LENGTH.toLocaleString("en-US")} characters or fewer`;
+  `Keep this answer to ${HOLISTIC_ANSWER_MAX_LENGTH.toLocaleString("en-US")} characters or fewer`;
 
 const FOLLOW_UP_MAYBE_SAVED =
   "This note may have saved. Check the Follow-up Notes list before trying again.";
@@ -1680,7 +1704,7 @@ function AddFollowUpNoteModal({ open, apiUrl, onClose }: {
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const hasAnswer = Object.values(draft).some((answer) => answer.trim());
-  const isTooLong = (answer: string) => answer.length > HOLISTIC_FOLLOW_UP_ANSWER_MAX_LENGTH;
+  const isTooLong = (answer: string) => answer.length > HOLISTIC_ANSWER_MAX_LENGTH;
   const hasTooLongAnswer = Object.values(draft).some(isTooLong);
 
   function close() {
@@ -1726,15 +1750,18 @@ function AddFollowUpNoteModal({ open, apiUrl, onClose }: {
     <div className="mt-4 space-y-4">
       {HOLISTIC_FOLLOW_UP_QUESTIONS.map(({ key, text }) => {
         const tooLong = isTooLong(draft[key]);
+        const counterId = `${fieldId}-${key}-counter`;
         return <div key={key}>
           <label htmlFor={`${fieldId}-${key}`} className="text-sm font-semibold text-text-primary">{text}</label>
           {/* readOnly, not disabled, so text stays selectable while a save is in flight. */}
           <textarea id={`${fieldId}-${key}`} rows={3}
             value={draft[key]} readOnly={saving} aria-invalid={tooLong || undefined}
-            aria-describedby={tooLong ? `${fieldId}-${key}-error` : undefined}
+            aria-describedby={describedBy(tooLong && `${fieldId}-${key}-error`,
+              showsAnswerCounter(draft[key]) && counterId)}
             onChange={(event) => setDraft((current) => ({ ...current, [key]: event.target.value }))}
             className={`mt-1 w-full rounded-md border bg-bg-card p-2 text-sm text-text-primary ${
               tooLong ? "border-danger" : "border-border"}`} />
+          <AnswerCounter id={counterId} answer={draft[key]} />
           {tooLong && <p id={`${fieldId}-${key}-error`} className="mt-1 text-sm text-danger">
             {FOLLOW_UP_ANSWER_TOO_LONG}
           </p>}

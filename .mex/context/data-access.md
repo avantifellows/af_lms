@@ -192,6 +192,15 @@ for a Grade 12 Mentee with prior-year Mapping history. It derives the prior Acad
 itself. `checkHolisticMentorWriteScope(scope, actorUserId)` returns 404 `Not found` for
 missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do not copy the query into new writers; call the helper so guard semantics and lock order stay identical.
 
+## Holistic answer length (#508)
+
+Post-Session answers and Follow-up answers share one limit, `HOLISTIC_ANSWER_MAX_LENGTH`
+(10,000) in the client-safe `src/lib/holistic-answer-limit.ts`. The Student Phase `PATCH`
+route and `normalizeHolisticFollowUpAnswers` both reject longer answers with it, and the
+Student Phase workspace shows an "N / 10,000" counter at 9,000 characters or more in every
+editable answer box (draft, author's Edit, Add Follow-up Note). Read-only views show no
+counter. Use this constant for any new answer-length check (e.g. Dictation, #500).
+
 ## Holistic Follow-up Notes (#377)
 
 - **Table ownership:** `holistic_mentorship_follow_up_notes` is created by the db-service
