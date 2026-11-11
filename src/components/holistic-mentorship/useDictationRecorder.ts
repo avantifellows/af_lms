@@ -372,30 +372,32 @@ export function useDictationRecorder(options: {
       return;
     }
     live.stream = stream;
-    let recorder: MediaRecorder;
+    // A recorder that can't be made, or can't start (the stream ended after
+    // getUserMedia), lets go of the mic and says this browser can't record.
     try {
-      recorder = new MediaRecorder(stream, recorderOptions());
+      const recorder = new MediaRecorder(stream, recorderOptions());
+      live.recorder = recorder;
+      const chunks: Blob[] = [];
+      recorder.ondataavailable = (event) => { if (event.data.size > 0) chunks.push(event.data); };
+      recorder.onstop = () => {
+        releaseMic(live);
+        live.recorder = null;
+        const finished = live.stop;
+        live.stop = null;
+        if (session !== live.session) return;
+        const clip = new Blob(chunks, { type: recorder.mimeType || chunks[0]?.type || "" });
+        void upload(target, clip, finished ?? browserStop(live), session);
+      };
+      // A recorder error ends the recording like a stop the browser made itself.
+      // A recorder that is already inactive fires stop after the error.
+      recorder.onerror = () => { if (recorder.state !== "inactive") recorder.stop(); };
+      recorder.start();
     } catch {
+      live.recorder = null;
       releaseMic(live);
       setState({ kind: "notice", target, message: DICTATION_MESSAGES.unsupported });
       return;
     }
-    live.recorder = recorder;
-    const chunks: Blob[] = [];
-    recorder.ondataavailable = (event) => { if (event.data.size > 0) chunks.push(event.data); };
-    recorder.onstop = () => {
-      releaseMic(live);
-      live.recorder = null;
-      const finished = live.stop;
-      live.stop = null;
-      if (session !== live.session) return;
-      const clip = new Blob(chunks, { type: recorder.mimeType || chunks[0]?.type || "" });
-      void upload(target, clip, finished ?? browserStop(live), session);
-    };
-    // A recorder error ends the recording like a stop the browser made itself.
-    // A recorder that is already inactive fires stop after the error.
-    recorder.onerror = () => { if (recorder.state !== "inactive") recorder.stop(); };
-    recorder.start();
     const startedAt = Date.now();
     live.startedAt = startedAt;
     const stopAtSeconds = Math.min(MAX_CLIP_SECONDS, optionsRef.current.remainingSeconds);

@@ -1382,6 +1382,21 @@ describe("Follow-up Note Dictation", () => {
       for (const button of followUpMics(dialog)) expect(button).toBeEnabled();
     });
 
+    it("lets go of the mic and leaves the Follow-up mics enabled when the recorder can't start", async () => {
+      const network = stubNetwork();
+      vi.stubGlobal("MediaRecorder", class extends FakeMediaRecorder {
+        start() { throw new DOMException("The stream is inactive", "NotSupportedError"); }
+      });
+      const dialog = await recordInEditThenOpenModal();
+
+      expect(screen.getByText(/^This browser can't record audio\./)).toHaveAttribute("aria-live", "polite");
+      expect(tracks[0].stop).toHaveBeenCalled();
+      expect(mic("What helped?")).toHaveAttribute("aria-pressed", "false");
+      expect(mic("What helped?")).toBeEnabled();
+      for (const button of followUpMics(dialog)) expect(button).toBeEnabled();
+      expect(network.dictationCalls).toHaveLength(0);
+    });
+
     // The open modal covers the page, so a Mentor can't reach these mics; the
     // shared count still keeps them disabled while the Follow-up form records.
     it("disables the Post-Session mics while a Follow-up answer records, until the modal drops it", async () => {
