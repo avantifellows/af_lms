@@ -215,6 +215,8 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   (`discard()` aborts the upload) is not passed to the provider call: the call finishes, the row
   is completed, and the seconds count. This is the agreed rule (ADR 0012: an abandoned clip
   still counts), so do not wire `request.signal` into `transcribeSpeech` without a new decision.
+  The route refuses an empty (0-byte) clip with 422 "Attach one audio clip" before this path, so
+  it writes no row and makes no provider call.
 - **Timestamps:** the columns are naive UTC and the shared Postgres session time zone may be
   Asia/Kolkata (the local test DBs are), so the insert writes `$now::timestamptz AT TIME ZONE 'UTC'`
   and `completed_at = now() AT TIME ZONE 'UTC'` explicitly; never rely on the `now()` default here.

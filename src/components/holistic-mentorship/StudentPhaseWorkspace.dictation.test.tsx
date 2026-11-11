@@ -514,6 +514,23 @@ describe("StudentPhaseWorkspace Dictation", () => {
     });
   });
 
+  it("sends nothing when Stop ends a recording that holds no audio, and leaves the mics ready", async () => {
+    const network = stubNetwork();
+    renderWorkspace(mentorDetail(draft({ 91: "Met parents" })));
+
+    await act(async () => fireEvent.click(mic("What helped?")));
+    FakeMediaRecorder.instances[0].audio = "";
+    await act(async () => fireEvent.click(mic("What helped?")));
+
+    expect(network.dictationCalls).toHaveLength(0);
+    expect(screen.getByText(/^Didn't catch anything\./)).toHaveAttribute("aria-live", "polite");
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+    expect(tracks[0].stop).toHaveBeenCalled();
+    expect(mic("What helped?")).toBeEnabled();
+    expect(mic("What happens next?")).toBeEnabled();
+    expect(box("What helped?")).toHaveValue("Met parents");
+  });
+
   describe("when the browser stops the recording itself", () => {
     const CHECK_MIC = "Recording stopped. Check your microphone.";
 

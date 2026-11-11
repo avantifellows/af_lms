@@ -439,6 +439,14 @@ describe("Holistic Dictation API", () => {
     expectNoProviderCallOrRecord();
   });
 
+  it("returns 422 for an empty clip without recording it or calling ElevenLabs", async () => {
+    const response = await post({ audio: clip(0) });
+
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toEqual({ error: "Attach one audio clip" });
+    expectNoProviderCallOrRecord();
+  });
+
   it.each(["audio/wav", "video/webm", "text/plain", ""])("returns 415 for a %j clip", async (type) => {
     const response = await post({ audio: clip(3, type) });
 

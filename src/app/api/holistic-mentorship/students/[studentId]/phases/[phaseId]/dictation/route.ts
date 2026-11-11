@@ -40,9 +40,16 @@ function refuse(error: string, status: number) {
   return NextResponse.json({ error }, { status });
 }
 
-function validateClip(form: FormData): { ok: true; clip: ValidClip } | { ok: false; response: NextResponse } {
+// The attached clip, or null when there is none or it holds no audio (an
+// empty clip is refused before any usage record or provider call).
+function attachedAudio(form: FormData): Blob | null {
   const audio = form.get("audio");
-  if (!(audio instanceof Blob)) return { ok: false, response: refuse("Attach one audio clip", 422) };
+  return audio instanceof Blob && audio.size > 0 ? audio : null;
+}
+
+function validateClip(form: FormData): { ok: true; clip: ValidClip } | { ok: false; response: NextResponse } {
+  const audio = attachedAudio(form);
+  if (!audio) return { ok: false, response: refuse("Attach one audio clip", 422) };
   // Ignore codec parameters: "audio/webm;codecs=opus" is "audio/webm".
   const contentType = audio.type.split(";")[0].trim().toLowerCase();
   if (!ALLOWED_AUDIO_TYPES.has(contentType)) {

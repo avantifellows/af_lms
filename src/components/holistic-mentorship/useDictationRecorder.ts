@@ -320,18 +320,23 @@ export function useDictationRecorder(options: {
     recorder.stop();
   }, []);
 
+  // An empty recording is never sent or counted: it shows `emptyNotice` instead.
+  const sendClip = useCallback((target: string, clip: Blob, stop: Stop, emptyNotice: string, session: number) => {
+    if (clip.size > 0) {
+      void upload(target, clip, stop, session);
+      return;
+    }
+    setState({ kind: "notice", target, message: emptyNotice });
+  }, [upload]);
+
   // The browser ended the recording itself (mic unplugged, permission removed,
   // a call took the mic). Keep what was said, and say why it stopped.
   const stoppedByBrowser = useCallback((target: string, clip: Blob, session: number) => {
     const live = liveRef.current;
     clearAutoStop(live);
     const notice = DICTATION_MESSAGES.micStopped;
-    if (clip.size === 0) {
-      setState({ kind: "notice", target, message: notice });
-      return;
-    }
-    void upload(target, clip, { durationMs: clipDurationMs(live), notice }, session);
-  }, [upload]);
+    sendClip(target, clip, { durationMs: clipDurationMs(live), notice }, notice, session);
+  }, [sendClip]);
 
   const start = useCallback(async (target: string) => {
     const live = liveRef.current;
@@ -371,7 +376,7 @@ export function useDictationRecorder(options: {
       live.stop = null;
       if (session !== live.session) return;
       const clip = new Blob(chunks, { type: recorder.mimeType || chunks[0]?.type || "" });
-      if (finished) void upload(target, clip, finished, session);
+      if (finished) sendClip(target, clip, finished, DICTATION_MESSAGES.nothingHeard, session);
       else stoppedByBrowser(target, clip, session);
     };
     // A recorder error ends the recording like a stop the browser made itself.
@@ -385,7 +390,7 @@ export function useDictationRecorder(options: {
     live.stopAtMs = stopAtMs;
     live.autoStop = window.setTimeout(() => stop(autoStopNotice(stopAtSeconds)), stopAtMs);
     setState({ kind: "recording", target, startedAt, stopAtMs });
-  }, [stop, stoppedByBrowser, upload]);
+  }, [sendClip, stop, stoppedByBrowser]);
 
   const discard = useCallback(() => {
     const live = liveRef.current;
