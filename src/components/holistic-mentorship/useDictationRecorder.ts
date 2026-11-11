@@ -249,6 +249,21 @@ function clipDurationMs(live: Live) {
   return Math.max(1, Math.min(live.stopAtMs, Date.now() - live.startedAt));
 }
 
+// The browser ended the recording itself (mic unplugged, permission removed,
+// a call took the mic). Keep what was said, and say why it stopped.
+function browserStop(live: Live): Stop {
+  clearAutoStop(live);
+  return { durationMs: clipDurationMs(live), notice: DICTATION_MESSAGES.micStopped };
+}
+
+function recordingStartedAt(state: DictationState) {
+  return state.kind === "recording" ? state.startedAt : null;
+}
+
+function isBusyElsewhere(busyKind: DictationKind | null, kind: DictationKind) {
+  return busyKind !== null && busyKind !== kind;
+}
+
 // Ticks while a recording runs, for the "Recording m:ss" label.
 function useElapsedMs(startedAt: number | null) {
   const [now, setNow] = useState(0);
@@ -290,7 +305,13 @@ export function useDictationRecorder(options: {
     stopAtMs: MAX_CLIP_SECONDS * 1000,
   });
 
-  const upload = useCallback(async (target: string, clip: Blob, stop: Stop, session: number) => {
+  // An empty recording is never sent or counted: it shows `emptyNotice` instead.
+  // This one check serves both stop paths (Mentor or auto-stop, and the browser).
+  const upload = useCallback(async (target: string, clip: Blob, stop: Stop, session: number, emptyNotice: string) => {
+    if (clip.size === 0) {
+      setState({ kind: "notice", target, message: emptyNotice });
+      return;
+    }
     const live = liveRef.current;
     setState({ kind: "transcribing", target });
     const controller = new AbortController();
@@ -308,7 +329,9 @@ export function useDictationRecorder(options: {
 
   const retry = useCallback(() => {
     if (state.kind !== "failed") return;
-    void upload(state.target, state.clip, { durationMs: state.durationMs, notice: null }, liveRef.current.session);
+    // A failed clip is never empty, so emptyNotice is never shown here.
+    const stop = { durationMs: state.durationMs, notice: null };
+    void upload(state.target, state.clip, stop, liveRef.current.session, DICTATION_MESSAGES.nothingHeard);
   }, [state, upload]);
 
   const stop = useCallback((notice: string | null) => {
@@ -319,24 +342,6 @@ export function useDictationRecorder(options: {
     live.stop = { durationMs: clipDurationMs(live), notice };
     recorder.stop();
   }, []);
-
-  // An empty recording is never sent or counted: it shows `emptyNotice` instead.
-  const sendClip = useCallback((target: string, clip: Blob, stop: Stop, emptyNotice: string, session: number) => {
-    if (clip.size > 0) {
-      void upload(target, clip, stop, session);
-      return;
-    }
-    setState({ kind: "notice", target, message: emptyNotice });
-  }, [upload]);
-
-  // The browser ended the recording itself (mic unplugged, permission removed,
-  // a call took the mic). Keep what was said, and say why it stopped.
-  const stoppedByBrowser = useCallback((target: string, clip: Blob, session: number) => {
-    const live = liveRef.current;
-    clearAutoStop(live);
-    const notice = DICTATION_MESSAGES.micStopped;
-    sendClip(target, clip, { durationMs: clipDurationMs(live), notice }, notice, session);
-  }, [sendClip]);
 
   const start = useCallback(async (target: string) => {
     const live = liveRef.current;
@@ -376,8 +381,8 @@ export function useDictationRecorder(options: {
       live.stop = null;
       if (session !== live.session) return;
       const clip = new Blob(chunks, { type: recorder.mimeType || chunks[0]?.type || "" });
-      if (finished) sendClip(target, clip, finished, DICTATION_MESSAGES.nothingHeard, session);
-      else stoppedByBrowser(target, clip, session);
+      if (finished) void upload(target, clip, finished, session, DICTATION_MESSAGES.nothingHeard);
+      else void upload(target, clip, browserStop(live), session, DICTATION_MESSAGES.micStopped);
     };
     // A recorder error ends the recording like a stop the browser made itself.
     // A recorder that is already inactive fires stop after the error.
@@ -390,7 +395,7 @@ export function useDictationRecorder(options: {
     live.stopAtMs = stopAtMs;
     live.autoStop = window.setTimeout(() => stop(autoStopNotice(stopAtSeconds)), stopAtMs);
     setState({ kind: "recording", target, startedAt, stopAtMs });
-  }, [sendClip, stop, stoppedByBrowser]);
+  }, [stop, upload]);
 
   const discard = useCallback(() => {
     const live = liveRef.current;
@@ -410,7 +415,7 @@ export function useDictationRecorder(options: {
     setState({ kind: "idle" });
   }, []);
 
-  const busyElsewhere = options.busyKind !== null && options.busyKind !== options.kind;
+  const busyElsewhere = isBusyElsewhere(options.busyKind, options.kind);
   useReportBusy(dictationBusy(state), options.kind, options.onBusy);
 
   const toggle = useCallback((target: string) => {
@@ -422,7 +427,7 @@ export function useDictationRecorder(options: {
     void start(target);
   }, [busyElsewhere, start, state, stop]);
 
-  const elapsedMs = useElapsedMs(state.kind === "recording" ? state.startedAt : null);
+  const elapsedMs = useElapsedMs(recordingStartedAt(state));
 
   // Leaving the page or unmounting the form drops the recording and any late text.
   useEffect(() => {
