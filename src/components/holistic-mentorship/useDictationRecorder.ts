@@ -92,7 +92,12 @@ function autoStopNotice(stopAtSeconds: number) {
     : "Recording stopped: today's Dictation time ran out.";
 }
 
-type Stop = { durationMs: number; notice: string | null };
+type Stop = {
+  durationMs: number;
+  notice: string | null;
+  /** The browser ended the recording (mic unplugged, permission removed), not the Mentor or the timer. */
+  byBrowser?: boolean;
+};
 
 type DictationReply = {
   status: number;
@@ -179,10 +184,16 @@ function shownState(state: DictationState, remainingSeconds: number): DictationS
   return state;
 }
 
+// What to show when a clip held no words (empty, or the server heard nothing).
+// After the browser stopped the recording, the microphone is the likelier cause.
+function nothingHeardNotice(stop: Stop) {
+  return stop.byBrowser ? DICTATION_MESSAGES.micStopped : DICTATION_MESSAGES.nothingHeard;
+}
+
 // Why a reply brought no words, when that is not a failure to retry. A clip
 // refused by the daily limit while time is left can never fit, so it is dropped.
-function replyNotice(reply: DictationReply): string | null {
-  if (heardNothing(reply)) return DICTATION_MESSAGES.nothingHeard;
+function replyNotice(reply: DictationReply, stop: Stop): string | null {
+  if (heardNothing(reply)) return nothingHeardNotice(stop);
   // Signed out, no access, or a clip the server won't take: resending can't help.
   if (reply.status >= 400 && reply.status < 500 && reply.status !== 429) return DICTATION_MESSAGES.notSent;
   const timeLeft = (remainingAfter(reply) ?? 0) > 0;
@@ -200,7 +211,7 @@ function stateAfterReply(reply: DictationReply, attempt: {
 }): DictationState {
   const { target, clip, stop, limitReached } = attempt;
   const text = replyText(reply);
-  const replyMessage = replyNotice(reply);
+  const replyMessage = replyNotice(reply, stop);
   if (text === null && !replyMessage && !limitReached) {
     return { kind: "failed", target, clip, durationMs: stop.durationMs };
   }
@@ -253,7 +264,7 @@ function clipDurationMs(live: Live) {
 // a call took the mic). Keep what was said, and say why it stopped.
 function browserStop(live: Live): Stop {
   clearAutoStop(live);
-  return { durationMs: clipDurationMs(live), notice: DICTATION_MESSAGES.micStopped };
+  return { durationMs: clipDurationMs(live), notice: DICTATION_MESSAGES.micStopped, byBrowser: true };
 }
 
 function recordingStartedAt(state: DictationState) {
@@ -305,11 +316,11 @@ export function useDictationRecorder(options: {
     stopAtMs: MAX_CLIP_SECONDS * 1000,
   });
 
-  // An empty recording is never sent or counted: it shows `emptyNotice` instead.
-  // This one check serves both stop paths (Mentor or auto-stop, and the browser).
-  const upload = useCallback(async (target: string, clip: Blob, stop: Stop, session: number, emptyNotice: string) => {
+  // An empty recording is never sent or counted: it shows the nothing-heard
+  // notice instead. This one check serves both stop paths (Mentor or auto-stop, and the browser).
+  const upload = useCallback(async (target: string, clip: Blob, stop: Stop, session: number) => {
     if (clip.size === 0) {
-      setState({ kind: "notice", target, message: emptyNotice });
+      setState({ kind: "notice", target, message: nothingHeardNotice(stop) });
       return;
     }
     const live = liveRef.current;
@@ -329,9 +340,7 @@ export function useDictationRecorder(options: {
 
   const retry = useCallback(() => {
     if (state.kind !== "failed") return;
-    // A failed clip is never empty, so emptyNotice is never shown here.
-    const stop = { durationMs: state.durationMs, notice: null };
-    void upload(state.target, state.clip, stop, liveRef.current.session, DICTATION_MESSAGES.nothingHeard);
+    void upload(state.target, state.clip, { durationMs: state.durationMs, notice: null }, liveRef.current.session);
   }, [state, upload]);
 
   const stop = useCallback((notice: string | null) => {
@@ -381,8 +390,7 @@ export function useDictationRecorder(options: {
       live.stop = null;
       if (session !== live.session) return;
       const clip = new Blob(chunks, { type: recorder.mimeType || chunks[0]?.type || "" });
-      if (finished) void upload(target, clip, finished, session, DICTATION_MESSAGES.nothingHeard);
-      else void upload(target, clip, browserStop(live), session, DICTATION_MESSAGES.micStopped);
+      void upload(target, clip, finished ?? browserStop(live), session);
     };
     // A recorder error ends the recording like a stop the browser made itself.
     // A recorder that is already inactive fires stop after the error.

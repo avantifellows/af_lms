@@ -578,6 +578,25 @@ describe("StudentPhaseWorkspace Dictation", () => {
       expect(mic("What happens next?")).toHaveAttribute("aria-pressed", "true");
     });
 
+    it("says to check the microphone, not that nothing was heard, when Scribe hears nothing", async () => {
+      const network = stubNetwork();
+      vi.useFakeTimers();
+      renderWorkspace(mentorDetail(draft({ 91: "Met parents" })));
+
+      await act(async () => fireEvent.click(mic("What helped?")));
+      await act(async () => vi.advanceTimersByTimeAsync(3_000));
+      await act(async () => { FakeMediaRecorder.instances[0].stop(); });
+      expect(network.dictationCalls).toHaveLength(1);
+      await network.respond({ outcome: "nothing_heard", remainingSeconds: 1_797 });
+
+      expect(screen.getByText(CHECK_MIC)).toHaveAttribute("aria-live", "polite");
+      expect(screen.queryByText(/^Didn't catch anything\./)).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+      expect(box("What helped?")).toHaveValue("Met parents");
+      expect(mic("What helped?")).toBeEnabled();
+      expect(mic("What happens next?")).toBeEnabled();
+    });
+
     it("ends the recording the same way when the recorder reports an error", async () => {
       const network = stubNetwork();
       vi.useFakeTimers();
