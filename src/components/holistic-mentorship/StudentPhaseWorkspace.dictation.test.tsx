@@ -908,6 +908,20 @@ describe("StudentPhaseWorkspace Dictation", () => {
       expect(box("What helped?")).toBeEnabled();
     });
 
+    // jsdom has no layout, so this checks structure only: the shown-only limit
+    // message shares one block with the polite live region instead of being a
+    // separate item of the gapped status row (which put it 8 px right of the mic).
+    it("keeps the shown-only limit message in the same block as the box's live region", () => {
+      renderWorkspace(mentorDetail(), { enabled: true, remainingSeconds: 0 });
+
+      for (const message of screen.getAllByText(LIMIT)) {
+        const block = message.parentElement!;
+        expect(block.querySelector("[aria-live='polite']")).toBeEmptyDOMElement();
+        expect(block).not.toHaveClass("gap-2");
+        expect(block.parentElement).toHaveClass("gap-2");
+      }
+    });
+
     it("keeps mics in the limit state after Cancel in Edit or pagehide", async () => {
       stubNetwork();
       renderWorkspace(mentorDetail(submitted({ 91: "First answer", 92: "Then this" })),

@@ -57,15 +57,18 @@ export function DictationStatus({ target, recorder }: { target: string; recorder
   const mine = "target" in state && state.target === target;
   const limitHere = mine && state.kind === "unavailable";
   return <div className="flex flex-wrap items-center gap-2">
-    <p aria-live="polite" className="text-xs text-text-muted">
-      {limitHere
-        ? <>{state.note && <><span>{state.note}</span>{" "}</>}<span>{DICTATION_MESSAGES.dailyLimit}</span></>
-        : mine ? statusMessage(state) : ""}
-    </p>
-    {/* Every other box shows the limit too, without announcing it again. */}
-    {state.kind === "unavailable" && !mine && <p className="text-xs text-text-muted">
-      {DICTATION_MESSAGES.dailyLimit}
-    </p>}
+    {/* One flex item, so the shown-only limit message isn't pushed a gap right of the empty live region. */}
+    <div>
+      <p aria-live="polite" className="text-xs text-text-muted">
+        {limitHere
+          ? <>{state.note && <><span>{state.note}</span>{" "}</>}<span>{DICTATION_MESSAGES.dailyLimit}</span></>
+          : mine ? statusMessage(state) : ""}
+      </p>
+      {/* Every other box shows the limit too, without announcing it again. */}
+      {state.kind === "unavailable" && !mine && <p className="text-xs text-text-muted">
+        {DICTATION_MESSAGES.dailyLimit}
+      </p>}
+    </div>
     {mine && state.kind === "failed" && <button type="button" onClick={recorder.retry}
       className="inline-flex min-h-11 items-center rounded-md border border-border bg-bg-card px-2.5 text-xs font-semibold text-text-secondary hover:border-accent hover:text-accent">
       Retry
