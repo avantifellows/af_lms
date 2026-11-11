@@ -173,6 +173,31 @@ function renderWorkspace(detail: HolisticStudentPhaseDetail, dictation = ON) {
 const mic = (question: string) => screen.getByRole("button", { name: `Dictate: ${question}` });
 const box = (question: string) => screen.getByRole("textbox", { name: question });
 
+// ---- Saving while a clip is in progress ----
+
+const SAVE_HINT = "Finish dictating first";
+
+function expectSaveBlocked(button: HTMLElement) {
+  expect(button).toBeDisabled();
+  expect(button).toHaveAccessibleDescription(SAVE_HINT);
+  expect(screen.getByText(SAVE_HINT)).toBeVisible();
+}
+
+function expectSaveAllowed(button: HTMLElement) {
+  expect(button).toBeEnabled();
+  expect(button).not.toHaveAccessibleDescription(SAVE_HINT);
+  expect(screen.queryByText(SAVE_HINT)).not.toBeInTheDocument();
+}
+
+// These forms have no <form> element or keyboard shortcut, and React never runs
+// onClick for a disabled button, so the only other way to reach the save
+// handler is to call it directly. It must refuse on its own, not only by the
+// button being disabled.
+function callSaveHandler(button: HTMLElement) {
+  const propsKey = Object.keys(button).find((key) => key.startsWith("__reactProps$"))!;
+  (button as unknown as Record<string, { onClick: () => void }>)[propsKey].onClick();
+}
+
 describe("StudentPhaseWorkspace Dictation", () => {
   beforeEach(() => {
     installFakeMic();
@@ -336,53 +361,86 @@ describe("StudentPhaseWorkspace Dictation", () => {
       ...notes!, challengeCategories: ["academic.other", "non_academic.other"],
     });
 
-    it("Submit stops the recording, releases the mic, and uploads nothing", async () => {
+    const finalWrites = (network: ReturnType<typeof stubNetwork>) =>
+      network.notesCalls.filter(({ body }) => body.action !== "draft");
+
+    // Submit and Save Changes wait while the clip records and while it is
+    // transcribed, so its words are in what is saved.
+    async function expectSaveWaitsForClip(network: ReturnType<typeof stubNetwork>, button: string) {
+      await act(async () => fireEvent.click(mic("What helped?")));
+      expectSaveBlocked(screen.getByRole("button", { name: button }));
+      await act(async () => callSaveHandler(screen.getByRole("button", { name: button })));
+      expect(finalWrites(network)).toHaveLength(0);
+      expect(tracks[0].stop).not.toHaveBeenCalled();
+      expect(mic("What helped?")).toHaveAttribute("aria-pressed", "true");
+
+      await act(async () => fireEvent.click(mic("What helped?")));
+      expect(screen.getByText("Transcribing…")).toBeInTheDocument();
+      expectSaveBlocked(screen.getByRole("button", { name: button }));
+      await act(async () => callSaveHandler(screen.getByRole("button", { name: button })));
+      expect(finalWrites(network)).toHaveLength(0);
+
+      await network.transcribe("They agreed");
+      expectSaveAllowed(screen.getByRole("button", { name: button }));
+      await act(async () => fireEvent.click(screen.getByRole("button", { name: button })));
+      expect(network.dictationCalls).toHaveLength(1);
+    }
+
+    it("Submit waits for a clip that is recording or transcribing, then submits its words", async () => {
       const network = stubNetwork();
       vi.spyOn(window, "confirm").mockReturnValue(true);
       renderWorkspace(mentorDetail(withCategories(draft({ 91: "A plan", 92: "Review it" }))));
 
-      await act(async () => fireEvent.click(mic("What helped?")));
-      expect(tracks[0].stop).not.toHaveBeenCalled();
-      await act(async () => fireEvent.click(screen.getByRole("button", { name: "Submit Notes" })));
+      await expectSaveWaitsForClip(network, "Submit Notes");
 
-      expect(tracks[0].stop).toHaveBeenCalled();
-      expect(network.dictationCalls).toHaveLength(0);
-      expect(network.notesCalls.at(-1)!.body).toMatchObject({
+      expect(finalWrites(network)).toHaveLength(1);
+      expect(finalWrites(network)[0].body).toMatchObject({
         action: "submit",
-        answers: [{ question_id: 91, answer: "A plan" }, { question_id: 92, answer: "Review it" }],
+        answers: [{ question_id: 91, answer: "A plan They agreed" }, { question_id: 92, answer: "Review it" }],
       });
     });
 
-    it("Submit ignores a transcription that arrives late", async () => {
+    it("pagehide ignores a transcription that arrives late", async () => {
       const network = stubNetwork();
-      vi.spyOn(window, "confirm").mockReturnValue(true);
-      renderWorkspace(mentorDetail(withCategories(draft({ 91: "A plan", 92: "Review it" }))));
+      renderWorkspace(mentorDetail(draft({ 91: "A plan", 92: "Review it" })));
 
       await act(async () => fireEvent.click(mic("What helped?")));
       await act(async () => fireEvent.click(mic("What helped?")));
       expect(network.dictationCalls).toHaveLength(1);
-      await act(async () => fireEvent.click(screen.getByRole("button", { name: "Submit Notes" })));
+      await act(async () => { window.dispatchEvent(new Event("pagehide")); });
       await network.transcribe("late words");
 
-      expect(screen.getByText("A plan")).toBeInTheDocument();
-      expect(screen.queryByText(/late words/)).not.toBeInTheDocument();
+      expect(box("What helped?")).toHaveValue("A plan");
+      expect(screen.queryByText("Transcribing…")).not.toBeInTheDocument();
+      expect(screen.queryByText("Finish dictating first")).not.toBeInTheDocument();
     });
 
-    it("Save changes stops a recording in the author's Edit and uploads nothing", async () => {
+    it("Save Changes waits for a clip in the author's Edit, then saves its words", async () => {
       const network = stubNetwork();
       vi.spyOn(window, "confirm").mockReturnValue(true);
       renderWorkspace(mentorDetail(submitted({ 91: "First answer", 92: "Then this" })));
 
       fireEvent.click(screen.getByRole("button", { name: "Edit Notes" }));
+      await expectSaveWaitsForClip(network, "Save Changes");
+
+      expect(finalWrites(network)).toHaveLength(1);
+      expect(finalWrites(network)[0].body).toMatchObject({
+        action: "edit",
+        answers: [{ question_id: 91, answer: "First answer They agreed" }, { question_id: 92, answer: "Then this" }],
+      });
+    });
+
+    it("Cancel in Edit still drops a recording, releases the mic, and uploads nothing", async () => {
+      const network = stubNetwork();
+      renderWorkspace(mentorDetail(submitted({ 91: "First answer", 92: "Then this" })));
+
+      fireEvent.click(screen.getByRole("button", { name: "Edit Notes" }));
       await act(async () => fireEvent.click(mic("What helped?")));
-      await act(async () => fireEvent.click(screen.getByRole("button", { name: "Save Changes" })));
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
       expect(tracks[0].stop).toHaveBeenCalled();
       expect(network.dictationCalls).toHaveLength(0);
-      expect(network.notesCalls[0].body).toMatchObject({
-        action: "edit",
-        answers: [{ question_id: 91, answer: "First answer" }, { question_id: 92, answer: "Then this" }],
-      });
+      expect(screen.getByRole("button", { name: "Edit Notes" })).toBeInTheDocument();
     });
 
     it("Cancel in Edit ignores a transcription that arrives late", async () => {
@@ -1105,20 +1163,35 @@ describe("Follow-up Note Dictation", () => {
   });
 
   describe("dropping a recording", () => {
-    it("Save stops the recording, releases the mic, uploads nothing, and saves what is in the boxes", async () => {
+    it("Save waits for a clip that is recording or transcribing, then saves its words", async () => {
       const network = stubNetwork();
       renderWorkspace(completedDetail());
       const dialog = openModal();
+      const save = () => within(dialog).getByRole("button", { name: "Save" });
       fireEvent.change(modalBox(dialog, CHALLENGES), { target: { value: "Homesick" } });
+      expectSaveAllowed(save());
 
       await act(async () => fireEvent.click(modalMic(dialog, SOLUTIONS)));
+      expectSaveBlocked(save());
+      await act(async () => callSaveHandler(save()));
+      expect(network.notesCalls).toHaveLength(0);
       expect(tracks[0].stop).not.toHaveBeenCalled();
-      await act(async () => fireEvent.click(within(dialog).getByRole("button", { name: "Save" })));
+      expect(modalMic(dialog, SOLUTIONS)).toHaveAttribute("aria-pressed", "true");
 
-      expect(tracks[0].stop).toHaveBeenCalled();
-      expect(network.dictationCalls).toHaveLength(0);
+      await act(async () => fireEvent.click(modalMic(dialog, SOLUTIONS)));
+      expect(within(dialog).getByText("Transcribing…")).toBeInTheDocument();
+      expectSaveBlocked(save());
+      await act(async () => callSaveHandler(save()));
+      expect(network.notesCalls).toHaveLength(0);
+
+      await network.transcribe("Daily check-in");
+      expectSaveAllowed(save());
+      await act(async () => fireEvent.click(save()));
+
+      expect(network.dictationCalls).toHaveLength(1);
+      expect(network.notesCalls).toHaveLength(1);
       expect(network.notesCalls[0].body).toEqual({
-        answers: { challenges: "Homesick", solutions: "", action_plan: "" },
+        answers: { challenges: "Homesick", solutions: "Daily check-in", action_plan: "" },
       });
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     });
@@ -1409,6 +1482,10 @@ describe("Follow-up Note Dictation", () => {
       await act(async () => fireEvent.click(modalMic(dialog, CHALLENGES)));
       expect(mic("What helped?")).toBeDisabled();
       expect(mic("What happens next?")).toBeDisabled();
+      // Only a form's own clip holds its save back.
+      expect(screen.getByRole("button", { name: "Save Changes" })).toBeEnabled();
+      expect(screen.getByRole("button", { name: "Save Changes" })).not.toHaveAccessibleDescription(SAVE_HINT);
+      expect(screen.getAllByText(SAVE_HINT)).toEqual([within(dialog).getByText(SAVE_HINT)]);
       await act(async () => fireEvent.click(mic("What helped?")));
       expect(getUserMedia).toHaveBeenCalledTimes(1);
 

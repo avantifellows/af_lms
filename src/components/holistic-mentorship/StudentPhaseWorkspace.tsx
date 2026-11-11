@@ -24,9 +24,9 @@ import { Badge, type BadgeVariant } from "@/components/ui/Badge";
 import { Card } from "@/components/ui/Card";
 import { Modal } from "@/components/ui/Modal";
 import GuidancePreview from "./GuidancePreview";
-import { DictationMicButton, DictationStatus } from "./DictationMicButton";
+import { DictationMicButton, DictationSaveHint, DictationStatus } from "./DictationMicButton";
 import {
-  DICTATION_OFF, useDictationRecorder, useSharedDictationAvailability,
+  DICTATION_OFF, dictationBusy, useDictationRecorder, useSharedDictationAvailability,
   type DictationAvailability, type DictationRecorder, type SharedDictationAvailability,
 } from "./useDictationRecorder";
 
@@ -209,6 +209,12 @@ function notesApiUrl(props: NotesEditorProps) {
 type DictationRouteScope = Pick<NotesEditorProps, "studentId" | "phaseId" | "schoolCode" | "academicYear" | "programId">;
 
 const DICTATION_TOO_LONG = "Not added: the answer would go over 10,000 characters.";
+
+// Saving waits for a clip still recording or transcribing, so its words are
+// not lost. While it waits, the save button is described by this hint id.
+function dictationSaveHintId(recorder: DictationRecorder, id: string) {
+  return dictationBusy(recorder.state) ? id : undefined;
+}
 
 function dictationApiUrl(props: DictationRouteScope) {
   return `/api/holistic-mentorship/students/${props.studentId}/phases/${props.phaseId}/dictation?${
@@ -675,7 +681,10 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
     setSuccess("");
   };
   const dictation = useNotesDictation(props, value.answers, updateAnswer);
+  // Autosave doesn't wait for a clip: its words arrive later like typing.
+  const dictating = dictationBusy(dictation.state);
   const submit = async () => {
+    if (dictating) return;
     dictation.discard();
     if (!validateFinalWrite(SUBMIT_BLANK_ANSWER_ERROR)) return;
     setFinalWriting(true);
@@ -703,6 +712,7 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
     }
   };
   const saveCorrection = async () => {
+    if (dictating) return;
     dictation.discard();
     if (!validateFinalWrite(SAVE_BLANK_ANSWER_ERROR)) return;
     setFinalWriting(true);
@@ -771,7 +781,8 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
         actions={<NotesEditorActions status={status} error={error} validationError={validationError}
           validationErrorId={validationErrorId} categoryError={holisticChallengeCategoryGroupsMessage(missingCategories)}
           categoryErrorId={categoryErrorId} canRetry={enabledUnlessDisabled(autosaveEnabled, conflict)}
-          editingSubmitted={editingSubmitted} disabled={finalWriting} onRetry={retry}
+          editingSubmitted={editingSubmitted} disabled={finalWriting}
+          saveHintId={dictationSaveHintId(dictation, `${errorId}-dictating`)} onRetry={retry}
           onSaveCorrection={saveCorrection} onCancelCorrection={cancelCorrection} onSubmit={submit} />} />}
       submitted={<><SubmittedNotesView questions={props.questions} value={value}
           submitted={notesState === "submitted"} />
@@ -1008,7 +1019,7 @@ function EditableNotesForm({ questions, value, validationError, validationErrorI
 
 function NotesEditorActions({ status, error, validationError, validationErrorId, categoryError,
   categoryErrorId, canRetry, editingSubmitted, onRetry, onSaveCorrection,
-  disabled, onCancelCorrection, onSubmit }: {
+  disabled, saveHintId, onCancelCorrection, onSubmit }: {
   status: NotesEditorStatus;
   error: string;
   validationError: string;
@@ -1018,27 +1029,33 @@ function NotesEditorActions({ status, error, validationError, validationErrorId,
   canRetry: boolean;
   editingSubmitted: boolean;
   disabled: boolean;
+  /** Set while this form's Dictation clip is still recording or transcribing: Submit and Save Changes wait. */
+  saveHintId: string | undefined;
   onRetry: () => void;
   onSaveCorrection: () => Promise<void>;
   onCancelCorrection: () => void;
   onSubmit: () => Promise<void>;
 }) {
-  const busy = disabled || status === "saving";
-  return <div className="flex min-h-11 flex-wrap items-center justify-end gap-3" aria-live="polite">
-    <NotesEditorAlert id={validationErrorId} message={validationError} />
-    <NotesEditorAlert id={categoryErrorId} message={categoryError} />
-    {status === "failed" && <NotesSaveFailure error={error} showError={editingSubmitted} canRetry={canRetry}
-      disabled={disabled} onRetry={onRetry} />}
-    {editingSubmitted
-      ? <><Button type="button" variant="ghost" disabled={disabled} onClick={onCancelCorrection}>Cancel</Button>
-          <Button type="button" onClick={() => void onSaveCorrection()} disabled={busy}>
-            <Save aria-hidden="true" className="h-4 w-4" />
-            Save Changes
-          </Button></>
-      : <Button type="button" onClick={() => void onSubmit()} disabled={busy}>
-          <Send aria-hidden="true" className="h-4 w-4" />
-          Submit Notes
-        </Button>}
+  const busy = disabled || status === "saving" || Boolean(saveHintId);
+  // The hint sits outside the live region, so it isn't announced each time a recording starts.
+  return <div className="space-y-1">
+    <div className="flex min-h-11 flex-wrap items-center justify-end gap-3" aria-live="polite">
+      <NotesEditorAlert id={validationErrorId} message={validationError} />
+      <NotesEditorAlert id={categoryErrorId} message={categoryError} />
+      {status === "failed" && <NotesSaveFailure error={error} showError={editingSubmitted} canRetry={canRetry}
+        disabled={disabled} onRetry={onRetry} />}
+      {editingSubmitted
+        ? <><Button type="button" variant="ghost" disabled={disabled} onClick={onCancelCorrection}>Cancel</Button>
+            <Button type="button" onClick={() => void onSaveCorrection()} disabled={busy} aria-describedby={saveHintId}>
+              <Save aria-hidden="true" className="h-4 w-4" />
+              Save Changes
+            </Button></>
+        : <Button type="button" onClick={() => void onSubmit()} disabled={busy} aria-describedby={saveHintId}>
+            <Send aria-hidden="true" className="h-4 w-4" />
+            Submit Notes
+          </Button>}
+    </div>
+    <DictationSaveHint id={saveHintId} className="block text-right" />
   </div>;
 }
 
@@ -1766,8 +1783,9 @@ function MentorFollowUpNotes({ phase, apiUrl, dictation, dictationUrl }: {
   </>;
 }
 
-// The modal owns its own Dictation recorder; closing it, saving, or leaving
-// the page drops any recording and ignores a transcription still in flight.
+// The modal owns its own Dictation recorder; closing it or leaving the page
+// drops any recording and ignores a transcription still in flight. Save waits
+// until the recording's words have arrived.
 function AddFollowUpNoteModal({ open, apiUrl, dictation, dictationUrl, onClose }: {
   open: boolean;
   apiUrl: string;
@@ -1802,6 +1820,9 @@ function AddFollowUpNoteModal({ open, apiUrl, dictation, dictationUrl, onClose }
     onBusy: dictation.onBusy,
     onText: applyDictation,
   });
+  // A saved Follow-up Note can't be edited, so a clip's words would be lost for good.
+  const dictating = dictationBusy(recorder.state);
+  const saveHintId = dictationSaveHintId(recorder, `${fieldId}-dictating`);
 
   function close() {
     recorder.discard();
@@ -1818,6 +1839,7 @@ function AddFollowUpNoteModal({ open, apiUrl, dictation, dictationUrl, onClose }
   }
 
   async function save() {
+    if (dictating) return;
     recorder.discard();
     setError("");
     setSaving(true);
@@ -1872,9 +1894,11 @@ function AddFollowUpNoteModal({ open, apiUrl, dictation, dictationUrl, onClose }
       })}
     </div>
     {error && <p role="alert" className="mt-4 text-sm text-danger">{error}</p>}
-    <div className="mt-5 flex justify-end gap-2">
+    <div className="mt-5 flex items-center justify-end gap-2">
+      <DictationSaveHint id={saveHintId} />
       <Button type="button" variant="secondary" onClick={requestClose}>Cancel</Button>
-      <Button type="button" disabled={!hasAnswer || hasTooLongAnswer || saving} onClick={() => void save()}>
+      <Button type="button" disabled={!hasAnswer || hasTooLongAnswer || saving || dictating}
+        aria-describedby={saveHintId} onClick={() => void save()}>
         Save
       </Button>
     </div>

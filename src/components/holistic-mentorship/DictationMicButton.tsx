@@ -40,6 +40,14 @@ export function DictationMicButton({ question, target, recorder, disabled = fals
   </div>;
 }
 
+// Beside a form's save button while that form's clip is still recording or
+// transcribing: saving waits for the words. Not a live region; the disabled
+// button's aria-describedby points here. Nothing renders without an `id`.
+export function DictationSaveHint({ id, className = "" }: { id: string | undefined; className?: string }) {
+  if (!id) return null;
+  return <span id={id} className={`text-xs text-text-muted ${className}`}>Finish dictating first</span>;
+}
+
 function statusMessage(state: DictationRecorder["state"]) {
   switch (state.kind) {
     case "transcribing": return "Transcribing…";
