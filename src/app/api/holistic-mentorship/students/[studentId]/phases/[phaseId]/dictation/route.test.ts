@@ -342,18 +342,16 @@ describe("Holistic Dictation API", () => {
     expectNoProviderCallOrRecord();
   });
 
-  it.each(["program_manager", "program_admin", "holistic_mentorship_admin", "admin"])(
-    "refuses a read-only %s through the access check",
-    async () => {
-      mockAccess.mockResolvedValue({ ok: false, status: 403, error: "Forbidden" });
+  // Which roles are refused notes_draft / follow_up_note_add is tested in src/lib/holistic-mentorship.test.ts.
+  it("returns the access check's refusal without calling the provider or recording usage", async () => {
+    mockAccess.mockResolvedValue({ ok: false, status: 403, error: "Forbidden" });
 
-      const response = await post();
+    const response = await post();
 
-      expect(response.status).toBe(403);
-      await expect(response.json()).resolves.toEqual({ error: "Forbidden" });
-      expectNoProviderCallOrRecord();
-    },
-  );
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: "Forbidden" });
+    expectNoProviderCallOrRecord();
+  });
 
   it("checks Follow-up Note access for a Follow-up box", async () => {
     db.notesState = "submitted";

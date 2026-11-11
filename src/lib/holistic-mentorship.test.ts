@@ -488,6 +488,43 @@ describe("requireHolisticMentorshipAccess", () => {
     }
   );
 
+  function draftNotesAs(email: string) {
+    return requireHolisticMentorshipAccess(
+      { user: { email } },
+      "notes_draft",
+      { schoolCode: "SCH001", studentId: 41, programId: 1, academicYear: "2026-2027" }
+    );
+  }
+
+  it("allows the current Mentor to draft Post-Session Notes", async () => {
+    mockTeacherScope();
+    mockQuery
+      .mockResolvedValueOnce([
+        { id: 20, code: "SCH001", name: "School One", region: "North", program_id: 1 },
+      ])
+      .mockResolvedValueOnce([{ user_id: 10 }])
+      .mockResolvedValueOnce([{ id: 73 }]);
+
+    await expect(draftNotesAs("teacher@example.com")).resolves.toMatchObject({ ok: true, actorUserId: 10 });
+  });
+
+  it("denies a read-only Teacher drafting Post-Session Notes", async () => {
+    mockTeacherScope({ read_only: true });
+
+    await expect(draftNotesAs("teacher@example.com"))
+      .resolves.toMatchObject({ ok: false, status: 403 });
+  });
+
+  it.each(["admin", "holistic_mentorship_admin", "program_manager", "program_admin"] as const)(
+    "denies %s drafting Post-Session Notes",
+    async (role) => {
+      mockQuery.mockResolvedValueOnce([permissionRow(role)]);
+
+      await expect(draftNotesAs(`${role}@example.com`))
+        .resolves.toMatchObject({ ok: false, status: 403 });
+    }
+  );
+
   it.each(["admin", "holistic_mentorship_admin"] as const)(
     "allows scoped %s read-only Student drill-down",
     async (role) => {
