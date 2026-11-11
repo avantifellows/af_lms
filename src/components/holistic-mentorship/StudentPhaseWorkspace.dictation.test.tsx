@@ -626,6 +626,67 @@ describe("StudentPhaseWorkspace Dictation", () => {
       expect(screen.queryByText("Couldn't transcribe. Try again")).not.toBeInTheDocument();
     });
 
+    it.each([401, 403, 422])(
+      "drops a clip the server refuses with a %i, says to reload, and offers no Retry",
+      async (status) => {
+        const network = stubNetwork();
+        vi.useFakeTimers();
+        renderWorkspace(mentorDetail(draft({ 91: "Met parents" })));
+
+        await dictate("What helped?", 4);
+        await network.respond({ error: "Refused" }, status);
+
+        expect(screen.getByText("Couldn't send that recording. Reload the page and try again."))
+          .toHaveAttribute("aria-live", "polite");
+        expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+        expect(screen.queryByText("Couldn't transcribe. Try again")).not.toBeInTheDocument();
+        expect(box("What helped?")).toHaveValue("Met parents");
+        expect(mic("What helped?")).toBeEnabled();
+        expect(mic("What happens next?")).toBeEnabled();
+        expect(network.dictationCalls).toHaveLength(1);
+      },
+    );
+
+    it("keeps Retry for a 429 that is not the daily limit", async () => {
+      const network = stubNetwork();
+      vi.useFakeTimers();
+      renderWorkspace(mentorDetail());
+
+      await dictate("What helped?");
+      await network.respond({ error: "Too many requests" }, 429);
+
+      expect(screen.getByText("Couldn't transcribe. Try again")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+    });
+
+    // The device slept while recording: the wall clock jumps past the timer.
+    it.each([[1_800, "120000"], [40, "40000"]])(
+      "with %i s left today, sends at most the auto-stop length after the device slept",
+      async (remainingSeconds, sent) => {
+        const network = stubNetwork();
+        vi.useFakeTimers();
+        renderWorkspace(mentorDetail(), { enabled: true, remainingSeconds });
+
+        await act(async () => fireEvent.click(mic("What helped?")));
+        vi.setSystemTime(Date.now() + 200_000);
+        await act(async () => fireEvent.click(mic("What helped?")));
+
+        expect(network.dictationCalls[0].body.get("duration_ms")).toBe(sent);
+      },
+    );
+
+    it("sends at most the auto-stop length when the auto-stop fires late after the device slept", async () => {
+      const network = stubNetwork();
+      vi.useFakeTimers();
+      renderWorkspace(mentorDetail());
+
+      await act(async () => fireEvent.click(mic("What helped?")));
+      vi.setSystemTime(Date.now() + 200_000);
+      await act(async () => vi.advanceTimersByTimeAsync(120_000));
+
+      expect(network.dictationCalls[0].body.get("duration_ms")).toBe("120000");
+    });
+
     async function failOnce(network: ReturnType<typeof stubNetwork>, question: string) {
       await act(async () => fireEvent.click(mic(question)));
       await act(async () => fireEvent.click(mic(question)));

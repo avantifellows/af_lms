@@ -148,6 +148,7 @@ export const DICTATION_MESSAGES = {
   nothingHeard: "Didn't catch anything. Try speaking closer to the mic or a little louder.",
   dailyLimit: "You've used today's 30 minutes of Dictation. You can keep typing.",
   overTimeLeft: "That recording is longer than the time you have left today.",
+  notSent: "Couldn't send that recording. Reload the page and try again.",
   micStopped: "Recording stopped. Check your microphone.",
 } as const;
 
@@ -180,6 +181,8 @@ function shownState(state: DictationState, remainingSeconds: number): DictationS
 // refused by the daily limit while time is left can never fit, so it is dropped.
 function replyNotice(reply: DictationReply): string | null {
   if (heardNothing(reply)) return DICTATION_MESSAGES.nothingHeard;
+  // Signed out, no access, or a clip the server won't take: resending can't help.
+  if (reply.status >= 400 && reply.status < 500 && reply.status !== 429) return DICTATION_MESSAGES.notSent;
   const timeLeft = (remainingAfter(reply) ?? 0) > 0;
   return dailyLimitReply(reply) && timeLeft ? DICTATION_MESSAGES.overTimeLeft : null;
 }
@@ -224,6 +227,8 @@ type Live = {
   upload: AbortController | null;
   stop: Stop | null;
   startedAt: number;
+  /** Where this recording is set to auto-stop. */
+  stopAtMs: number;
 };
 
 function releaseMic(live: Live) {
@@ -236,8 +241,10 @@ function clearAutoStop(live: Live) {
   live.autoStop = null;
 }
 
+// Wall-clock time, capped at the auto-stop point: a device that slept while
+// recording would otherwise send a length the server refuses.
 function clipDurationMs(live: Live) {
-  return Math.max(1, Date.now() - live.startedAt);
+  return Math.max(1, Math.min(live.stopAtMs, Date.now() - live.startedAt));
 }
 
 // Ticks while a recording runs, for the "Recording m:ss" label.
@@ -278,6 +285,7 @@ export function useDictationRecorder(options: {
   useEffect(() => { optionsRef.current = options; });
   const liveRef = useRef<Live>({
     session: 0, stream: null, recorder: null, autoStop: null, upload: null, stop: null, startedAt: 0,
+    stopAtMs: MAX_CLIP_SECONDS * 1000,
   });
 
   const upload = useCallback(async (target: string, clip: Blob, stop: Stop, session: number) => {
@@ -372,6 +380,7 @@ export function useDictationRecorder(options: {
     live.startedAt = startedAt;
     const stopAtSeconds = Math.min(MAX_CLIP_SECONDS, optionsRef.current.remainingSeconds);
     const stopAtMs = stopAtSeconds * 1000;
+    live.stopAtMs = stopAtMs;
     live.autoStop = window.setTimeout(() => stop(autoStopNotice(stopAtSeconds)), stopAtMs);
     setState({ kind: "recording", target, startedAt, stopAtMs });
   }, [stop, stoppedByBrowser, upload]);
