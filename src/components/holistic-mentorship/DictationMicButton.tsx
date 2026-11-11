@@ -22,7 +22,7 @@ export function DictationMicButton({ question, target, recorder, disabled = fals
   return <div className="flex flex-wrap items-center gap-2">
     <button type="button" aria-label={`Dictate: ${question}`} aria-pressed={recording}
       disabled={blocked} onClick={() => recorder.toggle(target)}
-      className={`inline-flex min-h-9 items-center gap-1.5 rounded-md border px-2.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-50 ${
+      className={`inline-flex min-h-11 items-center gap-1.5 rounded-md border px-2.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-50 ${
         recording
           ? "border-danger bg-danger text-white"
           : "border-border bg-bg-card text-text-secondary hover:border-accent hover:text-accent"}`}>
@@ -65,7 +65,7 @@ export function DictationStatus({ target, recorder }: { target: string; recorder
       {DICTATION_MESSAGES.dailyLimit}
     </p>}
     {mine && state.kind === "failed" && <button type="button" onClick={recorder.retry}
-      className="inline-flex min-h-9 items-center rounded-md border border-border bg-bg-card px-2.5 text-xs font-semibold text-text-secondary hover:border-accent hover:text-accent">
+      className="inline-flex min-h-11 items-center rounded-md border border-border bg-bg-card px-2.5 text-xs font-semibold text-text-secondary hover:border-accent hover:text-accent">
       Retry
     </button>}
   </div>;

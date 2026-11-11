@@ -405,6 +405,7 @@ test.describe("Holistic Mentorship release workflows", () => {
     expect((await typed).status()).toBe(200);
 
     const mic = page.getByRole("button", { name: /^Dictate: .*What support will help next\?$/ });
+    await expectMinimumTapTarget(mic);
     await mic.click();
     await expect(mic).toHaveAttribute("aria-pressed", "true");
     await expect(page.getByText(/^Recording 0:0[1-9]$/)).toBeVisible();
