@@ -535,5 +535,24 @@ describe("StudentPhasePage", () => {
       expect(dictationProp()).toEqual({ enabled: false, remainingSeconds: 0 });
       expect(mockRemainingSeconds).not.toHaveBeenCalled();
     });
+
+    it("still shows the Notes form, without Dictation, when today's usage can't be read", async () => {
+      mockSession.mockResolvedValue({ user: { email: "teacher@example.com" } });
+      mockAccess.mockResolvedValue(teacherAccess);
+      mockDetail.mockResolvedValue({ ...phase, readOnly: false });
+      mockDictationSettings.mockReturnValue({ enabled: true, apiKey: "key", zeroRetention: false });
+      const missingTable = Object.assign(
+        new Error('relation "holistic_mentorship_dictation_usage_records" does not exist'),
+        { code: "42P01" }
+      );
+      mockRemainingSeconds.mockRejectedValue(missingTable);
+      const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      render(await StudentPhasePage(props));
+
+      expect(dictationProp()).toEqual({ enabled: false, remainingSeconds: 0 });
+      expect(logged).toHaveBeenCalledWith("Holistic Dictation usage read failed", { failureClass: "42P01" });
+      logged.mockRestore();
+    });
   });
 });

@@ -124,14 +124,27 @@ type PhaseNavigationItem = HolisticStudentPhaseDetail["phases"][number];
 
 // Dictation (#500) is on only for the editing Mentor (a workspace that isn't
 // read-only) while the server-side switch is on. The client never sees the settings.
+// If today's usage can't be read (the table isn't deployed yet, or the database
+// errors), the Mentor still gets the Notes form, without the mic.
 async function studentPhaseDictation(detail: HolisticStudentPhaseDetail, actorUserId: number | undefined) {
-  if (detail.readOnly || !actorUserId || !holisticDictationSettings().enabled) {
-    return { enabled: false, remainingSeconds: 0 };
+  const off = { enabled: false, remainingSeconds: 0 };
+  if (detail.readOnly || !actorUserId || !holisticDictationSettings().enabled) return off;
+  try {
+    return {
+      enabled: true,
+      remainingSeconds: await getHolisticDictationRemainingSeconds(actorUserId, new Date()),
+    };
+  } catch (error) {
+    console.error("Holistic Dictation usage read failed", { failureClass: usageReadFailureClass(error) });
+    return off;
   }
-  return {
-    enabled: true,
-    remainingSeconds: await getHolisticDictationRemainingSeconds(actorUserId, new Date()),
-  };
+}
+
+// The Postgres error code or the error name only: never the message or the query.
+function usageReadFailureClass(error: unknown): string {
+  if (!(error instanceof Error)) return "unexpected";
+  const code = (error as { code?: unknown }).code;
+  return typeof code === "string" ? code : error.name;
 }
 
 function unlockedPhase(phase: PhaseNavigationItem) {
