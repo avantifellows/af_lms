@@ -9,7 +9,8 @@ function formatElapsed(ms: number) {
 
 // Dictation (#500): the mic toggle beside one editable answer box. Kept out
 // of the Student Phase workspace so the Follow-up Note form can reuse it.
-// While any box in the form is busy, every other mic is disabled.
+// While any box in the form, or in the page's other form, is busy, every
+// other mic is disabled.
 export function DictationMicButton({ question, target, recorder, disabled = false }: {
   question: string;
   target: string;
@@ -18,7 +19,8 @@ export function DictationMicButton({ question, target, recorder, disabled = fals
 }) {
   const { state } = recorder;
   const recording = state.kind === "recording" && state.target === target;
-  const blocked = disabled || state.kind === "unavailable" || (dictationBusy(state) && !recording);
+  const blocked = disabled || recorder.busyElsewhere || state.kind === "unavailable"
+    || (dictationBusy(state) && !recording);
   return <div className="flex flex-wrap items-center gap-2">
     <button type="button" aria-label={`Dictate: ${question}`} aria-pressed={recording}
       disabled={blocked} onClick={() => recorder.toggle(target)}

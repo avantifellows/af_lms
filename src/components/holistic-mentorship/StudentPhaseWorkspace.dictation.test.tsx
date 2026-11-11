@@ -1148,6 +1148,75 @@ describe("Follow-up Note Dictation", () => {
     });
   });
 
+  describe("one recording at a time on the page", () => {
+    const followUpMics = (dialog: HTMLElement) =>
+      [CHALLENGES, SOLUTIONS, ACTION_PLAN].map((question) => modalMic(dialog, question));
+
+    async function recordInEditThenOpenModal() {
+      renderWorkspace(completedDetail());
+      fireEvent.click(screen.getByRole("button", { name: "Edit Notes" }));
+      await act(async () => fireEvent.click(mic("What helped?")));
+      return openModal();
+    }
+
+    it("disables every Follow-up mic while a Post-Session answer records, until its words arrive", async () => {
+      const network = stubNetwork();
+      const getUserMedia = installFakeMic();
+      vi.useFakeTimers();
+      const dialog = await recordInEditThenOpenModal();
+
+      for (const button of followUpMics(dialog)) expect(button).toBeDisabled();
+      expect(dialog).not.toHaveTextContent(/Recording|Transcribing|Dictation/);
+      await act(async () => fireEvent.click(modalMic(dialog, CHALLENGES)));
+      expect(getUserMedia).toHaveBeenCalledTimes(1);
+      expect(FakeMediaRecorder.instances).toHaveLength(1);
+
+      await act(async () => vi.advanceTimersByTimeAsync(120_000));
+      expect(network.dictationCalls).toHaveLength(1);
+      for (const button of followUpMics(dialog)) expect(button).toBeDisabled();
+      await network.transcribe("Spoken in Notes");
+
+      expect(box("What helped?")).toHaveValue("First answer Spoken in Notes");
+      for (const button of followUpMics(dialog)) expect(button).toBeEnabled();
+      await act(async () => fireEvent.click(modalMic(dialog, CHALLENGES)));
+      expect(modalMic(dialog, CHALLENGES)).toHaveAttribute("aria-pressed", "true");
+      expect(getUserMedia).toHaveBeenCalledTimes(2);
+    });
+
+    it("enables the Follow-up mics again once the Post-Session recording is dropped", async () => {
+      stubNetwork();
+      let dialog = await recordInEditThenOpenModal();
+      for (const button of followUpMics(dialog)) expect(button).toBeDisabled();
+
+      fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+      expect(tracks[0].stop).toHaveBeenCalled();
+      dialog = openModal();
+
+      for (const button of followUpMics(dialog)) expect(button).toBeEnabled();
+    });
+
+    // The open modal covers the page, so a Mentor can't reach these mics; the
+    // shared count still keeps them disabled while the Follow-up form records.
+    it("disables the Post-Session mics while a Follow-up answer records, until the modal drops it", async () => {
+      stubNetwork();
+      const getUserMedia = installFakeMic();
+      renderWorkspace(completedDetail());
+      fireEvent.click(screen.getByRole("button", { name: "Edit Notes" }));
+      const dialog = openModal();
+
+      await act(async () => fireEvent.click(modalMic(dialog, CHALLENGES)));
+      expect(mic("What helped?")).toBeDisabled();
+      expect(mic("What happens next?")).toBeDisabled();
+      await act(async () => fireEvent.click(mic("What helped?")));
+      expect(getUserMedia).toHaveBeenCalledTimes(1);
+
+      await act(async () => fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" })));
+      expect(mic("What helped?")).toBeEnabled();
+      expect(mic("What happens next?")).toBeEnabled();
+    });
+  });
+
   describe("one daily count for both forms", () => {
     const LIMIT = "You've used today's 30 minutes of Dictation. You can keep typing.";
 

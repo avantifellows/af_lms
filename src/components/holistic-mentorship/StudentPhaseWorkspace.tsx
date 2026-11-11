@@ -588,6 +588,8 @@ function useNotesDictation(
     kind: "post_session",
     remainingSeconds: props.dictation.remainingSeconds,
     onRemainingSeconds: props.dictation.onRemainingSeconds,
+    busyKind: props.dictation.busyKind,
+    onBusy: props.dictation.onBusy,
     onText: applyDictation,
   });
 }
@@ -1796,6 +1798,8 @@ function AddFollowUpNoteModal({ open, apiUrl, dictation, dictationUrl, onClose }
     kind: "follow_up",
     remainingSeconds: dictation.remainingSeconds,
     onRemainingSeconds: dictation.onRemainingSeconds,
+    busyKind: dictation.busyKind,
+    onBusy: dictation.onBusy,
     onText: applyDictation,
   });
 

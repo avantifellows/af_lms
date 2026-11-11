@@ -10,6 +10,9 @@ export const DICTATION_OFF: DictationAvailability = { enabled: false, remainingS
 // the page reads it and reports what the server says after each clip.
 export type SharedDictationAvailability = DictationAvailability & {
   onRemainingSeconds: (seconds: number) => void;
+  /** The form whose recorder is busy (see dictationBusy), or null. One recording at a time on the page. */
+  busyKind: DictationKind | null;
+  onBusy: (kind: DictationKind, busy: boolean) => void;
 };
 
 // Post-Session Notes and the Follow-up Note form each own a recorder but spend
@@ -18,13 +21,17 @@ export type SharedDictationAvailability = DictationAvailability & {
 export function useSharedDictationAvailability(server: DictationAvailability): SharedDictationAvailability {
   const [serverSeconds, setServerSeconds] = useState(server.remainingSeconds);
   const [remainingSeconds, setRemainingSeconds] = useState(server.remainingSeconds);
+  const [busyKind, setBusyKind] = useState<DictationKind | null>(null);
   if (serverSeconds !== server.remainingSeconds) {
     setServerSeconds(server.remainingSeconds);
     setRemainingSeconds(server.remainingSeconds);
   }
+  const onBusy = useCallback((kind: DictationKind, busy: boolean) => {
+    setBusyKind((current) => (busy ? kind : current === kind ? null : current));
+  }, []);
   return useMemo(
-    () => ({ enabled: server.enabled, remainingSeconds, onRemainingSeconds: setRemainingSeconds }),
-    [server.enabled, remainingSeconds]
+    () => ({ enabled: server.enabled, remainingSeconds, onRemainingSeconds: setRemainingSeconds, busyKind, onBusy }),
+    [server.enabled, remainingSeconds, busyKind, onBusy]
   );
 }
 
@@ -50,6 +57,8 @@ export type ApplyDictationText = (target: string, text: string) => string | null
 export type DictationRecorder = {
   state: DictationState;
   elapsedMs: number;
+  /** The other form on the page is recording or transcribing, so this form's mics wait. */
+  busyElsewhere: boolean;
   toggle: (target: string) => void;
   /** Resends a failed clip, with its duration, without re-recording. */
   retry: () => void;
@@ -229,11 +238,23 @@ function useElapsedMs(startedAt: number | null) {
   return startedAt === null ? 0 : Math.max(0, now - startedAt);
 }
 
+// Tells the page while this form's recorder is busy, and lets go when it stops
+// being busy or the form unmounts, so the other form's mics wait for it.
+function useReportBusy(busy: boolean, kind: DictationKind, onBusy: SharedDictationAvailability["onBusy"]) {
+  useEffect(() => {
+    if (!busy) return;
+    onBusy(kind, true);
+    return () => onBusy(kind, false);
+  }, [busy, kind, onBusy]);
+}
+
 export function useDictationRecorder(options: {
   url: string;
   kind: DictationKind;
   remainingSeconds: number;
   onRemainingSeconds: (seconds: number) => void;
+  busyKind: DictationKind | null;
+  onBusy: SharedDictationAvailability["onBusy"];
   onText: ApplyDictationText;
 }): DictationRecorder {
   const [state, setState] = useState<DictationState>({ kind: "idle" });
@@ -360,14 +381,17 @@ export function useDictationRecorder(options: {
     setState({ kind: "idle" });
   }, []);
 
+  const busyElsewhere = options.busyKind !== null && options.busyKind !== options.kind;
+  useReportBusy(dictationBusy(state), options.kind, options.onBusy);
+
   const toggle = useCallback((target: string) => {
     if (state.kind === "recording" && state.target === target) {
       stop(null);
       return;
     }
-    if (dictationBusy(state) || optionsRef.current.remainingSeconds <= 0) return;
+    if (dictationBusy(state) || busyElsewhere || optionsRef.current.remainingSeconds <= 0) return;
     void start(target);
-  }, [start, state, stop]);
+  }, [busyElsewhere, start, state, stop]);
 
   const elapsedMs = useElapsedMs(state.kind === "recording" ? state.startedAt : null);
 
@@ -380,7 +404,7 @@ export function useDictationRecorder(options: {
     };
   }, [discard]);
 
-  return { state: shownState(state, options.remainingSeconds), elapsedMs, toggle, retry, discard };
+  return { state: shownState(state, options.remainingSeconds), elapsedMs, busyElsewhere, toggle, retry, discard };
 }
 
 export function dictationBusy(state: DictationState) {
