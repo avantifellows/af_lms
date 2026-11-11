@@ -25,8 +25,11 @@ class FakeMediaRecorder {
   static isTypeSupported = (type: string) => type === "audio/webm;codecs=opus";
   state: "inactive" | "recording" = "inactive";
   mimeType: string;
+  /** What the clip holds when the recorder stops; empty means nothing was recorded. */
+  audio = "spoken clip";
   ondataavailable: ((event: { data: Blob }) => void) | null = null;
   onstop: (() => void) | null = null;
+  onerror: ((event: Event) => void) | null = null;
 
   constructor(public stream: { getTracks: () => FakeTrack[] }, public options: MediaRecorderOptions = {}) {
     this.mimeType = options.mimeType ?? "";
@@ -40,8 +43,13 @@ class FakeMediaRecorder {
   stop() {
     if (this.state === "inactive") return;
     this.state = "inactive";
-    this.ondataavailable?.({ data: new Blob(["spoken clip"], { type: this.mimeType }) });
+    this.ondataavailable?.({ data: new Blob([this.audio], { type: this.mimeType }) });
     this.onstop?.();
+  }
+
+  /** The browser reports a recorder error while still recording. */
+  fail() {
+    this.onerror?.(new Event("error"));
   }
 }
 
@@ -503,6 +511,72 @@ describe("StudentPhaseWorkspace Dictation", () => {
 
       expect(screen.getByText(/^This browser can't record audio\./)).toHaveAttribute("aria-live", "polite");
       expect(network.dictationCalls).toHaveLength(0);
+    });
+  });
+
+  describe("when the browser stops the recording itself", () => {
+    const CHECK_MIC = "Recording stopped. Check your microphone.";
+
+    it("releases the mic, transcribes what was said, and says to check the microphone", async () => {
+      const network = stubNetwork();
+      vi.useFakeTimers();
+      renderWorkspace(mentorDetail(draft({ 91: "Met parents" })));
+
+      await act(async () => fireEvent.click(mic("What helped?")));
+      await act(async () => vi.advanceTimersByTimeAsync(7_000));
+      await act(async () => { FakeMediaRecorder.instances[0].stop(); });
+
+      expect(mic("What helped?")).toHaveAttribute("aria-pressed", "false");
+      expect(screen.queryByText(/^Recording \d:\d\d/)).not.toBeInTheDocument();
+      expect(tracks[0].stop).toHaveBeenCalled();
+      expect(network.dictationCalls).toHaveLength(1);
+      expect(network.dictationCalls[0].body.get("duration_ms")).toBe("7000");
+      expect(await (network.dictationCalls[0].body.get("audio") as Blob).text()).toBe("spoken clip");
+
+      await network.transcribe("met the student");
+      expect(box("What helped?")).toHaveValue("Met parents met the student");
+      expect(screen.getByText(CHECK_MIC)).toHaveAttribute("aria-live", "polite");
+      expect(mic("What helped?")).toBeEnabled();
+      expect(mic("What happens next?")).toBeEnabled();
+      await act(async () => vi.advanceTimersByTimeAsync(130_000));
+      expect(network.dictationCalls).toHaveLength(1);
+    });
+
+    it("uploads nothing and leaves the mics ready when nothing was recorded", async () => {
+      const network = stubNetwork();
+      vi.useFakeTimers();
+      renderWorkspace(mentorDetail());
+
+      await act(async () => fireEvent.click(mic("What helped?")));
+      FakeMediaRecorder.instances[0].audio = "";
+      await act(async () => { FakeMediaRecorder.instances[0].stop(); });
+
+      expect(screen.getByText(CHECK_MIC)).toHaveAttribute("aria-live", "polite");
+      expect(mic("What helped?")).toHaveAttribute("aria-pressed", "false");
+      expect(tracks[0].stop).toHaveBeenCalled();
+      await act(async () => vi.advanceTimersByTimeAsync(130_000));
+      expect(network.dictationCalls).toHaveLength(0);
+      expect(mic("What happens next?")).toBeEnabled();
+      await act(async () => fireEvent.click(mic("What happens next?")));
+      expect(mic("What happens next?")).toHaveAttribute("aria-pressed", "true");
+    });
+
+    it("ends the recording the same way when the recorder reports an error", async () => {
+      const network = stubNetwork();
+      vi.useFakeTimers();
+      renderWorkspace(mentorDetail());
+
+      await act(async () => fireEvent.click(mic("What helped?")));
+      await act(async () => vi.advanceTimersByTimeAsync(2_000));
+      await act(async () => { FakeMediaRecorder.instances[0].fail(); });
+
+      expect(mic("What helped?")).toHaveAttribute("aria-pressed", "false");
+      expect(tracks[0].stop).toHaveBeenCalled();
+      expect(network.dictationCalls).toHaveLength(1);
+      expect(network.dictationCalls[0].body.get("duration_ms")).toBe("2000");
+      await network.transcribe("Review in a week");
+      expect(box("What helped?")).toHaveValue("Review in a week");
+      expect(screen.getByText(CHECK_MIC)).toBeInTheDocument();
     });
   });
 

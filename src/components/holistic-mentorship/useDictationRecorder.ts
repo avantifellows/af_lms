@@ -133,6 +133,7 @@ export const DICTATION_MESSAGES = {
   failed: "Couldn't transcribe. Try again",
   nothingHeard: "Didn't catch anything. Try speaking closer to the mic or a little louder.",
   dailyLimit: "You've used today's 30 minutes of Dictation. You can keep typing.",
+  micStopped: "Recording stopped. Check your microphone.",
 } as const;
 
 function micErrorMessage(error: unknown) {
@@ -213,6 +214,10 @@ function clearAutoStop(live: Live) {
   live.autoStop = null;
 }
 
+function clipDurationMs(live: Live) {
+  return Math.max(1, Date.now() - live.startedAt);
+}
+
 // Ticks while a recording runs, for the "Recording m:ss" label.
 function useElapsedMs(startedAt: number | null) {
   const [now, setNow] = useState(0);
@@ -267,9 +272,22 @@ export function useDictationRecorder(options: {
     clearAutoStop(live);
     const recorder = live.recorder;
     if (!recorder || recorder.state === "inactive") return;
-    live.stop = { durationMs: Math.max(1, Date.now() - live.startedAt), notice };
+    live.stop = { durationMs: clipDurationMs(live), notice };
     recorder.stop();
   }, []);
+
+  // The browser ended the recording itself (mic unplugged, permission removed,
+  // a call took the mic). Keep what was said, and say why it stopped.
+  const stoppedByBrowser = useCallback((target: string, clip: Blob, session: number) => {
+    const live = liveRef.current;
+    clearAutoStop(live);
+    const notice = DICTATION_MESSAGES.micStopped;
+    if (clip.size === 0) {
+      setState({ kind: "notice", target, message: notice });
+      return;
+    }
+    void upload(target, clip, { durationMs: clipDurationMs(live), notice }, session);
+  }, [upload]);
 
   const start = useCallback(async (target: string) => {
     const live = liveRef.current;
@@ -307,10 +325,14 @@ export function useDictationRecorder(options: {
       live.recorder = null;
       const finished = live.stop;
       live.stop = null;
-      if (session !== live.session || !finished) return;
+      if (session !== live.session) return;
       const clip = new Blob(chunks, { type: recorder.mimeType || chunks[0]?.type || "" });
-      void upload(target, clip, finished, session);
+      if (finished) void upload(target, clip, finished, session);
+      else stoppedByBrowser(target, clip, session);
     };
+    // A recorder error ends the recording like a stop the browser made itself.
+    // A recorder that is already inactive fires stop after the error.
+    recorder.onerror = () => { if (recorder.state !== "inactive") recorder.stop(); };
     recorder.start();
     const startedAt = Date.now();
     live.startedAt = startedAt;
@@ -318,7 +340,7 @@ export function useDictationRecorder(options: {
     const stopAtMs = stopAtSeconds * 1000;
     live.autoStop = window.setTimeout(() => stop(autoStopNotice(stopAtSeconds)), stopAtMs);
     setState({ kind: "recording", target, startedAt, stopAtMs });
-  }, [stop, upload]);
+  }, [stop, stoppedByBrowser, upload]);
 
   const discard = useCallback(() => {
     const live = liveRef.current;
