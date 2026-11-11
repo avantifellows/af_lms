@@ -17,13 +17,15 @@ export type SharedDictationAvailability = DictationAvailability & {
 
 // Post-Session Notes and the Follow-up Note form each own a recorder but spend
 // the same daily limit, so the count lives above both. A new count from the
-// server (the page refreshed) replaces what the recorders reported.
+// server (the page refreshed) replaces what the recorders reported, even when
+// it is the same number as before (a new India-time day). Each server render
+// sends a new `server` object; client re-renders pass the same one through.
 export function useSharedDictationAvailability(server: DictationAvailability): SharedDictationAvailability {
-  const [serverSeconds, setServerSeconds] = useState(server.remainingSeconds);
+  const [serverSnapshot, setServerSnapshot] = useState(server);
   const [remainingSeconds, setRemainingSeconds] = useState(server.remainingSeconds);
   const [busyKind, setBusyKind] = useState<DictationKind | null>(null);
-  if (serverSeconds !== server.remainingSeconds) {
-    setServerSeconds(server.remainingSeconds);
+  if (serverSnapshot !== server) {
+    setServerSnapshot(server);
     setRemainingSeconds(server.remainingSeconds);
   }
   const onBusy = useCallback((kind: DictationKind, busy: boolean) => {

@@ -840,6 +840,45 @@ describe("StudentPhaseWorkspace Dictation", () => {
       expect(screen.queryByText("That recording is longer than the time you have left today.")).not.toBeInTheDocument();
     });
 
+    it("unlocks the mics when a refresh brings the same count as the first load (a new day)", async () => {
+      const network = stubNetwork();
+      vi.useFakeTimers();
+      const detail = mentorDetail();
+      const view = renderWorkspace(detail, { enabled: true, remainingSeconds: 1_800 });
+
+      await dictate("What helped?");
+      await network.transcribe("Last words today", 0);
+      expect(mic("What helped?")).toBeDisabled();
+
+      view.rerender(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027"
+        detail={detail} dictation={{ enabled: true, remainingSeconds: 1_800 }} />);
+      expect(mic("What helped?")).toBeEnabled();
+      expect(screen.queryByText(LIMIT)).not.toBeInTheDocument();
+      await act(async () => fireEvent.click(mic("What happens next?")));
+      await act(async () => vi.advanceTimersByTimeAsync(120_000));
+      expect(network.dictationCalls[1].body.get("duration_ms")).toBe("120000");
+    });
+
+    it("keeps a count a recorder reported when the page re-renders with the same server count", async () => {
+      const network = stubNetwork();
+      vi.useFakeTimers();
+      const detail = mentorDetail();
+      const server = { enabled: true, remainingSeconds: 1_800 };
+      const view = renderWorkspace(detail, server);
+
+      await dictate("What helped?");
+      await network.transcribe("First part", 25);
+      view.rerender(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027"
+        detail={detail} dictation={server} />);
+      fireEvent.change(box("What helped?"), { target: { value: "First part, typed on" } });
+      await act(async () => fireEvent.click(mic("What happens next?")));
+      await act(async () => vi.advanceTimersByTimeAsync(24_999));
+      expect(mic("What happens next?")).toHaveAttribute("aria-pressed", "true");
+      await act(async () => vi.advanceTimersByTimeAsync(1));
+
+      expect(network.dictationCalls.map((call) => call.body.get("duration_ms"))).toEqual(["3000", "25000"]);
+    });
+
     it("shows mics in the limit state from the start when the page loads with no time left", async () => {
       const network = stubNetwork();
       renderWorkspace(mentorDetail(), { enabled: true, remainingSeconds: 0 });
