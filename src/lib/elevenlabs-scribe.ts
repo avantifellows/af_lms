@@ -8,7 +8,6 @@ const ELEVENLABS_SPEECH_TO_TEXT_URL = "https://api.elevenlabs.io/v1/speech-to-te
 export type TranscribeSpeechInput = {
   audio: Blob;
   filename: string;
-  contentType: string;
   apiKey: string;
   zeroRetention: boolean;
   signal: AbortSignal;

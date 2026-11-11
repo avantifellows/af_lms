@@ -37,7 +37,7 @@ function dictate(mentorUserId: number, at: string, durationMs: number) {
     schoolId,
     programId,
     kind: "post_session",
-    clip: { audio: new Blob([new Uint8Array([1, 2, 3])], { type: "audio/webm" }), filename: "clip.webm", contentType: "audio/webm" },
+    clip: { audio: new Blob([new Uint8Array([1, 2, 3])], { type: "audio/webm" }), filename: "clip.webm" },
     durationMs,
     now: new Date(at),
   });

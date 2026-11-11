@@ -34,7 +34,7 @@ const FALLBACK_EXTENSION: Record<string, string> = {
   "audio/webm": "webm", "audio/mp4": "mp4", "audio/ogg": "ogg", "audio/mpeg": "mp3",
 };
 
-type ValidClip = { audio: Blob; filename: string; contentType: string; durationMs: number };
+type ValidClip = { audio: Blob; filename: string; durationMs: number };
 
 function refuse(error: string, status: number) {
   return NextResponse.json({ error }, { status });
@@ -63,7 +63,7 @@ function validateClip(form: FormData): { ok: true; clip: ValidClip } | { ok: fal
   }
   const name = audio instanceof File && audio.name ? audio.name : "";
   const filename = name || `dictation.${FALLBACK_EXTENSION[contentType]}`;
-  return { ok: true, clip: { audio, filename, contentType, durationMs } };
+  return { ok: true, clip: { audio, filename, durationMs } };
 }
 
 // Dictation (#500): one recorded clip in, verbatim text out. The route only

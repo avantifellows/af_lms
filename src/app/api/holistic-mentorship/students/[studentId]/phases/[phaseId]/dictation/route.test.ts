@@ -263,7 +263,10 @@ describe("Holistic Dictation API", () => {
     expect(body.has("language_code")).toBe(false);
     expect(body.has("diarize")).toBe(false);
     expect(body.has("enable_logging")).toBe(false);
+    expect([...body.keys()]).toEqual(["file", "model_id", "tag_audio_events"]);
     const file = body.get("file") as File;
+    expect(file.name).toBe("take-1.webm");
+    expect(file.type).toBe("audio/webm;codecs=opus");
     expect(file.size).toBe(5);
     expect(new Uint8Array(await file.arrayBuffer())).toEqual(new Uint8Array(5).fill(7));
     expect(scribeUrl.toString()).not.toContain(apiKey);

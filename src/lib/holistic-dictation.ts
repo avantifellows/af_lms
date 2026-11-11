@@ -101,7 +101,7 @@ function audioSecondsFor(durationMs: number, lastWordEndSeconds = 0): number {
   return Math.min(HOLISTIC_DICTATION_MAX_CLIP_SECONDS, Math.max(1, seconds));
 }
 
-export type HolisticDictationClip = { audio: Blob; filename: string; contentType: string };
+export type HolisticDictationClip = { audio: Blob; filename: string };
 
 export type TranscribeHolisticDictationInput = {
   mentorUserId: number;
@@ -168,7 +168,6 @@ async function providerResult(clip: HolisticDictationClip, settings: HolisticDic
     return await transcribeSpeech({
       audio: clip.audio,
       filename: clip.filename,
-      contentType: clip.contentType,
       apiKey: settings.apiKey ?? "",
       zeroRetention: settings.zeroRetention,
       signal: controller.signal,

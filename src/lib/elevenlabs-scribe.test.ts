@@ -9,7 +9,6 @@ function call(overrides: Partial<Parameters<typeof transcribeSpeech>[0]> = {}) {
   return transcribeSpeech({
     audio: new Blob([new Uint8Array([1, 2, 3])], { type: "audio/webm" }),
     filename: "clip.webm",
-    contentType: "audio/webm",
     apiKey: "sk_test_key",
     zeroRetention: false,
     signal: new AbortController().signal,
