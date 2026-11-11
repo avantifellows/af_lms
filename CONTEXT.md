@@ -291,7 +291,7 @@ A Holistic Mentor's spoken words turned into verbatim text and added to a Post-S
 _Avoid_: Voice note, voice-to-text, speech note, Call Recording
 
 **Dictation Usage Record**:
-The content-free record of one Dictation attempt: who dictated, where, for how long, and whether it worked.
+The content-free record of one Dictation recording passed on for transcription: who dictated, where, for how long, and whether it worked.
 _Avoid_: Transcript log, Dictation history, audio log
 
 **Challenge Category**:
@@ -646,8 +646,8 @@ _Avoid_: Screener Form (as a Quiz Form), Holistic Student Profile Questionnaire
 - **Dictation** is offered only where a Holistic Mentor can edit the answer: draft Post-Session Notes, the author's Edit of submitted Notes, and a new Follow-up Note; read-only viewers never see it, and Blended Learning and School Visit forms have no Dictation
 - **Dictation** text is the speech-to-text output as returned, with no rewriting, translation, or summarising; it is added to the end of the answer and from then on is ordinary answer text, saved and limited like typed text and carrying no mark that it was dictated
 - One **Dictation** recording lasts at most two minutes, and a Mentor may dictate at most thirty minutes in a day
-- Every **Dictation** recording that is sent for transcription counts toward the day's thirty minutes, whether it returned text, failed, heard nothing, or the Mentor left before the text came back; a recording dropped before it is sent does not count
-- Every **Dictation** attempt leaves one **Dictation Usage Record** holding the Mentor, School, Program, whether it was for Post-Session Notes or a Follow-up Note, audio seconds, characters returned, outcome, and time; it never holds the Student, the Question, the text, or the audio
+- Every **Dictation** recording that LMS passes on for transcription counts toward the day's thirty minutes, whether it returned text, failed, heard nothing, or the Mentor left before the text came back; a recording dropped before it is sent, or one LMS refuses before transcription (the Mentor is signed out or may not write those Notes, or the recording is empty, too long, too large, in an unsupported format, or over the day's time), does not count
+- Every **Dictation** recording passed on for transcription leaves one **Dictation Usage Record** holding the Mentor, School, Program, whether it was for Post-Session Notes or a Follow-up Note, audio seconds, characters returned, outcome, and time; it never holds the Student, the Question, the text, or the audio
 - Draft **Post-Session Notes** allow partial answers and autosave with visible state, but opening or viewing a blank form does not persist data or freeze the Phase
 - An unfinished Notes draft and the fact that it has been saved are visible only to its author while they remain the current Mentor; Program Managers, Program Admins, Holistic Mentorship Admins, and Admins derive progress as though the draft does not exist (normally Pending, while an otherwise Skipped Phase remains Skipped) until Notes are submitted
 - If a Mapping ends before Notes submission, LMS warns when applicable, discards the draft content, records a content-free actor/time/reason audit event, and gives the replacement Mentor a blank form
