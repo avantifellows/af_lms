@@ -496,6 +496,21 @@ describe("Holistic Dictation API", () => {
     },
   );
 
+  it.each([[1790, "16000", 10], [1803, "3000", 0]])(
+    "tells the page the real time left with a 429 at %i s used, never below 0",
+    async (used, duration, remainingSeconds) => {
+      db.usedTodaySeconds = used;
+
+      const response = await post({ duration_ms: duration });
+
+      expect(response.status).toBe(429);
+      await expect(response.json()).resolves.toEqual({
+        error: "You've used today's Dictation time", code: "daily_limit", remainingSeconds,
+      });
+      expectNoProviderCallOrRecord();
+    },
+  );
+
   it("allows a 15 s clip at 1,790 s used (1,805 ≤ 1,805) and reports 0 remaining", async () => {
     db.usedTodaySeconds = 1790;
     fetchMock.mockResolvedValue(scribeReply({ text: "Theek hai", words: [{ text: "hai", type: "word", start: 1, end: 14.2 }] }));

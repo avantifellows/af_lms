@@ -221,7 +221,8 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
 - **Daily limit:** remaining = 1,800 − SUM(`audio_seconds`) of this Mentor's rows whose
   `inserted_at` is in the current Asia/Kolkata day (converted to a UTC window), floored at 0
   (`getHolisticDictationRemainingSeconds`). A clip is refused (429 `daily_limit`) when used +
-  `ceil(duration_ms/1000)` > 1,805. The check and insert are not atomic; racing tabs can overshoot
+  `ceil(duration_ms/1000)` > 1,805; the 429 body carries `remainingSeconds` (the real time left from
+  that same used-seconds read, floored at 0) and no usage row is written. The check and insert are not atomic; racing tabs can overshoot
   by one clip each (accepted).
 - **Write scope before the call:** `checkHolisticDictationScope` runs `loadHolisticMentorWriteScope`
   (plus submitted Notes for `follow_up`) in its own `withTransaction`, which commits before the

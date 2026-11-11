@@ -112,9 +112,11 @@ export async function POST(
     durationMs,
     now: new Date(),
   });
+  // The refused clip leaves no usage record; remainingSeconds is the Mentor's
+  // real time left, so a page with a stale count can correct it.
   if (result.outcome === "daily_limit") {
     return NextResponse.json(
-      { error: "You've used today's Dictation time", code: "daily_limit" },
+      { error: "You've used today's Dictation time", code: "daily_limit", remainingSeconds: result.remainingSeconds },
       { status: 429 }
     );
   }

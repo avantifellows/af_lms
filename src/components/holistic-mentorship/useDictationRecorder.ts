@@ -116,10 +116,15 @@ async function postClip(
   }
 }
 
+function dailyLimitReply({ status, body }: DictationReply) {
+  return status === 429 && body?.code === "daily_limit";
+}
+
 // Today's remaining time as the server reports it, or null when it didn't say.
-function remainingAfter({ status, body }: DictationReply): number | null {
-  if (status === 429 && body?.code === "daily_limit") return 0;
-  return typeof body?.remainingSeconds === "number" ? body.remainingSeconds : null;
+// A daily-limit refusal without a count (an older server) means none is left.
+function remainingAfter(reply: DictationReply): number | null {
+  const reported = typeof reply.body?.remainingSeconds === "number" ? reply.body.remainingSeconds : null;
+  return dailyLimitReply(reply) ? reported ?? 0 : reported;
 }
 
 function replyText({ status, body }: DictationReply): string | null {
@@ -142,6 +147,7 @@ export const DICTATION_MESSAGES = {
   failed: "Couldn't transcribe. Try again",
   nothingHeard: "Didn't catch anything. Try speaking closer to the mic or a little louder.",
   dailyLimit: "You've used today's 30 minutes of Dictation. You can keep typing.",
+  overTimeLeft: "That recording is longer than the time you have left today.",
   micStopped: "Recording stopped. Check your microphone.",
 } as const;
 
@@ -170,6 +176,14 @@ function shownState(state: DictationState, remainingSeconds: number): DictationS
   return state;
 }
 
+// Why a reply brought no words, when that is not a failure to retry. A clip
+// refused by the daily limit while time is left can never fit, so it is dropped.
+function replyNotice(reply: DictationReply): string | null {
+  if (heardNothing(reply)) return DICTATION_MESSAGES.nothingHeard;
+  const timeLeft = (remainingAfter(reply) ?? 0) > 0;
+  return dailyLimitReply(reply) && timeLeft ? DICTATION_MESSAGES.overTimeLeft : null;
+}
+
 // What the form shows once the reply is in. A clip that produced nothing
 // stays in memory only, so Retry can resend it without re-recording.
 function stateAfterReply(reply: DictationReply, attempt: {
@@ -181,12 +195,11 @@ function stateAfterReply(reply: DictationReply, attempt: {
 }): DictationState {
   const { target, clip, stop, limitReached } = attempt;
   const text = replyText(reply);
-  const nothingHeard = heardNothing(reply);
-  if (text === null && !nothingHeard && !limitReached) {
+  const replyMessage = replyNotice(reply);
+  if (text === null && !replyMessage && !limitReached) {
     return { kind: "failed", target, clip, durationMs: stop.durationMs };
   }
-  const heard = nothingHeard ? DICTATION_MESSAGES.nothingHeard : null;
-  const message = text === null ? heard : attempt.onText(target, text);
+  const message = text === null ? replyMessage : attempt.onText(target, text);
   const notice = message ?? stop.notice;
   if (limitReached) return limitState(target, notice);
   return notice ? { kind: "notice", target, message: notice } : { kind: "idle" };

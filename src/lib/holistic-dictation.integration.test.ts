@@ -129,6 +129,9 @@ describe.skipIf(!database)("Holistic Dictation usage against disposable Postgres
 
     for (let clip = 0; clip < 12; clip += 1) await dictate(mentor, at, 125_000);
     await expect(remaining(mentor, at)).resolves.toBe(50);
+    // 1,750 used + 60 s = 1,810: refused with the real 50 s left, and not recorded.
+    await expect(dictate(mentor, at, 60_000)).resolves.toEqual({ outcome: "daily_limit", remainingSeconds: 50 });
+    expect(await recordsOf(mentor)).toHaveLength(14);
     // 1,750 used + 55 s = 1,805: allowed, leaving -5, shown as 0.
     await expect(dictate(mentor, at, 55_000)).resolves.toMatchObject({ outcome: "ok", remainingSeconds: 0 });
     await expect(remaining(mentor, at)).resolves.toBe(0);

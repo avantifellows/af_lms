@@ -743,6 +743,42 @@ describe("StudentPhaseWorkspace Dictation", () => {
       expect(box("What helped?")).toHaveValue("Met parents. Typed on.");
     });
 
+    it("drops a clip longer than the time really left, says so, and uses that time for the next recording", async () => {
+      const network = stubNetwork();
+      vi.useFakeTimers();
+      renderWorkspace(mentorDetail(draft({ 91: "Met parents" })));
+
+      await dictate("What helped?", 50);
+      await network.respond({ error: "You've used today's Dictation time", code: "daily_limit", remainingSeconds: 40 }, 429);
+
+      expect(screen.getByText("That recording is longer than the time you have left today."))
+        .toHaveAttribute("aria-live", "polite");
+      expect(screen.queryByText(LIMIT)).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+      expect(box("What helped?")).toHaveValue("Met parents");
+      expect(mic("What helped?")).toBeEnabled();
+      expect(mic("What happens next?")).toBeEnabled();
+
+      await act(async () => fireEvent.click(mic("What happens next?")));
+      await act(async () => vi.advanceTimersByTimeAsync(40_000));
+      expect(network.dictationCalls).toHaveLength(2);
+      expect(network.dictationCalls[1].body.get("duration_ms")).toBe("40000");
+    });
+
+    it("still locks every mic when the 429 says no time is left", async () => {
+      const network = stubNetwork();
+      vi.useFakeTimers();
+      renderWorkspace(mentorDetail());
+
+      await dictate("What helped?", 5);
+      await network.respond({ error: "You've used today's Dictation time", code: "daily_limit", remainingSeconds: 0 }, 429);
+
+      expect(screen.getAllByText(LIMIT)).toHaveLength(2);
+      expect(mic("What helped?")).toBeDisabled();
+      expect(mic("What happens next?")).toBeDisabled();
+      expect(screen.queryByText("That recording is longer than the time you have left today.")).not.toBeInTheDocument();
+    });
+
     it("shows mics in the limit state from the start when the page loads with no time left", async () => {
       const network = stubNetwork();
       renderWorkspace(mentorDetail(), { enabled: true, remainingSeconds: 0 });
