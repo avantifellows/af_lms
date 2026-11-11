@@ -21,7 +21,7 @@ edges:
     condition: when adding a write that must proxy to the DB Service
   - target: patterns/add-api-route.md
     condition: when adding a route that reads or writes
-last_updated: 2026-11-10
+last_updated: 2026-11-11
 ---
 
 # Data Access
@@ -211,7 +211,10 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   insert `outcome='failed'`, `characters_returned=0`, `completed_at` NULL → ElevenLabs call → update
   to `ok` / `nothing_heard` / `failed` with `characters_returned`, `completed_at`, and
   `audio_seconds = min(125, ceil(max(duration_ms/1000, last word end)))`. A request killed
-  mid-call leaves the `failed`, uncompleted row, which still counts.
+  mid-call leaves the `failed`, uncompleted row, which still counts. The browser's cancel
+  (`discard()` aborts the upload) is not passed to the provider call: the call finishes, the row
+  is completed, and the seconds count. This is the agreed rule (ADR 0012: an abandoned clip
+  still counts), so do not wire `request.signal` into `transcribeSpeech` without a new decision.
 - **Timestamps:** the columns are naive UTC and the shared Postgres session time zone may be
   Asia/Kolkata (the local test DBs are), so the insert writes `$now::timestamptz AT TIME ZONE 'UTC'`
   and `completed_at = now() AT TIME ZONE 'UTC'` explicitly; never rely on the `now()` default here.
