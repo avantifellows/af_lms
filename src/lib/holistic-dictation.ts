@@ -150,7 +150,18 @@ async function completeUsageRecord(
   );
 }
 
-async function callScribe(clip: HolisticDictationClip, settings: HolisticDictationSettings) {
+// Logs only the failure class and HTTP status: never the clip, text, provider
+// body, key, or Student/Question identifiers.
+function logProviderFailure(error: unknown) {
+  const failure = error instanceof ScribeTranscriptionError
+    ? { failureClass: error.failureClass, status: error.status }
+    : { failureClass: "unexpected" };
+  console.error("Holistic Dictation transcription failed", failure);
+}
+
+// One Scribe call with its own 25 s abort (independent of the request's
+// signal); any error is logged and becomes "failed".
+async function providerResult(clip: HolisticDictationClip, settings: HolisticDictationSettings) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), PROVIDER_TIMEOUT_MS);
   try {
@@ -162,26 +173,11 @@ async function callScribe(clip: HolisticDictationClip, settings: HolisticDictati
       zeroRetention: settings.zeroRetention,
       signal: controller.signal,
     });
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-// Logs only the failure class and HTTP status: never the clip, text, provider
-// body, key, or Student/Question identifiers.
-function logProviderFailure(error: unknown) {
-  const failure = error instanceof ScribeTranscriptionError
-    ? { failureClass: error.failureClass, status: error.status }
-    : { failureClass: "unexpected" };
-  console.error("Holistic Dictation transcription failed", failure);
-}
-
-async function providerResult(clip: HolisticDictationClip, settings: HolisticDictationSettings) {
-  try {
-    return await callScribe(clip, settings);
   } catch (error) {
     logProviderFailure(error);
     return { kind: "failed" as const };
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
