@@ -53,7 +53,7 @@ export const MENTEES = {
   thirtyDays: { key: "A3", firstName: "Meera", lastName: "Thirty", gender: "Female", grade: 12, programId: 81 },
   legacy: { key: "A4", firstName: "Nikhil", lastName: "Legacy", gender: "Male", grade: 13, programId: 91 },
   twentyNineDays: { key: "A5", firstName: "Zoya", lastName: "TwentyNine", gender: "Female", grade: 12, programId: 79 },
-  recent: { key: "A6", firstName: "Rohan", lastName: "Recent", gender: "Male", grade: 12, programId: 82 },
+  recent: { key: "A6", firstName: "Rohan", lastName: "Recent", gender: "Male", grade: 12, programId: 82, category: "OBC" },
 } as const satisfies Record<string, FixtureMentee>;
 
 // Students Mentor A must never see.
