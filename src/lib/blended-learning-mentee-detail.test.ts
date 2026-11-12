@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { mockCanAccessBlendedStudent } = vi.hoisted(() => ({ mockCanAccessBlendedStudent: vi.fn() }));
+const { mockBlendedStudentScope } = vi.hoisted(() => ({ mockBlendedStudentScope: vi.fn() }));
 
 vi.mock("./db", () => ({ query: vi.fn() }));
 vi.mock("./s3", () => ({ getObjectText: vi.fn(), headObject: vi.fn(), presignDocumentPage: vi.fn() }));
 vi.mock("./blended-learning-access", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./blended-learning-access")>()),
-  canAccessBlendedStudent: mockCanAccessBlendedStudent,
+  blendedStudentScope: mockBlendedStudentScope,
 }));
 
 import { query } from "./db";
@@ -53,17 +53,27 @@ function entry(overrides: Record<string, unknown>) {
 
 beforeEach(() => {
   mockQuery.mockReset();
-  mockCanAccessBlendedStudent.mockReset();
-  mockCanAccessBlendedStudent.mockResolvedValue(true);
+  mockBlendedStudentScope.mockReset();
+  mockBlendedStudentScope.mockResolvedValue("full");
 });
 
 describe("getMenteeDetail", () => {
   it("gives nothing for a Student out of the actor's scope, without reading", async () => {
-    mockCanAccessBlendedStudent.mockResolvedValue(false);
+    mockBlendedStudentScope.mockResolvedValue(null);
 
     expect(await getMenteeDetail(MENTOR, 601)).toBeNull();
-    expect(mockCanAccessBlendedStudent).toHaveBeenCalledWith(MENTOR, 601);
+    expect(mockBlendedStudentScope).toHaveBeenCalledWith(MENTOR, 601);
     expect(mockQuery).not.toHaveBeenCalled();
+  });
+
+  it("marks a supervised Mentor's Mentee view only, with that Mentor named", async () => {
+    mockBlendedStudentScope.mockResolvedValue("view_only");
+    givenRows({ profile: [{ ...PROFILE, mentor_user_id: "9002", mentor_first_name: "Reportee" }] });
+
+    expect(await getMenteeDetail(MENTOR, 502)).toMatchObject({
+      viewOnly: true,
+      mentor: { userId: 9002, firstName: "Reportee" },
+    });
   });
 
   it("gives nothing when the Student has no active Mapping profile row", async () => {
@@ -93,6 +103,7 @@ describe("getMenteeDetail", () => {
       openActionItems: [],
       history: [],
       mentor: { userId: 9001, firstName: "Faizan" },
+      viewOnly: false,
     });
   });
 

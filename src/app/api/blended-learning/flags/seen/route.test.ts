@@ -41,6 +41,7 @@ beforeEach(() => {
       const row = PERMISSIONS[email];
       return row ? [{ email, level: 1, school_codes: null, regions: null, program_ids: [], ...row }] : [];
     }
+    if (sql.includes("FROM blended_learning_mentor_supervisions")) return [];
     if (sql.includes("INSERT INTO blended_learning_flag_views")) {
       const [email] = params ?? [];
       const existing = views.find((row) => row.viewer_email.toLowerCase() === String(email).toLowerCase());

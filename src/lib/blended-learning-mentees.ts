@@ -3,6 +3,7 @@ import { CURRENT_ACADEMIC_YEAR } from "./constants";
 import {
   activeBlendedMappingSql,
   canBlendedLearning,
+  supervisedMentor,
   type BlendedLearningAccess,
 } from "./blended-learning-access";
 import {
@@ -116,6 +117,11 @@ export function currentGradeLateralSql(userId: string): string {
      ) current_grade ON true`;
 }
 
+// A Mentor's display name: their full name, else email, else "Mentor <id>"
+// (`mentor` is the `user` alias).
+const MENTOR_NAME_SQL = `COALESCE(NULLIF(TRIM(CONCAT_WS(' ', mentor.first_name, mentor.last_name)), ''),
+                     mentor.email, CONCAT('Mentor ', mentor.id))`;
+
 // Active current-year Mappings with what Last Contact and Talk to First need,
 // optionally narrowed to one Mentor or one Student.
 function menteeRows(mentorUserId: number | null, studentId: number | null) {
@@ -163,9 +169,10 @@ function menteeRows(mentorUserId: number | null, studentId: number | null) {
 }
 
 // Mentees from active current-year Mappings, grouped and sorted. A Mentor
-// always gets only their own; an admin gets every Mentor's, or one Mentor's
-// when `mentorUserId` is given. `studentId` narrows it to one Mentee's row.
-// `today` is the IST calendar date.
+// gets their own, or a Mentor's they supervise when `mentorUserId` is one
+// (any other id gets their own); an admin gets every Mentor's, or one
+// Mentor's when `mentorUserId` is given. `studentId` narrows it to one
+// Mentee's row. `today` is the IST calendar date.
 export async function listMentees(params: {
   access: BlendedLearningAccess;
   mentorUserId?: number | null;
@@ -173,7 +180,10 @@ export async function listMentees(params: {
   today: string;
 }): Promise<MenteeList> {
   const { access, today } = params;
-  const mentorUserId = access.kind === "mentor" ? access.mentorUserId : params.mentorUserId;
+  const mentorUserId =
+    access.kind === "mentor"
+      ? (supervisedMentor(access, params.mentorUserId ?? null) ?? access.mentorUserId)
+      : params.mentorUserId;
   if (access.kind === "mentor" && mentorUserId == null) return { talkToFirst: [], everyoneElse: [] };
 
   const rows = await menteeRows(mentorUserId ?? null, params.studentId ?? null);
@@ -182,6 +192,25 @@ export async function listMentees(params: {
     talkToFirst: mentees.filter((mentee) => menteeGroup(mentee.reasons) === "Talk to first"),
     everyoneElse: mentees.filter((mentee) => menteeGroup(mentee.reasons) === "Everyone else"),
   };
+}
+
+export type SupervisedMentor = { mentorUserId: number; name: string };
+
+// The Mentors a supervisor supervises, A–Z by name, for the Mentee list's
+// "whose students" switch and the Flags tab's Mentor filter. Empty for anyone
+// who supervises no one (admins included: they have the Mentor cards).
+export async function listSupervisedMentors(access: BlendedLearningAccess): Promise<SupervisedMentor[]> {
+  const ids = access.kind === "mentor" ? (access.supervisedMentorUserIds ?? []) : [];
+  if (ids.length === 0) return [];
+  const rows = await query<{ id: number | string; name: string }>(
+    `SELECT mentor.id, ${MENTOR_NAME_SQL} AS name
+     FROM "user" mentor
+     WHERE mentor.id = ANY($1::bigint[])`,
+    [ids]
+  );
+  return rows
+    .map((row) => ({ mentorUserId: Number(row.id), name: row.name }))
+    .sort((a, b) => a.name.localeCompare(b.name, "en", { sensitivity: "base" }));
 }
 
 export type MentorCard = {

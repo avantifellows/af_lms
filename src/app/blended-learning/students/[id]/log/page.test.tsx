@@ -98,6 +98,7 @@ const MENTEE: MenteeDetail = {
   ],
   openActionItems: OPEN_ITEMS as MenteeDetail["openActionItems"],
   mentor: { userId: 9001, firstName: "Faizan" },
+  viewOnly: false,
 };
 
 function signedInAs(access: { actorEmail: string }) {
@@ -144,6 +145,14 @@ describe("LogEntryPage", () => {
     signedInAs(access);
     await expect(renderPage()).rejects.toThrow("REDIRECT:/blended-learning/students/501");
     expect(mockGetMenteeDetail).not.toHaveBeenCalled();
+  });
+
+  it("sends a supervisor back from a supervised Mentor's Mentee's detail page: they never log for them", async () => {
+    const supervisor = { ...MENTOR, actorEmail: "lead@test.local", supervisedMentorUserIds: [9002] };
+    signedInAs(supervisor);
+    mockGetMenteeDetail.mockResolvedValue({ ...MENTEE, studentId: 502, mentor: { userId: 9002, firstName: "Reportee" }, viewOnly: true });
+
+    await expect(renderPage("502")).rejects.toThrow("REDIRECT:/blended-learning/students/502");
   });
 
   it("shows the not-found page for a Mentee out of scope", async () => {

@@ -16,6 +16,8 @@ const MENTOR_A = "faizan@avantifellows.org";
 const MENTOR_B = "lokesh@avantifellows.org";
 const ADMIN_READ_ONLY = "viewer@avantifellows.org";
 const TEACHER = "teacher@avantifellows.org";
+// A team-lead Mentor who supervises Mentor B (9002), not Mentor 9004.
+const SUPERVISOR = "supervisor@test.local";
 
 // Fixture tables, keyed the way the SQL reads them.
 const PERMISSIONS: Record<string, { role: string; read_only: boolean; user_id: number }> = {
@@ -23,15 +25,19 @@ const PERMISSIONS: Record<string, { role: string; read_only: boolean; user_id: n
   [MENTOR_B]: { role: "blended_mentor", read_only: false, user_id: 9002 },
   [ADMIN_READ_ONLY]: { role: "blended_admin", read_only: true, user_id: 12 },
   [TEACHER]: { role: "teacher", read_only: false, user_id: 40 },
+  [SUPERVISOR]: { role: "blended_mentor", read_only: false, user_id: 9003 },
 };
 // Active current-year Mappings: student → Mentor user id. Student 503 is unmapped.
-const MAPPINGS: Record<number, number> = { 501: 9001, 601: 9002 };
+const MAPPINGS: Record<number, number> = { 501: 9001, 601: 9002, 701: 9004 };
+// Active current-year Supervisions: supervisor → supervised Mentors.
+const SUPERVISIONS: Record<number, number[]> = { 9003: [9002] };
 const CONVERSATIONS: Record<number, { student_id: number; kind: string; notes_html: string | null }> = {
   71: { student_id: 501, kind: "conversation", notes_html: "<h3>Exams</h3><ul><li>Revise optics</li></ul>" },
   72: { student_id: 501, kind: "conversation", notes_html: null },
   73: { student_id: 501, kind: "attempt", notes_html: null },
   81: { student_id: 601, kind: "conversation", notes_html: "<p>Mentor B's notes</p>" },
   91: { student_id: 503, kind: "conversation", notes_html: "<p>Unmapped</p>" },
+  95: { student_id: 701, kind: "conversation", notes_html: "<p>Mentor 9004's notes</p>" },
 };
 
 function givenTables() {
@@ -44,6 +50,9 @@ function givenTables() {
     if (sql.includes("FROM blended_learning_mentor_mentee_mappings")) {
       const mentor = MAPPINGS[Number(params?.[0])];
       return mentor ? [{ mentor_user_id: mentor }] : [];
+    }
+    if (sql.includes("FROM blended_learning_mentor_supervisions")) {
+      return (SUPERVISIONS[Number(params?.[0])] ?? []).map((id) => ({ mentor_user_id: id }));
     }
     if (sql.includes("FROM blended_learning_conversations")) {
       const row = CONVERSATIONS[Number(params?.[0])];
@@ -105,6 +114,14 @@ describe("GET /api/blended-learning/conversations/[id]/notes", () => {
     expect((await getNotes("99")).status).toBe(404);
     expect((await getNotes("73")).status).toBe(404);
     expect((await getNotes("7x")).status).toBe(404);
+  });
+
+  it("lets a supervisor read a supervised Mentor's Mentee's notes, and no other Mentor's", async () => {
+    signedInAs(SUPERVISOR);
+
+    expect(await getNotes("81")).toEqual({ status: 200, body: { notesHtml: "<p>Mentor B's notes</p>" } });
+    expect(await getNotes("95")).toEqual({ status: 404, body: { error: "Not found" } });
+    expect(await getNotes("71")).toEqual({ status: 404, body: { error: "Not found" } });
   });
 
   it("lets a read-only Blended Learning Admin read any mapped Mentee's notes", async () => {
