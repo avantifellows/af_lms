@@ -119,6 +119,8 @@ export default async function LogEntryPage({ params }: { params: Promise<{ id: s
 
   const mentee = await getMenteeDetail(access, Number(id));
   if (!mentee) notFound();
+  // A supervisor reads a supervised Mentor's Mentee but never logs for them.
+  if (mentee.viewOnly) redirect(`/blended-learning/students/${id}`);
 
   const firstName = mentee.name.split(" ")[0] || mentee.name;
   const program = mentee.programName && shortProgramName(mentee.programName);

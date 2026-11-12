@@ -90,9 +90,9 @@ describe("countNewFlags", () => {
 
 // A Mentor's Flags tab: only flags on Students with an active current-year
 // Mapping to them, in every read, so another Mentor's flags never leave the DB.
-describe("a Mentor's flags", () => {
-  const OWN_STUDENTS = /EXISTS \(\s*SELECT 1 FROM blended_learning_mentor_mentee_mappings own\s+WHERE own\.student_id = flag\.student_id AND own\.mentor_user_id = \$(\d)::bigint\s+AND own\.academic_year = \$(\d) AND own\.ended_at IS NULL\)/;
+const OWN_STUDENTS = /EXISTS \(\s*SELECT 1 FROM blended_learning_mentor_mentee_mappings own\s+WHERE own\.student_id = flag\.student_id AND own\.mentor_user_id = ANY\(\$(\d)::bigint\[\]\)\s+AND own\.academic_year = \$(\d) AND own\.ended_at IS NULL\)/;
 
+describe("a Mentor's flags", () => {
   it("narrows the feed to the Mentor's own Students and ignores a Mentor filter", async () => {
     mockQuery.mockImplementation(async (sql: string) => (/count\(\*\)/.test(sql) ? [{ count: 1 }] : [FLAG_ROW]));
 
@@ -101,12 +101,12 @@ describe("a Mentor's flags", () => {
     const [listSql, listParams] = mockQuery.mock.calls.find(([sql]) => /AS in_scope/.test(sql))!;
     expect(listSql).toMatch(/NOT \$7::boolean OR EXISTS/);
     const [, mentorParam, yearParam] = OWN_STUDENTS.exec(listSql)!;
-    expect(listParams[Number(mentorParam) - 1]).toBe(9001);
+    expect(listParams[Number(mentorParam) - 1]).toEqual([9001]);
     expect(listParams[Number(yearParam) - 1]).toBe("2026-2027");
-    expect(listParams).toEqual([null, null, "maths", null, 51, "2026-2027", true, 9001]);
+    expect(listParams).toEqual([null, null, "maths", null, 51, "2026-2027", true, [9001]]);
     const [countSql, countParams] = mockQuery.mock.calls.find(([sql]) => /count\(\*\)/.test(sql))!;
     expect(countSql).toMatch(OWN_STUDENTS);
-    expect(countParams).toEqual([null, true, 9001, "2026-2027"]);
+    expect(countParams).toEqual([null, true, [9001], "2026-2027"]);
   });
 
   it("counts only the Mentor's own Students' new flags for the badge", async () => {
@@ -116,7 +116,7 @@ describe("a Mentor's flags", () => {
     const [sql, params] = mockQuery.mock.calls[0];
     expect(sql).toMatch(/NOT \$2::boolean OR EXISTS/);
     expect(sql).toMatch(OWN_STUDENTS);
-    expect(params).toEqual([MENTOR.actorEmail, true, 9001, "2026-2027"]);
+    expect(params).toEqual([MENTOR.actorEmail, true, [9001], "2026-2027"]);
   });
 
   it("matches nothing for a Mentor without a user id, rather than every flag", async () => {
@@ -124,11 +124,41 @@ describe("a Mentor's flags", () => {
 
     await countNewFlags({ ...MENTOR, mentorUserId: null });
 
-    expect(mockQuery.mock.calls[0][1]).toEqual([MENTOR.actorEmail, true, null, "2026-2027"]);
+    expect(mockQuery.mock.calls[0][1]).toEqual([MENTOR.actorEmail, true, [], "2026-2027"]);
   });
 
   it("offers a Mentor no Mentor filter, without querying other Mentors", async () => {
     expect(await listFlagMentors(MENTOR)).toEqual([]);
     expect(mockQuery).not.toHaveBeenCalled();
+  });
+});
+
+// A team-lead Mentor (9001) who supervises Mentor 9002.
+describe("a supervisor's flags", () => {
+  const SUPERVISOR: BlendedLearningAccess = { ...MENTOR, supervisedMentorUserIds: [9002] };
+
+  it("covers their own and the supervised Mentor's Students, in the feed and the badge", async () => {
+    mockQuery.mockImplementation(async (sql: string) => (/count\(\*\)/.test(sql) ? [{ count: 2 }] : [FLAG_ROW]));
+
+    await listFlags(SUPERVISOR, { recipient: null }, { lastSeenAt: null });
+
+    const [listSql, listParams] = mockQuery.mock.calls.find(([sql]) => /AS in_scope/.test(sql))!;
+    expect(listSql).toMatch(OWN_STUDENTS);
+    expect(listParams).toEqual([null, null, null, null, 51, "2026-2027", true, [9001, 9002]]);
+    const [, countParams] = mockQuery.mock.calls.find(([sql]) => /count\(\*\)/.test(sql))!;
+    expect(countParams).toEqual([null, true, [9001, 9002], "2026-2027"]);
+  });
+
+  it("filters by their own or a supervised Mentor, and ignores any other Mentor", async () => {
+    mockQuery.mockImplementation(async (sql: string) => (/count\(\*\)/.test(sql) ? [{ count: 0 }] : []));
+    const mentorParam = async (mentorUserId: number) => {
+      mockQuery.mockClear();
+      await listFlags(SUPERVISOR, { mentorUserId }, { lastSeenAt: null });
+      return mockQuery.mock.calls.find(([sql]) => /AS in_scope/.test(sql))![1][1];
+    };
+
+    expect(await mentorParam(9002)).toBe(9002);
+    expect(await mentorParam(9001)).toBe(9001);
+    expect(await mentorParam(9003)).toBeNull();
   });
 });

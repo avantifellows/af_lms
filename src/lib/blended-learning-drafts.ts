@@ -2,10 +2,12 @@ import { randomUUID } from "node:crypto";
 
 import { query, withTransaction } from "./db";
 import {
+  blendedStudentScope,
   canAccessBlendedStudent,
   canBlendedLearning,
   lockMappingInScope,
   type BlendedLearningAccess,
+  type BlendedStudentScope,
 } from "./blended-learning-access";
 import { blendedLearningRecordingPrefix, headObject, presignUpload } from "./s3";
 import type { DraftNote } from "./blended-learning-draft-notes";
@@ -217,9 +219,12 @@ type DraftRow = {
   request_stale: boolean | null;
 };
 
+type ScopedDraft = DraftRow & { scope: BlendedStudentScope };
+
 // One draft with its active (queued or running) Transcription Request, if
-// any. Null when there is no such draft or it is out of scope.
-async function readDraft(access: BlendedLearningAccess, draftId: number): Promise<DraftRow | null> {
+// any, and the viewer's scope on its Student. Null when there is no such
+// draft or it is out of scope; a supervisor gets "view_only".
+async function readDraft(access: BlendedLearningAccess, draftId: number): Promise<ScopedDraft | null> {
   if (!Number.isSafeInteger(draftId) || draftId <= 0) return null;
   const rows = await query<DraftRow>(
     `SELECT draft.id, draft.student_id, draft.state,
@@ -233,8 +238,14 @@ async function readDraft(access: BlendedLearningAccess, draftId: number): Promis
     [draftId]
   );
   const draft = rows[0];
-  if (!draft || !(await canAccessBlendedStudent(access, Number(draft.student_id)))) return null;
-  return draft;
+  const scope = draft ? await blendedStudentScope(access, Number(draft.student_id)) : null;
+  return draft && scope ? { ...draft, scope } : null;
+}
+
+// The draft for a change (retry, discard): only on a Student in full scope.
+async function readDraftToChange(access: BlendedLearningAccess, draftId: number): Promise<ScopedDraft | null> {
+  const draft = await readDraft(access, draftId);
+  return draft?.scope === "full" ? draft : null;
 }
 
 // Transcribing, but its request has waited in the queue for over 10 minutes
@@ -243,14 +254,15 @@ function queuedForEtl(draft: DraftRow): boolean {
   return draft.state === "transcribing" && draft.request_state === "queued" && draft.request_stale === true;
 }
 
-function draftStatus(access: BlendedLearningAccess, draft: DraftRow): DraftStatus {
-  const retryable = draft.state === "failed" || queuedForEtl(draft);
+function draftStatus(access: BlendedLearningAccess, draft: ScopedDraft): DraftStatus {
+  const retryable = draft.scope === "full" && (draft.state === "failed" || queuedForEtl(draft));
   return { id: Number(draft.id), state: draft.state, retryOffered: retryable && canBlendedLearning(access, "manage_draft") };
 }
 
 // One draft's state, for the detail page's polling. "Retry drafting" is
 // offered to those who can manage drafts when the draft failed, or when its
-// request is still queued after 10 minutes. Null when the draft is out of scope.
+// request is still queued after 10 minutes, never on a supervised Mentor's
+// Mentee. Null when the draft is out of scope.
 export async function getDraftStatus(access: BlendedLearningAccess, draftId: number): Promise<DraftStatus | null> {
   const draft = await readDraft(access, draftId);
   return draft ? draftStatus(access, draft) : null;
@@ -269,7 +281,7 @@ export async function retryDrafting(
   draftId: number
 ): Promise<{ ok: true; draft: DraftStatus } | Failure> {
   if (!canBlendedLearning(access, "manage_draft")) return { ok: false, status: 403, error: "Forbidden" };
-  const draft = await readDraft(access, draftId);
+  const draft = await readDraftToChange(access, draftId);
   if (!draft) return { ok: false, status: 404, error: "Not found" };
 
   let requestKey: string;
@@ -316,7 +328,7 @@ export async function discardDraft(
   draftId: number
 ): Promise<{ ok: true; draft: { id: number; state: "discarded" } } | Failure> {
   if (!canBlendedLearning(access, "manage_draft")) return { ok: false, status: 403, error: "Forbidden" };
-  if (!(await readDraft(access, draftId))) return { ok: false, status: 404, error: "Not found" };
+  if (!(await readDraftToChange(access, draftId))) return { ok: false, status: 404, error: "Not found" };
 
   const discarded = await query<{ id: number | string }>(
     `UPDATE blended_learning_conversation_drafts

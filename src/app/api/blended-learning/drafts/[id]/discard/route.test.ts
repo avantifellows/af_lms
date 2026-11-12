@@ -16,13 +16,18 @@ const MENTOR_A = "faizan@avantifellows.org";
 const ADMIN = "juned@avantifellows.org";
 const ADMIN_READ_ONLY = "shalinijha@avantifellows.org";
 const TEACHER = "teacher@avantifellows.org";
+// A team-lead Mentor who supervises the Mentor of Student 601.
+const SUPERVISOR = "supervisor@test.local";
 
 const PERMISSIONS: Record<string, { role: string; read_only: boolean; user_id: number }> = {
   [MENTOR_A]: { role: "blended_mentor", read_only: false, user_id: 9001 },
   [ADMIN]: { role: "blended_admin", read_only: false, user_id: 11 },
   [ADMIN_READ_ONLY]: { role: "blended_admin", read_only: true, user_id: 12 },
   [TEACHER]: { role: "teacher", read_only: false, user_id: 40 },
+  [SUPERVISOR]: { role: "blended_mentor", read_only: false, user_id: 9003 },
 };
+// Active current-year Supervisions: supervisor → supervised Mentors.
+const SUPERVISIONS: Record<number, number[]> = { 9003: [9002] };
 // Active current-year Mappings: student → Mentor user id.
 const MAPPINGS: Record<number, number> = { 501: 9001, 503: 9001, 504: 9001, 505: 9001, 506: 9001, 601: 9002 };
 
@@ -51,6 +56,9 @@ beforeEach(() => {
     if (sql.includes("FROM blended_learning_mentor_mentee_mappings")) {
       const mentor = MAPPINGS[Number(params?.[0])];
       return mentor ? [{ mentor_user_id: mentor }] : [];
+    }
+    if (sql.includes("FROM blended_learning_mentor_supervisions")) {
+      return (SUPERVISIONS[Number(params?.[0])] ?? []).map((id) => ({ mentor_user_id: id }));
     }
     // SET state = $2, discarded_at = now() … WHERE id = $1 AND state IN ('transcribing', 'ready', 'failed')
     if (sql.includes("UPDATE blended_learning_conversation_drafts")) {
@@ -121,6 +129,14 @@ describe("POST /api/blended-learning/drafts/[id]/discard", () => {
     const before = structuredClone(drafts);
 
     expect(await discard("43")).toEqual({ status: 403, body: { error: "Forbidden" } });
+    expect(drafts).toEqual(before);
+  });
+
+  it("returns 404 to a supervisor for a supervised Mentor's Mentee's draft: view only", async () => {
+    signedInAs(SUPERVISOR);
+    const before = structuredClone(drafts);
+
+    expect(await discard("61")).toEqual({ status: 404, body: { error: "Not found" } });
     expect(drafts).toEqual(before);
   });
 

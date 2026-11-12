@@ -17,7 +17,16 @@ vi.mock("@/lib/blended-learning-mentees", () => ({ listMentees: vi.fn() }));
 import { withTransaction } from "@/lib/db";
 import { notifyWellbeingFlag } from "@/lib/blended-learning-wellbeing-notifier";
 import { listMentees } from "@/lib/blended-learning-mentees";
-import { MAPPING, MENTOR, READ_ONLY_ADMIN, mockBlendedDb, pgError, rows, signedInAs } from "@/app/api/blended-learning/test-db";
+import {
+  MAPPING,
+  MENTOR,
+  READ_ONLY_ADMIN,
+  SUPERVISOR,
+  mockBlendedDb,
+  pgError,
+  rows,
+  signedInAs,
+} from "@/app/api/blended-learning/test-db";
 import { POST } from "./route";
 
 const mockNotify = vi.mocked(notifyWellbeingFlag);
@@ -98,6 +107,19 @@ describe("POST /api/blended-learning/students/[id]/entries", () => {
     expect(clientQuery).toHaveBeenCalledTimes(1);
 
     expect((await postEntry("5x", { kind: "attempt", occurredOn: "2026-10-20" })).status).toBe(404);
+  });
+
+  it("returns 404 to a supervisor for a supervised Mentor's Mentee, and saves nothing: view only", async () => {
+    signedInAs(SUPERVISOR);
+    clientQuery.mockResolvedValueOnce(rows(MAPPING));
+
+    expect(await postEntry("501", CONVERSATION)).toEqual({
+      status: 404,
+      body: { error: "Not found" },
+    });
+    expect(clientQuery).toHaveBeenCalledTimes(1);
+    expect(clientQuery.mock.calls[0][0]).toContain("FOR SHARE");
+    expect(mockNotify).not.toHaveBeenCalled();
   });
 
   it("passes validation errors through as 422 and saves nothing", async () => {

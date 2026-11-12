@@ -2,7 +2,8 @@ import { query } from "./db";
 import { CURRENT_ACADEMIC_YEAR } from "./constants";
 import {
   activeBlendedMappingSql,
-  canAccessBlendedStudent,
+  blendedStudentScope,
+  canViewBlendedStudent,
   type BlendedLearningAccess,
 } from "./blended-learning-access";
 import type { OpenDraftState } from "./blended-learning-mentees";
@@ -12,8 +13,9 @@ const PHOTO_URL_TTL_SECONDS = 300; // 5 minutes
 const RECORDING_URL_TTL_SECONDS = 300; // 5 minutes
 
 // Blended Learning read model: one Mentee's detail page and a Conversation's
-// on-demand notes and photos (server-only). Every read checks
-// canAccessBlendedStudent first; out of scope reads as null (a 404).
+// on-demand notes and photos (server-only). Every read checks the Student's
+// scope first (a supervisor reads a supervised Mentor's Mentee, view only);
+// out of scope reads as null (a 404).
 
 export type ActionItemOwner = "student" | "mentor" | "parent";
 export type ActionItem = {
@@ -97,9 +99,11 @@ export type MenteeDetail = {
   // Open Action Items from earlier Conversations, the Profile Doc and
   // Common Action Items, newest first by agreed (or pushed) date.
   openActionItems: OpenActionItem[];
-  // The Mentor of the Student's active Mapping, for an admin's way back to
-  // that Mentor's list.
+  // The Mentor of the Student's active Mapping, for an admin's (or a
+  // supervisor's) way back to that Mentor's list.
   mentor: { userId: number; firstName: string };
+  // A supervised Mentor's Mentee: the viewer reads, the mapped Mentor writes.
+  viewOnly: boolean;
 };
 
 type ProfileRow = {
@@ -309,7 +313,8 @@ export async function getMenteeDetail(
   access: BlendedLearningAccess,
   studentId: number
 ): Promise<MenteeDetail | null> {
-  if (!(await canAccessBlendedStudent(access, studentId))) return null;
+  const scope = await blendedStudentScope(access, studentId);
+  if (!scope) return null;
 
   const profiles = await query<ProfileRow>(
     `SELECT account.first_name, account.last_name, account.gender, account.phone, account.whatsapp_phone,
@@ -396,6 +401,7 @@ export async function getMenteeDetail(
         ? null
         : { id: Number(profile.open_draft_id), state: profile.open_draft_state },
     mentor: { userId: Number(profile.mentor_user_id), firstName: profile.mentor_first_name },
+    viewOnly: scope === "view_only",
     openActionItems: openActionItems(profile, entries, itemsByConversation, actionItems),
     history: withProfileDocEntry(
       entries.map((entry) => historyEntry(entry, itemsByConversation, commonItemsByConversation, flagsByConversation)),
@@ -420,7 +426,7 @@ async function conversationInScope(access: BlendedLearningAccess, conversationId
   );
   const conversation = rows[0];
   if (!conversation || conversation.kind !== "conversation") return null;
-  if (!(await canAccessBlendedStudent(access, Number(conversation.student_id)))) return null;
+  if (!(await canViewBlendedStudent(access, Number(conversation.student_id)))) return null;
   return conversation;
 }
 

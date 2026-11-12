@@ -20,6 +20,8 @@ const MENTOR_A = "faizan@avantifellows.org";
 const ADMIN = "juned@avantifellows.org";
 const ADMIN_READ_ONLY = "shalinijha@avantifellows.org";
 const TEACHER = "teacher@avantifellows.org";
+// A team-lead Mentor who supervises the Mentor of Student 601.
+const SUPERVISOR = "supervisor@test.local";
 
 // Fixture tables, keyed the way the SQL reads them.
 const PERMISSIONS: Record<string, { role: string; read_only: boolean; user_id: number }> = {
@@ -27,7 +29,10 @@ const PERMISSIONS: Record<string, { role: string; read_only: boolean; user_id: n
   [ADMIN]: { role: "blended_admin", read_only: false, user_id: 11 },
   [ADMIN_READ_ONLY]: { role: "blended_admin", read_only: true, user_id: 12 },
   [TEACHER]: { role: "teacher", read_only: false, user_id: 40 },
+  [SUPERVISOR]: { role: "blended_mentor", read_only: false, user_id: 9003 },
 };
+// Active current-year Supervisions: supervisor → supervised Mentors.
+const SUPERVISIONS: Record<number, number[]> = { 9003: [9002] };
 // Active current-year Mappings: student → Mentor user id. Student 503 is unmapped.
 const MAPPINGS: Record<number, number> = { 501: 9001, 601: 9002 };
 
@@ -45,6 +50,9 @@ function givenTables() {
     if (sql.includes("FROM blended_learning_mentor_mentee_mappings")) {
       const mentor = MAPPINGS[Number(params?.[0])];
       return mentor ? [{ mentor_user_id: mentor }] : [];
+    }
+    if (sql.includes("FROM blended_learning_mentor_supervisions")) {
+      return (SUPERVISIONS[Number(params?.[0])] ?? []).map((id) => ({ mentor_user_id: id }));
     }
     return [];
   });
@@ -179,6 +187,12 @@ describe("POST /api/blended-learning/students/[id]/photos", () => {
   ])("returns 404 for %s and stores nothing", async (_case, studentId) => {
     signedInAs(MENTOR_A);
     expect((await upload(studentId, { mimeType: "image/jpeg", bytes: new Uint8Array([1]) })).status).toBe(404);
+    expect(puts()).toEqual([]);
+  });
+
+  it("returns 404 to a supervisor for a supervised Mentor's Mentee and stores nothing: view only", async () => {
+    signedInAs(SUPERVISOR);
+    expect((await upload("601", { mimeType: "image/jpeg", bytes: new Uint8Array([1]) })).status).toBe(404);
     expect(puts()).toEqual([]);
   });
 

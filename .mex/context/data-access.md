@@ -21,7 +21,7 @@ edges:
     condition: when adding a write that must proxy to the DB Service
   - target: patterns/add-api-route.md
     condition: when adding a route that reads or writes
-last_updated: 2026-11-10
+last_updated: 2026-11-12
 ---
 
 # Data Access
@@ -582,6 +582,22 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   Doc"), admins read-only; the log page's Last Conversation panel shows it while it is the
   latest. Owner pills are a fixed `w-16` column (`ACTION_ITEM_ROW_CLASSES` in
   `ActionItemMeta.tsx`) so item text lines up whoever owns it.
+
+## Blended Learning Supervisions (2026-11-12)
+
+- `blended_learning_mentor_supervisions` (db-service `20261112120442`, LMS-owned, mirrored in
+  `e2e/fixtures/migrations/20261112120442_add_blended_learning_supervisions.sql`, pg_dump-identical):
+  `supervisor_user_id`, `mentor_user_id` (both `user` FKs, `<>` each other), `academic_year`,
+  `started_at`, then the Mapping table's audit and lifecycle columns and CHECKs. One running row per
+  (supervisor, mentor, year) (`blm_supervisions_active_pair_year_unique`, partial on
+  `ended_at IS NULL`); rows are ended, never deleted. Read as `activeBlendedMappingSql` reads Mappings.
+- Read once per request in `getBlendedLearningAccess` (a Mentor's `supervisedMentorUserIds`);
+  `listSupervisedMentors` (in `blended-learning-mentees.ts`) names them for the list switch and the
+  Flags tab's Mentor filter. Written only by the operator script
+  (`src/lib/blended-learning-supervisions-load.ts`: dry run on a read-only connection; apply = one
+  transaction, `ON CONFLICT … WHERE ended_at IS NULL DO NOTHING`; `--end` sets the end columns).
+- e2e: `BLENDED_SUPERVISOR` (one own Mentee, `SUPERVISOR_MENTEE`) supervises Mentor B and has an
+  ended Supervision of Mentor A; `e2e/tests/blended-learning-supervisor.spec.ts` asserts on them.
 
 ## Blended Learning Manage: Resources and Common Action Items (2026-10-27)
 

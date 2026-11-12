@@ -32,6 +32,14 @@ export const BLENDED_MENTOR_D = {
   email: "e2e-blended-mentor-d@test.local",
 };
 
+// A team-lead Mentor with one Mentee of their own, who supervises Mentor B
+// (view only: Sana and Tara, whose Flags the feed seeds) and whose earlier
+// Supervision of Mentor A has ended. Only the supervisor spec asserts on them.
+export const BLENDED_SUPERVISOR = {
+  name: "Synthetic Blended Lead",
+  email: "e2e-blended-lead@test.local",
+};
+
 type Grade = 12 | 13;
 type FixtureMentee = {
   key: string;
@@ -55,6 +63,11 @@ export const MENTEES = {
   twentyNineDays: { key: "A5", firstName: "Zoya", lastName: "TwentyNine", gender: "Female", grade: 12, programId: 79 },
   recent: { key: "A6", firstName: "Rohan", lastName: "Recent", gender: "Male", grade: 12, programId: 82 },
 } as const satisfies Record<string, FixtureMentee>;
+
+// The supervisor's own Mentee.
+export const SUPERVISOR_MENTEE = {
+  key: "S1", firstName: "Lata", lastName: "Lead", gender: "Female", grade: 12, programId: 80,
+} as const satisfies FixtureMentee;
 
 // Students Mentor A must never see.
 export const OTHER_STUDENTS = {
@@ -585,6 +598,7 @@ export async function seedBlendedLearningFixtures(client: Client): Promise<void>
   const mentorB = await seedMentor(client, BLENDED_MENTOR_B);
   const mentorC = await seedMentor(client, BLENDED_MENTOR_C);
   const mentorD = await seedMentor(client, BLENDED_MENTOR_D);
+  const supervisor = await seedMentor(client, BLENDED_SUPERVISOR);
 
   const ids: Record<string, number> = {};
   const contacts: Record<string, FixtureContact> = {
@@ -610,6 +624,7 @@ export async function seedBlendedLearningFixtures(client: Client): Promise<void>
     ...loggingMentees,
     ...manageMentees,
     ...screenerMentees,
+    SUPERVISOR_MENTEE,
   ].entries()) {
     ids[mentee.key] = await seedStudent(client, mentee, index, contacts[mentee.key]);
   }
@@ -795,4 +810,29 @@ export async function seedBlendedLearningFixtures(client: Client): Promise<void>
   }
 
   await seedFeedFlags(client, ids, { mentorA, mentorB });
+  await seedSupervisions(client, { supervisor, mentorA, mentorB, ownMentee: ids[SUPERVISOR_MENTEE.key] });
+}
+
+// The supervisor's own Mapping, their running Supervision of Mentor B and an
+// ended one of Mentor A.
+async function seedSupervisions(
+  client: Client,
+  people: { supervisor: number; mentorA: number; mentorB: number; ownMentee: number }
+) {
+  await seedMapping(client, {
+    studentId: people.ownMentee,
+    mentorUserId: people.supervisor,
+    programId: SUPERVISOR_MENTEE.programId,
+    academicYear: CURRENT_ACADEMIC_YEAR,
+    startedDaysAgo: 90,
+  });
+  await client.query(
+    `INSERT INTO blended_learning_mentor_supervisions
+       (supervisor_user_id, mentor_user_id, academic_year, started_at, assignment_source,
+        ended_at, end_source, end_reason)
+     VALUES
+       ($1, $2, $4, now() - interval '30 days', 'e2e_fixture', NULL, NULL, NULL),
+       ($1, $3, $4, now() - interval '60 days', 'e2e_fixture', now() - interval '31 days', 'e2e_fixture', 'team_changed')`,
+    [people.supervisor, people.mentorB, people.mentorA, CURRENT_ACADEMIC_YEAR]
+  );
 }

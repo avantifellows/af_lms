@@ -1,5 +1,10 @@
 import { Card } from "@/components/ui";
-import { canBlendedLearning, type BlendedLearningAccess } from "@/lib/blended-learning-access";
+import {
+  canBlendedLearning,
+  supervisedMentor,
+  viewableMentorUserIds,
+  type BlendedLearningAccess,
+} from "@/lib/blended-learning-access";
 import { requireBlendedLearningPage } from "@/lib/blended-learning-guard";
 import {
   countNewFlags,
@@ -13,8 +18,10 @@ import {
 import {
   listMentees,
   listMentorCards,
+  listSupervisedMentors,
   type MenteeList,
   type MentorCard,
+  type SupervisedMentor,
 } from "@/lib/blended-learning-mentees";
 import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
 import { getTodayIST } from "@/lib/curriculum-date-helpers";
@@ -26,6 +33,7 @@ import { FlagsFeed, type FlagsView } from "./FlagsFeed";
 import { MarkFlagsSeen } from "./MarkFlagsSeen";
 import { MentorCards } from "./MentorCards";
 import { SECTION_TAB_TITLE, SectionTabs, type SectionTab } from "./SectionTabs";
+import { SupervisedMentorSwitch } from "./SupervisedMentorSwitch";
 
 type SearchParam = string | string[] | undefined;
 type LandingTab = Exclude<SectionTab, "resources" | "manage">;
@@ -37,7 +45,21 @@ type SearchParams = {
   since?: SearchParam;
 };
 
-function MentorMenteeList({ list, canLog, today }: { list: MenteeList; canLog: boolean; today: string }) {
+// The Mentee list a Mentor sees: their own, or (for a supervisor) a Mentor's
+// they supervise, view only.
+type MenteesRead = { list: MenteeList; supervised: SupervisedMentor[]; viewing: SupervisedMentor | null };
+
+function MentorMenteeList({
+  list,
+  canLog,
+  today,
+  whose,
+}: {
+  list: MenteeList;
+  canLog: boolean;
+  today: string;
+  whose: string;
+}) {
   const total = list.talkToFirst.length + list.everyoneElse.length;
   return (
     <>
@@ -48,7 +70,7 @@ function MentorMenteeList({ list, canLog, today }: { list: MenteeList; canLog: b
       {total === 0 ? (
         <Card elevation="sm" className="p-4 sm:p-6">
           <p className="text-sm text-text-secondary">
-            No students are mapped to you for {CURRENT_ACADEMIC_YEAR}.
+            No students are mapped to {whose} for {CURRENT_ACADEMIC_YEAR}.
           </p>
         </Card>
       ) : (
@@ -63,11 +85,27 @@ type FlagsRead = { view: FlagsView; newVisit: boolean };
 // The landing's data for the open tab; only its reads run.
 type Landing = {
   tab: LandingTab;
-  mentees: MenteeList | null;
+  mentees: MenteesRead | null;
   cards: MentorCard[];
   flags: FlagsRead | null;
   newFlags: number;
 };
+
+function MenteesView({ access, mentees, today }: { access: BlendedLearningAccess; mentees: MenteesRead; today: string }) {
+  const { list, supervised, viewing } = mentees;
+  return (
+    <>
+      {supervised.length > 0 && <SupervisedMentorSwitch mentors={supervised} viewing={viewing} />}
+      <MentorMenteeList
+        list={list}
+        // A supervised Mentor's Mentees are view only.
+        canLog={viewing === null && canBlendedLearning(access, "log")}
+        today={today}
+        whose={viewing ? viewing.name : "you"}
+      />
+    </>
+  );
+}
 
 function LandingView({
   access,
@@ -89,7 +127,7 @@ function LandingView({
         newFlags={newFlags}
         canManage={canBlendedLearning(access, "manage")}
       />
-      {mentees && <MentorMenteeList list={mentees} canLog={canBlendedLearning(access, "log")} today={today} />}
+      {mentees && <MenteesView access={access} mentees={mentees} today={today} />}
       {tab === "mentors" && <MentorCards cards={cards} />}
       {flags && (
         <>
@@ -117,8 +155,9 @@ async function readFlags(
   access: BlendedLearningAccess,
   params: SearchParams
 ): Promise<FlagsRead | null> {
-  // Only an admin filters by Mentor; a Mentor's feed is theirs already.
-  const mentorUserId = access.kind === "admin" ? positiveId(single(params.mentor)) : null;
+  // An admin filters by any Mentor, a supervisor by a Mentor in their scope;
+  // a Mentor's feed is theirs already.
+  const mentorUserId = flagsMentorParam(access, positiveId(single(params.mentor)));
   const recipientParam = single(params.recipient);
   const recipient = FLAG_RECIPIENTS.find((value) => value === recipientParam) ?? null;
   const cursor = positiveId(single(params.cursor));
@@ -126,14 +165,15 @@ async function readFlags(
   const cutoff = carried ?? (await readFlagsCutoff(access));
   const [page, mentors] = await Promise.all([
     listFlags(access, { mentorUserId, recipient, cursor }, cutoff),
-    listFlagMentors(access),
+    flagsMentorOptions(access),
   ]);
   if (!page) return null;
   return {
     view: {
       page,
       mentors,
-      ownStudents: access.kind === "mentor",
+      // Without a Mentor filter, a Mentor's flags are all their own.
+      ownStudents: access.kind === "mentor" && mentors.length === 0,
       mentorUserId,
       recipient,
       cursor,
@@ -141,6 +181,35 @@ async function readFlags(
     },
     newVisit: carried === null,
   };
+}
+
+function flagsMentorParam(access: BlendedLearningAccess, mentorUserId: number | null): number | null {
+  const mentors = viewableMentorUserIds(access);
+  return mentors === null || (mentorUserId !== null && mentors.includes(mentorUserId)) ? mentorUserId : null;
+}
+
+// The Flags tab's Mentor filter: an admin's every flagged Mentor; a
+// supervisor's own Students and each supervised Mentor's; none for a Mentor.
+async function flagsMentorOptions(access: BlendedLearningAccess): Promise<SupervisedMentor[]> {
+  if (access.kind === "admin") return listFlagMentors(access);
+  const supervised = await listSupervisedMentors(access);
+  if (supervised.length === 0 || access.mentorUserId == null) return [];
+  return [{ mentorUserId: access.mentorUserId, name: "My students" }, ...supervised];
+}
+
+// A Mentor's own Mentee list, or the supervised Mentor's in `mentor`.
+async function readMentees(
+  access: BlendedLearningAccess,
+  params: SearchParams,
+  today: string
+): Promise<MenteesRead> {
+  const mentorUserId = supervisedMentor(access, positiveId(single(params.mentor)));
+  const [list, supervised] = await Promise.all([
+    listMentees({ access, mentorUserId, today }),
+    listSupervisedMentors(access),
+  ]);
+  const viewing = supervised.find((mentor) => mentor.mentorUserId === mentorUserId) ?? null;
+  return { list, supervised, viewing };
 }
 
 // Flags when asked for, else the viewer's first tab.
@@ -152,7 +221,7 @@ function landingTab(access: BlendedLearningAccess, params: SearchParams): Landin
 async function readLanding(access: BlendedLearningAccess, params: SearchParams, today: string): Promise<Landing> {
   const tab = landingTab(access, params);
   const [mentees, cards, flags] = await Promise.all([
-    tab === "students" ? listMentees({ access, today }) : null,
+    tab === "students" ? readMentees(access, params, today) : null,
     tab === "mentors" && canBlendedLearning(access, "view_mentors") ? listMentorCards(access, today) : [],
     tab === "flags" ? readFlags(access, params) : null,
   ]);
@@ -161,9 +230,10 @@ async function readLanding(access: BlendedLearningAccess, params: SearchParams, 
 }
 
 // Landing page for the Blended Learning section, under the section's tabs: a
-// Mentor's own Student list (My Students) or, for a Blended Learning Admin,
-// the Mentor cards; then Flags (a Mentor's own Students' only). Resources is
-// its own page.
+// Mentor's own Student list (My Students; a supervisor can switch to a
+// supervised Mentor's, view only) or, for a Blended Learning Admin, the Mentor
+// cards; then Flags (a Mentor's own and supervised Mentors' Students' only).
+// Resources is its own page.
 export default async function BlendedLearningPage({
   searchParams,
 }: {
