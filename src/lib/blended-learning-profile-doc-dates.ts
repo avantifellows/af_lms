@@ -6,7 +6,8 @@
 // Tab 1 is the intake / profile and tab 2 the Student Story; those tabs are
 // skipped by title. In the other tabs a conversation date is a paragraph,
 // heading or tab title that starts with a full date ("Sep 3, 2026",
-// "Date: Sep 3, 2026", "3 September 2026", "03/09/2026", "2026-09-03", a Meet
+// "Date: Sep 3, 2026", "Conversation date: 3 September 2026", "September –
+// 3 September 2026", "3 September 2026", "03/09/2026", "2026-09-03", a Meet
 // notes header "abc-defg-hij (2026-09-03 16:05 …"), or a call recording ("…
 // -2609031615.mp3", or a Meet chip "… - 2026/09/03 16:15 GMT+05:30 – Recording").
 // A date without a year ("17 October", "Oct 17", "17/10") is in the window's
@@ -173,8 +174,20 @@ function firstMatch<P extends { pattern: RegExp }>(
   return null;
 }
 
+// A month heading before a full date ("October – 19 October 2026"): the date
+// after it is the entry's. Only a full date, so "September – 2026" or a
+// month and a year-less date stay what they were.
+const MONTH_PREFIX = new RegExp(`^${MONTH}\\.?\\s*[–—-]\\s*`, "i");
+
+function withoutMonthPrefix(text: string): string {
+  const prefix = text.match(MONTH_PREFIX);
+  if (!prefix) return text;
+  const rest = text.slice(prefix[0].length);
+  return LEADING_DATES.some(({ pattern }) => pattern.test(rest)) ? rest : text;
+}
+
 function leadingDate(text: string, year: number): Anchor | null {
-  const unlabelled = text.replace(/^date\s*[:\-–]?\s*/i, "");
+  const unlabelled = withoutMonthPrefix(text.replace(/^(?:conversation\s+)?date\s*[:\-–]?\s*/i, ""));
   const full = firstMatch(LEADING_DATES, unlabelled, ({ parts }, match) => isoDate(...parts(match)));
   const found = full ?? firstMatch(YEARLESS_DATES, unlabelled, ({ parts }, match) => isoDate(String(year), ...parts(match)));
   if (!found?.date) return null;

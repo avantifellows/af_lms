@@ -35,8 +35,17 @@ describe("latestProfileDocConversationOn", () => {
     ["a recording file name", "<p>Recording : call-2608191839.mp3</p>", "2026-08-19"],
     ["a Meet recording chip", "<p>Student_Interaction - 2026/07/09 16:33 GMT+05:30 – Recording</p>", "2026-07-09"],
     ["a text entry after the date on the same line", "<p>Jul 9, 2026: parent and student on the call</p>", "2026-07-09"],
+    ["a Conversation date: label", "<p>Conversation date: 16 October 2026</p><p>Notes</p>", "2026-10-16"],
+    ["a month heading before the full date", "<h2>October &ndash; 19 October 2026</h2><p>Notes</p>", "2026-10-19"],
   ])("reads %s", (_label, entries, expected) => {
     expect(latest(tab("Student Interview"), "<p>Notes</p>", tab("September"), entries)).toBe(expected);
+  });
+
+  it("reads a month heading only before a full date", () => {
+    expect(latest(tab("Log"), "<h2>September &ndash; 2026</h2><p>Notes</p>")).toBeNull();
+    expect(latest(tab("Log"), "<h2>Aug &ndash; 21 August 2026</h2><p>Notes</p><h2>October &ndash; 19 October</h2><p>Notes</p>")).toBe(
+      "2026-08-21"
+    );
   });
 
   it("takes the latest date across tabs, whatever their order in the doc", () => {
