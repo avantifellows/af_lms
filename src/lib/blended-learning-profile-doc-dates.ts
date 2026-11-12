@@ -204,9 +204,12 @@ function recordingDate(text: string): Anchor | null {
   return null;
 }
 
+// A bullet that starts with a year-less date ("Nov 1 test: follow up on the
+// score") is a to-do or a plan inside an entry, not a conversation of its own.
 function blockAnchor(block: DocBlock, year: number): Anchor | null {
   if (block.inTable) return null;
-  return leadingDate(block.text, year) ?? recordingDate(block.text);
+  const anchor = leadingDate(block.text, year) ?? recordingDate(block.text);
+  return anchor?.yearless && block.listItem ? null : anchor;
 }
 
 function isContent(block: DocBlock): boolean {

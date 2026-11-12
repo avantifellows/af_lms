@@ -41,6 +41,14 @@ describe("latestProfileDocConversationOn", () => {
     expect(latest(tab("Student Interview"), "<p>Notes</p>", tab("September"), entries)).toBe(expected);
   });
 
+  it("reads a bullet that starts with a year-less date as a to-do in its entry, not a new entry", () => {
+    const followUp = "<ul><li>Oct 20 test: follow up on the score</li></ul>";
+    expect(latest(tab("Log"), "<p>Sep 21, 2026 call</p><p>Discussed the mock test.</p>", followUp)).toBe("2026-09-21");
+    expect(latest(tab("Log"), "<p>Sep 21, 2026 call</p><p>Notes</p><ul><li>Oct 20, 2026: called the parent</li></ul>")).toBe(
+      "2026-10-20"
+    );
+  });
+
   it("reads a month heading only before a full date", () => {
     expect(latest(tab("Log"), "<h2>September &ndash; 2026</h2><p>Notes</p>")).toBeNull();
     expect(latest(tab("Log"), "<h2>Aug &ndash; 21 August 2026</h2><p>Notes</p><h2>October &ndash; 19 October</h2><p>Notes</p>")).toBe(
@@ -163,6 +171,12 @@ describe("latestProfileDocEntry", () => {
     );
     expect(entry(tab("Log"), "<p>Oct 8, 2026</p><p>Summary</p><p>Oct 22, 2026</p><p>Oct 30, 2026: plan</p>")?.text).toBe(
       "Oct 8, 2026\nSummary"
+    );
+  });
+
+  it("keeps a year-less dated to-do bullet in the entry above it", () => {
+    expect(entry(tab("Log"), "<p>Sep 21, 2026 call</p><p>Notes</p><ul><li>Oct 20 test: follow up on the score</li></ul>")?.text).toBe(
+      "Sep 21, 2026 call\nNotes\n- Oct 20 test: follow up on the score"
     );
   });
 
