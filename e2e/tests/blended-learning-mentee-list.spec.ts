@@ -15,8 +15,8 @@ import { shortDate } from "../../src/app/blended-learning/menteeListCopy";
 // Attempt 2; Kabir — nothing logged, a ready draft; Meera — Conversation 30;
 // Nikhil — legacy last-contact date 14 Jun 2026 only; Zoya — Conversation 29;
 // Rohan — Conversation 3, a failed draft. Each Student ID is E2E-BL-<key>;
-// only Ira has a category (Gen-EWS). The table gives each its own column; a
-// card shows both on the line under the name.
+// only Ira (Gen-EWS) and Rohan (OBC) have a category. The table gives each
+// its own column; a card shows both on the line under the name.
 //
 // From 1024 px up the list is one table, each group a named rowgroup with a
 // header row; below that each group is a region of cards.

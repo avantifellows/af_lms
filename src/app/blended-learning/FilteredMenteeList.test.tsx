@@ -16,12 +16,12 @@ function mentee(studentId: number, name: string, overrides: Partial<MenteeRow> =
 }
 
 const KABIR = mentee(1, "Kabir Never", {
-  gender: "Male", grade: 13, lastContact: null, lastContactSource: null, latestEntryKind: null,
+  gender: "Male", category: null, grade: 13, lastContact: null, lastContactSource: null, latestEntryKind: null,
   reasons: ["no_contact"], daysSince: null,
 });
 const ZOYA = mentee(2, "Zoya TwentyNine", { daysSince: 29 });
 const ROHAN = mentee(3, "Rohan Recent", {
-  gender: "Male", daysSince: 3, programId: 81, programName: "STP Dropper Himachal Pradesh",
+  gender: "Male", category: "OBC", daysSince: 3, programId: 81, programName: "STP Dropper Himachal Pradesh",
 });
 
 function renderList() {
@@ -35,15 +35,32 @@ function tableNames(): string[] {
 }
 
 describe("FilteredMenteeList", () => {
-  it("lays out search, Gender, Grade, Program and Last contact as one filter row, each select defaulting to All", () => {
+  it("lays out search, Gender, Category, Grade, Program and Last contact as one filter region, each select defaulting to All", () => {
     renderList();
 
     const filters = screen.getByRole("search", { name: "Filter students" });
     expect(within(filters).getByRole("searchbox", { name: "Search by name or Student ID" })).toBeInTheDocument();
-    for (const name of ["Gender", "Grade", "Program", "Last contact"]) {
+    for (const name of ["Gender", "Category", "Grade", "Program", "Last contact"]) {
       expect(within(filters).getByRole("combobox", { name })).toHaveDisplayValue("All");
     }
     expect(within(filters).queryByRole("button", { name: "Clear filters" })).not.toBeInTheDocument();
+  });
+
+  it("offers each category in the list once, sorted, without blanks, and narrows to it", async () => {
+    const user = userEvent.setup();
+    renderList();
+
+    const category = screen.getByRole("combobox", { name: "Category" });
+    expect(within(category).getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "All", "Gen", "OBC",
+    ]);
+    await user.selectOptions(category, "OBC");
+
+    expect(category).toHaveClass("bg-hover-bg");
+    expect(tableNames()).toEqual(["Rohan Recent"]);
+
+    await user.selectOptions(category, "Gen");
+    expect(tableNames()).toEqual(["Zoya TwentyNine"]);
   });
 
   it("offers each program by its short name, and narrows to it", async () => {
