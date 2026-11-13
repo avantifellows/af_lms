@@ -15,7 +15,7 @@ edges:
     condition: when configuring which backend env vars point at
   - target: context/architecture.md
     condition: when understanding how components connect during setup
-last_updated: 2026-10-27
+last_updated: 2026-11-11
 ---
 
 # Setup
@@ -48,13 +48,15 @@ Conditionally required (only if the feature is used):
 - `BLENDED_LEARNING_SES_ACCESS_KEY_ID`, `BLENDED_LEARNING_SES_SECRET_ACCESS_KEY`, `BLENDED_LEARNING_SES_REGION` (default `ap-south-1`), `BLENDED_LEARNING_WELLBEING_EMAILS` (comma-separated; `shalinijha@` in production) — the well-being email sent after a Conversation with an Emotional Well-being Mentor Flag is saved (`src/lib/blended-learning-wellbeing-notifier.ts`, `af-lms-ses` IAM user, from `no-reply@avantifellows.org`). The link uses `NEXTAUTH_URL`. If the key id, secret or recipients are unset, the email is skipped without error. The Playwright web server sets the key id and recipients to `" "` (a blank value would be refilled from `.env.local`), so e2e never sends.
 - `BLENDED_LEARNING_ETL_URL` (the etl-next base URL, no path), `BLENDED_LEARNING_ETL_TOKEN` (machine token bound to `APP_ENV`) — the wake call after a Call Recording upload creates a Conversation Draft (`wakeTranscription` in `src/lib/blended-learning-drafts.ts`): `POST {URL}/api/internal/blended-learning/transcription-requests/{request_key}/enqueue` with `{"environment": APP_ENV}`. If the URL or token is unset (blank after trimming) or `APP_ENV` is not `staging`/`production`, the wake is skipped without error and the draft stays `transcribing`. The Playwright web server sets both to `" "`, so e2e never calls etl-next.
 
+- `HOLISTIC_DICTATION_ENABLED`, `HOLISTIC_DICTATION_ELEVENLABS_API_KEY`, `HOLISTIC_DICTATION_ELEVENLABS_ZERO_RETENTION` — Holistic Dictation (#500), server-only. Deployed apps get them from the GitHub environment secrets of the same names (`Preview` for staging, `Production`): every Amplify job in `.github/workflows/deploy-amplify.yml` syncs them and `amplify.yml` writes them into `.env.production`. A secret that isn't set arrives blank, which leaves Dictation off. A new setting that is missing from the workflow is wiped on every deploy, because each job replaces the branch's whole variable set. The Playwright web server sets the flag on with a dummy key; `holistic-mentorship.spec.ts` fakes the dictation route with `page.route`, so ElevenLabs is never called. The page reads today's usage from `holistic_mentorship_dictation_usage_records`, which e2e gets from the `*holistic*.exs` migration in `../db-service_holistic_mentorship` (db-service #858; check the checkout has `20261110151931_create_holistic_mentorship_dictation_usage_records.exs`). The spec also fakes `getUserMedia` and `MediaRecorder` with an init script: headless Chromium's `--use-fake-device-for-media-stream` (and even Web Audio) stalled on macOS, so the browser's audio stack is not used.
+
 Never commit real values — `.env.local` is gitignored; CI injects prod/preview values via the Amplify workflow.
 
 ## Common Commands
 - `npm run dev` — dev server on :3000 (hot reload).
 - `npm test` / `npm run test:unit` — full Vitest run; `npm run test:unit:watch` for watch; `npm run test:unit:coverage` for coverage.
 - `npm run test:e2e` — Playwright E2E (`:ui`/`:headed` variants exist).
-  Global setup runs db-service migrations with `mix` from `../db-service_holistic_mentorship` (hard-coded in `e2e/helpers/db.ts`). If that checkout is absent, holistic tables are on `db-service` main, so a temporary symlink to `../db-service` works. With asdf and no `.tool-versions`, put `~/.asdf/installs/elixir/<ver>/bin` and `~/.asdf/installs/erlang/<ver>/bin` on `PATH` directly.
+  Global setup runs db-service migrations with `mix` from `../db-service_holistic_mentorship` (hard-coded in `e2e/helpers/db.ts`). If that checkout is absent, holistic tables are on `db-service` main, so a temporary symlink to `../db-service` works. With asdf and no `.tool-versions`, put `~/.asdf/installs/elixir/<ver>/bin` and `~/.asdf/installs/erlang/<ver>/bin` on `PATH` directly. The web server preloads `e2e/helpers/fake-elevenlabs.cjs` through `NODE_OPTIONS` (set in `playwright.config.ts`): it answers ElevenLabs Scribe with a fixed transcript, logs each call to a temp file the specs read (`e2e/helpers/fake-elevenlabs.ts`), refuses any other ElevenLabs request, and is the only thing that sets the dummy Dictation key, so a server without it has Dictation off.
 - `npm run lint` — ESLint (`eslint-config-next`).
 - `npm run build` — production Next build.
 - `npm run fallow:health` — codebase health/hotspots; `fallow:dead-code`, `fallow:audit` for cleanup/PR risk.

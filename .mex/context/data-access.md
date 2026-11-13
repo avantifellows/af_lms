@@ -21,7 +21,7 @@ edges:
     condition: when adding a write that must proxy to the DB Service
   - target: patterns/add-api-route.md
     condition: when adding a route that reads or writes
-last_updated: 2026-11-10
+last_updated: 2026-11-13
 ---
 
 # Data Access
@@ -191,6 +191,50 @@ privacy tombstone, and an applicable Phase: current-year, or a prior-year Grade 
 for a Grade 12 Mentee with prior-year Mapping history. It derives the prior Academic Year
 itself. `checkHolisticMentorWriteScope(scope, actorUserId)` returns 404 `Not found` for
 missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do not copy the query into new writers; call the helper so guard semantics and lock order stay identical.
+
+## Holistic answer length (#508)
+
+Post-Session answers and Follow-up answers share one limit, `HOLISTIC_ANSWER_MAX_LENGTH`
+(10,000) in the client-safe `src/lib/holistic-answer-limit.ts`. The Student Phase `PATCH`
+route and `normalizeHolisticFollowUpAnswers` both reject longer answers with it, and the
+Student Phase workspace shows an "N / 10,000" counter at 9,000 characters or more in every
+editable answer box (draft, author's Edit, Add Follow-up Note). Read-only views show no
+counter. Use this constant for any new answer-length check (e.g. Dictation, #500).
+
+## Holistic Dictation usage records (#500, slice #509)
+
+- **Table ownership:** `holistic_mentorship_dictation_usage_records` comes from db-service #858
+  (migration `20261110151931_create_holistic_mentorship_dictation_usage_records`); LMS inserts and
+  updates it directly through `query()` (ADR 0005). Content-free: no Student, Phase, Question,
+  text or audio column, so it is outside Holistic privacy erasure.
+- **Write path** (`transcribeHolisticDictation` in `src/lib/holistic-dictation.ts`): limit check →
+  insert `outcome='failed'`, `characters_returned=0`, `completed_at` NULL → ElevenLabs call → update
+  to `ok` / `nothing_heard` / `failed` with `characters_returned`, `completed_at`, and
+  `audio_seconds = min(305, ceil(max(duration_ms/1000, last word end)))`. The route refuses a clip over
+  305,000 ms (422) or 10 MB (413); 305 s is `HOLISTIC_DICTATION_MAX_CLIP_SECONDS` in
+  `src/lib/holistic-dictation-limits.ts` (five minutes plus 5 s of timer slop, owner decision
+  2026-11-13), and db-service #858 checks `audio_seconds BETWEEN 1 AND 305`. A request killed
+  mid-call leaves the `failed`, uncompleted row, which still counts. The browser's cancel
+  (`discard()` aborts the upload) is not passed to the provider call: the call finishes, the row
+  is completed, and the seconds count. This is the agreed rule (ADR 0012: an abandoned clip
+  still counts), so do not wire `request.signal` into `transcribeSpeech` without a new decision.
+  The route refuses an empty (0-byte) clip with 422 "Attach one audio clip" before this path, so
+  it writes no row and makes no provider call.
+- **Timestamps:** the columns are naive UTC and the shared Postgres session time zone may be
+  Asia/Kolkata (the local test DBs are), so the insert writes `$now::timestamptz AT TIME ZONE 'UTC'`
+  and `completed_at = now() AT TIME ZONE 'UTC'` explicitly; never rely on the `now()` default here.
+- **Daily limit:** remaining = 1,800 − SUM(`audio_seconds`) of this Mentor's rows whose
+  `inserted_at` is in the current Asia/Kolkata day (converted to a UTC window), floored at 0
+  (`getHolisticDictationRemainingSeconds`). A clip is refused (429 `daily_limit`) when used +
+  `ceil(duration_ms/1000)` > 1,805; the 429 body carries `remainingSeconds` (the real time left from
+  that same used-seconds read, floored at 0) and no usage row is written. The check and insert are not atomic; racing tabs can overshoot
+  by one clip each (accepted).
+- **Write scope before the call:** `checkHolisticDictationScope` runs `loadHolisticMentorWriteScope`
+  (plus submitted Notes for `follow_up`) in its own `withTransaction`, which commits before the
+  provider call, so no row lock is held while ElevenLabs works.
+- **Opt-in integration test:** `src/lib/holistic-dictation.integration.test.ts` with
+  `HOLISTIC_DICTATION_TEST_DATABASE=dbservice_test_*` (IST day boundary, sum/floor, killed attempt,
+  a five-minute clip and the 305 s cap against the table's check constraint).
 
 ## Holistic Follow-up Notes (#377)
 

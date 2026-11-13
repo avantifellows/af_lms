@@ -15,16 +15,20 @@ import {
   holisticChallengeCategoryGroupsMessage, placeHolisticChallengeCategories, toggleHolisticChallengeCategory,
   validateHolisticChallengeCategories, type HolisticChallengeCategoryCode, type HolisticChallengeCategoryGroup,
 } from "@/lib/holistic-challenge-categories";
-import {
-  HOLISTIC_FOLLOW_UP_ANSWER_MAX_LENGTH, HOLISTIC_FOLLOW_UP_QUESTIONS,
-  type HolisticFollowUpQuestionKey,
-} from "@/lib/holistic-follow-up-questions";
+import { HOLISTIC_ANSWER_MAX_LENGTH } from "@/lib/holistic-answer-limit";
+import { appendDictation } from "@/lib/holistic-dictation-text";
+import { HOLISTIC_FOLLOW_UP_QUESTIONS, type HolisticFollowUpQuestionKey } from "@/lib/holistic-follow-up-questions";
 import { holisticStudentPhaseHref, type HolisticStudentPhaseSource } from "@/lib/holistic-links";
 import { Button } from "@/components/ui/Button";
 import { Badge, type BadgeVariant } from "@/components/ui/Badge";
 import { Card } from "@/components/ui/Card";
 import { Modal } from "@/components/ui/Modal";
 import GuidancePreview from "./GuidancePreview";
+import { DictationMicButton, DictationSaveHint, DictationStatus } from "./DictationMicButton";
+import {
+  DICTATION_OFF, dictationBusy, useDictationRecorder, useSharedDictationAvailability,
+  type DictationAvailability, type DictationRecorder, type SharedDictationAvailability,
+} from "./useDictationRecorder";
 
 type NotesEditorProps = {
   studentId: number;
@@ -46,6 +50,7 @@ type NotesEditorProps = {
   };
   timestampNotes: OpenSelectedPhase["notes"];
   onNotesSaved: (submitted: boolean) => void;
+  dictation: SharedDictationAvailability;
 };
 type NotesEditorStatus = "idle" | "saving" | "saved" | "failed";
 // Answers and Challenge Categories autosave, hydrate and submit together.
@@ -199,6 +204,25 @@ function notesApiUrl(props: NotesEditorProps) {
     academic_year: props.academicYear,
     program_id: String(props.programId),
   })}`;
+}
+
+type DictationRouteScope = Pick<NotesEditorProps, "studentId" | "phaseId" | "schoolCode" | "academicYear" | "programId">;
+
+const DICTATION_TOO_LONG = "Not added: the answer would go over 10,000 characters.";
+
+// Saving waits for a clip still recording or transcribing, so its words are
+// not lost. While it waits, the save button is described by this hint id.
+function dictationSaveHintId(recorder: DictationRecorder, id: string) {
+  return dictationBusy(recorder.state) ? id : undefined;
+}
+
+function dictationApiUrl(props: DictationRouteScope) {
+  return `/api/holistic-mentorship/students/${props.studentId}/phases/${props.phaseId}/dictation?${
+    new URLSearchParams({
+      school_code: props.schoolCode,
+      academic_year: props.academicYear,
+      program_id: String(props.programId),
+    })}`;
 }
 
 function useNotesMutation(props: NotesEditorProps, revisionRef: React.MutableRefObject<number>) {
@@ -550,6 +574,32 @@ function useNotesDraftAutosave({ state, refs, mutate, canAutosave, autosaveEnabl
   return flushDraft;
 }
 
+// The Post-Session Notes recorder. The words land at the end of the box's
+// value as it is when they arrive, through the same handler typing uses, so
+// autosave and saving are unchanged.
+function useNotesDictation(
+  props: NotesEditorProps,
+  answers: NotesValue["answers"],
+  updateAnswer: (questionId: number, answer: string) => void
+) {
+  const applyDictation = (target: string, text: string) => {
+    const questionId = Number(target);
+    const appended = appendDictation(answers[questionId] ?? "", text);
+    if (!appended.ok) return DICTATION_TOO_LONG;
+    updateAnswer(questionId, appended.value);
+    return null;
+  };
+  return useDictationRecorder({
+    url: dictationApiUrl(props),
+    kind: "post_session",
+    remainingSeconds: props.dictation.remainingSeconds,
+    onRemainingSeconds: props.dictation.onRemainingSeconds,
+    busyKind: props.dictation.busyKind,
+    onBusy: props.dictation.onBusy,
+    onText: applyDictation,
+  });
+}
+
 function PostSessionNotesEditor(props: NotesEditorProps) {
   const router = useRouter();
   const state = useNotesEditorState(props);
@@ -563,8 +613,9 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
   const localDirty = hasLocalNotesWork(valueChanged, status);
   const refs = useNotesEditorRefs(props, state);
   const { savedRef, textareasRef, categoryFieldsetsRef, mutationRevisionRef } = refs;
-  const validationErrorId = useId();
-  const categoryErrorId = useId();
+  const errorId = useId();
+  const validationErrorId = `${errorId}-answers`;
+  const categoryErrorId = `${errorId}-categories`;
   const mutate = useNotesMutation(props, mutationRevisionRef);
   const apiUrl = notesApiUrl(props);
   const canAutosave = canAutosaveNotes(props.editable, notesState);
@@ -622,7 +673,19 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
     categoryFieldsetsRef.current[missing[0]]?.querySelector("input")?.focus();
     return false;
   };
+  const updateAnswer = (questionId: number, answer: string) => {
+    const nextAnswers = { ...value.answers, [questionId]: answer };
+    setValue({ ...value, answers: nextAnswers });
+    setError("");
+    if (validationError && !hasBlankAnswer(props.questions, nextAnswers)) setValidationError("");
+    setSuccess("");
+  };
+  const dictation = useNotesDictation(props, value.answers, updateAnswer);
+  // Autosave doesn't wait for a clip: its words arrive later like typing.
+  const dictating = dictationBusy(dictation.state);
   const submit = async () => {
+    if (dictating) return;
+    dictation.discard();
     if (!validateFinalWrite(SUBMIT_BLANK_ANSWER_ERROR)) return;
     setFinalWriting(true);
     if (!(await flushDraft()) || !window.confirm("Submit these Post-Session Notes?")) {
@@ -649,6 +712,8 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
     }
   };
   const saveCorrection = async () => {
+    if (dictating) return;
+    dictation.discard();
     if (!validateFinalWrite(SAVE_BLANK_ANSWER_ERROR)) return;
     setFinalWriting(true);
     if (!window.confirm("Save changes to submitted Notes?")) {
@@ -682,6 +747,7 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
     setSuccess("");
   };
   const cancelCorrection = () => {
+    dictation.discard();
     if (JSON.stringify(value) !== JSON.stringify(savedValue)) {
       void discardSubmittedChanges();
       return;
@@ -689,13 +755,6 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
     setEditingSubmitted(false);
     setStatus("idle");
     setMissingCategories([]);
-  };
-  const updateAnswer = (questionId: number, answer: string) => {
-    const nextAnswers = { ...value.answers, [questionId]: answer };
-    setValue({ ...value, answers: nextAnswers });
-    setError("");
-    if (validationError && !hasBlankAnswer(props.questions, nextAnswers)) setValidationError("");
-    setSuccess("");
   };
   const toggleCategory = (code: HolisticChallengeCategoryCode) => {
     const challengeCategories = toggleHolisticChallengeCategory(value.challengeCategories, code);
@@ -716,12 +775,14 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
         validationError={validationError} validationErrorId={validationErrorId}
         missingCategories={missingCategories} categoryErrorId={categoryErrorId}
         disabled={finalWriting} onAnswerChange={updateAnswer} onCategoryToggle={toggleCategory}
+        dictation={props.dictation.enabled ? dictation : null}
         onTextarea={(questionId, element) => { textareasRef.current[questionId] = element; }}
         onCategoryFieldset={(group, element) => { categoryFieldsetsRef.current[group] = element; }}
         actions={<NotesEditorActions status={status} error={error} validationError={validationError}
           validationErrorId={validationErrorId} categoryError={holisticChallengeCategoryGroupsMessage(missingCategories)}
           categoryErrorId={categoryErrorId} canRetry={enabledUnlessDisabled(autosaveEnabled, conflict)}
-          editingSubmitted={editingSubmitted} disabled={finalWriting} onRetry={retry}
+          editingSubmitted={editingSubmitted} disabled={finalWriting}
+          saveHintId={dictationSaveHintId(dictation, `${errorId}-dictating`)} onRetry={retry}
           onSaveCorrection={saveCorrection} onCancelCorrection={cancelCorrection} onSubmit={submit} />} />}
       submitted={<><SubmittedNotesView questions={props.questions} value={value}
           submitted={notesState === "submitted"} />
@@ -860,7 +921,7 @@ function categoryGroupsPlacedAt(
 
 // `children` (the placed Category groups) render above the Question, so they are ticked first.
 function NotesAnswerField({ question, answer, validationError, validationErrorId, disabled, onTextarea,
-  onAnswerChange, children }: {
+  onAnswerChange, dictation, children }: {
   question: NotesEditorProps["questions"][number];
   answer: string | undefined;
   validationError: string;
@@ -868,27 +929,60 @@ function NotesAnswerField({ question, answer, validationError, validationErrorId
   disabled: boolean;
   onTextarea: (questionId: number, element: HTMLTextAreaElement | null) => void;
   onAnswerChange: (questionId: number, answer: string) => void;
+  dictation: DictationRecorder | null;
   children: ReactNode;
 }) {
+  const counterId = useId();
   const invalid = Boolean(validationError && !answer?.trim());
+  const counted = showsAnswerCounter(answer ?? "");
   return <div className="space-y-3">
     {children}
-    <label className="block space-y-1 text-sm font-semibold text-text-secondary">
-      {question.text} <span aria-hidden="true" className="text-accent">*</span>
-      <span className="sr-only">required</span>
-      <textarea ref={(element) => onTextarea(question.questionId, element)} aria-label={question.text}
-      aria-invalid={invalid} aria-describedby={invalid ? validationErrorId : undefined} rows={4}
-      disabled={disabled}
-      value={answer ?? ""}
-      onChange={(event) => onAnswerChange(question.questionId, event.target.value)}
-      className="w-full resize-y rounded-md border border-border bg-bg-card p-3 font-normal text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20" />
-    </label>
+    <div className="space-y-1">
+      <label className="block space-y-1 text-sm font-semibold text-text-secondary">
+        {question.text} <span aria-hidden="true" className="text-accent">*</span>
+        <span className="sr-only">required</span>
+        <textarea ref={(element) => onTextarea(question.questionId, element)} aria-label={question.text}
+        aria-invalid={invalid}
+        aria-describedby={describedBy(invalid && validationErrorId, counted && counterId)} rows={4}
+        disabled={disabled}
+        value={answer ?? ""}
+        onChange={(event) => onAnswerChange(question.questionId, event.target.value)}
+        className="w-full resize-y rounded-md border border-border bg-bg-card p-3 font-normal text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20" />
+      </label>
+      <AnswerCounter id={counterId} answer={answer ?? ""} />
+      {dictation && <>
+        <DictationMicButton question={question.text} target={String(question.questionId)}
+          recorder={dictation} disabled={disabled} />
+        <DictationStatus target={String(question.questionId)} recorder={dictation} />
+      </>}
+    </div>
   </div>;
+}
+
+const ANSWER_COUNTER_THRESHOLD = 9_000;
+
+function showsAnswerCounter(answer: string) {
+  return answer.length >= ANSWER_COUNTER_THRESHOLD;
+}
+
+function describedBy(...ids: Array<string | false>) {
+  return ids.filter(Boolean).join(" ") || undefined;
+}
+
+// Shown near the limit in every editable answer box. Not a live region: screen
+// readers hear it with the box's description, not on each keystroke.
+function AnswerCounter({ id, answer }: { id: string; answer: string }) {
+  if (!showsAnswerCounter(answer)) return null;
+  const over = answer.length > HOLISTIC_ANSWER_MAX_LENGTH;
+  return <p id={id} className={`text-right text-xs ${over ? "text-danger" : "text-text-muted"}`}>
+    {`${answer.length.toLocaleString("en-US")} / ${HOLISTIC_ANSWER_MAX_LENGTH.toLocaleString("en-US")}`}
+  </p>;
 }
 
 // `actions` renders below the fields: the Notes errors and Submit/Save controls.
 function EditableNotesForm({ questions, value, validationError, validationErrorId, missingCategories,
-  categoryErrorId, disabled, onAnswerChange, onCategoryToggle, onTextarea, onCategoryFieldset, actions }: {
+  categoryErrorId, disabled, onAnswerChange, onCategoryToggle, onTextarea, onCategoryFieldset, dictation,
+  actions }: {
   questions: NotesEditorProps["questions"];
   value: NotesValue;
   validationError: string;
@@ -900,6 +994,7 @@ function EditableNotesForm({ questions, value, validationError, validationErrorI
   onCategoryToggle: (code: HolisticChallengeCategoryCode) => void;
   onTextarea: (questionId: number, element: HTMLTextAreaElement | null) => void;
   onCategoryFieldset: (group: HolisticChallengeCategoryGroup, element: HTMLFieldSetElement | null) => void;
+  dictation: DictationRecorder | null;
   actions: ReactNode;
 }) {
   const placement = placeHolisticChallengeCategories(questions);
@@ -911,7 +1006,7 @@ function EditableNotesForm({ questions, value, validationError, validationErrorI
     {questions.map((question) => <NotesAnswerField key={question.questionId} question={question}
       answer={value.answers[question.questionId]} validationError={validationError}
       validationErrorId={validationErrorId} disabled={disabled} onTextarea={onTextarea}
-      onAnswerChange={onAnswerChange}>
+      onAnswerChange={onAnswerChange} dictation={dictation}>
       {categoryGroupsPlacedAt(placement, question.questionId).map(fieldset)}
     </NotesAnswerField>)}
     {unplaced.length > 0 && <div className="space-y-3">
@@ -924,7 +1019,7 @@ function EditableNotesForm({ questions, value, validationError, validationErrorI
 
 function NotesEditorActions({ status, error, validationError, validationErrorId, categoryError,
   categoryErrorId, canRetry, editingSubmitted, onRetry, onSaveCorrection,
-  disabled, onCancelCorrection, onSubmit }: {
+  disabled, saveHintId, onCancelCorrection, onSubmit }: {
   status: NotesEditorStatus;
   error: string;
   validationError: string;
@@ -934,27 +1029,33 @@ function NotesEditorActions({ status, error, validationError, validationErrorId,
   canRetry: boolean;
   editingSubmitted: boolean;
   disabled: boolean;
+  /** Set while this form's Dictation clip is still recording or transcribing: Submit and Save Changes wait. */
+  saveHintId: string | undefined;
   onRetry: () => void;
   onSaveCorrection: () => Promise<void>;
   onCancelCorrection: () => void;
   onSubmit: () => Promise<void>;
 }) {
-  const busy = disabled || status === "saving";
-  return <div className="flex min-h-11 flex-wrap items-center justify-end gap-3" aria-live="polite">
-    <NotesEditorAlert id={validationErrorId} message={validationError} />
-    <NotesEditorAlert id={categoryErrorId} message={categoryError} />
-    {status === "failed" && <NotesSaveFailure error={error} showError={editingSubmitted} canRetry={canRetry}
-      disabled={disabled} onRetry={onRetry} />}
-    {editingSubmitted
-      ? <><Button type="button" variant="ghost" disabled={disabled} onClick={onCancelCorrection}>Cancel</Button>
-          <Button type="button" onClick={() => void onSaveCorrection()} disabled={busy}>
-            <Save aria-hidden="true" className="h-4 w-4" />
-            Save Changes
-          </Button></>
-      : <Button type="button" onClick={() => void onSubmit()} disabled={busy}>
-          <Send aria-hidden="true" className="h-4 w-4" />
-          Submit Notes
-        </Button>}
+  const busy = disabled || status === "saving" || Boolean(saveHintId);
+  // The hint sits outside the live region, so it isn't announced each time a recording starts.
+  return <div className="space-y-1">
+    <div className="flex min-h-11 flex-wrap items-center justify-end gap-3" aria-live="polite">
+      <NotesEditorAlert id={validationErrorId} message={validationError} />
+      <NotesEditorAlert id={categoryErrorId} message={categoryError} />
+      {status === "failed" && <NotesSaveFailure error={error} showError={editingSubmitted} canRetry={canRetry}
+        disabled={disabled} onRetry={onRetry} />}
+      {editingSubmitted
+        ? <><Button type="button" variant="ghost" disabled={disabled} onClick={onCancelCorrection}>Cancel</Button>
+            <Button type="button" onClick={() => void onSaveCorrection()} disabled={busy} aria-describedby={saveHintId}>
+              <Save aria-hidden="true" className="h-4 w-4" />
+              Save Changes
+            </Button></>
+        : <Button type="button" onClick={() => void onSubmit()} disabled={busy} aria-describedby={saveHintId}>
+            <Send aria-hidden="true" className="h-4 w-4" />
+            Submit Notes
+          </Button>}
+    </div>
+    <DictationSaveHint id={saveHintId} className="block text-right" />
   </div>;
 }
 
@@ -1010,6 +1111,7 @@ export default function StudentPhaseWorkspace({
   backHref,
   canRegenerateProfile = true,
   viewerRole = "admin",
+  dictation = DICTATION_OFF,
 }: {
   detail: HolisticStudentPhaseDetail;
   schoolCode: string;
@@ -1021,6 +1123,8 @@ export default function StudentPhaseWorkspace({
   backHref?: string;
   canRegenerateProfile?: boolean;
   viewerRole?: string;
+  /** Dictation for the editing Mentor; the page sends it off for read-only viewers. */
+  dictation?: DictationAvailability;
 }) {
   const [completedPhaseIds, setCompletedPhaseIds] = useState<Set<number>>(() => new Set());
   if (detail.readOnly) {
@@ -1050,7 +1154,7 @@ export default function StudentPhaseWorkspace({
       <SelectedPhaseContent phase={visibleSelected} studentId={detail.student.id}
         selectedPhase={detail.selectedPhase}
         readOnly={detail.readOnly} schoolCode={schoolCode}
-        academicYear={academicYear} programId={programId}
+        academicYear={academicYear} programId={programId} dictation={dictation}
         onSubmitted={(phaseId) => setCompletedPhaseIds((current) => new Set(current).add(phaseId))} />
     </div>
   );
@@ -1264,7 +1368,8 @@ function LockedPhasePanel({ studentId, selectedPhase, bordered = false }: {
   </p>;
 }
 
-function SelectedPhaseContent({ phase, selectedPhase, studentId, readOnly, schoolCode, academicYear, programId, onSubmitted }: {
+function SelectedPhaseContent({ phase, selectedPhase, studentId, readOnly, schoolCode, academicYear, programId,
+  dictation, onSubmitted }: {
   phase: OpenSelectedPhase | null;
   selectedPhase: HolisticStudentPhaseDetail["selectedPhase"];
   studentId: number;
@@ -1272,9 +1377,12 @@ function SelectedPhaseContent({ phase, selectedPhase, studentId, readOnly, schoo
   schoolCode: string;
   academicYear: string;
   programId: number;
+  dictation: DictationAvailability;
   onSubmitted: (phaseId: number) => void;
 }) {
   const [mobilePanel, setMobilePanel] = useState<"context" | "guidance">("context");
+  // Post-Session Notes and Follow-up Notes spend the same daily Dictation time.
+  const sharedDictation = useSharedDictationAvailability(dictation);
   const tabId = phaseTabId(studentId, selectedPhase);
   const panelId = phasePanelId(studentId, selectedPhase);
   if (!phase) return <LockedPhasePanel bordered studentId={studentId} selectedPhase={selectedPhase} />;
@@ -1310,11 +1418,12 @@ function SelectedPhaseContent({ phase, selectedPhase, studentId, readOnly, schoo
     </div>
     <PostSessionNotes key={`${phase.phaseId}-${phase.mappingId}-${phase.revision}`}
       phase={phase} studentId={studentId} readOnly={readOnly}
-      schoolCode={schoolCode} academicYear={academicYear} programId={programId}
+      schoolCode={schoolCode} academicYear={academicYear} programId={programId} dictation={sharedDictation}
       onSubmitted={() => onSubmitted(phase.phaseId)} />
     <MentorFollowUpNotes key={`${phase.phaseId}-${phase.mappingId}`} phase={phase} apiUrl={`/api/holistic-mentorship/students/${studentId}/phases/${phase.phaseId}/follow-up-notes?${new URLSearchParams(
       { school_code: schoolCode, academic_year: academicYear, program_id: String(programId) }
-    )}`} />
+    )}`} dictation={sharedDictation} dictationUrl={dictationApiUrl(
+      { studentId, phaseId: phase.phaseId, schoolCode, academicYear, programId })} />
   </section>;
 }
 
@@ -1649,12 +1758,17 @@ const EMPTY_FOLLOW_UP_DRAFT = Object.fromEntries(
 ) as FollowUpDraft;
 
 const FOLLOW_UP_ANSWER_TOO_LONG =
-  `Keep this answer to ${HOLISTIC_FOLLOW_UP_ANSWER_MAX_LENGTH.toLocaleString("en-US")} characters or fewer`;
+  `Keep this answer to ${HOLISTIC_ANSWER_MAX_LENGTH.toLocaleString("en-US")} characters or fewer`;
 
 const FOLLOW_UP_MAYBE_SAVED =
   "This note may have saved. Check the Follow-up Notes list before trying again.";
 
-function MentorFollowUpNotes({ phase, apiUrl }: { phase: OpenSelectedPhase; apiUrl: string }) {
+function MentorFollowUpNotes({ phase, apiUrl, dictation, dictationUrl }: {
+  phase: OpenSelectedPhase;
+  apiUrl: string;
+  dictation: SharedDictationAvailability;
+  dictationUrl: string;
+}) {
   const hintId = useId();
   const [open, setOpen] = useState(false);
   const canAdd = phase.progress === "completed";
@@ -1664,13 +1778,19 @@ function MentorFollowUpNotes({ phase, apiUrl }: { phase: OpenSelectedPhase; apiU
       <Button type="button" variant="secondary" size="sm" disabled={!canAdd}
         aria-describedby={canAdd ? undefined : hintId} onClick={() => setOpen(true)}>Add notes</Button>
     </div>} />
-    <AddFollowUpNoteModal open={open} apiUrl={apiUrl} onClose={() => setOpen(false)} />
+    <AddFollowUpNoteModal open={open} apiUrl={apiUrl} dictation={dictation} dictationUrl={dictationUrl}
+      onClose={() => setOpen(false)} />
   </>;
 }
 
-function AddFollowUpNoteModal({ open, apiUrl, onClose }: {
+// The modal owns its own Dictation recorder; closing it or leaving the page
+// drops any recording and ignores a transcription still in flight. Save waits
+// until the recording's words have arrived.
+function AddFollowUpNoteModal({ open, apiUrl, dictation, dictationUrl, onClose }: {
   open: boolean;
   apiUrl: string;
+  dictation: SharedDictationAvailability;
+  dictationUrl: string;
   onClose: () => void;
 }) {
   const router = useRouter();
@@ -1680,10 +1800,32 @@ function AddFollowUpNoteModal({ open, apiUrl, onClose }: {
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const hasAnswer = Object.values(draft).some((answer) => answer.trim());
-  const isTooLong = (answer: string) => answer.length > HOLISTIC_FOLLOW_UP_ANSWER_MAX_LENGTH;
+  const isTooLong = (answer: string) => answer.length > HOLISTIC_ANSWER_MAX_LENGTH;
   const hasTooLongAnswer = Object.values(draft).some(isTooLong);
+  // The words land at the end of the box as it is when they arrive, through
+  // the same setDraft path typing uses.
+  const applyDictation = (target: string, text: string) => {
+    const key = target as HolisticFollowUpQuestionKey;
+    const appended = appendDictation(draft[key], text);
+    if (!appended.ok) return DICTATION_TOO_LONG;
+    setDraft((current) => ({ ...current, [key]: appended.value }));
+    return null;
+  };
+  const recorder = useDictationRecorder({
+    url: dictationUrl,
+    kind: "follow_up",
+    remainingSeconds: dictation.remainingSeconds,
+    onRemainingSeconds: dictation.onRemainingSeconds,
+    busyKind: dictation.busyKind,
+    onBusy: dictation.onBusy,
+    onText: applyDictation,
+  });
+  // A saved Follow-up Note can't be edited, so a clip's words would be lost for good.
+  const dictating = dictationBusy(recorder.state);
+  const saveHintId = dictationSaveHintId(recorder, `${fieldId}-dictating`);
 
   function close() {
+    recorder.discard();
     setDraft(EMPTY_FOLLOW_UP_DRAFT);
     setError("");
     onClose();
@@ -1691,11 +1833,14 @@ function AddFollowUpNoteModal({ open, apiUrl, onClose }: {
 
   function requestClose() {
     if (saving) return;
+    recorder.discard();
     if (Object.values(draft).some(Boolean) && !window.confirm("Discard this follow-up note?")) return;
     close();
   }
 
   async function save() {
+    if (dictating) return;
+    recorder.discard();
     setError("");
     setSaving(true);
     const response = await fetch(apiUrl, {
@@ -1726,25 +1871,34 @@ function AddFollowUpNoteModal({ open, apiUrl, onClose }: {
     <div className="mt-4 space-y-4">
       {HOLISTIC_FOLLOW_UP_QUESTIONS.map(({ key, text }) => {
         const tooLong = isTooLong(draft[key]);
+        const counterId = `${fieldId}-${key}-counter`;
         return <div key={key}>
           <label htmlFor={`${fieldId}-${key}`} className="text-sm font-semibold text-text-primary">{text}</label>
           {/* readOnly, not disabled, so text stays selectable while a save is in flight. */}
           <textarea id={`${fieldId}-${key}`} rows={3}
             value={draft[key]} readOnly={saving} aria-invalid={tooLong || undefined}
-            aria-describedby={tooLong ? `${fieldId}-${key}-error` : undefined}
+            aria-describedby={describedBy(tooLong && `${fieldId}-${key}-error`,
+              showsAnswerCounter(draft[key]) && counterId)}
             onChange={(event) => setDraft((current) => ({ ...current, [key]: event.target.value }))}
             className={`mt-1 w-full rounded-md border bg-bg-card p-2 text-sm text-text-primary ${
               tooLong ? "border-danger" : "border-border"}`} />
+          <AnswerCounter id={counterId} answer={draft[key]} />
           {tooLong && <p id={`${fieldId}-${key}-error`} className="mt-1 text-sm text-danger">
             {FOLLOW_UP_ANSWER_TOO_LONG}
           </p>}
+          {dictation.enabled && <div className="mt-1 space-y-1">
+            <DictationMicButton question={text} target={key} recorder={recorder} disabled={saving} />
+            <DictationStatus target={key} recorder={recorder} />
+          </div>}
         </div>;
       })}
     </div>
     {error && <p role="alert" className="mt-4 text-sm text-danger">{error}</p>}
-    <div className="mt-5 flex justify-end gap-2">
+    <div className="mt-5 flex items-center justify-end gap-2">
+      <DictationSaveHint id={saveHintId} />
       <Button type="button" variant="secondary" onClick={requestClose}>Cancel</Button>
-      <Button type="button" disabled={!hasAnswer || hasTooLongAnswer || saving} onClick={() => void save()}>
+      <Button type="button" disabled={!hasAnswer || hasTooLongAnswer || saving || dictating}
+        aria-describedby={saveHintId} onClick={() => void save()}>
         Save
       </Button>
     </div>
@@ -1881,13 +2035,15 @@ function StudentContextBody({ context }: { context: OpenSelectedPhase["context"]
   </div>;
 }
 
-function PostSessionNotes({ phase, studentId, readOnly, schoolCode, academicYear, programId, onSubmitted }: {
+function PostSessionNotes({ phase, studentId, readOnly, schoolCode, academicYear, programId, dictation,
+  onSubmitted }: {
   phase: OpenSelectedPhase;
   studentId: number;
   readOnly: boolean;
   schoolCode: string;
   academicYear: string;
   programId: number;
+  dictation: SharedDictationAvailability;
   onSubmitted: () => void;
 }) {
   const [visibleNotesOverride, setVisibleNotes] = useState<OpenSelectedPhase["notes"] | undefined>();
@@ -1918,7 +2074,7 @@ function PostSessionNotes({ phase, studentId, readOnly, schoolCode, academicYear
         academicYear={academicYear} programId={programId}
         editable={!readOnly && phase.canEditNotes}
         questions={phase.questions} notes={phase.notes} timestampNotes={visibleNotes}
-        onNotesSaved={refreshNotesMetadata} />
+        onNotesSaved={refreshNotesMetadata} dictation={dictation} />
     </Card>
   </section>;
 }

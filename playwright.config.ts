@@ -1,5 +1,11 @@
 import { defineConfig } from "@playwright/test";
 
+import {
+  FAKE_ELEVENLABS_CALL_LOG,
+  FAKE_ELEVENLABS_PRELOAD,
+  FAKE_ELEVENLABS_TRANSCRIPT,
+} from "./e2e/helpers/fake-elevenlabs";
+
 const TEST_PORT = 3001;
 
 export default defineConfig({
@@ -89,6 +95,17 @@ export default defineConfig({
       // warehouse from .env.local credentials (the Visit Summary School page
       // shows "Academic levels unavailable"). Specs stub /api/quiz-analytics.
       GOOGLE_SERVICE_ACCOUNT_JSON: " ",
+      // Holistic Dictation never reaches ElevenLabs. The preload fakes Scribe
+      // inside the server (a fixed transcript, a call log, any other
+      // ElevenLabs request refused) and only then sets a dummy key: without
+      // it the key stays blank and Dictation is off. Most specs also fake the
+      // dictation route with page.route.
+      NODE_OPTIONS: `--require "${FAKE_ELEVENLABS_PRELOAD}"`,
+      E2E_FAKE_ELEVENLABS_CALL_LOG: FAKE_ELEVENLABS_CALL_LOG,
+      E2E_FAKE_ELEVENLABS_TRANSCRIPT: FAKE_ELEVENLABS_TRANSCRIPT,
+      HOLISTIC_DICTATION_ENABLED: "true",
+      HOLISTIC_DICTATION_ELEVENLABS_API_KEY: " ",
+      HOLISTIC_DICTATION_ELEVENLABS_ZERO_RETENTION: "false",
     },
   },
 });
