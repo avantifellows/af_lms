@@ -6,6 +6,7 @@ import {
   transcribeHolisticDictation,
   type HolisticDictationKind,
 } from "@/lib/holistic-dictation";
+import { HOLISTIC_DICTATION_MAX_CLIP_SECONDS } from "@/lib/holistic-dictation-limits";
 import { requireHolisticMentorshipAccess } from "@/lib/holistic-mentorship";
 import { authenticatedTarget, type RouteParams } from "../student-phase-target";
 
@@ -27,9 +28,9 @@ function dictationKind(value: FormDataEntryValue | null): HolisticDictationKind 
 }
 
 const ALLOWED_AUDIO_TYPES = new Set(["audio/webm", "audio/mp4", "audio/ogg", "audio/mpeg"]);
-const MAX_CLIP_BYTES = 5 * 1024 * 1024;
-// Two minutes plus 5 s of client timer slop.
-const MAX_DURATION_MS = 125_000;
+const MAX_CLIP_BYTES = 10 * 1024 * 1024;
+// Five minutes plus 5 s of client timer slop.
+const MAX_DURATION_MS = HOLISTIC_DICTATION_MAX_CLIP_SECONDS * 1000;
 const FALLBACK_EXTENSION: Record<string, string> = {
   "audio/webm": "webm", "audio/mp4": "mp4", "audio/ogg": "ogg", "audio/mpeg": "mp3",
 };

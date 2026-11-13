@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { HOLISTIC_DICTATION_MAX_RECORDING_SECONDS } from "@/lib/holistic-dictation-limits";
+
 // What the server-rendered Student Phase page tells the client about
 // Dictation (#500). The client never reads the HOLISTIC_DICTATION_* settings.
 export type DictationAvailability = { enabled: boolean; remainingSeconds: number };
@@ -68,7 +70,6 @@ export type DictationRecorder = {
   discard: () => void;
 };
 
-const MAX_CLIP_SECONDS = 120;
 const PREFERRED_TYPES = ["audio/webm;codecs=opus", "audio/mp4", "audio/ogg;codecs=opus"];
 const AUDIO_BITS_PER_SECOND = 32_000;
 const FILE_EXTENSIONS: Record<string, string> = {
@@ -87,8 +88,8 @@ function clipFilename(clip: Blob) {
 }
 
 function autoStopNotice(stopAtSeconds: number) {
-  return stopAtSeconds >= MAX_CLIP_SECONDS
-    ? "Recording stopped at 2 minutes."
+  return stopAtSeconds >= HOLISTIC_DICTATION_MAX_RECORDING_SECONDS
+    ? `Recording stopped at ${HOLISTIC_DICTATION_MAX_RECORDING_SECONDS / 60} minutes.`
     : "Recording stopped: today's Dictation time ran out.";
 }
 
@@ -313,7 +314,7 @@ export function useDictationRecorder(options: {
   useEffect(() => { optionsRef.current = options; });
   const liveRef = useRef<Live>({
     session: 0, stream: null, recorder: null, autoStop: null, upload: null, stop: null, startedAt: 0,
-    stopAtMs: MAX_CLIP_SECONDS * 1000,
+    stopAtMs: HOLISTIC_DICTATION_MAX_RECORDING_SECONDS * 1000,
   });
 
   // An empty recording is never sent or counted: it shows the nothing-heard
@@ -400,7 +401,7 @@ export function useDictationRecorder(options: {
     }
     const startedAt = Date.now();
     live.startedAt = startedAt;
-    const stopAtSeconds = Math.min(MAX_CLIP_SECONDS, optionsRef.current.remainingSeconds);
+    const stopAtSeconds = Math.min(HOLISTIC_DICTATION_MAX_RECORDING_SECONDS, optionsRef.current.remainingSeconds);
     const stopAtMs = stopAtSeconds * 1000;
     live.stopAtMs = stopAtMs;
     live.autoStop = window.setTimeout(() => stop(autoStopNotice(stopAtSeconds)), stopAtMs);

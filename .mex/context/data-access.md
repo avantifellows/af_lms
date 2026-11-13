@@ -21,7 +21,7 @@ edges:
     condition: when adding a write that must proxy to the DB Service
   - target: patterns/add-api-route.md
     condition: when adding a route that reads or writes
-last_updated: 2026-11-11
+last_updated: 2026-11-13
 ---
 
 # Data Access
@@ -210,7 +210,10 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
 - **Write path** (`transcribeHolisticDictation` in `src/lib/holistic-dictation.ts`): limit check →
   insert `outcome='failed'`, `characters_returned=0`, `completed_at` NULL → ElevenLabs call → update
   to `ok` / `nothing_heard` / `failed` with `characters_returned`, `completed_at`, and
-  `audio_seconds = min(125, ceil(max(duration_ms/1000, last word end)))`. A request killed
+  `audio_seconds = min(305, ceil(max(duration_ms/1000, last word end)))`. The route refuses a clip over
+  305,000 ms (422) or 10 MB (413); 305 s is `HOLISTIC_DICTATION_MAX_CLIP_SECONDS` in
+  `src/lib/holistic-dictation-limits.ts` (five minutes plus 5 s of timer slop, owner decision
+  2026-11-13), and db-service #858 checks `audio_seconds BETWEEN 1 AND 305`. A request killed
   mid-call leaves the `failed`, uncompleted row, which still counts. The browser's cancel
   (`discard()` aborts the upload) is not passed to the provider call: the call finishes, the row
   is completed, and the seconds count. This is the agreed rule (ADR 0012: an abandoned clip
@@ -230,7 +233,8 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   (plus submitted Notes for `follow_up`) in its own `withTransaction`, which commits before the
   provider call, so no row lock is held while ElevenLabs works.
 - **Opt-in integration test:** `src/lib/holistic-dictation.integration.test.ts` with
-  `HOLISTIC_DICTATION_TEST_DATABASE=dbservice_test_*` (IST day boundary, sum/floor, killed attempt).
+  `HOLISTIC_DICTATION_TEST_DATABASE=dbservice_test_*` (IST day boundary, sum/floor, killed attempt,
+  a five-minute clip and the 305 s cap against the table's check constraint).
 
 ## Holistic Follow-up Notes (#377)
 

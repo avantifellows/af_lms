@@ -290,25 +290,25 @@ describe("StudentPhaseWorkspace Dictation", () => {
     expect(screen.getByText("Saved")).toBeInTheDocument();
   });
 
-  it("stops by itself at 2 minutes, transcribes the clip, and says it stopped", async () => {
+  it("stops by itself at 5 minutes, transcribes the clip, and says it stopped", async () => {
     const network = stubNetwork();
     vi.useFakeTimers();
     renderWorkspace(mentorDetail());
 
     await act(async () => fireEvent.click(mic("What helped?")));
-    await act(async () => vi.advanceTimersByTimeAsync(119_999));
+    await act(async () => vi.advanceTimersByTimeAsync(299_999));
     expect(network.dictationCalls).toHaveLength(0);
     await act(async () => vi.advanceTimersByTimeAsync(1));
 
     expect(network.dictationCalls).toHaveLength(1);
-    expect(network.dictationCalls[0].body.get("duration_ms")).toBe("120000");
+    expect(network.dictationCalls[0].body.get("duration_ms")).toBe("300000");
     expect(mic("What helped?")).toHaveAttribute("aria-pressed", "false");
     await network.transcribe("A long story");
     expect(box("What helped?")).toHaveValue("A long story");
-    expect(screen.getByText("Recording stopped at 2 minutes.")).toBeInTheDocument();
+    expect(screen.getByText("Recording stopped at 5 minutes.")).toBeInTheDocument();
   });
 
-  it("stops by itself when the Mentor's remaining time for today is under 2 minutes", async () => {
+  it("stops by itself when the Mentor's remaining time for today is under 5 minutes", async () => {
     const network = stubNetwork();
     vi.useFakeTimers();
     renderWorkspace(mentorDetail(), { enabled: true, remainingSeconds: 45 });
@@ -613,7 +613,7 @@ describe("StudentPhaseWorkspace Dictation", () => {
       expect(screen.getByText(CHECK_MIC)).toHaveAttribute("aria-live", "polite");
       expect(mic("What helped?")).toBeEnabled();
       expect(mic("What happens next?")).toBeEnabled();
-      await act(async () => vi.advanceTimersByTimeAsync(130_000));
+      await act(async () => vi.advanceTimersByTimeAsync(310_000));
       expect(network.dictationCalls).toHaveLength(1);
     });
 
@@ -629,7 +629,7 @@ describe("StudentPhaseWorkspace Dictation", () => {
       expect(screen.getByText(CHECK_MIC)).toHaveAttribute("aria-live", "polite");
       expect(mic("What helped?")).toHaveAttribute("aria-pressed", "false");
       expect(tracks[0].stop).toHaveBeenCalled();
-      await act(async () => vi.advanceTimersByTimeAsync(130_000));
+      await act(async () => vi.advanceTimersByTimeAsync(310_000));
       expect(network.dictationCalls).toHaveLength(0);
       expect(mic("What happens next?")).toBeEnabled();
       await act(async () => fireEvent.click(mic("What happens next?")));
@@ -754,7 +754,7 @@ describe("StudentPhaseWorkspace Dictation", () => {
     });
 
     // The device slept while recording: the wall clock jumps past the timer.
-    it.each([[1_800, "120000"], [40, "40000"]])(
+    it.each([[1_800, "300000"], [40, "40000"]])(
       "with %i s left today, sends at most the auto-stop length after the device slept",
       async (remainingSeconds, sent) => {
         const network = stubNetwork();
@@ -762,7 +762,7 @@ describe("StudentPhaseWorkspace Dictation", () => {
         renderWorkspace(mentorDetail(), { enabled: true, remainingSeconds });
 
         await act(async () => fireEvent.click(mic("What helped?")));
-        vi.setSystemTime(Date.now() + 200_000);
+        vi.setSystemTime(Date.now() + 400_000);
         await act(async () => fireEvent.click(mic("What helped?")));
 
         expect(network.dictationCalls[0].body.get("duration_ms")).toBe(sent);
@@ -775,10 +775,10 @@ describe("StudentPhaseWorkspace Dictation", () => {
       renderWorkspace(mentorDetail());
 
       await act(async () => fireEvent.click(mic("What helped?")));
-      vi.setSystemTime(Date.now() + 200_000);
-      await act(async () => vi.advanceTimersByTimeAsync(120_000));
+      vi.setSystemTime(Date.now() + 400_000);
+      await act(async () => vi.advanceTimersByTimeAsync(300_000));
 
-      expect(network.dictationCalls[0].body.get("duration_ms")).toBe("120000");
+      expect(network.dictationCalls[0].body.get("duration_ms")).toBe("300000");
     });
 
     async function failOnce(network: ReturnType<typeof stubNetwork>, question: string) {
@@ -949,8 +949,8 @@ describe("StudentPhaseWorkspace Dictation", () => {
       expect(mic("What helped?")).toBeEnabled();
       expect(screen.queryByText(LIMIT)).not.toBeInTheDocument();
       await act(async () => fireEvent.click(mic("What happens next?")));
-      await act(async () => vi.advanceTimersByTimeAsync(120_000));
-      expect(network.dictationCalls[1].body.get("duration_ms")).toBe("120000");
+      await act(async () => vi.advanceTimersByTimeAsync(300_000));
+      expect(network.dictationCalls[1].body.get("duration_ms")).toBe("300000");
     });
 
     it("keeps a count a recorder reported when the page re-renders with the same server count", async () => {
@@ -1430,7 +1430,7 @@ describe("Follow-up Note Dictation", () => {
       expect(getUserMedia).toHaveBeenCalledTimes(1);
       expect(FakeMediaRecorder.instances).toHaveLength(1);
 
-      await act(async () => vi.advanceTimersByTimeAsync(120_000));
+      await act(async () => vi.advanceTimersByTimeAsync(300_000));
       expect(network.dictationCalls).toHaveLength(1);
       for (const button of followUpMics(dialog)) expect(button).toBeDisabled();
       await network.transcribe("Spoken in Notes");

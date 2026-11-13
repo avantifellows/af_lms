@@ -307,15 +307,15 @@ describe("Holistic Dictation API", () => {
     expectNothingSensitiveIn(logged());
   });
 
-  it("records at most 125 seconds when Scribe's words run past the clip", async () => {
+  it("records at most 305 seconds when Scribe's words run past the clip", async () => {
     fetchMock.mockResolvedValue(scribeReply({
       text: "Bahut lamba jawab",
-      words: [{ text: "jawab", type: "word", start: 130.0, end: 131.2 }],
+      words: [{ text: "jawab", type: "word", start: 310.0, end: 311.2 }],
     }));
 
-    await post({ duration_ms: "120000" });
+    await post({ duration_ms: "300000" });
 
-    expect(db.records[0]).toMatchObject({ audioSeconds: 125, outcome: "ok" });
+    expect(db.records[0]).toMatchObject({ audioSeconds: 305, outcome: "ok" });
   });
 
   function expectNoProviderCallOrRecord() {
@@ -431,7 +431,7 @@ describe("Holistic Dictation API", () => {
     expect(transactionOpenDuringCall).toBe(false);
   });
 
-  const fiveMegabytes = 5 * 1024 * 1024;
+  const tenMegabytes = 10 * 1024 * 1024;
 
   it("returns 422 when no audio is attached", async () => {
     const response = await post({ audio: null });
@@ -462,22 +462,24 @@ describe("Holistic Dictation API", () => {
     },
   );
 
-  it("returns 413 for a clip over 5 MB, and accepts exactly 5 MB", async () => {
-    const tooBig = await post({ audio: clip(fiveMegabytes + 1, "audio/webm") });
+  it("returns 413 for a clip over 10 MB, and accepts exactly 10 MB", async () => {
+    const tooBig = await post({ audio: clip(tenMegabytes + 1, "audio/webm") });
     expect(tooBig.status).toBe(413);
+    await expect(tooBig.json()).resolves.toEqual({ error: "Audio clip is too large" });
     expectNoProviderCallOrRecord();
 
-    expect((await post({ audio: clip(fiveMegabytes, "audio/webm") })).status).toBe(200);
+    expect((await post({ audio: clip(tenMegabytes, "audio/webm") })).status).toBe(200);
   });
 
-  it.each(["0", "125001", "-5", "4.5", "abc", ""])("returns 422 for duration_ms %j", async (duration) => {
+  it.each(["0", "305001", "-5", "4.5", "abc", ""])("returns 422 for duration_ms %j", async (duration) => {
     const response = await post({ duration_ms: duration });
 
     expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toEqual({ error: "Invalid recording duration" });
     expectNoProviderCallOrRecord();
   });
 
-  it.each([["1", 1], ["125000", 125]])("accepts duration_ms %s and records %i s", async (duration, seconds) => {
+  it.each([["1", 1], ["300000", 300], ["305000", 305]])("accepts duration_ms %s and records %i s", async (duration, seconds) => {
     fetchMock.mockResolvedValue(scribeReply({ text: "Haan", words: [{ text: "Haan", type: "word", start: 0, end: 0.4 }] }));
 
     expect((await post({ duration_ms: duration })).status).toBe(200);
@@ -529,6 +531,26 @@ describe("Holistic Dictation API", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ outcome: "ok", text: "Theek hai", remainingSeconds: 0 });
     expect(db.records[0]).toMatchObject({ audioSeconds: 15, outcome: "ok" });
+  });
+
+  it("allows a five-minute clip at 1,505 s used (1,805 ≤ 1,805) and refuses it at 1,506 s", async () => {
+    fetchMock.mockResolvedValue(scribeReply({ text: "Lamba jawab", words: [{ text: "jawab", type: "word", start: 1, end: 299.6 }] }));
+    db.usedTodaySeconds = 1506;
+
+    const refused = await post({ duration_ms: "300000" });
+
+    expect(refused.status).toBe(429);
+    await expect(refused.json()).resolves.toEqual({
+      error: "You've used today's Dictation time", code: "daily_limit", remainingSeconds: 294,
+    });
+    expectNoProviderCallOrRecord();
+
+    db.usedTodaySeconds = 1505;
+    const allowed = await post({ duration_ms: "300000" });
+
+    expect(allowed.status).toBe(200);
+    await expect(allowed.json()).resolves.toEqual({ outcome: "ok", text: "Lamba jawab", remainingSeconds: 0 });
+    expect(db.records[0]).toMatchObject({ audioSeconds: 300, outcome: "ok" });
   });
 
   it("logs nothing sensitive when a clip is transcribed", async () => {

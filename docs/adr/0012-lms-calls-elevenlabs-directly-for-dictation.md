@@ -4,7 +4,7 @@ Dictation (issue #500) turns a Holistic Mentor's short spoken clip into text whi
 
 The exception covers verbatim speech-to-text only. The route sends no prompt, calls no LLM, and stores neither the audio nor a transcript. Any summarising, rewriting, or generation still belongs in etl-next under ADR 0009.
 
-A recording is capped at two minutes so that one call is expected to fit inside Amplify's ~30 s request limit. That has not been measured yet and must be checked when the route is built.
+A recording is capped at five minutes, by owner decision on 2026-11-13; the first cap was two minutes. Whether one call fits inside Amplify's ~30 s request limit has still not been measured. The route gives ElevenLabs 25 s before it gives up, and a five-minute clip makes running out of time a larger risk than a two-minute clip did. When that happens the Mentor sees "Couldn't transcribe. Try again", and the attempt still counts toward their thirty minutes.
 
 ## Considered Options
 

@@ -151,6 +151,19 @@ describe.skipIf(!database)("Holistic Dictation usage against disposable Postgres
     }]);
   });
 
+  it("records a five-minute clip, and at most 305 s when the words run past it", async () => {
+    const mentor = await newMentor();
+    fetchMock
+      .mockResolvedValueOnce(scribeSaid("Lamba jawab", 299.6))
+      .mockResolvedValueOnce(scribeSaid("Aur lamba jawab", 311.2));
+    const at = "2026-11-15T06:00:00Z";
+
+    await expect(dictate(mentor, at, 300_000)).resolves.toMatchObject({ outcome: "ok", remainingSeconds: 1500 });
+    await expect(dictate(mentor, at, 300_000)).resolves.toMatchObject({ outcome: "ok", remainingSeconds: 1195 });
+
+    expect((await recordsOf(mentor)).map((record) => record.audio_seconds)).toEqual([300, 305]);
+  });
+
   it("leaves a killed attempt failed and uncompleted, and still counts it", async () => {
     const mentor = await newMentor();
     let duringCall: { records: Awaited<ReturnType<typeof recordsOf>>; remainingSeconds: number } | null = null;

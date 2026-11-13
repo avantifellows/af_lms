@@ -10,6 +10,7 @@ import {
   loadHolisticMentorWriteScope,
   type HolisticMentorWriteScopeInput,
 } from "./holistic-mentor-write-scope";
+import { HOLISTIC_DICTATION_MAX_CLIP_SECONDS } from "./holistic-dictation-limits";
 
 export type HolisticDictationSettings = {
   enabled: boolean;
@@ -64,7 +65,6 @@ export function checkHolisticDictationScope(
 }
 
 const HOLISTIC_DICTATION_DAILY_SECONDS = 1_800;
-const HOLISTIC_DICTATION_MAX_CLIP_SECONDS = 125;
 // A clip may start with a few seconds left and run a little past the limit:
 // the recorder stops at the remaining time, plus the same 5 s of timer slop.
 const DAILY_LIMIT_SLOP_SECONDS = 5;
