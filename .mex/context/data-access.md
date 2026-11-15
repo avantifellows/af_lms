@@ -21,7 +21,7 @@ edges:
     condition: when adding a write that must proxy to the DB Service
   - target: patterns/add-api-route.md
     condition: when adding a route that reads or writes
-last_updated: 2026-11-10
+last_updated: 2026-11-15
 ---
 
 # Data Access
@@ -694,3 +694,67 @@ missing scope or a non-Mentor actor, and 422 `Phase is not Open` otherwise. Do n
   mirrors the migration (pg_dump-identical). `blended-learning-screener-feedback.spec.ts` uses
   Mentor C's `SCREENER_MENTEES` (J1–J4: one with a link, one without, per viewport) and
   `SCREENER_RACE_MENTEE` (J5), seeded after every other fixture Student so their phones don't move.
+
+## Blended Learning JEE form (2026-11-10, JEE Form tab 2026-11-15)
+
+- **Audience:** every Student in an active current-year Blended Learning Mapping (all
+  programs). One exam is hard-coded: JEE Main 2027 = the `exam` row named "JEE Mains" +
+  `exam_year` 2027 (`JEE_FORM_EXAM` in the client-safe `src/lib/blended-learning-jee-form-input.ts`).
+- **Tables:** db-service `20261110120000_add_blended_learning_jee_form_updates` (branch
+  `feat/bl-jee-form`; deploy it before this code): append-only
+  `blended_learning_jee_form_updates` (latest row per Student + exam + year is the status, the
+  rest is history; `filled` carries `application_number` and an optional
+  `confirmation_document_id` → `lms_student_documents`; `not_filled` carries `reasons` (fixed
+  codes, CHECK-listed; `other` needs `details`) and optional `details`), plus
+  `blended_learning_mentor_flags.jee_form_update_id` (recipient `jee_form`, no Conversation;
+  `bl_mentor_flags_source_check`) and `blended_learning_action_items.completed_by_jee_form_update_id`
+  (a done item is completed by a Conversation XOR a JEE form update). Mirrored for e2e by
+  `e2e/fixtures/migrations/20261110120000_add_blended_learning_jee_form_updates.sql`, with
+  `20260528120000_add_lms_student_documents.sql`, `20261015120000_…exam_details.sql` and
+  `20261019120000_…sessions_applied.sql` for the tables db-dump.sql predates (all pg_dump-identical).
+- **Write:** `POST /api/blended-learning/students/[id]/jee-form` (multipart) → `recordJeeForm` in
+  `src/lib/blended-learning-jee-form.ts`, behind `record_jee_form` (the Mentor of the active
+  Mapping or a Blended Learning Admin; never read-only) + `canAccessBlendedStudent`. Filled:
+  `planExamRecordWrite` picks the Student's JEE Mains 2027 `student_exam_record` (PATCH), else a
+  yearless JEE Mains record holding the same number (PATCH + `exam_year`), else POST; a number
+  held by any other record is a 409 (the DB Service's create upserts on student + number). The
+  PDF (≤ 5 MB) goes through `uploadDocumentPages` + `createDocument` as document type
+  `jee_main_confirmation` (labelled in the Documents tab by `documentTypeLabel`, not offered in its
+  picker). Then one transaction appends the update (Mapping's Mentor/program/year, actor as
+  `recorded_by_email`) and either raises the `jee_form` flag (comment = exam + reason labels +
+  details) or ticks the Student's open Action Items whose Common Action Item text is "JEE Form
+  Filling (Reminder)" (case and spacing ignored; no id is hard-coded). Re-saving the same values is
+  a 200 no-op. A failed DB Service/S3 call is a 502 and withdraws the stored PDF.
+- **Never the password:** no read here names `application_password` (no `SELECT *`);
+  `createExamRecordWithoutPassword` / `patchExamRecordWithoutPassword` in
+  `src/lib/db-service-exam-records.ts` send named fields only and never read the DB Service's
+  response body (it contains the password); failures log the status only.
+- **Read/UI:** the JEE Form tab `/blended-learning/jee-form` (`view_list`) reads `listJeeFormRows`:
+  the Students with an active current-year Mapping (a Mentor's own; every Mentor's for an admin),
+  then every Student's updates in one query (`row_number()` per Student, newest 20) and their
+  reminder items in another. The client list (`jee-form/JeeFormTab.tsx`) shows counts, a status
+  filter and rows that open in place to `JeeFormPanel` / `JeeFormEditor`; saving updates the row
+  and counts from the POST's `form`. URL params: `status`, `mentor` (admins), `student` (open row,
+  scrolled to on arrival), written with `history.pushState` / `replaceState`. The Mentee page shows
+  `JeeFormStatusLine` (from `getJeeForm`) linking to `?student=<id>`; it renders without the data
+  when the read fails, and so does the tab.
+- **Reminder rule:** `src/lib/blended-learning-jee-reminder.ts` holds the reminder's text match.
+  `getMenteeDetail` marks the open item `jeeReminder`, so the Mentee page and the log form show a
+  "Fill in JEE tab" link instead of a tick; `completeActionItems` (the only manual tick path, used
+  by the log form and draft saves) answers 409 when a ticked id is the reminder. Only a Filled
+  save ticks it; it is never unticked.
+  `GET …/jee-form/confirmation` redirects to a 5-minute presigned GET (anyone who can view the
+  Mentee). The Flags feed shows `jee_form` flags as "JEE form (program team)": `listFlags` and
+  `listFlagMentors` LEFT JOIN the Conversation and the JEE form update and COALESCE Mentor,
+  program and date; `getMenteeDetail` reads Conversation flags only.
+- **E2E:** Playwright now starts `e2e/helpers/db-service-stub.mjs` (port 3902) and points
+  `DB_SERVICE_URL` at it, so no spec reaches a real DB Service; it writes `student_exam_record` /
+  `lms_student_documents` as the DB Service does and lists requests at `/__requests`.
+  `blended-learning-jee-form.spec.ts` (the tab, the status line and the reminder rule) uses Mentor
+  C's `JEE_FORM_MENTEES` (K1–K3, seeded last, with
+  the reminder pushed to them and K2's yearless JEE Mains record). E2E has no S3, so the PDF upload
+  is route-tested only.
+- **Not built:** a write-only encrypted application password (the panel leaves a row for it), other
+  exams, any import or prefill. The Exams tab keeps one record per exam, so a Student with both a
+  yearless and a 2027 JEE Mains record shows only one there.
+

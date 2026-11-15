@@ -141,7 +141,7 @@ describe("BlendedLearningPage", () => {
     expect(screen.queryByRole("rowgroup", { name: "Everyone else" })).not.toBeInTheDocument();
     // The admins' tab bar with My Students first, open; no Resources on the list itself.
     const tabs = screen.getByRole("navigation", { name: "Mentor views" });
-    expect(within(tabs).getAllByRole("link").map((link) => link.textContent)).toEqual(["My Students", "Flags", "Resources"]);
+    expect(within(tabs).getAllByRole("link").map((link) => link.textContent)).toEqual(["My Students", "JEE Form", "Flags", "Resources"]);
     expect(within(tabs).getByRole("link", { name: "My Students" })).toHaveAttribute("aria-current", "page");
     expect(within(tabs).getByRole("link", { name: "Flags" })).toHaveAttribute("href", "/blended-learning?tab=flags");
     expect(within(tabs).getByRole("link", { name: "Resources" })).toHaveAttribute("href", "/blended-learning/resources");

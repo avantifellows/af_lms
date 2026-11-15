@@ -316,6 +316,28 @@ describe("LogEntryForm: Conversation", () => {
     expect(sentBody()).toMatchObject({ completeActionItemIds: [8] });
   });
 
+  it("gives the JEE Form Filling (Reminder) no tick box, only a link to the Student's row in the JEE Form tab", async () => {
+    renderForm({
+      openActionItems: [
+        ...OPEN_ITEMS,
+        { id: 9, text: "JEE Form Filling (Reminder)", owner: "student", agreedOn: "2026-10-25", source: "common", jeeReminder: true },
+      ],
+    });
+    const panel = screen.getByRole("region", { name: "Open Action Items" });
+    const reminder = within(panel).getByText("JEE Form Filling (Reminder)").closest("li") as HTMLElement;
+    expect(within(reminder).queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(within(reminder).getByRole("link", { name: "Fill in JEE tab" })).toHaveAttribute(
+      "href",
+      "/blended-learning/jee-form?student=501"
+    );
+    // The other items still tick.
+    expect(within(panel).getAllByRole("checkbox")).toHaveLength(OPEN_ITEMS.length);
+    await fillConversation();
+    answer({ entry: { id: 9 }, mentee: MENTEE });
+    await save();
+    expect(sentBody()).toMatchObject({ completeActionItemIds: [] });
+  });
+
   it("sends a Conversation's photo, Mentor Flags, ticks and notes, and lists them once saved", async () => {
     renderForm();
     await fillConversation();
