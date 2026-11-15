@@ -50,7 +50,8 @@ What it reads (hyperlinks, never cell text — a Ctrl+K link or a `HYPERLINK("ur
   academic year to today, IST (a later date is a typo or a plan). A year-less
   date ("17 October", "17/10") is read in the academic year's first year (product owner,
   2026-10-23), except in a tab whose dated entries all carry an earlier year (a G13 doc's
-  previous-year history). Outcomes per Student:
+  previous-year history), or one on the older side of a written date from before the academic
+  year (above it in an oldest-first tab, below it in a newest-first one). Outcomes per Student:
   `dated`, `no_dates` (doc read, nothing dated → NULL), `unreadable` (no export → stored value
   kept, NULL until a re-run has the doc), `no_doc_link`. Counts only are printed.
 - **`--legacy-conversations=<file.json>`** (only with `--legacy-docs-dir`) →

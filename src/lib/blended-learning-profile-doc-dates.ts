@@ -13,7 +13,9 @@
 // A date without a year ("17 October", "Oct 17", "17/10") is in the window's
 // first year, the academic year's (product owner, 2026-10-23: the program
 // started this year), except in a tab whose dated entries all carry an
-// earlier year: that is a previous year's history. Dates inside tables
+// earlier year (a previous year's history), or one above a written date from
+// before the academic year in an oldest-first tab (below it in a newest-first
+// one): it is older than that date. Dates inside tables
 // (pasted data exports) or mid-sentence are never read. A date line with
 // nothing under it (a placeholder) does not count, and neither does a date
 // outside [from, to]: one after `to` is a typo or a plan, not a contact.
@@ -269,14 +271,37 @@ function tabEntries(tab: DocBlock[], year: number): Entry[] {
   return entries;
 }
 
+// Whether the tab's entries with a written year run oldest first (+1),
+// newest first (-1), or no order can be told (0).
+function writtenOrder(written: Entry[]): number {
+  let order = 0;
+  for (let i = 1; i < written.length; i++) {
+    if (written[i].date !== written[i - 1].date) order += written[i].date > written[i - 1].date ? 1 : -1;
+  }
+  return Math.sign(order);
+}
+
+// Whether a year-less entry sits on the older side of a written-year entry
+// from before the academic year (above it in an oldest-first tab, below it in
+// a newest-first one): it is older still, so not this year's.
+function olderThanBeforeYear(entry: Entry, written: Entry[], from: string): boolean {
+  const order = writtenOrder(written);
+  return written.some(
+    (old) => old.date < from && (order > 0 ? entry.start < old.start : order < 0 && entry.start > old.start)
+  );
+}
+
 // The tab's dated entries. A tab whose entries with a written year are all
 // from before `year` is a previous year's history, so its year-less dates
-// are not this year's and are dropped.
-function tabDatedEntries(tab: DocBlock[], year: number): Entry[] {
+// are not this year's and are dropped; so is a year-less date on the older
+// side of a written date from before the academic year (`from`).
+function tabDatedEntries(tab: DocBlock[], year: number, from: string): Entry[] {
   const entries = tabEntries(tab, year);
   const written = entries.filter((entry) => !entry.yearless);
   const previousYear = written.length > 0 && written.every((entry) => Number(entry.date.slice(0, 4)) < year);
-  return entries.filter((entry) => !(previousYear && entry.yearless));
+  return entries.filter(
+    (entry) => !(entry.yearless && (previousYear || olderThanBeforeYear(entry, written, from)))
+  );
 }
 
 // The latest date within the window, and the blocks of every entry on it in
@@ -288,7 +313,7 @@ function latestEntries(html: string, window: DateWindow): LatestEntries | null {
   let latest = null as LatestEntries | null;
   for (const tab of splitTabs(docBlocks(html))) {
     if (isSkippedTab(tab, year)) continue;
-    for (const entry of tabDatedEntries(tab, year)) {
+    for (const entry of tabDatedEntries(tab, year, window.from)) {
       if (entry.date < window.from || entry.date > window.to || (latest && entry.date < latest.date)) continue;
       const blocks = tab.slice(entry.start, entry.end);
       if (latest?.date === entry.date) latest.entries.push(blocks);

@@ -135,6 +135,26 @@ describe("latestProfileDocConversationOn", () => {
     ).toBe("2026-07-06");
   });
 
+  it("skips a year-less date on the older side of a written date from before the academic year", () => {
+    const lastYear = "<p>6th July - mock test</p><p>Score notes</p>";
+    const dated = "<p>Feb 25, 2026</p><p>Notes</p><p>May 30, 2026: called the student</p>";
+    // Oldest first: the year-less line above the February entry is older still.
+    expect(latest(tab("Log"), lastYear, dated)).toBe("2026-05-30");
+    // Newest first: below the February entry.
+    expect(latest(tab("Log"), "<p>May 30, 2026: called the student</p><p>Feb 25, 2026</p><p>Notes</p>", lastYear)).toBe(
+      "2026-05-30"
+    );
+    // On the newer side it is this year's.
+    expect(latest(tab("Log"), dated, "<p>6th July - follow-up call</p><p>Notes</p>")).toBe("2026-07-06");
+  });
+
+  it("keeps a year-less date when no written date before the academic year sits below it, or no order shows", () => {
+    expect(latest(tab("Log"), "<p>6th July</p><p>Notes</p>", "<p>May 30, 2026</p><p>Notes</p>", "<p>Jun 9, 2026</p><p>Notes</p>")).toBe(
+      "2026-07-06"
+    );
+    expect(latest(tab("Log"), "<p>6th July</p><p>Notes</p>", "<p>Feb 25, 2026</p><p>Notes</p>")).toBe("2026-07-06");
+  });
+
   it("counts an image under a date as content and decodes entities", () => {
     expect(latest(tab("Log"), '<p>Sep&nbsp;5,&#32;2026</p><p><img src="data:image/png;base64,AAAA"></p>')).toBe("2026-09-05");
   });
