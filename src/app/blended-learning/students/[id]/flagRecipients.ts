@@ -10,7 +10,7 @@ export const FLAG_RECIPIENT: Record<FlagRecipient, string> = {
   maths: "Maths Teacher",
 };
 
-// The Flags feed's labels: the four above, and the JEE form card's flag for
+// The Flags feed's labels: the four above, and the JEE form's flag for
 // the program team (raised when a Mentee's form is recorded as not filled).
 export const FEED_FLAG_RECIPIENT: Record<FeedFlagRecipient, string> = {
   ...FLAG_RECIPIENT,

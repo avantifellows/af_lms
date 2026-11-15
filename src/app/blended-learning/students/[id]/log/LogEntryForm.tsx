@@ -8,6 +8,7 @@ import type { OpenActionItem } from "@/lib/blended-learning-mentee-detail";
 import type { MenteeGroup } from "@/lib/blended-learning-talk-to-first";
 
 import { ACTION_ITEM_ROW_CLASSES, ActionItemMeta, OwnerPill } from "../ActionItemMeta";
+import { JeeTabLink } from "../JeeFormStatusLine";
 import {
   buildEntryPayload,
   initialEntryValues,
@@ -56,17 +57,60 @@ function OpenItemText({ item }: { item: OpenActionItem }) {
   );
 }
 
-function OpenActionItemsPanel({
-  items,
+// The "JEE Form Filling (Reminder)" item has no tick box: it is ticked by
+// recording the JEE form as Filled, so it links to the JEE Form tab instead.
+function OpenItemRow({
+  item,
+  studentId,
   canTick,
   ticked,
   onToggle,
 }: {
-  items: OpenActionItem[];
+  item: OpenActionItem;
+  studentId: number;
   canTick: boolean;
   ticked: Set<number>;
   onToggle: (id: number) => void;
 }) {
+  if (item.jeeReminder) {
+    return (
+      <div className="py-1 pl-8">
+        <OpenItemText item={item} />
+        <div className="pl-[4.625rem]">
+          <JeeTabLink studentId={studentId}>Fill in JEE tab</JeeTabLink>
+        </div>
+      </div>
+    );
+  }
+  if (!canTick) {
+    return (
+      <div className="py-1">
+        <OpenItemText item={item} />
+      </div>
+    );
+  }
+  return (
+    <label className="flex min-h-11 cursor-pointer items-start gap-3 py-1">
+      <input
+        type="checkbox"
+        checked={ticked.has(item.id)}
+        onChange={() => onToggle(item.id)}
+        className="mt-0.5 h-5 w-5 shrink-0 accent-accent"
+      />
+      <OpenItemText item={item} />
+    </label>
+  );
+}
+
+type OpenItemsProps = {
+  studentId: number;
+  items: OpenActionItem[];
+  canTick: boolean;
+  ticked: Set<number>;
+  onToggle: (id: number) => void;
+};
+
+function OpenActionItemsPanel({ items, canTick, ...rest }: OpenItemsProps) {
   return (
     <section aria-label="Open Action Items">
       <Card elevation="sm" className="space-y-2 p-4">
@@ -79,21 +123,7 @@ function OpenActionItemsPanel({
         <ul className="space-y-1">
           {items.map((item) => (
             <li key={item.id} className="break-words text-sm text-text-primary">
-              {canTick ? (
-                <label className="flex min-h-11 cursor-pointer items-start gap-3 py-1">
-                  <input
-                    type="checkbox"
-                    checked={ticked.has(item.id)}
-                    onChange={() => onToggle(item.id)}
-                    className="mt-0.5 h-5 w-5 shrink-0 accent-accent"
-                  />
-                  <OpenItemText item={item} />
-                </label>
-              ) : (
-                <div className="py-1">
-                  <OpenItemText item={item} />
-                </div>
-              )}
+              <OpenItemRow item={item} canTick={canTick} {...rest} />
             </li>
           ))}
         </ul>
@@ -105,22 +135,12 @@ function OpenActionItemsPanel({
 function SidePanels({
   lastConversationPanel,
   openActionItems,
-  canTick,
-  ticked,
-  onToggle,
-}: {
-  lastConversationPanel: ReactNode;
-  openActionItems: OpenActionItem[];
-  canTick: boolean;
-  ticked: Set<number>;
-  onToggle: (id: number) => void;
-}) {
+  ...panel
+}: Omit<OpenItemsProps, "items"> & { lastConversationPanel: ReactNode; openActionItems: OpenActionItem[] }) {
   return (
     <div className="min-w-0 space-y-4 lg:sticky lg:top-4 lg:order-2">
       {lastConversationPanel}
-      {openActionItems.length > 0 && (
-        <OpenActionItemsPanel items={openActionItems} canTick={canTick} ticked={ticked} onToggle={onToggle} />
-      )}
+      {openActionItems.length > 0 && <OpenActionItemsPanel items={openActionItems} {...panel} />}
     </div>
   );
 }
@@ -300,6 +320,7 @@ function EntryForm({
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start lg:gap-8">
       <SidePanels
+        studentId={studentId}
         lastConversationPanel={props.lastConversationPanel}
         openActionItems={props.openActionItems}
         canTick={kind === "conversation"}

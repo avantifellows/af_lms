@@ -1,5 +1,5 @@
 -- Mirrors db-service 20260528120000_create_lms_student_documents_table, which
--- db-dump.sql predates. The JEE form card stores its confirmation page here
+-- db-dump.sql predates. The JEE form stores its confirmation page here
 -- (through the DB Service, which e2e stubs). Proven pg_dump-identical with
 -- patterns/mirror-db-service-schema-in-e2e.md.
 

@@ -2,7 +2,12 @@ import type { PoolClient } from "pg";
 
 import { query, withTransaction } from "./db";
 import { CURRENT_ACADEMIC_YEAR } from "./constants";
-import { activeBlendedMappingSql, canBlendedLearning, type BlendedLearningAccess } from "./blended-learning-access";
+import {
+  activeBlendedMappingSql,
+  canBlendedLearning,
+  mentorNameSql,
+  type BlendedLearningAccess,
+} from "./blended-learning-access";
 import {
   validateCommonItem,
   validateCommonItemEdit,
@@ -59,8 +64,6 @@ function validId(id: number): boolean {
   return Number.isSafeInteger(id) && id > 0;
 }
 
-const MENTOR_NAME_SQL = (alias: string, idSql: string) =>
-  `COALESCE(NULLIF(TRIM(CONCAT_WS(' ', ${alias}.first_name, ${alias}.last_name)), ''), ${alias}.email, CONCAT('Mentor ', ${idSql}))`;
 
 type TargetSql = { kind: string; grade: string; mentor: string; ids: string };
 
@@ -157,7 +160,7 @@ export async function previewCommonTarget(
 export async function listTargetMentors(access: BlendedLearningAccess): Promise<TargetMentor[]> {
   if (!canBlendedLearning(access, "manage")) return [];
   const rows = await query<{ user_id: number | string; name: string; students: number | string }>(
-    `SELECT mapping.mentor_user_id AS user_id, ${MENTOR_NAME_SQL("mentor", "mapping.mentor_user_id")} AS name,
+    `SELECT mapping.mentor_user_id AS user_id, ${mentorNameSql("mentor", "mapping.mentor_user_id")} AS name,
             count(*) AS students
      FROM blended_learning_mentor_mentee_mappings mapping
      LEFT JOIN "user" mentor ON mentor.id = mapping.mentor_user_id
@@ -213,7 +216,7 @@ export async function listCommonActionItems(access: BlendedLearningAccess): Prom
     `SELECT common.id, common.text, common.owner, common.target_kind, common.target_grade,
             common.target_mentor_user_id, common.target_student_ids,
             CASE WHEN common.target_mentor_user_id IS NULL THEN NULL
-                 ELSE ${MENTOR_NAME_SQL("mentor", "common.target_mentor_user_id")} END AS target_mentor_name,
+                 ELSE ${mentorNameSql("mentor", "common.target_mentor_user_id")} END AS target_mentor_name,
             (SELECT count(*) FROM blended_learning_action_items item
              WHERE item.common_action_item_id = common.id AND item.status = 'open') AS open_count,
             (SELECT count(*) FROM blended_learning_action_items item

@@ -1,9 +1,9 @@
-// The JEE form card's exam, reasons and limits, and the validation the card
-// and the route share (client-safe: no server imports).
+// The JEE form's exam, reasons and limits, and the validation the JEE Form
+// tab and the route share (client-safe: no server imports).
 //
 // One exam is hard-coded for now: JEE Main 2027, stored against the existing
 // `exam` row named "JEE Mains" with exam_year 2027. There is deliberately no
-// application password anywhere in this module, the card or its route: a
+// application password anywhere in this module, the tab or its route: a
 // secure (encrypted, write-only for Mentors) password field comes later.
 
 export const JEE_FORM_EXAM = { label: "JEE Main 2027", examName: "JEE Mains", examYear: 2027 } as const;
@@ -72,6 +72,24 @@ export type JeeFormView = {
   reminderItems: JeeReminderItem[];
 };
 
+// One Student's row in the JEE Form tab.
+export type JeeFormRow = {
+  studentId: number;
+  // `student.student_id` as text (leading zeros kept); may be NULL.
+  programStudentId: string | null;
+  name: string;
+  mentorUserId: number;
+  mentorName: string;
+  form: JeeFormView;
+};
+
+// The tab's status filter: "not_recorded" is a Student with no update yet.
+export type JeeFormStatusFilter = "all" | "not_recorded" | JeeFormStatus;
+
+export function jeeRowStatus(form: JeeFormView): Exclude<JeeFormStatusFilter, "all"> {
+  return form.current?.status ?? "not_recorded";
+}
+
 export type JeeFormInput =
   | { status: "filled"; applicationNumber: string }
   | { status: "not_filled"; reasons: JeeFormReason[]; details: string | null };
@@ -123,7 +141,7 @@ function validateNotFilled(raw: RawJeeForm): JeeFormValidation {
 }
 
 // Reasons come back in the list's order, without repeats. The fields of the
-// other status are ignored, so the card can keep them while the Mentor
+// other status are ignored, so the form can keep them while the Mentor
 // switches back and forth.
 export function validateJeeForm(raw: RawJeeForm): JeeFormValidation {
   if (raw.status === "filled") return validateFilled(raw);

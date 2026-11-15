@@ -30,7 +30,7 @@ import { ConversationPhotos } from "./ConversationPhotos";
 import { ConversationRecording } from "./ConversationRecording";
 import { DraftStatus } from "./DraftStatus";
 import { FLAG_HISTORY } from "./flagRecipients";
-import { JeeFormCard } from "./JeeFormCard";
+import { JeeFormStatusLine, JeeTabLink } from "./JeeFormStatusLine";
 import { SCREENER_QUESTIONS } from "./screenerQuestions";
 
 // One Mentee, in one column as wide as the log page's: name, profile line,
@@ -44,9 +44,10 @@ import { SCREENER_QUESTIONS } from "./screenerQuestions";
 // ticked done from the log page. Only Blended Learning Admins (read-only too)
 // can play a saved Call Recording or read its transcript. A Conversation
 // that used the Screener says so, with the Student's one Screener Feedback
-// on the Conversation that gave it. The JEE form card sits between the Open
-// Action Items and the history; the Mentor and (non-read-only) admins record
-// it there.
+// on the Conversation that gave it. A line under the Open Action Items shows
+// the JEE form status and links to the Student's row in the JEE Form tab,
+// where it is recorded; so does the "JEE Form Filling (Reminder)" item, which
+// is never ticked by hand.
 
 type Conversation = Extract<HistoryEntry, { kind: "conversation" }>;
 type ProfileDocHistoryEntry = Extract<HistoryEntry, { kind: "profile_doc" }>;
@@ -316,7 +317,7 @@ function AttemptEntry({ entry }: { entry: Extract<HistoryEntry, { kind: "attempt
 }
 
 // Styled as the log page's Open Action Items panel.
-function OpenActionItems({ items }: { items: MenteeDetail["openActionItems"] }) {
+function OpenActionItems({ studentId, items }: { studentId: number; items: MenteeDetail["openActionItems"] }) {
   return (
     <section aria-label="Open Action Items">
       <Card elevation="sm" className="space-y-2 p-4">
@@ -328,6 +329,7 @@ function OpenActionItems({ items }: { items: MenteeDetail["openActionItems"] }) 
               <span className="min-w-0 break-words">
                 {item.text}
                 <ActionItemMeta agreedOn={item.agreedOn} source={item.source} />
+                {item.jeeReminder && <JeeTabLink studentId={studentId}>Fill in JEE tab</JeeTabLink>}
               </span>
             </li>
           ))}
@@ -408,13 +410,14 @@ function backLink(access: BlendedLearningAccess, mentee: MenteeDetail, from: Bac
   };
 }
 
-// The JEE form card's data. The page still renders without it (the card says
-// it can't be shown), e.g. on a database without the JEE form migration.
+// The JEE form status line's data. The page still renders without it (the
+// line says it can't be shown), e.g. on a database without the JEE form
+// migration.
 async function loadJeeForm(access: BlendedLearningAccess, studentId: number): Promise<JeeFormView | null> {
   try {
     return await getJeeForm(access, studentId);
   } catch (error) {
-    console.error("Failed to load the JEE form card:", error instanceof Error ? error.name : "unknown");
+    console.error("Failed to load the JEE form status:", error instanceof Error ? error.name : "unknown");
     return null;
   }
 }
@@ -460,8 +463,10 @@ export default async function MenteeDetailPage({
           hideActions={mentee.viewOnly}
         />
       )}
-      {mentee.openActionItems.length > 0 && <OpenActionItems items={mentee.openActionItems} />}
-      <JeeFormCard
+      {mentee.openActionItems.length > 0 && (
+        <OpenActionItems studentId={mentee.studentId} items={mentee.openActionItems} />
+      )}
+      <JeeFormStatusLine
         studentId={mentee.studentId}
         form={jeeForm}
         canRecord={!mentee.viewOnly && canBlendedLearning(access, "record_jee_form")}

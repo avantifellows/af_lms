@@ -126,7 +126,7 @@ export async function updateExamRecord(
 
 // --- Password-free writes (Blended Learning JEE form) -----------------------
 //
-// The JEE form card never touches `application_password`: these types have
+// The JEE form never touches `application_password`: these types have
 // no such field, each body is built from named fields only (never a spread),
 // and a PATCH without the key leaves the stored password as it is (the DB
 // Service casts only the keys sent). The DB Service answers with the whole

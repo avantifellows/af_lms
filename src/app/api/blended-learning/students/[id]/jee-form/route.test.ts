@@ -72,7 +72,9 @@ async function fakeQuery(text: string, params?: unknown[]) {
   if (text.includes("FROM exam WHERE name")) return params?.[0] === "JEE Mains" ? [{ id: JEE_EXAM_ID }] : [];
   if (text.includes("FROM student_exam_record")) return examRecords;
   if (text.includes("FROM blended_learning_jee_form_updates u")) {
+    const [studentId] = params?.[0] as number[];
     return [...updates].reverse().map((update) => ({
+      student_id: studentId,
       ...update,
       has_confirmation: update.confirmation_document_id !== null,
       recorded_on: "2026-11-10",
@@ -80,7 +82,8 @@ async function fakeQuery(text: string, params?: unknown[]) {
     }));
   }
   if (text.includes("FROM blended_learning_action_items item")) {
-    return [{ id: 81, text: "JEE Form Filling (Reminder)", status: updates.some((u) => u.status === "filled") ? "done" : "open" }];
+    const [studentId] = params?.[0] as number[];
+    return [{ student_id: studentId, id: 81, text: "JEE Form Filling (Reminder)", status: updates.some((u) => u.status === "filled") ? "done" : "open" }];
   }
   return [];
 }

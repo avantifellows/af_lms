@@ -312,7 +312,7 @@ describe("canBlendedLearning", () => {
     ["view_mentors", false, true, true],
     // Resources and Common Action Items: the one thing an admin edits.
     ["manage", false, true, false],
-    // The JEE form card: the Mentor or an admin, never read-only.
+    // The JEE form: the Mentor or an admin, never read-only.
     ["record_jee_form", true, true, false],
   ];
 

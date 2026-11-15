@@ -156,6 +156,7 @@ describe("POST /api/blended-learning/students/[id]/entries", () => {
       .mockResolvedValueOnce(rows())
       .mockResolvedValueOnce(rows({ id: 41 }))
       .mockResolvedValueOnce(rows({ id: 42 }))
+      .mockResolvedValueOnce(rows())
       .mockResolvedValueOnce(rows({ id: 802 }, { id: 803 }));
 
     const res = await postEntry("501", {
@@ -177,7 +178,9 @@ describe("POST /api/blended-learning/students/[id]/entries", () => {
     expectWrite(5, "INSERT INTO blended_learning_conversation_photos", [700, PHOTO, "image/jpeg", 412_345, 1]);
     expectWrite(6, "INSERT INTO blended_learning_mentor_flags", [700, 501, "emotional_wellbeing", "Seemed anxious", MENTOR.actorEmail]);
     expectWrite(7, "INSERT INTO blended_learning_mentor_flags", [700, 501, "physics", null, MENTOR.actorEmail]);
-    expectWrite(8, "UPDATE blended_learning_action_items", [700, MENTOR.actorEmail, [802, 803], 501]);
+    // None of the ticked items is the JEE form reminder.
+    expectWrite(8, "JOIN blended_learning_common_action_items common", [[802, 803], 501, "JEE Form Filling (Reminder)"]);
+    expectWrite(9, "UPDATE blended_learning_action_items", [700, MENTOR.actorEmail, [802, 803], 501]);
     // Only the Emotional Well-being flag emails, after commit.
     expect(mockNotify.mock.calls).toEqual([[41]]);
   });
@@ -186,14 +189,15 @@ describe("POST /api/blended-learning/students/[id]/entries", () => {
     clientQuery
       .mockResolvedValueOnce(rows(MAPPING))
       .mockResolvedValueOnce(SAVED)
+      .mockResolvedValueOnce(rows())
       .mockResolvedValueOnce(rows({ id: 802 }))
       .mockResolvedValueOnce(rows());
 
     const res = await postEntry("501", { ...CONVERSATION, completeActionItemIds: [801, 802] });
 
     expect(res.status).toBe(201);
-    expectWrite(3, "UPDATE blended_learning_action_items", [700, MENTOR.actorEmail, [801, 802], 501]);
-    expectWrite(4, "SELECT 1 FROM blended_learning_action_items", [[801]]);
+    expectWrite(4, "UPDATE blended_learning_action_items", [700, MENTOR.actorEmail, [801, 802], 501]);
+    expectWrite(5, "SELECT 1 FROM blended_learning_action_items", [[801]]);
   });
 
   it("returns 422 for a photo whose upload never reached S3, and saves nothing", async () => {
@@ -222,13 +226,33 @@ describe("POST /api/blended-learning/students/[id]/entries", () => {
         .mockResolvedValueOnce(rows(MAPPING))
         .mockResolvedValueOnce(SAVED)
         .mockResolvedValueOnce(rows({ id: 41 }))
+        .mockResolvedValueOnce(rows())
         .mockResolvedValueOnce(rows({ id: 802 }))
         .mockResolvedValueOnce(rows({ "?column?": 1 }));
 
       const res = await postEntry("501", { ...WELLBEING, completeActionItemIds: [801, 802] });
 
       expect(res).toEqual({ status: 409, body: { error: expect.stringContaining("already done") } });
-      expectWrite(5, "SELECT 1 FROM blended_learning_action_items", [[801]]);
+      expectWrite(6, "SELECT 1 FROM blended_learning_action_items", [[801]]);
+      expect(mockNotify).not.toHaveBeenCalled();
+    });
+
+    it("a ticked JEE Form Filling (Reminder): only the JEE Form tab ticks it", async () => {
+      clientQuery
+        .mockResolvedValueOnce(rows(MAPPING))
+        .mockResolvedValueOnce(SAVED)
+        .mockResolvedValueOnce(rows({ id: 41 }))
+        .mockResolvedValueOnce(rows({ id: 805 }));
+
+      const res = await postEntry("501", { ...WELLBEING, completeActionItemIds: [802, 805] });
+
+      expect(res).toEqual({
+        status: 409,
+        body: { error: expect.stringContaining("ticked only by recording the JEE form as Filled in the JEE Form tab") },
+      });
+      expectWrite(4, "lower(regexp_replace(btrim(common.text)", [[802, 805], 501, "JEE Form Filling (Reminder)"]);
+      // Nothing was ticked, and the rolled-back save sends no email.
+      expect(clientQuery.mock.calls.some(([sql]) => String(sql).includes("UPDATE blended_learning_action_items"))).toBe(false);
       expect(mockNotify).not.toHaveBeenCalled();
     });
 
