@@ -3,13 +3,15 @@ import { CURRENT_ACADEMIC_YEAR } from "./constants";
 import {
   activeBlendedMappingSql,
   canBlendedLearning,
+  notBlendedDropoutSql,
   type BlendedLearningAccess,
 } from "./blended-learning-access";
 import { contactNumbers, present, type FlagRecipient } from "./blended-learning-mentee-detail";
 
 // The Flags feed (server-only): for a Blended Learning Admin every Mentor
 // Flag, for a Mentor only the flags on their own Students (an active
-// current-year Mapping to them), newest first by (inserted_at, id), and each
+// current-year Mapping to them), never a dropout's (notBlendedDropoutSql),
+// newest first by (inserted_at, id), and each
 // viewer's "last seen" time behind the "N new" badge. A Mentor's scope is in
 // every query here, so another Mentor's flags are never read. Flags have no
 // resolution; the feed is read-only.
@@ -121,9 +123,9 @@ function flagScope(access: BlendedLearningAccess): [boolean, number | null] {
 }
 
 // The flag is in the viewer's scope (flagScope's parameters at `scoped` and
-// `mentor`; the academic year at `year`).
+// `mentor`; the academic year at `year`). A dropout's flags are in no one's.
 function inViewerScopeSql(scoped: string, mentor: string, year: string): string {
-  return `(NOT ${scoped}::boolean OR EXISTS (
+  return `${notBlendedDropoutSql("flag.student_id")} AND (NOT ${scoped}::boolean OR EXISTS (
             SELECT 1 FROM blended_learning_mentor_mentee_mappings own
             WHERE own.student_id = flag.student_id AND own.mentor_user_id = ${mentor}::bigint
               AND ${activeBlendedMappingSql("own", year)}))`;
@@ -264,6 +266,7 @@ export async function listFlagMentors(
      FROM blended_learning_mentor_flags flag
      JOIN blended_learning_conversations c ON c.id = flag.conversation_id
      LEFT JOIN "user" mentor ON mentor.id = c.mentor_user_id
+     WHERE ${notBlendedDropoutSql("flag.student_id")}
      ORDER BY mentor_name, c.mentor_user_id`
   );
   return rows.map((row) => ({ mentorUserId: Number(row.mentor_user_id), name: row.mentor_name }));
