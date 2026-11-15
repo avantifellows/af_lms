@@ -44,7 +44,7 @@ describe("labelFor", () => {
 });
 
 describe("documentTypeLabel", () => {
-  it("labels picker types, the JEE form card's confirmation page, and shows anything else as stored", () => {
+  it("labels picker types, the JEE form's confirmation page, and shows anything else as stored", () => {
     expect(documentTypeLabel("income_certificate")).toBe("Income Certificate");
     expect(documentTypeLabel("jee_main_confirmation")).toBe("JEE Main confirmation page");
     expect(documentTypeLabel("something_else")).toBe("something_else");

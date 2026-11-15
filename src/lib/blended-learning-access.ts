@@ -70,7 +70,7 @@ export async function getBlendedLearningAccess(
 // only when not read-only; Mentors never. Recordings and Mentor cards are for
 // Blended Learning Admins (including read-only ones). Everyone sees flags: an
 // admin every flag, a Mentor only those on their own Students
-// (blended-learning-flags). The JEE form card is recorded by the Mentor or a
+// (blended-learning-flags). The JEE form is recorded by the Mentor or a
 // Blended Learning Admin, never by a read-only account.
 export function canBlendedLearning(
   access: BlendedLearningAccess | null,
@@ -88,6 +88,12 @@ export function canBlendedLearning(
 // CURRENT_ACADEMIC_YEAR. `yearParam` is the placeholder bound to it.
 export function activeBlendedMappingSql(alias: string, yearParam: string): string {
   return `${alias}.academic_year = ${yearParam} AND ${alias}.ended_at IS NULL`;
+}
+
+// A Mentor's display name from the `user` row `alias` (joined on the
+// Mapping's mentor_user_id, `idSql`): full name, else email, else "Mentor <id>".
+export function mentorNameSql(alias: string, idSql: string): string {
+  return `COALESCE(NULLIF(TRIM(CONCAT_WS(' ', ${alias}.first_name, ${alias}.last_name)), ''), ${alias}.email, CONCAT('Mentor ', ${idSql}))`;
 }
 
 // A Student is in scope with an active current-year Mapping; for a Mentor

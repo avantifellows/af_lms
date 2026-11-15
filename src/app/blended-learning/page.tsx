@@ -28,7 +28,7 @@ import { MentorCards } from "./MentorCards";
 import { SECTION_TAB_TITLE, SectionTabs, type SectionTab } from "./SectionTabs";
 
 type SearchParam = string | string[] | undefined;
-type LandingTab = Exclude<SectionTab, "resources" | "manage">;
+type LandingTab = Exclude<SectionTab, "jee_form" | "resources" | "manage">;
 type SearchParams = {
   tab?: SearchParam;
   mentor?: SearchParam;

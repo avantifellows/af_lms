@@ -2,12 +2,9 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { mockRefresh } = vi.hoisted(() => ({ mockRefresh: vi.fn() }));
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: mockRefresh }) }));
-
 import type { JeeFormUpdate, JeeFormView } from "@/lib/blended-learning-jee-form-input";
 
-import { JeeFormCard } from "./JeeFormCard";
+import { JeeFormPanel } from "./JeeFormPanel";
 
 const REMINDER_OPEN = { id: 81, text: "JEE Form Filling (Reminder)", status: "open" as const };
 const EMPTY: JeeFormView = { current: null, earlier: [], reminderItems: [REMINDER_OPEN] };
@@ -31,8 +28,15 @@ const NOT_FILLED: JeeFormUpdate = {
   recordedOn: "2026-11-03",
   flagRaised: true,
 };
+const SAVED_FILLED: JeeFormView = {
+  current: FILLED,
+  earlier: [NOT_FILLED],
+  reminderItems: [{ ...REMINDER_OPEN, status: "done" }],
+};
 
 let fetchMock: ReturnType<typeof vi.fn>;
+const onSaved = vi.fn();
+const onClose = vi.fn();
 
 function sentForm(): FormData {
   const [url, init] = fetchMock.mock.calls[0];
@@ -41,9 +45,13 @@ function sentForm(): FormData {
   return init.body as FormData;
 }
 
+function panel(form: JeeFormView, canRecord = true) {
+  return render(<JeeFormPanel studentId={501} form={form} canRecord={canRecord} onSaved={onSaved} onClose={onClose} />);
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
-  fetchMock = vi.fn(async () => new Response(JSON.stringify({ form: EMPTY }), { status: 201 }));
+  fetchMock = vi.fn(async () => new Response(JSON.stringify({ form: SAVED_FILLED }), { status: 201 }));
   vi.stubGlobal("fetch", fetchMock);
 });
 
@@ -51,27 +59,16 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("JeeFormCard before anything is recorded", () => {
-  it("shows a read-only viewer 'Not recorded yet' with no controls", () => {
-    render(<JeeFormCard studentId={501} form={EMPTY} canRecord={false} />);
+describe("JeeFormPanel for a recorder", () => {
+  it("opens straight to the choice, with no password field anywhere", async () => {
+    panel(EMPTY);
 
-    const card = screen.getByRole("region", { name: "JEE Main 2027 form" });
-    expect(within(card).getAllByText(/Not recorded yet/)).toHaveLength(2);
-    expect(within(card).queryByRole("radio")).not.toBeInTheDocument();
-    expect(within(card).queryByRole("button")).not.toBeInTheDocument();
-  });
-
-  it("asks a recorder whether the form is filled, with no password field anywhere", async () => {
-    render(<JeeFormCard studentId={501} form={EMPTY} canRecord />);
-
-    expect(screen.getByText("Not recorded yet")).toBeInTheDocument();
     const group = screen.getByRole("group", { name: "Has the student filled the form?" });
     expect(within(group).getAllByRole("radio").map((radio) => radio.closest("label")?.textContent)).toEqual([
       "Filled",
       "Not filled",
     ]);
     expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
-
     await userEvent.click(screen.getByRole("radio", { name: "Filled" }));
     expect(screen.getByLabelText("Application number")).toBeInTheDocument();
     expect(screen.getByLabelText(/Confirmation page/)).toHaveAttribute("accept", "application/pdf,.pdf");
@@ -79,16 +76,26 @@ describe("JeeFormCard before anything is recorded", () => {
     expect(screen.queryByText(/password/i)).not.toBeInTheDocument();
   });
 
-  it("can't be shown when its data didn't load", () => {
-    render(<JeeFormCard studentId={501} form={null} canRecord />);
-    expect(screen.getByText("The JEE form can't be shown right now.")).toBeInTheDocument();
-    expect(screen.queryByRole("radio")).not.toBeInTheDocument();
-  });
-});
+  it("is prefilled from what is saved, and Cancel closes the row", async () => {
+    panel({ current: NOT_FILLED, earlier: [], reminderItems: [] });
 
-describe("JeeFormCard recording Filled", () => {
+    expect(screen.getByRole("radio", { name: "Not filled" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Other" })).toBeChecked();
+    expect(screen.getByLabelText("Details")).toHaveValue("Waiting for the income certificate");
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("links the saved confirmation page from the Filled form", () => {
+    panel(SAVED_FILLED);
+    expect(screen.getByRole("link", { name: "View PDF" })).toHaveAttribute(
+      "href",
+      "/api/blended-learning/students/501/jee-form/confirmation"
+    );
+  });
+
   it("needs an application number before posting", async () => {
-    render(<JeeFormCard studentId={501} form={EMPTY} canRecord />);
+    panel(EMPTY);
     await userEvent.click(screen.getByRole("radio", { name: "Filled" }));
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
 
@@ -96,8 +103,8 @@ describe("JeeFormCard recording Filled", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("posts the number and the PDF, says it ticks the reminder, and refreshes the page", async () => {
-    render(<JeeFormCard studentId={501} form={EMPTY} canRecord />);
+  it("posts the number and the PDF, then shows what was saved with the ticked reminder", async () => {
+    const { rerender } = panel(EMPTY);
     await userEvent.click(screen.getByRole("radio", { name: "Filled" }));
     expect(screen.getByText(/Saving ticks the student's “JEE Form Filling \(Reminder\)” action item/)).toBeInTheDocument();
 
@@ -111,11 +118,21 @@ describe("JeeFormCard recording Filled", () => {
     expect(body.get("status")).toBe("filled");
     expect(body.get("applicationNumber")).toBe("270310000001");
     expect((body.get("confirmation") as File).name).toBe("confirmation.pdf");
-    expect(mockRefresh).toHaveBeenCalled();
+    expect(onSaved).toHaveBeenCalledWith(SAVED_FILLED);
+
+    // The tab passes the saved form back down.
+    rerender(<JeeFormPanel studentId={501} form={SAVED_FILLED} canRecord onSaved={onSaved} onClose={onClose} />);
+    expect(screen.getByRole("status")).toHaveTextContent("Saved");
+    expect(screen.getByText("270310000001")).toHaveClass("font-mono");
+    expect(screen.getByText("JEE Form Filling (Reminder)")).toHaveClass("line-through");
+    expect(screen.getByText("Done")).toBeInTheDocument();
+    expect(screen.getByText(/^Recorded/)).toHaveTextContent("Recorded 10 Nov 2026");
+    await userEvent.click(screen.getByRole("button", { name: "Change status" }));
+    expect(screen.getByRole("radio", { name: "Filled" })).toBeChecked();
   });
 
   it("refuses a confirmation that isn't a PDF in the browser", async () => {
-    render(<JeeFormCard studentId={501} form={EMPTY} canRecord />);
+    panel(EMPTY);
     await userEvent.click(screen.getByRole("radio", { name: "Filled" }));
     await userEvent.type(screen.getByLabelText("Application number"), "2703");
     await userEvent.upload(screen.getByLabelText(/Confirmation page/), new File(["x"], "photo.png", { type: "image/png" }), {
@@ -137,20 +154,30 @@ describe("JeeFormCard recording Filled", () => {
         { status: 409 }
       )
     );
-    render(<JeeFormCard studentId={501} form={EMPTY} canRecord />);
+    panel(EMPTY);
     await userEvent.click(screen.getByRole("radio", { name: "Filled" }));
     await userEvent.type(screen.getByLabelText("Application number"), "2703");
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
 
     expect(await screen.findByText("This application number is already saved for JEE Advanced.")).toBeInTheDocument();
     expect(screen.getByLabelText("Application number")).toHaveValue("2703");
-    expect(mockRefresh).not.toHaveBeenCalled();
+    expect(onSaved).not.toHaveBeenCalled();
+  });
+
+  it("says so when the save can't reach the server", async () => {
+    fetchMock.mockRejectedValue(new TypeError("offline"));
+    panel(EMPTY);
+    await userEvent.click(screen.getByRole("radio", { name: "Filled" }));
+    await userEvent.type(screen.getByLabelText("Application number"), "2703");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't save. Check your connection and try again.");
   });
 });
 
-describe("JeeFormCard recording Not filled", () => {
+describe("JeeFormPanel recording Not filled", () => {
   it("offers the eleven reasons and needs at least one", async () => {
-    render(<JeeFormCard studentId={501} form={EMPTY} canRecord />);
+    panel(EMPTY);
     await userEvent.click(screen.getByRole("radio", { name: "Not filled" }));
 
     const reasons = screen.getByRole("group", { name: "Why hasn't it been filled?" });
@@ -164,7 +191,7 @@ describe("JeeFormCard recording Not filled", () => {
   });
 
   it("makes details required once Other is ticked, then posts every reason and the details", async () => {
-    render(<JeeFormCard studentId={501} form={EMPTY} canRecord />);
+    panel(EMPTY);
     await userEvent.click(screen.getByRole("radio", { name: "Not filled" }));
     expect(screen.getByLabelText(/Details/)).not.toBeRequired();
 
@@ -183,37 +210,28 @@ describe("JeeFormCard recording Not filled", () => {
     expect(body.getAll("reasons")).toEqual(["not_aware", "other"]);
     expect(body.get("details")).toBe("Family moved this month");
     expect(body.has("applicationNumber")).toBe(false);
-    expect(mockRefresh).toHaveBeenCalled();
+    expect(onSaved).toHaveBeenCalled();
   });
 });
 
-describe("JeeFormCard once recorded", () => {
-  it("shows Filled with the number, the PDF link and the ticked reminder", () => {
-    render(
-      <JeeFormCard
-        studentId={501}
-        form={{ current: FILLED, earlier: [], reminderItems: [{ ...REMINDER_OPEN, status: "done" }] }}
-        canRecord={false}
-      />
-    );
-
-    const card = screen.getByRole("region", { name: "JEE Main 2027 form" });
-    expect(within(card).getByText("Filled")).toBeInTheDocument();
-    expect(within(card).getByText("270310000001")).toHaveClass("font-mono");
-    expect(within(card).getByRole("link", { name: "View PDF" })).toHaveAttribute(
-      "href",
-      "/api/blended-learning/students/501/jee-form/confirmation"
-    );
-    expect(within(card).getByText("JEE Form Filling (Reminder)")).toHaveClass("line-through");
-    expect(within(card).getByText("Done")).toBeInTheDocument();
-    expect(within(card).getByText(/Recorded/)).toHaveTextContent("Recorded 10 Nov 2026");
-    expect(within(card).queryByRole("button", { name: "Change status" })).not.toBeInTheDocument();
+describe("JeeFormPanel for a read-only viewer", () => {
+  it("says Not recorded yet, with no controls", () => {
+    panel(EMPTY, false);
+    expect(screen.getByText("Not recorded yet.")).toBeInTheDocument();
+    expect(screen.queryByRole("radio")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
 
-  it("shows Not filled with its reasons, details and the program team's flag, and earlier updates", async () => {
-    render(<JeeFormCard studentId={501} form={{ current: NOT_FILLED, earlier: [FILLED], reminderItems: [] }} canRecord />);
+  it("shows Filled with the number and PDF link, without Change status", () => {
+    panel(SAVED_FILLED, false);
+    expect(screen.getByText("270310000001")).toHaveClass("font-mono");
+    expect(screen.getByRole("link", { name: "View PDF" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Change status" })).not.toBeInTheDocument();
+  });
 
-    expect(screen.getByText("Not filled")).toBeInTheDocument();
+  it("shows Not filled with its reasons, details and flag, and earlier updates", async () => {
+    panel({ current: NOT_FILLED, earlier: [FILLED], reminderItems: [] }, false);
+
     expect(within(screen.getByRole("list", { name: "Reasons" })).getAllByRole("listitem").map((item) => item.textContent)).toEqual([
       "Certificate is not available",
       "Other",
@@ -222,18 +240,5 @@ describe("JeeFormCard once recorded", () => {
     expect(screen.getByText("Flagged to the program team")).toBeInTheDocument();
     await userEvent.click(screen.getByText("Earlier updates (1)"));
     expect(screen.getByText(/Filled · 270310000001/)).toBeInTheDocument();
-  });
-
-  it("lets a recorder change the status from the saved values, or cancel", async () => {
-    render(<JeeFormCard studentId={501} form={{ current: NOT_FILLED, earlier: [], reminderItems: [] }} canRecord />);
-    await userEvent.click(screen.getByRole("button", { name: "Change status" }));
-
-    expect(screen.getByRole("radio", { name: "Not filled" })).toBeChecked();
-    expect(screen.getByRole("checkbox", { name: "Other" })).toBeChecked();
-    expect(screen.getByLabelText("Details")).toHaveValue("Waiting for the income certificate");
-
-    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(screen.queryByRole("radio")).not.toBeInTheDocument();
-    expect(screen.getByText("Flagged to the program team")).toBeInTheDocument();
   });
 });

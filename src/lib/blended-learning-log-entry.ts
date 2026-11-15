@@ -17,6 +17,7 @@ import {
   type PhotoInput,
   type ScreenerFeedbackInput,
 } from "./blended-learning-log-entry-input";
+import { JEE_REMINDER_TICK_REFUSED, jeeReminderItemIds } from "./blended-learning-jee-reminder";
 import { listMentees, type MenteeRow } from "./blended-learning-mentees";
 import { uploadedPhotoSizes } from "./blended-learning-photos";
 import { notifyWellbeingFlag } from "./blended-learning-wellbeing-notifier";
@@ -180,7 +181,9 @@ async function insertFlags(
 // Mark this Mentee's earlier open Action Items done by this Conversation. An
 // id that is already done or another Student's conflicts; one with no row is
 // skipped, since removing a Common Action Item deletes its open items while
-// a Mentor may still have one ticked in an open form.
+// a Mentor may still have one ticked in an open form. The "JEE Form Filling
+// (Reminder)" item is never ticked here: only recording the JEE form as
+// Filled ticks it.
 async function completeActionItems(
   client: PoolClient,
   access: BlendedLearningAccess,
@@ -189,6 +192,7 @@ async function completeActionItems(
   ids: number[]
 ): Promise<void> {
   if (ids.length === 0) return;
+  if ((await jeeReminderItemIds(client, studentId, ids)).length > 0) throw new ReminderTick();
   const result = await client.query<{ id: number | string }>(
     `UPDATE blended_learning_action_items
      SET status = 'done', completed_by_conversation_id = $1, completed_by_email = $2,
@@ -208,6 +212,7 @@ async function completeActionItems(
 
 class OutOfScope extends Error {}
 class TickConflict extends Error {}
+class ReminderTick extends Error {}
 class DraftConflict extends Error {}
 class ScreenerFeedbackGiven extends Error {}
 class ScreenerRatingsMissing extends Error {}
@@ -351,6 +356,7 @@ function conflictMessage(error: unknown): string | null {
   if (error instanceof TickConflict) {
     return "An Action Item you ticked is already done or isn't this Mentee's. Reload and try again.";
   }
+  if (error instanceof ReminderTick) return JEE_REMINDER_TICK_REFUSED;
   if (error instanceof DraftConflict) return "This Conversation Draft is no longer ready to save. Reload and try again.";
   if (isConflict(error)) return "This entry conflicts with what is already saved. Reload and try again.";
   return null;

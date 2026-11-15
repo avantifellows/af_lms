@@ -26,7 +26,7 @@ export function labelFor(type: DocumentType): string {
 }
 
 // Types other flows store in `lms_student_documents` without offering them in
-// the upload picker: the Blended Learning JEE form card's confirmation page.
+// the upload picker: the Blended Learning JEE form's confirmation page.
 const OTHER_DOCUMENT_TYPE_LABELS: Readonly<Record<string, string>> = {
   jee_main_confirmation: "JEE Main confirmation page",
 };

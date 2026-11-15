@@ -2,10 +2,13 @@ import { randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
 
 import { query, withTransaction } from "./db";
+import { CURRENT_ACADEMIC_YEAR } from "./constants";
 import {
+  activeBlendedMappingSql,
   canAccessBlendedStudent,
   canBlendedLearning,
   lockMappingInScope,
+  mentorNameSql,
   type BlendedLearningAccess,
 } from "./blended-learning-access";
 import {
@@ -17,12 +20,14 @@ import {
   type JeeFormFieldErrors,
   type JeeFormInput,
   type JeeFormReason,
+  type JeeFormRow,
   type JeeFormStatus,
   type JeeFormUpdate,
   type JeeFormView,
   type JeeReminderItem,
   type RawJeeForm,
 } from "./blended-learning-jee-form-input";
+import { jeeReminderMatchSql } from "./blended-learning-jee-reminder";
 import { createDocument, softDeleteDocument } from "./db-service-documents";
 import {
   createExamRecordWithoutPassword,
@@ -30,9 +35,10 @@ import {
 } from "./db-service-exam-records";
 import { deleteDocumentObjects, presignDocumentPage, uploadDocumentPages, type UploadedPage } from "./s3";
 
-// The JEE form card (server-only): whether a Mentee has filled the JEE Main
-// 2027 form. Each save appends a row to blended_learning_jee_form_updates
-// (the latest is the status, the rest its history).
+// The JEE form (server-only): whether a Mentee has filled the JEE Main 2027
+// form, recorded in the JEE Form tab. Each save appends a row to
+// blended_learning_jee_form_updates (the latest is the status, the rest its
+// history).
 //
 // - Filled: the application number is upserted into `student_exam_record`
 //   through the DB Service (one record per Student + "JEE Mains" + 2027; an
@@ -52,6 +58,7 @@ const CONFIRMATION_URL_TTL_SECONDS = 300; // 5 minutes
 const HISTORY_LIMIT = 20;
 
 type UpdateRow = {
+  student_id: number | string;
   id: number | string;
   status: JeeFormStatus;
   application_number: string | null;
@@ -63,8 +70,6 @@ type UpdateRow = {
   flag_raised: boolean;
 };
 
-// The reminder's text with case and runs of spaces ignored.
-const REMINDER_MATCH_SQL = `lower(regexp_replace(btrim(common.text), '\\s+', ' ', 'g')) = lower($2)`;
 
 function toUpdate(row: UpdateRow): JeeFormUpdate {
   return {
@@ -87,44 +92,125 @@ async function jeeExamId(): Promise<number | null> {
   return rows[0] ? Number(rows[0].id) : null;
 }
 
-async function listUpdates(studentId: number, examId: number): Promise<UpdateRow[]> {
+// Each Student's latest updates, newest first: the current one and up to
+// HISTORY_LIMIT - 1 earlier ones.
+async function listUpdates(studentIds: number[], examId: number): Promise<UpdateRow[]> {
   return query<UpdateRow>(
-    `SELECT u.id, u.status, u.application_number, u.confirmation_document_id,
-            (doc.id IS NOT NULL) AS has_confirmation, u.reasons, u.details,
-            ((u.inserted_at AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Kolkata')::date::text AS recorded_on,
-            EXISTS (SELECT 1 FROM blended_learning_mentor_flags flag WHERE flag.jee_form_update_id = u.id)
-              AS flag_raised
-     FROM blended_learning_jee_form_updates u
-     LEFT JOIN lms_student_documents doc
-       ON doc.id = u.confirmation_document_id AND doc.deleted_at IS NULL
-     WHERE u.student_id = $1 AND u.exam_id = $2 AND u.exam_year = $3
-     ORDER BY u.id DESC
-     LIMIT ${HISTORY_LIMIT}`,
-    [studentId, examId, JEE_FORM_EXAM.examYear]
+    `SELECT ranked.student_id, ranked.id, ranked.status, ranked.application_number,
+            ranked.confirmation_document_id, ranked.has_confirmation, ranked.reasons, ranked.details,
+            ranked.recorded_on, ranked.flag_raised
+     FROM (
+       SELECT u.student_id, u.id, u.status, u.application_number, u.confirmation_document_id,
+              (doc.id IS NOT NULL) AS has_confirmation, u.reasons, u.details,
+              ((u.inserted_at AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Kolkata')::date::text AS recorded_on,
+              EXISTS (SELECT 1 FROM blended_learning_mentor_flags flag WHERE flag.jee_form_update_id = u.id)
+                AS flag_raised,
+              row_number() OVER (PARTITION BY u.student_id ORDER BY u.id DESC) AS newest
+       FROM blended_learning_jee_form_updates u
+       LEFT JOIN lms_student_documents doc
+         ON doc.id = u.confirmation_document_id AND doc.deleted_at IS NULL
+       WHERE u.student_id = ANY($1::bigint[]) AND u.exam_id = $2 AND u.exam_year = $3
+     ) ranked
+     WHERE ranked.newest <= ${HISTORY_LIMIT}
+     ORDER BY ranked.student_id, ranked.id DESC`,
+    [studentIds, examId, JEE_FORM_EXAM.examYear]
   );
 }
 
-async function listReminderItems(studentId: number): Promise<JeeReminderItem[]> {
-  const rows = await query<{ id: number | string; text: string; status: "open" | "done" }>(
-    `SELECT item.id, item.text, item.status
+type ReminderRow = { student_id: number | string; id: number | string; text: string; status: "open" | "done" };
+
+async function listReminderItems(studentIds: number[]): Promise<ReminderRow[]> {
+  return query<ReminderRow>(
+    `SELECT item.student_id, item.id, item.text, item.status
      FROM blended_learning_action_items item
      JOIN blended_learning_common_action_items common ON common.id = item.common_action_item_id
-     WHERE item.student_id = $1 AND ${REMINDER_MATCH_SQL}
-     ORDER BY item.id`,
-    [studentId, JEE_FORM_REMINDER_TEXT]
+     WHERE item.student_id = ANY($1::bigint[]) AND ${jeeReminderMatchSql("common", "$2")}
+     ORDER BY item.student_id, item.id`,
+    [studentIds, JEE_FORM_REMINDER_TEXT]
   );
-  return rows.map((row) => ({ id: Number(row.id), text: row.text, status: row.status }));
 }
 
-// The card for one Mentee; null when out of the actor's scope or when there
-// is no "JEE Mains" exam row to record against.
+function byStudent<T extends { student_id: number | string }>(rows: T[]): Map<number, T[]> {
+  const groups = new Map<number, T[]>();
+  for (const row of rows) {
+    const key = Number(row.student_id);
+    groups.set(key, [...(groups.get(key) ?? []), row]);
+  }
+  return groups;
+}
+
+// Each Student's form: the current update, the earlier ones and the reminder.
+async function jeeFormViews(studentIds: number[], examId: number): Promise<Map<number, JeeFormView>> {
+  if (studentIds.length === 0) return new Map();
+  const [updates, reminders] = await Promise.all([listUpdates(studentIds, examId), listReminderItems(studentIds)]);
+  const updatesByStudent = byStudent(updates);
+  const remindersByStudent = byStudent(reminders);
+  return new Map(
+    studentIds.map((studentId) => {
+      const [current, ...earlier] = (updatesByStudent.get(studentId) ?? []).map(toUpdate);
+      const reminderItems: JeeReminderItem[] = (remindersByStudent.get(studentId) ?? []).map((row) => ({
+        id: Number(row.id),
+        text: row.text,
+        status: row.status,
+      }));
+      return [studentId, { current: current ?? null, earlier, reminderItems }];
+    })
+  );
+}
+
+// One Mentee's form; null when out of the actor's scope or when there is no
+// "JEE Mains" exam row to record against.
 export async function getJeeForm(access: BlendedLearningAccess, studentId: number): Promise<JeeFormView | null> {
   if (!(await canAccessBlendedStudent(access, studentId))) return null;
   const examId = await jeeExamId();
   if (examId === null) return null;
-  const [updates, reminderItems] = await Promise.all([listUpdates(studentId, examId), listReminderItems(studentId)]);
-  const [current, ...earlier] = updates.map(toUpdate);
-  return { current: current ?? null, earlier, reminderItems };
+  return (await jeeFormViews([studentId], examId)).get(studentId) ?? null;
+}
+
+type StudentRow = {
+  student_id: number | string;
+  program_student_id: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  mentor_user_id: number | string;
+  mentor_name: string;
+};
+
+// The JEE Form tab: one row per Student with an active current-year Mapping
+// (a Mentor's own; every Mentor's for an admin), A–Z by name, each with its
+// form. Null when there is no "JEE Mains" exam row.
+export async function listJeeFormRows(access: BlendedLearningAccess): Promise<JeeFormRow[] | null> {
+  const mentorUserId = access.kind === "mentor" ? (access.mentorUserId ?? null) : null;
+  if (access.kind === "mentor" && mentorUserId === null) return [];
+  const examId = await jeeExamId();
+  if (examId === null) return null;
+  const students = await query<StudentRow>(
+    `SELECT st.id AS student_id, st.student_id AS program_student_id, account.first_name, account.last_name,
+            mapping.mentor_user_id, ${mentorNameSql("mentor", "mapping.mentor_user_id")} AS mentor_name
+     FROM blended_learning_mentor_mentee_mappings mapping
+     JOIN student st ON st.id = mapping.student_id
+     JOIN "user" account ON account.id = st.user_id
+     LEFT JOIN "user" mentor ON mentor.id = mapping.mentor_user_id
+     WHERE ${activeBlendedMappingSql("mapping", "$1")}
+       AND ($2::bigint IS NULL OR mapping.mentor_user_id = $2::bigint)
+     ORDER BY lower(CONCAT_WS(' ', account.first_name, account.last_name)), st.id`,
+    [CURRENT_ACADEMIC_YEAR, mentorUserId]
+  );
+  const views = await jeeFormViews(
+    students.map((row) => Number(row.student_id)),
+    examId
+  );
+  return students.map((row) => {
+    const studentId = Number(row.student_id);
+    return {
+      studentId,
+      programStudentId: row.program_student_id,
+      name: [row.first_name, row.last_name].filter(Boolean).join(" "),
+      mentorUserId: Number(row.mentor_user_id),
+      mentorName: row.mentor_name,
+      form: views.get(studentId) ?? { current: null, earlier: [], reminderItems: [] },
+    };
+  });
 }
 
 // --- Recording ---------------------------------------------------------------
@@ -352,7 +438,7 @@ async function tickReminder(
          completed_at = now(), updated_at = now()
      FROM blended_learning_common_action_items common
      WHERE common.id = item.common_action_item_id
-       AND item.student_id = $1 AND item.status = 'open' AND ${REMINDER_MATCH_SQL}`,
+       AND item.student_id = $1 AND item.status = 'open' AND ${jeeReminderMatchSql("common", "$2")}`,
     [studentId, JEE_FORM_REMINDER_TEXT, updateId, access.actorEmail]
   );
 }

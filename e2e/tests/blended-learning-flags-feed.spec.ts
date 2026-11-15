@@ -67,7 +67,7 @@ async function resetLastSeen(email: string) {
 }
 
 // Flags other specs have raised on Mentor C's Mentees so far (in Conversations
-// or on the JEE form card).
+// or on the JEE form).
 async function mentorCFlagCount(): Promise<number> {
   return withPool(async (pool) => {
     const result = await pool.query<{ count: number }>(

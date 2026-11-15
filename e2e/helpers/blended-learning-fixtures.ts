@@ -158,7 +158,7 @@ export const SCREENER_MENTEES = {
 export const SCREENER_RACE_MENTEE = {
   key: "J5", firstName: "Kavya", lastName: "Race", gender: "Female", grade: 12, programId: 80,
 } as const satisfies FixtureMentee;
-// Mentor C's Mentees for the JEE form card spec, never contacted, each with
+// Mentor C's Mentees for the JEE form spec, never contacted, each with
 // the JEE_REMINDER Common Action Item open. "mentor" is recorded by Mentor C,
 // "mobile" by Mentor C at 360 px (and already has a yearless JEE Mains exam
 // record, JEE_EXISTING_RECORD, as the Exams tab saves them), "admin" by a

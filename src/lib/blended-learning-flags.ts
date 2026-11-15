@@ -7,7 +7,7 @@ import {
 } from "./blended-learning-access";
 import { contactNumbers, present, type FlagRecipient } from "./blended-learning-mentee-detail";
 
-// The feed also carries the JEE form card's flags for the program team
+// The feed also carries the JEE form's flags for the program team
 // (`jee_form`), raised when a Mentee's form is recorded as not filled. They
 // have no Conversation: the Mentor, program and date come from the JEE form
 // update instead.
