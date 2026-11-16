@@ -21,7 +21,7 @@ edges:
     condition: when adding a write that must proxy to the DB Service
   - target: patterns/add-api-route.md
     condition: when adding a route that reads or writes
-last_updated: 2026-11-13
+last_updated: 2026-11-16
 ---
 
 # Data Access
@@ -204,12 +204,21 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
 ## Holistic Dictation usage records (#500, slice #509)
 
 - **Table ownership:** `holistic_mentorship_dictation_usage_records` comes from db-service #858
-  (migration `20261110151931_create_holistic_mentorship_dictation_usage_records`); LMS inserts and
-  updates it directly through `query()` (ADR 0005). Content-free: no Student, Phase, Question,
-  text or audio column, so it is outside Holistic privacy erasure.
+  (migration `20261110151931_create_holistic_mentorship_dictation_usage_records`, plus
+  `20261116113700_add_translation_to_holistic_dictation_usage_records`, a second migration because
+  the first is already applied on staging); LMS inserts and updates it directly through `query()`
+  (ADR 0005). Content-free: no Student, Phase, Question, text, translation or audio column, so it is
+  outside Holistic privacy erasure. The second migration adds `detected_language` (Scribe's code,
+  lower-cased, NULL when missing or not 1–16 characters) and `translation`
+  (`not_run | skipped | ok | failed`, checked by the table). **Deploy order:** the LMS writes both
+  columns on every clip, so apply `20261116113700` before deploying this LMS code (ADR 0013).
 - **Write path** (`transcribeHolisticDictation` in `src/lib/holistic-dictation.ts`): limit check →
-  insert `outcome='failed'`, `characters_returned=0`, `completed_at` NULL → ElevenLabs call → update
-  to `ok` / `nothing_heard` / `failed` with `characters_returned`, `completed_at`, and
+  insert `outcome='failed'`, `characters_returned=0`, `translation='not_run'`, `completed_at` NULL →
+  ElevenLabs call → translation into English through OpenRouter unless already English (ADR 0013) →
+  update to `ok` / `nothing_heard` / `failed` with `characters_returned` (length of the English text
+  returned), `detected_language`, `translation` (`not_run` when Scribe failed or heard nothing,
+  `skipped` when already English, `ok` translated, `failed` translation failed, which also makes
+  the outcome `failed`), `completed_at`, and
   `audio_seconds = min(305, ceil(max(duration_ms/1000, last word end)))`. The route refuses a clip over
   305,000 ms (422) or 10 MB (413); 305 s is `HOLISTIC_DICTATION_MAX_CLIP_SECONDS` in
   `src/lib/holistic-dictation-limits.ts` (five minutes plus 5 s of timer slop, owner decision
@@ -217,7 +226,9 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   mid-call leaves the `failed`, uncompleted row, which still counts. The browser's cancel
   (`discard()` aborts the upload) is not passed to the provider call: the call finishes, the row
   is completed, and the seconds count. This is the agreed rule (ADR 0012: an abandoned clip
-  still counts), so do not wire `request.signal` into `transcribeSpeech` without a new decision.
+  still counts), so do not wire `request.signal` into `transcribeSpeech` or `translateToEnglish`
+  without a new decision. Scribe and translation share one 27 s deadline (Scribe 25 s cap; each
+  translation attempt min(15 s, time left); one retry only with at least 5 s left).
   The route refuses an empty (0-byte) clip with 422 "Attach one audio clip" before this path, so
   it writes no row and makes no provider call.
 - **Timestamps:** the columns are naive UTC and the shared Postgres session time zone may be
@@ -231,10 +242,13 @@ counter. Use this constant for any new answer-length check (e.g. Dictation, #500
   by one clip each (accepted).
 - **Write scope before the call:** `checkHolisticDictationScope` runs `loadHolisticMentorWriteScope`
   (plus submitted Notes for `follow_up`) in its own `withTransaction`, which commits before the
-  provider call, so no row lock is held while ElevenLabs works.
+  provider calls, so no row lock is held while ElevenLabs or OpenRouter works.
 - **Opt-in integration test:** `src/lib/holistic-dictation.integration.test.ts` with
   `HOLISTIC_DICTATION_TEST_DATABASE=dbservice_test_*` (IST day boundary, sum/floor, killed attempt,
-  a five-minute clip and the 305 s cap against the table's check constraint).
+  a five-minute clip and the 305 s cap against the table's check constraint, the
+  `detected_language` / `translation` values for skipped, translated, failed and nothing-heard
+  clips, and the `translation` check constraint). The disposable DB needs both db-service #858
+  migrations, including `20261116113700`; ElevenLabs and OpenRouter are faked at `fetch`.
 
 ## Holistic Follow-up Notes (#377)
 

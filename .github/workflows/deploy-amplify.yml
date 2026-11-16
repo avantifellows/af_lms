@@ -94,6 +94,8 @@ jobs:
           HOLISTIC_DICTATION_ENABLED: ${{ secrets.HOLISTIC_DICTATION_ENABLED }}
           HOLISTIC_DICTATION_ELEVENLABS_API_KEY: ${{ secrets.HOLISTIC_DICTATION_ELEVENLABS_API_KEY }}
           HOLISTIC_DICTATION_ELEVENLABS_ZERO_RETENTION: ${{ secrets.HOLISTIC_DICTATION_ELEVENLABS_ZERO_RETENTION }}
+          HOLISTIC_DICTATION_OPENROUTER_API_KEY: ${{ secrets.HOLISTIC_DICTATION_OPENROUTER_API_KEY }}
+          HOLISTIC_DICTATION_TRANSLATION_MODEL: ${{ secrets.HOLISTIC_DICTATION_TRANSLATION_MODEL }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           DYNAMODB_URL: ${{ secrets.DYNAMODB_URL }}
           DYNAMODB_REGION: ${{ secrets.DYNAMODB_REGION }}
@@ -141,6 +143,8 @@ jobs:
             --arg dictation_enabled "$HOLISTIC_DICTATION_ENABLED" \
             --arg dictation_key "$HOLISTIC_DICTATION_ELEVENLABS_API_KEY" \
             --arg dictation_zero_retention "$HOLISTIC_DICTATION_ELEVENLABS_ZERO_RETENTION" \
+            --arg dictation_openrouter_key "$HOLISTIC_DICTATION_OPENROUTER_API_KEY" \
+            --arg dictation_translation_model "$HOLISTIC_DICTATION_TRANSLATION_MODEL" \
             --arg l "$GOOGLE_SERVICE_ACCOUNT_JSON" \
             --arg m "$DYNAMODB_URL" \
             --arg n "$DYNAMODB_REGION" \
@@ -186,6 +190,8 @@ jobs:
               HOLISTIC_DICTATION_ENABLED: $dictation_enabled,
               HOLISTIC_DICTATION_ELEVENLABS_API_KEY: $dictation_key,
               HOLISTIC_DICTATION_ELEVENLABS_ZERO_RETENTION: $dictation_zero_retention,
+              HOLISTIC_DICTATION_OPENROUTER_API_KEY: $dictation_openrouter_key,
+              HOLISTIC_DICTATION_TRANSLATION_MODEL: $dictation_translation_model,
               GOOGLE_SERVICE_ACCOUNT_JSON: $l,
               DYNAMODB_URL: $m,
               DYNAMODB_REGION: $n,
@@ -304,6 +310,8 @@ jobs:
           HOLISTIC_DICTATION_ENABLED: ${{ secrets.HOLISTIC_DICTATION_ENABLED }}
           HOLISTIC_DICTATION_ELEVENLABS_API_KEY: ${{ secrets.HOLISTIC_DICTATION_ELEVENLABS_API_KEY }}
           HOLISTIC_DICTATION_ELEVENLABS_ZERO_RETENTION: ${{ secrets.HOLISTIC_DICTATION_ELEVENLABS_ZERO_RETENTION }}
+          HOLISTIC_DICTATION_OPENROUTER_API_KEY: ${{ secrets.HOLISTIC_DICTATION_OPENROUTER_API_KEY }}
+          HOLISTIC_DICTATION_TRANSLATION_MODEL: ${{ secrets.HOLISTIC_DICTATION_TRANSLATION_MODEL }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           DYNAMODB_URL: ${{ secrets.DYNAMODB_URL }}
           DYNAMODB_REGION: ${{ secrets.DYNAMODB_REGION }}
@@ -351,6 +359,8 @@ jobs:
             --arg dictation_enabled "$HOLISTIC_DICTATION_ENABLED" \
             --arg dictation_key "$HOLISTIC_DICTATION_ELEVENLABS_API_KEY" \
             --arg dictation_zero_retention "$HOLISTIC_DICTATION_ELEVENLABS_ZERO_RETENTION" \
+            --arg dictation_openrouter_key "$HOLISTIC_DICTATION_OPENROUTER_API_KEY" \
+            --arg dictation_translation_model "$HOLISTIC_DICTATION_TRANSLATION_MODEL" \
             --arg l "$GOOGLE_SERVICE_ACCOUNT_JSON" \
             --arg m "$DYNAMODB_URL" \
             --arg n "$DYNAMODB_REGION" \
@@ -396,6 +406,8 @@ jobs:
               HOLISTIC_DICTATION_ENABLED: $dictation_enabled,
               HOLISTIC_DICTATION_ELEVENLABS_API_KEY: $dictation_key,
               HOLISTIC_DICTATION_ELEVENLABS_ZERO_RETENTION: $dictation_zero_retention,
+              HOLISTIC_DICTATION_OPENROUTER_API_KEY: $dictation_openrouter_key,
+              HOLISTIC_DICTATION_TRANSLATION_MODEL: $dictation_translation_model,
               GOOGLE_SERVICE_ACCOUNT_JSON: $l,
               DYNAMODB_URL: $m,
               DYNAMODB_REGION: $n,
@@ -521,6 +533,8 @@ jobs:
           HOLISTIC_DICTATION_ENABLED: ${{ secrets.HOLISTIC_DICTATION_ENABLED }}
           HOLISTIC_DICTATION_ELEVENLABS_API_KEY: ${{ secrets.HOLISTIC_DICTATION_ELEVENLABS_API_KEY }}
           HOLISTIC_DICTATION_ELEVENLABS_ZERO_RETENTION: ${{ secrets.HOLISTIC_DICTATION_ELEVENLABS_ZERO_RETENTION }}
+          HOLISTIC_DICTATION_OPENROUTER_API_KEY: ${{ secrets.HOLISTIC_DICTATION_OPENROUTER_API_KEY }}
+          HOLISTIC_DICTATION_TRANSLATION_MODEL: ${{ secrets.HOLISTIC_DICTATION_TRANSLATION_MODEL }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           DYNAMODB_URL: ${{ secrets.DYNAMODB_URL }}
           DYNAMODB_REGION: ${{ secrets.DYNAMODB_REGION }}
@@ -567,6 +581,8 @@ jobs:
             --arg dictation_enabled "$HOLISTIC_DICTATION_ENABLED" \
             --arg dictation_key "$HOLISTIC_DICTATION_ELEVENLABS_API_KEY" \
             --arg dictation_zero_retention "$HOLISTIC_DICTATION_ELEVENLABS_ZERO_RETENTION" \
+            --arg dictation_openrouter_key "$HOLISTIC_DICTATION_OPENROUTER_API_KEY" \
+            --arg dictation_translation_model "$HOLISTIC_DICTATION_TRANSLATION_MODEL" \
             --arg l "$GOOGLE_SERVICE_ACCOUNT_JSON" \
             --arg m "$DYNAMODB_URL" \
             --arg n "$DYNAMODB_REGION" \
@@ -612,6 +628,8 @@ jobs:
               HOLISTIC_DICTATION_ENABLED: $dictation_enabled,
               HOLISTIC_DICTATION_ELEVENLABS_API_KEY: $dictation_key,
               HOLISTIC_DICTATION_ELEVENLABS_ZERO_RETENTION: $dictation_zero_retention,
+              HOLISTIC_DICTATION_OPENROUTER_API_KEY: $dictation_openrouter_key,
+              HOLISTIC_DICTATION_TRANSLATION_MODEL: $dictation_translation_model,
               GOOGLE_SERVICE_ACCOUNT_JSON: $l,
               DYNAMODB_URL: $m,
               DYNAMODB_REGION: $n,
